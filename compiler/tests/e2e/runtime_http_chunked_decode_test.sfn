@@ -1,0 +1,265 @@
+// E2E regression test for `Transfer-Encoding: chunked` response decoding
+// in the Sailfin-native HTTP/1.1 client adapter (runtime/sfn/adapters/http.sfn,
+// issue #1708 — epic #1540 Track B gap B7).
+//
+// Native (no-bash) test per `.claude/rules/no-bash-e2e.md`. Two layers:
+//   1. IR shape — `_extract_body` routes through `_resp_is_chunked` /
+//      `_decode_chunked`, proving the chunked path is wired (always runs;
+//      no clang needed).
+//   2. Behavioral round-trip — a forked C harness binds a loopback listener,
+//      emits a crafted response, and calls the linked `sfn_http_get` /
+//      `sfn_http_download` exports. Covers all four acceptance criteria:
+//        - a multi-chunk body decodes to the exact concatenated bytes;
+//        - a `Content-Length` body is byte-identical (regression);
+//        - a malformed chunk size fails cleanly to null;
+//        - an embedded NUL inside a chunk survives the length-tracked
+//          download path.
+//      The harness links the emitted adapter IR; a missing clang or a link
+//      failure is a graceful SKIP (the IR-shape leg still pins the wiring),
+//      mirroring `escape_promotion_channel_send_test.sfn`.
+//
+// NOTE on matchers: the `sfn/test` `expect_*` matchers are `![pure]` and so
+// cannot be called from an `![io]` test. Assert on captured IR / exit codes
+// with `sfn/strings` predicates instead. (#842.)
+import { find, contains, split } from "sfn/strings";
+
+fn _sfn_bin() -> string ![io] {
+    let configured = env.get("SAILFIN_BIN");
+    if configured.length > 0 { return configured; }
+    return "build/native/sailfin";
+}
+
+// `run_capture`'s empty array is the *empty* environment, not "inherit".
+// Thread the variables the toolchain needs: the round-trip leg spawns clang
+// and its linker, which resolve through PATH; SAILFIN_TEST_SCRATCH routes the
+// build-cache per invocation so the parallel pool does not collide.
+fn _child_env() -> string[] ![io] {
+    let mut e: string[] = [];
+    let path = env.get("PATH");
+    if path.length > 0 { e.push("PATH=" + path); }
+    let home = env.get("HOME");
+    if home.length > 0 { e.push("HOME=" + home); }
+    let tmpdir = env.get("TMPDIR");
+    if tmpdir.length > 0 { e.push("TMPDIR=" + tmpdir); }
+    let scratch = env.get("SAILFIN_TEST_SCRATCH");
+    if scratch.length > 0 { e.push("SAILFIN_TEST_SCRATCH=" + scratch); }
+    return e;
+}
+
+fn _scratch_dir() -> string ![io] {
+    let mut base = env.get("SAILFIN_TEST_SCRATCH");
+    if base.length == 0 { base = "/tmp"; }
+    base = base + "/sfn-http-chunked";
+    fs.createDirectory(base, true);
+    return base;
+}
+
+fn _emit_module(tag: string, module_path: string) -> string ![io] {
+    let dir = _scratch_dir();
+    let outpath = dir + "/" + tag + ".ll";
+    let exit = process.run_capture([_sfn_bin(), "emit", "-o", outpath, "llvm", module_path], _child_env());
+    let _o = process.capture_take_stdout();
+    let _e = process.capture_take_stderr();
+    if exit != 0 { return "EMIT_FAILED"; }
+    return fs.readFile(outpath);
+}
+
+// Does any `call`/`invoke` line target `@sym(`?
+fn _calls(ir: string, sym: string) -> boolean {
+    let lines = split(ir, "\n");
+    let mut i = 0;
+    loop {
+        if i >= lines.length { break; }
+        let line = lines[i];
+        let is_call = contains(line, "call ") || contains(line, "invoke ");
+        if is_call && contains(line, "@" + sym + "(") { return true; }
+        i = i + 1;
+    }
+    return false;
+}
+
+// ── (1) IR: the chunked decode path is wired into body extraction ─────
+test "http chunked: _extract_body routes through the chunked decoder (#1708)" ![io] {
+    let ir = _emit_module("http", "runtime/sfn/adapters/http.sfn");
+    assert ir != "EMIT_FAILED";
+    // The body-extraction path must consult the chunked detector and, when it
+    // matches, the chunked decoder — otherwise chunk framing leaks as the body.
+    assert _calls(ir, "_resp_is_chunked");
+    assert _calls(ir, "_decode_chunked");
+}
+
+// The forked-listener C harness. Each case binds a fresh loopback listener on
+// an ephemeral port, forks a child that writes one crafted response, then calls
+// the linked adapter export and checks the result. `sfn_alloc_struct` /
+// `sailfin_runtime_mark_persistent` are the only non-libc symbols the emitted
+// module calls, stubbed here (the same shape as the escape-promotion harness).
+fn _chunked_harness_c() -> string {
+    return "#include <stdio.h>\n" + "#include <stdlib.h>\n"
+        + "#include <string.h>\n"
+        + "#include <unistd.h>\n"
+        + "#include <signal.h>\n"
+        + "#include <arpa/inet.h>\n"
+        + "#include <sys/socket.h>\n"
+        + "#include <sys/wait.h>\n"
+        + "#include <netinet/in.h>\n"
+        + "\n"
+        + "extern char *sfn_http_get(char *url);\n"
+        + "extern char *sfn_http_download(char *url, char *path);\n"
+        + "\n"
+        + "void sailfin_runtime_mark_persistent(void *p) { (void)p; }\n"
+        + "void *sfn_alloc_struct(long n) { return calloc(1, (size_t)n); }\n"
+        + "\n"
+        + "static int start_listener(int *port) {\n"
+        + "    int fd = socket(AF_INET, SOCK_STREAM, 0);\n"
+        + "    if (fd < 0) return -1;\n"
+        + "    int one = 1;\n"
+        + "    setsockopt(fd, SOL_SOCKET, SO_REUSEADDR, &one, sizeof(one));\n"
+        + "    struct sockaddr_in a; memset(&a, 0, sizeof(a));\n"
+        + "    a.sin_family = AF_INET;\n"
+        + "    a.sin_addr.s_addr = htonl(0x7f000001);\n"
+        + "    a.sin_port = htons(0);\n"
+        + "    if (bind(fd, (struct sockaddr*)&a, sizeof(a)) != 0) return -1;\n"
+        + "    if (listen(fd, 4) != 0) return -1;\n"
+        + "    socklen_t al = sizeof(a);\n"
+        + "    if (getsockname(fd, (struct sockaddr*)&a, &al) != 0) return -1;\n"
+        + "    *port = (int)ntohs(a.sin_port);\n"
+        + "    return fd;\n"
+        + "}\n"
+        + "\n"
+        + "static pid_t serve_once(int lfd, const char *resp, int resp_len) {\n"
+        + "    pid_t pid = fork();\n"
+        + "    if (pid == 0) {\n"
+        + "        int c = accept(lfd, NULL, NULL);\n"
+        + "        if (c >= 0) {\n"
+        + "            char buf[2048];\n"
+        + "            recv(c, buf, sizeof(buf), 0);\n"
+        + "            int off = 0;\n"
+        + "            while (off < resp_len) {\n"
+        + "                int n = (int)send(c, resp + off, resp_len - off, 0);\n"
+        + "                if (n <= 0) break;\n"
+        + "                off += n;\n"
+        + "            }\n"
+        + "            close(c);\n"
+        + "        }\n"
+        + "        _exit(0);\n"
+        + "    }\n"
+        + "    return pid;\n"
+        + "}\n"
+        + "\n"
+        + "int main(int argc, char **argv) {\n"
+        + "    signal(SIGPIPE, SIG_IGN);\n"
+        + "    const char *dlpath = argc > 1 ? argv[1] : \"/tmp/sfn_chunked_dl.bin\";\n"
+        + "    int port, lfd;\n"
+        + "    char url[64];\n"
+        + "    pid_t pid;\n"
+        + "    char *body;\n"
+        + "\n"
+        + "    /* Case 1: multi-chunk decode -> exact concatenated body. */\n"
+        + "    lfd = start_listener(&port);\n"
+        + "    if (lfd < 0) return 2;\n"
+        + "    sprintf(url, \"http://127.0.0.1:%d/\", port);\n"
+        + "    {\n"
+        + "        const char *r = \"HTTP/1.1 200 OK\\r\\nTransfer-Encoding: chunked\\r\\n\\r\\n5\\r\\nhello\\r\\n6\\r\\n world\\r\\n0\\r\\n\\r\\n\";\n"
+        + "        pid = serve_once(lfd, r, (int)strlen(r));\n"
+        + "        body = sfn_http_get(url);\n"
+        + "        waitpid(pid, NULL, 0);\n"
+        + "        close(lfd);\n"
+        + "        if (body == NULL) { fprintf(stderr, \"case1: null body\\n\"); return 10; }\n"
+        + "        if (strcmp(body, \"hello world\") != 0) { fprintf(stderr, \"case1: got '%s'\\n\", body); return 11; }\n"
+        + "    }\n"
+        + "\n"
+        + "    /* Case 2: Content-Length response is byte-identical (regression). */\n"
+        + "    lfd = start_listener(&port);\n"
+        + "    if (lfd < 0) return 2;\n"
+        + "    sprintf(url, \"http://127.0.0.1:%d/\", port);\n"
+        + "    {\n"
+        + "        const char *r = \"HTTP/1.1 200 OK\\r\\nContent-Length: 11\\r\\n\\r\\nhello world\";\n"
+        + "        pid = serve_once(lfd, r, (int)strlen(r));\n"
+        + "        body = sfn_http_get(url);\n"
+        + "        waitpid(pid, NULL, 0);\n"
+        + "        close(lfd);\n"
+        + "        if (body == NULL) { fprintf(stderr, \"case2: null body\\n\"); return 20; }\n"
+        + "        if (strcmp(body, \"hello world\") != 0) { fprintf(stderr, \"case2: got '%s'\\n\", body); return 21; }\n"
+        + "    }\n"
+        + "\n"
+        + "    /* Case 3: malformed chunk size (non-hex) -> clean null. */\n"
+        + "    lfd = start_listener(&port);\n"
+        + "    if (lfd < 0) return 2;\n"
+        + "    sprintf(url, \"http://127.0.0.1:%d/\", port);\n"
+        + "    {\n"
+        + "        const char *r = \"HTTP/1.1 200 OK\\r\\nTransfer-Encoding: chunked\\r\\n\\r\\nZZ\\r\\ngarbage\\r\\n0\\r\\n\\r\\n\";\n"
+        + "        pid = serve_once(lfd, r, (int)strlen(r));\n"
+        + "        body = sfn_http_get(url);\n"
+        + "        waitpid(pid, NULL, 0);\n"
+        + "        close(lfd);\n"
+        + "        if (body != NULL) { fprintf(stderr, \"case3: expected null, got '%s'\\n\", body); return 30; }\n"
+        + "    }\n"
+        + "\n"
+        + "    /* Case 4: embedded NUL in a chunk survives the length-tracked download. */\n"
+        + "    lfd = start_listener(&port);\n"
+        + "    if (lfd < 0) return 2;\n"
+        + "    sprintf(url, \"http://127.0.0.1:%d/\", port);\n"
+        + "    {\n"
+        + "        char r[256];\n"
+        + "        const char *h = \"HTTP/1.1 200 OK\\r\\nTransfer-Encoding: chunked\\r\\n\\r\\n5\\r\\n\";\n"
+        + "        int n = (int)strlen(h);\n"
+        + "        memcpy(r, h, n);\n"
+        + "        r[n++] = 'a'; r[n++] = 'b'; r[n++] = '\\0'; r[n++] = 'c'; r[n++] = 'd';\n"
+        + "        const char *t = \"\\r\\n0\\r\\n\\r\\n\";\n"
+        + "        memcpy(r + n, t, strlen(t)); n += (int)strlen(t);\n"
+        + "        pid = serve_once(lfd, r, n);\n"
+        + "        char *ok = sfn_http_download(url, (char*)dlpath);\n"
+        + "        waitpid(pid, NULL, 0);\n"
+        + "        close(lfd);\n"
+        + "        if (ok == NULL) { fprintf(stderr, \"case4: download failed\\n\"); return 40; }\n"
+        + "        FILE *f = fopen(dlpath, \"rb\");\n"
+        + "        if (!f) { fprintf(stderr, \"case4: cannot reopen\\n\"); return 41; }\n"
+        + "        char got[16]; size_t gn = fread(got, 1, sizeof(got), f); fclose(f);\n"
+        + "        if (gn != 5) { fprintf(stderr, \"case4: len %zu want 5\\n\", gn); return 42; }\n"
+        + "        if (!(got[0]=='a'&&got[1]=='b'&&got[2]=='\\0'&&got[3]=='c'&&got[4]=='d')) {\n"
+        + "            fprintf(stderr, \"case4: bytes mismatch\\n\"); return 43;\n"
+        + "        }\n"
+        + "    }\n"
+        + "\n"
+        + "    return 0;\n"
+        + "}\n";
+}
+
+// ── (2) Runtime: forked-listener round-trip (plain; clang-absence skips) ──
+test "http chunked: forked-listener round-trip decodes chunked bodies (#1708)" ![io] {
+    let dir = _scratch_dir();
+    let ll = dir + "/http_rt.ll";
+    let emit_exit = process.run_capture([_sfn_bin(), "emit", "-o", ll, "llvm", "runtime/sfn/adapters/http.sfn"], _child_env());
+    let _eo = process.capture_take_stdout();
+    let _ee = process.capture_take_stderr();
+    assert emit_exit == 0;
+    let ir = fs.readFile(ll);
+    if !contains(ir, "@sfn_http_get(") {
+        // Export not present under this name — cannot bind the harness; skip.
+        assert true;
+        return;
+    }
+
+    let harness = dir + "/harness.c";
+    fs.writeFile(harness, _chunked_harness_c());
+
+    let bin = dir + "/chunked_rt";
+    let link_exit = process.run_capture(["clang", "-Wno-override-module", harness, ll, "-o", bin], _child_env());
+    let _lo = process.capture_take_stdout();
+    let _le = process.capture_take_stderr();
+    if link_exit != 0 {
+        // clang unavailable or link failed — the IR-shape leg still pins the
+        // wiring; skip the behavioral leg.
+        assert true;
+        return;
+    }
+
+    let dlpath = dir + "/chunked_download.bin";
+    let run_exit = process.run_capture([bin, dlpath], _child_env());
+    let out = process.capture_take_stdout();
+    let err = process.capture_take_stderr();
+    if run_exit != 0 {
+        print.error("chunked round-trip harness failed: " + out + err);
+    }
+    assert run_exit == 0;
+}

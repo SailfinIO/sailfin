@@ -172,7 +172,8 @@ env-aware dispatch) and is listed as an open question below.
 | Closure handlers | no (top-level fn only, documented) | follow-up | — |
 | `ServerConfig.host` binding | dropped from v0 API | with host-bind runtime support | — |
 | DNS resolution (`getaddrinfo`) | no — localhost / dotted-quad only | **shipped** (#1707 — real hostnames resolve via `getaddrinfo`, first IPv4/A record; `sfn/net::resolve` wired) | — |
-| TLS, chunked, redirects | — | — | out (matches client v0 limits) |
+| Chunked response decode (client) | no — `Content-Length` only | **shipped** (#1708 — `_extract_body` decodes `Transfer-Encoding: chunked` on the get/post/download body-extraction path, length-tracked; chunked *request* decode on `serve` stays out) | — |
+| TLS, redirects | — | — | out (matches client v0 limits) |
 | Per-response buffer free / Task reaping | no — documented leak (same class as the existing fire-and-forget Task leak) | request-scoped arena follow-up (ties to ownership/arena work) | — |
 
 Stage1 readiness: everything in the v0 column is enforced end-to-end (status/headers

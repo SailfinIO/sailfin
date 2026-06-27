@@ -50,13 +50,14 @@
 // DNS via `getaddrinfo` for any other hostname (#1540 B2 — first IPv4/A
 // record only, no AAAA, no caching, no happy-eyeballs).
 //
-// v0 limitations (follow-up waves): no `Transfer-Encoding:
-// chunked` decoding (the v0 contract is `Content-Length` responses;
-// a chunked response would surface its raw chunk framing as the
-// body), and no redirect following. Response bodies are length-
-// tracked end-to-end (`_recv_all` -> `_extract_body`), so binary
-// payloads with embedded NULs download faithfully even though the
-// get/post `i8*` return is also NUL-terminated for string use.
+// `Transfer-Encoding: chunked` responses ARE decoded on the
+// get/post/download body-extraction path (`_extract_body` ->
+// `_decode_chunked`, #1708): the chunk framing is stripped and the
+// chunk data concatenated into the body. Remaining v0 limitation
+// (follow-up waves): no redirect following. Response bodies are
+// length-tracked end-to-end (`_recv_all` -> `_extract_body`), so
+// binary payloads with embedded NULs download faithfully even though
+// the get/post `i8*` return is also NUL-terminated for string use.
 //
 // Effects: `![net]` for get/post, `![net, io]` for download (it
 // opens a file). The flipped descriptors carry the same effects, so
@@ -454,16 +455,22 @@ fn _send_all(fd: i32, buf: * u8, total: i64) -> bool ![net] {
 // `Connection: close`) ends the loop and returns the buffer. The
 // trailing NUL keeps the buffer usable as a C string for the
 // text-body get/post paths.
+//
+// The buffer is over-allocated by 4 trailing bytes (not just the 1
+// for the NUL) so the chunked decoder's single-byte reads — which use
+// the 4-byte `sailfin_intrinsic_pointer_read_i32` load masked to its
+// low byte — never fault on a 4-byte load issued at the final in-body
+// offset (`off <= len`, load touches `off..off+3 <= len+3`).
 fn _recv_all(fd: i32, len_slot: * i64) -> * u8 ![net] {
     let mut capacity: i64 = 8192;
     let mut len: i64 = 0;
-    let mut buf: * u8 = malloc((capacity + 1) as usize);
+    let mut buf: * u8 = malloc((capacity + 4) as usize);
     if buf as i64 == 0 { return null; }
     let chunk: i64 = 8192;
     loop {
         if len + chunk > capacity {
             let new_cap: i64 = capacity * 2;
-            let new_buf: * u8 = realloc(buf, (new_cap + 1) as usize);
+            let new_buf: * u8 = realloc(buf, (new_cap + 4) as usize);
             if new_buf as i64 == 0 {
                 free(buf);
                 return null;
@@ -486,6 +493,164 @@ fn _recv_all(fd: i32, len_slot: * i64) -> * u8 ![net] {
     return buf;
 }
 
+// `_byte_at(base, off)` — read the byte at `base + off` as 0..255. Uses the
+// 4-byte pointer-read intrinsic masked to its low byte (both targets are
+// little-endian, the same idiom as `_first_is_digit`). The caller MUST keep
+// `off` within the in-bounds region; the recv buffer is over-allocated by 4
+// bytes so a 4-byte load at the final in-body offset never faults.
+fn _byte_at(base: * u8, off: i64) -> i64 {
+    return (sailfin_intrinsic_pointer_read_i32(_ptr_off(base, off)) as i64) & 255;
+}
+
+// `_lc(b)` — ASCII-lowercase a byte value ('A'..'Z' → 'a'..'z'); other bytes
+// unchanged. For case-insensitive header-name / token matching.
+fn _lc(b: i64) -> i64 {
+    if b >= 65 && b <= 90 { return b + 32; }
+    return b;
+}
+
+// `_hex_val(b)` — value 0..15 of an ASCII hex-digit byte, or -1 if `b` is not
+// a hex digit. Used to parse the chunk-size line of a chunked body.
+fn _hex_val(b: i64) -> i64 {
+    if b >= 48 && b <= 57 { return b - 48; }
+    if b >= 97 && b <= 102 { return (b - 97) + 10; }
+    if b >= 65 && b <= 70 { return (b - 65) + 10; }
+    return 0 - 1;
+}
+
+// `_ci_find(base, limit, needle, nlen)` — first index in `[0, limit)` where the
+// `nlen`-byte `needle` matches case-insensitively, or -1. Strictly bounded: it
+// never reads at or beyond `limit`, so it is safe over the NUL-free,
+// length-known header region (no `strstr`, which would stop at an embedded NUL).
+fn _ci_find(base: * u8, limit: i64, needle: * u8, nlen: i64) -> i64 {
+    if nlen <= 0 { return 0 - 1; }
+    let mut i: i64 = 0;
+    loop {
+        if i + nlen > limit { break; }
+        let mut j: i64 = 0;
+        let mut matched: bool = true;
+        loop {
+            if j >= nlen { break; }
+            if _lc(_byte_at(base, i + j)) != _lc(_byte_at(needle, j)) {
+                matched = false;
+                break;
+            }
+            j = j + 1;
+        }
+        if matched { return i; }
+        i = i + 1;
+    }
+    return 0 - 1;
+}
+
+// `_resp_is_chunked(resp, header_len)` — does the response header block (the
+// `header_len` bytes before the `\r\n\r\n` terminator) declare a chunked
+// transfer encoding? Finds a `Transfer-Encoding` header (case-insensitive),
+// then scans the remainder of that line for `chunked`. v0 treats any
+// `chunked` token in the value as chunked framing (no coding-list ordering).
+fn _resp_is_chunked(resp: * u8, header_len: i64) -> bool {
+    let te: string = "transfer-encoding";
+    let idx: i64 = _ci_find(resp, header_len, te as * u8, 17);
+    if idx < 0 { return false; }
+    let value_start: i64 = idx + 17;
+    // End of this header line (the next LF, or the header-block end).
+    let mut line_end: i64 = value_start;
+    loop {
+        if line_end >= header_len { break; }
+        if _byte_at(resp, line_end) == 10 { break; }
+        line_end = line_end + 1;
+    }
+    let chunked: string = "chunked";
+    let found: i64 = _ci_find(_ptr_off(resp, value_start), line_end - value_start, chunked as * u8, 7);
+    return found >= 0;
+}
+
+// `_decode_chunked(resp, body_off, total_len, out_len_slot)` — decode a
+// `Transfer-Encoding: chunked` body in `resp[body_off..total_len)` into a fresh
+// caller-owned NUL-terminated buffer, writing the decoded length through
+// `out_len_slot`. Each chunk is `<hex-size>[;ext]\r\n<size bytes>\r\n`,
+// terminated by a `0\r\n` (trailers, if any, are ignored). The decoded body is
+// never larger than the raw chunked body, so one allocation suffices.
+//
+// Every read is bounded by `total_len` and every chunk length is validated
+// against the remaining bytes, so a malformed size (non-hex, overflowing, or
+// claiming more bytes than remain) or a missing CRLF fails cleanly to null —
+// never an unbounded read. Length is tracked explicitly (never `strlen`), so an
+// embedded NUL inside a chunk survives.
+fn _decode_chunked(resp: * u8, body_off: i64, total_len: i64, out_len_slot: * i64) -> * u8 {
+    atomic_store(out_len_slot, 0);
+    let raw_len: i64 = total_len - body_off;
+    if raw_len < 0 { return null; }
+    let out: * u8 = malloc((raw_len + 1) as usize);
+    if out as i64 == 0 { return null; }
+    let mut out_len: i64 = 0;
+    let mut pos: i64 = body_off;
+    loop {
+        // Parse the hex chunk-size, stopping at the first non-hex byte.
+        let mut size: i64 = 0;
+        let mut digits: i64 = 0;
+        loop {
+            if pos >= total_len {
+                free(out);
+                return null;
+            }
+            let hv: i64 = _hex_val(_byte_at(resp, pos));
+            if hv < 0 { break; }
+            size = size * 16 + hv;
+            // A size larger than the bytes that remain is malformed — also
+            // guards the accumulator against overflow on a runaway length.
+            if size > raw_len {
+                free(out);
+                return null;
+            }
+            digits = digits + 1;
+            pos = pos + 1;
+        }
+        // A chunk header with no hex size is malformed framing.
+        if digits == 0 {
+            free(out);
+            return null;
+        }
+        // Skip any chunk extension (";...") up to the line's CR/LF.
+        loop {
+            if pos >= total_len {
+                free(out);
+                return null;
+            }
+            let b: i64 = _byte_at(resp, pos);
+            if b == 13 || b == 10 { break; }
+            pos = pos + 1;
+        }
+        // Consume the size-line terminator (CRLF, or a tolerated bare LF).
+        if pos < total_len && _byte_at(resp, pos) == 13 { pos = pos + 1; }
+        if pos >= total_len || _byte_at(resp, pos) != 10 {
+            free(out);
+            return null;
+        }
+        pos = pos + 1;
+        // A zero-size chunk terminates the body.
+        if size == 0 { break; }
+        // Copy the chunk data; it must fit within the received bytes.
+        if pos + size > total_len {
+            free(out);
+            return null;
+        }
+        memcpy(_ptr_off(out, out_len), _ptr_off(resp, pos), size as usize);
+        out_len = out_len + size;
+        pos = pos + size;
+        // Require the CRLF (or tolerated bare LF) that follows chunk data.
+        if pos < total_len && _byte_at(resp, pos) == 13 { pos = pos + 1; }
+        if pos >= total_len || _byte_at(resp, pos) != 10 {
+            free(out);
+            return null;
+        }
+        pos = pos + 1;
+    }
+    memset(_ptr_off(out, out_len), 0, 1 as usize);
+    atomic_store(out_len_slot, out_len);
+    return out;
+}
+
 // `_extract_body(resp, total_len, body_len_slot)` — given a raw
 // HTTP response buffer of `total_len` bytes, check the status line
 // and return a fresh copy of the body (everything after the first
@@ -499,10 +664,10 @@ fn _recv_all(fd: i32, len_slot: * i64) -> * u8 ![net] {
 // `strstr` over them are safe. `resp` is left untouched; the caller
 // frees it.
 //
-// v0 limitation: `Transfer-Encoding: chunked` is not decoded — the
-// raw chunk framing would be returned as the body. The v0 contract
-// targets `Content-Length` responses (e.g. the localhost listener);
-// chunked decoding is a follow-up wave.
+// `Transfer-Encoding: chunked` responses are decoded: the chunk
+// framing is stripped and the chunk data concatenated into the body
+// (still length-tracked, never `strlen`). A malformed chunked body
+// fails cleanly to null. Trailers and chunk extensions are skipped.
 fn _extract_body(resp: * u8, total_len: i64, body_len_slot: * i64) -> * u8 {
     atomic_store(body_len_slot, 0);
     if resp as i64 == 0 { return null; }
@@ -515,9 +680,14 @@ fn _extract_body(resp: * u8, total_len: i64, body_len_slot: * i64) -> * u8 {
     let terminator: string = "\r\n\r\n";
     let header_end: * u8 = strstr(resp, terminator as * u8);
     if header_end as i64 == 0 { return null; }
-    let body_off: i64 = ((header_end as i64) - (resp as i64)) + 4;
+    let header_len: i64 = (header_end as i64) - (resp as i64);
+    let body_off: i64 = header_len + 4;
     let body_len: i64 = total_len - body_off;
     if body_len < 0 { return null; }
+    // Chunked framing → decode into the actual body bytes.
+    if _resp_is_chunked(resp, header_len) {
+        return _decode_chunked(resp, body_off, total_len, body_len_slot);
+    }
     let body: * u8 = _strdup_n(_ptr_off(resp, body_off), body_len);
     if body as i64 == 0 { return null; }
     atomic_store(body_len_slot, body_len);
