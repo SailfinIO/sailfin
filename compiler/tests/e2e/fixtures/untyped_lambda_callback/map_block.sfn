@@ -1,0 +1,14 @@
+// #1683 — the untyped BLOCK form `.map(fn(x) { return x*x; })` executes
+// identically to the expr form (proves the fix is not tied to `=> expr`).
+fn main() ![io] {
+    let xs: int[] = [1, 2, 3];
+    let ys: int[] = xs.map(fn (x) { return x * x; });
+    let mut total: int = 0;
+    let mut i: int = 0;
+    loop {
+        if i >= ys.length { break; }
+        total = total + ys[i];
+        i = i + 1;
+    }
+    print(total);
+}

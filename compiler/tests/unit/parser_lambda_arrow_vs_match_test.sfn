@@ -1,0 +1,85 @@
+// Overload guard for the `=>` token (SFEP-0029, #1683).
+//
+// `=>` is the shipped match-arm separator (`Pattern => body`) AND, since
+// the expression-bodied lambda short form, the lambda expr-body lead-in
+// (`fn(x) => expr`). The two never collide because the lambda `=>` only
+// appears after a `fn(...)` head the parser is already committed to
+// (inside `parse_lambda_expression`), while a match arm's `=>` is only
+// reached inside a `match { }` body. These tests pin that a function
+// containing BOTH constructs parses each correctly — the `=>` overload
+// does not cross-contaminate.
+import { Expression, Statement } from "../../src/ast";
+import { parse_program } from "../../src/parser/mod";
+
+// The body statements of the first top-level function declaration.
+fn first_fn_body_statements(source: string) -> Statement[] ![io] {
+    let program = parse_program(source);
+    let stmt = program.statements[0];
+    assert stmt.variant == "FunctionDeclaration";
+    return stmt.body.statements;
+}
+
+// A `match` statement and an expr-bodied lambda in the same function both
+// parse into their structured nodes — the lambda is a `Lambda` (not a
+// `Raw` blob) with a single-`return` body, and the match keeps its arms.
+test "arrow overload: match arms and `fn(x) => expr` coexist" ![io] {
+    let source = "fn run(n: int) -> int {" + "  let f = fn(x) => x * x;"
+        + "  match n {"
+        + "    0 => { return f(0); }"
+        + "    _ => { return f(n); }"
+        + "  }"
+        + "  return 0;"
+        + "}";
+    let stmts = first_fn_body_statements(source);
+
+    // First statement: the lambda binding parses to a structured Lambda.
+    assert stmts[0].variant == "VariableDeclaration";
+    let lam = stmts[0].initializer;
+    assert lam != null;
+    assert lam.variant == "Lambda";
+    assert lam.body.statements.length == 1;
+    assert lam.body.statements[0].variant == "ReturnStatement";
+
+    // A later statement is the structured match with both arms intact.
+    let mut found_match: boolean = false;
+    let mut i: int = 0;
+    loop {
+        if i >= stmts.length { break; }
+        if stmts[i].variant == "MatchStatement" {
+            found_match = true;
+            assert stmts[i].cases.length == 2;
+        }
+        i += 1;
+    }
+    assert found_match;
+}
+
+// The reverse ordering (match first, then the lambda) parses the same —
+// the parser does not get "stuck" in match-arm mode after a `=>`.
+test "arrow overload: lambda after a match still parses to Lambda" ![io] {
+    let source = "fn run(n: int) -> int {" + "  match n {"
+        + "    0 => { return 1; }"
+        + "    _ => { return 2; }"
+        + "  }"
+        + "  let g = fn(y: int) => y + 1;"
+        + "  return g(n);"
+        + "}";
+    let stmts = first_fn_body_statements(source);
+    let mut found_lambda: boolean = false;
+    let mut i: int = 0;
+    loop {
+        if i >= stmts.length { break; }
+        if stmts[i].variant == "VariableDeclaration" {
+            let init = stmts[i].initializer;
+            if init != null {
+                if init.variant == "Lambda" {
+                    found_lambda = true;
+                    assert init.body.statements.length == 1;
+                    assert init.body.statements[0].variant == "ReturnStatement";
+                }
+            }
+        }
+        i += 1;
+    }
+    assert found_lambda;
+}

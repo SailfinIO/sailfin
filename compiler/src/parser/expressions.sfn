@@ -3,6 +3,7 @@
 // Expression parsing - Pratt parser implementation for expressions including
 // literals, binary/unary operators, member access, calls, lambdas, and more.
 import {
+    Block,
     Capture,
     Expression,
     ObjectField,
@@ -21,6 +22,7 @@ import { spawn_future_kind } from "../typecheck_types";
 import { parse_block } from "./statements";
 import {
     append_token,
+    collect_type_annotation_until,
     filter_trivia,
     identifier_matches,
     identifier_text,
@@ -1454,6 +1456,46 @@ fn collect_struct_type_name(expression: Expression) -> StructTypeNameResult {
 // ============================================================================
 // Lambda Expressions
 // ============================================================================
+// Desugar an expression-bodied lambda (`fn(...) => expr`, SFEP-0029) into
+// the same structured `{ return <expr>; }` block the block form produces.
+// Synthesizing the block tokens and running them through `parse_block` (the
+// exact path the block form uses) gives the resulting `Block` real
+// `statements`, `tokens`, and `text`, so every downstream pass sees a normal
+// single-`return` block. The synthetic `{`, `return`, `;`, `}` tokens borrow
+// the `=>` arrow's line/column: capture inference (`typecheck_captures`) and
+// closure lowering (`lambda_lowering._find_capture_record`) both key a
+// lambda's captures off `body.tokens[0]`'s (line, column), so an all-zero
+// position would collide across multiple short-form lambdas in one file.
+fn desugar_expr_lambda_body(body_tokens: Token[], arrow: Token) -> Block {
+    let line = arrow.line;
+    let column = arrow.column;
+    let mut block_tokens: Token[] = [];
+    block_tokens = append_token(block_tokens, Token {
+        kind: TokenKind.Symbol(), lexeme: "{", line: line, column: column
+    });
+    block_tokens = append_token(block_tokens, Token {
+        kind: TokenKind.Identifier(), lexeme: "return", line: line, column: column
+    });
+    let mut index: int = 0;
+    loop {
+        if index >= body_tokens.length { break; }
+        block_tokens = append_token(block_tokens, body_tokens[index]);
+        index += 1;
+    }
+    block_tokens = append_token(block_tokens, Token {
+        kind: TokenKind.Symbol(), lexeme: ";", line: line, column: column
+    });
+    block_tokens = append_token(block_tokens, Token {
+        kind: TokenKind.Symbol(), lexeme: "}", line: line, column: column
+    });
+    block_tokens = append_token(block_tokens, Token {
+        kind: TokenKind.EndOfFile(), lexeme: "", line: line, column: column
+    });
+    let block_parser = Parser { tokens: block_tokens, index: 0 };
+    let parsed = parse_block(block_parser);
+    return parsed.block;
+}
+
 fn parse_lambda_expression(state: ExpressionTokens) -> ExpressionParseResult {
     let mut current = state;
     if expression_tokens_is_at_end(current) {
@@ -1485,33 +1527,44 @@ fn parse_lambda_expression(state: ExpressionTokens) -> ExpressionParseResult {
         let sep_result = expression_tokens_consume_type_separator(current, false, true);
         if sep_result.found {
             current = sep_result.state;
-            // Stop the return-type capture at the effect marker `!` as well
-            // as the body `{`, mirroring the fn-decl parser
-            // (`declarations.sfn`). Collecting through `{` alone swallows a
-            // trailing `![...]` annotation into the return-type text (e.g.
-            // `int ![io]`), which makes the future-kind classifier
-            // (`spawn_future_kind`) and the lambda return-type lowering fall
-            // to the `ptr` catch-all — the #1546 typed-result round-trip bug.
-            let capture = expression_tokens_collect_until(current, ["!", "{"]);
-            if !capture.success { return expression_parse_failure(state); }
+            // Capture the return type with the real type parser
+            // (`collect_type_annotation_until`) instead of a flat
+            // collect-until. It balances nested generics — including the
+            // glued `>>` shift token in `Map<K, Result<T, E>>` — and stops
+            // only at a top-level effect marker `!`, block body `{`, or
+            // expr body `=>`. The earlier flat capture stopping at `!`/`{`
+            // was a point fix for #1546 (a trailing `![io]` folded into the
+            // return-type text as `int ![io]`, defeating the future-kind
+            // classifier); routing through the canonical type capture
+            // retires that whole bug class (SFEP-0029 §2.1, §5).
+            let type_parser = Parser {
+                tokens: current.tokens,
+                index: current.index
+            };
+            let capture = collect_type_annotation_until(type_parser, ["!", "{", "=>"]);
             let type_text = trim_text(tokens_to_text(capture.tokens));
             if type_text.length > 0 {
                 return_type = TypeAnnotation { text: type_text };
             }
-            current = capture.state;
+            current = ExpressionTokens {
+                tokens: current.tokens,
+                index: capture.parser.index
+            };
             // Consume an optional effect annotation `![...]` sitting between
-            // the return type and the body so the block collection below
-            // still starts at `{`. The lambda effect set is not yet tracked
-            // on the AST node, so the tokens are discarded (status quo) —
-            // only the return-type text is corrected here.
-            let after_type = expression_tokens_peek(current);
-            if after_type.kind.variant == "Symbol" {
-                if strings_equal(after_type.lexeme, "!") {
-                    let effect_capture = expression_tokens_collect_until(current, ["{"]);
-                    if !effect_capture.success {
-                        return expression_parse_failure(state);
+            // the return type and the body so the body dispatch below still
+            // starts at `{` or `=>`. The lambda effect set is not yet
+            // tracked on the AST node, so the tokens are discarded (status
+            // quo) — only the return-type text is corrected here.
+            if !expression_tokens_is_at_end(current) {
+                let after_type = expression_tokens_peek(current);
+                if after_type.kind.variant == "Symbol" {
+                    if strings_equal(after_type.lexeme, "!") {
+                        let effect_capture = expression_tokens_collect_until(current, ["{", "=>"]);
+                        if !effect_capture.success {
+                            return expression_parse_failure(state);
+                        }
+                        current = effect_capture.state;
                     }
-                    current = effect_capture.state;
                 }
             }
         }
@@ -1521,17 +1574,39 @@ fn parse_lambda_expression(state: ExpressionTokens) -> ExpressionParseResult {
         return expression_parse_failure(state);
     }
 
-    let block_result = collect_expression_block(current);
-    if !block_result.success { return expression_parse_failure(state); }
-    current = block_result.state;
+    // Dispatch on the body lead-in. SFEP-0029 adds the additive
+    // expression-bodied short form `fn(...) => expr` alongside the block
+    // form `fn(...) { ... }`. Both yield an `Expression.Lambda` whose
+    // `body` is a structured `Block`; the expr form desugars to a single-
+    // `return` block *here*, before any downstream pass (typecheck,
+    // effects, emit, lowering) sees it, so those passes are unchanged.
+    let mut body: Block = Block { tokens: [], text: "", statements: [] };
+    let lead = expression_tokens_peek(current);
+    if symbol_matches(lead, "=>") {
+        let arrow = lead;
+        current = expression_tokens_advance(current);
+        if expression_tokens_is_at_end(current) {
+            return expression_parse_failure(state);
+        }
+        let body_start = current.index;
+        let body_result = parse_expression_bp(current, 0);
+        if !body_result.success { return expression_parse_failure(state); }
+        current = body_result.state;
+        let body_tokens = token_slice(state.tokens, body_start, current.index);
+        body = desugar_expr_lambda_body(body_tokens, arrow);
+    } else {
+        let block_result = collect_expression_block(current);
+        if !block_result.success { return expression_parse_failure(state); }
+        current = block_result.state;
 
-    let mut block_tokens = block_result.tokens;
-    block_tokens = append_token(block_tokens, Token {
-        kind: TokenKind.EndOfFile(), lexeme: "", line: 0, column: 0
-    });
-    let block_parser = Parser { tokens: block_tokens, index: 0 };
-    let parsed_block = parse_block(block_parser);
-    let body = parsed_block.block;
+        let mut block_tokens = block_result.tokens;
+        block_tokens = append_token(block_tokens, Token {
+            kind: TokenKind.EndOfFile(), lexeme: "", line: 0, column: 0
+        });
+        let block_parser = Parser { tokens: block_tokens, index: 0 };
+        let parsed_block = parse_block(block_parser);
+        body = parsed_block.block;
+    }
 
     let empty_captures: Capture[] = [];
     return ExpressionParseResult {

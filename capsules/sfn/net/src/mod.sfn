@@ -18,10 +18,12 @@
 // `read_all` / `read_bytes` / `close`) and server (`listen` / `accept` /
 // `close_listener`) perform real socket I/O against the runtime socket
 // primitives in `runtime/sfn/adapters/net.sfn` (#1582, epic #1540 B6).
-// UDP (`udp_bind` / `send_to` / `recv_from`) and DNS (`resolve`) remain
-// stubbed pending follow-up waves; host resolution is the `localhost`
-// alias plus numeric dotted-quad IPv4 (no DNS), and bodies are text v0
-// (NUL-terminated; embedded-NUL binary payloads are a follow-up).
+// DNS (`resolve`) resolves real hostnames via libc `getaddrinfo` (#1540
+// B2 — first IPv4/A record only, no AAAA / caching / happy-eyeballs); host
+// resolution across the client is the `localhost` alias, numeric
+// dotted-quad IPv4, and `getaddrinfo`. UDP (`udp_bind` / `send_to` /
+// `recv_from`) remains stubbed pending a follow-up wave, and bodies are
+// text v0 (NUL-terminated; embedded-NUL binary payloads are a follow-up).
 //
 // Runtime ABI. The `sfn_net_*` externs below are defined in
 // `runtime/sfn/adapters/net.sfn` (linked into every Sailfin binary via
@@ -45,6 +47,8 @@ extern fn sfn_net_listen(host: * u8, port: i64) -> i32;
 extern fn sfn_net_listen_port(fd: i32) -> i64;
 
 extern fn sfn_net_accept(fd: i32) -> i32;
+
+extern fn sfn_net_resolve(host: * u8) -> * u8;
 
 // ---- Types ----
 struct Connection {
@@ -170,9 +174,17 @@ fn recv_from(conn: Connection, max_bytes: int) -> string ![net] {
 
 // ---- DNS ----
 fn resolve(hostname: string) -> string[] ![net] {
-    // Resolve a hostname to one or more IP addresses.
-    // Pending runtime DNS (getaddrinfo) — follow-up wave (#1540 B2).
-    return [];
+    // Resolve a hostname to an IPv4 address (dotted-quad string). Backed by
+    // libc `getaddrinfo` in runtime/sfn/adapters/net.sfn (#1540 B2). The
+    // `localhost` alias and a numeric dotted-quad echo back their loopback /
+    // literal address; any other name is resolved via DNS. v0 returns at
+    // most the first A record (no AAAA, no happy-eyeballs, no caching); an
+    // unresolvable name yields an empty list rather than a hang or crash.
+    let ptr = sfn_net_resolve(hostname as * u8);
+    if ptr as i64 == 0 { return []; }
+    let addr = ptr as string;
+    if addr.length == 0 { return []; }
+    return [addr];
 }
 
 // ---- Utilities ----

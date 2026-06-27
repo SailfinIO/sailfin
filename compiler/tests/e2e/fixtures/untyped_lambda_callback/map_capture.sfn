@@ -1,0 +1,15 @@
+// #1683 — a capturing untyped lambda `.map(fn(x) => x + base)`.
+// base=10, [1,2,3].map(x => x+10) = [11,12,13], sum = 36.
+fn main() ![io] {
+    let base: int = 10;
+    let xs: int[] = [1, 2, 3];
+    let ys: int[] = xs.map(fn (x) => x + base);
+    let mut total: int = 0;
+    let mut i: int = 0;
+    loop {
+        if i >= ys.length { break; }
+        total = total + ys[i];
+        i = i + 1;
+    }
+    print(total);
+}

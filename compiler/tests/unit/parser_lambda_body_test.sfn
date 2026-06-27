@@ -113,3 +113,61 @@ test "lambda return type: effect annotation is not folded into return type (#154
     assert expr.body.statements.length == 1;
     assert expr.body.statements[0].variant == "ReturnStatement";
 }
+
+// -------------------------------------------------------------------
+// Expression-bodied short form (SFEP-0029, #1683) — `fn(x) => expr`
+// desugars to a single-`return` block so the `Expression.Lambda.body`
+// shape is identical to the block form downstream.
+// -------------------------------------------------------------------
+test "lambda expr form: untyped `fn(x) => x * x` desugars to single return" ![io] {
+    let expr = first_let_lambda("let f = fn(x) => x * x;");
+    assert expr != null;
+    assert expr.variant == "Lambda";
+    assert expr.parameters.length == 1;
+    assert expr.parameters[0].name == "x";
+    assert expr.body.statements.length == 1;
+    assert expr.body.statements[0].variant == "ReturnStatement";
+}
+
+test "lambda expr form: multi-param `fn(x: int, y: int) => x + y` parses" ![io] {
+    let expr = first_let_lambda("let f = fn(x: int, y: int) => x + y;");
+    assert expr != null;
+    assert expr.variant == "Lambda";
+    assert expr.parameters.length == 2;
+    assert expr.body.statements.length == 1;
+    assert expr.body.statements[0].variant == "ReturnStatement";
+}
+
+test "lambda expr form: typed head `fn(x: int) -> int => x` keeps return type" ![io] {
+    let expr = first_let_lambda("let f = fn(x: int) -> int => x;");
+    assert expr != null;
+    assert expr.variant == "Lambda";
+    let rt = expr.return_type;
+    assert rt != null;
+    assert rt.text == "int";
+    assert expr.body.statements.length == 1;
+    assert expr.body.statements[0].variant == "ReturnStatement";
+}
+
+// The expr body's `return` value is the full expression to the right of
+// `=>` — the desugared `ReturnStatement` carries it, so the block form
+// and the short form produce the same statement shape.
+test "lambda expr form: return value is the full body expression" ![io] {
+    let expr = first_let_lambda("let f = fn(x) => x + 1;");
+    assert expr != null;
+    assert expr.variant == "Lambda";
+    let ret = expr.body.statements[0];
+    assert ret.variant == "ReturnStatement";
+    let val = ret.expression;
+    assert val != null;
+    assert val.variant == "Binary";
+}
+
+// Block form remains valid — the short form is purely additive.
+test "lambda expr form: block form `fn(x) -> int { ... }` still parses (no regression)" ![io] {
+    let expr = first_let_lambda("let f = fn(x) -> int { return x; };");
+    assert expr != null;
+    assert expr.variant == "Lambda";
+    assert expr.body.statements.length == 1;
+    assert expr.body.statements[0].variant == "ReturnStatement";
+}

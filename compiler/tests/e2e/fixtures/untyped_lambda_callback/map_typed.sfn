@@ -1,0 +1,14 @@
+// #1683 no-regression — the TYPED expr form must produce byte-identical
+// output to the untyped form (map_expr.sfn): sum = 14.
+fn main() ![io] {
+    let xs: int[] = [1, 2, 3];
+    let ys: int[] = xs.map(fn (x: int) -> int => x * x);
+    let mut total: int = 0;
+    let mut i: int = 0;
+    loop {
+        if i >= ys.length { break; }
+        total = total + ys[i];
+        i = i + 1;
+    }
+    print(total);
+}

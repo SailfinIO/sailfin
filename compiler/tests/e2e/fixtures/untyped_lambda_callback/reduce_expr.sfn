@@ -1,0 +1,6 @@
+// #1683 — `.reduce(0, fn(acc, x) => acc + x)` untyped. sum([1,2,3,4]) = 10.
+fn main() ![io] {
+    let xs: int[] = [1, 2, 3, 4];
+    let sum: int = xs.reduce(0, fn (acc, x) => acc + x);
+    print(sum);
+}

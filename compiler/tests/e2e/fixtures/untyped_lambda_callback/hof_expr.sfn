@@ -1,0 +1,5 @@
+// #1683 — untyped lambda passed to a user higher-order function whose
+// parameter is declared `fn(int) -> int`. apply(x => x+1, 5) = 6.
+fn apply(cb: fn (int) -> int, n: int) -> int { return cb(n); }
+
+fn main() ![io] { print(apply(fn (x) => x + 1, 5)); }
