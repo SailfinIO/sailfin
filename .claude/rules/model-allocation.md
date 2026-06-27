@@ -61,6 +61,24 @@ coding, or a wrong edit would be subtle and costly. When in doubt on a
 *correctness-sensitive* change, Opus implements; when in doubt on a *mechanical*
 change, Sonnet implements and Opus reviews.
 
+**Decompose before deciding — the keep-vs-delegate call is per *slice*, not per
+issue.** Separate the subtle core from the mechanical periphery (test/fixture
+adaptation, repetitive call-site edits, boilerplate). Keeping the
+correctness-sensitive core on Opus does **not** mean keeping the mechanical
+periphery too — hand those slices to the `implementer`, ideally **in parallel**
+while you write the core. The common miss is making one whole-issue decision ("I'll
+do this issue myself") when the issue is really a small subtle core plus a large
+mechanical slice that should have been split off.
+
+**Break-even test for keeping a slice on Opus:** if a spec precise enough to
+delegate it would have to contain the implementation nearly *verbatim*, just write
+it — the spec-authoring cost has met the implementation cost (this legitimizes
+self-implementing a small, subtle function). But if the spec ("adapt
+`X_test.sfn` to cover Y", "apply this rename across these call sites") is far
+*smaller* than its output, that gap is the delegation win — give it to the
+`implementer`. Apply the test per slice: a subtle 25-line core and a mechanical
+190-line test from the same issue can land on different sides of it.
+
 ## Tiered escalation: don't wake Opus for trivia
 
 A failing `make compile`/`make test` does **not** go straight to the Opus
