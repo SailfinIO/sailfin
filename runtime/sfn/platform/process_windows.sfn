@@ -43,9 +43,10 @@ extern fn strlen(s: * u8) -> usize;
 
 extern fn exit(code: i32) -> void;
 
-// Identity bridge `string`/`* u8` (a Sailfin `string` lowers to a bare
-// NUL-terminated `i8*` on the pinned seed), same as `process.sfn`.
-extern fn sfn_str_to_cstr(s: * u8) -> * u8;
+// Materializes a NUL-terminated C string by copying the carried-length bytes
+// into the arena (#1705), same as `process.sfn`. Callers pass `null` for the
+// arena slot to resolve the process-global arena.
+extern fn sfn_str_to_cstr(s_data: * u8, s_len: i64, arena_slot: * u8) -> * u8;
 
 // ── Win32 kernel32 (implicitly linked by mingw; no extra `-l`). ──────
 extern fn CreateProcessA(app: * u8, cmdline: * u8, pattr: * u8, tattr: * u8, inherit: i32, flags: i32, env: * u8, cwd: * u8, si: * u8, pi: * u8) -> i32;
@@ -121,9 +122,9 @@ fn sfn_process_run(argv: string[]) -> float ![io] {
     let quote: string = "\"";
     let space: string = " ";
     let empty: string = "";
-    let q: * u8 = sfn_str_to_cstr(quote as * u8);
-    let sp: * u8 = sfn_str_to_cstr(space as * u8);
-    let nul: * u8 = sfn_str_to_cstr(empty as * u8);
+    let q: * u8 = sfn_str_to_cstr(quote as * u8, quote.length, null);
+    let sp: * u8 = sfn_str_to_cstr(space as * u8, space.length, null);
+    let nul: * u8 = sfn_str_to_cstr(empty as * u8, empty.length, null);
 
     // Command-line length: each arg contributes its bytes + two quotes +
     // one separating space, plus a trailing NUL.
@@ -131,7 +132,7 @@ fn sfn_process_run(argv: string[]) -> float ![io] {
     let mut i: i64 = 0;
     loop {
         if i >= len { break; }
-        let a: * u8 = sfn_str_to_cstr(argv[i] as * u8);
+        let a: * u8 = sfn_str_to_cstr(argv[i] as * u8, argv[i].length, null);
         total = total + (strlen(a) as i64) + 3;
         i = i + 1;
     }
@@ -149,7 +150,7 @@ fn sfn_process_run(argv: string[]) -> float ![io] {
         }
         memcpy((base + wp) as * u8, q, 1 as usize);
         wp = wp + 1;
-        let a: * u8 = sfn_str_to_cstr(argv[i] as * u8);
+        let a: * u8 = sfn_str_to_cstr(argv[i] as * u8, argv[i].length, null);
         let n: i64 = strlen(a) as i64;
         if n > 0 {
             memcpy((base + wp) as * u8, a, n as usize);
@@ -238,15 +239,15 @@ fn _pw_build_cmdline(argv: string[]) -> * u8 {
     let quote: string = "\"";
     let space: string = " ";
     let empty: string = "";
-    let q: * u8 = sfn_str_to_cstr(quote as * u8);
-    let sp: * u8 = sfn_str_to_cstr(space as * u8);
-    let nul: * u8 = sfn_str_to_cstr(empty as * u8);
+    let q: * u8 = sfn_str_to_cstr(quote as * u8, quote.length, null);
+    let sp: * u8 = sfn_str_to_cstr(space as * u8, space.length, null);
+    let nul: * u8 = sfn_str_to_cstr(empty as * u8, empty.length, null);
 
     let mut total: i64 = 0;
     let mut i: i64 = 0;
     loop {
         if i >= len { break; }
-        let a: * u8 = sfn_str_to_cstr(argv[i] as * u8);
+        let a: * u8 = sfn_str_to_cstr(argv[i] as * u8, argv[i].length, null);
         total = total + (strlen(a) as i64) + 3;
         i = i + 1;
     }
@@ -264,7 +265,7 @@ fn _pw_build_cmdline(argv: string[]) -> * u8 {
         }
         memcpy((base + wp) as * u8, q, 1 as usize);
         wp = wp + 1;
-        let a: * u8 = sfn_str_to_cstr(argv[i] as * u8);
+        let a: * u8 = sfn_str_to_cstr(argv[i] as * u8, argv[i].length, null);
         let n: i64 = strlen(a) as i64;
         if n > 0 {
             memcpy((base + wp) as * u8, a, n as usize);
@@ -290,7 +291,7 @@ fn _pw_build_env_block(env_flat: string[]) -> * u8 {
     let mut i: i64 = 0;
     loop {
         if i >= n { break; }
-        let e: * u8 = sfn_str_to_cstr(env_flat[i] as * u8);
+        let e: * u8 = sfn_str_to_cstr(env_flat[i] as * u8, env_flat[i].length, null);
         total = total + (strlen(e) as i64) + 1;
         i = i + 1;
     }
@@ -303,7 +304,7 @@ fn _pw_build_env_block(env_flat: string[]) -> * u8 {
     i = 0;
     loop {
         if i >= n { break; }
-        let e: * u8 = sfn_str_to_cstr(env_flat[i] as * u8);
+        let e: * u8 = sfn_str_to_cstr(env_flat[i] as * u8, env_flat[i].length, null);
         let l: i64 = strlen(e) as i64;
         if l > 0 { memcpy((base + wp) as * u8, e, l as usize); }
         // The NUL separator and the final terminator are already zero
