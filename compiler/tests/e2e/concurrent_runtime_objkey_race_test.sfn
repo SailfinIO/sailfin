@@ -74,9 +74,20 @@ fn _race_round(base: string, round: int, n: int) -> boolean ![io] {
     script = script + "wait\n";
 
     let exit = process.run_capture(["bash", "-c", script], process.environ());
-    let _o = process.capture_take_stdout();
-    let _e = process.capture_take_stderr();
-    if exit != 0 { return false; }
+    let o = process.capture_take_stdout();
+    let e = process.capture_take_stderr();
+    if exit != 0 {
+        // Surface the child output so a re-fire in the macOS nightly is
+        // diagnosable (OOM/SIGABRT vs. a genuine cache-key race) — these
+        // background `sfn run`s otherwise swallow their stderr (#1462).
+        print.err("[objkey-race] round " + number_to_string(round)
+            + " bash exit="
+            + number_to_string(exit)
+            + " output:\n"
+            + o
+            + e);
+        return false;
+    }
 
     // Verify every child produced exactly its own marker.
     let mut ok = true;
@@ -86,10 +97,18 @@ fn _race_round(base: string, round: int, n: int) -> boolean ![io] {
         let tag = number_to_string(round) + "_" + number_to_string(j);
         let marker = "OBJKEY_MARK_" + tag;
         let outp = base + "/o_" + tag + ".txt";
-        if !fs.exists(outp) { ok = false; } else {
+        if !fs.exists(outp) {
+            print.err("[objkey-race] missing child output " + outp);
+            ok = false;
+        } else {
             let got = fs.readFile(outp);
             // Own marker present...
-            if !contains(got, marker) { ok = false; }
+            if !contains(got, marker) {
+                print.err("[objkey-race] child " + tag
+                    + " missing own marker; got:\n"
+                    + got);
+                ok = false;
+            }
             // ...and no sibling's marker leaked in (cross-contamination).
             let mut s = 0;
             loop {
