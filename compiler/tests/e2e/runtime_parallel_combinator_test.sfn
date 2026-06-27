@@ -162,6 +162,7 @@ test "linked fan-out/join: all tasks run, results in input order, empty returns 
                 + "void sfn_type_register(void *desc) { (void)desc; }\n"
                 + "void *sfn_alloc_struct(long n) { return calloc(1, (size_t)n); }\n"
                 + "double sfn_str_to_number(void *s) { (void)s; return 0; }\n"
+                + "double sfn_str_to_number_lv(void *s, long n) { (void)s; (void)n; return 0; }\n"
                 + "\n"
                 + "static void *task_body(void *ctx) {\n"
                 + "    long c = (long)ctx;\n"

@@ -1285,7 +1285,7 @@ fn _rh_descriptors_08(descriptors_in: RuntimeHelperDescriptor[]) -> RuntimeHelpe
 fn _rh_descriptors_09(descriptors_in: RuntimeHelperDescriptor[]) -> RuntimeHelperDescriptor[] {
     let mut descriptors = descriptors_in;
     descriptors = append_runtime_helper(descriptors, RuntimeHelperDescriptor {
-        target: "string.to_number", symbol: "sfn_str_to_number", return_type: "double", parameter_types: ["i8*"], effects: [], native_signature: "sfn_str_to_number", c_abi_return_type: null
+        target: "string.to_number", symbol: "sfn_str_to_number", return_type: "double", parameter_types: ["{i8*, i64}"], effects: [], native_signature: "sfn_str_to_number_lv", c_abi_return_type: null
     });
     descriptors = append_runtime_helper(descriptors, RuntimeHelperDescriptor {
         target: "strings_equal", symbol: "strings_equal", return_type: "i1", parameter_types: ["i8*", "i8*"], effects: [], native_signature: "sfn_str_eq", c_abi_return_type: null
