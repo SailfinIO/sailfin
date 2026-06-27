@@ -54,10 +54,19 @@ fn _emit(source: string, tag: string, kind: string, ext: string) -> string ![io]
     fs.writeFile(src, source);
     if fs.exists(out) { fs.deleteFile(out); }
     let exit = process.run_capture([_sfn_bin(), "emit", "-o", out, kind, src], _child_env());
-    let _o = process.capture_take_stdout();
-    let _e = process.capture_take_stderr();
+    let o = process.capture_take_stdout();
+    let e = process.capture_take_stderr();
     fs.deleteFile(src);
-    if exit != 0 { return ""; }
+    if exit != 0 {
+        // Surface child output so a macOS-nightly re-fire is diagnosable
+        // (OOM/SIGABRT vs. an emit bug) — otherwise swallowed (#1462).
+        print.err("[struct-sep] emit failed tag=" + tag + " exit="
+            + number_to_string(exit)
+            + " output:\n"
+            + o
+            + e);
+        return "";
+    }
     if !fs.exists(out) { return ""; }
     let text = fs.readFile(out);
     fs.deleteFile(out);
@@ -74,7 +83,16 @@ fn _run(source: string, tag: string) -> string ![io] {
     let out = process.capture_take_stdout();
     let err = process.capture_take_stderr();
     fs.deleteFile(src);
-    if exit != 0 { return ""; }
+    if exit != 0 {
+        // Surface child output so a macOS-nightly re-fire is diagnosable
+        // (OOM/SIGABRT vs. a run-pipeline bug) — otherwise swallowed (#1462).
+        print.err("[struct-sep] run failed tag=" + tag + " exit="
+            + number_to_string(exit)
+            + " output:\n"
+            + out
+            + err);
+        return "";
+    }
     return out + err;
 }
 
