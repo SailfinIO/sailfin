@@ -329,6 +329,14 @@ fn walk_expression(scope: LocalBinding[], expression: Expression?) -> CaptureWal
         let else_value = walk_expression(scope, expression.else_value);
         return merge_results(merge_results(cond, then_value), else_value);
     }
+    if expression.variant == "Assignment" {
+        // Assignment `target <op> value` (#1627 Part D) — a capture can live
+        // in either side (`fn() { captured = x; }`, `fn() { y = captured; }`),
+        // so walk both and union the discovered captures.
+        let target = walk_expression(scope, expression.target);
+        let value = walk_expression(scope, expression.value);
+        return merge_results(target, value);
+    }
     if expression.variant == "Call" {
         let mut result = walk_expression(scope, expression.callee);
         let mut i: int = 0;

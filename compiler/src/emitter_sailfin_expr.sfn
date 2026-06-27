@@ -145,6 +145,14 @@ fn format_expression(expression: Expression) -> string {
         let else_text = format_expression(expression.else_value);
         return condition_text + " ? " + then_text + " : " + else_text;
     }
+    if expression.variant == "Assignment" {
+        // Assignment `target <op> value` (#1627 Part D). Human-friendly
+        // Sailfin-to-Sailfin rendering (no operand parens), like the
+        // Conditional/Cast arms above.
+        let target_text = format_expression(expression.target);
+        let value_text = format_expression(expression.value);
+        return target_text + " " + expression.operator + " " + value_text;
+    }
     if expression.variant == "Lambda" {
         return format_lambda_expression(expression);
     }

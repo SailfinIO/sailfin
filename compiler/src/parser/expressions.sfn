@@ -409,11 +409,59 @@ fn parse_expression_bp(state: ExpressionTokens, min_precedence: int) -> Expressi
         }
     }
 
+    // Assignment-as-expression `target <op> value` (#1627 Part D). Binds
+    // looser than ternary, right-associative; recognized only at base
+    // precedence (`min_precedence == 0`) so it wraps the fully-climbed (and
+    // possibly ternary-wrapped) `left_expression` as the target. `=` and the
+    // compound operators carry precedence -1 (never climbed), so this is
+    // purely additive — every `a = b` / `x += 1` that previously degraded to
+    // an effect-blind `Raw` now structures into `Assignment`, and the value
+    // recurses at base precedence for right-associativity (`a = b = c`).
+    // `==`/`!=`/`<=`/`>=` lex as distinct two-char tokens, so
+    // `is_assignment_operator` cannot misfire on a comparison.
+    if min_precedence == 0 {
+        if !expression_tokens_is_at_end(current_state) {
+            let assign_token = expression_tokens_peek(current_state);
+            if assign_token.kind.variant == "Symbol" {
+                if is_assignment_operator(assign_token.lexeme) {
+                    let after_op = expression_tokens_advance(current_state);
+                    let value_result = parse_expression_bp(after_op, 0);
+                    if !value_result.success {
+                        return expression_parse_failure(state);
+                    }
+                    return ExpressionParseResult {
+                        state: value_result.state,
+                        expression: Expression.Assignment {
+                            target: left_expression,
+                            operator: assign_token.lexeme,
+                            value: value_result.expression,
+                            span: source_span_from_tokens([assign_token])
+                        },
+                        success: true
+                    };
+                }
+            }
+        }
+    }
+
     return ExpressionParseResult {
         state: current_state,
         expression: left_expression,
         success: true
     };
+}
+
+// Recognize an assignment operator (#1627 Part D). Restricted to the set the
+// lowering `parse_assignment_expression` string-scan supports (`= += -= *= /=`);
+// `%=` is intentionally excluded so it stays `Raw` (the lowering compound
+// parser cannot handle it anyway).
+fn is_assignment_operator(op: string) -> boolean {
+    if strings_equal(op, "=") { return true; }
+    if strings_equal(op, "+=") { return true; }
+    if strings_equal(op, "-=") { return true; }
+    if strings_equal(op, "*=") { return true; }
+    if strings_equal(op, "/=") { return true; }
+    return false;
 }
 
 // ============================================================================

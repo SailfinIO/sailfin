@@ -1022,6 +1022,14 @@ fn walk_expression(expression: Expression?, bindings: SymbolEntry[], imports: Im
         diagnostics = diagnostics.concat(walk_expression(expression.else_value, bindings, imports));
         return diagnostics;
     }
+    if expression.variant == "Assignment" {
+        // Assignment `target <op> value` (#1627 Part D) — recurse into both
+        // sides so diagnostics (undefined symbols, fn-value misuse, nested
+        // parse-error nodes) in the lvalue and the rvalue still fire.
+        let mut diagnostics = walk_expression(expression.target, bindings, imports);
+        diagnostics = diagnostics.concat(walk_expression(expression.value, bindings, imports));
+        return diagnostics;
+    }
     if expression.variant == "Unary" {
         // Prefix `*`/`&`/`-`/`!` (#1627 Part B structured `*`/`&`). Recurse
         // into the operand so its diagnostics still fire — in particular

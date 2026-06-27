@@ -906,6 +906,16 @@ fn collect_effects_from_expression(expression: Expression?, imports: ImportSymbo
         required = merge_requirements(required, collect_effects_from_expression(expression.else_value, imports));
         return required;
     }
+    if expression.variant == "Assignment" {
+        // Assignment `target <op> value` (#1627 Part D). Both sides can be
+        // effectful — `arr[compute_io()] = x` (effect in the lvalue) and
+        // `a = readFile()` (effect in the value) — so the requirement is the
+        // union of the target's and value's effects. Before #1627 the whole
+        // assignment degraded to an effect-blind `Raw`, dropping both.
+        let mut required = collect_effects_from_expression(expression.target, imports);
+        required = merge_requirements(required, collect_effects_from_expression(expression.value, imports));
+        return required;
+    }
     if expression.variant == "Array" {
         let mut required: EffectRequirement[] = [];
         let mut element_index: int = 0;

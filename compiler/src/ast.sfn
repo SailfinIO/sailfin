@@ -115,6 +115,27 @@ enum Expression {
         else_value: Expression,
         span: SourceSpan?
     },
+    // Assignment-as-expression `target <op> value` (issue #1627, epic #1180,
+    // effect-system hardening). Assignment has no AST node before #1627 —
+    // `a = b` parsed as `ExpressionStatement { Raw{"a = b"} }` because `=`
+    // carried precedence -1 and was never climbed, so the leftover `= b`
+    // tokens degraded the whole expression to `Raw`. Since #1186 a `Raw`
+    // contributes zero effects, so an effectful target/value (`arr[io()] = x`,
+    // `a = readFile()`) reached codegen effect-free. Structuring it lets the
+    // effect checker, typecheck walker, capture/ownership analysis, and
+    // lambda-capture rewrite all recurse into `target` and `value`. The
+    // formatter serializes it back to `<target> <operator> <value>` — the
+    // exact text the lowering `parse_assignment_expression` already consumes
+    // (string-scan), so no new lowering arm is needed. `operator` is `"="` or
+    // a compound (`"+="`, `"-="`, `"*="`, `"/="`), keeping the node lossless.
+    // `span` is the last field per the variant convention so positional GEP
+    // indexing for prior variants stays stable.
+    Assignment {
+        target: Expression,
+        operator: string,
+        value: Expression,
+        span: SourceSpan?
+    },
     // Concurrency frontend nodes (M4.0, epic #965, issue #1079). Parse-only
     // targets for the structured-concurrency surface; parsing, type rules,
     // effect-checking, and lowering land in follow-up issues. Runtime

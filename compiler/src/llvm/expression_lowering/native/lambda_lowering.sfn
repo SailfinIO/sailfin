@@ -620,6 +620,23 @@ fn _rewrite_expression(ctx: LiftContext, expression: Expression) -> ExpressionRe
             }
         };
     }
+    if expression.variant == "Assignment" {
+        // Assignment `target <op> value` (#1627 Part D). Rewrite both sides so
+        // a captured binding assigned-to or read inside a lambda body
+        // (`fn() { captured = x; }`) is lifted to the captured environment,
+        // threading `ctx` left-to-right.
+        let target = _rewrite_expression(ctx, expression.target);
+        let value = _rewrite_expression(target.ctx, expression.value);
+        return ExpressionRewriteResult {
+            ctx: value.ctx,
+            expression: Expression.Assignment {
+                target: target.expression,
+                operator: expression.operator,
+                value: value.expression,
+                span: expression.span
+            }
+        };
+    }
     // Lift lambdas nested inside spawn/await operands (#1090). A lambda
     // operand is a spawn target — its captured env crosses the thread
     // boundary and the worker frees it (#1475), so lift it with
