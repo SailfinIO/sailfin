@@ -1772,10 +1772,43 @@ fn _strip_outer_parens(text: string) -> string {
     return trim_text(inner);
 }
 
+// Classify a `<fn> as <target>` cast where `head` resolves to function `entry`.
+// E0808 = fn used as value (unsupported target); E0809 = fn address unsupported.
+//
+// E0809 (C-ABI enforcement) applies ONLY to the typed `* fn (...)` form, where
+// the calling convention is named and must match. An erased `* u8` target is
+// `void*` — conventionless — so producing it violates no convention (the
+// convention is enforced where the pointer is declared/consumed). This lets
+// concrete struct-ABI functions (e.g. `_sfn_http_trampoline as * u8`,
+// `fn(OwnedBuf)->OwnedBuf`) classify clean on `* u8` targets. (#1627 Part A.)
+fn classify_fn_cast(head: string, target_text: string, entry: SymbolEntry, span: SourceSpan?) -> Diagnostic[] {
+    let target = trim_text(target_text);
+    if starts_with(target, "*") {
+        let pointee = trim_text(strip_prefix(target, "*"));
+        let is_typed_fn_ptr = starts_with(pointee, "fn ") || starts_with(pointee, "fn(");
+        if strings_equal(pointee, "u8") || is_typed_fn_ptr {
+            if entry.is_generic {
+                return [make_fn_address_unsupported_diagnostic(head, "it is generic", span)];
+            }
+            // C-ABI enforcement applies only to the typed `* fn (...)` form —
+            // an erased `* u8` carries no calling convention.
+            if is_typed_fn_ptr {
+                if !entry.is_c_abi {
+                    return [make_fn_address_unsupported_diagnostic(head, "its signature is not C-ABI-compatible", span)];
+                }
+            }
+            return [];
+        }
+    }
+    return [make_fn_value_position_diagnostic(head, span)];
+}
+
 // Classify a `Raw`-degraded expression that may be a function-reference
 // form the parser could not structure: `& <fn>` (the `&` prefix has no
-// unary parse) or `<fn> as <type>` (the `as` target only parses a bare
-// identifier, so `<fn> as *T` falls back to Raw). Emits E0808/E0809 only
+// unary parse). The `<fn> as <type>` cast half is now dead for structured
+// casts (Part A lifts all casts; the cast half is kept for defensive
+// back-compat with any residual Raw that still contains ` as `, delegating
+// to `classify_fn_cast` for identical behavior). Emits E0808/E0809 only
 // when the head identifier resolves to a function in `symbols` — this
 // gate is load-bearing for self-host: `<value> as * u8` casts on
 // non-function operands (e.g. `label as * u8` in the driver) must stay
@@ -1798,7 +1831,11 @@ fn check_fn_reference_raw(text: string, symbols: SymbolEntry[], span: SourceSpan
         return [make_fn_value_position_diagnostic(head, span)];
     }
 
-    // Cast form: `<fn> as <type>`.
+    // Cast form: `<fn> as <type>` — kept for defensive back-compat with any
+    // residual Raw still containing ` as `. After Part A all structured casts
+    // reach `typecheck.sfn`'s Cast arm instead, so this half is effectively
+    // dead for normal source. Delegates to `classify_fn_cast` for identical
+    // behavior with the structured path.
     let as_pos = index_of(trimmed, " as ");
     if as_pos < 0 { return []; }
     let left = _strip_outer_parens(trim_text(substring(trimmed, 0, as_pos)));
@@ -1806,38 +1843,13 @@ fn check_fn_reference_raw(text: string, symbols: SymbolEntry[], span: SourceSpan
     if head.length == 0 { return []; }
     // Only fire when the left side is exactly the bare identifier (after
     // stripping any wrapping parens) — not `foo()` / `a + b` / a member
-    // access — so we target genuine function references, not arbitrary
-    // casts.
+    // access — so we target genuine function references, not arbitrary casts.
     if !strings_equal(head, left) { return []; }
     let cast_entry = find_symbol(symbols, head);
     if cast_entry == null { return []; }
     if !is_function_kind(cast_entry.kind) { return []; }
-
-    // Supported function-address spellings: `<fn> as * u8` (the C
-    // `void*`/`char*` code-pointer idiom #1146 lowers) and `<fn> as
-    // * fn (...) -> T` (the precise function-pointer-typed form — e.g.
-    // the M4 concurrency trampolines in runtime/sfn/concurrency, #1193).
-    // Both materialize a C-ABI code pointer. Any other cast target — a
-    // non-pointer (`as i64`) or a typed data pointer (`as * i32`, which
-    // would reinterpret a code address as a data pointer) — is
-    // unsupported (E0808).
-    let target = trim_text(substring(trimmed, as_pos + 4, trimmed.length));
-    if starts_with(target, "*") {
-        let pointee = trim_text(strip_prefix(target, "*"));
-        if strings_equal(pointee, "u8") || starts_with(pointee, "fn ")
-            || starts_with(pointee, "fn(") {
-            // A blessed form — valid only for a concrete C-ABI function.
-            if cast_entry.is_generic {
-                return [make_fn_address_unsupported_diagnostic(head, "it is generic", span)];
-            }
-            if !cast_entry.is_c_abi {
-                return [make_fn_address_unsupported_diagnostic(head, "its signature is not C-ABI-compatible", span)];
-            }
-            return [];
-        }
-    }
-    // Non-`* u8` target — not a supported function-address form.
-    return [make_fn_value_position_diagnostic(head, span)];
+    let target_str = trim_text(substring(trimmed, as_pos + 4, trimmed.length));
+    return classify_fn_cast(head, target_str, cast_entry, span);
 }
 
 fn has_symbol_in_range(symbols: SymbolEntry[], name: string, start: int) -> boolean {

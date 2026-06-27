@@ -5,10 +5,567 @@
 - **Design record extended:** SFEP-0008 (`docs/proposals/0008-effect-validation.md`)
 - **Author:** agent:compiler-architect
 - **Status:** Draft (single-issue design gate; not a new SFEP)
-- **Date:** 2026-06-26
+- **Date:** 2026-06-26; **revised 2026-06-27** (the E0818-flip endgame — parts A–F)
 - **Decision:** **Structural lift (root fix)** chosen at the design gate. The
   earlier text-anchor "floor" (`_raw_contains_effectful_anchor`) is **superseded**
   and retained below only as the analysis that led to the root-fix decision.
+
+---
+
+## 2026-06-27 revision — the E0818-flip endgame (parts A–F)
+
+This section is the **authoritative, ordered implementation spec** for flipping
+the blanket `E0818` fail-closed `Raw` arm green and self-host-clean. It
+**supersedes the older "Staging A–E" section below** wherever they differ
+(notably the older line numbers, which are stale post-#1689/#1690). The user
+approved enabling the blanket `E0818` arm; this section resolves the hard
+problems that blocked it. **Everything bundles into one PR (no seed cut)** — see
+the final staging note.
+
+### Verified current source map (re-confirmed by exploration 2026-06-27)
+
+Trust these over the §"Root cause" line numbers below.
+
+- **`Expression.Raw` producers** — exactly two live escape paths, both in
+  `compiler/src/parser/expressions.sfn::expression_from_tokens`:
+  `parse_expression_bp` returns `success:false` (~:272-277) and leftover
+  unconsumed tokens after a successful climb (~:279-284). The
+  `expression_parse_failure` placeholder (~:74, `success:false`) never escapes
+  the parser. Every valid-but-`Raw` construct flows through the two
+  `expression_from_tokens` paths.
+- **Assignment** has **no AST node at all** (no `Statement.Assignment`, no
+  `Expression.Assignment`). `a = b;` parses as
+  `Statement.ExpressionStatement { expression: expression_from_tokens("a = b") }`
+  (statements.sfn ~:1495-1500), and `=` has precedence `-1` in
+  `binary_precedence` (~:1831/1861) so the climb leaves `=` unconsumed →
+  **leftover tokens → `Expression.Raw{text:"a = b"}`**. Lowering re-parses that
+  Raw text in `llvm/.../statement.sfn::lower_expr_stmt` via
+  `parse_assignment_expression` (statement.sfn:161). So assignment is an
+  ExpressionStatement-wrapped Raw today.
+- **Prefix `*`/`&`** — `parse_prefix_expression` (expressions.sfn ~:499-523)
+  handles only symbol ops `-` and `!`, plus soft keywords. `&` and prefix `*`
+  fall through → Raw. The shadow lowering parser DOES handle prefix `*` (deref,
+  core.sfn:2281) and prefix `&` (borrow, core_parsing.sfn:44) on text.
+- **Cast `as` arm** in `parse_postfix_chain` (expressions.sfn ~:836-900):
+  `lift_pointer_target = current_expression.variant != "Identifier"` (~:868).
+  Bare-identifier operands accept only bare-name targets (`as int`); `* T` is
+  rejected → parse failure → the enclosing expression degrades to Raw. Generic
+  (`as Foo<...>`) and fn-pointer (`as fn(A)->B`) targets are never accepted →
+  leftover tokens → Raw.
+- **Effect checker** `collect_effects_from_expression`
+  (`effect_checker.sfn` ~:735-1016): arms for Call, Member, Unary (:878 walks
+  operand), Cast (:881 walks operand, #1689), Binary, Conditional (:897, #1690),
+  Array, Object, Struct, Lambda, Index, Range, TryOperator, Spawn, Await,
+  Channel, Parallel, Serve. **Fall-through `return []` at :1015** — the silent
+  drop site for `Raw`. `collect_effects_from_statement` (~:531-622) has **no
+  `Unknown` arm**; fall-through `return []` at :621.
+- **fn-reference diagnostics** — `check_fn_reference_raw(text, symbols, span)` in
+  `typecheck_types.sfn` ~:1785-1841, called from `typecheck.sfn:1088` **only**
+  for `expression.variant == "Raw"`. Text-parses two forms: `& <fn>` → E0808
+  (`make_fn_value_position_diagnostic`); `<fn> as <type>` → if target is `* u8`
+  / `* fn...` it is the blessed pointer-to-code form, validates C-ABI (generic →
+  E0808; non-C-ABI → E0808 via `make_fn_address_unsupported_diagnostic`), else
+  E0808. The `head == left` guard (:1811) bails when the operand is not exactly a
+  bare identifier (so a fn-cast buried in a call argument is not classified). The
+  `walk_expression` `Identifier` arm (typecheck.sfn ~:1073-1081) independently
+  emits E0808 for a function-kind identifier used as a value.
+- **Diagnostic factory** `make_parse_error_diagnostic` (typecheck_types.sfn
+  ~:573-586, code E0816). **Highest used code is E0816. E0817 and E0818 are
+  free.**
+- **Formatter** (`emit_native_format.sfn`): `Unary` arm (:108-115) pushes
+  `operator` then `_format_binary_operand_into(operand)` (parenthesizes Binary /
+  Cast operands; otherwise verbatim). `Cast` arm (:192-202) → `(operand) as
+  <target.text>`. `Conditional` arm (:203-219) → `(c) ? (t) : (e)`. `Raw` arm
+  (:303+) emits normalized raw text.
+- **Conditional walker arms (the template to mirror for Assignment)** exist in
+  exactly these files: `effect_checker.sfn:897`, `typecheck.sfn:1015`,
+  `typecheck_captures.sfn:323`, `ownership_checker.sfn:936`,
+  `emit_native_format.sfn:203`, `emitter_sailfin_expr.sfn:137`,
+  `llvm/expression_lowering/native/lambda_lowering.sfn:606`.
+
+### Live effect escapes still open today (re-probed 2026-06-27)
+
+- `*print.info(x)` (prefix deref) — ESCAPES (Raw)
+- `&print.info(x)` / `&print.info` (address-of) — ESCAPES (Raw)
+- `(a = print.info(x))` (assignment-expr) — ESCAPES (Raw)
+- Already caught: `as int`, `as *T` (non-ident operand), bare `as Result`,
+  ternary, plain calls.
+
+### In-source `Raw` nodes E0818 would otherwise trip on — the exhaustive census
+
+Grepped `compiler/src`, `runtime`, `capsules` (excluding `tests/`):
+
+1. **Bare-identifier `<fn> as *T`** — exactly ONE:
+   `capsules/sfn/http/src/server.sfn:142`,
+   `sfn_serve_framed(_sfn_http_trampoline as * u8, port as i32)`. The cast is the
+   **first argument** to `sfn_serve_framed`; the bare-ident `* u8` target is
+   rejected by the cast arm → the **whole `sfn_serve_framed(...)` call** has
+   leftover tokens → degrades to one `Raw{text:"sfn_serve_framed(...)"}`.
+   `check_fn_reference_raw`'s `head == left` guard bails (head is
+   `sfn_serve_framed`, not a fn-cast), so it is clean today — and `_sfn_http_trampoline`
+   is a concrete `fn(OwnedBuf)->OwnedBuf` (struct-ABI, **not** C-ABI-primitive),
+   so naively structuring it into Cast + classifying re-introduces the #1689
+   E0809 regression.
+2. **`& fn` address-of of a bare function identifier** — ZERO in non-test source.
+   (All `&ident` grep hits in `compiler/src` are inside comments or string
+   literals.) The `& fn` E0808 path (`check_fn_reference_raw`, :1790-1798) is
+   exercised only by `compiler/tests/unit/fn_reference_typecheck_test.sfn`.
+3. **Generic / fn-pointer cast targets** (`as Foo<...>`, `as fn(A)->B`) — ZERO in
+   non-test source. (`examples/web/http-server.sfn:43` and several e2e fixtures
+   use `handle as * fn (Request) -> Response`, but that is a **non-bare-identifier
+   operand**? No — `handle` IS a bare identifier, so it is also census item 1's
+   sibling: a bare-ident operand with a `* fn ...` target. Today it degrades to
+   Raw the same way. See part A — these are covered by the same fix.)
+4. **Assignment-as-statement `a = b;`** — PERVASIVE across compiler/runtime
+   source (hundreds of sites). Each is an `ExpressionStatement{Raw}`. **This is
+   the dominant E0818 blocker** and the reason a naive flip explodes the build.
+
+**Conclusion:** the only structural blockers to E0818 are (1) the one
+bare-ident `<fn> as *T` http-trampoline cast (+ its `as * fn ...` siblings in
+examples/tests), and (4) every assignment statement. Generic targets and `&fn`
+are absent from non-test source. Parts A–D below close exactly these.
+
+---
+
+### Part A — `<fn> as *T` (and `as * fn ...`) off the `Raw` path without the E0809 regression
+
+**Chosen option: (b′) — structure ALL `as <pointer/fn-pointer/generic> T` into
+`Cast`, and run fn-reference classification on the structured `Cast` ONLY under
+the exact condition the old `Raw` path did: when the cast is the *entire*
+analyzed expression with a bare-identifier operand.** Reject options (a) and (c):
+
+- **(a) relax the C-ABI check for `* u8`** — rejected. A fn cast to `* u8` is the
+  blessed code-pointer idiom, but the C-ABI check (`is_c_abi`) is *load-bearing
+  ABI soundness*, not over-strictness: it guards that the address handed to a C
+  caller (`pthread_create`, `sfn_serve_framed`) is a callable C-ABI entry. The
+  http trampoline is **deliberately** `fn(OwnedBuf)->OwnedBuf` precisely because
+  the runtime calls it with an `OwnedBuf` by the struct-ABI the Sailfin backend
+  emits — `sfn_serve_framed`'s C signature takes a `void*` and the runtime
+  re-enters Sailfin through it. Whether that is genuinely C-ABI-sound is a
+  separate question (#1147 territory); **#1627 must not change fn-reference ABI
+  semantics.** Relaxing the check to make the flip work would silently weaken an
+  ABI guard for every fn cast — wrong blast radius for an effects PR.
+- **(c) exempt recognized fn-references in the E0818 arm** — rejected as the
+  primary mechanism. A structural "is this Raw a fn-reference" classifier in the
+  effect checker is defensible on *soundness* grounds (taking a fn's address
+  invokes no effect, so a fn-reference is genuinely effect-free and analyzable —
+  E0818 is defense-in-depth for *unanalyzable* nodes, and a recognized
+  fn-reference is analyzable). BUT it keeps the `Raw` overload alive, which is
+  exactly the latent re-parse-divergence hazard the root fix exists to kill, and
+  it risks drifting back toward text-pattern classification. We adopt the
+  *spirit* of (c) — fn-references are effect-free, so they need not be E0818'd —
+  by **structuring them so the effect checker sees a `Cast` (walks the operand,
+  which is a bare identifier → no effect → clean)**, not by special-casing `Raw`.
+
+**The mechanism — preserve the old classification predicate exactly:**
+
+The reason structuring `<fn> as *T` regressed E0809 in #1689 was *not* the
+structuring — it was that classification moved to a `Cast` arm that fired in
+positions the old `Raw` path never reached (the old path bailed via `head ==
+left` whenever the cast was buried in a larger expression, e.g. a call argument).
+The fix is to **replicate that predicate**:
+
+1. **Parser** (`expressions.sfn` cast arm, ~:866-899): drop the
+   `lift_pointer_target = current_expression.variant != "Identifier"` gate.
+   *Always* lift a pointer / fn-pointer cast target into `Cast` (extend the
+   target reader per Part C to also accept `fn (...) -> T`). Bare-identifier
+   operands now also produce `Cast{operand: Identifier, target_type.text: "* u8"}`.
+   The formatter already serializes this to `(_sfn_http_trampoline) as * u8` —
+   byte-equivalent (modulo the operand parens, which the shadow re-parser strips)
+   to the prior Raw text, so **lowering is unchanged**.
+2. **typecheck `Cast` arm** (`typecheck.sfn:1024-1032`, currently just recurses):
+   add fn-reference classification that fires **only when the Cast operand is a
+   bare `Identifier` that resolves to a function kind** — i.e. exactly the
+   `head == left` predicate, but read structurally off `expression.operand`
+   instead of by text. Extract the classification *body* of
+   `check_fn_reference_raw` (the `<fn> as <type>` half: target inspection →
+   E0808/E0809 via `make_fn_address_unsupported_diagnostic` /
+   `make_fn_value_position_diagnostic`) into a shared
+   `classify_fn_cast(head: string, target_text: string, entry: SymbolEntry,
+   span) -> Diagnostic[]` and call it from the new `Cast` arm. **Crucially, this
+   arm fires only at the top of `walk_expression` for a `Cast` whose operand is a
+   bare fn Identifier — when the `Cast` is nested inside a `Call`'s argument list,
+   `walk_expression` recurses into the argument and reaches the `Cast` arm with
+   the SAME bare-identifier operand, so it WOULD now classify the trampoline.**
+
+   This is the trap. To preserve the exact old behavior, the classification must
+   be suppressed in argument position the way the old whole-call-degrades-to-Raw
+   accident suppressed it. Two sound ways:
+
+   - **(b-i) — the http trampoline is genuinely a valid fn-address and SHOULD
+     classify clean.** Re-examine: under the old path the trampoline escaped
+     classification by accident (the call degraded to Raw, head guard bailed).
+     The *correct* answer is not to preserve the accident but to make
+     classification **pass** for it. `_sfn_http_trampoline as * u8` is a real,
+     intended fn-address materialization — the runtime calls it. The only reason
+     it would fail E0809 is `is_c_abi == false` for an `OwnedBuf`-taking fn. So
+     the principled fix is to ensure `is_c_abi` is computed correctly for this
+     signature, OR to recognize that `as * u8` (opaque code pointer, type-erased)
+     is ABI-agnostic by construction — a `* u8` is `void*`; the callee re-casts
+     it, so the C-ABI-of-the-Sailfin-signature check is **only** meaningful for
+     the *typed* `as * fn (A) -> B` form (line 133/examples), never for the
+     erased `as * u8` form. **Decision:** in `classify_fn_cast`, restrict the
+     C-ABI enforcement (E0809) to the **typed `* fn (...)` target**; an erased
+     `* u8` target is accepted for any concrete (non-generic) function. This is
+     ABI-sound: `* u8` carries no calling convention, so no convention can be
+     violated by producing it; the convention is enforced where it is *declared*
+     (`* fn (...)`), which is where `try_lower_plain_fn_ptr_call` and
+     `serve(... as * fn ...)` actually consume it. Generic fns still → E0808
+     (no monomorphic address exists).
+
+   This **removes the regression at its root** instead of replicating an
+   accident, and it lets classification run uniformly in any position
+   (argument or not) — simpler, no position predicate needed. `as * fn (...)`
+   forms (examples/tests) keep full C-ABI enforcement.
+
+**Net Part A:** parser always lifts pointer/fn-pointer cast targets to `Cast`;
+`check_fn_reference_raw` is split into `classify_fn_cast` (shared) + the residual
+`& fn` half (Part B); the typecheck `Cast` arm classifies a bare-fn-Identifier
+operand via `classify_fn_cast`, with E0809 scoped to typed `* fn (...)` targets
+and `* u8` accepted for any concrete fn. The effect checker `Cast` arm is
+**unchanged** (already walks operand; a bare-identifier operand yields no
+effect). The `Raw` arm of `check_fn_reference_raw` in `typecheck.sfn:1088` keeps
+handling the residual `& fn` Raw (Part B) until that too is structured.
+
+**Canary:** `compiler/tests/unit/effect_cast_operand_test.sfn` (the existing
+bare-identifier `Raw` gate test must be UPDATED — the gate is removed; the
+trampoline now structures into `Cast` and classifies clean) +
+`compiler/tests/unit/fn_reference_typecheck_test.sfn` (E0808 for generic
+`gen as * u8`; E0808/clean parity for `nc as * u8` / `worker as * u8`;
+`label as * u8` non-fn stays clean). Self-host gate: `make compile` must build
+`capsules/sfn/http/src/server.sfn` clean.
+
+### Part B — prefix `&` structuring vs the `&fn` E0808 path
+
+**Claim to verify:** if prefix `&` becomes `Unary{&, operand}`, does `&fn_name`
+still get E0808? **Answer: NO, not automatically — and a change is required.**
+
+- `&print.info(x)` (address-of a call result) → `Unary{&, Call{Member}}`. The
+  effect checker `Unary` arm (:878) walks the operand → the `Call` fires `io`.
+  **Correct, no change.** This closes the `&print.info(x)` escape.
+- `&fn_name` (address-of a bare function identifier) → `Unary{&, Identifier}`.
+  The typecheck `walk_expression` has **no `Unary` arm today** (grep confirms:
+  Conditional/Cast/TryOperator/Range arms exist; no Unary). So a structured
+  `Unary` currently falls through `walk_expression`'s tail `return []` — the
+  operand is NOT recursed, so the `Identifier` arm's E0808 never fires. **This is
+  the required change:** add a `Unary` arm to `walk_expression`
+  (`typecheck.sfn`) that recurses into `expression.operand`. Then `&fn_name`'s
+  operand `Identifier{fn_name}` reaches the existing `Identifier` arm
+  (:1073-1081) → `make_fn_value_position_diagnostic` (E0808). **Behavior
+  preserved via the generic Identifier arm — no `&`-specific logic needed.**
+
+  Note: the old `& <fn>` path in `check_fn_reference_raw` (:1790-1798) used
+  `make_fn_value_position_diagnostic` (E0808), exactly what the Identifier arm
+  emits. So routing `&fn` through `Unary → Identifier` is behavior-equivalent.
+  Since there are **zero** in-source `&fn` sites, the only consumer is
+  `fn_reference_typecheck_test.sfn` — update/confirm it asserts E0808 for the
+  structured form.
+
+**Distinguishing the two:** `&fn_name` (Identifier operand, fn kind → E0808 in
+Identifier arm, no effect) vs `&(print.info(x))` (Call operand → io via effect
+checker Unary arm). The split is automatic once both the typecheck `Unary`
+recursion (E0808 reachability) and the effect-checker `Unary` arm (already
+present, effect reachability) exist.
+
+**Parser change:** `parse_prefix_expression` (:505-523) — extend the symbol set
+from `{-, !}` to `{-, !, *, &}`, building `Unary{operator: sym, operand: parsed
+at unary_precedence()}`. The binary `&`/`*` handlers in `binary_precedence` are
+unaffected (infix-only; prefix position never reaches the climb).
+
+**Formatter:** the `Unary` arm (:108-115) already pushes `operator` then the
+operand. For `&`/`*` it emits `&operand` / `*operand`, which the shadow parser
+lowers via borrow (core_parsing.sfn:44) / deref (core.sfn:2281). **Risk:**
+`_format_binary_operand_into` parenthesizes `Binary` and `Cast` operands but NOT
+`Call`/`Member`. `&print.info(x)` → `&print.info(x)`; the shadow borrow parser
+`parse_borrow_expression` takes everything after `&` as the target — for a call
+that is `print.info(x)`, which borrow lowering must accept or reject cleanly.
+**Verify in the IR-diff canary** that `&<call>` and `*<call>` lower identically
+to the pre-change Raw text (they are byte-identical: Raw text was the same
+`&print.info(x)` string). Because the source contains no prefix `&`/`*` on
+calls today (they were Raw and the effect checker dropped them — but did they
+lower? they were never *written* in source, only probed), the in-source risk is
+limited to `*ptr` / `&x` simple-identifier forms, which the shadow parser
+already handles. **The IR-diff canary over in-source `*ptr`/`&x` sites is the
+gate.**
+
+**Canary:** `effect_prefix_deref_addr_test.sfn` — `*print.info(x)` and
+`&print.info(x)` require `![io]`; `&fn_name` → E0808; plus the IR-diff identity
+test over in-source `*ptr`/`&x`.
+
+### Part C — generic / fn-pointer cast targets
+
+There are **zero** in-source `as Foo<...>` or `as fn(...)` targets, and the
+`as * fn (...)` targets (examples/tests) are covered by Part A's reader
+extension. So Part C is **minimal and mostly defensive**, but required so E0818
+cannot trip on a future/edge construct.
+
+**Cast-target reader extension** (`expressions.sfn` cast arm, replacing the
+`*`-prefix loop + single-Identifier read at ~:866-893): after consuming `as`,
+read a full type-annotation target by **reusing the existing type-annotation
+parser** (the same path that parses `let p: * fn (A) -> B`). Concretely:
+
+- Keep the existing `*`-prefix accumulation for `* T` / `** T`.
+- After the pointer prefix, instead of requiring a single `Identifier`, call the
+  shared type-annotation token reader to consume `fn (A, B) -> R`, `Foo<X, Y>`,
+  or a bare identifier, capturing the verbatim target text into
+  `TypeAnnotation.text`. The type-annotation grammar already exists for
+  parameter/var/field positions; this keeps cast targets in lockstep.
+- Only a genuinely unparseable target falls through to
+  `expression_parse_failure` (→ Raw → E0818, correctly: it is junk).
+
+The formatter `Cast` arm serializes `(operand) as <target.text>` verbatim, and
+the shadow `parse_cast_expression` already scans for top-level ` as ` and
+strip-parens the operand — so generic/fn-pointer target text round-trips with no
+new lowering arm. **Verify** the type-annotation reader does not over-consume
+past the cast (e.g. a trailing `,` in a call-arg list); bound it to the cast's
+token window.
+
+**To find any hidden in-source occurrence before flipping:** see Part F's
+instrumentation probe (it enumerates *all* surviving Raw producers by text, so a
+stray generic cast would be named there).
+
+**Canary:** `cast_generic_target_test.sfn` — `x as Result<int, string>` and
+`f as fn (int) -> int` structure into `Cast` (assert via the parser test harness
+that `parse_program` yields a `Cast`, not a `Raw`); IR-diff for `as * fn (...)`
+in-source-adjacent fixtures stays identical.
+
+### Part D — assignment-as-expression (the dominant blocker)
+
+**This is the highest-blast-radius part** (hundreds of in-source `a = b;` sites).
+Mirror exactly how #1690 added `Conditional` to every walker.
+
+**AST** (`ast.sfn`): add
+`Assignment { target: Expression, operator: string, value: Expression, span: SourceSpan? }`.
+`operator` holds `"="` or a compound (`"+="`, `"-="`, …) so the node carries the
+same information `parse_assignment_expression` recovers from text today
+(statement.sfn:196-200 desugars compound). Using an AST `operator` field keeps
+the structured node lossless.
+
+**Parser:** assignment binds **lower than ternary** (right-associative,
+precedence below `Conditional`). The cleanest seam is **after** the
+precedence-climbing loop AND after the ternary check in `expression_from_tokens`
+(expressions.sfn, the same place #1690 added the ternary peek): once `left` is
+the fully-climbed (and possibly ternary-wrapped) expression, peek for a
+top-level assignment operator (`=`, `+=`, `-=`, `*=`, `/=`, `%=`) that is NOT
+`==`/`!=`/`<=`/`>=`. If found, parse the RHS as a full expression (recursing for
+right-assoc), build `Assignment{target: left, operator, value: rhs}`.
+**Guard:** only treat `=` as assignment, never `==` — the lexer must distinguish
+(it already lexes `==` as a distinct token / two-char symbol; confirm the peek
+checks the full operator token, not a single `=` char). Because `=` currently has
+precedence `-1` (never climbed), this is purely additive: every `a = b` that was
+Raw becomes `Assignment`; nothing that parsed before changes.
+
+**Formatter** (`emit_native_format.sfn`): add an `Assignment` arm emitting
+`<target> <operator> <value>` (e.g. `a = b`, `x += 1`) — **the exact text
+`parse_assignment_expression` (statement.sfn:161) already lowers.** No new
+lowering arm. Parenthesize the target/value only if they are `Binary`/`Cast`/
+`Assignment` (reuse `_format_binary_operand_into`-style guarding) so a chained or
+operator-laden side round-trips; for the overwhelmingly common
+`identifier = expr` and `member.field = expr` cases this is verbatim.
+
+**Walkers — add an `Assignment` arm to each of the seven Conditional sites:**
+
+1. **`effect_checker.sfn`** (`collect_effects_from_expression`, before :1015):
+   union the effects of `target` and `value` (an effectful LHS like
+   `arr[compute_io()] = x` or RHS must surface). The ExpressionStatement path
+   already routes here via `collect_effects_from_statement`'s ExpressionStatement
+   arm (:599).
+2. **`typecheck.sfn`** (`walk_expression`, near :1015): recurse into `target`
+   and `value` (concat diagnostics).
+3. **`typecheck_captures.sfn`** (near :323): walk `target` and `value`, merge
+   captures (`fn() { captured = x; }` captures `captured`).
+4. **`ownership_checker.sfn`** (near :936): walk `target` and `value` — an
+   assignment is a write to the target's scope; preserve current ownership
+   behavior by treating it as the statement path does (an assignment Raw is
+   currently analyzed by the lowering ownership pass, not here; the structured
+   arm must at minimum recurse so nested moves are seen — match the
+   ExpressionStatement handling).
+5. **`emit_native_format.sfn`** (the formatter arm above).
+6. **`emitter_sailfin_expr.sfn`** (near :137): serialize the structured
+   assignment for the `.sfn-asm` emitter round-trip (mirror its Conditional arm).
+7. **`llvm/.../lambda_lowering.sfn`** (the lambda-capture rewrite, near :606):
+   rewrite captured identifiers inside `target` and `value` (a lambda body may
+   assign to a captured `mut` binding).
+
+**Self-host risk — HIGH** (every assignment statement changes node shape). The
+guarantee is the formatter→shadow-parser identity: `Assignment{a, "=", b}` →
+`"a = b"` → `parse_assignment_expression` → the identical lowering that the
+`Raw{"a = b"}` produced. **The IR-diff canary over a representative set of
+in-source assignment sites (simple, compound, member-target, index-target) is
+the proof.** Compound assignment must round-trip its operator (`x += 1` →
+`"x += 1"`, NOT `"x = x + 1"` — the desugar stays in lowering at
+statement.sfn:196, fed the original operator).
+
+**Canary:** `assignment_node_ir_identity_test.sfn` (IR-diff simple/compound/
+member/index assignments before vs after) + `effect_assignment_test.sfn`
+(`a = print.info(x)` and `arr[io()] = x` require `![io]`).
+
+### Part E — `E0817` nested `Unknown`
+
+`Statement.Unknown` is produced by `parse_unknown` (declarations.sfn ~:1793,
+call sites :1320/:1525/:1679/:1691/:1697/:1728) and `parse_unknown_statement`
+(statements.sfn ~:1511, called from `parse_block` :149-153). **No diagnostic is
+recorded at any site.** Zero in-source `Unknown` nodes exist (the tree
+self-hosts).
+
+**Approach (matches #1180-b):** record a parse diagnostic **at the production
+site**, not in the effect checker — cleaner than threading a top-level flag
+through the shared `check_statement` walker. Add `make_unparseable_statement_diagnostic`
+(`E0817`, mirroring `make_parse_error_diagnostic`) and emit it from
+`parse_unknown_statement` (the nested-block producer) with the captured token
+span.
+
+**Double-fire gating** (the crux of part E): a nested `Unknown` must NOT
+double-report when another pass already minted a diagnostic for the same text.
+Gate the E0817 emission to fire **only when**:
+- `detect_removed_ai_keyword(text).length == 0` (no removed-AI-keyword
+  diagnostic), AND
+- `detect_unsupported_statement_keyword(text).length == 0` (no `E0411`
+  removed-keyword like `while`), AND
+- the statement is **not** at top level (top-level `Unknown` already gets `E0500`
+  in `tools/check.sfn:165`, a disjoint node position — nested production via
+  `parse_block` is where the gap is).
+
+The effect checker still gets a defensive `Unknown` arm in
+`collect_effects_from_statement` (before :621) that returns `[]` (an unparseable
+statement contributes no *analyzable* effect; the E0817 parse diagnostic already
+fails the build, so the effect arm need not also error — keep it `[]` to avoid a
+second diagnostic on the same node). This is Part E's only effect-checker touch.
+
+**Canary:** `effect_unknown_block_level_test.sfn` — nested `@@@ junk !!!` →
+E0817; top-level `@@@` still E0500; `while(){}` still E0411 (dedup proof);
+no E0817 when E0411/removed-keyword already fired.
+
+### Part F — the `E0818` flip + pre-flip enumeration
+
+**Enumerate remaining in-source Raw producers BEFORE flipping** (so you
+structure them rather than discover them via a broken build):
+
+**Temporary instrumentation probe** (the safe way): in
+`expression_from_tokens` (expressions.sfn ~:272-284), behind an env gate
+`SAILFIN_TRACE_RAW`, `print.err` the `trim_text(tokens_to_text(tokens))` and the
+enclosing span each time a Raw is produced. Then run `make compile` once with
+`SAILFIN_TRACE_RAW=1` and collect stderr — every distinct Raw text emitted while
+compiling the compiler+runtime+capsules is a producer you must structure (or
+confirm is genuine junk). This is read-only instrumentation; **remove it before
+the PR lands** (or keep it permanently behind the env gate as a debugging aid —
+implementer's call, but it must be a no-op by default). Cross-check the probe
+output against the census above (items 1–4): after Parts A–D, the probe should
+emit **nothing** for compiler/runtime/capsules source. Any residual line names a
+construct A–D missed → structure it before flipping.
+
+**The flip** (`effect_checker.sfn`, `collect_effects_from_expression`
+fall-through at :1015): replace the final `return []` with a `Raw` arm placed
+**before** it:
+
+```
+if expression.variant == "Raw" {
+    if trim_text(expression.text).length == 0 { return []; }   // empty Raw is never effectful
+    // emit E0818 via the effect-violation channel (so SAILFIN_EFFECT_ENFORCE /
+    // [kind: effect] rendering applies), carated at expression.span.
+    ...
+}
+return [];   // genuinely unhandled non-Raw variants stay non-fatal (defensive)
+```
+
+Empty `Raw{text:""}` (the never-escapes placeholder shape) returns `[]`. The
+non-empty arm emits `E0818` ("unstructured expression cannot be analyzed;
+rewrite so the compiler can parse it"). Add `make_effectful_raw_diagnostic`
+(E0818) mirroring `make_parse_error_diagnostic`. **Soundness note:** because
+Parts A–D structured every effect-free-but-Raw form (fn-references, assignment,
+prefix ops, casts), every *remaining* Raw is genuinely unanalyzable — so E0818 as
+a hard error is correct, not over-broad. fn-references are no longer Raw, so the
+"fn-references are effect-free, don't E0818 them" concern is moot (they're
+`Cast`/`Unary` now).
+
+**The self-host gate IS the proof.** `make compile` after the flip MUST stay
+green. A failure names the exact construct still degrading to Raw — structure it
+(Parts A–D) or, if it is genuine junk in source, fix the source. Then
+`make check` (triple-pass) before declaring shipped.
+
+**Canary:** `effect_raw_failclosed_test.sfn` — a genuinely unlowerable
+expression → E0818; a valid structured expression → clean.
+`effect_raw_negative_substring_test.sfn` — Raw/structured text mentioning
+`print` as a non-call substring → no E0818 (proves no text-scan reintroduction —
+E0818 fires on *node shape*, not text content).
+
+---
+
+### Ordered implementation plan (one PR, no seed cut)
+
+Each stage ends with a self-host checkpoint. Order is chosen so the highest-risk
+structuring (assignment) lands before the flip, and the flip is last.
+
+| Stage | Work | Self-host checkpoint | Canary |
+|---|---|---|---|
+| **F0** | Add `SAILFIN_TRACE_RAW` probe (read-only). | `make compile` (behavior unchanged). | run `SAILFIN_TRACE_RAW=1 make compile`, save baseline Raw census. |
+| **A** | Parser: always-lift pointer/fn-ptr cast targets → `Cast`. Split `check_fn_reference_raw` → `classify_fn_cast` (E0809 scoped to `* fn (...)`; `* u8` accepted for any concrete fn) + residual `& fn`. typecheck `Cast` arm classifies bare-fn-Identifier operand. | `make compile` (esp. `capsules/sfn/http/src/server.sfn:142`). | `effect_cast_operand_test` (update gate test), `fn_reference_typecheck_test`. |
+| **B** | Parser: prefix `*`/`&` → `Unary`. typecheck: add `Unary` arm to `walk_expression` (recurse operand → preserves `&fn` E0808). | `make compile` + IR-diff in-source `*ptr`/`&x`. | `effect_prefix_deref_addr_test`. |
+| **C** | Cast-target reader: accept generic/`fn (...)` targets via type-annotation parser. | `make compile`. | `cast_generic_target_test`. |
+| **D** | AST `Assignment` node; parser assignment seam; formatter arm; **7 walker arms**. | `make compile` + IR-diff simple/compound/member/index assignments — **the high-risk gate**. | `assignment_node_ir_identity_test`, `effect_assignment_test`. |
+| **E** | `E0817` at `parse_unknown_statement` site (gated vs E0500/E0411/removed-keyword); defensive `Unknown` effect arm `[]`. | `make compile`. | `effect_unknown_block_level_test`. |
+| **F** | Re-run `SAILFIN_TRACE_RAW=1 make compile` → **must emit zero** Raw for compiler/runtime/capsules. Then flip the E0818 arm. Remove (or gate-off) the probe. | **`make compile` green = the proof no in-source Raw survives**; then `make check`. | `effect_raw_failclosed_test`, `effect_raw_negative_substring_test`. |
+
+**Bundling / no seed cut:** every stage is a compiler-source change consumed by
+the same self-host pass. `make compile` builds the new compiler from the pinned
+seed; that compiler then compiles runtime + capsules (the consumers of the new
+parsing/effect behavior) in the same pass. There is no separate consumer release,
+so **no seed cut, no `/pin-seed`** (per `.claude/rules/seed-dependency.md`). The
+old seed never runs the new E0818 arm — enforcement first fires in the
+firstpass→seedcheck build, exactly like #957.
+
+### Self-host risk register (parts A–F)
+
+| Risk | Detection | Mitigation |
+|---|---|---|
+| Part A re-introduces E0809 on the http trampoline. | `make compile` fails building `server.sfn:142`. | E0809 scoped to typed `* fn (...)` targets; `* u8` accepted for any concrete fn (ABI-sound: `* u8` is conventionless). |
+| Part A `Cast` arm classifies a fn-cast in argument position that the old Raw path skipped. | `fn_reference_typecheck_test` + `make compile`. | classification is uniform & *correct* now (E0809 only on typed targets), so position no longer matters — no predicate to preserve. |
+| Part B `&fn` loses E0808 (no `Unary` arm in walk_expression). | `fn_reference_typecheck_test` (E0808 case). | add `Unary` recursion to `walk_expression`; operand `Identifier` arm emits E0808. |
+| Part B `&<call>`/`*<call>` formatter text diverges from prior Raw text. | IR-diff canary. | formatter emits `&operand`/`*operand` verbatim — byte-identical to the prior Raw string. |
+| **Part D assignment node changes hundreds of sites → IR drift.** | **IR-diff canary (simple/compound/member/index)** + `make compile`. | formatter→shadow-parser identity; compound operator preserved (desugar stays in lowering). |
+| Part D `=` mis-parsed as `==` (or vice versa). | parser unit test; `make compile`. | peek the full operator token, exclude `==`/`!=`/`<=`/`>=`. |
+| Part E E0817 double-fires with E0500/E0411/removed-keyword. | `effect_unknown_block_level_test` dedup assertions. | gate on `detect_removed_ai_keyword`/`detect_unsupported_statement_keyword` empty + nested-only. |
+| **Part F flip breaks self-host** (a missed Raw producer). | `SAILFIN_TRACE_RAW` pre-flip census == empty; `make compile` post-flip. | structure the named producer before flipping; the probe makes discovery cheap and pre-emptive. |
+| Closure-pair `Raw` marker (`lambda_lowering.sfn:957`) trips E0818. | `make compile`. | that marker is created **after** typecheck/effect-check, so the E0818 arm never sees it — confirmed (unchanged from prior analysis). |
+
+### Verification commands
+
+- `SAILFIN_TRACE_RAW=1 make compile 2>&1` before Stage A (baseline census) and
+  before Stage F (must be empty for compiler/runtime/capsules).
+- `make compile` after **every** stage (self-host checkpoint).
+- IR-diff canaries (Stages B, D): drive from `![io]` `*_test.sfn` via
+  `process.run_capture` building a fixture with `sfn build` (thread `PATH` +
+  `SAILFIN_TEST_SCRATCH`), capture the `.ll`, `diff` against the pre-change
+  golden — per `.claude/rules/no-bash-e2e.md`.
+- `make check` (triple-pass) before declaring shipped.
+- `sfn fmt --check` on every touched `.sfn`.
+
+### Files affected (parts A–F), by pipeline stage
+
+- **Parser:** `compiler/src/parser/expressions.sfn` (cast-target reader A/C;
+  prefix `*`/`&` B; assignment seam D), `compiler/src/parser/statements.sfn`
+  (E0817 at `parse_unknown_statement` E).
+- **AST:** `compiler/src/ast.sfn` (`Assignment` node D).
+- **Typecheck:** `compiler/src/typecheck.sfn` (`Cast` arm classification A;
+  `Unary` arm B; `Assignment` arm D), `compiler/src/typecheck_types.sfn`
+  (`classify_fn_cast` split + `make_unparseable_statement_diagnostic` E0817 +
+  `make_effectful_raw_diagnostic` E0818), `compiler/src/typecheck_captures.sfn`
+  (`Assignment` arm D).
+- **Effect checker:** `compiler/src/effect_checker.sfn` (`Assignment` arm D;
+  `Unknown` defensive arm E; **E0818 `Raw` flip F**).
+- **Ownership:** `compiler/src/ownership_checker.sfn` (`Assignment` arm D).
+- **Emit / format:** `compiler/src/emit_native_format.sfn` (`Assignment` arm D),
+  `compiler/src/emitter_sailfin_expr.sfn` (`Assignment` arm D).
+- **Lowering:** `compiler/src/llvm/expression_lowering/native/lambda_lowering.sfn`
+  (`Assignment` capture-rewrite arm D). **No new codegen arm** — Cast/Unary/
+  Conditional/Assignment all serialize to the exact text the shadow parser
+  already lowers.
+- **Tests:** the canaries listed per stage, under `compiler/tests/unit/` and
+  `compiler/tests/e2e/`.
+- **Docs:** `docs/status.md` (effect fail-closed → shipped), SFEP-0008 (flip
+  #1180-c row toward Implemented when this lands), this design note.
+
+---
 
 ## Shipped in #1627 (actual scope)
 
@@ -29,7 +586,8 @@ split below). Delivered:
    identifier carries no effect, so the #1627 escapes (operands are calls/members)
    lose nothing, while `<fn> as * u8` and the dominant in-source `<ptr-value> as
    * u8` spelling keep their exact legacy `Raw` path — fn-reference diagnostics
-   and lowering untouched.
+   and lowering untouched. **(The 2026-06-27 revision Part A removes this gate —
+   the always-lift + scoped-E0809 fix supersedes it.)**
 3. **The gate (item 2) replaced an earlier fn-reference-cast migration.** First
    attempt structured *every* `<operand> as * T` into `Cast` and moved the
    E0808/E0809 classification onto the `Cast` arm (`check_fn_reference_cast`).
@@ -42,7 +600,11 @@ split below). Delivered:
    `head == left` guard bailed). Rather than relax the C-ABI rule (broad blast
    radius) or replicate call-position, the gate keeps bare-identifier fn casts on
    the untouched `Raw` path entirely — zero fn-reference behavior change, and the
-   `typecheck.sfn`/`typecheck_types.sfn` migration was reverted.
+   `typecheck.sfn`/`typecheck_types.sfn` migration was reverted. **(2026-06-27
+   Part A resolves this at its root: E0809 is scoped to typed `* fn (...)`
+   targets; an erased `* u8` carries no convention, so the trampoline classifies
+   clean and can be structured — the regression that forced the gate no longer
+   exists.)**
 4. Regression coverage: `compiler/tests/unit/effect_cast_operand_test.sfn`
    (structural lift over a call operand + effect attribution + the effect-free
    bare-pointer-cast canary + a guard pinning the bare-identifier `Raw` gate).
@@ -51,7 +613,10 @@ split below). Delivered:
 ternary → `Conditional`, the blanket `E0818` `Raw` backstop (it requires
 structuring *every* Raw-lowerable shape first), and the `E0817` `Unknown` arm
 (cleaner at the parser production site). The full staged design (A/B/C/D/E)
-below is retained as the roadmap those sub-issues execute against.
+below is retained as the roadmap those sub-issues execute against. **The
+2026-06-27 revision at the top is the consolidated, current endgame for the
+remaining sub-issues (#1180-b and #1180-c) and supersedes the older staging
+where they conflict.**
 
 ## Problem
 
@@ -258,6 +823,7 @@ Self-host gate: `make compile` + `make check`.
   with a precise span (analog of `ParseError`, #1531), gated to avoid
   double-firing with `E0500`/`E0411`/removed-keyword. Cleaner than threading a
   top-level flag through the shared `check_statement` walker. Cite SFEP-0008.
+  **(2026-06-27: this is Part E above.)**
 - **#1180-c "Retire the lowering shadow expression parser; structure remaining
   Raw-lowerable forms + blanket `Raw` fail-closed (`E0818`)" — L (epic-sized).**
   Structure the residual valid-but-`Raw` constructs (prefix `*`/`&` deref/addr —
@@ -267,7 +833,12 @@ Self-host gate: `make compile` + `make check`.
   **no** valid construct degrades to `Raw` can the blanket `E0818` `Raw` arm be
   enabled self-host-clean (the defense-in-depth that catches unknown/future
   escapes). Also a build-perf win (removes the 745-site text re-parse). Cite
-  SFEP-0008 and `0006-build-architecture.md`.
+  SFEP-0008 and `0006-build-architecture.md`. **(2026-06-27: the
+  blanket-`E0818`-enabling slice is Parts A–D + F above. The "lower structured
+  nodes directly instead of re-parsing" build-perf slice remains a separate,
+  later effort — Parts A–F deliberately keep the formatter→shadow-parser text
+  bridge so the diff stays effect-focused and IR-identical; retiring the shadow
+  parser is orthogonal and out of scope for the E0818 flip.)**
 - **#1180-d "Stale-comment cleanup for retired text-scan effect path" — XS.**
   `effect_checker.sfn:60`/`:461` still reference the "text-pattern (Raw body)
   path" deleted in #1186. Audit `effect_checker.sfn`/SFEP-0008.

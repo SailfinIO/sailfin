@@ -39,6 +39,7 @@ import {
     check_struct_implements_interfaces,
     check_struct_methods,
     check_type_parameters,
+    classify_fn_cast,
     clone_bindings,
     detect_removed_ai_keyword,
     detect_unsupported_statement_keyword,
@@ -954,6 +955,12 @@ fn walk_expression(expression: Expression?, bindings: SymbolEntry[], imports: Im
         return diagnostics;
     }
     if expression.variant == "Unary" {
+        // Prefix `*`/`&`/`-`/`!` — recurse into the operand so its diagnostics
+        // still fire. In particular, once #1627 Part B structured prefix `&`
+        // into `Unary{"&", Identifier(fn)}` (instead of degrading `& fn` to
+        // `Raw`), the operand `Identifier` reaches the `Identifier` arm below,
+        // which emits E0808 for a function used in value position — preserving
+        // the prior `check_fn_reference_raw` `& fn` behavior.
         return walk_expression(expression.operand, bindings, imports);
     }
     if expression.variant == "Member" {
@@ -1022,12 +1029,24 @@ fn walk_expression(expression: Expression?, bindings: SymbolEntry[], imports: Im
         return diagnostics;
     }
     if expression.variant == "Cast" {
-        // The #1627 parser lift only structures a pointer cast target into
-        // `Cast` when the operand is NOT a bare identifier (effect-bearing
-        // operands only). A bare `<fn> as * u8` therefore stays `Raw` and is
-        // still classified by `check_fn_reference_raw` (E0808/E0809) below,
-        // so this arm needs no function-reference logic — it just recurses
-        // so the operand's own diagnostics still fire.
+        // A bare function identifier cast to a pointer (`<fn> as * u8` /
+        // `<fn> as * fn (...)`) is a function-address materialization, not a
+        // value-position misuse. Classify it DIRECTLY via `classify_fn_cast`
+        // (E0808/E0809 per target) — do NOT recurse into the operand, because
+        // the `Identifier` arm would wrongly emit E0808 for a perfectly valid
+        // fn-address cast. #1627: Part A now structures every cast (including
+        // bare-identifier operands), so this replaces the old text-based
+        // `check_fn_reference_raw` cast path. Classification is
+        // position-independent — it fires the same whether the cast is
+        // top-level or buried in a call argument.
+        if expression.operand.variant == "Identifier" {
+            let fn_entry = find_symbol(bindings, expression.operand.name);
+            if fn_entry != null {
+                if is_function_kind(fn_entry.kind) {
+                    return classify_fn_cast(expression.operand.name, expression.target_type.text, fn_entry, expression.span);
+                }
+            }
+        }
         return walk_expression(expression.operand, bindings, imports);
     }
     if expression.variant == "TryOperator" {

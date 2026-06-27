@@ -39,6 +39,7 @@ import {
 import {
     ArrayLiteralParseResult,
     CallArgumentsParseResult,
+    CastTargetParseResult,
     ExpressionBlockParseResult,
     ExpressionCollectResult,
     ExpressionParseResult,
@@ -507,6 +508,17 @@ fn parse_prefix_expression(state: ExpressionTokens) -> ExpressionParseResult {
         let mut _if403: boolean = false;
         if strings_equal(sym, "-") { _if403 = true; }
         if strings_equal(sym, "!") { _if403 = true; }
+        // Prefix `*` (deref) and `&` (address-of) — #1627 Part B. Before this
+        // they had no prefix parse and fell through to `Raw`, so `*ioCall()` /
+        // `&print.info(x)` reached codegen effect-blind. Structuring them into
+        // `Unary` lets the effect checker's `Unary` arm walk the operand (the
+        // effectful surface) and routes `&fn` through the typecheck `Unary` →
+        // `Identifier` arm (E0808). The binary `*`/`&` handlers are infix-only
+        // (the climb never calls this in infix position), so they are
+        // unaffected. The formatter emits `*operand` / `&operand` verbatim —
+        // the exact text the shadow lowering deref/borrow parsers already lower.
+        if strings_equal(sym, "*") { _if403 = true; }
+        if strings_equal(sym, "&") { _if403 = true; }
         if _if403 {
             let advanced = expression_tokens_advance(state);
             let operand_result = parse_expression_bp(advanced, unary_precedence());
@@ -804,6 +816,207 @@ fn parse_primary_expression(state: ExpressionTokens) -> ExpressionParseResult {
     return expression_parse_failure(state);
 }
 
+// Append a lexeme to an accumulator string, prefixing a space when the
+// accumulator is non-empty. Used by `read_cast_target` to build the
+// target-type text from individual token lexemes.
+fn _cast_target_append(acc: string, lexeme: string) -> string {
+    if acc.length == 0 { return lexeme; }
+    return acc + " " + lexeme;
+}
+
+// Read a cast target type after `as`, consuming pointer prefixes, named
+// types with generic argument lists (`Foo<X, Y>`), and fn-pointer targets
+// (`fn (A) -> B`, `fn (A) -> * B`). Joins all consumed lexemes with
+// single spaces into `text` — the Cast formatter serializes the text
+// verbatim, and the shadow lowering re-parser is whitespace-insensitive,
+// so the join is round-trip-safe. Returns `success:false` on a
+// genuinely unparseable target (missing identifier, unbalanced brackets).
+fn read_cast_target(state: ExpressionTokens) -> CastTargetParseResult {
+    let mut cursor = state;
+    let mut text: string = "";
+
+    // Step 1: Accumulate optional leading `*` pointer-prefix symbols.
+    loop {
+        if expression_tokens_is_at_end(cursor) { break; }
+        let tok = expression_tokens_peek(cursor);
+        if tok.kind.variant != "Symbol" { break; }
+        if !strings_equal(tok.lexeme, "*") { break; }
+        text = _cast_target_append(text, "*");
+        cursor = expression_tokens_advance(cursor);
+    }
+
+    if expression_tokens_is_at_end(cursor) {
+        return CastTargetParseResult {
+            state: state,
+            text: "",
+            success: false
+        };
+    }
+
+    let head_tok = expression_tokens_peek(cursor);
+
+    // Step 2a: Function-pointer target — starts with `fn`.
+    if head_tok.kind.variant == "Identifier" {
+        if identifier_matches(head_tok, "fn") {
+            text = _cast_target_append(text, "fn");
+            cursor = expression_tokens_advance(cursor);
+
+            // Expect a balanced `( ... )` parameter list.
+            if expression_tokens_is_at_end(cursor) {
+                return CastTargetParseResult {
+                    state: state,
+                    text: "",
+                    success: false
+                };
+            }
+            let paren_tok = expression_tokens_peek(cursor);
+            if !strings_equal(paren_tok.lexeme, "(") {
+                return CastTargetParseResult {
+                    state: state,
+                    text: "",
+                    success: false
+                };
+            }
+            text = _cast_target_append(text, "(");
+            cursor = expression_tokens_advance(cursor);
+            let mut paren_depth: int = 1;
+            loop {
+                if expression_tokens_is_at_end(cursor) {
+                    return CastTargetParseResult {
+                        state: state,
+                        text: "",
+                        success: false
+                    };
+                }
+                let inner_tok = expression_tokens_peek(cursor);
+                if strings_equal(inner_tok.lexeme, "(") { paren_depth += 1; }
+                if strings_equal(inner_tok.lexeme, ")") {
+                    paren_depth -= 1;
+                    if paren_depth == 0 {
+                        text = _cast_target_append(text, ")");
+                        cursor = expression_tokens_advance(cursor);
+                        break;
+                    }
+                }
+                text = _cast_target_append(text, inner_tok.lexeme);
+                cursor = expression_tokens_advance(cursor);
+            }
+
+            // Optional `->` return type: may lex as symbol `->` or as two
+            // separate symbols `-` then `>`.
+            if !expression_tokens_is_at_end(cursor) {
+                let arr_tok = expression_tokens_peek(cursor);
+                let mut has_arrow: boolean = false;
+                let mut arrow_cursor = cursor;
+                if arr_tok.kind.variant == "Symbol" {
+                    if strings_equal(arr_tok.lexeme, "->") {
+                        has_arrow = true;
+                        arrow_cursor = expression_tokens_advance(cursor);
+                    }
+                    if strings_equal(arr_tok.lexeme, "-") {
+                        let after_minus = expression_tokens_advance(cursor);
+                        if !expression_tokens_is_at_end(after_minus) {
+                            let gt_tok = expression_tokens_peek(after_minus);
+                            if strings_equal(gt_tok.lexeme, ">") {
+                                has_arrow = true;
+                                arrow_cursor = expression_tokens_advance(after_minus);
+                            }
+                        }
+                    }
+                }
+                if has_arrow {
+                    text = _cast_target_append(text, "->");
+                    cursor = arrow_cursor;
+                    // Return type: read recursively via the same target grammar.
+                    let ret_result = read_cast_target(cursor);
+                    if !ret_result.success {
+                        return CastTargetParseResult {
+                            state: state,
+                            text: "",
+                            success: false
+                        };
+                    }
+                    text = _cast_target_append(text, ret_result.text);
+                    cursor = ret_result.state;
+                }
+            }
+
+            return CastTargetParseResult {
+                state: cursor,
+                text: text,
+                success: true
+            };
+        }
+    }
+
+    // Step 2b: Named type with an optional generic argument list `< ... >`.
+    if head_tok.kind.variant != "Identifier" {
+        return CastTargetParseResult {
+            state: state,
+            text: "",
+            success: false
+        };
+    }
+    text = _cast_target_append(text, identifier_text(head_tok));
+    cursor = expression_tokens_advance(cursor);
+
+    // Optional generic args: consume `< ... >` balancing angle brackets.
+    if !expression_tokens_is_at_end(cursor) {
+        let maybe_lt = expression_tokens_peek(cursor);
+        if maybe_lt.kind.variant == "Symbol" {
+            if strings_equal(maybe_lt.lexeme, "<") {
+                text = _cast_target_append(text, "<");
+                cursor = expression_tokens_advance(cursor);
+                let mut angle_depth: int = 1;
+                loop {
+                    if expression_tokens_is_at_end(cursor) {
+                        return CastTargetParseResult {
+                            state: state,
+                            text: "",
+                            success: false
+                        };
+                    }
+                    let g_tok = expression_tokens_peek(cursor);
+                    if strings_equal(g_tok.lexeme, "<") {
+                        angle_depth += 1;
+                        text = _cast_target_append(text, g_tok.lexeme);
+                        cursor = expression_tokens_advance(cursor);
+                    } else if strings_equal(g_tok.lexeme, ">>") {
+                        if angle_depth >= 2 { angle_depth -= 2; } else {
+                            angle_depth = 0;
+                        }
+                        if angle_depth == 0 {
+                            text = _cast_target_append(text, ">");
+                            cursor = expression_tokens_advance(cursor);
+                            break;
+                        }
+                        text = _cast_target_append(text, ">>");
+                        cursor = expression_tokens_advance(cursor);
+                    } else if strings_equal(g_tok.lexeme, ">") {
+                        angle_depth -= 1;
+                        if angle_depth == 0 {
+                            text = _cast_target_append(text, ">");
+                            cursor = expression_tokens_advance(cursor);
+                            break;
+                        }
+                        text = _cast_target_append(text, ">");
+                        cursor = expression_tokens_advance(cursor);
+                    } else {
+                        text = _cast_target_append(text, g_tok.lexeme);
+                        cursor = expression_tokens_advance(cursor);
+                    }
+                }
+            }
+        }
+    }
+
+    return CastTargetParseResult {
+        state: cursor,
+        text: text,
+        success: true
+    };
+}
+
 // ============================================================================
 // Postfix Operators (calls, member access, indexing, struct literals)
 // ============================================================================
@@ -838,63 +1051,26 @@ fn parse_postfix_chain(state: ExpressionTokens, expression: Expression) -> Expre
             if expression_tokens_is_at_end(after_as) {
                 return expression_parse_failure(state);
             }
-            // Collect a leading pointer prefix (`* T`, `** T`) so an
-            // effectful operand under a pointer cast (`fs.read(p) as * u8`)
-            // structures into `Cast` and stays effect-visible (#1627)
-            // instead of degrading the whole expression to an effect-blind
-            // `Raw`. Before #1627 the cast arm accepted only a bare
-            // `Identifier` target, so every `as * T` form fell through to a
-            // `Raw` the effect checker never walked. The target text is
-            // captured verbatim into `TypeAnnotation.text` — `"* i64"` —
-            // which the Cast formatter renders back as `(operand) as * i64`,
-            // byte-equivalent to the prior `Raw` text, so emit/lowering is
-            // unchanged. Generic / fn-pointer cast targets (`Result<T, E>`,
-            // `fn(A) -> B`) stay `Raw` for now (rare; tracked as a #1180
-            // follow-up); only the pointer prefix is lifted here.
-            //
-            // CRUCIAL: lift a pointer target ONLY when the operand is NOT a
-            // bare `Identifier`. A bare identifier carries no effect, so the
-            // #1627 effect escapes (whose operands are calls/members) lose
-            // nothing — but `<fn> as * u8` (#1147 function references) and
-            // `<ptr-value> as * u8` (the dominant in-source spelling, e.g.
-            // `out as * u8`) keep their exact legacy `Raw` behavior:
-            // `check_fn_reference_raw`'s E0808/E0809 classification and the
-            // shadow-parser lowering are untouched. This avoids regressing
-            // the http-server trampoline `_sfn_http_trampoline as * u8`
-            // (concrete-but-struct-ABI fn, which the prior Raw path passed
-            // through) while still closing every effectful-operand escape.
-            let mut cast_cursor = after_as;
-            let mut cast_target_text: string = "";
-            let lift_pointer_target = current_expression.variant != "Identifier";
-            loop {
-                if !lift_pointer_target { break; }
-                if expression_tokens_is_at_end(cast_cursor) {
-                    return expression_parse_failure(state);
-                }
-                let star_token = expression_tokens_peek(cast_cursor);
-                if star_token.kind.variant != "Symbol" { break; }
-                if !strings_equal(star_token.lexeme, "*") { break; }
-                if cast_target_text.length > 0 {
-                    cast_target_text = cast_target_text + " ";
-                }
-                cast_target_text = cast_target_text + "*";
-                cast_cursor = expression_tokens_advance(cast_cursor);
-            }
-            if expression_tokens_is_at_end(cast_cursor) {
+            // Structure ALL `as <type>` cast targets — including bare-identifier
+            // operands, pointer/fn-pointer targets, and generic targets — into a
+            // `Cast` node. `read_cast_target` handles pointer prefixes (`* T`,
+            // `** T`), fn-pointer targets (`fn (A) -> B`), and named types with
+            // optional generic argument lists (`Foo<X, Y>`). A genuinely
+            // unparseable target (no identifier, unbalanced brackets) returns
+            // `success:false` and the enclosing expression falls through to
+            // `expression_parse_failure` → `Raw` (correct: it is junk). (#1627
+            // Part A/C — the earlier bare-identifier `lift_pointer_target` gate
+            // is removed; `classify_fn_cast` in `typecheck.sfn` handles
+            // fn-reference classification on the structured `Cast`; E0809 is
+            // scoped to typed `* fn (...)` targets so `* u8` is ABI-agnostic.)
+            let cast_result = read_cast_target(after_as);
+            if !cast_result.success {
                 return expression_parse_failure(state);
             }
-            let type_token = expression_tokens_peek(cast_cursor);
-            if type_token.kind.variant != "Identifier" {
-                return expression_parse_failure(state);
-            }
-            if cast_target_text.length > 0 {
-                cast_target_text = cast_target_text + " ";
-            }
-            cast_target_text = cast_target_text + identifier_text(type_token);
-            current_state = expression_tokens_advance(cast_cursor);
+            current_state = cast_result.state;
             current_expression = Expression.Cast {
                 operand: current_expression,
-                target_type: TypeAnnotation { text: cast_target_text }
+                target_type: TypeAnnotation { text: cast_result.text }
             };
             continue;
         }

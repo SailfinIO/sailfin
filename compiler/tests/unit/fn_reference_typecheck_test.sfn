@@ -1,17 +1,27 @@
 // Unit tests for the function-reference-as-value diagnostics (issue
 // #1147): E0808 (a function used as a value in an unsupported position —
-// bare name, `& fn`, or `<fn> as <non-pointer>`) and E0809 (`<fn> as * u8`
-// where the function is generic or non-C-ABI, so it has no single C-ABI
-// code-pointer symbol).
+// bare name, `& fn`, or `<fn> as <non-pointer>`) and E0809 (a function
+// address that has no single valid C-ABI code-pointer symbol: a generic
+// function, or a function whose signature is not C-ABI-compatible cast to a
+// *typed* function pointer `<fn> as * fn (...)`).
 //
 // #1146 made `<fn> as * u8` lower to a real `bitcast @sym to i8*` for a
-// concrete C-ABI function; #1147 rejects every other function-reference
-// spelling instead of letting it silently lower to `null` / a wrong
-// closure-pair coercion. The parser degrades both `<fn> as *T` and
-// `& fn` to `Raw` nodes (the `as` target only parses a bare identifier,
-// `&` has no prefix form), so the checks live in the walker's `Raw` and
-// `Identifier` arms — driven here end-to-end via parse + typecheck (no
-// lowering import, per the #331 atomics 180s-timeout precedent).
+// concrete function; #1147 rejects every other function-reference spelling
+// instead of letting it silently lower to `null` / a wrong closure-pair
+// coercion.
+//
+// #1627 re-scoped the C-ABI guard: an erased `* u8` target is `void*` and
+// carries no calling convention, so producing it violates none — a concrete
+// (non-generic) function is accepted as `* u8` regardless of its signature
+// ABI (this is what lets the struct-ABI http trampoline self-host). The
+// C-ABI signature check applies ONLY to the *typed* `* fn (...)` target,
+// where the calling convention is named and must match. #1627 also
+// structured every `<fn> as *T` cast into an `Expression.Cast`, so the
+// classification now lives in the walker's `Cast` arm (via
+// `classify_fn_cast`); only the residual `& fn` address-of (no prefix parse
+// yet) still flows through the `Raw`/`Identifier` arms. Driven here
+// end-to-end via parse + typecheck (no lowering import, per the #331 atomics
+// 180s-timeout precedent).
 import { parse_program } from "../../src/parser/mod";
 import { typecheck_diagnostics } from "../../src/typecheck";
 
@@ -46,14 +56,27 @@ test "fn-ref: bare function passed as an argument is E0808" ![io] {
     assert _count_code(source, "E0808") == 1;
 }
 
-// ── E0809: generic / non-C-ABI `<fn> as * u8` ──
+// ── E0809: generic `as * u8`, or non-C-ABI cast to a *typed* `* fn (...)` ──
 test "fn-ref: generic function `as * u8` is E0809" ![io] {
     let source = "fn gen<T>(x: T) -> T { return x; } fn main() { let f = gen as * u8; }";
     assert _count_code(source, "E0809") == 1;
 }
 
-test "fn-ref: non-C-ABI function `as * u8` is E0809" ![io] {
+// #1627: an erased `* u8` target is conventionless `void*`, so a concrete
+// (non-generic) function with a non-C-ABI signature is now ACCEPTED as
+// `* u8` — the C-ABI guard no longer fires on the erased target. (Before
+// #1627 this was E0809; the struct-ABI http trampoline `as * u8` relies on
+// this to self-host.)
+test "fn-ref: non-C-ABI function `as * u8` is accepted (#1627 erased target)" ![io] {
     let source = "fn nc(x: number) -> number { return x; } fn main() { let f = nc as * u8; }";
+    assert _count_code(source, "E0808") == 0;
+    assert _count_code(source, "E0809") == 0;
+}
+
+// #1627: the C-ABI guard DOES still fire on the *typed* `* fn (...)` target,
+// where the calling convention is named and must match the function's ABI.
+test "fn-ref: non-C-ABI function as typed `* fn (...)` is E0809" ![io] {
+    let source = "fn nc(x: number) -> number { return x; } fn main() { let f = nc as * fn (number) -> number; }";
     assert _count_code(source, "E0809") == 1;
 }
 

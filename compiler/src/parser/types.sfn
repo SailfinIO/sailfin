@@ -199,6 +199,15 @@ struct ExpressionTypeSeparatorParseResult {
     found: boolean;
 }
 
+// Result of `read_cast_target` — the parsed type-annotation text for an
+// `as <type>` cast target, consuming pointer prefixes, named types with
+// generic argument lists, and fn-pointer targets.
+struct CastTargetParseResult {
+    state: ExpressionTokens;
+    text: string;
+    success: boolean;
+}
+
 struct ExpressionCollectResult {
     state: ExpressionTokens;
     tokens: Token[];
