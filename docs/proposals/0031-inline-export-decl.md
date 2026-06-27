@@ -1,15 +1,15 @@
 ---
 sfep: 0031
 title: Inline `export <declaration>` syntax
-status: Accepted
+status: Implemented
 type: language
 created: 2026-06-26
-updated: 2026-06-26
+updated: 2026-06-27
 author: "agent:compiler-architect; human review"
 tracking: "#1681, #1680"
 supersedes:
 superseded-by:
-graduates-to:
+graduates-to: reference/spec/02-modules.md
 ---
 
 # SFEP-0031 — Inline `export <declaration>` syntax
