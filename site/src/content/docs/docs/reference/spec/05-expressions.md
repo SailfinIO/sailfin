@@ -52,6 +52,21 @@ fn main() {
 
 **Out of scope for `E0420`:** member/method callees (`obj.method()`) are not name-resolved here — the member name is never flagged; undefined *variable* references (a bare identifier used as a value, not a callee) are a separate concern; and argument *types* are not checked by this rule.
 
+## Anonymous functions (lambdas)
+
+An anonymous function is written with a leading `fn`, a parenthesized parameter list, an optional `-> ReturnType`, and a body. The body is either a `{ ... }` **block** or, for the additive expression-bodied **short form**, `=> expr`:
+
+```sfn
+let sq  = fn(x: int) -> int { return x * x; };  // block form
+let sq2 = fn(x) => x * x;                        // short form — equivalent
+let add = fn(x: int, y: int) => x + y;          // typed head, expr body
+numbers.map(fn(x) => x * x);                     // the callback idiom
+```
+
+The short form is **purely additive**: `fn(x) => expr` desugars to a single-`return` block (`fn(x) { return expr; }`), so the two forms are equivalent and the block form is unchanged. The `fn` lead-in keeps lambda recognition zero-lookahead, so the body `=>` never collides with the `match`-arm separator (`Pattern => body`, §8).
+
+A lambda's parameter and return types may be **omitted** when it is passed directly as a callback: the compiler infers them from the callee's expected function type. For a user higher-order function whose parameter is declared `fn(int) -> int`, or for the builtin `int[]` methods `.map` / `.filter` / `.reduce` (§10), `numbers.map(fn(x) => x * x)` types `x` and the result from the mapper signature. A lambda that is already annotated keeps its annotations. (Inference is currently limited to these call-site positions and `int`-element arrays; other element types follow generic constraints.)
+
 ## Cast operator (`as`)
 
 `expr as Type` performs an explicit numeric or pointer-shape conversion. The cast is postfix-bound (tighter than any binary operator) and left-associative — `x as i32 as i64` parses as `((x as i32) as i64)`.

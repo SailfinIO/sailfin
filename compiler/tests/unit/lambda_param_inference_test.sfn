@@ -1,0 +1,112 @@
+// Unit tests for the untyped-lambda parameter/return inference helpers
+// (#1683, bundled with SFEP-0029). Covers the fn-type-text splitter and the
+// no-op-on-typed-lambda guarantee that keeps typed lambdas (the no-regression
+// surface) untouched.
+import { Expression } from "../../src/ast";
+import { backfill_lambda_from_fn_type, parse_fn_type_text } from "../../src/llvm/expression_lowering/native/lambda_param_inference";
+import { parse_program } from "../../src/parser/mod";
+
+// The lambda bound by the first top-level `let f = <lambda>;`.
+fn first_let_lambda(source: string) -> Expression ![io] {
+    let program = parse_program(source);
+    let lam = program.statements[0].body.statements[0].initializer;
+    assert lam != null;
+    assert lam.variant == "Lambda";
+    return lam;
+}
+
+// -------------------------------------------------------------------
+// parse_fn_type_text — the textual fn-type splitter.
+// -------------------------------------------------------------------
+test "parse_fn_type_text: single int param" {
+    let p = parse_fn_type_text("fn(int) -> int");
+    assert p.ok;
+    assert p.param_types.length == 1;
+    assert p.param_types[0] == "int";
+    assert p.return_type == "int";
+}
+
+test "parse_fn_type_text: two params" {
+    let p = parse_fn_type_text("fn(int, int) -> int");
+    assert p.ok;
+    assert p.param_types.length == 2;
+    assert p.param_types[0] == "int";
+    assert p.param_types[1] == "int";
+    assert p.return_type == "int";
+}
+
+test "parse_fn_type_text: boolean return (filter predicate)" {
+    let p = parse_fn_type_text("fn(int) -> boolean");
+    assert p.ok;
+    assert p.param_types.length == 1;
+    assert p.return_type == "boolean";
+}
+
+test "parse_fn_type_text: fmt spelling `fn (` is accepted" {
+    let p = parse_fn_type_text("fn (int) -> int");
+    assert p.ok;
+    assert p.param_types.length == 1;
+    assert p.return_type == "int";
+}
+
+// Nested generics / nested fn-types must not split on inner commas.
+test "parse_fn_type_text: nested generic param is one segment" {
+    let p = parse_fn_type_text("fn(Map<string, int>) -> boolean");
+    assert p.ok;
+    assert p.param_types.length == 1;
+    assert p.param_types[0] == "Map<string, int>";
+}
+
+test "parse_fn_type_text: nested fn param is one segment" {
+    let p = parse_fn_type_text("fn(fn(int) -> int) -> int");
+    assert p.ok;
+    assert p.param_types.length == 1;
+    assert p.param_types[0] == "fn(int) -> int";
+    assert p.return_type == "int";
+}
+
+// Non-fn input is rejected (caller no-ops).
+test "parse_fn_type_text: non-fn input is not ok" {
+    let p = parse_fn_type_text("int");
+    assert ! p.ok;
+    let q = parse_fn_type_text("");
+    assert ! q.ok;
+}
+
+// -------------------------------------------------------------------
+// backfill_lambda_from_fn_type — fills only null annotations.
+// -------------------------------------------------------------------
+test "backfill: untyped lambda gains param and return types" ![io] {
+    let lam = first_let_lambda("fn host() { let f = fn(x) => x * x; }");
+    let filled = backfill_lambda_from_fn_type(lam, "fn(int) -> int");
+    assert filled.variant == "Lambda";
+    let p0 = filled.parameters[0].type_annotation;
+    assert p0 != null;
+    assert p0.text == "int";
+    let rt = filled.return_type;
+    assert rt != null;
+    assert rt.text == "int";
+}
+
+// A fully-typed lambda is returned with its annotations preserved verbatim —
+// the no-regression pin.
+test "backfill: typed lambda is unchanged" ![io] {
+    let lam = first_let_lambda("fn host() { let f = fn(x: int) -> int => x * x; }");
+    let filled = backfill_lambda_from_fn_type(lam, "fn(string) -> string");
+    let p0 = filled.parameters[0].type_annotation;
+    assert p0 != null;
+    // The expected fn-type would say `string`, but the lambda already
+    // declared `int` — the existing annotation wins.
+    assert p0.text == "int";
+    let rt = filled.return_type;
+    assert rt != null;
+    assert rt.text == "int";
+}
+
+// An arity mismatch leaves the lambda untouched (honest no-op).
+test "backfill: arity mismatch is a no-op" ![io] {
+    let lam = first_let_lambda("fn host() { let f = fn(x) => x; }");
+    let filled = backfill_lambda_from_fn_type(lam, "fn(int, int) -> int");
+    let p0 = filled.parameters[0].type_annotation;
+    assert p0 == null;
+}

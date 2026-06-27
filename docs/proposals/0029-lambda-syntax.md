@@ -1,15 +1,15 @@
 ---
 sfep: 29
 title: Lambda expression syntax for 1.0 — keep, reform, or defer
-status: Accepted
+status: Implemented
 type: language
 created: 2026-06-26
-updated: 2026-06-26
+updated: 2026-06-27
 author: "agent:compiler-architect"
-tracking: [690]
+tracking: [690, 1683]
 supersedes:
 superseded-by:
-graduates-to:
+graduates-to: site/src/content/docs/docs/reference/spec/05-expressions.md
 ---
 
 # SFEP-0029 — Lambda expression syntax for 1.0 — keep, reform, or defer
@@ -465,3 +465,22 @@ callback syntax of any mainstream language.
 formatter + tests + docs, bundled per the seed-dependency rule), `## Design:
 SFEP-0029`. This SFEP flips to `Implemented` and sets `graduates-to:` the spec
 lambda chapter when that PR lands and self-hosts.
+
+## 11. Status — Implemented (2026-06-27, #1683)
+
+Shipped end-to-end and self-hosts. `parse_lambda_expression`
+(`compiler/src/parser/expressions.sfn`) accepts `fn(...) => expr` after the
+head, desugaring the expression body to a single-`return` `Block` so
+typecheck / effects / emit / lowering see a normal block (no AST node added).
+The fragile return-type capture was rerouted through the real type parser
+(`collect_type_annotation_until`), retiring the #1546 class. The formatter
+round-trips both forms idempotently. Regression coverage:
+`parser_lambda_body_test.sfn`, `parser_lambda_arrow_vs_match_test.sfn` (the
+`=>` overload guard), and the `untyped_lambda_callback_test.sfn` e2e (the
+`.map(fn(x) => x*x)` callback executes).
+
+The headline callback case `.map(fn(x) => x*x)` additionally required typing
+the untyped lambda from the callee signature — a **pre-existing**,
+syntax-independent codegen gap (the untyped block form failed identically).
+That fix was bundled into the same PR and is recorded in **SFEP-0031**
+(untyped lambda parameter/return inference).
