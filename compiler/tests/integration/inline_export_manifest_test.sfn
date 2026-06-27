@@ -1,0 +1,56 @@
+// Integration coverage for inline `export <declaration>` manifest parity
+// (SFEP-0031, issue #1681).
+//
+// The inline form must emit the SAME `.export "" { name }` directive in the
+// module's native IR as the block form — that directive is what keeps the
+// symbol externally linkable and signature-resolvable across modules. This
+// asserts the emitted `.sfn-asm` text carries the manifest entry for every
+// inline-exported form, including `export extern fn` / `export extern var`
+// (the one introducer arm with branching `extern`/`unsafe`/`var` lookahead).
+import { emit_native_text_with_module_name } from "../../src/emit_native";
+import { parse_program } from "../../src/parser/mod";
+import { index_of } from "../../src/string_utils";
+
+fn _emit(source: string) -> string ![io] {
+    let program = parse_program(source);
+    return emit_native_text_with_module_name(program, "inline_export_manifest_test");
+}
+
+fn _exports(native: string, symbol: string) -> boolean {
+    return index_of(native, ".export \"\" { " + symbol + " }") >= 0;
+}
+
+test "inline export manifest: `export fn` emits `.export` parity with the block form" ![io] {
+    let inline = _emit("export fn parse(text: string) -> int { return 0; }");
+    let block = _emit("fn parse(text: string) -> int { return 0; } export { parse };");
+    assert _exports(inline, "parse");
+    assert _exports(block, "parse");
+}
+
+test "inline export manifest: struct / enum / interface / type / let all emit `.export`" ![io] {
+    let native = _emit("export struct S { x: int }\n"
+        + "export enum E { A, B }\n"
+        + "export interface I { fn m() -> int; }\n"
+        + "export type T = int;\n"
+        + "export let L: int = 5;\n");
+    assert _exports(native, "S");
+    assert _exports(native, "E");
+    assert _exports(native, "I");
+    assert _exports(native, "T");
+    assert _exports(native, "L");
+}
+
+test "inline export manifest: `export extern fn` emits `.export`" ![io] {
+    let native = _emit("export extern fn write(fd: int, n: int) -> int;");
+    assert _exports(native, "write");
+}
+
+test "inline export manifest: `export extern var` emits `.export`" ![io] {
+    let native = _emit("export extern var errno: int;");
+    assert _exports(native, "errno");
+}
+
+test "inline export manifest: `export thread_local let mut` emits `.export`" ![io] {
+    let native = _emit("export thread_local let mut counter: int = 0;");
+    assert _exports(native, "counter");
+}
