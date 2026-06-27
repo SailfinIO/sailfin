@@ -1,0 +1,133 @@
+// DNS resolution tests for the sfn/net capsule (#1707, epic #1540 B2).
+// Exercises the real `getaddrinfo`-backed host resolution wired through
+// runtime/sfn/adapters/net.sfn::sfn_net_resolve, plus a DNS-resolved
+// loopback round-trip over the real socket client (the http client shares
+// the identical `_host_ip4` -> `_parse_quad` -> `_resolve_dns` path).
+//
+// NOTE on matchers: the `sfn/test` `expect_*` matchers are `![pure]` and
+// cannot be called from a `![net]` / `![net, io]` test, so assert on the
+// returned strings with `sfn/strings::find` / `==` (the loopback_test
+// exemplar pattern).
+import {
+    find,
+    replace,
+    split,
+    starts_with,
+    trim
+} from "sfn/strings";
+
+import {
+    accept,
+    close,
+    close_listener,
+    connect,
+    is_open,
+    listen,
+    read_bytes,
+    resolve,
+    write_all
+} from "../src/mod";
+
+// `_alias_from_line(line)` — extract a non-`localhost` hostname from an
+// `/etc/hosts` line that maps a `127.*` loopback address, or "" if the line
+// is a comment / non-loopback / only defines `localhost`. (The resolver
+// short-circuits `localhost` before DNS, so it cannot exercise getaddrinfo.)
+fn _alias_from_line(line: string) -> string {
+    let norm = trim(replace(line, "\t", " "));
+    if !starts_with(norm, "127.") { return ""; }
+    let toks = split(norm, " ");
+    let mut j = 1;
+    loop {
+        if j >= toks.length { break; }
+        let t = toks[j];
+        if t.length > 0 {
+            if t != "localhost" { return t; }
+        }
+        j = j + 1;
+    }
+    return "";
+}
+
+// `_loopback_alias()` — the first `/etc/hosts` hostname (other than
+// `localhost`) that maps to a loopback address, or "" when none exists. A
+// container/CI host typically maps its own hostname to `127.0.0.1`, giving
+// a hermetic real DNS name that resolves to loopback with no network.
+fn _loopback_alias() -> string ![io] {
+    let content = fs.readFile("/etc/hosts");
+    let lines = split(content, "\n");
+    let mut i = 0;
+    let mut result = "";
+    loop {
+        if i >= lines.length { break; }
+        if result.length == 0 {
+            let alias = _alias_from_line(lines[i]);
+            if alias.length > 0 { result = alias; }
+        }
+        i = i + 1;
+    }
+    return result;
+}
+
+test "net: resolve(localhost) returns the loopback quad" ![net] {
+    // The `localhost` alias short-circuits to 127.0.0.1 (no DNS query), so
+    // this is deterministic in any environment.
+    let ips = resolve("localhost");
+    assert ips.length >= 1;
+    assert find(ips[0], "127.0.0.1", 0) >= 0;
+}
+
+test "net: resolve(dotted-quad) echoes the literal address (unchanged)" ![net] {
+    // The numeric dotted-quad path is unchanged: it parses and re-renders
+    // the same octets without consulting DNS.
+    let ips = resolve("10.0.0.7");
+    assert ips.length == 1;
+    assert ips[0] == "10.0.0.7";
+}
+
+test "net: resolve(unresolvable .invalid name) returns an empty list" ![net] {
+    // `.invalid` is reserved (RFC 6761) and always fails resolution, so the
+    // DNS failure path must surface an empty list — never a hang or crash.
+    let ips = resolve("nonexistent.invalid");
+    assert ips.length == 0;
+}
+
+test "net: connect via a real DNS name round-trips over loopback" ![net, io] {
+    // Resolve a real (non-localhost) hostname from /etc/hosts through
+    // getaddrinfo and round-trip to a listener bound on the resolved
+    // loopback address. This drives the same `_host_ip4` -> `_resolve_dns`
+    // path the http client uses. Skip cleanly when the environment has no
+    // loopback DNS alias — the deterministic resolve tests above still
+    // cover the getaddrinfo wiring.
+    let alias = _loopback_alias();
+    let mut bind_ip = "";
+    if alias.length > 0 {
+        let ips = resolve(alias);
+        if ips.length > 0 {
+            if starts_with(ips[0], "127.") { bind_ip = ips[0]; }
+        }
+    }
+
+    if bind_ip.length == 0 { assert true; } else {
+        // Bind a listener on the resolved loopback address; on loopback the
+        // handshake completes into the accept backlog, so the
+        // connect -> write -> accept -> read sequence does not deadlock.
+        let lst = listen(bind_ip, 0);
+        assert lst.id >= 0;
+        assert lst.port > 0;
+
+        // Connect by the DNS name — this resolves through getaddrinfo to the
+        // same loopback address the listener is bound on.
+        let cli = connect(alias, lst.port);
+        assert is_open(cli);
+
+        write_all(cli, "dns-ping");
+        let srv = accept(lst);
+        assert is_open(srv);
+        let got = read_bytes(srv, 64);
+        assert find(got, "dns-ping", 0) >= 0;
+
+        close(srv);
+        close(cli);
+        close_listener(lst);
+    }
+}

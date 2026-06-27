@@ -190,6 +190,16 @@ test "http emit: declares the BSD-sockets libc surface" ![io] {
     assert _has_declare(ir, "close");
 }
 
+test "http emit: declares getaddrinfo for real-DNS host resolution (#1707)" ![io] {
+    let ir = _emit_module("http", "runtime/sfn/adapters/http.sfn");
+    assert ir != "EMIT_FAILED";
+    // The DNS fall-through (`_host_ip4` -> `_resolve_dns`) declares the libc
+    // resolver surface so a real hostname can resolve past localhost /
+    // dotted-quad.
+    assert _has_declare(ir, "getaddrinfo");
+    assert _has_declare(ir, "freeaddrinfo");
+}
+
 test "http.get_body lowers to @sfn_http_get, not the curl path" ![io] {
     let source = "fn fetch(url: string) -> string ![net] {\n"
         + "    return http.get_body(url);\n"
