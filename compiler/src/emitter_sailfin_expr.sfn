@@ -134,6 +134,17 @@ fn format_expression(expression: Expression) -> string {
         let operand_text = format_expression(expression.operand);
         return operand_text + " as " + expression.target_type.text;
     }
+    if expression.variant == "Conditional" {
+        // Ternary `cond ? then : else` (#1690). Human-friendly source
+        // rendering (no operand parens) — like the `Cast` arm above, this
+        // emitter feeds the Sailfin-to-Sailfin path, not the .sfn-asm
+        // re-parse, so the parens the native formatter adds are unnecessary
+        // here.
+        let condition_text = format_expression(expression.condition);
+        let then_text = format_expression(expression.then_value);
+        let else_text = format_expression(expression.else_value);
+        return condition_text + " ? " + then_text + " : " + else_text;
+    }
     if expression.variant == "Lambda" {
         return format_lambda_expression(expression);
     }

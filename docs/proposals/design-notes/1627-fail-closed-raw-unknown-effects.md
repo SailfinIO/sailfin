@@ -230,13 +230,26 @@ Self-host gate: `make compile` + `make check`.
   reuse, and `effect_cast_operand_test`. Bundled (no seed cut). Closes the
   demonstrated cast-shaped effect escape; the constructs below are now tracked
   follow-ons rather than part of this PR.
-- **#1180-a "Structure ternary `? :` into a `Conditional` AST node" — M.**
-  `cond ? readFile() : x` degrades to `Raw` and escapes `![io]` (confirmed live).
-  Needs a new `Conditional` node + `?`/`:` lookahead disambiguation that does
-  **not** regress postfix `TryOperator` (`a()?`, used throughout compiler source —
-  a regression breaks self-host), formatter (→ `cond ? a : b`, shadow parser
-  already lowers it), effect arm. Self-contained but precedence-delicate; its own
-  tested PR. Cite SFEP-0008.
+- **#1180-a "Structure ternary `? :` into a `Conditional` AST node" — M —
+  SHIPPED (#1690).** A ternary now parses into `Conditional { condition,
+  then_value, else_value, span }`; the effect checker unions all three children's
+  effects, closing the `cond ? readFile() : x` escape (`E0400`). The `?`/`:`
+  disambiguation is two-signal: a `?` is ternary only when the token after it can
+  start an expression **and** a nesting-aware top-level `:` follows — the
+  expression-start signal is what keeps a try operator immediately before an
+  enclosing ternary's colon (`outer ? inner()? : z`) parsing the inner `?` as a
+  `TryOperator`. Postfix `a()?` / `a()?.b()?` are untouched (self-host on them is
+  preserved). The formatter serializes `(cond) ? (then) : (else)` — the exact text
+  the shadow `parse_ternary_expression` already lowers (no new lowering arm); a
+  `TryOperator` formatter arm was added for a try left inside a ternary branch
+  (the desugarer correctly does **not** hoist branch-tries). `Conditional` arms
+  were also added to every structural walker (typecheck, capture analysis,
+  ownership scope, lambda-capture rewrite) so the node is fully analyzed, not just
+  effect-checked. Regression coverage: `effect_conditional_branch_test.sfn`. The
+  compiler/runtime source contains no ternaries, so the path is dormant under
+  self-host. **Remaining gap (filed separately):** typecheck does not yet unify
+  the then/else branch types, so `cond ? 1 : "s"` is not rejected — a follow-on.
+  Cite SFEP-0008.
 - **#1180-b "Parser-level parse diagnostic at `Unknown` production sites" — S.**
   A nested `Statement.Unknown` (unparseable statement inside a block) is silently
   dropped — no diagnostic, no effects; top-level gets `E0500`, nested gets

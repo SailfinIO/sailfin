@@ -320,6 +320,15 @@ fn walk_expression(scope: LocalBinding[], expression: Expression?) -> CaptureWal
     if expression.variant == "TryOperator" {
         return walk_expression(scope, expression.operand);
     }
+    if expression.variant == "Conditional" {
+        // Ternary `cond ? then : else` (#1690) — a capture can live in any
+        // branch (`fn() { return flag ? captured_a : captured_b; }`), so
+        // walk all three children and union the discovered captures.
+        let cond = walk_expression(scope, expression.condition);
+        let then_value = walk_expression(scope, expression.then_value);
+        let else_value = walk_expression(scope, expression.else_value);
+        return merge_results(merge_results(cond, then_value), else_value);
+    }
     if expression.variant == "Call" {
         let mut result = walk_expression(scope, expression.callee);
         let mut i: int = 0;

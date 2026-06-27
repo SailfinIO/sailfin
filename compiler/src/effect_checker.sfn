@@ -894,6 +894,18 @@ fn collect_effects_from_expression(expression: Expression?, imports: ImportSymbo
         required = merge_requirements(required, collect_effects_from_expression(expression.right, imports));
         return required;
     }
+    if expression.variant == "Conditional" {
+        // Ternary `cond ? then : else` (#1690). Either branch may run, and
+        // the condition always does, so the requirement is the union of all
+        // three children's effects: `cond ? readFile() : x` requires `![io]`.
+        // Before #1690 the whole ternary degraded to an effect-blind `Raw`,
+        // letting an effectful branch reach codegen with no declared
+        // capability — a fail-open hole in the effects pillar.
+        let mut required = collect_effects_from_expression(expression.condition, imports);
+        required = merge_requirements(required, collect_effects_from_expression(expression.then_value, imports));
+        required = merge_requirements(required, collect_effects_from_expression(expression.else_value, imports));
+        return required;
+    }
     if expression.variant == "Array" {
         let mut required: EffectRequirement[] = [];
         let mut element_index: int = 0;
