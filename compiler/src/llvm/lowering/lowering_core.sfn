@@ -735,9 +735,40 @@ fn lower_to_llvm_lines_with_parsed_context(native_module: NativeModule, parse_in
     }
     let module_struct_methods = flatten_struct_methods(module_structs);
     if debug_lowering { print.err("emit-llvm: phase=struct_methods_done"); }
-    // Site 1 — safe in-place extend: safe_functions is not read after this
-    // line; local_functions aliases safe_functions and is read downstream.
-    let local_functions = extend_native_functions_inplace(safe_functions, module_struct_methods);
+    // #1700: drop any `safe_functions` entry that duplicates a flattened
+    // struct method (same name). A module whose only callables are struct
+    // methods (no free functions) makes `sanitize_functions` take its
+    // empty-parse recovery path, where `recover_native_functions_light`
+    // re-derives the struct methods AS top-level functions. That light
+    // parser does not recognize `.let`, so the recovered copies carry
+    // `Unknown` instructions and never populate locals — a `.push` on a
+    // local array then fails lowering with `cannot resolve return type for
+    // call to '<arr>.push'` (e.g. backend.sfn's argv builders when inlined
+    // into the `LlvmTextBackend` methods). `flatten_struct_methods` above
+    // already produced the authoritative copy of every struct method, so
+    // the recovered duplicate must be dropped; genuine free functions
+    // (distinct names) are kept. The dedup only fires when BOTH copies
+    // exist, so a true empty-parse recovery (structs also corrupt → no
+    // flattened method) keeps its recovered functions.
+    let mut deduped_safe_functions: NativeFunction[] = [];
+    let mut _dsf_i: int = 0;
+    loop {
+        if _dsf_i >= safe_functions.length { break; }
+        let _sf = safe_functions[_dsf_i];
+        let mut _is_dup_method: boolean = false;
+        let mut _msm_i: int = 0;
+        loop {
+            if _msm_i >= module_struct_methods.length { break; }
+            if module_struct_methods[_msm_i].name == _sf.name {
+                _is_dup_method = true;
+                break;
+            }
+            _msm_i += 1;
+        }
+        if !_is_dup_method { deduped_safe_functions.push(_sf); }
+        _dsf_i += 1;
+    }
+    let local_functions = extend_native_functions_inplace(deduped_safe_functions, module_struct_methods);
     if debug_lowering { print.err("emit-llvm: phase=local_functions"); }
     // Site 2 — must stay copying: local_functions is reused by
     // collect_runtime_helper_targets, render_llvm_preamble, and
