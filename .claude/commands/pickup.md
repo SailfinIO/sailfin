@@ -275,7 +275,35 @@ Based on the issue's `type:*` label, follow the appropriate workflow. Use the is
 | `type:feature` | Follow `/add-feature` phases — but skip the architect phase if the issue body already has a design (most groomed issues will). Go straight to implementation, then review, test, docs. |
 | `type:bug` | Follow `/debug-compile` phases — issue body should already have reproduction. Trace, fix, verify. |
 | `type:perf` | Follow `/perf` phases — profile baseline, implement, bench after, verify. |
-| `type:refactor` | Implement directly (one self-hosting step at a time), spawn `code-reviewer`, run `test-runner`. No architect needed if issue body has the plan. |
+| `type:refactor` | Implement (one self-hosting step at a time), spawn `code-reviewer`, run `test-runner`. No architect needed if issue body has the plan. |
+
+### Model allocation: spend Opus on judgment, push labor to Sonnet
+
+You (the orchestrator) run on Opus. Reserve yourself for the decisions a wrong
+call makes expensive — scope, sequencing, the review gate, genuine diagnosis —
+and route the rest to Sonnet specialists per `.claude/rules/model-allocation.md`:
+
+- **Surface mapping → `compiler-explorer` (sonnet).** Do not grep the tree
+  yourself on Opus to re-derive each `In:` unit's surface (next section).
+  Dispatch the explorer with the `In:` units and let it return the current file
+  set; you apply the In/Out boundary to its map.
+- **Routine implementation → `implementer` (sonnet), under your spec.** For
+  mechanical edits, clear-cut bug fixes (known repro), localized refactors, and
+  regression-test additions, author a precise spec (exact files, symbols, change,
+  acceptance criteria) and hand it to the `implementer`. Keep implementation on
+  yourself (Opus) only when the change is **novel, cross-cutting, or entangled
+  with design** — where a subtle wrong edit is costly. When in doubt on a
+  correctness-sensitive change, implement it yourself; on a mechanical change,
+  delegate and review.
+- **Review gate stays Opus.** Run the cheap mechanical checks first
+  (`sfn fmt --check`, `sfn check <files>`) so they're green before you spend
+  Opus, then spawn the Opus `code-reviewer` to adjudicate correctness,
+  self-hosting safety, and effects on the diff — whoever typed it.
+- **Failures triage on Sonnet first.** A failing `make compile`/`make test` goes
+  to the `test-runner` (sonnet) to classify: trivial (fmt, missing import, typo,
+  stale test) → fix via the `implementer`; genuine (miscompile, IR rejection,
+  self-host break, perf/memory regression) → escalate to the Opus
+  `seed-stabilizer`. Don't wake Opus for a formatting error.
 
 ### Reconcile the advisory map, then check for real scope growth
 
@@ -283,8 +311,9 @@ A groomed issue's **contract** is its **Goal** plus the semantic `In:`/`Out:`
 scope. `## Files Affected` is a **non-binding map** (`docs/conventions/issue-naming.md`,
 "Intent-authoritative issues") that is *expected to drift* between grooming and
 pickup. **Before** implementing, re-derive the current surface for each `In:`
-unit (grep/glob for the named symbols/units), compare it against the advisory
-map, and apply the **In/Out semantic boundary contract**:
+unit — **dispatch `compiler-explorer` (sonnet)** with the `In:` units rather than
+grepping the tree yourself on Opus — then compare its returned file set against
+the advisory map and apply the **In/Out semantic boundary contract**:
 
 - **In-scope — reconcile and proceed (do not pause):**
   - A path in `## Files Affected` was **renamed/moved** → use the new path.
@@ -367,7 +396,13 @@ make test       # no regressions
 # plus any issue-specific verification commands
 ```
 
-If any criterion fails, fix it. If a criterion turns out to be impossible or wrong, comment on the issue and pause for human input — do not declare done with unmet criteria.
+If any criterion fails, fix it — but triage before escalating. Route a failing
+`make compile`/`make test` through the Sonnet `test-runner` to classify: trivial
+(fmt, missing import, typo, stale test) → fix via the `implementer`; genuine
+(miscompile, IR rejection, self-host break, perf/memory regression) → escalate to
+the Opus `seed-stabilizer`. Don't spend Opus diagnosing a formatting error.
+
+If a criterion turns out to be impossible or wrong, comment on the issue and pause for human input — do not declare done with unmet criteria.
 
 ---
 

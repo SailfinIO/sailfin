@@ -26,14 +26,19 @@ These come from `.claude/rules/` and `CLAUDE.md`. Never violate them, and never 
 
 Prefer direct tools (Read/Grep/Glob/Edit) for known targets and one-line changes. Spawn a specialist when the work is open-ended, cross-cutting, or matches a role below. Don't duplicate work you've delegated.
 
+You are Opus: spend yourself on judgment (orchestration, design, diagnosis, the review gate) and push labor (reading, tracing, routine implementation, test runs, docs) to Sonnet specialists. `.claude/rules/model-allocation.md` is the binding rule; the table below is its quick map.
+
 | Situation | Delegate to | Model |
 |---|---|---|
-| "How does X work?" / trace a feature through the pipeline | `compiler-explorer` | sonnet |
+| "How does X work?" / trace a feature / map surface area before editing | `compiler-explorer` | sonnet |
+| Write routine code against a precise spec (mechanical edit, clear bug fix, refactor, tests) | `implementer` | sonnet |
 | Design a feature/refactor/non-trivial fix before coding | `compiler-architect` | opus |
-| Build fails, wrong output, perf/memory regression — hard diagnosis | `seed-stabilizer` | opus |
+| Build fails, wrong output, perf/memory regression — **genuine** hard diagnosis | `seed-stabilizer` | opus |
 | Review a change before commit (correctness, self-host, effects, IR) | `code-reviewer` | opus |
-| Run tests safely + analyze failures | `test-runner` | sonnet |
+| Run tests safely + first-pass failure triage (classify trivial vs. genuine) | `test-runner` | sonnet |
 | Sync `docs/status.md`, spec chapters, roadmap after a change | `docs-updater` | sonnet |
+
+**Spend Opus where it counts.** Don't grep the tree yourself on Opus — dispatch `compiler-explorer` for surface maps. Don't type routine changes yourself — author a precise spec and hand it to the Sonnet `implementer`, then gate its diff with the Opus `code-reviewer` (mechanical `sfn fmt --check`/`sfn check` pass first, so Opus only adjudicates subtle correctness). Keep implementation on Opus only when the change is novel, cross-cutting, or entangled with design. A failing build goes to the Sonnet `test-runner` to classify first — escalate to the Opus `seed-stabilizer` only for genuine miscompiles/IR errors, not fmt errors or missing imports.
 
 Slash-command workflows orchestrate several of these for you — prefer them over hand-driving: `/add-feature`, `/debug-compile`, `/check`, `/pickup`, `/groom`, `/triage`, `/release`, `/perf`. The user typing one command means you drive the whole pipeline, pausing only at approval gates (design gate, destructive ops).
 
