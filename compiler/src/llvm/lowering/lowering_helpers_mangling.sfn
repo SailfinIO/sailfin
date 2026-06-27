@@ -39,6 +39,7 @@ import {
     extract_module_name_from_native_text,
     find_declare_signature,
     find_signature_in_index,
+    find_vtable_method_signature,
     has_declare_or_define_in_index,
     insert_before_llvm_footer,
     pretrim_lines,
@@ -347,10 +348,20 @@ fn apply_module_symbol_mangling(lines: string[], imports: NativeImport[], curren
             if index_of(bare, "__") >= 0 { continue; }
             if string_array_contains(defined, bare) { continue; }
             if string_array_contains(import_olds, bare) { continue; }
-            // Only act when this module actually references the method (the
+            // Only act when this module actually references the method. The
             // signature is recovered from the bare call site, which still
-            // exists in `rewritten` at this point — before substitution).
-            let signature = find_declare_signature(rewritten, bare);
+            // exists in `rewritten` at this point — before substitution.
+            let mut signature = find_declare_signature(rewritten, bare);
+            // #1739: a method referenced only by a per-module interface
+            // vtable constant (not a direct call site) is missed by the
+            // call-site scan above. Recover its signature from the vtable's
+            // bitcast function-pointer type so the reference is rewritten to
+            // the provider symbol and an external declare is injected —
+            // otherwise the vtable initializer references an undefined value
+            // (invalid IR; #1739).
+            if signature == null {
+                signature = find_vtable_method_signature(rewritten, bare);
+            }
             if signature == null { continue; }
             let target = bare + "__" + provider_suffix;
             import_olds.push(bare);

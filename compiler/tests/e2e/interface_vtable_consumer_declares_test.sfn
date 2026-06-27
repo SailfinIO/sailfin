@@ -1,0 +1,93 @@
+// End-to-end regression for #1739: a consumer module that imports an
+// interface-implementing struct must lower to VALID IR regardless of which
+// interface methods it calls.
+//
+// Symptom (#1739): the compiler emits a per-module interface vtable constant
+// (`@vtable.<Struct>.<Interface>.const = internal constant ...`) that
+// references EVERY interface method symbol, but only the methods the consumer
+// directly CALLS were rewritten to the provider's module-qualified symbol and
+// declared. A consumer that imports the struct and calls only SOME interface
+// methods left the rest undefined in the vtable initializer:
+//   error: use of undefined value '@<Struct><Method>'
+// (emit retries 3x, IR validation rejected output → capsule-resolver: failed
+// to lower).
+//
+// This is a build-only failure of the #1389 class: `sfn check` models no
+// codegen/link and passes, so the bug surfaces only at `sfn build` / IR
+// validation. The fix recovers the uncalled method's signature from the
+// vtable's bitcast function-pointer type so it is rewritten to the provider
+// symbol and declared exactly like a called method.
+//
+// The fixture is the LlvmTextBackend/Backend shape from
+// `compiler/src/backend.sfn` (a two-method interface, structurally
+// implemented) that the SFEP-0027 §3.1 build-driver split exposes: an
+// assemble-only consumer (#1730) and the mirror link-only consumer.
+//
+// Build/parallel-runner hygiene (temp-dir build, full inherited env via
+// `process.environ()` for the nested clang/ld toolchain + per-invocation
+// SAILFIN_TEST_SCRATCH cache routing) mirrors
+// check_build_agree_module_global_test.sfn — see `.claude/rules/no-bash-e2e.md`.
+import { with_tmp_dir } from "sfn/test";
+
+fn _sfn_bin() -> string ![io] {
+    let configured = env.get("SAILFIN_BIN");
+    if configured.length > 0 { return configured; }
+    return "build/native/sailfin";
+}
+
+// Inherit the full parent environment so the nested clang/ld the build
+// spawns find their toolchain, and SAILFIN_TEST_SCRATCH routes the build
+// cache per-invocation (#1333).
+fn _child_env() -> string[] ![io] { return process.environ(); }
+
+// Provider: a two-method interface, structurally implemented by a struct.
+fn _provider_src() -> string {
+    return "interface Shape {\n" + "    fn area(self) -> int;\n"
+        + "    fn describe(self) -> int;\n"
+        + "}\n"
+        + "\n"
+        + "struct Circle {\n"
+        + "    r: int;\n"
+        + "    fn area(self) -> int { return self.r; }\n"
+        + "    fn describe(self) -> int { return self.r + 1; }\n"
+        + "}\n";
+}
+
+// Consumer that imports Circle and calls exactly one interface method
+// (`method_call` is "area" or "describe"). The uncalled method is the one
+// the vtable left undefined before the fix.
+fn _consumer_src(method_call: string) -> string {
+    return "import { Circle } from \"./shapes\";\n" + "fn main() ![io] {\n"
+        + "    let c = Circle { r: 5 };\n"
+        + "    print(number.to_string(c."
+        + method_call
+        + "()));\n"
+        + "}\n";
+}
+
+// Write provider + consumer into `dir`, build the consumer, and return the
+// build exit code (0 = valid IR + successful link).
+fn _build_consumer(dir: string, consumer_name: string, method_call: string) -> int ![io] {
+    fs.writeFile(dir + "/shapes.sfn", _provider_src());
+    let consumer_path = dir + "/" + consumer_name + ".sfn";
+    fs.writeFile(consumer_path, _consumer_src(method_call));
+    let binpath = dir + "/" + consumer_name + ".out";
+    let exit = process.run_capture([_sfn_bin(), "build", "-o", binpath, consumer_path], _child_env());
+    let _o = process.capture_take_stdout();
+    let _e = process.capture_take_stderr();
+    return exit;
+}
+
+test "lowering: assemble-only consumer of an interface struct lowers to valid IR (#1739)" ![io] {
+    let exit = with_tmp_dir(fn (dir: string) -> int {
+        return _build_consumer(dir, "consumer_area", "area");
+    });
+    assert exit == 0;
+}
+
+test "lowering: link-only consumer of an interface struct lowers to valid IR (#1739)" ![io] {
+    let exit = with_tmp_dir(fn (dir: string) -> int {
+        return _build_consumer(dir, "consumer_describe", "describe");
+    });
+    assert exit == 0;
+}

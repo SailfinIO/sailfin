@@ -681,6 +681,119 @@ fn find_declare_signature(lines: string[], symbol: string) -> DeclareSignature? 
     return find_declare_signature_t(pretrim_lines(lines), symbol);
 }
 
+// #1739: recover a method's signature from a per-module interface vtable
+// constant that references it. The vtable constant
+// (`@vtable.<Struct>.<Interface>.const = internal constant ...`) references
+// EVERY interface method symbol via a bitcast of its function-pointer type
+// (`<fptype> bitcast (<fptype> @<sym> to <fptype>)`), but a consumer module
+// only emits a direct call site for the methods it actually calls. So a
+// method referenced *only* by the vtable has no call site for
+// `find_declare_signature` to recover from, and the mangling pass would
+// leave its `@<sym>` reference unmangled and undeclared → an undefined value
+// in the vtable initializer (invalid IR). This recovers the signature from
+// the vtable's bitcast function-pointer type so the reference can be
+// rewritten to the provider symbol and an external declare injected.
+// Intentionally scans raw `lines` (not `pretrim_lines`d / indexed like the
+// #1512 hot-shim paths): this runs only in block 2b's cold fallback branch
+// (a vtable-only-referenced imported method), not the per-symbol shim loop,
+// so the index machinery would not pay for itself here.
+fn find_vtable_method_signature(lines: string[], symbol: string) -> DeclareSignature? {
+    if symbol.length == 0 { return null; }
+    let needle = "@" + symbol + " to ";
+    let bitcast_kw = "bitcast (";
+    let mut index: int = 0;
+    loop {
+        if index >= lines.length { break; }
+        let line = lines[index];
+        index += 1;
+        // Only interface vtable constants reference methods via bitcast.
+        if index_of(line, "= internal constant %vtable.") < 0 { continue; }
+        let at_pos = index_of(line, needle);
+        if at_pos < 0 { continue; }
+        // The function-pointer type sits between the enclosing `bitcast (`
+        // and the `@<symbol>` token. The last `bitcast (` before `at_pos` is
+        // the cast for this entry (each entry is one bitcast).
+        let prefix = substring(line, 0, at_pos);
+        let mut bc: int = -1;
+        let mut search_from: int = 0;
+        loop {
+            let rel = index_of(substring(prefix, search_from, prefix.length), bitcast_kw);
+            if rel < 0 { break; }
+            bc = search_from + rel;
+            search_from = bc + 1;
+        }
+        if bc < 0 { continue; }
+        let type_start = bc + bitcast_kw.length;
+        let fptype = trim_text(substring(line, type_start, at_pos));
+        if fptype.length == 0 { continue; }
+        let sig = _parse_fn_pointer_type(fptype);
+        if sig != null { return sig; }
+    }
+    return null;
+}
+
+// Parse an LLVM function-pointer type (`<ret> (<params>)*`) into a
+// DeclareSignature. Depth-aware so nested function-pointer parameter types
+// (themselves containing parens) split correctly.
+fn _parse_fn_pointer_type(fptype: string) -> DeclareSignature? {
+    let paren_open = index_of(fptype, "(");
+    if paren_open < 0 { return null; }
+    let return_type = trim_text(substring(fptype, 0, paren_open));
+    if return_type.length == 0 { return null; }
+    // Find the matching close paren for the parameter list.
+    let mut depth: int = 0;
+    let mut i: int = paren_open;
+    let mut close: int = -1;
+    loop {
+        if i >= fptype.length { break; }
+        let ch = fptype[i];
+        if ch == "(" { depth += 1; }
+        if ch == ")" {
+            depth -= 1;
+            if depth == 0 {
+                close = i;
+                break;
+            }
+        }
+        i += 1;
+    }
+    if close < 0 { return null; }
+    let params_text = substring(fptype, paren_open + 1, close);
+    let mut param_types: string[] = [];
+    let mut ps: int = 0;
+    let mut sc: int = 0;
+    let mut pd: int = 0;
+    let mut cd: int = 0;
+    loop {
+        if sc >= params_text.length { break; }
+        let pch = params_text[sc];
+        if pch == "(" { pd += 1; }
+        if pch == ")" {
+            if pd > 0 { pd -= 1; }
+        }
+        if pch == "{" { cd += 1; }
+        if pch == "}" {
+            if cd > 0 { cd -= 1; }
+        }
+        if pch == "," {
+            if pd == 0 {
+                if cd == 0 {
+                    let part = trim_text(substring(params_text, ps, sc));
+                    if part.length > 0 { param_types.push(part); }
+                    ps = sc + 1;
+                }
+            }
+        }
+        sc += 1;
+    }
+    let last = trim_text(substring(params_text, ps, params_text.length));
+    if last.length > 0 { param_types.push(last); }
+    return DeclareSignature {
+        return_type: return_type,
+        param_types: param_types
+    };
+}
+
 // Symbol → header-line index over pre-trimmed module lines (#1512). The
 // mangling shim loop probes hundreds of symbols against the module; doing
 // that with `find_declare_signature` / `_has_declare_or_define` re-scans
