@@ -21,12 +21,11 @@
 //
 // Marshalling: `argv: string[]` arrives without a NULL
 // sentinel. The body allocates a `(len + 1) * 8`-byte buffer
-// via libc `malloc`, copies each `sfn_str_to_cstr(argv[i])`
-// pointer (no-op on today's NUL-terminated strings — see
-// `sailfin_runtime.c:2075` in the retired C runtime for the identity-
-// bridge rationale that this Sailfin module preserves at the
-// API boundary), and writes a NULL terminator past the last
-// element. `atomic_store` is the seed-supported pointer-slot
+// via libc `malloc`, copies each `sfn_str_to_cstr(argv[i], …)`
+// pointer (#1705: an arena copy of the element's carried-length
+// bytes + a trailing NUL, so a non-NUL-terminated view cannot
+// over-read past its slice), and writes a NULL terminator past
+// the last element. `atomic_store` is the seed-supported pointer-slot
 // store primitive (the bare `slots[i] = x` form on a raw
 // `* i64` lowers to a no-op on the pinned seed — verified
 // 2026-05-22). `seq_cst` ordering is irrelevant on this code
@@ -95,7 +94,7 @@ extern fn posix_spawnp(pid: * i32, path: * u8, file_actions: * u8, attrp: * u8, 
 
 extern fn waitpid(pid: i32, status: * i32, options: i32) -> i32;
 
-extern fn sfn_str_to_cstr(s: * u8) -> * u8;
+extern fn sfn_str_to_cstr(s_data: * u8, s_len: i64, arena_slot: * u8) -> * u8;
 
 // libc `environ` (`char **`) referenced directly via `extern var`
 // (#1313) — the Sailfin-native replacement for the retired C bridge
@@ -239,7 +238,7 @@ fn sfn_process_run(argv: string[]) -> float ![io] {
     loop {
         if i >= len { break; }
         let element: string = argv[i];
-        let s_ptr: * u8 = sfn_str_to_cstr(element as * u8);
+        let s_ptr: * u8 = sfn_str_to_cstr(element as * u8, element.length, null);
         let slot_ptr: * i64 = slots + i;
         let s_as_i64: i64 = s_ptr as i64;
         atomic_store(slot_ptr, s_as_i64);
@@ -249,15 +248,15 @@ fn sfn_process_run(argv: string[]) -> float ![io] {
     let zero: i64 = 0;
     atomic_store(null_slot, zero);
 
-    // Spawn. `path` is `argv[0]` adopted as a C string view via
-    // the identity-bridge `sfn_str_to_cstr`. `file_actions` /
+    // Spawn. `path` is `argv[0]` materialized as a NUL-terminated C
+    // string via `sfn_str_to_cstr` (#1705 arena copy). `file_actions` /
     // `attrp` are NULL; `envp` is the parent's `environ` (see
     // the file header for the inheritance contract — passing
     // NULL gave the child an empty environment on Linux glibc).
     let mut pid: i32 = 0;
     let pid_ptr: * i32 = & pid;
     let first: string = argv[0];
-    let path: * u8 = sfn_str_to_cstr(first as * u8);
+    let path: * u8 = sfn_str_to_cstr(first as * u8, first.length, null);
     let envp: * * u8 = get_environ();
     let buf_pp: * * u8 = buf as * * u8;
     let spawn_err: i32 = posix_spawnp(pid_ptr, path, null, null, buf_pp, envp);
@@ -388,8 +387,8 @@ struct SailfinProcessHandle {
 }
 
 // Build a NULL-terminated C `char**` argv/envp buffer from a Sailfin
-// `string[]`. `(n + 1)` 8-byte slots; element pointers adopted via
-// the identity-bridge `sfn_str_to_cstr` (see `sfn_process_run`).
+// `string[]`. `(n + 1)` 8-byte slots; element pointers materialized via
+// `sfn_str_to_cstr` (#1705 arena copy + NUL; see `sfn_process_run`).
 // `atomic_store` is the seed-supported pointer-slot store. An empty
 // array yields a single NULL slot — i.e. an empty argv/env (the
 // os-capsule env contract treats `Env { entries: [] }` as the empty
@@ -405,7 +404,7 @@ fn _process_build_cstr_argv(items: string[]) -> * u8 {
     loop {
         if i >= n { break; }
         let element: string = items[i];
-        let s_ptr: * u8 = sfn_str_to_cstr(element as * u8);
+        let s_ptr: * u8 = sfn_str_to_cstr(element as * u8, element.length, null);
         let slot_ptr: * i64 = slots + i;
         let s_as_i64: i64 = s_ptr as i64;
         atomic_store(slot_ptr, s_as_i64);
@@ -734,7 +733,7 @@ fn _run_capture_impl(argv: string[], env_flat: string[], rusage_buf: * u8, cwd: 
     let mut pid: i32 = 0;
     let pid_ptr: * i32 = & pid;
     let first: string = argv[0];
-    let path: * u8 = sfn_str_to_cstr(first as * u8);
+    let path: * u8 = sfn_str_to_cstr(first as * u8, first.length, null);
     let argv_pp: * * u8 = child_argv as * * u8;
     let envp_pp: * * u8 = child_envp as * * u8;
     let spawn_err: i32 = posix_spawnp(pid_ptr, path, actions, null, argv_pp, envp_pp);
@@ -1060,7 +1059,7 @@ fn _spawn_with_env_impl(argv: string[], env_flat: string[], cwd: * u8) -> i64 ![
     let mut pid: i32 = 0;
     let pid_ptr: * i32 = & pid;
     let first: string = argv[0];
-    let path: * u8 = sfn_str_to_cstr(first as * u8);
+    let path: * u8 = sfn_str_to_cstr(first as * u8, first.length, null);
     let argv_pp: * * u8 = child_argv as * * u8;
     let envp_pp: * * u8 = child_envp as * * u8;
     let spawn_err: i32 = posix_spawnp(pid_ptr, path, actions, null, argv_pp, envp_pp);

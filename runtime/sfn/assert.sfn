@@ -42,7 +42,7 @@ extern fn fwrite(ptr: * u8, size: usize, nmemb: usize, fp: * u8) -> i64;
 
 extern fn fclose(fp: * u8) -> i32;
 
-extern fn sfn_str_to_cstr(s: * u8) -> * u8;
+extern fn sfn_str_to_cstr(s_data: * u8, s_len: i64, arena_slot: * u8) -> * u8;
 
 // Raise a value error so an uncaught assertion terminates the process
 // and a `try`/`catch` can observe it. Sailfin-native (exception.sfn).
@@ -57,7 +57,7 @@ extern fn sfn_raise_value_error(message: * u8) -> void;
 // are sequential within one process, so they concatenate in order.
 // `_assert_write_lit(fp, lit)` — write a string literal's bytes to `fp`.
 fn _assert_write_lit(fp: * u8, lit: string) -> void ![io] {
-    let c: * u8 = sfn_str_to_cstr(lit as * u8);
+    let c: * u8 = sfn_str_to_cstr(lit as * u8, lit.length, null);
     if (c as i64) == 0 { return; }
     let n: i64 = strlen(c) as i64;
     if n > 0 {
