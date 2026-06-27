@@ -1,0 +1,235 @@
+// Focused leak gate for the serve request-recv early-return paths
+// (#1709, gap B8 of epic #1540). The blocking `serve()` accept loop never
+// returns cleanly, so an atexit LeakSanitizer pass over the whole server
+// is impossible (the loopback storm in `serve_loopback_test.sfn` is the
+// live-server stability proxy). This test instead drives the leak-prone
+// helper — `runtime/sfn/concurrency/serve.sfn::_serve_recv_request` — in
+// isolation over a `socketpair`, through a C harness that exits cleanly so
+// LeakSanitizer's atexit pass can run.
+//
+// `_serve_recv_request` has external linkage (the `_serve_` prefix exists
+// precisely so the native backend's file-local-but-external runtime
+// helpers do not collide — see serve.sfn's header), so the harness binds
+// it directly. Three legs, each on a fresh socketpair:
+//
+//   A. truncated — write a partial head (no `\r\n\r\n`) then close the
+//      write end; recv sees EOF before the terminator. Post-#1709 the
+//      helper FREES the growing buffer and returns NULL (no dispatch, no
+//      leak). Pre-fix it returned the partial buffer — caught here both as
+//      a non-NULL return (exit 1) AND, since the harness drops it, as a
+//      LeakSanitizer report.
+//   B. over-cap — declare `Content-Length: 2000000` (over the 1 MiB cap)
+//      with a complete head; the helper rejects it: free + NULL.
+//   C. valid — a complete head + `\r\n\r\n`; the helper returns a non-NULL
+//      buffer the harness frees (so a clean leg leaves nothing for LSan).
+//
+// Build with `-fsanitize=address` and run with SAILFIN_MEM_LIMIT=unlimited
+// (the instrumented binary's own self-cap would otherwise abort the ~16 TB
+// shadow reservation at startup) — only an actual `ERROR: AddressSanitizer:`
+// / leak report FAILS; a startup abort or a missing ASAN runtime SKIPS, per
+// `.claude/rules/compiler-safety.md`. A plain (uninstrumented) build+run
+// leg always exercises the three legs for behavioral coverage when clang is
+// present.
+//
+// NOTE on matchers: `sfn/test`'s `expect_*` are `![pure]` and cannot be
+// called from an `![io]` test; assert on captured output with `sfn/strings`.
+import { find, contains } from "sfn/strings";
+
+fn _sfn_bin() -> string ![io] {
+    let configured = env.get("SAILFIN_BIN");
+    if configured.length > 0 { return configured; }
+    return "build/native/sailfin";
+}
+
+// `run_capture`'s empty array is the *empty* environment, not "inherit".
+// Thread the toolchain variables: the legs spawn clang + its linker (PATH),
+// and SAILFIN_TEST_SCRATCH routes the build-cache per invocation so the
+// parallel pool does not collide.
+fn _child_env() -> string[] ![io] {
+    let mut e: string[] = [];
+    let path = env.get("PATH");
+    if path.length > 0 { e.push("PATH=" + path); }
+    let home = env.get("HOME");
+    if home.length > 0 { e.push("HOME=" + home); }
+    let tmpdir = env.get("TMPDIR");
+    if tmpdir.length > 0 { e.push("TMPDIR=" + tmpdir); }
+    let scratch = env.get("SAILFIN_TEST_SCRATCH");
+    if scratch.length > 0 { e.push("SAILFIN_TEST_SCRATCH=" + scratch); }
+    return e;
+}
+
+// The ASAN run's child env, with SAILFIN_MEM_LIMIT=unlimited so the
+// instrumented binary's own self-cap does not abort the ~16 TB shadow
+// reservation at startup. detect_leaks=1 forces the atexit leak pass even
+// where the platform default leaves it off.
+fn _asan_env() -> string[] ![io] {
+    let mut e = _child_env();
+    e.push("SAILFIN_MEM_LIMIT=unlimited");
+    e.push("ASAN_OPTIONS=detect_leaks=1");
+    return e;
+}
+
+fn _scratch_dir() -> string ![io] {
+    let mut base = env.get("SAILFIN_TEST_SCRATCH");
+    if base.length == 0 { base = "/tmp"; }
+    base = base + "/sfn-serve-request-leak";
+    fs.createDirectory(base, true);
+    return base;
+}
+
+fn _repo_root() -> string ![io] {
+    let configured = env.get("SAILFIN_REPO_ROOT");
+    if configured.length > 0 { return configured; }
+    return ".";
+}
+
+fn _serve_path() -> string ![io] {
+    return _repo_root() + "/runtime/sfn/concurrency/serve.sfn";
+}
+
+// Emit serve.ll into the scratch dir (re-emit only if absent).
+fn _emit_serve_ll() -> string ![io] {
+    let dir = _scratch_dir();
+    let ll = dir + "/serve.ll";
+    if !fs.exists(ll) {
+        let exit = process.run_capture([_sfn_bin(), "emit", "-o", ll, "llvm", _serve_path()], _child_env());
+        let _o = process.capture_take_stdout();
+        let _e = process.capture_take_stderr();
+        assert exit == 0;
+    }
+    return ll;
+}
+
+// The socketpair leak harness. Stubs the scheduler externs that serve.sfn's
+// DEFINED accept-loop functions reference (the leak legs never drive the
+// accept loop, but the linker still needs the symbols resolved). Each leg
+// uses a fresh AF_UNIX SOCK_STREAM pair: bytes written to `sv[1]` and the
+// `close(sv[1])` FIN are read by `_serve_recv_request(sv[0])`.
+fn _leak_harness_c() -> string {
+    return "#include <stddef.h>\n" + "#include <stdlib.h>\n"
+        + "#include <stdio.h>\n"
+        + "#include <string.h>\n"
+        + "#include <unistd.h>\n"
+        + "#include <sys/socket.h>\n"
+        + "\n"
+        + "/* serve.sfn scheduler externs — referenced by the accept-loop\n"
+        + " * functions in the linked IR; never called on the recv legs. */\n"
+        + "void *sfn_taskqueue_create(long capacity) { (void)capacity; return NULL; }\n"
+        + "void sfn_taskqueue_destroy(void *q) { (void)q; }\n"
+        + "void sfn_taskqueue_enqueue(void *q, void *t) { (void)q; (void)t; }\n"
+        + "void *sfn_task_create_detached(long fn, long ctx) { (void)fn; (void)ctx; return NULL; }\n"
+        + "void *sfn_scheduler_create(void *q) { (void)q; return NULL; }\n"
+        + "\n"
+        + "/* Module-init / runtime trio the emitted IR's global ctor + struct\n"
+        + " * helpers reference (same stubs as runtime_memory_arena_test). */\n"
+        + "void sailfin_runtime_mark_persistent(void *p) { (void)p; }\n"
+        + "void *sfn_alloc_struct(long n) { return calloc(1, (size_t)n); }\n"
+        + "void sfn_type_register(void *d) { (void)d; }\n"
+        + "\n"
+        + "extern char *_serve_recv_request(int fd);\n"
+        + "\n"
+        + "/* Drive one leg: write `req` (len bytes) to the peer, close it so\n"
+        + " * the recv side sees EOF, then call the helper. Returns the helper's\n"
+        + " * pointer (NULL on the reject paths). */\n"
+        + "static char *drive(const char *req, size_t len) {\n"
+        + "    int sv[2];\n"
+        + "    if (socketpair(AF_UNIX, SOCK_STREAM, 0, sv) != 0) return (char *)-1;\n"
+        + "    if (len > 0) { ssize_t _w = write(sv[1], req, len); (void)_w; }\n"
+        + "    close(sv[1]);\n"
+        + "    char *r = _serve_recv_request(sv[0]);\n"
+        + "    close(sv[0]);\n"
+        + "    return r;\n"
+        + "}\n"
+        + "\n"
+        + "int main(void) {\n"
+        + "    /* Leg A — truncated head, EOF before the terminator: NULL, freed. */\n"
+        + "    const char *trunc = \"GET / HTTP/1.1\\r\\nHost: x\";\n"
+        + "    char *a = drive(trunc, strlen(trunc));\n"
+        + "    if (a == (char *)-1) { fprintf(stderr, \"socketpair A failed\\n\"); return 2; }\n"
+        + "    if (a != NULL) { fprintf(stderr, \"truncated: expected NULL, got non-NULL\\n\"); return 1; }\n"
+        + "\n"
+        + "    /* Leg B — over-cap Content-Length, complete head: NULL, freed. */\n"
+        + "    const char *over = \"POST / HTTP/1.1\\r\\nContent-Length: 2000000\\r\\n\\r\\nx\";\n"
+        + "    char *b = drive(over, strlen(over));\n"
+        + "    if (b == (char *)-1) { fprintf(stderr, \"socketpair B failed\\n\"); return 4; }\n"
+        + "    if (b != NULL) { fprintf(stderr, \"over-cap: expected NULL, got non-NULL\\n\"); return 3; }\n"
+        + "\n"
+        + "    /* Leg C — complete head, no body: non-NULL buffer the caller owns. */\n"
+        + "    const char *valid = \"GET / HTTP/1.1\\r\\nHost: x\\r\\n\\r\\n\";\n"
+        + "    char *c = drive(valid, strlen(valid));\n"
+        + "    if (c == (char *)-1) { fprintf(stderr, \"socketpair C failed\\n\"); return 6; }\n"
+        + "    if (c == NULL) { fprintf(stderr, \"valid: expected non-NULL, got NULL\\n\"); return 5; }\n"
+        + "    free(c);\n"
+        + "    return 0;\n"
+        + "}\n";
+}
+
+// ---- Phase 1: emit sanity — _serve_recv_request is defined ----
+test "serve emit: _serve_recv_request is a defined external symbol" ![io] {
+    let ll = _emit_serve_ll();
+    let ir = fs.readFile(ll);
+    assert contains(ir, "@_serve_recv_request(");
+}
+
+// ---- Phase 2: plain leak-leg roundtrip (clang) ----
+test "serve recv: EOF / over-cap / valid legs behave (C harness via clang) (#1709)" ![io] {
+    let dir = _scratch_dir();
+    let ll = _emit_serve_ll();
+
+    let harness = dir + "/leak_harness.c";
+    fs.writeFile(harness, _leak_harness_c());
+
+    let bin = dir + "/serve_recv_legs";
+    let link_exit = process.run_capture(["clang", "-Wno-override-module", harness, ll, "-o", bin, "-lm"], _child_env());
+    let _lo = process.capture_take_stdout();
+    let _le = process.capture_take_stderr();
+    if link_exit != 0 {
+        // clang unavailable or link failed — skip (the emit assertion above
+        // still pins the symbol contract).
+        assert true;
+        return;
+    }
+    let run_exit = process.run_capture([bin], _child_env());
+    let _ro = process.capture_take_stdout();
+    let _re = process.capture_take_stderr();
+    assert run_exit == 0;
+}
+
+// ---- Phase 3: ASAN leak leg (best effort, skip-on-no-ASAN) ----
+test "serve recv: error-path buffers are freed — no leaks (ASAN, best effort) (#1709)" ![io] {
+    let dir = _scratch_dir();
+    let ll = _emit_serve_ll();
+
+    let harness = dir + "/leak_harness.c";
+    fs.writeFile(harness, _leak_harness_c());
+
+    let bin_asan = dir + "/serve_recv_legs_asan";
+    let asan_link = process.run_capture(["clang", "-fsanitize=address", "-Wno-override-module", harness, ll, "-o", bin_asan, "-lm"], _child_env());
+    let _alo = process.capture_take_stdout();
+    let _ale = process.capture_take_stderr();
+    if asan_link != 0 {
+        // ASAN runtime not available on this host — the plain leg covered
+        // behavior.
+        assert true;
+        return;
+    }
+
+    let asan_exit = process.run_capture([bin_asan], _asan_env());
+    let asan_out = process.capture_take_stdout();
+    let asan_err = process.capture_take_stderr();
+    if asan_exit == 0 {
+        // Clean: no leaks, all legs behaved.
+        assert true;
+    } else if find(asan_out + asan_err, "ERROR: AddressSanitizer:", 0) >= 0 {
+        // A genuine sanitizer report — a request buffer leaked (or a
+        // double-free / UAF) on an error path. The #1709 regression signal.
+        assert false;
+    } else if find(asan_out + asan_err, "detected memory leaks", 0) >= 0 {
+        // LeakSanitizer's standalone leak summary line — also a real leak.
+        assert false;
+    } else {
+        // Startup/environment failure (shadow mapping under a vmem cap,
+        // missing runtime) — not a verdict on the free discipline. Skip.
+        assert true;
+    }
+}
