@@ -30,11 +30,12 @@
 // return a caller-owned NUL-terminated `* u8`; the capsule views it via
 // the canonical `* u8 as string` cast.
 //
-// v0 scope: TCP only. UDP, TLS, and real DNS (`getaddrinfo`) are out of
-// scope (epic #1540 B1/B2); host resolution is the `localhost` alias plus
-// numeric dotted-quad IPv4, reused from `http.sfn::_host_ip4`. Bodies are
-// length-bounded by `strlen` (text v0); embedded-NUL binary payloads are a
-// follow-up wave, matching the rest of the runtime socket surface.
+// v0 scope: TCP only. UDP and TLS are out of scope (epic #1540 B1);
+// host resolution is the `localhost` alias, numeric dotted-quad IPv4, and
+// real DNS (`getaddrinfo`, #1540 B2 — first IPv4/A record only, no AAAA,
+// no caching, no happy-eyeballs). Bodies are length-bounded by `strlen`
+// (text v0); embedded-NUL binary payloads are a follow-up wave, matching
+// the rest of the runtime socket surface.
 //
 // Effects: the socket-touching helpers and public symbols carry `![net]`,
 // mirroring `http.sfn`. Externs carry no effect (externs may not); the
@@ -53,6 +54,8 @@ extern fn free(ptr: * u8) -> void;
 extern fn realloc(ptr: * u8, new_size: usize) -> * u8;
 
 extern fn memset(dst: * u8, byte: i32, n: usize) -> * u8;
+
+extern fn memcpy(dst: * u8, src: * u8, n: usize) -> * u8;
 
 extern fn strlen(s: * u8) -> usize;
 
@@ -92,6 +95,21 @@ extern fn close(fd: i32) -> i32;
 
 extern fn setsockopt(sockfd: i32, level: i32, optname: i32, optval: * u8, optlen: i32) -> i32;
 
+// ── DNS resolution (libc) ─────────────────────────────────────
+// `int getaddrinfo(const char *node, const char *service,
+//                  const struct addrinfo *hints, struct addrinfo **res)`
+// and `void freeaddrinfo(struct addrinfo *res)`. `node` is the hostname,
+// `service` is NULL (we resolve the address only; the port is supplied by
+// the caller). `hints` and the `res` out-list are opaque `struct addrinfo`
+// buffers cast through `* u8` (the `net.sfn` opaque-handle policy); `res`
+// is a `struct addrinfo **` out-param (`* * u8`, the same shape `environ`
+// and `posix_spawnp`'s argv/envp use, on the extern accept-list). Declared
+// inline per the same #306 cross-module-extern workaround as the socket
+// externs above.
+extern fn getaddrinfo(node: * u8, service: * u8, hints: * u8, res: * * u8) -> i32;
+
+extern fn freeaddrinfo(res: * u8) -> void;
+
 // `_net_ptr_off(p, off)` — byte-stride pointer arithmetic for a variable
 // offset (net-local copy of `http.sfn`'s `_ptr_off`).
 fn _net_ptr_off(p: * u8, off: i64) -> * u8 {
@@ -99,23 +117,29 @@ fn _net_ptr_off(p: * u8, off: i64) -> * u8 {
     return addr as * u8;
 }
 
-// `_net_host_ip4(host, out)` — resolve `host` to four IPv4 octets, written
-// to `out[0..4]`. Handles the `localhost` alias and numeric dotted-quad
-// addresses; returns false on anything else (no DNS in v0). `out` must
-// point at >= 4 writable bytes. Net-local copy of `http.sfn`'s `_host_ip4`.
-fn _net_host_ip4(host: * u8, out: * u8) -> bool {
-    let localhost: string = "localhost";
-    if strcmp(host, localhost as * u8) == 0 {
-        memset(_net_ptr_off(out, 0), 127, 1 as usize);
-        memset(_net_ptr_off(out, 1), 0, 1 as usize);
-        memset(_net_ptr_off(out, 2), 0, 1 as usize);
-        memset(_net_ptr_off(out, 3), 1, 1 as usize);
-        return true;
-    }
+// `_net_first_is_digit(p)` — is the first byte at `p` an ASCII digit
+// (`'0'`..`'9'` = 48..57)? Used to reject a non-numeric label before
+// `atoi` (which returns 0 for `"foo"`) can smuggle a hostname through the
+// dotted-quad parser as octet 0. Reads the byte via the pointer-read
+// intrinsic and masks the low 8 bits.
+fn _net_first_is_digit(p: * u8) -> bool {
+    let b: i64 = (sailfin_intrinsic_pointer_read_i32(p) as i64) & 255;
+    return b >= 48 && b <= 57;
+}
+
+// `_net_parse_quad(host, out)` — parse `host` as a numeric dotted-quad
+// IPv4 address, writing the four octets to `out[0..4]`. Returns false on
+// anything that is not a clean `N.N.N.N` (each octet a leading-digit value
+// in 0..255 separated by `.`), leaving the caller to fall through to DNS.
+fn _net_parse_quad(host: * u8, out: * u8) -> bool {
     let mut cursor: * u8 = host;
     let mut i: i64 = 0;
     loop {
         if i >= 4 { break; }
+        // Each octet must start with a digit — `atoi("foo")` is 0, which
+        // would otherwise pass a hostname label off as octet 0 instead of
+        // routing it to DNS.
+        if !_net_first_is_digit(cursor) { return false; }
         let octet: i64 = atoi(cursor) as i64;
         // Reject malformed octets — `atoi` happily returns values outside
         // 0..255 (or negative), which would silently wrap/truncate into one
@@ -130,6 +154,95 @@ fn _net_host_ip4(host: * u8, out: * u8) -> bool {
         i = i + 1;
     }
     return true;
+}
+
+// `_net_sockaddr_octets(sa, out)` — given the address of a `sockaddr_in`
+// (`sa`, as an i64), validate it is an AF_INET address and copy its four
+// `sin_addr` octets to `out[0..4]`. Returns false for a null pointer or a
+// non-INET family. The family lives at the front of the struct, spelled
+// differently per target (Linux: u16 `sin_family` at byte 0 → low byte 2;
+// macOS/BSD: u8 `sin_len` at byte 0, u8 `sin_family` at byte 1 → byte1 2),
+// so we accept AF_INET (2) in either the low or the second byte. The
+// address octets sit at offset 4 on both layouts. The control byte 2 never
+// appears as the first byte of a hostname string, so this also rejects an
+// `ai_canonname` char-pointer mistaken for a sockaddr (see `_net_resolve_dns`).
+fn _net_sockaddr_octets(sa: i64, out: * u8) -> bool {
+    if sa == 0 { return false; }
+    let head4: i64 = sailfin_intrinsic_pointer_read_i32(sa as * u8) as i64;
+    let b0: i64 = head4 & 255;
+    let b1: i64 = (head4 >> 8) & 255;
+    if b0 != 2 && b1 != 2 { return false; }
+    memcpy(out, (sa + 4) as * u8, 4 as usize);
+    return true;
+}
+
+// `_net_resolve_dns(host, out)` — resolve a hostname to its first IPv4 (A)
+// address via libc `getaddrinfo`, writing the four octets to `out[0..4]`.
+// Returns false when resolution fails (so the caller surfaces the existing
+// typed failure — a closed Connection / null body — never a hang or crash).
+//
+// v0 scope (epic #1540 B2): IPv4 only (hints restrict to AF_INET +
+// SOCK_STREAM), first A record only (no happy-eyeballs), no caching, no
+// AAAA. `service` is NULL — only the address is resolved; the caller owns
+// the port. `res` is a `struct addrinfo **`: an 8-byte pointer slot whose
+// `*res` (read with the pointer-read intrinsic) is the head of the result
+// list, freed with `freeaddrinfo`.
+//
+// `struct addrinfo` is 48 bytes on both targets, but the order of its two
+// trailing pointers differs: `ai_addr` is at byte offset 24 on Linux and
+// 32 on macOS/BSD (the other slot is `ai_canonname`, NULL because
+// AI_CANONNAME is not requested). The platform-agnostic emitted IR cannot
+// branch on the target, so we read both candidate slots and let
+// `_net_sockaddr_octets` pick the one that validates as an AF_INET sockaddr.
+fn _net_resolve_dns(host: * u8, out: * u8) -> bool ![net] {
+    let hints: * u8 = malloc(48 as usize);
+    if hints as i64 == 0 { return false; }
+    memset(hints, 0, 48 as usize);
+    // ai_family = AF_INET (2) at offset 4; ai_socktype = SOCK_STREAM (1)
+    // at offset 8 — identical offsets on both targets.
+    memset(_net_ptr_off(hints, 4), 2, 1 as usize);
+    memset(_net_ptr_off(hints, 8), 1, 1 as usize);
+    let res: * u8 = malloc(8 as usize);
+    if res as i64 == 0 {
+        free(hints);
+        return false;
+    }
+    memset(res, 0, 8 as usize);
+    let rc: i32 = getaddrinfo(host, null, hints, res as * * u8);
+    free(hints);
+    if rc != 0 {
+        free(res);
+        return false;
+    }
+    let head: i64 = sailfin_intrinsic_pointer_read_i64(res);
+    free(res);
+    if head == 0 { return false; }
+    let cand_a: i64 = sailfin_intrinsic_pointer_read_i64((head + 24) as * u8);
+    let cand_b: i64 = sailfin_intrinsic_pointer_read_i64((head + 32) as * u8);
+    let mut ok: bool = false;
+    if _net_sockaddr_octets(cand_a, out) { ok = true; } else {
+        if _net_sockaddr_octets(cand_b, out) { ok = true; }
+    }
+    freeaddrinfo(head as * u8);
+    return ok;
+}
+
+// `_net_host_ip4(host, out)` — resolve `host` to four IPv4 octets, written
+// to `out[0..4]`. Handles the `localhost` alias and numeric dotted-quad
+// addresses directly; anything else (a real hostname) falls through to DNS
+// via `getaddrinfo` (#1540 B2). `out` must point at >= 4 writable bytes.
+// Net-local copy of `http.sfn`'s `_host_ip4`.
+fn _net_host_ip4(host: * u8, out: * u8) -> bool ![net] {
+    let localhost: string = "localhost";
+    if strcmp(host, localhost as * u8) == 0 {
+        memset(_net_ptr_off(out, 0), 127, 1 as usize);
+        memset(_net_ptr_off(out, 1), 0, 1 as usize);
+        memset(_net_ptr_off(out, 2), 0, 1 as usize);
+        memset(_net_ptr_off(out, 3), 1, 1 as usize);
+        return true;
+    }
+    if _net_parse_quad(host, out) { return true; }
+    return _net_resolve_dns(host, out);
 }
 
 // `_net_io_timeout_secs()` — the recv/send/accept socket-timeout budget
@@ -389,4 +502,62 @@ fn sfn_net_accept(fd: i32) -> i32 ![net] {
     if conn < 0 { return 0 - 1; }
     _net_set_socket_timeouts(conn);
     return conn;
+}
+
+// `_net_render_u8(value, buf, off)` — render `value` (0..255) as decimal
+// into `buf` at byte offset `off`, returning the new offset. Emits the
+// minimal number of digits (no leading zeros): 1 digit for 0..9, 2 for
+// 10..99, 3 for 100..255. Used to format the dotted-quad string.
+fn _net_render_u8(value: i64, buf: * u8, off: i64) -> i64 {
+    let mut cur: i64 = off;
+    if value >= 100 {
+        memset(_net_ptr_off(buf, cur), (48 + value / 100) as i32, 1 as usize);
+        cur = cur + 1;
+    }
+    if value >= 10 {
+        memset(_net_ptr_off(buf, cur), (48 + (value / 10) % 10) as i32, 1 as usize);
+        cur = cur + 1;
+    }
+    memset(_net_ptr_off(buf, cur), (48 + value % 10) as i32, 1 as usize);
+    return cur + 1;
+}
+
+// `sfn_net_resolve(host)` — resolve `host` to a single dotted-quad IPv4
+// string (caller-owned, NUL-terminated), or null when it cannot be
+// resolved. Backs `sfn/net::resolve`. `localhost` and a numeric
+// dotted-quad echo back their loopback / literal address; any other name
+// is resolved through `getaddrinfo` (first A record, #1540 B2). Returns
+// null (→ an empty `string[]` at the capsule boundary) on failure, never a
+// hang or crash.
+fn sfn_net_resolve(host: * u8) -> * u8 ![net] {
+    if host as i64 == 0 { return null; }
+    let octets: * u8 = malloc(4 as usize);
+    if octets as i64 == 0 { return null; }
+    memset(octets, 0, 4 as usize);
+    if !_net_host_ip4(host, octets) {
+        free(octets);
+        return null;
+    }
+    let packed: i64 = sailfin_intrinsic_pointer_read_i32(octets) as i64;
+    free(octets);
+    let a: i64 = packed & 255;
+    let b: i64 = (packed >> 8) & 255;
+    let c: i64 = (packed >> 16) & 255;
+    let d: i64 = (packed >> 24) & 255;
+    // Max "255.255.255.255" is 15 bytes + NUL.
+    let buf: * u8 = malloc(16 as usize);
+    if buf as i64 == 0 { return null; }
+    let mut off: i64 = 0;
+    off = _net_render_u8(a, buf, off);
+    memset(_net_ptr_off(buf, off), 46, 1 as usize);
+    off = off + 1;
+    off = _net_render_u8(b, buf, off);
+    memset(_net_ptr_off(buf, off), 46, 1 as usize);
+    off = off + 1;
+    off = _net_render_u8(c, buf, off);
+    memset(_net_ptr_off(buf, off), 46, 1 as usize);
+    off = off + 1;
+    off = _net_render_u8(d, buf, off);
+    memset(_net_ptr_off(buf, off), 0, 1 as usize);
+    return buf;
 }
