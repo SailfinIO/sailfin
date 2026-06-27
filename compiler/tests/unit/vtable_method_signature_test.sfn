@@ -1,0 +1,96 @@
+// Unit coverage for `find_vtable_method_signature` / `_parse_fn_pointer_type`
+// (compiler/src/llvm/lowering/lowering_helpers.sfn), the #1739 fix that
+// recovers an interface method's signature from a per-module vtable constant
+// when the method is referenced ONLY by the vtable (no direct call site).
+//
+// The e2e regression (interface_vtable_consumer_declares_test.sfn) proves the
+// end-to-end build path on the `i64 (i8*)` shape the fixture happens to emit.
+// This pins the parser's edge cases directly — void return, zero params,
+// nested function-pointer params, multi-entry lines, and no-match — so the
+// recovery logic is protected independent of whichever fptypes a future
+// fixture produces. Tests exercise the parser through the public
+// `find_vtable_method_signature` (the private `_parse_fn_pointer_type` is not
+// exported).
+import { find_vtable_method_signature } from "../../src/llvm/lowering/lowering_helpers";
+
+// Build a single vtable constant line in the exact format
+// `render_vtable_constants` emits: comma-joined `<fptype> bitcast (<fptype>
+// @<sym> to <fptype>)` entries wrapped in `= internal constant %vtable...`.
+fn _entry(fptype: string, sym: string) -> string {
+    return fptype + " bitcast (" + fptype + " @" + sym + " to " + fptype + ")";
+}
+
+fn _vtable_line(entries: string) -> string {
+    return "@vtable.X.Y.const = internal constant %vtable.X.Y { " + entries
+        + " }";
+}
+
+// Recover the return type for `sym`, or a sentinel when no signature is found.
+fn _ret(lines: string[], sym: string) -> string {
+    let sig = find_vtable_method_signature(lines, sym);
+    if sig == null { return "<null>"; }
+    return sig.return_type;
+}
+
+fn _nparams(lines: string[], sym: string) -> int {
+    let sig = find_vtable_method_signature(lines, sym);
+    if sig == null { return -1; }
+    return sig.param_types.length;
+}
+
+fn _param(lines: string[], sym: string, i: int) -> string {
+    let sig = find_vtable_method_signature(lines, sym);
+    if sig == null { return "<null>"; }
+    if i >= sig.param_types.length { return "<oob>"; }
+    return sig.param_types[i];
+}
+
+test "vtable sig: standard self-only method (i64 (i8*))" {
+    let lines = [_vtable_line(_entry("i64 (i8*)*", "Circlearea"))];
+    assert _ret(lines, "Circlearea") == "i64";
+    assert _nparams(lines, "Circlearea") == 1;
+    assert _param(lines, "Circlearea", 0) == "i8*";
+}
+
+test "vtable sig: void return type is preserved" {
+    let lines = [_vtable_line(_entry("void (i8*)*", "Sinkconsume"))];
+    assert _ret(lines, "Sinkconsume") == "void";
+    assert _nparams(lines, "Sinkconsume") == 1;
+    assert _param(lines, "Sinkconsume", 0) == "i8*";
+}
+
+test "vtable sig: zero-parameter signature" {
+    let lines = [_vtable_line(_entry("i64 ()*", "Counttick"))];
+    assert _ret(lines, "Counttick") == "i64";
+    assert _nparams(lines, "Counttick") == 0;
+}
+
+test "vtable sig: nested function-pointer parameter does not mis-split" {
+    let lines = [_vtable_line(_entry("i64 (i8*, void (i8*)*)*", "Hookrun"))];
+    assert _ret(lines, "Hookrun") == "i64";
+    assert _nparams(lines, "Hookrun") == 2;
+    assert _param(lines, "Hookrun", 0) == "i8*";
+    assert _param(lines, "Hookrun", 1) == "void (i8*)*";
+}
+
+test "vtable sig: second entry on a multi-entry line is recovered" {
+    let entries = _entry("i64 (i8*)*", "Shapearea") + ", " + _entry("i64 (i8*)*", "Shapedescribe");
+    let lines = [_vtable_line(entries)];
+    // The uncalled `describe` is the one the producer left undefined; ensure
+    // its type is recovered from its own (second) bitcast, not the first.
+    assert _ret(lines, "Shapedescribe") == "i64";
+    assert _nparams(lines, "Shapedescribe") == 1;
+    assert _param(lines, "Shapedescribe", 0) == "i8*";
+}
+
+test "vtable sig: a prefix symbol does not match a longer one" {
+    let lines = [_vtable_line(_entry("i64 (i8*)*", "Circlearea"))];
+    // `Circle` is a prefix of `Circlearea`; the trailing ` to ` anchor must
+    // prevent a false match.
+    assert _ret(lines, "Circle") == "<null>";
+}
+
+test "vtable sig: non-vtable lines yield no signature" {
+    let lines = ["declare i64 @foo(i8*)", "  %t = call i64 @foo(i8* %x)"];
+    assert _ret(lines, "foo") == "<null>";
+}
