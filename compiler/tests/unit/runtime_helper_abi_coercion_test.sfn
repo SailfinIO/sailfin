@@ -82,18 +82,24 @@ test "emit_runtime_call: c_abi_return_type=null collapses onto pre-#638 shape (n
     // failure rather than silently inserting a coercion at every
     // `string.to_number` call site.
     //
-    // M2.5 (#403): the descriptor's `native_signature` flipped to
-    // `sfn_str_to_number` (the wave-2 trampoline) so user emission
-    // lands on the canonical name; the descriptor's `symbol` field
-    // stays at the legacy name as archeology. Asserting against the
-    // new effective symbol pins the flip and keeps the no-coercion
-    // contract intact (since `c_abi_return_type` is still null).
-    let operand = LLVMOperand { llvm_type: "i8*", value: "%s" };
+    // M2.4b (#1722): the descriptor flipped to the length-aware
+    // `{i8*, i64}` aggregate ABI — `parameter_types` is now
+    // `["{i8*, i64}"]` and `native_signature` resolves to
+    // `sfn_str_to_number_lv` (the bare `sfn_str_to_number` stays defined
+    // as the pinned-seed trampoline; the descriptor's `symbol` field
+    // still points at it as archeology). Passing a pre-aggregated
+    // `{i8*, i64}` operand keeps the parameter-coercion walk a no-op, so
+    // the render stays a single call line with no spliced coercion —
+    // exactly the `c_abi_return_type: null` default this fixture pins.
+    // (An `i8*` operand would instead exercise the `i8*` -> `{i8*, i64}`
+    // length-recovery preamble, which is parameter coercion, not the
+    // post-call return coercion this test guards.)
+    let operand = LLVMOperand { llvm_type: "{i8*, i64}", value: "%s" };
     let operands: LLVMOperand[] = [operand];
     let result = emit_runtime_call("string.to_number", operands, empty_runtime_call_overrides(), 0, []);
 
     assert result.lines.length == 1;
-    assert result.lines[0] == "  %t0 = call double @sfn_str_to_number(i8* %s)";
+    assert result.lines[0] == "  %t0 = call double @sfn_str_to_number_lv({i8*, i64} %s)";
     assert result.operand != null;
     assert result.operand.llvm_type == "double";
     assert result.operand.value == "%t0";
