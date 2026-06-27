@@ -1,0 +1,124 @@
+// End-to-end regression for #1700: the array builtin `.push` called from
+// inside a `struct { fn method(self, …) { … } }` body must lower to LLVM
+// IR and link, not abort with
+//   `cannot resolve return type for call to 'args.push' — callee
+//    signature is not known to the compiler`.
+//
+// History & why this drives a CAPSULE build, not a single file: discovered
+// while implementing the `Backend` interface seam (#1112, merged in #1687).
+// The first cut put the clang-argv assembly `.push` loops directly in the
+// `LlvmTextBackend.assemble`/`link` method bodies; `sfn check` accepted it
+// but the self-host failed at lowering. The failure only surfaces under
+// the compiler's PER-MODULE emit (`capsule_resolver` lowers each module
+// with the other modules' staged `.sfn-asm` as import context) — a
+// standalone single-file `emit`/`build` of the same struct lowers fine, so
+// a single-file test would NOT catch the regression. It also only bites
+// when the struct's module has NO free-function `.push` of the same
+// element type to register a global `push` signature (#1687 worked around
+// it by hoisting the argv builders to free functions; that mask is exactly
+// what made the gap easy to miss). So this test builds a two-module capsule
+// whose `builder` module contains a single struct-method `.push` and no
+// free-function `.push`, mirroring the real failing shape.
+//
+// This is a #1389-class guard: `sfn check` is parse + typecheck +
+// effect-check ONLY (no IR, no link), so it cannot catch a codegen/link
+// lowering gap by construction. The regression must drive a real per-module
+// `build` (and run), not just `check` — see `.claude/rules/no-bash-e2e.md`.
+//
+// Build/parallel-runner hygiene: the capsule lives under a per-invocation
+// `SAILFIN_TEST_SCRATCH` path and the build inherits the full parent env
+// (`process.environ()`) so the nested clang/ld toolchain resolves (#1410)
+// and the build cache routes per-invocation (#1333). Mirrors
+// check_build_agree_module_global_test.sfn.
+import { find } from "sfn/strings";
+
+fn _sfn_bin() -> string ![io] {
+    let configured = env.get("SAILFIN_BIN");
+    if configured.length > 0 { return configured; }
+    return "build/native/sailfin";
+}
+
+// Inherit the full parent environment so the nested clang/ld the build
+// spawns find their toolchain (#1410), and SAILFIN_TEST_SCRATCH routes
+// the build cache per-invocation (#1333).
+fn _child_env() -> string[] ![io] { return process.environ(); }
+
+// The defining module: a struct method that assembles a local `string[]`
+// with `.push` in a loop (pushing both a parameter-array element and a
+// string literal) and returns it. Deliberately contains NO free-function
+// `.push` — that absence is what exposes the lowering gap under the
+// per-module emit. Before the fix, `capsule_resolver` aborted lowering
+// this module with `cannot resolve return type for call to 'args.push'`.
+fn _builder_src() -> string {
+    return "struct Builder {\n"
+        + "    fn make(self, xs: string[]) -> string[] {\n"
+        + "        let mut args: string[] = [\"clang\"];\n"
+        + "        let mut i: int = 0;\n"
+        + "        loop {\n"
+        + "            if i >= xs.length { break; }\n"
+        + "            args.push(xs[i]);\n"
+        + "            i += 1;\n"
+        + "        }\n"
+        + "        args.push(\"-o\");\n"
+        + "        return args;\n"
+        + "    }\n"
+        + "}\n";
+}
+
+fn _main_src() -> string {
+    return "import { Builder } from \"./builder\";\n"
+        + "\n"
+        + "fn main() -> int ![io] {\n"
+        + "    let b = Builder{};\n"
+        + "    let out = b.make([\"a\", \"b\"]);\n"
+        + "    print.info(out[out.length - 1]);\n"
+        + "    return 0;\n"
+        + "}\n";
+}
+
+fn _capsule_toml() -> string {
+    return "[capsule]\n"
+        + "name = \"pushcap1700\"\n"
+        + "version = \"0.1.0\"\n"
+        + "\n"
+        + "[capabilities]\n"
+        + "allow = [\"io\"]\n";
+}
+
+// Stage the two-module capsule under the per-invocation scratch dir. This
+// test owns the directory name, so there is no cross-test collision under
+// the parallel pool.
+fn _stage_capsule() -> string ![io] {
+    let mut root = env.get("SAILFIN_TEST_SCRATCH");
+    if root.length == 0 { root = "/tmp"; }
+    let dir = root + "/sfn-1700-pushcap";
+    fs.createDirectory(dir + "/src", true);
+    fs.writeFile(dir + "/capsule.toml", _capsule_toml());
+    fs.writeFile(dir + "/src/builder.sfn", _builder_src());
+    fs.writeFile(dir + "/src/main.sfn", _main_src());
+    return dir;
+}
+
+test "push in struct method body lowers under per-module emit and runs (#1700)" ![io] {
+    let dir = _stage_capsule();
+    let binpath = dir + "/out";
+
+    // `sfn build -p <capsule>`: per-module codegen + link — each module is
+    // lowered with the others' `.sfn-asm` as import context. This is where
+    // the `cannot resolve return type for call to 'args.push'` abort used
+    // to surface on the `builder` module.
+    let build_exit = process.run_capture([_sfn_bin(), "build", "-p", dir, "-o", binpath], _child_env());
+    let build_out = process.capture_take_stdout();
+    let build_err = process.capture_take_stderr();
+
+    // The defining regression: lowering must NOT abort.
+    assert find(build_out + build_err, "cannot resolve return type") < 0;
+    assert build_exit == 0;
+
+    // ...and the linked program runs, printing the last pushed element
+    // (`-o`), proving the push lowered to correct, runnable IR.
+    let _run_exit = process.run_capture([binpath], _child_env());
+    let run_out = process.capture_take_stdout();
+    let _run_err = process.capture_take_stderr();
+    assert find(run_out, "-o", 0) >= 0;
+}
