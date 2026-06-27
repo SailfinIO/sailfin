@@ -568,31 +568,71 @@ fn sfn_str_slice(text: * u8, start: f64, end: f64) -> * u8 {
     return _sfn_substring_unchecked(text, si, ei);
 }
 
-// `sfn_str_sfn_to_cstr(s)` — NUL-terminated C string view of `s`.
-// Today's strings already carry a trailing NUL (the literal
-// lowering in `core_strings.sfn::lower_string_literal` writes one
-// past the byte payload), so the boundary is the identity
-// function. M2.4b reworks the body once the aggregate carries
-// arbitrary (potentially non-terminated) byte ranges and an arena
-// must be threaded for the copy.
-fn sfn_str_sfn_to_cstr(s: * u8) -> * u8 { return s; }
+// `sfn_str_to_cstr(s_data, s_len, arena_slot)` — #1705 (M2.4b, SFEP-0025 §3.3):
+// the runtime-FFI boundary `process.sfn` / `assert.sfn` call to materialize a
+// real NUL-terminated C string for `execve` / `posix_spawn` / `fwrite`. The body
+// is no longer the identity: it copies the carried `s_len` bytes into the arena
+// and writes a trailing NUL, so a non-NUL-terminated interior view (`{data+start,
+// end-start}`, #1454) yields a correctly-terminated buffer with NO over-read into
+// the source remainder. The length is the CARRIED aggregate field (callers pass
+// `x.length`, a direct `extractvalue`), never a `strnlen` scan — scanning a
+// non-terminated view is exactly the over-read this fixes. No registry emission
+// row — it is runtime-to-runtime FFI, resolved at link.
+//
+// Arena. `_sfn_resolve_arena(arena_slot)` derefs the slot (or falls back to the
+// process-global arena when it is null — callers pass `null`), the same
+// resolution `sfn_str_concat` uses. The `roundup8(s_len + 1)` 8-aligned alloc +
+// `_num_put_byte` trailing NUL keeps the word read-modify-write in-bounds (the
+// seed cannot lower a single-byte `* u8` store). Like `concat`, it is
+// unconditionally arena-backed (the `SAILFIN_USE_ARENA=0` opt-out routes only
+// the legacy C entrypoints), so it never gates on `sfn_arena_enabled()`.
+fn sfn_str_to_cstr(s_data: * u8, s_len: i64, arena_slot: * u8) -> * u8 {
+    if (s_data as i64) == 0 {
+        let empty: string = "";
+        return empty as * u8;
+    }
+    let mut n: i64 = s_len;
+    if n < 0 { n = 0; }
+    let arena: * u8 = _sfn_resolve_arena(arena_slot);
+    let cap: i64 = ((n + 1 + 7) / 8) * 8;
+    let data: * u8 = sfn_arena_alloc(arena, cap as usize, 8 as usize);
+    if (data as i64) == 0 {
+        let oom: string = "";
+        return oom as * u8;
+    }
+    if n > 0 { memcpy(data, s_data, n as usize); }
+    _num_put_byte(data as i64 + n, 0);
+    return data;
+}
 
-// `sfn_str_to_cstr(s)` — #1308: the bare runtime-FFI entrypoint `process.sfn`
-// calls to materialize a NUL-terminated C string for `execve`/`posix_spawn`
-// (the C def is deleted). Post immediate-encoding teardown (#1420/#1421) every
-// `* u8` is already a real NUL-terminated buffer, so this is the identity (the
-// old C body's `_sfn_str_decode_immediate_owned` is now a no-op decode). No
-// registry emission row — it is runtime-to-runtime FFI, resolved at link.
-fn sfn_str_to_cstr(s: * u8) -> * u8 { return s; }
+// `sfn_str_sfn_to_cstr(s_data, s_len, arena_slot)` — the `_sfn_` infix alias the
+// emit contract still expects a define for; forwards to the bare body so both
+// symbols share one arena-copy implementation.
+fn sfn_str_sfn_to_cstr(s_data: * u8, s_len: i64, arena_slot: * u8) -> * u8 {
+    return sfn_str_to_cstr(s_data, s_len, arena_slot);
+}
 
-// `sfn_str_sfn_from_cstr(s)` — adopt a NUL-terminated C buffer as
-// an SfnString. The architect spec scans for the NUL terminator
-// with `memchr` to recover the byte length and constructs the
-// aggregate `{s, len}` view; today's body still hands back the
-// bare `i8*` because there's no SfnString slot to populate.
-// `memchr` is declared above so the M2.4b body rewrite (over the
-// aggregate shape) doesn't need to add it then.
-fn sfn_str_sfn_from_cstr(s: * u8) -> * u8 { return s; }
+// `sfn_str_sfn_from_cstr(s)` — #1705 (M2.4b, SFEP-0025 §3.3): adopt a
+// NUL-terminated C buffer as an SfnString. Recovers the byte length by scanning
+// for the terminating NUL with `memchr` (bounded to the 16 MiB string cap) and
+// returns the `{data, len}` aggregate: the `-> SfnString` return spelling routes
+// the definition onto the by-value `{i8*, i64}` ABI (M1.A.2), and the return-path
+// coercion wraps `{s, len}` — byte-identical to this memchr scan because `s` is
+// NUL-terminated. The explicit `memchr` makes the recovery load-bearing (a buffer
+// with no NUL within the cap is rejected as the empty string rather than wrapped
+// into an unbounded view). No copy: the foreign buffer is adopted in place.
+fn sfn_str_sfn_from_cstr(s: * u8) -> SfnString {
+    if (s as i64) == 0 {
+        let empty: string = "";
+        return empty;
+    }
+    let nul: * u8 = memchr(s, 0, 16777216 as usize);
+    if (nul as i64) == 0 {
+        let uncapped: string = "";
+        return uncapped;
+    }
+    return s;
+}
 
 // #1318 (C5 of epic #1308): real Sailfin `sfn_str_concat` / `sfn_str_append`
 // bodies over the registry's SfnString `{i8*, i64}` ABI. The bare names ARE
