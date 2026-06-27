@@ -2,29 +2,29 @@
 //
 // LLVM IR rendering functions for declarations and metadata comments.
 // Handles trait metadata comments, runtime helper declarations, and function declarations.
+import { TypeContext, TraitMetadata, RuntimeHelperDescriptor } from "./types";
+import {
+    index_of,
+    trim_text,
+    append_string,
+    sanitize_symbol,
+    number_to_string,
+    join_with_separator,
+    string_array_contains
+} from "./utils";
 import { NativeFunction, NativeParameter } from "../native_ir";
+import { map_return_type, map_parameter_type } from "./type_mapping";
 import { substring } from "../string_utils";
 import {
-    collect_parameter_types,
-    extract_struct_type_from_llvm,
-    render_interface_signature
-} from "./rendering_helpers";
-import {
-    effective_helper_declare_return_type,
     is_async_runtime_target,
-    runtime_helper_descriptors
+    runtime_helper_descriptors,
+    effective_helper_declare_return_type
 } from "./runtime_helpers";
-import { map_parameter_type, map_return_type } from "./type_mapping";
-import { RuntimeHelperDescriptor, TraitMetadata, TypeContext } from "./types";
 import {
-    append_string,
-    index_of,
-    join_with_separator,
-    number_to_string,
-    sanitize_symbol,
-    string_array_contains,
-    trim_text
-} from "./utils";
+    collect_parameter_types,
+    render_interface_signature,
+    extract_struct_type_from_llvm
+} from "./rendering_helpers";
 
 fn clamp_collection_length(value: int, max: int) -> int {
     if value < 0 { return 0; }
@@ -380,7 +380,43 @@ fn render_runtime_helper_declarations(used_targets: string[], local_functions: N
 // =============================================================================
 // Imported Function Declarations
 // =============================================================================
-fn render_imported_function_declarations(imported_functions: NativeFunction[], local_functions: NativeFunction[], context: TypeContext, runtime_helpers: string[]) -> string[] {
+// #1736: extract the `@<symbol>` names from rendered `declare ... @sym(...)`
+// lines. Used to share the typed-descriptor pass's declared-symbol set with
+// the imported-function pass below, so a helper that both passes resolve to
+// the same symbol (e.g. `print` → `sfn_print`, `concat` → `sfn_array_concat`,
+// where `target != symbol` so the #633 import-shadow skip does not fire) is
+// declared exactly once — with the typed shape the prelude's own call sites
+// use, not the erased import-closure shape.
+fn extract_declared_symbol_names(lines: string[]) -> string[] {
+    let mut symbols: string[] = [];
+    if lines.length == 0 { return symbols; }
+    let mut index: int = 0;
+    loop {
+        if index >= lines.length { break; }
+        let line = lines[index];
+        // Only parse `declare`-prefixed lines. Capability-metadata comment
+        // lines (`; intrinsic <sym> requires ...`) carry no `@` today, but
+        // keying on the `declare ` prefix makes the extractor robust if a
+        // future comment shape ever embeds an `@symbol` token.
+        if index_of(line, "declare ") == 0 {
+            let at_pos = index_of(line, "@");
+            if at_pos >= 0 {
+                let after_at = substring(line, at_pos + 1, line.length);
+                let paren_pos = index_of(after_at, "(");
+                if paren_pos > 0 {
+                    let symbol = substring(after_at, 0, paren_pos);
+                    if !string_array_contains(symbols, symbol) {
+                        symbols.push(symbol);
+                    }
+                }
+            }
+        }
+        index += 1;
+    }
+    return symbols;
+}
+
+fn render_imported_function_declarations(imported_functions: NativeFunction[], local_functions: NativeFunction[], context: TypeContext, runtime_helpers: string[], already_declared_symbols: string[]) -> string[] {
     if imported_functions.length == 0 { return []; }
     // Issue #633: previously this pass collected the runtime-helper
     // symbol set and skipped imported declares that collided with any
@@ -420,6 +456,20 @@ fn render_imported_function_declarations(imported_functions: NativeFunction[], l
         }
         // Skip if we've already emitted a declaration for this function
         if string_array_contains(emitted_declarations, sanitized_name) {
+            index += 1;
+            continue;
+        }
+        // Issue #1736: skip when the typed runtime-helper declare pass
+        // (`render_runtime_helper_declarations`, run just before this one)
+        // already declared this symbol. For helpers whose `target != symbol`
+        // (e.g. `print` → `sfn_print`, `concat` → `sfn_array_concat`) the
+        // #633 import-shadow skip in that pass does not fire, so it emits the
+        // typed descriptor shape (`{i8*, i64}` / `{i8**,i64,i64}*`). The
+        // prelude's own call sites use that typed shape, so emitting the
+        // erased import-closure declare here would produce a conflicting
+        // redefinition that clang's per-module verifier rejects. The typed
+        // declare must win, so defer to it.
+        if string_array_contains(already_declared_symbols, sanitized_name) {
             index += 1;
             continue;
         }
