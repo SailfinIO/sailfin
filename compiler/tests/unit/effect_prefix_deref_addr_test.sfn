@@ -1,0 +1,93 @@
+// #1627 Part B — prefix `*` (deref) and `&` (address-of) must not hide their
+// operand's effects.
+//
+// Before #1627 the expression parser had no prefix `*`/`&` form, so `*ioCall()`
+// and `&ioCall()` degraded the whole expression to an effect-blind `Raw` (since
+// #1186 a `Raw` contributes ZERO effects) — an effect escape. Confirmed live:
+// `*print.info(x)` / `&print.info(x)` passed `sfn check` with no `![io]`.
+//
+// This pins: (a) prefix `*`/`&` now parse into `Expression.Unary`, and (b) the
+// effect checker's `Unary` arm walks the operand so the requirement surfaces.
+// It also pins the `& <fn>` -> E0808 path now that `&` structures into `Unary`
+// (the typecheck `Unary` arm recurses into the operand `Identifier`, which the
+// `Identifier` arm flags as a function used in value position).
+import { Expression } from "../../src/ast";
+import { EffectRequirement, collect_effects_from_expression } from "../../src/effect_checker";
+import { empty_import_symbols } from "../../src/effect_imports";
+import { parse_program } from "../../src/parser/mod";
+import { typecheck_diagnostics } from "../../src/typecheck";
+
+fn _probe_expr(snippet: string) -> Expression ![io] {
+    let program = parse_program("fn probe() { " + snippet + "; }");
+    assert program.statements.length >= 1;
+    let fn_stmt = program.statements[0];
+    assert fn_stmt.variant == "FunctionDeclaration";
+    assert fn_stmt.body.statements.length >= 1;
+    let stmt = fn_stmt.body.statements[0];
+    assert stmt.variant == "ExpressionStatement";
+    return stmt.expression;
+}
+
+fn _reqs_contain(reqs: EffectRequirement[], effect: string) -> boolean {
+    let mut index: int = 0;
+    loop {
+        if index >= reqs.length { break; }
+        if reqs[index].effect == effect { return true; }
+        index += 1;
+    }
+    return false;
+}
+
+fn _prefix_reqs(snippet: string) -> EffectRequirement[] ![io] {
+    return collect_effects_from_expression(_probe_expr(snippet), empty_import_symbols());
+}
+
+fn _count_code(source: string, code: string) -> int ![io] {
+    let program = parse_program(source);
+    let diagnostics = typecheck_diagnostics(program);
+    let mut count: int = 0;
+    let mut i: int = 0;
+    loop {
+        if i >= diagnostics.length { break; }
+        if strings_equal(diagnostics[i].code, code) { count += 1; }
+        i += 1;
+    }
+    return count;
+}
+
+// ── Structuring: prefix `*`/`&` parse into Unary ──
+test "prefix: deref `*` structures into Unary" ![io] {
+    let expr = _probe_expr("*ptr");
+    assert expr.variant == "Unary";
+    assert expr.operator == "*";
+}
+
+test "prefix: address-of `&` structures into Unary" ![io] {
+    let expr = _probe_expr("&value");
+    assert expr.variant == "Unary";
+    assert expr.operator == "&";
+}
+
+// ── Effect attribution: the Unary arm walks the operand ──
+test "prefix: deref over an io call surfaces io" ![io] {
+    assert _reqs_contain(_prefix_reqs("*print.info(\"x\")"), "io");
+}
+
+test "prefix: address-of over an io call surfaces io" ![io] {
+    assert _reqs_contain(_prefix_reqs("&print.info(\"x\")"), "io");
+}
+
+test "prefix: address-of over a net call surfaces net" ![io] {
+    assert _reqs_contain(_prefix_reqs("&http.get(\"u\")"), "net");
+}
+
+// ── No false positive: a prefix op over an effect-free operand ──
+test "prefix: deref over a plain identifier requires nothing" ![io] {
+    let reqs = _prefix_reqs("*ptr");
+    assert reqs.length == 0;
+}
+
+// ── `& <fn>` is still E0808 now that `&` structures into Unary ──
+test "prefix: `& <fn>` (address-of a function) is E0808" ![io] {
+    assert _count_code("fn worker() { } fn main() { let f = & worker; }", "E0808") == 1;
+}

@@ -508,6 +508,17 @@ fn parse_prefix_expression(state: ExpressionTokens) -> ExpressionParseResult {
         let mut _if403: boolean = false;
         if strings_equal(sym, "-") { _if403 = true; }
         if strings_equal(sym, "!") { _if403 = true; }
+        // Prefix `*` (deref) and `&` (address-of) — #1627 Part B. Before this
+        // they had no prefix parse and fell through to `Raw`, so `*ioCall()` /
+        // `&print.info(x)` reached codegen effect-blind. Structuring them into
+        // `Unary` lets the effect checker's `Unary` arm walk the operand (the
+        // effectful surface) and routes `&fn` through the typecheck `Unary` →
+        // `Identifier` arm (E0808). The binary `*`/`&` handlers are infix-only
+        // (the climb never calls this in infix position), so they are
+        // unaffected. The formatter emits `*operand` / `&operand` verbatim —
+        // the exact text the shadow lowering deref/borrow parsers already lower.
+        if strings_equal(sym, "*") { _if403 = true; }
+        if strings_equal(sym, "&") { _if403 = true; }
         if _if403 {
             let advanced = expression_tokens_advance(state);
             let operand_result = parse_expression_bp(advanced, unary_precedence());

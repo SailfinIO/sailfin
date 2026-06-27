@@ -1022,6 +1022,15 @@ fn walk_expression(expression: Expression?, bindings: SymbolEntry[], imports: Im
         diagnostics = diagnostics.concat(walk_expression(expression.else_value, bindings, imports));
         return diagnostics;
     }
+    if expression.variant == "Unary" {
+        // Prefix `*`/`&`/`-`/`!` (#1627 Part B structured `*`/`&`). Recurse
+        // into the operand so its diagnostics still fire — in particular
+        // `& <fn>` (`Unary{"&", Identifier(fn)}`) reaches the `Identifier`
+        // arm below, which emits E0808 for a function used in value position
+        // (preserving the prior `check_fn_reference_raw` `& fn` behavior now
+        // that `&` structures instead of degrading to `Raw`).
+        return walk_expression(expression.operand, bindings, imports);
+    }
     if expression.variant == "Cast" {
         // A bare function identifier cast to a pointer (`<fn> as * u8` /
         // `<fn> as * fn (...)`) is a function-address materialization, not a
