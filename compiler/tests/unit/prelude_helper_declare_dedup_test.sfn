@@ -24,13 +24,13 @@
 // dedup at unit speed instead of as a slow link failure.
 import { find } from "sfn/strings";
 
-import { NativeFunction, NativeParameter } from "../../src/native_ir";
-import { TypeContext } from "../../src/llvm/types";
 import {
     extract_declared_symbol_names,
-    render_runtime_helper_declarations,
-    render_imported_function_declarations
+    render_imported_function_declarations,
+    render_runtime_helper_declarations
 } from "../../src/llvm/rendering";
+import { TypeContext } from "../../src/llvm/types";
+import { NativeFunction, NativeParameter } from "../../src/native_ir";
 
 fn _empty_context() -> TypeContext {
     return TypeContext {
