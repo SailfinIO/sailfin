@@ -933,6 +933,17 @@ fn _scope_after_expression(expression: Expression?, scope: OwnershipScope) -> Ow
     if expression.variant == "TryOperator" {
         return _scope_after_expression(expression.operand, scope);
     }
+    if expression.variant == "Conditional" {
+        // Ternary `cond ? then : else` (#1690). Thread the scope through all
+        // three children so a move inside any branch (`flag ? consume(buf) :
+        // x`) is recorded and a later use of the moved binding is still
+        // caught. Sequencing condition → then → else is a conservative
+        // over-approximation (the two branches are mutually exclusive at
+        // runtime, but treating both as taken never misses a real move).
+        let after_condition = _scope_after_expression(expression.condition, scope);
+        let after_then = _scope_after_expression(expression.then_value, after_condition);
+        return _scope_after_expression(expression.else_value, after_then);
+    }
     if expression.variant == "Spawn" {
         // A spawned closure captures owned values as moves (#1220). A
         // bare-fn spawn (`spawn foo(buf)`) is an ordinary call whose

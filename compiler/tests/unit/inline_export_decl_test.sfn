@@ -1,0 +1,157 @@
+// Regression coverage for the inline `export <declaration>` syntax
+// (SFEP-0031, issue #1681).
+//
+// Before this feature, the parser routed every `export` token to the
+// block-export parser (`parse_export`), which expects `{`. The inline form
+// `export fn foo() { ... }` was mis-parsed: the declaration was swallowed
+// into a bogus export `source` string and its name never reached the
+// module's export manifest, so cross-module callers hit
+// `llvm lowering [fatal]: cannot resolve return type for call to \`foo\``.
+//
+// The fix (`parser/mod.sfn`) dispatches `export` on the *next* token: `{`
+// keeps the existing block/re-export path; a declaration introducer routes
+// to `parse_inline_export`, which parses the declaration normally AND
+// synthesizes a `Statement.ExportDeclaration` naming it — exactly
+// equivalent to `<declaration> export { name };`.
+//
+// These tests assert the parser emits BOTH the declaration statement and a
+// matching `ExportDeclaration`. Cross-module build+run is covered by
+// `compiler/tests/e2e/inline_export_cross_module_test.sfn`.
+import { Program, Statement } from "../../src/ast";
+import { parse_program } from "../../src/parser/mod";
+
+// True when the program contains an `ExportDeclaration` whose specifier list
+// names `symbol` with no `from` source (an inline / local export).
+fn _exports_local(program: Program, symbol: string) -> boolean ![io] {
+    let mut i: int = 0;
+    loop {
+        if i >= program.statements.length { break; }
+        let stmt = program.statements[i];
+        if stmt.variant == "ExportDeclaration" {
+            if stmt.source.length == 0 {
+                let mut j: int = 0;
+                loop {
+                    if j >= stmt.export_specifiers.length { break; }
+                    if stmt.export_specifiers[j].name == symbol { return true; }
+                    j += 1;
+                }
+            }
+        }
+        i += 1;
+    }
+    return false;
+}
+
+// True when the program contains a declaration statement of `variant`.
+fn _has_decl(program: Program, variant: string) -> boolean ![io] {
+    let mut i: int = 0;
+    loop {
+        if i >= program.statements.length { break; }
+        if program.statements[i].variant == variant { return true; }
+        i += 1;
+    }
+    return false;
+}
+
+fn _count_local_exports(program: Program, symbol: string) -> int ![io] {
+    let mut count: int = 0;
+    let mut i: int = 0;
+    loop {
+        if i >= program.statements.length { break; }
+        let stmt = program.statements[i];
+        if stmt.variant == "ExportDeclaration" {
+            if stmt.source.length == 0 {
+                let mut j: int = 0;
+                loop {
+                    if j >= stmt.export_specifiers.length { break; }
+                    if stmt.export_specifiers[j].name == symbol { count += 1; }
+                    j += 1;
+                }
+            }
+        }
+        i += 1;
+    }
+    return count;
+}
+
+test "inline export: `export fn` emits the function and exports it" ![io] {
+    let program = parse_program("export fn foo(x: int) -> int { return x + 1; }");
+    assert _has_decl(program, "FunctionDeclaration");
+    assert _exports_local(program, "foo");
+}
+
+test "inline export: `export async fn` emits the function and exports it" ![io] {
+    let program = parse_program("export async fn fetch(u: string) -> int ![io] { return 0; }");
+    assert _has_decl(program, "FunctionDeclaration");
+    assert _exports_local(program, "fetch");
+}
+
+test "inline export: `export struct` emits the struct and exports it" ![io] {
+    let program = parse_program("export struct Shard { valid: boolean, index: int }");
+    assert _has_decl(program, "StructDeclaration");
+    assert _exports_local(program, "Shard");
+}
+
+test "inline export: `export enum` emits the enum and exports it" ![io] {
+    let program = parse_program("export enum Color { Red, Green, Blue }");
+    assert _has_decl(program, "EnumDeclaration");
+    assert _exports_local(program, "Color");
+}
+
+test "inline export: `export interface` emits the interface and exports it" ![io] {
+    let program = parse_program("export interface Reader { fn read() -> int; }");
+    assert _has_decl(program, "InterfaceDeclaration");
+    assert _exports_local(program, "Reader");
+}
+
+test "inline export: `export type` emits the alias and exports it" ![io] {
+    let program = parse_program("export type Id = int;");
+    assert _has_decl(program, "TypeAliasDeclaration");
+    assert _exports_local(program, "Id");
+}
+
+test "inline export: `export let` emits the global and exports it" ![io] {
+    let program = parse_program("export let MAX: int = 256;");
+    assert _has_decl(program, "VariableDeclaration");
+    assert _exports_local(program, "MAX");
+}
+
+test "inline export: `export thread_local let mut` emits the global and exports it" ![io] {
+    let program = parse_program("export thread_local let mut counter: int = 0;");
+    assert _has_decl(program, "VariableDeclaration");
+    assert _exports_local(program, "counter");
+}
+
+test "inline export: `export @deco fn` parses and exports (decorator leads stay on decl)" ![io] {
+    let program = parse_program("export @logExecution fn traced(x: int) -> int ![io] { return x; }");
+    assert _has_decl(program, "FunctionDeclaration");
+    assert _exports_local(program, "traced");
+}
+
+test "inline export: coexists with a later block export of the same symbol (de-duped no-op)" ![io] {
+    let program = parse_program("export fn f() -> int { return 1; } export { f };");
+    assert _has_decl(program, "FunctionDeclaration");
+    // Two `.export { f }` entries are emitted; the manifest de-dupes them.
+    assert _count_local_exports(program, "f") == 2;
+}
+
+test "inline export: block export form is unchanged" ![io] {
+    let program = parse_program("fn g() -> int { return 1; } export { g };");
+    assert _has_decl(program, "FunctionDeclaration");
+    assert _exports_local(program, "g");
+}
+
+test "inline export: re-export `export { x } from` keeps its source" ![io] {
+    let program = parse_program("export { x } from \"./other\";");
+    let mut found_reexport: boolean = false;
+    let mut i: int = 0;
+    loop {
+        if i >= program.statements.length { break; }
+        let stmt = program.statements[i];
+        if stmt.variant == "ExportDeclaration" {
+            if stmt.source.length > 0 { found_reexport = true; }
+        }
+        i += 1;
+    }
+    assert found_reexport;
+}

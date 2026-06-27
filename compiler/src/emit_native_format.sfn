@@ -200,6 +200,37 @@ fn format_expression_into(expression: Expression, out: string[]) -> string[] {
         out.push(expression.target_type.text);
         return out;
     }
+    if expression.variant == "Conditional" {
+        // `(cond) ? (then) : (else)` (#1690) — the exact text the lowering
+        // shadow re-parser `parse_ternary_expression` consumes (it scans for
+        // the first top-level `?` then the first top-level `:`). Each operand
+        // is fully parenthesized so a nested ternary or any embedded operator
+        // stays at depth ≥ 1 and the scan splits on the outer `?`/`:` only,
+        // preserving right-associativity through the re-parse. No dedicated
+        // lowering arm is needed; this serialization IS the bridge.
+        out.push("(");
+        format_expression_into(expression.condition, out);
+        out.push(") ? (");
+        format_expression_into(expression.then_value, out);
+        out.push(") : (");
+        format_expression_into(expression.else_value, out);
+        out.push(")");
+        return out;
+    }
+    if expression.variant == "TryOperator" {
+        // `<operand>?` (#1690). Normally every try operator is desugared by
+        // `desugar_try_in_block` before formatting, so this arm does not fire
+        // for the ordinary `a()?` path. It fires only for a try that the
+        // desugarer deliberately leaves in place — one nested inside a
+        // ternary branch (`cond ? readFile()? : x`), where the desugarer's
+        // statement-level hoist would wrongly evaluate the branch
+        // unconditionally. Serializing back to `operand?` text lets the
+        // shadow re-parser lower it with correct conditional semantics, the
+        // same path the construct took as a `Raw` node before #1690.
+        format_expression_into(expression.operand, out);
+        out.push("?");
+        return out;
+    }
     if expression.variant == "Await" {
         // Bridge the structured `Await` node (#1080) to the legacy text form
         // the `async`/`await` lowering keys on (a leading `"await "`). Use the

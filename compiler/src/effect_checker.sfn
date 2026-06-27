@@ -746,11 +746,13 @@ fn collect_effects_from_expression(expression: Expression?, imports: ImportSymbo
             // call expressions (e.g. the runtime fail-call wrapper).
             let callee_trigger = _token_from_span(expression.callee.span, name);
             if name == "spawn" {
-                // Concurrency anchor (out of #1183 scope): no runtime
-                // descriptor backs the `spawn` keyword form.
-                required = append_requirement(required, EffectRequirement {
-                    effect: "io", description: "spawn call", trigger: callee_trigger
-                });
+                // Registry-driven (#1655): derive the effect from the
+                // `spawn_task` descriptor row so the checker and the
+                // registry share one source of truth (mirrors the `serve`
+                // arm below). The row carries `io` as a deliberate
+                // conservative placeholder — see runtime_helpers.sfn and
+                // the effect-transparency successor #1702.
+                required = _append_builtin_effects(required, "spawn_task", callee_trigger);
             }
             // Registry-driven bare builtins: `print(...)` / `console(...)`
             // (the Call-form analog of the Member-form `print.info(...)`
@@ -804,9 +806,15 @@ fn collect_effects_from_expression(expression: Expression?, imports: ImportSymbo
             if method == "receive" { _is_channel_op = true; }
             if _is_channel_op {
                 let callee_trigger = _token_from_span(expression.callee.span, method);
-                required = append_requirement(required, EffectRequirement {
-                    effect: "io", description: "channel send/receive", trigger: callee_trigger
-                });
+                // Registry-driven (#1655): map the bare member name to its
+                // descriptor target (`send` -> `channel_send`, `receive` ->
+                // `channel_receive`) and derive the effect from the row. The
+                // mapping is required — passing the bare `method` to
+                // `effects_for_callee_target` would miss the exact row and
+                // namespace-union to `[]`, silently dropping the effect. The
+                // rows carry `io` as a conservative placeholder (#1702).
+                let channel_target = "channel_" + method;
+                required = _append_builtin_effects(required, channel_target, callee_trigger);
             }
         }
         // Member-callee effects (e.g. `fs.exists(...)`) are already
@@ -886,6 +894,18 @@ fn collect_effects_from_expression(expression: Expression?, imports: ImportSymbo
         required = merge_requirements(required, collect_effects_from_expression(expression.right, imports));
         return required;
     }
+    if expression.variant == "Conditional" {
+        // Ternary `cond ? then : else` (#1690). Either branch may run, and
+        // the condition always does, so the requirement is the union of all
+        // three children's effects: `cond ? readFile() : x` requires `![io]`.
+        // Before #1690 the whole ternary degraded to an effect-blind `Raw`,
+        // letting an effectful branch reach codegen with no declared
+        // capability — a fail-open hole in the effects pillar.
+        let mut required = collect_effects_from_expression(expression.condition, imports);
+        required = merge_requirements(required, collect_effects_from_expression(expression.then_value, imports));
+        required = merge_requirements(required, collect_effects_from_expression(expression.else_value, imports));
+        return required;
+    }
     if expression.variant == "Array" {
         let mut required: EffectRequirement[] = [];
         let mut element_index: int = 0;
@@ -947,9 +967,9 @@ fn collect_effects_from_expression(expression: Expression?, imports: ImportSymbo
     if expression.variant == "Spawn" {
         let spawn_trigger = _token_from_span(expression.span, "spawn");
         let mut required = collect_effects_from_expression(expression.operand, imports);
-        required = append_requirement(required, EffectRequirement {
-            effect: "io", description: "spawn call", trigger: spawn_trigger
-        });
+        // Registry-driven (#1655): `spawn_task` row -> [io] (conservative
+        // placeholder; effect-transparency successor #1702).
+        required = _append_builtin_effects(required, "spawn_task", spawn_trigger);
         return required;
     }
     if expression.variant == "Await" {
@@ -968,9 +988,13 @@ fn collect_effects_from_expression(expression: Expression?, imports: ImportSymbo
             required = merge_requirements(required, collect_effects_from_expression(expression.tasks[task_index], imports));
             task_index += 1;
         }
-        required = append_requirement(required, EffectRequirement {
-            effect: "io", description: "parallel call", trigger: parallel_trigger
-        });
+        // Registry-driven (#1655): parallel is fan-out of spawns, so derive
+        // its effect from the `spawn_task` row -> [io]. No dedicated
+        // `parallel` descriptor row exists: the paren-call `parallel(...)` of
+        // the unimplemented `sfn/sync` surface must stay fail-closed in
+        // lowering, which a row would break (conservative placeholder;
+        // effect-transparency successor #1702).
+        required = _append_builtin_effects(required, "spawn_task", parallel_trigger);
         return required;
     }
     if expression.variant == "Serve" {

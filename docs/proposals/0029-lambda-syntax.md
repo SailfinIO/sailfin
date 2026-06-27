@@ -482,5 +482,5 @@ round-trips both forms idempotently. Regression coverage:
 The headline callback case `.map(fn(x) => x*x)` additionally required typing
 the untyped lambda from the callee signature — a **pre-existing**,
 syntax-independent codegen gap (the untyped block form failed identically).
-That fix was bundled into the same PR and is recorded in **SFEP-0031**
+That fix was bundled into the same PR and is recorded in **SFEP-0032**
 (untyped lambda parameter/return inference).

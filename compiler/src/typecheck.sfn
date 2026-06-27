@@ -1012,6 +1012,15 @@ fn walk_expression(expression: Expression?, bindings: SymbolEntry[], imports: Im
         diagnostics = diagnostics.concat(walk_expression(expression.end, bindings, imports));
         return diagnostics;
     }
+    if expression.variant == "Conditional" {
+        // Ternary `cond ? then : else` (#1690) — recurse into all three
+        // children so nested diagnostics (undefined symbols, parse-error
+        // nodes, removed-keyword statements) inside any branch still fire.
+        let mut diagnostics = walk_expression(expression.condition, bindings, imports);
+        diagnostics = diagnostics.concat(walk_expression(expression.then_value, bindings, imports));
+        diagnostics = diagnostics.concat(walk_expression(expression.else_value, bindings, imports));
+        return diagnostics;
+    }
     if expression.variant == "Cast" {
         // The #1627 parser lift only structures a pointer cast target into
         // `Cast` when the operand is NOT a bare identifier (effect-bearing

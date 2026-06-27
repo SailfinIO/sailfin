@@ -1,5 +1,5 @@
 ---
-sfep: 31
+sfep: 32
 title: Infer untyped lambda parameter and return types from the expected call-site function type
 status: Implemented
 type: language

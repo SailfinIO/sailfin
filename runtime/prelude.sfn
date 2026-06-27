@@ -665,6 +665,29 @@ fn find_char(text: string, character: string, start: int = 0) -> int {
         } else if escape == "t" { target = "\t"; }
     }
 
+    // Fast path (#1511): a single-byte ASCII target resolves via a
+    // non-allocating raw byte scan (the `load_byte` builtin — a true
+    // `load i8` + `zext`) instead of the grapheme loop below, which
+    // allocates a fresh grapheme string at every position (the dominant
+    // cost of the `string_find_format` runtime benchmark). For an ASCII
+    // needle this is exact: an ASCII byte (< 0x80) can only match a
+    // standalone ASCII grapheme in UTF-8 (lead and continuation bytes are
+    // all >= 0x80), and for ASCII text the byte offset equals the
+    // grapheme index the slow path returns.
+    if target.length == 1 {
+        let code = char_code(target);
+        if code >= 0 && code < 128 {
+            let addr = (text as * u8) as i64;
+            let mut bi = normalized_start;
+            loop {
+                if bi >= length { break; }
+                if load_byte(addr + bi) == code { return bi; }
+                bi = bi + 1;
+            }
+            return -1;
+        }
+    }
+
     let mut index = normalized_start;
     loop {
         if index >= length { break; }

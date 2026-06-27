@@ -603,6 +603,23 @@ fn _rewrite_expression(ctx: LiftContext, expression: Expression) -> ExpressionRe
             }
         };
     }
+    if expression.variant == "Conditional" {
+        // Ternary `cond ? then : else` (#1690). Rewrite all three children
+        // so a capture reference inside any branch is lifted to the captured
+        // environment, threading `ctx` left-to-right.
+        let cond = _rewrite_expression(ctx, expression.condition);
+        let then_value = _rewrite_expression(cond.ctx, expression.then_value);
+        let else_value = _rewrite_expression(then_value.ctx, expression.else_value);
+        return ExpressionRewriteResult {
+            ctx: else_value.ctx,
+            expression: Expression.Conditional {
+                condition: cond.expression,
+                then_value: then_value.expression,
+                else_value: else_value.expression,
+                span: expression.span
+            }
+        };
+    }
     // Lift lambdas nested inside spawn/await operands (#1090). A lambda
     // operand is a spawn target — its captured env crosses the thread
     // boundary and the worker frees it (#1475), so lift it with

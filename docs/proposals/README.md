@@ -53,7 +53,8 @@ The next number is `max + 1`. Add a row in the same PR that introduces an SFEP.
 | [0028](./0028-typed-array-higher-order-fns.md) | Typed / Generic-Element Array Higher-Order Functions (map / filter / reduce) | Draft | language |
 | [0029](./0029-lambda-syntax.md) | Lambda expression syntax for 1.0 — keep, reform, or defer | Implemented | language |
 | [0030](./0030-first-class-function-values.md) | First-Class Function Values | Accepted | language |
-| [0031](./0031-untyped-lambda-param-inference.md) | Infer Untyped Lambda Parameter/Return Types from the Call Site | Implemented | language |
+| [0031](./0031-inline-export-decl.md) | Inline `export <declaration>` syntax | Accepted | language |
+| [0032](./0032-untyped-lambda-param-inference.md) | Infer Untyped Lambda Parameter/Return Types from the Call Site | Implemented | language |
 
 ## Subdirectories
 
