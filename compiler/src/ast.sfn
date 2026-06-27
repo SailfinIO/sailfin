@@ -97,6 +97,24 @@ enum Expression {
     // from the statement-level `TryStatement`. Type rules and emission
     // land in R.3 / R.4 — today this is parse-only.
     TryOperator { operand: Expression, span: SourceSpan? },
+    // Ternary conditional `cond ? then : else` (issue #1690, epic #1180,
+    // effect-system hardening). Before #1690 a ternary degraded to
+    // `Expression.Raw` because the expression parser had no ternary form —
+    // and since #1186 a `Raw` node contributes zero effects, so an
+    // effectful branch (`cond ? readFile() : x`) reached codegen
+    // effect-free. Structuring it here lets the effect checker, typecheck
+    // walker, capture/ownership analysis, and lambda-capture rewrite all
+    // recurse into the three children. The formatter serializes it back to
+    // `(cond) ? (then) : (else)` — the exact text the lowering shadow
+    // re-parser (`parse_ternary_expression`) already handles, so no new
+    // lowering arm is needed. `span` is the last field per the variant
+    // convention so positional GEP indexing for prior variants stays stable.
+    Conditional {
+        condition: Expression,
+        then_value: Expression,
+        else_value: Expression,
+        span: SourceSpan?
+    },
     // Concurrency frontend nodes (M4.0, epic #965, issue #1079). Parse-only
     // targets for the structured-concurrency surface; parsing, type rules,
     // effect-checking, and lowering land in follow-up issues. Runtime

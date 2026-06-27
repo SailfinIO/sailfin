@@ -121,11 +121,16 @@ here.
   so a cast can no longer hide its operand's effects (`E0400`). Bare-identifier
   pointer casts (`<fn>`/`<ptr-value> as * u8`) intentionally stay `Raw` — they
   carry no effect, and this preserves the #1147 function-reference diagnostics and
-  the shadow-parser lowering unchanged. The remaining
-  Raw-degraded effect-escapes (ternary `? :`, prefix `*`/`&`, assignment-as-
-  expression) are tracked under epic #1180 (#1180-a/c) behind a blanket
-  fail-closed `Raw` backstop. Effect polymorphism (`!E` variables, polymorphic
-  HOFs) remains post-1.0.
+  the shadow-parser lowering unchanged. The ternary `? :` escape is closed the
+  same way in **#1690**: a ternary now parses into a structured `Conditional`
+  node (`cond ? then : else`) the effect checker walks, unioning the effects of
+  all three children, so `cond ? readFile() : x` can no longer reach codegen
+  effect-free (`E0400`). The disambiguation leaves the postfix `?` try operator
+  (`a()?`, `a()?.b()?`) untouched — a `?` is ternary only when the token after it
+  can start an expression *and* a top-level `:` follows. The remaining
+  Raw-degraded effect-escapes (prefix `*`/`&`, assignment-as-expression) are
+  tracked under epic #1180 (#1180-c) behind a blanket fail-closed `Raw` backstop.
+  Effect polymorphism (`!E` variables, polymorphic HOFs) remains post-1.0.
 - **Undefined free-function rejection** (`E0420`, #616/#812): unresolvable
   bare-identifier callees fail typecheck.
 - **Function references**: a bare fn name in value position lowers to the

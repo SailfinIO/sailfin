@@ -1,0 +1,151 @@
+// #1690 — a ternary `cond ? then : else` must not hide a branch's effects.
+//
+// Epic #1180 (effect-system hardening), follows #1627. Before #1690 a ternary
+// had no structured parse: the postfix chain consumed the `?` as a
+// `TryOperator`, leaving `b : c` as leftover tokens, so the whole expression
+// degraded to `Expression.Raw`. Since #1186 deleted `collect_effects_from_text`
+// a `Raw` node contributes ZERO effects, so an effectful branch
+// (`cond ? print.info(x) : y`) reached codegen with no `![io]` declared —
+// confirmed live: `c ? print.info("X") : print.info("Y")` passed `sfn check`
+// with no `[io]` requirement.
+//
+// This pins three things end to end:
+//   (a) the parser structures a ternary into a `Conditional` node with the
+//       correct precedence/associativity (and does NOT regress the postfix
+//       `TryOperator`, which the compiler self-hosts on heavily);
+//   (b) `collect_effects_from_expression` unions the effects of all three
+//       children so any effectful branch surfaces its requirement; and
+//   (c) an effect-free ternary requires nothing (no false positive that would
+//       reject ordinary user code).
+import { Expression } from "../../src/ast";
+import { EffectRequirement, collect_effects_from_expression } from "../../src/effect_checker";
+import { empty_import_symbols } from "../../src/effect_imports";
+import { parse_program } from "../../src/parser/mod";
+
+fn _probe_expr(snippet: string) -> Expression ![io] {
+    let program = parse_program("fn probe() { " + snippet + "; }");
+    assert program.statements.length >= 1;
+    let fn_stmt = program.statements[0];
+    assert fn_stmt.variant == "FunctionDeclaration";
+    assert fn_stmt.body.statements.length >= 1;
+    let stmt = fn_stmt.body.statements[0];
+    assert stmt.variant == "ExpressionStatement";
+    return stmt.expression;
+}
+
+fn _reqs_contain(reqs: EffectRequirement[], effect: string) -> boolean {
+    let mut index: int = 0;
+    loop {
+        if index >= reqs.length { break; }
+        if reqs[index].effect == effect { return true; }
+        index += 1;
+    }
+    return false;
+}
+
+fn _cond_reqs(snippet: string) -> EffectRequirement[] ![io] {
+    return collect_effects_from_expression(_probe_expr(snippet), empty_import_symbols());
+}
+
+// -------------------------------------------------------------------
+// Structural lift: a ternary parses into a `Conditional` (not `Raw`).
+// -------------------------------------------------------------------
+test "ternary: basic form structures into Conditional" ![io] {
+    let expr = _probe_expr("a ? b : c");
+    assert expr.variant == "Conditional";
+    assert expr.condition.variant == "Identifier";
+    assert expr.condition.name == "a";
+    assert expr.then_value.variant == "Identifier";
+    assert expr.then_value.name == "b";
+    assert expr.else_value.variant == "Identifier";
+    assert expr.else_value.name == "c";
+}
+
+// `a + b ? c : d` groups as `(a + b) ? c : d` — ternary is lower precedence
+// than every binary operator, so the climbed `a + b` is the condition.
+test "ternary: binds looser than binary (right grouping)" ![io] {
+    let expr = _probe_expr("a + b ? c : d");
+    assert expr.variant == "Conditional";
+    assert expr.condition.variant == "Binary";
+    assert expr.condition.operator == "+";
+    assert expr.then_value.name == "c";
+    assert expr.else_value.name == "d";
+}
+
+// `a ? b : c ? d : e` right-associates as `a ? b : (c ? d : e)`.
+test "ternary: right-associative else branch" ![io] {
+    let expr = _probe_expr("a ? b : c ? d : e");
+    assert expr.variant == "Conditional";
+    assert expr.condition.name == "a";
+    assert expr.then_value.name == "b";
+    assert expr.else_value.variant == "Conditional";
+    assert expr.else_value.condition.name == "c";
+    assert expr.else_value.then_value.name == "d";
+    assert expr.else_value.else_value.name == "e";
+}
+
+// A brace-nested `:` (object literal) must not be mistaken for the ternary
+// separator — the nesting-aware lookahead skips colons at depth > 0.
+test "ternary: brace-nested colon does not split the ternary" ![io] {
+    let expr = _probe_expr("cond ? {k: 1} : z");
+    assert expr.variant == "Conditional";
+    assert expr.condition.name == "cond";
+    assert expr.then_value.variant == "Object";
+    assert expr.else_value.name == "z";
+}
+
+// -------------------------------------------------------------------
+// Regression guard: the postfix `?` try operator must NOT be reinterpreted
+// as a ternary. The compiler self-hosts on `a()?` / `a()?.b()?` throughout
+// its own source — a regression here breaks the build.
+// -------------------------------------------------------------------
+test "try-operator: `a()?` still parses as TryOperator" ![io] {
+    let expr = _probe_expr("a()?");
+    assert expr.variant == "TryOperator";
+    assert expr.operand.variant == "Call";
+}
+
+test "try-operator: chained `a()?.b()?` still parses as TryOperator" ![io] {
+    let expr = _probe_expr("a()?.b()?");
+    assert expr.variant == "TryOperator";
+}
+
+// A try operator directly before an enclosing ternary's colon
+// (`cond ? maybeFail()? : x`): the inner `?` is followed immediately by `:`
+// (which cannot start an expression), so it stays a TryOperator; the outer
+// `?` is the ternary. This is the precedence-delicate case the disambiguation
+// is built around.
+test "ternary: try operator inside the then-branch stays a TryOperator" ![io] {
+    let expr = _probe_expr("cond ? g()? : x");
+    assert expr.variant == "Conditional";
+    assert expr.condition.name == "cond";
+    assert expr.then_value.variant == "TryOperator";
+    assert expr.else_value.name == "x";
+}
+
+// -------------------------------------------------------------------
+// Effect attribution: the requirement is the union of all three children.
+// -------------------------------------------------------------------
+test "ternary: effectful then-branch surfaces io" ![io] {
+    assert _reqs_contain(_cond_reqs("c ? print.info(\"X\") : y"), "io");
+}
+
+test "ternary: effectful else-branch surfaces io" ![io] {
+    assert _reqs_contain(_cond_reqs("c ? y : print.info(\"X\")"), "io");
+}
+
+test "ternary: effectful condition surfaces io" ![io] {
+    assert _reqs_contain(_cond_reqs("print.info(\"X\") ? a : b"), "io");
+}
+
+test "ternary: effectful branch surfaces net" ![io] {
+    assert _reqs_contain(_cond_reqs("c ? http.get(\"u\") : y"), "net");
+}
+
+// -------------------------------------------------------------------
+// No false positive: an effect-free ternary requires nothing.
+// -------------------------------------------------------------------
+test "ternary: effect-free ternary requires nothing" ![io] {
+    let reqs = _cond_reqs("a ? b : c");
+    assert reqs.length == 0;
+}
