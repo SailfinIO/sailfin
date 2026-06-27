@@ -31,6 +31,12 @@
 // for call to `args.push`"), even though `sfn check` accepts it — a
 // build-only failure of the #1389 class. The methods are thin delegators
 // to the free functions, which is the proven self-hosting shape.
+// The clang `assemble` argv builder lives in the struct-free
+// `build/clang_argv` leaf so build-driver modules can assemble without
+// importing this module (and emitting the `LlvmTextBackend` vtable). See
+// that file's header for the seed-lowering reason (#1730).
+import { _llvm_text_assemble_argv } from "./build/clang_argv";
+
 // Reserved opaque object-file handle for later backend stages (#347 /
 // #1640 produce these in-process). Stage 0's `LlvmTextBackend` returns
 // the clang exit code directly, so this is unused today but pins the
@@ -73,25 +79,6 @@ interface Backend {
     fn assemble(self, src: string, out: string, opt_flag: string, include_flags: string[]) -> int ![io];
     // Link pre-compiled objects + IR inputs into a binary.
     fn link(self, plan: LinkPlan) -> int ![io];
-}
-
-// Build the `clang -c` argv for a single object compile. Mirrors the
-// runtime c-source / ll-source / sfn-source object compiles and the
-// `--no-link` library build: section split so the link's dead-strip can
-// GC unreferenced sections (#1047).
-fn _llvm_text_assemble_argv(src: string, out: string, opt_flag: string, include_flags: string[]) -> string[] {
-    let mut args: string[] = ["clang", opt_flag, "-Wno-override-module", "-ffunction-sections", "-fdata-sections"];
-    let mut i: int = 0;
-    loop {
-        if i >= include_flags.length { break; }
-        args.push(include_flags[i]);
-        i += 1;
-    }
-    args.push("-c");
-    args.push(src);
-    args.push("-o");
-    args.push(out);
-    return args;
 }
 
 // Build the clang link argv for the `sfn test` layout:

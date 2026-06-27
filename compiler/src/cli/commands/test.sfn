@@ -47,6 +47,7 @@ import {
 
 import { AssertFailure, _empty_assert_failure, _parse_assert_failure_record } from "../../assert_failure";
 import { Program, Statement } from "../../ast";
+import { assemble_runtime_capsule_link_inputs } from "../../build/runtime_objs";
 import {
     CacheKey,
     cache_copy_artifact_to,
@@ -86,7 +87,7 @@ import {
     _suite_name_from_path,
     _write_text_cmd
 } from "../../cli_commands_utils";
-import { assemble_runtime_capsule_link_inputs, link_test_objects } from "../../cli_main";
+import { link_test_objects } from "../../cli_main";
 import { ImportSymbolTable, empty_import_symbols } from "../../effect_imports";
 import { compile_tests_to_llvm_file_with_module_imports, module_name_from_path } from "../../main";
 import { LayoutManifest } from "../../native_ir";
