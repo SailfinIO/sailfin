@@ -297,8 +297,11 @@ fn _serve_content_length(buf: * u8, header_end: i64) -> i64 {
 // `_serve_recv_request(fd)` — read a full request (head + body) into a
 // growing libc buffer (doubling like `http.sfn`'s `_recv_all`).
 // Returns a NUL-terminated, caller-owned buffer (null on OOM / error /
-// over-cap body, which the worker turns into a `500` + connection
-// close).
+// over-cap body / a truncated request — EOF before the `\r\n\r\n` header
+// terminator — which the worker turns into a `500` + connection close).
+// Every null-returning path frees the growing buffer before returning, so
+// the worker's direct-500 path never has a request buffer to reclaim
+// (#1709): the request is freed here, never moved into the handler.
 //
 // Phase 1 reads until the `\r\n\r\n` header terminator, on EOF, or on
 // a `recv` error. A client that never sends the terminator must not be
@@ -364,10 +367,15 @@ fn _serve_recv_request(fd: i32) -> * u8 {
         }
     }
 
-    // EOF before the headers completed: return what we have.
+    // EOF (or a client that closed the write side) before the `\r\n\r\n`
+    // terminator: the request is truncated/empty and must NOT be moved into
+    // the handler. Free the partial buffer and signal the error to the
+    // worker (null -> direct 500, no dispatch) so the request buffer is
+    // reclaimed on this early-return path rather than handed to user code as
+    // a malformed request (#1709).
     if header_end < 0 {
-        memset(_serve_ptr_off(buf, len), 0, 1 as usize);
-        return buf;
+        free(buf);
+        return null;
     }
 
     // Phase 2 — drain the Content-Length body, if any.
@@ -565,11 +573,14 @@ fn sfn_serve_handler_dispatch(handler: * u8, request: OwnedBuf) -> OwnedBuf {
 // effect-free externs + the effect-erased dispatch, so it carries no
 // effect annotation (matching `future.sfn`'s trampolines).
 //
-// A null request (recv error, OOM, or the header cap exceeded) is
-// NOT handed to user code — the handler reads the request `OwnedBuf`'s
-// bytes, so a null backing would risk a crash inside the handler.
-// Instead the worker skips dispatch and sends a `500` directly
-// (`_serve_send_response(fd, null)`).
+// A null request (recv error, OOM, the header cap exceeded, or a
+// truncated request — EOF before the header terminator) is NOT handed to
+// user code — the handler reads the request `OwnedBuf`'s bytes, so a null
+// backing would risk a crash inside the handler, and a truncated request
+// is malformed. `_serve_recv_request` has already freed the buffer on
+// every such path, so there is nothing to reclaim here; the worker simply
+// skips dispatch and sends a `500` directly (`_serve_send_response(fd,
+// null)`).
 fn _serve_conn_worker(ctx: * u8) -> * u8 {
     if ctx as i64 == 0 { return null; }
     let base: i64 = ctx as i64;

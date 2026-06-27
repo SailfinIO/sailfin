@@ -64,6 +64,11 @@ extern fn recv(sockfd: i32, buf: * u8, len: i64, flags: i32) -> i64;
 
 extern fn close(fd: i32) -> i32;
 
+// `shutdown(fd, SHUT_WR=1)` — half-close the write side so the server's
+// recv sees EOF (a truncated request, #1709) while the read side stays
+// open to drain the server's 500 reply. Identical C ABI on both targets.
+extern fn shutdown(sockfd: i32, how: i32) -> i32;
+
 // The listening port for the loopback server. Fixed (this is the sole
 // server-loopback test in the native e2e pool, so it does not collide
 // under `--jobs N`); high + uncommon to avoid clashing with a developer's
@@ -210,6 +215,46 @@ fn _lb_request(port: i64, request: string) -> string {
         close(fd);
         return "";
     }
+    let resp = _lb_recv_all(fd);
+    close(fd);
+    return resp;
+}
+
+// `_lb_fire_and_close(port, request)` — connect, send `request` (which may
+// be empty), then close WITHOUT reading the response. The fire-and-forget
+// shape for driving the server's error paths (empty / truncated
+// connections, #1709) without blocking on a 500 the peer may never read:
+// an empty send closes immediately (the server's first recv returns 0 —
+// EOF — with no bytes), and a partial head is delivered then followed by
+// FIN (the server reads the partial, then EOF before the `\r\n\r\n`
+// terminator). Both take the worker's free-and-500 early-return path
+// rather than a 10s recv-timeout wait. Returns true if the connection
+// was established.
+fn _lb_fire_and_close(port: i64, request: string) -> bool {
+    let fd: i32 = _lb_connect(port);
+    if fd < 0 { return false; }
+    let n: i64 = strlen(request as * u8) as i64;
+    if n > 0 { let _ = _lb_send_all(fd, request as * u8, n); }
+    close(fd);
+    return true;
+}
+
+// `_lb_request_halfclose(port, request)` — send a deliberately truncated
+// head, half-close the write side (SHUT_WR) so the server sees EOF before
+// the `\r\n\r\n` terminator, then drain the reply. Unlike
+// `_lb_fire_and_close`, this keeps the read side open to OBSERVE the
+// server's response (a 500 for the truncated request, #1709). Returns the
+// response text, or "" on a connect/send failure.
+fn _lb_request_halfclose(port: i64, request: string) -> string {
+    let fd: i32 = _lb_connect(port);
+    if fd < 0 { return ""; }
+    if !_lb_send_all(fd, request as * u8, strlen(request as * u8) as i64) {
+        close(fd);
+        return "";
+    }
+    // SHUT_WR = 1: signal EOF to the server's recv while keeping the read
+    // side open to drain its 500 response.
+    shutdown(fd, 1);
     let resp = _lb_recv_all(fd);
     close(fd);
     return resp;
@@ -433,6 +478,40 @@ test "serve loopback: macOS request delivery + framed behavioral round-trips" ![
     let oversize_resp = _lb_request(port, oversize_req);
     print.info("[serve-loopback] oversize: " + oversize_resp);
     assert contains(oversize_resp, "HTTP/1.1 500");
+
+    // #1709: a truncated request (EOF before the `\r\n\r\n` terminator) is
+    // rejected with a 500 — NOT moved into the handler as a malformed
+    // request. Before the fix the partial buffer was handed to the handler
+    // (which saw an unparseable head and 404'd); after it, the worker's
+    // EOF early-return path frees the request buffer and sends a direct
+    // 500. Asserting the 500 distinguishes the fixed behavior from the old
+    // dispatch-the-garbage path.
+    let trunc_resp = _lb_request_halfclose(port, "GET /probe HTTP/1.1\r\nHost: x");
+    print.info("[serve-loopback] truncated: " + trunc_resp);
+    assert contains(trunc_resp, "HTTP/1.1 500");
+
+    // #1709: hammer the error paths — interleave empty (immediate-close)
+    // and truncated (partial head + EOF) connections so each repeatedly
+    // takes the worker's free-and-500 early-return path. A per-connection
+    // request-buffer leak, a double-free, or a crash/hang on these paths
+    // would destabilize the long-lived server; the post-storm valid
+    // round-trip below proves it survived every error-path connection
+    // intact. This is the achievable proxy for the RSS-stability criterion
+    // — there is no in-process RSS probe, and the blocking server never
+    // exits cleanly for an atexit LeakSanitizer pass (the focused, clean-
+    // exit ASAN leak gate over `_serve_recv_request` lives in
+    // `serve_request_leak_test.sfn`).
+    let mut storm: i64 = 0;
+    loop {
+        if storm >= 40 { break; }
+        let _e = _lb_fire_and_close(port, "");
+        let _t = _lb_fire_and_close(port, "GET /probe HTTP/1.1\r\nHost: x");
+        storm = storm + 1;
+    }
+    let post_storm = _lb_request(port, "GET / HTTP/1.1\r\nHost: x\r\nConnection: close\r\n\r\n");
+    print.info("[serve-loopback] post-storm: " + post_storm);
+    assert contains(post_storm, "HTTP/1.1 200");
+    assert contains(post_storm, "ROOT-OK");
 
     // Typed `fetch` client round-trips status + headers from the live
     // server (the #1323 framed path, proven end-to-end through the
