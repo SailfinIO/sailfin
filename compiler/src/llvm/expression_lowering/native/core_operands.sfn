@@ -99,33 +99,77 @@ fn emit_comparison_instruction(symbol: string, left_operand: LLVMOperand, right_
                         // aggregate-by-value rewrite lands with
                         // M2.4b — so the operand-extraction shim
                         // below is unchanged from the M1.A landing.
+                        // #1704: length-aware equality. Recover (data, len) for
+                        // each operand — extractvalue BOTH fields from a
+                        // `{i8*, i64}` aggregate (a non-owning slice carries its
+                        // true len), or take the bare `i8*` data and recover its
+                        // length via `@sfn_str_len` (the i8* NUL-scan helper,
+                        // reached only for genuinely NUL-terminated bare
+                        // pointers). Then call the `_lv` symbol; the bare
+                        // `@sfn_str_eq` stays the seed/extern `(i8*, i8*)` ABI.
                         let mut next_index = temp_index;
-                        let mut left_ptr_value = left_operand.value;
+                        let mut left_data = left_operand.value;
+                        let mut left_len = "";
                         if left_operand.llvm_type == "{i8*, i64}" {
                             let lext = format_temp_name(next_index);
                             current_lines.push("  " + lext
                                 + " = extractvalue {i8*, i64} "
                                 + left_operand.value
                                 + ", 0");
-                            left_ptr_value = lext;
                             next_index += 1;
+                            let llen = format_temp_name(next_index);
+                            current_lines.push("  " + llen
+                                + " = extractvalue {i8*, i64} "
+                                + left_operand.value
+                                + ", 1");
+                            next_index += 1;
+                            left_data = lext;
+                            left_len = llen;
+                        } else {
+                            let llen = format_temp_name(next_index);
+                            current_lines.push("  " + llen
+                                + " = call i64 @sfn_str_len(i8* "
+                                + left_operand.value
+                                + ")");
+                            next_index += 1;
+                            left_len = llen;
                         }
-                        let mut right_ptr_value = right_operand.value;
+                        let mut right_data = right_operand.value;
+                        let mut right_len = "";
                         if right_operand.llvm_type == "{i8*, i64}" {
                             let rext = format_temp_name(next_index);
                             current_lines.push("  " + rext
                                 + " = extractvalue {i8*, i64} "
                                 + right_operand.value
                                 + ", 0");
-                            right_ptr_value = rext;
                             next_index += 1;
+                            let rlen = format_temp_name(next_index);
+                            current_lines.push("  " + rlen
+                                + " = extractvalue {i8*, i64} "
+                                + right_operand.value
+                                + ", 1");
+                            next_index += 1;
+                            right_data = rext;
+                            right_len = rlen;
+                        } else {
+                            let rlen = format_temp_name(next_index);
+                            current_lines.push("  " + rlen
+                                + " = call i64 @sfn_str_len(i8* "
+                                + right_operand.value
+                                + ")");
+                            next_index += 1;
+                            right_len = rlen;
                         }
                         let compare_temp = format_temp_name(next_index);
                         current_lines.push("  " + compare_temp
-                            + " = call i1 @sfn_str_eq(i8* "
-                            + left_ptr_value
+                            + " = call i1 @sfn_str_eq_lv(i8* "
+                            + left_data
+                            + ", i64 "
+                            + left_len
                             + ", i8* "
-                            + right_ptr_value
+                            + right_data
+                            + ", i64 "
+                            + right_len
                             + ")");
                         next_index += 1;
                         let mut operand = LLVMOperand {
@@ -172,33 +216,73 @@ fn emit_comparison_instruction(symbol: string, left_operand: LLVMOperand, right_
             if right_is_string {
                 if !left_is_null {
                     if !right_is_null {
+                        // #1704: length-aware ordered compare — same (data, len)
+                        // recovery as the equality block above, then call the
+                        // `_lv` symbol. The bare `@sfn_str_cmp` stays the seed
+                        // `(i8*, i8*)` ABI.
                         let mut next_index = temp_index;
-                        let mut left_ptr_value = left_operand.value;
+                        let mut left_data = left_operand.value;
+                        let mut left_len = "";
                         if left_operand.llvm_type == "{i8*, i64}" {
                             let lext = format_temp_name(next_index);
                             current_lines.push("  " + lext
                                 + " = extractvalue {i8*, i64} "
                                 + left_operand.value
                                 + ", 0");
-                            left_ptr_value = lext;
                             next_index += 1;
+                            let llen = format_temp_name(next_index);
+                            current_lines.push("  " + llen
+                                + " = extractvalue {i8*, i64} "
+                                + left_operand.value
+                                + ", 1");
+                            next_index += 1;
+                            left_data = lext;
+                            left_len = llen;
+                        } else {
+                            let llen = format_temp_name(next_index);
+                            current_lines.push("  " + llen
+                                + " = call i64 @sfn_str_len(i8* "
+                                + left_operand.value
+                                + ")");
+                            next_index += 1;
+                            left_len = llen;
                         }
-                        let mut right_ptr_value = right_operand.value;
+                        let mut right_data = right_operand.value;
+                        let mut right_len = "";
                         if right_operand.llvm_type == "{i8*, i64}" {
                             let rext = format_temp_name(next_index);
                             current_lines.push("  " + rext
                                 + " = extractvalue {i8*, i64} "
                                 + right_operand.value
                                 + ", 0");
-                            right_ptr_value = rext;
                             next_index += 1;
+                            let rlen = format_temp_name(next_index);
+                            current_lines.push("  " + rlen
+                                + " = extractvalue {i8*, i64} "
+                                + right_operand.value
+                                + ", 1");
+                            next_index += 1;
+                            right_data = rext;
+                            right_len = rlen;
+                        } else {
+                            let rlen = format_temp_name(next_index);
+                            current_lines.push("  " + rlen
+                                + " = call i64 @sfn_str_len(i8* "
+                                + right_operand.value
+                                + ")");
+                            next_index += 1;
+                            right_len = rlen;
                         }
                         let cmp_temp = format_temp_name(next_index);
                         current_lines.push("  " + cmp_temp
-                            + " = call i32 @sfn_str_cmp(i8* "
-                            + left_ptr_value
+                            + " = call i32 @sfn_str_cmp_lv(i8* "
+                            + left_data
+                            + ", i64 "
+                            + left_len
                             + ", i8* "
-                            + right_ptr_value
+                            + right_data
+                            + ", i64 "
+                            + right_len
                             + ")");
                         next_index += 1;
                         let mut pred = "icmp slt";

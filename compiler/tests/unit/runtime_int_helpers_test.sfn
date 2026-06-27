@@ -36,6 +36,13 @@ fn _i8ptr_operand(value: string) -> LLVMOperand {
     return LLVMOperand { llvm_type: "i8*", value: value };
 }
 
+// #1704: the string-query accessor descriptors now take the `{i8*, i64}`
+// SfnString aggregate (length-aware `_lv` bodies). A matching-shape operand
+// emits the call directly with no coercion, keeping the three-line render.
+fn _sfnstr_operand(value: string) -> LLVMOperand {
+    return LLVMOperand { llvm_type: "{i8*, i64}", value: value };
+}
+
 fn _argv_operand(value: string) -> LLVMOperand {
     // SfnArray-shaped argv buffer per the M1.B v2 ABI
     // (`runtime_helpers.sfn:285` parameter type).
@@ -89,16 +96,16 @@ test "runtime int helper: runtime_monotonic_millis_fn alias matches monotonic_mi
 
 test "runtime int helper: runtime_char_code_fn emits call+round+fptosi to i64" ![io] {
     // M2.5 (#403) flipped this descriptor's `native_signature` to
-    // `sfn_str_codepoint` — the Sailfin-native wave-2 trampoline. The
-    // C ABI (`double` return) is preserved on the trampoline body so
-    // the #639 `round + fptosi` coercion shape stays bit-identical;
-    // only the called symbol moved.
-    let s = _i8ptr_operand("%s");
+    // `sfn_str_codepoint`. #1704 repointed it again to the length-aware
+    // `sfn_str_codepoint_lv` over the `{i8*, i64}` aggregate; the C ABI
+    // (`double` return) is preserved so the #639 `round + fptosi` coercion
+    // shape stays bit-identical. Only the called symbol + operand shape moved.
+    let s = _sfnstr_operand("%s");
     let operands: LLVMOperand[] = [s];
     let result = emit_runtime_call("runtime_char_code_fn", operands, empty_runtime_call_overrides(), 0, []);
 
     assert result.lines.length == 3;
-    assert result.lines[0] == "  %t0 = call double @sfn_str_codepoint(i8* %s)";
+    assert result.lines[0] == "  %t0 = call double @sfn_str_codepoint_lv({i8*, i64} %s)";
     assert result.lines[1] == "  %t1 = call double @round(double %t0)";
     assert result.lines[2] == "  %t2 = fptosi double %t1 to i64";
 
@@ -133,16 +140,16 @@ test "runtime int helper: process.run emits call+round+fptosi to i64" ![io] {
 
 test "runtime int helper: runtime_grapheme_count_fn emits call+round+fptosi to i64" ![io] {
     // M2.5 (#403) flipped this descriptor's `native_signature` to
-    // `sfn_str_grapheme_count` — the Sailfin-native wave-2 trampoline.
-    // The C ABI (`double` return) is preserved on the trampoline body
-    // so the #639 `round + fptosi` coercion shape stays bit-identical;
-    // only the called symbol moved.
-    let s = _i8ptr_operand("%s");
+    // `sfn_str_grapheme_count`. #1704 repointed it to the length-aware
+    // `sfn_str_grapheme_count_lv` over the `{i8*, i64}` aggregate; the C ABI
+    // (`double` return) is preserved so the #639 `round + fptosi` coercion
+    // shape stays bit-identical. Only the called symbol + operand shape moved.
+    let s = _sfnstr_operand("%s");
     let operands: LLVMOperand[] = [s];
     let result = emit_runtime_call("runtime_grapheme_count_fn", operands, empty_runtime_call_overrides(), 0, []);
 
     assert result.lines.length == 3;
-    assert result.lines[0] == "  %t0 = call double @sfn_str_grapheme_count(i8* %s)";
+    assert result.lines[0] == "  %t0 = call double @sfn_str_grapheme_count_lv({i8*, i64} %s)";
     assert result.lines[1] == "  %t1 = call double @round(double %t0)";
     assert result.lines[2] == "  %t2 = fptosi double %t1 to i64";
 
