@@ -61,7 +61,9 @@ import {
     make_try_error_type_mismatch_diagnostic,
     make_try_non_result_fn_diagnostic,
     make_try_non_result_operand_diagnostic,
+    make_unanalyzable_raw_diagnostic,
     make_undefined_function_diagnostic,
+    make_unparseable_statement_diagnostic,
     make_unsupported_statement_keyword_diagnostic,
     register_local_symbol,
     register_symbol,
@@ -570,7 +572,19 @@ fn check_statement(statement: Statement, bindings: SymbolEntry[], interfaces: St
         loop {
             if index >= statement.cases.length { break; }
             let case = statement.cases[index];
-            diagnostics = diagnostics.concat(walk_expression(case.pattern, bindings, imports));
+            // A match pattern is destructuring, not a value expression. A
+            // struct/enum destructuring pattern (`Type.Variant { field, … }`)
+            // legitimately degrades to `Raw` — the parser has no pattern
+            // grammar, so bindings are extracted by
+            // `register_match_pattern_bindings` from the pattern text — and a
+            // pattern carries no effects. So the #1627 E0818 backstop must NOT
+            // fire in pattern position: walk a structured pattern for its
+            // diagnostics, but skip a `Raw` pattern (it would only ever yield
+            // a false E0818). The guard IS a value expression and stays fully
+            // checked (E0818 applies there).
+            if case.pattern.variant != "Raw" {
+                diagnostics = diagnostics.concat(walk_expression(case.pattern, bindings, imports));
+            }
             diagnostics = diagnostics.concat(walk_expression(case.guard, bindings, imports));
             let arm_bindings = register_match_pattern_bindings(case.pattern, bindings);
             let _blk_diags = check_block(case.body, arm_bindings, interfaces, imports, top_level);
@@ -713,6 +727,27 @@ fn check_block(block: Block, parent_bindings: SymbolEntry[], interfaces: Stateme
             if _ci >= result.diagnostics.length { break; }
             diagnostics.push(result.diagnostics[_ci]);
             _ci += 1;
+        }
+        // E0817 (#1691) — a nested `Statement.Unknown` the parser could not
+        // structure must fail closed. This `check_block` walk only sees
+        // block-level statements (top-level `Unknown` is reported as E0500 by
+        // `sfn check` over `program.statements`, a disjoint position), so
+        // emitting here is nested-only and does not double-fire with E0500.
+        // Gate against the removed-AI-keyword / E0411 cases that
+        // `check_statement`'s Unknown arm already diagnosed, so we report a
+        // genuinely unrecognized statement exactly once.
+        if statement.variant == "Unknown" {
+            if detect_removed_ai_keyword(statement.text).length == 0 {
+                if detect_unsupported_statement_keyword(statement.text).length == 0 {
+                    let mut anchor: Token? = null;
+                    let mut near: string = "";
+                    if statement.tokens.length > 0 {
+                        anchor = statement.tokens[0];
+                        near = " near `" + statement.tokens[0].lexeme + "`";
+                    }
+                    diagnostics.push(make_unparseable_statement_diagnostic(anchor, near));
+                }
+            }
         }
     }
 
@@ -1109,13 +1144,23 @@ fn walk_expression(expression: Expression?, bindings: SymbolEntry[], imports: Im
         }
         return [];
     }
-    // #1147: the parser cannot structure `& <fn>` or `<fn> as *T` (the
-    // `as` target only parses a bare identifier; `&` has no prefix form),
-    // so both fall back to `Raw`. Diagnose the unsupported / invalid
-    // function-reference spellings here. Gated on the head resolving to a
-    // function so non-function `<value> as * u8` casts stay clean.
+    // #1627 Part F — blanket fail-closed `Raw` backstop. After Parts A–D
+    // structured every valid construct that previously degraded to `Raw`
+    // (casts → Cast, prefix `*`/`&` → Unary, assignment → Assignment, ternary
+    // → Conditional), any non-empty `Raw` reaching here is genuinely
+    // unanalyzable — the effect checker contributes `[]` for it, so leaving it
+    // silent is a fail-open hole in the effects pillar. An empty
+    // `Raw{text:""}` (the never-escapes placeholder shape) is not effectful
+    // and stays clean. `check_fn_reference_raw` still classifies any residual
+    // `& fn` form (now structured into `Unary` by Part B, kept defensively)
+    // with its specific E0808 before the blanket E0818 fires. The backstop
+    // keys off node SHAPE, never text content — it does not re-introduce the
+    // retired text-pattern detection (#1186).
     if expression.variant == "Raw" {
-        return check_fn_reference_raw(expression.text, bindings, expression.span);
+        if expression.text.length == 0 { return []; }
+        let fn_ref = check_fn_reference_raw(expression.text, bindings, expression.span);
+        if fn_ref.length > 0 { return fn_ref; }
+        return [make_unanalyzable_raw_diagnostic(expression.text, expression.span)];
     }
     return [];
 }
@@ -1293,7 +1338,19 @@ fn walk_statement_expressions(statement: Statement, bindings: SymbolEntry[], imp
         loop {
             if index >= statement.cases.length { break; }
             let case = statement.cases[index];
-            diagnostics = diagnostics.concat(walk_expression(case.pattern, bindings, imports));
+            // A match pattern is destructuring, not a value expression. A
+            // struct/enum destructuring pattern (`Type.Variant { field, … }`)
+            // legitimately degrades to `Raw` — the parser has no pattern
+            // grammar, so bindings are extracted by
+            // `register_match_pattern_bindings` from the pattern text — and a
+            // pattern carries no effects. So the #1627 E0818 backstop must NOT
+            // fire in pattern position: walk a structured pattern for its
+            // diagnostics, but skip a `Raw` pattern (it would only ever yield
+            // a false E0818). The guard IS a value expression and stays fully
+            // checked (E0818 applies there).
+            if case.pattern.variant != "Raw" {
+                diagnostics = diagnostics.concat(walk_expression(case.pattern, bindings, imports));
+            }
             diagnostics = diagnostics.concat(walk_expression(case.guard, bindings, imports));
             diagnostics = diagnostics.concat(walk_block_expressions(case.body, bindings, imports));
             index += 1;

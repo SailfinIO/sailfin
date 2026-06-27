@@ -1,0 +1,65 @@
+// #1627 Part D — an assignment must not hide its target's or value's effects.
+//
+// Before #1627 assignment had no AST node: `a = b` / `x += 1` parsed as
+// `ExpressionStatement{Raw}` (since `=` carried precedence -1 and compound
+// operators lexed as two tokens), and after #1186 a `Raw` contributes ZERO
+// effects — so `a = readFile()` or `arr[io()] = x` reached codegen with no
+// declared capability. Now assignment structures into `Expression.Assignment`
+// and the effect checker unions the effects of both `target` and `value`.
+import { Expression } from "../../src/ast";
+import { EffectRequirement, collect_effects_from_expression } from "../../src/effect_checker";
+import { empty_import_symbols } from "../../src/effect_imports";
+import { parse_program } from "../../src/parser/mod";
+
+fn _probe_expr(snippet: string) -> Expression ![io] {
+    let program = parse_program("fn probe() { " + snippet + "; }");
+    assert program.statements.length >= 1;
+    let fn_stmt = program.statements[0];
+    assert fn_stmt.variant == "FunctionDeclaration";
+    assert fn_stmt.body.statements.length >= 1;
+    let stmt = fn_stmt.body.statements[0];
+    assert stmt.variant == "ExpressionStatement";
+    return stmt.expression;
+}
+
+fn _reqs_contain(reqs: EffectRequirement[], effect: string) -> boolean {
+    let mut index: int = 0;
+    loop {
+        if index >= reqs.length { break; }
+        if reqs[index].effect == effect { return true; }
+        index += 1;
+    }
+    return false;
+}
+
+fn _assign_reqs(snippet: string) -> EffectRequirement[] ![io] {
+    return collect_effects_from_expression(_probe_expr(snippet), empty_import_symbols());
+}
+
+// ── Structuring: assignment (simple + compound) parses into Assignment ──
+test "assign: simple `a = b` structures into Assignment" ![io] {
+    let expr = _probe_expr("a = b");
+    assert expr.variant == "Assignment";
+    assert expr.operator == "=";
+}
+
+test "assign: compound `a += b` structures into Assignment" ![io] {
+    let expr = _probe_expr("a += b");
+    assert expr.variant == "Assignment";
+    assert expr.operator == "+=";
+}
+
+// ── Effect attribution: the Assignment arm unions target + value ──
+test "assign: an effectful value surfaces io" ![io] {
+    assert _reqs_contain(_assign_reqs("a = print.info(\"x\")"), "io");
+}
+
+test "assign: an effectful lvalue index surfaces io" ![io] {
+    assert _reqs_contain(_assign_reqs("arr[print.info(\"x\")] = 5"), "io");
+}
+
+// ── No false positive: an effect-free assignment requires nothing ──
+test "assign: an effect-free assignment requires nothing" ![io] {
+    let reqs = _assign_reqs("i += 1");
+    assert reqs.length == 0;
+}

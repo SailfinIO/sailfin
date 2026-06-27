@@ -1,0 +1,56 @@
+// #1627 / #1691 — a nested (block-level) unparseable statement must fail
+// closed, not silently reach codegen with zero effects.
+//
+// Before #1627, a nested statement the parser could not structure degraded
+// to an effect-blind node and `sfn check` reported it clean. Now it fails
+// closed: the dominant case parses as `ExpressionStatement{Raw}` and is
+// caught by the E0818 expression backstop (Part F); a genuine
+// `Statement.Unknown` (only reachable when `parse_block_statement` rejects a
+// token outright) is caught by the defensive E0817 arm in `check_block`.
+// Either way the build fails — the point is that it is no longer silent.
+//
+// The double-fire gating is the crux: a removed-AI-keyword / E0411
+// unsupported-keyword statement keeps its specific code and does NOT also
+// emit the generic backstop.
+import { parse_program } from "../../src/parser/mod";
+import { typecheck_diagnostics } from "../../src/typecheck";
+
+fn _count_code(source: string, code: string) -> int ![io] {
+    let program = parse_program(source);
+    let diagnostics = typecheck_diagnostics(program);
+    let mut count: int = 0;
+    let mut i: int = 0;
+    loop {
+        if i >= diagnostics.length { break; }
+        if strings_equal(diagnostics[i].code, code) { count += 1; }
+        i += 1;
+    }
+    return count;
+}
+
+fn _total(source: string) -> int ![io] {
+    let program = parse_program(source);
+    return typecheck_diagnostics(program).length;
+}
+
+// ── A nested unparseable statement fails closed (no longer silent) ──
+test "unknown: nested junk statement fails the build" ![io] {
+    assert _total("fn f() { @@@ junk !!! }") > 0;
+}
+
+// ── Dedup: an unsupported-keyword statement keeps E0411 only ──
+// `while` is a removed/unsupported statement keyword (E0411); it must NOT
+// also trip the generic E0818 backstop or the E0817 unknown arm.
+test "unknown: nested `while` is E0411 only (no backstop double-fire)" ![io] {
+    let source = "fn f() { while (true) { } }";
+    assert _count_code(source, "E0411") == 1;
+    assert _count_code(source, "E0818") == 0;
+    assert _count_code(source, "E0817") == 0;
+}
+
+// ── No false positive: a valid nested statement is clean ──
+test "unknown: a valid nested statement is not flagged" ![io] {
+    let source = "fn f() { let x = 1; let y = x + 2; }";
+    assert _count_code(source, "E0818") == 0;
+    assert _count_code(source, "E0817") == 0;
+}

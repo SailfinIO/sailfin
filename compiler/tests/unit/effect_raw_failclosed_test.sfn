@@ -1,0 +1,55 @@
+// #1627 Part F — the blanket fail-closed `Raw` backstop (E0818).
+//
+// After Parts A–D structured every valid construct that previously degraded
+// to `Expression.Raw` (casts → Cast, prefix `*`/`&` → Unary, assignment →
+// Assignment, ternary → Conditional), any non-empty `Raw` reaching the
+// typecheck walk is genuinely unanalyzable — the effect checker contributes
+// zero effects for it, so leaving it silent would be a fail-open hole in the
+// effects pillar. E0818 makes that fail closed.
+//
+// Crucially E0818 fires on node SHAPE (a `Raw` node), never on text content,
+// so it does not re-introduce the retired text-pattern detection (#1186) —
+// see the negative-substring tests below.
+import { parse_program } from "../../src/parser/mod";
+import { typecheck_diagnostics } from "../../src/typecheck";
+
+fn _count_code(source: string, code: string) -> int ![io] {
+    let program = parse_program(source);
+    let diagnostics = typecheck_diagnostics(program);
+    let mut count: int = 0;
+    let mut i: int = 0;
+    loop {
+        if i >= diagnostics.length { break; }
+        if strings_equal(diagnostics[i].code, code) { count += 1; }
+        i += 1;
+    }
+    return count;
+}
+
+// ── A genuinely unstructured expression fails closed with E0818 ──
+// `a @ b` has no operator for `@`; the climb stops after `a`, the leftover
+// `@ b` tokens degrade the expression to a non-empty `Raw`.
+test "raw: an unstructured expression is E0818" ![io] {
+    assert _count_code("fn f() { let x = a @ b; }", "E0818") == 1;
+}
+
+// ── Valid structured expressions never trip E0818 ──
+test "raw: a valid arithmetic expression is not E0818" ![io] {
+    assert _count_code("fn f() { let x = 1 + 2 * 3; }", "E0818") == 0;
+}
+
+test "raw: a valid call/member/cast/assignment is not E0818" ![io] {
+    let source = "fn g() -> int { return 1; } fn f() { let mut a = 0; a = g() as int; }";
+    assert _count_code(source, "E0818") == 0;
+}
+
+// ── Negative-substring: E0818 keys off node shape, not text content ──
+// A string literal or identifier containing `print` as a SUBSTRING is a
+// structured node, so it must NOT trip E0818 (proof there is no text-scan).
+test "raw: a string literal mentioning print is not E0818" ![io] {
+    assert _count_code("fn f() { let s = \"print.info(x)\"; }", "E0818") == 0;
+}
+
+test "raw: an identifier containing print as a substring is not E0818" ![io] {
+    assert _count_code("fn f() { let printable = 5; let y = printable + 1; }", "E0818") == 0;
+}
