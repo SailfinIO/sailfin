@@ -57,9 +57,8 @@ struct EffectRequirement {
     // Source-token attribution for the operation that introduced
     // this requirement. Populated by `collect_effects_from_expression`
     // when the AST node carries a span (Identifier / Member). Stays
-    // null on synthesized decorator-implied effects, where no source
-    // Expression is available. (The text-pattern `Raw`-body effect path
-    // that also produced null triggers was deleted in #1186.)
+    // null on the text-pattern (`Raw` body) path and on synthesized
+    // decorator-implied effects, where no Expression is available.
     // `analyze_routine` reads the first non-null trigger from the
     // missing-requirements list to caret the diagnostic at the call
     // site rather than the function declaration.
@@ -459,9 +458,9 @@ fn analyze_routine(signature: FunctionSignature, body: Block, decorators: Decora
     // call-site token captured during the body walk — that's where
     // the offending operation actually lives, so the caret lands on
     // the user-actionable line. When no per-requirement trigger
-    // exists (decorator-implied effects, synthesized expressions),
-    // the trigger falls back to signature_token so diagnostics never
-    // lose source attribution.
+    // exists (text-pattern Raw bodies, decorator-implied effects,
+    // synthesized expressions), the trigger falls back to
+    // signature_token so diagnostics never lose source attribution.
     //
     // Use `signature.name` (the bare identifier) for the
     // signature_token's lexeme so the fallback caret has the right
@@ -490,8 +489,8 @@ fn analyze_routine(signature: FunctionSignature, body: Block, decorators: Decora
 
 // B1: pick the first per-requirement trigger token captured by the
 // body walker; fall back to the signature token if every requirement
-// came from a non-AST path (decorator-implied effects, synthesized
-// expressions). The caller passes signature_token as the
+// came from a non-AST path (text patterns, decorator-implied effects,
+// synthesized expressions). The caller passes signature_token as the
 // fallback so the violation always carries a source location.
 fn _first_requirement_trigger(missing_requirements: EffectRequirement[], fallback: Token?) -> Token? {
     let mut i: int = 0;
@@ -618,14 +617,6 @@ fn collect_effects_from_statement(statement: Statement, imports: ImportSymbolTab
             method_index += 1;
         }
         return required;
-    }
-    if statement.variant == "Unknown" {
-        // A nested unparseable statement (#1691) contributes no analyzable
-        // effect. The `E0817` parse diagnostic (typecheck `check_block`)
-        // already fails the build, so this arm stays `[]` to avoid a second
-        // diagnostic on the same node — it documents intent (the prior
-        // fall-through returned `[]` implicitly).
-        return [];
     }
     return [];
 }
@@ -913,16 +904,6 @@ fn collect_effects_from_expression(expression: Expression?, imports: ImportSymbo
         let mut required = collect_effects_from_expression(expression.condition, imports);
         required = merge_requirements(required, collect_effects_from_expression(expression.then_value, imports));
         required = merge_requirements(required, collect_effects_from_expression(expression.else_value, imports));
-        return required;
-    }
-    if expression.variant == "Assignment" {
-        // Assignment `target <op> value` (#1627 Part D). Both sides can be
-        // effectful — `arr[compute_io()] = x` (effect in the lvalue) and
-        // `a = readFile()` (effect in the value) — so the requirement is the
-        // union of the target's and value's effects. Before #1627 the whole
-        // assignment degraded to an effect-blind `Raw`, dropping both.
-        let mut required = collect_effects_from_expression(expression.target, imports);
-        required = merge_requirements(required, collect_effects_from_expression(expression.value, imports));
         return required;
     }
     if expression.variant == "Array" {

@@ -944,15 +944,6 @@ fn _scope_after_expression(expression: Expression?, scope: OwnershipScope) -> Ow
         let after_then = _scope_after_expression(expression.then_value, after_condition);
         return _scope_after_expression(expression.else_value, after_then);
     }
-    if expression.variant == "Assignment" {
-        // Assignment `target <op> value` (#1627 Part D). Thread the scope
-        // through the value then the target so a move inside the rvalue
-        // (`a = consume(buf)`) or an effectful/owning lvalue is recorded and a
-        // later use of a moved binding is still caught. Value-before-target
-        // matches evaluation order (the rvalue is computed before the store).
-        let after_value = _scope_after_expression(expression.value, scope);
-        return _scope_after_expression(expression.target, after_value);
-    }
     if expression.variant == "Spawn" {
         // A spawned closure captures owned values as moves (#1220). A
         // bare-fn spawn (`spawn foo(buf)`) is an ordinary call whose

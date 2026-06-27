@@ -217,22 +217,6 @@ fn format_expression_into(expression: Expression, out: string[]) -> string[] {
         out.push(")");
         return out;
     }
-    if expression.variant == "Assignment" {
-        // `<target> <operator> <value>` (#1627 Part D) — the exact text the
-        // lowering `parse_assignment_expression` string-scan consumes (it
-        // splits on the first top-level `=`, reading the preceding char for a
-        // compound operator). The target is an lvalue (Identifier / Member /
-        // Index / `*`-deref) and never carries a top-level `=`, so the split
-        // is unambiguous; the value is parenthesized when it is a Binary/Cast
-        // so embedded operators survive the re-parse. No dedicated lowering
-        // arm is needed; this serialization IS the bridge.
-        format_expression_into(expression.target, out);
-        out.push(" ");
-        out.push(expression.operator);
-        out.push(" ");
-        _format_binary_operand_into(expression.value, out);
-        return out;
-    }
     if expression.variant == "TryOperator" {
         // `<operand>?` (#1690). Normally every try operator is desugared by
         // `desugar_try_in_block` before formatting, so this arm does not fire

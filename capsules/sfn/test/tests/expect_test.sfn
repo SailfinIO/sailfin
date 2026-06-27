@@ -177,28 +177,28 @@ test "expect: contains_int_array fail" ![pure] {
 
 // -- to_throw --
 test "expect: to_throw pass" ![pure] {
-    assert expect_to_throw(fn () -> int { return _boom(); }).ok;
+    assert expect_to_throw(() -> int { return _boom(); }).ok;
 }
 
 test "expect: to_throw fail (no throw)" ![pure] {
-    let r = expect_to_throw(fn () -> int { return _no_throw(); });
+    let r = expect_to_throw(() -> int { return _no_throw(); });
     assert ! r.ok;
     assert r.message.length > 0;
 }
 
 // -- to_throw_with --
 test "expect: to_throw_with pass" ![pure] {
-    assert expect_to_throw_with(fn () -> int { return _boom(); }, "overflow").ok;
+    assert expect_to_throw_with(() -> int { return _boom(); }, "overflow").ok;
 }
 
 test "expect: to_throw_with fail (wrong message)" ![pure] {
-    let r = expect_to_throw_with(fn () -> int { return _boom(); }, "disk full");
+    let r = expect_to_throw_with(() -> int { return _boom(); }, "disk full");
     assert ! r.ok;
     assert r.message.length > 0;
 }
 
 test "expect: to_throw_with fail (no throw)" ![pure] {
-    let r = expect_to_throw_with(fn () -> int { return _no_throw(); }, "overflow");
+    let r = expect_to_throw_with(() -> int { return _no_throw(); }, "overflow");
     assert ! r.ok;
     assert r.message.length > 0;
 }

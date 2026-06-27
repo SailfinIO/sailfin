@@ -4,12 +4,7 @@
 - **Epic:** #1180
 - **Design record extended:** SFEP-0008 (`docs/proposals/0008-effect-validation.md`)
 - **Author:** agent:compiler-architect
-- **Status:** **Shipped (2026-06-27)** — Parts A–F all landed and self-host;
-  full-tree `sfn check` census over compiler+runtime+capsules confirms zero
-  in-source `Raw`/`Unknown` nodes survive the backstop. Diagnostics added:
-  **E0817** (nested unparseable statement at production site) and **E0818**
-  (blanket fail-closed non-empty `Expression.Raw`). AST node added:
-  `Expression.Assignment { target, operator, value, span }` (Part D).
+- **Status:** Draft (single-issue design gate; not a new SFEP)
 - **Date:** 2026-06-26; **revised 2026-06-27** (the E0818-flip endgame — parts A–F)
 - **Decision:** **Structural lift (root fix)** chosen at the design gate. The
   earlier text-anchor "floor" (`_raw_contains_effectful_anchor`) is **superseded**

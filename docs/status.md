@@ -1,6 +1,6 @@
 # Status
 
-Updated: 2026-06-27. Seed pinned to `0.7.0-alpha.39` (`.seed-version`);
+Updated: 2026-06-24. Seed pinned to `0.7.0-alpha.39` (`.seed-version`);
 the compiler version source of truth is `compiler/capsule.toml`.
 
 This document is the **current-state source of truth**: what ships today,
@@ -110,36 +110,27 @@ here.
   effect requirement is resolved through the symbol table (local + imported)
   and the runtime descriptor registry — not text heuristics. The legacy
   text-pattern fallback (`collect_effects_from_text`) was proven redundant by
-  a parity harness (#1185) and **deleted in #1186**. A series of structural
-  lifts then closed every remaining effect-escape path through `Raw`/`Unknown`
-  nodes, culminating in a **blanket fail-closed backstop** (branch
-  `claude/issue-1627-effect-hardening-nh0kgh`, epic #1180, sub-issue #1627):
-  - **#1627** (`Cast` arm + pointer-target lift): the `as int` / `as * T` cast
-    escapes are closed — an effectful cast operand can no longer reach codegen
-    effect-free (`E0400`).
-  - **#1690** (ternary → `Conditional`): `cond ? readFile() : x` can no longer
-    escape the checker; effects of all three children are unioned.
-  - **Parts A–D** of the #1627 endgame: `<fn> as * u8` / `as * fn (...)` casts
-    (always lifted to `Cast`; E0809 scoped to typed `* fn (...)` targets),
-    prefix `*`/`&` (→ `Expression.Unary`), generic/fn-pointer cast targets,
-    and assignment-as-expression (`a = b`, `x += 1`) all structure into first-class
-    AST nodes — no valid effectful construct degrades to `Raw` any longer.
-    A new `Expression.Assignment` node covers the dominant Raw-producer (hundreds
-    of in-source `a = b` sites), with walker arms added in all seven required
-    passes (effect checker, typecheck, captures, ownership, format, emit, lambda
-    lowering).
-  - **E0817** (`Statement.Unknown` backstop): a nested unparseable statement now
-    records a parse diagnostic at the production site, gated to avoid
-    double-firing with `E0500`/`E0411`.
-  - **E0818** (blanket `Raw` fail-closed): any non-empty `Expression.Raw` that
-    reaches the effect checker is now a hard error ("unstructured expression
-    cannot be analyzed; rewrite it"). The self-host `make compile` gate over the
-    full compiler+runtime+capsules tree is the proof — a full-tree `sfn check`
-    census confirmed zero in-source `Raw`/`Unknown` nodes survive the backstop.
-    E0818 keys off node *shape*, not text content — the retired text-pattern
-    detection (#1186) is not reintroduced.
+  a parity harness (#1185) and **deleted in #1186**; parse-failure `Raw`/
+  `Unknown` nodes are effect-blind by design (they carry no resolvable call).
+  A #1627 audit confirmed that invariant held *except* for `<operand> as <type>`
+  casts: an identifier-typed cast parsed as a structured `Cast` the checker never
+  walked, and a pointer-typed cast (`as * T`) over an effectful operand degraded
+  the whole expression to `Raw` — so `print.info(x) as * i64` reached codegen with
+  no `![io]`. #1627 adds a `Cast` effect-checker arm (walks the operand) and lifts
+  pointer cast targets into `Cast` **for effect-bearing (non-identifier) operands**,
+  so a cast can no longer hide its operand's effects (`E0400`). Bare-identifier
+  pointer casts (`<fn>`/`<ptr-value> as * u8`) intentionally stay `Raw` — they
+  carry no effect, and this preserves the #1147 function-reference diagnostics and
+  the shadow-parser lowering unchanged. The ternary `? :` escape is closed the
+  same way in **#1690**: a ternary now parses into a structured `Conditional`
+  node (`cond ? then : else`) the effect checker walks, unioning the effects of
+  all three children, so `cond ? readFile() : x` can no longer reach codegen
+  effect-free (`E0400`). The disambiguation leaves the postfix `?` try operator
+  (`a()?`, `a()?.b()?`) untouched — a `?` is ternary only when the token after it
+  can start an expression *and* a top-level `:` follows. The remaining
+  Raw-degraded effect-escapes (prefix `*`/`&`, assignment-as-expression) are
+  tracked under epic #1180 (#1180-c) behind a blanket fail-closed `Raw` backstop.
   Effect polymorphism (`!E` variables, polymorphic HOFs) remains post-1.0.
-  Hierarchical effects are also post-1.0.
 - **Undefined free-function rejection** (`E0420`, #616/#812): unresolvable
   bare-identifier callees fail typecheck.
 - **Function references**: a bare fn name in value position lowers to the

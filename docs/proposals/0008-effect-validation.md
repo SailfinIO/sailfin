@@ -4,7 +4,7 @@ title: Effect Validation as Build Gate
 status: Accepted
 type: language
 created: 2026-04-26
-updated: 2026-06-27
+updated: 2026-04-26
 author: "agent:compiler-architect"
 tracking:
 supersedes:
@@ -1156,21 +1156,6 @@ Add effect polymorphism for HOFs.
 > superset parity with the legacy text-pattern detector (#1185), and **G4
 > (#1186) deleted `collect_effects_from_text` and the `Raw`/`Unknown`
 > text-scan fallback** — name resolution is now the only detection path.
-> The text-pattern detector is **fully retired**: the residual effect-opaque
-> `Raw`/`Unknown` node hole that #1186 left open was closed by a sequence of
-> structural lifts culminating in the #1627 endgame (2026-06-27, epic #1180).
-> Every valid expression that previously degraded to `Expression.Raw` is now
-> structured into a first-class AST node the effect checker walks: casts
-> (`<operand> as <type>` including pointer and fn-pointer targets, building on
-> #1627/#1689/#1690), prefix `*`/`&` into `Expression.Unary`, and
-> assignment/compound-assignment into a new `Expression.Assignment` node.
-> `Statement.Unknown` inside a block now records a parse diagnostic (**E0817**)
-> at the production site. A blanket fail-closed backstop (**E0818**: "unstructured
-> expression cannot be analyzed; rewrite it") then covers any remaining non-empty
-> `Expression.Raw` reaching the effect checker. A full-tree `sfn check` census
-> over compiler+runtime+capsules confirmed zero in-source `Raw`/`Unknown` nodes
-> survive the backstop; `make compile` (self-host) is the proof. E0818 keys off
-> node *shape*, not text content — the text-pattern detection is not reintroduced.
 > The *effect-polymorphism* sub-track (`!E` variables, polymorphic stdlib
 > HOFs) remains post-1.0 and is sketched below for forward-compatibility.
 

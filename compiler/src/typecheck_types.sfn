@@ -588,55 +588,6 @@ fn make_parse_error_diagnostic(message: string, span: SourceSpan?) -> Diagnostic
     };
 }
 
-// E0817 — a nested (block-level) `Statement.Unknown` the parser could not
-// structure (issue #1691, epic #1180). Top-level `Unknown` is reported as
-// E0500 by `sfn check` (tools/check.sfn) iterating `program.statements`; that
-// walk never descends into block bodies, so a nested unparseable statement
-// (`fn f() { @@@ junk !!! }`) reached codegen silently with zero effects —
-// after #1186 deleted the text-pattern fallback, a fail-open hole. Emitted
-// from `check_block` (nested-only), gated so it does not double-fire with the
-// removed-AI-keyword / E0411 unsupported-keyword diagnostics that
-// `check_statement`'s Unknown arm already mints. `primary` anchors at the
-// first consumed token; `near` is the ` near `<lexeme>`` hint.
-fn make_unparseable_statement_diagnostic(primary: Token?, near: string) -> Diagnostic {
-    return Diagnostic {
-        code: "E0817",
-        severity: "error",
-        message: "parse error: unrecognized statement" + near,
-        file_path: "",
-        primary: primary,
-        suggestion: null
-    };
-}
-
-// E0818 — the blanket fail-closed `Raw` backstop (issue #1627, epic #1180).
-// After Parts A–D structured every valid construct that previously degraded
-// to `Expression.Raw` (casts, prefix `*`/`&`, assignment, ternary), any
-// non-empty `Raw` reaching the typecheck walk is genuinely unanalyzable — the
-// effect checker cannot see its effects (it contributes `[]`), so without this
-// it would be a silent fail-open hole in the effects pillar. E0818 makes that
-// fail closed: an unstructured expression is a hard error. This fires on node
-// SHAPE (a `Raw` node), never on text content, so it does not re-introduce the
-// retired text-pattern detection (#1186). `span` locates the offending text;
-// `near` carries a bounded snippet for the caret hint.
-fn make_unanalyzable_raw_diagnostic(raw_text: string, span: SourceSpan?) -> Diagnostic {
-    let trimmed = trim_text(raw_text);
-    let mut near = trimmed;
-    if near.length > 40 { near = substring(near, 0, 40) + "…"; }
-    return Diagnostic {
-        code: "E0818",
-        severity: "error",
-        message: "this expression could not be structured by the parser, so its"
-            + " effects and types cannot be analyzed; rewrite it into a form the"
-            + " compiler can parse (near `"
-            + near
-            + "`)",
-        file_path: "",
-        primary: token_from_name(near, span),
-        suggestion: null
-    };
-}
-
 fn make_spawn_unresolvable_kind_diagnostic(span: SourceSpan?) -> Diagnostic {
     let head = "`spawn` target has no declared return type, so its future";
     let mid = " kind cannot be determined. Annotate the spawned lambda/fn";
