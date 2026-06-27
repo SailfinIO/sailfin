@@ -348,6 +348,24 @@ fn sfn_str_eq(a: * u8, b: * u8) -> bool {
     return memcmp(ra, b, la2 as usize) == 0;
 }
 
+// `sfn_str_eq_lv(a_data, a_len, b_data, b_len)` — #1704: length-aware (`_lv`)
+// equality over the `{i8*, i64}` SfnString aggregate. Consumes the carried byte
+// lengths instead of `strnlen`, so a non-NUL-terminated interior view (#1454)
+// is compared strictly within its bounds (no over-read into the source tail).
+// A length mismatch is an O(1) reject; `memcmp` over the shared length decides.
+// The bare `sfn_str_eq` is left untouched as the old `(i8*, i8*)` ABI symbol the
+// pinned seed emits during `make compile` and that `rlimit.sfn` externs;
+// freshly-emitted IR (the hardcoded `==`/`!=` site in `core_operands.sfn`)
+// targets this `_lv` symbol with both aggregate fields.
+fn sfn_str_eq_lv(a_data: * u8, a_len: i64, b_data: * u8, b_len: i64) -> bool {
+    if a_len != b_len { return false; }
+    if (a_data as i64) == (b_data as i64) { return true; }
+    if a_len == 0 { return true; }
+    if (a_data as i64) == 0 { return false; }
+    if (b_data as i64) == 0 { return false; }
+    return memcmp(a_data, b_data, a_len as usize) == 0;
+}
+
 // #1365: lexicographic compare of two immediate codepoints by their UTF-8
 // encodings — the ordered analogue of the imm-vs-imm arm of `sfn_str_eq`.
 // Walks `min(na, nb)` bytes via `_sfn_utf8_byte`; first non-zero byte delta
@@ -436,6 +454,29 @@ fn sfn_str_cmp(a: * u8, b: * u8) -> i32 {
     if r != 0 { return r; }
     if la2 < lb2 { return -1; }
     if la2 > lb2 { return 1; }
+    return 0;
+}
+
+// `sfn_str_cmp_lv(a_data, a_len, b_data, b_len)` — #1704: length-aware (`_lv`)
+// lexicographic compare over the aggregate. `memcmp` over `min(a_len, b_len)`
+// then the shorter view sorts first; carried lengths replace `strnlen`, so a
+// non-terminated interior view (#1454) orders strictly within its bounds. The
+// bare `sfn_str_cmp` is left as the old `(i8*, i8*)` ABI symbol the seed emits;
+// the hardcoded `<`/`<=`/`>`/`>=` site in `core_operands.sfn` targets this one.
+fn sfn_str_cmp_lv(a_data: * u8, a_len: i64, b_data: * u8, b_len: i64) -> i32 {
+    if (a_data as i64) == (b_data as i64) {
+        if a_len == b_len { return 0; }
+    }
+    if (a_data as i64) == 0 { return -1; }
+    if (b_data as i64) == 0 { return 1; }
+    let mut m: i64 = a_len;
+    if b_len < m { m = b_len; }
+    if m > 0 {
+        let r: i32 = memcmp(a_data, b_data, m as usize);
+        if r != 0 { return r; }
+    }
+    if a_len < b_len { return -1; }
+    if a_len > b_len { return 1; }
     return 0;
 }
 
@@ -759,6 +800,17 @@ fn sfn_str_grapheme_count(s: * u8) -> f64 {
     return len as f64;
 }
 
+// `sfn_str_grapheme_count_lv(s_data, s_len)` — #1704: length-aware (`_lv`)
+// grapheme count over the aggregate. Bootstrap simplification (one byte == one
+// grapheme) reads the carried `s_len` instead of NUL-scanning, so a
+// non-terminated interior view (#1454) counts only its own bytes. The bare
+// `sfn_str_grapheme_count` stays the old `(i8*)`/`double` ABI symbol the seed
+// emits; the repointed descriptor (`runtime_grapheme_count_fn`) targets this one.
+fn sfn_str_grapheme_count_lv(s_data: * u8, s_len: i64) -> f64 {
+    if s_len < 0 { return 0.0; }
+    return s_len as f64;
+}
+
 // `sfn_str_grapheme_at(s, idx)` — the `idx`-th grapheme of `s`. An
 // immediate-codepoint input is a single grapheme at index 0 (returned
 // unchanged, never dereferenced); a real ASCII byte is produced as an
@@ -783,35 +835,49 @@ fn sfn_str_grapheme_at(s: * u8, idx: f64) -> * u8 {
     return sfn_str_grapheme_byte(real, iidx);
 }
 
-// `sfn_str_byte_at(s, idx)` — raw byte at offset `idx`, or -1 for a null
-// string / out-of-range index. Decodes an immediate input to real bytes
-// first, bounds against the NUL-scanned length, then reads the byte via
-// the `sfn_str_read_byte` bridge.
-fn sfn_str_byte_at(s: * u8, idx: i64) -> i64 {
-    if (s as i64) == 0 { return -1; }
-    if idx < 0 { return -1; }
-    let real: * u8 = sfn_str_decode_owned(s);
-    let len: i64 = strnlen(real, 16777216) as i64;
-    if idx >= len { return -1; }
-    return sfn_str_read_byte(real, idx);
+// `sfn_str_grapheme_at_lv(s_data, s_len, idx)` — #1704: length-aware (`_lv`)
+// grapheme accessor over the aggregate. Bounds `idx` against the carried
+// `s_len` (bootstrap: one byte == one grapheme) instead of NUL-scanning, so a
+// non-terminated interior view (#1454) cannot index past its bytes. The bare
+// `sfn_str_grapheme_at` stays the old `(i8*, double)` ABI symbol the seed emits
+// via its descriptor; the repointed descriptor targets this `_lv` symbol.
+fn sfn_str_grapheme_at_lv(s_data: * u8, s_len: i64, idx: f64) -> * u8 {
+    if (s_data as i64) == 0 { return sfn_str_from_byte(0); }
+    let iidx: i64 = idx as i64;
+    if (iidx as f64) != idx { return sfn_str_from_byte(0); }
+    if iidx < 0 { return sfn_str_from_byte(0); }
+    if s_len <= 0 { return sfn_str_from_byte(0); }
+    if iidx >= s_len { return sfn_str_from_byte(0); }
+    return sfn_str_grapheme_byte(s_data, iidx);
 }
 
-// `sfn_str_find_byte(s, byte_value, start)` — first offset >= `start` at
-// which `byte_value` (low 8 bits) occurs in `s`, or -1. A pure-Sailfin
-// forward scan, byte-identical to the legacy `memchr` walk; a negative
-// `start` clamps to 0.
-fn sfn_str_find_byte(s: * u8, byte_value: i64, start_index: i64) -> i64 {
-    if (s as i64) == 0 { return -1; }
-    let real: * u8 = sfn_str_decode_owned(s);
-    let len: i64 = strnlen(real, 16777216) as i64;
+// `sfn_str_byte_at(s_data, s_len, idx)` — #1704: raw byte at offset `idx`, or -1
+// string / out-of-range index. Length-aware: bounds `idx` against the carried
+// `s_len` instead of NUL-scanning, then reads the byte via `sfn_str_read_byte`.
+// Runtime-internal (no descriptor, no caller today); re-signatured in place so
+// a non-terminated interior view (#1454) cannot read past its bytes.
+fn sfn_str_byte_at(s_data: * u8, s_len: i64, idx: i64) -> i64 {
+    if (s_data as i64) == 0 { return -1; }
+    if idx < 0 { return -1; }
+    if idx >= s_len { return -1; }
+    return sfn_str_read_byte(s_data, idx);
+}
+
+// `sfn_str_find_byte(s_data, s_len, byte_value, start)` — #1704: first offset
+// >= `start` at which `byte_value` (low 8 bits) occurs within the carried
+// `s_len`, or -1. Length-aware forward scan (no NUL-scan); a negative `start`
+// clamps to 0. Runtime-internal (no descriptor, no caller today); re-signatured
+// in place so a non-terminated interior view (#1454) cannot scan past its bytes.
+fn sfn_str_find_byte(s_data: * u8, s_len: i64, byte_value: i64, start_index: i64) -> i64 {
+    if (s_data as i64) == 0 { return -1; }
     let mut start: i64 = start_index;
     if start < 0 { start = 0; }
-    if start >= len { return -1; }
+    if start >= s_len { return -1; }
     let target: i64 = byte_value & 255;
     let mut i: i64 = start;
     loop {
-        if i >= len { break; }
-        if sfn_str_read_byte(real, i) == target { return i; }
+        if i >= s_len { break; }
+        if sfn_str_read_byte(s_data, i) == target { return i; }
         i = i + 1;
     }
     return -1;
@@ -830,6 +896,18 @@ fn sfn_str_codepoint(s: * u8) -> f64 {
     let len: i64 = strnlen(real, 16777216) as i64;
     if len <= 0 { return -1.0; }
     return sfn_str_read_byte(real, 0) as f64;
+}
+
+// `sfn_str_codepoint_lv(s_data, s_len)` — #1704: length-aware (`_lv`) first
+// codepoint over the aggregate. Empty is gated by the carried `s_len` instead
+// of a NUL-scan; returns the first byte (the bootstrap simplification for
+// multi-byte sequences), or -1 for a null/empty view. The bare `sfn_str_codepoint`
+// stays the old `(i8*)`/`double` ABI symbol the seed emits; the repointed
+// descriptor (`runtime_char_code_fn`) targets this `_lv` symbol.
+fn sfn_str_codepoint_lv(s_data: * u8, s_len: i64) -> f64 {
+    if (s_data as i64) == 0 { return -1.0; }
+    if s_len <= 0 { return -1.0; }
+    return sfn_str_read_byte(s_data, 0) as f64;
 }
 
 // `sfn_str_sfn_from_codepoint(cp)` — 1-4 byte UTF-8 encode of
