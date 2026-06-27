@@ -990,6 +990,12 @@ fn walk_expression(expression: Expression?, bindings: SymbolEntry[], imports: Im
         return diagnostics;
     }
     if expression.variant == "Unary" {
+        // Prefix `*`/`&`/`-`/`!` — recurse into the operand so its diagnostics
+        // still fire. In particular, once #1627 Part B structured prefix `&`
+        // into `Unary{"&", Identifier(fn)}` (instead of degrading `& fn` to
+        // `Raw`), the operand `Identifier` reaches the `Identifier` arm below,
+        // which emits E0808 for a function used in value position — preserving
+        // the prior `check_fn_reference_raw` `& fn` behavior.
         return walk_expression(expression.operand, bindings, imports);
     }
     if expression.variant == "Member" {
@@ -1064,15 +1070,6 @@ fn walk_expression(expression: Expression?, bindings: SymbolEntry[], imports: Im
         let mut diagnostics = walk_expression(expression.target, bindings, imports);
         diagnostics = diagnostics.concat(walk_expression(expression.value, bindings, imports));
         return diagnostics;
-    }
-    if expression.variant == "Unary" {
-        // Prefix `*`/`&`/`-`/`!` (#1627 Part B structured `*`/`&`). Recurse
-        // into the operand so its diagnostics still fire — in particular
-        // `& <fn>` (`Unary{"&", Identifier(fn)}`) reaches the `Identifier`
-        // arm below, which emits E0808 for a function used in value position
-        // (preserving the prior `check_fn_reference_raw` `& fn` behavior now
-        // that `&` structures instead of degrading to `Raw`).
-        return walk_expression(expression.operand, bindings, imports);
     }
     if expression.variant == "Cast" {
         // A bare function identifier cast to a pointer (`<fn> as * u8` /
