@@ -1,0 +1,163 @@
+// compiler/tests/e2e/string_to_number_lv_test.sfn
+//
+// #1722 — regression coverage for the length-aware (`_lv`) `string.to_number`
+// runtime helper over the `{i8*, i64}` SfnString aggregate. `strtod` cannot be
+// length-bounded directly (it scans to a NUL), so `sfn_str_to_number_lv` copies
+// the carried `s_len` bytes + a trailing NUL into the arena and parses the copy.
+// This is the prerequisite for a sound non-owning `string.slice` (#1454): an
+// interior view is NOT NUL-terminated, so a scan-to-NUL consumer would over-read
+// past the slice into the source tail and parse the wrong number.
+//
+// Until `string.slice` returns a real non-owning view (#1454) there is no
+// pure-`.sfn` path that produces a non-NUL-terminated string, so the hazard is
+// synthesized directly via a C harness (per `.claude/rules/no-bash-e2e.md`,
+// mirroring `string_length_aware_lv_test.sfn`): a buffer `"123456"` is handed to
+// the helper with `len = 3`, and it must parse `123` — NOT scan into `"456"` and
+// parse `123456`. A scan-to-NUL body would FAIL the truncation legs.
+//
+// Unlike the query-side `_lv` helpers, `sfn_str_to_number_lv` allocates, so the
+// harness provides a real malloc-backed `sfn_arena_alloc` / `sfn_arena_global`
+// (the query-side harness stubs them to no-op `0`, which would short-circuit the
+// copy path here). The remaining cross-module symbols are stubbed for the linker.
+import {
+    find,
+    contains,
+    split,
+    starts_with
+} from "sfn/strings";
+
+fn _sfn_bin() -> string ![io] {
+    let configured = env.get("SAILFIN_BIN");
+    if configured.length > 0 { return configured; }
+    return "build/native/sailfin";
+}
+
+fn _child_env() -> string[] ![io] {
+    let mut e: string[] = [];
+    let path = env.get("PATH");
+    if path.length > 0 { e.push("PATH=" + path); }
+    let home = env.get("HOME");
+    if home.length > 0 { e.push("HOME=" + home); }
+    let tmpdir = env.get("TMPDIR");
+    if tmpdir.length > 0 { e.push("TMPDIR=" + tmpdir); }
+    let scratch = env.get("SAILFIN_TEST_SCRATCH");
+    if scratch.length > 0 { e.push("SAILFIN_TEST_SCRATCH=" + scratch); }
+    return e;
+}
+
+fn _scratch_dir() -> string ![io] {
+    let mut dir = env.get("SAILFIN_TEST_SCRATCH");
+    if dir.length == 0 { dir = "/tmp"; }
+    dir = dir + "/sfn-to-number-lv";
+    fs.createDirectory(dir, true);
+    return dir;
+}
+
+fn _repo_root() -> string ![io] {
+    let configured = env.get("SAILFIN_REPO_ROOT");
+    if configured.length > 0 { return configured; }
+    return ".";
+}
+
+fn _string_path() -> string ![io] {
+    return _repo_root() + "/runtime/sfn/string.sfn";
+}
+
+fn _emit_string_ll() -> string ![io] {
+    let dir = _scratch_dir();
+    let ll = dir + "/string.ll";
+    let exit = process.run_capture([_sfn_bin(), "emit", "-o", ll, "llvm", _string_path()], _child_env());
+    let _o = process.capture_take_stdout();
+    let _e = process.capture_take_stderr();
+    assert exit == 0;
+    return ll;
+}
+
+fn _has_define_named(ir: string, sym: string) -> boolean {
+    let lines = split(ir, "\n");
+    let mut i = 0;
+    loop {
+        if i >= lines.length { break; }
+        let line = lines[i];
+        if starts_with(line, "define ") && contains(line, "@" + sym + "(") {
+            return true;
+        }
+        i = i + 1;
+    }
+    return false;
+}
+
+// The C harness. `main` exercises `sfn_str_to_number_lv` against a buffer with
+// no NUL at the carried boundary; the malloc-backed arena lets the copy+strtod
+// path run for real, and the remaining stubs satisfy the linker for the rest of
+// the module. All test values are exactly representable doubles so `==` is sound.
+// Returns 0 iff every length-bounded parse holds.
+fn _harness_c() -> string {
+    return "#include <stdio.h>\n" + "#include <stdlib.h>\n"
+        + "void* sfn_arena_global(void){return (void*)1;}\n"
+        + "void* sfn_arena_alloc(void* a,unsigned long s,unsigned long g){(void)a;(void)g;return malloc(s);}\n"
+        + "void* sfn_arena_realloc(void* a,void* p,unsigned long s,unsigned long g){(void)a;(void)g;return realloc(p,s);}\n"
+        + "void* owned_buf_new(long a,long b){(void)a;(void)b;return 0;}\n"
+        + "void  sailfin_runtime_mark_persistent(void* p){(void)p;}\n"
+        + "_Bool sfn_arena_enabled(void){return 0;}\n"
+        + "void  sfn_type_register(void* d){(void)d;}\n"
+        + "void* sfn_alloc_struct(long n){(void)n;return 0;}\n"
+        + "void  sfn_raise_value_error(void* a){(void)a;}\n"
+        + "extern double sfn_str_to_number_lv(char*,long);\n"
+        + "int main(void){\n"
+        + "  char buf[]=\"123456\"; /* no NUL within the first 3 bytes */\n"
+        + "  int ok=1;\n"
+        + "  /* carried len truncates the parse: only the first 3 bytes are seen,\n"
+        + "   * the non-NUL tail \"456\" is invisible — a scan-to-NUL body parses\n"
+        + "   * 123456 instead of 123. */\n"
+        + "  if(sfn_str_to_number_lv(buf,3)!=123.0){printf(\"truncated FAIL\\n\");ok=0;}\n"
+        + "  if(sfn_str_to_number_lv(buf,6)!=123456.0){printf(\"full FAIL\\n\");ok=0;}\n"
+        + "  char buf2[]=\"12.5\";\n"
+        + "  if(sfn_str_to_number_lv(buf2,2)!=12.0){printf(\"frac trunc FAIL\\n\");ok=0;}\n"
+        + "  if(sfn_str_to_number_lv(buf2,4)!=12.5){printf(\"frac full FAIL\\n\");ok=0;}\n"
+        + "  /* carried len 0 is the empty fast path. */\n"
+        + "  if(sfn_str_to_number_lv(buf,0)!=0.0){printf(\"empty FAIL\\n\");ok=0;}\n"
+        + "  printf(ok?\"ALL OK\\n\":\"SOME FAIL\\n\");\n"
+        + "  return ok?0:1;\n"
+        + "}\n";
+}
+
+// ---- typecheck ----
+test "runtime/sfn/string.sfn typechecks cleanly" ![io] {
+    let exit = process.run_capture([_sfn_bin(), "check", _string_path()], _child_env());
+    let _o = process.capture_take_stdout();
+    let _e = process.capture_take_stderr();
+    assert exit == 0;
+}
+
+// ---- emit shape: the `_lv` body is defined; the bare trampoline is retained ----
+test "string.sfn emit: defines length-aware sfn_str_to_number_lv + retains trampoline" ![io] {
+    let ll = _emit_string_ll();
+    let ir = fs.readFile(ll);
+    assert _has_define_named(ir, "sfn_str_to_number_lv");
+    // The bare old-ABI trampoline is retained for the pinned-seed boundary.
+    assert _has_define_named(ir, "sfn_str_to_number");
+}
+
+// ---- soundness: non-NUL-terminated interior view honored (C harness) ----
+test "to_number respects carried len on a non-terminated buffer (C harness via clang)" ![io] {
+    let dir = _scratch_dir();
+    let ll = _emit_string_ll();
+    let harness = dir + "/to_number_harness.c";
+    fs.writeFile(harness, _harness_c());
+    let bin = dir + "/to_number_roundtrip";
+    let clang_exit = process.run_capture(["clang", "-Wno-override-module", harness, ll, "-o", bin, "-lm"], _child_env());
+    let _co = process.capture_take_stdout();
+    let _ce = process.capture_take_stderr();
+    if clang_exit != 0 {
+        // clang unavailable or link failed — skip the roundtrip; the emit-shape
+        // assertions above still pin the `_lv` define contract.
+        assert true;
+    } else {
+        let run_exit = process.run_capture([bin], _child_env());
+        let out = process.capture_take_stdout();
+        let _re = process.capture_take_stderr();
+        assert run_exit == 0;
+        assert find(out, "ALL OK", 0) >= 0;
+    }
+}

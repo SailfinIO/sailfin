@@ -996,6 +996,42 @@ fn sfn_str_to_number(s: * u8) -> f64 {
     return strtod(s, null);
 }
 
+// `sfn_str_to_number_lv(s_data, s_len)` — #1722 (M2.4b, SFEP-0025 §3.3): the
+// length-aware `string.to_number` over the `{i8*, i64}` SfnString aggregate.
+// `strtod` cannot be length-bounded directly — it scans to a NUL — so the body
+// mirrors the #1705 `sfn_str_to_cstr` boundary copy: copy the carried `s_len`
+// bytes + a trailing NUL into the process-global arena and `strtod` the copy.
+// A non-NUL-terminated interior view (`{data+start, end-start}`, #1454) then
+// parses ONLY its bytes and never over-reads into the source tail. The carried
+// length is the aggregate field, never a NUL scan — scanning a non-terminated
+// view is exactly the over-read this fixes. The immediate-codepoint and
+// null/empty fast paths are preserved so numeric results stay byte-identical to
+// `sfn_str_to_number` for NUL-terminated inputs. The bare body above is retained
+// as the old-`i8*` ABI trampoline for the pinned seed during `make compile`; the
+// `string.to_number` descriptor's `native_signature` resolves freshly-emitted IR
+// to this `_lv` symbol. The `roundup8(s_len + 1)` 8-aligned alloc + `_num_put_byte`
+// trailing NUL keeps the word read-modify-write in-bounds (the seed cannot lower a
+// single-byte `* u8` store), the same discipline `sfn_str_to_cstr` / `sfn_str_concat`
+// use.
+fn sfn_str_to_number_lv(s_data: * u8, s_len: i64) -> f64 {
+    if (s_data as i64) == 0 { return 0.0; }
+    let cp: i64 = sfn_str_immediate_codepoint(s_data);
+    if cp >= 0 {
+        if cp >= 48 && cp <= 57 { return (cp - 48) as f64; }
+        return 0.0;
+    }
+    let mut n: i64 = s_len;
+    if n < 0 { n = 0; }
+    if n == 0 { return 0.0; }
+    let arena: * u8 = sfn_arena_global();
+    let cap: i64 = ((n + 1 + 7) / 8) * 8;
+    let data: * u8 = sfn_arena_alloc(arena, cap as usize, 8 as usize);
+    if (data as i64) == 0 { return 0.0; }
+    memcpy(data, s_data, n as usize);
+    _num_put_byte(data as i64 + n, 0);
+    return strtod(data, null);
+}
+
 // ====================================================================
 // Number / int formatting — real hand-rolled Sailfin bodies (#1314, C3
 // of epic #1308). The bare `sfn_int_to_str` / `sfn_number_to_str`
