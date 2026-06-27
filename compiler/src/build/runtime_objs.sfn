@@ -1,0 +1,795 @@
+// compiler/src/build/runtime_objs.sfn
+//
+// Runtime-object compile/cache orchestration extracted from
+// cli_main.sfn (SFEP-0027 §3.1, issue #1730). Behavior-preserving
+// move: bodies are verbatim; this module is pure `![io]` build-driver
+// orchestration (no fixups, no post-processing of compiler output).
+import {
+    CacheStats,
+    cache_compiler_identity,
+    cache_copy_artifact_to,
+    cache_lookup_artifact,
+    cache_store_artifact,
+    empty_cache_stats,
+    merge_cache_stats,
+    runtime_object_cache_key,
+    runtime_object_cache_key_with_identity,
+    runtime_object_entry_key_from_str
+} from "../build_cache";
+import {
+    _atomic_rename_into_place,
+    _env_flag,
+    _mktemp_sibling_cmd,
+    _sha256_of_file_cmd,
+    _shell_single_quote_arg
+} from "../cli_commands_utils";
+import { resolve_import_module_slug_for_module } from "../llvm/imports";
+import { module_name_from_path, number_to_string } from "../main";
+import { parse_native_imports_for_import } from "../native_ir_api";
+import { RuntimeCapsuleArtifacts } from "../runtime_capsule_resolver";
+import { resolve_compiler_version } from "../version";
+import { llvm_assemble } from "./clang_argv";
+import {
+    _dirname,
+    _ensure_dir,
+    _path_basename,
+    _path_join,
+    _read_import_deps,
+    _resolve_self_path
+} from "./paths";
+
+// Issue #940: validate the declarative runtime bundle by the
+// presence of `<root>/capsule.toml` (the manifest the implicit
+// runtime-capsule resolver reads). Previously this probed for a
+// Makefile-staged `prelude.o` via `_runtime_prelude_path`; with the
+// prelude now emitted from source via the capsule's `prelude-entry`,
+// the manifest is the load-bearing artifact, and `_runtime_prelude_path`
+// is gone. #822 deleted the C runtime source; #823 deleted the
+// `runtime/native/` directory and moved the manifest up to the runtime
+// root, so the manifest is the sole bundle anchor (`ll-sources` is now
+// empty — there is no `.ll` to probe).
+fn _runtime_bundle_exists(root: string) -> boolean ![io] {
+    if root.length == 0 { return false; }
+    let manifest = _path_join(root, "capsule.toml");
+    return fs.exists(manifest);
+}
+
+// Stage D PR2: aggregated link-phase inputs from a project's
+// `kind = "runtime"` dep capsules. `object_paths` are the cached
+// `.o`s the runtime capsule's c-sources / ll-sources compiled
+// to; `link_libs` are the linker flags (e.g. `-lm`, `-lpthread`)
+// to append after the `.ll` inputs in the final clang invocation.
+// `success` is `false` when any clang sub-invocation exited
+// non-zero — the caller bails before invoking the final link.
+struct RuntimeLinkInputs {
+    object_paths: string[];
+    link_libs: string[];
+    success: boolean;
+    // Runtime C/LL/sfn object-cache activity accumulated while
+    // compiling this capsule set (#915). Folded into the build-wide
+    // `CacheStats` so the end-of-build `[cache]` summary reflects
+    // runtime-object hits/misses, not just the `.ll` module cache.
+    stats: CacheStats;
+}
+
+fn _failed_runtime_link_inputs() -> RuntimeLinkInputs {
+    let empty: string[] = [];
+    let empty2: string[] = [];
+    return RuntimeLinkInputs {
+        object_paths: empty,
+        link_libs: empty2,
+        success: false,
+        stats: empty_cache_stats()
+    };
+}
+
+// Compose a per-capsule cache-key prefix for the runtime-capsule
+// `.o` outputs. `"sfn/runtime-native"` → `"sfn__runtime-native__"`;
+// the trailing `__` separates the prefix from the source basename
+// in the cached object's filename. Empty input returns `""` so
+// the legacy hardcoded `_clang_compile_runtime_objects` path
+// stays bit-identical when no capsule artifacts are present.
+fn _runtime_obj_prefix(capsule_name: string) -> string {
+    if capsule_name.length == 0 { return ""; }
+    let mut out: string = "";
+    let mut i: int = 0;
+    loop {
+        if i >= capsule_name.length { break; }
+        let ch = substring(capsule_name, i, i + 1);
+        if ch == "/" { out = out + "__"; } else { out = out + ch; }
+        i += 1;
+    }
+    return out + "__";
+}
+
+// Content-addressed cache gate for a runtime object compile (#632).
+// A previously-compiled `.o` at `obj_path` may be reused iff the
+// object exists AND the sidecar `<obj_path>.key` records a content
+// key byte-identical to the current source's key. A content edit
+// changes the key (via `runtime_object_cache_key`'s source SHA-256),
+// busting the cache and forcing a recompile; a pure mtime touch
+// leaves the bytes — hence the key — unchanged, so the cache still
+// hits. An empty key (unhashable source) is treated as a miss so a
+// hash failure never serves a stale object. Before this gate the
+// caller keyed solely on `fs.exists(obj_path)`, which silently
+// reused a stale `.o` after any source-content edit.
+fn _runtime_obj_cache_hit(obj_path: string, key: string) -> boolean ![io] {
+    if key.length == 0 { return false; }
+    if !fs.exists(obj_path) { return false; }
+    let sidecar = obj_path + ".key";
+    if !fs.exists(sidecar) { return false; }
+    return fs.readFile(sidecar) == key;
+}
+
+// Persist the content key alongside a freshly-compiled `.o` so the
+// next build's `_runtime_obj_cache_hit` can validate it. No-op on an
+// empty key (the gate already forced an uncached recompile).
+fn _runtime_obj_cache_record(obj_path: string, key: string) ![io] {
+    if key.length == 0 { return; }
+    fs.writeFile(obj_path + ".key", key);
+}
+
+// Shared content-addressed cache lookup for a runtime object (#1096).
+// When the shared cache is enabled (`shared_cache_root` non-empty) and
+// holds the artifact for this content key, copy it into the work-dir
+// `obj_path`, write the work-dir sidecar so a same-work-dir rebuild
+// can fast-path it, and return true (the caller counts a HIT and skips
+// the compile). Returns false on a disabled cache, an empty/unhashable
+// key, or a miss — leaving the caller to compile fresh. `hash_suffix`
+// only needs to be unique enough to avoid a tmp-file collision while
+// the key string is hashed; the per-source `cap_prefix + basename +
+// opt_flag` the callers pass satisfies that.
+fn _runtime_obj_shared_cache_fetch(shared_cache_root: string, key: string, obj_path: string, hash_suffix: string) -> boolean ![io] {
+    if shared_cache_root.length == 0 { return false; }
+    if key.length == 0 { return false; }
+    let ck = runtime_object_entry_key_from_str(key, hash_suffix);
+    if !cache_lookup_artifact(shared_cache_root, ck, "runtime-obj") {
+        return false;
+    }
+    if !cache_copy_artifact_to(shared_cache_root, ck, "runtime-obj", obj_path) {
+        return false;
+    }
+    _runtime_obj_cache_record(obj_path, key);
+    return true;
+}
+
+// Publish a freshly-compiled runtime object into the shared
+// content-addressed cache so sibling work-dirs and CI cache restores
+// can warm-hit it (#1096). No-op when the shared cache is disabled or
+// the key is unhashable. A store failure is non-fatal — the object
+// already exists at `obj_path` for this build's link.
+fn _runtime_obj_shared_cache_publish(shared_cache_root: string, key: string, obj_path: string, hash_suffix: string) ![io] {
+    if shared_cache_root.length == 0 { return; }
+    if key.length == 0 { return; }
+    let ck = runtime_object_entry_key_from_str(key, hash_suffix);
+    cache_store_artifact(shared_cache_root, ck, "runtime-obj", obj_path);
+}
+
+// Compile every `c-sources` / `ll-sources` entry from a list of
+// `kind = "runtime"` capsule artifacts and return the resulting
+// `.o` paths plus the accumulated `link-libs`. Caches `.o` outputs
+// under `out_dir` keyed by source content SHA-256 + `opt_flag`
+// (#632) so a content edit recompiles while repeat builds skip clang.
+//
+// Used only when the resolver returns at least one runtime capsule
+// artifact (i.e. the project's `[dependencies]` declared a
+// `kind = "runtime"` workspace member). For end-user `sfn build`
+// without a runtime dep, the caller falls through to the legacy
+// `_clang_compile_runtime_objects` helper that uses the
+// hardcoded `runtime_root/native/...` layout.
+fn _clang_compile_runtime_capsule_objects(runtime_capsules: RuntimeCapsuleArtifacts[], out_dir: string, opt_flag: string, shared_cache_root: string) -> RuntimeLinkInputs ![io] {
+    let mut objects: string[] = [];
+    let mut link_libs: string[] = [];
+    // Per-call cache-stat accumulator (#915). Counting mirrors the
+    // `.ll` module cache (`capsule_resolver.sfn::_cr_compile_one`): a
+    // valid-key reuse is a `hit`; any recompile (the producer ran) is
+    // a `miss`; a successful `_runtime_obj_cache_record` is a `store`.
+    // An unhashable (empty) key additionally bumps `invalid_keys` —
+    // NOT disjoint from `misses`, matching the `.ll` layer where an
+    // invalid digest counts as both a miss and an invalid key
+    // (`lookup_attempted` stays true while `is_valid_digest` is
+    // false). It does not `store`: `_runtime_obj_cache_record` no-ops
+    // on an empty key.
+    let mut stats = empty_cache_stats();
+    let mut i: int = 0;
+    loop {
+        if i >= runtime_capsules.length { break; }
+        let cap = runtime_capsules[i];
+        // `-I<dir>` for every include root the capsule declares.
+        // Threaded into every c-source compile in this capsule.
+        let mut include_flags: string[] = [];
+        let mut idi: int = 0;
+        loop {
+            if idi >= cap.include_dirs.length { break; }
+            include_flags.push("-I" + cap.include_dirs[idi]);
+            idi += 1;
+        }
+        // Per-capsule prefix for cached `.o` filenames. Replaces
+        // `/` with `__` so the capsule name maps cleanly to a
+        // filesystem segment. With this prefix two capsules can
+        // declare same-basename sources without colliding (e.g.
+        // both shipping a `util.c`).
+        let cap_prefix = _runtime_obj_prefix(cap.capsule_name);
+        // c-sources: clang -c each, cached by capsule-prefix +
+        // full basename (extension included so `foo.c` and
+        // `foo.ll` from the same capsule don't collide on the
+        // same `.o` output).
+        let mut ci: int = 0;
+        loop {
+            if ci >= cap.c_sources.length { break; }
+            let src = cap.c_sources[ci];
+            let base = cap_prefix + _path_basename(src) + opt_flag;
+            let obj = _path_join(out_dir, base + ".o");
+            let key = runtime_object_cache_key(src, opt_flag);
+            if key.length == 0 {
+                stats.invalid_keys = stats.invalid_keys + 1;
+            }
+            if _runtime_obj_cache_hit(obj, key) {
+                stats.hits = stats.hits + 1;
+            } else if _runtime_obj_shared_cache_fetch(shared_cache_root, key, obj, base) {
+                stats.hits = stats.hits + 1;
+            } else {
+                stats.misses = stats.misses + 1;
+                // Per-function/per-datum sections (in `assemble`) so the
+                // final link's dead-strip (`--gc-sections` / `-dead_strip`)
+                // can drop functions no consumer references (#1047).
+                let rc = llvm_assemble(src, obj, opt_flag, include_flags);
+                if rc != 0 {
+                    print("sfn build: failed to compile runtime c-source " + src);
+                    return _failed_runtime_link_inputs();
+                }
+                _runtime_obj_cache_record(obj, key);
+                if key.length > 0 {
+                    stats.stores = stats.stores + 1;
+                    _runtime_obj_shared_cache_publish(shared_cache_root, key, obj, base);
+                }
+            }
+            objects.push(obj);
+            ci += 1;
+        }
+        // ll-sources: assemble each via clang, also cached with
+        // the capsule prefix + full basename. `foo.ll` ≠
+        // `foo.c` because the basename includes the extension.
+        let mut li: int = 0;
+        loop {
+            if li >= cap.ll_sources.length { break; }
+            let src = cap.ll_sources[li];
+            let base = cap_prefix + _path_basename(src) + opt_flag;
+            let obj = _path_join(out_dir, base + ".o");
+            let key = runtime_object_cache_key(src, opt_flag);
+            if key.length == 0 {
+                stats.invalid_keys = stats.invalid_keys + 1;
+            }
+            if _runtime_obj_cache_hit(obj, key) {
+                stats.hits = stats.hits + 1;
+            } else if _runtime_obj_shared_cache_fetch(shared_cache_root, key, obj, base) {
+                stats.hits = stats.hits + 1;
+            } else {
+                stats.misses = stats.misses + 1;
+                let no_includes: string[] = [];
+                let rc = llvm_assemble(src, obj, opt_flag, no_includes);
+                if rc != 0 {
+                    print("sfn build: failed to assemble runtime ll-source "
+                        + src);
+                    return _failed_runtime_link_inputs();
+                }
+                _runtime_obj_cache_record(obj, key);
+                if key.length > 0 {
+                    stats.stores = stats.stores + 1;
+                    _runtime_obj_shared_cache_publish(shared_cache_root, key, obj, base);
+                }
+            }
+            objects.push(obj);
+            li += 1;
+        }
+        // link-libs flow through verbatim (resolver doesn't
+        // path-resolve these — they're linker flags like `-lm`).
+        let mut bi: int = 0;
+        loop {
+            if bi >= cap.link_libs.length { break; }
+            link_libs.push(cap.link_libs[bi]);
+            bi += 1;
+        }
+        i += 1;
+    }
+    return RuntimeLinkInputs {
+        object_paths: objects,
+        link_libs: link_libs,
+        success: true,
+        stats: stats
+    };
+}
+
+// Result of a single runtime `.sfn` emit: the produced `.o` path
+// (`""` on failure) plus the cache-stat delta for this one source
+// (#915), so the caller can fold runtime-object hits/misses into the
+// build-wide `[cache]` summary.
+struct RuntimeEmitResult {
+    obj_path: string;
+    stats: CacheStats;
+}
+
+// #1288: fold staged sibling-dep content into the runtime object
+// cache key. The emitted `.ll`/`.o` of a module with sibling imports
+// depends on those siblings' signatures/layouts, so editing a
+// sibling (e.g. a future `ownedbuf.sfn`) must bust the cached `.o`
+// of every module that imports it — otherwise the link silently
+// reuses a stale-ABI object. Modules without a `.import-deps`
+// sidecar keep the base key byte-for-byte (the pre-#1288 contract).
+// An unhashable dep returns "" so the caller falls back to the
+// always-recompile path, mirroring `runtime_object_cache_key`.
+fn _runtime_obj_key_with_sibling_deps(base_key: string, ctx_root: string, slug: string) -> string ![io] {
+    if base_key.length == 0 { return ""; }
+    let deps = _read_import_deps(ctx_root, slug);
+    let mut key = base_key;
+    let mut i: int = 0;
+    loop {
+        if i >= deps.length { break; }
+        let dep_hash = _sha256_of_file_cmd(deps[i]);
+        if dep_hash.length == 0 { return ""; }
+        key = key + "\n" + dep_hash;
+        i += 1;
+    }
+    return key;
+}
+
+fn _emit_runtime_sfn_to_obj(self_path: string, cap_prefix: string, src: string, out_dir: string, opt_flag: string, shared_cache_root: string, ctx_root: string, compiler_identity: string) -> RuntimeEmitResult ![io] {
+    let mut stats = empty_cache_stats();
+    let slug = module_name_from_path(src);
+    let ll_path = _path_join(out_dir, cap_prefix + _path_basename(src)
+        + opt_flag
+        + ".ll");
+    let obj_path = _path_join(out_dir, cap_prefix + _path_basename(src)
+        + opt_flag
+        + ".o");
+    // Content-addressed cache (#632 / #969): a previously-emitted
+    // `.o` may only be reused when its sidecar `.key` matches the
+    // current source content. The prior bare `fs.exists(ll_path)` /
+    // `fs.exists(obj_path)` checks silently reused a stale `.o`/`.ll`
+    // after the source gained new functions (e.g. #905's
+    // `sfn_clock_millis`, #935's `sfn_log_execution` /
+    // `sfn_to_debug_string` / `sfn_is_void`), so the freshly-emitted
+    // prelude called symbols the stale runtime objects never defined —
+    // surfacing as `Undefined symbols ... link failed` (#969). This
+    // mirrors the `_clang_compile_runtime_capsule_objects` c-source
+    // path so the sfn-source + prelude emit invalidates identically.
+    // #1197: fold the emitting compiler's identity into the key so a
+    // codegen change in `compiler/src` busts the cached runtime object
+    // even when the runtime source bytes are unchanged. See
+    // `runtime_object_cache_key_with_identity`.
+    let key = _runtime_obj_key_with_sibling_deps(runtime_object_cache_key_with_identity(src, opt_flag, compiler_identity), ctx_root, slug);
+    if key.length == 0 { stats.invalid_keys = stats.invalid_keys + 1; }
+    let shared_suffix = cap_prefix + _path_basename(src) + opt_flag;
+    if _runtime_obj_cache_hit(obj_path, key) {
+        stats.hits = stats.hits + 1;
+        return RuntimeEmitResult { obj_path: obj_path, stats: stats };
+    }
+    // Shared content-addressed cache hit (#1096): a sibling work-dir or
+    // a CI cache restore may already hold this object even though the
+    // local sidecar above missed. Skip the re-emit + clang entirely.
+    if _runtime_obj_shared_cache_fetch(shared_cache_root, key, obj_path, shared_suffix) {
+        stats.hits = stats.hits + 1;
+        return RuntimeEmitResult { obj_path: obj_path, stats: stats };
+    }
+    stats.misses = stats.misses + 1;
+    // Cache miss: regenerate the `.ll` unconditionally (a cached one
+    // is stale by definition here), then compile the `.o` and record
+    // the key. Build the `sh -c` argv: each `KEY= ` clears that toggle
+    // for the child; everything else inherits from the parent (PATH,
+    // HOME, PWD, etc.). The shell-quote escaping protects against
+    // paths that contain spaces or shell metacharacters.
+    // #1288: `--import-context` points at the private rt-import-context
+    // root. A module with a staged `.import-deps` sidecar threads its
+    // sibling sfn-source signatures into the emit
+    // (`compile_to_llvm_file_with_module_imports`, #957/#999); a module
+    // without one — including the `prelude-entry`, which shares this
+    // emit path but is never staged — reads an absent sidecar, gets an
+    // empty dep list, and degrades to the exact pre-#1288 legacy emit.
+    let cmd = "SAILFIN_TRACE_EMIT= SAILFIN_SKIP_TYPECHECK= SAILFIN_TRACE_TEST_RUNNER= SAILFIN_DUMP_TEST_SOURCES= SAILFIN_NO_LEGACY_PROBE=1 "
+        + _shell_single_quote_arg(self_path)
+        + " emit --module-name "
+        + _shell_single_quote_arg(slug)
+        + " --import-context "
+        + _shell_single_quote_arg(ctx_root)
+        + " -o "
+        + _shell_single_quote_arg(ll_path)
+        + " llvm "
+        + _shell_single_quote_arg(src);
+    let rc = process.run(["sh", "-c", cmd]);
+    if rc != 0 {
+        print("sfn build: failed to emit runtime sfn-source " + src
+            + " (child exit="
+            + number_to_string(rc)
+            + ")");
+        return RuntimeEmitResult { obj_path: "", stats: stats };
+    }
+    let no_includes: string[] = [];
+    let rc2 = llvm_assemble(ll_path, obj_path, opt_flag, no_includes);
+    if rc2 != 0 {
+        print("sfn build: failed to compile runtime sfn-source object "
+            + obj_path);
+        return RuntimeEmitResult { obj_path: "", stats: stats };
+    }
+    _runtime_obj_cache_record(obj_path, key);
+    if key.length > 0 {
+        stats.stores = stats.stores + 1;
+        _runtime_obj_shared_cache_publish(shared_cache_root, key, obj_path, shared_suffix);
+    }
+    return RuntimeEmitResult { obj_path: obj_path, stats: stats };
+}
+
+// #1288 (Gap 1 of #1283): root of the PRIVATE import-context tree
+// for runtime sfn-source emits, sibling to the runtime `.o` cache
+// under `out_dir` (`build/sailfin` by default, work-dir aware).
+//
+// Deliberately NOT the shared cwd-relative
+// `build/native/import-context/` tree: artifacts staged there are
+// consulted by `collect_imported_module_context_for_module`'s
+// on-disk lookup during EVERY emit in that cwd. The prelude imports
+// the runtime modules (`runtime/prelude.sfn` → `./sfn/array`,
+// `./sfn/string`, …), so publishing runtime `.sfn-asm` into the
+// shared tree makes the prelude's lowering load those entries and
+// render imported-signature `declare`s that conflict with the
+// runtime-helper descriptor declares it also emits (e.g.
+// `declare i8* @sfn_array_push_string(i8*, i8*)` vs the
+// descriptor's `{ i8**, i64, i64 }*` form — clang then rejects the
+// IR with "invalid redefinition"). A private root threaded
+// explicitly via `--import-context` reaches exactly the sfn-source
+// child emits and nothing else.
+fn _runtime_sfn_ctx_root(out_dir: string) -> string {
+    return _path_join(out_dir, "rt-import-context");
+}
+
+// Stage one runtime sfn-source's native `.sfn-asm` into the private
+// import-context root so a SIBLING sfn-source importing a
+// struct-returning fn (e.g. `string.sfn` → `./memory/ownedbuf`)
+// resolves the callee's signature via the #957/#999 threading
+// (`--import-context` → `.import-deps` →
+// `compile_to_llvm_file_with_module_imports`). This is the
+// runtime-emit-path mirror of the resolver's capsule staging; the
+// Makefile's #812 loop provides on-disk artifacts for the four
+// `runtime/sfn/platform/*` extern modules only, which is why
+// `clock.sfn → ./platform/posix` worked while a struct-returning
+// sibling import died at `core_call_emission.sfn`'s "cannot resolve
+// return type" fatal. A pointer/i64-returning callee can be worked
+// around with an inline `extern fn`; a struct-by-value return
+// cannot (E0805) — staging, not per-module duplication, is the fix.
+// No `.layout-manifest` sidecar is needed on this path: the struct
+// shape travels inside the threaded native text.
+//
+// Content-keyed with the #632-style `.key` sidecar so warm builds
+// skip the child emit, and published via temp + atomic rename
+// (#1011) so a concurrent reader never observes a torn artifact.
+// The `native` emit stage is import-context-free by design (#906),
+// so staging order across the sfn-sources list does not matter.
+fn _stage_one_runtime_sfn_import_context(self_path: string, src: string, ctx_root: string, compiler_identity: string) -> boolean ![io] {
+    let slug = module_name_from_path(src);
+    let asm_path = ctx_root + "/" + slug + ".sfn-asm";
+    // #1197: the staged `.sfn-asm` import-context is emitted by the
+    // compiler too, so a codegen change must bust it on the same identity
+    // basis as the `.o` emit below — otherwise a stale staged context
+    // feeds outdated sibling signatures into `_emit_runtime_sfn_to_obj`.
+    let key = runtime_object_cache_key_with_identity(src, "", compiler_identity);
+    if _runtime_obj_cache_hit(asm_path, key) { return true; }
+    _ensure_dir(_dirname(asm_path));
+    let staged = _mktemp_sibling_cmd(asm_path);
+    let mut emit_target: string = asm_path;
+    if staged.length > 0 { emit_target = staged; }
+    // Same env-clearing `sh -c` contract as `_emit_runtime_sfn_to_obj`
+    // (see the race-safety note on `_compile_runtime_sfn_sources`).
+    // `--no-resolve-gate` (#906): this is a build-internal per-module
+    // NATIVE emit with no import context of its own, so the lowering
+    // dry-run gate would falsely reject the very cross-module calls
+    // this staging exists to resolve; the build's LLVM emit stage
+    // owns fail-closed.
+    let cmd = "SAILFIN_TRACE_EMIT= SAILFIN_SKIP_TYPECHECK= SAILFIN_TRACE_TEST_RUNNER= SAILFIN_DUMP_TEST_SOURCES= SAILFIN_NO_LEGACY_PROBE=1 "
+        + _shell_single_quote_arg(self_path)
+        + " emit --module-name "
+        + _shell_single_quote_arg(slug)
+        + " --no-resolve-gate -o "
+        + _shell_single_quote_arg(emit_target)
+        + " native "
+        + _shell_single_quote_arg(src);
+    let rc = process.run(["sh", "-c", cmd]);
+    if rc != 0 {
+        print("sfn build: failed to stage runtime sfn-source import-context for "
+            + src
+            + " (child exit="
+            + number_to_string(rc)
+            + ")");
+        if staged.length > 0 { process.run(["rm", "-f", staged]); }
+        return false;
+    }
+    // Empty-output probe, mirroring the Makefile #812 staging's
+    // `[ -s "$asm_path" ]` guard.
+    let probe = fs.readFile(emit_target);
+    if probe.length == 0 {
+        print("sfn build: staged runtime sfn-source import-context is empty for "
+            + src);
+        if staged.length > 0 { process.run(["rm", "-f", staged]); }
+        return false;
+    }
+    if staged.length > 0 {
+        if !_atomic_rename_into_place(staged, asm_path) {
+            print("sfn build: failed to publish runtime sfn-source import-context for "
+                + src);
+            process.run(["rm", "-f", staged]);
+            return false;
+        }
+    }
+    _runtime_obj_cache_record(asm_path, key);
+    return true;
+}
+
+// Write a module's `.import-deps` sidecar (one staged sibling
+// `.sfn-asm` path per line — the exact shape `_read_import_deps`
+// parses and the resolver's `_cr_stage_import_deps` writes). Only
+// imports that resolve to a STAGED SIBLING sfn-source are listed;
+// platform extern modules (`./platform/posix`, …) are not
+// sfn-sources, keep riding the on-disk #812 artifacts, and a module
+// with no sibling imports gets no sidecar at all — its child emit
+// then degrades to the exact pre-#1288 legacy path.
+fn _write_runtime_sfn_import_deps(asm_path: string, slug: string, ctx_root: string, staged_slugs: string[]) -> void ![io] {
+    let deps_path = ctx_root + "/" + slug + ".import-deps";
+    let asm_text = fs.readFile(asm_path);
+    let entries = parse_native_imports_for_import(asm_text);
+    let mut deps: string = "";
+    let mut i: int = 0;
+    loop {
+        if i >= entries.length { break; }
+        if entries[i].kind == "import" {
+            let dep_slug = resolve_import_module_slug_for_module(entries[i].module, slug);
+            let mut si: int = 0;
+            loop {
+                if si >= staged_slugs.length { break; }
+                if staged_slugs[si] == dep_slug {
+                    deps = deps + ctx_root + "/" + dep_slug + ".sfn-asm\n";
+                    break;
+                }
+                si += 1;
+            }
+        }
+        i += 1;
+    }
+    if deps.length == 0 {
+        // No sibling imports: drop any stale sidecar from a previous
+        // build so the emit can't thread context the module no longer
+        // declares.
+        if fs.exists(deps_path) { fs.deleteFile(deps_path); }
+        return;
+    }
+    // #1011: a concurrent `--import-context` emit reads this sidecar;
+    // publish atomically (temp sibling + rename) so a peer never sees
+    // a partial dep list. Mirrors `_cr_stage_import_deps`'s publish,
+    // including its plain-write fallback when `mktemp` is unavailable.
+    let tmp = _mktemp_sibling_cmd(deps_path);
+    if tmp.length == 0 {
+        fs.writeFile(deps_path, deps);
+        return;
+    }
+    fs.writeFile(tmp, deps);
+    if !_atomic_rename_into_place(tmp, deps_path) {
+        print("sfn build: failed to publish runtime sfn-source import-deps for "
+            + slug);
+        process.run(["rm", "-f", tmp]);
+    }
+}
+
+// Stage import-context artifacts + `.import-deps` sidecars for EVERY
+// sfn-source across the runtime capsules before any of them is
+// emitted to LLVM. Runs inside `_compile_runtime_sfn_sources` (and
+// therefore inside its `SAILFIN_DISABLE_RUNTIME_SFN_SOURCES` gate).
+// Fail-closed: a staging failure aborts the link the same way an
+// emit failure does — a missing sibling artifact would otherwise
+// surface later as the far less actionable "cannot resolve return
+// type" fatal in whichever module imports it.
+fn _stage_runtime_sfn_import_context(self_path: string, runtime_capsules: RuntimeCapsuleArtifacts[], ctx_root: string, compiler_identity: string) -> boolean ![io] {
+    let mut staged_slugs: string[] = [];
+    let mut staged_asm_paths: string[] = [];
+    let mut i: int = 0;
+    loop {
+        if i >= runtime_capsules.length { break; }
+        let cap = runtime_capsules[i];
+        let mut si: int = 0;
+        loop {
+            if si >= cap.sfn_sources.length { break; }
+            let src = cap.sfn_sources[si];
+            if !_stage_one_runtime_sfn_import_context(self_path, src, ctx_root, compiler_identity) {
+                return false;
+            }
+            let slug = module_name_from_path(src);
+            staged_slugs.push(slug);
+            staged_asm_paths.push(ctx_root + "/" + slug + ".sfn-asm");
+            si += 1;
+        }
+        i += 1;
+    }
+    // Second pass (all siblings now staged): derive each module's
+    // sibling deps from its own `.import` entries.
+    let mut di: int = 0;
+    loop {
+        if di >= staged_slugs.length { break; }
+        _write_runtime_sfn_import_deps(staged_asm_paths[di], staged_slugs[di], ctx_root, staged_slugs);
+        di += 1;
+    }
+    return true;
+}
+
+fn _compile_runtime_sfn_sources(runtime_capsules: RuntimeCapsuleArtifacts[], out_dir: string, opt_flag: string, binary_dir: string, shared_cache_root: string) -> RuntimeLinkInputs ![io] {
+    let mut objects: string[] = [];
+    let empty_libs: string[] = [];
+    let mut stats = empty_cache_stats();
+    if _env_flag("SAILFIN_DISABLE_RUNTIME_SFN_SOURCES") {
+        return RuntimeLinkInputs {
+            object_paths: objects,
+            link_libs: empty_libs,
+            success: true,
+            stats: stats
+        };
+    }
+    // Quick path: nothing to do if no capsule declares sfn_sources.
+    // (`prelude-entry` is handled separately by
+    // `assemble_runtime_capsule_link_inputs`, independent of the
+    // disable gate above — see #940.)
+    let mut has_any: boolean = false;
+    let mut probe: int = 0;
+    loop {
+        if probe >= runtime_capsules.length { break; }
+        if runtime_capsules[probe].sfn_sources.length > 0 {
+            has_any = true;
+            break;
+        }
+        probe += 1;
+    }
+    if !has_any {
+        return RuntimeLinkInputs {
+            object_paths: objects,
+            link_libs: empty_libs,
+            success: true,
+            stats: stats
+        };
+    }
+    let self_path = _resolve_self_path(binary_dir);
+    if self_path.length == 0 {
+        print("sfn build: cannot resolve self path for runtime sfn-source emit");
+        print("           tried: <binary_dir>/sailfin (binary_dir=\""
+            + binary_dir
+            + "\")");
+        return _failed_runtime_link_inputs();
+    }
+    // #1197: the emitting compiler's identity, computed once and threaded
+    // into every runtime object/import-context cache key so a codegen
+    // change busts the cache without a manual `rm`. `self_path` is the
+    // binary doing the emit, so its content hash (for `.dirty` stamps) is
+    // exactly the right codegen fingerprint; tagged / clean-commit stamps
+    // carry the commit hash in the version. Computed once here (not per
+    // source) so the binary is hashed at most once per build.
+    let compiler_identity = cache_compiler_identity(resolve_compiler_version(""), self_path);
+    // #1288: stage every sfn-source's import-context artifacts FIRST
+    // so each module's llvm emit below can resolve sibling imports.
+    let ctx_root = _runtime_sfn_ctx_root(out_dir);
+    if !_stage_runtime_sfn_import_context(self_path, runtime_capsules, ctx_root, compiler_identity) {
+        return _failed_runtime_link_inputs();
+    }
+    let mut i: int = 0;
+    loop {
+        if i >= runtime_capsules.length { break; }
+        let cap = runtime_capsules[i];
+        let cap_prefix = _runtime_obj_prefix(cap.capsule_name);
+        let mut si: int = 0;
+        loop {
+            if si >= cap.sfn_sources.length { break; }
+            let src = cap.sfn_sources[si];
+            let emit = _emit_runtime_sfn_to_obj(self_path, cap_prefix, src, out_dir, opt_flag, shared_cache_root, ctx_root, compiler_identity);
+            stats = merge_cache_stats(stats, emit.stats);
+            if emit.obj_path.length == 0 {
+                return _failed_runtime_link_inputs();
+            }
+            objects.push(emit.obj_path);
+            si += 1;
+        }
+        i += 1;
+    }
+    return RuntimeLinkInputs {
+        object_paths: objects,
+        link_libs: empty_libs,
+        success: true,
+        stats: stats
+    };
+}
+
+// Issue #940: assemble the full runtime object + link-lib set for a
+// resolved runtime capsule (implicit or declared). Compiles the
+// capsule's `c-sources` + `ll-sources`, then its `sfn-sources` and
+// `prelude-entry` (both via the child-compiler emit path), and
+// returns the combined `.o` paths + `link-libs`. `success = false`
+// on any clang/emit failure. Shared by the build/run link path
+// (`_clang_link_multi_with_opt`) and the `sfn test` link path
+// (`cli_commands.sfn::_clang_link_test_cmd_with_deps`, which imports
+// this through the `cli_main <-> cli_commands` cycle) so the two
+// paths resolve the runtime identically.
+fn assemble_runtime_capsule_link_inputs(runtime_capsules: RuntimeCapsuleArtifacts[], out_dir: string, opt_flag: string, binary_dir: string, shared_cache_root: string) -> RuntimeLinkInputs ![io] {
+    let inputs = _clang_compile_runtime_capsule_objects(runtime_capsules, out_dir, opt_flag, shared_cache_root);
+    if !inputs.success { return _failed_runtime_link_inputs(); }
+    let mut objects: string[] = inputs.object_paths;
+    let link_libs: string[] = inputs.link_libs;
+    // Fold the c-source / ll-source layer's cache stats; the
+    // sfn-source and prelude-entry layers merge in below (#915).
+    let mut stats = inputs.stats;
+    // `sfn-sources` + `prelude-entry` are materialized here (the
+    // prelude rides the same emit path as of #940).
+    let sfn_inputs = _compile_runtime_sfn_sources(runtime_capsules, out_dir, opt_flag, binary_dir, shared_cache_root);
+    if !sfn_inputs.success { return _failed_runtime_link_inputs(); }
+    stats = merge_cache_stats(stats, sfn_inputs.stats);
+    let mut soi: int = 0;
+    loop {
+        if soi >= sfn_inputs.object_paths.length { break; }
+        objects.push(sfn_inputs.object_paths[soi]);
+        soi += 1;
+    }
+    // #940: emit each capsule's `prelude-entry` on the same
+    // child-compiler path as `sfn-sources`, but deliberately OUTSIDE
+    // `_compile_runtime_sfn_sources` so the prelude is NOT gated by
+    // `SAILFIN_DISABLE_RUNTIME_SFN_SOURCES`. The prelude predates the
+    // sfn-sources migration and must always link (its `sleep` wrapper
+    // emits `@sfn_sleep` unconditionally, etc.); the rollback flag is
+    // only meant to short-circuit the migrated runtime modules. The
+    // slug resolves to `runtime/prelude` (prefix kept → symbols stay
+    // unmangled), matching the Makefile-staged `prelude.o` this
+    // replaces. Linked exactly once — the standalone
+    // `_runtime_prelude_path` append was removed atomically (Risk R1).
+    let mut has_prelude: boolean = false;
+    let mut pp: int = 0;
+    loop {
+        if pp >= runtime_capsules.length { break; }
+        if runtime_capsules[pp].prelude_entry.length > 0 {
+            has_prelude = true;
+            break;
+        }
+        pp += 1;
+    }
+    if has_prelude {
+        let self_path = _resolve_self_path(binary_dir);
+        if self_path.length == 0 {
+            print("sfn build: cannot resolve self path for runtime prelude-entry emit");
+            print("           tried: <binary_dir>/sailfin (binary_dir=\""
+                + binary_dir
+                + "\")");
+            return _failed_runtime_link_inputs();
+        }
+        // #1197: same compiler-identity fold as the sfn-sources emit, so a
+        // codegen change busts the cached prelude object too.
+        let compiler_identity = cache_compiler_identity(resolve_compiler_version(""), self_path);
+        let mut pi: int = 0;
+        loop {
+            if pi >= runtime_capsules.length { break; }
+            let cap = runtime_capsules[pi];
+            if cap.prelude_entry.length > 0 {
+                let cap_prefix = _runtime_obj_prefix(cap.capsule_name);
+                // #1288: the prelude is never staged, so it has no
+                // `.import-deps` sidecar — the threaded context root
+                // is inert here and the prelude keeps its legacy
+                // descriptor-based emit byte-for-byte (#940 Risk R2).
+                let prelude_emit = _emit_runtime_sfn_to_obj(self_path, cap_prefix, cap.prelude_entry, out_dir, opt_flag, shared_cache_root, _runtime_sfn_ctx_root(out_dir), compiler_identity);
+                stats = merge_cache_stats(stats, prelude_emit.stats);
+                if prelude_emit.obj_path.length == 0 {
+                    return _failed_runtime_link_inputs();
+                }
+                objects.push(prelude_emit.obj_path);
+            }
+            pi += 1;
+        }
+    }
+    return RuntimeLinkInputs {
+        object_paths: objects,
+        link_libs: link_libs,
+        success: true,
+        stats: stats
+    };
+}
+
+export {
+    RuntimeLinkInputs,
+    assemble_runtime_capsule_link_inputs,
+    _runtime_bundle_exists
+};

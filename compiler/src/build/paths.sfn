@@ -1,0 +1,123 @@
+// compiler/src/build/paths.sfn
+//
+// Leaf path/string helpers shared by the build driver (SFEP-0027 §3.1,
+// issue #1730). These were private utilities in `cli_main.sfn`; the
+// runtime-object extraction (`build/runtime_objs.sfn`) needs them too,
+// so they live in this dependency-free leaf module that both
+// `cli_main` and `build/runtime_objs` import. Keeping them in a leaf
+// (no local imports) breaks what would otherwise be a
+// `cli_main <-> build/runtime_objs` mutual import cycle, leaving a
+// clean one-directional `cli_main -> build/runtime_objs` DAG that the
+// cold self-host build stages without ordering hazards.
+//
+// Behavior-preserving move: every body is verbatim from cli_main.sfn.
+fn _path_join(base: string, name: string) -> string {
+    if base.length == 0 { return name; }
+    if base[base.length - 1] == "/" { return base + name; }
+    return base + "/" + name;
+}
+
+fn _dirname(path: string) -> string {
+    let mut last_slash: int = -1;
+    let mut index: int = 0;
+    loop {
+        if index >= path.length { break; }
+        if path[index] == "/" { last_slash = index; }
+        index += 1;
+    }
+    if last_slash < 0 { return "."; }
+    if last_slash == 0 { return "/"; }
+    return substring(path, 0, last_slash);
+}
+
+fn _path_basename(path: string) -> string {
+    let mut last_slash: int = -1;
+    let mut i: int = 0;
+    loop {
+        if i >= path.length { break; }
+        if path[i] == "/" { last_slash = i; }
+        i += 1;
+    }
+    if last_slash < 0 { return path; }
+    return substring(path, last_slash + 1, path.length);
+}
+
+fn _find_substring_from(haystack: string, needle: string, from: int) -> int {
+    if needle.length == 0 { return from; }
+    if from < 0 { return -1; }
+    if from > haystack.length { return -1; }
+    let limit = haystack.length - needle.length;
+    if from > limit { return -1; }
+    let mut i: int = from;
+    loop {
+        if i > limit { break; }
+        let mut j: int = 0;
+        let mut matches: boolean = true;
+        loop {
+            if j >= needle.length { break; }
+            if haystack[i + j] != needle[j] {
+                matches = false;
+                break;
+            }
+            j += 1;
+        }
+        if matches { return i; }
+        i += 1;
+    }
+    return -1;
+}
+
+fn _ensure_dir(path: string) ![io] {
+    // best-effort; ignore false.
+    fs.createDirectory(path, true);
+}
+
+fn _read_import_deps(context_root: string, slug: string) -> string[] ![io] {
+    let mut out: string[] = [];
+    let deps_path = context_root + "/" + slug + ".import-deps";
+    if !fs.exists(deps_path) { return out; }
+    let content = fs.readFile(deps_path);
+    let mut pos: int = 0;
+    loop {
+        if pos >= content.length { break; }
+        let nl = _find_substring_from(content, "\n", pos);
+        let mut end = content.length;
+        if nl >= 0 { end = nl; }
+        let line = substring(content, pos, end);
+        if line.length > 0 { out.push(line); }
+        if nl < 0 { break; }
+        pos = nl + 1;
+    }
+    return out;
+}
+
+fn _resolve_self_path(binary_dir: string) -> string ![io] {
+    if binary_dir.length > 0 {
+        // Try each known compiler-binary name in order. The bare
+        // `sailfin` / `sfn` names cover the dev-tree and installed
+        // POSIX layouts; the `.exe`-suffixed variants cover native
+        // Windows, where `GetModuleFileNameA` resolves the running
+        // binary as `sailfin.exe` and the suffixless join would miss
+        // it (#1482, epic #1485 M2). The Windows variants never match
+        // on POSIX (no such file), so the ordering is host-neutral.
+        let names: string[] = ["sailfin", "sailfin.exe", "sfn", "sfn.exe"];
+        let mut i: int = 0;
+        loop {
+            if i >= names.length { break; }
+            let candidate = _path_join(binary_dir, names[i]);
+            if fs.exists(candidate) { return candidate; }
+            i += 1;
+        }
+    }
+    return "";
+}
+
+export {
+    _dirname,
+    _ensure_dir,
+    _find_substring_from,
+    _path_basename,
+    _path_join,
+    _read_import_deps,
+    _resolve_self_path
+};

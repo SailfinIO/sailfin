@@ -1,0 +1,46 @@
+// compiler/src/build/clang_argv.sfn
+//
+// Leaf: clang assemble-argv construction plus a struct-free `assemble`
+// entry, extracted from `backend.sfn` (SFEP-0027 §3.1, issue #1730).
+//
+// Why this leaf exists. Build-driver modules under `compiler/src/build/`
+// (e.g. `build/runtime_objs.sfn`) need to assemble `.ll` → `.o`, but they
+// must NOT import `backend.sfn`: importing it pulls the `Backend`-interface-
+// implementing `LlvmTextBackend` struct into the consumer module, and the
+// pinned seed emits that struct's interface vtable as a module-local
+// `internal constant` referencing every interface-method symbol while only
+// emitting a `declare` for the methods the consumer actually calls. A module
+// that assembles but never links (`build/runtime_objs`) thus leaves the
+// `link` method symbol undefined and produces invalid LLVM IR
+// (`use of undefined value @LlvmTextBackendlink`), failing the cold
+// self-host build. Routing the assemble path through this struct-free leaf
+// keeps `LlvmTextBackend` out of the consumer's type universe, so no vtable
+// is emitted there. (The underlying seed vtable-lowering bug is tracked
+// separately; this leaf is the source-level avoidance.)
+//
+// `backend.sfn`'s `LlvmTextBackend.assemble` delegates here too, so the argv
+// shape stays defined in exactly one place.
+fn _llvm_text_assemble_argv(src: string, out: string, opt_flag: string, include_flags: string[]) -> string[] {
+    let mut args: string[] = ["clang", opt_flag, "-Wno-override-module", "-ffunction-sections", "-fdata-sections"];
+    let mut i: int = 0;
+    loop {
+        if i >= include_flags.length { break; }
+        args.push(include_flags[i]);
+        i += 1;
+    }
+    args.push("-c");
+    args.push(src);
+    args.push("-o");
+    args.push(out);
+    return args;
+}
+
+// Free-function assemble entry, byte-identical to
+// `LlvmTextBackend{}.assemble(...)` (both delegate to
+// `_llvm_text_assemble_argv` + `process.run`). Build-driver callers use this
+// so they need not import `backend.sfn` — see the module note above.
+fn llvm_assemble(src: string, out: string, opt_flag: string, include_flags: string[]) -> int ![io] {
+    return process.run(_llvm_text_assemble_argv(src, out, opt_flag, include_flags));
+}
+
+export { _llvm_text_assemble_argv, llvm_assemble };
