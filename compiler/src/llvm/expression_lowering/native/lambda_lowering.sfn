@@ -61,14 +61,31 @@ import { Parser } from "../../../parser/types";
 import { LambdaCaptureRecord, analyze_lambda_captures } from "../../../typecheck_captures";
 import { percent_escape_capture_text } from "../../closures";
 import { number_to_string } from "../../utils";
+import {
+    BindingEntry,
+    FnSigEntry,
+    backfill_call_argument,
+    build_binding_table,
+    build_fn_signature_table
+} from "./lambda_param_inference";
 
 // Mutable walker state threaded through every rewrite call. The
 // counter is module-monotonic and is the source of truth for both
 // the synthesised function name and the closure-pair marker text.
+//
+// `signatures` (built once, immutable) and `bindings` (the active
+// lexical scope, extended at function entry and per `let`) drive the
+// untyped-lambda parameter/return backfill (#1683): an untyped lambda
+// argument is typed from the callee's expected `fn(...) -> R` before it
+// is lifted, so the synthesised `sfn_lambda_<N>` carries the right
+// parameter/return types (an untyped lambda otherwise lowers with the
+// wrong LLVM width and segfaults). See `lambda_param_inference.sfn`.
 struct LiftContext {
     counter: int;
     lifted: Statement[];
     records: LambdaCaptureRecord[];
+    signatures: FnSigEntry[];
+    bindings: BindingEntry[];
 }
 
 struct LiftResult {
@@ -96,10 +113,14 @@ struct _BlockRewriteResult {
 // pass owns the precondition that records key by body span.
 fn lift_non_capturing_lambdas(program: Program) -> LiftResult {
     let records = analyze_lambda_captures(program);
+    let signatures = build_fn_signature_table(program);
+    let bindings = build_binding_table(program);
     let mut ctx: LiftContext = LiftContext {
         counter: 0,
         lifted: [],
-        records: records
+        records: records,
+        signatures: signatures,
+        bindings: bindings
     };
 
     let mut rewritten_statements: Statement[] = [];
@@ -472,7 +493,14 @@ fn _rewrite_expression(ctx: LiftContext, expression: Expression) -> ExpressionRe
         let mut index: int = 0;
         loop {
             if index >= expression.arguments.length { break; }
-            let arg_result = _rewrite_expression(current_ctx, expression.arguments[index]);
+            // Backfill an untyped lambda argument's parameter/return types
+            // from the callee's expected `fn(...) -> R` BEFORE it is lifted
+            // (#1683), so the synthesised `sfn_lambda_<N>` is fully typed.
+            // A non-lambda / already-typed argument, or an unknown expected
+            // type, is returned unchanged. The original (un-rewritten)
+            // callee is inspected so `.map`/`Struct.method` shapes resolve.
+            let backfilled = backfill_call_argument(expression.callee, index, expression.arguments[index], ctx.signatures, ctx.bindings);
+            let arg_result = _rewrite_expression(current_ctx, backfilled);
             current_ctx = arg_result.ctx;
             new_args.push(arg_result.expression);
             index += 1;
@@ -682,7 +710,9 @@ fn _rewrite_lambda(ctx: LiftContext, lambda: Expression, owned_env: boolean) -> 
         let new_ctx: LiftContext = LiftContext {
             counter: (ctx.counter + 1) as int,
             lifted: new_lifted,
-            records: ctx.records
+            records: ctx.records,
+            signatures: ctx.signatures,
+            bindings: ctx.bindings
         };
         let marker_text = closure_pair_marker(lambda_id, "null");
         return ExpressionRewriteResult {
@@ -711,7 +741,9 @@ fn _rewrite_lambda(ctx: LiftContext, lambda: Expression, owned_env: boolean) -> 
     let new_ctx: LiftContext = LiftContext {
         counter: (ctx.counter + 1) as int,
         lifted: new_lifted,
-        records: ctx.records
+        records: ctx.records,
+        signatures: ctx.signatures,
+        bindings: ctx.bindings
     };
     // #1476: when this is a spawn/parallel task lambda (`owned_env`) whose
     // FIRST capture is a moved `OwnedBuf`, it sits at env offset 0, so the

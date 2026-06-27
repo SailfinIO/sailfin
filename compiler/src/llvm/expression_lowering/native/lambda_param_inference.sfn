@@ -1,0 +1,541 @@
+// compiler/src/llvm/expression_lowering/native/lambda_param_inference.sfn
+//
+// Untyped-lambda parameter/return type backfill (issue #1683, bundled with
+// the SFEP-0029 `fn(x) => expr` short form).
+//
+// An untyped lambda passed to a callback position — `.map(fn(x) => x * x)`,
+// `apply(fn(x) => x + 1, 5)` — lowers with the WRONG LLVM parameter/return
+// types and segfaults: the lambda-lift pass copies the lambda's `null`
+// `type_annotation`/`return_type` straight into the synthesised
+// `sfn_lambda_<N>` signature (`lambda_lowering.sfn`), so the lifted function's
+// params default to the wrong width while the runtime/HOF ABI expects `i64`.
+// Both body forms fail identically — it is a syntax-independent codegen gap,
+// not specific to the new short form.
+//
+// This module supplies the helpers the lift pass calls to backfill an untyped
+// lambda argument's parameter/return type *text* from the EXPECTED function
+// type available at the call site, before synthesis. Two sources:
+//   (A) a user function / struct-method parameter declared `fn(A0, ...) -> R`;
+//   (B) a builtin `int[]` array method (`.map`/`.filter`/`.reduce`), whose
+//       mapper signature is fixed by the element type (mirrors the runtime
+//       gate in `core_call_resolution.sfn`; non-`int` stays out of scope on
+//       generics, #766).
+//
+// Safety: the backfill only ever writes annotations that are currently `null`,
+// so a typed lambda is untouched (zero regression surface), and an arity
+// mismatch or unknown expected type is a no-op — the lambda then lowers exactly
+// as today and the existing "callee signature is not known" diagnostic still
+// fires. Never a silent miscompile.
+import {
+    Block,
+    Expression,
+    FunctionSignature,
+    Parameter,
+    Program,
+    Statement,
+    TypeAnnotation
+} from "../../../ast";
+import { index_of, substring } from "../../../string_utils";
+import { ends_with, starts_with, trim_text } from "../../utils";
+
+// ── fn-type text splitter ────────────────────────────────────────────
+//
+// Splits a function-type annotation text (`fn(int, string) -> bool`) into its
+// parameter type texts and return type text. No existing helper does this —
+// function types map wholesale to `{i8*, i8*}` in `type_mapping.sfn`. This is
+// a deliberately total, textual splitter: it never throws and returns
+// `ok: false` on anything it does not recognise (the caller then no-ops).
+struct FnTypeParts {
+    ok: boolean;
+    param_types: string[];
+    return_type: string;
+}
+
+fn parse_fn_type_text(text: string) -> FnTypeParts {
+    let trimmed = trim_text(text);
+    // `sfn fmt` normalises `fn(` to `fn (`; accept either spelling.
+    let mut params_start: int = -1;
+    if starts_with(trimmed, "fn(") { params_start = 3; } else if starts_with(trimmed, "fn (") {
+        params_start = 4;
+    }
+    if params_start < 0 {
+        return FnTypeParts { ok: false, param_types: [], return_type: "" };
+    }
+
+    // Depth-match the opening `(` so a nested fn-type / generic param does
+    // not terminate the list early. The opening paren is already consumed,
+    // so depth starts at 1.
+    let mut depth: int = 1;
+    let mut cursor: int = params_start;
+    let mut params_end: int = -1;
+    loop {
+        if cursor >= trimmed.length { break; }
+        let ch = substring(trimmed, cursor, cursor + 1);
+        if ch == "(" { depth += 1; } else if ch == ")" {
+            depth -= 1;
+            if depth == 0 {
+                params_end = cursor;
+                break;
+            }
+        }
+        cursor += 1;
+    }
+    if params_end < 0 {
+        return FnTypeParts { ok: false, param_types: [], return_type: "" };
+    }
+
+    let params_text = trim_text(substring(trimmed, params_start, params_end));
+    let param_types = _split_top_level_commas(params_text);
+    let after = trim_text(substring(trimmed, params_end + 1, trimmed.length));
+    let mut return_type: string = "";
+    if starts_with(after, "->") {
+        return_type = trim_text(substring(after, 2, after.length));
+    } else if starts_with(after, ":") {
+        // `:` return separator tolerance (SFEP-0005) — harmless leniency.
+        return_type = trim_text(substring(after, 1, after.length));
+    }
+    return FnTypeParts {
+        ok: true,
+        param_types: param_types,
+        return_type: return_type
+    };
+}
+
+// Split `text` on top-level commas only — depth-balanced over `()`, `<>`,
+// and `[]` so `Map<string, int>`, `fn(int, int) -> int`, and `int[]` inside a
+// parameter list never split on an inner comma. An empty/whitespace text
+// yields zero segments.
+fn _split_top_level_commas(text: string) -> string[] {
+    let mut result: string[] = [];
+    if trim_text(text).length == 0 { return result; }
+    let mut paren: int = 0;
+    let mut angle: int = 0;
+    let mut bracket: int = 0;
+    let mut start: int = 0;
+    let mut i: int = 0;
+    loop {
+        if i >= text.length { break; }
+        let ch = substring(text, i, i + 1);
+        if ch == "(" { paren += 1; } else if ch == ")" {
+            if paren > 0 { paren -= 1; }
+        } else if ch == "<" { angle += 1; } else if ch == ">" {
+            if angle > 0 { angle -= 1; }
+        } else if ch == "[" { bracket += 1; } else if ch == "]" {
+            if bracket > 0 { bracket -= 1; }
+        } else if ch == "," {
+            if paren == 0 {
+                if angle == 0 {
+                    if bracket == 0 {
+                        result.push(trim_text(substring(text, start, i)));
+                        start = i + 1;
+                    }
+                }
+            }
+        }
+        i += 1;
+    }
+    result.push(trim_text(substring(text, start, text.length)));
+    return result;
+}
+
+// Strip a leading `name:` from a function-type parameter segment so a named
+// fn-type param (`fn(x: int) -> int`) yields the bare type `int`, matching the
+// unnamed form (`fn(int) -> int`). A type with no top-level `:` (e.g. `int`,
+// `Map<string, int>`) is returned verbatim.
+fn _param_type_only(segment: string) -> string {
+    let seg = trim_text(segment);
+    let colon = index_of(seg, ":");
+    if colon > 0 {
+        return trim_text(substring(seg, colon + 1, seg.length));
+    }
+    return seg;
+}
+
+// ── Backfill a lambda from an expected fn-type ───────────────────────
+//
+// Returns a NEW `Expression.Lambda` whose previously-null parameter
+// annotations and return type are filled from `expected_fn_type`. A param or
+// return that is ALREADY annotated is left untouched (the annotation wins, so
+// typed lambdas are a no-op). An arity mismatch or an unparseable expected
+// type returns the lambda unchanged.
+fn backfill_lambda_from_fn_type(lambda: Expression, expected_fn_type: string) -> Expression {
+    if lambda.variant != "Lambda" { return lambda; }
+    let parts = parse_fn_type_text(expected_fn_type);
+    if !parts.ok { return lambda; }
+    if parts.param_types.length != lambda.parameters.length { return lambda; }
+
+    let mut new_params: Parameter[] = [];
+    let mut i: int = 0;
+    loop {
+        if i >= lambda.parameters.length { break; }
+        let p = lambda.parameters[i];
+        let mut annotation: TypeAnnotation? = p.type_annotation;
+        if annotation == null {
+            let type_text = _param_type_only(parts.param_types[i]);
+            if type_text.length > 0 {
+                annotation = TypeAnnotation { text: type_text };
+            }
+        }
+        new_params.push(Parameter {
+            name: p.name, type_annotation: annotation, default_value: p.default_value, mutable: p.mutable, span: p.span
+        });
+        i += 1;
+    }
+
+    let mut new_return: TypeAnnotation? = lambda.return_type;
+    if new_return == null {
+        if parts.return_type.length > 0 {
+            new_return = TypeAnnotation { text: parts.return_type };
+        }
+    }
+
+    return Expression.Lambda {
+        parameters: new_params,
+        body: lambda.body,
+        return_type: new_return,
+        captures: lambda.captures
+    };
+}
+
+fn _lambda_is_fully_typed(lambda: Expression) -> boolean {
+    if lambda.return_type == null { return false; }
+    let mut i: int = 0;
+    loop {
+        if i >= lambda.parameters.length { break; }
+        if lambda.parameters[i].type_annotation == null { return false; }
+        i += 1;
+    }
+    return true;
+}
+
+// ── Case A: callee signature table ───────────────────────────────────
+//
+// `key` is the free-function name, or `Struct.method` for a struct method.
+// `param_type_texts[i]` is parameter `i`'s annotation text ("" when null).
+struct FnSigEntry {
+    key: string;
+    param_type_texts: string[];
+}
+
+fn build_fn_signature_table(program: Program) -> FnSigEntry[] {
+    let mut table: FnSigEntry[] = [];
+    let mut i: int = 0;
+    loop {
+        if i >= program.statements.length { break; }
+        let s = program.statements[i];
+        if s.variant == "FunctionDeclaration" {
+            table.push(_sig_entry(s.signature.name, s.signature));
+        } else if s.variant == "StructDeclaration" {
+            let mut m: int = 0;
+            loop {
+                if m >= s.methods.length { break; }
+                let method = s.methods[m];
+                table.push(_sig_entry(s.name + "." + method.signature.name, method.signature));
+                m += 1;
+            }
+        }
+        i += 1;
+    }
+    return table;
+}
+
+fn _sig_entry(key: string, signature: FunctionSignature) -> FnSigEntry {
+    let mut texts: string[] = [];
+    let mut p: int = 0;
+    loop {
+        if p >= signature.parameters.length { break; }
+        let annotation = signature.parameters[p].type_annotation;
+        if annotation == null { texts.push(""); } else {
+            texts.push(annotation.text);
+        }
+        p += 1;
+    }
+    return FnSigEntry { key: key, param_type_texts: texts };
+}
+
+fn _lookup_sig_param_types(table: FnSigEntry[], key: string) -> string[] {
+    let mut i: int = 0;
+    loop {
+        if i >= table.length { break; }
+        if table[i].key == key { return table[i].param_type_texts; }
+        i += 1;
+    }
+    let empty: string[] = [];
+    return empty;
+}
+
+// ── Case B: int[] array-method mapper signatures ─────────────────────
+//
+// Mirrors the runtime gate in `core_call_resolution.sfn`: only `int[]`
+// (`i64`) element arrays have runtime mapper bodies today. The callback's
+// expected signature is fixed by the method.
+fn array_builtin_expected_fn_type(method: string, element_type: string, arg_index: int) -> string {
+    if element_type != "int" { return ""; }
+    if method == "map" {
+        if arg_index == 0 { return "fn(int) -> int"; }
+    }
+    if method == "filter" {
+        if arg_index == 0 { return "fn(int) -> boolean"; }
+    }
+    if method == "reduce" {
+        // `reduce(init, fn(acc, elem) -> acc)` — the callback is argument 1.
+        if arg_index == 1 { return "fn(int, int) -> int"; }
+    }
+    return "";
+}
+
+// ── Binding scope (for receiver element-type resolution) ─────────────
+struct BindingEntry {
+    name: string;
+    type_text: string;
+}
+
+fn lookup_binding_type(bindings: BindingEntry[], name: string) -> string {
+    // Innermost scope is appended last → scan from the end so a shadowing
+    // binding wins.
+    let mut i: int = bindings.length - 1;
+    loop {
+        if i < 0 { break; }
+        if bindings[i].name == name { return bindings[i].type_text; }
+        i -= 1;
+    }
+    return "";
+}
+
+// Strip a trailing `[]` from an array type text, yielding the element type
+// ("" when the text is not an array type).
+fn _element_type_from_array_text(type_text: string) -> string {
+    let t = trim_text(type_text);
+    if ends_with(t, "[]") {
+        return trim_text(substring(t, 0, t.length - 2));
+    }
+    return "";
+}
+
+fn _is_int_literal_expr(e: Expression) -> boolean {
+    if e.variant == "NumberLiteral" {
+        // An integer literal carries no decimal point.
+        return index_of(e.value, ".") < 0;
+    }
+    if e.variant == "Unary" { return _is_int_literal_expr(e.operand); }
+    return false;
+}
+
+// Conservative element type of an array literal: "int" only when every
+// element is an integer literal, else "" (defer to a declared annotation).
+fn _array_literal_element_type(elements: Expression[]) -> string {
+    if elements.length == 0 { return ""; }
+    let mut i: int = 0;
+    loop {
+        if i >= elements.length { break; }
+        if !_is_int_literal_expr(elements[i]) { return ""; }
+        i += 1;
+    }
+    return "int";
+}
+
+// Element type ("int" or "") of an array-typed receiver expression.
+fn receiver_element_type(receiver: Expression, bindings: BindingEntry[]) -> string {
+    if receiver.variant == "Array" {
+        return _array_literal_element_type(receiver.elements);
+    }
+    if receiver.variant == "Identifier" {
+        return _element_type_from_array_text(lookup_binding_type(bindings, receiver.name));
+    }
+    return "";
+}
+
+fn _receiver_struct_type(receiver: Expression, bindings: BindingEntry[]) -> string {
+    if receiver.variant == "Identifier" {
+        return trim_text(lookup_binding_type(bindings, receiver.name));
+    }
+    return "";
+}
+
+// The declared type text of a `let` binding: the explicit annotation when
+// present, else `int[]` inferred from an all-integer-literal array
+// initializer (so `let xs = [1, 2, 3]; xs.map(...)` resolves), else "".
+fn declared_binding_type(type_annotation: TypeAnnotation?, initializer: Expression?) -> string {
+    if type_annotation != null { return trim_text(type_annotation.text); }
+    if initializer != null {
+        if initializer.variant == "Array" {
+            let elem = _array_literal_element_type(initializer.elements);
+            if elem.length > 0 { return elem + "[]"; }
+        }
+    }
+    return "";
+}
+
+// Build the program-wide binding table ONCE (immutable, like the signature
+// table). A per-walk *mutable* scope re-stored into the threaded `LiftContext`
+// corrupts the struct string fields under the seed compiler; the static table
+// sidesteps that entirely. The table is a flat `(name, type)` list over every
+// function/method parameter and `let` declaration (collected depth-first
+// through nested blocks). Lookups are global rather than lexically scoped — a
+// deliberately conservative subset: a same-named binding in two scopes can
+// only cause a no-op or a correct backfill in the covered cases, never a
+// crash (a non-`int` receiver type fails the array-builtin gate and falls
+// through to the existing diagnostic).
+fn build_binding_table(program: Program) -> BindingEntry[] {
+    let mut table: BindingEntry[] = [];
+    let mut i: int = 0;
+    loop {
+        if i >= program.statements.length { break; }
+        let s = program.statements[i];
+        if s.variant == "FunctionDeclaration" {
+            table = _collect_params(table, s.signature.parameters);
+            table = _collect_block_bindings(table, s.body);
+        } else if s.variant == "StructDeclaration" {
+            let mut m: int = 0;
+            loop {
+                if m >= s.methods.length { break; }
+                table = _collect_params(table, s.methods[m].signature.parameters);
+                table = _collect_block_bindings(table, s.methods[m].body);
+                m += 1;
+            }
+        }
+        i += 1;
+    }
+    return table;
+}
+
+fn _collect_params(table: BindingEntry[], params: Parameter[]) -> BindingEntry[] {
+    let mut out: BindingEntry[] = table;
+    let mut i: int = 0;
+    loop {
+        if i >= params.length { break; }
+        let annotation = params[i].type_annotation;
+        if annotation != null {
+            out.push(BindingEntry {
+                name: params[i].name, type_text: trim_text(annotation.text)
+            });
+        }
+        i += 1;
+    }
+    return out;
+}
+
+fn _collect_block_bindings(table: BindingEntry[], block: Block) -> BindingEntry[] {
+    let mut out: BindingEntry[] = table;
+    let mut i: int = 0;
+    loop {
+        if i >= block.statements.length { break; }
+        out = _collect_statement_bindings(out, block.statements[i]);
+        i += 1;
+    }
+    return out;
+}
+
+fn _collect_statement_bindings(table: BindingEntry[], statement: Statement) -> BindingEntry[] {
+    let mut out: BindingEntry[] = table;
+    if statement.variant == "VariableDeclaration" {
+        if statement.name.length > 0 {
+            let type_text = declared_binding_type(statement.type_annotation, statement.initializer);
+            if type_text.length > 0 {
+                out.push(BindingEntry {
+                    name: statement.name, type_text: type_text
+                });
+            }
+        }
+        return out;
+    }
+    if statement.variant == "IfStatement" {
+        out = _collect_block_bindings(out, statement.then_block);
+        if statement.else_branch != null {
+            let branch = statement.else_branch;
+            if branch.body != null {
+                out = _collect_block_bindings(out, branch.body);
+            } else if branch.statement != null {
+                out = _collect_statement_bindings(out, branch.statement);
+            }
+        }
+        return out;
+    }
+    if statement.variant == "BlockStatement" {
+        return _collect_block_bindings(out, statement.body);
+    }
+    if statement.variant == "ForStatement" {
+        return _collect_block_bindings(out, statement.body);
+    }
+    if statement.variant == "LoopStatement" {
+        return _collect_block_bindings(out, statement.body);
+    }
+    if statement.variant == "RoutineStatement" {
+        return _collect_block_bindings(out, statement.body);
+    }
+    if statement.variant == "MatchStatement" {
+        let mut c: int = 0;
+        loop {
+            if c >= statement.cases.length { break; }
+            out = _collect_block_bindings(out, statement.cases[c].body);
+            c += 1;
+        }
+        return out;
+    }
+    if statement.variant == "TryStatement" {
+        out = _collect_block_bindings(out, statement.try_block);
+        if statement.catch_block != null {
+            out = _collect_block_bindings(out, statement.catch_block);
+        }
+        if statement.finally_block != null {
+            out = _collect_block_bindings(out, statement.finally_block);
+        }
+        return out;
+    }
+    return out;
+}
+
+// ── Top-level entry the lift pass calls per call argument ────────────
+//
+// Given a call's `callee`, the argument's position, the argument expression,
+// the callee-signature table, and the active binding scope, return the
+// (possibly backfilled) argument. Non-lambda args and fully-typed lambdas are
+// returned unchanged; an unknown expected type is a no-op.
+fn backfill_call_argument(callee: Expression, arg_index: int, arg: Expression, signatures: FnSigEntry[], bindings: BindingEntry[]) -> Expression {
+    if arg.variant != "Lambda" { return arg; }
+    if _lambda_is_fully_typed(arg) { return arg; }
+    let expected = _expected_arg_fn_type(callee, arg_index, signatures, bindings);
+    if expected.length == 0 { return arg; }
+    return backfill_lambda_from_fn_type(arg, expected);
+}
+
+fn _expected_arg_fn_type(callee: Expression, arg_index: int, signatures: FnSigEntry[], bindings: BindingEntry[]) -> string {
+    // Case A — free function called by name.
+    if callee.variant == "Identifier" {
+        let types = _lookup_sig_param_types(signatures, callee.name);
+        if arg_index < types.length { return types[arg_index]; }
+        return "";
+    }
+    if callee.variant == "Member" {
+        // Case B — builtin int[] array method on the receiver.
+        let elem = receiver_element_type(callee.object, bindings);
+        if elem.length > 0 {
+            let builtin = array_builtin_expected_fn_type(callee.member, elem, arg_index);
+            if builtin.length > 0 { return builtin; }
+        }
+        // Case A (method) — `Struct.method` via the receiver's declared type.
+        let recv_type = _receiver_struct_type(callee.object, bindings);
+        if recv_type.length > 0 {
+            let types = _lookup_sig_param_types(signatures, recv_type + "."
+                + callee.member);
+            if arg_index < types.length { return types[arg_index]; }
+        }
+        return "";
+    }
+    return "";
+}
+
+export {
+    BindingEntry,
+    FnSigEntry,
+    FnTypeParts,
+    array_builtin_expected_fn_type,
+    backfill_call_argument,
+    backfill_lambda_from_fn_type,
+    build_binding_table,
+    build_fn_signature_table,
+    declared_binding_type,
+    lookup_binding_type,
+    parse_fn_type_text,
+    receiver_element_type
+};

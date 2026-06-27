@@ -1,0 +1,68 @@
+// End-to-end: untyped lambda callbacks execute correctly (#1683, bundled
+// with SFEP-0029). An untyped lambda passed to a builtin array method or a
+// user higher-order function previously lowered with the wrong LLVM types
+// and SEGFAULTED; both the new `fn(x) => expr` short form and the existing
+// block form `fn(x) { ... }` were affected identically. The backfill pass
+// (`lambda_param_inference.sfn`) now types the lambda from the callee's
+// expected `fn(...) -> R` before it is lifted.
+//
+// Drives the compiler-under-test as a subprocess and asserts on captured
+// stdout — the canonical e2e pattern (`.claude/rules/no-bash-e2e.md`,
+// `array_map_closure_test.sfn`).
+import { trim_right } from "sfn/strings";
+
+// The compiler-under-test: `$SAILFIN_BIN` if set, else the self-hosted
+// binary relative to the repo root the runner starts from.
+fn _sfn_bin() -> string ![io] {
+    let configured = env.get("SAILFIN_BIN");
+    if configured.length > 0 { return configured; }
+    return "build/native/sailfin";
+}
+
+// `sfn run` compiles+links+executes the fixture, so the spawned compiler
+// needs a real environment (PATH for the linker, plus SAILFIN_TEST_SCRATCH
+// for per-invocation build-cache isolation under the parallel pool, #1333).
+fn _child_env() -> string[] ![io] { return process.environ(); }
+
+fn _run_fixture(path: string) -> string ![io] {
+    let exit = process.run_capture([_sfn_bin(), "run", path], _child_env());
+    let out = process.capture_take_stdout();
+    let _err = process.capture_take_stderr();
+    assert exit == 0;
+    return trim_right(out);
+}
+
+test "untyped lambda: .map(fn(x) => x*x) executes (was segfault)" ![io] {
+    let out = _run_fixture("compiler/tests/e2e/fixtures/untyped_lambda_callback/map_expr.sfn");
+    assert out == "14";
+}
+
+test "untyped lambda: block form .map(fn(x){...}) executes identically" ![io] {
+    let out = _run_fixture("compiler/tests/e2e/fixtures/untyped_lambda_callback/map_block.sfn");
+    assert out == "14";
+}
+
+test "untyped lambda: capturing .map(fn(x) => x + base) executes" ![io] {
+    let out = _run_fixture("compiler/tests/e2e/fixtures/untyped_lambda_callback/map_capture.sfn");
+    assert out == "36";
+}
+
+test "untyped lambda: .filter(fn(x) => x > 1) executes" ![io] {
+    let out = _run_fixture("compiler/tests/e2e/fixtures/untyped_lambda_callback/filter_expr.sfn");
+    assert out == "2";
+}
+
+test "untyped lambda: .reduce(0, fn(acc, x) => acc + x) executes" ![io] {
+    let out = _run_fixture("compiler/tests/e2e/fixtures/untyped_lambda_callback/reduce_expr.sfn");
+    assert out == "10";
+}
+
+test "untyped lambda: user HOF apply(fn(x) => x + 1, 5) executes" ![io] {
+    let out = _run_fixture("compiler/tests/e2e/fixtures/untyped_lambda_callback/hof_expr.sfn");
+    assert out == "6";
+}
+
+test "no regression: typed expr form prints identical output to untyped" ![io] {
+    let out = _run_fixture("compiler/tests/e2e/fixtures/untyped_lambda_callback/map_typed.sfn");
+    assert out == "14";
+}

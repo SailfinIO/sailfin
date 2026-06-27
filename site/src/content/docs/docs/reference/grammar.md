@@ -219,7 +219,12 @@ ExpressionStatement = Expression ";" ;
 ```ebnf
 Expression         = LambdaExpression | PipelineExpression ;
 
-LambdaExpression   = "fn" "(" [ Parameters ] ")" [ ReturnType ] Block ;
+LambdaExpression   = "fn" "(" [ Parameters ] ")" [ ReturnType ] LambdaBody ;
+LambdaBody         = Block | "=>" Expression ;
+// The `=> Expression` short form (SFEP-0029) is additive: it desugars to a
+// single-`return` block, so `fn(x) => x * x` is equivalent to
+// `fn(x) { return x * x; }`. The `fn` lead-in keeps dispatch zero-lookahead,
+// so the body `=>` never collides with the match-arm separator.
 
 PipelineExpression = LogicalOr { "|>" LogicalOr } ;
 // Note: |> is not yet implemented.

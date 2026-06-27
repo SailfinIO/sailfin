@@ -1,0 +1,14 @@
+// #1683 — `.map(fn(x) => x*x)` with NO type annotations executes (was a
+// segfault). base=10, [1,2,3].map(x => x*x) = [1,4,9], sum = 14.
+fn main() ![io] {
+    let xs: int[] = [1, 2, 3];
+    let ys: int[] = xs.map(fn (x) => x * x);
+    let mut total: int = 0;
+    let mut i: int = 0;
+    loop {
+        if i >= ys.length { break; }
+        total = total + ys[i];
+        i = i + 1;
+    }
+    print(total);
+}
