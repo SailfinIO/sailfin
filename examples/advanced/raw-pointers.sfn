@@ -1,20 +1,35 @@
 // examples/advanced/raw-pointers.sfn
-
-fn main() ![unsafe, io] {
-    let mut value: i32 = 42;
-
-    // Take a raw pointer to the value
-    let ptr: *i32 = &raw value;
-
-    unsafe {
-        // Read through the pointer
-        let read_value = *ptr;
-        print("Read value: {{ read_value }}");
-
-        // Write through the pointer
-        *ptr = 100;
-    }
-
-    // Value was modified through the pointer
-    print("Modified value: {{ value }}");
+//
+// Design-stage: taking a raw pointer to a local with `&raw` is planned future
+// syntax. Per examples/README.md, future syntax stays inside comments and the
+// runnable body sticks to the shipped bootstrap grammar. The `&raw` operator
+// has no parser arm yet, so it degrades to an unstructured node; this file
+// keeps the planned form in a comment until the feature ships.
+//
+// Planned form (does not yet parse):
+//
+//     fn main() ![unsafe, io] {
+//         let mut value: i32 = 42;
+//
+//         // Take a raw pointer to the value
+//         let ptr: *i32 = &raw value;
+//
+//         unsafe {
+//             // Read through the pointer
+//             let read_value = *ptr;
+//             print("Read value: {{ read_value }}");
+//
+//             // Write through the pointer
+//             *ptr = 100;
+//         }
+//
+//         // Value was modified through the pointer
+//         print("Modified value: {{ value }}");
+//     }
+//
+// For shipped pointer usage today (malloc-backed pointers, `as` casts, `unsafe`
+// blocks, and `*` dereference), see `pointer-arithmetic.sfn` and
+// `unsafe-extern-interop.sfn`.
+fn main() ![io] {
+    print("raw-pointers: `&raw` is design-stage future syntax — see the comments in this file.");
 }

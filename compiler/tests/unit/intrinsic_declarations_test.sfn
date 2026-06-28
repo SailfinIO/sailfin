@@ -54,7 +54,14 @@ fn _trim(value: string) -> string {
         end -= 1;
     }
     if start == 0 && end == value.length { return value; }
-    return value[start: end];
+    let mut out: string = "";
+    let mut k: int = start;
+    loop {
+        if k >= end { break; }
+        out = out + value[k];
+        k += 1;
+    }
+    return out;
 }
 
 fn ensure_intrinsic_declarations(lines: string[]) -> string[] {

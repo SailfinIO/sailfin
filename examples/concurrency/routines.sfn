@@ -1,11 +1,12 @@
 // examples/concurrency/routines.sfn
-
 fn main() ![io] {
-    routine "named" {
-        print("This is routine 1");
-    }
-
-    routine {
-        print("This is an unnamed routine");
-    }
+    // Design-stage: named routines (`routine "name" { ... }`) are deferred
+    // concurrency syntax. Per examples/README.md, future syntax stays inside
+    // comments until the feature ships:
+    //
+    //     routine "named" {
+    //         print("This is routine 1");
+    //     }
+    // The unnamed `routine { ... }` form is structured today (RoutineStatement).
+    routine { print("This is an unnamed routine"); }
 }

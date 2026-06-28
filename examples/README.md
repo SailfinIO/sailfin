@@ -96,7 +96,7 @@ Effect annotations (`![...]`) flag the runtime capabilities you need to declare 
 | `type-guards.sfn`                 | `io`                 | Runtime type refinement and guarded matches within `main`.         |
 | `unions.sfn`                      | `io`                 | Union + intersection typing with runtime checks.                   |
 | `pointer-arithmetic.sfn`          | `io`, `unsafe`       | **Design-stage** pointer arithmetic with malloc/free.              |
-| `raw-pointers.sfn`                | `io`, `unsafe`       | **Design-stage** raw pointer creation and dereference with `&raw`. |
+| `raw-pointers.sfn`                | `io`                 | **Design-stage** raw pointer creation/dereference with `&raw`; planned form kept in comments, runnable `main` is a shipped-grammar stub. |
 | `unsafe-extern-interop.sfn`       | `io`, `unsafe`       | **Design-stage** extern function declarations and unsafe blocks.   |
 | `web-server-with-concurrency.sfn` | `clock`, `io`, `net` | HTTP handler spawning routines and throttled background work.      |
 
