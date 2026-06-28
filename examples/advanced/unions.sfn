@@ -1,13 +1,31 @@
 // examples/advanced/unions.sfn
+struct StringValue {
+    value: string;
+}
 
-fn printValue(value: string | int) ![io] {
-    if value is string {
-        print("It's a string: {{value}}");
-    } else {
-        print("It's a number: {{value}}");
+struct IntValue {
+    value: int;
+}
+
+// Discriminate a tagged union by matching named struct variants — the shipped
+// runtime type-refinement surface (the `i32` union tag selects the arm).
+fn printValue(value: StringValue | IntValue) ![io] {
+    match value {
+        StringValue { value } => print("It's a string: {{value}}"),
+        IntValue { value } => print("It's a number: {{value}}")
     }
 }
 
+// Planned future syntax — the `x is T` type-guard operator (not yet shipped; it
+// has no parser arm and degrades to an unstructured node). Tracked by #1753:
+//
+//     fn printValue(value: string | int) ![io] {
+//         if value is string {
+//             print("It's a string: {{value}}");
+//         } else {
+//             print("It's a number: {{value}}");
+//         }
+//     }
 interface Admin {
     isAdmin: boolean;
 }
@@ -19,9 +37,12 @@ interface User {
 type AdminUser = Admin & User;
 
 fn main() ![io] {
-    printValue("Sailfin");
-    printValue(42);
+    printValue(StringValue { value: "Sailfin" });
+    printValue(IntValue { value: 42 });
 
-    let admin: AdminUser = { name: "Alice", isAdmin: true };
+    let admin: AdminUser = {
+        name: "Alice",
+        isAdmin: true
+    };
     print("Admin: {{admin.name}}");
 }

@@ -1,27 +1,47 @@
 // examples/advanced/type-guards.sfn
-
 struct User {
     name: string;
     age: int;
 }
 
-fn process(input: string | int) ![io] {
-    if input is string {
-        print("It's a string: {{input}}");
-    } else {
-        print("It's a number: {{input}}");
+struct StringInput {
+    value: string;
+}
+
+struct IntInput {
+    value: int;
+}
+
+// Runtime type refinement on a tagged union: matching on named struct variants
+// is the shipped discriminator (mirrors examples/basics/error-handling.sfn). The
+// `i32` union tag drives the arm selection.
+fn process(input: StringInput | IntInput) ![io] {
+    match input {
+        StringInput { value } => print("It's a string: {{value}}"),
+        IntInput { value } => print("It's a number: {{value}}")
     }
 }
 
+// Planned future syntax — the `x is T` type-guard operator (not yet shipped; it
+// has no parser arm and degrades to an unstructured node). Tracked by #1753:
+//
+//     fn process(input: string | int) ![io] {
+//         if input is string {
+//             print("It's a string: {{input}}");
+//         } else {
+//             print("It's a number: {{input}}");
+//         }
+//     }
 fn main() ![io] {
-    process("Sail");
-    process(42);
+    process(StringInput { value: "Sail" });
+    process(IntInput { value: 42 });
 
     let user = User { name: "Robin", age: 22 };
 
     match user {
-        User { name, age } if age >= 18 => print("Adult user: {{name}}"),
+        User { name, age }
+        if age >= 18 => print("Adult user: {{name}}"),
         User { name, age } => print("Minor user: {{name}}"),
-        _ => print("Unknown entity"),
+        _ => print("Unknown entity")
     }
 }
