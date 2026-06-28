@@ -455,5 +455,17 @@ fn is_two_char_symbol(value: string) -> boolean {
     if value == "<<" { return true; }
     if value == ">>" { return true; }
     if value == ".." { return true; }
+    // Compound assignment operators (#1627 Part D). Tokenizing these as
+    // single symbols lets the expression parser's assignment seam recognize
+    // `x += 1` as `Assignment{operator:"+="}` instead of lexing `+` then `=`
+    // — which made the binary `+` climb fail on the trailing `=` and degrade
+    // the whole statement to an effect-blind `Raw`. The lowering
+    // `parse_assignment_expression` is a string-scan (not token-based), so it
+    // is unaffected by this tokenization change. `%=` is intentionally omitted
+    // (the lowering compound-assignment parser handles only `+= -= *= /=`).
+    if value == "+=" { return true; }
+    if value == "-=" { return true; }
+    if value == "*=" { return true; }
+    if value == "/=" { return true; }
     return false;
 }

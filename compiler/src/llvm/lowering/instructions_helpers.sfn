@@ -425,7 +425,24 @@ fn _body_text_allocates_or_stores(text: string) -> boolean {
     loop {
         if i >= n { break; }
         let ch = char_at(text, i);
-        if ch == "(" { return true; }
+        if ch == "(" {
+            // Only a CALL `(` allocates/escapes — a grouping (precedence) `(`
+            // does not. In the native-IR token stream a call `(` immediately
+            // follows its callee (an identifier char, or a `)`/`]` closing the
+            // callee expression), whereas a precedence-grouping paren follows
+            // an operator / `=` / `,` / space or another `(`. A structured
+            // assignment RHS now carries such grouping parens (`acc = (a + b)`,
+            // #1741) where the pre-#1627 `Raw` verbatim source — for the
+            // arena-eligible loops in the self-host set — did not, so this scan
+            // never saw them before. Skipping a grouping `(` is sound: its
+            // inner content is still scanned char-by-char below, so any real
+            // call nested inside is caught at that call's own `(`.
+            let mut prev: string = " ";
+            if i > 0 { prev = char_at(text, i - 1); }
+            if is_identifier_part_char(prev) { return true; }
+            if prev == ")" { return true; }
+            if prev == "]" { return true; }
+        }
         if ch == "[" { return true; }
         if ch == "\"" { return true; }
         if ch == "'" { return true; }

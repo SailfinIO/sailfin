@@ -1,0 +1,116 @@
+// #1627 Part D — assignment-as-expression must not hide its target's or
+// value's effects.
+//
+// Before #1627 assignment had no AST node: `a = b` / `x += 1` parsed as
+// `ExpressionStatement { Raw{"a = b"} }` because `=` carried precedence -1
+// (never climbed) and the compound operators lexed as two tokens, so the
+// whole statement degraded to an effect-blind `Raw`. After #1186 a `Raw`
+// contributes ZERO effects, so an effectful target or value
+// (`arr[io()] = x`, `a = readFile()`) reached codegen with no declared
+// capability.
+//
+// This pins both halves: (a) the parser now structures `<target> <op>
+// <value>` into `Expression.Assignment` (no `Raw` degradation, for `=` and
+// the compound operators `+= -= *= /=`), and (b)
+// `collect_effects_from_expression` walks BOTH sides so a requirement in the
+// lvalue or the rvalue surfaces. The effect-free canary guards against a
+// false positive on the dominant in-source spelling (`i += 1`,
+// `cursor = cursor + 1`), of which the compiler/runtime source has hundreds;
+// a false positive there would break self-host.
+import { Expression } from "../../src/ast";
+import { EffectRequirement, collect_effects_from_expression } from "../../src/effect_checker";
+import { empty_import_symbols } from "../../src/effect_imports";
+import { parse_program } from "../../src/parser/mod";
+
+fn _probe_expr(snippet: string) -> Expression ![io] {
+    let program = parse_program("fn probe() { " + snippet + "; }");
+    assert program.statements.length >= 1;
+    let fn_stmt = program.statements[0];
+    assert fn_stmt.variant == "FunctionDeclaration";
+    assert fn_stmt.body.statements.length >= 1;
+    let stmt = fn_stmt.body.statements[0];
+    assert stmt.variant == "ExpressionStatement";
+    return stmt.expression;
+}
+
+fn _reqs_contain(reqs: EffectRequirement[], effect: string) -> boolean {
+    let mut index: int = 0;
+    loop {
+        if index >= reqs.length { break; }
+        if reqs[index].effect == effect { return true; }
+        index += 1;
+    }
+    return false;
+}
+
+fn _assign_reqs(snippet: string) -> EffectRequirement[] ![io] {
+    return collect_effects_from_expression(_probe_expr(snippet), empty_import_symbols());
+}
+
+// -------------------------------------------------------------------
+// Structural lift: simple and compound assignment parse to an
+// `Assignment` node carrying the operator, never a `Raw`.
+// -------------------------------------------------------------------
+test "assign: simple assignment structures into Assignment" ![io] {
+    let expr = _probe_expr("a = b");
+    assert expr.variant == "Assignment";
+    assert strings_equal(expr.operator, "=");
+}
+
+test "assign: compound += structures into Assignment with the operator" ![io] {
+    let expr = _probe_expr("a += 1");
+    assert expr.variant == "Assignment";
+    assert strings_equal(expr.operator, "+=");
+}
+
+test "assign: compound -= *= /= each structure into Assignment" ![io] {
+    assert strings_equal(_probe_expr("a -= 1").operator, "-=");
+    assert strings_equal(_probe_expr("a *= 2").operator, "*=");
+    assert strings_equal(_probe_expr("a /= 2").operator, "/=");
+}
+
+test "assign: index lvalue structures with an Index target" ![io] {
+    let expr = _probe_expr("arr[0] = 5");
+    assert expr.variant == "Assignment";
+    assert expr.target.variant == "Index";
+}
+
+test "assign: member lvalue structures with a Member target" ![io] {
+    let expr = _probe_expr("p.x = 5");
+    assert expr.variant == "Assignment";
+    assert expr.target.variant == "Member";
+}
+
+// -------------------------------------------------------------------
+// Effect attribution: an assignment walks BOTH its target and value.
+// -------------------------------------------------------------------
+test "assign: value-side io surfaces" ![io] {
+    assert _reqs_contain(_assign_reqs("a = print.info(\"x\")"), "io");
+}
+
+test "assign: value-side net surfaces" ![io] {
+    assert _reqs_contain(_assign_reqs("a = http.get(\"u\")"), "net");
+}
+
+test "assign: target-side (index) io surfaces" ![io] {
+    assert _reqs_contain(_assign_reqs("arr[print.info(\"x\")] = 5"), "io");
+}
+
+test "assign: compound value-side io surfaces" ![io] {
+    assert _reqs_contain(_assign_reqs("total += print.info(\"x\")"), "io");
+}
+
+// -------------------------------------------------------------------
+// No false positive: an effect-free assignment requires nothing. These
+// are the dominant in-source spellings (hundreds of sites); a false
+// positive here would break self-host.
+// -------------------------------------------------------------------
+test "assign: effect-free simple assignment requires nothing (self-host canary)" ![io] {
+    let reqs = _assign_reqs("cursor = cursor + 1");
+    assert reqs.length == 0;
+}
+
+test "assign: effect-free compound increment requires nothing (self-host canary)" ![io] {
+    let reqs = _assign_reqs("i += 1");
+    assert reqs.length == 0;
+}
