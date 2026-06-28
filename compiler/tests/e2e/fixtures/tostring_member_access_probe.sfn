@@ -1,0 +1,52 @@
+// Fixture for #1706 — `.toString()` on an `int` value derived from a
+// struct field access, an array `.length`, and a direct member access.
+//
+// Before the fix these tripped the lowering fatal
+//   `cannot resolve return type for call to `idx.toString``
+// because the method-dispatch resolver could not establish the receiver's
+// type. The fix intercepts a primitive `.toString()` in `lower_expression`
+// and lowers it through `number.to_string`, reading the receiver type off
+// the lowered operand (so a struct-field / array-length / direct
+// member-access receiver all resolve uniformly).
+struct Shard {
+    valid: boolean,
+    index: int,
+    total: int
+}
+
+fn make_shard(i: int, t: int) -> Shard {
+    return Shard { valid: true, index: i, total: t };
+}
+
+fn select_indices(count: int) -> int[] {
+    let mut out: int[] = [];
+    let mut k = 0;
+    loop {
+        if k >= count { break; }
+        out.push(k);
+        k = k + 1;
+    }
+    return out;
+}
+
+fn main() -> int ![io] {
+    let s = make_shard(2, 3);
+    let idx = s.index;  // initializer is a struct field access -> int
+    print.info("idx=" + idx.toString());
+
+    let xs = select_indices(4);
+    let n = xs.length;  // initializer is array `.length` -> int
+    print.info("len=" + n.toString());
+
+    // Method call directly on the member access, no intermediate local.
+    print.info("direct=" + s.index.toString());
+
+    // Float receiver (double).
+    let ratio = 2.5;
+    print.info("flt=" + ratio.toString());
+
+    // String receiver is identity.
+    let label = "tag";
+    print.info("str=" + label.toString());
+    return 0;
+}
