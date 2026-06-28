@@ -8,6 +8,7 @@
 // Extracted from lowering_core.sfn to reduce per-file memory footprint.
 import { NativeFunction } from "../../native_ir";
 import {
+    extract_declared_symbol_names,
     render_enum_type_definitions,
     render_imported_function_declarations,
     render_runtime_helper_declarations,
@@ -153,7 +154,12 @@ fn render_llvm_preamble(module_name: string, type_context: TypeContext, trait_me
 
     // Imported function declarations
     if debug_lowering { print.err("emit-llvm: phase=render_imports"); }
-    let imported_declarations = render_imported_function_declarations(imported_functions, local_functions, type_context, runtime_helpers);
+    // #1736: hand the imported-declare pass the symbols the typed
+    // runtime-helper pass already declared, so it does not re-declare a
+    // shared helper (e.g. `sfn_print` / `sfn_array_concat`) with the erased
+    // import-closure signature and produce a conflicting redefinition.
+    let helper_declared_symbols = extract_declared_symbol_names(helper_declarations);
+    let imported_declarations = render_imported_function_declarations(imported_functions, local_functions, type_context, runtime_helpers, helper_declared_symbols);
     if imported_declarations != null {
         if imported_declarations.length > 0 {
             lines = extend_string_lines(lines, imported_declarations);

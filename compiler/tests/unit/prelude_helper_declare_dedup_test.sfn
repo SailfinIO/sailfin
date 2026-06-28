@@ -1,0 +1,147 @@
+// compiler/tests/unit/prelude_helper_declare_dedup_test.sfn
+//
+// Regression coverage for #1736: the regenerated runtime prelude emitted a
+// runtime helper's `declare` TWICE with conflicting signatures, breaking the
+// per-module clang verifier (`invalid redefinition of function`) and so
+// `sfn test` / `sfn build` / `sfn run` and `make check`'s test phase.
+//
+// Two declare-emission passes run into the same module preamble
+// (`lowering_phase_render.sfn`):
+//   1. `render_runtime_helper_declarations` — the typed descriptor shape from
+//      the runtime-helper registry (`print` → `{i8*, i64}`, `concat` →
+//      `{i8**,i64,i64}*`).
+//   2. `render_imported_function_declarations` — the source-level erased shape
+//      from the prelude's transitive import closure (`sfn_print(* u8, i64)`,
+//      `sfn_array_concat(* u8, * u8) -> * u8`).
+//
+// For `print`/`concat` the registry rows carry `target != symbol`
+// (`target` "print"/"concat", `symbol` "sfn_print"/"sfn_array_concat"), so the
+// #633 import-shadow skip in pass 1 does NOT fire and it emits the typed
+// declare. Pre-fix, pass 2 then emitted a second erased declare for the same
+// symbol — the conflicting pair. The fix shares pass 1's declared-symbol set
+// with pass 2 (via `extract_declared_symbol_names`), so pass 2 defers to the
+// typed declare the prelude's own call sites actually use. This locks the
+// dedup at unit speed instead of as a slow link failure.
+import { find } from "sfn/strings";
+
+import {
+    extract_declared_symbol_names,
+    render_imported_function_declarations,
+    render_runtime_helper_declarations
+} from "../../src/llvm/rendering";
+import { TypeContext } from "../../src/llvm/types";
+import { NativeFunction, NativeParameter } from "../../src/native_ir";
+
+fn _empty_context() -> TypeContext {
+    return TypeContext {
+        structs: [],
+        enums: [],
+        interfaces: [],
+        vtables: []
+    };
+}
+
+fn _param(name: string, type_annotation: string) -> NativeParameter {
+    return NativeParameter {
+        name: name,
+        type_annotation: type_annotation,
+        mutable: false,
+        default_value: null,
+        span: null
+    };
+}
+
+fn _fn(name: string, return_type: string, parameters: NativeParameter[]) -> NativeFunction {
+    return NativeFunction {
+        name: name,
+        is_async: false,
+        parameters: parameters,
+        return_type: return_type,
+        effects: [],
+        decorators: [],
+        is_extern: true,
+        instructions: []
+    };
+}
+
+// The two prelude-transitive imports whose source-level (erased) declare
+// collided with the registry's typed declare in #1736.
+fn _colliding_imports() -> NativeFunction[] {
+    return [_fn("sfn_print", "void", [_param("text", "* u8"), _param("len", "i64")]), _fn("sfn_array_concat", "* u8", [_param("a", "* u8"), _param("b", "* u8")])];
+}
+
+// Count emitted lines that declare `@<symbol>(` across a line set.
+fn _declare_count(lines: string[], symbol: string) -> int {
+    let needle = "@" + symbol + "(";
+    let mut count = 0;
+    let mut i: int = 0;
+    loop {
+        if i >= lines.length { break; }
+        if find(lines[i], "declare ", 0) == 0 {
+            if find(lines[i], needle, 0) >= 0 { count += 1; }
+        }
+        i += 1;
+    }
+    return count;
+}
+
+// ── extract_declared_symbol_names parses `@sym(` out of declare lines ──
+test "declare-dedup (#1736): extract_declared_symbol_names reads symbols from declare lines" {
+    let lines: string[] = ["declare void @sfn_print({i8*, i64})", "; intrinsic sfn_array_concat requires capabilities: ![]", "declare { i8**, i64, i64 }* @sfn_array_concat({ i8**, i64, i64 }*, { i8**, i64, i64 }*)", "declare noalias i8* @calloc(i64, i64)"];
+    let syms = extract_declared_symbol_names(lines);
+    // The comment line carries no `@`, so it contributes nothing.
+    assert syms.length == 3;
+    assert find(syms[0], "sfn_print", 0) == 0;
+    assert find(syms[1], "sfn_array_concat", 0) == 0;
+    assert find(syms[2], "calloc", 0) == 0;
+}
+
+// ── Pass 1 emits the typed declare for the target != symbol rows ──
+test "declare-dedup (#1736): helper pass emits the typed print/concat declares" {
+    let no_locals: NativeFunction[] = [];
+    let helper_lines = render_runtime_helper_declarations(["print", "concat"], no_locals, _colliding_imports());
+    assert _declare_count(helper_lines, "sfn_print") == 1;
+    assert _declare_count(helper_lines, "sfn_array_concat") == 1;
+}
+
+// ── Pass 2 skips a symbol the helper pass already declared (typed wins) ──
+test "declare-dedup (#1736): imported pass defers to the typed helper declare" {
+    let no_locals: NativeFunction[] = [];
+    let imports = _colliding_imports();
+    let helper_lines = render_runtime_helper_declarations(["print", "concat"], no_locals, imports);
+    let already = extract_declared_symbol_names(helper_lines);
+
+    // With the helper-declared set threaded in, pass 2 emits NO second declare.
+    let imported_lines = render_imported_function_declarations(imports, no_locals, _empty_context(), [], already);
+    assert _declare_count(imported_lines, "sfn_print") == 0;
+    assert _declare_count(imported_lines, "sfn_array_concat") == 0;
+
+    // Net across BOTH passes: exactly one declare per helper symbol.
+    let mut combined: string[] = [];
+    let mut h: int = 0;
+    loop {
+        if h >= helper_lines.length { break; }
+        combined.push(helper_lines[h]);
+        h += 1;
+    }
+    let mut k: int = 0;
+    loop {
+        if k >= imported_lines.length { break; }
+        combined.push(imported_lines[k]);
+        k += 1;
+    }
+    assert _declare_count(combined, "sfn_print") == 1;
+    assert _declare_count(combined, "sfn_array_concat") == 1;
+}
+
+// ── Negative control: the skip is load-bearing ──
+// Without the shared set (empty `already_declared`), pass 2 still emits the
+// erased declare — proving the dedup, not some unrelated filter, suppresses
+// the duplicate above.
+test "declare-dedup (#1736): empty already-declared set still emits the import declare" {
+    let no_locals: NativeFunction[] = [];
+    let imports = _colliding_imports();
+    let imported_lines = render_imported_function_declarations(imports, no_locals, _empty_context(), [], []);
+    assert _declare_count(imported_lines, "sfn_print") == 1;
+    assert _declare_count(imported_lines, "sfn_array_concat") == 1;
+}
