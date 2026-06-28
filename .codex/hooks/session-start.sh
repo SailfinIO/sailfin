@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 # Codex SessionStart hook: emit a compact project snapshot that keeps Sailfin's
-# self-hosted compiler constraints visible at the start of every session.
+# self-hosted compiler, Sailfin-native runtime, and proposal process visible at
+# the start of every session.
 
 set -euo pipefail
 
@@ -32,17 +33,29 @@ else
   printf -- '- seedcheck: not built (only needed for `make check`)\n'
 fi
 
+if [[ -f tools/mcp-server/dist/index.js ]]; then
+  printf -- '- mcp-server: tools/mcp-server/dist present\n'
+elif [[ -d tools/mcp-server ]]; then
+  printf -- '- mcp-server: not built — run `make mcp-server` if MCP tools are needed\n'
+fi
+
 branch=$(git branch --show-current 2>/dev/null || printf '(detached)')
 printf -- '- branch: %s\n' "$branch"
 
 version_pin=$(sed -n 's/^version[[:space:]]*=[[:space:]]*"\([^"]*\)".*/version = \1/p' compiler/capsule.toml 2>/dev/null | head -n1 || true)
 [[ -n "$version_pin" ]] && printf -- '- capsule: %s\n' "$version_pin"
 
+if [[ -f .seed-version ]]; then
+  seed_pin=$(tr -d '[:space:]' < .seed-version)
+  [[ -n "$seed_pin" ]] && printf -- '- pinned seed: v%s\n' "$seed_pin"
+fi
+
 cat <<'MSG'
 
 Reminders:
 - The compiler self-caps memory at 8 GiB on Linux (`SAILFIN_MEM_LIMIT` to override); wrap single-file compiles with `timeout 60`.
+- The runtime is Sailfin-native (`runtime/prelude.sfn`, `runtime/sfn/`); do not add C runtime fixups.
+- Use `sfn check <files>` for the parse/type/effect inner loop, then `make compile` for compiler-source changes.
+- Status source of truth: docs/status.md. SFEP process: docs/proposals/0001-sfep-process.md. Roadmap: site/src/pages/roadmap.astro.
 - Prefer feature branches named `codex/<issue-or-topic>-<slug>`.
-- Status source of truth: docs/status.md. Roadmap: site/src/pages/roadmap.astro.
-- For issue pickup, use .codex/prompts/pickup.md as the web/CLI prompt template.
 MSG

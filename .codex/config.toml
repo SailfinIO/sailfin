@@ -26,6 +26,14 @@ enabled = true
 path = ".codex/skills/sailfin-pickup/SKILL.md"
 enabled = true
 
+[[skills.config]]
+path = ".codex/skills/sailfin-debug-compile/SKILL.md"
+enabled = true
+
+[[skills.config]]
+path = ".codex/skills/sailfin-pin-seed/SKILL.md"
+enabled = true
+
 # Lifecycle hooks are intentionally small wrappers around scripts in
 # .codex/hooks/ so the behavior can be reviewed and tested outside Codex.
 [[hooks.SessionStart]]
