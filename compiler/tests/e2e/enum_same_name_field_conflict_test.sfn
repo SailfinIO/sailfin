@@ -1,0 +1,151 @@
+// End-to-end regression for #1746: an enum field whose name is reused at a
+// DIFFERENT (base-incompatible) type across variants must never silently
+// miscompile a read.
+//
+// Two behaviors are pinned here, both via a full `sfn build` (the hazard
+// lives in LLVM lowering — `lower_enum_member_access` in
+// `compiler/src/llvm/expression_lowering/native/core_member_lowering.sfn` —
+// so it is NOT visible to `sfn check` / `assert_does_not_compile`, which run
+// the frontend only):
+//
+//   1. POSITIVE — a read under variant narrowing (`if e.variant == "Lit"`)
+//      resolves to a single, unambiguous field type and reads CORRECTLY for
+//      both the `string` and the `int` variant. This is the path the
+//      compiler's own AST relies on (`enum Expression` reuses `value` /
+//      `arguments` / `fields` at incompatible types, read only under
+//      narrowing), so it must stay correct.
+//
+//   2. NEGATIVE — an UN-narrowed read of the same collided field has no
+//      single static result type and is unrepresentable. Before the fix it
+//      returned a null operand the caller silently degraded to `double`
+//      (the reported corruption: the repro printed nothing). It must now be
+//      rejected with a located `[fatal] [E0817]` build error naming the
+//      enum, the field, and the conflicting per-variant types.
+//
+// Build hygiene mirrors `sailfin_main_entry_test.sfn`: write the fixture
+// into a fresh `with_tmp_dir` (so `sfn build` does not auto-discover the
+// repo's capsules) and thread the full parent environment to the nested
+// build (PATH for clang/linker, SAILFIN_TEST_SCRATCH for parallel-pool
+// build-cache isolation per #1333).
+import { find } from "sfn/strings";
+import { with_tmp_dir } from "sfn/test";
+
+fn _sfn_bin() -> string ![io] {
+    let configured = env.get("SAILFIN_BIN");
+    if configured.length > 0 { return configured; }
+    return "build/native/sailfin";
+}
+
+fn _child_env() -> string[] ![io] { return process.environ(); }
+
+fn _marker(name: string) -> string ![io] {
+    let mut dir = env.get("SAILFIN_TEST_SCRATCH");
+    if dir.length == 0 { dir = "/tmp"; }
+    fs.createDirectory(dir, true);
+    let path = dir + "/sfn-enum-collision-" + name + ".out";
+    if fs.exists(path) { fs.deleteFile(path); }
+    return path;
+}
+
+// A program that reads the collided `value` field (string in `Lit`, int in
+// `Op`) only under `if e.variant == "..."` narrowing. The `int` read is
+// returned as the exit code (42) so a correct read is observable without an
+// int->string conversion; the `string` read is printed.
+fn _positive_src() -> string {
+    return "enum E {\n" + "    Lit { value: string },\n"
+        + "    Op { operator: string, value: int }\n"
+        + "}\n"
+        + "\n"
+        + "fn read_lit_value(e: E) -> string ![io] {\n"
+        + "    if e.variant == \"Lit\" {\n"
+        + "        return e.value;\n"
+        + "    }\n"
+        + "    return \"?\";\n"
+        + "}\n"
+        + "\n"
+        + "fn read_op_value(e: E) -> int ![io] {\n"
+        + "    if e.variant == \"Op\" {\n"
+        + "        return e.value;\n"
+        + "    }\n"
+        + "    return -1;\n"
+        + "}\n"
+        + "\n"
+        + "fn main() -> int ![io] {\n"
+        + "    let a = E.Lit { value: \"hello\" };\n"
+        + "    let b = E.Op { operator: \"+\", value: 42 };\n"
+        + "    print.info(\"Lit.value=[\" + read_lit_value(a) + \"]\");\n"
+        + "    return read_op_value(b);\n"
+        + "}\n";
+}
+
+// The reported repro: an un-narrowed read of the collided `value` field.
+fn _negative_src() -> string {
+    return "enum E {\n" + "    Lit { value: string },\n"
+        + "    Op { operator: string, value: int }\n"
+        + "}\n"
+        + "\n"
+        + "fn main() -> int ![io] {\n"
+        + "    let a = E.Lit { value: \"hello\" };\n"
+        + "    print.info(\"Lit.value=[\" + a.value + \"]\");\n"
+        + "    return 0;\n"
+        + "}\n";
+}
+
+// Build `src` and run the binary. Stashes the run's stdout to `out_marker`
+// and returns the run exit code, or -100 if the build itself failed.
+fn _build_and_run(out_marker: string, src: string) -> int ![io] {
+    return with_tmp_dir(fn (dir: string) -> int {
+        let srcpath = dir + "/probe.sfn";
+        fs.writeFile(srcpath, src);
+        let binpath = dir + "/probe";
+        let build_exit = process.run_capture([_sfn_bin(), "build", "-o", binpath, srcpath], _child_env());
+        let _bo = process.capture_take_stdout();
+        let _be = process.capture_take_stderr();
+        if build_exit != 0 { return -100; }
+        let run_exit = process.run_capture([binpath], []);
+        let out = process.capture_take_stdout();
+        let _re = process.capture_take_stderr();
+        fs.writeFile(out_marker, out);
+        return run_exit;
+    });
+}
+
+// Build `src` expecting FAILURE; stash the build's stderr to `err_marker`
+// and return the build exit code (0 means it unexpectedly succeeded).
+fn _build_expect_fail(err_marker: string, src: string) -> int ![io] {
+    return with_tmp_dir(fn (dir: string) -> int {
+        let srcpath = dir + "/probe.sfn";
+        fs.writeFile(srcpath, src);
+        let binpath = dir + "/probe";
+        let build_exit = process.run_capture([_sfn_bin(), "build", "-o", binpath, srcpath], _child_env());
+        let _bo = process.capture_take_stdout();
+        let err = process.capture_take_stderr();
+        fs.writeFile(err_marker, err);
+        return build_exit;
+    });
+}
+
+test "enum-collision: narrowed reads of a same-name/different-type field are correct" ![io] {
+    let marker = _marker("positive");
+    let exit = _build_and_run(marker, _positive_src());
+    // -100 == build failure; the narrowed reads must build AND run, with the
+    // `int` variant's value (42) landing on the exit status.
+    assert exit == 42;
+    let out = fs.readFile(marker);
+    if fs.exists(marker) { fs.deleteFile(marker); }
+    // The `string` variant's value must read back intact (not empty/garbage).
+    assert find(out, "Lit.value=[hello]", 0) >= 0;
+}
+
+test "enum-collision: un-narrowed read is rejected with E0817" ![io] {
+    let marker = _marker("negative");
+    let build_exit = _build_expect_fail(marker, _negative_src());
+    let err = fs.readFile(marker);
+    if fs.exists(marker) { fs.deleteFile(marker); }
+    // The build must FAIL (not silently miscompile)...
+    assert build_exit != 0;
+    // ...with the located E0817 diagnostic naming the field and the conflict.
+    assert find(err, "E0817", 0) >= 0;
+    assert find(err, "value", 0) >= 0;
+    assert find(err, "conflicting types across variants", 0) >= 0;
+}

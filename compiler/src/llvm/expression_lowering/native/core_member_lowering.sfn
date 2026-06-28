@@ -183,6 +183,45 @@ fn lower_runtime_global_reference(temp_index: int, lines: string[]) -> Expressio
     };
 }
 
+// Build the `[fatal] [E0817]` message for a same-name field reused at
+// base-incompatible types across variants (#1746). Names the enum, the
+// field, and a per-variant "variant `X` declares it `T`" census (preferring
+// the source annotation, falling back to the lowered LLVM type), plus a
+// narrowing fix-it hint. Called only on the failure paths so the common
+// (consistent-base) access pays nothing.
+fn _enum_field_conflict_diag(enum_name: string, field: string, variants: EnumVariantInfo[], fields: StructFieldInfo[]) -> string {
+    let mut conflict_desc: string = "";
+    let mut conflict_index: int = 0;
+    loop {
+        if conflict_index >= fields.length { break; }
+        if conflict_index > 0 { conflict_desc = conflict_desc + ", "; }
+        let mut conflict_type_name = fields[conflict_index].type_annotation;
+        if conflict_type_name.length == 0 {
+            conflict_type_name = fields[conflict_index].llvm_type;
+        }
+        conflict_desc = conflict_desc + "variant `" + variants[conflict_index].name
+            + "` declares it `"
+            + conflict_type_name
+            + "`";
+        conflict_index += 1;
+    }
+    let mut narrow_hint: string = "the variant";
+    if variants.length > 0 {
+        narrow_hint = "the variant (e.g. `if <receiver>.variant == \""
+            + variants[0].name
+            + "\"`)";
+    }
+    return "llvm lowering [fatal] [E0817]: enum `" + enum_name + "` field `"
+        + field
+        + "` is read at conflicting types across variants ("
+        + conflict_desc
+        + "); narrow "
+        + narrow_hint
+        + " before reading `."
+        + field
+        + "`, or rename the field in one variant";
+}
+
 fn lower_enum_member_access(parse: MemberAccessParse, enum_info: EnumTypeInfo, base_operand: LLVMOperand, pointer_available: boolean, temp_index: int, lines: string[], diagnostics: string[], string_constants: StringConstant[], expected_type: string, narrowed_variant: string) -> ExpressionResult ![io] {
     let mut current_lines: string[] = lines;
     let mut current_temp: int = temp_index;
@@ -506,10 +545,21 @@ fn lower_enum_member_access(parse: MemberAccessParse, enum_info: EnumTypeInfo, b
     }
 
     if !consistent_base {
-        messages.push("llvm lowering: enum member access for `" + enum_info.name
-            + "."
-            + parse.field
-            + "` uses incompatible field types across variants");
+        // #1746: a same-name field read at base-incompatible types across
+        // variants has no single static result type. Without narrowing this
+        // access is unrepresentable, so reject it with a located `[fatal]`
+        // error instead of returning a null operand the caller silently
+        // degrades to `double` (the original silent miscompile).
+        //
+        // Reachability note: a string LHS threads an aggregate `expected_type`
+        // (`{i8*, i64}`) that matches neither variant's scalar field type, so
+        // the expected-type filter preserves both variants (its keep-on-empty-
+        // match guard) and the base mismatch (i8 vs i64) lands here. A future
+        // string-storage ABI flip could shift that filter outcome — the
+        // negative e2e test (enum_same_name_field_conflict_test.sfn) guards it.
+        let diag = _enum_field_conflict_diag(enum_info.name, parse.field, selected_variants, selected_fields);
+        print.err(diag);
+        messages.push(diag);
         return make_expression_result(current_lines, current_temp, null, messages, enum_string_constants);
     }
 
@@ -538,10 +588,11 @@ fn lower_enum_member_access(parse: MemberAccessParse, enum_info: EnumTypeInfo, b
             pointer_coercion = true;
             field_type = base_type + "*";
         } else {
-            messages.push("llvm lowering: enum member access for `" + enum_info.name
-                + "."
-                + parse.field
-                + "` uses incompatible field types across variants");
+            // #1746: pointer-depth mismatch beyond the single-level coercion
+            // the chain can repair — also unrepresentable as one result type.
+            let diag = _enum_field_conflict_diag(enum_info.name, parse.field, selected_variants, selected_fields);
+            print.err(diag);
+            messages.push(diag);
             return make_expression_result(current_lines, current_temp, null, messages, enum_string_constants);
         }
     }
