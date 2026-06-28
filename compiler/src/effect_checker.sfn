@@ -618,6 +618,13 @@ fn collect_effects_from_statement(statement: Statement, imports: ImportSymbolTab
         }
         return required;
     }
+    if statement.variant == "Unknown" {
+        // An unparseable statement contributes no analyzable effect. The
+        // E0819 parse diagnostic (typecheck) already fails the build for a
+        // nested `Unknown`, so this arm intentionally returns no requirement
+        // rather than minting a second diagnostic on the same node (#1691).
+        return [];
+    }
     return [];
 }
 

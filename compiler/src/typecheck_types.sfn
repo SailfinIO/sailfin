@@ -2027,6 +2027,29 @@ fn make_unsupported_statement_keyword_diagnostic(keyword: string) -> Diagnostic 
     };
 }
 
+// E0819 — a nested (block-level) `Statement.Unknown` that no other pass
+// already diagnosed. Top-level `Unknown` statements surface E0500 from the
+// check driver (`tools/check.sfn`), whose walk covers only
+// `program.statements`; a `Statement.Unknown` produced inside a block by
+// `parse_unknown_statement` (reached via `parse_block`) is invisible to that
+// walk and previously fell through `check_statement`'s `Unknown` arm with no
+// diagnostic — contributing zero effects and being silently dropped at
+// codegen, a fail-open hole in the effects pillar (#1691, epic #1180).
+// Emitted from `check_statement` only for non-top-level statements and only
+// when neither a removed-keyword (E0410) nor an unsupported-keyword (E0411)
+// diagnostic already fired, so it never double-reports. `anchor` is the first
+// token of the unparseable run; `near` quotes its lexeme for the message.
+fn make_unparseable_statement_diagnostic(anchor: Token?, near: string) -> Diagnostic {
+    return Diagnostic {
+        code: "E0819",
+        severity: "error",
+        message: "parse error: unrecognized statement" + near,
+        file_path: "",
+        primary: anchor,
+        suggestion: null
+    };
+}
+
 fn make_missing_interface_member_diagnostic(struct_name: string, interface_name: string, member_name: string) -> Diagnostic {
     return Diagnostic {
         code: "E0301",
