@@ -274,8 +274,8 @@ fn format_expression_into(expression: Expression, out: string[]) -> string[] {
     }
     if expression.variant == "Channel" {
         // `channel[:<kind>](capacity?)` (§2.6.4). Capacity optional
-        // (unbuffered default); `kind` is "" today (element-type form
-        // deferred in the parser). Fails closed downstream until #1085.
+        // (unbuffered default); `kind` is non-empty for the typed colon
+        // form `channel:<Type>(...)` (#1742), "" for the bare `channel(...)`.
         if expression.kind.length > 0 {
             out.push("channel:");
             out.push(expression.kind);

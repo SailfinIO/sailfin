@@ -696,6 +696,24 @@ fn parse_prefix_expression(state: ExpressionTokens) -> ExpressionParseResult {
             if !expression_tokens_is_at_end(after_channel) {
                 if symbol_matches(expression_tokens_peek(after_channel), "(") {
                     channel_followed_by_paren = true;
+                } else if symbol_matches(expression_tokens_peek(after_channel), ":") {
+                    // Typed form `channel:<Type>(...)`. Commit only when a
+                    // type identifier and an opening paren follow, so a bare
+                    // `channel` used as an identifier in a labelled position
+                    // (`channel: foo`) is not misread as a constructor. The
+                    // kind is the bare type name the native lowering slices
+                    // between `channel:` and `(` (core.sfn).
+                    let after_typed_colon = expression_tokens_advance(after_channel);
+                    if !expression_tokens_is_at_end(after_typed_colon) {
+                        if expression_tokens_peek(after_typed_colon).kind.variant == "Identifier" {
+                            let after_typed_name = expression_tokens_advance(after_typed_colon);
+                            if !expression_tokens_is_at_end(after_typed_name) {
+                                if symbol_matches(expression_tokens_peek(after_typed_name), "(") {
+                                    channel_followed_by_paren = true;
+                                }
+                            }
+                        }
+                    }
                 }
             }
             if channel_followed_by_paren {
@@ -1245,32 +1263,57 @@ fn parse_postfix_chain(state: ExpressionTokens, expression: Expression) -> Expre
 // form fails the parse hard rather than backtracking to an identifier
 // call. `capacity` is bound only for the canonical single-argument form;
 // zero or extra arguments leave it `null` and are a typecheck-layer arity
-// concern (deferred — issue #1080 is parse-only). The element type
-// (`channel<T>(...)`) is not parsed yet — `element_type` stays `null`.
+// concern (deferred — issue #1080 is parse-only). The typed colon form
+// `channel:<Type>(...)` is parsed (#1742): the bare type name is captured
+// into `element_type` and `kind`. The generic `channel<T>(...)` angle-bracket
+// form is still deferred.
 fn parse_channel_expression(state: ExpressionTokens) -> ExpressionParseResult {
     let channel_token = expression_tokens_peek(state);
     let after_channel = expression_tokens_advance(state);
     if expression_tokens_is_at_end(after_channel) {
         return expression_parse_failure(state);
     }
-    let next = expression_tokens_peek(after_channel);
+    // Optional typed form `channel:<Type>(...)`. The element kind is the bare
+    // type name the native lowering slices between `channel:` and `(`
+    // (`lower_channel_typed_expression` in core.sfn), so capture the type
+    // identifier verbatim — the formatter round-trips it back to that exact
+    // text and no new lowering arm is needed. Structuring it here moves the
+    // construct off the `Raw` shadow-reparser path so the effect checker and
+    // typechecker walk the capacity argument (issue #1742).
+    let mut cursor = after_channel;
+    let mut element_type: TypeAnnotation? = null;
+    let mut channel_kind: string = "";
+    if symbol_matches(expression_tokens_peek(cursor), ":") {
+        let after_colon = expression_tokens_advance(cursor);
+        if expression_tokens_is_at_end(after_colon) {
+            return expression_parse_failure(state);
+        }
+        let type_token = expression_tokens_peek(after_colon);
+        if type_token.kind.variant != "Identifier" {
+            return expression_parse_failure(state);
+        }
+        channel_kind = identifier_text(type_token);
+        element_type = TypeAnnotation { text: channel_kind };
+        cursor = expression_tokens_advance(after_colon);
+    }
+    if expression_tokens_is_at_end(cursor) {
+        return expression_parse_failure(state);
+    }
+    let next = expression_tokens_peek(cursor);
     if !symbol_matches(next, "(") { return expression_parse_failure(state); }
-    let args_result = parse_call_arguments(after_channel);
+    let args_result = parse_call_arguments(cursor);
     if !args_result.success { return expression_parse_failure(state); }
     let mut capacity: Expression? = null;
     if args_result.arguments.length == 1 {
         capacity = args_result.arguments[0];
     }
-    // `element_type` is `null` until `channel<T>(...)` parsing lands (a
-    // follow-up), so `kind` stays "" today; #1082's `spawn_future_kind` is
-    // ready to derive it from the annotation once the generic form is parsed.
     return ExpressionParseResult {
         state: args_result.state,
         expression: Expression.Channel {
-            element_type: null,
+            element_type: element_type,
             capacity: capacity,
             span: source_span_from_tokens([channel_token]),
-            kind: ""
+            kind: channel_kind
         },
         success: true
     };

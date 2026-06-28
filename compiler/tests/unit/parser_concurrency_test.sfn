@@ -13,8 +13,8 @@
 // convention in `parser_iife_postfix_test.sfn` (the block-scoped `let`
 // initializer path is opaque, tracked separately).
 import { Block, Expression } from "../../src/ast";
-import { typecheck_diagnostics } from "../../src/typecheck";
 import { parse_program } from "../../src/parser/mod";
+import { typecheck_diagnostics } from "../../src/typecheck";
 
 // True if typechecking `source` produces a diagnostic with `code`.
 fn _produces_diagnostic(source: string, code: string) -> boolean ![io] {
@@ -197,6 +197,50 @@ test "concurrency: channel commits to construct even with extra args" ![io] {
     let expr = first_let_initializer("let c = channel(1, 2);");
     assert expr.variant == "Channel";
     assert expr.capacity == null;
+}
+
+// -------------------------------------------------------------------
+// Typed `channel:<Type>(capacity?)` (issue #1742) parses to a structured
+// `Channel` node carrying the bare element-type name in `kind` (and a
+// `TypeAnnotation` in `element_type`) — NOT a `Raw` node riding the shadow
+// re-parser. This is what lets the effect checker / typechecker walk the
+// capacity argument. The `kind` text is captured verbatim because the
+// native lowering slices it between `channel:` and `(`.
+// -------------------------------------------------------------------
+test "concurrency: typed channel:OwnedBuf(2) parses to Channel with kind" ![io] {
+    let expr = first_let_initializer("let c = channel:OwnedBuf(2);");
+    assert expr.variant == "Channel";
+    assert strings_equal(expr.kind, "OwnedBuf");
+    assert expr.element_type != null;
+    assert strings_equal(expr.element_type.text, "OwnedBuf");
+    assert expr.capacity != null;
+    assert expr.capacity.variant == "NumberLiteral";
+}
+
+// A scalar typed channel with no capacity still structures: `kind` carries
+// the type name and `capacity` is the unbuffered-default null.
+test "concurrency: typed channel:int() parses to Channel with kind int" ![io] {
+    let expr = first_let_initializer("let c = channel:int();");
+    assert expr.variant == "Channel";
+    assert strings_equal(expr.kind, "int");
+    assert expr.capacity == null;
+}
+
+// Regression guard: the typed dispatch commits ONLY on the full
+// `channel:<Ident>(` form. `channel:Foo` without a trailing `(` must not be
+// misread as a typed channel — it falls through the constructor path.
+test "concurrency: channel:Type without parens is not a Channel node" ![io] {
+    let expr = first_let_initializer("let c = channel:Foo;");
+    assert expr.variant != "Channel";
+}
+
+// Regression guard: the bare untyped `channel(...)` form keeps an empty
+// `kind` — the typed path must not leak a kind onto it.
+test "concurrency: untyped channel(4) keeps empty kind" ![io] {
+    let expr = first_let_initializer("let c = channel(4);");
+    assert expr.variant == "Channel";
+    assert strings_equal(expr.kind, "");
+    assert expr.element_type == null;
 }
 
 // `await` parses at unary precedence, so a `Binary` operand only arises
