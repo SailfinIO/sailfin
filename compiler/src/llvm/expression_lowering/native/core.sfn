@@ -1063,6 +1063,71 @@ fn _try_lower_channel_method(member_target: MemberAccessParse, argument_entries:
     };
 }
 
+// Determine a call receiver's LLVM type WITHOUT emitting any IR, so a
+// `.toString()` interception can decide numeric-ness before committing to
+// lowering an effectful receiver (e.g. `foo().toString()` must lower `foo`
+// exactly once). Handles a simple-identifier receiver (local/parameter
+// binding) and a one-level member-access receiver (`s.index`): a declared
+// struct field's type wins, falling back to `i64` for an array/string
+// `.length`. Returns "" when the type cannot be determined statically.
+fn _infer_receiver_llvm_type(receiver: string, bindings: ParameterBinding[], locals: LocalBinding[], context: TypeContext) -> string {
+    if is_simple_identifier(receiver) {
+        let local = find_local_binding(locals, receiver);
+        if local != null { return local.llvm_type; }
+        let param = find_parameter_binding(bindings, receiver);
+        if param != null { return param.llvm_type; }
+        return "";
+    }
+    let parse = parse_member_access(receiver);
+    if !parse.success { return ""; }
+    let struct_info = resolve_struct_info_for_method_target(parse.base, bindings, locals, context);
+    if struct_info != null {
+        let field_info = find_struct_field_info(struct_info, parse.field);
+        if field_info != null { return field_info.llvm_type; }
+    }
+    if parse.field == "length" { return "i64"; }
+    return "";
+}
+
+fn _is_numeric_tostring_type(llvm_type: string) -> boolean {
+    let trimmed = trim_text(llvm_type);
+    if trimmed == "i64" { return true; }
+    if trimmed == "double" { return true; }
+    return false;
+}
+
+// #1706: `<numeric>.toString()` — calling `.toString()` on a value of a
+// numeric scalar type (`int`/`i64` or `float`/`double`). Sailfin has no
+// user-defined methods on primitives, so when the receiver resolves to a
+// numeric type this is unambiguously the number→string conversion; route it
+// through the same `coerce_operand_to_string` descriptor path that string
+// interpolation (`{{x}}`) already uses. Non-numeric receivers return null so
+// struct/string method dispatch is left untouched. The receiver type is
+// resolved before lowering, then the receiver is lowered exactly once, so an
+// effectful receiver is never evaluated twice.
+fn _try_lower_numeric_tostring(member_target: MemberAccessParse, argument_entries: string[], bindings: ParameterBinding[], locals: LocalBinding[], temp_index: int, lines: string[], functions: NativeFunction[], context: TypeContext) -> ExpressionResult? ![io] {
+    if member_target.field != "toString" { return null; }
+    if argument_entries.length != 0 { return null; }
+    let receiver = trim_text(member_target.base);
+    if receiver.length == 0 { return null; }
+    let receiver_type = _infer_receiver_llvm_type(receiver, bindings, locals, context);
+    if !_is_numeric_tostring_type(receiver_type) { return null; }
+
+    // Committed: lower the receiver once and convert to a string. Any failure
+    // is returned as a non-null result (operand == null) rather than falling
+    // back to the generic call path, so the receiver is never re-lowered.
+    let lowered = lower_expression(receiver, bindings, locals, temp_index, lines, functions, context, "");
+    if lowered.operand == null { return lowered; }
+    let coerced = coerce_operand_to_string(lowered.operand, lowered.temp_index, lowered.lines);
+    return ExpressionResult {
+        lines: coerced.lines,
+        temp_index: coerced.temp_index,
+        operand: coerced.operand,
+        diagnostics: extend_string_array(lowered.diagnostics, coerced.diagnostics),
+        string_constants: merge_string_constants(lowered.string_constants, coerced.string_constants)
+    };
+}
+
 // Typed spawn: `spawn:<kind> <operand>`. Extracted sibling of
 // `lower_expression` (peak-RSS scope split, issue context in CLAUDE.md) —
 // behaviour is identical; each `let` here lives in its own function scope
@@ -2376,6 +2441,12 @@ fn lower_expression(expression: string, bindings: ParameterBinding[], locals: Lo
             if member_target.success {
                 let channel_lowered = _try_lower_channel_method(member_target, argument_entries, bindings, locals, temp_index, lines, functions, context, expected_type);
                 if channel_lowered != null { return channel_lowered; }
+            }
+            if member_target.success {
+                // #1706: `<numeric>.toString()` converts a numeric scalar to a
+                // string; route through the shared number→string descriptor.
+                let tostring_lowered = _try_lower_numeric_tostring(member_target, argument_entries, bindings, locals, temp_index, lines, functions, context);
+                if tostring_lowered != null { return tostring_lowered; }
             }
             if member_target.success {
                 if member_target.field == "concat" {

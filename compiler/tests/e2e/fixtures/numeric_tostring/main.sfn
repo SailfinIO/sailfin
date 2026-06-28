@@ -1,0 +1,45 @@
+// Regression fixture for #1706: `.toString()` on a numeric receiver whose
+// value comes from a struct field access (`let idx = s.index;`), an array
+// `.length` (`let n = xs.length;`), or directly off a member access
+// (`s.index.toString()`). Each previously failed closed at LLVM lowering
+// with `cannot resolve return type for call to ... callee signature is not
+// known`; all three must now lower and print the formatted integer.
+struct Shard {
+    valid: boolean;
+    index: int;
+    total: int;
+}
+
+fn make_shard(i: int, t: int) -> Shard {
+    return Shard { valid: true, index: i, total: t };
+}
+
+fn select_indices(count: int) -> int[] {
+    let mut out: int[] = [];
+    let mut k = 0;
+    loop {
+        if k >= count { break; }
+        out.push(k);
+        k = k + 1;
+    }
+    return out;
+}
+
+fn main() -> int ![io] {
+    let s = make_shard(2, 3);
+    let idx = s.index;  // initializer is a struct field access
+    print(idx.toString());  // -> "2"
+
+    let xs = select_indices(4);
+    let n = xs.length;  // initializer is array `.length`
+    print(n.toString());  // -> "4"
+
+    print(s.index.toString());  // method directly on member access -> "2"
+
+    let plain = 9;  // bare int-literal local
+    print(plain.toString());  // -> "9"
+
+    let r = 1.5;  // float (double) local
+    print(r.toString());  // -> "1.5"
+    return 0;
+}

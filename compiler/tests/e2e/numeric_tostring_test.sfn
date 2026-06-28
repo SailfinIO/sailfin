@@ -1,0 +1,51 @@
+// End-to-end test for `<numeric>.toString()` (#1706).
+//
+// Calling `.toString()` on a value of a numeric scalar type (`int`/`i64` or
+// `float`/`double`) lowers to the shared number→string descriptor — the same
+// path string interpolation (`{{x}}`) uses. Before the fix, a `.toString()`
+// receiver bound from a struct field access (`let idx = s.index;`), an array
+// `.length` (`let n = xs.length;`), or taken directly off a member access
+// (`s.index.toString()`) failed closed at LLVM lowering with
+// `cannot resolve return type for call to ... callee signature is not known`.
+//
+// Drives the compiler-under-test as a subprocess with the runtime `process.*`
+// builtins and asserts on captured stdout — the canonical e2e pattern (see
+// `.claude/rules/no-bash-e2e.md`, `array_map_closure_test.sfn`).
+import { trim_right } from "sfn/strings";
+
+// The compiler-under-test: `$SAILFIN_BIN` if set, else the self-hosted
+// binary relative to the repo root the runner starts from. Mirrors
+// `sfn/test`'s `_resolve_sfn_bin` so CI can point the test at any compiler.
+fn _sfn_bin() -> string ![io] {
+    let configured = env.get("SAILFIN_BIN");
+    if configured.length > 0 { return configured; }
+    return "build/native/sailfin";
+}
+
+// `sfn run` compiles+links+executes the fixture, so the spawned compiler
+// needs a real environment (PATH for the linker, plus SAILFIN_TEST_SCRATCH
+// for per-invocation build-cache isolation under the parallel pool, #1333).
+// Inherit the full parent environment — mirrors array_map_closure_test.sfn.
+fn _child_env() -> string[] ![io] { return process.environ(); }
+
+struct RunOut {
+    exit: int;
+    out: string;
+}
+
+// Compile+run a fixture and return its exit code plus the trailing-
+// newline-normalized stdout.
+fn _run_fixture(path: string) -> RunOut ![io] {
+    let exit = process.run_capture([_sfn_bin(), "run", path], _child_env());
+    let out = process.capture_take_stdout();
+    let _err = process.capture_take_stderr();
+    return RunOut { exit: exit, out: trim_right(out) };
+}
+
+test "numeric toString: struct-field, array-length, and direct member access all lower" ![io] {
+    let r = _run_fixture("compiler/tests/e2e/fixtures/numeric_tostring/main.sfn");
+    assert r.exit == 0;
+    // idx = s.index (2), n = xs.length (4), s.index directly (2),
+    // bare int local (9), float local (1.5).
+    assert r.out == "2\n4\n2\n9\n1.5";
+}
