@@ -1083,6 +1083,94 @@ fn read_cast_target(state: ExpressionTokens) -> CastTargetParseResult {
     };
 }
 
+// Read an `is` type-guard target (issue #1753). A narrower sibling of
+// `read_cast_target`: `is` is a runtime type predicate, not a reinterpret
+// cast, so it accepts ONLY a named type with an optional generic argument
+// list (`Foo`, `Foo<X, Y>`) — no pointer prefix (`* T`) and no fn-pointer
+// (`fn (A) -> B`) forms, which are meaningless as a guard target. This is
+// exactly Step 2b of `read_cast_target`. Returns `success:false` on a
+// non-identifier head or unbalanced generic brackets so the enclosing
+// expression falls through to `expression_parse_failure` → `Raw`.
+fn read_is_target(state: ExpressionTokens) -> CastTargetParseResult {
+    let mut cursor = state;
+    let mut text: string = "";
+
+    if expression_tokens_is_at_end(cursor) {
+        return CastTargetParseResult {
+            state: state,
+            text: "",
+            success: false
+        };
+    }
+    let head_tok = expression_tokens_peek(cursor);
+    if head_tok.kind.variant != "Identifier" {
+        return CastTargetParseResult {
+            state: state,
+            text: "",
+            success: false
+        };
+    }
+    text = _cast_target_append(text, identifier_text(head_tok));
+    cursor = expression_tokens_advance(cursor);
+
+    // Optional generic args: consume `< ... >` balancing angle brackets,
+    // identical to `read_cast_target` Step 2b.
+    if !expression_tokens_is_at_end(cursor) {
+        let maybe_lt = expression_tokens_peek(cursor);
+        if maybe_lt.kind.variant == "Symbol" {
+            if strings_equal(maybe_lt.lexeme, "<") {
+                text = _cast_target_append(text, "<");
+                cursor = expression_tokens_advance(cursor);
+                let mut angle_depth: int = 1;
+                loop {
+                    if expression_tokens_is_at_end(cursor) {
+                        return CastTargetParseResult {
+                            state: state,
+                            text: "",
+                            success: false
+                        };
+                    }
+                    let g_tok = expression_tokens_peek(cursor);
+                    if strings_equal(g_tok.lexeme, "<") {
+                        angle_depth += 1;
+                        text = _cast_target_append(text, g_tok.lexeme);
+                        cursor = expression_tokens_advance(cursor);
+                    } else if strings_equal(g_tok.lexeme, ">>") {
+                        if angle_depth >= 2 { angle_depth -= 2; } else {
+                            angle_depth = 0;
+                        }
+                        if angle_depth == 0 {
+                            text = _cast_target_append(text, ">");
+                            cursor = expression_tokens_advance(cursor);
+                            break;
+                        }
+                        text = _cast_target_append(text, ">>");
+                        cursor = expression_tokens_advance(cursor);
+                    } else if strings_equal(g_tok.lexeme, ">") {
+                        angle_depth -= 1;
+                        if angle_depth == 0 {
+                            text = _cast_target_append(text, ">");
+                            cursor = expression_tokens_advance(cursor);
+                            break;
+                        }
+                        text = _cast_target_append(text, ">");
+                        cursor = expression_tokens_advance(cursor);
+                    } else {
+                        text = _cast_target_append(text, g_tok.lexeme);
+                        cursor = expression_tokens_advance(cursor);
+                    }
+                }
+            }
+        }
+    }
+
+    return CastTargetParseResult {
+        state: cursor,
+        text: text,
+        success: true
+    };
+}
+
 // ============================================================================
 // Postfix Operators (calls, member access, indexing, struct literals)
 // ============================================================================
@@ -1137,6 +1225,29 @@ fn parse_postfix_chain(state: ExpressionTokens, expression: Expression) -> Expre
             current_expression = Expression.Cast {
                 operand: current_expression,
                 target_type: TypeAnnotation { text: cast_result.text }
+            };
+            continue;
+        }
+
+        // `is` type-guards (issue #1753, epic #1180). `is` is a soft keyword
+        // (lexes as Identifier; same convention as `as`). Postfix-binding so
+        // `x is string && y` parses as `(x is string) && y` (`&&` is a Symbol
+        // handled by the lower binding-power climb, which breaks the postfix
+        // chain first). The target is a named type with optional generics
+        // (`read_is_target`); a non-identifier target falls through to a parse
+        // failure → `Raw` (correct: it is junk). The narrowing + boolean
+        // lowering land in typecheck / llvm lowering on the structured `Is`.
+        if identifier_matches(token, "is") {
+            let after_is = expression_tokens_advance(current_state);
+            if expression_tokens_is_at_end(after_is) {
+                return expression_parse_failure(state);
+            }
+            let is_result = read_is_target(after_is);
+            if !is_result.success { return expression_parse_failure(state); }
+            current_state = is_result.state;
+            current_expression = Expression.Is {
+                operand: current_expression,
+                target_type: TypeAnnotation { text: is_result.text }
             };
             continue;
         }

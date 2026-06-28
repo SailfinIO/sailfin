@@ -93,6 +93,21 @@ enum Expression {
     },
     Range { start: Expression, end: Expression },
     Cast { operand: Expression, target_type: TypeAnnotation },
+    // Type-guard operator `x is T` (issue #1753, epic #1180, effect-system
+    // hardening). Before #1753 a guard degraded to `Expression.Raw` because
+    // the postfix parser had no `is` arm — and since #1186 a `Raw` node
+    // contributes zero effects, so an effectful operand (`readFile() is T`)
+    // reached codegen effect-blind, and the branch bodies saw the operand at
+    // its un-narrowed type. Structuring it here lets the effect checker and
+    // typecheck walker recurse into `operand` (the target is a static type,
+    // effect-free). The formatter serializes it back to `(operand) is <type>`
+    // — the exact text the lowering shadow re-parser `parse_is_expression`
+    // consumes — and the if-lowering narrows the guarded operand in the
+    // then-branch via the same `narrowed_variant` machinery `if
+    // <base>.variant == "<V>"` already uses. Fields `operand`/`target_type`
+    // match `Cast`, so they share the enum's per-name field slots (no GEP
+    // collision — see the `Assignment` note below).
+    Is { operand: Expression, target_type: TypeAnnotation },
     // Postfix `?` error-propagation operator (R.1, epic #371). Distinct
     // from the statement-level `TryStatement`. Type rules and emission
     // land in R.3 / R.4 — today this is parse-only.

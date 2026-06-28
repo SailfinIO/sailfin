@@ -49,6 +49,7 @@ import { lower_expression } from "./core";
 import {
     coerce_operand_to_type,
     dominant_type,
+    emit_comparison_instruction,
     integer_llvm_width,
     is_float_llvm_type,
     is_integer_llvm_type
@@ -1425,6 +1426,143 @@ fn lower_enum_literal(parse: EnumLiteralParse, bindings: ParameterBinding[], loc
         operand: boxed.operand,
         diagnostics: diagnostics,
         string_constants: collected_string_constants
+    };
+}
+
+// Lower an `is` type-guard (#1753) to a boolean `i1`. v1 supports a named
+// `enum` operand: extract the operand's discriminant tag and `icmp eq` it
+// against the target variant's tag — the same discriminant test `match`
+// emits (instructions_match_condition.sfn) and that `if <base>.variant ==
+// "<V>"` lowers to. The then-branch narrowing of the guarded operand is
+// applied separately by `lower_if_instruction` via the `narrowed_variant`
+// machinery. A non-enum operand (inline union, primitive, struct) gets a
+// clear v1 diagnostic: in-branch narrowing of those surfaces is not yet
+// wired (the `narrowed_variant` flow is enum-only), so shipping a boolean
+// without the narrowed use would be a half-feature. They are documented
+// fast-follows (SFEP-0034 §3.6).
+fn lower_is_expression(parse: CastParseResult, bindings: ParameterBinding[], locals: LocalBinding[], temp_index: int, lines: string[], functions: NativeFunction[], context: TypeContext) -> ExpressionResult ![io] {
+    let mut diagnostics = parse.diagnostics;
+    let empty_constants = empty_string_constant_set();
+    if !parse.success {
+        return ExpressionResult {
+            lines: lines,
+            temp_index: temp_index,
+            operand: null,
+            diagnostics: diagnostics,
+            string_constants: empty_constants
+        };
+    }
+
+    let lowered = lower_expression(parse.value, bindings, locals, temp_index, lines, functions, context, "");
+    let mut _ci_is: int = 0;
+    loop {
+        if _ci_is >= lowered.diagnostics.length { break; }
+        diagnostics.push(lowered.diagnostics[_ci_is]);
+        _ci_is += 1;
+    }
+    if lowered.operand == null {
+        return ExpressionResult {
+            lines: lowered.lines,
+            temp_index: lowered.temp_index,
+            operand: null,
+            diagnostics: diagnostics,
+            string_constants: lowered.string_constants
+        };
+    }
+    let subject = lowered.operand;
+    let mut current_lines = lowered.lines;
+    let mut current_temp = lowered.temp_index;
+
+    // Resolve the operand's enum type from its LLVM type (strip a pointer
+    // suffix for the boxed-struct ABI), mirroring core_member_lowering.
+    let mut candidate = subject.llvm_type;
+    if ends_with_pointer_suffix(candidate) {
+        let stripped = trim_text(strip_pointer_suffix(candidate));
+        if stripped.length > 0 { candidate = stripped; }
+    }
+    let enum_info = find_enum_info_by_llvm_type(context, candidate);
+    if enum_info == null {
+        diagnostics.push("llvm lowering: `is` on a non-enum value `" + subject.llvm_type
+            + "` is not yet supported; the operand must be a named `enum` type");
+        return ExpressionResult {
+            lines: current_lines,
+            temp_index: current_temp,
+            operand: null,
+            diagnostics: diagnostics,
+            string_constants: lowered.string_constants
+        };
+    }
+    let variant_info = resolve_enum_variant_info(enum_info, parse.type_annotation);
+    if variant_info == null {
+        diagnostics.push("llvm lowering: enum `" + enum_info.name
+            + "` has no variant `"
+            + parse.type_annotation
+            + "` for `is`");
+        return ExpressionResult {
+            lines: current_lines,
+            temp_index: current_temp,
+            operand: null,
+            diagnostics: diagnostics,
+            string_constants: lowered.string_constants
+        };
+    }
+
+    // Map the tag type and extract/load the discriminant tag (field 0).
+    let mut tag_llvm_type: string = "i32";
+    if enum_info.tag_type == "i8" { tag_llvm_type = "i8"; }
+    if enum_info.tag_type == "i16" { tag_llvm_type = "i16"; }
+    if enum_info.tag_type == "i32" { tag_llvm_type = "i32"; }
+    if enum_info.tag_type == "i64" { tag_llvm_type = "i64"; }
+
+    let mut tag_temp: string = "";
+    if ends_with_pointer_suffix(subject.llvm_type) {
+        let tag_ptr_temp = format_temp_name(current_temp);
+        current_temp += 1;
+        current_lines.push("  " + tag_ptr_temp + " = getelementptr inbounds "
+            + enum_info.llvm_name
+            + ", "
+            + subject.llvm_type
+            + " "
+            + subject.value
+            + ", i32 0, i32 0");
+        let load_temp = format_temp_name(current_temp);
+        current_temp += 1;
+        current_lines.push("  " + load_temp + " = load " + tag_llvm_type + ", "
+            + tag_llvm_type
+            + "* "
+            + tag_ptr_temp);
+        tag_temp = load_temp;
+    } else {
+        let extract_temp = format_temp_name(current_temp);
+        current_temp += 1;
+        current_lines.push("  " + extract_temp + " = extractvalue " + subject.llvm_type
+            + " "
+            + subject.value
+            + ", 0");
+        tag_temp = extract_temp;
+    }
+
+    let tag_operand = LLVMOperand {
+        llvm_type: tag_llvm_type,
+        value: tag_temp
+    };
+    let variant_tag_operand = LLVMOperand {
+        llvm_type: tag_llvm_type,
+        value: number_to_string(variant_info.tag)
+    };
+    let comparison = emit_comparison_instruction("==", tag_operand, variant_tag_operand, current_temp, current_lines);
+    let mut _cc_is: int = 0;
+    loop {
+        if _cc_is >= comparison.diagnostics.length { break; }
+        diagnostics.push(comparison.diagnostics[_cc_is]);
+        _cc_is += 1;
+    }
+    return ExpressionResult {
+        lines: comparison.lines,
+        temp_index: comparison.temp_index,
+        operand: comparison.operand,
+        diagnostics: diagnostics,
+        string_constants: lowered.string_constants
     };
 }
 

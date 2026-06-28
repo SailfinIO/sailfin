@@ -175,6 +175,37 @@ fn _parse_variant_guard(condition: string) -> _VariantGuard {
     return _VariantGuard { matched: true, base: base, variant: variant };
 }
 
+// Parse an `is` type-guard of the shape `(<base>) is <Variant>` (#1753) —
+// the text the `Is` formatter emits for `if <base> is <Variant>`. Maps onto
+// the SAME `_VariantGuard` the `.variant ==` form produces, so the existing
+// then-branch narrowing applies unchanged. `<base>` must be a simple
+// identifier (after stripping the formatter's enclosing parens) and
+// `<Variant>` a simple variant name; a compound operand or a generic /
+// qualified target yields no narrowing (the boolean still lowers — only the
+// narrowing is conservatively skipped).
+fn _parse_is_guard(condition: string) -> _VariantGuard {
+    let none = _VariantGuard { matched: false, base: "", variant: "" };
+    let trimmed = trim_text(condition);
+    let marker = " is ";
+    let mi = index_of(trimmed, marker);
+    if mi <= 0 { return none; }
+    let mut base = trim_text(substring(trimmed, 0, mi));
+    let variant = trim_text(substring(trimmed, mi + marker.length, trimmed.length));
+    // Strip the single enclosing paren pair the `Is` formatter wraps the
+    // operand in (`(operand) is <type>`).
+    if base.length >= 2 {
+        if base[0] == "(" {
+            if base[base.length - 1] == ")" {
+                base = trim_text(substring(base, 1, base.length - 1));
+            }
+        }
+    }
+    if !is_simple_identifier(base) { return none; }
+    if variant.length == 0 { return none; }
+    if !is_simple_identifier(variant) { return none; }
+    return _VariantGuard { matched: true, base: base, variant: variant };
+}
+
 // Return a copy of `locals` with the binding named `base_name` carrying
 // `narrowed_variant = variant` (all other fields preserved).
 fn _narrow_locals_for_variant(locals: LocalBinding[], base_name: string, variant: string) -> LocalBinding[] {
@@ -372,7 +403,12 @@ fn lower_if_instruction(function: NativeFunction, start_index: int, llvm_return:
 
     // Flow-sensitive variant narrowing: an `if <base>.variant == "<V>"`
     // guard narrows `<base>` to variant V inside the then-branch only.
-    let _guard = _parse_variant_guard(sanitized_condition_source);
+    let mut _guard = _parse_variant_guard(sanitized_condition_source);
+    if !_guard.matched {
+        // `if <base> is <Variant>` narrows identically to `<base>.variant ==
+        // "<Variant>"` (#1753) — reuse the same then-branch narrowing.
+        _guard = _parse_is_guard(sanitized_condition_source);
+    }
     let mut then_locals: LocalBinding[] = base_locals;
     let mut then_param_bindings: ParameterBinding[] = bindings;
     let mut _guard_local_active: boolean = false;

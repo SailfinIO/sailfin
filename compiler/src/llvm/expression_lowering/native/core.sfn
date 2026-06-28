@@ -332,6 +332,7 @@ import {
     parse_ternary_expression,
     parse_raw_address_expression,
     parse_cast_expression,
+    parse_is_expression,
     parse_array_literal_metadata,
     map_metadata_annotation
 } from "./core_parsing";
@@ -392,6 +393,7 @@ import {
     lower_struct_literal,
     lower_enum_literal,
     lower_cast_expression,
+    lower_is_expression,
     try_lower_interpolated_string_literal
 } from "./core_literals_lowering";
 
@@ -2209,6 +2211,17 @@ fn lower_expression(expression: string, bindings: ParameterBinding[], locals: Lo
         if logical.symbol == "||" {
             return lower_logical_or(stripped, logical, bindings, locals, temp_index, lines, functions, context);
         }
+    }
+
+    // `is` type-guard (#1753). Placed AFTER the logical split so
+    // `x is T && y` peels `&&` first, but BEFORE the comparison/bitwise
+    // finders so a generic target's angle brackets (`x is Foo<X>`) are not
+    // mis-split at `<`. `parse_is_expression` declines when the target
+    // carries a top-level operator, so a clean `(operand) is Type` only
+    // reaches here once the surrounding operators are already peeled.
+    let is_parse = parse_is_expression(stripped);
+    if is_parse.recognized {
+        return lower_is_expression(is_parse, bindings, locals, temp_index, lines, functions, context);
     }
 
     // Slice B (2026-05-02): bitwise + shift operator dispatch.

@@ -1,0 +1,93 @@
+// Integration test for the effect-walker coverage of `Expression.Is`
+// (issue #1753).
+//
+// Before #1753, `x is T` degraded to `Expression.Raw`, and since #1186 a `Raw`
+// node contributes zero effects — so `reads() is Variant` in a pure function
+// silently passed `sfn check`. The fix structures the node as `Expression.Is`
+// and the effect checker recurses into its operand, surfacing the operand's
+// `![io]` requirement via E0400.
+//
+// Two cases are pinned: the missing-effect path MUST exit non-zero with E0400,
+// and the correctly-annotated version MUST check clean. The test drives `sfn
+// check` as a subprocess (matching the style of
+// `compiler/tests/integration/undefined_function_check_test.sfn`) so it
+// exercises the full parse → typecheck → effect-check → render pipeline.
+fn _contains(haystack: string, needle: string) -> boolean {
+    if needle.length == 0 { return true; }
+    if needle.length > haystack.length { return false; }
+    let mut i: int = 0;
+    let limit = haystack.length - needle.length;
+    loop {
+        if i > limit { break; }
+        if substring(haystack, i, i + needle.length) == needle { return true; }
+        i += 1;
+    }
+    return false;
+}
+
+fn _mint_fixture(name: string, source: string) -> string ![io] {
+    let dir = fs.mkdtemp("sfn-is-effect-");
+    assert dir.length > 0;
+    let path = dir + "/" + name;
+    fs.writeFile(path, source);
+    return path;
+}
+
+fn _check_output(path: string) -> string ![io] {
+    let _rc = process.run_capture(["build/native/sailfin", "check", path], []);
+    let out = process.capture_take_stdout();
+    let err = process.capture_take_stderr();
+    return out + err;
+}
+
+fn _check_exit(path: string) -> i64 ![io] {
+    let rc = process.run_capture(["build/native/sailfin", "check", path], []);
+    let _o = process.capture_take_stdout();
+    let _e = process.capture_take_stderr();
+    return rc;
+}
+
+// A function that calls an `![io]` helper and applies `is T` to the result,
+// WITHOUT declaring `![io]` on the caller. The operand's effect must surface.
+fn _missing_effect_source() -> string {
+    return "enum Thing { Text { content: string }, Other }\n"
+        + "fn reads() -> Thing ![io] { print.info(\"x\"); return Thing.Other; }\n"
+        + "fn check_it() -> bool { return reads() is Text; }\n";
+}
+
+// The same program with `![io]` properly declared on the caller — must pass.
+fn _declared_effect_source() -> string {
+    return "enum Thing { Text { content: string }, Other }\n"
+        + "fn reads() -> Thing ![io] { print.info(\"x\"); return Thing.Other; }\n"
+        + "fn check_it() -> bool ![io] { return reads() is Text; }\n";
+}
+
+// -------------------------------------------------------------------
+// Missing `![io]`: the operand's effect must surface as E0400.
+// -------------------------------------------------------------------
+test "is effect-walk: effectful operand in pure caller is rejected with E0400" ![io] {
+    let fixture = _mint_fixture("missing.sfn", _missing_effect_source());
+
+    let rc = _check_exit(fixture);
+    assert rc != 0;
+
+    let combined = _check_output(fixture);
+    assert _contains(combined, "E0400");
+
+    fs.deleteFile(fixture);
+}
+
+// -------------------------------------------------------------------
+// Declared `![io]`: the same body with the correct annotation checks clean.
+// -------------------------------------------------------------------
+test "is effect-walk: effectful operand in io-annotated caller checks clean" ![io] {
+    let fixture = _mint_fixture("declared.sfn", _declared_effect_source());
+
+    let rc = _check_exit(fixture);
+    assert rc == 0;
+
+    let combined = _check_output(fixture);
+    assert ! _contains(combined, "E0400");
+
+    fs.deleteFile(fixture);
+}

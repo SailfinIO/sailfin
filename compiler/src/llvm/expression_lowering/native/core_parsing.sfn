@@ -790,6 +790,215 @@ fn parse_cast_expression(text: string) -> CastParseResult {
     };
 }
 
+// `is` type-guard re-parser (#1753) — the lowering mirror of the `Is`
+// formatter (`emit_native_format.sfn`), which serializes a guard as
+// `(operand) is <type>`. Reuses `CastParseResult` (same shape): `value`
+// is the operand text, `type_annotation` is the guard's target type.
+// Scans for a top-level ` is ` outside of brackets/strings, identical to
+// `parse_cast_expression`'s ` as ` scan. Declines (`recognized = false`)
+// when the text after `is` carries a top-level (angle-depth-0) binary
+// operator char — that means `is` is not the outermost operator (`x is T == z`
+// is `(x is T) == z`), so the dispatcher must split the comparison / bitwise
+// operator first and re-parse the now clean `x is T`. (`&&`/`||` are peeled
+// before is-dispatch.) Generic targets are accepted whole: `<`/`>` are tracked
+// as angle depth, so a `Foo < int >` target — which the formatter renders with
+// a depth-0 space before `<` — is NOT mistaken for a trailing operator.
+fn parse_is_expression(text: string) -> CastParseResult {
+    let trimmed = trim_text(text);
+    let mut diagnostics: string[] = [];
+    if trimmed.length == 0 {
+        return CastParseResult {
+            recognized: false,
+            success: false,
+            value: "",
+            type_annotation: "",
+            diagnostics: diagnostics
+        };
+    }
+
+    let mut paren_depth: int = 0;
+    let mut bracket_depth: int = 0;
+    let mut brace_depth: int = 0;
+    let mut angle_depth: int = 0;
+    let mut in_single: boolean = false;
+    let mut in_double: boolean = false;
+    let mut escape_next: boolean = false;
+    let mut index: int = 0;
+    let mut match_index: int = -1;
+    loop {
+        if index >= trimmed.length { break; }
+        let ch = char_at(trimmed, index);
+        if in_double {
+            if escape_next {
+                escape_next = false;
+                index += 1;
+                continue;
+            }
+            if ch == "\\" {
+                escape_next = true;
+                index += 1;
+                continue;
+            }
+            if ch == "\"" { in_double = false; }
+            index += 1;
+            continue;
+        }
+        if in_single {
+            if escape_next {
+                escape_next = false;
+                index += 1;
+                continue;
+            }
+            if ch == "\\" {
+                escape_next = true;
+                index += 1;
+                continue;
+            }
+            if ch == "'" { in_single = false; }
+            index += 1;
+            continue;
+        }
+        if ch == "\"" {
+            in_double = true;
+            index += 1;
+            continue;
+        }
+        if ch == "'" {
+            in_single = true;
+            index += 1;
+            continue;
+        }
+        if ch == "(" {
+            paren_depth += 1;
+            index += 1;
+            continue;
+        }
+        if ch == ")" {
+            if paren_depth > 0 { paren_depth -= 1; }
+            index += 1;
+            continue;
+        }
+        if ch == "[" {
+            bracket_depth += 1;
+            index += 1;
+            continue;
+        }
+        if ch == "]" {
+            if bracket_depth > 0 { bracket_depth -= 1; }
+            index += 1;
+            continue;
+        }
+        if ch == "{" {
+            brace_depth += 1;
+            index += 1;
+            continue;
+        }
+        if ch == "}" {
+            if brace_depth > 0 { brace_depth -= 1; }
+            index += 1;
+            continue;
+        }
+        if ch == "<" {
+            angle_depth += 1;
+            index += 1;
+            continue;
+        }
+        if ch == ">" {
+            if angle_depth > 0 { angle_depth -= 1; }
+            index += 1;
+            continue;
+        }
+
+        if paren_depth == 0 {
+            if bracket_depth == 0 {
+                if brace_depth == 0 {
+                    if angle_depth == 0 {
+                        let _is_end = index + 4;
+                        if _is_end <= trimmed.length {
+                            let window = substring(trimmed, index, _is_end);
+                            if window == " is " { match_index = index; }
+                        }
+                    }
+                }
+            }
+        }
+        index += 1;
+    }
+
+    if match_index < 0 {
+        return CastParseResult {
+            recognized: false,
+            success: false,
+            value: "",
+            type_annotation: "",
+            diagnostics: diagnostics
+        };
+    }
+    let value = trim_text(substring(trimmed, 0, match_index));
+    let annotation = trim_text(substring(trimmed, match_index + 4, trimmed.length));
+    let mut _is_malformed: boolean = false;
+    if value.length == 0 { _is_malformed = true; }
+    if annotation.length == 0 { _is_malformed = true; }
+    if _is_malformed {
+        diagnostics.push("llvm lowering: malformed `is` expression `" + text
+            + "`");
+        return CastParseResult {
+            recognized: true,
+            success: false,
+            value: value,
+            type_annotation: annotation,
+            diagnostics: diagnostics
+        };
+    }
+    // Precedence guard: a top-level (angle-depth-0) binary OPERATOR character in
+    // the target means `is` is not the outermost operator (`x is T == z` is
+    // `(x is T) == z`), so decline and let the comparison/bitwise split run
+    // first; the inner `x is T` is then re-parsed here. (`&&`/`||` are already
+    // peeled before the is-dispatch.) We must NOT key on whitespace: the formatter
+    // renders a generic target as `Foo < int >` with a depth-0 space before `<`,
+    // so a whitespace check would wrongly decline every generic target and defeat
+    // the dispatch ordering. `<`/`>` are tracked as angle depth (generics), so a
+    // type's own brackets never trigger the guard; only a true operator char does.
+    let mut a_index: int = 0;
+    let mut a_angle: int = 0;
+    loop {
+        if a_index >= annotation.length { break; }
+        let a_ch = char_at(annotation, a_index);
+        if a_ch == "<" { a_angle += 1; } else if a_ch == ">" {
+            if a_angle > 0 { a_angle -= 1; }
+        } else if a_angle == 0 {
+            let mut _is_op: boolean = false;
+            if a_ch == "=" { _is_op = true; }
+            if a_ch == "!" { _is_op = true; }
+            if a_ch == "+" { _is_op = true; }
+            if a_ch == "-" { _is_op = true; }
+            if a_ch == "*" { _is_op = true; }
+            if a_ch == "/" { _is_op = true; }
+            if a_ch == "%" { _is_op = true; }
+            if a_ch == "|" { _is_op = true; }
+            if a_ch == "^" { _is_op = true; }
+            if a_ch == "&" { _is_op = true; }
+            if _is_op {
+                return CastParseResult {
+                    recognized: false,
+                    success: false,
+                    value: "",
+                    type_annotation: "",
+                    diagnostics: diagnostics
+                };
+            }
+        }
+        a_index += 1;
+    }
+    return CastParseResult {
+        recognized: true,
+        success: true,
+        value: value,
+        type_annotation: annotation,
+        diagnostics: diagnostics
+    };
+}
+
 fn parse_array_literal_metadata(entries: string[], context: TypeContext) -> ArrayLiteralMetadata {
     if entries.length == 0 {
         return ArrayLiteralMetadata { element_type: "", start_index: 0 };

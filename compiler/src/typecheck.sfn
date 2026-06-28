@@ -1077,6 +1077,15 @@ fn walk_expression(expression: Expression?, bindings: SymbolEntry[], imports: Im
         }
         return walk_expression(expression.operand, bindings, imports);
     }
+    if expression.variant == "Is" {
+        // Type-guard `x is T` (#1753) — recurse into the operand so inner
+        // diagnostics (undefined symbols, fn-value misuse, nested parse-error
+        // nodes) still fire. The target type is a static type name, not an
+        // expression, so there is nothing to walk there. Flow-sensitive
+        // narrowing is applied at lowering via the `narrowed_variant`
+        // machinery (the typecheck pass tracks names only — no type field).
+        return walk_expression(expression.operand, bindings, imports);
+    }
     if expression.variant == "TryOperator" {
         return walk_expression(expression.operand, bindings, imports);
     }

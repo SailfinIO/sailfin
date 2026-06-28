@@ -896,6 +896,13 @@ fn collect_effects_from_expression(expression: Expression?, imports: ImportSymbo
         // effect of its own.
         return collect_effects_from_expression(expression.operand, imports);
     }
+    if expression.variant == "Is" {
+        // A type-guard's operand is the effectful surface: `readFile() is T`
+        // performs the io of `readFile` before the (effect-free) type test.
+        // Before #1753 the guard degraded to `Raw` (effect-blind) — walk the
+        // operand so the requirement surfaces; the target type carries none.
+        return collect_effects_from_expression(expression.operand, imports);
+    }
     if expression.variant == "Binary" {
         let mut required = collect_effects_from_expression(expression.left, imports);
         required = merge_requirements(required, collect_effects_from_expression(expression.right, imports));
