@@ -1063,6 +1063,71 @@ fn _try_lower_channel_method(member_target: MemberAccessParse, argument_entries:
     };
 }
 
+// #1706: `<expr>.toString()` on a primitive receiver lowers to the
+// `number.to_string` runtime conversion (booleans render "true"/"false";
+// an already-string receiver is identity). The base is lowered as a full
+// expression, so this uniformly covers a plain local, a parameter, a
+// call-bound local, a member-access-bound local (`let idx = s.index;`), an
+// array `.length`-bound local (`let n = xs.length;`), and the
+// no-intermediate-local form (`s.index.toString()`) — every case keys off
+// the lowered operand's LLVM type, not a binding annotation. A non-primitive
+// (struct / array / pointer-aggregate) receiver returns null so a
+// user-defined `toString` still routes through the struct-dispatch path
+// (and an absent one fails closed as before).
+fn _try_lower_tostring_method(member_target: MemberAccessParse, argument_entries: string[], bindings: ParameterBinding[], locals: LocalBinding[], temp_index: int, lines: string[], functions: NativeFunction[], context: TypeContext) -> ExpressionResult? ![io] {
+    if member_target.field != "toString" { return null; }
+    // `toString()` takes no arguments; anything else is not this builtin.
+    if argument_entries.length != 0 { return null; }
+    let base = trim_text(member_target.base);
+    if base.length == 0 { return null; }
+
+    // PROBE the receiver type on a throwaway copy of `lines` first. Sailfin
+    // arrays are reference types, so `lower_expression`'s `lines.push`
+    // mutates in place — lowering directly into `lines` and then deferring
+    // (non-primitive / unlowerable receiver) would orphan those instructions
+    // and let the caller re-lower from the unchanged `temp_index`, reusing
+    // SSA temp names and emitting invalid IR (#1706 review). Probing into a
+    // copy keeps the caller's `lines`/`temp_index` pristine on every defer.
+    let probe_lines = extend_string_array([], lines);
+    let probe = lower_expression(base, bindings, locals, temp_index, probe_lines, functions, context, "");
+    if probe.operand == null { return null; }
+    let base_type = trim_text(probe.operand.llvm_type);
+
+    // Only intercept the primitive receivers whose `coerce_operand_to_string`
+    // arm is verified to emit valid IR end-to-end: `int` (i64) — the #1706
+    // target — plus `float` (double) and an already-string receiver
+    // (i8* / the `{i8*, i64}` SfnString aggregate, identity). Everything else
+    // defers to the normal method dispatch (and fails closed if unresolved).
+    // `i1`/`i8`/`i16`/`i32` are deliberately excluded: the boolean (`i1`) arm
+    // of `coerce_operand_to_string` currently feeds a `{i8*, i64}` string
+    // literal into a `select i8*` (invalid IR — a separate, pre-existing
+    // bug); routing them here would manufacture a miscompile rather than the
+    // clean fail-closed diagnostic they get today.
+    let mut _is_primitive: boolean = false;
+    if base_type == "i64" { _is_primitive = true; }
+    if base_type == "double" { _is_primitive = true; }
+    if base_type == "i8*" { _is_primitive = true; }
+    if base_type == "{i8*, i64}" { _is_primitive = true; }
+    if !_is_primitive { return null; }
+
+    // COMMIT: the receiver is primitive, so re-lower the base into the REAL
+    // `lines` (in-place, visible to the caller — the probe's IR is discarded)
+    // and convert. The probe consumed `temp_index..` only in the throwaway
+    // copy, so committing from the same `temp_index` reuses no live names.
+    let base_lowered = lower_expression(base, bindings, locals, temp_index, lines, functions, context, "");
+    if base_lowered.operand == null { return null; }
+    let coerced = coerce_operand_to_string(base_lowered.operand, base_lowered.temp_index, base_lowered.lines);
+    let mut ts_diag: string[] = base_lowered.diagnostics;
+    ts_diag = extend_string_array(ts_diag, coerced.diagnostics);
+    return ExpressionResult {
+        lines: coerced.lines,
+        temp_index: coerced.temp_index,
+        operand: coerced.operand,
+        diagnostics: ts_diag,
+        string_constants: base_lowered.string_constants
+    };
+}
+
 // Typed spawn: `spawn:<kind> <operand>`. Extracted sibling of
 // `lower_expression` (peak-RSS scope split, issue context in CLAUDE.md) —
 // behaviour is identical; each `let` here lives in its own function scope
@@ -2376,6 +2441,15 @@ fn lower_expression(expression: string, bindings: ParameterBinding[], locals: Lo
             if member_target.success {
                 let channel_lowered = _try_lower_channel_method(member_target, argument_entries, bindings, locals, temp_index, lines, functions, context, expected_type);
                 if channel_lowered != null { return channel_lowered; }
+            }
+            // #1706: `<expr>.toString()` on a primitive receiver lowers to
+            // the `number.to_string` conversion. Runs before the struct /
+            // runtime-helper dispatch (which keys on a binding annotation
+            // a primitive receiver does not carry) so the receiver type is
+            // read straight off the lowered operand.
+            if member_target.success {
+                let tostring_lowered = _try_lower_tostring_method(member_target, argument_entries, bindings, locals, temp_index, lines, functions, context);
+                if tostring_lowered != null { return tostring_lowered; }
             }
             if member_target.success {
                 if member_target.field == "concat" {

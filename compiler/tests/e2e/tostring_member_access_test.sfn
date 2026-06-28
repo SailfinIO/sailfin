@@ -1,0 +1,133 @@
+// End-to-end regression for #1706 — `.toString()` on an `int` value
+// derived from a struct field access, an array `.length`, and a direct
+// member access.
+//
+// Before the fix these tripped the LLVM-lowering fatal
+//   `cannot resolve return type for call to `idx.toString``
+// because the method-dispatch resolver could not establish the receiver's
+// type. The fix (`_try_lower_tostring_method` in
+// `compiler/src/llvm/expression_lowering/native/core.sfn`) intercepts a
+// primitive `.toString()` in `lower_expression` and lowers it through the
+// `number.to_string` conversion, reading the receiver type straight off
+// the lowered base operand — so a struct-field, array-length, and direct
+// member-access receiver all resolve uniformly.
+//
+// This MUST build-and-run (not just `sfn check`): the bug is at stage-6
+// LLVM lowering, which the frontend `check` never reaches — `check` was
+// green on the failing input. The fixture is built in a fresh temp dir and
+// run, asserting the three lines it prints.
+//
+// Build/parallel-runner isolation mirrors `sailfin_main_entry_test.sfn`:
+// the child build inherits the full parent environment (PATH/HOME/TMPDIR
+// for clang+linker, SAILFIN_TEST_SCRATCH so the `program.ll` build cache
+// is per-invocation under `sfn test --jobs N`), and captured stdout is
+// stashed to an out-of-tree marker so it survives the temp-dir teardown.
+import { find } from "sfn/strings";
+import { with_tmp_dir } from "sfn/test";
+
+fn _sfn_bin() -> string ![io] {
+    let configured = env.get("SAILFIN_BIN");
+    if configured.length > 0 { return configured; }
+    return "build/native/sailfin";
+}
+
+fn _fixture_src() -> string ![io] {
+    return fs.readFile("compiler/tests/e2e/fixtures/tostring_member_access_probe.sfn");
+}
+
+fn _child_env() -> string[] ![io] { return process.environ(); }
+
+fn _marker(name: string) -> string ![io] {
+    let mut dir = env.get("SAILFIN_TEST_SCRATCH");
+    if dir.length == 0 { dir = "/tmp"; }
+    fs.createDirectory(dir, true);
+    let path = dir + "/sfn-tostring-" + name + ".out";
+    if fs.exists(path) { fs.deleteFile(path); }
+    return path;
+}
+
+// Build the probe fixture in a temp dir and run it. Stashes the run's
+// captured stdout to `out_marker` and returns the run's exit code, or
+// `-100` if the build itself failed.
+fn _build_and_run(out_marker: string) -> int ![io] {
+    return with_tmp_dir(fn (dir: string) -> int {
+        let srcpath = dir + "/probe.sfn";
+        fs.writeFile(srcpath, _fixture_src());
+        let binpath = dir + "/probe";
+        let build_exit = process.run_capture([_sfn_bin(), "build", "-o", binpath, srcpath], _child_env());
+        let _bo = process.capture_take_stdout();
+        let _be = process.capture_take_stderr();
+        if build_exit != 0 { return -100; }
+        let run_exit = process.run_capture([binpath], []);
+        let out = process.capture_take_stdout();
+        let _re = process.capture_take_stderr();
+        fs.writeFile(out_marker, out);
+        return run_exit;
+    });
+}
+
+test "tostring: int from struct field / array length / direct member access" ![io] {
+    let marker = _marker("members");
+    let exit = _build_and_run(marker);
+    // Reject the `-100` build-failure sentinel before reading the marker —
+    // on a build failure the marker is never written.
+    assert exit == 0;
+    let out = fs.readFile(marker);
+    if fs.exists(marker) { fs.deleteFile(marker); }
+    // `let idx = s.index; idx.toString()` (struct field).
+    assert find(out, "idx=2", 0) >= 0;
+    // `let n = xs.length; n.toString()` (array length).
+    assert find(out, "len=4", 0) >= 0;
+    // `s.index.toString()` (method directly on a member access, no local).
+    assert find(out, "direct=2", 0) >= 0;
+    // Float receiver (double).
+    assert find(out, "flt=2.5", 0) >= 0;
+    // String receiver is identity.
+    assert find(out, "str=tag", 0) >= 0;
+}
+
+// Build an inline source and return the build exit code (the run is never
+// reached on a build failure).
+fn _build_inline_exit(source: string) -> int ![io] {
+    return with_tmp_dir(fn (dir: string) -> int {
+        let srcpath = dir + "/probe.sfn";
+        fs.writeFile(srcpath, source);
+        let binpath = dir + "/probe";
+        let build_exit = process.run_capture([_sfn_bin(), "build", "-o", binpath, srcpath], _child_env());
+        let _bo = process.capture_take_stdout();
+        let _be = process.capture_take_stderr();
+        return build_exit;
+    });
+}
+
+test "tostring: struct receiver defers to method dispatch and fails the build cleanly" ![io] {
+    // A struct receiver is NOT a primitive `.toString()`: it must defer to
+    // the struct-method dispatch (no `toString` method exists) and fail the
+    // build, rather than be intercepted. This guards the defer path — the
+    // classification lowering of the base must not be intercepted for
+    // non-primitive receivers, and (post-#1706-review) must not corrupt the
+    // caller's instruction stream. A non-zero build exit confirms the
+    // struct receiver was not silently accepted.
+    let src = "struct Box { value: int }\n" + "fn main() -> int ![io] {\n"
+        + "    let b = Box{ value: 1 };\n"
+        + "    print.info(b.toString());\n"
+        + "    return 0;\n"
+        + "}\n";
+    let build_exit = _build_inline_exit(src);
+    assert build_exit != 0;
+}
+
+test "tostring: boolean receiver is excluded and fails the build (no miscompile)" ![io] {
+    // `i1` is deliberately NOT intercepted (the `coerce_operand_to_string`
+    // boolean arm emits invalid IR — a separate pre-existing bug). A boolean
+    // receiver must therefore DEFER and fail the build closed, NOT be lowered
+    // into a `select i8*` against a `{i8*, i64}` literal. This pins the guard
+    // exclusion so a future widening of the primitive set can't silently
+    // reintroduce the boolean miscompile.
+    let src = "fn main() -> int ![io] {\n" + "    let flag = true;\n"
+        + "    print.info(flag.toString());\n"
+        + "    return 0;\n"
+        + "}\n";
+    let build_exit = _build_inline_exit(src);
+    assert build_exit != 0;
+}
