@@ -1,0 +1,133 @@
+// End-to-end test for the `x is T` type-guard operator lowering (issue #1753).
+//
+// Proves the full pipeline end-to-end: the discriminant tag test (`x is T`
+// lowers to `icmp eq` on the enum tag) AND the then-branch narrowing that lets
+// member access (`v.content`) resolve to the correct variant field. Mirrors the
+// build-and-run pattern from `sailfin_main_entry_test.sfn` and
+// `enum_same_name_field_conflict_test.sfn`.
+//
+// The fixture defines an enum with two variants, a function that uses `is` to
+// branch, and a `main` that calls it with both variants. The test builds the
+// fixture binary, runs it, and asserts on the stdout.
+//
+// Parallel-runner isolation: `_child_env()` returns `process.environ()` so
+// PATH (clang/linker) and SAILFIN_TEST_SCRATCH (per-invocation build-cache
+// isolation, #1333) are both forwarded to the nested `sfn build`.
+import { find } from "sfn/strings";
+import { with_tmp_dir } from "sfn/test";
+
+fn _sfn_bin() -> string ![io] {
+    let configured = env.get("SAILFIN_BIN");
+    if configured.length > 0 { return configured; }
+    return "build/native/sailfin";
+}
+
+fn _child_env() -> string[] ![io] { return process.environ(); }
+
+fn _marker(name: string) -> string ![io] {
+    let mut dir = env.get("SAILFIN_TEST_SCRATCH");
+    if dir.length == 0 { dir = "/tmp"; }
+    fs.createDirectory(dir, true);
+    let path = dir + "/sfn-is-guard-" + name + ".out";
+    if fs.exists(path) { fs.deleteFile(path); }
+    return path;
+}
+
+// The fixture exercises:
+//   1. `if v is Text { return "T:" + v.content; }` — discriminant test AND
+//      then-branch narrowing so `v.content` resolves to the Text variant field.
+//   2. The fall-through for the Number variant returns "N".
+//   3. `main` calls `describe` with both variants and prints the results.
+//      Each line is printed separately so the test can assert on each one.
+fn _fixture_src() -> string {
+    return "enum Value { Text { content: string }, Number { amount: int } }\n"
+        + "\n"
+        + "fn describe(v: Value) -> string ![io] {\n"
+        + "    if v is Text { return \"T:\" + v.content; }\n"
+        + "    return \"N\";\n"
+        + "}\n"
+        + "\n"
+        + "fn main() ![io] {\n"
+        + "    print(describe(Value.Text { content: \"hi\" }));\n"
+        + "    print(describe(Value.Number { amount: 9 }));\n"
+        + "}\n";
+}
+
+// A negated guard `!(v is Text)` must preserve the negation through the
+// formatter ↔ lowering round-trip (#1753 review fix): the `Is` operand is
+// parenthesized in `_format_binary_operand_into` so `!` is not absorbed into
+// the guard operand. Text → "T:hi" (negation false, fall through); Number →
+// "not-text" (negation true).
+fn _negated_fixture_src() -> string {
+    return "enum Value { Text { content: string }, Number { amount: int } }\n"
+        + "\n"
+        + "fn describe(v: Value) -> string ![io] {\n"
+        + "    if !(v is Text) { return \"not-text\"; }\n"
+        + "    return \"T:\" + v.content;\n"
+        + "}\n"
+        + "\n"
+        + "fn main() ![io] {\n"
+        + "    print(describe(Value.Text { content: \"hi\" }));\n"
+        + "    print(describe(Value.Number { amount: 9 }));\n"
+        + "}\n";
+}
+
+// Build `src` in a fresh temp dir and run the resulting binary.
+// Stashes the combined stdout to `out_marker` and returns the run exit code,
+// or -100 if the build failed.
+fn _build_and_run(out_marker: string, src: string) -> int ![io] {
+    return with_tmp_dir(fn (dir: string) -> int {
+        let srcpath = dir + "/probe.sfn";
+        fs.writeFile(srcpath, src);
+        let binpath = dir + "/probe";
+        let build_exit = process.run_capture([_sfn_bin(), "build", "-o", binpath, srcpath], _child_env());
+        let _bo = process.capture_take_stdout();
+        let _be = process.capture_take_stderr();
+        if build_exit != 0 { return -100; }
+        let run_exit = process.run_capture([binpath], []);
+        let out = process.capture_take_stdout();
+        let _re = process.capture_take_stderr();
+        fs.writeFile(out_marker, out);
+        return run_exit;
+    });
+}
+
+// -------------------------------------------------------------------
+// The discriminant test and narrowing must produce the right output for
+// the Text variant (prefix "T:" followed by the field value "hi").
+// -------------------------------------------------------------------
+test "is type-guard e2e: Text variant discriminant and field narrowing" ![io] {
+    let marker = _marker("text");
+    let exit = _build_and_run(marker, _fixture_src());
+    // -100 == build failure; the fixture must compile and run.
+    assert exit == 0;
+    let out = fs.readFile(marker);
+    if fs.exists(marker) { fs.deleteFile(marker); }
+    assert find(out, "T:hi", 0) >= 0;
+}
+
+// -------------------------------------------------------------------
+// The fall-through branch for the non-matching variant must produce "N".
+// -------------------------------------------------------------------
+test "is type-guard e2e: non-matching variant falls through to else branch" ![io] {
+    let marker = _marker("number");
+    let exit = _build_and_run(marker, _fixture_src());
+    assert exit == 0;
+    let out = fs.readFile(marker);
+    if fs.exists(marker) { fs.deleteFile(marker); }
+    assert find(out, "N", 0) >= 0;
+}
+
+// -------------------------------------------------------------------
+// A negated guard `!(v is Text)` must keep the negation: Text → "T:hi"
+// (guard true, negation false, fall through), Number → "not-text".
+// -------------------------------------------------------------------
+test "is type-guard e2e: negated guard preserves negation" ![io] {
+    let marker = _marker("negated");
+    let exit = _build_and_run(marker, _negated_fixture_src());
+    assert exit == 0;
+    let out = fs.readFile(marker);
+    if fs.exists(marker) { fs.deleteFile(marker); }
+    assert find(out, "T:hi", 0) >= 0;
+    assert find(out, "not-text", 0) >= 0;
+}

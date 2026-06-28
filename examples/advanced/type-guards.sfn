@@ -1,47 +1,22 @@
 // examples/advanced/type-guards.sfn
-struct User {
-    name: string;
-    age: int;
+// A tagged enum is the canonical sum type the `x is T` type-guard refines.
+enum Input {
+    Text { value: string },
+    Number { amount: int }
 }
 
-struct StringInput {
-    value: string;
-}
-
-struct IntInput {
-    value: int;
-}
-
-// Runtime type refinement on a tagged union: matching on named struct variants
-// is the shipped discriminator (mirrors examples/basics/error-handling.sfn). The
-// `i32` union tag drives the arm selection.
-fn process(input: StringInput | IntInput) ![io] {
-    match input {
-        StringInput { value } => print("It's a string: {{value}}"),
-        IntInput { value } => print("It's a number: {{value}}")
+// The `x is T` type-guard operator (#1753): `input is Text` is a structured,
+// enforced predicate. It lowers to the enum's discriminant test, and the
+// then-branch narrows `input` to the `Text` variant so `input.value` resolves
+// against it — the same flow-sensitive narrowing `match` uses, reached through
+// an ordinary `if`/`else`.
+fn process(input: Input) ![io] {
+    if input is Text { print("It's a string: {{input.value}}"); } else {
+        print("It's a number: {{input.amount}}");
     }
 }
 
-// Planned future syntax — the `x is T` type-guard operator (not yet shipped; it
-// has no parser arm and degrades to an unstructured node). Tracked by #1753:
-//
-//     fn process(input: string | int) ![io] {
-//         if input is string {
-//             print("It's a string: {{input}}");
-//         } else {
-//             print("It's a number: {{input}}");
-//         }
-//     }
 fn main() ![io] {
-    process(StringInput { value: "Sail" });
-    process(IntInput { value: 42 });
-
-    let user = User { name: "Robin", age: 22 };
-
-    match user {
-        User { name, age }
-        if age >= 18 => print("Adult user: {{name}}"),
-        User { name, age } => print("Minor user: {{name}}"),
-        _ => print("Unknown entity")
-    }
+    process(Input.Text { value: "Sail" });
+    process(Input.Number { amount: 42 });
 }

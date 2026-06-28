@@ -1,0 +1,88 @@
+// Unit tests for the `x is T` type-guard operator (issue #1753).
+//
+// Pins the parser-level structure of `Expression.Is` nodes: the variant
+// name, operand shape, target_type text, precedence relative to `&&`, and
+// generic targets. Mirrors the style of `effect_cast_operand_test.sfn` and
+// `parser_iife_postfix_test.sfn` — parse a short snippet, walk to the
+// relevant expression, and assert on fields.
+import { Expression } from "../../src/ast";
+import { parse_program } from "../../src/parser/mod";
+
+// Return the expression of the first return statement in the first top-level
+// function declaration of `source`.
+fn _return_expr(source: string) -> Expression ![io] {
+    let program = parse_program(source);
+    let fn_stmt = program.statements[0];
+    assert fn_stmt.variant == "FunctionDeclaration";
+    let ret = fn_stmt.body.statements[0];
+    assert ret.variant == "ReturnStatement";
+    let expr = ret.expression;
+    assert expr != null;
+    return expr;
+}
+
+// Return the condition expression of the first `if` statement inside the
+// first top-level function declaration of `source`.
+fn _if_condition(source: string) -> Expression ![io] {
+    let program = parse_program(source);
+    let fn_stmt = program.statements[0];
+    assert fn_stmt.variant == "FunctionDeclaration";
+    let if_stmt = fn_stmt.body.statements[0];
+    assert if_stmt.variant == "IfStatement";
+    return if_stmt.condition;
+}
+
+// -------------------------------------------------------------------
+// Basic parse: `v is Text` structures into Expression.Is with the right
+// operand variant and target_type text.
+// -------------------------------------------------------------------
+test "is type-guard: basic guard condition parses to Is node" ![io] {
+    let expr = _if_condition("fn f(v: Value) -> bool { if v is Text { } }");
+    assert expr.variant == "Is";
+    assert expr.operand.variant == "Identifier";
+    assert expr.target_type.text == "Text";
+}
+
+// -------------------------------------------------------------------
+// Return position: `return v is Text` also structures into Is.
+// -------------------------------------------------------------------
+test "is type-guard: guard in return position structures into Is" ![io] {
+    let expr = _return_expr("fn f(v: Value) -> bool { return v is Text; }");
+    assert expr.variant == "Is";
+    assert expr.operand.variant == "Identifier";
+    assert expr.target_type.text == "Text";
+}
+
+// -------------------------------------------------------------------
+// Generic target: `x is Foo<int>` carries the full generic text.
+// -------------------------------------------------------------------
+test "is type-guard: generic target carries full type text" ![io] {
+    let expr = _return_expr("fn f(x: Box) -> bool { return x is Foo<int>; }");
+    assert expr.variant == "Is";
+    assert expr.target_type.text == "Foo < int >";
+}
+
+// -------------------------------------------------------------------
+// Precedence: `x is Text && y` must parse as `(x is Text) && y`, i.e.
+// a Binary whose left is the Is node — `is` binds tighter than `&&`.
+// -------------------------------------------------------------------
+test "is type-guard: is binds tighter than &&" ![io] {
+    let expr = _return_expr("fn f(x: Value, y: bool) -> bool { return x is Text && y; }");
+    assert expr.variant == "Binary";
+    assert expr.operator == "&&";
+    assert expr.left.variant == "Is";
+    assert expr.left.operand.variant == "Identifier";
+    assert expr.left.target_type.text == "Text";
+    assert expr.right.variant == "Identifier";
+}
+
+// -------------------------------------------------------------------
+// Operand is not limited to identifiers: a member expression
+// (`obj.value is Text`) also structures into Is.
+// -------------------------------------------------------------------
+test "is type-guard: member-expression operand structures into Is" ![io] {
+    let expr = _return_expr("fn f(obj: Wrapper) -> bool { return obj.value is Text; }");
+    assert expr.variant == "Is";
+    assert expr.operand.variant == "Member";
+    assert expr.target_type.text == "Text";
+}

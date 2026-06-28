@@ -12,11 +12,11 @@ sidebar:
 | Comparison | `==` `!=` `<` `>` `<=` `>=` |
 | Logical | `&&` `\|\|` `!` |
 | Compound assignment | `+=` `-=` `*=` `/=` |
-| Type check | `is` |
+| Type-guard | `is` |
 | Borrow | `&expr` `&mut expr` |
 | Cast | `expr as Type` |
 
-`&&` and `||` short-circuit. `is` performs a runtime type check and returns `boolean`.
+`&&` and `||` short-circuit. `is` tests whether an enum value is a specific variant (see §5 "Type-guard operator") and returns `bool`.
 
 Operator precedence: unary > multiplicative > additive > comparison > equality > `&&` > `||` > assignment.
 
@@ -96,3 +96,40 @@ A lambda's parameter and return types may be **omitted** when it is passed direc
 
 - **Source-level signedness is not tracked through casts.** Sailfin's `i8`/`u8`/`i16`/`u16`/`i32`/`u32` annotations all collapse to LLVM `i8`/`i16`/`i32`, so `255_u8 as u64` lowers as `sext` and produces `-1` instead of `255`. Tracked in [issue #295](https://github.com/SailfinIO/sailfin/issues/295)/[#296](https://github.com/SailfinIO/sailfin/issues/296) follow-ups.
 - **Mixed `int` + `float` in a binary op (without an explicit cast) still silently widens to `double`** — the architect-planned `dominant_type` tightening that would reject this rides on Slice E (`number` retirement). Workaround today: spell the cast (`x as float + y` or `x + y as int`). Tracked in [issue #296](https://github.com/SailfinIO/sailfin/issues/296).
+
+## Type-guard operator (`is`)
+
+`expr is Variant` tests whether a named `enum` value is a specific variant. It is an infix binary operator with the same precedence as comparison operators, and it returns `bool`.
+
+```sfn
+enum Input {
+    Text { value: string },
+    Number { amount: int }
+}
+
+fn process(input: Input) ![io] {
+    if input is Text {
+        print("It's a string: {{input.value}}");
+    } else {
+        print("It's a number: {{input.amount}}");
+    }
+}
+```
+
+### Semantics
+
+- **Discriminant test.** `x is Variant` lowers to the enum's discriminant tag comparison — the same check `match` uses for an enum-variant arm.
+- **Flow-sensitive narrowing (then-branch).** Inside the `if`-`is` then-branch the compiler narrows the operand's type to the tested variant. Member accesses against the narrowed binding (`input.value` above) resolve against that variant's payload fields — the same narrowing `match` applies to a destructured arm.
+- **Effect transparency.** The effect checker walks the operand of `is`. If the operand expression itself requires effects (e.g. `readFile() is T`), those effects must be declared on the enclosing function. The operator adds no effects of its own.
+- **Returns `bool`.** The result is an ordinary boolean expression usable in any boolean context — `if`, `&&`/`||`, `let b = x is Variant`, etc.
+
+### v1 scope and limitations
+
+The current implementation supports `is` on **named `enum` operands only**. The following are not yet supported and are deferred:
+
+- Non-enum operands: inline union types (`string | int`), primitives, and plain structs.
+- Else-branch complement narrowing: the else-branch does not narrow the operand to the complement set of variants.
+
+These limitations exist because the typecheck pass does not yet perform general expression-type inference ([#829](https://github.com/SailfinIO/sailfin/issues/829)), and the lowering's narrowing machinery is enum-discriminant-based. Non-enum narrowing will be addressed when expression-type inference lands.
+
+The worked example is `examples/advanced/type-guards.sfn`.

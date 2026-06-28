@@ -1,6 +1,6 @@
 # Status
 
-Updated: 2026-06-24. Seed pinned to `0.7.0-alpha.39` (`.seed-version`);
+Updated: 2026-06-28. Seed pinned to `0.7.0-alpha.39` (`.seed-version`);
 the compiler version source of truth is `compiler/capsule.toml`.
 
 This document is the **current-state source of truth**: what ships today,
@@ -130,7 +130,10 @@ here.
   can start an expression *and* a top-level `:` follows. The remaining
   Raw-degraded effect-escapes (prefix `*`/`&`, assignment-as-expression) are
   tracked under epic #1180 (#1180-c) behind a blanket fail-closed `Raw` backstop.
-  Effect polymorphism (`!E` variables, polymorphic HOFs) remains post-1.0.
+  The `is` type-guard hole is **closed in #1753**: `<operand> is T` now parses
+  to a structured `Is` AST node (not `Expression.Raw`), and the effect checker
+  walks the operand — so `readFile() is T` correctly requires `![io]`. Effect
+  polymorphism (`!E` variables, polymorphic HOFs) remains post-1.0.
 - **Undefined free-function rejection** (`E0420`, #616/#812): unresolvable
   bare-identifier callees fail typecheck.
 - **Function references**: a bare fn name in value position lowers to the
@@ -155,6 +158,7 @@ here.
 | `if`/`else`, `for` | Shipped | |
 | `loop` / `break` / `continue` | Shipped | `while` is intentionally not a keyword (`E0411` with a `loop` fix-it) |
 | `match` | Shipped | Literals, `_`, guards, enum-variant destructuring |
+| `x is T` type-guard operator | **Shipped** (enum operands; #1753) | Parses to a structured `Is` AST node; effect checker walks the operand (closes the `Raw`-degradation effect-blind hole in epic #1180). Lowers to the enum's discriminant tag test and narrows the operand to the matched variant in the then-branch — same flow-sensitive narrowing as `match`. v1 scope: **named `enum` operands only**; non-enum unions, primitives, and plain structs are deferred. Else-branch complement narrowing is also deferred. See `examples/advanced/type-guards.sfn` |
 | `try`/`catch`/`finally` | Shipped | Maps to runtime exceptions |
 | String interpolation (`{{ }}`) | Shipped | `${ }` migration planned pre-1.0 (see Known Design Issues) |
 | Pattern-match exhaustiveness | Partial | Runtime backstop (`match_exhaustive_failed`) |

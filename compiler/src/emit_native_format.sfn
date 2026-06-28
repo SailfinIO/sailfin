@@ -71,6 +71,17 @@ fn _format_binary_operand_into(operand: Expression, out: string[]) -> string[] {
         out.push(")");
         return out;
     }
+    if operand.variant == "Is" {
+        // `!(x is T)` parses as `Unary{!, Is}` — wrap the `Is` so the negation
+        // survives the round-trip. Without the parens the Unary formatter emits
+        // `!(x) is T`, and the lowering shadow re-parser (`parse_is_expression`)
+        // matches the top-level ` is ` and absorbs `!(x)` as the operand,
+        // dropping the negation (#1753).
+        out.push("(");
+        format_expression_into(operand, out);
+        out.push(")");
+        return out;
+    }
     format_expression_into(operand, out);
     return out;
 }
@@ -197,6 +208,18 @@ fn format_expression_into(expression: Expression, out: string[]) -> string[] {
         out.push("(");
         format_expression_into(expression.operand, out);
         out.push(") as ");
+        out.push(expression.target_type.text);
+        return out;
+    }
+    if expression.variant == "Is" {
+        // `(operand) is <type>` (#1753) — the exact text the lowering shadow
+        // re-parser `parse_is_expression` consumes (it scans for a top-level
+        // ` is `). The operand parens are load-bearing: they let
+        // `strip_enclosing_parentheses` recover an operand that may contain
+        // embedded operators, exactly as the `Cast` formatter does.
+        out.push("(");
+        format_expression_into(expression.operand, out);
+        out.push(") is ");
         out.push(expression.target_type.text);
         return out;
     }
