@@ -1,0 +1,153 @@
+// End-to-end regression for #1701: a module in a NESTED directory that
+// imports a method-bearing struct from another directory via a
+// cross-directory relative import (`../../backend`), constructs it, and
+// calls a method, must lower to VALID IR under the build's per-module
+// `--import-context` staging path — the path `sfn build -p <dir>` drives.
+//
+// Symptom (#1701): the cross-dir consumer's per-module emit ran with
+// `--import-context`, but the imported struct's interface vtable referenced
+// method symbols that were never rewritten to the provider's
+// module-qualified symbol nor declared, so IR validation rejected the
+// output and the resolver reported `capsule-resolver: failed to lower
+// <module> to LLVM IR`. Crucially the bug needed BOTH conditions: the
+// cross-directory import AND the build's import-context staging — standalone
+// emit (no import-context) and same-directory imports both lowered fine.
+//
+// This is a build-only failure of the #1389 class: `sfn check` models no
+// codegen/link and passes; the bug surfaces only at `sfn build` / IR
+// validation. The failure had two sub-cases in the mangling pass's imported
+// struct-method handling: an *uncalled* method referenced only by the
+// interface vtable (fixed by #1739/#1740's `find_vtable_method_signature`),
+// and a *called* method whose injected external `declare` got a garbage
+// parameter list from a `substring(trimmed, ...)` typo in
+// `find_declare_signature_t`'s call-site recovery — empty `()` for the
+// compiler's own `cli/commands/test` → `backend.link` (clang-tolerated) but
+// unparseable `(s)` here, so the module failed to lower. #1701 fixed the
+// called-method path (`trimmed` → `line`). This fixture exercises BOTH: it
+// calls `run` (the called-method path) and leaves `describe` vtable-only.
+// #1740's e2e test (`interface_vtable_consumer_declares_test.sfn`) covers the
+// SAME-DIR single-file shape; this test pins the distinct CROSS-DIR + `-p`
+// import-context shape from #1701 so it cannot regress as #347 / #1640 grow
+// the backend surface across modules.
+//
+// The fixture mirrors the LlvmTextBackend/Backend shape from
+// `compiler/src/backend.sfn`: a fieldless struct that structurally
+// implements a two-method interface, whose methods carry `![io]` and take a
+// struct parameter. The nested consumer calls exactly ONE interface method,
+// leaving the other vtable-only (the #1739 trigger), and reaches the
+// provider through a cross-directory `../../backend` import.
+//
+// NOTE: assert on captured stdout+stderr with `sfn/strings` predicates
+// (the `sfn/test` `expect_*` matchers are `![pure]` and cannot be called
+// from an `![io]` test). (#842.)
+import { find, contains } from "sfn/strings";
+
+fn _sfn_bin() -> string ![io] {
+    let configured = env.get("SAILFIN_BIN");
+    if configured.length > 0 { return configured; }
+    return "build/native/sailfin";
+}
+
+// The build spawns a nested `clang` + linker, so the child needs `PATH`
+// (an empty `run_capture` env is the *empty* environment, not "inherit").
+// `SAILFIN_TEST_SCRATCH` routes the `program.ll` build-cache dir per
+// invocation so the parallel pool does not collide on `build/sailfin`.
+fn _child_env() -> string[] ![io] {
+    let mut e: string[] = [];
+    let path = env.get("PATH");
+    if path.length > 0 { e.push("PATH=" + path); }
+    let home = env.get("HOME");
+    if home.length > 0 { e.push("HOME=" + home); }
+    let tmpdir = env.get("TMPDIR");
+    if tmpdir.length > 0 { e.push("TMPDIR=" + tmpdir); }
+    let scratch = env.get("SAILFIN_TEST_SCRATCH");
+    if scratch.length > 0 { e.push("SAILFIN_TEST_SCRATCH=" + scratch); }
+    return e;
+}
+
+// A fresh capsule root under the runner's scratch dir (or /tmp), keyed by
+// `tag` so concurrent tests in the parallel pool never collide.
+fn _make_capsule(tag: string) -> string ![io] {
+    let mut base = env.get("SAILFIN_TEST_SCRATCH");
+    if base.length == 0 { base = "/tmp"; }
+    let root = base + "/sfn-xdir-method-" + tag;
+    fs.createDirectory(root + "/src/a/b", true);
+
+    fs.writeFile(root + "/capsule.toml", "[capsule]\n"
+        + "name = \"xdir-method-test\"\n"
+        + "version = \"0.1.0\"\n\n"
+        + "[capabilities]\n"
+        + "required = [\"io\"]\n\n"
+        + "[build]\n"
+        + "kind = \"binary\"\n"
+        + "entry = \"src/main.sfn\"\n");
+
+    // Provider (sibling of the entry): a two-method interface structurally
+    // implemented by a fieldless struct whose methods carry `![io]` and take
+    // a struct parameter — the LlvmTextBackend/Backend shape.
+    fs.writeFile(root + "/src/backend.sfn", "struct Job {\n"
+        + "    value: int;\n"
+        + "}\n\n"
+        + "interface Worker {\n"
+        + "    fn run(self, job: Job) -> int ![io];\n"
+        + "    fn describe(self) -> int;\n"
+        + "}\n\n"
+        + "struct LocalWorker {\n"
+        + "    fn run(self, job: Job) -> int ![io] {\n"
+        + "        print.info(\"worker ran\");\n"
+        + "        return job.value * 2;\n"
+        + "    }\n\n"
+        + "    fn describe(self) -> int {\n"
+        + "        return 7;\n"
+        + "    }\n"
+        + "}\n");
+
+    // Nested consumer: reaches the provider through a CROSS-DIRECTORY
+    // `../../backend` import, constructs the method-bearing struct, and
+    // calls exactly ONE interface method (`run`) — `describe` stays
+    // vtable-only.
+    fs.writeFile(root + "/src/a/b/consumer.sfn", "import { LocalWorker, Job } from \"../../backend\";\n\n"
+        + "fn run_consumer() -> int ![io] {\n"
+        + "    let w = LocalWorker { };\n"
+        + "    let j = Job { value: 21 };\n"
+        + "    return w.run(j);\n"
+        + "}\n\n"
+        + "export { run_consumer };\n");
+
+    // Entry: calls the nested consumer so it is linked and the produced
+    // binary is runnable.
+    fs.writeFile(root + "/src/main.sfn", "import { run_consumer } from \"./a/b/consumer\";\n\n"
+        + "fn main() ![io] {\n"
+        + "    let r = run_consumer();\n"
+        + "    print.info(\"backend-result=\" + number_to_string(r));\n"
+        + "}\n");
+
+    return root;
+}
+
+// Build the capsule through the real resolver (`-p` ⇒ per-module emit with
+// `--import-context`), assert it lowered cleanly, then run the linked binary
+// and assert the cross-dir method call produced the right value.
+test "cross-dir method-bearing struct import lowers under import-context, links, runs (#1701)" ![io] {
+    let root = _make_capsule("link");
+    let out_bin = root + "/prog";
+    let exit = process.run_capture([_sfn_bin(), "build", "-p", root, "-o", out_bin], _child_env());
+    let out = process.capture_take_stdout();
+    let err = process.capture_take_stderr();
+    let log = out + err;
+
+    // The authoritative #1701 signal: the resolver must not report a
+    // lowering failure for the cross-dir consumer.
+    assert ! contains(log, "failed to lower");
+    assert ! contains(log, "use of undefined value");
+    assert exit == 0;
+
+    // The linked binary runs and prints the resolved value. `print.info`
+    // prefixes with `[info] `, so the fixed prefix rules out an incidental
+    // substring match. run(Job{21}) == 42.
+    let run_exit = process.run_capture([out_bin], _child_env());
+    let run_out = process.capture_take_stdout();
+    let run_err = process.capture_take_stderr();
+    assert run_exit == 0;
+    assert find(run_out + run_err, "[info] backend-result=42", 0) >= 0;
+}

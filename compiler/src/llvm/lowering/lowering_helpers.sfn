@@ -1051,7 +1051,16 @@ fn find_declare_signature_t(trimmed: string[], symbol: string) -> DeclareSignatu
                 let params_start = call_pos + call_needle.length;
                 let close_paren = index_of(substring(line, params_start, line.length), ")");
                 if close_paren >= 0 {
-                    let params_text = substring(trimmed, params_start, params_start
+                    // #1701: read the parameter list from `line` (the current
+                    // line string), NOT `trimmed` (the whole line array). The
+                    // typo made the call-site signature fallback parse garbage
+                    // params — an empty `()` (clang-tolerated) for the
+                    // compiler's own `cli/commands/test` → `backend.link`, but
+                    // an unparseable `(s)` for a generic cross-dir
+                    // method-bearing-struct consumer under `--import-context`,
+                    // so its injected `declare` was invalid IR and the module
+                    // failed to lower.
+                    let params_text = substring(line, params_start, params_start
                         + close_paren);
                     if ret_type.length > 0 {
                         // Strip parameter values, keeping only types.

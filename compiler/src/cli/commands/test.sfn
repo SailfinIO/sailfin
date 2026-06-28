@@ -47,6 +47,7 @@ import {
 
 import { AssertFailure, _empty_assert_failure, _parse_assert_failure_record } from "../../assert_failure";
 import { Program, Statement } from "../../ast";
+import { LinkPlan, LlvmTextBackend } from "../../backend";
 import { assemble_runtime_capsule_link_inputs } from "../../build/runtime_objs";
 import {
     CacheKey,
@@ -87,7 +88,6 @@ import {
     _suite_name_from_path,
     _write_text_cmd
 } from "../../cli_commands_utils";
-import { link_test_objects } from "../../cli_main";
 import { ImportSymbolTable, empty_import_symbols } from "../../effect_imports";
 import { compile_tests_to_llvm_file_with_module_imports, module_name_from_path } from "../../main";
 import { LayoutManifest } from "../../native_ir";
@@ -1326,10 +1326,27 @@ fn _clang_link_test_cmd_with_deps(ll_path: string, out_path: string, runtime_roo
     // them (keeps the link complete without double-adding).
     if !has_lm { libs.push("-lm"); }
     if !has_pthread { libs.push("-pthread"); }
-    // Dispatch through the `Backend` seam via the cli_main entry point
-    // (kept there to avoid a cross-dir `../../backend` import; see
-    // `link_test_objects`). Reproduces the prior test-link argv exactly.
-    return link_test_objects(rt.object_paths, ir_inputs, out_path, libs);
+    // Dispatch the test-binary link directly through the `Backend` seam.
+    // This is a cross-directory `../../backend` import of the method-bearing
+    // `LlvmTextBackend`; the #1687 workaround that routed it through
+    // `cli_main::link_test_objects` was removed once #1701 (cross-dir
+    // method-bearing struct lowering under `--import-context`) was fixed. The
+    // `backend.link` *called*-method path here was the one repaired by #1701's
+    // `find_declare_signature_t` correction (#1739/#1740 had already fixed the
+    // uncalled/vtable-only method path). Reproduces the prior test-link argv
+    // exactly (test_mode).
+    let backend = LlvmTextBackend { };
+    let no_link_flags: string[] = [];
+    let plan = LinkPlan {
+        objects: rt.object_paths,
+        ir_inputs: ir_inputs,
+        out_path: out_path,
+        opt_flag: "-O0",
+        link_flags: no_link_flags,
+        libs: libs,
+        test_mode: true
+    };
+    return backend.link(plan);
 }
 
 // Resolve the per-test scratch root used for the test runner's
