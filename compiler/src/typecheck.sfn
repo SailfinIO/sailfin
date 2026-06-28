@@ -62,6 +62,7 @@ import {
     make_try_non_result_fn_diagnostic,
     make_try_non_result_operand_diagnostic,
     make_undefined_function_diagnostic,
+    make_unparseable_statement_diagnostic,
     make_unsupported_statement_keyword_diagnostic,
     register_local_symbol,
     register_symbol,
@@ -347,7 +348,7 @@ fn check_program_scopes(program: Program, interfaces: Statement[], imports: Impo
     let mut diagnostics: Diagnostic[] = [];
 
     for statement in program.statements {
-        let result = check_statement(statement, bindings, interfaces, 0, imports, top_level);
+        let result = check_statement(statement, bindings, interfaces, 0, imports, top_level, true);
         bindings = result.bindings;
         let mut _ci: int = 0;
         loop {
@@ -373,7 +374,7 @@ fn check_program_scopes(program: Program, interfaces: Statement[], imports: Impo
 // callee lookup resolves sibling top-level functions and imports
 // regardless of source order. It is never re-registered, so it does not
 // affect duplicate detection.
-fn check_statement(statement: Statement, bindings: SymbolEntry[], interfaces: Statement[], scope_start: int, imports: ImportSymbolTable, top_level: SymbolEntry[]) -> ScopeResult {
+fn check_statement(statement: Statement, bindings: SymbolEntry[], interfaces: Statement[], scope_start: int, imports: ImportSymbolTable, top_level: SymbolEntry[], is_top_level: boolean) -> ScopeResult {
     if statement.variant == "VariableDeclaration" {
         let registration = register_local_symbol(bindings, statement.name, "variable", statement.span, scope_start);
         let walk_diags = walk_expression(statement.initializer, bindings, imports);
@@ -599,7 +600,7 @@ fn check_statement(statement: Statement, bindings: SymbolEntry[], interfaces: St
                 }
             }
             if branch.statement != null {
-                let result = check_statement(branch.statement, bindings, interfaces, scope_start, imports, top_level);
+                let result = check_statement(branch.statement, bindings, interfaces, scope_start, imports, top_level, false);
                 let mut _ci2: int = 0;
                 loop {
                     if _ci2 >= result.diagnostics.length { break; }
@@ -658,6 +659,25 @@ fn check_statement(statement: Statement, bindings: SymbolEntry[], interfaces: St
                 diagnostics: [make_unsupported_statement_keyword_diagnostic(unsupported)]
             };
         }
+        // A nested (block-level) unparseable statement must fail closed: the
+        // top-level `Unknown` walk in `tools/check.sfn` (E0500) covers only
+        // `program.statements`, so a `Statement.Unknown` produced inside a
+        // block by `parse_unknown_statement` would otherwise be dropped with
+        // no diagnostic and zero effects (#1691). Gate on `is_top_level` so we
+        // never double-fire with E0500 at top level, and reach here only after
+        // the E0410/E0411 checks above so we never double-fire with those.
+        if !is_top_level {
+            let mut anchor: Token? = null;
+            let mut near: string = "";
+            if statement.tokens.length > 0 {
+                anchor = statement.tokens[0];
+                near = " near `" + statement.tokens[0].lexeme + "`";
+            }
+            return ScopeResult {
+                bindings: bindings,
+                diagnostics: [make_unparseable_statement_diagnostic(anchor, near)]
+            };
+        }
         return ScopeResult { bindings: bindings, diagnostics: [] };
     }
     return ScopeResult { bindings: bindings, diagnostics: [] };
@@ -706,7 +726,7 @@ fn check_block(block: Block, parent_bindings: SymbolEntry[], interfaces: Stateme
     let mut diagnostics: Diagnostic[] = [];
 
     for statement in block.statements {
-        let result = check_statement(statement, bindings, interfaces, scope_start, imports, top_level);
+        let result = check_statement(statement, bindings, interfaces, scope_start, imports, top_level, false);
         bindings = result.bindings;
         let mut _ci: int = 0;
         loop {

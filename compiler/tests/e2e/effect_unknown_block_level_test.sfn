@@ -1,0 +1,120 @@
+// Regression coverage for #1691 (epic #1180, effect-system hardening):
+// a nested (block-level) `Statement.Unknown` must fail closed with a
+// diagnostic (E0819) instead of being silently dropped with zero effects.
+//
+// SCOPE NOTE (verified empirically against the self-hosted compiler):
+// the E0819 arm is a *defense-in-depth* fail-closed for a genuine nested
+// `Statement.Unknown`. In the current parser there is **no reachable
+// source input** that produces a bare nested `Statement.Unknown` outside
+// the reserved-keyword path: `parse_block_statement` absorbs every
+// unrecognized nested statement into an `ExpressionStatement{Raw}` (the
+// silent-drop the issue actually observed for `@@@ junk !!!`), which is
+// the `Expression.Raw` escape owned by #1692's E0818 backstop —
+// explicitly `Out:` of #1691. The only nested construct that reaches
+// `parse_unknown_statement` today is a reserved/unsupported keyword
+// (`while` -> E0411). So these tests pin the load-bearing, reachable
+// invariants of the fix: the gate never double-fires E0819 with the
+// top-level parse diagnostic (E0500) or the reserved-keyword diagnostic
+// (E0411), and pre-existing behavior is preserved. The E0819 emission
+// itself is exercised by review + the self-host build (it must not fire
+// over the compiler/runtime tree); when #1692 structures the Raw escapes
+// such that a bare nested `Unknown` can occur, a direct E0819 trigger
+// test belongs there.
+//
+// Driven through `sfn check --json` (the machine-checkable envelope) and
+// asserted with `sfn/strings` predicates, matching
+// `check_json_schema_test.sfn`. The `sfn/test` `expect_*` matchers are
+// `![pure]` and cannot be called from this `![io]` test.
+import { find, contains } from "sfn/strings";
+
+fn _sfn_bin() -> string ![io] {
+    let configured = env.get("SAILFIN_BIN");
+    if configured.length > 0 { return configured; }
+    return "build/native/sailfin";
+}
+
+// Pure-frontend `sfn check` needs no clang, but thread PATH/HOME so a
+// constrained CI shell still resolves anything the frontend touches.
+fn _child_env() -> string[] ![io] {
+    let mut e: string[] = [];
+    let path = env.get("PATH");
+    if path.length > 0 { e.push("PATH=" + path); }
+    let home = env.get("HOME");
+    if home.length > 0 { e.push("HOME=" + home); }
+    return e;
+}
+
+struct CheckRun {
+    exit: int,
+    out: string,
+    err: string
+}
+
+// Scratch base for fixtures, keyed by tag so the parallel pool never
+// collides. Materializes a minimal capsule/workspace context plus the
+// per-case fixture under it.
+fn _fixture_dir(tag: string) -> string ![io] {
+    let mut base = env.get("SAILFIN_TEST_SCRATCH");
+    if base.length == 0 { base = "/tmp"; }
+    let root = base + "/sfn-unknown-block-" + tag;
+    fs.createDirectory(root + "/src", true);
+    fs.writeFile(root + "/workspace.toml", "[workspace]\nmembers = []\n");
+    fs.writeFile(root + "/capsule.toml", "[capsule]\n"
+        + "name = \"unknown-block-test\"\n"
+        + "version = \"0.1.0\"\n"
+        + "description = \"E2E for nested Unknown fail-closed (#1691)\"\n\n"
+        + "[capabilities]\n"
+        + "required = [\"io\"]\n\n"
+        + "[build]\n"
+        + "entry = \"src/main.sfn\"\n");
+    return root;
+}
+
+fn _write(root: string, name: string, source: string) -> string ![io] {
+    let path = root + "/src/" + name;
+    fs.writeFile(path, source);
+    return path;
+}
+
+fn _check(path: string) -> CheckRun ![io] {
+    let exit = process.run_capture([_sfn_bin(), "check", "--json", path], _child_env());
+    let out = process.capture_take_stdout();
+    let err = process.capture_take_stderr();
+    return CheckRun { exit: exit, out: out, err: err };
+}
+
+// ---- Test 1: top-level junk still surfaces E0500, never E0819 ----
+// The driver's top-level `Unknown` walk (`tools/check.sfn`) owns E0500;
+// `check_statement` is invoked for the same node with `is_top_level=true`,
+// so the gate must keep E0819 silent — no double-fire.
+test "nested unknown: top-level junk surfaces E0500 only (no E0819 double-fire)" ![io] {
+    let root = _fixture_dir("toplevel");
+    let path = _write(root, "toplevel.sfn", "@@@ junk !!!\n");
+    let r = _check(path);
+    assert r.exit == 1;
+    assert contains(r.out, "\"code\":\"E0500\"");
+    assert find(r.out, "\"code\":\"E0819\"", 0) < 0;
+}
+
+// ---- Test 2: nested reserved `while` surfaces E0411, never E0819 ----
+// `while` is the one construct that reaches `parse_unknown_statement` in a
+// block today. The E0819 arm sits after the E0411 guard, so a nested
+// `while` must still produce E0411 alone — proving the dedup ordering.
+test "nested unknown: nested while surfaces E0411 only (no E0819 dedup)" ![io] {
+    let root = _fixture_dir("while");
+    let path = _write(root, "while.sfn", "fn g() {\n    while(true) { }\n}\n");
+    let r = _check(path);
+    assert r.exit == 1;
+    assert contains(r.out, "\"code\":\"E0411\"");
+    assert find(r.out, "\"code\":\"E0819\"", 0) < 0;
+}
+
+// ---- Test 3: a clean nested block stays clean (no spurious E0819) ----
+// Guards against the gate mis-firing on ordinary block statements.
+test "nested unknown: a valid nested block does not emit E0819" ![io] {
+    let root = _fixture_dir("clean");
+    let path = _write(root, "clean.sfn", "fn ok() {\n    let x = 1;\n    let _ = x + 1;\n}\n");
+    let r = _check(path);
+    assert r.exit == 0;
+    assert find(r.out, "\"code\":\"E0819\"", 0) < 0;
+}
