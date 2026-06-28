@@ -115,6 +115,38 @@ enum Expression {
         else_value: Expression,
         span: SourceSpan?
     },
+    // Assignment-as-expression `target <op> rhs` (issue #1627/#1741, epic
+    // #1180, effect-system hardening). Assignment has no AST node before
+    // #1627 — `a = b` parsed as `ExpressionStatement { Raw{"a = b"} }` because
+    // `=` carried precedence -1 and was never climbed, so the leftover `= b`
+    // tokens degraded the whole expression to `Raw`. Since #1186 a `Raw`
+    // contributes zero effects, so an effectful target/rhs (`arr[io()] = x`,
+    // `a = readFile()`) reached codegen effect-free. Structuring it lets the
+    // effect checker, typecheck walker, ownership analysis, and lambda-capture
+    // rewrite all recurse into `target` and `rhs` (the capture walk in
+    // typecheck_captures.sfn DELIBERATELY does not descend — see its #687
+    // note). The
+    // formatter serializes it back to `<target> <operator> <rhs>` — the
+    // exact text the lowering `parse_assignment_expression` already consumes
+    // (string-scan), so no new lowering arm is needed. `operator` is `"="` or
+    // a compound (`"+="`, `"-="`, `"*="`, `"/="`), keeping the node lossless.
+    //
+    // The rvalue is named `rhs`, NOT `value` (#1741): enum field reads slot by
+    // field NAME with a single type per name (the union payload is rendered
+    // per-name and read via a variant-filtered select chain). `value` is
+    // already `string` in `NumberLiteral`/`StringLiteral`/`BooleanLiteral`, so
+    // an `Expression`-typed `value` here collides on that slot and corrupts
+    // reads of the existing string `value` reached through a nested operand
+    // (`Unary{ -, NumberLiteral }.operand.value` came back empty, dropping
+    // negative-int capture type inference — the regression that sank the first
+    // #1741 attempt). `rhs`/`target` are unique names in this enum, so they
+    // take their own slots and the collision is gone. `span` stays last.
+    Assignment {
+        target: Expression,
+        operator: string,
+        rhs: Expression,
+        span: SourceSpan?
+    },
     // Concurrency frontend nodes (M4.0, epic #965, issue #1079). Parse-only
     // targets for the structured-concurrency surface; parsing, type rules,
     // effect-checking, and lowering land in follow-up issues. Runtime

@@ -1028,6 +1028,14 @@ fn walk_expression(expression: Expression?, bindings: SymbolEntry[], imports: Im
         diagnostics = diagnostics.concat(walk_expression(expression.else_value, bindings, imports));
         return diagnostics;
     }
+    if expression.variant == "Assignment" {
+        // Assignment `target <op> rhs` (#1627 Part D) — recurse into both
+        // sides so diagnostics (undefined symbols, fn-value misuse, nested
+        // parse-error nodes) in the lvalue and the rvalue still fire.
+        let mut diagnostics = walk_expression(expression.target, bindings, imports);
+        diagnostics = diagnostics.concat(walk_expression(expression.rhs, bindings, imports));
+        return diagnostics;
+    }
     if expression.variant == "Cast" {
         // A bare function identifier cast to a pointer (`<fn> as * u8` /
         // `<fn> as * fn (...)`) is a function-address materialization, not a
