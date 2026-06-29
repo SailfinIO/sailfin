@@ -3,7 +3,8 @@
 // Sailfin-native CLI entrypoint invoked by the native C shim.
 import { bold } from "sfn/cli";
 
-import { LinkPlan, LlvmTextBackend } from "./backend";
+import { LlvmTextBackend } from "./backend";
+import { LinkResult, _clang_link_multi } from "./build/link";
 import {
     _dirname,
     _ensure_dir,
@@ -13,11 +14,7 @@ import {
     _read_import_deps,
     _resolve_self_path
 } from "./build/paths";
-import {
-    RuntimeLinkInputs,
-    _runtime_bundle_exists,
-    assemble_runtime_capsule_link_inputs
-} from "./build/runtime_objs";
+import { _runtime_bundle_exists } from "./build/runtime_objs";
 import {
     BuildCacheConfig,
     CacheKey,
@@ -28,7 +25,6 @@ import {
     cache_root,
     cache_stats_is_empty,
     cache_store_artifact,
-    empty_cache_stats,
     merge_cache_stats,
     resolve_build_cache_config,
     runtime_object_cache_key,
@@ -81,9 +77,7 @@ import {
     _env_flag,
     _legacy_flag_file,
     _mktemp_sibling_cmd,
-    _resolve_linker,
     _sha256_of_file_cmd,
-    _shell_read_cmd,
     _shell_single_quote_arg
 } from "./cli_commands_utils";
 import { handle_selfhost_command } from "./cli_selfhost";
@@ -101,7 +95,7 @@ import {
     write_native_text_file_with_module_gated
 } from "./main";
 import { parse_native_imports_for_import } from "./native_ir_api";
-import { RuntimeCapsuleArtifacts, runtime_capsule_from_root } from "./runtime_capsule_resolver";
+import { runtime_capsule_from_root } from "./runtime_capsule_resolver";
 import {
     toml_get_build_kind,
     toml_get_entry,
@@ -677,220 +671,6 @@ fn _path_strip_ext(name: string) -> string {
     }
     if last_dot < 0 { return name; }
     return substring(name, 0, last_dot);
-}
-
-// Dead-code-strip linker flag for the final link (#1047). With every
-// `clang -c` (and the inline `.ll` compile in the link below) emitting
-// `-ffunction-sections -fdata-sections`, the linker's section garbage
-// collector drops any function/datum unreferenced from the entry point —
-// so importing one symbol from a multi-function capsule no longer drags
-// the whole `src/` closure into the binary. The GC flag is platform-
-// specific: GNU ld / lld use `--gc-sections`, the Darwin linker uses
-// `-dead_strip`. Detected via the same `uname -s` probe the driver
-// already uses (`_package_detect_target`, the errno/exe-path locators).
-fn _dead_strip_link_flag() -> string ![io] {
-    let os = _shell_read_cmd("uname -s");
-    if strings_equal(os, "Darwin") { return "-Wl,-dead_strip"; }
-    return "-Wl,--gc-sections";
-}
-
-// Force-retain the runtime provider surface as link-GC roots (#1047).
-// `--gc-sections` would otherwise strip every runtime helper the *current*
-// program never statically references — including the compiler's own
-// self-hosted binary, which exercises only a slice of the runtime. But the
-// runtime is a provider surface: downstream programs link these helpers
-// fresh, and the C→Sailfin migration tests assert the compiler binary
-// keeps the full `sfn_*` family defined. Rooting the migrated provider
-// symbols keeps that surface intact while user / capsule `.ll` code that
-// nothing references is still collected (the actual #1046 win).
-//
-// We restrict rooting to defined globals whose name contains `sfn` — the
-// migrated runtime helper family (`sfn_*`, `sfn_str_sfn_*`, the Mach-O
-// `_sfn_*` form). Rooting *every* runtime global is wrong: it drags back C
-// startup/internal sections gc-sections is meant to drop. With
-// `-ffunction-sections` each function is its own section, so rooting an
-// `sfn_*` symbol pulls in only that function, not its object's startup
-// neighbours. Runtime objects are few, so a single `nm` over all of them
-// is cheap; its BSD output is `<value> <type> <name>`, and we keep global
-// defined types (uppercase, excluding `U` undefined — which also have only
-// two fields, so `NF >= 3` drops them).
-fn _runtime_retain_root_flags(runtime_objs: string[]) -> string[] ![io] {
-    if runtime_objs.length == 0 { return []; }
-    let mut nm_cmd = "nm";
-    let mut oi: int = 0;
-    loop {
-        if oi >= runtime_objs.length { break; }
-        nm_cmd = nm_cmd + " " + _shell_single_quote_arg(runtime_objs[oi]);
-        oi += 1;
-    }
-    nm_cmd = nm_cmd
-        + " 2>/dev/null | awk 'NF >= 3 && $2 ~ /^[A-TV-Z]$/ && $3 ~ /sfn/ {print $3}' | sort -u";
-    let out = _shell_read_cmd(nm_cmd);
-    if out.length == 0 { return []; }
-    let mut flags: string[] = [];
-    let mut start: int = 0;
-    loop {
-        if start >= out.length { break; }
-        let nl = _find_substring_from(out, "\n", start);
-        let mut end = nl;
-        if end < 0 { end = out.length; }
-        let name = substring(out, start, end);
-        if name.length > 0 { flags.push("-Wl,-u," + name); }
-        if nl < 0 { break; }
-        start = nl + 1;
-    }
-    return flags;
-}
-
-// Result of a runtime link: the clang exit code plus the runtime
-// object-cache stats the link accumulated (#915). The link is the
-// only place the runtime C/LL/sfn object cache is consulted, so the
-// caller folds `stats` into the build-wide `[cache]` summary.
-struct LinkResult {
-    rc: int;
-    stats: CacheStats;
-}
-
-fn _failed_link_result() -> LinkResult {
-    return LinkResult { rc: 1, stats: empty_cache_stats() };
-}
-
-fn _clang_link_with_opt(ll_path: string, out_path: string, runtime_root: string, runtime_capsules: RuntimeCapsuleArtifacts[], opt_flag: string, cache_dir: string, binary_dir: string, shared_cache_root: string) -> LinkResult ![io] {
-    // Thin wrapper: most callers have one .ll; capsule-aware callers use
-    // _clang_link_multi_with_opt directly.
-    let single: string[] = [ll_path];
-    return _clang_link_multi_with_opt(single, out_path, runtime_root, runtime_capsules, opt_flag, cache_dir, binary_dir, shared_cache_root);
-}
-
-fn _clang_link_multi_with_opt(ll_paths: string[], out_path: string, runtime_root: string, runtime_capsules: RuntimeCapsuleArtifacts[], opt_flag: string, cache_dir: string, binary_dir: string, shared_cache_root: string) -> LinkResult ![io] {
-    if ll_paths.length == 0 {
-        print("_clang_link_multi_with_opt: no input .ll files");
-        return _failed_link_result();
-    }
-
-    // Cache runtime compilation products under `cache_dir`. With the
-    // legacy default this is `build/sailfin/`; with `--work-dir <DIR>`
-    // it is `<DIR>/sailfin/`. `mkdir -p` already creates intermediate
-    // dirs, so a single `_ensure_dir(cache_dir)` covers both cases —
-    // unconditionally creating `./build/` here would leak an empty
-    // directory into CWD when a virtualized work-dir was requested.
-    _ensure_dir(cache_dir);
-
-    // Issue #940 (Ra of #939): the runtime link always takes the
-    // declarative runtime-capsule path. `sfn build` / `sfn run` /
-    // `sfn test` inject the implicit `runtime/capsule.toml` as
-    // a fallback when the resolver surfaced no `[dependencies]`, and
-    // `-p` / declared-dep builds (including the compiler's own
-    // self-host, whose `capsule.toml` declares the runtime dep) carry
-    // the capsule already. An empty list here therefore means the
-    // runtime bundle / manifest is genuinely missing — fail loudly
-    // rather than silently producing an unlinkable binary.
-    let mut runtime_objs: string[] = [];
-    let mut runtime_link_libs: string[] = [];
-    if runtime_capsules.length == 0 {
-        // Reached by `sfn build` / `sfn run` (and indirectly `sfn test`
-        // via the shared assembly), so the diagnostic is command-neutral.
-        let mut root_display = runtime_root;
-        if root_display.length == 0 { root_display = "<runtime-root>"; }
-        print("sfn: runtime bundle/manifest missing — no runtime capsule resolved");
-        print("     expected " + root_display
-            + "/capsule.toml (kind = \"runtime\")");
-        print("     hint: ensure the runtime bundle ships alongside the compiler binary");
-        return _failed_link_result();
-    }
-    let inputs = assemble_runtime_capsule_link_inputs(runtime_capsules, cache_dir, opt_flag, binary_dir, shared_cache_root);
-    if !inputs.success {
-        return LinkResult { rc: 1, stats: inputs.stats };
-    }
-    runtime_objs = inputs.object_paths;
-    runtime_link_libs = inputs.link_libs;
-
-    // Driver computes the clang-driver flag interleave; `LlvmTextBackend`
-    // owns the final argv + `process.run`. Flag order is load-bearing for
-    // byte-identical output (#1112 zero-behaviour gate).
-    let mut link_flags: string[] = [];
-    // Opportunistic faster-linker selection (#343): prefer mold/lld when
-    // present, honour the `SAILFIN_LINKER` override, else fall back to the
-    // platform default. Empty string = no `-fuse-ld=` flag (system linker).
-    let linker_flag = _resolve_linker();
-    if linker_flag.length > 0 { link_flags.push(linker_flag); }
-    // `.ll` inputs are compiled inline by this same clang invocation, so
-    // they need the section split here; pre-compiled runtime `.o`s already
-    // carry it from `_clang_compile_runtime_capsule_objects` /
-    // `_emit_runtime_sfn_to_obj`. The dead-strip flag then GCs every
-    // section unreferenced from the entry point (#1047).
-    link_flags.push("-ffunction-sections");
-    link_flags.push("-fdata-sections");
-    // Root the runtime provider surface, then GC unreferenced sections
-    // (#1047). The order matters for correctness: if symbol enumeration
-    // yields nothing while runtime objects are present (`nm`/`awk`
-    // unavailable, or the pipeline failed), enabling the strip anyway
-    // would drop the runtime surface the compiler binary must export.
-    // In that case we skip the GC flag — keeping the (slightly larger)
-    // un-stripped binary is strictly safer than a silently broken one —
-    // and emit a diagnostic so the lost optimization isn't invisible.
-    // With runtime objects present the enumeration always finds the
-    // `sfn_*` family, so the happy path is unaffected.
-    let retain_flags = _runtime_retain_root_flags(runtime_objs);
-    let strip_safe = runtime_objs.length == 0 || retain_flags.length > 0;
-    if strip_safe { link_flags.push(_dead_strip_link_flag()); } else {
-        print("sfn: dead-code strip disabled — could not enumerate runtime");
-        print("     provider symbols (is `nm` on PATH?); linking unstripped");
-    }
-    let mut rfi: int = 0;
-    loop {
-        if rfi >= retain_flags.length { break; }
-        link_flags.push(retain_flags[rfi]);
-        rfi += 1;
-    }
-    let backend = LlvmTextBackend { };
-    let plan = LinkPlan {
-        objects: runtime_objs,
-        ir_inputs: ll_paths,
-        out_path: out_path,
-        opt_flag: opt_flag,
-        link_flags: link_flags,
-        libs: runtime_link_libs,
-        test_mode: false
-    };
-    let rc = backend.link(plan);
-    return LinkResult { rc: rc, stats: inputs.stats };
-}
-
-// (#1701) The `link_test_objects` indirection that previously lived here —
-// the #1687 workaround for the cross-directory `../../backend` import of the
-// method-bearing `LlvmTextBackend` failing to lower under the build's
-// import-context — was removed once that lowering path was fixed. The
-// uncalled/vtable-only method sub-case was fixed by #1739/#1740
-// (`find_vtable_method_signature`); the *called*-method sub-case (the
-// cross-dir invalid-`declare` failure this `backend.link` call hit) was fixed
-// by #1701's `find_declare_signature_t` correction. `cli/commands/test.sfn`
-// now constructs the test-layout `LinkPlan` and dispatches through the
-// `Backend` seam directly via a `../../backend` import.
-fn _clang_link(ll_path: string, out_path: string, runtime_root: string, runtime_capsules: RuntimeCapsuleArtifacts[], binary_dir: string, cache_dir: string) -> LinkResult ![io] {
-    // Default link used by `build` and `run` for single-module programs.
-    let resolved_cache_dir = _resolve_sailfin_cache_dir(cache_dir);
-    // Single-module path is not on the cache-gated build/run flow that
-    // threads a shared cache root; pass empty (work-dir-local only).
-    return _clang_link_with_opt(ll_path, out_path, runtime_root, runtime_capsules, "-O2", resolved_cache_dir, binary_dir, "");
-}
-
-fn _clang_link_multi(ll_paths: string[], out_path: string, runtime_root: string, runtime_capsules: RuntimeCapsuleArtifacts[], binary_dir: string, cache_dir: string, shared_cache_root: string) -> LinkResult ![io] {
-    // Default link used by `build` and `run` for multi-module programs
-    // (main source + capsule dependency modules). `cache_dir` is the
-    // sailfin-side scratch root (`build/sailfin` for legacy in-tree
-    // builds, `<work_dir>/sailfin` when `sfn build --work-dir <root>`
-    // virtualizes the layout).
-    let resolved_cache_dir = _resolve_sailfin_cache_dir(cache_dir);
-    return _clang_link_multi_with_opt(ll_paths, out_path, runtime_root, runtime_capsules, "-O2", resolved_cache_dir, binary_dir, shared_cache_root);
-}
-
-// Resolve the sailfin-side cache scratch root. Empty input is the
-// legacy default (`build/sailfin`); a non-empty string is treated
-// as already-virtualized and passed through verbatim.
-fn _resolve_sailfin_cache_dir(cache_dir: string) -> string {
-    if cache_dir.length == 0 { return "build/sailfin"; }
-    return cache_dir;
 }
 
 // Resolve the sailfin cache root for a given `--work-dir` value.
