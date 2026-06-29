@@ -1,0 +1,258 @@
+// benchmarks/runtime/http_proxy_hotpath.sfn
+//
+// Runtime-execution benchmark: the MCP-proxy request hot path
+//   parse (HTTP/1.1 wire) -> policy decision (StrMap lookup) -> forward
+// (issue #1712, epic #1540 Track C gap C6; folds into the `sfn bench`
+// epic #1503).
+//
+// Purpose: establish a runnable baseline for the parse->policy->forward
+// hot path with a documented 150 ms wall-clock budget, so later perf
+// work (keep-alive reuse, an epoll event loop) has a number to compare
+// against. This benchmark deliberately measures the CPU hot path only,
+// with no network: a real upstream forward is non-deterministic and
+// could not satisfy the "deterministic enough to compare across runs"
+// requirement, and the event-loop/epoll work is explicitly out of scope
+// (Track B B5). The "forward" step is therefore the outbound-request
+// serialization the proxy performs before it would hand bytes to the
+// socket.
+//
+// What is real vs. representative:
+//   * Policy lookup uses the real prelude/stdlib `StrMap` (#1710) from
+//     `runtime/sfn/collections.sfn` — a runtime module that links into a
+//     bare-file build.
+//   * Parsing is a representative inline HTTP/1.1 request parse that
+//     mirrors `capsules/sfn/http/src/wire.sfn::parse_request`. The
+//     `sfn/http` capsule parser cannot be reused directly here because
+//     the `make bench-runtime` harness builds each workload as a bare
+//     `.sfn` file (`sailfin build -o <bin> <src>`), and a capsule module
+//     with its own relative imports does not link into a bare-file
+//     build. The parse therefore lives inline; keep it in sync with the
+//     wire parser's shape if that parser changes materially.
+//
+// Reporting & budget:
+//   * One `RESULT http_proxy_hotpath <median_ms> <iters>` line, where
+//     <median_ms> is the median of `ROUNDS` measured rounds (after
+//     `WARMUP` discarded rounds) and <iters> is the parse->policy->
+//     forward iterations per round. Per-iteration time is <median_ms> /
+//     <iters>, which the harness derives as ops_per_ms.
+//   * The 150 ms budget is enforced two ways: this program prints its
+//     own PASS/FAIL against it, and the harness gates the median when run
+//     with `make bench-runtime BENCH_RUNTIME_ARGS="--budget-time 150"`.
+import {
+    StrMap,
+    str_map_get,
+    str_map_new,
+    str_map_set
+} from "../../runtime/sfn/collections";
+
+struct ParsedReq {
+    method: string;
+    path: string;
+    query: string;
+    headers: string[];
+    body: string;
+}
+
+// Drop a single trailing '\r' (CRLF tolerance), mirroring wire.sfn.
+fn strip_cr(s: string) -> string {
+    let n = s.length;
+    if n == 0 { return s; }
+    let last = substring(s, n - 1, n);
+    if strings_equal(last, "\r") { return substring(s, 0, n - 1); }
+    return s;
+}
+
+fn starts_with(s: string, p: string) -> boolean {
+    if p.length > s.length { return false; }
+    return strings_equal(substring(s, 0, p.length), p);
+}
+
+// Representative HTTP/1.1 request parse — mirrors the structure of
+// capsules/sfn/http/src/wire.sfn::parse_request (request line ->
+// method/target, target -> path/query, header lines until blank, body).
+fn parse_req(raw: string) -> ParsedReq {
+    let total = raw.length;
+
+    let line_nl = find_char(raw, "\n", 0);
+    let mut line_end = total;
+    if line_nl >= 0 { line_end = line_nl; }
+    let request_line = strip_cr(substring(raw, 0, line_end));
+
+    let mut method = "";
+    let mut target = "";
+    let sp1 = find_char(request_line, " ", 0);
+    if sp1 >= 0 {
+        method = substring(request_line, 0, sp1);
+        let sp2 = find_char(request_line, " ", sp1 + 1);
+        if sp2 >= 0 { target = substring(request_line, sp1 + 1, sp2); } else {
+            target = substring(request_line, sp1 + 1, request_line.length);
+        }
+    } else { method = request_line; }
+
+    let mut path = target;
+    let mut query = "";
+    let q = find_char(target, "?", 0);
+    if q >= 0 {
+        path = substring(target, 0, q);
+        query = substring(target, q + 1, target.length);
+    }
+
+    let mut headers: string[] = [];
+    let mut body = "";
+    let mut cursor = total;
+    if line_nl >= 0 { cursor = line_nl + 1; }
+    loop {
+        if cursor >= total { break; }
+        let nl = find_char(raw, "\n", cursor);
+        let mut end = total;
+        if nl >= 0 { end = nl; }
+        let line = strip_cr(substring(raw, cursor, end));
+        let mut next = total;
+        if nl >= 0 { next = nl + 1; }
+        if line.length == 0 {
+            body = substring(raw, next, total);
+            break;
+        }
+        headers.push(line);
+        if nl < 0 { break; }
+        cursor = next;
+    }
+
+    return ParsedReq {
+        method: method,
+        path: path,
+        query: query,
+        headers: headers,
+        body: body
+    };
+}
+
+// Serialize the outbound (forwarded) request: the request line, the
+// header block with the Host header rewritten to the upstream, then the
+// body. This is the CPU work the proxy does before writing to the
+// upstream socket (the socket write itself is out of scope / not
+// deterministic).
+fn build_forward(p: ParsedReq, upstream: string) -> string {
+    let mut target = p.path;
+    if p.query.length > 0 { target = p.path + "?" + p.query; }
+    let mut out = p.method + " " + target + " HTTP/1.1\r\n";
+    let mut i = 0;
+    loop {
+        if i >= p.headers.length { break; }
+        let h = p.headers[i];
+        if starts_with(h, "Host:") { out = out + "Host: " + upstream + "\r\n"; } else {
+            out = out + h + "\r\n";
+        }
+        i = i + 1;
+    }
+    out = out + "\r\n" + p.body;
+    return out;
+}
+
+// Representative proxy policy table: method+path -> decision.
+fn build_policy_table() -> StrMap {
+    let mut m = str_map_new();
+    m = str_map_set(m, "GET /api/orders", "allow");
+    m = str_map_set(m, "POST /api/orders", "allow");
+    m = str_map_set(m, "GET /api/users", "allow");
+    m = str_map_set(m, "POST /api/users", "allow");
+    m = str_map_set(m, "DELETE /api/users", "deny");
+    m = str_map_set(m, "GET /api/products", "allow");
+    m = str_map_set(m, "POST /api/login", "allow");
+    m = str_map_set(m, "GET /health", "allow");
+    m = str_map_set(m, "GET /metrics", "rate-limit");
+    m = str_map_set(m, "GET /admin", "deny");
+    m = str_map_set(m, "GET /api/search", "rate-limit");
+    m = str_map_set(m, "PUT /api/orders", "allow");
+    return m;
+}
+
+// Median of a small int array via insertion sort over a copy.
+fn median(xs: int[]) -> int {
+    let n = xs.length;
+    if n == 0 { return 0; }
+    let mut a: int[] = [];
+    let mut c = 0;
+    loop {
+        if c >= n { break; }
+        a.push(xs[c]);
+        c = c + 1;
+    }
+    let mut x = 1;
+    loop {
+        if x >= n { break; }
+        let key = a[x];
+        let mut j = x - 1;
+        loop {
+            if j < 0 { break; }
+            if a[j] <= key { break; }
+            a[j + 1] = a[j];
+            j = j - 1;
+        }
+        a[j + 1] = key;
+        x = x + 1;
+    }
+    return a[n / 2];
+}
+
+// One measured round: `iters` full parse -> policy -> forward passes
+// over a fixed request. Returns an accumulated sink so the optimizer
+// cannot discard the work.
+fn run_round(table: StrMap, raw: string, upstream: string, iters: int) -> int {
+    let mut sink = 0;
+    let mut i = 0;
+    loop {
+        if i >= iters { break; }
+        let req = parse_req(raw);
+        let key = req.method + " " + req.path;
+        let decision = str_map_get(table, key);
+        if decision == null { sink = sink + req.path.length; } else {
+            let fwd = build_forward(req, upstream);
+            sink = sink + fwd.length + decision.length;
+        }
+        i = i + 1;
+    }
+    return sink;
+}
+
+fn main() ![io, clock] {
+    let iters = 12000;
+    let rounds = 7;
+    let warmup = 2;
+    let budget = 150;
+    let upstream = "upstream.internal:8080";
+    let raw = "GET /api/orders?page=2&limit=50 HTTP/1.1\r\nHost: gateway.local\r\nUser-Agent: sfn-bench/1.0\r\nAccept: application/json\r\nAuthorization: Bearer tok-abc123\r\nX-Request-Id: 7f3a91c2\r\nContent-Length: 0\r\n\r\n";
+
+    let table = build_policy_table();
+
+    // Warm-up rounds (discarded) for steady-state timing.
+    let mut sink = 0;
+    let mut w = 0;
+    loop {
+        if w >= warmup { break; }
+        sink = sink + run_round(table, raw, upstream, iters);
+        w = w + 1;
+    }
+
+    // Measured rounds.
+    let mut times: int[] = [];
+    let mut r = 0;
+    loop {
+        if r >= rounds { break; }
+        let start = monotonic_millis();
+        sink = sink + run_round(table, raw, upstream, iters);
+        let end = monotonic_millis();
+        times.push(end - start);
+        r = r + 1;
+    }
+
+    let med = median(times);
+
+    let mut status = "PASS";
+    if med > budget { status = "FAIL"; }
+
+    print("RESULT http_proxy_hotpath {{med}} {{iters}}");
+    // `sink` is printed (not just branched on) so the parse->policy->forward
+    // work is observable and cannot be eliminated as dead code.
+    print("http_proxy_hotpath: median {{med}}ms over {{iters}} parse->policy->forward iters/round; budget {{budget}}ms; {{status}} (checksum {{sink}})");
+}

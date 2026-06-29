@@ -68,6 +68,28 @@ minutes.
 | `array_map_filter` | collection traversal (`runtime/sfn/array.sfn`) | 8,000,000 | Map (double) → filter (multiples of 3) → reduce (sum) over a large array. |
 | `exception_throw` | exception frames (`runtime/sfn/exception.sfn`) | 600,000 | Per-iteration `try`/`catch`; ~1 in 4 iterations throws and is caught. |
 | `io_throughput` | filesystem adapter (`runtime/sfn/adapters/filesystem.sfn`) | 20,000 | Appends N lines to a temp file (`$TMPDIR`, fallback `/tmp`) via `fs.appendFile`, then reads the file back once. |
+| `http_proxy_hotpath` | MCP-proxy request hot path (parse + `StrMap` + forward) | 12,000 iters × 7 rounds (median) | Per iteration: parse an HTTP/1.1 request (representative inline wire parse) → policy lookup in the real prelude `StrMap` (`runtime/sfn/collections.sfn`) → serialize the forwarded outbound request. CPU-only (no network). Documented **150 ms** budget; the program prints its own PASS/FAIL and the harness gates it with `--budget-time 150`. |
+
+### Hot-path budget gate (`http_proxy_hotpath`, #1712)
+
+`http_proxy_hotpath` establishes the parse→policy→forward baseline for the
+MCP-proxy work (epic #1540, Track C gap C6) with a documented **150 ms**
+per-round wall-clock budget. It is **advisory-only** (no CI gating yet — Track C
+B5/epoll work is out of scope). To check the gate locally:
+
+```bash
+make bench-runtime BENCH_RUNTIME_ARGS="--workload http_proxy_hotpath --budget-time 150"
+```
+
+The benchmark measures the CPU hot path only: a live upstream forward is
+non-deterministic and would break the cross-run comparability requirement, so the
+"forward" step is the outbound-request serialization the proxy performs before
+handing bytes to the socket. The parse is an inline parse mirroring
+`capsules/sfn/http/src/wire.sfn::parse_request` — the `sfn/http` capsule parser
+cannot be reused directly because the harness builds each workload as a bare
+`.sfn` file and a capsule module with its own relative imports does not link into
+a bare-file build. The policy lookup uses the **real** `StrMap` (#1710), which is
+a runtime module and links cleanly.
 
 ### Compiler-version caveats (0.7.0-alpha.47)
 
