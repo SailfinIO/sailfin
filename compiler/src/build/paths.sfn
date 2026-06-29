@@ -91,6 +91,13 @@ fn _read_import_deps(context_root: string, slug: string) -> string[] ![io] {
     return out;
 }
 
+fn _ends_with(value: string, suffix: string) -> boolean {
+    if suffix.length == 0 { return true; }
+    if value.length < suffix.length { return false; }
+    let start = value.length - suffix.length;
+    return substring(value, start, value.length) == suffix;
+}
+
 fn _resolve_self_path(binary_dir: string) -> string ![io] {
     if binary_dir.length > 0 {
         // Try each known compiler-binary name in order. The bare
@@ -114,6 +121,7 @@ fn _resolve_self_path(binary_dir: string) -> string ![io] {
 
 export {
     _dirname,
+    _ends_with,
     _ensure_dir,
     _find_substring_from,
     _path_basename,
