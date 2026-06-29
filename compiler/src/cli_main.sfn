@@ -75,7 +75,7 @@ import {
 import { CliContext, driver_prefix_length, parse_driver_prefix } from "./cli/context";
 import { sailfin_cli_main_v2 } from "./cli/main";
 import { handle_check_command } from "./cli_check";
-import { handle_config_command, handle_lock_command, handle_package_command } from "./cli_commands";
+import { handle_lock_command, handle_package_command } from "./cli_commands";
 import {
     _atomic_rename_into_place,
     _env_flag,
@@ -1036,10 +1036,6 @@ fn _legacy_dispatch_lock(args: string[]) -> int ![io] {
     return handle_lock_command(args);
 }
 
-fn _legacy_dispatch_config(args: string[]) -> int ![io] {
-    return handle_config_command(args);
-}
-
 fn _legacy_dispatch_check(args: string[], binary_dir: string) -> int ![io] {
     return handle_check_command(args, binary_dir);
 }
@@ -1133,7 +1129,6 @@ fn sailfin_cli_main_legacy(argv: string[]) -> int ![io, clock] {
     let is_help = _let10;
     let is_package = strings_equal(cmd, "package");
     let is_lock = strings_equal(cmd, "lock");
-    let is_config = strings_equal(cmd, "config");
     let is_check = strings_equal(cmd, "check");
     // #1502: internal self-host validator. Intentionally absent from
     // `_usage()` — driven by `make check` / CI, not end users.
@@ -1170,8 +1165,8 @@ fn sailfin_cli_main_legacy(argv: string[]) -> int ![io, clock] {
 
     // `sfn login` migrated to `sfn/cli` (epic #351, Issue 3.2) — handled
     // by `sailfin_cli_main_v2` before reaching the legacy dispatch.
-    if is_config { return _legacy_dispatch_config(args); }
-
+    // `sfn config` migrated to `sfn/cli` (epic #1671, Phase B) — handled
+    // by `sailfin_cli_main_v2` before reaching the legacy dispatch.
     // `sfn fmt` migrated to `sfn/cli` (epic #351, Issue 3.4) — handled
     // by `sailfin_cli_main_v2` before reaching the legacy dispatch.
     if is_check { return _legacy_dispatch_check(args, binary_dir); }
@@ -1406,4 +1401,4 @@ fn main(argv: string[]) -> int ![io, clock] {
     // returns its exit code up through here rather than calling `exit()`.
     sfn_arena_telemetry_dump(label as * u8);
     return exit_code;
-}  // Issue #940: `cli_main` is the `@main` entrypoint root AND now an  // imported module — the `sfn test` link path in  // `cli/commands/test.sfn` imports the runtime-link assembly from here,  // forming an import cycle (`cli_main` itself imports  // `handle_lock_command` / `handle_config_command` /  // `handle_package_command` from `cli_commands`, and the v2 CLI root  // imports `cli/commands/test.sfn`). Sailfin resolves function/struct-level  // import cycles (e.g. parser `statements` <-> `declarations`), so these  // edges are safe.
+}  // Issue #940: `cli_main` is the `@main` entrypoint root AND now an  // imported module — the `sfn test` link path in  // `cli/commands/test.sfn` imports the runtime-link assembly from here,  // forming an import cycle (`cli_main` itself imports  // `handle_lock_command` / `handle_package_command` from  // `cli_commands`, and the v2 CLI root imports `cli/commands/test.sfn`). Sailfin resolves function/struct-level  // import cycles (e.g. parser `statements` <-> `declarations`), so these  // edges are safe.

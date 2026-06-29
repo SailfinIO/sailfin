@@ -1,0 +1,62 @@
+// compiler/src/cli/commands/config.sfn
+//
+// `config` subcommand (CLI modularization epic #1671 / tracker #1675,
+// Phase B — SFEP-0027 §3.4, command #1). Migrates `config` off the
+// legacy hand-rolled dispatch (`cli_main.sfn`) into the per-command
+// `command_def()` + `run()` pattern that `version.sfn` established.
+//
+// `config` is the first migrated command with **nested subcommands**
+// (`get`/`set`/`unset`/`list`); `sfn/cli`'s `parse()` owns the descent,
+// and `run` reconstructs the legacy positional args slice
+// (`["config", <sub>, <key>, <value>]`) so it can delegate to the
+// existing `handle_config_command` body **verbatim**. Phase C (#1676)
+// owns deleting that body and relocating its logic — until then this is a
+// behavior-preserving move: the reconstructed slice drives the same
+// handler the legacy dispatch called, so output and exit codes are
+// byte-identical to today (parity oracle:
+// `compiler/tests/e2e/config_test.sfn`).
+import {
+    Command,
+    Matches,
+    arg,
+    command,
+    get,
+    subcommand,
+    with_arg,
+    with_subcommand
+} from "sfn/cli";
+
+import { handle_config_command } from "../../cli_commands";
+import { CliContext } from "../context";
+
+// The `sfn/cli` definition for `config`, registered on the v2 root via
+// `with_subcommand`. The four leaf subcommands mirror the legacy
+// handler's `get`/`set`/`unset`/`list` dispatch: `get`/`unset` take a
+// `<key>`, `set` takes `<key> <value>`, `list` takes none.
+fn command_def() -> Command {
+    let get_cmd: Command = with_arg(command("get", "Print a config value"), arg("key", "Config key"));
+    let set_cmd: Command = with_arg(with_arg(command("set", "Set a config value"), arg("key", "Config key")), arg("value", "Config value"));
+    let unset_cmd: Command = with_arg(command("unset", "Remove a config value"), arg("key", "Config key"));
+    let list_cmd: Command = command("list", "List resolved config values");
+    return with_subcommand(with_subcommand(with_subcommand(with_subcommand(command("config", "Manage sfn configuration"), get_cmd), set_cmd), unset_cmd), list_cmd);
+}
+
+// Reconstruct the legacy positional args slice from the typed matches and
+// delegate to `handle_config_command` verbatim. `subcommand(matches)`
+// returns the leaf name (`get`/`set`/`unset`/`list`), or `"config"` for a
+// bare `sfn config` with no subcommand — which the handler answers with
+// its usage message, matching the legacy behavior. `ctx` is part of the
+// per-command contract but unused here (config sources no driver state).
+fn run(matches: Matches, ctx: CliContext) -> int ![io] {
+    let sub: string = subcommand(matches);
+    let mut args: string[] = ["config"];
+    if strings_equal(sub, "config") { return handle_config_command(args); }
+    args.push(sub);
+    if strings_equal(sub, "get") { args.push(get(matches, "key")); }
+    if strings_equal(sub, "set") {
+        args.push(get(matches, "key"));
+        args.push(get(matches, "value"));
+    }
+    if strings_equal(sub, "unset") { args.push(get(matches, "key")); }
+    return handle_config_command(args);
+}
