@@ -5,26 +5,23 @@
 // is an ordinary closure that may capture the enclosing test's locals
 // (M1.5 closures-with-capture, #687 emission + #689 dispatch).
 //
-// Only `with_tmp_dir` ships here. The originally-proposed `with_env` and
-// `with_cwd` fixtures are intentionally NOT provided:
+// Three scoped fixtures ship here, all built on per-child control so they
+// are safe under the (future) parallel test runner:
 //
-//   * They require mutating *process-global* state (`setenv` / `chdir`)
-//     and restoring it. The runtime exposes no such primitive — only
-//     `env.get` / `env.home` exist — and adding C for it cuts against the
-//     in-flight C→Sailfin runtime port (the C surface is frozen after the
-//     test-infra epic's Phase 0).
-//   * Even with the primitives, both are unsound under structured
-//     concurrency: `chdir(2)` sets a per-*process* working directory and
-//     `setenv(3)` mutates a shared, non-thread-safe `environ`, so a
-//     process-global fixture corrupts sibling tasks the moment the test
-//     runner goes parallel. The right shape is per-child control, which
-//     already ships as the typed `Env` + `os::run_capture` API. A
-//     concurrency-aware redesign is tracked in #1107.
+//   * `with_tmp_dir` — create a temp dir, run the body, remove the tree on
+//     scope exit (including the throwing path).
+//   * `with_env` (#1166) — run a subprocess under a scoped `os::Env`.
+//   * `with_cwd` (#1168) — run a subprocess in a scoped working directory.
 //
-// That concurrency-aware redesign ships here as `with_env` (#1166): a
-// per-child scoped-environment runner over the typed `os::Env` +
-// `os::run_capture` API, with the parent `environ` never mutated. See
-// its doc comment below.
+// The originally-proposed `with_env` / `with_cwd` fixtures were going to
+// mutate *process-global* state (`setenv(3)` / `chdir(2)`) and restore it.
+// Both are unsound under structured concurrency: `chdir(2)` sets a
+// per-*process* cwd and `setenv(3)` mutates a shared, non-thread-safe
+// `environ`, so a process-global fixture corrupts sibling tasks the moment
+// the runner goes parallel. The shipped shape is per-child instead: the
+// scoped environment / cwd is applied to a *single* spawned child via
+// `os::run_capture(args, env, cwd)` (#1167), and the parent process is never
+// read or written. See each helper's doc comment below.
 //
 // Teardown delegates to `sfn/fs::remove_all` (#976) — a pure-Sailfin
 // `rm -rf` composed from the `fs.*` runtime intrinsics
@@ -105,5 +102,34 @@ fn with_env(args: string[], env: Env, body: fn (ProcessOutput) -> int) -> int ![
     // cwd-aware `with_env`/`with_cwd` ergonomic wrapper is the
     // companion follow-up, not this change.
     let out = run_capture(args, env, "");
+    return body(out);
+}
+
+// Run `args` as a subprocess in the working directory `cwd` under the
+// scoped environment `env`, hand the captured `ProcessOutput` to `body`,
+// and return whatever `body` returns.
+//
+// This is the cwd-scoping companion to `with_env`: the concurrency-safe
+// successor to the dropped process-global `with_cwd` fixture (see the note
+// at the top of this file). Rather than calling `chdir(2)` — which sets a
+// per-*process* working directory and so corrupts sibling tasks the moment
+// the test runner goes parallel — the directory is applied to a *single*
+// child via `os::run_capture(args, env, cwd)` (#1167), which runs the child
+// in `cwd` with `posix_spawn_file_actions_addchdir_np` and never touches the
+// parent's cwd. Concurrent tests are unaffected.
+//
+// `cwd` is typically the absolute path handed to a `with_tmp_dir` body, so
+// the two compose: open a temp dir, then run a child inside it. An empty
+// `cwd` inherits the parent's working directory (identical to `with_env`);
+// pass a non-empty absolute path to scope it. In-process (non-subprocess)
+// cwd scoping is not offered — there is no per-thread cwd, so in-process
+// tests must use absolute paths.
+//
+// `body`, the `Env` constructors, the no-`![io]`-row fn-type, and the
+// `-> int` interim return shape are all exactly as documented for `with_env`
+// above. Like `with_env`, there is no teardown: a scoped cwd owns no host
+// resource — it is just an argument to the child spawn.
+fn with_cwd(args: string[], env: Env, cwd: string, body: fn (ProcessOutput) -> int) -> int ![io] {
+    let out = run_capture(args, env, cwd);
     return body(out);
 }

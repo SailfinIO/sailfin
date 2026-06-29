@@ -248,7 +248,7 @@ fn _split_top_level_comma(text: string) -> string[] {
 }
 
 // Strip the leading `__env: i8*` parameter (synthesised by
-// `_synthesize_lifted_function` in `lambda_lowering.sfn`) from a
+// `_synthesize_lifted_function_rewritten` in `lambda_lowering.sfn`) from a
 // lifted function's parameter type list, leaving just the
 // user-visible parameter types for the call-site signature.
 fn _strip_env_parameter(parameter_types: string[]) -> string[] {

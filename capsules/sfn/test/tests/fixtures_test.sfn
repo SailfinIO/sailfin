@@ -25,10 +25,10 @@
 // separate multi-capture lowering bug). Single capture — the path the
 // `closure_single_capture` e2e fixture exercises and that #979 actually
 // rides — works; these tests stay within it deliberately.
-import { env_set, env_empty, ProcessOutput } from "sfn/os";
+import { ProcessOutput, env_empty, env_set } from "sfn/os";
 import { find } from "sfn/strings";
 
-import { with_env, with_tmp_dir } from "../src/mod";
+import { with_cwd, with_env, with_tmp_dir } from "../src/mod";
 
 // Scratch root for marker files. Prefer the runner's
 // `SAILFIN_TEST_SCRATCH`; fall back to `/tmp` for a direct
@@ -197,4 +197,69 @@ test "with_env: body return value threads back out" ![io] {
         return out.exit;
     });
     assert r == 7;
+}
+
+// ---------------------------------------------------------------------------
+// with_cwd — scoped per-child working-directory runner (#1168)
+// ---------------------------------------------------------------------------
+// `with_cwd(args, env, cwd, body)` runs `args` in working directory `cwd`
+// via `os::run_capture(args, env, cwd)` (#1167 per-child cwd, no global
+// `chdir`), threading the captured `ProcessOutput` to `body`. These tests
+// prove: the child runs in the scoped cwd, it composes with `with_tmp_dir`,
+// and the parent's cwd is untouched. `env_empty()` is fine — `posix_spawnp`
+// resolves bare binary names (`ls`/`pwd`/`sh`) via the parent's PATH even
+// when the child env is empty (same as the with_env tests above). Each body
+// lambda captures at most one local, honoring the single-capture constraint.
+// The child runs in the temp dir handed down by `with_tmp_dir`: a marker
+// file written into that dir shows up in a bare `ls` (which lists the cwd),
+// proving the child's cwd is the scoped dir. Also exercises nesting.
+test "with_cwd: child runs in the scoped cwd (nested under with_tmp_dir)" ![io] {
+    let r = with_tmp_dir(fn (dir: string) -> int {
+        fs.writeFile(dir + "/sfn-cwd-marker.txt", "x");
+        return with_cwd(["ls"], env_empty(), dir, fn (out: ProcessOutput) -> int {
+            if out.exit != 0 { return -1; }
+            if find(out.stdout, "sfn-cwd-marker.txt", 0) >= 0 { return 1; }
+            return 0;
+        });
+    });
+    assert r == 1;
+}
+
+// A scoped cwd never leaks into the parent: an inherited-cwd child (empty
+// cwd) reports the parent's working directory, and that reading is identical
+// before and after a `with_cwd` into a different directory — proving no
+// process-global `chdir` happened. The pwd strings are ferried out through
+// marker files (the body returns `int`, so it cannot return the string).
+test "with_cwd: parent process cwd is unchanged by a scoped child cwd" ![io] {
+    let m_before = _marker("cwd-before");
+    let m_after = _marker("cwd-after");
+    let _a = with_cwd(["pwd"], env_empty(), "", fn (out: ProcessOutput) -> int {
+        fs.writeFile(m_before, out.stdout);
+        return 0;
+    });
+    let _mid = with_tmp_dir(fn (dir: string) -> int {
+        return with_cwd(["pwd"], env_empty(), dir, fn (out: ProcessOutput) -> int {
+            return out.exit;
+        });
+    });
+    let _b = with_cwd(["pwd"], env_empty(), "", fn (out: ProcessOutput) -> int {
+        fs.writeFile(m_after, out.stdout);
+        return 0;
+    });
+    let before = fs.readFile(m_before);
+    let after = fs.readFile(m_after);
+    assert before.length > 0;
+    assert before == after;
+    _cleanup(m_before);
+    _cleanup(m_after);
+}
+
+// The captured `ProcessOutput` threads back through the helper: a body
+// returning the child's exit code is the helper's return value (mirrors
+// the with_env result-threading contract).
+test "with_cwd: body return value threads back out" ![io] {
+    let r = with_cwd(["sh", "-c", "exit 5"], env_empty(), "", fn (out: ProcessOutput) -> int {
+        return out.exit;
+    });
+    assert r == 5;
 }
