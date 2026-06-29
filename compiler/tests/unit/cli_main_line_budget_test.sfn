@@ -1,0 +1,50 @@
+// Line-budget sentinel for `compiler/src/cli_main.sfn` — the cheap
+// regression guard for SFEP-0027 Phase A's per-worker RSS lever.
+//
+// Phase A carved the build-driver orchestration out of `cli_main.sfn`
+// into `compiler/src/build/{runtime_objs,link,determinism,cache}.sfn`
+// (#1730–#1733) and shattered the 937-line `sailfin_cli_main_legacy`
+// into per-command `_legacy_dispatch_<cmd>` helpers (#1734). That took
+// `cli_main.sfn` from 3,067 lines to ~1,409 and dropped its isolated
+// per-module emit peak RSS from ~2,415 MB to ~1,065 MB
+// (docs/proposals/0006-build-architecture.md, "post-Phase-A CLI deltas").
+//
+// Because per-module working set is what bounds parallel `--jobs`
+// (SFEP-0027 §2.1), `cli_main.sfn` must not silently re-balloon back
+// toward the pre-Phase-A monolith. This sentinel fails the build if the
+// module regrows past a budget with modest headroom over the current
+// Phase-A size.
+//
+// Budget rationale: SFEP-0027 §8 names `< 1,200` as the *Phase-B-era*
+// target (reached once the 7 remaining commands migrate out into
+// `cli/commands/`). The current Phase-A floor is ~1,409 lines (the
+// `_legacy_dispatch_<cmd>` helpers still live here until Phase B), so the
+// Phase-A budget is 1,500 — enough headroom for routine maintenance,
+// tight enough to flag build-driver code creeping back. Tighten to 1,200
+// when Phase B empties the legacy dispatch arms.
+import { find_char_local } from "../../src/string_utils";
+
+let CLI_MAIN_LINE_BUDGET: int = 1500;
+
+// Count newlines, matching `wc -l` semantics (a trailing newline is not
+// double-counted). Cheap single linear scan via `find_char_local`.
+fn _count_newlines(source: string) -> int {
+    let mut count: int = 0;
+    let mut pos: int = 0;
+    loop {
+        let idx = find_char_local(source, "\n", pos);
+        if idx < 0 { break; }
+        count += 1;
+        pos = idx + 1;
+    }
+    return count;
+}
+
+test "cli_main.sfn stays under the SFEP-0027 Phase A line budget" ![io] {
+    let source = fs.readFile("compiler/src/cli_main.sfn");
+    let lines = _count_newlines(source);
+    // A non-empty read is a precondition — guards against a path typo
+    // silently passing the budget check on an empty string.
+    assert lines > 0;
+    assert lines < CLI_MAIN_LINE_BUDGET;
+}
