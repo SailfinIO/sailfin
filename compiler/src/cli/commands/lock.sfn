@@ -1,0 +1,57 @@
+// compiler/src/cli/commands/lock.sfn
+//
+// `lock` subcommand (CLI modularization epic #1671 / tracker #1675,
+// Phase B — SFEP-0027 §3.4, command #2). Migrates `lock` off the legacy
+// hand-rolled dispatch (`cli_main.sfn`) into the per-command
+// `command_def()` + `run()` pattern that `version.sfn` established and
+// `config.sfn` (command #1) extended.
+//
+// `lock` is a thin command: a single `--work-dir DIR` value flag and no
+// positionals. `sfn/cli`'s `parse()` owns flag validation, and `run`
+// reconstructs the legacy positional args slice (`["lock", "--work-dir",
+// <dir>]`) so it can delegate to the existing `handle_lock_command` body
+// **verbatim**. Phase C (#1676) owns deleting that body and relocating
+// its logic — until then this is a behavior-preserving move: the
+// reconstructed slice drives the same handler the legacy dispatch called,
+// so output and exit codes are byte-identical to today (parity oracle:
+// `compiler/tests/e2e/lock_test.sfn`).
+//
+// A missing `--work-dir` value, an unrecognized flag, or `--help` makes
+// the parse non-ok while still marking `lock` as descended; the v2
+// dispatch in `cli/main.sfn` returns the usage error (exit 2) there — the
+// parser owns argument validation, matching the legacy handler's
+// "requires a directory argument" / unknown-flag guards.
+import {
+    Command,
+    Matches,
+    command,
+    flag_value,
+    get_or,
+    with_flag
+} from "sfn/cli";
+
+import { handle_lock_command } from "../../cli_commands";
+import { CliContext } from "../context";
+
+// The `sfn/cli` definition for `lock`, registered on the v2 root via
+// `with_subcommand`. One optional `--work-dir DIR` value flag; no
+// positionals.
+fn command_def() -> Command {
+    return with_flag(command("lock", "Write the workspace lockfile (workspace.lock)"), flag_value("work-dir", "Directory to discover the workspace root from (defaults to $PWD)"));
+}
+
+// Reconstruct the legacy positional args slice from the typed matches and
+// delegate to `handle_lock_command` verbatim. An absent `--work-dir`
+// leaves the slice at `["lock"]`, so the handler falls back to `$PWD`
+// exactly as before; when present, the value is forwarded as
+// `["lock", "--work-dir", <dir>]`. `ctx` is part of the per-command
+// contract but unused here (lock sources no driver state).
+fn run(matches: Matches, ctx: CliContext) -> int ![io] {
+    let mut args: string[] = ["lock"];
+    let work_dir: string = get_or(matches, "work-dir", "");
+    if work_dir.length > 0 {
+        args.push("--work-dir");
+        args.push(work_dir);
+    }
+    return handle_lock_command(args);
+}
