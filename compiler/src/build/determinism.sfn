@@ -1,0 +1,329 @@
+// compiler/src/build/determinism.sfn
+//
+// Determinism (pass-2 / sidecar) check orchestration extracted from
+// cli_main.sfn (SFEP-0027 §3.1, issue #1732). Behavior-preserving
+// move: bodies are verbatim; this module is pure `![io]` build-driver
+// orchestration (no fixups, no post-processing of compiler output).
+import {
+    DeterminismModule,
+    DeterminismSnapshot,
+    compare_for_determinism,
+    determinism_diff_to_json,
+    determinism_diff_to_text,
+    make_determinism_module
+} from "../build_report";
+import { capsule_artifact_manifest_path, is_safe_scope_name, parse_scope_name } from "../capsule_artifact";
+import { _sha256_of_file_cmd, _shell_single_quote_arg } from "../cli_commands_utils";
+import { number_to_string } from "../main";
+import { _find_substring_from, _resolve_self_path } from "./paths";
+
+// -------------------------------------------------------------------
+// Determinism check (issue #779)
+// -------------------------------------------------------------------
+//
+// `sfn build --check-determinism` runs the build twice and compares
+// the two passes. The second pass re-invokes this same compiler
+// binary as a subprocess with a sibling `--work-dir` so the
+// two passes don't stomp each other's intermediate artifacts.
+//
+// The helpers below capture pass 1's snapshot by parsing the
+// per-capsule sidecar JSON off disk (the same source pass 2 will
+// read), then drive pass 2 as a subprocess against a sibling
+// `--work-dir`, then snapshot pass 2 the same way, and emit the
+// diff.
+//
+// Pass 1's sidecar is overwritten on disk by pass 2 (sidecars are
+// always written under `build/capsules/<scope>/<name>/manifest.json`
+// regardless of `--work-dir`), so the orchestrator reads pass 1's
+// sidecar BEFORE invoking pass 2. Using the same `_read_sidecar_modules`
+// path for both passes keeps the comparison symmetric: capsules
+// whose `[capsule].name` isn't in scope/name form (the compiler
+// self-host's `name = "sailfin"` is the canonical example —
+// `_emit_capsule_artifact_sidecar` skips emission in that case)
+// produce empty module lists on BOTH sides, so the check
+// gracefully degrades to a binary-sha256 comparison. Pulling pass
+// 1's modules from the in-memory `module_events` instead would
+// inject the full module list into the pass 1 snapshot while
+// pass 2 stayed empty, surfacing every module as `only_in_a`
+// even on a perfectly deterministic self-host build.
+//
+// The pure comparator (`compare_for_determinism` in `build_report.sfn`)
+// is unit-tested independently in
+// `compiler/tests/unit/build_report_determinism_test.sfn`.
+// Resolve the capsule's sidecar path for `-p` builds, or `""` for
+// positional builds and capsules whose `[capsule].name` isn't in
+// safe scope/name form (the compiler self-host's `name = "sailfin"`
+// is the canonical example — single-segment, so no sidecar). When
+// this returns `""`, the determinism check falls back to comparing
+// only the binary sha256.
+fn _sidecar_path_for_capsule(capsule_name: string) -> string {
+    if capsule_name.length == 0 { return ""; }
+    let parts = parse_scope_name(capsule_name);
+    if parts.scope.length == 0 { return ""; }
+    if !is_safe_scope_name(parts.scope, parts.name) { return ""; }
+    return capsule_artifact_manifest_path(parts.scope, parts.name);
+}
+
+// Parse the `modules` array out of a capsule artifact `manifest.json`
+// string.
+//
+// CONTRACT: this parser is intentionally minimal and assumes the
+// exact JSON shape emitted by `capsule_artifact.sfn::_ca_json_module_entry`:
+//   `{"slug":"X","ir_path":"Y","cache_key":"Z"}`
+// flat objects with no whitespace inside the `modules` array. The
+// two fields it extracts have constrained value spaces by
+// construction:
+//   - `slug` is produced by `module_name_from_path`, which
+//     emits `/`-separated path components without `"`, `\`, or `]`.
+//   - `cache_key` is the sha256 hex of `CacheKey.digest` — strictly
+//     `[0-9a-f]{64}` or `""` (caching disabled / digest rejected).
+// `ir_path` is skipped entirely; the embedded `]`-or-`"` risk for
+// arbitrary path strings is irrelevant since this parser never
+// reads it.
+//
+// If/when manifest emission gains fields with arbitrary string
+// content (or `modules` entries grow nested arrays), swap this
+// helper for `capsules/sfn/json` — that's the deferred path the
+// architect verdict on #341 left open.
+//
+// Returns `[]` if the `modules` field is absent or the array is
+// empty. The `_do_determinism_check` caller separately verifies
+// that the sidecar FILE exists when one is expected, so an empty
+// return here means "manifest exists but has no module entries"
+// (a `-p` build with zero deps), never "manifest missing".
+fn _extract_modules_from_manifest_json(content: string) -> DeterminismModule[] {
+    let mut out: DeterminismModule[] = [];
+    let modules_marker = "\"modules\":[";
+    let modules_start = _find_substring_from(content, modules_marker, 0);
+    if modules_start < 0 { return out; }
+    let array_start = modules_start + modules_marker.length;
+    // The first `]` after the array start closes the modules array.
+    // Slug + cache_key values are sha256 hex or path slugs and
+    // cannot contain `]`, so this naive scan is safe for the
+    // generated JSON shape.
+    let array_end = _find_substring_from(content, "]", array_start);
+    if array_end < 0 { return out; }
+
+    let slug_marker = "\"slug\":\"";
+    let cache_key_marker = "\"cache_key\":\"";
+    let mut pos = array_start;
+    loop {
+        if pos >= array_end { break; }
+        let slug_start = _find_substring_from(content, slug_marker, pos);
+        if slug_start < 0 { break; }
+        if slug_start >= array_end { break; }
+        let svs = slug_start + slug_marker.length;
+        let sve = _find_substring_from(content, "\"", svs);
+        if sve < 0 { break; }
+        if sve > array_end { break; }
+        let slug = substring(content, svs, sve);
+
+        let ck_start = _find_substring_from(content, cache_key_marker, sve);
+        if ck_start < 0 { break; }
+        if ck_start >= array_end { break; }
+        let cvs = ck_start + cache_key_marker.length;
+        let cve = _find_substring_from(content, "\"", cvs);
+        if cve < 0 { break; }
+        if cve > array_end { break; }
+        let cache_key = substring(content, cvs, cve);
+
+        out.push(make_determinism_module(slug, cache_key));
+        pos = cve + 1;
+    }
+    return out;
+}
+
+// Derive pass 2's work-dir from pass 1's. A sibling directory
+// keeps the two builds completely isolated (cache entries write
+// to a shared `build/cache/v1` root by design — that's what the
+// determinism check exercises — but intermediate `.ll` / `.o` /
+// binary outputs never collide). When pass 1 has no `--work-dir`,
+// pass 2 falls back to `build/det-pass2`.
+fn _derive_pass2_work_dir(pass1_work_dir: string) -> string {
+    if pass1_work_dir.length == 0 { return "build/det-pass2"; }
+    return pass1_work_dir + "-pass2";
+}
+
+// Compute pass 2's effective binary path. Pass 2 always provides
+// `--work-dir`, so the default `out_path` derivation in the build
+// subcommand routes through the `work_dir.length > 0` branch:
+// `<work_dir>/sailfin/program.o` for libraries, `<work_dir>/native/sailfin`
+// for binaries.
+fn _pass2_out_path(pass2_work_dir: string, is_library: boolean) -> string {
+    if is_library { return pass2_work_dir + "/sailfin/program.o"; }
+    return pass2_work_dir + "/native/sailfin";
+}
+
+// Reconstruct the second pass's argv and invoke it as a subprocess.
+// Intentionally omits `--no-cache` (per the architect's lean —
+// pass 2 with cache is the realistic regression mode) and
+// `--check-determinism` (no recursion). Forces `--work-dir` to a
+// sibling of pass 1's; never propagates `-o` (pass 2 derives from
+// its own work-dir).
+//
+// In `--json` mode pass 2's stdout/stderr are routed to `/dev/null`
+// through `sh -c "<argv> >/dev/null 2>&1"` so the orchestrator's
+// determinism-diff JSON line stays the sole structured output on
+// stdout (alongside pass 1's BuildReport JSON that the existing
+// build path already emits). Without this, pass 2 would print its
+// own `build` BuildReport JSON and the `[capsule-artifact] ...`
+// stderr lines to the same stream the caller is parsing, breaking
+// the "one line per logical event" contract of `--json`.
+//
+// In non-`--json` mode pass 2's output is left to inherit so a
+// human watching the build sees both passes' `built:` / cache
+// summary lines.
+fn _run_determinism_pass2(self_exe: string, capsule_path: string, input_path: string, pass2_work_dir: string, cache_trace_flag: boolean, json_flag: boolean) -> int ![io] {
+    let mut args: string[] = [];
+    args.push(self_exe);
+    args.push("build");
+    args.push("--work-dir");
+    args.push(pass2_work_dir);
+    if cache_trace_flag { args.push("--cache-trace"); }
+    if json_flag { args.push("--json"); }
+    if capsule_path.length > 0 {
+        args.push("-p");
+        args.push(capsule_path);
+    } else { args.push(input_path); }
+    if json_flag {
+        // Shell-quote each arg so paths with spaces / metacharacters
+        // (e.g. `--work-dir "with spaces"`) survive the wrapper.
+        let mut cmd: string = "";
+        let mut i: int = 0;
+        loop {
+            if i >= args.length { break; }
+            if i > 0 { cmd = cmd + " "; }
+            cmd = cmd + _shell_single_quote_arg(args[i]);
+            i += 1;
+        }
+        cmd = cmd + " >/dev/null 2>&1";
+        return process.run(["sh", "-c", cmd]);
+    }
+    return process.run(args);
+}
+
+// Read pass 2's sidecar (now overwritten on disk by the subprocess)
+// and extract its module list. `""` sidecar_path covers the
+// no-sidecar case (positional builds, compiler self-host) —
+// fall through to an empty list and let the binary sha256
+// carry the determinism check.
+//
+// The caller (`_do_determinism_check`) is responsible for
+// verifying that the sidecar exists when `sidecar_path` is
+// non-empty BEFORE calling this helper. A missing sidecar at a
+// non-empty path is a bug (the build was supposed to write it)
+// and would silently downgrade the check to binary-only here,
+// hiding the failure. Pre-checking lets the orchestrator surface
+// the missing-sidecar case as a hard error.
+fn _read_sidecar_modules(sidecar_path: string) -> DeterminismModule[] ![io] {
+    let empty: DeterminismModule[] = [];
+    if sidecar_path.length == 0 { return empty; }
+    if !fs.exists(sidecar_path) { return empty; }
+    let content = fs.readFile(sidecar_path);
+    return _extract_modules_from_manifest_json(content);
+}
+
+// Run the full determinism orchestration after a successful first
+// pass: snapshot pass 1, run pass 2, snapshot pass 2, diff, emit.
+// Returns the process exit code: 0 on match, non-zero on mismatch
+// or pass-2 failure.
+fn _do_determinism_check(pass1_out: string, is_library: boolean, cap_capsule_name: string, work_dir: string, capsule_path: string, input_path: string, binary_dir: string, cache_trace_flag: boolean, json_flag: boolean) -> int ![io] {
+    let pass1_sha = _sha256_of_file_cmd(pass1_out);
+    if pass1_sha.length == 0 {
+        if !json_flag {
+            print.err("[determinism] failed to sha256 first-pass binary: "
+                + pass1_out);
+        }
+        return 1;
+    }
+    // Read pass 1's sidecar BEFORE pass 2 runs — pass 2 will
+    // overwrite the same `build/capsules/<scope>/<name>/manifest.json`
+    // path because sidecar emission isn't gated by `--work-dir`.
+    // Capsules without scope/name form (compiler self-host) get
+    // an empty list from `_read_sidecar_modules`; pass 2 will see
+    // the same empty list later, so the comparison stays symmetric.
+    //
+    // When `sidecar_path` IS non-empty (`-p` build with safe
+    // scope/name), the file must exist — `_emit_capsule_artifact_sidecar`
+    // ran just before we entered this function. A missing file
+    // here means the sidecar emitter failed silently (or the file
+    // was concurrently deleted) and would silently downgrade the
+    // check to binary-only, hiding the failure. Surface it.
+    let sidecar_path = _sidecar_path_for_capsule(cap_capsule_name);
+    if sidecar_path.length > 0 {
+        if !fs.exists(sidecar_path) {
+            if !json_flag {
+                print.err("[determinism] expected pass-1 sidecar missing: "
+                    + sidecar_path);
+            }
+            return 1;
+        }
+    }
+    let pass1_modules = _read_sidecar_modules(sidecar_path);
+    let pass1_snap = DeterminismSnapshot {
+        binary_path: pass1_out,
+        binary_sha256: pass1_sha,
+        modules: pass1_modules
+    };
+
+    let pass2_work_dir = _derive_pass2_work_dir(work_dir);
+    let pass2_out = _pass2_out_path(pass2_work_dir, is_library);
+    // #1482: resolve through `_resolve_self_path` so the `.exe`
+    // variants are tried on Windows (and the binary's existence is
+    // verified) instead of blindly concatenating `<dir>/sailfin`. On
+    // POSIX the first candidate (`sailfin`) matches, so this is
+    // behavior-identical there.
+    let self_exe = _resolve_self_path(binary_dir);
+    if self_exe.length == 0 {
+        if !json_flag {
+            print.err("[determinism] cannot locate self binary (binary_dir=\""
+                + binary_dir
+                + "\")");
+        }
+        return 1;
+    }
+
+    let pass2_rc = _run_determinism_pass2(self_exe, capsule_path, input_path, pass2_work_dir, cache_trace_flag, json_flag);
+    if pass2_rc != 0 {
+        if !json_flag {
+            print.err("[determinism] pass-2 build failed (exit="
+                + number_to_string(pass2_rc)
+                + ")");
+        }
+        return pass2_rc;
+    }
+
+    let pass2_sha = _sha256_of_file_cmd(pass2_out);
+    if pass2_sha.length == 0 {
+        if !json_flag {
+            print.err("[determinism] failed to sha256 second-pass binary: "
+                + pass2_out);
+        }
+        return 1;
+    }
+    // Sidecar path is the same as pass 1's; pass 2 overwrote the
+    // file in place, so this read returns pass 2's data. Same
+    // missing-file invariant as pass 1.
+    if sidecar_path.length > 0 {
+        if !fs.exists(sidecar_path) {
+            if !json_flag {
+                print.err("[determinism] expected pass-2 sidecar missing: "
+                    + sidecar_path);
+            }
+            return 1;
+        }
+    }
+    let pass2_modules = _read_sidecar_modules(sidecar_path);
+    let pass2_snap = DeterminismSnapshot {
+        binary_path: pass2_out,
+        binary_sha256: pass2_sha,
+        modules: pass2_modules
+    };
+
+    let diff = compare_for_determinism(pass1_snap, pass2_snap);
+    if json_flag { print(determinism_diff_to_json(diff)); } else {
+        print(determinism_diff_to_text(diff));
+    }
+    if diff.matched { return 0; }
+    return 1;
+}
