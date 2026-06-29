@@ -1,0 +1,207 @@
+// Regression coverage for the stdlib `StrMap` (#1710) — a concrete,
+// non-generic, string-keyed map. It lives in `runtime/sfn/collections.sfn`
+// (a regular module, imported here) rather than the prelude: a prelude call
+// whose return type is a freshly-declared struct cannot resolve its
+// signature from a separately-compiled consumer in the current seed, while a
+// module import merges the source and resolves it.
+import {
+    StrMap,
+    str_map_delete,
+    str_map_get,
+    str_map_has,
+    str_map_keys,
+    str_map_len,
+    str_map_new,
+    str_map_set
+} from "../../../runtime/sfn/collections";
+
+// Decimal-only itoa for generating distinct keys/values in the bulk and
+// collision tests (the seed lexer has no `0x` support; mirrors the
+// prelude's own decimal-constant discipline).
+fn _itoa(n: int) -> string {
+    if n == 0 { return "0"; }
+    let mut x: int = n;
+    let mut s: string = "";
+    loop {
+        if x <= 0 { break; }
+        let d: int = x % 10;
+        s = char_from_code(48 + d) + s;
+        x = x / 10;
+    }
+    return s;
+}
+
+test "str_map: get on a present key returns its value" {
+    let mut m: StrMap = str_map_new();
+    m = str_map_set(m, "alpha", "1");
+    let r: string? = str_map_get(m, "alpha");
+    if r == null { assert false; } else { assert strings_equal(r, "1"); }
+}
+
+test "str_map: get on an absent key returns null" {
+    let m: StrMap = str_map_new();
+    let r: string? = str_map_get(m, "missing");
+    assert r == null;
+}
+
+test "str_map: empty-string value is distinct from absent" {
+    let mut m: StrMap = str_map_new();
+    m = str_map_set(m, "k", "");
+    let present: string? = str_map_get(m, "k");
+    if present == null { assert false; } else {
+        assert strings_equal(present, "");
+    }
+    let absent: string? = str_map_get(m, "other");
+    assert absent == null;
+}
+
+test "str_map: empty-string key is a valid, distinct key" {
+    let mut m: StrMap = str_map_new();
+    m = str_map_set(m, "", "empty-key");
+    assert str_map_has(m, "");
+    let r: string? = str_map_get(m, "");
+    if r == null { assert false; } else {
+        assert strings_equal(r, "empty-key");
+    }
+    // The default (state-0) slots also carry "" — confirm the empty key does
+    // not alias a never-set key, and a non-empty key is unaffected.
+    assert str_map_has(m, "never") == false;
+    m = str_map_set(m, "k", "v");
+    assert str_map_len(m) == 2;
+    m = str_map_delete(m, "");
+    assert str_map_has(m, "") == false;
+    assert str_map_has(m, "k");
+    assert str_map_len(m) == 1;
+}
+
+test "str_map: set overwrites an existing key" {
+    let mut m: StrMap = str_map_new();
+    m = str_map_set(m, "k", "first");
+    m = str_map_set(m, "k", "second");
+    assert str_map_len(m) == 1;
+    let r: string? = str_map_get(m, "k");
+    if r == null { assert false; } else {
+        assert strings_equal(r, "second");
+    }
+}
+
+test "str_map: has reflects presence and absence" {
+    let mut m: StrMap = str_map_new();
+    m = str_map_set(m, "yes", "v");
+    assert str_map_has(m, "yes");
+    assert str_map_has(m, "no") == false;
+}
+
+test "str_map: delete removes a key and updates has/len" {
+    let mut m: StrMap = str_map_new();
+    m = str_map_set(m, "a", "1");
+    m = str_map_set(m, "b", "2");
+    assert str_map_len(m) == 2;
+    m = str_map_delete(m, "a");
+    assert str_map_len(m) == 1;
+    assert str_map_has(m, "a") == false;
+    assert str_map_has(m, "b");
+    let ga: string? = str_map_get(m, "a");
+    assert ga == null;
+    let gb: string? = str_map_get(m, "b");
+    if gb == null { assert false; } else { assert strings_equal(gb, "2"); }
+}
+
+test "str_map: delete of an absent key is a no-op" {
+    let mut m: StrMap = str_map_new();
+    m = str_map_set(m, "a", "1");
+    m = str_map_delete(m, "ghost");
+    assert str_map_len(m) == 1;
+    assert str_map_has(m, "a");
+}
+
+test "str_map: reinsert after delete works (tombstone reuse)" {
+    let mut m: StrMap = str_map_new();
+    m = str_map_set(m, "a", "1");
+    m = str_map_delete(m, "a");
+    assert str_map_has(m, "a") == false;
+    m = str_map_set(m, "a", "2");
+    assert str_map_has(m, "a");
+    assert str_map_len(m) == 1;
+    let r: string? = str_map_get(m, "a");
+    if r == null { assert false; } else { assert strings_equal(r, "2"); }
+}
+
+test "str_map: keys length matches len and contains live keys" {
+    let mut m: StrMap = str_map_new();
+    m = str_map_set(m, "a", "1");
+    m = str_map_set(m, "b", "2");
+    m = str_map_set(m, "c", "3");
+    m = str_map_delete(m, "b");
+    let ks: string[] = str_map_keys(m);
+    assert ks.length == str_map_len(m);
+    assert ks.length == 2;
+    // membership (order is not guaranteed)
+    let mut saw_a: boolean = false;
+    let mut saw_c: boolean = false;
+    let mut saw_b: boolean = false;
+    let mut i: int = 0;
+    loop {
+        if i >= ks.length { break; }
+        if strings_equal(ks[i], "a") { saw_a = true; }
+        if strings_equal(ks[i], "b") { saw_b = true; }
+        if strings_equal(ks[i], "c") { saw_c = true; }
+        i = i + 1;
+    }
+    assert saw_a;
+    assert saw_c;
+    assert saw_b == false;
+}
+
+test "str_map: many keys round-trip correctly across resizes (collisions)" {
+    let mut m: StrMap = str_map_new();
+    let n: int = 500;
+    let mut i: int = 0;
+    loop {
+        if i >= n { break; }
+        m = str_map_set(m, "key" + _itoa(i), "val" + _itoa(i));
+        i = i + 1;
+    }
+    assert str_map_len(m) == n;
+    // Every inserted key must resolve to its own value — proves probing
+    // resolves collisions correctly after multiple resizes.
+    let mut j: int = 0;
+    loop {
+        if j >= n { break; }
+        let r: string? = str_map_get(m, "key" + _itoa(j));
+        if r == null { assert false; } else {
+            assert strings_equal(r, "val" + _itoa(j));
+        }
+        j = j + 1;
+    }
+    // An out-of-range key is still absent.
+    let miss: string? = str_map_get(m, "key" + _itoa(n));
+    assert miss == null;
+}
+
+test "str_map: 10k inserts stay correct (no quadratic-blowup smoke)" {
+    let mut m: StrMap = str_map_new();
+    let n: int = 10000;
+    let mut i: int = 0;
+    loop {
+        if i >= n { break; }
+        m = str_map_set(m, "k" + _itoa(i), "v" + _itoa(i));
+        i = i + 1;
+    }
+    assert str_map_len(m) == n;
+    let first: string? = str_map_get(m, "k0");
+    if first == null { assert false; } else {
+        assert strings_equal(first, "v0");
+    }
+    let last: string? = str_map_get(m, "k9999");
+    if last == null { assert false; } else {
+        assert strings_equal(last, "v9999");
+    }
+    // Overwrite a key in a large table; len is unchanged.
+    m = str_map_set(m, "k0", "OVER");
+    let over: string? = str_map_get(m, "k0");
+    if over == null { assert false; } else {
+        assert strings_equal(over, "OVER");
+    }
+    assert str_map_len(m) == n;
+}

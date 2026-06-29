@@ -1,0 +1,240 @@
+// runtime/sfn/collections.sfn
+//
+// `StrMap` (#1710) — a concrete, non-generic, string-keyed map for the
+// Sailfin standard library. It bridges the gap until a generic `HashMap`
+// lands with the generic-constraints epic; when generics ship, `StrMap`
+// becomes a deprecated alias. The representation is open-addressed (linear
+// probing) with tombstone deletion and load-factor-triggered growth, so N
+// inserts stay amortized O(1) rather than the O(N) linear scan a flat
+// parallel-array map would force. It uses only shipped language features
+// (structs, arrays, loops) — no new builtin or intrinsic — so it adds
+// nothing to the seed registry.
+//
+// It lives in a standalone module (consumers `import` it) rather than in
+// `runtime/prelude.sfn`: the prelude is linked as an external runtime, so a
+// separately-compiled consumer cannot resolve a prelude call whose return
+// type is a freshly-declared struct/array (the documented seed gap in
+// `compiler/src/cli_commands_utils.sfn`). A regular module import merges the
+// source, so the `StrMap`-returning API resolves correctly.
+//
+// `slot_state` encodes each slot: 0 = empty, 1 = live, 2 = tombstone.
+// `slot_key` / `slot_val` are the parallel key/value arrays. `count` is the
+// number of live entries; `used` counts live + tombstone slots and drives
+// the resize threshold so a probe always terminates at an empty slot (the
+// table never exceeds 75% live+tombstone occupancy).
+struct StrMap {
+    slot_state: int[];
+    slot_key: string[];
+    slot_val: string[];
+    cap: int;
+    count: int;
+    used: int;
+}
+
+// FNV-1a-style hash of `key`, masked to 32 bits after each step (decimal
+// constants — the seed lexer has no `0x` support). This mirrors the
+// `sfn/crypto` byte-loop: `char_code(key[i]) & 255` mixes the low 8 bits of
+// each position over `i < key.length`. Distinct codepoints sharing a low
+// byte collide in the mix, which is a distribution detail only — collisions
+// are resolved by probing — and ASCII keys (the common case) are unaffected.
+// The `& 4294967295` mask keeps the running hash a non-negative i64 so the
+// multiply never overflows and the caller's `& (cap-1)` stays non-negative.
+fn _fnv1a(key: string) -> int {
+    let mut h: int = 2166136261;
+    let mut i: int = 0;
+    loop {
+        if i >= key.length { break; }
+        let c: int = char_code(key[i]) & 255;
+        h = h ^ c;
+        h = (h * 16777619) & 4294967295;
+        i = i + 1;
+    }
+    return h & 4294967295;
+}
+
+// Allocate a StrMap with `cap` (power-of-two) empty slots.
+fn _str_map_with_cap(cap: int) -> StrMap {
+    let mut st: int[] = [];
+    let mut sk: string[] = [];
+    let mut sv: string[] = [];
+    let mut i: int = 0;
+    loop {
+        if i >= cap { break; }
+        st.push(0);
+        sk.push("");
+        sv.push("");
+        i = i + 1;
+    }
+    return StrMap {
+        slot_state: st,
+        slot_key: sk,
+        slot_val: sv,
+        cap: cap,
+        count: 0,
+        used: 0
+    };
+}
+
+// Construct an empty map (16 slots).
+fn str_map_new() -> StrMap { return _str_map_with_cap(16); }
+
+// Number of live entries.
+fn str_map_len(m: StrMap) -> int { return m.count; }
+
+// Double the table and rehash live entries, dropping tombstones.
+fn _str_map_resize(m: StrMap) -> StrMap {
+    let newcap: int = m.cap * 2;
+    let mut n: StrMap = _str_map_with_cap(newcap);
+    let mut i: int = 0;
+    loop {
+        if i >= m.cap { break; }
+        if m.slot_state[i] == 1 {
+            n = str_map_set(n, m.slot_key[i], m.slot_val[i]);
+        }
+        i = i + 1;
+    }
+    return n;
+}
+
+// Insert or overwrite `key` -> `value`. Grows at 75% live+tombstone load so
+// probing always terminates at an empty slot. Returns the updated map
+// (value-struct convention — the caller rebinds).
+fn str_map_set(m: StrMap, key: string, value: string) -> StrMap {
+    let mut mm: StrMap = m;
+    if (mm.used + 1) * 4 >= mm.cap * 3 { mm = _str_map_resize(mm); }
+    let mask: int = mm.cap - 1;
+    let mut idx: int = _fnv1a(key) & mask;
+    let mut first_tomb: int = -1;
+    loop {
+        let st: int = mm.slot_state[idx];
+        if st == 0 {
+            // First empty slot ends the probe. Reuse an earlier tombstone if
+            // one was seen so the table stays compact.
+            if first_tomb >= 0 {
+                mm.slot_state[first_tomb] = 1;
+                mm.slot_key[first_tomb] = key;
+                mm.slot_val[first_tomb] = value;
+                return StrMap {
+                    slot_state: mm.slot_state,
+                    slot_key: mm.slot_key,
+                    slot_val: mm.slot_val,
+                    cap: mm.cap,
+                    count: mm.count + 1,
+                    used: mm.used
+                };
+            }
+            mm.slot_state[idx] = 1;
+            mm.slot_key[idx] = key;
+            mm.slot_val[idx] = value;
+            return StrMap {
+                slot_state: mm.slot_state,
+                slot_key: mm.slot_key,
+                slot_val: mm.slot_val,
+                cap: mm.cap,
+                count: mm.count + 1,
+                used: mm.used + 1
+            };
+        }
+        if st == 2 {
+            if first_tomb < 0 { first_tomb = idx; }
+        }
+        if st == 1 {
+            if strings_equal(mm.slot_key[idx], key) {
+                mm.slot_val[idx] = value;
+                return StrMap {
+                    slot_state: mm.slot_state,
+                    slot_key: mm.slot_key,
+                    slot_val: mm.slot_val,
+                    cap: mm.cap,
+                    count: mm.count,
+                    used: mm.used
+                };
+            }
+        }
+        idx = (idx + 1) & mask;
+    }
+}
+
+// Look up `key`. Returns the value, or `null` when the key is absent (the
+// documented missing-key sentinel). A present key whose value is the empty
+// string returns `""`, distinct from `null`.
+fn str_map_get(m: StrMap, key: string) -> string? {
+    let mask: int = m.cap - 1;
+    let mut idx: int = _fnv1a(key) & mask;
+    loop {
+        let st: int = m.slot_state[idx];
+        if st == 0 { return null; }
+        if st == 1 {
+            if strings_equal(m.slot_key[idx], key) {
+                return m.slot_val[idx];
+            }
+        }
+        idx = (idx + 1) & mask;
+    }
+}
+
+// Whether `key` is present.
+fn str_map_has(m: StrMap, key: string) -> boolean {
+    let mask: int = m.cap - 1;
+    let mut idx: int = _fnv1a(key) & mask;
+    loop {
+        let st: int = m.slot_state[idx];
+        if st == 0 { return false; }
+        if st == 1 {
+            if strings_equal(m.slot_key[idx], key) { return true; }
+        }
+        idx = (idx + 1) & mask;
+    }
+}
+
+// Remove `key` if present (tombstone). `used` is unchanged — the slot still
+// blocks probing until a resize reclaims it. Returns the updated map; an
+// absent key returns it unchanged.
+fn str_map_delete(m: StrMap, key: string) -> StrMap {
+    let mut mm: StrMap = m;
+    let mask: int = mm.cap - 1;
+    let mut idx: int = _fnv1a(key) & mask;
+    loop {
+        let st: int = mm.slot_state[idx];
+        if st == 0 { return mm; }
+        if st == 1 {
+            if strings_equal(mm.slot_key[idx], key) {
+                mm.slot_state[idx] = 2;
+                mm.slot_key[idx] = "";
+                mm.slot_val[idx] = "";
+                return StrMap {
+                    slot_state: mm.slot_state,
+                    slot_key: mm.slot_key,
+                    slot_val: mm.slot_val,
+                    cap: mm.cap,
+                    count: mm.count - 1,
+                    used: mm.used
+                };
+            }
+        }
+        idx = (idx + 1) & mask;
+    }
+}
+
+// Live keys, in arbitrary (non-guaranteed) order.
+fn str_map_keys(m: StrMap) -> string[] {
+    let mut out: string[] = [];
+    let mut i: int = 0;
+    loop {
+        if i >= m.cap { break; }
+        if m.slot_state[i] == 1 { out.push(m.slot_key[i]); }
+        i = i + 1;
+    }
+    return out;
+}
+
+export {
+    StrMap,
+    str_map_new,
+    str_map_set,
+    str_map_get,
+    str_map_has,
+    str_map_delete,
+    str_map_keys,
+    str_map_len
+};
