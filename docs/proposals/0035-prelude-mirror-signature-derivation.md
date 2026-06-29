@@ -1,18 +1,18 @@
 ---
-sfep: TBD
+sfep: 0035
 title: Deriving prelude-mirror registry signatures from the prelude (kill latent ABI drift)
-status: Draft
+status: Accepted
 type: runtime
 created: 2026-06-29
 updated: 2026-06-29
 author: "agent:compiler-architect; human review"
-tracking: "#572"
+tracking: "#572, #1779, #1780"
 supersedes:
 superseded-by:
 graduates-to:
 ---
 
-# SFEP-XXXX — Deriving prelude-mirror registry signatures from the prelude (kill latent ABI drift)
+# SFEP-0035 — Deriving prelude-mirror registry signatures from the prelude (kill latent ABI drift)
 
 > Re-grooming of issue #572 ("derive prelude-mirror registry signatures from
 > prelude AST"). The issue was filed 2026-05-14; the runtime landscape has moved
@@ -468,7 +468,7 @@ only by the first and picked up promptly once it lands — not deferred.
 
 - **Type:** `type:enhancement` (correctness gate) · `area:llvm` ·
   `priority:` (pre-1.0; closes a latent silent-miscompile class).
-- **Design:** SFEP-XXXX §3.1.
+- **Design:** SFEP-0035 §3.1.
 - **In:**
   - Extend `render_runtime_helper_declarations` (`rendering.sfn:306-325`) so a
     `target == symbol && native_signature == null` mirror row, when its symbol
@@ -506,7 +506,7 @@ only by the first and picked up promptly once it lands — not deferred.
 
 - **Type:** `type:refactor` · `area:llvm` · actionable; sequenced immediately
   after Sub-issue 1 (the guard is its safety predecessor, not a postponement).
-- **Design:** SFEP-XXXX §3.2 / §6 Option C.
+- **Design:** SFEP-0035 §3.2 / §6 Option C.
 - **In:**
   - Have the declare-emitter source the mirror symbols' declares from the
     prelude's emitted define directly (Option C), and **remove** the 6
