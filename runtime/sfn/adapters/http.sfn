@@ -1030,6 +1030,289 @@ fn sfn_http_request_raw(method: * u8, url: * u8, headers: * u8, body: * u8) -> *
     return resp;
 }
 
+// ── keep-alive client (single-connection reuse, #1711) ────────────
+// Optional single-connection reuse for back-to-back requests to the same
+// authority (gap B4 of epic #1540). Unlike `sfn_http_get` / `_post` /
+// `_request_raw` — which open a fresh connection, send `Connection: close`,
+// and drain the response to EOF — these helpers keep one connection open
+// across calls: `sfn_http_conn_open` connects, `sfn_http_conn_send` issues a
+// request with `Connection: keep-alive` and reads exactly one Content-Length-
+// framed response (so the connection stays open), and `sfn_http_conn_close`
+// closes it. v0 limits match the rest of the adapter (no TLS; localhost /
+// dotted-quad / getaddrinfo host) plus: the kept-alive response MUST be
+// Content-Length framed (the Sailfin keep-alive server always sends it) —
+// chunked or close-delimited keep-alive responses are out of scope, and HTTP
+// pipelining is not used (one request per round-trip).
+// `_resp_content_length(resp, header_end)` — the declared response
+// `Content-Length` from the head `[0, header_end)`, or -1 if absent. Anchored
+// to a header-line start (`\r\ncontent-length:`) and bounded to the head;
+// case-insensitive (RFC 7230 §3.2). Leading OWS before the value is skipped.
+fn _resp_content_length(resp: * u8, header_end: i64) -> i64 {
+    let needle: string = "\r\ncontent-length:";
+    let idx: i64 = _ci_find(resp, header_end, needle as * u8, 17);
+    if idx < 0 { return 0 - 1; }
+    // The value starts after the 17-char "\r\ncontent-length:" token.
+    let mut pos: i64 = idx + 17;
+    loop {
+        if pos >= header_end { break; }
+        let ws: i64 = _byte_at(resp, pos);
+        if ws == 32 || ws == 9 {
+            pos = pos + 1;
+            continue;
+        }
+        break;
+    }
+    let mut value: i64 = 0;
+    let mut digits: i64 = 0;
+    loop {
+        if pos >= header_end { break; }
+        let b: i64 = _byte_at(resp, pos);
+        if b < 48 || b > 57 { break; }
+        value = value * 10 + (b - 48);
+        digits = digits + 1;
+        pos = pos + 1;
+    }
+    if digits == 0 { return 0 - 1; }
+    return value;
+}
+
+// `_recv_one_response(fd, len_slot)` — read exactly ONE HTTP/1.1 response from
+// a (possibly kept-alive) connection, delimited by `Content-Length` rather
+// than EOF. Returns the FULL raw response (status line + headers + body),
+// NUL-terminated and caller-owned, with the exact byte length via `len_slot`;
+// null on a recv error or a missing header terminator. Unlike `_recv_all`
+// (which drains to EOF, relying on the server's `Connection: close`), this
+// stops at the response boundary so the connection stays open for the next
+// request. A response with no `Content-Length` is taken as head-only (the v0
+// keep-alive server always frames with `Content-Length`). The buffer is
+// over-allocated by 4 trailing bytes so the masked 4-byte reads in
+// `_resp_content_length` never fault at the final head offset.
+fn _recv_one_response(fd: i32, len_slot: * i64) -> * u8 ![net] {
+    atomic_store(len_slot, 0);
+    let mut capacity: i64 = 8192;
+    let mut len: i64 = 0;
+    let mut buf: * u8 = malloc((capacity + 4) as usize);
+    if buf as i64 == 0 { return null; }
+    let chunk: i64 = 8192;
+    let terminator: string = "\r\n\r\n";
+
+    // Phase 1 — read until the `\r\n\r\n` header terminator (or EOF/error).
+    let mut header_end: i64 = 0 - 1;
+    loop {
+        if len + chunk > capacity {
+            let new_cap: i64 = capacity * 2;
+            let new_buf: * u8 = realloc(buf, (new_cap + 4) as usize);
+            if new_buf as i64 == 0 {
+                free(buf);
+                return null;
+            }
+            buf = new_buf;
+            capacity = new_cap;
+        }
+        let n: i64 = recv(fd, _ptr_off(buf, len), chunk, 0);
+        if n < 0 {
+            free(buf);
+            return null;
+        }
+        if n == 0 { break; }
+        len = len + n;
+        memset(_ptr_off(buf, len), 0, 1 as usize);
+        let term_ptr: * u8 = strstr(buf, terminator as * u8);
+        if (term_ptr as i64) != 0 {
+            header_end = ((term_ptr as i64) - (buf as i64)) + 4;
+            break;
+        }
+    }
+    if header_end < 0 {
+        free(buf);
+        return null;
+    }
+
+    // Phase 2 — drain exactly `Content-Length` body bytes, if any.
+    let content_length: i64 = _resp_content_length(buf, header_end);
+    if content_length <= 0 {
+        memset(_ptr_off(buf, len), 0, 1 as usize);
+        atomic_store(len_slot, len);
+        return buf;
+    }
+    let body_target: i64 = header_end + content_length;
+    loop {
+        if len >= body_target { break; }
+        if body_target + 4 > capacity {
+            let mut new_cap: i64 = capacity;
+            loop {
+                if new_cap >= body_target + 4 { break; }
+                new_cap = new_cap * 2;
+            }
+            let new_buf: * u8 = realloc(buf, (new_cap + 4) as usize);
+            if new_buf as i64 == 0 {
+                free(buf);
+                return null;
+            }
+            buf = new_buf;
+            capacity = new_cap;
+        }
+        let want: i64 = body_target - len;
+        let n: i64 = recv(fd, _ptr_off(buf, len), want, 0);
+        if n < 0 {
+            free(buf);
+            return null;
+        }
+        // Server closed before sending the full declared body: return what
+        // arrived (a short body rather than a hang).
+        if n == 0 { break; }
+        len = len + n;
+    }
+    memset(_ptr_off(buf, len), 0, 1 as usize);
+    atomic_store(len_slot, len);
+    return buf;
+}
+
+// `sfn_http_conn_open(url)` — open a keep-alive TCP connection to the
+// authority in `url`. Returns the connected fd as an i64 (>= 0), or -1 on a
+// null/HTTPS url, an authority parse failure, or a connect failure. The caller
+// issues one or more requests with `sfn_http_conn_send` and closes with
+// `sfn_http_conn_close`. Same v0 host limits as the rest of the adapter.
+fn sfn_http_conn_open(url: * u8) -> i64 ![net] {
+    if url as i64 == 0 { return 0 - 1; }
+    // Reject TLS — no HTTPS in v0.
+    let https: string = "https://";
+    if (strstr(url, https as * u8) as i64) == (url as i64) { return 0 - 1; }
+
+    // Locate the authority: skip past "scheme://" if present.
+    let sep: string = "://";
+    let mut host_start: * u8 = url;
+    let scheme: * u8 = strstr(url, sep as * u8);
+    if scheme as i64 != 0 { host_start = _ptr_off(scheme, 3); }
+
+    let slash: * u8 = strchr(host_start, 47);
+    let mut authority_len: i64 = 0;
+    if slash as i64 != 0 {
+        authority_len = (slash as i64) - (host_start as i64);
+    } else { authority_len = strlen(host_start) as i64; }
+    let authority: * u8 = _strdup_n(host_start, authority_len);
+    if authority as i64 == 0 { return 0 - 1; }
+
+    let mut port: i64 = 80;
+    let colon: * u8 = strchr(authority, 58);
+    if colon as i64 != 0 {
+        port = atoi(_ptr_off(colon, 1)) as i64;
+        memset(colon, 0, 1 as usize);
+    }
+    let fd: i32 = _connect_tcp(authority, port);
+    free(authority);
+    return fd as i64;
+}
+
+// `sfn_http_conn_send(fd, method, url, headers, body)` — send ONE request over
+// an already-open keep-alive connection `fd` and read ONE Content-Length-
+// framed response (the FULL raw response: status line + headers + body),
+// caller-owned and NUL-terminated; null on a send/recv error. Emits
+// `Connection: keep-alive` so the server keeps the connection open for the
+// next call. `url` is re-parsed only for the request path and the `Host`
+// authority; the connection's authority is assumed unchanged from
+// `sfn_http_conn_open` (the caller's "same authority" contract). `headers` is
+// a pre-serialized "Name: value\r\n" block (possibly empty); a `Content-Length`
+// line is emitted only when `body` is non-empty. Same v0 limits as
+// `sfn_http_request_raw`.
+fn sfn_http_conn_send(fd: i64, method: * u8, url: * u8, headers: * u8, body: * u8) -> * u8 ![net] {
+    if fd < 0 { return null; }
+    if url as i64 == 0 { return null; }
+    if method as i64 == 0 { return null; }
+
+    // Parse authority (for the Host line) and path from the url.
+    let sep: string = "://";
+    let mut host_start: * u8 = url;
+    let scheme: * u8 = strstr(url, sep as * u8);
+    if scheme as i64 != 0 { host_start = _ptr_off(scheme, 3); }
+
+    let slash: * u8 = strchr(host_start, 47);
+    let mut authority_len: i64 = 0;
+    if slash as i64 != 0 {
+        authority_len = (slash as i64) - (host_start as i64);
+    } else { authority_len = strlen(host_start) as i64; }
+    let authority: * u8 = _strdup_n(host_start, authority_len);
+    if authority as i64 == 0 { return null; }
+
+    let root: string = "/";
+    let mut path: * u8 = root as * u8;
+    if slash as i64 != 0 { path = slash; }
+
+    // ── Build the request head with Connection: keep-alive ──
+    let sp: string = " ";
+    let proto: string = " HTTP/1.1\r\nHost: ";
+    let crlf: string = "\r\n";
+    let clen_label: string = "Content-Length: ";
+    let conn_keep: string = "Connection: keep-alive\r\n\r\n";
+
+    let method_len: i64 = strlen(method) as i64;
+    let path_len: i64 = strlen(path) as i64;
+    let host_len: i64 = strlen(authority) as i64;
+    let mut headers_len: i64 = 0;
+    if headers as i64 != 0 { headers_len = strlen(headers) as i64; }
+    let mut body_len: i64 = 0;
+    if body as i64 != 0 { body_len = strlen(body) as i64; }
+
+    let mut clen: * u8 = null;
+    let mut clen_len: i64 = 0;
+    if body_len > 0 {
+        clen = _uint_to_str(body_len);
+        if clen as i64 == 0 {
+            free(authority);
+            return null;
+        }
+        clen_len = strlen(clen) as i64;
+    }
+
+    let mut total: i64 = method_len + (strlen(sp as * u8) as i64) + path_len + (strlen(proto as * u8) as i64)
+        + host_len
+        + (strlen(crlf as * u8) as i64)
+        + headers_len
+        + (strlen(conn_keep as * u8) as i64);
+    if body_len > 0 {
+        total = total + (strlen(clen_label as * u8) as i64) + clen_len + (strlen(crlf as * u8) as i64);
+    }
+    let head: * u8 = malloc((total + 1) as usize);
+    if head as i64 == 0 {
+        if clen as i64 != 0 { free(clen); }
+        free(authority);
+        return null;
+    }
+    let mut off: i64 = 0;
+    off = _append(head, off, method);
+    off = _append(head, off, sp as * u8);
+    off = _append(head, off, path);
+    off = _append(head, off, proto as * u8);
+    off = _append(head, off, authority);
+    off = _append(head, off, crlf as * u8);
+    if headers_len > 0 { off = _append(head, off, headers); }
+    if body_len > 0 {
+        off = _append(head, off, clen_label as * u8);
+        off = _append(head, off, clen);
+        off = _append(head, off, crlf as * u8);
+    }
+    off = _append(head, off, conn_keep as * u8);
+    memset(_ptr_off(head, off), 0, 1 as usize);
+    if clen as i64 != 0 { free(clen); }
+    free(authority);
+
+    let head_ok: bool = _send_all(fd as i32, head, off);
+    free(head);
+    if !head_ok { return null; }
+    if body_len > 0 {
+        if !_send_all(fd as i32, body, body_len) { return null; }
+    }
+
+    let mut total_len: i64 = 0;
+    return _recv_one_response(fd as i32, & total_len);
+}
+
+// `sfn_http_conn_close(fd)` — close a keep-alive connection opened by
+// `sfn_http_conn_open`. A no-op on a negative (failed-open) fd.
+fn sfn_http_conn_close(fd: i64) -> void {
+    if fd >= 0 { close(fd as i32); }
+}
+
 // `sfn_http_download(url, output_path)` — GET `url` and write the
 // body to `output_path` in binary mode. Returns the literal `"ok"`
 // on success, null on failure (matching the curl

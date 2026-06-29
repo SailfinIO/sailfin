@@ -4,7 +4,7 @@ title: "sfn/http — Typed HTTP Surface"
 status: Accepted
 type: tooling
 created: 2026-06-13
-updated: 2026-06-13
+updated: 2026-06-29
 author: "agent:compiler-architect"
 tracking: "#1321"
 supersedes:
@@ -168,7 +168,7 @@ env-aware dispatch) and is listed as an open question below.
 | Header/query accessors (`header(req, n)`, `query_param(req, n)`) | yes (Wave 1, pure capsule) | — | — |
 | Typed client (`fetch`-style → `Response` with status/headers) | no — `get`/`post` body-string wrappers stay | Wave 4 (needs additive `sfn_http_request_raw` returning the full raw response) | — |
 | Routing (`Router`) | no — handler-side `if req.path == ...` idiom | post-v0 capsule work (blocked on closure-handler story) | — |
-| Keep-alive | no (`Connection: close`) | runtime follow-up | — |
+| Keep-alive | no (`Connection: close` default) | **shipped** (#1711 — the serve connection worker loops recv→dispatch→send; `serialize_response` is negotiation-aware; a native single-connection-reuse client `sfn_http_conn_*` lands in the adapter) | — |
 | Closure handlers | no (top-level fn only, documented) | follow-up | — |
 | `ServerConfig.host` binding | dropped from v0 API | with host-bind runtime support | — |
 | DNS resolution (`getaddrinfo`) | no — localhost / dotted-quad only | **shipped** (#1707 — real hostnames resolve via `getaddrinfo`, first IPv4/A record; `sfn/net::resolve` wired) | — |

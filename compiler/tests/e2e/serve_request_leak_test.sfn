@@ -22,6 +22,16 @@
 //      with a complete head; the helper rejects it: free + NULL.
 //   C. valid — a complete head + `\r\n\r\n`; the helper returns a non-NULL
 //      buffer the harness frees (so a clean leg leaves nothing for LSan).
+//   D. keep-alive scan, capacity boundary (#1711) — a 4096-byte well-formed
+//      head (== the initial recv buffer capacity) with a tail `Connection:
+//      close` header, driven through `_serve_recv_request` then scanned by
+//      `_serve_keep_alive`. The scan's 4-byte masked `_serve_byte_at` reads
+//      near `header_end` must stay inside the request buffer — which is why
+//      `_serve_recv_request` over-allocates by 4 (mirroring `http.sfn`'s
+//      `_recv_all`). Behaviorally the verdict must be `close` (0); under ASAN
+//      a reverted +1 allocation at the boundary surfaces as a heap over-read.
+//   E. keep-alive default (#1711) — a head with NO `Connection` header is
+//      HTTP/1.1 keep-alive (verdict 1).
 //
 // Build with `-fsanitize=address` and run with SAILFIN_MEM_LIMIT=unlimited
 // (the instrumented binary's own self-cap would otherwise abort the ~16 TB
@@ -110,6 +120,7 @@ fn _leak_harness_c() -> string {
         + "#include <stdio.h>\n"
         + "#include <string.h>\n"
         + "#include <unistd.h>\n"
+        + "#include <stdbool.h>\n"
         + "#include <sys/socket.h>\n"
         + "\n"
         + "/* serve.sfn scheduler externs — referenced by the accept-loop\n"
@@ -127,6 +138,7 @@ fn _leak_harness_c() -> string {
         + "void sfn_type_register(void *d) { (void)d; }\n"
         + "\n"
         + "extern char *_serve_recv_request(int fd);\n"
+        + "extern bool _serve_keep_alive(char *buf);\n"
         + "\n"
         + "/* Drive one leg: write `req` (len bytes) to the peer, close it so\n"
         + " * the recv side sees EOF, then call the helper. Returns the helper's\n"
@@ -139,6 +151,22 @@ fn _leak_harness_c() -> string {
         + "    char *r = _serve_recv_request(sv[0]);\n"
         + "    close(sv[0]);\n"
         + "    return r;\n"
+        + "}\n"
+        + "\n"
+        + "/* Drive a keep-alive scan leg: recv the full request via the helper,\n"
+        + " * then run _serve_keep_alive over it (the masked 4-byte scan must\n"
+        + " * stay inside the +4 over-allocated buffer, #1711). Returns the\n"
+        + " * verdict (1 keep-alive, 0 close), -1 socketpair fail, -2 NULL buf. */\n"
+        + "static int drive_ka(const char *req, size_t len) {\n"
+        + "    int sv[2];\n"
+        + "    if (socketpair(AF_UNIX, SOCK_STREAM, 0, sv) != 0) return -1;\n"
+        + "    if (len > 0) { ssize_t _w = write(sv[1], req, len); (void)_w; }\n"
+        + "    close(sv[1]);\n"
+        + "    char *r = _serve_recv_request(sv[0]);\n"
+        + "    int verdict = -2;\n"
+        + "    if (r != NULL) { verdict = _serve_keep_alive(r) ? 1 : 0; free(r); }\n"
+        + "    close(sv[0]);\n"
+        + "    return verdict;\n"
         + "}\n"
         + "\n"
         + "int main(void) {\n"
@@ -160,6 +188,27 @@ fn _leak_harness_c() -> string {
         + "    if (c == (char *)-1) { fprintf(stderr, \"socketpair C failed\\n\"); return 6; }\n"
         + "    if (c == NULL) { fprintf(stderr, \"valid: expected non-NULL, got NULL\\n\"); return 5; }\n"
         + "    free(c);\n"
+        + "\n"
+        + "    /* Leg D — keep-alive scan over a capacity-boundary request (#1711):\n"
+        + "     * a 4096-byte well-formed head (== initial recv capacity) with a\n"
+        + "     * tail `Connection: close`. Verdict must be close (0); under ASAN a\n"
+        + "     * reverted +1 allocation surfaces the masked-read over-read here. */\n"
+        + "    static char kd[4096];\n"
+        + "    memcpy(kd, \"GET / HTTP/1.1\\r\\nX-Pad: \", 23);\n"
+        + "    memset(kd + 23, 'a', 4050);\n"
+        + "    memcpy(kd + 23 + 4050, \"\\r\\nConnection: close\\r\\n\\r\\n\", 23);\n"
+        + "    int d = drive_ka(kd, 4096);\n"
+        + "    if (d == -1) { fprintf(stderr, \"socketpair D failed\\n\"); return 8; }\n"
+        + "    if (d == -2) { fprintf(stderr, \"boundary keep-alive: NULL buffer\\n\"); return 7; }\n"
+        + "    if (d != 0) { fprintf(stderr, \"boundary keep-alive: expected close(0), got %d\\n\", d); return 9; }\n"
+        + "\n"
+        + "    /* Leg E — keep-alive default: a head with NO Connection header is\n"
+        + "     * HTTP/1.1 keep-alive (verdict 1). */\n"
+        + "    const char *ka = \"GET / HTTP/1.1\\r\\nHost: x\\r\\n\\r\\n\";\n"
+        + "    int e = drive_ka(ka, strlen(ka));\n"
+        + "    if (e == -1) { fprintf(stderr, \"socketpair E failed\\n\"); return 10; }\n"
+        + "    if (e == -2) { fprintf(stderr, \"keep-alive default: NULL buffer\\n\"); return 11; }\n"
+        + "    if (e != 1) { fprintf(stderr, \"keep-alive default: expected keep-alive(1), got %d\\n\", e); return 12; }\n"
         + "    return 0;\n"
         + "}\n";
 }
