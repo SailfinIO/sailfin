@@ -1,7 +1,7 @@
 ---
-sfep: TBD
+sfep: 0036
 title: "TLS termination + upstream TLS for the native runtime (OpenSSL)"
-status: Draft
+status: Accepted
 type: runtime
 created: 2026-06-29
 updated: 2026-06-29
@@ -12,10 +12,11 @@ superseded-by:
 graduates-to:
 ---
 
-# SFEP-XXXX — TLS termination + upstream TLS for the native runtime (OpenSSL)
+# SFEP-0036 — TLS termination + upstream TLS for the native runtime (OpenSSL)
 
-> Draft. Decomposed into the issue table in §10 (returned to the orchestrator,
-> not yet filed). Gap **B1** of epic #1540 (MCP-proxy enablement). Extends, does
+> Accepted at the grooming design gate (2026-06-29). Decomposed into the issue
+> table in §10, filed as sub-issues of epic #1540. Gap **B1** of epic #1540
+> (MCP-proxy enablement). Extends, does
 > not contradict, SFEP-0019 (`sfn/http`): TLS is the deferred "TLS, redirects"
 > row of SFEP-0019 §4, now promoted to a 1.0 blocker by the MCP-proxy hot path.
 
