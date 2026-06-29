@@ -35,7 +35,7 @@ Effect annotations (`![...]`) flag the runtime capabilities you need to declare 
 | Example                  | Effects       | Notes                                                                                                                                      |
 | ------------------------ | ------------- | ------------------------------------------------------------------------------------------------------------------------------------------ |
 | `basic-enum.sfn`         | `io`          | Enum pattern matching with console logging.                                                                                                |
-| `borrowing.sfn`          | `mut`, `read` | Native compiler borrowing design sample (legacy name: stage2); shows moves, shared borrows, and reborrows without runtime enforcement yet. |
+| `borrowing.sfn`          | `io`          | **Design-stage** user-facing borrowing (`&`/`&mut` borrow expressions, `borrow(...)`, `![read]`/`![mut]`); planned form kept in comments, runnable `main` is a shipped-grammar stub (Phase U, post-1.0).            |
 | `conditionals.sfn`       | `io`          | Branching over values with `print.info`.                                                                                                   |
 | `error-handling.sfn`     | `io`          | Struct-based error propagation matched with logging.                                                                                       |
 | `functions.sfn`          | `io`          | Function defaults and overloading with console output.                                                                                     |
@@ -129,7 +129,7 @@ Effect annotations (`![...]`) flag the runtime capabilities you need to declare 
 - **Effect-sensitive**: `advanced`, `concurrency`, `ai`, `io`, and `web` rely on mocked helpers (`print.*`, `fs.*`, `http.*`, `serve`, `sleep`, `channel`). Declare the exact effects listed above before running them through the bootstrap compiler.
 - **Design-stage examples**: Some examples demonstrate planned features that parse but aren't fully enforced yet. These are marked with **Design-stage** in the notes column. Examples include:
   - `unsafe-extern-interop.sfn` — FFI interop with raw pointers and `unsafe` blocks. Parser accepts the syntax but unsafe semantics are not yet enforced. See [spec §6 Type System](https://sailfin.dev/docs/reference/spec/06-types/).
-  - `borrowing.sfn` — Ownership and borrowing syntax. Parser accepts but the bootstrap compiler does not enforce exclusivity. The native LLVM backend (legacy name: stage2) enforces borrow conflicts.
+  - `borrowing.sfn` — **Design-stage** user-facing ownership/borrowing syntax (`&`/`&mut` borrow expressions, `borrow(...)`, `![read]`/`![mut]`). The planned form is kept in comments and the runnable `main` is a shipped-grammar stub, because a `&mut <value>` borrow expression has no parser arm yet (it would degrade to an unstructured node). The native LLVM backend enforces borrow conflicts on the runtime owned-buffer surface today (Phase R1); the user-facing grammar is previewed until Phase U.
 - **Forward-looking commentary**: Any future syntax remains inside comments—runnable code in this directory sticks to the shipped bootstrap grammar. Update the index whenever you add new examples or adjust their effects.
 
 > Tip: Browse examples alongside the [grammar](https://sailfin.dev/docs/reference/grammar) and [spec](https://sailfin.dev/docs/reference/spec/) to see how planned features map onto the implemented subset.

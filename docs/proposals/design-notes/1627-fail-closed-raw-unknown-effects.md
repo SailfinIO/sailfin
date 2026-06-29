@@ -4,8 +4,8 @@
 - **Epic:** #1180
 - **Design record extended:** SFEP-0008 (`docs/proposals/0008-effect-validation.md`)
 - **Author:** agent:compiler-architect
-- **Status:** Draft (single-issue design gate; not a new SFEP)
-- **Date:** 2026-06-26; **revised 2026-06-27** (the E0818-flip endgame — parts A–F)
+- **Status:** Draft (single-issue design gate; not a new SFEP) — Parts E (E0819/#1755) and F (E0818/#1743) **implemented**; Parts A–D still pending
+- **Date:** 2026-06-26; **revised 2026-06-27** (the E0818-flip endgame — parts A–F); **annotated 2026-06-29** (Parts E+F shipped)
 - **Decision:** **Structural lift (root fix)** chosen at the design gate. The
   earlier text-anchor "floor" (`_raw_contains_effectful_anchor`) is **superseded**
   and retained below only as the analysis that led to the root-fix decision.
@@ -400,7 +400,11 @@ statement.sfn:196, fed the original operator).
 member/index assignments before vs after) + `effect_assignment_test.sfn`
 (`a = print.info(x)` and `arr[io()] = x` require `![io]`).
 
-### Part E — `E0817` nested `Unknown`
+### Part E — `E0817` nested `Unknown` — **SHIPPED (#1755, E0819)**
+
+> **2026-06-29 note:** Part E shipped as **E0819** (not E0817 — E0817 was
+> reassigned to enum-field conflicts, #1746) in issue **#1755**. The nested
+> `Unknown` fail-closed diagnostic is live.
 
 `Statement.Unknown` is produced by `parse_unknown` (declarations.sfn ~:1793,
 call sites :1320/:1525/:1679/:1691/:1697/:1728) and `parse_unknown_statement`
@@ -436,7 +440,18 @@ second diagnostic on the same node). This is Part E's only effect-checker touch.
 E0817; top-level `@@@` still E0500; `while(){}` still E0411 (dedup proof);
 no E0817 when E0411/removed-keyword already fired.
 
-### Part F — the `E0818` flip + pre-flip enumeration
+### Part F — the `E0818` flip + pre-flip enumeration — **SHIPPED (#1743, E0818)**
+
+> **2026-06-29 note:** Part F shipped in issue **#1743**. The E0818 blanket
+> fail-closed `Raw` backstop landed in **`compiler/src/typecheck.sfn`**
+> (`walk_expression` `Raw` arm) rather than in the effect-checker as the older
+> draft contemplated — the typecheck site is where the `walk_match_pattern`
+> exemption for match-arm shorthand-destructure patterns is natural. Diagnostic
+> factory: `make_unanalyzable_raw_diagnostic` in `typecheck_types.sfn` (named
+> `make_unanalyzable_raw_diagnostic`, not `make_effectful_raw_diagnostic` as the
+> draft had it). The `check_fn_reference_raw` fn-reference path remains on the Raw
+> arm unchanged. Regression test: `compiler/tests/unit/effect_raw_failclosed_test.sfn`.
+> Part E (nested `Unknown`) shipped earlier as E0819 in #1755.
 
 **Enumerate remaining in-source Raw producers BEFORE flipping** (so you
 structure them rather than discover them via a broken build):
@@ -503,8 +518,8 @@ structuring (assignment) lands before the flip, and the flip is last.
 | **B** | Parser: prefix `*`/`&` → `Unary`. typecheck: add `Unary` arm to `walk_expression` (recurse operand → preserves `&fn` E0808). | `make compile` + IR-diff in-source `*ptr`/`&x`. | `effect_prefix_deref_addr_test`. |
 | **C** | Cast-target reader: accept generic/`fn (...)` targets via type-annotation parser. | `make compile`. | `cast_generic_target_test`. |
 | **D** | AST `Assignment` node; parser assignment seam; formatter arm; **7 walker arms**. | `make compile` + IR-diff simple/compound/member/index assignments — **the high-risk gate**. | `assignment_node_ir_identity_test`, `effect_assignment_test`. |
-| **E** | `E0817` at `parse_unknown_statement` site (gated vs E0500/E0411/removed-keyword); defensive `Unknown` effect arm `[]`. | `make compile`. | `effect_unknown_block_level_test`. |
-| **F** | Re-run `SAILFIN_TRACE_RAW=1 make compile` → **must emit zero** Raw for compiler/runtime/capsules. Then flip the E0818 arm. Remove (or gate-off) the probe. | **`make compile` green = the proof no in-source Raw survives**; then `make check`. | `effect_raw_failclosed_test`, `effect_raw_negative_substring_test`. |
+| **E** ✓ | `E0817` at `parse_unknown_statement` site (gated vs E0500/E0411/removed-keyword); defensive `Unknown` effect arm `[]`. **Shipped as E0819 in #1755.** | `make compile`. | `effect_unknown_block_level_test`. |
+| **F** ✓ | Re-run `SAILFIN_TRACE_RAW=1 make compile` → **must emit zero** Raw for compiler/runtime/capsules. Then flip the E0818 arm. Remove (or gate-off) the probe. **Shipped as E0818 in #1743 (typecheck `walk_expression` Raw arm + `walk_match_pattern` exemption).** | **`make compile` green = the proof no in-source Raw survives**; then `make check`. | `effect_raw_failclosed_test`, `effect_raw_negative_substring_test`. |
 
 **Bundling / no seed cut:** every stage is a compiler-source change consumed by
 the same self-host pass. `make compile` builds the new compiler from the pinned
