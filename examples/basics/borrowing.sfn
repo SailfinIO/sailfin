@@ -1,37 +1,55 @@
 // examples/basics/borrowing.sfn
-
-struct Counter {
-    value: int;
-}
-
-fn read_counter(counter: &Counter) ![read] -> int {
-    return counter.value;
-}
-
-fn increment_counter(counter: &mut Counter) ![mut] {
-    counter.value = counter.value + 1;
-}
-
-fn snapshot(counter: &mut Counter) ![mut, read] -> int {
-    let view: &Counter = borrow(counter);
-    return read_counter(view);
-}
-
+//
+// Design-stage: user-facing ownership/borrowing (`&`/`&mut` borrow
+// expressions, `borrow(...)`, and the `![read]`/`![mut]` borrow effects) is
+// planned future syntax (Phase U, post-1.0 — see CLAUDE.md and
+// reference/preview/ownership.md). Per examples/README.md, future syntax stays
+// inside comments and the runnable body sticks to the shipped bootstrap
+// grammar. A `&mut <value>` borrow expression has no parser arm yet, so it
+// degrades to an unstructured node; this file keeps the planned form in a
+// comment until the feature ships.
+//
+// Planned form (does not yet parse / type-check):
+//
+//     struct Counter {
+//         value: int;
+//     }
+//
+//     fn read_counter(counter: &Counter) ![read] -> int {
+//         return counter.value;
+//     }
+//
+//     fn increment_counter(counter: &mut Counter) ![mut] {
+//         counter.value = counter.value + 1;
+//     }
+//
+//     fn snapshot(counter: &mut Counter) ![mut, read] -> int {
+//         let view: &Counter = borrow(counter);
+//         return read_counter(view);
+//     }
+//
+//     fn main() ![io] {
+//         let mut counter = Counter { value: 0 };
+//
+//         let initial: int = read_counter(&counter);
+//
+//         let mut after_increment: int = initial;
+//         {
+//             let exclusive = &mut counter;       // mutable (exclusive) borrow
+//             increment_counter(exclusive);
+//             after_increment = snapshot(exclusive);
+//         }
+//
+//         let final_view: &Counter = borrow(counter);   // shared reborrow
+//         let delta: int = read_counter(final_view) - initial;
+//
+//         let result: int = after_increment + delta;
+//         print("Borrowing result: {{result}}");
+//     }
+//
+// The native LLVM backend enforces borrow conflicts on the runtime owned-buffer
+// surface today (Phase R1); the user-facing borrow grammar above is previewed
+// until Phase U.
 fn main() ![io] {
-    let mut counter = Counter { value: 0 };
-
-    let initial: int = read_counter(&counter);
-
-    let mut after_increment: int = initial;
-    {
-        let exclusive = &mut counter;
-        increment_counter(exclusive);
-        after_increment = snapshot(exclusive);
-    }
-
-    let final_view: &Counter = borrow(counter);
-    let delta: int = read_counter(final_view) - initial;
-
-    let result: int = after_increment + delta;
-    print("Borrowing result: {{result}}");
+    print("borrowing: `&`/`&mut` borrow expressions are design-stage future syntax — see the comments in this file.");
 }

@@ -1,0 +1,125 @@
+// #1627 Part F / #1743 — the blanket fail-closed `Raw` backstop (E0818).
+//
+// After #1186 deleted `collect_effects_from_text`, an `Expression.Raw` node
+// contributes ZERO effects silently. Once every valid construct was structured
+// (casts → `Cast`, prefix `*`/`&` → `Unary`, assignment → `Assignment`, typed
+// `channel:Type` → `Channel`; corpus cleared by #1751), any non-empty `Raw`
+// reaching the typecheck expression walk is genuinely unanalyzable — the
+// compiler cannot parse it, so it must fail closed (E0818) rather than slip to
+// codegen effect-blind. This completes #1627's "no valid effectful construct
+// reaches codegen through an effect-opaque node" criterion.
+//
+// These tests pin: (a) a non-empty `Raw` → E0818; (b) an empty / whitespace
+// `Raw` → clean; (c) the backstop fires on node SHAPE, not text content — a
+// structured node mentioning `print` does not fire, and a `Raw` whose text
+// contains no effect keyword still fires (no text scan, no effect-keyword
+// anchor); (d) match-arm shorthand patterns (which legitimately degrade to
+// `Raw`) are exempt.
+import { Expression } from "../../src/ast";
+import { empty_import_symbols } from "../../src/effect_imports";
+import { parse_program } from "../../src/parser/mod";
+import { typecheck_diagnostics, walk_expression, walk_match_pattern } from "../../src/typecheck";
+import { Diagnostic, SymbolEntry } from "../../src/typecheck_types";
+
+fn _no_bindings() -> SymbolEntry[] {
+    let empty: SymbolEntry[] = [];
+    return empty;
+}
+
+fn _has_code(diags: Diagnostic[], code: string) -> boolean {
+    let mut i: int = 0;
+    loop {
+        if i >= diags.length { break; }
+        if strings_equal(diags[i].code, code) { return true; }
+        i += 1;
+    }
+    return false;
+}
+
+fn _raw_diags(text: string) -> Diagnostic[] ![io] {
+    let raw = Expression.Raw { text: text, span: null };
+    return walk_expression(raw, _no_bindings(), empty_import_symbols());
+}
+
+// ── (a) a non-empty, non-fn-reference Raw fails closed ──
+test "raw: a genuinely unstructured expression fails closed with E0818" ![io] {
+    assert _has_code(_raw_diags("foo bar baz"), "E0818");
+}
+
+test "raw: an unstructured Raw with punctuation fails closed" ![io] {
+    assert _has_code(_raw_diags("@@@ junk @@@"), "E0818");
+}
+
+// ── (b) empty / whitespace-only Raw is clean (the never-escapes shape) ──
+test "raw: an empty Raw is clean (no E0818)" ![io] {
+    let diags = _raw_diags("");
+    assert diags.length == 0;
+}
+
+test "raw: a whitespace-only Raw is clean (trimmed to empty)" ![io] {
+    let diags = _raw_diags("   ");
+    assert diags.length == 0;
+}
+
+// ── (c) node-shape, not text-scan: no effect-keyword anchor ──
+// A structured expression mentioning `print` as a substring must NOT fire
+// E0818 — the backstop keys on `variant == "Raw"`, never on text content.
+test "raw: a structured Identifier mentioning `print` does not fire E0818" ![io] {
+    let ident = Expression.Identifier { name: "printable", span: null };
+    let diags = walk_expression(ident, _no_bindings(), empty_import_symbols());
+    assert ! _has_code(diags, "E0818");
+}
+
+// Conversely a Raw whose text contains no effectful builtin still fails —
+// proving the backstop does not require an effect-keyword anchor in the text.
+test "raw: a Raw with no effect keyword still fails closed (no text scan)" ![io] {
+    assert _has_code(_raw_diags("lorem ipsum dolor"), "E0818");
+}
+
+// And a Raw that merely mentions `print` is treated identically to any other
+// Raw (shape, not content) — it fails closed, not because of the word.
+test "raw: a Raw mentioning `print` as a substring fails closed by shape" ![io] {
+    assert _has_code(_raw_diags("the word print appears here"), "E0818");
+}
+
+// ── (d) match-arm shorthand patterns are exempt ──
+// Colon-less shorthand destructures (e.g. `Result.Ok { value }`) parse to
+// `Expression.Raw` and reach the match-pattern walk; they are bindings, not
+// unstructured expressions, so `walk_match_pattern` exempts them from E0818.
+test "match pattern: a Raw shorthand destructure is exempt from E0818" ![io] {
+    let pattern = Expression.Raw { text: "Result.Ok { value }", span: null };
+    let diags = walk_match_pattern(pattern, _no_bindings(), empty_import_symbols());
+    assert diags.length == 0;
+}
+
+test "match pattern: an empty-text Raw pattern is exempt from E0818" ![io] {
+    let pattern = Expression.Raw { text: "", span: null };
+    let diags = walk_match_pattern(pattern, _no_bindings(), empty_import_symbols());
+    assert diags.length == 0;
+}
+
+// A structured (non-Raw) pattern still walks normally through the exemption
+// helper — the exemption is scoped to the `Raw` shorthand form only.
+test "match pattern: a structured Identifier pattern walks clean" ![io] {
+    let pattern = Expression.Identifier { name: "x", span: null };
+    let diags = walk_match_pattern(pattern, _no_bindings(), empty_import_symbols());
+    assert ! _has_code(diags, "E0818");
+}
+
+// ── end-to-end: a match with a shorthand-destructure arm self-hosts clean ──
+// Pins the wiring (the MatchStatement walker routes patterns through
+// `walk_match_pattern`), so a real match over an enum variant with a
+// brace-destructure arm produces no E0818.
+test "match: a shorthand-destructure arm produces no E0818 end-to-end" ![io] {
+    let source = "enum Box { Full { value: int }, Empty }\n"
+        + "fn unwrap(b: Box) -> int {\n"
+        + "    match b {\n"
+        + "        Box.Full { value } => { return value; }\n"
+        + "        Box.Empty => { return 0; }\n"
+        + "    }\n"
+        + "    return 0;\n"
+        + "}\n";
+    let program = parse_program(source);
+    let diags = typecheck_diagnostics(program);
+    assert ! _has_code(diags, "E0818");
+}

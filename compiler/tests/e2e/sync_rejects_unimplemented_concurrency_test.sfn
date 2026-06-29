@@ -143,6 +143,27 @@ fn _emit_rejected(label: string, source: string, mode: string, ext: string, symb
     return true;
 }
 
+// `sfn emit <mode>` must fail closed: rc != 0 and no artifact, without
+// asserting a specific diagnostic. Used where the rejection now happens at
+// typecheck (E0818 fail-closed on the unstructured/unimplemented `spawn`
+// keyword form, #1743) before the resolver's `cannot resolve` path is reached.
+fn _emit_fails_closed(label: string, source: string, mode: string, ext: string) -> bool ![io] {
+    let dir = _scratch_dir();
+    let src = dir + "/" + label + ".sfn";
+    let out = dir + "/" + label + ext;
+    fs.writeFile(src, source);
+    if fs.exists(out) { fs.deleteFile(out); }
+    let exit = process.run_capture([_sfn_bin(), "emit", "-o", out, mode, src], _child_env());
+    let _o = process.capture_take_stdout();
+    let _e = process.capture_take_stderr();
+    let produced = fs.exists(out);
+    if produced { fs.deleteFile(out); }
+    fs.deleteFile(src);
+    if exit == 0 { return false; }
+    if produced { return false; }
+    return true;
+}
+
 // `sfn emit native` must succeed and the `.sfn-asm` must mention `needle`.
 fn _emit_native_succeeds(label: string, source: string, needle: string) -> bool ![io] {
     let dir = _scratch_dir();
@@ -198,7 +219,10 @@ test "sync-rejects: sfn build rejects sfn/sync.parallel import (#617)" ![io] {
 }
 
 test "sync-rejects: sfn build rejects sfn/sync.spawn import (#617)" ![io] {
-    assert _build_rejected("spawn_import_caller", _spawn_import(), "spawn");
+    // The unstructured `spawn(...)` keyword form fails closed at typecheck
+    // (E0818, #1743) before the resolver's `cannot resolve \`spawn\`` path —
+    // still rejected, no binary produced.
+    assert _build_fails_closed("spawn_import_caller", _spawn_import());
 }
 
 test "sync-rejects: sfn build succeeds on channel() now the runtime is wired (#1091)" ![io] {
@@ -206,7 +230,7 @@ test "sync-rejects: sfn build succeeds on channel() now the runtime is wired (#1
 }
 
 test "sync-rejects: sfn build rejects bare prelude spawn() (#617)" ![io] {
-    assert _build_rejected("spawn_prelude_caller", _spawn_prelude(), "spawn");
+    assert _build_fails_closed("spawn_prelude_caller", _spawn_prelude());
 }
 
 test "sync-rejects: sfn build fails closed on unknown void helper (#631)" ![io] {
@@ -214,7 +238,7 @@ test "sync-rejects: sfn build fails closed on unknown void helper (#631)" ![io] 
 }
 
 test "sync-rejects: sfn emit llvm fails closed on void spawn() (#631)" ![io] {
-    assert _emit_rejected("spawn_emit_llvm_caller", _spawn_prelude(), "llvm", ".ll", "spawn");
+    assert _emit_fails_closed("spawn_emit_llvm_caller", _spawn_prelude(), "llvm", ".ll");
 }
 
 test "sync-rejects: sfn emit native succeeds on channel() now lowering exists (#1085)" ![io] {
@@ -222,5 +246,5 @@ test "sync-rejects: sfn emit native succeeds on channel() now lowering exists (#
 }
 
 test "sync-rejects: sfn emit native fails closed on void spawn() (#906)" ![io] {
-    assert _emit_rejected("spawn_emit_native_caller", _spawn_prelude(), "native", ".sfn-asm", "spawn");
+    assert _emit_fails_closed("spawn_emit_native_caller", _spawn_prelude(), "native", ".sfn-asm");
 }

@@ -1,6 +1,6 @@
 # Status
 
-Updated: 2026-06-28. Seed pinned to `0.7.0-alpha.39` (`.seed-version`);
+Updated: 2026-06-29. Seed pinned to `0.7.0-alpha.39` (`.seed-version`);
 the compiler version source of truth is `compiler/capsule.toml`.
 
 This document is the **current-state source of truth**: what ships today,
@@ -127,9 +127,22 @@ here.
   all three children, so `cond ? readFile() : x` can no longer reach codegen
   effect-free (`E0400`). The disambiguation leaves the postfix `?` try operator
   (`a()?`, `a()?.b()?`) untouched — a `?` is ternary only when the token after it
-  can start an expression *and* a top-level `:` follows. The remaining
-  Raw-degraded effect-escapes (prefix `*`/`&`, assignment-as-expression) are
-  tracked under epic #1180 (#1180-c) behind a blanket fail-closed `Raw` backstop.
+  can start an expression *and* a top-level `:` follows. The previously
+  Raw-degraded effect-escapes are now structured into real AST nodes the effect
+  checker walks: casts (#1627/#1737), prefix `*`/`&` (#1737), ternary (#1690),
+  assignment-as-expression (#1745), and typed `channel:Type` (#1750) — so each
+  surfaces its operand's effects instead of silently degrading to `Raw`. With
+  those structured (epic #1180), the blanket fail-closed `Raw` backstop
+  (**E0818**, #1743) is **shipped** as defense-in-depth: any non-empty
+  `Expression.Raw` reaching the typecheck expression walk that is not a recognized
+  fn-reference (`& fn` / `<fn> as T`, still handled by `check_fn_reference_raw`)
+  emits E0818 ("unstructured expression cannot be analyzed; rewrite so the compiler
+  can parse it"); match-arm shorthand-destructure patterns (legitimately Raw) are
+  exempt via `walk_match_pattern`. Diagnostic factory:
+  `make_unanalyzable_raw_diagnostic` (`typecheck_types.sfn`). Regression test:
+  `compiler/tests/unit/effect_raw_failclosed_test.sfn`. E0818 fires on node
+  shape, not text content. E0819 (nested `Unknown` fail-closed) shipped separately
+  in #1755; E0817 was reassigned to enum-field conflicts (#1746).
   The `is` type-guard hole is **closed in #1753**: `<operand> is T` now parses
   to a structured `Is` AST node (not `Expression.Raw`), and the effect checker
   walks the operand — so `readFile() is T` correctly requires `![io]`. Effect

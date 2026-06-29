@@ -2050,6 +2050,38 @@ fn make_unparseable_statement_diagnostic(anchor: Token?, near: string) -> Diagno
     };
 }
 
+// E0818 — the blanket fail-closed backstop for effect-opaque
+// `Expression.Raw` nodes (#1627 Part F / #1743). Once every valid construct
+// has been structured (casts, prefix `*`/`&`, assignment-as-expression, typed
+// `channel:Type`), a non-empty `Raw` reaching the typecheck expression walk is
+// genuinely unanalyzable — the compiler cannot parse it, so it must not slip
+// to codegen effect-blind. This completes #1627's "no valid effectful
+// construct reaches codegen through an effect-opaque node" criterion. The
+// diagnostic fires on node *shape* (`variant == "Raw"`), never on text
+// content: there is no text scan and no effect-keyword anchor.
+fn make_unanalyzable_raw_diagnostic(text: string, span: SourceSpan?) -> Diagnostic {
+    return Diagnostic {
+        code: "E0818",
+        severity: "error",
+        message: "unstructured expression cannot be analyzed; rewrite so the"
+            + " compiler can parse it",
+        file_path: "",
+        primary: token_from_name(trim_text(text), span),
+        suggestion: null
+    };
+}
+
+// The Raw decision invoked by the typecheck `Raw` arm after
+// `check_fn_reference_raw` has had its chance at the residual `& fn` /
+// `<fn> as <type>` spellings. An empty `Raw{text:""}` (the never-escapes
+// placeholder shape, plus whitespace-only text) carries no meaning and is
+// clean; any non-empty Raw fails closed with E0818. Match-arm patterns are
+// exempted upstream — they never reach this arm (see `walk_match_pattern`).
+fn check_unanalyzable_raw(text: string, span: SourceSpan?) -> Diagnostic[] {
+    if trim_text(text).length == 0 { return []; }
+    return [make_unanalyzable_raw_diagnostic(text, span)];
+}
+
 fn make_missing_interface_member_diagnostic(struct_name: string, interface_name: string, member_name: string) -> Diagnostic {
     return Diagnostic {
         code: "E0301",

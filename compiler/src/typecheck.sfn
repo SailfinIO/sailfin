@@ -39,6 +39,7 @@ import {
     check_struct_implements_interfaces,
     check_struct_methods,
     check_type_parameters,
+    check_unanalyzable_raw,
     classify_fn_cast,
     clone_bindings,
     detect_removed_ai_keyword,
@@ -571,7 +572,7 @@ fn check_statement(statement: Statement, bindings: SymbolEntry[], interfaces: St
         loop {
             if index >= statement.cases.length { break; }
             let case = statement.cases[index];
-            diagnostics = diagnostics.concat(walk_expression(case.pattern, bindings, imports));
+            diagnostics = diagnostics.concat(walk_match_pattern(case.pattern, bindings, imports));
             diagnostics = diagnostics.concat(walk_expression(case.guard, bindings, imports));
             let arm_bindings = register_match_pattern_bindings(case.pattern, bindings);
             let _blk_diags = check_block(case.body, arm_bindings, interfaces, imports, top_level);
@@ -1135,15 +1136,35 @@ fn walk_expression(expression: Expression?, bindings: SymbolEntry[], imports: Im
         }
         return [];
     }
-    // #1147: the parser cannot structure `& <fn>` or `<fn> as *T` (the
-    // `as` target only parses a bare identifier; `&` has no prefix form),
-    // so both fall back to `Raw`. Diagnose the unsupported / invalid
-    // function-reference spellings here. Gated on the head resolving to a
-    // function so non-function `<value> as * u8` casts stay clean.
+    // Blanket fail-closed backstop for effect-opaque `Raw` nodes
+    // (#1627 Part F / #1743). `check_fn_reference_raw` first classifies the
+    // residual function-reference spellings (`& <fn>` → E0808, a defensive
+    // `<fn> as <type>` → E0808/E0809); after Part A/B those normally structure
+    // into `Cast`/`Unary`, so this is the last-resort path. Any non-empty Raw
+    // that is NOT a recognized fn-reference is genuinely unanalyzable — every
+    // valid construct has been structured (casts, prefix `*`/`&`, assignment,
+    // typed channels) — so it fails closed with E0818 rather than reaching
+    // codegen effect-blind. Empty Raw is clean; match-arm patterns are exempt
+    // upstream (`walk_match_pattern`) and never reach this arm.
     if expression.variant == "Raw" {
-        return check_fn_reference_raw(expression.text, bindings, expression.span);
+        let fn_diags = check_fn_reference_raw(expression.text, bindings, expression.span);
+        if fn_diags.length > 0 { return fn_diags; }
+        return check_unanalyzable_raw(expression.text, expression.span);
     }
     return [];
+}
+
+// Walk a match-arm pattern for diagnostics, exempting the `Raw` shorthand
+// destructure form from the blanket E0818 fail-closed backstop (#1743).
+// Colon-less shorthand patterns (e.g. `Result.Ok { value }`) legitimately
+// degrade to `Expression.Raw` — they are bindings, not unstructured
+// *expressions*, and carry no effects, so they must not trip E0818. Their
+// bindings are registered separately via `register_match_pattern_bindings`.
+// Structured patterns (Struct/Identifier) are still walked normally.
+fn walk_match_pattern(pattern: Expression?, bindings: SymbolEntry[], imports: ImportSymbolTable) -> Diagnostic[] {
+    if pattern == null { return []; }
+    if pattern.variant == "Raw" { return []; }
+    return walk_expression(pattern, bindings, imports);
 }
 
 // `?` operator (TryOperator) type rules — issue #833, epic #371 (R.3).
@@ -1319,7 +1340,7 @@ fn walk_statement_expressions(statement: Statement, bindings: SymbolEntry[], imp
         loop {
             if index >= statement.cases.length { break; }
             let case = statement.cases[index];
-            diagnostics = diagnostics.concat(walk_expression(case.pattern, bindings, imports));
+            diagnostics = diagnostics.concat(walk_match_pattern(case.pattern, bindings, imports));
             diagnostics = diagnostics.concat(walk_expression(case.guard, bindings, imports));
             diagnostics = diagnostics.concat(walk_block_expressions(case.body, bindings, imports));
             index += 1;

@@ -3,6 +3,12 @@
 // it emits string_append instead of string_concat for intermediates,
 // reusing the buffer via realloc instead of allocating a new one each time.
 // These tests verify that the optimization produces correct results.
+// Top-level helper for the "function call between concats" case. A
+// statement-position nested `fn` declaration degrades to `Expression.Raw`
+// (no front-end structuring) and now fails closed under E0818 (#1743), so
+// the helper lives at module scope — the shipped form.
+fn make_tag(name: string) -> string { return "<" + name + ">"; }
+
 test "string_append: 3-way chain" {
     let a = "hello";
     let b = " ";
@@ -86,7 +92,6 @@ test "string_append: long chain builds IR-like content" {
 test "string_append: chain with function call between concats" {
     // Ensures the peephole fires correctly when the chain involves a
     // helper function that returns a string between concat operations.
-    fn make_tag(name: string) -> string { return "<" + name + ">"; }
     let result = "prefix:" + make_tag("div") + ":suffix";
     assert result == "prefix:<div>:suffix";
 }
