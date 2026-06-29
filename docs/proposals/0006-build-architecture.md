@@ -1647,6 +1647,35 @@ Runtime execution performance (the dimension most affected by C-runtime deletion
 tracked separately in `docs/perf/runtime-performance.md` with its own `make bench-runtime`
 harness and 0.7.0 baseline.
 
+### post-Phase-A CLI deltas (2026-06-29, SFEP-0027 Phase A)
+
+SFEP-0027 Phase A carved the build-driver orchestration out of `cli_main.sfn`
+into `compiler/src/build/{runtime_objs,link,determinism,cache}.sfn` (#1730–#1733)
+and shattered the 937-line `sailfin_cli_main_legacy` into per-command
+`_legacy_dispatch_<cmd>` helpers (#1734). The falsifiable Phase A success gate
+(#1735) is the per-module emit RSS drop. Measured with `make bench
+--module cli_main --module cli_commands` (Darwin arm64, compiler
+`sfn 0.7.0-alpha.50+dev.e4eac88c`); the "before" column is the 0.7.0 baseline CSV
+row above.
+
+| Module | emit time (before → after) | peak RSS (before → after) | IR lines (before → after) |
+| --- | --- | --- | --- |
+| `cli_main` | 19.76 s → **10.24 s** (−48%) | 2,473,616 KB (2,415 MB) → **1,090,560 KB (1,065 MB)** (−56%) | 20,543 → 9,977 |
+| `cli_commands` | 22.30 s → **10.77 s** (−52%) | 3,520,976 KB (3,438 MB) → **1,162,240 KB (1,135 MB)** (−67%) | 29,258 → 10,335 |
+
+Both CLI modules drop out of the "two heaviest CLI emitters" callout above: their
+post-Phase-A peak RSS (~1.0–1.1 GB) is well under the 4,389 MB
+`llvm__expression_lowering__native__core` peak and roughly in line with the median
+emitter. `cli_commands` is unchanged in source by Phase A (it is emptied in Phase C),
+but its isolated emit shrank because the build-driver functions it imports moved out
+of the monolithic `cli_main` closure into small `build/` modules — its emit import
+closure (and thus IR-line expansion and working set) shrank with the carve. Per
+SFEP-0027 §8, no Phase A step raised peak RSS; both levers measurably lowered it, so
+neither is reverted. A line-budget sentinel
+(`compiler/tests/unit/cli_main_line_budget_test.sfn`, budget 1,500) guards
+`cli_main.sfn` against silently re-ballooning toward the pre-Phase-A 3,067-line
+monolith.
+
 ---
 
 ## Cross-references

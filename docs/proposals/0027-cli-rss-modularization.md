@@ -346,8 +346,10 @@ This is a structural refactor, not a language feature; the checklist maps to
   module name in mangling).
 - [x] Lowers to LLVM IR — unchanged lowering; the *goal* is lower per-module
   RSS during lowering.
-- [ ] Regression coverage — existing CLI/e2e tests must stay green; add a
-  per-module RSS guard (§8).
+- [x] Regression coverage — existing CLI/e2e tests stay green; per-module RSS
+  lever guarded by the line-budget sentinel
+  `compiler/tests/unit/cli_main_line_budget_test.sfn` (§8, #1735). (Phase B/C
+  command-migration coverage still pending.)
 - [ ] Self-hosts — `make compile` per step; `make check` per structural step.
 - [ ] `sfn fmt --check` clean — every touched `.sfn`.
 - [ ] Documented — update `docs/status.md` (CLI module map) and cross-ref
@@ -381,6 +383,23 @@ This is a structural refactor, not a language feature; the checklist maps to
 - Optional: a `compiler/tests/` guard asserting `cli_main.sfn` stays under a
   line budget (e.g. < 1,200 lines) so the module cannot silently re-balloon —
   a cheap regression sentinel for the RSS lever.
+
+**Phase A result (2026-06-29, #1735).** The threshold is met for both CLI
+modules — full before/after table in
+`docs/proposals/0006-build-architecture.md` ("post-Phase-A CLI deltas"):
+
+| Module | peak RSS (before → after) | emit time (before → after) |
+| --- | --- | --- |
+| `cli_main` | 2,415 MB → **1,065 MB** (−56%) | 19.76 s → 10.24 s (−48%) |
+| `cli_commands` | 3,438 MB → **1,135 MB** (−67%) | 22.30 s → 10.77 s (−52%) |
+
+Both modules drop out of the "two heaviest CLI emitters" callout, landing near
+the median emitter and well under the 4,389 MB lowering-core peak. No step raised
+RSS, so nothing is reverted. The line-budget sentinel shipped as
+`compiler/tests/unit/cli_main_line_budget_test.sfn` (budget **1,500** — the SFEP's
+`< 1,200` is the Phase-B target, reached once the 7 remaining commands migrate out
+of `cli_main.sfn`; the Phase-A floor is ~1,409 lines while the
+`_legacy_dispatch_<cmd>` helpers still live there).
 
 **Migration coverage (Phase B/C).**
 - Each migrated command gains/keeps a `cli/commands/<name>.sfn` test peer
