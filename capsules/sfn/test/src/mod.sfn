@@ -399,6 +399,7 @@ export { CompileExpect, assert_compiles, assert_does_not_compile } from "./compi
 // successor to the dropped process-global `with_env`: it runs `args` as a
 // subprocess under a scoped `os::Env` via `os::run_capture` and threads the
 // captured `ProcessOutput` to `body`, never mutating the parent `environ`.
-// (`with_cwd` stays omitted — no per-child cwd primitive yet; tracked in
-// #1107.) See `fixtures.sfn`.
-export { with_env, with_tmp_dir } from "./fixtures";
+// `with_cwd(args, env, cwd, body)` (issue #1168) is its cwd-scoping
+// companion: it runs the child in `cwd` via the same `os::run_capture`
+// (#1167 per-child cwd), with no process-global `chdir`. See `fixtures.sfn`.
+export { with_cwd, with_env, with_tmp_dir } from "./fixtures";

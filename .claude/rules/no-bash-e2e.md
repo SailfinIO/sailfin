@@ -71,10 +71,13 @@ The supported building blocks (all already shipped):
   captured output with `sfn/strings::find` or `==`. (Making the matchers
   callable from `![io]` contexts is tracked against #842.)
 - **Temp dirs:** `with_tmp_dir(fn(dir) { ... })` from `sfn/test`.
-- **Per-child env:** pass `["KEY=value", ...]` as the `run_capture` env
-  argument. There is **no** `with_env`/`with_cwd` fixture (process-global
-  `setenv`/`chdir` is unsound under the future parallel runner — see
-  `fixtures.sfn`); always scope env to the child you spawn.
+- **Per-child env / cwd:** pass `["KEY=value", ...]` as the `run_capture`
+  env argument, and a cwd path as its third argument (`""` inherits). The
+  `with_env(args, env, body)` (#1166) and `with_cwd(args, env, cwd, body)`
+  (#1168) fixtures in `sfn/test` wrap this per-child shape. There is **no**
+  process-global `setenv`/`chdir` fixture (process-global mutation is unsound
+  under the future parallel runner — see `fixtures.sfn`); always scope env
+  and cwd to the child you spawn.
 - **Build a binary to run it:** when a test must compile a fixture to an
   executable (not just frontend-check it), thread `SAILFIN_TEST_SCRATCH`
   through to the spawned compiler so its staging stays per-invocation —
