@@ -156,7 +156,7 @@ fn _shell_read_cmd(cmd: string) -> string ![io] {
 // `cli: argv...` trace noise on every invocation; the same breakage
 // corrupted `SAILFIN_NO_LEGACY_PROBE`, `SAILFIN_LINKER`, `HOME`, and every
 // other flag routed through this helper (#1483). `env.get` is the same
-// builtin `_resolve_sailfin_cache_dir_for_work` (cli_main.sfn) already
+// builtin `_resolve_sailfin_cache_dir_for_work` (build/cache.sfn) already
 // uses; it returns "" for an unset variable on every platform.
 fn _get_env_cmd(name: string) -> string ![io] { return env.get(name); }
 

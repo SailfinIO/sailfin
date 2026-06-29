@@ -4,10 +4,20 @@
 import { bold } from "sfn/cli";
 
 import { LlvmTextBackend } from "./backend";
+import {
+    _CapsuleBuildSpec,
+    _emit_build_report,
+    _emit_capsule_artifact_sidecar,
+    _print_cache_summary,
+    _resolve_capsule_build_spec,
+    _resolve_sailfin_cache_dir_for_work,
+    _write_llvm_text
+} from "./build/cache";
 import { _do_determinism_check } from "./build/determinism";
 import { LinkResult, _clang_link_multi } from "./build/link";
 import {
     _dirname,
+    _ends_with,
     _ensure_dir,
     _path_basename,
     _path_join,
@@ -199,146 +209,6 @@ fn _usage() -> string {
     return out;
 }
 
-fn _ends_with(value: string, suffix: string) -> boolean {
-    if suffix.length == 0 { return true; }
-    if value.length < suffix.length { return false; }
-    let start = value.length - suffix.length;
-    return substring(value, start, value.length) == suffix;
-}
-
-fn _write_llvm_text(path: string, llvm: string) ![io] {
-    // Avoid passing potentially large/fragile `string[]` buffers across the
-    // native runtime boundary via fs.writeLines, which can hang if array ABI
-    // metadata is corrupted.
-    fs.writeFile(path, llvm);
-}
-
-// Print the per-build cache stats summary in the
-// `[cache] hits=N misses=M stores=K invalid_keys=I copy_failures=F`
-// shape — quiet for builds with no cache activity (no manifest deps,
-// or `--no-cache`). The shape is the human-readable counterpart of
-// the eventual `--json` build report's `cache` field; keep them in
-// sync if either changes.
-//
-// Emitted on stderr, not stdout. Since #915 folded the runtime
-// C/LL/sfn object cache into this summary, the line is non-empty on
-// nearly every `sfn build`/`sfn run` (runtime objects almost always
-// hit). For `sfn run` the driver's stdout is the program's stdout,
-// so a `[cache]` line there would corrupt program output (and any
-// downstream pipe). stderr keeps the diagnostic visible to humans /
-// `2>&1` captures while leaving stdout clean for the program and for
-// `--json`'s machine-readable report.
-fn _print_cache_summary(stats: CacheStats) ![io] {
-    if cache_stats_is_empty(stats) { return; }
-    print.err("[cache] hits=" + number_to_string(stats.hits) + " misses="
-        + number_to_string(stats.misses)
-        + " stores="
-        + number_to_string(stats.stores)
-        + " invalid_keys="
-        + number_to_string(stats.invalid_keys)
-        + " copy_failures="
-        + number_to_string(stats.copy_failures));
-}
-
-// Stage C2a — write `build/capsules/<scope>/<name>/manifest.json`
-// after a successful `sfn build -p`. Schema-versioned sidecar that
-// captures the resolved per-capsule build state for downstream
-// consumers (`sfn package` C4, `sfn lsp` capsule discovery, MCP
-// tooling) to read without re-running the build.
-//
-// Quiet on `--json` mode the same way `_print_cache_summary` is —
-// the sidecar lives on disk regardless, but no stdout chatter is
-// emitted.
-//
-// Best-effort: failure to write the sidecar is logged to stderr
-// but does NOT fail the build, since the binary/library was
-// already produced and the sidecar is metadata only.
-fn _emit_capsule_artifact_sidecar(spec_capsule_name: string, spec_version: string, spec_kind: string, spec_entry_relative: string, out_path: string, capsule_result: ProjectCapsuleResult) ![io] {
-    if spec_capsule_name.length == 0 {
-        // Manifest had no `[capsule].name` — can't compose a path.
-        // The build itself succeeded; just skip the sidecar.
-        return;
-    }
-    let parts = parse_scope_name(spec_capsule_name);
-    if parts.scope.length == 0 {
-        // Single-segment (scope-less) names are a legitimate, supported
-        // configuration: the compiler self-host's own `name = "sailfin"`
-        // is one, and `sfn init` scaffolds bare names too (#1395). A bare
-        // name simply means "no per-capsule sidecar" — it is not an error,
-        // so skip silently rather than warning on stderr on every build.
-        // `sfn package` still surfaces a clear, actionable error at
-        // packaging time when a sidecar is genuinely required.
-        return;
-    }
-    // Path-traversal guard: `[capsule].name` is end-user-controlled,
-    // and the scope/name is interpolated into a filesystem path. A
-    // malicious manifest could set `name = "../../etc"` and escape
-    // `build/capsules/`. Reject any segment that is empty, `.`, `..`,
-    // or contains `/` (in scope) or `\` (in either). See
-    // `capsule_artifact.sfn::is_safe_scope_name`.
-    if !is_safe_scope_name(parts.scope, parts.name) {
-        print.err("[capsule-artifact] capsule name \"" + spec_capsule_name
-            + "\" contains unsafe path segments; skipping sidecar");
-        return;
-    }
-    let mut manifest = empty_capsule_artifact_manifest();
-    manifest.capsule_name = spec_capsule_name;
-    manifest.version = spec_version;
-    manifest.kind = spec_kind;
-    manifest.compiler_version = resolve_compiler_version("");
-    manifest.entry_relative = spec_entry_relative;
-    manifest.out_path = out_path;
-    manifest.dep_ll_paths = capsule_result.ll_paths;
-
-    // Stage C2c: per-module entries. `module_events` is a
-    // parallel array to `ll_paths` (lockstep emission in
-    // `compile_capsule_modules`), so index alignment is safe;
-    // we still defend against mismatch by using the shorter
-    // length. `cache_key_digest` is `""` when caching was
-    // disabled or the digest was rejected — surfaced verbatim
-    // as the JSON `cache_key` field.
-    let mut modules: CapsuleArtifactModule[] = [];
-    let event_count = capsule_result.module_events.length;
-    let path_count = capsule_result.ll_paths.length;
-    let mut limit = event_count;
-    if path_count < limit { limit = path_count; }
-    let mut mi: int = 0;
-    loop {
-        if mi >= limit { break; }
-        let evt = capsule_result.module_events[mi];
-        modules.push(make_capsule_artifact_module(evt.slug, capsule_result.ll_paths[mi], evt.cache_key_digest));
-        mi += 1;
-    }
-    manifest.modules = modules;
-
-    let dir = capsule_artifact_dir(parts.scope, parts.name);
-    fs.createDirectory(dir, true);
-    let path = capsule_artifact_manifest_path(parts.scope, parts.name);
-    fs.writeFile(path, capsule_artifact_manifest_to_json(manifest));
-}
-
-// Compose a `BuildReport` for a successful build and print its
-// JSON encoding to stdout. Mirrors `_print_cache_summary`'s
-// placement (end of the success path); machine-readable consumers
-// (`sfn lsp`, MCP, CI gates) read this single line and parse it
-// rather than scraping the human text output (`built: ...` on
-// stdout, `[cache] ...` on stderr since #915).
-fn _emit_build_report(input_path: string, out_path: string, kind: string, exit_code: int, capsule_result: ProjectCapsuleResult, cache_config: BuildCacheConfig, stats: CacheStats) ![io] {
-    let mut report = empty_build_report();
-    report.input = input_path;
-    report.out = out_path;
-    report.kind = kind;
-    report.exit_code = exit_code;
-    report.compiler_version = resolve_compiler_version("");
-    // `stats` is the build-wide total (`.ll` module cache folded with
-    // the runtime object cache, #915), not just `capsule_result.stats`.
-    report.cache = stats;
-    report.cache_root = cache_root();
-    report.cache_enabled = cache_config.enabled;
-    report.dep_ll_paths = capsule_result.ll_paths;
-    print(build_report_to_json(report));
-}
-
 // Strip the last `.<ext>` from a path's basename. `"foo.c"` →
 // `"foo"`; `"foo.tar.gz"` → `"foo.tar"` (last extension only).
 // Returns the input unchanged when there's no `.`.
@@ -352,102 +222,6 @@ fn _path_strip_ext(name: string) -> string {
     }
     if last_dot < 0 { return name; }
     return substring(name, 0, last_dot);
-}
-
-// Resolve the sailfin cache root for a given `--work-dir` value.
-// Empty `work_dir` keeps the legacy `build/sailfin` path; a
-// non-empty `work_dir` rebases under `<work_dir>/sailfin` so a
-// `sfn build --work-dir <root>` invocation writes nothing under
-// `./build/`.
-// Resolve the cache dir for the top-level module's `program.ll`/`program.o`
-// and related driver scratch. With `--work-dir` it lives under
-// `<work_dir>/sailfin`. Otherwise it honours `SAILFIN_TEST_SCRATCH`
-// (#1333): without that isolation, two concurrent `sfn build`s of
-// different sources both write the fixed `build/sailfin/program.ll` and
-// clobber each other's IR, producing a cross-contaminated binary under
-// the parallel `sfn test` pool. Read via the `env.get` builtin so it
-// works even when the child env carries no PATH (a `run_capture` child
-// given only `SAILFIN_TEST_SCRATCH`). Self-host sets no
-// `SAILFIN_TEST_SCRATCH`, so it keeps the stable `build/sailfin` path —
-// matching the resolver's `_cr_scratch_root` default for the dep `.ll`s.
-fn _resolve_sailfin_cache_dir_for_work(work_dir: string) -> string ![io] {
-    if work_dir.length > 0 { return work_dir + "/sailfin"; }
-    let scratch = env.get("SAILFIN_TEST_SCRATCH");
-    if scratch.length > 0 { return scratch; }
-    return "build/sailfin";
-}
-
-struct _CapsuleBuildSpec {
-    entry_path: string;
-    kind: string;
-    capsule_name: string;
-    version: string;
-    entry_relative: string;
-}
-
-// Resolve `-p <path>` for `sfn build`. The path is either a directory
-// containing a capsule.toml or a path to capsule.toml directly. Returns
-// the entry source path (manifest's [build].entry resolved against the
-// manifest's directory) plus the build kind from `[build].kind` (defaults
-// to "binary" when unset, matching historical sfn build behaviour).
-// `entry_path` is "" with an error printed on failure.
-//
-// Also surfaces the manifest's `[capsule].name` + `[capsule].version`
-// + the manifest directory + the relative entry path so the
-// post-build sidecar emitter (Stage C2a) can compose
-// `build/capsules/<scope>/<name>/manifest.json` without re-reading
-// the capsule.toml.
-fn _resolve_capsule_build_spec(p: string) -> _CapsuleBuildSpec ![io] {
-    let mut spec = _CapsuleBuildSpec {
-        entry_path: "",
-        kind: "binary",
-        capsule_name: "",
-        version: "",
-        entry_relative: ""
-    };
-    if p.length == 0 { return spec; }
-    // Treat `p` as a manifest path only when its final segment is exactly
-    // `capsule.toml`. Substring-only checks would also accept paths like
-    // `notcapsule.toml`, which the user almost certainly didn't mean.
-    let mut is_manifest_path: boolean = false;
-    if strings_equal(p, "capsule.toml") { is_manifest_path = true; }
-    if _ends_with(p, "/capsule.toml") { is_manifest_path = true; }
-    let mut manifest_path = p;
-    if !is_manifest_path { manifest_path = _path_join(p, "capsule.toml"); }
-    if !fs.exists(manifest_path) {
-        print("capsule manifest not found: " + manifest_path);
-        return spec;
-    }
-    let manifest_text = fs.readFile(manifest_path);
-    let entry_rel = toml_get_entry(manifest_text);
-    if entry_rel.length == 0 {
-        print("capsule manifest at " + manifest_path + " has no [build].entry");
-        return spec;
-    }
-    let manifest_dir = _dirname(manifest_path);
-    spec.entry_path = _path_join(manifest_dir, entry_rel);
-    spec.entry_relative = entry_rel;
-    spec.capsule_name = toml_get_name(manifest_text);
-    spec.version = toml_get_version(manifest_text);
-    let declared_kind = toml_get_build_kind(manifest_text);
-    if declared_kind.length > 0 {
-        // Validate against the supported set so a typo in capsule.toml
-        // (e.g. `kind = "lybrary"`) doesn't silently fall back to binary.
-        let mut kind_ok: boolean = false;
-        if strings_equal(declared_kind, "binary") { kind_ok = true; }
-        if strings_equal(declared_kind, "library") { kind_ok = true; }
-        if strings_equal(declared_kind, "runtime") { kind_ok = true; }
-        if !kind_ok {
-            print("capsule manifest at " + manifest_path
-                + ": unknown [build].kind \""
-                + declared_kind
-                + "\" (expected binary | library | runtime)");
-            spec.entry_path = "";
-            return spec;
-        }
-        spec.kind = declared_kind;
-    }
-    return spec;
 }
 
 // Historical C ABI boundary — the now-retired C driver called
