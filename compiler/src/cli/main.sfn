@@ -32,12 +32,14 @@ import {
     command,
     parse,
     subcommand,
+    subcommand_path,
     with_subcommand
 } from "sfn/cli";
 
 import { sailfin_cli_main_legacy } from "../cli_main";
 import { number_to_string } from "../num_format";
 import { command_def as add_command_def, run as add_run } from "./commands/add";
+import { command_def as config_command_def, run as config_run } from "./commands/config";
 import { command_def as fmt_command_def, run as fmt_run } from "./commands/fmt";
 import { command_def as guillermo_command_def, run as guillermo_run } from "./commands/guillermo";
 import { command_def as init_command_def, run as init_run } from "./commands/init";
@@ -86,7 +88,7 @@ fn sailfin_cli_main_v2(argv: string[]) -> int ![io, clock] {
     // resolving it eagerly here would add a filesystem read to every
     // `build` / `run` invocation. `parse()` skips argv[0] (the program
     // name), so a synthetic "sfn" head is prepended before parsing.
-    let root: Command = with_subcommand(with_subcommand(with_subcommand(with_subcommand(with_subcommand(with_subcommand(with_subcommand(with_subcommand(command("sfn", "Sailfin compiler"), version_command_def()), guillermo_command_def()), init_command_def()), login_command_def()), add_command_def()), publish_command_def()), fmt_command_def()), test_command_def());
+    let root: Command = with_subcommand(with_subcommand(with_subcommand(with_subcommand(with_subcommand(with_subcommand(with_subcommand(with_subcommand(with_subcommand(command("sfn", "Sailfin compiler"), version_command_def()), guillermo_command_def()), init_command_def()), login_command_def()), add_command_def()), publish_command_def()), fmt_command_def()), test_command_def()), config_command_def());
 
     let mut parse_argv: string[] = ["sfn"];
     let mut j: int = 0;
@@ -205,6 +207,34 @@ fn sailfin_cli_main_v2(argv: string[]) -> int ![io, clock] {
         if result.ok { return test_run(result.matches, ctx); }
         print("usage: sfn test [--json] [-k NAME] [--tag TAG] [--update-snapshots] [--no-test-cache] [--jobs N] <suite...>");
         return 2;
+    }
+
+    // `sfn config <get|set|unset|list> [key] [value]` — the registered
+    // subcommand matched. `config` is the first migrated command with
+    // nested subcommands, so `subcommand(result.matches)` returns the
+    // *leaf* (e.g. "get") rather than "config"; the dispatch therefore
+    // gates on the descent path's root (`subcommand_path[0]`). A clean
+    // parse dispatches to `config.run`, which reconstructs the legacy
+    // positional slice and delegates to `handle_config_command`. A non-ok
+    // parse that descended into `config` is a usage error (exit 2): the
+    // `unknown_subcommand` / `unknown_flag` kinds carry a non-empty
+    // diagnostic (e.g. `config quantum` → "unknown subcommand 'quantum'",
+    // preserving the e2e parity oracle), so that message is printed when
+    // present; the help/version kinds (`--help` / `-h` / `--version`) carry
+    // an empty message, so a fixed usage line is printed instead — never a
+    // blank line. Either way the exit code is the legacy `2`.
+    let config_path: string[] = subcommand_path(result.matches);
+    if config_path.length > 0 {
+        if strings_equal(config_path[0], "config") {
+            if ctx.trace_argv { _v2_trace_argv(argv); }
+            if result.ok { return config_run(result.matches, ctx); }
+            if result.error.message.length > 0 {
+                print(result.error.message);
+            } else {
+                print("usage: sfn config <get|set|unset|list> [key] [value]");
+            }
+            return 2;
+        }
     }
 
     let mut handled_version: boolean = false;
