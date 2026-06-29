@@ -54,9 +54,15 @@
 // (post-1.0). The default `sfn_serve` response is always `200 OK` with
 // a `Content-Length`; a null handler return becomes a `500`.
 //
-// v0 limitations (follow-up waves): (1) No keep-alive (`Connection:
-// close` semantics, one request per connection). (2) No request
-// routing / method dispatch — that is the handler's job.
+// Keep-alive (#1711, gap B4 of epic #1540): the connection worker now loops
+// recv→dispatch→send on the same fd, honoring HTTP/1.1 keep-alive — it serves
+// multiple request/response cycles until the client sends `Connection: close`,
+// closes the connection, or the SO_RCVTIMEO idle timeout fires (recv → null).
+// HTTP pipelining (a second request before the first response is read) stays
+// out of scope: the worker reads exactly one Content-Length-framed request per
+// cycle and assumes the client waits for each response. v0 limitations
+// (follow-up waves): (1) No request routing / method dispatch — that is the
+// handler's job.
 //
 // (#1203, fixed) Per-connection `Task` handles are fire-and-forget —
 // never `sfn_task_join`ed — so they use the detached constructor
@@ -294,6 +300,89 @@ fn _serve_content_length(buf: * u8, header_end: i64) -> i64 {
     return strtoll(value_ptr, null, 10);
 }
 
+// `_serve_lc(b)` — ASCII-lowercase a byte value ('A'..'Z' → 'a'..'z'); other
+// bytes unchanged. For case-insensitive token matching in the request head.
+fn _serve_lc(b: i64) -> i64 {
+    if b >= 65 && b <= 90 { return b + 32; }
+    return b;
+}
+
+// `_serve_byte_at(base, off)` — read the byte at `base + off` as 0..255 via
+// the 4-byte pointer-read intrinsic masked to its low byte (both targets are
+// little-endian; the same idiom as `http.sfn::_byte_at`). The caller keeps
+// `off` in bounds.
+fn _serve_byte_at(base: * u8, off: i64) -> i64 {
+    return (sailfin_intrinsic_pointer_read_i32(_serve_ptr_off(base, off)) as i64) & 255;
+}
+
+// `_serve_ci_find(base, start, end, needle, nlen)` — first index in
+// `[start, end)` where the `nlen`-byte `needle` matches case-insensitively,
+// or -1. Strictly bounded (never reads at/after `end`), so it is safe over a
+// header-line slice without relying on a NUL terminator.
+fn _serve_ci_find(base: * u8, start: i64, end: i64, needle: * u8, nlen: i64) -> i64 {
+    if nlen <= 0 { return 0 - 1; }
+    let mut i: i64 = start;
+    loop {
+        if i + nlen > end { break; }
+        let mut j: i64 = 0;
+        let mut matched: bool = true;
+        loop {
+            if j >= nlen { break; }
+            if _serve_lc(_serve_byte_at(base, i + j)) != _serve_lc(_serve_byte_at(needle, j)) {
+                matched = false;
+                break;
+            }
+            j = j + 1;
+        }
+        if matched { return i; }
+        i = i + 1;
+    }
+    return 0 - 1;
+}
+
+// `_serve_keep_alive(buf)` — does the request want connection reuse? HTTP/1.1
+// defaults to keep-alive; a client opts out with an explicit `Connection:
+// close` header (#1711, gap B4 of epic #1540). Returns true unless a
+// `Connection` header is present whose (case-insensitive) value contains the
+// `close` token. The match is anchored to a header-line start (the
+// CRLF-prefixed `\r\nconnection:`, like `_serve_content_length`) and the
+// `close` search is bounded to that single header line, so a `close` token in
+// another header's value or in the body cannot flip the decision. This is the
+// socket-layer twin of the capsule's `wire.sfn::keep_alive_requested`, which
+// computes the same decision from the parsed request to emit the matching
+// `Connection` response header — so the wire framing and the loop control
+// always agree.
+fn _serve_keep_alive(buf: * u8) -> bool {
+    // Locate the header block end so the line-bound stays inside the head.
+    let terminator: string = "\r\n\r\n";
+    let term: * u8 = strstr(buf, terminator as * u8);
+    let mut header_end: i64 = strlen(buf) as i64;
+    if term as i64 != 0 {
+        header_end = ((term as i64) - (buf as i64)) + 4;
+    }
+
+    let needle: string = "\r\nconnection:";
+    let hit: * u8 = strcasestr(buf, needle as * u8);
+    if hit as i64 == 0 { return true; }
+    let off: i64 = (hit as i64) - (buf as i64);
+    // The header name starts at `off + 2`; reject a match that begins at/after
+    // the blank-line terminator (a body opening with `connection:`).
+    if off + 2 >= header_end { return true; }
+    // The value starts after the 13-char "\r\nconnection:" token.
+    let value_start: i64 = off + 13;
+    // Bound the `close` search to this header line (up to the next LF or the
+    // head end).
+    let mut line_end: i64 = value_start;
+    loop {
+        if line_end >= header_end { break; }
+        if _serve_byte_at(buf, line_end) == 10 { break; }
+        line_end = line_end + 1;
+    }
+    let close_tok: string = "close";
+    let found: i64 = _serve_ci_find(buf, value_start, line_end, close_tok as * u8, 5);
+    return found < 0;
+}
+
 // `_serve_recv_request(fd)` — read a full request (head + body) into a
 // growing libc buffer (doubling like `http.sfn`'s `_recv_all`).
 // Returns a NUL-terminated, caller-owned buffer (null on OOM / error /
@@ -327,7 +416,13 @@ fn _serve_recv_request(fd: i32) -> * u8 {
     let max_body: i64 = 1048576;
     let mut capacity: i64 = 4096;
     let mut len: i64 = 0;
-    let mut buf: * u8 = malloc((capacity + 1) as usize);
+    // Over-allocate by 4 (not 1): `_serve_keep_alive` scans this buffer with
+    // `_serve_byte_at`, a 4-byte masked `pointer_read_i32`, so a read at the
+    // final in-head offset touches up to `off + 3`. With `len <= capacity`,
+    // the worst read index is `len + 2`, which must stay inside the
+    // allocation — exactly the +4 headroom `http.sfn::_recv_all` keeps for the
+    // same idiom (#1711). One trailing NUL still serves the `strstr` scans.
+    let mut buf: * u8 = malloc((capacity + 4) as usize);
     if buf as i64 == 0 { return null; }
     let chunk: i64 = 4096;
     let terminator: string = "\r\n\r\n";
@@ -338,7 +433,7 @@ fn _serve_recv_request(fd: i32) -> * u8 {
     loop {
         if len + chunk > capacity {
             let new_cap: i64 = capacity * 2;
-            let new_buf: * u8 = realloc(buf, (new_cap + 1) as usize);
+            let new_buf: * u8 = realloc(buf, (new_cap + 4) as usize);
             if new_buf as i64 == 0 {
                 free(buf);
                 return null;
@@ -399,7 +494,7 @@ fn _serve_recv_request(fd: i32) -> * u8 {
                 if new_cap >= body_target { break; }
                 new_cap = new_cap * 2;
             }
-            let new_buf: * u8 = realloc(buf, (new_cap + 1) as usize);
+            let new_buf: * u8 = realloc(buf, (new_cap + 4) as usize);
             if new_buf as i64 == 0 {
                 free(buf);
                 return null;
@@ -422,18 +517,23 @@ fn _serve_recv_request(fd: i32) -> * u8 {
     return buf;
 }
 
-// `_serve_send_response(fd, body)` — frame `body` as a minimal
-// HTTP/1.1 `200 OK` response (`Content-Length` + `Connection:
-// close`) and write it. A null `body` becomes a `500 Internal Server
-// Error` with an empty body. Returns false on a send failure.
-fn _serve_send_response(fd: i32, body: * u8) -> bool {
+// `_serve_send_response(fd, body, keep_alive)` — frame `body` as a minimal
+// HTTP/1.1 `200 OK` response (`Content-Length` + a negotiation-aware
+// `Connection` header) and write it. When `keep_alive` is true the response
+// carries `Connection: keep-alive` (the connection is reused for the next
+// request); otherwise `Connection: close` (#1711). A null `body` becomes a
+// `500 Internal Server Error` with an empty body and always `Connection:
+// close` (the worker closes on the error path). Returns false on a send
+// failure.
+fn _serve_send_response(fd: i32, body: * u8, keep_alive: bool) -> bool {
     if body as i64 == 0 {
         let err: string = "HTTP/1.1 500 Internal Server Error\r\nContent-Length: 0\r\nConnection: close\r\n\r\n";
         return _serve_send_all(fd, err as * u8, strlen(err as * u8) as i64);
     }
 
     let status: string = "HTTP/1.1 200 OK\r\nContent-Length: ";
-    let tail: string = "\r\nConnection: close\r\n\r\n";
+    let mut tail: string = "\r\nConnection: close\r\n\r\n";
+    if keep_alive { tail = "\r\nConnection: keep-alive\r\n\r\n"; }
     let body_len: i64 = strlen(body) as i64;
     let clen: * u8 = _serve_uint_to_str(body_len);
     if clen as i64 == 0 { return false; }
@@ -590,25 +690,42 @@ fn _serve_conn_worker(ctx: * u8) -> * u8 {
     let handler: i64 = atomic_load(handler_slot);
     free(ctx);
 
-    let request: * u8 = _serve_recv_request(client_fd as i32);
-    if request as i64 == 0 {
-        // Bad/oversized/failed request: emit a 500, never call the
-        // handler with a null request pointer.
-        _serve_send_response(client_fd as i32, null);
-        close(client_fd as i32);
-        return null;
+    // Keep-alive loop (#1711): serve request/response cycles on the same fd
+    // until the client opts out (`Connection: close`), the client closes
+    // (recv EOF → null), or the socket idle timeout fires (recv -1 → null;
+    // SO_RCVTIMEO is re-armed inside `_serve_recv_request` each cycle, so an
+    // idle kept-alive connection is reaped, not pinned forever). `first`
+    // preserves the #1709 direct-500 contract: a failed FIRST request
+    // (truncated / empty / oversized) still emits a 500; a null on a
+    // SUBSEQUENT cycle is just the kept-alive client finishing, so the worker
+    // closes quietly without a spurious 500.
+    let mut first: bool = true;
+    loop {
+        let request: * u8 = _serve_recv_request(client_fd as i32);
+        if request as i64 == 0 {
+            // Bad/oversized/failed request: emit a 500 (first cycle only),
+            // never call the handler with a null request pointer.
+            if first {
+                _serve_send_response(client_fd as i32, null, false);
+            }
+            break;
+        }
+        first = false;
+        let keep_alive: bool = _serve_keep_alive(request);
+        // Move the request bytes into the handler as an OwnedBuf; dispatch
+        // reclaims the request after the handler returns, and the handler
+        // returns a FRESH response OwnedBuf moved back out. The worker is the
+        // response's last owner and frees it after the send (so memory stays
+        // bounded across many reused requests). The raw `request` buffer is
+        // owned by the move now — do NOT free it here (dispatch does).
+        let req_box: OwnedBuf = _serve_wrap_owned(request, strlen(request) as i64);
+        let response: OwnedBuf = sfn_serve_handler_dispatch(handler as * u8, req_box);
+        let sent_ok: bool = _serve_send_response(client_fd as i32, response.ptr_addr as * u8, keep_alive);
+        _serve_free_owned(response);
+        if !keep_alive { break; }
+        if !sent_ok { break; }
     }
-    // Move the request bytes into the handler as an OwnedBuf; dispatch
-    // reclaims the request after the handler returns, and the handler
-    // returns a FRESH response OwnedBuf moved back out. The worker is the
-    // response's last owner and frees it after the send (closing the v0
-    // leak). The raw `request` buffer is owned by the move now — do NOT
-    // free it here (dispatch does).
-    let req_box: OwnedBuf = _serve_wrap_owned(request, strlen(request) as i64);
-    let response: OwnedBuf = sfn_serve_handler_dispatch(handler as * u8, req_box);
-    _serve_send_response(client_fd as i32, response.ptr_addr as * u8);
     close(client_fd as i32);
-    _serve_free_owned(response);
     return null;
 }
 
@@ -636,17 +753,29 @@ fn _serve_conn_worker_framed(ctx: * u8) -> * u8 {
     let handler: i64 = atomic_load(handler_slot);
     free(ctx);
 
-    let request: * u8 = _serve_recv_request(client_fd as i32);
-    if request as i64 == 0 {
-        _serve_send_raw(client_fd as i32, null);
-        close(client_fd as i32);
-        return null;
+    // Keep-alive loop (#1711): same shape as `_serve_conn_worker`, but the
+    // handler returns the FULL pre-framed response sent verbatim. The capsule
+    // trampoline (`server.sfn::_sfn_http_trampoline`) emits the matching
+    // `Connection` header by computing the same keep-alive decision from the
+    // parsed request, so the framed bytes and this loop's control agree. The
+    // worker computes `keep_alive` here purely to decide whether to loop.
+    let mut first: bool = true;
+    loop {
+        let request: * u8 = _serve_recv_request(client_fd as i32);
+        if request as i64 == 0 {
+            if first { _serve_send_raw(client_fd as i32, null); }
+            break;
+        }
+        first = false;
+        let keep_alive: bool = _serve_keep_alive(request);
+        let req_box: OwnedBuf = _serve_wrap_owned(request, strlen(request) as i64);
+        let response: OwnedBuf = sfn_serve_handler_dispatch(handler as * u8, req_box);
+        let sent_ok: bool = _serve_send_raw(client_fd as i32, response.ptr_addr as * u8);
+        _serve_free_owned(response);
+        if !keep_alive { break; }
+        if !sent_ok { break; }
     }
-    let req_box: OwnedBuf = _serve_wrap_owned(request, strlen(request) as i64);
-    let response: OwnedBuf = sfn_serve_handler_dispatch(handler as * u8, req_box);
-    _serve_send_raw(client_fd as i32, response.ptr_addr as * u8);
     close(client_fd as i32);
-    _serve_free_owned(response);
     return null;
 }
 

@@ -741,7 +741,7 @@ The following HTTP features are planned for a future release:
 - `http.put`, `http.delete`, `http.patch`
 - Streaming response bodies
 - `websocket.connect` for WebSocket support
-- TLS, keep-alive, per-request allocation cleanup, and a typed routing layer (sfn/http Waves 3+)
+- TLS, per-request allocation cleanup, and a typed routing layer (sfn/http Waves 3+)
 
 ---
 
@@ -910,9 +910,9 @@ let rsp = parse_response("HTTP/1.1 404 Not Found\r\nContent-Length: 0\r\n\r\n");
 
 ---
 
-#### `serialize_response(rsp: Response) -> string`
+#### `serialize_response(rsp: Response, keep_alive: boolean = false) -> string`
 
-Serialize a `Response` to a raw HTTP/1.1 response string. Emits the status line (using an internal reason-phrase table), the user-supplied headers, `Content-Length`, and `Connection: close`. Any user header containing CR or LF is silently dropped (injection guard). Headers that name `Content-Length`, `Connection`, or `Transfer-Encoding` are also dropped to prevent response smuggling.
+Serialize a `Response` to a raw HTTP/1.1 response string. Emits the status line (using an internal reason-phrase table), the user-supplied headers, `Content-Length`, and a `Connection` header: `Connection: keep-alive` when `keep_alive` is `true`, otherwise `Connection: close` (the default). Any user header containing CR or LF is silently dropped (injection guard). Headers that name `Content-Length`, `Connection`, or `Transfer-Encoding` are also dropped to prevent response smuggling.
 
 ```sfn
 let raw = serialize_response(Response { status: 200, headers: [], body: "OK" });
@@ -1007,9 +1007,41 @@ The `fetch` client shares the v0 client limits: no TLS (`https://` is rejected),
 
 ---
 
+#### Native keep-alive client primitives (single-connection reuse)
+
+For back-to-back requests to the same authority, `sfn/http` exposes three runtime adapter primitives that hold a TCP connection open across multiple send/receive cycles (#1711). These are externable from a consumer capsule and bypass the per-request connect overhead of `get`/`post`/`fetch`.
+
+##### `sfn_http_conn_open(url: string) -> int ![net]`
+
+Open a persistent TCP connection to the authority in `url`. Returns a file-descriptor integer on success, or `-1` on failure. The caller must pass this fd to every subsequent `_send` call and close it with `_close` when done.
+
+##### `sfn_http_conn_send(fd: int, method: string, url: string, headers: string[], body: string) -> Response ![net]`
+
+Send an HTTP request over an already-open connection `fd` and read back a `Response`. The response must be `Content-Length`-framed (chunked transfer-encoding is not decoded on this path). Sends `Connection: keep-alive` automatically so the server holds the socket open.
+
+##### `sfn_http_conn_close(fd: int) -> void ![net]`
+
+Close the persistent connection identified by `fd`. Always call this when the connection is no longer needed to avoid fd exhaustion.
+
+```sfn
+import { sfn_http_conn_open, sfn_http_conn_send, sfn_http_conn_close } from "sfn/http";
+
+fn batch_requests(base: string) -> void ![net] {
+    let fd = sfn_http_conn_open(base);
+    if fd < 0 { return; }
+    let r1 = sfn_http_conn_send(fd, "GET", base + "/a", [], "");
+    let r2 = sfn_http_conn_send(fd, "GET", base + "/b", [], "");
+    sfn_http_conn_close(fd);
+}
+```
+
+v0 limit: the response to each `_send` call must carry a `Content-Length` header; responses without one are not decoded on this path.
+
+---
+
 ### v0 limitations
 
-- **HTTP/1.1 only, blocking accept, no TLS, no keep-alive** (`Connection: close` on every response).
+- **HTTP/1.1 only, blocking accept, no TLS.** Keep-alive IS honored: the server reuses a connection for back-to-back requests unless the client sends `Connection: close` (#1711). HTTP pipelining (multiple in-flight requests on one connection) remains out of scope.
 - **`Content-Length` bodies only** — POST/PUT request bodies are drained via `Content-Length` (capped at 1 MiB; over-cap requests get a `500`), so `Request.body` is reliable. Chunked transfer-encoding is not decoded (post-1.0).
 - **`host` binding not enforced** — the server always binds `INADDR_ANY` regardless of `ServerConfig.host`.
 - **Per-request allocations are not freed** — a known leak; acceptable for short-lived or v0 servers but not production long-running processes.

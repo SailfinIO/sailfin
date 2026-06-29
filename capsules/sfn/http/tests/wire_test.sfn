@@ -7,14 +7,17 @@
 import {
     Request,
     Response,
+    header,
+    not_found,
     parse_request,
     parse_response,
-    serialize_response,
-    header,
     query_param,
     reason_phrase,
-    not_found
+    serialize_response
 } from "../src/mod";
+// `keep_alive_requested` is an internal wire helper (not part of the public
+// barrel); imported directly for unit coverage, like `server.sfn` does.
+import { keep_alive_requested } from "../src/wire";
 
 test "parse_request: GET request line, path, query, and headers" {
     let raw = "GET /search?q=sail&n=2 HTTP/1.1\r\nHost: localhost\r\nAccept: */*\r\n\r\n";
@@ -103,6 +106,41 @@ test "serialize_response: drops user-supplied framing headers (smuggling guard)"
     let out = serialize_response(rsp);
     let expected = "HTTP/1.1 200 OK\r\nX-Keep: yes\r\nContent-Length: 3\r\nConnection: close\r\n\r\nabc";
     assert strings_equal(out, expected);
+}
+
+test "serialize_response: keep_alive=true emits Connection: keep-alive (#1711)" {
+    // The serializer no longer hard-codes `Connection: close` — when keep-alive
+    // is negotiated it emits `Connection: keep-alive` instead.
+    let rsp = Response {
+        status: 200,
+        headers: ["X-Custom: yes"],
+        body: "ok"
+    };
+    let out = serialize_response(rsp, true);
+    let expected = "HTTP/1.1 200 OK\r\nX-Custom: yes\r\nContent-Length: 2\r\nConnection: keep-alive\r\n\r\nok";
+    assert strings_equal(out, expected);
+}
+
+test "serialize_response: keep_alive=false matches the default close framing (#1711)" {
+    // Passing false explicitly is byte-identical to the zero-arg default — the
+    // close-path regression stays intact.
+    let rsp = Response { status: 200, headers: [], body: "x" };
+    assert strings_equal(serialize_response(rsp, false), serialize_response(rsp));
+    assert strings_equal(serialize_response(rsp, false), "HTTP/1.1 200 OK\r\nContent-Length: 1\r\nConnection: close\r\n\r\nx");
+}
+
+test "keep_alive_requested: HTTP/1.1 default is keep-alive, Connection: close opts out (#1711)" {
+    // No Connection header → HTTP/1.1 default keep-alive.
+    let plain = parse_request("GET / HTTP/1.1\r\nHost: x\r\n\r\n");
+    assert keep_alive_requested(plain);
+    // Explicit keep-alive.
+    let keep = parse_request("GET / HTTP/1.1\r\nHost: x\r\nConnection: keep-alive\r\n\r\n");
+    assert keep_alive_requested(keep);
+    // Explicit close (any casing) opts out.
+    let close = parse_request("GET / HTTP/1.1\r\nHost: x\r\nConnection: close\r\n\r\n");
+    assert ! keep_alive_requested(close);
+    let close_uc = parse_request("GET / HTTP/1.1\r\nHost: x\r\nConnection: CLOSE\r\n\r\n");
+    assert ! keep_alive_requested(close_uc);
 }
 
 test "reason_phrase: known codes mapped, unknown falls back to Status" {

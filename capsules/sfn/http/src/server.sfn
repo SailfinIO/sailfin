@@ -24,8 +24,8 @@
 // so the extern resolves at link time (like the libc externs in the
 // client adapter). The extern carries no effect annotation (externs may
 // not); enforcement rides on `serve`'s own `![net, io]`.
-import { parse_request, serialize_response } from "./wire";
 import { Request, Response } from "./types";
+import { keep_alive_requested, parse_request, serialize_response } from "./wire";
 
 extern fn sfn_serve_framed(handler: * u8, port: i32) -> void;
 
@@ -114,8 +114,14 @@ fn _sfn_http_trampoline(req: OwnedBuf) -> OwnedBuf {
     }
     let entry: * fn (Request) -> Response = _sfn_http_handler_addr as * fn (Request) -> Response;
     let parsed: Request = parse_request(req.ptr_addr as * u8 as string);
+    // Keep-alive negotiation (#1711): emit a `Connection` header that agrees
+    // with whether the runtime socket layer keeps the connection open. The
+    // runtime worker computes the same decision from the raw request
+    // (`serve.sfn::_serve_keep_alive`), so the wire framing and the loop
+    // control never disagree.
+    let keep_alive: boolean = keep_alive_requested(parsed);
     let resp: Response = entry(parsed);
-    return _http_owned_from_str(serialize_response(resp));
+    return _http_owned_from_str(serialize_response(resp, keep_alive));
 }
 
 // `serve(handler, port)` — start a blocking HTTP/1.1 server that
@@ -134,9 +140,10 @@ fn _sfn_http_trampoline(req: OwnedBuf) -> OwnedBuf {
 //   }
 //
 // `handler` must be a top-level function (closures are not supported in
-// v0). v0 limits (matching the runtime): HTTP/1.1, blocking accept, no
-// TLS, no keep-alive, GET-shaped request bodies (POST bodies land in a
-// follow-up), text responses only.
+// v0). HTTP/1.1 keep-alive is honored (#1711): the connection is reused for
+// back-to-back requests unless the client sends `Connection: close`. v0
+// limits (matching the runtime): HTTP/1.1, blocking accept, no TLS, text
+// responses only, no HTTP pipelining.
 fn serve(handler: * fn (Request) -> Response, port: int = 8080) -> void ![net, io] {
     _sfn_http_handler_addr = handler as i64;
     sfn_serve_framed(_sfn_http_trampoline as * u8, port as i32);

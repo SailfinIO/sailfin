@@ -96,6 +96,24 @@ fn _is_reserved_header(h: string) -> boolean {
         || strings_equal(lower, "transfer-encoding");
 }
 
+// `_contains_sub(haystack, needle)` — true if `needle` occurs in `haystack`
+// (exact, case-sensitive substring scan; callers lowercase first for a
+// case-insensitive match). The prelude exposes `find_char` (single char)
+// but no substring search, so this small scan covers the `Connection`-value
+// token check (#1711). An empty needle matches.
+fn _contains_sub(haystack: string, needle: string) -> boolean {
+    let n = needle.length;
+    if n == 0 { return true; }
+    let limit = haystack.length - n;
+    let mut i = 0;
+    loop {
+        if i > limit { break; }
+        if strings_equal(substring(haystack, i, i + n), needle) { return true; }
+        i = i + 1;
+    }
+    return false;
+}
+
 // ASCII-lowercase (A–Z only) for case-insensitive header-name matching.
 fn _ascii_lower(value: string) -> string {
     let mut out = "";
@@ -285,9 +303,17 @@ fn parse_response(raw: string) -> Response {
 // EXCEPT any containing a CR or LF (header-injection guard) or naming a
 // framing header the serializer owns — `Content-Length`, `Connection`,
 // `Transfer-Encoding` (response-smuggling guard, see `_is_reserved_header`).
-// `Content-Length` (from the body's length) and `Connection: close` are
-// always appended. v0 is text bodies only.
-fn serialize_response(rsp: Response) -> string {
+// `Content-Length` (from the body's length) is always appended.
+//
+// The `Connection` framing header is negotiation-aware (keep-alive, #1711):
+// when `keep_alive` is true the serializer emits `Connection: keep-alive`
+// (the connection is reused for the next request/response cycle); otherwise
+// it emits `Connection: close` (the v0 default — preserved so existing
+// callers and the close-path regression are unchanged). The caller decides
+// `keep_alive` from the request's `Connection` header — the server keeps the
+// connection alive for an HTTP/1.1 client that did not send `Connection:
+// close` (see `server.sfn::_sfn_http_trampoline`). v0 is text bodies only.
+fn serialize_response(rsp: Response, keep_alive: boolean = false) -> string {
     let mut out = "HTTP/1.1 " + _int_to_string(rsp.status) + " " + reason_phrase(rsp.status)
         + "\r\n";
     let mut i = 0;
@@ -298,7 +324,9 @@ fn serialize_response(rsp: Response) -> string {
         i = i + 1;
     }
     out = out + "Content-Length: " + _int_to_string(rsp.body.length) + "\r\n";
-    out = out + "Connection: close\r\n";
+    if keep_alive { out = out + "Connection: keep-alive\r\n"; } else {
+        out = out + "Connection: close\r\n";
+    }
     out = out + "\r\n";
     out = out + rsp.body;
     return out;
@@ -351,6 +379,23 @@ fn query_param(req: Request, name: string) -> string? {
         cursor = amp + 1;
     }
     return null;
+}
+
+// ── keep-alive negotiation ────────────────────────────────────────
+// `keep_alive_requested(req)` — does the request want connection reuse?
+// HTTP/1.1 defaults to keep-alive; the client opts out with an explicit
+// `Connection: close` header (#1711). Returns false only when a `Connection`
+// header is present and its (case-insensitive) value contains the `close`
+// token; otherwise true. This mirrors the runtime's socket-layer decision
+// (`serve.sfn::_serve_keep_alive`) so the response's `Connection` header
+// agrees with whether the runtime actually keeps the connection open.
+fn keep_alive_requested(req: Request) -> boolean {
+    let conn = header(req, "Connection");
+    if conn != null {
+        let value = _ascii_lower(conn);
+        if _contains_sub(value, "close") { return false; }
+    }
+    return true;
 }
 
 // ── response builders ─────────────────────────────────────────────
