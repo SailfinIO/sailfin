@@ -212,149 +212,6 @@ fn _path_strip_ext(name: string) -> string {
     return substring(name, 0, last_dot);
 }
 
-fn _legacy_dispatch_run(args: string[], runtime_root: string, binary_dir: string) -> int ![io] {
-    // run [--no-cache] [--clean] [--cache-trace] <file.sfn | exe>
-    let mut input_path: string = "";
-    let mut no_cache_flag: boolean = false;
-    let mut clean_flag: boolean = false;
-    let mut cache_trace_flag: boolean = false;
-
-    let mut ri: int = 1;
-    loop {
-        if ri >= args.length { break; }
-        let a = args[ri];
-        if strings_equal(a, "--no-cache") {
-            no_cache_flag = true;
-            ri += 1;
-            continue;
-        }
-        if strings_equal(a, "--clean") {
-            clean_flag = true;
-            ri += 1;
-            continue;
-        }
-        if strings_equal(a, "--cache-trace") {
-            cache_trace_flag = true;
-            ri += 1;
-            continue;
-        }
-        // Positional argument: the source file (or executable).
-        if input_path.length > 0 {
-            print(_usage());
-            return 2;
-        }
-        input_path = a;
-        ri += 1;
-    }
-    if input_path.length == 0 {
-        print(_usage());
-
-        return 2;
-    }
-
-    // If the argument doesn't look like Sailfin source, treat it as an executable.
-    if !_ends_with(input_path, ".sfn") {
-        return process.run([input_path]);
-    }
-
-    if !fs.exists(input_path) {
-        print("file not found: " + input_path);
-
-        return 1;
-    }
-
-    // #1411: route the top-level `run.ll`/`run` executable under the
-    // per-invocation scratch when one is set (`SAILFIN_TEST_SCRATCH`),
-    // exactly as `sfn build` does (line ~2322). Bare-file dispatch
-    // delegates here (`["run", cmd]`), so it inherits this too. Without
-    // it, two concurrent `sfn run`/bare-dispatch children in the
-    // parallel `sfn test --jobs N` pool both write the fixed
-    // `build/sailfin/run` and clobber each other's executable — a test
-    // asserting on the run's stdout then sees another fixture's output
-    // (non-deterministic, #1411). Empty scratch resolves to
-    // `build/sailfin`, keeping the default invocation byte-for-byte.
-    let run_cache_dir = _resolve_sailfin_cache_dir_for_work("");
-    _ensure_dir(run_cache_dir);
-
-    let ll_path = run_cache_dir + "/run.ll";
-    let exe_path = run_cache_dir + "/run";
-
-    // Resolve and compile capsule deps before lowering the main file.
-    // The unified resolver covers relative imports, manifest-declared
-    // capsule deps, and workspace-implicit imports in one pass —
-    // text-level fallback retired with Stage B. CLI overrides
-    // (`--no-cache` / `--clean` / `--cache-trace`) layer on top of
-    // env-var defaults (`SAILFIN_NO_CACHE` / `SAILFIN_CACHE_TRACE`).
-    let run_cache_config = resolve_build_cache_config(no_cache_flag, cache_trace_flag, clean_flag);
-    // `sfn run` has no `-p` plumbing yet, so the consumer is
-    // always empty: relative-import `.ll`s take the legacy
-    // flat layout (Stage C2b2). When `sfn run -p` lands, this
-    // becomes a one-line update mirroring `sfn build`.
-    // Stage D PR3 / #1405 Bug 2: `sfn run` keeps the in-process
-    // compile path for small fixtures (its typical use case). It
-    // doesn't take `-p` yet, so `sailfin_exe`/`work_dir` stay empty;
-    // threading `binary_dir` lets `prepare_project_capsules` upgrade
-    // to subprocess isolation only when the resolved closure is large
-    // enough to otherwise OOM (a whole-compiler-importing `sfn run`).
-    let run_capsule_result = prepare_project_capsules(input_path, run_cache_config, empty_resolver_consumer(), "", "", binary_dir);
-    let capsule_lls = run_capsule_result.ll_paths;
-
-    let source = fs.readFile(input_path);
-    let module_name = module_name_from_path(input_path);
-    let ok = compile_to_llvm_file_with_module(source, module_name, ll_path, "");
-    if !ok {
-        print("failed to compile LLVM for: " + input_path);
-
-        return 1;
-    }
-
-    let mut all_lls: string[] = [ll_path];
-    let mut rli: int = 0;
-    loop {
-        if rli >= capsule_lls.length { break; }
-        all_lls.push(capsule_lls[rli]);
-        rli += 1;
-    }
-    // Issue #940: same implicit-capsule fallback as `sfn build`
-    // (no-op for `-p` / declared-dep, load-bearing for a no-dep
-    // `sfn run <file>`).
-    let mut run_runtime_caps = run_capsule_result.runtime_capsules;
-    if run_runtime_caps.length == 0 {
-        run_runtime_caps = runtime_capsule_from_root(runtime_root);
-    }
-    // Shared runtime-object cache root (#1096); empty under
-    // `--no-cache` to leave the persistent store untouched.
-    let mut run_shared_cache_root: string = "";
-    if run_cache_config.enabled { run_shared_cache_root = cache_root(); }
-    let link_result = _clang_link_multi(all_lls, exe_path, runtime_root, run_runtime_caps, binary_dir, "", run_shared_cache_root);
-    let link_rc = link_result.rc;
-    if link_rc != 0 {
-        // A native link failure is a real compiler/runtime bug to
-        // fix at the source — never paper over it. The prior
-        // `process.run(["sfn", "run", input_path])` "seed fallback"
-        // re-invoked `sfn run`, so on any persistent link failure
-        // it recursed into itself forever (#969). Fail closed with
-        // the clang exit code instead.
-        print("link failed (clang exit=" + number_to_string(link_rc) + ")");
-        return link_rc;
-    }
-
-    // Cache summary mirrors `sfn build`: quiet for builds with no
-    // cache activity (no manifest deps, or `--no-cache`), and the
-    // human-readable counterpart of the eventual `--json` build
-    // report's `cache` field. Runtime object-cache stats fold in
-    // alongside the `.ll` module cache total (#915), gated on
-    // `run_cache_config.enabled` so `--no-cache` stays quiet (see
-    // the `sfn build` fold site for the rationale).
-    let mut run_cache_stats = run_capsule_result.stats;
-    if run_cache_config.enabled {
-        run_cache_stats = merge_cache_stats(run_capsule_result.stats, link_result.stats);
-    }
-    _print_cache_summary(run_cache_stats);
-    let run_rc = process.run([exe_path]);
-    return run_rc;
-}
-
 // Historical C ABI boundary — the now-retired C driver called
 // `sailfin_cli_main__cli_main` with an `int64_t` return type.
 // After M5.5 (#473) the only callers are `sailfin_cli_main_v2`
@@ -426,7 +283,6 @@ fn sailfin_cli_main_legacy(argv: string[]) -> int ![io, clock] {
     // `emit` / `--emit` migrated to `sfn/cli` (epic #1671, Phase B) — handled
     // by `sailfin_cli_main_v2` before reaching this legacy dispatch.
     let cmd = args[0];
-    let is_run = strings_equal(cmd, "run");
     let mut _let10: boolean = false;
     if strings_equal(cmd, "-h") { _let10 = true; }
     if strings_equal(cmd, "--help") { _let10 = true; }
@@ -435,10 +291,10 @@ fn sailfin_cli_main_legacy(argv: string[]) -> int ![io, clock] {
     // `_usage()` — driven by `make check` / CI, not end users.
     let is_selfhost = strings_equal(cmd, "selfhost");
 
-    if is_run {
-        return _legacy_dispatch_run(args, runtime_root, binary_dir);
-    }
-
+    // `sfn run` migrated to `sfn/cli` (epic #1671, Phase B) — handled by
+    // `sailfin_cli_main_v2` before reaching this legacy dispatch. Bare-file
+    // dispatch (`sfn foo.sfn`) re-enters as `["run", foo.sfn]` and routes
+    // through v2 to `cli/commands/run.sfn`.
     // `sfn test` migrated to `sfn/cli` (epic #351, Issue 3.8) — handled
     // by `sailfin_cli_main_v2` before reaching this legacy dispatch.
     if is_help {
