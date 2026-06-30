@@ -39,6 +39,7 @@ import {
 import { sailfin_cli_main_legacy } from "../cli_main";
 import { number_to_string } from "../num_format";
 import { command_def as add_command_def, run as add_run } from "./commands/add";
+import { command_def as build_command_def, run as build_run } from "./commands/build";
 import { command_def as check_command_def, run as check_run } from "./commands/check";
 import { command_def as config_command_def, run as config_run } from "./commands/config";
 import { command_def as emit_command_def, run as emit_run } from "./commands/emit";
@@ -113,6 +114,7 @@ fn sailfin_cli_main_v2(argv: string[]) -> int ![io, clock] {
     root = with_subcommand(root, package_command_def());
     root = with_subcommand(root, emit_command_def());
     root = with_subcommand(root, check_command_def());
+    root = with_subcommand(root, build_command_def());
 
     // Preserve the legacy `--emit` long-flag alias (`sfn --emit llvm x.sfn`):
     // the legacy dispatch treated `--emit` as the first token identically to
@@ -360,6 +362,20 @@ fn sailfin_cli_main_v2(argv: string[]) -> int ![io, clock] {
         // reflects the accumulated parse state; `version.run` ignores it,
         // so passing it on both paths keeps the dispatch uniform.
         return version_run(result.matches, ctx);
+    }
+
+    // `sfn build [-o OUTPUT] [-p PATH] [--no-cache] [--clean] [--cache-trace]
+    // [--json] [--work-dir DIR] [--check-determinism] (<file.sfn> | -p <capsule-path>)`
+    // — the registered subcommand matched. A clean parse dispatches to
+    // `build.run`, which reproduces the legacy `_legacy_dispatch_build` body
+    // against typed matches. A non-ok parse that still descended into `build`
+    // (a value flag with no value, an unrecognized flag, or `--help`) is a
+    // usage error (exit 2) — the parser owns argument validation.
+    if strings_equal(subcommand(result.matches), "build") {
+        if ctx.trace_argv { _v2_trace_argv(argv); }
+        if result.ok { return build_run(result.matches, ctx); }
+        print("usage: sfn build [-o OUTPUT] [-p PATH] [--no-cache] [--clean] [--cache-trace] [--json] [--work-dir DIR] [--check-determinism] (<file.sfn> | -p <capsule-path>)");
+        return 2;
     }
 
     // Every other subcommand (and help, parse errors, the bare
