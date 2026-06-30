@@ -45,6 +45,7 @@ import { command_def as guillermo_command_def, run as guillermo_run } from "./co
 import { command_def as init_command_def, run as init_run } from "./commands/init";
 import { command_def as lock_command_def, run as lock_run } from "./commands/lock";
 import { command_def as login_command_def, run as login_run } from "./commands/login";
+import { command_def as package_command_def, run as package_run } from "./commands/package";
 import { command_def as publish_command_def, run as publish_run } from "./commands/publish";
 import { command_def as test_command_def, run as test_run } from "./commands/test";
 import { command_def as version_command_def, run as version_run } from "./commands/version";
@@ -89,7 +90,7 @@ fn sailfin_cli_main_v2(argv: string[]) -> int ![io, clock] {
     // resolving it eagerly here would add a filesystem read to every
     // `build` / `run` invocation. `parse()` skips argv[0] (the program
     // name), so a synthetic "sfn" head is prepended before parsing.
-    let root: Command = with_subcommand(with_subcommand(with_subcommand(with_subcommand(with_subcommand(with_subcommand(with_subcommand(with_subcommand(with_subcommand(with_subcommand(command("sfn", "Sailfin compiler"), version_command_def()), guillermo_command_def()), init_command_def()), login_command_def()), add_command_def()), publish_command_def()), fmt_command_def()), test_command_def()), config_command_def()), lock_command_def());
+    let root: Command = with_subcommand(with_subcommand(with_subcommand(with_subcommand(with_subcommand(with_subcommand(with_subcommand(with_subcommand(with_subcommand(with_subcommand(with_subcommand(command("sfn", "Sailfin compiler"), version_command_def()), guillermo_command_def()), init_command_def()), login_command_def()), add_command_def()), publish_command_def()), fmt_command_def()), test_command_def()), config_command_def()), lock_command_def()), package_command_def());
 
     let mut parse_argv: string[] = ["sfn"];
     let mut j: int = 0;
@@ -189,6 +190,22 @@ fn sailfin_cli_main_v2(argv: string[]) -> int ![io, clock] {
         if ctx.trace_argv { _v2_trace_argv(argv); }
         if result.ok { return lock_run(result.matches, ctx); }
         print("usage: sfn lock [--work-dir DIR]");
+        return 2;
+    }
+
+    // `sfn package [--target T] [--out DIR] [--compiler-bin PATH] [--installer] [-p <capsule-path>]`
+    // — the registered subcommand matched. A clean parse dispatches to
+    // `package.run`, which reconstructs the legacy positional slice and
+    // delegates to `handle_package_command` (the packaging body stays in
+    // `cli_commands.sfn` until Phase C). A non-ok parse that still descended
+    // into `package` (a value flag with no value, an unrecognized flag, or
+    // `--help`) is a usage error (exit 2) — the parser owns argument
+    // validation. The literal `2` mirrors the dispatches above (the `sfn/cli`
+    // `EXIT_*` constants lower to 0 here).
+    if strings_equal(subcommand(result.matches), "package") {
+        if ctx.trace_argv { _v2_trace_argv(argv); }
+        if result.ok { return package_run(result.matches, ctx); }
+        print("usage: sfn package [--target T] [--out DIR] [--compiler-bin PATH] [--installer] [-p <capsule-path>]");
         return 2;
     }
 

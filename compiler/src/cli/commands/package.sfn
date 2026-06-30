@@ -1,0 +1,73 @@
+// compiler/src/cli/commands/package.sfn
+//
+// `package` subcommand (CLI modularization epic #1671 / tracker #1675,
+// Phase B — SFEP-0027 §3.4, command #3). Migrates `package` off the
+// legacy hand-rolled dispatch (`cli_main.sfn`) into the per-command
+// `command_def()` + `run()` pattern that `version.sfn` established and
+// `lock.sfn` (command #2) extended.
+//
+// `run` reconstructs the legacy positional args slice and delegates to
+// `handle_package_command` **verbatim** — output and exit codes are
+// byte-identical to today (parity oracle:
+// `compiler/tests/e2e/sfn_package_test.sfn`). The `--installer` / `-p`
+// mutual-exclusion stays inside `handle_package_command` and is
+// preserved automatically by delegation. Phase C (#1676) owns deleting
+// that body and relocating its logic.
+//
+// A missing value for a value flag, an unrecognized flag, or `--help`
+// makes the parse non-ok while still marking `package` as descended;
+// the v2 dispatch in `cli/main.sfn` returns the usage error (exit 2)
+// there — the parser owns argument validation.
+import {
+    Command,
+    Matches,
+    command,
+    flag,
+    flag_value,
+    flag_value_short,
+    get_or,
+    has_flag,
+    with_flag
+} from "sfn/cli";
+
+import { handle_package_command } from "../../cli_commands";
+import { CliContext } from "../context";
+
+// The `sfn/cli` definition for `package`, registered on the v2 root via
+// `with_subcommand`. Four optional value flags, one boolean flag, and one
+// short value flag `-p`.
+fn command_def() -> Command {
+    return with_flag(with_flag(with_flag(with_flag(with_flag(command("package", "Package a capsule or the compiler for distribution"), flag_value("target", "Platform target (e.g. linux-x86_64); auto-detected if absent")), flag_value("out", "Output directory (default: dist)")), flag_value("compiler-bin", "Path to the compiler binary (default: build/native/sailfin)")), flag("installer", "Package the compiler installer bundle")), flag_value_short("p", "p", "Capsule path to package (user-capsule mode)"));
+}
+
+// Reconstruct the legacy positional args slice from the typed matches and
+// delegate to `handle_package_command` verbatim. Absent flags are omitted
+// from the slice so the handler applies its own defaults (`out` → "dist",
+// `compiler-bin` → "build/native/sailfin") and its own mutual-exclusion
+// check exactly as before. `ctx` is part of the per-command contract but
+// unused here (package sources no driver state).
+fn run(matches: Matches, ctx: CliContext) -> int ![io] {
+    let mut args: string[] = ["package"];
+    let target: string = get_or(matches, "target", "");
+    if target.length > 0 {
+        args.push("--target");
+        args.push(target);
+    }
+    let out_dir: string = get_or(matches, "out", "");
+    if out_dir.length > 0 {
+        args.push("--out");
+        args.push(out_dir);
+    }
+    let compiler_bin: string = get_or(matches, "compiler-bin", "");
+    if compiler_bin.length > 0 {
+        args.push("--compiler-bin");
+        args.push(compiler_bin);
+    }
+    if has_flag(matches, "installer") { args.push("--installer"); }
+    let capsule_path: string = get_or(matches, "p", "");
+    if capsule_path.length > 0 {
+        args.push("-p");
+        args.push(capsule_path);
+    }
+    return handle_package_command(args);
+}
