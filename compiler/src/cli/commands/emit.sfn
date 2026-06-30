@@ -1,0 +1,184 @@
+// compiler/src/cli/commands/emit.sfn
+//
+// `emit` subcommand (CLI modularization epic #1671 / tracker #1675,
+// Phase B — SFEP-0027 §3.4, command #4). Migrates `emit` off the legacy
+// hand-rolled dispatch (`cli_main.sfn`'s `_legacy_dispatch_emit`) into the
+// per-command `command_def()` + `run()` pattern that `version.sfn`
+// established and `config`/`lock`/`package` extended.
+//
+// Unlike those three, `emit` has no `handle_emit_command` to delegate to —
+// the body was inline in `cli_main.sfn`, so it migrates wholesale into
+// `run` here. The hand-rolled argv walk becomes typed `sfn/cli` match
+// accessors; the three mode branches (`llvm` / `sailfin` / `native`), the
+// import-context staging, and the native resolve-gate are reproduced
+// byte-for-byte (parity oracles:
+// `compiler/tests/e2e/subprocess_emit_clean_env_test.sfn`,
+// `compiler/tests/e2e/effect_gate_build_path_test.sfn`).
+//
+// Flag-order semantics: `--no-retry` aliases `--attempts 1` (applied after
+// `--attempts` so it wins), and `--no-validate` overrides `--validate`,
+// matching the legacy last-wins toggles for the only invocations that pass
+// both. `--attempts N` keeps the legacy `emit_parse_nonneg_int` parse (a
+// bad or `< 1` value is ignored, preserving the default of 1) rather than a
+// `flag_int`, so a malformed value stays a no-op instead of a parse error.
+//
+// A missing flag value, an unrecognized flag, a wrong positional count, or
+// `--help` makes the parse non-ok while still marking `emit` as descended;
+// the v2 dispatch in `cli/main.sfn` returns the usage error (exit 2) there
+// — the parser owns argument validation, replacing the legacy `_usage()`
+// branches. `binary_dir` is threaded from the driver-parsed `CliContext`,
+// replacing the legacy handler's extra param.
+import {
+    Command,
+    Matches,
+    arg,
+    command,
+    flag,
+    flag_value,
+    flag_value_short,
+    get,
+    get_or,
+    has_flag,
+    with_arg,
+    with_flag
+} from "sfn/cli";
+
+import { _write_llvm_text } from "../../build/cache";
+import { _read_import_deps, _resolve_self_path } from "../../build/paths";
+import { stage_capsule_imports_for_emit } from "../../capsule_resolver";
+import { emit_llvm_with_retry, emit_parse_nonneg_int } from "../../emit_helpers";
+import {
+    compile_to_llvm_with_module_timed,
+    compile_to_sailfin,
+    module_name_from_path,
+    print_llvm_with_module,
+    print_native_text_with_module_gated,
+    write_native_text_file_with_module_gated
+} from "../../main";
+import { CliContext } from "../context";
+
+// The `sfn/cli` definition for `emit`, registered on the v2 root via
+// `with_subcommand`. One boolean `--timing`, the `-o` short value flag,
+// three value flags (`--module-name`, `--import-context`, `--attempts`),
+// four boolean toggles (`--no-retry`, `--validate`, `--no-validate`,
+// `--no-resolve-gate`), and two required positionals (`mode`, `path`).
+fn command_def() -> Command {
+    return with_arg(with_arg(with_flag(with_flag(with_flag(with_flag(with_flag(with_flag(with_flag(with_flag(with_flag(command("emit", "Emit intermediate representation for a Sailfin source file"), flag("timing", "Report per-phase emit timings (llvm only; single attempt, no validate)")), flag_value_short("o", "o", "Write output to this path instead of stdout")), flag_value("module-name", "Module slug override for symbol mangling")), flag_value("import-context", "Root of the staged import-context tree for cross-module effect checking")), flag_value("attempts", "Emit+validate attempt count (N >= 1; llvm -o only)")), flag("no-retry", "Single emit attempt (alias for --attempts 1)")), flag("validate", "Round-trip the emitted IR through llvm-as/clang")), flag("no-validate", "Disable IR validation (default)")), flag("no-resolve-gate", "Skip the native-emit lowering dry-run gate (build-internal)")), arg("mode", "Output form: llvm | sailfin | native")), arg("path", "Sailfin source file to emit"));
+}
+
+// Reproduce the legacy `_legacy_dispatch_emit` body against typed matches.
+// Flag reads mirror the hand-rolled walk; the mode dispatch is verbatim.
+fn run(matches: Matches, ctx: CliContext) -> int ![io, clock] {
+    let timing: boolean = has_flag(matches, "timing");
+    let out_path: string = get_or(matches, "o", "");
+    // Stage D PR3: explicit module-name override for symbol mangling of
+    // cross-capsule deps; empty falls back to `module_name_from_path(path)`.
+    let module_name_override: string = get_or(matches, "module-name", "");
+    // #957: root of the staged import-context tree. When set, the llvm-emit
+    // path reads `<root>/<module-name>.import-deps` so callee-effect
+    // transitivity (`E0402`) is enforced on the build path.
+    let import_context_root: string = get_or(matches, "import-context", "");
+    // #515: `--attempts N` (N >= 1) sets the emit+validate attempt count via
+    // the same nonneg parse the legacy body used; a bad / `< 1` value is
+    // ignored so the bare CLI stays byte-for-byte behaviour-preserving.
+    let mut emit_attempts: int = 1;
+    let attempts_raw: string = get_or(matches, "attempts", "");
+    if attempts_raw.length > 0 {
+        let parsed = emit_parse_nonneg_int(attempts_raw);
+        if parsed >= 1 { emit_attempts = parsed; }
+    }
+    // `--no-retry` == `--attempts 1`; applied after `--attempts` so it wins.
+    if has_flag(matches, "no-retry") { emit_attempts = 1; }
+    // `--validate` / `--no-validate` toggle the llvm-as/clang round-trip;
+    // `--no-validate` wins to match the legacy explicit-off.
+    let mut emit_validate: boolean = has_flag(matches, "validate");
+    if has_flag(matches, "no-validate") { emit_validate = false; }
+    // #906: build-internal per-module native emits skip the lowering
+    // dry-run gate via `--no-resolve-gate`.
+    let skip_resolve_gate: boolean = has_flag(matches, "no-resolve-gate");
+
+    let mode: string = get(matches, "mode");
+    let path: string = get(matches, "path");
+    if !fs.exists(path) {
+        print("file not found: " + path);
+        return 1;
+    }
+    // #1370: a user-facing `emit llvm` (no `--module-name` /
+    // `--import-context`, i.e. NOT a build-internal worker emit) stages the
+    // consumer capsule's dependencies into the import-context tree first,
+    // exactly as `check` / `build` / `run` do — otherwise a cold `emit llvm`
+    // of a capsule importing e.g. sfn/http `serve` finds no staged
+    // `.sfn-asm` and the #1323 gate hijacks the call. Scoped to `llvm` (the
+    // lowering stage the gate runs in); `native` is import-context-free by
+    // design (#906) and `sailfin` is a transpile.
+    // `stage_capsule_imports_for_emit` no-ops unless the entry's
+    // capsule.toml declares `[dependencies]`, so a bare runtime/prelude emit
+    // is untouched.
+    if strings_equal(mode, "llvm") && module_name_override.length == 0
+        && import_context_root.length == 0 {
+        let emit_stage_exe = _resolve_self_path(ctx.binary_dir);
+        let emit_staged = stage_capsule_imports_for_emit(path, emit_stage_exe, "");
+        if !emit_staged {
+            print.err("sfn emit: warning: capsule import staging incomplete; imported capsule calls may not resolve");
+        }
+    }
+    let source = fs.readFile(path);
+    let mut module_name = module_name_from_path(path);
+    if module_name_override.length > 0 { module_name = module_name_override; }
+    let has_out = out_path.length > 0;
+    if strings_equal(mode, "llvm") {
+        if has_out {
+            if timing {
+                // --timing keeps the single-attempt, no-validate path: it
+                // reports per-phase emit timings, which a retry loop would
+                // distort.
+                let llvm = compile_to_llvm_with_module_timed(source, module_name);
+                _write_llvm_text(out_path, llvm);
+            } else {
+                // #515: route through the shared retry+validator cascade.
+                // Empty `import_asm_paths` degrades to the legacy
+                // in-module-only effect gate.
+                let mut import_asm_paths: string[] = [];
+                if import_context_root.length > 0 {
+                    import_asm_paths = _read_import_deps(import_context_root, module_name);
+                }
+                let ok = emit_llvm_with_retry(path, module_name, out_path, import_asm_paths, emit_attempts, emit_validate, false);
+                if !ok { return 1; }
+            }
+        } else {
+            if timing {
+                print(compile_to_llvm_with_module_timed(source, module_name));
+            } else {
+                if !print_llvm_with_module(source, module_name) { return 1; }
+            }
+        }
+        return 0;
+    }
+    if strings_equal(mode, "sailfin") {
+        if has_out {
+            fs.writeFile(out_path, compile_to_sailfin(source));
+        } else { print(compile_to_sailfin(source)); }
+        return 0;
+    }
+    if strings_equal(mode, "native") {
+        // #906: gate the native emit on the same lowering `[fatal]` that
+        // `build` / `emit llvm` reject, so `emit native` fails closed on
+        // unresolved-callee inputs. The build's per-module subprocess emit
+        // passes `--no-resolve-gate` to opt out (no cross-module import
+        // context in isolation); it stays fail-closed via the later LLVM
+        // lowering stage (#631).
+        let run_gate = !skip_resolve_gate;
+        if has_out {
+            if !write_native_text_file_with_module_gated(source, module_name, out_path, run_gate) {
+                return 1;
+            }
+        } else {
+            if !print_native_text_with_module_gated(source, module_name, run_gate) {
+                return 1;
+            }
+        }
+        return 0;
+    }
+    print("unknown emit mode: " + mode);
+    return 2;
+}

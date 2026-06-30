@@ -40,6 +40,7 @@ import { sailfin_cli_main_legacy } from "../cli_main";
 import { number_to_string } from "../num_format";
 import { command_def as add_command_def, run as add_run } from "./commands/add";
 import { command_def as config_command_def, run as config_run } from "./commands/config";
+import { command_def as emit_command_def, run as emit_run } from "./commands/emit";
 import { command_def as fmt_command_def, run as fmt_run } from "./commands/fmt";
 import { command_def as guillermo_command_def, run as guillermo_run } from "./commands/guillermo";
 import { command_def as init_command_def, run as init_run } from "./commands/init";
@@ -90,13 +91,21 @@ fn sailfin_cli_main_v2(argv: string[]) -> int ![io, clock] {
     // resolving it eagerly here would add a filesystem read to every
     // `build` / `run` invocation. `parse()` skips argv[0] (the program
     // name), so a synthetic "sfn" head is prepended before parsing.
-    let root: Command = with_subcommand(with_subcommand(with_subcommand(with_subcommand(with_subcommand(with_subcommand(with_subcommand(with_subcommand(with_subcommand(with_subcommand(with_subcommand(command("sfn", "Sailfin compiler"), version_command_def()), guillermo_command_def()), init_command_def()), login_command_def()), add_command_def()), publish_command_def()), fmt_command_def()), test_command_def()), config_command_def()), lock_command_def()), package_command_def());
+    let root: Command = with_subcommand(with_subcommand(with_subcommand(with_subcommand(with_subcommand(with_subcommand(with_subcommand(with_subcommand(with_subcommand(with_subcommand(with_subcommand(with_subcommand(command("sfn", "Sailfin compiler"), version_command_def()), guillermo_command_def()), init_command_def()), login_command_def()), add_command_def()), publish_command_def()), fmt_command_def()), test_command_def()), config_command_def()), lock_command_def()), package_command_def()), emit_command_def());
 
+    // Preserve the legacy `--emit` long-flag alias (`sfn --emit llvm x.sfn`):
+    // the legacy dispatch treated `--emit` as the first token identically to
+    // the `emit` subcommand. `sfn/cli`'s `parse()` would otherwise see it as
+    // an unknown root flag, so normalize the leading `--emit` to `emit`
+    // before parsing — the only place the alias is recognized now that the
+    // legacy `is_emit` arm is removed.
     let mut parse_argv: string[] = ["sfn"];
     let mut j: int = 0;
     loop {
         if j >= args.length { break; }
-        parse_argv.push(args[j]);
+        if j == 0 && strings_equal(args[0], "--emit") {
+            parse_argv.push("emit");
+        } else { parse_argv.push(args[j]); }
         j += 1;
     }
 
@@ -206,6 +215,24 @@ fn sailfin_cli_main_v2(argv: string[]) -> int ![io, clock] {
         if ctx.trace_argv { _v2_trace_argv(argv); }
         if result.ok { return package_run(result.matches, ctx); }
         print("usage: sfn package [--target T] [--out DIR] [--compiler-bin PATH] [--installer] [-p <capsule-path>]");
+        return 2;
+    }
+
+    // `sfn emit [--timing] [-o OUTPUT] [--module-name SLUG]
+    // [--import-context DIR] [--attempts N] [--no-retry] [--validate]
+    // [--no-validate] [--no-resolve-gate] <llvm|sailfin|native> <file.sfn>`
+    // — the registered subcommand matched (including the normalized `--emit`
+    // alias). A clean parse dispatches to `emit.run`, which reproduces the
+    // legacy `_legacy_dispatch_emit` body against typed matches. A non-ok
+    // parse that still descended into `emit` (a value flag with no value, an
+    // unrecognized flag, a missing/surplus positional, or `--help`) is a
+    // usage error (exit 2) — the parser owns argument validation, replacing
+    // the legacy `_usage()` branches. The literal `2` mirrors the dispatches
+    // above (the `sfn/cli` `EXIT_*` constants lower to 0 here).
+    if strings_equal(subcommand(result.matches), "emit") {
+        if ctx.trace_argv { _v2_trace_argv(argv); }
+        if result.ok { return emit_run(result.matches, ctx); }
+        print("usage: sfn emit [--timing] [-o OUTPUT] [--module-name SLUG] [--import-context DIR] [--attempts N] [--no-retry] [--validate] [--no-validate] [--no-resolve-gate] <llvm|sailfin|native> <file.sfn>");
         return 2;
     }
 
