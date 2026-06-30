@@ -1,0 +1,437 @@
+// compiler/src/cli/commands/build.sfn
+//
+// `build` subcommand (CLI modularization epic #1671 / tracker #1675,
+// Phase B — SFEP-0027 §3.4, command #6). Migrates `build` off the legacy
+// hand-rolled dispatch (`cli_main.sfn`'s inline `_legacy_dispatch_build` —
+// no `handle_build_command` existed; the body was entirely inline) into
+// the per-command `command_def()` + `run()` pattern that `version.sfn`
+// established and `config`/`lock`/`package`/`emit`/`check` extended.
+//
+// The hand-rolled argv walk becomes typed `sfn/cli` match accessors; the
+// full build body (capsule resolution, dep staging, LLVM emit, link, cache,
+// artifact sidecar, build-stamp, determinism check) is reproduced
+// byte-for-byte (parity oracles:
+// `compiler/tests/e2e/capsule_build_test.sfn`,
+// `compiler/tests/e2e/build_json_schema_test.sfn`,
+// `compiler/tests/e2e/work_dir_flag_test.sfn`,
+// `compiler/tests/e2e/build_diagnostics_format_test.sfn`,
+// `compiler/tests/e2e/capsule_artifact_sidecar_test.sfn`).
+//
+// The `runtime_root` empty→"runtime" bundle fallback is reproduced from
+// the legacy caller (see `run` body below, Step 1d): `parse_driver_prefix`
+// deliberately does NOT apply it, so it lives here. `binary_dir` is
+// threaded from the driver-parsed `CliContext`, replacing the legacy
+// handler's extra param.
+import {
+    Command,
+    Matches,
+    arg_variadic,
+    command,
+    flag,
+    flag_value,
+    flag_value_short,
+    get_or,
+    has_flag,
+    positionals,
+    with_arg,
+    with_flag
+} from "sfn/cli";
+
+import { LlvmTextBackend } from "../../backend";
+import {
+    _emit_build_report,
+    _emit_capsule_artifact_sidecar,
+    _print_cache_summary,
+    _resolve_capsule_build_spec,
+    _resolve_sailfin_cache_dir_for_work
+} from "../../build/cache";
+import { _do_determinism_check } from "../../build/determinism";
+import { _clang_link_multi } from "../../build/link";
+import { _dirname, _ensure_dir } from "../../build/paths";
+import { _runtime_bundle_exists } from "../../build/runtime_objs";
+import { cache_root, merge_cache_stats, resolve_build_cache_config } from "../../build_cache";
+import { emit_compiler_build_stamp_if_applicable } from "../../build_stamp";
+import {
+    capsule_artifact_bin_path,
+    capsule_artifact_dir,
+    capsule_artifact_obj_path,
+    capsule_default_bin_name,
+    is_safe_scope_name,
+    parse_scope_name
+} from "../../capsule_artifact";
+import { ResolverConsumer, prepare_project_capsules } from "../../capsule_resolver";
+import {
+    compile_to_llvm_file_with_module,
+    module_name_from_path,
+    number_to_string
+} from "../../main";
+import { runtime_capsule_from_root } from "../../runtime_capsule_resolver";
+import { CliContext } from "../context";
+
+// The `sfn/cli` definition for `build`, registered on the v2 root via
+// `with_subcommand`. Two short value flags (`-o`, `-p`), five boolean
+// flags, one value flag (`--work-dir`), and a variadic positional `[path]`
+// that accepts zero tokens (because `-p <capsule>` is the alternative to
+// a positional source file).
+fn command_def() -> Command {
+    let mut cmd: Command = command("build", "Compile a Sailfin source file or capsule to a native binary");
+    cmd = with_flag(cmd, flag_value_short("o", "o", "Write the output binary to this path"));
+    cmd = with_flag(cmd, flag_value_short("p", "p", "Build the capsule rooted at this path"));
+    cmd = with_flag(cmd, flag("no-cache", "Disable the build cache for this invocation"));
+    cmd = with_flag(cmd, flag("clean", "Clear the build cache before building"));
+    cmd = with_flag(cmd, flag("cache-trace", "Print per-artifact cache hit/miss trace"));
+    cmd = with_flag(cmd, flag("json", "Emit a machine-readable JSON build report on stdout"));
+    cmd = with_flag(cmd, flag_value("work-dir", "Virtualize intermediate build artifacts under this directory"));
+    cmd = with_flag(cmd, flag("check-determinism", "Build twice and compare cache keys + binary sha256"));
+    cmd = with_arg(cmd, arg_variadic("path", "Sailfin source file to build (omit when using -p)"));
+    return cmd;
+}
+
+// Reproduce the legacy `_legacy_dispatch_build` body against typed matches.
+// Flag reads replace the hand-rolled argv walk; the build body is verbatim.
+// The `runtime_root` empty→"runtime" fallback is applied here (not in
+// `parse_driver_prefix`) because it is a filesystem probe, not argv parsing.
+fn run(matches: Matches, ctx: CliContext) -> int ![io] {
+    let mut out_path: string = get_or(matches, "o", "");
+    let capsule_path: string = get_or(matches, "p", "");
+    let no_cache_flag: boolean = has_flag(matches, "no-cache");
+    let clean_flag: boolean = has_flag(matches, "clean");
+    let cache_trace_flag: boolean = has_flag(matches, "cache-trace");
+    let json_flag: boolean = has_flag(matches, "json");
+    let work_dir: string = get_or(matches, "work-dir", "");
+    let check_determinism_flag: boolean = has_flag(matches, "check-determinism");
+    let _build_positionals: string[] = positionals(matches, "path");
+    let mut input_path: string = "";
+    if _build_positionals.length > 1 {
+        print("usage: sfn build [-o OUTPUT] [-p PATH] [--no-cache] [--clean] [--cache-trace] [--json] [--work-dir DIR] [--check-determinism] (<file.sfn> | -p <capsule-path>)");
+        return 2;
+    }
+    if _build_positionals.length == 1 { input_path = _build_positionals[0]; }
+
+    let binary_dir: string = ctx.binary_dir;
+    let mut runtime_root: string = ctx.runtime_root;
+    if runtime_root.length == 0 {
+        if _runtime_bundle_exists("runtime") { runtime_root = "runtime"; }
+    }
+
+    // Resolved scratch / staging roots for this build. With
+    // `--work-dir` unset both fall back to the legacy in-tree
+    // paths so the default invocation is byte-for-byte identical.
+    let sailfin_cache_dir = _resolve_sailfin_cache_dir_for_work(work_dir);
+    let cache_config = resolve_build_cache_config(no_cache_flag, cache_trace_flag, clean_flag);
+
+    // -p resolves the entry path + build kind from the capsule's
+    // manifest. The build then proceeds as for a positional source
+    // file, with the kind controlling whether we link an executable
+    // (binary) or just emit an object (library/runtime).
+    let mut build_kind: string = "binary";
+    // Captured from `-p` resolution so the post-build sidecar
+    // emitter (Stage C2a) has the manifest's name + version
+    // + entry-relative path without re-reading capsule.toml.
+    // Empty when `-p` was not used (positional source only).
+    let mut cap_capsule_name: string = "";
+    let mut cap_version: string = "";
+    let mut cap_entry_relative: string = "";
+    if capsule_path.length > 0 {
+        if input_path.length > 0 {
+            print("sfn build: -p and positional source are mutually exclusive");
+            return 2;
+        }
+        let cap_spec = _resolve_capsule_build_spec(capsule_path);
+        if cap_spec.entry_path.length == 0 { return 1; }
+        input_path = cap_spec.entry_path;
+        build_kind = cap_spec.kind;
+        cap_capsule_name = cap_spec.capsule_name;
+        cap_version = cap_spec.version;
+        cap_entry_relative = cap_spec.entry_relative;
+    }
+    if input_path.length == 0 {
+        print("usage: sfn build [-o OUTPUT] [-p PATH] [--no-cache] [--clean] [--cache-trace] [--json] [--work-dir DIR] [--check-determinism] (<file.sfn> | -p <capsule-path>)");
+        return 2;
+    }
+
+    let is_library_build = strings_equal(build_kind, "library");
+    let is_runtime_build = strings_equal(build_kind, "runtime");
+    let no_link = is_library_build;
+    // Stage D PR1: `kind = "runtime"` capsules are now a recognised
+    // schema variant — they ship declarative C / LL / include-dirs
+    // / link-libs source lists rather than `.sfn` modules. The
+    // driver doesn't yet COMPILE them as a top-level `-p` target
+    // (Stage D PR2 wires the link phase up); building one
+    // directly surfaces a hint and exits with the same usage-error
+    // code as other `-p` misuse so scripts/CI don't treat the
+    // unsupported invocation as success and proceed with missing
+    // artifacts.
+    if is_runtime_build {
+        print("sfn build: kind = \"runtime\" capsules are not buildable directly;");
+        print("           declare \"" + cap_capsule_name
+            + "\" as a dependency of a kind=\"binary\" capsule instead.");
+        return 2;
+    }
+
+    // Resolve the consumer's safe scope/name once. Used by:
+    //   (a) the canonical-`out_path` defaulting block below
+    //       (Stage C2b1), and
+    //   (b) the resolver's `ResolverConsumer` so intra-capsule
+    //       relative-import `.ll`s land under the consumer's
+    //       per-capsule tree (Stage C2b2).
+    // Both `out_path` and dep `.ll` routing fall back to the
+    // legacy flat layout when the name isn't scope-form (e.g.
+    // the compiler's own `[capsule].name = "sailfin"`).
+    // Stage D PR3: opt the resolver into walking
+    // `<project_root>/src/**/*.sfn` for any `-p` build of a
+    // `kind = "binary"` capsule. The compiler is the canonical
+    // case — `compiler/src/main.sfn` doesn't transitively
+    // import every `.sfn` under `compiler/src/` (notably
+    // `cli_main.sfn` and the CLI subcommand modules), so the
+    // entry-driven relative-import walker would miss them and
+    // the link would surface 100+ undefined references. Library
+    // builds keep the entry-driven enumeration for now — they
+    // produce a single unlinked `.o` whose multi-file story
+    // shakes out the same way intra-project imports do today.
+    let walk_src = capsule_path.length > 0 && !is_runtime_build && !is_library_build;
+    let mut consumer = ResolverConsumer {
+        scope: "",
+        name: "",
+        walk_project_src: walk_src,
+        include_host_as_dep: false
+    };
+    if cap_capsule_name.length > 0 {
+        let parts0 = parse_scope_name(cap_capsule_name);
+        if is_safe_scope_name(parts0.scope, parts0.name) {
+            consumer = ResolverConsumer {
+                scope: parts0.scope,
+                name: parts0.name,
+                walk_project_src: walk_src,
+                include_host_as_dep: false
+            };
+        }
+    }
+
+    if out_path.length == 0 {
+        // `--work-dir <root>` overrides the canonical
+        // per-capsule layout: when set, the default output is
+        // `<root>/native/sailfin` for binary builds (matching
+        // the prior `scripts/build.sh`'s historical
+        // `OUT="$WORK_DIR/.../native/sailfin"` shape; the
+        // script was retired in Stage E PR7 / #383) or
+        // `<root>/sailfin/program.o` for libraries. The
+        // work-dir form is meant for build orchestration
+        // (now exclusively `make check`'s stage2/stage3
+        // fixed-point comparison; formerly also the prior
+        // build.sh), so it explicitly takes precedence over
+        // the scoped `build/capsules/...` layout.
+        if work_dir.length > 0 {
+            if no_link { out_path = sailfin_cache_dir + "/program.o"; } else {
+                out_path = work_dir + "/native/sailfin";
+            }
+        } else {
+            // Stage C2b: when `-p` is used and `-o` was NOT
+            // given, default to the canonical per-capsule
+            // layout (`build/capsules/<scope>/<name>/{obj/mod.o,
+            // bin/<name>}`) from proposal §4.4. Positional builds
+            // and explicit `-o` paths still use their pre-
+            // existing locations — user override is sacred.
+            // Unsafe / non-scope-form capsule names fall back to
+            // the legacy paths so a malformed `[capsule].name`
+            // can never escape the build root.
+            let mut canonical_set: boolean = false;
+            if consumer.scope.length > 0 {
+                let cap_dir = capsule_artifact_dir(consumer.scope, consumer.name);
+                if no_link {
+                    _ensure_dir(cap_dir + "/obj");
+                    out_path = capsule_artifact_obj_path(consumer.scope, consumer.name);
+                    canonical_set = true;
+                } else {
+                    let bin_name = capsule_default_bin_name(consumer.name);
+                    if bin_name.length > 0 {
+                        _ensure_dir(cap_dir + "/bin");
+                        out_path = capsule_artifact_bin_path(consumer.scope, consumer.name, bin_name);
+                        canonical_set = true;
+                    }
+                }
+            }
+            if !canonical_set {
+                if no_link { out_path = "build/sailfin/program.o"; } else {
+                    out_path = "build/sailfin/program";
+                }
+            }
+        }
+    }
+
+    if !fs.exists(input_path) {
+        print("file not found: " + input_path);
+
+        return 1;
+    }
+
+    if work_dir.length == 0 { _ensure_dir("build"); } else {
+        _ensure_dir(work_dir);
+    }
+    _ensure_dir(sailfin_cache_dir);
+    // Make sure the parent dir of the resolved `out_path` exists
+    // before clang writes the binary / object. With
+    // `--work-dir <DIR>` the default binary lands at
+    // `<DIR>/native/sailfin`, but the only call site that creates
+    // `<DIR>/native/` is `stage_capsule_imports` — which
+    // `prepare_project_capsules` skips when the project has no
+    // capsule deps. Ensure unconditionally so positional builds
+    // (no deps) also succeed.
+    let out_parent = _dirname(out_path);
+    if out_parent.length > 0 { _ensure_dir(out_parent); }
+
+    // Resolve and compile any capsule deps declared in the project's
+    // capsule.toml before compiling the main source. stage_capsule_imports
+    // writes .sfn-asm + .layout-manifest into <work_dir>/native/import-context/
+    // (or build/native/import-context/ when `--work-dir` is unset)
+    // where the main module's lowering will find them.
+    //
+    // Stage D PR3: the `-p` self-host (`walk_src`) explicitly
+    // selects `<binary_dir>/sailfin` here so its 138-module compile
+    // runs each module in a fresh-arena subprocess and fits in 8 GB.
+    // A typical end-user positional build (a handful of capsule deps)
+    // fits in-process and shouldn't pay the subprocess spawn cost —
+    // and shouldn't have its arena state perturbed by `process.run`'s
+    // argv allocations, which has surfaced seed-corruption flakes in
+    // the entry's in-process compile downstream.
+    //
+    // #1405 Bug 2: a positional build of a *large-closure* source
+    // (e.g. a compiler unit test importing the whole compiler) cannot
+    // fit in-process either — it OOMs at ~15.5 GB. So we leave the
+    // empty `sailfin_exe` here and let `prepare_project_capsules`
+    // upgrade it to subprocess isolation *only* when the resolved
+    // closure crosses the size threshold (binary_dir is threaded
+    // below for that decision). Small closures stay in-process.
+    let mut sailfin_exe: string = "";
+    if walk_src {
+        if binary_dir.length > 0 { sailfin_exe = binary_dir + "/sailfin"; }
+    }
+    let capsule_result = prepare_project_capsules(input_path, cache_config, consumer, sailfin_exe, work_dir, binary_dir);
+    // Issue #991: a per-module emit failure (e.g. an effect-gate
+    // `E0402` on an unimported sibling) leaves `ll_paths` empty and
+    // silently drops the offending module from the link. Without
+    // this guard the driver would link the survivors and print
+    // `built:` with exit 0, swallowing the failure. The resolver /
+    // per-module helper has already printed the diagnostic, so
+    // exit non-zero here without re-reporting. A legitimate "no
+    // capsule deps" project returns `success = true` with an empty
+    // `ll_paths`, so dependency-free builds still link and succeed.
+    if !capsule_result.success { return 1; }
+    let capsule_lls = capsule_result.ll_paths;
+
+    let ll_path = sailfin_cache_dir + "/program.ll";
+    let source = fs.readFile(input_path);
+    let module_name = module_name_from_path(input_path);
+    let ok = compile_to_llvm_file_with_module(source, module_name, ll_path, work_dir);
+    if !ok {
+        print("failed to compile LLVM for: " + input_path);
+
+        return 1;
+    }
+
+    // Library builds stop after `clang -c` on the main .ll — no link,
+    // no main symbol required. Capsule deps remain as `.ll` files
+    // under build/sailfin/capsules/ (compiled in `prepare_project_capsules`
+    // but not lowered to `.o` here). Downstream consumers that need
+    // dep object files will compile them on demand once Stage C lands
+    // the in-process driver.
+    if no_link {
+        let backend = LlvmTextBackend { };
+        let no_includes: string[] = [];
+        let rc_obj = backend.assemble(ll_path, out_path, "-O2", no_includes);
+        if rc_obj != 0 {
+            if !json_flag {
+                print("library build failed (clang exit=" + number_to_string(rc_obj)
+                    + ")");
+            }
+            return rc_obj;
+        }
+        if json_flag {
+            // Library builds stop after `clang -c` — no runtime
+            // link, so there's no runtime object-cache activity to
+            // fold; `capsule_result.stats` is the full total.
+            _emit_build_report(input_path, out_path, "library", 0, capsule_result, cache_config, capsule_result.stats);
+        } else {
+            print("built: " + out_path);
+            _print_cache_summary(capsule_result.stats);
+        }
+        // Stage C2a: per-capsule artifact sidecar for `-p` builds.
+        // No-op for positional builds (cap_capsule_name == "").
+        _emit_capsule_artifact_sidecar(cap_capsule_name, cap_version, "library", cap_entry_relative, out_path, capsule_result);
+        // Epic #513 Phase 0.3 / issue #516: the compiler
+        // self-stamps `build/native/.build-stamp` here so the
+        // Makefile can stop shelling out to git. Gated on
+        // `[capsule].name == "sailfin"` inside the helper,
+        // so foreign capsule builds are a no-op.
+        emit_compiler_build_stamp_if_applicable(cap_capsule_name, cap_version, work_dir);
+        if check_determinism_flag {
+            return _do_determinism_check(out_path, true, cap_capsule_name, work_dir, capsule_path, input_path, binary_dir, cache_trace_flag, json_flag);
+        }
+        return 0;
+    }
+
+    let exe_path = out_path;
+    let mut all_lls: string[] = [ll_path];
+    let mut cli: int = 0;
+    loop {
+        if cli >= capsule_lls.length { break; }
+        all_lls.push(capsule_lls[cli]);
+        cli += 1;
+    }
+    // Issue #940: inject the implicit runtime capsule as a pure
+    // fallback when the resolver surfaced no `[dependencies]`. A
+    // `-p` / declared-dep build (incl. self-host) already carries
+    // `runtime_capsules`, so this is a no-op there; an end-user
+    // `sfn build <file>` with no deps now links via the implicit
+    // `runtime/capsule.toml` instead of the retired probe.
+    let mut build_runtime_caps = capsule_result.runtime_capsules;
+    if build_runtime_caps.length == 0 {
+        build_runtime_caps = runtime_capsule_from_root(runtime_root);
+    }
+    // Shared content-addressed cache root for runtime objects
+    // (#1096), mirroring the `.ll` module cache. Empty under
+    // `--no-cache` so the persistent store is neither read nor
+    // written, matching the summary-fold gate below.
+    let mut build_shared_cache_root: string = "";
+    if cache_config.enabled { build_shared_cache_root = cache_root(); }
+    let link_result = _clang_link_multi(all_lls, exe_path, runtime_root, build_runtime_caps, binary_dir, sailfin_cache_dir, build_shared_cache_root);
+    let rc = link_result.rc;
+    if rc != 0 {
+        if !json_flag {
+            print("link failed (clang exit=" + number_to_string(rc) + ")");
+        }
+        return rc;
+    }
+    // Fold the runtime object-cache stats accumulated during the
+    // link into the `.ll` module cache total so the single
+    // `[cache]` summary reflects both layers (#915). Gated on
+    // `cache_config.enabled`: under `--no-cache` the module cache
+    // is never consulted (counters stay zero), and the runtime
+    // object cache — which has no `--no-cache` gate of its own —
+    // must not resurrect a non-zero summary, so its stats are not
+    // folded when caching is disabled.
+    let mut build_cache_stats = capsule_result.stats;
+    if cache_config.enabled {
+        build_cache_stats = merge_cache_stats(capsule_result.stats, link_result.stats);
+    }
+    if json_flag {
+        _emit_build_report(input_path, exe_path, "binary", 0, capsule_result, cache_config, build_cache_stats);
+    } else {
+        print("built: " + exe_path);
+        _print_cache_summary(build_cache_stats);
+    }
+    // Stage C2a: per-capsule artifact sidecar for `-p` builds.
+    // No-op for positional builds (cap_capsule_name == "").
+    _emit_capsule_artifact_sidecar(cap_capsule_name, cap_version, "binary", cap_entry_relative, exe_path, capsule_result);
+    // Epic #513 Phase 0.3 / issue #516: the compiler self-stamps
+    // `build/native/.build-stamp` here so the Makefile can stop
+    // shelling out to git. Gated on `[capsule].name == "sailfin"`
+    // inside the helper, so foreign capsule builds are a no-op.
+    emit_compiler_build_stamp_if_applicable(cap_capsule_name, cap_version, work_dir);
+    if check_determinism_flag {
+        return _do_determinism_check(exe_path, false, cap_capsule_name, work_dir, capsule_path, input_path, binary_dir, cache_trace_flag, json_flag);
+    }
+    return 0;
+}
+
+export { command_def, run };
