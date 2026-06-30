@@ -39,6 +39,7 @@ import {
 import { sailfin_cli_main_legacy } from "../cli_main";
 import { number_to_string } from "../num_format";
 import { command_def as add_command_def, run as add_run } from "./commands/add";
+import { command_def as check_command_def, run as check_run } from "./commands/check";
 import { command_def as config_command_def, run as config_run } from "./commands/config";
 import { command_def as emit_command_def, run as emit_run } from "./commands/emit";
 import { command_def as fmt_command_def, run as fmt_run } from "./commands/fmt";
@@ -85,13 +86,33 @@ fn sailfin_cli_main_v2(argv: string[]) -> int ![io, clock] {
         i += 1;
     }
 
-    // Root command registers ONLY `version`, sourced from its own
-    // module via `command_def()`. The version string is not set on the
-    // command (`with_version`) because `version.run` prints it itself —
-    // resolving it eagerly here would add a filesystem read to every
-    // `build` / `run` invocation. `parse()` skips argv[0] (the program
-    // name), so a synthetic "sfn" head is prepended before parsing.
-    let root: Command = with_subcommand(with_subcommand(with_subcommand(with_subcommand(with_subcommand(with_subcommand(with_subcommand(with_subcommand(with_subcommand(with_subcommand(with_subcommand(with_subcommand(command("sfn", "Sailfin compiler"), version_command_def()), guillermo_command_def()), init_command_def()), login_command_def()), add_command_def()), publish_command_def()), fmt_command_def()), test_command_def()), config_command_def()), lock_command_def()), package_command_def()), emit_command_def());
+    // Root command, composed from each subcommand's `command_def()`. Built
+    // incrementally (one `with_subcommand` reassignment per command) rather
+    // than as a single deeply-nested expression: the pinned seed miscompiles
+    // a `with_subcommand(...)` chain at this depth, emitting code that
+    // segfaults at runtime while constructing the tree (#1773 — adding the
+    // 13th command tipped the nested form over). The reassignment form is
+    // semantically identical and codegens cleanly, and scales to the
+    // remaining `build` / `run` migrations (SFEP-0027 §3.4) without
+    // re-tripping the limit. The version string is not set on the command
+    // (`with_version`) because `version.run` prints it itself — resolving it
+    // eagerly here would add a filesystem read to every `build` / `run`
+    // invocation. `parse()` skips argv[0] (the program name), so a synthetic
+    // "sfn" head is prepended before parsing.
+    let mut root: Command = command("sfn", "Sailfin compiler");
+    root = with_subcommand(root, version_command_def());
+    root = with_subcommand(root, guillermo_command_def());
+    root = with_subcommand(root, init_command_def());
+    root = with_subcommand(root, login_command_def());
+    root = with_subcommand(root, add_command_def());
+    root = with_subcommand(root, publish_command_def());
+    root = with_subcommand(root, fmt_command_def());
+    root = with_subcommand(root, test_command_def());
+    root = with_subcommand(root, config_command_def());
+    root = with_subcommand(root, lock_command_def());
+    root = with_subcommand(root, package_command_def());
+    root = with_subcommand(root, emit_command_def());
+    root = with_subcommand(root, check_command_def());
 
     // Preserve the legacy `--emit` long-flag alias (`sfn --emit llvm x.sfn`):
     // the legacy dispatch treated `--emit` as the first token identically to
@@ -269,6 +290,23 @@ fn sailfin_cli_main_v2(argv: string[]) -> int ![io, clock] {
         if ctx.trace_argv { _v2_trace_argv(argv); }
         if result.ok { return test_run(result.matches, ctx); }
         print("usage: sfn test [--json] [-k NAME] [--tag TAG] [--update-snapshots] [--no-test-cache] [--jobs N] <suite...>");
+        return 2;
+    }
+
+    // `sfn check [--quiet] [--json] [--allow-bare-assert] [path...]` — the
+    // registered subcommand matched. The variadic `[path...]` accepts zero
+    // tokens, so a bare `sfn check` (and every flag combination) parses ok
+    // and dispatches to `check.run`, which reconstructs the legacy positional
+    // slice and delegates to `handle_check_command` (the body stays in
+    // `cli_check.sfn`, reused verbatim — SFEP-0027 §3.4 command #5). A non-ok
+    // parse that still descended into `check` (an unrecognized flag, or
+    // `--help`) is a usage error (exit 2) — the parser owns flag validation.
+    // The literal `2` mirrors the dispatches above (the `sfn/cli` `EXIT_*`
+    // constants lower to 0 here).
+    if strings_equal(subcommand(result.matches), "check") {
+        if ctx.trace_argv { _v2_trace_argv(argv); }
+        if result.ok { return check_run(result.matches, ctx); }
+        print("usage: sfn check [--quiet] [--json] [--allow-bare-assert] [path...]");
         return 2;
     }
 
