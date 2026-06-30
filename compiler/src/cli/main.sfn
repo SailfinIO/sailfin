@@ -50,6 +50,7 @@ import { command_def as lock_command_def, run as lock_run } from "./commands/loc
 import { command_def as login_command_def, run as login_run } from "./commands/login";
 import { command_def as package_command_def, run as package_run } from "./commands/package";
 import { command_def as publish_command_def, run as publish_run } from "./commands/publish";
+import { command_def as run_command_def, run as run_run } from "./commands/run";
 import { command_def as test_command_def, run as test_run } from "./commands/test";
 import { command_def as version_command_def, run as version_run } from "./commands/version";
 import { CliContext, driver_prefix_length, parse_driver_prefix } from "./context";
@@ -115,6 +116,7 @@ fn sailfin_cli_main_v2(argv: string[]) -> int ![io, clock] {
     root = with_subcommand(root, emit_command_def());
     root = with_subcommand(root, check_command_def());
     root = with_subcommand(root, build_command_def());
+    root = with_subcommand(root, run_command_def());
 
     // Preserve the legacy `--emit` long-flag alias (`sfn --emit llvm x.sfn`):
     // the legacy dispatch treated `--emit` as the first token identically to
@@ -375,6 +377,20 @@ fn sailfin_cli_main_v2(argv: string[]) -> int ![io, clock] {
         if ctx.trace_argv { _v2_trace_argv(argv); }
         if result.ok { return build_run(result.matches, ctx); }
         print("usage: sfn build [-o OUTPUT] [-p PATH] [--no-cache] [--clean] [--cache-trace] [--json] [--work-dir DIR] [--check-determinism] (<file.sfn> | -p <capsule-path>)");
+        return 2;
+    }
+
+    // `sfn run [--no-cache] [--clean] [--cache-trace] <file.sfn>` — the
+    // registered subcommand matched. A clean parse dispatches to `run.run`,
+    // which reproduces the legacy `_legacy_dispatch_run` build-then-exec body
+    // against typed matches. A non-ok parse that still descended into `run`
+    // (an unrecognized flag, or `--help`) is a usage error (exit 2) — the
+    // parser owns argument validation. Bare-file dispatch (`sfn foo.sfn`)
+    // re-enters here as `["run", foo.sfn]` from the legacy fallthrough.
+    if strings_equal(subcommand(result.matches), "run") {
+        if ctx.trace_argv { _v2_trace_argv(argv); }
+        if result.ok { return run_run(result.matches, ctx); }
+        print("usage: sfn run [--no-cache] [--clean] [--cache-trace] <file.sfn>");
         return 2;
     }
 
