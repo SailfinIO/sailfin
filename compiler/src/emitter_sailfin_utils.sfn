@@ -166,14 +166,25 @@ fn trim_right(value: string) -> string {
 
 fn join_with_separator(values: string[], separator: string) -> string {
     if values.length == 0 { return ""; }
-    let mut result: string = values[0];
-    let mut index: int = 1;
+    if values.length == 1 { return values[0]; }
+    // Pair-wise merge — O(N log N) memory instead of the O(N^2)
+    // accumulation of `result = result + line` under the zero-GC arena.
+    // Same fix as emit_native_state.sfn / lowering_helpers_mangling.sfn.
+    let mut current = values;
     loop {
-        if index >= values.length { break; }
-        result = result + separator + values[index];
-        index += 1;
+        if current.length <= 1 { break; }
+        let mut next: string[] = [];
+        let mut i: int = 0;
+        loop {
+            if i >= current.length { break; }
+            if i + 1 < current.length {
+                next.push(current[i] + separator + current[i + 1]);
+            } else { next.push(current[i]); }
+            i += 2;
+        }
+        current = next;
     }
-    return result;
+    return current[0];
 }
 
 fn trim_text(value: string) -> string {
