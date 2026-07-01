@@ -1,7 +1,7 @@
 ---
-sfep: TBD
+sfep: 0037
 title: Peer-Language Process Adoption — Merge Queue, ICE Discipline, Perf History, Corpus Runs, Reduction, Fuzzing
-status: Draft
+status: Accepted
 type: process
 created: 2026-07-01
 updated: 2026-07-01
@@ -12,7 +12,7 @@ superseded-by:
 graduates-to:
 ---
 
-# SFEP-TBD — Peer-Language Process Adoption
+# SFEP-0037 — Peer-Language Process Adoption
 
 ## 1. Summary
 
