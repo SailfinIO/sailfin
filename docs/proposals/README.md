@@ -60,6 +60,29 @@ The next number is `max + 1`. Add a row in the same PR that introduces an SFEP.
 | [0035](./0035-prelude-mirror-signature-derivation.md) | Deriving Prelude-Mirror Registry Signatures from the Prelude | Accepted | runtime |
 | [0036](./0036-tls-runtime.md) | TLS termination + upstream TLS for the native runtime (OpenSSL) | Accepted | runtime |
 
+## Drafts under review (numbers assigned at merge)
+
+Per SFEP-0001 §2, a draft keeps its `draft-<slug>.md` name and `sfep: TBD`
+front-matter until it merges, at which point it claims `max + 1` and gets an
+Index row. The following drafts are in review — a cohesive slate closing the
+language gaps surfaced by the 2026-07 grammar/object-model audit:
+
+| Draft | Title | Type |
+|---|---|---|
+| [`draft-generic-constraints`](./draft-generic-constraints.md) | Generic Type Parameter Constraints and Monomorphization | language |
+| [`draft-generic-collections`](./draft-generic-collections.md) | Generic Collections — Map, Set, and Tuple | language |
+| [`draft-sized-integer-types`](./draft-sized-integer-types.md) | Sized Integer Types and Overflow Semantics | language |
+| [`draft-interface-signature-conformance`](./draft-interface-signature-conformance.md) | Signature-Checked Interface Conformance | language |
+| [`draft-exhaustive-match`](./draft-exhaustive-match.md) | Compile-Time Match Exhaustiveness Checking | language |
+| [`draft-derive`](./draft-derive.md) | Derivable Interface Implementations (`@derive`) | language |
+| [`draft-string-interpolation-dollar`](./draft-string-interpolation-dollar.md) | String Interpolation with `${ }` (migrating off `{{ }}`) | language |
+| [`draft-nullable-access-operators`](./draft-nullable-access-operators.md) | Nullable Access Operators (`?.` and `??`) | language |
+
+`draft-generic-constraints` is the root foundation: `draft-generic-collections`,
+`draft-derive`, and SFEP-0028 all depend on it. Draft diagnostic codes are
+pre-deconflicted (`E0303`; `E0711`–`E0715`; `E0820`–`E0822`; `E0823`/`W0823`;
+`E0824`–`E0825`).
+
 ## Subdirectories
 
 - [`design-notes/`](./design-notes/) — single-issue implementation design gates.
