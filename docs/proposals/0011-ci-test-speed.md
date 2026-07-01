@@ -396,6 +396,21 @@ test surface. e2e shards gain ~2× (each test already spawns a nested
 multi-core `sfn build`); frontend/unit shards gain ~6× (single compiles that
 leave cores idle on link/spawn stalls when serial).
 
+> **Measurement method / accuracy.** The `peak RSS` column is the tree-wide
+> anonymous working set from a 0.2 s `ps` sampler (matched `sailfin`/`clang`/
+> `ld…` process names; page cache excluded). This box has no GNU
+> `/usr/bin/time`, so per-module `make bench` memory reads 0 — a separate
+> limitation that does not affect these figures. Cross-checked against the
+> kernel's own cgroup accounting (`memory.max_usage_in_bytes`, reset then
+> read after one run): e2e-c @ jobs=3 charged **3.18 GiB** total vs the
+> sampler's 2.1 GiB — the ~1 GiB delta is reclaimable page cache from the
+> IR/object/binary writes (evicted under pressure before any OOM), plus a
+> little RSS the name filter misses. So the honest ceiling is ~3.2 GiB
+> cache-inclusive / ~2.1 GiB hard working set; both sit far under the 16 GiB
+> (Linux) / 7 GiB (macOS) budgets, and the jobs=3/2 decision holds under the
+> higher, kernel-measured number. macOS remains the extrapolated case (no
+> `RLIMIT_AS` backstop) pending one CI confirmation run.
+
 **Shipped.** `scripts/test_shards.sh run` reads `SAILFIN_TEST_JOBS` (default
 1 = byte-identical serial; non-numeric → serial, which also blocks
 word-injection into the unquoted expansion); the `sailfin-build` action
