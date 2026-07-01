@@ -68,9 +68,46 @@ When behaviour, coverage, or roadmap status changes:
 3. Adjust the [roadmap](https://sfn.dev/roadmap) (source: `site/src/pages/roadmap.astro`) for sequencing changes.
 4. Touch the relevant folder README (e.g., `compiler/README.md`,
    `runtime/README.md`, `examples/README.md`) so local guidance stays accurate.
-5. For future-facing designs, add or amend proposals under `docs/proposals/`.
+5. For a forward-looking design decision, record it as an **SFEP** (see below).
 
 Please reference the updated documents in your pull request description.
+
+### Design Records (SFEPs)
+
+Forward-looking design decisions with real surface area or longevity are
+recorded as **SFEPs** (Sailfin Enhancement Proposals) — numbered design records
+under `docs/proposals/`. Write (or update) an SFEP for a new/changed **language**
+feature, a **runtime/ABI** design, a **toolchain** design, or the design behind a
+**roadmap epic** before it is groomed into issues.
+
+Not everything is an SFEP. A rule we already follow lives in `docs/conventions/`,
+a post-incident analysis in `docs/rca/`, an operational playbook in
+`docs/runbooks/`, and a single-issue implementation design gate in
+`docs/proposals/design-notes/`. Small or mechanical work (a one-line fix, a
+localized bug, a routine refactor) needs no SFEP — the issue body is enough. When
+unsure, follow the decision tree in [SFEP-0001 §1](docs/proposals/0001-sfep-process.md).
+
+To create one:
+
+1. Copy `docs/proposals/template.md` to `docs/proposals/draft-<slug>.md`, set
+   `status: Draft`, and fill **every** required section (Summary, Motivation,
+   Design, Effect & capability impact, Self-hosting impact, Alternatives, Stage1
+   readiness mapping, Test plan, References). An incomplete proposal stays `Draft`.
+2. Numbers are allocated from the registry in
+   [`docs/proposals/README.md`](docs/proposals/README.md) (next number = `max + 1`).
+   Keep `sfep: TBD` and the `draft-<slug>.md` name while in review; fix the number
+   and add the registry row in the PR that merges the proposal.
+3. The lifecycle is `Draft → Accepted → Implemented` (plus terminal `Withdrawn` /
+   `Rejected` / `Superseded`). A proposal becomes `Accepted` at the design gate and
+   graduates to `Implemented` only when the work clears the Stage1 Readiness
+   Checklist end-to-end and self-hosts — "parsed but not enforced" is not
+   `Implemented`.
+
+The SFEP is the durable design record (the *why*); issues and PRs are the
+execution. An issue implementing an SFEP cites it (e.g. `Design: SFEP-0017`)
+rather than duplicating the design. The full process is
+[SFEP-0001](docs/proposals/0001-sfep-process.md); SFEP files are Markdown and are
+not subject to `sfn fmt` or the self-host gate.
 
 ## 4. Commit & Review Style
 
