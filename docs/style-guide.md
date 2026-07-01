@@ -71,9 +71,9 @@ Additional rules:
 
 ## Comments
 
-Sailfin has one comment syntax: `//`. There is no `///` doc-comment form and
-no `/* */` convention — the five files using block comments are historical,
-not a pattern to follow.
+Sailfin has one comment syntax: `//`. There is no `///` doc-comment form,
+and block comments (`/* */`) are not used — write `//` line comments
+exclusively.
 
 The prime directive, borrowed from Go and Rust practice: **comments explain
 *why*, code explains *what*.** A comment that restates the line below it is
@@ -207,7 +207,8 @@ Three tiers, by audience:
    guard + diagnostic over an assertion; the compiler must degrade to an
    error message, not a crash.
 
-**Error codes** are `E0xxx` strings with range ownership:
+**Error codes** are `E0xxx` strings with range ownership (Home paths are
+relative to `compiler/src/`):
 
 | Range | Domain | Home |
 |---|---|---|
