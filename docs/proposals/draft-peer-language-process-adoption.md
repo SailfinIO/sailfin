@@ -6,7 +6,7 @@ type: process
 created: 2026-07-01
 updated: 2026-07-01
 author: "agent:orchestrator (Sailbot); project owner (direction + decisions)"
-tracking:
+tracking: "#1806, #1807, #1808, #1809 (Tier 1, §3.13)"
 supersedes:
 superseded-by:
 graduates-to:
@@ -309,18 +309,20 @@ stated sunset.
 
 ### 3.13 Execution plan — Tier 1 issues
 
-Groomed as session-sized issues on acceptance (tracked in the front-matter):
+Groomed as session-sized issues (tracked in the front-matter):
 
-1. `chore(ci): add merge_group trigger to CI and document merge-queue
-   enablement` — §3.1. `ci.yml` + a runbook note; queue enablement itself is
-   an owner settings action.
-2. `feat(cli): print a uniform ICE banner on compiler panic + add ICE issue
-   template` — §3.2. Panic boundary in the CLI driver + `ice.md` template.
-3. `chore(ci): nightly perf-history job with regression auto-filing` — §3.3.
-   New workflow + `bench-data` orphan branch + threshold compare script.
-4. `chore(ci): nightly corpus run diffing candidate vs pinned seed` — §3.4.
-   New workflow + corpus-runner script asserting verdict-pair agreement and
-   fmt round-trip.
+1. **#1806** — `chore(ci): add merge_group trigger to CI and document
+   merge-queue enablement` — §3.1. `ci.yml` + a runbook note; queue
+   enablement itself is an owner settings action.
+2. **#1807** — `feat(cli): print a uniform ICE banner on compiler panic +
+   add ICE issue template` — §3.2. Panic boundary in the CLI driver +
+   `ice.md` template.
+3. **#1808** — `chore(ci): nightly perf-history job — bench time series on a
+   data branch + regression auto-filing` — §3.3. New workflow + `bench-data`
+   orphan branch + threshold compare script.
+4. **#1809** — `chore(ci): nightly corpus run — diff candidate compiler vs
+   pinned seed` — §3.4. New workflow + corpus-runner script asserting
+   verdict-pair agreement and fmt round-trip.
 
 Tier 2/3 items are groomed when their tier is reached; §3.5 and §3.9 start
 as new draft SFEPs, §3.8 and §3.11 as amendments/additions beside SFEP-0001.
