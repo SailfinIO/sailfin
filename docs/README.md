@@ -17,7 +17,10 @@ documentation lives on the docs site.**
 - **Native runtime architecture** → `docs/proposals/0025-native-runtime-architecture.md` (SFEP-0025)
 - **Build architecture and performance baseline** → `docs/proposals/0006-build-architecture.md` (SFEP-0006)
 - **Runtime execution perf baseline** → `docs/perf/runtime-performance.md`
-- **Repository style guide** → `docs/style-guide.md`
+- **Coding conventions & repository style guide** → `docs/style-guide.md`
+  (the single source of truth for naming, comments, effects style, error
+  handling, and file organization; narrow single-topic conventions live under
+  `docs/conventions/`)
 - **Proposals (SFEPs)** → `docs/proposals/` — numbered design records;
   index + process in [`docs/proposals/README.md`](proposals/README.md) and
   [SFEP-0001](proposals/0001-sfep-process.md)

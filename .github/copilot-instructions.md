@@ -89,8 +89,12 @@ Effect checking walks nested blocks, lambdas, and `routine` scopes. Missing effe
 
 ## Coding Style & Naming Conventions
 
-- **Python:** PEP 8, four-space indentation, `snake_case` functions, narrow passes; share helpers instead of duplicating parsing logic.
-- **Sailfin (`.sfn`):** Spell effects explicitly, keep effect lists ordered by impact, `CamelCase` for models/capsules, `snake_case` for locals, annotate future syntax as comments until the compiler supports it.
+`docs/style-guide.md` is the single source of truth for coding conventions. Headline rules:
+
+- **Formatting:** `sfn fmt --write` then `sfn fmt --check` on every touched `.sfn` file; never hand-tune what the formatter owns.
+- **Naming:** `snake_case` functions/locals/files, `PascalCase` types and enum variants, `_underscore` module-private helpers, `SCREAMING_SNAKE_CASE` module-level constants.
+- **Effects:** spelled explicitly and listed alphabetically — `![io, net]`, never `![net, io]`.
+- **Comments:** `//` only, explain *why* not *what*, cite issues/SFEPs (`(#1234)`, `SFEP-0027`) — no `TODO`s, no commented-out code, no "this commit"/"this PR" language.
 - Align terminology with the language spec at `site/src/content/docs/docs/reference/spec/` (capsule, fleet, provenance card).
 
 ## Adding a Language Feature

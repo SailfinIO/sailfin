@@ -138,10 +138,17 @@ Reviewers will check for:
 
 ## 6. Code Style
 
-- Sailfin (`.sfn`): explicit effect lists, `CamelCase` for models/capsules,
-  `snake_case` locals, and comment future syntax when used for illustration.
-  Follow the module and file conventions in `docs/style-guide.md` (one concern
-  per file, `mod.sfn` re-exports, mirrored `*.spec.sfn` tests).
+[`docs/style-guide.md`](docs/style-guide.md) is the single source of truth for
+coding conventions — naming, comments, effect-annotation style, error-handling
+idiom, file organization, and size budgets. Read it before your first `.sfn`
+change; the short version:
+
+- `sfn fmt --write` then `sfn fmt --check` on every touched `.sfn` file
+  (mechanics are the formatter's, everything else is the guide's).
+- `snake_case` functions/files, `PascalCase` types, `_underscore` private
+  helpers, alphabetical effect lists (`![io, net]`).
+- Comments explain *why* and cite issues/SFEPs — no `TODO`s, no
+  commented-out code, no "this PR" language.
 - Examples: keep inputs minimal, avoid generated artefacts, and annotate
   future-only constructs.
 

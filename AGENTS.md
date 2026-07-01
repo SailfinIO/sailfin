@@ -29,7 +29,7 @@
 
 ## Style, Tests, and Documentation
 
-- Sailfin files spell effects explicitly (`fn foo() -> Bar ![io, model]`), keep effect lists ordered by impact, and use `CamelCase` for models/capsules while locals remain `snake_case`.
+- `docs/style-guide.md` is the single source of truth for coding conventions (naming, comments, effect-annotation style, error handling, file size budgets); `.claude/rules/code-style.md` is the always-loaded summary. Headline rules: effects spelled explicitly and listed alphabetically (`fn foo() -> Bar ![io, model]`); `snake_case` functions/locals, `PascalCase` types, `_underscore` private helpers; comments explain *why* and cite issues/SFEPs — never `TODO`s, commented-out code, or "this PR" language.
 - Align terminology with the language spec at `site/src/content/docs/docs/reference/spec/` (capsule, fleet, provenance card) and note currency or latency literals as comments until syntax support arrives.
 - Before committing touched `.sfn` files under `compiler/src/` or `runtime/`, run `sfn fmt --write <files>` and then `sfn fmt --check <files>` (or the equivalent `build/native/sailfin` commands).
 - Stage regression tests beside related coverage in `compiler/tests/`; prefer Sailfin-native tests and slim fixtures over recorded generated output.
