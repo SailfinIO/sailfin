@@ -219,9 +219,15 @@ fn _write_server(port_str: string) -> string ![io] {
 
 // Compile the consumer to a standalone binary up front (synchronous), so
 // the cold `sfn/http` compile happens ONCE and is not inside any readiness
-// window. Returns the binary path, or "" on a build failure.
+// window. #1789: pass a per-test `--work-dir` so the `sfn/http`
+// import-context stages into a private tree (`<work>/native/import-context`)
+// rather than the shared, fixed `build/native/import-context/sfn/http`
+// (which `SAILFIN_TEST_SCRATCH` does NOT route) — keeping this build off
+// the path the sibling serve/http e2e tests contend on under `--jobs N`.
+// Returns the binary path, or "" on a build failure.
 fn _build_bin(main_path: string, bin: string) -> string ![io] {
-    let exit = process.run_capture([_sfn_bin(), "build", "-o", bin, main_path], _child_env());
+    let exit = process.run_capture([_sfn_bin(), "build", "--work-dir", _app_root()
+        + "/work", "-o", bin, main_path], _child_env());
     let _out = process.capture_take_stdout();
     let _err = process.capture_take_stderr();
     if exit != 0 { return ""; }

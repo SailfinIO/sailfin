@@ -364,11 +364,16 @@ fn _write_fetch_client(port_str: string) -> string ![io] {
 // and is NOT inside the readiness window — a backgrounded `sfn run` would
 // otherwise race a cold capsule build against the poll budget. Threads the
 // full parent environment (the nested build links, needing the toolchain
-// surface; the routed `program.ll` stays under SAILFIN_TEST_SCRATCH,
-// parallel-safe per `.claude/rules/no-bash-e2e.md`). Returns the binary
-// path, or "" on a build failure.
+// surface). #1789: `SAILFIN_TEST_SCRATCH` only routes the `program.ll`
+// build cache, NOT the `sfn/http` import-context staging — that is routed
+// solely by `--work-dir`. So pass a per-test `--work-dir` to stage
+// `sfn/http` into a private tree (`<work>/native/import-context`) instead
+// of the shared, fixed `build/native/import-context/sfn/http`, keeping
+// this build off the path the sibling serve/http e2e tests contend on
+// under `--jobs N`. Returns the binary path, or "" on a build failure.
 fn _build_bin(main_path: string, bin: string) -> string ![io] {
-    let exit = process.run_capture([_sfn_bin(), "build", "-o", bin, main_path], _child_env());
+    let exit = process.run_capture([_sfn_bin(), "build", "--work-dir", _app_root()
+        + "/work", "-o", bin, main_path], _child_env());
     let _out = process.capture_take_stdout();
     let _err = process.capture_take_stderr();
     if exit != 0 { return ""; }
