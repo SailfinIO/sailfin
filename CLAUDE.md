@@ -243,7 +243,9 @@ Prefer the new forms where the parser already accepts them. Full plan:
    `{{ }}` until updated. Design record: `docs/proposals/draft-string-interpolation-dollar.md`.
 3. **Integer types** — `int` (i64) / `float` (f64) are recognized;
    `number` is now an alias for `float` (`typecheck_types.sfn`). Shipped.
-   The sized-int family (`i8`..`u64`) is still absent — see
+   The sized-int family (`i8`..`u64`) is recognized and lowered but only
+   half-real (unsigned widths collapse to signed LLVM types, and there is no
+   defined overflow or literal-range checking) — see
    `docs/proposals/draft-sized-integer-types.md`.
 4. **`Result<T, E>` + `?` operator** — typed error handling. Shipped: `Result`
    lives in `runtime/prelude.sfn`; the postfix `?` is `Expression.TryOperator`

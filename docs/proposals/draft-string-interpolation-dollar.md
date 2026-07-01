@@ -200,7 +200,7 @@ immediately followed by `{`, treat everything up to the next unescaped `}`
 as an embedded-expression segment (unbalanced brace nesting inside the
 segment, e.g. `${ f({a: 1}) }`, must be brace-depth-tracked rather than
 matched via a naive `find_substring_from(..., "}", ...)`, since the current
-`{{ }}` scanner's `"}}"} `-substring search has no such nesting problem but a
+`{{ }}` scanner's `"}}"`-substring search has no such nesting problem but a
 single-`}` delimiter does — this is a real behavioral difference from the
 current implementation that the implementer must account for, not merely a
 delimiter swap). A `$` not followed by `{`, or an escaped `\${`, is emitted
