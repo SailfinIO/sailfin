@@ -1,97 +1,17 @@
 // compiler/src/llvm/runtime_helpers.sfn
 //
-// Runtime helper descriptor definitions for LLVM lowering. These describe
-// the external C runtime functions that Sailfin code can call.
+// Runtime helper descriptor registry for LLVM lowering. Each
+// `RuntimeHelperDescriptor` maps a runtime operation to the symbol the
+// lowering emits calls against, plus its effect and parameter shape.
 //
-// New helpers must follow the descriptor-only contract documented in
-// `docs/conventions/runtime-helpers.md`: populate `native_signature`,
-// register the call site through `emit_runtime_call`, and add a
-// C trampoline only when a legitimate parameter-shape bridge is
-// required — never as the migration vehicle.
-//
-// =============================================================================
-// `native_signature` Rollout Plan (issue #461 / Epic #450 — M1)
-// =============================================================================
-//
-// Each `RuntimeHelperDescriptor` carries an optional `native_signature`
-// field (#392). When populated, the LLVM lowering emits calls to that
-// canonical Sailfin-native symbol (`sfn_*`) instead of the legacy C
-// entrypoint (`symbol`, typically `sailfin_runtime_*`). This is the
-// per-helper hand-off that lets the M2.4a / M2.6 string and array
-// migrations land one descriptor at a time, with `null` entries
-// continuing to route through the legacy C bodies until their pilot
-// PR lands.
-//
-// **Naming scheme** — the canonical name uses the `sfn_<domain>_<op>`
-// shape, mirroring the populated entries already in this file:
-//   - `sfn_str_*`   — string ops      (e.g. `sfn_str_len`, `sfn_str_eq`,
-//                     `sfn_str_slice`, `sfn_str_concat`,
-//                     `sfn_str_starts_with`, `sfn_str_ends_with`,
-//                     `sfn_str_contains`, `sfn_str_repeat`)
-//   - `sfn_array_*` — array/collection ops (e.g. `sfn_array_concat`,
-//                     `sfn_array_push_string`, `sfn_array_push_slot`)
-//   - `sfn_fs_*`    — filesystem ops  (next wave; `fs.*` descriptors)
-//   - `sfn_net_*`   — network ops     (after fs)
-//   - `sfn_clock_*` — clock/time ops  (last; mostly already routed
-//                     through `sfn_sleep` via direct emission)
-//
-// **Prioritization order** for the remaining ~107 descriptors, picked
-// to surface ABI hazards earliest in cheap pilots and defer the
-// effect-bearing surfaces (which need capability wiring on the
-// runtime side) to the back of the queue:
-//   1. **string** — smallest ABI surface, no effects, exercised by
-//      every test. Wave 1 (M2.4a, #430): `sfn_str_len`, `sfn_str_eq`,
-//      `sfn_str_slice`, `sfn_str_to_cstr`, `sfn_str_from_cstr`.
-//      Wave 1b (this PR, #461): `sfn_str_concat` + four method
-//      registrations (`starts_with`, `ends_with`, `contains`,
-//      `repeat`) staged for follow-up.
-//   2. **array** — landed in M2.6 (#466): `sfn_array_concat`,
-//      `sfn_array_push_string`, `sfn_array_push_slot`. Remaining
-//      array helpers (map / filter / reduce / runtime_array_*_fn)
-//      are next.
-//   3. **fs** — `fs.read`, `fs.write`, `fs.exists`, … require
-//      bridging the `![io]` capability before flipping their
-//      descriptors; descriptor metadata can land first, the
-//      `symbol`→`native_signature` flip lands once the capability
-//      bridge ships.
-//   4. **net** — `http.get`, `http.post`, websocket bridges. Same
-//      capability-first ordering as fs.
-//   5. **clock** — `sleep`, `monotonic_millis`. Mostly already
-//      routed through `sfn_sleep` via direct emission; the
-//      descriptor flip is the cleanup step.
-//
-// **Rollout checklist** for the remaining ~107 descriptors —
-// follow-up PRs slot underneath this comment as additional waves
-// land. Each wave should:
-//   * Pick a small batch (5–10 helpers, single domain).
-//   * **Before flipping `native_signature`**, grep both
-//     `compiler/src/llvm/lowering/` and
-//     `compiler/src/llvm/expression_lowering/native/` for hardcoded
-//     `@sailfin_runtime_<symbol>` call strings — these bypass the
-//     descriptor's `effective_symbol` resolution and must be updated
-//     in lockstep with the flip, or the wave PR will link-fail
-//     against the old symbol (see #727 and the M2.8 print.err
-//     wrapper post-mortem). The audit is mechanised by
-//     `compiler/tests/e2e/test_lowering_no_bare_runtime_emissions.sh`;
-//     any new hardcoded emission must either route through the
-//     registry or land in the test's allowlist with a
-//     `// Registry bypass: …` source comment.
-//   * For each helper that has hardcoded LLVM call sites in
-//     `compiler/src/llvm/expression_lowering/native/*`, mirror
-//     the M2.4a / M2.6 pattern: add a C trampoline in
-//     `runtime/native/src/sailfin_runtime.c` that forwards to the
-//     legacy `sailfin_runtime_*` body, update the hardcoded
-//     `@sailfin_runtime_*` sites to call `@sfn_<domain>_<op>`,
-//     then populate the descriptor's `native_signature`.
-//   * For descriptors with no callers yet (pre-registered method
-//     entries), populate `native_signature` directly — they are
-//     pure metadata until consumer code starts looking them up.
-//   * Run `make compile && make test` per batch.
-//   * Update the prioritization list above as waves land.
-//
-// See the Runtime Migration table in `docs/status.md` for the C→Sailfin migration tracker
-// and Epic #450 for the milestone-level sequencing.
-//
+// New helpers follow the descriptor-only contract in
+// `docs/conventions/runtime-helpers.md`: populate `native_signature`
+// with the canonical `sfn_<domain>_<op>` symbol (`sfn_str_*`,
+// `sfn_array_*`, `sfn_fs_*`, `sfn_net_*`, `sfn_clock_*`) and register
+// the call site through `emit_runtime_call` — never hardcode a bare
+// `@`-symbol call string in lowering code. History of the C→Sailfin
+// symbol migration: epic #450 and the Runtime Migration table in
+// `docs/status.md`.
 import { RuntimeHelperDescriptor } from "./types";
 import {
     join_with_separator,
