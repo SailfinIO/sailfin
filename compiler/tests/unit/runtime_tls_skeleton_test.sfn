@@ -1,0 +1,60 @@
+// Golden-IR test for the `runtime/sfn/platform/tls.sfn` OpenSSL surface —
+// the client-side TLS externs + wrappers behind the HTTP client's
+// `https://` path (SFEP-0036 gap B1, #1782). Mirrors
+// `runtime_net_skeleton_test.sfn`: pins the `declare` emitted for every
+// `SSL_*` extern (so the callback-free opaque-`* u8`-handle surface stays
+// lowerable) plus a `define` for the exported client wrappers.
+//
+// Strategy: ONE `lower_to_llvm_ir_from_text` call over the REAL module
+// (read via `fs.readFile`). `tls.sfn` has no imports, so single-module
+// lowering resolves every symbol it declares (the typecheck / fmt / link
+// halves are covered by `make compile` + the `fmt --check` CI gate + the
+// loopback e2e in `runtime_tls_https_client_test.sfn`).
+import { emit_native_text_with_module_name } from "../../src/emit_native";
+import { lower_to_llvm_ir_from_text } from "../../src/llvm/lowering/entrypoints";
+import { parse_program } from "../../src/parser/mod";
+import { index_of } from "../../src/string_utils";
+
+fn _contains(haystack: string, needle: string) -> boolean {
+    return index_of(haystack, needle) >= 0;
+}
+
+test "lowering: runtime/sfn/platform/tls.sfn emits a declare for every OpenSSL extern" ![io] {
+    let source = fs.readFile("runtime/sfn/platform/tls.sfn");
+    let program = parse_program(source);
+    let native = emit_native_text_with_module_name(program, "runtime/sfn/platform/tls");
+    let ir = lower_to_llvm_ir_from_text(native, "runtime/sfn/platform/tls");
+
+    assert _contains(ir, "declare ");
+    // Context / handshake surface.
+    assert _contains(ir, "@TLS_client_method(");
+    assert _contains(ir, "@SSL_CTX_new(");
+    assert _contains(ir, "@SSL_CTX_set_verify(");
+    assert _contains(ir, "@SSL_CTX_set_default_verify_paths(");
+    assert _contains(ir, "@SSL_CTX_load_verify_locations(");
+    assert _contains(ir, "@SSL_new(");
+    assert _contains(ir, "@SSL_set_fd(");
+    // SNI rides the SSL_ctrl ABI symbol (the set_tlsext_host_name macro).
+    assert _contains(ir, "@SSL_ctrl(");
+    assert _contains(ir, "@SSL_connect(");
+    // I/O + verify-poll + teardown surface.
+    assert _contains(ir, "@SSL_read(");
+    assert _contains(ir, "@SSL_write(");
+    assert _contains(ir, "@SSL_shutdown(");
+    assert _contains(ir, "@SSL_get_error(");
+    assert _contains(ir, "@SSL_get_verify_result(");
+}
+
+test "lowering: runtime/sfn/platform/tls.sfn defines the exported client wrappers" ![io] {
+    let source = fs.readFile("runtime/sfn/platform/tls.sfn");
+    let program = parse_program(source);
+    let native = emit_native_text_with_module_name(program, "runtime/sfn/platform/tls");
+    let ir = lower_to_llvm_ir_from_text(native, "runtime/sfn/platform/tls");
+
+    assert _contains(ir, "@tls_client_ctx(");
+    assert _contains(ir, "@tls_ctx_free(");
+    assert _contains(ir, "@tls_connect_fd(");
+    assert _contains(ir, "@tls_read(");
+    assert _contains(ir, "@tls_write(");
+    assert _contains(ir, "@tls_shutdown_free(");
+}
