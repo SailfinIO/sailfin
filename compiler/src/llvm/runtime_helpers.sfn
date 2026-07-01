@@ -8,10 +8,12 @@
 // `docs/conventions/runtime-helpers.md`: populate `native_signature`
 // with the canonical `sfn_<domain>_<op>` symbol (`sfn_str_*`,
 // `sfn_array_*`, `sfn_fs_*`, `sfn_net_*`, `sfn_clock_*`) and register
-// the call site through `emit_runtime_call` — never hardcode a bare
-// `@`-symbol call string in lowering code. History of the C→Sailfin
-// symbol migration: epic #450 and the Runtime Migration table in
-// `docs/status.md`.
+// the call site through `emit_runtime_call` rather than hardcoding an
+// `@`-symbol call string in lowering code. The few deliberate
+// registry bypasses (e.g. the synthesized `main` wrapper in
+// `lowering/emission.sfn`) are documented at their call sites — do
+// not add new ones. History of the C→Sailfin symbol migration:
+// epic #450 and the Runtime Migration table in `docs/status.md`.
 import { RuntimeHelperDescriptor } from "./types";
 import {
     join_with_separator,
