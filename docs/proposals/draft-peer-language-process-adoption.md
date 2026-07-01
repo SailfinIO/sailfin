@@ -43,12 +43,15 @@ the process portfolios of Rust, Go, Python, Swift, LLVM, and Zig confirms the
 following gaps — each one is machinery a peer project built because manual
 handling stopped scaling:
 
-- **Untested merge combinations.** `ci.yml` tests the PR head, not the merge
-  result; `build-quality.yml` catches breakage only *after* it lands on
-  `main`. With concurrent agent PRs (budgeted in `.github/AGENTS.md`),
-  semantic merge conflicts are precisely the failure class agents cannot
-  foresee. Rust has refused to merge untested combinations since 2013 (the
-  bors "not rocket science" rule).
+- **Unserialized landings.** `ci.yml` tests the PR's synthetic merge commit
+  *as of the CI run* — against whatever `main` was then, not against the
+  `main` tip the PR is actually merged into, and nothing serializes or
+  revalidates at landing time; `build-quality.yml` catches breakage only
+  *after* it lands on `main`. With concurrent agent PRs (budgeted in
+  `.github/AGENTS.md`), semantic merge conflicts between in-flight PRs are
+  precisely the failure class agents cannot foresee. Rust has refused to
+  land untested combinations since 2013 (the bors "not rocket science"
+  rule).
 - **No ICE contract.** A compiler panic prints whatever the failing pass
   printed. There is no internal-compiler-error banner (version, active pass,
   span, "file a bug" pointer) and no ICE issue template — so agent-filed
@@ -96,9 +99,10 @@ earlier one.
 
 *Prior art:* Rust's bors; GitHub merge queue is the managed successor.
 
-*Mechanism:* a PR is merged only after CI passes on the **speculative merge
-commit** against current `main`, serialized through a queue. Untested
-combinations never land.
+*Mechanism:* a PR lands only after CI passes on the **speculative merge
+commit against the `main` tip at landing time**, serialized through a
+queue. A merge result that went stale while other PRs landed is re-tested,
+never assumed.
 
 *Adaptation:* enable GitHub merge queue on `main` with the `ci.yml` shard
 legs as required checks. The in-tree change is small: `ci.yml` (and the
