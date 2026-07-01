@@ -474,6 +474,10 @@ jobs:
           seed_version: ${{ steps.seed.outputs.seed_version }}
           # Each leg runs only its shard; package only on the primary leg.
           shard: ${{ matrix.shard }}
+          # Per-file parallelism within the shard leg (benchmarked #843/Track A
+          # follow-on): 3 on the 4-vCPU/16GB ubuntu runner (~2x e2e, ~6x unit
+          # throughput; tree-wide peak RSS ~2-3.5 GiB, well under budget).
+          shard_test_jobs: "3"
           package: ${{ matrix.primary && 'true' || 'false' }}
 
       - name: Report compiler metadata
@@ -806,6 +810,10 @@ jobs:
           seed_version: ${{ steps.seed.outputs.seed_version }}
           # Each leg runs only its shard; package only on the primary leg.
           shard: ${{ matrix.shard }}
+          # Per-file parallelism within the shard leg. Conservative 2 on the
+          # 3-vCPU/7GB macos-arm64 runner: Darwin has no RLIMIT_AS backstop
+          # (SFEP-0022), so keep headroom and confirm before raising.
+          shard_test_jobs: "2"
           package: ${{ matrix.primary && 'true' || 'false' }}
 
       # #1235 measurement (read-only): surface this shard leg's test-phase

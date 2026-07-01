@@ -4,7 +4,7 @@ title: "CI Test-Speed Plan"
 status: Accepted
 type: tooling
 created: 2026-05-01
-updated: 2026-05-01
+updated: 2026-07-01
 author: "agent:compiler-architect"
 tracking: "#1012"
 supersedes:
@@ -368,6 +368,65 @@ insufficient.
 + build. But the win overlaps heavily with Lever 1 — if sharding already
 gets macOS to ~12 min, Lever 3's marginal value is smaller and its
 coverage cost is real. Treat as the *last* lever, not the first.
+
+---
+
+### Lever 4 — Within-shard `--jobs` parallelism (Phase 1 follow-on, shipped 2026-07-01)
+
+**Idea.** Levers 1–3 parallelize *across* CI legs but each leg still runs
+its shard **serially internally** (`sailfin test --jobs 1`). The multi-file
+runner's bounded worker pool (`--jobs N`, #1236) is already shipped and
+proven equivalence-safe (`runner_jobs_parallel_test.sfn`), but CI never
+opted in — the serial-internal default was calibrated on the 3.23 GiB heavy
+*compiler-module* emit (SFEP-0022 §2.4), which CI shards never build.
+
+**Benchmark (2026-07-01, self-hosted `0.7.0-alpha.50`, on a 4-vCPU/16 GiB
+box == the ubuntu runner).** Wall time + tree-wide peak RSS (summed across
+all `sailfin`/`clang`/`ld` processes) per shard, sweeping `--jobs`:
+
+| shard | jobs=1 | jobs=2 | jobs=3 | jobs=4 | peak RSS |
+|---|---|---|---|---|---|
+| `e2e-c` (build-spawners, heaviest type) | 389.7s | 218.9s (1.78×) | 189.4s (2.06×) | 173.7s (2.24×) | 1.6 → 2.1 GiB |
+| `unit-a` (frontend compiles) | 596.4s | — | — | 88.4s (**6.75×**) | 3.6 → 3.2 GiB |
+
+Peak RSS stays **flat or drops** under parallelism, topping out at 3.6 GiB —
+22% of the 16 GiB runner — because test-fixture emits are ~30× lighter than
+a heavy compiler module. Memory was never the binding constraint for the
+test surface. e2e shards gain ~2× (each test already spawns a nested
+multi-core `sfn build`); frontend/unit shards gain ~6× (single compiles that
+leave cores idle on link/spawn stalls when serial).
+
+> **Measurement method / accuracy.** The `peak RSS` column is the tree-wide
+> anonymous working set from a 0.2 s `ps` sampler (matched `sailfin`/`clang`/
+> `ld…` process names; page cache excluded). This box has no GNU
+> `/usr/bin/time`, so per-module `make bench` memory reads 0 — a separate
+> limitation that does not affect these figures. Cross-checked against the
+> kernel's own cgroup accounting (`memory.max_usage_in_bytes`, reset then
+> read after one run): e2e-c @ jobs=3 charged **3.18 GiB** total vs the
+> sampler's 2.1 GiB — the ~1 GiB delta is reclaimable page cache from the
+> IR/object/binary writes (evicted under pressure before any OOM), plus a
+> little RSS the name filter misses. So the honest ceiling is ~3.2 GiB
+> cache-inclusive / ~2.1 GiB hard working set; both sit far under the 16 GiB
+> (Linux) / 7 GiB (macOS) budgets, and the jobs=3/2 decision holds under the
+> higher, kernel-measured number. macOS remains the extrapolated case (no
+> `RLIMIT_AS` backstop) pending one CI confirmation run.
+
+**Shipped.** `scripts/test_shards.sh run` reads `SAILFIN_TEST_JOBS` (default
+1 = byte-identical serial; non-numeric → serial, which also blocks
+word-injection into the unquoted expansion); the `sailfin-build` action
+forwards it via a `shard_test_jobs` input; `ci.yml` sets **3** on Linux legs
+and a conservative **2** on macOS legs. macOS is conservative because Darwin
+has **no** `RLIMIT_AS` backstop (SFEP-0022) and the runner is 7 GiB/3-vCPU;
+its value should be confirmed against one real CI run before raising, per
+SFEP-0022 §7. The compiled-in runner default stays 1 for local determinism
+and arbitrary callers. Emit fan-out (`_cr_resolve_jobs`, clamp `[1, 8]`) is
+**unchanged** — it already resolves to 3 (Linux) / 1 (macOS 7 GiB) on
+GitHub runners, so raising the clamp buys nothing until runners exceed 8
+cores.
+
+> Observed but out of scope: `effect_gate_build_path_entry_test.sfn` (line
+> 129) fails standalone in a fresh container (exit 134) — identical at every
+> `--jobs` level, so parallelism-independent. Tracked separately.
 
 ---
 
