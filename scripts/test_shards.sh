@@ -112,11 +112,22 @@ run() {
 	# / 7 GiB (macOS) runner — because test fixtures emit ~30x lighter than
 	# the 3 GiB heavy compiler-module emit the serial-internal default was
 	# calibrated on (SFEP-0022 §2.4). `runner_jobs_parallel_test.sfn` pins
-	# --jobs N equivalence to --jobs 1. A non-numeric value falls back to
-	# serial (also blocks word-injection into the unquoted expansion below).
+	# --jobs N equivalence to --jobs 1. Any value the runner would reject
+	# with exit 2 (`sailfin test` requires --jobs in [1, 256]) falls back to
+	# serial rather than hard-failing a shard leg on a misconfigured env:
+	# non-numeric (which also blocks word-injection into the unquoted
+	# expansion below) and out-of-range. `10#` forces base-10 so a
+	# leading-zero value ("08") is not misread as octal and is normalized.
 	local jobs="${SAILFIN_TEST_JOBS:-1}"
 	case "$jobs" in
 	'' | *[!0-9]*) jobs=1 ;;
+	*)
+		if [ "$((10#$jobs))" -lt 1 ] || [ "$((10#$jobs))" -gt 256 ]; then
+			jobs=1
+		else
+			jobs="$((10#$jobs))"
+		fi
+		;;
 	esac
 	local jobs_flag=""
 	if [ "$jobs" != "1" ]; then
