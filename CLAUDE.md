@@ -222,9 +222,12 @@ When adding features or making design choices:
   add keywords for constructs that can't be library functions. AI constructs
   (`model`, `prompt`, `tool`, `pipeline`) are migrating to the `sfn/ai` capsule;
   the `![model]` effect stays as a language-level capability gate.
-- **Fix the foundation first.** Integer types, `Result<T, E>`, generic
-  constraints, hierarchical effects, and effect polymorphism are prerequisites
-  for everything else.
+- **Fix the foundation first.** `int`/`float` and `Result<T, E>` + `?` have
+  landed; the remaining prerequisites for everything else are **generic
+  constraints + monomorphization** (the root blocker for real collections,
+  typed higher-order fns, and `Result` `From<E>` — see
+  `docs/proposals/draft-generic-constraints.md`), hierarchical effects, and
+  effect polymorphism.
 - **Chase timeless problems.** Effects and capability security matter in 20 years;
   AI API wrappers change every 6 months. Language syntax is permanent; library
   APIs can iterate.
@@ -237,16 +240,20 @@ Prefer the new forms where the parser already accepts them. Full plan:
 1. **Type annotations: `:` not `->`** — `x: number`, not `x -> number`, for params,
    vars, fields. Return types keep `->`. Parser accepts both (`TypeSep = "->" | ":"`).
 2. **String interpolation: `${ }` not `{{ }}`** — parser change pending; keep
-   `{{ }}` until updated.
-3. **Integer types** — `int` (i64) / `float` (f64) will replace `number`
-   (`number` becomes an alias for `float`). Not yet in parser.
-4. **`Result<T, E>` + `?` operator** — typed error handling. Not yet in parser.
+   `{{ }}` until updated. Design record: `docs/proposals/draft-string-interpolation-dollar.md`.
+3. **Integer types** — `int` (i64) / `float` (f64) are recognized;
+   `number` is now an alias for `float` (`typecheck_types.sfn`). Shipped.
+   The sized-int family (`i8`..`u64`) is still absent — see
+   `docs/proposals/draft-sized-integer-types.md`.
+4. **`Result<T, E>` + `?` operator** — typed error handling. Shipped: `Result`
+   lives in `runtime/prelude.sfn`; the postfix `?` is `Expression.TryOperator`
+   (`ast.sfn`), typecheck `E0810`–`E0812` (SFEP-0012, `docs/status.md`).
 5. **Closures with capture** — lambdas must capture enclosing variables.
 6. **Lambda short form: `fn(x) => expr`** — an additive expression-bodied lambda
    alongside the block form `fn(x) -> T { ... }`; the `fn` lead-in stays (keeps
-   zero-lookahead dispatch and avoids the match-arm `=>` collision). Accepted in
-   `docs/proposals/0029-lambda-syntax.md`; parser change pending — keep the block
-   form until it ships.
+   zero-lookahead dispatch and avoids the match-arm `=>` collision). Shipped
+   (SFEP-0029 `Implemented`, #1683; desugars to a single-`return` block in
+   `parser/expressions.sfn`).
 
 ## Deferred / Not Yet Shipped
 
@@ -266,7 +273,14 @@ Prefer the new forms where the parser already accepts them. Full plan:
 - `PII<T>` / `Secret<T>` parsed, no runtime enforcement (post-1.0)
 - `model` / `prompt` / `tool` / `pipeline` blocks emit metadata only (migrating
   to the `sfn/ai` capsule)
-- No concurrency runtime (`routine`, `spawn`, `channel`, `await`)
+- **Concurrency runtime — v0 works, not complete.** `routine {}` lowers to a real
+  structured-concurrency nursery (join-all, no orphaned tasks); `channel()` is a
+  working bounded MPMC queue; `spawn`/`await`/`parallel` route through a real
+  thread-pool scheduler (`docs/status.md`). Still partial: `await` typing isn't
+  wired into the live typecheck walk (#829), `async fn` is structural-only,
+  channels are untyped/pointer-width, and there's no cancel-on-fault or `sfn/sync`
+  API yet. Structured concurrency is a pillar, so this is the active workstream —
+  not "not shipped."
 
 The 1.0 critical path (runtime enablement phases, effect-system hardening) and
 the LLM-adoption strategy live in the roadmap and `docs/status.md` — those
