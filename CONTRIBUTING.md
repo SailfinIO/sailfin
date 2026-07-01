@@ -91,8 +91,9 @@ To create one:
 
 1. Copy `docs/proposals/template.md` to `docs/proposals/draft-<slug>.md`, set
    `status: Draft`, and fill **every** required section (Summary, Motivation,
-   Design, Effect & capability impact, Self-hosting impact, Alternatives, Stage1
-   readiness mapping, Test plan, References). An incomplete proposal stays `Draft`.
+   Design, Effect & capability impact, Self-hosting impact, Alternatives
+   considered, Stage1 readiness mapping, Test plan, References). An incomplete
+   proposal stays `Draft`.
 2. Numbers are allocated from the registry in
    [`docs/proposals/README.md`](docs/proposals/README.md) (next number = `max + 1`).
    Keep `sfep: TBD` and the `draft-<slug>.md` name while in review; fix the number
