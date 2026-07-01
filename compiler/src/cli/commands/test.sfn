@@ -67,7 +67,6 @@ import {
     discover_workspace_root,
     prepare_project_capsules_for_test
 } from "../../capsule_resolver";
-import { _package_basename } from "../../cli_commands";
 import {
     _collect_test_files_cmd,
     _dirname_cmd,
@@ -115,6 +114,7 @@ import { toml_get_name } from "../../toml_parser";
 import { load_imported_interfaces_from_paths } from "../../typecheck_import_loader";
 import { resolve_test_bin_identity_for_cache } from "../../version";
 import { CliContext } from "../context";
+import { _package_basename } from "./cmd_shared";
 
 // The `sfn/cli` definition for `test`, registered on the v2 root via
 // `with_subcommand`. Three boolean flags, three value flags (`-k`,

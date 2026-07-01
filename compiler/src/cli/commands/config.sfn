@@ -9,9 +9,9 @@
 // (`get`/`set`/`unset`/`list`); `sfn/cli`'s `parse()` owns the descent,
 // and `run` reconstructs the legacy positional args slice
 // (`["config", <sub>, <key>, <value>]`) so it can delegate to the
-// existing `handle_config_command` body **verbatim**. Phase C (#1676)
-// owns deleting that body and relocating its logic — until then this is a
-// behavior-preserving move: the reconstructed slice drives the same
+// existing `handle_config_command` body **verbatim** — now relocated into
+// this module from the deleted `cli_commands.sfn` (#1795, SFEP-0027 §3.2).
+// This is a behavior-preserving move: the reconstructed slice drives the same
 // handler the legacy dispatch called, so output and exit codes are
 // byte-identical to today (parity oracle:
 // `compiler/tests/e2e/config_test.sfn`).
@@ -26,8 +26,113 @@ import {
     with_subcommand
 } from "sfn/cli";
 
-import { handle_config_command } from "../../cli_commands";
+import { _ensure_dir_recursive_cmd, _get_home_cmd, _toml_trim_cmd } from "../../cli_commands_utils";
 import { CliContext } from "../context";
+import {
+    _is_valid_registry_url_cmd,
+    _resolve_registry_url_cmd,
+    _strip_trailing_slash_cmd
+} from "./cmd_shared";
+
+fn _write_config_registry_cmd(url: string) -> int ![io] {
+    let home = _get_home_cmd();
+    if home.length == 0 {
+        print("could not determine home directory");
+        return 1;
+    }
+    let sfn_dir = home + "/.sfn";
+    _ensure_dir_recursive_cmd(sfn_dir);
+    let dir_chmod_rc = process.run(["chmod", "700", sfn_dir]);
+    if dir_chmod_rc != 0 {
+        print("error: failed to set permissions on " + sfn_dir);
+        return 1;
+    }
+    let path = sfn_dir + "/config.toml";
+    let mut out: string = "";
+    if url.length > 0 {
+        out = out + "[registry]\n";
+        out = out + "url = \"" + url + "\"\n";
+    }
+    fs.writeFile(path, out);
+    let file_chmod_rc = process.run(["chmod", "600", path]);
+    if file_chmod_rc != 0 {
+        print("error: failed to set permissions on " + path);
+        return 1;
+    }
+    return 0;
+}
+
+fn handle_config_command(args: string[]) -> int ![io] {
+    if args.length < 2 {
+        print("usage: sfn config <get|set|unset|list> [key] [value]");
+        return 2;
+    }
+    let sub = args[1];
+    if strings_equal(sub, "list") {
+        if args.length != 2 {
+            print("usage: sfn config list");
+            return 2;
+        }
+        print("registry = " + _resolve_registry_url_cmd());
+        return 0;
+    }
+    if strings_equal(sub, "get") {
+        if args.length != 3 {
+            print("usage: sfn config get <key>");
+            return 2;
+        }
+        let key = args[2];
+        if strings_equal(key, "registry") {
+            print(_resolve_registry_url_cmd());
+            return 0;
+        }
+        print("unknown config key: " + key);
+        return 2;
+    }
+    if strings_equal(sub, "set") {
+        if args.length != 4 {
+            print("usage: sfn config set <key> <value>");
+            return 2;
+        }
+        let key = args[2];
+        let value = _toml_trim_cmd(args[3]);
+        if !strings_equal(key, "registry") {
+            print("unknown config key: " + key);
+            return 2;
+        }
+        if value.length == 0 {
+            print("error: empty value");
+            return 1;
+        }
+        let normalized = _strip_trailing_slash_cmd(value);
+        if !_is_valid_registry_url_cmd(normalized) {
+            print("error: registry must be an http(s) URL with no whitespace, quotes, or shell metacharacters");
+            return 1;
+        }
+        let rc = _write_config_registry_cmd(normalized);
+        if rc != 0 { return rc; }
+        print("registry = " + normalized);
+        return 0;
+    }
+    if strings_equal(sub, "unset") {
+        if args.length != 3 {
+            print("usage: sfn config unset <key>");
+            return 2;
+        }
+        let key = args[2];
+        if !strings_equal(key, "registry") {
+            print("unknown config key: " + key);
+            return 2;
+        }
+        let rc = _write_config_registry_cmd("");
+        if rc != 0 { return rc; }
+        print("unset " + key);
+        return 0;
+    }
+    print("unknown subcommand: " + sub);
+    print("usage: sfn config <get|set|unset|list> [key] [value]");
+    return 2;
+}
 
 // The `sfn/cli` definition for `config`, registered on the v2 root via
 // `with_subcommand`. The four leaf subcommands mirror the legacy

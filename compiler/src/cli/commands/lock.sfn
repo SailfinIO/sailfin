@@ -10,9 +10,10 @@
 // positionals. `sfn/cli`'s `parse()` owns flag validation, and `run`
 // reconstructs the legacy positional args slice (`["lock", "--work-dir",
 // <dir>]`) so it can delegate to the existing `handle_lock_command` body
-// **verbatim**. Phase C (#1676) owns deleting that body and relocating
-// its logic — until then this is a behavior-preserving move: the
-// reconstructed slice drives the same handler the legacy dispatch called,
+// **verbatim** — now relocated into this module from the deleted
+// `cli_commands.sfn` (#1795, SFEP-0027 §3.2). This is a
+// behavior-preserving move: the reconstructed slice drives the same handler
+// the legacy dispatch called,
 // so output and exit codes are byte-identical to today (parity oracle:
 // `compiler/tests/e2e/lock_test.sfn`).
 //
@@ -30,8 +31,48 @@ import {
     with_flag
 } from "sfn/cli";
 
-import { handle_lock_command } from "../../cli_commands";
+import { discover_workspace_root, resolve_workspace_lock_entries } from "../../capsule_resolver";
+import { _get_env_cmd } from "../../cli_commands_utils";
+import { workspace_lock_write } from "../../lock";
+import { number_to_string } from "../../num_format";
 import { CliContext } from "../context";
+
+fn handle_lock_command(args: string[]) -> int ![io] {
+    let mut work_dir: string = "";
+    let mut ai = 1;
+    loop {
+        if ai >= args.length { break; }
+        let arg = args[ai];
+        if strings_equal(arg, "--work-dir") {
+            if ai + 1 >= args.length {
+                print("sfn lock: --work-dir requires a directory argument");
+                return 2;
+            }
+            work_dir = args[ai + 1];
+            ai += 2;
+        } else {
+            print("usage: sfn lock [--work-dir DIR]");
+            return 2;
+        }
+    }
+    let mut start_dir = work_dir;
+    if start_dir.length == 0 {
+        start_dir = _get_env_cmd("PWD");
+        if start_dir.length == 0 { start_dir = "."; }
+    }
+    let workspace_root = discover_workspace_root(start_dir);
+    if workspace_root.length == 0 {
+        print("sfn lock: no workspace.toml found (run inside a workspace)");
+        return 1;
+    }
+    let entries = resolve_workspace_lock_entries(workspace_root);
+    let lock_text = workspace_lock_write(entries);
+    let lock_path = workspace_root + "/workspace.lock";
+    fs.writeFile(lock_path, lock_text);
+    print("wrote " + lock_path + " (" + number_to_string(entries.length)
+        + " members)");
+    return 0;
+}
 
 // The `sfn/cli` definition for `lock`, registered on the v2 root via
 // `with_subcommand`. One optional `--work-dir DIR` value flag; no

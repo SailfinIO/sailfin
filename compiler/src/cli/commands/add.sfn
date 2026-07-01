@@ -29,9 +29,10 @@
 // module — `add` needs 1/2, so it uses literals to return them correctly.
 //
 // The capsule-name validation helpers (`_is_safe_capsule_segment_cmd`,
-// `_is_safe_capsule_version_cmd`, `_resolve_registry_url_cmd`) still live in
-// `cli_commands.sfn` and are imported in place; relocating them is Phase 4
-// (out of scope here).
+// `_is_safe_capsule_version_cmd`, `_resolve_registry_url_cmd`) now live in
+// the shared `cli/commands/cmd_shared.sfn` module (relocated from the
+// deleted `cli_commands.sfn` in #1795, SFEP-0027 §3.2) and are imported
+// from there.
 import {
     Command,
     Matches,
@@ -44,11 +45,6 @@ import {
     with_flag
 } from "sfn/cli";
 
-import {
-    _is_safe_capsule_segment_cmd,
-    _is_safe_capsule_version_cmd,
-    _resolve_registry_url_cmd
-} from "../../cli_commands";
 import {
     _curl_download_cmd,
     _display_capsule_name_cmd,
@@ -68,6 +64,11 @@ import {
     toml_merge_capabilities_required
 } from "../../toml_parser";
 import { CliContext } from "../context";
+import {
+    _is_safe_capsule_segment_cmd,
+    _is_safe_capsule_version_cmd,
+    _resolve_registry_url_cmd
+} from "./cmd_shared";
 
 // The `sfn/cli` definition for `add`, registered on the v2 root via
 // `with_subcommand`. Two boolean flags and one required `<capsule>`
