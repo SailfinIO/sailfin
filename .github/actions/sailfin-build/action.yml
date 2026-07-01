@@ -32,6 +32,10 @@ inputs:
     description: "Parallel test children for the full-suite path (TEST_JOBS, forwarded to `make test` — see Makefile). Empty = serial (TEST_JOBS=1). Only consulted when `shard` is empty: the shard path parallelizes across CI legs instead. Pick N for the runner's RAM budget — each child carries its own footprint under the 8GB per-process cap (e.g. 4 on 4-vCPU/16GB ubuntu, 2 on 3-vCPU/7GB macos-15)."
     required: false
     default: ""
+  shard_test_jobs:
+    description: "Per-file parallelism WITHIN a shard leg (SAILFIN_TEST_JOBS, forwarded to `scripts/test_shards.sh run`). Only consulted when `shard` is set. Empty/1 = serial (byte-identical to the historical shard run). Benchmarked sweet spots: 3 on 4-vCPU/16GB ubuntu, 2 on 3-vCPU/7GB macos-arm64 (no RLIMIT_AS backstop there). Peak RSS stays a fraction of the runner budget because test fixtures emit ~30x lighter than a heavy compiler module."
+    required: false
+    default: ""
   package:
     description: "Build + upload dist/ packages ('true'/'false'). Set 'false' on non-primary shard legs so packaging runs once per OS."
     required: false
@@ -259,6 +263,13 @@ runs:
         # Empty shard = full suite (release workflows + back-compat).
         # A shard name runs only that disjoint slice; the union across
         # legs equals `make test` (asserted by the shard-cover lint).
+        # Per-file parallelism within a shard leg (benchmarked: ~2x e2e /
+        # ~6x unit throughput, peak RSS a fraction of the runner budget).
+        # Forwarded via SAILFIN_TEST_JOBS, which scripts/test_shards.sh reads.
+        # Empty/unset keeps the byte-identical serial shard run.
+        if [ -n "${{ inputs.shard_test_jobs }}" ]; then
+          export SAILFIN_TEST_JOBS="${{ inputs.shard_test_jobs }}"
+        fi
         run_tests() {
           if [ -n "${{ inputs.shard }}" ]; then
             make test-shard SHARD="${{ inputs.shard }}"

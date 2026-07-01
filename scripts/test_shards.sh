@@ -104,6 +104,25 @@ run() {
 		exit 1
 	fi
 	echo "[test_shards] shard '$shard': $(printf '%s\n' "$files" | wc -l | tr -d ' ') file(s)"
+	# Per-file parallelism WITHIN a shard (SAILFIN_TEST_JOBS). Default 1 =
+	# serial, byte-identical to the historical run. CI sets this per runner
+	# budget (Linux 3, macOS 2) so each shard leg's per-file children run
+	# through the runner's bounded worker pool (#1236). Benchmarked safe:
+	# tree-wide peak RSS stays ~2-3.5 GiB — a fraction of the 16 GiB (Linux)
+	# / 7 GiB (macOS) runner — because test fixtures emit ~30x lighter than
+	# the 3 GiB heavy compiler-module emit the serial-internal default was
+	# calibrated on (SFEP-0022 §2.4). `runner_jobs_parallel_test.sfn` pins
+	# --jobs N equivalence to --jobs 1. A non-numeric value falls back to
+	# serial (also blocks word-injection into the unquoted expansion below).
+	local jobs="${SAILFIN_TEST_JOBS:-1}"
+	case "$jobs" in
+	'' | *[!0-9]*) jobs=1 ;;
+	esac
+	local jobs_flag=""
+	if [ "$jobs" != "1" ]; then
+		jobs_flag="--jobs $jobs"
+		echo "[test_shards] shard '$shard': $jobs_flag (parallel per-file children)"
+	fi
 	# JSON-report gate (#1235, additive / default-off). When
 	# SAILFIN_AGENT_REPORT=1 (the repo-wide JSON=1 gate, exported by the
 	# Makefile and set directly by the macOS measurement legs in
@@ -120,10 +139,10 @@ run() {
 		mkdir -p build
 		local sidecar="build/agent-test.shard-${shard}.jsonl"
 		set -o pipefail
-		"$native" test $files --json | tee "$sidecar"
+		"$native" test $files $jobs_flag --json | tee "$sidecar"
 		exit "${PIPESTATUS[0]}"
 	fi
-	exec "$native" test $files
+	exec "$native" test $files $jobs_flag
 }
 
 cover() {
