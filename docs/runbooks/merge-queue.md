@@ -1,10 +1,12 @@
 # Merge Queue enablement runbook
 
-`main` is protected by a GitHub merge queue (SFEP-0037 §3.1 — Rust's bors
-"not rocket science" rule): a PR lands only after CI passes on the
-**speculative merge commit against the `main` tip at landing time**,
-serialized through a queue. A merge result that went stale while other
-PRs landed is re-tested, never assumed.
+This runbook covers protecting `main` with a GitHub merge queue
+(SFEP-0037 §3.1 — Rust's bors "not rocket science" rule): once enabled,
+a PR lands only after CI passes on the **speculative merge commit
+against the `main` tip at landing time**, serialized through a queue. A
+merge result that went stale while other PRs landed is re-tested, never
+assumed. Until the owner completes §1, `main` is not yet queue-protected
+— the in-tree trigger alone changes nothing.
 
 The in-tree half is done: `.github/workflows/ci.yml` triggers on
 `merge_group`, and no job in it is conditioned on `github.event_name`,

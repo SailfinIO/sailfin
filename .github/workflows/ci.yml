@@ -40,7 +40,10 @@ on:
   # runs in queue context (the fixed-point rebuild steps stay off — they
   # are gated to `refs/heads/main|rc`, which a queue ref is not, same as
   # PR context today). Enablement steps: docs/runbooks/merge-queue.md.
+  # `checks_requested` is the only activity type Actions supports for
+  # merge_group (and the default); stated explicitly for clarity.
   merge_group:
+    types: [checks_requested]
   workflow_dispatch:
     inputs: {}
 
