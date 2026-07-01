@@ -219,15 +219,17 @@ fn _write_server(port_str: string) -> string ![io] {
 
 // Compile the consumer to a standalone binary up front (synchronous), so
 // the cold `sfn/http` compile happens ONCE and is not inside any readiness
-// window. #1789: pass a per-test `--work-dir` so the `sfn/http`
-// import-context stages into a private tree (`<work>/native/import-context`)
-// rather than the shared, fixed `build/native/import-context/sfn/http`
-// (which `SAILFIN_TEST_SCRATCH` does NOT route) — keeping this build off
-// the path the sibling serve/http e2e tests contend on under `--jobs N`.
-// Returns the binary path, or "" on a build failure.
+// window.
+//
+// #1789: deliberately NO `--work-dir` here. This is the sole
+// `sfn/http`-consumer build in its CI e2e shard, so a private `--work-dir`
+// would buy no import-context isolation and only force a slower COLD build
+// — added CPU/memory pressure under the parallel pool that can starve this
+// test's spawned server and blow the readiness poll. The shared-path
+// contention #1789 addressed came from a sibling test's destructive
+// `rm -rf`, now removed. Returns the binary path, or "" on a build failure.
 fn _build_bin(main_path: string, bin: string) -> string ![io] {
-    let exit = process.run_capture([_sfn_bin(), "build", "--work-dir", _app_root()
-        + "/work", "-o", bin, main_path], _child_env());
+    let exit = process.run_capture([_sfn_bin(), "build", "-o", bin, main_path], _child_env());
     let _out = process.capture_take_stdout();
     let _err = process.capture_take_stderr();
     if exit != 0 { return ""; }
