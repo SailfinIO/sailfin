@@ -87,7 +87,7 @@ fn _write_consumer() -> string ![io] {
     return root + "/src/main.sfn";
 }
 
-test "http serve gate: cold emit lowers imported serve to the capsule fn, not @sfn_serve" ![io] {
+test "http serve gate: emit staging lowers imported serve to the capsule fn, not @sfn_serve" ![io] {
     let main_path = _write_consumer();
 
     // #1789: this test previously force-COLD the emit with
