@@ -294,14 +294,33 @@ fn append_string(values: string[], value: string) -> string[] {
 fn join_with_separator(values: string[], separator: string) -> string {
     if values == null { return ""; }
     if values.length == 0 { return ""; }
-    let mut result: string = values[0];
-    let mut index: int = 1;
+    if values.length == 1 { return values[0]; }
+    // Pair-wise merge: each pass halves the working array. O(N log N) memory
+    // total instead of the O(N^2) accumulation of `result = result + line`
+    // in a loop — under the zero-GC arena every intermediate prefix copy
+    // stays resident, so the naive join dominated per-module peak RSS when
+    // `builder_to_string` materialized the whole `.sfn-asm` text (same fix
+    // as `_join_llvm_lines_linear` in llvm/lowering/lowering_helpers_mangling.sfn).
+    //
+    // Bonus: each `current[i] + separator + current[i+1]` is a
+    // left-associative chain whose second concat sees a fresh-concat LHS,
+    // so the compiler's string_append peephole (b3b6dad) reuses the buffer
+    // in place.
+    let mut current = values;
     loop {
-        if index >= values.length { break; }
-        result = result + separator + values[index];
-        index += 1;
+        if current.length <= 1 { break; }
+        let mut next: string[] = [];
+        let mut i: int = 0;
+        loop {
+            if i >= current.length { break; }
+            if i + 1 < current.length {
+                next.push(current[i] + separator + current[i + 1]);
+            } else { next.push(current[i]); }
+            i += 2;
+        }
+        current = next;
     }
-    return result;
+    return current[0];
 }
 
 fn join_type_annotations(values: TypeAnnotation[]) -> string {
