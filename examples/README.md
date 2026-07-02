@@ -110,8 +110,8 @@ Effect annotations (`![...]`) flag the runtime capabilities you need to declare 
 
 | Example                  | Effects | Notes                                                         |
 | ------------------------ | ------- | ------------------------------------------------------------- |
-| `read-file.sfn`          | `io`    | Mocked filesystem read via `runtime.fs.read`.                 |
-| `write-file.sfn`         | `io`    | Mocked filesystem write illustrating `fs.write`.              |
+| `read-file.sfn`          | `io`    | Filesystem read via `fs.readFile`.                            |
+| `write-file.sfn`         | `io`    | Filesystem write via `fs.writeFile`.                          |
 
 ### `web/`
 
