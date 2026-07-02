@@ -4,9 +4,9 @@ title: "TLS termination + upstream TLS for the native runtime (OpenSSL)"
 status: Accepted
 type: runtime
 created: 2026-06-29
-updated: 2026-06-29
+updated: 2026-07-02
 author: "agent:compiler-architect; human review"
-tracking: "#1540"
+tracking: "#1540, #1820, #1821, #1822"
 supersedes:
 superseded-by:
 graduates-to:
