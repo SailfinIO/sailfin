@@ -44,7 +44,14 @@ import {
 import { char_code, substring } from "./string_utils";
 
 fn parse_native_artifact_impl(text: string, include_instructions: boolean, include_top_level_bindings: boolean) -> ParseNativeResult {
-    let lines = split_lines(text);
+    return parse_native_artifact_impl_from_lines(split_lines(text), include_instructions, include_top_level_bindings);
+}
+
+// From-lines core of `parse_native_artifact_impl`. Lets the in-process
+// emit→lower handoff pass the emitter's line array straight in, instead of
+// joining to one string that this parser would immediately re-split
+// (#1817). The text entry point above is the thin `split_lines` shim.
+fn parse_native_artifact_impl_from_lines(lines: string[], include_instructions: boolean, include_top_level_bindings: boolean) -> ParseNativeResult {
     let mut diagnostics: string[] = [];
     let mut functions: NativeFunction[] = [];
     let mut imports: NativeImport[] = [];
@@ -458,4 +465,4 @@ fn binding_from_instruction(instruction: NativeInstruction) -> NativeBinding {
     };
 }
 
-export { parse_native_artifact_impl };
+export { parse_native_artifact_impl, parse_native_artifact_impl_from_lines };

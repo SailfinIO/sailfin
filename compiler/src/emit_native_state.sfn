@@ -88,9 +88,33 @@ fn builder_pop_indent(builder: TextBuilder) -> TextBuilder {
 
 fn builder_to_string(builder: TextBuilder) -> string {
     if builder.lines == null { return ""; }
-    let content = join_with_separator(builder.lines, "\n");
+    return lines_to_native_text(builder.lines);
+}
+
+// Join a native-text line array into a single `.sfn-asm` string with the
+// same trailing-newline contract as `builder_to_string`. Retained for
+// callers that genuinely need one string (the lowering recovery re-parse
+// and the `NativeArtifact.contents` ABI); the emit hot path streams the
+// line array to `fs.writeLines` / a from-lines parse instead of joining
+// (#1817).
+fn lines_to_native_text(lines: string[]) -> string {
+    if lines == null { return ""; }
+    let content = join_with_separator(lines, "\n");
     if content.length == 0 { return ""; }
     return content + "\n";
+}
+
+// True iff `lines_to_native_text(lines)` would be non-empty, without
+// materializing the joined string. Equivalent to
+// `join_with_separator(lines, "\n").length > 0`: a separator makes the
+// text non-empty as soon as there is more than one line, otherwise the
+// single line must itself be non-empty. Lets the streaming write/emit
+// paths reproduce the string path's empty-output guard byte-for-byte.
+fn native_lines_have_text(lines: string[]) -> boolean {
+    if lines == null { return false; }
+    if lines.length == 0 { return false; }
+    if lines.length > 1 { return true; }
+    return lines[0].length > 0;
 }
 
 // ── State functions ──────────────────────────────────────────────────

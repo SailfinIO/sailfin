@@ -99,6 +99,8 @@ import {
 } from "../utils";
 import { emit_llvm_function } from "./emission";
 import {
+    compile_native_lines_to_llvm_file,
+    compile_native_lines_to_llvm_file_with_context,
     compile_native_text_to_llvm_file,
     compile_native_text_to_llvm_file_with_context,
     has_fatal_lowering_diagnostic,
@@ -354,6 +356,17 @@ fn write_llvm_ir_from_native_text(native_text: string, module_name: string, out_
 // (`write_llvm_ir_for_tests_from_text_with_context`).
 fn write_llvm_ir_from_native_text_with_context(native_text: string, module_name: string, out_path: string, imported_native_texts: string[]) -> boolean ![io] {
     return compile_native_text_to_llvm_file_with_context(native_text, module_name, out_path, imported_native_texts);
+}
+
+// Lines-array counterparts (#1817): the per-module build driver passes the
+// emitter's line array straight through instead of joining to one string
+// that lowering would immediately re-split.
+fn write_llvm_ir_from_native_lines(native_lines: string[], module_name: string, out_path: string) -> boolean ![io] {
+    return compile_native_lines_to_llvm_file(native_lines, module_name, out_path);
+}
+
+fn write_llvm_ir_from_native_lines_with_context(native_lines: string[], module_name: string, out_path: string, imported_native_texts: string[]) -> boolean ![io] {
+    return compile_native_lines_to_llvm_file_with_context(native_lines, module_name, out_path, imported_native_texts);
 }
 
 fn lower_to_llvm_with_manifests(native_module: NativeModule, imported_manifests: LayoutManifest[]) -> LoweredLLVMResult ![io] {
