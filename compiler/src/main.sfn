@@ -18,6 +18,7 @@ import {
     report_reexport_violations
 } from "./emit_native";
 import { emit_program } from "./emitter_sailfin";
+import { ice_enter_stage, ice_set_source } from "./ice";
 import {
     lower_to_llvm_ir,
     lower_to_llvm_ir_from_text,
@@ -274,10 +275,13 @@ fn print_llvm_with_module(source: string, module_name: string) -> boolean ![io] 
 }
 
 fn compile_to_llvm_with_module(source: string, module_name: string) -> string ![io] {
+    ice_set_source(module_name);
+    ice_enter_stage("parse");
     let program: Program = parse_program(source);
     let prelude_globals = load_prelude_global_names(runtime_helper_call_names());
     let skip_typecheck = _env_flag("SAILFIN_SKIP_TYPECHECK")
         || _legacy_flag_file("build/sailfin/.skip_typecheck");
+    ice_enter_stage("typecheck");
     if !skip_typecheck {
         if typecheck_has_errors_with_prelude(program, prelude_globals) {
             let diagnostics = typecheck_diagnostics_with_prelude(program, prelude_globals);
@@ -288,12 +292,15 @@ fn compile_to_llvm_with_module(source: string, module_name: string) -> string ![
         print.err("emit-llvm: skipping typecheck (SAILFIN_SKIP_TYPECHECK set, or legacy build/sailfin/.skip_typecheck file present)");
     }
     if _reject_reexport_violations(program) { return ""; }
+    ice_enter_stage("effects");
     if validate_and_render_effects(program, source, module_name, empty_import_symbols()) > 0 {
         return "";
     }
     // E4 ownership pass (#1213): dormant Phase R0 gate.
+    ice_enter_stage("ownership");
     if run_ownership_checker(program) > 0 { return ""; }
     let trace_emit = _env_flag("SAILFIN_TRACE_EMIT") || _legacy_flag_file("build/sailfin/.trace_emit");
+    ice_enter_stage("emit_native");
     let native_text = emit_native_text_with_module_name(program, module_name);
     if trace_emit {
         print.err("emit-llvm: native text bytes=" + number_to_string(native_text.length));
@@ -302,6 +309,7 @@ fn compile_to_llvm_with_module(source: string, module_name: string) -> string ![
             print.err("emit-llvm: wrote build/sailfin/debug-emit-native.sfn-asm");
         }
     }
+    ice_enter_stage("lower_llvm");
     let mut ir: string = "";
     if native_text.length > 0 {
         ir = lower_to_llvm_ir_from_text(native_text, module_name);
@@ -324,12 +332,15 @@ fn compile_to_llvm_with_module(source: string, module_name: string) -> string ![
 }
 
 fn compile_to_llvm_with_module_timed(source: string, module_name: string) -> string ![io, clock] {
+    ice_set_source(module_name);
+    ice_enter_stage("parse");
     let t0 = monotonic_millis();
     let program: Program = parse_program(source);
     let prelude_globals = load_prelude_global_names(runtime_helper_call_names());
     let t_parse = _ms_since(t0);
 
     let t1 = monotonic_millis();
+    ice_enter_stage("typecheck");
     let skip_typecheck = _env_flag("SAILFIN_SKIP_TYPECHECK")
         || _legacy_flag_file("build/sailfin/.skip_typecheck");
     let mut t_typecheck: int = 0;
@@ -351,12 +362,14 @@ fn compile_to_llvm_with_module_timed(source: string, module_name: string) -> str
         print.err(_timing_line(module_name, "typecheck", t_typecheck));
         return "";
     }
+    ice_enter_stage("effects");
     if validate_and_render_effects(program, source, module_name, empty_import_symbols()) > 0 {
         print.err(_timing_line(module_name, "parse", t_parse));
         print.err(_timing_line(module_name, "typecheck", t_typecheck));
         return "";
     }
     // E4 ownership pass (#1213): dormant Phase R0 gate.
+    ice_enter_stage("ownership");
     if run_ownership_checker(program) > 0 {
         print.err(_timing_line(module_name, "parse", t_parse));
         print.err(_timing_line(module_name, "typecheck", t_typecheck));
@@ -364,6 +377,7 @@ fn compile_to_llvm_with_module_timed(source: string, module_name: string) -> str
     }
 
     let t2 = monotonic_millis();
+    ice_enter_stage("emit_native");
     let trace_emit = _env_flag("SAILFIN_TRACE_EMIT") || _legacy_flag_file("build/sailfin/.trace_emit");
     let native_text = emit_native_text_with_module_name(program, module_name);
     if trace_emit {
@@ -376,6 +390,7 @@ fn compile_to_llvm_with_module_timed(source: string, module_name: string) -> str
     let t_emit_native = _ms_since(t2);
 
     let t3 = monotonic_millis();
+    ice_enter_stage("lower_llvm");
     let mut ir = "";
     if native_text.length > 0 {
         ir = lower_to_llvm_ir_from_text(native_text, module_name);

@@ -37,6 +37,7 @@ import {
 } from "sfn/cli";
 
 import { sailfin_cli_main_legacy } from "../cli_main";
+import { ice_set_binary_dir } from "../ice";
 import { number_to_string } from "../num_format";
 import { command_def as add_command_def, run as add_run } from "./commands/add";
 import { command_def as build_command_def, run as build_run } from "./commands/build";
@@ -78,6 +79,14 @@ fn sailfin_cli_main_v2(argv: string[]) -> int ![io, clock] {
     // (Issue 2.2) so `binary_dir` is available for version resolution
     // and the user-visible args can be sliced off the front.
     let ctx: CliContext = parse_driver_prefix(argv);
+    // Stash `binary_dir` for the ICE banner (SFEP-0037 §3.2, #1807): an
+    // uncaught pipeline `throw` — which the `@main` wrapper prints as the ICE
+    // banner — resolves the version from this lazily, so the banner carries
+    // the `.build-stamp` dev hash even though the throw site cannot reach
+    // `binary_dir`. No panic boundary is installed here on purpose: a nested
+    // source-level `try/catch` frame corrupts the exception chain under the
+    // arena allocator (see `ice.sfn` header).
+    ice_set_binary_dir(ctx.binary_dir);
     let start_index: int = driver_prefix_length(argv);
 
     let mut args: string[] = [];

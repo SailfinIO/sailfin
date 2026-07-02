@@ -1,0 +1,99 @@
+// compiler/src/ice.sfn
+//
+// Internal-compiler-error (ICE) support (SFEP-0037 §3.2, #1807). Prior art:
+// rustc's ICE contract — every compiler panic on a non-user-error path is a
+// reportable bug, and the crash output carries enough structure that filing
+// and deduping are mechanical.
+//
+// The top-level panic boundary is the synthesized `@main` wrapper
+// (`llvm/lowering/emission.sfn`), which already `setjmp`s once per process
+// and prints an uncaught `throw`'s message to stderr before exiting non-zero.
+// This module makes that message a *uniform banner* rather than raw text: a
+// panic throws `format_ice_banner(...)`, so the existing wrapper prints the
+// banner with no extra machinery. A deliberate design choice: adding a second
+// source-level `try/catch` frame here corrupts the exception chain under the
+// arena allocator (`SAILFIN_USE_ARENA=1`) — the nested frame is reclaimed at
+// arena reset and the wrapper's own `pop` then walks a stale `prev`, faulting
+// in `sfn_exception_pop_frame`. Formatting at throw time keeps the process in
+// the known-good single-frame regime.
+//
+// The banner needs context the throw site lacks: the compiler's `binary_dir`
+// (only known at the CLI entry — it resolves the version, incl. the
+// `.build-stamp` dev hash) and the active pipeline stage / source (only known
+// deep in the passes). All are stashed in process-wide markers, then read by
+// the formatter when a panic fires. `binary_dir` is stashed (not the resolved
+// version) so the version's filesystem read is paid lazily, only on an actual
+// panic, not on every CLI invocation.
+import { resolve_compiler_version } from "./version";
+
+// New-issue URL prefilled with the ICE template. Kept grep-stable: /triage
+// dedupes ICE issues by banner content, so the banner's shape is contract.
+let ICE_ISSUE_URL: string = "https://github.com/SailfinIO/sailfin/issues/new?template=ice.md";
+
+// Process-wide banner context. Same module-mutable-state pattern as
+// `test_runner_state.sfn` / `llvm/lowering_debug_state.sfn`; the constant
+// initializers keep them out of the runtime-evaluated-global class (#1386).
+//
+// Stage/source semantics are forward-only: stages advance them, nothing
+// resets them. A `throw` that reaches the banner *after* a compile function
+// has returned (e.g. driver/link orchestration between modules) would render
+// the last stage/source seen, not the true panic site. Harmless today — those
+// paths return exit codes rather than `throw` — but the banner's stage/source
+// is best-effort context, not a guaranteed panic location.
+let mut _ice_stage: string = "";
+let mut _ice_source: string = "";
+let mut _ice_binary_dir: string = "";
+
+// Stash the compiler's `binary_dir` at the CLI entry, where it is known. The
+// version is resolved from it lazily at throw time (so the banner carries the
+// `.build-stamp` dev hash) — paying the filesystem read only on an actual
+// panic, not on every invocation.
+fn ice_set_binary_dir(binary_dir: string) { _ice_binary_dir = binary_dir; }
+
+// Record the current pipeline stage and, when the debug hook is armed, force
+// a panic in it. Called at the entry of each stage in the compile driver so a
+// panic anywhere downstream reports the stage that raised it.
+fn ice_enter_stage(stage: string) ![io] {
+    _ice_stage = stage;
+    _ice_check_force_panic(stage);
+}
+
+// Record the source (module) currently being compiled so the banner can name
+// it. Set once per compile entry; pure (no env read).
+fn ice_set_source(source: string) { _ice_source = source; }
+
+// Debug-only forced panic (SFEP-0037 §8 test hook). When
+// `SAILFIN_DEBUG_FORCE_PANIC` names the current stage (or "all" / "1"), throw
+// the uniform banner so the ICE path is exercised deterministically without
+// depending on a real compiler bug. The `@main` wrapper prints the thrown
+// message (the banner) to stderr and exits non-zero. A no-op unless the env
+// var is set, so ordinary compiles pay only one env read per stage.
+fn _ice_check_force_panic(stage: string) ![io] {
+    let want = env.get("SAILFIN_DEBUG_FORCE_PANIC");
+    if want.length == 0 { return; }
+    if strings_equal(want, stage) || strings_equal(want, "all") || strings_equal(want, "1") {
+        let reason = "forced panic (SAILFIN_DEBUG_FORCE_PANIC) in stage '"
+            + stage
+            + "'";
+        let version = resolve_compiler_version(_ice_binary_dir);
+        throw format_ice_banner(version, _ice_stage, _ice_source, reason);
+    }
+}
+
+// Format the uniform ICE banner. Grep-stable lines — `internal compiler
+// error`, `version:`, `stage:`, `file a report:` — are contract for /triage's
+// ICE dedupe. `source:` is emitted only when a source was recorded; an unset
+// stage renders as `<unknown>` rather than blank.
+fn format_ice_banner(version: string, stage: string, source: string, message: string) -> string {
+    let mut banner: string = "error: internal compiler error (ICE): " + message
+        + "\n";
+    banner = banner
+        + "note: the compiler unexpectedly panicked — this is a bug\n";
+    banner = banner + "note: version: " + version + "\n";
+    let mut stage_line: string = stage;
+    if stage_line.length == 0 { stage_line = "<unknown>"; }
+    banner = banner + "note: stage: " + stage_line + "\n";
+    if source.length > 0 { banner = banner + "note: source: " + source + "\n"; }
+    banner = banner + "note: file a report: " + ICE_ISSUE_URL + "\n";
+    return banner;
+}
