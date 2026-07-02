@@ -160,16 +160,20 @@ runs:
 
     # OpenSSL link path (macOS only). The native runtime now links
     # `-lssl -lcrypto` (TLS, SFEP-0036 #1782), so every Sailfin binary —
-    # incl. the compiler — links OpenSSL. On Linux `libssl-dev` is on the
-    # default search path; on macOS Homebrew's `openssl@3` is keg-only
-    # (not symlinked into a default `-l` search dir), so clang reports
-    # `ld: library 'ssl' not found`. Export the keg's lib dir via
-    # `LIBRARY_PATH` (clang honours it for `-l` resolution) and
-    # `DYLD_FALLBACK_LIBRARY_PATH` (so the built binary loads the dylib at
-    # run time) into $GITHUB_ENV so the build + test steps inherit it.
+    # incl. the compiler AND each per-test binary the suite links — pulls
+    # OpenSSL. On Linux `libssl-dev` is on the default search path; on
+    # macOS Homebrew's `openssl@3` is keg-only (not symlinked into a
+    # default `-l` search dir), so clang reports `ld: library 'ssl' not
+    # found`. Export the keg's lib dir via `LIBRARY_PATH` (clang honours it
+    # for `-l` resolution) and `DYLD_FALLBACK_LIBRARY_PATH` (so the linked
+    # binary loads the dylib at run time) into $GITHUB_ENV so every later
+    # step inherits it. Runs on ALL macOS modes — NOT gated on
+    # `mode != 'skip-build'`: the test-shard jobs use `skip-build` (they
+    # download the prebuilt compiler) yet still compile + link per-test
+    # binaries, which need `-lssl` resolved just as much as the build job.
     # macOS-gated: Linux/Windows legs are byte-identical.
     - name: Provision OpenSSL link path (macOS)
-      if: ${{ inputs.mode != 'skip-build' && inputs.target == 'macos-arm64' }}
+      if: ${{ inputs.target == 'macos-arm64' }}
       shell: bash {0}
       run: |
         set -euo pipefail
