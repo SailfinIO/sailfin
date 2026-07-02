@@ -1,0 +1,30 @@
+// Fixture for interface_dispatch_test.sfn (#1835). Exercises dynamic
+// dispatch through interface-typed locals: a method call on a
+// `let x: Iface = Concrete { ... }` binding must box the concrete struct
+// into a trait object (data pointer + vtable) and dispatch through the
+// vtable, rather than fuse `<Iface><method>` into a dot-less callee that
+// no lookup resolves. Two structs implement the same interface so a
+// correct vtable dispatch must select a different method body per
+// concrete type.
+interface Greeter {
+    fn greet(self) -> string;
+}
+
+struct English {
+    name: string;
+
+    fn greet(self) -> string { return "Hello, {{self.name}}!"; }
+}
+
+struct Spanish {
+    name: string;
+
+    fn greet(self) -> string { return "Hola, {{self.name}}!"; }
+}
+
+fn main() ![io] {
+    let a: Greeter = English { name: "Alice" };
+    let b: Greeter = Spanish { name: "Bob" };
+    print(a.greet());
+    print(b.greet());
+}

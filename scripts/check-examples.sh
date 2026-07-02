@@ -50,12 +50,9 @@ SKIP_RUN=(
 # Runnable examples that fail today on an open compiler bug (epic #549).
 # Each entry cites its tracking sub-issue; remove it when that issue lands.
 KNOWN_FAILING=(
-    "examples/basics/interfaces.sfn"                    # #1835 interface dynamic dispatch
-    "examples/basics/struct-composition.sfn"           # #1835 interface dynamic dispatch
-    "examples/advanced/interface-polymorphism.sfn"     # #1835 interface dynamic dispatch
-    "examples/advanced/generic-structures.sfn"         # #1835 + generics (#766)
-    "examples/concurrency/producer-consumer.sfn"       # #1835 explicit Channel<int> method dispatch
-    "examples/concurrency/dynamic-task-scheduling.sfn" # #1835 fn-typed channel + await (#829)
+    "examples/advanced/generic-structures.sfn"         # #766 generic-struct method monomorphization
+    "examples/concurrency/producer-consumer.sfn"       # #1835 lowering fatal fixed; run still hangs on drain (#549 await follow-up)
+    "examples/concurrency/dynamic-task-scheduling.sfn" # fn-typed channel element + await (#829)
     "examples/functional/map-reduce.sfn"               # #1836 array-HOF map->reduce chain
     "examples/advanced/matrix-multiplication.sfn"      # #1836 range/nested-array map (#766)
     "examples/functional/higher-order-functions.sfn"   # #1837 indirect call through fn-typed param

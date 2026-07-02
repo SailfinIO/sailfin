@@ -833,7 +833,28 @@ fn resolve_call_method_target(trimmed_target: string, arguments: string[], bindi
                                     result_temp = _pre_lowered.temp_index;
                                     if _pre_lowered.operand != null {
                                         method_operand = _pre_lowered.operand;
-                                        result_target = _pre_struct + _pre_field;
+                                        // #1835: an interface-typed base is trait
+                                        // dispatch, not a struct method. Fusing
+                                        // `<Iface><field>` (e.g. `Greetergreet`)
+                                        // yields a dot-less callee that the
+                                        // downstream `parse_member_access` can't
+                                        // split, so the `trait_dispatch__` branch is
+                                        // never reached and lowering fatals with an
+                                        // unresolvable callee. Build the dispatch name
+                                        // here — the base is already lowered and
+                                        // injected as arg0 — matching the downstream
+                                        // interface path. Struct bases keep the fused
+                                        // `<Struct><field>` method name.
+                                        let _pre_iface = find_interface_info_by_name(context, _pre_struct);
+                                        if _pre_iface != null {
+                                            result_target = "trait_dispatch__"
+                                                + _pre_iface.name
+                                                + "__"
+                                                + _pre_field;
+                                        } else {
+                                            result_target = _pre_struct
+                                                + _pre_field;
+                                        }
                                         injected_argument_count = 1;
                                     }
                                 }
