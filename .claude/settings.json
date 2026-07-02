@@ -94,6 +94,9 @@
   "agent": "Sailbot",
   "outputStyle": "Compiler Engineer",
   "includeCoAuthoredBy": false,
+  "attribution": {
+    "sessionUrl": false
+  },
   "hooks": {
     "SessionStart": [
       {

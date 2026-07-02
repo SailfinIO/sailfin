@@ -418,8 +418,6 @@ git commit -m "$(cat <<'EOF'
 <body if needed — link issue with "Closes #N">
 
 Closes #<N>
-
-Co-Authored-By: Claude Opus 4.6 (1M context) <noreply@anthropic.com>
 EOF
 )"
 ```
@@ -451,8 +449,6 @@ e.g. "`old/path.sfn` → `new/path.sfn` (renamed); added sibling `x.sfn` (same I
 
 ## Files Changed
 <short list>
-
-🤖 Generated with [Claude Code](https://claude.com/claude-code)
 EOF
 )"
 ```
