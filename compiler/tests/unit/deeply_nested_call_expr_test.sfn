@@ -1,0 +1,91 @@
+// Regression coverage for deeply-nested call expressions (#1792).
+//
+// Background: during the #1773 / PR #1791 CLI `check` migration, a chain of
+// ~13 nested `with_subcommand(...)` calls — each consuming the previous
+// call's struct result as an argument — compiled cleanly but the emitted
+// binary SEGFAULTED at runtime while evaluating the expression. `check` /
+// `compile` reported success (the build-only-failure class, CLAUDE.md /
+// #1389); only *running* the binary surfaced the crash. PR #1791 shipped an
+// incremental-reassignment workaround (`let mut root = ...; root =
+// with_subcommand(root, ...);`) which codegens cleanly.
+//
+// The specific crash is no longer reproducible on the current tree: building
+// the exact nested `with_subcommand` form (to depth 15) with either the
+// pinned 0.7.0 seed or the historical 0.7.0-alpha.50 seed runs every command
+// correctly, and there are no `compiler/src/llvm` / `emit_native` / `sfn/cli`
+// builder changes between #1791's merge and HEAD. The trigger appears to have
+// depended on work-in-progress source state during #1791 that never landed.
+//
+// This test therefore locks in correct behaviour for the *class* of defect —
+// a value threaded through a deeply-nested single call expression whose
+// arguments are themselves calls returning a struct with an array field
+// (mirroring `Command` / `with_subcommand`) — so a future regression of the
+// deep-nested-call codegen path fails here at build+run time rather than
+// silently miscompiling. It executes the nested expression (it is not a
+// frontend-only `check`) and asserts the threaded result.
+struct Node {
+    value: int,
+    subs: Node[]
+}
+
+// Leaf constructor: mirrors `command(...)` — a fresh struct with an empty
+// array field.
+fn node(v: int) -> Node {
+    let empty: Node[] = [];
+    return Node { value: v, subs: empty };
+}
+
+// Array-copying builder: mirrors `with_subcommand(...)` — copies the
+// accumulator's array field, pushes the new element, and returns a new
+// struct by value. This is the shape that segfaulted at depth ~13.
+fn chain(acc: Node, sub: Node) -> Node {
+    let mut new_subs: Node[] = [];
+    let mut i: int = 0;
+    loop {
+        if i >= acc.subs.length { break; }
+        new_subs.push(acc.subs[i]);
+        i += 1;
+    }
+    new_subs.push(sub);
+    return Node { value: acc.value, subs: new_subs };
+}
+
+fn add1(x: int) -> int { return x + 1; }
+
+fn _sum_subs(root: Node) -> int {
+    let mut total: int = 0;
+    let mut i: int = 0;
+    loop {
+        if i >= root.subs.length { break; }
+        total += root.subs[i].value;
+        i += 1;
+    }
+    return total;
+}
+
+// 16-level nested chain (well past the depth-13 threshold). A single nested
+// expression, not incremental reassignment — this is the codegen path under
+// test. subs = [1..16], so length is 16 and the sub-value sum is 136.
+test "nested_call: 16-level struct chain builds and runs" {
+    let root: Node = chain(chain(chain(chain(chain(chain(chain(chain(chain(chain(chain(chain(chain(chain(chain(chain(node(0), node(1)), node(2)), node(3)), node(4)), node(5)), node(6)), node(7)), node(8)), node(9)), node(10)), node(11)), node(12)), node(13)), node(14)), node(15)), node(16));
+    assert root.value == 0;
+    assert root.subs.length == 16;
+    assert _sum_subs(root) == 136;
+}
+
+// 20-level nested chain where each argument is itself a nested call
+// (`node(add1(add1(i)))`), stressing the case where a call's argument is a
+// call whose argument is a call. Each sub value is i + 2, so subs = [3..22],
+// length 20, sub-value sum 250.
+test "nested_call: 20-level chain with nested call arguments" {
+    let root: Node = chain(chain(chain(chain(chain(chain(chain(chain(chain(chain(chain(chain(chain(chain(chain(chain(chain(chain(chain(chain(node(0), node(add1(add1(1)))), node(add1(add1(2)))), node(add1(add1(3)))), node(add1(add1(4)))), node(add1(add1(5)))), node(add1(add1(6)))), node(add1(add1(7)))), node(add1(add1(8)))), node(add1(add1(9)))), node(add1(add1(10)))), node(add1(add1(11)))), node(add1(add1(12)))), node(add1(add1(13)))), node(add1(add1(14)))), node(add1(add1(15)))), node(add1(add1(16)))), node(add1(add1(17)))), node(add1(add1(18)))), node(add1(add1(19)))), node(add1(add1(20))));
+    assert root.subs.length == 20;
+    assert _sum_subs(root) == 250;
+}
+
+// Pure primitive-return deep nesting: 16 nested `add1` calls, each consuming
+// the previous result. Guards the scalar-threading variant of the same class.
+test "nested_call: 16-level primitive chain threads correctly" {
+    let r: int = add1(add1(add1(add1(add1(add1(add1(add1(add1(add1(add1(add1(add1(add1(add1(add1(0))))))))))))))));
+    assert r == 16;
+}
