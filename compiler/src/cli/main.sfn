@@ -212,7 +212,7 @@ fn sailfin_cli_main_v2(argv: string[]) -> int ![io, clock] {
     // `sfn lock [--work-dir DIR]` — the registered subcommand matched. A
     // clean parse dispatches to `lock.run`, which reconstructs the legacy
     // positional slice and delegates to `handle_lock_command` (the
-    // workspace-lock body stays in `cli_commands.sfn` until Phase C). A
+    // workspace-lock body now lives in `cli/commands/lock.sfn`). A
     // non-ok parse that still descended into `lock` (a `--work-dir` with
     // no value, an unrecognized flag, or `--help`) is a usage error (exit
     // 2), matching the legacy handler's "requires a directory argument" /
@@ -230,8 +230,8 @@ fn sailfin_cli_main_v2(argv: string[]) -> int ![io, clock] {
     // `sfn package [--target T] [--out DIR] [--compiler-bin PATH] [--installer] [-p <capsule-path>]`
     // — the registered subcommand matched. A clean parse dispatches to
     // `package.run`, which reconstructs the legacy positional slice and
-    // delegates to `handle_package_command` (the packaging body stays in
-    // `cli_commands.sfn` until Phase C). A non-ok parse that still descended
+    // delegates to `handle_package_command` (the packaging body now lives
+    // in `cli/commands/package.sfn`). A non-ok parse that still descended
     // into `package` (a value flag with no value, an unrecognized flag, or
     // `--help`) is a usage error (exit 2) — the parser owns argument
     // validation. The literal `2` mirrors the dispatches above (the `sfn/cli`

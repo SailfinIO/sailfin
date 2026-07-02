@@ -1,0 +1,156 @@
+// compiler/src/cli/commands/cmd_shared.sfn
+//
+// Cross-command shared helpers relocated out of the deleted
+// cli_commands.sfn (SFEP-0027 §3.2, issue #1795): capsule-name/version
+// validators, the registry-URL resolution tree, and the path-basename
+// helper. Consumed by add / publish / test / config / package command
+// modules. Kept compiler-local — do NOT push into a stdlib capsule
+// (that is #345's call).
+import {
+    _get_env_cmd,
+    _get_home_cmd,
+    _string_contains_cmd,
+    _toml_trim_cmd
+} from "../../cli_commands_utils";
+import { find_char_local, substring } from "../../string_utils";
+import { toml_get_string } from "../../toml_parser";
+
+// Validate a path segment (scope, name) contains no traversal or illegal chars.
+fn _is_safe_capsule_segment_cmd(value: string) -> boolean {
+    if value.length == 0 { return false; }
+    if strings_equal(value, ".") { return false; }
+    if strings_equal(value, "..") { return false; }
+    if find_char_local(value, "/", 0) >= 0 { return false; }
+    if find_char_local(value, "\\", 0) >= 0 { return false; }
+    return true;
+}
+
+// Validate a version string contains no traversal sequences.
+fn _is_safe_capsule_version_cmd(value: string) -> boolean {
+    if value.length == 0 { return false; }
+    if strings_equal(value, ".") { return false; }
+    if strings_equal(value, "..") { return false; }
+    if find_char_local(value, "/", 0) >= 0 { return false; }
+    if find_char_local(value, "\\", 0) >= 0 { return false; }
+    if _string_contains_cmd(value, "..") { return false; }
+    return true;
+}
+
+// ═══════════════════════════════════════════════════════════════════
+// Registry configuration
+// ═══════════════════════════════════════════════════════════════════
+//
+// Registry URL resolution order (highest priority first):
+//   1. SFN_REGISTRY environment variable (one-shot override for CI)
+//   2. `[registry] url` in ~/.sfn/config.toml (persisted via `sfn config`)
+//   3. Compiled-in default: https://pkg.sfn.dev
+//
+// Per-project overrides (e.g. `[registry]` in capsule.toml) are intentionally
+// out of scope for now — can be added later without breaking this layering.
+fn _default_registry_url_cmd() -> string { return "https://pkg.sfn.dev"; }
+
+fn _strip_trailing_slash_cmd(url: string) -> string {
+    let mut end = url.length;
+    loop {
+        if end == 0 { break; }
+        if substring(url, end - 1, end) != "/" { break; }
+        end -= 1;
+    }
+    if end == url.length { return url; }
+    return substring(url, 0, end);
+}
+
+// Validate a registry URL before persisting or interpolating into shell/TOML.
+// Must be http:// or https://, contain no whitespace/control chars, no quotes,
+// no shell metacharacters that can escape a single-quoted context.
+fn _is_valid_registry_url_cmd(url: string) -> boolean {
+    if url.length == 0 { return false; }
+    let mut has_http = false;
+    if url.length >= 7 {
+        if strings_equal(substring(url, 0, 7), "http://") { has_http = true; }
+    }
+    if url.length >= 8 {
+        if strings_equal(substring(url, 0, 8), "https://") { has_http = true; }
+    }
+    if !has_http { return false; }
+    let mut i: int = 0;
+    loop {
+        if i >= url.length { break; }
+        let ch = url[i];
+        if ch == " " { return false; }
+        if ch == "\t" { return false; }
+        if ch == "\r" { return false; }
+        if ch == "\n" { return false; }
+        if ch == "\"" { return false; }
+        if ch == "'" { return false; }
+        if ch == "`" { return false; }
+        if ch == "$" { return false; }
+        if ch == "\\" { return false; }
+        if ch == ";" { return false; }
+        if ch == "|" { return false; }
+        if ch == "&" { return false; }
+        if ch == "<" { return false; }
+        if ch == ">" { return false; }
+        if ch == "(" { return false; }
+        if ch == ")" { return false; }
+        i += 1;
+    }
+    return true;
+}
+
+fn _config_file_path_cmd() -> string ![io] {
+    let home = _get_home_cmd();
+    if home.length == 0 { return ""; }
+    return home + "/.sfn/config.toml";
+}
+
+fn _config_registry_url_from_file_cmd() -> string ![io] {
+    let path = _config_file_path_cmd();
+    if path.length == 0 { return ""; }
+    if !fs.exists(path) { return ""; }
+    let text = fs.readFile(path);
+    return _toml_trim_cmd(toml_get_string(text, "registry", "url"));
+}
+
+// Returns resolved registry base URL (no trailing slash). Silently falls back
+// to the next source if a source is set but invalid — the config-set path
+// already rejects bad URLs, so this only matters for SFN_REGISTRY from the
+// environment and hand-edited config files.
+fn _resolve_registry_url_cmd() -> string ![io] {
+    let env_url = _strip_trailing_slash_cmd(_toml_trim_cmd(_get_env_cmd("SFN_REGISTRY")));
+    if env_url.length > 0 {
+        if _is_valid_registry_url_cmd(env_url) { return env_url; }
+        print.err("warning: SFN_REGISTRY is not a valid http(s) URL; ignoring");
+    }
+    let file_url = _strip_trailing_slash_cmd(_config_registry_url_from_file_cmd());
+    if file_url.length > 0 {
+        if _is_valid_registry_url_cmd(file_url) { return file_url; }
+        print.err("warning: ~/.sfn/config.toml registry.url is invalid; ignoring");
+    }
+    return _default_registry_url_cmd();
+}
+
+// Last `/`-separated segment of `path`. Returns `""` if the path
+// has no segments or ends with `/`.
+fn _package_basename(path: string) -> string {
+    if path.length == 0 { return ""; }
+    let mut last_slash: int = -1;
+    let mut i: int = 0;
+    loop {
+        if i >= path.length { break; }
+        if substring(path, i, i + 1) == "/" { last_slash = i; }
+        i += 1;
+    }
+    if last_slash < 0 { return path; }
+    if last_slash == path.length - 1 { return ""; }
+    return substring(path, last_slash + 1, path.length);
+}
+
+export {
+    _is_safe_capsule_segment_cmd,
+    _is_safe_capsule_version_cmd,
+    _resolve_registry_url_cmd,
+    _package_basename,
+    _strip_trailing_slash_cmd,
+    _is_valid_registry_url_cmd
+};
