@@ -6,6 +6,13 @@
 // trim_right, number_to_string, strip_optional_suffix) require the runtime
 // prelude which isn't available in standalone test files. Those are exercised
 // indirectly through the emit_native integration test and the full test suite.
+//
+// Exception (#1817): `lines_to_native_text` / `native_lines_have_text` are
+// pure (no substring/char_code, hence no prelude dependency), so they are
+// imported directly — the equivalence tests below gate the *real*
+// implementations, not local mirrors.
+import { lines_to_native_text, native_lines_have_text } from "../../src/emit_native_state";
+
 // ── Local copies of functions under test ─────────────────────────────
 fn _ends_with(value: string, suffix: string) -> boolean {
     if suffix.length == 0 { return true; }
@@ -77,24 +84,6 @@ fn _escape_char(ch: string) -> string {
     if ch == "\r" { return "\\r"; }
     if ch == "\t" { return "\\t"; }
     return ch;
-}
-
-// Local mirrors of `lines_to_native_text` / `native_lines_have_text`
-// (#1817). The streaming write/emit paths use `native_lines_have_text` as a
-// materialization-free stand-in for `lines_to_native_text(lines).length > 0`
-// (the empty-output guard the old string path applied). These pin that
-// equivalence — and the join's trailing-newline contract — so a future edit
-// to either real function that breaks byte-identity is caught here.
-fn _lines_to_native_text(lines: string[]) -> string {
-    let content = _join(lines, "\n");
-    if content.length == 0 { return ""; }
-    return content + "\n";
-}
-
-fn _native_lines_have_text(lines: string[]) -> boolean {
-    if lines.length == 0 { return false; }
-    if lines.length > 1 { return true; }
-    return lines[0].length > 0;
 }
 
 // ── ends_with tests ──────────────────────────────────────────────────
@@ -214,35 +203,35 @@ test "state: is_optional_annotation negative" {
 // ── lines_to_native_text / native_lines_have_text equivalence (#1817) ─
 test "state: native_lines_have_text empty array" {
     let e: string[] = [];
-    assert _native_lines_have_text(e) == false;
-    assert(_lines_to_native_text(e).length > 0) == false;
+    assert native_lines_have_text(e) == false;
+    assert(lines_to_native_text(e).length > 0) == false;
 }
 
 test "state: native_lines_have_text single blank line" {
-    assert _native_lines_have_text([""]) == false;
-    assert(_lines_to_native_text([""]).length > 0) == false;
+    assert native_lines_have_text([""]) == false;
+    assert(lines_to_native_text([""]).length > 0) == false;
 }
 
 test "state: native_lines_have_text two blank lines" {
     // join(["",""], "\n") == "\n" — non-empty, so the text guard is true.
-    assert _native_lines_have_text(["", ""]) == true;
-    assert(_lines_to_native_text(["", ""]).length > 0) == true;
+    assert native_lines_have_text(["", ""]) == true;
+    assert(lines_to_native_text(["", ""]).length > 0) == true;
 }
 
 test "state: native_lines_have_text single non-empty line" {
-    assert _native_lines_have_text(["a"]) == true;
-    assert(_lines_to_native_text(["a"]).length > 0) == true;
+    assert native_lines_have_text(["a"]) == true;
+    assert(lines_to_native_text(["a"]).length > 0) == true;
 }
 
 test "state: native_lines_have_text multiple lines" {
-    assert _native_lines_have_text(["a", "b"]) == true;
-    assert(_lines_to_native_text(["a", "b"]).length > 0) == true;
+    assert native_lines_have_text(["a", "b"]) == true;
+    assert(lines_to_native_text(["a", "b"]).length > 0) == true;
 }
 
 test "state: lines_to_native_text trailing newline contract" {
     // fs.writeLines writes each line + "\n" (incl. trailing), matching
     // builder_to_string's join + "\n" — byte-identical staged output.
-    assert _lines_to_native_text(["a", "b"]) == "a\nb\n";
-    assert _lines_to_native_text(["only"]) == "only\n";
-    assert _lines_to_native_text([""]) == "";
+    assert lines_to_native_text(["a", "b"]) == "a\nb\n";
+    assert lines_to_native_text(["only"]) == "only\n";
+    assert lines_to_native_text([""]) == "";
 }
