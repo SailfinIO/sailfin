@@ -52,6 +52,8 @@ import {
     is_identifier_char,
     make_await_non_future_diagnostic,
     make_channel_send_mismatch_diagnostic,
+    make_conditional_branch_mismatch_diagnostic,
+    make_conditional_non_boolean_condition_diagnostic,
     make_fn_value_position_diagnostic,
     make_main_signature_param_count_diagnostic,
     make_main_signature_param_type_diagnostic,
@@ -1047,6 +1049,13 @@ fn walk_expression(expression: Expression?, bindings: SymbolEntry[], imports: Im
         let mut diagnostics = walk_expression(expression.condition, bindings, imports);
         diagnostics = diagnostics.concat(walk_expression(expression.then_value, bindings, imports));
         diagnostics = diagnostics.concat(walk_expression(expression.else_value, bindings, imports));
+        // #1715: constrain the condition to boolean and unify the two branch
+        // types. Types are literal-inferred (#829 has no live inferencer), so
+        // an un-inferable branch/condition is left unconstrained.
+        let condition_type = _conditional_branch_type(expression.condition);
+        let then_type = _conditional_branch_type(expression.then_value);
+        let else_type = _conditional_branch_type(expression.else_value);
+        diagnostics = diagnostics.concat(check_conditional_types(condition_type, then_type, else_type, expression.span));
         return diagnostics;
     }
     if expression.variant == "Assignment" {
@@ -1218,6 +1227,93 @@ fn check_try_operator(operand_type: string, enclosing_return_type: string?, span
 fn try_operator_result_type(operand_type: string) -> string? {
     if !type_is_result(operand_type) { return null; }
     return result_type_arguments(operand_type)[0];
+}
+
+// === Ternary `Conditional` type rules — issue #1715, epic #1180 ===
+//
+// A ternary `cond ? then : else` (#1690's `Expression.Conditional`) must have a
+// boolean condition and two branches that unify. The checker has no expression-
+// type inferencer (#829), so branch/condition types are inferred only for the
+// literal forms in `_conditional_branch_type` and left "" (unknown) otherwise;
+// an unknown type is never reported, so a valid ternary the checker cannot yet
+// type is passed through rather than rejected. The rules run both live (the
+// `Conditional` arm of `walk_expression`) and directly under
+// `conditional_typecheck_test.sfn`.
+// The literal-inferred type of a ternary branch/condition, as a plain type
+// string. Mirrors the emitter's `infer_expression_type`
+// (`emit_native_format.sfn`) for the literal forms: number -> "int"/"float"
+// (dot detection), string -> "string", boolean -> "boolean", null -> "null".
+// A signed numeric literal parses as `Unary { -, NumberLiteral }`, so it is
+// unwrapped to its numeric kind. Any other form yields "" (not inferable).
+fn _conditional_branch_type(expression: Expression?) -> string {
+    if expression == null { return ""; }
+    if expression.variant == "NumberLiteral" {
+        return _conditional_number_kind(expression.value);
+    }
+    if expression.variant == "StringLiteral" { return "string"; }
+    if expression.variant == "BooleanLiteral" { return "boolean"; }
+    if expression.variant == "NullLiteral" { return "null"; }
+    if expression.variant == "Unary" {
+        // Only a signed numeric literal (`Unary { "-", NumberLiteral }`) carries
+        // a numeric kind; other prefix operators (`!`, `*`, `&`) do not, so
+        // gate on `-` to avoid classifying `!5` / `*42` / `&0` as int/float.
+        if strings_equal(expression.operator, "-") && expression.operand.variant == "NumberLiteral" {
+            return _conditional_number_kind(expression.operand.value);
+        }
+        return "";
+    }
+    return "";
+}
+
+// "float" if the numeric literal text carries a decimal point, else "int"
+// (mirrors `_number_literal_kind` in `emit_native_format.sfn`).
+fn _conditional_number_kind(value: string) -> string {
+    let mut i: int = 0;
+    loop {
+        if i >= value.length { break; }
+        if value[i] == "." { return "float"; }
+        i += 1;
+    }
+    return "int";
+}
+
+// Unify two ternary branch types under exact/null-compatible rules (#1715). A
+// "null" branch unifies with the other branch's type; two known non-null types
+// unify only when equal. Returns "" when either side is unknown or the two are
+// incompatible — the single source of truth for the branch rule, consumed by
+// `check_conditional_types`. Coercion beyond this is deferred (#1715 Out).
+fn conditional_result_type(then_type: string, else_type: string) -> string {
+    if then_type.length == 0 { return ""; }
+    if else_type.length == 0 { return ""; }
+    if strings_equal(then_type, "null") { return else_type; }
+    if strings_equal(else_type, "null") { return then_type; }
+    if strings_equal(then_type, else_type) { return then_type; }
+    return "";
+}
+
+// Type rules for a ternary `Conditional`, driven by the literal-inferred
+// condition/branch type strings. Reports E0305 when the condition is a known
+// non-boolean type, and E0304 when both branches are known but do not unify
+// (via `conditional_result_type`, so the rule has one implementation). Unknown
+// ("") types are left unconstrained.
+fn check_conditional_types(condition_type: string, then_type: string, else_type: string, span: SourceSpan?) -> Diagnostic[] {
+    let mut diagnostics: Diagnostic[] = [];
+
+    if condition_type.length > 0 {
+        if !strings_equal(condition_type, "boolean") {
+            diagnostics.push(make_conditional_non_boolean_condition_diagnostic(condition_type, span));
+        }
+    }
+
+    // Both branches known but no unified type -> an incompatible pair. A "null"
+    // branch unifies (non-empty result), so it never reaches this diagnostic.
+    if then_type.length > 0 && else_type.length > 0 {
+        if conditional_result_type(then_type, else_type).length == 0 {
+            diagnostics.push(make_conditional_branch_mismatch_diagnostic(then_type, else_type, span));
+        }
+    }
+
+    return diagnostics;
 }
 
 // Concurrency type rules — issue #1082, epic #965 (M4, decision B). Like the

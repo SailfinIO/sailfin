@@ -438,6 +438,49 @@ fn make_try_error_type_mismatch_diagnostic(operand_error: string, fn_error: stri
 }
 
 // =============================================================================
+// Ternary `Conditional` type rules (issue #1715, epic #1180)
+// =============================================================================
+// A ternary `cond ? then : else` (#1690's `Expression.Conditional`) requires a
+// boolean condition and two branches that unify to one type. Types are plain
+// strings throughout the checker (no expression-type inferencer — #829), so
+// these operate on the literal-inferred type strings produced by
+// `_conditional_branch_type` (`typecheck.sfn`); a branch or condition whose type
+// cannot be inferred is left unconstrained rather than reported, so no valid
+// program is rejected on a type the checker cannot yet see. Unification is
+// exact/null-compatible only — branch coercion beyond that is deferred (#1715
+// Out). The rule orchestration lives in `typecheck.sfn`
+// (`check_conditional_types`).
+// E0304 — a ternary's two branches have incompatible (non-unifiable) types.
+fn make_conditional_branch_mismatch_diagnostic(then_type: string, else_type: string, span: SourceSpan?) -> Diagnostic {
+    return Diagnostic {
+        code: "E0304",
+        severity: "error",
+        message: "ternary branches have incompatible types: the `then` branch is `"
+            + trim_text(then_type)
+            + "` but the `else` branch is `"
+            + trim_text(else_type)
+            + "`. Both branches of a `?:` must produce the same type.",
+        file_path: "",
+        primary: token_from_name("?", span),
+        suggestion: null
+    };
+}
+
+// E0305 — a ternary's condition is not a boolean.
+fn make_conditional_non_boolean_condition_diagnostic(condition_type: string, span: SourceSpan?) -> Diagnostic {
+    return Diagnostic {
+        code: "E0305",
+        severity: "error",
+        message: "ternary condition must be `boolean`, but has type `"
+            + trim_text(condition_type)
+            + "`. The condition of a `?:` must be a boolean expression.",
+        file_path: "",
+        primary: token_from_name("?", span),
+        suggestion: null
+    };
+}
+
+// =============================================================================
 // Concurrency kind resolution (issue #1082, epic #965, M4 — decision B)
 // =============================================================================
 // Types are monomorphized into SIX future/channel kinds: void, number, int,
