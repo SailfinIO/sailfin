@@ -112,3 +112,15 @@ test "conditional: `true ? 1 : 2` is clean end-to-end" ![io] {
 test "conditional: `true ? 1 : null` is clean end-to-end" ![io] {
     assert _codes_for("fn main() { true ? 1 : null; }", "E0304") == 0;
 }
+
+test "conditional: a signed numeric literal branch unifies as its kind" ![io] {
+    // `-1` is `Unary { "-", NumberLiteral }` -> `int`, so it mismatches a string.
+    assert _codes_for("fn main() { true ? -1 : \"s\"; }", "E0304") == 1;
+}
+
+test "conditional: a non-`-` unary branch is not misclassified" ![io] {
+    // `!5` is `Unary { "!", NumberLiteral }` — not a signed numeric literal, so
+    // it is left un-inferable ("") rather than typed `int`, and the string
+    // branch has nothing to mismatch against. Guards the operator-gate fix.
+    assert _codes_for("fn main() { true ? !5 : \"s\"; }", "E0304") == 0;
+}

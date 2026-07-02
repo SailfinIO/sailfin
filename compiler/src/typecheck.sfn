@@ -1254,7 +1254,10 @@ fn _conditional_branch_type(expression: Expression?) -> string {
     if expression.variant == "BooleanLiteral" { return "boolean"; }
     if expression.variant == "NullLiteral" { return "null"; }
     if expression.variant == "Unary" {
-        if expression.operand.variant == "NumberLiteral" {
+        // Only a signed numeric literal (`Unary { "-", NumberLiteral }`) carries
+        // a numeric kind; other prefix operators (`!`, `*`, `&`) do not, so
+        // gate on `-` to avoid classifying `!5` / `*42` / `&0` as int/float.
+        if strings_equal(expression.operator, "-") && expression.operand.variant == "NumberLiteral" {
             return _conditional_number_kind(expression.operand.value);
         }
         return "";
