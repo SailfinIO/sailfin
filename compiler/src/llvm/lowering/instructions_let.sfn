@@ -29,7 +29,7 @@ import {
     find_struct_info_by_llvm_type,
     find_vtable_for_struct_interface
 } from "../type_context_queries";
-import { ends_with_pointer_suffix, numeric_type_kind } from "../type_mapping";
+import { ends_with_pointer_suffix, numeric_type_kind, strip_pointer_suffix } from "../type_mapping";
 import {
     LLVMOperand,
     LetLoweringResult,
@@ -236,7 +236,20 @@ fn lower_let_instruction(function: NativeFunction, instruction: NativeInstructio
                 + instruction.value);
         }
         let _pre_expr_line_count = current_lines.length;
-        let lowered = lower_expression(instruction.value, current_bindings, current_locals, current_temp, current_lines, functions, context, llvm_type);
+        // #1835: an interface-typed local boxes its concrete initializer into a
+        // trait object below (the `find_vtable_for_struct_interface` path). If
+        // the initializer is lowered with the trait type (`%trait.X`) as its
+        // expected type, the generic coercion fallback reinterpret-loads the
+        // concrete struct's bytes as the `{data, vtable}` fat pointer — the
+        // vtable slot ends up holding a field value, so dispatch jumps through
+        // garbage and segfaults. Lower it with a neutral expected type so the
+        // initializer yields its natural `%Struct*`, then box it with the real
+        // vtable below.
+        let mut init_expected_type: string = llvm_type;
+        if find_interface_info_by_name(context, instruction.type_annotation) != null {
+            init_expected_type = "";
+        }
+        let lowered = lower_expression(instruction.value, current_bindings, current_locals, current_temp, current_lines, functions, context, init_expected_type);
         if debug_lowering {
             print.err("let-lowering: post-lower_expression name=" + instruction.name);
         }
@@ -310,8 +323,12 @@ fn lower_let_instruction(function: NativeFunction, instruction: NativeInstructio
     let interface_info = find_interface_info_by_name(context, instruction.type_annotation);
     if interface_info != null {
         if operand != null {
-            // Target type is an interface; check if operand is a concrete struct
-            let struct_info = find_struct_info_by_llvm_type(context, operand.llvm_type);
+            // Target type is an interface; check if operand is a concrete struct.
+            // #1835: under the 0.5.8+ boxed-struct ABI the operand arrives as a
+            // `%T*` pointer (see the pointer branch below), but structs are keyed
+            // by their bare `%T` llvm_name — strip the pointer suffix so the
+            // lookup resolves and boxing is not silently skipped.
+            let struct_info = find_struct_info_by_llvm_type(context, strip_pointer_suffix(operand.llvm_type));
             if struct_info != null {
                 // Find the vtable for this struct-interface pair
                 let vtable = find_vtable_for_struct_interface(context, struct_info.name, interface_info.name);
@@ -584,7 +601,17 @@ fn lower_let_instruction(function: NativeFunction, instruction: NativeInstructio
     // find them. Annotating the local as `"channel"` lets the method-call
     // resolver route `.send` / `.receive` / `.close` to the `sfn_channel_*`
     // runtime helpers instead of failing closed.
-    if local_type_annotation.length == 0 {
+    //
+    // #1835: key off the *initializer*, not the annotation. An explicit
+    // `let buf: Channel<int> = channel(N)` carries a source annotation
+    // ("Channel<int>"), which skipped the old empty-annotation guard, so the
+    // binding never received the `channel` / `channel:<kind>` sentinel — and
+    // `buf.send(x)` fused into an unresolvable `Channel<int>send` callee. A
+    // `channel(...)` / `channel:...` initializer is itself proof the local is
+    // a channel (they are builtin constructors, so typecheck admits them only
+    // for channel-typed bindings), so normalize whenever the initializer is
+    // one, regardless of the source annotation's spelling.
+    {
         let trimmed_init = trim_text(instruction.value);
         if starts_with(trimmed_init, "channel(") {
             local_type_annotation = "channel";
