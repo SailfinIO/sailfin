@@ -114,7 +114,7 @@ NATIVE_BIN ?= build/native/sailfin$(EXE_EXT)
 # Which compiler binary to use for running Sailfin-native tests.
 # Default: the native compiler alias produced by `make compile`.
 
-.PHONY: help install fetch-seed test test-unit test-integration test-e2e test-capsules compile check check-fast package clean bench bench-runtime test-arena
+.PHONY: help install fetch-seed test test-unit test-integration test-e2e test-capsules compile check check-strict check-fast package clean bench bench-runtime test-arena
 
 .PHONY: ci-prepare-test-artifacts ci-package ci-package-installer
 
@@ -175,6 +175,20 @@ else
 CHECK_TEST_JOBS ?= $(TEST_JOBS)
 endif
 
+# Strict self-host gate (#1830). When SELFHOST_STRICT=1, `make check`
+# passes `--strict` to `sfn selfhost` so a stage2/stage3 fixed-point
+# mismatch is fatal (exit non-zero, no promotion) instead of the default
+# warn-and-promote. CI/nightly turns this on; local `make check` stays
+# warn-only for dev ergonomics. `make check-strict` is the convenience
+# alias. The `--strict` plumbing itself lives in
+# compiler/src/cli_selfhost.sfn (`cfg.strict`).
+SELFHOST_STRICT ?=
+ifeq ($(SELFHOST_STRICT),1)
+SELFHOST_STRICT_FLAG := --strict
+else
+SELFHOST_STRICT_FLAG :=
+endif
+
 help:
 	@echo "Common Sailfin tasks"
 	@echo ""
@@ -182,6 +196,7 @@ help:
 	@echo "  make rebuild        # Force rebuild from seed via 'sfn build -p compiler'"
 	@echo "  make install        # Install the built compiler binary into PREFIX/bin"
 	@echo "  make check          # Compile (if needed) then run the full test suite"
+	@echo "  make check-strict   # Same as check, but a stage2/stage3 fixed-point mismatch is fatal"
 	@echo "  make check-fast     # Run sfn check on compiler/src/ + runtime/ (no codegen, fast PR gate)"
 	@echo "  make test           # Run Sailfin-native unit + integration + e2e tests"
 	@echo "  make test TEST_JOBS=4 # Same, with 4 parallel test children (pick N for your RAM budget)"
@@ -528,6 +543,16 @@ compile-impl:
 check:
 	@$(AGENT_REPORT) --target check -- $(MAKE) check-impl
 
+# Strict variant of `make check` (#1830): a stage2/stage3 fixed-point
+# mismatch is fatal (non-zero exit, no promotion) instead of
+# warn-and-promote. CI/nightly (Linux leg) runs this so a compiler that
+# cannot reproduce itself byte-for-byte fails the gate. A command-line
+# SELFHOST_STRICT=1 propagates through the recursive `check` → `check-impl`
+# makes via MAKEFLAGS, so the `--strict` flag reaches the `sfn selfhost`
+# invocation.
+check-strict:
+	@$(MAKE) check SELFHOST_STRICT=1
+
 check-impl:
 	@$(MAKE) compile NATIVE_OPT="$(SELFHOST1_OPT)"
 	@seed="build/native/sailfin"; \
@@ -547,8 +572,10 @@ check-impl:
 	@# verb is internal — absent from `sfn --help`; `make check` and CI are
 	@# its only callers (Go keeps this in `cmd/dist`, Rust in `x.py`). A
 	@# non-fixed-point result warns and still promotes (parity with the
-	@# former shell, which exited 0 on `.ll` divergence); add `--strict` to
-	@# make a mismatch fatal. The driver hardcodes `-O2` for the link step,
+	@# former shell, which exited 0 on `.ll` divergence) UNLESS
+	@# SELFHOST_STRICT=1 (`make check-strict`), which passes `--strict` so a
+	@# mismatch is fatal and the binary is not promoted (#1830). The driver
+	@# hardcodes `-O2` for the link step,
 	@# so `NATIVE_OPT` overrides for stage2/stage3 are still ignored (no
 	@# regression — the prior shell had the same gap). The suite legs and
 	@# the first-pass `make compile` stay Make-driven (issue `Out:` scope).
@@ -558,7 +585,8 @@ check-impl:
 		--seedcheck-out build/native/sailfin-seedcheck \
 		--stage3-out build/native/sailfin-stage3 \
 		--promote-to $(NATIVE_BIN) \
-		--smoke-timeout 10
+		--smoke-timeout 10 \
+		$(SELFHOST_STRICT_FLAG)
 	@echo "[check] running test suite with seedcheck binary (no fallbacks, jobs=$(CHECK_TEST_JOBS))..."
 	@$(MAKE) test NATIVE_BIN=build/native/sailfin-seedcheck TEST_BIN_CACHE_FLAGS=--no-test-cache TEST_JOBS=$(CHECK_TEST_JOBS)
 
