@@ -27,6 +27,29 @@ fn _dead_strip_link_flag() -> string ![io] {
     return "-Wl,--gc-sections";
 }
 
+// OpenSSL link-search path (Darwin only, #1782 / SFEP-0036). The native
+// runtime links `-lssl -lcrypto` (TLS), so every Sailfin binary — incl.
+// the compiler — pulls OpenSSL at link. On Linux `libssl-dev` sits on
+// clang's default search path; on macOS Homebrew's `openssl@3` is
+// keg-only (not symlinked into a default `-l` dir), so the link fails
+// with `ld: library 'ssl' not found`. The build driver adds the keg's
+// lib dir itself — rather than relying on a caller's `LIBRARY_PATH` — so
+// EVERY `sfn build` on macOS resolves `-lssl`: the compiler self-host,
+// nested test builds that spawn with a curated env, and real user
+// builds alike. Honours `SAILFIN_OPENSSL_PREFIX`, else probes `brew` and
+// the standard keg locations; emits nothing on Linux (default path) or a
+// macOS without a discoverable keg (there the default path / an external
+// `-L` is expected). Darwin-only, so Linux argv stays byte-identical
+// (#1112). Mirrors the `uname -s` probe `_dead_strip_link_flag` uses.
+fn _openssl_link_search_flags() -> string[] ![io] {
+    let os = _shell_read_cmd("uname -s");
+    if !strings_equal(os, "Darwin") { return []; }
+    let probe = "for d in \"${SAILFIN_OPENSSL_PREFIX:-}/lib\" \"$(brew --prefix openssl@3 2>/dev/null)/lib\" /opt/homebrew/opt/openssl@3/lib /usr/local/opt/openssl@3/lib; do [ -d \"$d\" ] && { printf %s \"$d\"; break; }; done";
+    let dir = _shell_read_cmd(probe);
+    if dir.length == 0 { return []; }
+    return ["-L" + dir];
+}
+
 // Force-retain the runtime provider surface as link-GC roots (#1047).
 // `--gc-sections` would otherwise strip every runtime helper the *current*
 // program never statically references — including the compiler's own
@@ -175,6 +198,15 @@ fn _clang_link_multi_with_opt(ll_paths: string[], out_path: string, runtime_root
         if rfi >= retain_flags.length { break; }
         link_flags.push(retain_flags[rfi]);
         rfi += 1;
+    }
+    // Darwin-only OpenSSL keg search path so `-lssl -lcrypto` resolve
+    // (#1782). No-op on Linux — argv stays byte-identical there (#1112).
+    let ssl_search = _openssl_link_search_flags();
+    let mut ssi: int = 0;
+    loop {
+        if ssi >= ssl_search.length { break; }
+        link_flags.push(ssl_search[ssi]);
+        ssi += 1;
     }
     let backend = LlvmTextBackend { };
     let plan = LinkPlan {
