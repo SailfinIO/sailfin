@@ -46,9 +46,17 @@ ll-sources = []
 #   `compiler/tests/e2e/test_runtime_sfn_sources_link_consumer.sh`.
 #
 # Single-line array per the parser limitation noted above.
-sfn-sources = ["sfn/runtime_globals.sfn", "sfn/memory/arena.sfn", "sfn/memory/rc.sfn", "sfn/memory/mem.sfn", "sfn/memory/ownedbuf.sfn", "sfn/string.sfn", "sfn/array.sfn", "sfn/clock.sfn", "sfn/process.sfn", "sfn/io.sfn", "sfn/exception.sfn", "sfn/assert.sfn", "sfn/type_meta.sfn", "sfn/platform/exec.sfn", "sfn/platform/rlimit.sfn", "sfn/adapters/filesystem.sfn", "sfn/adapters/http.sfn", "sfn/adapters/net.sfn", "sfn/concurrency/scheduler.sfn", "sfn/concurrency/nursery.sfn", "sfn/concurrency/future.sfn", "sfn/concurrency/channel.sfn", "sfn/concurrency/parallel.sfn", "sfn/concurrency/serve.sfn"]
+sfn-sources = ["sfn/runtime_globals.sfn", "sfn/memory/arena.sfn", "sfn/memory/rc.sfn", "sfn/memory/mem.sfn", "sfn/memory/ownedbuf.sfn", "sfn/string.sfn", "sfn/array.sfn", "sfn/clock.sfn", "sfn/process.sfn", "sfn/io.sfn", "sfn/exception.sfn", "sfn/assert.sfn", "sfn/type_meta.sfn", "sfn/platform/exec.sfn", "sfn/platform/rlimit.sfn", "sfn/platform/tls.sfn", "sfn/adapters/filesystem.sfn", "sfn/adapters/http.sfn", "sfn/adapters/net.sfn", "sfn/concurrency/scheduler.sfn", "sfn/concurrency/nursery.sfn", "sfn/concurrency/future.sfn", "sfn/concurrency/channel.sfn", "sfn/concurrency/parallel.sfn", "sfn/concurrency/serve.sfn"]
 include-dirs = []
-link-libs = ["-lm", "-lpthread"]
+# `-lssl -lcrypto`: OpenSSL, linked into every Sailfin binary for the
+# native runtime's TLS surface (`sfn/platform/tls.sfn`, SFEP-0036). The
+# runtime capsule is the only `kind` whose `link-libs` reaches the link
+# (SFEP-0036 §3.2), so the TLS body must live here. Build/CI hosts must
+# have `libssl`-dev available. `--gc-sections` (link.sfn) dead-strips the
+# unreferenced `SSL_*` symbols from binaries that never call TLS (e.g. the
+# compiler), but the libraries are still linked, so their presence on the
+# link host is mandatory — same dependency class as `-lm` / `-lpthread`.
+link-libs = ["-lm", "-lpthread", "-lssl", "-lcrypto"]
 
 # The prelude (`runtime/prelude.sfn`) is emitted from source on the same
 # child-compiler path as `sfn-sources` and linked into every compiler

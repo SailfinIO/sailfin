@@ -1,0 +1,223 @@
+// runtime/sfn/platform/tls.sfn
+//
+// TLS extern surface + outbound (client) wrappers for the native
+// runtime (SFEP-0036, gap B1 of epic #1540). This is the first slice:
+// link OpenSSL (`-lssl -lcrypto`, declared in `runtime/capsule.toml`)
+// and expose a minimal, callback-free `SSL_CTX_*`/`SSL_*` surface over
+// an already-connected socket `fd`, wrapped by a small set of Sailfin
+// helpers the HTTP client (`../adapters/http.sfn`) uses for its
+// `https://` path. Inbound TLS termination in `serve` is a follow-up
+// (#2). Verification is on: the peer chain is verified (SSL_VERIFY_PEER,
+// result polled) AND the hostname is checked (SSL_set1_host, RFC 6125), so
+// an `https://` GET both round-trips and rejects a wrong-host cert. The
+// system CA trust-store discovery / macOS-Windows CA paths + the
+// verify-failure regression e2e remain #3.
+//
+// Callback-free by construction (SFEP-0036 §3.2): the verify callback
+// arg to `SSL_CTX_set_verify` is always `null` and the result is polled
+// imperatively with `SSL_get_verify_result` after the handshake, so no
+// Sailfin fn is ever address-taken for OpenSSL (the #1088 callback gap
+// is avoided entirely). OpenSSL drives blocking `read(2)`/`write(2)` on
+// our already-connected, already-timeout-armed (`SO_RCVTIMEO` /
+// `SO_SNDTIMEO`, #1581) fd via the default socket BIO (`SSL_set_fd`) —
+// no custom `BIO_METHOD` table (which would need C function pointers).
+//
+// Opaque-handle policy: every `SSL_CTX*` / `SSL*` is spelled `* u8`,
+// mirroring the socket-extern pattern in `../adapters/http.sfn` /
+// `../platform/net.sfn` (family-specific structs cast through `* u8` at
+// the boundary — no struct-by-value at the extern edge). Extern fns
+// carry no effect surface (E0804); enforcement rides the enclosing
+// `![net]` Sailfin fns, exactly as the socket externs do.
+//
+// Symbols confirmed exported by `libssl.so.3` (`nm -D`). OpenSSL >= 1.1
+// auto-initializes the library on first `SSL_CTX_new`, so no explicit
+// `OPENSSL_init_ssl` call is needed. `SSL_set_tlsext_host_name` (SNI) is
+// a header macro that resolves to `SSL_ctrl(ssl, 55 /*SET_TLSEXT_
+// HOSTNAME*/, 0 /*host_name*/, name)` at the ABI — declared here as the
+// real `SSL_ctrl` symbol.
+//
+// Decimal constants used below:
+//   SSL_VERIFY_PEER            = 1
+//   SSL_CTRL_SET_TLSEXT_HOSTNAME = 55, TLSEXT_NAMETYPE_host_name = 0
+//   X509_V_OK                  = 0   (SSL_get_verify_result success)
+//   SSL_ERROR_ZERO_RETURN      = 6   (clean close_notify)
+//   SSL_ERROR_SYSCALL          = 5   (peer TCP close w/o close_notify)
+// ── OpenSSL extern surface (libssl / libcrypto) ───────────────────
+extern fn TLS_client_method() -> * u8;
+
+extern fn SSL_CTX_new(method: * u8) -> * u8;
+
+extern fn SSL_CTX_free(ctx: * u8) -> void;
+
+extern fn SSL_CTX_set_verify(ctx: * u8, mode: i32, cb: * u8) -> void;
+
+extern fn SSL_CTX_set_default_verify_paths(ctx: * u8) -> i32;
+
+extern fn SSL_CTX_load_verify_locations(ctx: * u8, cafile: * u8, capath: * u8) -> i32;
+
+extern fn SSL_new(ctx: * u8) -> * u8;
+
+extern fn SSL_free(ssl: * u8) -> void;
+
+extern fn SSL_set_fd(ssl: * u8, fd: i32) -> i32;
+
+// `SSL_ctrl` — the ABI symbol behind the `SSL_set_tlsext_host_name`
+// (SNI) macro. `long SSL_ctrl(SSL *, int cmd, long larg, void *parg)`.
+extern fn SSL_ctrl(ssl: * u8, cmd: i32, larg: i64, parg: * u8) -> i64;
+
+// `SSL_set1_host` — set the expected DNS hostname for OpenSSL's built-in
+// certificate hostname verification (RFC 6125). A real exported symbol
+// (not a macro), callback-free. `int SSL_set1_host(SSL *, const char *)`
+// returns 1 on success. Once set, `SSL_VERIFY_PEER` makes the handshake
+// fail on a hostname mismatch, so no Sailfin fn is address-taken.
+extern fn SSL_set1_host(ssl: * u8, host: * u8) -> i32;
+
+extern fn SSL_connect(ssl: * u8) -> i32;
+
+extern fn SSL_read(ssl: * u8, buf: * u8, num: i32) -> i32;
+
+extern fn SSL_write(ssl: * u8, buf: * u8, num: i32) -> i32;
+
+extern fn SSL_shutdown(ssl: * u8) -> i32;
+
+extern fn SSL_get_error(ssl: * u8, ret: i32) -> i32;
+
+extern fn SSL_get_verify_result(ssl: * u8) -> i64;
+
+// ── libc helpers (optional extra CA bundle) ───────────────────────
+// Declared inline (redeclaring a C symbol across runtime modules is
+// safe — each emits its own LLVM `declare` and the linker resolves both
+// to the single libc entrypoint; see the `http.sfn` symbol note).
+extern fn getenv(name: * u8) -> * u8;
+
+extern fn strlen(s: * u8) -> usize;
+
+// `tls_client_ctx()` — build a client `SSL_CTX` with the system trust
+// store loaded (`SSL_CTX_set_default_verify_paths`, e.g.
+// `/etc/ssl/certs`) plus an optional extra CA bundle from the
+// `SAILFIN_TLS_CAFILE` environment variable (loaded additively —
+// analogous to `curl`'s `CURL_CA_BUNDLE` / Node's `NODE_EXTRA_CA_CERTS`;
+// used by the loopback e2e to trust a generated self-signed cert).
+// Verification is turned ON (`SSL_VERIFY_PEER`, callback arg `null`); the
+// result is polled after the handshake in `tls_connect_fd`, and the
+// hostname is bound there via SSL_set1_host. Returns null on allocation
+// failure. System trust-store discovery hardening is #3.
+fn tls_client_ctx() -> * u8 {
+    let method: * u8 = TLS_client_method();
+    if method as i64 == 0 { return null; }
+    let ctx: * u8 = SSL_CTX_new(method);
+    if ctx as i64 == 0 { return null; }
+    // System default trust store.
+    SSL_CTX_set_default_verify_paths(ctx);
+    // Optional additional CA bundle (custom / test trust).
+    let ca_env: string = "SAILFIN_TLS_CAFILE";
+    let ca: * u8 = getenv(ca_env as * u8);
+    if ca as i64 != 0 {
+        if (strlen(ca) as i64) > 0 {
+            SSL_CTX_load_verify_locations(ctx, ca, null);
+        }
+    }
+    // Verify the peer chain; result polled via SSL_get_verify_result.
+    // The callback arg is null — no Sailfin fn is address-taken.
+    SSL_CTX_set_verify(ctx, 1, null);
+    return ctx;
+}
+
+// `tls_ctx_free(ctx)` — free a client ctx (no-op on null).
+fn tls_ctx_free(ctx: * u8) -> void {
+    if ctx as i64 != 0 { SSL_CTX_free(ctx); }
+}
+
+// `tls_connect_fd(ctx, fd, host)` — wrap an already-connected socket
+// `fd` into a client `SSL*`: attach the fd (blocking BIO), set the SNI
+// host name, drive the blocking handshake, and poll the verification
+// result. Returns the handshaken `SSL*`, or null on any failure (freeing
+// the partial `SSL*` first) so the caller surfaces a typed failure — a
+// failed verify is never a silent downgrade. `host` (a C string) is used
+// for BOTH the SNI extension and the RFC-6125 hostname check
+// (SSL_set1_host); it must be the bare host (no port). An IP-literal host
+// is checked as a DNS name (IP-SAN certs are uncommon) — real hostnames
+// are the supported outbound case.
+fn tls_connect_fd(ctx: * u8, fd: i32, host: * u8) -> * u8 ![net] {
+    if ctx as i64 == 0 { return null; }
+    let ssl: * u8 = SSL_new(ctx);
+    if ssl as i64 == 0 { return null; }
+    // Attach the connected, timeout-armed socket.
+    if SSL_set_fd(ssl, fd) != 1 {
+        SSL_free(ssl);
+        return null;
+    }
+    if host as i64 != 0 {
+        // SNI: SSL_set_tlsext_host_name(ssl, host) -> SSL_ctrl(ssl, 55, 0,
+        // host). Returns 1 on success; a failure (e.g. OOM) means we would
+        // hand-shake against the wrong / a default vhost, so fail hard.
+        if SSL_ctrl(ssl, 55, 0, host) != 1 {
+            SSL_free(ssl);
+            return null;
+        }
+        // Hostname verification: bind the expected DNS name so
+        // SSL_VERIFY_PEER enforces cert<->host matching during the
+        // handshake (RFC 6125). Without this, a valid cert for ANY host
+        // would pass chain verification — an MITM hole. Callback-free.
+        if SSL_set1_host(ssl, host) != 1 {
+            SSL_free(ssl);
+            return null;
+        }
+    }
+    // Blocking handshake (bounded by the socket's SO_*TIMEO). With
+    // SSL_set1_host + SSL_VERIFY_PEER, a chain OR hostname mismatch fails
+    // the handshake here.
+    if SSL_connect(ssl) != 1 {
+        SSL_free(ssl);
+        return null;
+    }
+    // Belt-and-suspenders: poll the verification result (X509_V_OK == 0).
+    // A hostname mismatch surfaces here as X509_V_ERR_HOSTNAME_MISMATCH.
+    if SSL_get_verify_result(ssl) != 0 {
+        SSL_free(ssl);
+        return null;
+    }
+    return ssl;
+}
+
+// `tls_write(ssl, buf, n)` — write up to `n` bytes; returns the count
+// written (> 0), or <= 0 on failure. Mirrors `send`'s contract so the
+// `_send_all` retry loop treats it identically. `n` is bounded by the
+// caller's request size (< 2 GiB), so the i32 cast is safe.
+fn tls_write(ssl: * u8, buf: * u8, n: i64) -> i64 ![net] {
+    if ssl as i64 == 0 { return 0 - 1; }
+    let r: i32 = SSL_write(ssl, buf, n as i32);
+    return r as i64;
+}
+
+// `tls_read(ssl, buf, n)` — read up to `n` bytes; returns the count read
+// (> 0), 0 at end-of-stream, or -1 on a genuine error. Mirrors `recv`'s
+// contract so `_recv_all` treats it identically. On a non-positive
+// `SSL_read`, the error is classified: ZERO_RETURN (clean close_notify)
+// and SYSCALL-with-0 (peer TCP close without close_notify, common for
+// `Connection: close` servers and `openssl s_server`) are both EOF;
+// anything else is a real error.
+fn tls_read(ssl: * u8, buf: * u8, n: i64) -> i64 ![net] {
+    if ssl as i64 == 0 { return 0 - 1; }
+    let r: i32 = SSL_read(ssl, buf, n as i32);
+    if r > 0 { return r as i64; }
+    let err: i32 = SSL_get_error(ssl, r);
+    // ZERO_RETURN (6) is a clean close_notify. SYSCALL (5) is EOF ONLY when
+    // `SSL_read` returned 0 (peer TCP close without close_notify). A SYSCALL
+    // with `r < 0` is EAGAIN / a recv timeout (`SO_RCVTIMEO`, #1581) / reset
+    // — a genuine error that must fail to -1, NOT a truncated body reported
+    // as a clean EOF. This keeps the TLS read contract identical to the raw
+    // `recv` path (which returns -1 on the same timeout).
+    if err == 6 { return 0; }
+    if err == 5 && r == 0 { return 0; }
+    return 0 - 1;
+}
+
+// `tls_shutdown_free(ssl)` — best-effort `SSL_shutdown` (sends
+// close_notify over the fd) then `SSL_free`. No-op on null. Must run
+// before the caller `close`s the underlying fd.
+fn tls_shutdown_free(ssl: * u8) -> void ![net] {
+    if ssl as i64 == 0 { return; }
+    SSL_shutdown(ssl);
+    SSL_free(ssl);
+}

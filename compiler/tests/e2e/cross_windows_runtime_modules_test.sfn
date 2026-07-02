@@ -61,6 +61,13 @@ test "cross-windows RUNTIME_MODS / manifest per-module contracts" ![io] {
     assert contains(manifest, "\"sfn/platform/rlimit.sfn\"");
     assert ! contains(makefile, "runtime/sfn/platform/rlimit.sfn");
 
+    // tls.sfn (#1782): in the manifest, excluded from RUNTIME_MODS — it
+    // pulls the OpenSSL externs, which cannot resolve in a static mingw
+    // link (Windows TLS is #1485 M10). http.sfn forward-declares its
+    // @tls_* symbols, resolved to the windows_stubs.ll no-op stubs.
+    assert contains(manifest, "\"sfn/platform/tls.sfn\"");
+    assert ! contains(makefile, "runtime/sfn/platform/tls.sfn");
+
     // assert.sfn: in the manifest, excluded from RUNTIME_MODS.
     assert contains(manifest, "\"sfn/assert.sfn\"");
     assert ! contains(makefile, "runtime/sfn/assert.sfn");
@@ -89,6 +96,14 @@ test "cross-windows windows_stubs.ll defines the required Windows stubs" ![io] {
     assert contains(stubs, "@realpath");
     assert contains(stubs, "@runtime_assert_fail_fn");
     assert contains(stubs, "@sailfin_assert_fail");
+
+    // TLS client wrappers (#1782): tls.sfn is excluded from RUNTIME_MODS, so
+    // http.o's forward-declared @tls_* symbols resolve to these Windows
+    // no-op stubs (https:// degrades to a clean null; Windows TLS is M10).
+    assert contains(stubs, "define i8* @tls_client_ctx");
+    assert contains(stubs, "define i8* @tls_connect_fd");
+    assert contains(stubs, "define i64 @tls_read");
+    assert contains(stubs, "define i64 @tls_write");
 
     // windows_stubs.ll is a cross-windows-only object: NOT in the manifest
     // (its `ll-sources` is empty — adding windows_stubs would duplicate the
