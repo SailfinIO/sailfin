@@ -1,0 +1,299 @@
+// Outbound HTTPS round-trip e2e for the native runtime's TLS surface
+// (SFEP-0036 gap B1, #1782). Drives the real `https://` client path
+// (`runtime/sfn/adapters/http.sfn` -> `runtime/sfn/platform/tls.sfn`,
+// OpenSSL) against a local `openssl s_server` on loopback and asserts the
+// response body arrives — proving the handshake, peer-chain verification,
+// TLS read/write, and body extraction all work end-to-end.
+//
+// Shape (the no-bash-e2e pattern, `.claude/rules/no-bash-e2e.md`): the
+// `openssl` CLI generates a self-signed cert (CN=localhost) and runs the
+// TLS server (`s_server -www`, an HTTP status page). A generated Sailfin
+// fixture `http.download`s the `https://` URL to a file; the test then
+// reads that file. `http.download` writes the file ONLY on a successful
+// round-trip (a failed connect/handshake/verify returns null before the
+// file is opened), so a non-empty file is proof the TLS GET succeeded —
+// and it sidesteps printing a possibly-null body string from the fixture.
+//
+// Trust: the fixture runs with `SAILFIN_TLS_CAFILE` pointed at the
+// generated self-signed cert (which carries a `DNS:localhost` SAN), so
+// `tls_client_ctx`'s verify-on default (SSL_VERIFY_PEER + polled
+// SSL_get_verify_result) plus the RFC-6125 hostname check (SSL_set1_host,
+// host = "localhost") both accept it. System trust-store discovery
+// hardening + the verify-failure regression are #3.
+//
+// Skips cleanly (`assert true`, mirroring the tool-absent SKIP precedent)
+// when `openssl` is missing (no TLS peer) or no `timeout`/`gtimeout` is
+// available to reap the blocking `s_server` (no process-kill primitive).
+// CI runners (Linux + coreutils + libssl) have both.
+//
+// Matchers note (#842): `sfn/test`'s `expect_*` matchers are `![pure]` and
+// cannot be called from an `![io]` test; assert on captured text with
+// `sfn/strings::contains` instead.
+import { contains } from "sfn/strings";
+
+// ── file-local raw loopback readiness probe ──────────────────────
+// Prefixed `_tlp_` so these never collide with the external-linkage
+// runtime helpers of the same shape in `http.sfn` (not linked into this
+// test binary, but the prefix keeps that independent of link order). The
+// libc socket externs carry no effect annotation, so the effect checker
+// infers no `net` requirement for these direct callers — they are left
+// un-annotated (the same rationale as `serve_loopback_test.sfn`), while
+// the test body keeps `![io]` for its `process.*` / `fs.*` calls.
+extern fn malloc(size: usize) -> * u8;
+
+extern fn free(ptr: * u8) -> void;
+
+extern fn memset(dst: * u8, byte: i32, n: usize) -> * u8;
+
+extern fn socket(domain: i32, ty: i32, protocol: i32) -> i32;
+
+extern fn connect(sockfd: i32, addr: * u8, addrlen: i32) -> i32;
+
+extern fn close(fd: i32) -> i32;
+
+fn _tlp_ptr_off(p: * u8, off: i64) -> * u8 {
+    let addr: i64 = (p as i64) + off;
+    return addr as * u8;
+}
+
+// The listening port — fixed, high, and distinct from the other native
+// loopback tests (serve_loopback uses 18790) so the pool's `--jobs N` does
+// not collide.
+fn _tls_port() -> i64 { return 18795; }
+
+fn _tls_port_str() -> string { return "18795"; }
+
+// Connect a stream socket to `127.0.0.1:port`; returns the fd or -1. Tries
+// both `sockaddr_in` byte layouts (Linux u16 sin_family at 0; macOS/BSD u8
+// sin_len at 0 + u8 sin_family at 1), first success wins — the inlined
+// `http.sfn::_connect_tcp` idiom. Used only to detect that `s_server` is
+// accepting before the fixture runs.
+fn _tlp_connect(port: i64) -> i32 {
+    let mut attempt: i64 = 0;
+    loop {
+        if attempt >= 2 { break; }
+        let addr: * u8 = malloc(16 as usize);
+        if addr as i64 == 0 { return 0 - 1; }
+        memset(addr, 0, 16 as usize);
+        if attempt == 0 {
+            memset(_tlp_ptr_off(addr, 0), 2, 1 as usize);
+        } else {
+            memset(_tlp_ptr_off(addr, 0), 16, 1 as usize);
+            memset(_tlp_ptr_off(addr, 1), 2, 1 as usize);
+        }
+        memset(_tlp_ptr_off(addr, 2), ((port >> 8) & 255) as i32, 1 as usize);
+        memset(_tlp_ptr_off(addr, 3), (port & 255) as i32, 1 as usize);
+        memset(_tlp_ptr_off(addr, 4), 127, 1 as usize);
+        memset(_tlp_ptr_off(addr, 7), 1, 1 as usize);
+        let fd: i32 = socket(2, 1, 0);
+        if fd < 0 {
+            free(addr);
+            return 0 - 1;
+        }
+        let rc: i32 = connect(fd, addr, 16);
+        free(addr);
+        if rc == 0 { return fd; }
+        close(fd);
+        attempt = attempt + 1;
+    }
+    return 0 - 1;
+}
+
+fn _sfn_bin() -> string ![io] {
+    let configured = env.get("SAILFIN_BIN");
+    if configured.length > 0 { return configured; }
+    return "build/native/sailfin";
+}
+
+// Full parent environment for the build + server + client subprocesses
+// (`run_capture`/`spawn_with_env`'s empty env is EMPTY, not "inherit"):
+// the nested build links a binary (clang + ld, now also `-lssl -lcrypto`),
+// and SAILFIN_TEST_SCRATCH (already present) keeps the build cache
+// per-invocation under the parallel pool.
+fn _child_env() -> string[] ![io] { return process.environ(); }
+
+// The client run-env plus `SAILFIN_TLS_CAFILE` pointed at the generated
+// self-signed cert so the client trusts it (verify stays on).
+fn _client_env(cert_path: string) -> string[] ![io] {
+    let mut e = process.environ();
+    e.push("SAILFIN_TLS_CAFILE=" + cert_path);
+    return e;
+}
+
+fn _has_cmd(name: string) -> boolean ![io] {
+    let probe = process.run(["sh", "-c", "command -v " + name
+        + " >/dev/null 2>&1"]);
+    return probe == 0;
+}
+
+// Resolve a wall-clock timeout command to reap the blocking `s_server`;
+// empty if none found.
+fn _timeout_cmd() -> string ![io] {
+    if _has_cmd("timeout") { return "timeout"; }
+    if _has_cmd("gtimeout") { return "gtimeout"; }
+    return "";
+}
+
+fn _scratch_dir() -> string ![io] {
+    let mut dir = env.get("SAILFIN_TEST_SCRATCH");
+    if dir.length == 0 { dir = "/tmp"; }
+    dir = dir + "/sfn-tls-https-e2e";
+    fs.createDirectory(dir, true);
+    return dir;
+}
+
+// Generate a self-signed cert+key (CN=localhost) for the TLS server. The
+// `subjectAltName=DNS:localhost` SAN is required: the client now enforces
+// RFC-6125 hostname verification (SSL_set1_host), and modern OpenSSL checks
+// the SAN (not the CN) when a SAN is present. Returns true on success.
+fn _gen_cert(dir: string) -> boolean ![io] {
+    let exit = process.run_capture(["openssl", "req", "-x509", "-newkey", "rsa:2048", "-keyout", dir
+        + "/key.pem", "-out", dir
+        + "/cert.pem", "-days", "1", "-nodes", "-subj", "/CN=localhost", "-addext", "subjectAltName=DNS:localhost"], _child_env());
+    let _o = process.capture_take_stdout();
+    let _e = process.capture_take_stderr();
+    return exit == 0;
+}
+
+// Spawn `openssl s_server -www` (an HTTP status-page server) in the
+// background, wrapped in a wall-clock timeout so it self-reaps (there is
+// no process-kill primitive; s_server blocks forever). Returns the spawn
+// handle (unused for teardown — the timeout owns the lifetime).
+fn _spawn_server(dir: string, tcmd: string) -> i64 ![io] {
+    let mut argv: string[] = [];
+    argv.push(tcmd);
+    argv.push("60");
+    argv.push("openssl");
+    argv.push("s_server");
+    argv.push("-accept");
+    argv.push(_tls_port_str());
+    argv.push("-cert");
+    argv.push(dir + "/cert.pem");
+    argv.push("-key");
+    argv.push(dir + "/key.pem");
+    argv.push("-www");
+    argv.push("-quiet");
+    return process.spawn_with_env(argv, _child_env());
+}
+
+// Poll a raw TCP connect until `s_server` is accepting (or the budget
+// elapses). ~30s budget (60 attempts x ~0.5s) stays under the 60s server
+// timeout. Returns true once the port accepts a connection.
+fn _await_listening(port: i64) -> boolean ![io] {
+    let mut attempt: i64 = 0;
+    loop {
+        if attempt >= 60 { break; }
+        let fd: i32 = _tlp_connect(port);
+        if fd >= 0 {
+            close(fd);
+            return true;
+        }
+        let _ = process.run(["sleep", "0.5"]);
+        attempt = attempt + 1;
+    }
+    return false;
+}
+
+// Write a fixture capsule whose `main` downloads `https://localhost:PORT/`
+// to `out_path`. `http.download` writes the file only on a successful
+// round-trip, so its presence + content is the round-trip proof.
+fn _write_client(dir: string, out_path: string) -> string ![io] {
+    let root = dir + "/client";
+    fs.createDirectory(root + "/src", true);
+    fs.writeFile(root + "/capsule.toml", "[capsule]\n"
+        + "name = \"sfn/tls-https-e2e-client\"\n"
+        + "version = \"0.0.1\"\n"
+        + "description = \"outbound https e2e client\"\n"
+        + "\n"
+        + "[capabilities]\n"
+        + "required = [\"io\", \"net\"]\n"
+        + "\n"
+        + "[build]\n"
+        + "entry = \"src/main.sfn\"\n"
+        + "kind = \"library\"\n");
+    fs.writeFile(root + "/src/main.sfn", "fn main() -> int ![net, io] {\n"
+        + "    let _ = http.download(\"https://localhost:"
+        + _tls_port_str()
+        + "/\", \""
+        + out_path
+        + "\");\n"
+        + "    return 0;\n"
+        + "}\n");
+    return root + "/src/main.sfn";
+}
+
+fn _build_bin(main_path: string, bin: string) -> string ![io] {
+    let exit = process.run_capture([_sfn_bin(), "build", "-o", bin, main_path], _child_env());
+    let _o = process.capture_take_stdout();
+    let _e = process.capture_take_stderr();
+    if exit != 0 { return ""; }
+    return bin;
+}
+
+test "runtime tls: https GET round-trips against a local openssl s_server" ![io] {
+    // Need the openssl CLI (TLS peer + cert gen) and a timeout to reap the
+    // blocking server. Skip cleanly otherwise — the plain suite still
+    // covers the surface via the unit skeleton test + `make compile`.
+    if !_has_cmd("openssl") {
+        print.info("[tls-https] SKIP: openssl CLI not available");
+        assert true;
+        return;
+    }
+    let tcmd = _timeout_cmd();
+    if tcmd.length == 0 {
+        print.info("[tls-https] SKIP: no timeout/gtimeout to reap the blocking s_server");
+        assert true;
+        return;
+    }
+
+    let dir = _scratch_dir();
+    let cert_ok = _gen_cert(dir);
+    assert cert_ok;
+
+    // Build the client fixture up front (cold build once, links -lssl).
+    let out_path = dir + "/body.out";
+    let _rm = process.run(["rm", "-f", out_path]);
+    let main_path = _write_client(dir, out_path);
+    let client_bin = _build_bin(main_path, dir + "/client-bin");
+    assert client_bin.length > 0;
+
+    // Start the TLS server and wait for it to accept.
+    let _handle = _spawn_server(dir, tcmd);
+    let up = _await_listening(_tls_port());
+    assert up;
+
+    // Run the client (with SAILFIN_TLS_CAFILE trusting the self-signed
+    // cert), retrying briefly to absorb any residual startup latency. A
+    // non-empty output file proves the https round-trip succeeded.
+    let cenv = _client_env(dir + "/cert.pem");
+    let mut body = "";
+    let mut attempt: i64 = 0;
+    loop {
+        if attempt >= 20 { break; }
+        let _rm2 = process.run(["rm", "-f", out_path]);
+        let cexit = process.run_capture([client_bin], cenv);
+        let _co = process.capture_take_stdout();
+        let _ce = process.capture_take_stderr();
+        if cexit == 0 {
+            if fs.exists(out_path) {
+                let content = fs.readFile(out_path);
+                if content.length > 0 {
+                    body = content;
+                    break;
+                }
+            }
+        }
+        let _ = process.run(["sleep", "0.5"]);
+        attempt = attempt + 1;
+    }
+
+    print.info("[tls-https] body length: received");
+    // Round-trip proof: a non-empty body came back over TLS. `s_server
+    // -www` returns an HTML status page listing the negotiated ciphers.
+    assert body.length > 0;
+    assert contains(body, "Ciphers");
+
+    // Best-effort cleanup (the timeout reaps the server process).
+    let _rmd = process.run(["rm", "-rf", dir + "/client"]);
+    let _rmo = process.run(["rm", "-f", out_path]);
+}
