@@ -23,7 +23,7 @@ import {
     StructLayoutFieldParse,
     StructLayoutHeaderParse
 } from "./native_ir";
-import { parse_native_artifact_impl } from "./native_ir_parser";
+import { parse_native_artifact_impl, parse_native_artifact_impl_from_lines } from "./native_ir_parser";
 import {
     parse_enum_layout_header,
     parse_enum_payload_layout,
@@ -78,6 +78,16 @@ fn select_layout_manifest_artifact(artifacts: NativeArtifact[]) -> NativeArtifac
 
 fn parse_native_artifact(text: string) -> ParseNativeResult {
     return parse_native_artifact_impl(text, true, true);
+}
+
+// From-lines variant of `parse_native_artifact`: parse the emitter's line
+// array directly, skipping the join→split round-trip on the in-process
+// emit→lower handoff (#1817). Parse result is identical to
+// `parse_native_artifact(lines_to_native_text(lines))` — the only textual
+// difference (a trailing empty line from the joined string's terminating
+// newline) is a blank line the parser already skips.
+fn parse_native_artifact_from_lines(lines: string[]) -> ParseNativeResult {
+    return parse_native_artifact_impl_from_lines(lines, true, true);
 }
 
 fn parse_native_function_count_from_text(text: string) -> int {
@@ -164,6 +174,7 @@ export {
     select_text_artifact,
     select_layout_manifest_artifact,
     parse_native_artifact,
+    parse_native_artifact_from_lines,
     parse_native_function_count_from_text,
     parse_native_functions_from_text,
     parse_native_bindings_from_text,

@@ -14,6 +14,7 @@
 //   lowering_io.sfn             — string array ops, file I/O, intrinsics
 import { NativeModule } from "../../emit_native";
 import { NativeArtifact } from "../../emit_native_layout";
+import { lines_to_native_text, native_lines_have_text } from "../../emit_native_state";
 import {
     LayoutManifest,
     NativeBinding,
@@ -29,6 +30,7 @@ import {
 } from "../../native_ir";
 import {
     parse_native_artifact,
+    parse_native_artifact_from_lines,
     parse_native_bindings_from_text,
     parse_native_function_count_from_text,
     parse_native_functions_from_text
@@ -389,6 +391,12 @@ fn compile_native_text_to_llvm_file(native_text: string, module_name: string, ou
     return compile_native_text_to_llvm_file_with_context(native_text, module_name, out_path, no_texts);
 }
 
+// Lines-array counterpart of `compile_native_text_to_llvm_file` (#1817).
+fn compile_native_lines_to_llvm_file(native_lines: string[], module_name: string, out_path: string) -> boolean ![io] {
+    let no_texts: string[] = [];
+    return compile_native_lines_to_llvm_file_with_context(native_lines, module_name, out_path, no_texts);
+}
+
 // Context-carrying variant for the `-p` per-module build path (#999).
 // The build driver stages each module's direct-import `.sfn-asm` bodies
 // — including the walk-excluded entry (#984) — and loads them via
@@ -409,7 +417,32 @@ fn compile_native_text_to_llvm_file_with_context(native_text: string, module_nam
         print.err("emit-llvm: empty native text for module " + module_name);
         return false;
     }
-    let parse = parse_native_artifact(native_text);
+    return _lower_parsed_native_to_llvm_file(parse_native_artifact(native_text), native_text, module_name, out_path, imported_native_texts);
+}
+
+// Lines-array counterpart of `compile_native_text_to_llvm_file_with_context`
+// for the in-process emit→lower handoff (#1817). Parses the emitter's line
+// array directly (no join→split), reconstructing the joined text only for
+// the recovery re-parse the lowering still consumes on the happy path
+// (`recover_functions_for_lowering` cross-checks the structured parse and
+// `make_native_module_for_emit` carries it as the fallback). `recovery_text`
+// is byte-identical to the old `native_text`, so output is unchanged; the
+// win is skipping the primary `parse_native_artifact` re-split.
+fn compile_native_lines_to_llvm_file_with_context(native_lines: string[], module_name: string, out_path: string, imported_native_texts: string[]) -> boolean ![io] {
+    if !native_lines_have_text(native_lines) {
+        print.err("emit-llvm: empty native text for module " + module_name);
+        return false;
+    }
+    let recovery_text = lines_to_native_text(native_lines);
+    return _lower_parsed_native_to_llvm_file(parse_native_artifact_from_lines(native_lines), recovery_text, module_name, out_path, imported_native_texts);
+}
+
+// Shared lowering tail for the text and lines entry points above. Given the
+// parsed native artifact and the joined native text (needed by the recovery
+// re-parse / `make_native_module_for_emit` fallback), union the import
+// context, lower to LLVM lines, gate on `[fatal]` diagnostics, and write the
+// `.ll`.
+fn _lower_parsed_native_to_llvm_file(parse: ParseNativeResult, native_text: string, module_name: string, out_path: string, imported_native_texts: string[]) -> boolean ![io] {
     let import_context = collect_imported_module_context_for_module(parse.imports, module_name);
     let mut combined_texts: string[] = import_context.native_texts;
     let mut _it: int = 0;

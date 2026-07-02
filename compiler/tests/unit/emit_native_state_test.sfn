@@ -6,6 +6,13 @@
 // trim_right, number_to_string, strip_optional_suffix) require the runtime
 // prelude which isn't available in standalone test files. Those are exercised
 // indirectly through the emit_native integration test and the full test suite.
+//
+// Exception (#1817): `lines_to_native_text` / `native_lines_have_text` are
+// pure (no substring/char_code, hence no prelude dependency), so they are
+// imported directly — the equivalence tests below gate the *real*
+// implementations, not local mirrors.
+import { lines_to_native_text, native_lines_have_text } from "../../src/emit_native_state";
+
 // ── Local copies of functions under test ─────────────────────────────
 fn _ends_with(value: string, suffix: string) -> boolean {
     if suffix.length == 0 { return true; }
@@ -191,4 +198,40 @@ test "state: is_optional_annotation positive" {
 test "state: is_optional_annotation negative" {
     assert _is_optional("number") == false;
     assert _is_optional("") == false;
+}
+
+// ── lines_to_native_text / native_lines_have_text equivalence (#1817) ─
+test "state: native_lines_have_text empty array" {
+    let e: string[] = [];
+    assert native_lines_have_text(e) == false;
+    assert(lines_to_native_text(e).length > 0) == false;
+}
+
+test "state: native_lines_have_text single blank line" {
+    assert native_lines_have_text([""]) == false;
+    assert(lines_to_native_text([""]).length > 0) == false;
+}
+
+test "state: native_lines_have_text two blank lines" {
+    // join(["",""], "\n") == "\n" — non-empty, so the text guard is true.
+    assert native_lines_have_text(["", ""]) == true;
+    assert(lines_to_native_text(["", ""]).length > 0) == true;
+}
+
+test "state: native_lines_have_text single non-empty line" {
+    assert native_lines_have_text(["a"]) == true;
+    assert(lines_to_native_text(["a"]).length > 0) == true;
+}
+
+test "state: native_lines_have_text multiple lines" {
+    assert native_lines_have_text(["a", "b"]) == true;
+    assert(lines_to_native_text(["a", "b"]).length > 0) == true;
+}
+
+test "state: lines_to_native_text trailing newline contract" {
+    // fs.writeLines writes each line + "\n" (incl. trailing), matching
+    // builder_to_string's join + "\n" — byte-identical staged output.
+    assert lines_to_native_text(["a", "b"]) == "a\nb\n";
+    assert lines_to_native_text(["only"]) == "only\n";
+    assert lines_to_native_text([""]) == "";
 }

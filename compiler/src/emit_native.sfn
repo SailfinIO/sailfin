@@ -58,6 +58,8 @@ import {
     builder_to_string,
     join_type_annotations,
     join_with_separator,
+    lines_to_native_text,
+    native_lines_have_text,
     state_add_diagnostic,
     state_emit_blank,
     state_emit_line,
@@ -153,8 +155,13 @@ fn emit_native_with_module_name(program: Program, module_name: string) -> EmitNa
     };
 }
 
-// Emit native text without returning the NativeModule struct (avoids ABI issues in stage2).
-fn emit_native_text_with_module_name(program: Program, module_name: string) -> string {
+// Emit native text as its line array, without joining into one string
+// (avoids the join→split round-trip on the emit→lower/write handoff, #1817)
+// and without returning the NativeModule struct (avoids ABI issues in
+// stage2). Callers that need one string wrap this with
+// `lines_to_native_text`; the streaming write/parse paths consume the
+// array directly.
+fn emit_native_lines_with_module_name(program: Program, module_name: string) -> string[] {
     // Issue #686 — match the lifting in `emit_native_with_module_name`.
     let lifted = lift_non_capturing_lambdas(program);
     let lifted_program = lifted.program;
@@ -181,17 +188,24 @@ fn emit_native_text_with_module_name(program: Program, module_name: string) -> s
         }
         index += 1;
     }
-    let text = builder_to_string(state.builder);
-    if text == null { return ""; }
-    return text;
+    if state.builder.lines == null { return []; }
+    return state.builder.lines;
+}
+
+// Emit native text without returning the NativeModule struct (avoids ABI issues in stage2).
+fn emit_native_text_with_module_name(program: Program, module_name: string) -> string {
+    return lines_to_native_text(emit_native_lines_with_module_name(program, module_name));
 }
 
 // Emit native text directly to a file to avoid returning large strings across ABI boundaries.
+// Streams the emitter's line array straight to disk via `fs.writeLines`
+// (the `write_llvm_lines_chunked` pattern) rather than joining to one
+// string first — byte-identical output, one fewer full-text copy (#1817).
 fn emit_native_text_to_file_with_module_name(program: Program, module_name: string, out_path: string) -> boolean ![io] {
-    let text = emit_native_text_with_module_name(program, module_name);
-    if text.length == 0 { return false; }
+    let lines = emit_native_lines_with_module_name(program, module_name);
+    if !native_lines_have_text(lines) { return false; }
     if fs.exists(out_path) { fs.deleteFile(out_path); }
-    fs.writeFile(out_path, text);
+    fs.writeLines(out_path, lines);
     return fs.exists(out_path);
 }
 
