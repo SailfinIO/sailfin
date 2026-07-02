@@ -79,12 +79,25 @@ emit() { # file status detail
     else printf "  %-11s %-52s %s\n" "$2" "$1" "$3"; fi
 }
 
+# Private stderr scratch file for `run` capture — mktemp (not a predictable
+# /tmp/$$ name) avoids symlink races and cross-run collisions; cleaned on exit.
+err_tmp="$(mktemp "${TMPDIR:-/tmp}/sfn_ex_err.XXXXXX")" || {
+    echo "error: mktemp failed" >&2; exit 2; }
+trap 'rm -f "$err_tmp"' EXIT
+
+# First non-empty line of stdin, capped — the fallback when no error/fatal line
+# matched (a timeout, a missing `timeout` binary, or another wrapper failure),
+# so a regression is still actionable from CI logs.
+first_line() { grep -m1 . | head -c 160; }
+
 while IFS= read -r f; do
     known=0; in_list "$f" "${KNOWN_FAILING[@]}" && known=1
 
     check_out="$(timeout "$TIMEOUT" "$SAILFIN_BIN" check "$f" 2>&1)"
     if [ $? -ne 0 ]; then
         detail="$(printf '%s' "$check_out" | grep -m1 -E 'error|fatal' | head -c 160)"
+        [ -z "$detail" ] && detail="$(printf '%s' "$check_out" | first_line)"
+        [ -z "$detail" ] && detail="check exited non-zero with no output (timeout?)"
         if [ "$known" -eq 1 ]; then xfail=$((xfail + 1)); emit "$f" "XFAIL" "check: $detail"
         else regressions+=("$f"); emit "$f" "CHECK_FAIL" "$detail"; fi
         continue
@@ -94,14 +107,15 @@ while IFS= read -r f; do
         skipped=$((skipped + 1)); emit "$f" "SKIP_RUN" "check-only (no main / blocking server)"; continue
     fi
 
-    run_out="$(timeout "$TIMEOUT" "$SAILFIN_BIN" run "$f" 2>/tmp/ex_err.$$)"
+    run_out="$(timeout "$TIMEOUT" "$SAILFIN_BIN" run "$f" 2>"$err_tmp")"
     run_rc=$?
-    run_err="$(cat /tmp/ex_err.$$ 2>/dev/null)"; rm -f /tmp/ex_err.$$
+    run_err="$(cat "$err_tmp" 2>/dev/null)"
 
     status="PASS"; detail=""
     if [ $run_rc -ne 0 ]; then
         status="RUN_FAIL"
         detail="$(printf '%s' "$run_err" | grep -m1 -E 'error|fatal|verifier' | head -c 160)"
+        [ -z "$detail" ] && detail="$(printf '%s' "$run_err" | first_line)"
         [ -z "$detail" ] && detail="exit $run_rc"
     elif [ -z "$run_out" ]; then
         status="EMPTY_OUT"; detail="exit 0 but no stdout"
