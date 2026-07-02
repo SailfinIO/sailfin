@@ -169,8 +169,6 @@ https://github.com/SailfinIO/sailfin/compare/v<current>...v<target>
 - [ ] `make fetch-seed` succeeded locally
 - [ ] CI green on this PR
 - [ ] (optional) `make compile` succeeds against the new seed locally
-
-https://claude.ai/code/session_<session-id>
 ```
 
 ---
