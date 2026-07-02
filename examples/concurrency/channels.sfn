@@ -1,14 +1,14 @@
 // examples/concurrency/channels.sfn
+// Bounded channels ship as the language builtin `channel(N)` (capacity N),
+// with `.send` / `.receive` over the by-pointer element ABI. A receive target
+// annotated `int` loads the element at the right width. The typed `sync`
+// capsule wrapper (`Channel<int>`, `channel<T>()`) and `async`/`await` are not
+// yet shipped — see docs/status.md and #829.
+fn main() ![io] {
+    let messages = channel(1);
 
-import { Channel, channel } from "sync";
+    routine { messages.send(42); }
 
-async fn main() ![io] {
-    let messages: Channel<int> = channel();
-
-    routine {
-        messages.send(42);
-    }
-
-    let result: int = await messages.receive();
+    let result: int = messages.receive();
     print("Received: {{result}}");
 }

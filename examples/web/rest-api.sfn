@@ -1,16 +1,17 @@
 // examples/web/rest-api.sfn
-
 import { serve } from "http";
 
-fn handleRequest(req, res) {
+fn handleRequest(req, res) ![io] {
     match req.method {
         "GET" => res.send("You sent a GET request."),
         "POST" => res.send("You sent a POST request."),
-        _ => res.send("Unsupported method!", 405),
+        _ => res.send("Unsupported method!", 405)
     }
 }
 
 fn main() ![io, net] {
-    serve(handleRequest, { port: 3000 });
+    serve(handleRequest, {
+        port: 3000
+    });
     print("Server is running on http://localhost:3000");
 }

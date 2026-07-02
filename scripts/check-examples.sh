@@ -1,0 +1,137 @@
+#!/usr/bin/env bash
+# scripts/check-examples.sh
+#
+# Examples regression sweep (epic #549). Runs every runnable `.sfn` under
+# examples/ through `sfn check` and `sfn run`, capturing stdout/stderr/exit
+# separately so "exits 0 but prints nothing" is distinguishable from a real
+# pass. Prints a per-file table and a summary.
+#
+# CI ratchet: the KNOWN_FAILING list below enumerates runnable examples that
+# fail today because of an open compiler bug (each tied to its tracking issue).
+# The script gates CI as follows:
+#   - a NON-listed runnable example that fails  -> REGRESSION -> exit 1
+#   - a listed example that now PASSES          -> XPASS      -> exit 1
+#     (a good problem: the bug is fixed; remove it from KNOWN_FAILING)
+#   - a listed example that still fails          -> XFAIL      -> tolerated
+# This lets the marketed example surface be guarded now, while the remaining
+# compiler bugs in #549 are worked off one sub-issue at a time.
+#
+# Two files are intentionally not run:
+#   - basics/tests.sfn  — no `main`; exercised by `sfn test`.
+#   - the blocking-server web examples — `sfn run` never returns (Category 8
+#     in #549); they need a spawn/probe/kill harness, tracked separately.
+#
+# Usage:
+#   scripts/check-examples.sh            # sweep, human-readable table
+#   SAILFIN_BIN=path scripts/check-examples.sh
+#   scripts/check-examples.sh --tsv      # machine-readable TSV to stdout
+
+set -u
+
+SAILFIN_BIN="${SAILFIN_BIN:-build/native/sailfin}"
+TIMEOUT="${SAILFIN_EXAMPLES_TIMEOUT:-25}"
+TSV=0
+[ "${1:-}" = "--tsv" ] && TSV=1
+
+if [ ! -x "$SAILFIN_BIN" ]; then
+    echo "error: compiler not found at $SAILFIN_BIN (run 'make compile')" >&2
+    exit 2
+fi
+
+# Files that have no `main` or block forever — not runnable via `sfn run`.
+SKIP_RUN=(
+    "examples/basics/tests.sfn"
+    "examples/web/http-server.sfn"
+    "examples/web/rest-api.sfn"
+    "examples/web/websocket-chat.sfn"
+    "examples/advanced/web-server-with-concurrency.sfn"
+)
+
+# Runnable examples that fail today on an open compiler bug (epic #549).
+# Each entry cites its tracking sub-issue; remove it when that issue lands.
+KNOWN_FAILING=(
+    "examples/basics/interfaces.sfn"                    # #1835 interface dynamic dispatch
+    "examples/basics/struct-composition.sfn"           # #1835 interface dynamic dispatch
+    "examples/advanced/interface-polymorphism.sfn"     # #1835 interface dynamic dispatch
+    "examples/advanced/generic-structures.sfn"         # #1835 + generics (#766)
+    "examples/concurrency/producer-consumer.sfn"       # #1835 explicit Channel<int> method dispatch
+    "examples/concurrency/dynamic-task-scheduling.sfn" # #1835 fn-typed channel + await (#829)
+    "examples/functional/map-reduce.sfn"               # #1836 array-HOF map->reduce chain
+    "examples/advanced/matrix-multiplication.sfn"      # #1836 range/nested-array map (#766)
+    "examples/functional/higher-order-functions.sfn"   # #1837 indirect call through fn-typed param
+    "examples/advanced/unions.sfn"                      # #1838 @.runtime.field.name global
+    "examples/algorithms/quicksort.sfn"                # #1839 double-array GEP i64/ptr
+)
+
+in_list() {
+    local needle="$1"; shift
+    for x in "$@"; do [ "$needle" = "$x" ] && return 0; done
+    return 1
+}
+
+pass=0 skipped=0 xfail=0
+regressions=() xpasses=()
+
+[ "$TSV" -eq 1 ] && printf "file\tstatus\tdetail\n"
+
+emit() { # file status detail
+    if [ "$TSV" -eq 1 ]; then printf "%s\t%s\t%s\n" "$1" "$2" "$3"
+    else printf "  %-11s %-52s %s\n" "$2" "$1" "$3"; fi
+}
+
+while IFS= read -r f; do
+    known=0; in_list "$f" "${KNOWN_FAILING[@]}" && known=1
+
+    check_out="$(timeout "$TIMEOUT" "$SAILFIN_BIN" check "$f" 2>&1)"
+    if [ $? -ne 0 ]; then
+        detail="$(printf '%s' "$check_out" | grep -m1 -E 'error|fatal' | head -c 160)"
+        if [ "$known" -eq 1 ]; then xfail=$((xfail + 1)); emit "$f" "XFAIL" "check: $detail"
+        else regressions+=("$f"); emit "$f" "CHECK_FAIL" "$detail"; fi
+        continue
+    fi
+
+    if in_list "$f" "${SKIP_RUN[@]}"; then
+        skipped=$((skipped + 1)); emit "$f" "SKIP_RUN" "check-only (no main / blocking server)"; continue
+    fi
+
+    run_out="$(timeout "$TIMEOUT" "$SAILFIN_BIN" run "$f" 2>/tmp/ex_err.$$)"
+    run_rc=$?
+    run_err="$(cat /tmp/ex_err.$$ 2>/dev/null)"; rm -f /tmp/ex_err.$$
+
+    status="PASS"; detail=""
+    if [ $run_rc -ne 0 ]; then
+        status="RUN_FAIL"
+        detail="$(printf '%s' "$run_err" | grep -m1 -E 'error|fatal|verifier' | head -c 160)"
+        [ -z "$detail" ] && detail="exit $run_rc"
+    elif [ -z "$run_out" ]; then
+        status="EMPTY_OUT"; detail="exit 0 but no stdout"
+    else
+        detail="$(printf '%s' "$run_out" | head -1 | head -c 60)"
+    fi
+
+    if [ "$status" = "PASS" ]; then
+        if [ "$known" -eq 1 ]; then xpasses+=("$f"); emit "$f" "XPASS" "now passes — remove from KNOWN_FAILING: $detail"
+        else pass=$((pass + 1)); emit "$f" "PASS" "$detail"; fi
+    else
+        if [ "$known" -eq 1 ]; then xfail=$((xfail + 1)); emit "$f" "XFAIL" "$detail"
+        else regressions+=("$f"); emit "$f" "$status" "$detail"; fi
+    fi
+done < <(find examples -name '*.sfn' | sort)
+
+if [ "$TSV" -eq 0 ]; then
+    echo ""
+    echo "  summary: $pass PASS / ${#regressions[@]} REGRESSION / ${#xpasses[@]} XPASS / $xfail XFAIL(known #549) / $skipped SKIP_RUN"
+fi
+
+rc=0
+if [ "${#regressions[@]}" -gt 0 ]; then
+    echo "  REGRESSION: these runnable examples newly fail — fix or add to KNOWN_FAILING with an issue:" >&2
+    for r in "${regressions[@]}"; do echo "    - $r" >&2; done
+    rc=1
+fi
+if [ "${#xpasses[@]}" -gt 0 ]; then
+    echo "  XPASS: these now pass — remove them from KNOWN_FAILING (the ratchet tightens):" >&2
+    for x in "${xpasses[@]}"; do echo "    - $x" >&2; done
+    rc=1
+fi
+exit $rc

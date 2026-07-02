@@ -503,6 +503,19 @@ jobs:
           (file build/native/sailfin || true)
           build/native/sailfin version || build/native/sailfin --version || true
 
+      # Examples regression sweep (epic #549). Every runnable example under
+      # examples/ must still `check` + `run` end-to-end. The KNOWN_FAILING
+      # allowlist in the script tracks examples blocked on an open compiler
+      # bug (each tied to a #549 sub-issue); the gate fails on a NEW failure
+      # (a regression in the marketed surface) or when a listed example starts
+      # passing (remove it — the ratchet tightens). Primary leg only: it has
+      # the packaged native compiler, and runs from the repo root so runtime/
+      # resolves via CWD.
+      - name: Examples sweep (epic #549)
+        if: ${{ matrix.primary }}
+        shell: bash
+        run: scripts/check-examples.sh
+
       # Regression guard for #615 / #807: assert the effect gate
       # actually fails the build (non-zero exit + correct summary
       # integers) on both Linux x86_64 and macOS arm64. The
