@@ -48,12 +48,18 @@ jobs:
           - os: ubuntu-24.04
             package_label: linux-x86_64
             clang: clang-18
+            # Strict self-host gate (#1830): a stage2/stage3 fixed-point
+            # mismatch fails this leg instead of warn-and-promote. Linux is
+            # the enforced surface; macOS stays warn-only (its strict
+            # participation is a separate sub-issue).
+            selfhost_strict: "1"
           # Trialing macos-26 ahead of the 2026-06-15 `macos-latest` migration:
           # nightly is the early-warning canary for fixed-point / determinism
           # breakage on the new image before CI and release jobs adopt it.
           - os: macos-26
             package_label: macos-arm64
             clang: clang
+            selfhost_strict: "0"
     steps:
       - name: Checkout repository
         uses: actions/checkout@v7.0.0
@@ -112,10 +118,13 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           CLANG: ${{ matrix.clang }}
+          # #1830: SELFHOST_STRICT=1 makes a stage2/stage3 fixed-point
+          # mismatch fatal on the Linux leg; macOS passes "0" (warn-only).
+          SELFHOST_STRICT: ${{ matrix.selfhost_strict }}
         run: |
           set -euo pipefail
           export SEED_NATIVE="build/seed/bin/sailfin"
-          make check
+          make check SELFHOST_STRICT="$SELFHOST_STRICT"
 
       - name: Surface non-empty phase_types diagnostics
         if: always()
