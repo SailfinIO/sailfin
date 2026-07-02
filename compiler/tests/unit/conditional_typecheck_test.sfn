@@ -1,0 +1,114 @@
+// Unit tests for the ternary `Conditional` type rules — issue #1715, epic
+// #1180. A ternary `cond ? then : else` (#1690's `Expression.Conditional`)
+// requires a boolean condition (E0305) and two branches that unify under
+// exact/null-compatible rules (E0304). Types are plain type-annotation strings
+// throughout the checker (no expression-type inferencer — #829), so the pure
+// rule (`check_conditional_types`) is driven against explicit type strings the
+// way `result_question_typecheck_test.sfn` drives the `?`-operator rules, and
+// the end-to-end tests confirm the `walk_expression` `Conditional` arm fires
+// the same diagnostics through `typecheck_diagnostics`.
+import { parse_program } from "../../src/parser/mod";
+import {
+    check_conditional_types,
+    conditional_result_type,
+    typecheck_diagnostics
+} from "../../src/typecheck";
+import { Diagnostic } from "../../src/typecheck_types";
+
+fn _count_code(diagnostics: Diagnostic[], code: string) -> int {
+    let mut count: int = 0;
+    let mut i: int = 0;
+    loop {
+        if i >= diagnostics.length { break; }
+        if strings_equal(diagnostics[i].code, code) { count += 1; }
+        i += 1;
+    }
+    return count;
+}
+
+fn _codes_for(source: string, code: string) -> int ![io] {
+    let program = parse_program(source);
+    return _count_code(typecheck_diagnostics(program), code);
+}
+
+// --- Pure rule: branch unification (E0304) ---------------------------------
+test "conditional: incompatible branch types emit E0304" {
+    let diags = check_conditional_types("boolean", "int", "string", null);
+    assert diags.length == 1;
+    assert strings_equal(diags[0].code, "E0304");
+}
+
+test "conditional: identical branch types type-check" {
+    let diags = check_conditional_types("boolean", "int", "int", null);
+    assert diags.length == 0;
+}
+
+test "conditional: a null branch unifies with the other branch" {
+    // `cond ? 1 : null` and `cond ? null : "s"` are both well-typed.
+    assert check_conditional_types("boolean", "int", "null", null).length == 0;
+    assert check_conditional_types("boolean", "null", "string", null).length == 0;
+}
+
+test "conditional: an un-inferable branch is left unconstrained" {
+    // "" is the not-inferable sentinel — no branch diagnostic either way.
+    assert check_conditional_types("boolean", "", "string", null).length == 0;
+    assert check_conditional_types("boolean", "int", "", null).length == 0;
+}
+
+test "conditional: int and float branches do not unify (coercion deferred)" {
+    // Exact unification only — `cond ? 1 : 2.5` is `int`/`float` and mismatches
+    // (#1715 Out: coercion is a later refinement). Pins the intended floor so a
+    // future coercion change is a visible test flip, not a silent one.
+    let diags = check_conditional_types("boolean", "int", "float", null);
+    assert diags.length == 1;
+    assert strings_equal(diags[0].code, "E0304");
+}
+
+// --- Pure rule: condition boolean constraint (E0305) -----------------------
+test "conditional: a non-boolean condition emits E0305" {
+    let diags = check_conditional_types("int", "int", "int", null);
+    assert diags.length == 1;
+    assert strings_equal(diags[0].code, "E0305");
+}
+
+test "conditional: an un-inferable condition is left unconstrained" {
+    let diags = check_conditional_types("", "int", "int", null);
+    assert diags.length == 0;
+}
+
+test "conditional: a bad condition and bad branches both fire" {
+    let diags = check_conditional_types("string", "int", "boolean", null);
+    assert diags.length == 2;
+    assert strings_equal(diags[0].code, "E0305");
+    assert strings_equal(diags[1].code, "E0304");
+}
+
+// --- Result-type unification ------------------------------------------------
+test "conditional: result_type unifies equal and null-compatible branches" {
+    assert strings_equal(conditional_result_type("int", "int"), "int");
+    assert strings_equal(conditional_result_type("int", "null"), "int");
+    assert strings_equal(conditional_result_type("null", "string"), "string");
+}
+
+test "conditional: result_type is empty for mismatched or unknown branches" {
+    assert strings_equal(conditional_result_type("int", "string"), "");
+    assert strings_equal(conditional_result_type("", "int"), "");
+}
+
+// --- End-to-end through typecheck_diagnostics ------------------------------
+test "conditional: `true ? 1 : \"s\"` fires E0304 end-to-end" ![io] {
+    assert _codes_for("fn main() { true ? 1 : \"s\"; }", "E0304") == 1;
+}
+
+test "conditional: `5 ? 1 : 2` fires E0305 end-to-end" ![io] {
+    assert _codes_for("fn main() { 5 ? 1 : 2; }", "E0305") == 1;
+}
+
+test "conditional: `true ? 1 : 2` is clean end-to-end" ![io] {
+    assert _codes_for("fn main() { true ? 1 : 2; }", "E0304") == 0;
+    assert _codes_for("fn main() { true ? 1 : 2; }", "E0305") == 0;
+}
+
+test "conditional: `true ? 1 : null` is clean end-to-end" ![io] {
+    assert _codes_for("fn main() { true ? 1 : null; }", "E0304") == 0;
+}
