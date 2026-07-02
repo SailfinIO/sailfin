@@ -27,12 +27,30 @@ fn _valid_src() -> string {
     return "fn add(a: int, b: int) -> int {\n    return a + b;\n}\n";
 }
 
-// The full parent environment plus the forced-panic stage, so the in-process
-// compile resolves its runtime root exactly as the parent did and the hook
-// sees the flag. `run_capture`'s env array is the CHILD's entire environment
-// (empty = empty, not inherit), so the parent env must be threaded through.
+// The parent environment with any pre-existing `SAILFIN_DEBUG_FORCE_PANIC`
+// stripped, so the in-process compile resolves its runtime root exactly as
+// the parent did without inheriting a stray forced-panic flag from the
+// developer's shell. `run_capture`'s env array is the CHILD's entire
+// environment (empty = empty, not inherit), so the parent env is threaded
+// through; both the forced-panic and clean runs build on this filtered base
+// so a single caller-set flag cannot skew either.
+fn _base_env() -> string[] ![io] {
+    let raw = process.environ();
+    let mut e: string[] = [];
+    let mut i: int = 0;
+    loop {
+        if i >= raw.length { break; }
+        if find(raw[i], "SAILFIN_DEBUG_FORCE_PANIC=", 0) != 0 {
+            e.push(raw[i]);
+        }
+        i += 1;
+    }
+    return e;
+}
+
+// The filtered base plus exactly one forced-panic stage.
 fn _env_with_panic(stage: string) -> string[] ![io] {
-    let mut e: string[] = process.environ();
+    let mut e: string[] = _base_env();
     e.push("SAILFIN_DEBUG_FORCE_PANIC=" + stage);
     return e;
 }
@@ -46,12 +64,13 @@ test "ICE #1807: forced parse-stage panic prints the banner on stderr" ![io] {
         let err = process.capture_take_stderr();
         // Uniform banner, version line, correct stage, and the issue URL. The
         // banner is the thrown message; the `@main` wrapper prints it to
-        // stderr and exits non-zero.
+        // stderr and exits 1 (its uncaught-throw code) — asserting the exact
+        // code rejects a non-zero exit from an unrelated failure path.
         assert find(err, "internal compiler error (ICE)", 0) >= 0;
         assert find(err, "note: version:", 0) >= 0;
         assert find(err, "note: stage: parse", 0) >= 0;
         assert find(err, "issues/new?template=ice.md", 0) >= 0;
-        assert exit != 0;
+        assert exit == 1;
         return 0;
     });
     assert code == 0;
@@ -66,7 +85,7 @@ test "ICE #1807: the banner names the stage that raised (lower_llvm)" ![io] {
         let err = process.capture_take_stderr();
         assert find(err, "internal compiler error (ICE)", 0) >= 0;
         assert find(err, "note: stage: lower_llvm", 0) >= 0;
-        assert exit != 0;
+        assert exit == 1;
         return 0;
     });
     assert code == 0;
@@ -76,10 +95,11 @@ test "ICE #1807: a clean compile prints no banner and exits 0" ![io] {
     let code = with_tmp_dir(fn (dir: string) -> int {
         let src = dir + "/ice_probe.sfn";
         fs.writeFile(src, _valid_src());
-        let exit = process.run_capture([_sfn_bin(), "emit", "llvm", "--timing", src], process.environ());
+        let exit = process.run_capture([_sfn_bin(), "emit", "llvm", "--timing", src], _base_env());
         let _out = process.capture_take_stdout();
         let err = process.capture_take_stderr();
-        // No panic banner on the ordinary path.
+        // No panic banner on the ordinary path — the filtered base env cannot
+        // carry a stray `SAILFIN_DEBUG_FORCE_PANIC` from the developer's shell.
         assert find(err, "internal compiler error", 0) < 0;
         assert exit == 0;
         return 0;
