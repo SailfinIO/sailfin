@@ -15,10 +15,11 @@
 // and it sidesteps printing a possibly-null body string from the fixture.
 //
 // Trust: the fixture runs with `SAILFIN_TLS_CAFILE` pointed at the
-// generated self-signed cert, so `tls_client_ctx`'s verify-on default
-// (SSL_VERIFY_PEER + polled SSL_get_verify_result) accepts it. This
-// exercises basic verify-on without the full trust-store / hostname
-// hardening (deferred to #3).
+// generated self-signed cert (which carries a `DNS:localhost` SAN), so
+// `tls_client_ctx`'s verify-on default (SSL_VERIFY_PEER + polled
+// SSL_get_verify_result) plus the RFC-6125 hostname check (SSL_set1_host,
+// host = "localhost") both accept it. System trust-store discovery
+// hardening + the verify-failure regression are #3.
 //
 // Skips cleanly (`assert true`, mirroring the tool-absent SKIP precedent)
 // when `openssl` is missing (no TLS peer) or no `timeout`/`gtimeout` is
@@ -141,12 +142,14 @@ fn _scratch_dir() -> string ![io] {
     return dir;
 }
 
-// Generate a self-signed cert+key (CN=localhost) for the TLS server.
-// Returns true on success.
+// Generate a self-signed cert+key (CN=localhost) for the TLS server. The
+// `subjectAltName=DNS:localhost` SAN is required: the client now enforces
+// RFC-6125 hostname verification (SSL_set1_host), and modern OpenSSL checks
+// the SAN (not the CN) when a SAN is present. Returns true on success.
 fn _gen_cert(dir: string) -> boolean ![io] {
     let exit = process.run_capture(["openssl", "req", "-x509", "-newkey", "rsa:2048", "-keyout", dir
         + "/key.pem", "-out", dir
-        + "/cert.pem", "-days", "1", "-nodes", "-subj", "/CN=localhost"], _child_env());
+        + "/cert.pem", "-days", "1", "-nodes", "-subj", "/CN=localhost", "-addext", "subjectAltName=DNS:localhost"], _child_env());
     let _o = process.capture_take_stdout();
     let _e = process.capture_take_stderr();
     return exit == 0;

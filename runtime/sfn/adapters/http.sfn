@@ -12,8 +12,9 @@
 // Scope: HTTP and outbound HTTPS. The `https://` path (get / post /
 // download, via `_http_send`) TLS-wraps its connected socket through
 // `../platform/tls.sfn` (OpenSSL, SFEP-0036 gap B1 / #1782): default port
-// 443, SNI = host, peer chain verified (basic verify-on; trust-store /
-// hostname hardening is #3). The raw-request and keep-alive helpers
+// 443, SNI = host, peer chain verified AND hostname checked (RFC 6125);
+// system trust-store discovery hardening is #3. The raw-request and
+// keep-alive helpers
 // (`sfn_http_request_raw`, `sfn_http_conn_*`) remain HTTP-only for now
 // and still reject `https://` (a follow-up wave routes them through TLS).
 //
@@ -92,18 +93,32 @@
 // routing probe + a behavioral round-trip against a localhost
 // listener).
 // TLS client wrappers (SFEP-0036, gap B1): the `https://` path wraps its
-// connected socket via these helpers from `../platform/tls.sfn`. Imported
-// (not inlined) because they are Sailfin fn bodies, not externs — the same
-// cross-module import shape `string.sfn` uses for `owned_buf_new` (the #306
-// inline-extern workaround does not apply to imported fn bodies).
-import {
-    tls_client_ctx,
-    tls_ctx_free,
-    tls_connect_fd,
-    tls_read,
-    tls_write,
-    tls_shutdown_free
-} from "../platform/tls";
+// connected socket via these helpers, whose bodies live in
+// `../platform/tls.sfn`. Declared here as `extern fn` FORWARD-DECLARATIONS
+// rather than `import`ed for the SAME #306 reason the libc externs below
+// are inlined: a cross-module `import` is resolved from a staged
+// import-context that the standalone per-module runtime emit (the
+// `ci-cross-windows` bridge, which emits `http.sfn` in isolation) does not
+// stage, so lowering fails with "callee signature is not known". A forward
+// declaration makes this module self-contained for every emit path; the
+// linker resolves each `@tls_*` symbol to `tls.sfn`'s definition in the
+// full runtime link (unmangled external linkage, same as the `sfn_http_*`
+// exports). On the Windows cross-build — where `tls.sfn` is excluded (it
+// pulls OpenSSL, deferred to #1485 M10) — they resolve to the no-op stubs
+// in `runtime/ir/windows_stubs.ll`, so `https://` degrades to a clean null
+// there. (The runtime effect is identical to the prior `import`; only the
+// resolution mechanism changes.)
+extern fn tls_client_ctx() -> * u8;
+
+extern fn tls_ctx_free(ctx: * u8) -> void;
+
+extern fn tls_connect_fd(ctx: * u8, fd: i32, host: * u8) -> * u8;
+
+extern fn tls_read(ssl: * u8, buf: * u8, n: i64) -> i64;
+
+extern fn tls_write(ssl: * u8, buf: * u8, n: i64) -> i64;
+
+extern fn tls_shutdown_free(ssl: * u8) -> void;
 
 // ── libc memory + string helpers ──────────────────────────────
 extern fn malloc(size: usize) -> * u8;

@@ -29,13 +29,17 @@ test "lowering: runtime/sfn/platform/tls.sfn emits a declare for every OpenSSL e
     // Context / handshake surface.
     assert _contains(ir, "@TLS_client_method(");
     assert _contains(ir, "@SSL_CTX_new(");
+    assert _contains(ir, "@SSL_CTX_free(");
     assert _contains(ir, "@SSL_CTX_set_verify(");
     assert _contains(ir, "@SSL_CTX_set_default_verify_paths(");
     assert _contains(ir, "@SSL_CTX_load_verify_locations(");
     assert _contains(ir, "@SSL_new(");
+    assert _contains(ir, "@SSL_free(");
     assert _contains(ir, "@SSL_set_fd(");
-    // SNI rides the SSL_ctrl ABI symbol (the set_tlsext_host_name macro).
+    // SNI rides the SSL_ctrl ABI symbol (the set_tlsext_host_name macro);
+    // SSL_set1_host binds the RFC-6125 hostname check.
     assert _contains(ir, "@SSL_ctrl(");
+    assert _contains(ir, "@SSL_set1_host(");
     assert _contains(ir, "@SSL_connect(");
     // I/O + verify-poll + teardown surface.
     assert _contains(ir, "@SSL_read(");

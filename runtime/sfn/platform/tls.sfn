@@ -7,9 +7,11 @@
 // an already-connected socket `fd`, wrapped by a small set of Sailfin
 // helpers the HTTP client (`../adapters/http.sfn`) uses for its
 // `https://` path. Inbound TLS termination in `serve` is a follow-up
-// (#2); trust-store / hostname hardening + the verify-failure e2e are
-// #3 — here verification is basic-on (peer chain checked, result
-// polled), enough to round-trip an `https://` GET.
+// (#2). Verification is on: the peer chain is verified (SSL_VERIFY_PEER,
+// result polled) AND the hostname is checked (SSL_set1_host, RFC 6125), so
+// an `https://` GET both round-trips and rejects a wrong-host cert. The
+// system CA trust-store discovery / macOS-Windows CA paths + the
+// verify-failure regression e2e remain #3.
 //
 // Callback-free by construction (SFEP-0036 §3.2): the verify callback
 // arg to `SSL_CTX_set_verify` is always `null` and the result is polled
@@ -63,6 +65,13 @@ extern fn SSL_set_fd(ssl: * u8, fd: i32) -> i32;
 // (SNI) macro. `long SSL_ctrl(SSL *, int cmd, long larg, void *parg)`.
 extern fn SSL_ctrl(ssl: * u8, cmd: i32, larg: i64, parg: * u8) -> i64;
 
+// `SSL_set1_host` — set the expected DNS hostname for OpenSSL's built-in
+// certificate hostname verification (RFC 6125). A real exported symbol
+// (not a macro), callback-free. `int SSL_set1_host(SSL *, const char *)`
+// returns 1 on success. Once set, `SSL_VERIFY_PEER` makes the handshake
+// fail on a hostname mismatch, so no Sailfin fn is address-taken.
+extern fn SSL_set1_host(ssl: * u8, host: * u8) -> i32;
+
 extern fn SSL_connect(ssl: * u8) -> i32;
 
 extern fn SSL_read(ssl: * u8, buf: * u8, num: i32) -> i32;
@@ -90,8 +99,9 @@ extern fn strlen(s: * u8) -> usize;
 // analogous to `curl`'s `CURL_CA_BUNDLE` / Node's `NODE_EXTRA_CA_CERTS`;
 // used by the loopback e2e to trust a generated self-signed cert).
 // Verification is turned ON (`SSL_VERIFY_PEER`, callback arg `null`); the
-// result is polled after the handshake in `tls_connect_fd`. Returns null
-// on allocation failure. Full trust-store / hostname hardening is #3.
+// result is polled after the handshake in `tls_connect_fd`, and the
+// hostname is bound there via SSL_set1_host. Returns null on allocation
+// failure. System trust-store discovery hardening is #3.
 fn tls_client_ctx() -> * u8 {
     let method: * u8 = TLS_client_method();
     if method as i64 == 0 { return null; }
@@ -124,7 +134,10 @@ fn tls_ctx_free(ctx: * u8) -> void {
 // result. Returns the handshaken `SSL*`, or null on any failure (freeing
 // the partial `SSL*` first) so the caller surfaces a typed failure — a
 // failed verify is never a silent downgrade. `host` (a C string) is used
-// for SNI only; strict hostname-match verification is #3.
+// for BOTH the SNI extension and the RFC-6125 hostname check
+// (SSL_set1_host); it must be the bare host (no port). An IP-literal host
+// is checked as a DNS name (IP-SAN certs are uncommon) — real hostnames
+// are the supported outbound case.
 fn tls_connect_fd(ctx: * u8, fd: i32, host: * u8) -> * u8 ![net] {
     if ctx as i64 == 0 { return null; }
     let ssl: * u8 = SSL_new(ctx);
@@ -134,16 +147,32 @@ fn tls_connect_fd(ctx: * u8, fd: i32, host: * u8) -> * u8 ![net] {
         SSL_free(ssl);
         return null;
     }
-    // SNI: SSL_set_tlsext_host_name(ssl, host) -> SSL_ctrl(ssl, 55, 0, host).
     if host as i64 != 0 {
-        SSL_ctrl(ssl, 55, 0, host);
+        // SNI: SSL_set_tlsext_host_name(ssl, host) -> SSL_ctrl(ssl, 55, 0,
+        // host). Returns 1 on success; a failure (e.g. OOM) means we would
+        // hand-shake against the wrong / a default vhost, so fail hard.
+        if SSL_ctrl(ssl, 55, 0, host) != 1 {
+            SSL_free(ssl);
+            return null;
+        }
+        // Hostname verification: bind the expected DNS name so
+        // SSL_VERIFY_PEER enforces cert<->host matching during the
+        // handshake (RFC 6125). Without this, a valid cert for ANY host
+        // would pass chain verification — an MITM hole. Callback-free.
+        if SSL_set1_host(ssl, host) != 1 {
+            SSL_free(ssl);
+            return null;
+        }
     }
-    // Blocking handshake (bounded by the socket's SO_*TIMEO).
+    // Blocking handshake (bounded by the socket's SO_*TIMEO). With
+    // SSL_set1_host + SSL_VERIFY_PEER, a chain OR hostname mismatch fails
+    // the handshake here.
     if SSL_connect(ssl) != 1 {
         SSL_free(ssl);
         return null;
     }
-    // Poll the verification result (X509_V_OK == 0).
+    // Belt-and-suspenders: poll the verification result (X509_V_OK == 0).
+    // A hostname mismatch surfaces here as X509_V_ERR_HOSTNAME_MISMATCH.
     if SSL_get_verify_result(ssl) != 0 {
         SSL_free(ssl);
         return null;

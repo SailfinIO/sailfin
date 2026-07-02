@@ -80,3 +80,35 @@ define void @sailfin_assert_fail(i8* %file, i64 %line, i64 %col, i8* %msg) {
   call void @abort()
   unreachable
 }
+
+; TLS client wrappers (SFEP-0036, #1782). `runtime/sfn/platform/tls.sfn` is
+; excluded from RUNTIME_MODS — it pulls the OpenSSL (`libssl`/`libcrypto`)
+; externs, which do not resolve in a static mingw link (Windows native TLS
+; is deferred to #1485 M10, which reuses this same OS-independent extern
+; surface). `runtime/sfn/adapters/http.sfn`'s `https://` path forward-
+; declares these `@tls_*` symbols, so the standalone-emitted `http.o` needs
+; them defined at the Windows link. No-op stubs are the correct degraded
+; behavior: `tls_client_ctx` / `tls_connect_fd` return null → `_http_send`
+; surfaces a clean null (https unsupported on Windows for now, never a
+; silent downgrade); the read/write/free helpers are unreachable once the
+; ctx is null but are defined for completeness. Plaintext `http://` is
+; unaffected. Sync pinned by
+; compiler/tests/e2e/cross_windows_runtime_modules_test.sfn.
+define i8* @tls_client_ctx() {
+  ret i8* null
+}
+define void @tls_ctx_free(i8* %ctx) {
+  ret void
+}
+define i8* @tls_connect_fd(i8* %ctx, i32 %fd, i8* %host) {
+  ret i8* null
+}
+define i64 @tls_read(i8* %ssl, i8* %buf, i64 %n) {
+  ret i64 -1
+}
+define i64 @tls_write(i8* %ssl, i8* %buf, i64 %n) {
+  ret i64 -1
+}
+define void @tls_shutdown_free(i8* %ssl) {
+  ret void
+}
