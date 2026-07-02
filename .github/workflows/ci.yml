@@ -1,4 +1,4 @@
-name: CI (PR)
+name: CI (PR + merge queue)
 
 # The pinned seed version lives in `.seed-version` at the repo root.
 # A setup step in each job reads that file and exports the resolved
@@ -30,6 +30,20 @@ on:
       - '.seed-version'
       - '.github/workflows/ci.yml'
       - '.github/actions/**'
+  # Merge queue (SFEP-0037 §3.1, the bors "not rocket science" rule):
+  # run the same PR-gating surface on the speculative merge commit so
+  # branch protection's required checks gate the queue, not the stale
+  # PR head. `merge_group` does not support `paths:` filtering, so every
+  # queued merge runs full CI regardless of the diff — deliberate: the
+  # queue must never land an untested combination. No job in this
+  # workflow is conditioned on `github.event_name`, so the full job set
+  # runs in queue context (the fixed-point rebuild steps stay off — they
+  # are gated to `refs/heads/main|rc`, which a queue ref is not, same as
+  # PR context today). Enablement steps: docs/runbooks/merge-queue.md.
+  # `checks_requested` is the only activity type Actions supports for
+  # merge_group (and the default); stated explicitly for clarity.
+  merge_group:
+    types: [checks_requested]
   workflow_dispatch:
     inputs: {}
 
