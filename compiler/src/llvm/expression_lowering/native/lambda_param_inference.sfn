@@ -366,6 +366,38 @@ fn declared_binding_type(type_annotation: TypeAnnotation?, initializer: Expressi
     return "";
 }
 
+// #1836: the result type of an inferred `let sq = arr.map(...)` /
+// `arr.filter(...)`. `declared_binding_type` yields "" for it (the
+// initializer is a `Call`, not an `Array` literal), so `sq` never enters the
+// binding table and a follow-on `sq.reduce(...)` / `sq.map(...)` cannot
+// backfill its untyped callback params (they default to the wrong width and
+// segfault, the exact gap #1683 closed for the direct-receiver case). The
+// shipped map/filter helpers are i64-only and preserve/produce an `int`
+// element, so when the receiver resolves to an int array the result is
+// `int[]`. Mirrors the runtime gate in `array_builtin_expected_fn_type`. The
+// receiver is resolved against the partial table built so far, which already
+// holds any earlier `let` in the same block — so chained `a.map(...).map(...)`
+// via intermediate lets resolves left-to-right.
+fn _map_filter_result_type(initializer: Expression?, bindings: BindingEntry[]) -> string {
+    if initializer != null {
+        let init = initializer;
+        if init.variant == "Call" {
+            let callee = init.callee;
+            if callee.variant == "Member" {
+                let mut is_map_filter: boolean = false;
+                if callee.member == "map" { is_map_filter = true; }
+                if callee.member == "filter" { is_map_filter = true; }
+                if is_map_filter {
+                    if receiver_element_type(callee.object, bindings) == "int" {
+                        return "int[]";
+                    }
+                }
+            }
+        }
+    }
+    return "";
+}
+
 // Build the program-wide binding table ONCE (immutable, like the signature
 // table). A per-walk *mutable* scope re-stored into the threaded `LiftContext`
 // corrupts the struct string fields under the seed compiler; the static table
@@ -430,7 +462,15 @@ fn _collect_statement_bindings(table: BindingEntry[], statement: Statement) -> B
     let mut out: BindingEntry[] = table;
     if statement.variant == "VariableDeclaration" {
         if statement.name.length > 0 {
-            let type_text = declared_binding_type(statement.type_annotation, statement.initializer);
+            let mut type_text = declared_binding_type(statement.type_annotation, statement.initializer);
+            // #1836: recover `int[]` for an inferred `let sq = arr.map(...)` /
+            // `arr.filter(...)` (no annotation, non-`Array` initializer) so a
+            // follow-on reduce/map/filter backfills its untyped callback.
+            if type_text.length == 0 {
+                if statement.type_annotation == null {
+                    type_text = _map_filter_result_type(statement.initializer, out);
+                }
+            }
             if type_text.length > 0 {
                 out.push(BindingEntry {
                     name: statement.name, type_text: type_text

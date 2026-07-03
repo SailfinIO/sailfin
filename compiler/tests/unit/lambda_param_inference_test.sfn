@@ -3,7 +3,12 @@
 // no-op-on-typed-lambda guarantee that keeps typed lambdas (the no-regression
 // surface) untouched.
 import { Expression } from "../../src/ast";
-import { backfill_lambda_from_fn_type, parse_fn_type_text } from "../../src/llvm/expression_lowering/native/lambda_param_inference";
+import {
+    backfill_lambda_from_fn_type,
+    build_binding_table,
+    lookup_binding_type,
+    parse_fn_type_text
+} from "../../src/llvm/expression_lowering/native/lambda_param_inference";
 import { parse_program } from "../../src/parser/mod";
 
 // The lambda bound by the first top-level `let f = <lambda>;`.
@@ -109,4 +114,25 @@ test "backfill: arity mismatch is a no-op" ![io] {
     let filled = backfill_lambda_from_fn_type(lam, "fn(int, int) -> int");
     let p0 = filled.parameters[0].type_annotation;
     assert p0 == null;
+}
+
+// -------------------------------------------------------------------
+// build_binding_table — inferred map/filter-result recovery (#1836).
+// An inferred `let sq = arr.map(...)` has no annotation and a `Call`
+// (not `Array`) initializer, so it must still enter the binding table as
+// `int[]` for a follow-on reduce/map/filter to backfill its untyped
+// callback params.
+// -------------------------------------------------------------------
+test "binding table: inferred map result binds int[] (#1836)" ![io] {
+    let source = "fn host() { let numbers = [1, 2, 3]; let squares = numbers.map(fn (x) -> int { return x * x; }); }";
+    let table = build_binding_table(parse_program(source));
+    assert lookup_binding_type(table, "numbers") == "int[]";
+    assert lookup_binding_type(table, "squares") == "int[]";
+}
+
+test "binding table: chained filter->map results bind int[] (#1836)" ![io] {
+    let source = "fn host() { let numbers = [1, 2, 3, 4]; let evens = numbers.filter(fn (x) -> bool { return x > 1; }); let doubled = evens.map(fn (x) -> int { return x * 2; }); }";
+    let table = build_binding_table(parse_program(source));
+    assert lookup_binding_type(table, "evens") == "int[]";
+    assert lookup_binding_type(table, "doubled") == "int[]";
 }

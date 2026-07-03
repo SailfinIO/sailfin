@@ -1,0 +1,17 @@
+// compiler/tests/e2e/fixtures/array_map_reduce_chain/main.sfn
+//
+// Issue #1836 acceptance — a `.map(...).reduce(...)` chain over an `int[]`
+// where the intermediate `.map` result is bound to an *inferred* `let`
+// (no explicit `: int[]` annotation). The map result is an opaque `i8*`
+// from the `runtime_array_map_fn` helper; the follow-on `.reduce` must
+// still recover an `i64` element type from the map-result binding so it
+// routes to `runtime_array_reduce_fn` instead of fataling at lowering.
+//
+// [1,2,3,4,5].map(x => x*x) = [1,4,9,16,25]; reduce(0, +) = 55.
+// (Before #1836 the inferred-let reduce no-op'd and the build fataled.)
+fn main() ![io] {
+    let numbers = [1, 2, 3, 4, 5];
+    let squares = numbers.map(fn (x) -> int { return x * x; });
+    let sum = squares.reduce(0, fn (acc, x) -> int { return acc + x; });
+    print(sum);
+}

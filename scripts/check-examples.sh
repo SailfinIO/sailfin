@@ -53,8 +53,7 @@ KNOWN_FAILING=(
     "examples/advanced/generic-structures.sfn"         # #766 generic-struct method monomorphization
     "examples/concurrency/producer-consumer.sfn"       # #1835 lowering fatal fixed; run still hangs on drain (#549 await follow-up)
     "examples/concurrency/dynamic-task-scheduling.sfn" # fn-typed channel element + await (#829)
-    "examples/functional/map-reduce.sfn"               # #1836 array-HOF map->reduce chain
-    "examples/advanced/matrix-multiplication.sfn"      # #1836 range/nested-array map (#766)
+    "examples/advanced/matrix-multiplication.sfn"      # #1836 range/nested-array map still gated (#766)
     "examples/functional/higher-order-functions.sfn"   # #1837 indirect call through fn-typed param
     "examples/advanced/unions.sfn"                      # #1838 @.runtime.field.name global
     "examples/algorithms/quicksort.sfn"                # #1839 double-array GEP i64/ptr

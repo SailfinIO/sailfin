@@ -3,6 +3,7 @@
 // Let binding instruction lowering.
 import { NativeFunction, NativeInstruction, NativeSourceSpan } from "../../native_ir";
 import { index_of } from "../../string_utils";
+import { array_pointer_element_type } from "../expression_lowering/arrays";
 import { analyze_value_ownership, detect_borrow_conflicts, lower_expression } from "../expression_lowering/native/core";
 import { coerce_operand_to_type } from "../expression_lowering/native/core_operands";
 import {
@@ -10,10 +11,10 @@ import {
     mark_last_local_consumed,
     promote_escaping_locals_for_boundaries
 } from "../expression_lowering/native/core_scopes";
-import { is_heap_type } from "../expression_lowering/native/core_type_mapping";
+import { is_heap_type, map_array_pointer_type } from "../expression_lowering/native/core_type_mapping";
 import { detect_suspension_conflicts } from "../expression_lowering/native/statement_suspension";
 import { map_local_type } from "../expression_lowering/native/statement_type_mapping";
-import { find_local_binding, mark_parameter_consumed } from "../expressions_bindings";
+import { find_local_binding, find_parameter_binding, mark_parameter_consumed } from "../expressions_bindings";
 import { default_return_literal, format_local_pointer_name } from "../expressions_helpers";
 import {
     append_lifetime_region,
@@ -110,6 +111,64 @@ fn _extract_leading_call_target(expression: string) -> string {
     return substring(trimmed, 0, index);
 }
 
+// Detect an array higher-order-method initializer `<base>.map(...)` /
+// `<base>.filter(...)` and return the `<base>` identifier, else "". The
+// runtime array-HOF helpers return an opaque `i8*` (runtime_helpers.sfn),
+// so an inferred `let sq = arr.map(...)` records no resolvable array
+// annotation and a follow-on `sq.reduce(...)` / `sq.map(...)` cannot
+// recover the `i64` element type the routing needs
+// (core_call_resolution.sfn:563-676). #1836.
+fn _array_hof_result_base(expression: string) -> string {
+    let trimmed = trim_text(expression);
+    if trimmed.length == 0 { return ""; }
+    let first = substring(trimmed, 0, 1);
+    if !is_identifier_start_char(first) { return ""; }
+    let mut index: int = 1;
+    loop {
+        if index >= trimmed.length { break; }
+        let ch = substring(trimmed, index, index + 1);
+        if !is_identifier_part_char(ch) { break; }
+        index += 1;
+    }
+    let base = substring(trimmed, 0, index);
+    if base.length == 0 { return ""; }
+    let rest = substring(trimmed, index, trimmed.length);
+    if starts_with(rest, ".map(") { return base; }
+    if starts_with(rest, ".filter(") { return base; }
+    return "";
+}
+
+// Recover the source array element type for a base identifier binding,
+// mirroring the receiver-element resolution in
+// core_call_resolution.sfn:563-588 (the binding's llvm_type first, then
+// the source annotation via `map_array_pointer_type`). Returns "" when the
+// base is not a resolvable array. #1836.
+fn _base_array_element_type(base: string, locals: LocalBinding[], bindings: ParameterBinding[], context: TypeContext) -> string {
+    let mut ltype: string = "";
+    let mut ann: string = "";
+    let local = find_local_binding(locals, base);
+    if local != null {
+        ltype = local.llvm_type;
+        ann = local.type_annotation;
+    } else {
+        let param = find_parameter_binding(bindings, base);
+        if param != null {
+            ltype = param.llvm_type;
+            ann = param.type_annotation;
+        }
+    }
+    let mut elem = array_pointer_element_type(ltype);
+    if elem.length == 0 {
+        if ann.length > 0 {
+            let derived = map_array_pointer_type(context, ann);
+            if derived.length > 0 {
+                elem = array_pointer_element_type(derived);
+            }
+        }
+    }
+    return elem;
+}
+
 fn lower_let_instruction(function: NativeFunction, instruction: NativeInstruction, bindings: ParameterBinding[], locals: LocalBinding[], allocas: string[], lines: string[], temp_index: int, next_local_id: int, next_region_id: int, functions: NativeFunction[], context: TypeContext, scope_id: string, scope_depth: int, current_label: string) -> LetLoweringResult ![io] {
     let mut diagnostics: string[] = [];
     let mut current_lines: string[] = lines;
@@ -153,10 +212,36 @@ fn lower_let_instruction(function: NativeFunction, instruction: NativeInstructio
         }
     }
 
-    let trimmed_annotation = trim_text(instruction.type_annotation);
+    // #1836: derive an effective source annotation for the binding before
+    // the LLVM type is computed. An inferred `let sq = arr.map(...)` /
+    // `arr.filter(...)` otherwise binds the runtime-helper result as an
+    // opaque `i8*`, losing the array element type that BOTH the array-HOF
+    // routing (core_call_resolution.sfn:563-676) and the closure-parameter
+    // inference need from the receiver — a follow-on `sq.reduce(...)` /
+    // `sq.map(...)` then fatals at lowering or miscompiles its untyped
+    // closure params to `i8*`. The shipped map/filter helpers are i64-only,
+    // so when the base resolves to an i64 array, treat the binding as
+    // `int[]` — the same annotation a typed `let sq: int[] = ...` carries —
+    // so the result becomes a first-class array local (llvm_type
+    // `{i64*, i64, i64}*`, the i8* result coerced on store) with the element
+    // type recoverable everywhere downstream. Gated on an empty source
+    // annotation so an explicit `let sq: int[] = ...` is untouched; non-i64
+    // element maps never route to the helper (they fatal earlier), so only
+    // genuinely-i64 results are enriched.
+    let mut effective_annotation: string = instruction.type_annotation;
+    if trim_text(instruction.type_annotation).length == 0 {
+        let hof_base = _array_hof_result_base(instruction.value);
+        if hof_base.length > 0 {
+            if _base_array_element_type(hof_base, current_locals, current_bindings, context) == "i64" {
+                effective_annotation = "int[]";
+            }
+        }
+    }
+
+    let trimmed_annotation = trim_text(effective_annotation);
     let mut llvm_type: string = "";
     if trimmed_annotation.length > 0 {
-        llvm_type = map_local_type(context, instruction.type_annotation);
+        llvm_type = map_local_type(context, effective_annotation);
         if llvm_type.length == 0 {
             diagnostics.push("llvm lowering: unsupported local type for `"
                 + instruction.name
@@ -542,7 +627,7 @@ fn lower_let_instruction(function: NativeFunction, instruction: NativeInstructio
     // imported / mangled callees — the unique `target + "__"` suffix, so we
     // reach the same `NativeFunction.return_type` the file-IPC channel used
     // to carry for both local and imported async functions.
-    let mut local_type_annotation: string = instruction.type_annotation;
+    let mut local_type_annotation: string = effective_annotation;
     // Issue #689: enrich the bare `__closure__` sentinel with the
     // lifted lambda's symbol so call-site dispatch can recover the
     // function signature without a side-channel. The AST-level
