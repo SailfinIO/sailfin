@@ -7,14 +7,16 @@
 # pass. Prints a per-file table and a summary.
 #
 # CI ratchet: the KNOWN_FAILING list below enumerates runnable examples that
-# fail today because of an open compiler bug (each tied to its tracking issue).
-# The script gates CI as follows:
+# do not PASS yet (each tied to its tracking issue). Epic #549 — which restored
+# this sweep and fixed the compiler bugs it surfaced — is closed; the entries
+# that remain are gated on unshipped language features, not open #549 bugs, and
+# are tracked in #1883. The script gates CI as follows:
 #   - a NON-listed runnable example that fails  -> REGRESSION -> exit 1
 #   - a listed example that now PASSES          -> XPASS      -> exit 1
-#     (a good problem: the bug is fixed; remove it from KNOWN_FAILING)
+#     (a good problem: the gate landed; remove it from KNOWN_FAILING)
 #   - a listed example that still fails          -> XFAIL      -> tolerated
-# This lets the marketed example surface be guarded now, while the remaining
-# compiler bugs in #549 are worked off one sub-issue at a time.
+# This keeps the marketed example surface guarded now, while the remaining
+# gated examples graduate one at a time as their features ship (#1883).
 #
 # Two files are intentionally not run:
 #   - basics/tests.sfn  — no `main`; exercised by `sfn test`.
@@ -45,15 +47,20 @@ SKIP_RUN=(
     "examples/web/rest-api.sfn"
     "examples/web/websocket-chat.sfn"
     "examples/advanced/web-server-with-concurrency.sfn"
+    # Non-terminating: an infinite `loop { await buffer.receive() }` consumer,
+    # so `sfn run` never returns (like the blocking servers). A bounded rewrite
+    # could return it to the runnable set — tracked in #1883.
+    "examples/concurrency/producer-consumer.sfn"
 )
 
-# Runnable examples that fail today on an open compiler bug (epic #549).
-# Each entry cites its tracking sub-issue; remove it when that issue lands.
+# Runnable examples that fail today on a feature that is not yet shipped — NOT a
+# #549 compiler bug (all of those closed via #1835–#1839). Tracked in #1883;
+# remove each entry when its gate lands (it will flip to XPASS and the ratchet
+# will flag it).
 KNOWN_FAILING=(
-    "examples/advanced/generic-structures.sfn"         # #766 generic-struct method monomorphization
-    "examples/concurrency/producer-consumer.sfn"       # #1835 lowering fatal fixed; run still hangs on drain (#549 await follow-up)
-    "examples/concurrency/dynamic-task-scheduling.sfn" # fn-typed channel element + await (#829)
-    "examples/advanced/matrix-multiplication.sfn"      # #1836 range/nested-array map still gated (#766)
+    "examples/advanced/generic-structures.sfn"         # generic-struct method monomorphization — SFEP-0038 (#1883)
+    "examples/advanced/matrix-multiplication.sfn"      # generics over ranges + nested int[][] — SFEP-0038 (#1883)
+    "examples/concurrency/dynamic-task-scheduling.sfn" # calling an fn-typed value received over a channel + await (#1883)
 )
 
 in_list() {
@@ -127,7 +134,7 @@ done < <(find examples -name '*.sfn' | sort)
 
 if [ "$TSV" -eq 0 ]; then
     echo ""
-    echo "  summary: $pass PASS / ${#regressions[@]} REGRESSION / ${#xpasses[@]} XPASS / $xfail XFAIL(known #549) / $skipped SKIP_RUN"
+    echo "  summary: $pass PASS / ${#regressions[@]} REGRESSION / ${#xpasses[@]} XPASS / $xfail XFAIL(gated #1883) / $skipped SKIP_RUN"
 fi
 
 rc=0
