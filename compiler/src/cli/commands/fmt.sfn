@@ -29,8 +29,7 @@
 // importing module — `fmt` needs 1, so it uses literals to return it.
 //
 // `format_source` lives in `tools/fmt.sfn` and `_collect_sfn_files_cmd`
-// in `cli_commands_utils.sfn`; both are imported in place (relocating them
-// is out of scope here).
+// in the backend-shared `build/fs.sfn`; both are imported in place.
 import {
     Command,
     Matches,
@@ -43,7 +42,7 @@ import {
     with_flag
 } from "sfn/cli";
 
-import { _collect_sfn_files_cmd } from "../../cli_commands_utils";
+import { _collect_sfn_files_cmd } from "../../build/fs";
 import { substring } from "../../string_utils";
 import { format_source } from "../../tools/fmt";
 import { CliContext } from "../context";

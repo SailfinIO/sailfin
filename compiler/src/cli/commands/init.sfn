@@ -27,7 +27,7 @@
 // it must use literals to return them correctly.
 import { Command, Matches, command } from "sfn/cli";
 
-import { _get_env_cmd } from "../../cli_commands_utils";
+import { _get_env_cmd } from "../../build_flags";
 import { substring } from "../../string_utils";
 import { toml_generate } from "../../toml_parser";
 import { CliContext } from "../context";

@@ -48,6 +48,16 @@ import {
 import { AssertFailure, _empty_assert_failure, _parse_assert_failure_record } from "../../assert_failure";
 import { Program, Statement } from "../../ast";
 import { LinkPlan, LlvmTextBackend } from "../../backend";
+import {
+    _dirname_cmd,
+    _ends_with_cmd,
+    _ensure_dir_cmd,
+    _path_join_cmd,
+    _sanitize_filename_cmd,
+    _shell_read_cmd,
+    _strip_trailing_slashes_cmd,
+    _write_text_cmd
+} from "../../build/fs";
 import { assemble_runtime_capsule_link_inputs } from "../../build/runtime_objs";
 import {
     CacheKey,
@@ -59,6 +69,7 @@ import {
     test_bin_cache_key,
     test_bin_cache_root
 } from "../../build_cache";
+import { _env_flag, _get_env_cmd, _legacy_flag_file } from "../../build_flags";
 import { is_safe_scope_name, parse_scope_name } from "../../capsule_artifact";
 import {
     ResolverConsumer,
@@ -67,33 +78,19 @@ import {
     discover_workspace_root,
     prepare_project_capsules_for_test
 } from "../../capsule_resolver";
-import {
-    _collect_test_files_cmd,
-    _dirname_cmd,
-    _ends_with_cmd,
-    _ensure_dir_cmd,
-    _env_flag,
-    _get_env_cmd,
-    _has_prefix_cmd,
-    _legacy_flag_file,
-    _parse_shard_index,
-    _parse_shard_total,
-    _path_join_cmd,
-    _sanitize_filename_cmd,
-    _shard_keeps_index,
-    _shell_read_cmd,
-    _sort_strings_cmd,
-    _strip_trailing_slashes_cmd,
-    _suite_name_from_path,
-    _write_text_cmd
-} from "../../cli_commands_utils";
 import { ImportSymbolTable, empty_import_symbols } from "../../effect_imports";
 import { compile_tests_to_llvm_file_with_module_imports, module_name_from_path } from "../../main";
 import { LayoutManifest } from "../../native_ir";
 import { number_to_string } from "../../num_format";
 import { parse_program } from "../../parser/mod";
 import { runtime_capsule_from_root } from "../../runtime_capsule_resolver";
-import { char_code_at_text, index_of, substring } from "../../string_utils";
+import { _has_prefix_cmd, _sort_strings_cmd } from "../../string_cmd_utils";
+import {
+    char_code_at_text,
+    find_char_local,
+    index_of,
+    substring
+} from "../../string_utils";
 import {
     TestEntry,
     collect_test_entries,
@@ -115,6 +112,193 @@ import { load_imported_interfaces_from_paths } from "../../typecheck_import_load
 import { resolve_test_bin_identity_for_cache } from "../../version";
 import { CliContext } from "../context";
 import { _package_basename } from "./cmd_shared";
+
+fn _looks_like_test_file_cmd(name: string) -> boolean {
+    return _ends_with_cmd(name, "_test.sfn");
+}
+
+fn _collect_test_files_cmd(root: string, max_depth: int) -> string[] ![io] {
+    let mut results: string[] = [];
+    if _ends_with_cmd(root, ".sfn") { return [root]; }
+    // Mirror `_collect_sfn_files_cmd`'s normalization: a trailing
+    // slash on `root` would propagate through `dir + "/" + entry`
+    // into double-slashed paths like `compiler/tests/unit//foo_test.sfn`,
+    // which `_cr_resolve_and_dedupe` cannot navigate out of —
+    // `enumerate_relative_sources` returns zero hits, the resolver
+    // emits `deps=0`, and every test that imports anything fails
+    // with `undefined reference` at link time. The historical
+    // backstop for that surface was `llvm-objcopy --weaken` against
+    // the self-hosted compiler binary; with this normalization in
+    // place the backstop is dead code.
+    let root_norm: string = _strip_trailing_slashes_cmd(root);
+    let mut queue: string[] = [root_norm];
+    let mut depth: int = 0;
+    loop {
+        if depth >= max_depth { break; }
+        if queue.length == 0 { break; }
+        let mut next_queue: string[] = [];
+        let mut qi: int = 0;
+        loop {
+            if qi >= queue.length { break; }
+            let dir = queue[qi];
+            let entries = fs.listDirectory(dir);
+            let mut ei: int = 0;
+            loop {
+                if ei >= entries.length { break; }
+                let entry = entries[ei];
+                let full_path = dir + "/" + entry;
+                if _looks_like_test_file_cmd(entry) {
+                    results.push(full_path);
+                } else {
+                    let child_entries = fs.listDirectory(full_path);
+                    if child_entries.length > 0 {
+                        next_queue.push(full_path);
+                    }
+                }
+                ei += 1;
+            }
+            qi += 1;
+        }
+        queue = next_queue;
+        depth += 1;
+    }
+    return results;
+}
+
+// Derive a per-suite banner label from a positional path passed to
+// `sfn test`. Trims trailing slashes (so `compiler/tests/unit/`
+// yields the same label as `compiler/tests/unit`) and returns the
+// path's basename. Empty input degenerates to `.` so the banner
+// always carries a non-empty label. Pure (no I/O) so it's covered
+// by a fast unit test in
+// `compiler/tests/unit/cli_path_normalization_test.sfn`.
+fn _suite_name_from_path(path: string) -> string {
+    let trimmed = _strip_trailing_slashes_cmd(path);
+    if trimmed.length == 0 { return "."; }
+    let mut last_slash: int = -1;
+    let mut i: int = 0;
+    loop {
+        if i >= trimmed.length { break; }
+        if substring(trimmed, i, i + 1) == "/" { last_slash = i; }
+        i += 1;
+    }
+    if last_slash < 0 { return trimmed; }
+    if last_slash == trimmed.length - 1 { return trimmed; }
+    return substring(trimmed, last_slash + 1, trimmed.length);
+}
+
+// #1236: parse the `--jobs N` value for `sfn test`. Returns the
+// parsed worker count, or `-1` for anything that is not a plain
+// positive decimal integer in [1, 256]. The 256 ceiling is a sanity
+// cap, not a tuning hint: every pooled child is a full compiler
+// invocation whose leaf compile can peak at multiple GB, so callers
+// must size N to the machine's RAM budget — each child runs under
+// its own 8 GB virtual-memory cap, and CI runners (macOS ~7 GB)
+// sustain only a small N. The conservative default is `--jobs 1`
+// (the serial path), which stays byte-identical to the pre-#1236
+// runner.
+fn _parse_jobs_value(text: string) -> int {
+    if text.length == 0 { return -1; }
+    let mut i: int = 0;
+    let mut n: int = 0;
+    loop {
+        if i >= text.length { break; }
+        let c = char_code_at_text(text, i);
+        if c < 48 { return -1; }
+        if c > 57 { return -1; }
+        n = n * 10 + (c - 48);
+        if n > 256 { return -1; }
+        i += 1;
+    }
+    if n < 1 { return -1; }
+    return n;
+}
+
+// `sailfin test --shard I/N` partitioning (issue #1237, test-infra
+// Phase 4 Track A). Moves shard partitioning out of `scripts/test_shards.sh`'s
+// awk stride into the runner: one tested home for the shard map, reusable
+// by the Makefile / CI / nightly. The partition mirrors that script's
+// `(NR - 1) % n == (i - 1)` stride over the sorted file list, so the
+// runner's `--shard` and the legacy bash shard map agree byte-for-byte
+// over the same discovery surface.
+//
+// API shape note: these helpers return only `int` / `boolean` so their
+// signatures resolve across modules in the pinned seed. A struct-valued
+// `_parse_shard_value(...) -> ShardSpec` and an array-valued
+// `_shard_select_indices(...) -> int[]` were the natural first cut, but a
+// *cross-module* call to a function returning a freshly-declared struct or
+// an `int[]` cannot resolve its return type in the seed
+// (`llvm lowering [fatal]: ... callee signature is not known`) — `int[]`
+// was, in fact, the only such return type in the whole compiler. Tracked
+// as a separate compiler-robustness follow-up; the `int`/`boolean` surface
+// below is exactly as testable.
+// Parse one positive decimal field (the `I` or `N` of `I/N`). Returns -1
+// on an empty string or any non-digit byte, matching `_parse_jobs_value`.
+// No 256 ceiling: a shard total is bounded by the discovered file surface,
+// not by per-child memory like `--jobs`.
+fn _parse_shard_field(text: string) -> int {
+    if text.length == 0 { return -1; }
+    let mut i: int = 0;
+    let mut n: int = 0;
+    loop {
+        if i >= text.length { break; }
+        let c = char_code_at_text(text, i);
+        if c < 48 { return -1; }
+        if c > 57 { return -1; }
+        n = n * 10 + (c - 48);
+        i += 1;
+    }
+    if n < 1 { return -1; }
+    return n;
+}
+
+// Parse and fully validate a `--shard I/N` value, returning the field
+// selected by `which` (0 = I, 1 = N), or -1 when the spec is malformed.
+// A valid spec is exactly one '/', both sides positive integers, and
+// `1 <= I <= N`; any deviation ("", "2", "0/3", "4/3", "a/3", "1/2/3")
+// yields -1. The two public wrappers below expose the I and N fields.
+fn _parse_shard_field_at(text: string, which: int) -> int {
+    let slash = find_char_local(text, "/", 0);
+    if slash < 0 { return -1; }
+    let lhs = substring(text, 0, slash);
+    let rhs = substring(text, slash + 1, text.length);
+    // A second '/' (e.g. "1/2/3") is malformed: the right field must
+    // contain no further slash.
+    if find_char_local(rhs, "/", 0) >= 0 { return -1; }
+    let index = _parse_shard_field(lhs);
+    let total = _parse_shard_field(rhs);
+    if index < 1 { return -1; }
+    if total < 1 { return -1; }
+    if index > total { return -1; }
+    if which == 0 { return index; }
+    return total;
+}
+
+// The shard index I of a valid `--shard I/N`, or -1 if the spec is
+// malformed. The caller treats either field returning -1 as a usage error.
+fn _parse_shard_index(text: string) -> int {
+    return _parse_shard_field_at(text, 0);
+}
+
+// The shard total N of a valid `--shard I/N`, or -1 if the spec is
+// malformed.
+fn _parse_shard_total(text: string) -> int {
+    return _parse_shard_field_at(text, 1);
+}
+
+// Does the 0-based `item_index` belong to shard `shard_index`/`shard_total`?
+// The stable stride `item_index % shard_total == shard_index - 1`
+// (`shard_index` is 1-based) mirrors `scripts/test_shards.sh`'s
+// `(NR - 1) % n == (i - 1)`. `1/1` keeps every index. Over
+// `shard_index = 1..shard_total` each item lands in exactly one residue
+// class mod `shard_total`, so the shards are disjoint, their union is the
+// whole surface, and their sizes differ by at most one (file-count
+// balanced). Deterministic: depends only on its three integer arguments,
+// so it is stable across runs and platforms for a fixed sorted file list.
+fn _shard_keeps_index(item_index: int, shard_index: int, shard_total: int) -> boolean {
+    if shard_total < 1 { return false; }
+    return (item_index % shard_total) == (shard_index - 1);
+}
 
 // The `sfn/cli` definition for `test`, registered on the v2 root via
 // `with_subcommand`. Three boolean flags, three value flags (`-k`,
@@ -2392,4 +2576,13 @@ fn _test_bin_runtime_identity(runtime_root: string, unique_suffix: string) -> st
     return runtime_link_inputs_identity(sources, values, unique_suffix + "_rtid");
 }
 
-export { command_def, run };
+export {
+    command_def,
+    run,
+    _collect_test_files_cmd,
+    _suite_name_from_path,
+    _parse_jobs_value,
+    _parse_shard_index,
+    _parse_shard_total,
+    _shard_keeps_index
+};

@@ -4,7 +4,7 @@
 // integers in [1, 256] and reject everything else — `handle_test_command`
 // maps a `-1` return to a usage error (exit 2) rather than silently
 // running serial or unbounded.
-import { _parse_jobs_value } from "../../src/cli_commands_utils";
+import { _parse_jobs_value } from "../../src/cli/commands/test";
 
 test "jobs: plain positive integer parses" {
     assert _parse_jobs_value("4") == 4;

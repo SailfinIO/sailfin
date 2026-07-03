@@ -1,0 +1,122 @@
+// compiler/src/string_cmd_utils.sfn
+//
+// Compiler-local string helpers relocated from `cli_commands_utils`
+// (SFEP-0027 §3.5). Tag: candidates for the `sfn/strings` dogfooding swap
+// owned by #345 §7 / SFEP-0020 §7 — do NOT relocate to `sfn/strings` here.
+import { char_code_at_text, substring } from "./string_utils";
+
+// Lexicographic byte-wise less-than (mirrors `_string_lt` in
+// `build_cache.sfn`). Used to give `sfn test`'s file discovery a
+// stable, platform-independent order — `fs.listDirectory` returns
+// entries in filesystem order, which varies across platforms, so
+// the runner sorts the collected paths to match the old
+// `find ... | sort` Makefile behaviour.
+fn _string_lt_cmd(a: string, b: string) -> boolean {
+    let mut i: int = 0;
+    loop {
+        if i >= a.length || i >= b.length { break; }
+        let ca = char_code_at_text(a, i);
+        let cb = char_code_at_text(b, i);
+        if ca < cb { return true; }
+        if ca > cb { return false; }
+        i += 1;
+    }
+    return a.length < b.length;
+}
+
+// Insertion sort over a string array (N is small — at most the test
+// count of one suite). Returns a new sorted array; input is left
+// untouched.
+fn _sort_strings_cmd(input: string[]) -> string[] {
+    let mut out: string[] = [];
+    let mut copy_i: int = 0;
+    loop {
+        if copy_i >= input.length { break; }
+        out.push(input[copy_i]);
+        copy_i += 1;
+    }
+    let mut k: int = 1;
+    loop {
+        if k >= out.length { break; }
+        let cur = out[k];
+        let mut j: int = k - 1;
+        loop {
+            if j < 0 { break; }
+            if !_string_lt_cmd(cur, out[j]) { break; }
+            out[j + 1] = out[j];
+            j -= 1;
+        }
+        out[j + 1] = cur;
+        k += 1;
+    }
+    return out;
+}
+
+fn _string_contains_cmd(haystack: string, needle: string) -> boolean {
+    if needle.length == 0 { return true; }
+    let mut i: int = 0;
+    loop {
+        if i >= haystack.length { break; }
+        if haystack[i] == needle { return true; }
+        i += 1;
+    }
+    return false;
+}
+
+fn _has_prefix_cmd(value: string, prefix: string) -> boolean {
+    if prefix.length > value.length { return false; }
+    let mut i: int = 0;
+    loop {
+        if i >= prefix.length { break; }
+        if value[i] != prefix[i] { return false; }
+        i += 1;
+    }
+    return true;
+}
+
+fn _byte_at_cmd(text: string, index: int) -> string {
+    if text.length == 0 { return ""; }
+    if index < 0 { return ""; }
+    if index >= text.length { return ""; }
+    return substring(text, index, index + 1);
+}
+
+fn _is_ident_char_cmd(ch: string) -> boolean {
+    let allowed = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789_";
+    return _string_contains_cmd(allowed, ch);
+}
+
+fn _word_matches_cmd(source: string, index: int, word: string) -> boolean {
+    if word.length == 0 { return false; }
+    if index < 0 { return false; }
+    let end_pos = index + word.length;
+    if end_pos > source.length { return false; }
+    if substring(source, index, end_pos) != word { return false; }
+    if index > 0 {
+        if _is_ident_char_cmd(_byte_at_cmd(source, index - 1)) { return false; }
+    }
+    if end_pos < source.length {
+        if _is_ident_char_cmd(_byte_at_cmd(source, end_pos)) { return false; }
+    }
+    return true;
+}
+
+fn _string_list_contains_cmd(items: string[], value: string) -> boolean {
+    let mut i: int = 0;
+    loop {
+        if i >= items.length { break; }
+        if items[i] == value { return true; }
+        i += 1;
+    }
+    return false;
+}
+
+export {
+    _sort_strings_cmd,
+    _string_contains_cmd,
+    _has_prefix_cmd,
+    _byte_at_cmd,
+    _is_ident_char_cmd,
+    _word_matches_cmd,
+    _string_list_contains_cmd
+};

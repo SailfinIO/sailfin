@@ -31,8 +31,8 @@ import {
     with_flag
 } from "sfn/cli";
 
+import { _sha256_of_file_cmd, _shell_read_cmd, _shell_single_quote_arg } from "../../build/fs";
 import { is_safe_scope_name, parse_scope_name } from "../../capsule_artifact";
-import { _sha256_of_file_cmd, _shell_read_cmd, _shell_single_quote_arg } from "../../cli_commands_utils";
 import { DistManifest, dist_manifest_to_json, empty_dist_manifest } from "../../dist_manifest";
 import { number_to_string } from "../../num_format";
 import { substring } from "../../string_utils";

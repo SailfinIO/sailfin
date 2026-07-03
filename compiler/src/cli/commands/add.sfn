@@ -46,15 +46,13 @@ import {
 } from "sfn/cli";
 
 import {
-    _curl_download_cmd,
-    _display_capsule_name_cmd,
+    _dirname_cmd,
     _ensure_dir_recursive_cmd,
-    _extract_sfnpkg_cmd,
-    _get_home_cmd,
-    _resolve_capsule_name_cmd,
     _sha256_of_file_cmd,
     _shell_read_cmd
-} from "../../cli_commands_utils";
+} from "../../build/fs";
+import { _get_home_cmd } from "../../build_flags";
+import { _display_capsule_name_cmd, _resolve_capsule_name_cmd } from "../../capsule_names";
 import { lock_add_entry, lock_get_version } from "../../lock";
 import { find_char_local, substring } from "../../string_utils";
 import {
@@ -89,6 +87,60 @@ fn _join_caps_cmd(caps: string[]) -> string {
         i += 1;
     }
     return out;
+}
+
+fn _curl_post_json_cmd(url: string, body_path: string, auth_header: string) -> string ![io] {
+    let tmp = "/tmp/.sfn_curl_response_cmd_tmp";
+    let rc = process.run(["curl", "-sfS", "-X", "POST", "-H", "Content-Type: application/json", "-H", "Authorization: "
+        + auth_header, "-d", "@"
+        + body_path, "-o", tmp, url]);
+    if rc != 0 { return ""; }
+    if !fs.exists(tmp) { return ""; }
+    let response = fs.readFile(tmp);
+    process.run(["rm", "-f", tmp]);
+    return response;
+}
+
+fn _curl_download_cmd(url: string, output_path: string) -> int ![io] {
+    return process.run(["curl", "-sfSL", "-o", output_path, url]);
+}
+
+fn _extract_sfnpkg_cmd(content: string, dest_dir: string) -> void ![io] {
+    let mut pos: int = 0;
+    let header = "SFNPKG/1\n";
+    if content.length < header.length { return; }
+    pos = header.length;
+    let marker = "--- path: ";
+    loop {
+        if pos >= content.length { break; }
+        let remaining = substring(content, pos, content.length);
+        if remaining.length < marker.length { break; }
+        if substring(remaining, 0, marker.length) != marker {
+            pos += 1;
+            continue;
+        }
+        let after_marker = substring(remaining, marker.length, remaining.length);
+        let nl_idx = find_char_local(after_marker, "\n", 0);
+        if nl_idx < 0 { break; }
+        let rel_path = substring(after_marker, 0, nl_idx);
+        let body_start = pos + marker.length + nl_idx + 1;
+        let mut body_end: int = content.length;
+        let next_marker_search = substring(content, body_start, content.length);
+        let next_idx = find_char_local(next_marker_search, "-", 0);
+        if next_idx >= 0 {
+            if next_idx + marker.length <= next_marker_search.length {
+                if substring(next_marker_search, next_idx, next_idx + marker.length) == marker {
+                    body_end = body_start + next_idx;
+                }
+            }
+        }
+        let file_body = substring(content, body_start, body_end);
+        let full_path = dest_dir + "/" + rel_path;
+        let file_dir = _dirname_cmd(full_path);
+        _ensure_dir_recursive_cmd(file_dir);
+        fs.writeFile(full_path, file_body);
+        pos = body_end;
+    }
 }
 
 // Add a dependency capsule: resolve its version (locked or from the

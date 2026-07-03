@@ -11,7 +11,7 @@
 // copy) rather than imported from capsule_resolver: capsule_resolver imports
 // THIS module, so importing back would form a cycle. The original copy stays
 // in capsule_resolver for its own `_cr_get_home`/`_cr_scratch_root` callers.
-import { _atomic_rename_into_place, _mktemp_sibling_cmd } from "./cli_commands_utils";
+import { _atomic_rename_into_place, _mktemp_sibling_cmd } from "./build/fs";
 import { number_to_string } from "./main";
 import { substring } from "./string_utils";
 
@@ -52,7 +52,7 @@ fn _cr_shell_read(cmd: string) -> string ![io] {
 // Shell single-quote a string so it can be embedded safely in a
 // `sh -c '...'` invocation. Escapes embedded single-quotes via the
 // classic `'\''` dance. Inlined here rather than imported from
-// `cli_commands_utils` to keep the resolver's dep diamond shallow.
+// `build/fs.sfn` to keep the resolver's dep diamond shallow.
 fn _cr_shell_quote(value: string) -> string {
     let mut out: string = "'";
     let mut i: int = 0;

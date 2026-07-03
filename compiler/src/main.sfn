@@ -2,7 +2,7 @@
 //
 // Sailfin compiler main module and compilation entry points.
 import { Program, Statement } from "./ast";
-import { _env_flag, _legacy_flag_file } from "./cli_commands_utils";
+import { _env_flag, _legacy_flag_file } from "./build_flags";
 import { render_diagnostic, split_source_lines } from "./diagnostics_render";
 import {
     validate_and_render_effects,

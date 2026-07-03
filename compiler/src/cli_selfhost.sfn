@@ -35,6 +35,12 @@
 // `_emit_runtime_sfn_source` uses, `cli_main.sfn:1197`), keeping this a
 // pure-orchestration driver that post-processes no artifact.
 import {
+    _ensure_dir_recursive_cmd,
+    _sha256_of_file_cmd,
+    _shell_read_cmd,
+    _shell_single_quote_arg
+} from "./build/fs";
+import {
     DeterminismModule,
     DeterminismSnapshot,
     compare_for_determinism,
@@ -42,12 +48,6 @@ import {
     determinism_diff_to_text,
     make_determinism_module
 } from "./build_report";
-import {
-    _ensure_dir_recursive_cmd,
-    _sha256_of_file_cmd,
-    _shell_read_cmd,
-    _shell_single_quote_arg
-} from "./cli_commands_utils";
 import { number_to_string } from "./main";
 import { substring } from "./string_utils";
 
@@ -90,7 +90,7 @@ fn _selfhost_usage() -> string {
 }
 
 // Whether `needle` occurs in `haystack`. `_string_contains_cmd` in
-// cli_commands_utils only tests single-character membership, so the
+// string_cmd_utils only tests single-character membership, so the
 // smoke gate needs a real substring scan.
 fn _selfhost_contains(haystack: string, needle: string) -> boolean {
     if needle.length == 0 { return true; }

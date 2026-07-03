@@ -34,6 +34,7 @@
 // Consumers then call `_clang_link_multi` with the main .ll and the
 // capsule .ll paths, and clang produces a linked binary with all
 // capsule symbols resolved.
+import { _atomic_rename_into_place, _mktemp_sibling_cmd } from "./build/fs";
 import {
     BuildCacheConfig,
     CacheKey,
@@ -65,11 +66,7 @@ import {
     collect_relative_import_specs,
     collect_scoped_import_specs
 } from "./capsule_import_scan";
-import {
-    _atomic_rename_into_place,
-    _display_capsule_name_cmd,
-    _mktemp_sibling_cmd
-} from "./cli_commands_utils";
+import { _display_capsule_name_cmd } from "./capsule_names";
 import { emit_subprocess_with_retry } from "./emit_helpers";
 import { _LockEntry, lock_get_versions } from "./lock";
 import {
@@ -344,13 +341,13 @@ fn _cr_ends_with(text: string, suffix: string) -> boolean {
 // fixed `/tmp/.sfn_capsule_resolver_tmp` path that previously raced
 // across xargs-spawned emit workers and parallel `sfn test`
 // invocations. The helper is the same one
-// `cli_commands_utils.sfn:_shell_read_cmd` calls; declaring it here
+// `build/fs.sfn:_shell_read_cmd` calls; declaring it here
 // keeps the resolver self-contained (no new cross-module import).
 extern fn sailfin_runtime_shell_capture(cmd: * u8) -> * u8;
 
 fn _cr_shell_read(cmd: string) -> string ![io] {
     let captured = sailfin_runtime_shell_capture(cmd);
-    // Match the trimming semantics of `cli_commands_utils.sfn:_shell_read_cmd`
+    // Match the trimming semantics of `build/fs.sfn:_shell_read_cmd`
     // (which routes through `_toml_trim_cmd` for symmetric whitespace
     // stripping). Without this, an env value with trailing whitespace
     // could make `_cr_scratch_root` and `_test_scratch_root` disagree

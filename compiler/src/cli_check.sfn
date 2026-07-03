@@ -17,6 +17,7 @@
 // resolve each project independently rather than silently anchoring
 // on whichever path came first.
 import { Statement } from "./ast";
+import { _collect_sfn_files_cmd, _dirname_cmd, _path_join_cmd } from "./build/fs";
 import {
     CheckCapsuleResolution,
     discover_project_root,
@@ -24,7 +25,6 @@ import {
     empty_resolver_consumer,
     prepare_project_capsules_for_check
 } from "./capsule_resolver";
-import { _collect_sfn_files_cmd, _dirname_cmd, _path_join_cmd } from "./cli_commands_utils";
 import {
     CheckJsonEvent,
     CheckJsonSummary,

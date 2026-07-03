@@ -54,12 +54,8 @@
 // **Back-compat.** `_legacy_flag_file` keeps `touch
 // build/sailfin/.trace_lowering` working for one release. Drop the
 // shim in the release after #312 ships.
-import {
-    _env_flag,
-    _legacy_flag_file,
-    _shell_read_cmd,
-    _get_env_cmd
-} from "../cli_commands_utils";
+import { _shell_read_cmd } from "../build/fs";
+import { _env_flag, _get_env_cmd, _legacy_flag_file } from "../build_flags";
 
 export {
     trace_lowering,
