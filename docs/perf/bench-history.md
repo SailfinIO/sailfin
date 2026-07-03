@@ -30,8 +30,10 @@ compares their output.
 | `build.csv` | `run_sha,run_date,build_wall_s,budget_s` |
 
 Every nightly run appends one block of rows to each file. Append is
-**idempotent per commit**: if a run's SHA is already in `compile.csv`, re-running
-the job is a no-op (safe manual re-runs).
+**idempotent per commit, per file**: each of `compile.csv`, `runtime.csv`, and
+`build.csv` is guarded on its own SHA column, so re-running the job never
+duplicates rows — even after a partial run where one bench aborted before
+writing its CSV and only the others were recorded (safe manual re-runs).
 
 ## How regressions are detected
 

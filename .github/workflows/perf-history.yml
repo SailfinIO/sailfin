@@ -199,7 +199,9 @@ jobs:
           set -euo pipefail
           run_date="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
           git -C bench-data add -A
-          if git -C bench-data diff --cached --quiet; then
+          # HEAD-independent staged-change check: works on the first-ever run
+          # when bench-data is an unborn orphan branch (no HEAD to diff against).
+          if [ -z "$(git -C bench-data status --porcelain)" ]; then
             echo "[perf-history] no new data to commit (run $SHA already recorded)"
           else
             git -C bench-data commit -q -m "perf-history: ${SHA} (${run_date})"
