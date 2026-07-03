@@ -11,7 +11,7 @@ import { Diagnostic } from "../../src/typecheck_types";
 
 fn _codes_for(source: string, code: string) -> int ![io] {
     let program = parse_program(source);
-    let diags = typecheck_diagnostics(program);
+    let diags: Diagnostic[] = typecheck_diagnostics(program);
     let mut count: int = 0;
     let mut i: int = 0;
     loop {

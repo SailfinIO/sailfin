@@ -100,21 +100,22 @@ let runtime_grapheme_at_fn = runtime.grapheme_at;
 // at declaration time (#1868). Satisfaction checking (E0820) and
 // monomorphization are the enforcement siblings, not part of this slice.
 interface Eq {
-    fn eq(other: Self) -> bool;
+    fn eq(self, other: Self) -> boolean;
 }
 
 interface Comparable {
-    fn compare(other: Self) -> int;
+    fn compare(self, other: Self) -> int;
 }
 
 interface Hashable {
-    fn hash() -> int;
+    fn hash(self) -> int;
 }
 
 interface Display {
-    fn to_string() -> string;
+    fn to_string(self) -> string;
 }
 
+// `from` is a static factory (no `self`), mirroring Rust's `From::from`.
 interface From<T> {
     fn from (value: T) -> Self;
 }

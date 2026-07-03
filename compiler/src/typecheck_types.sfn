@@ -1666,7 +1666,7 @@ fn check_type_parameters(type_parameters: TypeParameter[], interfaces: Statement
                 if _bri >= bound_refs.length { break; }
                 let ref_text = trim_text(bound_refs[_bri]);
                 if ref_text.length > 0 {
-                    let d = check_single_bound(ref_text, tp.name, interfaces, top_level);
+                    let d = check_single_bound(ref_text, tp.name, tp.span, interfaces, top_level);
                     if d != null { diagnostics.push(d); }
                 }
                 _bri += 1;
@@ -2039,19 +2039,19 @@ fn symbol_has_kind(symbols: SymbolEntry[], name: string, kind: string) -> boolea
     return false;
 }
 
-fn make_bound_not_interface_diagnostic(bound_name: string, param_name: string) -> Diagnostic {
+fn make_bound_not_interface_diagnostic(bound_name: string, param_name: string, span: SourceSpan?) -> Diagnostic {
     return Diagnostic {
         code: "E0821",
         severity: "error",
         message: "bound `" + bound_name + "` on type parameter `" + param_name
             + "` is not an interface",
         file_path: "",
-        primary: null,
+        primary: token_from_name(param_name, span),
         suggestion: null
     };
 }
 
-fn make_bound_arity_diagnostic(bound_name: string, param_name: string, interface_signature: string) -> Diagnostic {
+fn make_bound_arity_diagnostic(bound_name: string, param_name: string, interface_signature: string, span: SourceSpan?) -> Diagnostic {
     return Diagnostic {
         code: "E0822",
         severity: "error",
@@ -2060,7 +2060,7 @@ fn make_bound_arity_diagnostic(bound_name: string, param_name: string, interface
             + interface_signature
             + " type arguments",
         file_path: "",
-        primary: null,
+        primary: token_from_name(param_name, span),
         suggestion: null
     };
 }
@@ -2073,7 +2073,7 @@ fn make_bound_arity_diagnostic(bound_name: string, param_name: string, interface
 // an unresolved name may be a prelude/imported interface not visible in a
 // single-file check, so it is left unflagged to avoid false positives on
 // std-library bounds.
-fn check_single_bound(ref_text: string, param_name: string, interfaces: Statement[], top_level: SymbolEntry[]) -> Diagnostic? {
+fn check_single_bound(ref_text: string, param_name: string, span: SourceSpan?, interfaces: Statement[], top_level: SymbolEntry[]) -> Diagnostic? {
     let annotation = TypeAnnotation { text: ref_text };
     let iface = resolve_interface_annotation(annotation, interfaces);
     if iface != null {
@@ -2082,21 +2082,21 @@ fn check_single_bound(ref_text: string, param_name: string, interfaces: Statemen
         let provided = parse_type_arguments(ref_text);
         if expected == 0 {
             if provided.length > 0 {
-                return make_bound_arity_diagnostic(trim_text(ref_text), param_name, format_interface_signature(found));
+                return make_bound_arity_diagnostic(trim_text(ref_text), param_name, format_interface_signature(found), span);
             }
         } else {
             if provided.length != expected {
-                return make_bound_arity_diagnostic(trim_text(ref_text), param_name, format_interface_signature(found));
+                return make_bound_arity_diagnostic(trim_text(ref_text), param_name, format_interface_signature(found), span);
             }
         }
         return null;
     }
     let base = bound_base_name(ref_text);
     if symbol_has_kind(top_level, base, "struct") {
-        return make_bound_not_interface_diagnostic(base, param_name);
+        return make_bound_not_interface_diagnostic(base, param_name, span);
     }
     if symbol_has_kind(top_level, base, "enum") {
-        return make_bound_not_interface_diagnostic(base, param_name);
+        return make_bound_not_interface_diagnostic(base, param_name, span);
     }
     return null;
 }
