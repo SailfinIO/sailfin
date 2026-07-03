@@ -1,0 +1,53 @@
+// End-to-end regression for #1839 — a closure that captures an un-annotated
+// `let pivot = arr[0]` must compile to valid IR and run correctly. Before the
+// fix the capture's env field fell back to the opaque `i8*` slot while the
+// stored value was an `i64`, emitting `store i8* %v, i8** ...` — invalid IR
+// the LLVM verifier rejected at link (`'%tN' defined with type 'i64' but
+// expected 'ptr'`). Functional quicksort exercises three such captures.
+//
+// Drives the compiler-under-test as a subprocess with the runtime `process.*`
+// builtins and asserts on captured stdout — the canonical e2e pattern (see
+// `.claude/rules/no-bash-e2e.md`, `array_filter_closure_test.sfn`).
+import { trim_right } from "sfn/strings";
+
+// The compiler-under-test: `$SAILFIN_BIN` if set, else the self-hosted binary
+// relative to the repo root the runner starts from. Mirrors `sfn/test`'s
+// `_resolve_sfn_bin` so CI can point the test at any compiler.
+fn _sfn_bin() -> string ![io] {
+    let configured = env.get("SAILFIN_BIN");
+    if configured.length > 0 { return configured; }
+    return "build/native/sailfin";
+}
+
+// `sfn run` compiles+links+executes the fixture, so the spawned compiler
+// needs a real environment (PATH for the linker, SAILFIN_TEST_SCRATCH for
+// per-invocation build-cache isolation under the parallel pool, #1333).
+fn _child_env() -> string[] ![io] { return process.environ(); }
+
+struct RunOut {
+    exit: int;
+    out: string;
+}
+
+fn _run_fixture(path: string) -> RunOut ![io] {
+    let exit = process.run_capture([_sfn_bin(), "run", path], _child_env());
+    let out = process.capture_take_stdout();
+    let _err = process.capture_take_stderr();
+    return RunOut { exit: exit, out: trim_right(out) };
+}
+
+test "closure capture: un-annotated pivot compiles and sorts correctly" ![io] {
+    let r = _run_fixture("compiler/tests/e2e/fixtures/closure_capture_inferred_pivot/main.sfn");
+    // Exit 0 proves the IR linked (the pre-fix bug failed here); the output
+    // proves the captured `pivot` carried the right value through each filter.
+    assert r.exit == 0;
+    assert r.out == "1\n5\n7\n8\n9\n10";
+}
+
+test "closure capture: whole un-annotated array literal captured and indexed" ![io] {
+    let r = _run_fixture("compiler/tests/e2e/fixtures/closure_capture_whole_array/main.sfn");
+    // Pins the array-literal inference arm's env field shape: `nums` is
+    // captured whole and indexed inside the predicate. [20,30,40] > 10 → 3.
+    assert r.exit == 0;
+    assert r.out == "3";
+}

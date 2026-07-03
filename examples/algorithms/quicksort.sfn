@@ -1,17 +1,21 @@
 // examples/algorithms/quicksort.sfn
-
 fn quicksort(arr: int[]) -> int[] {
     if arr.length <= 1 { return arr; }
 
     let pivot = arr[0];
-    let less = arr.filter(fn(x) -> boolean { return x < pivot; });
-    let equal = arr.filter(fn(x) -> boolean { return x == pivot; });
-    let greater = arr.filter(fn(x) -> boolean { return x > pivot; });
+    let less = arr.filter(fn (x) -> boolean { return x < pivot; });
+    let equal = arr.filter(fn (x) -> boolean { return x == pivot; });
+    let greater = arr.filter(fn (x) -> boolean { return x > pivot; });
 
     return quicksort(less).concat(equal).concat(quicksort(greater));
 }
 
 fn main() ![io] {
     let nums = [10, 7, 8, 9, 1, 5];
-    print("Sorted: {{quicksort(nums)}}");
+    let sorted = quicksort(nums);
+    // Render element-wise: whole-array interpolation is not yet supported
+    // (tracked separately under epic #549's string-formatting category).
+    let mut line = "Sorted:";
+    for x in sorted { line = line + " {{x}}"; }
+    print(line);
 }

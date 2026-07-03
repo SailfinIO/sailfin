@@ -1,0 +1,35 @@
+// End-to-end regression for #1839 (acceptance criterion) — indexing and
+// mutating a `float[]` must round-trip correctly. Guards the float/double
+// array element addressing path (GEP over a `{ double*, i64, i64 }*` array),
+// the surface the issue's original diagnosis named.
+//
+// Drives the compiler-under-test as a subprocess (see
+// `.claude/rules/no-bash-e2e.md`, `array_filter_closure_test.sfn`).
+import { trim_right } from "sfn/strings";
+
+fn _sfn_bin() -> string ![io] {
+    let configured = env.get("SAILFIN_BIN");
+    if configured.length > 0 { return configured; }
+    return "build/native/sailfin";
+}
+
+fn _child_env() -> string[] ![io] { return process.environ(); }
+
+struct RunOut {
+    exit: int;
+    out: string;
+}
+
+fn _run_fixture(path: string) -> RunOut ![io] {
+    let exit = process.run_capture([_sfn_bin(), "run", path], _child_env());
+    let out = process.capture_take_stdout();
+    let _err = process.capture_take_stderr();
+    return RunOut { exit: exit, out: trim_right(out) };
+}
+
+test "float array: index read and slot mutate round-trip" ![io] {
+    let r = _run_fixture("compiler/tests/e2e/fixtures/float_array_index_mutate/main.sfn");
+    assert r.exit == 0;
+    // xs[0] read as 3.5; xs[1] mutated to 9.9 and read back.
+    assert r.out == "a=3.5 b=9.9";
+}
