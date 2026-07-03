@@ -295,7 +295,7 @@ substitution** is the complete 1.0 rule:
   docstring already lives with) and is not a regression this proposal
   introduces; tightening it further needs the type-annotation resolver work
   generic constraints will need anyway (§6, cross-reference to
-  `draft-generic-constraints.md`).
+  `0038-generic-constraints.md`).
 
 ### 3.5 New diagnostic: `E0303`
 
@@ -649,7 +649,7 @@ later error-default flip.
 - `site/src/content/docs/docs/reference/spec/03-declarations.md` §3.3, §3.5 —
   current documented `struct`/`interface`/`implements` syntax (bare `self`
   receiver convention this proposal's §3.1 rule depends on).
-- `draft-generic-constraints.md` (forthcoming SFEP) — constraint satisfaction
+- `0038-generic-constraints.md` (forthcoming SFEP) — constraint satisfaction
   for generic bounds (`fn foo<T: Container>(...)`) will need to answer "does
   `T` satisfy `Container`" using the same conformance check this proposal
   hardens; today's name-only check would let an ill-typed `T` satisfy a bound

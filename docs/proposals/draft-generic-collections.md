@@ -75,7 +75,7 @@ into every consumer instead of a uniform generic vocabulary.
 ## 3. Design
 
 This SFEP consumes, and does **not** re-specify, the generic type-parameter
-constraint system designed in `draft-generic-constraints.md` (the
+constraint system designed in `0038-generic-constraints.md` (the
 `Hashable` / `Eq` bounds and the monomorphization pass). That constraint system
 is a **hard dependency** (§7 dependencies): `Map<K, V>` and `Set<T>` cannot ship
 until `<K: Hashable>` bounds are solvable and monomorphizable. Tuples do **not**
@@ -164,7 +164,7 @@ over their type parameters, backed by the same open-addressed hash-table layout
 resize — `runtime/sfn/collections.sfn:20-52`). The only differences from
 `StrMap` are (1) the key/value arrays are `K[]` / `V[]` instead of `string[]`,
 and (2) hashing and equality are dispatched through the `Hashable` / `Eq`
-bounds from `draft-generic-constraints.md` instead of the hard-coded
+bounds from `0038-generic-constraints.md` instead of the hard-coded
 `_fnv1a(string)`:
 
 ```sfn
@@ -264,7 +264,7 @@ land:
 
 ### 3.5 Monomorphization
 
-Consistent with `draft-generic-constraints.md` and SFEP-0028: each concrete
+Consistent with `0038-generic-constraints.md` and SFEP-0028: each concrete
 `(K, V)` / `T` instantiation of `Map` / `Set` (and each generic collection
 function) is **monomorphized** at the call site. The key/value arrays lower to
 `K[]` / `V[]` with the element's natural width (using the `elem_size` already
@@ -305,7 +305,7 @@ Passes touched, in pipeline order:
   appended per the GEP-stability convention (`compiler/src/ast.sfn:60`).
 - **Typecheck** (`typecheck.sfn`): tuple structural typing + constant-index
   bounds checking; `Map`/`Set` generic-constraint solving (delegated to the
-  `draft-generic-constraints.md` solver — this SFEP adds the `Hashable`/`Eq`
+  `0038-generic-constraints.md` solver — this SFEP adds the `Hashable`/`Eq`
   requirement at map/set key positions, not the solver).
 - **Effect checker** (`effect_checker.sfn`): recurse into `Tuple.elements`,
   `TupleIndex.object`, `MapLiteral.keys`/`.values` — mechanical, same pattern
@@ -325,7 +325,7 @@ parser/AST/typecheck/lowering all move together, and the compiler source does
 not use tuples until the tuple-capable compiler is the pinned seed. Whether to
 split "tuples" from "map/set" is a grooming decision; the natural split is
 **two bundles** — tuples first (no generics dependency), then map/set (gated on
-`draft-generic-constraints.md`).
+`0038-generic-constraints.md`).
 
 ## 6. Alternatives considered
 
@@ -361,7 +361,7 @@ split "tuples" from "map/set" is a grooming decision; the natural split is
 ## 7. Stage1 readiness mapping
 
 Nothing here is built yet — this is a Draft design record. **Dependency:**
-`draft-generic-constraints.md` must be Accepted-and-Implemented (the
+`0038-generic-constraints.md` must be Accepted-and-Implemented (the
 `Hashable`/`Eq` bounds + monomorphization) before `Map`/`Set` can clear these
 boxes; `draft-derive.md` (`Hash`/`Eq` derivation) makes user structs usable as
 keys but is not strictly required for primitive-keyed maps. Tuples have no such
@@ -406,7 +406,7 @@ Unit (parser/typecheck) + e2e (`compiler/tests/{unit,integration,e2e}/`):
 
 ## 9. References
 
-- `draft-generic-constraints.md` — **hard dependency**: the `Hashable` / `Eq`
+- `0038-generic-constraints.md` — **hard dependency**: the `Hashable` / `Eq`
   bounds and monomorphization pass this SFEP consumes for `Map`/`Set` keys.
   This SFEP does not re-specify the constraint system.
 - **SFEP-0028** (`0028-typed-array-higher-order-fns.md`) — typed / generic

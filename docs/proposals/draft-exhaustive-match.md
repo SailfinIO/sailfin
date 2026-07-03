@@ -263,7 +263,7 @@ the same rule so `sfn check` and `build`/`run` agree (see §5).
 New diagnostic code **`E0823`** (the next free slot in the `E08xx` typecheck
 range; `E0801`–`E0819` are taken across `typecheck_types.sfn`/`typecheck.sfn`/
 `atomics.sfn`/`byte_load.sfn`/`core_member_lowering.sfn`, and the sibling
-in-flight draft `docs/proposals/draft-generic-constraints.md` has claimed
+in-flight draft `docs/proposals/0038-generic-constraints.md` has claimed
 `E0820`–`E0822`):
 
 ```
@@ -606,7 +606,7 @@ in the same pass.
   frontend feature to the statically-resolvable case rather than blocking on
   #829 expression-type inference; the "decline, don't guess" discipline this
   SFEP's §3.3.5 follows.
-- `docs/proposals/draft-generic-constraints.md` — sibling in-flight draft
+- `docs/proposals/0038-generic-constraints.md` — sibling in-flight draft
   claiming `E0820`–`E0822`; this SFEP claims the next free block,
   `E0823`(–`W0823`), to avoid collision.
 - Issue #829 — expression-type inference (tracked dependency for widening
