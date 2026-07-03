@@ -1,0 +1,11 @@
+// #1837 — a user higher-order function whose parameter is declared
+// `fn(int) -> int`, invoked with a lambda that wraps a named function
+// call. Exercises indirect-call return-type resolution through a
+// function-typed parameter: `apply(5, fn(x) => double(x))` = 10.
+fn apply(value: int, transformer: fn (int) -> int) -> int {
+    return transformer(value);
+}
+
+fn double(x: int) -> int { return x * 2; }
+
+fn main() ![io] { print(apply(5, fn (x) => double(x))); }

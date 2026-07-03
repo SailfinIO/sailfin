@@ -1,0 +1,45 @@
+// End-to-end: an indirect call through a `fn(int) -> int` parameter lowers
+// and returns the correct value (#1837). The callee is a plain parameter
+// identifier, not a method on a receiver, so its return type must come from
+// the parameter's declared function type. The canonical `fn(int) -> int`
+// spelling maps the parameter to the `{i8*, i8*}` closure pair and dispatches
+// through the closure seam; the non-canonical bare `(int) -> int` spelling
+// instead mapped it to an opaque `i8*` and silently produced the wrong result
+// (`Result: 0`), which is why the shipped example was rewritten to the
+// canonical spelling.
+//
+// Drives the compiler-under-test as a subprocess and asserts on captured
+// stdout — the canonical e2e pattern (`.claude/rules/no-bash-e2e.md`,
+// `untyped_lambda_callback_test.sfn`).
+import { trim_right } from "sfn/strings";
+
+// The compiler-under-test: `$SAILFIN_BIN` if set, else the self-hosted
+// binary relative to the repo root the runner starts from.
+fn _sfn_bin() -> string ![io] {
+    let configured = env.get("SAILFIN_BIN");
+    if configured.length > 0 { return configured; }
+    return "build/native/sailfin";
+}
+
+// `sfn run` compiles+links+executes the fixture, so the spawned compiler
+// needs a real environment (PATH for the linker, plus SAILFIN_TEST_SCRATCH
+// for per-invocation build-cache isolation under the parallel pool, #1333).
+fn _child_env() -> string[] ![io] { return process.environ(); }
+
+fn _run(path: string) -> string ![io] {
+    let exit = process.run_capture([_sfn_bin(), "run", path], _child_env());
+    let out = process.capture_take_stdout();
+    let _err = process.capture_take_stderr();
+    assert exit == 0;
+    return trim_right(out);
+}
+
+test "hof: fn(int)->int param invoked with a named-fn lambda returns 10" ![io] {
+    let out = _run("compiler/tests/e2e/fixtures/higher_order_named_fn/apply_named.sfn");
+    assert out == "10";
+}
+
+test "hof: shipped higher-order-functions example prints Result: 10" ![io] {
+    let out = _run("examples/functional/higher-order-functions.sfn");
+    assert out == "Result: 10";
+}
