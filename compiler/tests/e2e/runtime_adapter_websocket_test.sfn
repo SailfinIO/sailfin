@@ -1,0 +1,200 @@
+// End-to-end test for runtime/sfn/adapters/websocket.sfn — the
+// Sailfin-native RFC 6455 `ws://` client adapter (#1876, epic #1180
+// Phase G follow-through; parent #1630).
+//
+// Pins, end-to-end, the client-bridge registry flip (#1876) that replaced
+// the effect-metadata-only `sfn_websocket_unbridged` sentinel rows (#1601)
+// with real `sfn_websocket_*` symbols:
+//   1. typecheck   — `sfn check runtime/sfn/adapters/websocket.sfn` is ok.
+//   2. fmt         — the module is fmt-canonical.
+//   3. emit shape  — the module emits a `define` for every sfn_websocket_*
+//                    client export and `declare`s the BSD-sockets libc
+//                    surface (socket/connect/send/recv/close) plus the
+//                    OpenSSL handshake surface it links (RAND_bytes,
+//                    EVP_EncodeBlock).
+//   4. routing     — `websocket.connect/.send/.close` member calls lower to
+//                    real `@sfn_websocket_*` calls and NOT the unbridged
+//                    `@sfn_websocket_unbridged` sentinel.
+//
+// OMITTED here: the behavioral loopback send/receive/close round-trip. It
+// needs a real server end (`websocket.serve`), which lands in #1877; the
+// loopback test lands with it. This test covers the client registry-flip
+// behavior (emit shape + routing) without a network, mirroring
+// `runtime_adapter_http_test.sfn`.
+//
+// NOTE on matchers: the `sfn/test` `expect_*` matchers are `![pure]`, so
+// they cannot be called from an `![io]` test. For subprocess/IR-output
+// assertions use `sfn/strings` (`find` / `split` / `starts_with` /
+// `contains` / `char_at_index`).
+import {
+    find,
+    split,
+    starts_with,
+    contains,
+    char_at_index
+} from "sfn/strings";
+
+// The compiler-under-test: `$SAILFIN_BIN` if set, else the self-hosted
+// binary relative to the repo root the runner starts from.
+fn _sfn_bin() -> string ![io] {
+    let configured = env.get("SAILFIN_BIN");
+    if configured.length > 0 { return configured; }
+    return "build/native/sailfin";
+}
+
+// `run_capture`'s empty array is the *empty* environment; thread the
+// variables the toolchain needs. `emit` / `check` neither link nor spawn
+// clang (no PATH required), but keep the standard set for portability.
+fn _child_env() -> string[] ![io] {
+    let mut e: string[] = [];
+    let path = env.get("PATH");
+    if path.length > 0 { e.push("PATH=" + path); }
+    let home = env.get("HOME");
+    if home.length > 0 { e.push("HOME=" + home); }
+    let tmpdir = env.get("TMPDIR");
+    if tmpdir.length > 0 { e.push("TMPDIR=" + tmpdir); }
+    let scratch = env.get("SAILFIN_TEST_SCRATCH");
+    if scratch.length > 0 { e.push("SAILFIN_TEST_SCRATCH=" + scratch); }
+    return e;
+}
+
+// A unique scratch dir for this test (under the runner's per-file scratch
+// when present, else /tmp).
+fn _scratch_dir() -> string ![io] {
+    let mut dir = env.get("SAILFIN_TEST_SCRATCH");
+    if dir.length == 0 { dir = "/tmp"; }
+    dir = dir + "/sfn-runtime-websocket";
+    fs.createDirectory(dir, true);
+    return dir;
+}
+
+// Emit LLVM IR for the module at `module_path` and return it (or
+// "EMIT_FAILED" on a non-zero exit).
+fn _emit_module(tag: string, module_path: string) -> string ![io] {
+    let dir = _scratch_dir();
+    let outpath = dir + "/" + tag + ".ll";
+    let exit = process.run_capture([_sfn_bin(), "emit", "-o", outpath, "llvm", module_path], _child_env());
+    let _o = process.capture_take_stdout();
+    let _e = process.capture_take_stderr();
+    if exit != 0 { return "EMIT_FAILED"; }
+    return fs.readFile(outpath);
+}
+
+// Emit LLVM IR for source written to a scratch `.sfn` file, then read it
+// back (or "EMIT_FAILED" on a non-zero exit).
+fn _emit_source(tag: string, source: string) -> string ![io] {
+    let dir = _scratch_dir();
+    let srcpath = dir + "/" + tag + ".sfn";
+    fs.writeFile(srcpath, source);
+    return _emit_module(tag, srcpath);
+}
+
+// `^define .* @sym(` — a line that starts the symbol's definition.
+fn _has_define(ir: string, sym: string) -> boolean {
+    let lines = split(ir, "\n");
+    let mut i = 0;
+    loop {
+        if i >= lines.length { break; }
+        let line = lines[i];
+        if starts_with(line, "define ") && contains(line, "@" + sym + "(") {
+            return true;
+        }
+        i = i + 1;
+    }
+    return false;
+}
+
+// `^declare .* @sym(` — the module declares the libc/OpenSSL trampoline.
+fn _has_declare(ir: string, sym: string) -> boolean {
+    let lines = split(ir, "\n");
+    let mut i = 0;
+    loop {
+        if i >= lines.length { break; }
+        let line = lines[i];
+        if starts_with(line, "declare ") && contains(line, "@" + sym + "(") {
+            return true;
+        }
+        i = i + 1;
+    }
+    return false;
+}
+
+// Does any `call`/`invoke` line target `@sym(`?
+fn _calls(ir: string, sym: string) -> boolean {
+    let lines = split(ir, "\n");
+    let mut i = 0;
+    loop {
+        if i >= lines.length { break; }
+        let line = lines[i];
+        let is_call = contains(line, "call ") || contains(line, "invoke ");
+        if is_call && contains(line, "@" + sym + "(") { return true; }
+        i = i + 1;
+    }
+    return false;
+}
+
+test "runtime/sfn/adapters/websocket.sfn typechecks cleanly" ![io] {
+    let exit = process.run_capture([_sfn_bin(), "check", "runtime/sfn/adapters/websocket.sfn"], _child_env());
+    let out = process.capture_take_stdout();
+    let err = process.capture_take_stderr();
+    assert exit == 0;
+    assert find(out + err, "ok", 0) >= 0;
+}
+
+test "runtime/sfn/adapters/websocket.sfn is fmt-canonical" ![io] {
+    let exit = process.run_capture([_sfn_bin(), "fmt", "--check", "runtime/sfn/adapters/websocket.sfn"], _child_env());
+    let _o = process.capture_take_stdout();
+    let _e = process.capture_take_stderr();
+    assert exit == 0;
+}
+
+test "websocket emit: define for every sfn_websocket_* client export" ![io] {
+    let ir = _emit_module("websocket", "runtime/sfn/adapters/websocket.sfn");
+    assert ir != "EMIT_FAILED";
+    assert _has_define(ir, "sfn_websocket_connect");
+    assert _has_define(ir, "sfn_websocket_send");
+    assert _has_define(ir, "sfn_websocket_close");
+}
+
+test "websocket emit: declares the BSD-sockets libc surface" ![io] {
+    let ir = _emit_module("websocket", "runtime/sfn/adapters/websocket.sfn");
+    assert ir != "EMIT_FAILED";
+    assert _has_declare(ir, "socket");
+    assert _has_declare(ir, "connect");
+    assert _has_declare(ir, "send");
+    assert _has_declare(ir, "recv");
+    assert _has_declare(ir, "close");
+}
+
+test "websocket emit: declares the OpenSSL handshake surface it links" ![io] {
+    let ir = _emit_module("websocket", "runtime/sfn/adapters/websocket.sfn");
+    assert ir != "EMIT_FAILED";
+    // The RFC 6455 client masks every frame (RAND_bytes) and base64-encodes
+    // the Sec-WebSocket-Key (EVP_EncodeBlock) — both from libcrypto, already
+    // linked repo-wide via `-lssl -lcrypto` (runtime/capsule.toml).
+    assert _has_declare(ir, "RAND_bytes");
+    assert _has_declare(ir, "EVP_EncodeBlock");
+}
+
+test "websocket.connect/.send/.close lower to @sfn_websocket_*, not the unbridged sentinel" ![io] {
+    // `![io, net]`: `websocket.*` requires `net` from the registry rows;
+    // `websocket.send` additionally trips the effect checker's receiver-
+    // agnostic `.send(` -> `channel_send` (io) rule (a pre-existing
+    // conservative-policy collision, out of scope for the #1876 runtime
+    // bridge — the chat example's `main` declares `![io, net]` for the same
+    // reason).
+    let source = "fn main() -> int ![io, net] {\n"
+        + "    let conn = websocket.connect(\"ws://127.0.0.1:9/\");\n"
+        + "    websocket.send(conn, \"hello\");\n"
+        + "    websocket.close(conn);\n"
+        + "    return 0;\n"
+        + "}\n";
+    let ir = _emit_source("websocket_member_probe", source);
+    assert ir != "EMIT_FAILED";
+    // The flipped registry rows route through the real client symbols.
+    assert _calls(ir, "sfn_websocket_connect");
+    assert _calls(ir, "sfn_websocket_send");
+    assert _calls(ir, "sfn_websocket_close");
+    // The deliberately-fake metadata sentinel must never be called.
+    assert ! _calls(ir, "sfn_websocket_unbridged");
+}
