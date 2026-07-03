@@ -352,6 +352,14 @@ fn lower_expression_statement(function_name: string, instruction: NativeInstruct
     let consumption = ownership_analysis.consumption;
 
     let _lowered = lower_expression(expression, current_bindings, current_locals, current_temp, current_lines, functions, context, "");
+    // Issue #1838: propagate the expression's string constants (e.g. the
+    // `@.runtime.field.*` field-name globals a dynamic member access emits
+    // for an interpolated `{{admin.name}}`). A bare call statement like
+    // `print("{{admin.name}}")` references the getelementptr into the
+    // global but, without this, the constant was dropped — the assignment
+    // and return paths already capture it (see the simple-assignment branch
+    // and `lower_return_instruction`).
+    string_constants = _lowered.string_constants;
     // Issue #631: a bare expression statement (e.g. a void-returning call
     // like `spawn(...)`) can surface a `[fatal]` lowering diagnostic when
     // the callee's return type cannot be resolved. Collect those into the
