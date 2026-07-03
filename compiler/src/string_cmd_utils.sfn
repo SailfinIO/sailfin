@@ -52,12 +52,18 @@ fn _sort_strings_cmd(input: string[]) -> string[] {
     return out;
 }
 
+// True substring search: reports whether `needle` occurs anywhere in
+// `haystack`. For a single-char needle this degrades to byte membership,
+// so `_is_ident_char_cmd` (its only single-char caller) is unchanged;
+// multi-byte needles like ".." are now matched correctly (#1854).
 fn _string_contains_cmd(haystack: string, needle: string) -> boolean {
     if needle.length == 0 { return true; }
+    if needle.length > haystack.length { return false; }
+    let last = haystack.length - needle.length;
     let mut i: int = 0;
     loop {
-        if i >= haystack.length { break; }
-        if haystack[i] == needle { return true; }
+        if i > last { break; }
+        if substring(haystack, i, i + needle.length) == needle { return true; }
         i += 1;
     }
     return false;

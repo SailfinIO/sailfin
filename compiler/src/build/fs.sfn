@@ -84,8 +84,9 @@ fn _toml_trim_cmd(text: string) -> string {
     return substring(text, s, e);
 }
 
-// Forward declare the arena-aware popen-based capture helper added
-// in `runtime/native/src/sailfin_runtime.c`. The pre-existing
+// Forward declare the arena-aware popen-based capture helper
+// implemented in `runtime/sfn/io.sfn` (`fn sailfin_runtime_shell_capture`).
+// The pre-existing
 // implementation of `_shell_read_cmd` redirected the shell's stdout
 // through `/tmp/.sfn_shell_read_cmd_tmp` — a single fixed path that
 // raced under any cross-process concurrency (xargs-spawned emit
