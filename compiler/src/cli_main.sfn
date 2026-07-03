@@ -3,92 +3,7 @@
 // Sailfin-native CLI entrypoint invoked by the native C shim.
 import { bold } from "sfn/cli";
 
-import { LlvmTextBackend } from "./backend";
-import {
-    _CapsuleBuildSpec,
-    _emit_build_report,
-    _emit_capsule_artifact_sidecar,
-    _print_cache_summary,
-    _resolve_capsule_build_spec,
-    _resolve_sailfin_cache_dir_for_work
-} from "./build/cache";
-import { _do_determinism_check } from "./build/determinism";
-import { _atomic_rename_into_place, _mktemp_sibling_cmd } from "./build/fs";
-import { LinkResult, _clang_link_multi } from "./build/link";
-import {
-    _dirname,
-    _ends_with,
-    _ensure_dir,
-    _path_basename,
-    _path_join
-} from "./build/paths";
-import { _runtime_bundle_exists } from "./build/runtime_objs";
-import {
-    BuildCacheConfig,
-    CacheKey,
-    CacheStats,
-    cache_compiler_identity,
-    cache_copy_artifact_to,
-    cache_lookup_artifact,
-    cache_root,
-    cache_stats_is_empty,
-    cache_store_artifact,
-    merge_cache_stats,
-    resolve_build_cache_config,
-    runtime_object_cache_key,
-    runtime_object_cache_key_with_identity,
-    runtime_object_entry_key_from_str
-} from "./build_cache";
-import { _env_flag, _legacy_flag_file } from "./build_flags";
-import {
-    BuildReport,
-    DeterminismDiff,
-    build_report_to_json,
-    empty_build_report,
-    empty_determinism_snapshot
-} from "./build_report";
-import { emit_compiler_build_stamp_if_applicable } from "./build_stamp";
-import {
-    CapsuleArtifactManifest,
-    CapsuleArtifactModule,
-    ScopeName,
-    capsule_artifact_bin_path,
-    capsule_artifact_dir,
-    capsule_artifact_manifest_path,
-    capsule_artifact_manifest_to_json,
-    capsule_artifact_obj_path,
-    capsule_default_bin_name,
-    empty_capsule_artifact_manifest,
-    is_safe_scope_name,
-    make_capsule_artifact_module,
-    parse_scope_name
-} from "./capsule_artifact";
-import {
-    ModuleCacheEvent,
-    ProjectCapsuleResult,
-    ResolverConsumer,
-    empty_resolver_consumer,
-    prepare_project_capsules
-} from "./capsule_resolver";
-import { CliContext, driver_prefix_length, parse_driver_prefix } from "./cli/context";
 import { sailfin_cli_main_v2 } from "./cli/main";
-import { handle_selfhost_command } from "./cli_selfhost";
-import { resolve_import_module_slug_for_module } from "./llvm/imports";
-import {
-    compile_to_llvm_file_with_module,
-    compile_to_llvm_with_module,
-    module_name_from_path,
-    number_to_string
-} from "./main";
-import { parse_native_imports_for_import } from "./native_ir_api";
-import { runtime_capsule_from_root } from "./runtime_capsule_resolver";
-import {
-    toml_get_build_kind,
-    toml_get_entry,
-    toml_get_name,
-    toml_get_version
-} from "./toml_parser";
-import { resolve_compiler_version } from "./version";
 
 // M5.5 (#473) entry-point dependencies. `fn main` below resolves the
 // running binary's path and the runtime bundle root directly via the
@@ -193,158 +108,14 @@ fn _usage() -> string {
     return out;
 }
 
-// Strip the last `.<ext>` from a path's basename. `"foo.c"` →
-// `"foo"`; `"foo.tar.gz"` → `"foo.tar"` (last extension only).
-// Returns the input unchanged when there's no `.`.
-fn _path_strip_ext(name: string) -> string {
-    let mut last_dot: int = -1;
-    let mut i: int = 0;
-    loop {
-        if i >= name.length { break; }
-        if name[i] == "." { last_dot = i; }
-        i += 1;
-    }
-    if last_dot < 0 { return name; }
-    return substring(name, 0, last_dot);
-}
-
-// Historical C ABI boundary — the now-retired C driver called
-// `sailfin_cli_main__cli_main` with an `int64_t` return type.
-// After M5.5 (#473) the only callers are `sailfin_cli_main_v2`
-// (the `sfn/cli`-based dispatcher in `cli/main.sfn`, which falls
-// through here for every subcommand it does not own) and, transitively,
-// `sailfin_cli_main_with_paths` (driven from `fn main`). The `int`
-// return type keeps the ABI shape stable in case any embedder still
-// binds the symbol externally.
-//
-// CLI modularization epic #351, Issue 2.3: renamed from
-// `sailfin_cli_main` to `sailfin_cli_main_legacy` and kept verbatim;
-// v2 (`cli/main.sfn`) is the new front door and delegates here.
-fn sailfin_cli_main_legacy(argv: string[]) -> int ![io, clock] {
-    // Issue 2.2 (#1160): the driver-injected `--runtime-root` /
-    // `--binary-dir` prefix is parsed by `cli/context.sfn` into a
-    // CliContext; this body only consumes the result.
-    let ctx: CliContext = parse_driver_prefix(argv);
-    let trace_argv = ctx.trace_argv;
-    if trace_argv {
-        print.err("cli: argv.len=" + number_to_string(argv.length));
-        let mut trace_index: int = 0;
-        loop {
-            if trace_index >= argv.length { break; }
-            print.err("cli: argv[" + number_to_string(trace_index) + "]=" + argv[trace_index]);
-            trace_index += 1;
-        }
-    }
-    if argv.length == 0 {
-        print(_usage());
-        return 2;
-    }
-
-    let mut runtime_root: string = ctx.runtime_root;
-    let binary_dir: string = ctx.binary_dir;
-    let start_index: int = driver_prefix_length(argv);
-    if trace_argv {
-        print.err("cli: runtime_root=" + runtime_root);
-        print.err("cli: binary_dir=" + binary_dir);
-        print.err("cli: start_index=" + number_to_string(start_index));
-    }
-    if runtime_root.length == 0 {
-        if _runtime_bundle_exists("runtime") { runtime_root = "runtime"; }
-    }
-
-    let mut args: string[] = [];
-    let mut arg_index: int = start_index;
-    loop {
-        if arg_index >= argv.length { break; }
-        args.push(argv[arg_index]);
-        arg_index += 1;
-    }
-    if args.length == 0 {
-        print(_usage());
-        return 2;
-    }
-    if trace_argv {
-        print.err("cli: args.len=" + number_to_string(args.length));
-        let mut arg_index_trace: int = 0;
-        loop {
-            if arg_index_trace >= args.length { break; }
-            print.err("cli: args[" + number_to_string(arg_index_trace) + "]="
-                + args[arg_index_trace]);
-            arg_index_trace += 1;
-        }
-    }
-
-    // Pre-compute command checks to avoid patterns the compiler drops
-    // (&&-chained .length checks with function calls get dropped from IR)
-    // `emit` / `--emit` migrated to `sfn/cli` (epic #1671, Phase B) — handled
-    // by `sailfin_cli_main_v2` before reaching this legacy dispatch.
-    let cmd = args[0];
-    let mut _let10: boolean = false;
-    if strings_equal(cmd, "-h") { _let10 = true; }
-    if strings_equal(cmd, "--help") { _let10 = true; }
-    let is_help = _let10;
-    // #1502: internal self-host validator. Intentionally absent from
-    // `_usage()` — driven by `make check` / CI, not end users.
-    let is_selfhost = strings_equal(cmd, "selfhost");
-
-    // `sfn run` migrated to `sfn/cli` (epic #1671, Phase B) — handled by
-    // `sailfin_cli_main_v2` before reaching this legacy dispatch. Bare-file
-    // dispatch (`sfn foo.sfn`) re-enters as `["run", foo.sfn]` and routes
-    // through v2 to `cli/commands/run.sfn`.
-    // `sfn test` migrated to `sfn/cli` (epic #351, Issue 3.8) — handled
-    // by `sailfin_cli_main_v2` before reaching this legacy dispatch.
-    if is_help {
-        print(_usage());
-        return 0;
-    }
-
-    // ---- Package management commands ----
-    // `sfn init` migrated to `sfn/cli` (epic #351, Issue 3.1) — handled
-    // by `sailfin_cli_main_v2` before reaching the legacy dispatch.
-    // `sfn publish` migrated to `sfn/cli` (epic #351, Issue 3.9) — handled
-    // by `sailfin_cli_main_v2` before reaching the legacy dispatch.
-    // `sfn package` migrated to `sfn/cli` (epic #1671, Phase B) — handled
-    // by `sailfin_cli_main_v2` before reaching the legacy dispatch.
-    // `sfn lock` migrated to `sfn/cli` (epic #1671, Phase B) — handled
-    // by `sailfin_cli_main_v2` before reaching the legacy dispatch.
-    // `sfn login` migrated to `sfn/cli` (epic #351, Issue 3.2) — handled
-    // by `sailfin_cli_main_v2` before reaching the legacy dispatch.
-    // `sfn config` migrated to `sfn/cli` (epic #1671, Phase B) — handled
-    // by `sailfin_cli_main_v2` before reaching the legacy dispatch.
-    // `sfn fmt` migrated to `sfn/cli` (epic #351, Issue 3.4) — handled
-    // by `sailfin_cli_main_v2` before reaching the legacy dispatch.
-    // `sfn check` migrated to `sfn/cli` (epic #1671, Phase B) — handled
-    // by `sailfin_cli_main_v2` before reaching the legacy dispatch.
-    // #1502: internal self-host fixed-point validator (undocumented).
-    if is_selfhost { return handle_selfhost_command(args, binary_dir); }
-
-    // Bare-file dispatch: `sailfin <file.sfn>` (no subcommand) compiles
-    // and runs the file, matching the convention `python script.py` /
-    // `node script.js` set. Replaces the legacy C-driver fallback that
-    // called `compile_to_sailfin` / `compile_to_llvm` directly
-    // (retired in M5.4 / #472).
-    if args.length == 1 && _ends_with(cmd, ".sfn") {
-        return sailfin_cli_main_with_paths(["run", cmd], runtime_root, binary_dir);
-    }
-
-    print("unknown command: " + cmd);
-    print(_usage());
-
-    return 2;
-}
-
-// M5.3 (#471): direct-params facade over `sailfin_cli_main`. After
-// M5.5 (#473) retired the C driver, this helper is the route from
-// the synthesized `@main(argc, argv)` prologue (`fn main` below)
-// into the legacy `sailfin_cli_main` dispatch — runtime_root and
-// binary_dir are resolved as Sailfin strings via
-// `runtime/sfn/platform/exec.sfn` rather than injected as
-// `--runtime-root` / `--binary-dir` argv flags by the prior C
-// driver.
-// Today it reconstructs the legacy argv shape and delegates so the
-// 700-line dispatch in `sailfin_cli_main` remains a single source of
-// truth; a follow-up PR can flip the direction (move the body here,
-// leave `sailfin_cli_main` as a back-compat shim).
+// Direct-params facade over `sailfin_cli_main_v2` (M5.3 / #471). This
+// is the route from the synthesized `@main(argc, argv)` prologue
+// (`fn main` below) into the CLI dispatch: `runtime_root` and
+// `binary_dir` are resolved as Sailfin strings via
+// `runtime/sfn/platform/exec.sfn`, then re-encoded as the
+// `--runtime-root` / `--binary-dir` driver prefix that
+// `cli/context.sfn::parse_driver_prefix` consumes — the shape the
+// retired C driver injected as argv flags.
 fn sailfin_cli_main_with_paths(argv: string[], runtime_root: string, binary_dir: string) -> int ![io, clock] {
     let mut composed: string[] = [];
     if runtime_root.length > 0 {
@@ -389,12 +160,11 @@ fn native_cli_main(argv: string[]) -> int ![io, clock] {
 // The body mirrors what the retired C driver used to do, in pure
 // Sailfin: resolve the binary's path, derive the binary directory,
 // walk upward for a runtime bundle, then hand control to
-// `sailfin_cli_main_with_paths`. The legacy `--runtime-root` /
+// `sailfin_cli_main_with_paths`. The `--runtime-root` /
 // `--binary-dir` argv-flag injection is preserved through that
-// helper so the existing argv-parsing branch in `sailfin_cli_main`
-// stays the single source of truth — flipping the direction (move
-// the body into `sailfin_cli_main_with_paths`, leave
-// `sailfin_cli_main` as a shim) is a separate cleanup.
+// helper so `cli/context.sfn::parse_driver_prefix` — consumed by
+// `sailfin_cli_main_v2` — stays the single source of truth for the
+// driver prefix.
 //
 // Platform coverage tracks `runtime/sfn/platform/exec.sfn`:
 //   - Linux x86_64: full coverage (readlink /proc/self/exe).
@@ -488,8 +258,8 @@ fn main(argv: string[]) -> int ![io, clock] {
     // future-ABI flip to `{i8*, i64}` (M1.A.2 — see the
     // `runtime/sfn/platform/exec.sfn` module header) is what the
     // "cast-quirk" note in that file anticipates; downstream
-    // consumers (`_runtime_bundle_exists`, the argv-flag re-parse in
-    // `sailfin_cli_main`) read NUL-terminated bytes off the pointer
+    // consumers (`_runtime_bundle_exists`, the driver-prefix re-parse
+    // in `cli/context.sfn`) read NUL-terminated bytes off the pointer
     // either way, so the pinned semantics here survive the future
     // shape change without source edits.
     //
@@ -501,8 +271,8 @@ fn main(argv: string[]) -> int ![io, clock] {
     // fallback is preserved below to give the runtime-root walk a
     // directory to start from. argv[0] is not guaranteed to be canonical (a bare
     // `$PATH` name fails the walk on its own), but `_runtime_bundle_exists`
-    // in `sailfin_cli_main` provides the final CWD-relative
-    // `runtime` fallback either way.
+    // in `sailfin_cli_main_v2`'s bare-file dispatch provides the final
+    // CWD-relative `runtime` fallback either way.
     let exe_raw: * u8 = exe_path();
     let mut exe_str: string = exe_raw as string;
     if exe_str.length == 0 {
@@ -545,4 +315,4 @@ fn main(argv: string[]) -> int ![io, clock] {
     // returns its exit code up through here rather than calling `exit()`.
     sfn_arena_telemetry_dump(label as * u8);
     return exit_code;
-}  // Issue #940: `cli_main` is the `@main` entrypoint root AND now an  // imported module — the `sfn test` link path in  // `cli/commands/test.sfn` imports the runtime-link assembly from here,  // forming an import cycle (the v2 CLI root imports `cli/commands/test.sfn`). Sailfin resolves function/struct-level  // import cycles (e.g. parser `statements` <-> `declarations`), so these  // edges are safe.
+}  // `cli_main` is the `@main` entrypoint root and imports  // `sailfin_cli_main_v2` from `cli/main.sfn`, which in turn imports  // `_usage` / `sailfin_cli_main_with_paths` back from here — a  // two-function mutual import between exactly these two modules. Sailfin  // resolves function/struct-level import cycles (e.g. parser  // `statements` <-> `declarations`), so this edge is safe.

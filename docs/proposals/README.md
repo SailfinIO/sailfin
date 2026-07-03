@@ -49,7 +49,7 @@ The next number is `max + 1`. Add a row in the same PR that introduces an SFEP.
 | [0024](./0024-model-engines-and-training.md) | Model Engines, Adapters, Tensors, Training | Draft | informational |
 | [0025](./0025-native-runtime-architecture.md) | Native Runtime Architecture | Accepted | runtime |
 | [0026](./0026-delivery-process.md) | Delivery Process — Drift-Tolerant Issues, Seed Discovery, Release Cadence | Accepted | process |
-| [0027](./0027-cli-rss-modularization.md) | CLI Modularization — Per-Worker RSS Relief First, Then Migration | Accepted | tooling |
+| [0027](./0027-cli-rss-modularization.md) | CLI Modularization — Per-Worker RSS Relief First, Then Migration | Implemented | tooling |
 | [0028](./0028-typed-array-higher-order-fns.md) | Typed / Generic-Element Array Higher-Order Functions (map / filter / reduce) | Draft | language |
 | [0029](./0029-lambda-syntax.md) | Lambda expression syntax for 1.0 — keep, reform, or defer | Implemented | language |
 | [0030](./0030-first-class-function-values.md) | First-Class Function Values | Accepted | language |

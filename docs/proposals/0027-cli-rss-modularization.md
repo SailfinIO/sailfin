@@ -1,18 +1,27 @@
 ---
 sfep: 27
 title: CLI Modularization — Per-Worker RSS Relief First, Then Migration
-status: Accepted
+status: Implemented
 type: tooling
 created: 2026-06-26
-updated: 2026-06-26
+updated: 2026-07-03
 author: "agent:compiler-architect; human review"
 tracking: "#1671"
 supersedes: 9
 superseded-by:
-graduates-to:
+graduates-to: docs/status.md
 ---
 
 # SFEP-0027 — CLI Modularization: Per-Worker RSS Relief First, Then Migration
+
+> **Status: Implemented (Phases A–C landed; Phase C in #1797).** This proposal
+> is a design record: the inventories and line counts in §1 and §3 describe the
+> **pre-implementation** starting state (a 3,067-line `cli_main.sfn` with the
+> 937-line `sailfin_cli_main_legacy` and dead helpers like `_path_strip_ext`)
+> — they are the *motivation*, not current-state guidance. For the delivered
+> post-Phase-C structure (`sailfin_cli_main_v2` as the sole router;
+> `cli_main.sfn` = entry shims + `_usage`; `cli_commands*.sfn` deleted) see
+> `docs/status.md` "Toolchain" and the §7 Stage1 mapping below.
 
 > Supersedes SFEP-0009 (`0009-cli-modularization-epic.md`). 0009 was written
 > 2026-05-06, **before** the runtime migration (#822) dumped the entire
@@ -350,10 +359,13 @@ This is a structural refactor, not a language feature; the checklist maps to
   lever guarded by the line-budget sentinel
   `compiler/tests/unit/cli_main_line_budget_test.sfn` (§8, #1735). (Phase B/C
   command-migration coverage still pending.)
-- [ ] Self-hosts — `make compile` per step; `make check` per structural step.
-- [ ] `sfn fmt --check` clean — every touched `.sfn`.
-- [ ] Documented — update `docs/status.md` (CLI module map) and cross-ref
-  SFEP-0020; flip this SFEP to `Implemented` when Phase C lands.
+- [x] Self-hosts — `make compile` self-hosts per step; `make clean-build &&
+  make check` green on the Phase C structural change (#1797).
+- [x] `sfn fmt --check` clean — every touched `.sfn`.
+- [x] Documented — `docs/status.md` "Toolchain" section carries the post-Phase-C
+  CLI dispatch map (v2 sole router; `cli_main.sfn` = entry shims + `_usage`),
+  cross-referencing SFEP-0020 for the deferred `compiler-common` boundary; this
+  SFEP is `Implemented` (Phase C landed in #1797).
 
 ## 8. Test plan
 

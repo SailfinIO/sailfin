@@ -3,16 +3,16 @@
 // Compiler CLI skeleton — `sailfin_cli_main_v2` (CLI modularization
 // epic #351, Issue 2.3 — proposal §5 Phase 2, §7 Issue 2.3, Risk R2).
 //
-// v2 builds a root `Command` via `sfn/cli`, registers ONLY the
-// `version` subcommand (from `commands/version.sfn`), and parses with
-// `sfn/cli`'s pure, non-exiting `parse()`. It dispatches `version` /
-// `--version` / `-V` to `version.run` — which prints the version and
-// returns a canonical `EXIT_*` code — and falls through to the verbatim
-// legacy dispatch (`sailfin_cli_main_legacy`) for every other
-// subcommand. As of Issue 2.4 the root is composed from
-// `version.command_def()` and the handler is `version.run`, establishing
-// the per-subcommand `command_def()` + `run()` pattern that all of
-// Phase 3 follows.
+// v2 builds a root `Command` via `sfn/cli` from every subcommand's
+// `command_def()`, parses with `sfn/cli`'s pure, non-exiting `parse()`,
+// and dispatches each command to its `run` — the per-subcommand
+// `command_def()` + `run()` pattern `version.sfn` established. As of
+// SFEP-0027 Phase C (#1797) `sailfin_cli_main_v2` is the *sole* command
+// dispatch: the four residual behaviors the former
+// `sailfin_cli_main_legacy` shim owned — root `-h`/`--help`, the
+// internal `selfhost` validator, bare-`.sfn`-file dispatch, and the
+// unknown-command fallback — are handled inline at the fallthrough
+// below, so no path routes through a legacy dispatcher.
 //
 // Risk R2 (proposal §8): `sfn/cli`'s `run()` calls `process.exit()` on
 // --help/--version/parse errors, which would terminate the process out
@@ -36,7 +36,10 @@ import {
     with_subcommand
 } from "sfn/cli";
 
-import { sailfin_cli_main_legacy } from "../cli_main";
+import { _ends_with } from "../build/paths";
+import { _runtime_bundle_exists } from "../build/runtime_objs";
+import { _usage, sailfin_cli_main_with_paths } from "../cli_main";
+import { handle_selfhost_command } from "../cli_selfhost";
 import { ice_set_binary_dir } from "../ice";
 import { number_to_string } from "../num_format";
 import { command_def as add_command_def, run as add_run } from "./commands/add";
@@ -56,14 +59,12 @@ import { command_def as test_command_def, run as test_run } from "./commands/tes
 import { command_def as version_command_def, run as version_run } from "./commands/version";
 import { CliContext, driver_prefix_length, parse_driver_prefix } from "./context";
 
-// Cold-path `SAILFIN_TRACE_ARGV` trace, byte-identical to the block at
-// the top of `sailfin_cli_main_legacy`. v2 owns the `version` paths now,
-// so it must reproduce this trace for the argv it acts on — otherwise
-// `version` / `--version` / `-V` (which never reach legacy) would emit no
-// argv trace under the toggle, regressing
-// `test_compiler_debug_toggle_env_vars.sh`. Fall-through commands trace
-// in legacy as before (no duplication: this only fires on the paths v2
-// handles itself).
+// Cold-path `SAILFIN_TRACE_ARGV` trace. v2 is the sole dispatch, so it
+// reproduces this trace for the argv each path acts on — every matched
+// subcommand block and the fallthrough call it under `ctx.trace_argv`,
+// so `version` / `--version` / `-V` and the help/selfhost/bare-file/
+// unknown paths all emit the argv trace under the toggle (pinned by
+// `compiler/tests/e2e/compiler_debug_toggle_env_vars_test.sfn`).
 fn _v2_trace_argv(argv: string[]) ![io] {
     print.err("cli: argv.len=" + number_to_string(argv.length));
     let mut trace_index: int = 0;
@@ -403,9 +404,58 @@ fn sailfin_cli_main_v2(argv: string[]) -> int ![io, clock] {
         return 2;
     }
 
-    // Every other subcommand (and help, parse errors, the bare
-    // invocation) falls through to the verbatim legacy dispatch, which
-    // re-parses the driver prefix off the original argv itself — so the
-    // full, unsliced `argv` is forwarded unchanged.
-    return sailfin_cli_main_legacy(argv);
+    // Fallthrough — every path the registered subcommands above did not
+    // claim. SFEP-0027 Phase C (#1797) folded the former
+    // `sailfin_cli_main_legacy` shim in here so v2 is the sole dispatch;
+    // `ctx` / `args` are the driver prefix and user args already parsed
+    // at the top, so no argv re-parse is needed. The four residual
+    // behaviors, in the legacy order: empty-args usage, root help,
+    // `selfhost`, bare-file dispatch, unknown-command.
+    if ctx.trace_argv { _v2_trace_argv(argv); }
+
+    // Bare invocation (no user args after the driver prefix, or empty
+    // argv): print usage, exit 2 — matching the legacy `args.length == 0`
+    // guard.
+    if args.length == 0 {
+        print(_usage());
+        return 2;
+    }
+
+    let cmd: string = args[0];
+
+    // Root `-h` / `--help` (no subcommand): print usage, exit 0.
+    let mut is_help: boolean = false;
+    if strings_equal(cmd, "-h") { is_help = true; }
+    if strings_equal(cmd, "--help") { is_help = true; }
+    if is_help {
+        print(_usage());
+        return 0;
+    }
+
+    // `selfhost` — internal self-host fixed-point validator (#1502).
+    // Intentionally absent from `_usage()`: driven by `make check` / CI,
+    // not end users.
+    if strings_equal(cmd, "selfhost") {
+        return handle_selfhost_command(args, ctx.binary_dir);
+    }
+
+    // Bare-file dispatch: `sfn <file.sfn>` (a single `.sfn` positional,
+    // no subcommand) compiles and runs the file, matching the
+    // `python script.py` / `node script.js` convention. Re-enters as
+    // `["run", <file>]` through `sailfin_cli_main_with_paths` → this
+    // dispatch, so `cli/commands/run.sfn` owns the build-then-exec body.
+    // The empty `runtime_root` → "runtime" bundle fallback is a
+    // filesystem probe (not argv parsing), reproduced from the legacy
+    // caller.
+    if args.length == 1 && _ends_with(cmd, ".sfn") {
+        let mut runtime_root: string = ctx.runtime_root;
+        if runtime_root.length == 0 {
+            if _runtime_bundle_exists("runtime") { runtime_root = "runtime"; }
+        }
+        return sailfin_cli_main_with_paths(["run", cmd], runtime_root, ctx.binary_dir);
+    }
+
+    print("unknown command: " + cmd);
+    print(_usage());
+    return 2;
 }

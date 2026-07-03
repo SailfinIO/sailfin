@@ -21,6 +21,21 @@ here.
   (`compiler/src/cli_main.sfn` + `capsule_resolver.sfn` — pure orchestration,
   no fixups). The `scripts/build.sh` orchestrator (Stage E PR7, #383) and the
   Python fixup script `selfhost_native.py` are retired.
+- **CLI dispatch.** `sailfin_cli_main_v2` (`compiler/src/cli/main.sfn`) is the
+  sole command router: it builds a root `Command` via the `sfn/cli` capsule
+  from each subcommand's `command_def()` and dispatches to per-command
+  `cli/commands/<name>.sfn` `run` handlers, handling the residual
+  help / `selfhost` / bare-`.sfn`-file / unknown-command paths inline. As of
+  SFEP-0027 Phase C (#1797) the former `sailfin_cli_main_legacy` shim is gone;
+  `cli_main.sfn` retains only the `@main` entry shims (`main`,
+  `native_cli_main`, `sailfin_cli_main_with_paths`, `_arena_telemetry_*`) plus
+  `_usage`. The former `cli_commands.sfn` / `cli_commands_utils.sfn` emitters
+  were deleted, their bodies relocated by consumer (backend-shared helpers to
+  `compiler/src/build/`; the `compiler-common` boundary is deferred to
+  SFEP-0020 / #345). Per-worker peak RSS drop drove the sequencing
+  (SFEP-0027 §2.1); a line-budget sentinel
+  (`compiler/tests/unit/cli_main_line_budget_test.sfn`) guards against
+  re-ballooning.
 - **Deterministic self-hosting.** The compiler is a verified fixed point —
   stage2 and stage3 produce byte-identical LLVM IR across all modules;
   `make check` enforces this. The triple-pass validation (stage2 + stage3

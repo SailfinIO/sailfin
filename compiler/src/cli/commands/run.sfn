@@ -18,8 +18,9 @@
 // `compiler/tests/e2e/runtime_implicit_capsule_link_test.sfn`).
 //
 // Bare-file dispatch (`sfn foo.sfn`) re-invokes `["run", foo.sfn]` from
-// `sailfin_cli_main_legacy`, which routes back through `sailfin_cli_main_v2`
-// to this command — so the bare-file path shares this exact body.
+// `sailfin_cli_main_v2`'s fallthrough (SFEP-0027 Phase C, #1797), which
+// routes back through `sailfin_cli_main_v2` to this command — so the
+// bare-file path shares this exact body.
 //
 // The `runtime_root` empty→"runtime" bundle fallback is reproduced from the
 // legacy caller (it is a filesystem probe, not argv parsing, so

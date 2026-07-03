@@ -5,9 +5,12 @@
 // Native replacement for the former `test_cli_v2_exit_codes.sh`
 // (test-infra Phase 3, epic #842; ratchet #1327). v2 is the new front
 // door for the compiler CLI: it builds a root `Command` via `sfn/cli`,
-// registers only `version`, parses with the pure, non-exiting `parse()`,
-// prints help/version itself, and falls through to the verbatim legacy
-// dispatch (`sailfin_cli_main_legacy`) for every other subcommand.
+// registers every subcommand, parses with the pure, non-exiting
+// `parse()`, dispatches each command to its `run`, and handles the
+// residual help / `selfhost` / bare-file / unknown-command paths inline
+// at the fallthrough (SFEP-0027 Phase C, #1797 — `sailfin_cli_main_v2`
+// is the sole dispatch; the former `sailfin_cli_main_legacy` shim is
+// gone).
 //
 // This pins the Issue 2.3 acceptance contract end-to-end against the
 // real binary — i.e. through the synthesized `@main` →
@@ -77,11 +80,11 @@ test "cli-v2: version short flag routes through v2 exit zero prints version" ![i
 }
 
 // `not-a-known-subcommand` is not `version`, does not end in `.sfn`, and
-// is unknown to the legacy dispatch — which prints "unknown command" and
-// returns EXIT_USAGE (2). The point of the pin: the legacy exit code is
-// OBSERVED by the v2 caller, proving v2 forwarded to legacy without a
-// `process.exit` terminating the process first.
-test "cli-v2: legacy fallthrough exit code is observed by the v2 caller (no process.exit)" ![io] {
+// no subcommand claims it — so v2's inline fallthrough prints "unknown
+// command" and returns EXIT_USAGE (2). The point of the pin: that exit
+// code is OBSERVED by the caller, proving `parse()` never fired a
+// `process.exit` out from under the `int`-returning contract (Risk R2).
+test "cli-v2: fallthrough exit code is observed by the caller (no process.exit)" ![io] {
     let exit = process.run_capture([_sfn_bin(), "not-a-known-subcommand"], []);
     let out = process.capture_take_stdout();
     let err = process.capture_take_stderr();
