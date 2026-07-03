@@ -1,0 +1,66 @@
+// Unit tests for declaration-time generic bound validation (SFEP-0038 §3.1,
+// #1868). A type-parameter bound (`T: Comparable`) must name a real
+// interface (E0821) of matching type-argument arity (E0822); an unknown
+// name is left unflagged (conservative — avoids false positives on
+// prelude/imported interfaces not visible in a single-file check).
+// Instantiation-site satisfaction (E0820) and monomorphization are separate
+// slices, not covered here.
+import { parse_program } from "../../src/parser/mod";
+import { typecheck_diagnostics } from "../../src/typecheck";
+import { Diagnostic } from "../../src/typecheck_types";
+
+fn _codes_for(source: string, code: string) -> int ![io] {
+    let program = parse_program(source);
+    let diags: Diagnostic[] = typecheck_diagnostics(program);
+    let mut count: int = 0;
+    let mut i: int = 0;
+    loop {
+        if i >= diags.length { break; }
+        if strings_equal(diags[i].code, code) { count += 1; }
+        i += 1;
+    }
+    return count;
+}
+
+test "generic bound: non-interface struct bound raises E0821" ![io] {
+    let source = "struct S { x: int; }\n"
+        + "fn f<T: S>(a: T) -> T { return a; }\n";
+    assert _codes_for(source, "E0821") == 1;
+}
+
+test "generic bound: interface bound does not raise E0821" ![io] {
+    let source = "interface Comparable { fn compare(other: Self) -> int; }\n"
+        + "fn f<T: Comparable>(a: T) -> T { return a; }\n";
+    assert _codes_for(source, "E0821") == 0;
+}
+
+test "generic bound: unknown name is not flagged (conservative)" ![io] {
+    let source = "fn f<T: Comparable>(a: T) -> T { return a; }\n";
+    assert _codes_for(source, "E0821") == 0;
+}
+
+test "generic bound: multi-bound splits on + and validates each" ![io] {
+    let source = "interface Eq { fn eq(other: Self) -> bool; }\n"
+        + "struct S { x: int; }\n"
+        + "fn f<K: Eq + S>(a: K) -> K { return a; }\n";
+    assert _codes_for(source, "E0821") == 1;
+}
+
+test "generic bound: duplicate bound name is not an error" ![io] {
+    let source = "interface Eq { fn eq(other: Self) -> bool; }\n"
+        + "fn f<K: Eq + Eq>(a: K) -> K { return a; }\n";
+    assert _codes_for(source, "E0821") == 0;
+    assert _codes_for(source, "E0822") == 0;
+}
+
+test "generic bound: arity mismatch on generic interface raises E0822" ![io] {
+    let source = "interface From<T> { fn from(value: T) -> Self; }\n"
+        + "fn f<E: From<int, string>>(a: E) -> E { return a; }\n";
+    assert _codes_for(source, "E0822") == 1;
+}
+
+test "generic bound: correct arity on generic interface is clean" ![io] {
+    let source = "interface From<T> { fn from(value: T) -> Self; }\n"
+        + "fn f<E: From<int>>(a: E) -> E { return a; }\n";
+    assert _codes_for(source, "E0822") == 0;
+}

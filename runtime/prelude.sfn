@@ -95,6 +95,31 @@ let runtime_array_reduce_fn = runtime.array_reduce;
 let runtime_grapheme_count_fn = runtime.grapheme_count;
 let runtime_grapheme_at_fn = runtime.grapheme_at;
 
+// Standard bound interfaces (SFEP-0038 §3.4). Inert in v1: they exist so a
+// generic type-parameter bound (`T: Comparable`) resolves to a real interface
+// at declaration time (#1868). Satisfaction checking (E0820) and
+// monomorphization are the enforcement siblings, not part of this slice.
+interface Eq {
+    fn eq(self, other: Self) -> boolean;
+}
+
+interface Comparable {
+    fn compare(self, other: Self) -> int;
+}
+
+interface Hashable {
+    fn hash(self) -> int;
+}
+
+interface Display {
+    fn to_string(self) -> string;
+}
+
+// `from` is a static factory (no `self`), mirroring Rust's `From::from`.
+interface From<T> {
+    fn from (value: T) -> Self;
+}
+
 struct EnumField {
     name: string;
     value: any;

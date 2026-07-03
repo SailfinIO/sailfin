@@ -782,7 +782,7 @@ fn is_whitespace(ch: string) -> boolean {
     return _ret438;
 }
 
-fn check_struct_methods(methods: MethodDeclaration[]) -> Diagnostic[] {
+fn check_struct_methods(methods: MethodDeclaration[], interfaces: Statement[], top_level: SymbolEntry[]) -> Diagnostic[] {
     let mut seen: string[] = [];
     let mut diagnostics: Diagnostic[] = [];
 
@@ -790,7 +790,7 @@ fn check_struct_methods(methods: MethodDeclaration[]) -> Diagnostic[] {
     loop {
         if _mi >= methods.length { break; }
         let method = methods[_mi];
-        let _sig_diags = check_function_signature(method.signature);
+        let _sig_diags = check_function_signature(method.signature, interfaces, top_level);
         let mut _ci: int = 0;
         loop {
             if _ci >= _sig_diags.length { break; }
@@ -825,7 +825,7 @@ fn check_enum_variants(variants: EnumVariant[]) -> Diagnostic[] {
     return diagnostics;
 }
 
-fn check_interface_members(members: FunctionSignature[]) -> Diagnostic[] {
+fn check_interface_members(members: FunctionSignature[], interfaces: Statement[], top_level: SymbolEntry[]) -> Diagnostic[] {
     let mut seen: string[] = [];
     let mut diagnostics: Diagnostic[] = [];
 
@@ -833,7 +833,7 @@ fn check_interface_members(members: FunctionSignature[]) -> Diagnostic[] {
     loop {
         if _mbi >= members.length { break; }
         let member = members[_mbi];
-        let _sig_diags = check_function_signature(member);
+        let _sig_diags = check_function_signature(member, interfaces, top_level);
         let mut _ci: int = 0;
         loop {
             if _ci >= _sig_diags.length { break; }
@@ -850,8 +850,8 @@ fn check_interface_members(members: FunctionSignature[]) -> Diagnostic[] {
     return diagnostics;
 }
 
-fn check_function_signature(signature: FunctionSignature) -> Diagnostic[] {
-    return check_type_parameters(signature.type_parameters);
+fn check_function_signature(signature: FunctionSignature, interfaces: Statement[], top_level: SymbolEntry[]) -> Diagnostic[] {
+    return check_type_parameters(signature.type_parameters, interfaces, top_level);
 }
 
 // Validate an `extern fn` declaration's signature.
@@ -1414,6 +1414,47 @@ fn split_top_level_commas(text: string) -> string[] {
     return out;
 }
 
+// Split a type-parameter bound list ("Eq + Comparable<int>") on top-level
+// `+`, respecting `(`/`)` and `<`/`>` nesting the same way
+// `split_top_level_commas` does (#1868, SFEP-0038 §3.1). Empty segments are
+// dropped and each segment is trimmed.
+fn split_top_level_plus(text: string) -> string[] {
+    let mut out: string[] = [];
+    let mut current: string = "";
+    let mut depth: int = 0;
+    let mut index: int = 0;
+    loop {
+        if index >= text.length { break; }
+        let ch = text[index];
+        if ch == "(" {
+            depth += 1;
+            current = current + ch;
+        } else if ch == ")" {
+            if depth > 0 { depth -= 1; }
+            current = current + ch;
+        } else if ch == "<" {
+            depth += 1;
+            current = current + ch;
+        } else if ch == ">" {
+            if depth > 0 { depth -= 1; }
+            current = current + ch;
+        } else if ch == "+" {
+            if depth == 0 {
+                let trimmed = trim_text(current);
+                if trimmed.length > 0 { out.push(trimmed); }
+                current = "";
+                index += 1;
+                continue;
+            }
+            current = current + ch;
+        } else { current = current + ch; }
+        index += 1;
+    }
+    let trimmed_last = trim_text(current);
+    if trimmed_last.length > 0 { out.push(trimmed_last); }
+    return out;
+}
+
 // Pure: does the type text contain `[]` at the top level (i.e. it is
 // a Sailfin array type)? Detects both `i32[]` and `string[]` shapes.
 fn extern_type_contains_array_brackets(text: string) -> boolean {
@@ -1596,7 +1637,7 @@ fn extern_type_hint_for(kind: string, type_text: string) -> string {
         + " pointers (`fn(A) -> B`).";
 }
 
-fn check_type_parameters(type_parameters: TypeParameter[]) -> Diagnostic[] {
+fn check_type_parameters(type_parameters: TypeParameter[], interfaces: Statement[], top_level: SymbolEntry[]) -> Diagnostic[] {
     let mut seen: string[] = [];
     let mut diagnostics: Diagnostic[] = [];
 
@@ -1609,6 +1650,29 @@ fn check_type_parameters(type_parameters: TypeParameter[]) -> Diagnostic[] {
             diagnostics.push(make_duplicate_symbol_diagnostic(name, "type parameter", token_from_name(name, type_parameter.span)));
         } else { seen.push(name); }
         _tpi += 1;
+    }
+
+    // Declaration-time bound validation (SFEP-0038 §3.1/§3.2a, #1868).
+    let mut _bpi: int = 0;
+    loop {
+        if _bpi >= type_parameters.length { break; }
+        let tp = type_parameters[_bpi];
+        let tp_bound = tp.bound;
+        if tp_bound != null {
+            let bound = tp_bound;
+            let bound_refs = split_top_level_plus(bound.text);
+            let mut _bri: int = 0;
+            loop {
+                if _bri >= bound_refs.length { break; }
+                let ref_text = trim_text(bound_refs[_bri]);
+                if ref_text.length > 0 {
+                    let d = check_single_bound(ref_text, tp.name, tp.span, interfaces, top_level);
+                    if d != null { diagnostics.push(d); }
+                }
+                _bri += 1;
+            }
+        }
+        _bpi += 1;
     }
 
     return diagnostics;
@@ -1945,6 +2009,96 @@ fn make_interface_no_type_arguments_diagnostic(struct_name: string, annotation_t
         primary: null,
         suggestion: null
     };
+}
+
+// Returns the identifier before the first top-level `<` in a bound
+// reference, trimmed ("From<int>" -> "From", "Comparable" -> "Comparable").
+// Used to resolve a bound to a top-level struct/enum symbol for the E0821
+// check (#1868, SFEP-0038 §3.1).
+fn bound_base_name(text: string) -> string {
+    let trimmed = trim_text(text);
+    let mut index: int = 0;
+    loop {
+        if index >= trimmed.length { break; }
+        if trimmed[index] == "<" { break; }
+        index += 1;
+    }
+    return trim_text(substring(trimmed, 0, index));
+}
+
+// True if `symbols` contains an entry with this name AND kind.
+fn symbol_has_kind(symbols: SymbolEntry[], name: string, kind: string) -> boolean {
+    let mut i: int = 0;
+    loop {
+        if i >= symbols.length { break; }
+        if strings_equal(symbols[i].name, name) && strings_equal(symbols[i].kind, kind) {
+            return true;
+        }
+        i += 1;
+    }
+    return false;
+}
+
+fn make_bound_not_interface_diagnostic(bound_name: string, param_name: string, span: SourceSpan?) -> Diagnostic {
+    return Diagnostic {
+        code: "E0821",
+        severity: "error",
+        message: "bound `" + bound_name + "` on type parameter `" + param_name
+            + "` is not an interface",
+        file_path: "",
+        primary: token_from_name(param_name, span),
+        suggestion: null
+    };
+}
+
+fn make_bound_arity_diagnostic(bound_name: string, param_name: string, interface_signature: string, span: SourceSpan?) -> Diagnostic {
+    return Diagnostic {
+        code: "E0822",
+        severity: "error",
+        message: "bound `" + bound_name + "` on type parameter `" + param_name
+            + "` must match "
+            + interface_signature
+            + " type arguments",
+        file_path: "",
+        primary: token_from_name(param_name, span),
+        suggestion: null
+    };
+}
+
+// Validate one bound reference from a `T: Bound1 + Bound2` list against the
+// interface table and the top-level symbol table (#1868, SFEP-0038 §3.1).
+// Returns `null` when the bound is OK. If the bound resolves to a known
+// interface, validates its type-argument arity (E0822). If it does not
+// resolve, E0821 fires only when the base name is a KNOWN struct/enum —
+// an unresolved name may be a prelude/imported interface not visible in a
+// single-file check, so it is left unflagged to avoid false positives on
+// std-library bounds.
+fn check_single_bound(ref_text: string, param_name: string, span: SourceSpan?, interfaces: Statement[], top_level: SymbolEntry[]) -> Diagnostic? {
+    let annotation = TypeAnnotation { text: ref_text };
+    let iface = resolve_interface_annotation(annotation, interfaces);
+    if iface != null {
+        let found = iface;
+        let expected = found.type_parameters.length;
+        let provided = parse_type_arguments(ref_text);
+        if expected == 0 {
+            if provided.length > 0 {
+                return make_bound_arity_diagnostic(trim_text(ref_text), param_name, format_interface_signature(found), span);
+            }
+        } else {
+            if provided.length != expected {
+                return make_bound_arity_diagnostic(trim_text(ref_text), param_name, format_interface_signature(found), span);
+            }
+        }
+        return null;
+    }
+    let base = bound_base_name(ref_text);
+    if symbol_has_kind(top_level, base, "struct") {
+        return make_bound_not_interface_diagnostic(base, param_name, span);
+    }
+    if symbol_has_kind(top_level, base, "enum") {
+        return make_bound_not_interface_diagnostic(base, param_name, span);
+    }
+    return null;
 }
 
 fn token_from_name(name: string, span: SourceSpan?) -> Token? {
