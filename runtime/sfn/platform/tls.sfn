@@ -252,6 +252,13 @@ extern fn SSL_CTX_use_PrivateKey_file(ctx: * u8, file: * u8, ty: i32) -> i32;
 // the attached fd. Returns 1 on success. Callback-free (blocking BIO).
 extern fn SSL_accept(ssl: * u8) -> i32;
 
+// `int SSL_CTX_check_private_key(const SSL_CTX *)` — verify the loaded
+// private key matches the loaded certificate. `SSL_CTX_use_PrivateKey_file`
+// only validates the key's own internal consistency, not that it pairs with
+// the cert, so a mismatched keypair would otherwise pass ctx build and fail
+// every handshake at runtime. Returns 1 when the pair is consistent.
+extern fn SSL_CTX_check_private_key(ctx: * u8) -> i32;
+
 // `tls_server_ctx(cert_path, key_path)` — build a server `SSL_CTX` with the
 // certificate chain + private key loaded (PEM) for the server's lifetime
 // (SFEP-0036 §3.5/§3.7). No peer (client-cert) verification is configured
@@ -275,6 +282,12 @@ fn tls_server_ctx(cert_path: * u8, key_path: * u8) -> * u8 {
         SSL_CTX_free(ctx);
         return null;
     }
+    // Fail closed at ctx-build time if the key does not pair with the cert,
+    // rather than deferring the failure to every per-connection handshake.
+    if SSL_CTX_check_private_key(ctx) != 1 {
+        SSL_CTX_free(ctx);
+        return null;
+    }
     return ctx;
 }
 
@@ -285,7 +298,9 @@ fn tls_server_ctx(cert_path: * u8, key_path: * u8) -> * u8 {
 // connection rather than reading plaintext off a half-open TLS socket. The
 // `SSL_CTX` is shared read-only across pool workers — OpenSSL `SSL_CTX` is
 // reference-counted and thread-safe for `SSL_new`, so no per-worker ctx is
-// needed. The fd's `SO_RCVTIMEO`/`SO_SNDTIMEO` (#1581) bound the handshake.
+// needed. The caller MUST arm the fd's `SO_RCVTIMEO`/`SO_SNDTIMEO` (#1581)
+// BEFORE this call so the blocking `SSL_accept` handshake is bounded — a
+// stalled/slow-loris handshake must not pin a pool worker indefinitely.
 fn tls_accept_fd(ctx: * u8, fd: i32) -> * u8 ![net] {
     if ctx as i64 == 0 { return null; }
     let ssl: * u8 = SSL_new(ctx);

@@ -866,6 +866,13 @@ fn _serve_conn_worker_tls(ctx: * u8) -> * u8 {
     let server_ctx: i64 = atomic_load(ctx_slot);
     free(ctx);
 
+    // Arm SO_RCVTIMEO/SO_SNDTIMEO (#1581) BEFORE the blocking `SSL_accept`
+    // handshake so a stalled/slow-loris handshake cannot pin this pool worker
+    // — the plaintext path arms inside the first `_serve_recv_request`, but
+    // the TLS handshake runs first, so it must be armed here (the recv loop's
+    // per-cycle re-arm is idempotent).
+    _serve_set_socket_timeouts(client_fd as i32);
+
     // Server-side handshake. On failure, drop the connection (no plaintext
     // fallback on a TLS port).
     let ssl: * u8 = tls_accept_fd(server_ctx as * u8, client_fd as i32);

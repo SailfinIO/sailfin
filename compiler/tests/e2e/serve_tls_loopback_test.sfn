@@ -160,7 +160,10 @@ fn _tls_get(tcmd: string) -> string ![io] {
         + " 6 openssl s_client -connect 127.0.0.1:"
         + _tls_port_str()
         + " -quiet 2>/dev/null";
-    let exit = process.run_capture(["bash", "-c", cmd], _child_env());
+    // `sh -c` (not `bash -c`): the command is POSIX-shell compatible (printf
+    // + pipe + redirect) and `sh` is more universally present — matches the
+    // `_timeout_cmd`/`_has_openssl` probes above.
+    let exit = process.run_capture(["sh", "-c", cmd], _child_env());
     let out = process.capture_take_stdout();
     let _err = process.capture_take_stderr();
     if exit != 0 { return out; }
