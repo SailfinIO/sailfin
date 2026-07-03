@@ -623,13 +623,26 @@ fn _capture_scope_primitive_type(scope: LocalBinding[], name: string) -> string 
 }
 
 // Infer a primitive array type (`int[]`) from a non-empty array literal by
-// recovering its first element's primitive type. Empty or non-primitive-first
-// literals return "" so the conservative `i8*` fallback still applies (#1839).
+// recovering a single primitive element type shared by EVERY element. Mixed,
+// empty, or non-primitive literals return "" so the conservative `i8*`
+// fallback still applies. Checking all elements (not just the first) mirrors
+// `emit_native_format.sfn::infer_array_element_type` so a heterogeneous
+// literal never yields a `type_text` hint that disagrees with the array's
+// real element layout (#1839).
 fn _capture_array_literal_type(scope: LocalBinding[], array_expr: Expression) -> string {
     if array_expr.elements.length == 0 { return ""; }
-    let elem = infer_let_initializer_type(scope, array_expr.elements[0]);
-    if is_primitive_type(elem) { return elem + "[]"; }
-    return "";
+    let mut candidate: string = "";
+    let mut index: int = 0;
+    loop {
+        if index >= array_expr.elements.length { break; }
+        let elem = infer_let_initializer_type(scope, array_expr.elements[index]);
+        if !is_primitive_type(elem) { return ""; }
+        if candidate.length == 0 { candidate = elem; } else if !strings_equal(candidate, elem) {
+            return "";
+        }
+        index += 1;
+    }
+    return candidate + "[]";
 }
 
 // Map a primitive array annotation (`int[]`) to its element type (`int`).
