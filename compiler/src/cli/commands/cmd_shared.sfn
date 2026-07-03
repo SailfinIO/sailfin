@@ -6,12 +6,9 @@
 // helper. Consumed by add / publish / test / config / package command
 // modules. Kept compiler-local — do NOT push into a stdlib capsule
 // (that is #345's call).
-import {
-    _get_env_cmd,
-    _get_home_cmd,
-    _string_contains_cmd,
-    _toml_trim_cmd
-} from "../../cli_commands_utils";
+import { _toml_trim_cmd } from "../../build/fs";
+import { _get_env_cmd, _get_home_cmd } from "../../build_flags";
+import { _string_contains_cmd } from "../../string_cmd_utils";
 import { find_char_local, substring } from "../../string_utils";
 import { toml_get_string } from "../../toml_parser";
 

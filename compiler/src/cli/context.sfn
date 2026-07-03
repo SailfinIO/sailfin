@@ -19,7 +19,7 @@
 // `compiler/src/cli/registry.sfn` lands in a later epic issue. It is
 // always "" here, matching today's behaviour where no inline argv
 // parsing produces a registry URL.
-import { _env_flag, _legacy_flag_file } from "../cli_commands_utils";
+import { _env_flag, _legacy_flag_file } from "../build_flags";
 
 struct CliContext {
     runtime_root: string;

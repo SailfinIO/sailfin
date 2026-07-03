@@ -34,8 +34,8 @@
 // The registry helper `_resolve_registry_url_cmd` now lives in the shared
 // `cli/commands/cmd_shared.sfn` module (relocated from the deleted
 // `cli_commands.sfn` in #1795, SFEP-0027 §3.2); the crypto/collection
-// helpers (`_collect_sfn_files_cmd`, `_sha256_of_file_cmd`, …) still live
-// in `cli_commands_utils.sfn` and are imported from there.
+// helpers (`_collect_sfn_files_cmd`, `_sha256_of_file_cmd`, …) live in the
+// backend-shared `build/fs.sfn` module and are imported from there.
 import {
     Command,
     Matches,
@@ -47,12 +47,11 @@ import {
 
 import {
     _collect_sfn_files_cmd,
-    _get_env_cmd,
-    _get_home_cmd,
     _sha256_of_file_cmd,
     _shell_read_cmd,
     _toml_trim_cmd
-} from "../../cli_commands_utils";
+} from "../../build/fs";
+import { _get_env_cmd, _get_home_cmd } from "../../build_flags";
 import { find_char_local, substring } from "../../string_utils";
 import { toml_get_name, toml_get_version } from "../../toml_parser";
 import { CliContext } from "../context";

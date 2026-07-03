@@ -27,7 +27,7 @@
 // `compose_build_stamp`, `write_build_stamp`) are gate-agnostic
 // so tests can pin the four-case truth table without spawning a
 // build.
-import { _shell_read_cmd } from "./cli_commands_utils";
+import { _shell_read_cmd } from "./build/fs";
 
 // Pure formatter — the four-case truth table. Tests drive every
 // branch through this function so they don't depend on the

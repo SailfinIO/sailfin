@@ -1,0 +1,56 @@
+// compiler/src/capsule_names.sfn
+//
+// Capsule-name resolution/display helpers relocated from
+// `cli_commands_utils` (SFEP-0027 §3.5).
+import { find_char_local, substring } from "./string_utils";
+
+fn _is_stdlib_capsule_cmd(name: string) -> boolean {
+    if name == "cli" { return true; }
+    if name == "crypto" { return true; }
+    if name == "fs" { return true; }
+    if name == "http" { return true; }
+    if name == "json" { return true; }
+    if name == "layers" { return true; }
+    if name == "log" { return true; }
+    if name == "losses" { return true; }
+    if name == "math" { return true; }
+    if name == "net" { return true; }
+    if name == "nn" { return true; }
+    if name == "os" { return true; }
+    if name == "path" { return true; }
+    if name == "strings" { return true; }
+    if name == "sync" { return true; }
+    if name == "tensor" { return true; }
+    if name == "test" { return true; }
+    if name == "time" { return true; }
+    if name == "toml" { return true; }
+    return false;
+}
+
+fn _has_slash_cmd(name: string) -> boolean {
+    return find_char_local(name, "/", 0) >= 0;
+}
+
+fn _resolve_capsule_name_cmd(name: string) -> string {
+    if _has_slash_cmd(name) { return name; }
+    if _is_stdlib_capsule_cmd(name) { return "sfn/" + name; }
+    return name;
+}
+
+fn _display_capsule_name_cmd(name: string) -> string {
+    if _has_slash_cmd(name) {
+        let slash = find_char_local(name, "/", 0);
+        let scope = substring(name, 0, slash);
+        if scope == "sfn" {
+            return substring(name, slash + 1, name.length);
+        }
+    }
+    return name;
+}
+
+export {
+    _is_stdlib_capsule_cmd,
+    _has_slash_cmd,
+    _resolve_capsule_name_cmd,
+    _display_capsule_name_cmd
+};

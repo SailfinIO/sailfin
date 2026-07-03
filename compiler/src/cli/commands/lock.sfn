@@ -31,8 +31,8 @@ import {
     with_flag
 } from "sfn/cli";
 
+import { _get_env_cmd } from "../../build_flags";
 import { discover_workspace_root, resolve_workspace_lock_entries } from "../../capsule_resolver";
-import { _get_env_cmd } from "../../cli_commands_utils";
 import { workspace_lock_write } from "../../lock";
 import { number_to_string } from "../../num_format";
 import { CliContext } from "../context";

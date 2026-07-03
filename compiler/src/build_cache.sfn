@@ -66,13 +66,13 @@
 import {
     _dirname_cmd,
     _ensure_dir_recursive_cmd,
-    _get_env_cmd,
     _sanitize_filename_cmd,
     _sha256_of_file_cmd,
     _shell_read_cmd,
     _shell_single_quote_arg,
     _write_text_cmd
-} from "./cli_commands_utils";
+} from "./build/fs";
+import { _get_env_cmd } from "./build_flags";
 import { char_code_at_text, substring } from "./string_utils";
 
 // ----------------------------------------------------------------
@@ -632,7 +632,7 @@ fn canonicalize_flags(flags: string[]) -> string {
 // ----------------------------------------------------------------
 // Public wrapper over the private `_sha256_of_file_cmd` so callers
 // outside this module can content-address their own artifacts
-// without reaching into `cli_commands_utils` internals. Promoted to
+// without reaching into `build/fs.sfn` internals. Promoted to
 // a single exported helper per #514's plan; the runtime C-object
 // cache (#632) is the first external consumer. Returns "" if the
 // file can't be hashed (missing source, sha tool absent) — callers

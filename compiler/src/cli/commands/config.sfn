@@ -26,7 +26,8 @@ import {
     with_subcommand
 } from "sfn/cli";
 
-import { _ensure_dir_recursive_cmd, _get_home_cmd, _toml_trim_cmd } from "../../cli_commands_utils";
+import { _ensure_dir_recursive_cmd, _toml_trim_cmd } from "../../build/fs";
+import { _get_home_cmd } from "../../build_flags";
 import { CliContext } from "../context";
 import {
     _is_valid_registry_url_cmd,

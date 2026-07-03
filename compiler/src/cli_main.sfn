@@ -13,6 +13,7 @@ import {
     _resolve_sailfin_cache_dir_for_work
 } from "./build/cache";
 import { _do_determinism_check } from "./build/determinism";
+import { _atomic_rename_into_place, _mktemp_sibling_cmd } from "./build/fs";
 import { LinkResult, _clang_link_multi } from "./build/link";
 import {
     _dirname,
@@ -38,6 +39,7 @@ import {
     runtime_object_cache_key_with_identity,
     runtime_object_entry_key_from_str
 } from "./build_cache";
+import { _env_flag, _legacy_flag_file } from "./build_flags";
 import {
     BuildReport,
     DeterminismDiff,
@@ -70,12 +72,6 @@ import {
 } from "./capsule_resolver";
 import { CliContext, driver_prefix_length, parse_driver_prefix } from "./cli/context";
 import { sailfin_cli_main_v2 } from "./cli/main";
-import {
-    _atomic_rename_into_place,
-    _env_flag,
-    _legacy_flag_file,
-    _mktemp_sibling_cmd
-} from "./cli_commands_utils";
 import { handle_selfhost_command } from "./cli_selfhost";
 import { resolve_import_module_slug_for_module } from "./llvm/imports";
 import {

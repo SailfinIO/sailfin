@@ -31,7 +31,7 @@
 // no `setenv`, so the in-process helper also accepts the count as an
 // explicit parameter (`emit_llvm_with_retry_injected`) for unit tests
 // that can't mutate their own environment.
-import { _atomic_rename_into_place, _mktemp_sibling_cmd } from "./cli_commands_utils";
+import { _atomic_rename_into_place, _mktemp_sibling_cmd } from "./build/fs";
 import {
     compile_to_llvm_file_with_module,
     compile_to_llvm_file_with_module_imports,
@@ -39,7 +39,7 @@ import {
 } from "./main";
 import { substring } from "./string_utils";
 
-// Same extern the resolver and `cli_commands_utils` declare; repeating
+// Same extern the resolver and `build/fs.sfn` declare; repeating
 // it here keeps this module a leaf (no new cross-module import just to
 // read one env var).
 extern fn sailfin_runtime_shell_capture(cmd: * u8) -> * u8;

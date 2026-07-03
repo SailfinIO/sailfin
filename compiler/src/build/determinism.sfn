@@ -13,8 +13,8 @@ import {
     make_determinism_module
 } from "../build_report";
 import { capsule_artifact_manifest_path, is_safe_scope_name, parse_scope_name } from "../capsule_artifact";
-import { _sha256_of_file_cmd, _shell_single_quote_arg } from "../cli_commands_utils";
 import { number_to_string } from "../main";
+import { _sha256_of_file_cmd, _shell_single_quote_arg } from "./fs";
 import { _find_substring_from, _resolve_self_path } from "./paths";
 
 // -------------------------------------------------------------------

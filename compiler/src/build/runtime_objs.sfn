@@ -16,20 +16,20 @@ import {
     runtime_object_cache_key_with_identity,
     runtime_object_entry_key_from_str
 } from "../build_cache";
-import {
-    _atomic_rename_into_place,
-    _env_flag,
-    _mktemp_sibling_cmd,
-    _sha256_of_file_cmd,
-    _shell_read_cmd,
-    _shell_single_quote_arg
-} from "../cli_commands_utils";
+import { _env_flag } from "../build_flags";
 import { resolve_import_module_slug_for_module } from "../llvm/imports";
 import { module_name_from_path, number_to_string } from "../main";
 import { parse_native_imports_for_import } from "../native_ir_api";
 import { RuntimeCapsuleArtifacts } from "../runtime_capsule_resolver";
 import { resolve_compiler_version } from "../version";
 import { llvm_assemble } from "./clang_argv";
+import {
+    _atomic_rename_into_place,
+    _mktemp_sibling_cmd,
+    _sha256_of_file_cmd,
+    _shell_read_cmd,
+    _shell_single_quote_arg
+} from "./fs";
 import {
     _dirname,
     _ensure_dir,

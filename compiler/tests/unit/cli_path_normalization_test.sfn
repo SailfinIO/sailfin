@@ -10,12 +10,11 @@
 // e2e test now runs the canonical scenario exactly once.
 import {
     _atomic_rename_into_place,
-    _collect_test_files_cmd,
     _dirname_cmd,
     _mktemp_sibling_cmd,
-    _strip_trailing_slashes_cmd,
-    _suite_name_from_path
-} from "../../src/cli_commands_utils";
+    _strip_trailing_slashes_cmd
+} from "../../src/build/fs";
+import { _collect_test_files_cmd, _suite_name_from_path } from "../../src/cli/commands/test";
 
 test "path-norm: bare directory unchanged" {
     assert _strip_trailing_slashes_cmd("compiler/src") == "compiler/src";

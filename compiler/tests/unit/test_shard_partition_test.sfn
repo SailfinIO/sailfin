@@ -12,7 +12,7 @@
 //     file-count-balanced (sizes differ by at most one). The predicate is
 //     deterministic, so the same query always yields the same answer
 //     across runs/platforms.
-import { _parse_shard_index, _parse_shard_total, _shard_keeps_index } from "../../src/cli_commands_utils";
+import { _parse_shard_index, _parse_shard_total, _shard_keeps_index } from "../../src/cli/commands/test";
 
 // --- Parse + validation ---
 test "shard: well-formed 1/3 parses to fields" {
