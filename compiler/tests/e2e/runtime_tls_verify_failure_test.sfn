@@ -32,6 +32,8 @@
 // Matchers note (#842): `sfn/test`'s `expect_*` matchers are `![pure]` and
 // cannot be called from an `![io]` test; assert on captured state with
 // direct comparisons instead.
+import { find } from "sfn/strings";
+
 // ── file-local raw loopback readiness probe ──────────────────────
 // Prefixed `_tvf_` so these never collide with the external-linkage
 // runtime helpers of the same shape in `http.sfn` (not linked into this
@@ -103,14 +105,34 @@ fn _sfn_bin() -> string ![io] {
 // SAILFIN_TEST_SCRATCH keeps the build cache per-invocation under the pool.
 fn _child_env() -> string[] ![io] { return process.environ(); }
 
+// Parent environment with any inherited `SAILFIN_TLS_CAFILE` entry
+// stripped. A child's `getenv` resolves the FIRST matching entry, so a
+// CAFILE set in the parent shell would otherwise leak into the child and
+// either shadow the trusted run's intended cert or trust-anchor the
+// "untrusted" negative case — skewing the result. Both client env builders
+// start from this filtered base. `find(...) != 0` keeps every entry whose
+// `SAILFIN_TLS_CAFILE=` prefix is NOT at index 0 (i.e. not this variable).
+fn _env_no_cafile() -> string[] ![io] {
+    let src = process.environ();
+    let mut out: string[] = [];
+    let mut i: i64 = 0;
+    loop {
+        if i >= src.length { break; }
+        let entry = src[i];
+        if find(entry, "SAILFIN_TLS_CAFILE=", 0) != 0 { out.push(entry); }
+        i = i + 1;
+    }
+    return out;
+}
+
 // The client run-env WITHOUT any custom CA — the self-signed peer is not
 // in the system trust store, so verification must fail.
-fn _untrusted_env() -> string[] ![io] { return process.environ(); }
+fn _untrusted_env() -> string[] ![io] { return _env_no_cafile(); }
 
 // The client run-env WITH `SAILFIN_TLS_CAFILE` pointed at `cert_path` so
 // the chain verifies (self-signed cert as its own trust anchor).
 fn _trusted_env(cert_path: string) -> string[] ![io] {
-    let mut e = process.environ();
+    let mut e = _env_no_cafile();
     e.push("SAILFIN_TLS_CAFILE=" + cert_path);
     return e;
 }
