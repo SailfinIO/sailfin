@@ -215,9 +215,103 @@ fn tls_read(ssl: * u8, buf: * u8, n: i64) -> i64 ![net] {
 
 // `tls_shutdown_free(ssl)` — best-effort `SSL_shutdown` (sends
 // close_notify over the fd) then `SSL_free`. No-op on null. Must run
-// before the caller `close`s the underlying fd.
+// before the caller `close`s the underlying fd. Direction-agnostic: the
+// server accept loop (`../concurrency/serve.sfn`) reuses it exactly as the
+// client does, since an `SSL*` teardown is identical either way.
 fn tls_shutdown_free(ssl: * u8) -> void ![net] {
     if ssl as i64 == 0 { return; }
     SSL_shutdown(ssl);
     SSL_free(ssl);
+}
+
+// ── Inbound (server) surface (SFEP-0036 §3.5) ─────────────────────
+// Server-side TLS termination for the `serve` accept loop
+// (`../concurrency/serve.sfn`). Symmetric to the client surface above: a
+// server `SSL_CTX` loads the cert chain + private key, and each accepted
+// fd is wrapped into an `SSL*` via the server handshake (`SSL_accept`
+// instead of `SSL_connect`). No client-certificate (mTLS) request — the
+// server does not verify a peer cert in v0 (deferred post-1.0), so no
+// `SSL_CTX_set_verify` is set on the server ctx and no callback is ever
+// address-taken (the same callback-free property as the client, §3.2).
+// Reuses `SSL_CTX_new` / `SSL_CTX_free` / `SSL_new` / `SSL_free` /
+// `SSL_set_fd` and the `tls_read` / `tls_write` / `tls_shutdown_free`
+// helpers already declared above.
+extern fn TLS_server_method() -> * u8;
+
+// `int SSL_CTX_use_certificate_chain_file(SSL_CTX *, const char *file)` —
+// load the server's PEM certificate chain. Returns 1 on success.
+extern fn SSL_CTX_use_certificate_chain_file(ctx: * u8, file: * u8) -> i32;
+
+// `int SSL_CTX_use_PrivateKey_file(SSL_CTX *, const char *file, int type)`
+// — load the server's PEM private key (`type` = SSL_FILETYPE_PEM = 1).
+// Returns 1 on success; a load failure (missing / mismatched key) means we
+// cannot serve TLS.
+extern fn SSL_CTX_use_PrivateKey_file(ctx: * u8, file: * u8, ty: i32) -> i32;
+
+// `int SSL_accept(SSL *)` — drive the blocking server-side handshake over
+// the attached fd. Returns 1 on success. Callback-free (blocking BIO).
+extern fn SSL_accept(ssl: * u8) -> i32;
+
+// `int SSL_CTX_check_private_key(const SSL_CTX *)` — verify the loaded
+// private key matches the loaded certificate. `SSL_CTX_use_PrivateKey_file`
+// only validates the key's own internal consistency, not that it pairs with
+// the cert, so a mismatched keypair would otherwise pass ctx build and fail
+// every handshake at runtime. Returns 1 when the pair is consistent.
+extern fn SSL_CTX_check_private_key(ctx: * u8) -> i32;
+
+// `tls_server_ctx(cert_path, key_path)` — build a server `SSL_CTX` with the
+// certificate chain + private key loaded (PEM) for the server's lifetime
+// (SFEP-0036 §3.5/§3.7). No peer (client-cert) verification is configured
+// — mTLS is out of scope for 1.0 (§3.6). Returns the ctx, or null on any
+// failure (freeing a partially-built ctx first) so the caller fails closed
+// rather than binding a mode that cannot complete a handshake. `cert_path`
+// and `key_path` are NUL-terminated C strings (bare filesystem paths).
+fn tls_server_ctx(cert_path: * u8, key_path: * u8) -> * u8 {
+    if cert_path as i64 == 0 { return null; }
+    if key_path as i64 == 0 { return null; }
+    let method: * u8 = TLS_server_method();
+    if method as i64 == 0 { return null; }
+    let ctx: * u8 = SSL_CTX_new(method);
+    if ctx as i64 == 0 { return null; }
+    // SSL_FILETYPE_PEM = 1.
+    if SSL_CTX_use_certificate_chain_file(ctx, cert_path) != 1 {
+        SSL_CTX_free(ctx);
+        return null;
+    }
+    if SSL_CTX_use_PrivateKey_file(ctx, key_path, 1) != 1 {
+        SSL_CTX_free(ctx);
+        return null;
+    }
+    // Fail closed at ctx-build time if the key does not pair with the cert,
+    // rather than deferring the failure to every per-connection handshake.
+    if SSL_CTX_check_private_key(ctx) != 1 {
+        SSL_CTX_free(ctx);
+        return null;
+    }
+    return ctx;
+}
+
+// `tls_accept_fd(ctx, fd)` — wrap an already-accepted socket `fd` into a
+// server `SSL*`: attach the fd (blocking BIO), then drive the blocking
+// server handshake (`SSL_accept`). Returns the handshaken `SSL*`, or null
+// on any failure (freeing the partial `SSL*` first) so the caller drops the
+// connection rather than reading plaintext off a half-open TLS socket. The
+// `SSL_CTX` is shared read-only across pool workers — OpenSSL `SSL_CTX` is
+// reference-counted and thread-safe for `SSL_new`, so no per-worker ctx is
+// needed. The caller MUST arm the fd's `SO_RCVTIMEO`/`SO_SNDTIMEO` (#1581)
+// BEFORE this call so the blocking `SSL_accept` handshake is bounded — a
+// stalled/slow-loris handshake must not pin a pool worker indefinitely.
+fn tls_accept_fd(ctx: * u8, fd: i32) -> * u8 ![net] {
+    if ctx as i64 == 0 { return null; }
+    let ssl: * u8 = SSL_new(ctx);
+    if ssl as i64 == 0 { return null; }
+    if SSL_set_fd(ssl, fd) != 1 {
+        SSL_free(ssl);
+        return null;
+    }
+    if SSL_accept(ssl) != 1 {
+        SSL_free(ssl);
+        return null;
+    }
+    return ssl;
 }

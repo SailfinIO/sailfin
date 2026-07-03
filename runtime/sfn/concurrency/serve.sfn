@@ -46,8 +46,10 @@
 // and the bespoke serve lowering in `core.sfn` emits `@sfn_serve`
 // in place of the legacy `@sailfin_adapter_serve_start`.
 //
-// Scope: HTTP/1.1 only — NO TLS (post-1.0), and blocking accept —
-// NO async I/O (v0). Request parsing is minimal: the raw request is
+// Scope: HTTP/1.1 only, and blocking accept — NO async I/O (v0).
+// Inbound TLS termination IS available via `sfn_serve_tls` (SFEP-0036
+// §3.5); the plaintext `sfn_serve` / `sfn_serve_framed` paths stay
+// untouched. Request parsing is minimal: the raw request is
 // handed to the handler verbatim. `Content-Length` request bodies ARE
 // drained (capped at 1 MiB; over-cap → `500`), so POST/PUT handlers
 // see a reliable body; chunked transfer-encoding is out of scope
@@ -157,6 +159,50 @@ extern fn sfn_task_create_detached(fn_ptr: i64, ctx: i64) -> * u8;
 
 extern fn sfn_scheduler_create(queue: * u8) -> * u8;
 
+// ── TLS termination surface (SFEP-0036 §3.5, tls.sfn) ─────────────
+// Inbound TLS: `sfn_serve_tls` builds a server `SSL_CTX` once
+// (`tls_server_ctx`), wraps each accepted fd into an `SSL*`
+// (`tls_accept_fd`), and runs the recv→dispatch→send loop through
+// `tls_read`/`tls_write` (same contract as `recv`/`send`) instead of the
+// raw socket. Declared here as externs — the linker resolves each `@tls_*`
+// symbol to its Sailfin definition in `../platform/tls.sfn`, the same
+// cross-module-linkage idiom `adapters/http.sfn` uses for the client
+// surface (declaring the runtime helper as an `extern` in the consumer).
+// Extern declarations carry no effects (E0804); enforcement rides the
+// enclosing `![net]` `sfn_serve_tls`, exactly as the socket externs do.
+extern fn tls_server_ctx(cert_path: * u8, key_path: * u8) -> * u8;
+
+extern fn tls_accept_fd(ctx: * u8, fd: i32) -> * u8;
+
+extern fn tls_read(ssl: * u8, buf: * u8, n: i64) -> i64;
+
+extern fn tls_write(ssl: * u8, buf: * u8, n: i64) -> i64;
+
+extern fn tls_shutdown_free(ssl: * u8) -> void;
+
+// `_serve_conn_recv(fd, ssl, buf, n)` / `_serve_conn_send(fd, ssl, buf, n)`
+// — the per-connection transport seam. When `ssl` is null the bytes go
+// through the raw socket (`recv`/`send` on `fd`, byte-for-byte the plaintext
+// path); when `ssl` is non-null they go through TLS (`tls_read`/`tls_write`,
+// which mirror `recv`/`send`'s contract exactly — see `tls.sfn`). This lets
+// the request-parse and response-frame helpers below serve both the
+// plaintext and TLS workers from a single body: the plaintext callers pass
+// `null` and observe no behavioral change (`SSL_read`/`SSL_write` are never
+// reached), so the pinned plaintext serve e2e stays green.
+fn _serve_conn_recv(fd: i32, ssl: * u8, buf: * u8, n: i64) -> i64 {
+    if ssl as i64 == 0 {
+        return recv(fd, buf, n, 0);
+    }
+    return tls_read(ssl, buf, n);
+}
+
+fn _serve_conn_send(fd: i32, ssl: * u8, buf: * u8, n: i64) -> i64 {
+    if ssl as i64 == 0 {
+        return send(fd, buf, n, 0);
+    }
+    return tls_write(ssl, buf, n);
+}
+
 // `_serve_ptr_off(p, off)` — byte-stride pointer arithmetic for a
 // variable offset (serve-local copy of `http.sfn`'s `_ptr_off`).
 fn _serve_ptr_off(p: * u8, off: i64) -> * u8 {
@@ -208,14 +254,16 @@ fn _serve_append(dst: * u8, off: i64, src: * u8) -> i64 {
     return off + n;
 }
 
-// `_serve_send_all(fd, buf, total)` — write `total` bytes, retrying
-// on short sends. Returns false if `send` ever fails. Serve-local
-// copy of `http.sfn`'s `_send_all`.
-fn _serve_send_all(fd: i32, buf: * u8, total: i64) -> bool {
+// `_serve_send_all(fd, ssl, buf, total)` — write `total` bytes, retrying
+// on short sends. Returns false if the underlying write ever fails.
+// Serve-local copy of `http.sfn`'s `_send_all`. `ssl` selects the
+// transport: null → raw `send(fd)` (plaintext, unchanged); non-null →
+// `tls_write(ssl)` (TLS termination). Both go through `_serve_conn_send`.
+fn _serve_send_all(fd: i32, ssl: * u8, buf: * u8, total: i64) -> bool {
     let mut sent: i64 = 0;
     loop {
         if sent >= total { break; }
-        let n: i64 = send(fd, _serve_ptr_off(buf, sent), total - sent, 0);
+        let n: i64 = _serve_conn_send(fd, ssl, _serve_ptr_off(buf, sent), total - sent);
         if n <= 0 { return false; }
         sent = sent + n;
     }
@@ -406,7 +454,14 @@ fn _serve_keep_alive(buf: * u8) -> bool {
 // (null → `500`) rather than risking an unbounded allocation or a hang.
 // Chunked transfer-encoding is out of scope (post-1.0); only an
 // explicit `Content-Length` body is drained.
-fn _serve_recv_request(fd: i32) -> * u8 {
+//
+// `ssl` selects the transport (SFEP-0036 §3.5): null → raw `recv(fd)`
+// (plaintext, unchanged); non-null → `tls_read(ssl)`. Both go through
+// `_serve_conn_recv`. The `SO_RCVTIMEO`/`SO_SNDTIMEO` arming stays keyed on
+// `fd` — OpenSSL rides the same fd, so the socket timeouts bound `tls_read`
+// identically (a TLS read timeout surfaces as `tls_read -> -1`, handled the
+// same as a raw `recv -> -1`).
+fn _serve_recv_request(fd: i32, ssl: * u8) -> * u8 {
     // Bound recv/send so a slow-loris or dead client cannot pin this pool
     // worker forever (#1581). A recv timeout returns -1 below, which is
     // handled exactly like any recv error: free + null → the worker emits
@@ -441,7 +496,7 @@ fn _serve_recv_request(fd: i32) -> * u8 {
             buf = new_buf;
             capacity = new_cap;
         }
-        let n: i64 = recv(fd, _serve_ptr_off(buf, len), chunk, 0);
+        let n: i64 = _serve_conn_recv(fd, ssl, _serve_ptr_off(buf, len), chunk);
         if n < 0 {
             free(buf);
             return null;
@@ -503,7 +558,7 @@ fn _serve_recv_request(fd: i32) -> * u8 {
             capacity = new_cap;
         }
         let want: i64 = body_target - len;
-        let n: i64 = recv(fd, _serve_ptr_off(buf, len), want, 0);
+        let n: i64 = _serve_conn_recv(fd, ssl, _serve_ptr_off(buf, len), want);
         if n < 0 {
             free(buf);
             return null;
@@ -517,18 +572,19 @@ fn _serve_recv_request(fd: i32) -> * u8 {
     return buf;
 }
 
-// `_serve_send_response(fd, body, keep_alive)` — frame `body` as a minimal
-// HTTP/1.1 `200 OK` response (`Content-Length` + a negotiation-aware
+// `_serve_send_response(fd, ssl, body, keep_alive)` — frame `body` as a
+// minimal HTTP/1.1 `200 OK` response (`Content-Length` + a negotiation-aware
 // `Connection` header) and write it. When `keep_alive` is true the response
 // carries `Connection: keep-alive` (the connection is reused for the next
 // request); otherwise `Connection: close` (#1711). A null `body` becomes a
 // `500 Internal Server Error` with an empty body and always `Connection:
 // close` (the worker closes on the error path). Returns false on a send
-// failure.
-fn _serve_send_response(fd: i32, body: * u8, keep_alive: bool) -> bool {
+// failure. `ssl` selects the transport (null → raw `send`, non-null → TLS),
+// threaded into `_serve_send_all`.
+fn _serve_send_response(fd: i32, ssl: * u8, body: * u8, keep_alive: bool) -> bool {
     if body as i64 == 0 {
         let err: string = "HTTP/1.1 500 Internal Server Error\r\nContent-Length: 0\r\nConnection: close\r\n\r\n";
-        return _serve_send_all(fd, err as * u8, strlen(err as * u8) as i64);
+        return _serve_send_all(fd, ssl, err as * u8, strlen(err as * u8) as i64);
     }
 
     let status: string = "HTTP/1.1 200 OK\r\nContent-Length: ";
@@ -553,24 +609,25 @@ fn _serve_send_response(fd: i32, body: * u8, keep_alive: bool) -> bool {
     memset(_serve_ptr_off(resp, off), 0, 1 as usize);
     free(clen);
 
-    let ok: bool = _serve_send_all(fd, resp, off);
+    let ok: bool = _serve_send_all(fd, ssl, resp, off);
     free(resp);
     return ok;
 }
 
-// `_serve_send_raw(fd, resp)` — write a pre-framed HTTP response
+// `_serve_send_raw(fd, ssl, resp)` — write a pre-framed HTTP response
 // verbatim. This is the framed-handler contract used by `sfn_serve_framed`:
 // the handler returns the FULL response (status line + headers + body),
 // so the runtime adds no framing of its own. A null `resp` becomes a
 // `500 Internal Server Error`. Returns false on a send failure. v0 is
 // text responses (NUL-terminated); embedded-NUL binary bodies are out of
-// scope (the `strlen` length stops at the first NUL).
-fn _serve_send_raw(fd: i32, resp: * u8) -> bool {
+// scope (the `strlen` length stops at the first NUL). `ssl` selects the
+// transport (null → raw `send`, non-null → TLS).
+fn _serve_send_raw(fd: i32, ssl: * u8, resp: * u8) -> bool {
     if resp as i64 == 0 {
         let err: string = "HTTP/1.1 500 Internal Server Error\r\nContent-Length: 0\r\nConnection: close\r\n\r\n";
-        return _serve_send_all(fd, err as * u8, strlen(err as * u8) as i64);
+        return _serve_send_all(fd, ssl, err as * u8, strlen(err as * u8) as i64);
     }
-    return _serve_send_all(fd, resp, strlen(resp) as i64);
+    return _serve_send_all(fd, ssl, resp, strlen(resp) as i64);
 }
 
 // `OwnedBuf` — the runtime owned-buffer aggregate (`runtime/sfn/memory/
@@ -701,12 +758,12 @@ fn _serve_conn_worker(ctx: * u8) -> * u8 {
     // closes quietly without a spurious 500.
     let mut first: bool = true;
     loop {
-        let request: * u8 = _serve_recv_request(client_fd as i32);
+        let request: * u8 = _serve_recv_request(client_fd as i32, null);
         if request as i64 == 0 {
             // Bad/oversized/failed request: emit a 500 (first cycle only),
             // never call the handler with a null request pointer.
             if first {
-                _serve_send_response(client_fd as i32, null, false);
+                _serve_send_response(client_fd as i32, null, null, false);
             }
             break;
         }
@@ -720,7 +777,7 @@ fn _serve_conn_worker(ctx: * u8) -> * u8 {
         // owned by the move now — do NOT free it here (dispatch does).
         let req_box: OwnedBuf = _serve_wrap_owned(request, strlen(request) as i64);
         let response: OwnedBuf = sfn_serve_handler_dispatch(handler as * u8, req_box);
-        let sent_ok: bool = _serve_send_response(client_fd as i32, response.ptr_addr as * u8, keep_alive);
+        let sent_ok: bool = _serve_send_response(client_fd as i32, null, response.ptr_addr as * u8, keep_alive);
         _serve_free_owned(response);
         if !keep_alive { break; }
         if !sent_ok { break; }
@@ -761,20 +818,88 @@ fn _serve_conn_worker_framed(ctx: * u8) -> * u8 {
     // worker computes `keep_alive` here purely to decide whether to loop.
     let mut first: bool = true;
     loop {
-        let request: * u8 = _serve_recv_request(client_fd as i32);
+        let request: * u8 = _serve_recv_request(client_fd as i32, null);
         if request as i64 == 0 {
-            if first { _serve_send_raw(client_fd as i32, null); }
+            if first { _serve_send_raw(client_fd as i32, null, null); }
             break;
         }
         first = false;
         let keep_alive: bool = _serve_keep_alive(request);
         let req_box: OwnedBuf = _serve_wrap_owned(request, strlen(request) as i64);
         let response: OwnedBuf = sfn_serve_handler_dispatch(handler as * u8, req_box);
-        let sent_ok: bool = _serve_send_raw(client_fd as i32, response.ptr_addr as * u8);
+        let sent_ok: bool = _serve_send_raw(client_fd as i32, null, response.ptr_addr as * u8);
         _serve_free_owned(response);
         if !keep_alive { break; }
         if !sent_ok { break; }
     }
+    close(client_fd as i32);
+    return null;
+}
+
+// `_serve_conn_worker_tls(ctx)` — per-connection worker for the TLS server
+// (`sfn_serve_tls`, SFEP-0036 §3.5). Same recv→dispatch→send keep-alive
+// shape as `_serve_conn_worker`, but each accepted fd is first wrapped into
+// a server `SSL*` via `tls_accept_fd`, and every I/O flows through TLS
+// (`_serve_recv_request` / `_serve_send_response` receive the non-null
+// `ssl`). The ctx is a 24-byte triple `[client_fd: i64][handler: i64]
+// [server_ctx: i64]` (the plaintext workers use a 16-byte pair; the third
+// slot carries the shared server `SSL_CTX*`).
+//
+// A failed handshake (`tls_accept_fd -> null`: a non-TLS client, a cert/SNI
+// mismatch, or a recv-timeout during the handshake) means there is no TLS
+// channel to send even a `500` over, so the worker closes the raw fd and
+// drops the connection — it never falls back to a plaintext error (that
+// would leak an unencrypted response on a port advertised as TLS).
+// `tls_shutdown_free` sends `close_notify` and frees the `SSL*` before the
+// underlying `close`, mirroring the client teardown discipline (§3.7). The
+// shared `server_ctx` is NOT freed here — it lives for the server's
+// lifetime and is used by every worker (OpenSSL `SSL_CTX` is refcounted and
+// thread-safe for `SSL_new`).
+fn _serve_conn_worker_tls(ctx: * u8) -> * u8 {
+    if ctx as i64 == 0 { return null; }
+    let base: i64 = ctx as i64;
+    let fd_slot: * i64 = base as * i64;
+    let handler_slot: * i64 = (base + 8) as * i64;
+    let ctx_slot: * i64 = (base + 16) as * i64;
+    let client_fd: i64 = atomic_load(fd_slot);
+    let handler: i64 = atomic_load(handler_slot);
+    let server_ctx: i64 = atomic_load(ctx_slot);
+    free(ctx);
+
+    // Arm SO_RCVTIMEO/SO_SNDTIMEO (#1581) BEFORE the blocking `SSL_accept`
+    // handshake so a stalled/slow-loris handshake cannot pin this pool worker
+    // — the plaintext path arms inside the first `_serve_recv_request`, but
+    // the TLS handshake runs first, so it must be armed here (the recv loop's
+    // per-cycle re-arm is idempotent).
+    _serve_set_socket_timeouts(client_fd as i32);
+
+    // Server-side handshake. On failure, drop the connection (no plaintext
+    // fallback on a TLS port).
+    let ssl: * u8 = tls_accept_fd(server_ctx as * u8, client_fd as i32);
+    if ssl as i64 == 0 {
+        close(client_fd as i32);
+        return null;
+    }
+
+    let mut first: bool = true;
+    loop {
+        let request: * u8 = _serve_recv_request(client_fd as i32, ssl);
+        if request as i64 == 0 {
+            if first {
+                _serve_send_response(client_fd as i32, ssl, null, false);
+            }
+            break;
+        }
+        first = false;
+        let keep_alive: bool = _serve_keep_alive(request);
+        let req_box: OwnedBuf = _serve_wrap_owned(request, strlen(request) as i64);
+        let response: OwnedBuf = sfn_serve_handler_dispatch(handler as * u8, req_box);
+        let sent_ok: bool = _serve_send_response(client_fd as i32, ssl, response.ptr_addr as * u8, keep_alive);
+        _serve_free_owned(response);
+        if !keep_alive { break; }
+        if !sent_ok { break; }
+    }
+    tls_shutdown_free(ssl);
     close(client_fd as i32);
     return null;
 }
@@ -923,6 +1048,74 @@ fn sfn_serve_framed(handler: * u8, port: i32) -> void ![net, io] {
         atomic_store(handler_slot, handler as i64);
 
         let worker: * fn (* u8) -> * u8 = _serve_conn_worker_framed as * fn (* u8) -> * u8;
+        let task: * u8 = sfn_task_create_detached(worker as i64, conn_ctx as i64);
+        if task as i64 == 0 {
+            free(conn_ctx);
+            close(client_fd);
+            continue;
+        }
+        sfn_taskqueue_enqueue(queue, task);
+    }
+
+    close(listen_fd);
+}
+
+// `sfn_serve_tls(handler, port, cert_path, key_path)` — like `sfn_serve`,
+// but terminates inbound TLS (SFEP-0036 §3.5): each accepted connection is
+// wrapped in a server-side handshake before the recv→dispatch→send cycle,
+// and the handler's returned bytes are framed as a bare `200 OK` (identical
+// framing to `sfn_serve`). The server `SSL_CTX` (cert chain + private key,
+// PEM) is built ONCE up front via `tls_server_ctx` and shared read-only
+// across the pool (OpenSSL `SSL_CTX` is thread-safe for `SSL_new`), living
+// for the server's lifetime. `cert_path` / `key_path` are NUL-terminated
+// filesystem paths. Fails closed: if the cert/key cannot be loaded the
+// server never binds (no plaintext downgrade on a TLS port). Does NOT
+// return (blocking accept loop). The plaintext `sfn_serve` /
+// `sfn_serve_framed` paths are untouched — TLS mode is a distinct
+// entrypoint + worker, so a build that never calls `sfn_serve_tls` links no
+// TLS accept path.
+fn sfn_serve_tls(handler: * u8, port: i32, cert_path: * u8, key_path: * u8) -> void ![net, io] {
+    // Build the server TLS context once (cert + key held for the server's
+    // lifetime). A load failure means we cannot terminate TLS — return
+    // without binding rather than serve plaintext on a TLS port.
+    let server_ctx: * u8 = tls_server_ctx(cert_path, key_path);
+    if server_ctx as i64 == 0 { return; }
+
+    let listen_fd: i32 = _serve_bind_listen(port as i64);
+    if listen_fd < 0 { return; }
+
+    // One shared queue + fixed worker pool for the whole server.
+    let queue: * u8 = sfn_taskqueue_create(256);
+    if queue as i64 == 0 {
+        close(listen_fd);
+        return;
+    }
+    let scheduler: * u8 = sfn_scheduler_create(queue);
+    if scheduler as i64 == 0 {
+        sfn_taskqueue_destroy(queue);
+        close(listen_fd);
+        return;
+    }
+
+    loop {
+        let client_fd: i32 = accept(listen_fd, null, null);
+        if client_fd < 0 { break; }
+
+        // Pack [client_fd][handler][server_ctx] for the TLS connection
+        // worker (24 bytes; the plaintext workers use a 16-byte pair).
+        let conn_ctx: * u8 = malloc(24 as usize);
+        if conn_ctx as i64 == 0 {
+            close(client_fd);
+            continue;
+        }
+        let fd_slot: * i64 = conn_ctx as * i64;
+        let handler_slot: * i64 = (conn_ctx as i64 + 8) as * i64;
+        let ctx_slot: * i64 = (conn_ctx as i64 + 16) as * i64;
+        atomic_store(fd_slot, client_fd as i64);
+        atomic_store(handler_slot, handler as i64);
+        atomic_store(ctx_slot, server_ctx as i64);
+
+        let worker: * fn (* u8) -> * u8 = _serve_conn_worker_tls as * fn (* u8) -> * u8;
         let task: * u8 = sfn_task_create_detached(worker as i64, conn_ctx as i64);
         if task as i64 == 0 {
             free(conn_ctx);
