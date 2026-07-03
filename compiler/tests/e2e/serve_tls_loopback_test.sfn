@@ -1,0 +1,227 @@
+// Inbound TLS-termination loopback e2e for `sfn_serve_tls`
+// (SFEP-0036 §3.5, gap B1 of epic #1540, issue #1783). Proves the native
+// runtime terminates inbound TLS end-to-end: a self-signed server cert is
+// generated, `sfn_serve_tls` is started over loopback, and an external TLS
+// client (`openssl s_client`) completes a handshake and drives a full
+// request→response cycle — the acceptance bar for the inbound half of the
+// TLS transport.
+//
+// Why an external TLS client. The Sailfin-native TLS *client* + the full
+// client↔server / verify-failure matrix is issue #4 of SFEP-0036 (§8 test
+// plan); this test's job is only to pin that `sfn_serve_tls` handshakes and
+// responds. `openssl s_client` is the minimal, ubiquitous TLS driver, run
+// via a `bash -c` pipe vehicle (`.claude/rules/no-bash-e2e.md` — an `![io]`
+// test may spawn external tools; there is no bash *script*). It doubles as
+// the cert generator (`openssl req`), so the only external dependency is
+// `openssl` (+ a wall-clock `timeout` to reap the never-returning server).
+//
+// Handler ABI. `sfn_serve_tls` dispatches to the same moved-`OwnedBuf`
+// `fn(OwnedBuf) -> OwnedBuf` handler ABI as `sfn_serve` (#1476). The fixture
+// defines a layout-matching `OwnedBuf` and a handler that returns a fresh
+// libc-backed buffer (mirroring `sfn/http`'s `_http_owned_from_str`), so it
+// exercises the real runtime dispatch without depending on the `sfn/http`
+// capsule. `sfn_serve_tls` wraps the returned body in a bare `200 OK`.
+//
+// Matchers note (#842): `sfn/test`'s `expect_*` are `![pure]` and cannot be
+// called from an `![io]` test; assert on captured output with
+// `sfn/strings::contains`.
+import { contains } from "sfn/strings";
+
+// The compiler-under-test: `$SAILFIN_BIN` if set, else the self-hosted
+// binary relative to the repo root the runner starts from.
+fn _sfn_bin() -> string ![io] {
+    let configured = env.get("SAILFIN_BIN");
+    if configured.length > 0 { return configured; }
+    return "build/native/sailfin";
+}
+
+// Full parent environment for the build + client subprocesses. The build
+// LINKS a binary (clang + ld + `-lssl -lcrypto`), needing the toolchain
+// environment; `run_capture`'s empty env is the EMPTY environment, not
+// "inherit". `SAILFIN_TEST_SCRATCH` (set by the runner) rides along, keeping
+// the nested build cache per-invocation under the parallel pool.
+fn _child_env() -> string[] ![io] { return process.environ(); }
+
+// Fixed loopback port for this test (sole TLS-serve e2e in the pool, so no
+// `--jobs N` collision); high + uncommon to dodge local services.
+fn _tls_port_str() -> string { return "18893"; }
+
+// Resolve a wall-clock timeout command (mirrors the plaintext loopback
+// test). Empty => none found; the caller then skips (the blocking server
+// would otherwise orphan the fixed port).
+fn _timeout_cmd() -> string ![io] {
+    let probe = process.run(["sh", "-c", "command -v timeout >/dev/null 2>&1"]);
+    if probe == 0 { return "timeout"; }
+    let gprobe = process.run(["sh", "-c", "command -v gtimeout >/dev/null 2>&1"]);
+    if gprobe == 0 { return "gtimeout"; }
+    return "";
+}
+
+fn _has_openssl() -> bool ![io] {
+    let probe = process.run(["sh", "-c", "command -v openssl >/dev/null 2>&1"]);
+    return probe == 0;
+}
+
+// A scratch dir for the cert/key + fixture (under the runner's per-file
+// scratch when present, else /tmp). Absolute so the fixture's baked cert/key
+// paths resolve regardless of the server's cwd.
+fn _scratch_dir() -> string ![io] {
+    let mut dir = env.get("SAILFIN_TEST_SCRATCH");
+    if dir.length == 0 { dir = "/tmp"; }
+    dir = dir + "/sfn-serve-tls";
+    fs.createDirectory(dir, true);
+    return dir;
+}
+
+// Generate a self-signed server cert+key (no passphrase). CN=127.0.0.1;
+// `openssl s_client` does not verify by default, so no SAN is needed for
+// this handshake-and-respond pin (cert-verification enforcement is #3/#4).
+fn _gen_cert(cert: string, key: string) -> bool ![io] {
+    let exit = process.run_capture(["openssl", "req", "-x509", "-newkey", "rsa:2048", "-keyout", key, "-out", cert, "-days", "2", "-nodes", "-subj", "/CN=127.0.0.1"], _child_env());
+    let _o = process.capture_take_stdout();
+    let _e = process.capture_take_stderr();
+    return exit == 0;
+}
+
+// Write the TLS server fixture: a layout-matching `OwnedBuf`, a handler that
+// returns a fixed body, and `main` starting `sfn_serve_tls` with the baked
+// cert/key paths + port. `sfn_serve_tls` is declared `extern` — the linker
+// resolves it to the runtime definition in
+// `runtime/sfn/concurrency/serve.sfn`.
+fn _write_server(dir: string, cert: string, key: string) -> string ![io] {
+    let src = dir + "/tlssrv.sfn";
+    fs.writeFile(src, "extern fn malloc(size: usize) -> * u8;\n"
+        + "extern fn memcpy(dst: * u8, src: * u8, n: usize) -> * u8;\n"
+        + "extern fn memset(dst: * u8, byte: i32, n: usize) -> * u8;\n"
+        + "extern fn strlen(s: * u8) -> usize;\n"
+        + "extern fn sfn_serve_tls(handler: * u8, port: i32, cert: * u8, key: * u8) -> void;\n"
+        + "\n"
+        + "struct OwnedBuf {\n"
+        + "    ptr_addr: i64;\n"
+        + "    len: i64;\n"
+        + "    cap: i64;\n"
+        + "    arena_addr: i64;\n"
+        + "}\n"
+        + "\n"
+        + "fn _owned_from(s: string) -> OwnedBuf {\n"
+        + "    let src: * u8 = s as * u8;\n"
+        + "    let n: i64 = strlen(src) as i64;\n"
+        + "    let copy: * u8 = malloc((n + 1) as usize);\n"
+        + "    if copy as i64 == 0 { return OwnedBuf { ptr_addr: 0, len: 0, cap: 0, arena_addr: 0 }; }\n"
+        + "    memcpy(copy, src, n as usize);\n"
+        + "    memset(((copy as i64) + n) as * u8, 0, 1 as usize);\n"
+        + "    return OwnedBuf { ptr_addr: copy as i64, len: n, cap: n + 1, arena_addr: 0 };\n"
+        + "}\n"
+        + "\n"
+        + "fn handle(req: OwnedBuf) -> OwnedBuf { return _owned_from(\"TLS-OK-BODY-9f3a\"); }\n"
+        + "\n"
+        + "fn main() -> int ![net, io] {\n"
+        + "    sfn_serve_tls(handle as * u8, "
+        + _tls_port_str()
+        + ", \""
+        + cert
+        + "\" as * u8, \""
+        + key
+        + "\" as * u8);\n"
+        + "    return 0;\n"
+        + "}\n");
+    return src;
+}
+
+// Compile the fixture to a standalone binary up front (synchronous), so the
+// cold compile is NOT inside the readiness poll window. Threads the full
+// parent environment (the nested build links clang + `-lssl -lcrypto`).
+fn _build_bin(main_path: string, bin: string) -> string ![io] {
+    let exit = process.run_capture([_sfn_bin(), "build", "-o", bin, main_path], _child_env());
+    let _out = process.capture_take_stdout();
+    let _err = process.capture_take_stderr();
+    if exit != 0 { return ""; }
+    return bin;
+}
+
+// Spawn the prebuilt blocking server wrapped in a wall-clock timeout so it
+// self-reaps (no process-kill primitive; `serve()` never returns). Guarded
+// on `tcmd` being present by the caller.
+fn _spawn_server(tcmd: string, bin: string) -> i64 ![io] {
+    let mut argv: string[] = [];
+    argv.push(tcmd);
+    argv.push("60");
+    argv.push(bin);
+    return process.spawn_with_env(argv, _child_env());
+}
+
+// Drive the live server once over TLS: `printf <request> | openssl s_client`
+// completes a handshake and sends the request; the server's `Connection:
+// close` makes s_client exit after the response. Wrapped in `timeout` so a
+// stuck handshake cannot hang the pool. Returns the captured response text.
+fn _tls_get(tcmd: string) -> string ![io] {
+    let cmd = "printf 'GET / HTTP/1.1\\r\\nHost: x\\r\\nConnection: close\\r\\n\\r\\n' | "
+        + tcmd
+        + " 6 openssl s_client -connect 127.0.0.1:"
+        + _tls_port_str()
+        + " -quiet 2>/dev/null";
+    let exit = process.run_capture(["bash", "-c", cmd], _child_env());
+    let out = process.capture_take_stdout();
+    let _err = process.capture_take_stderr();
+    if exit != 0 { return out; }
+    return out;
+}
+
+// Poll the TLS endpoint until the prebuilt server answers (startup is just
+// the binary launching + bind + ctx build, ~1s). ~45s budget (90 × ~0.5s)
+// under the 60s server timeout.
+fn _await_ready(tcmd: string) -> string ![io] {
+    let mut attempt: i64 = 0;
+    loop {
+        if attempt >= 90 { break; }
+        let resp = _tls_get(tcmd);
+        if contains(resp, "TLS-OK-BODY-9f3a") { return resp; }
+        let _ = process.run(["sleep", "0.5"]);
+        attempt = attempt + 1;
+    }
+    return "";
+}
+
+test "serve TLS loopback: handshake + request→response cycle over TLS" ![io] {
+    // Teardown of the blocking server relies on a wall-clock timeout; skip
+    // cleanly without one rather than orphan the fixed port. CI (Linux +
+    // coreutils) always has `timeout`. Mirrors the sanitizer/loopback skip
+    // precedent.
+    let tcmd = _timeout_cmd();
+    if tcmd.length == 0 {
+        print.info("[serve-tls] SKIP: no timeout/gtimeout to reap the blocking server");
+        return;
+    }
+    // `openssl` generates the cert AND drives the TLS handshake; skip if
+    // absent (the plain suite still covers the plaintext serve paths).
+    if !_has_openssl() {
+        print.info("[serve-tls] SKIP: openssl CLI not available");
+        return;
+    }
+
+    let dir = _scratch_dir();
+    let cert = dir + "/cert.pem";
+    let key = dir + "/key.pem";
+    assert _gen_cert(cert, key);
+
+    let main_path = _write_server(dir, cert, key);
+    let server_bin = _build_bin(main_path, dir + "/tlssrv-bin");
+    assert server_bin.length > 0;
+    let _handle = _spawn_server(tcmd, server_bin);
+
+    // Handshake + full request→response cycle over TLS (acceptance #1).
+    let resp = _await_ready(tcmd);
+    print.info("[serve-tls] response: " + resp);
+    assert resp.length > 0;
+    assert contains(resp, "HTTP/1.1 200");
+    assert contains(resp, "TLS-OK-BODY-9f3a");
+
+    // A second TLS request round-trips too (a fresh handshake per
+    // connection; the server ctx is reused read-only across pool workers).
+    let resp2 = _tls_get(tcmd);
+    print.info("[serve-tls] response2: " + resp2);
+    assert contains(resp2, "TLS-OK-BODY-9f3a");
+
+    // Best-effort cleanup (the timeout reaps the server process).
+    let _rm = process.run(["rm", "-rf", dir]);
+}
