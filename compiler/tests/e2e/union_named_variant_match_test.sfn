@@ -1,0 +1,86 @@
+// End-to-end regression for tagged-union matching over named struct
+// variants (#1838).
+//
+// Root cause guarded here: the bare expression-statement lowering path
+// (`lower_expression_statement` in
+// `compiler/src/llvm/expression_lowering/native/statement.sfn`) dropped
+// the `string_constants` produced by a dynamic member access, so the
+// `@.runtime.field.*` field-name globals a `match`/interpolation emits
+// were referenced by a `getelementptr` but never defined. LLVM rejected
+// the module with `use of undefined value '@.runtime.field.name'`.
+//
+// `sfn check` cannot catch this — it models no codegen or link, so the
+// undefined-global surfaces only when the IR is verified/linked. This
+// test therefore BUILDS the fixture to a binary and runs it: pre-fix the
+// build fails outright (the undefined global), so a clean exit-0 build
+// AND run is itself the guard, on top of asserting the union arms fire.
+//
+// Build-and-run isolation follows the sibling `sailfin_main_entry_test`
+// pattern: the fixture is written into a fresh `with_tmp_dir` and the
+// nested `sfn build` inherits the parent environment (PATH for
+// clang/linker, SAILFIN_TEST_SCRATCH for per-invocation build-cache
+// isolation under the parallel pool). See `.claude/rules/no-bash-e2e.md`.
+import { find } from "sfn/strings";
+import { with_tmp_dir } from "sfn/test";
+
+fn _sfn_bin() -> string ![io] {
+    let configured = env.get("SAILFIN_BIN");
+    if configured.length > 0 { return configured; }
+    return "build/native/sailfin";
+}
+
+fn _fixture_src() -> string ![io] {
+    return fs.readFile("compiler/tests/e2e/fixtures/union_named_variant_match_probe.sfn");
+}
+
+fn _child_env() -> string[] ![io] { return process.environ(); }
+
+fn _marker(name: string) -> string ![io] {
+    let mut dir = env.get("SAILFIN_TEST_SCRATCH");
+    if dir.length == 0 { dir = "/tmp"; }
+    fs.createDirectory(dir, true);
+    let path = dir + "/sfn-union-match-" + name + ".out";
+    if fs.exists(path) { fs.deleteFile(path); }
+    return path;
+}
+
+// Build the fixture in a temp dir and run it. Stashes the run's captured
+// stdout to `out_marker` and returns the run's exit code, or `-100` if
+// the build itself failed (the undefined-global regression is a build
+// failure, so `-100` is the pre-fix signal this test pins).
+fn _build_and_run(out_marker: string) -> int ![io] {
+    return with_tmp_dir(fn (dir: string) -> int {
+        let srcpath = dir + "/probe.sfn";
+        fs.writeFile(srcpath, _fixture_src());
+        let binpath = dir + "/probe";
+        let build_exit = process.run_capture([_sfn_bin(), "build", "-o", binpath, srcpath], _child_env());
+        let _bo = process.capture_take_stdout();
+        let _be = process.capture_take_stderr();
+        if build_exit != 0 { return -100; }
+        let run_exit = process.run_capture([binpath], []);
+        let out = process.capture_take_stdout();
+        let _re = process.capture_take_stderr();
+        fs.writeFile(out_marker, out);
+        return run_exit;
+    });
+}
+
+test "union-match: named-struct tagged union builds with valid IR and selects the right arm" ![io] {
+    let marker = _marker("arms");
+    let exit = _build_and_run(marker);
+    // `-100` == build failure (the undefined `@.runtime.field.name`
+    // global regression). A clean build+run exits 0.
+    assert exit == 0;
+    let out = fs.readFile(marker);
+    if fs.exists(marker) { fs.deleteFile(marker); }
+    // The StringValue arm and the IntValue arm each fired, selected by
+    // the union tag, printing their interpolated destructured field.
+    assert find(out, "string:Sailfin", 0) >= 0;
+    assert find(out, "number:42", 0) >= 0;
+    // The bare `print("admin:{{admin.name}}")` statement is what emits
+    // the `@.runtime.field.name` global; its `admin:` prefix printing
+    // confirms the statement lowered to valid, runnable IR. The field
+    // value itself is empty here (a separate bare-struct-literal bug,
+    // #1855), so only the prefix is asserted.
+    assert find(out, "admin:", 0) >= 0;
+}

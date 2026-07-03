@@ -1,0 +1,52 @@
+// Fixture for compiler/tests/e2e/union_named_variant_match_test.sfn (#1838).
+//
+// Faithful reduction of examples/advanced/unions.sfn. Two constructs:
+//
+//   1. Tagged-union (`A | B`) matching over named struct variants — the
+//      criterion-2 surface. Each arm prints its interpolated field.
+//   2. A bare `print("...{{admin.name}}...")` whose dynamic member access
+//      emits an `@.runtime.field.name` string global. This is the #1838
+//      regression: the bare expression-statement lowering path dropped
+//      the member access's `string_constants`, so the global was
+//      referenced by a `getelementptr` but never defined and LLVM
+//      rejected the module with `use of undefined value
+//      '@.runtime.field.name'`. Building this fixture at all is the guard.
+//
+// NOTE: `admin.name` reads back empty (`admin:`) because a bare struct
+// literal resolved via a type annotation (`let x: T = { ... }`) is a
+// separate, broader lowering bug (#1855) — the union field-name global
+// emission this fixture pins is orthogonal to it.
+struct StringValue {
+    value: string;
+}
+
+struct IntValue {
+    value: int;
+}
+
+interface Admin {
+    isAdmin: boolean;
+}
+
+interface User {
+    name: string;
+}
+
+type AdminUser = Admin & User;
+
+fn print_value(value: StringValue | IntValue) ![io] {
+    match value {
+        StringValue { value } => print("string:{{value}}"),
+        IntValue { value } => print("number:{{value}}")
+    }
+}
+
+fn main() ![io] {
+    print_value(StringValue { value: "Sailfin" });
+    print_value(IntValue { value: 42 });
+    let admin: AdminUser = {
+        name: "Alice",
+        isAdmin: true
+    };
+    print("admin:{{admin.name}}");
+}
