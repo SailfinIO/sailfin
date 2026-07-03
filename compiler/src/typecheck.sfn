@@ -1048,6 +1048,20 @@ fn walk_expression(expression: Expression?, bindings: SymbolEntry[], imports: Im
             diagnostics = diagnostics.concat(check_bare_fn_type_annotation(parameter.type_annotation, parameter.name, parameter.span));
             _lp += 1;
         }
+        // A param-less lambda (`fn() -> (int) -> int`) has no parameter span
+        // to anchor a return-type E0826 to; fall back to the body's opening
+        // token so the diagnostic still renders with a source location.
+        if lambda_span == null {
+            if expression.body.tokens.length > 0 {
+                let btok = expression.body.tokens[0];
+                lambda_span = SourceSpan {
+                    start_line: btok.line,
+                    start_column: btok.column,
+                    end_line: btok.line,
+                    end_column: btok.column
+                };
+            }
+        }
         diagnostics = diagnostics.concat(check_bare_fn_type_annotation(expression.return_type, "lambda", lambda_span));
         return diagnostics;
     }

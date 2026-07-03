@@ -45,6 +45,48 @@ test "bare-fn-type: accepts canonical signature parameter" ![io] {
     assert ! _has_code(diagnostics, "E0826");
 }
 
+test "bare-fn-type: rejects signature return type (E0826)" ![io] {
+    let source = "fn f() -> (int) -> int { return f; }";
+    let program = parse_program(source);
+    let diagnostics = typecheck_diagnostics(program);
+    assert _has_code(diagnostics, "E0826");
+}
+
+test "bare-fn-type: accepts canonical signature return type" ![io] {
+    let source = "fn f() -> fn(int) -> int { return f; }";
+    let program = parse_program(source);
+    let diagnostics = typecheck_diagnostics(program);
+    assert ! _has_code(diagnostics, "E0826");
+}
+
+test "bare-fn-type: rejects struct method parameter (E0826)" ![io] {
+    let source = "struct S { value: int; fn m(self, cb: (int) -> int) -> int { return 0; } }";
+    let program = parse_program(source);
+    let diagnostics = typecheck_diagnostics(program);
+    assert _has_code(diagnostics, "E0826");
+}
+
+test "bare-fn-type: accepts canonical struct method parameter" ![io] {
+    let source = "struct S { value: int; fn m(self, cb: fn(int) -> int) -> int { return 0; } }";
+    let program = parse_program(source);
+    let diagnostics = typecheck_diagnostics(program);
+    assert ! _has_code(diagnostics, "E0826");
+}
+
+test "bare-fn-type: rejects interface member parameter (E0826)" ![io] {
+    let source = "interface I { fn m(cb: (int) -> int) -> int; }";
+    let program = parse_program(source);
+    let diagnostics = typecheck_diagnostics(program);
+    assert _has_code(diagnostics, "E0826");
+}
+
+test "bare-fn-type: accepts canonical interface member parameter" ![io] {
+    let source = "interface I { fn m(cb: fn(int) -> int) -> int; }";
+    let program = parse_program(source);
+    let diagnostics = typecheck_diagnostics(program);
+    assert ! _has_code(diagnostics, "E0826");
+}
+
 // -------------------------------------------------------------------
 // Position 2 — variable declarations.
 // -------------------------------------------------------------------
@@ -91,6 +133,20 @@ test "bare-fn-type: rejects lambda parameter annotation (E0826)" ![io] {
 
 test "bare-fn-type: accepts canonical lambda parameter annotation" ![io] {
     let source = "fn host() -> int { let f = fn(cb: fn(int) -> int) -> int { return 0; }; return 0; }";
+    let program = parse_program(source);
+    let diagnostics = typecheck_diagnostics(program);
+    assert ! _has_code(diagnostics, "E0826");
+}
+
+test "bare-fn-type: rejects lambda return annotation (E0826)" ![io] {
+    let source = "fn host() -> int { let g = fn() -> (int) -> int { return host; }; return 0; }";
+    let program = parse_program(source);
+    let diagnostics = typecheck_diagnostics(program);
+    assert _has_code(diagnostics, "E0826");
+}
+
+test "bare-fn-type: accepts canonical lambda return annotation" ![io] {
+    let source = "fn host() -> int { let g = fn() -> fn(int) -> int { return host; }; return 0; }";
     let program = parse_program(source);
     let diagnostics = typecheck_diagnostics(program);
     assert ! _has_code(diagnostics, "E0826");
