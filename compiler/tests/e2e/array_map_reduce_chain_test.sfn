@@ -1,0 +1,51 @@
+// End-to-end test for a `.map(...).reduce(...)` chain over an `int[]` where
+// the intermediate `.map` result is bound to an inferred `let` (#1836).
+//
+// `numbers.map(...)` routes to `runtime_array_map_fn`, returning the mapped
+// array as an opaque `i8*`. The `squares` binding therefore carries no
+// resolvable array annotation; the follow-on `squares.reduce(0, ...)` must
+// recover the `i64` element type from the map-result binding to route to
+// `runtime_array_reduce_fn`. Before #1836 the reduce routing no-op'd and the
+// build fataled at lowering.
+//
+// Drives the compiler-under-test as a subprocess with the runtime `process.*`
+// builtins and asserts on captured stdout — the canonical e2e pattern (see
+// `.claude/rules/no-bash-e2e.md`, `array_reduce_closure_test.sfn`).
+import { trim_right } from "sfn/strings";
+
+// The compiler-under-test: `$SAILFIN_BIN` if set, else the self-hosted
+// binary relative to the repo root the runner starts from. Mirrors
+// `sfn/test`'s `_resolve_sfn_bin` so CI can point the test at any compiler.
+fn _sfn_bin() -> string ![io] {
+    let configured = env.get("SAILFIN_BIN");
+    if configured.length > 0 { return configured; }
+    return "build/native/sailfin";
+}
+
+// `sfn run` compiles+links+executes the fixture, so the spawned compiler
+// needs a real environment (PATH for the linker, plus SAILFIN_TEST_SCRATCH
+// for per-invocation build-cache isolation under the parallel pool, #1333).
+// Inherit the full parent environment — mirrors array_reduce_closure_test.sfn.
+fn _child_env() -> string[] ![io] { return process.environ(); }
+
+struct RunOut {
+    exit: int;
+    out: string;
+}
+
+// Compile+run a fixture and return its exit code plus the trailing-
+// newline-normalized stdout.
+fn _run_fixture(path: string) -> RunOut ![io] {
+    let exit = process.run_capture([_sfn_bin(), "run", path], _child_env());
+    let out = process.capture_take_stdout();
+    let _err = process.capture_take_stderr();
+    return RunOut { exit: exit, out: trim_right(out) };
+}
+
+test "array map->reduce chain: inferred-let map result reduces to 55" ![io] {
+    let r = _run_fixture("compiler/tests/e2e/fixtures/array_map_reduce_chain/main.sfn");
+    assert r.exit == 0;
+    // [1,2,3,4,5].map(x*x) = [1,4,9,16,25]; reduce(0, +) = 55.
+    // A no-op'd reduce (or a build fatal) would not print 55.
+    assert r.out == "55";
+}
