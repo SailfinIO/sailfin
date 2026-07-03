@@ -51,14 +51,37 @@ extern fn close(fd: i32) -> i32;
 
 extern fn setsockopt(sockfd: i32, level: i32, optname: i32, optval: * u8, optlen: i32) -> i32;
 
-// Fixed loopback port for this test. High + uncommon, distinct from
-// `serve_loopback_test.sfn`'s 18790 so the two cannot collide under
-// `--jobs N`.
-fn _st_port() -> i64 { return 18793; }
+// Fixed loopback port for this test. High + uncommon, and — critically —
+// distinct from every other server-binding e2e test so the parallel
+// `--jobs N` pool cannot collide on it: 18790 serve_loopback, 18791
+// serve_reuseaddr, 18792 serve_keepalive, 18793 the long-lived ASAN-serve
+// server (`concurrency_ownedbuf_asan_interleave_test.sfn`), 18795+ the TLS
+// tests. This test previously shared 18793 with that ASAN-serve test; under
+// the pool its `serve()` server held 18793 for its ~60s lifetime, so this
+// test's raw `bind` lost the race with EADDRINUSE and `assert lfd >= 0`
+// aborted (SIGABRT / exit 134, #1862). 18794 is unshared.
+fn _st_port() -> i64 { return 18794; }
 
 fn _st_ptr_off(p: * u8, off: i64) -> * u8 {
     let addr: i64 = (p as i64) + off;
     return addr as * u8;
+}
+
+// Arm SO_REUSEADDR on the listening socket before `bind`, mirroring the
+// shipped `serve.sfn::_serve_set_reuseaddr` (#1583). The port de-collision
+// above is the primary #1862 fix; this hardens the raw `bind` against a
+// lingering TIME_WAIT socket on a repeated run (e.g. the `make check`
+// triple self-host pass rebinding inside the 60s TIME_WAIT window). 4-byte
+// int optval = 1; both platforms armed (Linux SOL_SOCKET=1/SO_REUSEADDR=2,
+// macOS 65535/4), the wrong-platform call failing harmlessly.
+fn _st_set_reuseaddr(fd: i32) -> void {
+    let optval: * u8 = malloc(4 as usize);
+    if optval as i64 == 0 { return; }
+    memset(optval, 0, 4 as usize);
+    memset(_st_ptr_off(optval, 0), 1, 1 as usize);
+    setsockopt(fd, 1, 2, optval, 4);
+    setsockopt(fd, 65535, 4, optval, 4);
+    free(optval);
 }
 
 // Open a stream socket bound to `0.0.0.0:port` and listen. Tries both
@@ -71,6 +94,7 @@ fn _st_bind_listen(port: i64) -> i32 {
         if attempt >= 2 { break; }
         let fd: i32 = socket(2, 1, 0);
         if fd < 0 { return 0 - 1; }
+        _st_set_reuseaddr(fd);
         let addr: * u8 = malloc(16 as usize);
         if addr as i64 == 0 {
             close(fd);

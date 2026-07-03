@@ -101,7 +101,7 @@ implementation of:
 | `Clone` | `Clone` | `clone() -> Self` |
 | `Ord` | `Ord` (a.k.a. `Comparable`) | `compare(other: Self) -> int` |
 
-These are the **same interfaces** that `draft-generic-constraints.md` uses as
+These are the **same interfaces** that `0038-generic-constraints.md` uses as
 constraint bounds (`K: Hashable + Eq`, `T: Ord`). Derive is the primary means by
 which a user type comes to satisfy those bounds. The interface names are owned by
 that SFEP / the prelude; this proposal consumes them and must match their exact
@@ -475,7 +475,7 @@ they see synthesized methods as ordinary methods.
 - **Pipeline placement:** `compiler/src/main.sfn:82,205,259` (typecheck gate) →
   `:217,271` (`emit_native_text_with_module_name`) — `derive_expand` inserts
   between.
-- **Related SFEPs:** `draft-generic-constraints.md` (the interfaces `@derive`
+- **Related SFEPs:** `0038-generic-constraints.md` (the interfaces `@derive`
   targets are the constraint bounds `K: Hashable + Eq`, `T: Ord`);
   `draft-generic-collections.md` (derived `Hash`/`Eq` → usable as `Map`/`Set`
   keys — the payoff consumer); `draft-interface-signature-conformance.md` (derived
