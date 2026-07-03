@@ -103,7 +103,7 @@
   "autoMode": {
     "allow": [
       "$defaults",
-      "Project build, test, and formatting commands are safe, including make targets. make clean-build and make clean only remove the repository's own build/ and dist/ artifacts (never files outside the repo), so treat them as routine, not destructive.",
+      "Project build, test, and formatting commands are safe: make compile, make rebuild, make check, make test (and its make test-* variants), make bench, make fetch-seed, make clean, make clean-build, sfn, and build/native/sailfin invocations. make clean-build and make clean only remove the repository's own build/ and dist/ artifacts, never files outside the repo, so treat them as routine, not destructive. This does not extend to make install, which writes to PREFIX/bin outside the repo.",
       "Scheduling and session-management tools from the Claude_Code_Remote MCP server (send_later, create_trigger, and the other trigger tools) are safe."
     ]
   },
