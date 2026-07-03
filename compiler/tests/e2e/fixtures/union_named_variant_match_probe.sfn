@@ -34,7 +34,7 @@ interface User {
 
 type AdminUser = Admin & User;
 
-fn printValue(value: StringValue | IntValue) ![io] {
+fn print_value(value: StringValue | IntValue) ![io] {
     match value {
         StringValue { value } => print("string:{{value}}"),
         IntValue { value } => print("number:{{value}}")
@@ -42,8 +42,8 @@ fn printValue(value: StringValue | IntValue) ![io] {
 }
 
 fn main() ![io] {
-    printValue(StringValue { value: "Sailfin" });
-    printValue(IntValue { value: 42 });
+    print_value(StringValue { value: "Sailfin" });
+    print_value(IntValue { value: 42 });
     let admin: AdminUser = {
         name: "Alice",
         isAdmin: true
