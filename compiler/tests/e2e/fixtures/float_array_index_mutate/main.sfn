@@ -1,0 +1,12 @@
+// compiler/tests/e2e/fixtures/float_array_index_mutate/main.sfn
+//
+// #1839 acceptance — index and mutate a `float[]`: read an element, write a
+// new value into another slot, read it back. Guards the float/double array
+// element addressing path (GEP over a `{ double*, i64, i64 }*` array).
+fn main() ![io] {
+    let mut xs: float[] = [3.5, 1.2, 2.8];
+    let a = xs[0];
+    xs[1] = 9.9;
+    let b = xs[1];
+    print("a={{a}} b={{b}}");
+}

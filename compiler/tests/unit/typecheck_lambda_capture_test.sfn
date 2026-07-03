@@ -141,6 +141,44 @@ test "captures: un-annotated negative int initializer infers int type_text" ![io
     assert strings_equal(records[0].captures[0].type_text, "int");
 }
 
+// #1839: an un-annotated `let pivot = arr[0]` (functional quicksort's
+// `arr.filter(fn(x) => x < pivot)`) must infer its element type from the
+// indexed array's binding — otherwise the capture falls back to `i8*` while
+// the stored value is an `i64`, emitting `store i8* %v, i8** ...` (invalid IR
+// that fails at link). The array's type is recovered from an annotated
+// binding (here a literal `let`, below a `T[]` parameter).
+test "captures: un-annotated index-of-array initializer infers element type" ![io] {
+    let source = "let nums = [10, 7, 8]; let pivot = nums[0]; let f = fn() -> int { return pivot; };";
+    let program = parse_program(source);
+    let records = analyze_lambda_captures(program);
+    assert records.length == 1;
+    assert records[0].captures.length == 1;
+    assert strings_equal(records[0].captures[0].name, "pivot");
+    assert strings_equal(records[0].captures[0].type_text, "int");
+    assert records[0].captures[0].by_value;
+}
+
+test "captures: un-annotated index-of-float-array infers float element" ![io] {
+    let source = "let xs = [1.5, 2.5]; let head = xs[0]; let f = fn() -> float { return head; };";
+    let program = parse_program(source);
+    let records = analyze_lambda_captures(program);
+    assert records.length == 1;
+    assert records[0].captures.length == 1;
+    assert strings_equal(records[0].captures[0].type_text, "float");
+}
+
+// #1839: an un-annotated `let p = q` inherits `q`'s known primitive type so a
+// scalar capture does not fall through to the `i8*` fallback.
+test "captures: un-annotated identifier initializer inherits primitive type" ![io] {
+    let source = "let a: int = 5; let b = a; let f = fn() -> int { return b; };";
+    let program = parse_program(source);
+    let records = analyze_lambda_captures(program);
+    assert records.length == 1;
+    assert records[0].captures.length == 1;
+    assert strings_equal(records[0].captures[0].name, "b");
+    assert strings_equal(records[0].captures[0].type_text, "int");
+}
+
 test "captures: mutability of the enclosing binding is recorded" ![io] {
     let source = "let mut counter: int = 0; let inc = fn() -> int { return counter; };";
     let program = parse_program(source);

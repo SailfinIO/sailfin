@@ -105,7 +105,7 @@ fn analyze_lambda_captures(program: Program) -> LambdaCaptureRecord[] {
         let result = walk_top_statement(scope, stmt);
         records = append_records(records, result.records);
         if stmt.variant == "VariableDeclaration" {
-            scope = append_binding(scope, binding_from_let(stmt));
+            scope = append_binding(scope, binding_from_let(scope, stmt));
         }
         i += 1;
     }
@@ -160,7 +160,7 @@ fn walk_block(scope: LocalBinding[], block: Block) -> CaptureWalkResult {
         free = union_names(free, stmt_free);
         records = append_records(records, result.records);
         if stmt.variant == "VariableDeclaration" {
-            local = append_binding(local, binding_from_let(stmt));
+            local = append_binding(local, binding_from_let(inner_scope, stmt));
         }
         i += 1;
     }
@@ -523,7 +523,7 @@ fn binding_from_parameter(p: Parameter) -> LocalBinding {
     };
 }
 
-fn binding_from_let(stmt: Statement) -> LocalBinding {
+fn binding_from_let(scope: LocalBinding[], stmt: Statement) -> LocalBinding {
     let mut type_text = type_annotation_text(stmt.type_annotation);
     // #1610: an un-annotated `let base = 100` carries no `type_annotation`,
     // so `type_text` is empty and `closure_field_llvm_type` falls back to the
@@ -533,9 +533,11 @@ fn binding_from_let(stmt: Statement) -> LocalBinding {
     // capture lays out the same `i64`/`i1`/`i8*` field its annotated form
     // (`let base: int = 100`) already does. Non-literal initializers stay
     // empty (full type inference is out of scope) and keep the conservative
-    // i8* fallback.
+    // i8* fallback. `scope` lets the recovery resolve identifier / index
+    // initializers against the bindings visible where the `let` appears
+    // (#1839).
     if type_text.length == 0 {
-        type_text = infer_let_initializer_type(stmt.initializer);
+        type_text = infer_let_initializer_type(scope, stmt.initializer);
     }
     return LocalBinding {
         name: stmt.name,
@@ -552,7 +554,7 @@ fn binding_from_let(stmt: Statement) -> LocalBinding {
 // a typecheck -> emit module dependency. Only the literal forms are handled
 // (the cases that otherwise mis-lay-out a closure env field); anything else
 // returns the empty string and preserves the prior conservative behaviour.
-fn infer_let_initializer_type(initializer: Expression?) -> string {
+fn infer_let_initializer_type(scope: LocalBinding[], initializer: Expression?) -> string {
     if initializer == null { return ""; }
     if initializer.variant == "NumberLiteral" {
         return number_literal_kind(initializer.value);
@@ -568,6 +570,91 @@ fn infer_let_initializer_type(initializer: Expression?) -> string {
             }
         }
     }
+    // #1839: an un-annotated `let nums = [10, 7, 8]` gives `nums` a primitive
+    // array type so a later `nums[i]` capture (below) can resolve its element
+    // type — otherwise an un-annotated array literal bound to a `let` leaves
+    // the index base untyped and the capture falls back to `i8*`.
+    if initializer.variant == "Array" {
+        let arr_type = _capture_array_literal_type(scope, initializer);
+        if arr_type.length > 0 { return arr_type; }
+    }
+    // #1839: an un-annotated `let pivot = arr[0]` captured by a closure (e.g.
+    // functional quicksort's `arr.filter(fn(x) => x < pivot)`) needs the
+    // element type so its env field lays out the same scalar its annotated
+    // form (`let pivot: int = arr[0]`) already does. Without it the field
+    // falls back to `i8*` while the stored value is an `i64`, emitting
+    // `store i8* %v, i8** ...` — invalid IR that fails at link. Resolve the
+    // indexed array's element type from scope, restricted to primitive
+    // elements (aggregate captures already lay out correctly on the existing
+    // path, so the conservative `i8*` fallback still covers them).
+    if initializer.variant == "Index" {
+        let elem = _capture_indexed_element_type(scope, initializer);
+        if elem.length > 0 { return elem; }
+    }
+    // #1839: an un-annotated `let p = q` inherits `q`'s known primitive type
+    // for the same reason — a scalar capture must not fall through to `i8*`.
+    if initializer.variant == "Identifier" {
+        let inherited = _capture_scope_primitive_type(scope, initializer.name);
+        if inherited.length > 0 { return inherited; }
+    }
+    return "";
+}
+
+// Resolve `arr[i]`'s element type when `arr` is an identifier bound to a
+// primitive array (`T[]`) in scope. Returns "" for non-identifier bases,
+// unknown bindings, non-array types, or non-primitive elements — every case
+// the closure-env layout already handles without this hint (#1839).
+fn _capture_indexed_element_type(scope: LocalBinding[], index_expr: Expression) -> string {
+    let base = index_expr.sequence;
+    if base == null { return ""; }
+    if base.variant != "Identifier" { return ""; }
+    let binding = find_binding(scope, base.name);
+    if binding == null { return ""; }
+    return _primitive_array_element_type(binding.type_text);
+}
+
+// Look up a scope binding's `type_text`, returning it only when it names a
+// primitive — the scalar-capture case this hint exists for (#1839).
+fn _capture_scope_primitive_type(scope: LocalBinding[], name: string) -> string {
+    let binding = find_binding(scope, name);
+    if binding == null { return ""; }
+    if is_primitive_type(binding.type_text) { return binding.type_text; }
+    return "";
+}
+
+// Infer a primitive array type (`int[]`) from a non-empty array literal by
+// recovering a single primitive element type shared by EVERY element. Mixed,
+// empty, or non-primitive literals return "" so the conservative `i8*`
+// fallback still applies. Checking all elements (not just the first) mirrors
+// `emit_native_format.sfn::infer_array_element_type` so a heterogeneous
+// literal never yields a `type_text` hint that disagrees with the array's
+// real element layout (#1839).
+fn _capture_array_literal_type(scope: LocalBinding[], array_expr: Expression) -> string {
+    if array_expr.elements.length == 0 { return ""; }
+    let mut candidate: string = "";
+    let mut index: int = 0;
+    loop {
+        if index >= array_expr.elements.length { break; }
+        let elem = infer_let_initializer_type(scope, array_expr.elements[index]);
+        if !is_primitive_type(elem) { return ""; }
+        if candidate.length == 0 { candidate = elem; } else if !strings_equal(candidate, elem) {
+            return "";
+        }
+        index += 1;
+    }
+    return candidate + "[]";
+}
+
+// Map a primitive array annotation (`int[]`) to its element type (`int`).
+// Restricted to the `is_primitive_type` set so the caller only recovers the
+// scalar captures the `i8*` fallback mis-lays-out; anything else returns ""
+// (#1839).
+fn _primitive_array_element_type(type_text: string) -> string {
+    if strings_equal(type_text, "int[]") { return "int"; }
+    if strings_equal(type_text, "float[]") { return "float"; }
+    if strings_equal(type_text, "number[]") { return "number"; }
+    if strings_equal(type_text, "boolean[]") { return "boolean"; }
+    if strings_equal(type_text, "string[]") { return "string"; }
     return "";
 }
 
