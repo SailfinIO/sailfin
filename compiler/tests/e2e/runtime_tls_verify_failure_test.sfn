@@ -1,0 +1,368 @@
+// Verify-failure enforcement e2e for the native runtime's outbound TLS
+// client (SFEP-0036 §3.6, gap B1, #1784). Complements the positive
+// round-trip in `runtime_tls_https_client_test.sfn`: this asserts the
+// SECURITY-LOAD-BEARING half — a server cert the client cannot verify
+// must FAIL/CLOSE the connection, not be parsed and ignored.
+//
+// Two enforced properties, each proven against a live `openssl s_server`
+// on loopback (the no-bash-e2e pattern, `.claude/rules/no-bash-e2e.md`):
+//
+//   1. Untrusted cert is rejected. A self-signed cert (SAN DNS:localhost)
+//      NOT in the trust store must fail chain verification. The same
+//      client run WITH `SAILFIN_TLS_CAFILE` pointed at the cert then
+//      succeeds — a positive control that isolates TRUST as the sole
+//      variable, so an empty body in the untrusted run cannot be a false
+//      negative from an unrelated failure.
+//   2. Hostname mismatch is rejected. A cert whose SAN is `example.com`
+//      (a valid, trust-anchored chain via CAFILE) must still be rejected
+//      when the client connects to `https://localhost:.../` — the
+//      RFC-6125 hostname check (`SSL_set1_host`, #1782) fails even though
+//      the chain verifies.
+//
+// The proof in every negative case: TCP connects (raw probe confirms the
+// server is accepting), yet `http.download` writes NO file — it opens the
+// output only on a fully successful round-trip, so an absent/empty file
+// after a confirmed-up server is proof the TLS verify rejected the peer.
+//
+// Skips cleanly (`assert true`, the tool-absent SKIP precedent) when
+// `openssl` is missing (no TLS peer / cert gen) or no `timeout`/`gtimeout`
+// is available to reap the blocking `s_server`. CI runners (Linux +
+// coreutils + libssl) have both.
+//
+// Matchers note (#842): `sfn/test`'s `expect_*` matchers are `![pure]` and
+// cannot be called from an `![io]` test; assert on captured state with
+// direct comparisons instead.
+import { find } from "sfn/strings";
+
+// ── file-local raw loopback readiness probe ──────────────────────
+// Prefixed `_tvf_` so these never collide with the external-linkage
+// runtime helpers of the same shape in `http.sfn` (not linked into this
+// test binary, but the prefix keeps that independent of link order). The
+// libc socket externs carry no effect annotation, so the effect checker
+// infers no `net` requirement for these direct callers.
+extern fn malloc(size: usize) -> * u8;
+
+extern fn free(ptr: * u8) -> void;
+
+extern fn memset(dst: * u8, byte: i32, n: usize) -> * u8;
+
+extern fn socket(domain: i32, ty: i32, protocol: i32) -> i32;
+
+extern fn connect(sockfd: i32, addr: * u8, addrlen: i32) -> i32;
+
+extern fn close(fd: i32) -> i32;
+
+fn _tvf_ptr_off(p: * u8, off: i64) -> * u8 {
+    let addr: i64 = (p as i64) + off;
+    return addr as * u8;
+}
+
+// Connect a stream socket to `127.0.0.1:port`; returns the fd or -1. Tries
+// both `sockaddr_in` byte layouts (Linux u16 sin_family at 0; macOS/BSD u8
+// sin_len at 0 + u8 sin_family at 1), first success wins — the inlined
+// `http.sfn::_connect_tcp` idiom. Used only to detect that `s_server` is
+// accepting before the fixture runs.
+fn _tvf_connect(port: i64) -> i32 {
+    let mut attempt: i64 = 0;
+    loop {
+        if attempt >= 2 { break; }
+        let addr: * u8 = malloc(16 as usize);
+        if addr as i64 == 0 { return 0 - 1; }
+        memset(addr, 0, 16 as usize);
+        if attempt == 0 {
+            memset(_tvf_ptr_off(addr, 0), 2, 1 as usize);
+        } else {
+            memset(_tvf_ptr_off(addr, 0), 16, 1 as usize);
+            memset(_tvf_ptr_off(addr, 1), 2, 1 as usize);
+        }
+        memset(_tvf_ptr_off(addr, 2), ((port >> 8) & 255) as i32, 1 as usize);
+        memset(_tvf_ptr_off(addr, 3), (port & 255) as i32, 1 as usize);
+        memset(_tvf_ptr_off(addr, 4), 127, 1 as usize);
+        memset(_tvf_ptr_off(addr, 7), 1, 1 as usize);
+        let fd: i32 = socket(2, 1, 0);
+        if fd < 0 {
+            free(addr);
+            return 0 - 1;
+        }
+        let rc: i32 = connect(fd, addr, 16);
+        free(addr);
+        if rc == 0 { return fd; }
+        close(fd);
+        attempt = attempt + 1;
+    }
+    return 0 - 1;
+}
+
+fn _sfn_bin() -> string ![io] {
+    let configured = env.get("SAILFIN_BIN");
+    if configured.length > 0 { return configured; }
+    return "build/native/sailfin";
+}
+
+// Full parent environment for the build + server subprocesses
+// (`run_capture`/`spawn_with_env`'s empty env is EMPTY, not "inherit"):
+// the nested build links a binary (clang + ld + `-lssl -lcrypto`), and
+// SAILFIN_TEST_SCRATCH keeps the build cache per-invocation under the pool.
+fn _child_env() -> string[] ![io] { return process.environ(); }
+
+// Parent environment with any inherited `SAILFIN_TLS_CAFILE` entry
+// stripped. A child's `getenv` resolves the FIRST matching entry, so a
+// CAFILE set in the parent shell would otherwise leak into the child and
+// either shadow the trusted run's intended cert or trust-anchor the
+// "untrusted" negative case — skewing the result. Both client env builders
+// start from this filtered base. `find(...) != 0` keeps every entry whose
+// `SAILFIN_TLS_CAFILE=` prefix is NOT at index 0 (i.e. not this variable).
+fn _env_no_cafile() -> string[] ![io] {
+    let src = process.environ();
+    let mut out: string[] = [];
+    let mut i: i64 = 0;
+    loop {
+        if i >= src.length { break; }
+        let entry = src[i];
+        if find(entry, "SAILFIN_TLS_CAFILE=", 0) != 0 { out.push(entry); }
+        i = i + 1;
+    }
+    return out;
+}
+
+// The client run-env WITHOUT any custom CA — the self-signed peer is not
+// in the system trust store, so verification must fail.
+fn _untrusted_env() -> string[] ![io] { return _env_no_cafile(); }
+
+// The client run-env WITH `SAILFIN_TLS_CAFILE` pointed at `cert_path` so
+// the chain verifies (self-signed cert as its own trust anchor).
+fn _trusted_env(cert_path: string) -> string[] ![io] {
+    let mut e = _env_no_cafile();
+    e.push("SAILFIN_TLS_CAFILE=" + cert_path);
+    return e;
+}
+
+fn _has_cmd(name: string) -> boolean ![io] {
+    let probe = process.run(["sh", "-c", "command -v " + name
+        + " >/dev/null 2>&1"]);
+    return probe == 0;
+}
+
+// Resolve a wall-clock timeout command to reap the blocking `s_server`;
+// empty if none found.
+fn _timeout_cmd() -> string ![io] {
+    if _has_cmd("timeout") { return "timeout"; }
+    if _has_cmd("gtimeout") { return "gtimeout"; }
+    return "";
+}
+
+fn _scratch_root() -> string ![io] {
+    let mut dir = env.get("SAILFIN_TEST_SCRATCH");
+    if dir.length == 0 { dir = "/tmp"; }
+    return dir;
+}
+
+// Generate a self-signed cert+key with SAN = `san_host`. When `san_host`
+// differs from the connect host, this is the hostname-mismatch fixture;
+// modern OpenSSL checks the SAN (not the CN) when a SAN is present.
+// Returns true on success.
+fn _gen_cert(dir: string, san_host: string) -> boolean ![io] {
+    let exit = process.run_capture(["openssl", "req", "-x509", "-newkey", "rsa:2048", "-keyout", dir
+        + "/key.pem", "-out", dir
+        + "/cert.pem", "-days", "1", "-nodes", "-subj", "/CN="
+        + san_host, "-addext", "subjectAltName=DNS:"
+        + san_host], _child_env());
+    let _o = process.capture_take_stdout();
+    let _e = process.capture_take_stderr();
+    return exit == 0;
+}
+
+// Spawn `openssl s_server -www` in the background, wrapped in a wall-clock
+// timeout so it self-reaps (there is no process-kill primitive; s_server
+// blocks forever). Returns the spawn handle (unused — the timeout owns the
+// lifetime).
+fn _spawn_server(dir: string, port_str: string, tcmd: string) -> i64 ![io] {
+    let mut argv: string[] = [];
+    argv.push(tcmd);
+    argv.push("60");
+    argv.push("openssl");
+    argv.push("s_server");
+    argv.push("-accept");
+    argv.push(port_str);
+    argv.push("-cert");
+    argv.push(dir + "/cert.pem");
+    argv.push("-key");
+    argv.push(dir + "/key.pem");
+    argv.push("-www");
+    argv.push("-quiet");
+    return process.spawn_with_env(argv, _child_env());
+}
+
+// Poll a raw TCP connect until `s_server` is accepting (or the budget
+// elapses). ~30s budget (60 attempts x ~0.5s) stays under the 60s server
+// timeout. Returns true once the port accepts a connection.
+fn _await_listening(port: i64) -> boolean ![io] {
+    let mut attempt: i64 = 0;
+    loop {
+        if attempt >= 60 { break; }
+        let fd: i32 = _tvf_connect(port);
+        if fd >= 0 {
+            close(fd);
+            return true;
+        }
+        let _ = process.run(["sleep", "0.5"]);
+        attempt = attempt + 1;
+    }
+    return false;
+}
+
+// Write a fixture capsule whose `main` downloads `https://localhost:PORT/`
+// to `out_path`. `http.download` writes the file only on a successful
+// round-trip, so its presence + content is the round-trip proof (and its
+// absence is the verify-rejected proof).
+fn _write_client(dir: string, port_str: string, out_path: string) -> string ![io] {
+    let root = dir + "/client";
+    fs.createDirectory(root + "/src", true);
+    fs.writeFile(root + "/capsule.toml", "[capsule]\n"
+        + "name = \"sfn/tls-verify-fail-client\"\n"
+        + "version = \"0.0.1\"\n"
+        + "description = \"tls verify-failure e2e client\"\n"
+        + "\n"
+        + "[capabilities]\n"
+        + "required = [\"io\", \"net\"]\n"
+        + "\n"
+        + "[build]\n"
+        + "entry = \"src/main.sfn\"\n"
+        + "kind = \"library\"\n");
+    fs.writeFile(root + "/src/main.sfn", "fn main() -> int ![net, io] {\n"
+        + "    let _ = http.download(\"https://localhost:"
+        + port_str
+        + "/\", \""
+        + out_path
+        + "\");\n"
+        + "    return 0;\n"
+        + "}\n");
+    return root + "/src/main.sfn";
+}
+
+fn _build_bin(main_path: string, bin: string) -> string ![io] {
+    let exit = process.run_capture([_sfn_bin(), "build", "-o", bin, main_path], _child_env());
+    let _o = process.capture_take_stdout();
+    let _e = process.capture_take_stderr();
+    if exit != 0 { return ""; }
+    return bin;
+}
+
+// Run the client once with `run_env` and report whether `http.download`
+// wrote a non-empty body to `out_path` (i.e. the TLS round-trip
+// succeeded). Removes any stale output first so the result reflects THIS
+// run only.
+fn _client_downloads(client_bin: string, run_env: string[], out_path: string) -> boolean ![io] {
+    let _rm = process.run(["rm", "-f", out_path]);
+    let cexit = process.run_capture([client_bin], run_env);
+    let _co = process.capture_take_stdout();
+    let _ce = process.capture_take_stderr();
+    if cexit != 0 { return false; }
+    if !fs.exists(out_path) { return false; }
+    let content = fs.readFile(out_path);
+    return content.length > 0;
+}
+
+// Retry `_client_downloads` a few times to absorb residual server startup
+// latency — used only for the POSITIVE control (where a download IS
+// expected), never to conclude a negative (an untrusted peer never
+// succeeds no matter how many retries).
+fn _client_downloads_retry(client_bin: string, run_env: string[], out_path: string) -> boolean ![io] {
+    let mut attempt: i64 = 0;
+    loop {
+        if attempt >= 20 { break; }
+        if _client_downloads(client_bin, run_env, out_path) { return true; }
+        let _ = process.run(["sleep", "0.5"]);
+        attempt = attempt + 1;
+    }
+    return false;
+}
+
+fn _skip_ready() -> boolean ![io] {
+    if !_has_cmd("openssl") {
+        print.info("[tls-verify] SKIP: openssl CLI not available");
+        return false;
+    }
+    if _timeout_cmd().length == 0 {
+        print.info("[tls-verify] SKIP: no timeout/gtimeout to reap the blocking s_server");
+        return false;
+    }
+    return true;
+}
+
+test "runtime tls: an untrusted server cert is rejected (verify enforced)" ![io] {
+    if !_skip_ready() {
+        assert true;
+        return;
+    }
+    let tcmd = _timeout_cmd();
+    let port: i64 = 18796;
+    let port_str = "18796";
+
+    let dir = _scratch_root() + "/sfn-tls-verify-untrusted";
+    fs.createDirectory(dir, true);
+    // Cert SAN matches the connect host (localhost), so the ONLY reason the
+    // untrusted run fails is trust — isolating chain verification.
+    assert _gen_cert(dir, "localhost");
+
+    let out_path = dir + "/body.out";
+    let main_path = _write_client(dir, port_str, out_path);
+    let client_bin = _build_bin(main_path, dir + "/client-bin");
+    assert client_bin.length > 0;
+
+    let _handle = _spawn_server(dir, port_str, tcmd);
+    assert _await_listening(port);
+
+    // NEGATIVE: no CAFILE -> the self-signed cert is not trust-anchored ->
+    // chain verification fails -> no body is written. A single attempt is
+    // conclusive (trust cannot appear on retry).
+    let untrusted_ok = _client_downloads(client_bin, _untrusted_env(), out_path);
+    assert untrusted_ok == false;
+
+    // POSITIVE control: same cert, same host, now trusted via CAFILE ->
+    // the round-trip succeeds. Proves the negative above was TRUST, not an
+    // unrelated failure (server-down, build break, wrong port).
+    let trusted_ok = _client_downloads_retry(client_bin, _trusted_env(dir
+        + "/cert.pem"), out_path);
+    assert trusted_ok;
+
+    let _rmd = process.run(["rm", "-rf", dir]);
+}
+
+test "runtime tls: a hostname/SAN mismatch is rejected (RFC-6125 enforced)" ![io] {
+    if !_skip_ready() {
+        assert true;
+        return;
+    }
+    let tcmd = _timeout_cmd();
+    let port: i64 = 18797;
+    let port_str = "18797";
+
+    let dir = _scratch_root() + "/sfn-tls-verify-hostmismatch";
+    fs.createDirectory(dir, true);
+    // Cert SAN is example.com; the client connects to localhost. The chain
+    // verifies (CAFILE trusts this self-signed cert as its own root) but
+    // the hostname check must reject it.
+    assert _gen_cert(dir, "example.com");
+
+    let out_path = dir + "/body.out";
+    let main_path = _write_client(dir, port_str, out_path);
+    let client_bin = _build_bin(main_path, dir + "/client-bin");
+    assert client_bin.length > 0;
+
+    let _handle = _spawn_server(dir, port_str, tcmd);
+    assert _await_listening(port);
+
+    // Trust the cert via CAFILE so chain verification PASSES; the only
+    // remaining gate is the hostname check (SSL_set1_host = "localhost" vs
+    // SAN example.com). A wrong-host cert must be rejected -> no body.
+    // This test has no positive control of its own; the sibling
+    // "untrusted server cert is rejected" test above establishes that the
+    // CAFILE-anchoring + build + server machinery yields a body on a
+    // SAN-matching cert, so a rejection here is attributable to the host
+    // check, not to broken trust plumbing.
+    let ok = _client_downloads(client_bin, _trusted_env(dir + "/cert.pem"), out_path);
+    assert ok == false;
+
+    let _rmd = process.run(["rm", "-rf", dir]);
+}
