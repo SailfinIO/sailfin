@@ -10,8 +10,10 @@
 // (#2). Verification is on: the peer chain is verified (SSL_VERIFY_PEER,
 // result polled) AND the hostname is checked (SSL_set1_host, RFC 6125), so
 // an `https://` GET both round-trips and rejects a wrong-host cert. The
-// system CA trust-store discovery / macOS-Windows CA paths + the
-// verify-failure regression e2e remain #3.
+// client also loads the canonical system CA bundle
+// (`/etc/ssl/certs/ca-certificates.crt`) as a discovery fallback so a
+// trust-anchored server stays reachable when OpenSSL's default paths are
+// empty (#1784). macOS/Windows CA-store paths remain #1485 M10.
 //
 // Callback-free by construction (SFEP-0036 §3.2): the verify callback
 // arg to `SSL_CTX_set_verify` is always `null` and the result is polled
@@ -101,14 +103,29 @@ extern fn strlen(s: * u8) -> usize;
 // Verification is turned ON (`SSL_VERIFY_PEER`, callback arg `null`); the
 // result is polled after the handshake in `tls_connect_fd`, and the
 // hostname is bound there via SSL_set1_host. Returns null on allocation
-// failure. System trust-store discovery hardening is #3.
+// failure. The canonical system CA bundle is loaded as a discovery
+// fallback below (#1784); macOS/Windows CA-store paths remain #1485 M10.
 fn tls_client_ctx() -> * u8 {
     let method: * u8 = TLS_client_method();
     if method as i64 == 0 { return null; }
     let ctx: * u8 = SSL_CTX_new(method);
     if ctx as i64 == 0 { return null; }
-    // System default trust store.
+    // System default trust store (OpenSSL's compiled-in dir, e.g.
+    // /etc/ssl/certs). Its return tells us the lookup method was set, not
+    // that the store is non-empty, so we cannot rely on it to decide
+    // whether the standard bundle is reachable.
     SSL_CTX_set_default_verify_paths(ctx);
+    // Trust-store discovery fallback (SFEP-0036 §3.6): additively load the
+    // canonical Debian/Ubuntu CA bundle. On a host whose OpenSSL default
+    // dir is empty or misconfigured, the compiled-in paths above load no
+    // anchors and every real cert would fail to verify; loading the
+    // well-known bundle here keeps a trust-anchored server reachable.
+    // Additive and de-duped by OpenSSL, so it is harmless where the default
+    // paths already cover it, and ignored (return not checked, like the
+    // CAFILE load below) when the file is absent. macOS/Windows CA-store
+    // discovery differs and is deferred to #1485 M10.
+    let ca_bundle: string = "/etc/ssl/certs/ca-certificates.crt";
+    SSL_CTX_load_verify_locations(ctx, ca_bundle as * u8, null);
     // Optional additional CA bundle (custom / test trust).
     let ca_env: string = "SAILFIN_TLS_CAFILE";
     let ca: * u8 = getenv(ca_env as * u8);
