@@ -7,14 +7,16 @@
 # pass. Prints a per-file table and a summary.
 #
 # CI ratchet: the KNOWN_FAILING list below enumerates runnable examples that
-# fail today because of an open compiler bug (each tied to its tracking issue).
-# The script gates CI as follows:
+# do not PASS yet (each tied to its tracking issue). Epic #549 — which restored
+# this sweep and fixed the compiler bugs it surfaced — is closed; the entries
+# that remain are gated on unshipped language features, not open #549 bugs, and
+# are tracked in #1883. The script gates CI as follows:
 #   - a NON-listed runnable example that fails  -> REGRESSION -> exit 1
 #   - a listed example that now PASSES          -> XPASS      -> exit 1
-#     (a good problem: the bug is fixed; remove it from KNOWN_FAILING)
+#     (a good problem: the gate landed; remove it from KNOWN_FAILING)
 #   - a listed example that still fails          -> XFAIL      -> tolerated
-# This lets the marketed example surface be guarded now, while the remaining
-# compiler bugs in #549 are worked off one sub-issue at a time.
+# This keeps the marketed example surface guarded now, while the remaining
+# gated examples graduate one at a time as their features ship (#1883).
 #
 # Two files are intentionally not run:
 #   - basics/tests.sfn  — no `main`; exercised by `sfn test`.
