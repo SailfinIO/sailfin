@@ -148,10 +148,22 @@ fn _mono_split_top_level(text: string) -> string[] {
         } else if ch == "(" {
             depth += 1;
             current = current + ch;
+        } else if ch == "[" {
+            depth += 1;
+            current = current + ch;
+        } else if ch == "{" {
+            depth += 1;
+            current = current + ch;
         } else if ch == ">" {
             if depth > 0 { depth -= 1; }
             current = current + ch;
         } else if ch == ")" {
+            if depth > 0 { depth -= 1; }
+            current = current + ch;
+        } else if ch == "]" {
+            if depth > 0 { depth -= 1; }
+            current = current + ch;
+        } else if ch == "}" {
             if depth > 0 { depth -= 1; }
             current = current + ch;
         } else if ch == "," {
@@ -398,6 +410,29 @@ fn _mono_type_of_arg(arg: string, env_names: string[], env_types: string[], fns:
         }
         sig = sig + ") -> " + lam.ret;
         return sig;
+    }
+    // Struct literal `Widget { ... }` -> the struct type.
+    let struct_lit = _mono_struct_literal_type(a);
+    if struct_lit.length > 0 { return struct_lit; }
+    // Array literal `[#element:TYPE, ...]` -> `TYPE[]` (the emitter tags the
+    // element type on the literal).
+    if starts_with(a, "[") {
+        let em = index_of(a, "#element:");
+        if em >= 0 {
+            let after = substring(a, em + 9, a.length);
+            let mut ty: string = "";
+            let mut m: int = 0;
+            loop {
+                if m >= after.length { break; }
+                let c = substring(after, m, m + 1);
+                if c == "," { break; }
+                if c == "]" { break; }
+                ty = ty + c;
+                m += 1;
+            }
+            ty = trim_text(ty);
+            if ty.length > 0 { return ty + "[]"; }
+        }
     }
     // Plain identifier: consult the local env.
     let mut all_ident: boolean = true;
@@ -845,26 +880,29 @@ fn monomorphize_native_text(text: string) -> string {
     }
 
     // Process the worklist, specializing each distinct instantiation and
-    // closing transitively. Dedup by mangled key.
+    // closing transitively. An index cursor advances over `worklist` while
+    // newly-discovered instantiations are appended to its tail (O(n) over the
+    // instantiation set, not O(n^2)). Dedup by mangled key.
     let mut seen: string[] = [];
     let mut specialized: string[] = [];
-    let mut guard: int = 0;
+    let mut cursor: int = 0;
+    let mut aborted: boolean = false;
     loop {
-        if worklist.length == 0 { break; }
-        guard += 1;
-        if guard > 100000 { break; }
-        let inst = worklist[worklist.length - 1];
-        // pop last
-        let mut next: MonoInst[] = [];
-        let mut wi: int = 0;
-        loop {
-            if wi >= worklist.length - 1 { break; }
-            next = next.push(worklist[wi]);
-            wi += 1;
-        }
-        worklist = next;
+        if cursor >= worklist.length { break; }
+        let inst = worklist[cursor];
+        cursor += 1;
         if _mono_contains(seen, inst.mangled) { continue; }
         seen = seen.push(inst.mangled);
+        // Runaway backstop. The language has no polymorphic recursion in v1
+        // (SFEP-0038 §3.3), so the instantiation set is finite; if it ever
+        // explodes past a sane cap, abort the whole transform and return the
+        // input unchanged rather than emitting partial output with the generic
+        // defs dropped (which would surface as a confusing downstream
+        // undefined-symbol failure instead of a deterministic one).
+        if seen.length > 100000 {
+            aborted = true;
+            break;
+        }
         let gi = _mono_find_fn(gfns, inst.base);
         if gi < 0 { continue; }
         let spec = _mono_specialize(gfns[gi], inst, gfns, allfns);
@@ -876,6 +914,7 @@ fn monomorphize_native_text(text: string) -> string {
             si += 1;
         }
     }
+    if aborted { return text; }
 
     // Reassemble: emit non-generic blocks (rewritten) and non-fn lines,
     // drop generic blocks, then append specialized blocks.

@@ -89,3 +89,27 @@ test "monomorphize: a module with no generic function is unchanged" {
     // compiler source) flows through untouched, preserving self-hosting.
     assert out == src;
 }
+
+test "monomorphize: array/struct literal args do not mis-split the arg list" {
+    // The array literal's inner commas must not split the call's argument
+    // list, or the type-param arg after it would misalign and resolve `T`
+    // from the wrong operand. Here `T` must come from `x` (a string), not
+    // from a fragment of the `[#element:int, ...]` literal.
+    let src = ".module m\n" + "\n" + ".fn take<T>(arr: int[], x: T) -> T\n"
+        + ".meta return T\n"
+        + ".meta generics <T>\n"
+        + ".param arr: int[]\n"
+        + ".param x: T\n"
+        + "    ret x\n"
+        + ".endfn\n"
+        + "\n"
+        + ".fn main() -> int\n"
+        + ".meta return int\n"
+        + "    .let r = take([#element:int, 1, 2, 3], \"hi\")\n"
+        + "    ret r\n"
+        + ".endfn\n";
+    let out = monomorphize_native_text(src);
+    assert _has(out, "take$string");
+    assert ! _has(out, "take$int");
+    assert _has(out, "take$string([#element:int, 1, 2, 3], \"hi\")");
+}
