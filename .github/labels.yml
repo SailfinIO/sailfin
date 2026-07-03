@@ -172,6 +172,9 @@ labels:
   - name: build-quality-regression
     color: "b60205"
     description: "Auto-filed by build-quality.yml on gate failure; dedup anchor"
+  - name: perf-regression
+    color: "b60205"
+    description: "Auto-filed by perf-history.yml on a module regression; dedup anchor"
 
   # --- Release gating --------------------------------------------------
   # Intent labels consumed by `/release`. The single uncurated combo is

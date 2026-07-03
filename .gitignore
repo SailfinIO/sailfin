@@ -76,6 +76,12 @@ scratch/
 # should never be committed; use dist/ for release packaging instead.
 /build/
 
+# Transient perf-history working dirs (.github/workflows/perf-history.yml).
+# bench-out/ holds a run's raw CSVs; bench-data/ is a throwaway checkout of
+# the orphan bench-data branch. Neither belongs on main.
+/bench-out/
+/bench-data/
+
 # Compiled runtime object files (generated during build)
 runtime/native/obj/
 

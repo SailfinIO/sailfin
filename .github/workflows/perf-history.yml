@@ -1,0 +1,328 @@
+name: Perf history
+
+# Nightly performance time-series job (SFEP-0037 §3.3). Builds the compiler
+# from the pinned seed, runs the compile-perf and runtime benches, and appends
+# the CSVs (tagged with the commit SHA) to the orphan `bench-data` branch — a
+# growing time series in the spirit of perf.rust-lang.org / the LLVM
+# compile-time tracker, not one-shot artifacts. It then compares the current
+# run against the rolling median of the last N runs and auto-files one
+# `type:perf` issue per module that regresses beyond threshold (deduped against
+# an open issue for that module), plus a whole-build wall-time budget check
+# against the SFEP-0006 <5 min target.
+#
+# The bench harnesses themselves (scripts/bench_compile.sh,
+# scripts/bench_runtime.sh) and their budgets are unchanged — this job only
+# records and compares their output. All data/compare logic lives in
+# scripts/perf_history.sh so the workflow stays thin; see
+# docs/perf/bench-history.md for how to read the `bench-data` branch.
+#
+# Single-platform (linux-x86_64) on purpose: compile and especially runtime
+# wall/RSS are not cross-platform comparable, so a coherent series lives on one
+# runner class. Nightly only — per-PR/per-merge benching is a later tightening.
+#
+# NOTE: workflow_dispatch is only triggerable once this file is on `main`.
+
+on:
+  schedule:
+    # Nightly at 06:00 UTC — between build-quality (05:00) and
+    # nightly-selfhost (07:00) so the three nightlies don't overlap.
+    - cron: "0 6 * * *"
+  workflow_dispatch:
+    inputs:
+      seed_version:
+        description: "Seed version (blank defaults to `.seed-version` from checkout)"
+        required: false
+        default: ""
+      dry_run:
+        description: "Run benches + compare but do not push to bench-data or file issues"
+        required: false
+        default: false
+        type: boolean
+      synthetic_slowdown_module:
+        description: "Inject a synthetic 2x slowdown for this module (compare-only scratch; verifies auto-filing). Blank = off."
+        required: false
+        default: ""
+
+permissions:
+  contents: read
+
+concurrency:
+  group: perf-history
+  cancel-in-progress: false
+
+env:
+  PERF_MIN_RUNS: "7"
+  PERF_THRESHOLD_PCT: "10"
+  BUILD_BUDGET_S: "300"
+  DATA_BRANCH: "bench-data"
+
+jobs:
+  perf-history:
+    name: perf-history [linux-x86_64]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 90
+    permissions:
+      contents: write
+      issues: write
+    env:
+      REPO: ${{ github.repository }}
+      GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+      DRY_RUN: ${{ inputs.dry_run }}
+      SYN_MODULE: ${{ inputs.synthetic_slowdown_module }}
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v7.0.0
+
+      - name: Resolve seed version (input override → .seed-version)
+        id: seed
+        shell: bash
+        env:
+          INPUT_SEED_VERSION: ${{ inputs.seed_version }}
+        run: |
+          set -euo pipefail
+          override="$(printf '%s' "$INPUT_SEED_VERSION" | tr -d '[:space:]')"
+          if [ -n "$override" ]; then
+            pin="$override"
+            echo "[seed-pin] using seed $pin (workflow_dispatch input override)"
+          else
+            [ -f .seed-version ] || { echo "[seed-pin] .seed-version is missing" >&2; exit 1; }
+            pin="$(tr -d '[:space:]' < .seed-version)"
+            [ -n "$pin" ] || { echo "[seed-pin] .seed-version is empty" >&2; exit 1; }
+            echo "[seed-pin] using seed $pin from .seed-version"
+          fi
+          echo "seed_version=$pin" >> "$GITHUB_OUTPUT"
+
+      - name: Install clang + GNU time
+        run: |
+          sudo apt-get update
+          # `time` provides /usr/bin/time -v for peak-RSS measurement (distinct
+          # from the bash `time` builtin, which the bench scripts cannot read).
+          sudo apt-get install -y clang-18 llvm-18 jq time
+
+      - name: Fetch released seed compiler
+        shell: bash
+        env:
+          SEED_VERSION: ${{ steps.seed.outputs.seed_version }}
+        run: |
+          set -euo pipefail
+          make fetch-seed SEED_VERSION="$SEED_VERSION"
+          build/seed/bin/sailfin version
+
+      - name: Build native compiler (timed clean self-host)
+        id: build
+        shell: bash
+        env:
+          CLANG: clang-18
+        run: |
+          set -euo pipefail
+          # `make rebuild` forces a clean self-host so the timing reflects a
+          # real parallel clean build (the SFEP-0006 <5 min target), not a
+          # cached one. This wall time is the whole-build budget metric — it is
+          # NOT the compile bench's serial sum of isolated per-module emits.
+          start=$(date +%s)
+          make rebuild CLANG="clang-18" SEED_NATIVE="build/seed/bin/sailfin"
+          end=$(date +%s)
+          build/native/sailfin version
+          echo "wall_s=$((end - start))" >> "$GITHUB_OUTPUT"
+          echo "[perf-history] clean build wall time: $((end - start))s (budget ${BUILD_BUDGET_S}s)"
+
+      - name: Prepare output dir
+        shell: bash
+        run: mkdir -p bench-out
+
+      - name: Compile-perf benchmark (make bench)
+        shell: bash
+        run: |
+          set -euo pipefail
+          # The bench harness exits non-zero on its own budget/SLOW/FAIL flags,
+          # but it writes the CSV before exiting. This job's gate is the
+          # median comparison (later step), not the harness's per-run budgets,
+          # so tolerate a non-zero exit and record the CSV regardless.
+          make bench BENCH_ARGS="--csv bench-out/compile.csv --top 20" \
+            || echo "[perf-history] make bench exited $? (budget/FAIL flag) — recording CSV anyway"
+
+      - name: Runtime-execution benchmark (make bench-runtime)
+        shell: bash
+        run: |
+          set -euo pipefail
+          make bench-runtime BENCH_RUNTIME_ARGS="--csv bench-out/runtime.csv --top 20 --iterations 5" \
+            || echo "[perf-history] make bench-runtime exited $? (budget/FAIL flag) — recording CSV anyway"
+
+      - name: Check out bench-data branch (create orphan if absent)
+        shell: bash
+        run: |
+          set -euo pipefail
+          # A fresh init in an isolated dir keeps the main working tree from
+          # ever being committed onto the orphan data branch. Auth via the
+          # token-embedded remote URL (masked in logs by Actions).
+          remote="https://x-access-token:${GITHUB_TOKEN}@github.com/${REPO}.git"
+          rm -rf bench-data
+          mkdir -p bench-data
+          git -C bench-data init -q
+          git -C bench-data config user.name "github-actions[bot]"
+          git -C bench-data config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git -C bench-data remote add origin "$remote"
+          if git -C bench-data ls-remote --exit-code --heads origin "$DATA_BRANCH" >/dev/null 2>&1; then
+            git -C bench-data fetch -q --depth=200 origin "$DATA_BRANCH"
+            git -C bench-data checkout -q -B "$DATA_BRANCH" FETCH_HEAD
+            echo "[perf-history] checked out existing $DATA_BRANCH"
+          else
+            git -C bench-data checkout -q --orphan "$DATA_BRANCH"
+            echo "[perf-history] created new orphan $DATA_BRANCH"
+          fi
+
+      - name: Append run to bench-data (idempotent per commit)
+        shell: bash
+        env:
+          SHA: ${{ github.sha }}
+          BUILD_WALL: ${{ steps.build.outputs.wall_s }}
+        run: |
+          set -euo pipefail
+          run_date="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+          scripts/perf_history.sh append \
+            --data-dir bench-data \
+            --sha "$SHA" \
+            --date "$run_date" \
+            --compile bench-out/compile.csv \
+            --runtime bench-out/runtime.csv \
+            --build-wall "$BUILD_WALL" \
+            --budget "$BUILD_BUDGET_S"
+
+      - name: Commit + push bench-data
+        if: ${{ github.event_name == 'schedule' || inputs.dry_run != true }}
+        shell: bash
+        env:
+          SHA: ${{ github.sha }}
+        run: |
+          set -euo pipefail
+          run_date="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+          git -C bench-data add -A
+          if git -C bench-data diff --cached --quiet; then
+            echo "[perf-history] no new data to commit (run $SHA already recorded)"
+          else
+            git -C bench-data commit -q -m "perf-history: ${SHA} (${run_date})"
+            git -C bench-data push -q origin "$DATA_BRANCH"
+            echo "[perf-history] pushed run $SHA to $DATA_BRANCH"
+          fi
+
+      - name: Compare against rolling median
+        id: compare
+        shell: bash
+        env:
+          SHA: ${{ github.sha }}
+        run: |
+          set -euo pipefail
+          data_dir=bench-data
+          # Synthetic-regression validation (workflow_dispatch): inject a 2x
+          # slowdown for one module into a *scratch* copy so the pushed series
+          # stays honest, then compare against that. Exercises the full
+          # file-issue path end-to-end (acceptance: "synthetic regression
+          # injected in a scratch run files exactly one issue").
+          if [ -n "${SYN_MODULE:-}" ]; then
+            echo "[perf-history] synthetic slowdown injected for module: $SYN_MODULE"
+            rm -rf bench-data-scratch
+            cp -r bench-data bench-data-scratch
+            awk -F, -v OFS=, -v s="$SHA" -v m="$SYN_MODULE" \
+              'NR>1 && $1==s && $3==m { $4=$4*2; $5=$5*2 } { print }' \
+              bench-data/compile.csv > bench-data-scratch/compile.csv
+            data_dir=bench-data-scratch
+          fi
+          scripts/perf_history.sh compare \
+            --data-dir "$data_dir" \
+            --sha "$SHA" \
+            --min-runs "$PERF_MIN_RUNS" \
+            --threshold-pct "$PERF_THRESHOLD_PCT" \
+            --budget "$BUILD_BUDGET_S" \
+            --out regressions.tsv
+          count=0
+          [ -s regressions.tsv ] && count=$(cut -f1 regressions.tsv | sort -u | wc -l | tr -d ' ')
+          echo "modules=$count" >> "$GITHUB_OUTPUT"
+          {
+            echo "## Perf history — ${{ github.sha }}"
+            echo ""
+            echo "Clean build wall: ${{ steps.build.outputs.wall_s }}s (budget ${BUILD_BUDGET_S}s)"
+            echo ""
+            if [ -s regressions.tsv ]; then
+              echo "Regressions (module / metric / current / rolling-median / +%):"
+              echo '```'
+              cat regressions.tsv
+              echo '```'
+            else
+              echo "_No regressions vs the rolling median of the last ${PERF_MIN_RUNS} runs._"
+            fi
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: File regression issues (deduped per module)
+        if: ${{ (github.event_name == 'schedule' || inputs.dry_run != true) && steps.compare.outputs.modules != '0' }}
+        shell: bash
+        env:
+          SHA: ${{ github.sha }}
+        run: |
+          set -euo pipefail
+          # Self-sufficient: ensure the dedup-anchor label exists even before
+          # sync-labels.yml runs (e.g. a pre-merge dispatch trial).
+          gh label create perf-regression --repo "$REPO" \
+            --color b60205 \
+            --description "Auto-filed by perf-history.yml on a module regression; dedup anchor" \
+            --force >/dev/null 2>&1 || true
+
+          data_url="${{ github.server_url }}/${REPO}/tree/${DATA_BRANCH}"
+          cut -f1 regressions.tsv | sort -u | while IFS= read -r module; do
+            [ -n "$module" ] || continue
+            title="perf regression: ${module}"
+            metrics="$(awk -F'\t' -v m="$module" \
+              '$1==m { printf "- **%s**: current `%s` vs rolling median `%s` (**+%s%%**)\n", $2, $3, $4, $5 }' \
+              regressions.tsv)"
+
+            # Dedup anchor: the `perf-regression` label plus exact title
+            # equality (module-keyed). Mirrors build-quality.yml — list by
+            # label, filter title in jq to dodge gh --search quoting quirks.
+            existing="$(gh issue list --repo "$REPO" --state open \
+              --label perf-regression --limit 100 \
+              --json number,title \
+              --jq "[.[] | select(.title == \"${title}\")] | .[0].number // empty")"
+
+            {
+              echo "**Run:** ${RUN_URL}"
+              echo "**Commit:** \`${SHA}\`"
+              echo "**Baseline:** rolling median of the last ${PERF_MIN_RUNS} runs on \`${DATA_BRANCH}\` (threshold +${PERF_THRESHOLD_PCT}%)"
+              echo "**Data:** ${data_url}"
+              echo ""
+              echo "${metrics}"
+            } > perf-body.md
+
+            if [ -n "$existing" ]; then
+              echo "[perf-history] appending to existing issue #${existing} for ${module}"
+              gh issue comment "$existing" --repo "$REPO" --body-file perf-body.md
+            else
+              {
+                echo "# perf regression: ${module}"
+                echo ""
+                echo "Auto-filed by \`perf-history.yml\` (SFEP-0037 §3.3). \`${module}\` regressed beyond the +${PERF_THRESHOLD_PCT}% threshold vs the rolling median of the last ${PERF_MIN_RUNS} nightly runs. Further regressions for this module aggregate here as comments; see \`docs/perf/bench-history.md\` for how to read \`${DATA_BRANCH}\` and reproduce locally (\`make bench\` / \`make bench-runtime\`)."
+                echo ""
+                echo "## Latest measurement"
+                echo ""
+                cat perf-body.md
+              } > perf-new-body.md
+              new_number="$(gh issue create --repo "$REPO" \
+                --title "$title" \
+                --label "type:perf" \
+                --label "priority:medium" \
+                --label "perf-regression" \
+                --body-file perf-new-body.md \
+                | awk -F/ '/^https:/{print $NF}')"
+              echo "[perf-history] opened issue #${new_number} for ${module}"
+            fi
+          done
+
+      - name: Upload run CSVs (artifact)
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: perf-history-linux-x86_64
+          path: |
+            bench-out/*.csv
+            regressions.tsv
+          if-no-files-found: warn
