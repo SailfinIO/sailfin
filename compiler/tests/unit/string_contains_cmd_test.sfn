@@ -1,0 +1,39 @@
+// Regression coverage for `_string_contains_cmd` (compiler/src/string_cmd_utils.sfn)
+// and its consumer `_is_safe_capsule_version_cmd` (compiler/src/cli/commands/cmd_shared.sfn).
+//
+// `_string_contains_cmd` used to test single-byte membership only, so a
+// multi-byte needle like ".." could never match — silently no-oping the
+// traversal-defense line in `_is_safe_capsule_version_cmd` (#1854). These
+// tests pin the true-substring-search behaviour and the version validator.
+import { _is_safe_capsule_version_cmd } from "../../src/cli/commands/cmd_shared";
+import { _string_contains_cmd } from "../../src/string_cmd_utils";
+
+test "string_cmd: multi-byte needle matches substring" {
+    assert _string_contains_cmd("1.2..3", "..") == true;
+}
+
+test "string_cmd: multi-byte needle absent when bytes are non-adjacent" {
+    assert _string_contains_cmd("1.2.3", "..") == false;
+}
+
+test "string_cmd: single-char needle membership unchanged" {
+    assert _string_contains_cmd("abc", "b") == true;
+    assert _string_contains_cmd("abc", "z") == false;
+}
+
+test "string_cmd: empty needle is always contained" {
+    assert _string_contains_cmd("", "") == true;
+    assert _string_contains_cmd("abc", "") == true;
+}
+
+test "string_cmd: needle longer than haystack is absent" {
+    assert _string_contains_cmd("a", "..") == false;
+}
+
+test "cmd_shared: capsule version with `..` is rejected" {
+    assert _is_safe_capsule_version_cmd("1..2") == false;
+}
+
+test "cmd_shared: ordinary capsule version is accepted" {
+    assert _is_safe_capsule_version_cmd("1.2.3") == true;
+}
