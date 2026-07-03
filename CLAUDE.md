@@ -305,11 +305,16 @@ them instead of hand-driving each step. Agent definitions live in
 | `/groom`, `/triage`, `/pickup`, `/sweep` | Issue lifecycle (see Task Tracking) |
 | `/sfep <new\|status\|list\|graduate>` | Create/transition a design proposal (SFEP) — see `.claude/rules/proposals.md` |
 
-**Approval gates** — pause for explicit user approval before: the design gate in
-`/add-feature` (after the architect's plan, before code), destructive ops
-(`make clean-build`, force-push, branch deletion), and shared-state changes
-(pushing, opening/closing PRs, releases). Everything else proceeds autonomously;
-when something fails, diagnose root cause before trying a different approach.
+**Approval gates** — most work proceeds autonomously, including `make clean-build`
+(it only rebuilds the repo's own `build/`/`dist/` artifacts), pushing to `claude/*`
+branches, and opening PRs. Pause for explicit user approval only before genuinely
+irreversible or high-blast-radius actions: cutting releases (`gh workflow run
+release.yml`), merging or closing PRs, and history-destructive git (force-push,
+branch/ref deletion, `reset --hard`) — several of which the `.claude/settings.json`
+deny-list also hard-blocks. For the `/add-feature` design gate, present the
+architect's plan and then proceed, pausing for sign-off only when the change is
+cross-cutting or high-risk. When something fails, diagnose root cause before trying
+a different approach.
 
 **Use direct tools (Read/Grep/Glob/Edit), not an agent,** when you know the file,
 the search is a simple keyword, or the change is a one-line obvious fix. Agents

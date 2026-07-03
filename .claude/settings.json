@@ -5,7 +5,15 @@
       "Read",
       "Grep",
       "Glob",
+      "Edit",
+      "Write",
       "Bash(make *)",
+      "Bash(sfn *)",
+      "Bash(mkdir *)",
+      "Bash(cp *)",
+      "Bash(mv *)",
+      "Bash(touch *)",
+      "Bash(chmod *)",
       "Bash(ulimit *)",
       "Bash(build/native/sailfin *)",
       "Bash(timeout * build/native/sailfin *)",
@@ -30,6 +38,7 @@
       "Bash(git rev-parse*)",
       "Bash(git rev-list*)",
       "Bash(git ls-files*)",
+      "Bash(git worktree*)",
       "Bash(git push -u origin claude/*)",
       "Bash(git push origin claude/*)",
       "Bash(gh pr *)",
@@ -65,7 +74,10 @@
       "WebFetch(domain:docs.anthropic.com)",
       "WebFetch(domain:code.claude.com)",
       "WebFetch(domain:github.com)",
-      "WebFetch(domain:raw.githubusercontent.com)"
+      "WebFetch(domain:raw.githubusercontent.com)",
+      "mcp__Claude_Code_Remote",
+      "mcp__sailfin",
+      "mcp__github"
     ],
     "deny": [
       "Bash(rm -rf /*)",
@@ -86,6 +98,13 @@
       "Bash(git commit*--no-gpg-sign*)",
       "Bash(gh release delete*)",
       "Bash(gh repo delete*)"
+    ]
+  },
+  "autoMode": {
+    "allow": [
+      "$defaults",
+      "Project build, test, and formatting commands are safe: make compile, make rebuild, make check, make test (and its make test-* variants), make bench, make fetch-seed, make clean, make clean-build, sfn, and build/native/sailfin invocations. make clean-build and make clean only remove the repository's own build/ and dist/ artifacts, never files outside the repo, so treat them as routine, not destructive. This does not extend to make install, which writes to PREFIX/bin outside the repo.",
+      "Scheduling and session-management tools from the Claude_Code_Remote MCP server (send_later, create_trigger, and the other trigger tools) are safe."
     ]
   },
   "env": {

@@ -40,7 +40,7 @@ You are Opus: spend yourself on judgment (orchestration, design, diagnosis, the 
 
 **Spend Opus where it counts.** Don't grep the tree yourself on Opus — dispatch `compiler-explorer` for surface maps. Don't type routine changes yourself — author a precise spec and hand it to the Sonnet `implementer`, then gate its diff with the Opus `code-reviewer` (mechanical `sfn fmt --check`/`sfn check` pass first, so Opus only adjudicates subtle correctness). Keep implementation on Opus only when the change is novel, cross-cutting, or entangled with design. A failing build goes to the Sonnet `test-runner` to classify first — escalate to the Opus `seed-stabilizer` only for genuine miscompiles/IR errors, not fmt errors or missing imports.
 
-Slash-command workflows orchestrate several of these for you — prefer them over hand-driving: `/add-feature`, `/debug-compile`, `/check`, `/pickup`, `/groom`, `/triage`, `/release`, `/perf`. The user typing one command means you drive the whole pipeline, pausing only at approval gates (design gate, destructive ops).
+Slash-command workflows orchestrate several of these for you — prefer them over hand-driving: `/add-feature`, `/debug-compile`, `/check`, `/pickup`, `/groom`, `/triage`, `/release`, `/perf`. The user typing one command means you drive the whole pipeline, pausing only at the narrowed approval gates (releases, PR merges/closes, history-destructive git).
 
 ## Forming a team
 
@@ -54,4 +54,4 @@ Keep the Engineer budget in mind for autonomous GitHub workflows (≤2 concurren
 
 ## Approval gates
 
-Pause for explicit user approval before: destructive ops (`make clean-build`, force-push, branch deletion), the design gate in `/add-feature` (after the architect's plan, before code), and anything with shared-state blast radius (pushing, opening/closing PRs, releases). Everything else proceeds autonomously unless something fails — when it fails, diagnose root cause before retrying a different approach.
+Most work proceeds autonomously, including `make clean-build` (it only rebuilds the repo's own `build/`/`dist/` artifacts), pushing to `claude/*` branches, and opening PRs. Pause for explicit user approval only before genuinely irreversible or high-blast-radius actions: cutting releases (`gh workflow run release.yml`), merging or closing PRs, and history-destructive git (force-push, branch/ref deletion, `reset --hard`) — several of which the `.claude/settings.json` deny-list also hard-blocks. For the `/add-feature` design gate, present the architect's plan and then proceed, pausing for sign-off only when the change is cross-cutting or high-risk. When something fails, diagnose root cause before retrying a different approach.
