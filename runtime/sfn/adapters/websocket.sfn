@@ -299,7 +299,7 @@ fn _ws_send_all(fd: i32, buf: * u8, total: i64) -> bool ![net] {
 // server that splits the `101` status line and headers across TCP
 // segments is not handled here; the drain-until-`\r\n\r\n` receive loop
 // lands with the server bridge and behavioral loopback test (#1877).
-fn _ws_recv_some(fd: i32, buf: * u8, cap: i64) -> i64 {
+fn _ws_recv_some(fd: i32, buf: * u8, cap: i64) -> i64 ![net] {
     return recv(fd, buf, cap, 0);
 }
 
@@ -464,7 +464,12 @@ fn _ws_find(haystack: * u8, needle: * u8) -> * u8 {
 // into `dst24` (24-char NUL-terminated buffer, per RFC 4648 padding)
 // via OpenSSL `EVP_EncodeBlock`.
 fn _ws_base64_16(src: * u8, dst24: * u8) -> void {
-    EVP_EncodeBlock(dst24, src, 16);
+    // EVP_EncodeBlock already NUL-terminates and returns the encoded length
+    // (24 for 16 input bytes); re-assert the terminator at that length so
+    // `strlen(dst24)` is well-defined regardless of the libcrypto build. The
+    // 25-byte buffer holds 24 chars + NUL.
+    let enc_len: i32 = EVP_EncodeBlock(dst24, src, 16);
+    memset(_ws_ptr_off(dst24, enc_len as i64), 0, 1 as usize);
 }
 
 // `_ws_sec_accept(key_b64, out28)` — compute the expected
@@ -489,7 +494,11 @@ fn _ws_sec_accept(key_b64: * u8, out28: * u8) -> void {
     }
     SHA1(concat, total as usize, digest);
     free(concat);
-    EVP_EncodeBlock(out28, digest, 20);
+    // Defensive NUL-terminate at the encoded length (28 for a 20-byte
+    // digest) so `strlen(out28)` is well-defined; the 29-byte buffer holds
+    // 28 chars + NUL.
+    let enc_len: i32 = EVP_EncodeBlock(out28, digest, 20);
+    memset(_ws_ptr_off(out28, enc_len as i64), 0, 1 as usize);
     free(digest);
 }
 
