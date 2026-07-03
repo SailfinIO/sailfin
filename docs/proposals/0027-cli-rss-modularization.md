@@ -14,6 +14,15 @@ graduates-to: docs/status.md
 
 # SFEP-0027 — CLI Modularization: Per-Worker RSS Relief First, Then Migration
 
+> **Status: Implemented (Phases A–C landed; Phase C in #1797).** This proposal
+> is a design record: the inventories and line counts in §1 and §3 describe the
+> **pre-implementation** starting state (a 3,067-line `cli_main.sfn` with the
+> 937-line `sailfin_cli_main_legacy` and dead helpers like `_path_strip_ext`)
+> — they are the *motivation*, not current-state guidance. For the delivered
+> post-Phase-C structure (`sailfin_cli_main_v2` as the sole router;
+> `cli_main.sfn` = entry shims + `_usage`; `cli_commands*.sfn` deleted) see
+> `docs/status.md` "Toolchain" and the §7 Stage1 mapping below.
+
 > Supersedes SFEP-0009 (`0009-cli-modularization-epic.md`). 0009 was written
 > 2026-05-06, **before** the runtime migration (#822) dumped the entire
 > build/link orchestration into `cli_main.sfn`. Its inventory (`cli_main.sfn`
