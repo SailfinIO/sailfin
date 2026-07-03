@@ -1,0 +1,84 @@
+// End-to-end test for issue #1855 — a bare struct literal (`{ field: val }`)
+// assigned through a concrete struct type annotation (`let p: Person = { ... }`)
+// must populate its fields via the same path as the explicit `Person { ... }`
+// form, rather than lowering to `store %Person zeroinitializer`.
+//
+// NOTE on matchers: the `sfn/test` `expect_*` matchers are `![pure]` and so
+// cannot be called from an `![io]` test like this. Assert on the captured
+// `.ll` text with `sfn/strings` predicates instead. (#842.)
+import { contains, split, trim } from "sfn/strings";
+
+fn _sfn_bin() -> string ![io] {
+    let configured = env.get("SAILFIN_BIN");
+    if configured.length > 0 { return configured; }
+    return "build/native/sailfin";
+}
+
+// Child environment for the spawned `sfn` invocations. `process.run_capture`
+// treats an empty array as the *empty* environment (not "inherit"), so PATH
+// (the nested `sfn run` build shells out to clang + a linker) and
+// SAILFIN_TEST_SCRATCH (per-invocation build-cache dir, #1333) are threaded
+// explicitly.
+fn _child_env() -> string[] ![io] {
+    // Inherit the full parent environment: PATH/HOME/TMPDIR plus the macOS
+    // SDK/toolchain vars the nested clang/ld need (a minimal set links on
+    // Linux but fails on macOS with `ld: library 'm' not found`, #1410),
+    // and SAILFIN_TEST_SCRATCH for per-invocation build-cache isolation
+    // (#1333). Mirrors serve_loopback_test.sfn / process_environ_test.sfn.
+    return process.environ();
+}
+
+fn _scratch_dir() -> string ![io] {
+    let mut dir = env.get("SAILFIN_TEST_SCRATCH");
+    if dir.length == 0 { dir = "/tmp"; }
+    fs.createDirectory(dir, true);
+    return dir;
+}
+
+fn _fixture() -> string {
+    return "compiler/tests/e2e/fixtures/bare_struct_literal_annotation.sfn";
+}
+
+fn _emit_llvm() -> string ![io] {
+    let dir = _scratch_dir();
+    let ll = dir + "/bare_struct_literal_annotation.ll";
+    if fs.exists(ll) { fs.deleteFile(ll); }
+    let exit = process.run_capture([_sfn_bin(), "emit", "-o", ll, "llvm", _fixture()], _child_env());
+    let _o = process.capture_take_stdout();
+    let _e = process.capture_take_stderr();
+    if exit != 0 { return ""; }
+    if !fs.exists(ll) { return ""; }
+    let ir = fs.readFile(ll);
+    fs.deleteFile(ll);
+    return ir;
+}
+
+// 1 — The bare literal's field assignment goes through `insertvalue %Person`
+// (field population), not a `store %Person zeroinitializer`.
+test "bare-struct-annotation: field literal populates %Person (no zeroinitializer)" ![io] {
+    let ir = _emit_llvm();
+    assert ir.length > 0;
+    let lines = split(ir, "\n");
+    let mut found = false;
+    let mut i = 0;
+    loop {
+        if i >= lines.length { break; }
+        let line = lines[i];
+        if contains(line, "insertvalue %Person") { found = true; }
+        i += 1;
+    }
+    assert found;
+    assert contains(ir, "Bob");
+    // Guard against the pre-fix lowering reappearing alongside the fixed path.
+    assert ! contains(ir, "%Person zeroinitializer");
+}
+
+// 2 — Runtime round-trip: the populated field prints its assigned value, not
+// a zeroed/empty default.
+test "bare-struct-annotation: runtime prints populated field" ![io] {
+    let exit = process.run_capture([_sfn_bin(), "run", _fixture()], _child_env());
+    let out = process.capture_take_stdout();
+    let _e = process.capture_take_stderr();
+    assert exit == 0;
+    assert contains(out, "Person: Bob");
+}

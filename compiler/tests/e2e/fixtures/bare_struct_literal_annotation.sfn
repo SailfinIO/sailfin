@@ -1,0 +1,12 @@
+// Fixture for issue #1855 — a bare struct literal assigned through a concrete
+// type annotation must populate its fields (not lower to a zero value).
+struct Person {
+    name: string;
+}
+
+fn main() ![io] {
+    let p: Person = {
+        name: "Bob"
+    };
+    print("Person: {{p.name}}");
+}

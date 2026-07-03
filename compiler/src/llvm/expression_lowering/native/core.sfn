@@ -2546,6 +2546,61 @@ fn lower_expression(expression: string, bindings: ParameterBinding[], locals: Lo
     // form (enum parse unsuccessful, or `enum_info == null`) falls through to
     // the struct dispatch below (parse_struct_literal recognizes the dotted
     // name), where the fail-closed guard catches the unresolvable type.
+    // #1855: a bare object literal `{ field: val, ... }` routed through a
+    // concrete-struct type annotation (`let p: Person = { ... }`) reaches
+    // lowering as bare `{...}` text with no leading type name, so the
+    // parse_struct_literal call below cannot recognize it (it requires a
+    // leading identifier) and it would fall through to a zeroinitializer
+    // store — the literal's fields are silently dropped. When `expected_type`
+    // resolves to a concrete struct, prepend that struct's source name so the
+    // literal routes through the same field-population path the explicit
+    // `T { ... }` form uses. Interface/intersection annotations resolve to no
+    // struct here (they lower through the dynamic runtime-object path) and are
+    // intentionally left untouched.
+    if starts_with(stripped, "{") {
+        let bare_target = resolve_struct_info_from_llvm_type(context, expected_type);
+        if bare_target != null {
+            let bare_parse = parse_struct_literal(bare_target.name + " "
+                + stripped);
+            if bare_parse.recognized {
+                // Fail closed on a malformed body (missing `}`, trailing
+                // content) rather than dropping the parse diagnostics and
+                // falling through to a zeroinitializer store — mirrors the
+                // explicit `T { ... }` arm's `!success` handling below so the
+                // bare form surfaces the same struct-literal diagnostics.
+                if !bare_parse.success {
+                    let mut _ci_bad: int = 0;
+                    loop {
+                        if _ci_bad >= bare_parse.diagnostics.length { break; }
+                        diagnostics.push(bare_parse.diagnostics[_ci_bad]);
+                        _ci_bad += 1;
+                    }
+                    return ExpressionResult {
+                        lines: lines,
+                        temp_index: temp_index,
+                        operand: null,
+                        diagnostics: diagnostics,
+                        string_constants: empty_constants
+                    };
+                }
+                let bare_lowered = lower_struct_literal(bare_parse, bindings, locals, temp_index, lines, functions, context, expected_type, null);
+                let mut _ci_bare: int = 0;
+                loop {
+                    if _ci_bare >= bare_lowered.diagnostics.length { break; }
+                    diagnostics.push(bare_lowered.diagnostics[_ci_bare]);
+                    _ci_bare += 1;
+                }
+                return ExpressionResult {
+                    lines: bare_lowered.lines,
+                    temp_index: bare_lowered.temp_index,
+                    operand: bare_lowered.operand,
+                    diagnostics: diagnostics,
+                    string_constants: bare_lowered.string_constants
+                };
+            }
+        }
+    }
+
     let struct_parse = parse_struct_literal(stripped);
     if struct_parse.recognized {
         if !struct_parse.success {
