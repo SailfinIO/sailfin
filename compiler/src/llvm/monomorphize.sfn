@@ -1,0 +1,929 @@
+// compiler/src/llvm/monomorphize.sfn
+//
+// Generic-function monomorphization (SFEP-0038 §3.3, #1869). A native-IR
+// text → text pass that runs at the top of `lower_to_llvm_ir_from_text`
+// (the single lowering choke point): it finds each generic `.fn` (one that
+// carries a `.meta generics <...>` clause), emits one specialized copy per
+// distinct concrete instantiation with the type-parameter tokens substituted
+// for concrete types, rewrites every generic call site to target the mangled
+// specialization, and drops the original generic definitions before they can
+// leak a `%T`/`%U` token into LLVM IR.
+//
+// The transform is an inert no-op on any module with no generic `.fn` — the
+// entire (non-generic) compiler source flows through byte-for-byte unchanged,
+// which is what preserves the self-hosting invariant. It reuses the #830
+// enum-payload substitution engine (`enum_inst_substitute_annotation`),
+// generalizing it from a single payload field to a whole function body.
+import { char_code, substring } from "../string_utils";
+import { enum_inst_substitute_annotation } from "./type_mapping";
+import {
+    ends_with,
+    index_of,
+    starts_with,
+    trim_text
+} from "./utils";
+
+// A parsed `.fn` block. `lines` is the verbatim slice from the `.fn` header
+// through `.endfn`. Type parameters are non-empty only for generic functions.
+struct MonoFn {
+    base: string;
+    type_params: string[];
+    ret: string;
+    param_names: string[];
+    param_types: string[];
+    start: int;
+    end: int;
+    lines: string[];
+}
+
+// A concrete instantiation of a generic function. `args` are the concrete
+// type strings ordered against the declared `type_params`; `mangled` is the
+// specialized symbol name (`base$arg1$arg2...`).
+struct MonoInst {
+    base: string;
+    args: string[];
+    mangled: string;
+}
+
+// Result of parsing a `fn(...) -> ...` pointer annotation.
+struct MonoFnType {
+    param_types: string[];
+    ret: string;
+    ok: boolean;
+}
+
+// Parallel-array binding set produced by unification (param name -> concrete).
+struct MonoBindings {
+    params: string[];
+    vals: string[];
+}
+
+fn _mono_is_ident_char(ch: string) -> boolean {
+    if ch.length == 0 { return false; }
+    let code = char_code(ch);
+    let mut ok: boolean = false;
+    if code >= char_code("a") {
+        if code <= char_code("z") { ok = true; }
+    }
+    if code >= char_code("A") {
+        if code <= char_code("Z") { ok = true; }
+    }
+    if code >= char_code("0") {
+        if code <= char_code("9") { ok = true; }
+    }
+    if ch == "_" { ok = true; }
+    return ok;
+}
+
+fn _mono_split_lines(value: string) -> string[] {
+    let mut lines: string[] = [];
+    let mut start: int = 0;
+    let mut index: int = 0;
+    loop {
+        if index >= value.length { break; }
+        let ch = substring(value, index, index + 1);
+        if ch == "\n" {
+            lines = lines.push(substring(value, start, index));
+            start = index + 1;
+        }
+        index += 1;
+    }
+    lines = lines.push(substring(value, start, value.length));
+    return lines;
+}
+
+fn _mono_join_lines(lines: string[]) -> string {
+    let mut out: string = "";
+    let mut index: int = 0;
+    loop {
+        if index >= lines.length { break; }
+        if index > 0 { out = out + "\n"; }
+        out = out + lines[index];
+        index += 1;
+    }
+    return out;
+}
+
+fn _mono_contains(values: string[], target: string) -> boolean {
+    let mut index: int = 0;
+    loop {
+        if index >= values.length { break; }
+        if values[index] == target { return true; }
+        index += 1;
+    }
+    return false;
+}
+
+// Strip a top-level `<...>` clause from a header fragment such as
+// `id<T>` -> `id` or `map<T, U>` -> `map`. Depth-aware.
+fn _mono_strip_generics(text: string) -> string {
+    let mut out: string = "";
+    let mut depth: int = 0;
+    let mut index: int = 0;
+    loop {
+        if index >= text.length { break; }
+        let ch = substring(text, index, index + 1);
+        if ch == "<" { depth += 1; } else if ch == ">" {
+            if depth > 0 { depth -= 1; }
+        } else {
+            if depth == 0 { out = out + ch; }
+        }
+        index += 1;
+    }
+    return out;
+}
+
+// Split a comma-separated list at top level (paren/angle-bracket aware).
+fn _mono_split_top_level(text: string) -> string[] {
+    let mut parts: string[] = [];
+    let mut depth: int = 0;
+    let mut current: string = "";
+    let mut index: int = 0;
+    loop {
+        if index >= text.length { break; }
+        let ch = substring(text, index, index + 1);
+        if ch == "<" {
+            depth += 1;
+            current = current + ch;
+        } else if ch == "(" {
+            depth += 1;
+            current = current + ch;
+        } else if ch == ">" {
+            if depth > 0 { depth -= 1; }
+            current = current + ch;
+        } else if ch == ")" {
+            if depth > 0 { depth -= 1; }
+            current = current + ch;
+        } else if ch == "," {
+            if depth == 0 {
+                parts = parts.push(trim_text(current));
+                current = "";
+            } else { current = current + ch; }
+        } else { current = current + ch; }
+        index += 1;
+    }
+    if trim_text(current).length > 0 {
+        parts = parts.push(trim_text(current));
+    }
+    return parts;
+}
+
+// Parse `.meta generics <T, U>` into ["T", "U"].
+fn _mono_parse_generics_meta(line: string) -> string[] {
+    let open = index_of(line, "<");
+    if open < 0 { return []; }
+    let mut inner: string = "";
+    let mut depth: int = 0;
+    let mut index: int = open;
+    loop {
+        if index >= line.length { break; }
+        let ch = substring(line, index, index + 1);
+        if ch == "<" {
+            depth += 1;
+            if depth == 1 {
+                index += 1;
+                continue;
+            }
+            inner = inner + ch;
+        } else if ch == ">" {
+            if depth > 0 { depth -= 1; }
+            if depth == 0 { break; }
+            inner = inner + ch;
+        } else { inner = inner + ch; }
+        index += 1;
+    }
+    return _mono_split_top_level(inner);
+}
+
+// True for a fn-pointer annotation in either spelling the emitter/formatter
+// produces: `fn(T) -> U` or `fn (T) -> U` (a space after `fn`).
+fn _mono_is_fn_type(annotation: string) -> boolean {
+    let t = trim_text(annotation);
+    if starts_with(t, "fn(") { return true; }
+    if starts_with(t, "fn (") { return true; }
+    return false;
+}
+
+// Parse a `fn(P1, P2) -> R` pointer annotation (spacing-tolerant).
+fn _mono_parse_fn_type(annotation: string) -> MonoFnType {
+    let trimmed = trim_text(annotation);
+    if !_mono_is_fn_type(trimmed) {
+        return MonoFnType { param_types: [], ret: "", ok: false };
+    }
+    let open = index_of(trimmed, "(");
+    let mut depth: int = 0;
+    let mut close: int = -1;
+    let mut inner: string = "";
+    let mut index: int = open;
+    loop {
+        if index >= trimmed.length { break; }
+        let ch = substring(trimmed, index, index + 1);
+        if ch == "(" {
+            depth += 1;
+            if depth == 1 {
+                index += 1;
+                continue;
+            }
+            inner = inner + ch;
+        } else if ch == ")" {
+            if depth > 0 { depth -= 1; }
+            if depth == 0 {
+                close = index;
+                break;
+            }
+            inner = inner + ch;
+        } else { inner = inner + ch; }
+        index += 1;
+    }
+    if close < 0 {
+        return MonoFnType { param_types: [], ret: "", ok: false };
+    }
+    let params = _mono_split_top_level(inner);
+    let arrow = index_of(substring(trimmed, close, trimmed.length), "->");
+    let mut ret: string = "";
+    if arrow >= 0 {
+        let ret_start = close + arrow + 2;
+        ret = trim_text(substring(trimmed, ret_start, trimmed.length));
+    }
+    return MonoFnType { param_types: params, ret: ret, ok: true };
+}
+
+// Unify a declared parameter annotation (which may reference type params)
+// against a concrete type, appending discovered param -> concrete bindings.
+fn _mono_unify(declared: string, concrete: string, type_params: string[], acc: MonoBindings) -> MonoBindings {
+    let d = trim_text(declared);
+    let c = trim_text(concrete);
+    let mut out = acc;
+    if d.length == 0 { return out; }
+    if c.length == 0 { return out; }
+    if _mono_contains(type_params, d) {
+        out.params = out.params.push(d);
+        out.vals = out.vals.push(c);
+        return out;
+    }
+    if ends_with(d, "[]") {
+        if ends_with(c, "[]") {
+            let de = substring(d, 0, d.length - 2);
+            let ce = substring(c, 0, c.length - 2);
+            return _mono_unify(de, ce, type_params, out);
+        }
+        return out;
+    }
+    if _mono_is_fn_type(d) {
+        if _mono_is_fn_type(c) {
+            let dt = _mono_parse_fn_type(d);
+            let ct = _mono_parse_fn_type(c);
+            if dt.ok {
+                if ct.ok {
+                    let mut i: int = 0;
+                    let mut limit = dt.param_types.length;
+                    if ct.param_types.length < limit {
+                        limit = ct.param_types.length;
+                    }
+                    loop {
+                        if i >= limit { break; }
+                        out = _mono_unify(dt.param_types[i], ct.param_types[i], type_params, out);
+                        i += 1;
+                    }
+                    out = _mono_unify(dt.ret, ct.ret, type_params, out);
+                }
+            }
+        }
+        return out;
+    }
+    return out;
+}
+
+fn _mono_lookup_binding(bindings: MonoBindings, param: string) -> string {
+    let mut index: int = 0;
+    loop {
+        if index >= bindings.params.length { break; }
+        if bindings.params[index] == param { return bindings.vals[index]; }
+        index += 1;
+    }
+    return "";
+}
+
+// Sanitize a concrete type into a symbol-safe mangling token
+// (`int` -> `int`, `int[]` -> `intArr`, `fn(int)->int` -> `fnPtr`).
+fn _mono_mangle_arg(arg: string) -> string {
+    let t = trim_text(arg);
+    if _mono_is_fn_type(t) { return "fnPtr"; }
+    let mut out: string = "";
+    let mut index: int = 0;
+    let mut saw_array: boolean = false;
+    loop {
+        if index >= t.length { break; }
+        let ch = substring(t, index, index + 1);
+        if _mono_is_ident_char(ch) { out = out + ch; } else if ch == "[" {
+            saw_array = true;
+        }
+        index += 1;
+    }
+    if saw_array { out = out + "Arr"; }
+    if out.length == 0 { return "_"; }
+    return out;
+}
+
+fn _mono_mangled_name(base: string, args: string[]) -> string {
+    let mut out = base;
+    let mut index: int = 0;
+    loop {
+        if index >= args.length { break; }
+        out = out + "$" + _mono_mangle_arg(args[index]);
+        index += 1;
+    }
+    return out;
+}
+
+// Look up a function's declared info by base name in the collected set.
+fn _mono_find_fn(fns: MonoFn[], name: string) -> int {
+    let mut index: int = 0;
+    loop {
+        if index >= fns.length { break; }
+        if fns[index].base == name { return index; }
+        index += 1;
+    }
+    return -1;
+}
+
+// Type a single call-argument expression against the caller's local env.
+// Returns "" when the type cannot be resolved.
+fn _mono_type_of_arg(arg: string, env_names: string[], env_types: string[], fns: MonoFn[]) -> string {
+    let a = trim_text(arg);
+    if a.length == 0 { return ""; }
+    let first = substring(a, 0, 1);
+    if first == "\"" { return "string"; }
+    if a == "true" { return "bool"; }
+    if a == "false" { return "bool"; }
+    let code = char_code(first);
+    let mut is_num: boolean = false;
+    if code >= char_code("0") {
+        if code <= char_code("9") { is_num = true; }
+    }
+    if first == "-" { is_num = true; }
+    if is_num {
+        if index_of(a, ".") >= 0 { return "float"; }
+        return "int";
+    }
+    if starts_with(a, "<closure_pair @") {
+        let after = substring(a, 15, a.length);
+        let mut name: string = "";
+        let mut index: int = 0;
+        loop {
+            if index >= after.length { break; }
+            let ch = substring(after, index, index + 1);
+            if _mono_is_ident_char(ch) { name = name + ch; } else { break; }
+            index += 1;
+        }
+        let fi = _mono_find_fn(fns, name);
+        if fi < 0 { return ""; }
+        let lam = fns[fi];
+        // A lambda's first parameter is the closure environment (`__env: i8*`);
+        // its logical fn type drops that leading env parameter.
+        let mut ptypes: string[] = [];
+        let mut p: int = 1;
+        loop {
+            if p >= lam.param_types.length { break; }
+            ptypes = ptypes.push(lam.param_types[p]);
+            p += 1;
+        }
+        let mut sig: string = "fn(";
+        let mut q: int = 0;
+        loop {
+            if q >= ptypes.length { break; }
+            if q > 0 { sig = sig + ", "; }
+            sig = sig + ptypes[q];
+            q += 1;
+        }
+        sig = sig + ") -> " + lam.ret;
+        return sig;
+    }
+    // Plain identifier: consult the local env.
+    let mut all_ident: boolean = true;
+    let mut k: int = 0;
+    loop {
+        if k >= a.length { break; }
+        if !_mono_is_ident_char(substring(a, k, k + 1)) {
+            all_ident = false;
+            break;
+        }
+        k += 1;
+    }
+    if all_ident {
+        let mut e: int = 0;
+        loop {
+            if e >= env_names.length { break; }
+            if env_names[e] == a { return env_types[e]; }
+            e += 1;
+        }
+    }
+    return "";
+}
+
+// Result of the argument-list paren match: the inner text and the index
+// just past the matching `)`.
+struct MonoParen {
+    inner: string;
+    after: int;
+    ok: boolean;
+}
+
+// Given `expr` and the index of an opening `(`, return the balanced inner
+// text and the index just past the matching `)`.
+fn _mono_match_parens(expr: string, open_index: int) -> MonoParen {
+    let mut depth: int = 0;
+    let mut inner: string = "";
+    let mut index: int = open_index;
+    loop {
+        if index >= expr.length { break; }
+        let ch = substring(expr, index, index + 1);
+        if ch == "(" {
+            depth += 1;
+            if depth == 1 {
+                index += 1;
+                continue;
+            }
+            inner = inner + ch;
+        } else if ch == ")" {
+            if depth > 0 { depth -= 1; }
+            if depth == 0 {
+                return MonoParen {
+                    inner: inner,
+                    after: index + 1,
+                    ok: true
+                };
+            }
+            inner = inner + ch;
+        } else { inner = inner + ch; }
+        index += 1;
+    }
+    return MonoParen { inner: "", after: open_index, ok: false };
+}
+
+// Rewrite result: the transformed expression plus the instantiations it
+// discovered (for the worklist).
+struct MonoRewrite {
+    text: string;
+    insts: MonoInst[];
+}
+
+// Rewrite every generic call in `expr` to its mangled specialization,
+// recording each instantiation. Non-generic text is left byte-for-byte intact.
+fn _mono_rewrite_expr(expr: string, env_names: string[], env_types: string[], gfns: MonoFn[], allfns: MonoFn[]) -> MonoRewrite {
+    let mut out: string = "";
+    let mut insts: MonoInst[] = [];
+    let mut token: string = "";
+    let mut index: int = 0;
+    loop {
+        if index >= expr.length { break; }
+        let ch = substring(expr, index, index + 1);
+        if _mono_is_ident_char(ch) {
+            token = token + ch;
+            index += 1;
+            continue;
+        }
+        if token.length > 0 {
+            if ch == "(" {
+                let gi = _mono_find_fn(gfns, token);
+                let mut is_method: boolean = false;
+                if out.length > 0 {
+                    if substring(out, out.length - 1, out.length) == "." {
+                        is_method = true;
+                    }
+                }
+                if gi >= 0 {
+                    if !is_method {
+                        let paren = _mono_match_parens(expr, index);
+                        if paren.ok {
+                            let gfn = gfns[gi];
+                            let raw_args = _mono_split_top_level(paren.inner);
+                            let mut bind = MonoBindings {
+                                params: [],
+                                vals: []
+                            };
+                            let mut ai: int = 0;
+                            loop {
+                                if ai >= raw_args.length { break; }
+                                if ai >= gfn.param_types.length { break; }
+                                let at = _mono_type_of_arg(raw_args[ai], env_names, env_types, allfns);
+                                if at.length > 0 {
+                                    bind = _mono_unify(gfn.param_types[ai], at, gfn.type_params, bind);
+                                }
+                                ai += 1;
+                            }
+                            let mut ordered: string[] = [];
+                            let mut resolved: boolean = true;
+                            let mut ti: int = 0;
+                            loop {
+                                if ti >= gfn.type_params.length { break; }
+                                let v = _mono_lookup_binding(bind, gfn.type_params[ti]);
+                                if v.length == 0 {
+                                    resolved = false;
+                                    break;
+                                }
+                                ordered = ordered.push(v);
+                                ti += 1;
+                            }
+                            if resolved {
+                                let mangled = _mono_mangled_name(token, ordered);
+                                let inner = _mono_rewrite_expr(paren.inner, env_names, env_types, gfns, allfns);
+                                out = out + mangled + "(" + inner.text + ")";
+                                insts = insts.push(MonoInst {
+                                    base: token, args: ordered, mangled: mangled
+                                });
+                                let mut ni: int = 0;
+                                loop {
+                                    if ni >= inner.insts.length { break; }
+                                    insts = insts.push(inner.insts[ni]);
+                                    ni += 1;
+                                }
+                                token = "";
+                                index = paren.after;
+                                continue;
+                            }
+                        }
+                    }
+                }
+            }
+            out = out + token;
+            token = "";
+        }
+        out = out + ch;
+        index += 1;
+    }
+    if token.length > 0 { out = out + token; }
+    return MonoRewrite { text: out, insts: insts };
+}
+
+// Parse the `.param name: <type>` name and type out of a body line.
+fn _mono_param_name(line: string) -> string {
+    let t = trim_text(line);
+    let rest = trim_text(substring(t, 6, t.length));
+    let colon = index_of(rest, ":");
+    if colon < 0 { return trim_text(rest); }
+    return trim_text(substring(rest, 0, colon));
+}
+
+fn _mono_param_type(line: string) -> string {
+    let t = trim_text(line);
+    let colon = index_of(t, ":");
+    if colon < 0 { return ""; }
+    return trim_text(substring(t, colon + 1, t.length));
+}
+
+// Extract a typed `.let [mut] name : type = ...` binding's name and type.
+// Returns "" type for an untyped let.
+fn _mono_let_name(line: string) -> string {
+    let t = trim_text(line);
+    let mut rest = trim_text(substring(t, 4, t.length));
+    if starts_with(rest, "mut ") {
+        rest = trim_text(substring(rest, 4, rest.length));
+    }
+    let mut name: string = "";
+    let mut index: int = 0;
+    loop {
+        if index >= rest.length { break; }
+        let ch = substring(rest, index, index + 1);
+        if _mono_is_ident_char(ch) { name = name + ch; } else { break; }
+        index += 1;
+    }
+    return name;
+}
+
+fn _mono_let_type(line: string) -> string {
+    let t = trim_text(line);
+    let eq = index_of(t, "=");
+    let colon = index_of(t, ":");
+    if colon < 0 { return ""; }
+    if eq >= 0 {
+        if colon > eq { return ""; }
+        return trim_text(substring(t, colon + 1, eq));
+    }
+    return trim_text(substring(t, colon + 1, t.length));
+}
+
+// If `value` is a struct literal (`Widget { ... }`), return the struct name;
+// otherwise "". Lets the env infer the type of an untyped struct-literal
+// binding (`let w = Widget { v: 7 }`), so a struct-typed argument to a
+// generic call resolves without an explicit annotation.
+fn _mono_struct_literal_type(value: string) -> string {
+    let t = trim_text(value);
+    let mut name: string = "";
+    let mut index: int = 0;
+    loop {
+        if index >= t.length { break; }
+        let ch = substring(t, index, index + 1);
+        if _mono_is_ident_char(ch) { name = name + ch; } else { break; }
+        index += 1;
+    }
+    if name.length == 0 { return ""; }
+    let rest = trim_text(substring(t, name.length, t.length));
+    if starts_with(rest, "{") { return name; }
+    return "";
+}
+
+// Resolve the env type of a `.let` binding: the explicit annotation when
+// present, else a struct-literal value's type, else "" (untyped/unknown).
+fn _mono_let_env_type(line: string) -> string {
+    let typed = _mono_let_type(line);
+    if typed.length > 0 { return typed; }
+    let t = trim_text(line);
+    let eq = index_of(t, "=");
+    if eq < 0 { return ""; }
+    return _mono_struct_literal_type(trim_text(substring(t, eq + 1, t.length)));
+}
+
+// Result of specializing one generic function at one instantiation.
+struct MonoSpec {
+    lines: string[];
+    insts: MonoInst[];
+}
+
+// Build the local type environment (param + typed-let names -> concrete
+// types) for a block whose lines have already had type tokens substituted.
+fn _mono_build_env_names(lines: string[]) -> string[] {
+    let mut names: string[] = [];
+    let mut index: int = 0;
+    loop {
+        if index >= lines.length { break; }
+        let t = trim_text(lines[index]);
+        if starts_with(t, ".param ") {
+            names = names.push(_mono_param_name(t));
+        } else if starts_with(t, ".let ") {
+            if _mono_let_env_type(t).length > 0 {
+                names = names.push(_mono_let_name(t));
+            }
+        }
+        index += 1;
+    }
+    return names;
+}
+
+fn _mono_build_env_types(lines: string[]) -> string[] {
+    let mut types: string[] = [];
+    let mut index: int = 0;
+    loop {
+        if index >= lines.length { break; }
+        let t = trim_text(lines[index]);
+        if starts_with(t, ".param ") {
+            types = types.push(_mono_param_type(t));
+        } else if starts_with(t, ".let ") {
+            let lt = _mono_let_env_type(t);
+            if lt.length > 0 { types = types.push(lt); }
+        }
+        index += 1;
+    }
+    return types;
+}
+
+// Produce one specialized copy of `gfn` for instantiation `inst`. Type tokens
+// are substituted throughout; the header is renamed to the mangled symbol and
+// the `.meta generics` directive dropped. Generic calls inside the body are
+// rewritten (transitively discovering further instantiations).
+fn _mono_specialize(gfn: MonoFn, inst: MonoInst, gfns: MonoFn[], allfns: MonoFn[]) -> MonoSpec {
+    let tp = gfn.type_params;
+    let args = inst.args;
+    // First sweep: substitute type tokens on every line except the dropped
+    // `.meta generics` directive, rewriting the header name.
+    let mut subst_lines: string[] = [];
+    let mut index: int = 0;
+    loop {
+        if index >= gfn.lines.length { break; }
+        let raw = gfn.lines[index];
+        let trimmed = trim_text(raw);
+        if index == 0 {
+            // `.fn <name><clause>(sig) -> ret [effects]` -> mangled monomorphic header.
+            let stripped = _mono_strip_generics(raw);
+            let substituted = enum_inst_substitute_annotation(stripped, tp, args);
+            let sig_start = index_of(substituted, "(");
+            let mut header: string = "";
+            if sig_start >= 0 {
+                header = ".fn " + inst.mangled + substring(substituted, sig_start, substituted.length);
+            } else { header = ".fn " + inst.mangled; }
+            subst_lines = subst_lines.push(header);
+        } else if starts_with(trimmed, ".meta generics") {
+            // drop — the specialization is monomorphic
+        } else {
+            subst_lines = subst_lines.push(enum_inst_substitute_annotation(raw, tp, args));
+        }
+        index += 1;
+    }
+    // Second sweep: rewrite generic call sites using the substituted env.
+    let env_names = _mono_build_env_names(subst_lines);
+    let env_types = _mono_build_env_types(subst_lines);
+    let mut out_lines: string[] = [];
+    let mut insts: MonoInst[] = [];
+    let mut j: int = 0;
+    loop {
+        if j >= subst_lines.length { break; }
+        let rw = _mono_rewrite_expr(subst_lines[j], env_names, env_types, gfns, allfns);
+        out_lines = out_lines.push(rw.text);
+        let mut k: int = 0;
+        loop {
+            if k >= rw.insts.length { break; }
+            insts = insts.push(rw.insts[k]);
+            k += 1;
+        }
+        j += 1;
+    }
+    return MonoSpec { lines: out_lines, insts: insts };
+}
+
+// Parse the base name out of a `.fn <name>...` header line.
+fn _mono_header_base(line: string) -> string {
+    let t = trim_text(line);
+    let rest = trim_text(substring(t, 3, t.length));
+    let mut name: string = "";
+    let mut index: int = 0;
+    loop {
+        if index >= rest.length { break; }
+        let ch = substring(rest, index, index + 1);
+        if _mono_is_ident_char(ch) { name = name + ch; } else { break; }
+        index += 1;
+    }
+    return name;
+}
+
+// Parse every `.fn ... .endfn` block into a MonoFn record.
+fn _mono_collect_fns(lines: string[]) -> MonoFn[] {
+    let mut fns: MonoFn[] = [];
+    let mut index: int = 0;
+    loop {
+        if index >= lines.length { break; }
+        let t = trim_text(lines[index]);
+        if starts_with(t, ".fn ") {
+            let start = index;
+            let base = _mono_header_base(t);
+            let mut type_params: string[] = [];
+            let mut ret: string = "";
+            let mut p_names: string[] = [];
+            let mut p_types: string[] = [];
+            let mut block: string[] = [];
+            let mut j: int = index;
+            loop {
+                if j >= lines.length { break; }
+                let bl = lines[j];
+                let bt = trim_text(bl);
+                block = block.push(bl);
+                if starts_with(bt, ".meta generics") {
+                    type_params = _mono_parse_generics_meta(bt);
+                } else if starts_with(bt, ".meta return ") {
+                    ret = trim_text(substring(bt, 13, bt.length));
+                } else if starts_with(bt, ".param ") {
+                    p_names = p_names.push(_mono_param_name(bt));
+                    p_types = p_types.push(_mono_param_type(bt));
+                }
+                if bt == ".endfn" { break; }
+                j += 1;
+            }
+            fns = fns.push(MonoFn {
+                base: base, type_params: type_params, ret: ret, param_names: p_names, param_types: p_types, start: start, end: j, lines: block
+            });
+            index = j + 1;
+            continue;
+        }
+        index += 1;
+    }
+    return fns;
+}
+
+// Entry point: monomorphize generic functions in a `.sfn-asm` native-IR text.
+// No-op (returns the input unchanged) when the module has no generic `.fn`.
+fn monomorphize_native_text(text: string) -> string {
+    if text.length == 0 { return text; }
+    // Fast bail-out: a generic `.fn` is the only thing this pass acts on, and
+    // it always carries a `.meta generics` directive (emit_native.sfn). No
+    // marker → no generic function → return the input untouched without even
+    // splitting lines. This keeps the non-generic path (the entire compiler
+    // source, every self-host module) a single substring scan. A false
+    // positive is harmless: it falls through to the `gfns.length == 0` return.
+    if index_of(text, ".meta generics") < 0 { return text; }
+    let lines = _mono_split_lines(text);
+    let allfns = _mono_collect_fns(lines);
+    // Collect the generic subset.
+    let mut gfns: MonoFn[] = [];
+    let mut fi: int = 0;
+    loop {
+        if fi >= allfns.length { break; }
+        if allfns[fi].type_params.length > 0 {
+            gfns = gfns.push(allfns[fi]);
+        }
+        fi += 1;
+    }
+    if gfns.length == 0 { return text; }
+
+    // Rewrite call sites in non-generic blocks; seed the worklist.
+    let mut worklist: MonoInst[] = [];
+    let mut ng_starts: int[] = [];
+    let mut ng_text: string[] = [];
+    let mut bi: int = 0;
+    loop {
+        if bi >= allfns.length { break; }
+        let f = allfns[bi];
+        if f.type_params.length == 0 {
+            let env_names = _mono_build_env_names(f.lines);
+            let env_types = _mono_build_env_types(f.lines);
+            let mut rewritten: string[] = [];
+            let mut li: int = 0;
+            loop {
+                if li >= f.lines.length { break; }
+                let rw = _mono_rewrite_expr(f.lines[li], env_names, env_types, gfns, allfns);
+                rewritten = rewritten.push(rw.text);
+                let mut ii: int = 0;
+                loop {
+                    if ii >= rw.insts.length { break; }
+                    worklist = worklist.push(rw.insts[ii]);
+                    ii += 1;
+                }
+                li += 1;
+            }
+            ng_starts = ng_starts.push(f.start);
+            ng_text = ng_text.push(_mono_join_lines(rewritten));
+        }
+        bi += 1;
+    }
+
+    // Process the worklist, specializing each distinct instantiation and
+    // closing transitively. Dedup by mangled key.
+    let mut seen: string[] = [];
+    let mut specialized: string[] = [];
+    let mut guard: int = 0;
+    loop {
+        if worklist.length == 0 { break; }
+        guard += 1;
+        if guard > 100000 { break; }
+        let inst = worklist[worklist.length - 1];
+        // pop last
+        let mut next: MonoInst[] = [];
+        let mut wi: int = 0;
+        loop {
+            if wi >= worklist.length - 1 { break; }
+            next = next.push(worklist[wi]);
+            wi += 1;
+        }
+        worklist = next;
+        if _mono_contains(seen, inst.mangled) { continue; }
+        seen = seen.push(inst.mangled);
+        let gi = _mono_find_fn(gfns, inst.base);
+        if gi < 0 { continue; }
+        let spec = _mono_specialize(gfns[gi], inst, gfns, allfns);
+        specialized = specialized.push(_mono_join_lines(spec.lines));
+        let mut si: int = 0;
+        loop {
+            if si >= spec.insts.length { break; }
+            worklist = worklist.push(spec.insts[si]);
+            si += 1;
+        }
+    }
+
+    // Reassemble: emit non-generic blocks (rewritten) and non-fn lines,
+    // drop generic blocks, then append specialized blocks.
+    let mut out_lines: string[] = [];
+    let mut idx: int = 0;
+    loop {
+        if idx >= lines.length { break; }
+        let t = trim_text(lines[idx]);
+        if starts_with(t, ".fn ") {
+            // Find the owning block's end.
+            let mut end: int = idx;
+            let mut k: int = idx;
+            loop {
+                if k >= lines.length { break; }
+                if trim_text(lines[k]) == ".endfn" {
+                    end = k;
+                    break;
+                }
+                k += 1;
+            }
+            // Locate this block in the collected set to test genericity.
+            let mut is_generic: boolean = false;
+            let mut ng_hit: int = -1;
+            let mut n: int = 0;
+            loop {
+                if n >= ng_starts.length { break; }
+                if ng_starts[n] == idx {
+                    ng_hit = n;
+                    break;
+                }
+                n += 1;
+            }
+            if ng_hit < 0 { is_generic = true; }
+            if is_generic {
+                // drop the generic block
+            } else { out_lines = out_lines.push(ng_text[ng_hit]); }
+            idx = end + 1;
+            continue;
+        }
+        out_lines = out_lines.push(lines[idx]);
+        idx += 1;
+    }
+    let mut s: int = 0;
+    loop {
+        if s >= specialized.length { break; }
+        out_lines = out_lines.push("");
+        out_lines = out_lines.push(specialized[s]);
+        s += 1;
+    }
+    return _mono_join_lines(out_lines);
+}

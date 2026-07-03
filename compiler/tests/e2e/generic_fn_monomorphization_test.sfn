@@ -1,0 +1,140 @@
+// End-to-end coverage for generic-function monomorphization (#1869,
+// SFEP-0038 §3.3). Drives the production `sfn build` / `sfn emit llvm`
+// paths as subprocesses and asserts on the runtime behaviour and emitted
+// IR that the acceptance criteria pin:
+//
+//   1. `id<T>` at int and string emits two distinct specialized symbols
+//      (`id$int`, `id$string`) and each call round-trips its value.
+//   2. `map_one(f, x)` returning `f(x)` (a call to a fn-typed parameter)
+//      returns the real value (105), not a garbage pointer.
+//   3. `my_map(arr: T[], f)` (array-of-T element type) builds, runs, and
+//      leaks no bare `%T`/`%U` element token into the emitted IR.
+//
+// Matchers note: the `sfn/test` `expect_*` matchers are `![pure]` and so
+// cannot be called from an `![io]` test; assert on captured output / IR
+// text with `sfn/strings` predicates instead (#842). Build/emit isolation
+// follows `.claude/rules/no-bash-e2e.md`: the full parent environment is
+// threaded (PATH for clang/ld, SAILFIN_TEST_SCRATCH for per-invocation
+// build-cache isolation under the parallel pool).
+import { contains, find, split } from "sfn/strings";
+
+fn _sfn_bin() -> string ![io] {
+    let configured = env.get("SAILFIN_BIN");
+    if configured.length > 0 { return configured; }
+    return "build/native/sailfin";
+}
+
+fn _child_env() -> string[] ![io] { return process.environ(); }
+
+fn _scratch_dir() -> string ![io] {
+    let mut dir = env.get("SAILFIN_TEST_SCRATCH");
+    if dir.length == 0 { dir = "/tmp"; }
+    fs.createDirectory(dir, true);
+    return dir;
+}
+
+// Emit the fixture's LLVM IR and return its text (or "" on failure). `tag`
+// keeps the per-invocation `.ll` path unique for the parallel pool.
+fn _emit_ir(fixture: string, tag: string) -> string ![io] {
+    let dir = _scratch_dir();
+    let ll = dir + "/sfn-mono-" + tag + ".ll";
+    if fs.exists(ll) { fs.deleteFile(ll); }
+    let exit = process.run_capture([_sfn_bin(), "emit", "-o", ll, "llvm", fixture], _child_env());
+    let _o = process.capture_take_stdout();
+    let _e = process.capture_take_stderr();
+    if exit != 0 { return ""; }
+    if !fs.exists(ll) { return ""; }
+    let ir = fs.readFile(ll);
+    fs.deleteFile(ll);
+    return ir;
+}
+
+// Count lines that contain `a` and also contain `b` (when non-empty) — a
+// faithful stand-in for a per-line `grep -cE` over the emitted IR.
+fn _count_match(text: string, a: string, b: string) -> int {
+    let lines = split(text, "\n");
+    let mut n = 0;
+    let mut i = 0;
+    loop {
+        if i >= lines.length { break; }
+        let l = lines[i];
+        let mut ok = contains(l, a);
+        if ok && b.length > 0 { ok = contains(l, b); }
+        if ok { n += 1; }
+        i += 1;
+    }
+    return n;
+}
+
+// Build the fixture to a unique path and run it; stash stdout to `marker`
+// and return the run's exit code, or -100 if the build itself failed.
+fn _build_and_run(fixture: string, tag: string, marker: string) -> int ![io] {
+    let dir = _scratch_dir();
+    let bin = dir + "/sfn-mono-bin-" + tag;
+    if fs.exists(bin) { fs.deleteFile(bin); }
+    let build_exit = process.run_capture([_sfn_bin(), "build", "-o", bin, fixture], _child_env());
+    let _bo = process.capture_take_stdout();
+    let _be = process.capture_take_stderr();
+    if build_exit != 0 { return -100; }
+    let run_exit = process.run_capture([bin], _child_env());
+    let out = process.capture_take_stdout();
+    let _re = process.capture_take_stderr();
+    fs.writeFile(marker, out);
+    fs.deleteFile(bin);
+    return run_exit;
+}
+
+test "monomorphize e2e: id<T> emits two distinct specialized symbols" ![io] {
+    let ir = _emit_ir("compiler/tests/e2e/fixtures/mono_id_two.sfn", "id");
+    assert ir.length > 0;
+    // One specialization each for int and string — distinct emitted symbols.
+    assert _count_match(ir, "define", "$int") >= 1;
+    assert _count_match(ir, "define", "$string") >= 1;
+}
+
+test "monomorphize e2e: id<T> instantiations round-trip their values" ![io] {
+    let dir = _scratch_dir();
+    let marker = dir + "/sfn-mono-id.out";
+    if fs.exists(marker) { fs.deleteFile(marker); }
+    let exit = _build_and_run("compiler/tests/e2e/fixtures/mono_id_two.sfn", "id", marker);
+    assert exit == 5;
+    let out = fs.readFile(marker);
+    if fs.exists(marker) { fs.deleteFile(marker); }
+    assert find(out, "hi", 0) >= 0;
+}
+
+test "monomorphize e2e: higher-order f(x) returns the real value, not garbage" ![io] {
+    let dir = _scratch_dir();
+    let marker = dir + "/sfn-mono-map1.out";
+    if fs.exists(marker) { fs.deleteFile(marker); }
+    let exit = _build_and_run("compiler/tests/e2e/fixtures/mono_map_one.sfn", "map1", marker);
+    if fs.exists(marker) { fs.deleteFile(marker); }
+    assert exit == 105;
+}
+
+test "monomorphize e2e: my_map array-of-T builds, runs, and maps the array" ![io] {
+    let dir = _scratch_dir();
+    let marker = dir + "/sfn-mono-mymap.out";
+    if fs.exists(marker) { fs.deleteFile(marker); }
+    let exit = _build_and_run("compiler/tests/e2e/fixtures/mono_my_map.sfn", "mymap", marker);
+    assert exit == 3;
+    let out = fs.readFile(marker);
+    if fs.exists(marker) { fs.deleteFile(marker); }
+    assert find(out, "10", 0) >= 0;
+}
+
+test "monomorphize e2e: my_map leaks no bare %T/%U element token into IR" ![io] {
+    let ir = _emit_ir("compiler/tests/e2e/fixtures/mono_my_map.sfn", "mymapir");
+    assert ir.length > 0;
+    // The specialization at T=int,U=int must appear...
+    assert _count_match(ir, "define", "$int$int") >= 1;
+    // ...and the array-element leak that caused `alloca %T` / `[0 x %U]`
+    // must be gone. (`%T = type opaque` forward-decls from prelude generics
+    // are unrelated and predate this pass, so match the body-level forms.)
+    assert _count_match(ir, "alloca %T", "") == 0;
+    assert _count_match(ir, "alloca %U", "") == 0;
+    assert _count_match(ir, "x %T]", "") == 0;
+    assert _count_match(ir, "x %U]", "") == 0;
+    assert _count_match(ir, "%T*", "") == 0;
+    assert _count_match(ir, "%U*", "") == 0;
+}

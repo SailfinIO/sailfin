@@ -1,0 +1,12 @@
+// Fixture for generic-function monomorphization (#1869): a single generic
+// `id<T>` instantiated at two distinct concrete types. Monomorphization must
+// emit two distinct specialized symbols (`id$int`, `id$string`) and each call
+// must round-trip its value (exit 5, stdout "hi").
+fn id<T>(x: T) -> T { return x; }
+
+fn main() -> int ![io] {
+    let a = id(5);
+    let b = id("hi");
+    print.info(b);
+    return a;
+}
