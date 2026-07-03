@@ -1,0 +1,163 @@
+// Unit tests for the E0826 bare-function-type rejection (#1845).
+//
+// The parser accepts a bare `(int) -> int` function-type annotation, but
+// lowering maps it to an opaque `i8*` pointer instead of the `{i8*, i8*}`
+// closure pair — a silent miscompile `sfn check` did not otherwise catch.
+// Sailfin keeps exactly one canonical spelling, `fn(...) -> R` (spec §5,
+// SFEP-0030); the bare form is rejected with E0826 at every position that
+// accepts a type annotation. Design record:
+// docs/proposals/0030-first-class-function-values.md.
+//
+// These parse a small `.sfn` source through `parse_program` and run
+// `typecheck_diagnostics` end-to-end, asserting on the `Diagnostic.code`
+// field. Every position that accepts a type annotation gets a reject test
+// (bare form → E0826) and a canonical pin (`fn(...)` form → no E0826):
+// signature params+return, variable declarations, struct fields, lambda
+// params, enum variant fields, lambda-body locals, and type aliases.
+import { parse_program } from "../../src/parser/mod";
+import { typecheck_diagnostics } from "../../src/typecheck";
+import { Diagnostic } from "../../src/typecheck_types";
+
+fn _has_code(diagnostics: Diagnostic[], code: string) -> boolean {
+    let mut i: int = 0;
+    loop {
+        if i >= diagnostics.length { break; }
+        if strings_equal(diagnostics[i].code, code) { return true; }
+        i += 1;
+    }
+    return false;
+}
+
+// -------------------------------------------------------------------
+// Position 1 — fn / method / interface signature params + return.
+// -------------------------------------------------------------------
+test "bare-fn-type: rejects signature parameter (E0826)" ![io] {
+    let source = "fn apply(cb: (int) -> int) -> int { return 0; }";
+    let program = parse_program(source);
+    let diagnostics = typecheck_diagnostics(program);
+    assert _has_code(diagnostics, "E0826");
+}
+
+test "bare-fn-type: accepts canonical signature parameter" ![io] {
+    let source = "fn apply(cb: fn(int) -> int) -> int { return 0; }";
+    let program = parse_program(source);
+    let diagnostics = typecheck_diagnostics(program);
+    assert ! _has_code(diagnostics, "E0826");
+}
+
+// -------------------------------------------------------------------
+// Position 2 — variable declarations.
+// -------------------------------------------------------------------
+test "bare-fn-type: rejects variable annotation (E0826)" ![io] {
+    let source = "fn host() -> int { let cb: (int) -> int = host; return 0; }";
+    let program = parse_program(source);
+    let diagnostics = typecheck_diagnostics(program);
+    assert _has_code(diagnostics, "E0826");
+}
+
+test "bare-fn-type: accepts canonical variable annotation" ![io] {
+    let source = "fn host() -> int { let cb: fn(int) -> int = host; return 0; }";
+    let program = parse_program(source);
+    let diagnostics = typecheck_diagnostics(program);
+    assert ! _has_code(diagnostics, "E0826");
+}
+
+// -------------------------------------------------------------------
+// Position 3 — struct fields.
+// -------------------------------------------------------------------
+test "bare-fn-type: rejects struct field annotation (E0826)" ![io] {
+    let source = "struct S { handler: (int) -> int; }";
+    let program = parse_program(source);
+    let diagnostics = typecheck_diagnostics(program);
+    assert _has_code(diagnostics, "E0826");
+}
+
+test "bare-fn-type: accepts canonical struct field annotation" ![io] {
+    let source = "struct S { handler: fn(int) -> int; }";
+    let program = parse_program(source);
+    let diagnostics = typecheck_diagnostics(program);
+    assert ! _has_code(diagnostics, "E0826");
+}
+
+// -------------------------------------------------------------------
+// Position 4 — lambda parameter / return annotations.
+// -------------------------------------------------------------------
+test "bare-fn-type: rejects lambda parameter annotation (E0826)" ![io] {
+    let source = "fn host() -> int { let f = fn(cb: (int) -> int) -> int { return 0; }; return 0; }";
+    let program = parse_program(source);
+    let diagnostics = typecheck_diagnostics(program);
+    assert _has_code(diagnostics, "E0826");
+}
+
+test "bare-fn-type: accepts canonical lambda parameter annotation" ![io] {
+    let source = "fn host() -> int { let f = fn(cb: fn(int) -> int) -> int { return 0; }; return 0; }";
+    let program = parse_program(source);
+    let diagnostics = typecheck_diagnostics(program);
+    assert ! _has_code(diagnostics, "E0826");
+}
+
+// -------------------------------------------------------------------
+// Position 5 — enum variant fields. Reachable via `check_enum_variants`;
+// a variant field is a `FieldDeclaration` that reaches lowering.
+// -------------------------------------------------------------------
+test "bare-fn-type: rejects enum variant field annotation (E0826)" ![io] {
+    let source = "enum E { V { cb: (int) -> int } }";
+    let program = parse_program(source);
+    let diagnostics = typecheck_diagnostics(program);
+    assert _has_code(diagnostics, "E0826");
+}
+
+test "bare-fn-type: accepts canonical enum variant field annotation" ![io] {
+    let source = "enum E { V { cb: fn(int) -> int } }";
+    let program = parse_program(source);
+    let diagnostics = typecheck_diagnostics(program);
+    assert ! _has_code(diagnostics, "E0826");
+}
+
+// -------------------------------------------------------------------
+// Position 6 — local variable declarations inside a lambda body. These
+// are walked by the expression walker, not the scope checker, so the
+// annotation must be checked there too.
+// -------------------------------------------------------------------
+test "bare-fn-type: rejects lambda-body local annotation (E0826)" ![io] {
+    let source = "fn host() -> int { let f = fn() -> int { let cb: (int) -> int = host; return 0; }; return 0; }";
+    let program = parse_program(source);
+    let diagnostics = typecheck_diagnostics(program);
+    assert _has_code(diagnostics, "E0826");
+}
+
+test "bare-fn-type: accepts canonical lambda-body local annotation" ![io] {
+    let source = "fn host() -> int { let f = fn() -> int { let cb: fn(int) -> int = host; return 0; }; return 0; }";
+    let program = parse_program(source);
+    let diagnostics = typecheck_diagnostics(program);
+    assert ! _has_code(diagnostics, "E0826");
+}
+
+// -------------------------------------------------------------------
+// Position 7 — type alias target.
+// -------------------------------------------------------------------
+test "bare-fn-type: rejects type alias target annotation (E0826)" ![io] {
+    let source = "type Handler = (int) -> int;";
+    let program = parse_program(source);
+    let diagnostics = typecheck_diagnostics(program);
+    assert _has_code(diagnostics, "E0826");
+}
+
+test "bare-fn-type: accepts canonical type alias target annotation" ![io] {
+    let source = "type Handler = fn(int) -> int;";
+    let program = parse_program(source);
+    let diagnostics = typecheck_diagnostics(program);
+    assert ! _has_code(diagnostics, "E0826");
+}
+
+// -------------------------------------------------------------------
+// Regression pin — the extern C-ABI boundary keeps its own E0805 path
+// and is untouched by the bare-fn-type check (#1845 Out: scope).
+// -------------------------------------------------------------------
+test "bare-fn-type: extern E0805 rejection unchanged" ![io] {
+    let source = "extern fn legacy(x: number) -> number;";
+    let program = parse_program(source);
+    let diagnostics = typecheck_diagnostics(program);
+    assert _has_code(diagnostics, "E0805");
+    assert ! _has_code(diagnostics, "E0826");
+}
