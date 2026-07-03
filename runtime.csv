@@ -1,0 +1,11 @@
+run_sha,run_date,workload,inner_ms_min,inner_ms_median,peak_kb,ops,ops_per_ms,status,seed_version,platform
+9f672dc22a95e4429e59e4aabbfe0bc7d4c98438,2026-07-03T09:08:50Z,arena_alloc,807,814,3504,30000000,36855.0,ok,sfn 0.8.0-alpha.1+dev.9f672dc,Linux x86_64
+9f672dc22a95e4429e59e4aabbfe0bc7d4c98438,2026-07-03T09:08:50Z,arena_alloc_for_range,805,813,3504,30000000,36900.4,ok,sfn 0.8.0-alpha.1+dev.9f672dc,Linux x86_64
+9f672dc22a95e4429e59e4aabbfe0bc7d4c98438,2026-07-03T09:08:50Z,arena_reset_churn,623,625,779316,60000000,96000.0,ok,sfn 0.8.0-alpha.1+dev.9f672dc,Linux x86_64
+9f672dc22a95e4429e59e4aabbfe0bc7d4c98438,2026-07-03T09:08:50Z,array_growth,126,127,263516,12000000,94488.2,ok,sfn 0.8.0-alpha.1+dev.9f672dc,Linux x86_64
+9f672dc22a95e4429e59e4aabbfe0bc7d4c98438,2026-07-03T09:08:50Z,array_map_filter,129,129,325164,8000000,62015.5,ok,sfn 0.8.0-alpha.1+dev.9f672dc,Linux x86_64
+9f672dc22a95e4429e59e4aabbfe0bc7d4c98438,2026-07-03T09:08:50Z,exception_throw,366,367,5600,600000,1634.9,ok,sfn 0.8.0-alpha.1+dev.9f672dc,Linux x86_64
+9f672dc22a95e4429e59e4aabbfe0bc7d4c98438,2026-07-03T09:08:50Z,http_proxy_hotpath,64,65,405248,12000,184.6,ok,sfn 0.8.0-alpha.1+dev.9f672dc,Linux x86_64
+9f672dc22a95e4429e59e4aabbfe0bc7d4c98438,2026-07-03T09:08:50Z,io_throughput,169,170,6456,20000,117.6,ok,sfn 0.8.0-alpha.1+dev.9f672dc,Linux x86_64
+9f672dc22a95e4429e59e4aabbfe0bc7d4c98438,2026-07-03T09:08:50Z,string_concat,188,189,165368,2005000,10608.5,ok,sfn 0.8.0-alpha.1+dev.9f672dc,Linux x86_64
+9f672dc22a95e4429e59e4aabbfe0bc7d4c98438,2026-07-03T09:08:50Z,string_find_format,44,45,32032,220000,4888.9,ok,sfn 0.8.0-alpha.1+dev.9f672dc,Linux x86_64
