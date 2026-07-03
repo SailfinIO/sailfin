@@ -357,6 +357,20 @@ fn _client_body(client_bin: string, run_env: string[], out_path: string) -> stri
     return fs.readFile(out_path);
 }
 
+// Run the client once and return its process exit code, discarding any
+// downloaded body. Used by the verify-failure leg to distinguish a CLEAN
+// verify-rejection (the fixture returns 0 and `http.download` writes no
+// file) from an unrelated CRASH (non-zero exit, which also leaves no file):
+// the crash must FAIL the test, not masquerade as a rejection the way a
+// body-only check would. Removes stale output first.
+fn _client_exit(client_bin: string, run_env: string[], out_path: string) -> i64 ![io] {
+    let _rm = process.run(["rm", "-f", out_path]);
+    let cexit = process.run_capture([client_bin], run_env);
+    let _co = process.capture_take_stdout();
+    let _ce = process.capture_take_stderr();
+    return cexit;
+}
+
 // Retry `_client_body` a few times to absorb residual server startup
 // latency — used only for the POSITIVE round-trip (where a body IS
 // expected), never to conclude a negative (an untrusted peer never
@@ -421,10 +435,14 @@ test "tls loopback: native serve ↔ native https client round-trips + verify-fa
     assert contains(body, "TLS-RT-OK-7c1e");
 
     // VERIFY-FAILURE leg (acceptance #2): no CAFILE -> the self-signed cert
-    // is not trust-anchored -> chain verification fails -> no body. A single
-    // attempt is conclusive (trust cannot appear on retry).
-    let untrusted = _client_body(cli_bin, _untrusted_env(), out_path);
-    assert untrusted.length == 0;
+    // is not trust-anchored -> chain verification fails -> no body. Require
+    // the client to still exit 0 (a clean verify-rejection, since the fixture
+    // returns 0 regardless) so an unrelated crash — which would ALSO leave no
+    // file — cannot masquerade as a rejection and pass. A single attempt is
+    // conclusive (trust cannot appear on retry).
+    let uexit = _client_exit(cli_bin, _untrusted_env(), out_path);
+    assert uexit == 0;
+    assert ! fs.exists(out_path);
 
     // Best-effort cleanup (the timeout reaps the server process).
     let _rm = process.run(["rm", "-rf", dir]);
