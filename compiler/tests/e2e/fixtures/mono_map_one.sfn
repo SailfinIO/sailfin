@@ -1,0 +1,11 @@
+// Fixture for generic-function monomorphization (#1869): a higher-order call
+// `f(x)` where `f: fn(T) -> U` is a type-parameter-typed parameter. Before
+// monomorphization the call's return type could not be resolved and the
+// specialization returned a garbage pointer; the specialized copy at U=int
+// must return the real value (105).
+fn map_one<T, U>(f: fn (T) -> U, x: T) -> U { return f(x); }
+
+fn main() -> int {
+    let r = map_one(fn (n: int) -> int { return n + 100; }, 5);
+    return r;
+}

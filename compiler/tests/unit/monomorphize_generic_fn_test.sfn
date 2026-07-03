@@ -1,0 +1,115 @@
+// Unit coverage for generic-function monomorphization (#1869, SFEP-0038
+// §3.3). Exercises the pure `monomorphize_native_text` text→text transform
+// directly on hand-written `.sfn-asm`: two-instantiation mangling, transitive
+// worklist closure, dropping the generic definition, and the byte-for-byte
+// no-op on a module with no generic function.
+//
+// At the native-IR level the mangled names are clean (`id$int`) — the module
+// symbol suffix is applied later, in LLVM lowering — so these assertions pin
+// the mangling scheme without a build.
+import { contains } from "sfn/strings";
+
+import { monomorphize_native_text } from "../../src/llvm/monomorphize";
+
+fn _has(haystack: string, needle: string) -> boolean {
+    return contains(haystack, needle);
+}
+
+test "monomorphize: id at int and string emits two distinct specializations" {
+    let src = ".module m\n" + "\n" + ".fn id<T>(x: T) -> T\n"
+        + ".meta return T\n"
+        + ".meta effects none\n"
+        + ".meta generics <T>\n"
+        + ".param x: T\n"
+        + "    ret x\n"
+        + ".endfn\n"
+        + "\n"
+        + ".fn main() -> int\n"
+        + ".meta return int\n"
+        + ".meta effects none\n"
+        + "    .let a = id(5)\n"
+        + "    .let b = id(\"hi\")\n"
+        + "    ret a\n"
+        + ".endfn\n";
+    let out = monomorphize_native_text(src);
+    // Two distinct mangled specializations exist.
+    assert _has(out, "id$int");
+    assert _has(out, "id$string");
+    // The call sites are rewritten to target them.
+    assert _has(out, "id$int(5)");
+    assert _has(out, "id$string(\"hi\")");
+    // The original generic definition is dropped (no leftover `id<T>` header).
+    assert ! _has(out, ".fn id<T>");
+    // No bare type-parameter token survives into the specialized bodies.
+    assert ! _has(out, ": T");
+}
+
+test "monomorphize: transitive outer->inner closes the worklist" {
+    let src = ".module m\n" + "\n" + ".fn inner<T>(x: T) -> T\n"
+        + ".meta return T\n"
+        + ".meta generics <T>\n"
+        + ".param x: T\n"
+        + "    ret x\n"
+        + ".endfn\n"
+        + "\n"
+        + ".fn outer<T>(x: T) -> T\n"
+        + ".meta return T\n"
+        + ".meta generics <T>\n"
+        + ".param x: T\n"
+        + "    ret inner(x)\n"
+        + ".endfn\n"
+        + "\n"
+        + ".fn main() -> int\n"
+        + ".meta return int\n"
+        + "    .let w = Widget { v: 7 }\n"
+        + "    .let r = outer(w)\n"
+        + "    ret r\n"
+        + ".endfn\n";
+    let out = monomorphize_native_text(src);
+    // The top-level instantiation and the one it transitively induces both emit.
+    assert _has(out, "outer$Widget");
+    assert _has(out, "inner$Widget");
+    // The specialized outer body targets the specialized inner.
+    assert _has(out, "inner$Widget(x)");
+    // Both generic definitions are dropped.
+    assert ! _has(out, ".fn outer<T>");
+    assert ! _has(out, ".fn inner<T>");
+}
+
+test "monomorphize: a module with no generic function is unchanged" {
+    let src = ".module m\n" + "\n" + ".fn add(a: int, b: int) -> int\n"
+        + ".meta return int\n"
+        + ".meta effects none\n"
+        + ".param a: int\n"
+        + ".param b: int\n"
+        + "    ret a + b\n"
+        + ".endfn\n";
+    let out = monomorphize_native_text(src);
+    // Byte-for-byte identical — the guarantee that non-generic code (the whole
+    // compiler source) flows through untouched, preserving self-hosting.
+    assert out == src;
+}
+
+test "monomorphize: array/struct literal args do not mis-split the arg list" {
+    // The array literal's inner commas must not split the call's argument
+    // list, or the type-param arg after it would misalign and resolve `T`
+    // from the wrong operand. Here `T` must come from `x` (a string), not
+    // from a fragment of the `[#element:int, ...]` literal.
+    let src = ".module m\n" + "\n" + ".fn take<T>(arr: int[], x: T) -> T\n"
+        + ".meta return T\n"
+        + ".meta generics <T>\n"
+        + ".param arr: int[]\n"
+        + ".param x: T\n"
+        + "    ret x\n"
+        + ".endfn\n"
+        + "\n"
+        + ".fn main() -> int\n"
+        + ".meta return int\n"
+        + "    .let r = take([#element:int, 1, 2, 3], \"hi\")\n"
+        + "    ret r\n"
+        + ".endfn\n";
+    let out = monomorphize_native_text(src);
+    assert _has(out, "take$string");
+    assert ! _has(out, "take$int");
+    assert _has(out, "take$string([#element:int, 1, 2, 3], \"hi\")");
+}

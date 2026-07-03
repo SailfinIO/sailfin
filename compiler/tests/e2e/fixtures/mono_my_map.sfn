@@ -1,0 +1,17 @@
+// Fixture for generic-function monomorphization (#1869): array-of-T element
+// types (`arr: T[]`, `let mut out: U[]`). Before monomorphization the bare
+// `%T`/`%U` element token leaked into LLVM IR as an unsized type and clang
+// rejected it; the specialized copy at T=int,U=int must build and run,
+// mapping [1,2,3] -> [10,20,30] (stdout "10", exit = length 3).
+fn my_map<T, U>(arr: T[], f: fn (T) -> U) -> U[] {
+    let mut out: U[] = [];
+    for x in arr { out.push(f(x)); }
+    return out;
+}
+
+fn main() -> int ![io] {
+    let xs: int[] = [1, 2, 3];
+    let ys = my_map(xs, fn (n: int) -> int { return n * 10; });
+    print.info(ys[0] as string);
+    return ys.length;
+}

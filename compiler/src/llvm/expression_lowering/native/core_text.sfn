@@ -620,6 +620,9 @@ fn unescape_string_literal(literal: string) -> string {
 fn is_symbol_char(ch: string) -> boolean {
     if ch.length == 0 { return false; }
     if ch == "_" { return true; }
+    // `$` is a legal LLVM identifier character and the monomorphization
+    // mangling separator (#1869); admitting it changes only specialized names.
+    if ch == "$" { return true; }
     let code = char_code(ch);
     let lower_a = char_code("a");
     let lower_z = char_code("z");

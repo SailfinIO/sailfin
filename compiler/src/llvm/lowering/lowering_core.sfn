@@ -49,6 +49,7 @@ import {
     collect_imported_module_context_for_module
 } from "../imports";
 import { skip_module_globals, trace_call_lowering, trace_lowering } from "../lowering_debug_state";
+import { monomorphize_native_text } from "../monomorphize";
 import { collect_exported_symbol_names } from "../rendering_helpers";
 import {
     empty_string_constant_set,
@@ -580,7 +581,20 @@ fn has_fatal_lowering_diagnostic(diagnostics: string[]) -> boolean {
     return false;
 }
 
-fn lower_to_llvm_lines_with_parsed_context(native_module: NativeModule, parse_in: ParseNativeResult, imported_manifests: LayoutManifest[], imported_native_texts: string[], diagnostics_in: string[], mangle_symbols: boolean, native_text_override_path: string) -> LoweredLLVMLinesResult ![io] {
+fn lower_to_llvm_lines_with_parsed_context(native_module: NativeModule, parse_arg: ParseNativeResult, imported_manifests: LayoutManifest[], imported_native_texts: string[], diagnostics_in: string[], mangle_symbols: boolean, native_text_override_path_in: string) -> LoweredLLVMLinesResult ![io] {
+    // Generic-function monomorphization (#1869, SFEP-0038 §3.3). This is the
+    // single lowering choke point every entry path funnels through. Specialize
+    // generic `.fn`s and rewrite their call sites, then re-parse the rewritten
+    // text so every downstream consumer (recovery re-parse, symbol mangling)
+    // sees the monomorphic form. `monomorphize_native_text` is an inert no-op
+    // for any module with no generic function, so the re-parse only runs when
+    // the text actually changed — non-generic modules are byte-for-byte
+    // unaffected and pay no extra parse.
+    let native_text_override_path = monomorphize_native_text(native_text_override_path_in);
+    let mut parse_in = parse_arg;
+    if native_text_override_path != native_text_override_path_in {
+        parse_in = parse_native_artifact(native_text_override_path);
+    }
     let debug_lowering = trace_lowering();
     if debug_lowering { print.err("emit-llvm: phase=start"); }
     if debug_lowering {
