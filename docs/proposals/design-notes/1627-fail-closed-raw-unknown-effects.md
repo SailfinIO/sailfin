@@ -4,7 +4,7 @@
 - **Epic:** #1180
 - **Design record extended:** SFEP-0008 (`docs/proposals/0008-effect-validation.md`)
 - **Author:** agent:compiler-architect
-- **Status:** Draft (single-issue design gate; not a new SFEP) — Parts E (E0819/#1755) and F (E0818/#1743) **implemented**; Parts A–D still pending
+- **Status:** Implemented (single-issue design gate; not a new SFEP) — all parts A–F shipped. A/B/C (casts→`Cast`, prefix `*`/`&`→`Unary`, pointer/fn-ptr/generic cast targets) in #1737; D (assignment→`Assignment`) in #1741/#1745; typed `channel:Type` in #1742; E (E0819 nested-`Unknown`) in #1755; F (blanket E0818 fail-closed `Raw`) in #1743; corpus cleanup in #1751. #1627's fail-closed criterion is met: no valid parseable construct degrades to an effect-opaque `Raw`/`Unknown` node without a diagnostic.
 - **Date:** 2026-06-26; **revised 2026-06-27** (the E0818-flip endgame — parts A–F); **annotated 2026-06-29** (Parts E+F shipped)
 - **Decision:** **Structural lift (root fix)** chosen at the design gate. The
   earlier text-anchor "floor" (`_raw_contains_effectful_anchor`) is **superseded**
