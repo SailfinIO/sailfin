@@ -412,7 +412,7 @@ byte-identical for the release build.
   reducing LLM error rates.
 - **Ship `checked_*`/`saturating_*` in 1.0.** Deferred: `checked_*` needs a
   `Result`/`Option` return, which depends on the generic-constraints foundation
-  (companion `draft-generic-constraints.md`). Defining the default overflow
+  (companion `0038-generic-constraints.md`). Defining the default overflow
   semantics and `wrapping_*` now is the load-bearing 1.0 slice; the checked/
   saturating library methods slot in later with no language change.
 - **Retract `f32→f64` implicit widening too.** Left as a follow-on: floats are a
@@ -500,7 +500,7 @@ opcode selection.
 - **Related SFEPs / work:** SFEP-0025 §3.7 (`0025-native-runtime-architecture.md`,
   the `int`/`float` numeric-types decision this extends), SFEP-0017
   (`0017-hierarchical-effects.md`, the taxonomy lock this leaves untouched),
-  companion `draft-generic-constraints.md` (the generics foundation that
+  companion `0038-generic-constraints.md` (the generics foundation that
   `checked_*` → `Result`/`Option` depends on — deferred post-1.0), `.claude/rules/
   seed-dependency.md` (the bundle-vs-split seed rule applied in §5).
 - **Prior art:** Rust integer types + `as` semantics + debug-trap/release-wrap
