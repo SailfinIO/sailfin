@@ -1,18 +1,18 @@
 ---
-sfep: TBD
+sfep: 38
 title: Generic Type Parameter Constraints and Monomorphization
-status: Draft
+status: Accepted
 type: language
 created: 2026-07-01
-updated: 2026-07-01
+updated: 2026-07-03
 author: "agent:compiler-architect; human review"
-tracking:
+tracking: "#1867, #1868, #1869, #1870, #1871, #1872"
 supersedes:
 superseded-by:
 graduates-to: reference/preview/generics.md
 ---
 
-# SFEP-XXXX — Generic Type Parameter Constraints and Monomorphization
+# SFEP-0038 — Generic Type Parameter Constraints and Monomorphization
 
 ## 1. Summary
 
