@@ -69,6 +69,8 @@ test "bare-struct-annotation: field literal populates %Person (no zeroinitialize
     }
     assert found;
     assert contains(ir, "Bob");
+    // Guard against the pre-fix lowering reappearing alongside the fixed path.
+    assert ! contains(ir, "%Person zeroinitializer");
 }
 
 // 2 — Runtime round-trip: the populated field prints its assigned value, not
