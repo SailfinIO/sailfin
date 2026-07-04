@@ -252,6 +252,42 @@ This is primarily used by the self-hosting build scripts.
 
 ---
 
+### `sfn cache <info|prune|clean>`
+
+Inspect and garbage-collect the content-addressed build artifact cache (the
+same store `sfn build`/`sfn run`/`sfn check`/`sfn test` read and write
+through, keyed on source + dependency hashes + compiler version + flags).
+`sfn cache` is an `![io]` command; it never runs implicitly during a normal
+build.
+
+**Subcommands:**
+
+| Form | Description |
+|---|---|
+| `sfn cache info` | Print the resolved cache root, entry count, and total on-disk size. |
+| `sfn cache prune [--max-size <bytes>] [--max-age <days>]` | LRU eviction: remove entries older than `--max-age` days, then delete oldest-first (by last-hit time) until total size is under `--max-size`. |
+| `sfn cache clean [--all-schemas]` | Remove the current cache schema tree. With `--all-schemas`, also sweep stale sibling schema-version trees left behind by a compiler upgrade. |
+
+**Usage:**
+
+```bash
+sfn cache info
+sfn cache prune                          # conservative defaults (~5 GiB / 30 days)
+sfn cache prune --max-size 1000000000    # cap the cache at 1 GB
+sfn cache prune --max-age 7              # evict anything not hit in 7 days
+sfn cache prune --max-size 0             # empty the cache
+sfn cache clean                          # remove the current schema tree
+sfn cache clean --all-schemas            # also remove stale prior-schema trees
+```
+
+**Behavior:**
+
+- `prune` is explicit and opt-in — it never runs automatically on `sfn build`/`sfn run`/`sfn check`/`sfn test`. With neither `--max-size` nor `--max-age` given, conservative defaults apply (~5 GiB total size, 30-day max age).
+- Eviction order is a true LRU: a cache *hit* touches the entry directory's mtime, so `prune` evicts by last-use recency rather than creation time.
+- The cache root follows the same resolution as the build cache generally: `$SAILFIN_BUILD_CACHE_DIR`, then `$XDG_CACHE_HOME/sailfin`, then `$HOME/.cache/sailfin`, falling back to the in-tree `build/cache` when `$HOME` is unresolvable. The compiler's own self-host build always pins the in-tree root and is unaffected by `sfn cache`.
+
+---
+
 ### `sfn --version`
 
 Display the compiler version string and exit with code 0.

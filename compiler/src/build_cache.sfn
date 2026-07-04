@@ -80,7 +80,7 @@ import {
     _write_text_cmd
 } from "./build/fs";
 import { _get_env_cmd } from "./build_flags";
-import { char_code_at_text, substring } from "./string_utils";
+import { char_code_at_text, find_last_index_of_char, substring } from "./string_utils";
 
 // ----------------------------------------------------------------
 // Schema version
@@ -248,6 +248,309 @@ fn cache_clean(root: string) -> boolean ![io] {
     if !fs.exists(root) { return true; }
     let rc = process.run(["rm", "-rf", root]);
     return rc == 0;
+}
+
+// ----------------------------------------------------------------
+// Cache GC: mtime-on-hit, info, prune, stale-schema sweep
+// ----------------------------------------------------------------
+// SFEP-0040 §3.2–3.4. All operate on a resolved schema root
+// (`<base>/v<N>`) and never touch the cache *key*, entry *layout*, or
+// the atomic-publish protocol — only when entries are removed and the
+// recency signal `cache_prune` reads. Every removal path is `![io]`
+// (the same effect class the cache already carries) and shell-quotes
+// the root, which can derive from `$SAILFIN_BUILD_CACHE_DIR`.
+// A cache HIT copies artifacts OUT of the entry directory into the
+// build tree; it never writes into the entry itself, so the entry's
+// mtime would otherwise stay pinned at creation time and `cache_prune`
+// would evict a hot entry as though it were cold. Touch the entry
+// directory on every hit so mtime is a true LRU recency signal
+// (SFEP-0040 §3.4). Metadata-only; a failure is non-fatal (best-effort
+// recency — the build has already succeeded).
+fn cache_touch_entry(root: string, key: CacheKey) -> boolean ![io] {
+    if !_is_valid_digest(key.digest) { return false; }
+    let dir = _cache_entry_dir(root, key);
+    if !fs.exists(dir) { return false; }
+    return process.run(["touch", dir]) == 0;
+}
+
+// Split `text` on newlines, dropping empty lines and stray `\r`.
+fn _split_lines(text: string) -> string[] {
+    let mut out: string[] = [];
+    let mut cur: string = "";
+    let mut i: int = 0;
+    loop {
+        if i >= text.length { break; }
+        let ch = substring(text, i, i + 1);
+        if ch == "\n" {
+            if cur.length > 0 { out.push(cur); }
+            cur = "";
+        } else if ch != "\r" { cur = cur + ch; }
+        i += 1;
+    }
+    if cur.length > 0 { out.push(cur); }
+    return out;
+}
+
+// Parse a leading run of decimal digits as a non-negative int. Returns
+// 0 when `text` has no leading digit (shell helpers below already trim
+// their output, so a well-formed number is the whole string).
+fn _parse_nonneg_int(text: string) -> int {
+    let mut val: int = 0;
+    let mut i: int = 0;
+    loop {
+        if i >= text.length { break; }
+        let code = char_code_at_text(text, i);
+        if code < 48 || code > 57 { break; }
+        val = val * 10 + (code - 48);
+        i += 1;
+    }
+    return val;
+}
+
+fn _basename_cmd(path: string) -> string {
+    let idx = find_last_index_of_char(path, "/");
+    if idx < 0 { return path; }
+    return substring(path, idx + 1, path.length);
+}
+
+// The `<prefix>/<key>` entry directories under `root` (layout depth 2).
+fn _cache_entry_dirs(root: string) -> string[] ![io] {
+    if !fs.exists(root) { return []; }
+    let q = _shell_single_quote_arg(root);
+    let out = _shell_read_cmd("find " + q
+        + " -mindepth 2 -maxdepth 2 -type d 2>/dev/null");
+    return _split_lines(out);
+}
+
+// Directory mtime in epoch seconds. Tries GNU `stat -c %Y` then BSD
+// `stat -f %m` so the LRU signal is portable across Linux and macOS.
+fn _entry_mtime_epoch(dir: string) -> int ![io] {
+    let q = _shell_single_quote_arg(dir);
+    let out = _shell_read_cmd("stat -c %Y " + q + " 2>/dev/null || stat -f %m "
+        + q
+        + " 2>/dev/null");
+    return _parse_nonneg_int(out);
+}
+
+// On-disk size of `dir` in bytes. `du -sk` (1024-byte blocks) is
+// portable across GNU and BSD; block-rounding is the correct notion of
+// "on-disk size" and is precise enough for both `info` and LRU compares.
+fn _dir_size_bytes(dir: string) -> int ![io] {
+    let q = _shell_single_quote_arg(dir);
+    let out = _shell_read_cmd("du -sk " + q + " 2>/dev/null | awk '{print $1}'");
+    return _parse_nonneg_int(out) * 1024;
+}
+
+fn _now_epoch() -> int ![io] {
+    return _parse_nonneg_int(_shell_read_cmd("date +%s"));
+}
+
+// `rm -rf` guarded against the empty path and `/` (mirrors cache_clean).
+fn _rm_rf_dir(dir: string) -> boolean ![io] {
+    if dir.length == 0 { return false; }
+    if strings_equal(dir, "/") { return false; }
+    return process.run(["rm", "-rf", dir]) == 0;
+}
+
+// Best-effort removal of now-empty prefix shards (and any empty entry
+// dirs) so `cache info` entry counts stay honest after a prune.
+fn _prune_empty_shards(root: string) ![io] {
+    if !fs.exists(root) { return; }
+    let q = _shell_single_quote_arg(root);
+    let _ = _shell_read_cmd("find " + q
+        + " -mindepth 1 -type d -empty -delete 2>/dev/null");
+}
+
+// Index permutation that orders `mtimes` ascending (oldest first).
+// Insertion sort — entry counts are small and this runs only on the
+// eviction path. Stable, so equal-mtime entries keep enumeration order.
+fn _order_by_mtime_asc(mtimes: int[]) -> int[] {
+    let mut order: int[] = [];
+    let mut i: int = 0;
+    loop {
+        if i >= mtimes.length { break; }
+        order.push(i);
+        i += 1;
+    }
+    let mut k: int = 1;
+    loop {
+        if k >= order.length { break; }
+        let cur = order[k];
+        let cur_m = mtimes[cur];
+        let mut j: int = k - 1;
+        loop {
+            if j < 0 { break; }
+            if mtimes[order[j]] <= cur_m { break; }
+            order[j + 1] = order[j];
+            j -= 1;
+        }
+        order[j + 1] = cur;
+        k += 1;
+    }
+    return order;
+}
+
+// ----------------------------------------------------------------
+// `sfn cache info`
+// ----------------------------------------------------------------
+struct CacheInfo {
+    root: string;
+    entry_count: int;
+    total_bytes: int;
+}
+
+// Resolved root, live entry count, and total on-disk size (bytes). A
+// non-existent root reports zero/zero rather than erroring — `info` on
+// a machine that has never built is a valid, empty answer.
+fn cache_info(root: string) -> CacheInfo ![io] {
+    let dirs = _cache_entry_dirs(root);
+    let mut total: int = 0;
+    if fs.exists(root) {
+        let q = _shell_single_quote_arg(root);
+        let out = _shell_read_cmd("du -sk " + q
+            + " 2>/dev/null | awk '{print $1}'");
+        total = _parse_nonneg_int(out) * 1024;
+    }
+    return CacheInfo {
+        root: root,
+        entry_count: dirs.length,
+        total_bytes: total
+    };
+}
+
+// ----------------------------------------------------------------
+// `sfn cache prune`
+// ----------------------------------------------------------------
+struct PruneResult {
+    removed_entries: int;
+    removed_bytes: int;
+}
+
+// LRU eviction. `max_age_days >= 0` removes any entry whose mtime is
+// older than that many days; `max_size_bytes >= 0` then deletes
+// oldest-first until the total falls to or below the cap (so
+// `--max-size 0` empties the cache). A negative bound disables that
+// axis. Age is applied before size so an aged-out entry never counts
+// toward the size total. mtime is a true recency signal because a hit
+// touches the entry (`cache_touch_entry`).
+fn cache_prune(root: string, max_size_bytes: int, max_age_days: int) -> PruneResult ![io] {
+    let mut removed_entries: int = 0;
+    let mut removed_bytes: int = 0;
+    if !fs.exists(root) {
+        return PruneResult { removed_entries: 0, removed_bytes: 0 };
+    }
+    let dirs = _cache_entry_dirs(root);
+    let now = _now_epoch();
+
+    // Clamp the age axis: a `--max-age` past ~10,000 years is treated as
+    // "unbounded" (no age eviction). This guards `max_age_days * 86400`
+    // against i64 overflow, which would otherwise wrap negative and
+    // invert the comparison into evicting *every* entry — the opposite
+    // of the "keep everything" intent behind a very large value.
+    let age_active = max_age_days >= 0 && max_age_days <= 3650000;
+
+    let mut kept_dirs: string[] = [];
+    let mut kept_mtimes: int[] = [];
+    let mut kept_sizes: int[] = [];
+    let mut i: int = 0;
+    loop {
+        if i >= dirs.length { break; }
+        let d = dirs[i];
+        let mt = _entry_mtime_epoch(d);
+        let sz = _dir_size_bytes(d);
+        let aged_out = age_active && now > 0 && (now - mt) > max_age_days * 86400;
+        if aged_out {
+            if _rm_rf_dir(d) {
+                removed_entries += 1;
+                removed_bytes += sz;
+            }
+        } else {
+            kept_dirs.push(d);
+            kept_mtimes.push(mt);
+            kept_sizes.push(sz);
+        }
+        i += 1;
+    }
+
+    if max_size_bytes >= 0 {
+        let mut total: int = 0;
+        let mut s: int = 0;
+        loop {
+            if s >= kept_sizes.length { break; }
+            total += kept_sizes[s];
+            s += 1;
+        }
+        if total > max_size_bytes {
+            let order = _order_by_mtime_asc(kept_mtimes);
+            let mut o: int = 0;
+            loop {
+                if o >= order.length { break; }
+                if total <= max_size_bytes { break; }
+                let idx = order[o];
+                if _rm_rf_dir(kept_dirs[idx]) {
+                    removed_entries += 1;
+                    removed_bytes += kept_sizes[idx];
+                    total -= kept_sizes[idx];
+                }
+                o += 1;
+            }
+        }
+    }
+
+    _prune_empty_shards(root);
+    return PruneResult {
+        removed_entries: removed_entries,
+        removed_bytes: removed_bytes
+    };
+}
+
+// ----------------------------------------------------------------
+// Stale-schema sweep (`sfn cache clean --all-schemas`)
+// ----------------------------------------------------------------
+// Remove sibling `<base>/v<M>` trees for `M < N`, where `root` is
+// `<base>/v<N>`. Explicit-only — invoked from `sfn cache clean
+// --all-schemas`, never eagerly on a build (SFEP-0040 §3.3/§6 default:
+// no eager sweep). Skips the current schema, any `v<M>` with `M >= N`,
+// and every non-`v<digits>` sibling (e.g. the `test-bin/` cache), so a
+// stale-schema sweep can never evict a live or unrelated tree.
+fn cache_sweep_stale_schemas(root: string) -> int ![io] {
+    let base = _dirname_cmd(root);
+    let cur_num = _parse_schema_num(_basename_cmd(root));
+    if cur_num < 0 { return 0; }
+    if !fs.exists(base) { return 0; }
+    let q = _shell_single_quote_arg(base);
+    let out = _shell_read_cmd("find " + q
+        + " -mindepth 1 -maxdepth 1 -type d 2>/dev/null");
+    let entries = _split_lines(out);
+    let mut removed: int = 0;
+    let mut i: int = 0;
+    loop {
+        if i >= entries.length { break; }
+        let n = _parse_schema_num(_basename_cmd(entries[i]));
+        if n >= 0 && n < cur_num {
+            if _rm_rf_dir(entries[i]) { removed += 1; }
+        }
+        i += 1;
+    }
+    return removed;
+}
+
+// Parse `v<digits>` -> the integer schema number; -1 when `name` is not
+// exactly `v` followed by one or more decimal digits (rejects
+// `test-bin`, `v2x`, bare `v`, and any tmp sibling).
+fn _parse_schema_num(name: string) -> int {
+    if name.length < 2 { return -1; }
+    if substring(name, 0, 1) != "v" { return -1; }
+    let mut val: int = 0;
+    let mut i: int = 1;
+    loop {
+        if i >= name.length { break; }
+        let code = char_code_at_text(name, i);
+        if code < 48 || code > 57 { return -1; }
+        val = val * 10 + (code - 48);
+        i += 1;
+    }
+    return val;
 }
 
 // ----------------------------------------------------------------
@@ -515,7 +818,11 @@ fn cache_copy_artifact_to(root: string, key: CacheKey, kind: string, dst_path: s
     if !fs.exists(src) { return false; }
     let dst_dir = _dirname_cmd(dst_path);
     if dst_dir.length > 0 { _ensure_dir_recursive_cmd(dst_dir); }
-    return _cache_atomic_copy(src, dst_path);
+    let ok = _cache_atomic_copy(src, dst_path);
+    // Cache hit: bump the entry's mtime so `cache_prune` sees true
+    // recency (SFEP-0040 §3.4). Best-effort — never fails the restore.
+    if ok { let _ = cache_touch_entry(root, key); }
+    return ok;
 }
 
 // Copy `src_path` into the cache as the artifact of `kind` for
@@ -1087,6 +1394,12 @@ export {
     empty_build_cache_config,
     resolve_build_cache_config,
     cache_clean,
+    cache_touch_entry,
+    CacheInfo,
+    cache_info,
+    PruneResult,
+    cache_prune,
+    cache_sweep_stale_schemas,
     is_valid_digest,
     test_bin_cache_schema_version,
     test_bin_cache_root_with_override,

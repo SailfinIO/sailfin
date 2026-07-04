@@ -59,7 +59,13 @@ here.
   `$HOME` is unresolvable and pinned in-tree for the compiler self-host build —
   SFEP-0040 §3.1) with per-source dep manifests,
   `--no-cache` / `--clean` / `--cache-trace` flags, and a `[cache]` summary on
-  stderr (Stage C PR1–1f, #254–#259). Runtime C/LL/sfn objects share the same
+  stderr (Stage C PR1–1f, #254–#259). `sfn cache info/prune/clean` (SFEP-0040
+  §3.2–3.4, #1893) adds bounded-size GC over the same store: `info` reports
+  root/entry-count/size, `prune [--max-size <bytes>] [--max-age <days>]`
+  evicts LRU (mtime touched on cache hit) with conservative defaults (~5 GiB /
+  30 days) and is opt-in only (no implicit prune on builds), and `clean
+  [--all-schemas]` removes the current schema tree, optionally sweeping stale
+  sibling `v<M>` schema trees too. Runtime C/LL/sfn objects share the same
   cache across work-dirs (#915, #1096). `sfn test` content-addresses each
   linked test binary, cross-commit-stable (#1230, #1233); `make check` passes
   `--no-test-cache` so the full gate always cold-builds. **Runtime object
@@ -269,6 +275,7 @@ here.
 | `sfn vet` / `sfn lsp` / `sfn doc` / `sfn fix` | Planned | See `docs/proposals/0003-tooling.md` |
 | Package registry (`sfn init/add/publish`) | Shipped | Default registry `pkg.sfn.dev`; `SFN_REGISTRY` / `sfn config set registry` override |
 | `workspace.lock` (`sfn lock` write + resolver consume) | **Shipped** | Explicit `sfn lock` writes the root lockfile (#1070); `sfn lock --work-dir DIR` sets the workspace-discovery start dir so the command can run against a workspace without `cd`. Resolver prefers `workspace → workspace.lock → capsule.lock → cache → registry` for external deps, sibling-first untouched (#1071). Roots own lockfiles; library capsules don't commit them. Committing the root `workspace.lock` is #1050, gated on a seed embedding #1071 (satisfied at `v0.7.0-alpha.31`) |
+| `sfn cache` (`info`/`prune`/`clean`) | **Shipped** | Bounded-size GC over the content-addressed build cache (SFEP-0040 §3.2–3.4, #1893): `info` prints root/entry-count/size; `prune [--max-size <bytes>] [--max-age <days>]` evicts oldest-first by true LRU (mtime touched on cache hit), defaults ~5 GiB/30 days, opt-in only; `clean [--all-schemas]` removes the current schema tree and optionally stale sibling `v<M>` trees. `![io]` command, no eager auto-sweep on builds |
 | Notebook support | Not started | Post-1.0 |
 
 ## Print API (Current)

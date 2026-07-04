@@ -44,6 +44,7 @@ import { ice_set_binary_dir } from "../ice";
 import { number_to_string } from "../num_format";
 import { command_def as add_command_def, run as add_run } from "./commands/add";
 import { command_def as build_command_def, run as build_run } from "./commands/build";
+import { command_def as cache_command_def, run as cache_run } from "./commands/cache";
 import { command_def as check_command_def, run as check_run } from "./commands/check";
 import { command_def as config_command_def, run as config_run } from "./commands/config";
 import { command_def as emit_command_def, run as emit_run } from "./commands/emit";
@@ -121,6 +122,7 @@ fn sailfin_cli_main_v2(argv: string[]) -> int ![io, clock] {
     root = with_subcommand(root, fmt_command_def());
     root = with_subcommand(root, test_command_def());
     root = with_subcommand(root, config_command_def());
+    root = with_subcommand(root, cache_command_def());
     root = with_subcommand(root, lock_command_def());
     root = with_subcommand(root, package_command_def());
     root = with_subcommand(root, emit_command_def());
@@ -348,6 +350,29 @@ fn sailfin_cli_main_v2(argv: string[]) -> int ![io, clock] {
             } else {
                 print("usage: sfn config <get|set|unset|list> [key] [value]");
             }
+            return 2;
+        }
+    }
+
+    // `sfn cache <info|prune|clean>` — the registered subcommand matched.
+    // Like `config`, `cache` has nested subcommands, so
+    // `subcommand(result.matches)` returns the *leaf* (e.g. "prune") and
+    // the dispatch gates on the descent path's root (`subcommand_path[0]`).
+    // A clean parse dispatches to `cache.run`; a non-ok parse that
+    // descended into `cache` (an unrecognized flag, a `--max-size`
+    // non-integer, or `--help`) is a usage error (exit 2) — the parser
+    // owns flag validation. A carried diagnostic (unknown subcommand/flag)
+    // is printed when present; otherwise a fixed usage line. The literal
+    // `2` mirrors the dispatches above (the `sfn/cli` `EXIT_*` constants
+    // lower to 0 here).
+    let cache_path: string[] = subcommand_path(result.matches);
+    if cache_path.length > 0 {
+        if strings_equal(cache_path[0], "cache") {
+            if ctx.trace_argv { _v2_trace_argv(argv); }
+            if result.ok { return cache_run(result.matches, ctx); }
+            if result.error.message.length > 0 {
+                print(result.error.message);
+            } else { print("usage: sfn cache <info|prune|clean>"); }
             return 2;
         }
     }

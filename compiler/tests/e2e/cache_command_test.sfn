@@ -1,0 +1,246 @@
+// End-to-end tests for `sfn cache` (SFEP-0040 §3.2–3.4, #1893).
+//
+// Covers `cache info` / `prune` / `clean` and the two GC behaviors:
+// mtime-on-hit (a cache hit refreshes the entry's mtime so `prune`
+// evicts by true LRU recency) and the explicit stale-schema sweep
+// (`clean --all-schemas`). Every test threads a private scratch cache
+// root via `$SAILFIN_BUILD_CACHE_DIR` and scopes env per child (an
+// empty `run_capture` env array is the *empty* environment, not
+// "inherit"), per `no-bash-e2e.md`.
+//
+// Most tests pre-seed synthetic entry directories so the GC mechanics
+// are exercised deterministically without depending on build internals;
+// the mtime-on-hit test drives a real `sfn build` twice because the
+// touch only fires on a genuine cache hit.
+import { find } from "sfn/strings";
+
+fn _sfn_bin() -> string ![io] {
+    let configured = env.get("SAILFIN_BIN");
+    if configured.length > 0 { return configured; }
+    return "build/native/sailfin";
+}
+
+fn _scratch() -> string ![io] {
+    let base = env.get("SAILFIN_TEST_SCRATCH");
+    if base.length == 0 { return "/tmp"; }
+    return base;
+}
+
+struct Run {
+    exit: int,
+    out: string
+}
+
+// A private cache base for `tag`, wiped first so each run starts clean.
+// The resolved cache root the compiler and `sfn cache` share is
+// `<base>/v2` (`cache_root` appends the schema suffix).
+fn _cache_base(tag: string) -> string ![io] {
+    let base = _scratch() + "/sfn-cache-" + tag;
+    if fs.exists(base) { process.run(["rm", "-rf", base]); }
+    fs.createDirectory(base, true);
+    return base;
+}
+
+// Run `sfn cache <args...>` with the scratch cache root (+ PATH/HOME)
+// threaded to the child, returning the exit code and combined output.
+fn _run_cache(cache_base: string, args: string[]) -> Run ![io] {
+    let mut e: string[] = ["SAILFIN_BUILD_CACHE_DIR=" + cache_base];
+    let path = env.get("PATH");
+    if path.length > 0 { e.push("PATH=" + path); }
+    let home = env.get("HOME");
+    if home.length > 0 { e.push("HOME=" + home); }
+    let mut argv: string[] = [_sfn_bin(), "cache"];
+    let mut i = 0;
+    loop {
+        if i >= args.length { break; }
+        argv.push(args[i]);
+        i += 1;
+    }
+    let exit = process.run_capture(argv, e);
+    let out = process.capture_take_stdout();
+    let err = process.capture_take_stderr();
+    return Run { exit: exit, out: out + err };
+}
+
+// Materialize a synthetic cache entry `<base>/v2/<prefix>/<key>` with a
+// couple of artifact files so `du` reports a plausible size and `find`
+// counts it at layout depth 2.
+fn _seed_entry(cache_base: string, prefix: string, key: string) ![io] {
+    let dir = cache_base + "/v2/" + prefix + "/" + key;
+    fs.createDirectory(dir, true);
+    fs.writeFile(dir + "/mod.ll", "; ll\n");
+    fs.writeFile(dir + "/mod.o", "obj\n");
+}
+
+// Like `_seed_entry` but with a ~200 KiB artifact so size-based eviction
+// crosses a byte threshold predictably regardless of block rounding.
+fn _seed_big_entry(cache_base: string, prefix: string, key: string) ![io] {
+    let dir = cache_base + "/v2/" + prefix + "/" + key;
+    fs.createDirectory(dir, true);
+    process.run(["bash", "-c", "head -c 200000 /dev/zero > '" + dir + "/mod.o'"]);
+}
+
+// Build `src` to `out` with the scratch cache root and the full child
+// env a nested compile needs (PATH for clang/linker, HOME/TMPDIR).
+// `work` is a *distinct* per-build scratch dir threaded as
+// SAILFIN_TEST_SCRATCH: it isolates the driver's non-content-addressed
+// build scratch per invocation, and — critically for the mtime-on-hit
+// test — forces a warm build to restore module artifacts from the
+// content-addressed cache (rather than reusing already-staged `.ll`s in
+// a shared work-dir), which is the path that refreshes entry mtime.
+fn _build(cache_base: string, work: string, src: string, out: string) -> Run ![io] {
+    let mut e: string[] = ["SAILFIN_BUILD_CACHE_DIR=" + cache_base];
+    let path = env.get("PATH");
+    if path.length > 0 { e.push("PATH=" + path); }
+    let home = env.get("HOME");
+    if home.length > 0 { e.push("HOME=" + home); }
+    let tmpdir = env.get("TMPDIR");
+    if tmpdir.length > 0 { e.push("TMPDIR=" + tmpdir); }
+    e.push("SAILFIN_TEST_SCRATCH=" + work);
+    let exit = process.run_capture([_sfn_bin(), "build", "-o", out, src], e);
+    let so = process.capture_take_stdout();
+    let se = process.capture_take_stderr();
+    return Run { exit: exit, out: so + se };
+}
+
+// ---- info ----
+test "cache: info on an empty cache reports zero entries" ![io] {
+    let base = _cache_base("info_empty");
+    let r = _run_cache(base, ["info"]);
+    assert r.exit == 0;
+    assert find(r.out, "entries: 0", 0) >= 0;
+    // The reported root is the schema-suffixed resolution of the base.
+    assert find(r.out, "/v2", 0) >= 0;
+}
+
+test "cache: info counts seeded entries and reports a size" ![io] {
+    let base = _cache_base("info_count");
+    _seed_entry(base, "aa", "aa_entry_one");
+    _seed_entry(base, "bb", "bb_entry_two");
+    let r = _run_cache(base, ["info"]);
+    assert r.exit == 0;
+    assert find(r.out, "entries: 2", 0) >= 0;
+    assert find(r.out, "size:", 0) >= 0;
+}
+
+// ---- prune ----
+test "cache: prune --max-size 0 empties the cache" ![io] {
+    let base = _cache_base("prune_size0");
+    _seed_entry(base, "aa", "aa_entry_one");
+    _seed_entry(base, "bb", "bb_entry_two");
+    let r = _run_cache(base, ["prune", "--max-size", "0"]);
+    assert r.exit == 0;
+    let info = _run_cache(base, ["info"]);
+    assert find(info.out, "entries: 0", 0) >= 0;
+}
+
+test "cache: prune --max-age removes old entries and keeps fresh ones" ![io] {
+    let base = _cache_base("prune_age");
+    _seed_entry(base, "aa", "old_entry");
+    _seed_entry(base, "bb", "fresh_entry");
+    // Age one entry well past the threshold; the other stays at ~now.
+    process.run(["touch", "-t", "200001010000", base + "/v2/aa/old_entry"]);
+    let r = _run_cache(base, ["prune", "--max-age", "30"]);
+    assert r.exit == 0;
+    assert ! fs.exists(base + "/v2/aa/old_entry");
+    assert fs.exists(base + "/v2/bb/fresh_entry");
+}
+
+// ---- clean + stale-schema sweep ----
+test "cache: clean --all-schemas sweeps stale sibling schema trees" ![io] {
+    let base = _cache_base("sweep");
+    _seed_entry(base, "aa", "current_entry");
+    // A stale sibling schema tree (`v1`) beside the current `v2`.
+    fs.createDirectory(base + "/v1/aa/old_schema", true);
+    fs.writeFile(base + "/v1/aa/old_schema/mod.o", "x\n");
+    let r = _run_cache(base, ["clean", "--all-schemas"]);
+    assert r.exit == 0;
+    assert ! fs.exists(base + "/v1");
+    assert ! fs.exists(base + "/v2");
+}
+
+test "cache: clean --all-schemas leaves non-schema siblings (test-bin)" ![io] {
+    let base = _cache_base("sweep_keeps_testbin");
+    _seed_entry(base, "aa", "current_entry");
+    // A stale schema sibling to sweep, plus the per-test-binary cache
+    // (`test-bin/`) which is NOT a `v<N>` schema and must survive.
+    fs.createDirectory(base + "/v1/aa/old_schema", true);
+    fs.createDirectory(base + "/test-bin/v2/aa/some_bin", true);
+    let r = _run_cache(base, ["clean", "--all-schemas"]);
+    assert r.exit == 0;
+    assert ! fs.exists(base + "/v1");
+    assert fs.exists(base + "/test-bin");
+}
+
+test "cache: prune --max-size evicts oldest-first (partial)" ![io] {
+    let base = _cache_base("prune_lru");
+    _seed_big_entry(base, "aa", "oldest");
+    _seed_big_entry(base, "bb", "middle");
+    _seed_big_entry(base, "cc", "newest");
+    // Distinct ages so LRU ordering is unambiguous (oldest → newest).
+    process.run(["touch", "-t", "200001010000", base + "/v2/aa/oldest"]);
+    process.run(["touch", "-t", "200101010000", base + "/v2/bb/middle"]);
+    process.run(["touch", "-t", "200201010000", base + "/v2/cc/newest"]);
+    // Three ~200 KiB entries (~600 KiB total) under a 450 KiB cap: exactly
+    // one eviction is needed, and it must be the oldest.
+    let r = _run_cache(base, ["prune", "--max-size", "450000"]);
+    assert r.exit == 0;
+    assert ! fs.exists(base + "/v2/aa/oldest");
+    assert fs.exists(base + "/v2/bb/middle");
+    assert fs.exists(base + "/v2/cc/newest");
+}
+
+test "cache: clean without --all-schemas leaves sibling schema trees" ![io] {
+    let base = _cache_base("clean_keep");
+    _seed_entry(base, "aa", "current_entry");
+    fs.createDirectory(base + "/v1/aa/old_schema", true);
+    let r = _run_cache(base, ["clean"]);
+    assert r.exit == 0;
+    assert fs.exists(base + "/v1");
+    assert ! fs.exists(base + "/v2");
+}
+
+// ---- dispatch ----
+test "cache: no subcommand prints usage and exits non-zero" ![io] {
+    let base = _cache_base("usage");
+    let r = _run_cache(base, []);
+    assert r.exit != 0;
+    assert find(r.out, "usage", 0) >= 0;
+}
+
+// ---- mtime-on-hit (real build) ----
+test "cache: a cache hit refreshes entry mtime (verified by prune ordering)" ![io] {
+    let base = _cache_base("mtime_hit");
+    let src_dir = _scratch() + "/sfn-cache-mtime-src";
+    if fs.exists(src_dir) { process.run(["rm", "-rf", src_dir]); }
+    fs.createDirectory(src_dir, true);
+    let src = src_dir + "/hello.sfn";
+    fs.writeFile(src, "fn main() ![io] { print(\"hi\"); }\n");
+    let out = src_dir + "/hello";
+
+    // Cold build (work-dir A) populates the content-addressed module cache.
+    let b1 = _build(base, src_dir + "/work_a", src, out);
+    assert b1.exit == 0;
+    let info1 = _run_cache(base, ["info"]);
+    assert find(info1.out, "entries: 0", 0) < 0;
+
+    // Age every cache entry into the distant past. `touch -t` (not `-d`)
+    // for GNU/BSD portability — the macOS-arm64 CI leg's BSD touch does
+    // not accept the GNU `-d YYYY-MM-DD` form.
+    process.run(["bash", "-c", "find '" + base
+        + "/v2' -mindepth 2 -maxdepth 2 -type d -exec touch -t 200001010000 {} +"]);
+
+    // Warm build in a *fresh* work-dir (B): every module restores from
+    // the content-addressed cache, and each hit must touch the served
+    // entry's mtime back to now (SFEP-0040 §3.4).
+    let b2 = _build(base, src_dir + "/work_b", src, out + "2");
+    assert b2.exit == 0;
+
+    // Evict anything older than one day. Without mtime-on-hit the aged
+    // entries would remain at 2000 and be swept to empty; the refresh
+    // keeps the hit entries, so the cache is non-empty after the prune.
+    let r = _run_cache(base, ["prune", "--max-age", "1"]);
+    assert r.exit == 0;
+    let info2 = _run_cache(base, ["info"]);
+    assert find(info2.out, "entries: 0", 0) < 0;
+}

@@ -79,6 +79,8 @@ fn _usage() -> string {
         + "  sfn run   [--no-cache] [--clean] [--cache-trace] (<file.sfn> | <exe>)\n";
     out = out
         + "  sfn emit  [--timing] [-o OUTPUT] [--module-name SLUG] [--import-context DIR] llvm|sailfin|native <file.sfn>\n";
+    out = out
+        + "  sfn cache <info|prune|clean> [--max-size N] [--max-age N] [--all-schemas]\n";
     out = out + "\n";
     out = out + "project:\n";
     out = out + "  sfn init\n";

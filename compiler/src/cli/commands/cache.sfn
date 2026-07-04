@@ -1,0 +1,121 @@
+// compiler/src/cli/commands/cache.sfn
+//
+// `sfn cache` subcommand (SFEP-0040 §3.2). Gives the content-addressed
+// build artifact cache a bounded-size story: `info` reports usage,
+// `prune` evicts by size/age (LRU), and `clean` reclaims the current
+// schema tree (with `--all-schemas` sweeping stale sibling versions).
+// All GC mechanics live in `build_cache.sfn`; this module is the thin
+// CLI surface (flag parsing + human-readable output) over them.
+//
+// The resolved cache root follows the same ladder every build uses
+// (`cache_root`, SFEP-0040 §3.1): `$SAILFIN_BUILD_CACHE_DIR` wins, else
+// the global `$XDG_CACHE_HOME`/`$HOME/.cache/sailfin` default. `cache`
+// is not tied to a build capsule, so it resolves with an empty capsule
+// name — the self-host in-tree pin only applies to the compiler's own
+// build, never to an interactive `sfn cache` invocation.
+import {
+    Command,
+    Matches,
+    command,
+    flag,
+    flag_int,
+    get_int,
+    has,
+    has_flag,
+    subcommand,
+    with_flag,
+    with_subcommand
+} from "sfn/cli";
+
+import {
+    CacheInfo,
+    PruneResult,
+    cache_clean,
+    cache_info,
+    cache_prune,
+    cache_root,
+    cache_sweep_stale_schemas
+} from "../../build_cache";
+import { number_to_string } from "../../num_format";
+import { CliContext } from "../context";
+
+// Render a byte count as `<n> bytes (<m> MiB)` for `cache info`. Integer
+// MiB (rounded down) is enough context for an at-a-glance size; the raw
+// byte count stays authoritative.
+fn _format_bytes(bytes: int) -> string {
+    let mib = bytes / 1048576;
+    return number_to_string(bytes) + " bytes (" + number_to_string(mib)
+        + " MiB)";
+}
+
+fn _run_info(root: string) -> int ![io] {
+    let info: CacheInfo = cache_info(root);
+    print("root: " + info.root);
+    print("entries: " + number_to_string(info.entry_count));
+    print("size: " + _format_bytes(info.total_bytes));
+    return 0;
+}
+
+fn _run_prune(root: string, matches: Matches) -> int ![io] {
+    // Defaults apply only when NEITHER bound is given, so passing one
+    // axis never silently activates the other (least-surprise). SFEP
+    // §3.2 conservative defaults: ~5 GiB, 30 days.
+    let has_size = has(matches, "max-size");
+    let has_age = has(matches, "max-age");
+    let mut max_size: int = -1;
+    let mut max_age: int = -1;
+    if has_size { max_size = get_int(matches, "max-size"); }
+    if has_age { max_age = get_int(matches, "max-age"); }
+    if !has_size && !has_age {
+        max_size = 5368709120;  // 5 GiB
+        max_age = 30;
+    }
+    let result: PruneResult = cache_prune(root, max_size, max_age);
+    print("pruned " + number_to_string(result.removed_entries) + " entries ("
+        + _format_bytes(result.removed_bytes)
+        + ")");
+    return 0;
+}
+
+fn _run_clean(root: string, matches: Matches) -> int ![io] {
+    let all_schemas = has_flag(matches, "all-schemas");
+    if !cache_clean(root) {
+        print("error: failed to remove cache root " + root);
+        return 1;
+    }
+    if all_schemas {
+        let removed = cache_sweep_stale_schemas(root);
+        print("cleaned cache and swept " + number_to_string(removed)
+            + " stale schema version(s)");
+        return 0;
+    }
+    print("cleaned cache root " + root);
+    return 0;
+}
+
+// The `sfn/cli` definition for `cache`, registered on the v2 root via
+// `with_subcommand`. Three leaf subcommands: `info` (no flags), `prune`
+// (`--max-size <bytes>` / `--max-age <days>`), `clean` (`--all-schemas`).
+fn command_def() -> Command {
+    let info_cmd: Command = command("info", "Show the resolved cache root, entry count, and total on-disk size");
+    let prune_cmd: Command = with_flag(with_flag(command("prune", "Evict cache entries by size and/or age (LRU)"), flag_int("max-size", "Evict oldest-first until total on-disk size is <= N bytes")), flag_int("max-age", "Remove entries whose last use is older than N days"));
+    let clean_cmd: Command = with_flag(command("clean", "Remove the current cache schema tree"), flag("all-schemas", "Also sweep stale sibling cache schema versions"));
+    return with_subcommand(with_subcommand(with_subcommand(command("cache", "Inspect and garbage-collect the build artifact cache"), info_cmd), prune_cmd), clean_cmd);
+}
+
+// `cache` is not tied to a build capsule, so the root resolves with an
+// empty capsule name (never the self-host in-tree pin). `subcommand`
+// returns the leaf name, or `"cache"` for a bare `sfn cache`, which we
+// answer with a usage message and exit 2. `ctx` is part of the
+// per-command contract but unused here (cache sources no driver state).
+fn run(matches: Matches, ctx: CliContext) -> int ![io] {
+    let root: string = cache_root("");
+    let sub: string = subcommand(matches);
+    if strings_equal(sub, "info") { return _run_info(root); }
+    if strings_equal(sub, "prune") { return _run_prune(root, matches); }
+    if strings_equal(sub, "clean") { return _run_clean(root, matches); }
+    print("usage: sfn cache <info|prune|clean>");
+    return 2;
+}
+
+export { command_def, run };
