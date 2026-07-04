@@ -81,7 +81,8 @@ parameter, struct/enum field, or return-type annotation, or the RHS of a
 `type X = A & B` alias — is a typecheck error (`E0829`). It is never
 decomposed into a structural record of both interfaces' members; the nominal
 object model has no such structural type. `A & B` is *reserved* for generic
-trait-bound composition and stays undiagnosed in bound position; only
+trait-bound composition — a bound is written `+`-separated (`<T: A + B>`, per
+SFEP-0038), not with `&` — and stays undiagnosed in bound position; only
 data/value-type uses are rejected. See SFEP-0039 for the full rationale.
 
 ```sfn

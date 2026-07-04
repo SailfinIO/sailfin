@@ -51,6 +51,18 @@ test "object-model: bare literal targeting a concrete struct is not E0828" ![io]
     assert ! _has_code(_diags(source), "E0828");
 }
 
+test "object-model: bare literal targeting an optional interface is E0828" ![io] {
+    let source = "interface Named { fn display_name() -> string; }\n"
+        + "fn main() ![io] { let bad: Named? = { name: \"Alice\" }; }\n";
+    assert _has_code(_diags(source), "E0828");
+}
+
+test "object-model: bare literal targeting an optional struct is not E0828" ![io] {
+    let source = "struct Person { name: string; }\n"
+        + "fn main() ![io] { let p: Person? = { name: \"Alice\" }; }\n";
+    assert ! _has_code(_diags(source), "E0828");
+}
+
 // -------------------------------------------------------------------
 // E0829 — `A & B` in value / type-annotation position.
 // -------------------------------------------------------------------

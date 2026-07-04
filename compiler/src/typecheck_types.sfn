@@ -350,6 +350,22 @@ fn make_object_literal_requires_struct_diagnostic(target: string, is_interface: 
     };
 }
 
+// Head type name of a value annotation, stripping a trailing optional
+// marker (`Named?` -> `Named`) so an object literal targeting an
+// optional interface is still classified by its head type. Broader
+// wrapper normalization (array `T[]`, generic-instantiation heads) and
+// the return/parameter positions are the coverage follow-up (#1900).
+fn _object_literal_head_type(text: string) -> string {
+    let mut head = trim_text(text);
+    loop {
+        if head.length == 0 { break; }
+        if head[head.length - 1] == "?" {
+            head = trim_text(substring(head, 0, head.length - 1));
+        } else { break; }
+    }
+    return head;
+}
+
 // Reject a bare object literal (`{ ... }`) whose target type is not a
 // registered concrete `struct`: an interface target, or an
 // un-inferable unannotated binding. A direct or aliased intersection
@@ -367,10 +383,11 @@ fn check_object_literal_target(initializer: Expression?, annotation: TypeAnnotat
     }
     let text = trim_text(annotation.text);
     if type_annotation_is_intersection(text) { return []; }
-    let target = find_symbol(top_level, text);
+    let head = _object_literal_head_type(text);
+    let target = find_symbol(top_level, head);
     if target == null { return []; }
     if strings_equal(target.kind, "interface") {
-        return [make_object_literal_requires_struct_diagnostic(text, true, anchor_name, anchor_span)];
+        return [make_object_literal_requires_struct_diagnostic(head, true, anchor_name, anchor_span)];
     }
     return [];
 }
