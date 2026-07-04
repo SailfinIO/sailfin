@@ -168,6 +168,29 @@ test "object-model: struct-typed parameter-default literal is not E0828" ![io] {
 }
 
 // -------------------------------------------------------------------
+// E0828 — return-position object literals (#1904). A `return { ... }`
+// is classified against the enclosing function's declared return type,
+// threaded through the walk as `TypeckCtx.enclosing_return_type`.
+// -------------------------------------------------------------------
+test "object-model: return literal targeting an interface is E0828" ![io] {
+    let source = "interface Named { fn display_name() -> string; }\n"
+        + "fn make() -> Named { return { name: \"Alice\" }; }\n";
+    assert _has_code(_diags(source), "E0828");
+}
+
+test "object-model: return literal targeting a concrete struct is not E0828" ![io] {
+    let source = "struct Person { name: string; }\n"
+        + "fn make() -> Person { return { name: \"Alice\" }; }\n";
+    assert ! _has_code(_diags(source), "E0828");
+}
+
+test "object-model: return literal targeting an array type is E0828" ![io] {
+    let source = "struct Person { name: string; }\n"
+        + "fn make() -> Person[] { return { name: \"Alice\" }; }\n";
+    assert _has_code(_diags(source), "E0828");
+}
+
+// -------------------------------------------------------------------
 // E0829 — `A & B` in value / type-annotation position.
 // -------------------------------------------------------------------
 test "object-model: intersection type alias is E0829 at the definition" ![io] {

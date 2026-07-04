@@ -410,12 +410,77 @@ fn register_top_level_symbol(statement: Statement, existing: SymbolEntry[]) -> S
     return SymbolCollectionResult { symbols: existing, diagnostics: [] };
 }
 
+// The typing environment + expected-type channel threaded through the
+// typecheck walk (SFEP-0039 addendum). One record serves both the
+// statement/block family and the expression family; a family reads only
+// the subset it needs (inert fields are free). Unifying the record is
+// what gives lambda-body walking `top_level` + `enclosing_return_type`
+// (the #1905 fix); `enclosing_return_type` is the ambient channel that
+// reaches a nested `return` (the #1904 fix). `expected_type` is the
+// general local channel reserved for future positions (call args, field
+// defaults) so they plug in without another signature change.
+struct TypeckCtx {
+    bindings: SymbolEntry[];
+    imports: ImportSymbolTable;
+    interfaces: Statement[];
+    top_level: SymbolEntry[];
+    is_top_level: boolean;
+    scope_start: int;
+    enclosing_return_type: TypeAnnotation?;
+    expected_type: TypeAnnotation?;
+}
+
+// Root context for a walk: top-level scope, no enclosing return type.
+fn make_typeck_ctx(bindings: SymbolEntry[], imports: ImportSymbolTable, interfaces: Statement[], top_level: SymbolEntry[], is_top_level: boolean) -> TypeckCtx {
+    return TypeckCtx {
+        bindings: bindings,
+        imports: imports,
+        interfaces: interfaces,
+        top_level: top_level,
+        is_top_level: is_top_level,
+        scope_start: 0,
+        enclosing_return_type: null,
+        expected_type: null
+    };
+}
+
+// Enter a nested block scope: swap in the block's bindings + shadowing
+// boundary, drop to non-top-level, preserve the ambient return type.
+fn ctx_with_bindings(ctx: TypeckCtx, bindings: SymbolEntry[], scope_start: int) -> TypeckCtx {
+    return TypeckCtx {
+        bindings: bindings,
+        imports: ctx.imports,
+        interfaces: ctx.interfaces,
+        top_level: ctx.top_level,
+        is_top_level: false,
+        scope_start: scope_start,
+        enclosing_return_type: ctx.enclosing_return_type,
+        expected_type: ctx.expected_type
+    };
+}
+
+// Enter a fn/lambda body: install its parameter-scope bindings and the
+// declared return type as the ambient `enclosing_return_type`, clearing
+// any local expected type.
+fn ctx_enter_body(ctx: TypeckCtx, bindings: SymbolEntry[], return_type: TypeAnnotation?) -> TypeckCtx {
+    return TypeckCtx {
+        bindings: bindings,
+        imports: ctx.imports,
+        interfaces: ctx.interfaces,
+        top_level: ctx.top_level,
+        is_top_level: false,
+        scope_start: 0,
+        enclosing_return_type: return_type,
+        expected_type: null
+    };
+}
+
 fn check_program_scopes(program: Program, interfaces: Statement[], imports: ImportSymbolTable, top_level: SymbolEntry[]) -> Diagnostic[] {
     let mut bindings: SymbolEntry[] = [];
     let mut diagnostics: Diagnostic[] = [];
 
     for statement in program.statements {
-        let result = check_statement(statement, bindings, interfaces, 0, imports, top_level, true);
+        let result = check_statement(statement, make_typeck_ctx(bindings, imports, interfaces, top_level, true));
         bindings = result.bindings;
         let mut _ci: int = 0;
         loop {
@@ -441,7 +506,14 @@ fn check_program_scopes(program: Program, interfaces: Statement[], imports: Impo
 // callee lookup resolves sibling top-level functions and imports
 // regardless of source order. It is never re-registered, so it does not
 // affect duplicate detection.
-fn check_statement(statement: Statement, bindings: SymbolEntry[], interfaces: Statement[], scope_start: int, imports: ImportSymbolTable, top_level: SymbolEntry[], is_top_level: boolean) -> ScopeResult {
+fn check_statement(statement: Statement, ctx: TypeckCtx) -> ScopeResult {
+    let bindings = ctx.bindings;
+    let interfaces = ctx.interfaces;
+    let scope_start = ctx.scope_start;
+    let imports = ctx.imports;
+    let top_level = ctx.top_level;
+    let is_top_level = ctx.is_top_level;
+    let enclosing_return_type = ctx.enclosing_return_type;
     if statement.variant == "VariableDeclaration" {
         let registration = register_local_symbol(bindings, statement.name, "variable", statement.span, scope_start);
         let walk_diags = walk_expression(statement.initializer, bindings, imports);
@@ -470,7 +542,7 @@ fn check_statement(statement: Statement, bindings: SymbolEntry[], interfaces: St
             diagnostics.push(_main_diags[_cim]);
             _cim += 1;
         }
-        let function_diagnostics = check_function_body(statement.signature, statement.body, interfaces, imports, top_level);
+        let function_diagnostics = check_function_body(statement.signature, statement.body, ctx);
         let mut _ci2: int = 0;
         loop {
             if _ci2 >= function_diagnostics.length { break; }
@@ -547,7 +619,7 @@ fn check_statement(statement: Statement, bindings: SymbolEntry[], interfaces: St
         loop {
             if index >= statement.methods.length { break; }
             let method = statement.methods[index];
-            let _mb_diags = check_function_body(method.signature, method.body, interfaces, imports, top_level);
+            let _mb_diags = check_function_body(method.signature, method.body, ctx);
             let mut _ci5: int = 0;
             loop {
                 if _ci5 >= _mb_diags.length { break; }
@@ -615,7 +687,7 @@ fn check_statement(statement: Statement, bindings: SymbolEntry[], interfaces: St
     if statement.variant == "TestDeclaration" {
         let registration = register_local_symbol(bindings, statement.name, "test", statement.name_span, scope_start);
         let mut diagnostics = registration.diagnostics;
-        let _blk_diags = check_block(statement.body, top_level, interfaces, imports, top_level);
+        let _blk_diags = check_block(statement.body, ctx_with_bindings(ctx, top_level, scope_start));
         let mut _ci: int = 0;
         loop {
             if _ci >= _blk_diags.length { break; }
@@ -630,13 +702,13 @@ fn check_statement(statement: Statement, bindings: SymbolEntry[], interfaces: St
     if statement.variant == "WithStatement" {
         return ScopeResult {
             bindings: bindings,
-            diagnostics: check_block(statement.body, bindings, interfaces, imports, top_level)
+            diagnostics: check_block(statement.body, ctx_with_bindings(ctx, bindings, scope_start))
         };
     }
     if statement.variant == "ForStatement" {
         let target_diags = walk_expression(statement.clause.target, bindings, imports);
         let iter_diags = walk_expression(statement.clause.iterable, bindings, imports);
-        let body_diags = check_block(statement.body, bindings, interfaces, imports, top_level);
+        let body_diags = check_block(statement.body, ctx_with_bindings(ctx, bindings, scope_start));
         return ScopeResult {
             bindings: bindings,
             diagnostics: target_diags.concat(iter_diags).concat(body_diags)
@@ -651,7 +723,7 @@ fn check_statement(statement: Statement, bindings: SymbolEntry[], interfaces: St
             diagnostics = diagnostics.concat(walk_match_pattern(case.pattern, bindings, imports));
             diagnostics = diagnostics.concat(walk_expression(case.guard, bindings, imports));
             let arm_bindings = register_match_pattern_bindings(case.pattern, bindings);
-            let _blk_diags = check_block(case.body, arm_bindings, interfaces, imports, top_level);
+            let _blk_diags = check_block(case.body, ctx_with_bindings(ctx, arm_bindings, scope_start));
             let mut _ci: int = 0;
             loop {
                 if _ci >= _blk_diags.length { break; }
@@ -664,11 +736,11 @@ fn check_statement(statement: Statement, bindings: SymbolEntry[], interfaces: St
     }
     if statement.variant == "IfStatement" {
         let mut diagnostics = walk_expression(statement.condition, bindings, imports);
-        diagnostics = diagnostics.concat(check_block(statement.then_block, bindings, interfaces, imports, top_level));
+        diagnostics = diagnostics.concat(check_block(statement.then_block, ctx_with_bindings(ctx, bindings, scope_start)));
         if statement.else_branch != null {
             let branch = statement.else_branch;
             if branch.body != null {
-                let _blk_diags = check_block(branch.body, bindings, interfaces, imports, top_level);
+                let _blk_diags = check_block(branch.body, ctx_with_bindings(ctx, bindings, scope_start));
                 let mut _ci: int = 0;
                 loop {
                     if _ci >= _blk_diags.length { break; }
@@ -677,7 +749,7 @@ fn check_statement(statement: Statement, bindings: SymbolEntry[], interfaces: St
                 }
             }
             if branch.statement != null {
-                let result = check_statement(branch.statement, bindings, interfaces, scope_start, imports, top_level, false);
+                let result = check_statement(branch.statement, ctx_with_bindings(ctx, bindings, scope_start));
                 let mut _ci2: int = 0;
                 loop {
                     if _ci2 >= result.diagnostics.length { break; }
@@ -691,7 +763,7 @@ fn check_statement(statement: Statement, bindings: SymbolEntry[], interfaces: St
     if statement.variant == "BlockStatement" {
         return ScopeResult {
             bindings: bindings,
-            diagnostics: check_block(statement.body, bindings, interfaces, imports, top_level)
+            diagnostics: check_block(statement.body, ctx_with_bindings(ctx, bindings, scope_start))
         };
     }
     if statement.variant == "TypeAliasDeclaration" {
@@ -718,9 +790,21 @@ fn check_statement(statement: Statement, bindings: SymbolEntry[], interfaces: St
         };
     }
     if statement.variant == "ReturnStatement" {
+        let return_diags = walk_expression(statement.expression, bindings, imports);
+        // A `return { ... }` is classified against the enclosing function's
+        // declared return type (#1904). Gate on `!is_top_level`: a top-level
+        // `return` has no enclosing function, so `enclosing_return_type` is
+        // absent and the un-inferable branch must not fire spuriously.
+        if is_top_level {
+            return ScopeResult {
+                bindings: bindings,
+                diagnostics: return_diags
+            };
+        }
+        let object_literal_diags = check_object_literal_target(statement.expression, enclosing_return_type, "return", statement.span, top_level);
         return ScopeResult {
             bindings: bindings,
-            diagnostics: walk_expression(statement.expression, bindings, imports)
+            diagnostics: return_diags.concat(object_literal_diags)
         };
     }
     if statement.variant == "Unknown" {
@@ -762,9 +846,10 @@ fn check_statement(statement: Statement, bindings: SymbolEntry[], interfaces: St
     return ScopeResult { bindings: bindings, diagnostics: [] };
 }
 
-fn check_function_body(signature: FunctionSignature, body: Block, interfaces: Statement[], imports: ImportSymbolTable, top_level: SymbolEntry[]) -> Diagnostic[] {
-    let parameter_scope = seed_parameter_scope(signature, top_level);
-    let body_diagnostics = check_block(body, parameter_scope.bindings, interfaces, imports, top_level);
+fn check_function_body(signature: FunctionSignature, body: Block, ctx: TypeckCtx) -> Diagnostic[] {
+    let parameter_scope = seed_parameter_scope(signature, ctx.top_level);
+    let body_ctx = ctx_enter_body(ctx, parameter_scope.bindings, signature.return_type);
+    let body_diagnostics = check_block(body, body_ctx);
     let mut _result = parameter_scope.diagnostics;
     let mut _ci: int = 0;
     loop {
@@ -806,13 +891,13 @@ fn seed_parameter_scope(signature: FunctionSignature, top_level: SymbolEntry[]) 
     return ScopeResult { bindings: bindings, diagnostics: diagnostics };
 }
 
-fn check_block(block: Block, parent_bindings: SymbolEntry[], interfaces: Statement[], imports: ImportSymbolTable, top_level: SymbolEntry[]) -> Diagnostic[] {
-    let mut bindings = clone_bindings(parent_bindings);
+fn check_block(block: Block, ctx: TypeckCtx) -> Diagnostic[] {
+    let mut bindings = clone_bindings(ctx.bindings);
     let scope_start = bindings.length;
     let mut diagnostics: Diagnostic[] = [];
 
     for statement in block.statements {
-        let result = check_statement(statement, bindings, interfaces, scope_start, imports, top_level, false);
+        let result = check_statement(statement, ctx_with_bindings(ctx, bindings, scope_start));
         bindings = result.bindings;
         let mut _ci: int = 0;
         loop {
