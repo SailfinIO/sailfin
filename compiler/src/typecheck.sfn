@@ -794,6 +794,13 @@ fn seed_parameter_scope(signature: FunctionSignature, top_level: SymbolEntry[]) 
             diagnostics.push(registration.diagnostics[_ci]);
             _ci += 1;
         }
+        let default_diags = check_object_literal_target(parameter.default_value, parameter.type_annotation, parameter.name, parameter.span, top_level);
+        let mut _di: int = 0;
+        loop {
+            if _di >= default_diags.length { break; }
+            diagnostics.push(default_diags[_di]);
+            _di += 1;
+        }
     }
 
     return ScopeResult { bindings: bindings, diagnostics: diagnostics };
