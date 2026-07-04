@@ -61,6 +61,8 @@ test "generic bound satisfaction: non-implementing type raises E0820" ![io] {
     assert _codes_for(source, "E0820") == 1;
     assert _e0820_message_contains(source, "Comparable");
     assert _e0820_message_contains(source, "Bad");
+    // Concrete struct → the fix-it suggests an `implements` clause.
+    assert _e0820_message_contains(source, "implements Comparable");
 }
 
 test "generic bound satisfaction: multi-bound requires every interface" ![io] {
@@ -96,4 +98,7 @@ test "generic bound satisfaction: unbounded type parameter fails propagation" ![
         + "struct Wrapper<T> implements Container<T> { fn has(x: T) -> bool { return true; } }\n";
     assert _codes_for(source, "E0820") == 1;
     assert _e0820_message_contains(source, "Comparable");
+    // In-scope type parameter → the fix-it suggests adding a bound, not an
+    // `implements` clause (which would be wrong advice for a type parameter).
+    assert _e0820_message_contains(source, "add bound");
 }

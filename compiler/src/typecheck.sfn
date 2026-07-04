@@ -240,7 +240,7 @@ fn check_generic_instantiation_sites(program: Program, interfaces: Statement[], 
                     let found = iface;
                     if found.type_parameters.length > 0 {
                         let args = parse_type_arguments(annotation.text);
-                        let inst = check_generic_instantiation(found.name, found.type_parameters, args, interfaces, structs, statement.type_parameters, statement.name_span);
+                        let inst = check_generic_instantiation(found.name, found.type_parameters, args, interfaces, structs, statement.type_parameters);
                         let mut _di: int = 0;
                         loop {
                             if _di >= inst.length { break; }

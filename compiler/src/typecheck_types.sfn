@@ -2229,24 +2229,37 @@ fn type_satisfies_bound(concrete: string, bound_ref: string, interfaces: Stateme
 }
 
 // E0820 — a concrete type argument does not satisfy a declared bound at a
-// generic instantiation site (SFEP-0038 §3.2b, #1870). Names the bound,
-// the offending type, and the type parameter, with a fix-it hint.
-fn make_bound_not_satisfied_diagnostic(concrete: string, bound_name: string, param_name: string, decl_name: string, span: SourceSpan?) -> Diagnostic {
+// generic instantiation site (SFEP-0038 §3.2b, #1870). Names the full
+// bound (with any type arguments), the offending type, and the type
+// parameter. The fix-it hint adapts to the offending type: an in-scope
+// type parameter needs a *bound* added (`T: I`), a concrete type needs an
+// `implements I` clause. No primary token is set — an `implements`
+// annotation carries no span (`TypeAnnotation` is text-only), and the
+// enclosing site span does not correspond to the offending type-argument
+// text, so a caret there would mis-highlight; the message carries the
+// full context instead.
+fn make_bound_not_satisfied_diagnostic(concrete: string, bound_display: string, param_name: string, decl_name: string, concrete_is_param: boolean) -> Diagnostic {
+    let mut fix: string = "; add `implements " + bound_display + "` to `"
+        + concrete
+        + "`";
+    if concrete_is_param {
+        fix = "; add bound `" + bound_display + "` to type parameter `"
+            + concrete
+            + "`";
+    }
     return Diagnostic {
         code: "E0820",
         severity: "error",
-        message: "type `" + concrete + "` does not satisfy bound `" + bound_name
+        message: "type `" + concrete + "` does not satisfy bound `"
+            + bound_display
             + "` on type parameter `"
             + param_name
             + "` of `"
             + decl_name
-            + "`; add `implements "
-            + bound_name
-            + "` to `"
-            + concrete
-            + "`",
+            + "`"
+            + fix,
         file_path: "",
-        primary: token_from_name(concrete, span),
+        primary: null,
         suggestion: null
     };
 }
@@ -2260,7 +2273,7 @@ fn make_bound_not_satisfied_diagnostic(concrete: string, bound_name: string, par
 // E0820 per unsatisfied (argument, bound) pair. Positions past the
 // shorter of the two lists are ignored — arity is validated separately
 // (E0822 at declaration; the interface/enum arity checks at use sites).
-fn check_generic_instantiation(decl_name: string, decl_type_parameters: TypeParameter[], type_arguments: string[], interfaces: Statement[], structs: Statement[], in_scope_params: TypeParameter[], span: SourceSpan?) -> Diagnostic[] {
+fn check_generic_instantiation(decl_name: string, decl_type_parameters: TypeParameter[], type_arguments: string[], interfaces: Statement[], structs: Statement[], in_scope_params: TypeParameter[]) -> Diagnostic[] {
     let mut diagnostics: Diagnostic[] = [];
     let mut limit: int = decl_type_parameters.length;
     if type_arguments.length < limit { limit = type_arguments.length; }
@@ -2269,6 +2282,7 @@ fn check_generic_instantiation(decl_name: string, decl_type_parameters: TypePara
         if index >= limit { break; }
         let param = decl_type_parameters[index];
         let concrete = trim_text(type_arguments[index]);
+        let concrete_is_param = find_type_parameter(bound_base_name(concrete), in_scope_params) != null;
         let tp_bound = param.bound;
         if tp_bound != null {
             let bound = tp_bound;
@@ -2279,7 +2293,7 @@ fn check_generic_instantiation(decl_name: string, decl_type_parameters: TypePara
                 let ref_text = trim_text(refs[_bri]);
                 if ref_text.length > 0 {
                     if !type_satisfies_bound(concrete, ref_text, interfaces, structs, in_scope_params) {
-                        diagnostics.push(make_bound_not_satisfied_diagnostic(concrete, bound_base_name(ref_text), param.name, decl_name, span));
+                        diagnostics.push(make_bound_not_satisfied_diagnostic(concrete, ref_text, param.name, decl_name, concrete_is_param));
                     }
                 }
                 _bri += 1;
