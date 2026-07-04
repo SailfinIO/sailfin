@@ -83,10 +83,18 @@ fn _write_test_fixture(dir: string) -> string ![io] {
 // `LlvmTextBackend.link` has a separate `test_mode` argv layout; `sfn test`
 // links each test binary through it, so guard that branch too — the flag
 // must surface the test-layout argv, not only the program/build layout.
+//
+// `--no-test-cache` is load-bearing: on a test-bin cache HIT `sfn test`
+// serves the pre-linked binary and skips the clang link entirely, so no
+// `[trace-link]` line is emitted. Across the suite's repeated passes
+// (first-pass + parallel `--jobs` + seedcheck, all sharing
+// `SAILFIN_TEST_SCRATCH`) a later pass would hit the cache and the trace
+// would vanish. Disabling the cache forces the link every time so the
+// assertion is deterministic.
 test "trace-link: SAILFIN_TRACE_LINK=1 echoes the test-layout link argv" ![io] {
     let dir = _scratch_dir();
     let test_path = _write_test_fixture(dir);
-    let _exit = process.run_capture([_sfn_bin(), "test", test_path], _child_env(true));
+    let _exit = process.run_capture([_sfn_bin(), "test", "--no-test-cache", test_path], _child_env(true));
     let _out = process.capture_take_stdout();
     let err = process.capture_take_stderr();
     assert contains(err, "[trace-link]");
