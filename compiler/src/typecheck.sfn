@@ -29,6 +29,7 @@ import {
     SymbolCollectionResult,
     SymbolEntry,
     append_symbol,
+    check_bare_fn_type_annotation,
     check_enum_variants,
     check_extern_signature,
     check_extern_var,
@@ -381,9 +382,10 @@ fn check_statement(statement: Statement, bindings: SymbolEntry[], interfaces: St
     if statement.variant == "VariableDeclaration" {
         let registration = register_local_symbol(bindings, statement.name, "variable", statement.span, scope_start);
         let walk_diags = walk_expression(statement.initializer, bindings, imports);
+        let annotation_diags = check_bare_fn_type_annotation(statement.type_annotation, statement.name, statement.span);
         return ScopeResult {
             bindings: registration.bindings,
-            diagnostics: registration.diagnostics.concat(walk_diags)
+            diagnostics: registration.diagnostics.concat(walk_diags).concat(annotation_diags)
         };
     }
     if statement.variant == "FunctionDeclaration" {
@@ -630,6 +632,7 @@ fn check_statement(statement: Statement, bindings: SymbolEntry[], interfaces: St
             diagnostics.push(_tp_diags[_ci]);
             _ci += 1;
         }
+        diagnostics = diagnostics.concat(check_bare_fn_type_annotation(statement.aliased_type, statement.name, statement.name_span));
         return ScopeResult {
             bindings: registration.bindings,
             diagnostics: diagnostics
@@ -1035,7 +1038,32 @@ fn walk_expression(expression: Expression?, bindings: SymbolEntry[], imports: Im
         return diagnostics;
     }
     if expression.variant == "Lambda" {
-        return walk_block_expressions(expression.body, bindings, imports);
+        let mut diagnostics = walk_block_expressions(expression.body, bindings, imports);
+        let mut lambda_span: SourceSpan? = null;
+        let mut _lp: int = 0;
+        loop {
+            if _lp >= expression.parameters.length { break; }
+            let parameter = expression.parameters[_lp];
+            if lambda_span == null { lambda_span = parameter.span; }
+            diagnostics = diagnostics.concat(check_bare_fn_type_annotation(parameter.type_annotation, parameter.name, parameter.span));
+            _lp += 1;
+        }
+        // A param-less lambda (`fn() -> (int) -> int`) has no parameter span
+        // to anchor a return-type E0826 to; fall back to the body's opening
+        // token so the diagnostic still renders with a source location.
+        if lambda_span == null {
+            if expression.body.tokens.length > 0 {
+                let btok = expression.body.tokens[0];
+                lambda_span = SourceSpan {
+                    start_line: btok.line,
+                    start_column: btok.column,
+                    end_line: btok.line,
+                    end_column: btok.column
+                };
+            }
+        }
+        diagnostics = diagnostics.concat(check_bare_fn_type_annotation(expression.return_type, "lambda", lambda_span));
+        return diagnostics;
     }
     if expression.variant == "Range" {
         let mut diagnostics = walk_expression(expression.start, bindings, imports);
@@ -1408,7 +1436,9 @@ fn walk_statement_expressions(statement: Statement, bindings: SymbolEntry[], imp
         return walk_expression(statement.expression, bindings, imports);
     }
     if statement.variant == "VariableDeclaration" {
-        return walk_expression(statement.initializer, bindings, imports);
+        let init_diags = walk_expression(statement.initializer, bindings, imports);
+        let annotation_diags = check_bare_fn_type_annotation(statement.type_annotation, statement.name, statement.span);
+        return init_diags.concat(annotation_diags);
     }
     if statement.variant == "IfStatement" {
         let mut diagnostics = walk_expression(statement.condition, bindings, imports);

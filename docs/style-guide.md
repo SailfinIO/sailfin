@@ -216,7 +216,7 @@ relative to `compiler/src/`):
 | `E03xx` | Duplicate symbols / type conflicts | `typecheck*.sfn` |
 | `E04xx` | Effect violations | `diagnostics_render.sfn`, `effect_checker.sfn` |
 | `E05xx`–`E06xx` | Build / check tooling | `tools/check.sfn` |
-| `E08xx` | `Result` / `?` operator | `typecheck_types.sfn` |
+| `E08xx` | `Result` / `?` operator; extern C-ABI (`E0801`–`E0805`); bare function-type annotation reject (`E0826`) | `typecheck_types.sfn` |
 | `E09xx` | Ownership / affine types | `ownership_checker.sfn` |
 
 New codes go in the matching range at the next free number; grep the range

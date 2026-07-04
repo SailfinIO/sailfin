@@ -169,6 +169,15 @@ here.
   typecheck (`E0808`/`E0809`, #1147); `* fn (A) -> R` values call through an
   env-less indirect call (#1089), distinct from closure `{fn_ptr, env}`
   dispatch.
+- **Bare function-type annotation rejection** (`E0826`, #1845): the sole
+  canonical function-type spelling is `fn(...) -> R` (spec §5, SFEP-0030). A
+  bare `(int) -> int` — which the parser accepts but lowering silently
+  miscompiled to an opaque `i8*` instead of the `{i8*, i8*}` closure pair —
+  now fails typecheck with `E0826` and a fix-it steering to `fn(int) -> int`,
+  enforced at every position that accepts a type annotation: fn/method/interface
+  signatures, variable declarations (scope- and lambda-body-local), struct
+  fields, lambda parameter/return annotations, enum variant fields, and type
+  aliases.
 
 ## Feature Matrix
 

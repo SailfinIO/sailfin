@@ -82,7 +82,8 @@ language gaps surfaced by the 2026-07 grammar/object-model audit:
 SFEP-0038 (`0038-generic-constraints.md`, Accepted) is the root foundation:
 `draft-generic-collections`, `draft-derive`, and SFEP-0028 all depend on it. Draft diagnostic codes are
 pre-deconflicted (`E0303`; `E0711`–`E0715`; `E0820`–`E0822`; `E0823`/`W0823`;
-`E0824`–`E0825`).
+`E0824`–`E0825`). `E0826` is allocated (shipped) — bare function-type
+annotation rejection (#1845, SFEP-0030) — so drafts must skip it.
 
 ## Subdirectories
 
