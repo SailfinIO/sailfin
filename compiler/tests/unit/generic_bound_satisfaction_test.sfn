@@ -1,0 +1,99 @@
+// Unit tests for instantiation-site generic bound satisfaction (SFEP-0038
+// §3.1/§3.2b, #1870). At a generic instantiation site, each concrete type
+// argument must satisfy every bound declared on the corresponding type
+// parameter, or `E0820` fires naming the bound + offending type.
+//
+// The checker has no expression-type inferencer (#829), so the live site
+// with syntactic concrete arguments today is a struct's `implements
+// I<Args>` clause against a generic interface whose parameters carry
+// bounds — these tests drive the rule end-to-end through that site.
+// Function-call and `let`/struct-literal instantiation live-wire when
+// inference lands (the rule `check_generic_instantiation` is already
+// call-ready). Declaration-time bound validation (E0821/E0822) is the
+// #1868 sibling, covered in `generic_bound_declaration_test.sfn`.
+import { find } from "sfn/strings";
+
+import { parse_program } from "../../src/parser/mod";
+import { typecheck_diagnostics } from "../../src/typecheck";
+import { Diagnostic } from "../../src/typecheck_types";
+
+fn _codes_for(source: string, code: string) -> int ![io] {
+    let program = parse_program(source);
+    let diags: Diagnostic[] = typecheck_diagnostics(program);
+    let mut count: int = 0;
+    let mut i: int = 0;
+    loop {
+        if i >= diags.length { break; }
+        if strings_equal(diags[i].code, code) { count += 1; }
+        i += 1;
+    }
+    return count;
+}
+
+// True if some E0820 diagnostic's message contains `needle`.
+fn _e0820_message_contains(source: string, needle: string) -> boolean ![io] {
+    let program = parse_program(source);
+    let diags: Diagnostic[] = typecheck_diagnostics(program);
+    let mut i: int = 0;
+    loop {
+        if i >= diags.length { break; }
+        if strings_equal(diags[i].code, "E0820") {
+            if find(diags[i].message, needle, 0) >= 0 { return true; }
+        }
+        i += 1;
+    }
+    return false;
+}
+
+test "generic bound satisfaction: implementing type is clean" ![io] {
+    let source = "interface Comparable { fn compare(other: Self) -> int; }\n"
+        + "interface Container<T: Comparable> { fn has(x: T) -> bool; }\n"
+        + "struct Widget implements Comparable { fn compare(other: Self) -> int { return 0; } }\n"
+        + "struct Holder implements Container<Widget> { fn has(x: Widget) -> bool { return true; } }\n";
+    assert _codes_for(source, "E0820") == 0;
+}
+
+test "generic bound satisfaction: non-implementing type raises E0820" ![io] {
+    let source = "interface Comparable { fn compare(other: Self) -> int; }\n"
+        + "interface Container<T: Comparable> { fn has(x: T) -> bool; }\n"
+        + "struct Bad { x: int; }\n"
+        + "struct Holder implements Container<Bad> { fn has(x: Bad) -> bool { return true; } }\n";
+    assert _codes_for(source, "E0820") == 1;
+    assert _e0820_message_contains(source, "Comparable");
+    assert _e0820_message_contains(source, "Bad");
+}
+
+test "generic bound satisfaction: multi-bound requires every interface" ![io] {
+    let source = "interface Hashable { fn hash() -> int; }\n"
+        + "interface Eq { fn eq(other: Self) -> bool; }\n"
+        + "interface Keyed<K: Hashable + Eq> { fn key() -> K; }\n"
+        + "struct OnlyHash implements Hashable { fn hash() -> int { return 0; } }\n"
+        + "struct Holder implements Keyed<OnlyHash> { fn key() -> OnlyHash { return OnlyHash {}; } }\n";
+    // Hashable is satisfied; Eq is not — exactly one unmet bound.
+    assert _codes_for(source, "E0820") == 1;
+    assert _e0820_message_contains(source, "Eq");
+}
+
+test "generic bound satisfaction: multi-bound satisfied by both is clean" ![io] {
+    let source = "interface Hashable { fn hash() -> int; }\n"
+        + "interface Eq { fn eq(other: Self) -> bool; }\n"
+        + "interface Keyed<K: Hashable + Eq> { fn key() -> K; }\n"
+        + "struct Both implements Hashable, Eq { fn hash() -> int { return 0; } fn eq(other: Self) -> bool { return true; } }\n"
+        + "struct Holder implements Keyed<Both> { fn key() -> Both { return Both {}; } }\n";
+    assert _codes_for(source, "E0820") == 0;
+}
+
+test "generic bound satisfaction: type parameter satisfies its own bound (propagation)" ![io] {
+    let source = "interface Comparable { fn compare(other: Self) -> int; }\n"
+        + "interface Container<T: Comparable> { fn has(x: T) -> bool; }\n"
+        + "struct Wrapper<T: Comparable> implements Container<T> { fn has(x: T) -> bool { return true; } }\n";
+    assert _codes_for(source, "E0820") == 0;
+}
+
+test "generic bound satisfaction: unbounded type parameter fails propagation" ![io] {
+    let source = "interface Comparable { fn compare(other: Self) -> int; }\n"
+        + "interface Container<T: Comparable> { fn has(x: T) -> bool; }\n"
+        + "struct Wrapper<T> implements Container<T> { fn has(x: T) -> bool { return true; } }\n";
+    assert _codes_for(source, "E0820") == 1;
+    assert _e0820_message_contains(source, "Comparable");
+}
