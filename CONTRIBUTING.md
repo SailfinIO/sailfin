@@ -114,10 +114,12 @@ not subject to `sfn fmt` or the self-host gate.
 
 - Use clear, atomic commits. Conventional prefixes (`feat(compiler):`, `fix(bootstrap):`)
   are encouraged.
-- Note: automated GitHub releases are driven by `python-semantic-release`, which relies on
-  Conventional Commit-style prefixes to decide whether to cut a new version. If you expect
-  a new prerelease (e.g., on the `alpha` branch), use a release-worthy prefix like `fix:`
-  or `feat:` in the commit subject.
+- Note: releases are **not** cut automatically from commit prefixes. They are triggered
+  manually via `gh workflow run release.yml -f channel=<alpha|beta|stable> -f bump=<prerelease|minor|…>`
+  (`workflow_dispatch`), and the release workflow is pure bash — there is no
+  `python-semantic-release` or any Python in the toolchain. The version source of truth is
+  `[capsule] version` in `compiler/capsule.toml`. Conventional Commit prefixes still aid
+  changelog readability, but they do not gate whether a version is cut.
 - Document how you validated the change (commands, tests, screenshots).
 - When behaviour shifts, include reproduction steps and link to the relevant
   roadmap/status entries.
