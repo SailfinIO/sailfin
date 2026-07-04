@@ -112,7 +112,10 @@ here.
   selection, dead-strip, and link-libs; the backend owns only the final argv +
   `process.run`. The seam is the prerequisite for the LLVM C-API backend (#347)
   and the seal-sufficient native backend (#1640) to plug in without
-  re-hardcoding LLVM across the driver.
+  re-hardcoding LLVM across the driver. `SAILFIN_TRACE_LINK=1` echoes the
+  resolved clang link argv to stderr (`[trace-link] <argv>`, #1908) for both
+  the program and test link layouts — a read-only debugging aid with no
+  behavior change when unset.
 - **Build-host OpenSSL dependency** (SFEP-0036, #1782/#1821). The native
   runtime links `-lssl -lcrypto` (TLS; `runtime/sfn/platform/tls.sfn`), so
   **every** Sailfin binary — including the compiler and each per-test binary

@@ -1,0 +1,75 @@
+// Regression e2e for the `SAILFIN_TRACE_LINK` observability knob (#1908):
+// the build driver echoes the resolved clang link argv to stderr when the
+// flag is set, and is silent (no `[trace-link]` marker) when it is not —
+// the #1112 zero-behaviour gate for the unset fast path. Platform-independent:
+// a hello-world build reaches `LlvmTextBackend.link` on every target, and the
+// trace line (`_llvm_text_trace_link` in `compiler/src/backend.sfn`) fires
+// before `process.run`, so the marker's presence/absence is observable
+// regardless of whether the link ultimately succeeds.
+//
+// Matchers note (#842): `sfn/test`'s `expect_*` matchers are `![pure]` and
+// cannot be called from an `![io]` test; assert on captured text directly.
+import { contains } from "sfn/strings";
+
+fn _sfn_bin() -> string ![io] {
+    let configured = env.get("SAILFIN_BIN");
+    if configured.length > 0 { return configured; }
+    return "build/native/sailfin";
+}
+
+fn _scratch_dir() -> string ![io] {
+    let mut dir = env.get("SAILFIN_TEST_SCRATCH");
+    if dir.length == 0 { dir = "/tmp"; }
+    dir = dir + "/sfn-trace-link-e2e";
+    fs.createDirectory(dir, true);
+    return dir;
+}
+
+fn _has_key(entry: string, key: string) -> boolean {
+    if entry.length < key.length { return false; }
+    return substring(entry, 0, key.length) == key;
+}
+
+// Inherit the parent env (the nested build links clang + ld via `PATH` and
+// routes its build cache under `SAILFIN_TEST_SCRATCH`), dropping any ambient
+// `SAILFIN_TRACE_LINK` so `traced` alone decides the child's value.
+fn _child_env(traced: boolean) -> string[] ![io] {
+    let base = process.environ();
+    let mut e: string[] = [];
+    let mut i = 0;
+    loop {
+        if i >= base.length { break; }
+        if !_has_key(base[i], "SAILFIN_TRACE_LINK=") { e.push(base[i]); }
+        i = i + 1;
+    }
+    if traced { e.push("SAILFIN_TRACE_LINK=1"); }
+    return e;
+}
+
+fn _write_fixture(dir: string) -> string ![io] {
+    let path = dir + "/main.sfn";
+    fs.writeFile(path, "fn main() ![io] {\n    print(\"ok\");\n}\n");
+    return path;
+}
+
+fn _build_stderr(main_path: string, bin: string, traced: boolean) -> string ![io] {
+    let _exit = process.run_capture([_sfn_bin(), "build", "-o", bin, main_path], _child_env(traced));
+    let _out = process.capture_take_stdout();
+    return process.capture_take_stderr();
+}
+
+test "trace-link: SAILFIN_TRACE_LINK=1 echoes the resolved link argv" ![io] {
+    let dir = _scratch_dir();
+    let main_path = _write_fixture(dir);
+    let err = _build_stderr(main_path, dir + "/traced-bin", true);
+    // The greppable marker plus the `clang` invoker it prefixes.
+    assert contains(err, "[trace-link]");
+    assert contains(err, "clang");
+}
+
+test "trace-link: unset leaves the link path silent" ![io] {
+    let dir = _scratch_dir();
+    let main_path = _write_fixture(dir);
+    let err = _build_stderr(main_path, dir + "/silent-bin", false);
+    assert ! contains(err, "[trace-link]");
+}
