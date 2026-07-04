@@ -6,7 +6,7 @@ type: language
 created: 2026-07-04
 updated: 2026-07-04
 author: "agent:compiler-architect; human review"
-tracking: "#1860, #1887, #1888, #1838, #1855"
+tracking: "#1860, #1887, #1888, #1838, #1855, #1900, #1904, #1905"
 supersedes:
 superseded-by:
 graduates-to: reference/spec/06-types.md
