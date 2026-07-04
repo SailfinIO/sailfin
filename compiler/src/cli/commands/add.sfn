@@ -100,17 +100,24 @@ fn _curl_download_cmd(url: string, output_path: string) -> int ![io] {
     return process.run(["curl", "-sfSL", "-o", output_path, url]);
 }
 
-// GET `url` and return the response body as a string ("" on any curl
-// error). Mirrors `_curl_post_json_cmd`'s file-based capture minus the
-// POST flags: the URL is passed as an argv element, never interpolated
-// into a shell string, so there is no shell-injection surface to defend.
+// GET `url` and return the response body as a string ("" on any curl or
+// filesystem error). Like `_curl_post_json_cmd` this stages the response in
+// a file rather than capturing stdout, but passes the URL as an argv element
+// (never interpolated into a shell string, so no shell-injection surface).
+// The staging file lives in a per-invocation `mkdtemp` directory: an
+// unpredictable path defeats symlink clobbering, and two concurrent
+// `sfn add` runs cannot collide on a shared temp file.
 fn _curl_get_cmd(url: string) -> string ![io] {
-    let tmp = "/tmp/.sfn_curl_index_cmd_tmp";
+    let dir = fs.mkdtemp(".sfn_index_");
+    if dir.length == 0 { return ""; }
+    let tmp = dir + "/index";
     let rc = process.run(["curl", "-sfS", "-o", tmp, url]);
-    if rc != 0 { return ""; }
-    if !fs.exists(tmp) { return ""; }
-    let response = fs.readFile(tmp);
-    process.run(["rm", "-f", tmp]);
+    let mut response: string = "";
+    if rc == 0 {
+        if fs.exists(tmp) { response = fs.readFile(tmp); }
+    }
+    if fs.exists(tmp) { fs.deleteFile(tmp); }
+    fs.removeDirectory(dir);
     return response;
 }
 
@@ -171,7 +178,9 @@ fn _json_match_brace_cmd(body: string, open: int) -> int {
 // (`GET /api/index.json`, shape `{"capsules":{"<scope/name>":{"latest":
 // "..."}}}`). Hand-rolled rather than importing `sfn/json`: the target is
 // a single fixed field, and pulling the general parser into compiler
-// source carries a self-host workspace-resolver hang risk (#842) with no
+// source carries a workspace-resolver hang risk when imported transitively
+// into the compiler (documented in `capsule_ir_layout_test.sfn` /
+// `capsule_artifact_sidecar_test.sfn`, test-infra epic #842) with no
 // `compiler/src/` precedent — this follows the `_package_extract_top_level`
 // house pattern (package.sfn). Returns "" when the capsule is absent or
 // carries no `latest`, matching the prior `python3` one-liner's
