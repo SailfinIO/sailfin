@@ -1704,7 +1704,7 @@ fn compile_capsule_modules(sources: CapsuleSource[], slug_universe_extra: Capsul
     // #984: sidecars are still written only for `sources`; only the slug
     // resolution universe is widened.
     _cr_stage_import_deps(sources, slug_universe, work_dir);
-    let cache_root_path = cache_root();
+    let cache_root_path = cache_root(config.capsule_name);
     if config.clean {
         // `--clean` is a destructive opt-in. If the wipe fails
         // (read-only fs, perms, etc.), surface a warning so the

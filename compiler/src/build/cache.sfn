@@ -159,7 +159,7 @@ fn _emit_build_report(input_path: string, out_path: string, kind: string, exit_c
     // `stats` is the build-wide total (`.ll` module cache folded with
     // the runtime object cache, #915), not just `capsule_result.stats`.
     report.cache = stats;
-    report.cache_root = cache_root();
+    report.cache_root = cache_root(cache_config.capsule_name);
     report.cache_enabled = cache_config.enabled;
     report.dep_ll_paths = capsule_result.ll_paths;
     print(build_report_to_json(report));
