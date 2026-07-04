@@ -26,15 +26,22 @@ fn printValue(value: StringValue | IntValue) ![io] {
 //             print("It's a number: {{value}}");
 //         }
 //     }
-interface Admin {
-    isAdmin: boolean;
+// Nominal object model (SFEP-0039): interfaces are method-only contracts, and the
+// data lives on a concrete `struct` that implements them. This replaces the former
+// data-field interfaces (`interface Admin { isAdmin: boolean }`) and the
+// `type AdminUser = Admin & User` intersection — idioms the nominal backend never
+// implemented. A concrete struct constructed through the object-literal path (#1855)
+// carries the fields, so `admin.name` reads back `Alice`.
+interface Named {
+    fn display_name(self) -> string;
 }
 
-interface User {
+struct AdminUser implements Named {
     name: string;
-}
+    isAdmin: boolean;
 
-type AdminUser = Admin & User;
+    fn display_name(self) -> string { return self.name; }
+}
 
 fn main() ![io] {
     printValue(StringValue { value: "Sailfin" });

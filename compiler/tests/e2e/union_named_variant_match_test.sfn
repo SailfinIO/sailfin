@@ -78,9 +78,9 @@ test "union-match: named-struct tagged union builds with valid IR and selects th
     assert find(out, "string:Sailfin", 0) >= 0;
     assert find(out, "number:42", 0) >= 0;
     // The bare `print("admin:{{admin.name}}")` statement is what emits
-    // the `@.runtime.field.name` global; its `admin:` prefix printing
-    // confirms the statement lowered to valid, runnable IR. The field
-    // value itself is empty here (a separate bare-struct-literal bug,
-    // #1855), so only the prefix is asserted.
-    assert find(out, "admin:", 0) >= 0;
+    // the `@.runtime.field.name` global; its printing confirms the
+    // statement lowered to valid, runnable IR. `admin` is a concrete
+    // struct constructed via the object-literal path (#1855), so the
+    // field reads back its value — the full `admin:Alice` is asserted.
+    assert find(out, "admin:Alice", 0) >= 0;
 }
