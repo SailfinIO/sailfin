@@ -72,14 +72,14 @@ fn _env_with_prefix(prefix: string) -> string[] ![io] {
     let mut i = 0;
     loop {
         if i >= base.length { break; }
-        if !contains_prefix_key(base[i]) { e.push(base[i]); }
+        if !_contains_prefix_key(base[i]) { e.push(base[i]); }
         i = i + 1;
     }
     e.push("SAILFIN_OPENSSL_PREFIX=" + prefix);
     return e;
 }
 
-fn contains_prefix_key(entry: string) -> boolean {
+fn _contains_prefix_key(entry: string) -> boolean {
     let key = "SAILFIN_OPENSSL_PREFIX=";
     if entry.length < key.length { return false; }
     return substring(entry, 0, key.length) == key;
