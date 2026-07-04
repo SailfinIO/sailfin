@@ -20,6 +20,9 @@ test "conformance: struct implementing an unresolved interface terminates" ![io]
     let program = parse_program(source);
     let diags: Diagnostic[] = typecheck_diagnostics(program);
     // An unseen interface is trusted (skipped), so no conformance diagnostic is
-    // raised for it; the walk simply returns.
-    assert diags.length >= 0;
+    // raised for it: the fully-valid struct type-checks with zero diagnostics.
+    // Reaching this assertion also proves the walk terminated (a hang would time
+    // out); the exact-count check additionally pins the silently-skipped
+    // behavior the fix restores.
+    assert diags.length == 0;
 }
