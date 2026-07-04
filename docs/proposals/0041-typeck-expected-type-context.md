@@ -1,7 +1,7 @@
 ---
-sfep: TBD
+sfep: 0041
 title: Unified expected-type + typing-environment context for the typecheck walk
-status: Draft
+status: Implemented
 type: tooling             # a compiler-internal refactor; no user-facing surface
 created: 2026-07-04
 updated: 2026-07-04
@@ -9,10 +9,10 @@ author: "agent:compiler-architect; human review"
 tracking: "#1900, #1904, #1905"
 supersedes:
 superseded-by:
-graduates-to:
+graduates-to: "docs/status.md (E0828 object-literal coverage); SFEP-0039 §3.2"
 ---
 
-# SFEP-XXXX — Unified expected-type + typing-environment context for the typecheck walk
+# SFEP-0041 — Unified expected-type + typing-environment context for the typecheck walk
 
 > Addendum to SFEP-0039 (`0039-nominal-object-model.md`). This is a
 > compiler-internal refactor, not a language change, so it is deliberately
