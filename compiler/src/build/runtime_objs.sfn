@@ -722,10 +722,14 @@ fn _compile_runtime_sfn_sources(runtime_capsules: RuntimeCapsuleArtifacts[], out
 // test builds spawned with a curated env, and real user builds alike.
 // Injected into the shared runtime `link_libs` (consumed by both argv
 // builders as `plan.libs`) so it can't be missed by one path. The `-L`
-// precedes `-lssl`/`-lcrypto`, so it applies. Honours
-// `SAILFIN_OPENSSL_PREFIX`, else probes `brew` and the standard keg
-// locations; emits nothing on Linux (default path). Darwin-gated via the
-// same `uname -s` probe `_dead_strip_link_flag` uses, so Linux argv stays
+// precedes `-lssl`/`-lcrypto`, so it applies. Candidate order (first hit
+// wins, so exactly one `-L` is ever emitted): `SAILFIN_OPENSSL_PREFIX`
+// (supported public override — a valid prefix surfaces `-L<prefix>/lib`),
+// then the standard arm64 / Intel keg dirs, then `brew --prefix
+// openssl@3`, and finally a `pkg-config --libs-only-L openssl` fallback
+// for a non-Homebrew / system-registered OpenSSL (SFEP-0036 §3.1, #1821).
+// Emits nothing on Linux (default path). Darwin-gated via the same
+// `uname -s` probe `_dead_strip_link_flag` uses, so Linux argv stays
 // byte-identical (#1112).
 fn _openssl_link_search_flags() -> string[] ![io] {
     let os = _shell_read_cmd("uname -s");
@@ -734,8 +738,21 @@ fn _openssl_link_search_flags() -> string[] ![io] {
     // arm64 / Intel keg dirs) FIRST, and only shell out to `brew --prefix`
     // when none exist — command substitution in a `for` list would run
     // `brew` unconditionally (~100-300ms), and this probe fires on every
-    // link (incl. each `sfn test` per-binary link).
-    let probe = "d=\"\"; for c in \"${SAILFIN_OPENSSL_PREFIX:-}/lib\" /opt/homebrew/opt/openssl@3/lib /usr/local/opt/openssl@3/lib; do [ -d \"$c\" ] && { d=\"$c\"; break; }; done; [ -z \"$d\" ] && { p=\"$(brew --prefix openssl@3 2>/dev/null)\"; [ -n \"$p\" ] && [ -d \"$p/lib\" ] && d=\"$p/lib\"; }; printf %s \"$d\"";
+    // link (incl. each `sfn test` per-binary link). The override is guarded
+    // by `[ -n "$P" ]` so an UNSET `SAILFIN_OPENSSL_PREFIX` does not expand
+    // to the bare `/lib` candidate (which would wrongly short-circuit the
+    // keg/brew/pkg-config search on a host that happens to have a `/lib`
+    // dir); it only participates when explicitly set. The `pkg-config`
+    // fallback runs LAST and only when every `[ -d ]` keg check AND
+    // `brew --prefix` miss; it is guarded by `command -v pkg-config` so a
+    // host without `pkg-config` (or without a registered `openssl.pc`)
+    // yields empty output and the function returns `[]` exactly as before
+    // (#1112 keeps the fast keg-hit path free of any `brew`/`pkg-config`
+    // subshell). Homebrew's `openssl@3` is keg-only, so its `.pc` is
+    // generally off the default `pkg-config` path — this fallback targets
+    // system/registered OpenSSL, not the Homebrew case the keg/brew
+    // candidates already cover.
+    let probe = "d=\"\"; P=\"${SAILFIN_OPENSSL_PREFIX:-}\"; [ -n \"$P\" ] && [ -d \"$P/lib\" ] && d=\"$P/lib\"; [ -z \"$d\" ] && { for c in /opt/homebrew/opt/openssl@3/lib /usr/local/opt/openssl@3/lib; do [ -d \"$c\" ] && { d=\"$c\"; break; }; done; }; [ -z \"$d\" ] && { p=\"$(brew --prefix openssl@3 2>/dev/null)\"; [ -n \"$p\" ] && [ -d \"$p/lib\" ] && d=\"$p/lib\"; }; [ -z \"$d\" ] && command -v pkg-config >/dev/null 2>&1 && { L=\"$(pkg-config --libs-only-L openssl 2>/dev/null)\"; L=\"${L%% *}\"; c=\"${L#-L}\"; [ -n \"$c\" ] && [ -d \"$c\" ] && d=\"$c\"; }; printf %s \"$d\"";
     let dir = _shell_read_cmd(probe);
     if dir.length == 0 { return []; }
     return ["-L" + dir];

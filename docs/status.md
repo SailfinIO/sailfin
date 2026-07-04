@@ -113,6 +113,20 @@ here.
   `process.run`. The seam is the prerequisite for the LLVM C-API backend (#347)
   and the seal-sufficient native backend (#1640) to plug in without
   re-hardcoding LLVM across the driver.
+- **Build-host OpenSSL dependency** (SFEP-0036, #1782/#1821). The native
+  runtime links `-lssl -lcrypto` (TLS; `runtime/sfn/platform/tls.sfn`), so
+  **every** Sailfin binary — including the compiler and each per-test binary
+  the suite links — needs OpenSSL present on the link host, the same class of
+  build-host dependency as `-lm` / `-lpthread`. On Linux `libssl-dev` sits on
+  clang's default search path (no-op). On macOS Homebrew's `openssl@3` is
+  keg-only, so the build driver injects a single `-L<openssl>/lib` link-search
+  flag (`_openssl_link_search_flags`, `compiler/src/build/runtime_objs.sfn`):
+  it honors `SAILFIN_OPENSSL_PREFIX` (a supported public override) first, then
+  the standard kegs, `brew --prefix openssl@3`, and a `pkg-config
+  --libs-only-L openssl` fallback for non-Homebrew installs. Dead-strip drops
+  the unreferenced `SSL_*` symbols from binaries that never call TLS, but the
+  libraries are still linked, so their presence on the host is mandatory. See
+  the OpenSSL build-dependency runbook (`docs/runbooks/openssl-build-dependency.md`).
 - **Effect enforcement is a build gate** (Phases A–F, shipped 2026-04-26):
   `validate_effects()` runs from every `compile_to_*` entry and fails the
   build on undeclared effects. `SAILFIN_EFFECT_ENFORCE=warning|off` are the
