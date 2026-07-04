@@ -4,6 +4,7 @@
 // Extracted from typecheck.sfn to keep file sizes manageable.
 import {
     EnumVariant,
+    Expression,
     FieldDeclaration,
     FunctionSignature,
     MethodDeclaration,
@@ -228,6 +229,169 @@ fn check_bare_fn_type_annotation(annotation: TypeAnnotation?, anchor_name: strin
     return [make_bare_fn_type_diagnostic(annotation.text, token_from_name(anchor_name, anchor_span))];
 }
 
+// -------------------------------------------------------------------
+// SFEP-0039 (#1860): nominal object model — honest rejection of the
+// TypeScript-shaped data constructs the nominal backend never
+// implemented. E0828 rejects a bare object literal without a concrete
+// `struct` target; E0829 rejects `A & B` used as a data / value type.
+// Data is only ever constructed through a concrete `struct` (the #1855
+// object-literal path). Design record:
+// docs/proposals/0039-nominal-object-model.md.
+// -------------------------------------------------------------------
+// Split a type annotation on top-level `&`, respecting `(`/`)` and
+// `<`/`>` nesting so an intersection nested inside generic arguments
+// (`Map<A & B, C>`) is not mistaken for a top-level intersection.
+// Mirrors `split_top_level_plus`; empty segments are dropped.
+fn split_top_level_ampersand(text: string) -> string[] {
+    let mut out: string[] = [];
+    let mut current: string = "";
+    let mut depth: int = 0;
+    let mut index: int = 0;
+    loop {
+        if index >= text.length { break; }
+        let ch = text[index];
+        if ch == "(" {
+            depth += 1;
+            current = current + ch;
+        } else if ch == ")" {
+            if depth > 0 { depth -= 1; }
+            current = current + ch;
+        } else if ch == "<" {
+            depth += 1;
+            current = current + ch;
+        } else if ch == ">" {
+            if depth > 0 { depth -= 1; }
+            current = current + ch;
+        } else if ch == "&" {
+            if depth == 0 {
+                let trimmed = trim_text(current);
+                if trimmed.length > 0 { out.push(trimmed); }
+                current = "";
+                index += 1;
+                continue;
+            }
+            current = current + ch;
+        } else { current = current + ch; }
+        index += 1;
+    }
+    let trimmed_last = trim_text(current);
+    if trimmed_last.length > 0 { out.push(trimmed_last); }
+    return out;
+}
+
+// A type annotation is an intersection when two or more operands are
+// joined by a top-level `&` (`A & B`, `Admin & User`). A stray leading
+// or trailing `&`, or a `&` only inside generic arguments, yields
+// fewer than two operands and is not treated as an intersection.
+fn type_annotation_is_intersection(text: string) -> boolean {
+    return split_top_level_ampersand(text).length >= 2;
+}
+
+// E0829: an intersection `A & B` used as a data / value type. The
+// fix-it steers to the two sanctioned paths — a concrete `struct`
+// implementing both interfaces, or a generic bound when the intent is
+// "a value satisfying both" (SFEP-0038 bounds are `+`-separated).
+fn make_intersection_value_type_diagnostic(type_text: string, anchor: Token?) -> Diagnostic {
+    let bare = trim_text(type_text);
+    let fix = FixSuggestion {
+        message: "declare a concrete `struct` that implements both interfaces and annotate with it; "
+            + "for a value satisfying both interfaces in a generic context, use a `+`-separated bound "
+            + "such as `<T: A + B>` (SFEP-0038)",
+        edits: []
+    };
+    return Diagnostic {
+        code: "E0829",
+        severity: "error",
+        message: "intersection type `" + bare
+            + "` is not a data type; `A & B` is reserved for generic trait bounds",
+        file_path: "",
+        primary: anchor,
+        suggestion: fix
+    };
+}
+
+// Reject an intersection `A & B` in any value / type-annotation
+// position (variable, parameter, struct/enum field, return type, and
+// the RHS of a `type X = A & B` alias). Bound position (`<T: A + B>`)
+// is resolved through `check_type_parameters`, never this helper, so
+// generic bounds are untouched (SFEP-0039 §3.3).
+fn check_intersection_value_type_annotation(annotation: TypeAnnotation?, anchor_name: string, anchor_span: SourceSpan?) -> Diagnostic[] {
+    if annotation == null { return []; }
+    if !type_annotation_is_intersection(annotation.text) { return []; }
+    return [make_intersection_value_type_diagnostic(annotation.text, token_from_name(anchor_name, anchor_span))];
+}
+
+// E0828: a bare object literal whose target is not a concrete `struct`.
+// `is_interface` selects between the interface-target and the
+// un-inferable-unannotated wording.
+fn make_object_literal_requires_struct_diagnostic(target: string, is_interface: boolean, anchor_name: string, anchor_span: SourceSpan?) -> Diagnostic {
+    let anchor = token_from_name(anchor_name, anchor_span);
+    let mut message: string = "";
+    if is_interface {
+        message = "object literal requires a concrete `struct` type; `"
+            + trim_text(target)
+            + "` is an interface, not a struct";
+    } else {
+        message = "object literal requires a concrete `struct` type annotation; "
+            + "its target type cannot be inferred";
+    }
+    let fix = FixSuggestion {
+        message: "declare a `struct` with these fields and annotate the binding with it "
+            + "(data is constructed only through concrete structs)",
+        edits: []
+    };
+    return Diagnostic {
+        code: "E0828",
+        severity: "error",
+        message: message,
+        file_path: "",
+        primary: anchor,
+        suggestion: fix
+    };
+}
+
+// Head type name of a value annotation, stripping a trailing optional
+// marker (`Named?` -> `Named`) so an object literal targeting an
+// optional interface is still classified by its head type. Broader
+// wrapper normalization (array `T[]`, generic-instantiation heads) and
+// the return/parameter positions are the coverage follow-up (#1900).
+fn _object_literal_head_type(text: string) -> string {
+    let mut head = trim_text(text);
+    loop {
+        if head.length == 0 { break; }
+        if head[head.length - 1] == "?" {
+            head = trim_text(substring(head, 0, head.length - 1));
+        } else { break; }
+    }
+    return head;
+}
+
+// Reject a bare object literal (`{ ... }`) whose target type is not a
+// registered concrete `struct`: an interface target, or an
+// un-inferable unannotated binding. A direct or aliased intersection
+// target is left to E0829, which takes precedence (SFEP-0039 §3.3); an
+// unknown / type-alias / enum target is left unflagged (conservative —
+// avoids false positives on imported or aliased names, and the
+// alias-to-intersection case is already reported at the alias
+// definition). The concrete-`struct` target is the sanctioned #1855
+// construction path and compiles unchanged.
+fn check_object_literal_target(initializer: Expression?, annotation: TypeAnnotation?, anchor_name: string, anchor_span: SourceSpan?, top_level: SymbolEntry[]) -> Diagnostic[] {
+    if initializer == null { return []; }
+    if initializer.variant != "Object" { return []; }
+    if annotation == null {
+        return [make_object_literal_requires_struct_diagnostic("", false, anchor_name, anchor_span)];
+    }
+    let text = trim_text(annotation.text);
+    if type_annotation_is_intersection(text) { return []; }
+    let head = _object_literal_head_type(text);
+    let target = find_symbol(top_level, head);
+    if target == null { return []; }
+    if strings_equal(target.kind, "interface") {
+        return [make_object_literal_requires_struct_diagnostic(head, true, anchor_name, anchor_span)];
+    }
+    return [];
+}
+
 fn check_struct_fields(fields: FieldDeclaration[]) -> Diagnostic[] {
     let mut seen: string[] = [];
     let mut diagnostics: Diagnostic[] = [];
@@ -241,6 +405,7 @@ fn check_struct_fields(fields: FieldDeclaration[]) -> Diagnostic[] {
             diagnostics.push(make_duplicate_symbol_diagnostic(name, "struct field", token_from_name(name, field.name_span)));
         } else { seen.push(name); }
         diagnostics = diagnostics.concat(check_bare_fn_type_annotation(field.type_annotation, name, field.name_span));
+        diagnostics = diagnostics.concat(check_intersection_value_type_annotation(field.type_annotation, name, field.name_span));
         _fi += 1;
     }
 
@@ -905,6 +1070,7 @@ fn check_enum_variants(variants: EnumVariant[]) -> Diagnostic[] {
             if _evf >= variant.fields.length { break; }
             let field = variant.fields[_evf];
             diagnostics = diagnostics.concat(check_bare_fn_type_annotation(field.type_annotation, field.name, field.name_span));
+            diagnostics = diagnostics.concat(check_intersection_value_type_annotation(field.type_annotation, field.name, field.name_span));
             _evf += 1;
         }
         _vi += 1;
@@ -945,9 +1111,11 @@ fn check_function_signature(signature: FunctionSignature, interfaces: Statement[
         if _pi >= signature.parameters.length { break; }
         let parameter = signature.parameters[_pi];
         diagnostics = diagnostics.concat(check_bare_fn_type_annotation(parameter.type_annotation, parameter.name, parameter.span));
+        diagnostics = diagnostics.concat(check_intersection_value_type_annotation(parameter.type_annotation, parameter.name, parameter.span));
         _pi += 1;
     }
     diagnostics = diagnostics.concat(check_bare_fn_type_annotation(signature.return_type, signature.name, signature.name_span));
+    diagnostics = diagnostics.concat(check_intersection_value_type_annotation(signature.return_type, signature.name, signature.name_span));
     return diagnostics;
 }
 

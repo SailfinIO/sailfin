@@ -181,6 +181,18 @@ here.
   signatures, variable declarations (scope- and lambda-body-local), struct
   fields, lambda parameter/return annotations, enum variant fields, and type
   aliases.
+- **Nominal object model — object literals and intersections** (`E0828`/`E0829`,
+  SFEP-0039, #1860): data is constructed only through a concrete `struct`. A
+  bare object literal `{ ... }` whose resolved target is an **interface**, or
+  an unannotated `let` the compiler cannot infer a struct for, fails typecheck
+  with `E0828`; `let p: Person = { name: "Alice" }` against a `struct Person`
+  is the sanctioned path (#1855) and is unaffected. Separately, `A & B` used as
+  a **data/value type** (variable, parameter, field, or return annotation, or
+  the RHS of a `type X = A & B` alias) fails typecheck with `E0829` — `A & B`
+  stays in the grammar but is reserved for generic trait-bound composition
+  (`<T: A + B>`, SFEP-0038) and is not diagnosed in bound position. The sibling
+  rule that interface members must be method signatures (`E0827`) is designed
+  in SFEP-0039 but **not yet enforced** — tracked separately in #1888.
 
 ## Feature Matrix
 
@@ -190,10 +202,10 @@ here.
 | `thread_local let mut` | Shipped | Top-level only; ELF TLS; immutable form rejected (`E0807`) |
 | Functions (`fn`) | Shipped | Generics, default params, decorators |
 | `async fn` | Parsed | Structural only; `spawn`/`await` on spawned tasks works end-to-end (v0, #1084 closed, #1474/#1477/#1546); `await` on `async fn` return values is not wired into the live typecheck walk (pending #829). Use `spawn fn() -> T { ... }` + `await` instead |
-| Structs | Shipped | Generic params, `implements` clause |
-| Interfaces | Shipped | Trait-style method signatures |
+| Structs | Shipped | Generic params, `implements` clause. Sole sanctioned bare-object-literal target (`E0828`, SFEP-0039, #1860) — a literal targeting an interface or an un-inferable unannotated `let` is rejected |
+| Interfaces | Shipped | Trait-style method signatures. Nominal model intent is method-only contracts (SFEP-0039); data-field-shaped members are still parsed without a diagnostic pending `E0827` enforcement (#1888) |
 | Enums / ADTs | Shipped | Payload variants; generic payloads monomorphise per instantiation (#830). >8-byte by-value payload layouts not yet emitted |
-| Type aliases | Shipped | Including generic params |
+| Type aliases | Shipped | Including generic params. `A & B` is reserved for generic trait bounds, not a data type — `type X = A & B` is rejected at the definition (`E0829`, SFEP-0039, #1860) |
 | Module exports | **Shipped** | Block form `export { name };` / `export { x } from "./m";` and inline `export <declaration>` (`export fn`/`export struct`/`export enum`/`export interface`/`export type`/`export let`/`export extern …`/`export thread_local let mut`). Inline form added in SFEP-0031 (#1681); equivalent to `<decl> export { name };` |
 | `if`/`else`, `for` | Shipped | |
 | `loop` / `break` / `continue` | Shipped | `while` is intentionally not a keyword (`E0411` with a `loop` fix-it) |

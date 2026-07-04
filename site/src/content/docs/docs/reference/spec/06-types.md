@@ -55,9 +55,43 @@ boundaries — bindings, call arguments, struct fields, and arithmetic operands:
 
 **Composite types**: structs, enums, arrays (`T[]`)
 
+**Object literals require a concrete `struct` target**: data is constructed
+only through a `struct`. A bare object literal `{ ... }` resolves its shape
+against the annotation or contextual type it targets; if that target is an
+**interface**, or the binding is unannotated and no concrete struct can be
+inferred, the literal is a typecheck error (`E0828`). The sanctioned path is
+a `struct` annotation:
+
+```sfn
+struct Person { name: string; }
+interface Named { fn name() -> string; }
+
+let p: Person = { name: "Alice" };   // OK — concrete struct target
+let n: Named  = { name: "Alice" };   // E0828 — Named is an interface, not a struct
+let u         = { name: "Alice" };   // E0828 — no inferable struct target
+```
+
 **Optional types**: `T?` — the value is `T` or `null`
 
 **Union types**: `A | B` — the value is either type; matched with `match`
+
+**Intersection types (`A & B`) are not a data type**: the grammar accepts
+`A & B` as a `Type`, but using it as a **data/value type** — a variable,
+parameter, struct/enum field, or return-type annotation, or the RHS of a
+`type X = A & B` alias — is a typecheck error (`E0829`). It is never
+decomposed into a structural record of both interfaces' members; the nominal
+object model has no such structural type. `A & B` is *reserved* for generic
+trait-bound composition — a bound is written `+`-separated (`<T: A + B>`, per
+SFEP-0038), not with `&` — and stays undiagnosed in bound position; only
+data/value-type uses are rejected. See SFEP-0039 for the full rationale.
+
+```sfn
+interface Named  { fn name() -> string; }
+interface Scoped { fn is_admin() -> boolean; }
+
+type AdminUser = Named & Scoped;         // E0829 — intersection at the alias definition
+let x: Named & Scoped = get_admin();     // E0829 — intersection in annotation position
+```
 
 **Generic types**: user-declared generics (`fn first<T>(items: T[]) -> T?`).
 `Result<T, E>` is on the [roadmap](/roadmap); use union return types
