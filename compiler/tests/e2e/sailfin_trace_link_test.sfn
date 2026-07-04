@@ -73,3 +73,22 @@ test "trace-link: unset leaves the link path silent" ![io] {
     let err = _build_stderr(main_path, dir + "/silent-bin", false);
     assert ! contains(err, "[trace-link]");
 }
+
+fn _write_test_fixture(dir: string) -> string ![io] {
+    let path = dir + "/probe_test.sfn";
+    fs.writeFile(path, "test \"trace-link probe: trivial\" { assert true; }\n");
+    return path;
+}
+
+// `LlvmTextBackend.link` has a separate `test_mode` argv layout; `sfn test`
+// links each test binary through it, so guard that branch too — the flag
+// must surface the test-layout argv, not only the program/build layout.
+test "trace-link: SAILFIN_TRACE_LINK=1 echoes the test-layout link argv" ![io] {
+    let dir = _scratch_dir();
+    let test_path = _write_test_fixture(dir);
+    let _exit = process.run_capture([_sfn_bin(), "test", test_path], _child_env(true));
+    let _out = process.capture_take_stdout();
+    let err = process.capture_take_stderr();
+    assert contains(err, "[trace-link]");
+    assert contains(err, "clang");
+}

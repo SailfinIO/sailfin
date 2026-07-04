@@ -36,6 +36,9 @@
 // importing this module (and emitting the `LlvmTextBackend` vtable). See
 // that file's header for the seed-lowering reason (#1730).
 import { _llvm_text_assemble_argv } from "./build/clang_argv";
+// `_env_flag` gives `SAILFIN_TRACE_LINK` the same toggle semantics ("",
+// "0", "false" are off) as the other `SAILFIN_TRACE_*` knobs.
+import { _env_flag } from "./build_flags";
 
 // Reserved opaque object-file handle for later backend stages (#347 /
 // #1640 produce these in-process). Stage 0's `LlvmTextBackend` returns
@@ -145,17 +148,15 @@ fn _llvm_text_link_program_argv(plan: LinkPlan) -> string[] {
 // argv (#1908): a read-only observability aid that prints exactly the argv
 // `_llvm_text_link_{program,test}_argv` already returns, so link-flag tests
 // can assert on the argv directly instead of proving honoring behaviorally
-// (the #1902 follow-up). The env is read once and all string work is
-// skipped when unset, so the unset fast path stays free of per-link cost —
-// output is byte-identical to an untraced link (the #1112 zero-behaviour
-// gate). Lives as a free function (not a struct method) to match the
-// module's self-host shape; the caller binds the argv to a local so the
-// echoed slice is the same one handed to `process.run`.
+// (the #1902 follow-up). The toggle uses the shared `_env_flag` helper so
+// its semantics match the other `SAILFIN_TRACE_*` knobs, and all string
+// work is skipped when unset, so the unset fast path stays free of per-link
+// cost — output is byte-identical to an untraced link (the #1112
+// zero-behaviour gate). Lives as a free function (not a struct method) to
+// match the module's self-host shape; the caller binds the argv to a local
+// so the echoed slice is the same one handed to `process.run`.
 fn _llvm_text_trace_link(argv: string[]) ![io] {
-    let v = env.get("SAILFIN_TRACE_LINK");
-    if v.length == 0 { return; }
-    if v == "0" { return; }
-    if v == "false" { return; }
+    if !_env_flag("SAILFIN_TRACE_LINK") { return; }
     let mut line: string = "[trace-link]";
     let mut i: int = 0;
     loop {
