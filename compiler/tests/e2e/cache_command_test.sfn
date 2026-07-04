@@ -139,7 +139,7 @@ test "cache: prune --max-age removes old entries and keeps fresh ones" ![io] {
     _seed_entry(base, "aa", "old_entry");
     _seed_entry(base, "bb", "fresh_entry");
     // Age one entry well past the threshold; the other stays at ~now.
-    process.run(["touch", "-d", "2000-01-01", base + "/v2/aa/old_entry"]);
+    process.run(["touch", "-t", "200001010000", base + "/v2/aa/old_entry"]);
     let r = _run_cache(base, ["prune", "--max-age", "30"]);
     assert r.exit == 0;
     assert ! fs.exists(base + "/v2/aa/old_entry");
@@ -178,9 +178,9 @@ test "cache: prune --max-size evicts oldest-first (partial)" ![io] {
     _seed_big_entry(base, "bb", "middle");
     _seed_big_entry(base, "cc", "newest");
     // Distinct ages so LRU ordering is unambiguous (oldest → newest).
-    process.run(["touch", "-d", "2000-01-01", base + "/v2/aa/oldest"]);
-    process.run(["touch", "-d", "2001-01-01", base + "/v2/bb/middle"]);
-    process.run(["touch", "-d", "2002-01-01", base + "/v2/cc/newest"]);
+    process.run(["touch", "-t", "200001010000", base + "/v2/aa/oldest"]);
+    process.run(["touch", "-t", "200101010000", base + "/v2/bb/middle"]);
+    process.run(["touch", "-t", "200201010000", base + "/v2/cc/newest"]);
     // Three ~200 KiB entries (~600 KiB total) under a 450 KiB cap: exactly
     // one eviction is needed, and it must be the oldest.
     let r = _run_cache(base, ["prune", "--max-size", "450000"]);
@@ -224,9 +224,11 @@ test "cache: a cache hit refreshes entry mtime (verified by prune ordering)" ![i
     let info1 = _run_cache(base, ["info"]);
     assert find(info1.out, "entries: 0", 0) < 0;
 
-    // Age every cache entry into the distant past.
+    // Age every cache entry into the distant past. `touch -t` (not `-d`)
+    // for GNU/BSD portability — the macOS-arm64 CI leg's BSD touch does
+    // not accept the GNU `-d YYYY-MM-DD` form.
     process.run(["bash", "-c", "find '" + base
-        + "/v2' -mindepth 2 -maxdepth 2 -type d -exec touch -d 2000-01-01 {} +"]);
+        + "/v2' -mindepth 2 -maxdepth 2 -type d -exec touch -t 200001010000 {} +"]);
 
     // Warm build in a *fresh* work-dir (B): every module restores from
     // the content-addressed cache, and each hit must touch the served
