@@ -1,0 +1,130 @@
+// End-to-end coverage for generic-struct monomorphization (#1871,
+// SFEP-0038 §3.3). Drives the production `sfn build` / `sfn emit llvm`
+// paths as subprocesses and asserts on the runtime behaviour and emitted
+// IR that the acceptance criteria pin:
+//
+//   1. `Box<T>` instantiated at int inline-lays-out `value` at pointer
+//      width and reads back correctly (exit 42, stdout "42").
+//   2. The specialized `%Box$int` struct type is concrete (no `%T` member)
+//      and the generic `%Box` type is dropped from the emitted IR.
+//   3. `Pair<A, B>` instantiated at <int, string> lays out both fields
+//      inline at their concrete widths and both round-trip.
+//   4. The specialized `%Pair$int$string` struct type carries no `%A`/`%B`
+//      member tokens.
+//
+// Matchers note: the `sfn/test` `expect_*` matchers are `![pure]` and so
+// cannot be called from an `![io]` test; assert on captured output / IR
+// text with `sfn/strings` predicates instead (#842). Build/emit isolation
+// follows `.claude/rules/no-bash-e2e.md`: the full parent environment is
+// threaded (PATH for clang/ld, SAILFIN_TEST_SCRATCH for per-invocation
+// build-cache isolation under the parallel pool).
+import { contains, find, split } from "sfn/strings";
+
+fn _sfn_bin() -> string ![io] {
+    let configured = env.get("SAILFIN_BIN");
+    if configured.length > 0 { return configured; }
+    return "build/native/sailfin";
+}
+
+fn _child_env() -> string[] ![io] { return process.environ(); }
+
+fn _scratch_dir() -> string ![io] {
+    let mut dir = env.get("SAILFIN_TEST_SCRATCH");
+    if dir.length == 0 { dir = "/tmp"; }
+    fs.createDirectory(dir, true);
+    return dir;
+}
+
+// Emit the fixture's LLVM IR and return its text (or "" on failure). `tag`
+// keeps the per-invocation `.ll` path unique for the parallel pool.
+fn _emit_ir(fixture: string, tag: string) -> string ![io] {
+    let dir = _scratch_dir();
+    let ll = dir + "/sfn-mono-" + tag + ".ll";
+    if fs.exists(ll) { fs.deleteFile(ll); }
+    let exit = process.run_capture([_sfn_bin(), "emit", "-o", ll, "llvm", fixture], _child_env());
+    let _o = process.capture_take_stdout();
+    let _e = process.capture_take_stderr();
+    if exit != 0 { return ""; }
+    if !fs.exists(ll) { return ""; }
+    let ir = fs.readFile(ll);
+    fs.deleteFile(ll);
+    return ir;
+}
+
+// Count lines that contain `a` and also contain `b` (when non-empty) — a
+// faithful stand-in for a per-line `grep -cE` over the emitted IR.
+fn _count_match(text: string, a: string, b: string) -> int {
+    let lines = split(text, "\n");
+    let mut n = 0;
+    let mut i = 0;
+    loop {
+        if i >= lines.length { break; }
+        let l = lines[i];
+        let mut ok = contains(l, a);
+        if ok && b.length > 0 { ok = contains(l, b); }
+        if ok { n += 1; }
+        i += 1;
+    }
+    return n;
+}
+
+// Build the fixture to a unique path and run it; stash stdout to `marker`
+// and return the run's exit code, or -100 if the build itself failed.
+fn _build_and_run(fixture: string, tag: string, marker: string) -> int ![io] {
+    let dir = _scratch_dir();
+    let bin = dir + "/sfn-mono-bin-" + tag;
+    if fs.exists(bin) { fs.deleteFile(bin); }
+    let build_exit = process.run_capture([_sfn_bin(), "build", "-o", bin, fixture], _child_env());
+    let _bo = process.capture_take_stdout();
+    let _be = process.capture_take_stderr();
+    if build_exit != 0 { return -100; }
+    let run_exit = process.run_capture([bin], _child_env());
+    let out = process.capture_take_stdout();
+    let _re = process.capture_take_stderr();
+    fs.writeFile(marker, out);
+    fs.deleteFile(bin);
+    return run_exit;
+}
+
+test "monomorphize struct e2e: Box<int> inline field reads back 42" ![io] {
+    let dir = _scratch_dir();
+    let marker = dir + "/sfn-mono-boxint.out";
+    if fs.exists(marker) { fs.deleteFile(marker); }
+    let exit = _build_and_run("compiler/tests/e2e/fixtures/mono_box_int.sfn", "boxint", marker);
+    assert exit == 42;
+    let out = fs.readFile(marker);
+    if fs.exists(marker) { fs.deleteFile(marker); }
+    assert find(out, "42", 0) >= 0;
+}
+
+test "monomorphize struct e2e: Box<int> emits a concrete specialized struct type" ![io] {
+    let ir = _emit_ir("compiler/tests/e2e/fixtures/mono_box_int.sfn", "boxintir");
+    assert ir.length > 0;
+    assert _count_match(ir, "%Box$int = type", "") >= 1;
+    // The specialized struct type is concrete — no type-param member. (Do
+    // not assert on bare standalone `%T = type opaque` prelude forward-decls;
+    // those are unrelated and predate this pass.)
+    assert _count_match(ir, "%Box$int = type", "%T") == 0;
+    // The generic struct type is dropped from the emitted IR.
+    assert _count_match(ir, "%Box ", "= type") == 0;
+}
+
+test "monomorphize struct e2e: Pair<int, string> both fields read back" ![io] {
+    let dir = _scratch_dir();
+    let marker = dir + "/sfn-mono-pair.out";
+    if fs.exists(marker) { fs.deleteFile(marker); }
+    let exit = _build_and_run("compiler/tests/e2e/fixtures/mono_pair_struct.sfn", "pair", marker);
+    assert exit == 7;
+    let out = fs.readFile(marker);
+    if fs.exists(marker) { fs.deleteFile(marker); }
+    assert find(out, "hello", 0) >= 0;
+    assert find(out, "7", 0) >= 0;
+}
+
+test "monomorphize struct e2e: Pair specialized type carries both concrete widths" ![io] {
+    let ir = _emit_ir("compiler/tests/e2e/fixtures/mono_pair_struct.sfn", "pairir");
+    assert ir.length > 0;
+    assert _count_match(ir, "%Pair$int$string = type", "") >= 1;
+    assert _count_match(ir, "%Pair$int$string = type", "%A") == 0;
+    assert _count_match(ir, "%Pair$int$string = type", "%B") == 0;
+}

@@ -1,0 +1,13 @@
+// Fixture for generic-struct monomorphization (#1871, SFEP-0038 §3.3): a
+// generic `Box<T>` instantiated at int. Inline field layout must store T at
+// pointer width so `b.value` reads back 42 (exit 42, stdout "42"), and the
+// specialized `%Box$int` struct type must carry no `%T` member.
+struct Box<T> {
+    value: T;
+}
+
+fn main() -> int ![io] {
+    let b = Box { value: 42 };
+    print.info(b.value);
+    return b.value;
+}
