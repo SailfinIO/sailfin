@@ -43,6 +43,32 @@ test "monomorphize struct: Box at int emits a specialized struct block" {
     assert ! _has(out, "value: T");
 }
 
+test "monomorphize struct: specialized header preserves a substituted implements clause" {
+    // A generic struct with a trailing `implements Foo<T>` clause must keep
+    // that clause (with `T` substituted) in the specialized header — only the
+    // struct's own type-parameter clause is dropped, not every `<...>` (#1896
+    // review).
+    let src = ".module m\n" + ".struct Wrap<T> implements Show<T>\n"
+        + ".layout struct name=Wrap size=8 align=8\n"
+        + ".layout field value type=T offset=0 size=8 align=8\n"
+        + "    .field value: T\n"
+        + ".endstruct\n"
+        + "\n"
+        + ".fn main() -> int\n"
+        + ".meta return int\n"
+        + ".meta effects none\n"
+        + "    .let w = Wrap { value: 5 }\n"
+        + "    ret 0\n"
+        + ".endfn\n";
+    let out = monomorphize_native_text(src);
+    // The implements clause survives with its argument substituted to int.
+    assert _has(out, ".struct Wrap$int implements Show<int>");
+    // The generic type-parameter clause on the struct itself is gone.
+    assert ! _has(out, ".struct Wrap$int<");
+    // The unsubstituted implements argument must not survive.
+    assert ! _has(out, "implements Show<T>");
+}
+
 test "monomorphize struct: module with no generic struct is a byte-for-byte no-op" {
     let src = ".module m\n" + ".struct Plain\n"
         + ".layout struct name=Plain size=8 align=8\n"

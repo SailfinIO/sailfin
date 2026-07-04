@@ -1149,11 +1149,13 @@ fn _mono_specialize_struct(gs: MonoStruct, inst: MonoInst) -> string {
         let raw = gs.lines[index];
         if index == 0 {
             // `.struct <name><clause> [implements ...]` -> mangled monomorphic
-            // header. Drop the type-parameter clause, then substitute any
-            // parameter tokens in the (rare) implements tail before renaming.
-            let stripped = _mono_strip_generics(raw);
-            let substituted = enum_inst_substitute_annotation(stripped, tp, args);
-            let after_kw = trim_text(substring(trim_text(substituted), 7, trim_text(substituted).length));
+            // header. Strip ONLY the struct's own type-parameter clause (the
+            // `<...>` abutting the name), then substitute type-param tokens in
+            // the remaining tail — so a trailing `implements Foo<T>` keeps its
+            // (substituted) arguments rather than having them erased (a blanket
+            // `_mono_strip_generics` would drop every `<...>`, including the
+            // implements clause).
+            let after_kw = trim_text(substring(trim_text(raw), 7, trim_text(raw).length));
             let mut nlen: int = 0;
             loop {
                 if nlen >= after_kw.length { break; }
@@ -1161,7 +1163,23 @@ fn _mono_specialize_struct(gs: MonoStruct, inst: MonoInst) -> string {
                     nlen += 1;
                 } else { break; }
             }
-            let tail = substring(after_kw, nlen, after_kw.length);
+            let mut rest: int = nlen;
+            if rest < after_kw.length && substring(after_kw, rest, rest + 1) == "<" {
+                let mut depth: int = 0;
+                loop {
+                    if rest >= after_kw.length { break; }
+                    let rc = substring(after_kw, rest, rest + 1);
+                    if rc == "<" { depth += 1; } else if rc == ">" {
+                        depth -= 1;
+                        if depth == 0 {
+                            rest += 1;
+                            break;
+                        }
+                    }
+                    rest += 1;
+                }
+            }
+            let tail = enum_inst_substitute_annotation(substring(after_kw, rest, after_kw.length), tp, args);
             out = out.push(".struct " + inst.mangled + tail);
         } else {
             out = out.push(enum_inst_substitute_annotation(raw, tp, args));
