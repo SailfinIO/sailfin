@@ -88,7 +88,7 @@ prints `Admin: ` and exits 0. `sfn check` is green throughout.
 The decision to commit to the nominal object model is fixed (see the header).
 The alternative — building a structural/dynamic object model (a real
 `sfn_mem_set_field`, dynamic field maps) — is explicitly *not* to be built:
-`sfn_mem_get_field` (`runtime/sfn/.../mem.sfn`) is a deliberate zeroed-safe-buffer
+`sfn_mem_get_field` (`runtime/sfn/memory/mem.sfn`) is a deliberate zeroed-safe-buffer
 stub, there is no `sfn_mem_set_field` anywhere in the repo, and real field access
 is the static GEP-replacement pass in `core_member_lowering.sfn`. A structural
 model would dilute the nominal backend the compiler already self-hosts on and
@@ -134,8 +134,8 @@ interface Named {
 
 **Where it fires.** In the interface member loop in `parser/declarations.sfn`:
 when `parse_interface_member` returns `success: false` **and** the pending
-tokens have a field shape (an identifier followed by the `:` / `->` type
-separator), emit `E0827` at the member's span and then continue error recovery
+tokens have a field shape (an identifier followed by a type separator — `:`,
+or the legacy `->`), emit `E0827` at the member's span and then continue error recovery
 by skipping the member (do not cascade). The check is a bounded lookahead the
 loop already has the position for; it replaces the unconditional
 `skip_struct_member` on the failure path. A member that is neither a valid `fn`
@@ -395,7 +395,7 @@ the decomposition). Required-in-pinned-seed: none.
   `parse_interface_member`, `skip_struct_member`); `ast.sfn`
   (`InterfaceDeclaration.members: FunctionSignature[]`, `TypeAnnotation.text`);
   `typecheck.sfn` / `typecheck_types.sfn` (`resolve_struct_info_from_llvm_type`,
-  annotation resolution); `llvm/.../instructions_let.sfn`,
+  annotation resolution); `llvm/lowering/instructions_let.sfn`,
   `expressions_helpers.sfn` (`default_return_literal` fall-through);
   `core_member_lowering.sfn` (static GEP field access);
-  `runtime/sfn/.../mem.sfn` (`sfn_mem_get_field` stub — no `set_field` exists).
+  `runtime/sfn/memory/mem.sfn` (`sfn_mem_get_field` stub — no `set_field` exists).
