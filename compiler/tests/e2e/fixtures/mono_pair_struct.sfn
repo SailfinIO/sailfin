@@ -1,0 +1,15 @@
+// Fixture for generic-struct monomorphization (#1871, SFEP-0038 §3.3): a
+// generic `Pair<A, B>` instantiated at <int, string>. Both fields lay out
+// inline at their concrete widths (`{ i64, i8* }`) and read back correctly
+// (exit 7, stdout contains "7" and "hello").
+struct Pair<A, B> {
+    first: A;
+    second: B;
+}
+
+fn main() -> int ![io] {
+    let p = Pair { first: 7, second: "hello" };
+    print.info(p.first);
+    print.info(p.second);
+    return p.first;
+}

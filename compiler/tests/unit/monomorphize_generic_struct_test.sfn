@@ -1,0 +1,88 @@
+// Unit coverage for generic-struct monomorphization (#1871, SFEP-0038
+// §3.3). Exercises the pure `monomorphize_native_text` text→text transform
+// directly on hand-written `.sfn-asm`: specializing a generic struct's
+// layout manifest and field declarations at a construct site, and the
+// byte-for-byte no-op on a module with no generic struct.
+//
+// At the native-IR level the mangled struct name is clean (`Box$int`) — the
+// module symbol suffix is applied later, in LLVM lowering — so these
+// assertions pin the mangling scheme without a build.
+import { contains } from "sfn/strings";
+
+import { monomorphize_native_text } from "../../src/llvm/monomorphize";
+
+fn _has(haystack: string, needle: string) -> boolean {
+    return contains(haystack, needle);
+}
+
+test "monomorphize struct: Box at int emits a specialized struct block" {
+    let src = ".module m\n" + ".struct Box<T>\n"
+        + ".layout struct name=Box size=8 align=8\n"
+        + ".layout field value type=T offset=0 size=8 align=8\n"
+        + "    .field value: T\n"
+        + ".endstruct\n"
+        + "\n"
+        + ".fn main() -> int\n"
+        + ".meta return int\n"
+        + ".meta effects none\n"
+        + "    .let b = Box { value: 42 }\n"
+        + "    ret 0\n"
+        + ".endfn\n";
+    let out = monomorphize_native_text(src);
+    // The specialized struct header exists.
+    assert _has(out, ".struct Box$int");
+    // The construct site is rewritten to target it.
+    assert _has(out, "Box$int { value: 42 }");
+    // The layout manifest line is substituted with the concrete type.
+    assert _has(out, "type=int");
+    // The field declaration is substituted with the concrete type.
+    assert _has(out, ".field value: int");
+    // The original generic definition is dropped (no leftover `Box<T>` header).
+    assert ! _has(out, ".struct Box<T>");
+    // No bare type-parameter token survives into the specialized field.
+    assert ! _has(out, "value: T");
+}
+
+test "monomorphize struct: specialized header preserves a substituted implements clause" {
+    // A generic struct with a trailing `implements Foo<T>` clause must keep
+    // that clause (with `T` substituted) in the specialized header — only the
+    // struct's own type-parameter clause is dropped, not every `<...>` (#1896
+    // review).
+    let src = ".module m\n" + ".struct Wrap<T> implements Show<T>\n"
+        + ".layout struct name=Wrap size=8 align=8\n"
+        + ".layout field value type=T offset=0 size=8 align=8\n"
+        + "    .field value: T\n"
+        + ".endstruct\n"
+        + "\n"
+        + ".fn main() -> int\n"
+        + ".meta return int\n"
+        + ".meta effects none\n"
+        + "    .let w = Wrap { value: 5 }\n"
+        + "    ret 0\n"
+        + ".endfn\n";
+    let out = monomorphize_native_text(src);
+    // The implements clause survives with its argument substituted to int.
+    assert _has(out, ".struct Wrap$int implements Show<int>");
+    // The generic type-parameter clause on the struct itself is gone.
+    assert ! _has(out, ".struct Wrap$int<");
+    // The unsubstituted implements argument must not survive.
+    assert ! _has(out, "implements Show<T>");
+}
+
+test "monomorphize struct: module with no generic struct is a byte-for-byte no-op" {
+    let src = ".module m\n" + ".struct Plain\n"
+        + ".layout struct name=Plain size=8 align=8\n"
+        + ".layout field v type=int offset=0 size=8 align=8\n"
+        + "    .field v: int\n"
+        + ".endstruct\n"
+        + "\n"
+        + ".fn main() -> int\n"
+        + ".meta return int\n"
+        + ".meta effects none\n"
+        + "    ret 0\n"
+        + ".endfn\n";
+    let out = monomorphize_native_text(src);
+    // Byte-for-byte identical — the guarantee that non-generic code (the whole
+    // compiler source) flows through untouched, preserving self-hosting.
+    assert out == src;
+}
