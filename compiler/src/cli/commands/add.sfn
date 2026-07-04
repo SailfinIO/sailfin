@@ -45,12 +45,7 @@ import {
     with_flag
 } from "sfn/cli";
 
-import {
-    _dirname_cmd,
-    _ensure_dir_recursive_cmd,
-    _sha256_of_file_cmd,
-    _shell_read_cmd
-} from "../../build/fs";
+import { _dirname_cmd, _ensure_dir_recursive_cmd, _sha256_of_file_cmd } from "../../build/fs";
 import { _get_home_cmd } from "../../build_flags";
 import { _display_capsule_name_cmd, _resolve_capsule_name_cmd } from "../../capsule_names";
 import { lock_add_entry, lock_get_version } from "../../lock";
@@ -103,6 +98,137 @@ fn _curl_post_json_cmd(url: string, body_path: string, auth_header: string) -> s
 
 fn _curl_download_cmd(url: string, output_path: string) -> int ![io] {
     return process.run(["curl", "-sfSL", "-o", output_path, url]);
+}
+
+// GET `url` and return the response body as a string ("" on any curl
+// error). Mirrors `_curl_post_json_cmd`'s file-based capture minus the
+// POST flags: the URL is passed as an argv element, never interpolated
+// into a shell string, so there is no shell-injection surface to defend.
+fn _curl_get_cmd(url: string) -> string ![io] {
+    let tmp = "/tmp/.sfn_curl_index_cmd_tmp";
+    let rc = process.run(["curl", "-sfS", "-o", tmp, url]);
+    if rc != 0 { return ""; }
+    if !fs.exists(tmp) { return ""; }
+    let response = fs.readFile(tmp);
+    process.run(["rm", "-f", tmp]);
+    return response;
+}
+
+// First index of `needle` in `haystack` at or after `start`, or -1.
+fn _find_substr_cmd(haystack: string, needle: string, start: int) -> int {
+    if needle.length == 0 { return start; }
+    if haystack.length < needle.length { return -1; }
+    let limit = haystack.length - needle.length;
+    let mut i: int = start;
+    loop {
+        if i > limit { break; }
+        if substring(haystack, i, i + needle.length) == needle { return i; }
+        i += 1;
+    }
+    return -1;
+}
+
+// Return the index just past the `}` matching the `{` at `open`, or -1 if
+// unbalanced. String contents (and escaped quotes) are skipped so braces
+// inside string values never affect nesting depth.
+fn _json_match_brace_cmd(body: string, open: int) -> int {
+    let mut depth: int = 0;
+    let mut i: int = open;
+    let mut in_string: boolean = false;
+    loop {
+        if i >= body.length { return -1; }
+        let ch = substring(body, i, i + 1);
+        if in_string {
+            if ch == "\\" {
+                i += 2;
+                continue;
+            }
+            if ch == "\"" { in_string = false; }
+            i += 1;
+            continue;
+        }
+        if ch == "\"" {
+            in_string = true;
+            i += 1;
+            continue;
+        }
+        if ch == "{" {
+            depth += 1;
+            i += 1;
+            continue;
+        }
+        if ch == "}" {
+            depth -= 1;
+            if depth == 0 { return i + 1; }
+            i += 1;
+            continue;
+        }
+        i += 1;
+    }
+}
+
+// Extract `capsules.<registry_name>.latest` from a registry index response
+// (`GET /api/index.json`, shape `{"capsules":{"<scope/name>":{"latest":
+// "..."}}}`). Hand-rolled rather than importing `sfn/json`: the target is
+// a single fixed field, and pulling the general parser into compiler
+// source carries a self-host workspace-resolver hang risk (#842) with no
+// `compiler/src/` precedent — this follows the `_package_extract_top_level`
+// house pattern (package.sfn). Returns "" when the capsule is absent or
+// carries no `latest`, matching the prior `python3` one-liner's
+// `.get(...,'')` semantics. Whitespace-tolerant (compact or pretty JSON).
+//
+// This is a *textual* anchor, not a full JSON key walk: equivalence with
+// `.get('capsules',{}).get(name,{}).get('latest','')` holds because the
+// index schema is flat and the only slash-bearing strings are capsule-name
+// keys (`registry_name` is slash-validated upstream; version values,
+// `"latest"`, and `"capsules"` contain no slash — so `"<name>"` can only
+// anchor on the real key). It would diverge only if the schema grew a
+// per-capsule string value containing a `/` before the key, or a nested
+// object carrying its own `"latest"` before the top-level one — neither
+// exists on today's index.
+fn _extract_index_latest_cmd(body: string, registry_name: string) -> string {
+    if body.length == 0 { return ""; }
+    if registry_name.length == 0 { return ""; }
+    // Descend into the `capsules` object first (mirrors the prior
+    // `.get('capsules',{})`), so a value elsewhere in the document that
+    // happens to equal the capsule name cannot be mistaken for its entry.
+    let caps_idx = _find_substr_cmd(body, "\"capsules\"", 0);
+    if caps_idx < 0 { return ""; }
+    // Anchor on the capsule's own entry key so a `latest` belonging to a
+    // sibling capsule can never be returned. The trailing quote in the key
+    // prevents a prefix collision (`acme/router` vs `acme/router-extras`).
+    let entry_key = "\"" + registry_name + "\"";
+    let entry_idx = _find_substr_cmd(body, entry_key, caps_idx);
+    if entry_idx < 0 { return ""; }
+    // Bound the search to this capsule's object value: opening brace to the
+    // matching close brace.
+    let brace_start = find_char_local(body, "{", entry_idx + entry_key.length);
+    if brace_start < 0 { return ""; }
+    let obj_end = _json_match_brace_cmd(body, brace_start);
+    if obj_end < 0 { return ""; }
+    let key_idx = _find_substr_cmd(body, "\"latest\"", brace_start);
+    if key_idx < 0 { return ""; }
+    if key_idx >= obj_end { return ""; }
+    // Skip past the colon (and any whitespace) to the value's opening quote.
+    let colon = find_char_local(body, ":", key_idx + 8);
+    if colon < 0 { return ""; }
+    if colon >= obj_end { return ""; }
+    let vq_start = find_char_local(body, "\"", colon + 1);
+    if vq_start < 0 { return ""; }
+    if vq_start >= obj_end { return ""; }
+    let value_start = vq_start + 1;
+    let mut end: int = value_start;
+    loop {
+        if end >= obj_end { return ""; }
+        let ch = substring(body, end, end + 1);
+        if ch == "\\" {
+            end += 2;
+            continue;
+        }
+        if ch == "\"" { break; }
+        end += 1;
+    }
+    return substring(body, value_start, end);
 }
 
 fn _extract_sfnpkg_cmd(content: string, dest_dir: string) -> void ![io] {
@@ -169,10 +295,11 @@ fn run(matches: Matches, ctx: CliContext) -> int ![io] {
     // `scope/name` format.
     let display_name = _display_capsule_name_cmd(registry_name);
 
-    // Validate scope/name up front — registry_name is interpolated into a
-    // shell pipeline below when fetching the index, and into the cache path
-    // and download URL after. Rejecting path-traversal and directory-separator
-    // characters early covers both the shell-injection and traversal risks.
+    // Validate scope/name up front — registry_name is interpolated into the
+    // cache path and download URL below. Rejecting path-traversal and
+    // directory-separator characters early covers the traversal risk. (The
+    // index fetch passes it as JSON data to `_extract_index_latest_cmd`, not
+    // through a shell, so there is no injection surface on that path.)
     let slash_pos = find_char_local(registry_name, "/", 0);
     if slash_pos < 0 {
         print("invalid capsule id — expected scope/name format: "
@@ -213,11 +340,8 @@ fn run(matches: Matches, ctx: CliContext) -> int ![io] {
     } else {
         print("fetching registry index...");
         let registry_base = _resolve_registry_url_cmd();
-        resolved_version = _shell_read_cmd("curl -sfS '" + registry_base
-            + "/api/index.json'"
-            + " | python3 -c \"import json,sys; d=json.load(sys.stdin); c=d.get('capsules',{}).get('"
-            + registry_name
-            + "',{}); print(c.get('latest',''))\" 2>/dev/null");
+        let index_body = _curl_get_cmd(registry_base + "/api/index.json");
+        resolved_version = _extract_index_latest_cmd(index_body, registry_name);
         if resolved_version.length == 0 {
             print("capsule not found in registry: " + registry_name);
             return 1;

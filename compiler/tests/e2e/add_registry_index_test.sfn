@@ -1,0 +1,237 @@
+// E2E tests for `sfn add` registry-index version resolution (#1894).
+//
+// `sfn add <capsule>` (without `--update` and with no lockfile entry)
+// resolves the dependency's latest version from the registry index
+// (`GET <registry>/api/index.json`). That resolution used to shell out to
+// `python3 -c "...json..."`; it is now parsed natively in
+// `compiler/src/cli/commands/add.sfn` (`_extract_index_latest_cmd`), so no
+// `python3` is spawned. These tests drive the native path via a
+// PATH-injected fake `curl` shim (NOT a real server): the shim writes a
+// canned `index.json` body for the index GET and exits non-zero for the
+// subsequent `.sfnpkg` download, so the test observes the resolved version
+// (`downloading <name>@<version>...`, printed before the download) without
+// needing a real package payload.
+//
+// `sfn add` reads/writes `capsule.toml` in the CWD and has no path arg, so
+// each case runs inside its own temp dir via a `cd <dir> && exec <sfn>`
+// bash vehicle (run_capture cannot chdir) with an ABSOLUTE compiler path.
+//
+// NOTE on matchers: the `sfn/test` `expect_*` matchers are `![pure]` and so
+// cannot be called from an `![io]` test; assert on captured stdout/stderr
+// with `sfn/strings::contains` instead. (#842.)
+import { contains, split } from "sfn/strings";
+
+fn _sfn_bin() -> string ![io] {
+    let configured = env.get("SAILFIN_BIN");
+    if configured.length > 0 { return configured; }
+    return "build/native/sailfin";
+}
+
+// Absolute path of the runner's working directory (repo root).
+fn _pwd() -> string ![io] {
+    let exit = process.run_capture(["pwd"], _child_env());
+    let out = process.capture_take_stdout();
+    let _e = process.capture_take_stderr();
+    if exit != 0 { return ""; }
+    return _first_line(out);
+}
+
+// Absolute compiler path: the tests `cd` into a temp dir before running,
+// so a repo-relative `build/native/sailfin` would not resolve.
+fn _sfn_bin_abs() -> string ![io] {
+    let bin = _sfn_bin();
+    if bin.length > 0 && bin[0] == "/" { return bin; }
+    let root = _pwd();
+    if root.length == 0 { return bin; }
+    return root + "/" + bin;
+}
+
+fn _child_env() -> string[] ![io] {
+    let mut e: string[] = [];
+    let path = env.get("PATH");
+    if path.length > 0 { e.push("PATH=" + path); }
+    let home = env.get("HOME");
+    if home.length > 0 { e.push("HOME=" + home); }
+    let tmpdir = env.get("TMPDIR");
+    if tmpdir.length > 0 { e.push("TMPDIR=" + tmpdir); }
+    let scratch = env.get("SAILFIN_TEST_SCRATCH");
+    if scratch.length > 0 { e.push("SAILFIN_TEST_SCRATCH=" + scratch); }
+    return e;
+}
+
+// Absolute scratch root. `SAILFIN_TEST_SCRATCH` is often the relative
+// `build/sailfin`; the tests `cd` into a temp dir via a bash vehicle, so a
+// relative shim-dir PATH entry would break after the `cd` (the shim would
+// silently fall through to the real `curl`). Anchor it to the repo root.
+fn _scratch_dir() -> string ![io] {
+    let mut dir = env.get("SAILFIN_TEST_SCRATCH");
+    if dir.length == 0 { dir = "/tmp"; }
+    if dir[0] != "/" {
+        let root = _pwd();
+        if root.length > 0 { dir = root + "/" + dir; }
+    }
+    fs.createDirectory(dir, true);
+    return dir;
+}
+
+fn _test_root(tag: string) -> string ![io] {
+    let root = _scratch_dir() + "/add-idx-" + tag;
+    fs.createDirectory(root, true);
+    return root;
+}
+
+fn _first_line(text: string) -> string {
+    let lines = split(text, "\n");
+    if lines.length == 0 { return text; }
+    return lines[0];
+}
+
+// Minimal consumer capsule so `add` gets past its `capsule.toml` guard.
+fn _make_consumer(dir: string) -> void ![io] {
+    fs.createDirectory(dir, true);
+    fs.writeFile(dir + "/capsule.toml", "[capsule]\nname = \"test/consumer\"\nversion = \"0.1.0\"\n\n[dependencies]\n");
+}
+
+fn _chmod_x(path: string) -> void ![io] {
+    let _ = process.run_capture(["chmod", "+x", path], _child_env());
+    let _o = process.capture_take_stdout();
+    let _e = process.capture_take_stderr();
+}
+
+// Fake `curl`: for a URL containing `index.json`, write `body` to the `-o`
+// target and exit 0; for anything else (the `.sfnpkg` download) exit 1.
+// `body` is embedded single-quoted, so it must contain no single quotes
+// (JSON here never does).
+fn _make_index_shim(dir: string, body: string) -> void ![io] {
+    fs.createDirectory(dir, true);
+    let shim = "#!/usr/bin/env bash\n" + "out_file=\"\"\n" + "url=\"\"\n"
+        + "prev=\"\"\n"
+        + "for arg in \"$@\"; do\n"
+        + "    if [ \"$prev\" = \"-o\" ]; then out_file=\"$arg\"; fi\n"
+        + "    url=\"$arg\"\n"
+        + "    prev=\"$arg\"\n"
+        + "done\n"
+        + "case \"$url\" in\n"
+        + "    *index.json*)\n"
+        + "        if [ -n \"$out_file\" ]; then\n"
+        + "            printf '%s' '"
+        + body
+        + "' > \"$out_file\"\n"
+        + "        fi\n"
+        + "        exit 0\n"
+        + "        ;;\n"
+        + "    *)\n"
+        + "        exit 1\n"
+        + "        ;;\n"
+        + "esac\n";
+    fs.writeFile(dir + "/curl", shim);
+    _chmod_x(dir + "/curl");
+}
+
+// Child env with a shim-prefixed PATH, forced HOME, and a deterministic
+// registry so the index URL host is fixed. `extra` appends KEY=value pairs.
+fn _env_for(home: string, shim_dir: string, extra: string[]) -> string[] ![io] {
+    let mut e: string[] = [];
+    let path = env.get("PATH");
+    e.push("PATH=" + shim_dir + ":" + path);
+    e.push("HOME=" + home);
+    e.push("SFN_REGISTRY=https://registry.test");
+    let tmpdir = env.get("TMPDIR");
+    if tmpdir.length > 0 { e.push("TMPDIR=" + tmpdir); }
+    let scratch = env.get("SAILFIN_TEST_SCRATCH");
+    if scratch.length > 0 { e.push("SAILFIN_TEST_SCRATCH=" + scratch); }
+    let mut i = 0;
+    loop {
+        if i >= extra.length { break; }
+        e.push(extra[i]);
+        i += 1;
+    }
+    return e;
+}
+
+// Run `sfn add <capsule>` in `workdir` (cd vehicle) with `home`/`shim_dir`.
+fn _run_add(workdir: string, home: string, shim_dir: string, capsule: string) -> string ![io] {
+    let sfn_abs = _sfn_bin_abs();
+    let e = _env_for(home, shim_dir, []);
+    let cmd = "cd \"" + workdir + "\" && exec \"" + sfn_abs + "\" add "
+        + capsule;
+    let _exit = process.run_capture(["bash", "-c", cmd], e);
+    let out = process.capture_take_stdout();
+    let err = process.capture_take_stderr();
+    return out + err;
+}
+
+// ---- Test 1: latest resolved natively from a compact index ----
+test "add: resolves latest from compact registry index" ![io] {
+    let root = _test_root("t1");
+    let home = root + "/home";
+    let workdir = root + "/work";
+    let shim_dir = root + "/shim";
+    _make_consumer(workdir);
+    _make_index_shim(shim_dir, "{\"capsules\":{\"acme/router\":{\"latest\":\"1.2.3\"}}}");
+    let all = _run_add(workdir, home, shim_dir, "acme/router");
+    // The version printed in the download line proves native resolution
+    // to 1.2.3 (no python3 involved).
+    assert contains(all, "downloading acme/router@1.2.3");
+    assert ! contains(all, "capsule not found in registry");
+}
+
+// ---- Test 2: whitespace-tolerant parse (pretty-printed index) ----
+test "add: resolves latest from pretty-printed index" ![io] {
+    let root = _test_root("t2");
+    let home = root + "/home";
+    let workdir = root + "/work";
+    let shim_dir = root + "/shim";
+    _make_consumer(workdir);
+    // Spaces after colons and around braces exercise the whitespace
+    // tolerance of the hand-rolled extractor.
+    _make_index_shim(shim_dir, "{ \"capsules\": { \"acme/router\": { \"latest\": \"4.5.6\" } } }");
+    let all = _run_add(workdir, home, shim_dir, "acme/router");
+    assert contains(all, "downloading acme/router@4.5.6");
+}
+
+// ---- Test 3: capsule absent from the index -> not found ----
+test "add: reports not found when capsule absent from index" ![io] {
+    let root = _test_root("t3");
+    let home = root + "/home";
+    let workdir = root + "/work";
+    let shim_dir = root + "/shim";
+    _make_consumer(workdir);
+    // The requested capsule has no entry at all (only an unrelated one),
+    // so resolution fails at the entry-key lookup.
+    _make_index_shim(shim_dir, "{\"capsules\":{\"other/pkg\":{\"latest\":\"9.9.9\"}}}");
+    let all = _run_add(workdir, home, shim_dir, "acme/router");
+    assert contains(all, "capsule not found in registry: acme/router");
+    assert ! contains(all, "downloading");
+}
+
+// ---- Test 4: capsule present but carries no `latest`; sibling has one ----
+// Exercises the object-bound guard: the requested capsule's object has no
+// `latest`, and a *sibling* that does must NOT bleed through.
+test "add: does not borrow a sibling's latest" ![io] {
+    let root = _test_root("t4");
+    let home = root + "/home";
+    let workdir = root + "/work";
+    let shim_dir = root + "/shim";
+    _make_consumer(workdir);
+    _make_index_shim(shim_dir, "{\"capsules\":{\"acme/router\":{\"version\":\"1.0.0\"},\"other/pkg\":{\"latest\":\"9.9.9\"}}}");
+    let all = _run_add(workdir, home, shim_dir, "acme/router");
+    assert contains(all, "capsule not found in registry: acme/router");
+    assert ! contains(all, "9.9.9");
+    assert ! contains(all, "downloading");
+}
+
+// ---- Test 5: prefix-collision — `acme/router` vs `acme/router-extras` ----
+// The longer-named sibling is listed FIRST; the trailing-quote anchor must
+// resolve the exact requested key, not the prefix match.
+test "add: resolves the exact key, not a prefix sibling" ![io] {
+    let root = _test_root("t5");
+    let home = root + "/home";
+    let workdir = root + "/work";
+    let shim_dir = root + "/shim";
+    _make_consumer(workdir);
+    _make_index_shim(shim_dir, "{\"capsules\":{\"acme/router-extras\":{\"latest\":\"7.7.7\"},\"acme/router\":{\"latest\":\"1.2.3\"}}}");
+    let all = _run_add(workdir, home, shim_dir, "acme/router");
+    assert contains(all, "downloading acme/router@1.2.3");
+    assert ! contains(all, "7.7.7");
+}
