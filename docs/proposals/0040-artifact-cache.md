@@ -1,18 +1,18 @@
 ---
-sfep: TBD
+sfep: 0040
 title: Global Artifact Cache Store and Garbage Collection
-status: Draft
+status: Accepted
 type: tooling
 created: 2026-07-04
 updated: 2026-07-04
 author: "agent:compiler-architect; human review"
-tracking:
+tracking: "#1892, #1893"
 supersedes:
 superseded-by:
 graduates-to:
 ---
 
-# SFEP-XXXX — Global Artifact Cache Store and Garbage Collection
+# SFEP-0040 — Global Artifact Cache Store and Garbage Collection
 
 ## 1. Summary
 

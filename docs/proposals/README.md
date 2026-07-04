@@ -62,6 +62,7 @@ The next number is `max + 1`. Add a row in the same PR that introduces an SFEP.
 | [0037](./0037-peer-language-process-adoption.md) | Peer-Language Process Adoption — Merge Queue, ICE Discipline, Perf History, Corpus Runs | Accepted | process |
 | [0038](./0038-generic-constraints.md) | Generic Type Parameter Constraints and Monomorphization | Accepted | language |
 | [0039](./0039-nominal-object-model.md) | Nominal Object Model — Honest Rejection of TypeScript-Shaped Data Syntax | Accepted | language |
+| [0040](./0040-artifact-cache.md) | Global Artifact Cache Store and Garbage Collection | Accepted | tooling |
 
 ## Drafts under review (numbers assigned at merge)
 
@@ -79,7 +80,6 @@ language gaps surfaced by the 2026-07 grammar/object-model audit:
 | [`draft-derive`](./draft-derive.md) | Derivable Interface Implementations (`@derive`) | language |
 | [`draft-string-interpolation-dollar`](./draft-string-interpolation-dollar.md) | String Interpolation with `${ }` (migrating off `{{ }}`) | language |
 | [`draft-nullable-access-operators`](./draft-nullable-access-operators.md) | Nullable Access Operators (`?.` and `??`) | language |
-| [`draft-artifact-cache`](./draft-artifact-cache.md) | Global Artifact Cache Store and Garbage Collection | tooling |
 
 SFEP-0038 (`0038-generic-constraints.md`, Accepted) is the root foundation:
 `draft-generic-collections`, `draft-derive`, and SFEP-0028 all depend on it. Draft diagnostic codes are
