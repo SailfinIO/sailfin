@@ -1072,6 +1072,13 @@ able to act on link failures.
 - The build report (`--json`) lists cache hits/misses per module. CI can
   fail the build if the hit rate drops below a threshold (regression
   signal).
+- `sfn cache info/prune/clean` (SFEP-0040 §3.2–3.4) provides bounded-size GC
+  over this same store: `info` reports the resolved root, entry count, and
+  total on-disk size; `prune [--max-size <bytes>] [--max-age <days>]` evicts
+  entries oldest-first by mtime (touched on cache hit, so eviction order is
+  true LRU) down to a size/age bound, opt-in only (no implicit prune on
+  ordinary builds); `clean [--all-schemas]` extends `--clean` to optionally
+  sweep stale sibling `v<M>` schema trees as well as the current one.
 
 Determinism: the fixed-point check currently in `make check` (stage2 vs
 stage3 IR hashes) becomes a first-class assertion of the driver. If two
@@ -1583,9 +1590,10 @@ actual split is an ecosystem-maturity cleanup.
 1. **Workspace file location.** Does the shipped stdlib workspace file
    live at `$PREFIX/lib/sailfin/workspace.toml` (Unix convention) or
    next to the binary? Affects how installers lay things out.
-2. **Cache eviction.** Bounded by size, age, or never? A compiler build
-   is ~120 modules × ~1 MB each ≈ 120 MB per successful build; CI
-   caches could bloat quickly.
+2. **Cache eviction.** Resolved by SFEP-0040 §3.2–3.4 (#1893): bounded by
+   size and age via the explicit, opt-in `sfn cache prune`
+   (`--max-size`/`--max-age`, LRU by mtime-on-hit) and `sfn cache clean
+   [--all-schemas]` — never implicit on an ordinary build.
 3. **Per-target sub-graphs.** Cross-compilation to wasm32 needs a
    different runtime capsule. Does the driver build both graphs in one
    invocation (`sfn build --target=native --target=wasm32`) or require
