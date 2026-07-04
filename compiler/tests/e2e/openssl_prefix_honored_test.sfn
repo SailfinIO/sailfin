@@ -66,23 +66,37 @@ fn _scratch_dir() -> string ![io] {
 // parallel pool) with an explicit `SAILFIN_OPENSSL_PREFIX` appended. Any
 // ambient copy is dropped first so the child sees exactly the value under
 // test regardless of the platform's duplicate-key getenv precedence.
+//
+// It ALSO strips `LIBRARY_PATH` (and `DYLD_FALLBACK_LIBRARY_PATH`) from the
+// child so `SAILFIN_OPENSSL_PREFIX` *solely* determines where the link finds
+// OpenSSL. CI's macOS legs export `LIBRARY_PATH=<keg>/lib` (the
+// `Provision OpenSSL link path` step), which clang also searches for `-l`
+// resolution — so without stripping it, a bogus override `-L` would be
+// masked by `LIBRARY_PATH` and the negative leg's link would wrongly
+// succeed. Removing it makes both legs sound proofs of honoring, independent
+// of CI provisioning. `-lm` / `-lpthread` live on the default SDK path (not
+// `LIBRARY_PATH`), so stripping it only removes the OpenSSL keg confound.
 fn _env_with_prefix(prefix: string) -> string[] ![io] {
     let base = process.environ();
     let mut e: string[] = [];
     let mut i = 0;
     loop {
         if i >= base.length { break; }
-        if !_contains_prefix_key(base[i]) { e.push(base[i]); }
+        if !_is_stripped_env_key(base[i]) { e.push(base[i]); }
         i = i + 1;
     }
     e.push("SAILFIN_OPENSSL_PREFIX=" + prefix);
     return e;
 }
 
-fn _contains_prefix_key(entry: string) -> boolean {
-    let key = "SAILFIN_OPENSSL_PREFIX=";
+fn _has_key(entry: string, key: string) -> boolean {
     if entry.length < key.length { return false; }
     return substring(entry, 0, key.length) == key;
+}
+
+fn _is_stripped_env_key(entry: string) -> boolean {
+    return _has_key(entry, "SAILFIN_OPENSSL_PREFIX=") || _has_key(entry, "LIBRARY_PATH=")
+        || _has_key(entry, "DYLD_FALLBACK_LIBRARY_PATH=");
 }
 
 // A trivial fixture. Any Sailfin binary links `-lssl -lcrypto` (SFEP-0036
@@ -141,8 +155,11 @@ test "openssl prefix: a valid SAILFIN_OPENSSL_PREFIX links (macOS)" ![io] {
 // ---- Negative: the override is honored (suppresses keg discovery) ----
 // An existing-but-empty `lib` prefix is the first and only candidate; the
 // keg dirs are never searched, so `-lssl` is unresolvable and the link
-// fails. Sound on macOS precisely because `-lssl` is NOT on the default
-// link path (the reason `_openssl_link_search_flags` exists at all).
+// fails. Sound on macOS because `-lssl` is NOT on the default link path
+// (the reason `_openssl_link_search_flags` exists at all) AND
+// `_env_with_prefix` strips `LIBRARY_PATH` (see its note), so the empty
+// override `-L` is genuinely the sole OpenSSL search dir — no ambient
+// `LIBRARY_PATH` keg can rescue the link.
 test "openssl prefix: an empty-lib SAILFIN_OPENSSL_PREFIX suppresses the keg and fails the link (macOS)" ![io] {
     if !_is_darwin() {
         print.info("[openssl-prefix] SKIP: non-Darwin (override is inert)");
