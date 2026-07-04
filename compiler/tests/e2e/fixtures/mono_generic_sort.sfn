@@ -22,7 +22,7 @@ struct Widget implements Comparable {
     fn compare(self, other: Widget) -> int { return self.rank - other.rank; }
 }
 
-fn sort < T: Comparable > (items: T[]) -> T[] {
+fn sort<T: Comparable>(items: T[]) -> T[] {
     let mut out: T[] = items;
     let n = out.length;
     let mut i = 0;

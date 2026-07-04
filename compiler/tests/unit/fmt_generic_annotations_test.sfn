@@ -98,3 +98,52 @@ test "fmt generic: right-shift expression is unaffected" ![io] {
     let out = format_source(src);
     assert _contains(out, "a >> 1");
 }
+
+// ── Bounded declaration-site clauses stay tight (#1903) ──────────────
+// A type-parameter bound (`T: Bound`) made `_scan_generic` bail on the
+// interior `:` and re-emit the `<`/`>` with binary-operator spacing
+// (`fn sort < T: Comparable > (...)`). A declaration-site clause now
+// permits a bound and formats as tightly as its unbounded sibling.
+test "fmt generic: single-bound fn header stays tight" ![io] {
+    let src = "fn sort<T: Comparable>(items: T[]) -> T[] {\n    return items;\n}\n";
+    let out = format_source(src);
+    assert _contains(out, "fn sort<T: Comparable>(items: T[]) -> T[]");
+    assert _contains(out, "sort < T") == false;
+    assert _contains(out, "Comparable >") == false;
+}
+
+test "fmt generic: multi-bound fn header keeps `+` spacing, brackets tight" ![io] {
+    let src = "fn multi<T: A + B>(x: T) -> T {\n    return x;\n}\n";
+    let out = format_source(src);
+    assert _contains(out, "fn multi<T: A + B>(x: T) -> T");
+    assert _contains(out, "multi < T") == false;
+    assert _contains(out, "B >") == false;
+}
+
+test "fmt generic: generic-bound multi-param fn header stays tight" ![io] {
+    let src = "fn gbound<E, T: From<E>>(x: T) -> T {\n    return x;\n}\n";
+    let out = format_source(src);
+    assert _contains(out, "fn gbound<E, T: From<E>>(x: T) -> T");
+    assert _contains(out, "gbound < E") == false;
+}
+
+test "fmt generic: bounded struct type-parameter clause stays tight" ![io] {
+    let src = "struct Box<T: Comparable> {\n    value: T\n}\n";
+    let out = format_source(src);
+    assert _contains(out, "struct Box<T: Comparable>");
+    assert _contains(out, "Box < T") == false;
+}
+
+test "fmt generic: unbounded fn header is unchanged by bound handling" ![io] {
+    let src = "fn id<T>(x: T) -> T {\n    return x;\n}\n";
+    let out = format_source(src);
+    assert _contains(out, "fn id<T>(x: T) -> T");
+    assert _contains(out, "id < T") == false;
+}
+
+test "fmt generic: bounded fn header is idempotent" ![io] {
+    let src = "fn sort<T: Comparable>(items: T[]) -> T[] {\n    return items;\n}\n";
+    let once = format_source(src);
+    let twice = format_source(once);
+    assert once == twice;
+}
