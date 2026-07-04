@@ -1,0 +1,59 @@
+// Fixture for bounded generic-method resolution (#1872, SFEP-0038 §3.3 step 3).
+// `sort<T: Comparable>` calls the bounded interface method `a.compare(b)` on a
+// `T`-typed receiver. In the specialized copy at T=Widget that call must resolve
+// to the concrete `Widget.compare` — a direct static call, not dynamic vtable
+// dispatch. Before the monomorphizer stripped the `: Comparable` bound from the
+// parsed `.meta generics` param name, the whole bounded generic was dropped with
+// no specialization emitted; correctly ordered output proves the resolution.
+//
+// `Comparable` comes from the prelude (SFEP-0038 §3.4). The exit code encodes
+// the final order (ranks 1,2,3 -> 1*100 + 2*10 + 3 = 123), so a mis-ordered or
+// unresolved dispatch produces a different code.
+//
+// `compare` takes `other: Widget` rather than the interface's `other: Self`
+// spelling: a `Self`-typed non-receiver parameter is not yet resolved to the
+// enclosing struct type at lowering (it lowers to an opaque pointer, corrupting
+// field access) — a separate, pre-existing gap outside this issue's dispatch
+// scope. `other: Widget` satisfies `Comparable` conformance identically and
+// keeps this fixture focused on the bound-method resolution under test.
+struct Widget implements Comparable {
+    rank: int;
+
+    fn compare(self, other: Widget) -> int { return self.rank - other.rank; }
+}
+
+fn sort < T: Comparable > (items: T[]) -> T[] {
+    let mut out: T[] = items;
+    let n = out.length;
+    let mut i = 0;
+    loop {
+        if i >= n { break; }
+        let mut j = 0;
+        loop {
+            if j + 1 >= n { break; }
+            let a: T = out[j];
+            let b: T = out[j + 1];
+            if a.compare(b) > 0 {
+                out[j] = b;
+                out[j + 1] = a;
+            }
+            j += 1;
+        }
+        i += 1;
+    }
+    return out;
+}
+
+fn main() -> int ![io] {
+    let widgets: Widget[] = [Widget { rank: 3 }, Widget { rank: 1 }, Widget {
+        rank: 2
+    },];
+    let sorted = sort(widgets);
+    let mut line = "sorted:";
+    for w in sorted {
+        let r = w.rank;
+        line = line + " {{ r }}";
+    }
+    print(line);
+    return sorted[0].rank * 100 + sorted[1].rank * 10 + sorted[2].rank;
+}

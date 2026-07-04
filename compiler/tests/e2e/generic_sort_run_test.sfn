@@ -1,0 +1,97 @@
+// End-to-end coverage for bounded generic-method resolution (#1872,
+// SFEP-0038 §3.3 step 3). Drives the production `sfn build` / `sfn emit llvm`
+// paths as subprocesses over `fixtures/mono_generic_sort.sfn`, a
+// `sort<T: Comparable>` that calls the bounded interface method `a.compare(b)`
+// on a `T`-typed receiver.
+//
+// The acceptance pins two things:
+//   1. The bounded generic actually monomorphizes and runs — a `Widget[]` is
+//      sorted to ascending order. (Before the monomorphizer stripped the
+//      `: Comparable` bound from the parsed `.meta generics` param name, the
+//      whole bounded generic was dropped with no specialization emitted.)
+//   2. In the specialized copy at T=Widget the bounded call resolves to a
+//      DIRECT static call to the concrete `Widget.compare` (not a dynamic
+//      vtable / `trait_dispatch__` fat-pointer dispatch) — the payoff of
+//      interface *bounds* over interface *values*.
+//
+// Matchers note: the `sfn/test` `expect_*` matchers are `![pure]` and cannot be
+// called from an `![io]` test; assert on captured output / IR text with
+// `sfn/strings` predicates instead (#842). Build/emit isolation follows
+// `.claude/rules/no-bash-e2e.md`: the full parent environment is threaded (PATH
+// for clang/ld, SAILFIN_TEST_SCRATCH for per-invocation build-cache isolation
+// under the parallel pool).
+import { contains, find } from "sfn/strings";
+
+fn _sfn_bin() -> string ![io] {
+    let configured = env.get("SAILFIN_BIN");
+    if configured.length > 0 { return configured; }
+    return "build/native/sailfin";
+}
+
+fn _child_env() -> string[] ![io] { return process.environ(); }
+
+fn _scratch_dir() -> string ![io] {
+    let mut dir = env.get("SAILFIN_TEST_SCRATCH");
+    if dir.length == 0 { dir = "/tmp"; }
+    fs.createDirectory(dir, true);
+    return dir;
+}
+
+// Emit the fixture's LLVM IR and return its text (or "" on failure).
+fn _emit_ir(fixture: string, tag: string) -> string ![io] {
+    let dir = _scratch_dir();
+    let ll = dir + "/sfn-sort-" + tag + ".ll";
+    if fs.exists(ll) { fs.deleteFile(ll); }
+    let exit = process.run_capture([_sfn_bin(), "emit", "-o", ll, "llvm", fixture], _child_env());
+    let _o = process.capture_take_stdout();
+    let _e = process.capture_take_stderr();
+    if exit != 0 { return ""; }
+    if !fs.exists(ll) { return ""; }
+    let ir = fs.readFile(ll);
+    fs.deleteFile(ll);
+    return ir;
+}
+
+// Build the fixture to a unique path and run it; stash stdout to `marker` and
+// return the run's exit code, or -100 if the build itself failed.
+fn _build_and_run(fixture: string, tag: string, marker: string) -> int ![io] {
+    let dir = _scratch_dir();
+    let bin = dir + "/sfn-sort-bin-" + tag;
+    if fs.exists(bin) { fs.deleteFile(bin); }
+    let build_exit = process.run_capture([_sfn_bin(), "build", "-o", bin, fixture], _child_env());
+    let _bo = process.capture_take_stdout();
+    let _be = process.capture_take_stderr();
+    if build_exit != 0 { return -100; }
+    let run_exit = process.run_capture([bin], _child_env());
+    let out = process.capture_take_stdout();
+    let _re = process.capture_take_stderr();
+    fs.writeFile(marker, out);
+    fs.deleteFile(bin);
+    return run_exit;
+}
+
+test "generic sort e2e: bounded sort<T: Comparable> runs and orders a Widget[]" ![io] {
+    let dir = _scratch_dir();
+    let marker = dir + "/sfn-sort-run.out";
+    if fs.exists(marker) { fs.deleteFile(marker); }
+    let exit = _build_and_run("compiler/tests/e2e/fixtures/mono_generic_sort.sfn", "run", marker);
+    // Exit code encodes the final order: ranks 1,2,3 -> 1*100 + 2*10 + 3.
+    assert exit == 123;
+    let out = fs.readFile(marker);
+    if fs.exists(marker) { fs.deleteFile(marker); }
+    // Ascending order of the shuffled 3,1,2 input.
+    assert find(out, "1 2 3", 0) >= 0;
+}
+
+test "generic sort e2e: bound call resolves to a direct concrete method, not vtable" ![io] {
+    let ir = _emit_ir("compiler/tests/e2e/fixtures/mono_generic_sort.sfn", "ir");
+    assert ir.length > 0;
+    // The bounded generic monomorphized: a `sort$Widget` specialization exists.
+    assert contains(ir, "sort__");
+    assert contains(ir, "$Widget");
+    // The bounded `a.compare(b)` lowered to a DIRECT static call to the
+    // concrete `Widget.compare` symbol...
+    assert contains(ir, "call i64 @Widgetcompare");
+    // ...and NOT through the dynamic interface-value dispatch path.
+    assert ! contains(ir, "trait_dispatch");
+}
