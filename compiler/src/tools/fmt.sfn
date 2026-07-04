@@ -546,7 +546,11 @@ fn _valid_post_generic(fmt_tokens: FmtToken[], close_idx: int) -> boolean {
 // Scan a balanced generic starting at `start` (a `<`). Returns the index
 // of the matching outermost close (`>` or `>>`) on success, or -1 if the
 // span is not a generic (a comparison/shift expression instead).
-fn _scan_generic(fmt_tokens: FmtToken[], start: int) -> int {
+// `allow_bounds` is true for a declaration-site clause (`fn f<T: Bound>`,
+// `struct Box<T: Bound>`), where a `:` is a type-parameter bound and `+`
+// joins multiple bounds — neither disproves the generic. It is false for a
+// use-site type argument list, where those tokens signal a comparison (#1903).
+fn _scan_generic(fmt_tokens: FmtToken[], start: int, allow_bounds: boolean) -> int {
     let mut depth = 0;
     let mut j = start;
     let len = fmt_tokens.length;
@@ -591,12 +595,20 @@ fn _scan_generic(fmt_tokens: FmtToken[], start: int) -> int {
         if strings_equal(role, "block_close") { return -1; }
         if strings_equal(role, "assign") { return -1; }
         if strings_equal(role, "arrow") { return -1; }
-        if strings_equal(role, "colon") { return -1; }
+        // A `:` is a type-parameter bound in a declaration-site clause
+        // (`T: Bound`); anywhere else it proves the `<` was a comparison.
+        if strings_equal(role, "colon") {
+            if !allow_bounds { return -1; }
+        }
         if strings_equal(role, "decorator") { return -1; }
         if strings_equal(role, "bang_bracket") { return -1; }
         // Any operator other than the angle delimiters handled above
-        // (e.g. `>=`, `+`, `&&`, `==`) → comparison/arithmetic, not a type.
-        if strings_equal(role, "operator") { return -1; }
+        // (e.g. `>=`, `&&`, `==`) → comparison/arithmetic, not a type. The
+        // one exception is `+` joining multiple bounds (`T: A + B`) in a
+        // declaration-site clause.
+        if strings_equal(role, "operator") {
+            if !(allow_bounds && strings_equal(lex, "+")) { return -1; }
+        }
         if strings_equal(lex, "<<") { return -1; }
 
         j += 1;
@@ -651,13 +663,31 @@ fn _is_generic_open_candidate(fmt_tokens: FmtToken[], i: int) -> boolean {
     return false;
 }
 
+// Is the candidate generic open at index `i` a *declaration-site* clause
+// (`fn f<…>`, `struct Box<…>`, `enum`/`interface`/`impl`/`type`)? Such a
+// clause may carry type-parameter bounds (`T: Bound`, `T: A + B`) that a
+// use-site type argument list never contains. Distinguished by the token two
+// before the `<`: a declaration keyword, not the `:`/`->` of a type position.
+fn _is_decl_site_generic_open(fmt_tokens: FmtToken[], i: int) -> boolean {
+    if i < 2 { return false; }
+    let kw = fmt_tokens[i - 2].token.lexeme;
+    if strings_equal(kw, "struct") { return true; }
+    if strings_equal(kw, "enum") { return true; }
+    if strings_equal(kw, "interface") { return true; }
+    if strings_equal(kw, "impl") { return true; }
+    if strings_equal(kw, "fn") { return true; }
+    if strings_equal(kw, "type") { return true; }
+    return false;
+}
+
 fn _reclassify_generics(fmt_tokens: FmtToken[]) -> FmtToken[] {
     let mut toks = fmt_tokens;
     let mut i = 0;
     loop {
         if i >= toks.length { break; }
         if _is_generic_open_candidate(toks, i) {
-            let match_end = _scan_generic(toks, i);
+            let allow_bounds = _is_decl_site_generic_open(toks, i);
+            let match_end = _scan_generic(toks, i, allow_bounds);
             if match_end > i {
                 toks = _apply_generic_roles(toks, i, match_end);
                 i = match_end + 1;
