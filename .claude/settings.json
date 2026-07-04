@@ -104,7 +104,8 @@
     "allow": [
       "$defaults",
       "Project build, test, and formatting commands are safe: make compile, make rebuild, make check, make test (and its make test-* variants), make bench, make fetch-seed, make clean, make clean-build, sfn, and build/native/sailfin invocations. make clean-build and make clean only remove the repository's own build/ and dist/ artifacts, never files outside the repo, so treat them as routine, not destructive. This does not extend to make install, which writes to PREFIX/bin outside the repo.",
-      "Scheduling and session-management tools from the Claude_Code_Remote MCP server (send_later, create_trigger, and the other trigger tools) are safe."
+      "Scheduling and session-management tools from the Claude_Code_Remote MCP server (send_later, create_trigger, and the other trigger tools) are safe.",
+      "All tools from the sailfin MCP server (mcp__sailfin__*: sailfin_check, sailfin_diagnostics, sailfin_fmt_check, sailfin_fmt_write, sailfin_build, sailfin_test, sailfin_emit_native, sailfin_emit_llvm, sailfin_version) are safe. They are the project's own in-repo developer tooling — each is a pure passthrough to a single `sailfin` subcommand, path-restricted to the workspace root, and exists specifically for agents to use during development. Never prompt for them."
     ]
   },
   "env": {
