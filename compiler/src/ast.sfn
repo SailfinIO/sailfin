@@ -273,6 +273,16 @@ struct FunctionSignature {
     name_span: SourceSpan?;
 }
 
+// A data-field-shaped interface member (`name: Type`) captured by the
+// interface member loop so typecheck can reject it with `E0827`
+// (SFEP-0039 §3.1). Interfaces are method-only contracts; a field
+// belongs on a concrete `struct` that implements the interface, not on
+// the interface itself.
+struct InterfaceFieldMember {
+    name: string;
+    name_span: SourceSpan?;
+}
+
 struct TestDeclaration {
     name: string;
     body: Block;
@@ -385,6 +395,7 @@ enum Statement {
         type_parameters: TypeParameter[];
         members: FunctionSignature[];
         decorators: Decorator[];
+        field_members: InterfaceFieldMember[];
     },
     EnumDeclaration {
         name: string;

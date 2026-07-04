@@ -55,6 +55,18 @@ boundaries — bindings, call arguments, struct fields, and arithmetic operands:
 
 **Composite types**: structs, enums, arrays (`T[]`)
 
+**Interfaces are method-only contracts**: an interface member must be a method
+signature (`fn name(...) -> T`). A data-field-shaped member (`name: Type`) is
+a typecheck error (`E0827`); data fields belong on a concrete `struct` that
+implements the interface:
+
+```sfn
+interface Named {
+    fn name() -> string;   // OK — method-only contract
+    // isAdmin: boolean;   // E0827 — declare a struct for data fields
+}
+```
+
 **Object literals require a concrete `struct` target**: data is constructed
 only through a `struct`. A bare object literal `{ ... }` resolves its shape
 against the annotation or contextual type it targets; if that target is an

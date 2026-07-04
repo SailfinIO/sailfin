@@ -28,6 +28,7 @@
 import {
     Decorator,
     FunctionSignature,
+    InterfaceFieldMember,
     Parameter,
     Statement,
     TypeAnnotation,
@@ -133,12 +134,16 @@ fn function_signatures_from_native(signatures: NativeInterfaceSignature[]) -> Fu
 // -------------------------------------------------------------------
 fn interface_statement_from_native(native: NativeInterface) -> Statement {
     let empty_decorators: Decorator[] = [];
+    // Native/FFI interfaces are synthesized from descriptors, never
+    // parsed from user source, so they carry no field-shaped members.
+    let empty_field_members: InterfaceFieldMember[] = [];
     return Statement.InterfaceDeclaration {
         name: native.name,
         name_span: null,
         type_parameters: type_parameters_from_names(native.type_parameters),
         members: function_signatures_from_native(native.signatures),
-        decorators: empty_decorators
+        decorators: empty_decorators,
+        field_members: empty_field_members
     };
 }
 
