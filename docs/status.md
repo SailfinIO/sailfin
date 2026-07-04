@@ -54,10 +54,10 @@ here.
   is gone (Stages A–B). By-name and relative imports of a workspace capsule
   converge to one mangled symbol (#873).
 - **Build cache.** Content-addressed cache defaulting to a shared per-user root
-  (`$XDG_CACHE_HOME/sailfin` or `$HOME/.cache/sailfin`; `$SAILFIN_BUILD_CACHE_DIR`
-  override; in-tree `build/cache` fallback when `$HOME` is unresolvable and pinned
-  in-tree for the compiler self-host build — SFEP-0040 §3.1) with per-source dep
-  manifests,
+  (`$XDG_CACHE_HOME/sailfin/v2` or `$HOME/.cache/sailfin/v2`, schema-suffixed;
+  `$SAILFIN_BUILD_CACHE_DIR` override; in-tree `build/cache/v2` fallback when
+  `$HOME` is unresolvable and pinned in-tree for the compiler self-host build —
+  SFEP-0040 §3.1) with per-source dep manifests,
   `--no-cache` / `--clean` / `--cache-trace` flags, and a `[cache]` summary on
   stderr (Stage C PR1–1f, #254–#259). Runtime C/LL/sfn objects share the same
   cache across work-dirs (#915, #1096). `sfn test` content-addresses each
