@@ -36,6 +36,7 @@ import {
     check_fn_reference_raw,
     check_function_signature,
     check_generic_instantiation,
+    check_interface_field_members,
     check_interface_members,
     check_intersection_value_type_annotation,
     check_object_literal_target,
@@ -598,6 +599,13 @@ fn check_statement(statement: Statement, bindings: SymbolEntry[], interfaces: St
             if _ci2 >= _im_diags.length { break; }
             diagnostics.push(_im_diags[_ci2]);
             _ci2 += 1;
+        }
+        let _fm_diags = check_interface_field_members(statement.field_members);
+        let mut _ci3: int = 0;
+        loop {
+            if _ci3 >= _fm_diags.length { break; }
+            diagnostics.push(_fm_diags[_ci3]);
+            _ci3 += 1;
         }
         return ScopeResult {
             bindings: registration.bindings,

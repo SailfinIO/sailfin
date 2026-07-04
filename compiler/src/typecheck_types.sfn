@@ -7,6 +7,7 @@ import {
     Expression,
     FieldDeclaration,
     FunctionSignature,
+    InterfaceFieldMember,
     MethodDeclaration,
     SourceSpan,
     Statement,
@@ -327,6 +328,44 @@ fn check_intersection_value_type_annotation(annotation: TypeAnnotation?, anchor_
     if annotation == null { return []; }
     if !type_annotation_is_intersection(annotation.text) { return []; }
     return [make_intersection_value_type_diagnostic(annotation.text, token_from_name(anchor_name, anchor_span))];
+}
+
+// E0827: a data-field-shaped interface member (`name: Type`). Interfaces
+// are method-only contracts (SFEP-0039 §3.1); a data field belongs on a
+// concrete `struct` that implements the interface, not on the interface.
+// The parser (interface member loop) records the field-shaped members it
+// could not parse as method signatures; this factory turns each into the
+// diagnostic that was silently dropped before.
+fn make_interface_field_member_diagnostic(name: string, span: SourceSpan?) -> Diagnostic {
+    let fix = FixSuggestion {
+        message: "declare a `struct` with this field and have the struct implement the "
+            + "interface (interfaces carry only method signatures)",
+        edits: []
+    };
+    return Diagnostic {
+        code: "E0827",
+        severity: "error",
+        message: "interface members must be method signatures; `" + name
+            + "` is a data field",
+        file_path: "",
+        primary: token_from_name(name, span),
+        suggestion: fix
+    };
+}
+
+// Turn every field-shaped interface member the parser captured into an
+// `E0827` diagnostic. A method-only interface captures none, so this
+// returns empty and leaves such interfaces unaffected.
+fn check_interface_field_members(field_members: InterfaceFieldMember[]) -> Diagnostic[] {
+    let mut diagnostics: Diagnostic[] = [];
+    let mut _fmi: int = 0;
+    loop {
+        if _fmi >= field_members.length { break; }
+        let fm = field_members[_fmi];
+        diagnostics.push(make_interface_field_member_diagnostic(fm.name, fm.name_span));
+        _fmi += 1;
+    }
+    return diagnostics;
 }
 
 // E0828: a bare object literal whose target is not a concrete `struct`.

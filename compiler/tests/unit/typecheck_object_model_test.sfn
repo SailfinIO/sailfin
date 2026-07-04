@@ -26,9 +26,61 @@ fn _has_code(diagnostics: Diagnostic[], code: string) -> boolean {
     return false;
 }
 
+fn _count_code(diagnostics: Diagnostic[], code: string) -> int {
+    let mut n: int = 0;
+    let mut i: int = 0;
+    loop {
+        if i >= diagnostics.length { break; }
+        if strings_equal(diagnostics[i].code, code) { n += 1; }
+        i += 1;
+    }
+    return n;
+}
+
 fn _diags(source: string) -> Diagnostic[] ![io] {
     let program = parse_program(source);
     return typecheck_diagnostics(program);
+}
+
+// -------------------------------------------------------------------
+// E0827 — a data-field-shaped interface member (`name: Type`).
+// Interfaces are method-only contracts (SFEP-0039 §3.1); a data field
+// belongs on a concrete `struct` that implements the interface. Before
+// this fix the member was silently dropped, leaving a zero-member
+// interface (the "parsed but not enforced" anti-pattern).
+// -------------------------------------------------------------------
+test "object-model: field-shaped interface member is E0827" ![io] {
+    let source = "interface Admin { isAdmin: boolean }\n";
+    assert _has_code(_diags(source), "E0827");
+}
+
+test "object-model: legacy-arrow field-shaped interface member is E0827" ![io] {
+    let source = "interface Admin { isAdmin -> boolean }\n";
+    assert _has_code(_diags(source), "E0827");
+}
+
+test "object-model: method-only interface is not E0827" ![io] {
+    let source = "interface Named { fn name() -> string; }\n";
+    assert ! _has_code(_diags(source), "E0827");
+}
+
+test "object-model: mixed interface reports only the field member" ![io] {
+    let source = "interface Account {\n" + "    fn name() -> string;\n"
+        + "    isAdmin: boolean;\n"
+        + "}\n";
+    let diagnostics = _diags(source);
+    assert _has_code(diagnostics, "E0827");
+    assert _count_code(diagnostics, "E0827") == 1;
+}
+
+// A field member between two method signatures: recovery skips only the
+// offending member (exactly one E0827), so it does not cascade past it.
+test "object-model: recovery does not cascade past a field member" ![io] {
+    let source = "interface Account {\n" + "    fn id() -> int;\n"
+        + "    isAdmin: boolean;\n"
+        + "    fn name() -> string;\n"
+        + "}\n";
+    assert _count_code(_diags(source), "E0827") == 1;
 }
 
 // -------------------------------------------------------------------

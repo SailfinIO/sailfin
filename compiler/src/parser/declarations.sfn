@@ -12,6 +12,7 @@ import {
     FieldDeclaration,
     FunctionSignature,
     ImportSpecifier,
+    InterfaceFieldMember,
     MethodDeclaration,
     Parameter,
     Statement,
@@ -1537,6 +1538,7 @@ fn parse_interface(initial_parser: Parser, decorators: Decorator[]) -> Statement
     parser = consume_symbol(parser, "{");
 
     let mut members: FunctionSignature[] = [];
+    let mut field_members: InterfaceFieldMember[] = [];
     loop {
         parser = skip_trivia(parser);
         let token = parser_peek_raw(parser);
@@ -1561,6 +1563,24 @@ fn parse_interface(initial_parser: Parser, decorators: Decorator[]) -> Statement
             continue;
         }
 
+        // The member did not parse as a method signature. If it has a
+        // data-field shape (an identifier followed by a type separator
+        // `:` or the legacy `->`), record it so typecheck rejects it
+        // with `E0827` (SFEP-0039 §3.1): interfaces are method-only.
+        // Genuine garbage (neither `fn` nor a field shape) keeps the
+        // existing silent recovery so recovery does not cascade.
+        let head = parser_peek_raw(parser);
+        if head.kind.variant == "Identifier" && !identifier_matches(head, "fn") {
+            let after_name = skip_trivia(parser_advance_raw(parser));
+            let colon = consume_annotation_separator(after_name);
+            let arrow = consume_return_type_separator(after_name);
+            if colon.found || arrow.found {
+                field_members.push(InterfaceFieldMember {
+                    name: identifier_text(head), name_span: source_span_from_tokens([head])
+                });
+            }
+        }
+
         parser = skip_struct_member(member_start);
     }
 
@@ -1569,7 +1589,8 @@ fn parse_interface(initial_parser: Parser, decorators: Decorator[]) -> Statement
         name_span: name_span,
         type_parameters: type_parameters,
         members: members,
-        decorators: decorators
+        decorators: decorators,
+        field_members: field_members
     };
     return StatementParseResult { parser: parser, statement: statement };
 }
