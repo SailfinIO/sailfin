@@ -110,7 +110,15 @@ fn check_struct_implements_interfaces(statement: Statement, interfaces: Statemen
         if _ai >= statement.implements_types.length { break; }
         let annotation = statement.implements_types[_ai];
         let interface_definition = resolve_interface_annotation(annotation, interfaces);
-        if interface_definition == null { continue; }
+        // An interface not visible on this path (e.g. a prelude interface not
+        // loaded for a standalone `sfn check`) is silently trusted, matching
+        // the "trusted when not visible" conformance doctrine. Advance the
+        // index before continuing — skipping it spins the loop forever, which
+        // exhausts the memory cap and aborts with no diagnostic.
+        if interface_definition == null {
+            _ai += 1;
+            continue;
+        }
         let interface_name = interface_definition.name;
         let _via_diags = validate_interface_annotation(statement.name, interface_definition, annotation);
         let mut _ci: int = 0;

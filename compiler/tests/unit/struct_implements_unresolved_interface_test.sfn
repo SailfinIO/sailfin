@@ -1,0 +1,28 @@
+// Regression for the conformance-walk termination bug bundled with #1872
+// (SFEP-0038). An `implements` clause naming an interface not visible in the
+// current typecheck scope — a prelude interface not loaded on a standalone
+// `sfn check`, or a genuinely undeclared name — resolves to null in
+// `check_struct_implements_interfaces`. The null branch must advance the loop
+// index and continue (silently trusting the unseen interface); the #1870 E0820
+// work skipped the increment, so the walk spun forever, exhausted the memory
+// cap, and aborted with no diagnostic. This asserts the walk terminates.
+import { parse_program } from "../../src/parser/mod";
+import { typecheck_diagnostics } from "../../src/typecheck";
+import { Diagnostic } from "../../src/typecheck_types";
+
+test "conformance: struct implementing an unresolved interface terminates" ![io] {
+    // `Comparable` is neither declared here nor loaded from the prelude on this
+    // path, so it resolves to null in the conformance walk. Reaching the
+    // assertion at all proves the walk terminated instead of looping.
+    let source = "struct Widget implements Comparable {\n" + "    rank: int;\n"
+        + "    fn compare(self, other: Widget) -> int { return self.rank - other.rank; }\n"
+        + "}\n";
+    let program = parse_program(source);
+    let diags: Diagnostic[] = typecheck_diagnostics(program);
+    // An unseen interface is trusted (skipped), so no conformance diagnostic is
+    // raised for it: the fully-valid struct type-checks with zero diagnostics.
+    // Reaching this assertion also proves the walk terminated (a hang would time
+    // out); the exact-count check additionally pins the silently-skipped
+    // behavior the fix restores.
+    assert diags.length == 0;
+}

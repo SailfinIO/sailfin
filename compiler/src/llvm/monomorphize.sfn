@@ -197,7 +197,13 @@ fn _mono_split_top_level(text: string) -> string[] {
     return parts;
 }
 
-// Parse `.meta generics <T, U>` into ["T", "U"].
+// Parse `.meta generics <T, U>` into ["T", "U"]. A bounded parameter such as
+// `<T : Comparable>` keeps only the bare name (`T`), truncating at the first
+// `:` bound separator — otherwise `_mono_unify`/`enum_inst_resolve_token`
+// exact-match the whole `"T : Comparable"` string and never recognize the bare
+// `T` token in `.param`/`.let` lines, so no binding is discovered and the
+// bounded generic is dropped without a specialization (SFEP-0038 §3.3). Mirrors
+// `parse_enum_header_type_parameters` in native_ir_parser_defs.sfn.
 fn _mono_parse_generics_meta(line: string) -> string[] {
     let open = index_of(line, "<");
     if open < 0 { return []; }
@@ -221,7 +227,20 @@ fn _mono_parse_generics_meta(line: string) -> string[] {
         } else { inner = inner + ch; }
         index += 1;
     }
-    return _mono_split_top_level(inner);
+    let raw_entries = _mono_split_top_level(inner);
+    let mut names: string[] = [];
+    let mut entry_index: int = 0;
+    loop {
+        if entry_index >= raw_entries.length { break; }
+        let mut entry = trim_text(raw_entries[entry_index]);
+        let bound_index = index_of(entry, ":");
+        if bound_index >= 0 {
+            entry = trim_text(substring(entry, 0, bound_index));
+        }
+        if entry.length > 0 { names = names.push(entry); }
+        entry_index += 1;
+    }
+    return names;
 }
 
 // True for a fn-pointer annotation in either spelling the emitter/formatter
