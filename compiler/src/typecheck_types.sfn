@@ -2198,6 +2198,209 @@ fn check_single_bound(ref_text: string, param_name: string, span: SourceSpan?, i
     return null;
 }
 
+// Locate a top-level interface declaration by its bare name.
+fn find_interface_by_name(name: string, interfaces: Statement[]) -> Statement? {
+    let mut i: int = 0;
+    loop {
+        if i >= interfaces.length { break; }
+        if strings_equal(interfaces[i].name, name) { return interfaces[i]; }
+        i += 1;
+    }
+    return null;
+}
+
+// Locate a top-level struct declaration by its bare name.
+fn find_struct_by_name(name: string, structs: Statement[]) -> Statement? {
+    let mut i: int = 0;
+    loop {
+        if i >= structs.length { break; }
+        if strings_equal(structs[i].name, name) { return structs[i]; }
+        i += 1;
+    }
+    return null;
+}
+
+// True if `struct_decl` declares a method named `method_name`.
+fn struct_has_method(struct_decl: Statement, method_name: string) -> boolean {
+    let mut i: int = 0;
+    loop {
+        if i >= struct_decl.methods.length { break; }
+        if strings_equal(struct_decl.methods[i].signature.name, method_name) {
+            return true;
+        }
+        i += 1;
+    }
+    return false;
+}
+
+// Locate a type parameter by name within an in-scope parameter list.
+fn find_type_parameter(name: string, params: TypeParameter[]) -> TypeParameter? {
+    let mut i: int = 0;
+    loop {
+        if i >= params.length { break; }
+        if strings_equal(params[i].name, name) { return params[i]; }
+        i += 1;
+    }
+    return null;
+}
+
+// True if type parameter `param` was itself declared with a bound whose
+// base name is `bound_name` (the bound-propagation predicate, §3.1).
+fn type_parameter_declares_bound(param: TypeParameter, bound_name: string) -> boolean {
+    let b = param.bound;
+    if b == null { return false; }
+    let bound = b;
+    let refs = split_top_level_plus(bound.text);
+    let mut i: int = 0;
+    loop {
+        if i >= refs.length { break; }
+        if strings_equal(bound_base_name(trim_text(refs[i])), bound_name) {
+            return true;
+        }
+        i += 1;
+    }
+    return false;
+}
+
+// True iff `struct_decl` implements the interface named `interface_name`:
+// it must (1) declare `implements I` nominally AND (2) structurally
+// provide every interface member as a method. This is the reusable
+// conformance predicate the SFEP calls `struct_implements`, sharing the
+// exact nominal+structural test `check_struct_implements_interfaces`
+// emits diagnostics for (SFEP-0038 §3.1/§3.2b, #1870) — factored so the
+// satisfaction test can query conformance against an arbitrary interface
+// without re-walking diagnostics. When the interface is not visible in
+// this compilation unit, the nominal `implements` declaration is trusted
+// (structural conformance is proven at the struct's own declaration).
+fn struct_implements(struct_decl: Statement, interface_name: string, interfaces: Statement[]) -> boolean {
+    let mut nominal: boolean = false;
+    let mut _ai: int = 0;
+    loop {
+        if _ai >= struct_decl.implements_types.length { break; }
+        if strings_equal(bound_base_name(struct_decl.implements_types[_ai].text), interface_name) {
+            nominal = true;
+            break;
+        }
+        _ai += 1;
+    }
+    if !nominal { return false; }
+    let iface = find_interface_by_name(interface_name, interfaces);
+    if iface == null { return true; }
+    let found = iface;
+    let mut _mi: int = 0;
+    loop {
+        if _mi >= found.members.length { break; }
+        if !struct_has_method(struct_decl, found.members[_mi].name) {
+            return false;
+        }
+        _mi += 1;
+    }
+    return true;
+}
+
+// True iff the concrete type argument `concrete` satisfies the single
+// bound reference `bound_ref` (one interface, e.g. "Comparable" or
+// "From<int>") at an instantiation site (SFEP-0038 §3.1/§3.2b, #1870):
+//   1. If `concrete` names an in-scope type parameter, consult ITS own
+//      declared bounds — bound propagation: satisfied iff that parameter
+//      was itself declared with `bound_ref`.
+//   2. Otherwise resolve `concrete` to a struct declaration and ask
+//      whether it implements the bound interface.
+// Conservative on names it cannot resolve: a bound that does not name a
+// known interface, or a concrete type that is neither an in-scope
+// parameter nor a known struct (a primitive, enum, or imported type), is
+// treated as satisfied — mirroring `check_single_bound`'s leniency so
+// std/imported surfaces are not falsely flagged.
+fn type_satisfies_bound(concrete: string, bound_ref: string, interfaces: Statement[], structs: Statement[], in_scope_params: TypeParameter[]) -> boolean {
+    let bound_name = bound_base_name(bound_ref);
+    if find_interface_by_name(bound_name, interfaces) == null { return true; }
+    let concrete_name = bound_base_name(concrete);
+    let param = find_type_parameter(concrete_name, in_scope_params);
+    if param != null {
+        let p = param;
+        return type_parameter_declares_bound(p, bound_name);
+    }
+    let struct_decl = find_struct_by_name(concrete_name, structs);
+    if struct_decl == null { return true; }
+    return struct_implements(struct_decl, bound_name, interfaces);
+}
+
+// E0820 — a concrete type argument does not satisfy a declared bound at a
+// generic instantiation site (SFEP-0038 §3.2b, #1870). Names the full
+// bound (with any type arguments), the offending type, and the type
+// parameter. The fix-it hint adapts to the offending type: an in-scope
+// type parameter needs a *bound* added (`T: I`), a concrete type needs an
+// `implements I` clause. No primary token is set — an `implements`
+// annotation carries no span (`TypeAnnotation` is text-only), and the
+// enclosing site span does not correspond to the offending type-argument
+// text, so a caret there would mis-highlight; the message carries the
+// full context instead.
+fn make_bound_not_satisfied_diagnostic(concrete: string, bound_display: string, param_name: string, decl_name: string, concrete_is_param: boolean) -> Diagnostic {
+    let mut fix: string = "; add `implements " + bound_display + "` to `"
+        + concrete
+        + "`";
+    if concrete_is_param {
+        fix = "; add bound `" + bound_display + "` to type parameter `"
+            + concrete
+            + "`";
+    }
+    return Diagnostic {
+        code: "E0820",
+        severity: "error",
+        message: "type `" + concrete + "` does not satisfy bound `"
+            + bound_display
+            + "` on type parameter `"
+            + param_name
+            + "` of `"
+            + decl_name
+            + "`"
+            + fix,
+        file_path: "",
+        primary: null,
+        suggestion: null
+    };
+}
+
+// Verify every concrete type argument at a generic instantiation site
+// satisfies the bounds declared on the corresponding type parameter
+// (SFEP-0038 §3.2b, #1870). `decl_type_parameters` are the instantiated
+// declaration's parameters (carrying their bounds); `type_arguments` are
+// the concrete arguments supplied at the site; `in_scope_params` are the
+// type parameters visible at the site (for bound propagation). Emits one
+// E0820 per unsatisfied (argument, bound) pair. Positions past the
+// shorter of the two lists are ignored — arity is validated separately
+// (E0822 at declaration; the interface/enum arity checks at use sites).
+fn check_generic_instantiation(decl_name: string, decl_type_parameters: TypeParameter[], type_arguments: string[], interfaces: Statement[], structs: Statement[], in_scope_params: TypeParameter[]) -> Diagnostic[] {
+    let mut diagnostics: Diagnostic[] = [];
+    let mut limit: int = decl_type_parameters.length;
+    if type_arguments.length < limit { limit = type_arguments.length; }
+    let mut index: int = 0;
+    loop {
+        if index >= limit { break; }
+        let param = decl_type_parameters[index];
+        let concrete = trim_text(type_arguments[index]);
+        let concrete_is_param = find_type_parameter(bound_base_name(concrete), in_scope_params) != null;
+        let tp_bound = param.bound;
+        if tp_bound != null {
+            let bound = tp_bound;
+            let refs = split_top_level_plus(bound.text);
+            let mut _bri: int = 0;
+            loop {
+                if _bri >= refs.length { break; }
+                let ref_text = trim_text(refs[_bri]);
+                if ref_text.length > 0 {
+                    if !type_satisfies_bound(concrete, ref_text, interfaces, structs, in_scope_params) {
+                        diagnostics.push(make_bound_not_satisfied_diagnostic(concrete, ref_text, param.name, decl_name, concrete_is_param));
+                    }
+                }
+                _bri += 1;
+            }
+        }
+        index += 1;
+    }
+    return diagnostics;
+}
+
 fn token_from_name(name: string, span: SourceSpan?) -> Token? {
     if span == null { return null; }
     return Token {

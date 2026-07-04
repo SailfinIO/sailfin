@@ -35,6 +35,7 @@ import {
     check_extern_var,
     check_fn_reference_raw,
     check_function_signature,
+    check_generic_instantiation,
     check_interface_members,
     check_struct_fields,
     check_struct_implements_interfaces,
@@ -68,8 +69,10 @@ import {
     make_undefined_function_diagnostic,
     make_unparseable_statement_diagnostic,
     make_unsupported_statement_keyword_diagnostic,
+    parse_type_arguments,
     register_local_symbol,
     register_symbol,
+    resolve_interface_annotation,
     result_type_arguments,
     signature_is_c_abi,
     signature_is_generic,
@@ -191,10 +194,67 @@ fn typecheck_diagnostics_full(program: Program, imported_interfaces: Statement[]
     let resolution_scope = top_level.symbols.concat(_collect_imported_call_symbols(program)).concat(_symbols_from_global_names(prelude_globals));
     let scoped_diagnostics = check_program_scopes(program, combined_interfaces, local_imports, resolution_scope);
 
+    let local_structs = collect_struct_definitions(program);
+    let instantiation_diagnostics = check_generic_instantiation_sites(program, combined_interfaces, local_structs);
+
     // Merge diagnostics using concat (avoids loop-with-if-break pattern that
     // the compiler lowers incorrectly — loops emit without exit conditions).
-    let diagnostics_with_scopes = top_level.diagnostics.concat(scoped_diagnostics);
+    let diagnostics_with_scopes = top_level.diagnostics.concat(scoped_diagnostics).concat(instantiation_diagnostics);
     return diagnostics_with_scopes;
+}
+
+// Every top-level struct declaration, for resolving a concrete type
+// argument to its declaration when checking generic bound satisfaction
+// (SFEP-0038 §3.2b, #1870). Mirrors `collect_interface_definitions`.
+fn collect_struct_definitions(program: Program) -> Statement[] {
+    let mut structs: Statement[] = [];
+    for statement in program.statements {
+        if statement.variant == "StructDeclaration" {
+            structs.push(statement);
+        }
+    }
+    return structs;
+}
+
+// E0820 enforcement at generic instantiation sites (SFEP-0038 §3.2b,
+// #1870). The checker has no expression-type inferencer (#829), so
+// generic *function-call* argument→type-parameter binding and `let` /
+// struct-literal generic annotations carry no recoverable concrete
+// arguments to check yet — those live-wire when inference lands, exactly
+// as the `?`-operator (E0810–E0812) and ternary rules defer their live
+// walk. The instantiation site with syntactic concrete arguments today is
+// a struct's `implements I<Args>` clause against a generic interface
+// whose parameters carry bounds; this pass enforces bound satisfaction
+// there. The rule itself (`check_generic_instantiation`) is call-ready
+// for the remaining sites. In-scope parameters for bound propagation are
+// the implementing struct's own type parameters.
+fn check_generic_instantiation_sites(program: Program, interfaces: Statement[], structs: Statement[]) -> Diagnostic[] {
+    let mut diagnostics: Diagnostic[] = [];
+    for statement in program.statements {
+        if statement.variant == "StructDeclaration" {
+            let mut _ai: int = 0;
+            loop {
+                if _ai >= statement.implements_types.length { break; }
+                let annotation = statement.implements_types[_ai];
+                let iface = resolve_interface_annotation(annotation, interfaces);
+                if iface != null {
+                    let found = iface;
+                    if found.type_parameters.length > 0 {
+                        let args = parse_type_arguments(annotation.text);
+                        let inst = check_generic_instantiation(found.name, found.type_parameters, args, interfaces, structs, statement.type_parameters);
+                        let mut _di: int = 0;
+                        loop {
+                            if _di >= inst.length { break; }
+                            diagnostics.push(inst[_di]);
+                            _di += 1;
+                        }
+                    }
+                }
+                _ai += 1;
+            }
+        }
+    }
+    return diagnostics;
 }
 
 // Wrap each implicitly-available prelude/runtime global name in a
