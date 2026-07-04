@@ -61,6 +61,7 @@ The next number is `max + 1`. Add a row in the same PR that introduces an SFEP.
 | [0036](./0036-tls-runtime.md) | TLS termination + upstream TLS for the native runtime (OpenSSL) | Accepted | runtime |
 | [0037](./0037-peer-language-process-adoption.md) | Peer-Language Process Adoption — Merge Queue, ICE Discipline, Perf History, Corpus Runs | Accepted | process |
 | [0038](./0038-generic-constraints.md) | Generic Type Parameter Constraints and Monomorphization | Accepted | language |
+| [0039](./0039-nominal-object-model.md) | Nominal Object Model — Honest Rejection of TypeScript-Shaped Data Syntax | Accepted | language |
 
 ## Drafts under review (numbers assigned at merge)
 
