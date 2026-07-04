@@ -24,7 +24,7 @@ graduates-to: "docs/status.md (E0828 object-literal coverage); SFEP-0039 §3.2"
 
 SFEP-0039 §3.2 introduced `E0828` — a bare object literal `{ ... }` requires a
 concrete-`struct` target. It shipped (#1899) at exactly **one** position: the
-`let` site (`typecheck.sfn:450`). The residual positions were split into three
+`let` site (`check_statement`'s `VariableDeclaration` branch). The residual positions were split into three
 issues — array/generic-head normalization + parameter defaults (#1900), return
 position (#1904), lambda body/return (#1905) — and each is being handled
 individually, with more positions still to come (struct-field defaults,
@@ -115,8 +115,10 @@ shape as `FunctionSignature`, `ast.sfn:266`, and `SymbolEntry`,
 `typecheck_types.sfn:73` — plain records, no struct generics):
 
 ```sfn
-// typecheck_types.sfn — the typing environment + expected-type channel
-// threaded through the typecheck walk. One record serves both the
+// typecheck.sfn — the typing environment + expected-type channel
+// threaded through the typecheck walk. (As built, TypeckCtx and its
+// helpers live in typecheck.sfn, not typecheck_types.sfn, because
+// ImportSymbolTable is imported there.) One record serves both the
 // statement/block family and the expression family; a given family reads
 // only the subset it needs (unused fields are inert).
 struct TypeckCtx {
@@ -170,7 +172,7 @@ Crucially, unifying the record is what finally gives lambda-body walking
 ### 3.2 Constructors / derivation helpers
 
 Because Sailfin records are constructed by literal, ctx derivation is a set of
-small pure helpers (all in `typecheck_types.sfn`), so no call site hand-copies
+small pure helpers (all in `typecheck.sfn`), so no call site hand-copies
 eight fields:
 
 ```sfn

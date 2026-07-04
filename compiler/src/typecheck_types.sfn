@@ -422,10 +422,12 @@ fn _object_literal_head_type(text: string) -> string {
 // True when the object-literal target's head is an array type (`T[]`).
 // An object literal never produces an array, so an array target is
 // rejected regardless of the element type — the caller short-circuits
-// on this before the head-symbol lookup (SFEP-0039 §3.2).
+// on this before the head-symbol lookup (SFEP-0039 §3.2). Match the `[]`
+// suffix specifically (not any trailing `]`) so a future `]`-terminated
+// type form or a malformed annotation is not mistaken for an array.
 fn _object_literal_target_is_array(head: string) -> boolean {
-    if head.length == 0 { return false; }
-    return head[head.length - 1] == "]";
+    if head.length < 2 { return false; }
+    return head[head.length - 2] == "[" && head[head.length - 1] == "]";
 }
 
 // Base name of a possibly-generic head (`Box<int>` -> `Box`,
@@ -469,7 +471,10 @@ fn check_object_literal_target(initializer: Expression?, annotation: TypeAnnotat
     let target = find_symbol(top_level, base);
     if target == null { return []; }
     if strings_equal(target.kind, "interface") {
-        return [make_object_literal_requires_struct_diagnostic(base, "interface", anchor_name, anchor_span)];
+        // Name the full head (`Container<int>`) in the message so it
+        // matches the source annotation verbatim, while still resolving the
+        // symbol by `base` (`Container`).
+        return [make_object_literal_requires_struct_diagnostic(head, "interface", anchor_name, anchor_span)];
     }
     return [];
 }

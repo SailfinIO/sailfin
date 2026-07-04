@@ -183,7 +183,7 @@ it."*
 
 **Coverage status: complete across value positions (closed by SFEP-0041).**
 `E0828` shipped (#1899) at exactly one position — the `let` site
-(`typecheck.sfn:450`). Three follow-up issues have since closed every other
+(`check_statement`'s `VariableDeclaration` branch). Three follow-up issues have since closed every other
 residual position, via SFEP-0041's unified `TypeckCtx` expected-type /
 typing-environment context threaded through both typecheck walk families
 (statements and the lighter expression family lambda bodies use):

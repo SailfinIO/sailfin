@@ -419,12 +419,17 @@ fn register_top_level_symbol(statement: Statement, existing: SymbolEntry[]) -> S
 // reaches a nested `return` (the #1904 fix). `expected_type` is the
 // general local channel reserved for future positions (call args, field
 // defaults) so they plug in without another signature change.
+// `in_function_body` marks that the walk is inside a fn/lambda body, so a
+// `return { ... }` is classified there but a top-level `return` — or one
+// in a top-level nested block (`if`/`with`/`{}`), which is `!is_top_level`
+// yet has no enclosing function — is exempt.
 struct TypeckCtx {
     bindings: SymbolEntry[];
     imports: ImportSymbolTable;
     interfaces: Statement[];
     top_level: SymbolEntry[];
     is_top_level: boolean;
+    in_function_body: boolean;
     scope_start: int;
     enclosing_return_type: TypeAnnotation?;
     expected_type: TypeAnnotation?;
@@ -438,6 +443,7 @@ fn make_typeck_ctx(bindings: SymbolEntry[], imports: ImportSymbolTable, interfac
         interfaces: interfaces,
         top_level: top_level,
         is_top_level: is_top_level,
+        in_function_body: false,
         scope_start: 0,
         enclosing_return_type: null,
         expected_type: null
@@ -445,7 +451,10 @@ fn make_typeck_ctx(bindings: SymbolEntry[], imports: ImportSymbolTable, interfac
 }
 
 // Enter a nested block scope: swap in the block's bindings + shadowing
-// boundary, drop to non-top-level, preserve the ambient return type.
+// boundary, drop to non-top-level, preserve the ambient return type and
+// the in-function-body flag. `expected_type` is a parent-imposed *local*
+// expectation, so it is cleared at a statement/block boundary — it must
+// not leak into unrelated statements once the channel becomes active.
 fn ctx_with_bindings(ctx: TypeckCtx, bindings: SymbolEntry[], scope_start: int) -> TypeckCtx {
     return TypeckCtx {
         bindings: bindings,
@@ -453,15 +462,16 @@ fn ctx_with_bindings(ctx: TypeckCtx, bindings: SymbolEntry[], scope_start: int) 
         interfaces: ctx.interfaces,
         top_level: ctx.top_level,
         is_top_level: false,
+        in_function_body: ctx.in_function_body,
         scope_start: scope_start,
         enclosing_return_type: ctx.enclosing_return_type,
-        expected_type: ctx.expected_type
+        expected_type: null
     };
 }
 
 // Enter a fn/lambda body: install its parameter-scope bindings and the
-// declared return type as the ambient `enclosing_return_type`, clearing
-// any local expected type.
+// declared return type as the ambient `enclosing_return_type`, mark the
+// in-function-body context, and clear any local expected type.
 fn ctx_enter_body(ctx: TypeckCtx, bindings: SymbolEntry[], return_type: TypeAnnotation?) -> TypeckCtx {
     return TypeckCtx {
         bindings: bindings,
@@ -469,6 +479,7 @@ fn ctx_enter_body(ctx: TypeckCtx, bindings: SymbolEntry[], return_type: TypeAnno
         interfaces: ctx.interfaces,
         top_level: ctx.top_level,
         is_top_level: false,
+        in_function_body: true,
         scope_start: 0,
         enclosing_return_type: return_type,
         expected_type: null
@@ -513,6 +524,7 @@ fn check_statement(statement: Statement, ctx: TypeckCtx) -> ScopeResult {
     let imports = ctx.imports;
     let top_level = ctx.top_level;
     let is_top_level = ctx.is_top_level;
+    let in_function_body = ctx.in_function_body;
     let enclosing_return_type = ctx.enclosing_return_type;
     if statement.variant == "VariableDeclaration" {
         let registration = register_local_symbol(bindings, statement.name, "variable", statement.span, scope_start);
@@ -792,10 +804,12 @@ fn check_statement(statement: Statement, ctx: TypeckCtx) -> ScopeResult {
     if statement.variant == "ReturnStatement" {
         let return_diags = walk_expression(statement.expression, ctx);
         // A `return { ... }` is classified against the enclosing function's
-        // declared return type (#1904). Gate on `!is_top_level`: a top-level
-        // `return` has no enclosing function, so `enclosing_return_type` is
-        // absent and the un-inferable branch must not fire spuriously.
-        if is_top_level {
+        // declared return type (#1904). Gate on `in_function_body`, not
+        // `!is_top_level`: a `return` in a top-level nested block (`if`/`with`/
+        // `{}`) is `!is_top_level` yet has no enclosing function, so its
+        // `enclosing_return_type` is absent and the un-inferable branch must
+        // not fire there.
+        if !in_function_body {
             return ScopeResult {
                 bindings: bindings,
                 diagnostics: return_diags

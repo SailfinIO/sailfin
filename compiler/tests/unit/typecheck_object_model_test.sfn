@@ -190,6 +190,15 @@ test "object-model: return literal targeting an array type is E0828" ![io] {
     assert _has_code(_diags(source), "E0828");
 }
 
+// A function with no declared return type returning a bare object literal
+// has no concrete struct target, so it fires the un-inferable E0828 — the
+// return check runs because it is `in_function_body`, independent of
+// whether a return type is declared.
+test "object-model: function with no declared return type returning a literal is E0828" ![io] {
+    let source = "fn make() { return { name: \"Alice\" }; }\n";
+    assert _has_code(_diags(source), "E0828");
+}
+
 // -------------------------------------------------------------------
 // E0828 — lambda-body positions (#1905). A bare object literal in a
 // lambda-body `let` or a lambda `return` is classified via the same
