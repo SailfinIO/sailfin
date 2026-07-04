@@ -5,26 +5,24 @@
 // (`_openssl_link_search_flags` in `compiler/src/build/runtime_objs.sfn`).
 // `SAILFIN_OPENSSL_PREFIX` is the supported public override: it is the
 // FIRST candidate and, because the probe stops at the first match, the
-// SOLE `-L` emitted when it is set to a valid prefix. That single-`-L`
-// property is what makes the override observable end-to-end here without a
-// backend argv trace (out of scope for #1821):
+// SOLE `-L` emitted when it is set to a prefix whose `lib` dir exists.
 //
-//   - valid prefix  → `-L<prefix>/lib` resolves `-lssl` → build SUCCEEDS.
-//   - empty-lib prefix → `-L<prefix>/lib` is the only search dir, the keg
-//     is suppressed, `-lssl` is unresolvable → build FAILS.
-//
-// The negative leg proves the override is genuinely *honored* (it wins over
-// and suppresses keg/brew discovery), not merely that a happy build worked.
+// This asserts the override is honored by inspecting the resolved clang
+// link argv DIRECTLY via `SAILFIN_TRACE_LINK` (#1908) — the override's
+// `-L<prefix>/lib` appearing in the link argv IS the proof it was honored.
+// That replaces the prior behavioral proxy (link success/failure), which
+// forced the test to discover a real OpenSSL keg and to strip `LIBRARY_PATH`
+// so the ambient CI keg path could not mask a bogus override (the #1902
+// workaround). The trace fires before `process.run`, so the assertion holds
+// regardless of whether the (deliberately empty) `lib` dir resolves `-lssl` —
+// no host OpenSSL, no link-outcome, and no `LIBRARY_PATH` handling needed.
 //
 // Non-Darwin: `_openssl_link_search_flags` returns `[]` (the override is
-// inert), so both legs SKIP cleanly (`assert true`), mirroring the
-// tool-absent SKIP precedent. On Darwin with no discoverable host OpenSSL
-// (no keg / brew / pkg-config hit) the tests also SKIP — there is nothing
-// to symlink a valid prefix at.
+// inert), so the test SKIPs cleanly (`assert true`), mirroring the
+// tool-absent SKIP precedent.
 //
 // Matchers note (#842): `sfn/test`'s `expect_*` matchers are `![pure]` and
-// cannot be called from an `![io]` test; assert on captured text / exit
-// codes directly.
+// cannot be called from an `![io]` test; assert on captured text directly.
 import { contains } from "sfn/strings";
 
 fn _sfn_bin() -> string ![io] {
@@ -40,19 +38,6 @@ fn _is_darwin() -> boolean ![io] {
     return contains(out, "Darwin");
 }
 
-// Discover the host's real OpenSSL lib dir the same way the build driver
-// would (standard kegs, then `brew --prefix openssl@3`, then a
-// `pkg-config` fallback) but WITHOUT consulting `SAILFIN_OPENSSL_PREFIX` —
-// this is the ground-truth location we symlink a valid override prefix at.
-// Empty when the host has no discoverable OpenSSL.
-fn _discover_openssl_lib() -> string ![io] {
-    let probe = "d=\"\"; for c in /opt/homebrew/opt/openssl@3/lib /usr/local/opt/openssl@3/lib; do [ -d \"$c\" ] && { d=\"$c\"; break; }; done; [ -z \"$d\" ] && { p=\"$(brew --prefix openssl@3 2>/dev/null)\"; [ -n \"$p\" ] && [ -d \"$p/lib\" ] && d=\"$p/lib\"; }; [ -z \"$d\" ] && command -v pkg-config >/dev/null 2>&1 && { L=\"$(pkg-config --libs-only-L openssl 2>/dev/null)\"; L=\"${L%% *}\"; c=\"${L#-L}\"; [ -n \"$c\" ] && [ -d \"$c\" ] && d=\"$c\"; }; printf %s \"$d\"";
-    let _exit = process.run_capture(["sh", "-c", probe], process.environ());
-    let out = process.capture_take_stdout();
-    let _err = process.capture_take_stderr();
-    return out;
-}
-
 fn _scratch_dir() -> string ![io] {
     let mut dir = env.get("SAILFIN_TEST_SCRATCH");
     if dir.length == 0 { dir = "/tmp"; }
@@ -61,42 +46,31 @@ fn _scratch_dir() -> string ![io] {
     return dir;
 }
 
-// Parent env (the nested build links clang + ld + `-lssl -lcrypto`, and
-// SAILFIN_TEST_SCRATCH keeps the build cache per-invocation under the
-// parallel pool) with an explicit `SAILFIN_OPENSSL_PREFIX` appended. Any
-// ambient copy is dropped first so the child sees exactly the value under
-// test regardless of the platform's duplicate-key getenv precedence.
-//
-// It ALSO strips `LIBRARY_PATH` (and `DYLD_FALLBACK_LIBRARY_PATH`) from the
-// child so `SAILFIN_OPENSSL_PREFIX` *solely* determines where the link finds
-// OpenSSL. CI's macOS legs export `LIBRARY_PATH=<keg>/lib` (the
-// `Provision OpenSSL link path` step), which clang also searches for `-l`
-// resolution — so without stripping it, a bogus override `-L` would be
-// masked by `LIBRARY_PATH` and the negative leg's link would wrongly
-// succeed. Removing it makes both legs sound proofs of honoring, independent
-// of CI provisioning. `-lm` / `-lpthread` live on the default SDK path (not
-// `LIBRARY_PATH`), so stripping it only removes the OpenSSL keg confound.
-fn _env_with_prefix(prefix: string) -> string[] ![io] {
-    let base = process.environ();
-    let mut e: string[] = [];
-    let mut i = 0;
-    loop {
-        if i >= base.length { break; }
-        if !_is_stripped_env_key(base[i]) { e.push(base[i]); }
-        i = i + 1;
-    }
-    e.push("SAILFIN_OPENSSL_PREFIX=" + prefix);
-    return e;
-}
-
 fn _has_key(entry: string, key: string) -> boolean {
     if entry.length < key.length { return false; }
     return substring(entry, 0, key.length) == key;
 }
 
-fn _is_stripped_env_key(entry: string) -> boolean {
-    return _has_key(entry, "SAILFIN_OPENSSL_PREFIX=") || _has_key(entry, "LIBRARY_PATH=")
-        || _has_key(entry, "DYLD_FALLBACK_LIBRARY_PATH=");
+// The nested build links clang + ld (needs the parent `PATH`) and routes its
+// build cache under `SAILFIN_TEST_SCRATCH` (per-invocation isolation under the
+// parallel pool). Inherit the parent env, but drop any ambient
+// `SAILFIN_OPENSSL_PREFIX` / `SAILFIN_TRACE_LINK` first so the child sees
+// exactly the values under test regardless of duplicate-key getenv precedence,
+// then append them.
+fn _child_env(prefix: string) -> string[] ![io] {
+    let base = process.environ();
+    let mut e: string[] = [];
+    let mut i = 0;
+    loop {
+        if i >= base.length { break; }
+        if !_has_key(base[i], "SAILFIN_OPENSSL_PREFIX=") && !_has_key(base[i], "SAILFIN_TRACE_LINK=") {
+            e.push(base[i]);
+        }
+        i = i + 1;
+    }
+    e.push("SAILFIN_OPENSSL_PREFIX=" + prefix);
+    e.push("SAILFIN_TRACE_LINK=1");
+    return e;
 }
 
 // A trivial fixture. Any Sailfin binary links `-lssl -lcrypto` (SFEP-0036
@@ -108,82 +82,28 @@ fn _write_fixture(dir: string) -> string ![io] {
     return path;
 }
 
-struct BuildOutcome {
-    exit: int;
-    err: string;
-}
-
-fn _build_with_prefix(main_path: string, bin: string, prefix: string) -> BuildOutcome ![io] {
-    let exit = process.run_capture([_sfn_bin(), "build", "-o", bin, main_path], _env_with_prefix(prefix));
-    let _o = process.capture_take_stdout();
-    let err = process.capture_take_stderr();
-    return BuildOutcome { exit: exit, err: err };
-}
-
-// ---- Positive: a valid prefix surfaces a working `-L<prefix>/lib` ----
-test "openssl prefix: a valid SAILFIN_OPENSSL_PREFIX links (macOS)" ![io] {
+// A valid `SAILFIN_OPENSSL_PREFIX` surfaces its `-L<prefix>/lib` directly in
+// the resolved clang link argv. The prefix's `lib` dir must exist for
+// `_openssl_link_search_flags` to emit the flag (`[ -d "$P/lib" ]`); it stays
+// empty because we assert on the argv, not on link success.
+test "openssl prefix: SAILFIN_OPENSSL_PREFIX surfaces -L<prefix>/lib in the link trace (macOS)" ![io] {
     if !_is_darwin() {
         print.info("[openssl-prefix] SKIP: non-Darwin (override is inert)");
         assert true;
         return;
     }
-    let real_lib = _discover_openssl_lib();
-    if real_lib.length == 0 {
-        print.info("[openssl-prefix] SKIP: no host OpenSSL to point a valid prefix at");
-        assert true;
-        return;
-    }
     let dir = _scratch_dir();
-    // A distinct prefix (NOT a keg dir) whose `lib` symlinks the real
-    // OpenSSL dir. Because the override is the first and only candidate,
-    // build success proves the `-L<prefix>/lib` it produced resolved
-    // `-lssl` — i.e. the override path, not the keg, drove the link.
     let prefix = dir + "/honored";
-    fs.createDirectory(prefix, true);
-    let _rm = process.run(["rm", "-rf", prefix + "/lib"]);
-    let ln = process.run_capture(["ln", "-s", real_lib, prefix + "/lib"], process.environ());
-    let _lo = process.capture_take_stdout();
-    let _le = process.capture_take_stderr();
-    assert ln == 0;
-
-    let main_path = _write_fixture(dir);
-    let outcome = _build_with_prefix(main_path, dir + "/honored-bin", prefix);
-    assert outcome.exit == 0;
-    assert fs.exists(dir + "/honored-bin");
-}
-
-// ---- Negative: the override is honored (suppresses keg discovery) ----
-// An existing-but-empty `lib` prefix is the first and only candidate; the
-// keg dirs are never searched, so `-lssl` is unresolvable and the link
-// fails. Sound on macOS because `-lssl` is NOT on the default link path
-// (the reason `_openssl_link_search_flags` exists at all) AND
-// `_env_with_prefix` strips `LIBRARY_PATH` (see its note), so the empty
-// override `-L` is genuinely the sole OpenSSL search dir — no ambient
-// `LIBRARY_PATH` keg can rescue the link.
-test "openssl prefix: an empty-lib SAILFIN_OPENSSL_PREFIX suppresses the keg and fails the link (macOS)" ![io] {
-    if !_is_darwin() {
-        print.info("[openssl-prefix] SKIP: non-Darwin (override is inert)");
-        assert true;
-        return;
-    }
-    // Only meaningful when the host actually HAS an OpenSSL keg that the
-    // override must be shown to suppress; otherwise the link would fail
-    // regardless and the assertion proves nothing.
-    let real_lib = _discover_openssl_lib();
-    if real_lib.length == 0 {
-        print.info("[openssl-prefix] SKIP: no host OpenSSL keg to suppress");
-        assert true;
-        return;
-    }
-    let dir = _scratch_dir();
-    let prefix = dir + "/empty";
     fs.createDirectory(prefix + "/lib", true);
 
     let main_path = _write_fixture(dir);
-    let outcome = _build_with_prefix(main_path, dir + "/empty-bin", prefix);
-    // Fail AND for the intended reason: the sole `-L<empty>/lib` leaves
-    // `-lssl` unresolvable, so clang/ld reports an ssl link error. Pinning
-    // the cause keeps the test from passing on an unrelated build failure.
-    assert outcome.exit != 0;
-    assert contains(outcome.err, "ssl");
+    let _exit = process.run_capture([_sfn_bin(), "build", "-o", dir
+        + "/honored-bin", main_path], _child_env(prefix));
+    let _out = process.capture_take_stdout();
+    let err = process.capture_take_stderr();
+
+    // The override's `-L<prefix>/lib` appears in the resolved link argv —
+    // direct proof it was honored, independent of whether the link resolves.
+    assert contains(err, "[trace-link]");
+    assert contains(err, "-L" + prefix + "/lib");
 }
