@@ -15,15 +15,30 @@
 // contains no effect keyword still fires (no text scan, no effect-keyword
 // anchor); (d) match-arm shorthand patterns (which legitimately degrade to
 // `Raw`) are exempt.
-import { Expression } from "../../src/ast";
+import { Expression, Statement } from "../../src/ast";
 import { empty_import_symbols } from "../../src/effect_imports";
 import { parse_program } from "../../src/parser/mod";
-import { typecheck_diagnostics, walk_expression, walk_match_pattern } from "../../src/typecheck";
+import {
+    TypeckCtx,
+    make_typeck_ctx,
+    typecheck_diagnostics,
+    walk_expression,
+    walk_match_pattern
+} from "../../src/typecheck";
 import { Diagnostic, SymbolEntry } from "../../src/typecheck_types";
 
 fn _no_bindings() -> SymbolEntry[] {
     let empty: SymbolEntry[] = [];
     return empty;
+}
+
+// A minimal root walk context: empty scope, no enclosing return type.
+// The expression walk takes a `TypeckCtx` (SFEP-0039 addendum); these
+// fail-closed tests only exercise the Raw/Identifier arms, which read
+// `ctx.bindings`/`ctx.imports` — both empty here.
+fn _walk_ctx() -> TypeckCtx {
+    let no_interfaces: Statement[] = [];
+    return make_typeck_ctx(_no_bindings(), empty_import_symbols(), no_interfaces, _no_bindings(), false);
 }
 
 fn _has_code(diags: Diagnostic[], code: string) -> boolean {
@@ -38,7 +53,7 @@ fn _has_code(diags: Diagnostic[], code: string) -> boolean {
 
 fn _raw_diags(text: string) -> Diagnostic[] ![io] {
     let raw = Expression.Raw { text: text, span: null };
-    return walk_expression(raw, _no_bindings(), empty_import_symbols());
+    return walk_expression(raw, _walk_ctx());
 }
 
 // ── (a) a non-empty, non-fn-reference Raw fails closed ──
@@ -66,7 +81,7 @@ test "raw: a whitespace-only Raw is clean (trimmed to empty)" ![io] {
 // E0818 — the backstop keys on `variant == "Raw"`, never on text content.
 test "raw: a structured Identifier mentioning `print` does not fire E0818" ![io] {
     let ident = Expression.Identifier { name: "printable", span: null };
-    let diags = walk_expression(ident, _no_bindings(), empty_import_symbols());
+    let diags = walk_expression(ident, _walk_ctx());
     assert ! _has_code(diags, "E0818");
 }
 
@@ -88,13 +103,13 @@ test "raw: a Raw mentioning `print` as a substring fails closed by shape" ![io] 
 // unstructured expressions, so `walk_match_pattern` exempts them from E0818.
 test "match pattern: a Raw shorthand destructure is exempt from E0818" ![io] {
     let pattern = Expression.Raw { text: "Result.Ok { value }", span: null };
-    let diags = walk_match_pattern(pattern, _no_bindings(), empty_import_symbols());
+    let diags = walk_match_pattern(pattern, _walk_ctx());
     assert diags.length == 0;
 }
 
 test "match pattern: an empty-text Raw pattern is exempt from E0818" ![io] {
     let pattern = Expression.Raw { text: "", span: null };
-    let diags = walk_match_pattern(pattern, _no_bindings(), empty_import_symbols());
+    let diags = walk_match_pattern(pattern, _walk_ctx());
     assert diags.length == 0;
 }
 
@@ -102,7 +117,7 @@ test "match pattern: an empty-text Raw pattern is exempt from E0818" ![io] {
 // helper — the exemption is scoped to the `Raw` shorthand form only.
 test "match pattern: a structured Identifier pattern walks clean" ![io] {
     let pattern = Expression.Identifier { name: "x", span: null };
-    let diags = walk_match_pattern(pattern, _no_bindings(), empty_import_symbols());
+    let diags = walk_match_pattern(pattern, _walk_ctx());
     assert ! _has_code(diags, "E0818");
 }
 
