@@ -36,6 +36,7 @@ import {
     cache_lookup_artifact,
     cache_lookup_complete,
     cache_paths_for,
+    cache_root_from,
     cache_root_with_override,
     cache_stats_is_empty,
     cache_store,
@@ -84,6 +85,32 @@ test "build_cache: cache_root_with_override empty -> in-tree default" {
 
 test "build_cache: cache_root_with_override non-empty -> override + version" {
     assert cache_root_with_override("/tmp/sfn-shared-cache") == "/tmp/sfn-shared-cache/v2";
+}
+
+// Cache-root ladder (SFEP-0040 §3.1). Pure inputs so precedence is
+// verified without any process-global env mutation.
+test "build_cache: cache_root_from explicit override wins over all" {
+    // Explicit ($SAILFIN_BUILD_CACHE_DIR) beats even the self-host
+    // pin, so CI can redirect the compiler's own cache.
+    assert cache_root_from("/ci/cache", true, "/xdg", "/home/dev") == "/ci/cache/v2";
+    assert cache_root_from("/ci/cache", false, "/xdg", "/home/dev") == "/ci/cache/v2";
+}
+
+test "build_cache: cache_root_from self-host pins in-tree over XDG/HOME" {
+    assert cache_root_from("", true, "/xdg", "/home/dev") == "build/cache/v2";
+}
+
+test "build_cache: cache_root_from XDG_CACHE_HOME beats HOME" {
+    assert cache_root_from("", false, "/xdg", "/home/dev") == "/xdg/sailfin/v2";
+}
+
+test "build_cache: cache_root_from HOME is the global default" {
+    assert cache_root_from("", false, "", "/home/dev") == "/home/dev/.cache/sailfin/v2";
+}
+
+test "build_cache: cache_root_from all-empty falls back in-tree" {
+    // Hermetic fallback when $HOME is unresolvable (containers, CI).
+    assert cache_root_from("", false, "", "") == "build/cache/v2";
 }
 
 // --------------------------------------------------------------

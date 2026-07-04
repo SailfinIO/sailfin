@@ -44,9 +44,14 @@
 //
 //   <root>/<key[0..2]>/<key>/{ir.sfn-asm, layout.manifest, mod.ll, mod.o}
 //
-// `<root>` defaults to `build/cache/v2` (in-tree) and can be
-// overridden by `$SAILFIN_BUILD_CACHE_DIR` to support shared CI
-// caches without code changes. The trailing suffix is
+// `<root>` defaults to a shared per-user directory
+// (`$XDG_CACHE_HOME/sailfin` or `$HOME/.cache/sailfin`) so identical
+// module compiles are deduplicated across projects on a machine
+// (SFEP-0040 §3.1). It can be overridden by `$SAILFIN_BUILD_CACHE_DIR`
+// (shared CI caches), falls back to in-tree `build/cache` when `$HOME`
+// is unresolvable, and is pinned in-tree for the compiler self-host
+// build so `make compile` / `make check` stay hermetic. See
+// `cache_root_from`. The trailing suffix is
 // `build_cache_schema_version()` (currently `v2`) — when the key
 // shape or layout changes, bump it and let the old `v<N>` tree age
 // out so stale entries can never poison new compilers.
@@ -61,8 +66,10 @@
 //
 // All `![io]` operations are parameterized on `root` so tests can
 // pass an arbitrary tmp directory without setting environment
-// variables. The convenience reader `cache_root()` is the
-// production-side wrapper that resolves `$SAILFIN_BUILD_CACHE_DIR`.
+// variables. The convenience reader `cache_root(capsule_name)` is the
+// production-side wrapper that resolves the root ladder from the
+// environment; the pure `cache_root_from` underneath it takes every
+// input explicitly so the precedence order is unit-testable.
 import {
     _dirname_cmd,
     _ensure_dir_recursive_cmd,
@@ -194,10 +201,23 @@ struct BuildCacheConfig {
     enabled: boolean;
     trace: boolean;
     clean: boolean;
+    // The current build's `[capsule].name`, threaded here so it
+    // reaches every `cache_root()` call site (this config already
+    // flows to all of them). Used only to pin the content-addressed
+    // cache root in-tree for the compiler self-host build
+    // (`== "sailfin"`, SFEP-0040 §3.1) so `make compile` / `make
+    // check` never read a developer's global `~/.cache/sailfin`.
+    // Empty for positional/foreign builds → global default root.
+    capsule_name: string;
 }
 
 fn empty_build_cache_config() -> BuildCacheConfig {
-    return BuildCacheConfig { enabled: true, trace: false, clean: false };
+    return BuildCacheConfig {
+        enabled: true,
+        trace: false,
+        clean: false,
+        capsule_name: ""
+    };
 }
 
 // `no_cache_flag` / `trace_flag` / `clean_flag` are the CLI
@@ -208,7 +228,8 @@ fn resolve_build_cache_config(no_cache_flag: boolean, trace_flag: boolean, clean
     return BuildCacheConfig {
         enabled: !env_disabled && !no_cache_flag,
         trace: env_trace || trace_flag,
-        clean: clean_flag
+        clean: clean_flag,
+        capsule_name: ""
     };
 }
 
@@ -216,10 +237,10 @@ fn resolve_build_cache_config(no_cache_flag: boolean, trace_flag: boolean, clean
 // success (or no-op when the directory didn't exist), false if
 // `rm` failed. Defensive: refuses to operate on an empty path.
 //
-// Note: deletes the FULL `<override>/v<N>/...` tree the cache
-// stores under. Callers should resolve `cache_root()` first and
-// pass that — wiping `$SAILFIN_BUILD_CACHE_DIR` itself would
-// nuke any sibling schema versions that future compilers might
+// Note: deletes the FULL `<root>/v<N>/...` tree the cache stores
+// under. Callers should resolve `cache_root(capsule_name)` first and
+// pass that — wiping the bare cache base (e.g. `$SAILFIN_BUILD_CACHE_DIR`)
+// would nuke any sibling schema versions that future compilers might
 // be relying on.
 fn cache_clean(root: string) -> boolean ![io] {
     if root.length == 0 { return false; }
@@ -232,21 +253,48 @@ fn cache_clean(root: string) -> boolean ![io] {
 // ----------------------------------------------------------------
 // Cache root resolution
 // ----------------------------------------------------------------
-// Pure variant — used by tests and by the production reader below.
-// `override_path` empty → in-tree default `build/cache/<version>`;
-// non-empty → `<override>/<version>`.
-fn cache_root_with_override(override_path: string) -> string {
-    if override_path.length > 0 {
-        return override_path + "/" + build_cache_schema_version();
-    }
-    return "build/cache/" + build_cache_schema_version();
+// Pure resolution ladder (SFEP-0040 §3.1). Highest precedence first:
+//   1. `explicit` ($SAILFIN_BUILD_CACHE_DIR) — CI/sandbox override.
+//   2. compiler self-host pin — in-tree `build/cache` stays hermetic
+//      so `make compile` / `make check` never read a developer's
+//      global store (explicit still wins above, so CI can redirect
+//      even the self-host cache).
+//   3. `$XDG_CACHE_HOME/sailfin` — global default when XDG is set.
+//   4. `$HOME/.cache/sailfin` — global default on Linux/macOS.
+//   5. `build/cache` — hermetic fallback when `$HOME` is unresolvable
+//      (containers, minimal CI).
+// All inputs are explicit so the ladder is unit-testable without any
+// process-global env mutation. The `<version>` schema suffix is
+// appended uniformly across every branch.
+fn cache_root_from(explicit: string, is_selfhost: boolean, xdg: string, home: string) -> string {
+    let schema = build_cache_schema_version();
+    if explicit.length > 0 { return explicit + "/" + schema; }
+    if is_selfhost { return "build/cache/" + schema; }
+    if xdg.length > 0 { return xdg + "/sailfin/" + schema; }
+    if home.length > 0 { return home + "/.cache/sailfin/" + schema; }
+    return "build/cache/" + schema;
 }
 
-// Production reader. Resolves `$SAILFIN_BUILD_CACHE_DIR` at call
-// time; callers should invoke once at the top of a build and
-// thread the result through.
-fn cache_root() -> string ![io] {
-    return cache_root_with_override(_get_env_cmd("SAILFIN_BUILD_CACHE_DIR"));
+// Pure variant — used by tests and by other callers that already hold
+// an override. `override_path` empty → in-tree default
+// `build/cache/<version>`; non-empty → `<override>/<version>`.
+// Equivalent to the non-self-host, no-XDG/HOME slice of the ladder.
+fn cache_root_with_override(override_path: string) -> string {
+    return cache_root_from(override_path, false, "", "");
+}
+
+// Production reader. Resolves the cache-root ladder from the
+// environment plus `capsule_name` (the current build's
+// `[capsule].name`); callers should invoke once at the top of a
+// build and thread the result through. `capsule_name == "sailfin"`
+// pins the in-tree root so the compiler self-host build stays
+// hermetic (SFEP-0040 §3.1).
+fn cache_root(capsule_name: string) -> string ![io] {
+    let explicit = _get_env_cmd("SAILFIN_BUILD_CACHE_DIR");
+    let is_selfhost = strings_equal(capsule_name, "sailfin");
+    let xdg = _get_env_cmd("XDG_CACHE_HOME");
+    let home = _get_env_cmd("HOME");
+    return cache_root_from(explicit, is_selfhost, xdg, home);
 }
 
 // ----------------------------------------------------------------
@@ -1016,6 +1064,7 @@ export {
     CacheStats,
     BuildCacheConfig,
     build_cache_schema_version,
+    cache_root_from,
     cache_root_with_override,
     cache_root,
     cache_artifact_path,

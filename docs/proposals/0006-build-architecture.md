@@ -1059,7 +1059,12 @@ able to act on link failures.
 - Cache key per module:
   `sha256(source)` ⊕ `sha256(each resolved dep's .layout-manifest)` ⊕
   `compiler_version` ⊕ `canonical(flags)`.
-- Cache store: `build/cache/<key-prefix>/<key>.{sfn-asm,layout-manifest,ll,o}`.
+- Cache store: `<root>/<key[0..2]>/<key>/{ir.sfn-asm,layout.manifest,mod.ll,mod.o}`
+  — one directory per key, sharded by the 2-char key prefix. `<root>` already
+  includes the schema suffix (`.../v2`) and defaults to a shared per-user
+  directory (`$XDG_CACHE_HOME/sailfin/v2` or `$HOME/.cache/sailfin/v2`;
+  `$SAILFIN_BUILD_CACHE_DIR` override; in-tree `build/cache/v2` fallback and for
+  the compiler self-host build — SFEP-0040 §3.1).
 - Cache hits skip parse, typecheck, effect, emit, and clang. They do not
   skip link.
 - `--no-cache` disables the lookup but still writes. `--clean` wipes the

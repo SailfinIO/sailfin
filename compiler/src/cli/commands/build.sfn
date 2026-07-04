@@ -118,7 +118,7 @@ fn run(matches: Matches, ctx: CliContext) -> int ![io] {
     // `--work-dir` unset both fall back to the legacy in-tree
     // paths so the default invocation is byte-for-byte identical.
     let sailfin_cache_dir = _resolve_sailfin_cache_dir_for_work(work_dir);
-    let cache_config = resolve_build_cache_config(no_cache_flag, cache_trace_flag, clean_flag);
+    let mut cache_config = resolve_build_cache_config(no_cache_flag, cache_trace_flag, clean_flag);
 
     // -p resolves the entry path + build kind from the capsule's
     // manifest. The build then proceeds as for a positional source
@@ -145,6 +145,12 @@ fn run(matches: Matches, ctx: CliContext) -> int ![io] {
         cap_version = cap_spec.version;
         cap_entry_relative = cap_spec.entry_relative;
     }
+    // Thread the resolved capsule name into the cache config so every
+    // downstream `cache_root(...)` call (this fn, `_emit_build_report`,
+    // `compile_capsule_modules`) pins the in-tree root for the
+    // compiler self-host build (`== "sailfin"`, SFEP-0040 §3.1). Empty
+    // for a positional build → global default root.
+    cache_config.capsule_name = cap_capsule_name;
     if input_path.length == 0 {
         print("usage: sfn build [-o OUTPUT] [-p PATH] [--no-cache] [--clean] [--cache-trace] [--json] [--work-dir DIR] [--check-determinism] (<file.sfn> | -p <capsule-path>)");
         return 2;
@@ -393,7 +399,9 @@ fn run(matches: Matches, ctx: CliContext) -> int ![io] {
     // `--no-cache` so the persistent store is neither read nor
     // written, matching the summary-fold gate below.
     let mut build_shared_cache_root: string = "";
-    if cache_config.enabled { build_shared_cache_root = cache_root(); }
+    if cache_config.enabled {
+        build_shared_cache_root = cache_root(cache_config.capsule_name);
+    }
     let link_result = _clang_link_multi(all_lls, exe_path, runtime_root, build_runtime_caps, binary_dir, sailfin_cache_dir, build_shared_cache_root);
     let rc = link_result.rc;
     if rc != 0 {

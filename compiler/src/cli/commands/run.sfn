@@ -154,7 +154,9 @@ fn run(matches: Matches, ctx: CliContext) -> int ![io] {
     // Shared runtime-object cache root (#1096); empty under `--no-cache` to
     // leave the persistent store untouched.
     let mut run_shared_cache_root: string = "";
-    if run_cache_config.enabled { run_shared_cache_root = cache_root(); }
+    if run_cache_config.enabled {
+        run_shared_cache_root = cache_root(run_cache_config.capsule_name);
+    }
     let link_result = _clang_link_multi(all_lls, exe_path, runtime_root, run_runtime_caps, binary_dir, "", run_shared_cache_root);
     let link_rc = link_result.rc;
     if link_rc != 0 {
