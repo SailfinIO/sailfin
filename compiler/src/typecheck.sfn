@@ -37,6 +37,8 @@ import {
     check_function_signature,
     check_generic_instantiation,
     check_interface_members,
+    check_intersection_value_type_annotation,
+    check_object_literal_target,
     check_struct_fields,
     check_struct_implements_interfaces,
     check_struct_methods,
@@ -443,9 +445,11 @@ fn check_statement(statement: Statement, bindings: SymbolEntry[], interfaces: St
         let registration = register_local_symbol(bindings, statement.name, "variable", statement.span, scope_start);
         let walk_diags = walk_expression(statement.initializer, bindings, imports);
         let annotation_diags = check_bare_fn_type_annotation(statement.type_annotation, statement.name, statement.span);
+        let intersection_diags = check_intersection_value_type_annotation(statement.type_annotation, statement.name, statement.span);
+        let object_literal_diags = check_object_literal_target(statement.initializer, statement.type_annotation, statement.name, statement.span, top_level);
         return ScopeResult {
             bindings: registration.bindings,
-            diagnostics: registration.diagnostics.concat(walk_diags).concat(annotation_diags)
+            diagnostics: registration.diagnostics.concat(walk_diags).concat(annotation_diags).concat(intersection_diags).concat(object_literal_diags)
         };
     }
     if statement.variant == "FunctionDeclaration" {
@@ -693,6 +697,7 @@ fn check_statement(statement: Statement, bindings: SymbolEntry[], interfaces: St
             _ci += 1;
         }
         diagnostics = diagnostics.concat(check_bare_fn_type_annotation(statement.aliased_type, statement.name, statement.name_span));
+        diagnostics = diagnostics.concat(check_intersection_value_type_annotation(statement.aliased_type, statement.name, statement.name_span));
         return ScopeResult {
             bindings: registration.bindings,
             diagnostics: diagnostics
@@ -1106,6 +1111,7 @@ fn walk_expression(expression: Expression?, bindings: SymbolEntry[], imports: Im
             let parameter = expression.parameters[_lp];
             if lambda_span == null { lambda_span = parameter.span; }
             diagnostics = diagnostics.concat(check_bare_fn_type_annotation(parameter.type_annotation, parameter.name, parameter.span));
+            diagnostics = diagnostics.concat(check_intersection_value_type_annotation(parameter.type_annotation, parameter.name, parameter.span));
             _lp += 1;
         }
         // A param-less lambda (`fn() -> (int) -> int`) has no parameter span
@@ -1123,6 +1129,7 @@ fn walk_expression(expression: Expression?, bindings: SymbolEntry[], imports: Im
             }
         }
         diagnostics = diagnostics.concat(check_bare_fn_type_annotation(expression.return_type, "lambda", lambda_span));
+        diagnostics = diagnostics.concat(check_intersection_value_type_annotation(expression.return_type, "lambda", lambda_span));
         return diagnostics;
     }
     if expression.variant == "Range" {
@@ -1498,7 +1505,8 @@ fn walk_statement_expressions(statement: Statement, bindings: SymbolEntry[], imp
     if statement.variant == "VariableDeclaration" {
         let init_diags = walk_expression(statement.initializer, bindings, imports);
         let annotation_diags = check_bare_fn_type_annotation(statement.type_annotation, statement.name, statement.span);
-        return init_diags.concat(annotation_diags);
+        let intersection_diags = check_intersection_value_type_annotation(statement.type_annotation, statement.name, statement.span);
+        return init_diags.concat(annotation_diags).concat(intersection_diags);
     }
     if statement.variant == "IfStatement" {
         let mut diagnostics = walk_expression(statement.condition, bindings, imports);
