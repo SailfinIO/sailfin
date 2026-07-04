@@ -206,14 +206,24 @@ here.
   aliases.
 - **Nominal object model — object literals and intersections** (`E0828`/`E0829`,
   SFEP-0039, #1860): data is constructed only through a concrete `struct`. A
-  bare object literal `{ ... }` whose resolved target is an **interface**, or
-  an unannotated `let` the compiler cannot infer a struct for, fails typecheck
-  with `E0828`; `let p: Person = { name: "Alice" }` against a `struct Person`
-  is the sanctioned path (#1855) and is unaffected. Separately, `A & B` used as
-  a **data/value type** (variable, parameter, field, or return annotation, or
-  the RHS of a `type X = A & B` alias) fails typecheck with `E0829` — `A & B`
-  stays in the grammar but is reserved for generic trait-bound composition
-  (`<T: A + B>`, SFEP-0038) and is not diagnosed in bound position. The sibling
+  bare object literal `{ ... }` whose resolved target is an **interface**, an
+  **array** type (a bare literal never yields an array, so this fires
+  regardless of the element type — even `Named[]` where `Named` is a struct), a
+  **generic instantiation** whose head names a non-struct (classified by base
+  name, e.g. `Iface<...>`), or an **unannotated `let`** the compiler cannot
+  infer a struct for, fails typecheck with `E0828`; `let p: Person = { name: "Alice" }`
+  against a `struct Person` is the sanctioned path (#1855) and is unaffected.
+  Coverage is now complete across value positions — `let` (#1899), parameter
+  defaults and array/generic-head target normalization (#1900), return
+  position (#1904), and lambda-body `let` / lambda return (#1905) — via a
+  unified `TypeckCtx` expected-type/typing-environment context threaded
+  through both typecheck walk families (SFEP-0041). The named-`struct`
+  construction path (the `Struct` AST variant) stays exempt. Separately, `A &
+  B` used as a **data/value type** (variable, parameter, field, or return
+  annotation, or the RHS of a `type X = A & B` alias) fails typecheck with
+  `E0829` — `A & B` stays in the grammar but is reserved for generic
+  trait-bound composition (`<T: A + B>`, SFEP-0038) and is not diagnosed in
+  bound position. The sibling
   rule that interface members must be method signatures (`E0827`, SFEP-0039,
   #1888) is now enforced: the parser detects a data-field-shaped interface
   member (an identifier followed by `:` or `->` where a method signature was
@@ -231,7 +241,7 @@ here.
 | `thread_local let mut` | Shipped | Top-level only; ELF TLS; immutable form rejected (`E0807`) |
 | Functions (`fn`) | Shipped | Generics, default params, decorators |
 | `async fn` | Parsed | Structural only; `spawn`/`await` on spawned tasks works end-to-end (v0, #1084 closed, #1474/#1477/#1546); `await` on `async fn` return values is not wired into the live typecheck walk (pending #829). Use `spawn fn() -> T { ... }` + `await` instead |
-| Structs | Shipped | Generic params, `implements` clause. Sole sanctioned bare-object-literal target (`E0828`, SFEP-0039, #1860) — a literal targeting an interface or an un-inferable unannotated `let` is rejected |
+| Structs | Shipped | Generic params, `implements` clause. Sole sanctioned bare-object-literal target (`E0828`, SFEP-0039/SFEP-0041, #1860/#1899/#1900/#1904/#1905) — a literal targeting an interface, an un-inferable unannotated `let`, any array type (regardless of element type), or a non-struct generic-instantiation head is rejected at every value position: `let`, parameter defaults, return, and lambda-body/return |
 | Interfaces | Shipped | Trait-style method signatures, enforced method-only: a data-field-shaped member is rejected at typecheck with `E0827` (SFEP-0039, #1888), fix-it points at a concrete `struct`. Interface *signature conformance* checking is separate and still draft |
 | Enums / ADTs | Shipped | Payload variants; generic payloads monomorphise per instantiation (#830). >8-byte by-value payload layouts not yet emitted |
 | Type aliases | Shipped | Including generic params. `A & B` is reserved for generic trait bounds, not a data type — `type X = A & B` is rejected at the definition (`E0829`, SFEP-0039, #1860) |
