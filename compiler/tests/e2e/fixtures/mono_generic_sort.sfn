@@ -10,16 +10,13 @@
 // the final order (ranks 1,2,3 -> 1*100 + 2*10 + 3 = 123), so a mis-ordered or
 // unresolved dispatch produces a different code.
 //
-// `compare` takes `other: Widget` rather than the interface's `other: Self`
-// spelling: a `Self`-typed non-receiver parameter is not yet resolved to the
-// enclosing struct type at lowering (it lowers to an opaque pointer, corrupting
-// field access) — a separate, pre-existing gap outside this issue's dispatch
-// scope. `other: Widget` satisfies `Comparable` conformance identically and
-// keeps this fixture focused on the bound-method resolution under test.
+// `compare` takes `other: Self` — the canonical `Comparable.compare(self,
+// other: Self)` spelling — now that a `Self`-typed non-receiver parameter
+// resolves to the enclosing struct type at lowering (#1898).
 struct Widget implements Comparable {
     rank: int;
 
-    fn compare(self, other: Widget) -> int { return self.rank - other.rank; }
+    fn compare(self, other: Self) -> int { return self.rank - other.rank; }
 }
 
 fn sort < T: Comparable > (items: T[]) -> T[] {

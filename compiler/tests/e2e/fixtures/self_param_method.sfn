@@ -1,0 +1,17 @@
+// Fixture for #1898: a `Self`-typed non-receiver parameter on a struct method
+// resolves to the enclosing struct at lowering, exactly like the `self`
+// receiver. `diff` reads `other.rank` — a field access on a `Self`-typed
+// parameter. Before the fix `other` lowered to an opaque `i8*`, so the field
+// load and the subtraction miscompiled (`sub i8* ...`). The exit code encodes
+// the result (5 - 2 = 3), so a miscompile produces a different code.
+struct Widget {
+    rank: int;
+
+    fn diff(self, other: Self) -> int { return self.rank - other.rank; }
+}
+
+fn main() -> int {
+    let a = Widget { rank: 5 };
+    let b = Widget { rank: 2 };
+    return a.diff(b);
+}

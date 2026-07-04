@@ -1,0 +1,57 @@
+// End-to-end coverage for #1898: a `Self`-typed non-receiver parameter on a
+// struct method must lower to the enclosing struct's concrete type, mirroring
+// how the `self` receiver is already typed to `%Struct*`. Before the fix a
+// `Self`-typed parameter lowered to an opaque `i8*`, so field access on it went
+// through `sfn_mem_get_field` (yielding `i8*`) instead of a typed GEP, and any
+// arithmetic on that field miscompiled (`sub i8* ...`, rejected by LLVM).
+//
+// Drives the production `sfn build` path as a subprocess over
+// `fixtures/self_param_method.sfn` and asserts the run exit code encodes the
+// correct field arithmetic (5 - 2 = 3). Build/emit isolation follows
+// `.claude/rules/no-bash-e2e.md`: the full parent environment is threaded
+// (PATH for clang/ld, SAILFIN_TEST_SCRATCH for per-invocation build-cache
+// isolation under the parallel pool).
+fn _sfn_bin() -> string ![io] {
+    let configured = env.get("SAILFIN_BIN");
+    if configured.length > 0 { return configured; }
+    return "build/native/sailfin";
+}
+
+fn _child_env() -> string[] ![io] { return process.environ(); }
+
+fn _scratch_dir() -> string ![io] {
+    let mut dir = env.get("SAILFIN_TEST_SCRATCH");
+    if dir.length == 0 { dir = "/tmp"; }
+    fs.createDirectory(dir, true);
+    return dir;
+}
+
+// Build the fixture to a unique path and run it; return the run's exit code,
+// or -100 if the build itself failed.
+fn _build_and_run(fixture: string, tag: string) -> int ![io] {
+    let dir = _scratch_dir();
+    let bin = dir + "/sfn-self-param-" + tag;
+    if fs.exists(bin) { fs.deleteFile(bin); }
+    let build_exit = process.run_capture([_sfn_bin(), "build", "-o", bin, fixture], _child_env());
+    let _bo = process.capture_take_stdout();
+    let _be = process.capture_take_stderr();
+    if build_exit != 0 { return -100; }
+    let run_exit = process.run_capture([bin], _child_env());
+    let _ro = process.capture_take_stdout();
+    let _re = process.capture_take_stderr();
+    fs.deleteFile(bin);
+    return run_exit;
+}
+
+test "self-param lowering: `other: Self` field access builds and computes correctly" ![io] {
+    let exit = _build_and_run("compiler/tests/e2e/fixtures/self_param_method.sfn", "diff");
+    // 5 - 2 = 3: proves `other.rank` loaded a typed `i64` field, not an `i8*`.
+    assert exit == 3;
+}
+
+test "self-param lowering: return-position `-> Self` resolves to the concrete type" ![io] {
+    let exit = _build_and_run("compiler/tests/e2e/fixtures/self_return_method.sfn", "ret");
+    // `with_x` returns a `Point`; reading `.x` off the result yields 7 only if
+    // the `-> Self` return lowered to `%Point*`, not an opaque `i8*`.
+    assert exit == 7;
+}

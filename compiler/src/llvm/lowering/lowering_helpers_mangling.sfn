@@ -573,6 +573,54 @@ fn extend_native_functions_inplace(dst: NativeFunction[], src: NativeFunction[])
     return out;
 }
 
+// Identifier-character test for `Self`-token substitution: ASCII letters,
+// digits, and `_`. Used to keep the rewrite identifier-boundary aware so a
+// distinct type such as `SelfContained` is never partially rewritten.
+fn _lhm_is_ident_char(ch: string) -> boolean {
+    if ch.length == 0 { return false; }
+    if ch >= "a" && ch <= "z" { return true; }
+    if ch >= "A" && ch <= "Z" { return true; }
+    if ch >= "0" && ch <= "9" { return true; }
+    if ch == "_" { return true; }
+    return false;
+}
+
+// Rewrite every whole-identifier `Self` token in a method type annotation to
+// the enclosing struct's concrete name. This is the compiler's `Self`
+// desugaring inside a concrete struct method: `Self` denotes the enclosing
+// type in every position, exactly as the `self` receiver is already typed to
+// `%Struct*`. The walk is identifier-boundary aware so wrappers and suffixes
+// resolve (`Self[]`, `&Self`, `Self?`, `mut Self`) while a distinct type such
+// as `SelfContained` is left intact. Without this a `Self`-typed non-receiver
+// parameter lowers to an opaque `i8*`, corrupting field access on it (#1898).
+fn _lhm_resolve_self_annotation(annotation: string, struct_name: string) -> string {
+    if annotation == null { return annotation; }
+    if annotation.length == 0 { return annotation; }
+    let mut result: string = "";
+    let mut token: string = "";
+    let mut i: int = 0;
+    loop {
+        if i >= annotation.length { break; }
+        let ch = substring(annotation, i, i + 1);
+        if _lhm_is_ident_char(ch) { token = token + ch; } else {
+            if token.length > 0 {
+                if token == "Self" { result = result + struct_name; } else {
+                    result = result + token;
+                }
+                token = "";
+            }
+            result = result + ch;
+        }
+        i += 1;
+    }
+    if token.length > 0 {
+        if token == "Self" { result = result + struct_name; } else {
+            result = result + token;
+        }
+    }
+    return result;
+}
+
 fn flatten_struct_methods(structs: NativeStruct[]) -> NativeFunction[] {
     if structs.length > 100000 { return []; }
     let mut result: NativeFunction[] = [];
@@ -630,6 +678,11 @@ fn flatten_struct_methods(structs: NativeStruct[]) -> NativeFunction[] {
                 if p_name == "self" {
                     if p_type.length == 0 { p_type = definition.name; }
                 }
+                // A `Self`-spelled non-receiver parameter (and nested forms
+                // like `Self[]`) denotes the enclosing struct just like the
+                // receiver; resolve it to the concrete type so it lowers to
+                // `%Struct*` instead of an opaque `i8*` (#1898).
+                p_type = _lhm_resolve_self_annotation(p_type, definition.name);
                 let fixed_p = NativeParameter {
                     name: p_name,
                     type_annotation: p_type,
@@ -640,11 +693,15 @@ fn flatten_struct_methods(structs: NativeStruct[]) -> NativeFunction[] {
                 fixed_params.push(fixed_p);
                 pi += 1;
             }
+            // Return-position `Self` resolves to the enclosing struct too, so
+            // a method declared `-> Self` carries the concrete return type
+            // through lowering (#1898).
+            let fixed_return = _lhm_resolve_self_annotation(method.return_type, definition.name);
             let qualified = NativeFunction {
                 name: qualified_name,
                 is_async: method.is_async,
                 parameters: fixed_params,
-                return_type: method.return_type,
+                return_type: fixed_return,
                 effects: method.effects,
                 decorators: method.decorators,
                 instructions: method.instructions,

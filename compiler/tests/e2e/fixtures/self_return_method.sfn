@@ -1,0 +1,20 @@
+// Fixture for #1898 (return position): a method declared `-> Self` resolves to
+// the enclosing struct's concrete type at lowering, the same uniform `Self`
+// desugaring applied to `Self`-typed parameters. `with_x` returns a fresh
+// `Point`; the caller reads `.x` off the result, which only type-checks and
+// GEPs correctly if the return type lowered to `%Point*` rather than `i8*`.
+// The exit code encodes the field (7), so a miscompile produces a different
+// code.
+struct Point {
+    x: int;
+
+    fn with_x(self, nx: int) -> Self {
+        return Point { x: nx };
+    }
+}
+
+fn main() -> int {
+    let p = Point { x: 1 };
+    let q = p.with_x(7);
+    return q.x;
+}
