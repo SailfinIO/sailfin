@@ -262,6 +262,9 @@ fn _lb_read_frame(fd: i32, out_opcode: * i64) -> string {
 // mask key is fine for a directed test vehicle (the production client uses
 // `RAND_bytes`).
 fn _lb_send_frame_raw(fd: i32, fin: i64, opcode: i64, masked: bool, payload: * u8, payload_len: i64) -> bool {
+    // Guard against a negative length underflowing `total` into a huge
+    // `as usize` allocation if a future caller mis-passes it.
+    if payload_len < 0 { return false; }
     let byte0: i64 = (fin << 7) | (opcode & 15);
     let mut header_len: i64 = 2;
     if payload_len >= 126 && payload_len <= 65535 { header_len = 4; } else {
@@ -319,9 +322,11 @@ fn _lb_send_frame_raw(fd: i32, fin: i64, opcode: i64, masked: bool, payload: * u
     return ok;
 }
 
-// Send ONLY a frame header declaring an oversized 64-bit length (no mask,
-// no payload). `_ws_frame_read` rejects on the length check before it reads
-// the mask, so it never blocks on the un-sent payload — it replies with
+// Send ONLY a frame header declaring an oversized 64-bit length: the MASK
+// bit is set (so the server reaches the length-cap check and replies `1009`
+// rather than taking the unmasked-frame `1002` path) but no masking key or
+// payload follows. `_ws_frame_read` rejects on the length check before it
+// reads the mask, so it never blocks on the un-sent bytes — it replies with
 // close `1009` (message too big). The declared length is 4 GiB (2^32), well
 // over the server's frame cap and positive as an i64.
 fn _lb_send_oversize_header(fd: i32) -> bool {

@@ -1283,6 +1283,10 @@ fn _ws_conn_worker(ctx: * u8) -> * u8 {
             if len > 0 {
                 memcpy(_ws_ptr_off(grown, frag_len), payload_addr as * u8, len as usize);
             }
+            // Keep the module's payload-buffer invariant: NUL-terminate at the
+            // new end (the +4 slack in `new_len + 4` covers it) so the buffer
+            // stays safe for any `_ws_byte_at`-style tail read.
+            memset(_ws_ptr_off(grown, new_len), 0, 1 as usize);
             free(payload_addr as * u8);
             frag_len = new_len;
             if fin == 1 {
