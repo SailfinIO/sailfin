@@ -15,23 +15,6 @@ import { parse_program } from "../../src/parser/mod";
 import { typecheck_diagnostics, typecheck_diagnostics_with_import_symbols } from "../../src/typecheck";
 import { Diagnostic } from "../../src/typecheck_types";
 
-fn _count_e0420(diagnostics: Diagnostic[]) -> int {
-    let mut count: int = 0;
-    let mut i: int = 0;
-    loop {
-        if i >= diagnostics.length { break; }
-        if strings_equal(diagnostics[i].code, "E0420") { count += 1; }
-        i += 1;
-    }
-    return count;
-}
-
-fn _e0420_for(source: string) -> int ![io] {
-    let program = parse_program(source);
-    let diagnostics = typecheck_diagnostics(program);
-    return _count_e0420(diagnostics);
-}
-
 fn _count_code(diagnostics: Diagnostic[], code: string) -> int {
     let mut count: int = 0;
     let mut i: int = 0;
@@ -41,6 +24,16 @@ fn _count_code(diagnostics: Diagnostic[], code: string) -> int {
         i += 1;
     }
     return count;
+}
+
+fn _count_e0420(diagnostics: Diagnostic[]) -> int {
+    return _count_code(diagnostics, "E0420");
+}
+
+fn _e0420_for(source: string) -> int ![io] {
+    let program = parse_program(source);
+    let diagnostics = typecheck_diagnostics(program);
+    return _count_e0420(diagnostics);
 }
 
 fn _e0001_for(source: string) -> int ![io] {
