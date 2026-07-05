@@ -54,6 +54,13 @@ fn _lb_port() -> i64 { return 18791; }
 
 fn _lb_port_str() -> string { return "18791"; }
 
+// A second, distinct fixed port for the concurrent-clients test's own
+// server instance, so it never collides with the port above or with
+// `serve_loopback_test.sfn`'s 18790 under `--jobs N`.
+fn _lb_port2() -> i64 { return 18792; }
+
+fn _lb_port2_str() -> string { return "18792"; }
+
 fn _sfn_bin() -> string ![io] {
     let configured = env.get("SAILFIN_BIN");
     if configured.length > 0 { return configured; }
@@ -273,6 +280,32 @@ fn _write_server(port_str: string) -> string ![io] {
     return root + "/src/main.sfn";
 }
 
+// A second consumer tree, fully independent of `_app_root`/`_write_server`,
+// so the concurrent-clients test spawns its own server on `_lb_port2()`.
+fn _app_root2() -> string { return "build/websocket-serve-concurrent-e2e"; }
+
+fn _write_server2(port_str: string) -> string ![io] {
+    let root = _app_root2();
+    fs.createDirectory(root + "/src", true);
+    fs.writeFile(root + "/capsule.toml", "[capsule]\n"
+        + "name = \"sfn/websocket-serve-loopback-e2e-app\"\n"
+        + "version = \"0.0.1\"\n"
+        + "description = \"websocket.serve loopback e2e consumer\"\n"
+        + "\n"
+        + "[capabilities]\n"
+        + "required = [\"io\", \"net\"]\n"
+        + "\n"
+        + "[build]\n"
+        + "entry = \"src/main.sfn\"\n"
+        + "kind = \"library\"\n");
+    fs.writeFile(root + "/src/main.sfn", "fn main() ![io, net] {\n"
+        + "    websocket.serve("
+        + port_str
+        + ");\n"
+        + "}\n");
+    return root + "/src/main.sfn";
+}
+
 // Compile the consumer to a standalone binary up front (synchronous), so
 // the build happens ONCE outside the readiness poll window. Threads the
 // full parent environment (the build links, needing the toolchain surface).
@@ -297,6 +330,40 @@ fn _spawn_server(bin: string) -> i64 ![io] {
     }
     argv.push(bin);
     return process.spawn_with_env(argv, _child_env());
+}
+
+// Child env with the scheduler pool pinned to two workers. The
+// concurrency test is the first test whose PASS depends on the server's
+// pool being >= 2 threads; the runtime auto-floors auto-detection at two
+// (`scheduler.sfn::sfn_scheduler_resolve_thread_count`), but an inherited
+// `SAILFIN_THREADS=1` bypasses that floor. `getenv` returns the first
+// match, so we must DROP any inherited `SAILFIN_THREADS=` before appending
+// our pin rather than just append a second entry.
+fn _pool_env() -> string[] ![io] {
+    let base = process.environ();
+    let mut e: string[] = [];
+    let mut i = 0;
+    loop {
+        if i >= base.length { break; }
+        let entry = base[i];
+        if find(entry, "SAILFIN_THREADS=", 0) != 0 { e.push(entry); }
+        i = i + 1;
+    }
+    e.push("SAILFIN_THREADS=2");
+    return e;
+}
+
+// Spawn the concurrent-test server with the pool pinned (`_pool_env`) so
+// the two-client guarantee never hinges on an inherited thread count.
+fn _spawn_server_pooled(bin: string) -> i64 ![io] {
+    let tcmd = _timeout_cmd();
+    let mut argv: string[] = [];
+    if tcmd.length > 0 {
+        argv.push(tcmd);
+        argv.push("60");
+    }
+    argv.push(bin);
+    return process.spawn_with_env(argv, _pool_env());
 }
 
 // Poll the handshake until the prebuilt server answers with a `101`.
@@ -375,4 +442,99 @@ test "websocket.serve loopback: handshake + echo + close round-trip" ![io] {
     // Best-effort cleanup of the consumer tree (the timeout reaps the
     // server process).
     let _rm = process.run(["rm", "-rf", _app_root()]);
+}
+
+test "websocket.serve loopback: two clients served concurrently" ![io] {
+    // Same rationale as the test above: without a reaper, a spawned server
+    // would orphan the fixed port 18792 and poison subsequent runs.
+    if _timeout_cmd().length == 0 {
+        print.info("[websocket-serve-concurrent] SKIP: no timeout/gtimeout to reap the blocking server");
+        return;
+    }
+
+    let port2 = _lb_port2();
+    let main_path = _write_server2(_lb_port2_str());
+
+    let server_bin = _build_bin(main_path, _app_root2() + "/server-bin");
+    assert server_bin.length > 0;
+    let _handle = _spawn_server_pooled(server_bin);
+
+    let ready_resp = _await_ready(port2);
+    print.info("[websocket-serve-concurrent] ready: " + ready_resp);
+    assert ready_resp.length > 0;
+    assert contains(ready_resp, "101");
+
+    let handshake_req: string = "GET / HTTP/1.1\r\nHost: 127.0.0.1\r\nUpgrade: websocket\r\nConnection: Upgrade\r\nSec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==\r\nSec-WebSocket-Version: 13\r\n\r\n";
+    let cap: i64 = 1024;
+
+    // Open the first connection and complete its handshake, but do NOT
+    // close it or drive it further yet — a single-threaded accept loop
+    // would now be blocked in this connection's per-client frame loop.
+    let fd1: i32 = _lb_connect(port2);
+    assert fd1 >= 0;
+    assert _lb_send_all(fd1, handshake_req as * u8, strlen(handshake_req as * u8) as i64);
+    let hbuf1: * u8 = malloc((cap + 4) as usize);
+    assert hbuf1 as i64 != 0;
+    let hn1: i64 = _lb_recv_some(fd1, hbuf1, cap);
+    assert hn1 > 0;
+    memset(_lb_ptr_off(hbuf1, hn1), 0, 1 as usize);
+    let resp1: string = hbuf1 as string;
+    print.info("[websocket-serve-concurrent] fd1 handshake: " + resp1);
+    assert contains(resp1, "101");
+
+    // Load-bearing assertion: open and handshake a SECOND connection while
+    // the first is still open and mid-session. A single-threaded accept
+    // loop could not reach `accept()` again here, so a successful 101 on
+    // fd2 proves connections are dispatched to a shared thread pool (#1923),
+    // not served one at a time.
+    let fd2: i32 = _lb_connect(port2);
+    assert fd2 >= 0;
+    assert _lb_send_all(fd2, handshake_req as * u8, strlen(handshake_req as * u8) as i64);
+    let hbuf2: * u8 = malloc((cap + 4) as usize);
+    assert hbuf2 as i64 != 0;
+    let hn2: i64 = _lb_recv_some(fd2, hbuf2, cap);
+    assert hn2 > 0;
+    memset(_lb_ptr_off(hbuf2, hn2), 0, 1 as usize);
+    let resp2: string = hbuf2 as string;
+    print.info("[websocket-serve-concurrent] fd2 handshake: " + resp2);
+    assert contains(resp2, "101");
+
+    // Interleaved echo: prove both connections are independently live by
+    // sending on both, then reading fd2's echo BEFORE fd1's. Servicing fd2
+    // without waiting on fd1 shows fd1 is not holding the server hostage.
+    assert _lb_send_masked(fd1, 1, "one");
+    assert _lb_send_masked(fd2, 1, "two");
+
+    let mut op2: i64 = 0 - 1;
+    let echoed2 = _lb_read_frame(fd2, & op2);
+    print.info("[websocket-serve-concurrent] fd2 echo opcode=" + op2
+        + " payload="
+        + echoed2);
+    assert op2 == 1;
+    assert echoed2 == "two";
+
+    let mut op1: i64 = 0 - 1;
+    let echoed1 = _lb_read_frame(fd1, & op1);
+    print.info("[websocket-serve-concurrent] fd1 echo opcode=" + op1
+        + " payload="
+        + echoed1);
+    assert op1 == 1;
+    assert echoed1 == "one";
+
+    // Tear both connections down with a masked CLOSE + reply.
+    assert _lb_send_masked(fd1, 8, "");
+    let mut close_opcode1: i64 = 0 - 1;
+    let _close_payload1 = _lb_read_frame(fd1, & close_opcode1);
+    assert close_opcode1 == 8;
+    close(fd1);
+
+    assert _lb_send_masked(fd2, 8, "");
+    let mut close_opcode2: i64 = 0 - 1;
+    let _close_payload2 = _lb_read_frame(fd2, & close_opcode2);
+    assert close_opcode2 == 8;
+    close(fd2);
+
+    // Best-effort cleanup of the consumer tree (the timeout reaps the
+    // server process).
+    let _rm = process.run(["rm", "-rf", _app_root2()]);
 }
