@@ -6,7 +6,7 @@ type: language
 created: 2026-07-05
 updated: 2026-07-05
 author: "agent:compiler-architect; human review"
-tracking: "#1609"
+tracking: "#1609, #1922, #1935"
 supersedes:
 superseded-by:
 graduates-to:

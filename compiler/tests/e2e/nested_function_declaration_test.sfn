@@ -1,0 +1,120 @@
+// End-to-end tests for nested / local function declarations (SFEP-0042).
+//
+// Builds and runs small fixtures exercising self-recursion, mutual
+// sibling recursion, and same-named nested fns in distinct outer
+// functions getting distinct symbols — proving the feature not just
+// typechecks but compiles, links, and runs correctly end to end.
+//
+// Native (no-bash) per `.claude/rules/no-bash-e2e.md`. This is a
+// build-and-run test, so per that rule's "Build-and-run tests must
+// isolate the build" section, `_child_env` threads PATH (required — the
+// nested build runs clang + its linker), HOME, TMPDIR, and
+// SAILFIN_TEST_SCRATCH so the nested `sfn build` does not collide with
+// sibling builds under the parallel `sfn test` pool.
+import { with_tmp_dir } from "sfn/test";
+
+fn _sfn_bin() -> string ![io] {
+    let configured = env.get("SAILFIN_BIN");
+    if configured.length > 0 { return configured; }
+    return "build/native/sailfin";
+}
+
+fn _child_env() -> string[] ![io] {
+    let mut e: string[] = [];
+    let path = env.get("PATH");
+    if path.length > 0 { e.push("PATH=" + path); }
+    let home = env.get("HOME");
+    if home.length > 0 { e.push("HOME=" + home); }
+    let tmpdir = env.get("TMPDIR");
+    if tmpdir.length > 0 { e.push("TMPDIR=" + tmpdir); }
+    let scratch = env.get("SAILFIN_TEST_SCRATCH");
+    if scratch.length > 0 { e.push("SAILFIN_TEST_SCRATCH=" + scratch); }
+    return e;
+}
+
+// A fresh marker-file path under the runner's scratch dir (or `/tmp`),
+// with any stale value removed so each run starts clean. Lives outside
+// the `with_tmp_dir` tree so it survives teardown; carries the build's
+// captured stdout+stderr for a diagnosable failure.
+fn _marker(name: string) -> string ![io] {
+    let mut dir = env.get("SAILFIN_TEST_SCRATCH");
+    if dir.length == 0 { dir = "/tmp"; }
+    fs.createDirectory(dir, true);
+    let path = dir + "/sfn-nested-fn-" + name + ".out";
+    if fs.exists(path) { fs.deleteFile(path); }
+    return path;
+}
+
+// Build `source` in a temp dir and run the resulting binary, returning
+// its exit code, or `-100` if the build itself failed (with the build's
+// captured stdout+stderr stashed to `out_marker` for diagnosis).
+fn _build_and_run(out_marker: string, source: string) -> int ![io] {
+    return with_tmp_dir(fn (dir: string) -> int {
+        let srcpath = dir + "/fixture.sfn";
+        fs.writeFile(srcpath, source);
+        let binpath = dir + "/fixture";
+        let build_exit = process.run_capture([_sfn_bin(), "build", "-o", binpath, srcpath], _child_env());
+        let build_out = process.capture_take_stdout();
+        let build_err = process.capture_take_stderr();
+        if build_exit != 0 {
+            fs.writeFile(out_marker, build_out + build_err);
+            return -100;
+        }
+        let run_exit = process.run_capture([binpath], []);
+        let _ro = process.capture_take_stdout();
+        let _re = process.capture_take_stderr();
+        return run_exit;
+    });
+}
+
+test "nested fn: self-recursive fib compiles and runs" ![io] {
+    let marker = _marker("fib");
+    let source = "fn main() -> int { fn fib(n: int) -> int { if n < 2 { return n; } return fib(n - 1) + fib(n - 2); } return fib(10); }";
+    let exit = _build_and_run(marker, source);
+    if exit == -100 {
+        let details = fs.readFile(marker);
+        print.error(details);
+        assert false;
+    }
+    assert exit == 55;
+}
+
+test "nested fn: mutually recursive siblings compile and run" ![io] {
+    let marker = _marker("mutual");
+    let source = "fn main() -> int { fn is_even(n: int) -> boolean { if n == 0 { return true; } return is_odd(n - 1); } fn is_odd(n: int) -> boolean { if n == 0 { return false; } return is_even(n - 1); } if is_even(10) { return 1; } return 0; }";
+    let exit = _build_and_run(marker, source);
+    if exit == -100 {
+        let details = fs.readFile(marker);
+        print.error(details);
+        assert false;
+    }
+    assert exit == 1;
+}
+
+test "nested fn: same-named nested fns in different outer fns get distinct symbols" ![io] {
+    let marker = _marker("distinct");
+    let source = "fn a() -> int { fn helper() -> int { return 7; } return helper(); } fn b() -> int { fn helper() -> int { return 9; } return helper(); } fn main() -> int { return a() + b(); }";
+    let exit = _build_and_run(marker, source);
+    if exit == -100 {
+        let details = fs.readFile(marker);
+        print.error(details);
+        assert false;
+    }
+    assert exit == 16;
+}
+
+// Regression (SFEP-0042 review): a nested fn inside a STRUCT METHOD body must
+// be lifted to a top-level function too — previously it survived un-lifted and
+// silently miscompiled (green `check`, wrong result). `go` returns
+// helper() (3) + self.v (4) == 7.
+test "nested fn: inside a struct method body compiles and runs" ![io] {
+    let marker = _marker("method");
+    let source = "struct S { v: int; fn go(self) -> int { fn helper() -> int { return 3; } return helper() + self.v; } } fn main() -> int { let s = S { v: 4 }; return s.go(); }";
+    let exit = _build_and_run(marker, source);
+    if exit == -100 {
+        let details = fs.readFile(marker);
+        print.error(details);
+        assert false;
+    }
+    assert exit == 7;
+}
