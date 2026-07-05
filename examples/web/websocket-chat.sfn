@@ -1,17 +1,18 @@
 // examples/web/websocket-chat.sfn
-
+//
+// v0 WebSocket echo server (#1877, epic #1180 Phase G). `websocket.serve(port)`
+// binds ws://localhost:8080, completes the RFC 6455 handshake per connection,
+// and echoes each client message back until the client closes. It is a
+// blocking accept loop (does not return), so anything after the call is
+// unreachable — the greeting therefore prints BEFORE it.
+//
+// The richer per-client API the original illustrative example sketched
+// (server.clients() iterator, client.onMessage callbacks, per-client send)
+// is a handler-bearing surface tracked as follow-up under epic #1180, not
+// part of the v0 bridge.
 import { websocket } from "http";
 
 fn main() ![io, net] {
-    let server = websocket.serve({ port: 8080 });
-    print("WebSocket server is running on ws://localhost:8080");
-
-    routine {
-        for client in server.clients() {
-            client.onMessage(fn(message) {
-                print("Received: {{message}}");
-                client.send("Echo: {{message}}");
-            });
-        }
-    }
+    print("WebSocket echo server starting on ws://localhost:8080");
+    websocket.serve(8080);
 }

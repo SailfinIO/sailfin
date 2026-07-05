@@ -1024,20 +1024,27 @@ fn _rh_descriptors_07(descriptors_in: RuntimeHelperDescriptor[]) -> RuntimeHelpe
     // `rendering.sfn::render_runtime_helper_declarations` were removed with
     // the bridge.
     //
-    // `websocket.serve` and the Call-form `serve` remain effect-metadata-only:
-    // their `symbol`s are deliberately fake (`sfn_*_unbridged`) and they stay
-    // sentinel-skipped so a metadata row never produces a call/declare to an
-    // undefined symbol (the spurious-declare/link hazard that kept #1183 from
-    // adding them). The `websocket.serve` runtime bridge is tracked in #1877;
-    // the Call-form `serve` lowers via its own bespoke path
-    // (`serve_start`/`serve_handler_dispatch` rows + `core.sfn`).
+    // `websocket.serve` is now BRIDGED to the Sailfin-native server runtime
+    // (#1877): `sfn_websocket_serve`, `parameter_types: ["i32"]` (the scalar
+    // port; an object literal `{ port }` is NOT used because member-call
+    // registry bridges marshal scalars, not struct literals), mirroring the
+    // connect/send/close bridge above. Its sentinel-skip in
+    // `rendering.sfn::render_runtime_helper_declarations` was removed with
+    // the bridge.
+    //
+    // The Call-form `serve` remains effect-metadata-only: its `symbol` is
+    // deliberately fake (`sfn_serve_unbridged`) and it stays sentinel-skipped
+    // so a metadata row never produces a call/declare to an undefined symbol
+    // (the spurious-declare/link hazard that kept #1183 from adding it). It
+    // lowers via its own bespoke path (`serve_start`/`serve_handler_dispatch`
+    // rows + `core.sfn`).
     //
     // `serve` carries `["io", "net"]` to match the prelude/capsule
     // `fn serve(...) ![io, net]` signatures and the
     // `serve_start`/`serve_handler_dispatch` rows above — the honest set,
     // tighter than #1183's retained `net`-only check.
     descriptors = append_runtime_helper(descriptors, RuntimeHelperDescriptor {
-        target: "websocket.serve", symbol: "sfn_websocket_unbridged", return_type: "void", parameter_types: [], effects: ["net"], native_signature: null, c_abi_return_type: null
+        target: "websocket.serve", symbol: "sfn_websocket_serve", return_type: "void", parameter_types: ["i32"], effects: ["net"], native_signature: "sfn_websocket_serve", c_abi_return_type: null
     });
     descriptors = append_runtime_helper(descriptors, RuntimeHelperDescriptor {
         target: "websocket.send", symbol: "sfn_websocket_send", return_type: "i8*", parameter_types: ["i8*", "i8*"], effects: ["net"], native_signature: "sfn_websocket_send", c_abi_return_type: null

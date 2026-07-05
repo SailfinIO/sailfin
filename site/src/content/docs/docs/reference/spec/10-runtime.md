@@ -24,6 +24,18 @@ sidebar:
 `header(req, name)`, `query_param(req, name)`, `reason_phrase(status)`.
 See [Standard Library — `sfn/http` capsule](/docs/reference/standard-library#sfnhttp-capsule) for full signatures.
 
+**WebSocket (v0, `ws://` only, require `![net]`)**:
+`websocket.connect(url)`, `websocket.send(handle, msg)`, `websocket.close(handle)` —
+a client that opens a connection, sends one masked TEXT frame at a
+time, and closes it. `websocket.send` additionally requires `![io]` (the
+effect checker's conservative, receiver-agnostic `.send(...)` rule, shared
+with `channel.send`, applies here too). `websocket.serve(port)` binds/
+listens/accepts and runs a single-connection, blocking RFC 6455 echo server
+(bind → handshake → echo TEXT/BINARY frames back unmasked → reply to CLOSE).
+Neither half handles fragmentation or ping/pong, and there is no `wss://`/TLS
+or client-side receive yet — see [Standard Library — `websocket` module](/docs/reference/standard-library#websocket-module)
+for the full v0 scope and follow-ups.
+
 **Logging** (via `sfn/log` capsule, require `![io]`):
 `log.info(msg)`, `log.warn(msg)`, `log.error(msg)`, `log.debug(msg)`
 `log.warn` and `log.error` write to stderr.
