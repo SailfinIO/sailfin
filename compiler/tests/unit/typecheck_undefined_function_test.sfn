@@ -32,6 +32,23 @@ fn _e0420_for(source: string) -> int ![io] {
     return _count_e0420(diagnostics);
 }
 
+fn _count_code(diagnostics: Diagnostic[], code: string) -> int {
+    let mut count: int = 0;
+    let mut i: int = 0;
+    loop {
+        if i >= diagnostics.length { break; }
+        if strings_equal(diagnostics[i].code, code) { count += 1; }
+        i += 1;
+    }
+    return count;
+}
+
+fn _e0001_for(source: string) -> int ![io] {
+    let program = parse_program(source);
+    let diagnostics = typecheck_diagnostics(program);
+    return _count_code(diagnostics, "E0001");
+}
+
 // -------------------------------------------------------------------
 // Positive: a bare undefined callee fires exactly one E0420
 // -------------------------------------------------------------------
@@ -106,6 +123,34 @@ test "E0420: call inside a test body resolves top-level helper" ![io] {
     // calling a file-local helper must not false-positive.
     let source = "fn helper() -> int { return 1; } test \"t\" { let x = helper(); }";
     assert _e0420_for(source) == 0;
+}
+
+// -------------------------------------------------------------------
+// Lambda-body parameter scope (#1917): a lambda's own parameters are
+// registered into the scope its body is walked in.
+// -------------------------------------------------------------------
+test "E0420: lambda parameter used as a call target resolves (#1917)" ![io] {
+    // `f` is a lambda parameter called as a function inside the body. It
+    // must resolve against the lambda's own parameter scope, not fire E0420.
+    assert _e0420_for("fn main() { let apply = fn(f, x) -> int { return f(x); }; }") == 0;
+}
+
+test "E0420: genuinely undefined callee inside a lambda body still fires (#1917)" ![io] {
+    // `notarealfn` is neither a lambda parameter nor any in-scope binding,
+    // so the undefined-callee check must still fire inside the lambda body.
+    assert _e0420_for("fn main() { let apply = fn(x) -> int { return notarealfn(x); }; }") == 1;
+}
+
+test "E0001: lambda parameter shadowing an outer name is a nested scope (#1917)" ![io] {
+    // `x` names both an outer local and the lambda parameter; the parameter
+    // opens a nested scope, so this must not trip the duplicate-symbol check.
+    assert _e0001_for("fn main() { let x = 1; let f = fn(x) -> int { return x; }; }") == 0;
+}
+
+test "E0001: duplicate lambda parameter names are still caught (#1917)" ![io] {
+    // Two parameters registered at the same `param_scope_start` collide, so
+    // the duplicate-symbol check must still fire inside a lambda.
+    assert _e0001_for("fn main() { let f = fn(a, a) -> int { return a; }; }") == 1;
 }
 
 // -------------------------------------------------------------------

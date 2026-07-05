@@ -1219,7 +1219,25 @@ fn walk_expression(expression: Expression?, ctx: TypeckCtx) -> Diagnostic[] {
         return diagnostics;
     }
     if expression.variant == "Lambda" {
-        let mut diagnostics = walk_block_expressions(expression.body, ctx_enter_body(ctx, bindings, expression.return_type));
+        // Register the lambda's own parameters into the scope its body is
+        // walked in, so a parameter used as a call target (or otherwise
+        // resolved by name) is not falsely reported undefined (#1917). The
+        // params start at `param_scope_start` (past the outer bindings) so a
+        // parameter may shadow an enclosing name without tripping E0001, while
+        // parameter-vs-parameter duplicates are still caught.
+        let mut body_bindings: SymbolEntry[] = clone_bindings(bindings);
+        let param_scope_start = body_bindings.length;
+        let mut diagnostics: Diagnostic[] = [];
+        let mut _pp: int = 0;
+        loop {
+            if _pp >= expression.parameters.length { break; }
+            let param = expression.parameters[_pp];
+            let registration = register_local_symbol(body_bindings, param.name, "parameter", param.span, param_scope_start);
+            body_bindings = registration.bindings;
+            diagnostics = diagnostics.concat(registration.diagnostics);
+            _pp += 1;
+        }
+        diagnostics = diagnostics.concat(walk_block_expressions(expression.body, ctx_enter_body(ctx, body_bindings, expression.return_type)));
         let mut lambda_span: SourceSpan? = null;
         let mut _lp: int = 0;
         loop {
