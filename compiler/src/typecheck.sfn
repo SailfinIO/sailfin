@@ -410,12 +410,88 @@ fn register_top_level_symbol(statement: Statement, existing: SymbolEntry[]) -> S
     return SymbolCollectionResult { symbols: existing, diagnostics: [] };
 }
 
+// The typing environment + expected-type channel threaded through the
+// typecheck walk (SFEP-0039 addendum). One record serves both the
+// statement/block family and the expression family; a family reads only
+// the subset it needs (inert fields are free). Unifying the record is
+// what gives lambda-body walking `top_level` + `enclosing_return_type`
+// (the #1905 fix); `enclosing_return_type` is the ambient channel that
+// reaches a nested `return` (the #1904 fix). `expected_type` is the
+// general local channel reserved for future positions (call args, field
+// defaults) so they plug in without another signature change.
+// `in_function_body` marks that the walk is inside a fn/lambda body, so a
+// `return { ... }` is classified there but a top-level `return` — or one
+// in a top-level nested block (`if`/`with`/`{}`), which is `!is_top_level`
+// yet has no enclosing function — is exempt.
+struct TypeckCtx {
+    bindings: SymbolEntry[];
+    imports: ImportSymbolTable;
+    interfaces: Statement[];
+    top_level: SymbolEntry[];
+    is_top_level: boolean;
+    in_function_body: boolean;
+    scope_start: int;
+    enclosing_return_type: TypeAnnotation?;
+    expected_type: TypeAnnotation?;
+}
+
+// Root context for a walk: top-level scope, no enclosing return type.
+fn make_typeck_ctx(bindings: SymbolEntry[], imports: ImportSymbolTable, interfaces: Statement[], top_level: SymbolEntry[], is_top_level: boolean) -> TypeckCtx {
+    return TypeckCtx {
+        bindings: bindings,
+        imports: imports,
+        interfaces: interfaces,
+        top_level: top_level,
+        is_top_level: is_top_level,
+        in_function_body: false,
+        scope_start: 0,
+        enclosing_return_type: null,
+        expected_type: null
+    };
+}
+
+// Enter a nested block scope: swap in the block's bindings + shadowing
+// boundary, drop to non-top-level, preserve the ambient return type and
+// the in-function-body flag. `expected_type` is a parent-imposed *local*
+// expectation, so it is cleared at a statement/block boundary — it must
+// not leak into unrelated statements once the channel becomes active.
+fn ctx_with_bindings(ctx: TypeckCtx, bindings: SymbolEntry[], scope_start: int) -> TypeckCtx {
+    return TypeckCtx {
+        bindings: bindings,
+        imports: ctx.imports,
+        interfaces: ctx.interfaces,
+        top_level: ctx.top_level,
+        is_top_level: false,
+        in_function_body: ctx.in_function_body,
+        scope_start: scope_start,
+        enclosing_return_type: ctx.enclosing_return_type,
+        expected_type: null
+    };
+}
+
+// Enter a fn/lambda body: install its parameter-scope bindings and the
+// declared return type as the ambient `enclosing_return_type`, mark the
+// in-function-body context, and clear any local expected type.
+fn ctx_enter_body(ctx: TypeckCtx, bindings: SymbolEntry[], return_type: TypeAnnotation?) -> TypeckCtx {
+    return TypeckCtx {
+        bindings: bindings,
+        imports: ctx.imports,
+        interfaces: ctx.interfaces,
+        top_level: ctx.top_level,
+        is_top_level: false,
+        in_function_body: true,
+        scope_start: 0,
+        enclosing_return_type: return_type,
+        expected_type: null
+    };
+}
+
 fn check_program_scopes(program: Program, interfaces: Statement[], imports: ImportSymbolTable, top_level: SymbolEntry[]) -> Diagnostic[] {
     let mut bindings: SymbolEntry[] = [];
     let mut diagnostics: Diagnostic[] = [];
 
     for statement in program.statements {
-        let result = check_statement(statement, bindings, interfaces, 0, imports, top_level, true);
+        let result = check_statement(statement, make_typeck_ctx(bindings, imports, interfaces, top_level, true));
         bindings = result.bindings;
         let mut _ci: int = 0;
         loop {
@@ -441,10 +517,18 @@ fn check_program_scopes(program: Program, interfaces: Statement[], imports: Impo
 // callee lookup resolves sibling top-level functions and imports
 // regardless of source order. It is never re-registered, so it does not
 // affect duplicate detection.
-fn check_statement(statement: Statement, bindings: SymbolEntry[], interfaces: Statement[], scope_start: int, imports: ImportSymbolTable, top_level: SymbolEntry[], is_top_level: boolean) -> ScopeResult {
+fn check_statement(statement: Statement, ctx: TypeckCtx) -> ScopeResult {
+    let bindings = ctx.bindings;
+    let interfaces = ctx.interfaces;
+    let scope_start = ctx.scope_start;
+    let imports = ctx.imports;
+    let top_level = ctx.top_level;
+    let is_top_level = ctx.is_top_level;
+    let in_function_body = ctx.in_function_body;
+    let enclosing_return_type = ctx.enclosing_return_type;
     if statement.variant == "VariableDeclaration" {
         let registration = register_local_symbol(bindings, statement.name, "variable", statement.span, scope_start);
-        let walk_diags = walk_expression(statement.initializer, bindings, imports);
+        let walk_diags = walk_expression(statement.initializer, ctx);
         let annotation_diags = check_bare_fn_type_annotation(statement.type_annotation, statement.name, statement.span);
         let intersection_diags = check_intersection_value_type_annotation(statement.type_annotation, statement.name, statement.span);
         let object_literal_diags = check_object_literal_target(statement.initializer, statement.type_annotation, statement.name, statement.span, top_level);
@@ -470,7 +554,7 @@ fn check_statement(statement: Statement, bindings: SymbolEntry[], interfaces: St
             diagnostics.push(_main_diags[_cim]);
             _cim += 1;
         }
-        let function_diagnostics = check_function_body(statement.signature, statement.body, interfaces, imports, top_level);
+        let function_diagnostics = check_function_body(statement.signature, statement.body, ctx);
         let mut _ci2: int = 0;
         loop {
             if _ci2 >= function_diagnostics.length { break; }
@@ -547,7 +631,7 @@ fn check_statement(statement: Statement, bindings: SymbolEntry[], interfaces: St
         loop {
             if index >= statement.methods.length { break; }
             let method = statement.methods[index];
-            let _mb_diags = check_function_body(method.signature, method.body, interfaces, imports, top_level);
+            let _mb_diags = check_function_body(method.signature, method.body, ctx);
             let mut _ci5: int = 0;
             loop {
                 if _ci5 >= _mb_diags.length { break; }
@@ -615,7 +699,7 @@ fn check_statement(statement: Statement, bindings: SymbolEntry[], interfaces: St
     if statement.variant == "TestDeclaration" {
         let registration = register_local_symbol(bindings, statement.name, "test", statement.name_span, scope_start);
         let mut diagnostics = registration.diagnostics;
-        let _blk_diags = check_block(statement.body, top_level, interfaces, imports, top_level);
+        let _blk_diags = check_block(statement.body, ctx_with_bindings(ctx, top_level, scope_start));
         let mut _ci: int = 0;
         loop {
             if _ci >= _blk_diags.length { break; }
@@ -630,28 +714,28 @@ fn check_statement(statement: Statement, bindings: SymbolEntry[], interfaces: St
     if statement.variant == "WithStatement" {
         return ScopeResult {
             bindings: bindings,
-            diagnostics: check_block(statement.body, bindings, interfaces, imports, top_level)
+            diagnostics: check_block(statement.body, ctx_with_bindings(ctx, bindings, scope_start))
         };
     }
     if statement.variant == "ForStatement" {
-        let target_diags = walk_expression(statement.clause.target, bindings, imports);
-        let iter_diags = walk_expression(statement.clause.iterable, bindings, imports);
-        let body_diags = check_block(statement.body, bindings, interfaces, imports, top_level);
+        let target_diags = walk_expression(statement.clause.target, ctx);
+        let iter_diags = walk_expression(statement.clause.iterable, ctx);
+        let body_diags = check_block(statement.body, ctx_with_bindings(ctx, bindings, scope_start));
         return ScopeResult {
             bindings: bindings,
             diagnostics: target_diags.concat(iter_diags).concat(body_diags)
         };
     }
     if statement.variant == "MatchStatement" {
-        let mut diagnostics = walk_expression(statement.expression, bindings, imports);
+        let mut diagnostics = walk_expression(statement.expression, ctx);
         let mut index: int = 0;
         loop {
             if index >= statement.cases.length { break; }
             let case = statement.cases[index];
-            diagnostics = diagnostics.concat(walk_match_pattern(case.pattern, bindings, imports));
-            diagnostics = diagnostics.concat(walk_expression(case.guard, bindings, imports));
+            diagnostics = diagnostics.concat(walk_match_pattern(case.pattern, ctx));
+            diagnostics = diagnostics.concat(walk_expression(case.guard, ctx));
             let arm_bindings = register_match_pattern_bindings(case.pattern, bindings);
-            let _blk_diags = check_block(case.body, arm_bindings, interfaces, imports, top_level);
+            let _blk_diags = check_block(case.body, ctx_with_bindings(ctx, arm_bindings, scope_start));
             let mut _ci: int = 0;
             loop {
                 if _ci >= _blk_diags.length { break; }
@@ -663,12 +747,12 @@ fn check_statement(statement: Statement, bindings: SymbolEntry[], interfaces: St
         return ScopeResult { bindings: bindings, diagnostics: diagnostics };
     }
     if statement.variant == "IfStatement" {
-        let mut diagnostics = walk_expression(statement.condition, bindings, imports);
-        diagnostics = diagnostics.concat(check_block(statement.then_block, bindings, interfaces, imports, top_level));
+        let mut diagnostics = walk_expression(statement.condition, ctx);
+        diagnostics = diagnostics.concat(check_block(statement.then_block, ctx_with_bindings(ctx, bindings, scope_start)));
         if statement.else_branch != null {
             let branch = statement.else_branch;
             if branch.body != null {
-                let _blk_diags = check_block(branch.body, bindings, interfaces, imports, top_level);
+                let _blk_diags = check_block(branch.body, ctx_with_bindings(ctx, bindings, scope_start));
                 let mut _ci: int = 0;
                 loop {
                     if _ci >= _blk_diags.length { break; }
@@ -677,7 +761,7 @@ fn check_statement(statement: Statement, bindings: SymbolEntry[], interfaces: St
                 }
             }
             if branch.statement != null {
-                let result = check_statement(branch.statement, bindings, interfaces, scope_start, imports, top_level, false);
+                let result = check_statement(branch.statement, ctx_with_bindings(ctx, bindings, scope_start));
                 let mut _ci2: int = 0;
                 loop {
                     if _ci2 >= result.diagnostics.length { break; }
@@ -691,7 +775,7 @@ fn check_statement(statement: Statement, bindings: SymbolEntry[], interfaces: St
     if statement.variant == "BlockStatement" {
         return ScopeResult {
             bindings: bindings,
-            diagnostics: check_block(statement.body, bindings, interfaces, imports, top_level)
+            diagnostics: check_block(statement.body, ctx_with_bindings(ctx, bindings, scope_start))
         };
     }
     if statement.variant == "TypeAliasDeclaration" {
@@ -714,13 +798,27 @@ fn check_statement(statement: Statement, bindings: SymbolEntry[], interfaces: St
     if statement.variant == "ExpressionStatement" {
         return ScopeResult {
             bindings: bindings,
-            diagnostics: walk_expression(statement.expression, bindings, imports)
+            diagnostics: walk_expression(statement.expression, ctx)
         };
     }
     if statement.variant == "ReturnStatement" {
+        let return_diags = walk_expression(statement.expression, ctx);
+        // A `return { ... }` is classified against the enclosing function's
+        // declared return type (#1904). Gate on `in_function_body`, not
+        // `!is_top_level`: a `return` in a top-level nested block (`if`/`with`/
+        // `{}`) is `!is_top_level` yet has no enclosing function, so its
+        // `enclosing_return_type` is absent and the un-inferable branch must
+        // not fire there.
+        if !in_function_body {
+            return ScopeResult {
+                bindings: bindings,
+                diagnostics: return_diags
+            };
+        }
+        let object_literal_diags = check_object_literal_target(statement.expression, enclosing_return_type, "return", statement.span, top_level);
         return ScopeResult {
             bindings: bindings,
-            diagnostics: walk_expression(statement.expression, bindings, imports)
+            diagnostics: return_diags.concat(object_literal_diags)
         };
     }
     if statement.variant == "Unknown" {
@@ -762,9 +860,10 @@ fn check_statement(statement: Statement, bindings: SymbolEntry[], interfaces: St
     return ScopeResult { bindings: bindings, diagnostics: [] };
 }
 
-fn check_function_body(signature: FunctionSignature, body: Block, interfaces: Statement[], imports: ImportSymbolTable, top_level: SymbolEntry[]) -> Diagnostic[] {
-    let parameter_scope = seed_parameter_scope(signature, top_level);
-    let body_diagnostics = check_block(body, parameter_scope.bindings, interfaces, imports, top_level);
+fn check_function_body(signature: FunctionSignature, body: Block, ctx: TypeckCtx) -> Diagnostic[] {
+    let parameter_scope = seed_parameter_scope(signature, ctx.top_level);
+    let body_ctx = ctx_enter_body(ctx, parameter_scope.bindings, signature.return_type);
+    let body_diagnostics = check_block(body, body_ctx);
     let mut _result = parameter_scope.diagnostics;
     let mut _ci: int = 0;
     loop {
@@ -794,18 +893,25 @@ fn seed_parameter_scope(signature: FunctionSignature, top_level: SymbolEntry[]) 
             diagnostics.push(registration.diagnostics[_ci]);
             _ci += 1;
         }
+        let default_diags = check_object_literal_target(parameter.default_value, parameter.type_annotation, parameter.name, parameter.span, top_level);
+        let mut _di: int = 0;
+        loop {
+            if _di >= default_diags.length { break; }
+            diagnostics.push(default_diags[_di]);
+            _di += 1;
+        }
     }
 
     return ScopeResult { bindings: bindings, diagnostics: diagnostics };
 }
 
-fn check_block(block: Block, parent_bindings: SymbolEntry[], interfaces: Statement[], imports: ImportSymbolTable, top_level: SymbolEntry[]) -> Diagnostic[] {
-    let mut bindings = clone_bindings(parent_bindings);
+fn check_block(block: Block, ctx: TypeckCtx) -> Diagnostic[] {
+    let mut bindings = clone_bindings(ctx.bindings);
     let scope_start = bindings.length;
     let mut diagnostics: Diagnostic[] = [];
 
     for statement in block.statements {
-        let result = check_statement(statement, bindings, interfaces, scope_start, imports, top_level, false);
+        let result = check_statement(statement, ctx_with_bindings(ctx, bindings, scope_start));
         bindings = result.bindings;
         let mut _ci: int = 0;
         loop {
@@ -1005,7 +1111,9 @@ fn register_raw_pattern_bindings(text: string, bindings: SymbolEntry[]) -> Symbo
     return result;
 }
 
-fn walk_expression(expression: Expression?, bindings: SymbolEntry[], imports: ImportSymbolTable) -> Diagnostic[] {
+fn walk_expression(expression: Expression?, ctx: TypeckCtx) -> Diagnostic[] {
+    let bindings = ctx.bindings;
+    let imports = ctx.imports;
     if expression == null { return []; }
     if expression.variant == "Call" {
         // A bare-identifier callee is a *call target*, not a value
@@ -1017,7 +1125,7 @@ fn walk_expression(expression: Expression?, bindings: SymbolEntry[], imports: Im
         let mut diagnostics: Diagnostic[] = [];
         if expression.callee != null {
             if expression.callee.variant != "Identifier" {
-                diagnostics = walk_expression(expression.callee, bindings, imports);
+                diagnostics = walk_expression(expression.callee, ctx);
             }
         }
         // #812: a bare-identifier callee that resolves to neither an
@@ -1043,14 +1151,14 @@ fn walk_expression(expression: Expression?, bindings: SymbolEntry[], imports: Im
         let mut index: int = 0;
         loop {
             if index >= expression.arguments.length { break; }
-            diagnostics = diagnostics.concat(walk_expression(expression.arguments[index], bindings, imports));
+            diagnostics = diagnostics.concat(walk_expression(expression.arguments[index], ctx));
             index += 1;
         }
         return diagnostics;
     }
     if expression.variant == "Binary" {
-        let mut diagnostics = walk_expression(expression.left, bindings, imports);
-        diagnostics = diagnostics.concat(walk_expression(expression.right, bindings, imports));
+        let mut diagnostics = walk_expression(expression.left, ctx);
+        diagnostics = diagnostics.concat(walk_expression(expression.right, ctx));
         return diagnostics;
     }
     if expression.variant == "Unary" {
@@ -1060,7 +1168,7 @@ fn walk_expression(expression: Expression?, bindings: SymbolEntry[], imports: Im
         // `Raw`), the operand `Identifier` reaches the `Identifier` arm below,
         // which emits E0808 for a function used in value position — preserving
         // the prior `check_fn_reference_raw` `& fn` behavior.
-        return walk_expression(expression.operand, bindings, imports);
+        return walk_expression(expression.operand, ctx);
     }
     if expression.variant == "Member" {
         // A bare-identifier member *object* is a receiver / namespace
@@ -1073,11 +1181,11 @@ fn walk_expression(expression: Expression?, bindings: SymbolEntry[], imports: Im
         if expression.object != null {
             if expression.object.variant == "Identifier" { return []; }
         }
-        return walk_expression(expression.object, bindings, imports);
+        return walk_expression(expression.object, ctx);
     }
     if expression.variant == "Index" {
-        let mut diagnostics = walk_expression(expression.sequence, bindings, imports);
-        diagnostics = diagnostics.concat(walk_expression(expression.index, bindings, imports));
+        let mut diagnostics = walk_expression(expression.sequence, ctx);
+        diagnostics = diagnostics.concat(walk_expression(expression.index, ctx));
         return diagnostics;
     }
     if expression.variant == "Array" {
@@ -1085,7 +1193,7 @@ fn walk_expression(expression: Expression?, bindings: SymbolEntry[], imports: Im
         let mut index: int = 0;
         loop {
             if index >= expression.elements.length { break; }
-            diagnostics = diagnostics.concat(walk_expression(expression.elements[index], bindings, imports));
+            diagnostics = diagnostics.concat(walk_expression(expression.elements[index], ctx));
             index += 1;
         }
         return diagnostics;
@@ -1095,7 +1203,7 @@ fn walk_expression(expression: Expression?, bindings: SymbolEntry[], imports: Im
         let mut index: int = 0;
         loop {
             if index >= expression.fields.length { break; }
-            diagnostics = diagnostics.concat(walk_expression(expression.fields[index].value, bindings, imports));
+            diagnostics = diagnostics.concat(walk_expression(expression.fields[index].value, ctx));
             index += 1;
         }
         return diagnostics;
@@ -1105,13 +1213,13 @@ fn walk_expression(expression: Expression?, bindings: SymbolEntry[], imports: Im
         let mut index: int = 0;
         loop {
             if index >= expression.fields.length { break; }
-            diagnostics = diagnostics.concat(walk_expression(expression.fields[index].value, bindings, imports));
+            diagnostics = diagnostics.concat(walk_expression(expression.fields[index].value, ctx));
             index += 1;
         }
         return diagnostics;
     }
     if expression.variant == "Lambda" {
-        let mut diagnostics = walk_block_expressions(expression.body, bindings, imports);
+        let mut diagnostics = walk_block_expressions(expression.body, ctx_enter_body(ctx, bindings, expression.return_type));
         let mut lambda_span: SourceSpan? = null;
         let mut _lp: int = 0;
         loop {
@@ -1141,17 +1249,17 @@ fn walk_expression(expression: Expression?, bindings: SymbolEntry[], imports: Im
         return diagnostics;
     }
     if expression.variant == "Range" {
-        let mut diagnostics = walk_expression(expression.start, bindings, imports);
-        diagnostics = diagnostics.concat(walk_expression(expression.end, bindings, imports));
+        let mut diagnostics = walk_expression(expression.start, ctx);
+        diagnostics = diagnostics.concat(walk_expression(expression.end, ctx));
         return diagnostics;
     }
     if expression.variant == "Conditional" {
         // Ternary `cond ? then : else` (#1690) — recurse into all three
         // children so nested diagnostics (undefined symbols, parse-error
         // nodes, removed-keyword statements) inside any branch still fire.
-        let mut diagnostics = walk_expression(expression.condition, bindings, imports);
-        diagnostics = diagnostics.concat(walk_expression(expression.then_value, bindings, imports));
-        diagnostics = diagnostics.concat(walk_expression(expression.else_value, bindings, imports));
+        let mut diagnostics = walk_expression(expression.condition, ctx);
+        diagnostics = diagnostics.concat(walk_expression(expression.then_value, ctx));
+        diagnostics = diagnostics.concat(walk_expression(expression.else_value, ctx));
         // #1715: constrain the condition to boolean and unify the two branch
         // types. Types are literal-inferred (#829 has no live inferencer), so
         // an un-inferable branch/condition is left unconstrained.
@@ -1165,8 +1273,8 @@ fn walk_expression(expression: Expression?, bindings: SymbolEntry[], imports: Im
         // Assignment `target <op> rhs` (#1627 Part D) — recurse into both
         // sides so diagnostics (undefined symbols, fn-value misuse, nested
         // parse-error nodes) in the lvalue and the rvalue still fire.
-        let mut diagnostics = walk_expression(expression.target, bindings, imports);
-        diagnostics = diagnostics.concat(walk_expression(expression.rhs, bindings, imports));
+        let mut diagnostics = walk_expression(expression.target, ctx);
+        diagnostics = diagnostics.concat(walk_expression(expression.rhs, ctx));
         return diagnostics;
     }
     if expression.variant == "Cast" {
@@ -1188,7 +1296,7 @@ fn walk_expression(expression: Expression?, bindings: SymbolEntry[], imports: Im
                 }
             }
         }
-        return walk_expression(expression.operand, bindings, imports);
+        return walk_expression(expression.operand, ctx);
     }
     if expression.variant == "Is" {
         // Type-guard `x is T` (#1753) — recurse into the operand so inner
@@ -1197,10 +1305,10 @@ fn walk_expression(expression: Expression?, bindings: SymbolEntry[], imports: Im
         // expression, so there is nothing to walk there. Flow-sensitive
         // narrowing is applied at lowering via the `narrowed_variant`
         // machinery (the typecheck pass tracks names only — no type field).
-        return walk_expression(expression.operand, bindings, imports);
+        return walk_expression(expression.operand, ctx);
     }
     if expression.variant == "TryOperator" {
-        return walk_expression(expression.operand, bindings, imports);
+        return walk_expression(expression.operand, ctx);
     }
     // Concurrency nodes (issue #1082). Recurse into operands so inner
     // diagnostics still fire. The only statically-sound live rule is E0813:
@@ -1210,7 +1318,7 @@ fn walk_expression(expression: Expression?, bindings: SymbolEntry[], imports: Im
     // (E0815) all need expression-type inference (#829, out of scope) and
     // ship as helpers exercised by `concurrency_typecheck_test.sfn`.
     if expression.variant == "Spawn" {
-        let mut diagnostics = walk_expression(expression.operand, bindings, imports);
+        let mut diagnostics = walk_expression(expression.operand, ctx);
         if expression.operand.variant == "Lambda" {
             let return_type = expression.operand.return_type;
             if return_type == null {
@@ -1220,11 +1328,11 @@ fn walk_expression(expression: Expression?, bindings: SymbolEntry[], imports: Im
         return diagnostics;
     }
     if expression.variant == "Await" {
-        return walk_expression(expression.operand, bindings, imports);
+        return walk_expression(expression.operand, ctx);
     }
     if expression.variant == "Channel" {
         if expression.capacity == null { return []; }
-        return walk_expression(expression.capacity, bindings, imports);
+        return walk_expression(expression.capacity, ctx);
     }
     // A parser-originated diagnostic node (issue #1531): the parser emitted
     // this for syntax that must fail closed (e.g. the internal-only
@@ -1273,10 +1381,10 @@ fn walk_expression(expression: Expression?, bindings: SymbolEntry[], imports: Im
 // *expressions*, and carry no effects, so they must not trip E0818. Their
 // bindings are registered separately via `register_match_pattern_bindings`.
 // Structured patterns (Struct/Identifier) are still walked normally.
-fn walk_match_pattern(pattern: Expression?, bindings: SymbolEntry[], imports: ImportSymbolTable) -> Diagnostic[] {
+fn walk_match_pattern(pattern: Expression?, ctx: TypeckCtx) -> Diagnostic[] {
     if pattern == null { return []; }
     if pattern.variant == "Raw" { return []; }
-    return walk_expression(pattern, bindings, imports);
+    return walk_expression(pattern, ctx);
 }
 
 // `?` operator (TryOperator) type rules — issue #833, epic #371 (R.3).
@@ -1489,62 +1597,71 @@ fn typecheck_walker_resolves_import(name: string, imports: ImportSymbolTable) ->
 // Top-level statement traversal still flows through `check_block` →
 // `check_statement`; this helper is only the expression-positions
 // recursion for lambda bodies (which `check_block` never descends into).
-fn walk_block_expressions(block: Block, bindings: SymbolEntry[], imports: ImportSymbolTable) -> Diagnostic[] {
+fn walk_block_expressions(block: Block, ctx: TypeckCtx) -> Diagnostic[] {
     let mut diagnostics: Diagnostic[] = [];
     let mut index: int = 0;
     loop {
         if index >= block.statements.length { break; }
-        diagnostics = diagnostics.concat(walk_statement_expressions(block.statements[index], bindings, imports));
+        diagnostics = diagnostics.concat(walk_statement_expressions(block.statements[index], ctx));
         index += 1;
     }
     return diagnostics;
 }
 
-fn walk_statement_expressions(statement: Statement, bindings: SymbolEntry[], imports: ImportSymbolTable) -> Diagnostic[] {
+fn walk_statement_expressions(statement: Statement, ctx: TypeckCtx) -> Diagnostic[] {
     if statement.variant == "ExpressionStatement" {
-        return walk_expression(statement.expression, bindings, imports);
+        return walk_expression(statement.expression, ctx);
     }
     if statement.variant == "ReturnStatement" {
-        return walk_expression(statement.expression, bindings, imports);
+        let return_diags = walk_expression(statement.expression, ctx);
+        // A lambda-body `return { ... }` is classified against the lambda's
+        // declared return type (installed as `ctx.enclosing_return_type` by
+        // the `Lambda` branch's `ctx_enter_body`) — the #1905 lambda-return
+        // twin of the #1904 function-return check.
+        let object_literal_diags = check_object_literal_target(statement.expression, ctx.enclosing_return_type, "return", statement.span, ctx.top_level);
+        return return_diags.concat(object_literal_diags);
     }
     if statement.variant == "ThrowStatement" {
-        return walk_expression(statement.expression, bindings, imports);
+        return walk_expression(statement.expression, ctx);
     }
     if statement.variant == "VariableDeclaration" {
-        let init_diags = walk_expression(statement.initializer, bindings, imports);
+        let init_diags = walk_expression(statement.initializer, ctx);
         let annotation_diags = check_bare_fn_type_annotation(statement.type_annotation, statement.name, statement.span);
         let intersection_diags = check_intersection_value_type_annotation(statement.type_annotation, statement.name, statement.span);
-        return init_diags.concat(annotation_diags).concat(intersection_diags);
+        // The lambda-body `let` twin of the primary let-site E0828 (#1905):
+        // classify a bare object-literal initializer against its annotation.
+        let object_literal_diags = check_object_literal_target(statement.initializer, statement.type_annotation, statement.name, statement.span, ctx.top_level);
+        return init_diags.concat(annotation_diags).concat(intersection_diags).concat(object_literal_diags);
     }
     if statement.variant == "IfStatement" {
-        let mut diagnostics = walk_expression(statement.condition, bindings, imports);
-        diagnostics = diagnostics.concat(walk_block_expressions(statement.then_block, bindings, imports));
+        let mut diagnostics = walk_expression(statement.condition, ctx);
+        diagnostics = diagnostics.concat(walk_block_expressions(statement.then_block, ctx));
         if statement.else_branch != null {
             let branch = statement.else_branch;
             if branch.body != null {
-                diagnostics = diagnostics.concat(walk_block_expressions(branch.body, bindings, imports));
+                diagnostics = diagnostics.concat(walk_block_expressions(branch.body, ctx));
             }
             if branch.statement != null {
-                diagnostics = diagnostics.concat(walk_statement_expressions(branch.statement, bindings, imports));
+                diagnostics = diagnostics.concat(walk_statement_expressions(branch.statement, ctx));
             }
         }
         return diagnostics;
     }
     if statement.variant == "ForStatement" {
-        let mut diagnostics = walk_expression(statement.clause.target, bindings, imports);
-        diagnostics = diagnostics.concat(walk_expression(statement.clause.iterable, bindings, imports));
-        diagnostics = diagnostics.concat(walk_block_expressions(statement.body, bindings, imports));
+        let mut diagnostics = walk_expression(statement.clause.target, ctx);
+        diagnostics = diagnostics.concat(walk_expression(statement.clause.iterable, ctx));
+        diagnostics = diagnostics.concat(walk_block_expressions(statement.body, ctx));
         return diagnostics;
     }
     if statement.variant == "MatchStatement" {
-        let mut diagnostics = walk_expression(statement.expression, bindings, imports);
+        let mut diagnostics = walk_expression(statement.expression, ctx);
         let mut index: int = 0;
         loop {
             if index >= statement.cases.length { break; }
             let case = statement.cases[index];
-            diagnostics = diagnostics.concat(walk_match_pattern(case.pattern, bindings, imports));
-            diagnostics = diagnostics.concat(walk_expression(case.guard, bindings, imports));
-            diagnostics = diagnostics.concat(walk_block_expressions(case.body, bindings, imports));
+            diagnostics = diagnostics.concat(walk_match_pattern(case.pattern, ctx));
+            diagnostics = diagnostics.concat(walk_expression(case.guard, ctx));
+            diagnostics = diagnostics.concat(walk_block_expressions(case.body, ctx));
             index += 1;
         }
         return diagnostics;
@@ -1554,25 +1671,25 @@ fn walk_statement_expressions(statement: Statement, bindings: SymbolEntry[], imp
         let mut clause_index: int = 0;
         loop {
             if clause_index >= statement.clauses.length { break; }
-            diagnostics = diagnostics.concat(walk_expression(statement.clauses[clause_index].expression, bindings, imports));
+            diagnostics = diagnostics.concat(walk_expression(statement.clauses[clause_index].expression, ctx));
             clause_index += 1;
         }
-        diagnostics = diagnostics.concat(walk_block_expressions(statement.body, bindings, imports));
+        diagnostics = diagnostics.concat(walk_block_expressions(statement.body, ctx));
         return diagnostics;
     }
     if statement.variant == "LoopStatement" {
-        return walk_block_expressions(statement.body, bindings, imports);
+        return walk_block_expressions(statement.body, ctx);
     }
     if statement.variant == "BlockStatement" {
-        return walk_block_expressions(statement.body, bindings, imports);
+        return walk_block_expressions(statement.body, ctx);
     }
     if statement.variant == "TryStatement" {
-        let mut diagnostics = walk_block_expressions(statement.try_block, bindings, imports);
+        let mut diagnostics = walk_block_expressions(statement.try_block, ctx);
         if statement.catch_block != null {
-            diagnostics = diagnostics.concat(walk_block_expressions(statement.catch_block, bindings, imports));
+            diagnostics = diagnostics.concat(walk_block_expressions(statement.catch_block, ctx));
         }
         if statement.finally_block != null {
-            diagnostics = diagnostics.concat(walk_block_expressions(statement.finally_block, bindings, imports));
+            diagnostics = diagnostics.concat(walk_block_expressions(statement.finally_block, ctx));
         }
         return diagnostics;
     }

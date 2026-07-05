@@ -181,6 +181,41 @@ never reached for the illegal case and the placeholder store is dead.
 not a struct` with a fix-it: *"declare a `struct` and annotate the binding with
 it."*
 
+**Coverage status: complete across value positions (closed by SFEP-0041).**
+`E0828` shipped (#1899) at exactly one position — the `let` site
+(`check_statement`'s `VariableDeclaration` branch). Three follow-up issues have since closed every other
+residual position, via SFEP-0041's unified `TypeckCtx` expected-type /
+typing-environment context threaded through both typecheck walk families
+(statements and the lighter expression family lambda bodies use):
+
+- [x] `let` site (#1899) — the original enforcement.
+- [x] Array targets and generic-instantiation-head targets (#1900) — `let x:
+      Named[] = { ... }` fires `E0828` regardless of the element type, and a
+      generic instantiation target (`Iface<...>`) is classified by its base
+      name rather than falling through unrejected.
+- [x] Parameter-default initializers (#1900) — `fn f(p: Iface = { ... })` is
+      classified against `parameter.type_annotation` the same way the `let`
+      site is.
+- [x] Return-position object literals (#1904) — `fn f() -> Iface { return {
+      ... }; }` now has the enclosing function's declared return type threaded
+      down through `check_block` → `check_statement` to the `ReturnStatement`
+      branch, so it can call the classifier.
+- [x] Lambda-body `let` and lambda-return object literals (#1905) — the
+      lighter expression-family walk (`walk_expression` →
+      `walk_block_expressions` → `walk_statement_expressions`) now carries
+      `top_level` and an enclosing return type, so a lambda body's `let` and
+      `return` positions run the same classifier as the top-level walk.
+
+`E0828` is therefore enforced at **every** value position that can hold a bare
+object literal — `let`, parameter defaults, return, and lambda-body/return —
+with array and generic-instantiation-head target normalization applied
+uniformly. The named-`struct` construction path (the `Struct` AST variant, the
+#1855 path) remains exempt throughout. See SFEP-0041
+(`docs/proposals/0041-typeck-expected-type-context.md`) for the `TypeckCtx`
+mechanism; struct-field defaults, generic-instantiation arguments, and call
+arguments remain open future consumers of that same channel, tracked
+separately.
+
 ### 3.3 Rule 3 — `A & B` is not a data type (`E0829`); it is reserved for generic bounds
 
 `A & B` **stays in the grammar**. In **value / type-annotation position** — a

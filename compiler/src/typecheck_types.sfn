@@ -369,24 +369,30 @@ fn check_interface_field_members(field_members: InterfaceFieldMember[]) -> Diagn
 }
 
 // E0828: a bare object literal whose target is not a concrete `struct`.
-// `is_interface` selects between the interface-target and the
-// un-inferable-unannotated wording.
-fn make_object_literal_requires_struct_diagnostic(target: string, is_interface: boolean, anchor_name: string, anchor_span: SourceSpan?) -> Diagnostic {
+// `kind` selects the wording: "interface" (target names an interface),
+// "array" (target is an array type `T[]` — an object literal never
+// yields an array, so this fires regardless of the element type), or
+// "uninferable" (unannotated binding with no contextual struct target).
+fn make_object_literal_requires_struct_diagnostic(target: string, kind: string, anchor_name: string, anchor_span: SourceSpan?) -> Diagnostic {
     let anchor = token_from_name(anchor_name, anchor_span);
     let mut message: string = "";
-    if is_interface {
+    let mut fix_message: string = "declare a `struct` with these fields and annotate the binding with it "
+        + "(data is constructed only through concrete structs)";
+    if strings_equal(kind, "interface") {
         message = "object literal requires a concrete `struct` type; `"
             + trim_text(target)
             + "` is an interface, not a struct";
+    } else if strings_equal(kind, "array") {
+        message = "object literal requires a concrete `struct` type; `"
+            + trim_text(target)
+            + "` is an array type, and an object literal never yields an array";
+        fix_message = "build each element and collect them into an array literal `[...]`, "
+            + "or annotate with the concrete `struct` element type for a single value";
     } else {
         message = "object literal requires a concrete `struct` type annotation; "
             + "its target type cannot be inferred";
     }
-    let fix = FixSuggestion {
-        message: "declare a `struct` with these fields and annotate the binding with it "
-            + "(data is constructed only through concrete structs)",
-        edits: []
-    };
+    let fix = FixSuggestion { message: fix_message, edits: [] };
     return Diagnostic {
         code: "E0828",
         severity: "error",
@@ -399,9 +405,9 @@ fn make_object_literal_requires_struct_diagnostic(target: string, is_interface: 
 
 // Head type name of a value annotation, stripping a trailing optional
 // marker (`Named?` -> `Named`) so an object literal targeting an
-// optional interface is still classified by its head type. Broader
-// wrapper normalization (array `T[]`, generic-instantiation heads) and
-// the return/parameter positions are the coverage follow-up (#1900).
+// optional interface is still classified by its head type. Array and
+// generic-instantiation-head normalization is layered on top by the
+// caller via `_object_literal_target_is_array` / `_object_literal_head_base`.
 fn _object_literal_head_type(text: string) -> string {
     let mut head = trim_text(text);
     loop {
@@ -409,6 +415,33 @@ fn _object_literal_head_type(text: string) -> string {
         if head[head.length - 1] == "?" {
             head = trim_text(substring(head, 0, head.length - 1));
         } else { break; }
+    }
+    return head;
+}
+
+// True when the object-literal target's head is an array type (`T[]`).
+// An object literal never produces an array, so an array target is
+// rejected regardless of the element type — the caller short-circuits
+// on this before the head-symbol lookup (SFEP-0039 §3.2). Match the `[]`
+// suffix specifically (not any trailing `]`) so a future `]`-terminated
+// type form or a malformed annotation is not mistaken for an array.
+fn _object_literal_target_is_array(head: string) -> boolean {
+    if head.length < 2 { return false; }
+    return head[head.length - 2] == "[" && head[head.length - 1] == "]";
+}
+
+// Base name of a possibly-generic head (`Box<int>` -> `Box`,
+// `Named` -> `Named`), so a generic-instantiation target is classified
+// by its base symbol rather than the raw instantiation text — which
+// `find_symbol` would otherwise miss.
+fn _object_literal_head_base(head: string) -> string {
+    let mut index: int = 0;
+    loop {
+        if index >= head.length { break; }
+        if head[index] == "<" {
+            return trim_text(substring(head, 0, index));
+        }
+        index += 1;
     }
     return head;
 }
@@ -426,15 +459,22 @@ fn check_object_literal_target(initializer: Expression?, annotation: TypeAnnotat
     if initializer == null { return []; }
     if initializer.variant != "Object" { return []; }
     if annotation == null {
-        return [make_object_literal_requires_struct_diagnostic("", false, anchor_name, anchor_span)];
+        return [make_object_literal_requires_struct_diagnostic("", "uninferable", anchor_name, anchor_span)];
     }
     let text = trim_text(annotation.text);
     if type_annotation_is_intersection(text) { return []; }
     let head = _object_literal_head_type(text);
-    let target = find_symbol(top_level, head);
+    if _object_literal_target_is_array(head) {
+        return [make_object_literal_requires_struct_diagnostic(head, "array", anchor_name, anchor_span)];
+    }
+    let base = _object_literal_head_base(head);
+    let target = find_symbol(top_level, base);
     if target == null { return []; }
     if strings_equal(target.kind, "interface") {
-        return [make_object_literal_requires_struct_diagnostic(head, true, anchor_name, anchor_span)];
+        // Name the full head (`Container<int>`) in the message so it
+        // matches the source annotation verbatim, while still resolving the
+        // symbol by `base` (`Container`).
+        return [make_object_literal_requires_struct_diagnostic(head, "interface", anchor_name, anchor_span)];
     }
     return [];
 }
