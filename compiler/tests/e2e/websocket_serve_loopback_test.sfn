@@ -1,0 +1,378 @@
+// Native server-loopback e2e for the Sailfin-native `ws://` SERVER bridge
+// (#1877) — `sfn_websocket_serve`, bridged behind `websocket.serve(port)`
+// in `runtime/sfn/adapters/websocket.sfn`.
+//
+// Mirrors the structure of `serve_loopback_test.sfn`: build a tiny consumer
+// app that calls `websocket.serve(<port>)`, spawn it as a background
+// subprocess wrapped in a wall-clock `timeout` (the server never returns —
+// the timeout is the only teardown mechanism), and drive it with a
+// self-contained raw-socket websocket CLIENT inlined in this test. The
+// #1876 client adapter has no receive primitive, so this test cannot reuse
+// `sfn_websocket_connect`/`.send` — adding a receive to the client module is
+// out of scope here (see `websocket.sfn`'s own client/server split).
+//
+// Coverage: the handshake (fixed `Sec-WebSocket-Key` -> the RFC 6455
+// canonical `Sec-WebSocket-Accept`, proving `_ws_sec_accept`); a masked
+// TEXT frame round-trips as an unmasked echo (proving `_ws_frame_read`'s
+// unmask step and `_ws_server_frame_send`'s unmasked framing); a masked
+// CLOSE frame is accepted without hanging the connection.
+//
+// Matchers note (#842): `sfn/test`'s `expect_*` matchers are `![pure]` and
+// cannot be called from an `![io]` test; assert on captured bytes with
+// `sfn/strings::contains`/`find` instead.
+import { contains, find } from "sfn/strings";
+
+// ── libc memory + string + socket surface (test-local raw client) ──
+// Prefixed `_lb_` so the file-local helpers never collide with the
+// external-linkage runtime helpers of the same shape in `websocket.sfn`
+// (not linked into this test binary, but the prefix keeps that guarantee
+// independent of link order).
+extern fn malloc(size: usize) -> * u8;
+
+extern fn free(ptr: * u8) -> void;
+
+extern fn memset(dst: * u8, byte: i32, n: usize) -> * u8;
+
+extern fn memcpy(dst: * u8, src: * u8, n: usize) -> * u8;
+
+extern fn strlen(s: * u8) -> usize;
+
+extern fn socket(domain: i32, ty: i32, protocol: i32) -> i32;
+
+extern fn connect(sockfd: i32, addr: * u8, addrlen: i32) -> i32;
+
+extern fn send(sockfd: i32, buf: * u8, len: i64, flags: i32) -> i64;
+
+extern fn recv(sockfd: i32, buf: * u8, len: i64, flags: i32) -> i64;
+
+extern fn close(fd: i32) -> i32;
+
+// The listening port for the loopback server. Fixed and distinct from
+// `serve_loopback_test.sfn`'s 18790 so the two never collide under
+// `--jobs N`.
+fn _lb_port() -> i64 { return 18791; }
+
+fn _lb_port_str() -> string { return "18791"; }
+
+fn _sfn_bin() -> string ![io] {
+    let configured = env.get("SAILFIN_BIN");
+    if configured.length > 0 { return configured; }
+    return "build/native/sailfin";
+}
+
+// `run_capture`/`spawn_with_env`'s empty env is the EMPTY environment, not
+// "inherit" — snapshot the parent's full environment (the nested build
+// links, needing the toolchain surface; SAILFIN_TEST_SCRATCH is already in
+// there, keeping the nested build cache per-invocation under the parallel
+// pool, `.claude/rules/no-bash-e2e.md`).
+fn _child_env() -> string[] ![io] { return process.environ(); }
+
+// Resolve a wall-clock timeout command, mirroring
+// `serve_loopback_test.sfn::_timeout_cmd`. Empty string => none found.
+fn _timeout_cmd() -> string ![io] {
+    let probe = process.run(["sh", "-c", "command -v timeout >/dev/null 2>&1"]);
+    if probe == 0 { return "timeout"; }
+    let gprobe = process.run(["sh", "-c", "command -v gtimeout >/dev/null 2>&1"]);
+    if gprobe == 0 { return "gtimeout"; }
+    return "";
+}
+
+// ── raw loopback websocket client (test-local, not the #1876 adapter) ──
+fn _lb_ptr_off(p: * u8, off: i64) -> * u8 {
+    let addr: i64 = (p as i64) + off;
+    return addr as * u8;
+}
+
+fn _lb_byte_at(base: * u8, off: i64) -> i64 {
+    return (sailfin_intrinsic_pointer_read_i32(_lb_ptr_off(base, off)) as i64) & 255;
+}
+
+// Connect a stream socket to `127.0.0.1:port`. Tries both `sockaddr_in`
+// byte layouts (Linux u16 sin_family at 0; macOS/BSD u8 sin_len at 0 +
+// u8 sin_family at 1), first success wins. Returns the connected fd or -1.
+fn _lb_connect(port: i64) -> i32 {
+    let mut attempt: i64 = 0;
+    loop {
+        if attempt >= 2 { break; }
+        let addr: * u8 = malloc(16 as usize);
+        if addr as i64 == 0 { return 0 - 1; }
+        memset(addr, 0, 16 as usize);
+        if attempt == 0 {
+            memset(_lb_ptr_off(addr, 0), 2, 1 as usize);
+        } else {
+            memset(_lb_ptr_off(addr, 0), 16, 1 as usize);
+            memset(_lb_ptr_off(addr, 1), 2, 1 as usize);
+        }
+        memset(_lb_ptr_off(addr, 2), ((port >> 8) & 255) as i32, 1 as usize);
+        memset(_lb_ptr_off(addr, 3), (port & 255) as i32, 1 as usize);
+        // sin_addr = 127.0.0.1
+        memset(_lb_ptr_off(addr, 4), 127, 1 as usize);
+        memset(_lb_ptr_off(addr, 7), 1, 1 as usize);
+        let fd: i32 = socket(2, 1, 0);
+        if fd < 0 {
+            free(addr);
+            return 0 - 1;
+        }
+        let rc: i32 = connect(fd, addr, 16);
+        free(addr);
+        if rc == 0 { return fd; }
+        close(fd);
+        attempt = attempt + 1;
+    }
+    return 0 - 1;
+}
+
+fn _lb_send_all(fd: i32, buf: * u8, total: i64) -> bool {
+    let mut sent: i64 = 0;
+    loop {
+        if sent >= total { break; }
+        let n: i64 = send(fd, _lb_ptr_off(buf, sent), total - sent, 0);
+        if n <= 0 { return false; }
+        sent = sent + n;
+    }
+    return true;
+}
+
+// A single bounded `recv` (enough for the ~150-byte handshake response on
+// loopback — the same v0 single-recv scope `websocket.sfn::_ws_recv_some`
+// documents). Returns the byte count, or -1 on error.
+fn _lb_recv_some(fd: i32, buf: * u8, cap: i64) -> i64 {
+    return recv(fd, buf, cap, 0);
+}
+
+// `_lb_recv_exact(fd, buf, n)` — loop `recv` until exactly `n` bytes land.
+fn _lb_recv_exact(fd: i32, buf: * u8, n: i64) -> bool {
+    let mut got: i64 = 0;
+    loop {
+        if got >= n { break; }
+        let r: i64 = recv(fd, _lb_ptr_off(buf, got), n - got, 0);
+        if r <= 0 { return false; }
+        got = got + r;
+    }
+    return true;
+}
+
+// Send the fixed RFC 6455 handshake request (the well-known test key from
+// the spec's own example, so the expected accept value is a fixed
+// constant) and return the raw response bytes (or "" on failure).
+fn _lb_handshake(port: i64) -> string {
+    let fd: i32 = _lb_connect(port);
+    if fd < 0 { return ""; }
+    let req: string = "GET / HTTP/1.1\r\nHost: 127.0.0.1\r\nUpgrade: websocket\r\nConnection: Upgrade\r\nSec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==\r\nSec-WebSocket-Version: 13\r\n\r\n";
+    if !_lb_send_all(fd, req as * u8, strlen(req as * u8) as i64) {
+        close(fd);
+        return "";
+    }
+    let cap: i64 = 1024;
+    let buf: * u8 = malloc((cap + 4) as usize);
+    if buf as i64 == 0 {
+        close(fd);
+        return "";
+    }
+    let n: i64 = _lb_recv_some(fd, buf, cap);
+    close(fd);
+    if n <= 0 { return ""; }
+    memset(_lb_ptr_off(buf, n), 0, 1 as usize);
+    return buf as string;
+}
+
+// Send a MASKED frame (client -> server MUST mask). `payload` is a raw
+// string; only TEXT (opcode 1) and CLOSE (opcode 8, empty payload) are
+// exercised by this test.
+fn _lb_send_masked(fd: i32, opcode: i64, payload: string) -> bool {
+    let payload_bytes: * u8 = payload as * u8;
+    let payload_len: i64 = strlen(payload_bytes) as i64;
+    let byte0: i64 = 128 | (opcode & 15);
+    let header_len: i64 = 2;
+    let total: i64 = header_len + 4 + payload_len;
+    let out: * u8 = malloc(total as usize);
+    if out as i64 == 0 { return false; }
+    memset(_lb_ptr_off(out, 0), byte0 as i32, 1 as usize);
+    memset(_lb_ptr_off(out, 1), (128 | payload_len) as i32, 1 as usize);
+    // A fixed (non-random) mask key is fine here — this is a directed test
+    // vehicle, not the production client (which uses RAND_bytes).
+    let mut k: i64 = 0;
+    loop {
+        if k >= 4 { break; }
+        memset(_lb_ptr_off(out, header_len + k), (11 + k) as i32, 1 as usize);
+        k = k + 1;
+    }
+    let mut i: i64 = 0;
+    loop {
+        if i >= payload_len { break; }
+        let mb: i64 = _lb_byte_at(out, header_len + (i & 3));
+        let pb: i64 = _lb_byte_at(payload_bytes, i);
+        memset(_lb_ptr_off(out, header_len + 4 + i), (pb ^ mb) as i32, 1 as usize);
+        i = i + 1;
+    }
+    let ok: bool = _lb_send_all(fd, out, total);
+    free(out);
+    return ok;
+}
+
+// Read one server (UNMASKED) frame's opcode + payload. Returns the payload
+// as a string (possibly empty), and writes the opcode through `out_opcode`.
+// Only handles the short-length (< 126) form the server ever emits for this
+// test's small payloads. Returns "" (with opcode left at -1) on any recv
+// failure.
+fn _lb_read_frame(fd: i32, out_opcode: * i64) -> string {
+    // malloc(8), not 4: `_lb_byte_at`'s 4-byte load at offset 1 touches bytes
+    // 1..4, so a 2-byte header buffer needs the same content+slack headroom
+    // the runtime's own frame buffers keep.
+    let hdr: * u8 = malloc(8 as usize);
+    if hdr as i64 == 0 {
+        atomic_store(out_opcode, 0 - 1);
+        return "";
+    }
+    if !_lb_recv_exact(fd, hdr, 2) {
+        free(hdr);
+        atomic_store(out_opcode, 0 - 1);
+        return "";
+    }
+    let byte0: i64 = _lb_byte_at(hdr, 0);
+    let byte1: i64 = _lb_byte_at(hdr, 1);
+    let opcode: i64 = byte0 & 15;
+    let masked: bool = (byte1 & 128) != 0;
+    let len: i64 = byte1 & 127;
+    free(hdr);
+    atomic_store(out_opcode, opcode);
+    if masked { return ""; }
+    if len == 0 { return ""; }
+    let payload: * u8 = malloc((len + 4) as usize);
+    if payload as i64 == 0 { return ""; }
+    if !_lb_recv_exact(fd, payload, len) {
+        free(payload);
+        return "";
+    }
+    memset(_lb_ptr_off(payload, len), 0, 1 as usize);
+    return payload as string;
+}
+
+// Lay out a consumer capsule whose `main` calls `websocket.serve(<port>)`.
+fn _app_root() -> string { return "build/websocket-serve-loopback-e2e"; }
+
+fn _write_server(port_str: string) -> string ![io] {
+    let root = _app_root();
+    fs.createDirectory(root + "/src", true);
+    fs.writeFile(root + "/capsule.toml", "[capsule]\n"
+        + "name = \"sfn/websocket-serve-loopback-e2e-app\"\n"
+        + "version = \"0.0.1\"\n"
+        + "description = \"websocket.serve loopback e2e consumer\"\n"
+        + "\n"
+        + "[capabilities]\n"
+        + "required = [\"io\", \"net\"]\n"
+        + "\n"
+        + "[build]\n"
+        + "entry = \"src/main.sfn\"\n"
+        + "kind = \"library\"\n");
+    fs.writeFile(root + "/src/main.sfn", "fn main() ![io, net] {\n"
+        + "    websocket.serve("
+        + port_str
+        + ");\n"
+        + "}\n");
+    return root + "/src/main.sfn";
+}
+
+// Compile the consumer to a standalone binary up front (synchronous), so
+// the build happens ONCE outside the readiness poll window. Threads the
+// full parent environment (the build links, needing the toolchain surface).
+fn _build_bin(main_path: string, bin: string) -> string ![io] {
+    let exit = process.run_capture([_sfn_bin(), "build", "-o", bin, main_path], _child_env());
+    let _out = process.capture_take_stdout();
+    let _err = process.capture_take_stderr();
+    if exit != 0 { return ""; }
+    return bin;
+}
+
+// Spawn the prebuilt blocking server, wrapped in a wall-clock timeout so it
+// self-reaps — there is no process-kill primitive and `websocket.serve`
+// never returns. The test guards on a timeout command being present before
+// calling this, so `tcmd` is always non-empty here.
+fn _spawn_server(bin: string) -> i64 ![io] {
+    let tcmd = _timeout_cmd();
+    let mut argv: string[] = [];
+    if tcmd.length > 0 {
+        argv.push(tcmd);
+        argv.push("60");
+    }
+    argv.push(bin);
+    return process.spawn_with_env(argv, _child_env());
+}
+
+// Poll the handshake until the prebuilt server answers with a `101`.
+// ~45s budget (90 attempts x ~0.5s) stays under the 60s server timeout.
+fn _await_ready(port: i64) -> string ![io] {
+    let mut attempt: i64 = 0;
+    loop {
+        if attempt >= 90 { break; }
+        let resp = _lb_handshake(port);
+        if resp.length > 0 {
+            if contains(resp, "101") { return resp; }
+        }
+        let _ = process.run(["sleep", "0.5"]);
+        attempt = attempt + 1;
+    }
+    return "";
+}
+
+test "websocket.serve loopback: handshake + echo + close round-trip" ![io] {
+    // Teardown of the blocking server relies on a wall-clock timeout (no
+    // process-kill primitive; `websocket.serve` never returns). Without
+    // `timeout`/`gtimeout`, spawning the server would orphan the fixed port
+    // 18791 and poison subsequent runs — skip cleanly instead.
+    if _timeout_cmd().length == 0 {
+        print.info("[websocket-serve-loopback] SKIP: no timeout/gtimeout to reap the blocking server");
+        return;
+    }
+
+    let port = _lb_port();
+    let main_path = _write_server(_lb_port_str());
+
+    let server_bin = _build_bin(main_path, _app_root() + "/server-bin");
+    assert server_bin.length > 0;
+    let _handle = _spawn_server(server_bin);
+
+    // Readiness + handshake correctness: the fixed RFC 6455 example key
+    // `dGhlIHNhbXBsZSBub25jZQ==` must produce the canonical accept value
+    // `s3pPLMBiTxaQ9kYGzzhZRbK+xOo=`, isolating handshake bugs (`_ws_sec_accept`)
+    // from framing bugs below.
+    let handshake_resp = _await_ready(port);
+    print.info("[websocket-serve-loopback] handshake: " + handshake_resp);
+    assert handshake_resp.length > 0;
+    assert contains(handshake_resp, "101");
+    assert contains(handshake_resp, "Sec-WebSocket-Accept: s3pPLMBiTxaQ9kYGzzhZRbK+xOo=");
+
+    // A fresh connection for the framed round-trip (the handshake connection
+    // above was used only to prove the accept value and is left to the
+    // server's own per-connection teardown).
+    let fd: i32 = _lb_connect(port);
+    assert fd >= 0;
+    let handshake_req: string = "GET / HTTP/1.1\r\nHost: 127.0.0.1\r\nUpgrade: websocket\r\nConnection: Upgrade\r\nSec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==\r\nSec-WebSocket-Version: 13\r\n\r\n";
+    assert _lb_send_all(fd, handshake_req as * u8, strlen(handshake_req as * u8) as i64);
+    let cap: i64 = 1024;
+    let hbuf: * u8 = malloc((cap + 4) as usize);
+    assert hbuf as i64 != 0;
+    let hn: i64 = _lb_recv_some(fd, hbuf, cap);
+    assert hn > 0;
+
+    // Masked TEXT frame "hi" round-trips as an unmasked echo.
+    assert _lb_send_masked(fd, 1, "hi");
+    let mut opcode: i64 = 0 - 1;
+    let echoed = _lb_read_frame(fd, & opcode);
+    print.info("[websocket-serve-loopback] echo opcode=" + opcode + " payload="
+        + echoed);
+    assert opcode == 1;
+    assert echoed == "hi";
+
+    // Masked CLOSE frame -> the server replies with an unmasked CLOSE
+    // (opcode 8, empty payload) before it tears the connection down.
+    assert _lb_send_masked(fd, 8, "");
+    let mut close_opcode: i64 = 0 - 1;
+    let _close_payload = _lb_read_frame(fd, & close_opcode);
+    assert close_opcode == 8;
+    close(fd);
+
+    // Best-effort cleanup of the consumer tree (the timeout reaps the
+    // server process).
+    let _rm = process.run(["rm", "-rf", _app_root()]);
+}

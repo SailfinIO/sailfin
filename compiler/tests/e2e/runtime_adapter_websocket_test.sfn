@@ -16,11 +16,11 @@
 //                    real `@sfn_websocket_*` calls and NOT the unbridged
 //                    `@sfn_websocket_unbridged` sentinel.
 //
-// OMITTED here: the behavioral loopback send/receive/close round-trip. It
-// needs a real server end (`websocket.serve`), which lands in #1877; the
-// loopback test lands with it. This test covers the client registry-flip
-// behavior (emit shape + routing) without a network, mirroring
-// `runtime_adapter_http_test.sfn`.
+// OMITTED here: the behavioral loopback send/receive/close round-trip — it
+// lives in the sibling `websocket_serve_loopback_test.sfn` (#1877), which
+// drives a real `sfn_websocket_serve` server with a raw-socket client. This
+// test covers the client registry-flip behavior (emit shape + routing)
+// without a network, mirroring `runtime_adapter_http_test.sfn`.
 //
 // NOTE on matchers: the `sfn/test` `expect_*` matchers are `![pure]`, so
 // they cannot be called from an `![io]` test. For subprocess/IR-output
@@ -154,6 +154,7 @@ test "websocket emit: define for every sfn_websocket_* client export" ![io] {
     assert _has_define(ir, "sfn_websocket_connect");
     assert _has_define(ir, "sfn_websocket_send");
     assert _has_define(ir, "sfn_websocket_close");
+    assert _has_define(ir, "sfn_websocket_serve");
 }
 
 test "websocket emit: declares the BSD-sockets libc surface" ![io] {
@@ -196,5 +197,19 @@ test "websocket.connect/.send/.close lower to @sfn_websocket_*, not the unbridge
     assert _calls(ir, "sfn_websocket_send");
     assert _calls(ir, "sfn_websocket_close");
     // The deliberately-fake metadata sentinel must never be called.
+    assert ! _calls(ir, "sfn_websocket_unbridged");
+}
+
+test "websocket.serve lowers to @sfn_websocket_serve, not the unbridged sentinel" ![io] {
+    // `websocket.serve(9)` alone needs only the registry's `net` effect —
+    // keep the probe minimal, unlike the connect/send/close probe above
+    // (whose `.send(` additionally trips the receiver-agnostic
+    // `channel_send` `io` rule).
+    let source = "fn main() -> int ![net] {\n" + "    websocket.serve(9);\n"
+        + "    return 0;\n"
+        + "}\n";
+    let ir = _emit_source("websocket_serve_probe", source);
+    assert ir != "EMIT_FAILED";
+    assert _calls(ir, "sfn_websocket_serve");
     assert ! _calls(ir, "sfn_websocket_unbridged");
 }

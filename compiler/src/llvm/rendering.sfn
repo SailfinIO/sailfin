@@ -252,29 +252,23 @@ fn render_runtime_helper_declarations(used_targets: string[], local_functions: N
             if descriptor.target == "sailfin_intrinsic_fs_get_perms" {
                 _preamble_inlined = true;
             }
-            // #1601 / #1876: `websocket.serve` and the Call-form `serve` stay
-            // effect-metadata-only, so they stay sentinel-skipped — their
-            // descriptor `symbol`s are deliberately fake
-            // (`sfn_websocket_unbridged` / `sfn_serve_unbridged`) and no
-            // lowering emits a `call` against them. The source-text walker
-            // (`filter_runtime_helper_targets`) can still surface these
-            // targets from a literal `serve` / `websocket.serve` token in a
-            // compiled module, which would otherwise drive the loop below to
-            // emit a `declare` to an undefined symbol and break the link. Skip
-            // them so a metadata-only row never declares. The real serve
-            // runtime declares come from the `serve_start` /
-            // `serve_handler_dispatch` rows (distinct targets, real
-            // `sfn_serve` symbol) and are unaffected.
+            // #1601 / #1876 / #1877: the Call-form `serve` stays
+            // effect-metadata-only, so it stays sentinel-skipped — its
+            // descriptor `symbol` is deliberately fake (`sfn_serve_unbridged`)
+            // and no lowering emits a `call` against it. The source-text
+            // walker (`filter_runtime_helper_targets`) can still surface this
+            // target from a literal `serve` token in a compiled module, which
+            // would otherwise drive the loop below to emit a `declare` to an
+            // undefined symbol and break the link. Skip it so a metadata-only
+            // row never declares. The real serve runtime declares come from
+            // the `serve_start` / `serve_handler_dispatch` rows (distinct
+            // targets, real `sfn_serve` symbol) and are unaffected.
             //
-            // `websocket.connect`/`.send`/`.close` are NO LONGER skipped: they
-            // are bridged to real `sfn_websocket_*` symbols in
-            // `runtime/sfn/adapters/websocket.sfn` (#1876), so the normal
-            // declare path below emits a real `declare` the linker resolves
-            // against that runtime module. `websocket.serve`'s runtime bridge
-            // is tracked in #1877.
-            if descriptor.target == "websocket.serve" {
-                _preamble_inlined = true;
-            }
+            // `websocket.connect`/`.send`/`.close`/`.serve` are NO LONGER
+            // skipped: they are all bridged to real `sfn_websocket_*` symbols
+            // in `runtime/sfn/adapters/websocket.sfn` (#1876, #1877), so the
+            // normal declare path below emits a real `declare` the linker
+            // resolves against that runtime module.
             if descriptor.target == "serve" { _preamble_inlined = true; }
             if _preamble_inlined {
                 index += 1;

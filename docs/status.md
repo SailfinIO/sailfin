@@ -1,6 +1,6 @@
 # Status
 
-Updated: 2026-07-04. Seed pinned to `0.8.0-alpha.1` (`.seed-version`);
+Updated: 2026-07-05. Seed pinned to `0.8.0-alpha.1` (`.seed-version`);
 the compiler version source of truth is `compiler/capsule.toml`.
 
 This document is the **current-state source of truth**: what ships today,
@@ -188,6 +188,27 @@ here.
   to a structured `Is` AST node (not `Expression.Raw`), and the effect checker
   walks the operand — so `readFile() is T` correctly requires `![io]`. Effect
   polymorphism (`!E` variables, polymorphic HOFs) remains post-1.0.
+- **`websocket.*` runtime bridge** (epic #1180 Phase G): the `websocket.connect`/
+  `.send`/`.close`/`.serve` registry rows in `runtime_helpers.sfn` now point at
+  real `sfn_websocket_*` symbols in `runtime/sfn/adapters/websocket.sfn` — the
+  `sfn_websocket_unbridged` metadata-only sentinel is gone for this family, so
+  the calls lower, link, and self-host like any other member-call bridge (e.g.
+  `http.*`). Client (#1876): `ws://` connect + a single masked TEXT/BINARY send
+  + close. Server (#1877, v0): `websocket.serve(port)` binds/listens/accepts and
+  runs an RFC 6455 echo loop — single connection at a time, blocking, unmasked
+  server frames, no fragmentation/ping-pong, no `wss://`. `![net]` is enforced
+  via the registry rows (single source of truth since #1601); `websocket.send`
+  additionally requires `![io]` — any `.send(...)` member call trips the
+  checker's pre-existing conservative, receiver-agnostic channel-op rule
+  (shared with `channel.send`) on top of the registry's `net` row. Durable
+  convention: a registry-driven member-call bridge marshals scalar arguments
+  only — `websocket.serve(8080)` is the canonical call shape; an object literal
+  (`websocket.serve({ port })`) is unreachable without bespoke lowering.
+  Follow-ups tracked under epic #1180: concurrency-pool dispatch (#1923),
+  ping/pong + fragmentation + close-code completeness (#1924), `wss://`/TLS
+  (#1925), a per-client handler API — `server.clients()`/`onMessage`/per-client
+  send (#1926), typed message channels/backpressure (#1927), and client-side
+  receive.
 - **Undefined free-function rejection** (`E0420`, #616/#812): unresolvable
   bare-identifier callees fail typecheck.
 - **Function references**: a bare fn name in value position lowers to the
@@ -259,6 +280,7 @@ here.
 | Effect enforcement — `gpu`, `rand` | Parsed only | Reserved in the taxonomy; no detectors yet |
 | Cross-module effect propagation | **Shipped** | `E0402` (Phase E); E2 deferred |
 | Capsule capability cross-check | **Shipped** | `E0403` (Phase F) |
+| `websocket.*` (`connect`/`send`/`close`; `serve(port)`) | **Shipped (v0)** | RFC 6455 `ws://` bridged end-to-end to real `sfn_websocket_*` runtime symbols (`runtime/sfn/adapters/websocket.sfn`), replacing the `sfn_websocket_unbridged` metadata-only sentinel — client (#1876), single-connection blocking echo server (#1877), epic #1180 Phase G. `![net]` enforced via the registry rows (#1601). v0 scope: `ws://` only (no `wss://`), no fragmentation/ping-pong, unmasked server frames, one connection at a time. Follow-ups: #1923 (pool dispatch), #1924 (ping/pong + fragmentation + close codes), #1925 (`wss://`/TLS), #1926 (per-client handler API), #1927 (typed channels/backpressure) |
 | `int` / `float` numeric types | **Shipped** | Slices A–E complete (#296 closed): i64/f64 annotations, bitwise/shift ops, the `as` cast lowering matrix, integer-literal default, full source migration, strict int↔float refusal with `as` fix-it, bool-kind tightening (#537). `number` is an alias for `float` |
 | Bitwise operators (`&`, `\|`, `^`, `<<`, `>>`) | **Shipped** | Slice B; rejected on `double` operands |
 | `Result<T, E>` + `?` operator | **Shipped** | Prelude `Result`/`Error` (#832), typed `?` (`E0810`–`E0812`, #833), pure control-flow desugar (#834); spec §12. `From<E>` coercion and the `E: Error` bound gate on generic constraints |

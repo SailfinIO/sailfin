@@ -98,10 +98,20 @@ Required for all outbound network calls, WebSocket connections, and binding to a
 |-----|-------|
 | `http.get(url)` | HTTP GET request |
 | `http.post(url, body)` | HTTP POST request |
-| `websocket.connect(url)` | Open a WebSocket connection |
-| `websocket.send(conn, msg)` | Send a message on a connection |
-| `websocket.recv(conn)` | Receive a message from a connection |
+| `websocket.connect(url)` | Open a `ws://` client connection (#1876) |
+| `websocket.send(handle, msg)` | Send a masked TEXT/BINARY frame on a connection (#1876); also requires `io` — see note below |
+| `websocket.close(handle)` | Send a CLOSE frame and close the connection (#1876) |
+| `websocket.serve(port)` | Bind/listen/accept a v0 single-connection `ws://` echo server (#1877) |
 | `serve(handler)` | Bind and serve an HTTP handler |
+
+Client-side message *receive* (`websocket.recv`) is not yet implemented — a
+follow-up under epic #1180 (see `docs/status.md`).
+
+`websocket.send(handle, msg)` needs `![io, net]`, not `![net]` alone: any
+`.send(...)` member call, regardless of receiver, trips the effect checker's
+conservative receiver-agnostic channel-op rule (shared with `channel.send`),
+which adds `io` on top of the registry's `net` requirement for
+`websocket.send` itself.
 
 ### `model` effect
 

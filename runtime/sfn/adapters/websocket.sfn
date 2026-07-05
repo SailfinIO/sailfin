@@ -1,18 +1,18 @@
 // runtime/sfn/adapters/websocket.sfn
 //
-// First-wave Sailfin-native RFC 6455 `ws://` CLIENT adapter (#1876).
-// Mirrors the socket/pointer idioms of `runtime/sfn/adapters/http.sfn`
-// (TCP connect, DNS resolution, socket-timeout arming) and the
-// `_serve_`-prefix collision-avoidance convention of
-// `runtime/sfn/concurrency/serve.sfn`: the native backend gives
-// file-local runtime helpers external linkage, so every helper here
-// carries a `_ws_` prefix to avoid a duplicate-symbol link error
-// against `http.sfn`'s identically-shaped helpers.
+// Sailfin-native RFC 6455 `ws://` adapter: a first-wave CLIENT half
+// (#1876) plus a v0 echo SERVER half (#1877). Mirrors the socket/pointer
+// idioms of `runtime/sfn/adapters/http.sfn` (TCP connect, DNS resolution,
+// socket-timeout arming) and the `_serve_`-prefix collision-avoidance
+// convention of `runtime/sfn/concurrency/serve.sfn`: the native backend
+// gives file-local runtime helpers external linkage, so every helper here
+// carries a `_ws_` prefix to avoid a duplicate-symbol link error against
+// `http.sfn`'s identically-shaped helpers.
 //
-// Scope: `ws://` only (no TLS/`wss://`), client-side only (connect,
-// send a single masked TEXT frame, close). No fragmentation, no
-// ping/pong, no receive-loop — the minimal handshake + framed send
-// needed to talk to a websocket server from Sailfin code.
+// Scope: `ws://` only (no TLS/`wss://`). Client: connect, send a single
+// masked TEXT frame, close. Server: bind/listen/accept, one connection at
+// a time, echo TEXT/BINARY frames back unmasked, reply to CLOSE. Neither
+// half implements fragmentation or ping/pong.
 //
 // ABI. `compiler/src/llvm/runtime_helpers.sfn` points the websocket
 // registry rows at the exports below (owned by the orchestrator, not
@@ -20,6 +20,7 @@
 //   - `websocket.connect(url)`        -> `sfn_websocket_connect` (i8*) -> i8*
 //   - `websocket.send(handle, msg)`   -> `sfn_websocket_send`    (i8*, i8*) -> i8*
 //   - `websocket.close(handle)`       -> `sfn_websocket_close`   (i8*) -> i8*
+//   - `websocket.serve(port)`         -> `sfn_websocket_serve`   (i32) -> void
 //
 // The handle is a `malloc(16)` cell: the connected socket fd is stored
 // as an `i32` at offset 0 (one byte at a time, matching http.sfn's
@@ -67,6 +68,14 @@ extern fn recv(sockfd: i32, buf: * u8, len: i64, flags: i32) -> i64;
 extern fn close(fd: i32) -> i32;
 
 extern fn setsockopt(sockfd: i32, level: i32, optname: i32, optval: * u8, optlen: i32) -> i32;
+
+// The server bridge (#1877) needs the three passive-socket calls the client
+// half never uses.
+extern fn bind(sockfd: i32, addr: * u8, addrlen: i32) -> i32;
+
+extern fn listen(sockfd: i32, backlog: i32) -> i32;
+
+extern fn accept(sockfd: i32, addr: * u8, addrlen: * i32) -> i32;
 
 // ── DNS resolution (libc) ─────────────────────────────────────
 extern fn getaddrinfo(node: * u8, service: * u8, hints: * u8, res: * * u8) -> i32;
@@ -778,4 +787,325 @@ fn sfn_websocket_close(handle: * u8) -> * u8 ![net] {
     close(fd);
     free(handle);
     return null;
+}
+
+// ── server bridge (#1877) ──────────────────────────────────────
+// `_ws_srv_set_reuseaddr(fd)` — arm SO_REUSEADDR on the listening socket
+// before `bind` so the server can rebind its port immediately after a
+// restart instead of failing with `EADDRINUSE` while the prior socket
+// lingers in `TIME_WAIT`. Direct copy of
+// `serve.sfn::_serve_set_reuseaddr`'s dual-platform constants:
+//   - Linux:     SOL_SOCKET = 1,     SO_REUSEADDR = 2.
+//   - macOS/BSD: SOL_SOCKET = 65535, SO_REUSEADDR = 4.
+fn _ws_srv_set_reuseaddr(fd: i32) -> void {
+    let optval: * u8 = malloc(4 as usize);
+    if optval as i64 == 0 { return; }
+    memset(optval, 0, 4 as usize);
+    memset(_ws_ptr_off(optval, 0), 1, 1 as usize);
+    setsockopt(fd, 1, 2, optval, 4);
+    setsockopt(fd, 65535, 4, optval, 4);
+    free(optval);
+}
+
+// `_ws_srv_bind_listen(port)` — build an IPv4 `sockaddr_in` (dual
+// Linux/macOS layout, matching `_ws_connect_tcp`'s client-side attempt
+// loop), bind, and listen. Returns the listening fd, or -1 on any
+// failure. Direct copy of `serve.sfn::_serve_bind_listen`.
+fn _ws_srv_bind_listen(port: i64) -> i32 {
+    let mut attempt: i64 = 0;
+    loop {
+        if attempt >= 2 { break; }
+        let fd: i32 = socket(2, 1, 0);
+        if fd < 0 { return 0 - 1; }
+        _ws_srv_set_reuseaddr(fd);
+        let addr: * u8 = malloc(16 as usize);
+        if addr as i64 == 0 {
+            close(fd);
+            return 0 - 1;
+        }
+        memset(addr, 0, 16 as usize);
+        if attempt == 0 {
+            // Linux: u16 sin_family at offset 0.
+            memset(_ws_ptr_off(addr, 0), 2, 1 as usize);
+        } else {
+            // macOS/BSD: u8 sin_len at 0, u8 sin_family at 1.
+            memset(_ws_ptr_off(addr, 0), 16, 1 as usize);
+            memset(_ws_ptr_off(addr, 1), 2, 1 as usize);
+        }
+        // sin_port (network byte order = big-endian).
+        memset(_ws_ptr_off(addr, 2), ((port >> 8) & 255) as i32, 1 as usize);
+        memset(_ws_ptr_off(addr, 3), (port & 255) as i32, 1 as usize);
+        // sin_addr stays zero (INADDR_ANY) at offset 4..8.
+        let rc: i32 = bind(fd, addr, 16);
+        free(addr);
+        if rc == 0 {
+            if listen(fd, 128) == 0 { return fd; }
+            close(fd);
+            return 0 - 1;
+        }
+        close(fd);
+        attempt = attempt + 1;
+    }
+    return 0 - 1;
+}
+
+// `_ws_recv_exact(fd, buf, n)` — loop `recv` until exactly `n` bytes have
+// landed in `buf`. Returns false on a short read, error, or EOF (any
+// `recv` returning <= 0) before `n` bytes are collected.
+fn _ws_recv_exact(fd: i32, buf: * u8, n: i64) -> bool ![net] {
+    let mut got: i64 = 0;
+    loop {
+        if got >= n { break; }
+        let r: i64 = recv(fd, _ws_ptr_off(buf, got), n - got, 0);
+        if r <= 0 { return false; }
+        got = got + r;
+    }
+    return true;
+}
+
+// `_ws_server_frame_send(fd, opcode, payload, payload_len)` — assemble
+// and send an UNMASKED RFC 6455 server frame (FIN=1; server→client MUST
+// NOT mask). Structurally `_ws_frame_send`'s counterpart minus the
+// masking key and XOR step. Returns false on OOM or a send failure.
+fn _ws_server_frame_send(fd: i32, opcode: i64, payload: * u8, payload_len: i64) -> bool ![net] {
+    let byte0: i64 = 128 | (opcode & 15);
+    let mut header_len: i64 = 2;
+    if payload_len >= 126 && payload_len <= 65535 { header_len = 4; } else {
+        if payload_len > 65535 { header_len = 10; }
+    }
+    let total: i64 = header_len + payload_len;
+    let out: * u8 = malloc(total as usize);
+    if out as i64 == 0 { return false; }
+    memset(_ws_ptr_off(out, 0), byte0 as i32, 1 as usize);
+    if payload_len < 126 {
+        memset(_ws_ptr_off(out, 1), payload_len as i32, 1 as usize);
+    } else {
+        if payload_len <= 65535 {
+            memset(_ws_ptr_off(out, 1), 126, 1 as usize);
+            memset(_ws_ptr_off(out, 2), ((payload_len >> 8) & 255) as i32, 1 as usize);
+            memset(_ws_ptr_off(out, 3), (payload_len & 255) as i32, 1 as usize);
+        } else {
+            memset(_ws_ptr_off(out, 1), 127, 1 as usize);
+            let mut k: i64 = 0;
+            loop {
+                if k >= 8 { break; }
+                let shift: i64 = 8 * (7 - k);
+                memset(_ws_ptr_off(out, 2 + k), ((payload_len >> shift) & 255) as i32, 1 as usize);
+                k = k + 1;
+            }
+        }
+    }
+    if payload as i64 != 0 && payload_len > 0 {
+        memcpy(_ws_ptr_off(out, header_len), payload, payload_len as usize);
+    }
+    let ok: bool = _ws_send_all(fd, out, total);
+    free(out);
+    return ok;
+}
+
+// `_ws_frame_read(fd, out_opcode, out_payload_slot, out_len_slot)` —
+// read exactly one CLIENT frame and unmask it. Writes the opcode, the
+// `i64` bit-pattern of a freshly `malloc`'d NUL-terminated payload
+// buffer (the caller casts back with `as * u8` and owns/frees it — the
+// same slot-write idiom as `_ws_parse_url`), and the payload length
+// through the three out-params. Returns false on a protocol error
+// (an unmasked "client" frame) or any `recv` failure.
+fn _ws_frame_read(fd: i32, out_opcode: * i64, out_payload_slot: * i64, out_len_slot: * i64) -> bool ![net] {
+    // malloc(12), not 8: the `len7 == 127` path fills 8 content bytes and
+    // reads them with `_ws_byte_at`, whose 4-byte load at offset 7 touches
+    // bytes 7..10 — so 8 content + 4 tail-load slack, matching this module's
+    // content+4 over-allocation invariant (the 2-byte header read needs less,
+    // but the buffer is reused for the widest read).
+    let hdr: * u8 = malloc(12 as usize);
+    if hdr as i64 == 0 { return false; }
+    if !_ws_recv_exact(fd, hdr, 2) {
+        free(hdr);
+        return false;
+    }
+    let byte0: i64 = _ws_byte_at(hdr, 0);
+    let byte1: i64 = _ws_byte_at(hdr, 1);
+    let opcode: i64 = byte0 & 15;
+    if (byte1 & 128) == 0 {
+        // RFC 6455: client-to-server frames MUST be masked.
+        free(hdr);
+        return false;
+    }
+    let len7: i64 = byte1 & 127;
+    let mut len: i64 = len7;
+    if len7 == 126 {
+        if !_ws_recv_exact(fd, hdr, 2) {
+            free(hdr);
+            return false;
+        }
+        len = (_ws_byte_at(hdr, 0) << 8) | _ws_byte_at(hdr, 1);
+    } else {
+        if len7 == 127 {
+            if !_ws_recv_exact(fd, hdr, 8) {
+                free(hdr);
+                return false;
+            }
+            let mut v: i64 = 0;
+            let mut k: i64 = 0;
+            loop {
+                if k >= 8 { break; }
+                v = (v << 8) | _ws_byte_at(hdr, k);
+                k = k + 1;
+            }
+            len = v;
+        }
+    }
+    free(hdr);
+
+    // malloc(8), not 4: `_ws_byte_at`'s 4-byte tail load at key[3] needs the
+    // slack, matching `_ws_frame_send`'s identical over-allocation.
+    let key: * u8 = malloc(8 as usize);
+    if key as i64 == 0 { return false; }
+    if !_ws_recv_exact(fd, key, 4) {
+        free(key);
+        return false;
+    }
+
+    // +4, not +1: the NUL terminator needs the same `_ws_byte_at` tail-load
+    // slack every strdup'd buffer in this module carries.
+    let payload: * u8 = malloc((len + 4) as usize);
+    if payload as i64 == 0 {
+        free(key);
+        return false;
+    }
+    if len > 0 {
+        if !_ws_recv_exact(fd, payload, len) {
+            free(key);
+            free(payload);
+            return false;
+        }
+    }
+    let mut i: i64 = 0;
+    loop {
+        if i >= len { break; }
+        let mb: i64 = _ws_byte_at(key, i & 3);
+        let pb: i64 = _ws_byte_at(payload, i);
+        memset(_ws_ptr_off(payload, i), (pb ^ mb) as i32, 1 as usize);
+        i = i + 1;
+    }
+    memset(_ws_ptr_off(payload, len), 0, 1 as usize);
+    free(key);
+
+    atomic_store(out_opcode, opcode);
+    atomic_store(out_payload_slot, payload as i64);
+    atomic_store(out_len_slot, len);
+    return true;
+}
+
+// `_ws_srv_handshake(fd)` — read the client's HTTP GET upgrade request
+// (a single bounded `recv`, the same v0 loopback scope
+// `_ws_recv_some` documents) and reply with the RFC 6455 `101`
+// response. Returns false on a malformed/missing
+// `Sec-WebSocket-Key` header or a recv/send failure.
+fn _ws_srv_handshake(fd: i32) -> bool ![net] {
+    let req_cap: i64 = 2048;
+    let buf: * u8 = malloc((req_cap + 4) as usize);
+    if buf as i64 == 0 { return false; }
+    let n: i64 = _ws_recv_some(fd, buf, req_cap);
+    if n <= 0 {
+        free(buf);
+        return false;
+    }
+    memset(_ws_ptr_off(buf, n), 0, 1 as usize);
+
+    let needle: string = "sec-websocket-key:";
+    let nlen: i64 = strlen(needle as * u8) as i64;
+    let hit: i64 = _ws_ci_find(buf, n, needle as * u8, nlen);
+    if hit < 0 {
+        free(buf);
+        return false;
+    }
+    let mut cursor: i64 = hit + nlen;
+    loop {
+        if _ws_byte_at(buf, cursor) != 32 { break; }
+        cursor = cursor + 1;
+    }
+    let key: * u8 = malloc(64 as usize);
+    if key as i64 == 0 {
+        free(buf);
+        return false;
+    }
+    let mut klen: i64 = 0;
+    loop {
+        if klen >= 63 { break; }
+        let b: i64 = _ws_byte_at(buf, cursor + klen);
+        if b == 0 || b == 13 || b == 10 { break; }
+        memset(_ws_ptr_off(key, klen), b as i32, 1 as usize);
+        klen = klen + 1;
+    }
+    memset(_ws_ptr_off(key, klen), 0, 1 as usize);
+    free(buf);
+
+    let accept_val: * u8 = malloc(29 as usize);
+    if accept_val as i64 == 0 {
+        free(key);
+        return false;
+    }
+    _ws_sec_accept(key, accept_val);
+    free(key);
+
+    let status: string = "HTTP/1.1 101 Switching Protocols\r\nUpgrade: websocket\r\nConnection: Upgrade\r\nSec-WebSocket-Accept: ";
+    let tail: string = "\r\n\r\n";
+    let total: i64 = (strlen(status as * u8) as i64) + (strlen(accept_val) as i64)
+        + (strlen(tail as * u8) as i64);
+    let resp: * u8 = malloc((total + 1) as usize);
+    if resp as i64 == 0 {
+        free(accept_val);
+        return false;
+    }
+    let mut off: i64 = 0;
+    off = _ws_append(resp, off, status as * u8);
+    off = _ws_append(resp, off, accept_val);
+    off = _ws_append(resp, off, tail as * u8);
+    memset(_ws_ptr_off(resp, off), 0, 1 as usize);
+    free(accept_val);
+
+    let ok: bool = _ws_send_all(fd, resp, off);
+    free(resp);
+    return ok;
+}
+
+// `sfn_websocket_serve(port)` — a v0 echo `ws://` server. Binds and
+// listens on `port`, then blocks forever accepting one connection at a
+// time (single-client-at-a-time — no pool dispatch; fanning connections
+// out across a worker pool is a follow-up under epic #1180). Each
+// accepted connection completes the RFC 6455 handshake, then loops
+// reading single-frame (FIN=1; fragmentation is unsupported) client
+// frames and echoing TEXT/BINARY payloads back unmasked; a CLOSE frame
+// gets an unmasked CLOSE reply before the connection closes. PING/PONG
+// and any other opcode are silently drained (no ping/pong handling yet,
+// #1877). The accept loop only exits on an `accept` error.
+fn sfn_websocket_serve(port: i32) -> void ![net] {
+    let listen_fd: i32 = _ws_srv_bind_listen(port as i64);
+    if listen_fd < 0 { return; }
+    loop {
+        let fd: i32 = accept(listen_fd, null, null);
+        if fd < 0 { break; }
+        _ws_set_socket_timeouts(fd);
+        if !_ws_srv_handshake(fd) {
+            close(fd);
+            continue;
+        }
+        loop {
+            let mut opcode: i64 = 0;
+            let mut payload_addr: i64 = 0;
+            let mut len: i64 = 0;
+            if !_ws_frame_read(fd, & opcode, & payload_addr, & len) { break; }
+            if opcode == 8 {
+                _ws_server_frame_send(fd, 8, null, 0);
+                free(payload_addr as * u8);
+                break;
+            }
+            if opcode == 1 || opcode == 2 {
+                _ws_server_frame_send(fd, opcode, payload_addr as * u8, len);
+                free(payload_addr as * u8);
+            } else { free(payload_addr as * u8); }
+        }
+        close(fd);
+    }
+    close(listen_fd);
 }

@@ -740,8 +740,68 @@ The following HTTP features are planned for a future release:
 - Timeout and retry configuration
 - `http.put`, `http.delete`, `http.patch`
 - Streaming response bodies
-- `websocket.connect` for WebSocket support
 - TLS, per-request allocation cleanup, and a typed routing layer (sfn/http Waves 3+)
+
+---
+
+## `websocket` module
+
+The `websocket` module provides a Sailfin-native RFC 6455 `ws://` client and a v0 echo server, imported as `import { websocket } from "http";`. The module is bound from `runtime/sfn/adapters/websocket.sfn` and, as of #1876 (client) and #1877 (server), lowers to real `sfn_websocket_*` runtime symbols — not the `sfn_websocket_unbridged` metadata-only sentinel these calls previously carried. There is no `WebSocket` struct type — a connection is an opaque handle (a raw pointer under the hood); treat it as an unannotated value threaded between calls.
+
+---
+
+#### `websocket.connect(url: string) -> <handle> ![net]`
+
+Parse `url` (`ws://host[:port][/path]`), open a TCP connection, and perform the RFC 6455 client handshake. Returns an opaque connection handle, or a null-equivalent handle on failure (DNS/connect/handshake error).
+
+```sfn
+fn open_conn(url: string) ![net] {
+    let conn = websocket.connect(url);
+}
+```
+
+---
+
+#### `websocket.send(handle, msg: string) -> <handle> ![io, net]`
+
+Send `msg` as a single masked TEXT frame over `handle`'s connection (client → server frames must be masked per RFC 6455). Returns the handle unchanged on success. **Requires `![io, net]`, not just `![net]`:** any `.send(...)` member call — regardless of receiver — trips the effect checker's conservative, receiver-agnostic channel-op rule (shared with `channel.send`), which adds `io` on top of the registry's `net` requirement for `websocket.send` itself.
+
+```sfn
+fn round_trip(url: string) ![io, net] {
+    let conn = websocket.connect(url);
+    websocket.send(conn, "hello");
+    websocket.close(conn);
+}
+```
+
+---
+
+#### `websocket.close(handle) -> <handle> ![net]`
+
+Send a masked CLOSE frame, close the underlying socket, and free the handle. Safe to call on an already-failed handle.
+
+---
+
+#### `websocket.serve(port: int) ![net]`
+
+Bind and listen on `port`, then block forever, accepting **one connection at a time**. Each accepted connection completes the RFC 6455 server handshake and then echoes TEXT/BINARY frames back **unmasked** (server → client frames must not be masked) until the client sends CLOSE (answered with an unmasked CLOSE reply) or the connection drops.
+
+```sfn
+fn run_echo_server() ![net] {
+    websocket.serve(8080);
+}
+```
+
+> **Convention:** like other registry-driven member-call runtime bridges, the argument is a bare scalar — `websocket.serve(8080)` — not an object literal. `websocket.serve({ port: 8080 })` is unreachable; the bridge marshals scalar arguments only, not struct literals.
+
+**v0 scope.** Shipped: the client half (connect / one masked TEXT-or-BINARY send / close) and a single-connection blocking echo server (bind/listen/accept, RFC 6455 handshake, unmasked TEXT/BINARY echo, CLOSE reply). Not yet shipped (epic #1180 follow-ups):
+
+- Concurrency-pool dispatch, so the server can hold more than one connection at a time (#1923)
+- Ping/pong, frame fragmentation, and close-code completeness (#1924)
+- `wss://` / TLS (#1925)
+- A richer per-client handler API — `server.clients()`, `onMessage`, per-client send (#1926)
+- Typed message channels and backpressure (#1927)
+- Client-side receive
 
 ---
 
