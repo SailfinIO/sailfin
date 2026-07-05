@@ -1,10 +1,10 @@
 ---
 sfep: 0038
 title: Generic Type Parameter Constraints and Monomorphization
-status: Accepted
+status: Implemented
 type: language
 created: 2026-07-01
-updated: 2026-07-03
+updated: 2026-07-05
 author: "agent:compiler-architect; human review"
 tracking: "#1867, #1868, #1869, #1870, #1871, #1872"
 supersedes:
@@ -456,23 +456,30 @@ implementation.
 
 - [x] **Parses** — already true (`parse_type_parameter_clause`); the only add is
   `+`-splitting the bound, an additive parser refinement.
-- [ ] **Type-checks / effect-checks** — the core deliverable: `E0820`–`E0822`
-  in `typecheck_types.sfn`. No effect-check change (§4).
-- [ ] **Emits valid `.sfn-asm`** — via monomorphization emitting specialized
+- [x] **Type-checks / effect-checks** — `E0820`–`E0822` in `typecheck_types.sfn`
+  (declaration-time validation #1868; instantiation-site satisfaction #1870). No
+  effect-check change (§4).
+- [x] **Emits valid `.sfn-asm`** — via monomorphization emitting specialized
   monomorphic declarations; no new opcodes.
-- [ ] **Lowers to LLVM IR** — new `llvm/monomorphize.sfn` generalizing the #830
-  substitution helpers; specialized declarations lower through the unchanged
-  backend.
-- [ ] **Regression coverage** — §8.
-- [ ] **Self-hosts** — additive, non-self-referential first (§5); compiler
-  source opts in only after a seed cut.
-- [ ] **`sfn fmt --check` clean** — on every touched `.sfn`.
-- [ ] **Documented** — `docs/status.md` lines 191–193 flip from Planned/Partial;
-  `reference/preview/generics.md` (the `graduates-to` target).
+- [x] **Lowers to LLVM IR** — `llvm/monomorphize.sfn` generalizing the #830
+  substitution helpers; generic functions (#1869), generic structs with inline
+  field layout (#1871), and bound interface-method resolution (#1872) lower
+  through the unchanged backend.
+- [x] **Regression coverage** — §8.
+- [x] **Self-hosts** — additive, non-self-referential (§5); all sub-tracks
+  merged to `main` under the pinned seed. Downstream-consumer enablement gates
+  on the cadence seed cut carrying these lowering slices.
+- [x] **`sfn fmt --check` clean** — on every touched `.sfn`.
+- [x] **Documented** — `docs/status.md` generics-constraints row updated;
+  `reference/preview/generics.md` (the `graduates-to` target) written.
 
-Remains `Accepted`, not `Implemented`, until enforcement **and**
-monomorphization ship end-to-end and self-host — enforcement alone would be
-"parsed and checked but not lowered," which does not unblock the consumers.
+Shipped end-to-end for the v1 scope (monomorphize-only, pointer-width `T`):
+enforcement (`E0820`–`E0822`) **and** monomorphization (functions, structs,
+bound method calls) both land and self-host. Arbitrary-width by-value aggregate
+`T`, generic collections, and the dictionary-passing fallback remain deferred
+(§3.3, §6) and are tracked as separate follow-ups; the cadence seed cut that
+unblocks downstream consumers (#1866, SFEP-0028, generic collections,
+SFEP-0012) is queued per `.claude/rules/seed-dependency.md`.
 
 ## 8. Test plan
 
