@@ -1,0 +1,101 @@
+// Regression e2e for #1914: on macOS the build driver must pass an
+// explicitly-probed `-isysroot <sdk>` / `-L<sdk>/usr/lib` to `clang` so the
+// link resolves the platform libraries (`libSystem`, `libm`, `libpthread`)
+// on its own — independent of the ambient SDK environment (`SDKROOT` /
+// `LIBRARY_PATH`) or which `clang` is first on `PATH`. Before the fix the
+// nested link leaned on that ambient env; a subprocess build that inherited
+// a stripped env (the parallel test pool forwards only PATH/HOME/TMPDIR) or
+// a non-Apple `clang` on `PATH` then failed the link (`ld: library
+// 'System'/'m' not found`), which surfaced as non-deterministic macOS-arm64
+// e2e failures because success depended on load-timed SDK re-detection.
+//
+// The discriminator is deterministic on Darwin: the link argv carries
+// `-isysroot` after the fix and not before, and a `![io]` runtime-linking
+// program built under a deliberately stripped env must succeed. On
+// non-Darwin the flags are a no-op, so assert they are absent — guarding
+// against accidentally emitting a macOS `-isysroot` on Linux.
+//
+// Matchers note (#842): `sfn/test`'s `expect_*` matchers are `![pure]` and
+// cannot be called from an `![io]` test; assert on captured text directly.
+import { contains, find } from "sfn/strings";
+
+fn _sfn_bin() -> string ![io] {
+    let configured = env.get("SAILFIN_BIN");
+    if configured.length > 0 { return configured; }
+    return "build/native/sailfin";
+}
+
+fn _scratch_dir() -> string ![io] {
+    let mut dir = env.get("SAILFIN_TEST_SCRATCH");
+    if dir.length == 0 { dir = "/tmp"; }
+    dir = dir + "/sfn-macos-sdk-link";
+    fs.createDirectory(dir, true);
+    return dir;
+}
+
+// Forward `PATH` so `uname` resolves: `run_capture`'s empty env is the
+// *empty* environment (no PATH), under which the `uname` spawn could fail
+// and mis-report the host as non-Darwin (Copilot review, PR #1929).
+fn _is_darwin() -> boolean ![io] {
+    let mut e: string[] = [];
+    let path = env.get("PATH");
+    if path.length > 0 { e.push("PATH=" + path); }
+    let _exit = process.run_capture(["uname", "-s"], e);
+    let out = process.capture_take_stdout();
+    let _err = process.capture_take_stderr();
+    return find(out, "Darwin", 0) >= 0;
+}
+
+// Deliberately minimal: forward only PATH (clang/ld discovery), HOME,
+// TMPDIR, and SAILFIN_TEST_SCRATCH (per-invocation build-cache isolation).
+// `SDKROOT` / `LIBRARY_PATH` are intentionally NOT forwarded — the whole
+// point is that the compiler supplies the SDK itself. `SAILFIN_TRACE_LINK`
+// echoes the resolved clang link argv to stderr.
+fn _stripped_traced_env() -> string[] ![io] {
+    let mut e: string[] = [];
+    let path = env.get("PATH");
+    if path.length > 0 { e.push("PATH=" + path); }
+    let home = env.get("HOME");
+    if home.length > 0 { e.push("HOME=" + home); }
+    let tmpdir = env.get("TMPDIR");
+    if tmpdir.length > 0 { e.push("TMPDIR=" + tmpdir); }
+    let scratch = env.get("SAILFIN_TEST_SCRATCH");
+    if scratch.length > 0 { e.push("SAILFIN_TEST_SCRATCH=" + scratch); }
+    e.push("SAILFIN_TRACE_LINK=1");
+    return e;
+}
+
+// A program that pulls the runtime link libs (`-lm`/`-lpthread`): `parallel`
+// links the concurrency runtime, exercising the exact link that failed.
+fn _write_fixture(dir: string) -> string ![io] {
+    let path = dir + "/prog.sfn";
+    fs.writeFile(path, "fn _w() -> int { return 7; }\n" + "fn main() ![io] {\n"
+        + "    let _h = parallel [\n"
+        + "        fn() -> int { return _w(); },\n"
+        + "    ];\n"
+        + "    print(\"sdk-link-ok\");\n"
+        + "}\n");
+    return path;
+}
+
+test "macos-sdk-link: build carries explicit -isysroot and links under a stripped env (#1914)" ![io] {
+    let dir = _scratch_dir();
+    let main_path = _write_fixture(dir);
+    let bin = dir + "/prog.bin";
+    let exit = process.run_capture([_sfn_bin(), "build", "-o", bin, main_path], _stripped_traced_env());
+    let _out = process.capture_take_stdout();
+    let err = process.capture_take_stderr();
+
+    if _is_darwin() {
+        // The fix: the link argv self-supplies the SDK.
+        assert contains(err, "-isysroot");
+        assert contains(err, "/usr/lib");
+        // Behavioural proof: the runtime-linking build succeeds without any
+        // ambient SDK env — the regression was this link failing.
+        assert exit == 0;
+    } else {
+        // No-op on non-Darwin: a Linux link must not carry a macOS SDK root.
+        assert ! contains(err, "-isysroot");
+        assert exit == 0;
+    }
+}

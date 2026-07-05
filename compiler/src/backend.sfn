@@ -7,7 +7,10 @@
 // clang path is the sole implementation (`LlvmTextBackend`); it
 // reproduces every existing clang invocation byte-for-byte (zero
 // behaviour change — `--check-determinism` must still pass with no
-// rebaseline).
+// rebaseline), with the one deliberate exception that on Darwin the link
+// now self-supplies an explicit `-isysroot`/`-L<sdk>/usr/lib` (see the
+// `_macos_sdk_link_flags` note below, #1914); the Linux invocation is
+// unchanged and the addition is memoized/deterministic per machine.
 //
 // Later codegen/link work plugs in here instead of re-hardcoding LLVM
 // assumptions across the driver: the LLVM C-API binding (#347) lands as
@@ -36,9 +39,13 @@
 // importing this module (and emitting the `LlvmTextBackend` vtable). See
 // that file's header for the seed-lowering reason (#1730).
 import { _llvm_text_assemble_argv } from "./build/clang_argv";
+// `_shell_read_cmd` runs a command and trims its stdout — used by the
+// macOS SDK probe (`uname -s`, `xcrun --show-sdk-path`).
+import { _shell_read_cmd } from "./build/fs";
 // `_env_flag` gives `SAILFIN_TRACE_LINK` the same toggle semantics ("",
-// "0", "false" are off) as the other `SAILFIN_TRACE_*` knobs.
-import { _env_flag } from "./build_flags";
+// "0", "false" are off) as the other `SAILFIN_TRACE_*` knobs;
+// `_get_env_cmd` reads a single env var (the macOS SDK probe below).
+import { _env_flag, _get_env_cmd } from "./build_flags";
 
 // Reserved opaque object-file handle for later backend stages (#347 /
 // #1640 produce these in-process). Stage 0's `LlvmTextBackend` returns
@@ -84,10 +91,71 @@ interface Backend {
     fn link(self, plan: LinkPlan) -> int ![io];
 }
 
+// macOS SDK link flags (#1914). The driver invokes `clang` by bare name
+// and, on Darwin, has historically leaned on the *ambient* environment
+// (`SDKROOT` / `LIBRARY_PATH`) for the linker to locate the platform
+// libraries (`libSystem`, `libm`, `libpthread`). That is fragile: a
+// non-Apple `clang` first on `PATH` (a common Homebrew-LLVM setup) with
+// those vars unset fails the link outright (`ld: library 'System'/'m' not
+// found`), and a subprocess build that inherits a stripped env — e.g. the
+// parallel test pool's per-child env, which forwards only PATH/HOME/TMPDIR
+// — reintroduces the same gap. That gap surfaced as non-deterministic
+// macOS-arm64 e2e failures because whether a nested build's link resolved
+// depended on load-timed SDK re-detection rather than on the source.
+// Passing an explicitly-probed `-isysroot`/`-L<sdk>/usr/lib` makes the
+// link self-sufficient regardless of which clang is on PATH or whether the
+// SDK env is present. Non-Darwin returns [] (no-op); additive only when a
+// real SDK is found, so a working Apple-clang link is byte-unchanged.
+//
+// Probed once and cached (a link may recur per test binary in one process;
+// caching also avoids re-running `xcrun` under load, the very race this
+// closes). Only scalars are memoized — matching the `errno_locator_symbol`
+// lazy-init contract in `llvm/lowering_debug_state.sfn`.
+let mut _macos_sdk_probe_done: boolean = false;
+let mut _macos_sdk_root: string = "";
+
+fn _macos_sdk_link_flags() -> string[] ![io] {
+    if !_macos_sdk_probe_done {
+        _macos_sdk_root = _probe_macos_sdk_root();
+        _macos_sdk_probe_done = true;
+    }
+    if _macos_sdk_root.length == 0 { return []; }
+    return ["-isysroot", _macos_sdk_root, "-L" + _macos_sdk_root + "/usr/lib"];
+}
+
+// Resolve the macOS SDK root, or "" when not on Darwin / none found.
+// Order: `SAILFIN_TARGET_OS` (cross-compile override) then `uname -s` to
+// gate on Darwin; then `SDKROOT` (no subprocess, most stable when set),
+// `xcrun --show-sdk-path`, and the Command Line Tools default. Each SDK
+// candidate must exist on disk before it is trusted, so a stale env var
+// cannot force a bad `-isysroot`.
+fn _probe_macos_sdk_root() -> string ![io] {
+    let mut os: string = _get_env_cmd("SAILFIN_TARGET_OS");
+    if os.length == 0 { os = _shell_read_cmd("uname -s"); }
+    if os != "Darwin" { return ""; }
+    let env_sdk = _get_env_cmd("SDKROOT");
+    if env_sdk.length > 0 {
+        if fs.exists(env_sdk) { return env_sdk; }
+    }
+    let xcrun_sdk = _shell_read_cmd("xcrun --show-sdk-path 2>/dev/null");
+    if xcrun_sdk.length > 0 {
+        if fs.exists(xcrun_sdk) { return xcrun_sdk; }
+    }
+    let clt = "/Library/Developer/CommandLineTools/SDKs/MacOSX.sdk";
+    if fs.exists(clt) { return clt; }
+    return "";
+}
+
 // Build the clang link argv for the `sfn test` layout:
-// `clang -O0 -Wno-override-module -o OUT <test.ll> <dep.ll…> <runtime.o…> <libs…>`.
-fn _llvm_text_link_test_argv(plan: LinkPlan) -> string[] {
+// `clang -O0 -Wno-override-module <sdk_flags…> -o OUT <test.ll> <dep.ll…> <runtime.o…> <libs…>`.
+fn _llvm_text_link_test_argv(plan: LinkPlan, sdk_flags: string[]) -> string[] {
     let mut args: string[] = ["clang", plan.opt_flag, "-Wno-override-module"];
+    let mut si: int = 0;
+    loop {
+        if si >= sdk_flags.length { break; }
+        args.push(sdk_flags[si]);
+        si += 1;
+    }
     args.push("-o");
     args.push(plan.out_path);
     let mut ii: int = 0;
@@ -112,9 +180,15 @@ fn _llvm_text_link_test_argv(plan: LinkPlan) -> string[] {
 }
 
 // Build the clang link argv for the program/build layout:
-// `clang <opt> -Wno-override-module <link_flags…> <runtime.o…> <ir.ll…> -o OUT <libs…>`.
-fn _llvm_text_link_program_argv(plan: LinkPlan) -> string[] {
+// `clang <opt> -Wno-override-module <sdk_flags…> <link_flags…> <runtime.o…> <ir.ll…> -o OUT <libs…>`.
+fn _llvm_text_link_program_argv(plan: LinkPlan, sdk_flags: string[]) -> string[] {
     let mut args: string[] = ["clang", plan.opt_flag, "-Wno-override-module"];
+    let mut si: int = 0;
+    loop {
+        if si >= sdk_flags.length { break; }
+        args.push(sdk_flags[si]);
+        si += 1;
+    }
     let mut fi: int = 0;
     loop {
         if fi >= plan.link_flags.length { break; }
@@ -183,12 +257,13 @@ struct LlvmTextBackend {
     }
 
     fn link(self, plan: LinkPlan) -> int ![io] {
+        let sdk_flags = _macos_sdk_link_flags();
         if plan.test_mode {
-            let test_argv = _llvm_text_link_test_argv(plan);
+            let test_argv = _llvm_text_link_test_argv(plan, sdk_flags);
             _llvm_text_trace_link(test_argv);
             return process.run(test_argv);
         }
-        let program_argv = _llvm_text_link_program_argv(plan);
+        let program_argv = _llvm_text_link_program_argv(plan, sdk_flags);
         _llvm_text_trace_link(program_argv);
         return process.run(program_argv);
     }
