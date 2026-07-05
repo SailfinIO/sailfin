@@ -49,6 +49,7 @@ import {
     Expression,
     FunctionSignature,
     MatchCase,
+    MethodDeclaration,
     ObjectField,
     Parameter,
     Program,
@@ -1187,12 +1188,40 @@ fn _rewrite_statement(ctx: LiftContext, statement: Statement) -> StatementRewrit
             }
         };
     }
-    // StructDeclaration: method bodies could contain lambdas, but
-    // the AST shape for `MethodDeclaration` is awkward to round-trip
-    // through this pure-functional walker. For #686 the acceptance
-    // criteria exercise top-level / function-body lambdas only, so
-    // leaving method-body lambdas in `<lambda>`-placeholder form is
-    // a deliberate no-op. #687 (capturing lambdas) will revisit.
+    if statement.variant == "StructDeclaration" {
+        // Descend into method bodies (SFEP-0042) so a nested `fn` declared in a
+        // method body is hoisted to a top-level function (and its call sites
+        // rewritten), exactly as in a free-function body. Without this the
+        // nested `FunctionDeclaration` survives un-lifted and emits a malformed
+        // function definition inside the method's instruction stream — a green
+        // `sfn check` with a broken build. Rewriting through `_rewrite_block`
+        // also lifts any method-body lambdas (previously left as placeholders).
+        let mut current_ctx: LiftContext = ctx;
+        let mut new_methods: MethodDeclaration[] = [];
+        let mut mi: int = 0;
+        loop {
+            if mi >= statement.methods.length { break; }
+            let method = statement.methods[mi];
+            let body_result = _rewrite_block(current_ctx, method.body);
+            current_ctx = body_result.ctx;
+            new_methods.push(MethodDeclaration {
+                signature: method.signature, body: body_result.block, decorators: method.decorators
+            });
+            mi += 1;
+        }
+        return StatementRewriteResult {
+            ctx: current_ctx,
+            statement: Statement.StructDeclaration {
+                name: statement.name,
+                name_span: statement.name_span,
+                type_parameters: statement.type_parameters,
+                implements_types: statement.implements_types,
+                fields: statement.fields,
+                methods: new_methods,
+                decorators: statement.decorators
+            }
+        };
+    }
     return StatementRewriteResult { ctx: ctx, statement: statement };
 }
 
