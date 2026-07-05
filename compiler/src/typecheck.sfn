@@ -1617,10 +1617,25 @@ fn typecheck_walker_resolves_import(name: string, imports: ImportSymbolTable) ->
 // recursion for lambda bodies (which `check_block` never descends into).
 fn walk_block_expressions(block: Block, ctx: TypeckCtx) -> Diagnostic[] {
     let mut diagnostics: Diagnostic[] = [];
+    // Thread a growing binding scope through the block so a body-local `let`
+    // declared earlier is visible to later statements as a call target (else
+    // it falsely trips E0420, #1921 — the #1917 parameter-scope sibling gap).
+    // A fresh clone + `scope_start` per block confines each nested block's own
+    // `let`s to that block, mirroring `check_block`'s discipline. Variable
+    // registration never dedups (`register_local_symbol` skips the duplicate
+    // check for the `variable` kind), so it yields no diagnostics to surface;
+    // lambda-body E0001 handling is out of this scope.
+    let mut bindings: SymbolEntry[] = clone_bindings(ctx.bindings);
+    let scope_start: int = bindings.length;
     let mut index: int = 0;
     loop {
         if index >= block.statements.length { break; }
-        diagnostics = diagnostics.concat(walk_statement_expressions(block.statements[index], ctx));
+        let statement = block.statements[index];
+        diagnostics = diagnostics.concat(walk_statement_expressions(statement, ctx_with_bindings(ctx, bindings, scope_start)));
+        if statement.variant == "VariableDeclaration" {
+            let registration = register_local_symbol(bindings, statement.name, "variable", statement.span, scope_start);
+            bindings = registration.bindings;
+        }
         index += 1;
     }
     return diagnostics;

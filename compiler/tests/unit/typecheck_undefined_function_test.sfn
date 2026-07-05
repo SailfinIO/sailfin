@@ -147,6 +147,29 @@ test "E0001: duplicate lambda parameter names are still caught (#1917)" ![io] {
 }
 
 // -------------------------------------------------------------------
+// Lambda-body local-binding scope (#1921): a `let` declared earlier in a
+// lambda body is registered into the scope its later statements are walked
+// in, the #1917 parameter-scope sibling gap.
+// -------------------------------------------------------------------
+test "E0420: lambda body local declared earlier resolves as a later callee (#1921)" ![io] {
+    // `g` is a body-local `let` declared before the `return g()` that calls
+    // it; threading the binding scope through the body walk must resolve it.
+    assert _e0420_for("fn main() { let f = fn() -> int { let g = fn() -> int { return 0; }; return g(); }; }") == 0;
+}
+
+test "E0420: genuinely undefined callee inside a lambda body still fires (#1921)" ![io] {
+    // No body-local `let` or parameter named `nope`, so the undefined-callee
+    // check must still fire after the scope-threading change.
+    assert _e0420_for("fn main() { let f = fn() -> int { let g = fn() -> int { return 0; }; return nope(); }; }") == 1;
+}
+
+test "E0420: lambda inner-block local does not leak to the enclosing body (#1921)" ![io] {
+    // `g` is declared only inside an `if` block; it must not resolve as a
+    // call target after the block, so the outer `g()` still trips E0420.
+    assert _e0420_for("fn main() { let f = fn() -> int { if true { let g = fn() -> int { return 0; }; } return g(); }; }") == 1;
+}
+
+// -------------------------------------------------------------------
 // Imports: resolution via the program's own import specifier
 // -------------------------------------------------------------------
 fn _imports_with_helper() -> ImportSymbolTable {
