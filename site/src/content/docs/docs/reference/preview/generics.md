@@ -17,9 +17,9 @@ A type parameter may declare a bound: a `+`-separated list of **interfaces** the
 concrete type argument must implement.
 
 ```sfn
-interface Comparable { fn compare(other: Self) -> int; }   // <0 / 0 / >0
-interface Eq         { fn eq(other: Self) -> bool; }
-interface Hashable   { fn hash() -> int; }
+interface Comparable { fn compare(self, other: Self) -> int; }   // <0 / 0 / >0
+interface Eq         { fn eq(self, other: Self) -> boolean; }
+interface Hashable   { fn hash(self) -> int; }
 
 fn sort<T: Comparable>(items: T[]) -> T[] ![pure] { ... }
 struct Map<K: Hashable + Eq, V> { ... }          // conjunctive: both required
@@ -27,10 +27,13 @@ struct Map<K: Hashable + Eq, V> { ... }          // conjunctive: both required
 
 A bound is checked, not decorative. Enforcement happens in two places:
 
-- **Declaration time.** A bound must name a real interface of the correct
-  arity. Naming a struct, enum, or unknown type raises **`E0821`**; a
-  type-argument arity mismatch against a generic function raises **`E0822`**
-  (#1868).
+- **Declaration time.** When a bound base name resolves to a **known struct or
+  enum** (not an interface), it raises **`E0821`** ("bound is not an
+  interface"). An *unresolved* name is deliberately left unflagged — it may be a
+  prelude/imported interface not visible in a single-file check, so flagging it
+  would produce false positives on std-library bounds. When a bound resolves to
+  a **generic interface**, a type-argument arity mismatch on that bound raises
+  **`E0822`** (#1868).
 - **Instantiation site.** Every concrete type argument must implement each
   declared bound, verified against the same struct-implements-interface
   conformance machinery used for `implements` clauses. A type that does not
@@ -93,12 +96,15 @@ SFEP-0038 introduces the minimal interface set the immediate consumers name.
 Each is an ordinary `interface` — no new language surface:
 
 ```sfn
-interface Eq         { fn eq(other: Self) -> bool; }
-interface Comparable { fn compare(other: Self) -> int; }
-interface Hashable   { fn hash() -> int; }
-interface Display    { fn to_string() -> string; }
+interface Eq         { fn eq(self, other: Self) -> boolean; }
+interface Comparable { fn compare(self, other: Self) -> int; }
+interface Hashable   { fn hash(self) -> int; }
+interface Display    { fn to_string(self) -> string; }
 interface From<T>    { fn from(value: T) -> Self; }
 ```
+
+(These live in `runtime/prelude.sfn`. `From<T>.from` is a constructor, so it
+takes no `self`.)
 
 ## v1 scope and what remains in preview
 
@@ -115,7 +121,7 @@ Still in preview, gated on this foundation:
   gates enum payloads.
 - **Generic collections** — real `Array<T>` / `HashMap<K: Hashable + Eq, V>` /
   `Set<T>`. `StrMap` remains the concrete-now string→string bridge until these
-  land. See `draft-generic-collections.md`.
+  land. See [`draft-generic-collections.md`](https://github.com/SailfinIO/sailfin/blob/main/docs/proposals/draft-generic-collections.md).
 - **Typed higher-order array functions** — `float[]` / `string[]` / struct-array
   `.map` / `.filter` / `.reduce` (SFEP-0028); today only pointer-width `int[]`
   lowers.
@@ -126,7 +132,7 @@ Still in preview, gated on this foundation:
 
 ## References
 
-- **Design:** SFEP-0038 (`docs/proposals/0038-generic-constraints.md`).
+- **Design:** [SFEP-0038](https://github.com/SailfinIO/sailfin/blob/main/docs/proposals/0038-generic-constraints.md) (`docs/proposals/0038-generic-constraints.md`).
 - **Sub-tracks:** bound validation #1868 (`E0821`/`E0822`), function
   monomorphization #1869, instantiation-site satisfaction #1870 (`E0820`),
   struct monomorphization #1871, bound interface-method resolution #1872.

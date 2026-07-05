@@ -454,8 +454,10 @@ implementation.
 
 ## 7. Stage1 readiness mapping
 
-- [x] **Parses** — already true (`parse_type_parameter_clause`); the only add is
-  `+`-splitting the bound, an additive parser refinement.
+- [x] **Parses** — already true: `parse_type_parameter_clause` captures the whole
+  bound text unchanged. The `+`-split into individual `BoundList` entries happens
+  in typecheck (`check_type_parameters` / `check_single_bound` in
+  `typecheck_types.sfn`), not the parser — so no parser change was needed.
 - [x] **Type-checks / effect-checks** — `E0820`–`E0822` in `typecheck_types.sfn`
   (declaration-time validation #1868; instantiation-site satisfaction #1870). No
   effect-check change (§4).
