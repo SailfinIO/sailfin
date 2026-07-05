@@ -691,6 +691,8 @@ The following filesystem helpers are planned for a future release and are not av
 
 The `http` module provides outbound HTTP client functionality. All operations require the `![net]` effect. The module is bound from `runtime.http` in the prelude.
 
+`https://` URLs are supported transparently (SFEP-0036): the client TLS-wraps the socket, verifies the server's certificate chain **and** hostname against the system CA trust store, and defaults to port 443. Verification is **on by default and fail-closed** — a certificate that does not validate closes the connection rather than being parsed and ignored. The trust store is discovered from OpenSSL's default verify paths plus the `/etc/ssl/certs/ca-certificates.crt` fallback; set `SAILFIN_TLS_CAFILE` to add an extra CA bundle (e.g. a private CA in tests). See the [OpenSSL build-host dependency runbook](https://github.com/SailfinIO/sailfin/blob/main/docs/runbooks/openssl-build-dependency.md) for the `libssl-dev` link precondition.
+
 ---
 
 #### `http.get(url: string) -> Response ![net]`
@@ -699,7 +701,9 @@ Perform an HTTP GET request to `url` and return a `Response`. Blocks until the r
 
 ```sfn
 fn fetch_json(url: string) -> string ![net] {
-    let response = http.get(url);
+    // http:// and https:// both work; TLS is transparent for https://,
+    // with certificate-chain + hostname verification enforced by default.
+    let response = http.get("https://example.com/status");
     return response.body;
 }
 ```
@@ -740,7 +744,9 @@ The following HTTP features are planned for a future release:
 - Timeout and retry configuration
 - `http.put`, `http.delete`, `http.patch`
 - Streaming response bodies
-- TLS, per-request allocation cleanup, and a typed routing layer (sfn/http Waves 3+)
+- Per-request allocation cleanup, and a typed routing layer (sfn/http Waves 3+)
+
+> TLS shipped for this client (SFEP-0036): `https://` URLs are handled transparently with certificate verification — see the note under [`http` module](#http-module). (The typed `sfn/http` `fetch`/keep-alive client remains HTTP-only for now.)
 
 ---
 
@@ -894,6 +900,34 @@ fn main() ![net, io] {
 }
 ```
 
+##### TLS termination (`serve` over HTTPS)
+
+The runtime terminates inbound TLS in the accept loop (SFEP-0036, #1783): it wraps each accepted connection in a server-side handshake using a cert + key loaded once at startup, then runs the same recv → dispatch → send cycle over TLS. If the cert or key fails to load the server never binds — there is **no plaintext downgrade**.
+
+The typed capsule `serve` above is plaintext-only; the TLS entry is the runtime symbol `sfn_serve_tls`, which today is called by declaring it as an `extern fn` (no capsule wrapper yet). Its handler ABI is the raw moved-`OwnedBuf` form (`fn (OwnedBuf) -> OwnedBuf`), not the typed `fn (Request) -> Response`:
+
+```sfn
+extern fn sfn_serve_tls(handler: * u8, port: i32, cert: * u8, key: * u8) -> void;
+
+struct OwnedBuf { ptr_addr: i64; len: i64; cap: i64; arena_addr: i64; }
+
+fn handle(req: OwnedBuf) -> OwnedBuf {
+    // ... build and return a pre-framed HTTP/1.1 response OwnedBuf ...
+}
+
+fn main() -> int ![net, io] {
+    sfn_serve_tls(
+        handle as * u8,
+        8443,
+        "/etc/sailfin/cert.pem" as * u8,
+        "/etc/sailfin/key.pem" as * u8,
+    );
+    return 0;
+}
+```
+
+Out of scope for 1.0: mTLS / client-certificate request (the server terminates TLS but does not request client certs). Both the outbound `https://` client and this inbound path require OpenSSL on the link host — see the [OpenSSL build-host dependency runbook](https://github.com/SailfinIO/sailfin/blob/main/docs/runbooks/openssl-build-dependency.md).
+
 ---
 
 ### Response builders
@@ -1020,7 +1054,7 @@ let phrase = reason_phrase(418); // "Status"
 
 ### Client
 
-The following wrappers call the underlying runtime HTTP client and return the response **body string** directly (distinct from the `runtime.http` client which returns a `Response` struct with both `body` and `status`).
+The following wrappers call the underlying runtime HTTP client and return the response **body string** directly (distinct from the `runtime.http` client which returns a `Response` struct with both `body` and `status`). Like `http.get`/`http.post`, `get` and `post` support `https://` transparently with certificate verification (SFEP-0036); the typed `fetch` client below does **not** (see its limits).
 
 #### `get(url: string) -> string ![net]`
 
@@ -1101,7 +1135,7 @@ v0 limit: the response to each `_send` call must carry a `Content-Length` header
 
 ### v0 limitations
 
-- **HTTP/1.1 only, blocking accept, no TLS.** Keep-alive IS honored: the server reuses a connection for back-to-back requests unless the client sends `Connection: close` (#1711). HTTP pipelining (multiple in-flight requests on one connection) remains out of scope.
+- **HTTP/1.1 only, blocking accept.** The typed capsule `serve` is plaintext; inbound TLS termination is available via the runtime `sfn_serve_tls` entry (see [TLS termination](#tls-termination-serve-over-https) above), enforced end-to-end (SFEP-0036) but without a typed capsule wrapper yet. Keep-alive IS honored: the server reuses a connection for back-to-back requests unless the client sends `Connection: close` (#1711). HTTP pipelining (multiple in-flight requests on one connection) remains out of scope.
 - **`Content-Length` bodies only** — POST/PUT request bodies are drained via `Content-Length` (capped at 1 MiB; over-cap requests get a `500`), so `Request.body` is reliable. Chunked transfer-encoding is not decoded (post-1.0).
 - **`host` binding not enforced** — the server always binds `INADDR_ANY` regardless of `ServerConfig.host`.
 - **Per-request allocations are not freed** — a known leak; acceptable for short-lived or v0 servers but not production long-running processes.
