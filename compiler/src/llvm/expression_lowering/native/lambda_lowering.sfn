@@ -80,12 +80,23 @@ import {
 // is lifted, so the synthesised `sfn_lambda_<N>` carries the right
 // parameter/return types (an untyped lambda otherwise lowers with the
 // wrong LLVM width and segfaults). See `lambda_param_inference.sfn`.
+// A single nested-fn source-name → mangled-symbol rename (SFEP-0042). The
+// active list on `LiftContext` is block-scoped: `_rewrite_block` extends it
+// with the block's own nested fns and restores the incoming list on return, so
+// a `Call` to a nested fn is rewritten to its lifted symbol only within the
+// enclosing block (and sub-blocks), never outside it.
+struct NestedRename {
+    from: string;
+    to: string;
+}
+
 struct LiftContext {
     counter: int;
     lifted: Statement[];
     records: LambdaCaptureRecord[];
     signatures: FnSigEntry[];
     bindings: BindingEntry[];
+    renames: NestedRename[];
 }
 
 struct LiftResult {
@@ -129,7 +140,8 @@ fn lift_non_capturing_lambdas(program: Program) -> LiftResult {
         lifted: [],
         records: records,
         signatures: signatures,
-        bindings: bindings
+        bindings: bindings,
+        renames: []
     };
 
     let mut rewritten_statements: Statement[] = [];
@@ -229,6 +241,27 @@ fn closure_pair_fatal_mutable_marker(lambda_id: int, capture_name: string) -> st
 // runs — drives the LLVM `define @sfn_lambda_<N>` symbol.
 fn lifted_function_name(lambda_id: int) -> string {
     return "sfn_lambda_" + number_to_string(lambda_id);
+}
+
+// Symbol name for a lifted nested / local function (SFEP-0042). The source
+// name is embedded for readable IR; the module-monotonic `<id>` (drawn from
+// the same `LiftContext.counter` as lambdas) is the uniqueness guarantee, so
+// two different outer functions each declaring `fn helper()` lift to distinct
+// symbols. `_` disambiguates the source name from the id suffix.
+fn nested_lifted_function_name(source_name: string, id: int) -> string {
+    return "sfn_nested_" + source_name + "_" + number_to_string(id);
+}
+
+// Look up a nested-fn source name in the active block-scoped rename list;
+// returns the mangled symbol, or "" if the name is not a nested fn in scope.
+fn _lookup_nested_rename(renames: NestedRename[], name: string) -> string {
+    let mut _i: int = 0;
+    loop {
+        if _i >= renames.length { break; }
+        if renames[_i].from == name { return renames[_i].to; }
+        _i += 1;
+    }
+    return "";
 }
 
 // Type-text sentinel assigned to the let binding whose initializer
@@ -431,15 +464,123 @@ fn _synthesize_lifted_function_rewritten(ctx: LiftContext, lambda: Expression, l
 }
 
 // ── Block rewriter ──────────────────────────────────────────────────
+// Single-field `LiftContext` updates (Sailfin structs are value types, so a
+// field change rebuilds the record). Keeping the other fields threaded avoids
+// dropping accumulated `lifted`/`counter` state.
+fn _with_counter(ctx: LiftContext, counter: int) -> LiftContext {
+    return LiftContext {
+        counter: counter,
+        lifted: ctx.lifted,
+        records: ctx.records,
+        signatures: ctx.signatures,
+        bindings: ctx.bindings,
+        renames: ctx.renames
+    };
+}
+
+fn _with_lifted(ctx: LiftContext, lifted: Statement[]) -> LiftContext {
+    return LiftContext {
+        counter: ctx.counter,
+        lifted: lifted,
+        records: ctx.records,
+        signatures: ctx.signatures,
+        bindings: ctx.bindings,
+        renames: ctx.renames
+    };
+}
+
+fn _with_renames(ctx: LiftContext, renames: NestedRename[]) -> LiftContext {
+    return LiftContext {
+        counter: ctx.counter,
+        lifted: ctx.lifted,
+        records: ctx.records,
+        signatures: ctx.signatures,
+        bindings: ctx.bindings,
+        renames: renames
+    };
+}
+
+// Copy a `FunctionSignature` under a new name — used to rename a hoisted
+// nested fn to its lifted symbol without disturbing its parameters/effects.
+fn _rename_signature(sig: FunctionSignature, name: string) -> FunctionSignature {
+    return FunctionSignature {
+        name: name,
+        is_async: sig.is_async,
+        parameters: sig.parameters,
+        return_type: sig.return_type,
+        effects: sig.effects,
+        type_parameters: sig.type_parameters,
+        name_span: sig.name_span
+    };
+}
+
+// Rewrite a bare-identifier call target to its lifted nested-fn symbol when the
+// name is a nested fn in the active block scope; every other callee (member,
+// non-nested name) is returned unchanged.
+fn _rename_call_callee(callee: Expression, renames: NestedRename[]) -> Expression {
+    if callee.variant != "Identifier" { return callee; }
+    let mangled = _lookup_nested_rename(renames, callee.name);
+    if mangled.length == 0 { return callee; }
+    return Expression.Identifier { name: mangled, span: callee.span };
+}
+
 fn _rewrite_block(ctx: LiftContext, block: Block) -> _BlockRewriteResult {
+    let incoming_renames = ctx.renames;
     let mut current_ctx: LiftContext = ctx;
+
+    // Block-hoist pass (SFEP-0042): assign each nested `fn` in this block a
+    // unique lifted symbol, extend the active (block-scoped) rename list, and
+    // advance the module counter. A block with no nested fns adds nothing, so
+    // non-nested-fn code is untouched.
+    let mut extended_renames: NestedRename[] = [];
+    let mut _cr: int = 0;
+    loop {
+        if _cr >= incoming_renames.length { break; }
+        extended_renames.push(incoming_renames[_cr]);
+        _cr += 1;
+    }
+    let mut _hp: int = 0;
+    loop {
+        if _hp >= block.statements.length { break; }
+        let hs = block.statements[_hp];
+        if hs.variant == "FunctionDeclaration" {
+            let mangled = nested_lifted_function_name(hs.signature.name, current_ctx.counter as int);
+            extended_renames.push(NestedRename {
+                from: hs.signature.name, to: mangled
+            });
+            current_ctx = _with_counter(current_ctx, (current_ctx.counter + 1) as int);
+        }
+        _hp += 1;
+    }
+    current_ctx = _with_renames(current_ctx, extended_renames);
+
     let mut new_statements: Statement[] = [];
     let mut index: int = 0;
     loop {
         if index >= block.statements.length { break; }
-        let result = _rewrite_statement(current_ctx, block.statements[index]);
-        current_ctx = result.ctx;
-        new_statements.push(result.statement);
+        let stmt = block.statements[index];
+        if stmt.variant == "FunctionDeclaration" {
+            // Hoist: rewrite the body with renames active (so self- and
+            // sibling-calls resolve to lifted symbols), rename the fn to its
+            // lifted symbol, collect it as a top-level function, and drop it
+            // from this block.
+            let body_result = _rewrite_block(current_ctx, stmt.body);
+            current_ctx = body_result.ctx;
+            let mangled = _lookup_nested_rename(current_ctx.renames, stmt.signature.name);
+            let lifted_fn = Statement.FunctionDeclaration {
+                signature: _rename_signature(stmt.signature, mangled),
+                body: body_result.block,
+                decorators: stmt.decorators,
+                is_unsafe: stmt.is_unsafe
+            };
+            let mut acc: Statement[] = current_ctx.lifted;
+            acc.push(lifted_fn);
+            current_ctx = _with_lifted(current_ctx, acc);
+        } else {
+            let result = _rewrite_statement(current_ctx, stmt);
+            current_ctx = result.ctx;
+            new_statements.push(result.statement);
+        }
         index += 1;
     }
     let new_block = Block {
@@ -447,7 +588,9 @@ fn _rewrite_block(ctx: LiftContext, block: Block) -> _BlockRewriteResult {
         text: block.text,
         statements: new_statements
     };
-    return _BlockRewriteResult { ctx: current_ctx, block: new_block };
+    // Restore the caller's rename scope; keep accumulated counter + lifted.
+    let restored = _with_renames(current_ctx, incoming_renames);
+    return _BlockRewriteResult { ctx: restored, block: new_block };
 }
 
 // ── Expression rewriter ─────────────────────────────────────────────
@@ -502,6 +645,8 @@ fn _rewrite_expression(ctx: LiftContext, expression: Expression) -> ExpressionRe
     }
     if expression.variant == "Call" {
         let callee = _rewrite_expression(ctx, expression.callee);
+        // Rewrite a nested-fn call target to its lifted symbol (SFEP-0042).
+        let renamed_callee = _rename_call_callee(callee.expression, ctx.renames);
         let mut current_ctx: LiftContext = callee.ctx;
         let mut new_args: Expression[] = [];
         let mut index: int = 0;
@@ -522,7 +667,7 @@ fn _rewrite_expression(ctx: LiftContext, expression: Expression) -> ExpressionRe
         return ExpressionRewriteResult {
             ctx: current_ctx,
             expression: Expression.Call {
-                callee: callee.expression,
+                callee: renamed_callee,
                 arguments: new_args,
                 span: expression.span
             }
@@ -744,7 +889,8 @@ fn _rewrite_lambda(ctx: LiftContext, lambda: Expression, owned_env: boolean) -> 
             lifted: ctx.lifted,
             records: ctx.records,
             signatures: ctx.signatures,
-            bindings: ctx.bindings
+            bindings: ctx.bindings,
+            renames: ctx.renames
         };
         let no_captures: Capture[] = [];
         let synth = _synthesize_lifted_function_rewritten(descend_ctx, lambda, lambda_id, no_captures);
@@ -755,7 +901,8 @@ fn _rewrite_lambda(ctx: LiftContext, lambda: Expression, owned_env: boolean) -> 
             lifted: new_lifted,
             records: ctx.records,
             signatures: ctx.signatures,
-            bindings: ctx.bindings
+            bindings: ctx.bindings,
+            renames: ctx.renames
         };
         let marker_text = closure_pair_marker(lambda_id, "null");
         return ExpressionRewriteResult {
@@ -783,7 +930,8 @@ fn _rewrite_lambda(ctx: LiftContext, lambda: Expression, owned_env: boolean) -> 
         lifted: ctx.lifted,
         records: ctx.records,
         signatures: ctx.signatures,
-        bindings: ctx.bindings
+        bindings: ctx.bindings,
+        renames: ctx.renames
     };
     let synth = _synthesize_lifted_function_rewritten(descend_ctx, lambda, lambda_id, record.captures);
     let mut new_lifted: Statement[] = synth.ctx.lifted;
@@ -793,7 +941,8 @@ fn _rewrite_lambda(ctx: LiftContext, lambda: Expression, owned_env: boolean) -> 
         lifted: new_lifted,
         records: ctx.records,
         signatures: ctx.signatures,
-        bindings: ctx.bindings
+        bindings: ctx.bindings,
+        renames: ctx.renames
     };
     // #1476: when this is a spawn/parallel task lambda (`owned_env`) whose
     // FIRST capture is a moved `OwnedBuf`, it sits at env offset 0, so the

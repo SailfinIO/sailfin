@@ -211,6 +211,78 @@ fn validate_effects_with_imports(program: Program, imports: ImportSymbolTable) -
 // them here by bare member name would be unsound. Functions with no
 // declared effects are still recorded (harmless: an empty effect set
 // propagates nothing) so the table answers "is this a known local fn".
+// Enumerate every nested / local `fn` reachable inside a block, at any depth,
+// flattened (SFEP-0042). Descends through all block-bearing statements. Used
+// both to register nested-fn effect signatures for call-site transitivity
+// (`_merge_local_functions`) and to effect-check each nested body against its
+// own declared row (`analyze_statement`).
+fn _collect_nested_fns_in_block(block: Block) -> Statement[] {
+    let mut acc: Statement[] = [];
+    let mut i: int = 0;
+    loop {
+        if i >= block.statements.length { break; }
+        acc = acc.concat(_collect_nested_fns_in_statement(block.statements[i]));
+        i += 1;
+    }
+    return acc;
+}
+
+fn _collect_nested_fns_in_statement(statement: Statement) -> Statement[] {
+    let mut acc: Statement[] = [];
+    if statement.variant == "FunctionDeclaration" {
+        acc.push(statement);
+        return acc.concat(_collect_nested_fns_in_block(statement.body));
+    }
+    if statement.variant == "IfStatement" {
+        acc = acc.concat(_collect_nested_fns_in_block(statement.then_block));
+        if statement.else_branch != null {
+            let branch = statement.else_branch;
+            if branch.body != null {
+                acc = acc.concat(_collect_nested_fns_in_block(branch.body));
+            }
+            if branch.statement != null {
+                acc = acc.concat(_collect_nested_fns_in_statement(branch.statement));
+            }
+        }
+        return acc;
+    }
+    if statement.variant == "ForStatement" {
+        return _collect_nested_fns_in_block(statement.body);
+    }
+    if statement.variant == "LoopStatement" {
+        return _collect_nested_fns_in_block(statement.body);
+    }
+    if statement.variant == "BlockStatement" {
+        return _collect_nested_fns_in_block(statement.body);
+    }
+    if statement.variant == "RoutineStatement" {
+        return _collect_nested_fns_in_block(statement.body);
+    }
+    if statement.variant == "WithStatement" {
+        return _collect_nested_fns_in_block(statement.body);
+    }
+    if statement.variant == "MatchStatement" {
+        let mut ci: int = 0;
+        loop {
+            if ci >= statement.cases.length { break; }
+            acc = acc.concat(_collect_nested_fns_in_block(statement.cases[ci].body));
+            ci += 1;
+        }
+        return acc;
+    }
+    if statement.variant == "TryStatement" {
+        acc = acc.concat(_collect_nested_fns_in_block(statement.try_block));
+        if statement.catch_block != null {
+            acc = acc.concat(_collect_nested_fns_in_block(statement.catch_block));
+        }
+        if statement.finally_block != null {
+            acc = acc.concat(_collect_nested_fns_in_block(statement.finally_block));
+        }
+        return acc;
+    }
+    return acc;
+}
+
 fn _merge_local_functions(program: Program, table: ImportSymbolTable) -> ImportSymbolTable {
     let mut merged = table;
     let mut index: int = 0;
@@ -219,6 +291,15 @@ fn _merge_local_functions(program: Program, table: ImportSymbolTable) -> ImportS
         let statement = program.statements[index];
         if statement.variant == "FunctionDeclaration" {
             merged = append_local_function(merged, statement.signature.name, statement.signature.effects);
+            // Register nested-fn signatures too (SFEP-0042), keyed by source
+            // name, so a call to a nested fn requires its effects transitively.
+            let nested = _collect_nested_fns_in_block(statement.body);
+            let mut ni: int = 0;
+            loop {
+                if ni >= nested.length { break; }
+                merged = append_local_function(merged, nested[ni].signature.name, nested[ni].signature.effects);
+                ni += 1;
+            }
         }
         index += 1;
     }
@@ -352,7 +433,19 @@ fn _append_capability_violations(violations: CapabilityViolation[], new_violatio
 
 fn analyze_statement(statement: Statement, imports: ImportSymbolTable) -> EffectViolation[] {
     if statement.variant == "FunctionDeclaration" {
-        return analyze_routine(statement.signature, statement.body, statement.decorators, statement.signature.name, imports);
+        let mut issues = analyze_routine(statement.signature, statement.body, statement.decorators, statement.signature.name, imports);
+        // Effect-check each nested / local `fn` body against its own declared
+        // effect row (SFEP-0042). Since a nested declaration no longer inlines
+        // its effects into the enclosing block (`collect_effects_from_statement`),
+        // its body is validated here as its own deferred routine.
+        let nested = _collect_nested_fns_in_block(statement.body);
+        let mut ni: int = 0;
+        loop {
+            if ni >= nested.length { break; }
+            issues = append_violations(issues, analyze_routine(nested[ni].signature, nested[ni].body, nested[ni].decorators, nested[ni].signature.name, imports));
+            ni += 1;
+        }
+        return issues;
     }
     if statement.variant == "TestDeclaration" {
         let signature = FunctionSignature {
@@ -603,7 +696,15 @@ fn collect_effects_from_statement(statement: Statement, imports: ImportSymbolTab
         return collect_effects_from_expression(statement.initializer, imports);
     }
     if statement.variant == "FunctionDeclaration" {
-        return collect_effects_from_block(statement.body, imports);
+        // A nested / local `fn` *declaration* contributes no effect to its
+        // enclosing block (SFEP-0042). Its body is effect-checked as its own
+        // deferred routine (`analyze_routine` via `_analyze_nested_functions`),
+        // and a *call* to it requires the callee's effects transitively (the
+        // nested signature is registered in the local-function table by
+        // `_merge_local_functions`). Inlining the body's effects here — the
+        // prior behavior — wrongly forced a declared-but-uncalled nested
+        // `fn foo() ![io]` to require `![io]` of its parent.
+        return [];
     }
     if statement.variant == "TestDeclaration" {
         return collect_effects_from_block(statement.body, imports);
