@@ -10,9 +10,10 @@
 // `http.sfn`'s identically-shaped helpers.
 //
 // Scope: `ws://` only (no TLS/`wss://`). Client: connect, send a single
-// masked TEXT frame, close. Server: bind/listen/accept, one connection at
-// a time, echo TEXT/BINARY frames back unmasked, reply to CLOSE. Neither
-// half implements fragmentation or ping/pong.
+// masked TEXT frame, close. Server: bind/listen/accept, dispatching each
+// connection to a shared worker pool (#1923), echo TEXT/BINARY frames back
+// unmasked, reply to CLOSE. Neither half implements fragmentation or
+// ping/pong.
 //
 // ABI. `compiler/src/llvm/runtime_helpers.sfn` points the websocket
 // registry rows at the exports below (owned by the orchestrator, not
@@ -89,6 +90,26 @@ extern fn SHA1(d: * u8, n: usize, md: * u8) -> * u8;
 extern fn EVP_EncodeBlock(dst: * u8, src: * u8, srclen: i32) -> i32;
 
 extern fn RAND_bytes(buf: * u8, num: i32) -> i32;
+
+// ── Scheduler (scheduler.sfn) — the shared MPMC task queue + fixed
+// worker pool. `sfn_websocket_serve` creates one queue + pool, then
+// enqueues a detached `Task` per accepted connection (mirrors
+// `serve.sfn`, #1923). Declared inline per the same cross-module-extern
+// workaround (#306) as the sockets above.
+extern fn sfn_taskqueue_create(capacity: i64) -> * u8;
+
+extern fn sfn_taskqueue_destroy(queue: * u8) -> void;
+
+extern fn sfn_taskqueue_enqueue(queue: * u8, task: * u8) -> void;
+
+// Per-connection tasks are fire-and-forget: `sfn_websocket_serve` never
+// joins them, so they use the detached constructor (#1203). The pool
+// worker that runs a detached task reclaims its `Task` handle after
+// `sfn_task_run` returns — so the only reclaim the worker owns is its
+// ctx cell.
+extern fn sfn_task_create_detached(fn_ptr: i64, ctx: i64) -> * u8;
+
+extern fn sfn_scheduler_create(queue: * u8) -> * u8;
 
 // `_ws_ptr_off(p, off)` — byte-stride pointer arithmetic for a
 // variable offset. Mirrors `http.sfn`'s `_ptr_off`.
@@ -290,7 +311,7 @@ fn _ws_connect_tcp(host: * u8, port: i64) -> i32 ![net] {
 // socket, retrying on short sends. Returns false if a write ever
 // fails. `ws://` is plaintext only, so unlike `http.sfn`'s `_send_all`
 // there is no `ssl` argument.
-fn _ws_send_all(fd: i32, buf: * u8, total: i64) -> bool ![net] {
+fn _ws_send_all(fd: i32, buf: * u8, total: i64) -> bool {
     let mut sent: i64 = 0;
     loop {
         if sent >= total { break; }
@@ -308,7 +329,7 @@ fn _ws_send_all(fd: i32, buf: * u8, total: i64) -> bool ![net] {
 // server that splits the `101` status line and headers across TCP
 // segments is not handled here; the drain-until-`\r\n\r\n` receive loop
 // lands with the server bridge and behavioral loopback test (#1877).
-fn _ws_recv_some(fd: i32, buf: * u8, cap: i64) -> i64 ![net] {
+fn _ws_recv_some(fd: i32, buf: * u8, cap: i64) -> i64 {
     return recv(fd, buf, cap, 0);
 }
 
@@ -852,7 +873,7 @@ fn _ws_srv_bind_listen(port: i64) -> i32 {
 // `_ws_recv_exact(fd, buf, n)` — loop `recv` until exactly `n` bytes have
 // landed in `buf`. Returns false on a short read, error, or EOF (any
 // `recv` returning <= 0) before `n` bytes are collected.
-fn _ws_recv_exact(fd: i32, buf: * u8, n: i64) -> bool ![net] {
+fn _ws_recv_exact(fd: i32, buf: * u8, n: i64) -> bool {
     let mut got: i64 = 0;
     loop {
         if got >= n { break; }
@@ -867,7 +888,7 @@ fn _ws_recv_exact(fd: i32, buf: * u8, n: i64) -> bool ![net] {
 // and send an UNMASKED RFC 6455 server frame (FIN=1; server→client MUST
 // NOT mask). Structurally `_ws_frame_send`'s counterpart minus the
 // masking key and XOR step. Returns false on OOM or a send failure.
-fn _ws_server_frame_send(fd: i32, opcode: i64, payload: * u8, payload_len: i64) -> bool ![net] {
+fn _ws_server_frame_send(fd: i32, opcode: i64, payload: * u8, payload_len: i64) -> bool {
     let byte0: i64 = 128 | (opcode & 15);
     let mut header_len: i64 = 2;
     if payload_len >= 126 && payload_len <= 65535 { header_len = 4; } else {
@@ -910,7 +931,7 @@ fn _ws_server_frame_send(fd: i32, opcode: i64, payload: * u8, payload_len: i64) 
 // same slot-write idiom as `_ws_parse_url`), and the payload length
 // through the three out-params. Returns false on a protocol error
 // (an unmasked "client" frame) or any `recv` failure.
-fn _ws_frame_read(fd: i32, out_opcode: * i64, out_payload_slot: * i64, out_len_slot: * i64) -> bool ![net] {
+fn _ws_frame_read(fd: i32, out_opcode: * i64, out_payload_slot: * i64, out_len_slot: * i64) -> bool {
     // malloc(12), not 8: the `len7 == 127` path fills 8 content bytes and
     // reads them with `_ws_byte_at`, whose 4-byte load at offset 7 touches
     // bytes 7..10 — so 8 content + 4 tail-load slack, matching this module's
@@ -1012,7 +1033,7 @@ fn _ws_frame_read(fd: i32, out_opcode: * i64, out_payload_slot: * i64, out_len_s
 // `_ws_recv_some` documents) and reply with the RFC 6455 `101`
 // response. Returns false on a malformed/missing
 // `Sec-WebSocket-Key` header or a recv/send failure.
-fn _ws_srv_handshake(fd: i32) -> bool ![net] {
+fn _ws_srv_handshake(fd: i32) -> bool {
     let req_cap: i64 = 2048;
     let buf: * u8 = malloc((req_cap + 4) as usize);
     if buf as i64 == 0 { return false; }
@@ -1080,16 +1101,56 @@ fn _ws_srv_handshake(fd: i32) -> bool ![net] {
     return ok;
 }
 
+// `_ws_conn_worker(ctx)` — the per-connection pool task body (#1923). It
+// matches the `Task` worker ABI (`fn (* u8) -> * u8`): `ctx` points at an
+// 8-byte cell `[client_fd: i64]` (freed here up front — no handler slot,
+// unlike `serve.sfn`'s 16-byte pair, since `websocket.serve` has no user
+// handler surface yet). Arms the socket timeouts, completes the RFC 6455
+// handshake, then loops reading single-frame (FIN=1) client frames and
+// echoing TEXT/BINARY payloads back unmasked; a CLOSE frame gets an
+// unmasked CLOSE reply before the connection closes. PING/PONG and any
+// other opcode are silently drained (#1877). Returns null (serve is
+// fire-and-forget; the `Task` result is unused). Calls only effect-free
+// externs and effect-erased helpers, so it carries no effect annotation —
+// matching `serve.sfn::_serve_conn_worker` and `future.sfn`'s trampolines.
+fn _ws_conn_worker(ctx: * u8) -> * u8 {
+    if ctx as i64 == 0 { return null; }
+    let fd_slot: * i64 = ctx as * i64;
+    let client_fd: i64 = atomic_load(fd_slot);
+    free(ctx);
+
+    let fd: i32 = client_fd as i32;
+    _ws_set_socket_timeouts(fd);
+    if !_ws_srv_handshake(fd) {
+        close(fd);
+        return null;
+    }
+    loop {
+        let mut opcode: i64 = 0;
+        let mut payload_addr: i64 = 0;
+        let mut len: i64 = 0;
+        if !_ws_frame_read(fd, & opcode, & payload_addr, & len) { break; }
+        if opcode == 8 {
+            _ws_server_frame_send(fd, 8, null, 0);
+            free(payload_addr as * u8);
+            break;
+        }
+        if opcode == 1 || opcode == 2 {
+            _ws_server_frame_send(fd, opcode, payload_addr as * u8, len);
+            free(payload_addr as * u8);
+        } else { free(payload_addr as * u8); }
+    }
+    close(fd);
+    return null;
+}
+
 // `sfn_websocket_serve(port)` — a v0 echo `ws://` server. Binds and
-// listens on `port`, then blocks forever accepting one connection at a
-// time (single-client-at-a-time — no pool dispatch; fanning connections
-// out across a worker pool is a follow-up under epic #1180). Each
-// accepted connection completes the RFC 6455 handshake, then loops
-// reading single-frame (FIN=1; fragmentation is unsupported) client
-// frames and echoing TEXT/BINARY payloads back unmasked; a CLOSE frame
-// gets an unmasked CLOSE reply before the connection closes. PING/PONG
-// and any other opcode are silently drained (no ping/pong handling yet,
-// #1877). The accept loop only exits on an `accept` error.
+// listens on `port`, builds one shared task queue + fixed worker pool,
+// then blocks forever accepting connections and dispatching each accepted
+// fd to the pool as a detached `Task` (#1923) — so multiple clients are
+// served concurrently, mirroring `serve.sfn::sfn_serve`. Each connection's
+// handshake + frame-echo loop runs on a pool thread (`_ws_conn_worker`).
+// The accept loop only exits on an `accept` error.
 fn sfn_websocket_serve(port: i32) -> void ![net] {
     // Reject an out-of-range port before packing it into the sockaddr: a
     // negative or > 65535 value would truncate into an unintended u16 (e.g.
@@ -1098,30 +1159,44 @@ fn sfn_websocket_serve(port: i32) -> void ![net] {
     if port_i64 <= 0 || port_i64 > 65535 { return; }
     let listen_fd: i32 = _ws_srv_bind_listen(port_i64);
     if listen_fd < 0 { return; }
+
+    // One shared queue + fixed worker pool for the whole server; a detached
+    // per-connection task is enqueued on each accept (mirrors `sfn_serve`).
+    // The scheduler local is never freed — its threads service the shared
+    // queue for the process lifetime (the server never returns).
+    let queue: * u8 = sfn_taskqueue_create(256);
+    if queue as i64 == 0 {
+        close(listen_fd);
+        return;
+    }
+    let scheduler: * u8 = sfn_scheduler_create(queue);
+    if scheduler as i64 == 0 {
+        sfn_taskqueue_destroy(queue);
+        close(listen_fd);
+        return;
+    }
+
     loop {
         let fd: i32 = accept(listen_fd, null, null);
         if fd < 0 { break; }
-        _ws_set_socket_timeouts(fd);
-        if !_ws_srv_handshake(fd) {
+
+        // Pack [client_fd] into an 8-byte ctx cell for the worker.
+        let conn_ctx: * u8 = malloc(8 as usize);
+        if conn_ctx as i64 == 0 {
             close(fd);
             continue;
         }
-        loop {
-            let mut opcode: i64 = 0;
-            let mut payload_addr: i64 = 0;
-            let mut len: i64 = 0;
-            if !_ws_frame_read(fd, & opcode, & payload_addr, & len) { break; }
-            if opcode == 8 {
-                _ws_server_frame_send(fd, 8, null, 0);
-                free(payload_addr as * u8);
-                break;
-            }
-            if opcode == 1 || opcode == 2 {
-                _ws_server_frame_send(fd, opcode, payload_addr as * u8, len);
-                free(payload_addr as * u8);
-            } else { free(payload_addr as * u8); }
+        let fd_slot: * i64 = conn_ctx as * i64;
+        atomic_store(fd_slot, fd as i64);
+
+        let worker: * fn (* u8) -> * u8 = _ws_conn_worker as * fn (* u8) -> * u8;
+        let task: * u8 = sfn_task_create_detached(worker as i64, conn_ctx as i64);
+        if task as i64 == 0 {
+            free(conn_ctx);
+            close(fd);
+            continue;
         }
-        close(fd);
+        sfn_taskqueue_enqueue(queue, task);
     }
     close(listen_fd);
 }
