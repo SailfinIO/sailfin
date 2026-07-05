@@ -194,9 +194,12 @@ here.
   `sfn_websocket_unbridged` metadata-only sentinel is gone for this family, so
   the calls lower, link, and self-host like any other member-call bridge (e.g.
   `http.*`). Client (#1876): `ws://` connect + a single masked TEXT send
-  + close. Server (#1877, v0): `websocket.serve(port)` binds/listens/accepts and
-  runs an RFC 6455 echo loop — single connection at a time, blocking, unmasked
-  server frames, no fragmentation/ping-pong, no `wss://`. `![net]` is enforced
+  + close. Server (#1877): `websocket.serve(port)` binds/listens/accepts,
+  dispatching each connection to a shared worker pool (#1923) that runs an
+  RFC 6455 echo loop with unmasked server frames, ping/pong keepalive,
+  bounded fragmented-message reassembly, and a status-code close handshake
+  (#1924); an unmasked or over-large (> 1 MiB) client frame is refused with
+  the matching close code (`1002`/`1009`). No `wss://`. `![net]` is enforced
   via the registry rows (single source of truth since #1601); `websocket.send`
   additionally requires `![io]` — any `.send(...)` member call trips the
   checker's pre-existing conservative, receiver-agnostic channel-op rule
@@ -204,11 +207,9 @@ here.
   convention: a registry-driven member-call bridge marshals scalar arguments
   only — `websocket.serve(8080)` is the canonical call shape; an object literal
   (`websocket.serve({ port })`) is unreachable without bespoke lowering.
-  Follow-ups tracked under epic #1180: concurrency-pool dispatch (#1923),
-  ping/pong + fragmentation + close-code completeness (#1924), `wss://`/TLS
-  (#1925), a per-client handler API — `server.clients()`/`onMessage`/per-client
-  send (#1926), typed message channels/backpressure (#1927), and client-side
-  receive.
+  Follow-ups tracked under epic #1180: `wss://`/TLS (#1925), a per-client
+  handler API — `server.clients()`/`onMessage`/per-client send (#1926), typed
+  message channels/backpressure (#1927), and client-side receive.
 - **Undefined free-function rejection** (`E0420`, #616/#812): unresolvable
   bare-identifier callees fail typecheck.
 - **Function references**: a bare fn name in value position lowers to the
