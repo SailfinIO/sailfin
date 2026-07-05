@@ -51,7 +51,8 @@ fn _representative_plan() -> LinkPlan ![pure] {
 
 test "backend: test-layout builder reproduces every plan.libs entry" ![pure] {
     let plan = _representative_plan();
-    let argv = _llvm_text_link_test_argv(plan);
+    let no_sdk: string[] = [];
+    let argv = _llvm_text_link_test_argv(plan, no_sdk);
     let mut i: int = 0;
     loop {
         if i >= plan.libs.length { break; }
@@ -62,7 +63,8 @@ test "backend: test-layout builder reproduces every plan.libs entry" ![pure] {
 
 test "backend: program-layout builder reproduces every plan.libs entry" ![pure] {
     let plan = _representative_plan();
-    let argv = _llvm_text_link_program_argv(plan);
+    let no_sdk: string[] = [];
+    let argv = _llvm_text_link_program_argv(plan, no_sdk);
     let mut i: int = 0;
     loop {
         if i >= plan.libs.length { break; }
@@ -76,8 +78,9 @@ test "backend: program-layout builder reproduces every plan.libs entry" ![pure] 
 // above genuinely fail if a builder ever drops an entry.
 test "backend: parity check is meaningful (absent lib is not found)" ![pure] {
     let plan = _representative_plan();
-    let test_argv = _llvm_text_link_test_argv(plan);
-    let program_argv = _llvm_text_link_program_argv(plan);
+    let no_sdk: string[] = [];
+    let test_argv = _llvm_text_link_test_argv(plan, no_sdk);
+    let program_argv = _llvm_text_link_program_argv(plan, no_sdk);
     assert expect_eq_bool(_argv_contains(test_argv, "-lnot-a-real-lib"), false).ok;
     assert expect_eq_bool(_argv_contains(program_argv, "-lnot-a-real-lib"), false).ok;
 }
