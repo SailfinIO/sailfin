@@ -33,8 +33,14 @@ fn _scratch_dir() -> string ![io] {
     return dir;
 }
 
+// Forward `PATH` so `uname` resolves: `run_capture`'s empty env is the
+// *empty* environment (no PATH), under which the `uname` spawn could fail
+// and mis-report the host as non-Darwin (Copilot review, PR #1929).
 fn _is_darwin() -> boolean ![io] {
-    let _exit = process.run_capture(["uname", "-s"], []);
+    let mut e: string[] = [];
+    let path = env.get("PATH");
+    if path.length > 0 { e.push("PATH=" + path); }
+    let _exit = process.run_capture(["uname", "-s"], e);
     let out = process.capture_take_stdout();
     let _err = process.capture_take_stderr();
     return find(out, "Darwin", 0) >= 0;
