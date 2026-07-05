@@ -144,6 +144,13 @@ fn _llvm_text_link_program_argv(plan: LinkPlan) -> string[] {
     return args;
 }
 
+// Both builders are module-private by naming convention; export them so
+// the runtime `link_libs` parity regression guard
+// (`compiler/tests/unit/backend_link_libs_parity_test.sfn`, SFEP-0036 /
+// #1782) can call them directly. Mirrors the `build/clang_argv.sfn`
+// export-of-underscore-helper precedent; no rename, no behavior change.
+export { _llvm_text_link_test_argv, _llvm_text_link_program_argv };
+
 // Env-gated (`SAILFIN_TRACE_LINK`) stderr echo of the resolved clang link
 // argv (#1908): a read-only observability aid that prints exactly the argv
 // `_llvm_text_link_{program,test}_argv` already returns, so link-flag tests

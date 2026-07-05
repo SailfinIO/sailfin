@@ -1,0 +1,83 @@
+// compiler/tests/unit/backend_link_libs_parity_test.sfn
+//
+// Regression guard for the #1782 macOS TLS link-path bug class
+// (SFEP-0036, `docs/proposals/0036-tls-runtime.md`, gap B1 of epic
+// #1540): the OpenSSL `-L`/`-lssl`/`-lcrypto` linker inputs ride into
+// the final clang link via `LinkPlan.libs`, and BOTH backend link-argv
+// builders — the `sfn test` per-binary layout
+// (`_llvm_text_link_test_argv`) and the `sfn build`/`run` program layout
+// (`_llvm_text_link_program_argv`) — must reproduce every `plan.libs`
+// entry. #1782 was the class of bug where one link path silently dropped
+// the runtime libs while the other kept them; this test fails if either
+// builder omits any `plan.libs` entry.
+//
+// `plan.libs` is the parity-critical channel, NOT `plan.link_flags`:
+// `link_flags` is deliberately asymmetric (populated only for the
+// program layout, empty in test mode by design — see `LinkPlan` in
+// `compiler/src/backend.sfn`), so `link_flags` symmetry is intentionally
+// NOT guarded here. The guarded property is only that both builders
+// carry the full `plan.libs` set.
+import { expect_eq_bool } from "sfn/test";
+
+import { LinkPlan, _llvm_text_link_program_argv, _llvm_text_link_test_argv } from "../../src/backend";
+
+// Membership check over an emitted argv (`string[]`).
+fn _argv_contains(argv: string[], needle: string) -> boolean ![pure] {
+    let mut i: int = 0;
+    loop {
+        if i >= argv.length { break; }
+        if argv[i] == needle { return true; }
+        i += 1;
+    }
+    return false;
+}
+
+// A representative link plan whose `libs` carry OpenSSL-shaped entries:
+// the Darwin `-L<dir>` search flag plus the `-l…` library flags the
+// runtime manifest (`runtime/capsule.toml` `link-libs`) contributes.
+// `link_flags` is populated to mirror the program layout; the test
+// layout builder ignores it by design (the intentional asymmetry).
+fn _representative_plan() -> LinkPlan ![pure] {
+    return LinkPlan {
+        objects: ["runtime.o"],
+        ir_inputs: ["main.ll"],
+        out_path: "a.out",
+        opt_flag: "-O0",
+        link_flags: ["-fuse-ld=mold", "-ffunction-sections"],
+        libs: ["-L/opt/homebrew/opt/openssl@3/lib", "-lssl", "-lcrypto", "-lm", "-lpthread"],
+        test_mode: false
+    };
+}
+
+test "backend: test-layout builder reproduces every plan.libs entry" ![pure] {
+    let plan = _representative_plan();
+    let argv = _llvm_text_link_test_argv(plan);
+    let mut i: int = 0;
+    loop {
+        if i >= plan.libs.length { break; }
+        assert expect_eq_bool(_argv_contains(argv, plan.libs[i]), true).ok;
+        i += 1;
+    }
+}
+
+test "backend: program-layout builder reproduces every plan.libs entry" ![pure] {
+    let plan = _representative_plan();
+    let argv = _llvm_text_link_program_argv(plan);
+    let mut i: int = 0;
+    loop {
+        if i >= plan.libs.length { break; }
+        assert expect_eq_bool(_argv_contains(argv, plan.libs[i]), true).ok;
+        i += 1;
+    }
+}
+
+// Sanity: the membership helper is not trivially true — a lib that is
+// NOT in the plan must be reported absent, so the parity assertions
+// above genuinely fail if a builder ever drops an entry.
+test "backend: parity check is meaningful (absent lib is not found)" ![pure] {
+    let plan = _representative_plan();
+    let test_argv = _llvm_text_link_test_argv(plan);
+    let program_argv = _llvm_text_link_program_argv(plan);
+    assert expect_eq_bool(_argv_contains(test_argv, "-lnot-a-real-lib"), false).ok;
+    assert expect_eq_bool(_argv_contains(program_argv, "-lnot-a-real-lib"), false).ok;
+}
