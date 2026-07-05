@@ -173,7 +173,8 @@ env-aware dispatch) and is listed as an open question below.
 | `ServerConfig.host` binding | dropped from v0 API | with host-bind runtime support | — |
 | DNS resolution (`getaddrinfo`) | no — localhost / dotted-quad only | **shipped** (#1707 — real hostnames resolve via `getaddrinfo`, first IPv4/A record; `sfn/net::resolve` wired) | — |
 | Chunked response decode (client) | no — `Content-Length` only | **shipped** (#1708 — `_extract_body` decodes `Transfer-Encoding: chunked` on the get/post/download body-extraction path, length-tracked; chunked *request* decode on `serve` stays out) | — |
-| TLS, redirects | — | — | out (matches client v0 limits) |
+| TLS (`https://` client + `serve` termination) | — | **shipped** (SFEP-0036, epic #1540 B1 — outbound `https://` on `http.*`/capsule `get`/`post` with peer-chain + hostname verification against the system CA store; inbound termination via the `sfn_serve_tls` runtime entry; `runtime/sfn/platform/tls.sfn`. Typed `fetch`/keep-alive client stays HTTP-only for now) | — |
+| Redirects | — | — | out (matches client v0 limits) |
 | Per-response buffer free / Task reaping | no — documented leak (same class as the existing fire-and-forget Task leak) | request-scoped arena follow-up (ties to ownership/arena work) | — |
 
 Stage1 readiness: everything in the v0 column is enforced end-to-end (status/headers

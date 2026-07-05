@@ -58,7 +58,7 @@ The next number is `max + 1`. Add a row in the same PR that introduces an SFEP.
 | [0033](./0033-string-runtime-length-aware-abi.md) | Length-aware ({i8*, i64}) ABI for query-side string runtime helpers | Accepted | runtime |
 | [0034](./0034-is-type-guard.md) | Structured, Enforced `x is T` Type-Guard Operator | Accepted | language |
 | [0035](./0035-prelude-mirror-signature-derivation.md) | Deriving Prelude-Mirror Registry Signatures from the Prelude | Accepted | runtime |
-| [0036](./0036-tls-runtime.md) | TLS termination + upstream TLS for the native runtime (OpenSSL) | Accepted | runtime |
+| [0036](./0036-tls-runtime.md) | TLS termination + upstream TLS for the native runtime (OpenSSL) | Implemented | runtime |
 | [0037](./0037-peer-language-process-adoption.md) | Peer-Language Process Adoption — Merge Queue, ICE Discipline, Perf History, Corpus Runs | Accepted | process |
 | [0038](./0038-generic-constraints.md) | Generic Type Parameter Constraints and Monomorphization | Implemented | language |
 | [0039](./0039-nominal-object-model.md) | Nominal Object Model — Honest Rejection of TypeScript-Shaped Data Syntax | Accepted | language |

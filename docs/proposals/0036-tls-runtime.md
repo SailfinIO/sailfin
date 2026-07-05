@@ -1,24 +1,28 @@
 ---
 sfep: 0036
 title: "TLS termination + upstream TLS for the native runtime (OpenSSL)"
-status: Accepted
+status: Implemented
 type: runtime
 created: 2026-06-29
-updated: 2026-07-02
+updated: 2026-07-05
 author: "agent:compiler-architect; human review"
 tracking: "#1540, #1820, #1821, #1822"
 supersedes:
 superseded-by:
-graduates-to:
+graduates-to: reference/standard-library.md
 ---
 
 # SFEP-0036 — TLS termination + upstream TLS for the native runtime (OpenSSL)
 
-> Accepted at the grooming design gate (2026-06-29). Decomposed into the issue
-> table in §10, filed as sub-issues of epic #1540. Gap **B1** of epic #1540
-> (MCP-proxy enablement). Extends, does
-> not contradict, SFEP-0019 (`sfn/http`): TLS is the deferred "TLS, redirects"
-> row of SFEP-0019 §4, now promoted to a 1.0 blocker by the MCP-proxy hot path.
+> **Implemented (2026-07-05).** Shipped across #1782 (extern surface + HTTPS
+> client), #1783 (inbound TLS termination in `serve`), #1784 (client cert
+> verification + system CA trust store), and #1785 (loopback e2e); documented
+> here at #1786. Graduates to `reference/standard-library.md`. Accepted at the
+> grooming design gate (2026-06-29), decomposed into the issue table in §10, and
+> filed as sub-issues of epic #1540. Gap **B1** of epic #1540 (MCP-proxy
+> enablement). Extends, does not contradict, SFEP-0019 (`sfn/http`): TLS was the
+> deferred "TLS, redirects" row of SFEP-0019 §4, promoted to a 1.0 blocker by
+> the MCP-proxy hot path and now shipped.
 
 ## 1. Summary
 
@@ -324,13 +328,16 @@ is gated first (see §10 issue #1).
 - [x] **Emits valid `.sfn-asm`** — no new IR; externs emit `declare`/`call`
       (probe 1).
 - [x] **Lowers to LLVM IR** — confirmed (`declare i8* @SSL_CTX_new`, calls).
-- [ ] **Regression coverage** — §8 (loopback client↔server TLS round-trip;
-      verify-failure path; plaintext serve stays green).
-- [ ] **Self-hosts** — `make compile` then `make check` after each issue; the
-      compiler links `-lssl -lcrypto` but calls no TLS.
-- [ ] **`sfn fmt --check` clean** — on `tls.sfn` and every touched `.sfn`.
-- [ ] **Documented** — `docs/status.md` (TLS row), SFEP-0019 §4 row flipped,
-      `standard-library.md` https/serve-TLS notes, manifest `link-libs` comment.
+- [x] **Regression coverage** — §8, shipped: `runtime_tls_https_client_test.sfn`
+      (outbound), `serve_tls_loopback_test.sfn` + `tls_loopback_test.sfn`
+      (client↔server round-trip), `runtime_tls_verify_failure_test.sfn`
+      (verification enforced); plaintext serve stays green.
+- [x] **Self-hosts** — `make compile` / `make check` green with the runtime
+      linking `-lssl -lcrypto`; the compiler calls no TLS (#1782/#1783/#1784).
+- [x] **`sfn fmt --check` clean** — on `tls.sfn` and every touched `.sfn`.
+- [x] **Documented** — `docs/status.md` (sfn/http TLS row), SFEP-0019 §4 row
+      promoted, `standard-library.md` https-client + serve-TLS notes, manifest
+      `link-libs` comment, and the OpenSSL build-dependency runbook.
 
 ## 8. Test plan
 
