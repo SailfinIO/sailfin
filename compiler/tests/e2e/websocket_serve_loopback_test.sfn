@@ -255,6 +255,132 @@ fn _lb_read_frame(fd: i32, out_opcode: * i64) -> string {
     return payload as string;
 }
 
+// Send a raw client frame with explicit FIN, opcode, and masking, from a
+// raw byte buffer. Handles all three RFC 6455 length encodings (7-bit,
+// 126 + 16-bit, 127 + 64-bit) so the fragmentation / control-code / oversize
+// tests can drive frames the string-based `_lb_send_masked` cannot. A fixed
+// mask key is fine for a directed test vehicle (the production client uses
+// `RAND_bytes`).
+fn _lb_send_frame_raw(fd: i32, fin: i64, opcode: i64, masked: bool, payload: * u8, payload_len: i64) -> bool {
+    // Guard against a negative length underflowing `total` into a huge
+    // `as usize` allocation if a future caller mis-passes it.
+    if payload_len < 0 { return false; }
+    let byte0: i64 = (fin << 7) | (opcode & 15);
+    let mut header_len: i64 = 2;
+    if payload_len >= 126 && payload_len <= 65535 { header_len = 4; } else {
+        if payload_len > 65535 { header_len = 10; }
+    }
+    let mut mask_len: i64 = 0;
+    if masked { mask_len = 4; }
+    let total: i64 = header_len + mask_len + payload_len;
+    // +4 tail-load slack for `_lb_byte_at`'s 4-byte load during masking.
+    let out: * u8 = malloc((total + 4) as usize);
+    if out as i64 == 0 { return false; }
+    memset(_lb_ptr_off(out, 0), byte0 as i32, 1 as usize);
+    let mut len_bits: i64 = payload_len;
+    if payload_len >= 126 && payload_len <= 65535 {
+        len_bits = 126;
+        memset(_lb_ptr_off(out, 2), ((payload_len >> 8) & 255) as i32, 1 as usize);
+        memset(_lb_ptr_off(out, 3), (payload_len & 255) as i32, 1 as usize);
+    } else {
+        if payload_len > 65535 {
+            len_bits = 127;
+            let mut k: i64 = 0;
+            loop {
+                if k >= 8 { break; }
+                let shift: i64 = 8 * (7 - k);
+                memset(_lb_ptr_off(out, 2 + k), ((payload_len >> shift) & 255) as i32, 1 as usize);
+                k = k + 1;
+            }
+        }
+    }
+    let mut mask_flag: i64 = 0;
+    if masked { mask_flag = 128; }
+    memset(_lb_ptr_off(out, 1), (mask_flag | len_bits) as i32, 1 as usize);
+    if masked {
+        let mut m: i64 = 0;
+        loop {
+            if m >= 4 { break; }
+            memset(_lb_ptr_off(out, header_len + m), (11 + m) as i32, 1 as usize);
+            m = m + 1;
+        }
+        let mut i: i64 = 0;
+        loop {
+            if i >= payload_len { break; }
+            let mb: i64 = _lb_byte_at(out, header_len + (i & 3));
+            let pb: i64 = _lb_byte_at(payload, i);
+            memset(_lb_ptr_off(out, header_len + 4 + i), (pb ^ mb) as i32, 1 as usize);
+            i = i + 1;
+        }
+    } else {
+        if payload_len > 0 {
+            memcpy(_lb_ptr_off(out, header_len), payload, payload_len as usize);
+        }
+    }
+    let ok: bool = _lb_send_all(fd, out, total);
+    free(out);
+    return ok;
+}
+
+// Send ONLY a frame header declaring an oversized 64-bit length: the MASK
+// bit is set (so the server reaches the length-cap check and replies `1009`
+// rather than taking the unmasked-frame `1002` path) but no masking key or
+// payload follows. `_ws_frame_read` rejects on the length check before it
+// reads the mask, so it never blocks on the un-sent bytes — it replies with
+// close `1009` (message too big). The declared length is 4 GiB (2^32), well
+// over the server's frame cap and positive as an i64.
+fn _lb_send_oversize_header(fd: i32) -> bool {
+    let hdr: * u8 = malloc(16 as usize);
+    if hdr as i64 == 0 { return false; }
+    memset(_lb_ptr_off(hdr, 0), (128 | 1) as i32, 1 as usize);
+    memset(_lb_ptr_off(hdr, 1), (128 | 127) as i32, 1 as usize);
+    let mut k: i64 = 0;
+    loop {
+        if k >= 8 { break; }
+        memset(_lb_ptr_off(hdr, 2 + k), 0, 1 as usize);
+        k = k + 1;
+    }
+    // Big-endian byte index 3 of the 8-byte length (buffer offset 5) holds
+    // 2^32 = 4 GiB.
+    memset(_lb_ptr_off(hdr, 5), 1, 1 as usize);
+    let ok: bool = _lb_send_all(fd, hdr, 10);
+    free(hdr);
+    return ok;
+}
+
+// Read one UNMASKED server frame's opcode and, when it is a CLOSE carrying a
+// 2-byte status code, that code. Writes the opcode through `out_opcode` and
+// the code (0 when absent) through `out_code`. Short-length only — every
+// server reply these tests read is <= 125 bytes.
+fn _lb_read_close(fd: i32, out_opcode: * i64, out_code: * i64) -> bool {
+    let hdr: * u8 = malloc(8 as usize);
+    if hdr as i64 == 0 { return false; }
+    if !_lb_recv_exact(fd, hdr, 2) {
+        free(hdr);
+        return false;
+    }
+    let byte0: i64 = _lb_byte_at(hdr, 0);
+    let byte1: i64 = _lb_byte_at(hdr, 1);
+    let opcode: i64 = byte0 & 15;
+    let len: i64 = byte1 & 127;
+    free(hdr);
+    atomic_store(out_opcode, opcode);
+    atomic_store(out_code, 0);
+    if len <= 0 { return true; }
+    let payload: * u8 = malloc((len + 4) as usize);
+    if payload as i64 == 0 { return false; }
+    if !_lb_recv_exact(fd, payload, len) {
+        free(payload);
+        return false;
+    }
+    if len >= 2 {
+        let code: i64 = (_lb_byte_at(payload, 0) << 8) | _lb_byte_at(payload, 1);
+        atomic_store(out_code, code);
+    }
+    free(payload);
+    return true;
+}
+
 // Lay out a consumer capsule whose `main` calls `websocket.serve(<port>)`.
 fn _app_root() -> string { return "build/websocket-serve-loopback-e2e"; }
 
@@ -537,4 +663,189 @@ test "websocket.serve loopback: two clients served concurrently" ![io] {
     // Best-effort cleanup of the consumer tree (the timeout reaps the
     // server process).
     let _rm = process.run(["rm", "-rf", _app_root2()]);
+}
+
+// ── RFC 6455 protocol-completeness cases (#1924) ───────────────────────
+// A third fixed port + consumer tree, independent of the two above so the
+// protocol test spawns its own server and never collides under `--jobs N`.
+fn _lb_port3() -> i64 { return 18793; }
+
+fn _lb_port3_str() -> string { return "18793"; }
+
+fn _app_root3() -> string { return "build/websocket-serve-protocol-e2e"; }
+
+fn _write_server3(port_str: string) -> string ![io] {
+    let root = _app_root3();
+    fs.createDirectory(root + "/src", true);
+    fs.writeFile(root + "/capsule.toml", "[capsule]\n"
+        + "name = \"sfn/websocket-serve-protocol-e2e-app\"\n"
+        + "version = \"0.0.1\"\n"
+        + "description = \"websocket.serve protocol e2e consumer\"\n"
+        + "\n"
+        + "[capabilities]\n"
+        + "required = [\"io\", \"net\"]\n"
+        + "\n"
+        + "[build]\n"
+        + "entry = \"src/main.sfn\"\n"
+        + "kind = \"library\"\n");
+    fs.writeFile(root + "/src/main.sfn", "fn main() ![io, net] {\n"
+        + "    websocket.serve("
+        + port_str
+        + ");\n"
+        + "}\n");
+    return root + "/src/main.sfn";
+}
+
+// Open a fresh connection and complete the RFC 6455 handshake, returning the
+// upgraded fd (or -1). Effect-free (only the plain socket/libc externs), the
+// same shape as `_lb_connect`.
+fn _lb_open_ready(port: i64) -> i32 {
+    let fd: i32 = _lb_connect(port);
+    if fd < 0 { return 0 - 1; }
+    let req: string = "GET / HTTP/1.1\r\nHost: 127.0.0.1\r\nUpgrade: websocket\r\nConnection: Upgrade\r\nSec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==\r\nSec-WebSocket-Version: 13\r\n\r\n";
+    if !_lb_send_all(fd, req as * u8, strlen(req as * u8) as i64) {
+        close(fd);
+        return 0 - 1;
+    }
+    let cap: i64 = 1024;
+    let buf: * u8 = malloc((cap + 4) as usize);
+    if buf as i64 == 0 {
+        close(fd);
+        return 0 - 1;
+    }
+    let n: i64 = _lb_recv_some(fd, buf, cap);
+    free(buf);
+    if n <= 0 {
+        close(fd);
+        return 0 - 1;
+    }
+    return fd;
+}
+
+test "websocket.serve loopback: ping/pong, fragmentation, close-code, protocol errors" ![io] {
+    // Same teardown constraint as the tests above: without a reaper the
+    // spawned server would orphan the fixed port and poison later runs.
+    if _timeout_cmd().length == 0 {
+        print.info("[websocket-serve-protocol] SKIP: no timeout/gtimeout to reap the blocking server");
+        return;
+    }
+
+    let port = _lb_port3();
+    let main_path = _write_server3(_lb_port3_str());
+    let server_bin = _build_bin(main_path, _app_root3() + "/server-bin");
+    assert server_bin.length > 0;
+    let _handle = _spawn_server(server_bin);
+
+    let ready = _await_ready(port);
+    print.info("[websocket-serve-protocol] ready: " + ready);
+    assert ready.length > 0;
+    assert contains(ready, "101");
+
+    // Case 1: a PING is answered with a PONG carrying the same payload, and
+    // the connection stays open for subsequent data frames.
+    let fd1: i32 = _lb_open_ready(port);
+    assert fd1 >= 0;
+    assert _lb_send_frame_raw(fd1, 1, 9, true, "pingdata" as * u8, 8);
+    let mut op_pong: i64 = 0 - 1;
+    let pong = _lb_read_frame(fd1, & op_pong);
+    print.info("[websocket-serve-protocol] pong opcode=" + op_pong + " payload="
+        + pong);
+    assert op_pong == 10;
+    assert pong == "pingdata";
+    assert _lb_send_frame_raw(fd1, 1, 1, true, "still-here" as * u8, 10);
+    let mut op_after: i64 = 0 - 1;
+    let after = _lb_read_frame(fd1, & op_after);
+    assert op_after == 1;
+    assert after == "still-here";
+    close(fd1);
+
+    // Case 2: a fragmented message (initial TEXT FIN=0 + continuation FIN=1)
+    // is reassembled and echoed back as a single message.
+    let fd2: i32 = _lb_open_ready(port);
+    assert fd2 >= 0;
+    assert _lb_send_frame_raw(fd2, 0, 1, true, "Hello" as * u8, 5);
+    assert _lb_send_frame_raw(fd2, 1, 0, true, "World" as * u8, 5);
+    let mut op_frag: i64 = 0 - 1;
+    let frag = _lb_read_frame(fd2, & op_frag);
+    print.info("[websocket-serve-protocol] reassembled opcode=" + op_frag
+        + " payload="
+        + frag);
+    assert op_frag == 1;
+    assert frag == "HelloWorld";
+    close(fd2);
+
+    // Case 3: a client CLOSE carrying a 2-byte status code round-trips that
+    // code (not a bare empty CLOSE).
+    let fd3: i32 = _lb_open_ready(port);
+    assert fd3 >= 0;
+    let code_buf: * u8 = malloc(8 as usize);
+    assert code_buf as i64 != 0;
+    memset(_lb_ptr_off(code_buf, 0), 3, 1 as usize);
+    memset(_lb_ptr_off(code_buf, 1), 232, 1 as usize);
+    assert _lb_send_frame_raw(fd3, 1, 8, true, code_buf, 2);
+    free(code_buf);
+    let mut op_close: i64 = 0 - 1;
+    let mut code_close: i64 = 0 - 1;
+    assert _lb_read_close(fd3, & op_close, & code_close);
+    print.info("[websocket-serve-protocol] close-echo opcode=" + op_close
+        + " code="
+        + code_close);
+    assert op_close == 8;
+    assert code_close == 1000;
+    close(fd3);
+
+    // Case 4: an unmasked client frame is a protocol error — refused with a
+    // CLOSE carrying code 1002.
+    let fd4: i32 = _lb_open_ready(port);
+    assert fd4 >= 0;
+    assert _lb_send_frame_raw(fd4, 1, 1, false, "nomask" as * u8, 6);
+    let mut op_1002: i64 = 0 - 1;
+    let mut code_1002: i64 = 0 - 1;
+    assert _lb_read_close(fd4, & op_1002, & code_1002);
+    print.info("[websocket-serve-protocol] unmasked-reject opcode=" + op_1002
+        + " code="
+        + code_1002);
+    assert op_1002 == 8;
+    assert code_1002 == 1002;
+    close(fd4);
+
+    // Case 5: an over-large single frame (declared length only, no payload)
+    // is refused with CLOSE 1009 before any allocation — the DoS floor.
+    let fd5: i32 = _lb_open_ready(port);
+    assert fd5 >= 0;
+    assert _lb_send_oversize_header(fd5);
+    let mut op_1009a: i64 = 0 - 1;
+    let mut code_1009a: i64 = 0 - 1;
+    assert _lb_read_close(fd5, & op_1009a, & code_1009a);
+    print.info("[websocket-serve-protocol] oversize-frame opcode=" + op_1009a
+        + " code="
+        + code_1009a);
+    assert op_1009a == 8;
+    assert code_1009a == 1009;
+    close(fd5);
+
+    // Case 6: an oversize REASSEMBLY (two in-cap fragments whose sum exceeds
+    // the message cap) is refused with CLOSE 1009 — the buffer is bounded,
+    // not grown without limit.
+    let fd6: i32 = _lb_open_ready(port);
+    assert fd6 >= 0;
+    let frag_len: i64 = 525000;
+    let big: * u8 = malloc((frag_len + 4) as usize);
+    assert big as i64 != 0;
+    memset(big, 65, frag_len as usize);
+    assert _lb_send_frame_raw(fd6, 0, 1, true, big, frag_len);
+    assert _lb_send_frame_raw(fd6, 1, 0, true, big, frag_len);
+    free(big);
+    let mut op_1009b: i64 = 0 - 1;
+    let mut code_1009b: i64 = 0 - 1;
+    assert _lb_read_close(fd6, & op_1009b, & code_1009b);
+    print.info("[websocket-serve-protocol] oversize-reassembly opcode="
+        + op_1009b
+        + " code="
+        + code_1009b);
+    assert op_1009b == 8;
+    assert code_1009b == 1009;
+    close(fd6);
+
+    let _rm = process.run(["rm", "-rf", _app_root3()]);
 }

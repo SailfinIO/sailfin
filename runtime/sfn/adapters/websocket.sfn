@@ -12,8 +12,10 @@
 // Scope: `ws://` only (no TLS/`wss://`). Client: connect, send a single
 // masked TEXT frame, close. Server: bind/listen/accept, dispatching each
 // connection to a shared worker pool (#1923), echo TEXT/BINARY frames back
-// unmasked, reply to CLOSE. Neither half implements fragmentation or
-// ping/pong.
+// unmasked, reply to PING with PONG, absorb PONG, reassemble fragmented
+// messages (bounded), and complete the RFC 6455 close handshake (echo the
+// client's close code; reject an unmasked or over-large frame with the
+// matching close code, #1924).
 //
 // ABI. `compiler/src/llvm/runtime_helpers.sfn` points the websocket
 // registry rows at the exports below (owned by the orchestrator, not
@@ -49,6 +51,11 @@ extern fn free(ptr: * u8) -> void;
 extern fn memset(dst: * u8, byte: i32, n: usize) -> * u8;
 
 extern fn memcpy(dst: * u8, src: * u8, n: usize) -> * u8;
+
+// `realloc` grows the fragment-reassembly buffer in place across
+// continuation frames (`_ws_conn_worker`); returns null on failure
+// without freeing the original block (standard C semantics).
+extern fn realloc(ptr: * u8, size: usize) -> * u8;
 
 extern fn strlen(s: * u8) -> usize;
 
@@ -924,46 +931,84 @@ fn _ws_server_frame_send(fd: i32, opcode: i64, payload: * u8, payload_len: i64) 
     return ok;
 }
 
-// `_ws_frame_read(fd, out_opcode, out_payload_slot, out_len_slot)` —
-// read exactly one CLIENT frame and unmask it. Writes the opcode, the
-// `i64` bit-pattern of a freshly `malloc`'d NUL-terminated payload
-// buffer (the caller casts back with `as * u8` and owns/frees it — the
-// same slot-write idiom as `_ws_parse_url`), and the payload length
-// through the three out-params. Returns false on a protocol error
-// (an unmasked "client" frame) or any `recv` failure.
-fn _ws_frame_read(fd: i32, out_opcode: * i64, out_payload_slot: * i64, out_len_slot: * i64) -> bool {
+// `_ws_max_frame_len()` — maximum accepted single-frame payload length
+// (bytes). A client frame declaring more is rejected with close `1009`
+// (message too big) instead of allocated, so a malicious extended-length
+// header cannot force an unbounded `malloc` on the un-memory-capped compiled
+// server (#1924). Mirrors the HTTP server's 1 MiB request-body cap
+// (`serve.sfn`).
+fn _ws_max_frame_len() -> i64 { return 1048576; }
+
+// `_ws_max_message_len()` — maximum reassembled message length across a
+// fragmented sequence (bytes). Bounds the continuation-frame reassembly
+// buffer so a stream of fragments cannot grow it without limit (#1924); an
+// over-cap reassembly is rejected with close `1009`. Held equal to the
+// single-frame cap so no reassembled message exceeds what one frame may
+// carry.
+fn _ws_max_message_len() -> i64 { return 1048576; }
+
+// `_ws_server_close_send(fd, code)` — send an UNMASKED CLOSE frame (opcode
+// 0x8) carrying `code` as the RFC 6455 2-byte big-endian status code, used
+// for the protocol-error (`1002`) and message-too-big (`1009`) teardown
+// paths. malloc(4), not 2: keeps the module's content+slack over-allocation
+// invariant even though only the first 2 bytes are sent.
+fn _ws_server_close_send(fd: i32, code: i64) -> bool {
+    let body: * u8 = malloc(4 as usize);
+    if body as i64 == 0 { return false; }
+    memset(_ws_ptr_off(body, 0), ((code >> 8) & 255) as i32, 1 as usize);
+    memset(_ws_ptr_off(body, 1), (code & 255) as i32, 1 as usize);
+    let ok: bool = _ws_server_frame_send(fd, 8, body, 2);
+    free(body);
+    return ok;
+}
+
+// `_ws_frame_read(fd, out_fin, out_opcode, out_payload_slot, out_len_slot)` —
+// read exactly one CLIENT frame and unmask it. Writes the FIN bit (0/1),
+// the opcode, the `i64` bit-pattern of a freshly `malloc`'d NUL-terminated
+// payload buffer (the caller casts back with `as * u8` and owns/frees it —
+// the same slot-write idiom as `_ws_parse_url`), and the payload length
+// through the four out-params. Returns a status code rather than a bool so
+// the caller can pick the right close-handshake reply:
+//   0 = OK (out-params filled).
+//   1 = I/O failure / EOF / OOM — the peer is gone; just close.
+//   2 = protocol error (an unmasked "client" frame) — reply close `1002`.
+//   3 = frame length exceeds `_ws_max_frame_len()` — reply close `1009`.
+// On any non-zero status the out-params are untouched (no payload to free).
+fn _ws_frame_read(fd: i32, out_fin: * i64, out_opcode: * i64, out_payload_slot: * i64, out_len_slot: * i64) -> i64 {
     // malloc(12), not 8: the `len7 == 127` path fills 8 content bytes and
     // reads them with `_ws_byte_at`, whose 4-byte load at offset 7 touches
     // bytes 7..10 — so 8 content + 4 tail-load slack, matching this module's
     // content+4 over-allocation invariant (the 2-byte header read needs less,
     // but the buffer is reused for the widest read).
     let hdr: * u8 = malloc(12 as usize);
-    if hdr as i64 == 0 { return false; }
+    if hdr as i64 == 0 { return 1; }
     if !_ws_recv_exact(fd, hdr, 2) {
         free(hdr);
-        return false;
+        return 1;
     }
     let byte0: i64 = _ws_byte_at(hdr, 0);
     let byte1: i64 = _ws_byte_at(hdr, 1);
+    let fin: i64 = (byte0 >> 7) & 1;
     let opcode: i64 = byte0 & 15;
     if (byte1 & 128) == 0 {
-        // RFC 6455: client-to-server frames MUST be masked.
+        // RFC 6455 §5.1: client-to-server frames MUST be masked. Signal a
+        // protocol error so the caller replies with close `1002`.
         free(hdr);
-        return false;
+        return 2;
     }
     let len7: i64 = byte1 & 127;
     let mut len: i64 = len7;
     if len7 == 126 {
         if !_ws_recv_exact(fd, hdr, 2) {
             free(hdr);
-            return false;
+            return 1;
         }
         len = (_ws_byte_at(hdr, 0) << 8) | _ws_byte_at(hdr, 1);
     } else {
         if len7 == 127 {
             if !_ws_recv_exact(fd, hdr, 8) {
                 free(hdr);
-                return false;
+                return 1;
             }
             let mut v: i64 = 0;
             let mut k: i64 = 0;
@@ -977,24 +1022,21 @@ fn _ws_frame_read(fd: i32, out_opcode: * i64, out_payload_slot: * i64, out_len_s
     }
     free(hdr);
 
-    // v0 frame-length guard: reject a negative length (a 64-bit extended
-    // length with the MSB set, which would wrap the `len + 4` allocation
-    // request) and cap the payload at a generous v0 maximum so a malicious
-    // `127`-length frame cannot force an unbounded `malloc` (remote DoS) —
-    // the compiled server is not memory-capped, only the toolchain self-caps.
-    // The full configurable cap + RFC 6455 close `1009` (message too big) is
-    // tracked in #1924; this is the minimal safety floor. The client half
-    // never sends frames anywhere near this size.
-    let max_frame: i64 = 16777216;
-    if len < 0 || len > max_frame { return false; }
+    // Frame-length guard: reject a negative length (a 64-bit extended length
+    // with the MSB set, which would wrap the `len + 4` allocation request) or
+    // one over `_ws_max_frame_len()` so a malicious `127`-length frame cannot
+    // force an unbounded `malloc` (remote DoS) — the compiled server is not
+    // memory-capped, only the toolchain self-caps. Signal message-too-big so
+    // the caller replies with close `1009` (#1924).
+    if len < 0 || len > _ws_max_frame_len() { return 3; }
 
     // malloc(8), not 4: `_ws_byte_at`'s 4-byte tail load at key[3] needs the
     // slack, matching `_ws_frame_send`'s identical over-allocation.
     let key: * u8 = malloc(8 as usize);
-    if key as i64 == 0 { return false; }
+    if key as i64 == 0 { return 1; }
     if !_ws_recv_exact(fd, key, 4) {
         free(key);
-        return false;
+        return 1;
     }
 
     // +4, not +1: the NUL terminator needs the same `_ws_byte_at` tail-load
@@ -1002,13 +1044,13 @@ fn _ws_frame_read(fd: i32, out_opcode: * i64, out_payload_slot: * i64, out_len_s
     let payload: * u8 = malloc((len + 4) as usize);
     if payload as i64 == 0 {
         free(key);
-        return false;
+        return 1;
     }
     if len > 0 {
         if !_ws_recv_exact(fd, payload, len) {
             free(key);
             free(payload);
-            return false;
+            return 1;
         }
     }
     let mut i: i64 = 0;
@@ -1022,10 +1064,11 @@ fn _ws_frame_read(fd: i32, out_opcode: * i64, out_payload_slot: * i64, out_len_s
     memset(_ws_ptr_off(payload, len), 0, 1 as usize);
     free(key);
 
+    atomic_store(out_fin, fin);
     atomic_store(out_opcode, opcode);
     atomic_store(out_payload_slot, payload as i64);
     atomic_store(out_len_slot, len);
-    return true;
+    return 0;
 }
 
 // `_ws_srv_handshake(fd)` — read the client's HTTP GET upgrade request
@@ -1106,13 +1149,20 @@ fn _ws_srv_handshake(fd: i32) -> bool {
 // 8-byte cell `[client_fd: i64]` (freed here up front — no handler slot,
 // unlike `serve.sfn`'s 16-byte pair, since `websocket.serve` has no user
 // handler surface yet). Arms the socket timeouts, completes the RFC 6455
-// handshake, then loops reading single-frame (FIN=1) client frames and
-// echoing TEXT/BINARY payloads back unmasked; a CLOSE frame gets an
-// unmasked CLOSE reply before the connection closes. PING/PONG and any
-// other opcode are silently drained (#1877). Returns null (serve is
-// fire-and-forget; the `Task` result is unused). Calls only effect-free
-// externs and effect-erased helpers, so it carries no effect annotation —
-// matching `serve.sfn::_serve_conn_worker` and `future.sfn`'s trampolines.
+// handshake, then loops reading client frames and driving the RFC 6455
+// protocol (#1924):
+//   - TEXT/BINARY (0x1/0x2): echoed back unmasked; a FIN=0 frame opens a
+//     fragmented message that continuation frames (0x0) grow until FIN=1,
+//     bounded by `_ws_max_message_len()`.
+//   - PING (0x9): answered with a PONG carrying the same payload.
+//   - PONG (0xA): silently absorbed.
+//   - CLOSE (0x8): the client's close code (+ optional reason) is echoed,
+//     completing the close handshake, then the connection closes.
+//   - An unmasked or over-large frame is refused with close `1002` / `1009`.
+// Returns null (serve is fire-and-forget; the `Task` result is unused).
+// Calls only effect-free externs and effect-erased helpers, so it carries no
+// effect annotation — matching `serve.sfn::_serve_conn_worker` and
+// `future.sfn`'s trampolines.
 fn _ws_conn_worker(ctx: * u8) -> * u8 {
     if ctx as i64 == 0 { return null; }
     let fd_slot: * i64 = ctx as * i64;
@@ -1125,21 +1175,134 @@ fn _ws_conn_worker(ctx: * u8) -> * u8 {
         close(fd);
         return null;
     }
+
+    // Fragment-reassembly state (RFC 6455 §5.4). The initial data frame
+    // (FIN=0, opcode 0x1/0x2) seeds `frag_buf` and records its `frag_opcode`;
+    // continuation frames (0x0) grow the buffer via `realloc` until FIN=1,
+    // at which point the reassembled message is echoed with `frag_opcode`.
+    // `frag_buf` holds the buffer's i64 bit-pattern (0 when inactive).
+    let mut frag_active: bool = false;
+    let mut frag_opcode: i64 = 0;
+    let mut frag_buf: i64 = 0;
+    let mut frag_len: i64 = 0;
+
     loop {
+        let mut fin: i64 = 0;
         let mut opcode: i64 = 0;
         let mut payload_addr: i64 = 0;
         let mut len: i64 = 0;
-        if !_ws_frame_read(fd, & opcode, & payload_addr, & len) { break; }
+        let status: i64 = _ws_frame_read(fd, & fin, & opcode, & payload_addr, & len);
+        if status == 1 { break; }
+        if status == 2 {
+            // Unmasked client frame: close the handshake with `1002`.
+            _ws_server_close_send(fd, 1002);
+            break;
+        }
+        if status == 3 {
+            // Declared length over the cap: close with `1009` (too big).
+            _ws_server_close_send(fd, 1009);
+            break;
+        }
+
         if opcode == 8 {
-            _ws_server_frame_send(fd, 8, null, 0);
+            // CLOSE: echo the client's status code (+ optional reason) rather
+            // than a bare empty CLOSE, clamped to the 125-byte control-frame
+            // limit (RFC 6455 §5.5) so the reply stays a valid short-length
+            // control frame. An empty client CLOSE round-trips as empty.
+            let mut close_len: i64 = len;
+            if close_len > 125 { close_len = 125; }
+            _ws_server_frame_send(fd, 8, payload_addr as * u8, close_len);
             free(payload_addr as * u8);
             break;
         }
-        if opcode == 1 || opcode == 2 {
-            _ws_server_frame_send(fd, opcode, payload_addr as * u8, len);
+        if opcode == 9 {
+            // PING -> PONG with the same application data (clamped to the
+            // 125-byte control-frame limit).
+            let mut ping_len: i64 = len;
+            if ping_len > 125 { ping_len = 125; }
+            _ws_server_frame_send(fd, 10, payload_addr as * u8, ping_len);
             free(payload_addr as * u8);
-        } else { free(payload_addr as * u8); }
+            continue;
+        }
+        if opcode == 10 {
+            // PONG: heartbeat acknowledgement, silently absorbed.
+            free(payload_addr as * u8);
+            continue;
+        }
+        if opcode == 1 || opcode == 2 {
+            if frag_active {
+                // A new data frame while a fragmented message is open is a
+                // protocol violation (RFC 6455 §5.4).
+                free(payload_addr as * u8);
+                free(frag_buf as * u8);
+                frag_active = false;
+                _ws_server_close_send(fd, 1002);
+                break;
+            }
+            if fin == 1 {
+                // Complete single-frame message: echo it unchanged.
+                _ws_server_frame_send(fd, opcode, payload_addr as * u8, len);
+                free(payload_addr as * u8);
+                continue;
+            }
+            // Start of a fragmented message: adopt the payload buffer as the
+            // reassembly buffer (ownership transfers here — not freed).
+            frag_active = true;
+            frag_opcode = opcode;
+            frag_buf = payload_addr;
+            frag_len = len;
+            continue;
+        }
+        if opcode == 0 {
+            if !frag_active {
+                // Continuation with no message in progress: protocol error.
+                free(payload_addr as * u8);
+                _ws_server_close_send(fd, 1002);
+                break;
+            }
+            let new_len: i64 = frag_len + len;
+            if new_len > _ws_max_message_len() {
+                // Reassembled message exceeds the cap: refuse rather than grow
+                // the buffer without bound (#1924).
+                free(payload_addr as * u8);
+                free(frag_buf as * u8);
+                frag_active = false;
+                _ws_server_close_send(fd, 1009);
+                break;
+            }
+            let grown: * u8 = realloc(frag_buf as * u8, (new_len + 4) as usize);
+            if grown as i64 == 0 {
+                // realloc failed; the original block is still live. Free it and
+                // tear the connection down.
+                free(payload_addr as * u8);
+                free(frag_buf as * u8);
+                frag_active = false;
+                break;
+            }
+            frag_buf = grown as i64;
+            if len > 0 {
+                memcpy(_ws_ptr_off(grown, frag_len), payload_addr as * u8, len as usize);
+            }
+            // Keep the module's payload-buffer invariant: NUL-terminate at the
+            // new end (the +4 slack in `new_len + 4` covers it) so the buffer
+            // stays safe for any `_ws_byte_at`-style tail read.
+            memset(_ws_ptr_off(grown, new_len), 0, 1 as usize);
+            free(payload_addr as * u8);
+            frag_len = new_len;
+            if fin == 1 {
+                // Final fragment: echo the reassembled message as one frame.
+                _ws_server_frame_send(fd, frag_opcode, frag_buf as * u8, frag_len);
+                free(frag_buf as * u8);
+                frag_active = false;
+                frag_buf = 0;
+                frag_len = 0;
+            }
+            continue;
+        }
+        // Any other (reserved) opcode: drain and ignore.
+        free(payload_addr as * u8);
     }
+    if frag_active { free(frag_buf as * u8); }
     close(fd);
     return null;
 }
