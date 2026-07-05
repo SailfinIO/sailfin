@@ -700,7 +700,7 @@ The `http` module provides outbound HTTP client functionality. All operations re
 Perform an HTTP GET request to `url` and return a `Response`. Blocks until the response is received or the request fails.
 
 ```sfn
-fn fetch_json(url: string) -> string ![net] {
+fn fetch_status() -> string ![net] {
     // http:// and https:// both work; TLS is transparent for https://,
     // with certificate-chain + hostname verification enforced by default.
     let response = http.get("https://example.com/status");
