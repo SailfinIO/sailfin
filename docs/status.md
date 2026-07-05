@@ -193,7 +193,7 @@ here.
   real `sfn_websocket_*` symbols in `runtime/sfn/adapters/websocket.sfn` — the
   `sfn_websocket_unbridged` metadata-only sentinel is gone for this family, so
   the calls lower, link, and self-host like any other member-call bridge (e.g.
-  `http.*`). Client (#1876): `ws://` connect + a single masked TEXT/BINARY send
+  `http.*`). Client (#1876): `ws://` connect + a single masked TEXT send
   + close. Server (#1877, v0): `websocket.serve(port)` binds/listens/accepts and
   runs an RFC 6455 echo loop — single connection at a time, blocking, unmasked
   server frames, no fragmentation/ping-pong, no `wss://`. `![net]` is enforced

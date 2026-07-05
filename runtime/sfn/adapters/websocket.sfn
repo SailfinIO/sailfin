@@ -956,6 +956,17 @@ fn _ws_frame_read(fd: i32, out_opcode: * i64, out_payload_slot: * i64, out_len_s
     }
     free(hdr);
 
+    // v0 frame-length guard: reject a negative length (a 64-bit extended
+    // length with the MSB set, which would wrap the `len + 4` allocation
+    // request) and cap the payload at a generous v0 maximum so a malicious
+    // `127`-length frame cannot force an unbounded `malloc` (remote DoS) —
+    // the compiled server is not memory-capped, only the toolchain self-caps.
+    // The full configurable cap + RFC 6455 close `1009` (message too big) is
+    // tracked in #1924; this is the minimal safety floor. The client half
+    // never sends frames anywhere near this size.
+    let max_frame: i64 = 16777216;
+    if len < 0 || len > max_frame { return false; }
+
     // malloc(8), not 4: `_ws_byte_at`'s 4-byte tail load at key[3] needs the
     // slack, matching `_ws_frame_send`'s identical over-allocation.
     let key: * u8 = malloc(8 as usize);
@@ -1080,7 +1091,12 @@ fn _ws_srv_handshake(fd: i32) -> bool ![net] {
 // and any other opcode are silently drained (no ping/pong handling yet,
 // #1877). The accept loop only exits on an `accept` error.
 fn sfn_websocket_serve(port: i32) -> void ![net] {
-    let listen_fd: i32 = _ws_srv_bind_listen(port as i64);
+    // Reject an out-of-range port before packing it into the sockaddr: a
+    // negative or > 65535 value would truncate into an unintended u16 (e.g.
+    // -1 -> 65535) and bind a port the caller never asked for.
+    let port_i64: i64 = port as i64;
+    if port_i64 <= 0 || port_i64 > 65535 { return; }
+    let listen_fd: i32 = _ws_srv_bind_listen(port_i64);
     if listen_fd < 0 { return; }
     loop {
         let fd: i32 = accept(listen_fd, null, null);

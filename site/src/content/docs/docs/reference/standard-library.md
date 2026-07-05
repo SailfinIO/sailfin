@@ -746,7 +746,7 @@ The following HTTP features are planned for a future release:
 
 ## `websocket` module
 
-The `websocket` module provides a Sailfin-native RFC 6455 `ws://` client and a v0 echo server, imported as `import { websocket } from "http";`. The module is bound from `runtime/sfn/adapters/websocket.sfn` and, as of #1876 (client) and #1877 (server), lowers to real `sfn_websocket_*` runtime symbols — not the `sfn_websocket_unbridged` metadata-only sentinel these calls previously carried. There is no `WebSocket` struct type — a connection is an opaque handle (a raw pointer under the hood); treat it as an unannotated value threaded between calls.
+The `websocket` module provides a Sailfin-native RFC 6455 `ws://` client and a v0 echo server. Like `http.*`, the `websocket.*` calls are a built-in runtime namespace available without an explicit import (the examples below call `websocket.*` directly); an `import { websocket } from "http";` also resolves for readers who prefer a named import. The module is bound from `runtime/sfn/adapters/websocket.sfn` and, as of #1876 (client) and #1877 (server), lowers to real `sfn_websocket_*` runtime symbols — not the `sfn_websocket_unbridged` metadata-only sentinel these calls previously carried. There is no `WebSocket` struct type — a connection is an opaque handle (a raw pointer under the hood); treat it as an unannotated value threaded between calls.
 
 ---
 
@@ -794,7 +794,7 @@ fn run_echo_server() ![net] {
 
 > **Convention:** like other registry-driven member-call runtime bridges, the argument is a bare scalar — `websocket.serve(8080)` — not an object literal. `websocket.serve({ port: 8080 })` is unreachable; the bridge marshals scalar arguments only, not struct literals.
 
-**v0 scope.** Shipped: the client half (connect / one masked TEXT-or-BINARY send / close) and a single-connection blocking echo server (bind/listen/accept, RFC 6455 handshake, unmasked TEXT/BINARY echo, CLOSE reply). Not yet shipped (epic #1180 follow-ups):
+**v0 scope.** Shipped: the client half (connect / one masked TEXT send / close) and a single-connection blocking echo server (bind/listen/accept, RFC 6455 handshake, unmasked TEXT/BINARY echo, CLOSE reply). Not yet shipped (epic #1180 follow-ups):
 
 - Concurrency-pool dispatch, so the server can hold more than one connection at a time (#1923)
 - Ping/pong, frame fragmentation, and close-code completeness (#1924)

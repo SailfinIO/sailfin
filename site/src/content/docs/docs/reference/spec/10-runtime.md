@@ -26,7 +26,7 @@ See [Standard Library — `sfn/http` capsule](/docs/reference/standard-library#s
 
 **WebSocket (v0, `ws://` only, require `![net]`)**:
 `websocket.connect(url)`, `websocket.send(handle, msg)`, `websocket.close(handle)` —
-a client that opens a connection, sends one masked TEXT/BINARY frame at a
+a client that opens a connection, sends one masked TEXT frame at a
 time, and closes it. `websocket.send` additionally requires `![io]` (the
 effect checker's conservative, receiver-agnostic `.send(...)` rule, shared
 with `channel.send`, applies here too). `websocket.serve(port)` binds/
