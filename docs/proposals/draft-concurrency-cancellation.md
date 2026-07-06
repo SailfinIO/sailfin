@@ -6,7 +6,7 @@ type: runtime
 created: 2026-07-06
 updated: 2026-07-06
 author: "agent:compiler-architect; human review"
-tracking: "#1540"   # origin (MCP-proxy enablement, gap C5); new epic # TBD
+tracking: "#1540, #1963"   # #1540 origin (MCP-proxy, gap C5); #1963 tracking epic
 supersedes:
 superseded-by:
 graduates-to:
@@ -18,7 +18,10 @@ graduates-to:
 
 Sailfin's structured-concurrency v0 works end-to-end — `spawn`/`await`,
 `channel()`, `parallel [...]`, and the `routine { }` nursery all run on a real
-pthread pool — but it is **join-all only** and **thread-per-task**. This SFEP
+pthread pool — but it is **join-all only** and **blocking (no task
+suspension)**: tasks are queued onto a fixed worker pool, so a task that blocks
+(e.g. a keep-alive connection waiting on I/O) pins its worker for the duration.
+This SFEP
 proposes maturing the concurrency runtime along two axes that gap C5 of epic
 #1540 (MCP-proxy enablement) routed out as design-heavy: (1) **cancel-on-fault**
 — when one child in a `routine { }` nursery faults, its siblings are cancelled
@@ -406,6 +409,8 @@ Phase 2:
   baseline — pool is now `min(cores, 32)` / `SAILFIN_THREADS`.) Related gaps:
   B4 (keep-alive), B5 (concurrency ceiling / scalable I/O), A2/A3 (stdio
   poll/read, #1580).
+- **#1963** — Epic: concurrency runtime maturity — the tracking epic this SFEP
+  designs; Phase 1 (#1964) and Phase 2 (#1965) are its phase trackers.
 - **#1385** — Epic: close the REST-server dogfooding gaps (serve request
   delivery, router, closure handlers) — the `serve` reactor migration overlaps.
 - **#1944** — `async fn` typecheck wiring (`await` not in the live walk);
