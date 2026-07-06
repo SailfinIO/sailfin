@@ -4,9 +4,9 @@ title: Capsule-Defined Decorators
 status: Draft
 type: language
 created: 2026-06-15
-updated: 2026-06-15
+updated: 2026-07-06
 author: "agent:compiler-architect"
-tracking:
+tracking: ["#1557"]
 supersedes:
 superseded-by:
 graduates-to:

@@ -4,9 +4,9 @@ title: "CI Test-Speed Plan"
 status: Accepted
 type: tooling
 created: 2026-05-01
-updated: 2026-07-01
+updated: 2026-07-06
 author: "agent:compiler-architect"
-tracking: "#1012"
+tracking: "#1012, #843"
 supersedes:
 superseded-by:
 graduates-to:

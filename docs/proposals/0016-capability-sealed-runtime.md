@@ -4,9 +4,9 @@ title: The Capability-Sealed Runtime
 status: Accepted
 type: runtime
 created: 2026-06-07
-updated: 2026-06-26
+updated: 2026-07-06
 author: "agent:compiler-architect; project owner (repositioning)"
-tracking: "#1639"
+tracking: "#1639, #934, #1642, #1643"
 supersedes:
 superseded-by:
 graduates-to:
