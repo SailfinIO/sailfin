@@ -270,6 +270,62 @@ fn _lookup_nested_rename(renames: NestedRename[], name: string) -> string {
     return "";
 }
 
+// Look up the DEFINITION rename (the lifted symbol name) for a nested fn,
+// skipping shadow-suppression sentinels (`to == ""`, appended by
+// `_shadow_nested_rename` when a value binding / parameter shadows the name).
+// A real hoist rename always carries a non-empty mangled `to`, so scanning
+// innermost-first for the first non-shadow match yields this block's lifted
+// symbol even when a same-named `let` later shadowed the call path (#1940).
+fn _lookup_nested_mangled(renames: NestedRename[], name: string) -> string {
+    let mut _i: int = renames.length - 1;
+    loop {
+        if _i < 0 { break; }
+        if renames[_i].from == name {
+            if renames[_i].to.length > 0 { return renames[_i].to; }
+        }
+        _i -= 1;
+    }
+    return "";
+}
+
+// Append a shadow-suppression sentinel for `name` (#1940). A value binding
+// (`let`/parameter) that shadows a same-named nested `fn` must call the binding,
+// not the lifted nested symbol. The sentinel (`to == ""`) sits at a higher index
+// than the hoist rename, so `_lookup_nested_rename` (innermost-first) returns ""
+// for a call to `name` from this point on and `_rename_call_callee` leaves the
+// call untouched. Block-scoped like every rename: `_rewrite_block` restores the
+// incoming list on exit, so the shadow lapses outside the binding's block.
+fn _shadow_nested_rename(renames: NestedRename[], name: string) -> NestedRename[] {
+    let mut out: NestedRename[] = [];
+    let mut _i: int = 0;
+    loop {
+        if _i >= renames.length { break; }
+        out.push(renames[_i]);
+        _i += 1;
+    }
+    out.push(NestedRename { from: name, to: "" });
+    return out;
+}
+
+// Seed shadow sentinels for a nested-fn / lambda body's OWN parameters (#1940).
+// Inside such a body a parameter is highest priority (typecheck's
+// `_build_nested_fn_scope` step 4), so a parameter sharing a name with a sibling
+// nested `fn` shadows it — a call to that name invokes the parameter value, not
+// the lifted sibling. Only params that actually collide with an active rename
+// are shadowed; the rest already resolve to no rename.
+fn _shadow_parameters(renames: NestedRename[], parameters: Parameter[]) -> NestedRename[] {
+    let mut out: NestedRename[] = renames;
+    let mut _i: int = 0;
+    loop {
+        if _i >= parameters.length { break; }
+        if _lookup_nested_rename(out, parameters[_i].name).length > 0 {
+            out = _shadow_nested_rename(out, parameters[_i].name);
+        }
+        _i += 1;
+    }
+    return out;
+}
+
 // Type-text sentinel assigned to the let binding whose initializer
 // is a lifted lambda. Maps to the `{i8*, i8*}` closure-pair LLVM
 // type via `map_type_annotation` and is intentionally a string the
@@ -457,7 +513,12 @@ fn _synthesize_lifted_function_rewritten(ctx: LiftContext, lambda: Expression, l
     };
 
     let parsed_body = _reparse_lambda_body(lambda.body);
-    let rewritten = _rewrite_block(ctx, parsed_body);
+    // Seed the lambda body with its OWN parameter shadows (#1940): a lambda
+    // parameter sharing a name with a sibling nested fn shadows it, so a call to
+    // that name invokes the parameter, not the lifted sibling. Callers reset
+    // `renames` from their own `ctx`, so the seed never leaks past this body.
+    let seeded_ctx = _with_renames(ctx, _shadow_parameters(ctx.renames, lambda.parameters));
+    let rewritten = _rewrite_block(seeded_ctx, parsed_body);
     let body_with_prologue = _prepend_capture_prologue(rewritten.block, lambda_id, captures);
     let no_decorators: Decorator[] = [];
     let lifted_fn = Statement.FunctionDeclaration {
@@ -569,10 +630,16 @@ fn _rewrite_block(ctx: LiftContext, block: Block) -> _BlockRewriteResult {
             // Hoist: rewrite the body with renames active (so self- and
             // sibling-calls resolve to lifted symbols), rename the fn to its
             // lifted symbol, collect it as a top-level function, and drop it
-            // from this block.
-            let body_result = _rewrite_block(current_ctx, stmt.body);
-            current_ctx = body_result.ctx;
-            let mangled = _lookup_nested_rename(current_ctx.renames, stmt.signature.name);
+            // from this block. The body is seeded with its OWN parameter shadows
+            // (#1940) so a parameter that shares a name with a sibling nested fn
+            // calls the parameter; the outer rename scope (without those param
+            // shadows) is restored afterward, keeping accumulated counter+lifted.
+            let body_seed = _with_renames(current_ctx, _shadow_parameters(current_ctx.renames, stmt.signature.parameters));
+            let body_result = _rewrite_block(body_seed, stmt.body);
+            current_ctx = _with_renames(body_result.ctx, current_ctx.renames);
+            // Definition rename skips shadow sentinels so the lifted symbol name
+            // is the real mangled name even if a same-named `let` shadowed it.
+            let mangled = _lookup_nested_mangled(current_ctx.renames, stmt.signature.name);
             let lifted_fn = Statement.FunctionDeclaration {
                 signature: _rename_signature(stmt.signature, mangled),
                 body: body_result.block,
@@ -585,6 +652,17 @@ fn _rewrite_block(ctx: LiftContext, block: Block) -> _BlockRewriteResult {
         } else {
             let result = _rewrite_statement(current_ctx, stmt);
             current_ctx = result.ctx;
+            // A value binding that shadows a same-named nested fn suppresses the
+            // call rename from its declaration point onward (#1940), matching
+            // typecheck's sequential-`let` resolution (the `let` out-prioritizes
+            // the block-hoisted fn). The sentinel is appended AFTER the
+            // initializer is rewritten, so the initializer itself still sees the
+            // nested fn.
+            if stmt.variant == "VariableDeclaration" {
+                if _lookup_nested_rename(current_ctx.renames, stmt.name).length > 0 {
+                    current_ctx = _with_renames(current_ctx, _shadow_nested_rename(current_ctx.renames, stmt.name));
+                }
+            }
             new_statements.push(result.statement);
         }
         index += 1;

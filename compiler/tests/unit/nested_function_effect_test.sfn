@@ -79,3 +79,28 @@ test "effects: an effectful nested fn inside a lambda body is effect-checked" ![
     let violations = _violations_for(source);
     assert _has_violation_for(violations, "logit");
 }
+
+// Soundness regression (#1940, SFEP-0042 §3.4 gap 2): same-named nested fns in
+// SIBLING blocks of one routine must resolve to the correct per-block effect
+// row. The flat routine-wide table folded both `h`s by bare name
+// (last-write-wins), so the pure `h` collected last masked the effectful `h`.
+// The effectful `h` is CALLED in the first block; `run` declares no effect, so
+// the call must be flagged — under the old flat table it silently passed
+// (under-approximation defeating capability enforcement).
+test "effects: sibling-block nested fn call resolves to its own effectful row" ![io] {
+    let source = "fn run() -> int { { fn h() ![io] { print.info(\"x\"); } h(); } { fn h() -> int { return 1; } } return 0; }";
+    let violations = _violations_for(source);
+    assert _has_violation_for(violations, "run");
+}
+
+// Soundness regression (#1940, SFEP-0042 §3.4 gap 2), reverse direction: a call
+// to a PURE nested `h` must NOT inherit a same-named effectful sibling's row.
+// The effectful `h` is declared (uncalled) in the second block, so it is
+// collected last and won the flat table — over-approximating the first block's
+// pure `h()` call and falsely flagging `run`. Block-scoped keying resolves the
+// call to the pure `h`, so `run` is not flagged.
+test "effects: sibling-block pure nested fn call is not tainted by an effectful sibling" ![io] {
+    let source = "fn run() -> int { { fn h() -> int { return 1; } let r = h(); } { fn h() ![io] { print.info(\"x\"); } } return 0; }";
+    let violations = _violations_for(source);
+    assert ! _has_violation_for(violations, "run");
+}
