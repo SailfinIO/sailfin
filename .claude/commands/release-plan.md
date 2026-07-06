@@ -358,8 +358,11 @@ record every reason; it strengthens the rationale):
    covered by sources 1–3.
 
    ```bash
-   # Last released tag for this line (stable if promoting, else latest alpha):
-   LAST=$(git describe --tags --abbrev=0 --match 'v*' 2>/dev/null)
+   # Baseline = the last release of this line. Exclude prereleases so a
+   # stable-promotion manifest spans the whole minor; fall back to the
+   # nearest v* tag if the line has no stable cut yet.
+   LAST=$(git describe --tags --abbrev=0 --match 'v*' --exclude '*-*' 2>/dev/null \
+          || git describe --tags --abbrev=0 --match 'v*' 2>/dev/null)
    SINCE=$(git log -1 --format=%cd --date=short "$LAST" 2>/dev/null)
    gh pr list --state merged --base main --search "merged:>=$SINCE" \
      --json number,title,closingIssuesReferences \
@@ -372,11 +375,14 @@ Classify each candidate as a recommendation, then **present the full set
 and stop for the user's decision** — do not apply anything yet:
 
 - **IN** — should gate this release (correctness regressions,
-  merged-but-unreleased work, priority:critical, SFEP items explicitly
-  targeting this version).
+  `priority:critical`, SFEP items explicitly targeting this version).
+  **Open issues only** — a merged/closed item is never IN; it belongs to
+  MANIFEST (see the open-only rule in 4.1).
 - **ROLL-FORWARD** — defer to a later release (epics/themes, speculative
   or unscoped `priority:high`, anything whose landing this cycle is
   uncertain).
+- **MANIFEST** — merged-but-unreleased work; informational only, never
+  labeled (rendered into the tracker's manifest section).
 
 Present grouped by disposition with a one-line rationale and the exact
 label each IN item would receive. The MANIFEST group is informational
