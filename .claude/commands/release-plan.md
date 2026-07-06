@@ -317,14 +317,45 @@ labeled, so the tracker renders empty.
 
 ### 4.1 — Full-reconcile scan (propose)
 
-Gather candidates that carry **no `release:*` label** from all of these
-sources. Deduplicate by issue number; an issue may hit several sources
-(record every reason — it strengthens the rationale).
+**Only open issues are gate-label candidates.** A `release:<gate>` label
+means "must close before the cut," so it is **never** applied to a
+closed/merged issue. Merged-but-unreleased work is summarized as an
+informational **manifest**, not proposed for labeling. Gather from all of
+these sources, deduplicating by issue number (an issue may hit several —
+record every reason; it strengthens the rationale):
 
-1. **Merged-but-unreleased** (the gap-closer). Issues closed by PRs merged
-   to `main` since the last release of this line, with no `release:*`
-   label. These *will* ship in the target whether or not anyone planned
-   them — labeling records them in the manifest.
+**Gate-label candidates (open only):**
+
+1. **Priority.** Open `priority:critical` and `priority:high` issues with
+   no `release:*` label.
+2. **Correctness regressions.** Open `type:bug` issues (any priority) with
+   no `release:*` label — a shipped-feature defect is a strong stable gate.
+3. **SFEP-targeted.** Read the SFEP registry (`docs/proposals/README.md`)
+   for proposals in `Accepted` (design-approved, implementation pending) or
+   `Draft`-with-tracking status; follow each SFEP's `tracking:` front-matter
+   to its implementing issues and include the open, unlabeled ones. (This is
+   the SFEP scan the old `--candidates` lacked.)
+4. **Seed state.** Cross-reference the open `seed-blocker` /
+   `needs-seed-cut` sets already pulled in Phase 3 — surface any not yet
+   labeled for the gate.
+5. **Focus issue.** If a `focus:approved` issue exists, include its
+   workstream targets.
+6. **Theme-milestone epics.** Open epics in the active theme milestones
+   (#6, #7, #8, #10, plus any matching the gate by topic). **Flag these as
+   "usually milestone-tracked, not a single-cut gate"** — surface but
+   default them to ROLL-FORWARD. An **epic is a container, not a gate unit**:
+   what belongs on a release gate is an epic's in-flight *sub-issue*, never
+   the multi-release epic itself.
+
+**Manifest (informational — never labeled):**
+
+7. **Merged-but-unreleased.** Issues closed by PRs merged to `main` since
+   the last release of this line — the headline work that *will* ship in
+   the target. Summarize as a count + notable features for the tracker's
+   manifest section; do **not** propose these for the gate label (they are
+   closed — see the open-only rule above). Its value is (a) the release
+   manifest and (b) catching any *open* unplanned work, which is already
+   covered by sources 1–3.
 
    ```bash
    # Last released tag for this line (stable if promoting, else latest alpha):
@@ -332,29 +363,8 @@ sources. Deduplicate by issue number; an issue may hit several sources
    SINCE=$(git log -1 --format=%cd --date=short "$LAST" 2>/dev/null)
    gh pr list --state merged --base main --search "merged:>=$SINCE" \
      --json number,title,closingIssuesReferences \
-     --jq '.[] | .closingIssuesReferences[]?.number' | sort -u
+     --jq '.[] | "\(.title)"' | sort -u
    ```
-
-   For each closing issue, keep it if it has no `release:*` label.
-
-2. **Priority.** Open `priority:critical` and `priority:high` issues with
-   no `release:*` label.
-3. **Correctness regressions.** Open `type:bug` issues (any priority) with
-   no `release:*` label — a shipped-feature defect is a strong stable gate.
-4. **SFEP-targeted.** Read the SFEP registry (`docs/proposals/README.md`)
-   for proposals in `Accepted` (design-approved, implementation pending) or
-   `Draft`-with-tracking status; follow each SFEP's `tracking:` front-matter
-   to its implementing issues and include the open, unlabeled ones. (This is
-   the SFEP scan the old `--candidates` lacked.)
-5. **Seed state.** Cross-reference the open `seed-blocker` /
-   `needs-seed-cut` sets already pulled in Phase 3 — surface any not yet
-   labeled for the gate.
-6. **Focus issue.** If a `focus:approved` issue exists, include its
-   workstream targets.
-7. **Theme milestones.** Open epics in the active theme milestones
-   (#6, #7, #8, #10, plus any matching the gate by topic). **Flag these as
-   "usually milestone-tracked, not a single-cut gate"** — surface but
-   default them to ROLL-FORWARD.
 
 ### 4.2 — Classify and present (your approval gate)
 
@@ -369,17 +379,22 @@ and stop for the user's decision** — do not apply anything yet:
   uncertain).
 
 Present grouped by disposition with a one-line rationale and the exact
-label each would receive:
+label each IN item would receive. The MANIFEST group is informational
+context — it is rendered into the tracker's manifest section, never
+labeled:
 
 ```
 Proposed scope — Release: vX.Y.Z (gate: release:<gate>)
 
-IN (apply release:<gate>):
-  #N — <title>   [merged 2d ago, unreleased · type:bug]
+IN (apply release:<gate> — open issues only):
+  #N — <title>   [type:bug · shipped-feature miscompile]
   #M — <title>   [priority:critical · SFEP-00NN target]
 
 ROLL-FORWARD (no label / defer):
   #P — <title>   [epic, milestone-tracked — not a single-cut gate]
+
+MANIFEST (merged since <last tag>, ships in target — informational, not labeled):
+  N issues; headliners: <feature>, <feature>, ...
 
 Reply: approve all IN · move #X to IN/ROLL · drop #Y · edit the set.
 ```
