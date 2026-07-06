@@ -4,7 +4,7 @@ title: CLI Modularization — Per-Worker RSS Relief First, Then Migration
 status: Implemented
 type: tooling
 created: 2026-06-26
-updated: 2026-07-03
+updated: 2026-07-06
 author: "agent:compiler-architect; human review"
 tracking: "#1671"
 supersedes: 9
@@ -22,6 +22,13 @@ graduates-to: docs/status.md
 > post-Phase-C structure (`sailfin_cli_main_v2` as the sole router;
 > `cli_main.sfn` = entry shims + `_usage`; `cli_commands*.sfn` deleted) see
 > `docs/status.md` "Toolchain" and the §7 Stage1 mapping below.
+>
+> **Two module-home follow-ups were deferred out of the Implemented end-state**
+> and are tracked as Phase D leaves (#1967, #1968) under epic #1671: folding the
+> root `cli_main.sfn` entry shim into `cli/` (which also removes the
+> `cli_main ↔ cli/main` mutual import), and relocating the `check` engine out of
+> the root `cli_check.sfn` into a frontend module home. See §3.6 — they are
+> deliberate, non-blocking polish, not gaps in the RSS/migration outcome.
 
 > Supersedes SFEP-0009 (`0009-cli-modularization-epic.md`). 0009 was written
 > 2026-05-06, **before** the runtime migration (#822) dumped the entire
@@ -276,6 +283,45 @@ deleted; `cli_main.sfn` retains only the entry shims (`main`,
 `native_cli_main`, `sailfin_cli_main_with_paths`, `_arena_telemetry_*`) and
 `_usage`, with `sailfin_cli_main_v2` (`cli/main.sfn`) as the sole dispatch.
 `compiler/src/main.sfn` cross-imports update to the new module paths.
+
+### 3.6 Deferred module-home follow-ups (post-Implemented, Phase D)
+
+The Phase C end-state (§3.5) deliberately fixed two module homes without
+evaluating whether they are the *right* homes — the epic was scoped to the RSS
+lever and the command migration, not to a from-scratch module-boundary review.
+Two follow-ups are therefore tracked as Phase D leaves (#1967, #1968) rather
+than left as silent residue. Both are pure structural refactors, self-hosting-
+safe with no seed cut (§5 applies verbatim); the epic's Implemented status does
+**not** depend on them.
+
+- **Entry shim stays at the src root (#1967).** §3.5 kept `cli_main.sfn` as a
+  root-level module holding the `@main` C-ABI entrypoint, the platform `extern`
+  decls, arena telemetry, the memory-budget call, `_usage`, and the
+  `sailfin_cli_main_with_paths` facade. That home is defensible — it is the
+  compiler binary's OS entry boundary, a peer of `compiler/src/main.sfn` (the
+  pipeline-orchestrator module `capsule.toml` names as `entry`). But it leaves a
+  **two-function mutual import** between `cli_main.sfn` (imports
+  `sailfin_cli_main_v2`) and `cli/main.sfn` (imports `_usage` +
+  `sailfin_cli_main_with_paths` back), which is an artifact of the split rather
+  than a design goal, and it puts pure CLI presentation (`_usage`) on the ABI
+  boundary. #1967 folds the entry shim into `cli/` (a new `cli/entry.sfn` or
+  `cli/main.sfn` itself) and moves `_usage` next to the command tree, dissolving
+  the cycle. The only hard constraint is that `fn main` / `native_cli_main` must
+  remain unmangled ABI carve-outs the emitter's entry detection still finds.
+
+- **`cli_check.sfn` stays at the src root (#1968).** §3.5 explicitly ruled the
+  `check` engine out of scope ("stays; `check` reuses it verbatim") so the
+  command migration stayed mechanical. But `cli_check.sfn` is not a CLI-dispatch
+  module — it is the `check` *engine* (group resolution, diagnostic rendering,
+  `--json` envelope, import-interface loading), coupled to the typecheck
+  import-loader diamond rule. It belongs alongside the frontend/pass machinery
+  (a `check/` or `frontend/` home), parallel to how Phase A carved `build/`,
+  leaving `cli/commands/check.sfn` as the thin command. #1968 performs that
+  relocation.
+
+When #1967 and #1968 land, this section is the record of *why* the interim
+homes were chosen; no status change is needed (the SFEP is already
+`Implemented` — these are polish, not completion criteria).
 
 ## 4. Effect & capability impact
 
