@@ -1093,7 +1093,7 @@ fn _rh_descriptors_08(descriptors_in: RuntimeHelperDescriptor[]) -> RuntimeHelpe
     // POINTER to the element bytes and returns i64 (1 ok / 0 closed);
     // receive is `sfn_channel_recv` and returns a pointer to a malloc'd
     // copy of the element bytes (null when closed+empty). The bespoke
-    // channel-method lowering in `core.sfn` (`_try_lower_channel_method`)
+    // channel-method lowering in `core_concurrency_lowering.sfn` (`try_lower_channel_method`)
     // emits the spill/load sequences around these signatures.
     // `channel_create`/`channel_close` stay `effects: []` (#1655): no checker
     // arm consults them today — only `.send`/`.receive` are detected as

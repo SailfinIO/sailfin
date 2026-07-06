@@ -724,8 +724,8 @@ fn resolve_call_method_target(trimmed_target: string, arguments: string[], bindi
                                     // are runtime-helper calls, not struct methods. Only
                                     // `close` routes through the descriptor here — its ABI
                                     // is a plain (i8*) -> void call. `send` / `receive`
-                                    // must lower via `_try_lower_channel_method` in
-                                    // core.sfn (#1266), which implements the runtime's
+                                    // must lower via `try_lower_channel_method` in
+                                    // core_concurrency_lowering.sfn (#1266), which implements the runtime's
                                     // by-pointer element contract (send spills the value
                                     // to a slot; receive loads the malloc'd copy). That
                                     // bespoke path intercepts every current route before
@@ -1221,8 +1221,8 @@ fn resolve_parsed_method_dispatch(result_target: string, arguments: string[], bi
                         if _g_is_channel_method {
                             // Only `close` routes through the descriptor here
                             // — a plain (i8*) -> void call. `send` / `receive`
-                            // must lower via `_try_lower_channel_method` in
-                            // core.sfn (#1266), which implements the runtime's
+                            // must lower via `try_lower_channel_method` in
+                            // core_concurrency_lowering.sfn (#1266), which implements the runtime's
                             // by-pointer element contract; that bespoke path
                             // intercepts every current route before this
                             // resolver runs, so seeing them here means a
