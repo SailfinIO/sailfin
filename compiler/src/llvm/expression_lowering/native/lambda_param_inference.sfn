@@ -236,6 +236,13 @@ fn backfill_lambda_return_from_body(lambda: Expression) -> Expression {
     };
 }
 
+// Running state for the body-return scan below: whether any value-returning
+// `return` was seen, and the last literal-inferable return type ("" if none).
+struct _BodyReturnScan {
+    has_value_return: boolean;
+    inferred: string;
+}
+
 // Infer a lambda body's return type text from its `return <expr>` statements.
 // A body with a value-returning `return` whose type is not literal-inferable
 // falls back to the untyped-lambda `int` ABI (#766); the last inferable `return`
@@ -243,27 +250,93 @@ fn backfill_lambda_return_from_body(lambda: Expression) -> Expression {
 // `fn () { print.info("x"); }`) keeps `void` — the ABI it lifted with before
 // #1949 — so this backfill never turns an ordinary void closure into a
 // value-returning function (which would emit a spurious `missing return`
-// lowering diagnostic and `ret i64 0`).
+// lowering diagnostic and `ret i64 0`). The scan recurses into nested blocks
+// (`if`/`match`/`try`/loops/etc.) so a lambda whose only value-returning
+// `return` lives inside a branch is still typed, not mis-lowered to `void`.
 fn _infer_body_return_text(body: Block) -> string {
-    let mut inferred: string = "";
-    let mut has_value_return: boolean = false;
+    let scan = _scan_block_returns(_BodyReturnScan {
+        has_value_return: false, inferred: ""
+    }, body);
+    if !scan.has_value_return { return "void"; }
+    if scan.inferred.length == 0 { return "int"; }
+    return scan.inferred;
+}
+
+fn _scan_block_returns(scan: _BodyReturnScan, block: Block) -> _BodyReturnScan {
+    let mut out: _BodyReturnScan = scan;
     let mut index: int = 0;
     loop {
-        if index >= body.statements.length { break; }
-        let statement = body.statements[index];
-        if statement.variant == "ReturnStatement" {
-            if statement.expression != null {
-                has_value_return = true;
-                let value: Expression = statement.expression;
-                let text = infer_expression_type(value);
-                if text.length > 0 { inferred = text; }
-            }
-        }
+        if index >= block.statements.length { break; }
+        out = _scan_statement_returns(out, block.statements[index]);
         index += 1;
     }
-    if !has_value_return { return "void"; }
-    if inferred.length == 0 { return "int"; }
-    return inferred;
+    return out;
+}
+
+// Recurse over the block-bearing statement variants (mirrors the traversal in
+// `_collect_statement_bindings`) so a `return <expr>` at any depth is counted.
+fn _scan_statement_returns(scan: _BodyReturnScan, statement: Statement) -> _BodyReturnScan {
+    let mut out: _BodyReturnScan = scan;
+    if statement.variant == "ReturnStatement" {
+        if statement.expression != null {
+            let value: Expression = statement.expression;
+            let text = infer_expression_type(value);
+            let mut new_inferred: string = out.inferred;
+            if text.length > 0 { new_inferred = text; }
+            out = _BodyReturnScan {
+                has_value_return: true,
+                inferred: new_inferred
+            };
+        }
+        return out;
+    }
+    if statement.variant == "IfStatement" {
+        out = _scan_block_returns(out, statement.then_block);
+        if statement.else_branch != null {
+            let branch = statement.else_branch;
+            if branch.body != null {
+                out = _scan_block_returns(out, branch.body);
+            } else if branch.statement != null {
+                out = _scan_statement_returns(out, branch.statement);
+            }
+        }
+        return out;
+    }
+    if statement.variant == "BlockStatement" {
+        return _scan_block_returns(out, statement.body);
+    }
+    if statement.variant == "WithStatement" {
+        return _scan_block_returns(out, statement.body);
+    }
+    if statement.variant == "ForStatement" {
+        return _scan_block_returns(out, statement.body);
+    }
+    if statement.variant == "LoopStatement" {
+        return _scan_block_returns(out, statement.body);
+    }
+    if statement.variant == "RoutineStatement" {
+        return _scan_block_returns(out, statement.body);
+    }
+    if statement.variant == "MatchStatement" {
+        let mut c: int = 0;
+        loop {
+            if c >= statement.cases.length { break; }
+            out = _scan_block_returns(out, statement.cases[c].body);
+            c += 1;
+        }
+        return out;
+    }
+    if statement.variant == "TryStatement" {
+        out = _scan_block_returns(out, statement.try_block);
+        if statement.catch_block != null {
+            out = _scan_block_returns(out, statement.catch_block);
+        }
+        if statement.finally_block != null {
+            out = _scan_block_returns(out, statement.finally_block);
+        }
+        return out;
+    }
+    return out;
 }
 
 // ── Case A: callee signature table ───────────────────────────────────

@@ -84,3 +84,13 @@ test "lambda: value-less let-bound closure keeps the void ABI and runs clean" ![
     let exit = _build_and_run(src);
     assert exit == 0;
 }
+
+// The return-type inference must recurse into nested blocks: an untyped
+// `let`-bound closure whose only value-returning `return`s live inside `if`
+// branches (no top-level `return`) must still lift to a value-returning
+// function, not `void`. Guards against a top-level-only scan (#1949 review).
+test "lambda: untyped closure with only nested returns lifts to a value ABI" ![io] {
+    let src = "fn main() -> int {\n    let f = fn (n: int) { if n > 0 { return 7; } else { return 0; } };\n    return f(5);\n}\n";
+    let exit = _build_and_run(src);
+    assert exit == 7;
+}
