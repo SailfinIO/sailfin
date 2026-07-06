@@ -16,15 +16,30 @@ lives in `/release`, and the cadence train (`.github/workflows/release-train.yml
 opens the tracker on the 2-week boundary and defers enrichment here. See
 `docs/conventions/issue-naming.md` "Release tracking" for the convention.
 
+Two responsibilities:
+
+1. **Plan** (always) — open or sync the tracker as a rendered mirror of the
+   current `release:*` label state (Phases 1–3, 5).
+2. **Curate** (`--candidates`) — the propose → **you approve** → apply loop
+   that *decides release scope* and applies the `release:<gate>` labels the
+   plan step then renders (Phase 4). Without this, unplanned merged work is
+   never labeled, so the tracker opens empty — the gap `--candidates`
+   exists to close.
+
 ## Target: $ARGUMENTS
 
 Parse `$ARGUMENTS` as a target version (with or without leading `v`)
 plus optional flags:
 
-- `--candidates` — also surface unlabeled issues that look like
-  candidates for the release (open epics in matching theme milestones,
-  `priority:high` items in the active focus issue's workstream).
-- `--dry-run` — print intended actions but make no changes.
+- `--candidates` — run the **full-reconcile curation loop**: scan issues,
+  SFEPs, and merged-but-unreleased work for candidates; propose a scoped
+  set classified IN vs ROLL-FORWARD with rationale; present it for your
+  approval; then **apply `release:<gate>` to the approved subset** and
+  re-render the tracker (Phase 4). Label writes happen *only* on your
+  explicit approval — never unattended, never under `--dry-run`.
+- `--dry-run` — print intended actions (including the candidate proposal)
+  but make no writes: no tracker edits, no sub-issue attaches, no label
+  applications.
 
 Examples:
 - `/release-plan v0.6.0` — open or sync `Release: v0.6.0`
@@ -292,27 +307,106 @@ still fitting inside one cadence interval.
 
 ---
 
-## Phase 4: CANDIDATES MODE (optional, when `--candidates` is set)
+## Phase 4: CURATION LOOP (when `--candidates` is set)
 
-Surface unlabeled issues that *might* belong on this release's gate:
+The scope-deciding half of the command: **propose → you approve → apply**.
+It is the only step that writes `release:*` labels, and only ever to the
+subset you approve. This closes the structural gap where unplanned merged
+work (e.g. a feature/bug shipped in an out-of-cadence alpha) never gets
+labeled, so the tracker renders empty.
 
-1. **From theme milestones.** For the active theme milestones (#6, #7,
-   #8, #10, plus any matching the gating label by topic), list
-   open epic issues without any `release:*` label.
-2. **From priority.** Open `priority:high` and `priority:critical`
-   issues without any `release:*` label.
-3. **From the focus issue.** If a `focus:approved` issue exists, its
-   workstream targets are likely candidates; list them.
+### 4.1 — Full-reconcile scan (propose)
 
-Print as "consider applying `release:<gate>`":
+Gather candidates that carry **no `release:*` label** from all of these
+sources. Deduplicate by issue number; an issue may hit several sources
+(record every reason — it strengthens the rationale).
+
+1. **Merged-but-unreleased** (the gap-closer). Issues closed by PRs merged
+   to `main` since the last release of this line, with no `release:*`
+   label. These *will* ship in the target whether or not anyone planned
+   them — labeling records them in the manifest.
+
+   ```bash
+   # Last released tag for this line (stable if promoting, else latest alpha):
+   LAST=$(git describe --tags --abbrev=0 --match 'v*' 2>/dev/null)
+   SINCE=$(git log -1 --format=%cd --date=short "$LAST" 2>/dev/null)
+   gh pr list --state merged --base main --search "merged:>=$SINCE" \
+     --json number,title,closingIssuesReferences \
+     --jq '.[] | .closingIssuesReferences[]?.number' | sort -u
+   ```
+
+   For each closing issue, keep it if it has no `release:*` label.
+
+2. **Priority.** Open `priority:critical` and `priority:high` issues with
+   no `release:*` label.
+3. **Correctness regressions.** Open `type:bug` issues (any priority) with
+   no `release:*` label — a shipped-feature defect is a strong stable gate.
+4. **SFEP-targeted.** Read the SFEP registry (`docs/proposals/README.md`)
+   for proposals in `Accepted` (design-approved, implementation pending) or
+   `Draft`-with-tracking status; follow each SFEP's `tracking:` front-matter
+   to its implementing issues and include the open, unlabeled ones. (This is
+   the SFEP scan the old `--candidates` lacked.)
+5. **Seed state.** Cross-reference the open `seed-blocker` /
+   `needs-seed-cut` sets already pulled in Phase 3 — surface any not yet
+   labeled for the gate.
+6. **Focus issue.** If a `focus:approved` issue exists, include its
+   workstream targets.
+7. **Theme milestones.** Open epics in the active theme milestones
+   (#6, #7, #8, #10, plus any matching the gate by topic). **Flag these as
+   "usually milestone-tracked, not a single-cut gate"** — surface but
+   default them to ROLL-FORWARD.
+
+### 4.2 — Classify and present (your approval gate)
+
+Classify each candidate as a recommendation, then **present the full set
+and stop for the user's decision** — do not apply anything yet:
+
+- **IN** — should gate this release (correctness regressions,
+  merged-but-unreleased work, priority:critical, SFEP items explicitly
+  targeting this version).
+- **ROLL-FORWARD** — defer to a later release (epics/themes, speculative
+  or unscoped `priority:high`, anything whose landing this cycle is
+  uncertain).
+
+Present grouped by disposition with a one-line rationale and the exact
+label each would receive:
 
 ```
-Candidates for release:<gate> (not currently labeled):
-  - #N — <title>  (rationale: open epic in milestone "M", priority:high)
-  - ...
+Proposed scope — Release: vX.Y.Z (gate: release:<gate>)
+
+IN (apply release:<gate>):
+  #N — <title>   [merged 2d ago, unreleased · type:bug]
+  #M — <title>   [priority:critical · SFEP-00NN target]
+
+ROLL-FORWARD (no label / defer):
+  #P — <title>   [epic, milestone-tracked — not a single-cut gate]
+
+Reply: approve all IN · move #X to IN/ROLL · drop #Y · edit the set.
 ```
 
-**Don't auto-apply labels.** Recommendation only — the human decides.
+**Stop here.** The user approves, trims, or re-classifies. Apply nothing
+without an explicit go-ahead. Under `--dry-run`, end after presenting.
+
+### 4.3 — Apply the approved set
+
+For each issue the user approved as IN, apply the gate label (a **write**,
+authorized by the approval just given):
+
+```bash
+gh issue edit <N> --add-label "release:<gate>"
+```
+
+Never apply a label to a ROLL-FORWARD or dropped item. Never apply
+`release-critical-seed` here (that marker stays a `/triage` decision).
+
+### 4.4 — Re-render the tracker
+
+Labels just changed, so reconcile the tracker to reflect them: run the
+**Phase 3b UPDATE-MODE** reconcile (attach the newly-labeled issues as
+native sub-issues, re-render the body summary, post the auto-sync comment).
+If the tracker did not exist before this run, Phase 3a already created it;
+re-run 3b to attach the freshly-labeled set. The tracker now lists the
+scope you approved.
 
 ---
 
@@ -335,8 +429,11 @@ Seed bump (this cadence):
 
 Stable promotion: <eligible | not eligible — reason>
 
-Candidates (if --candidates):
-  ...
+Curation (if --candidates):
+  Proposed:   N  (IN: N, ROLL-FORWARD: N)
+  Approved:   N  → release:<gate> applied to #A, #B, ...
+  Deferred:   N  (rolled forward, unlabeled)
+  Re-render:  +M sub-issues attached to #<tracker>
 
 Dry run: changes <previewed | applied>
 ```
@@ -352,9 +449,13 @@ Dry run: changes <previewed | applied>
   a rendered mirror — never hand-edit `☐`/`☑` toggles; re-render from the
   sub-issue rollup. Attach via `POST /issues/<tracker>/sub_issues`
   (`-F sub_issue_id=<int>`, typed — `-f` 422s).
-- **Only writes the tracker body, the `tracking` label, sub-issue
-  attachments, and optional comments.** Never auto-applies `release:*` or
-  `release-critical-seed` labels — that's triage/grooming, not planning.
+- **Label writes are approval-gated, never unattended.** The default plan
+  step (no `--candidates`) writes only the tracker body, the `tracking`
+  label, sub-issue attachments, and comments — it never touches `release:*`.
+  The `--candidates` curation loop applies `release:<gate>` **only to the
+  subset the user explicitly approves** in Phase 4.2, and never applies
+  `release-critical-seed` (that stays a `/triage` decision). No `release:*`
+  label is ever applied without a human go-ahead in the same run.
 - **Never closes or detaches.** Same convention as `/triage` and `/sweep`:
   closing an issue and removing a sub-issue are human decisions. Surface
   drift; don't act on it.
@@ -367,7 +468,8 @@ Dry run: changes <previewed | applied>
 - **One tracking issue per version.** If two exist with the same title,
   surface the conflict and stop — don't pick one.
 - **In `--dry-run`, make zero writes.** No body edits, no sub-issue
-  attachments, no comments. Print intended actions only.
+  attachments, no comments, **no label applications** — the curation loop
+  ends after presenting the proposal. Print intended actions only.
 - **Read `docs/conventions/issue-naming.md` "Release tracking" before
   acting.** It's the source of truth for the gating-label table.
 
@@ -375,16 +477,19 @@ Dry run: changes <previewed | applied>
 
 ## Why this command exists
 
-`/release` cuts a release. `/release-plan` opens the cycle and keeps
-the tracking issue current as work flows. The two commands bookend
-the curated-release flow:
+`/release` cuts a release. `/release-plan` opens the cycle, **decides its
+scope** (via `--candidates`), and keeps the tracking issue current as work
+flows. The commands bookend the curated-release flow:
 
 ```
-cadence train opens tracker ──▶ plan (attach sub-issues, render summary)
-  ──▶ curate (label, /sweep native-sub-issue sync) ──▶ /release
+cadence train opens tracker
+  ──▶ /release-plan --candidates : propose scope ──▶ YOU approve
+        ──▶ apply release:<gate> ──▶ render tracker (sub-issues + summary)
+          ──▶ /sweep keeps the rollup synced ──▶ /release cuts
 ```
 
-Without this command, opening a tracking issue is manual boilerplate and
-the rollup drifts. With it, planning is one command per cycle plus passive
-maintenance via `/sweep` — and the native "Sub-issues" panel gives a
+Without the curation loop, `release:*` labeling is a manual step everyone
+forgets — so trackers open empty and unplanned merged work ships
+unrecorded. With it, scope is one approval-gated command per cycle plus
+passive `/sweep` maintenance, and the native "Sub-issues" panel gives a
 real "what's left before X" view instead of string-matched checkboxes.
