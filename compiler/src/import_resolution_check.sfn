@@ -1,0 +1,171 @@
+// compiler/src/import_resolution_check.sfn
+//
+// `sfn check` import-resolution pass (#1953). Validates that every
+// relative `import { ... } from "./x"` / `"../x"` in a source resolves to
+// a real module on disk (else E0430) and that each named specifier is
+// defined somewhere in the staged import closure (else E0431). Sailfin
+// resolves imported symbols globally by name — a module may legally import
+// a symbol from a module that does not itself declare it, as long as some
+// module in the link defines it — so E0431 checks closure-wide existence,
+// not per-declaring-module export (see `ClosureSymbolSet`). Runs ONLY on
+// the `check_source_with_imports` path — never in the build / self-host
+// emit path — so it cannot affect self-hosting.
+//
+// Scope is deliberately narrow: only specs beginning with `./` or `../`
+// are checked. Scoped/capsule imports (`sfn/...`), runtime imports
+// (`runtime/...`), and bare names resolve through other mechanisms and are
+// skipped entirely, so they can never false-positive here.
+import { Program } from "./ast";
+import { strings_equal, substring } from "./string_utils";
+import { ClosureSymbolSet } from "./typecheck_import_loader";
+import {
+    Diagnostic,
+    make_cannot_find_module_diagnostic,
+    make_symbol_not_exported_diagnostic
+} from "./typecheck_types";
+
+// ---- Path helpers ----
+// Local mirrors of `capsule_resolver.sfn`'s `_cr_dirname` / `_cr_path_join`
+// / `_cr_ends_with` / `resolve_relative_import`. Kept local so this leaf
+// carries zero coupling to the large resolver module; they must stay in
+// sync with the resolver (#1953) so `check` resolves a relative spec to
+// exactly the path the build resolver stages.
+fn _irc_dirname(path: string) -> string {
+    let mut last_slash: int = -1;
+    let mut i: int = 0;
+    loop {
+        if i >= path.length { break; }
+        if substring(path, i, i + 1) == "/" { last_slash = i; }
+        i += 1;
+    }
+    if last_slash < 0 { return "."; }
+    if last_slash == 0 { return "/"; }
+    return substring(path, 0, last_slash);
+}
+
+fn _irc_path_join(base: string, name: string) -> string {
+    if base.length == 0 { return name; }
+    if substring(base, base.length - 1, base.length) == "/" {
+        return base + name;
+    }
+    return base + "/" + name;
+}
+
+fn _irc_ends_with(text: string, suffix: string) -> boolean {
+    if suffix.length > text.length { return false; }
+    let start = text.length - suffix.length;
+    return strings_equal(substring(text, start, text.length), suffix);
+}
+
+fn _irc_starts_with(text: string, prefix: string) -> boolean {
+    if prefix.length > text.length { return false; }
+    return strings_equal(substring(text, 0, prefix.length), prefix);
+}
+
+// Mirror of `resolve_relative_import`: strip leading `../`/`./` segments,
+// walking the base dir up for each `../`, then join and ensure a `.sfn`
+// suffix.
+fn _irc_resolve_relative_import(base_dir: string, spec: string) -> string {
+    let mut current_base = base_dir;
+    let mut remainder = spec;
+    loop {
+        if remainder.length >= 3 {
+            if substring(remainder, 0, 3) == "../" {
+                current_base = _irc_dirname(current_base);
+                remainder = substring(remainder, 3, remainder.length);
+                continue;
+            }
+        }
+        if remainder.length >= 2 {
+            if substring(remainder, 0, 2) == "./" {
+                remainder = substring(remainder, 2, remainder.length);
+                continue;
+            }
+        }
+        break;
+    }
+    let path = _irc_path_join(current_base, remainder);
+    if _irc_ends_with(path, ".sfn") { return path; }
+    return path + ".sfn";
+}
+
+fn _irc_names_contains(names: string[], target: string) -> boolean {
+    let mut i: int = 0;
+    loop {
+        if i >= names.length { break; }
+        if strings_equal(names[i], target) { return true; }
+        i += 1;
+    }
+    return false;
+}
+
+fn _irc_is_relative(spec: string) -> boolean {
+    if _irc_starts_with(spec, "./") { return true; }
+    if _irc_starts_with(spec, "../") { return true; }
+    return false;
+}
+
+// Resolve a relative spec to a real file, applying the directory-import
+// fallback (`./dir` -> `dir/mod.sfn`) that the build resolver uses. Returns
+// "" when nothing on disk resolves.
+fn _irc_resolve_existing(base_dir: string, spec: string) -> string ![io] {
+    let dep = _irc_resolve_relative_import(base_dir, spec);
+    if fs.exists(dep) { return dep; }
+    if _irc_ends_with(dep, ".sfn") {
+        let mod_fallback = substring(dep, 0, dep.length - 4) + "/mod.sfn";
+        if fs.exists(mod_fallback) { return mod_fallback; }
+    }
+    return "";
+}
+
+// Walk a parsed program's `import` declarations and emit:
+//   - E0430 for a relative import whose `from "./x"` path resolves to no
+//     module on disk (independent of `closure` — a pure on-disk probe), and
+//   - E0431 for a named specifier that is defined NOWHERE in the staged
+//     import closure.
+// Sailfin resolves imported symbols globally by name (see
+// `ClosureSymbolSet`), so E0431 checks closure-wide existence, not
+// per-module export. It is suppressed unless `closure.complete` — an
+// incomplete closure (a missing/corrupt artifact, or a wildcard re-export)
+// might not list a genuinely-defined name, and a false positive is worse
+// than a missed one. E0430 always fires from the on-disk probe, so a
+// standalone single-file check (empty, incomplete closure) still catches a
+// nonexistent module path.
+fn collect_import_resolution_findings(program: Program, file_path: string, closure: ClosureSymbolSet) -> Diagnostic[] ![io] {
+    let mut out: Diagnostic[] = [];
+    let base_dir = _irc_dirname(file_path);
+    let mut i: int = 0;
+    loop {
+        if i >= program.statements.length { break; }
+        let statement = program.statements[i];
+        if statement.variant == "ImportDeclaration" {
+            let spec_path = statement.source;
+            if _irc_is_relative(spec_path) {
+                let resolved = _irc_resolve_existing(base_dir, spec_path);
+                if resolved.length == 0 {
+                    let mut d = make_cannot_find_module_diagnostic(spec_path);
+                    d.file_path = file_path;
+                    out.push(d);
+                } else {
+                    if closure.complete {
+                        let mut s: int = 0;
+                        loop {
+                            if s >= statement.import_specifiers.length { break; }
+                            let importer = statement.import_specifiers[s];
+                            if !_irc_names_contains(closure.names, importer.name) {
+                                let mut nd = make_symbol_not_exported_diagnostic(importer.name, spec_path);
+                                nd.file_path = file_path;
+                                out.push(nd);
+                            }
+                            s += 1;
+                        }
+                    }
+                }
+            }
+        }
+        i += 1;
+    }
+    return out;
+}
+
+export { collect_import_resolution_findings };

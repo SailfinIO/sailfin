@@ -31,6 +31,7 @@ import {
 import { validate_capsule_capabilities, validate_effects_with_imports } from "../effect_checker";
 import { read_effect_enforcement_env, resolve_effect_enforcement } from "../effect_gate";
 import { ImportSymbolTable, empty_import_symbols } from "../effect_imports";
+import { collect_import_resolution_findings } from "../import_resolution_check";
 import { runtime_helper_call_names } from "../llvm/runtime_helpers";
 import { number_to_string } from "../num_format";
 import { parse_program } from "../parser/mod";
@@ -39,6 +40,7 @@ import { collect_reexport_violations } from "../reexport_check";
 import { substring } from "../string_utils";
 import { Token, TokenKind } from "../token";
 import { typecheck_diagnostics_with_import_symbols_prelude } from "../typecheck";
+import { ClosureSymbolSet } from "../typecheck_import_loader";
 import { Diagnostic, FixSuggestion } from "../typecheck_types";
 
 // -------------------------------------------------------------------
@@ -105,7 +107,11 @@ fn _parse_diagnostic_for_unknown(stmt: Statement, file_path: string) -> Diagnost
 fn check_source(source: string, file_path: string) -> CheckResult ![io] {
     let no_interfaces: Statement[] = [];
     let no_caps: string[] = [];
-    return check_source_with_imports(source, file_path, no_interfaces, empty_import_symbols(), no_caps, false);
+    // Standalone single-file check: no staged closure, so mark it
+    // incomplete — E0431 (closure-wide symbol existence) is skipped, but
+    // E0430 (on-disk module-path probe) still fires.
+    let no_closure = ClosureSymbolSet { names: [], complete: false };
+    return check_source_with_imports(source, file_path, no_interfaces, empty_import_symbols(), no_caps, no_closure, false);
 }
 
 // Cross-module-aware variant: `imported_interfaces` carries
@@ -134,7 +140,7 @@ fn check_source(source: string, file_path: string) -> CheckResult ![io] {
 // the manifest-allowed set. Empty list = no manifest in scope =
 // skip the cross-check (standalone .sfn files outside any capsule
 // keep working unchanged).
-fn check_source_with_imports(source: string, file_path: string, imported_interfaces: Statement[], function_effects: ImportSymbolTable, capabilities_required: string[], allow_bare_assert: boolean) -> CheckResult ![io] {
+fn check_source_with_imports(source: string, file_path: string, imported_interfaces: Statement[], function_effects: ImportSymbolTable, capabilities_required: string[], closure_symbols: ClosureSymbolSet, allow_bare_assert: boolean) -> CheckResult ![io] {
     let program = parse_program(source);
     let prelude_globals = load_prelude_global_names(runtime_helper_call_names());
     let type_diags = typecheck_diagnostics_with_import_symbols_prelude(program, imported_interfaces, function_effects, prelude_globals);
@@ -202,6 +208,27 @@ fn check_source_with_imports(source: string, file_path: string, imported_interfa
         rendered.push(render_diagnostic(rxdiag, source_lines, "reexport"));
         errors += 1;
         rxi += 1;
+    }
+
+    // #1953: unresolved-import surfacing. A relative `import { ... } from
+    // "./x"` that resolves to no module on disk (E0430), or a named
+    // specifier defined nowhere in the staged import closure (E0431), used
+    // to pass `check` clean and only fail much later at LLVM lowering. Run
+    // the resolution pass here so the inner loop catches it. `closure_symbols`
+    // is empty and incomplete for the standalone `check_source` path
+    // (single-file, no staged closure) — E0430 still fires from the on-disk
+    // probe; E0431 is simply skipped when the closure is incomplete. Always
+    // `error`.
+    let import_findings = collect_import_resolution_findings(program, file_path, closure_symbols);
+    let mut ifi: int = 0;
+    loop {
+        if ifi >= import_findings.length { break; }
+        let idiag = import_findings[ifi];
+        combined.push(idiag);
+        producers.push("import");
+        rendered.push(render_diagnostic(idiag, source_lines, "import"));
+        errors += 1;
+        ifi += 1;
     }
 
     // W0210 (#1173): soft-deprecate a bare `assert` inside a `test`
