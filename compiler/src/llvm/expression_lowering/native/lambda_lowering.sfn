@@ -255,12 +255,17 @@ fn nested_lifted_function_name(source_name: string, id: int) -> string {
 
 // Look up a nested-fn source name in the active block-scoped rename list;
 // returns the mangled symbol, or "" if the name is not a nested fn in scope.
+// Scans from the END so the innermost (most-recently-appended) rename wins:
+// `_rewrite_block` appends the enclosing block's renames first, then this
+// block's own, so a later entry is a more deeply nested scope. This gives
+// lexical shadowing — an inner nested `fn h` overrides an outer `fn h` for
+// call sites inside the inner block.
 fn _lookup_nested_rename(renames: NestedRename[], name: string) -> string {
-    let mut _i: int = 0;
+    let mut _i: int = renames.length - 1;
     loop {
-        if _i >= renames.length { break; }
+        if _i < 0 { break; }
         if renames[_i].from == name { return renames[_i].to; }
-        _i += 1;
+        _i -= 1;
     }
     return "";
 }

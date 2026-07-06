@@ -118,3 +118,33 @@ test "nested fn: inside a struct method body compiles and runs" ![io] {
     }
     assert exit == 7;
 }
+
+// Regression (SFEP-0042 review): a nested `fn` that shares a name with a
+// top-level function shadows it within its enclosing body — the call resolves
+// to (and is lifted from) the nested fn, so this returns 2, not the top-level 1.
+test "nested fn: shadows a same-named top-level function" ![io] {
+    let marker = _marker("shadow-top");
+    let source = "fn helper() -> int { return 1; } fn main() -> int { fn helper() -> int { return 2; } return helper(); }";
+    let exit = _build_and_run(marker, source);
+    if exit == -100 {
+        let details = fs.readFile(marker);
+        print.error(details);
+        assert false;
+    }
+    assert exit == 2;
+}
+
+// Regression (SFEP-0042 review): a nested `fn` in an inner scope shadows a
+// same-named nested `fn` in an outer scope — the inner call rewrites to the
+// inner lifted symbol (returns 2), not the outer one (1).
+test "nested fn: inner-scope nested fn shadows a same-named outer one" ![io] {
+    let marker = _marker("shadow-inner");
+    let source = "fn main() -> int { fn h() -> int { return 1; } fn outer() -> int { fn h() -> int { return 2; } return h(); } return outer(); }";
+    let exit = _build_and_run(marker, source);
+    if exit == -100 {
+        let details = fs.readFile(marker);
+        print.error(details);
+        assert false;
+    }
+    assert exit == 2;
+}

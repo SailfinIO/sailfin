@@ -313,6 +313,35 @@ demonstrate that the resolution/statement diagnostics live in this range. Home:
 **Fix-it:** `bind a closure to capture it: \`let f = fn(...) => ...\``. This
 mirrors Rust `E0434`.
 
+### 3.4 Known limitations (v0) — same-name shadowing by a value binding
+
+Nested-fn resolution keys by **source name** in three places built during
+Sub-issue A: the typecheck scope (`_build_nested_fn_scope`), the emit rename map
+(`_lookup_nested_rename`), and the routine-local effect table
+(`_local_effect_table`). Nested fns lifted to distinct mangled symbols are
+collision-free, and lexical shadowing **between nested fns** is handled (inner
+scope wins: the rename lookup scans innermost-first, and sibling scope entries
+are ordered to shadow module-level names). Two v0 gaps remain where a nested fn
+name collides with a **value binding** or across **sibling blocks**, both narrow
+and both requiring scope-path-aware keying (or resolving/renaming *after* the
+lift, when every nested fn is already a distinct flat top-level symbol) — a
+follow-up, tracked in the epic #1609 thread:
+
+1. **A `let`/parameter that shadows a same-named nested `fn`.** Sailfin lets a
+   local value binding shadow a nested fn name (`fn helper() { … } let helper =
+   fn(x) => x; helper(1)`). Typecheck resolves `helper(1)` to the `let` (correct,
+   highest-index binding), but the emit rename — keyed only by callee name —
+   still rewrites the call to the lifted nested symbol. Fix: the lift walker must
+   skip the rename when a local/param binding shadows the name at the call site.
+2. **Same-named nested fns in *sibling* blocks with differing effects.** The
+   routine-local effect table flattens all nested fns of a routine by bare name
+   (last-write-wins), so `{ fn h() ![io] {…} }` and `{ fn h() -> int {…} h(); }`
+   in two sibling blocks share one entry; a call can resolve to the wrong effect
+   row (over- or under-approximating the requirement). Fix: key the effect table
+   by block scope, or run effect analysis post-lift.
+
+Distinct-name nested fns — the overwhelmingly common case — are unaffected.
+
 ## 4. Effect & capability impact
 
 There is a **live effect-checker bug that this SFEP must fix**, independent of
