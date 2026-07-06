@@ -806,7 +806,25 @@ fn lower_expression(expression: string, bindings: ParameterBinding[], locals: Lo
     // a regular identifier or member-access expression. Capturing
     // lambdas (#687) use the same prefix with an extended env_alloc
     // payload — handled by `lower_closure_pair_marker`.
+    //
+    // Inline IIFE (#1949): `(fn (n) => n + 1)(5)` lifts to
+    // `<closure_pair @sfn_lambda_<N> ...>(5)` — the marker's closing `>` is
+    // followed by a `(args)` call suffix. Route it through the call path (which
+    // materialises the pair via `try_resolve_closure_callee` and emits the
+    // closure dispatch) rather than the bare-marker lowering below, which would
+    // drop the call and return the pair itself. This must happen HERE, before
+    // the generic operator dispatch, because the marker's own `<`/`>` would
+    // otherwise be mis-read as comparison operators by `find_comparison_operator`.
     if starts_with(stripped, "<closure_pair ") {
+        let call_at = find_call_site(stripped);
+        if call_at > 0 && ends_with(stripped, ")") {
+            let marker_only = trim_text(substring(stripped, 0, call_at));
+            if ends_with(marker_only, ">") {
+                let args_text = substring(stripped, call_at + 1, stripped.length - 1);
+                let arg_entries = split_call_arguments(args_text);
+                return lower_call_expression(marker_only, arg_entries, bindings, locals, temp_index, lines, functions, context);
+            }
+        }
         let pair_result = lower_closure_pair_marker(stripped, functions, context, bindings, locals, temp_index, lines);
         let mut _ci_pair: int = 0;
         loop {

@@ -35,6 +35,7 @@ import {
     Statement,
     TypeAnnotation
 } from "../../../ast";
+import { infer_expression_type } from "../../../emit_native_format";
 import { index_of, substring } from "../../../string_utils";
 import { ends_with, starts_with, trim_text } from "../../utils";
 
@@ -206,6 +207,136 @@ fn _lambda_is_fully_typed(lambda: Expression) -> boolean {
         i += 1;
     }
     return true;
+}
+
+// ── Backfill a lambda's return type from its body (#1949) ────────────
+//
+// A short-form `fn(...) => expr` (or untyped block-form) lambda reaching the
+// lift choke point OUTSIDE call-argument position — `let`-bound and called by
+// name, or an inline IIFE — has no expected `fn(...) -> R` to backfill from, so
+// its `return_type` stays `null`, the synthesised `sfn_lambda_<N>` is declared
+// `void`, and a value-position call silently yields `0`. Fill a `null` return
+// type from the body's returned expression: a literal / struct / array return
+// whose type `infer_expression_type` recognises uses that; anything else (a
+// `Binary` like `n + 1`, an identifier, or a call — not covered by literal
+// inference) falls back to the untyped-lambda `int` ABI (#766), matching what
+// the call-argument backfill already emits for the array-builtin path. Only ever
+// fills a `null` return type, so a typed lambda (explicit `-> T`, or already
+// backfilled from an expected fn-type in argument position) is returned
+// unchanged — zero regression surface.
+fn backfill_lambda_return_from_body(lambda: Expression) -> Expression {
+    if lambda.variant != "Lambda" { return lambda; }
+    if lambda.return_type != null { return lambda; }
+    let inferred = _infer_body_return_text(lambda.body);
+    return Expression.Lambda {
+        parameters: lambda.parameters,
+        body: lambda.body,
+        return_type: TypeAnnotation { text: inferred },
+        captures: lambda.captures
+    };
+}
+
+// Running state for the body-return scan below: whether any value-returning
+// `return` was seen, and the last literal-inferable return type ("" if none).
+struct _BodyReturnScan {
+    has_value_return: boolean;
+    inferred: string;
+}
+
+// Infer a lambda body's return type text from its `return <expr>` statements.
+// A body with a value-returning `return` whose type is not literal-inferable
+// falls back to the untyped-lambda `int` ABI (#766); the last inferable `return`
+// wins. A body with NO value-returning `return` (a `void` closure such as
+// `fn () { print.info("x"); }`) keeps `void` — the ABI it lifted with before
+// #1949 — so this backfill never turns an ordinary void closure into a
+// value-returning function (which would emit a spurious `missing return`
+// lowering diagnostic and `ret i64 0`). The scan recurses into nested blocks
+// (`if`/`match`/`try`/loops/etc.) so a lambda whose only value-returning
+// `return` lives inside a branch is still typed, not mis-lowered to `void`.
+fn _infer_body_return_text(body: Block) -> string {
+    let scan = _scan_block_returns(_BodyReturnScan {
+        has_value_return: false, inferred: ""
+    }, body);
+    if !scan.has_value_return { return "void"; }
+    if scan.inferred.length == 0 { return "int"; }
+    return scan.inferred;
+}
+
+fn _scan_block_returns(scan: _BodyReturnScan, block: Block) -> _BodyReturnScan {
+    let mut out: _BodyReturnScan = scan;
+    let mut index: int = 0;
+    loop {
+        if index >= block.statements.length { break; }
+        out = _scan_statement_returns(out, block.statements[index]);
+        index += 1;
+    }
+    return out;
+}
+
+// Recurse over the block-bearing statement variants (mirrors the traversal in
+// `_collect_statement_bindings`) so a `return <expr>` at any depth is counted.
+fn _scan_statement_returns(scan: _BodyReturnScan, statement: Statement) -> _BodyReturnScan {
+    let mut out: _BodyReturnScan = scan;
+    if statement.variant == "ReturnStatement" {
+        if statement.expression != null {
+            let value: Expression = statement.expression;
+            let text = infer_expression_type(value);
+            let mut new_inferred: string = out.inferred;
+            if text.length > 0 { new_inferred = text; }
+            out = _BodyReturnScan {
+                has_value_return: true,
+                inferred: new_inferred
+            };
+        }
+        return out;
+    }
+    if statement.variant == "IfStatement" {
+        out = _scan_block_returns(out, statement.then_block);
+        if statement.else_branch != null {
+            let branch = statement.else_branch;
+            if branch.body != null {
+                out = _scan_block_returns(out, branch.body);
+            } else if branch.statement != null {
+                out = _scan_statement_returns(out, branch.statement);
+            }
+        }
+        return out;
+    }
+    if statement.variant == "BlockStatement" {
+        return _scan_block_returns(out, statement.body);
+    }
+    if statement.variant == "WithStatement" {
+        return _scan_block_returns(out, statement.body);
+    }
+    if statement.variant == "ForStatement" {
+        return _scan_block_returns(out, statement.body);
+    }
+    if statement.variant == "LoopStatement" {
+        return _scan_block_returns(out, statement.body);
+    }
+    if statement.variant == "RoutineStatement" {
+        return _scan_block_returns(out, statement.body);
+    }
+    if statement.variant == "MatchStatement" {
+        let mut c: int = 0;
+        loop {
+            if c >= statement.cases.length { break; }
+            out = _scan_block_returns(out, statement.cases[c].body);
+            c += 1;
+        }
+        return out;
+    }
+    if statement.variant == "TryStatement" {
+        out = _scan_block_returns(out, statement.try_block);
+        if statement.catch_block != null {
+            out = _scan_block_returns(out, statement.catch_block);
+        }
+        if statement.finally_block != null {
+            out = _scan_block_returns(out, statement.finally_block);
+        }
+        return out;
+    }
+    return out;
 }
 
 // ── Case A: callee signature table ───────────────────────────────────
@@ -572,6 +703,7 @@ export {
     array_builtin_expected_fn_type,
     backfill_call_argument,
     backfill_lambda_from_fn_type,
+    backfill_lambda_return_from_body,
     build_binding_table,
     build_fn_signature_table,
     declared_binding_type,

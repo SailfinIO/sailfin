@@ -1,0 +1,96 @@
+// End-to-end regression for #1949: an expression-bodied short-form lambda
+// (`fn(...) => expr`, SFEP-0029) that is `let`-bound and called by name, or
+// invoked inline as an IIFE, silently returned 0 instead of its body value.
+//
+// Root cause: the lambda-lift pass only backfilled a `null` return type for
+// lambdas in call-ARGUMENT position (`backfill_call_argument`, #1683). A
+// `let`-bound / IIFE short-form lambda has no expected `fn(...) -> R` to
+// backfill from, so it kept `return_type: null`, the synthesised
+// `sfn_lambda_<N>` lowered as `void`, and the value-position call yielded 0.
+// `backfill_lambda_return_from_body` now fills the return type at the lift
+// choke point (`_rewrite_lambda`). The block form (`fn() -> T { return e; }`)
+// was never affected because it carries an explicit return type.
+//
+// Build-and-run shape: each fixture returns the lambda value as its process
+// exit code (6/7), so a `void`-lowered regression re-surfaces as exit 0.
+//
+// Parallel-runner isolation (load-bearing): the nested `sfn build` inherits the
+// full environment — PATH for `clang`/`ld`, and `SAILFIN_TEST_SCRATCH` so the
+// compiler routes the `program.ll` build-cache dir per-invocation (#1333)
+// instead of colliding on the fixed `build/sailfin` under the `--jobs N` pool.
+// See `.claude/rules/no-bash-e2e.md`.
+import { with_tmp_dir } from "sfn/test";
+
+fn _sfn_bin() -> string ![io] {
+    let configured = env.get("SAILFIN_BIN");
+    if configured.length > 0 { return configured; }
+    return "build/native/sailfin";
+}
+
+fn _child_env() -> string[] ![io] { return process.environ(); }
+
+// Build `source` to a binary in a temp dir and run it; returns the run exit
+// code, or -100 if the build itself failed (kept distinct so a build break does
+// not masquerade as the miscompile this test guards).
+fn _build_and_run(source: string) -> int ![io] {
+    return with_tmp_dir(fn (dir: string) -> int {
+        let srcpath = dir + "/probe.sfn";
+        fs.writeFile(srcpath, source);
+        let binpath = dir + "/probe";
+        let build_exit = process.run_capture([_sfn_bin(), "build", "-o", binpath, srcpath], _child_env());
+        let _bo = process.capture_take_stdout();
+        let _be = process.capture_take_stderr();
+        if build_exit != 0 { return -100; }
+        let run_exit = process.run_capture([binpath], []);
+        let _ro = process.capture_take_stdout();
+        let _re = process.capture_take_stderr();
+        return run_exit;
+    });
+}
+
+test "short-lambda: let-bound `fn(n) => n + 1` called by name returns its body value" ![io] {
+    let src = "fn main() -> int {\n    let f = fn (n: int) => n + 1;\n    return f(5);\n}\n";
+    let exit = _build_and_run(src);
+    assert exit == 6;
+}
+
+test "short-lambda: inline IIFE `(fn(n) => n + 1)(5)` returns its body value" ![io] {
+    let src = "fn main() -> int {\n    return (fn (n: int) => n + 1)(5);\n}\n";
+    let exit = _build_and_run(src);
+    assert exit == 6;
+}
+
+test "short-lambda: let-bound no-arg `fn() => 7` returns its body value" ![io] {
+    let src = "fn main() -> int {\n    let f = fn () => 7;\n    return f();\n}\n";
+    let exit = _build_and_run(src);
+    assert exit == 7;
+}
+
+// The inline-IIFE dispatch fix (`try_resolve_closure_callee`'s marker branch)
+// is body-form-agnostic — it also repairs the block-form IIFE, which shared the
+// same silent-drop path. Guard that path too so it cannot regress.
+test "lambda: inline block-form IIFE `(fn(n) -> int { return n + 1; })(5)` returns its body value" ![io] {
+    let src = "fn main() -> int {\n    return (fn (n: int) -> int { return n + 1; })(5);\n}\n";
+    let exit = _build_and_run(src);
+    assert exit == 6;
+}
+
+// A value-less `let`-bound closure must keep the `void` ABI it lifted with
+// before #1949: the return-type backfill only touches value-returning bodies,
+// so this builds and runs cleanly (exit 0) rather than lifting to a spurious
+// `-> int` function that falls off its end.
+test "lambda: value-less let-bound closure keeps the void ABI and runs clean" ![io] {
+    let src = "fn main() -> int {\n    let log = fn () { };\n    log();\n    return 0;\n}\n";
+    let exit = _build_and_run(src);
+    assert exit == 0;
+}
+
+// The return-type inference must recurse into nested blocks: an untyped
+// `let`-bound closure whose only value-returning `return`s live inside `if`
+// branches (no top-level `return`) must still lift to a value-returning
+// function, not `void`. Guards against a top-level-only scan (#1949 review).
+test "lambda: untyped closure with only nested returns lifts to a value ABI" ![io] {
+    let src = "fn main() -> int {\n    let f = fn (n: int) { if n > 0 { return 7; } else { return 0; } };\n    return f(5);\n}\n";
+    let exit = _build_and_run(src);
+    assert exit == 7;
+}
