@@ -148,3 +148,56 @@ test "nested fn: inner-scope nested fn shadows a same-named outer one" ![io] {
     }
     assert exit == 2;
 }
+
+// Regression (#1940, SFEP-0042 §3.4 gap 1): a `let` value binding that shadows a
+// same-named nested `fn` must call the binding, not the lifted nested symbol.
+// typecheck resolves the call to the sequential `let` (highest index); the emit
+// rename previously rewrote `helper(5)` to the lifted nested symbol anyway
+// (`n * 10` → 50). With the shadow-suppression fix the call reaches the `let`
+// closure (`n + 1` → 6). Block-form lambda: an expression-bodied `fn(n) => …`
+// bound to a `let` and called by name miscompiles independently of #1940.
+test "nested fn: a let shadowing a nested fn calls the let, not the lifted fn" ![io] {
+    let marker = _marker("let-shadow");
+    let source = "fn main() -> int { fn helper(n: int) -> int { return n * 10; } let helper = fn (n: int) -> int { return n + 1; }; return helper(5); }";
+    let exit = _build_and_run(marker, source);
+    if exit == -100 {
+        let details = fs.readFile(marker);
+        print.error(details);
+        assert false;
+    }
+    assert exit == 6;
+}
+
+// Regression (#1940, SFEP-0042 §3.4 gap 1): the shadow is position-sensitive.
+// A call BEFORE the shadowing `let` still resolves to the block-hoisted nested
+// fn (`helper(5)` → 50); a call AFTER resolves to the `let` closure (→ 6). The
+// sentinel is appended only when the `let` is walked, so both halves coexist:
+// 50 + 6 == 56.
+test "nested fn: a nested-fn call before its shadowing let still hits the fn" ![io] {
+    let marker = _marker("shadow-before-after");
+    let source = "fn main() -> int { fn helper(n: int) -> int { return n * 10; } let before = helper(5); let helper = fn (n: int) -> int { return n + 1; }; let after = helper(5); return before + after; }";
+    let exit = _build_and_run(marker, source);
+    if exit == -100 {
+        let details = fs.readFile(marker);
+        print.error(details);
+        assert false;
+    }
+    assert exit == 56;
+}
+
+// Regression (#1940, SFEP-0042 §3.4 gap 1): a parameter that shadows a same-named
+// sibling nested `fn` must call the parameter. Inside `apply`, `dbl` is the
+// `fn(int) -> int` parameter (highest priority), so `dbl(5)` invokes the passed
+// lambda (`x + 1` → 6), not the sibling nested `fn dbl` (`n * 2` → 10). The emit
+// rename previously rewrote it to the lifted sibling symbol.
+test "nested fn: a parameter shadowing a sibling nested fn calls the parameter" ![io] {
+    let marker = _marker("param-shadow");
+    let source = "fn main() -> int { fn dbl(n: int) -> int { return n * 2; } fn apply(dbl: fn (int) -> int) -> int { return dbl(5); } return apply(fn (x: int) -> int { return x + 1; }); }";
+    let exit = _build_and_run(marker, source);
+    if exit == -100 {
+        let details = fs.readFile(marker);
+        print.error(details);
+        assert false;
+    }
+    assert exit == 6;
+}

@@ -749,12 +749,57 @@ fn required_effects(body: Block, imports: ImportSymbolTable) -> EffectRequiremen
     return collect_effects_from_block(body, imports);
 }
 
+// Augment the effect table with the nested `fn`s declared DIRECTLY in this
+// block (SFEP-0042, #1940), each shadowing any same-named enclosing entry
+// (`append_local_function` is last-write-wins). This keys nested-fn effect
+// resolution by block scope: a call to `h` resolves to the `fn h` in the
+// nearest enclosing block, so two same-named nested fns in sibling blocks no
+// longer collide on one flat routine-wide row (over-/under-approximating the
+// caller's requirement). A block with no direct nested fn returns the table
+// unchanged (no copy), so non-nested code is untouched.
+fn _hoist_block_local_fns(imports: ImportSymbolTable, block: Block) -> ImportSymbolTable {
+    let mut has_nested: boolean = false;
+    let mut p: int = 0;
+    loop {
+        if p >= block.statements.length { break; }
+        if block.statements[p].variant == "FunctionDeclaration" {
+            has_nested = true;
+            break;
+        }
+        p += 1;
+    }
+    if !has_nested { return imports; }
+    // Deep-copy the functions array before appending — `append_local_function`
+    // mutates it in place and the array is reference-shared on struct copy, so
+    // appending onto `imports` directly would corrupt the shared table (the same
+    // aliasing hazard `_local_effect_table` guards against).
+    let mut copied: ImportedFunctionSignature[] = [];
+    let mut k: int = 0;
+    loop {
+        if k >= imports.functions.length { break; }
+        copied.push(imports.functions[k]);
+        k += 1;
+    }
+    let mut merged = ImportSymbolTable { functions: copied };
+    let mut i: int = 0;
+    loop {
+        if i >= block.statements.length { break; }
+        let s = block.statements[i];
+        if s.variant == "FunctionDeclaration" {
+            merged = append_local_function(merged, s.signature.name, s.signature.effects);
+        }
+        i += 1;
+    }
+    return merged;
+}
+
 fn collect_effects_from_block(block: Block, imports: ImportSymbolTable) -> EffectRequirement[] {
+    let scoped = _hoist_block_local_fns(imports, block);
     let mut required: EffectRequirement[] = [];
     let mut index: int = 0;
     loop {
         if index >= block.statements.length { break; }
-        required = merge_requirements(required, collect_effects_from_statement(block.statements[index], imports));
+        required = merge_requirements(required, collect_effects_from_statement(block.statements[index], scoped));
         index += 1;
     }
     return required;
