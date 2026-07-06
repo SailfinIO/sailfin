@@ -4,9 +4,9 @@ title: Generic Collections — Map, Set, and Tuple
 status: Draft
 type: language
 created: 2026-07-01
-updated: 2026-07-01
+updated: 2026-07-06
 author: "agent:compiler-architect; human review"
-tracking:
+tracking: "#1941"
 supersedes:
 superseded-by:
 graduates-to: reference/preview/collections.md
@@ -270,6 +270,22 @@ function) is **monomorphized** at the call site. The key/value arrays lower to
 `K[]` / `V[]` with the element's natural width (using the `elem_size` already
 threaded through the array allocator, per SFEP-0028 §3(A)); `hash`/`==` resolve
 to the concrete `Hashable`/`Eq` instance for `K`/`T`. No boxing, no `any` slots.
+
+### 3.6 Return-type-site instantiation for generic-struct static methods (#1941)
+
+The monomorphizer SFEP-0038 v1 shipped infers a generic instantiation from
+**argument** types. A static constructor like `List.new()` — or `Map.new()` /
+`Set.new()` below — has no `T`-typed argument; the instantiation is knowable only
+from the **expected type** at the call site (`let m: Map<K, V> = Map.new()`, a
+parameter, or a return annotation). This is exactly Rust's turbofish-free
+`let v: Vec<i32> = Vec::new()` inference. Extending the monomorphizer to take its
+instantiation from the return-type site is therefore a **prerequisite substrate**
+for the library collections here: without it, every collection constructor hits
+the `core_call_emission.sfn` fail-closed fatal (`cannot resolve return type for
+call to …`). It is proven end-to-end by the user-defined `List<T>` in
+`examples/advanced/generic-structures.sfn` and tracked as **#1941** (a bounded
+monomorphizer extension, not a general expression-type inferencer). The
+collections API in §3.2 is pure library code once #1941 lands.
 
 ## 4. Effect & capability impact
 

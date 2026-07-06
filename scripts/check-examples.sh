@@ -49,7 +49,7 @@ SKIP_RUN=(
     "examples/advanced/web-server-with-concurrency.sfn"
     # Non-terminating: an infinite `loop { await buffer.receive() }` consumer,
     # so `sfn run` never returns (like the blocking servers). A bounded rewrite
-    # could return it to the runnable set — tracked in #1883.
+    # returns it to the runnable set — tracked in #1946 (epic #1883).
     "examples/concurrency/producer-consumer.sfn"
 )
 
@@ -58,9 +58,9 @@ SKIP_RUN=(
 # remove each entry when its gate lands (it will flip to XPASS and the ratchet
 # will flag it).
 KNOWN_FAILING=(
-    "examples/advanced/generic-structures.sfn"         # generic-struct method monomorphization — SFEP-0038 (#1883)
-    "examples/advanced/matrix-multiplication.sfn"      # generics over ranges + nested int[][] — SFEP-0038 (#1883)
-    "examples/concurrency/dynamic-task-scheduling.sfn" # calling an fn-typed value received over a channel + await (#1883)
+    "examples/advanced/generic-structures.sfn"         # return-type-site generic-struct monomorphization — #1941 (epic #1883)
+    "examples/advanced/matrix-multiplication.sfn"      # int[]-element mappers + range HOFs — #1943 then #1945 (epic #1883)
+    "examples/concurrency/dynamic-task-scheduling.sfn" # typed channel then live await typing — #1942 then #1944 (epic #1883)
 )
 
 in_list() {
