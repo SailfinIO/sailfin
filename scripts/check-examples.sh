@@ -59,8 +59,8 @@ SKIP_RUN=(
 # will flag it).
 KNOWN_FAILING=(
     "examples/advanced/generic-structures.sfn"         # return-type-site generic-struct monomorphization — #1941 (epic #1883)
-    "examples/advanced/matrix-multiplication.sfn"      # range HOFs + int[]-element mappers — #1945/#1943 (epic #1883)
-    "examples/concurrency/dynamic-task-scheduling.sfn" # fn-value over typed channel + live await typing — #1944/#1942 (epic #1883)
+    "examples/advanced/matrix-multiplication.sfn"      # int[]-element mappers + range HOFs — #1943 then #1945 (epic #1883)
+    "examples/concurrency/dynamic-task-scheduling.sfn" # typed channel then live await typing — #1942 then #1944 (epic #1883)
 )
 
 in_list() {
