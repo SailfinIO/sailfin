@@ -66,6 +66,7 @@ import {
     BindingEntry,
     FnSigEntry,
     backfill_call_argument,
+    backfill_lambda_return_from_body,
     build_binding_table,
     build_fn_signature_table
 } from "./lambda_param_inference";
@@ -952,7 +953,16 @@ fn _rewrite_expression(ctx: LiftContext, expression: Expression) -> ExpressionRe
     return ExpressionRewriteResult { ctx: ctx, expression: expression };
 }
 
-fn _rewrite_lambda(ctx: LiftContext, lambda: Expression, owned_env: boolean) -> ExpressionRewriteResult {
+fn _rewrite_lambda(ctx: LiftContext, lambda_in: Expression, owned_env: boolean) -> ExpressionRewriteResult {
+    // Fill a `null` return type from the body before matching the capture
+    // record and synthesising the lifted function (#1949). Argument-position
+    // lambdas are already backfilled from the callee's expected `fn(...) -> R`
+    // (`backfill_call_argument`) before reaching here, so this only affects
+    // `let`-bound / IIFE lambdas that have no expected type — otherwise the
+    // synthesised `sfn_lambda_<N>` lowers as `void` and the value-position call
+    // silently returns 0. The body object is preserved, so the `body.tokens[0]`
+    // capture-record key is unchanged.
+    let lambda = backfill_lambda_return_from_body(lambda_in);
     let record = _find_capture_record(ctx.records, lambda);
     if record == null {
         // No record means `analyze_lambda_captures` did not see this

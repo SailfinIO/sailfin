@@ -37,7 +37,7 @@ import {
     trim_text
 } from "../../utils";
 import { array_pointer_element_type } from "../arrays";
-import { lower_expression } from "./core";
+import { lower_closure_pair_marker, lower_expression } from "./core";
 import { collect_parameter_types } from "./core_helpers";
 import { load_local_operand } from "./core_operands";
 import { parse_member_access } from "./core_parse";
@@ -263,9 +263,65 @@ fn _strip_env_parameter(parameter_types: string[]) -> string[] {
     return out;
 }
 
+// Extract the lifted-lambda function name (no leading `@`) from a
+// `<closure_pair @sfn_lambda_<N> ...>` marker, or "" if malformed. Mirrors the
+// symbol parse in `lower_closure_pair_marker` (core.sfn) so the two agree on
+// which function the marker names.
+fn _closure_pair_symbol(marker: string) -> string {
+    let prefix = "<closure_pair ";
+    let mut cursor: int = prefix.length;
+    let mut symbol: string = "";
+    loop {
+        if cursor >= marker.length { break; }
+        let ch = marker[cursor];
+        if ch == " " { break; }
+        symbol = symbol + ch;
+        cursor += 1;
+    }
+    if symbol.length == 0 { return ""; }
+    if substring(symbol, 0, 1) == "@" {
+        return substring(symbol, 1, symbol.length);
+    }
+    return symbol;
+}
+
 fn try_resolve_closure_callee(target: string, bindings: ParameterBinding[], locals: LocalBinding[], functions: NativeFunction[], context: TypeContext, temp_index: int, lines: string[]) -> _ClosureCalleeInfo? ![io] {
     let name = trim_text(target);
     if name.length == 0 { return null; }
+
+    // Inline IIFE (#1949): the callee is a lifted-lambda closure-pair marker
+    // (`<closure_pair @sfn_lambda_<N> ...>`) rather than a named binding — e.g.
+    // `(fn (n) => n + 1)(5)`. Materialise the `{i8*, i8*}` pair inline (reusing
+    // `lower_closure_pair_marker`) and resolve the lifted function's user-facing
+    // signature, so the call routes through the same closure-dispatch branch as
+    // a `__closure__`-typed local. Without this the marker is not a simple
+    // identifier and dispatch falls through to a silent zero return. The trailing
+    // space in the prefix excludes the `<closure_pair_fatal_mutable ...>` marker.
+    if starts_with(name, "<closure_pair ") {
+        let symbol = _closure_pair_symbol(name);
+        if symbol.length == 0 { return null; }
+        let marker_fn = find_function_by_name(functions, symbol);
+        if marker_fn != null {
+            let pair = lower_closure_pair_marker(name, functions, context, bindings, locals, temp_index, lines);
+            if pair.operand != null {
+                let materialized: LLVMOperand = pair.operand;
+                let lifted_params = collect_parameter_types(context, marker_fn.parameters, marker_fn.name);
+                let user_params = _strip_env_parameter(lifted_params);
+                let return_type = map_return_type(context, marker_fn.return_type);
+                let mut effective_return: string = return_type;
+                if effective_return.length == 0 { effective_return = "void"; }
+                return _ClosureCalleeInfo {
+                    operand: materialized,
+                    lines: pair.lines,
+                    temp_index: pair.temp_index,
+                    return_type: effective_return,
+                    parameter_types: user_params
+                };
+            }
+        }
+        return null;
+    }
+
     if !is_simple_identifier(name) { return null; }
 
     // Locals win over parameters when both bind the same name (the
