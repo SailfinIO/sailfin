@@ -4,9 +4,9 @@ title: Native Windows Self-Host (MSVC ABI)
 status: Accepted
 type: runtime
 created: 2026-06-22
-updated: 2026-06-22
+updated: 2026-07-06
 author: "agent:compiler-architect"
-tracking:
+tracking: "#1485"
 supersedes:
 superseded-by:
 graduates-to:

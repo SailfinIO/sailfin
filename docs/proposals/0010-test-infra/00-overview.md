@@ -6,7 +6,7 @@ type: tooling
 created: 2026-05-06
 updated: 2026-05-06
 author: "agent:compiler-architect"
-tracking: "#965, #842, #840"
+tracking: "#965, #839, #842, #840"
 supersedes:
 superseded-by:
 graduates-to: reference/spec/11-testing.md
