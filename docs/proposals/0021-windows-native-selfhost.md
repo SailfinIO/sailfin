@@ -6,7 +6,7 @@ type: runtime
 created: 2026-06-22
 updated: 2026-07-06
 author: "agent:compiler-architect"
-tracking: ["#1485"]
+tracking: "#1485"
 supersedes:
 superseded-by:
 graduates-to:
