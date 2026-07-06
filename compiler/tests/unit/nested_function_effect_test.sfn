@@ -1,0 +1,81 @@
+// Unit tests for effect propagation through nested / local function
+// declarations (SFEP-0042).
+//
+// A declared-but-uncalled nested `fn foo() ![io]` must not force `![io]`
+// onto its parent — the effect only propagates through an actual call
+// edge, transitively, exactly like top-level functions. A nested fn
+// whose body uses an effect it does not itself declare is flagged
+// `E0400` on the nested fn (not silently absorbed by the parent).
+import { EffectViolation, validate_effects } from "../../src/effect_checker";
+import { parse_program } from "../../src/parser/mod";
+
+fn _has_violation_for(violations: EffectViolation[], routine_name: string) -> boolean {
+    let mut i: int = 0;
+    loop {
+        if i >= violations.length { break; }
+        if strings_equal(violations[i].routine_name, routine_name) {
+            return true;
+        }
+        i += 1;
+    }
+    return false;
+}
+
+fn _violations_for(source: string) -> EffectViolation[] ![io] {
+    let program = parse_program(source);
+    return validate_effects(program);
+}
+
+test "effects: declared-but-uncalled nested fn does not force its effect on the parent" ![io] {
+    let source = "fn main() -> int { fn logit() ![io] { print.info(\"hi\"); } return 0; }";
+    let violations = _violations_for(source);
+    assert violations.length == 0;
+}
+
+test "effects: calling a nested effectful fn without declaring the effect is flagged" ![io] {
+    let source = "fn main() -> int { fn logit() ![io] { print.info(\"hi\"); } logit(); return 0; }";
+    let violations = _violations_for(source);
+    assert _has_violation_for(violations, "main");
+}
+
+test "effects: a parent that declares the effect and calls the nested fn passes" ![io] {
+    let source = "fn main() ![io] { fn logit() ![io] { print.info(\"hi\"); } logit(); return 0; }";
+    let violations = _violations_for(source);
+    assert violations.length == 0;
+}
+
+test "effects: a nested fn whose body uses an effect it does not declare is flagged" ![io] {
+    let source = "fn main() ![io] { fn logit() { print.info(\"hi\"); } logit(); return 0; }";
+    let violations = _violations_for(source);
+    assert _has_violation_for(violations, "logit");
+}
+
+// Soundness regression (SFEP-0042 review): a nested fn's effect signature must
+// be scope-local. A nested pure `log` in `caller` must NOT overwrite the
+// top-level effectful `log` in the global table and strip its effect from an
+// unrelated caller (`other`), which would silently defeat capability
+// enforcement. `other` calls the top-level `![io]` `log` and must be flagged;
+// `caller` calls its own shadowing pure nested `log` and must not be.
+test "effects: nested fn does not strip a same-named top-level fn's effect from other callers" ![io] {
+    let source = "fn log(x: int) -> int ![io] { print.info(\"x\"); return x; } fn caller() -> int { fn log(x: int) -> int { return x; } return log(5); } fn other() -> int { return log(5); }";
+    let violations = _violations_for(source);
+    assert _has_violation_for(violations, "other");
+    assert ! _has_violation_for(violations, "caller");
+}
+
+// Two same-named nested fns in DIFFERENT top-level functions with different
+// effects must not cross-contaminate: `a`'s effectful nested `h` (declared,
+// and `a` declares `![io]`) and `b`'s pure nested `h` both resolve locally.
+test "effects: same-named nested fns in different parents do not cross-contaminate" ![io] {
+    let source = "fn a() ![io] { fn h() ![io] { print.info(\"x\"); } h(); } fn b() -> int { fn h() -> int { return 1; } return h(); }";
+    let violations = _violations_for(source);
+    assert violations.length == 0;
+}
+
+// A nested fn declared inside a lambda body that uses an effect it does not
+// declare is still flagged (the collector descends into lambda bodies).
+test "effects: an effectful nested fn inside a lambda body is effect-checked" ![io] {
+    let source = "fn main() ![io] { let g = fn() -> int { fn logit() { print.info(\"x\"); } logit(); return 0; }; return g(); }";
+    let violations = _violations_for(source);
+    assert _has_violation_for(violations, "logit");
+}

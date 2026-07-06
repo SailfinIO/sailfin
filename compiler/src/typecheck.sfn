@@ -62,6 +62,7 @@ import {
     make_fn_value_position_diagnostic,
     make_main_signature_param_count_diagnostic,
     make_main_signature_param_type_diagnostic,
+    make_nested_fn_capture_diagnostic,
     make_parse_error_diagnostic,
     make_removed_keyword_diagnostic,
     make_spawn_unresolvable_kind_diagnostic,
@@ -538,6 +539,25 @@ fn check_statement(statement: Statement, ctx: TypeckCtx) -> ScopeResult {
         };
     }
     if statement.variant == "FunctionDeclaration" {
+        // Nested / local function declaration (SFEP-0042). Its name is already
+        // block-hoisted into `ctx.bindings` by `check_block`, so do NOT
+        // re-register (that would double-report `E0001`); check its signature
+        // and its body under the non-capturing nested scope so a reference to
+        // an enclosing local surfaces as `E0421`.
+        if in_function_body {
+            let mut nested_diags = check_function_signature(statement.signature, interfaces, top_level);
+            let nested_body_diags = check_nested_function_body(statement.signature, statement.body, ctx);
+            let mut _cin: int = 0;
+            loop {
+                if _cin >= nested_body_diags.length { break; }
+                nested_diags.push(nested_body_diags[_cin]);
+                _cin += 1;
+            }
+            return ScopeResult {
+                bindings: bindings,
+                diagnostics: nested_diags
+            };
+        }
         let registration = register_local_symbol(bindings, statement.signature.name, "function", statement.signature.name_span, scope_start, signature_is_generic(statement.signature), signature_is_c_abi(statement.signature));
         let mut diagnostics = registration.diagnostics;
         let _sig_diags = check_function_signature(statement.signature, interfaces, top_level);
@@ -905,10 +925,131 @@ fn seed_parameter_scope(signature: FunctionSignature, top_level: SymbolEntry[]) 
     return ScopeResult { bindings: bindings, diagnostics: diagnostics };
 }
 
+// Block-hoist nested `fn` names (SFEP-0042): register every statement-position
+// `FunctionDeclaration` in a block into the block scope *before* any statement
+// body is walked, so siblings mutually recurse and a nested fn is visible in
+// its own body (self-recursion), regardless of declaration order — the item
+// rule, in deliberate contrast to the sequential `let` registration. Two
+// same-name nested fns in one block collide here (`E0001`). Called by both the
+// checking (`check_block`) and the resolution (`walk_block_expressions`) block
+// walkers so the hoist is identical for plain-function and lambda bodies.
+fn _hoist_nested_fn_names(statements: Statement[], bindings: SymbolEntry[], scope_start: int) -> ScopeResult {
+    let mut scope = bindings;
+    let mut diagnostics: Diagnostic[] = [];
+    let mut _i: int = 0;
+    loop {
+        if _i >= statements.length { break; }
+        let statement = statements[_i];
+        if statement.variant == "FunctionDeclaration" {
+            let registration = register_local_symbol(scope, statement.signature.name, "function", statement.signature.name_span, scope_start, signature_is_generic(statement.signature), signature_is_c_abi(statement.signature));
+            scope = registration.bindings;
+            let mut _ci: int = 0;
+            loop {
+                if _ci >= registration.diagnostics.length { break; }
+                diagnostics.push(registration.diagnostics[_ci]);
+                _ci += 1;
+            }
+        }
+        _i += 1;
+    }
+    return ScopeResult { bindings: scope, diagnostics: diagnostics };
+}
+
+// Build the resolution scope for a nested / local `fn` body (SFEP-0042). A
+// nested fn is a non-capturing static item, so its body resolves against only:
+// module-level items (`ctx.top_level`), sibling / enclosing nested `fn` names
+// (the block-hoisted function-kind entries in the enclosing scope), and its
+// own parameters. Enclosing data locals/parameters are appended tagged
+// `"outer_local"` (lowest priority) so a reference that resolves to one is
+// reported as an E0421 capture rather than silently accepted. `find_symbol`
+// returns the highest-index match, so priority is params > siblings >
+// top_level > outer_local (a same-named parameter legally shadows a capture).
+fn _build_nested_fn_scope(signature: FunctionSignature, ctx: TypeckCtx) -> ScopeResult {
+    let mut scope: SymbolEntry[] = [];
+    // (1) enclosing data locals/params — forbidden, tagged lowest priority.
+    let mut _oi: int = 0;
+    loop {
+        if _oi >= ctx.bindings.length { break; }
+        let entry = ctx.bindings[_oi];
+        if !has_symbol(ctx.top_level, entry.name) {
+            if !is_function_kind(entry.kind) {
+                scope.push(SymbolEntry {
+                    name: entry.name, kind: "outer_local", span: entry.span, is_generic: false, is_c_abi: false
+                });
+            }
+        }
+        _oi += 1;
+    }
+    // (2) module-level items.
+    let mut _ti: int = 0;
+    loop {
+        if _ti >= ctx.top_level.length { break; }
+        scope.push(ctx.top_level[_ti]);
+        _ti += 1;
+    }
+    // (3) sibling / enclosing nested fn names (function-kind). Added AFTER the
+    // module-level items (higher index) so a nested `fn` that shares a name with
+    // a top-level function shadows it — `find_symbol` returns the highest-index
+    // match. This keeps typecheck resolution consistent with the emit-side
+    // rename (which also rewrites the call to the lifted nested symbol) and
+    // preserves self/sibling recursion when a nested fn shadows a module name.
+    let mut _si: int = 0;
+    loop {
+        if _si >= ctx.bindings.length { break; }
+        let entry = ctx.bindings[_si];
+        if is_function_kind(entry.kind) { scope.push(entry); }
+        _si += 1;
+    }
+    // (4) own parameters — highest priority; may shadow any of the above.
+    let param_scope_start = scope.length;
+    let mut diagnostics: Diagnostic[] = [];
+    for parameter in signature.parameters {
+        let registration = register_local_symbol(scope, parameter.name, "parameter", parameter.span, param_scope_start);
+        scope = registration.bindings;
+        let mut _ci: int = 0;
+        loop {
+            if _ci >= registration.diagnostics.length { break; }
+            diagnostics.push(registration.diagnostics[_ci]);
+            _ci += 1;
+        }
+    }
+    return ScopeResult { bindings: scope, diagnostics: diagnostics };
+}
+
+// Check a nested / local `fn` body under its non-capturing scope (SFEP-0042).
+// The name is already block-hoisted by the enclosing block walk, so this only
+// re-scopes the body so a capture surfaces as E0421 (via `walk_expression`).
+fn check_nested_function_body(signature: FunctionSignature, body: Block, ctx: TypeckCtx) -> Diagnostic[] {
+    let scoped = _build_nested_fn_scope(signature, ctx);
+    let body_ctx = ctx_enter_body(ctx, scoped.bindings, signature.return_type);
+    let body_diagnostics = check_block(body, body_ctx);
+    let mut _result = scoped.diagnostics;
+    let mut _ci: int = 0;
+    loop {
+        if _ci >= body_diagnostics.length { break; }
+        _result.push(body_diagnostics[_ci]);
+        _ci += 1;
+    }
+    return _result;
+}
+
 fn check_block(block: Block, ctx: TypeckCtx) -> Diagnostic[] {
     let mut bindings = clone_bindings(ctx.bindings);
     let scope_start = bindings.length;
     let mut diagnostics: Diagnostic[] = [];
+
+    // Block-hoist nested `fn` names before walking any body (SFEP-0042), so a
+    // sibling declared later and a nested fn's own name resolve. The per-
+    // statement `FunctionDeclaration` arm below does not re-register (it sees
+    // `in_function_body`), so this is the sole registrar inside a body.
+    let hoisted = _hoist_nested_fn_names(block.statements, bindings, scope_start);
+    bindings = hoisted.bindings;
+    let mut _hi: int = 0;
+    loop {
+        if _hi >= hoisted.diagnostics.length { break; }
+        diagnostics.push(hoisted.diagnostics[_hi]);
+        _hi += 1;
+    }
 
     for statement in block.statements {
         let result = check_statement(statement, ctx_with_bindings(ctx, bindings, scope_start));
@@ -1139,7 +1280,15 @@ fn walk_expression(expression: Expression?, ctx: TypeckCtx) -> Diagnostic[] {
         if expression.callee != null {
             if expression.callee.variant == "Identifier" {
                 let callee_name = expression.callee.name;
-                if !has_symbol(bindings, callee_name) {
+                let callee_entry = find_symbol(bindings, callee_name);
+                if callee_entry != null {
+                    // Calling a captured enclosing local from a nested fn body
+                    // (tagged `"outer_local"`) is an illegal capture, not a
+                    // resolved call (SFEP-0042, E0421).
+                    if strings_equal(callee_entry.kind, "outer_local") {
+                        diagnostics.push(make_nested_fn_capture_diagnostic(callee_name, expression.callee.span));
+                    }
+                } else {
                     if !is_builtin_call_name(callee_name) {
                         if lookup_imported_function(imports, callee_name) == null {
                             diagnostics.push(make_undefined_function_diagnostic(callee_name, expression.callee.span));
@@ -1368,6 +1517,13 @@ fn walk_expression(expression: Expression?, ctx: TypeckCtx) -> Diagnostic[] {
     if expression.variant == "Identifier" {
         let entry = find_symbol(bindings, expression.name);
         if entry != null {
+            // A nested `fn` body resolving a name to an enclosing data local
+            // (tagged `"outer_local"` by `_build_nested_fn_scope`) is an
+            // illegal capture (SFEP-0042, E0421) — reported here instead of
+            // being silently accepted as a value reference.
+            if strings_equal(entry.kind, "outer_local") {
+                return [make_nested_fn_capture_diagnostic(expression.name, expression.span)];
+            }
             if is_function_kind(entry.kind) {
                 return [make_fn_value_position_diagnostic(expression.name, expression.span)];
             }
@@ -1627,6 +1783,12 @@ fn walk_block_expressions(block: Block, ctx: TypeckCtx) -> Diagnostic[] {
     // lambda-body E0001 handling is out of this scope.
     let mut bindings: SymbolEntry[] = clone_bindings(ctx.bindings);
     let scope_start: int = bindings.length;
+    // Block-hoist nested `fn` names before the walk (SFEP-0042), symmetric with
+    // `check_block`, so a nested fn call resolves in a lambda body regardless of
+    // declaration order and E0421 capture rejection sees the sibling scope.
+    let hoisted = _hoist_nested_fn_names(block.statements, bindings, scope_start);
+    bindings = hoisted.bindings;
+    diagnostics = diagnostics.concat(hoisted.diagnostics);
     let mut index: int = 0;
     loop {
         if index >= block.statements.length { break; }
@@ -1725,6 +1887,16 @@ fn walk_statement_expressions(statement: Statement, ctx: TypeckCtx) -> Diagnosti
             diagnostics = diagnostics.concat(walk_block_expressions(statement.finally_block, ctx));
         }
         return diagnostics;
+    }
+    if statement.variant == "FunctionDeclaration" {
+        // Nested / local fn inside a lambda body (SFEP-0042). Its name was
+        // block-hoisted by `walk_block_expressions`; walk its body under the
+        // non-capturing nested scope so calls to siblings/self resolve and a
+        // reference to an enclosing local (including a lambda parameter) trips
+        // E0421. Without this arm the body was never resolution-walked.
+        let scoped = _build_nested_fn_scope(statement.signature, ctx);
+        let body_ctx = ctx_enter_body(ctx, scoped.bindings, statement.signature.return_type);
+        return scoped.diagnostics.concat(walk_block_expressions(statement.body, body_ctx));
     }
     return [];
 }

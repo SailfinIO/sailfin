@@ -2721,6 +2721,23 @@ fn make_undefined_function_diagnostic(name: string, span: SourceSpan?) -> Diagno
     };
 }
 
+// A nested / local `fn` is a non-capturing static item (SFEP-0042): its
+// body may reference its own parameters, module-level items, and sibling
+// nested `fn`s — never an enclosing local or parameter. Capturing one is
+// rejected here, mirroring Rust `E0434`; the fix is to bind a closure,
+// which is Sailfin's existing capturing form.
+fn make_nested_fn_capture_diagnostic(name: string, span: SourceSpan?) -> Diagnostic {
+    return Diagnostic {
+        code: "E0421",
+        severity: "error",
+        message: "nested `fn` cannot capture `" + name
+            + "` from the enclosing scope; bind a closure with `let f = fn(...) => ...` to capture it",
+        file_path: "",
+        primary: token_from_name(name, span),
+        suggestion: null
+    };
+}
+
 // Match a reserved keyword that has no statement-level implementation.
 // `parse_block_statement` routes these to `parse_unknown_statement` so the
 // diagnostic surfaces here instead of being silently absorbed by the

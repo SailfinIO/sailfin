@@ -20,7 +20,7 @@ import {
     substring
 } from "../string_utils";
 import { Token } from "../token";
-import { parse_variable } from "./declarations";
+import { parse_function, parse_variable } from "./declarations";
 import { expression_from_tokens } from "./expressions";
 import {
     append_token,
@@ -236,6 +236,31 @@ fn parse_block_statement(parser: Parser) -> BlockStatementParseResult {
             success: true
         };
     }
+    // Nested / local function declaration (SFEP-0042): `fn name(...) { ... }`
+    // in statement position. Disambiguated from an anonymous lambda
+    // *expression* `fn(...)` by two-token lookahead — an identifier (a name)
+    // after `fn` is a declaration; a `(` after `fn` is a lambda, which falls
+    // through to the expression-statement path. `async fn` / decorated nested
+    // fns have no defined nested semantics in v0, so they fall through to
+    // `parse_unknown_statement` (a clean parse rejection) rather than parse.
+    if identifier_matches(token, "fn") {
+        let after_fn = skip_trivia(parser_advance_raw(after_decorators));
+        if parser_peek_raw(after_fn).kind.variant == "Identifier" {
+            if decorators.length > 0 {
+                return BlockStatementParseResult {
+                    parser: original,
+                    statement: null,
+                    success: false
+                };
+            }
+            let fn_result = parse_function(after_decorators, false, decorators, false);
+            return BlockStatementParseResult {
+                parser: fn_result.parser,
+                statement: fn_result.statement,
+                success: true
+            };
+        }
+    }
     if identifier_matches(token, "for") {
         return parse_for_statement(after_decorators, decorators);
     }
@@ -297,6 +322,20 @@ fn parse_block_statement(parser: Parser) -> BlockStatementParseResult {
         }
         let mut unsafe_current = consume_keyword(after_decorators, "unsafe");
         unsafe_current = skip_trivia(unsafe_current);
+        // `unsafe fn name(...)` is a nested unsafe function declaration
+        // (SFEP-0042); `unsafe { ... }` is an unsafe block. Disambiguate by
+        // whether `fn` (followed by a name) or `{` follows `unsafe`.
+        if identifier_matches(parser_peek_raw(unsafe_current), "fn") {
+            let after_fn = skip_trivia(parser_advance_raw(unsafe_current));
+            if parser_peek_raw(after_fn).kind.variant == "Identifier" {
+                let fn_result = parse_function(after_decorators, false, decorators, true);
+                return BlockStatementParseResult {
+                    parser: fn_result.parser,
+                    statement: fn_result.statement,
+                    success: true
+                };
+            }
+        }
         let body_result = parse_block(unsafe_current);
         return BlockStatementParseResult {
             parser: body_result.parser,

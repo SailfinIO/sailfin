@@ -64,6 +64,7 @@ The next number is `max + 1`. Add a row in the same PR that introduces an SFEP.
 | [0039](./0039-nominal-object-model.md) | Nominal Object Model — Honest Rejection of TypeScript-Shaped Data Syntax | Accepted | language |
 | [0040](./0040-artifact-cache.md) | Global Artifact Cache Store and Garbage Collection | Accepted | tooling |
 | [0041](./0041-typeck-expected-type-context.md) | Unified expected-type + typing-environment context for the typecheck walk | Implemented | tooling |
+| [0042](./0042-nested-function-declarations.md) | Nested / Local Function Declarations (non-capturing static `fn` items) | Accepted | language |
 
 ## Drafts under review (numbers assigned at merge)
 

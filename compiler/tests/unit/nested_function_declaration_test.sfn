@@ -1,0 +1,113 @@
+// Unit tests for nested / local function declarations (SFEP-0042).
+//
+// A statement-position `fn name(...) -> T ![effects] { ... }` inside a
+// function or lambda body is a non-capturing static item, block-hoisted
+// so siblings can mutually recurse and a nested fn can self-recurse. It
+// is called by name like any other function, but referencing an
+// enclosing local/parameter from its body is a capture and fires
+// `E0421` — a same-named nested-fn *parameter* legally shadows an
+// enclosing name (no capture). A genuinely undefined call target inside
+// a nested fn body still fires `E0420`, and two same-name nested fns in
+// one block still collide as `E0001`.
+import { find } from "sfn/strings";
+
+import { parse_program } from "../../src/parser/mod";
+import { typecheck_diagnostics } from "../../src/typecheck";
+import { Diagnostic } from "../../src/typecheck_types";
+
+fn _count_code(diagnostics: Diagnostic[], code: string) -> int {
+    let mut count: int = 0;
+    let mut i: int = 0;
+    loop {
+        if i >= diagnostics.length { break; }
+        if strings_equal(diagnostics[i].code, code) { count += 1; }
+        i += 1;
+    }
+    return count;
+}
+
+fn _count_for(source: string, code: string) -> int ![io] {
+    let program = parse_program(source);
+    let diagnostics = typecheck_diagnostics(program);
+    return _count_code(diagnostics, code);
+}
+
+// -------------------------------------------------------------------
+// E0420: name resolution for nested fns
+// -------------------------------------------------------------------
+test "E0420: nested fn called by name resolves" ![io] {
+    let source = "fn main() -> int { fn helper() -> int { return 1; } return helper(); }";
+    assert _count_for(source, "E0420") == 0;
+}
+
+test "E0420: mutually recursive sibling nested fns resolve" ![io] {
+    let source = "fn run() -> boolean { fn is_even(n: int) -> boolean { if n == 0 { return true; } return is_odd(n - 1); } fn is_odd(n: int) -> boolean { if n == 0 { return false; } return is_even(n - 1); } return is_even(4); }";
+    assert _count_for(source, "E0420") == 0;
+}
+
+test "E0420: self-recursive nested fn resolves" ![io] {
+    let source = "fn run() -> int { fn fib(n: int) -> int { if n < 2 { return n; } return fib(n - 1) + fib(n - 2); } return fib(6); }";
+    assert _count_for(source, "E0420") == 0;
+}
+
+test "E0420: genuinely undefined callee inside nested fn still fires" ![io] {
+    let source = "fn run() -> int { fn a() -> int { return nope(); } return a(); }";
+    assert _count_for(source, "E0420") == 1;
+}
+
+test "E0420: nested fn inside a lambda body resolves" ![io] {
+    let source = "fn main() -> int { let g = fn(x: int) -> int { fn dbl(n: int) -> int { return n * 2; } return dbl(x); }; return g(3); }";
+    assert _count_for(source, "E0420") == 0;
+}
+
+// -------------------------------------------------------------------
+// E0421: capture rejection
+// -------------------------------------------------------------------
+test "E0421: nested fn capturing an enclosing parameter is rejected" ![io] {
+    let source = "fn bump(base: int) -> int { fn helper(n: int) -> int { return n + base; } return helper(1); }";
+    assert _count_for(source, "E0421") == 1;
+}
+
+test "E0421: nested fn capturing an enclosing let is rejected" ![io] {
+    let source = "fn f() -> int { let x = 5; fn h() -> int { return x; } return h(); }";
+    assert _count_for(source, "E0421") == 1;
+}
+
+test "E0421: a nested-fn parameter shadowing an enclosing name is not a capture" ![io] {
+    let source = "fn f(base: int) -> int { fn h(base: int) -> int { return base + 1; } return h(base); }";
+    assert _count_for(source, "E0421") == 0;
+}
+
+test "E0421: nested fn in a lambda body capturing the lambda parameter is rejected" ![io] {
+    let source = "fn f() -> int { let g = fn(y: int) -> int { fn h() -> int { return y; } return h(); }; return g(3); }";
+    assert _count_for(source, "E0421") == 1;
+}
+
+test "E0421: carries the capture-rejection message and code" ![io] {
+    let source = "fn bump(base: int) -> int { fn helper(n: int) -> int { return n + base; } return helper(1); }";
+    let program = parse_program(source);
+    let diagnostics = typecheck_diagnostics(program);
+    let mut found: boolean = false;
+    let mut i: int = 0;
+    loop {
+        if i >= diagnostics.length { break; }
+        let d = diagnostics[i];
+        if strings_equal(d.code, "E0421") {
+            assert strings_equal(d.severity, "error");
+            assert d.primary != null;
+            assert find(d.message, "cannot capture", 0) >= 0;
+            assert find(d.message, "base", 0) >= 0;
+            found = true;
+        }
+        i += 1;
+    }
+    assert found;
+}
+
+// -------------------------------------------------------------------
+// E0001: duplicate nested fns in one block
+// -------------------------------------------------------------------
+test "E0001: two same-name nested fns in one block collide" ![io] {
+    let source = "fn f() -> int { fn h() -> int { return 1; } fn h() -> int { return 2; } return h(); }";
+    assert _count_for(source, "E0001") >= 1;
+}
