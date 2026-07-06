@@ -4,9 +4,9 @@ title: Nested / Local Function Declarations (non-capturing static `fn` items)
 status: Accepted
 type: language
 created: 2026-07-05
-updated: 2026-07-05
+updated: 2026-07-06
 author: "agent:compiler-architect; human review"
-tracking: "#1609, #1922, #1935"
+tracking: "#1609, #1922, #1935, #1940, #1950"
 supersedes:
 superseded-by:
 graduates-to:
@@ -313,7 +313,7 @@ demonstrate that the resolution/statement diagnostics live in this range. Home:
 **Fix-it:** `bind a closure to capture it: \`let f = fn(...) => ...\``. This
 mirrors Rust `E0434`.
 
-### 3.4 Known limitations (v0) — same-name shadowing by a value binding
+### 3.4 Same-name shadowing and sibling-scope resolution (resolved)
 
 Nested-fn resolution keys by **source name** in three places built during
 Sub-issue A: the typecheck scope (`_build_nested_fn_scope`), the emit rename map
@@ -321,26 +321,42 @@ Sub-issue A: the typecheck scope (`_build_nested_fn_scope`), the emit rename map
 (`_local_effect_table`). Nested fns lifted to distinct mangled symbols are
 collision-free, and lexical shadowing **between nested fns** is handled (inner
 scope wins: the rename lookup scans innermost-first, and sibling scope entries
-are ordered to shadow module-level names). Two v0 gaps remain where a nested fn
-name collides with a **value binding** or across **sibling blocks**, both narrow
-and both requiring scope-path-aware keying (or resolving/renaming *after* the
-lift, when every nested fn is already a distinct flat top-level symbol) — a
-follow-up, tracked in the epic #1609 thread:
+are ordered to shadow module-level names). Two classes of edge case beyond
+distinct-name nested fns — a nested fn name colliding with a **value binding**,
+or with a same-named fn in a **sibling block** — needed scope-aware keying. They
+were closed across two PRs.
 
-1. **A `let`/parameter that shadows a same-named nested `fn`.** Sailfin lets a
-   local value binding shadow a nested fn name (`fn helper() { … } let helper =
-   fn(x) => x; helper(1)`). Typecheck resolves `helper(1)` to the `let` (correct,
-   highest-index binding), but the emit rename — keyed only by callee name —
-   still rewrites the call to the lifted nested symbol. Fix: the lift walker must
-   skip the rename when a local/param binding shadows the name at the call site.
-2. **Same-named nested fns in *sibling* blocks with differing effects.** The
-   routine-local effect table flattens all nested fns of a routine by bare name
-   (last-write-wins), so `{ fn h() ![io] {…} }` and `{ fn h() -> int {…} h(); }`
-   in two sibling blocks share one entry; a call can resolve to the wrong effect
-   row (over- or under-approximating the requirement). Fix: key the effect table
-   by block scope, or run effect analysis post-lift.
+**Closed by #1940** (the Sub-issue A follow-up):
 
-Distinct-name nested fns — the overwhelmingly common case — are unaffected.
+1. **Emit rename vs. a value-binding shadow.** Sailfin lets a local value binding
+   shadow a nested fn name (`fn helper() { … } let helper = fn(x) => x;
+   helper(1)`); typecheck resolves `helper(1)` to the `let`, but the emit rename
+   — keyed only by callee name — used to rewrite the call to the lifted nested
+   symbol. The lift walker now skips the rename when a local/param binding
+   shadows the name at the call site (`lambda_lowering.sfn`, the `NestedRename`
+   shadow sentinel).
+2. **Block-scoped effect resolution for the enclosing routine.** The routine's
+   own requirement walk now hoists each block's direct fns
+   (`_hoist_block_local_fns` in `collect_effects_from_block`), so a call resolves
+   to the `fn` in its nearest enclosing block rather than to one flat
+   routine-wide row.
+
+**Closed by #1950** (two narrower residuals surfaced in #1940's review — both
+non-blocking: (a) unsound but contrived, (b) a spurious diagnostic only):
+
+- (a) **Deferred sibling resolution.** A nested fn's own body was still analyzed
+  against the flat routine-wide table, so a call to a same-named **sibling** in a
+  different scope could mis-resolve (last-write-wins). Deferred analysis now
+  seeds each nested fn's body with the effect table of its lexically enclosing
+  scope (`ScopedFn` in `effect_checker.sfn`), so a sibling call resolves by
+  scope.
+- (b) **Effect-side value-binding shadow.** The effect checker now mirrors (1) on
+  the emit side: a `let`/parameter that shadows a same-named nested `fn` zeroes
+  that fn's effect row for calls in its scope (position-sensitive for a `let`,
+  whole-body for a parameter), so the caller is not required to declare an effect
+  it does not incur.
+
+Distinct-name nested fns — the overwhelmingly common case — were never affected.
 
 ## 4. Effect & capability impact
 

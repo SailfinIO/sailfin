@@ -104,3 +104,58 @@ test "effects: sibling-block pure nested fn call is not tainted by an effectful 
     let violations = _violations_for(source);
     assert ! _has_violation_for(violations, "run");
 }
+
+// Soundness regression (SFEP-0042 §3.4 gap (a), #1950): a nested fn's DEFERRED
+// body analysis must resolve a call to a same-named SIBLING by lexical scope,
+// not against the flat routine-wide table. `a` calls its own block's effectful
+// `g`; a pure `g` in a later sibling block won the flat table's last-write slot,
+// so `a`'s call silently resolved to the pure `g` (under-approximation — `a`
+// escaped the `![io]` requirement). Scope-keyed seeding resolves `a`'s `g()` to
+// the effectful sibling, so `a` (declaring no effect) is flagged.
+test "effects: nested fn calling an effectful same-named sibling is flagged (#1950 gap a)" ![io] {
+    let source = "fn run() -> int { { fn g() ![io] { print.info(\"x\"); } fn a() -> int { g(); return 0; } } { fn g() -> int { return 1; } } return 0; }";
+    let violations = _violations_for(source);
+    assert _has_violation_for(violations, "a");
+}
+
+// Reverse direction (#1950 gap a): `a` calls its own block's PURE `g`; an
+// effectful `g` in a later sibling block won the flat table's last-write slot,
+// falsely tainting `a`'s call (over-approximation). Scope-keyed seeding resolves
+// `a`'s `g()` to the pure sibling, so `a` is not flagged.
+test "effects: nested fn calling a pure same-named sibling is not tainted (#1950 gap a)" ![io] {
+    let source = "fn run() -> int { { fn g() -> int { return 1; } fn a() -> int { return g(); } } { fn g() ![io] { print.info(\"x\"); } } return 0; }";
+    let violations = _violations_for(source);
+    assert ! _has_violation_for(violations, "a");
+}
+
+// False-positive regression (SFEP-0042 §3.4 gap (b), #1950): a `let` that
+// shadows a same-named nested `fn` rebinds the name to a value — a call to it
+// goes to the binding, not the fn. The effect checker must not require the
+// shadowed fn's effect of the caller (emit already calls the value binding).
+// Here `main` (no declared effect) rebinds the effectful `helper` to a pure
+// lambda before calling it, so `main` must not be flagged.
+test "effects: a let that shadows a nested fn does not inherit its effect (#1950 gap b)" ![io] {
+    let source = "fn main() -> int { fn helper() ![io] { print.info(\"x\"); } let helper = fn(x: int) -> int { return x; }; return helper(1); }";
+    let violations = _violations_for(source);
+    assert ! _has_violation_for(violations, "main");
+}
+
+// Soundness guard for the gap (b) fix (#1950): the shadow suppression is
+// position-sensitive — a call BEFORE the shadowing `let` still reaches the
+// (block-hoisted) effectful fn, so `main` (no declared effect) must be flagged.
+// A block-scoped suppression would wrongly clear this and be unsound.
+test "effects: a call before a shadowing let still requires the nested fn's effect (#1950 gap b)" ![io] {
+    let source = "fn main() -> int { fn helper() ![io] { print.info(\"x\"); } helper(); let helper = fn(x: int) -> int { return x; }; return helper(1); }";
+    let violations = _violations_for(source);
+    assert _has_violation_for(violations, "main");
+}
+
+// False-positive regression (SFEP-0042 §3.4 gap (b), #1950): a parameter that
+// shadows a same-named nested `fn` rebinds the name for the whole body. `apply`
+// calls its `cb` parameter, not the effectful nested `cb`, so `apply` must not
+// inherit `![io]`.
+test "effects: a parameter that shadows a nested fn does not inherit its effect (#1950 gap b)" ![io] {
+    let source = "fn main() -> int { fn cb() ![io] { print.info(\"x\"); } fn apply(cb: fn() -> int) -> int { return cb(); } return 0; }";
+    let violations = _violations_for(source);
+    assert ! _has_violation_for(violations, "apply");
+}

@@ -34,6 +34,7 @@ import {
     FunctionSignature,
     MatchCase,
     MethodDeclaration,
+    Parameter,
     Program,
     SourceSpan,
     Statement,
@@ -211,17 +212,43 @@ fn validate_effects_with_imports(program: Program, imports: ImportSymbolTable) -
 // them here by bare member name would be unsound. Functions with no
 // declared effects are still recorded (harmless: an empty effect set
 // propagates nothing) so the table answers "is this a known local fn".
+// A nested / local `fn` paired with the effect table of its LEXICALLY
+// ENCLOSING scope — the enclosing block's hoisted fns (its siblings) plus every
+// ancestor scope. Deferred nested-fn analysis seeds each fn's body walk with
+// this table so a call to a sibling resolves by lexical scope, not by bare name
+// against one flat routine-wide table (SFEP-0042 §3.4 gap (a), #1950).
+struct ScopedFn {
+    decl: Statement;
+    enclosing: ImportSymbolTable;
+}
+
+// Shallow-copy an effect table's `functions` array so a caller can append /
+// overwrite entries (`append_local_function` mutates in place) without
+// corrupting a table shared with an enclosing scope. Overwrite replaces a
+// slot rather than mutating the entry, so a shallow array copy is sufficient.
+fn _copy_effect_table(table: ImportSymbolTable) -> ImportSymbolTable {
+    let mut copied: ImportedFunctionSignature[] = [];
+    let mut k: int = 0;
+    loop {
+        if k >= table.functions.length { break; }
+        copied.push(table.functions[k]);
+        k += 1;
+    }
+    return ImportSymbolTable { functions: copied };
+}
+
 // Enumerate every nested / local `fn` reachable inside a block, at any depth,
-// flattened (SFEP-0042). Descends through all block-bearing statements. Used
-// both to register nested-fn effect signatures for call-site transitivity
-// (`_merge_local_functions`) and to effect-check each nested body against its
-// own declared row (`analyze_statement`).
-fn _collect_nested_fns_in_block(block: Block) -> Statement[] {
-    let mut acc: Statement[] = [];
+// each paired with the effect table of its enclosing scope (SFEP-0042).
+// Descends through all block-bearing statements and lambda bodies. `enclosing`
+// is the table visible to `block`'s statements; this block's own direct fns are
+// hoisted onto it first so siblings resolve one another.
+fn _collect_nested_fns_in_block(block: Block, enclosing: ImportSymbolTable) -> ScopedFn[] {
+    let scoped = _hoist_block_local_fns(enclosing, block);
+    let mut acc: ScopedFn[] = [];
     let mut i: int = 0;
     loop {
         if i >= block.statements.length { break; }
-        acc = acc.concat(_collect_nested_fns_in_statement(block.statements[i]));
+        acc = acc.concat(_collect_nested_fns_in_statement(block.statements[i], scoped));
         i += 1;
     }
     return acc;
@@ -231,60 +258,60 @@ fn _collect_nested_fns_in_block(block: Block) -> Statement[] {
 // contains (SFEP-0042). A nested fn inside a lambda body (`let g = fn() { fn
 // h() {...} ... }`) must be effect-checked and registered for transitivity too
 // — the emit lift already hoists it, so skipping it here would drop its effects.
-fn _collect_nested_fns_in_expression(expression: Expression?) -> Statement[] {
-    let mut acc: Statement[] = [];
+fn _collect_nested_fns_in_expression(expression: Expression?, enclosing: ImportSymbolTable) -> ScopedFn[] {
+    let mut acc: ScopedFn[] = [];
     if expression == null { return acc; }
     let v = expression.variant;
     if v == "Lambda" {
-        return _collect_nested_fns_in_block(expression.body);
+        return _collect_nested_fns_in_block(expression.body, enclosing);
     }
     if v == "Unary" {
-        return _collect_nested_fns_in_expression(expression.operand);
+        return _collect_nested_fns_in_expression(expression.operand, enclosing);
     }
     if v == "Member" {
-        return _collect_nested_fns_in_expression(expression.object);
+        return _collect_nested_fns_in_expression(expression.object, enclosing);
     }
     if v == "Cast" {
-        return _collect_nested_fns_in_expression(expression.operand);
+        return _collect_nested_fns_in_expression(expression.operand, enclosing);
     }
     if v == "Is" {
-        return _collect_nested_fns_in_expression(expression.operand);
+        return _collect_nested_fns_in_expression(expression.operand, enclosing);
     }
     if v == "TryOperator" {
-        return _collect_nested_fns_in_expression(expression.operand);
+        return _collect_nested_fns_in_expression(expression.operand, enclosing);
     }
     if v == "Spawn" {
-        return _collect_nested_fns_in_expression(expression.operand);
+        return _collect_nested_fns_in_expression(expression.operand, enclosing);
     }
     if v == "Await" {
-        return _collect_nested_fns_in_expression(expression.operand);
+        return _collect_nested_fns_in_expression(expression.operand, enclosing);
     }
     if v == "Binary" {
-        return _collect_nested_fns_in_expression(expression.left).concat(_collect_nested_fns_in_expression(expression.right));
+        return _collect_nested_fns_in_expression(expression.left, enclosing).concat(_collect_nested_fns_in_expression(expression.right, enclosing));
     }
     if v == "Index" {
-        return _collect_nested_fns_in_expression(expression.sequence).concat(_collect_nested_fns_in_expression(expression.index));
+        return _collect_nested_fns_in_expression(expression.sequence, enclosing).concat(_collect_nested_fns_in_expression(expression.index, enclosing));
     }
     if v == "Range" {
-        return _collect_nested_fns_in_expression(expression.start).concat(_collect_nested_fns_in_expression(expression.end));
+        return _collect_nested_fns_in_expression(expression.start, enclosing).concat(_collect_nested_fns_in_expression(expression.end, enclosing));
     }
     if v == "Assignment" {
-        return _collect_nested_fns_in_expression(expression.target).concat(_collect_nested_fns_in_expression(expression.rhs));
+        return _collect_nested_fns_in_expression(expression.target, enclosing).concat(_collect_nested_fns_in_expression(expression.rhs, enclosing));
     }
     if v == "Conditional" {
-        acc = _collect_nested_fns_in_expression(expression.condition);
-        acc = acc.concat(_collect_nested_fns_in_expression(expression.then_value));
-        return acc.concat(_collect_nested_fns_in_expression(expression.else_value));
+        acc = _collect_nested_fns_in_expression(expression.condition, enclosing);
+        acc = acc.concat(_collect_nested_fns_in_expression(expression.then_value, enclosing));
+        return acc.concat(_collect_nested_fns_in_expression(expression.else_value, enclosing));
     }
     if v == "Serve" {
-        return _collect_nested_fns_in_expression(expression.handler).concat(_collect_nested_fns_in_expression(expression.port));
+        return _collect_nested_fns_in_expression(expression.handler, enclosing).concat(_collect_nested_fns_in_expression(expression.port, enclosing));
     }
     if v == "Call" {
-        acc = _collect_nested_fns_in_expression(expression.callee);
+        acc = _collect_nested_fns_in_expression(expression.callee, enclosing);
         let mut i: int = 0;
         loop {
             if i >= expression.arguments.length { break; }
-            acc = acc.concat(_collect_nested_fns_in_expression(expression.arguments[i]));
+            acc = acc.concat(_collect_nested_fns_in_expression(expression.arguments[i], enclosing));
             i += 1;
         }
         return acc;
@@ -293,7 +320,7 @@ fn _collect_nested_fns_in_expression(expression: Expression?) -> Statement[] {
         let mut i: int = 0;
         loop {
             if i >= expression.elements.length { break; }
-            acc = acc.concat(_collect_nested_fns_in_expression(expression.elements[i]));
+            acc = acc.concat(_collect_nested_fns_in_expression(expression.elements[i], enclosing));
             i += 1;
         }
         return acc;
@@ -302,7 +329,7 @@ fn _collect_nested_fns_in_expression(expression: Expression?) -> Statement[] {
         let mut i: int = 0;
         loop {
             if i >= expression.tasks.length { break; }
-            acc = acc.concat(_collect_nested_fns_in_expression(expression.tasks[i]));
+            acc = acc.concat(_collect_nested_fns_in_expression(expression.tasks[i], enclosing));
             i += 1;
         }
         return acc;
@@ -311,7 +338,7 @@ fn _collect_nested_fns_in_expression(expression: Expression?) -> Statement[] {
         let mut i: int = 0;
         loop {
             if i >= expression.fields.length { break; }
-            acc = acc.concat(_collect_nested_fns_in_expression(expression.fields[i].value));
+            acc = acc.concat(_collect_nested_fns_in_expression(expression.fields[i].value, enclosing));
             i += 1;
         }
         return acc;
@@ -320,7 +347,7 @@ fn _collect_nested_fns_in_expression(expression: Expression?) -> Statement[] {
         let mut i: int = 0;
         loop {
             if i >= expression.fields.length { break; }
-            acc = acc.concat(_collect_nested_fns_in_expression(expression.fields[i].value));
+            acc = acc.concat(_collect_nested_fns_in_expression(expression.fields[i].value, enclosing));
             i += 1;
         }
         return acc;
@@ -328,69 +355,69 @@ fn _collect_nested_fns_in_expression(expression: Expression?) -> Statement[] {
     return acc;
 }
 
-fn _collect_nested_fns_in_statement(statement: Statement) -> Statement[] {
-    let mut acc: Statement[] = [];
+fn _collect_nested_fns_in_statement(statement: Statement, enclosing: ImportSymbolTable) -> ScopedFn[] {
+    let mut acc: ScopedFn[] = [];
     if statement.variant == "FunctionDeclaration" {
-        acc.push(statement);
-        return acc.concat(_collect_nested_fns_in_block(statement.body));
+        acc.push(ScopedFn { decl: statement, enclosing: enclosing });
+        return acc.concat(_collect_nested_fns_in_block(statement.body, enclosing));
     }
     if statement.variant == "VariableDeclaration" {
-        return _collect_nested_fns_in_expression(statement.initializer);
+        return _collect_nested_fns_in_expression(statement.initializer, enclosing);
     }
     if statement.variant == "ReturnStatement" {
-        return _collect_nested_fns_in_expression(statement.expression);
+        return _collect_nested_fns_in_expression(statement.expression, enclosing);
     }
     if statement.variant == "ExpressionStatement" {
-        return _collect_nested_fns_in_expression(statement.expression);
+        return _collect_nested_fns_in_expression(statement.expression, enclosing);
     }
     if statement.variant == "ThrowStatement" {
-        return _collect_nested_fns_in_expression(statement.expression);
+        return _collect_nested_fns_in_expression(statement.expression, enclosing);
     }
     if statement.variant == "IfStatement" {
-        acc = _collect_nested_fns_in_expression(statement.condition);
-        acc = acc.concat(_collect_nested_fns_in_block(statement.then_block));
+        acc = _collect_nested_fns_in_expression(statement.condition, enclosing);
+        acc = acc.concat(_collect_nested_fns_in_block(statement.then_block, enclosing));
         if statement.else_branch != null {
             let branch = statement.else_branch;
             if branch.body != null {
-                acc = acc.concat(_collect_nested_fns_in_block(branch.body));
+                acc = acc.concat(_collect_nested_fns_in_block(branch.body, enclosing));
             }
             if branch.statement != null {
-                acc = acc.concat(_collect_nested_fns_in_statement(branch.statement));
+                acc = acc.concat(_collect_nested_fns_in_statement(branch.statement, enclosing));
             }
         }
         return acc;
     }
     if statement.variant == "ForStatement" {
-        return _collect_nested_fns_in_block(statement.body);
+        return _collect_nested_fns_in_block(statement.body, enclosing);
     }
     if statement.variant == "LoopStatement" {
-        return _collect_nested_fns_in_block(statement.body);
+        return _collect_nested_fns_in_block(statement.body, enclosing);
     }
     if statement.variant == "BlockStatement" {
-        return _collect_nested_fns_in_block(statement.body);
+        return _collect_nested_fns_in_block(statement.body, enclosing);
     }
     if statement.variant == "RoutineStatement" {
-        return _collect_nested_fns_in_block(statement.body);
+        return _collect_nested_fns_in_block(statement.body, enclosing);
     }
     if statement.variant == "WithStatement" {
-        return _collect_nested_fns_in_block(statement.body);
+        return _collect_nested_fns_in_block(statement.body, enclosing);
     }
     if statement.variant == "MatchStatement" {
         let mut ci: int = 0;
         loop {
             if ci >= statement.cases.length { break; }
-            acc = acc.concat(_collect_nested_fns_in_block(statement.cases[ci].body));
+            acc = acc.concat(_collect_nested_fns_in_block(statement.cases[ci].body, enclosing));
             ci += 1;
         }
         return acc;
     }
     if statement.variant == "TryStatement" {
-        acc = acc.concat(_collect_nested_fns_in_block(statement.try_block));
+        acc = acc.concat(_collect_nested_fns_in_block(statement.try_block, enclosing));
         if statement.catch_block != null {
-            acc = acc.concat(_collect_nested_fns_in_block(statement.catch_block));
+            acc = acc.concat(_collect_nested_fns_in_block(statement.catch_block, enclosing));
         }
         if statement.finally_block != null {
-            acc = acc.concat(_collect_nested_fns_in_block(statement.finally_block));
+            acc = acc.concat(_collect_nested_fns_in_block(statement.finally_block, enclosing));
         }
         return acc;
     }
@@ -449,16 +476,58 @@ fn _local_effect_table(imports: ImportSymbolTable, nested: Statement[]) -> Impor
 // without polluting the global namespace. `name` is the qualified routine name
 // used in diagnostics.
 fn _analyze_routine_with_nested(signature: FunctionSignature, body: Block, decorators: Decorator[], name: string, imports: ImportSymbolTable) -> EffectViolation[] {
-    let nested = _collect_nested_fns_in_block(body);
-    let local = _local_effect_table(imports, nested);
+    let scoped_nested = _collect_nested_fns_in_block(body, imports);
+    // Flat routine-wide table for the ENCLOSING routine's own body walk. #1940's
+    // per-block hoisting (`_hoist_block_local_fns` inside `collect_effects_from_block`)
+    // refines resolution to the nearest-enclosing declaration during that walk,
+    // so the flat seed is only a starting point and its cross-scope name
+    // collisions do not affect the enclosing routine's own diagnostics.
+    let mut flat: Statement[] = [];
+    let mut fi: int = 0;
+    loop {
+        if fi >= scoped_nested.length { break; }
+        flat.push(scoped_nested[fi].decl);
+        fi += 1;
+    }
+    let local = _local_effect_table(imports, flat);
     let mut issues = analyze_routine(signature, body, decorators, name, local);
     let mut ni: int = 0;
     loop {
-        if ni >= nested.length { break; }
-        issues = append_violations(issues, analyze_routine(nested[ni].signature, nested[ni].body, nested[ni].decorators, nested[ni].signature.name, local));
+        if ni >= scoped_nested.length { break; }
+        let sn = scoped_nested[ni];
+        // Deferred nested-fn analysis: seed each nested fn's body with the effect
+        // table of its LEXICALLY ENCLOSING scope (its siblings), not the flat
+        // routine-wide table — so a call to a sibling resolves by scope, closing
+        // the cross-scope same-name collision (SFEP-0042 §3.4 gap (a), #1950).
+        issues = append_violations(issues, analyze_routine(sn.decl.signature, sn.decl.body, sn.decl.decorators, sn.decl.signature.name, sn.enclosing));
         ni += 1;
     }
     return issues;
+}
+
+// Zero the effect row of any in-scope `fn` shadowed by a same-named parameter
+// (SFEP-0042 §3.4 gap (b), #1950): inside the body, a call to the parameter
+// goes to the passed value, not the shadowed fn, so the fn's effects must not
+// be required of the body. Copy-on-write so a table shared with an enclosing
+// scope is never mutated. The value's own effects are a first-class-fn-value
+// concern (#1609), not modeled here.
+fn _suppress_shadowing_params(imports: ImportSymbolTable, parameters: Parameter[]) -> ImportSymbolTable {
+    let mut table = imports;
+    let mut copied: boolean = false;
+    let mut i: int = 0;
+    loop {
+        if i >= parameters.length { break; }
+        let pname = parameters[i].name;
+        if lookup_imported_function(table, pname) != null {
+            if !copied {
+                table = _copy_effect_table(table);
+                copied = true;
+            }
+            table = append_local_function(table, pname, []);
+        }
+        i += 1;
+    }
+    return table;
 }
 
 // Phase F entry: cross-check every function's *declared* effects
@@ -669,7 +738,9 @@ fn analyze_routine(signature: FunctionSignature, body: Block, decorators: Decora
     if requires_io_from_decorators {
         declared = append_unique_effect(declared, "io");
     }
-    let required = required_effects(body, imports);
+    // Suppress any fn-table row shadowed by a same-named parameter of this
+    // routine (SFEP-0042 §3.4 gap (b), #1950) before walking the body.
+    let required = required_effects(body, _suppress_shadowing_params(imports, signature.parameters));
     let mut missing: string[] = [];
     let mut missing_requirements: EffectRequirement[] = [];
     let mut index: int = 0;
@@ -794,12 +865,32 @@ fn _hoist_block_local_fns(imports: ImportSymbolTable, block: Block) -> ImportSym
 }
 
 fn collect_effects_from_block(block: Block, imports: ImportSymbolTable) -> EffectRequirement[] {
-    let scoped = _hoist_block_local_fns(imports, block);
+    let mut scoped = _hoist_block_local_fns(imports, block);
+    let mut shadow_copied: boolean = false;
     let mut required: EffectRequirement[] = [];
     let mut index: int = 0;
     loop {
         if index >= block.statements.length { break; }
-        required = merge_requirements(required, collect_effects_from_statement(block.statements[index], scoped));
+        let statement = block.statements[index];
+        required = merge_requirements(required, collect_effects_from_statement(statement, scoped));
+        // Value-binding shadow (SFEP-0042 §3.4 gap (b), #1950): once a `let`
+        // binds a name that currently resolves to an in-scope `fn`, a call to
+        // that name goes to the binding, not the fn — so suppress the fn's
+        // effect row for the REST of this block. Position-sensitive by design:
+        // a call before the `let` still sees the (block-hoisted) fn. The value's
+        // own effects are a first-class-fn-value concern (#1609), not modeled.
+        // Copy-on-write so a table shared with an enclosing scope is never
+        // mutated (`_hoist_block_local_fns` returns the shared table unchanged
+        // when the block declares no direct fn).
+        if statement.variant == "VariableDeclaration" {
+            if lookup_imported_function(scoped, statement.name) != null {
+                if !shadow_copied {
+                    scoped = _copy_effect_table(scoped);
+                    shadow_copied = true;
+                }
+                scoped = append_local_function(scoped, statement.name, []);
+            }
+        }
         index += 1;
     }
     return required;
@@ -892,12 +983,12 @@ fn collect_effects_from_statement(statement: Statement, imports: ImportSymbolTab
     if statement.variant == "FunctionDeclaration" {
         // A nested / local `fn` *declaration* contributes no effect to its
         // enclosing block (SFEP-0042). Its body is effect-checked as its own
-        // deferred routine (`analyze_routine` via `_analyze_nested_functions`),
-        // and a *call* to it requires the callee's effects transitively (the
-        // nested signature is registered in the local-function table by
-        // `_merge_local_functions`). Inlining the body's effects here — the
-        // prior behavior — wrongly forced a declared-but-uncalled nested
-        // `fn foo() ![io]` to require `![io]` of its parent.
+        // deferred routine (`analyze_routine` via `_analyze_routine_with_nested`),
+        // and a *call* to it requires the callee's effects transitively — the
+        // nested signature is registered in the routine-local effect table and
+        // resolved per block by `_hoist_block_local_fns`. Inlining the body's
+        // effects here — the prior behavior — wrongly forced a declared-but-
+        // uncalled nested `fn foo() ![io]` to require `![io]` of its parent.
         return [];
     }
     if statement.variant == "TestDeclaration" {
@@ -1256,7 +1347,9 @@ fn collect_effects_from_expression(expression: Expression?, imports: ImportSymbo
         return required;
     }
     if expression.variant == "Lambda" {
-        return collect_effects_from_block(expression.body, imports);
+        // Suppress any fn-table row shadowed by a same-named lambda parameter
+        // (SFEP-0042 §3.4 gap (b), #1950) before walking the lambda body.
+        return collect_effects_from_block(expression.body, _suppress_shadowing_params(imports, expression.parameters));
     }
     if expression.variant == "Index" {
         let mut required = collect_effects_from_expression(expression.sequence, imports);
