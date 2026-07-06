@@ -212,12 +212,13 @@ fn check_source_with_imports(source: string, file_path: string, imported_interfa
 
     // #1953: unresolved-import surfacing. A relative `import { ... } from
     // "./x"` that resolves to no module on disk (E0430), or a named
-    // specifier the resolved module does not export (E0431), used to pass
-    // `check` clean and only fail much later at LLVM lowering. Run the
-    // resolution pass here so the inner loop catches it. `module_exports`
-    // is empty for the standalone `check_source` path (single-file, no
-    // staged closure) — E0430 still fires from the on-disk probe; E0431 is
-    // simply skipped without a per-module export set. Always `error`.
+    // specifier defined nowhere in the staged import closure (E0431), used
+    // to pass `check` clean and only fail much later at LLVM lowering. Run
+    // the resolution pass here so the inner loop catches it. `closure_symbols`
+    // is empty and incomplete for the standalone `check_source` path
+    // (single-file, no staged closure) — E0430 still fires from the on-disk
+    // probe; E0431 is simply skipped when the closure is incomplete. Always
+    // `error`.
     let import_findings = collect_import_resolution_findings(program, file_path, closure_symbols);
     let mut ifi: int = 0;
     loop {

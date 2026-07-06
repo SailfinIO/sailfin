@@ -15,7 +15,7 @@
 // are checked. Scoped/capsule imports (`sfn/...`), runtime imports
 // (`runtime/...`), and bare names resolve through other mechanisms and are
 // skipped entirely, so they can never false-positive here.
-import { Program, Statement } from "./ast";
+import { Program } from "./ast";
 import { strings_equal, substring } from "./string_utils";
 import { ClosureSymbolSet } from "./typecheck_import_loader";
 import {

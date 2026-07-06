@@ -2723,11 +2723,12 @@ fn make_undefined_function_diagnostic(name: string, span: SourceSpan?) -> Diagno
 
 // #1953: `sfn check` resolves each relative import against the staged
 // import closure. A `from "./x"` spec that resolves to no module on disk
-// mints E0430; a named specifier the resolved module does not export
-// mints E0431. Both carry no span — the `ImportDeclaration` AST node
-// carries none (see ast.sfn) — so `primary` is null and the renderer
-// falls back to a location-only line, matching the E0600 re-export
-// diagnostics.
+// mints E0430; a named specifier defined nowhere in the closure mints
+// E0431 (Sailfin resolves imports globally by name, so this is a
+// closure-wide existence check, not per-module export enforcement). Both
+// carry no span — the `ImportDeclaration` AST node carries none (see
+// ast.sfn) — so `primary` is null and the renderer falls back to a
+// location-only line, matching the E0600 re-export diagnostics.
 fn make_cannot_find_module_diagnostic(module_spec: string) -> Diagnostic {
     return Diagnostic {
         code: "E0430",
@@ -2743,7 +2744,8 @@ fn make_symbol_not_exported_diagnostic(symbol: string, module_spec: string) -> D
     return Diagnostic {
         code: "E0431",
         severity: "error",
-        message: "`" + symbol + "` is not exported by `" + module_spec + "`",
+        message: "`" + symbol + "` is imported from `" + module_spec
+            + "` but is not defined by any module in scope",
         file_path: "",
         primary: null,
         suggestion: null
