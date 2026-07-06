@@ -1,0 +1,124 @@
+// End-to-end regression tests for #1953 — `sfn check` diagnoses unresolved
+// imports instead of silently accepting them: a relative module path that
+// resolves to no file on disk is E0430 ("cannot find module"), and a symbol
+// imported from a module that never defines it is E0431.
+//
+// Native `*_test.sfn` per `.claude/rules/no-bash-e2e.md` — drives the
+// compiler subprocess via `process.run_capture`, mirroring the
+// `_sfn_bin`/subprocess pattern in `guillermo_test.sfn` and the
+// `_child_env`/`with_tmp_dir` fixture layout in `check_compiler_src_test.sfn`.
+//
+// NOTE on matchers: the `sfn/test` `expect_*` matchers are `![pure]` and
+// cannot be called from an `![io]` test. Assertions here use
+// `sfn/strings::find` on the captured combined stdout+stderr instead.
+import { find } from "sfn/strings";
+import { with_tmp_dir } from "sfn/test";
+
+fn _sfn_bin() -> string ![io] {
+    let configured = env.get("SAILFIN_BIN");
+    if configured.length > 0 { return configured; }
+    return "build/native/sailfin";
+}
+
+// `run_capture`'s empty array is the *empty* environment; thread the
+// variables the toolchain needs.
+fn _child_env() -> string[] ![io] {
+    let mut e: string[] = [];
+    let path = env.get("PATH");
+    if path.length > 0 { e.push("PATH=" + path); }
+    let home = env.get("HOME");
+    if home.length > 0 { e.push("HOME=" + home); }
+    let tmpdir = env.get("TMPDIR");
+    if tmpdir.length > 0 { e.push("TMPDIR=" + tmpdir); }
+    let scratch = env.get("SAILFIN_TEST_SCRATCH");
+    if scratch.length > 0 { e.push("SAILFIN_TEST_SCRATCH=" + scratch); }
+    return e;
+}
+
+// A fresh marker-file path under the runner's scratch dir (or `/tmp`), with
+// any stale value removed. Lives outside the `with_tmp_dir` tree so the
+// captured output survives temp-dir teardown.
+fn _marker(name: string) -> string ![io] {
+    let mut dir = env.get("SAILFIN_TEST_SCRATCH");
+    if dir.length == 0 { dir = "/tmp"; }
+    fs.createDirectory(dir, true);
+    let path = dir + "/sfn-check-unresolved-" + name + ".out";
+    if fs.exists(path) { fs.deleteFile(path); }
+    return path;
+}
+
+// Run `sfn check <path>` and stash the combined stdout+stderr to
+// `out_marker`. Returns the process exit code.
+fn _check(path: string, out_marker: string) -> int ![io] {
+    let exit = process.run_capture([_sfn_bin(), "check", path], _child_env());
+    let out = process.capture_take_stdout();
+    let err = process.capture_take_stderr();
+    fs.writeFile(out_marker, out + err);
+    return exit;
+}
+
+test "check: nonexistent relative module path is E0430" ![io] {
+    let marker = _marker("missing-module");
+    let exit = with_tmp_dir(fn (dir: string) -> int {
+        let srcpath = dir + "/consumer.sfn";
+        fs.writeFile(srcpath, "import { helper_fn } from \"./missing_module\";\n"
+            + "fn use_it() -> string { return helper_fn(1); }\n");
+        return _check(srcpath, marker);
+    });
+    let combined = fs.readFile(marker);
+    if fs.exists(marker) { fs.deleteFile(marker); }
+    assert exit != 0;
+    assert find(combined, "E0430", 0) >= 0;
+    assert find(combined, "cannot find module", 0) >= 0;
+}
+
+test "check: symbol defined nowhere in closure is E0431" ![io] {
+    let marker = _marker("missing-symbol");
+    let exit = with_tmp_dir(fn (dir: string) -> int {
+        fs.writeFile(dir + "/helper.sfn", "fn helper_fn(x: int) -> string { return \"hi\"; }\n");
+        let srcpath = dir + "/consumer.sfn";
+        fs.writeFile(srcpath, "import { no_such_symbol } from \"./helper\";\n"
+            + "fn use_it() -> string { return no_such_symbol(1); }\n");
+        return _check(srcpath, marker);
+    });
+    let combined = fs.readFile(marker);
+    if fs.exists(marker) { fs.deleteFile(marker); }
+    assert exit != 0;
+    assert find(combined, "E0431", 0) >= 0;
+}
+
+test "check: valid relative import passes" ![io] {
+    let marker = _marker("valid-import");
+    let exit = with_tmp_dir(fn (dir: string) -> int {
+        fs.writeFile(dir + "/helper.sfn", "fn helper_fn(x: int) -> string { return \"hi\"; }\n");
+        let srcpath = dir + "/consumer.sfn";
+        fs.writeFile(srcpath, "import { helper_fn } from \"./helper\";\n"
+            + "fn use_it() -> string { return helper_fn(2); }\n");
+        return _check(srcpath, marker);
+    });
+    let _combined = fs.readFile(marker);
+    if fs.exists(marker) { fs.deleteFile(marker); }
+    assert exit == 0;
+}
+
+test "check: wrong import-path depth is caught (PR #1952 regression)" ![io] {
+    let marker = _marker("wrong-depth");
+    let exit = with_tmp_dir(fn (dir: string) -> int {
+        // `helper.sfn` lives at the tmp-dir root; the correct import from
+        // `sub/` is `../helper`. The consumer uses the wrong depth `./helper`,
+        // which resolves to `sub/helper.sfn` — reliably nonexistent INSIDE the
+        // controlled tmp dir (an `../../` overshoot would escape the tmp dir
+        // and could coincidentally hit a real file). This reproduces the
+        // #1952 class: a wrong-depth relative path that resolves to no module.
+        fs.writeFile(dir + "/helper.sfn", "fn helper_fn(x: int) -> string { return \"hi\"; }\n");
+        fs.createDirectory(dir + "/sub", true);
+        let srcpath = dir + "/sub/consumer.sfn";
+        fs.writeFile(srcpath, "import { helper_fn } from \"./helper\";\n"
+            + "fn use_it() -> string { return helper_fn(1); }\n");
+        return _check(srcpath, marker);
+    });
+    let combined = fs.readFile(marker);
+    if fs.exists(marker) { fs.deleteFile(marker); }
+    assert exit != 0;
+    assert find(combined, "E0430", 0) >= 0;
+}

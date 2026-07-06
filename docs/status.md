@@ -1,6 +1,6 @@
 # Status
 
-Updated: 2026-07-05. Seed pinned to `0.8.0-alpha.1` (`.seed-version`);
+Updated: 2026-07-06. Seed pinned to `0.8.0-alpha.1` (`.seed-version`);
 the compiler version source of truth is `compiler/capsule.toml`.
 
 This document is the **current-state source of truth**: what ships today,
@@ -99,6 +99,14 @@ here.
   carry structured `FixSuggestion`/`TextEdit` for `sfn fix` / LSP (Track B).
   `sfn check` surfaces parse errors (`E0500`, #974) and implicit re-export
   bans (`E0600`) via the shared `reexport_check.sfn`.
+- **Import-resolution checking (#1953).** `sfn check` now diagnoses a
+  relative `import { ... } from "./x"`/`"../x"` that resolves to no module
+  on disk (`E0430`) and a named specifier defined nowhere in the staged
+  import closure (`E0431`, closure-wide "defined somewhere" — Sailfin
+  resolves imports globally by name, not per-declaring-module export).
+  Narrows the check≠build gap (#1389) for the wrong-import-depth class
+  (e.g. #1952). Scope: only `./`/`../` specs; `sfn/...` and runtime imports
+  are unaffected; checked only in `sfn check`, not the build path.
 - **Emit pipeline.** Parallel per-module emit fan-out (Stage E PR3, #278)
   with a shared retry + validator cascade (#515); driver `--work-dir` flag
   (#378); cross-Windows packaging leg (`ci-cross-windows`, #280).
@@ -313,7 +321,7 @@ here.
 | `unsafe` / `extern` | Boundary enforced (locally-declared externs) | `extern fn` declarations are fully shipped (see Runtime Migration); `unsafe { }` blocks and `unsafe fn` carry an `is_unsafe` AST marker (#1211). The ownership checker skips `unsafe` interiors and treats the boundary as load-bearing: a bare owned value escaping into an `extern fn` outside `unsafe` raises `E0906` (#1215). Scope at E6: only externs **declared in the same compilation unit** are recognized; implicitly-linked prelude/runtime externs (e.g. `memcpy`) are not yet matched — a deliberate, self-host-safe false negative widened in a follow-up. Raw-pointer ops *inside* `unsafe` stay author-asserted |
 | Policy decorators (`@policy`) | Parsed only | No compiler or runtime effect |
 | `sfn fmt` | **Shipped** | Zero-config token-stream formatter, `--check`/`--write`, CI-enforced; architecture + limitations in `docs/proposals/0007-fmt-architecture.md` |
-| `sfn check` | **Shipped** | Parse + typecheck + effect-check, no codegen; `--json` envelope; cross-module conformance; directory mode completes the full 156-file tree (~295 s — perf, not stability, is the open item) |
+| `sfn check` | **Shipped** | Parse + typecheck + effect-check, no codegen; `--json` envelope; cross-module conformance; directory mode completes the full 156-file tree (~295 s — perf, not stability, is the open item); relative-import resolution (`E0430`/`E0431`, #1953) |
 | `sfn test` | **Shipped** | Discovery, `-k`/`--tag` filtering (#849), lifecycle hooks (#975, ordering only), snapshots + `--update-snapshots` (#977), `--jobs N` parallel runner (#1236), per-test binary cache (#1230/#1233) |
 | `sfn vet` / `sfn lsp` / `sfn doc` / `sfn fix` | Planned | See `docs/proposals/0003-tooling.md` |
 | Package registry (`sfn init/add/publish`) | Shipped | Default registry `pkg.sfn.dev`; `SFN_REGISTRY` / `sfn config set registry` override |

@@ -118,6 +118,110 @@ fn interfaces_from_native_artifact(text: string) -> ArtifactInterfaceParse {
     };
 }
 
+// #1953: the set of every symbol name defined anywhere in `sfn check`'s
+// staged import closure, for the import-resolution pass's non-exported-
+// symbol check (E0431). Sailfin resolves imported symbols GLOBALLY by name
+// — a module may legally `import { X } from "./a"` even when `X` is
+// actually declared in `./b`, because the linker resolves `X` across the
+// whole program, not per-declaring-module (the compiler's own tree relies
+// on this). So the honest check that matches the language is "is this
+// imported name defined SOMEWHERE in the closure", not "does this exact
+// module export it". `names` is the union of every top-level name every
+// staged artifact declares — functions (incl. externs), structs,
+// interfaces, enums, bindings — plus every `.import`/`.export` specifier
+// name and alias (names re-exported through a barrel). `complete` is false
+// when any artifact is missing or failed to parse: the union is then a
+// subset of the real closure surface, so the check pass skips E0431
+// entirely rather than risk a false positive on a name defined in the
+// unreadable artifact. Over-accepting is a deliberate false-negative bias
+// — it can only make E0431 more permissive, never false-positive on valid
+// code.
+struct ClosureSymbolSet {
+    names: string[];
+    complete: boolean;
+}
+
+fn build_closure_symbol_set(asm_paths: string[]) -> ClosureSymbolSet ![io] {
+    let mut names: string[] = [];
+    let mut complete: boolean = true;
+    let mut i: int = 0;
+    loop {
+        if i >= asm_paths.length { break; }
+        let asm = asm_paths[i];
+        if !fs.exists(asm) {
+            complete = false;
+            i += 1;
+            continue;
+        }
+        let text = fs.readFile(asm);
+        let parsed = parse_native_artifact_for_import_context(text);
+        if parsed.diagnostics.length > 0 {
+            complete = false;
+            i += 1;
+            continue;
+        }
+        let mut fi: int = 0;
+        loop {
+            if fi >= parsed.functions.length { break; }
+            names.push(parsed.functions[fi].name);
+            fi += 1;
+        }
+        let mut si: int = 0;
+        loop {
+            if si >= parsed.structs.length { break; }
+            names.push(parsed.structs[si].name);
+            si += 1;
+        }
+        let mut ii: int = 0;
+        loop {
+            if ii >= parsed.interfaces.length { break; }
+            names.push(parsed.interfaces[ii].name);
+            ii += 1;
+        }
+        let mut ei: int = 0;
+        loop {
+            if ei >= parsed.enums.length { break; }
+            names.push(parsed.enums[ei].name);
+            ei += 1;
+        }
+        let mut bi: int = 0;
+        loop {
+            if bi >= parsed.bindings.length { break; }
+            names.push(parsed.bindings[bi].name);
+            bi += 1;
+        }
+        // Every `.import`/`.export` specifier name a module carries is a
+        // name reachable through that module (barrel re-exports pass
+        // imported names straight through), so fold them into the global
+        // set too. A wildcard-shaped re-export (`.export "src" { }` — empty
+        // specifier list) cannot be enumerated; treat the closure as
+        // incomplete so E0431 is skipped rather than false-firing.
+        let mut ni: int = 0;
+        loop {
+            if ni >= parsed.imports.length { break; }
+            let imp = parsed.imports[ni];
+            if imp.kind == "export" {
+                if imp.specifiers.length == 0 { complete = false; }
+            }
+            let mut spi: int = 0;
+            loop {
+                if spi >= imp.specifiers.length { break; }
+                let spec = imp.specifiers[spi];
+                names.push(spec.name);
+                let alias = spec.alias;
+                if alias != null {
+                    let alias_str: string? = alias;
+                    if alias_str.length > 0 { names.push(alias_str); }
+                }
+                spi += 1;
+            }
+            ni += 1;
+        }
+        i += 1;
+    }
+    return ClosureSymbolSet { names: names, complete: complete };
+}
+
 // Read each path, parse its artifact, and accumulate. Partitioning
 // follows the `ImportedInterfaceLoadResult` contract: missing files
 // surface in `missing_paths`, parse failures surface in
@@ -202,7 +306,9 @@ fn load_imported_native_texts_from_paths(paths: string[]) -> string[] ![io] {
 
 export {
     ArtifactInterfaceParse,
+    ClosureSymbolSet,
     ImportedInterfaceLoadResult,
+    build_closure_symbol_set,
     interfaces_from_native_artifact,
     load_imported_interfaces_from_paths,
     load_imported_native_texts_from_paths
