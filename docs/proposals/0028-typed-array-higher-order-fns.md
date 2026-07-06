@@ -4,9 +4,9 @@ title: Typed / Generic-Element Array Higher-Order Functions (map / filter / redu
 status: Draft
 type: language
 created: 2026-06-26
-updated: 2026-06-26
+updated: 2026-07-06
 author: "agent:compiler-architect; human review"
-tracking: "#766"
+tracking: "#1943, #1945"
 supersedes:
 superseded-by:
 graduates-to:
@@ -131,6 +131,28 @@ The user-facing spelling does not change — `arr.map(closure)` /
 `array_map`/`array_filter`/`array_reduce` keep their signatures. The diagnostic
 that today rejects non-`int[]` element types is **removed** as each width becomes
 supported; until then it stays (rejecting is better than mis-mapping).
+
+### (D) Range higher-order functions (#1945)
+
+`(0..n).map(f)` / `.reduce(init, f)` / `.filter(f)` are **eager sugar** over the
+array HOFs: a `Range` receiver on a HOF materializes `[0, 1, …, n-1]` and
+dispatches the existing array seam. This is the honest 1.0 interim; Rust's
+range-as-lazy-`Iterator` protocol is the post-1.0 successor (a general iterator
+trait is out of scope here). A `Range` today (`ast.sfn` `Range { start, end }`)
+has no method surface — it is consumed only by `for`-loop lowering — so this adds
+the receiver recognition in `resolve_call_method_target` and types the result as
+the mapper's return-array type. Tracked as **#1945** (range surface), stacked on
+**#1943** (the `int[]`-element width below).
+
+### First shipped width: `int[]` elements (#1943)
+
+The **first width lifted** past pointer-width `int` is `int[]` elements — a
+mapper returning `int[]` (producing `int[][]`), which `matrix-multiplication.sfn`
+needs for its outer `.map`. `int[]` is itself pointer-width, so it fits the
+existing callback ABI without new generic-width machinery; only the
+element-type-discipline rejection above and the nested `int[][]` result type
+change. `float[]` / `string[]` / struct-array elements stay rejected-with-diagnostic
+until their widths land (honest partial rollout, per §3). Tracked as **#1943**.
 
 ## 4. Effect & capability impact
 
