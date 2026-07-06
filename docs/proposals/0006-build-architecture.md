@@ -1689,6 +1689,44 @@ neither is reverted. A line-budget sentinel
 `cli_main.sfn` against silently re-ballooning toward the pre-Phase-A 3,067-line
 monolith.
 
+### native/core* lowering-family RSS carve (2026-07-06)
+
+The same per-module-working-set lever SFEP-0027 Phase A applied to the CLI
+modules, applied to the heaviest emitters after them: the
+`llvm/expression_lowering/native/core*` lowering family. Two cohesive,
+behavior-preserving carves split the two heaviest modules' oversized function
+sets into new siblings, so each emits with a smaller working set (the moved
+functions are called only by `lower_expression`). Measured with `make bench`
+(Linux x86_64, compiler `sfn 0.8.0-alpha.2+dev.d935954`); "before" is the full
+`make bench` baseline captured on the same host before the carves.
+
+| Module | peak RSS (before → after) | IR lines (before → after) |
+| --- | --- | --- |
+| `native/core` | 1,452 MB → **924 MB** (−36%) | 17,478 → 8,612 |
+| `native/core_concurrency_lowering` (new) | — → 935 MB | — → 10,169 |
+| `native/core_literals_lowering` | 1,320 MB → **1,120 MB** (−15%) | 15,385 → 11,377 |
+| `native/core_cast_lowering` (new) | — → 564 MB | — → 5,130 |
+
+`core.sfn` (was the #1 peak-RSS module in the whole build) sheds the 9
+concurrency / channel / tostring special-form lowerings
+(spawn/channel/parallel/serve/await) into `core_concurrency_lowering.sfn`;
+`core_literals_lowering.sfn` (was #2) sheds its `is`/cast/interpolated-string
+block into `core_cast_lowering.sfn`. In both carves the moved functions are
+called only by `lower_expression` (which stays in `core.sfn`), so the split is a
+pure verbatim move — no logic, effect, or signature change — validated by
+`make check` (unit/integration/e2e/capsules all green) and a byte-identical
+`--work-dir` self-host parity build. No carve raised peak RSS.
+
+The single 1,452 MB peak — the build's tallest pole — is eliminated: `core.sfn`
+drops to 924 MB and neither new sibling exceeds it, so the parallel build's
+`jobs × heaviest-concurrent-module` RAM ceiling is now bounded by the next tier
+(`cli/commands/test.sfn` ~1,417 MB, `core_operands.sfn` ~1,207 MB) rather than by
+the lowering core. `core_literals_lowering`'s residual 1,120 MB is dominated by
+the untouched 650-line `lower_array_literal`. Follow-ups (same lever): split
+`cli/commands/test.sfn`'s single 1,132-line `run` (in-function split, the new
+tallest pole), and carve `core_operands.sfn` (~1,207 MB, three ~500–750-line
+coercion giants) and `capsule_resolver.sfn` (~1,229 MB).
+
 ---
 
 ## Cross-references

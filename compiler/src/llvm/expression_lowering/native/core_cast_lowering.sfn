@@ -1,0 +1,671 @@
+// compiler/src/llvm/expression_lowering/native/core_cast_lowering.sfn
+//
+// Lowering for `is`/cast expressions and interpolated string literals,
+// extracted from core_literals_lowering.sfn to bound per-module emit
+// working set. Called by `lower_expression` in ./core.
+import { NativeFunction } from "../../../native_ir";
+import { format_temp_name } from "../../expressions_helpers";
+import { empty_string_constant_set, merge_string_constants } from "../../strings";
+import { find_enum_info_by_llvm_type, resolve_enum_variant_info } from "../../type_context_queries";
+import { ends_with_pointer_suffix, map_type_annotation, strip_pointer_suffix } from "../../type_mapping";
+import {
+    CastParseResult,
+    ExpressionResult,
+    LLVMOperand,
+    LocalBinding,
+    ParameterBinding,
+    StringConstant,
+    TypeContext
+} from "../../types";
+import { number_to_string, starts_with, trim_text } from "../../utils";
+import { lower_expression } from "./core";
+import { pick_agg_cast_shim_target } from "./core_literals_lowering";
+import {
+    coerce_operand_to_type,
+    emit_comparison_instruction,
+    integer_llvm_width,
+    is_float_llvm_type,
+    is_integer_llvm_type
+} from "./core_operands";
+import { coerce_operand_to_string, emit_string_concat, lower_string_literal } from "./core_strings";
+import {
+    encode_string_literal_for_sailfin,
+    find_substring_from,
+    parse_interpolated_template,
+    unescape_string_literal
+} from "./core_text";
+
+// Lower an `is` type-guard (#1753) to a boolean `i1`. v1 supports a named
+// `enum` operand: extract the operand's discriminant tag and `icmp eq` it
+// against the target variant's tag — the same discriminant test `match`
+// emits (instructions_match_condition.sfn) and that `if <base>.variant ==
+// "<V>"` lowers to. The then-branch narrowing of the guarded operand is
+// applied separately by `lower_if_instruction` via the `narrowed_variant`
+// machinery. A non-enum operand (inline union, primitive, struct) gets a
+// clear v1 diagnostic: in-branch narrowing of those surfaces is not yet
+// wired (the `narrowed_variant` flow is enum-only), so shipping a boolean
+// without the narrowed use would be a half-feature. They are documented
+// fast-follows (SFEP-0034 §3.6).
+fn lower_is_expression(parse: CastParseResult, bindings: ParameterBinding[], locals: LocalBinding[], temp_index: int, lines: string[], functions: NativeFunction[], context: TypeContext) -> ExpressionResult ![io] {
+    let mut diagnostics = parse.diagnostics;
+    let empty_constants = empty_string_constant_set();
+    if !parse.success {
+        return ExpressionResult {
+            lines: lines,
+            temp_index: temp_index,
+            operand: null,
+            diagnostics: diagnostics,
+            string_constants: empty_constants
+        };
+    }
+
+    let lowered = lower_expression(parse.value, bindings, locals, temp_index, lines, functions, context, "");
+    let mut _ci_is: int = 0;
+    loop {
+        if _ci_is >= lowered.diagnostics.length { break; }
+        diagnostics.push(lowered.diagnostics[_ci_is]);
+        _ci_is += 1;
+    }
+    if lowered.operand == null {
+        return ExpressionResult {
+            lines: lowered.lines,
+            temp_index: lowered.temp_index,
+            operand: null,
+            diagnostics: diagnostics,
+            string_constants: lowered.string_constants
+        };
+    }
+    let subject = lowered.operand;
+    let mut current_lines = lowered.lines;
+    let mut current_temp = lowered.temp_index;
+
+    // Resolve the operand's enum type from its LLVM type (strip a pointer
+    // suffix for the boxed-struct ABI), mirroring core_member_lowering.
+    let mut candidate = subject.llvm_type;
+    if ends_with_pointer_suffix(candidate) {
+        let stripped = trim_text(strip_pointer_suffix(candidate));
+        if stripped.length > 0 { candidate = stripped; }
+    }
+    let enum_info = find_enum_info_by_llvm_type(context, candidate);
+    if enum_info == null {
+        diagnostics.push("llvm lowering: `is` on a non-enum value `" + subject.llvm_type
+            + "` is not yet supported; the operand must be a named `enum` type");
+        return ExpressionResult {
+            lines: current_lines,
+            temp_index: current_temp,
+            operand: null,
+            diagnostics: diagnostics,
+            string_constants: lowered.string_constants
+        };
+    }
+    let variant_info = resolve_enum_variant_info(enum_info, parse.type_annotation);
+    if variant_info == null {
+        diagnostics.push("llvm lowering: enum `" + enum_info.name
+            + "` has no variant `"
+            + parse.type_annotation
+            + "` for `is`");
+        return ExpressionResult {
+            lines: current_lines,
+            temp_index: current_temp,
+            operand: null,
+            diagnostics: diagnostics,
+            string_constants: lowered.string_constants
+        };
+    }
+
+    // Map the tag type and extract/load the discriminant tag (field 0).
+    let mut tag_llvm_type: string = "i32";
+    if enum_info.tag_type == "i8" { tag_llvm_type = "i8"; }
+    if enum_info.tag_type == "i16" { tag_llvm_type = "i16"; }
+    if enum_info.tag_type == "i32" { tag_llvm_type = "i32"; }
+    if enum_info.tag_type == "i64" { tag_llvm_type = "i64"; }
+
+    let mut tag_temp: string = "";
+    if ends_with_pointer_suffix(subject.llvm_type) {
+        let tag_ptr_temp = format_temp_name(current_temp);
+        current_temp += 1;
+        current_lines.push("  " + tag_ptr_temp + " = getelementptr inbounds "
+            + enum_info.llvm_name
+            + ", "
+            + subject.llvm_type
+            + " "
+            + subject.value
+            + ", i32 0, i32 0");
+        let load_temp = format_temp_name(current_temp);
+        current_temp += 1;
+        current_lines.push("  " + load_temp + " = load " + tag_llvm_type + ", "
+            + tag_llvm_type
+            + "* "
+            + tag_ptr_temp);
+        tag_temp = load_temp;
+    } else {
+        let extract_temp = format_temp_name(current_temp);
+        current_temp += 1;
+        current_lines.push("  " + extract_temp + " = extractvalue " + subject.llvm_type
+            + " "
+            + subject.value
+            + ", 0");
+        tag_temp = extract_temp;
+    }
+
+    let tag_operand = LLVMOperand {
+        llvm_type: tag_llvm_type,
+        value: tag_temp
+    };
+    let variant_tag_operand = LLVMOperand {
+        llvm_type: tag_llvm_type,
+        value: number_to_string(variant_info.tag)
+    };
+    let comparison = emit_comparison_instruction("==", tag_operand, variant_tag_operand, current_temp, current_lines);
+    let mut _cc_is: int = 0;
+    loop {
+        if _cc_is >= comparison.diagnostics.length { break; }
+        diagnostics.push(comparison.diagnostics[_cc_is]);
+        _cc_is += 1;
+    }
+    return ExpressionResult {
+        lines: comparison.lines,
+        temp_index: comparison.temp_index,
+        operand: comparison.operand,
+        diagnostics: diagnostics,
+        string_constants: lowered.string_constants
+    };
+}
+
+fn lower_cast_expression(parse: CastParseResult, bindings: ParameterBinding[], locals: LocalBinding[], temp_index: int, lines: string[], functions: NativeFunction[], context: TypeContext) -> ExpressionResult ![io] {
+    let mut diagnostics = parse.diagnostics;
+    let empty_constants = empty_string_constant_set();
+    if !parse.success {
+        return ExpressionResult {
+            lines: lines,
+            temp_index: temp_index,
+            operand: null,
+            diagnostics: diagnostics,
+            string_constants: empty_constants
+        };
+    }
+    let target_type = map_type_annotation(parse.type_annotation);
+    if target_type.length == 0 {
+        diagnostics.push("llvm lowering: unsupported cast target type `" + parse.type_annotation
+            + "`");
+        return ExpressionResult {
+            lines: lines,
+            temp_index: temp_index,
+            operand: null,
+            diagnostics: diagnostics,
+            string_constants: empty_constants
+        };
+    }
+
+    let lowered = lower_expression(parse.value, bindings, locals, temp_index, lines, functions, context, "");
+    let mut _ci10: int = 0;
+    loop {
+        if _ci10 >= lowered.diagnostics.length { break; }
+        diagnostics.push(lowered.diagnostics[_ci10]);
+        _ci10 += 1;
+    }
+    if lowered.operand == null {
+        return ExpressionResult {
+            lines: lowered.lines,
+            temp_index: lowered.temp_index,
+            operand: null,
+            diagnostics: diagnostics,
+            string_constants: lowered.string_constants
+        };
+    }
+    let operand = lowered.operand;
+    if operand.llvm_type == target_type {
+        return ExpressionResult {
+            lines: lowered.lines,
+            temp_index: lowered.temp_index,
+            operand: operand,
+            diagnostics: diagnostics,
+            string_constants: lowered.string_constants
+        };
+    }
+
+    let mut current_lines = lowered.lines;
+    let mut current_temp = lowered.temp_index;
+    let cast_name = format_temp_name(current_temp);
+    current_temp += 1;
+
+    // `as bool` is rejected uniformly — pointer, integer, or float
+    // sources should all use a comparison (`x != null`, `x != 0`,
+    // `x != 0.0`) rather than a bit-pattern reinterpretation that
+    // happens to land in `i1`. Done before the pointer-cast
+    // branches so `ptr as bool` doesn't sneak through `ptrtoint`.
+    if target_type == "i1" {
+        if ends_with_pointer_suffix(operand.llvm_type) {
+            diagnostics.push("llvm lowering: cast to `bool` via `as` is rejected;"
+                + " use a comparison like `x != null` instead");
+            return ExpressionResult {
+                lines: current_lines,
+                temp_index: current_temp,
+                operand: null,
+                diagnostics: diagnostics,
+                string_constants: lowered.string_constants
+            };
+        }
+        if is_integer_llvm_type(operand.llvm_type) {
+            diagnostics.push("llvm lowering: cast to `bool` via `as` is rejected;"
+                + " use a comparison like `x != 0` instead");
+            return ExpressionResult {
+                lines: current_lines,
+                temp_index: current_temp,
+                operand: null,
+                diagnostics: diagnostics,
+                string_constants: lowered.string_constants
+            };
+        }
+        if is_float_llvm_type(operand.llvm_type) {
+            diagnostics.push("llvm lowering: cast to `bool` via `as` is rejected;"
+                + " use a comparison like `x != 0.0` instead");
+            return ExpressionResult {
+                lines: current_lines,
+                temp_index: current_temp,
+                operand: null,
+                diagnostics: diagnostics,
+                string_constants: lowered.string_constants
+            };
+        }
+    }
+
+    // M1.A.2: casts between the `{i8*, i64}` SfnString aggregate and a raw
+    // pointer (`string as * u8`, `* u8 as string`). Both directions are
+    // handled by the shared coercion shim in core_operands.sfn — the forward
+    // direction `extractvalue`s the data pointer, the reverse recovers the
+    // length and builds the aggregate. Routed here (before the pointer/int
+    // matrix, which cannot model the aggregate) so a single implementation
+    // owns the conversion.
+    let mut _agg_cast: boolean = false;
+    if operand.llvm_type == "{i8*, i64}" {
+        if ends_with_pointer_suffix(target_type) { _agg_cast = true; }
+    }
+    if target_type == "{i8*, i64}" {
+        if ends_with_pointer_suffix(operand.llvm_type) { _agg_cast = true; }
+    }
+    if _agg_cast {
+        // Pointer targets narrower than `i8*` need an extra bitcast after the
+        // shim hands back the `i8*` data pointer; route via `i8*` first.
+        let shim_target = pick_agg_cast_shim_target(operand.llvm_type, target_type);
+        let coerced = coerce_operand_to_type(operand, shim_target, current_temp, current_lines, true, null);
+        current_lines = coerced.lines;
+        current_temp = coerced.temp_index;
+        let mut _agg_di: int = 0;
+        loop {
+            if _agg_di >= coerced.diagnostics.length { break; }
+            diagnostics.push(coerced.diagnostics[_agg_di]);
+            _agg_di += 1;
+        }
+        if coerced.operand == null {
+            return ExpressionResult {
+                lines: current_lines,
+                temp_index: current_temp,
+                operand: null,
+                diagnostics: diagnostics,
+                string_constants: lowered.string_constants
+            };
+        }
+        let mut result_operand: LLVMOperand = coerced.operand;
+        if result_operand.llvm_type != target_type {
+            let agg_bitcast = format_temp_name(current_temp);
+            current_lines.push("  " + agg_bitcast + " = bitcast "
+                + result_operand.llvm_type
+                + " "
+                + result_operand.value
+                + " to "
+                + target_type);
+            current_temp += 1;
+            result_operand = LLVMOperand {
+                llvm_type: target_type,
+                value: agg_bitcast
+            };
+        }
+        return ExpressionResult {
+            lines: current_lines,
+            temp_index: current_temp,
+            operand: result_operand,
+            diagnostics: diagnostics,
+            string_constants: lowered.string_constants
+        };
+    }
+
+    // #1505: an `as string` cast must stringify its operand — the same
+    // int/float→string lowering the `{{ }}` interpolation path uses — rather
+    // than fall through to the numeric/pointer matrices below, which have no
+    // `i64 → {i8*, i64}` arm and previously emitted a non-fatal
+    // "unsupported cast" diagnostic. The null operand that left behind made
+    // the binding default to `double 0.0`, so `n as string` silently printed
+    // "0". The `{i8*, i64}` identity (operand already a string) returned early
+    // above, and pointer→string was consumed by the `_agg_cast` shim, so the
+    // operand here is a scalar numeric value. `coerce_operand_to_type` builds
+    // the proper `{i8*, i64}` aggregate (number.to_string + length recovery),
+    // so the result matches the cast's declared `string` type for both
+    // annotated and inferred bindings.
+    if target_type == "{i8*, i64}" {
+        let str_cast = coerce_operand_to_type(operand, target_type, current_temp, current_lines, true, null);
+        let mut _str_di: int = 0;
+        loop {
+            if _str_di >= str_cast.diagnostics.length { break; }
+            diagnostics.push(str_cast.diagnostics[_str_di]);
+            _str_di += 1;
+        }
+        return ExpressionResult {
+            lines: str_cast.lines,
+            temp_index: str_cast.temp_index,
+            operand: str_cast.operand,
+            diagnostics: diagnostics,
+            string_constants: lowered.string_constants
+        };
+    }
+
+    if ends_with_pointer_suffix(operand.llvm_type) {
+        if ends_with_pointer_suffix(target_type) {
+            current_lines.push("  " + cast_name + " = bitcast " + operand.llvm_type
+                + " "
+                + operand.value
+                + " to "
+                + target_type);
+            let casted = LLVMOperand {
+                llvm_type: target_type,
+                value: cast_name
+            };
+            return ExpressionResult {
+                lines: current_lines,
+                temp_index: current_temp,
+                operand: casted,
+                diagnostics: diagnostics,
+                string_constants: lowered.string_constants
+            };
+        }
+    }
+
+    if !ends_with_pointer_suffix(operand.llvm_type) {
+        if ends_with_pointer_suffix(target_type) {
+            if starts_with(operand.llvm_type, "i") {
+                current_lines.push("  " + cast_name + " = inttoptr " + operand.llvm_type
+                    + " "
+                    + operand.value
+                    + " to "
+                    + target_type);
+                let casted = LLVMOperand {
+                    llvm_type: target_type,
+                    value: cast_name
+                };
+                return ExpressionResult {
+                    lines: current_lines,
+                    temp_index: current_temp,
+                    operand: casted,
+                    diagnostics: diagnostics,
+                    string_constants: lowered.string_constants
+                };
+            }
+        }
+    }
+
+    if ends_with_pointer_suffix(operand.llvm_type) {
+        if !ends_with_pointer_suffix(target_type) {
+            if starts_with(target_type, "i") {
+                current_lines.push("  " + cast_name + " = ptrtoint " + operand.llvm_type
+                    + " "
+                    + operand.value
+                    + " to "
+                    + target_type);
+                let casted = LLVMOperand {
+                    llvm_type: target_type,
+                    value: cast_name
+                };
+                return ExpressionResult {
+                    lines: current_lines,
+                    temp_index: current_temp,
+                    operand: casted,
+                    diagnostics: diagnostics,
+                    string_constants: lowered.string_constants
+                };
+            }
+        }
+    }
+
+    // Slice D (2026-05-03): numeric `as` cast lowering matrix. See
+    // docs/proposals/0025-native-runtime-architecture.md §3.7 (`#396-numeric-types-int--float`). Both sides are non-pointer
+    // at this point — pointer cases were handled above and the
+    // identity case was filtered earlier.
+    //   i1  → int (wider)      → zext      (true → 1, not -1)
+    //   i1  → double/float     → uitofp    (true → 1.0, not -1.0)
+    //   i*  → int (wider)      → sext
+    //   i*  → int (narrower)   → trunc
+    //   i*  → double/float     → sitofp
+    //   double/float → int     → fptosi
+    //   float → double         → fpext
+    //   double → float         → fptrunc
+    //   any  → i1 via `as`     → diagnostic (handled above)
+    //
+    // KNOWN LIMITATION: source-level unsigned widths (`u8`/`u16`/
+    // `u32`) collapse to `i8`/`i16`/`i32` in `map_primitive_type`,
+    // so this matrix can't tell signed from unsigned for non-i1
+    // sources. `255_u8 as u64` therefore lowers as `sext` and
+    // becomes `-1` (sign-extended) rather than `255` (zero-
+    // extended). Distinguishing requires source-level type tracking
+    // through the cast lowering — deferred to a Slice D follow-up.
+    // The architect's brief explicitly accepted "all integer casts
+    // emit signed forms" for this slice.
+    let operand_is_int = is_integer_llvm_type(operand.llvm_type);
+    let operand_is_float = is_float_llvm_type(operand.llvm_type);
+    let target_is_int = is_integer_llvm_type(target_type);
+    let target_is_float = is_float_llvm_type(target_type);
+
+    let mut numeric_op_name: string = "";
+
+    if operand_is_int {
+        if target_is_float {
+            // `sitofp i1 1` would produce -1.0 (LLVM treats `i1` as
+            // signed where `true` = -1). For `bool as float` we want
+            // `true` → 1.0, so use `uitofp` for the i1 source.
+            if operand.llvm_type == "i1" { numeric_op_name = "uitofp"; }
+            if operand.llvm_type != "i1" { numeric_op_name = "sitofp"; }
+        }
+    }
+    if operand_is_float {
+        if target_is_int { numeric_op_name = "fptosi"; }
+    }
+    if operand_is_int {
+        if target_is_int {
+            let src_width = integer_llvm_width(operand.llvm_type);
+            let dst_width = integer_llvm_width(target_type);
+            if dst_width > src_width {
+                if operand.llvm_type == "i1" { numeric_op_name = "zext"; }
+                if operand.llvm_type != "i1" { numeric_op_name = "sext"; }
+            }
+            if dst_width < src_width { numeric_op_name = "trunc"; }
+        }
+    }
+    if operand_is_float {
+        if target_is_float {
+            if operand.llvm_type == "float" {
+                if target_type == "double" { numeric_op_name = "fpext"; }
+            }
+            if operand.llvm_type == "double" {
+                if target_type == "float" { numeric_op_name = "fptrunc"; }
+            }
+        }
+    }
+
+    if numeric_op_name.length > 0 {
+        current_lines.push("  " + cast_name + " = " + numeric_op_name + " "
+            + operand.llvm_type
+            + " "
+            + operand.value
+            + " to "
+            + target_type);
+        let casted = LLVMOperand { llvm_type: target_type, value: cast_name };
+        return ExpressionResult {
+            lines: current_lines,
+            temp_index: current_temp,
+            operand: casted,
+            diagnostics: diagnostics,
+            string_constants: lowered.string_constants
+        };
+    }
+
+    diagnostics.push("llvm lowering: unsupported cast from `" + operand.llvm_type
+        + "` to `"
+        + target_type
+        + "`");
+    return ExpressionResult {
+        lines: current_lines,
+        temp_index: current_temp,
+        operand: null,
+        diagnostics: diagnostics,
+        string_constants: lowered.string_constants
+    };
+}
+
+fn try_lower_interpolated_string_literal(literal: string, bindings: ParameterBinding[], locals: LocalBinding[], temp_index: int, lines: string[], functions: NativeFunction[], context: TypeContext) -> ExpressionResult? ![io] {
+    let content = unescape_string_literal(literal);
+    if find_substring_from(content, "{{", 0) < 0 { return null; }
+    if find_substring_from(content, "}}", 0) < 0 { return null; }
+
+    let parsed = parse_interpolated_template(content);
+    if !parsed.success { return null; }
+    if parsed.expressions.length == 0 { return null; }
+    if parsed.parts.length != parsed.expressions.length + 1 { return null; }
+
+    let mut current_lines: string[] = lines;
+    let mut current_temp: int = temp_index;
+    let mut diagnostics: string[] = [];
+    let mut collected_string_constants: StringConstant[] = empty_string_constant_set();
+
+    let first_literal = encode_string_literal_for_sailfin(parsed.parts[0]);
+    let first = lower_string_literal(first_literal, current_temp, current_lines);
+    current_lines = first.lines;
+    current_temp = first.temp_index;
+
+    if first.operand == null {
+        return ExpressionResult {
+            lines: current_lines,
+            temp_index: current_temp,
+            operand: null,
+            diagnostics: diagnostics,
+            string_constants: collected_string_constants
+        };
+    }
+    let mut current_operand: LLVMOperand = first.operand;
+
+    let mut index: int = 0;
+    loop {
+        if index >= parsed.expressions.length { break; }
+
+        let expr_text = parsed.expressions[index];
+        let lowered_expr = lower_expression(expr_text, bindings, locals, current_temp, current_lines, functions, context, "i8*");
+        let mut _ci11: int = 0;
+        loop {
+            if _ci11 >= lowered_expr.diagnostics.length { break; }
+            diagnostics.push(lowered_expr.diagnostics[_ci11]);
+            _ci11 += 1;
+        }
+        current_lines = lowered_expr.lines;
+        current_temp = lowered_expr.temp_index;
+        collected_string_constants = merge_string_constants(collected_string_constants, lowered_expr.string_constants);
+
+        if lowered_expr.operand == null {
+            diagnostics.push("llvm lowering: unable to lower interpolated expression `"
+                + expr_text
+                + "`");
+            return ExpressionResult {
+                lines: current_lines,
+                temp_index: current_temp,
+                operand: null,
+                diagnostics: diagnostics,
+                string_constants: collected_string_constants
+            };
+        }
+
+        let coerced = coerce_operand_to_string(lowered_expr.operand, current_temp, current_lines);
+        let mut _ci12: int = 0;
+        loop {
+            if _ci12 >= coerced.diagnostics.length { break; }
+            diagnostics.push(coerced.diagnostics[_ci12]);
+            _ci12 += 1;
+        }
+        current_lines = coerced.lines;
+        current_temp = coerced.temp_index;
+        collected_string_constants = merge_string_constants(collected_string_constants, coerced.string_constants);
+        if coerced.operand == null {
+            diagnostics.push("llvm lowering: unable to stringify interpolated expression `"
+                + expr_text
+                + "`");
+            return ExpressionResult {
+                lines: current_lines,
+                temp_index: current_temp,
+                operand: null,
+                diagnostics: diagnostics,
+                string_constants: collected_string_constants
+            };
+        }
+
+        let concat1 = emit_string_concat(current_operand, coerced.operand, current_temp, current_lines);
+        let mut _ci13: int = 0;
+        loop {
+            if _ci13 >= concat1.diagnostics.length { break; }
+            diagnostics.push(concat1.diagnostics[_ci13]);
+            _ci13 += 1;
+        }
+        current_lines = concat1.lines;
+        current_temp = concat1.temp_index;
+        if concat1.operand == null {
+            return ExpressionResult {
+                lines: current_lines,
+                temp_index: current_temp,
+                operand: null,
+                diagnostics: diagnostics,
+                string_constants: collected_string_constants
+            };
+        }
+        current_operand = concat1.operand;
+
+        let part_literal = encode_string_literal_for_sailfin(parsed.parts[index
+            + 1]);
+        let part_value = lower_string_literal(part_literal, current_temp, current_lines);
+        current_lines = part_value.lines;
+        current_temp = part_value.temp_index;
+        if part_value.operand == null {
+            return ExpressionResult {
+                lines: current_lines,
+                temp_index: current_temp,
+                operand: null,
+                diagnostics: diagnostics,
+                string_constants: collected_string_constants
+            };
+        }
+
+        let concat2 = emit_string_concat(current_operand, part_value.operand, current_temp, current_lines);
+        let mut _ci14: int = 0;
+        loop {
+            if _ci14 >= concat2.diagnostics.length { break; }
+            diagnostics.push(concat2.diagnostics[_ci14]);
+            _ci14 += 1;
+        }
+        current_lines = concat2.lines;
+        current_temp = concat2.temp_index;
+        if concat2.operand == null {
+            return ExpressionResult {
+                lines: current_lines,
+                temp_index: current_temp,
+                operand: null,
+                diagnostics: diagnostics,
+                string_constants: collected_string_constants
+            };
+        }
+        current_operand = concat2.operand;
+
+        index += 1;
+    }
+
+    return ExpressionResult {
+        lines: current_lines,
+        temp_index: current_temp,
+        operand: current_operand,
+        diagnostics: diagnostics,
+        string_constants: collected_string_constants
+    };
+}
