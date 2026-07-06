@@ -396,8 +396,8 @@ import {
 } from "./core_cast_lowering";
 
 import {
-    _try_lower_channel_method,
-    _try_lower_tostring_method,
+    try_lower_channel_method,
+    try_lower_tostring_method,
     lower_spawn_typed_expression,
     lower_spawn_expression,
     lower_channel_capacity_expression,
@@ -1237,7 +1237,7 @@ fn lower_expression(expression: string, bindings: ParameterBinding[], locals: Lo
             // stays on the descriptor path — its ABI is a plain
             // (i8*) -> void call with no element indirection.
             if member_target.success {
-                let channel_lowered = _try_lower_channel_method(member_target, argument_entries, bindings, locals, temp_index, lines, functions, context, expected_type);
+                let channel_lowered = try_lower_channel_method(member_target, argument_entries, bindings, locals, temp_index, lines, functions, context, expected_type);
                 if channel_lowered != null { return channel_lowered; }
             }
             // #1706: `<expr>.toString()` on a primitive receiver lowers to
@@ -1246,7 +1246,7 @@ fn lower_expression(expression: string, bindings: ParameterBinding[], locals: Lo
             // a primitive receiver does not carry) so the receiver type is
             // read straight off the lowered operand.
             if member_target.success {
-                let tostring_lowered = _try_lower_tostring_method(member_target, argument_entries, bindings, locals, temp_index, lines, functions, context);
+                let tostring_lowered = try_lower_tostring_method(member_target, argument_entries, bindings, locals, temp_index, lines, functions, context);
                 if tostring_lowered != null { return tostring_lowered; }
             }
             if member_target.success {

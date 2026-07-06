@@ -72,7 +72,7 @@ import { emit_runtime_call, empty_runtime_call_overrides } from "./runtime_call"
 // seam yet — tracked with the worker-ctx ABI follow-up).
 // Returns null when the call is not a channel send/receive so the
 // caller falls through to the normal resolution pipeline.
-fn _try_lower_channel_method(member_target: MemberAccessParse, argument_entries: string[], bindings: ParameterBinding[], locals: LocalBinding[], temp_index: int, lines: string[], functions: NativeFunction[], context: TypeContext, expected_type: string) -> ExpressionResult? ![io] {
+fn try_lower_channel_method(member_target: MemberAccessParse, argument_entries: string[], bindings: ParameterBinding[], locals: LocalBinding[], temp_index: int, lines: string[], functions: NativeFunction[], context: TypeContext, expected_type: string) -> ExpressionResult? ![io] {
     let field = member_target.field;
     let mut is_channel_op: boolean = false;
     if field == "send" { is_channel_op = true; }
@@ -357,7 +357,7 @@ fn _try_lower_channel_method(member_target: MemberAccessParse, argument_entries:
 // (struct / array / pointer-aggregate) receiver returns null so a
 // user-defined `toString` still routes through the struct-dispatch path
 // (and an absent one fails closed as before).
-fn _try_lower_tostring_method(member_target: MemberAccessParse, argument_entries: string[], bindings: ParameterBinding[], locals: LocalBinding[], temp_index: int, lines: string[], functions: NativeFunction[], context: TypeContext) -> ExpressionResult? ![io] {
+fn try_lower_tostring_method(member_target: MemberAccessParse, argument_entries: string[], bindings: ParameterBinding[], locals: LocalBinding[], temp_index: int, lines: string[], functions: NativeFunction[], context: TypeContext) -> ExpressionResult? ![io] {
     if member_target.field != "toString" { return null; }
     // `toString()` takes no arguments; anything else is not this builtin.
     if argument_entries.length != 0 { return null; }

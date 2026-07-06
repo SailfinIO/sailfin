@@ -124,7 +124,7 @@ fn _extern_definition_initializer(llvm_type: string, value: string?) -> string {
 
 // Canonicalize a channel-typed global's annotation to the `channel` /
 // `channel:<kind>` form the bespoke send/receive lowering recognizes
-// (`_try_lower_channel_method` in expression_lowering/native/core.sfn).
+// (`try_lower_channel_method` in expression_lowering/native/core_concurrency_lowering.sfn).
 // Mirrors the function-local inference in `instructions_let.sfn` (#1091) so a
 // MODULE-GLOBAL channel routes `.send` / `.receive` to the `sfn_channel_*`
 // runtime helpers exactly as a local does. Without this, a global channel
