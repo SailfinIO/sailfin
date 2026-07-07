@@ -172,11 +172,16 @@ gh issue comment <N> --body "Auto-triage: in-progress label was set but no activ
 gh issue comment <N> --body "Auto-triage: claude-ready for 30+ days without pickup. Likely stale — review priority or close."
 ```
 
-### OVERSIZED — L-sized → epic
+### OVERSIZED — L-sized → needs grooming (epic scope = a Linear Project)
+
+An L-sized issue is epic-scale. Do **not** apply the `epic` label (retired —
+epics are Linear Projects, not GitHub issues; see `docs/conventions/linear-workflow.md`).
+Flag it for grooming; `/groom` decomposes it into XS/S/M leaves under a Linear
+Project.
 
 ```bash
-gh issue edit <N> --remove-label "claude-ready" --add-label "needs-grooming" --add-label "epic"
-gh issue comment <N> --body "Auto-triage: this issue is L-sized; the canonical scheme has no \`size:l\`. Marking \`epic\` + \`needs-grooming\`. Run \`/groom #<N>\` to decompose into XS/S/M children."
+gh issue edit <N> --remove-label "claude-ready" --add-label "needs-grooming"
+gh issue comment <N> --body "Auto-triage: this issue is L-sized; the canonical scheme has no \`size:l\`. Marking \`needs-grooming\`. Run \`/groom #<N>\` to decompose into XS/S/M leaves under a Linear Project (epics are Projects, not GitHub issues)."
 ```
 
 ### TYPE-FIX — null GitHub native Type field (silent, always)

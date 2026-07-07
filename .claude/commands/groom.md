@@ -127,15 +127,16 @@ Wait for user approval. The user may:
 
 ## Phase 4: CREATE ISSUES
 
-For each approved issue, create it via `gh`. Titles follow
-`docs/conventions/issue-naming.md`:
+Create **only session-sized leaf issues** on GitHub — one per approved item.
+The epic itself is **not** a GitHub issue: it is the Linear **Project** created
+in the *Reflect in Linear* step below (`linear-workflow.md`). Do **not** open a
+GitHub `Epic:` / `Tracking:` issue or apply the `epic` / `tracking` label — those
+shapes are retired (`docs/conventions/issue-naming.md` § Title taxonomy).
 
-- Sub-tasks: `<type>(<scope>): <imperative verb phrase>` (Conventional Commit shape).
-- Epics: `Epic: <track-id>: <noun phrase>` — also apply the `epic` label.
-- Tracking issues: `Tracking: <topic> (<YYYY-MM-DD>)` — also apply the `tracking` label.
-
-Labels come from `.github/labels.yml` (canonical registry). Use lowercase
-prefixes (`type:bug` not `bug`, `size:m` not `medium`).
+Leaf titles follow `docs/conventions/issue-naming.md`: `<type>(<scope>):
+<imperative verb phrase>` (Conventional Commit shape). Labels come from
+`.github/labels.yml` (canonical registry); use lowercase prefixes (`type:bug`
+not `bug`, `size:m` not `medium`).
 
 ```bash
 gh issue create \
@@ -304,12 +305,17 @@ Examples:
 agent has decided the issue does not need a fresh seed; getting that
 wrong is the failure mode this gate exists to prevent.
 
-### Attach issues to the parent epic as native sub-issues
+### Grouping: Linear Project for the epic; GitHub sub-issues only for leaf splits
 
-If the grooming target was an **existing epic issue** (e.g. `/groom 450`), every
-created issue must be attached as a GitHub-native sub-issue of that epic — body
-references alone do not populate the parent's "Sub-issues" panel and break the
-roadmap UI. Use the REST API (the `gh` CLI has no first-class command yet):
+Epic grouping is **not** a GitHub parent — it is the Linear **Project** the leaves
+are associated to in the *Reflect in Linear* step below. Do not create a GitHub
+`Epic:` parent to hang leaves off.
+
+GitHub-native sub-issue nesting is still used in **one** case: when a single
+session-sized leaf is split into smaller GitHub children (steps of one piece of
+work). Attach each child as a sub-issue of its **leaf parent** — body references
+alone do not populate the parent's "Sub-issues" panel. Use the REST API (the `gh`
+CLI has no first-class command yet):
 
 ```bash
 # Look up the parent's internal node id (NOT the issue number) once:
@@ -333,38 +339,36 @@ gh api /repos/SailfinIO/sailfin/issues/$PARENT/sub_issues \
 Skip this step only when the grooming target was a roadmap section, a free-form
 prompt, or a document — i.e. when no parent epic issue exists.
 
-### Phased epics: use a two-level phase-tracker structure
+### Phased epics: one Linear Project per phase, groomed wave-by-wave
 
 When an epic is **inherently multi-phase** — sequential phases where later phases
 depend on earlier ones (e.g. SFEP-0027's Phase A → B → C → D, where B can't start
-until A's modules land) — do **not** attach leaf issues directly to the epic and
-groom them in undocumented "waves." That is the structure that lost #351's Phase 3
-(it went 8/13-done with no sub-issues ever filed). Use two levels instead:
+until A's modules land) — do **not** dump all leaves into one Project and groom
+them in undocumented "waves." That is the structure that lost #351's Phase 3 (it
+went 8/13-done with no sub-issues ever filed). Model the phases in Linear instead:
 
-1. **One `tracking` sub-issue per phase, all attached to the epic up front.** Title
-   `Tracking: <epic-id> Phase <X> — <noun phrase>`; label `tracking` (never `epic`
-   — they are mutually exclusive). The phase you are grooming leaves for now is a
-   bare `tracking` issue; **every future phase also gets `needs-grooming`** (its
-   leaves don't exist yet). Body = that phase's checklist + the SFEP `## Design`
-   cite; leaves attach **under the phase tracker, not the epic**.
-2. **Groom each phase's leaf issues wave-by-wave under its phase tracker** — attach
-   the leaves as native sub-issues of the *phase tracker*, and only when that
-   phase's wave is actually being opened.
+1. **One Linear Project per phase, all created up front** under the shared
+   Initiative, named `<Epic> Phase <X> — <noun phrase>` (as the existing
+   *Concurrency Maturity Phase 1 / Phase 2* Projects do). Give each future phase's
+   Project a `Planned`/`Backlog` state and put its checklist + `Design: SFEP-NNNN`
+   in the Project description. Leaves attach to the **current** phase's Project;
+   future phases hold no leaves yet.
+2. **Groom each phase's leaf issues wave-by-wave**, filing them (GitHub → Linear)
+   into that phase's Project only when the wave is actually being opened. The empty
+   next-phase Project is the visible *"groom me next"* card.
 
-Why this is load-bearing (not bookkeeping): `/sweep` Phase 2c recommends closing a
-parent from its **native sub-issue rollup** (`completed == total`), and ignores the
-markdown `## Phases` checklist entirely. With leaves attached directly to the epic,
-the rollup hits 100% the moment Phase A's wave closes and `/sweep` recommends
-**closing the whole epic** before B/C/D are even groomed. With phase trackers
-attached up front, the epic rollup reads "phases-complete / total-phases" — it
-**cannot** reach 100% until every phase is groomed and done, and the open
-`needs-grooming` next-phase tracker is the visible *"groom me next"* card. Each
-phase is also independently focusable and closable, which a single epic issue is
-not.
+Why one-Project-per-phase (not one Project for the whole epic): a Project rolls up
+its own issues' state. If every phase's leaves lived in a single Project, that
+Project would read ~100% the moment Phase A's wave closed — hiding that B/C/D
+aren't even groomed. Separate phase Projects keep each phase independently
+plannable, focusable, and completable, and the Initiative view shows the phase
+sequence at a glance. (`/sweep` Phase 2c still uses GitHub **leaf** sub-issue
+rollups to recommend closing a leaf-parent — that is unchanged; it never closes a
+Linear Project.)
 
 **When NOT to use this:** a single-phase epic, or a flat bag of genuinely
-independent issues with no phase ordering — attach the leaves directly to the epic
-as above. The two-level structure is for *sequential, wave-groomed* phases only.
+independent issues with no phase ordering — one Project, leaves filed directly.
+The per-phase Project structure is for *sequential, wave-groomed* phases only.
 
 ---
 
@@ -387,9 +391,9 @@ Suggest: `/pickup` to start working the queue, or `/triage` to verify hygiene.
 - **Always set the `claude-ready` label** on issues that are ready to pick up. Use `needs-grooming` for issues that exist as placeholders but need refinement.
 - **Always set the `type:*` and `size:*` labels** so `/pickup` can filter correctly. Apply `area:*` labels when the touched subsystem is unambiguous.
 - **Use only labels defined in `.github/labels.yml`** — never invent new ones in this command. If you think a new label is warranted, edit `labels.yml` in a separate PR first.
-- **Title format follows `docs/conventions/issue-naming.md`** — Conventional Commit shape for sub-tasks, `Epic:` prefix for epics, `Tracking:` for trackers.
+- **Title format follows `docs/conventions/issue-naming.md`** — Conventional Commit shape for leaf sub-tasks. Never open an `Epic:`/`Tracking:` GitHub issue or apply the `epic`/`tracking` label; epics are Linear Projects (see *Reflect in Linear*).
 - **Don't create issues for work that's already in progress** — check `gh issue list` first to avoid duplicates.
-- **When grooming an existing epic issue, attach every created issue as a native sub-issue of that epic** via the REST `/sub_issues` endpoint. Body cross-references do not populate the parent's Sub-issues panel and leave the roadmap UI incomplete. Use `-F sub_issue_id=<int>` (not `-f`) — the field must be typed.
+- **When splitting one leaf into GitHub children, attach each child as a native sub-issue of its leaf parent** via the REST `/sub_issues` endpoint (epic grouping is the Linear Project, not a GitHub parent). Body cross-references do not populate the parent's Sub-issues panel. Use `-F sub_issue_id=<int>` (not `-f`) — the field must be typed.
 - **Labels are the source of truth.** There is no derived board to sync.
 - **Set the GitHub native Type field** with
   `.claude/scripts/set-issue-type.sh <N> <Feature|Task|Bug>` (best-effort; it

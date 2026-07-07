@@ -322,14 +322,17 @@ earn their cost on open-ended investigation and cross-cutting analysis.
 
 ## Task Tracking
 
-The roadmap (`site/src/pages/roadmap.astro`, [sailfin.dev/roadmap](https://sailfin.dev/roadmap))
-is strategic — epics, not session-sized work. Day-to-day work lives in **GitHub
-Issues**, scoped so a single session takes an issue from open to merged PR.
+Work is organised in three tiers — **Linear Initiative → Linear Project →
+GitHub Issue** (full playbook: `docs/conventions/linear-workflow.md`). An
+**epic is a Linear Project** under an Initiative (a theme); **never open a
+GitHub `Epic:`/`Tracking:` issue** (retired 2026-07-07). GitHub Issues are
+session-sized leaf work only, scoped so a single session takes an issue from
+open to merged PR, and are mirrored into Linear by the integration.
 
 ```
-roadmap (epics) ──/groom──▶ Issues (claude-ready) ──/triage──▶ pickable
-                                   │
-                                   └──/pickup [#N]──▶ PR opened, issue auto-closed on merge
+Initiative (theme) ─▶ Project (epic) ─▶ Issue (leaf, claude-ready) ──/triage──▶ pickable
+     [Linear]            [Linear]        [GitHub → mirrored]  │
+                                              └──/pickup [#N]──▶ PR opened, issue auto-closed on merge
 ```
 
 **Issue contract** (template: `.github/ISSUE_TEMPLATE/claude-task.md`): Goal,
@@ -347,7 +350,8 @@ the session-sized *what*.
 **Labels** are registered in `.github/labels.yml`; conventions and the lifecycle
 diagram are in `docs/conventions/issue-naming.md`. Key ones: `claude-ready`,
 `needs-grooming`, `in-progress`, `blocked`, `type:*`, `size:*`, `priority:*`,
-`area:*`, `epic`/`tracking`. **Labels are the source of truth** and there is no
+`area:*` (`epic`/`tracking` are **legacy** — epics/trackers are Linear Projects
+now, not labels on new issues). **Labels are the source of truth** and there is no
 derived GitHub board to keep in sync: the former *Sailfin Tracker* project
 (org project SailfinIO/4) and its `sync-project.yml` label→board workflow have
 been **retired**. Epic and roadmap-level grouping now lives in **Linear** —

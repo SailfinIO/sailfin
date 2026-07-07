@@ -156,10 +156,10 @@ labels:
   # --- Special markers -------------------------------------------------
   - name: epic
     color: "d4c5f9"
-    description: "Roadmap-scale parent ticket; tracks child issues"
+    description: "Legacy — epics are now Linear Projects; do not apply to new issues"
   - name: tracking
     color: "a371f7"
-    description: "Cross-cutting tracker (status, sequencing); not directly implementable"
+    description: "Legacy — trackers are now Linear Projects/Initiatives; do not apply to new issues"
   - name: seed-blocker
     color: "b60205"
     description: "Must close before the next seed binary is cut"

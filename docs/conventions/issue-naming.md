@@ -72,9 +72,16 @@ review attached or required).
 
 ## Title taxonomy
 
-There are **four human-authored title shapes** (sub-task, epic, tracking,
-focus) plus **one reserved auto-generated prefix** (`[aw]`). Anything else
-is a bug.
+There are **two human-authored GitHub title shapes** (sub-task, focus) plus
+**one reserved auto-generated prefix** (`[aw]`). Anything else is a bug.
+
+> **Epics and trackers are not GitHub issues.** An epic is a Linear **Project**
+> (under an Initiative); a cross-cutting status thread is that Project itself.
+> The historical `Epic:` / `Tracking:` GitHub title shapes are **retired** — see
+> § 2 and § 3 below and the playbook in
+> [`linear-workflow.md`](./linear-workflow.md). The **one** surviving tracking
+> title is `Release: vX.Y.Z` (release automation owns it — see § *Release
+> tracking*).
 
 ### 1. Sub-task (the default — what most issues and PRs are)
 
@@ -112,49 +119,31 @@ The `<type>` prefix and the `type:<type>` label MUST agree:
 | `chore`      | `type:tech-debt` |
 | `docs`       | `type:docs`     |
 
-### 2. Epic (parent of multiple sub-tasks)
+### 2. Epic — **retired as a GitHub issue; use a Linear Project**
 
-```
-Epic: <track-id>: <noun phrase>
-```
+An epic is now a **Linear Project** under an Initiative, not a GitHub issue.
+See § *Linear structure & naming* below and the playbook in
+[`linear-workflow.md`](./linear-workflow.md). Name the Project for its outcome
+(`CLI Modularization`), drop the `Epic:` prefix and any track-id / `#N` /
+`SFEP-NNNN`, and put `GitHub: #N` + `Design: SFEP-NNNN` in the Project
+**description**.
 
-| Field | Definition |
-|-------|------------|
-| `<track-id>` | Stable identifier from the roadmap. Examples: `M0`, `M1.5`, `M2`, `T1`, `T7`, `SR` (syntax reform), `EFF` (effect system hardening). New track IDs are added to the roadmap first. |
-| `<noun phrase>` | Title-case, scope-positive description of the outcome. |
+Do **not** open a new `Epic:` GitHub issue and do **not** apply the `epic`
+label to new work. The label persists only on the historical epics that were
+closed during the 2026-07-07 Linear migration; `/groom` creates a Project and
+files only session-sized leaves.
 
-**Examples:**
+### 3. Tracking issue — **retired; the Project (or Initiative) is the tracker**
 
-```
-Epic: M2: Core Runtime in Sailfin
-Epic: M3: Capability Adapters in Sailfin + Delete C Runtime
-Epic: T1: Per-module memory budget under 800 MB
-Epic: T7: Compiler decomposition into sub-capsules
-Epic: SR: Pre-1.0 syntax reform
-```
+Cross-cutting status no longer lives in a GitHub `Tracking:` issue. The Linear
+Project rolls up its issues' state, and an Initiative groups related Projects —
+that *is* the coordination surface. Do not open new `Tracking:` issues or apply
+the `tracking` label to new work.
 
-Always paired with the `epic` label. Children link back via `Blocked by` /
-`Parent: #<N>` references in their bodies.
-
-### 3. Tracking issue (cross-cutting status, not directly implementable)
-
-```
-Tracking: <topic> (<YYYY-MM-DD>)
-```
-
-The date is when the tracker was opened (not when the work happens). Use a
-tracking issue when you want a single thread to coordinate multiple PRs but
-no single PR closes it.
-
-**Examples:**
-
-```
-Tracking: Runtime Rewrite Reassessment & Sequencing (2026-05-06)
-Tracking: Build Performance & Production-Readiness (2026-05-06)
-```
-
-Always paired with the `tracking` label. Tracking issues are explicitly
-**not** `claude-ready` — they are coordination surfaces, not work items.
+**One exception:** the per-cycle **`Release: vX.Y.Z`** issue survives, because
+release automation (`release.yml`, `/release-plan`) keys off it and the
+`release:*` labels. A release is a Linear **Cycle**, never a Project — see
+§ *Release tracking*.
 
 ### 4. Focus issue (planner output, weekly)
 
@@ -183,7 +172,7 @@ Leave the `[aw]` prefix in place; downstream tooling pattern-matches on it.
 | Every `claude-ready` issue carries exactly one `size:*` label | `/pickup` and `/sweep` rank by it |
 | Use `priority:*` only when prioritisation matters; default is no priority label | Avoids label inflation; absence ≠ low |
 | Apply `area:*` labels when the touched subsystem is unambiguous | Helps `/sweep` dedupe collisions |
-| `epic` and `tracking` are mutually exclusive | They mean different things |
+| `epic` / `tracking` are **legacy** — do not apply to new issues | Epics are Linear Projects, trackers are Projects/Initiatives (see `linear-workflow.md`) |
 | Never re-introduce a bare alias (`bug`, `runtime`, `medium`, …) | They are listed in `aliases:` of `labels.yml` and will be migrated away on the next sync |
 | Never invent a new label in a workflow or slash command | Add it to `labels.yml` in a separate PR first |
 
