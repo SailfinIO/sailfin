@@ -50,12 +50,11 @@ and is silently skipped when `build/native/sailfin` is missing. Bypass with
 
 Releases are cut by `.github/workflows/release.yml`, which bumps the version
 source of truth (`compiler/capsule.toml`) and stamps the related version files.
-Per-release notes are generated automatically — GitHub's `gh release create
---generate-notes` writes commit/PR-derived notes onto the tag, and the
-`release-notes` agentic workflow posts a categorized summary as a comment on the
-published release. There is no hand-maintained `CHANGELOG.md`; the merged PR,
-its linked issue, and the [GitHub Releases](https://github.com/SailfinIO/sailfin/releases)
-notes are the per-change record.
+Per-release notes are generated automatically: GitHub's `gh release create
+--generate-notes` writes commit/PR-derived notes onto the tag. There is no
+hand-maintained `CHANGELOG.md`; the merged PR, its linked issue, and the
+[GitHub Releases](https://github.com/SailfinIO/sailfin/releases) notes are the
+per-change record.
 
 ## 3. Documentation Process
 
