@@ -25,6 +25,10 @@ Then confirm the session sees the repo configuration:
 
 If your Codex build does not auto-load repo-local skills or hooks, paste the relevant prompt from `prompts/` and explicitly mention the `SKILL.md` file named in that prompt.
 
+Hook definitions live inline in `config.toml`. Do not add a sibling
+`hooks.json` for the same project layer; Codex loads both representations,
+which can duplicate hook execution and produce startup warnings.
+
 ## Web setup
 
 Codex web should be given the same repository context plus one of the prompts in `prompts/`. For the closest equivalent to Claude's `/pickup`, paste `prompts/pickup.md` and optionally append an issue number. For SFEP lifecycle work, paste `prompts/sfep.md` with the desired mode.
