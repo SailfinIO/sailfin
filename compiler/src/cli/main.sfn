@@ -38,7 +38,6 @@ import {
 
 import { _ends_with } from "../build/paths";
 import { _runtime_bundle_exists } from "../build/runtime_objs";
-import { _usage, sailfin_cli_main_with_paths } from "../cli_main";
 import { handle_selfhost_command } from "../cli_selfhost";
 import { ice_set_binary_dir } from "../ice";
 import { number_to_string } from "../num_format";
@@ -59,6 +58,7 @@ import { command_def as run_command_def, run as run_run } from "./commands/run";
 import { command_def as test_command_def, run as test_run } from "./commands/test";
 import { command_def as version_command_def, run as version_run } from "./commands/version";
 import { CliContext, driver_prefix_length, parse_driver_prefix } from "./context";
+import { _usage, sailfin_cli_main_with_paths } from "./entry";
 
 // Cold-path `SAILFIN_TRACE_ARGV` trace. v2 is the sole dispatch, so it
 // reproduces this trace for the argv each path acts on — every matched

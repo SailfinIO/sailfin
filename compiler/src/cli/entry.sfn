@@ -1,9 +1,9 @@
-// compiler/src/cli_main.sfn
+// compiler/src/cli/entry.sfn
 //
 // Sailfin-native CLI entrypoint invoked by the native C shim.
 import { bold } from "sfn/cli";
 
-import { sailfin_cli_main_v2 } from "./cli/main";
+import { sailfin_cli_main_v2 } from "./main";
 
 // M5.5 (#473) entry-point dependencies. `fn main` below resolves the
 // running binary's path and the runtime bundle root directly via the
@@ -317,4 +317,4 @@ fn main(argv: string[]) -> int ![io, clock] {
     // returns its exit code up through here rather than calling `exit()`.
     sfn_arena_telemetry_dump(label as * u8);
     return exit_code;
-}  // `cli_main` is the `@main` entrypoint root and imports  // `sailfin_cli_main_v2` from `cli/main.sfn`, which in turn imports  // `_usage` / `sailfin_cli_main_with_paths` back from here — a  // two-function mutual import between exactly these two modules. Sailfin  // resolves function/struct-level import cycles (e.g. parser  // `statements` <-> `declarations`), so this edge is safe.
+}
