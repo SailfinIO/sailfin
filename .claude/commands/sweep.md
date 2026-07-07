@@ -104,8 +104,12 @@ For each issue in the `blocked` pool:
    gh issue edit <N> --remove-label blocked --add-label claude-ready
    gh issue comment <N> --body "Auto-sweep: blocker(s) resolved — <list resolved #N references>. Marking ready for pickup."
    ```
-5. If `--dry-run` is set: do not edit or comment. Record the intended
-   flip in the report.
+   Then **reflect the flip into Linear** per
+   `docs/conventions/issue-naming.md` § Reflecting state into Linear: set the
+   mirror to `Ready` and roll up its Project status. Best-effort — skip with a
+   note if the Linear MCP tools aren't connected; never write a terminal status.
+5. If `--dry-run` is set: do not edit, comment, or reflect into Linear. Record
+   the intended flip in the report.
 
 ---
 

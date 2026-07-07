@@ -248,6 +248,12 @@ gh issue edit <N> --add-label "in-progress" --remove-label "claude-ready"
 git checkout -b claude/<N>-<slug>
 ```
 
+Then **reflect the claim into Linear** per `docs/conventions/issue-naming.md`
+§ Reflecting state into Linear: set the issue's mirror to `In Progress` and roll
+up its Project to `started`. Best-effort — skip with a note if the Linear MCP
+tools aren't connected. (The eventual `Closes #N` merge closes the GitHub issue,
+which the two-way sync propagates to `Done` on its own — don't set it here.)
+
 Read the full issue body to extract:
 - Goal
 - Scope (in/out)

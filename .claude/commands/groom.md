@@ -241,6 +241,25 @@ gh issue edit <N> --add-label "blocked"
 # (and reference the blocker in the body — the gh CLI doesn't have native dependency support)
 ```
 
+### Reflect in Linear
+
+Once the GitHub issues exist, reflect the epic and its leaves into Linear per
+`docs/conventions/issue-naming.md` § Reflecting state into Linear (best-effort —
+skip with a one-line note if the Linear MCP tools aren't connected):
+
+1. **Create or reuse the epic's Linear Project** under the correct initiative,
+   named per § Linear structure & naming (concise Title-Case deliverable; no
+   `Epic:` prefix or trailing `#N`/`SFEP-NNNN`), with `GitHub: #<epic>` and any
+   `Design: SFEP-NNNN` placed in the project **description**, not the name.
+2. **Assign each created leaf** to that Project and set its status from its
+   labels. The mirror syncs in asynchronously — retry briefly, and let a later
+   `/triage`/`/sweep` pass reconcile any leaf whose mirror hasn't appeared yet.
+3. **Roll up the Project status** from its issues (any In Progress → `started`;
+   else any Ready → `planned`; else `backlog`).
+
+Never write a terminal (`Done`/`Canceled`) status — the leaves are open, and the
+two-way sync would close them.
+
 ### Seed dependencies
 
 For each created issue, evaluate whether its predecessors must be **in the

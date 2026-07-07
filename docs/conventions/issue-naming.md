@@ -330,11 +330,44 @@ This keeps project names scannable while preserving the link back to the design
 record and the GitHub epic. A project belongs to exactly one initiative; a leaf
 issue belongs to exactly one project.
 
-When an epic is groomed, a Linear Project is created (or reused) under the right
-initiative following this convention — today a manual step in the grooming
-session — and the session-sized leaves are filed as GitHub issues that mirror
-into it. Automating the project creation and the label→status roll-up (in the
-grooming skill and/or a Linear-sync GitHub Action) is a follow-up.
+When an epic is groomed, `/groom` creates (or reuses) a Linear Project under the
+right initiative following this convention, files the session-sized leaves as
+GitHub issues that mirror into it, and reflects their state per **§ Reflecting
+state into Linear** below. A Linear-sync GitHub Action (using the Actions
+`LINEAR_API_KEY`) can later make the same reflection fire on label changes made
+outside the skills; until then the skills are the reflection path.
+
+## Reflecting state into Linear
+
+Linear mirrors GitHub issues (via the GitHub↔Linear integration) and holds the
+epic/roadmap grouping (Linear Projects = epics). GitHub labels stay the **source
+of truth**; Linear status and project membership are **derived from them, one
+direction only** — never read Linear state back onto a GitHub issue.
+
+When a workflow (`/groom`, `/triage`, `/sweep`) creates an issue or flips a
+status-bearing label, it reflects the change into Linear with the Linear MCP
+tools (`list_issues`, `save_issue`, `list_projects`, `save_project`). This is
+**best-effort**: if the Linear MCP tools are not connected in the session, skip
+the reflection with a one-line note — never fail or block the GitHub-side work
+on it (the same posture the skills take when `gh` is unavailable).
+
+1. **Find the mirror.** A GitHub issue's Linear mirror is located with
+   `list_issues` querying the issue's number or URL (the integration records the
+   GitHub link on the mirror). A newly-created issue mirrors in
+   **asynchronously** — allow a brief lag and retry a few times; if the mirror
+   still isn't present, record it and let the next `/triage`/`/sweep` pass
+   reconcile it. Never block on it.
+2. **Set issue status from labels** using the § Status semantics precedence
+   (first match wins). **Never** write `Done`, `Canceled`, or any terminal
+   status onto a mirror whose GitHub issue is still open — the two-way sync would
+   close the GitHub issue. Only the non-terminal statuses (In Progress, Blocked,
+   Ready, To triage, Backlog, Todo) are ever written.
+3. **Assign the issue to its epic's Project** if it isn't already, resolving the
+   Project from the epic (`epic`/parent reference) and creating it per § Linear
+   structure & naming when it doesn't exist yet.
+4. **Roll up the Project status** from its issues: any issue In Progress →
+   Project `started`; else any Ready → `planned`; else `backlog`. Never
+   `completed`/`canceled` from a workflow.
 
 ## Release tracking
 

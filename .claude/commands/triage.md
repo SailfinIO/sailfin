@@ -112,6 +112,12 @@ a size entirely (no label AND no `## Size`).
 
 ## Phase 3: APPLY ACTIONS
 
+Every label change below is also **reflected into Linear** per
+`docs/conventions/issue-naming.md` § Reflecting state into Linear: after the
+`gh issue edit`, find the issue's mirror, set its status from the new labels, and
+roll up its Project status. Best-effort — skip with a one-line note if the Linear
+MCP tools aren't connected, and never write a terminal status onto an open issue.
+
 ### PROMOTE — move a groomed issue to Ready
 
 ```bash
