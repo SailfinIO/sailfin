@@ -330,9 +330,11 @@ This keeps project names scannable while preserving the link back to the design
 record and the GitHub epic. A project belongs to exactly one initiative; a leaf
 issue belongs to exactly one project.
 
-When an epic is groomed, its Linear Project is created (or reused) under the
-right initiative following this convention, and the session-sized leaves are
-filed as GitHub issues that mirror into it.
+When an epic is groomed, a Linear Project is created (or reused) under the right
+initiative following this convention — today a manual step in the grooming
+session — and the session-sized leaves are filed as GitHub issues that mirror
+into it. Automating the project creation and the label→status roll-up (in the
+grooming skill and/or a Linear-sync GitHub Action) is a follow-up.
 
 ## Release tracking
 
