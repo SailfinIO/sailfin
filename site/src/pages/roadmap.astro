@@ -20,127 +20,97 @@ interface RoadmapCategory {
   state?: "open" | "closed";
 }
 
-// GitHub API types
-interface ApiMilestone {
-  number: number;
-  title: string;
-  description: string | null;
-  open_issues: number;
-  closed_issues: number;
-  state: "open" | "closed";
-  html_url: string;
-  updated_at: string;
+// Linear API types
+interface LinearProjectStatus {
+  type: string;
 }
 
-interface ApiIssue {
-  number: number;
-  title: string;
-  state: "open" | "closed";
-  labels: { name: string }[];
-  html_url: string;
-  pull_request?: unknown;
+interface LinearProject {
+  id: string;
+  name: string;
+  url: string;
+  status: LinearProjectStatus | null;
+}
+
+interface LinearInitiative {
+  id: string;
+  name: string;
+  description: string | null;
+  url: string;
+  projects: { nodes: LinearProject[] };
+}
+
+interface LinearInitiativesResponse {
+  data?: {
+    initiatives?: { nodes: LinearInitiative[] };
+  };
+  errors?: unknown[];
 }
 
 const REPO = "SailfinIO/sailfin";
-// Logical roadmap order (milestone numbers). Anything not in this list is appended.
-const DISPLAY_ORDER: number[] = [8, 7, 15, 10, 6];
 
-const ghHeaders: Record<string, string> = {
-  "User-Agent": "sailfin-roadmap-builder",
-  Accept: "application/vnd.github+json",
-};
-if (import.meta.env.GITHUB_TOKEN) {
-  ghHeaders.Authorization = `Bearer ${import.meta.env.GITHUB_TOKEN}`;
+function mapStatus(type: string | undefined): Status {
+  if (type === "completed") return "done";
+  if (type === "started") return "in-progress";
+  return "planned";
 }
 
-async function fetchMilestones(): Promise<ApiMilestone[]> {
+async function fetchInitiatives(): Promise<LinearInitiative[] | null> {
+  const apiKey = import.meta.env.LINEAR_API_KEY;
+  if (!apiKey) return null;
   try {
-    const res = await fetch(
-      `https://api.github.com/repos/${REPO}/milestones?state=all&per_page=100`,
-      { headers: ghHeaders },
-    );
-    if (!res.ok) throw new Error(`GitHub API ${res.status}: ${res.statusText}`);
-    return (await res.json()) as ApiMilestone[];
+    const res = await fetch("https://api.linear.app/graphql", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: apiKey,
+      },
+      body: JSON.stringify({
+        query: `query { initiatives(first: 50) { nodes { id name description url projects(first: 100) { nodes { id name url status { type } } } } } }`,
+      }),
+    });
+    if (!res.ok) throw new Error(`Linear API ${res.status}: ${res.statusText}`);
+    const json = (await res.json()) as LinearInitiativesResponse;
+    if (json.errors) throw new Error("Linear API returned errors");
+    if (!json.data?.initiatives) throw new Error("Linear API response missing initiatives");
+    return json.data.initiatives.nodes;
   } catch (err) {
-    console.warn("[roadmap] milestone fetch failed:", err);
-    return [];
-  }
-}
-
-// Returns null on fetch failure so the UI can distinguish "no epics yet"
-// from "could not load epics" — empty array is the former.
-async function fetchEpicsForMilestone(milestoneNumber: number): Promise<ApiIssue[] | null> {
-  try {
-    const res = await fetch(
-      `https://api.github.com/repos/${REPO}/issues?milestone=${milestoneNumber}&labels=epic&state=all&per_page=100`,
-      { headers: ghHeaders },
-    );
-    if (!res.ok) throw new Error(`GitHub API ${res.status}: ${res.statusText}`);
-    const data = (await res.json()) as ApiIssue[];
-    return data.filter((i) => !i.pull_request);
-  } catch (err) {
-    console.warn(`[roadmap] epic fetch failed for milestone ${milestoneNumber}:`, err);
+    console.warn("[roadmap] Linear initiative fetch failed:", err);
     return null;
   }
 }
 
-function epicStatus(issue: ApiIssue): Status {
-  if (issue.state === "closed") return "done";
-  if (issue.labels.some((l) => l.name === "in-progress")) return "in-progress";
-  return "planned";
-}
+const initiatives = await fetchInitiatives();
+const apiAvailable = initiatives !== null;
 
-function cleanEpicTitle(title: string): string {
-  return title.replace(/^Epic:\s*/i, "");
-}
-
-const apiMilestones = await fetchMilestones();
-const apiAvailable = apiMilestones.length > 0;
-
-// Hide milestones with no items at all (open_issues + closed_issues == 0).
-// These are usually retired placeholders and contribute no signal.
-const populatedMilestones = apiMilestones.filter(
-  (m) => m.open_issues + m.closed_issues > 0,
+// Hide initiatives with no projects at all — these contribute no signal.
+const populatedInitiatives = (initiatives ?? []).filter(
+  (i) => i.projects.nodes.length > 0,
 );
 
-// Order: explicit DISPLAY_ORDER first, then any remaining milestones by number.
-const ordered: ApiMilestone[] = [
-  ...DISPLAY_ORDER
-    .map((n) => populatedMilestones.find((m) => m.number === n))
-    .filter((m): m is ApiMilestone => Boolean(m)),
-  ...populatedMilestones
-    .filter((m) => !DISPLAY_ORDER.includes(m.number))
-    .sort((a, b) => a.number - b.number),
-];
+const v1Categories: RoadmapCategory[] = apiAvailable
+  ? populatedInitiatives.map((initiative) => {
+      const projects = initiative.projects.nodes;
+      const items: RoadmapItem[] = projects.map((p) => ({
+        label: p.name,
+        status: mapStatus(p.status?.type),
+        url: p.url,
+      }));
+      const closed = projects.filter((p) => p.status?.type === "completed").length;
+      const open = projects.length - closed;
+      return {
+        title: initiative.name,
+        description: initiative.description ?? undefined,
+        items,
+        url: initiative.url,
+        open,
+        closed,
+        state: open > 0 ? "open" : "closed",
+      };
+    })
+  : [];
 
-const epicsByMilestone = await Promise.all(
-  ordered.map((m) => fetchEpicsForMilestone(m.number)),
-);
-
-const v1Categories: RoadmapCategory[] = ordered.map((m, idx) => {
-  const epicResult = epicsByMilestone[idx];
-  const epicsLoadFailed = epicResult === null;
-  const epics = epicResult ?? [];
-  const items: RoadmapItem[] = epics.map((e) => ({
-    label: cleanEpicTitle(e.title),
-    status: epicStatus(e),
-    url: e.html_url,
-  }));
-  return {
-    title: m.title,
-    description: m.description ?? undefined,
-    items,
-    url: m.html_url,
-    open: m.open_issues,
-    closed: m.closed_issues,
-    epicsLoadFailed,
-    state: m.state,
-  };
-});
-
-// Aggregate progress across all v1 milestones. Note: open_issues / closed_issues
-// from the milestone API counts both issues *and* PRs attached to the milestone,
-// so the UI labels these as "items" rather than "issues".
+// Aggregate progress across all v1 initiatives.
 const v1ItemsOpen = v1Categories.reduce((s, c) => s + (c.open ?? 0), 0);
 const v1ItemsClosed = v1Categories.reduce((s, c) => s + (c.closed ?? 0), 0);
 const v1ItemsTotal = v1ItemsOpen + v1ItemsClosed;
@@ -211,7 +181,7 @@ const lastUpdated = new Date().toLocaleDateString("en-US", {
           Sailfin's path from alpha to a stable 1.0 release and beyond.
         </p>
         <p class="meta">
-          Built {lastUpdated} from <a href={`https://github.com/${REPO}/milestones`}>GitHub milestones</a> at deploy time.
+          Built {lastUpdated} from the <a href="https://linear.app">Linear roadmap</a> at deploy time.
         </p>
       </header>
 
@@ -224,8 +194,7 @@ const lastUpdated = new Date().toLocaleDateString("en-US", {
 
       {!apiAvailable && (
         <div class="api-warning">
-          Could not load milestone data from GitHub at build time. View the live state directly on
-          <a href={`https://github.com/${REPO}/milestones`}>GitHub milestones</a>.
+          Could not load roadmap data from Linear at build time.
         </div>
       )}
 
@@ -281,7 +250,7 @@ const lastUpdated = new Date().toLocaleDateString("en-US", {
               </div>
               {cat.epicsLoadFailed ? (
                 <p class="empty-note epics-error">
-                  Could not load epics for this milestone. {cat.url && <a href={cat.url}>View milestone on GitHub</a>}
+                  Could not load projects for this initiative. {cat.url && <a href={cat.url}>View initiative</a>}
                 </p>
               ) : cat.items.length > 0 ? (
                 <ul class="item-list">
@@ -296,7 +265,7 @@ const lastUpdated = new Date().toLocaleDateString("en-US", {
                 </ul>
               ) : (
                 <p class="empty-note">
-                  No epics yet. {cat.url && <a href={cat.url}>View milestone on GitHub</a>}
+                  No projects yet in this initiative. {cat.url && <a href={cat.url}>View initiative</a>}
                 </p>
               )}
             </section>
@@ -336,7 +305,7 @@ const lastUpdated = new Date().toLocaleDateString("en-US", {
       <section class="exploration">
         <h2>Backlog & Exploration</h2>
         <p class="section-desc">
-          Workstreams without architected GitHub milestones yet. Some will graduate into milestones once design work lands; others stay exploratory.
+          Workstreams without an architected Linear initiative yet. Some will graduate into initiatives once design work lands; others stay exploratory.
         </p>
         <ul class="item-list exploration-list">
           {exploration.map((item) => (
