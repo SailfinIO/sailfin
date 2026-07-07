@@ -103,14 +103,13 @@ For each issue in the `blocked` pool:
    ```bash
    gh issue edit <N> --remove-label blocked --add-label claude-ready
    gh issue comment <N> --body "Auto-sweep: blocker(s) resolved — <list resolved #N references>. Marking ready for pickup."
-
-   # Move the card on the Sailfin Tracker (Project #4) out of the
-   # Blocked column. The helper derives the new column from the
-   # post-edit labels — here that resolves to "Ready".
-   .claude/scripts/sync-project-status.sh <N> --from-labels
    ```
-5. If `--dry-run` is set: do not edit, comment, or sync. Record the intended
-   flip (label change AND target column) in the report.
+   Then **reflect the flip into Linear** per
+   `docs/conventions/issue-naming.md` § Reflecting state into Linear: set the
+   mirror to `Ready` and roll up its Project status. Best-effort — skip with a
+   note if the Linear MCP tools aren't connected; never write a terminal status.
+5. If `--dry-run` is set: do not edit, comment, or reflect into Linear. Record
+   the intended flip in the report.
 
 ---
 
@@ -389,14 +388,9 @@ Dry run: changes <previewed | applied>
 - **Don't modify issue bodies.** Only labels and comments.
 - **Be conservative with prose blockers.** Anything not a hard `#N` reference stays blocked until a human confirms.
 - **Always leave a comment when flipping a label.** Future-you needs the audit trail.
-- **The label flip *is* the board update.** CI (`sync-project.yml`) reconciles
-  the board from labels on every label event. Optionally nudge Status sooner
-  with `.claude/scripts/sync-project-status.sh <N> --from-labels`; it self-skips
-  (exit 0, `note:`) where `gh` can't reach the API (e.g. remote containers).
-  Surface only a genuine non-zero exit under "Concerns" so a human can reconcile
-  the column — a self-skip is not one.
-- **In `--dry-run` mode, make zero writes.** No labels, no comments, no
-  board syncs. Print intended actions only.
+- **Labels are the source of truth.** There is no derived board to sync.
+- **In `--dry-run` mode, make zero writes.** No labels, no comments.
+  Print intended actions only.
 - **Read `.github/AGENTS.md` for cap context.** Default budget = 2 matches the autonomous-pipeline cap; `--greedy` raises it for human-coordinated parallel sessions.
 
 ---

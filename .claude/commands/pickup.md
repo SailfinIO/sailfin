@@ -238,23 +238,21 @@ proceed to Phase 2.
 
 ## Phase 2: CLAIM AND BRANCH
 
-Mark the issue as in-progress, sync the project board, and create a branch:
+Mark the issue as in-progress and create a branch:
 
 ```bash
 # Claim it
 gh issue edit <N> --add-label "in-progress" --remove-label "claude-ready"
 
-# Move the card on the Sailfin Tracker (Project #4) to match.
-# The helper derives the column from the current labels; with the edit
-# above that resolves to "In progress".
-.claude/scripts/sync-project-status.sh <N> --from-labels
-
 # Branch name: claude/<N>-<slugified-title>
 git checkout -b claude/<N>-<slug>
 ```
 
-If the project sync exits non-zero, do not abort the pickup — note the drift
-and surface it in the Phase 6 report so a human can reconcile.
+Then **reflect the claim into Linear** per `docs/conventions/issue-naming.md`
+§ Reflecting state into Linear: set the issue's mirror to `In Progress` and roll
+up its Project to `started`. Best-effort — skip with a note if the Linear MCP
+tools aren't connected. (The eventual `Closes #N` merge closes the GitHub issue,
+which the two-way sync propagates to `Done` on its own — don't set it here.)
 
 Read the full issue body to extract:
 - Goal
@@ -346,12 +344,10 @@ on the issue:
 gh issue comment <N> --body "Scope adjustment needed: <reason>. Pausing for human input."
 ```
 
-Then mark the issue with `needs-grooming`, remove `in-progress`, and resync the
-board so the card moves out of the "In progress" column:
+Then mark the issue with `needs-grooming` and remove `in-progress`:
 
 ```bash
 gh issue edit <N> --add-label "needs-grooming" --remove-label "in-progress"
-.claude/scripts/sync-project-status.sh <N> --from-labels
 ```
 
 Do not silently expand the *semantic* scope. A renamed/moved/merged map path or
@@ -496,8 +492,4 @@ If anything was deferred or scope was adjusted mid-flight, surface it explicitly
 - The compiler self-caps memory (8 GiB on Linux); see `.claude/rules/compiler-safety.md`.
 - **Never skip Phase 1.5.** The `## Required in pinned seed` precheck (and its legacy fallback) prevents the failure mode that broke the original #489 attempt — a compiler-source migration picked up against a seed that predated its dependency. If the precheck fails, halt and comment; do not attempt to triple-bootstrap a workaround binary.
 - **One issue per session.** Don't try to bundle multiple issues — they were sized to be standalone.
-- **The label flip *is* the board update.** CI (`sync-project.yml`) syncs the
-  Sailfin Tracker (Project #4) from labels on every label event. Optionally
-  nudge sooner with `.claude/scripts/sync-project-status.sh <N> --from-labels`
-  after a `gh issue edit ... --add-label/--remove-label`; it self-skips with a
-  `note:` where `gh` can't reach the API (e.g. remote containers).
+- Labels are the source of truth; there is no separate board to sync.

@@ -347,17 +347,16 @@ the session-sized *what*.
 **Labels** are registered in `.github/labels.yml`; conventions and the lifecycle
 diagram are in `docs/conventions/issue-naming.md`. Key ones: `claude-ready`,
 `needs-grooming`, `in-progress`, `blocked`, `type:*`, `size:*`, `priority:*`,
-`area:*`, `epic`/`tracking`. **Labels are the source of truth**; the Sailfin
-Tracker (org project SailfinIO/4) is *derived*. CI owns the board:
-`.github/workflows/sync-project.yml` (→ `scripts/sync-issue-to-project.sh`) runs
-on every `labeled`/`unlabeled` event and reconciles the Priority, Size, and
-Status fields from labels with a project-scoped PAT. So flipping the label *is*
-the board update — no extra step is required. `.claude/scripts/sync-project-status.sh
-<N> --from-labels` remains a **best-effort local nudge** (it just sets Status
-sooner than the next CI run); it self-skips with a `note:` when `gh` can't reach
-the API — e.g. in remote containers, where api.github.com is gated behind the
-Claude GitHub App and only the GitHub MCP tools work — so a "couldn't update the
-board" message there is expected and benign, not a failure to chase.
+`area:*`, `epic`/`tracking`. **Labels are the source of truth** and there is no
+derived GitHub board to keep in sync: the former *Sailfin Tracker* project
+(org project SailfinIO/4) and its `sync-project.yml` label→board workflow have
+been **retired**. Epic and roadmap-level grouping now lives in **Linear** —
+Linear Projects correspond to epics, while session-sized leaf work stays as
+GitHub issues (mirrored into Linear by the GitHub↔Linear integration). Flipping a
+label *is* the state change; no board-sync step follows it. The public roadmap
+(`site/src/pages/roadmap.astro`) builds from Linear initiatives/projects at deploy
+time (needs a `LINEAR_API_KEY` build secret; it degrades to a "data unavailable"
+state without one).
 
 **Anti-patterns:** don't pick up `needs-grooming` (groom first); don't expand
 scope mid-session (comment and pause); don't bundle issues into one PR; don't

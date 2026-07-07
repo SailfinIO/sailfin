@@ -112,15 +112,11 @@ a size entirely (no label AND no `## Size`).
 
 ## Phase 3: APPLY ACTIONS
 
-Every label flip MUST be followed by a board sync so the card moves to the
-matching column on the Sailfin Tracker (Project #4):
-
-```bash
-.claude/scripts/sync-project-status.sh <N> --from-labels
-```
-
-The helper derives the column from post-edit labels with strict precedence:
-`in-progress` > `blocked` > `needs-grooming` > `claude-ready`.
+Every label change below is also **reflected into Linear** per
+`docs/conventions/issue-naming.md` § Reflecting state into Linear: after the
+`gh issue edit`, find the issue's mirror, set its status from the new labels, and
+roll up its Project status. Best-effort — skip with a one-line note if the Linear
+MCP tools aren't connected, and never write a terminal status onto an open issue.
 
 ### PROMOTE — move a groomed issue to Ready
 
@@ -130,7 +126,6 @@ The helper derives the column from post-edit labels with strict precedence:
 #   gh issue edit <N> --remove-label "needs-grooming" --add-label "claude-ready" --add-label "size:s"
 gh issue edit <N> --remove-label "needs-grooming" --add-label "claude-ready"
 gh issue comment <N> --body "Auto-triage promotion: body passes the full hygiene bar (Goal/Scope-In-Out/Acceptance/Files/Verification) with no open blocker or unresolved decision. <If size backfilled: 'Size declared as <X> in the body; applied the size:<x> label.'> <If a precondition was checked: 'Precondition met — #<M> is closed.'> Moving to claude-ready/Ready."
-.claude/scripts/sync-project-status.sh <N> --from-labels   # → Ready
 ```
 
 ### DEMOTE — strip claude-ready from an incomplete issue
@@ -141,7 +136,6 @@ gh issue comment <N> --body "Auto-triage: missing the following sections require
 - <list of failed checks>
 
 Run \`/groom\` to flesh this out, or close if no longer relevant."
-.claude/scripts/sync-project-status.sh <N> --from-labels   # → To triage
 ```
 
 ### UNBLOCK — clear a resolved blocker (hard-vs-prose rule, shared with `/sweep`)
@@ -160,7 +154,6 @@ never auto-flip.
 ```bash
 gh issue edit <N> --remove-label "blocked" --add-label "claude-ready"
 gh issue comment <N> --body "Auto-triage: all hard blocker references closed (<list resolved #N>) and no prose gate present in '## Blocked by'. Marking ready for pickup."
-.claude/scripts/sync-project-status.sh <N> --from-labels   # → Ready
 ```
 
 If a blocker is `needs-grooming`-incomplete after unblocking, fold it through
@@ -171,10 +164,9 @@ the PROMOTE guard rather than landing it in Ready half-baked.
 ```bash
 gh issue edit <N> --remove-label "in-progress" --add-label "claude-ready"
 gh issue comment <N> --body "Auto-triage: in-progress label was set but no active branch/PR found. Releasing back to queue."
-.claude/scripts/sync-project-status.sh <N> --from-labels   # → Ready
 ```
 
-### STALE — flag only (no label change, no board move)
+### STALE — flag only (no label change)
 
 ```bash
 gh issue comment <N> --body "Auto-triage: claude-ready for 30+ days without pickup. Likely stale — review priority or close."
@@ -185,7 +177,6 @@ gh issue comment <N> --body "Auto-triage: claude-ready for 30+ days without pick
 ```bash
 gh issue edit <N> --remove-label "claude-ready" --add-label "needs-grooming" --add-label "epic"
 gh issue comment <N> --body "Auto-triage: this issue is L-sized; the canonical scheme has no \`size:l\`. Marking \`epic\` + \`needs-grooming\`. Run \`/groom #<N>\` to decompose into XS/S/M children."
-.claude/scripts/sync-project-status.sh <N> --from-labels   # → To triage
 ```
 
 ### TYPE-FIX — null GitHub native Type field (silent, always)
@@ -279,11 +270,6 @@ Concerns:
   fail an issue on `### In` vs `In:` or a body-only `## Size`. Brittle matching
   is the bug that this pass exists to fix.
 - **If you change a label, leave a comment explaining why.** Audit trail.
-- **The label flip *is* the board update.** CI (`sync-project.yml`) reconciles
-  Priority/Size/Status from labels on every label event, so no extra step is
-  required. Optionally nudge Status sooner with
-  `.claude/scripts/sync-project-status.sh <N> --from-labels`; it self-skips with
-  a `note:` where `gh` can't reach the API (e.g. remote containers) — expected,
-  not a failure to chase.
+- **Labels are the source of truth.** There is no derived board to sync.
 - **Fix a null GitHub Type field** via `set-issue-type.sh` (best-effort; it too
   self-skips when `gh` is unavailable, so set it from a session where `gh` works).

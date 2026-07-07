@@ -38,11 +38,10 @@ Before claiming compiler/runtime work, read the issue body. If `## Required in p
 
 ```bash
 gh issue edit <N> --add-label "in-progress" --remove-label "claude-ready"
-.claude/scripts/sync-project-status.sh <N> --from-labels || true
 git switch -c codex/<N>-<slug>
 ```
 
-The project sync helper remains under `.claude/scripts/` because it is provider-neutral repository automation.
+Labels are the source of truth; there is no derived board to sync.
 
 ## Implementation rules
 

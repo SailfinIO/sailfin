@@ -307,6 +307,36 @@ still fitting inside one cadence interval.
 
 ---
 
+## Phase 3c: REFLECT INTO LINEAR (release Cycle)
+
+Releases live on an axis **orthogonal to the epic-Projects** — a release is a
+time-boxed cut across many epics, and a Linear issue belongs to exactly one
+Project (its epic), so the release axis is the `release:*` labels (source of
+truth) plus a Linear **Cycle** for the target window (which carries the dates and
+burndown). Releases are **never** Linear Projects. See
+`docs/conventions/issue-naming.md` § Release tracking.
+
+Reflect the plan into Linear (best-effort — skip with a one-line note if the
+Linear MCP tools aren't connected, per § Reflecting state into Linear; never
+write a terminal issue status):
+
+1. **Pick the target Cycle.** `list_cycles` for the Sailfin team; choose the
+   cycle whose window covers the intended cut (the current cycle, or the next
+   when the current is closing). Its `endsAt` is the visible target date.
+2. **Assign the must-close set to that Cycle.** For every open `release:<gate>`
+   issue on the tracker, set its Linear mirror's `cycle` to the target cycle and
+   its `priority` from the issue's `priority:*` label (critical→1/Urgent,
+   high→2, medium→3, low→4). This is what yields the dated, burndown-tracked
+   "what's in vX.Y.Z" view.
+3. **Assign the tracking issue** to the same Cycle and set its priority, so the
+   coordination issue rides along.
+
+Do NOT create a Project for the release, and do NOT move the `release:<gate>`
+issues out of their epic Projects — Cycle membership is orthogonal to Project
+membership.
+
+---
+
 ## Phase 4: CURATION LOOP (when `--candidates` is set)
 
 The scope-deciding half of the command: **propose → you approve → apply**.
