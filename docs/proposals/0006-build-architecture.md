@@ -1727,6 +1727,31 @@ the untouched 650-line `lower_array_literal`. Follow-ups (same lever): split
 tallest pole), and carve `core_operands.sfn` (~1,207 MB, three ~500–750-line
 coercion giants) and `capsule_resolver.sfn` (~1,229 MB).
 
+### Phase-scoped arena reclamation (2026-07-07, SFEP-0043)
+
+A complementary lever to the working-set carves above: instead of reducing the
+per-module working set by splitting modules, **reclaim the front-half working set
+mid-process** so lowering reuses the freed pages. Takes an arena mark before
+`parse_program`; after the emitter produces `native_lines`, joins them to a
+single flat string and relocates that string's data buffer to malloc'd memory
+(`compiler/src/arena_relocate.sfn::relocate_string_to_heap`); then rewinds the
+arena to reclaim the entire AST/typecheck/emit region; then lowers; then frees
+the heap buffer. Gated by `SAILFIN_ARENA_PHASE_REWIND` (default ON).
+
+Measured across 199 modules (rewind OFF vs ON, same binary):
+
+| Metric | Before | After |
+| --- | --- | --- |
+| Peak RSS (heaviest module) | 1,211 MB | **1,009 MB** (−16.7%) |
+| Sum of per-module peak RSS | 72.4 GB | **56.1 GB** (−22.5%) |
+| Mean per-module RSS | 364 MB | **282 MB** |
+| Sum wall time | 871.9 s | 867.3 s (−0.5%, neutral) |
+
+Global win across all pipeline stages; 2 known regressions (`capsule_resolver`
++18%, `core_literals_lowering` +8%) — small front-half modules where the
+relocated-text copy exceeds reclaimed garbage; neither sets the new peak.
+Design record: `docs/proposals/draft-phase-scoped-arena-reclamation.md` (SFEP-0043).
+
 ---
 
 ## Cross-references

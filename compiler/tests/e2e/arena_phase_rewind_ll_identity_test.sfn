@@ -1,0 +1,102 @@
+// compiler/tests/e2e/arena_phase_rewind_ll_identity_test.sfn
+//
+// End-to-end gate for the phase-scoped arena reclamation feature (SFEP):
+// asserts that emitting LLVM IR with SAILFIN_ARENA_PHASE_REWIND enabled
+// (the default) produces byte-identical output to emitting with it disabled
+// (SAILFIN_ARENA_PHASE_REWIND=0). A difference would mean the rewind path
+// produces different IR from the non-rewind path — a correctness regression.
+//
+// Uses a self-contained fixture module so the emit resolves without an
+// import-context directory. Drives the compiler-under-test as a subprocess
+// per `.claude/rules/no-bash-e2e.md`.
+import { find } from "sfn/strings";
+
+fn _sfn_bin() -> string ![io] {
+    let configured = env.get("SAILFIN_BIN");
+    if configured.length > 0 { return configured; }
+    return "build/native/sailfin";
+}
+
+fn _scratch_dir() -> string ![io] {
+    let mut base = env.get("SAILFIN_TEST_SCRATCH");
+    if base.length == 0 { base = "/tmp"; }
+    let dir = base + "/sfn-arena-rewind-id";
+    fs.createDirectory(dir, true);
+    return dir;
+}
+
+// A self-contained fixture module with no imports. The emit can resolve
+// without an import-context directory, making it suitable for a portable
+// subprocess test.
+fn _fixture_source() -> string {
+    return "// arena_rewind_fixture: self-contained, no imports\n"
+        + "fn add(a: int, b: int) -> int { return a + b; }\n"
+        + "fn greeting(name: string) -> string { return \"hello \" + name; }\n";
+}
+
+fn _child_env() -> string[] ![io] {
+    let mut e: string[] = [];
+    let path = env.get("PATH");
+    if path.length > 0 { e.push("PATH=" + path); }
+    let home = env.get("HOME");
+    if home.length > 0 { e.push("HOME=" + home); }
+    let tmpdir = env.get("TMPDIR");
+    if tmpdir.length > 0 { e.push("TMPDIR=" + tmpdir); }
+    let scratch = env.get("SAILFIN_TEST_SCRATCH");
+    if scratch.length > 0 { e.push("SAILFIN_TEST_SCRATCH=" + scratch); }
+    return e;
+}
+
+fn _child_env_rewind_off() -> string[] ![io] {
+    let mut e = _child_env();
+    e.push("SAILFIN_ARENA_PHASE_REWIND=0");
+    return e;
+}
+
+// Write the fixture to a temp file, emit LLVM IR twice (rewind on vs off),
+// and assert the outputs are byte-identical and both exits are 0.
+test "arena phase rewind: LLVM IR output is byte-identical with rewind on vs off" ![io] {
+    let dir = _scratch_dir();
+    let fixture = dir + "/fixture.sfn";
+    let on_ll = dir + "/on.ll";
+    let off_ll = dir + "/off.ll";
+
+    fs.writeFile(fixture, _fixture_source());
+
+    // Rewind ON (default: env var absent).
+    let on_exit = process.run_capture([_sfn_bin(), "emit", "-o", on_ll, "llvm", fixture], _child_env());
+    let _on_out = process.capture_take_stdout();
+    let _on_err = process.capture_take_stderr();
+    assert on_exit == 0;
+
+    // Rewind OFF (SAILFIN_ARENA_PHASE_REWIND=0).
+    let off_exit = process.run_capture([_sfn_bin(), "emit", "-o", off_ll, "llvm", fixture], _child_env_rewind_off());
+    let _off_out = process.capture_take_stdout();
+    let _off_err = process.capture_take_stderr();
+    assert off_exit == 0;
+
+    // Read both outputs and assert byte-identical.
+    let on_ir = fs.readFile(on_ll);
+    let off_ir = fs.readFile(off_ll);
+    assert on_ir == off_ir;
+}
+
+// Additional smoke check: rewind ON emits non-empty IR that contains the
+// fixture's exported symbol names (confirms the output is not garbage).
+test "arena phase rewind: emitted IR contains fixture symbols" ![io] {
+    let dir = _scratch_dir();
+    let fixture = dir + "/fixture.sfn";
+    let out_ll = dir + "/smoke.ll";
+
+    fs.writeFile(fixture, _fixture_source());
+
+    let exit = process.run_capture([_sfn_bin(), "emit", "-o", out_ll, "llvm", fixture], _child_env());
+    let _o = process.capture_take_stdout();
+    let _e = process.capture_take_stderr();
+    assert exit == 0;
+
+    let ir = fs.readFile(out_ll);
+    // Symbol names are mangled with the file path; match base name only.
+    assert find(ir, "@add", 0) >= 0;
+    assert find(ir, "@greeting", 0) >= 0;
+}

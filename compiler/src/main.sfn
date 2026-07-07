@@ -1,6 +1,7 @@
 // compiler/src/main.sfn
 //
 // Sailfin compiler main module and compilation entry points.
+import { free_heap_string, relocate_string_to_heap } from "./arena_relocate";
 import { Program, Statement } from "./ast";
 import { _env_flag, _legacy_flag_file } from "./build_flags";
 import { render_diagnostic, split_source_lines } from "./diagnostics_render";
@@ -18,7 +19,7 @@ import {
     emit_native_with_module_name,
     report_reexport_violations
 } from "./emit_native";
-import { native_lines_have_text } from "./emit_native_state";
+import { lines_to_native_text, native_lines_have_text } from "./emit_native_state";
 import { emit_program } from "./emitter_sailfin";
 import { ice_enter_stage, ice_set_source } from "./ice";
 import {
@@ -55,6 +56,18 @@ import {
     typecheck_has_errors_with_prelude
 } from "./typecheck";
 import { load_imported_interfaces_from_paths } from "./typecheck_import_loader";
+
+// Phase-scoped arena reclamation (SFEP-0043). The arena mark/rewind pair
+// snapshots and restores the arena bump pointer so the AST/typecheck/emit
+// region can be reclaimed before lowering (LLVM IR) starts, reducing
+// per-module peak RSS from front+back to ≈max(front,back). Declared here
+// mirroring cli_main.sfn:59's `extern fn sfn_arena_telemetry_dump`. The
+// Sailfin-native bodies live in runtime/sfn/memory/arena.sfn.
+// f64 matches the double ABI (#1309 descriptor ABI: `() -> double` /
+// `(double) -> void`).
+extern fn sfn_arena_sfn_mark() -> f64;
+
+extern fn sfn_arena_sfn_rewind(mark: f64) -> void;
 
 fn _ms_since(start_ms: int) -> int {
     let end_ms = monotonic_millis();
@@ -665,6 +678,12 @@ fn compile_to_llvm_file_with_module(source: string, module_name: string, out_pat
 // (`compile_to_llvm_with_module_timed`, ad-hoc `sailfin emit llvm
 // <file>` with no `--import-context`) are unaffected.
 fn compile_to_llvm_file_with_module_imports(source: string, module_name: string, out_path: string, work_dir: string, import_asm_paths: string[]) -> boolean ![io] {
+    // Phase-scoped arena reclamation: enabled unless SAILFIN_ARENA_PHASE_REWIND=0.
+    // The mark is taken here, before parse, so the rewind at the end of the
+    // emit pass reclaims the entire AST/typecheck/emit region — letting
+    // LLVM lowering reuse that arena space instead of piling on top.
+    let phase_rewind: boolean = env.get("SAILFIN_ARENA_PHASE_REWIND") != "0";
+    let arena_mark: f64 = sfn_arena_sfn_mark();
     let program: Program = parse_program(source);
     let prelude_globals = load_prelude_global_names(runtime_helper_call_names());
     let mut skip_typecheck_probe: string = "build/sailfin/.skip_typecheck";
@@ -712,6 +731,31 @@ fn compile_to_llvm_file_with_module_imports(source: string, module_name: string,
         if fs.exists(out_path) { fs.deleteFile(out_path); }
         return false;
     }
+    // Phase-scoped arena reclamation: join the emitter's line array to a
+    // single string, copy it to malloc-backed memory, rewind the arena
+    // (reclaiming the entire parse/typecheck/emit region), then lower from
+    // the heap-backed text and free it. Only one scalar crosses the mark
+    // boundary — nothing arena-allocated is read after the rewind, avoiding
+    // the array-container UAF that afflicts a `string[]` copy approach
+    // (the array struct itself is arena-backed and gone after rewind).
+    // `import_asm_paths` is a parameter allocated by the caller before the
+    // arena mark and survives natively; it is re-loaded post-rewind so the
+    // loaded native_texts (which are arena-backed) are fresh and valid.
+    // Disabled when SAILFIN_ARENA_PHASE_REWIND=0.
+    if phase_rewind {
+        let heap_text: string = relocate_string_to_heap(lines_to_native_text(native_lines));
+        sfn_arena_sfn_rewind(arena_mark);
+        let mut ok: boolean = false;
+        if import_asm_paths.length > 0 {
+            let reloaded = load_imported_interfaces_from_paths(import_asm_paths);
+            ok = write_llvm_ir_from_native_text_with_context(heap_text, module_name, out_path, reloaded.native_texts);
+        } else {
+            ok = write_llvm_ir_from_native_text(heap_text, module_name, out_path);
+        }
+        free_heap_string(heap_text);
+        return ok;
+    }
+    // Non-rewind path: existing behavior unchanged.
     // `-p` cross-module path: thread the staged import bodies into
     // lowering so sibling call sites resolve the entry's exported
     // function signatures (#999). The empty-import / in-process path

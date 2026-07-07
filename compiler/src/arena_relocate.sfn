@@ -1,0 +1,46 @@
+// compiler/src/arena_relocate.sfn
+//
+// Byte-fresh relocation of a single string into malloc'd (non-arena) memory
+// so it survives the phase-scoped arena rewind that reclaims the
+// AST/typecheck/emit region before lowering (SFEP-0043; peak-RSS
+// reduction). The single-string form avoids the
+// array-container UAF: a `string[]` returned by a helper is itself
+// arena-allocated; after the rewind its metadata struct is gone, so any
+// post-rewind indexing is a use-after-free. By joining to one string
+// BEFORE the rewind (via `lines_to_native_text`) and copying only that
+// scalar, the only thing that crosses the mark boundary is a heap-backed
+// `* u8` re-wrapped as a string — nothing arena-allocated is read after
+// `sfn_arena_sfn_rewind`.
+//
+// calloc is used so the trailing NUL is provided for free by the zeroed
+// allocation. Returning the `* u8` under `-> string` routes through the
+// from-cstr NUL-scan length recovery — byte-exact since IR text carries
+// no embedded NULs and calloc zero-fills the terminator.
+//
+// Why compiler/src and not runtime/prelude: compiler-src siblings are
+// staged into each other's build context during `sfn build -p compiler`,
+// so main.sfn can import these as ordinary Sailfin functions without a
+// seed-cut. runtime/prelude is NOT staged into main.sfn's build context.
+extern fn calloc(n: usize, sz: usize) -> * u8;
+
+extern fn memcpy(dst: * u8, src: * u8, n: usize) -> * u8;
+
+extern fn free(ptr: * u8) -> void;
+
+// Copy `src` into a fresh zeroed heap buffer that survives an arena rewind.
+fn relocate_string_to_heap(src: string) -> string {
+    let n: i64 = src.length as i64;
+    if n <= 0 { return ""; }
+    let cap: i64 = ((n + 1 + 7) / 8) * 8;
+    let buf: * u8 = calloc(cap as usize, 1 as usize);
+    memcpy(buf, src as * u8, n as usize);
+    return buf;
+}
+
+// Free a heap string allocated by `relocate_string_to_heap`.
+fn free_heap_string(s: string) -> void {
+    let p: * u8 = s as * u8;
+    if (p as i64) != 0 { free(p); }
+}
+
+export { free_heap_string, relocate_string_to_heap };
