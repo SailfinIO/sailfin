@@ -151,16 +151,16 @@ labels:
     description: "Legacy — epics are now Linear Projects; do not apply to new issues"
   - name: tracking
     color: "a371f7"
-    description: "Legacy — trackers are now Linear Projects/Initiatives; do not apply to new issues except the Release: vX.Y.Z cadence tracker"
+    description: "Legacy — trackers are Linear Projects; only for Release: vX.Y.Z cadence tracker"
   - name: seed-blocker
     color: "b60205"
     description: "Must close before the next seed binary is cut"
   - name: needs-seed-cut
     color: "fbca04"
-    description: "Auto-flagged by seed-cut-advisor: a required-in-seed predecessor merged; queued for the next cadence seed bump"
+    description: "Auto-flagged: in-seed predecessor merged; queued for next cadence seed bump"
   - name: release-critical-seed
     color: "b60205"
-    description: "Seed need that breaks the cadence batch: clears the release-critical bar; off-cadence cut may be warranted"
+    description: "Seed need breaking cadence batch; off-cadence cut may be warranted"
   - name: build-quality-regression
     color: "b60205"
     description: "Auto-filed by build-quality.yml on gate failure; dedup anchor"
