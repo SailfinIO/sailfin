@@ -326,9 +326,12 @@ issue belongs to exactly one project.
 When an epic is groomed, `/groom` creates (or reuses) a Linear Project under the
 right initiative following this convention, files the session-sized leaves as
 GitHub issues that mirror into it, and reflects their state per **§ Reflecting
-state into Linear** below. A Linear-sync GitHub Action (using the Actions
-`LINEAR_API_KEY`) can later make the same reflection fire on label changes made
-outside the skills; until then the skills are the reflection path.
+state into Linear** below. The skills are the primary reflection path; the
+`Linear Priority Sync` GitHub Action (`.github/workflows/linear-priority-sync.yml`,
+using the Actions `LINEAR_API_KEY`) is a scheduled safety net that backfills the
+Linear-native **priority and estimate** on mirrors the skills didn't reach —
+notably the CI-auto-filed regression issues, whose mirror is created
+asynchronously after `gh issue create` (see the note in step 3 below).
 
 ## Reflecting state into Linear
 
@@ -378,6 +381,14 @@ on it (the same posture the skills take when `gh` is unavailable).
    `claude-ready` leaf gets both an estimate and a priority; if grooming set no
    explicit priority, default the leaf to its Project's priority. Never leave a
    promoted leaf at `No priority` / no estimate.
+
+   **CI-auto-filed issues** (the `build-quality.yml` / `perf-history.yml`
+   regression filers) can't set these inline — their Linear mirror is created
+   asynchronously by the integration, after `gh issue create` returns. The
+   scheduled `Linear Priority Sync` workflow backfills them: estimate from
+   `size:*`, and priority for the regression classes
+   (`build-quality-regression` → Urgent, `perf-regression` → Medium). It only
+   fills unset values, so an interactively-set priority/estimate always wins.
 4. **Assign the issue to its epic's Project** if it isn't already, resolving the
    Project from the epic (`epic`/parent reference) and creating it per § Linear
    structure & naming when it doesn't exist yet.

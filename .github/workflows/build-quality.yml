@@ -428,8 +428,9 @@ jobs:
   #   1. Open or append a dedup'd regression issue tagged
   #      `area:architecture` and the stable marker
   #      `build-quality-regression` (a build-quality regression is
-  #      inherently release-critical; priority is set on the Linear mirror
-  #      at triage — it is no longer a GitHub label). Title prefix
+  #      inherently release-critical; priority is a Linear-native field, not
+  #      a GitHub label — `linear-priority-sync.yml` backfills the mirror's
+  #      priority to Urgent from this marker). Title prefix
   #      `build-quality regression:` + gate-name suffix lets later runs
   #      append a comment rather than open a duplicate.
   #   2. On `push: main` only, look up the merging PR (`/commits/{sha}/

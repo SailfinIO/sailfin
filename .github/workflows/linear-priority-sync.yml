@@ -1,0 +1,39 @@
+name: Linear Priority Sync
+
+# Backfills Linear-native priority + estimate on the Sailfin team's issue
+# mirrors (scripts/linear-priority-sync.sh; see
+# docs/conventions/issue-naming.md § Reflecting state into Linear). Priority
+# and estimate are Linear-native fields, so the GitHub-side regression filers
+# (build-quality.yml, perf-history.yml) can't set them at create time — the
+# Linear mirror of a new GitHub issue is created asynchronously by the
+# GitHub<->Linear integration. This scheduled sweep fills the gap: it sets an
+# estimate from the `size:*` label, and a priority for the auto-filed
+# regression classes (build-quality -> Urgent, perf -> Medium). It never
+# overrides an already-set value, so grooming/triage stays authoritative.
+#
+# Requires the LINEAR_API_KEY Actions secret (write scope). Without it the
+# script is a no-op.
+
+on:
+  schedule:
+    - cron: "*/30 * * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: linear-priority-sync
+  cancel-in-progress: false
+
+jobs:
+  sync:
+    # Scheduled runs only make sense on the canonical repo, never on forks.
+    if: github.repository == 'SailfinIO/sailfin'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Backfill Linear priority + estimate
+        env:
+          LINEAR_API_KEY: ${{ secrets.LINEAR_API_KEY }}
+        run: bash scripts/linear-priority-sync.sh
