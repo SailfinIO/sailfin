@@ -51,9 +51,8 @@ function mapStatus(type: string | undefined): Status {
   return "planned";
 }
 
-// Records why the Linear fetch fell back, surfaced in the build log and the
-// on-page warning so a failed roadmap load is diagnosable without dashboard
-// access.
+// Records why the Linear fetch fell back, logged to the build output so a
+// failed roadmap load is diagnosable from the Cloudflare build log.
 let loadDiagnostic: string | null = null;
 
 async function fetchInitiatives(): Promise<LinearInitiative[] | null> {
@@ -105,6 +104,9 @@ async function fetchInitiatives(): Promise<LinearInitiative[] | null> {
 
 const initiatives = await fetchInitiatives();
 const apiAvailable = initiatives !== null;
+if (!apiAvailable && loadDiagnostic) {
+  console.warn("[roadmap] Linear fetch failed:", loadDiagnostic);
+}
 
 // Hide initiatives with no projects at all — these contribute no signal.
 const populatedInitiatives = (initiatives ?? []).filter(
@@ -218,7 +220,6 @@ const lastUpdated = new Date().toLocaleDateString("en-US", {
       {!apiAvailable && (
         <div class="api-warning">
           Could not load roadmap data from Linear at build time.
-          {loadDiagnostic && <><br /><small>Diagnostic: {loadDiagnostic}</small></>}
         </div>
       )}
 
