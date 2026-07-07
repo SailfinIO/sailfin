@@ -2,9 +2,13 @@ version: 2
 updates:
   - package-ecosystem: "github-actions"
     directory: "/"
+    labels:
+      - "dependencies"
     schedule:
       interval: "daily"
   - package-ecosystem: "npm"
     directory: "/site"
+    labels:
+      - "dependencies"
     schedule:
       interval: "weekly"

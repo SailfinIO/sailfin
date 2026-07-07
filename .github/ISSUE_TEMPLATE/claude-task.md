@@ -7,7 +7,10 @@ assignees: []
 ---
 
 <!--
-This template defines the contract between issue authors and Claude.
+This template defines the contract between public GitHub issue authors and
+Claude/Codex. Maintainer- or agent-created implementation work should start as
+a Linear `SFN-NNN` issue and use the GitHub issue only as the public mirror when
+needed.
 
 A well-groomed issue is one Claude can complete in a single session and
 produce a mergeable PR. If you can't fill in every section concretely,

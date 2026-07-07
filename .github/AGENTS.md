@@ -14,7 +14,7 @@ reintroduce gh-aw workflow sources without a new design decision.
 For issue execution, use Linear plus the repo-local Codex/Claude workflows:
 
 - groom and prioritize work in Linear;
-- use labels such as `claude-ready`, `needs-grooming`, and `blocked` as human
-  triage hints, not autonomous GitHub workflow triggers;
+- use labels such as `claude-ready`, `needs-grooming`, and `blocked` only as
+  public GitHub fallback triage hints; Linear native status is primary;
 - use the repository prompts and skills under `.codex/` and `.claude/` for
   interactive pickup, implementation, and PR handoff.
