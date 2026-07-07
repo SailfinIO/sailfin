@@ -309,6 +309,31 @@ Notable invariants:
   `in-progress` keeps that status across PR-open → review → merge → close; the
   PR side of GitHub already tracks review state.
 
+## Linear structure & naming
+
+Epic and roadmap-level grouping lives in Linear, in two tiers above the GitHub
+issues. Keep it consistent:
+
+| Tier | Represents | Naming |
+|------|------------|--------|
+| **Initiative** | a pillar or durable workstream | Theme name in Title Case. A small, stable set (e.g. *Capability-Sealed Runtime*, *Structured Concurrency*, *Build & Toolchain*). Rarely added. |
+| **Project** | one epic | The deliverable as a concise Title-Case noun phrase, ≤ ~60 chars. Drop `Epic:` / `Tracking:` prefixes and any trailing `#N` / `SFEP-NNNN`. e.g. `CLI Modularization`, not `Epic: CLI modularization (SFEP-0027)`. |
+| **Issue** | a session-sized leaf | Unchanged — a GitHub issue with a Conventional-Commit title (above), mirrored into Linear. |
+
+**Cross-links go in the project description, not the name.** Each Linear project's
+description carries the traceability the name omits:
+
+- `GitHub: #N` — the epic's GitHub tracking issue, when one exists.
+- `Design: SFEP-NNNN` — the governing proposal, when one exists.
+
+This keeps project names scannable while preserving the link back to the design
+record and the GitHub epic. A project belongs to exactly one initiative; a leaf
+issue belongs to exactly one project.
+
+When an epic is groomed, its Linear Project is created (or reused) under the
+right initiative following this convention, and the session-sized leaves are
+filed as GitHub issues that mirror into it.
+
 ## Release tracking
 
 Milestones group long-lived **themes** (and feed `site/src/pages/roadmap.astro`).
