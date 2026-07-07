@@ -55,12 +55,20 @@ function mapStatus(type: string | undefined): Status {
   return "planned";
 }
 
+// Records why the Linear fetch fell back, surfaced in the build log and the
+// on-page warning so a failed roadmap load is diagnosable without dashboard
+// access.
+let loadDiagnostic: string | null = null;
+
 async function fetchInitiatives(): Promise<LinearInitiative[] | null> {
   // Cloudflare Pages injects build secrets into process.env; Astro/Vite only
   // exposes PUBLIC_-prefixed vars on import.meta.env, so read process.env for
   // this non-public key.
   const apiKey = import.meta.env.LINEAR_API_KEY || process.env.LINEAR_API_KEY;
-  if (!apiKey) return null;
+  if (!apiKey) {
+    loadDiagnostic = "LINEAR_API_KEY not found in the build environment";
+    return null;
+  }
   try {
     const res = await fetch("https://api.linear.app/graphql", {
       method: "POST",
@@ -72,13 +80,25 @@ async function fetchInitiatives(): Promise<LinearInitiative[] | null> {
         query: `query { initiatives(first: 50) { nodes { id name description url projects(first: 100) { nodes { id name url status { type } } } } } }`,
       }),
     });
-    if (!res.ok) throw new Error(`Linear API ${res.status}: ${res.statusText}`);
+    if (!res.ok) {
+      loadDiagnostic = `Linear API returned HTTP ${res.status} ${res.statusText}`;
+      return null;
+    }
     const json = (await res.json()) as LinearInitiativesResponse;
-    if (json.errors) throw new Error("Linear API returned errors");
-    if (!json.data?.initiatives) throw new Error("Linear API response missing initiatives");
+    if (json.errors && json.errors.length > 0) {
+      const msgs = json.errors
+        .map((e) => (e as { message?: string })?.message ?? String(e))
+        .join("; ");
+      loadDiagnostic = `Linear GraphQL error: ${msgs}`;
+      return null;
+    }
+    if (!json.data?.initiatives) {
+      loadDiagnostic = "Linear response contained no initiatives field";
+      return null;
+    }
     return json.data.initiatives.nodes;
   } catch (err) {
-    console.warn("[roadmap] Linear initiative fetch failed:", err);
+    loadDiagnostic = `Linear fetch threw: ${err instanceof Error ? err.message : String(err)}`;
     return null;
   }
 }
@@ -198,6 +218,7 @@ const lastUpdated = new Date().toLocaleDateString("en-US", {
       {!apiAvailable && (
         <div class="api-warning">
           Could not load roadmap data from Linear at build time.
+          {loadDiagnostic && <><br /><small>Diagnostic: {loadDiagnostic}</small></>}
         </div>
       )}
 
