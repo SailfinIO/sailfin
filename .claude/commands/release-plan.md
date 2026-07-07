@@ -324,10 +324,11 @@ write a terminal issue status):
    cycle whose window covers the intended cut (the current cycle, or the next
    when the current is closing). Its `endsAt` is the visible target date.
 2. **Assign the must-close set to that Cycle.** For every open `release:<gate>`
-   issue on the tracker, set its Linear mirror's `cycle` to the target cycle and
-   its `priority` from the issue's `priority:*` label (critical→1/Urgent,
-   high→2, medium→3, low→4). This is what yields the dated, burndown-tracked
-   "what's in vX.Y.Z" view.
+   issue on the tracker, set its Linear mirror's `cycle` to the target cycle.
+   Its `priority` is already a Linear-native field (set at groom/triage) — leave
+   it; only backfill a priority if the mirror is still at `No priority` (default
+   a gating issue to High/2, or Urgent/1 for a correctness regression). This is
+   what yields the dated, burndown-tracked "what's in vX.Y.Z" view.
 3. **Assign the tracking issue** to the same Cycle and set its priority, so the
    coordination issue rides along.
 

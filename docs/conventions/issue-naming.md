@@ -360,12 +360,19 @@ on it (the same posture the skills take when `gh` is unavailable).
    grooming; estimate is derived mechanically from the `size:*` label. Use
    `save_issue` with the numeric `priority` and `estimate`:
 
-   | Size label | Estimate | | Priority tier | `priority` value |
-   |---|---|---|---|---|
-   | `size:xs` | `1` | | Urgent | `1` |
-   | `size:s` | `2` | | High | `2` |
-   | `size:m` | `3` | | Medium | `3` |
-   | (body `## Size`, no label) | map XS/S/M → 1/2/3 | | Low | `4` |
+   | Size label | Estimate |
+   |---|---|
+   | `size:xs` | `1` |
+   | `size:s` | `2` |
+   | `size:m` | `3` |
+   | (body `## Size`, no label) | map XS/S/M → 1/2/3 |
+
+   | Priority tier | `priority` value |
+   |---|---|
+   | Urgent | `1` |
+   | High | `2` |
+   | Medium | `3` |
+   | Low | `4` |
 
    The estimate scale is the Sailfin team's **Linear (1–5)** scale. Every
    `claude-ready` leaf gets both an estimate and a priority; if grooming set no

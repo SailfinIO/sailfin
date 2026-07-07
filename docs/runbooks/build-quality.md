@@ -102,8 +102,6 @@ Once the offending commit is identified, file a fix issue with these
 labels:
 
 - `type:bug`
-- Set the Linear-native priority to **Urgent** on the mirror (priority is no
-  longer a GitHub label).
 - `area:compiler` (for emit-pipeline / lowering regressions),
   `area:build` (for cache-key drift), or `area:runtime` (rare —
   runtime-shape changes that perturb emitted IR).
@@ -111,6 +109,9 @@ labels:
   `/release` to refuse to cut anything beyond an alpha prerelease
   until the issue closes (see `docs/conventions/issue-naming.md` →
   "Release tracking" + "Seed pinning").
+
+Then set the fix issue's **Linear-native priority to Urgent** on its mirror
+(priority is a Linear field, not a GitHub label).
 
 The fix issue's body should `Closes` the regression issue
 (`build-quality regression: <gate>`) so the dedup anchor closes
