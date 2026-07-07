@@ -39,7 +39,11 @@ fn _bool_to_string(value: boolean) -> string {
 }
 
 fn _abs(x: float) -> float {
-    if x < 0 { return 0 - x; }
+    // `x` is a float, so the negation must use a float literal: a bare `0`
+    // is an int literal, and Sailfin rejects int/float mixing in arithmetic
+    // (strict scalar coercion, spec §06-types). Write `0.0` so the operand
+    // kinds match (issue #1954).
+    if x < 0.0 { return 0.0 - x; }
     return x;
 }
 
