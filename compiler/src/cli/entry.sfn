@@ -1,9 +1,9 @@
-// compiler/src/cli_main.sfn
+// compiler/src/cli/entry.sfn
 //
 // Sailfin-native CLI entrypoint invoked by the native C shim.
 import { bold } from "sfn/cli";
 
-import { sailfin_cli_main_v2 } from "./cli/main";
+import { sailfin_cli_main_v2, sailfin_cli_main_with_paths } from "./main";
 
 // M5.5 (#473) entry-point dependencies. `fn main` below resolves the
 // running binary's path and the runtime bundle root directly via the
@@ -68,74 +68,6 @@ extern fn sfn_arena_telemetry_dump(label: * u8);
 // Advisory: a non-zero return never blocks the build. Pinned by
 // `compiler/tests/e2e/test_mem_limit_selfcap.sh`.
 extern fn apply_default_mem_limit() -> i32;
-
-fn _usage() -> string {
-    let mut out: string = "usage: sfn <command> [options]\n";
-    out = out + "\n";
-    out = out + "build & run:\n";
-    out = out
-        + "  sfn build [-o OUTPUT] [--no-cache] [--clean] [--cache-trace] [--json] [--work-dir DIR] [--check-determinism] (<file.sfn> | -p <capsule-path>)\n";
-    out = out
-        + "  sfn run   [--no-cache] [--clean] [--cache-trace] (<file.sfn> | <exe>)\n";
-    out = out
-        + "  sfn emit  [--timing] [-o OUTPUT] [--module-name SLUG] [--import-context DIR] llvm|sailfin|native <file.sfn>\n";
-    out = out
-        + "  sfn cache <info|prune|clean> [--max-size N] [--max-age N] [--all-schemas]\n";
-    out = out + "\n";
-    out = out + "project:\n";
-    out = out + "  sfn init\n";
-    out = out + "  sfn check [--quiet] [path...]\n";
-    out = out + "  sfn fmt   [--check] [--write] <path...>\n";
-    out = out + "  sfn test  [--update-snapshots] [--jobs N] [path...]\n";
-    out = out + "\n";
-    out = out + "packages:\n";
-    out = out + "  sfn add     [--dev] [--update] <capsule>\n";
-    out = out + "  sfn lock    [--work-dir DIR]\n";
-    out = out + "  sfn publish [path]\n";
-    out = out
-        + "  sfn package [--target T] [--out DIR] [--compiler-bin PATH] [--installer] [-p <capsule-path>]\n";
-    out = out + "  sfn login   [token]\n";
-    out = out + "  sfn config  <get|set|unset|list> [key] [value]\n";
-    out = out + "\n";
-    out = out + "meta:\n";
-    out = out + "  sfn version\n";
-    out = out + "  sfn --version\n";
-    out = out + "\n";
-    out = out + "examples:\n";
-    out = out + "  sfn run examples/basics/hello-world.sfn\n";
-    out = out
-        + "  sfn build -o build/native/examples/hello examples/basics/hello-world.sfn\n";
-    out = out + "  sfn add acme/router\n";
-    out = out + "  sfn config set registry https://registry.acme.internal\n";
-    return out;
-}
-
-// Direct-params facade over `sailfin_cli_main_v2` (M5.3 / #471). This
-// is the route from the synthesized `@main(argc, argv)` prologue
-// (`fn main` below) into the CLI dispatch: `runtime_root` and
-// `binary_dir` are resolved as Sailfin strings via
-// `runtime/sfn/platform/exec.sfn`, then re-encoded as the
-// `--runtime-root` / `--binary-dir` driver prefix that
-// `cli/context.sfn::parse_driver_prefix` consumes — the shape the
-// retired C driver injected as argv flags.
-fn sailfin_cli_main_with_paths(argv: string[], runtime_root: string, binary_dir: string) -> int ![io, clock] {
-    let mut composed: string[] = [];
-    if runtime_root.length > 0 {
-        composed.push("--runtime-root");
-        composed.push(runtime_root);
-    }
-    if binary_dir.length > 0 {
-        composed.push("--binary-dir");
-        composed.push(binary_dir);
-    }
-    let mut i: int = 0;
-    loop {
-        if i >= argv.length { break; }
-        composed.push(argv[i]);
-        i += 1;
-    }
-    return sailfin_cli_main_v2(composed);
-}
 
 // Exported entrypoint for the native argv shim (legacy C-ABI
 // boundary). With the C driver retired in M5.5 (#473) it has no
@@ -317,4 +249,4 @@ fn main(argv: string[]) -> int ![io, clock] {
     // returns its exit code up through here rather than calling `exit()`.
     sfn_arena_telemetry_dump(label as * u8);
     return exit_code;
-}  // `cli_main` is the `@main` entrypoint root and imports  // `sailfin_cli_main_v2` from `cli/main.sfn`, which in turn imports  // `_usage` / `sailfin_cli_main_with_paths` back from here — a  // two-function mutual import between exactly these two modules. Sailfin  // resolves function/struct-level import cycles (e.g. parser  // `statements` <-> `declarations`), so this edge is safe.
+}

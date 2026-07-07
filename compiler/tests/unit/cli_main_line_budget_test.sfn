@@ -1,19 +1,21 @@
-// Line-budget sentinel for `compiler/src/cli_main.sfn` — the cheap
+// Line-budget sentinel for `compiler/src/cli/entry.sfn` — the cheap
 // regression guard for SFEP-0027's per-worker RSS lever.
 //
-// Phase A carved the build-driver orchestration out of `cli_main.sfn`
+// Phase A carved the build-driver orchestration out of `cli/entry.sfn`
 // into `compiler/src/build/{runtime_objs,link,determinism,cache}.sfn`
 // (#1730–#1733); Phase B migrated the 7 remaining commands into
 // `cli/commands/`; Phase C (#1797) deleted the residual
 // `sailfin_cli_main_legacy` shim, folding its help / `selfhost` /
 // bare-file / unknown-command paths into `cli/main.sfn`. That took
-// `cli_main.sfn` from 3,067 lines to ~324 — the entry shims plus
-// `_usage` — and dropped its isolated per-module emit peak RSS far below
+// the residual entry module from 3,067 lines to ~324, and #1967
+// then moved `_usage` / `sailfin_cli_main_with_paths` next to the
+// command tree, leaving `cli/entry.sfn` as the entry shim only. This
+// dropped its isolated per-module emit peak RSS far below
 // the pre-Phase-A ~2,415 MB (docs/proposals/0006-build-architecture.md,
 // "post-Phase-A CLI deltas").
 //
 // Because per-module working set is what bounds parallel `--jobs`
-// (SFEP-0027 §2.1), `cli_main.sfn` must not silently re-balloon back
+// (SFEP-0027 §2.1), `cli/entry.sfn` must not silently re-balloon back
 // toward the pre-Phase-A monolith. This sentinel fails the build if the
 // module regrows past a budget with modest headroom over its current
 // entry-shim size.
@@ -22,13 +24,14 @@
 // Phase C (#1797) went further — it deleted `sailfin_cli_main_legacy`
 // (folded into `cli/main.sfn`) and slimmed the module to the entry shims
 // (`main`, `native_cli_main`, `sailfin_cli_main_with_paths`,
-// `_arena_telemetry_*`) plus `_usage`, landing at ~324 lines. The budget
-// is tightened to 600 — comfortable headroom for routine maintenance,
+// `_arena_telemetry_*`) plus `_usage`, landing at ~324 lines. #1967
+// moved usage and the driver-prefix facade into `cli/main.sfn`, so the
+// budget stays at 600 — comfortable headroom for routine maintenance,
 // tight enough to flag any dispatch/build-driver code creeping back into
 // what is now a pure entry-shim module.
 import { find_char_local } from "../../src/string_utils";
 
-let CLI_MAIN_LINE_BUDGET: int = 600;
+let CLI_ENTRY_LINE_BUDGET: int = 600;
 
 // Count newlines, matching `wc -l` semantics (a trailing newline is not
 // double-counted). Cheap single linear scan via `find_char_local`.
@@ -44,11 +47,11 @@ fn _count_newlines(source: string) -> int {
     return count;
 }
 
-test "cli_main.sfn stays under the SFEP-0027 entry-shim line budget" ![io] {
-    let source = fs.readFile("compiler/src/cli_main.sfn");
+test "cli/entry.sfn stays under the SFEP-0027 entry-shim line budget" ![io] {
+    let source = fs.readFile("compiler/src/cli/entry.sfn");
     let lines = _count_newlines(source);
     // A non-empty read is a precondition — guards against a path typo
     // silently passing the budget check on an empty string.
     assert lines > 0;
-    assert lines < CLI_MAIN_LINE_BUDGET;
+    assert lines < CLI_ENTRY_LINE_BUDGET;
 }

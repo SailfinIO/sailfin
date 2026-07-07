@@ -294,20 +294,15 @@ than left as silent residue. Both are pure structural refactors, self-hosting-
 safe with no seed cut (§5 applies verbatim); the epic's Implemented status does
 **not** depend on them.
 
-- **Entry shim stays at the src root (#1967).** §3.5 kept `cli_main.sfn` as a
-  root-level module holding the `@main` C-ABI entrypoint, the platform `extern`
-  decls, arena telemetry, the memory-budget call, `_usage`, and the
-  `sailfin_cli_main_with_paths` facade. That home is defensible — it is the
-  compiler binary's OS entry boundary, a peer of `compiler/src/main.sfn` (the
-  pipeline-orchestrator module `capsule.toml` names as `entry`). But it leaves a
-  **two-function mutual import** between `cli_main.sfn` (imports
-  `sailfin_cli_main_v2`) and `cli/main.sfn` (imports `_usage` +
-  `sailfin_cli_main_with_paths` back), which is an artifact of the split rather
-  than a design goal, and it puts pure CLI presentation (`_usage`) on the ABI
-  boundary. #1967 folds the entry shim into `cli/` (a new `cli/entry.sfn` or
-  `cli/main.sfn` itself) and moves `_usage` next to the command tree, dissolving
-  the cycle. The only hard constraint is that `fn main` / `native_cli_main` must
-  remain unmangled ABI carve-outs the emitter's entry detection still finds.
+- **Entry shim now lives under `cli/` (#1967).** §3.5 originally kept
+  `cli_main.sfn` as a root-level module holding the `@main` C-ABI entrypoint,
+  platform `extern` decls, arena telemetry, the memory-budget call, `_usage`,
+  and the `sailfin_cli_main_with_paths` facade. #1967 folds the ABI boundary
+  into `compiler/src/cli/entry.sfn` and moves `_usage` plus the driver-prefix
+  facade into `cli/main.sfn`, next to the command tree. The dependency is now
+  one-way: `cli/entry.sfn` imports the command router and the router no longer
+  imports a root `cli_main` module, while `fn main` / `native_cli_main` remain
+  the unmangled ABI carve-outs the emitter's entry detection finds.
 
 - **`cli_check.sfn` stays at the src root (#1968).** §3.5 explicitly ruled the
   `check` engine out of scope ("stays; `check` reuses it verbatim") so the
