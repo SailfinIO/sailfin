@@ -31,7 +31,7 @@ which can duplicate hook execution and produce startup warnings.
 
 ## Web setup
 
-Codex web should be given the same repository context plus one of the prompts in `prompts/`. For the closest equivalent to Claude's `/pickup`, paste `prompts/pickup.md` and optionally append an issue number. For SFEP lifecycle work, paste `prompts/sfep.md` with the desired mode.
+Codex web should be given the same repository context plus one of the prompts in `prompts/`. For the closest equivalent to Claude's `/pickup`, paste `prompts/pickup.md` and optionally append a Linear identifier such as `SFN-123` or a GitHub issue number. For SFEP lifecycle work, paste `prompts/sfep.md` with the desired mode.
 
 ## Safety behavior
 
@@ -55,9 +55,10 @@ The remaining guardrail is time, not caller memory: wrap direct single-file comp
 
 Use `prompts/pickup.md` for autonomous issue work. It instructs Codex to:
 
-1. Query `claude-ready` issues and rank them with the same priority order as Claude's `/pickup` command.
+1. Query Linear `Ready` issues first, falling back to GitHub `claude-ready` labels only when Linear is unavailable, and rank them with the same priority order as Claude's `/pickup` command.
 2. Verify pinned-seed freshness only when a compiler-source capability must already be present in the pinned seed.
-3. Claim the issue, sync the project board with the existing repository helper, and branch as `codex/<issue>-<slug>`.
-4. Implement, verify, commit, and open a PR with `Closes #<issue>`.
+3. Claim the Linear issue, best-effort sync any GitHub mirror, and branch as `codex/SFN-123-<slug>` for Linear pickup.
+4. File out-of-scope bugs or obvious gaps as Sailfin Linear follow-ups using the templates in `docs/conventions/linear-templates.md`.
+5. Implement, verify, commit, and open a PR with the Linear issue link plus `Closes #<issue>` when a GitHub mirror exists.
 
 The GitHub/project scripts remain in `.claude/scripts/` for now because they are repository automation rather than Claude-only logic.

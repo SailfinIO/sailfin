@@ -28,7 +28,9 @@
 # for naming conventions and the lifecycle diagram.
 
 labels:
-  # --- Issue lifecycle (state machine) ---------------------------------
+  # --- Public issue triage hints ---------------------------------------
+  # Linear owns maintainer workflow state natively. These labels remain only
+  # for public GitHub issues, mirrors, and GitHub-only fallback flows.
   - name: needs-grooming
     color: "fbca04"
     description: "Placeholder issue: scope, criteria, or files-affected still missing"
@@ -38,18 +40,15 @@ labels:
   - name: needs-discussion
     color: "d93f0b"
     description: "Design blocked pending human input"
-  - name: design-approved
-    color: "0e8a16"
-    description: "Legacy approval marker; prefer claude-ready for current pickup"
   - name: claude-ready
     color: "0e8a16"
-    description: "Fully groomed and unblocked; eligible for /pickup"
+    description: "GitHub fallback: fully groomed and eligible for /pickup"
   - name: in-progress
     color: "1d76db"
-    description: "Currently being worked; do not pick up"
+    description: "GitHub fallback: currently being worked; do not pick up"
   - name: blocked
     color: "b60205"
-    description: "Has open dependencies; recheck after blocker closes"
+    description: "GitHub fallback: has open dependencies"
 
   # --- PR lifecycle ----------------------------------------------------
   - name: needs-review
@@ -67,17 +66,6 @@ labels:
   - name: security
     color: "d93f0b"
     description: "Security-relevant issue or PR; requires Security review"
-
-  # --- Focus (planner cycle) -------------------------------------------
-  - name: focus:proposed
-    color: "a371f7"
-    description: "Legacy weekly focus issue awaiting human approval"
-  - name: focus:approved
-    color: "0e8a16"
-    description: "Legacy weekly focus is live; prefer Linear planning state"
-  - name: focus:stale
-    color: "cccccc"
-    description: "Superseded legacy focus issue"
 
   # --- Type taxonomy (mirror Conventional Commit prefixes) -------------
   - name: type:feature
@@ -114,7 +102,7 @@ labels:
   # Priority is a Linear-native field, not a GitHub label. Set it in Linear
   # at groom/triage time (Urgent/High/Medium/Low). The former `priority:*`
   # labels are retired via the `delete:` list below. See
-  # docs/conventions/issue-naming.md § Reflecting state into Linear.
+  # docs/conventions/issue-naming.md § Reflecting state across Linear and GitHub.
 
   # --- Area (subsystem) ------------------------------------------------
   - name: area:compiler
@@ -144,11 +132,11 @@ labels:
   - name: area:dx
     color: "c5def5"
     description: "Diagnostics, error messages, ergonomics, tooling UX"
+  - name: area:capsules
+    color: "c5def5"
+    description: "capsules/* — standard library and package capsule surfaces"
 
   # --- Special markers -------------------------------------------------
-  - name: epic
-    color: "d4c5f9"
-    description: "Legacy — epics are now Linear Projects; do not apply to new issues"
   - name: tracking
     color: "a371f7"
     description: "Legacy — trackers are Linear Projects; only for Release: vX.Y.Z cadence tracker"
@@ -240,6 +228,18 @@ aliases:
     to: area:architecture
   - from: agentic-workflows
     to: area:agents
+  - from: "area:fmt"
+    to: "area:dx"
+  - from: "area:formatter"
+    to: "area:dx"
+  - from: "area:perf"
+    to: "area:build"
+  - from: "type:chore"
+    to: "type:tech-debt"
+  - from: "type:enhancement"
+    to: "type:feature"
+  - from: "type:test"
+    to: "type:tech-debt"
 
 # Labels to delete outright (no canonical replacement).
 delete:
@@ -253,3 +253,37 @@ delete:
     reason: "Priority is now a Linear-native field, not a GitHub label"
   - name: priority:low
     reason: "Priority is now a Linear-native field, not a GitHub label"
+  - name: "priority: critical"
+    reason: "Priority is now a Linear-native field, not a GitHub label"
+  - name: design-approved
+    reason: "Retired GitHub agentic approval marker; Linear Ready status is canonical"
+  - name: focus:proposed
+    reason: "Retired weekly-focus planner marker; Linear planning state replaced it"
+  - name: focus:approved
+    reason: "Retired weekly-focus planner marker; Linear planning state replaced it"
+  - name: focus:stale
+    reason: "Retired weekly-focus planner marker; Linear planning state replaced it"
+  - name: epic
+    reason: "Epics are Linear Projects; historical GitHub epic issues were migrated"
+  - name: size:l
+    reason: "L work must be broken down; size is Linear estimate plus XS/S/M only"
+  - name: large
+    reason: "Old T-shirt size label; use size:m or split the issue"
+  - name: small
+    reason: "Old T-shirt size label; use size:s"
+  - name: xtra large
+    reason: "Old T-shirt size label; split the issue"
+  - name: workstream
+    reason: "Workstreams are Linear Initiatives/Projects, not labels"
+  - name: codex
+    reason: "Assistant authorship is tracked by PR body/author; agent-authored is the canonical label"
+  - name: claude-ready-remove
+    reason: "Temporary migration helper; no canonical use"
+  - name: released on @beta
+    reason: "Old release automation label; release tracking uses release:* labels"
+  - name: github_actions
+    reason: "Dependabot ecosystem label; dependabot.yml now uses only dependencies"
+  - name: javascript
+    reason: "Dependabot ecosystem label; dependabot.yml now uses only dependencies"
+  - name: python
+    reason: "Dependabot ecosystem label; dependabot.yml now uses only dependencies"

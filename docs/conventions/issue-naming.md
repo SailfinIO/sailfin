@@ -7,11 +7,13 @@ to follow it.
 
 The label registry lives in `.github/labels.yml` and is auto-synced to GitHub
 by the `Sync Labels` workflow on every push to `main`. Maintainers can also
-run `scripts/setup-github-labels.sh` manually.
+run `scripts/setup-github-labels.sh` manually. Linear labels are intentionally
+smaller: use native Linear fields for status, priority, estimate, Project,
+Cycle, blockers, and assignee.
 
 ---
 
-## Lifecycle (issue state machine)
+## Lifecycle (Linear state machine; GitHub fallback labels mirror names)
 
 ```
                                        ┌────────────────┐
@@ -30,17 +32,12 @@ run `scripts/setup-github-labels.sh` manually.
                               │                 │
                               │                 ▼
                               │        ┌────────────────┐
-                              │        │ design-approved│  ── architect gate
+                              │        │     Ready      │  ── eligible for /pickup
                               │        └────────┬───────┘
                               │                 │
                               │                 ▼
                               │        ┌────────────────┐
-                              │        │  claude-ready  │  ── eligible for /pickup
-                              │        └────────┬───────┘
-                              │                 │
-                              │                 ▼
-                              │        ┌────────────────┐
-                              │        │   in-progress  │
+                              │        │  In Progress   │
                               │        └────────┬───────┘
                               │                 │
                               │                 ▼
@@ -51,7 +48,7 @@ run `scripts/setup-github-labels.sh` manually.
                               │        │  Closes #N)    │
                               │        └────────────────┘
                               │
-                  ── if blocker found anywhere above ──► `blocked`
+                  ── if blocker found anywhere above ──► Blocked
 ```
 
 ## PR lifecycle
@@ -130,10 +127,9 @@ See § *Linear structure & naming* below and the playbook in
 `SFEP-NNNN`, and put `GitHub: #N` + `Design: SFEP-NNNN` in the Project
 **description**.
 
-Do **not** open a new `Epic:` GitHub issue and do **not** apply the `epic`
-label to new work. The label persists only on the historical epics that were
-closed during the 2026-07-07 Linear migration; `/groom` creates a Project and
-files only session-sized leaves.
+Do **not** open a new `Epic:` GitHub issue. The legacy `epic` label is retired
+and deleted by `.github/labels.yml`; `/groom` creates a Linear Project and files
+only session-sized leaves.
 
 ### 3. Tracking issue — **retired; the Project (or Initiative) is the tracker**
 
@@ -170,10 +166,10 @@ four human-authored shapes. Do not create new `[aw]` issues manually.
 | Rule | Why |
 |------|-----|
 | Every active issue carries exactly one `type:*` label | `/pickup` routes by it |
-| Every `claude-ready` issue carries exactly one `size:*` label | `/pickup` and `/sweep` rank by it |
-| **Priority is a Linear-native field, not a GitHub label.** Set it in Linear (Urgent/High/Medium/Low) at groom/triage time; the `priority:*` labels are retired (see § *Reflecting state into Linear*) | One source of truth; Linear's board sorts on the native field |
+| Every GitHub `claude-ready` fallback issue carries exactly one `size:*` label | GitHub-only `/pickup` fallback ranks by it |
+| **Priority is a Linear-native field, not a GitHub label.** Set it in Linear (Urgent/High/Medium/Low) at groom/triage time; the `priority:*` labels are retired (see § *Reflecting state across Linear and GitHub*) | One source of truth; Linear's board sorts on the native field |
 | Apply `area:*` labels when the touched subsystem is unambiguous | Helps `/sweep` dedupe collisions |
-| `epic` / `tracking` are **legacy** — do not apply to new issues (sole exception: `tracking` on the `Release: vX.Y.Z` cadence tracker, see § *Release tracking*) | Epics are Linear Projects, trackers are Projects/Initiatives (see `linear-workflow.md`) |
+| `tracking` is **legacy** outside release automation — do not apply to new issues except the `Release: vX.Y.Z` cadence tracker (see § *Release tracking*) | Epics are Linear Projects; release automation still queries `tracking` |
 | Never re-introduce a bare alias (`bug`, `runtime`, `medium`, …) | They are listed in `aliases:` of `labels.yml` and will be migrated away on the next sync |
 | Never invent a new label in a workflow or slash command | Add it to `labels.yml` in a separate PR first |
 
@@ -185,9 +181,7 @@ historical issue interpretation:
 
 | Label | Gate |
 |-------|------|
-| `focus:approved` | Legacy focus marker; prefer Linear planning state for new work |
 | `needs-design` | Human/agent hint that an issue needs design grooming |
-| `design-approved` | Historical approval marker; `claude-ready` is the current pickup-ready signal |
 | `type:bug` | Bug classification |
 | `agent-authored` | PR originated from an autonomous or assistant-driven workflow |
 | `needs-changes` | PR needs author rework before merge |
@@ -263,39 +257,45 @@ required, that is real growth — pause for human input.
 
 ## Issue tracking
 
-**Labels are the source of truth for issue state.** The former GitHub Project board
-(*Sailfin Tracker*, org project #4) and its label→board sync workflow have been
-**retired**. Lifecycle state lives entirely in GitHub labels; the `size:*` label
-carries size (and drives the derived Linear estimate), and the GitHub native
-parent/child relationship carries sub-issue nesting. **Priority and estimate are
-Linear-native fields** — set them on the Linear mirror at groom/triage time (see
-§ *Reflecting state into Linear*); there is no `priority:*` GitHub label. Epic and roadmap-level grouping now lives
-in **Linear** — Linear Projects correspond to epics, while session-sized leaf
-work stays as GitHub issues mirrored into Linear by the GitHub↔Linear integration.
+**Linear is the maintainer planning source of truth for issue state.** The
+former GitHub Project board (*Sailfin Tracker*, org project #4) and its
+label→board sync workflow have been **retired**. Lifecycle status, priority,
+estimate, assignee, and Project membership live on the Linear issue. GitHub
+issues remain the public open-source surface and compatibility mirror; their
+labels use the same canonical taxonomy so release automation, public triage,
+and GitHub-only fallbacks keep working.
+
+On GitHub fallback issues, the `size:*` label carries size and drives the
+Linear estimate. **Priority and estimate are Linear-native fields** — set them
+in Linear at groom/triage time
+(see § *Reflecting state across Linear and GitHub*); there is no `priority:*`
+GitHub label. Epic and roadmap-level grouping lives in **Linear** — Linear
+Projects correspond to epics, while session-sized leaf work is a Linear issue
+with a GitHub public mirror when needed.
 
 ### Status semantics
 
-A single status is derived from issue state plus labels, first match wins. This
-precedence is the convention `/triage` and `/sweep` apply. The GitHub↔Linear
-integration mirrors the **labels** themselves into Linear; a Linear issue's
-board status is owned natively in Linear and was seeded from this same
-precedence — Linear does not continuously recompute status from the labels.
+A single status is selected from issue state plus labels, first match wins. This
+precedence is the convention `/triage`, `/sweep`, and `/pickup` apply when they
+need to reconcile a GitHub mirror or an older migrated issue. Linear status is
+owned natively in Linear; labels are compatibility hints, not a replacement for
+the Linear status field.
 
 | Signal | Status |
 |--------|--------|
 | Issue closed (or PR merged for linked PRs) | `Done` |
-| `in-progress` label | `In progress` |
+| `in-progress` label | `In Progress` |
 | `blocked` label | `Blocked` |
 | `claude-ready` label (no blocker) | `Ready` |
-| `needs-grooming` / `needs-design` / `design-approved` | `Backlog` |
-| No status-bearing label | `To triage` (implicit default) |
+| `needs-grooming` / `needs-design` | `Backlog` |
+| No status-bearing label | `To triage` or Linear `Triage`, depending on origin |
 
 Notable invariants:
 
-- **`To triage` is not a label.** It is the implicit default for an issue that
-  carries no status-bearing label (`in-progress` / `blocked` / `claude-ready` /
-  `needs-grooming` / `needs-design` / `design-approved`) — not a value written
-  anywhere on the issue.
+- **`To triage` is not a label.** It is the implicit default for a GitHub issue
+  that carries no status-bearing label (`in-progress` / `blocked` /
+  `claude-ready` / `needs-grooming` / `needs-design`) and
+  the explicit triage queue state for new Linear/GitHub integration intake.
 - **`blocked` beats `claude-ready`.** A blocked-but-groomed issue reads as
   `Blocked`, not `Ready`, so the ready set is always pickable.
 - **`In review` is intentionally not derived** for issues. An issue with
@@ -311,7 +311,7 @@ issues. Keep it consistent:
 |------|------------|--------|
 | **Initiative** | a pillar or durable workstream | Theme name in Title Case. A small, stable set (e.g. *Capability-Sealed Runtime*, *Structured Concurrency*, *Build & Toolchain*). Rarely added. |
 | **Project** | one epic | The deliverable as a concise Title-Case noun phrase, ≤ ~60 chars. Drop `Epic:` / `Tracking:` prefixes and any trailing `#N` / `SFEP-NNNN`. e.g. `CLI Modularization`, not `Epic: CLI modularization (SFEP-0027)`. |
-| **Issue** | a session-sized leaf | Unchanged — a GitHub issue with a Conventional-Commit title (above), mirrored into Linear. |
+| **Issue** | a session-sized leaf | A Linear `SFN-NNN` issue with a Conventional-Commit title (above), mirrored to GitHub when public tracking is needed; external GitHub issues mirror into Linear triage. |
 
 **Cross-links go in the project description, not the name.** Each Linear project's
 description carries the traceability the name omits:
@@ -325,43 +325,49 @@ issue belongs to exactly one project.
 
 When an epic is groomed, `/groom` creates (or reuses) a Linear Project under the
 right initiative following this convention, files the session-sized leaves as
-GitHub issues that mirror into it, and reflects their state per **§ Reflecting
-state into Linear** below. The skills are the primary reflection path; the
+Linear issues, and attaches or creates GitHub public mirrors when needed. The
+skills are the primary reflection path; the
 `Linear Priority Sync` GitHub Action (`.github/workflows/linear-priority-sync.yml`,
 using the Actions `LINEAR_API_KEY`) is a scheduled safety net that backfills the
 Linear-native **priority and estimate** on mirrors the skills didn't reach —
 notably the CI-auto-filed regression issues, whose mirror is created
 asynchronously after `gh issue create` (see the note in step 3 below).
 
-## Reflecting state into Linear
+## Reflecting state across Linear and GitHub
 
-Linear mirrors GitHub issues (via the GitHub↔Linear integration) and holds the
-epic/roadmap grouping (Linear Projects = epics). GitHub labels stay the **source
-of truth**; Linear status and project membership are **derived from them, one
-direction only** — never read Linear state back onto a GitHub issue.
+Linear holds maintainer planning state and epic/roadmap grouping (Linear
+Projects = epics). GitHub issues remain the public mirror and the close target
+for PRs that should use `Closes #N`.
 
-When a workflow (`/groom`, `/triage`, `/sweep`) creates an issue or flips a
-status-bearing label, it reflects the change into Linear with the Linear MCP
-tools (`list_issues`, `save_issue`, `list_projects`, `save_project`). This is
-**best-effort**: if the Linear MCP tools are not connected in the session, skip
-the reflection with a one-line note — never fail or block the GitHub-side work
-on it (the same posture the skills take when `gh` is unavailable).
+When a workflow (`/groom`, `/triage`, `/sweep`, `/pickup`) creates or claims
+work, it should update Linear first with the Linear MCP tools (`list_issues`,
+`save_issue`, `list_projects`, `save_project`). If a GitHub mirror exists, it
+also updates the mirror labels best-effort. If the Linear MCP tools are not
+connected in the session, fall back to GitHub and leave a one-line note; if
+GitHub is unavailable but Linear is available, continue with Linear and link the
+Linear issue in the PR.
 
-1. **Find the mirror.** A GitHub issue's Linear mirror is located with
+1. **Find or create the work item.** Maintainer/agent-created work starts as a
+   Linear issue under the Sailfin (`SFN`) team and uses native status, priority,
+   estimate, Project, Cycle, blocker, and assignee fields. The GitHub
+   integration creates or attaches a public mirror when needed. External
+   contributor issues start in GitHub and mirror into Linear triage.
+2. **Find the mirror.** A GitHub issue's Linear mirror is located with
    `list_issues` querying the issue's number or URL (the integration records the
    GitHub link on the mirror). A newly-created issue mirrors in
    **asynchronously** — allow a brief lag and retry a few times; if the mirror
    still isn't present, record it and let the next `/triage`/`/sweep` pass
    reconcile it. Never block on it.
-2. **Set issue status from labels** using the § Status semantics precedence
-   (first match wins). **Never** write `Done`, `Canceled`, or any terminal
-   status onto a mirror whose GitHub issue is still open — the two-way sync would
-   close the GitHub issue. Only the non-terminal statuses (In Progress, Blocked,
-   Ready, To triage, Backlog, Todo) are ever written.
-3. **Set priority and estimate on the mirror** (Linear-native fields — there is
-   no GitHub label for either). Priority is a judgement call carried from
-   grooming; estimate is derived mechanically from the `size:*` label. Use
-   `save_issue` with the numeric `priority` and `estimate`:
+3. **Set Linear issue status from the intended workflow state** using the
+   § Status semantics precedence when reconciling GitHub labels. **Never** write
+   `Done`, `Canceled`, or any terminal status onto a mirror whose GitHub issue
+   is still open — the two-way sync would close the GitHub issue. Only the
+   non-terminal statuses (In Progress, Blocked, Ready, To triage, Backlog, Todo)
+   are ever written by agent workflows.
+4. **Set priority and estimate in Linear** (Linear-native fields — there is no
+   GitHub label for either). Priority is a judgement call carried from grooming;
+   estimate is derived mechanically from the `size:*` label. Use `save_issue`
+   with the numeric `priority` and `estimate`:
 
    | Size label | Estimate |
    |---|---|
@@ -378,7 +384,7 @@ on it (the same posture the skills take when `gh` is unavailable).
    | Low | `4` |
 
    The estimate scale is the Sailfin team's **Linear (1–5)** scale. Every
-   `claude-ready` leaf gets both an estimate and a priority; if grooming set no
+   Linear `Ready` leaf gets both an estimate and a priority; if grooming set no
    explicit priority, default the leaf to its Project's priority. Never leave a
    promoted leaf at `No priority` / no estimate.
 
@@ -389,10 +395,10 @@ on it (the same posture the skills take when `gh` is unavailable).
    `size:*`, and priority for the regression classes
    (`build-quality-regression` → Urgent, `perf-regression` → Medium). It only
    fills unset values, so an interactively-set priority/estimate always wins.
-4. **Assign the issue to its epic's Project** if it isn't already, resolving the
-   Project from the epic (`epic`/parent reference) and creating it per § Linear
+5. **Assign the issue to its epic's Project** if it isn't already, resolving the
+   Project from the Linear Project or parent reference and creating it per § Linear
    structure & naming when it doesn't exist yet.
-5. **Roll up the Project status** from its issues: any issue In Progress →
+6. **Roll up the Project status** from its issues: any issue In Progress →
    Project `started`; else any Ready → `planned`; else `backlog`. Never
    `completed`/`canceled` from a workflow.
 
@@ -643,9 +649,9 @@ workflow that reads `.seed-version`.
 
 ## Milestones
 
-Milestones are phase markers, not calendar deadlines. Every `epic` issue
-should carry exactly one milestone; sub-task issues inherit the milestone
-of their parent epic via the GitHub parent/child link.
+Milestones are phase markers, not calendar deadlines. Epics are Linear Projects;
+session-sized issues inherit the relevant milestone from their Project or parent
+context.
 
 | Milestone | Track IDs | Captures |
 |-----------|-----------|----------|

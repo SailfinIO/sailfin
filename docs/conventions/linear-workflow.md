@@ -3,11 +3,15 @@
 This is the human-facing playbook for how work is organised across **Linear**
 and **GitHub Issues**. It is the front door; the dense, agent-facing mechanics
 live in [`issue-naming.md`](./issue-naming.md) (§ *Linear structure & naming*,
-§ *Reflecting state into Linear*, § *Release tracking*) and this file links to
+§ *Reflecting state across Linear and GitHub*, § *Release tracking*) and this file links to
 them rather than restating them.
 
 If you only remember one thing: **an epic is a Linear Project, not a GitHub
-issue.** GitHub issues are session-sized leaf work — nothing bigger.
+issue.** Issues are session-sized leaf work — nothing bigger.
+
+Repo-side Linear issue, Project, and document templates live in
+[`linear-templates.md`](./linear-templates.md). Use those templates when Linear's
+native template slots are empty or unavailable to an agent.
 
 ---
 
@@ -16,7 +20,7 @@ issue.** GitHub issues are session-sized leaf work — nothing bigger.
 ```
 Initiative        a pillar / durable theme          (Linear)      ~6, rarely added
    └─ Project     one epic                           (Linear)      the roadmap unit
-        └─ Issue  one session-sized piece of work    (GitHub → mirrored to Linear)
+        └─ Issue  one session-sized piece of work    (Linear ↔ GitHub public mirror)
              └─ (sub-issue)  a split of one leaf, optional
 ```
 
@@ -24,7 +28,7 @@ Initiative        a pillar / durable theme          (Linear)      ~6, rarely add
 |------|----|----------|----------------|
 | **Initiative** | A pillar or durable workstream (e.g. *Structured Concurrency*, *Build & Toolchain*). A small, stable set. | Linear | Set by hand; changes rarely. |
 | **Project** | Exactly one epic — a deliverable with real surface area and a design record (SFEP). | Linear | Rolled up from its issues; the design/context lives in the project **description**. |
-| **Issue** | One session-sized leaf (XS/S/M, never L). A `claude-ready` issue is pickable by `/pickup`. | Authored on **GitHub**, mirrored into Linear by the GitHub↔Linear integration. | **GitHub labels are the source of truth**; Linear status is derived from them one-way. |
+| **Issue** | One session-sized leaf (XS/S/M, never L). A Linear `Ready` issue is pickable by `/pickup`. | Authored in **Linear** for maintainer/agent work, mirrored to GitHub when public tracking is needed; external GitHub issues mirror into Linear triage. | **Linear owns status, priority, estimate, project, and assignee**. GitHub labels remain the public compatibility taxonomy. |
 
 A Project belongs to exactly one Initiative. A leaf Issue belongs to exactly one
 Project. Releases are a fourth, **orthogonal** axis — a Linear **Cycle**, never a
@@ -39,16 +43,15 @@ Project (see below).
    itself (or its Initiative). The old GitHub `Epic:` / `Tracking:` title shapes
    are **retired** — see [`issue-naming.md`](./issue-naming.md) § *Title
    taxonomy*.
-2. **GitHub issues are leaf work only.** If a would-be issue is too big for one
-   session (an `L`, or a "parent of many"), it is an epic → make it a Project and
+2. **Issues are leaf work only.** If a would-be issue is too big for one session
+   (an `L`, or a "parent of many"), it is an epic → make it a Project and
    `/groom` it into leaves.
-3. **Labels stay the source of truth** for issue state (`claude-ready`,
-   `in-progress`, `blocked`, `type:*`, `size:*`, `area:*`). Linear status is
-   *derived* from them; never hand-edit a mirror's status to drive the GitHub
-   side. **Priority and estimate are the exception — they are Linear-native
-   fields**, not labels: set them on the mirror at groom/triage time (priority
-   is a judgement call; estimate derives from `size:*`, xs/s/m → 1/2/3). There
-   is no `priority:*` GitHub label.
+3. **Linear is the maintainer planning source of truth.** Status, priority,
+   estimate, project, assignee, blockers, and cycle live on the Linear issue.
+   Do not create Linear labels that duplicate native Linear fields
+   (`blocked`, `in-progress`, `claude-ready`, `size:*`, `priority:*`,
+   `release:*`). GitHub labels stay as the public compatibility taxonomy for
+   external contributors, release automation, and GitHub-only fallbacks.
 4. **Project names are scannable; links go in the description.** Name a project
    for its outcome (`CLI Modularization`), not `Epic: CLI modularization
    (SFEP-0027)`. Put `GitHub: #N` and `Design: SFEP-NNNN` in the description.
@@ -73,9 +76,10 @@ ordinary issues associated to that Project.
 
 - **By epic (Linear):** the Sailfin team board grouped by Project shows every
   epic and its live issues. Filter to an Initiative to see one theme.
-- **Pickable now (GitHub or Linear):** open issues with `claude-ready`, not
-  `blocked`, not `in-progress`, no unclosed `Blocked by`. This is exactly what
-  `/pickup` selects; `/pickup` with no argument picks the top one.
+- **Pickable now (Linear first):** open Sailfin (`SFN`) issues in the native
+  `Ready` status, no unclosed `Blocked by`.
+  This is exactly what `/pickup` selects; `/pickup` with no argument picks the
+  top one, and `/pickup SFN-123` targets a specific Linear issue.
 - **Needs shaping:** `needs-grooming` → run `/groom`; `needs-design` → architect
   queue; `needs-discussion` → parked for a human.
 
@@ -88,13 +92,14 @@ ordinary issues associated to that Project.
 2. **Write the design as an SFEP** (`/sfep new <slug>` → `docs/proposals/`), and
    put `Design: SFEP-NNNN` in the project description. See
    [`.claude/rules/proposals.md`](../../.claude/rules/proposals.md).
-3. **Groom into leaves:** `/groom <epic>` decomposes it into session-sized GitHub
-   issues, ensures the Project exists, associates each leaf to the Project, and
-   reflects state into Linear. Each leaf cites the SFEP (`## Design`), it does not
-   re-litigate the design.
-4. **Work the leaves:** `/pickup` drives each from branch → PR; the `Closes #N`
-   merge closes the GitHub issue, and the GitHub↔Linear integration reflects that
-   closure onto the Linear mirror, rolling up the Project.
+3. **Groom into leaves:** `/groom <epic>` decomposes it into session-sized
+   Linear issues, ensures the Project exists, associates each leaf to the
+   Project, and lets the GitHub integration create or attach the public mirror
+   when needed. Each leaf cites the SFEP (`## Design`), it does not re-litigate
+   the design.
+4. **Work the leaves:** `/pickup` drives each from Linear issue → branch → PR.
+   If a GitHub mirror exists, the PR uses `Closes #N`; otherwise the PR links
+   `Linear: SFN-NNN` and the mirror can be attached later.
 5. **Graduate:** when the epic ships, flip its SFEP to `Implemented` and update
    `docs/status.md`.
 
@@ -112,5 +117,27 @@ retired *Sailfin Tracker* GitHub Project board (org project #4). The migration:
   a comment pointing to its Linear Project. (The `Release: v0.8.0` / `v0.9.0`
   trackers stayed open — release automation owns them.)
 
-From here, follow the rules above: epics are Projects, GitHub carries leaf work,
-and no new GitHub `Epic:`/`Tracking:` issues are opened.
+From here, follow the rules above: epics are Projects, Linear carries maintainer
+leaf work, GitHub remains the public mirror, and no new GitHub
+`Epic:`/`Tracking:` issues are opened.
+
+## Linear labels
+
+Linear team labels should be smaller than the GitHub label registry. Use them
+only for dimensions Linear does not already model natively, mainly `type:*` and
+`area:*` classification. Use native Linear fields for status, priority,
+estimate, Project, Cycle, blockers, assignee, and duplicate/canceled state.
+
+The Linear MCP tools available to Codex can create labels, but they do not
+currently expose label edit/delete. Clean up stale Linear labels in the Linear
+UI when convenient:
+
+- Delete or archive native-field duplicates: `blocked`, `in-progress`,
+  `claude-ready`, `size:xs`, `size:s`, `size:m`, `size:l`, `release:*`,
+  `priority:critical`, `priority:high`, `priority:medium`, `priority:low`.
+- Delete or archive non-canonical migrated labels when no issue still needs
+  them: `type:enhancement`, `type:chore`, `workstream`, `agentic-workflows`,
+  `area:perf`, plus the default `Bug`/`Feature`/`Improvement` labels if they are
+  unused.
+- Delete `epic` and `tracking` from Linear labels. Epics are Projects; releases
+  are Cycles. The GitHub `tracking` label remains only for release automation.
