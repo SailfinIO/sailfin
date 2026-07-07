@@ -353,7 +353,10 @@ derived GitHub board to keep in sync: the former *Sailfin Tracker* project
 been **retired**. Epic and roadmap-level grouping now lives in **Linear** —
 Linear Projects correspond to epics, while session-sized leaf work stays as
 GitHub issues (mirrored into Linear by the GitHub↔Linear integration). Flipping a
-label *is* the state change; no board-sync step follows it.
+label *is* the state change; no board-sync step follows it. The public roadmap
+(`site/src/pages/roadmap.astro`) builds from Linear initiatives/projects at deploy
+time (needs a `LINEAR_API_KEY` build secret; it degrades to a "data unavailable"
+state without one).
 
 **Anti-patterns:** don't pick up `needs-grooming` (groom first); don't expand
 scope mid-session (comment and pause); don't bundle issues into one PR; don't
