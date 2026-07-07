@@ -375,6 +375,19 @@ Milestones group long-lived **themes** (and feed `site/src/pages/roadmap.astro`)
 They span many releases. To answer "what ships in version X" we use a separate
 axis: the **`release:*` label namespace** plus a **per-cycle tracking issue**.
 
+**In Linear, a release is a Cycle, never a Project.** A release is a time-boxed
+cut *across* many epics, and a Linear issue belongs to exactly one Project (its
+epic — see § Linear structure & naming), so the release axis must be orthogonal
+to Projects. The `release:*` labels stay the source of truth (mirrored from
+GitHub); `/release-plan` assigns the must-close `release:<gate>` issues to a
+Linear **Cycle** for the target window, which carries the target date and
+burndown. Never model a release as a Linear Project, and never move a
+`release:<gate>` issue out of its epic Project — Cycle and Project membership are
+independent axes. The mechanics live in `/release-plan` (Phase 3c). At cut time
+no Linear action is needed: `release.yml` merges close the issues via
+`Closes #N`, which the two-way sync propagates to `Done`, and the Cycle
+completes on its end date.
+
 ### When release tracking applies
 
 There is exactly one **uncurated** combination — it takes whatever is on
