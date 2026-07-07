@@ -1,0 +1,4 @@
+interface:
+  display_name: "Sailfin Plan"
+  short_description: "Plan Sailfin Linear work"
+  default_prompt: "Use $sfn-plan to audit Sailfin Linear Initiatives, Projects, Cycles, and issue queues, then propose production compiler/runtime planning updates before applying changes."

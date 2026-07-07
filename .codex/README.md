@@ -6,8 +6,8 @@ This directory mirrors the high-value, provider-neutral parts of the Claude Code
 
 - `config.toml` enables repo-local hooks, hierarchical `AGENTS.md` handling, long-running goals, and the Sailfin skills.
 - `hooks/` injects fast session and git context without enforcing obsolete caller-side memory wrappers.
-- `skills/` contains reusable Sailfin workflows for safe verification, issue pickup, compilation debugging, and seed pinning.
-- `prompts/` contains copy/paste prompts for Codex web or CLI sessions, including issue pickup, feature planning, validation, and SFEP management.
+- `skills/` contains reusable Sailfin workflows for safe verification, Sailfin planning, issue pickup, compilation debugging, and seed pinning.
+- `prompts/` contains copy/paste prompts for Codex web or CLI sessions, including Sailfin planning, issue pickup, feature planning, validation, and SFEP management.
 
 ## Local setup
 
@@ -50,6 +50,23 @@ The remaining guardrail is time, not caller memory: wrap direct single-file comp
 - `sfn check` is the fast parse/type/effect inner loop but does not prove codegen or self-hosting.
 - `make compile` is required before declaring `compiler/src/*.sfn` changes done; `make check` is the full gate.
 - Forward-looking design decisions use the SFEP process in `docs/proposals/0001-sfep-process.md` and the registry in `docs/proposals/README.md`.
+
+## Linear planning workflow
+
+Use `prompts/sfn-plan.md` or `$sfn-plan` when you want Codex to audit and
+reorganize Sailfin Linear planning before implementation work. It instructs
+Codex to:
+
+1. Inventory Sailfin Linear Initiatives, Projects, Cycles, statuses, labels, and
+   open issues.
+2. Ground recommendations in the long-term goal of a production-ready,
+   high-performance compiler/runtime rather than in the published site roadmap.
+3. Propose Project/Initiative fixes, session-sized leaf issues, native
+   priority/estimate fills, status moves, unblock candidates, and release Cycle
+   assignments.
+4. Treat releases as Linear Cycles, not Projects, while preserving the GitHub
+   `Release: vX.Y.Z` tracker used by automation.
+5. Wait for explicit approval before applying bulk Linear writes.
 
 ## Issue pickup workflow
 
