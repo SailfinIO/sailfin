@@ -349,10 +349,12 @@ the session-sized *what*.
 
 **Labels** are registered in `.github/labels.yml`; conventions and the lifecycle
 diagram are in `docs/conventions/issue-naming.md`. Key ones: `claude-ready`,
-`needs-grooming`, `in-progress`, `blocked`, `type:*`, `size:*`, `priority:*`,
-`area:*` (`epic`/`tracking` are **legacy** — epics/trackers are Linear Projects
-now, not labels on new issues; the one surviving use of `tracking` is the
-`Release: vX.Y.Z` cadence tracker). **Labels are the source of truth** and there is no
+`needs-grooming`, `in-progress`, `blocked`, `type:*`, `size:*`, `area:*`
+(`epic`/`tracking` are **legacy** — epics/trackers are Linear Projects now, not
+labels on new issues; the one surviving use of `tracking` is the `Release:
+vX.Y.Z` cadence tracker. **Priority and estimate are Linear-native fields, not
+GitHub labels** — the `priority:*` labels are retired; set them on the Linear
+mirror at groom/triage). **Labels are the source of truth** for issue state and there is no
 derived GitHub board to keep in sync: the former *Sailfin Tracker* project
 (org project SailfinIO/4) and its `sync-project.yml` label→board workflow have
 been **retired**. Epic and roadmap-level grouping now lives in **Linear** —

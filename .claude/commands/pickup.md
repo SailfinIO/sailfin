@@ -33,12 +33,13 @@ gh issue view <N> --json number,title,labels,assignees,body,state
 ```
 
 **Priority order** (highest first):
-1. `priority:critical` label
-2. `priority:high` label
-3. `type:bug` (bugs first)
-4. `type:perf` (perf next — compounds future work)
-5. Smallest `size:*` first within the same type (XS → S → M)
-6. Lowest issue number as tiebreaker (FIFO)
+1. **Linear-native priority** — Urgent, then High (read from the issue's Linear
+   mirror; priority is no longer a GitHub label). Best-effort: if the Linear MCP
+   tools aren't connected, skip this tier and rank by the signals below.
+2. `type:bug` (bugs first)
+3. `type:perf` (perf next — compounds future work)
+4. Smallest `size:*` first within the same type (XS → S → M)
+5. Lowest issue number as tiebreaker (FIFO)
 
 If no pickable issue exists, report: "No claude-ready issues available. Run `/triage` to audit, or `/groom <epic>` to add work."
 

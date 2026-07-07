@@ -308,10 +308,12 @@ jobs:
                 echo ""
                 cat perf-body.md
               } > perf-new-body.md
+              # Priority is a Linear-native field (not a GitHub label);
+              # linear-priority-sync.yml backfills the mirror's priority to
+              # Medium from the perf-regression marker.
               new_number="$(gh issue create --repo "$REPO" \
                 --title "$title" \
                 --label "type:perf" \
-                --label "priority:medium" \
                 --label "perf-regression" \
                 --body-file perf-new-body.md \
                 | awk -F/ '/^https:/{print $NF}')"

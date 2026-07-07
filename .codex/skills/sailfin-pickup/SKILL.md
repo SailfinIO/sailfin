@@ -15,8 +15,9 @@ Use this skill when the user asks Codex to pick up an issue, work the next item,
    ```
 2. Filter out blocked, in-progress, assigned, or externally blocked work.
 3. Rank remaining issues by:
-   - `priority:critical`
-   - `priority:high`
+   - Linear-native priority Urgent, then High (read from the issue's Linear
+     mirror — priority is no longer a GitHub label; skip this tier if Linear
+     isn't reachable)
    - `type:bug`
    - `type:perf`
    - smallest `size:*` (`XS` before `S` before `M`)

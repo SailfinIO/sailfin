@@ -43,9 +43,12 @@ Project (see below).
    session (an `L`, or a "parent of many"), it is an epic → make it a Project and
    `/groom` it into leaves.
 3. **Labels stay the source of truth** for issue state (`claude-ready`,
-   `in-progress`, `blocked`, `type:*`, `size:*`, `priority:*`, `area:*`). Linear
-   status is *derived* from them; never hand-edit a mirror's status to drive the
-   GitHub side.
+   `in-progress`, `blocked`, `type:*`, `size:*`, `area:*`). Linear status is
+   *derived* from them; never hand-edit a mirror's status to drive the GitHub
+   side. **Priority and estimate are the exception — they are Linear-native
+   fields**, not labels: set them on the mirror at groom/triage time (priority
+   is a judgement call; estimate derives from `size:*`, xs/s/m → 1/2/3). There
+   is no `priority:*` GitHub label.
 4. **Project names are scannable; links go in the description.** Name a project
    for its outcome (`CLI Modularization`), not `Epic: CLI modularization
    (SFEP-0027)`. Put `GitHub: #N` and `Design: SFEP-NNNN` in the description.

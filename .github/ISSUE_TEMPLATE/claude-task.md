@@ -16,13 +16,21 @@ the issue is too big or too vague — break it down further.
 Title format (see docs/conventions/issue-naming.md):
   - Sub-tasks:  <type>(<scope>): <imperative verb phrase>
                 e.g.  feat(typecheck): register extern fn declarations
-  - Epics:      Epic: <track-id>: <noun phrase>          + apply `epic` label
-  - Trackers:   Tracking: <topic> (<YYYY-MM-DD>)         + apply `tracking` label
+
+GitHub issues are session-sized leaf work only. Epics and trackers are NOT
+GitHub issues — an epic is a Linear Project, a tracker is a Project/Initiative
+(see docs/conventions/linear-workflow.md). The `Release: vX.Y.Z` cadence
+tracker is the sole surviving GitHub tracking title.
 
 Labels come from .github/labels.yml — never invent new ones here. The
 template defaults to `needs-grooming`. Once scope, criteria, and files
 are filled in, swap it for `claude-ready` (and add `type:*`, `size:*`,
 optional `area:*`).
+
+Priority and estimate are Linear-native fields, not GitHub labels. Record
+the intended priority in the `## Priority` section below; the groomer sets
+the Linear priority from it and the Linear estimate from the `## Size` /
+`size:*` value.
 -->
 
 ## Goal
@@ -81,11 +89,25 @@ timeout 60 build/native/sailfin run path/to/example.sfn
 
 ## Size
 
-<!-- Pick one. If L, this issue is too big — break it down. -->
+<!-- Pick one. If L, this issue is too big — break it down. Drives the Linear estimate: XS→1, S→2, M→3. -->
 - [ ] **XS** — single file, < 1 hour
 - [ ] **S** — few files, 1-3 hours
 - [ ] **M** — multi-file, 3-6 hours
 - [ ] **L** — > 6 hours (NEEDS BREAKDOWN — remove `claude-ready` label and add `needs-grooming`)
+
+## Priority
+
+<!--
+Pick one. This sets the Linear-native priority field (not a GitHub label) —
+the groomer carries it onto the Linear mirror (Urgent/High/Medium/Low → 1/2/3/4).
+Default to the parent epic/Project's priority unless this leaf is a genuine
+outlier. Judge by the 1.0 critical path: pillars & GA blockers rank higher,
+product/post-1.0 polish lower.
+-->
+- [ ] **Urgent** — actively blocking; drop-everything
+- [ ] **High** — a pillar / 1.0 critical-path item
+- [ ] **Medium** — enabling infra; lands this milestone
+- [ ] **Low** — nice to have; post-1.0 or product polish
 
 ## Type
 

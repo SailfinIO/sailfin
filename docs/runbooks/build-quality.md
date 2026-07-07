@@ -10,10 +10,11 @@ on every `push` to `main` and every nightly cron at 05:00 UTC:
    `cache.hit_rate >= 0.95`.
 
 When either gate fails, the `notify-failure` job (issue #782) opens a
-deduplicated regression issue labeled `priority:critical`,
-`area:architecture`, and `build-quality-regression`. If the failing
-event is `push: main`, the merging PR also gets a comment linking the
-regression issue and the failing job.
+deduplicated regression issue labeled `area:architecture` and
+`build-quality-regression` (build-quality regressions are inherently
+release-critical; priority is set on the Linear mirror at triage — it is no
+longer a GitHub label). If the failing event is `push: main`, the merging PR
+also gets a comment linking the regression issue and the failing job.
 
 This page is the triage runbook for those regressions.
 
@@ -101,7 +102,6 @@ Once the offending commit is identified, file a fix issue with these
 labels:
 
 - `type:bug`
-- `priority:critical`
 - `area:compiler` (for emit-pipeline / lowering regressions),
   `area:build` (for cache-key drift), or `area:runtime` (rare —
   runtime-shape changes that perturb emitted IR).
@@ -109,6 +109,9 @@ labels:
   `/release` to refuse to cut anything beyond an alpha prerelease
   until the issue closes (see `docs/conventions/issue-naming.md` →
   "Release tracking" + "Seed pinning").
+
+Then set the fix issue's **Linear-native priority to Urgent** on its mirror
+(priority is a Linear field, not a GitHub label).
 
 The fix issue's body should `Closes` the regression issue
 (`build-quality regression: <gate>`) so the dedup anchor closes

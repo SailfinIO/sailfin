@@ -115,8 +115,12 @@ a size entirely (no label AND no `## Size`).
 Every label change below is also **reflected into Linear** per
 `docs/conventions/issue-naming.md` § Reflecting state into Linear: after the
 `gh issue edit`, find the issue's mirror, set its status from the new labels, and
-roll up its Project status. Best-effort — skip with a one-line note if the Linear
-MCP tools aren't connected, and never write a terminal status onto an open issue.
+roll up its Project status. On a PROMOTE, also set the mirror's **Linear-native
+priority and estimate** if they're unset — estimate from the `size:*` label
+(xs/s/m → 1/2/3), priority defaulting to the issue's Project priority (see
+§ Reflecting state into Linear step 3). Best-effort — skip with a one-line note
+if the Linear MCP tools aren't connected, and never write a terminal status onto
+an open issue.
 
 ### PROMOTE — move a groomed issue to Ready
 

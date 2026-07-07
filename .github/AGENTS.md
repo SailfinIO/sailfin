@@ -214,10 +214,12 @@ The labels the agentic pipeline depends on:
 | `security` | Security | Security-relevant issue or PR |
 | `blocked` | Triage | Waiting on another issue to close |
 
-Type / size / priority / area labels follow the prefix scheme (`type:bug`,
-`size:m`, `priority:high`, `area:runtime`, …). Bare aliases (`bug`, `runtime`,
-`medium`, …) are retired by the `aliases:` list in `.github/labels.yml`; do
-not reintroduce them in workflows or templates.
+Type / size / area labels follow the prefix scheme (`type:bug`, `size:m`,
+`area:runtime`, …). **Priority is a Linear-native field, not a GitHub label**
+(the `priority:*` labels are retired via the `delete:` list in
+`.github/labels.yml`); set it on the Linear mirror at groom/triage. Bare aliases
+(`bug`, `runtime`, `medium`, …) are retired by the `aliases:` list in
+`.github/labels.yml`; do not reintroduce them in workflows or templates.
 
 ## Focus artifact
 

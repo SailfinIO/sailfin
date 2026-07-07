@@ -94,10 +94,12 @@ Key terminology: capsule (package), fleet (workspace), generation card (model pr
    | Security concern | `security` | Security reviewer will assess |
    | Question / discussion | `question` | |
 
-5. **Assess priority** based on:
-   - Does it block self-hosting? (`make compile` broken) -> `priority:critical`
-   - Does it affect first impressions? (broken examples, confusing errors) -> `priority:high`
-   - Is there a workaround? -> `priority:medium` or `priority:low`
+5. **Assess priority** and record it as a **suggested priority** in the analysis
+   comment (step 8) — priority is a Linear-native field set at groom/triage, not
+   a GitHub label, so do **not** apply a `priority:*` label:
+   - Does it block self-hosting? (`make compile` broken) -> suggest **Urgent**
+   - Does it affect first impressions? (broken examples, confusing errors) -> suggest **High**
+   - Is there a workaround? -> suggest **Medium** or **Low**
 
 6. **Check for duplicates**: Search open issues for similar problems. If you find a match, add a `duplicate` label and reference the original issue.
 
