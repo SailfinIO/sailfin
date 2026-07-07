@@ -27,6 +27,10 @@ path = ".codex/skills/sailfin-pickup/SKILL.md"
 enabled = true
 
 [[skills.config]]
+path = ".codex/skills/sfn-plan/SKILL.md"
+enabled = true
+
+[[skills.config]]
 path = ".codex/skills/sailfin-debug-compile/SKILL.md"
 enabled = true
 
@@ -49,4 +53,3 @@ matcher = ""
 [[hooks.UserPromptSubmit.hooks]]
 type = "command"
 command = ".codex/hooks/inject-git-context.sh"
-
