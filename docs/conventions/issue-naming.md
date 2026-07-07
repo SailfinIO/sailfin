@@ -72,8 +72,10 @@ review attached or required).
 
 ## Title taxonomy
 
-There are **two human-authored GitHub title shapes** (sub-task, focus) plus
-**one reserved auto-generated prefix** (`[aw]`). Anything else is a bug.
+There are **two recurring GitHub issue title shapes** — the sub-task (default)
+and the planner-generated focus issue — plus the **`Release: vX.Y.Z`** cadence
+tracker and **one reserved auto-generated prefix** (`[aw]`). Anything else is a
+bug.
 
 > **Epics and trackers are not GitHub issues.** An epic is a Linear **Project**
 > (under an Initiative); a cross-cutting status thread is that Project itself.
@@ -172,7 +174,7 @@ Leave the `[aw]` prefix in place; downstream tooling pattern-matches on it.
 | Every `claude-ready` issue carries exactly one `size:*` label | `/pickup` and `/sweep` rank by it |
 | Use `priority:*` only when prioritisation matters; default is no priority label | Avoids label inflation; absence ≠ low |
 | Apply `area:*` labels when the touched subsystem is unambiguous | Helps `/sweep` dedupe collisions |
-| `epic` / `tracking` are **legacy** — do not apply to new issues | Epics are Linear Projects, trackers are Projects/Initiatives (see `linear-workflow.md`) |
+| `epic` / `tracking` are **legacy** — do not apply to new issues (sole exception: `tracking` on the `Release: vX.Y.Z` cadence tracker, see § *Release tracking*) | Epics are Linear Projects, trackers are Projects/Initiatives (see `linear-workflow.md`) |
 | Never re-introduce a bare alias (`bug`, `runtime`, `medium`, …) | They are listed in `aliases:` of `labels.yml` and will be migrated away on the next sync |
 | Never invent a new label in a workflow or slash command | Add it to `labels.yml` in a separate PR first |
 

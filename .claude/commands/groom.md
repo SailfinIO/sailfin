@@ -336,8 +336,10 @@ gh api /repos/SailfinIO/sailfin/issues/$PARENT/sub_issues \
   --jq '.[] | "#\(.number) \(.title)"'
 ```
 
-Skip this step only when the grooming target was a roadmap section, a free-form
-prompt, or a document — i.e. when no parent epic issue exists.
+This applies **only** to the leaf-split case above. The default groom output —
+independent leaves associated to the epic's Linear Project — needs no GitHub
+sub-issue attachment at all; skip this step unless you actually split one leaf
+into GitHub children.
 
 ### Phased epics: one Linear Project per phase, groomed wave-by-wave
 

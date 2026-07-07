@@ -159,7 +159,7 @@ labels:
     description: "Legacy — epics are now Linear Projects; do not apply to new issues"
   - name: tracking
     color: "a371f7"
-    description: "Legacy — trackers are now Linear Projects/Initiatives; do not apply to new issues"
+    description: "Legacy — trackers are now Linear Projects/Initiatives; do not apply to new issues except the Release: vX.Y.Z cadence tracker"
   - name: seed-blocker
     color: "b60205"
     description: "Must close before the next seed binary is cut"

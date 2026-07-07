@@ -90,7 +90,8 @@ ordinary issues associated to that Project.
    reflects state into Linear. Each leaf cites the SFEP (`## Design`), it does not
    re-litigate the design.
 4. **Work the leaves:** `/pickup` drives each from branch → PR; the `Closes #N`
-   merge closes the GitHub issue, which the two-way sync rolls up to the Project.
+   merge closes the GitHub issue, and the GitHub↔Linear integration reflects that
+   closure onto the Linear mirror, rolling up the Project.
 5. **Graduate:** when the epic ships, flip its SFEP to `Implemented` and update
    `docs/status.md`.
 
