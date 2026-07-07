@@ -21,15 +21,11 @@ interface RoadmapCategory {
 }
 
 // Linear API types
-interface LinearProjectStatus {
-  type: string;
-}
-
 interface LinearProject {
   id: string;
   name: string;
   url: string;
-  status: LinearProjectStatus | null;
+  state: string | null;
 }
 
 interface LinearInitiative {
@@ -77,11 +73,15 @@ async function fetchInitiatives(): Promise<LinearInitiative[] | null> {
         Authorization: apiKey,
       },
       body: JSON.stringify({
-        query: `query { initiatives(first: 50) { nodes { id name description url projects(first: 100) { nodes { id name url status { type } } } } } }`,
+        query: `query { initiatives(first: 50) { nodes { id name description url projects(first: 100) { nodes { id name url state } } } } }`,
       }),
     });
     if (!res.ok) {
-      loadDiagnostic = `Linear API returned HTTP ${res.status} ${res.statusText}`;
+      let body = "";
+      try {
+        body = (await res.text()).slice(0, 300);
+      } catch {}
+      loadDiagnostic = `Linear API returned HTTP ${res.status} ${res.statusText}${body ? ` — ${body}` : ""}`;
       return null;
     }
     const json = (await res.json()) as LinearInitiativesResponse;
@@ -116,10 +116,10 @@ const v1Categories: RoadmapCategory[] = apiAvailable
       const projects = initiative.projects.nodes;
       const items: RoadmapItem[] = projects.map((p) => ({
         label: p.name,
-        status: mapStatus(p.status?.type),
+        status: mapStatus(p.state ?? undefined),
         url: p.url,
       }));
-      const closed = projects.filter((p) => p.status?.type === "completed").length;
+      const closed = projects.filter((p) => p.state === "completed").length;
       const open = projects.length - closed;
       return {
         title: initiative.name,
