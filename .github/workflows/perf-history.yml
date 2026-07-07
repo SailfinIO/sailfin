@@ -73,7 +73,7 @@ jobs:
       SYN_MODULE: ${{ inputs.synthetic_slowdown_module }}
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v7.0.0
+        uses: actions/checkout@v7
 
       - name: Resolve seed version (input override → .seed-version)
         id: seed
