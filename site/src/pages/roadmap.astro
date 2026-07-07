@@ -56,7 +56,10 @@ function mapStatus(type: string | undefined): Status {
 }
 
 async function fetchInitiatives(): Promise<LinearInitiative[] | null> {
-  const apiKey = import.meta.env.LINEAR_API_KEY;
+  // Cloudflare Pages injects build secrets into process.env; Astro/Vite only
+  // exposes PUBLIC_-prefixed vars on import.meta.env, so read process.env for
+  // this non-public key.
+  const apiKey = import.meta.env.LINEAR_API_KEY || process.env.LINEAR_API_KEY;
   if (!apiKey) return null;
   try {
     const res = await fetch("https://api.linear.app/graphql", {
