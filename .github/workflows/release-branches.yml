@@ -80,7 +80,7 @@ jobs:
 
         steps:
             - name: Checkout repository
-              uses: actions/checkout@v7.0.0
+              uses: actions/checkout@v7
 
             - name: Resolve seed version from .seed-version
               id: seed
