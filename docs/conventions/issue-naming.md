@@ -270,24 +270,21 @@ required, that is real growth — pause for human input.
 - **`/triage`** refreshes a stale advisory map (re-derives paths, no line
   numbers/counts) when Goal + semantic scope are intact.
 
-## Project board
+## Issue tracking
 
-Every open issue is tracked on the **Sailfin Tracker** project
-(org project #4: `https://github.com/orgs/SailfinIO/projects/4`).
+**Labels are the sole source of truth.** The former GitHub Project board
+(*Sailfin Tracker*, org project #4) and its label→board sync workflow have been
+**retired**. Issue state lives entirely in GitHub labels; `priority:*`/`size:*`
+labels carry priority and size directly, and the GitHub native parent/child
+relationship carries sub-issue nesting. Epic and roadmap-level grouping now lives
+in **Linear** — Linear Projects correspond to epics, while session-sized leaf
+work stays as GitHub issues mirrored into Linear by the GitHub↔Linear integration.
 
-| Field | Source | Notes |
-|-------|--------|-------|
-| Status | derived from issue state + labels | See **Status mapping** below |
-| Priority | `priority:*` label | `Critical`/`High`/`Medium`/`Low` mirror the four `priority:*` labels |
-| Size | `size:*` label | `XS`/`S`/`M` mirror the three `size:*` labels (no L; L items must be groomed down or promoted to `epic`) |
-| Milestone | `milestone` field | Phase marker — `M1`, `M1.5`, `M2`, `M3`, `Effect System Hardening`, `1.0` |
-| Iteration | manual | 2-week cadence, Monday-start. Optional per-issue (set on epics or in-flight work) |
-| Start / Target date | manual | Use on epics, not leaf issues — leaf issues are sized in hours, not days |
-| Parent issue / Sub-issues progress | auto | Inherits from the GitHub native parent/child relationship |
+### Status semantics
 
-### Status mapping
-
-Status is derived from issue state plus labels. First match wins:
+A single status is derived from issue state plus labels, first match wins. This
+precedence is what `/triage` and `/sweep` reason about, and what the Linear
+mirror reflects:
 
 | Signal | Status |
 |--------|--------|
@@ -296,24 +293,15 @@ Status is derived from issue state plus labels. First match wins:
 | `blocked` label | `Blocked` |
 | `claude-ready` label (no blocker) | `Ready` |
 | `needs-grooming` / `needs-design` / `design-approved` | `Backlog` |
-| No matching signal | (left alone — usually `To triage`) |
+| No matching signal | `To triage` |
 
 Notable invariants:
 
-- **`blocked` beats `claude-ready`.** A blocked-but-groomed issue lands in `Blocked`, not `Ready`, so the Ready column is always pickable.
-- **`In review` is intentionally not auto-set** for issues. An issue with `in-progress` keeps that status across PR-open → review → merge → close transitions; the PR side of GitHub already tracks review state.
-- **No signal → no change.** The sync never bounces an item back to `To triage`. If a maintainer manually moves an item to `Backlog`, it stays put until a label gives the workflow a stronger signal.
-
-Labels are canonical. The `Sync Project` workflow (`.github/workflows/sync-project.yml`)
-auto-adds new issues to the project and recomputes Priority/Size/Status from
-labels on every issue event. To backfill or repair drift, run
-`scripts/sync-issue-to-project.sh --all-open` locally or trigger the
-workflow with `backfill=true`.
-
-The workflow needs a PAT with `project` + `read:org` scopes, stored as
-`PROJECT_SYNC_TOKEN` (falls back to `RELEASE_PAT`). If neither secret is
-available the workflow no-ops — labels stay correct, only the project
-view goes stale.
+- **`blocked` beats `claude-ready`.** A blocked-but-groomed issue reads as
+  `Blocked`, not `Ready`, so the ready set is always pickable.
+- **`In review` is intentionally not derived** for issues. An issue with
+  `in-progress` keeps that status across PR-open → review → merge → close; the
+  PR side of GitHub already tracks review state.
 
 ## Release tracking
 

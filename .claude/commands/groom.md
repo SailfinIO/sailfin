@@ -221,12 +221,7 @@ halts on entropy `/triage` would otherwise refresh.
 
 Capture the issue numbers. After each `gh issue create`:
 
-1. Sync the board so the new card lands in the correct column:
-```bash
-.claude/scripts/sync-project-status.sh <new-issue-number> --from-labels
-```
-
-2. Set the GitHub native Type field to match the `type:*` label:
+1. Set the GitHub native Type field to match the `type:*` label:
 ```bash
 # Derive from the label: type:feature → Feature, type:bug → Bug, everything else → Task
 .claude/scripts/set-issue-type.sh <new-issue-number> <Feature|Task|Bug>
@@ -238,18 +233,13 @@ The mapping from `type:*` label to GitHub Type:
 - `type:refactor`, `type:perf`, `type:docs`, `type:tech-debt`, epics, tracking → `Task`
 
 Then set up dependencies. For any issue that depends on a sibling that
-hasn't merged yet, add the `blocked` label and resync — the helper will
-move that card from "Ready" into the "Blocked" column:
+hasn't merged yet, add the `blocked` label:
 
 ```bash
 # For each issue blocked by an earlier one:
 gh issue edit <N> --add-label "blocked"
 # (and reference the blocker in the body — the gh CLI doesn't have native dependency support)
-.claude/scripts/sync-project-status.sh <N> --from-labels   # → Blocked
 ```
-
-If a sync call exits non-zero, capture the issue number and surface it in
-the Phase 5 report so the human knows the board is out of sync.
 
 ### Seed dependencies
 
@@ -275,7 +265,6 @@ When that holds:
 
 ```bash
 gh issue edit <predecessor> --add-label seed-blocker
-.claude/scripts/sync-project-status.sh <predecessor> --from-labels
 ```
 
 3. Note in the Phase 5 report that a seed cut + `/pin-seed` will be
@@ -382,12 +371,7 @@ Suggest: `/pickup` to start working the queue, or `/triage` to verify hygiene.
 - **Title format follows `docs/conventions/issue-naming.md`** — Conventional Commit shape for sub-tasks, `Epic:` prefix for epics, `Tracking:` for trackers.
 - **Don't create issues for work that's already in progress** — check `gh issue list` first to avoid duplicates.
 - **When grooming an existing epic issue, attach every created issue as a native sub-issue of that epic** via the REST `/sub_issues` endpoint. Body cross-references do not populate the parent's Sub-issues panel and leave the roadmap UI incomplete. Use `-F sub_issue_id=<int>` (not `-f`) — the field must be typed.
-- **Labels drive the board; CI reconciles it.** `sync-project.yml` mirrors
-  Priority/Size/Status from labels on every label event, so creating/relabeling
-  an issue *is* the board update. Optionally nudge sooner with
-  `.claude/scripts/sync-project-status.sh <N> --from-labels` after a
-  `gh issue create` or a `gh issue edit` that adds `blocked`; it self-skips with
-  a `note:` where `gh` can't reach the API (e.g. remote containers).
+- **Labels are the source of truth.** There is no derived board to sync.
 - **Set the GitHub native Type field** with
   `.claude/scripts/set-issue-type.sh <N> <Feature|Task|Bug>` (best-effort; it
   self-skips when `gh` is unavailable). Derive the type from the `type:*` label:
