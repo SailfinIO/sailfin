@@ -23,9 +23,9 @@
 #   delete:
 #     - name:        label to remove outright (no replacement)
 #
-# When you add or edit a label here, update any agent/workflow/slash-command
-# that references it. See `docs/conventions/issue-naming.md` for naming
-# conventions and the lifecycle diagram.
+# When you add or edit a label here, update any workflow, prompt, or local
+# agent instruction that references it. See `docs/conventions/issue-naming.md`
+# for naming conventions and the lifecycle diagram.
 
 labels:
   # --- Issue lifecycle (state machine) ---------------------------------
@@ -34,13 +34,13 @@ labels:
     description: "Placeholder issue: scope, criteria, or files-affected still missing"
   - name: needs-design
     color: "fbca04"
-    description: "Awaiting Architect review of the design proposal"
+    description: "Design grooming needed before implementation"
   - name: needs-discussion
     color: "d93f0b"
     description: "Design blocked pending human input"
   - name: design-approved
     color: "0e8a16"
-    description: "Architect approved; Engineer may begin implementation"
+    description: "Legacy approval marker; prefer claude-ready for current pickup"
   - name: claude-ready
     color: "0e8a16"
     description: "Fully groomed and unblocked; eligible for /pickup"
@@ -63,7 +63,7 @@ labels:
     description: "All review agents approved; safe for human merge"
   - name: agent-authored
     color: "5319e7"
-    description: "PR opened by an autonomous agent; counts toward the budget gate"
+    description: "PR opened by an autonomous or assistant-driven workflow"
   - name: security
     color: "d93f0b"
     description: "Security-relevant issue or PR; requires Security review"
@@ -71,13 +71,13 @@ labels:
   # --- Focus (planner cycle) -------------------------------------------
   - name: focus:proposed
     color: "a371f7"
-    description: "Weekly focus issue awaiting human approval"
+    description: "Legacy weekly focus issue awaiting human approval"
   - name: focus:approved
     color: "0e8a16"
-    description: "Weekly focus is live; downstream agents may act on it"
+    description: "Legacy weekly focus is live; prefer Linear planning state"
   - name: focus:stale
     color: "cccccc"
-    description: "Superseded by a newer focus issue; ignore for grooming"
+    description: "Superseded legacy focus issue"
 
   # --- Type taxonomy (mirror Conventional Commit prefixes) -------------
   - name: type:feature

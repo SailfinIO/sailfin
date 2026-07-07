@@ -242,13 +242,14 @@ disposition before an RFC is accepted, merged, or closed.
 *Adaptation (amends SFEP-0001):* entering FCP is the gate between `Draft`
 and `Accepted`. On FCP entry, a mandated adversarial-review pass runs — N
 independent reviewer agents attack the design from fixed lenses
-(soundness, self-hosting, scope/YAGNI, ecosystem impact); the disabled
-`architect-review.md` gh-aw workflow is the natural seed of this. The window
-is 7 days or owner short-circuit; the disposition (accept / reject / back to
-draft) and the objections raised are recorded in the SFEP. This gives the
-solo-maintainer + agents configuration what FCP gives Rust's teams: a
-forcing function that prevents both lingering drafts and rubber-stamped
-accepts.
+(soundness, self-hosting, scope/YAGNI, ecosystem impact). The retired
+`architect-review.md` gh-aw workflow was prior art for this shape; any future
+FCP reviewer automation should be redesigned against the current Linear/Codex
+workflow rather than resurrecting the old pipeline unchanged. The window is 7
+days or owner short-circuit; the disposition (accept / reject / back to draft)
+and the objections raised are recorded in the SFEP. This gives the
+solo-maintainer + agents configuration what FCP gives Rust's teams: a forcing
+function that prevents both lingering drafts and rubber-stamped accepts.
 
 ### Tier 3 — policy debt to pay before 1.0
 
