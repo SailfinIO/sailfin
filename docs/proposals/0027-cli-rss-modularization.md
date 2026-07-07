@@ -297,12 +297,12 @@ safe with no seed cut (§5 applies verbatim); the epic's Implemented status does
 - **Entry shim now lives under `cli/` (#1967).** §3.5 originally kept
   `cli_main.sfn` as a root-level module holding the `@main` C-ABI entrypoint,
   platform `extern` decls, arena telemetry, the memory-budget call, `_usage`,
-  and the `sailfin_cli_main_with_paths` facade. #1967 folds that surface into
-  `compiler/src/cli/entry.sfn` and has `cli/main.sfn` import `_usage` plus the
-  driver-prefix facade from that sibling module. The dependency is now one-way:
-  `cli/entry.sfn` imports the command router and the router no longer imports
-  a root `cli_main` module, while `fn main` / `native_cli_main` remain the
-  unmangled ABI carve-outs the emitter's entry detection finds.
+  and the `sailfin_cli_main_with_paths` facade. #1967 folds the ABI boundary
+  into `compiler/src/cli/entry.sfn` and moves `_usage` plus the driver-prefix
+  facade into `cli/main.sfn`, next to the command tree. The dependency is now
+  one-way: `cli/entry.sfn` imports the command router and the router no longer
+  imports a root `cli_main` module, while `fn main` / `native_cli_main` remain
+  the unmangled ABI carve-outs the emitter's entry detection finds.
 
 - **`cli_check.sfn` stays at the src root (#1968).** §3.5 explicitly ruled the
   `check` engine out of scope ("stays; `check` reuses it verbatim") so the
