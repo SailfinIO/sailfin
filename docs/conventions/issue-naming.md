@@ -283,8 +283,10 @@ work stays as GitHub issues mirrored into Linear by the GitHub↔Linear integrat
 ### Status semantics
 
 A single status is derived from issue state plus labels, first match wins. This
-precedence is what `/triage` and `/sweep` reason about, and what the Linear
-mirror reflects:
+precedence is the convention `/triage` and `/sweep` apply. The GitHub↔Linear
+integration mirrors the **labels** themselves into Linear; a Linear issue's
+board status is owned natively in Linear and was seeded from this same
+precedence — Linear does not continuously recompute status from the labels.
 
 | Signal | Status |
 |--------|--------|
@@ -293,10 +295,14 @@ mirror reflects:
 | `blocked` label | `Blocked` |
 | `claude-ready` label (no blocker) | `Ready` |
 | `needs-grooming` / `needs-design` / `design-approved` | `Backlog` |
-| No matching signal | `To triage` |
+| No status-bearing label | `To triage` (implicit default) |
 
 Notable invariants:
 
+- **`To triage` is not a label.** It is the implicit default for an issue that
+  carries no status-bearing label (`in-progress` / `blocked` / `claude-ready` /
+  `needs-grooming` / `needs-design` / `design-approved`) — not a value written
+  anywhere on the issue.
 - **`blocked` beats `claude-ready`.** A blocked-but-groomed issue reads as
   `Blocked`, not `Ready`, so the ready set is always pickable.
 - **`In review` is intentionally not derived** for issues. An issue with
