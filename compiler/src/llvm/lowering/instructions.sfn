@@ -329,6 +329,13 @@ fn lower_instruction_range(function: NativeFunction, start_index: int, end: int,
                 // scope-exit drop seam in `emit_llvm_function`.
                 current_locals = lowered.locals;
                 current_bindings = lowered.bindings;
+                // Issue #1954: thread the return expression's diagnostics so a
+                // `[fatal]` on a `return f()` path (e.g. an unresolved callee
+                // whose return type is unknown) reaches the emit-level
+                // `has_fatal_lowering_diagnostic` gate. Every sibling
+                // expression-carrying branch already does this; the Return
+                // branch dropped them, letting return-path fatals exit rc=0.
+                diagnostics = extend_string_array(diagnostics, lowered.diagnostics);
                 collected_string_constants = merge_string_constants(collected_string_constants, lowered.string_constants);
                 terminated = true;
                 index += 1;
