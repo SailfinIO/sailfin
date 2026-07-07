@@ -111,18 +111,10 @@ labels:
     description: "3-6 hours, multi-file. Larger items must be groomed into smaller issues."
 
   # --- Priority --------------------------------------------------------
-  - name: priority:critical
-    color: "b60205"
-    description: "Blocks self-hosting or release; drop everything"
-  - name: priority:high
-    color: "d93f0b"
-    description: "Should land this week"
-  - name: priority:medium
-    color: "fbca04"
-    description: "Should land this milestone"
-  - name: priority:low
-    color: "fef2c0"
-    description: "Nice to have; pick when nothing else is ready"
+  # Priority is a Linear-native field, not a GitHub label. Set it in Linear
+  # at groom/triage time (Urgent/High/Medium/Low). The former `priority:*`
+  # labels are retired via the `delete:` list below. See
+  # docs/conventions/issue-naming.md § Reflecting state into Linear.
 
   # --- Area (subsystem) ------------------------------------------------
   - name: area:compiler
@@ -253,3 +245,11 @@ aliases:
 delete:
   - name: enhancement
     reason: "GitHub default never adopted; type:feature is canonical"
+  - name: priority:critical
+    reason: "Priority is now a Linear-native field, not a GitHub label"
+  - name: priority:high
+    reason: "Priority is now a Linear-native field, not a GitHub label"
+  - name: priority:medium
+    reason: "Priority is now a Linear-native field, not a GitHub label"
+  - name: priority:low
+    reason: "Priority is now a Linear-native field, not a GitHub label"

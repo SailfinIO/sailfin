@@ -113,10 +113,15 @@ the next cadence bump rather than cutting reactively.
 
 Present the proposed issue list as a table:
 
-| # | Title | Type | Size | Blocked by |
-|---|---|---|---|---|
-| 1 | ... | Performance | S | — |
-| 2 | ... | Refactor | M | #1 |
+| # | Title | Type | Size | Priority | Blocked by |
+|---|---|---|---|---|---|
+| 1 | ... | Performance | S | High | — |
+| 2 | ... | Refactor | M | Medium | #1 |
+
+Priority is one of Urgent / High / Medium / Low — the architect assigns it from
+the epic's place on the 1.0 critical path (default a leaf to its Project's
+priority unless it's a genuine outlier). It becomes the Linear-native priority in
+the *Reflect in Linear* step; it is **not** a GitHub label.
 
 Wait for user approval. The user may:
 - Approve as-is → proceed to Phase 4
@@ -252,9 +257,14 @@ skip with a one-line note if the Linear MCP tools aren't connected):
    named per § Linear structure & naming (concise Title-Case deliverable; no
    `Epic:` prefix or trailing `#N`/`SFEP-NNNN`), with `GitHub: #<epic>` and any
    `Design: SFEP-NNNN` placed in the project **description**, not the name.
-2. **Assign each created leaf** to that Project and set its status from its
-   labels. The mirror syncs in asynchronously — retry briefly, and let a later
-   `/triage`/`/sweep` pass reconcile any leaf whose mirror hasn't appeared yet.
+2. **Assign each created leaf** to that Project, set its status from its labels,
+   and set its **Linear-native priority and estimate** per
+   `docs/conventions/issue-naming.md` § Reflecting state into Linear (step 3):
+   estimate from the `size:*` label (xs/s/m → 1/2/3 on the team's Linear 1–5
+   scale), priority from the Phase 3 table (Urgent/High/Medium/Low → 1/2/3/4,
+   defaulting to the Project's priority). The mirror syncs in asynchronously —
+   retry briefly, and let a later `/triage`/`/sweep` pass reconcile any leaf
+   whose mirror (or priority/estimate) hasn't appeared yet.
 3. **Roll up the Project status** from its issues (any In Progress → `started`;
    else any Ready → `planned`; else `backlog`).
 
@@ -392,6 +402,7 @@ Suggest: `/pickup` to start working the queue, or `/triage` to verify hygiene.
 - **Never create issues without acceptance criteria.** The criteria are the contract.
 - **Always set the `claude-ready` label** on issues that are ready to pick up. Use `needs-grooming` for issues that exist as placeholders but need refinement.
 - **Always set the `type:*` and `size:*` labels** so `/pickup` can filter correctly. Apply `area:*` labels when the touched subsystem is unambiguous.
+- **Always set a Linear-native priority and estimate** on each leaf's mirror (see *Reflect in Linear*). Priority is not a GitHub label; estimate derives from `size:*`. Never leave a groomed leaf at `No priority` / no estimate.
 - **Use only labels defined in `.github/labels.yml`** — never invent new ones in this command. If you think a new label is warranted, edit `labels.yml` in a separate PR first.
 - **Title format follows `docs/conventions/issue-naming.md`** — Conventional Commit shape for leaf sub-tasks. Never open an `Epic:`/`Tracking:` GitHub issue or apply the `epic`/`tracking` label; epics are Linear Projects (see *Reflect in Linear*).
 - **Don't create issues for work that's already in progress** — check `gh issue list` first to avoid duplicates.

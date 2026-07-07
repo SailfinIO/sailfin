@@ -356,8 +356,10 @@ record every reason; it strengthens the rationale):
 
 **Gate-label candidates (open only):**
 
-1. **Priority.** Open `priority:critical` and `priority:high` issues with
-   no `release:*` label.
+1. **Priority.** Open issues at Linear-native priority Urgent or High with
+   no `release:*` label (priority is a Linear field, read via the mirror — not
+   a GitHub label). Best-effort: if the Linear MCP tools aren't connected, skip
+   this source and rely on the others below.
 2. **Correctness regressions.** Open `type:bug` issues (any priority) with
    no `release:*` label — a shipped-feature defect is a strong stable gate.
 3. **SFEP-targeted.** Read the SFEP registry (`docs/proposals/README.md`)
@@ -404,13 +406,13 @@ record every reason; it strengthens the rationale):
 Classify each candidate as a recommendation, then **present the full set
 and stop for the user's decision** — do not apply anything yet:
 
-- **IN** — should gate this release (correctness regressions,
-  `priority:critical`, SFEP items explicitly targeting this version).
+- **IN** — should gate this release (correctness regressions, Linear-native
+  priority Urgent, SFEP items explicitly targeting this version).
   **Open issues only** — a merged/closed item is never IN; it belongs to
   MANIFEST (see the open-only rule in 4.1).
 - **ROLL-FORWARD** — defer to a later release (epics/themes, speculative
-  or unscoped `priority:high`, anything whose landing this cycle is
-  uncertain).
+  or unscoped Linear-native priority High, anything whose landing this cycle
+  is uncertain).
 - **MANIFEST** — merged-but-unreleased work; informational only, never
   labeled (rendered into the tracker's manifest section).
 
@@ -424,7 +426,7 @@ Proposed scope — Release: vX.Y.Z (gate: release:<gate>)
 
 IN (apply release:<gate> — open issues only):
   #N — <title>   [type:bug · shipped-feature miscompile]
-  #M — <title>   [priority:critical · SFEP-00NN target]
+  #M — <title>   [priority:Urgent · SFEP-00NN target]
 
 ROLL-FORWARD (no label / defer):
   #P — <title>   [epic, milestone-tracked — not a single-cut gate]

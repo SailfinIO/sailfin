@@ -319,8 +319,8 @@ For each pickable `claude-ready` issue (exclude any with `in-progress` or assign
 
    | Signal | Weight |
    |---|---|
-   | `priority:critical` label | +100 |
-   | `priority:high` label | +50 |
+   | Linear-native priority Urgent | +100 |
+   | Linear-native priority High | +50 |
    | Closes an epic on merge | +30 |
    | Unblocks ≥2 downstream issues | +20 per |
    | `size:xs` | +10 |

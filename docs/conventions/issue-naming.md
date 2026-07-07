@@ -172,7 +172,7 @@ Leave the `[aw]` prefix in place; downstream tooling pattern-matches on it.
 |------|-----|
 | Every active issue carries exactly one `type:*` label | `/pickup` routes by it |
 | Every `claude-ready` issue carries exactly one `size:*` label | `/pickup` and `/sweep` rank by it |
-| Use `priority:*` only when prioritisation matters; default is no priority label | Avoids label inflation; absence ≠ low |
+| **Priority is a Linear-native field, not a GitHub label.** Set it in Linear (Urgent/High/Medium/Low) at groom/triage time; the `priority:*` labels are retired (see § *Reflecting state into Linear*) | One source of truth; Linear's board sorts on the native field |
 | Apply `area:*` labels when the touched subsystem is unambiguous | Helps `/sweep` dedupe collisions |
 | `epic` / `tracking` are **legacy** — do not apply to new issues (sole exception: `tracking` on the `Release: vX.Y.Z` cadence tracker, see § *Release tracking*) | Epics are Linear Projects, trackers are Projects/Initiatives (see `linear-workflow.md`) |
 | Never re-introduce a bare alias (`bug`, `runtime`, `medium`, …) | They are listed in `aliases:` of `labels.yml` and will be migrated away on the next sync |
@@ -263,11 +263,13 @@ required, that is real growth — pause for human input.
 
 ## Issue tracking
 
-**Labels are the sole source of truth.** The former GitHub Project board
+**Labels are the source of truth for issue state.** The former GitHub Project board
 (*Sailfin Tracker*, org project #4) and its label→board sync workflow have been
-**retired**. Issue state lives entirely in GitHub labels; `priority:*`/`size:*`
-labels carry priority and size directly, and the GitHub native parent/child
-relationship carries sub-issue nesting. Epic and roadmap-level grouping now lives
+**retired**. Lifecycle state lives entirely in GitHub labels; the `size:*` label
+carries size (and drives the derived Linear estimate), and the GitHub native
+parent/child relationship carries sub-issue nesting. **Priority and estimate are
+Linear-native fields** — set them on the Linear mirror at groom/triage time (see
+§ *Reflecting state into Linear*); there is no `priority:*` GitHub label. Epic and roadmap-level grouping now lives
 in **Linear** — Linear Projects correspond to epics, while session-sized leaf
 work stays as GitHub issues mirrored into Linear by the GitHub↔Linear integration.
 
@@ -353,10 +355,26 @@ on it (the same posture the skills take when `gh` is unavailable).
    status onto a mirror whose GitHub issue is still open — the two-way sync would
    close the GitHub issue. Only the non-terminal statuses (In Progress, Blocked,
    Ready, To triage, Backlog, Todo) are ever written.
-3. **Assign the issue to its epic's Project** if it isn't already, resolving the
+3. **Set priority and estimate on the mirror** (Linear-native fields — there is
+   no GitHub label for either). Priority is a judgement call carried from
+   grooming; estimate is derived mechanically from the `size:*` label. Use
+   `save_issue` with the numeric `priority` and `estimate`:
+
+   | Size label | Estimate | | Priority tier | `priority` value |
+   |---|---|---|---|---|
+   | `size:xs` | `1` | | Urgent | `1` |
+   | `size:s` | `2` | | High | `2` |
+   | `size:m` | `3` | | Medium | `3` |
+   | (body `## Size`, no label) | map XS/S/M → 1/2/3 | | Low | `4` |
+
+   The estimate scale is the Sailfin team's **Linear (1–5)** scale. Every
+   `claude-ready` leaf gets both an estimate and a priority; if grooming set no
+   explicit priority, default the leaf to its Project's priority. Never leave a
+   promoted leaf at `No priority` / no estimate.
+4. **Assign the issue to its epic's Project** if it isn't already, resolving the
    Project from the epic (`epic`/parent reference) and creating it per § Linear
    structure & naming when it doesn't exist yet.
-4. **Roll up the Project status** from its issues: any issue In Progress →
+5. **Roll up the Project status** from its issues: any issue In Progress →
    Project `started`; else any Ready → `planned`; else `backlog`. Never
    `completed`/`canceled` from a workflow.
 

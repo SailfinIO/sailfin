@@ -311,7 +311,6 @@ jobs:
               new_number="$(gh issue create --repo "$REPO" \
                 --title "$title" \
                 --label "type:perf" \
-                --label "priority:medium" \
                 --label "perf-regression" \
                 --body-file perf-new-body.md \
                 | awk -F/ '/^https:/{print $NF}')"

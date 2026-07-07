@@ -426,8 +426,10 @@ jobs:
   #
   # Responsibilities:
   #   1. Open or append a dedup'd regression issue tagged
-  #      `priority:critical`, `area:architecture`, and the stable marker
-  #      `build-quality-regression`. Title prefix
+  #      `area:architecture` and the stable marker
+  #      `build-quality-regression` (a build-quality regression is
+  #      inherently release-critical; priority is set on the Linear mirror
+  #      at triage — it is no longer a GitHub label). Title prefix
   #      `build-quality regression:` + gate-name suffix lets later runs
   #      append a comment rather than open a duplicate.
   #   2. On `push: main` only, look up the merging PR (`/commits/{sha}/
@@ -565,7 +567,6 @@ jobs:
             new_number="$(gh issue create \
               --repo "$REPO" \
               --title "$title" \
-              --label "priority:critical" \
               --label "area:architecture" \
               --label "build-quality-regression" \
               --body-file regression-new-body.md \
