@@ -75,6 +75,148 @@ fn render_help_tree(cmd: Command) -> HelpNode {
     };
 }
 
+fn render_help_json(node: HelpNode) -> string {
+    // Render the complete command tree as a stable machine-readable JSON
+    // envelope. The text help path continues to consume the same HelpNode, so
+    // `--help` and `--help --json` cannot drift in command/flag coverage.
+    return "{" + _json_number_field("schema_version", 1) + "," + _json_field("command", _render_help_node_json(node))
+        + "}";
+}
+
+fn _render_help_node_json(node: HelpNode) -> string {
+    let mut parts: string[] = [];
+    parts.push(_json_string_field("name", node.name));
+    parts.push(_json_string_field("description", node.description));
+    parts.push(_json_string_field("version", node.version));
+    parts.push(_json_field("flags", _render_help_flags_json(node.flags)));
+    parts.push(_json_field("positionals", _render_help_positionals_json(node.positionals)));
+    parts.push(_json_field("subcommands", _render_help_nodes_json(node.subcommands)));
+    return "{" + _json_join(parts, ",") + "}";
+}
+
+fn _render_help_nodes_json(nodes: HelpNode[]) -> string {
+    let mut parts: string[] = [];
+    let mut i: int = 0;
+    loop {
+        if i >= nodes.length { break; }
+        parts.push(_render_help_node_json(nodes[i]));
+        i += 1;
+    }
+    return "[" + _json_join(parts, ",") + "]";
+}
+
+fn _render_help_flags_json(flags: HelpFlag[]) -> string {
+    let mut parts: string[] = [];
+    let mut i: int = 0;
+    loop {
+        if i >= flags.length { break; }
+        let f = flags[i];
+        let mut fields: string[] = [];
+        fields.push(_json_string_field("name", f.long_name));
+        fields.push(_json_string_field("short", f.short_name));
+        fields.push(_json_bool_field("takes_value", f.takes_value));
+        fields.push(_json_string_field("description", f.description));
+        fields.push(_json_bool_field("required", f.required));
+        fields.push(_json_string_field("env", f.env_var));
+        parts.push("{" + _json_join(fields, ",") + "}");
+        i += 1;
+    }
+    return "[" + _json_join(parts, ",") + "]";
+}
+
+fn _render_help_positionals_json(args: HelpPositional[]) -> string {
+    let mut parts: string[] = [];
+    let mut i: int = 0;
+    loop {
+        if i >= args.length { break; }
+        let a = args[i];
+        let mut fields: string[] = [];
+        fields.push(_json_string_field("name", a.name));
+        fields.push(_json_string_field("description", a.description));
+        fields.push(_json_bool_field("optional", a.is_optional));
+        fields.push(_json_bool_field("variadic", a.is_variadic));
+        fields.push(_json_string_field("default", a.default_value));
+        parts.push("{" + _json_join(fields, ",") + "}");
+        i += 1;
+    }
+    return "[" + _json_join(parts, ",") + "]";
+}
+
+fn _json_escape_string(s: string) -> string {
+    let mut out: string = "";
+    let mut i: int = 0;
+    loop {
+        if i >= s.length { break; }
+        let ch = substring(s, i, i + 1);
+        if ch == "\"" { out = out + "\\\""; } else if ch == "\\" {
+            out = out + "\\\\";
+        } else if ch == "\n" { out = out + "\\n"; } else if ch == "\r" {
+            out = out + "\\r";
+        } else if ch == "\t" { out = out + "\\t"; } else { out = out + ch; }
+        i += 1;
+    }
+    return out;
+}
+
+fn _json_quote(s: string) -> string {
+    return "\"" + _json_escape_string(s) + "\"";
+}
+
+fn _json_field(name: string, value: string) -> string {
+    return _json_quote(name) + ":" + value;
+}
+
+fn _json_string_field(name: string, value: string) -> string {
+    return _json_field(name, _json_quote(value));
+}
+
+fn _json_bool_field(name: string, value: boolean) -> string {
+    if value { return _json_field(name, "true"); }
+    return _json_field(name, "false");
+}
+
+fn _json_number_field(name: string, value: int) -> string {
+    return _json_field(name, _json_number_to_string(value));
+}
+
+fn _json_number_to_string(value: int) -> string {
+    if value == 0 { return "0"; }
+    let digits = "0123456789";
+    let mut working = value;
+    let mut negative = false;
+    if working < 0 {
+        negative = true;
+        working = 0 - working;
+    }
+    let mut out = "";
+    loop {
+        if working <= 0 { break; }
+        let mut temp = working;
+        let mut quotient = 0;
+        loop {
+            if temp < 10 { break; }
+            temp -= 10;
+            quotient += 1;
+        }
+        out = substring(digits, temp, temp + 1) + out;
+        working = quotient;
+    }
+    if negative { out = "-" + out; }
+    return out;
+}
+
+fn _json_join(parts: string[], sep: string) -> string {
+    if parts.length == 0 { return ""; }
+    let mut out = parts[0];
+    let mut i: int = 1;
+    loop {
+        if i >= parts.length { break; }
+        out = out + sep + parts[i];
+        i += 1;
+    }
+    return out;
+}
+
 fn render_help_text(node: HelpNode) -> string {
     // Render a `HelpNode` into the `--help` string. Pure (no `![io]`).
     // The usage-line program name is `node.name`.

@@ -1,0 +1,54 @@
+// End-to-end coverage for `sfn --help --json` command-tree introspection.
+//
+// The JSON is emitted from the live `sfn/cli` HelpNode derived from the root
+// command tree, not a hand-maintained fixture. This test pins discoverability,
+// top-level command coverage, and deterministic output across runs.
+import { contains } from "sfn/strings";
+
+fn _sfn_bin() -> string ![io] {
+    let configured = env.get("SAILFIN_BIN");
+    if configured.length > 0 { return configured; }
+    return "build/native/sailfin";
+}
+
+fn _child_env() -> string[] ![io] {
+    let mut e: string[] = [];
+    let path = env.get("PATH");
+    if path.length > 0 { e.push("PATH=" + path); }
+    let home = env.get("HOME");
+    if home.length > 0 { e.push("HOME=" + home); }
+    let tmpdir = env.get("TMPDIR");
+    if tmpdir.length > 0 { e.push("TMPDIR=" + tmpdir); }
+    return e;
+}
+
+fn _assert_top_command(out: string, name: string) {
+    assert contains(out, "\"name\":\"" + name + "\"");
+}
+
+test "cli help json: stable envelope includes registered top-level commands" ![io] {
+    let exit1 = process.run_capture([_sfn_bin(), "--help", "--json"], _child_env());
+    let out1 = process.capture_take_stdout();
+    let err1 = process.capture_take_stderr();
+    assert exit1 == 0;
+    assert err1.length == 0;
+
+    let exit2 = process.run_capture([_sfn_bin(), "--help", "--json"], _child_env());
+    let out2 = process.capture_take_stdout();
+    let err2 = process.capture_take_stderr();
+    assert exit2 == 0;
+    assert err2.length == 0;
+    assert strings_equal(out1, out2);
+
+    assert contains(out1, "\"schema_version\":1");
+    assert contains(out1, "\"command\":{");
+    _assert_top_command(out1, "build");
+    _assert_top_command(out1, "run");
+    _assert_top_command(out1, "check");
+    _assert_top_command(out1, "test");
+    _assert_top_command(out1, "fmt");
+    _assert_top_command(out1, "add");
+    assert contains(out1, "\"flags\":[");
+    assert contains(out1, "\"takes_value\":");
+    assert contains(out1, "\"description\":");
+}

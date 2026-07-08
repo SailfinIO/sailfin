@@ -31,6 +31,8 @@ import {
     ParseResult,
     command,
     parse,
+    render_help_json,
+    render_help_tree,
     subcommand,
     subcommand_path,
     with_subcommand
@@ -143,6 +145,20 @@ fn _v2_trace_argv(argv: string[]) ![io] {
     }
 }
 
+fn _is_help_json_args(args: string[]) -> boolean {
+    if args.length != 2 { return false; }
+    if strings_equal(args[0], "--help") {
+        return strings_equal(args[1], "--json");
+    }
+    if strings_equal(args[0], "-h") {
+        return strings_equal(args[1], "--json");
+    }
+    if strings_equal(args[0], "help") {
+        return strings_equal(args[1], "--json");
+    }
+    return false;
+}
+
 fn sailfin_cli_main_v2(argv: string[]) -> int ![io, clock] {
     // Parse the driver-injected `--runtime-root` / `--binary-dir` prefix
     // (Issue 2.2) so `binary_dir` is available for version resolution
@@ -196,6 +212,15 @@ fn sailfin_cli_main_v2(argv: string[]) -> int ![io, clock] {
     root = with_subcommand(root, check_command_def());
     root = with_subcommand(root, build_command_def());
     root = with_subcommand(root, run_command_def());
+
+    // Machine-readable top-level help for tools and agents. This bypasses
+    // `parse()` intentionally: `--json` is a modifier for root help, not a
+    // root command flag, so the human-readable `sfn --help` path below stays
+    // byte-for-byte unchanged.
+    if _is_help_json_args(args) {
+        print(render_help_json(render_help_tree(root)));
+        return 0;
+    }
 
     // Preserve the legacy `--emit` long-flag alias (`sfn --emit llvm x.sfn`):
     // the legacy dispatch treated `--emit` as the first token identically to
