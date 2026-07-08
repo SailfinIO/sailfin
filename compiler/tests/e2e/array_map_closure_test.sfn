@@ -11,7 +11,7 @@
 // Drives the compiler-under-test as a subprocess with the runtime
 // `process.*` builtins and asserts on captured stdout — the canonical
 // e2e pattern (see `.claude/rules/no-bash-e2e.md`, `closure_capture_test.sfn`).
-import { trim_right } from "sfn/strings";
+import { find, trim_right } from "sfn/strings";
 
 // The compiler-under-test: `$SAILFIN_BIN` if set, else the self-hosted
 // binary relative to the repo root the runner starts from. Mirrors
@@ -46,4 +46,18 @@ test "array map: capturing lambda transforms elements (sum 36, not 6)" ![io] {
     let r = _run_fixture("compiler/tests/e2e/fixtures/array_map_closure/main.sfn");
     assert r.exit == 0;
     assert r.out == "36";
+}
+
+test "array map: int[] mapper result produces int[][] (SFN-112)" ![io] {
+    let r = _run_fixture("compiler/tests/e2e/fixtures/array_map_nested_int/main.sfn");
+    assert r.exit == 0;
+    assert r.out == "24";
+}
+
+test "array map: float[] remains rejected with diagnostic" ![io] {
+    let exit = process.run_capture([_sfn_bin(), "build", "compiler/tests/e2e/fixtures/array_map_float_negative/main.sfn"], _child_env());
+    let _out = process.capture_take_stdout();
+    let err = process.capture_take_stderr();
+    assert exit != 0;
+    assert find(err, "callee signature is not known", 0) >= 0;
 }

@@ -138,6 +138,14 @@ fn _array_hof_result_base(expression: string) -> string {
     return "";
 }
 
+fn _array_hof_map_returns_int_array(expression: string) -> boolean {
+    let trimmed = trim_text(expression);
+    if index_of(trimmed, ".map(") < 0 { return false; }
+    if index_of(trimmed, "-> int[]") >= 0 { return true; }
+    if index_of(trimmed, "->int[]") >= 0 { return true; }
+    return false;
+}
+
 // Recover the source array element type for a base identifier binding,
 // mirroring the receiver-element resolution in
 // core_call_resolution.sfn:563-588 (the binding's llvm_type first, then
@@ -219,20 +227,19 @@ fn lower_let_instruction(function: NativeFunction, instruction: NativeInstructio
     // routing (core_call_resolution.sfn:563-676) and the closure-parameter
     // inference need from the receiver — a follow-on `sq.reduce(...)` /
     // `sq.map(...)` then fatals at lowering or miscompiles its untyped
-    // closure params to `i8*`. The shipped map/filter helpers are i64-only,
-    // so when the base resolves to an i64 array, treat the binding as
-    // `int[]` — the same annotation a typed `let sq: int[] = ...` carries —
-    // so the result becomes a first-class array local (llvm_type
-    // `{i64*, i64, i64}*`, the i8* result coerced on store) with the element
-    // type recoverable everywhere downstream. Gated on an empty source
-    // annotation so an explicit `let sq: int[] = ...` is untouched; non-i64
-    // element maps never route to the helper (they fatal earlier), so only
-    // genuinely-i64 results are enriched.
+    // closure params to `i8*`. The shipped scalar lane records `int[]` when
+    // the base resolves to an i64 array. SFN-112 adds the first
+    // pointer-width array-element lane: if the mapper explicitly returns
+    // `int[]`, record `int[][]` so nested-map results stay first-class array
+    // locals too. Gated on an empty source annotation so explicit
+    // `let sq: ... = ...` bindings are untouched.
     let mut effective_annotation: string = instruction.type_annotation;
     if trim_text(instruction.type_annotation).length == 0 {
         let hof_base = _array_hof_result_base(instruction.value);
         if hof_base.length > 0 {
-            if _base_array_element_type(hof_base, current_locals, current_bindings, context) == "i64" {
+            if _array_hof_map_returns_int_array(instruction.value) {
+                effective_annotation = "int[][]";
+            } else if _base_array_element_type(hof_base, current_locals, current_bindings, context) == "i64" {
                 effective_annotation = "int[]";
             }
         }
