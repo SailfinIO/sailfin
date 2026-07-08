@@ -58,7 +58,11 @@ import {
     _strip_trailing_slashes_cmd,
     _write_text_cmd
 } from "../../build/fs";
-import { assemble_runtime_capsule_link_inputs } from "../../build/runtime_objs";
+import {
+    assemble_runtime_capsule_link_inputs,
+    runtime_stamp_identity,
+    write_runtime_identity_stamp
+} from "../../build/runtime_objs";
 import {
     CacheKey,
     cache_copy_artifact_to,
@@ -633,6 +637,16 @@ fn run(matches: Matches, ctx: CliContext) -> int ![io, clock] {
         // warm failure is non-fatal: children re-attempt and surface a
         // precise per-file link error.
         let warm_caps = runtime_capsule_from_root(runtime_root);
+        // #1996 / SFEP-0044 §3-A: after a successful warm, write the
+        // invocation stamp so children skip the per-file runtime
+        // cache-key derivation. The nonce ties the stamp to THIS
+        // invocation: children only trust a stamp whose `invocation=`
+        // matches the `SAILFIN_TEST_RUNTIME_STAMP` env they were
+        // handed, so a stale stamp in a reused pinned objdir (e.g.
+        // seedcheck runs pin SAILFIN_TEST_SCRATCH) can never validate.
+        // A failed warm or failed stamp write leaves the nonce empty
+        // and children fall back to full hashing — the pre-stamp path.
+        let mut stamp_nonce: string = "";
         if warm_caps.length > 0 {
             _ensure_dir_cmd(sub_root);
             let warm = assemble_runtime_capsule_link_inputs(warm_caps, sub_root, "-O0", binary_dir, "");
@@ -640,6 +654,13 @@ fn run(matches: Matches, ctx: CliContext) -> int ![io, clock] {
                 print.err("[test] warning: failed to pre-warm runtime objects under "
                     + sub_root
                     + " (children will retry per file)");
+            } else {
+                let candidate_nonce = _sanitize_filename_cmd(sub_root) + "-"
+                    + number_to_string(monotonic_millis());
+                let warm_identity = _test_bin_runtime_identity(runtime_root, _sanitize_filename_cmd(sub_root));
+                if write_runtime_identity_stamp(warm_caps, sub_root, "-O0", binary_dir, candidate_nonce, warm_identity) {
+                    stamp_nonce = candidate_nonce;
+                }
             }
         }
         // Single-frame `--json` aggregation (#1121). The parent owns the
@@ -725,7 +746,7 @@ fn run(matches: Matches, ctx: CliContext) -> int ![io, clock] {
                     if launched - ti >= jobs { break; }
                     let spawn_scratch = sub_root + "/sub-" + number_to_string(launched);
                     _ensure_dir_cmd(spawn_scratch);
-                    handles.push(process.spawn_with_env(_pool_child_argv(timeout_cmd, timeout_secs, self_exe, test_files[launched], name_filter, tag_filter, json_output, no_test_cache), _pool_child_env(pool_base_env, spawn_scratch, sub_root, update_snapshots, json_output)));
+                    handles.push(process.spawn_with_env(_pool_child_argv(timeout_cmd, timeout_secs, self_exe, test_files[launched], name_filter, tag_filter, json_output, no_test_cache), _pool_child_env(pool_base_env, spawn_scratch, sub_root, stamp_nonce, update_snapshots, json_output)));
                     launched += 1;
                 }
                 let path = test_files[ti];
@@ -812,7 +833,7 @@ fn run(matches: Matches, ctx: CliContext) -> int ![io, clock] {
                 // `sf_counts[rti]` fire on a double crash.
                 let stale_sf = rchild_scratch + "/_subframe_summary.json";
                 if fs.exists(stale_sf) { fs.deleteFile(stale_sf); }
-                let retry_handle = process.spawn_with_env(_pool_child_argv(timeout_cmd, timeout_secs, self_exe, rpath, name_filter, tag_filter, json_output, no_test_cache), _pool_child_env(pool_base_env, rchild_scratch, sub_root, update_snapshots, json_output));
+                let retry_handle = process.spawn_with_env(_pool_child_argv(timeout_cmd, timeout_secs, self_exe, rpath, name_filter, tag_filter, json_output, no_test_cache), _pool_child_env(pool_base_env, rchild_scratch, sub_root, stamp_nonce, update_snapshots, json_output));
                 let rc = _reap_test_child(retry_handle);
                 if rc == 0 { suites[rsuite_idx].pass_count += 1; } else {
                     // #1303: the isolated retry also died. The RETRY
@@ -854,7 +875,7 @@ fn run(matches: Matches, ctx: CliContext) -> int ![io, clock] {
                 // this per-file dir — see `SAILFIN_TEST_RUNTIME_OBJDIR`.
                 let child_scratch = sub_root + "/sub-" + number_to_string(ti);
                 _ensure_dir_cmd(child_scratch);
-                let mut rc = _run_test_child(timeout_cmd, timeout_secs, child_scratch, sub_root, self_exe, path, name_filter, tag_filter, update_snapshots, json_output, no_test_cache);
+                let mut rc = _run_test_child(timeout_cmd, timeout_secs, child_scratch, sub_root, stamp_nonce, self_exe, path, name_filter, tag_filter, update_snapshots, json_output, no_test_cache);
                 if _should_retry_test(rc, sub_retries_disabled) {
                     // RETRY banner is a human-mode artifact; suppress it in
                     // JSON mode so the jsonl stream stays pure (mirrors the
@@ -865,7 +886,7 @@ fn run(matches: Matches, ctx: CliContext) -> int ![io, clock] {
                             + number_to_string(rc)
                             + ", retrying once)");
                     }
-                    rc = _run_test_child(timeout_cmd, timeout_secs, child_scratch, sub_root, self_exe, path, name_filter, tag_filter, update_snapshots, json_output, no_test_cache);
+                    rc = _run_test_child(timeout_cmd, timeout_secs, child_scratch, sub_root, stamp_nonce, self_exe, path, name_filter, tag_filter, update_snapshots, json_output, no_test_cache);
                 }
                 if rc == 0 { suites[suite_idx].pass_count += 1; } else {
                     // #1303: serial path — a signal-kill (after the
@@ -2214,10 +2235,14 @@ fn _append_test_filter_args(argv: string[], name_filter: string, tag_filter: str
     return out;
 }
 
-fn _run_test_child(timeout_cmd: string, timeout_secs: string, child_scratch: string, runtime_objdir: string, self_exe: string, path: string, name_filter: string, tag_filter: string, update_snapshots: boolean, json_output: boolean, no_test_cache: boolean) -> int ![io] {
+fn _run_test_child(timeout_cmd: string, timeout_secs: string, child_scratch: string, runtime_objdir: string, stamp_nonce: string, self_exe: string, path: string, name_filter: string, tag_filter: string, update_snapshots: boolean, json_output: boolean, no_test_cache: boolean) -> int ![io] {
     // #940: `SAILFIN_TEST_RUNTIME_OBJDIR` points the child's runtime
     // link at the shared, invocation-stable object dir the parent
     // warmed once, so the runtime isn't recompiled per test file.
+    // #1996: `SAILFIN_TEST_RUNTIME_STAMP` carries the invocation nonce
+    // that lets the child trust the parent's runtime-identity stamp
+    // (omitted entirely when the parent wrote no stamp, keeping the
+    // argv byte-identical to the pre-stamp shape).
     // #977: when `--update-snapshots` is active, prepend
     // `SAILFIN_UPDATE_SNAPSHOTS=1` to the child's `env` so the child —
     // and the test binary it execs (which inherits the child's
@@ -2227,6 +2252,9 @@ fn _run_test_child(timeout_cmd: string, timeout_secs: string, child_scratch: str
         let mut base = [timeout_cmd, timeout_secs, "env", "SAILFIN_TEST_SCRATCH="
             + child_scratch, "SAILFIN_TEST_RUNTIME_OBJDIR="
             + runtime_objdir];
+        if stamp_nonce.length > 0 {
+            base.push("SAILFIN_TEST_RUNTIME_STAMP=" + stamp_nonce);
+        }
         if update_snapshots { base.push("SAILFIN_UPDATE_SNAPSHOTS=1"); }
         if json_output { base.push("SAILFIN_TEST_JSON_SUBFRAME=1"); }
         base.push(self_exe);
@@ -2238,6 +2266,9 @@ fn _run_test_child(timeout_cmd: string, timeout_secs: string, child_scratch: str
     }
     let mut base = ["env", "SAILFIN_TEST_SCRATCH=" + child_scratch, "SAILFIN_TEST_RUNTIME_OBJDIR="
         + runtime_objdir];
+    if stamp_nonce.length > 0 {
+        base.push("SAILFIN_TEST_RUNTIME_STAMP=" + stamp_nonce);
+    }
     if update_snapshots { base.push("SAILFIN_UPDATE_SNAPSHOTS=1"); }
     if json_output { base.push("SAILFIN_TEST_JSON_SUBFRAME=1"); }
     base.push(self_exe);
@@ -2317,13 +2348,14 @@ fn _env_entry_has_key(entry: string, key: string) -> boolean {
 // `SAILFIN_TEST_SCRATCH` (nested runner) or `SAILFIN_UPDATE_SNAPSHOTS`,
 // and POSIX `getenv` returns the FIRST match — so the inherited value
 // would shadow the per-child one without this filter.
-fn _pool_child_env(base_env: string[], child_scratch: string, runtime_objdir: string, update_snapshots: boolean, json_output: boolean) -> string[] {
+fn _pool_child_env(base_env: string[], child_scratch: string, runtime_objdir: string, stamp_nonce: string, update_snapshots: boolean, json_output: boolean) -> string[] {
     let mut env_flat: string[] = [];
     let mut i: int = 0;
     loop {
         if i >= base_env.length { break; }
         let entry = base_env[i];
         if !_env_entry_has_key(entry, "SAILFIN_TEST_SCRATCH") && !_env_entry_has_key(entry, "SAILFIN_TEST_RUNTIME_OBJDIR")
+            && !_env_entry_has_key(entry, "SAILFIN_TEST_RUNTIME_STAMP")
             && !_env_entry_has_key(entry, "SAILFIN_UPDATE_SNAPSHOTS")
             && !_env_entry_has_key(entry, "SAILFIN_TEST_JSON_SUBFRAME") {
             env_flat.push(entry);
@@ -2332,6 +2364,13 @@ fn _pool_child_env(base_env: string[], child_scratch: string, runtime_objdir: st
     }
     env_flat.push("SAILFIN_TEST_SCRATCH=" + child_scratch);
     env_flat.push("SAILFIN_TEST_RUNTIME_OBJDIR=" + runtime_objdir);
+    // #1996: the invocation nonce for the runtime-identity stamp. An
+    // inherited copy is always dropped above (a nested runner's nonce
+    // must never validate this invocation's stamp); the fresh value is
+    // pushed only when the parent actually wrote a stamp.
+    if stamp_nonce.length > 0 {
+        env_flat.push("SAILFIN_TEST_RUNTIME_STAMP=" + stamp_nonce);
+    }
     if update_snapshots { env_flat.push("SAILFIN_UPDATE_SNAPSHOTS=1"); }
     if json_output { env_flat.push("SAILFIN_TEST_JSON_SUBFRAME=1"); }
     return env_flat;
@@ -2520,6 +2559,19 @@ fn _collect_header_files_cmd(root: string, max_depth: int) -> string[] ![io] {
 // path collision-safe across concurrent `sfn test` invocations (pass the
 // per-invocation scratch root).
 fn _test_bin_runtime_identity(runtime_root: string, unique_suffix: string) -> string ![io] {
+    // #1996 / SFEP-0044 §3-A: when this process is a child of a
+    // multi-file runner that stamped the warm objdir, the identity was
+    // already computed once by the parent over the same immutable
+    // runtime tree — return the stamped value instead of re-hashing
+    // every runtime source + header. Nonce validation happens inside
+    // `runtime_stamp_identity`; any failure returns "" and the full
+    // computation below runs (the parent itself, and the single-file
+    // leaf path, always take that branch).
+    let stamp_objdir = _get_env_cmd("SAILFIN_TEST_RUNTIME_OBJDIR");
+    if stamp_objdir.length > 0 {
+        let stamped_identity = runtime_stamp_identity(stamp_objdir);
+        if stamped_identity.length > 0 { return stamped_identity; }
+    }
     let caps = runtime_capsule_from_root(runtime_root);
     let mut sources: string[] = [];
     let mut values: string[] = [];

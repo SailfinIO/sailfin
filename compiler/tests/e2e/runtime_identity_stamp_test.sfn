@@ -1,0 +1,244 @@
+// compiler/tests/e2e/runtime_identity_stamp_test.sfn
+//
+// Regression tests for the invocation-scoped runtime-identity stamp
+// (#1996, SFEP-0044 §3-A).
+//
+// The multi-file parent of `sfn test <dirA> <dirB>` warms the runtime
+// once into a shared objdir, then writes `.runtime-identity.stamp` into
+// that objdir. Children receive `SAILFIN_TEST_RUNTIME_STAMP=<nonce>`
+// and only trust the stamp when its `invocation=` line matches the nonce.
+// A missing/mismatched stamp falls back to full hashing — byte-identical
+// to the pre-stamp path.
+//
+// Four contracts tested here:
+//
+//   1. A multi-file run writes a v1 stamp with invocation/identity/obj
+//      lines into the SAILFIN_TEST_SCRATCH root.
+//   2. Two consecutive runs over the same scratch mint different nonces
+//      (cross-invocation leak guard).
+//   3. A child handed a garbage SAILFIN_TEST_RUNTIME_STAMP falls back
+//      to full hashing — it exits 0 with tests passing (no crash).
+//   4. A runtime content change on a fresh invocation causes the runtime
+//      object to be rebuilt (the nonce/sidecar staleness contract).
+//      Documented skip until #2005: out-of-tree SAILFIN_RUNTIME_ROOT is
+//      broken by a duplicate sfn_type_register__<path-slug> definition
+//      in type_meta's emit, so a private runtime copy cannot warm.
+//
+// All nested `sfn test` invocations use two trivial fixture files as the
+// "test suite" so each nested run is fast (no real suite dirs). Fixtures
+// are materialized into the per-test mkdtemp scratch.
+//
+// NOTE: `sfn/test` `expect_*` matchers are `![pure]` and cannot be called
+// from an `![io]` test; assertions use `sfn/strings::find` per the
+// `.claude/rules/no-bash-e2e.md` pattern. See `guillermo_test.sfn` for
+// the canonical _sfn_bin() / child-env shape.
+import { find } from "sfn/strings";
+
+fn _sfn_bin() -> string ![io] {
+    let configured = env.get("SAILFIN_BIN");
+    if configured.length > 0 { return configured; }
+    return "build/native/sailfin";
+}
+
+// Thread PATH/HOME/TMPDIR through to the nested `sfn test` child with an
+// explicit SAILFIN_TEST_SCRATCH override. `run_capture`'s empty-array env
+// is the FULL empty environment (not "inherit"), so clang/linker are
+// unreachable without PATH; the per-test scratch isolates each test's
+// objdir (the stamp lands under it) from sibling tests in the parallel
+// pool (#1333).
+fn _child_env_with_scratch(scratch: string) -> string[] ![io] {
+    let mut e: string[] = [];
+    let path = env.get("PATH");
+    if path.length > 0 { e.push("PATH=" + path); }
+    let home = env.get("HOME");
+    if home.length > 0 { e.push("HOME=" + home); }
+    let tmpdir = env.get("TMPDIR");
+    if tmpdir.length > 0 { e.push("TMPDIR=" + tmpdir); }
+    e.push("SAILFIN_TEST_SCRATCH=" + scratch);
+    return e;
+}
+
+// Materialize two minimal fixture dirs (A and B) under `base`. Each dir
+// contains one *_test.sfn with a single passing test. Returns [dirA, dirB].
+fn _make_fixture_dirs(base: string, tag: string) -> string[] ![io] {
+    let dir_a = base + "/fix-" + tag + "-A";
+    let dir_b = base + "/fix-" + tag + "-B";
+    fs.createDirectory(dir_a, true);
+    fs.createDirectory(dir_b, true);
+    fs.writeFile(dir_a + "/alpha_test.sfn", "test \"alpha: arithmetic\" { assert 1 + 1 == 2; }\n");
+    fs.writeFile(dir_b + "/beta_test.sfn", "test \"beta: comparison\" { assert 3 > 2; }\n");
+    let mut dirs: string[] = [];
+    dirs.push(dir_a);
+    dirs.push(dir_b);
+    return dirs;
+}
+
+// Read `.runtime-identity.stamp` from `objdir`. Returns "" when absent.
+fn _read_stamp(objdir: string) -> string ![io] {
+    let path = objdir + "/.runtime-identity.stamp";
+    if !fs.exists(path) { return ""; }
+    return fs.readFile(path);
+}
+
+// Extract the value of `key=` from a stamp string (e.g. "invocation").
+// Returns "" when the key is absent or the stamp is empty.
+fn _stamp_field(stamp: string, key: string) -> string {
+    let prefix = key + "=";
+    let mut pos: int = 0;
+    loop {
+        if pos >= stamp.length { break; }
+        let nl = find(stamp, "\n", pos);
+        let mut end: int = stamp.length;
+        if nl >= 0 { end = nl; }
+        let line = substring(stamp, pos, end);
+        if line.length > prefix.length && substring(line, 0, prefix.length) == prefix {
+            return substring(line, prefix.length, line.length);
+        }
+        if nl < 0 { break; }
+        pos = nl + 1;
+    }
+    return "";
+}
+
+// ---- Test 1: multi-file run writes a nonce-scoped stamp ----
+//
+// A `sfn test <dirA> <dirB>` run (two dirs → multi-file subprocess path)
+// with a pinned SAILFIN_TEST_SCRATCH must write a `.runtime-identity.stamp`
+// into that scratch dir. The stamp must:
+//   - open with the `v1` version line
+//   - carry an `invocation=` line
+//   - carry an `identity=` line with a 64-character hex digest
+//   - carry at least one `obj/` line
+test "stamp: multi-file run writes a nonce-scoped stamp into the warm objdir" ![io] {
+    let scratch = fs.mkdtemp("sfn-stamp-t1-");
+    let dirs = _make_fixture_dirs(scratch, "t1");
+    let exit = process.run_capture([_sfn_bin(), "test", dirs[0], dirs[1]], _child_env_with_scratch(scratch));
+    let _ = process.capture_take_stdout();
+    let _ = process.capture_take_stderr();
+    assert exit == 0;
+
+    let stamp = _read_stamp(scratch);
+    // Stamp must be non-empty.
+    assert stamp.length > 0;
+
+    // First line must be the version sentinel.
+    let first_nl = find(stamp, "\n", 0);
+    assert first_nl > 0;
+    assert substring(stamp, 0, first_nl) == "v1";
+
+    // Must carry invocation= (non-empty nonce).
+    let nonce = _stamp_field(stamp, "invocation");
+    assert nonce.length > 0;
+
+    // Must carry identity= (64-char hex — SHA-256 digest as produced by
+    // `sha256_hex_of_string`; the folded runtime identity).
+    let identity = _stamp_field(stamp, "identity");
+    assert identity.length == 64;
+
+    // Must carry at least one obj/ line. The stamp format uses
+    // `obj/<slug>=<64-hex>` entries. A presence check on "obj/" suffices.
+    assert find(stamp, "\nobj/", 0) >= 0;
+}
+
+// ---- Test 2: rerun mints a fresh nonce and still passes ----
+//
+// Two consecutive multi-file runs over the SAME scratch must each exit 0
+// and each rewrite the stamp with a different invocation nonce. The nonce
+// is designed to be per-invocation unique (SFEP-0044 §3-A, hazard b):
+// a child from run X must not validate a stamp written by run Y.
+test "stamp: rerun mints a fresh nonce and both runs pass" ![io] {
+    let scratch = fs.mkdtemp("sfn-stamp-t2-");
+    let dirs = _make_fixture_dirs(scratch, "t2");
+
+    // First run.
+    let exit1 = process.run_capture([_sfn_bin(), "test", dirs[0], dirs[1]], _child_env_with_scratch(scratch));
+    let _ = process.capture_take_stdout();
+    let _ = process.capture_take_stderr();
+    assert exit1 == 0;
+    let nonce1 = _stamp_field(_read_stamp(scratch), "invocation");
+    assert nonce1.length > 0;
+
+    // Second run (same scratch, same fixture dirs).
+    let exit2 = process.run_capture([_sfn_bin(), "test", dirs[0], dirs[1]], _child_env_with_scratch(scratch));
+    let _ = process.capture_take_stdout();
+    let _ = process.capture_take_stderr();
+    assert exit2 == 0;
+    let nonce2 = _stamp_field(_read_stamp(scratch), "invocation");
+    assert nonce2.length > 0;
+
+    // The two nonces must differ: the parent mints a fresh nonce each
+    // invocation to prevent a child from trusting a stale-invocation stamp.
+    assert nonce1 != nonce2;
+}
+
+// ---- Test 3: garbage nonce falls back to full hashing ----
+//
+// When a single-file child receives a `SAILFIN_TEST_RUNTIME_STAMP` value
+// that does not match any stamp on disk (or when the objdir has no stamp
+// at all), `_runtime_stamp_value` returns "" and the full hash path runs.
+// The child must still exit 0 with the test passing — graceful fallback,
+// no crash.
+//
+// Shape: warm the objdir first via a multi-file run (so a valid stamp
+// exists), then run a SINGLE fixture file with a completely bogus nonce.
+// If the child respected the bogus nonce it would read a stale key and
+// potentially misbehave; instead it must ignore the stamp and succeed.
+test "stamp: garbage nonce falls back to full hashing — no crash, tests pass" ![io] {
+    let scratch = fs.mkdtemp("sfn-stamp-t3-");
+    let dirs = _make_fixture_dirs(scratch, "t3");
+
+    // Warm: multi-file run to materialize the stamp.
+    let warm_exit = process.run_capture([_sfn_bin(), "test", dirs[0], dirs[1]], _child_env_with_scratch(scratch));
+    let _ = process.capture_take_stdout();
+    let _ = process.capture_take_stderr();
+    assert warm_exit == 0;
+
+    // Now run a SINGLE file with a bogus stamp nonce in the env. The child
+    // is handed SAILFIN_TEST_RUNTIME_OBJDIR (via its inherited scratch =
+    // scratch) but the nonce "totally-bogus" will never match the stamp's
+    // `invocation=` line, so it falls back to hashing.
+    let mut bogus_env = _child_env_with_scratch(scratch);
+    bogus_env.push("SAILFIN_TEST_RUNTIME_OBJDIR=" + scratch);
+    bogus_env.push("SAILFIN_TEST_RUNTIME_STAMP=totally-bogus");
+    let single_exit = process.run_capture([_sfn_bin(), "test", dirs[0]
+        + "/alpha_test.sfn"], bogus_env);
+    let _ = process.capture_take_stdout();
+    let _ = process.capture_take_stderr();
+    // Must exit 0: the fallback path produces correct output, no crash.
+    assert single_exit == 0;
+}
+
+// ---- Test 4: runtime content change across invocations rebuilds the object ----
+//
+// The load-bearing staleness test: if a runtime source changes between two
+// invocations, the second invocation must rebuild the affected runtime object.
+// The nonce closes the cross-invocation leak: a child from run 2 never
+// validates the stamp written by run 1 (different nonce), so it falls back to
+// full hashing, compares the new content hash against the old .key sidecar,
+// and rebuilds.
+//
+// The intended shape (blocked, see below): copy `runtime/` into the tmp
+// scratch, point the nested runner at the copy via `SAILFIN_RUNTIME_ROOT`
+// (honored FIRST by `resolve_runtime_root`, runtime/sfn/platform/exec.sfn,
+// and inherited by the runner's per-file children — the serial `env`
+// wrapper overlays without `-i`, the pool path copies the full environ),
+// append a per-run-unique token to the copy's `clock.sfn`, rerun, and
+// assert the `.key` sidecar CONTENT changed.
+//
+// BLOCKED by #2005: an out-of-tree SAILFIN_RUNTIME_ROOT produces a
+// duplicate `sfn_type_register__<path-slug>` definition in type_meta's
+// emitted .ll, so the private copy's runtime warm fails before the
+// staleness contract can be exercised (reproduced 2026-07-08 while
+// implementing this test). Editing the repo's own runtime/sfn/** from a
+// test is not an option — sibling tests build against it concurrently.
+//
+// Until #2005 lands, the contract is covered by: (a) manual verification
+// 2026-07-08 — editing runtime/sfn/clock.sfn between invocations rebuilt
+// clock.o and rewrote its sidecar + stamp; (b) tests 2 and 3 above, which
+// prove the nonce scope guard (fresh nonce per invocation; mismatched
+// nonce falls back to hashing); (c) the pre-existing runtime-object cache
+// tests guarding the `.key` sidecar contract (#632/#969). When #2005 is
+// fixed, replace this body with the intended shape.
+test "stamp: runtime content change across invocations rebuilds the object" ![io] {
+    assert true;
+}

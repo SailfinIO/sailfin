@@ -83,41 +83,44 @@ into the warm objdir, and have children read the stamp instead of re-hashing.
 
 Stamp file: `<warm_objdir>/.runtime-identity.stamp`, written by the parent
 immediately after a successful `assemble_runtime_capsule_link_inputs` warm. Its
-contents (newline-separated `key=value`, versioned):
+contents (newline-separated `key=value`, versioned; **as built** — the full
+cache keys are multi-line strings, so each stamp line carries the
+`sha256_hex_of_string` of the key rather than the key itself, keeping the
+format single-line-safe):
 
 ```
 v1
 invocation=<parent-minted nonce>
-runtime_identity=<the runtime_link_inputs_identity digest>
-obj_key/<slug>=<per-sfn-source runtime_object_cache_key_with_identity digest>
-obj_key/<slug>=...      # one line per runtime sfn-source + prelude entry
-sibling_key/<slug>=<the _runtime_obj_key_with_sibling_deps result for that slug>
-asm_key/<slug>=<the _stage_one import-context key for that slug>
+identity=<the runtime_link_inputs_identity digest>
+obj/<cap_prefix + source basename + opt_flag + ".o">=<sha256 of the full
+    sibling-folded runtime_object_cache_key_with_identity key>
+asm/<slug>=<sha256 of the _stage_one import-context key>
 ```
 
-The parent computes each of these values exactly once (it is already computing
-the object keys during the warm), so writing the stamp is nearly free.
+The nonce is `sanitize(sub_root) + "-" + monotonic_millis()` — `sub_root` is
+already per-invocation unique when mktemp'd, and the millis term covers the
+externally-pinned-scratch case. The parent re-derives each key once with
+exactly the emit path's derivation (`write_runtime_identity_stamp` in
+`runtime_objs.sfn` binds them side by side); the runtime identity is computed
+once by the parent (`_test_bin_runtime_identity`) and passed in. Derivation
+drift between the writer and the emit path produces a stamped hash that
+mismatches the sidecar — a fail-safe cache miss, never a stale hit.
 
 **How children consume it.**
 
-- `_test_bin_runtime_identity` (`test.sfn:2522`): if
-  `SAILFIN_TEST_RUNTIME_OBJDIR` is set **and** the stamp exists **and** its
-  `invocation` matches the value the child was handed (see nonce below), return
-  the stamped `runtime_identity` directly — skipping the entire
-  source/header hash loop. Otherwise fall back to the current in-process
-  computation (single-file leaf path, or a missing/mismatched stamp).
+- `_test_bin_runtime_identity` (`test.sfn`): if `SAILFIN_TEST_RUNTIME_OBJDIR`
+  is set **and** the stamp validates (versioned + `invocation=` equals the
+  child's `SAILFIN_TEST_RUNTIME_STAMP` env), return the stamped `identity`
+  directly — skipping the entire source/header hash loop. Otherwise fall back
+  to the full in-process computation (single-file leaf path, or a
+  missing/mismatched stamp).
 
-- `assemble_runtime_capsule_link_inputs` / `_emit_runtime_sfn_to_obj` /
-  `_stage_one_runtime_sfn_import_context`: on the warm child path, the object
-  already exists in the shared objdir with its `.key` sidecar. Today the child
-  re-derives the key (hashing the source) purely to compare against the sidecar.
-  Instead, thread an optional **precomputed-key lookup** (a
-  `RuntimeIdentityStamp` value, parsed from the stamp once per child) down the
-  warm path: when the stamp carries `obj_key/<slug>` (and `sibling_key`,
-  `asm_key`), use it as the expected key for the `_runtime_obj_cache_hit`
-  comparison instead of recomputing via `_sha256_of_file_cmd`. A cache hit then
-  requires **zero** hashing: existence check + sidecar-string compare against the
-  stamped key.
+- `_emit_runtime_sfn_to_obj` / `_stage_one_runtime_sfn_import_context`
+  (`_runtime_stamp_cache_hit`): on the warm child path, a hit is
+  `sha256(sidecar contents) == stamped hash` — zero source/sibling hashing.
+  Any mismatch (or absent artifact/sidecar/stamp/nonce) falls through to the
+  full key derivation and the existing `_runtime_obj_cache_hit` compare, so
+  the sidecar remains the freshness authority.
 
 **The staleness / correctness argument (the load-bearing part).**
 
