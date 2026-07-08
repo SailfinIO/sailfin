@@ -1,0 +1,82 @@
+import {
+    serve,
+    Request,
+    Response,
+    not_found
+} from "sfn/http";
+
+struct User {
+    id: string;
+    name: string;
+}
+
+let mut users: User[] = [];
+
+fn json_user(user: User) -> string {
+    return "{\"id\":\"" + user.id + "\",\"name\":\"" + user.name + "\"}";
+}
+
+fn json_users() -> string {
+    let mut out = "[";
+    let mut i = 0;
+    loop {
+        if i >= users.length { break; }
+        if i > 0 { out = out + ","; }
+        out = out + json_user(users[i]);
+        i = i + 1;
+    }
+    return out + "]";
+}
+
+fn find_user(id: string) -> User? {
+    let mut i = 0;
+    loop {
+        if i >= users.length { break; }
+        if strings_equal(users[i].id, id) { return users[i]; }
+        i = i + 1;
+    }
+    return null;
+}
+
+fn handle(req: Request) -> Response {
+    if strings_equal(req.method, "GET") && strings_equal(req.path, "/users") {
+        return Response {
+            status: 200,
+            headers: ["Content-Type: application/json"],
+            body: json_users()
+        };
+    }
+
+    if strings_equal(req.method, "GET") && req.path.length > 7 && strings_equal(substring(req.path, 0, 7), "/users/") {
+        let id = substring(req.path, 7, req.path.length);
+        let user = find_user(id);
+        if user != null {
+            return Response {
+                status: 200,
+                headers: ["Content-Type: application/json"],
+                body: json_user(user as User)
+            };
+        }
+        return not_found();
+    }
+
+    if strings_equal(req.method, "POST") && strings_equal(req.path, "/users") {
+        let user = User {
+            id: number_to_string(users.length + 1),
+            name: req.body
+        };
+        users.push(user);
+        return Response {
+            status: 201,
+            headers: ["Content-Type: application/json"],
+            body: json_user(user)
+        };
+    }
+
+    return not_found();
+}
+
+fn main() -> int ![io, net] {
+    serve(handle as * fn (Request) -> Response, 18882);
+    return 0;
+}

@@ -47,19 +47,18 @@ extern fn recv(sockfd: i32, buf: * u8, len: i64, flags: i32) -> i64;
 
 extern fn close(fd: i32) -> i32;
 
-// The listening port for the loopback server. Fixed and distinct from
-// `serve_loopback_test.sfn`'s 18790 so the two never collide under
-// `--jobs N`.
-fn _lb_port() -> i64 { return 18791; }
+// The listening port for the loopback server. Fixed and outside the
+// 18790..18797 HTTP/TLS loopback range so shard-local timeout-wrapped
+// servers from sibling tests cannot answer this websocket probe.
+fn _lb_port() -> i64 { return 18884; }
 
-fn _lb_port_str() -> string { return "18791"; }
+fn _lb_port_str() -> string { return "18884"; }
 
 // A second, distinct fixed port for the concurrent-clients test's own
-// server instance, so it never collides with the port above or with
-// `serve_loopback_test.sfn`'s 18790 under `--jobs N`.
-fn _lb_port2() -> i64 { return 18792; }
+// server instance, outside the shared HTTP/TLS loopback range.
+fn _lb_port2() -> i64 { return 18885; }
 
-fn _lb_port2_str() -> string { return "18792"; }
+fn _lb_port2_str() -> string { return "18885"; }
 
 fn _sfn_bin() -> string ![io] {
     let configured = env.get("SAILFIN_BIN");
@@ -512,7 +511,7 @@ test "websocket.serve loopback: handshake + echo + close round-trip" ![io] {
     // Teardown of the blocking server relies on a wall-clock timeout (no
     // process-kill primitive; `websocket.serve` never returns). Without
     // `timeout`/`gtimeout`, spawning the server would orphan the fixed port
-    // 18791 and poison subsequent runs — skip cleanly instead.
+    // and poison subsequent runs — skip cleanly instead.
     if _timeout_cmd().length == 0 {
         print.info("[websocket-serve-loopback] SKIP: no timeout/gtimeout to reap the blocking server");
         return;
@@ -572,7 +571,7 @@ test "websocket.serve loopback: handshake + echo + close round-trip" ![io] {
 
 test "websocket.serve loopback: two clients served concurrently" ![io] {
     // Same rationale as the test above: without a reaper, a spawned server
-    // would orphan the fixed port 18792 and poison subsequent runs.
+    // would orphan the fixed port and poison subsequent runs.
     if _timeout_cmd().length == 0 {
         print.info("[websocket-serve-concurrent] SKIP: no timeout/gtimeout to reap the blocking server");
         return;
@@ -666,11 +665,11 @@ test "websocket.serve loopback: two clients served concurrently" ![io] {
 }
 
 // ── RFC 6455 protocol-completeness cases (#1924) ───────────────────────
-// A third fixed port + consumer tree, independent of the two above so the
-// protocol test spawns its own server and never collides under `--jobs N`.
-fn _lb_port3() -> i64 { return 18793; }
+// A third fixed port + consumer tree, independent of the two above and outside
+// the shared HTTP/TLS loopback range.
+fn _lb_port3() -> i64 { return 18886; }
 
-fn _lb_port3_str() -> string { return "18793"; }
+fn _lb_port3_str() -> string { return "18886"; }
 
 fn _app_root3() -> string { return "build/websocket-serve-protocol-e2e"; }
 
