@@ -61,3 +61,11 @@ test "array map: float[] remains rejected with diagnostic" ![io] {
     assert exit != 0;
     assert find(err, "callee signature is not known", 0) >= 0;
 }
+
+test "array map: struct array with pointer field remains rejected" ![io] {
+    let exit = process.run_capture([_sfn_bin(), "build", "compiler/tests/e2e/fixtures/array_map_struct_pointer_negative/main.sfn"], _child_env());
+    let _out = process.capture_take_stdout();
+    let err = process.capture_take_stderr();
+    assert exit != 0;
+    assert find(err, "callee signature is not known", 0) >= 0;
+}

@@ -616,25 +616,25 @@ fn resolve_call_method_target(trimmed_target: string, arguments: string[], bindi
                                     }
                                 }
                                 if _pre_am_operand != null {
+                                    let mut _pre_am_ann: string = "";
+                                    if _pre_am_local != null {
+                                        if _pre_am_local.type_annotation != null {
+                                            _pre_am_ann = _pre_am_local.type_annotation;
+                                        }
+                                    }
+                                    if _pre_am_ann.length == 0 {
+                                        if _pre_am_param != null {
+                                            if _pre_am_param.type_annotation != null {
+                                                _pre_am_ann = _pre_am_param.type_annotation;
+                                            }
+                                        }
+                                    }
                                     let mut _pre_am_elem = array_pointer_element_type(_pre_am_type);
                                     // Fallback: when the binding's llvm_type is opaque
                                     // (e.g. `i8*` from async/runtime helpers, or degraded
                                     // across module boundaries), derive the element type
                                     // from the source type_annotation instead.
                                     if _pre_am_elem.length == 0 {
-                                        let mut _pre_am_ann: string = "";
-                                        if _pre_am_local != null {
-                                            if _pre_am_local.type_annotation != null {
-                                                _pre_am_ann = _pre_am_local.type_annotation;
-                                            }
-                                        }
-                                        if _pre_am_ann.length == 0 {
-                                            if _pre_am_param != null {
-                                                if _pre_am_param.type_annotation != null {
-                                                    _pre_am_ann = _pre_am_param.type_annotation;
-                                                }
-                                            }
-                                        }
                                         if _pre_am_ann.length > 0 {
                                             let _pre_am_derived = map_array_pointer_type(context, _pre_am_ann);
                                             if _pre_am_derived.length > 0 {
@@ -690,9 +690,6 @@ fn resolve_call_method_target(trimmed_target: string, arguments: string[], bindi
                                                 if starts_with(trim_text(_pre_am_elem), "{") {
                                                     _pre_map_supported = true;
                                                 }
-                                            }
-                                            if index_of(_pre_am_type, "i64*") >= 0 {
-                                                _pre_map_supported = true;
                                             }
                                             if _pre_map_supported {
                                                 let _pre_map_desc = find_runtime_helper("runtime_array_map_fn");
