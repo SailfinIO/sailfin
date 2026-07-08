@@ -127,6 +127,7 @@ export {
     help,
     print_help,
     render_help_tree,
+    render_help_json,
     render_help_text
 } from "./help";
 
