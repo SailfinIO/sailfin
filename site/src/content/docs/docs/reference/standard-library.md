@@ -746,7 +746,7 @@ The following HTTP features are planned for a future release:
 - Streaming response bodies
 - Per-request allocation cleanup, and a typed routing layer (sfn/http Waves 3+)
 
-> TLS shipped for this client (SFEP-0036): `https://` URLs are handled transparently with certificate verification — see the note under [`http` module](#http-module). (The typed `sfn/http` `fetch`/keep-alive client remains HTTP-only for now.)
+> TLS shipped for this client (SFEP-0036): `https://` URLs are handled transparently with certificate verification — see the note under [`http` module](#http-module). The typed `sfn/http` `fetch`/keep-alive client uses the same verified TLS path for `https://`.
 
 ---
 
@@ -1054,7 +1054,7 @@ let phrase = reason_phrase(418); // "Status"
 
 ### Client
 
-The following wrappers call the underlying runtime HTTP client and return the response **body string** directly (distinct from the `runtime.http` client which returns a `Response` struct with both `body` and `status`). Like `http.get`/`http.post`, `get` and `post` support `https://` transparently with certificate verification (SFEP-0036); the typed `fetch` client below does **not** (see its limits).
+The following wrappers call the underlying runtime HTTP client and return the response **body string** directly (distinct from the `runtime.http` client which returns a `Response` struct with both `body` and `status`). Like `http.get`/`http.post`, `get`, `post`, and typed `fetch` support `https://` transparently with certificate verification (SFEP-0036).
 
 #### `get(url: string) -> string ![net]`
 
@@ -1097,13 +1097,13 @@ fn check(url: string) -> int ![net] {
 }
 ```
 
-The `fetch` client shares the v0 client limits: no TLS (`https://` is rejected), `localhost`/dotted-quad IPv4 hosts only (no DNS), no chunked decoding, no redirect following.
+The `fetch` client shares the v0 client limits: no chunked decoding and no redirect following. `http://` and `https://` both use the shared DNS-capable socket path; `https://` verifies the peer chain and hostname by default and fails closed on an untrusted certificate.
 
 ---
 
 #### Native keep-alive client primitives (single-connection reuse)
 
-For back-to-back requests to the same authority, `sfn/http` exposes three runtime adapter primitives that hold a TCP connection open across multiple send/receive cycles (#1711). These are externable from a consumer capsule and bypass the per-request connect overhead of `get`/`post`/`fetch`.
+For back-to-back requests to the same authority, `sfn/http` exposes three runtime adapter primitives that hold a TCP or TLS connection open across multiple send/receive cycles (#1711). These are externable from a consumer capsule and bypass the per-request connect overhead of `get`/`post`/`fetch`; `https://` authorities use the same verified TLS client path as one-shot requests.
 
 ##### `sfn_http_conn_open(url: string) -> int ![net]`
 
