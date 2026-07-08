@@ -239,7 +239,13 @@ fn parse(cmd: Command, argv: string[]) -> Result<ParseResult, ParseError> {
                     // its required positionals/flags must be satisfied
                     // (and optional defaults filled) here, since the final
                     // post-loop validation only sees the leaf level.
-                    let _lr: ParseResult = _validate_level(cmd.name, path, active, pos_idx, pos_names, pos_values, fl_names, fl_values, fl_present)?;
+                    let level_result = _validate_level(cmd.name, path, active, pos_idx, pos_names, pos_values, fl_names, fl_values, fl_present);
+                    match level_result {
+                        Result.Ok { value } => { },
+                        Result.Err { error } => {
+                            return Result.Err { error: error };
+                        }
+                    }
                     path.push(token);
                     active = sub;
                     // Positionals are scoped per level; restart the
@@ -298,17 +304,11 @@ fn parse_with_env(cmd: Command, argv: string[]) -> Result<ParseResult, ParseErro
     // leaf level they were read from. The `env.get` read is the only
     // reason this entry carries `![io]` — `parse()` itself stays pure.
     let first_result = parse(cmd, argv);
-    let mut first_error: ParseError = _empty_parse_error();
-    let mut first_ok: boolean = true;
-    let mut first: ParseResult = ParseResult { matches: _empty_matches() };
-    match first_result {
-        Result.Ok { value } => { first = value; },
-        Result.Err { error } => {
-            first = ParseResult { matches: error.matches };
-            first_error = error;
-            first_ok = false;
-        }
-    }
+    let first_ok: boolean = parse_is_ok(first_result);
+    let first_error: ParseError = parse_error(first_result);
+    let first: ParseResult = ParseResult {
+        matches: parse_matches(first_result)
+    };
 
     // Help/version requests short-circuit identically on re-parse, so
     // skip the env reads entirely and return the pure result.
@@ -479,11 +479,8 @@ fn run(cmd: Command, argv: string[]) -> Matches ![io] {
     // `parse_with_env()` is why env-bound flags resolve for real CLI entry
     // points while keeping the pure `parse()` available for embedding.
     let result = parse_with_env(cmd, argv);
-    let mut error: ParseError = _empty_parse_error();
-    match result {
-        Result.Ok { value } => { return value.matches; },
-        Result.Err { error: err } => { error = err; }
-    }
+    if parse_is_ok(result) { return parse_matches(result); }
+    let error: ParseError = parse_error(result);
 
     let path = error.matches.subcommand_path;
     let active = _resolve_active_path(cmd, path);
