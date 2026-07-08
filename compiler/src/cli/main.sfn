@@ -28,6 +28,8 @@
 // numeric coercion.
 import {
     Command,
+    Matches,
+    ParseError,
     ParseResult,
     command,
     parse,
@@ -159,6 +161,29 @@ fn _is_help_json_args(args: string[]) -> boolean {
     return false;
 }
 
+fn _empty_cli_matches() -> Matches {
+    return Matches {
+        command_name: "",
+        subcommand_name: "",
+        subcommand_path: [],
+        positional_names: [],
+        positional_values: [],
+        flag_names: [],
+        flag_values: [],
+        flag_present: []
+    };
+}
+
+fn _empty_parse_error() -> ParseError {
+    return ParseError {
+        kind: "ok",
+        message: "",
+        flag_name: "",
+        arg_name: "",
+        matches: _empty_cli_matches()
+    };
+}
+
 fn sailfin_cli_main_v2(argv: string[]) -> int ![io, clock] {
     // Parse the driver-injected `--runtime-root` / `--binary-dir` prefix
     // (Issue 2.2) so `binary_dir` is available for version resolution
@@ -238,12 +263,25 @@ fn sailfin_cli_main_v2(argv: string[]) -> int ![io, clock] {
         j += 1;
     }
 
-    let result: ParseResult = parse(root, parse_argv);
+    let parse_result = parse(root, parse_argv);
+    let mut parse_error: ParseError = _empty_parse_error();
+    let mut parse_ok: boolean = true;
+    let mut result: ParseResult = ParseResult {
+        matches: _empty_cli_matches()
+    };
+    match parse_result {
+        Result.Ok { value } => { result = value; },
+        Result.Err { error } => {
+            result = ParseResult { matches: error.matches };
+            parse_error = error;
+            parse_ok = false;
+        }
+    }
 
     // `sfn guillermo` — the registered subcommand matched. Dispatch to
     // the guillermo command's `run` (it takes no input, so `matches` and
     // `ctx` are unused), reproducing the cold-path argv trace v2 owns.
-    if result.ok {
+    if parse_ok {
         if strings_equal(subcommand(result.matches), "guillermo") {
             if ctx.trace_argv { _v2_trace_argv(argv); }
             return guillermo_run(result.matches, ctx);
@@ -251,7 +289,7 @@ fn sailfin_cli_main_v2(argv: string[]) -> int ![io, clock] {
     }
 
     // `sfn init` — the registered subcommand matched. `init` declares no
-    // args, so a clean parse (`result.ok`) is the bare invocation and
+    // args, so a clean parse (`parse_ok`) is the bare invocation and
     // dispatches to `init.run` (exit 0 scaffolded / 1 already-exists).
     // Any trailing token makes the parse non-ok while still marking the
     // `init` subcommand as descended; that is a usage error (exit 2),
@@ -262,7 +300,7 @@ fn sailfin_cli_main_v2(argv: string[]) -> int ![io, clock] {
     // import value path today, so they lower to 0 here (see `init.sfn`).
     if strings_equal(subcommand(result.matches), "init") {
         if ctx.trace_argv { _v2_trace_argv(argv); }
-        if result.ok { return init_run(result.matches, ctx); }
+        if parse_ok { return init_run(result.matches, ctx); }
         print("usage: sfn init");
         return 2;
     }
@@ -277,7 +315,7 @@ fn sailfin_cli_main_v2(argv: string[]) -> int ![io, clock] {
     // dispatch above (the `sfn/cli` `EXIT_*` constants lower to 0 here).
     if strings_equal(subcommand(result.matches), "login") {
         if ctx.trace_argv { _v2_trace_argv(argv); }
-        if result.ok { return login_run(result.matches, ctx); }
+        if parse_ok { return login_run(result.matches, ctx); }
         print("usage: sfn login [token]");
         return 2;
     }
@@ -292,7 +330,7 @@ fn sailfin_cli_main_v2(argv: string[]) -> int ![io, clock] {
     // `sfn/cli` `EXIT_*` constants lower to 0 here).
     if strings_equal(subcommand(result.matches), "add") {
         if ctx.trace_argv { _v2_trace_argv(argv); }
-        if result.ok { return add_run(result.matches, ctx); }
+        if parse_ok { return add_run(result.matches, ctx); }
         print("usage: sfn add [--dev] [--update] <capsule>");
         return 2;
     }
@@ -308,7 +346,7 @@ fn sailfin_cli_main_v2(argv: string[]) -> int ![io, clock] {
     // to 0 here).
     if strings_equal(subcommand(result.matches), "publish") {
         if ctx.trace_argv { _v2_trace_argv(argv); }
-        if result.ok { return publish_run(result.matches, ctx); }
+        if parse_ok { return publish_run(result.matches, ctx); }
         print("usage: sfn publish [path]");
         return 2;
     }
@@ -326,7 +364,7 @@ fn sailfin_cli_main_v2(argv: string[]) -> int ![io, clock] {
     // constants lower to 0 here).
     if strings_equal(subcommand(result.matches), "lock") {
         if ctx.trace_argv { _v2_trace_argv(argv); }
-        if result.ok { return lock_run(result.matches, ctx); }
+        if parse_ok { return lock_run(result.matches, ctx); }
         print("usage: sfn lock [--work-dir DIR]");
         return 2;
     }
@@ -342,7 +380,7 @@ fn sailfin_cli_main_v2(argv: string[]) -> int ![io, clock] {
     // `EXIT_*` constants lower to 0 here).
     if strings_equal(subcommand(result.matches), "package") {
         if ctx.trace_argv { _v2_trace_argv(argv); }
-        if result.ok { return package_run(result.matches, ctx); }
+        if parse_ok { return package_run(result.matches, ctx); }
         print("usage: sfn package [--target T] [--out DIR] [--compiler-bin PATH] [--installer] [-p <capsule-path>]");
         return 2;
     }
@@ -360,7 +398,7 @@ fn sailfin_cli_main_v2(argv: string[]) -> int ![io, clock] {
     // above (the `sfn/cli` `EXIT_*` constants lower to 0 here).
     if strings_equal(subcommand(result.matches), "emit") {
         if ctx.trace_argv { _v2_trace_argv(argv); }
-        if result.ok { return emit_run(result.matches, ctx); }
+        if parse_ok { return emit_run(result.matches, ctx); }
         print("usage: sfn emit [--timing] [-o OUTPUT] [--module-name SLUG] [--import-context DIR] [--attempts N] [--no-retry] [--validate] [--no-validate] [--no-resolve-gate] <llvm|sailfin|native> <file.sfn>");
         return 2;
     }
@@ -377,7 +415,7 @@ fn sailfin_cli_main_v2(argv: string[]) -> int ![io, clock] {
     // constants lower to 0 here).
     if strings_equal(subcommand(result.matches), "fmt") {
         if ctx.trace_argv { _v2_trace_argv(argv); }
-        if result.ok { return fmt_run(result.matches, ctx); }
+        if parse_ok { return fmt_run(result.matches, ctx); }
         print("usage: sfn fmt [--check] [--write] <path...>");
         return 2;
     }
@@ -396,7 +434,7 @@ fn sailfin_cli_main_v2(argv: string[]) -> int ![io, clock] {
     // lower to 0 here).
     if strings_equal(subcommand(result.matches), "test") {
         if ctx.trace_argv { _v2_trace_argv(argv); }
-        if result.ok { return test_run(result.matches, ctx); }
+        if parse_ok { return test_run(result.matches, ctx); }
         print("usage: sfn test [--json] [-k NAME] [--tag TAG] [--update-snapshots] [--no-test-cache] [--jobs N] <suite...>");
         return 2;
     }
@@ -413,7 +451,7 @@ fn sailfin_cli_main_v2(argv: string[]) -> int ![io, clock] {
     // constants lower to 0 here).
     if strings_equal(subcommand(result.matches), "check") {
         if ctx.trace_argv { _v2_trace_argv(argv); }
-        if result.ok { return check_run(result.matches, ctx); }
+        if parse_ok { return check_run(result.matches, ctx); }
         print("usage: sfn check [--quiet] [--json] [--allow-bare-assert] [path...]");
         return 2;
     }
@@ -436,9 +474,9 @@ fn sailfin_cli_main_v2(argv: string[]) -> int ![io, clock] {
     if config_path.length > 0 {
         if strings_equal(config_path[0], "config") {
             if ctx.trace_argv { _v2_trace_argv(argv); }
-            if result.ok { return config_run(result.matches, ctx); }
-            if result.error.message.length > 0 {
-                print(result.error.message);
+            if parse_ok { return config_run(result.matches, ctx); }
+            if parse_error.message.length > 0 {
+                print(parse_error.message);
             } else {
                 print("usage: sfn config <get|set|unset|list> [key] [value]");
             }
@@ -461,23 +499,23 @@ fn sailfin_cli_main_v2(argv: string[]) -> int ![io, clock] {
     if cache_path.length > 0 {
         if strings_equal(cache_path[0], "cache") {
             if ctx.trace_argv { _v2_trace_argv(argv); }
-            if result.ok { return cache_run(result.matches, ctx); }
-            if result.error.message.length > 0 {
-                print(result.error.message);
+            if parse_ok { return cache_run(result.matches, ctx); }
+            if parse_error.message.length > 0 {
+                print(parse_error.message);
             } else { print("usage: sfn cache <info|prune|clean>"); }
             return 2;
         }
     }
 
     let mut handled_version: boolean = false;
-    if result.ok {
+    if parse_ok {
         // `sfn version` — the registered subcommand matched.
         if strings_equal(subcommand(result.matches), "version") {
             handled_version = true;
         }
     } else {
         // `sfn --version` / `sfn -V` — the built-in version flag.
-        if strings_equal(result.error.kind, "version_requested") {
+        if strings_equal(parse_error.kind, "version_requested") {
             handled_version = true;
         }
     }
@@ -487,7 +525,7 @@ fn sailfin_cli_main_v2(argv: string[]) -> int ![io, clock] {
         // `SAILFIN_TRACE_ARGV` toggle would go silent on `version`.
         if ctx.trace_argv { _v2_trace_argv(argv); }
         // Dispatch to the `version` command's `run`. On the `--version` /
-        // `-V` flag path `result.ok` is false, but `result.matches` still
+        // `-V` flag path `parse_ok` is false, but `result.matches` still
         // reflects the accumulated parse state; `version.run` ignores it,
         // so passing it on both paths keeps the dispatch uniform.
         return version_run(result.matches, ctx);
@@ -502,7 +540,7 @@ fn sailfin_cli_main_v2(argv: string[]) -> int ![io, clock] {
     // usage error (exit 2) — the parser owns argument validation.
     if strings_equal(subcommand(result.matches), "build") {
         if ctx.trace_argv { _v2_trace_argv(argv); }
-        if result.ok { return build_run(result.matches, ctx); }
+        if parse_ok { return build_run(result.matches, ctx); }
         print("usage: sfn build [-o OUTPUT] [-p PATH] [--no-cache] [--clean] [--cache-trace] [--json] [--work-dir DIR] [--check-determinism] (<file.sfn> | -p <capsule-path>)");
         return 2;
     }
@@ -516,7 +554,7 @@ fn sailfin_cli_main_v2(argv: string[]) -> int ![io, clock] {
     // re-enters here as `["run", foo.sfn]` from the legacy fallthrough.
     if strings_equal(subcommand(result.matches), "run") {
         if ctx.trace_argv { _v2_trace_argv(argv); }
-        if result.ok { return run_run(result.matches, ctx); }
+        if parse_ok { return run_run(result.matches, ctx); }
         print("usage: sfn run [--no-cache] [--clean] [--cache-trace] <file.sfn>");
         return 2;
     }
