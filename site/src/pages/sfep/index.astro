@@ -1,0 +1,379 @@
+---
+import { getCollection } from "astro:content";
+import BaseLayout from "../../layouts/BaseLayout.astro";
+import {
+  isCanonicalSfepEntry,
+  sortSfeps,
+  toSfepSummary,
+} from "../../utils/sfeps";
+
+const sfeps = (await getCollection("sfep"))
+  .filter(isCanonicalSfepEntry)
+  .map(toSfepSummary)
+  .sort(sortSfeps);
+
+const statuses = Array.from(new Set(sfeps.map((sfep) => sfep.status))).sort();
+const types = Array.from(new Set(sfeps.map((sfep) => sfep.type))).sort();
+
+const implementedCount = sfeps.filter((sfep) => sfep.status === "Implemented").length;
+const acceptedCount = sfeps.filter((sfep) => sfep.status === "Accepted").length;
+const draftCount = sfeps.filter((sfep) => sfep.status === "Draft").length;
+---
+
+<BaseLayout
+  title="SFEPs"
+  description="Browse Sailfin Enhancement Proposals for language, runtime, toolchain, and process design."
+>
+  <section class="sfep-index">
+    <div class="container">
+      <header class="sfep-header">
+        <div>
+          <p class="eyebrow">Design records</p>
+          <h1>Sailfin Enhancement Proposals</h1>
+          <p class="lead">
+            SFEPs capture the durable language, runtime, toolchain, and process decisions behind Sailfin.
+          </p>
+        </div>
+        <a class="process-link" href="/sfep/0001-sfep-process">Read SFEP-0001</a>
+      </header>
+
+      <div class="stats" aria-label="SFEP status summary">
+        <div class="stat">
+          <strong>{sfeps.length}</strong>
+          <span>Total</span>
+        </div>
+        <div class="stat">
+          <strong>{implementedCount}</strong>
+          <span>Implemented</span>
+        </div>
+        <div class="stat">
+          <strong>{acceptedCount}</strong>
+          <span>Accepted</span>
+        </div>
+        <div class="stat">
+          <strong>{draftCount}</strong>
+          <span>Draft</span>
+        </div>
+      </div>
+
+      <form class="filters" id="sfep-filters" role="search">
+        <label class="search-field">
+          <span>Search SFEPs</span>
+          <input
+            id="sfep-query"
+            type="search"
+            name="q"
+            autocomplete="off"
+            placeholder="effects, runtime, typecheck"
+          />
+        </label>
+
+        <label>
+          <span>Status</span>
+          <select id="sfep-status" name="status">
+            <option value="">All statuses</option>
+            {statuses.map((status) => <option value={status}>{status}</option>)}
+          </select>
+        </label>
+
+        <label>
+          <span>Type</span>
+          <select id="sfep-type" name="type">
+            <option value="">All types</option>
+            {types.map((type) => <option value={type}>{type}</option>)}
+          </select>
+        </label>
+      </form>
+
+      <div class="result-meta" aria-live="polite">
+        <span id="sfep-count">{sfeps.length}</span> proposals
+      </div>
+
+      <div class="sfep-list" id="sfep-list">
+        {sfeps.map((sfep) => (
+          <a
+            class="sfep-card"
+            href={sfep.href}
+            data-status={sfep.status}
+            data-type={sfep.type}
+            data-search={sfep.searchableText}
+          >
+            <div class="card-topline">
+              <span class="number">{sfep.number}</span>
+              <span class:list={["status", `status-${sfep.status.toLowerCase().replaceAll(" ", "-")}`]}>
+                {sfep.status}
+              </span>
+            </div>
+            <h2>{sfep.title}</h2>
+            <div class="meta">
+              <span>{sfep.type}</span>
+              {sfep.updated && (
+                <>
+                  <span aria-hidden="true">/</span>
+                  <time datetime={sfep.updated}>Updated {sfep.updated}</time>
+                </>
+              )}
+            </div>
+            {sfep.tracking && <p class="tracking">Tracks {sfep.tracking}</p>}
+          </a>
+        ))}
+      </div>
+    </div>
+  </section>
+
+  <script>
+    const form = document.getElementById("sfep-filters") as HTMLFormElement | null;
+    const query = document.getElementById("sfep-query") as HTMLInputElement | null;
+    const status = document.getElementById("sfep-status") as HTMLSelectElement | null;
+    const type = document.getElementById("sfep-type") as HTMLSelectElement | null;
+    const count = document.getElementById("sfep-count");
+    const cards = Array.from(document.querySelectorAll<HTMLElement>(".sfep-card"));
+
+    function applyFilters() {
+      const q = query?.value.trim().toLowerCase() ?? "";
+      const selectedStatus = status?.value ?? "";
+      const selectedType = type?.value ?? "";
+      let visible = 0;
+
+      for (const card of cards) {
+        const matchesQuery = !q || (card.dataset.search ?? "").includes(q);
+        const matchesStatus = !selectedStatus || card.dataset.status === selectedStatus;
+        const matchesType = !selectedType || card.dataset.type === selectedType;
+        const show = matchesQuery && matchesStatus && matchesType;
+        card.hidden = !show;
+        if (show) visible += 1;
+      }
+
+      if (count) count.textContent = String(visible);
+    }
+
+    form?.addEventListener("input", applyFilters);
+    form?.addEventListener("submit", (event) => event.preventDefault());
+  </script>
+</BaseLayout>
+
+<style>
+  .sfep-index {
+    padding: 3rem 0 5rem;
+  }
+
+  .sfep-header {
+    display: flex;
+    justify-content: space-between;
+    gap: 2rem;
+    align-items: flex-end;
+    margin-bottom: 2rem;
+  }
+
+  .eyebrow {
+    color: var(--color-primary);
+    font-family: var(--font-mono);
+    font-size: 0.8rem;
+    font-weight: 700;
+    letter-spacing: 0;
+    margin-bottom: 0.6rem;
+    text-transform: uppercase;
+  }
+
+  h1 {
+    font-size: clamp(2.25rem, 6vw, 4.5rem);
+    line-height: 1.05;
+    max-width: 11ch;
+  }
+
+  .lead {
+    color: var(--color-text-secondary);
+    font-size: 1.1rem;
+    margin-top: 1rem;
+    max-width: 44rem;
+  }
+
+  .process-link {
+    border: 1px solid var(--color-border-strong);
+    border-radius: 8px;
+    color: var(--color-text);
+    flex-shrink: 0;
+    font-weight: 700;
+    padding: 0.7rem 1rem;
+  }
+
+  .process-link:hover {
+    border-color: var(--color-primary);
+    text-decoration: none;
+  }
+
+  .stats {
+    border-block: 1px solid var(--color-border);
+    display: grid;
+    gap: 1px;
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+    margin-bottom: 2rem;
+  }
+
+  .stat {
+    padding: 1.25rem 0;
+  }
+
+  .stat strong {
+    display: block;
+    font-size: 1.8rem;
+    line-height: 1;
+  }
+
+  .stat span {
+    color: var(--color-text-secondary);
+    font-size: 0.9rem;
+  }
+
+  .filters {
+    align-items: end;
+    display: grid;
+    gap: 1rem;
+    grid-template-columns: minmax(16rem, 1fr) minmax(11rem, 0.25fr) minmax(11rem, 0.25fr);
+    margin-bottom: 1rem;
+  }
+
+  label {
+    color: var(--color-text-secondary);
+    display: grid;
+    font-size: 0.85rem;
+    font-weight: 700;
+    gap: 0.4rem;
+  }
+
+  input,
+  select {
+    background: var(--color-bg);
+    border: 1px solid var(--color-border-strong);
+    border-radius: 8px;
+    color: var(--color-text);
+    display: block;
+    font: inherit;
+    height: 3rem;
+    line-height: 1.2;
+    padding: 0 0.9rem;
+    width: 100%;
+  }
+
+  select {
+    appearance: none;
+    background-image:
+      linear-gradient(45deg, transparent 50%, var(--color-text-secondary) 50%),
+      linear-gradient(135deg, var(--color-text-secondary) 50%, transparent 50%);
+    background-position:
+      calc(100% - 1rem) 1.25rem,
+      calc(100% - 0.7rem) 1.25rem;
+    background-repeat: no-repeat;
+    background-size: 0.32rem 0.32rem, 0.32rem 0.32rem;
+    padding-right: 2.2rem;
+  }
+
+  input:focus,
+  select:focus {
+    border-color: var(--color-primary);
+    outline: 2px solid color-mix(in srgb, var(--color-primary) 28%, transparent);
+    outline-offset: 2px;
+  }
+
+  .result-meta {
+    color: var(--color-text-secondary);
+    font-size: 0.9rem;
+    margin-bottom: 1rem;
+  }
+
+  .sfep-list {
+    display: grid;
+    gap: 1rem;
+    grid-template-columns: repeat(auto-fit, minmax(min(100%, 22rem), 1fr));
+  }
+
+  .sfep-card {
+    border: 1px solid var(--color-border);
+    border-radius: 8px;
+    color: inherit;
+    display: block;
+    min-height: 13rem;
+    padding: 1.25rem;
+    transition: border-color 0.15s, box-shadow 0.15s, transform 0.15s;
+  }
+
+  .sfep-card:hover {
+    border-color: var(--color-primary);
+    box-shadow: 0 8px 28px rgba(32, 21, 47, 0.1);
+    text-decoration: none;
+    transform: translateY(-1px);
+  }
+
+  .card-topline,
+  .meta {
+    align-items: center;
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.5rem;
+  }
+
+  .number {
+    color: var(--color-primary);
+    font-family: var(--font-mono);
+    font-size: 0.85rem;
+    font-weight: 700;
+  }
+
+  .status {
+    background: var(--color-bg-alt);
+    border: 1px solid var(--color-border);
+    border-radius: 999px;
+    color: var(--color-text-secondary);
+    font-size: 0.75rem;
+    font-weight: 700;
+    line-height: 1;
+    padding: 0.35rem 0.55rem;
+  }
+
+  .status-implemented {
+    color: #12633f;
+  }
+
+  .status-accepted {
+    color: var(--color-primary);
+  }
+
+  h2 {
+    font-size: 1.25rem;
+    margin: 0.85rem 0 0.65rem;
+  }
+
+  .meta,
+  .tracking {
+    color: var(--color-text-secondary);
+    font-size: 0.9rem;
+  }
+
+  .tracking {
+    margin-top: 0.85rem;
+  }
+
+  @media (max-width: 760px) {
+    .sfep-header {
+      align-items: stretch;
+      flex-direction: column;
+    }
+
+    h1 {
+      font-size: 2.4rem;
+      max-width: 100%;
+    }
+
+    .process-link {
+      text-align: center;
+    }
+
+    .stats {
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+    }
+
+    .filters {
+      grid-template-columns: 1fr;
+    }
+  }
+</style>

@@ -1,0 +1,315 @@
+---
+import { getCollection, render } from "astro:content";
+import BaseLayout from "../../layouts/BaseLayout.astro";
+import {
+  isCanonicalSfepEntry,
+  slugForSfep,
+  sortSfeps,
+  toSfepSummary,
+} from "../../utils/sfeps";
+
+export async function getStaticPaths() {
+  const entries = (await getCollection("sfep")).filter(isCanonicalSfepEntry);
+  return entries.map((entry) => ({
+    params: { slug: slugForSfep(entry) },
+    props: { entry },
+  }));
+}
+
+const { entry } = Astro.props;
+const sfep = toSfepSummary(entry);
+const allSfeps = (await getCollection("sfep"))
+  .filter(isCanonicalSfepEntry)
+  .map(toSfepSummary)
+  .sort(sortSfeps);
+const currentIndex = allSfeps.findIndex((item) => item.id === sfep.id);
+const previous = currentIndex > 0 ? allSfeps[currentIndex - 1] : null;
+const next = currentIndex >= 0 && currentIndex < allSfeps.length - 1
+  ? allSfeps[currentIndex + 1]
+  : null;
+const sourcePath = entry.filePath?.replace(/^.*\/docs\/proposals\//, "docs/proposals/")
+  ?? `docs/proposals/${entry.id}.md`;
+const { Content } = await render(entry);
+---
+
+<BaseLayout
+  title={`${sfep.number}: ${sfep.title}`}
+  description={`${sfep.number} is a ${sfep.status} ${sfep.type} Sailfin Enhancement Proposal.`}
+  type="article"
+  article={{
+    headline: `${sfep.number}: ${sfep.title}`,
+    datePublished: sfep.created ?? sfep.updated ?? "2026-06-26",
+    author: sfep.author,
+  }}
+>
+  <article class="sfep-page">
+    <div class="container">
+      <a href="/sfep" class="back-link">Back to SFEPs</a>
+
+      <header class="sfep-title">
+        <div class="title-main">
+          <p class="number">{sfep.number}</p>
+          <h1>{sfep.title}</h1>
+        </div>
+        <dl class="frontmatter">
+          <div>
+            <dt>Status</dt>
+            <dd>{sfep.status}</dd>
+          </div>
+          <div>
+            <dt>Type</dt>
+            <dd>{sfep.type}</dd>
+          </div>
+          {sfep.created && (
+            <div>
+              <dt>Created</dt>
+              <dd><time datetime={sfep.created}>{sfep.created}</time></dd>
+            </div>
+          )}
+          {sfep.updated && (
+            <div>
+              <dt>Updated</dt>
+              <dd><time datetime={sfep.updated}>{sfep.updated}</time></dd>
+            </div>
+          )}
+          {sfep.author && (
+            <div>
+              <dt>Author</dt>
+              <dd>{sfep.author}</dd>
+            </div>
+          )}
+          {sfep.tracking && (
+            <div>
+              <dt>Tracking</dt>
+              <dd>{sfep.tracking}</dd>
+            </div>
+          )}
+          <div>
+            <dt>Source</dt>
+            <dd>
+              <a href={`https://github.com/SailfinIO/sailfin/blob/main/${sourcePath}`}>
+                {sourcePath}
+              </a>
+            </dd>
+          </div>
+        </dl>
+      </header>
+
+      <div class="sfep-body">
+        <Content />
+      </div>
+
+      <nav class="sfep-nav" aria-label="Adjacent SFEPs">
+        {previous ? (
+          <a href={previous.href} class="nav-card previous">
+            <span>Previous</span>
+            <strong>{previous.number}</strong>
+            <em>{previous.title}</em>
+          </a>
+        ) : <span></span>}
+
+        {next ? (
+          <a href={next.href} class="nav-card next">
+            <span>Next</span>
+            <strong>{next.number}</strong>
+            <em>{next.title}</em>
+          </a>
+        ) : <span></span>}
+      </nav>
+    </div>
+  </article>
+</BaseLayout>
+
+<style>
+  .sfep-page {
+    padding: 2rem 0 5rem;
+  }
+
+  .sfep-page .container {
+    max-width: 980px;
+  }
+
+  .back-link {
+    color: var(--color-text-secondary);
+    display: inline-block;
+    font-size: 0.9rem;
+    font-weight: 700;
+    margin-bottom: 1.5rem;
+  }
+
+  .sfep-title {
+    border-bottom: 1px solid var(--color-border);
+    display: grid;
+    gap: 2rem;
+    grid-template-columns: minmax(0, 1fr) minmax(18rem, 0.42fr);
+    padding-bottom: 2rem;
+  }
+
+  .number {
+    color: var(--color-primary);
+    font-family: var(--font-mono);
+    font-size: 0.9rem;
+    font-weight: 700;
+    margin-bottom: 0.75rem;
+  }
+
+  h1 {
+    font-size: clamp(2rem, 5vw, 3.5rem);
+    line-height: 1.08;
+    max-width: 13ch;
+  }
+
+  .frontmatter {
+    border: 1px solid var(--color-border);
+    border-radius: 8px;
+    overflow: hidden;
+  }
+
+  .frontmatter div {
+    display: grid;
+    gap: 0.75rem;
+    grid-template-columns: 6rem minmax(0, 1fr);
+    padding: 0.8rem 1rem;
+  }
+
+  .frontmatter div + div {
+    border-top: 1px solid var(--color-border);
+  }
+
+  .frontmatter dt {
+    color: var(--color-text-secondary);
+    font-size: 0.78rem;
+    font-weight: 700;
+    text-transform: uppercase;
+  }
+
+  .frontmatter dd {
+    min-width: 0;
+    overflow-wrap: anywhere;
+  }
+
+  .sfep-body {
+    font-size: 1.02rem;
+    line-height: 1.75;
+    margin: 2.5rem 0 3rem;
+  }
+
+  .sfep-body :global(h1:first-child) {
+    display: none;
+  }
+
+  .sfep-body :global(h2) {
+    border-top: 1px solid var(--color-border);
+    font-size: 1.65rem;
+    margin: 2.5rem 0 1rem;
+    padding-top: 1.6rem;
+  }
+
+  .sfep-body :global(h3) {
+    font-size: 1.25rem;
+    margin: 2rem 0 0.8rem;
+  }
+
+  .sfep-body :global(p),
+  .sfep-body :global(ul),
+  .sfep-body :global(ol),
+  .sfep-body :global(blockquote),
+  .sfep-body :global(table) {
+    margin-bottom: 1rem;
+  }
+
+  .sfep-body :global(ul),
+  .sfep-body :global(ol) {
+    padding-left: 1.5rem;
+  }
+
+  .sfep-body :global(blockquote) {
+    border-left: 3px solid var(--color-primary);
+    color: var(--color-text-secondary);
+    padding-left: 1rem;
+  }
+
+  .sfep-body :global(table) {
+    border-collapse: collapse;
+    display: block;
+    overflow-x: auto;
+    width: 100%;
+  }
+
+  .sfep-body :global(th),
+  .sfep-body :global(td) {
+    border: 1px solid var(--color-border);
+    padding: 0.55rem 0.75rem;
+    text-align: left;
+    vertical-align: top;
+  }
+
+  .sfep-body :global(th) {
+    background: var(--color-bg-alt);
+  }
+
+  .sfep-body :global(a) {
+    overflow-wrap: anywhere;
+  }
+
+  .sfep-nav {
+    border-top: 1px solid var(--color-border);
+    display: grid;
+    gap: 1rem;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    padding-top: 1.5rem;
+  }
+
+  .nav-card {
+    border: 1px solid var(--color-border);
+    border-radius: 8px;
+    color: inherit;
+    display: grid;
+    gap: 0.2rem;
+    min-height: 7rem;
+    padding: 1rem;
+  }
+
+  .nav-card:hover {
+    border-color: var(--color-primary);
+    text-decoration: none;
+  }
+
+  .nav-card span,
+  .nav-card em {
+    color: var(--color-text-secondary);
+    font-size: 0.9rem;
+  }
+
+  .nav-card strong {
+    color: var(--color-primary);
+    font-family: var(--font-mono);
+  }
+
+  .nav-card em {
+    font-style: normal;
+  }
+
+  .next {
+    text-align: right;
+  }
+
+  @media (max-width: 760px) {
+    .sfep-title,
+    .sfep-nav {
+      grid-template-columns: 1fr;
+    }
+
+    h1 {
+      max-width: 100%;
+    }
+
+    .frontmatter div {
+      grid-template-columns: 1fr;
+    }
+
+    .next {
+      text-align: left;
+    }
+  }
+</style>
