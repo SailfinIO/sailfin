@@ -151,29 +151,27 @@ AGENT_REPORT := bash scripts/agent_report.sh
 # can never mask a test-compile regression.
 TEST_BIN_CACHE_FLAGS ?=
 
-# Parallel test execution (#843 / #1236). The unified runner accepts
+# Parallel test execution (#843 / #1236 / #1998). The unified runner accepts
 # `--jobs N` (per-file child processes run N at a time); every
-# `$(NATIVE_BIN) test ...` invocation below threads this knob. The
-# default stays 1 because each child carries its own RAM footprint
-# under the 8GB per-process cap — callers pick N for their RAM budget
-# (e.g. `make test TEST_JOBS=4` on a 4-core/16GB box, smaller on
-# 7GB CI runners). CI sharding (`make test-shard`) is unaffected.
-TEST_JOBS ?= 1
+# `$(NATIVE_BIN) test ...` invocation below threads this knob.
+#
+# Default: auto-detected from CPU count and total RAM via
+# scripts/detect_test_jobs.sh with a per-job budget of 384 MB (conservative
+# headroom over the measured ~150 MB child peak, because e2e build-spawner
+# tests fork nested compiler+clang trees). The 384 MB budget is ~5× lighter
+# than BUILD_JOBS' ~2 GB budget, which is sized for per-module emit.
+# Override with `TEST_JOBS=N` on the command line or in the environment;
+# an explicit value always wins. CI sharding (`make test-shard`) is
+# unaffected — it reads SAILFIN_TEST_JOBS directly from scripts/test_shards.sh.
+# See docs/proposals/0044-test-runner-invocation-cache.md and #1998.
+TEST_JOBS ?= $(shell bash scripts/detect_test_jobs.sh 2>/dev/null || echo 1)
 TEST_JOBS_FLAG = --jobs $(TEST_JOBS)
 
-# Test parallelism for `make check` specifically. `make check` runs the full
-# suite TWICE (once on the first-pass binary as an early gate, once on the
-# seedcheck binary), so a serial `TEST_JOBS=1` doubles down on the slowest part
-# of the gate. Unlike a bare `make test`, `make check` already pins peak build
-# concurrency via the RAM-budgeted `BUILD_JOBS` auto-detect, so it can safely
-# reuse that same per-job budget for its suite runs. An explicit `TEST_JOBS=N`
-# (command line or environment) always wins — set it to dial the suite down on
-# a tighter RAM budget, or to 1 to restore the old serial behaviour.
-ifeq ($(filter command line environment,$(origin TEST_JOBS)),)
-CHECK_TEST_JOBS ?= $(BUILD_JOBS)
-else
+# Test parallelism for `make check` specifically. CHECK_TEST_JOBS defaults
+# to the same auto-detected TEST_JOBS. An explicit `TEST_JOBS=N` on the
+# command line or in the environment always wins (the `?=` auto-detect
+# above already captures it, so no origin-check branch is needed here).
 CHECK_TEST_JOBS ?= $(TEST_JOBS)
-endif
 
 # Strict self-host gate (#1830). When SELFHOST_STRICT=1, `make check`
 # passes `--strict` to `sfn selfhost` so a stage2/stage3 fixed-point
@@ -560,9 +558,35 @@ check-impl:
 		echo "[check][error] missing $$seed (run: make compile)"; \
 		exit 1; \
 	fi
-	@echo "[check] running test suite on first-pass binary (early gate, jobs=$(CHECK_TEST_JOBS))..."
+	@# Pass1 smoke gate (#1998 / SFEP-0044): the first-pass binary only needs
+	@# to prove it can run and execute test binaries end-to-end. Running the
+	@# full suite twice (pass1 + seedcheck) doubled check wall-time without a
+	@# meaningful catch rate — real miscompilations surface in the seedcheck
+	@# fixed-point; the pass1 gate catches outright crashes. Two checks:
+	@#   (a) hello-world smoke (timeout 60): proves run works.
+	@#   (b) capsules/sfn/test/tests only (5 test files): proves the pass1
+	@#       binary can compile, link, and execute test binaries end-to-end.
+	@# The cold-suite backstop is the seedcheck full run below.
+	@# Set CHECK_FULL_PASS1=1 to restore the old two-full-suite behaviour
+	@# (escape hatch for bisect / pre-release double-check).
+ifeq ($(CHECK_FULL_PASS1),1)
+	@echo "[check] CHECK_FULL_PASS1=1: running full suite on first-pass binary (jobs=$(CHECK_TEST_JOBS))..."
 	@$(MAKE) test NATIVE_BIN=build/native/sailfin TEST_BIN_CACHE_FLAGS=--no-test-cache TEST_JOBS=$(CHECK_TEST_JOBS)
-	@echo "[check] first-pass tests passed — validating self-host (stage2/stage3 fixed point)..."
+else
+	@echo "[check] pass1 smoke gate: hello-world + sfn/test capsule tests (jobs=$(CHECK_TEST_JOBS))..."
+	@t60=""; \
+	if command -v timeout >/dev/null 2>&1; then t60="timeout 60"; \
+	elif command -v gtimeout >/dev/null 2>&1; then t60="gtimeout 60"; fi; \
+	$$t60 build/native/sailfin run examples/basics/hello-world.sfn
+	@if [ "$${SAILFIN_AGENT_REPORT:-}" = "1" ]; then \
+		mkdir -p build; \
+		set -o pipefail; \
+		build/native/sailfin test capsules/sfn/test/tests --jobs $(CHECK_TEST_JOBS) --json | tee build/agent-test.check-pass1.jsonl || exit $$?; \
+	else \
+		build/native/sailfin test capsules/sfn/test/tests --jobs $(CHECK_TEST_JOBS) || exit $$?; \
+	fi
+endif
+	@echo "[check] pass1 smoke passed — validating self-host (stage2/stage3 fixed point)..."
 	@# #1502 (epic #513 Phase 1): the stage2/stage3 builds, per-stage `.ll`
 	@# scratch isolation (`SAILFIN_TEST_SCRATCH` so stage3 can't clobber
 	@# stage2's IR), `--no-cache` independence, the hello-world smoke gate,
@@ -587,7 +611,7 @@ check-impl:
 		--promote-to $(NATIVE_BIN) \
 		--smoke-timeout 10 \
 		$(SELFHOST_STRICT_FLAG)
-	@echo "[check] running test suite with seedcheck binary (no fallbacks, jobs=$(CHECK_TEST_JOBS))..."
+	@echo "[check] running full test suite with seedcheck binary (cold backstop, jobs=$(CHECK_TEST_JOBS))..."
 	@$(MAKE) test NATIVE_BIN=build/native/sailfin-seedcheck TEST_BIN_CACHE_FLAGS=--no-test-cache TEST_JOBS=$(CHECK_TEST_JOBS)
 
 # Fast PR-feedback gate: run `sfn check` against the compiler tree and
