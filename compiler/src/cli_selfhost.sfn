@@ -37,6 +37,7 @@
 import {
     _ensure_dir_recursive_cmd,
     _sha256_of_file_cmd,
+    _sha256_of_text_file,
     _shell_read_cmd,
     _shell_single_quote_arg
 } from "./build/fs";
@@ -190,7 +191,7 @@ fn _selfhost_snapshot(capsules_dir: string, binary_path: string) -> DeterminismS
     loop {
         if i >= files.length { break; }
         let slug = _selfhost_basename(files[i]);
-        let sha = _sha256_of_file_cmd(files[i]);
+        let sha = _sha256_of_text_file(files[i]);
         modules.push(make_determinism_module(slug, sha));
         i += 1;
     }

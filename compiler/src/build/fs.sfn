@@ -4,6 +4,7 @@
 // relocated from `cli_commands_utils` (SFEP-0027 §3.5); leave the
 // `compiler-common` boundary to #345.
 import { substring } from "../string_utils";
+import { sha256_hex_of_string } from "./hash";
 
 fn _ends_with_cmd(value: string, suffix: string) -> boolean {
     if suffix.length == 0 { return true; }
@@ -238,6 +239,35 @@ fn _sha256_of_file_cmd(file_path: string) -> string ![io] {
     return _shell_read_cmd(cmd);
 }
 
+// Compute the SHA-256 hex digest of a NUL-free text file in-process,
+// without spawning a subprocess. Returns `""` when the file does not
+// exist or cannot be read, preserving the `_sha256_of_file_cmd`
+// failure contract (empty digest → not content-addressable → recompile).
+//
+// SOUND ONLY for NUL-free text artifacts: .sfn source, .ll LLVM IR,
+// .toml manifests, .h/.c headers, layout manifests. `fs.readFile`
+// coerces the `i8*` return to a Sailfin string via `strlen`
+// (core_operands.sfn:1013–1043), which truncates at the first NUL byte.
+// Binary artifacts (compiled binaries, tarballs, archives) MUST use
+// `_sha256_of_file_cmd`. When #1999 lands a binary-safe `fs.readBinary`
+// builtin, this split can be collapsed: replace `_sha256_of_text_file`
+// with a single in-process path over `fs.readBinary` and retire
+// `_sha256_of_file_cmd` from all hashing callers (#1995, #1999).
+fn _sha256_of_text_file(file_path: string) -> string ![io] {
+    if !fs.exists(file_path) { return ""; }
+    let contents = fs.readFile(file_path);
+    if contents.length == 0 {
+        // Distinguish "empty file" from "read error": an empty file has
+        // the well-known empty-string digest; an unreadable file should
+        // return "" to signal the caller. fs.readFile returns "" on read
+        // failure, so we treat zero-length as a miss (recompile). Files
+        // with real zero-byte content produce the same cache-miss outcome
+        // as they would under _sha256_of_file_cmd ("" on failure).
+        return "";
+    }
+    return sha256_hex_of_string(contents);
+}
+
 export {
     _dirname_cmd,
     _path_join_cmd,
@@ -253,5 +283,6 @@ export {
     _toml_trim_cmd,
     _shell_read_cmd,
     _shell_single_quote_arg,
-    _sha256_of_file_cmd
+    _sha256_of_file_cmd,
+    _sha256_of_text_file
 };

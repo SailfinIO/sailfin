@@ -48,6 +48,7 @@ import {
 import {
     _collect_sfn_files_cmd,
     _sha256_of_file_cmd,
+    _sha256_of_text_file,
     _shell_read_cmd,
     _toml_trim_cmd
 } from "../../build/fs";
@@ -137,7 +138,7 @@ fn run(matches: Matches, ctx: CliContext) -> int ![io] {
         return 1;
     }
     fs.writeFile(payload_tmp, payload);
-    let raw_digest = _sha256_of_file_cmd(payload_tmp);
+    let raw_digest = _sha256_of_text_file(payload_tmp);
     if raw_digest.length == 0 {
         print("failed to compute digest");
         process.run(["rm", "-f", payload_tmp]);
