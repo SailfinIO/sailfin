@@ -28,7 +28,7 @@ Initiative        a pillar / durable theme          (Linear)      ~6, rarely add
 |------|----|----------|----------------|
 | **Initiative** | A pillar or durable workstream (e.g. *Structured Concurrency*, *Build & Toolchain*). A small, stable set. | Linear | Set by hand; changes rarely. |
 | **Project** | Exactly one epic — a deliverable with real surface area and a design record (SFEP). | Linear | Rolled up from its issues; the design/context lives in the project **description**. |
-| **Issue** | One session-sized leaf (XS/S/M, never L). A Linear `Ready` issue is pickable by `/pickup`. | Authored in **Linear** for maintainer/agent work, mirrored to GitHub when public tracking is needed; external GitHub issues mirror into Linear triage. | **Linear owns status, priority, estimate, project, and assignee**. GitHub labels remain the public compatibility taxonomy. |
+| **Issue** | One session-sized leaf (XS/S/M, never L). A Linear `Ready` issue is pickable by `/pickup`. | **Linear** — authored natively as `SFN-NNN`. External-contributor GitHub issues mirror into Linear **Triage**; we do **not** mirror our own planned work back to GitHub. | **Linear owns status, priority, estimate, project, blockers, and assignee.** GitHub hosts the code and PRs; its labels are a public taxonomy for contributor intake and the release axis, not our workflow state. |
 
 A Project belongs to exactly one Initiative. A leaf Issue belongs to exactly one
 Project. Releases are a fourth, **orthogonal** axis — a Linear **Cycle**, never a
@@ -80,8 +80,9 @@ ordinary issues associated to that Project.
   `Ready` status, no unclosed `Blocked by`.
   This is exactly what `/pickup` selects; `/pickup` with no argument picks the
   top one, and `/pickup SFN-123` targets a specific Linear issue.
-- **Needs shaping:** `needs-grooming` → run `/groom`; `needs-design` → architect
-  queue; `needs-discussion` → parked for a human.
+- **Needs shaping:** issues in `Triage`/`Backlog` → run `/groom`; a design gap →
+  architect queue (`needs-design` hint); parked for a human → left in `Triage`
+  with a note. External contributor issues land in `Triage` for this pass.
 
 ---
 
@@ -93,13 +94,14 @@ ordinary issues associated to that Project.
    put `Design: SFEP-NNNN` in the project description. See
    [`.claude/rules/proposals.md`](../../.claude/rules/proposals.md).
 3. **Groom into leaves:** `/groom <epic>` decomposes it into session-sized
-   Linear issues, ensures the Project exists, associates each leaf to the
-   Project, and lets the GitHub integration create or attach the public mirror
-   when needed. Each leaf cites the SFEP (`## Design`), it does not re-litigate
-   the design.
-4. **Work the leaves:** `/pickup` drives each from Linear issue → branch → PR.
-   If a GitHub mirror exists, the PR uses `Closes #N`; otherwise the PR links
-   `Linear: SFN-NNN` and the mirror can be attached later.
+   **native Linear issues**, ensures the Project exists, and associates each leaf
+   to it with native status/priority/estimate/blockers. Leaves stay Linear-native
+   — no GitHub mirror for our own work. Each leaf cites the SFEP (`## Design`); it
+   does not re-litigate the design.
+4. **Work the leaves:** `/pickup` drives each from Linear issue → branch → PR. It
+   branches `claude/sfn-<N>-<slug>` and the PR cites `Fixes SFN-<NNN>`, so
+   Linear's GitHub integration links the PR and advances the issue to `Done` on
+   merge. The skill flips `Ready → In Progress → In Review` via the Linear MCP.
 5. **Graduate:** when the epic ships, flip its SFEP to `Implemented` and update
    `docs/status.md`.
 

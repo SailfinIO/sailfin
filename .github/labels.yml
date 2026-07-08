@@ -29,8 +29,8 @@
 
 labels:
   # --- Public issue triage hints ---------------------------------------
-  # Linear owns maintainer workflow state natively. These labels remain only
-  # for public GitHub issues, mirrors, and GitHub-only fallback flows.
+  # These labels are public triage hints only; Linear status owns workflow
+  # state (Ready/In Progress/Blocked/etc.) natively.
   - name: needs-grooming
     color: "fbca04"
     description: "Placeholder issue: scope, criteria, or files-affected still missing"
@@ -40,15 +40,6 @@ labels:
   - name: needs-discussion
     color: "d93f0b"
     description: "Design blocked pending human input"
-  - name: claude-ready
-    color: "0e8a16"
-    description: "GitHub fallback: fully groomed and eligible for /pickup"
-  - name: in-progress
-    color: "1d76db"
-    description: "GitHub fallback: currently being worked; do not pick up"
-  - name: blocked
-    color: "b60205"
-    description: "GitHub fallback: has open dependencies"
 
   # --- PR lifecycle ----------------------------------------------------
   - name: needs-review
@@ -216,8 +207,6 @@ aliases:
     to: type:docs
   - from: medium
     to: size:m
-  - from: blocker
-    to: blocked
   - from: runtime
     to: area:runtime
   - from: compiler
@@ -287,3 +276,11 @@ delete:
     reason: "Dependabot ecosystem label; dependabot.yml now uses only dependencies"
   - name: python
     reason: "Dependabot ecosystem label; dependabot.yml now uses only dependencies"
+  - name: claude-ready
+    reason: "Retired: pickable state is Linear `Ready` status, not a GitHub label"
+  - name: in-progress
+    reason: "Retired: work-in-progress is the Linear `In Progress` status"
+  - name: blocked
+    reason: "Retired: blockers are native Linear blocked-by relations / `Blocked` status"
+  - name: blocker
+    reason: "Retired with `blocked`; blockers are native Linear relations"
