@@ -1,6 +1,6 @@
 # Status
 
-Updated: 2026-07-07. Seed pinned to `0.8.0-alpha.1` (`.seed-version`);
+Updated: 2026-07-08. Seed pinned to `0.8.0-alpha.1` (`.seed-version`);
 the compiler version source of truth is `compiler/capsule.toml`.
 
 This document is the **current-state source of truth**: what ships today,
@@ -322,7 +322,7 @@ here.
 | Policy decorators (`@policy`) | Parsed only | No compiler or runtime effect |
 | `sfn fmt` | **Shipped** | Zero-config token-stream formatter, `--check`/`--write`, CI-enforced; architecture + limitations in `docs/proposals/0007-fmt-architecture.md` |
 | `sfn check` | **Shipped** | Parse + typecheck + effect-check, no codegen; `--json` envelope; cross-module conformance; directory mode completes the full 156-file tree (~295 s — perf, not stability, is the open item); relative-import resolution (`E0430`/`E0431`, #1953) |
-| `sfn test` | **Shipped** | Discovery, `-k`/`--tag` filtering (#849), lifecycle hooks (#975, ordering only), snapshots + `--update-snapshots` (#977), `--jobs N` parallel runner (#1236), per-test binary cache (#1230/#1233) |
+| `sfn test` | **Shipped** | Discovery, `-k`/`--tag` filtering (#849), lifecycle hooks (#975, ordering only), snapshots + `--update-snapshots` (#977), `--jobs N` parallel runner (#1236), per-test binary cache (#1230/#1233). **Test-runner perf (SFEP-0044, 2026-07-08):** per warm test-file child (macOS 8-core): ~4 s → 2.9 s (in-process SHA-256 for text artifacts, #1995, PR #2000) → 1.75 s (invocation-scoped runtime-identity stamp, #1996, PR #2007); clang link window 2.9 s → 1.13 s. `make test` parallelism auto-detects via a test-child-sized 384 MB/job budget (`scripts/detect_test_jobs.sh`, #1998, PR #2001); `make check` runs ONE cold full suite (seedcheck leg, `--no-test-cache` backstop) + a pass1 smoke gate, `CHECK_FULL_PASS1=1` restores the old shape. CI shard legs restore a per-OS+shard test-binary cache across runs (#2008, PR #2009); safety is in the self-validating entry keys (#1233). Known residual: unit-tier cold cost dominated by per-child dep-closure compilation (~15 s CPU/file measured) — tracked as #2010; resolver sharing is #1997; binary-safe file read (retires the text/binary hash split) is #1999. |
 | `sfn vet` / `sfn lsp` / `sfn doc` / `sfn fix` | Planned | See `docs/proposals/0003-tooling.md` |
 | Package registry (`sfn init/add/publish`) | Shipped | Default registry `pkg.sfn.dev`; `SFN_REGISTRY` / `sfn config set registry` override |
 | `workspace.lock` (`sfn lock` write + resolver consume) | **Shipped** | Explicit `sfn lock` writes the root lockfile (#1070); `sfn lock --work-dir DIR` sets the workspace-discovery start dir so the command can run against a workspace without `cd`. Resolver prefers `workspace → workspace.lock → capsule.lock → cache → registry` for external deps, sibling-first untouched (#1071). Roots own lockfiles; library capsules don't commit them. Committing the root `workspace.lock` is #1050, gated on a seed embedding #1071 (satisfied at `v0.7.0-alpha.31`) |

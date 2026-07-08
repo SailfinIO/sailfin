@@ -1,12 +1,12 @@
 ---
 sfep: 0044
 title: Invocation-scoped runtime identity + in-process sha256 for the test runner
-status: Accepted
+status: Implemented
 type: tooling
 created: 2026-07-08
 updated: 2026-07-08
 author: "agent:compiler-architect; human review"
-tracking: "#1995, #1996, #1997, #1998, #1999"
+tracking: "#1995, #1996, #1997, #1998, #1999, #2008, #2010"
 supersedes:
 superseded-by:
 graduates-to:
@@ -29,6 +29,7 @@ all per-file runtime hashing on the warm path, and (B) replaces the
 vendored from `capsules/sfn/crypto` — a compiler-source-only change with **no
 seed dependency**. (C) resolver-pass sharing is scoped as a follow-up. Expected
 warm per-file link window after A+B: from ~2.8–3.4 s to ~0.4–0.5 s.
+Implemented via PRs #2000, #2001, #2007, #2009 (2026-07-08); work item C continues as #1997, dep-closure compile sharing as #2010.
 
 ## 2. Motivation
 
