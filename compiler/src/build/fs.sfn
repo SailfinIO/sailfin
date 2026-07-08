@@ -253,9 +253,23 @@ fn _sha256_of_file_cmd(file_path: string) -> string ![io] {
 // builtin, this split can be collapsed: replace `_sha256_of_text_file`
 // with a single in-process path over `fs.readBinary` and retire
 // `_sha256_of_file_cmd` from all hashing callers (#1995, #1999).
+//
+// Inputs larger than 64 KiB fall back to the subprocess pipeline: the
+// vendored hasher's byte loop collapses under -O0 compiler builds (the
+// CI shard configuration) — hashing multi-hundred-KB .ll files
+// in-process pushed the linux int-caps shard from ~6 min to ~23 min and
+// drove selfhost_diff_test.sfn into its 300 s per-file kill (PR #2000
+// triage). One popen (~30 ms) beats seconds of -O0 hashing; the
+// in-process win is the many small .sfn/.toml sources, which stay under
+// the threshold. Retire the threshold together with the split (#1999),
+// or earlier if CI shard builds move off -O0.
 fn _sha256_of_text_file(file_path: string) -> string ![io] {
     if !fs.exists(file_path) { return ""; }
     let contents = fs.readFile(file_path);
+    let inprocess_max = 65536;
+    if contents.length > inprocess_max {
+        return _sha256_of_file_cmd(file_path);
+    }
     if contents.length == 0 {
         // Distinguish "empty file" from "read error": an empty file has
         // the well-known empty-string digest; an unreadable file should
