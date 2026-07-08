@@ -30,4 +30,30 @@ const blog = defineCollection({
   }),
 });
 
-export const collections = { docs, blog };
+const optionalFrontmatterString = z.preprocess((value) => {
+  if (value === null || value === undefined) return undefined;
+  if (value instanceof Date) return value.toISOString().slice(0, 10);
+  return String(value);
+}, z.string().optional());
+
+const sfep = defineCollection({
+  loader: glob({
+    base: "../docs/proposals",
+    pattern: "**/*.md",
+  }),
+  schema: z.object({
+    sfep: z.union([z.number(), z.string()]).optional(),
+    title: z.string().optional(),
+    status: z.string().optional(),
+    type: z.string().optional(),
+    created: optionalFrontmatterString,
+    updated: optionalFrontmatterString,
+    author: z.string().optional(),
+    tracking: optionalFrontmatterString,
+    supersedes: optionalFrontmatterString,
+    "superseded-by": optionalFrontmatterString,
+    "graduates-to": optionalFrontmatterString,
+  }),
+});
+
+export const collections = { docs, blog, sfep };
