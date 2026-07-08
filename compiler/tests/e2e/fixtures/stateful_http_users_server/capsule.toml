@@ -1,0 +1,14 @@
+[capsule]
+name = "sfn/http-stateful-users-e2e-app"
+version = "0.0.1"
+description = "stateful sfn/http users server e2e fixture"
+
+[dependencies]
+"sfn/http" = "*"
+
+[capabilities]
+required = ["io", "net"]
+
+[build]
+entry = "src/main.sfn"
+kind = "library"
