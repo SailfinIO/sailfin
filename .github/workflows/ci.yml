@@ -476,6 +476,25 @@ jobs:
           [ -f build/native/.build-stamp ] && touch build/native/.build-stamp || true
           ls -lh build/native/sailfin
 
+      # Per-shard test-binary cache restore (#2008, SFEP-0044). The
+      # build-tree artifact deliberately excludes build/cache/test-bin;
+      # this restores each leg's slice from the most recent prior run of
+      # the same OS+shard (restore-keys prefix) and saves under this
+      # run's sha at job end. Safety is in the entry keys themselves:
+      # test_bin_cache_key folds test-source hash + dep closure +
+      # compiler identity + runtime identity (#1233), so a restored
+      # stale entry self-invalidates and a compiler-changing PR misses
+      # everything (correct cold start). The merge/seedcheck gate and
+      # nightly `make check` keep --no-test-cache — the cold backstop
+      # never consumes this cache.
+      - name: Restore per-shard test-binary cache
+        uses: actions/cache@v6
+        with:
+          path: build/cache/test-bin
+          key: test-bin-${{ runner.os }}-${{ matrix.shard }}-${{ github.sha }}
+          restore-keys: |
+            test-bin-${{ runner.os }}-${{ matrix.shard }}-
+
       - name: Test + package (via Makefile)
         uses: ./.github/actions/sailfin-build
         env:
@@ -824,6 +843,18 @@ jobs:
           touch build/native/sailfin
           [ -f build/native/.build-stamp ] && touch build/native/.build-stamp || true
           ls -lh build/native/sailfin
+
+      # Per-shard test-binary cache restore (#2008, SFEP-0044) — same
+      # contract as the Linux leg: prefix-restore from the latest prior
+      # run of this OS+shard, save under this run's sha; entry keys
+      # self-validate (#1233) so stale restores are safe by construction.
+      - name: Restore per-shard test-binary cache
+        uses: actions/cache@v6
+        with:
+          path: build/cache/test-bin
+          key: test-bin-${{ runner.os }}-${{ matrix.shard }}-${{ github.sha }}
+          restore-keys: |
+            test-bin-${{ runner.os }}-${{ matrix.shard }}-
 
       - name: Test + package (via Makefile)
         uses: ./.github/actions/sailfin-build
