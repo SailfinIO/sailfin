@@ -1,21 +1,22 @@
 ---
-sfep: TBD
+sfep: 0043
 title: Phase-scoped arena reclamation to reduce per-module peak RSS
-status: Draft
+status: Implemented
 type: runtime            # language | runtime | tooling | process | informational
 created: 2026-07-07
 updated: 2026-07-07
 author: "agent:compiler-architect; human review"
-tracking:                # fill with the grooming epic / issue numbers
+tracking: "#1989"
 supersedes:
 superseded-by:
-graduates-to:
+graduates-to: "docs/status.md (Runtime Migration); docs/proposals/0006-build-architecture.md (perf section)"
 ---
 
-# SFEP-XXXX — Phase-scoped arena reclamation to reduce per-module peak RSS
+# SFEP-0043 — Phase-scoped arena reclamation to reduce per-module peak RSS
 
-> Draft. Number assigned at merge (next = registry max + 1 → **0043**). Filename
-> stays `draft-` until then.
+> Implemented in #1989 (merged). Self-hosts; byte-identical `.ll` with the
+> rewind on vs off, gated by the e2e test
+> `compiler/tests/e2e/arena_phase_rewind_ll_identity_test.sfn`.
 
 ## 1. Summary
 

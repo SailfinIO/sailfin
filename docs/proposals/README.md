@@ -65,6 +65,7 @@ The next number is `max + 1`. Add a row in the same PR that introduces an SFEP.
 | [0040](./0040-artifact-cache.md) | Global Artifact Cache Store and Garbage Collection | Accepted | tooling |
 | [0041](./0041-typeck-expected-type-context.md) | Unified expected-type + typing-environment context for the typecheck walk | Implemented | tooling |
 | [0042](./0042-nested-function-declarations.md) | Nested / Local Function Declarations (non-capturing static `fn` items) | Accepted | language |
+| [0043](./0043-phase-scoped-arena-reclamation.md) | Phase-scoped arena reclamation to reduce per-module peak RSS | Implemented | runtime |
 
 ## Drafts under review (numbers assigned at merge)
 
