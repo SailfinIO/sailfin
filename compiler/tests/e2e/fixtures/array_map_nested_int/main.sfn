@@ -1,0 +1,10 @@
+// SFN-112: an `int[][]` receiver may map rows to `int[]` results.
+// Each row pointer is carried over the same pointer-width callback seam as
+// scalar `int` map results, producing a nested `int[][]` array.
+fn main() ![io] {
+    let rows: int[][] = [[1, 2], [3, 4], [5, 6]];
+    let mapped: int[][] = rows.map(fn (row: int[]) -> int[] {
+        return [row[0] + row[1], row.length];
+    });
+    print(mapped[0][0] + mapped[1][0] + mapped[2][0] + mapped.length);
+}

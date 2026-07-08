@@ -1,0 +1,7 @@
+// SFN-112 keeps non-pointer-width float[] array HOFs rejected until their
+// element-width lowering lands.
+fn main() -> int {
+    let xs: float[] = [1.0, 2.0];
+    let ys: float[] = xs.map(fn (x: float) -> float { return x + 1.0; });
+    return ys.length;
+}
