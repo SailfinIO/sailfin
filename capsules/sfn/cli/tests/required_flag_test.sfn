@@ -15,6 +15,9 @@ import {
     has_flag,
     help,
     parse,
+    parse_error,
+    parse_is_ok,
+    parse_matches,
     with_flag
 } from "../src/mod";
 
@@ -66,17 +69,17 @@ test "parse: required boolean flag present yields ok" {
     let cmd = with_flag(command("app", "desc"), flag_required(flag("force", "Force")));
     let argv: string[] = ["app", "--force"];
     let r = parse(cmd, argv);
-    assert r.ok == true;
-    assert strings_equal(r.error.kind, "ok");
-    assert has_flag(r.matches, "force") == true;
+    assert parse_is_ok(r) == true;
+    assert strings_equal(parse_error(r).kind, "ok");
+    assert has_flag(parse_matches(r), "force") == true;
 }
 
 test "parse: required value flag present yields ok" {
     let cmd = with_flag(command("app", "desc"), flag_required(flag_value("output", "Output")));
     let argv: string[] = ["app", "--output", "out.txt"];
     let r = parse(cmd, argv);
-    assert r.ok == true;
-    assert strings_equal(r.error.kind, "ok");
+    assert parse_is_ok(r) == true;
+    assert strings_equal(parse_error(r).kind, "ok");
 }
 
 // ---- Parser: absent ----
@@ -84,27 +87,27 @@ test "parse: required flag absent yields missing_required with flag_name" {
     let cmd = with_flag(command("app", "desc"), flag_required(flag("force", "Force")));
     let argv: string[] = ["app"];
     let r = parse(cmd, argv);
-    assert r.ok == false;
-    assert strings_equal(r.error.kind, "missing_required");
-    assert strings_equal(r.error.flag_name, "force");
-    assert strings_equal(r.error.arg_name, "");
-    assert strings_equal(r.error.message, "error: missing required flag --force\nrun 'app --help' for usage");
+    assert parse_is_ok(r) == false;
+    assert strings_equal(parse_error(r).kind, "missing_required");
+    assert strings_equal(parse_error(r).flag_name, "force");
+    assert strings_equal(parse_error(r).arg_name, "");
+    assert strings_equal(parse_error(r).message, "error: missing required flag --force\nrun 'app --help' for usage");
 }
 
 test "parse: required value flag absent yields missing_required" {
     let cmd = with_flag(command("app", "desc"), flag_required(flag_value("output", "Output")));
     let argv: string[] = ["app"];
     let r = parse(cmd, argv);
-    assert r.ok == false;
-    assert strings_equal(r.error.kind, "missing_required");
-    assert strings_equal(r.error.flag_name, "output");
+    assert parse_is_ok(r) == false;
+    assert strings_equal(parse_error(r).kind, "missing_required");
+    assert strings_equal(parse_error(r).flag_name, "output");
 }
 
 test "parse: non-required flag absent stays ok" {
     let cmd = with_flag(command("app", "desc"), flag("verbose", "Verbose"));
     let argv: string[] = ["app"];
     let r = parse(cmd, argv);
-    assert r.ok == true;
+    assert parse_is_ok(r) == true;
 }
 
 test "parse: required flag absent — get_or default does NOT satisfy required" {
@@ -114,12 +117,12 @@ test "parse: required flag absent — get_or default does NOT satisfy required" 
     let cmd = with_flag(command("app", "desc"), flag_required(flag_value("output", "Output")));
     let argv: string[] = ["app"];
     let r = parse(cmd, argv);
-    assert r.ok == false;
-    assert strings_equal(r.error.kind, "missing_required");
+    assert parse_is_ok(r) == false;
+    assert strings_equal(parse_error(r).kind, "missing_required");
     // The partial matches do not contain the flag, so `get_or` would
     // fall back to its default — but the caller never reaches that
     // codepath because `ok` is false.
-    let fallback = get_or(r.matches, "output", "out.txt");
+    let fallback = get_or(parse_matches(r), "output", "out.txt");
     assert strings_equal(fallback, "out.txt");
 }
 

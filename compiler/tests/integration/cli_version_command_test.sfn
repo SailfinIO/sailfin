@@ -14,11 +14,14 @@
 // (the built-in `parse()` version flag) are exercised, mirroring the v2
 // dispatch in `cli/main.sfn`: on success the matched subcommand is
 // "version"; on the flag path `parse()` reports `version_requested` and
-// `result.matches` still carries the accumulated state that `run`
+// `parse_matches(result)` still carries the accumulated state that `run`
 // uniformly accepts. `run` returns `EXIT_OK` (0) on every version path.
 import {
     command,
     parse,
+    parse_error,
+    parse_is_ok,
+    parse_matches,
     subcommand,
     with_subcommand
 } from "sfn/cli";
@@ -47,10 +50,11 @@ test "version command: command_def is a bare 'version' subcommand" {
 test "version command: 'sfn version' routes to the version subcommand" ![io] {
     let root = with_subcommand(command("sfn", "Sailfin compiler"), command_def());
     let result = parse(root, ["sfn", "version"]);
-    assert result.ok;
-    assert strings_equal(subcommand(result.matches), "version");
+    assert parse_is_ok(result);
+    let matches = parse_matches(result);
+    assert strings_equal(subcommand(matches), "version");
 
-    let code = run(result.matches, _empty_ctx());
+    let code = run(matches, _empty_ctx());
     assert code == 0;
 }
 
@@ -59,11 +63,11 @@ test "version command: 'sfn --version' flag still dispatches run to EXIT_OK" ![i
     let result = parse(root, ["sfn", "--version"]);
     // The built-in version flag surfaces through the error channel, not
     // a matched subcommand — exactly the path v2 keys on.
-    assert ! result.ok;
-    assert strings_equal(result.error.kind, "version_requested");
+    assert ! parse_is_ok(result);
+    assert strings_equal(parse_error(result).kind, "version_requested");
 
     // `run` ignores `matches`; passing the accumulated matches keeps the
     // dispatch uniform across the subcommand and flag paths.
-    let code = run(result.matches, _empty_ctx());
+    let code = run(parse_matches(result), _empty_ctx());
     assert code == 0;
 }

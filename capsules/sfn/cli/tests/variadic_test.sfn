@@ -12,6 +12,9 @@ import {
     command,
     help,
     parse,
+    parse_error,
+    parse_is_ok,
+    parse_matches,
     positionals,
     with_arg
 } from "../src/mod";
@@ -45,8 +48,8 @@ test "variadic: zero matches yields an empty list" {
     let cmd = with_arg(command("app", "Test app"), arg_variadic("files", "Files"));
     let argv: string[] = ["app"];
     let r = parse(cmd, argv);
-    assert r.ok == true;
-    let files = positionals(r.matches, "files");
+    assert parse_is_ok(r) == true;
+    let files = positionals(parse_matches(r), "files");
     assert files.length == 0;
 }
 
@@ -54,8 +57,8 @@ test "variadic: one match yields a single-element list" {
     let cmd = with_arg(command("app", "Test app"), arg_variadic("files", "Files"));
     let argv: string[] = ["app", "a.sfn"];
     let r = parse(cmd, argv);
-    assert r.ok == true;
-    let files = positionals(r.matches, "files");
+    assert parse_is_ok(r) == true;
+    let files = positionals(parse_matches(r), "files");
     assert files.length == 1;
     assert strings_equal(files[0], "a.sfn");
 }
@@ -64,8 +67,8 @@ test "variadic: three matches collected in order" {
     let cmd = with_arg(command("app", "Test app"), arg_variadic("files", "Files"));
     let argv: string[] = ["app", "a.sfn", "b.sfn", "c.sfn"];
     let r = parse(cmd, argv);
-    assert r.ok == true;
-    let files = positionals(r.matches, "files");
+    assert parse_is_ok(r) == true;
+    let files = positionals(parse_matches(r), "files");
     assert files.length == 3;
     assert strings_equal(files[0], "a.sfn");
     assert strings_equal(files[1], "b.sfn");
@@ -77,11 +80,11 @@ test "variadic: a fixed positional before the tail is populated" {
     let cmd = with_arg(with_arg(command("app", "Test app"), arg("src", "Source")), arg_variadic("rest", "Remaining"));
     let argv: string[] = ["app", "main.sfn", "x", "y"];
     let r = parse(cmd, argv);
-    assert r.ok == true;
-    let src = positionals(r.matches, "src");
+    assert parse_is_ok(r) == true;
+    let src = positionals(parse_matches(r), "src");
     assert src.length == 1;
     assert strings_equal(src[0], "main.sfn");
-    let rest = positionals(r.matches, "rest");
+    let rest = positionals(parse_matches(r), "rest");
     assert rest.length == 2;
     assert strings_equal(rest[0], "x");
     assert strings_equal(rest[1], "y");
@@ -91,11 +94,11 @@ test "variadic: a required fixed positional before an empty tail still parses" {
     let cmd = with_arg(with_arg(command("app", "Test app"), arg("src", "Source")), arg_variadic("rest", "Remaining"));
     let argv: string[] = ["app", "main.sfn"];
     let r = parse(cmd, argv);
-    assert r.ok == true;
-    let src = positionals(r.matches, "src");
+    assert parse_is_ok(r) == true;
+    let src = positionals(parse_matches(r), "src");
     assert src.length == 1;
     assert strings_equal(src[0], "main.sfn");
-    let rest = positionals(r.matches, "rest");
+    let rest = positionals(parse_matches(r), "rest");
     assert rest.length == 0;
 }
 
