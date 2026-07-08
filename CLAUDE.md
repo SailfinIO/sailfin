@@ -323,21 +323,23 @@ earn their cost on open-ended investigation and cross-cutting analysis.
 ## Task Tracking
 
 Work is organised in three tiers — **Linear Initiative → Linear Project →
-GitHub Issue** (full playbook: `docs/conventions/linear-workflow.md`). An
-**epic is a Linear Project** under an Initiative (a theme); **never open a
-GitHub `Epic:`/`Tracking:` issue** (retired 2026-07-07). GitHub Issues are
-session-sized leaf work only, scoped so a single session takes an issue from
-open to merged PR, and are mirrored into Linear by the integration.
+Linear Issue** (full playbook: `docs/conventions/linear-workflow.md`). An
+**epic is a Linear Project** under an Initiative (a theme); a **leaf is a native
+Linear `SFN-NNN` issue**, scoped so a single session takes it from `Ready` to a
+merged PR. **Never open a GitHub `Epic:`/`Tracking:` issue** (retired
+2026-07-07). GitHub issues are **external-contributor intake only** — they mirror
+into the Sailfin (`SFN`) team's `Triage` for us to triage.
 
 ```
-Initiative (theme) ─▶ Project (epic) ─▶ Issue (leaf, claude-ready) ──/triage──▶ pickable
-     [Linear]            [Linear]        [GitHub → mirrored]  │
-                                              └──/pickup [#N]──▶ PR opened, issue auto-closed on merge
+Initiative (theme) ─▶ Project (epic) ─▶ Issue (leaf) ──/groom──▶ Ready ──/pickup──▶ In Progress
+     [Linear]            [Linear]        [Linear SFN]                               │
+                                              PR (branch claude/sfn-N, "Fixes SFN-N") ──▶ Done on merge
 ```
 
-**Issue contract** (template: `.github/ISSUE_TEMPLATE/claude-task.md`): Goal,
-Scope (`In:`/`Out:`), Acceptance Criteria, Files Affected, Verification, Size
-(XS/S/M — never L), Type, Blocked by. Missing or vague → not pickable.
+**Issue contract** (template: `docs/conventions/linear-templates.md`): Goal,
+Scope (`In:`/`Out:`), Acceptance Criteria, Files Affected, Verification, plus a
+native Linear estimate (XS/S/M → 1/2/3, never L), a `type:*` label, priority, and
+any blocked-by relation. Missing or vague → not `Ready`.
 
 **Design records (SFEPs).** A substantive epic's design lives in an **SFEP** —
 a numbered proposal under `docs/proposals/` (`docs/proposals/README.md` is the
@@ -347,27 +349,26 @@ duplicating the design; `/pickup` reads it as the brief; it graduates to
 `Implemented` when the feature ships. The SFEP is the durable *why*; the issue is
 the session-sized *what*.
 
-**Labels** are registered in `.github/labels.yml`; conventions and the lifecycle
-diagram are in `docs/conventions/issue-naming.md`. Key ones: `claude-ready`,
-`needs-grooming`, `in-progress`, `blocked`, `type:*`, `size:*`, `area:*`
-(`epic`/`tracking` are **legacy** — epics/trackers are Linear Projects now, not
-labels on new issues; the one surviving use of `tracking` is the `Release:
-vX.Y.Z` cadence tracker. **Priority and estimate are Linear-native fields, not
-GitHub labels** — the `priority:*` labels are retired; set them on the Linear
-mirror at groom/triage). **Labels are the source of truth** for issue state and there is no
-derived GitHub board to keep in sync: the former *Sailfin Tracker* project
-(org project SailfinIO/4) and its `sync-project.yml` label→board workflow have
-been **retired**. Epic and roadmap-level grouping now lives in **Linear** —
-Linear Projects correspond to epics, while session-sized leaf work stays as
-GitHub issues (mirrored into Linear by the GitHub↔Linear integration). Flipping a
-label *is* the state change; no board-sync step follows it. The public roadmap
+**State is Linear-native.** Status (`Triage`→`Backlog`→`Ready`→`In Progress`→
+`In Review`→`Done`; `Blocked` via a blocked-by relation), priority, estimate, and
+Project membership live on the Linear issue — not GitHub labels. `/pickup`
+selects Linear `Ready`. The workflow-state labels `claude-ready`/`in-progress`/
+`blocked` are **retired**; GitHub labels are now only `type:*`/`area:*`
+classification (for contributor intake) plus the release axis (`release:*`,
+`seed-blocker`), registered in `.github/labels.yml`; conventions are in
+`docs/conventions/issue-naming.md`. `epic`/`tracking` are **legacy** — epics are
+Linear Projects, releases are Linear Cycles; the one surviving `tracking` use is
+the `Release: vX.Y.Z` cadence tracker. The former *Sailfin Tracker* GitHub board
+(org project SailfinIO/4) and its `sync-project.yml` label→board workflow are
+**retired**; there is no derived board to sync. The public roadmap
 (`site/src/pages/roadmap.astro`) builds from Linear initiatives/projects at deploy
 time (needs a `LINEAR_API_KEY` build secret; it degrades to a "data unavailable"
 state without one).
 
-**Anti-patterns:** don't pick up `needs-grooming` (groom first); don't expand
-scope mid-session (comment and pause); don't bundle issues into one PR; don't
-`/pickup` from the roadmap (it isn't pickable — issues are).
+**Anti-patterns:** don't pick up an ungroomed issue (`Triage`/`Backlog` — groom
+first); don't expand scope mid-session (comment and pause); don't bundle issues
+into one PR; don't `/pickup` from the roadmap (it isn't pickable — Linear `Ready`
+issues are).
 
 ## Source-of-Truth Documents
 

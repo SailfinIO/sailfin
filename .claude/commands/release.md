@@ -103,9 +103,13 @@ c. **Surface the gap to the user.** Present a short list:
    Curated cut: vX.Y.Z (channel=<c> bump=<b>)
    Tracking issue: Release: vX.Y.Z (#NNN)  [or: not found]
    Open `release:<gate>` items (N):
-     - #NNN <title> (size:_, priority:_)
+     - #NNN <title>
      - ...
    ```
+
+   Estimate/priority are Linear-native fields, not GitHub labels — if the
+   user wants them, read them off the issue's Linear mirror
+   (`mcp__Linear__*`) rather than a `size:_`/`priority:_` label.
 
 d. **Require explicit override if anything is open.** Ask the user:
    "N items are still open under `release:<gate>`. Cut anyway, or wait?"
@@ -117,18 +121,20 @@ and proceed to dispatch.
 
 ### 5. Dispatch the workflow
 
-```bash
-gh workflow run release.yml \
-  -f channel=<channel> \
-  -f bump=<bump>
+Use the GitHub MCP tool to dispatch `release.yml` on `main`:
+
+```
+mcp__github__actions_run_trigger
+  owner=SailfinIO repo=sailfin workflow_id=release.yml ref=main
+  inputs={"channel": "<channel>", "bump": "<bump>"}
 ```
 
 Or for a dry run first:
-```bash
-gh workflow run release.yml \
-  -f channel=<channel> \
-  -f bump=<bump> \
-  -f dry_run=true
+
+```
+mcp__github__actions_run_trigger
+  owner=SailfinIO repo=sailfin workflow_id=release.yml ref=main
+  inputs={"channel": "<channel>", "bump": "<bump>", "dry_run": "true"}
 ```
 
 ### 6. After dispatching

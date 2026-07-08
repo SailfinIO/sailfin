@@ -44,6 +44,6 @@ cat <<'MSG'
 
 Reminders:
 - The compiler self-caps memory at 8 GiB on Linux (`SAILFIN_MEM_LIMIT` to override); still wrap single-file compiles with `timeout 60`.
-- Work lives on the `claude/*` branch; PRs auto-close issues via `Closes #N`.
+- Work lives on `claude/*` branches (`/pickup` uses `claude/sfn-<N>-…`); PRs cite `Fixes SFN-<N>` so Linear closes the issue on merge.
 - Roadmap: site/src/pages/roadmap.astro. Status: docs/status.md.
 MSG

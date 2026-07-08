@@ -133,7 +133,7 @@ If no tracking issue exists for the target:
    ☑/☐ reflects each sub-issue's open/closed state. The GitHub
    "Sub-issues" panel is the source of truth; this list mirrors it. -->
 
-   - ☐ #<N> — <title>  (`release:<gate>`, size:_, priority:_)
+   - ☐ #<N> — <title>  (`release:<gate>`)
    - ☑ #<N> — <title>  (closed)
 
    ## Seed blockers (must close before the next seed bump)
@@ -191,29 +191,24 @@ If no tracking issue exists for the target:
 
 5. **Attach each curated item as a native sub-issue** of the tracker —
    mirroring `/groom`'s epic sub-issue pattern. Body references alone do
-   not populate the parent's "Sub-issues" panel. Use the REST API (the
-   `gh` CLI has no first-class command yet); `sub_issue_id` MUST be passed
-   with `-F` (typed integer) or the API rejects it with a 422:
+   not populate the parent's "Sub-issues" panel. Use the GitHub MCP
+   sub-issue tools:
 
-   ```bash
-   # The tracker's internal node id (NOT the issue number):
-   TRACKER=<tracker-number>
-   TRACKER_ID=$(gh api repos/SailfinIO/sailfin/issues/$TRACKER --jq '.id')
+   ```
+   # Attach every must-close / seed-blocker / needs-seed-cut item.
+   # sub_issue_id is the child's internal issue ID (NOT its number) — read the
+   # child with mcp__github__issue_read first to get `.id`, then method="add":
+   for n in <gate + seed-blocker + needs-seed-cut issue numbers>:
+     child_id = mcp__github__issue_read(owner=SailfinIO, repo=sailfin, issue_number=<n>).id
+     mcp__github__sub_issue_write method=add owner=SailfinIO repo=sailfin
+       issue_number=<tracker-number> sub_issue_id=<child_id>
 
-   # Attach every must-close / seed-blocker / needs-seed-cut item:
-   for n in <gate + seed-blocker + needs-seed-cut issue numbers>; do
-     child_id=$(gh api repos/SailfinIO/sailfin/issues/$n --jq '.id')
-     gh api -X POST /repos/SailfinIO/sailfin/issues/$TRACKER/sub_issues \
-       -F sub_issue_id=$child_id --jq '.number'
-   done
-
-   # Verify the rollup now lists every child:
-   gh api /repos/SailfinIO/sailfin/issues/$TRACKER/sub_issues \
-     --jq '.[] | "#\(.number) \(.title)"'
+   # Verify the rollup now lists every child (read the tracker's sub-issues):
+   mcp__github__issue_read owner=SailfinIO repo=sailfin issue_number=<tracker-number>
    ```
 
-   Attaching an issue that is already a sub-issue is a harmless 4xx — treat
-   it as idempotent (skip, don't fail the run).
+   Attaching an issue that is already a sub-issue is a harmless no-op/4xx —
+   treat it as idempotent (skip, don't fail the run).
 
 6. Report what was created with the issue URL and the count of attached
    sub-issues.
@@ -228,10 +223,9 @@ body summary from native state:
 
 1. Read the tracker's current native sub-issues:
 
-   ```bash
-   TRACKER=<tracker-number>
-   gh api /repos/SailfinIO/sailfin/issues/$TRACKER/sub_issues --paginate \
-     --jq '.[] | {number, state}'
+   ```
+   mcp__github__issue_read owner=SailfinIO repo=sailfin issue_number=<tracker-number>
+   # read its native sub-issues rollup (numbers + open/closed state)
    ```
 
 2. Pull the current label sets:
@@ -246,8 +240,8 @@ body summary from native state:
 3. Reconcile the native sub-issue set (do **not** edit `- [ ]` toggles by
    hand — open/closed is read from the sub-issue, not stored in the body):
    - **Newly labeled, not yet a sub-issue** → attach it via
-     `POST /issues/$TRACKER/sub_issues` (`-F sub_issue_id=<int>`; see
-     Phase 3a step 5). The "Sub-issues" panel then shows it automatically.
+     `mcp__github__sub_issue_write` (see Phase 3a step 5). The "Sub-issues"
+     panel then shows it automatically.
    - **Already a sub-issue, now closed** → no action; the panel and the
      re-rendered summary reflect the closed state on their own.
    - **A sub-issue that no longer carries any gating/seed label, still
@@ -287,16 +281,14 @@ the tracker, evaluate eligibility and surface it — never auto-dispatch
    rollup, not the markdown.
 2. **N = 7 consecutive green-CI days.** The Nightly self-host check
    (`.github/workflows/nightly-selfhost.yml`) concluded `success` on `main`
-   for 7 consecutive days with no failing run in the window:
+   for 7 consecutive days with no failing run in the window. List its recent
+   runs on `main` via the GitHub MCP Actions tools (list the workflow's runs
+   filtered to `branch=main`, then read each run's `conclusion`/`created_at`
+   — e.g. `mcp__github__actions_list` with `workflow_id:
+   nightly-selfhost.yml`, `branch: main`, paginated back 7 days).
 
-   ```bash
-   gh run list --workflow nightly-selfhost.yml --branch main \
-     --created ">=$(date -u -d '7 days ago' +%Y-%m-%d)" \
-     --json conclusion,createdAt --jq '[.[] | .conclusion] | unique'
-   ```
-
-   Pass only when every run in the 7-day window is `success` (the `unique`
-   set is exactly `["success"]`) and at least one run exists per day.
+   Pass only when every run in the 7-day window is `success` and at least
+   one run exists per day.
 
 Render the verdict into the `## Stable promotion` section and the report:
 **eligible** → "stable promotion eligible — a human may dispatch
@@ -317,7 +309,7 @@ burndown). Releases are **never** Linear Projects. See
 `docs/conventions/issue-naming.md` § Release tracking.
 
 Reflect the plan into Linear (best-effort — skip with a one-line note if the
-Linear MCP tools aren't connected, per § Reflecting state into Linear; never
+Linear MCP tools aren't connected, per § Cross-surface flow (Linear ↔ GitHub); never
 write a terminal issue status):
 
 1. **Pick the target Cycle.** `list_cycles` for the Sailfin team; choose the
@@ -397,10 +389,12 @@ record every reason; it strengthens the rationale):
    LAST=$(git describe --tags --abbrev=0 --match 'v*' --exclude '*-*' 2>/dev/null \
           || git describe --tags --abbrev=0 --match 'v*' 2>/dev/null)
    SINCE=$(git log -1 --format=%cd --date=short "$LAST" 2>/dev/null)
-   gh pr list --state merged --base main --search "merged:>=$SINCE" \
-     --json number,title,closingIssuesReferences \
-     --jq '.[] | "\(.title)"' | sort -u
    ```
+
+   Then list merged PRs into `main` since `$SINCE` via
+   `mcp__github__list_pull_requests` (`state=closed`, `base=main`, sorted by
+   merged date), keeping only entries with a non-null merge commit, and
+   dedupe titles.
 
 ### 4.2 — Classify and present (your approval gate)
 
@@ -446,8 +440,9 @@ without an explicit go-ahead. Under `--dry-run`, end after presenting.
 For each issue the user approved as IN, apply the gate label (a **write**,
 authorized by the approval just given):
 
-```bash
-gh issue edit <N> --add-label "release:<gate>"
+```
+mcp__github__issue_write owner=SailfinIO repo=sailfin issue_number=<N>
+  labels=[..._existing labels..., "release:<gate>"]
 ```
 
 Never apply a label to a ROLL-FORWARD or dropped item. Never apply
@@ -501,8 +496,7 @@ Dry run: changes <previewed | applied>
   re-rendered summary is byte-identical when nothing changed.
 - **Native sub-issues are the source of truth.** The markdown sections are
   a rendered mirror — never hand-edit `☐`/`☑` toggles; re-render from the
-  sub-issue rollup. Attach via `POST /issues/<tracker>/sub_issues`
-  (`-F sub_issue_id=<int>`, typed — `-f` 422s).
+  sub-issue rollup. Attach via `mcp__github__sub_issue_write`.
 - **Label writes are approval-gated, never unattended.** The default plan
   step (no `--candidates`) writes only the tracker body, the `tracking`
   label, sub-issue attachments, and comments — it never touches `release:*`.

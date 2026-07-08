@@ -13,8 +13,14 @@ reintroduce gh-aw workflow sources without a new design decision.
 
 For issue execution, use Linear plus the repo-local Codex/Claude workflows:
 
-- groom and prioritize work in Linear;
-- use labels such as `claude-ready`, `needs-grooming`, and `blocked` only as
-  public GitHub fallback triage hints; Linear native status is primary;
+- groom and prioritize work in Linear — workflow status (Triage → Backlog →
+  Ready → In Progress → In Review → Done, plus native blocked-by relations),
+  priority, and estimate are Linear-native fields, not GitHub labels;
+- the `claude-ready`, `in-progress`, and `blocked` labels are retired;
+  `needs-grooming` and `needs-design` survive only as public triage hints on
+  GitHub intake, not as workflow state;
+- external GitHub issues mirror into the Linear SFN team's Triage for
+  maintainers to classify and groom;
 - use the repository prompts and skills under `.codex/` and `.claude/` for
-  interactive pickup, implementation, and PR handoff.
+  interactive pickup and implementation against Linear `Ready` work, and for
+  PR handoff.

@@ -2,7 +2,7 @@ name: Linear Priority Sync
 
 # Backfills Linear-native priority + estimate on the Sailfin team's issue
 # mirrors (scripts/linear-priority-sync.sh; see
-# docs/conventions/issue-naming.md § Reflecting state into Linear). Priority
+# docs/conventions/issue-naming.md § Cross-surface flow (Linear ↔ GitHub)). Priority
 # and estimate are Linear-native fields, so the GitHub-side regression filers
 # (build-quality.yml, perf-history.yml) can't set them at create time — the
 # Linear mirror of a new GitHub issue is created asynchronously by the

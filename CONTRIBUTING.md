@@ -15,6 +15,10 @@ repository.
   file naming, and doc/test mirroring conventions.
 - Ensure you have `bash` and the LLVM toolchain available, including `clang`
   and `llvm-link` (no Conda or Python required).
+- Issues filed on GitHub are triaged by maintainers in Linear (the Sailfin
+  `SFN` team): a filed issue mirrors into Linear Triage, and maintainers own
+  planning and prioritization there. When scoping a PR, reference open issues
+  or roadmap items rather than assuming a particular priority or schedule.
 
 ## 2. Coding Workflow
 
