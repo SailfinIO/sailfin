@@ -138,18 +138,15 @@ struct ParseError {
     message: string;
     flag_name: string;
     arg_name: string;
+    matches: Matches;
 }
 
-// ParseResult is the non-exiting return shape of `parse()`. On success
-// `ok` is true and `matches` is the parsed `Matches`; on any other
-// outcome (including help/version requests) `ok` is false and `error`
-// describes what happened. `matches` still reflects whatever was
-// accumulated before the early exit so callers can inspect partial
-// state.
+// ParseResult is the successful return shape of `parse()`. Parse
+// failures, help, and version requests propagate as `Result.Err` with
+// `ParseError`; the error carries partial `Matches` so callers can
+// preserve legacy command-specific usage handling.
 struct ParseResult {
-    ok: boolean;
     matches: Matches;
-    error: ParseError;
 }
 
 // Style carries the resolved policy for emitting ANSI escape codes to

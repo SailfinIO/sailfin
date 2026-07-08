@@ -170,6 +170,16 @@ fn parse_native_artifact_for_import_context(text: string) -> ParseNativeResult {
     return parse_native_artifact_impl(text, false, false);
 }
 
+// Single-parse import gather (#2016): one full parse yielding structs,
+// enums, interfaces, functions AND top-level bindings for an imported
+// text. `include_instructions=false` (function bodies are never read on
+// the import path) + `include_top_level_bindings=true` (exported-binding
+// filtering needs them). Replaces five per-kind parses per imported text
+// in `gather_imported_module_symbols`.
+fn parse_native_artifact_for_import_with_bindings(text: string) -> ParseNativeResult {
+    return parse_native_artifact_impl(text, false, true);
+}
+
 export {
     select_text_artifact,
     select_layout_manifest_artifact,
@@ -184,6 +194,7 @@ export {
     parse_native_enums_for_import,
     parse_native_functions_for_import,
     parse_native_artifact_for_import_context,
+    parse_native_artifact_for_import_with_bindings,
     parse_layout_manifest
 };
 

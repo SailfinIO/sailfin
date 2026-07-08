@@ -22,6 +22,9 @@ import {
     has_flag,
     help,
     parse,
+    parse_error,
+    parse_is_ok,
+    parse_matches,
     red,
     subcommand,
     with_arg,
@@ -136,14 +139,14 @@ test "cli: builders chain preserves all fields" {
 test "cli: parse single positional argument" {
     let cmd = with_arg(command("app", "desc"), arg("file", "Source file"));
     let argv: string[] = ["app", "hello.sfn"];
-    let m = parse(cmd, argv).matches;
+    let m = parse_matches(parse(cmd, argv));
     assert strings_equal(get(m, "file"), "hello.sfn");
 }
 
 test "cli: parse multiple positional arguments" {
     let cmd = with_arg(with_arg(command("app", "desc"), arg("src", "Source")), arg("dst", "Destination"));
     let argv: string[] = ["app", "a.sfn", "b.sfn"];
-    let m = parse(cmd, argv).matches;
+    let m = parse_matches(parse(cmd, argv));
     assert strings_equal(get(m, "src"), "a.sfn");
     assert strings_equal(get(m, "dst"), "b.sfn");
 }
@@ -151,49 +154,49 @@ test "cli: parse multiple positional arguments" {
 test "cli: parse optional positional uses default when missing" {
     let cmd = with_arg(command("app", "desc"), arg_optional("path", "Directory", "."));
     let argv: string[] = ["app"];
-    let m = parse(cmd, argv).matches;
+    let m = parse_matches(parse(cmd, argv));
     assert strings_equal(get(m, "path"), ".");
 }
 
 test "cli: parse optional positional uses provided value" {
     let cmd = with_arg(command("app", "desc"), arg_optional("path", "Directory", "."));
     let argv: string[] = ["app", "src/"];
-    let m = parse(cmd, argv).matches;
+    let m = parse_matches(parse(cmd, argv));
     assert strings_equal(get(m, "path"), "src/");
 }
 
 test "cli: parse long boolean flag" {
     let cmd = with_flag(command("app", "desc"), flag("verbose", "Verbose"));
     let argv: string[] = ["app", "--verbose"];
-    let m = parse(cmd, argv).matches;
+    let m = parse_matches(parse(cmd, argv));
     assert has_flag(m, "verbose") == true;
 }
 
 test "cli: parse long value flag" {
     let cmd = with_flag(command("app", "desc"), flag_value("output", "Out"));
     let argv: string[] = ["app", "--output", "build/out"];
-    let m = parse(cmd, argv).matches;
+    let m = parse_matches(parse(cmd, argv));
     assert strings_equal(get(m, "output"), "build/out");
 }
 
 test "cli: parse short boolean flag" {
     let cmd = with_flag(command("app", "desc"), flag_short("verbose", "v", "Verbose"));
     let argv: string[] = ["app", "-v"];
-    let m = parse(cmd, argv).matches;
+    let m = parse_matches(parse(cmd, argv));
     assert has_flag(m, "verbose") == true;
 }
 
 test "cli: parse short value flag" {
     let cmd = with_flag(command("app", "desc"), flag_value_short("output", "o", "Out"));
     let argv: string[] = ["app", "-o", "build/out"];
-    let m = parse(cmd, argv).matches;
+    let m = parse_matches(parse(cmd, argv));
     assert strings_equal(get(m, "output"), "build/out");
 }
 
 test "cli: parse mixed flags and positionals" {
     let cmd = with_flag(with_flag(with_arg(command("app", "desc"), arg("file", "Source")), flag("verbose", "Verbose")), flag_value_short("output", "o", "Output"));
     let argv: string[] = ["app", "--verbose", "-o", "out.bin", "main.sfn"];
-    let m = parse(cmd, argv).matches;
+    let m = parse_matches(parse(cmd, argv));
     assert strings_equal(get(m, "file"), "main.sfn");
     assert has_flag(m, "verbose") == true;
     assert strings_equal(get(m, "output"), "out.bin");
@@ -203,7 +206,7 @@ test "cli: parse subcommand" {
     let sub = with_arg(command("build", "Build"), arg("file", "Source"));
     let cmd = with_subcommand(command("app", "desc"), sub);
     let argv: string[] = ["app", "build", "main.sfn"];
-    let m = parse(cmd, argv).matches;
+    let m = parse_matches(parse(cmd, argv));
     assert strings_equal(subcommand(m), "build");
     assert strings_equal(get(m, "file"), "main.sfn");
 }
@@ -212,7 +215,7 @@ test "cli: parse subcommand with flags" {
     let sub = with_flag(with_arg(command("build", "Build"), arg("file", "Source")), flag_value_short("output", "o", "Output"));
     let cmd = with_subcommand(command("app", "desc"), sub);
     let argv: string[] = ["app", "build", "-o", "a.out", "main.sfn"];
-    let m = parse(cmd, argv).matches;
+    let m = parse_matches(parse(cmd, argv));
     assert strings_equal(subcommand(m), "build");
     assert strings_equal(get(m, "output"), "a.out");
     assert strings_equal(get(m, "file"), "main.sfn");
@@ -221,7 +224,7 @@ test "cli: parse subcommand with flags" {
 test "cli: no subcommand returns empty string" {
     let cmd = with_subcommand(command("app", "desc"), command("build", "Build"));
     let argv: string[] = ["app"];
-    let m = parse(cmd, argv).matches;
+    let m = parse_matches(parse(cmd, argv));
     assert strings_equal(subcommand(m), "");
 }
 
@@ -232,22 +235,22 @@ test "cli: unknown token treated as positional when no args defined" {
     let cmd = command("app", "desc");
     let argv: string[] = ["app", "unknown"];
     let r = parse(cmd, argv);
-    assert r.ok == false;
-    assert strings_equal(r.error.kind, "unexpected_positional");
-    assert r.matches.positional_values.length == 0;
+    assert parse_is_ok(r) == false;
+    assert strings_equal(parse_error(r).kind, "unexpected_positional");
+    assert parse_matches(r).positional_values.length == 0;
 }
 
 // ---- Match accessor tests ----
 // These tests assert that accessors handle absent names correctly. An
-// `r.ok` precheck guards against parse() regressing to returning empty
+// `parse_is_ok(r)` precheck guards against parse() regressing to returning empty
 // matches alongside an error — which would silently satisfy assertions
 // like `get(..., "missing") == ""`.
 test "cli: get returns empty string for missing name" {
     let cmd = with_arg(command("app", "desc"), arg("file", "Source"));
     let argv: string[] = ["app", "test.sfn"];
     let r = parse(cmd, argv);
-    assert r.ok == true;
-    let m = r.matches;
+    assert parse_is_ok(r) == true;
+    let m = parse_matches(r);
     assert strings_equal(get(m, "nonexistent"), "");
 }
 
@@ -255,8 +258,8 @@ test "cli: get_or returns default for missing name" {
     let cmd = with_arg(command("app", "desc"), arg("file", "Source"));
     let argv: string[] = ["app", "test.sfn"];
     let r = parse(cmd, argv);
-    assert r.ok == true;
-    let m = r.matches;
+    assert parse_is_ok(r) == true;
+    let m = parse_matches(r);
     assert strings_equal(get_or(m, "missing", "fallback"), "fallback");
 }
 
@@ -264,8 +267,8 @@ test "cli: get_or returns actual value when present" {
     let cmd = with_arg(command("app", "desc"), arg("file", "Source"));
     let argv: string[] = ["app", "test.sfn"];
     let r = parse(cmd, argv);
-    assert r.ok == true;
-    let m = r.matches;
+    assert parse_is_ok(r) == true;
+    let m = parse_matches(r);
     assert strings_equal(get_or(m, "file", "fallback"), "test.sfn");
 }
 
@@ -295,8 +298,8 @@ test "cli: has_flag returns false for missing flag" {
     let cmd = with_flag(command("app", "desc"), flag("verbose", "V"));
     let argv: string[] = ["app"];
     let r = parse(cmd, argv);
-    assert r.ok == true;
-    let m = r.matches;
+    assert parse_is_ok(r) == true;
+    let m = parse_matches(r);
     assert has_flag(m, "verbose") == false;
 }
 
@@ -304,8 +307,8 @@ test "cli: has returns true for present positional" {
     let cmd = with_arg(command("app", "desc"), arg("file", "Source"));
     let argv: string[] = ["app", "main.sfn"];
     let r = parse(cmd, argv);
-    assert r.ok == true;
-    let m = r.matches;
+    assert parse_is_ok(r) == true;
+    let m = parse_matches(r);
     assert has(m, "file") == true;
 }
 
@@ -313,8 +316,8 @@ test "cli: has returns true for present flag" {
     let cmd = with_flag(command("app", "desc"), flag("verbose", "V"));
     let argv: string[] = ["app", "--verbose"];
     let r = parse(cmd, argv);
-    assert r.ok == true;
-    let m = r.matches;
+    assert parse_is_ok(r) == true;
+    let m = parse_matches(r);
     assert has(m, "verbose") == true;
 }
 
@@ -322,8 +325,8 @@ test "cli: has returns false for missing name" {
     let cmd = command("app", "desc");
     let argv: string[] = ["app"];
     let r = parse(cmd, argv);
-    assert r.ok == true;
-    let m = r.matches;
+    assert parse_is_ok(r) == true;
+    let m = parse_matches(r);
     assert has(m, "anything") == false;
 }
 
@@ -385,8 +388,8 @@ test "cli: help hint without subcommand" {
     let cmd = command("app", "desc");
     let argv: string[] = ["app", "--bogus"];
     let r = parse(cmd, argv);
-    assert r.ok == false;
-    assert _contains(r.error.message, "run 'app --help' for usage") == true;
+    assert parse_is_ok(r) == false;
+    assert _contains(parse_error(r).message, "run 'app --help' for usage") == true;
 }
 
 test "cli: help hint with subcommand" {
@@ -394,8 +397,8 @@ test "cli: help hint with subcommand" {
     let cmd = with_subcommand(command("app", "desc"), sub);
     let argv: string[] = ["app", "build", "--bogus"];
     let r = parse(cmd, argv);
-    assert r.ok == false;
-    assert _contains(r.error.message, "run 'app build --help' for usage") == true;
+    assert parse_is_ok(r) == false;
+    assert _contains(parse_error(r).message, "run 'app build --help' for usage") == true;
 }
 
 // ---- ANSI styling tests ----

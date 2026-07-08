@@ -13,6 +13,9 @@ import {
     flag_choice,
     get_choice,
     parse,
+    parse_error,
+    parse_is_ok,
+    parse_matches,
     with_flag
 } from "../src/mod";
 
@@ -22,8 +25,8 @@ test "choice: flag_choice accepts an allowed value" {
     let cmd = with_flag(command("app", "desc"), flag_choice("color", "Pick a color", choices));
     let argv: string[] = ["app", "--color", "green"];
     let r = parse(cmd, argv);
-    assert r.ok == true;
-    assert strings_equal(get_choice(r.matches, "color"), "green");
+    assert parse_is_ok(r) == true;
+    assert strings_equal(get_choice(parse_matches(r), "color"), "green");
 }
 
 test "choice: flag_choice accepts the first allowed value" {
@@ -31,8 +34,8 @@ test "choice: flag_choice accepts the first allowed value" {
     let cmd = with_flag(command("app", "desc"), flag_choice("color", "Pick a color", choices));
     let argv: string[] = ["app", "--color", "red"];
     let r = parse(cmd, argv);
-    assert r.ok == true;
-    assert strings_equal(get_choice(r.matches, "color"), "red");
+    assert parse_is_ok(r) == true;
+    assert strings_equal(get_choice(parse_matches(r), "color"), "red");
 }
 
 // ---- invalid_choice: a value outside the set is rejected ----
@@ -41,9 +44,9 @@ test "choice: value outside the set yields invalid_choice" {
     let cmd = with_flag(command("app", "desc"), flag_choice("color", "Pick a color", choices));
     let argv: string[] = ["app", "--color", "mauve"];
     let r = parse(cmd, argv);
-    assert r.ok == false;
-    assert strings_equal(r.error.kind, "invalid_choice");
-    assert strings_equal(r.error.flag_name, "color");
+    assert parse_is_ok(r) == false;
+    assert strings_equal(parse_error(r).kind, "invalid_choice");
+    assert strings_equal(parse_error(r).flag_name, "color");
 }
 
 // ---- invalid_choice: message reports the allowed set and the value ----
@@ -52,8 +55,8 @@ test "choice: invalid_choice message lists the allowed set" {
     let cmd = with_flag(command("app", "desc"), flag_choice("color", "Pick a color", choices));
     let argv: string[] = ["app", "--color", "mauve"];
     let r = parse(cmd, argv);
-    assert r.ok == false;
-    assert string_starts_with(r.error.message, "error: flag --color expected one of {red, green, blue}, got 'mauve'");
+    assert parse_is_ok(r) == false;
+    assert string_starts_with(parse_error(r).message, "error: flag --color expected one of {red, green, blue}, got 'mauve'");
 }
 
 // ---- case-sensitivity: matching is exact (open question deferred) ----
@@ -62,8 +65,8 @@ test "choice: matching is case-sensitive" {
     let cmd = with_flag(command("app", "desc"), flag_choice("color", "Pick a color", choices));
     let argv: string[] = ["app", "--color", "GREEN"];
     let r = parse(cmd, argv);
-    assert r.ok == false;
-    assert strings_equal(r.error.kind, "invalid_choice");
+    assert parse_is_ok(r) == false;
+    assert strings_equal(parse_error(r).kind, "invalid_choice");
 }
 
 // ---- absent optional choice flag returns the documented sentinel ----
@@ -72,6 +75,6 @@ test "choice: get_choice returns empty sentinel when flag absent" {
     let cmd = with_flag(command("app", "desc"), flag_choice("color", "Pick a color", choices));
     let argv: string[] = ["app"];
     let r = parse(cmd, argv);
-    assert r.ok == true;
-    assert strings_equal(get_choice(r.matches, "color"), "");
+    assert parse_is_ok(r) == true;
+    assert strings_equal(get_choice(parse_matches(r), "color"), "");
 }

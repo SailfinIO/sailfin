@@ -16,12 +16,8 @@ import {
     NativeStruct
 } from "../../native_ir";
 import {
-    parse_native_bindings_from_text,
-    parse_native_enums_for_import,
-    parse_native_functions_for_import,
-    parse_native_imports_for_import,
-    parse_native_interfaces_for_import,
-    parse_native_structs_for_import
+    parse_native_artifact_for_import_with_bindings,
+    parse_native_imports_for_import
 } from "../../native_ir_api";
 import { apply_layout_manifest_to_module } from "../imports";
 import { collect_exported_symbol_names, find_function_by_name_or_import } from "../rendering_helpers";
@@ -47,42 +43,6 @@ struct ImportedModuleSymbols {
     functions: NativeFunction[];
     struct_methods: NativeFunction[];
     bindings: NativeBinding[];
-}
-
-// Collect the module-level `let` constants an imported text EXPORTS (#1368).
-// Only exported bindings are surfaced: a producer's non-exported globals are
-// an implementation detail the importer must not materialise. The importer
-// value-inlines each exported constant into its own module
-// (`lower_imported_bindings_to_globals`), so the producer's value is read
-// directly with no cross-object link dependency.
-fn parse_single_import_exported_bindings(native_text: string) -> NativeBinding[] {
-    let mut exported: NativeBinding[] = [];
-    let all_bindings = parse_native_bindings_from_text(native_text);
-    if all_bindings.length == 0 { return exported; }
-    let exported_names = collect_exported_symbol_names(parse_native_imports_for_import(native_text));
-    if exported_names.length == 0 { return exported; }
-    let mut index: int = 0;
-    loop {
-        if index >= all_bindings.length { break; }
-        let binding = all_bindings[index];
-        index += 1;
-        if binding == null { continue; }
-        if binding.name == null { continue; }
-        if string_array_contains(exported_names, binding.name) {
-            exported.push(binding);
-        }
-    }
-    return exported;
-}
-
-// Parse imported interfaces from a single import text.
-fn parse_single_import_interfaces(native_text: string) -> NativeInterface[] {
-    return parse_native_interfaces_for_import(native_text);
-}
-
-// Parse imported functions from a single import text.
-fn parse_single_import_functions(native_text: string) -> NativeFunction[] {
-    return parse_native_functions_for_import(native_text);
 }
 
 // Extract struct methods from applied structs.
@@ -142,11 +102,20 @@ fn build_import_alias_signatures(imports: NativeImport[], candidate_functions: N
 }
 
 // Gather the per-import contribution (structs/enums/interfaces/functions/
-// struct-methods) for the whole import list.  Pure code-move from
-// lowering_core.sfn's Phase 2 loop; semantics are byte-for-byte preserved,
-// including the intentional drop of apply_layout_manifest_to_module's
-// diagnostics field (the same-module call in lowering_core still captures
-// them for local manifest application).
+// struct-methods/bindings) for the whole import list.  Parses each imported
+// `.sfn-asm` text exactly ONCE per loop iteration using
+// parse_native_artifact_for_import_with_bindings (the native_ir_api
+// wrapper for (false, true)): `include_instructions=false`
+// skips function bodies (only headers/params/meta needed for import context)
+// and `include_top_level_bindings=true` collects exported `.let`/`.extern-var`
+// constants (#1368).  The five per-kind parse calls this replaces all called
+// parse_native_artifact_impl internally with (false, false) or (true, true);
+// the flag difference for bindings is immaterial because binding lines are
+// top-level (current==null), so the include_instructions fast-forward never
+// activates for them (#2016, 5-parses→1).  Semantics are byte-for-byte
+// preserved, including the intentional drop of apply_layout_manifest_to_module's
+// diagnostics field and the parse_native_imports_for_import fast-path scan for
+// export-name filtering.
 fn gather_imported_module_symbols(safe_imported_native_texts: string[], safe_imported_manifests: LayoutManifest[]) -> ImportedModuleSymbols {
     let mut imported_structs: NativeStruct[] = [];
     let mut imported_enums: NativeEnum[] = [];
@@ -173,28 +142,39 @@ fn gather_imported_module_symbols(safe_imported_native_texts: string[], safe_imp
             text_index += 1;
             continue;
         }
-        // Single-pass: parse structs+enums once, apply manifest once
-        let imported_structs_safe = parse_native_structs_for_import(native_text);
-        let imported_enums_safe = parse_native_enums_for_import(native_text);
-        let applied_import = apply_layout_manifest_to_module(imported_structs_safe, imported_enums_safe, manifest_for_module);
+        let parsed = parse_native_artifact_for_import_with_bindings(native_text);
+        let mut parsed_structs = parsed.structs;
+        if parsed_structs == null { parsed_structs = []; }
+        let mut parsed_enums = parsed.enums;
+        if parsed_enums == null { parsed_enums = []; }
+        let applied_import = apply_layout_manifest_to_module(parsed_structs, parsed_enums, manifest_for_module);
         let mut applied_structs = applied_import.structs;
         if applied_structs == null { applied_structs = []; }
         let mut applied_enums = applied_import.enums;
         if applied_enums == null { applied_enums = []; }
-        let applied_interfaces = parse_single_import_interfaces(native_text);
-        let applied_functions = parse_single_import_functions(native_text);
+        let mut parsed_interfaces = parsed.interfaces;
+        if parsed_interfaces == null { parsed_interfaces = []; }
+        let mut parsed_functions = parsed.functions;
+        if parsed_functions == null { parsed_functions = []; }
+        let mut all_bindings = parsed.bindings;
+        if all_bindings == null { all_bindings = []; }
         imported_structs = extend_native_structs(imported_structs, applied_structs);
         imported_enums = extend_native_enums(imported_enums, applied_enums);
-        imported_interfaces = extend_native_interfaces(imported_interfaces, applied_interfaces);
-        imported_functions = extend_native_functions(imported_functions, applied_functions);
+        imported_interfaces = extend_native_interfaces(imported_interfaces, parsed_interfaces);
+        imported_functions = extend_native_functions(imported_functions, parsed_functions);
         let imported_methods = extract_import_struct_methods(applied_structs);
         imported_struct_methods = extend_native_functions(imported_struct_methods, imported_methods);
-        let exported_bindings = parse_single_import_exported_bindings(native_text);
+        let exported_names = collect_exported_symbol_names(parse_native_imports_for_import(native_text));
         let mut bi: int = 0;
         loop {
-            if bi >= exported_bindings.length { break; }
-            imported_bindings.push(exported_bindings[bi]);
+            if bi >= all_bindings.length { break; }
+            let binding = all_bindings[bi];
             bi += 1;
+            if binding == null { continue; }
+            if binding.name == null { continue; }
+            if string_array_contains(exported_names, binding.name) {
+                imported_bindings.push(binding);
+            }
         }
         text_index += 1;
     }

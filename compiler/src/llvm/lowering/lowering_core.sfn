@@ -31,7 +31,6 @@ import {
 import {
     parse_native_artifact,
     parse_native_artifact_from_lines,
-    parse_native_bindings_from_text,
     parse_native_function_count_from_text,
     parse_native_functions_from_text
 } from "../../native_ir_api";
