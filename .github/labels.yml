@@ -93,7 +93,7 @@ labels:
   # Priority is a Linear-native field, not a GitHub label. Set it in Linear
   # at groom/triage time (Urgent/High/Medium/Low). The former `priority:*`
   # labels are retired via the `delete:` list below. See
-  # docs/conventions/issue-naming.md § Reflecting state across Linear and GitHub.
+  # docs/conventions/issue-naming.md § Cross-surface flow (Linear ↔ GitHub).
 
   # --- Area (subsystem) ------------------------------------------------
   - name: area:compiler

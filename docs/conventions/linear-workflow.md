@@ -3,7 +3,7 @@
 This is the human-facing playbook for how work is organised across **Linear**
 and **GitHub Issues**. It is the front door; the dense, agent-facing mechanics
 live in [`issue-naming.md`](./issue-naming.md) (§ *Linear structure & naming*,
-§ *Reflecting state across Linear and GitHub*, § *Release tracking*) and this file links to
+§ *Cross-surface flow (Linear ↔ GitHub)*, § *Release tracking*) and this file links to
 them rather than restating them.
 
 If you only remember one thing: **an epic is a Linear Project, not a GitHub

@@ -195,11 +195,13 @@ If no tracking issue exists for the target:
    sub-issue tools:
 
    ```
-   # Attach every must-close / seed-blocker / needs-seed-cut item
-   # (method="add"; sub_issue_id is the child's internal node id):
+   # Attach every must-close / seed-blocker / needs-seed-cut item.
+   # sub_issue_id is the child's internal issue ID (NOT its number) — read the
+   # child with mcp__github__issue_read first to get `.id`, then method="add":
    for n in <gate + seed-blocker + needs-seed-cut issue numbers>:
+     child_id = mcp__github__issue_read(owner=SailfinIO, repo=sailfin, issue_number=<n>).id
      mcp__github__sub_issue_write method=add owner=SailfinIO repo=sailfin
-       issue_number=<tracker-number> sub_issue_id=<n>
+       issue_number=<tracker-number> sub_issue_id=<child_id>
 
    # Verify the rollup now lists every child (read the tracker's sub-issues):
    mcp__github__issue_read owner=SailfinIO repo=sailfin issue_number=<tracker-number>
@@ -307,7 +309,7 @@ burndown). Releases are **never** Linear Projects. See
 `docs/conventions/issue-naming.md` § Release tracking.
 
 Reflect the plan into Linear (best-effort — skip with a one-line note if the
-Linear MCP tools aren't connected, per § Reflecting state into Linear; never
+Linear MCP tools aren't connected, per § Cross-surface flow (Linear ↔ GitHub); never
 write a terminal issue status):
 
 1. **Pick the target Cycle.** `list_cycles` for the Sailfin team; choose the

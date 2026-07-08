@@ -8,8 +8,8 @@ PR open — flipping the Linear status as you go.
 > `SFN-NNN` issues; there is no GitHub mirror for our own planned work. GitHub
 > hosts the code and the PR. See `docs/conventions/linear-workflow.md` for the
 > full model. Use the `mcp__Linear__*` tools for all issue state; use
-> `mcp__github__*` / `git` for branches, commits, and PRs (there is no `gh`
-> CLI in this environment).
+> `mcp__github__*` for GitHub reads/PRs and `git` for branches and commits —
+> don't rely on a `gh` CLI being available.
 
 ## Target: $ARGUMENTS
 
@@ -69,10 +69,12 @@ git rev-parse --verify "${SEED_TAG}^{commit}" >/dev/null 2>&1 || {
   echo "Seed tag $SEED_TAG does not resolve — check .seed-version."; exit 1; }
 ```
 
-For each predecessor PR `#P` in `## Required in pinned seed`, get its merge
-commit (`mcp__github__pull_request_read` → `mergeCommit`) and check ancestry:
+For each predecessor PR `#P` in `## Required in pinned seed`, read its merge
+commit with `mcp__github__pull_request_read` (method `get` → `mergeCommit.oid`),
+assign it to `PR_MERGE`, and check ancestry:
 
 ```bash
+PR_MERGE=<mergeCommit.oid from mcp__github__pull_request_read for #P>
 git merge-base --is-ancestor "$PR_MERGE" "$SEED_TAG"   # exit 0 ⇒ in seed
 ```
 

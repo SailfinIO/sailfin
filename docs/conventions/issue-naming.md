@@ -167,7 +167,7 @@ four human-authored shapes. Do not create new `[aw]` issues manually.
 |------|-----|
 | Every active issue carries exactly one `type:*` label | `/pickup` routes by it |
 | **Workflow state is Linear-native, not a GitHub label.** Status (`Ready`/`In Progress`/`Blocked`/…), priority, estimate, and blockers live on the Linear issue. `claude-ready`, `in-progress`, and `blocked` are **retired** | One source of truth; `/pickup` selects Linear `Ready` |
-| **Priority is a Linear-native field, not a GitHub label.** Set it in Linear (Urgent/High/Medium/Low) at groom/triage time; the `priority:*` labels are retired (see § *Reflecting state across Linear and GitHub*) | One source of truth; Linear's board sorts on the native field |
+| **Priority is a Linear-native field, not a GitHub label.** Set it in Linear (Urgent/High/Medium/Low) at groom/triage time; the `priority:*` labels are retired (see § *Cross-surface flow (Linear ↔ GitHub)*) | One source of truth; Linear's board sorts on the native field |
 | Apply `area:*` labels when the touched subsystem is unambiguous | Helps `/sweep` dedupe collisions |
 | `tracking` is **legacy** outside release automation — do not apply to new issues except the `Release: vX.Y.Z` cadence tracker (see § *Release tracking*) | Epics are Linear Projects; release automation still queries `tracking` |
 | Never re-introduce a bare alias (`bug`, `runtime`, `medium`, …) | They are listed in `aliases:` of `labels.yml` and will be migrated away on the next sync |
