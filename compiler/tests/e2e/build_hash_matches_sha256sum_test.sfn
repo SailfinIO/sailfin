@@ -1,0 +1,150 @@
+// compiler/tests/e2e/build_hash_matches_sha256sum_test.sfn
+//
+// Correctness gate for the in-process SHA-256 split (#1995,
+// `docs/proposals/draft-test-runner-invocation-cache.md` §3-B).
+// Three contracts exercised against production code:
+//
+//   1. Text file: `sha256_hex_of_string(content)` == `sha256sum` output.
+//      Proves the vendored hasher is correct end-to-end for the common path.
+//
+//   2. Binary file (NUL bytes): `_sha256_of_file_cmd(nul_file)` == `sha256sum`
+//      output. Proves the kept popen path handles embedded NULs correctly.
+//
+//   3. NUL truncation assertion: `_sha256_of_text_file(nul_file)` !=
+//      `_sha256_of_file_cmd(nul_file)`. Proves the truncation is real and the
+//      text/binary split is necessary. If this assertion ever fails,
+//      `fs.readFile` has become binary-safe and #1999 can retire the split.
+//
+// Skips (assert true) when neither `sha256sum` nor `shasum` is on PATH,
+// per `.claude/rules/no-bash-e2e.md`.
+import { _sha256_of_file_cmd, _sha256_of_text_file } from "../../src/build/fs";
+import { sha256_hex_of_string } from "../../src/build/hash";
+
+fn _has_sha256_tool() -> boolean ![io] {
+    let probe = process.run_capture(["bash", "-c", "command -v sha256sum || command -v shasum"], []);
+    let out = process.capture_take_stdout();
+    let _ = process.capture_take_stderr();
+    return probe == 0 && out.length > 0;
+}
+
+// Run sha256sum (or shasum -a 256 on macOS) on `path` and return the
+// 64-hex-char digest, or "" on failure.
+fn _sha256sum_of_file(path: string) -> string ![io] {
+    let cmd = "(command -v sha256sum >/dev/null 2>&1 && sha256sum " + path
+        + " || shasum -a 256 "
+        + path
+        + ") 2>/dev/null | cut -d' ' -f1";
+    let rc = process.run_capture(["bash", "-c", cmd], []);
+    let out = process.capture_take_stdout();
+    let _ = process.capture_take_stderr();
+    if rc != 0 { return ""; }
+    // Strip trailing newline.
+    let mut digest = out;
+    if digest.length > 0 && digest[digest.length - 1] == "\n" {
+        digest = find_substring(digest, 0, digest.length - 1);
+    }
+    return digest;
+}
+
+fn find_substring(s: string, start: int, end: int) -> string {
+    let mut out: string = "";
+    let mut i: int = start;
+    loop {
+        if i >= end { break; }
+        if i >= s.length { break; }
+        out = out + s[i];
+        i += 1;
+    }
+    return out;
+}
+
+fn _tmp_path(name: string) -> string ![io] {
+    let scratch = env.get("SAILFIN_TEST_SCRATCH");
+    if scratch.length > 0 { return scratch + "/" + name; }
+    let tmpdir = env.get("TMPDIR");
+    if tmpdir.length > 0 { return tmpdir + "/.sfn_bh_test_" + name; }
+    return "/tmp/.sfn_bh_test_" + name;
+}
+
+test "build_hash: text file in-process digest matches sha256sum" ![io] {
+    if !_has_sha256_tool() {
+        assert true;
+        return;
+    }
+
+    let content = "hello, Sailfin\n";
+    let path = _tmp_path("text.txt");
+    fs.writeFile(path, content);
+    let expected = _sha256sum_of_file(path);
+    process.run(["rm", "-f", path]);
+    if expected.length == 0 {
+        assert true;
+        return;
+    }
+
+    let got = sha256_hex_of_string(content);
+    assert got == expected;
+}
+
+test "build_hash: _sha256_of_file_cmd on NUL file matches sha256sum" ![io] {
+    if !_has_sha256_tool() {
+        assert true;
+        return;
+    }
+
+    let path = _tmp_path("binary.bin");
+    let write_rc = process.run_capture(["bash", "-c", "printf 'a\\0b\\0c' > "
+        + path], []);
+    let _ = process.capture_take_stdout();
+    let _ = process.capture_take_stderr();
+    if write_rc != 0 {
+        assert true;
+        return;
+    }
+
+    let expected = _sha256sum_of_file(path);
+    if expected.length == 0 {
+        process.run(["rm", "-f", path]);
+        assert true;
+        return;
+    }
+
+    // Production popen path: must return the correct digest for a binary file.
+    let popen_digest = _sha256_of_file_cmd(path);
+    process.run(["rm", "-f", path]);
+    assert popen_digest == expected;
+}
+
+test "build_hash: _sha256_of_text_file truncates at NUL — split is necessary" ![io] {
+    if !_has_sha256_tool() {
+        assert true;
+        return;
+    }
+
+    let path = _tmp_path("binary2.bin");
+    let write_rc = process.run_capture(["bash", "-c", "printf 'a\\0b\\0c' > "
+        + path], []);
+    let _ = process.capture_take_stdout();
+    let _ = process.capture_take_stderr();
+    if write_rc != 0 {
+        assert true;
+        return;
+    }
+
+    let text_digest = _sha256_of_text_file(path);
+    let popen_digest = _sha256_of_file_cmd(path);
+    process.run(["rm", "-f", path]);
+
+    if text_digest.length == 0 || popen_digest.length == 0 {
+        assert true;
+        return;
+    }
+
+    // `_sha256_of_text_file` reads via fs.readFile whose i8* -> {i8*, i64}
+    // coercion uses strlen (core_operands.sfn:1013-1043), truncating at the
+    // first NUL. For the 5-byte input "a\0b\0c" it hashes only "a" (1 byte).
+    // `_sha256_of_file_cmd` (popen) sees all 5 bytes and returns the correct
+    // digest. The two must differ. If they are ever equal, fs.readFile has
+    // become binary-safe and #1999 can retire the text/binary split.
+    assert text_digest != popen_digest;
+}

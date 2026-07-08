@@ -1,0 +1,33 @@
+// compiler/tests/unit/build_hash_sha256_test.sfn
+//
+// FIPS 180-4 vector tests for `sha256_hex_of_string` in
+// `compiler/src/build/hash.sfn` (#1995,
+// `docs/proposals/draft-test-runner-invocation-cache.md` §3-B).
+// Verifies that the vendored copy produces the same digests as the
+// reference implementation in `capsules/sfn/crypto/src/mod.sfn`
+// (cross-checked against `sha256sum` by the e2e companion test).
+import { sha256_hex_of_string } from "../../src/build/hash";
+
+test "build_hash: empty string produces the FIPS 180-4 empty-message digest" {
+    let got = sha256_hex_of_string("");
+    assert got == "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855";
+}
+
+test "build_hash: \"abc\" produces the FIPS 180-4 single-block test vector" {
+    let got = sha256_hex_of_string("abc");
+    assert got == "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad";
+}
+
+test "build_hash: multi-block input matches sha256sum" {
+    // 56-byte NIST two-block test vector. SHA-256 padding appends 0x80, then
+    // zeros, then the 8-byte bit-length. A 56-byte message fills exactly 56
+    // bytes of the first 64-byte block, leaving no room for the 8-byte
+    // length field — so the padded message spans two blocks.
+    let got = sha256_hex_of_string("abcdbcdecdefdefgefghfghighijhijkijkljklmklmnlmnomnopnopq");
+    assert got == "248d6a61d20638b8e5c026930c3e6039a33ce45964ff2167f6ecedd419db06c1";
+}
+
+test "build_hash: single character" {
+    let got = sha256_hex_of_string("a");
+    assert got == "ca978112ca1bbdcafac231b39a23dc4da786eff8147c4e72b9807785afee48bb";
+}

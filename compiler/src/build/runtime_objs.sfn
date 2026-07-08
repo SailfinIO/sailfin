@@ -27,6 +27,7 @@ import {
     _atomic_rename_into_place,
     _mktemp_sibling_cmd,
     _sha256_of_file_cmd,
+    _sha256_of_text_file,
     _shell_read_cmd,
     _shell_single_quote_arg
 } from "./fs";
@@ -326,7 +327,7 @@ fn _runtime_obj_key_with_sibling_deps(base_key: string, ctx_root: string, slug: 
     let mut i: int = 0;
     loop {
         if i >= deps.length { break; }
-        let dep_hash = _sha256_of_file_cmd(deps[i]);
+        let dep_hash = _sha256_of_text_file(deps[i]);
         if dep_hash.length == 0 { return ""; }
         key = key + "\n" + dep_hash;
         i += 1;

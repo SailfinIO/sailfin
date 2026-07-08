@@ -75,10 +75,12 @@ import {
     _ensure_dir_recursive_cmd,
     _sanitize_filename_cmd,
     _sha256_of_file_cmd,
+    _sha256_of_text_file,
     _shell_read_cmd,
     _shell_single_quote_arg,
     _write_text_cmd
 } from "./build/fs";
+import { sha256_hex_of_string } from "./build/hash";
 import { _get_env_cmd } from "./build_flags";
 import { char_code_at_text, find_last_index_of_char, substring } from "./string_utils";
 
@@ -842,47 +844,13 @@ fn cache_store_artifact(root: string, key: CacheKey, kind: string, src_path: str
 // ----------------------------------------------------------------
 // Hashing helpers
 // ----------------------------------------------------------------
-// Hash a string by writing it to a tmp file and sha256ing.
-// `unique_suffix` is sanitized through `_sanitize_filename_cmd`
-// before being concatenated into the tmp path so a stray slash
-// or shell metacharacter cannot escape `/tmp/.sfn_build_cache_*`
-// or break the downstream `sha256sum '<path>'` shell invocation.
-//
-// Cross-process race fix: two parallel workers calling this with the
-// same sanitized suffix used to collide on the single fixed tmp path
-// `/tmp/.sfn_build_cache_hash_<suffix>` — one worker `rm -f`'d the file
-// out from under another's `sha256sum`, surfacing as
-// `sha256sum: /tmp/.sfn_build_cache_hash_…: No such file or directory`
-// and a roaming build-and-run failure under the parallel test pool /
-// `make check --jobs N` (macOS nightly self-host check). The runtime
-// object cache-key path (`runtime_object_entry_key_from_str`) hashes a
-// per-source `hash_suffix` (`cap_prefix + basename + opt_flag`) that is
-// IDENTICAL across concurrent builds of the same runtime source, so the
-// collision is process-global — independent of `SAILFIN_TEST_SCRATCH`.
-//
-// Fix: derive a per-process-unique tmp path via `mktemp` (same pattern
-// as `_cache_atomic_copy`). `mktemp` guarantees a fresh, exclusively
-// created file, so no two workers ever share the path. Falls back to the
-// legacy fixed path when `mktemp` is unavailable (degrades to the prior
-// single-process behaviour rather than failing the hash).
+// Hash a string in-process via the vendored SHA-256 (#1995,
+// `docs/proposals/draft-test-runner-invocation-cache.md` §3-B).
+// `unique_suffix` is accepted for API compatibility but is unused:
+// the in-process path has no shared tmp file and therefore no race
+// (the mktemp workaround is now moot).
 fn _sha256_of_string(input: string, unique_suffix: string) -> string ![io] {
-    let safe_suffix = _sanitize_filename_cmd(unique_suffix);
-    let template = _shell_single_quote_arg("/tmp/.sfn_build_cache_hash_"
-        + safe_suffix
-        + ".XXXXXX");
-    let tmp = _shell_read_cmd("mktemp " + template + " 2>/dev/null");
-    if tmp.length == 0 {
-        // mktemp unavailable — degrade to the legacy fixed path.
-        let fixed = "/tmp/.sfn_build_cache_hash_" + safe_suffix;
-        _write_text_cmd(fixed, input);
-        let fixed_digest = _sha256_of_file_cmd(fixed);
-        process.run(["rm", "-f", fixed]);
-        return fixed_digest;
-    }
-    _write_text_cmd(tmp, input);
-    let digest = _sha256_of_file_cmd(tmp);
-    process.run(["rm", "-f", tmp]);
-    return digest;
+    return sha256_hex_of_string(input);
 }
 
 // ----------------------------------------------------------------
@@ -985,16 +953,20 @@ fn canonicalize_flags(flags: string[]) -> string {
 // ----------------------------------------------------------------
 // Content-hash primitive (shared)
 // ----------------------------------------------------------------
-// Public wrapper over the private `_sha256_of_file_cmd` so callers
-// outside this module can content-address their own artifacts
-// without reaching into `build/fs.sfn` internals. Promoted to
-// a single exported helper per #514's plan; the runtime C-object
-// cache (#632) is the first external consumer. Returns "" if the
-// file can't be hashed (missing source, sha tool absent) — callers
-// must treat an empty hash as "not content-addressable" and fall
-// back to recompile rather than risk a stale hit.
+// Content-address a NUL-free text artifact (`.sfn` source, `.ll` LLVM IR,
+// `.toml` manifest, `.layout.manifest`, `.h`/`.c` header). Delegates to
+// `_sha256_of_text_file`, which reads via `fs.readFile`; that call coerces
+// the `i8*` return to a Sailfin string via `strlen`
+// (core_operands.sfn:1013–1043) and therefore truncates at the first NUL
+// byte. Binary artifacts (compiled binaries, tarballs, archives) MUST NOT
+// use this wrapper — route them through `_sha256_of_file_cmd` in
+// `build/fs.sfn` instead. When #1999 lands a binary-safe read builtin, the
+// two paths can be collapsed. Returns "" if the file does not exist or
+// cannot be read — callers must treat an empty hash as "not
+// content-addressable" and fall back to recompile rather than risk a stale
+// hit (#514, #632).
 fn sha256_of_file(file_path: string) -> string ![io] {
-    return _sha256_of_file_cmd(file_path);
+    return _sha256_of_text_file(file_path);
 }
 
 // Content-addressed cache key for a runtime C / LL object compile.
@@ -1125,13 +1097,13 @@ fn runtime_object_entry_key_from_str(key_str: string, hash_suffix: string) -> Ca
 // carry distinct slugs, which incidentally keeps the `sha256sum` temp
 // filenames below from colliding across concurrent workers.
 fn cache_key_for(source_path: string, dep_layout_manifest_paths: string[], compiler_version: string, flags_canonical: string, slug: string) -> CacheKey ![io] {
-    let s_hash = _sha256_of_file_cmd(source_path);
+    let s_hash = _sha256_of_text_file(source_path);
 
     let mut dep_hashes: string[] = [];
     let mut i: int = 0;
     loop {
         if i >= dep_layout_manifest_paths.length { break; }
-        dep_hashes.push(_sha256_of_file_cmd(dep_layout_manifest_paths[i]));
+        dep_hashes.push(_sha256_of_text_file(dep_layout_manifest_paths[i]));
         i += 1;
     }
     let sorted_dep_hashes = _sort_strings(dep_hashes);
@@ -1279,13 +1251,13 @@ fn test_bin_cache_root() -> string ![io] {
 // file simultaneously (the module cache carries the identical
 // single-process precondition).
 fn test_bin_cache_key(test_source_path: string, dep_ll_paths: string[], native_texts: string[], compiler_identity: string, runtime_identity: string, flags_canonical: string, unique_suffix: string) -> CacheKey ![io] {
-    let s_hash = _sha256_of_file_cmd(test_source_path);
+    let s_hash = _sha256_of_text_file(test_source_path);
 
     let mut dep_hashes: string[] = [];
     let mut i: int = 0;
     loop {
         if i >= dep_ll_paths.length { break; }
-        dep_hashes.push(_sha256_of_file_cmd(dep_ll_paths[i]));
+        dep_hashes.push(_sha256_of_text_file(dep_ll_paths[i]));
         i += 1;
     }
     let mut j: int = 0;
@@ -1344,7 +1316,7 @@ fn runtime_link_inputs_identity(source_paths: string[], value_inputs: string[], 
     let mut i: int = 0;
     loop {
         if i >= source_paths.length { break; }
-        parts.push("src:" + source_paths[i] + "@" + _sha256_of_file_cmd(source_paths[i]));
+        parts.push("src:" + source_paths[i] + "@" + _sha256_of_text_file(source_paths[i]));
         i += 1;
     }
     let mut j: int = 0;
