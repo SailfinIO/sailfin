@@ -147,7 +147,9 @@ fn _probe_macos_sdk_root() -> string ![io] {
 }
 
 // Build the clang link argv for the `sfn test` layout:
-// `clang -O0 -Wno-override-module <sdk_flags…> -o OUT <test.ll> <dep.ll…> <runtime.o…> <libs…>`.
+// `clang -O0 -Wno-override-module <sdk_flags…> -o OUT <test.ll> [dep.ll fallback…] <runtime.o…> <dep.o…> <libs…>`.
+// On a cache hit (#2013) resolver-produced dep modules link as pre-assembled `.o` objects
+// appended after the runtime objects; on cache failure they degrade to `.ll` IR inputs.
 fn _llvm_text_link_test_argv(plan: LinkPlan, sdk_flags: string[]) -> string[] {
     let mut args: string[] = ["clang", plan.opt_flag, "-Wno-override-module"];
     let mut si: int = 0;
