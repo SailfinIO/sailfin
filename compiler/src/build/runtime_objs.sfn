@@ -31,9 +31,11 @@ import {
     _shell_read_cmd,
     _shell_single_quote_arg
 } from "./fs";
+import { sha256_hex_of_string } from "./hash";
 import {
     _dirname,
     _ensure_dir,
+    _find_substring_from,
     _path_basename,
     _path_join,
     _read_import_deps,
@@ -302,6 +304,155 @@ fn _clang_compile_runtime_capsule_objects(runtime_capsules: RuntimeCapsuleArtifa
     };
 }
 
+// ----------------------------------------------------------------
+// Invocation-scoped runtime identity stamp (#1996, SFEP-0044 §3-A)
+// ----------------------------------------------------------------
+// The multi-file test runner's parent warms the runtime objects once
+// per invocation, then forks a child per test file. Without the stamp,
+// every child re-derives every runtime-object cache key (hashing each
+// source + its sibling deps) purely to compare against the `.key`
+// sidecar — invocation-constant work repeated per test file. The
+// parent instead writes `<objdir>/.runtime-identity.stamp` after a
+// successful warm: a `v1` line, the invocation nonce, the folded
+// runtime identity, and one `sha256(full key)` per runtime object /
+// staged `.sfn-asm`. A child whose `SAILFIN_TEST_RUNTIME_STAMP` env
+// nonce matches the stamp's `invocation=` line compares
+// `sha256(sidecar)` against the stamped hash instead of re-hashing
+// the runtime tree.
+//
+// Soundness: the stamp supplies only the EXPECTED key hash — the
+// on-disk `.key` sidecar compare remains the freshness authority, so
+// a corrupt/stale object still misses and recompiles (a stamp can
+// cause miss-when-hit-was-possible, never hit-when-stale). The nonce
+// closes cross-invocation leakage: a child only trusts a stamp its
+// own parent wrote this run (a stale stamp in a reused pinned objdir
+// fails the nonce compare and the child falls back to full hashing —
+// the pre-stamp behavior). Single-file leaf runs have no parent, no
+// nonce env, and are byte-for-byte unchanged.
+fn _runtime_stamp_path(objdir: string) -> string {
+    return _path_join(objdir, ".runtime-identity.stamp");
+}
+
+// Look up one `entry=` value in the stamp, gated on the nonce. Returns
+// "" when the stamp is absent, unversioned, nonce-mismatched (or the
+// child carries no nonce at all), or the entry is missing — every
+// failure mode degrades to the caller's full key computation.
+fn _runtime_stamp_value(objdir: string, entry: string) -> string ![io] {
+    let nonce = env.get("SAILFIN_TEST_RUNTIME_STAMP");
+    if nonce.length == 0 { return ""; }
+    let stamp_path = _runtime_stamp_path(objdir);
+    if !fs.exists(stamp_path) { return ""; }
+    let content = fs.readFile(stamp_path);
+    let mut versioned: boolean = false;
+    let mut nonce_ok: boolean = false;
+    let mut value: string = "";
+    let mut pos: int = 0;
+    loop {
+        if pos >= content.length { break; }
+        let nl = _find_substring_from(content, "\n", pos);
+        let mut end = content.length;
+        if nl >= 0 { end = nl; }
+        let line = substring(content, pos, end);
+        if pos == 0 {
+            if line == "v1" { versioned = true; }
+        } else if line.length > 11 && substring(line, 0, 11) == "invocation=" {
+            if substring(line, 11, line.length) == nonce { nonce_ok = true; }
+        } else {
+            let probe = entry + "=";
+            if line.length > probe.length && substring(line, 0, probe.length) == probe {
+                value = substring(line, probe.length, line.length);
+            }
+        }
+        if nl < 0 { break; }
+        pos = nl + 1;
+    }
+    if !versioned { return ""; }
+    if !nonce_ok { return ""; }
+    return value;
+}
+
+// Exported for `_test_bin_runtime_identity` (cli/commands/test.sfn):
+// the stamped invocation-wide runtime identity, or "" when the stamp
+// does not validate for this child.
+fn runtime_stamp_identity(objdir: string) -> string ![io] {
+    return _runtime_stamp_value(objdir, "identity");
+}
+
+// Write the stamp after a successful parent warm. Recomputes each
+// runtime object's cache key with EXACTLY the derivation
+// `_emit_runtime_sfn_to_obj` / `_stage_one_runtime_sfn_import_context`
+// use (same key functions, same ctx_root, same compiler identity) —
+// any drift between the two produces a stamped hash that mismatches
+// the sidecar, i.e. a fail-safe cache miss, never a stale hit. The
+// second hashing pass over the runtime sources runs once per
+// invocation in the parent (page-cache-hot, in-process) — the point is
+// that the ~34-source derivation stops running once per CHILD.
+// An entry with an unhashable ("") key is simply omitted.
+fn write_runtime_identity_stamp(runtime_capsules: RuntimeCapsuleArtifacts[], out_dir: string, opt_flag: string, binary_dir: string, nonce: string, runtime_identity: string) -> boolean ![io] {
+    if nonce.length == 0 { return false; }
+    let self_path = _resolve_self_path(binary_dir);
+    if self_path.length == 0 { return false; }
+    let compiler_identity = cache_compiler_identity(resolve_compiler_version(""), self_path);
+    let ctx_root = _runtime_sfn_ctx_root(out_dir);
+    let mut text: string = "v1\ninvocation=" + nonce + "\n";
+    if runtime_identity.length > 0 {
+        text = text + "identity=" + runtime_identity + "\n";
+    }
+    let mut ci: int = 0;
+    loop {
+        if ci >= runtime_capsules.length { break; }
+        let cap = runtime_capsules[ci];
+        let cap_prefix = _runtime_obj_prefix(cap.capsule_name);
+        let mut srcs: string[] = [];
+        let mut si: int = 0;
+        loop {
+            if si >= cap.sfn_sources.length { break; }
+            srcs.push(cap.sfn_sources[si]);
+            si += 1;
+        }
+        if cap.prelude_entry.length > 0 { srcs.push(cap.prelude_entry); }
+        let mut sj: int = 0;
+        loop {
+            if sj >= srcs.length { break; }
+            let src = srcs[sj];
+            let slug = module_name_from_path(src);
+            let obj_base = cap_prefix + _path_basename(src) + opt_flag + ".o";
+            let obj_key = _runtime_obj_key_with_sibling_deps(runtime_object_cache_key_with_identity(src, opt_flag, compiler_identity), ctx_root, slug);
+            if obj_key.length > 0 {
+                text = text + "obj/" + obj_base + "=" + sha256_hex_of_string(obj_key)
+                    + "\n";
+            }
+            // The prelude entry is never staged (#1288), so it has no
+            // `.sfn-asm` context entry to stamp.
+            if sj < cap.sfn_sources.length {
+                let asm_key = runtime_object_cache_key_with_identity(src, "", compiler_identity);
+                if asm_key.length > 0 {
+                    text = text + "asm/" + slug + "=" + sha256_hex_of_string(asm_key)
+                        + "\n";
+                }
+            }
+            sj += 1;
+        }
+        ci += 1;
+    }
+    fs.writeFile(_runtime_stamp_path(out_dir), text);
+    return fs.exists(_runtime_stamp_path(out_dir));
+}
+
+// Stamped-key fast path shared by the `.o` emit and the `.sfn-asm`
+// staging: when the stamp validates and carries this entry, a hit is
+// `sha256(sidecar) == stamped` — zero source/sibling hashing. Any
+// mismatch (or absent artifact/sidecar) returns false and the caller
+// runs the full derivation.
+fn _runtime_stamp_cache_hit(objdir: string, entry: string, artifact_path: string) -> boolean ![io] {
+    let stamped = _runtime_stamp_value(objdir, entry);
+    if stamped.length == 0 { return false; }
+    if !fs.exists(artifact_path) { return false; }
+    let sidecar = artifact_path + ".key";
+    if !fs.exists(sidecar) { return false; }
+    return sha256_hex_of_string(fs.readFile(sidecar)) == stamped;
+}
+
 // Result of a single runtime `.sfn` emit: the produced `.o` path
 // (`""` on failure) plus the cache-stat delta for this one source
 // (#915), so the caller can fold runtime-object hits/misses into the
@@ -355,6 +506,18 @@ fn _emit_runtime_sfn_to_obj(self_path: string, cap_prefix: string, src: string, 
     // surfacing as `Undefined symbols ... link failed` (#969). This
     // mirrors the `_clang_compile_runtime_capsule_objects` c-source
     // path so the sfn-source + prelude emit invalidates identically.
+    // #1996 / SFEP-0044 §3-A: stamped fast path. When the parent's
+    // invocation stamp validates for this child and carries this
+    // object's key hash, a sidecar-hash compare replaces the full
+    // source + sibling-dep key derivation. Any mismatch falls through
+    // to the full derivation below (fail-safe: the sidecar compare in
+    // `_runtime_obj_cache_hit` remains the freshness authority).
+    if _runtime_stamp_cache_hit(out_dir, "obj/" + cap_prefix + _path_basename(src)
+        + opt_flag
+        + ".o", obj_path) {
+        stats.hits = stats.hits + 1;
+        return RuntimeEmitResult { obj_path: obj_path, stats: stats };
+    }
     // #1197: fold the emitting compiler's identity into the key so a
     // codegen change in `compiler/src` busts the cached runtime object
     // even when the runtime source bytes are unchanged. See
@@ -467,6 +630,12 @@ fn _runtime_sfn_ctx_root(out_dir: string) -> string {
 fn _stage_one_runtime_sfn_import_context(self_path: string, src: string, ctx_root: string, compiler_identity: string) -> boolean ![io] {
     let slug = module_name_from_path(src);
     let asm_path = ctx_root + "/" + slug + ".sfn-asm";
+    // #1996 / SFEP-0044 §3-A: stamped fast path — same shape as the
+    // `.o` emit hook. The stamp lives in the warm objdir, which is the
+    // ctx root's parent (`_runtime_sfn_ctx_root`).
+    if _runtime_stamp_cache_hit(_dirname(ctx_root), "asm/" + slug, asm_path) {
+        return true;
+    }
     // #1197: the staged `.sfn-asm` import-context is emitted by the
     // compiler too, so a codegen change must bust it on the same identity
     // basis as the `.o` emit below — otherwise a stale staged context
@@ -850,5 +1019,7 @@ fn assemble_runtime_capsule_link_inputs(runtime_capsules: RuntimeCapsuleArtifact
 export {
     RuntimeLinkInputs,
     assemble_runtime_capsule_link_inputs,
+    runtime_stamp_identity,
+    write_runtime_identity_stamp,
     _runtime_bundle_exists
 };
