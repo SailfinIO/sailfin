@@ -103,7 +103,14 @@ export {
 } from "./builder";
 
 // ---- Parsing ----
-export { parse, parse_with_env, run } from "./parser";
+export {
+    parse,
+    parse_with_env,
+    parse_is_ok,
+    parse_matches,
+    parse_error,
+    run
+} from "./parser";
 
 // ---- Match accessors ----
 export {

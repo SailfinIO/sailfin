@@ -446,6 +446,30 @@ fn _validate_level(cmd_name: string, path: string[], active: Command, pos_idx: i
     };
 }
 
+fn parse_is_ok(result: Result<ParseResult, ParseError>) -> boolean {
+    match result {
+        Result.Ok { value } => { return true; },
+        Result.Err { error } => { return false; }
+    }
+    return false;
+}
+
+fn parse_matches(result: Result<ParseResult, ParseError>) -> Matches {
+    match result {
+        Result.Ok { value } => { return value.matches; },
+        Result.Err { error } => { return error.matches; }
+    }
+    return _empty_matches();
+}
+
+fn parse_error(result: Result<ParseResult, ParseError>) -> ParseError {
+    match result {
+        Result.Ok { value } => { return _empty_parse_error(); },
+        Result.Err { error } => { return error; }
+    }
+    return _empty_parse_error();
+}
+
 fn run(cmd: Command, argv: string[]) -> Matches ![io] {
     // Exiting wrapper around `parse_with_env()`. Prints help/version and
     // exits when --help/-h or --version/-V is given. Prints an error and

@@ -20,6 +20,9 @@ import {
     has_flag,
     help,
     parse,
+    parse_error,
+    parse_is_ok,
+    parse_matches,
     parse_with_env,
     with_flag
 } from "../src/mod";
@@ -79,8 +82,8 @@ test "parse: pure parser ignores env binding (flag stays absent)" {
     let cmd = with_flag(command("app", "desc"), flag_env(flag_value("token", "API token"), "PATH"));
     let argv: string[] = ["app"];
     let r = parse(cmd, argv);
-    assert r.ok == true;
-    assert has_flag(r.matches, "token") == false;
+    assert parse_is_ok(r) == true;
+    assert has_flag(parse_matches(r), "token") == false;
 }
 
 // ---- parse_with_env: argv present (env must not override) ----
@@ -88,8 +91,8 @@ test "parse_with_env: argv present with unset env yields argv value" ![io] {
     let cmd = with_flag(command("app", "desc"), flag_env(flag_value("token", "API token"), UNSET_VAR));
     let argv: string[] = ["app", "--token", "from-argv"];
     let r = parse_with_env(cmd, argv);
-    assert r.ok == true;
-    assert strings_equal(get(r.matches, "token"), "from-argv");
+    assert parse_is_ok(r) == true;
+    assert strings_equal(get(parse_matches(r), "token"), "from-argv");
 }
 
 test "parse_with_env: argv value wins over env when both are present" ![io] {
@@ -98,9 +101,9 @@ test "parse_with_env: argv value wins over env when both are present" ![io] {
     let cmd = with_flag(command("app", "desc"), flag_env(flag_value("token", "API token"), "PATH"));
     let argv: string[] = ["app", "--token", "explicit"];
     let r = parse_with_env(cmd, argv);
-    assert r.ok == true;
-    assert strings_equal(get(r.matches, "token"), "explicit");
-    assert ! strings_equal(get(r.matches, "token"), path_value);
+    assert parse_is_ok(r) == true;
+    assert strings_equal(get(parse_matches(r), "token"), "explicit");
+    assert ! strings_equal(get(parse_matches(r), "token"), path_value);
 }
 
 // ---- parse_with_env: argv absent (env fills in) ----
@@ -110,9 +113,9 @@ test "parse_with_env: env value used when argv is absent" ![io] {
     let cmd = with_flag(command("app", "desc"), flag_env(flag_value("token", "API token"), "PATH"));
     let argv: string[] = ["app"];
     let r = parse_with_env(cmd, argv);
-    assert r.ok == true;
-    assert has_flag(r.matches, "token") == true;
-    assert strings_equal(get(r.matches, "token"), path_value);
+    assert parse_is_ok(r) == true;
+    assert has_flag(parse_matches(r), "token") == true;
+    assert strings_equal(get(parse_matches(r), "token"), path_value);
 }
 
 test "parse_with_env: boolean flag marked present from env" ![io] {
@@ -121,16 +124,16 @@ test "parse_with_env: boolean flag marked present from env" ![io] {
     let cmd = with_flag(command("app", "desc"), flag_env(flag("debug", "Enable debug"), "PATH"));
     let argv: string[] = ["app"];
     let r = parse_with_env(cmd, argv);
-    assert r.ok == true;
-    assert has_flag(r.matches, "debug") == true;
+    assert parse_is_ok(r) == true;
+    assert has_flag(parse_matches(r), "debug") == true;
 }
 
 test "parse_with_env: unset env with argv absent leaves optional flag absent" ![io] {
     let cmd = with_flag(command("app", "desc"), flag_env(flag_value("token", "API token"), UNSET_VAR));
     let argv: string[] = ["app"];
     let r = parse_with_env(cmd, argv);
-    assert r.ok == true;
-    assert has_flag(r.matches, "token") == false;
+    assert parse_is_ok(r) == true;
+    assert has_flag(parse_matches(r), "token") == false;
 }
 
 // ---- parse_with_env + flag_required ----
@@ -140,18 +143,18 @@ test "parse_with_env: required flag satisfied by env alone" ![io] {
     let cmd = with_flag(command("app", "desc"), flag_required(flag_env(flag_value("token", "API token"), "PATH")));
     let argv: string[] = ["app"];
     let r = parse_with_env(cmd, argv);
-    assert r.ok == true;
-    assert strings_equal(r.error.kind, "ok");
-    assert strings_equal(get(r.matches, "token"), path_value);
+    assert parse_is_ok(r) == true;
+    assert strings_equal(parse_error(r).kind, "ok");
+    assert strings_equal(get(parse_matches(r), "token"), path_value);
 }
 
 test "parse_with_env: required env flag still fails when env unset and argv absent" ![io] {
     let cmd = with_flag(command("app", "desc"), flag_required(flag_env(flag_value("token", "API token"), UNSET_VAR)));
     let argv: string[] = ["app"];
     let r = parse_with_env(cmd, argv);
-    assert r.ok == false;
-    assert strings_equal(r.error.kind, "missing_required");
-    assert strings_equal(r.error.flag_name, "token");
+    assert parse_is_ok(r) == false;
+    assert strings_equal(parse_error(r).kind, "missing_required");
+    assert strings_equal(parse_error(r).flag_name, "token");
 }
 
 // ---- Help annotation ----

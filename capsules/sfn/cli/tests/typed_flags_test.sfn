@@ -16,6 +16,9 @@ import {
     get_int,
     get_path,
     parse,
+    parse_error,
+    parse_is_ok,
+    parse_matches,
     with_flag
 } from "../src/mod";
 
@@ -24,24 +27,24 @@ test "typed: flag_int parses a positive integer" {
     let cmd = with_flag(command("app", "desc"), flag_int("count", "How many"));
     let argv: string[] = ["app", "--count", "42"];
     let r = parse(cmd, argv);
-    assert r.ok == true;
-    assert get_int(r.matches, "count") == 42;
+    assert parse_is_ok(r) == true;
+    assert get_int(parse_matches(r), "count") == 42;
 }
 
 test "typed: flag_int parses a negative integer" {
     let cmd = with_flag(command("app", "desc"), flag_int("delta", "Offset"));
     let argv: string[] = ["app", "--delta", "-7"];
     let r = parse(cmd, argv);
-    assert r.ok == true;
-    assert get_int(r.matches, "delta") == -7;
+    assert parse_is_ok(r) == true;
+    assert get_int(parse_matches(r), "delta") == -7;
 }
 
 test "typed: flag_int accepts the i64 maximum" {
     let cmd = with_flag(command("app", "desc"), flag_int("big", "Max"));
     let argv: string[] = ["app", "--big", "9223372036854775807"];
     let r = parse(cmd, argv);
-    assert r.ok == true;
-    assert get_int(r.matches, "big") == 9223372036854775807;
+    assert parse_is_ok(r) == true;
+    assert get_int(parse_matches(r), "big") == 9223372036854775807;
 }
 
 // ---- happy path: float ----
@@ -49,16 +52,16 @@ test "typed: flag_float parses a decimal value" {
     let cmd = with_flag(command("app", "desc"), flag_float("ratio", "Ratio"));
     let argv: string[] = ["app", "--ratio", "0.5"];
     let r = parse(cmd, argv);
-    assert r.ok == true;
-    assert get_float(r.matches, "ratio") == 0.5;
+    assert parse_is_ok(r) == true;
+    assert get_float(parse_matches(r), "ratio") == 0.5;
 }
 
 test "typed: flag_float parses a negative decimal value" {
     let cmd = with_flag(command("app", "desc"), flag_float("ratio", "Ratio"));
     let argv: string[] = ["app", "--ratio", "-2.25"];
     let r = parse(cmd, argv);
-    assert r.ok == true;
-    assert get_float(r.matches, "ratio") == -2.25;
+    assert parse_is_ok(r) == true;
+    assert get_float(parse_matches(r), "ratio") == -2.25;
 }
 
 // ---- happy path: path ----
@@ -66,8 +69,8 @@ test "typed: flag_path returns the path verbatim" {
     let cmd = with_flag(command("app", "desc"), flag_path("out", "Output"));
     let argv: string[] = ["app", "--out", "build/out.txt"];
     let r = parse(cmd, argv);
-    assert r.ok == true;
-    assert strings_equal(get_path(r.matches, "out"), "build/out.txt");
+    assert parse_is_ok(r) == true;
+    assert strings_equal(get_path(parse_matches(r), "out"), "build/out.txt");
 }
 
 // ---- type_error: overflow ----
@@ -76,9 +79,9 @@ test "typed: flag_int overflow yields type_error" {
     // i64 max + 1.
     let argv: string[] = ["app", "--big", "9223372036854775808"];
     let r = parse(cmd, argv);
-    assert r.ok == false;
-    assert strings_equal(r.error.kind, "type_error");
-    assert strings_equal(r.error.flag_name, "big");
+    assert parse_is_ok(r) == false;
+    assert strings_equal(parse_error(r).kind, "type_error");
+    assert strings_equal(parse_error(r).flag_name, "big");
 }
 
 // ---- type_error: non-numeric int ----
@@ -86,9 +89,9 @@ test "typed: flag_int non-numeric input yields type_error" {
     let cmd = with_flag(command("app", "desc"), flag_int("count", "How many"));
     let argv: string[] = ["app", "--count", "twelve"];
     let r = parse(cmd, argv);
-    assert r.ok == false;
-    assert strings_equal(r.error.kind, "type_error");
-    assert strings_equal(r.error.flag_name, "count");
+    assert parse_is_ok(r) == false;
+    assert strings_equal(parse_error(r).kind, "type_error");
+    assert strings_equal(parse_error(r).flag_name, "count");
 }
 
 // ---- type_error: empty value ----
@@ -96,9 +99,9 @@ test "typed: flag_int empty value yields type_error" {
     let cmd = with_flag(command("app", "desc"), flag_int("count", "How many"));
     let argv: string[] = ["app", "--count", ""];
     let r = parse(cmd, argv);
-    assert r.ok == false;
-    assert strings_equal(r.error.kind, "type_error");
-    assert strings_equal(r.error.flag_name, "count");
+    assert parse_is_ok(r) == false;
+    assert strings_equal(parse_error(r).kind, "type_error");
+    assert strings_equal(parse_error(r).flag_name, "count");
 }
 
 // ---- type_error: non-numeric float ----
@@ -106,9 +109,9 @@ test "typed: flag_float non-numeric input yields type_error" {
     let cmd = with_flag(command("app", "desc"), flag_float("ratio", "Ratio"));
     let argv: string[] = ["app", "--ratio", "1.2.3"];
     let r = parse(cmd, argv);
-    assert r.ok == false;
-    assert strings_equal(r.error.kind, "type_error");
-    assert strings_equal(r.error.flag_name, "ratio");
+    assert parse_is_ok(r) == false;
+    assert strings_equal(parse_error(r).kind, "type_error");
+    assert strings_equal(parse_error(r).flag_name, "ratio");
 }
 
 // ---- type_error: empty path ----
@@ -116,9 +119,9 @@ test "typed: flag_path empty value yields type_error" {
     let cmd = with_flag(command("app", "desc"), flag_path("out", "Output"));
     let argv: string[] = ["app", "--out", ""];
     let r = parse(cmd, argv);
-    assert r.ok == false;
-    assert strings_equal(r.error.kind, "type_error");
-    assert strings_equal(r.error.flag_name, "out");
+    assert parse_is_ok(r) == false;
+    assert strings_equal(parse_error(r).kind, "type_error");
+    assert strings_equal(parse_error(r).flag_name, "out");
 }
 
 // ---- parse() never exits: error carries a usage hint ----
@@ -126,8 +129,8 @@ test "typed: type_error message includes a usage hint" {
     let cmd = with_flag(command("app", "desc"), flag_int("count", "How many"));
     let argv: string[] = ["app", "--count", "nope"];
     let r = parse(cmd, argv);
-    assert r.ok == false;
-    assert string_starts_with(r.error.message, "error: flag --count");
+    assert parse_is_ok(r) == false;
+    assert string_starts_with(parse_error(r).message, "error: flag --count");
 }
 
 // ---- absent optional typed flag returns the documented sentinel ----
@@ -135,6 +138,6 @@ test "typed: get_int returns 0 sentinel when flag absent" {
     let cmd = with_flag(command("app", "desc"), flag_int("count", "How many"));
     let argv: string[] = ["app"];
     let r = parse(cmd, argv);
-    assert r.ok == true;
-    assert get_int(r.matches, "count") == 0;
+    assert parse_is_ok(r) == true;
+    assert get_int(parse_matches(r), "count") == 0;
 }

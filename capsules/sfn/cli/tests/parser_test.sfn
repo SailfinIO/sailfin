@@ -20,6 +20,9 @@ import {
     flag_value,
     flag_value_short,
     parse,
+    parse_error,
+    parse_is_ok,
+    parse_matches,
     with_arg,
     with_flag,
     with_subcommand
@@ -30,25 +33,25 @@ test "parse: success sets ok=true and error.kind=\"ok\"" {
     let cmd = with_arg(command("app", "desc"), arg("file", "Source"));
     let argv: string[] = ["app", "main.sfn"];
     let r = parse(cmd, argv);
-    assert r.ok == true;
-    assert strings_equal(r.error.kind, "ok");
-    assert strings_equal(r.error.message, "");
-    assert strings_equal(r.error.flag_name, "");
-    assert strings_equal(r.error.arg_name, "");
+    assert parse_is_ok(r) == true;
+    assert strings_equal(parse_error(r).kind, "ok");
+    assert strings_equal(parse_error(r).message, "");
+    assert strings_equal(parse_error(r).flag_name, "");
+    assert strings_equal(parse_error(r).arg_name, "");
 }
 
 test "parse: success matches struct mirrors run() shape" {
     let cmd = with_flag(with_arg(command("app", "desc"), arg("file", "Source")), flag_short("verbose", "v", "Verbose"));
     let argv: string[] = ["app", "-v", "main.sfn"];
     let r = parse(cmd, argv);
-    assert r.ok == true;
-    assert strings_equal(r.matches.command_name, "app");
-    assert strings_equal(r.matches.subcommand_name, "");
-    assert r.matches.positional_names.length == 1;
-    assert strings_equal(r.matches.positional_names[0], "file");
-    assert strings_equal(r.matches.positional_values[0], "main.sfn");
-    assert r.matches.flag_names.length == 1;
-    assert strings_equal(r.matches.flag_names[0], "verbose");
+    assert parse_is_ok(r) == true;
+    assert strings_equal(parse_matches(r).command_name, "app");
+    assert strings_equal(parse_matches(r).subcommand_name, "");
+    assert parse_matches(r).positional_names.length == 1;
+    assert strings_equal(parse_matches(r).positional_names[0], "file");
+    assert strings_equal(parse_matches(r).positional_values[0], "main.sfn");
+    assert parse_matches(r).flag_names.length == 1;
+    assert strings_equal(parse_matches(r).flag_names[0], "verbose");
 }
 
 // ---- "help_requested" ----
@@ -56,18 +59,18 @@ test "parse: --help yields help_requested without printing" {
     let cmd = command("app", "desc");
     let argv: string[] = ["app", "--help"];
     let r = parse(cmd, argv);
-    assert r.ok == false;
-    assert strings_equal(r.error.kind, "help_requested");
+    assert parse_is_ok(r) == false;
+    assert strings_equal(parse_error(r).kind, "help_requested");
     // parse() must not produce a printable message — run() formats it.
-    assert strings_equal(r.error.message, "");
+    assert strings_equal(parse_error(r).message, "");
 }
 
 test "parse: -h yields help_requested" {
     let cmd = command("app", "desc");
     let argv: string[] = ["app", "-h"];
     let r = parse(cmd, argv);
-    assert r.ok == false;
-    assert strings_equal(r.error.kind, "help_requested");
+    assert parse_is_ok(r) == false;
+    assert strings_equal(parse_error(r).kind, "help_requested");
 }
 
 test "parse: subcommand --help records subcommand_name" {
@@ -75,10 +78,10 @@ test "parse: subcommand --help records subcommand_name" {
     let cmd = with_subcommand(command("app", "desc"), sub);
     let argv: string[] = ["app", "build", "--help"];
     let r = parse(cmd, argv);
-    assert r.ok == false;
-    assert strings_equal(r.error.kind, "help_requested");
+    assert parse_is_ok(r) == false;
+    assert strings_equal(parse_error(r).kind, "help_requested");
     // run() relies on subcommand_name to pick the right help target.
-    assert strings_equal(r.matches.subcommand_name, "build");
+    assert strings_equal(parse_matches(r).subcommand_name, "build");
 }
 
 // ---- "version_requested" ----
@@ -86,17 +89,17 @@ test "parse: --version yields version_requested" {
     let cmd = command("app", "desc");
     let argv: string[] = ["app", "--version"];
     let r = parse(cmd, argv);
-    assert r.ok == false;
-    assert strings_equal(r.error.kind, "version_requested");
-    assert strings_equal(r.error.message, "");
+    assert parse_is_ok(r) == false;
+    assert strings_equal(parse_error(r).kind, "version_requested");
+    assert strings_equal(parse_error(r).message, "");
 }
 
 test "parse: -V yields version_requested" {
     let cmd = command("app", "desc");
     let argv: string[] = ["app", "-V"];
     let r = parse(cmd, argv);
-    assert r.ok == false;
-    assert strings_equal(r.error.kind, "version_requested");
+    assert parse_is_ok(r) == false;
+    assert strings_equal(parse_error(r).kind, "version_requested");
 }
 
 // ---- "unknown_flag" ----
@@ -104,21 +107,21 @@ test "parse: unknown long flag yields unknown_flag" {
     let cmd = command("app", "desc");
     let argv: string[] = ["app", "--bogus"];
     let r = parse(cmd, argv);
-    assert r.ok == false;
-    assert strings_equal(r.error.kind, "unknown_flag");
-    assert strings_equal(r.error.message, "error: unknown flag --bogus\nrun 'app --help' for usage");
-    assert strings_equal(r.error.flag_name, "bogus");
-    assert strings_equal(r.error.arg_name, "");
+    assert parse_is_ok(r) == false;
+    assert strings_equal(parse_error(r).kind, "unknown_flag");
+    assert strings_equal(parse_error(r).message, "error: unknown flag --bogus\nrun 'app --help' for usage");
+    assert strings_equal(parse_error(r).flag_name, "bogus");
+    assert strings_equal(parse_error(r).arg_name, "");
 }
 
 test "parse: unknown short flag yields unknown_flag" {
     let cmd = command("app", "desc");
     let argv: string[] = ["app", "-x"];
     let r = parse(cmd, argv);
-    assert r.ok == false;
-    assert strings_equal(r.error.kind, "unknown_flag");
-    assert strings_equal(r.error.message, "error: unknown flag -x\nrun 'app --help' for usage");
-    assert strings_equal(r.error.flag_name, "x");
+    assert parse_is_ok(r) == false;
+    assert strings_equal(parse_error(r).kind, "unknown_flag");
+    assert strings_equal(parse_error(r).message, "error: unknown flag -x\nrun 'app --help' for usage");
+    assert strings_equal(parse_error(r).flag_name, "x");
 }
 
 // ---- "missing_value" ----
@@ -127,20 +130,20 @@ test "parse: long flag missing value yields missing_value" {
     let cmd = with_flag(command("app", "desc"), flag_value("output", "Output path"));
     let argv: string[] = ["app", "--output"];
     let r = parse(cmd, argv);
-    assert r.ok == false;
-    assert strings_equal(r.error.kind, "missing_value");
-    assert strings_equal(r.error.message, "error: flag --output requires a value");
-    assert strings_equal(r.error.flag_name, "output");
+    assert parse_is_ok(r) == false;
+    assert strings_equal(parse_error(r).kind, "missing_value");
+    assert strings_equal(parse_error(r).message, "error: flag --output requires a value");
+    assert strings_equal(parse_error(r).flag_name, "output");
 }
 
 test "parse: short flag missing value yields missing_value" {
     let cmd = with_flag(command("app", "desc"), flag_value_short("output", "o", "Out"));
     let argv: string[] = ["app", "-o"];
     let r = parse(cmd, argv);
-    assert r.ok == false;
-    assert strings_equal(r.error.kind, "missing_value");
-    assert strings_equal(r.error.message, "error: flag -o requires a value");
-    assert strings_equal(r.error.flag_name, "o");
+    assert parse_is_ok(r) == false;
+    assert strings_equal(parse_error(r).kind, "missing_value");
+    assert strings_equal(parse_error(r).message, "error: flag -o requires a value");
+    assert strings_equal(parse_error(r).flag_name, "o");
 }
 
 // ---- "unexpected_positional" ----
@@ -148,11 +151,11 @@ test "parse: extra positional yields unexpected_positional" {
     let cmd = command("app", "desc");
     let argv: string[] = ["app", "extra"];
     let r = parse(cmd, argv);
-    assert r.ok == false;
-    assert strings_equal(r.error.kind, "unexpected_positional");
-    assert strings_equal(r.error.message, "error: unexpected argument 'extra'\nrun 'app --help' for usage");
-    assert strings_equal(r.error.arg_name, "extra");
-    assert strings_equal(r.error.flag_name, "");
+    assert parse_is_ok(r) == false;
+    assert strings_equal(parse_error(r).kind, "unexpected_positional");
+    assert strings_equal(parse_error(r).message, "error: unexpected argument 'extra'\nrun 'app --help' for usage");
+    assert strings_equal(parse_error(r).arg_name, "extra");
+    assert strings_equal(parse_error(r).flag_name, "");
 }
 
 // ---- "missing_required" ----
@@ -160,32 +163,32 @@ test "parse: omitted required positional yields missing_required" {
     let cmd = with_arg(command("app", "desc"), arg("file", "Source"));
     let argv: string[] = ["app"];
     let r = parse(cmd, argv);
-    assert r.ok == false;
-    assert strings_equal(r.error.kind, "missing_required");
-    assert strings_equal(r.error.message, "error: missing required argument <file>\nrun 'app --help' for usage");
-    assert strings_equal(r.error.arg_name, "file");
+    assert parse_is_ok(r) == false;
+    assert strings_equal(parse_error(r).kind, "missing_required");
+    assert strings_equal(parse_error(r).message, "error: missing required argument <file>\nrun 'app --help' for usage");
+    assert strings_equal(parse_error(r).arg_name, "file");
 }
 
 test "parse: omitted required positional after a flag yields missing_required" {
     let cmd = with_flag(with_arg(command("app", "desc"), arg("file", "Source")), flag("verbose", "Verbose"));
     let argv: string[] = ["app", "--verbose"];
     let r = parse(cmd, argv);
-    assert r.ok == false;
-    assert strings_equal(r.error.kind, "missing_required");
-    assert strings_equal(r.error.arg_name, "file");
+    assert parse_is_ok(r) == false;
+    assert strings_equal(parse_error(r).kind, "missing_required");
+    assert strings_equal(parse_error(r).arg_name, "file");
     // Partial matches should still reflect the flag we consumed before
     // the missing-required diagnostic — useful for richer recovery in
     // future callers.
-    assert r.matches.flag_names.length == 1;
-    assert strings_equal(r.matches.flag_names[0], "verbose");
+    assert parse_matches(r).flag_names.length == 1;
+    assert strings_equal(parse_matches(r).flag_names[0], "verbose");
 }
 
 test "parse: optional positional missing still ok" {
     let cmd = with_arg(command("app", "desc"), arg_optional("path", "Directory", "."));
     let argv: string[] = ["app"];
     let r = parse(cmd, argv);
-    assert r.ok == true;
-    assert strings_equal(r.error.kind, "ok");
-    assert r.matches.positional_values.length == 1;
-    assert strings_equal(r.matches.positional_values[0], ".");
+    assert parse_is_ok(r) == true;
+    assert strings_equal(parse_error(r).kind, "ok");
+    assert parse_matches(r).positional_values.length == 1;
+    assert strings_equal(parse_matches(r).positional_values[0], ".");
 }

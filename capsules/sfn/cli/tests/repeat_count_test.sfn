@@ -15,6 +15,9 @@ import {
     flag_count_short,
     flag_repeat,
     parse,
+    parse_error,
+    parse_is_ok,
+    parse_matches,
     repeated,
     with_flag
 } from "../src/mod";
@@ -46,8 +49,8 @@ test "repeated: absent flag yields an empty list" {
     let cmd = with_flag(command("app", "desc"), flag_repeat("include", "Include"));
     let argv: string[] = ["app"];
     let r = parse(cmd, argv);
-    assert r.ok == true;
-    let vals = repeated(r.matches, "include");
+    assert parse_is_ok(r) == true;
+    let vals = repeated(parse_matches(r), "include");
     assert vals.length == 0;
 }
 
@@ -55,8 +58,8 @@ test "repeated: a single occurrence yields one value" {
     let cmd = with_flag(command("app", "desc"), flag_repeat("include", "Include"));
     let argv: string[] = ["app", "--include", "a"];
     let r = parse(cmd, argv);
-    assert r.ok == true;
-    let vals = repeated(r.matches, "include");
+    assert parse_is_ok(r) == true;
+    let vals = repeated(parse_matches(r), "include");
     assert vals.length == 1;
     assert strings_equal(vals[0], "a");
 }
@@ -65,8 +68,8 @@ test "repeated: three occurrences collected in argv order" {
     let cmd = with_flag(command("app", "desc"), flag_repeat("include", "Include"));
     let argv: string[] = ["app", "--include", "a", "--include", "b", "--include", "c"];
     let r = parse(cmd, argv);
-    assert r.ok == true;
-    let vals = repeated(r.matches, "include");
+    assert parse_is_ok(r) == true;
+    let vals = repeated(parse_matches(r), "include");
     assert vals.length == 3;
     assert strings_equal(vals[0], "a");
     assert strings_equal(vals[1], "b");
@@ -78,24 +81,24 @@ test "count_flag: absent flag yields zero" {
     let cmd = with_flag(command("app", "desc"), flag_count("verbose", "Verbose"));
     let argv: string[] = ["app"];
     let r = parse(cmd, argv);
-    assert r.ok == true;
-    assert count_flag(r.matches, "verbose") == 0;
+    assert parse_is_ok(r) == true;
+    assert count_flag(parse_matches(r), "verbose") == 0;
 }
 
 test "count_flag: a single long occurrence yields one" {
     let cmd = with_flag(command("app", "desc"), flag_count("verbose", "Verbose"));
     let argv: string[] = ["app", "--verbose"];
     let r = parse(cmd, argv);
-    assert r.ok == true;
-    assert count_flag(r.matches, "verbose") == 1;
+    assert parse_is_ok(r) == true;
+    assert count_flag(parse_matches(r), "verbose") == 1;
 }
 
 test "count_flag: three long occurrences yield three" {
     let cmd = with_flag(command("app", "desc"), flag_count("verbose", "Verbose"));
     let argv: string[] = ["app", "--verbose", "--verbose", "--verbose"];
     let r = parse(cmd, argv);
-    assert r.ok == true;
-    assert count_flag(r.matches, "verbose") == 3;
+    assert parse_is_ok(r) == true;
+    assert count_flag(parse_matches(r), "verbose") == 3;
 }
 
 // ---- count_flag: short and clustered forms ----
@@ -103,24 +106,24 @@ test "count_flag: a single short occurrence yields one" {
     let cmd = with_flag(command("app", "desc"), flag_count_short("verbose", "v", "Verbose"));
     let argv: string[] = ["app", "-v"];
     let r = parse(cmd, argv);
-    assert r.ok == true;
-    assert count_flag(r.matches, "verbose") == 1;
+    assert parse_is_ok(r) == true;
+    assert count_flag(parse_matches(r), "verbose") == 1;
 }
 
 test "count_flag: three separate short occurrences yield three" {
     let cmd = with_flag(command("app", "desc"), flag_count_short("verbose", "v", "Verbose"));
     let argv: string[] = ["app", "-v", "-v", "-v"];
     let r = parse(cmd, argv);
-    assert r.ok == true;
-    assert count_flag(r.matches, "verbose") == 3;
+    assert parse_is_ok(r) == true;
+    assert count_flag(parse_matches(r), "verbose") == 3;
 }
 
 test "count_flag: clustered -vvv increments the count by three" {
     let cmd = with_flag(command("app", "desc"), flag_count_short("verbose", "v", "Verbose"));
     let argv: string[] = ["app", "-vvv"];
     let r = parse(cmd, argv);
-    assert r.ok == true;
-    assert count_flag(r.matches, "verbose") == 3;
+    assert parse_is_ok(r) == true;
+    assert count_flag(parse_matches(r), "verbose") == 3;
 }
 
 // ---- a cluster of an unknown short alias is still rejected ----
@@ -128,6 +131,6 @@ test "count_flag: clustered unknown short flag is rejected" {
     let cmd = with_flag(command("app", "desc"), flag_count_short("verbose", "v", "Verbose"));
     let argv: string[] = ["app", "-xxx"];
     let r = parse(cmd, argv);
-    assert r.ok == false;
-    assert strings_equal(r.error.kind, "unknown_flag");
+    assert parse_is_ok(r) == false;
+    assert strings_equal(parse_error(r).kind, "unknown_flag");
 }
