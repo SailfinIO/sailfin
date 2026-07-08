@@ -1750,7 +1750,7 @@ Measured across 199 modules (rewind OFF vs ON, same binary):
 Global win across all pipeline stages; 2 known regressions (`capsule_resolver`
 +18%, `core_literals_lowering` +8%) — small front-half modules where the
 relocated-text copy exceeds reclaimed garbage; neither sets the new peak.
-Design record: `docs/proposals/draft-phase-scoped-arena-reclamation.md` (SFEP-0043).
+Design record: `docs/proposals/0043-phase-scoped-arena-reclamation.md` (SFEP-0043).
 
 ---
 
