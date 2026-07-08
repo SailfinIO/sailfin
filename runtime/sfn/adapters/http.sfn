@@ -10,13 +10,11 @@
 // (M3.1, #814/#815) and `runtime/sfn/process.sfn` (M2.9).
 //
 // Scope: HTTP and outbound HTTPS. The `https://` path (get / post /
-// download, via `_http_send`) TLS-wraps its connected socket through
+// download, via `_http_send`, typed fetch via `sfn_http_request_raw`, and
+// keep-alive via `sfn_http_conn_*`) TLS-wraps its connected socket through
 // `../platform/tls.sfn` (OpenSSL, SFEP-0036 gap B1 / #1782): default port
 // 443, SNI = host, peer chain verified AND hostname checked (RFC 6125);
-// system trust-store discovery hardening is #3. The raw-request and
-// keep-alive helpers
-// (`sfn_http_request_raw`, `sfn_http_conn_*`) remain HTTP-only for now
-// and still reject `https://` (a follow-up wave routes them through TLS).
+// system trust-store discovery hardening is #3.
 //
 // ABI. `compiler/src/llvm/runtime_helpers.sfn` flips the curl
 // registry rows by setting `native_signature` to the symbols
@@ -119,6 +117,10 @@ extern fn tls_read(ssl: * u8, buf: * u8, n: i64) -> i64;
 extern fn tls_write(ssl: * u8, buf: * u8, n: i64) -> i64;
 
 extern fn tls_shutdown_free(ssl: * u8) -> void;
+
+// Keep-alive TLS registry head. Plain HTTP handles remain the raw fd; HTTPS
+// handles are the same fd plus a registry row that owns SSL*/SSL_CTX*.
+extern var http_conn_tls_head: * u8 = null;
 
 // ── libc memory + string helpers ──────────────────────────────
 extern fn malloc(size: usize) -> * u8;
@@ -976,13 +978,12 @@ fn sfn_http_post2(url: * u8, body: * u8) -> * u8 ![net] {
 // `sfn_http_request_raw(method, url, headers, body)` — perform an
 // arbitrary HTTP/1.1 request and return the FULL raw response (status
 // line + headers + body) as a caller-owned NUL-terminated buffer, or
-// null on a socket/connect failure. This is the additive primitive
-// behind the typed `fetch` client (sfn/http, Wave 4 / #1325): unlike
-// `sfn_http_get` / `sfn_http_post` it neither strips the headers nor
-// filters on the status code, so the capsule's response parser can
-// surface the real status + headers. Same v0 limits as the rest of
-// this adapter: no TLS, localhost / dotted-quad host only, no chunked
-// decoding, no redirect following.
+// null on a socket/connect/TLS verification failure. This is the additive
+// primitive behind the typed `fetch` client (sfn/http, Wave 4 / #1325):
+// unlike `sfn_http_get` / `sfn_http_post` it neither strips the headers nor
+// filters on the status code, so the capsule's response parser can surface
+// the real status + headers. Same v0 limits as the rest of this adapter:
+// no chunked decoding, no redirect following.
 //
 // `headers` is a pre-serialized header block — zero or more
 // "Name: value\r\n" lines, possibly empty — emitted verbatim after the
@@ -993,9 +994,8 @@ fn sfn_http_request_raw(method: * u8, url: * u8, headers: * u8, body: * u8) -> *
     if url as i64 == 0 { return null; }
     if method as i64 == 0 { return null; }
 
-    // Reject TLS — no HTTPS in v0.
     let https: string = "https://";
-    if (strstr(url, https as * u8) as i64) == (url as i64) { return null; }
+    let is_https: bool = (strstr(url, https as * u8) as i64) == (url as i64);
 
     // Locate the authority: skip past "scheme://" if present.
     let sep: string = "://";
@@ -1014,6 +1014,7 @@ fn sfn_http_request_raw(method: * u8, url: * u8, headers: * u8, body: * u8) -> *
 
     // Split host:port (terminate host in place at the colon).
     let mut port: i64 = 80;
+    if is_https { port = 443; }
     let colon: * u8 = strchr(authority, 58);
     if colon as i64 != 0 {
         port = atoi(_ptr_off(colon, 1)) as i64;
@@ -1028,6 +1029,24 @@ fn sfn_http_request_raw(method: * u8, url: * u8, headers: * u8, body: * u8) -> *
     if fd < 0 {
         free(authority);
         return null;
+    }
+
+    let mut ssl: * u8 = null;
+    let mut tls_ctx: * u8 = null;
+    if is_https {
+        tls_ctx = tls_client_ctx();
+        if tls_ctx as i64 == 0 {
+            free(authority);
+            close(fd);
+            return null;
+        }
+        ssl = tls_connect_fd(tls_ctx, fd, authority);
+        if ssl as i64 == 0 {
+            tls_ctx_free(tls_ctx);
+            free(authority);
+            close(fd);
+            return null;
+        }
     }
 
     // ── Build the request head ──
@@ -1054,6 +1073,7 @@ fn sfn_http_request_raw(method: * u8, url: * u8, headers: * u8, body: * u8) -> *
     if body_len > 0 {
         clen = _uint_to_str(body_len);
         if clen as i64 == 0 {
+            _tls_teardown(ssl, tls_ctx);
             free(authority);
             close(fd);
             return null;
@@ -1072,6 +1092,7 @@ fn sfn_http_request_raw(method: * u8, url: * u8, headers: * u8, body: * u8) -> *
     let head: * u8 = malloc((total + 1) as usize);
     if head as i64 == 0 {
         if clen as i64 != 0 { free(clen); }
+        _tls_teardown(ssl, tls_ctx);
         free(authority);
         close(fd);
         return null;
@@ -1093,15 +1114,17 @@ fn sfn_http_request_raw(method: * u8, url: * u8, headers: * u8, body: * u8) -> *
     memset(_ptr_off(head, off), 0, 1 as usize);
     if clen as i64 != 0 { free(clen); }
 
-    let head_ok: bool = _send_all(fd, null, head, off);
+    let head_ok: bool = _send_all(fd, ssl, head, off);
     free(head);
     if !head_ok {
+        _tls_teardown(ssl, tls_ctx);
         free(authority);
         close(fd);
         return null;
     }
     if body_len > 0 {
-        if !_send_all(fd, null, body, body_len) {
+        if !_send_all(fd, ssl, body, body_len) {
+            _tls_teardown(ssl, tls_ctx);
             free(authority);
             close(fd);
             return null;
@@ -1110,7 +1133,8 @@ fn sfn_http_request_raw(method: * u8, url: * u8, headers: * u8, body: * u8) -> *
 
     free(authority);
     let mut total_len: i64 = 0;
-    let resp: * u8 = _recv_all(fd, null, & total_len);
+    let resp: * u8 = _recv_all(fd, ssl, & total_len);
+    _tls_teardown(ssl, tls_ctx);
     close(fd);
     // Return the full raw response verbatim — the capsule parses the
     // status code and headers out of it. `_recv_all` NUL-terminates the
@@ -1126,8 +1150,8 @@ fn sfn_http_request_raw(method: * u8, url: * u8, headers: * u8, body: * u8) -> *
 // across calls: `sfn_http_conn_open` connects, `sfn_http_conn_send` issues a
 // request with `Connection: keep-alive` and reads exactly one Content-Length-
 // framed response (so the connection stays open), and `sfn_http_conn_close`
-// closes it. v0 limits match the rest of the adapter (no TLS; localhost /
-// dotted-quad / getaddrinfo host) plus: the kept-alive response MUST be
+// closes it. v0 limits match the rest of the adapter plus: the kept-alive
+// response MUST be
 // Content-Length framed (the Sailfin keep-alive server always sends it) —
 // chunked or close-delimited keep-alive responses are out of scope, and HTTP
 // pipelining is not used (one request per round-trip).
@@ -1175,7 +1199,7 @@ fn _resp_content_length(resp: * u8, header_end: i64) -> i64 {
 // keep-alive server always frames with `Content-Length`). The buffer is
 // over-allocated by 4 trailing bytes so the masked 4-byte reads in
 // `_resp_content_length` never fault at the final head offset.
-fn _recv_one_response(fd: i32, len_slot: * i64) -> * u8 ![net] {
+fn _recv_one_response(fd: i32, ssl: * u8, len_slot: * i64) -> * u8 ![net] {
     atomic_store(len_slot, 0);
     let mut capacity: i64 = 8192;
     let mut len: i64 = 0;
@@ -1197,7 +1221,12 @@ fn _recv_one_response(fd: i32, len_slot: * i64) -> * u8 ![net] {
             buf = new_buf;
             capacity = new_cap;
         }
-        let n: i64 = recv(fd, _ptr_off(buf, len), chunk, 0);
+        let mut n: i64 = 0;
+        if ssl as i64 != 0 {
+            n = tls_read(ssl, _ptr_off(buf, len), chunk);
+        } else {
+            n = recv(fd, _ptr_off(buf, len), chunk, 0);
+        }
         if n < 0 {
             free(buf);
             return null;
@@ -1241,7 +1270,12 @@ fn _recv_one_response(fd: i32, len_slot: * i64) -> * u8 ![net] {
             capacity = new_cap;
         }
         let want: i64 = body_target - len;
-        let n: i64 = recv(fd, _ptr_off(buf, len), want, 0);
+        let mut n: i64 = 0;
+        if ssl as i64 != 0 {
+            n = tls_read(ssl, _ptr_off(buf, len), want);
+        } else {
+            n = recv(fd, _ptr_off(buf, len), want, 0);
+        }
         if n < 0 {
             free(buf);
             return null;
@@ -1256,16 +1290,68 @@ fn _recv_one_response(fd: i32, len_slot: * i64) -> * u8 ![net] {
     return buf;
 }
 
+// Keep-alive TLS registry row layout (32 bytes):
+//   +0 fd (i64), +8 SSL* (i64), +16 SSL_CTX* (i64), +24 next row (i64).
+// The public keep-alive ABI stays a single `i64` handle by returning the fd
+// and associating TLS state in this process-local list. The list is tiny in
+// normal use and scoped to explicit `sfn_http_conn_close` cleanup.
+fn _conn_tls_lookup(fd: i64) -> * u8 {
+    let mut row: * u8 = http_conn_tls_head;
+    loop {
+        if row as i64 == 0 { break; }
+        if atomic_load(row as * i64) == fd { return row; }
+        row = atomic_load(_ptr_off(row, 24) as * i64) as * u8;
+    }
+    return null;
+}
+
+fn _conn_tls_register(fd: i64, ssl: * u8, ctx: * u8) -> bool {
+    let row: * u8 = malloc(32 as usize);
+    if row as i64 == 0 { return false; }
+    atomic_store(row as * i64, fd);
+    atomic_store(_ptr_off(row, 8) as * i64, ssl as i64);
+    atomic_store(_ptr_off(row, 16) as * i64, ctx as i64);
+    atomic_store(_ptr_off(row, 24) as * i64, http_conn_tls_head as i64);
+    http_conn_tls_head = row;
+    return true;
+}
+
+fn _conn_tls_ssl(fd: i64) -> * u8 {
+    let row: * u8 = _conn_tls_lookup(fd);
+    if row as i64 == 0 { return null; }
+    return atomic_load(_ptr_off(row, 8) as * i64) as * u8;
+}
+
+fn _conn_tls_remove(fd: i64) -> void ![net] {
+    let mut prev: * u8 = null;
+    let mut row: * u8 = http_conn_tls_head;
+    loop {
+        if row as i64 == 0 { break; }
+        let next: * u8 = atomic_load(_ptr_off(row, 24) as * i64) as * u8;
+        if atomic_load(row as * i64) == fd {
+            if prev as i64 == 0 { http_conn_tls_head = next; } else {
+                atomic_store(_ptr_off(prev, 24) as * i64, next as i64);
+            }
+            let ssl: * u8 = atomic_load(_ptr_off(row, 8) as * i64) as * u8;
+            let ctx: * u8 = atomic_load(_ptr_off(row, 16) as * i64) as * u8;
+            _tls_teardown(ssl, ctx);
+            free(row);
+            return;
+        }
+        prev = row;
+        row = next;
+    }
+}
+
 // `sfn_http_conn_open(url)` — open a keep-alive TCP connection to the
 // authority in `url`. Returns the connected fd as an i64 (>= 0), or -1 on a
-// null/HTTPS url, an authority parse failure, or a connect failure. The caller
-// issues one or more requests with `sfn_http_conn_send` and closes with
-// `sfn_http_conn_close`. Same v0 host limits as the rest of the adapter.
+// null url, an authority parse failure, a connect failure, or an HTTPS TLS
+// verification failure. HTTPS connections keep their SSL*/SSL_CTX* in the
+// process-local registry above so the public handle remains the fd.
 fn sfn_http_conn_open(url: * u8) -> i64 ![net] {
     if url as i64 == 0 { return 0 - 1; }
-    // Reject TLS — no HTTPS in v0.
     let https: string = "https://";
-    if (strstr(url, https as * u8) as i64) == (url as i64) { return 0 - 1; }
+    let is_https: bool = (strstr(url, https as * u8) as i64) == (url as i64);
 
     // Locate the authority: skip past "scheme://" if present.
     let sep: string = "://";
@@ -1282,12 +1368,38 @@ fn sfn_http_conn_open(url: * u8) -> i64 ![net] {
     if authority as i64 == 0 { return 0 - 1; }
 
     let mut port: i64 = 80;
+    if is_https { port = 443; }
     let colon: * u8 = strchr(authority, 58);
     if colon as i64 != 0 {
         port = atoi(_ptr_off(colon, 1)) as i64;
         memset(colon, 0, 1 as usize);
     }
     let fd: i32 = _connect_tcp(authority, port);
+    if fd < 0 {
+        free(authority);
+        return fd as i64;
+    }
+    if is_https {
+        let ctx: * u8 = tls_client_ctx();
+        if ctx as i64 == 0 {
+            free(authority);
+            close(fd);
+            return 0 - 1;
+        }
+        let ssl: * u8 = tls_connect_fd(ctx, fd, authority);
+        if ssl as i64 == 0 {
+            tls_ctx_free(ctx);
+            free(authority);
+            close(fd);
+            return 0 - 1;
+        }
+        if !_conn_tls_register(fd as i64, ssl, ctx) {
+            _tls_teardown(ssl, ctx);
+            free(authority);
+            close(fd);
+            return 0 - 1;
+        }
+    }
     free(authority);
     return fd as i64;
 }
@@ -1384,21 +1496,25 @@ fn sfn_http_conn_send(fd: i64, method: * u8, url: * u8, headers: * u8, body: * u
     if clen as i64 != 0 { free(clen); }
     free(authority);
 
-    let head_ok: bool = _send_all(fd as i32, null, head, off);
+    let ssl: * u8 = _conn_tls_ssl(fd);
+    let head_ok: bool = _send_all(fd as i32, ssl, head, off);
     free(head);
     if !head_ok { return null; }
     if body_len > 0 {
-        if !_send_all(fd as i32, null, body, body_len) { return null; }
+        if !_send_all(fd as i32, ssl, body, body_len) { return null; }
     }
 
     let mut total_len: i64 = 0;
-    return _recv_one_response(fd as i32, & total_len);
+    return _recv_one_response(fd as i32, ssl, & total_len);
 }
 
 // `sfn_http_conn_close(fd)` — close a keep-alive connection opened by
 // `sfn_http_conn_open`. A no-op on a negative (failed-open) fd.
-fn sfn_http_conn_close(fd: i64) -> void {
-    if fd >= 0 { close(fd as i32); }
+fn sfn_http_conn_close(fd: i64) -> void ![net] {
+    if fd >= 0 {
+        _conn_tls_remove(fd);
+        close(fd as i32);
+    }
 }
 
 // `sfn_http_download(url, output_path)` — GET `url` and write the
