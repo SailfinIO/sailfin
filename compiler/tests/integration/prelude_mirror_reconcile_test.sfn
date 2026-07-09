@@ -2,9 +2,13 @@
 //
 // T1 for #1779 (SFEP-0035 §3.1): the prelude-mirror reconciliation guard's
 // positive path. `render_runtime_helper_declarations` reconciles each
-// `target == symbol && native_signature == null` registry mirror row against
+// *enumerated* prelude-mirror registry row (`_is_prelude_mirror_target`) against
 // the imported prelude function's real lowered signature before deferring to
-// the imported declare (#633 suppression); a drift throws a fatal.
+// the imported declare (#633 suppression); a drift throws a fatal. The gate is
+// an explicit six-target set, NOT every `target == symbol && native_signature
+// == null` row — libc-fallback rows (`nanosleep` / `clock_gettime`) share that
+// structural shape but are exempt (see the `nanosleep` case in the T2 unit
+// test).
 //
 // This pins the SFEP §2.1 table for the rows whose registry shape matches the
 // prelude define today: feeding each with its true prelude source-level

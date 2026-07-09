@@ -83,8 +83,19 @@ actual lowered signature before deferring to the prelude declare, and **throws a
 `signature drift` fatal on mismatch** — so drift fails `make compile` at the
 moment it is introduced rather than silently mis-declaring the helper on a
 fallback path. When you edit a mirror row (or its prelude function), change both
-in lock-step. Design record: SFEP-0035 §3.1; the follow-up that derives these
-rows from the prelude (removing the hand-typed duplication) is SFEP-0035 §3.2
+in lock-step.
+
+Reconciliation is gated on an **explicit enumeration** of the prelude-mirror
+targets (`_is_prelude_mirror_target` in `rendering.sfn`: `char_code`, `char_at`,
+`char_from_code`, `find_char`, `string_starts_with`, `record_eq_flag_message`),
+**not** the raw `target == symbol && native_signature == null` predicate: the
+libc-fallback rows `nanosleep` / `clock_gettime` also match that structural
+shape but are not prelude mirrors — their registry signature is the deliberate
+opaque-pointee (`i8*`) form that differs by design from the `%Timespec*` import
+they defer to, so reconciling them would false-positive. Those rows keep the
+plain #633 import suppression without reconciliation. Design record:
+SFEP-0035 §3.1; the follow-up that derives these rows from the prelude (removing
+the hand-typed duplication, and this enumeration with it) is SFEP-0035 §3.2
 (#1780).
 
 ## Returning the `{i8*, i64}` aggregate from a Sailfin body (`SfnString`)

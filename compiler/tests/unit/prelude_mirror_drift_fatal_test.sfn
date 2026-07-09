@@ -3,14 +3,17 @@
 // T2 for #1779 (SFEP-0035 §3.1): the prelude-mirror reconciliation guard
 // actually FATALS on drift — the failure mode the whole guard exists to catch.
 //
-// `render_runtime_helper_declarations` reconciles each
-// `target == symbol && native_signature == null` mirror registry row against
-// the imported prelude function's real lowered signature before deferring to
-// it (#633 suppression). When the two disagree it throws a `signature drift`
-// fatal naming the target and both shapes; the synthesized `@main` wrapper
-// renders that to stderr and exits non-zero, so `make compile` fails at the
-// moment drift is introduced instead of silently mis-declaring the helper on a
-// fallback path.
+// `render_runtime_helper_declarations` reconciles each *enumerated*
+// prelude-mirror registry row (`_is_prelude_mirror_target`) against the imported
+// prelude function's real lowered signature before deferring to it (#633
+// suppression). When the two disagree it throws a `signature drift` fatal naming
+// the target and both shapes; the synthesized `@main` wrapper renders that to
+// stderr and exits non-zero, so `make compile` fails at the moment drift is
+// introduced instead of silently mis-declaring the helper on a fallback path.
+// The gate is an explicit six-target set, NOT every `target == symbol &&
+// native_signature == null` row: the libc-fallback rows (`nanosleep` /
+// `clock_gettime`) share that structural shape but are exempt (pinned by the
+// `nanosleep` case below).
 //
 // Here the real registry `char_code` row (i64 ⟵ [{i8*, i64}]) is fed an
 // imported `char_code` whose return deliberately disagrees (string ⇒
