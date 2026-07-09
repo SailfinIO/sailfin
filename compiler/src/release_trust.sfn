@@ -1,0 +1,26 @@
+// compiler/src/release_trust.sfn
+//
+// Supply-chain trust root for toolchain auto-fetch. The Ed25519 public key
+// below is the one signed release-digest manifests (SHA256SUMS) are verified
+// against. It is pinned into the `sfn` binary at build time — no
+// trust-on-first-use — so a fetched toolchain can be verified with in-process
+// crypto alone (sfn/crypto::ed25519_verify_utf8) before it is ever executed.
+//
+// This mirrors the __version_fallback__ committed-constant pattern in
+// version.sfn: a plain source literal, no code generation. The matching
+// PRIVATE key is a CI secret and is never committed. The canonical committed
+// copy of this key in PEM form is .github/release-signing/ed25519-release.pub.pem;
+// the hex here is the same 32-byte key in the raw form ed25519_verify consumes.
+// Rotate the hex, the PEM, and the CI secret together.
+//
+// Trust model + rotation procedure: docs/release-signing.md.
+// Design: SFEP-0046 (docs/proposals/0046-toolchain-pinning.md) §3.5.
+// Raw 32-byte Ed25519 release-signing public key, lowercase hex (64 chars).
+let RELEASE_SIGNING_PUBLIC_KEY_HEX = "a98fd921c2c18521f765b13c2c134e4ab447f98970f6ea255dce22a05c81029d";
+
+// Pure accessor for the pinned release-signing public key (hex). The toolchain
+// fetch/verify path (SFN-168) passes this to ed25519_verify_utf8 to verify a
+// downloaded SHA256SUMS manifest against its detached signature.
+fn release_signing_public_key_hex() -> string {
+    return RELEASE_SIGNING_PUBLIC_KEY_HEX;
+}

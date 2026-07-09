@@ -278,6 +278,15 @@ jobs:
       contents: write
 
     steps:
+      - name: Checkout (signing script + committed public key)
+        uses: actions/checkout@v7
+        with:
+          # Pin to the released tag so the signing script and the committed
+          # public key come from the same commit the binaries were built at
+          # (the build job checks out this ref too) — matters for retroactive
+          # rebuilds and key-rotation windows.
+          ref: ${{ env.RELEASE_TAG }}
+
       - name: Download build artifacts
         uses: actions/download-artifact@v8
         with:
@@ -329,6 +338,19 @@ jobs:
             fi
           done
 
+      # Supply-chain root: publish a signed SHA256SUMS manifest over the release
+      # assets so `sfn` can verify a fetched toolchain against the public key
+      # embedded in the binary. Trust model: docs/release-signing.md, SFEP-0046 §3.5.
+      # The self-verify inside the script fails the release if the CI signing key
+      # and the committed public key drift apart.
+      - name: Sign release manifest (SHA256SUMS)
+        shell: bash
+        env:
+          SAILFIN_RELEASE_SIGNING_KEY: ${{ secrets.SAILFIN_RELEASE_SIGNING_KEY }}
+        run: |
+          set -euo pipefail
+          bash scripts/sign-release-manifest.sh dist
+
       - name: Remove existing assets (repair runs)
         shell: bash
         env:
@@ -356,5 +378,7 @@ jobs:
             dist/sailfin-native-*.manifest.json
             dist/sailfin_*.tar.gz
             dist/sailfin_*.tar.gz.sha256
+            dist/SHA256SUMS
+            dist/SHA256SUMS.sig
         env:
           GITHUB_TOKEN: ${{ secrets.RELEASE_PAT || secrets.GITHUB_TOKEN }}

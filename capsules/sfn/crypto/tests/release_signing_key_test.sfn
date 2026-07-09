@@ -1,0 +1,27 @@
+// End-to-end check that the Sailfin release-signing public key verifies a real
+// detached Ed25519 signature via the sfn/crypto primitive. This proves the key
+// material committed for the toolchain trust root (compiler/src/release_trust.sfn
+// and .github/release-signing/ed25519-release.pub.pem) is a valid verification
+// key, not just a well-formed hex string.
+//
+// KEY is the same 32-byte Ed25519 public key embedded in the sfn binary as
+// RELEASE_SIGNING_PUBLIC_KEY_HEX (compiler/src/release_trust.sfn). SIG is a
+// detached signature over MSG produced by the matching private key (openssl
+// Ed25519). Rotating the release key means updating KEY here, the compiler
+// constant, and the committed PEM together, and regenerating SIG — see
+// docs/release-signing.md.
+//
+// Design: SFEP-0046 §3.5.
+import { ed25519_verify_utf8 } from "../src/mod";
+
+let KEY = "a98fd921c2c18521f765b13c2c134e4ab447f98970f6ea255dce22a05c81029d";
+let MSG = "Sailfin release manifest signing fixture (SFN-171) :: embedded Ed25519 public key verifies end-to-end.";
+let SIG = "5185a0d821576e996ed55d735c6267db1f02f49cd50a6f6bb59aeaae41508a1462e9044da40e434ccb5cbf6ba2edc17e2dc2f5e4be8e2065040e55d0c1b9c502";
+
+test "release-signing: embedded key verifies a genuine signature" {
+    assert ed25519_verify_utf8(KEY, MSG, SIG) == true;
+}
+
+test "release-signing: tampered manifest is rejected" {
+    assert ed25519_verify_utf8(KEY, MSG + "x", SIG) == false;
+}

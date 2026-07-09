@@ -14,12 +14,17 @@
 //     canonical `EXIT_*` code that threads back to the C-shim entry
 //     (`native_cli_main`) unchanged.
 //
-// `version` takes no arguments or flags, so `run` ignores `matches` and
-// prints `sfn <resolved-version>` — byte-identical to the inline v2
-// handling it replaces (Issue 2.3) and the legacy `version` arm it
+// Bare `version` prints `sfn <resolved-version>` — byte-identical to the
+// inline v2 handling it replaces (Issue 2.3) and the legacy `version` arm it
 // supersedes. Version resolution stays in `version.sfn`
 // (`resolve_compiler_version`, which reads `capsule.toml` / the build
 // stamp); this module only formats and prints the resolved string.
+//
+// The `--signing-key` flag instead prints the release-signing public key
+// pinned into this binary (`release_trust.sfn`), the queryable surface for the
+// toolchain trust root (SFN-171, SFEP-0046 §3.5, docs/release-signing.md). It
+// also keeps the key constant referenced from `@main` so it is retained in the
+// shipped binary rather than dead-code-eliminated.
 //
 // Return-type note: the issue sketch writes `-> number`, but exit codes
 // are integers — the `EXIT_*` constants are `int`, `cli/main.sfn`'s v2
@@ -30,22 +35,31 @@ import {
     Command,
     EXIT_OK,
     Matches,
-    command
+    command,
+    flag,
+    has_flag,
+    with_flag
 } from "sfn/cli";
 
+import { release_signing_public_key_hex } from "../../release_trust";
 import { resolve_compiler_version } from "../../version";
 import { CliContext } from "../context";
 
 // The `sfn/cli` definition for `version`, registered on the v2 root via
-// `with_subcommand`. No args or flags — `version` is a bare subcommand.
+// `with_subcommand`. `--signing-key` prints the embedded release-signing
+// public key instead of the version.
 fn command_def() -> Command {
-    return command("version", "Print the compiler version");
+    return with_flag(command("version", "Print the compiler version"), flag("signing-key", "Print the embedded release-signing public key (hex) instead of the version"));
 }
 
-// Print the resolved compiler version. `matches` is part of the
-// per-command contract but unused here (version takes no input);
-// `ctx.binary_dir` seeds `resolve_compiler_version`'s dev-build lookup.
+// Print the resolved compiler version, or the embedded release-signing public
+// key when `--signing-key` is passed. `ctx.binary_dir` seeds
+// `resolve_compiler_version`'s dev-build lookup.
 fn run(matches: Matches, ctx: CliContext) -> int ![io] {
+    if has_flag(matches, "signing-key") {
+        print(release_signing_public_key_hex());
+        return EXIT_OK;
+    }
     print("sfn " + resolve_compiler_version(ctx.binary_dir));
     return EXIT_OK;
 }
