@@ -1,0 +1,166 @@
+// capsules/sfn/crypto/src/ed25519.sfn
+//
+// Verify-only Ed25519 (RFC 8032) for the sfn/crypto capsule — the crypto
+// primitive the signed-toolchain trust model rests on (SFEP-0046 §3.5).
+// Backed by OpenSSL libcrypto via extern: `-lcrypto` is already linked
+// into every Sailfin binary for TLS (SFEP-0036), so this adds no new
+// dependency. Fail-closed: any malformed input or OpenSSL error yields
+// `false`, never a panic. A pure-Sailfin port is deferred post-1.0
+// (SFEP-0046 §3.5).
+extern fn malloc(size: usize) -> * u8;
+
+extern fn free(ptr: * u8) -> void;
+
+extern fn memset(dst: * u8, byte: i32, n: usize) -> * u8;
+
+extern fn EVP_PKEY_new_raw_public_key(key_type: i32, e: * u8, key: * u8, keylen: usize) -> * u8;
+
+extern fn EVP_PKEY_free(pkey: * u8) -> void;
+
+extern fn EVP_MD_CTX_new() -> * u8;
+
+extern fn EVP_MD_CTX_free(ctx: * u8) -> void;
+
+extern fn EVP_DigestVerifyInit(ctx: * u8, pctx: * * u8, md_type: * u8, e: * u8, pkey: * u8) -> i32;
+
+extern fn EVP_DigestVerify(ctx: * u8, sig: * u8, siglen: usize, tbs: * u8, tbslen: usize) -> i32;
+
+// `_ed_ptr_off(p, off)` — byte-stride pointer arithmetic for a variable
+// offset (copy of the net.sfn / http.sfn helper).
+fn _ed_ptr_off(p: * u8, off: i64) -> * u8 {
+    let addr: i64 = (p as i64) + off;
+    return addr as * u8;
+}
+
+// Map a single hex character to its 0-15 value, or -1 if `c` is not a hex
+// digit.
+fn _ed_hex_val(c: string) -> int {
+    let code: int = char_code(c) & 255;
+    if code >= 48 && code <= 57 {
+        return code - 48;
+    }  // '0'..'9'
+    if code >= 97 && code <= 102 {
+        return code - 97 + 10;
+    }  // 'a'..'f'
+    if code >= 65 && code <= 70 {
+        return code - 65 + 10;
+    }  // 'A'..'F'
+    return -1;
+}
+
+// Decode `hex` into `expect_len` raw bytes. Fail-closed: returns `[]` if
+// `hex` is not exactly `expect_len * 2` hex characters.
+fn _ed_hex_to_bytes(hex: string, expect_len: int) -> int[] {
+    if hex.length != expect_len * 2 { return []; }
+    let mut out: int[] = [];
+    let mut j: int = 0;
+    loop {
+        if j >= expect_len { break; }
+        let hi: int = _ed_hex_val(hex[2 * j]);
+        let lo: int = _ed_hex_val(hex[2 * j + 1]);
+        if hi < 0 { return []; }
+        if lo < 0 { return []; }
+        out.push((hi << 4) | lo);
+        j += 1;
+    }
+    return out;
+}
+
+// Copy `bytes` into a freshly `malloc`ed native buffer, one byte at a time
+// (no pointer_write intrinsic exists, so `memset` with n=1 is the write
+// idiom). Returns `null` on allocation failure. Caller frees.
+fn _ed_bytes_to_native(bytes: int[]) -> * u8 {
+    if bytes.length == 0 {
+        // OpenSSL reads no bytes here (tbslen is 0), but zero the byte so
+        // the helper never hands back uninitialized memory.
+        let empty_buf: * u8 = malloc(1 as usize);
+        if empty_buf as i64 != 0 { memset(empty_buf, 0, 1 as usize); }
+        return empty_buf;
+    }
+    let buf: * u8 = malloc(bytes.length as usize);
+    if buf as i64 == 0 { return null; }
+    let mut i: i64 = 0;
+    loop {
+        if i >= bytes.length as i64 { break; }
+        memset(_ed_ptr_off(buf, i), (bytes[i] & 255) as i32, 1 as usize);
+        i += 1;
+    }
+    return buf;
+}
+
+// Decode a string's raw bytes into an `int[]` (byte-oriented, matching
+// `sha256_hex`'s decode loop).
+fn _ed_string_to_bytes(s: string) -> int[] {
+    let mut bytes: int[] = [];
+    let mut i: int = 0;
+    loop {
+        if i >= s.length { break; }
+        bytes.push(char_code(s[i]) & 255);
+        i += 1;
+    }
+    return bytes;
+}
+
+// Verify an Ed25519 signature (RFC 8032) over a raw byte message.
+// public_key_hex: 64 hex chars (32-byte raw Ed25519 public key).
+// signature_hex:  128 hex chars (64-byte signature).
+// Returns true iff the signature is valid; fail-closed (false, never panic)
+// on any malformed input or OpenSSL error.
+fn ed25519_verify(public_key_hex: string, message: int[], signature_hex: string) -> bool {
+    let key_bytes: int[] = _ed_hex_to_bytes(public_key_hex, 32);
+    if key_bytes.length != 32 { return false; }
+    let sig_bytes: int[] = _ed_hex_to_bytes(signature_hex, 64);
+    if sig_bytes.length != 64 { return false; }
+
+    let key_buf: * u8 = _ed_bytes_to_native(key_bytes);
+    if key_buf as i64 == 0 { return false; }
+
+    // NID_ED25519 / EVP_PKEY_ED25519 = 1087 (decimal; no hex literals).
+    let pkey: * u8 = EVP_PKEY_new_raw_public_key(1087, null, key_buf, 32 as usize);
+    free(key_buf);  // OpenSSL copies the key.
+    if pkey as i64 == 0 { return false; }
+
+    let ctx: * u8 = EVP_MD_CTX_new();
+    if ctx as i64 == 0 {
+        EVP_PKEY_free(pkey);
+        return false;
+    }
+
+    // Ed25519 is a single-shot signature scheme: md and pctx are null.
+    let init_rc: i32 = EVP_DigestVerifyInit(ctx, null, null, null, pkey);
+    if init_rc != 1 {
+        EVP_MD_CTX_free(ctx);
+        EVP_PKEY_free(pkey);
+        return false;
+    }
+
+    let sig_buf: * u8 = _ed_bytes_to_native(sig_bytes);
+    if sig_buf as i64 == 0 {
+        EVP_MD_CTX_free(ctx);
+        EVP_PKEY_free(pkey);
+        return false;
+    }
+    let msg_buf: * u8 = _ed_bytes_to_native(message);
+    if msg_buf as i64 == 0 {
+        free(sig_buf);
+        EVP_MD_CTX_free(ctx);
+        EVP_PKEY_free(pkey);
+        return false;
+    }
+    let msg_len: int = message.length;
+
+    let rc: i32 = EVP_DigestVerify(ctx, sig_buf, 64 as usize, msg_buf, msg_len as usize);
+
+    free(sig_buf);
+    free(msg_buf);
+    EVP_MD_CTX_free(ctx);
+    EVP_PKEY_free(pkey);
+
+    return rc == 1;
+}
+
+// Convenience for a NUL-free text message (e.g. a SHA256SUMS manifest).
+// Verifies over the string's raw bytes. Delegates to ed25519_verify.
+fn ed25519_verify_utf8(public_key_hex: string, message: string, signature_hex: string) -> bool {
+    return ed25519_verify(public_key_hex, _ed_string_to_bytes(message), signature_hex);
+}
