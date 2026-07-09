@@ -25,7 +25,7 @@ the **parent** run the frontend (resolve + typecheck + emit + lower + link)
 children to `exec(test_binary)` under a timeout, preserving execution fault
 isolation while eliminating frontend recomputation.
 
-The originally-Accepted design (below, §6-legacy) rested on a premise that a
+The originally-Accepted design (now the rejected alternative in §6) rested on a premise that a
 real implementation **falsified**: it assumed grouping tests by
 `(project_root, workspace_root)` avoids the resolver-union descriptor conflict
 that per-file forking was built to sidestep. It does not — for the compiler's
@@ -338,7 +338,7 @@ Dependency ordering is explicit so `/groom` can turn this into Linear issues and
 
 1. **Compiler-issue: giant-function codegen miscompile in `test.sfn::run`.**
    Scope: root-cause and fix the layout-sensitive `bounds_check` abort that
-   shifts/vanishes with a gated `print.err` / helper extraction (Finding /
+   shifts/vanishes with a gated `print.err` / helper extraction (see the §1a
    incidental note). *Depends on:* nothing. *Independent* — a compiler bug, not
    part of the runner design, but it destabilizes any work in this file, so land
    it first.
