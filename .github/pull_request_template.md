@@ -9,15 +9,15 @@ the issue from it. See docs/conventions/linear-workflow.md.
 <!-- What changed and why, in a few sentences. Which compiler pass(es) or
 runtime module(s) this touches. Link the SFEP if one governs this work. -->
 
-Fixes SFN-<N>
+Fixes SFN-NNN
 
 <!--
 Linear magic words (org GitHub integration):
-  - Auto-close on merge: Fixes / Closes / Resolves / Implements / Completes SFN-<N>
-  - Link only, no close: Ref / Refs / Part of / Related to / Contributes to SFN-<N>
+  - Auto-close on merge: Fixes / Closes / Resolves / Implements / Completes SFN-NNN
+  - Link only, no close: Ref / Refs / Part of / Related to / Contributes to SFN-NNN
   - Several at once:      Fixes SFN-12, SFN-34 and SFN-56
-  - Suppress linking:     add `skip SFN-<N>` or `ignore SFN-<N>`
-Prefer `Fixes SFN-<N>` for the leaf this PR completes — never `Closes #N`
+  - Suppress linking:     add `skip SFN-NNN` or `ignore SFN-NNN`
+Prefer `Fixes SFN-NNN` for the leaf this PR completes — never `Closes #N`
 (GitHub-issue numbers don't drive our Linear workflow state).
 -->
 
