@@ -99,7 +99,7 @@ test "declare-dedup (#1736): extract_declared_symbol_names reads symbols from de
 // ── Pass 1 emits the typed declare for the target != symbol rows ──
 test "declare-dedup (#1736): helper pass emits the typed print/concat declares" {
     let no_locals: NativeFunction[] = [];
-    let helper_lines = render_runtime_helper_declarations(["print", "concat"], no_locals, _colliding_imports());
+    let helper_lines = render_runtime_helper_declarations(["print", "concat"], no_locals, _colliding_imports(), _empty_context());
     assert _declare_count(helper_lines, "sfn_print") == 1;
     assert _declare_count(helper_lines, "sfn_array_concat") == 1;
 }
@@ -108,7 +108,7 @@ test "declare-dedup (#1736): helper pass emits the typed print/concat declares" 
 test "declare-dedup (#1736): imported pass defers to the typed helper declare" {
     let no_locals: NativeFunction[] = [];
     let imports = _colliding_imports();
-    let helper_lines = render_runtime_helper_declarations(["print", "concat"], no_locals, imports);
+    let helper_lines = render_runtime_helper_declarations(["print", "concat"], no_locals, imports, _empty_context());
     let already = extract_declared_symbol_names(helper_lines);
 
     // With the helper-declared set threaded in, pass 2 emits NO second declare.

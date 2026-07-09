@@ -1,0 +1,132 @@
+// compiler/tests/unit/prelude_mirror_drift_fatal_test.sfn
+//
+// T2 for #1779 (SFEP-0035 §3.1): the prelude-mirror reconciliation guard
+// actually FATALS on drift — the failure mode the whole guard exists to catch.
+//
+// `render_runtime_helper_declarations` reconciles each
+// `target == symbol && native_signature == null` mirror registry row against
+// the imported prelude function's real lowered signature before deferring to
+// it (#633 suppression). When the two disagree it throws a `signature drift`
+// fatal naming the target and both shapes; the synthesized `@main` wrapper
+// renders that to stderr and exits non-zero, so `make compile` fails at the
+// moment drift is introduced instead of silently mis-declaring the helper on a
+// fallback path.
+//
+// Here the real registry `char_code` row (i64 ⟵ [{i8*, i64}]) is fed an
+// imported `char_code` whose return deliberately disagrees (string ⇒
+// {i8*, i64}), so the guard must fire.
+import { expect_to_throw, expect_to_throw_with } from "sfn/test";
+
+import { render_runtime_helper_declarations } from "../../src/llvm/rendering";
+import { TypeContext } from "../../src/llvm/types";
+import { NativeFunction, NativeParameter } from "../../src/native_ir";
+
+fn _empty_context() -> TypeContext {
+    return TypeContext {
+        structs: [],
+        enums: [],
+        interfaces: [],
+        vtables: []
+    };
+}
+
+fn _param(type_annotation: string) -> NativeParameter {
+    return NativeParameter {
+        name: "p",
+        type_annotation: type_annotation,
+        mutable: false,
+        default_value: null,
+        span: null
+    };
+}
+
+fn _fn(name: string, return_type: string, parameters: NativeParameter[]) -> NativeFunction {
+    return NativeFunction {
+        name: name,
+        is_async: false,
+        parameters: parameters,
+        return_type: return_type,
+        effects: [],
+        decorators: [],
+        is_extern: true,
+        instructions: []
+    };
+}
+
+// An imported `char_code` whose RETURN drifts from the registry row: the
+// registry declares `i64`, but a `string` return lowers to `{i8*, i64}`. The
+// single `string` parameter still matches the registry (`{i8*, i64}`), so the
+// mismatch is isolated to the return.
+fn _drifted_char_code() -> NativeFunction[] {
+    return [_fn("char_code", "string", [_param("string")])];
+}
+
+// An imported `char_code` whose signature MATCHES the registry row
+// (int ⇒ i64, string ⇒ {i8*, i64}) — the positive control.
+fn _matching_char_code() -> NativeFunction[] {
+    return [_fn("char_code", "int", [_param("string")])];
+}
+
+// An imported `nanosleep` whose lowered signature disagrees with the registry
+// row (registry: i32 ⟵ [i8*, i8*]). `nanosleep` satisfies the structural
+// `target == symbol && native_signature == null` mirror shape but is a
+// libc-fallback row, NOT a prelude mirror — its registry `i8*` is the
+// deliberate opaque-pointee form that differs by design from the staged
+// `posix.sfn` `%Timespec*` import. It must therefore be EXEMPT from
+// reconciliation (only #633-suppressed), never fatal on this divergence.
+fn _drifted_nanosleep() -> NativeFunction[] {
+    return [_fn("nanosleep", "int", [_param("string"), _param("string")])];
+}
+
+fn _no_fns() -> NativeFunction[] { return []; }
+
+test "prelude-mirror drift (#1779): a drifted mirror row fatals" ![pure] {
+    assert expect_to_throw(fn () -> int {
+        let _ = render_runtime_helper_declarations(["char_code"], _no_fns(), _drifted_char_code(), _empty_context());
+        return 0;
+    }).ok;
+}
+
+test "prelude-mirror drift (#1779): the fatal names the target and both shapes" ![pure] {
+    // The message must name the drifting target...
+    assert expect_to_throw_with(fn () -> int {
+        let _ = render_runtime_helper_declarations(["char_code"], _no_fns(), _drifted_char_code(), _empty_context());
+        return 0;
+    }, "char_code").ok;
+    // ...the registry shape (return i64)...
+    assert expect_to_throw_with(fn () -> int {
+        let _ = render_runtime_helper_declarations(["char_code"], _no_fns(), _drifted_char_code(), _empty_context());
+        return 0;
+    }, "i64(").ok;
+    // ...and the prelude shape (return {i8*, i64}).
+    assert expect_to_throw_with(fn () -> int {
+        let _ = render_runtime_helper_declarations(["char_code"], _no_fns(), _drifted_char_code(), _empty_context());
+        return 0;
+    }, "{i8*, i64}(").ok;
+}
+
+test "prelude-mirror drift (#1779): a matching mirror row does not fatal" ![pure] {
+    // Negative control: an in-sync import reconciles cleanly (no throw). The
+    // matcher fails iff the thunk throws, so `!ok` proves the guard does not
+    // over-fire on a matching signature.
+    let r = expect_to_throw(fn () -> int {
+        let _ = render_runtime_helper_declarations(["char_code"], _no_fns(), _matching_char_code(), _empty_context());
+        return 0;
+    });
+    assert ! r.ok;
+}
+
+test "prelude-mirror drift (#1779): a non-mirror libc-fallback row is exempt from reconciliation" ![pure] {
+    // Scope boundary: `nanosleep` matches the structural mirror shape
+    // (`target == symbol`, `native_signature == null`) but is NOT a prelude
+    // mirror, so its intentional registry/import divergence must NOT fatal. If
+    // the reconciliation gate ever widened from the enumerated prelude-mirror
+    // set back to the raw structural predicate, this drifting import would throw
+    // and break every build that stages `posix.sfn` — so `!ok` locks the
+    // exemption at unit speed.
+    let r = expect_to_throw(fn () -> int {
+        let _ = render_runtime_helper_declarations(["nanosleep"], _no_fns(), _drifted_nanosleep(), _empty_context());
+        return 0;
+    });
+    assert ! r.ok;
+}

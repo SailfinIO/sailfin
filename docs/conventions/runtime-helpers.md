@@ -72,6 +72,21 @@ preamble's `render_runtime_helper_declarations` then emits a single
 `declare` per used target's effective symbol — no aliases, no
 per-target fallbacks.
 
+## Prelude-mirror reconciliation invariant (#1779)
+
+A **prelude-mirror row** (`target == symbol` and `native_signature == null`,
+whose `return_type`/`parameter_types` transcribe a `runtime/prelude.sfn`
+function by hand) must stay ABI-identical to that prelude definition. On any
+build where the mirror symbol is imported, `render_runtime_helper_declarations`
+(`rendering.sfn`) reconciles the registry row against the imported function's
+actual lowered signature before deferring to the prelude declare, and **throws a
+`signature drift` fatal on mismatch** — so drift fails `make compile` at the
+moment it is introduced rather than silently mis-declaring the helper on a
+fallback path. When you edit a mirror row (or its prelude function), change both
+in lock-step. Design record: SFEP-0035 §3.1; the follow-up that derives these
+rows from the prelude (removing the hand-typed duplication) is SFEP-0035 §3.2
+(#1780).
+
 ## Returning the `{i8*, i64}` aggregate from a Sailfin body (`SfnString`)
 
 A handful of helpers carry the `{i8*, i64}` SfnString aggregate return ABI
