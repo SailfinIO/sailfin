@@ -82,6 +82,11 @@ struct SymbolEntry {
     // concrete, C-ABI function. Always `false` for non-function kinds.
     is_generic: boolean;
     is_c_abi: boolean;
+    // For a `variable` bound with a `Channel<T>` type annotation: the
+    // monomorphized element kind `T` resolves to (one of the six kinds
+    // `spawn_future_kind` produces), so `check_channel_send` can enforce
+    // element-type on `ch.send(v)` (#1942). Empty for every other symbol.
+    element_kind: string;
 }
 
 struct SymbolCollectionResult {
@@ -935,6 +940,36 @@ fn future_element_kind(type_text: string) -> string? {
     if strings_equal(trimmed, "%SailfinFutureString*") { return "string"; }
     if strings_equal(trimmed, "%SailfinFuturePtr*") { return "ptr"; }
     return null;
+}
+
+// The monomorphized element kind a `Channel<T>` type annotation carries
+// (#1942), or null when `type_text` is not a channel type. The head name is
+// matched before the first `<` so spacing in the captured annotation text
+// (`Channel < int >`) still resolves. `T` is classified by the same six-kind
+// resolver `spawn_future_kind` applies to spawn/future kinds, so channel-send
+// checking agrees with the runtime's six channel kinds. Reuses
+// `extract_generic_argument_block` for angle-depth-balanced payload lifting,
+// so `Channel<fn() -> void>` resolves `fn() -> void` (→ the ptr catch-all).
+fn channel_element_kind(type_text: string) -> string? {
+    let trimmed = trim_text(type_text);
+    let mut lt: int = -1;
+    let mut index: int = 0;
+    loop {
+        if index >= trimmed.length { break; }
+        if trimmed[index] == "<" {
+            lt = index;
+            break;
+        }
+        index += 1;
+    }
+    if lt < 0 { return null; }
+    let head = trim_text(slice_text(trimmed, 0, lt));
+    if !strings_equal(head, "Channel") { return null; }
+    let inner = extract_generic_argument_block(trimmed);
+    if inner == null { return null; }
+    let resolved = spawn_future_kind(trim_text(inner));
+    if resolved.length == 0 { return null; }
+    return resolved;
 }
 
 // True when `type_text` names one of the six future types.
@@ -2040,7 +2075,7 @@ fn check_type_parameters(type_parameters: TypeParameter[], interfaces: Statement
 // compiler's own LLVM lowering uses the pattern e.g.
 // `compiler/src/llvm/lowering/instructions_loops.sfn:492,597`). Other kinds
 // (function/struct/enum/interface/type/test) keep the duplicate diagnostic.
-fn register_local_symbol(bindings: SymbolEntry[], name: string, kind: string, span: SourceSpan?, scope_start: int, is_generic: boolean = false, is_c_abi: boolean = false) -> ScopeResult {
+fn register_local_symbol(bindings: SymbolEntry[], name: string, kind: string, span: SourceSpan?, scope_start: int, is_generic: boolean = false, is_c_abi: boolean = false, element_kind: string = "") -> ScopeResult {
     if !strings_equal(kind, "variable") {
         if has_symbol_in_range(bindings, name, scope_start) {
             return ScopeResult {
@@ -2050,7 +2085,7 @@ fn register_local_symbol(bindings: SymbolEntry[], name: string, kind: string, sp
         }
     }
 
-    let updated = append_symbol(bindings, name, kind, span, is_generic, is_c_abi);
+    let updated = append_symbol(bindings, name, kind, span, is_generic, is_c_abi, element_kind);
     return ScopeResult { bindings: updated, diagnostics: [] };
 }
 
@@ -2068,10 +2103,10 @@ fn register_symbol(name: string, kind: string, span: SourceSpan?, existing: Symb
     };
 }
 
-fn append_symbol(symbols: SymbolEntry[], name: string, kind: string, span: SourceSpan?, is_generic: boolean = false, is_c_abi: boolean = false) -> SymbolEntry[] {
+fn append_symbol(symbols: SymbolEntry[], name: string, kind: string, span: SourceSpan?, is_generic: boolean = false, is_c_abi: boolean = false, element_kind: string = "") -> SymbolEntry[] {
     let mut updated: SymbolEntry[] = clone_bindings(symbols);
     updated.push(SymbolEntry {
-        name: name, kind: kind, span: span, is_generic: is_generic, is_c_abi: is_c_abi
+        name: name, kind: kind, span: span, is_generic: is_generic, is_c_abi: is_c_abi, element_kind: element_kind
     });
     return updated;
 }
