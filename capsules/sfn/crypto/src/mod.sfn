@@ -2,7 +2,8 @@
 //
 // Provides secure hash functions for data integrity, checksums, and
 // content-addressable storage. No effects required — pure computation.
-//
+export { ed25519_verify, ed25519_verify_utf8 } from "./ed25519";
+
 // SHA-256 is implemented in pure Sailfin (FIPS 180-4). All arithmetic is
 // performed on i64 values masked to 32 bits after every operation, because
 // `>>` lowers to LLVM `ashr` (arithmetic shift): keeping every intermediate

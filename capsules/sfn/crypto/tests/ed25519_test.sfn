@@ -1,0 +1,87 @@
+// Tests for sfn/crypto verify-only Ed25519 (RFC 8032, OpenSSL-backed).
+//
+// Known-answer vectors from RFC 8032 §7.1 (TEST 1-3), a positive
+// ed25519_verify_utf8 vector (so the text-message path is proven live,
+// not only rejected), plus tamper cases (a flipped signature byte, a
+// mismatched message, a mismatched key/message pair) and fail-closed
+// malformed-input cases that must return false without panicking.
+import { ed25519_verify, ed25519_verify_utf8 } from "../src/mod";
+
+test "ed25519_verify: RFC 8032 TEST 1 (empty message)" {
+    let pk = "d75a980182b10ab7d54bfed3c964073a0ee172f3daa62325af021a68f707511a";
+    let sig = "e5564300c360ac729086e2cc806e828a84877f1eb8e5d974d873e065224901555fb8821590a33bacc61e39701cf9b46bd25bf5f0595bbe24655141438e7a100b";
+    assert ed25519_verify(pk, [], sig) == true;
+}
+
+test "ed25519_verify: RFC 8032 TEST 2 (1-byte message)" {
+    let pk = "3d4017c3e843895a92b70aa74d1b7ebc9c982ccf2ec4968cc0cd55f12af4660c";
+    let sig = "92a009a9f0d4cab8720e820b5f642540a2b27b5416503f8fb3762223ebdb69da085ac1e43e15996e458f3613d0f11d8c387b2eaeb4302aeeb00d291612bb0c00";
+    assert ed25519_verify(pk, [114], sig) == true;
+}
+
+test "ed25519_verify: RFC 8032 TEST 3 (2-byte message)" {
+    let pk = "fc51cd8e6218a1a38da47ed00230f0580816ed13ba3303ac5deb911548908025";
+    let sig = "6291d657deec24024827e69c3abe01a30ce548a284743a445e3680d7db5ac3ac18ff9b538d16f290ae67f760984dc6594a7c15e9716ed28dc027beceea1ec40a";
+    assert ed25519_verify(pk, [175, 130], sig) == true;
+}
+
+test "ed25519_verify_utf8: valid text-message signature" {
+    // Generated with OpenSSL Ed25519 over the ASCII message below; proves
+    // the utf8 delegation path accepts a genuine signature (guards against
+    // a silent degrade-to-always-false in _ed_string_to_bytes).
+    let pk = "d481212055e305d0b05b591760df527f31fd3cb2cf448deeecdc04f4e45c2f1d";
+    let sig = "48c2680fd085d2132c9bf3940a1a9336fc71d50380443414097f36d754e4aa3f66c3b3d12427c926051a2ad09d43fc099ca6596455f3258820d07e0be0b4730d";
+    assert ed25519_verify_utf8(pk, "sailfin toolchain v1", sig) == true;
+}
+
+test "ed25519_verify: tamper - flipped last hex digit of signature" {
+    let pk = "d75a980182b10ab7d54bfed3c964073a0ee172f3daa62325af021a68f707511a";
+    let sig = "e5564300c360ac729086e2cc806e828a84877f1eb8e5d974d873e065224901555fb8821590a33bacc61e39701cf9b46bd25bf5f0595bbe24655141438e7a100c";
+    assert ed25519_verify(pk, [], sig) == false;
+}
+
+test "ed25519_verify: tamper - wrong message against TEST 1 key/sig" {
+    let pk = "d75a980182b10ab7d54bfed3c964073a0ee172f3daa62325af021a68f707511a";
+    let sig = "e5564300c360ac729086e2cc806e828a84877f1eb8e5d974d873e065224901555fb8821590a33bacc61e39701cf9b46bd25bf5f0595bbe24655141438e7a100b";
+    assert ed25519_verify(pk, [1], sig) == false;
+}
+
+test "ed25519_verify: tamper - mismatched key/message/signature pairing" {
+    let pk3 = "fc51cd8e6218a1a38da47ed00230f0580816ed13ba3303ac5deb911548908025";
+    let sig2 = "92a009a9f0d4cab8720e820b5f642540a2b27b5416503f8fb3762223ebdb69da085ac1e43e15996e458f3613d0f11d8c387b2eaeb4302aeeb00d291612bb0c00";
+    assert ed25519_verify(pk3, [175, 130], sig2) == false;
+}
+
+test "ed25519_verify: fail-closed - public key hex too short" {
+    let pk = "d75a980182b10ab7d54bfed3c964073a0ee172f3daa62325af021a68f70751";
+    let sig = "e5564300c360ac729086e2cc806e828a84877f1eb8e5d974d873e065224901555fb8821590a33bacc61e39701cf9b46bd25bf5f0595bbe24655141438e7a100b";
+    assert ed25519_verify(pk, [], sig) == false;
+}
+
+test "ed25519_verify: fail-closed - signature hex too short" {
+    let pk = "d75a980182b10ab7d54bfed3c964073a0ee172f3daa62325af021a68f707511a";
+    let sig = "e5564300c360ac729086e2cc806e828a84877f1eb8e5d974d873e065224901555fb8821590a33bacc61e39701cf9b46bd25bf5f0595bbe24655141438e7a100";
+    assert ed25519_verify(pk, [], sig) == false;
+}
+
+test "ed25519_verify: fail-closed - non-hex character in public key" {
+    let pk = "z75a980182b10ab7d54bfed3c964073a0ee172f3daa62325af021a68f707511a";
+    let sig = "e5564300c360ac729086e2cc806e828a84877f1eb8e5d974d873e065224901555fb8821590a33bacc61e39701cf9b46bd25bf5f0595bbe24655141438e7a100b";
+    assert ed25519_verify(pk, [], sig) == false;
+}
+
+test "ed25519_verify: fail-closed - empty public key" {
+    let sig = "e5564300c360ac729086e2cc806e828a84877f1eb8e5d974d873e065224901555fb8821590a33bacc61e39701cf9b46bd25bf5f0595bbe24655141438e7a100b";
+    assert ed25519_verify("", [], sig) == false;
+}
+
+test "ed25519_verify: fail-closed - empty signature" {
+    let pk = "d75a980182b10ab7d54bfed3c964073a0ee172f3daa62325af021a68f707511a";
+    assert ed25519_verify(pk, [], "") == false;
+}
+
+test "ed25519_verify_utf8: tamper - wrong text message" {
+    let pk = "d75a980182b10ab7d54bfed3c964073a0ee172f3daa62325af021a68f707511a";
+    let sig = "e5564300c360ac729086e2cc806e828a84877f1eb8e5d974d873e065224901555fb8821590a33bacc61e39701cf9b46bd25bf5f0595bbe24655141438e7a100b";
+    assert ed25519_verify_utf8(pk, "not the signed message", sig) == false;
+}
