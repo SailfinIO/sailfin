@@ -137,66 +137,130 @@ let STDOUT_FD: i32 = 1;
 
 let STDERR_FD: i32 = 2;
 
+// Owned, length-explicit byte buffer returned by `io.read_fd`. Layout MUST
+// match `runtime/sfn/memory/ownedbuf.sfn` (32 bytes, four i64 slots);
+// `arena_addr == 0` == libc-backed (`free`). Inlined here rather than
+// imported per the same #306 inline-surface discipline this file follows for
+// its externs — the isolated runtime-sfn emit resolves only the platform
+// symbols the seed pre-stages, and a cross-module struct-returning call would
+// hit the #1283 "cannot resolve return type" fatal; a local struct + literal
+// construction sidesteps it.
+struct OwnedBuf {
+    ptr_addr: i64;
+    len: i64;
+    cap: i64;
+    arena_addr: i64;
+}
+
 fn sfn_write_fd(fd: i32, buf: * u8, count: usize) -> i64 ![io] {
     return write(fd, buf, count);
 }
 
 // `sfn_read_fd(fd, n)` — the bare canonical symbol behind the
-// `io.read_fd(fd, n) -> string` builtin (#1579, epic #1540 Track A gap
-// A2). Performs a single `read(2)` of up to `n` bytes from `fd` into a
-// fresh `n + 1`-byte buffer and returns it NUL-terminated (so the
-// `i8*` descriptor return surfaces as a Sailfin `string` exactly like
-// `process.handle_read_stdout`). A short read returns fewer than `n`
-// bytes; EOF or error returns the empty string (never null — callers
-// iterate the result as a `string`). `fd` arrives as Sailfin `int`
-// (i64) and narrows to the `read` `i32` ABI.
-fn sfn_read_fd(fd: i64, n: i64) -> * u8 ![io] {
-    if n <= 0 { return _sfn_shell_empty(); }
-    let buf: * u8 = malloc((n + 1) as usize);
-    if buf as i64 == 0 { return _sfn_shell_empty(); }
+// `io.read_fd(fd, n) -> OwnedBuf` builtin (#1579 shipped the primitive;
+// SFN-154 upgraded the return to a typed owned buffer). Performs a single
+// `read(2)` of up to `n` bytes from `fd` into a fresh `n + 1`-byte buffer
+// and returns an owned, length-explicit `OwnedBuf` (== Rust `Vec<u8>` /
+// Go `[]byte`): `len` is the exact byte count from `read(2)`, so embedded
+// NULs are preserved and callers never `strlen`. A short read returns
+// fewer than `n` bytes; EOF / error / `n <= 0` returns the canonical empty
+// `OwnedBuf {0,0,0,0}` (`len == 0` is the EOF/empty signal, mirroring
+// `sfn/os::handle_read_bytes_stdout`). The buffer is also NUL-terminated
+// past the data (`buf[len] == 0`) so it doubles as a valid cstring for
+// text callers — `len` stays authoritative, so this costs nothing in
+// binary safety. `fd` arrives as Sailfin `int` (i64) and narrows to the
+// `read` `i32` ABI. Reclaim the buffer with `free(buf.ptr_addr as * u8)`
+// (or `owned_buf_free`) exactly once when `ptr_addr != 0`.
+fn sfn_read_fd(fd: i64, n: i64) -> OwnedBuf ![io] {
+    let empty: OwnedBuf = OwnedBuf {
+        ptr_addr: 0,
+        len: 0,
+        cap: 0,
+        arena_addr: 0
+    };
+    if n <= 0 { return empty; }
+    // Round the allocation up to a multiple of 8 so the returned OwnedBuf
+    // honors the word-load byte-reader invariant of
+    // `runtime/sfn/memory/ownedbuf.sfn`: `owned_buf_byte_at` /
+    // `_owned_buf_load_byte` read the enclosing 8-aligned word, so a
+    // non-8-multiple capacity would over-read the `malloc` tail (ASAN). The
+    // `n + 1` reserves the NUL slot; rounding up keeps `cap >= n + 1 >= got + 1`.
+    let cap: i64 = ((n + 1 + 7) / 8) * 8;
+    let buf: * u8 = malloc(cap as usize);
+    if buf as i64 == 0 { return empty; }
     let got: i64 = read(fd as i32, buf, n as usize);
-    let mut len: i64 = got;
-    if len < 0 { len = 0; }
-    // NUL-terminate at buf[len] (one byte — a wider store could over-run
-    // the allocation tail when the read filled the buffer).
-    memset((buf as i64 + len) as * u8, 0, 1 as usize);
-    return buf;
+    if got <= 0 {
+        free(buf);
+        return empty;
+    }
+    // NUL-terminate at buf[got] (one byte — a wider store could over-run the
+    // allocation tail when the read filled the buffer). `len` remains the
+    // authoritative length; the terminator sits past the data.
+    memset((buf as i64 + got) as * u8, 0, 1 as usize);
+    return OwnedBuf {
+        ptr_addr: buf as i64,
+        len: got,
+        cap: cap,
+        arena_addr: 0
+    };
 }
 
 // `sfn_read_line(fd)` — the bare canonical symbol behind the
-// `io.read_line(fd) -> string` builtin (#1579). Reads one byte at a
-// time from `fd` until a newline (`'\n'`, 10) or EOF, returning the
-// line without the trailing newline as a fresh NUL-terminated buffer
-// (empty string on immediate EOF). The byte-at-a-time loop never reads
-// past the newline, so the next `read` on a streamed fd (the MCP
-// proxy's own fd 0, the `login` token prompt) sees the following frame
-// intact — a buffered read could swallow it. The just-read byte is
-// recovered from an 8-byte scratch via the i32 pointer-load intrinsic
-// (no i8 load exists) masked to its low byte, and appended with a
-// single-byte `memset` (no byte-store builtin exists).
+// `io.read_line(fd) -> string?` builtin (#1579 shipped the primitive;
+// SFN-154 upgraded the return to `string?` so EOF is distinguishable
+// from a blank line — parity with Rust `BufRead::read_line`'s `Ok(0)`
+// and Go `bufio`'s `io.EOF`). Reads one byte at a time from `fd` until a
+// newline (`'\n'`, 10) or EOF, returning the line without the trailing
+// newline as a fresh NUL-terminated buffer. The result is the nullable
+// `i8*` that the descriptor surfaces as `string?`: a null pointer (0) is
+// `None` (immediate EOF or allocation failure); any non-null pointer is
+// `Some(line)`, including `Some("")` for a genuine blank line. The
+// distinction is drawn by the *first* `read(2)`: `<= 0` bytes → immediate
+// EOF → `None`; otherwise the first byte (data, or the `'\n'` of a blank
+// line) makes it a real line. The byte-at-a-time loop never reads past
+// the newline, so the next `read` on a streamed fd (the MCP proxy's own
+// fd 0, the `login` token prompt) sees the following frame intact — a
+// buffered read could swallow it. Each byte is recovered from an 8-byte
+// scratch via the i32 pointer-load intrinsic (no i8 load exists) masked
+// to its low byte, and appended with a single-byte `memset` (no
+// byte-store builtin exists).
 fn sfn_read_line(fd: i64) -> * u8 ![io] {
+    let scratch: * u8 = malloc(8 as usize);
+    if scratch as i64 == 0 { return 0 as * u8; }
+    // The first read distinguishes immediate EOF (None) from a real line
+    // (including a blank `"\n"` line, which is Some("")).
+    let first: i64 = read(fd as i32, scratch, 1 as usize);
+    if first <= 0 {
+        free(scratch);
+        return 0 as * u8;
+    }
     let mut cap: i64 = 128;
     let mut len: i64 = 0;
     let mut buf: * u8 = malloc(cap as usize);
-    if buf as i64 == 0 { return _sfn_shell_empty(); }
-    let scratch: * u8 = malloc(8 as usize);
-    if scratch as i64 == 0 {
-        free(buf);
-        return _sfn_shell_empty();
+    if buf as i64 == 0 {
+        free(scratch);
+        return 0 as * u8;
     }
-    loop {
-        let n: i64 = read(fd as i32, scratch, 1 as usize);
-        if n <= 0 { break; }
-        let b: i32 = sailfin_intrinsic_pointer_read_i32(scratch) & 255;
-        if b == 10 { break; }
-        if len + 1 >= cap {
-            cap = cap * 2;
-            let tmp: * u8 = realloc(buf, cap as usize);
-            if tmp as i64 == 0 { break; }
-            buf = tmp;
+    let first_b: i32 = sailfin_intrinsic_pointer_read_i32(scratch) & 255;
+    // A leading newline is a blank line: leave `len == 0` (Some("")). Any
+    // other first byte starts the line; keep consuming to the next newline.
+    if first_b != 10 {
+        memset(buf, first_b, 1 as usize);
+        len = 1;
+        loop {
+            let n: i64 = read(fd as i32, scratch, 1 as usize);
+            if n <= 0 { break; }
+            let b: i32 = sailfin_intrinsic_pointer_read_i32(scratch) & 255;
+            if b == 10 { break; }
+            if len + 1 >= cap {
+                cap = cap * 2;
+                let tmp: * u8 = realloc(buf, cap as usize);
+                if tmp as i64 == 0 { break; }
+                buf = tmp;
+            }
+            memset((buf as i64 + len) as * u8, b, 1 as usize);
+            len = len + 1;
         }
-        memset((buf as i64 + len) as * u8, b, 1 as usize);
-        len = len + 1;
     }
     free(scratch);
     memset((buf as i64 + len) as * u8, 0, 1 as usize);

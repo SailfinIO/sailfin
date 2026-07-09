@@ -26,7 +26,10 @@ fn _read_line_fixture() -> string {
 
 // Same shape for `io.read_fd`.
 fn _read_fd_fixture() -> string {
-    return "fn reader() -> string {\n" + "    return io.read_fd(0, 16);\n"
+    return "struct OwnedBuf { ptr_addr: i64; len: i64; cap: i64; arena_addr: i64; }\n"
+        + "fn reader() -> int {\n"
+        + "    let b: OwnedBuf = io.read_fd(0, 16);\n"
+        + "    return b.len;\n"
         + "}\n"
         + "\n"
         + "export { reader };\n";
