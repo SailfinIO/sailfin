@@ -68,6 +68,7 @@ The next number is `max + 1`. Add a row in the same PR that introduces an SFEP.
 | [0043](./0043-phase-scoped-arena-reclamation.md) | Phase-scoped arena reclamation to reduce per-module peak RSS | Implemented | runtime |
 | [0044](./0044-test-runner-invocation-cache.md) | Invocation-scoped runtime identity + in-process sha256 for the test runner | Implemented | tooling |
 | [0045](./0045-shared-frontend-test-runner.md) | Shared-frontend test runner — parent compiles, children only execute | Draft | tooling |
+| [0046](./0046-toolchain-pinning.md) | Native Toolchain Version Pinning + Dispatch | Accepted | tooling |
 
 ## Drafts under review (numbers assigned at merge)
 
