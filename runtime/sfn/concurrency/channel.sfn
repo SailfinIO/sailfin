@@ -93,9 +93,10 @@ extern fn pthread_cond_broadcast(c: * PthreadCond) -> i32;
 extern fn pthread_cond_destroy(c: * PthreadCond) -> i32;
 
 // ── Layout helpers ────────────────────────────────────────────────
-// Byte offset of the `closed` field.  `closed` is the LAST field,
-// appended after the two conds.  With the max-sized 64-byte mutex
-// (#1265) the struct layout is:
+// Byte offset of the `closed` field, which sits after the two conds. The
+// trailing `elem_owned` i64 was appended after `closed` (#1476), so
+// `closed` keeps its offset 208 and `elem_owned` is the final field. With
+// the max-sized 64-byte mutex (#1265) the struct layout is:
 //   [0..48)    six i64 cursors
 //   [48..112)  PthreadMutex (64 B)
 //   [112..160) not_empty PthreadCond (48 B)
