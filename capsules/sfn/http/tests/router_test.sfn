@@ -149,6 +149,14 @@ test "dispatch: no matching path yields 404" {
     assert resp.status == 404;
 }
 
+test "dispatch: a null handler address fails controlled with 500" {
+    // A null handler is only reachable via an unsafe cast; dispatch must not
+    // call a null code pointer — it returns 500 instead.
+    let r = route(router(), "GET", "/x", 0 as * fn (Request, Params) -> Response);
+    let resp = dispatch(r, _req("GET", "/x"));
+    assert resp.status == 500;
+}
+
 test "dispatch: registration order is precedence (static before {id})" {
     let mut r = router();
     r = route(r, "GET", "/users/me", _h_user_me as * fn (Request, Params) -> Response);

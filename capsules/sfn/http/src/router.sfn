@@ -184,6 +184,13 @@ fn dispatch(r: Router, req: Request) -> Response {
         let m = match_pattern(rt.pattern, req.path);
         if m.matched {
             if strings_equal(rt.method, req.method) {
+                // A well-formed route always carries a real handler address
+                // (`route` takes a `* fn`), but guard the sentinel `0` so an
+                // unsafe null cast fails controlled (500) rather than calling
+                // a null code pointer — mirrors `server.sfn::_sfn_http_trampoline`.
+                if rt.handler == 0 {
+                    return response_with_status(500, "Internal Server Error");
+                }
                 let h: * fn (Request, Params) -> Response = rt.handler as * fn (Request, Params) -> Response;
                 return h(req, m.params);
             }
