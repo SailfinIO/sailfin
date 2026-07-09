@@ -1,380 +1,199 @@
 # Sweep Blocker State and Coordinate Next Picks
 
-Post-merge issue-tracker reconciliation. Sweep newly-resolved blockers, audit `claude-ready` hygiene, and recommend the next 1-3 issues to dispatch via `/pickup` based on a configurable concurrency budget and file-collision analysis.
+Post-merge reconciliation over the **Linear** Sailfin (`SFN`) queue. Sweep
+newly-resolved blockers, surface completed/next-up epics (Projects), and
+recommend the next 1–3 issues to dispatch via `/pickup` based on a concurrency
+budget and file-collision analysis.
 
-This is the focused, event-driven sibling of `/triage`. Run it after every PR merge while you're coordinating multiple `/pickup` sessions.
+This is the focused, event-driven sibling of `/triage`. Run it after every PR
+merge while coordinating multiple `/pickup` sessions.
+
+> **Linear is the planning source of truth.** Blocker/status writes are
+> `mcp__Linear__save_issue`; Projects (epics) roll up their issues' state
+> natively, so there is no GitHub tracker/sub-issue bookkeeping here. Resolve
+> merged PRs → their Linear issue via the `sfn-<N>` branch / `Fixes SFN-<N>`
+> link. Use `mcp__github__*` only to read merged PRs. See
+> `docs/conventions/linear-workflow.md`.
 
 ## Target: $ARGUMENTS
 
-Parse `$ARGUMENTS` as a mix of flags and numbers:
-
-**Flags** (tokens starting with `--`):
+**Flags:**
 - `--greedy` (bare) — raise the concurrency budget from `2` to `4`
-- `--greedy=N` — set the concurrency budget to `N` (no upper bound)
-- `--dry-run` — preview label flips and recommendations; do not modify any issue or post comments
+- `--greedy=N` — set the budget to `N`
+- `--dry-run` — preview status flips and recommendations; make no writes
 
-**Bare numbers** — treat each as a PR or issue number that just merged or closed; the command resolves PR → linked issue(s) automatically.
+**Bare numbers** — treat each as a PR number that just merged; the command
+resolves PR → linked Linear issue (`SFN-<N>` from branch/body).
 
-Examples:
-- `/sweep` — auto-detect merged PRs in the last 24h (and their linked issues), default budget = 2
-- `/sweep 367` — anchor on PR/issue #367, default budget = 2
-- `/sweep --greedy 367 332` — anchor on two merges, budget = 4
-- `/sweep --greedy=6 --dry-run` — preview-only, budget = 6, auto-detect merges
-
-If parsing yields no flags and no numbers: budget = 2, auto-detect merges, real (non-dry) run.
+Examples: `/sweep` (auto-detect last-24h merges, budget 2) · `/sweep 367`
+(anchor on PR #367) · `/sweep --greedy 367 332` · `/sweep --greedy=6 --dry-run`.
 
 ---
 
 ## Phase 1: GATHER
 
-Resolve the merge anchor set.
+Resolve the merge anchor set:
+- If `$ARGUMENTS` has bare numbers, read each PR with
+  `mcp__github__pull_request_read` and extract its Linear issue (`SFN-<N>` from
+  the head branch `claude/sfn-<N>-…` or a `Fixes SFN-<N>` in the body).
+- Otherwise auto-detect merges in the last 24h:
+  ```
+  mcp__github__list_pull_requests state="closed" ... (filter merged, mergedAt within 24h)
+  ```
 
-If `$ARGUMENTS` includes bare numbers, use them directly. Try `gh pr view` first
-because `closingIssuesReferences` and `mergedAt` are PR-only fields, and
-`gh issue view <N>` resolves PRs as issues (they share a number space) — so
-querying `gh issue view` first would silently skip the PR-specific data.
+The set of Linear issues those PRs closed is the trigger for unblocking
+dependents. Confirm each is `Done` in Linear (the integration should have
+advanced it on merge; if it lags, note it — don't force a terminal status).
 
-```bash
-for N in <numbers>; do
-  # PR-first: PRs carry mergedAt + closingIssuesReferences.
-  gh pr view $N --json number,title,state,closingIssuesReferences,mergedAt 2>/dev/null \
-    || gh issue view $N --json number,title,state,closedAt
-done
+Pull the candidate pools from Linear:
+
+```
+mcp__Linear__list_issues team="Sailfin" state="Blocked" limit=100
+mcp__Linear__list_issues team="Sailfin" state="Ready"   limit=100
+mcp__Linear__list_issues team="Sailfin" state="In Progress" limit=100
 ```
 
-For raw issue anchors (closed manually, no PR), there's no
-`closingIssuesReferences` to expand — treat the issue itself as the
-closed trigger.
-
-Otherwise, auto-detect merges in the last 24h:
-
-```bash
-gh pr list --state merged --limit 20 \
-  --json number,title,closingIssuesReferences,mergedAt \
-  | jq '[.[] | select(.mergedAt > (now - 86400 | todate))]'
-```
-
-For each anchor PR, extract the closed issue numbers from `closingIssuesReferences` — these are the `Closes #N` references. The set of newly-closed issues is the trigger for unblocking dependents.
-
-Pull the candidate pools:
-
-```bash
-gh issue list --label blocked --state open \
-  --json number,title,labels,body,assignees --limit 100
-
-gh issue list --label claude-ready --state open \
-  --json number,title,labels,body,assignees --limit 100
-
-# gh pr list does not support --json files; just list PRs here. Phase 4
-# fetches file lists per PR via gh pr view.
-gh pr list --label agent-authored --state open \
-  --json number,title,headRefName --limit 20
-```
-
-Always include open PRs on a `claude/*` branch (the human-driven `/pickup` flow) in the in-flight set — they count toward the budget the same way as `agent-authored` PRs, and both categories can be live simultaneously:
-
-```bash
-gh pr list --state open \
-  --json number,title,headRefName \
-  --jq '[.[] | select(.headRefName | startswith("claude/"))]'
-```
-
-The in-flight set is the union of the two queries (de-duped by PR number).
+In-flight set = open PRs on `claude/sfn-*` branches
+(`mcp__github__list_pull_requests`, filter head `claude/`) plus the `In Progress`
+Linear issues. De-dupe by SFN number.
 
 ---
 
 ## Phase 2: SWEEP BLOCKERS
 
-> **Shared logic.** The hard-vs-prose blocker-clearing rule below is the one
-> mechanic `/sweep` and `/triage` have in common (`/triage` Phase 3 → UNBLOCK).
-> They are otherwise distinct — `/sweep` is the post-merge coordinator (budget,
-> collisions, dispatch); `/triage` is the whole-queue hygiene auditor
-> (promote/demote, Type fixes, orphan release). Do not merge them. If you change
-> this rule, mirror it in `/triage`.
+> **Shared logic.** The hard-vs-prose blocker rule below is the one mechanic
+> `/sweep` and `/triage` share (`/triage` Phase 3 → UNBLOCK). If you change it
+> here, mirror it there.
 
-For each issue in the `blocked` pool:
+For each `Blocked` issue:
 
-1. Parse the `## Blocked by` section of the body. Extract every `#N` reference via regex (`#\d+`).
-2. For each `#N`, check its state: `gh issue view N --json state,stateReason` (works for both issues and PRs).
-3. Classify each blocker:
-   - **Hard reference (#N)** — closed = resolved; open = still blocking
-   - **Prose reference** (e.g., "Slice E", "M3 — runtime/native/ deletion") — always ambiguous; never auto-flip on prose alone
-4. If all hard references are closed AND no prose references remain unresolved:
-   ```bash
-   gh issue edit <N> --remove-label blocked --add-label claude-ready
-   gh issue comment <N> --body "Auto-sweep: blocker(s) resolved — <list resolved #N references>. Marking ready for pickup."
+1. Read its blocked-by relations (`get_issue includeRelations=true`) and any
+   `## Blocked by` prose in the body.
+2. Classify each blocker: **hard** (a Linear relation, or a `SFN-N`/`#N` ref) —
+   closed = resolved; **prose** ("Slice E", "M3 runtime deletion") — never
+   auto-flip on prose alone.
+3. If every hard blocker is closed AND no prose gate remains, flip to `Ready`
+   and drop the resolved relations:
    ```
-   Then **reflect the flip into Linear** per
-   `docs/conventions/issue-naming.md` § Reflecting state into Linear: set the
-   mirror to `Ready` and roll up its Project status. Best-effort — skip with a
-   note if the Linear MCP tools aren't connected; never write a terminal status.
-5. If `--dry-run` is set: do not edit, comment, or reflect into Linear. Record
-   the intended flip in the report.
+   mcp__Linear__save_issue id="SFN-<N>" state="Ready" removeBlockedBy=["SFN-<resolved>"]
+   mcp__Linear__save_comment issueId="SFN-<N>" body="Auto-sweep: blocker(s) resolved — <list>. Marking Ready."
+   ```
+4. Under `--dry-run`, record the intended flip; make no writes.
 
 ---
 
-## Phase 2b: SYNC RELEASE TRACKING ISSUES
+## Phase 2b: EPIC & RELEASE ROLLUP
 
-If any of the issues newly closed by the anchor merges carries a
-`release:*` or `seed-blocker` label, the corresponding `Release: vX.Y.Z`
-tracking issue needs its rollup reconciled. The tracker uses
-**GitHub-native sub-issues** as the source of truth (SFEP-0026 WS-C;
-`/release-plan` attaches them) — so this sync reconciles **native
-sub-issue state**, not a string-matched markdown checklist. This is a
-passive sync — `/release-plan` is the active equivalent for cycle
-bookkeeping.
+Linear rolls up a Project (epic) from its issues natively — there is no GitHub
+tracker to reconcile. This phase reads those rollups to surface coordination
+signals; it makes **no writes** (identical under `--dry-run`).
 
-For each newly-closed issue:
-
-1. Get its labels:
-   ```bash
-   gh issue view <N> --json labels --jq '.labels[].name' \
-     | grep -E '^(release:|seed-blocker$)'
-   ```
-2. For each `release:<gate>` label found, locate the tracking issue:
-   ```
-   mcp__github__search_issues query='repo:SailfinIO/sailfin is:issue in:title "Release: v" label:tracking'
-   ```
-   Map `release:<gate>` to the matching tracking issue title — typically
-   the one whose target version corresponds to the gate. If multiple
-   match (e.g. an item gates both `release:beta` and `release:1.0`),
-   reconcile each.
-3. **Reconcile native sub-issue state** rather than hand-ticking markdown:
-   ```bash
-   TRACKER=<tracking-issue-number>
-   # Is the just-closed issue attached as a native sub-issue?
-   gh api /repos/SailfinIO/sailfin/issues/$TRACKER/sub_issues --paginate \
-     --jq '.[].number' | grep -qx <N> && echo attached || echo missing
-   ```
-   - **Attached** → its closed state shows in the GitHub "Sub-issues"
-     rollup automatically; no body edit needed. If `/release-plan` renders
-     a summary section, re-render the matching `☐`→`☑` line from the
-     native state (don't store closed-ness in the body).
-   - **Missing (closed item carries a gating/`seed-blocker` label but is
-     not a sub-issue)** → attach it so the rollup is complete, mirroring
-     `/release-plan` (typed `-F sub_issue_id`):
-     ```bash
-     child_id=$(gh api repos/SailfinIO/sailfin/issues/<N> --jq '.id')
-     gh api -X POST /repos/SailfinIO/sailfin/issues/$TRACKER/sub_issues \
-       -F sub_issue_id=$child_id --jq '.number'
-     ```
-4. For `seed-blocker`, keep the auto-tick behaviour: ensure the closed
-   item is reflected in the tracker's `## Seed blockers` / `## Seed bump
-   (this cadence)` rollup, and surface in the report so the user knows the
-   **cadence `/pin-seed`** will pick it up (a plain `seed-blocker` /
-   `needs-seed-cut` close queues for the next cadence bump — it does **not**
-   warrant a reactive cut unless the item carries `release-critical-seed`;
-   SFEP-0026 §3.3).
-5. Post a one-line comment:
-   ```
-   Auto-sweep: #<N> closed via PR #<M> — sub-issue rollup reconciled (release:<gate>, seed-blocker).
-   ```
-6. If the closed issue is neither attached nor labeled on any tracker,
-   mention it in the report under "Concerns" (likely means it was labeled
-   after the tracking issue was created without `/release-plan` re-running).
-
-If no newly-closed issue carries either label, skip this phase
-entirely. **In `--dry-run`, make zero writes** (no sub-issue attachments,
-no body edits, no comments).
+1. **Completed epics.** For each Project touched by the anchor merges, read its
+   issues (`list_issues project="<P>"`). When every issue is `Done`, recommend
+   the Project be marked complete (a human/Project-lead decision — never
+   auto-complete a Project). Report under "Epics ready to close."
+2. **Next phase to groom.** For a phased epic (per-phase Projects under one
+   Initiative), a fully-`Done` phase Project is the trigger to groom the next
+   sibling phase Project (the one in `Backlog`/`Planned` with no leaves yet).
+   Report under "Next phase to groom → `/groom <Phase Project>`."
+3. **Release axis.** If a newly-`Done` issue carries `seed-blocker` or a
+   `release:*` label, note it for `/release-plan` (releases are Linear **Cycles**
+   — see `docs/conventions/issue-naming.md` § Release tracking; `/release-plan`
+   owns Cycle bookkeeping and the seed-cut queue). A plain `seed-blocker` close
+   **queues** the seed advance for the next cadence bump — it does not warrant a
+   reactive cut unless the item carries `release-critical-seed`.
 
 ---
 
-## Phase 2c: RECOMMEND CLOSING COMPLETED TRACKERS
+## Phase 3: AUDIT READY HYGIENE (report-only)
 
-GitHub does not cascade-close a parent tracking issue when its sub-issues
-finish, and the slash commands never close issues (closing is a human
-decision). So a tracker whose every sub-issue is done sits open unnoticed
-(e.g. #1657 stayed open after all four of its sub-issues completed). This
-phase surfaces those completed parents as a **recommendation to close** —
-it never closes them.
+For each `Ready` issue, sanity-check without modifying it (hygiene edits are
+`/triage`'s job):
+- `## Files Affected` is an **advisory map** expected to drift — a missing path
+  is a **soft note** ("advisory map may be stale — `/triage` can refresh"), not
+  a defect. The semantic `In:`/`Out:` scope is the contract.
+- "Appears already shipped" heuristics: if the goal names a symbol to
+  delete/remove, grep to confirm it still exists; if it describes adding
+  something, grep for evidence it already shipped under another name.
 
-Work off **native sub-issue state** (the WS-C-2 rollup; SFEP-0026), not
-markdown checklists. Each issue carries a `sub_issues_summary` with
-`total`, `completed`, and `percent_completed`.
-
-1. Build the candidate parent set — open tracking issues, preferring the
-   parents of the issues just closed by the anchor merges:
-   ```bash
-   # Open trackers. A tracker may carry `tracking` and/or `epic`; union
-   # both pools, de-duped by number.
-   gh issue list --label tracking --state open --json number --jq '.[].number'
-   gh issue list --label epic     --state open --json number --jq '.[].number'
-   ```
-   The event-driven trigger is the anchor set: an open tracker is a parent
-   of a newly-closed issue `#N` when its native sub-issue list contains
-   `#N`. Prioritise those parents, but scanning every open tracker's
-   rollup (next step) is cheap and also catches stragglers like #1657 that
-   completed in an earlier sweep.
-2. For each candidate tracker, read the **native** rollup:
-   ```bash
-   TRACKER=<tracking-issue-number>
-   gh api repos/SailfinIO/sailfin/issues/$TRACKER \
-     --jq '.sub_issues_summary | "\(.completed)/\(.total)"'
-   ```
-3. Recommend closing the tracker when it has **at least one** native
-   sub-issue and **all** of them are closed (`total > 0` and
-   `completed == total`). Confirm against the live sub-issue list rather
-   than trusting a cached summary:
-   ```bash
-   gh api /repos/SailfinIO/sailfin/issues/$TRACKER/sub_issues --paginate \
-     --jq '[.[] | select(.state == "open")] | length'   # 0 ⇒ all closed
-   ```
-   A tracker with `total == 0` (no native sub-issues attached) is **not** a
-   close candidate — there is nothing to roll up. If such a tracker
-   visibly relies on a markdown checklist instead, surface it under
-   "Concerns" so a human can attach native sub-issues (or close it
-   manually); never infer completion from checkboxes.
-4. **Recommend only — never close.** Add each completed tracker to the
-   "Trackers ready to close" section of the Phase 6 report with its rollup
-   (`#N — <title> (4/4 sub-issues closed)`). Closing stays a human
-   decision, consistent with the `/sweep` and `/triage` "Don't close
-   issues" constraint. This phase makes **no writes**, so `--dry-run`
-   behaviour is identical (recommendations only, either way).
-
-### Phased epics: surface the next wave to groom
-
-A multi-phase epic groomed per `/groom`'s two-level structure is **Epic →
-one `tracking` sub-issue per phase → leaf issues under each phase tracker**.
-That changes what "completed" means at each level, and adds a coordination
-move this phase owns:
-
-1. **A completed *phase tracker* is the trigger to groom the next phase, not
-   to close the epic.** When a phase tracker's leaves are all closed
-   (`completed == total`), recommend closing **that phase tracker**, then look
-   for the next sibling phase tracker under the same epic that still carries
-   `needs-grooming`:
-   ```bash
-   EPIC=<epic-number>
-   gh api /repos/SailfinIO/sailfin/issues/$EPIC/sub_issues --paginate \
-     --jq '.[] | select(.state=="open") | "\(.number) \(.title)"'
-   # the next open phase tracker labeled needs-grooming is the one to groom
-   ```
-   Surface it in the report under **"Next phase to groom"** as
-   `Phase <X> of epic #<E> complete → run /groom on Phase <Y> (#<tracker>)`.
-   This is the timely-groom signal that keeps a wave-groomed epic from
-   stalling silently between phases.
-2. **Never recommend closing an epic that still has an open child phase
-   tracker.** The native rollup already enforces this (an open tracker keeps
-   `completed < total`), but state it so a partially-groomed epic is never a
-   close candidate. A `needs-grooming` phase tracker with **no leaves yet**
-   (`total == 0`) is likewise not a close candidate — report it under
-   "Awaiting grooming," not "ready to close."
-
-This phase still makes **no writes** beyond the existing label flips; the
-next-phase recommendation is report-only and identical under `--dry-run`.
-
----
-
-## Phase 3: AUDIT CLAUDE-READY
-
-For each issue in the `claude-ready` pool:
-
-1. Parse `## Files Affected` from the body. Extract path-shaped tokens.
-2. For each path not marked "New:", verify it exists in the working tree:
-   ```bash
-   test -f <path> || note "stale-map"   # soft note, NOT a defect flag
-   ```
-   `## Files Affected` is an **advisory map** (`docs/conventions/issue-naming.md`,
-   "Intent-authoritative issues") that is *expected to drift* — a missing path is
-   not an issue defect. Surface it as a **soft, non-blocking note** ("advisory map
-   may be stale — `/triage` can refresh") and do **not** imply the issue is broken.
-   The semantic `In:`/`Out:` scope is the contract; a stale map on a
-   semantically-scoped issue is expected entropy, not rot.
-3. Sanity-check for "appears already shipped" signals (heuristic only):
-   - If the issue's goal mentions a symbol/function to delete or remove, `grep` to confirm it still exists.
-   - If the issue describes adding a file/feature, `grep` for evidence the work shipped under a different name.
-4. Never modify labels or body in this phase — `claude-ready` hygiene is `/triage`'s job. Only report findings here.
+Report findings only; change nothing here.
 
 ---
 
 ## Phase 4: BUDGET
 
-Compute concurrency:
-
 ```
-budget     = 4 if --greedy bare
-           = N if --greedy=N
-           = 2 otherwise
-
-in_flight  = count of open agent-authored PRs + open claude/* branch PRs
+budget     = 4 if --greedy bare | N if --greedy=N | 2 otherwise
+in_flight  = count of open claude/sfn-* PRs + In Progress SFN issues (de-duped)
 free_slots = max(0, budget - in_flight)
 ```
 
-Cache the union of files touched across all in-flight PRs as `IN_FLIGHT_FILES` for collision analysis:
-
-```bash
-gh pr view <N> --json files | jq -r '.files[].path'
-```
+Cache the union of files touched across in-flight PRs as `IN_FLIGHT_FILES`
+(`mcp__github__pull_request_read` file lists) for collision analysis.
 
 ---
 
 ## Phase 5: COLLISION ANALYSIS
 
-For each pickable `claude-ready` issue (exclude any with `in-progress` or assignees):
+For each pickable `Ready` issue (exclude assigned / In Progress):
 
-1. Parse `## Files Affected` from the body.
-2. **Hard collision** — issue's files intersect `IN_FLIGHT_FILES`. Exclude from "dispatch now" recommendations; surface as "after #X merges".
-3. **Peer collision** — issue's files intersect another candidate's files. Note as "sequence after peer" rather than parallel.
-4. Score the remaining candidates:
+1. Parse `## Files Affected`.
+2. **Hard collision** — files intersect `IN_FLIGHT_FILES` → exclude from
+   "dispatch now"; surface as "after #X merges".
+3. **Peer collision** — files intersect another candidate → "sequence after peer."
+4. Score the rest:
 
    | Signal | Weight |
    |---|---|
-   | Linear-native priority Urgent | +100 |
-   | Linear-native priority High | +50 |
-   | Closes an epic on merge | +30 |
-   | Unblocks ≥2 downstream issues | +20 per |
-   | `size:xs` | +10 |
-   | `size:s` | +5 |
-   | `size:m` | 0 |
-   | Track diversity (different epic/area than already in-flight) | +15 |
+   | Linear priority Urgent | +100 |
+   | Linear priority High | +50 |
+   | Closes an epic (last open issue in its Project) | +30 |
+   | Unblocks ≥2 downstream issues | +20 each |
+   | estimate 1 (XS) | +10 |
+   | estimate 2 (S) | +5 |
+   | estimate 3 (M) | 0 |
+   | Track diversity (different Project/area than in-flight) | +15 |
 
-5. Pick the top `free_slots` candidates that have no hard collision with each other.
+5. Pick the top `free_slots` candidates with no hard collision with each other.
 
 ---
 
 ## Phase 6: REPORT
-
-Produce a concise report:
 
 ```
 Sweep Report — <date>
 Budget: <N>  |  In-flight: <N>  |  Free slots: <N>
 
 Anchor merges:
-  ✓ PR #<N> — <title>   (closed #<M>, #<K>)
-  ✓ PR #<N> — <title>   (closed #<M>)
+  ✓ PR #<N> — <title>   (closed SFN-<M>)
 
-Unblocked (label flipped):
-  ✓ #<N> — <title>      (blockers resolved: #<X>, #<Y>)
+Unblocked (flipped to Ready):
+  ✓ SFN-<N> — <title>   (blockers resolved: SFN-<X>)
 
 Still blocked:
-  ⏸ #<N> — <title>      (waiting on: #<X> open, "Slice E" ambiguous)
+  ⏸ SFN-<N> — <title>   (waiting on: SFN-<X> open, "Slice E" ambiguous)
 
-Trackers ready to close (recommendation — not auto-closed):
-  ✓ #<N> — <title>      (all <K>/<K> sub-issues closed)
+Epics ready to close (recommendation):
+  ✓ <Project> — all issues Done
 
-Next phase to groom (wave-groomed epics):
-  → Phase <X> of epic #<E> complete → /groom Phase <Y> (#<tracker>, needs-grooming)
+Next phase to groom:
+  → <Epic> Phase <X> done → /groom <Phase <Y> Project>
 
-Awaiting grooming (phase tracker, no leaves yet):
-  · #<N> — <title>      (epic #<E> Phase <X>; total == 0 — not a close candidate)
+Release axis (for /release-plan):
+  · SFN-<N> closed carries release:<gate> / seed-blocker
 
-Audit findings (claude-ready hygiene):
-  · #<N> — <title>      (advisory map may be stale: <path> — /triage can refresh)
-  ⚠ #<N> — <title>      (symbol "<name>" appears removed — verify scope)
+Audit findings (Ready hygiene):
+  · SFN-<N> — advisory map may be stale (<path>) — /triage can refresh
 
 Top picks for free slots:
-  1. #<N> — <title> (size, type) — <one-line rationale>
-  2. #<N> — <title> (size, type) — <one-line rationale>
+  1. SFN-<N> — <title> (estimate, type) — <rationale>
 
 Suggested sequence:
-  Now (parallel):  #<N>  ‖  #<M>
-  After #<X>:      #<Y>  (rebases onto <file>)
-  After all:       #<Z>  (closes epic #<E>)
+  Now (parallel):  SFN-<N>  ‖  SFN-<M>
+  After SFN-<X>:   SFN-<Y>  (rebases onto <file>)
 
 Concerns / human input needed:
   ? <ambiguous prose blocker>
-  ? <conflicting signal>
 
 Dry run: changes <previewed | applied>
 ```
@@ -383,23 +202,26 @@ Dry run: changes <previewed | applied>
 
 ## Constraints
 
-- **Don't dispatch work.** This command is a coordination layer. Dispatch happens via `/pickup` in separate sessions.
-- **Don't close issues.** Same convention as `/triage`. Closing is a human decision — Phase 2c only *recommends* closing a completed parent tracker; it never closes one.
-- **Don't modify issue bodies.** Only labels and comments.
-- **Be conservative with prose blockers.** Anything not a hard `#N` reference stays blocked until a human confirms.
-- **Always leave a comment when flipping a label.** Future-you needs the audit trail.
-- **Labels are the source of truth.** There is no derived board to sync.
-- **In `--dry-run` mode, make zero writes.** No labels, no comments.
-  Print intended actions only.
-- **Read `.github/AGENTS.md` for cap context.** Default budget = 2 matches the autonomous-pipeline cap; `--greedy` raises it for human-coordinated parallel sessions.
+- **Don't dispatch work.** This is a coordination layer; dispatch happens via
+  `/pickup` in separate sessions.
+- **Don't complete/cancel issues or Projects.** Same convention as `/triage` —
+  terminal states are human decisions. Phase 2b only *recommends*.
+- **Don't modify issue bodies.** Only status/relations and comments.
+- **Be conservative with prose blockers.** Anything not a hard reference stays
+  `Blocked` until a human confirms.
+- **Comment whenever you flip a status.** Audit trail.
+- **Native fields only** — status/priority/estimate/blockers are Linear-native.
+- **In `--dry-run`, make zero writes.** Print intended actions only.
+- **Read `.github/AGENTS.md` for cap context.** Default budget 2 matches the
+  autonomous-pipeline cap; `--greedy` raises it for human-coordinated sessions.
 
 ---
 
 ## Why this command exists
 
-After every PR merge, the next coordination move is mechanical:
-1. Some `blocked` issue's `#N` reference just resolved — flip it.
-2. Some in-flight files just freed — recompute collision-safe candidates.
-3. Some epic just gained a closer — surface that for the next `/pickup`.
-
-`/triage` audits the whole queue and is too broad for this. `/pickup` claims a single issue and is too narrow. `/sweep` is the bridge: invoked after every merge, it produces the to-do list for the next `/pickup` calls in your other sessions.
+After every PR merge the next coordination move is mechanical: some `Blocked`
+issue's blocker just resolved (flip it); some in-flight files just freed
+(recompute collision-safe candidates); some epic just gained a closer (surface
+it for the next `/pickup`). `/triage` audits the whole queue (too broad);
+`/pickup` claims one issue (too narrow). `/sweep` is the bridge that produces the
+to-do list for the next `/pickup` calls.

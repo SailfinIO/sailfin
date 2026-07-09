@@ -7,13 +7,16 @@ assignees: []
 ---
 
 <!--
-This template defines the contract between public GitHub issue authors and
-Claude/Codex. Maintainer- or agent-created implementation work should start as
-a Linear `SFN-NNN` issue and use the GitHub issue only as the public mirror when
-needed.
+This template is contributor intake, not an implementation-ready ticket. A
+GitHub issue filed from this template mirrors into the Linear SFN team's
+Triage, where maintainers classify it, groom scope, and set workflow status.
+Fill in what you can concretely, but do NOT set workflow state yourself —
+that's the maintainer's job once it lands in Linear. Maintainer- or
+agent-created implementation work is authored natively as a Linear `SFN-NNN`
+issue and does not need a GitHub mirror at all.
 
-A well-groomed issue is one Claude can complete in a single session and
-produce a mergeable PR. If you can't fill in every section concretely,
+A well-groomed issue is one that can be completed in a single focused session
+and produce a mergeable PR. If you can't fill in every section concretely,
 the issue is too big or too vague — break it down further.
 
 Title format (see docs/conventions/issue-naming.md):
@@ -26,9 +29,9 @@ GitHub issues — an epic is a Linear Project, a tracker is a Project/Initiative
 tracker is the sole surviving GitHub tracking title.
 
 Labels come from .github/labels.yml — never invent new ones here. The
-template defaults to `needs-grooming`. Once scope, criteria, and files
-are filled in, swap it for `claude-ready` (and add `type:*`, `size:*`,
-optional `area:*`).
+template defaults to `needs-grooming`, a public triage hint that a maintainer
+clears once the issue is groomed in Linear (add `type:*`, `size:*`, optional
+`area:*` there).
 
 Priority and estimate are Linear-native fields, not GitHub labels. Record
 the intended priority in the `## Priority` section below; the groomer sets
@@ -96,7 +99,7 @@ timeout 60 build/native/sailfin run path/to/example.sfn
 - [ ] **XS** — single file, < 1 hour
 - [ ] **S** — few files, 1-3 hours
 - [ ] **M** — multi-file, 3-6 hours
-- [ ] **L** — > 6 hours (NEEDS BREAKDOWN — remove `claude-ready` label and add `needs-grooming`)
+- [ ] **L** — > 6 hours (NEEDS BREAKDOWN — too big to take on as-is; a maintainer will break it down and set status in Linear)
 
 ## Priority
 

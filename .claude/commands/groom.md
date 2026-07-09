@@ -1,13 +1,22 @@
 # Groom a Roadmap Epic into Issues
 
-Take a high-level roadmap item and decompose it into session-sized GitHub issues that Claude can pick up and complete autonomously.
+Take a high-level epic (a **Linear Project** under an Initiative) and decompose
+it into session-sized **Linear `SFN-NNN` issues** that Claude can pick up and
+complete autonomously.
+
+> **Linear is the planning source of truth.** Epics are Linear **Projects**
+> (under Initiatives); leaves are native Linear issues on the Sailfin (`SFN`)
+> team. There is **no** GitHub mirror for our planned work and **no** GitHub
+> `Epic:`/`Tracking:` issue. Use `mcp__Linear__*` tools throughout. See
+> `docs/conventions/linear-workflow.md` for the full model and
+> `docs/conventions/linear-templates.md` for the issue/Project templates.
 
 ## Target: $ARGUMENTS
 
 The argument can be:
-- A roadmap section name (e.g., "syntax reform", "compiler stabilization")
-- A specific bullet from the [roadmap](https://sailfin.dev/roadmap) (e.g., "Implement await expression parsing")
-- A document to mine for work items (e.g., `docs/proposals/0006-build-architecture.md`)
+- A Linear Project / epic name (e.g. "CLI Modularization")
+- An Initiative name to mine for the next un-groomed Project
+- A roadmap bullet or a document to mine (e.g. `docs/proposals/0006-build-architecture.md`)
 - A free-form description of work that needs breaking down
 
 ---
@@ -15,29 +24,33 @@ The argument can be:
 ## Phase 1: UNDERSTAND THE EPIC
 
 Read the relevant context:
-- `site/src/pages/roadmap.astro` — find the epic and its surrounding priorities (published at [sailfin.dev/roadmap](https://sailfin.dev/roadmap))
+- **Linear** — the Initiative and its Projects. Find the epic and its place:
+  ```
+  mcp__Linear__list_initiatives includeProjects=true
+  mcp__Linear__get_project id="<project-id-or-name>"
+  mcp__Linear__list_issues project="<project>" limit=100
+  ```
+  The Project **description** carries the epic's outcome, scope, and
+  `Design: SFEP-NNNN` link.
 - `docs/status.md` — current state of the affected feature(s)
-- `site/src/content/docs/docs/reference/spec/` (chapter files §1–§11) — what the language commits to today; `.../reference/preview/` for planned features
-- Any document referenced in the argument
+- `site/src/content/docs/docs/reference/spec/` (§1–§11) and `.../reference/preview/`
+- The Project's cited SFEP and any document named in the argument
 
-Identify:
-- What outcome this epic produces when fully done
-- What's already partially in place
-- What dependencies exist (must other epics complete first?)
+Identify: what outcome this epic produces when done, what's already partially in
+place (existing issues under the Project), and what other epics must complete first.
 
 ---
 
 ## Phase 2: DECOMPOSE
 
-Spawn the **compiler-architect** agent (Opus). Give it:
-- The epic and its context
-- The current compiler state (relevant files)
-- The constraint: each output issue must be **session-sized** (XS/S/M, never L)
+Spawn the **compiler-architect** agent (Opus). Give it the epic + its
+Initiative/Project context, the current compiler state, and the constraint that
+each output issue must be **session-sized** (XS/S/M, never L).
 
 The architect produces an ordered list of issues. Each issue must:
 - Have a clear, verifiable goal achievable in one session
 - Touch a bounded set of files
-- Be self-contained (or have explicit `Blocked by` dependencies on earlier issues)
+- Be self-contained (or have explicit blocker dependencies on earlier issues)
 - Include concrete acceptance criteria
 - Map to one of: Feature, Bug, Performance, Refactor
 
@@ -45,67 +58,48 @@ If the architect produces any L-sized item, push back: "this needs further break
 
 ### Capture the epic's design as an SFEP
 
-An epic with real design surface needs a durable **design record** so the
-sub-issues don't each re-litigate the *why*, and so `/pickup` has a brief to
-read. Before creating issues:
+An epic with real design surface needs a durable **design record** so leaves
+don't re-litigate the *why* and `/pickup` has a brief. Before creating issues:
 
-- **Check for an existing SFEP** for this epic (`grep` `docs/proposals/` and the
-  registry `docs/proposals/README.md`). Many epics already have one (e.g. the
-  effect-system, ownership, and test-infra epics).
-- **If one exists**, the sub-issues reference it (see the `## Design` line in the
-  body skeleton below); update its `tracking:` to list the epic + new issues.
-- **If none exists and the epic embodies a substantive design** (a language,
-  runtime/ABI, or toolchain decision — not just a bag of mechanical tasks), have
-  the architect write it as an SFEP first (`/sfep new <slug>`, or it writes
-  `docs/proposals/draft-<slug>.md` directly per `.claude/rules/proposals.md`).
-  Accept it at the grooming gate (`/sfep status <slug-or-N> Accepted`) so the
-  sub-issues can cite a numbered SFEP.
-- **If the epic is purely mechanical** (no design decision — e.g. "migrate N call
-  sites"), no SFEP is needed; the issues stand on their own.
-
-Each sub-issue then **cites the SFEP rather than duplicating its design** — the
-SFEP is the *why*, the issue is the *what to do this session*.
+- **Check for an existing SFEP** (`grep docs/proposals/` and the registry
+  `docs/proposals/README.md`, and the Project description's `Design:` line).
+- **If one exists**, leaves cite it (`## Design: SFEP-NNNN`); update its
+  `tracking:` front-matter to list the new issues.
+- **If none exists and the epic embodies a substantive design**, have the
+  architect write it as an SFEP first (`/sfep new <slug>` per
+  `.claude/rules/proposals.md`) and accept it at the grooming gate
+  (`/sfep status <slug-or-N> Accepted`).
+- **If the epic is purely mechanical** (no design decision), no SFEP is needed.
 
 ### Feasibility-probe FFI / "no frontend dependency" claims (gate)
 
 Before any issue that touches `runtime/` or crosses the C-ABI / `extern fn`
-boundary goes `claude-ready`, **probe the load-bearing feasibility claim** —
-do not take "this is written against the extern layer the seed already
-compiles / has no frontend dependency" on faith. The cheapest probe is a
-throwaway `.sfn` snippet run through the current seed:
+boundary is marked `Ready`, **probe the load-bearing feasibility claim** — do
+not take "no frontend dependency" on faith. Run a throwaway `.sfn` snippet
+through the current seed:
 
 ```bash
 build/seed/bin/sailfin check /tmp/probe.sfn
 build/seed/bin/sailfin emit -o /tmp/probe.ll llvm /tmp/probe.sfn
 ```
 
-Confirm the construct the issue depends on can actually be **expressed and
-emitted** (not silently dropped to `null` / elided). Runtime code that calls
-a C API frequently needs a frontend capability that does not exist yet —
-e.g. taking a function's address to pass as a `pthread_create` start routine
-(the gap that broke the original #1088 pickup: its "no frontend dependency"
-premise was false, and the missing primitive surfaced reactively mid-pickup
-instead of as a planned predecessor). If the probe fails, the prerequisite
-is a **frontend issue that must be groomed first** — make it an explicit
-`Blocked by` / `Required in pinned seed` predecessor, not a surprise.
+Confirm the construct can actually be expressed and emitted (not silently
+dropped to `null`). If the probe fails, the prerequisite is a **frontend issue
+that must be groomed first** — make it an explicit blocker / seed predecessor,
+not a surprise (the gap that broke the original #1088 pickup).
 
 ### Don't over-decompose: bundle a capability with its single consumer (default)
 
-**Bundling is the groom-time default, not a split-time afterthought.** When you
-identify a compiler capability that is tightly coupled to exactly one consumer
-that will be worked in the same session, **produce one issue** (one PR), not two.
-Split only when the capability has **multiple consumers** that each justify
-standalone shipping, or the work is **genuinely independent**. Any split that
-creates a seed-cut gate for a single consumer must be **explicitly justified** in
-the issue body — the default answer is bundle.
+**Bundling is the groom-time default.** When a compiler capability is tightly
+coupled to exactly one consumer worked in the same session, **produce one
+issue** (one PR), not two. Split only when the capability has **multiple
+consumers** or is **genuinely independent**. Any split that creates a seed-cut
+gate for a single consumer must be **explicitly justified** in the issue body.
 
-The full decision tree and the seed-cut-tax rationale live in the shared rule
-**`.claude/rules/seed-dependency.md`** (cited by `/pickup` too, so both apply it
-identically — design record SFEP-0026 WS-B). Apply that rule here rather than
-re-deriving it. When a split is justified, follow "Seed dependencies" below:
-label the predecessor `seed-blocker`, give the consumer
-`## Required in pinned seed: #<predecessor>`, and queue the seed advance against
-the next cadence bump rather than cutting reactively.
+The full decision tree and seed-cut-tax rationale live in
+**`.claude/rules/seed-dependency.md`** (cited by `/pickup` too — SFEP-0026 WS-B).
+Apply that rule here rather than re-deriving it. When a split is justified,
+follow "Seed dependencies" below.
 
 ---
 
@@ -113,47 +107,77 @@ the next cadence bump rather than cutting reactively.
 
 Present the proposed issue list as a table:
 
-| # | Title | Type | Size | Priority | Blocked by |
+| # | Title | Type | Estimate | Priority | Blocked by |
 |---|---|---|---|---|---|
 | 1 | ... | Performance | S | High | — |
 | 2 | ... | Refactor | M | Medium | #1 |
 
-Priority is one of Urgent / High / Medium / Low — the architect assigns it from
-the epic's place on the 1.0 critical path (default a leaf to its Project's
-priority unless it's a genuine outlier). It becomes the Linear-native priority in
-the *Reflect in Linear* step; it is **not** a GitHub label.
+Priority is Urgent / High / Medium / Low — the architect assigns it from the
+epic's place on the 1.0 critical path (default a leaf to its Project's priority
+unless it's a genuine outlier). Estimate is XS/S/M. Both become **Linear-native
+fields** in Phase 4.
 
-Wait for user approval. The user may:
-- Approve as-is → proceed to Phase 4
-- Request changes (drop, merge, split, reorder) → iterate with the architect
-- Reject the breakdown entirely → ask what's wrong
+Wait for user approval. The user may approve as-is (→ Phase 4), request changes
+(iterate with the architect), or reject the breakdown (ask what's wrong).
 
 ---
 
-## Phase 4: CREATE ISSUES
+## Phase 4: CREATE LINEAR ISSUES
 
-Create **only session-sized leaf issues** on GitHub — one per approved item.
-The epic itself is **not** a GitHub issue: it is the Linear **Project** created
-in the *Reflect in Linear* step below (`linear-workflow.md`). Do **not** open a
-GitHub `Epic:` / `Tracking:` issue or apply the `epic` / `tracking` label — those
-shapes are retired (`docs/conventions/issue-naming.md` § Title taxonomy).
+Ensure the epic's Linear **Project** exists, then create one native Linear
+issue per approved leaf under it. Do **not** create GitHub issues (those are for
+external contributors) and never a GitHub `Epic:`/`Tracking:` issue.
 
-Leaf titles follow `docs/conventions/issue-naming.md`: `<type>(<scope>):
-<imperative verb phrase>` (Conventional Commit shape). Labels come from
-`.github/labels.yml` (canonical registry); use lowercase prefixes (`type:bug`
-not `bug`, `size:m` not `medium`).
+### 4.1 — Ensure the Project exists
 
-```bash
-gh issue create \
-  --title "<title>" \
-  --label "claude-ready,type:<type>,size:<size>" \
-  --body "$(cat <<'EOF'
+Resolve or create the epic's Project under the correct Initiative, named for its
+outcome per `docs/conventions/issue-naming.md` § Linear structure & naming
+(concise Title-Case noun phrase; no `Epic:` prefix, no trailing `#N`/`SFEP-NNNN`).
+Put `Design: SFEP-NNNN` and any related links in the **description**, not the name:
+
+```
+mcp__Linear__list_projects query="<epic outcome>"
+# if absent:
+mcp__Linear__save_project name="<Outcome Name>" addTeams=["Sailfin"] addInitiatives=["<Initiative>"] description="## Outcome\n...\n\n## Design\n- SFEP: SFEP-NNNN"
+```
+
+### 4.2 — Create each leaf
+
+For each approved leaf, create the issue with native status, priority,
+estimate, project, labels, and blocker relations set directly — no separate
+"reflect" step:
+
+```
+mcp__Linear__save_issue \
+  team="Sailfin" \
+  title="<type>(<scope>): <imperative verb phrase>" \
+  project="<Project name>" \
+  state="Ready" \
+  priority=<1|2|3|4> \
+  estimate=<1|2|3> \
+  labels=["type:<t>", "area:<a>"] \
+  description="<body — see skeleton below>"
+```
+
+Field mapping (canonical — see `docs/conventions/linear-workflow.md`):
+
+| Attribute | Linear field | Value |
+|---|---|---|
+| Pickable-when-groomed | `state` | `Ready` (or `Backlog` if scoped-but-not-ready) |
+| Priority | `priority` | Urgent/High/Medium/Low → 1/2/3/4 |
+| Size | `estimate` | XS/S/M → 1/2/3 (never L) |
+| Type / area | `labels` | `type:*`, `area:*` only — never status/priority/size labels |
+| Blocked | relation | `blockedBy=["SFN-<blocker>"]` → status is set to `Blocked` automatically when a blocker is open |
+
+**Issue body skeleton** (`docs/conventions/linear-templates.md` is the source):
+
+```markdown
 ## Goal
 <one sentence>
 
 ## Scope
 **In:**
-- <semantic unit of change — not a file path; e.g. "the effect-checker
+- <semantic unit of change — NOT a file path; e.g. "the effect-checker
   diagnostic emission for missing ![io]">
 
 **Out:**
@@ -168,247 +192,109 @@ gh issue create \
 - compiler/src/... — ...   # likely-relevant starting points; non-exhaustive, no line numbers/counts
 
 ## Verification
-\`\`\`bash
+```bash
 timeout 60 build/native/sailfin run path/to/example.sfn
-\`\`\`
-
-## Size
-<XS|S|M>
-
-## Type
-<Feature|Bug|Performance|Refactor>
-
-## Blocked by
-<#N or "None">
-
-## Required in pinned seed
-<#N or "None" — see "Seed dependencies" below for when to populate this>
-
-## Design
-<SFEP-NNNN (docs/proposals/NNNN-<slug>.md) — the design record this issue implements, or "None" for purely mechanical work>
-
-## Context
-<links to roadmap, code, prior PRs>
-EOF
-)"
 ```
 
-**Always emit the `## Required in pinned seed` section**, even when the
-value is `None`. `/pickup` Phase 1.5 treats a missing section as legacy
-and falls back to walking `## Blocked by` against the seed tag — which
-produces false-positive seed-cut requirements on routine work. An
-explicit `None` value is the contract that says "no seed dependency."
+## Required in pinned seed
+<#<PR> or "None" — see "Seed dependencies" below>
+
+## Design
+<SFEP-NNNN (docs/proposals/NNNN-<slug>.md), or "None" for purely mechanical work>
+
+## Context
+<links to the Project, roadmap, code, prior PRs>
+```
+
+**Always emit `## Required in pinned seed`, even as `None`.** `/pickup` treats a
+missing section as legacy and falls back to walking blockers against the seed —
+producing false-positive seed-cut requirements. An explicit `None` is the
+contract for "no seed dependency."
+
+### 4.3 — Set blocker relations
+
+For any leaf that depends on a sibling that hasn't merged, set the native
+blocked-by relation — Linear derives `Blocked` status from it:
+
+```
+mcp__Linear__save_issue id="SFN-<dependent>" blockedBy=["SFN-<blocker>"]
+```
 
 ### Intent authoritative, file map advisory
 
-A groomed issue's **contract** is its **Goal** plus a **semantic
-`In:`/`Out:` scope**. The `## Files Affected` block is a **non-binding map** —
-a navigation aid that is *expected to drift* and is reconciled at pickup, not
-a checklist that gates correctness. This is the convention of record in
-`docs/conventions/issue-naming.md` ("Intent-authoritative issues"); all four
-issue-lifecycle commands cite it. When emitting an issue body:
+A groomed issue's **contract** is its **Goal** plus a **semantic `In:`/`Out:`
+scope**; `## Files Affected` is a **non-binding map** reconciled at pickup
+(`docs/conventions/issue-naming.md`, "Intent-authoritative issues"). When
+emitting a body:
 
-- **Express `In:`/`Out:` as semantic units of change, not file paths.** Write
-  "the effect-checker diagnostic emission for missing `![io]`", not
-  "`effect_checker.sfn` lines X-Y". A new sibling file inside that unit (e.g.
-  a split that moved diagnostic emission into `effect_checker/diagnostics.sfn`)
-  is then **in scope by construction** — the unit, not the path, is the boundary.
-- **Mark `## Files Affected` advisory** (the header reword above) and list paths
-  as *likely-relevant starting points*, explicitly non-exhaustive.
-- **Forbid line numbers anywhere** (`L142`, `~L100-135`) and **exact file
-  counts** ("edit these 3 files", "two call sites") in any emitted body. Line
-  numbers rot fastest; a count turns an in-unit Nth sibling into a phantom
-  scope violation.
-
-`/pickup` reconciles cosmetic map drift (a renamed path, an in-unit sibling)
-and pauses only on **semantic** scope growth (a new acceptance criterion or new
-public surface). Grooming a precise-but-brittle map only manufactures pickup
-halts on entropy `/triage` would otherwise refresh.
-
-Capture the issue numbers. After each `gh issue create`:
-
-1. Set the GitHub native Type field to match the `type:*` label:
-```bash
-# Derive from the label: type:feature → Feature, type:bug → Bug, everything else → Task
-.claude/scripts/set-issue-type.sh <new-issue-number> <Feature|Task|Bug>
-```
-
-The mapping from `type:*` label to GitHub Type:
-- `type:feature` → `Feature`
-- `type:bug` → `Bug`
-- `type:refactor`, `type:perf`, `type:docs`, `type:tech-debt`, epics, tracking → `Task`
-
-Then set up dependencies. For any issue that depends on a sibling that
-hasn't merged yet, add the `blocked` label:
-
-```bash
-# For each issue blocked by an earlier one:
-gh issue edit <N> --add-label "blocked"
-# (and reference the blocker in the body — the gh CLI doesn't have native dependency support)
-```
-
-### Reflect in Linear
-
-Once the GitHub issues exist, reflect the epic and its leaves into Linear per
-`docs/conventions/issue-naming.md` § Reflecting state into Linear (best-effort —
-skip with a one-line note if the Linear MCP tools aren't connected):
-
-1. **Create or reuse the epic's Linear Project** under the correct initiative,
-   named per § Linear structure & naming (concise Title-Case deliverable; no
-   `Epic:` prefix or trailing `#N`/`SFEP-NNNN`), with `GitHub: #<epic>` and any
-   `Design: SFEP-NNNN` placed in the project **description**, not the name.
-2. **Assign each created leaf** to that Project, set its status from its labels,
-   and set its **Linear-native priority and estimate** per
-   `docs/conventions/issue-naming.md` § Reflecting state into Linear (step 3):
-   estimate from the `size:*` label (xs/s/m → 1/2/3 on the team's Linear 1–5
-   scale), priority from the Phase 3 table (Urgent/High/Medium/Low → 1/2/3/4,
-   defaulting to the Project's priority). The mirror syncs in asynchronously —
-   retry briefly, and let a later `/triage`/`/sweep` pass reconcile any leaf
-   whose mirror (or priority/estimate) hasn't appeared yet.
-3. **Roll up the Project status** from its issues (any In Progress → `started`;
-   else any Ready → `planned`; else `backlog`).
-
-Never write a terminal (`Done`/`Canceled`) status — the leaves are open, and the
-two-way sync would close them.
+- **Express `In:`/`Out:` as semantic units, not file paths.** A new sibling
+  file inside a named unit is in scope by construction.
+- **Mark `## Files Affected` advisory**, list paths as likely-relevant starting
+  points, explicitly non-exhaustive.
+- **Forbid line numbers** (`L142`, `~L100-135`) and **exact file counts**
+  anywhere — both rot fastest and manufacture phantom scope violations.
 
 ### Seed dependencies
 
-For each created issue, evaluate whether its predecessors must be **in the
-pinned seed binary**, not just merged on `main`. The two states are
-different — `make compile` runs against the binary at `.seed-version`, so
-a dependency that's merged but not seeded will fail to self-host.
+For each leaf, evaluate whether a predecessor must be **in the pinned seed
+binary**, not just merged. `make compile` runs against `.seed-version`, so a
+compiler-source dependency merged but not seeded fails to self-host.
 
-Apply this rule:
+Apply: if the leaf touches `compiler/src/` or `runtime/prelude.sfn` AND its
+predecessor is a compiler-source change affecting the binary's behaviour
+(lowering, parsing, typecheck, intrinsics, diagnostics, IR shape), the
+predecessor must be in the seed first. When that holds:
 
-- If the issue touches `compiler/src/` or `runtime/prelude.sfn` AND its
-  predecessor is a compiler-source change that affects the compiler
-  binary's behaviour (lowering, parsing, type-checking, intrinsics,
-  diagnostics, IR shape), the predecessor must be in the seed before
-  this issue can self-host.
+1. Fill `## Required in pinned seed` with the predecessor's **PR number**.
+2. Apply the `seed-blocker` label to the **predecessor** issue (the one shipping
+   the change): `mcp__Linear__save_issue id="SFN-<predecessor>" labels=[...,"seed-blocker"]`.
+3. Note in the Phase 5 report that a cadence seed bump + `/pin-seed` is required
+   before pickup of the dependent leaf.
 
-When that holds:
+A pure docs/test/runtime issue typically needs no seed cut.
 
-1. Fill in the `## Required in pinned seed` section of the issue body
-   with the predecessor issue/PR number — separate from `## Blocked by`.
-2. Apply the `seed-blocker` label to the **predecessor issue** (the
-   one shipping the change, not the dependent one):
+### Phased epics: one Project per phase, groomed wave-by-wave
 
-```bash
-gh issue edit <predecessor> --add-label seed-blocker
-```
+When an epic is inherently multi-phase (Phase A → B → C, later phases depend on
+earlier), model the phases as **separate Linear Projects** under the shared
+Initiative, named `<Epic> Phase <X> — <noun phrase>` (as the existing
+*Concurrency Maturity Phase 1 / Phase 2* Projects do). Give each future phase a
+`Backlog`/`Planned` Project state with its checklist + `Design: SFEP-NNNN` in
+the description. Groom each phase's leaves wave-by-wave into that phase's
+Project when the wave opens; the empty next-phase Project is the visible "groom
+me next" card. (One Project rolls up its own issues — a single Project for the
+whole epic would read ~100% the moment Phase A closed, hiding that B/C aren't
+groomed.)
 
-3. Note in the Phase 5 report that a seed cut + `/pin-seed` will be
-   required between the predecessor's merge and pickup of this issue.
-
-Examples:
-- Slice E.2 (struct-field migration) requires Slice E.1 (`int`/`float`
-  aliases) to be in the seed because the migration emits LLVM IR that
-  relies on the new `int → i64` mapping. The previous E.2 attempt
-  (#489) failed precisely because this gate was implicit instead of
-  explicit.
-- A new effect-checker pass that emits diagnostics requires the
-  diagnostic-codes PR to be in the seed.
-- A pure docs/test/runtime issue typically does NOT require a seed cut.
-
-`/pickup` enforces the `## Required in pinned seed` contract via
-`git merge-base --is-ancestor`. Skipping the section here means the
-agent has decided the issue does not need a fresh seed; getting that
-wrong is the failure mode this gate exists to prevent.
-
-### Grouping: Linear Project for the epic; GitHub sub-issues only for leaf splits
-
-Epic grouping is **not** a GitHub parent — it is the Linear **Project** the leaves
-are associated to in the *Reflect in Linear* step below. Do not create a GitHub
-`Epic:` parent to hang leaves off.
-
-GitHub-native sub-issue nesting is still used in **one** case: when a single
-session-sized leaf is split into smaller GitHub children (steps of one piece of
-work). Attach each child as a sub-issue of its **leaf parent** — body references
-alone do not populate the parent's "Sub-issues" panel. Use the REST API (the `gh`
-CLI has no first-class command yet):
-
-```bash
-# Look up the parent's internal node id (NOT the issue number) once:
-PARENT=450
-PARENT_ID=$(gh api repos/SailfinIO/sailfin/issues/$PARENT --jq '.id')
-
-# For each created sub-issue, look up its id and attach it. The
-# sub_issue_id field MUST be passed with -F (typed integer); -f sends a
-# string and the API rejects it with a 422.
-for n in 458 459 460 461 462 463; do
-  child_id=$(gh api repos/SailfinIO/sailfin/issues/$n --jq '.id')
-  gh api -X POST /repos/SailfinIO/sailfin/issues/$PARENT/sub_issues \
-    -F sub_issue_id=$child_id --jq '.number'
-done
-
-# Verify the parent now lists every child:
-gh api /repos/SailfinIO/sailfin/issues/$PARENT/sub_issues \
-  --jq '.[] | "#\(.number) \(.title)"'
-```
-
-This applies **only** to the leaf-split case above. The default groom output —
-independent leaves associated to the epic's Linear Project — needs no GitHub
-sub-issue attachment at all; skip this step unless you actually split one leaf
-into GitHub children.
-
-### Phased epics: one Linear Project per phase, groomed wave-by-wave
-
-When an epic is **inherently multi-phase** — sequential phases where later phases
-depend on earlier ones (e.g. SFEP-0027's Phase A → B → C → D, where B can't start
-until A's modules land) — do **not** dump all leaves into one Project and groom
-them in undocumented "waves." That is the structure that lost #351's Phase 3 (it
-went 8/13-done with no sub-issues ever filed). Model the phases in Linear instead:
-
-1. **One Linear Project per phase, all created up front** under the shared
-   Initiative, named `<Epic> Phase <X> — <noun phrase>` (as the existing
-   *Concurrency Maturity Phase 1 / Phase 2* Projects do). Give each future phase's
-   Project a `Planned`/`Backlog` state and put its checklist + `Design: SFEP-NNNN`
-   in the Project description. Leaves attach to the **current** phase's Project;
-   future phases hold no leaves yet.
-2. **Groom each phase's leaf issues wave-by-wave**, filing them (GitHub → Linear)
-   into that phase's Project only when the wave is actually being opened. The empty
-   next-phase Project is the visible *"groom me next"* card.
-
-Why one-Project-per-phase (not one Project for the whole epic): a Project rolls up
-its own issues' state. If every phase's leaves lived in a single Project, that
-Project would read ~100% the moment Phase A's wave closed — hiding that B/C/D
-aren't even groomed. Separate phase Projects keep each phase independently
-plannable, focusable, and completable, and the Initiative view shows the phase
-sequence at a glance. (`/sweep` Phase 2c still uses GitHub **leaf** sub-issue
-rollups to recommend closing a leaf-parent — that is unchanged; it never closes a
-Linear Project.)
-
-**When NOT to use this:** a single-phase epic, or a flat bag of genuinely
-independent issues with no phase ordering — one Project, leaves filed directly.
-The per-phase Project structure is for *sequential, wave-groomed* phases only.
+**When NOT to use this:** a single-phase epic, or a flat bag of independent
+issues with no ordering — one Project, leaves filed directly.
 
 ---
 
 ## Phase 5: REPORT
 
 Report to the user:
-- Issue numbers created (with titles)
+- Linear issues created (SFN-NNN with titles) and the Project they landed under
 - The dependency graph (what blocks what)
 - The recommended pickup order
+- Any seed-cut gate a split introduced (predecessor → dependent, queued bump)
 - Any context the architect flagged that doesn't fit in an issue
 
-Suggest: `/pickup` to start working the queue, or `/triage` to verify hygiene.
+Suggest: `/pickup` to start the queue, or `/triage` to verify hygiene.
 
 ---
 
 ## Constraints
 
-- **Never create L-sized issues.** If the architect can't break work into XS/S/M, the work is not yet ready.
+- **Never create L-sized issues.** If work can't break into XS/S/M, it's not ready.
 - **Never create issues without acceptance criteria.** The criteria are the contract.
-- **Always set the `claude-ready` label** on issues that are ready to pick up. Use `needs-grooming` for issues that exist as placeholders but need refinement.
-- **Always set the `type:*` and `size:*` labels** so `/pickup` can filter correctly. Apply `area:*` labels when the touched subsystem is unambiguous.
-- **Always set a Linear-native priority and estimate** on each leaf's mirror (see *Reflect in Linear*). Priority is not a GitHub label; estimate derives from `size:*`. Never leave a groomed leaf at `No priority` / no estimate.
-- **Use only labels defined in `.github/labels.yml`** — never invent new ones in this command. If you think a new label is warranted, edit `labels.yml` in a separate PR first.
-- **Title format follows `docs/conventions/issue-naming.md`** — Conventional Commit shape for leaf sub-tasks. Never open an `Epic:`/`Tracking:` GitHub issue or apply the `epic`/`tracking` label; epics are Linear Projects (see *Reflect in Linear*).
-- **Don't create issues for work that's already in progress** — check `gh issue list` first to avoid duplicates.
-- **When splitting one leaf into GitHub children, attach each child as a native sub-issue of its leaf parent** via the REST `/sub_issues` endpoint (epic grouping is the Linear Project, not a GitHub parent). Body cross-references do not populate the parent's Sub-issues panel. Use `-F sub_issue_id=<int>` (not `-f`) — the field must be typed.
-- **Labels are the source of truth.** There is no derived board to sync.
-- **Set the GitHub native Type field** with
-  `.claude/scripts/set-issue-type.sh <N> <Feature|Task|Bug>` (best-effort; it
-  self-skips when `gh` is unavailable). Derive the type from the `type:*` label:
-  `type:feature` → `Feature`, `type:bug` → `Bug`, everything else → `Task`.
+- **Set status, priority, and estimate natively** on every leaf. A groomed,
+  unblocked leaf is `Ready`; a blocked one gets a `blockedBy` relation (Linear
+  derives `Blocked`). Never leave a `Ready` leaf at `No priority` / no estimate.
+- **Labels are `type:*` / `area:*` only** — status, priority, estimate, and
+  blockers are native Linear fields, not labels.
+- **No GitHub issues.** Epics are Linear Projects; leaves are Linear issues.
+  GitHub issues come only from external contributors (mirrored into Linear
+  Triage) — never open one here.
+- **Never write a terminal status** (`Done`/`Canceled`) on freshly-groomed work.
+- **Don't duplicate in-progress work** — check `list_issues` for the Project first.

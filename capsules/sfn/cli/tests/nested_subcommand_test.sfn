@@ -15,6 +15,9 @@ import {
     get,
     has_flag,
     parse,
+    parse_error,
+    parse_is_ok,
+    parse_matches,
     subcommand,
     subcommand_path,
     with_arg,
@@ -27,9 +30,9 @@ test "parse: no subcommand yields empty path" {
     let root = with_arg(command("app", "App"), arg("file", "Source"));
     let argv: string[] = ["app", "main.sfn"];
     let r = parse(root, argv);
-    assert r.ok == true;
-    assert subcommand_path(r.matches).length == 0;
-    assert strings_equal(subcommand(r.matches), "");
+    assert parse_is_ok(r) == true;
+    assert subcommand_path(parse_matches(r)).length == 0;
+    assert strings_equal(subcommand(parse_matches(r)), "");
 }
 
 test "parse: single level path has one element" {
@@ -37,11 +40,11 @@ test "parse: single level path has one element" {
     let root = with_subcommand(command("app", "App"), build);
     let argv: string[] = ["app", "build"];
     let r = parse(root, argv);
-    assert r.ok == true;
-    let p = subcommand_path(r.matches);
+    assert parse_is_ok(r) == true;
+    let p = subcommand_path(parse_matches(r));
     assert p.length == 1;
     assert strings_equal(p[0], "build");
-    assert strings_equal(subcommand(r.matches), "build");
+    assert strings_equal(subcommand(parse_matches(r)), "build");
 }
 
 test "parse: descends two subcommand levels" {
@@ -50,9 +53,9 @@ test "parse: descends two subcommand levels" {
     let root = with_subcommand(command("app", "Root"), mid);
     let argv: string[] = ["app", "a", "b"];
     let r = parse(root, argv);
-    assert r.ok == true;
-    assert strings_equal(subcommand(r.matches), "b");
-    let p = subcommand_path(r.matches);
+    assert parse_is_ok(r) == true;
+    assert strings_equal(subcommand(parse_matches(r)), "b");
+    let p = subcommand_path(parse_matches(r));
     assert p.length == 2;
     assert strings_equal(p[0], "a");
     assert strings_equal(p[1], "b");
@@ -65,13 +68,13 @@ test "parse: descends three subcommand levels" {
     let root = with_subcommand(command("app", "Root"), a);
     let argv: string[] = ["app", "a", "b", "c"];
     let r = parse(root, argv);
-    assert r.ok == true;
-    let p = subcommand_path(r.matches);
+    assert parse_is_ok(r) == true;
+    let p = subcommand_path(parse_matches(r));
     assert p.length == 3;
     assert strings_equal(p[0], "a");
     assert strings_equal(p[1], "b");
     assert strings_equal(p[2], "c");
-    assert strings_equal(subcommand(r.matches), "c");
+    assert strings_equal(subcommand(parse_matches(r)), "c");
 }
 
 // ---- leaf positional (`sfn config get <key>`) ----
@@ -81,13 +84,13 @@ test "parse: leaf positional after nested subcommands" {
     let root = with_subcommand(command("sfn", "Sailfin"), config);
     let argv: string[] = ["sfn", "config", "get", "mykey"];
     let r = parse(root, argv);
-    assert r.ok == true;
-    assert strings_equal(subcommand(r.matches), "get");
-    let p = subcommand_path(r.matches);
+    assert parse_is_ok(r) == true;
+    assert strings_equal(subcommand(parse_matches(r)), "get");
+    let p = subcommand_path(parse_matches(r));
     assert p.length == 2;
     assert strings_equal(p[0], "config");
     assert strings_equal(p[1], "get");
-    assert strings_equal(get(r.matches, "key"), "mykey");
+    assert strings_equal(get(parse_matches(r), "key"), "mykey");
 }
 
 // ---- per-level flag scoping ----
@@ -97,10 +100,10 @@ test "parse: flags scoped per level both match" {
     let root = with_subcommand(command("app", "App"), config);
     let argv: string[] = ["app", "config", "--root", "get", "--leaf"];
     let r = parse(root, argv);
-    assert r.ok == true;
-    assert has_flag(r.matches, "root") == true;
-    assert has_flag(r.matches, "leaf") == true;
-    assert strings_equal(subcommand(r.matches), "get");
+    assert parse_is_ok(r) == true;
+    assert has_flag(parse_matches(r), "root") == true;
+    assert has_flag(parse_matches(r), "leaf") == true;
+    assert strings_equal(subcommand(parse_matches(r)), "get");
 }
 
 test "parse: parent flag not visible in child level" {
@@ -109,8 +112,8 @@ test "parse: parent flag not visible in child level" {
     let root = with_subcommand(command("app", "App"), config);
     let argv: string[] = ["app", "config", "get", "--root"];
     let r = parse(root, argv);
-    assert r.ok == false;
-    assert strings_equal(r.error.kind, "unknown_flag");
+    assert parse_is_ok(r) == false;
+    assert strings_equal(parse_error(r).kind, "unknown_flag");
 }
 
 // ---- unknown subcommand at each level ----
@@ -119,8 +122,8 @@ test "parse: unknown subcommand at first level" {
     let root = with_subcommand(command("app", "App"), config);
     let argv: string[] = ["app", "bogus"];
     let r = parse(root, argv);
-    assert r.ok == false;
-    assert strings_equal(r.error.kind, "unknown_subcommand");
+    assert parse_is_ok(r) == false;
+    assert strings_equal(parse_error(r).kind, "unknown_subcommand");
 }
 
 test "parse: unknown subcommand at second level reports path" {
@@ -129,14 +132,14 @@ test "parse: unknown subcommand at second level reports path" {
     let root = with_subcommand(command("app", "App"), config);
     let argv: string[] = ["app", "config", "bogus"];
     let r = parse(root, argv);
-    assert r.ok == false;
-    assert strings_equal(r.error.kind, "unknown_subcommand");
+    assert parse_is_ok(r) == false;
+    assert strings_equal(parse_error(r).kind, "unknown_subcommand");
     // The path descended so far is recorded so run() targets the right
     // help level, and the usage hint reflects the full path.
-    let p = subcommand_path(r.matches);
+    let p = subcommand_path(parse_matches(r));
     assert p.length == 1;
     assert strings_equal(p[0], "config");
-    assert strings_equal(r.error.message, "error: unknown subcommand 'bogus'\nrun 'app config --help' for usage");
+    assert strings_equal(parse_error(r).message, "error: unknown subcommand 'bogus'\nrun 'app config --help' for usage");
 }
 
 // ---- parent-level required arguments are enforced on descent ----
@@ -148,9 +151,9 @@ test "parse: required flag on parent level is enforced before descent" {
     // required --root, which must still be reported.
     let argv: string[] = ["app", "config", "get"];
     let r = parse(root, argv);
-    assert r.ok == false;
-    assert strings_equal(r.error.kind, "missing_required");
-    assert strings_equal(r.error.flag_name, "root");
+    assert parse_is_ok(r) == false;
+    assert strings_equal(parse_error(r).kind, "missing_required");
+    assert strings_equal(parse_error(r).flag_name, "root");
 }
 
 test "parse: required parent flag satisfied before subcommand" {
@@ -159,9 +162,9 @@ test "parse: required parent flag satisfied before subcommand" {
     let root = with_subcommand(command("app", "App"), config);
     let argv: string[] = ["app", "config", "--root", "r1", "get"];
     let r = parse(root, argv);
-    assert r.ok == true;
-    assert strings_equal(get(r.matches, "root"), "r1");
-    assert strings_equal(subcommand(r.matches), "get");
+    assert parse_is_ok(r) == true;
+    assert strings_equal(get(parse_matches(r), "root"), "r1");
+    assert strings_equal(subcommand(parse_matches(r)), "get");
 }
 
 test "parse: required positional on parent level is enforced on descent" {
@@ -172,7 +175,7 @@ test "parse: required positional on parent level is enforced on descent" {
     // so config's required <profile> is omitted and must be reported.
     let argv: string[] = ["app", "config", "get"];
     let r = parse(root, argv);
-    assert r.ok == false;
-    assert strings_equal(r.error.kind, "missing_required");
-    assert strings_equal(r.error.arg_name, "profile");
+    assert parse_is_ok(r) == false;
+    assert strings_equal(parse_error(r).kind, "missing_required");
+    assert strings_equal(parse_error(r).arg_name, "profile");
 }

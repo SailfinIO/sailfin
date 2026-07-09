@@ -35,7 +35,7 @@ import {
     ParseResult
 } from "./types";
 
-fn parse(cmd: Command, argv: string[]) -> ParseResult {
+fn parse(cmd: Command, argv: string[]) -> Result<ParseResult, ParseError> {
     // Pure, non-exiting argv parser. Returns a ParseResult that
     // describes either successful matches or a structured error.
     let mut pos_names: string[] = [];
@@ -239,8 +239,13 @@ fn parse(cmd: Command, argv: string[]) -> ParseResult {
                     // its required positionals/flags must be satisfied
                     // (and optional defaults filled) here, since the final
                     // post-loop validation only sees the leaf level.
-                    let lr = _validate_level(cmd.name, path, active, pos_idx, pos_names, pos_values, fl_names, fl_values, fl_present);
-                    if !lr.ok { return lr; }
+                    let level_result = _validate_level(cmd.name, path, active, pos_idx, pos_names, pos_values, fl_names, fl_values, fl_present);
+                    match level_result {
+                        Result.Ok { value } => { },
+                        Result.Err { error } => {
+                            return Result.Err { error: error };
+                        }
+                    }
                     path.push(token);
                     active = sub;
                     // Positionals are scoped per level; restart the
@@ -281,7 +286,7 @@ fn parse(cmd: Command, argv: string[]) -> ParseResult {
     return _validate_level(cmd.name, path, active, pos_idx, pos_names, pos_values, fl_names, fl_values, fl_present);
 }
 
-fn parse_with_env(cmd: Command, argv: string[]) -> ParseResult ![io] {
+fn parse_with_env(cmd: Command, argv: string[]) -> Result<ParseResult, ParseError> ![io] {
     // Env-aware variant of `parse()`. Runs the pure parser first to
     // discover the matched (leaf) command level and which flags argv
     // supplied, then for each flag on that level bound via `flag_env`
@@ -298,13 +303,22 @@ fn parse_with_env(cmd: Command, argv: string[]) -> ParseResult ![io] {
     // injected tokens are appended to argv, so they validate at the same
     // leaf level they were read from. The `env.get` read is the only
     // reason this entry carries `![io]` — `parse()` itself stays pure.
-    let first = parse(cmd, argv);
+    let first_result = parse(cmd, argv);
+    let first_ok: boolean = parse_is_ok(first_result);
+    let first_error: ParseError = parse_error(first_result);
+    let first: ParseResult = ParseResult {
+        matches: parse_matches(first_result)
+    };
 
     // Help/version requests short-circuit identically on re-parse, so
     // skip the env reads entirely and return the pure result.
-    if !first.ok {
-        if strings_equal(first.error.kind, "help_requested") { return first; }
-        if strings_equal(first.error.kind, "version_requested") { return first; }
+    if !first_ok {
+        if strings_equal(first_error.kind, "help_requested") {
+            return first_result;
+        }
+        if strings_equal(first_error.kind, "version_requested") {
+            return first_result;
+        }
     }
 
     let active = _resolve_active_path(cmd, first.matches.subcommand_path);
@@ -324,7 +338,7 @@ fn parse_with_env(cmd: Command, argv: string[]) -> ParseResult ![io] {
         i += 1;
     }
 
-    if extra.length == 0 { return first; }
+    if extra.length == 0 { return first_result; }
 
     // Rebuild argv with the env-supplied tokens appended. Copy
     // element-by-element rather than aliasing the caller's `argv`, so the
@@ -345,7 +359,7 @@ fn parse_with_env(cmd: Command, argv: string[]) -> ParseResult ![io] {
     return parse(cmd, aug);
 }
 
-fn _validate_level(cmd_name: string, path: string[], active: Command, pos_idx: int, pos_names: string[], pos_values: string[], fl_names: string[], fl_values: string[], fl_present: boolean[]) -> ParseResult {
+fn _validate_level(cmd_name: string, path: string[], active: Command, pos_idx: int, pos_names: string[], pos_values: string[], fl_names: string[], fl_values: string[], fl_present: boolean[]) -> Result<ParseResult, ParseError> {
     // Finalize a single command level: fill optional positional
     // defaults, enforce required positionals, and enforce required
     // flags. Mutates `pos_names`/`pos_values` in place to record filled
@@ -427,7 +441,33 @@ fn _validate_level(cmd_name: string, path: string[], active: Command, pos_idx: i
         flag_values: fl_values,
         flag_present: fl_present
     };
-    return ParseResult { ok: true, matches: matches, error: _ok_error() };
+    return Result.Ok {
+        value: ParseResult { matches: matches }
+    };
+}
+
+fn parse_is_ok(result: Result<ParseResult, ParseError>) -> boolean {
+    match result {
+        Result.Ok { value } => { return true; },
+        Result.Err { error } => { return false; }
+    }
+    return false;
+}
+
+fn parse_matches(result: Result<ParseResult, ParseError>) -> Matches {
+    match result {
+        Result.Ok { value } => { return value.matches; },
+        Result.Err { error } => { return error.matches; }
+    }
+    return _empty_matches();
+}
+
+fn parse_error(result: Result<ParseResult, ParseError>) -> ParseError {
+    match result {
+        Result.Ok { value } => { return _empty_parse_error(); },
+        Result.Err { error } => { return error; }
+    }
+    return _empty_parse_error();
 }
 
 fn run(cmd: Command, argv: string[]) -> Matches ![io] {
@@ -439,12 +479,13 @@ fn run(cmd: Command, argv: string[]) -> Matches ![io] {
     // `parse_with_env()` is why env-bound flags resolve for real CLI entry
     // points while keeping the pure `parse()` available for embedding.
     let result = parse_with_env(cmd, argv);
-    if result.ok { return result.matches; }
+    if parse_is_ok(result) { return parse_matches(result); }
+    let error: ParseError = parse_error(result);
 
-    let path = result.matches.subcommand_path;
+    let path = error.matches.subcommand_path;
     let active = _resolve_active_path(cmd, path);
     let label = _command_label(cmd.name, path);
-    let kind = result.error.kind;
+    let kind = error.kind;
 
     if strings_equal(kind, "help_requested") {
         print(_format_help(active, label));
@@ -469,25 +510,39 @@ fn run(cmd: Command, argv: string[]) -> Matches ![io] {
     // suffix for every kind except `missing_value` (which historically
     // omits the hint), so a single stderr write reproduces the
     // pre-parse() stderr exactly.
-    print.err(result.error.message);
+    print.err(error.message);
     process.exit(EXIT_USAGE);
-    return result.matches;
+    return error.matches;
 }
 
 fn _with_hint(cmd_name: string, path: string[], first_line: string) -> string {
     return first_line + "\nrun '" + _help_hint(cmd_name, path) + "' for usage";
 }
 
-fn _ok_error() -> ParseError {
+fn _empty_matches() -> Matches {
+    return Matches {
+        command_name: "",
+        subcommand_name: "",
+        subcommand_path: [],
+        positional_names: [],
+        positional_values: [],
+        flag_names: [],
+        flag_values: [],
+        flag_present: []
+    };
+}
+
+fn _empty_parse_error() -> ParseError {
     return ParseError {
         kind: "ok",
         message: "",
         flag_name: "",
-        arg_name: ""
+        arg_name: "",
+        matches: _empty_matches()
     };
 }
 
-fn _err_result(command_name: string, path: string[], pos_names: string[], pos_values: string[], fl_names: string[], fl_values: string[], fl_present: boolean[], kind: string, message: string, flag_name: string, arg_name: string) -> ParseResult {
+fn _err_result(command_name: string, path: string[], pos_names: string[], pos_values: string[], fl_names: string[], fl_values: string[], fl_present: boolean[], kind: string, message: string, flag_name: string, arg_name: string) -> Result<ParseResult, ParseError> {
     let matches = Matches {
         command_name: command_name,
         subcommand_name: _leaf_name(path),
@@ -498,14 +553,13 @@ fn _err_result(command_name: string, path: string[], pos_names: string[], pos_va
         flag_values: fl_values,
         flag_present: fl_present
     };
-    return ParseResult {
-        ok: false,
-        matches: matches,
+    return Result.Err {
         error: ParseError {
             kind: kind,
             message: message,
             flag_name: flag_name,
-            arg_name: arg_name
+            arg_name: arg_name,
+            matches: matches
         }
     };
 }

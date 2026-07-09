@@ -29,7 +29,7 @@ A seed dependency is discovered (groom-time or mid-pickup):
 ├─ Is the dependency a compiler-source capability (lowering / parse /
 │  typecheck / intrinsic / runtime-prelude) that the consumer needs
 │  present in the *pinned seed*?
-│     └─ No  → not a seed dependency. Normal `## Blocked by`. Done.
+│     └─ No  → not a seed dependency. Normal Linear blocked-by relation. Done.
 │     └─ Yes ↓
 │
 ├─ How many consumers need this capability?

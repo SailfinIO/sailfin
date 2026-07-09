@@ -77,7 +77,17 @@
       "WebFetch(domain:raw.githubusercontent.com)",
       "mcp__Claude_Code_Remote",
       "mcp__sailfin",
-      "mcp__github"
+      "mcp__github",
+      "mcp__Linear__save_issue",
+      "mcp__Linear__save_project",
+      "mcp__Linear__save_comment",
+      "mcp__Linear__list_issues",
+      "mcp__Linear__get_issue",
+      "mcp__Linear__list_projects",
+      "mcp__Linear__get_project",
+      "mcp__Linear__list_initiatives",
+      "mcp__Linear__get_initiative",
+      "mcp__Linear__list_cycles"
     ],
     "deny": [
       "Bash(rm -rf /*)",
@@ -105,7 +115,8 @@
       "$defaults",
       "Project build, test, and formatting commands are safe: make compile, make rebuild, make check, make test (and its make test-* variants), make bench, make fetch-seed, make clean, make clean-build, sfn, and build/native/sailfin invocations. make clean-build and make clean only remove the repository's own build/ and dist/ artifacts, never files outside the repo, so treat them as routine, not destructive. This does not extend to make install, which writes to PREFIX/bin outside the repo.",
       "Scheduling and session-management tools from the Claude_Code_Remote MCP server (send_later, create_trigger, and the other trigger tools) are safe.",
-      "All tools from the sailfin MCP server (mcp__sailfin__*: sailfin_check, sailfin_diagnostics, sailfin_fmt_check, sailfin_fmt_write, sailfin_build, sailfin_test, sailfin_emit_native, sailfin_emit_llvm, sailfin_version) are safe. They are the project's own in-repo developer tooling — each is a pure passthrough to a single `sailfin` subcommand, path-restricted to the workspace root, and exists specifically for agents to use during development. Never prompt for them."
+      "All tools from the sailfin MCP server (mcp__sailfin__*: sailfin_check, sailfin_diagnostics, sailfin_fmt_check, sailfin_fmt_write, sailfin_build, sailfin_test, sailfin_emit_native, sailfin_emit_llvm, sailfin_version) are safe. They are the project's own in-repo developer tooling — each is a pure passthrough to a single `sailfin` subcommand, path-restricted to the workspace root, and exists specifically for agents to use during development. Never prompt for them.",
+      "Linear planning tools are safe: the read tools (mcp__Linear__list_issues, mcp__Linear__get_issue, mcp__Linear__list_projects, mcp__Linear__get_project, mcp__Linear__list_initiatives, mcp__Linear__get_initiative, mcp__Linear__list_cycles) and the planning writes the /pickup, /groom, /triage, /sweep, and /release-plan skills depend on (mcp__Linear__save_issue, mcp__Linear__save_project, mcp__Linear__save_comment). Linear is the project's planning source of truth (team SFN), so creating/updating issues, projects, and comments is routine agent work — never prompt for these. This does NOT extend to destructive Linear tools (mcp__Linear__delete_*), which are not allow-listed and must still prompt."
     ]
   },
   "env": {
