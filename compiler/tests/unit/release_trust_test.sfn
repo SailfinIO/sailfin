@@ -1,0 +1,34 @@
+// Tests for the pinned release-signing public key embedded in the sfn binary
+// (compiler/src/release_trust.sfn). These assert the binary carries a
+// well-formed, fixed Ed25519 verification key. The end-to-end "this key
+// verifies a real signature" check lives in the crypto capsule
+// (capsules/sfn/crypto/tests/release_signing_key_test.sfn), where the
+// ed25519_verify primitive is in scope.
+//
+// Design: SFEP-0046 §3.5. Trust model + rotation: docs/release-signing.md.
+import { release_signing_public_key_hex } from "../../src/release_trust";
+
+// A single char is a lowercase hex digit (0-9, a-f).
+fn _is_lower_hex_char(c: string) -> boolean {
+    let code: int = char_code(c) & 255;
+    return (code >= 48 && code <= 57) || (code >= 97 && code <= 102);
+}
+
+test "release_trust: embedded pubkey is 64 lowercase hex chars" {
+    let key = release_signing_public_key_hex();
+    assert key.length == 64;
+    let mut i: int = 0;
+    let mut all_hex: boolean = true;
+    loop {
+        if i >= key.length { break; }
+        if !_is_lower_hex_char(key[i]) { all_hex = false; }
+        i = i + 1;
+    }
+    assert all_hex == true;
+}
+
+test "release_trust: embedded pubkey matches its golden value" {
+    // Golden value pins the key so any change is an intentional rotation
+    // (docs/release-signing.md lists every location that must move together).
+    assert release_signing_public_key_hex() == "a98fd921c2c18521f765b13c2c134e4ab447f98970f6ea255dce22a05c81029d";
+}
