@@ -6,7 +6,7 @@ type: tooling
 created: 2026-07-09
 updated: 2026-07-09
 author: "agent:compiler-architect; human review: Michael Curtis"
-tracking: SFN-167, SFN-168
+tracking: SFN-167, SFN-168, SFN-169, SFN-170, SFN-171, SFN-172
 supersedes:
 superseded-by:
 graduates-to:
