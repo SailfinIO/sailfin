@@ -1,0 +1,121 @@
+// Unit tests for typed `Channel<T>` element binding + live channel-send
+// element-type checking — issue #1942 (SFN-111), the parse-and-bind slice of
+// #1575 (concurrency frontend typing).
+//
+// Two behaviours are covered: (1) `channel_element_kind` resolves the
+// monomorphized element kind carried by a `Channel<T>` type annotation via the
+// same six-kind resolver `spawn_future_kind` applies to spawn/future kinds; and
+// (2) a `let ch: Channel<T> = channel()` binding threads that kind so a later
+// `ch.send(v)` with a certainly-mismatched value raises E0815. Inference-
+// dependent sends (identifier / lambda arguments) stay silent — the checker has
+// no expression-type inferencer (#829), so the send check is deliberately
+// conservative to avoid false positives.
+import { parse_program } from "../../src/parser/mod";
+import { typecheck_diagnostics } from "../../src/typecheck";
+import { channel_element_kind } from "../../src/typecheck_types";
+
+// Collapse the not-a-channel case so the assert sites stay free of optional
+// narrowing.
+fn _elem(type_text: string) -> string {
+    let resolved = channel_element_kind(type_text);
+    if resolved == null { return "<none>"; }
+    return resolved;
+}
+
+// True if typechecking `source` produces a diagnostic with `code`.
+fn _produces_diagnostic(source: string, code: string) -> boolean ![io] {
+    let program = parse_program(source);
+    let diags = typecheck_diagnostics(program);
+    let mut index: int = 0;
+    loop {
+        if index >= diags.length { break; }
+        if strings_equal(diags[index].code, code) { return true; }
+        index += 1;
+    }
+    return false;
+}
+
+// --- channel_element_kind: annotation -> monomorphized element kind ---------
+test "channel binding: `Channel<int>` binds element kind int" {
+    assert strings_equal(_elem("Channel<int>"), "int");
+}
+
+test "channel binding: each scalar element kind resolves" {
+    assert strings_equal(_elem("Channel<string>"), "string");
+    assert strings_equal(_elem("Channel<bool>"), "bool");
+    assert strings_equal(_elem("Channel<void>"), "void");
+    // int aliases collapse to `int`, matching `spawn_future_kind`.
+    assert strings_equal(_elem("Channel<i64>"), "int");
+}
+
+test "channel binding: a fn-typed element lifts through the ptr catch-all" {
+    // `Channel<fn() -> void>` (the dynamic-task-scheduling example) — the
+    // angle-depth-balanced payload `fn() -> void` is an unknown/user type, so
+    // it resolves to the opaque-pointer kind.
+    assert strings_equal(_elem("Channel<fn() -> void>"), "ptr");
+}
+
+test "channel binding: interior spacing in the annotation still resolves" {
+    assert strings_equal(_elem("Channel < int >"), "int");
+}
+
+test "channel binding: a non-channel annotation is not a channel type" {
+    assert strings_equal(_elem("int"), "<none>");
+    assert strings_equal(_elem("Result<int, string>"), "<none>");
+    // A bare `Channel` with no element argument carries no bound kind.
+    assert strings_equal(_elem("Channel"), "<none>");
+}
+
+// --- live send check: `ch.send(v)` element-type enforcement -> E0815 --------
+test "channel send: string sent on a `Channel<int>` raises E0815" ![io] {
+    let source = "fn producer() { let ch: Channel<int> = channel(); ch.send(\"x\"); }";
+    assert _produces_diagnostic(source, "E0815");
+}
+
+test "channel send: a matching element kind type-checks (no E0815)" ![io] {
+    let source = "fn producer() { let ch: Channel<string> = channel(); ch.send(\"x\"); }";
+    assert ! _produces_diagnostic(source, "E0815");
+}
+
+test "channel send: an inference-dependent argument is not flagged" ![io] {
+    // An identifier argument's kind is not resolvable without expression-type
+    // inference (#829), so the send check stays silent rather than guessing.
+    let source = "fn producer(msg: int) { let ch: Channel<int> = channel(); ch.send(msg); }";
+    assert ! _produces_diagnostic(source, "E0815");
+}
+
+test "channel send: an indeterminate (ptr) element kind is not flagged" ![io] {
+    // A `Channel<fn() -> void>` element resolves to the `ptr` catch-all, which
+    // carries no statically-comparable kind — comparing it to a determinate
+    // sent kind would false-positive, so the check stays silent (the
+    // dynamic-task-scheduling example shape).
+    let source = "fn producer() { let ch: Channel<fn() -> void> = channel(); ch.send(\"x\"); }";
+    assert ! _produces_diagnostic(source, "E0815");
+}
+
+test "channel send: the mismatch fires inside a lambda body too" ![io] {
+    // The lambda-body binding path (`walk_block_expressions`) threads the
+    // element kind independently of the primary path (`check_statement`).
+    let source = "fn outer() { let f = fn() { let ch: Channel<int> = channel(); ch.send(\"x\"); }; }";
+    assert _produces_diagnostic(source, "E0815");
+}
+
+test "channel send: an inner non-channel binding shadows the channel" ![io] {
+    // `find_symbol` resolves innermost-first, so a later same-scope `ch` with
+    // no channel annotation suppresses the send check on the outer channel.
+    let source = "fn producer() { let ch: Channel<int> = channel(); let ch: int = 5; ch.send(\"x\"); }";
+    assert ! _produces_diagnostic(source, "E0815");
+}
+
+test "channel send: a bool literal on a `Channel<int>` raises E0815" ![io] {
+    // The `BooleanLiteral` branch of `channel_send_value_kind` resolves `bool`,
+    // a certain mismatch against an `int` channel.
+    let source = "fn producer() { let ch: Channel<int> = channel(); ch.send(true); }";
+    assert _produces_diagnostic(source, "E0815");
+}
+
+test "channel send: a bool literal on a `Channel<bool>` type-checks" ![io] {
+    // The matching direction of the boolean branch — no mismatch, no E0815.
+    let source = "fn producer() { let ch: Channel<bool> = channel(); ch.send(false); }";
+    assert ! _produces_diagnostic(source, "E0815");
+}

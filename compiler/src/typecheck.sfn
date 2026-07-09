@@ -29,6 +29,7 @@ import {
     SymbolCollectionResult,
     SymbolEntry,
     append_symbol,
+    channel_element_kind,
     check_bare_fn_type_annotation,
     check_enum_variants,
     check_extern_signature,
@@ -271,7 +272,7 @@ fn _symbols_from_global_names(names: string[]) -> SymbolEntry[] {
     loop {
         if i >= names.length { break; }
         out.push(SymbolEntry {
-            name: names[i], kind: "prelude", span: null, is_generic: false, is_c_abi: false
+            name: names[i], kind: "prelude", span: null, is_generic: false, is_c_abi: false, element_kind: ""
         });
         i += 1;
     }
@@ -359,7 +360,7 @@ fn _collect_imported_call_symbols(program: Program) -> SymbolEntry[] {
                     if alias_str.length > 0 { local_name = alias_str; }
                 }
                 symbols.push(SymbolEntry {
-                    name: local_name, kind: "import", span: null, is_generic: false, is_c_abi: false
+                    name: local_name, kind: "import", span: null, is_generic: false, is_c_abi: false, element_kind: ""
                 });
                 s += 1;
             }
@@ -528,7 +529,17 @@ fn check_statement(statement: Statement, ctx: TypeckCtx) -> ScopeResult {
     let in_function_body = ctx.in_function_body;
     let enclosing_return_type = ctx.enclosing_return_type;
     if statement.variant == "VariableDeclaration" {
-        let registration = register_local_symbol(bindings, statement.name, "variable", statement.span, scope_start);
+        // A `let x: Channel<T> = ...` binding records its element kind so
+        // `check_channel_send` can enforce element-type on a later `x.send(v)`
+        // (#1942). Every other binding records "". This is the primary
+        // (plain-function-body / top-level) path; the lambda-body twin lives
+        // in `walk_block_expressions`.
+        let mut elem_kind: string = "";
+        if statement.type_annotation != null {
+            let resolved = channel_element_kind(statement.type_annotation.text);
+            if resolved != null { elem_kind = resolved; }
+        }
+        let registration = register_local_symbol(bindings, statement.name, "variable", statement.span, scope_start, false, false, elem_kind);
         let walk_diags = walk_expression(statement.initializer, ctx);
         let annotation_diags = check_bare_fn_type_annotation(statement.type_annotation, statement.name, statement.span);
         let intersection_diags = check_intersection_value_type_annotation(statement.type_annotation, statement.name, statement.span);
@@ -974,7 +985,7 @@ fn _build_nested_fn_scope(signature: FunctionSignature, ctx: TypeckCtx) -> Scope
         if !has_symbol(ctx.top_level, entry.name) {
             if !is_function_kind(entry.kind) {
                 scope.push(SymbolEntry {
-                    name: entry.name, kind: "outer_local", span: entry.span, is_generic: false, is_c_abi: false
+                    name: entry.name, kind: "outer_local", span: entry.span, is_generic: false, is_c_abi: false, element_kind: ""
                 });
             }
         }
@@ -1303,6 +1314,10 @@ fn walk_expression(expression: Expression?, ctx: TypeckCtx) -> Diagnostic[] {
             diagnostics = diagnostics.concat(walk_expression(expression.arguments[index], ctx));
             index += 1;
         }
+        // `ch.send(v)` on a `Channel<T>`-annotated receiver enforces the
+        // element type -> E0815 (#1942). Silent unless the mismatch is
+        // certain (see `channel_send_diagnostics`).
+        diagnostics = diagnostics.concat(channel_send_diagnostics(expression, bindings));
         return diagnostics;
     }
     if expression.variant == "Binary" {
@@ -1753,6 +1768,51 @@ fn check_channel_send(channel_kind: string, sent_kind: string, span: SourceSpan?
     return diagnostics;
 }
 
+// The monomorphized kind of a value sent on a channel, when it is resolvable
+// with certainty from the expression alone (#1942). Only literal forms whose
+// kind is unambiguous are classified — the checker has no expression-type
+// inferencer (#829), so an identifier / call / lambda argument stays null and
+// is conservatively NOT flagged, keeping the send check free of false
+// positives (e.g. `tasks.send(fn() { ... })` on a `Channel<fn() -> void>`). A
+// bare numeric literal is intentionally unresolved: `int`/`number`/`float`
+// share the literal spelling, so its kind is not decidable here.
+fn channel_send_value_kind(value: Expression?) -> string? {
+    if value == null { return null; }
+    if strings_equal(value.variant, "StringLiteral") { return "string"; }
+    if strings_equal(value.variant, "BooleanLiteral") { return "bool"; }
+    return null;
+}
+
+// Element-type check for a `ch.send(v)` call (#1942 / E0815). Fires only when
+// the receiver resolves to a `Channel<T>`-annotated binding (non-empty
+// `element_kind`), the call has exactly one argument, and that argument's kind
+// is resolvable with certainty — so a genuine mismatch (`let ch: Channel<int>;
+// ch.send("x")`) is reported while inference-dependent sends stay silent.
+fn channel_send_diagnostics(expression: Expression, bindings: SymbolEntry[]) -> Diagnostic[] {
+    let callee = expression.callee;
+    if callee == null { return []; }
+    if !strings_equal(callee.variant, "Member") { return []; }
+    if !strings_equal(callee.member, "send") { return []; }
+    let receiver = callee.object;
+    if receiver == null { return []; }
+    if !strings_equal(receiver.variant, "Identifier") { return []; }
+    let entry = find_symbol(bindings, receiver.name);
+    if entry == null { return []; }
+    if entry.element_kind.length == 0 { return []; }
+    // `ptr` is the indeterminate catch-all `spawn_future_kind` assigns to every
+    // non-primitive element (user type, alias, generic parameter, fn-type), so
+    // a `Channel<T>` whose `T` is not one of the five determinate primitive
+    // kinds carries no statically-comparable kind. Comparing it against a
+    // determinate sent kind would false-positive (`Channel<fn() -> void>` +
+    // `send("x")`), so the check stays silent there — only a determinate
+    // channel kind is enforced.
+    if strings_equal(entry.element_kind, "ptr") { return []; }
+    if expression.arguments.length != 1 { return []; }
+    let sent_kind = channel_send_value_kind(expression.arguments[0]);
+    if sent_kind == null { return []; }
+    return check_channel_send(entry.element_kind, sent_kind, expression.span);
+}
+
 // Resolution probe (issue #811). Returns whether `name` resolves to an
 // imported free function in the localized `imports` table. Since #812
 // flipped enforcement on, the walker's Call branch resolves callees
@@ -1795,7 +1855,15 @@ fn walk_block_expressions(block: Block, ctx: TypeckCtx) -> Diagnostic[] {
         let statement = block.statements[index];
         diagnostics = diagnostics.concat(walk_statement_expressions(statement, ctx_with_bindings(ctx, bindings, scope_start)));
         if statement.variant == "VariableDeclaration" {
-            let registration = register_local_symbol(bindings, statement.name, "variable", statement.span, scope_start);
+            // A `let x: Channel<T> = ...` binding records its element kind so
+            // `check_channel_send` can enforce element-type on a later
+            // `x.send(v)` (#1942). Every other binding records "".
+            let mut elem_kind: string = "";
+            if statement.type_annotation != null {
+                let resolved = channel_element_kind(statement.type_annotation.text);
+                if resolved != null { elem_kind = resolved; }
+            }
+            let registration = register_local_symbol(bindings, statement.name, "variable", statement.span, scope_start, false, false, elem_kind);
             bindings = registration.bindings;
         }
         index += 1;
