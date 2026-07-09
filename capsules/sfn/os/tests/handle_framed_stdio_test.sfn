@@ -15,6 +15,7 @@ import {
     handle_close_stdin,
     handle_read_line_stdout,
     handle_read_bytes_stdout,
+    owned_buf_free,
     handle_wait
 } from "../src/mod";
 
@@ -74,9 +75,14 @@ test "handle_read_bytes_stdout: bounded read into an owned buffer, empty at EOF"
     let p2 = handle_read_bytes_stdout(h, 10);
     assert p2.len == 5;
     assert strings_equal(p2.ptr_addr as * u8 as string, "defgh");
-    // Nothing left: EOF yields a zero-length buffer.
+    // Nothing left: EOF yields the canonical empty buffer (no allocation).
     let p3 = handle_read_bytes_stdout(h, 4);
     assert p3.len == 0;
+    assert p3.ptr_addr == 0;
+    // Reclaim the allocations: a real buffer frees, the empty one no-ops.
+    owned_buf_free(p1);
+    owned_buf_free(p2);
+    owned_buf_free(p3);
     let exit = handle_wait(h);
     assert exit == 0;
 }

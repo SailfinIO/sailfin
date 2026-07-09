@@ -1399,6 +1399,9 @@ fn sfn_process_handle_read_bytes_stdout(handle_id: i64, n: i64) -> * u8 ![io] {
 // end-of-stream to the same empty string; a `string?`-typed `sfn/os`
 // wrapper consults this to return `null` for EOF and `""` for a real
 // blank line. Reads only handle state — no syscall, so it never blocks.
+// A zero/invalid `handle_id` reports `true` (at-EOF), matching the raw
+// read builtins that treat a zero handle as an empty stream: a caller
+// framing until `null` then stops rather than spinning on a dead handle.
 fn sfn_process_handle_stdout_at_eof(handle_id: i64) -> bool ![io] {
     if handle_id == 0 { return true; }
     let h: * SailfinProcessHandle = handle_id as * SailfinProcessHandle;
