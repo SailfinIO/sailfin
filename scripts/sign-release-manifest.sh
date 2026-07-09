@@ -38,9 +38,11 @@ if ! command -v sha256sum >/dev/null 2>&1; then sumtool="shasum -a 256"; fi
 # the per-asset *.sha256 sidecars. Sorted for a byte-stable manifest.
 (
   cd "$dir"
+  # `-print` + strip the leading `./` (portable; `-printf` is GNU-only and
+  # breaks BSD/macOS `find` for local validation/rotation).
   files="$(find . -maxdepth 1 -type f \
       ! -name 'SHA256SUMS' ! -name 'SHA256SUMS.sig' ! -name '*.sha256' \
-      -printf '%f\n' | LC_ALL=C sort)"
+      -print | sed 's|^\./||' | LC_ALL=C sort)"
   [ -n "$files" ] || { echo "[sign] no assets to hash in $dir" >&2; exit 1; }
   while IFS= read -r f; do
     [ -n "$f" ] || continue
