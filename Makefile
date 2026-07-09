@@ -173,6 +173,30 @@ TEST_JOBS_FLAG = --jobs $(TEST_JOBS)
 # above already captures it, so no origin-check branch is needed here).
 CHECK_TEST_JOBS ?= $(TEST_JOBS)
 
+# Per-test wall-clock cap for the `make check` cold full-suite run.
+# `make check` runs the whole suite in ONE parallel pool with
+# `--no-test-cache` (Makefile check-impl), so the sole e2e test that does
+# full `sfn build -p compiler` self-host builds (work_dir_parity_test.sfn:
+# two cold builds, serially, in one child) is CPU-contended by the pool and
+# its two cold builds together exceed the runner's 300s default per-test cap
+# — exit 124. A single cold `-p compiler` build measures ~206s uncontended,
+# so the two serial builds (~412s) already clear 300s before the pool's CPU
+# contention stretches them further on the 4-vCPU runner. macOS dodges it by
+# shipping no `timeout` binary (no cap at all), so the timeout only surfaces
+# on the nightly Linux `make check` leg. The cap is a backstop, not a budget:
+# a child exits the instant its builds finish, so a wider cap costs nothing
+# on the passing path — it only stops a false-positive kill of a
+# slow-but-progressing child. Genuine compile hangs are still bounded by the
+# per-phase cap in compiler/src/main.sfn, and the whole job by the workflow's
+# `timeout-minutes: 180`. Override with `CHECK_TEST_TIMEOUT=<secs>`.
+CHECK_TEST_TIMEOUT ?= 1800
+
+# Env prefix applied to the `make check` full-suite `make test` invocations.
+# Kept as a single variable (not `export`) so both call sites can't diverge
+# while the wider cap stays scoped to `make check` — plain `make test` and
+# per-PR CI keep the runner's 300s default.
+CHECK_TEST_TIMEOUT_ENV = SAILFIN_TEST_TIMEOUT=$(CHECK_TEST_TIMEOUT)
+
 # Strict self-host gate (#1830). When SELFHOST_STRICT=1, `make check`
 # passes `--strict` to `sfn selfhost` so a stage2/stage3 fixed-point
 # mismatch is fatal (exit non-zero, no promotion) instead of the default
@@ -570,8 +594,8 @@ check-impl:
 	@# Set CHECK_FULL_PASS1=1 to restore the old two-full-suite behaviour
 	@# (escape hatch for bisect / pre-release double-check).
 ifeq ($(CHECK_FULL_PASS1),1)
-	@echo "[check] CHECK_FULL_PASS1=1: running full suite on first-pass binary (jobs=$(CHECK_TEST_JOBS))..."
-	@$(MAKE) test NATIVE_BIN=build/native/sailfin TEST_BIN_CACHE_FLAGS=--no-test-cache TEST_JOBS=$(CHECK_TEST_JOBS)
+	@echo "[check] CHECK_FULL_PASS1=1: running full suite on first-pass binary (jobs=$(CHECK_TEST_JOBS), test-timeout=$(CHECK_TEST_TIMEOUT)s)..."
+	@$(CHECK_TEST_TIMEOUT_ENV) $(MAKE) test NATIVE_BIN=build/native/sailfin TEST_BIN_CACHE_FLAGS=--no-test-cache TEST_JOBS=$(CHECK_TEST_JOBS)
 else
 	@echo "[check] pass1 smoke gate: hello-world + sfn/test capsule tests (jobs=$(CHECK_TEST_JOBS))..."
 	@t60=""; \
@@ -611,8 +635,8 @@ endif
 		--promote-to $(NATIVE_BIN) \
 		--smoke-timeout 10 \
 		$(SELFHOST_STRICT_FLAG)
-	@echo "[check] running full test suite with seedcheck binary (cold backstop, jobs=$(CHECK_TEST_JOBS))..."
-	@$(MAKE) test NATIVE_BIN=build/native/sailfin-seedcheck TEST_BIN_CACHE_FLAGS=--no-test-cache TEST_JOBS=$(CHECK_TEST_JOBS)
+	@echo "[check] running full test suite with seedcheck binary (cold backstop, jobs=$(CHECK_TEST_JOBS), test-timeout=$(CHECK_TEST_TIMEOUT)s)..."
+	@$(CHECK_TEST_TIMEOUT_ENV) $(MAKE) test NATIVE_BIN=build/native/sailfin-seedcheck TEST_BIN_CACHE_FLAGS=--no-test-cache TEST_JOBS=$(CHECK_TEST_JOBS)
 
 # Fast PR-feedback gate: run `sfn check` against the compiler tree and
 # the runtime prelude. No codegen, no clang, just parse + typecheck +
