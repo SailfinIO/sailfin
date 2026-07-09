@@ -1,0 +1,161 @@
+// Tests for the sfn/http router (SFN-37): path-pattern matching with
+// `{param}` capture, dispatch precedence, and the 404/405 fallbacks.
+//
+// Pure match/dispatch coverage — no runtime, socket, or serve path is
+// exercised here. `dispatch` invokes registered top-level handlers through
+// their retained addresses, so the handlers below double as the fn-pointer
+// round-trip coverage.
+import {
+    Params,
+    Router,
+    dispatch,
+    match_pattern,
+    param,
+    route,
+    router
+} from "../src/mod";
+import { Request, Response } from "../src/types";
+import { response } from "../src/wire";
+
+// ── test handlers (top-level so their addresses are bare code pointers) ──
+// Echo the captured `id` so a dispatch test can assert the param reached the
+// handler without any substring parsing on the request path.
+fn _h_user(req: Request, params: Params) -> Response {
+    let id = param(params, "id");
+    if id == null { return response("user <none>"); }
+    return response("user " + id);
+}
+
+// Static-route handler used for the precedence test (registered before the
+// overlapping `{id}` route so registration order prefers it).
+fn _h_user_me(req: Request, params: Params) -> Response {
+    return response("me");
+}
+
+// Two-segment capture handler — proves multiple params are captured in order.
+fn _h_comment(req: Request, params: Params) -> Response {
+    let uid = param(params, "uid");
+    let cid = param(params, "cid");
+    let mut u = "?";
+    let mut c = "?";
+    if uid != null { u = uid; }
+    if cid != null { c = cid; }
+    return response(u + "/" + c);
+}
+
+fn _req(method: string, path: string) -> Request {
+    return Request {
+        method: method,
+        path: path,
+        query: "",
+        headers: [],
+        body: ""
+    };
+}
+
+fn _one_route(method: string, pattern: string, handler: * fn (Request, Params) -> Response) -> Router {
+    return route(router(), method, pattern, handler);
+}
+
+test "match_pattern: {id} captures the path segment" {
+    let m = match_pattern("/users/{id}", "/users/42");
+    assert m.matched;
+    let id = param(m.params, "id");
+    assert id != null;
+    if id != null { assert strings_equal(id, "42"); }
+}
+
+test "match_pattern: literal segment mismatch does not match" {
+    let m = match_pattern("/users/{id}", "/posts/42");
+    assert ! m.matched;
+}
+
+test "match_pattern: differing segment count does not match" {
+    let extra = match_pattern("/users/{id}", "/users/42/comments");
+    assert ! extra.matched;
+    let fewer = match_pattern("/users/{id}", "/users");
+    assert ! fewer.matched;
+}
+
+test "match_pattern: exact static pattern matches with no params" {
+    let m = match_pattern("/health", "/health");
+    assert m.matched;
+    assert m.params.names.length == 0;
+    assert param(m.params, "anything") == null;
+}
+
+test "match_pattern: trailing slash is ignored" {
+    let m = match_pattern("/users/{id}", "/users/42/");
+    assert m.matched;
+    let id = param(m.params, "id");
+    assert id != null;
+    if id != null { assert strings_equal(id, "42"); }
+}
+
+test "match_pattern: multiple captures bind in order" {
+    let m = match_pattern("/users/{uid}/comments/{cid}", "/users/7/comments/99");
+    assert m.matched;
+    let uid = param(m.params, "uid");
+    let cid = param(m.params, "cid");
+    assert uid != null;
+    assert cid != null;
+    if uid != null { assert strings_equal(uid, "7"); }
+    if cid != null { assert strings_equal(cid, "99"); }
+}
+
+test "match_pattern: root pattern matches root path with no params" {
+    let m = match_pattern("/", "/");
+    assert m.matched;
+    assert m.params.names.length == 0;
+}
+
+test "match_pattern: empty-brace segment {} is a literal, not a capture" {
+    // "{}" declares no name, so it is matched literally (not captured).
+    let lit = match_pattern("/x/{}", "/x/{}");
+    assert lit.matched;
+    assert lit.params.names.length == 0;
+    let miss = match_pattern("/x/{}", "/x/42");
+    assert ! miss.matched;
+}
+
+test "dispatch: an empty router yields 404" {
+    let resp = dispatch(router(), _req("GET", "/anything"));
+    assert resp.status == 404;
+}
+
+test "dispatch: GET /users/{id} runs the handler with the captured id" {
+    let r = _one_route("GET", "/users/{id}", _h_user as * fn (Request, Params) -> Response);
+    let resp = dispatch(r, _req("GET", "/users/42"));
+    assert resp.status == 200;
+    assert strings_equal(resp.body, "user 42");
+}
+
+test "dispatch: multi-segment capture reaches the handler" {
+    let r = _one_route("GET", "/users/{uid}/comments/{cid}", _h_comment as * fn (Request, Params) -> Response);
+    let resp = dispatch(r, _req("GET", "/users/7/comments/99"));
+    assert resp.status == 200;
+    assert strings_equal(resp.body, "7/99");
+}
+
+test "dispatch: method mismatch on a matched path yields 405" {
+    let r = _one_route("GET", "/users/{id}", _h_user as * fn (Request, Params) -> Response);
+    let resp = dispatch(r, _req("POST", "/users/42"));
+    assert resp.status == 405;
+}
+
+test "dispatch: no matching path yields 404" {
+    let r = _one_route("GET", "/users/{id}", _h_user as * fn (Request, Params) -> Response);
+    let resp = dispatch(r, _req("GET", "/orders/42"));
+    assert resp.status == 404;
+}
+
+test "dispatch: registration order is precedence (static before {id})" {
+    let mut r = router();
+    r = route(r, "GET", "/users/me", _h_user_me as * fn (Request, Params) -> Response);
+    r = route(r, "GET", "/users/{id}", _h_user as * fn (Request, Params) -> Response);
+    let me = dispatch(r, _req("GET", "/users/me"));
+    assert strings_equal(me.body, "me");
+    // A non-static path still falls through to the {id} route.
+    let other = dispatch(r, _req("GET", "/users/42"));
+    assert strings_equal(other.body, "user 42");
+}

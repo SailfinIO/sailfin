@@ -167,7 +167,7 @@ env-aware dispatch) and is listed as an open question below.
 | Request body (POST) | no — documented GET-only | Wave 3 (Content-Length drain) | — |
 | Header/query accessors (`header(req, n)`, `query_param(req, n)`) | yes (Wave 1, pure capsule) | — | — |
 | Typed client (`fetch`-style → `Response` with status/headers) | no — `get`/`post` body-string wrappers stay | Wave 4 (needs additive `sfn_http_request_raw` returning the full raw response) | — |
-| Routing (`Router`) | no — handler-side `if req.path == ...` idiom | post-v0 capsule work (blocked on closure-handler story) | — |
+| Routing (`Router`) | no — handler-side `if req.path == ...` idiom | **shipped** (SFN-37 — `Router`/`route`/`dispatch` with `{param}` path capture in `router.sfn`; handlers are top-level `fn(Request, Params) -> Response` registered by address, sidestepping the closure-handler story; 405 on method mismatch, 404 on no match) | — |
 | Keep-alive | no (`Connection: close` default) | **shipped** (#1711 — the serve connection worker loops recv→dispatch→send; `serialize_response` is negotiation-aware; a native single-connection-reuse client `sfn_http_conn_*` lands in the adapter) | — |
 | Closure handlers | no (top-level fn only, documented) | follow-up | — |
 | `ServerConfig.host` binding | dropped from v0 API | with host-bind runtime support | — |

@@ -1,0 +1,198 @@
+// sfn/http — path router with `{param}` capture.
+//
+// Adds a routing layer over `serve` so handlers stop hand-parsing
+// `req.path`. A `Router` holds an ordered list of `(method, pattern,
+// handler)` routes; `dispatch(router, req)` finds the first matching route,
+// captures any `{param}` path segments, and invokes the handler with the
+// request and the captured `Params`.
+//
+// Handler ABI. A route handler is a TOP-LEVEL `fn(Request, Params) ->
+// Response` passed address-taken, exactly like `serve`'s handler (closures
+// are not supported in v0 — E0808). The handler address is stored as an
+// `i64` in the `Route` and cast back to a code pointer at dispatch, mirroring
+// `server.sfn::_sfn_http_handler_addr`. Because both the call site and the
+// callee are ordinary Sailfin functions, the indirect call uses the normal
+// Sailfin calling convention — unlike the runtime's `fn(OwnedBuf)->OwnedBuf`
+// boundary, there is no cross-ABI aggregate hazard here.
+//
+// Composing with `serve`. `serve` takes a single `fn(Request) -> Response`,
+// so a router is wired in through a module-global `Router` and a top-level
+// dispatch wrapper (the same single-server-per-process shape `serve` uses):
+//
+//   import { serve, router, route, dispatch, param } from "sfn/http";
+//
+//   let mut ROUTER: Router = router();
+//
+//   fn get_user(req: Request, params: Params) -> Response {
+//       let id = param(params, "id");            // captured, no substring math
+//       if id == null { return not_found(); }
+//       return response("user " + id);
+//   }
+//
+//   fn handle(req: Request) -> Response { return dispatch(ROUTER, req); }
+//
+//   fn main() ![net, io] {
+//       ROUTER = route(ROUTER, "GET", "/users/{id}",
+//           get_user as * fn (Request, Params) -> Response);
+//       serve(handle as * fn (Request) -> Response, 8080);
+//   }
+//
+// v0 scope: exact literal segments (case-sensitive) and single-segment
+// `{name}` captures only. No wildcard/splat, regex routes, middleware
+// chains, content negotiation, or an `Allow` header on the 405 (post-1.0 —
+// see SFN-37 / epic #1321).
+import { Request, Response } from "./types";
+import { not_found, response_with_status } from "./wire";
+
+// Captured path parameters, as parallel name/value arrays (the prelude
+// exposes no map to capsules yet; the array pair keeps the lookup obvious
+// and order-preserving). `param` reads a value by name.
+struct Params {
+    names: string[];
+    values: string[];
+}
+
+// `param(params, name)` — captured value for `name`, or null if the pattern
+// declared no such `{name}` segment. On a duplicate capture name (e.g.
+// `/{id}/{id}`), the first binding wins.
+fn param(params: Params, name: string) -> string? {
+    let mut i = 0;
+    loop {
+        if i >= params.names.length { break; }
+        if strings_equal(params.names[i], name) { return params.values[i]; }
+        i = i + 1;
+    }
+    return null;
+}
+
+// A single registered route. `handler` is the address of a top-level
+// `fn(Request, Params) -> Response` (stored as `i64`, cast back at dispatch).
+struct Route {
+    method: string;
+    pattern: string;
+    handler: i64;
+}
+
+// An ordered list of routes; `dispatch` scans it in registration order and
+// the first match wins (registration order IS the precedence — register a
+// static route before an overlapping `{param}` route to prefer the static
+// one).
+struct Router {
+    routes: Route[];
+}
+
+// `router()` — a new empty router.
+fn router() -> Router {
+    return Router { routes: [] };
+}
+
+// `route(r, method, pattern, handler)` — return a router with one more route
+// appended. `handler` is a top-level `fn(Request, Params) -> Response` passed
+// address-taken (the address is retained as `i64`). Returns a new `Router`
+// so callers reassign (`ROUTER = route(ROUTER, ...)`) — no reliance on
+// struct-field aliasing.
+fn route(r: Router, method: string, pattern: string, handler: * fn (Request, Params) -> Response) -> Router {
+    let mut routes = r.routes;
+    routes.push(Route {
+        method: method, pattern: pattern, handler: handler as i64
+    });
+    return Router { routes: routes };
+}
+
+// Whether a pattern matched a path, plus any captured params. `params` is
+// empty when `matched` is false.
+struct MatchResult {
+    matched: boolean;
+    params: Params;
+}
+
+// `_split_segments(path)` — split a '/'-delimited path into its non-empty
+// segments. Leading/trailing slashes and empty segments (from "//") are
+// dropped, so "/users/42" and "/users/42/" both yield ["users", "42"] and
+// "/" yields the empty list.
+fn _split_segments(path: string) -> string[] {
+    let mut segs: string[] = [];
+    let total = path.length;
+    let mut cursor = 0;
+    loop {
+        if cursor >= total { break; }
+        let slash = find_char(path, "/", cursor);
+        let mut end = total;
+        if slash >= 0 { end = slash; }
+        if end > cursor { segs.push(substring(path, cursor, end)); }
+        if slash < 0 { break; }
+        cursor = slash + 1;
+    }
+    return segs;
+}
+
+// `_is_param_seg(seg)` — true if `seg` is a "{name}" capture segment, which
+// requires at least one character between the braces (so "{}" is NOT a
+// capture — it is treated as a literal segment).
+fn _is_param_seg(seg: string) -> boolean {
+    let n = seg.length;
+    if n < 3 { return false; }
+    return strings_equal(grapheme_at(seg, 0), "{") && strings_equal(grapheme_at(seg, n - 1), "}");
+}
+
+// `match_pattern(pattern, path)` — does `pattern` match `path`, capturing
+// `{param}` segments? Segment counts must be equal (no wildcard/splat in
+// v0); literal segments compare exactly (case-sensitive); a "{name}" segment
+// captures the corresponding path segment under `name`.
+fn match_pattern(pattern: string, path: string) -> MatchResult {
+    let pat = _split_segments(pattern);
+    let seg = _split_segments(path);
+    let empty = Params { names: [], values: [] };
+    if pat.length != seg.length {
+        return MatchResult { matched: false, params: empty };
+    }
+    let mut names: string[] = [];
+    let mut values: string[] = [];
+    let mut i = 0;
+    loop {
+        if i >= pat.length { break; }
+        let p = pat[i];
+        if _is_param_seg(p) {
+            names.push(substring(p, 1, p.length - 1));
+            values.push(seg[i]);
+        } else {
+            if !strings_equal(p, seg[i]) {
+                return MatchResult { matched: false, params: empty };
+            }
+        }
+        i = i + 1;
+    }
+    return MatchResult {
+        matched: true,
+        params: Params { names: names, values: values }
+    };
+}
+
+// `dispatch(r, req)` — route `req` to the first registered route whose
+// pattern matches `req.path` AND whose method equals `req.method`, invoking
+// its handler with the captured params. A path that matches some route's
+// pattern but no route's method yields 405; a path that matches no pattern at
+// all yields 404. The returned `Response` is the handler's own. Composable
+// into `serve`'s `fn(Request) -> Response` via a top-level wrapper over a
+// module-global `Router` (see the module header).
+fn dispatch(r: Router, req: Request) -> Response {
+    let mut i = 0;
+    let mut path_matched = false;
+    loop {
+        if i >= r.routes.length { break; }
+        let rt = r.routes[i];
+        let m = match_pattern(rt.pattern, req.path);
+        if m.matched {
+            if strings_equal(rt.method, req.method) {
+                let h: * fn (Request, Params) -> Response = rt.handler as * fn (Request, Params) -> Response;
+                return h(req, m.params);
+            }
+            path_matched = true;
+        }
+        i = i + 1;
+    }
+    if path_matched {
+        return response_with_status(405, "Method Not Allowed");
+    }
+    return not_found();
+}
