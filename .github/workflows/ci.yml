@@ -443,7 +443,13 @@ jobs:
       - name: Install clang (Linux)
         run: |
           sudo apt-get update
-          sudo apt-get install -y clang-18 llvm-18 jq
+          # lld provides the unversioned ld.lld/lld binaries the compiler's
+          # linker auto-detect probes (compiler/src/build/link.sfn); llvm-18
+          # ships only versioned names, so without lld every example/test link
+          # falls to the system default linker, which fails on
+          # examples/advanced/decorators.sfn and reds the examples sweep
+          # (SFN-176). ubuntu-24.04's default lld is version 18.
+          sudo apt-get install -y clang-18 llvm-18 lld jq
           echo "CLANG=clang-18" >> "$GITHUB_ENV"
 
       # Shared compiler build (#1234): download the per-OS tree built by
