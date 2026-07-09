@@ -218,3 +218,94 @@ fn base64_encode(data: string) -> string {
 
     return out;
 }
+
+// Map a single standard-alphabet base64 character to its 6-bit value, or -1
+// if `c` is not an alphabet character (`=` padding included). Byte-oriented:
+// `char_code(c)` is the raw 0-255 byte, so the ASCII ranges select directly.
+fn base64_sextet(c: string) -> int {
+    let code: int = char_code(c) & 255;
+    if code >= 65 && code <= 90 {
+        return code - 65;
+    }  // 'A'..'Z' → 0..25
+    if code >= 97 && code <= 122 {
+        return code - 97 + 26;
+    }  // 'a'..'z' → 26..51
+    if code >= 48 && code <= 57 {
+        return code - 48 + 52;
+    }  // '0'..'9' → 52..61
+    if code == 43 {
+        return 62;
+    }  // '+' → 62
+    if code == 47 {
+        return 63;
+    }  // '/' → 63
+    return -1;
+}
+
+fn base64_decode(s: string) -> string {
+    // Decode standard RFC 4648 base64 (with `=` padding) back to the raw byte
+    // string, reversing `base64_encode`. Pure Sailfin: byte-oriented over the
+    // raw input, no effects. Malformed input — length not a multiple of 4, a
+    // character outside the standard alphabet, misplaced `=`, or non-canonical
+    // trailing bits — yields "" (the sentinel contract, matching the
+    // effect-free, non-`Result` encoder shape). This is strict RFC 4648: any
+    // embedded whitespace or newline is out-of-alphabet, so MIME/PEM-wrapped
+    // (line-broken) base64 also yields "" — feed it compact input.
+    //
+    // Usage:
+    //   let decoded = base64_decode("aGVsbG8gd29ybGQ=");
+    //   // decoded == "hello world"
+    //
+    let len: int = s.length;
+    if len == 0 { return ""; }
+    if (len & 3) != 0 { return ""; }
+
+    let mut out: string = "";
+    let mut i: int = 0;
+    loop {
+        if i >= len { break; }
+
+        let d0: int = base64_sextet(s[i]);
+        let d1: int = base64_sextet(s[i + 1]);
+        if d0 < 0 { return ""; }
+        if d1 < 0 { return ""; }
+
+        let c2: string = s[i + 2];
+        let c3: string = s[i + 3];
+        let pad2: bool = c2 == "=";
+        let pad3: bool = c3 == "=";
+
+        // `=` is only legal in the final quad, and `X=Y=` (pad in position 2
+        // without one in position 3) is never a valid encoding.
+        if (pad2 || pad3) && (i + 4 != len) { return ""; }
+        if pad2 && !pad3 { return ""; }
+
+        // Byte 0 is present in every quad.
+        let b0: int = ((d0 << 2) | (d1 >> 4)) & 255;
+        out = out + char_from_code(b0);
+
+        if pad2 {
+            // "XX==" → one output byte; the low 4 bits of d1 must be zero.
+            if (d1 & 15) != 0 { return ""; }
+        } else {
+            let d2: int = base64_sextet(c2);
+            if d2 < 0 { return ""; }
+            let b1: int = ((d1 << 4) | (d2 >> 2)) & 255;
+            out = out + char_from_code(b1);
+
+            if pad3 {
+                // "XXX=" → two output bytes; the low 2 bits of d2 must be zero.
+                if (d2 & 3) != 0 { return ""; }
+            } else {
+                let d3: int = base64_sextet(c3);
+                if d3 < 0 { return ""; }
+                let b2: int = ((d2 << 6) | d3) & 255;
+                out = out + char_from_code(b2);
+            }
+        }
+
+        i += 4;
+    }
+
+    return out;
+}

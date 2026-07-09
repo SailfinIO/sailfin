@@ -3,7 +3,7 @@
 // Known-answer vectors covering the empty string, all three padding
 // residues (0, 1, 2 trailing bytes), and a non-ASCII UTF-8 input to pin
 // the byte-oriented contract.
-import { base64_encode } from "../src/mod";
+import { base64_encode, base64_decode } from "../src/mod";
 
 test "base64_encode: empty string" { assert base64_encode("") == ""; }
 
@@ -39,4 +39,98 @@ test "base64_encode: non-ASCII UTF-8 raw bytes" {
     // "é" is the two UTF-8 bytes 0xc3 0xa9; byte-oriented indexing encodes
     // them raw, matching `printf 'é' | base64`.
     assert base64_encode("é") == "w6k=";
+}
+
+// Decode known-answer vectors — the exact reverse of the encoder table above,
+// covering every padding residue and a non-ASCII UTF-8 payload.
+test "base64_decode: empty string" { assert base64_decode("") == ""; }
+
+test "base64_decode: one trailing byte (two pad chars)" {
+    assert base64_decode("Zg==") == "f";
+}
+
+test "base64_decode: two trailing bytes (one pad char)" {
+    assert base64_decode("Zm8=") == "fo";
+}
+
+test "base64_decode: exact three-byte group (no padding)" {
+    assert base64_decode("Zm9v") == "foo";
+}
+
+test "base64_decode: four bytes" {
+    assert base64_decode("Zm9vYg==") == "foob";
+}
+
+test "base64_decode: five bytes" {
+    assert base64_decode("Zm9vYmE=") == "fooba";
+}
+
+test "base64_decode: six bytes" {
+    assert base64_decode("Zm9vYmFy") == "foobar";
+}
+
+test "base64_decode: ascii sentence" {
+    assert base64_decode("aGVsbG8gd29ybGQ=") == "hello world";
+}
+
+test "base64_decode: non-ASCII UTF-8 raw bytes" {
+    assert base64_decode("w6k=") == "é";
+}
+
+// Round-trip: decode(encode(x)) == x across every vector.
+test "base64: round-trips empty" {
+    assert base64_decode(base64_encode("")) == "";
+}
+
+test "base64: round-trips one trailing byte" {
+    assert base64_decode(base64_encode("f")) == "f";
+}
+
+test "base64: round-trips two trailing bytes" {
+    assert base64_decode(base64_encode("fo")) == "fo";
+}
+
+test "base64: round-trips exact three-byte group" {
+    assert base64_decode(base64_encode("foo")) == "foo";
+}
+
+test "base64: round-trips ascii sentence" {
+    assert base64_decode(base64_encode("hello world")) == "hello world";
+}
+
+test "base64: round-trips non-ASCII UTF-8" {
+    assert base64_decode(base64_encode("é")) == "é";
+}
+
+// Malformed input yields the sentinel "" (non-`Result` contract).
+test "base64_decode: rejects non-multiple-of-4 length" {
+    assert base64_decode("Zg=") == "";
+}
+
+test "base64_decode: rejects out-of-alphabet character" {
+    assert base64_decode("Zg!=") == "";
+}
+
+test "base64_decode: rejects misplaced padding" {
+    assert base64_decode("Z===") == "";
+}
+
+test "base64_decode: rejects non-canonical trailing bits (residue 1)" {
+    // "Zh==" — 'h' has non-zero low 4 bits that a canonical "XX==" quad must
+    // leave clear (contrast the valid "Zg==").
+    assert base64_decode("Zh==") == "";
+}
+
+test "base64_decode: rejects non-canonical trailing bits (residue 2)" {
+    // "Zm9=" — '9' has non-zero low 2 bits that a canonical "XXX=" quad must
+    // leave clear (contrast the valid "Zm8=").
+    assert base64_decode("Zm9=") == "";
+}
+
+test "base64_decode: rejects pad in position 2 without position 3" {
+    assert base64_decode("Zg=A") == "";
+}
+
+test "base64_decode: rejects padding outside the final quad" {
+    assert base64_decode("Zg==Zm8=") == "";
 }
