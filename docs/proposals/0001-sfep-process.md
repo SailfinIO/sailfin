@@ -139,9 +139,13 @@ Draft ──▶ Accepted ──▶ Implemented
 | **Rejected** | Considered and declined. Kept for the record. |
 | **Superseded** | Replaced by a newer SFEP. Set `superseded-by`. |
 
-**Mapping to issue labels** (see `docs/conventions/issue-naming.md`):
-`needs-design` → Draft · `design-approved` → Accepted · Stage1-readiness met →
-Implemented.
+**Where the status lives** (see `docs/conventions/issue-naming.md`): the SFEP's
+`status:` front-matter is authoritative, mirrored by the implementing Linear
+issue's native status — not GitHub labels. The `design-approved` workflow-state
+label is retired, and `needs-design` survives only as a public GitHub
+external-intake hint (never applied to a Linear-native `SFN-NNN` issue). Loosely,
+the design maps `Draft` → ungroomed, `Accepted` → design gate passed, and
+`Implemented` → Stage1-readiness met.
 
 **The bar for `Implemented`** is the Stage1 Readiness Checklist in `CLAUDE.md`:
 parses → type/effect-checks → emits `.sfn-asm` → lowers to LLVM IR → has
@@ -200,8 +204,8 @@ to continue. The system records this honestly rather than hiding it:
   `; human review` or a name when a human meaningfully shaped or signed off on it.
 - **Provenance is tracked, not gated.** There is no required human "sponsor"
   field. Acceptance authority lives where it already does: PR review plus the
-  issue labels (`design-approved`). A human reviewing and approving the PR *is*
-  the human gate — we do not add a second one.
+  SFEP/Linear status advance to `Accepted`. A human reviewing and approving the
+  PR *is* the human gate — we do not add a second one.
 - The required sections in §6 are the real quality bar. They apply identically to
   human and agent drafts. A proposal is judged on whether it clears that bar, not
   on who or what wrote it.

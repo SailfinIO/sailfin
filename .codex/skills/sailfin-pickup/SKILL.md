@@ -18,12 +18,10 @@ Issue identifiers are accepted in two forms:
 
 With no explicit issue, prefer Linear. Query Sailfin (`SFN`) Linear issues in
 the native `Ready` status, then filter out any issue that is assigned to someone
-else, canceled, completed, or externally blocked. If Linear is unreachable, fall
-back to GitHub's public compatibility label:
-
-   ```bash
-   gh issue list --label "claude-ready" --state open --json number,title,labels,assignees,body --limit 50
-   ```
+else, canceled, completed, or externally blocked. Workflow state is
+Linear-native — there is no GitHub `claude-ready` label to fall back to (it is
+retired). If the Linear tools are unreachable, stop and report that rather than
+guessing a pick from a GitHub label.
 
 Rank remaining issues by:
 
@@ -58,14 +56,12 @@ For Linear-native pickup, claim Linear first:
 
 - set state to `In Progress`;
 - assign to `me` when the Linear tools support it;
-- do not add Linear status labels such as `blocked` or `in-progress`; Linear has
-  native statuses for that.
+- do not add GitHub workflow-state labels such as `blocked`, `in-progress`, or
+  `claude-ready` (all retired) — Linear's native status is the single source of
+  truth.
 
-If a GitHub mirror exists, update it best-effort too:
-
-```bash
-gh issue edit <N> --add-label "in-progress" --remove-label "claude-ready"
-```
+A GitHub mirror (external-intake issue) needs no status-label sync: its state is
+derived from the Linear issue you have already advanced.
 
 Create the branch as `codex/SFN-123-<slug>` for Linear-native pickup, or
 `codex/<N>-<slug>` for GitHub-only fallback.
