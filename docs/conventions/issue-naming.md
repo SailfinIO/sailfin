@@ -84,11 +84,19 @@ bug.
 
 ### 1. Sub-task (the default — what most issues and PRs are)
 
-Conventional Commit form so the merged PR title lands as a clean commit:
+Conventional Commit form so the merged PR title lands as a clean commit,
+with the Linear issue id appended so `SFN-NNN` is visible at a glance in the
+PR list and the squashed commit:
 
 ```
-<type>(<scope>): <imperative verb phrase>
+<type>(<scope>): <imperative verb phrase> (SFN-NNN)
 ```
+
+The trailing `(SFN-NNN)` is required on any PR that completes a Linear leaf
+(omit it only for a PR with no backing issue). It keeps the Conventional
+Commit prefix parseable while surfacing the issue id in the title; the body
+still carries `Fixes SFN-NNN` as the machine-readable link that drives Linear
+workflow state.
 
 | Field      | Allowed values |
 |------------|----------------|
@@ -99,12 +107,12 @@ Conventional Commit form so the merged PR title lands as a clean commit:
 **Examples:**
 
 ```
-feat(typecheck): register extern fn declarations
-fix(lowering): emit valid LLVM for empty struct literal
-perf(ci): cache compiler binary across CI jobs
-refactor(emit): split emit_native_ops into ops/ submodule
-docs(spec): document Result and ? operator semantics
-chore(build): delete prior scripts/build.sh now retired post --work-dir cutover
+feat(typecheck): register extern fn declarations (SFN-412)
+fix(lowering): emit valid LLVM for empty struct literal (SFN-518)
+perf(ci): cache compiler binary across CI jobs (SFN-233)
+refactor(emit): split emit_native_ops into ops/ submodule (SFN-346)
+docs(spec): document Result and ? operator semantics (SFN-107)
+chore(build): delete prior scripts/build.sh now retired post --work-dir cutover (SFN-901)
 ```
 
 The `<type>` prefix and the `type:<type>` label MUST agree:
