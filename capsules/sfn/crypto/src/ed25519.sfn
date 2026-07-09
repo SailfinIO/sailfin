@@ -71,7 +71,10 @@ fn _ed_hex_to_bytes(hex: string, expect_len: int) -> int[] {
 // idiom). Returns `null` on allocation failure. Caller frees.
 fn _ed_bytes_to_native(bytes: int[]) -> * u8 {
     if bytes.length == 0 {
+        // OpenSSL reads no bytes here (tbslen is 0), but zero the byte so
+        // the helper never hands back uninitialized memory.
         let empty_buf: * u8 = malloc(1 as usize);
+        if empty_buf as i64 != 0 { memset(empty_buf, 0, 1 as usize); }
         return empty_buf;
     }
     let buf: * u8 = malloc(bytes.length as usize);
@@ -157,7 +160,7 @@ fn ed25519_verify(public_key_hex: string, message: int[], signature_hex: string)
 }
 
 // Convenience for a NUL-free text message (e.g. a SHA256SUMS manifest).
-// Hashes the string's raw bytes. Delegates to ed25519_verify.
+// Verifies over the string's raw bytes. Delegates to ed25519_verify.
 fn ed25519_verify_utf8(public_key_hex: string, message: string, signature_hex: string) -> bool {
     return ed25519_verify(public_key_hex, _ed_string_to_bytes(message), signature_hex);
 }
