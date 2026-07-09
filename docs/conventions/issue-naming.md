@@ -26,17 +26,19 @@ status field already carries grooming/design state.
   GitHub intake (external contributors only)
   ┌──────────────────────────────────────────┐
   │ human files issue → mirrors into Linear;  │
-  │ optional needs-grooming / needs-design    │
-  │ hint only sets the initial status         │
+  │ the initial Linear status comes from the  │
+  │ intake signal (see § Status semantics):   │
+  │ no hint → Triage, a needs-grooming /      │
+  │ needs-design hint → Backlog               │
   └───────────────────────┬──────────────────┘
-                          ▼
+                          ▼ (no hint)
   Linear status (source of truth)
         ┌──────────┐   /groom shapes scope,
         │  Triage  │   criteria, estimate, type
         └────┬─────┘
              ▼
-        ┌──────────┐   groomed but not yet
-        │ Backlog  │   scheduled / design pending
+        ┌──────────┐   groomed but not yet scheduled / design pending;
+        │ Backlog  │   ◄── intake with a grooming/design hint enters here
         └────┬─────┘
              ▼
         ┌──────────┐  ── eligible for /pickup
