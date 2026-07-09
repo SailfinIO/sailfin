@@ -26,6 +26,7 @@
 import { find } from "sfn/strings";
 
 import { render_runtime_helper_declarations } from "../../src/llvm/rendering";
+import { TypeContext } from "../../src/llvm/types";
 import { NativeFunction } from "../../src/native_ir";
 
 // The effect-metadata-only targets that remain after the #1876 client
@@ -33,6 +34,17 @@ import { NativeFunction } from "../../src/native_ir";
 // `websocket.connect`/`.send`/`.close` ops are no longer metadata-only).
 fn _metadata_only_targets() -> string[] {
     return ["serve", "websocket.serve"];
+}
+
+// Empty type context: the metadata-only rows carry no prelude-mirror
+// reconciliation (#1779), so no struct/enum tables are consulted.
+fn _empty_context() -> TypeContext {
+    return TypeContext {
+        structs: [],
+        enums: [],
+        interfaces: [],
+        vtables: []
+    };
 }
 
 // True if any emitted line contains `needle` as a substring.
@@ -54,7 +66,7 @@ test "metadata-only rows (#1631): sentinel targets emit no declare for the unbri
     // assertions at unit speed instead of as a link failure.
     let no_locals: NativeFunction[] = [];
     let no_imports: NativeFunction[] = [];
-    let lines = render_runtime_helper_declarations(_metadata_only_targets(), no_locals, no_imports);
+    let lines = render_runtime_helper_declarations(_metadata_only_targets(), no_locals, no_imports, _empty_context());
 
     assert ! _any_line_contains(lines, "sfn_serve_unbridged");
     assert ! _any_line_contains(lines, "sfn_websocket_unbridged");
@@ -70,7 +82,7 @@ test "metadata-only rows (#1631): the real serve_start row still declares (skip 
     // metadata-only target, not a `sfn_serve` prefix.
     let no_locals: NativeFunction[] = [];
     let no_imports: NativeFunction[] = [];
-    let lines = render_runtime_helper_declarations(["serve_start"], no_locals, no_imports);
+    let lines = render_runtime_helper_declarations(["serve_start"], no_locals, no_imports, _empty_context());
 
     assert _any_line_contains(lines, "@sfn_serve(");
     assert ! _any_line_contains(lines, "sfn_serve_unbridged");

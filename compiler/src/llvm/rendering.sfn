@@ -102,7 +102,99 @@ fn render_trait_metadata_comments(metadata: TraitMetadata) -> string[] {
 // =============================================================================
 // Runtime Helper Declarations
 // =============================================================================
-fn render_runtime_helper_declarations(used_targets: string[], local_functions: NativeFunction[], imported_functions: NativeFunction[]) -> string[] {
+// #1779 (SFEP-0035 §3.1): locate an imported prelude function by its sanitized
+// LLVM symbol so a `target == symbol` mirror registry row can be reconciled
+// against that function's real lowered signature before the declare loop defers
+// to the imported declare.
+fn _find_imported_fn_by_symbol(imported_functions: NativeFunction[], symbol: string) -> NativeFunction? {
+    let mut index: int = 0;
+    loop {
+        if index >= imported_functions.length { break; }
+        if sanitize_symbol(imported_functions[index].name) == symbol {
+            return imported_functions[index];
+        }
+        index += 1;
+    }
+    return null;
+}
+
+// #1779 (SFEP-0035 §3.1): the enumerated prelude-mirror targets — registry rows
+// whose `return_type`/`parameter_types` hand-transcribe a `runtime/prelude.sfn`
+// function (§2.1). Reconciliation is gated on this explicit set rather than the
+// structural `target == symbol && native_signature == null` predicate: the
+// libc-fallback rows `nanosleep` / `clock_gettime` also satisfy that structural
+// shape but are NOT prelude mirrors — their registry signature is the deliberate
+// opaque-pointee `i8*` form that differs by design from the `%Timespec*` import
+// they defer to, so reconciling them would false-positive. The follow-up that
+// derives these rows from the prelude and deletes the hand-typed set is #1780
+// (SFEP-0035 §3.2); when it lands, this list and the guard retire together.
+fn _is_prelude_mirror_target(target: string) -> boolean {
+    if target == "char_code" { return true; }
+    if target == "char_at" { return true; }
+    if target == "char_from_code" { return true; }
+    if target == "find_char" { return true; }
+    if target == "string_starts_with" { return true; }
+    if target == "record_eq_flag_message" { return true; }
+    return false;
+}
+
+// #1779 (SFEP-0035 §3.1): element-wise LLVM shape-string comparison for the
+// mirror-row reconciliation.
+fn _llvm_shape_lists_equal(registry: string[], prelude: string[]) -> boolean {
+    if registry.length != prelude.length { return false; }
+    let mut index: int = 0;
+    loop {
+        if index >= registry.length { break; }
+        if registry[index] != prelude[index] { return false; }
+        index += 1;
+    }
+    return true;
+}
+
+// #1779 (SFEP-0035 §3.1): reconcile one prelude-mirror registry row against the
+// prelude function's actual lowered signature. The imported function's
+// parameter/return types are lowered with the same `map_return_type` /
+// `collect_parameter_types` the imported-declare pass
+// (`render_imported_function_declarations`) applies, so the compared shapes are
+// exactly the ones that would be emitted. On drift the fatal names the target
+// and both shapes and `throw`s: the synthesized `@main` wrapper renders the
+// message to stderr and exits non-zero, so the *next* `make compile` fails at
+// the moment drift is introduced instead of silently mis-declaring the helper
+// on a fallback path (where the registry row, not the prelude declare, fires).
+fn _reconcile_mirror_row_or_fatal(descriptor: RuntimeHelperDescriptor, imported_functions: NativeFunction[], effective_symbol: string, context: TypeContext) -> void {
+    let imported = _find_imported_fn_by_symbol(imported_functions, effective_symbol);
+    if imported != null {
+        let prelude_return = map_return_type(context, imported.return_type);
+        let prelude_params = collect_parameter_types(context, imported.parameters, imported.name);
+        let mut _drift: boolean = false;
+        // Compare against `descriptor.return_type` (the caller-visible return),
+        // not `effective_helper_declare_return_type(descriptor)`: the six mirror
+        // rows all carry `c_abi_return_type == null`, so the two collapse to the
+        // same value. A mirror row that ever opts into the #638 post-call
+        // coercion (`c_abi_return_type` set) would need the effective return here.
+        if prelude_return != descriptor.return_type { _drift = true; }
+        if !_llvm_shape_lists_equal(descriptor.parameter_types, prelude_params) {
+            _drift = true;
+        }
+        if _drift {
+            let registry_shape = descriptor.return_type + "("
+                + join_with_separator(descriptor.parameter_types, ", ")
+                + ")";
+            let prelude_shape = prelude_return + "(" + join_with_separator(prelude_params, ", ")
+                + ")";
+            throw "runtime-helper mirror row '" + descriptor.target
+                + "' signature drift: registry declares "
+                + registry_shape
+                + " but prelude '"
+                + effective_symbol
+                + "' lowers to "
+                + prelude_shape
+                + "; update compiler/src/llvm/runtime_helpers.sfn or the prelude in lock-step";
+        }
+    }
+}
+
+fn render_runtime_helper_declarations(used_targets: string[], local_functions: NativeFunction[], imported_functions: NativeFunction[], context: TypeContext) -> string[] {
     if used_targets.length == 0 { return []; }
     // Build list of local function symbols to avoid declaring helpers that are defined locally
     let mut local_symbols: string[] = [];
@@ -306,6 +398,28 @@ fn render_runtime_helper_declarations(used_targets: string[], local_functions: N
             let mut _shadowed_by_import: boolean = false;
             if descriptor.target == descriptor.symbol {
                 if string_array_contains(imported_symbols, effective_symbol) {
+                    // #1779 (SFEP-0035 §3.1): before deferring to the prelude's
+                    // imported declare, reconcile the registry mirror row's
+                    // hand-typed shape against the prelude function's actual
+                    // lowered signature, so any future drift becomes a loud
+                    // build-time fatal on a normal build (where the prelude IS
+                    // imported) instead of a silent ABI mismatch on the fallback
+                    // paths (where the registry row, not the import, fires).
+                    //
+                    // Restricted to the enumerated prelude-mirror targets, NOT
+                    // every `target == symbol && native_signature == null` row:
+                    // the libc-fallback rows `nanosleep` / `clock_gettime` also
+                    // match that structural shape but are NOT prelude mirrors —
+                    // their registry signature is the deliberate opaque-pointee
+                    // form (`i8*`) that intentionally differs from the staged
+                    // `posix.sfn` `%Timespec*` import it defers to, so
+                    // reconciling them would be a false-positive drift. Those
+                    // rows keep the plain #633 suppression below; only the six
+                    // rows that genuinely mirror a `runtime/prelude.sfn`
+                    // definition are reconciled.
+                    if _is_prelude_mirror_target(descriptor.target) {
+                        _reconcile_mirror_row_or_fatal(descriptor, imported_functions, effective_symbol, context);
+                    }
                     _shadowed_by_import = true;
                 }
             }
