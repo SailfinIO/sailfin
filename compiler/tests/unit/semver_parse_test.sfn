@@ -93,3 +93,18 @@ test "semver_parse: rejects a leading zero in a core field" ![pure] {
     // A lone zero field is well-formed.
     assert expect_eq_bool(semver_is_valid(semver_parse("0.0.0")), true).ok;
 }
+
+test "semver_parse: rejects a leading zero in a numeric prerelease id (§9)" ![pure] {
+    assert expect_eq_bool(semver_is_valid(semver_parse("1.0.0-01")), false).ok;
+    assert expect_eq_bool(semver_is_valid(semver_parse("1.0.0-alpha.01")), false).ok;
+    // A lone zero identifier and an alphanumeric id with a zero are fine.
+    assert expect_eq_bool(semver_is_valid(semver_parse("1.0.0-0")), true).ok;
+    assert expect_eq_bool(semver_is_valid(semver_parse("1.0.0-0a")), true).ok;
+}
+
+test "semver_parse: rejects a core field too large for i64" ![pure] {
+    // > 18 digits cannot fit i64; reject rather than silently wrap.
+    assert expect_eq_bool(semver_is_valid(semver_parse("12345678901234567890.0.0")), false).ok;
+    // 18 digits is accepted.
+    assert expect_eq_bool(semver_is_valid(semver_parse("123456789012345678.0.0")), true).ok;
+}

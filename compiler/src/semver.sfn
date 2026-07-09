@@ -58,16 +58,19 @@ fn _all_digits(s: string) -> boolean ![pure] {
     return true;
 }
 
-// A valid core numeric field: all digits and, per semver §2, no leading zero
-// (a lone "0" is fine; "01" is not).
+// A valid core numeric field: all digits, no leading zero (semver §2 — a lone
+// "0" is fine, "01" is not), and short enough to fit i64 without `_parse_int`
+// overflow. Eighteen digits (< 10^18) always fit; real versions are a handful
+// of digits, so the cap only rejects absurd manifest/tag input.
 fn _valid_core_number(s: string) -> boolean ![pure] {
     if _all_digits(s) == false { return false; }
     if s.length > 1 && s[0] == "0" { return false; }
+    if s.length > 18 { return false; }
     return true;
 }
 
-// Parse a run of decimal digits; the caller guarantees `_all_digits(s)`.
-// Version fields are assumed bounded (they fit i64); no overflow guard.
+// Parse a run of decimal digits; callers guarantee the input is all digits and
+// length-bounded (`_valid_core_number`), so the accumulation cannot overflow.
 fn _parse_int(s: string) -> int ![pure] {
     let mut result = 0;
     let mut i = 0;
@@ -100,8 +103,10 @@ fn _split_dot(s: string) -> string[] ![pure] {
 }
 
 // A prerelease string is valid when it is a "."-separated list of non-empty
-// identifiers over [0-9A-Za-z-] (semver §9). Leading zeros in numeric
-// identifiers are tolerated rather than rejected.
+// identifiers over [0-9A-Za-z-] (semver §9). A purely numeric identifier must
+// not carry a leading zero ("01" is rejected; a lone "0" is fine) — this keeps
+// numeric ordering unambiguous and lets `_compare_identifier` order numeric
+// identifiers by length without an overflow-prone integer conversion.
 fn _valid_prerelease(pre: string) -> boolean ![pure] {
     let ids = _split_dot(pre);
     let mut i = 0;
@@ -115,6 +120,7 @@ fn _valid_prerelease(pre: string) -> boolean ![pure] {
             if _is_ident_char(id[j]) == false { return false; }
             j = j + 1;
         }
+        if _all_digits(id) && id.length > 1 && id[0] == "0" { return false; }
         i = i + 1;
     }
     return true;
@@ -166,14 +172,21 @@ fn semver_parse(text: string) -> SemVer ![pure] {
 // Compare a single prerelease identifier per semver §11: numeric identifiers
 // rank numerically and always below any alphanumeric identifier;
 // alphanumeric identifiers rank by ASCII lexical order.
+//
+// Numeric identifiers are ordered without integer conversion (so an
+// arbitrarily long identifier cannot overflow): `_valid_prerelease` forbids
+// leading zeros, so a longer digit string is always the larger number, and
+// equal-length digit strings order correctly under ASCII lexical comparison.
 fn _compare_identifier(x: string, y: string) -> int ![pure] {
     let xn = _all_digits(x);
     let yn = _all_digits(y);
     if xn && yn {
-        let xi = _parse_int(x);
-        let yi = _parse_int(y);
-        if xi < yi { return -1; }
-        if xi > yi { return 1; }
+        if x.length != y.length {
+            if x.length < y.length { return -1; }
+            return 1;
+        }
+        if x < y { return -1; }
+        if x > y { return 1; }
         return 0;
     }
     if xn { return -1; }
@@ -226,7 +239,11 @@ fn semver_compare(a: SemVer, b: SemVer) -> int ![pure] {
 }
 
 // Floor semantics: `running` satisfies the pin when it is at least the pin
-// (accepts `>=`, rejects `<`).
+// (accepts `>=`, rejects `<`). A malformed version on either side never
+// satisfies the floor — otherwise an invalid pin (sentinel `major == -1`)
+// would be silently accepted by any real running version.
 fn semver_satisfies_floor(running: SemVer, pin: SemVer) -> boolean ![pure] {
+    if semver_is_valid(running) == false { return false; }
+    if semver_is_valid(pin) == false { return false; }
     return semver_compare(running, pin) >= 0;
 }

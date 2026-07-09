@@ -72,3 +72,17 @@ test "semver_compare: equal prereleases and build metadata are order-neutral" ![
     assert expect_eq_int(_cmp("1.0.0+a", "1.0.0+b"), 0).ok;
     assert expect_eq_int(_cmp("1.0.0-alpha+x", "1.0.0-alpha+y"), 0).ok;
 }
+
+test "semver_compare: long numeric prerelease ids order without overflow" ![pure] {
+    // Identifiers far wider than i64 must still order by magnitude, since
+    // comparison is by length-then-lexical, not integer conversion.
+    assert expect_eq_int(_cmp("1.0.0-9999999999999999999", "1.0.0-10000000000000000000"), -1).ok;
+    assert expect_eq_int(_cmp("1.0.0-123", "1.0.0-45"), 1).ok;
+}
+
+test "semver_satisfies_floor: a malformed version never satisfies the floor" ![pure] {
+    // An unparseable pin must not be silently accepted by a real running version.
+    assert expect_eq_bool(semver_satisfies_floor(semver_parse("1.0.0"), semver_parse("not-a-version")), false).ok;
+    // A malformed running version fails too.
+    assert expect_eq_bool(semver_satisfies_floor(semver_parse("garbage"), semver_parse("0.8.0")), false).ok;
+}
