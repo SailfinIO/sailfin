@@ -191,6 +191,12 @@ CHECK_TEST_JOBS ?= $(TEST_JOBS)
 # `timeout-minutes: 180`. Override with `CHECK_TEST_TIMEOUT=<secs>`.
 CHECK_TEST_TIMEOUT ?= 1800
 
+# Env prefix applied to the `make check` full-suite `make test` invocations.
+# Kept as a single variable (not `export`) so both call sites can't diverge
+# while the wider cap stays scoped to `make check` — plain `make test` and
+# per-PR CI keep the runner's 300s default.
+CHECK_TEST_TIMEOUT_ENV = SAILFIN_TEST_TIMEOUT=$(CHECK_TEST_TIMEOUT)
+
 # Strict self-host gate (#1830). When SELFHOST_STRICT=1, `make check`
 # passes `--strict` to `sfn selfhost` so a stage2/stage3 fixed-point
 # mismatch is fatal (exit non-zero, no promotion) instead of the default
@@ -589,7 +595,7 @@ check-impl:
 	@# (escape hatch for bisect / pre-release double-check).
 ifeq ($(CHECK_FULL_PASS1),1)
 	@echo "[check] CHECK_FULL_PASS1=1: running full suite on first-pass binary (jobs=$(CHECK_TEST_JOBS), test-timeout=$(CHECK_TEST_TIMEOUT)s)..."
-	@SAILFIN_TEST_TIMEOUT=$(CHECK_TEST_TIMEOUT) $(MAKE) test NATIVE_BIN=build/native/sailfin TEST_BIN_CACHE_FLAGS=--no-test-cache TEST_JOBS=$(CHECK_TEST_JOBS)
+	@$(CHECK_TEST_TIMEOUT_ENV) $(MAKE) test NATIVE_BIN=build/native/sailfin TEST_BIN_CACHE_FLAGS=--no-test-cache TEST_JOBS=$(CHECK_TEST_JOBS)
 else
 	@echo "[check] pass1 smoke gate: hello-world + sfn/test capsule tests (jobs=$(CHECK_TEST_JOBS))..."
 	@t60=""; \
@@ -630,7 +636,7 @@ endif
 		--smoke-timeout 10 \
 		$(SELFHOST_STRICT_FLAG)
 	@echo "[check] running full test suite with seedcheck binary (cold backstop, jobs=$(CHECK_TEST_JOBS), test-timeout=$(CHECK_TEST_TIMEOUT)s)..."
-	@SAILFIN_TEST_TIMEOUT=$(CHECK_TEST_TIMEOUT) $(MAKE) test NATIVE_BIN=build/native/sailfin-seedcheck TEST_BIN_CACHE_FLAGS=--no-test-cache TEST_JOBS=$(CHECK_TEST_JOBS)
+	@$(CHECK_TEST_TIMEOUT_ENV) $(MAKE) test NATIVE_BIN=build/native/sailfin-seedcheck TEST_BIN_CACHE_FLAGS=--no-test-cache TEST_JOBS=$(CHECK_TEST_JOBS)
 
 # Fast PR-feedback gate: run `sfn check` against the compiler tree and
 # the runtime prelude. No codegen, no clang, just parse + typecheck +
