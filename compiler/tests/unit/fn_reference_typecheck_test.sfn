@@ -2,8 +2,7 @@
 // #1147): E0808 (a function used as a value in an unsupported position —
 // bare name, `& fn`, or `<fn> as <non-pointer>`) and E0809 (a function
 // address that has no single valid C-ABI code-pointer symbol: a generic
-// function, or a function whose signature is not C-ABI-compatible cast to a
-// *typed* function pointer `<fn> as * fn (...)`).
+// function).
 //
 // #1146 made `<fn> as * u8` lower to a real `bitcast @sym to i8*` for a
 // concrete function; #1147 rejects every other function-reference spelling
@@ -13,9 +12,9 @@
 // #1627 re-scoped the C-ABI guard: an erased `* u8` target is `void*` and
 // carries no calling convention, so producing it violates none — a concrete
 // (non-generic) function is accepted as `* u8` regardless of its signature
-// ABI (this is what lets the struct-ABI http trampoline self-host). The
-// C-ABI signature check applies ONLY to the *typed* `* fn (...)` target,
-// where the calling convention is named and must match. #1627 also
+// ABI (this is what lets the struct-ABI http trampoline self-host). Typed `* fn (...)` targets are Sailfin function pointers, so concrete
+// non-C-ABI handlers such as `fn(Request) -> Response` are accepted for
+// capsule APIs. #1627 also
 // structured every `<fn> as *T` cast into an `Expression.Cast`, so the
 // classification now lives in the walker's `Cast` arm (via
 // `classify_fn_cast`); only the residual `& fn` address-of (no prefix parse
@@ -56,7 +55,7 @@ test "fn-ref: bare function passed as an argument is E0808" ![io] {
     assert _count_code(source, "E0808") == 1;
 }
 
-// ── E0809: generic `as * u8`, or non-C-ABI cast to a *typed* `* fn (...)` ──
+// ── E0809: generic function address has no single concrete code symbol ──
 test "fn-ref: generic function `as * u8` is E0809" ![io] {
     let source = "fn gen<T>(x: T) -> T { return x; } fn main() { let f = gen as * u8; }";
     assert _count_code(source, "E0809") == 1;
@@ -73,11 +72,13 @@ test "fn-ref: non-C-ABI function `as * u8` is accepted (#1627 erased target)" ![
     assert _count_code(source, "E0809") == 0;
 }
 
-// #1627: the C-ABI guard DOES still fire on the *typed* `* fn (...)` target,
-// where the calling convention is named and must match the function's ABI.
-test "fn-ref: non-C-ABI function as typed `* fn (...)` is E0809" ![io] {
+// Typed `* fn (...)` targets are Sailfin function pointers. A concrete
+// non-C-ABI signature is accepted so typed capsule callbacks (for example
+// `sfn/http` handlers) can be passed without erasing them to `* u8`.
+test "fn-ref: non-C-ABI function as typed `* fn (...)` is accepted" ![io] {
     let source = "fn nc(x: number) -> number { return x; } fn main() { let f = nc as * fn (number) -> number; }";
-    assert _count_code(source, "E0809") == 1;
+    assert _count_code(source, "E0808") == 0;
+    assert _count_code(source, "E0809") == 0;
 }
 
 // ── Supported form stays clean (the #1146 happy path) ──

@@ -904,6 +904,51 @@ fn _serve_conn_worker_tls(ctx: * u8) -> * u8 {
     return null;
 }
 
+// `_serve_conn_worker_framed_tls(ctx)` — TLS twin of
+// `_serve_conn_worker_framed` for `sfn_serve_framed_tls`. It terminates
+// TLS exactly like `_serve_conn_worker_tls`, but sends the handler's returned
+// bytes verbatim so typed capsule `Response.status` and headers are preserved
+// over HTTPS. Handshake failures drop the raw fd without plaintext fallback.
+fn _serve_conn_worker_framed_tls(ctx: * u8) -> * u8 {
+    if ctx as i64 == 0 { return null; }
+    let base: i64 = ctx as i64;
+    let fd_slot: * i64 = base as * i64;
+    let handler_slot: * i64 = (base + 8) as * i64;
+    let ctx_slot: * i64 = (base + 16) as * i64;
+    let client_fd: i64 = atomic_load(fd_slot);
+    let handler: i64 = atomic_load(handler_slot);
+    let server_ctx: i64 = atomic_load(ctx_slot);
+    free(ctx);
+
+    _serve_set_socket_timeouts(client_fd as i32);
+
+    let ssl: * u8 = tls_accept_fd(server_ctx as * u8, client_fd as i32);
+    if ssl as i64 == 0 {
+        close(client_fd as i32);
+        return null;
+    }
+
+    let mut first: bool = true;
+    loop {
+        let request: * u8 = _serve_recv_request(client_fd as i32, ssl);
+        if request as i64 == 0 {
+            if first { _serve_send_raw(client_fd as i32, ssl, null); }
+            break;
+        }
+        first = false;
+        let keep_alive: bool = _serve_keep_alive(request);
+        let req_box: OwnedBuf = _serve_wrap_owned(request, strlen(request) as i64);
+        let response: OwnedBuf = sfn_serve_handler_dispatch(handler as * u8, req_box);
+        let sent_ok: bool = _serve_send_raw(client_fd as i32, ssl, response.ptr_addr as * u8);
+        _serve_free_owned(response);
+        if !keep_alive { break; }
+        if !sent_ok { break; }
+    }
+    tls_shutdown_free(ssl);
+    close(client_fd as i32);
+    return null;
+}
+
 // `_serve_bind_listen(port)` — open a stream socket bound to
 // `0.0.0.0:port` and start listening. Returns the listening fd, or
 // -1 on failure.
@@ -1048,6 +1093,60 @@ fn sfn_serve_framed(handler: * u8, port: i32) -> void ![net, io] {
         atomic_store(handler_slot, handler as i64);
 
         let worker: * fn (* u8) -> * u8 = _serve_conn_worker_framed as * fn (* u8) -> * u8;
+        let task: * u8 = sfn_task_create_detached(worker as i64, conn_ctx as i64);
+        if task as i64 == 0 {
+            free(conn_ctx);
+            close(client_fd);
+            continue;
+        }
+        sfn_taskqueue_enqueue(queue, task);
+    }
+
+    close(listen_fd);
+}
+
+// `sfn_serve_framed_tls(handler, port, cert_path, key_path)` — TLS twin of
+// `sfn_serve_framed`: build the server TLS context before binding (fail
+// closed on cert/key load errors), accept TLS connections, dispatch moved
+// `OwnedBuf` requests, and send the handler's FULL pre-framed HTTP/1.1
+// response verbatim over TLS. This is the runtime entry used by the typed
+// `sfn/http` `serve_tls` wrapper.
+fn sfn_serve_framed_tls(handler: * u8, port: i32, cert_path: * u8, key_path: * u8) -> void ![net, io] {
+    let server_ctx: * u8 = tls_server_ctx(cert_path, key_path);
+    if server_ctx as i64 == 0 { return; }
+
+    let listen_fd: i32 = _serve_bind_listen(port as i64);
+    if listen_fd < 0 { return; }
+
+    let queue: * u8 = sfn_taskqueue_create(256);
+    if queue as i64 == 0 {
+        close(listen_fd);
+        return;
+    }
+    let scheduler: * u8 = sfn_scheduler_create(queue);
+    if scheduler as i64 == 0 {
+        sfn_taskqueue_destroy(queue);
+        close(listen_fd);
+        return;
+    }
+
+    loop {
+        let client_fd: i32 = accept(listen_fd, null, null);
+        if client_fd < 0 { break; }
+
+        let conn_ctx: * u8 = malloc(24 as usize);
+        if conn_ctx as i64 == 0 {
+            close(client_fd);
+            continue;
+        }
+        let fd_slot: * i64 = conn_ctx as * i64;
+        let handler_slot: * i64 = (conn_ctx as i64 + 8) as * i64;
+        let ctx_slot: * i64 = (conn_ctx as i64 + 16) as * i64;
+        atomic_store(fd_slot, client_fd as i64);
+        atomic_store(handler_slot, handler as i64);
+        atomic_store(ctx_slot, server_ctx as i64);
+
+        let worker: * fn (* u8) -> * u8 = _serve_conn_worker_framed_tls as * fn (* u8) -> * u8;
         let task: * u8 = sfn_task_create_detached(worker as i64, conn_ctx as i64);
         if task as i64 == 0 {
             free(conn_ctx);
