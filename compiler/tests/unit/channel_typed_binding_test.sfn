@@ -106,3 +106,16 @@ test "channel send: an inner non-channel binding shadows the channel" ![io] {
     let source = "fn producer() { let ch: Channel<int> = channel(); let ch: int = 5; ch.send(\"x\"); }";
     assert ! _produces_diagnostic(source, "E0815");
 }
+
+test "channel send: a bool literal on a `Channel<int>` raises E0815" ![io] {
+    // The `BooleanLiteral` branch of `channel_send_value_kind` resolves `bool`,
+    // a certain mismatch against an `int` channel.
+    let source = "fn producer() { let ch: Channel<int> = channel(); ch.send(true); }";
+    assert _produces_diagnostic(source, "E0815");
+}
+
+test "channel send: a bool literal on a `Channel<bool>` type-checks" ![io] {
+    // The matching direction of the boolean branch — no mismatch, no E0815.
+    let source = "fn producer() { let ch: Channel<bool> = channel(); ch.send(false); }";
+    assert ! _produces_diagnostic(source, "E0815");
+}
