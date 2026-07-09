@@ -1,0 +1,110 @@
+// compiler/tests/unit/semver_parse_test.sfn
+// Parsing + validity coverage for compiler/src/semver.sfn (SFN-169 / SFEP-0046).
+import { expect_eq_bool, expect_eq_int, expect_eq_str } from "sfn/test";
+
+import { semver_is_valid, semver_parse } from "../../src/semver";
+
+test "semver_parse: plain release 1.2.3" ![pure] {
+    let v = semver_parse("1.2.3");
+    assert expect_eq_bool(semver_is_valid(v), true).ok;
+    assert expect_eq_int(v.major, 1).ok;
+    assert expect_eq_int(v.minor, 2).ok;
+    assert expect_eq_int(v.patch, 3).ok;
+    assert expect_eq_str(v.prerelease, "").ok;
+}
+
+test "semver_parse: leading v is tolerated" ![pure] {
+    let v = semver_parse("v1.2.3");
+    assert expect_eq_bool(semver_is_valid(v), true).ok;
+    assert expect_eq_int(v.major, 1).ok;
+    assert expect_eq_int(v.minor, 2).ok;
+    assert expect_eq_int(v.patch, 3).ok;
+    assert expect_eq_str(v.prerelease, "").ok;
+}
+
+test "semver_parse: prerelease alpha.2" ![pure] {
+    let v = semver_parse("0.8.0-alpha.2");
+    assert expect_eq_bool(semver_is_valid(v), true).ok;
+    assert expect_eq_int(v.major, 0).ok;
+    assert expect_eq_int(v.minor, 8).ok;
+    assert expect_eq_int(v.patch, 0).ok;
+    assert expect_eq_str(v.prerelease, "alpha.2").ok;
+}
+
+test "semver_parse: prerelease alpha.10" ![pure] {
+    let v = semver_parse("1.0.0-alpha.10");
+    assert expect_eq_bool(semver_is_valid(v), true).ok;
+    assert expect_eq_str(v.prerelease, "alpha.10").ok;
+}
+
+test "semver_parse: build metadata is ignored" ![pure] {
+    let v = semver_parse("1.0.0+abc");
+    assert expect_eq_bool(semver_is_valid(v), true).ok;
+    assert expect_eq_int(v.major, 1).ok;
+    assert expect_eq_int(v.minor, 0).ok;
+    assert expect_eq_int(v.patch, 0).ok;
+    assert expect_eq_str(v.prerelease, "").ok;
+}
+
+test "semver_parse: prerelease with trailing build metadata" ![pure] {
+    let v = semver_parse("1.0.0-alpha.1+build.5");
+    assert expect_eq_bool(semver_is_valid(v), true).ok;
+    assert expect_eq_str(v.prerelease, "alpha.1").ok;
+}
+
+test "semver_parse: rejects missing patch field" ![pure] {
+    let v = semver_parse("1.2");
+    assert expect_eq_bool(semver_is_valid(v), false).ok;
+}
+
+test "semver_parse: rejects extra core field" ![pure] {
+    let v = semver_parse("1.2.3.4");
+    assert expect_eq_bool(semver_is_valid(v), false).ok;
+}
+
+test "semver_parse: rejects non-numeric core field" ![pure] {
+    let v = semver_parse("1.x.0");
+    assert expect_eq_bool(semver_is_valid(v), false).ok;
+}
+
+test "semver_parse: rejects empty input" ![pure] {
+    let v = semver_parse("");
+    assert expect_eq_bool(semver_is_valid(v), false).ok;
+}
+
+test "semver_parse: rejects a bare leading v" ![pure] {
+    let v = semver_parse("v");
+    assert expect_eq_bool(semver_is_valid(v), false).ok;
+}
+
+test "semver_parse: rejects trailing dash with empty prerelease" ![pure] {
+    let v = semver_parse("1.0.0-");
+    assert expect_eq_bool(semver_is_valid(v), false).ok;
+}
+
+test "semver_parse: rejects empty prerelease identifier" ![pure] {
+    let v = semver_parse("1.0.0-alpha..1");
+    assert expect_eq_bool(semver_is_valid(v), false).ok;
+}
+
+test "semver_parse: rejects a leading zero in a core field" ![pure] {
+    assert expect_eq_bool(semver_is_valid(semver_parse("01.0.0")), false).ok;
+    assert expect_eq_bool(semver_is_valid(semver_parse("1.02.0")), false).ok;
+    // A lone zero field is well-formed.
+    assert expect_eq_bool(semver_is_valid(semver_parse("0.0.0")), true).ok;
+}
+
+test "semver_parse: rejects a leading zero in a numeric prerelease id (§9)" ![pure] {
+    assert expect_eq_bool(semver_is_valid(semver_parse("1.0.0-01")), false).ok;
+    assert expect_eq_bool(semver_is_valid(semver_parse("1.0.0-alpha.01")), false).ok;
+    // A lone zero identifier and an alphanumeric id with a zero are fine.
+    assert expect_eq_bool(semver_is_valid(semver_parse("1.0.0-0")), true).ok;
+    assert expect_eq_bool(semver_is_valid(semver_parse("1.0.0-0a")), true).ok;
+}
+
+test "semver_parse: rejects a core field too large for i64" ![pure] {
+    // > 18 digits cannot fit i64; reject rather than silently wrap.
+    assert expect_eq_bool(semver_is_valid(semver_parse("12345678901234567890.0.0")), false).ok;
+    // 18 digits is accepted.
+    assert expect_eq_bool(semver_is_valid(semver_parse("123456789012345678.0.0")), true).ok;
+}

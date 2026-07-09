@@ -1,0 +1,249 @@
+// compiler/src/semver.sfn
+// Semantic-version parsing and precedence ordering for the native toolchain.
+// The tree extracts version strings (version.sfn) but has no way to *order*
+// two versions or compare prereleases; the toolchain-pin feature (SFEP-0046)
+// needs exactly that. This module is the isolated, pure primitive: parse a
+// version, order two per semver §11, and answer a `>=` floor check. Build
+// metadata after `+` is parsed and ignored for ordering (semver §10).
+//
+// A malformed parse is reported by an invalid sentinel (`major == -1`, an
+// impossible value for a real version) via `semver_is_valid`, since the
+// return type is `SemVer`, not a `Result`. Range expressions (npm-style `^`
+// / `~`) are intentionally absent (SFEP-0046 §6); a range predicate can be
+// added later as a new function over `SemVer` without changing this schema.
+struct SemVer {
+    major: int;
+    minor: int;
+    patch: int;
+    prerelease: string;
+}
+
+fn _invalid() -> SemVer ![pure] {
+    return SemVer {
+        major: -1,
+        minor: -1,
+        patch: -1,
+        prerelease: ""
+    };
+}
+
+// True unless `v` came from a rejected/malformed parse.
+fn semver_is_valid(v: SemVer) -> boolean ![pure] { return v.major >= 0; }
+
+fn _is_digit(ch: string) -> boolean ![pure] {
+    if ch.length != 1 { return false; }
+    let c = char_code(ch);
+    return c >= 48 && c <= 57;
+}
+
+fn _is_ident_char(ch: string) -> boolean ![pure] {
+    if ch.length != 1 { return false; }
+    let c = char_code(ch);
+    if c >= 48 && c <= 57 { return true; }
+    if c >= 65 && c <= 90 { return true; }
+    if c >= 97 && c <= 122 { return true; }
+    if c == 45 { return true; }
+    return false;
+}
+
+// Non-empty and every character is a decimal digit.
+fn _all_digits(s: string) -> boolean ![pure] {
+    if s.length == 0 { return false; }
+    let mut i = 0;
+    loop {
+        if i >= s.length { break; }
+        if _is_digit(s[i]) == false { return false; }
+        i = i + 1;
+    }
+    return true;
+}
+
+// A valid core numeric field: all digits, no leading zero (semver §2 — a lone
+// "0" is fine, "01" is not), and short enough to fit i64 without `_parse_int`
+// overflow. Eighteen digits (< 10^18) always fit; real versions are a handful
+// of digits, so the cap only rejects absurd manifest/tag input.
+fn _valid_core_number(s: string) -> boolean ![pure] {
+    if _all_digits(s) == false { return false; }
+    if s.length > 1 && s[0] == "0" { return false; }
+    if s.length > 18 { return false; }
+    return true;
+}
+
+// Parse a run of decimal digits; callers guarantee the input is all digits and
+// length-bounded (`_valid_core_number`), so the accumulation cannot overflow.
+fn _parse_int(s: string) -> int ![pure] {
+    let mut result = 0;
+    let mut i = 0;
+    loop {
+        if i >= s.length { break; }
+        let digit = char_code(s[i]) - 48;
+        result = result * 10 + digit;
+        i = i + 1;
+    }
+    return result;
+}
+
+// Split on "." — the only separator semver uses in the core and prerelease.
+// Kept local so this module depends on nothing but the prelude, keeping the
+// self-host build graph minimal.
+fn _split_dot(s: string) -> string[] ![pure] {
+    let mut parts: string[] = [];
+    let mut start = 0;
+    let mut i = 0;
+    loop {
+        if i >= s.length { break; }
+        if s[i] == "." {
+            parts.push(substring(s, start, i));
+            start = i + 1;
+        }
+        i = i + 1;
+    }
+    parts.push(substring(s, start, s.length));
+    return parts;
+}
+
+// A prerelease string is valid when it is a "."-separated list of non-empty
+// identifiers over [0-9A-Za-z-] (semver §9). A purely numeric identifier must
+// not carry a leading zero ("01" is rejected; a lone "0" is fine) — this keeps
+// numeric ordering unambiguous and lets `_compare_identifier` order numeric
+// identifiers by length without an overflow-prone integer conversion.
+fn _valid_prerelease(pre: string) -> boolean ![pure] {
+    let ids = _split_dot(pre);
+    let mut i = 0;
+    loop {
+        if i >= ids.length { break; }
+        let id = ids[i];
+        if id.length == 0 { return false; }
+        let mut j = 0;
+        loop {
+            if j >= id.length { break; }
+            if _is_ident_char(id[j]) == false { return false; }
+            j = j + 1;
+        }
+        if _all_digits(id) && id.length > 1 && id[0] == "0" { return false; }
+        i = i + 1;
+    }
+    return true;
+}
+
+// Parse `[v]major.minor.patch[-prerelease][+build]`. Tolerant of a leading
+// `v`/`V`; build metadata is stripped and ignored. Returns an invalid
+// sentinel (see `semver_is_valid`) on any malformed input.
+fn semver_parse(text: string) -> SemVer ![pure] {
+    let mut s = text;
+
+    // Strip a single leading `v`/`V`.
+    if s.length > 0 {
+        let lead = s[0];
+        if lead == "v" || lead == "V" { s = substring(s, 1, s.length); }
+    }
+    if s.length == 0 { return _invalid(); }
+
+    // Drop build metadata after the first `+` (ignored for ordering).
+    let plus = find_char(s, "+", 0);
+    if plus >= 0 { s = substring(s, 0, plus); }
+    if s.length == 0 { return _invalid(); }
+
+    // Split core from prerelease at the first `-`.
+    let dash = find_char(s, "-", 0);
+    let mut core = s;
+    let mut pre = "";
+    if dash >= 0 {
+        core = substring(s, 0, dash);
+        pre = substring(s, dash + 1, s.length);
+        if _valid_prerelease(pre) == false { return _invalid(); }
+    }
+
+    // Core must be exactly three numeric fields.
+    let fields = _split_dot(core);
+    if fields.length != 3 { return _invalid(); }
+    if _valid_core_number(fields[0]) == false { return _invalid(); }
+    if _valid_core_number(fields[1]) == false { return _invalid(); }
+    if _valid_core_number(fields[2]) == false { return _invalid(); }
+
+    return SemVer {
+        major: _parse_int(fields[0]),
+        minor: _parse_int(fields[1]),
+        patch: _parse_int(fields[2]),
+        prerelease: pre
+    };
+}
+
+// Compare a single prerelease identifier per semver §11: numeric identifiers
+// rank numerically and always below any alphanumeric identifier;
+// alphanumeric identifiers rank by ASCII lexical order.
+//
+// Numeric identifiers are ordered without integer conversion (so an
+// arbitrarily long identifier cannot overflow): `_valid_prerelease` forbids
+// leading zeros, so a longer digit string is always the larger number, and
+// equal-length digit strings order correctly under ASCII lexical comparison.
+fn _compare_identifier(x: string, y: string) -> int ![pure] {
+    let xn = _all_digits(x);
+    let yn = _all_digits(y);
+    if xn && yn {
+        if x.length != y.length {
+            if x.length < y.length { return -1; }
+            return 1;
+        }
+        if x < y { return -1; }
+        if x > y { return 1; }
+        return 0;
+    }
+    if xn { return -1; }
+    if yn { return 1; }
+    if x < y { return -1; }
+    if x > y { return 1; }
+    return 0;
+}
+
+// Compare two prerelease strings. An empty prerelease is a release, which
+// outranks any prerelease of the same core. Otherwise identifiers are
+// compared left-to-right; a shorter run of otherwise-equal identifiers has
+// lower precedence.
+fn _compare_prerelease(pa: string, pb: string) -> int ![pure] {
+    if pa.length == 0 && pb.length == 0 { return 0; }
+    if pa.length == 0 { return 1; }
+    if pb.length == 0 { return -1; }
+
+    let ida = _split_dot(pa);
+    let idb = _split_dot(pb);
+    let mut i = 0;
+    loop {
+        let a_has = i < ida.length;
+        let b_has = i < idb.length;
+        if a_has == false && b_has == false { break; }
+        if a_has == false { return -1; }
+        if b_has == false { return 1; }
+        let cmp = _compare_identifier(ida[i], idb[i]);
+        if cmp != 0 { return cmp; }
+        i = i + 1;
+    }
+    return 0;
+}
+
+// -1 / 0 / +1 for a < b / a == b / a > b, semver §11 precedence.
+fn semver_compare(a: SemVer, b: SemVer) -> int ![pure] {
+    if a.major != b.major {
+        if a.major < b.major { return -1; }
+        return 1;
+    }
+    if a.minor != b.minor {
+        if a.minor < b.minor { return -1; }
+        return 1;
+    }
+    if a.patch != b.patch {
+        if a.patch < b.patch { return -1; }
+        return 1;
+    }
+    return _compare_prerelease(a.prerelease, b.prerelease);
+}
+
+// Floor semantics: `running` satisfies the pin when it is at least the pin
+// (accepts `>=`, rejects `<`). A malformed version on either side never
+// satisfies the floor — otherwise an invalid pin (sentinel `major == -1`)
+// would be silently accepted by any real running version.
+fn semver_satisfies_floor(running: SemVer, pin: SemVer) -> boolean ![pure] {
+    if semver_is_valid(running) == false { return false; }
+    if semver_is_valid(pin) == false { return false; }
+    return semver_compare(running, pin) >= 0;
+}

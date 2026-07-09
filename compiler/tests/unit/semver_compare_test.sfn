@@ -1,0 +1,88 @@
+// compiler/tests/unit/semver_compare_test.sfn
+// §11 precedence ordering + floor coverage for compiler/src/semver.sfn
+// (SFN-169 / SFEP-0046).
+import { expect_eq_bool, expect_eq_int } from "sfn/test";
+
+import { semver_compare, semver_parse, semver_satisfies_floor } from "../../src/semver";
+
+// Parse both sides and compare; every fixture below is a well-formed version.
+fn _cmp(a: string, b: string) -> int ![pure] {
+    return semver_compare(semver_parse(a), semver_parse(b));
+}
+
+test "semver_compare: numeric core fields order numerically" ![pure] {
+    assert expect_eq_int(_cmp("1.0.0", "2.0.0"), -1).ok;
+    assert expect_eq_int(_cmp("2.0.0", "1.0.0"), 1).ok;
+    assert expect_eq_int(_cmp("1.2.0", "1.10.0"), -1).ok;
+    assert expect_eq_int(_cmp("1.0.9", "1.0.10"), -1).ok;
+    assert expect_eq_int(_cmp("1.2.3", "1.2.3"), 0).ok;
+}
+
+test "semver_compare: release outranks prerelease of the same core" ![pure] {
+    assert expect_eq_int(_cmp("1.0.0", "1.0.0-alpha"), 1).ok;
+    assert expect_eq_int(_cmp("1.0.0-alpha", "1.0.0"), -1).ok;
+}
+
+test "semver_compare: numeric prerelease identifiers compare numerically" ![pure] {
+    assert expect_eq_int(_cmp("1.0.0-alpha.2", "1.0.0-alpha.10"), -1).ok;
+    assert expect_eq_int(_cmp("1.0.0-alpha.10", "1.0.0-alpha.2"), 1).ok;
+}
+
+test "semver_compare: alphanumeric prerelease identifiers compare lexically" ![pure] {
+    assert expect_eq_int(_cmp("1.0.0-alpha", "1.0.0-beta"), -1).ok;
+    assert expect_eq_int(_cmp("1.0.0-beta", "1.0.0-alpha"), 1).ok;
+}
+
+test "semver_compare: fewer identifiers rank lower when the prefix is equal" ![pure] {
+    assert expect_eq_int(_cmp("1.0.0-alpha", "1.0.0-alpha.1"), -1).ok;
+    assert expect_eq_int(_cmp("1.0.0-alpha.1", "1.0.0-alpha"), 1).ok;
+}
+
+test "semver_compare: numeric identifiers rank below alphanumeric" ![pure] {
+    assert expect_eq_int(_cmp("1.0.0-1", "1.0.0-alpha"), -1).ok;
+    assert expect_eq_int(_cmp("1.0.0-alpha", "1.0.0-1"), 1).ok;
+}
+
+test "semver_compare: canonical semver §11 precedence chain" ![pure] {
+    // 1.0.0-alpha < 1.0.0-alpha.1 < 1.0.0-alpha.beta < 1.0.0-beta
+    //   < 1.0.0-beta.2 < 1.0.0-beta.11 < 1.0.0-rc.1 < 1.0.0
+    assert expect_eq_int(_cmp("1.0.0-alpha", "1.0.0-alpha.1"), -1).ok;
+    assert expect_eq_int(_cmp("1.0.0-alpha.1", "1.0.0-alpha.beta"), -1).ok;
+    assert expect_eq_int(_cmp("1.0.0-alpha.beta", "1.0.0-beta"), -1).ok;
+    assert expect_eq_int(_cmp("1.0.0-beta", "1.0.0-beta.2"), -1).ok;
+    assert expect_eq_int(_cmp("1.0.0-beta.2", "1.0.0-beta.11"), -1).ok;
+    assert expect_eq_int(_cmp("1.0.0-beta.11", "1.0.0-rc.1"), -1).ok;
+    assert expect_eq_int(_cmp("1.0.0-rc.1", "1.0.0"), -1).ok;
+}
+
+test "semver_satisfies_floor: accepts greater-or-equal, rejects lesser" ![pure] {
+    assert expect_eq_bool(semver_satisfies_floor(semver_parse("0.8.0"), semver_parse("0.8.0")), true).ok;
+    assert expect_eq_bool(semver_satisfies_floor(semver_parse("0.9.0"), semver_parse("0.8.0")), true).ok;
+    assert expect_eq_bool(semver_satisfies_floor(semver_parse("1.0.0"), semver_parse("0.8.0")), true).ok;
+    assert expect_eq_bool(semver_satisfies_floor(semver_parse("0.7.0"), semver_parse("0.8.0")), false).ok;
+}
+
+test "semver_satisfies_floor: a prerelease does not satisfy a stable floor" ![pure] {
+    assert expect_eq_bool(semver_satisfies_floor(semver_parse("0.8.0-alpha.2"), semver_parse("0.8.0")), false).ok;
+}
+
+test "semver_compare: equal prereleases and build metadata are order-neutral" ![pure] {
+    assert expect_eq_int(_cmp("1.0.0-alpha.1", "1.0.0-alpha.1"), 0).ok;
+    // Build metadata (after '+') is ignored for ordering (semver §10).
+    assert expect_eq_int(_cmp("1.0.0+a", "1.0.0+b"), 0).ok;
+    assert expect_eq_int(_cmp("1.0.0-alpha+x", "1.0.0-alpha+y"), 0).ok;
+}
+
+test "semver_compare: long numeric prerelease ids order without overflow" ![pure] {
+    // Identifiers far wider than i64 must still order by magnitude, since
+    // comparison is by length-then-lexical, not integer conversion.
+    assert expect_eq_int(_cmp("1.0.0-9999999999999999999", "1.0.0-10000000000000000000"), -1).ok;
+    assert expect_eq_int(_cmp("1.0.0-123", "1.0.0-45"), 1).ok;
+}
+
+test "semver_satisfies_floor: a malformed version never satisfies the floor" ![pure] {
+    // An unparseable pin must not be silently accepted by a real running version.
+    assert expect_eq_bool(semver_satisfies_floor(semver_parse("1.0.0"), semver_parse("not-a-version")), false).ok;
+    // A malformed running version fails too.
+    assert expect_eq_bool(semver_satisfies_floor(semver_parse("garbage"), semver_parse("0.8.0")), false).ok;
+}
