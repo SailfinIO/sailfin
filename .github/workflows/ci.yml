@@ -868,10 +868,15 @@ jobs:
           seed_version: ${{ steps.seed.outputs.seed_version }}
           # Each leg runs only its shard; package only on the primary leg.
           shard: ${{ matrix.shard }}
-          # Per-file parallelism within the shard leg. Conservative 2 on the
-          # 3-vCPU/7GB macos-arm64 runner: Darwin has no RLIMIT_AS backstop
-          # (SFEP-0022), so keep headroom and confirm before raising.
-          shard_test_jobs: "2"
+          # Per-file parallelism within the shard leg, raised 2 -> 3 to
+          # match the 3-vCPU macos-arm64 runner: the macOS unit/e2e legs
+          # are the PR-CI critical path (24-32 min) and the prior
+          # conservative 2 left a core idle. Darwin has no RLIMIT_AS
+          # backstop, but the per-child emit fan-out is RAM-aware
+          # (SFEP-0022 governor) and the heavy-child working set is
+          # frontend-bound, not RSS-bound (#2010). Drop back to 2 if a
+          # shard leg OOMs on the 7GB runner.
+          shard_test_jobs: "3"
           package: ${{ matrix.primary && 'true' || 'false' }}
 
       # #1235 measurement (read-only): surface this shard leg's test-phase
