@@ -1391,6 +1391,25 @@ fn sfn_process_handle_read_bytes_stdout(handle_id: i64, n: i64) -> * u8 ![io] {
     return _framed_consume(gb, take, take);
 }
 
+// ── process.handle_stdout_at_eof ───────────────────────────────
+// True once the child's stdout is fully consumed: the fd was closed on
+// a prior EOF/error read (`stdout_fd == -1`) AND no read-ahead bytes
+// remain in the stash. The raw `handle_read_line_stdout` /
+// `handle_read_bytes_stdout` builtins collapse a genuine blank line and
+// end-of-stream to the same empty string; a `string?`-typed `sfn/os`
+// wrapper consults this to return `null` for EOF and `""` for a real
+// blank line. Reads only handle state — no syscall, so it never blocks.
+// A zero/invalid `handle_id` reports `true` (at-EOF), matching the raw
+// read builtins that treat a zero handle as an empty stream: a caller
+// framing until `null` then stops rather than spinning on a dead handle.
+fn sfn_process_handle_stdout_at_eof(handle_id: i64) -> bool ![io] {
+    if handle_id == 0 { return true; }
+    let h: * SailfinProcessHandle = handle_id as * SailfinProcessHandle;
+    let gb: * GrowBuf = ((h as i64) + 16) as * GrowBuf;
+    if h.stdout_fd < 0 && gb.len == 0 { return true; }
+    return false;
+}
+
 // ── process.handle_write_bytes ─────────────────────────────────
 // Write exactly `len` bytes of `data` to the child's stdin, resuming
 // short writes and EINTR. Unlike `handle_write` (which `strlen`s a

@@ -826,6 +826,13 @@ fn _rh_descriptors_05(descriptors_in: RuntimeHelperDescriptor[]) -> RuntimeHelpe
     descriptors = append_runtime_helper(descriptors, RuntimeHelperDescriptor {
         target: "process.handle_read_bytes_stdout", symbol: "sfn_process_handle_read_bytes_stdout", return_type: "i8*", parameter_types: ["i64", "i64"], effects: ["io"], native_signature: "sfn_process_handle_read_bytes_stdout", c_abi_return_type: null
     });
+    // SFN-153 (epic #1540 Track A, gap A1): EOF predicate for the framed
+    // stdout reads. The raw line/bytes builtins return `""` for both a
+    // genuine blank line and end-of-stream; this lets the `string?`-typed
+    // `sfn/os::handle_read_line_stdout` wrapper return `null` only at EOF.
+    descriptors = append_runtime_helper(descriptors, RuntimeHelperDescriptor {
+        target: "process.handle_stdout_at_eof", symbol: "sfn_process_handle_stdout_at_eof", return_type: "i1", parameter_types: ["i64"], effects: ["io"], native_signature: "sfn_process_handle_stdout_at_eof", c_abi_return_type: null
+    });
     return descriptors;
 }
 
