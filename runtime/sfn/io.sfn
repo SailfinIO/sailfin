@@ -140,11 +140,11 @@ let STDERR_FD: i32 = 2;
 // Owned, length-explicit byte buffer returned by `io.read_fd`. Layout MUST
 // match `runtime/sfn/memory/ownedbuf.sfn` (32 bytes, four i64 slots);
 // `arena_addr == 0` == libc-backed (`free`). Inlined here rather than
-// imported per the same #306 inline-surface discipline this file follows for
-// its externs — the isolated runtime-sfn emit resolves only the platform
-// symbols the seed pre-stages, and a cross-module struct-returning call would
-// hit the #1283 "cannot resolve return type" fatal; a local struct + literal
-// construction sidesteps it.
+// imported because the isolated runtime-sfn emit cannot resolve a
+// cross-module struct-returning call (#1283 "cannot resolve return type");
+// a local struct + literal construction sidesteps it, mirroring the
+// keep-the-surface-local approach this file already takes for its libc
+// externs.
 struct OwnedBuf {
     ptr_addr: i64;
     len: i64;
@@ -169,8 +169,9 @@ fn sfn_write_fd(fd: i32, buf: * u8, count: usize) -> i64 ![io] {
 // past the data (`buf[len] == 0`) so it doubles as a valid cstring for
 // text callers — `len` stays authoritative, so this costs nothing in
 // binary safety. `fd` arrives as Sailfin `int` (i64) and narrows to the
-// `read` `i32` ABI. Reclaim the buffer with `free(buf.ptr_addr as * u8)`
-// (or `owned_buf_free`) exactly once when `ptr_addr != 0`.
+// `read` `i32` ABI. The caller owns the returned buffer: free it exactly
+// once when its `ptr_addr` is non-zero — `owned_buf_free`, or
+// `free(ptr_addr as * u8)` on the returned `OwnedBuf`.
 fn sfn_read_fd(fd: i64, n: i64) -> OwnedBuf ![io] {
     let empty: OwnedBuf = OwnedBuf {
         ptr_addr: 0,
