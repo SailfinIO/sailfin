@@ -900,30 +900,34 @@ fn main() ![net, io] {
 }
 ```
 
-##### TLS termination (`serve` over HTTPS)
+#### `serve_tls(handler: * fn (Request) -> Response, port: int, cert_path: string, key_path: string) -> void ![net, io]`
 
-The runtime terminates inbound TLS in the accept loop (SFEP-0036, #1783): it wraps each accepted connection in a server-side handshake using a cert + key loaded once at startup, then runs the same recv → dispatch → send cycle over TLS. If the cert or key fails to load the server never binds — there is **no plaintext downgrade**.
+Start a blocking HTTP/1.1 server on `port`, terminate TLS with the PEM certificate and private key loaded from `cert_path` / `key_path`, and dispatch each request to the same typed `Request -> Response` handler shape as plaintext `serve`. Status codes and headers from the returned `Response` are serialized before the TLS worker writes the response. If the cert or key fails to load the server never binds — there is **no plaintext downgrade**.
 
-The typed capsule `serve` above is plaintext-only; the TLS entry is the runtime symbol `sfn_serve_tls`, which today is called by declaring it as an `extern fn` (no capsule wrapper yet). Its handler ABI is the raw moved-`OwnedBuf` form (`fn (OwnedBuf) -> OwnedBuf`), not the typed `fn (Request) -> Response`:
+```sfn
+import { serve_tls, Request, Response, response, not_found } from "sfn/http";
+
+fn handle(req: Request) -> Response {
+    if strings_equal(req.path, "/") { return response("Welcome to Sailfin over TLS!"); }
+    return not_found();
+}
+
+fn main() ![net, io] {
+    serve_tls(
+        handle as * fn (Request) -> Response,
+        8443,
+        "/etc/sailfin/cert.pem",
+        "/etc/sailfin/key.pem",
+    );
+}
+```
+
+##### Low-level TLS runtime entry
+
+The runtime also exposes `sfn_serve_tls(handler, port, cert, key)` for low-level callers that already speak the raw moved-`OwnedBuf` handler ABI. Prefer the typed capsule wrapper above for new code.
 
 ```sfn
 extern fn sfn_serve_tls(handler: * u8, port: i32, cert: * u8, key: * u8) -> void;
-
-struct OwnedBuf { ptr_addr: i64; len: i64; cap: i64; arena_addr: i64; }
-
-fn handle(req: OwnedBuf) -> OwnedBuf {
-    // ... build and return a pre-framed HTTP/1.1 response OwnedBuf ...
-}
-
-fn main() -> int ![net, io] {
-    sfn_serve_tls(
-        handle as * u8,
-        8443,
-        "/etc/sailfin/cert.pem" as * u8,
-        "/etc/sailfin/key.pem" as * u8,
-    );
-    return 0;
-}
 ```
 
 Out of scope for 1.0: mTLS / client-certificate request (the server terminates TLS but does not request client certs). Both the outbound `https://` client and this inbound path require OpenSSL on the link host — see the [OpenSSL build-host dependency runbook](https://github.com/SailfinIO/sailfin/blob/main/docs/runbooks/openssl-build-dependency.md).
@@ -1135,7 +1139,7 @@ v0 limit: the response to each `_send` call must carry a `Content-Length` header
 
 ### v0 limitations
 
-- **HTTP/1.1 only, blocking accept.** The typed capsule `serve` is plaintext; inbound TLS termination is available via the runtime `sfn_serve_tls` entry (see [TLS termination](#tls-termination-serve-over-https) above), enforced end-to-end (SFEP-0036) but without a typed capsule wrapper yet. Keep-alive IS honored: the server reuses a connection for back-to-back requests unless the client sends `Connection: close` (#1711). HTTP pipelining (multiple in-flight requests on one connection) remains out of scope.
+- **HTTP/1.1 only, blocking accept.** The typed capsule provides plaintext `serve` and TLS `serve_tls`; inbound TLS termination is enforced end-to-end (SFEP-0036) and fails closed on cert/key load errors. Keep-alive IS honored: the server reuses a connection for back-to-back requests unless the client sends `Connection: close` (#1711). HTTP pipelining (multiple in-flight requests on one connection) remains out of scope.
 - **`Content-Length` bodies only** — POST/PUT request bodies are drained via `Content-Length` (capped at 1 MiB; over-cap requests get a `500`), so `Request.body` is reliable. Chunked transfer-encoding is not decoded (post-1.0).
 - **`host` binding not enforced** — the server always binds `INADDR_ANY` regardless of `ServerConfig.host`.
 - **Per-request allocations are not freed** — a known leak; acceptable for short-lived or v0 servers but not production long-running processes.

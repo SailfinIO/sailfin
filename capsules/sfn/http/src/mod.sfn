@@ -30,7 +30,7 @@ export {
 } from "./wire";
 
 // ---- Server ----
-export { serve } from "./server";
+export { serve, serve_tls } from "./server";
 
 // Local bindings for the typed client (re-export above does not create
 // local scope): `fetch` returns a `Response` and parses it via the wire

@@ -2234,12 +2234,14 @@ fn _strip_outer_parens(text: string) -> string {
 // Classify a `<fn> as <target>` cast where `head` resolves to function `entry`.
 // E0808 = fn used as value (unsupported target); E0809 = fn address unsupported.
 //
-// E0809 (C-ABI enforcement) applies ONLY to the typed `* fn (...)` form, where
-// the calling convention is named and must match. An erased `* u8` target is
-// `void*` — conventionless — so producing it violates no convention (the
-// convention is enforced where the pointer is declared/consumed). This lets
-// concrete struct-ABI functions (e.g. `_sfn_http_trampoline as * u8`,
-// `fn(OwnedBuf)->OwnedBuf`) classify clean on `* u8` targets. (#1627 Part A.)
+// Function addresses are allowed for concrete functions when the target is
+// either erased (`* u8`) or a typed Sailfin function pointer (`* fn (...)`).
+// Only generic functions are rejected here because they have no single code
+// symbol. The call site that consumes the pointer owns ABI compatibility:
+// erased pointers may cross extern/runtime boundaries, while typed function
+// pointers are used by Sailfin capsule surfaces such as `sfn/http`
+// `serve_tls(handler: * fn (Request) -> Response, ...)` where the signature
+// intentionally is not C-ABI-compatible.
 fn classify_fn_cast(head: string, target_text: string, entry: SymbolEntry, span: SourceSpan?) -> Diagnostic[] {
     let target = trim_text(target_text);
     if starts_with(target, "*") {
@@ -2248,13 +2250,6 @@ fn classify_fn_cast(head: string, target_text: string, entry: SymbolEntry, span:
         if strings_equal(pointee, "u8") || is_typed_fn_ptr {
             if entry.is_generic {
                 return [make_fn_address_unsupported_diagnostic(head, "it is generic", span)];
-            }
-            // C-ABI enforcement applies only to the typed `* fn (...)` form —
-            // an erased `* u8` carries no calling convention.
-            if is_typed_fn_ptr {
-                if !entry.is_c_abi {
-                    return [make_fn_address_unsupported_diagnostic(head, "its signature is not C-ABI-compatible", span)];
-                }
             }
             return [];
         }
