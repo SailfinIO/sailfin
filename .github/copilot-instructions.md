@@ -140,6 +140,7 @@ Update documents in this order when behaviour changes:
 ## Commit & Pull Request Guidelines
 
 - Use Conventional Commit prefixes: `feat(compiler): …`, `fix(bootstrap): …`, etc.
+- PR titles append the Linear issue id: `feat(compiler): … (SFN-NNN)` so `SFN-NNN` is visible in the PR list (see `docs/conventions/issue-naming.md` § 1); the body still carries `Fixes SFN-NNN`.
 - Keep commits atomic; mention touched capsules; co-author doc changes in the same PR.
 - PRs must include: scope summary, verification commands (`make test`, targeted runs), and notes on doc updates.
 - Releases are manually triggered via `.github/workflows/release.yml` (pure bash) — use `fix:` or `feat:` prefixes in commit messages.
