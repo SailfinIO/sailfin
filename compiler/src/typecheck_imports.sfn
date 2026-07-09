@@ -20,7 +20,7 @@
 //   type-only) so any test or future consumer can pull it in without
 //   incurring the heavier native-IR parser graph. The `.sfn-asm`-text
 //   helper and the on-disk loader live alongside the eventual
-//   `cli_check`/resolver integration in A2.
+//   `check/engine`/resolver integration in A2.
 //
 // See docs/proposals/0004-check-architecture.md and
 // docs/proposals/0006-build-architecture.md (Stage B PR2) for the design

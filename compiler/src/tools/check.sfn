@@ -55,7 +55,7 @@ struct CheckResult {
     // shared `Diagnostic` struct stays out of the re-export GEP
     // hazard zone (see docs/rca/2026-04-18-reexport-diagnostic-gep.md
     // — every `Diagnostic` widening risks reintroducing that bug).
-    // `cli_check.sfn`'s `--json` path consumes this directly; the
+    // `check/engine.sfn`'s `--json` path consumes this directly; the
     // human renderer ignores it.
     producers: string[];
     rendered: string[];
@@ -395,7 +395,7 @@ fn summarize(results: CheckResult[]) -> CheckSummary {
 // imported symbols without a local definition (see
 // `docs/rca/2026-04-18-reexport-diagnostic-gep.md` and the
 // `_reject_reexport_violations` gate in `main.sfn`). Consumers
-// (`cli_check.sfn`, future tooling) import them directly from
+// (`check/engine.sfn`, future tooling) import them directly from
 // `compiler/src/diagnostics_render.sfn` — same source of truth as
 // the build-path gate in `effect_gate.sfn`.
 export {

@@ -411,7 +411,7 @@ fn sailfin_cli_main_v2(argv: string[]) -> int ![io, clock] {
     // tokens, so a bare `sfn check` (and every flag combination) parses ok
     // and dispatches to `check.run`, which reconstructs the legacy positional
     // slice and delegates to `handle_check_command` (the body stays in
-    // `cli_check.sfn`, reused verbatim — SFEP-0027 §3.4 command #5). A non-ok
+    // `check/engine.sfn`, reused verbatim — SFEP-0027 §3.4 command #5). A non-ok
     // parse that still descended into `check` (an unrecognized flag, or
     // `--help`) is a usage error (exit 2) — the parser owns flag validation.
     // The literal `2` mirrors the dispatches above (the `sfn/cli` `EXIT_*`

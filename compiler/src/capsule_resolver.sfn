@@ -2331,7 +2331,7 @@ fn _cr_capsule_spec_for_slug(slug: string, members: WorkspaceMember[]) -> string
 // once PER ENTRY — O(entries × closure) full-source scans through the
 // allocation-heavy `collect_relative_import_specs` state machine
 // (`_cr_byte_at` allocates a fresh 1-char string per byte). All of
-// that garbage lands in the process-global arena BEFORE `cli_check`'s
+// that garbage lands in the process-global arena BEFORE `check/engine`'s
 // Phase 5a loop mark, so the per-file rewind can never reclaim it:
 // measured ~25MB of dead arena per entry (~4.0GB across the warm
 // whole-tree check). The memo caches, per unique source path:
@@ -3337,7 +3337,7 @@ fn prepare_project_capsules(input_path: string, config: BuildCacheConfig, consum
 // them into `typecheck_diagnostics_with_imports`.
 //
 // `entry_paths` is a list of source files that share the same
-// project + workspace roots. Callers (e.g. `cli_check.sfn`) group
+// project + workspace roots. Callers (e.g. `check/engine.sfn`) group
 // `sfn check` arguments by `(discover_project_root,
 // discover_workspace_root)` and pass each group's file list as a
 // separate invocation, so a multi-path `sfn check pathA pathB` that
@@ -3457,7 +3457,7 @@ fn stage_capsule_imports_for_emit(entry_path: string, sailfin_exe: string, work_
 // `entry_paths` is a list of test source files that share the same
 // project + workspace roots. The CLI groups discovered tests by
 // `(discover_project_root, discover_workspace_root)` and calls this
-// once per group, mirroring the per-group resolution `cli_check.sfn`
+// once per group, mirroring the per-group resolution `check/engine.sfn`
 // already performs. Resolution work is amortized across every test
 // in the group; per-(group, capsule) staging + compilation runs at
 // most once.

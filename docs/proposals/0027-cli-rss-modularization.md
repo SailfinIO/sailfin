@@ -23,11 +23,11 @@ graduates-to: docs/status.md
 > `cli_main.sfn` = entry shims + `_usage`; `cli_commands*.sfn` deleted) see
 > `docs/status.md` "Toolchain" and the §7 Stage1 mapping below.
 >
-> **Two module-home follow-ups were deferred out of the Implemented end-state**
-> and are tracked as Phase D leaves (#1967, #1968) under epic #1671: folding the
+> **The two module-home follow-ups deferred out of the Implemented end-state**
+> have landed as Phase D leaves (#1967, #1968) under epic #1671: folding the
 > root `cli_main.sfn` entry shim into `cli/` (which also removes the
 > `cli_main ↔ cli/main` mutual import), and relocating the `check` engine out of
-> the root `cli_check.sfn` into a frontend module home. See §3.6 — they are
+> the root `cli_check.sfn` into `check/engine.sfn`. See §3.6 — they were
 > deliberate, non-blocking polish, not gaps in the RSS/migration outcome.
 
 > Supersedes SFEP-0009 (`0009-cli-modularization-epic.md`). 0009 was written
@@ -204,7 +204,7 @@ builds the relocated module from the old seed in the same self-host pass).
 `handle_lock_command`, `handle_config_command`, `handle_check_command`, plus
 `handle_publish_command`). As §3.3 migrates each command into
 `cli/commands/<name>.sfn`, the corresponding `handle_*` body moves with it (or
-is reused — `check` reuses `cli_check.sfn`). `cli_commands.sfn` is **emptied
+is reused — `check` now delegates to `check/engine.sfn`). `cli_commands.sfn` is **emptied
 and deleted in Phase C**; its RSS cost disappears rather than relocating.
 
 ### 3.3 Break the 937-line `sailfin_cli_main_legacy` (`cli_main.sfn:1918-2855`)
@@ -242,7 +242,7 @@ first**:
 | 2 | `lock` | thin; reuse `handle_lock_command`. |
 | 3 | `package` | reuse `handle_package_command`. |
 | 4 | `emit` | flag-heavy (`--timing`, `--module-name`, `-o`, `--attempts`, `--no-retry`, `--validate`, `--no-validate`, `--no-resolve-gate` — `cli_main.sfn:2001-2236`); maps cleanly onto `sfn/cli` typed flags. |
-| 5 | `check` | **reuse the `cli_check.sfn` body verbatim** (`handle_check_command(args, binary_dir)`); the migration is the `command_def()` + dispatch wiring, not a rewrite. |
+| 5 | `check` | **reuse the check engine body verbatim** (`handle_check_command(args, binary_dir)`); the migration is the `command_def()` + dispatch wiring, not a rewrite. The engine now lives in `check/engine.sfn`. |
 | 6 | `build` | **heavy** — pulls in the §3.1-extracted `build/` modules (link, runtime_objs, determinism, cache). |
 | 7 | `run` | **heavy** — shares the `build/` modules with `build`; `run` = build-then-exec. |
 
@@ -304,17 +304,14 @@ safe with no seed cut (§5 applies verbatim); the epic's Implemented status does
   imports a root `cli_main` module, while `fn main` / `native_cli_main` remain
   the unmangled ABI carve-outs the emitter's entry detection finds.
 
-- **`cli_check.sfn` stays at the src root (#1968).** §3.5 explicitly ruled the
+- **The `check` engine moved to `check/engine.sfn` (#1968).** §3.5 explicitly ruled the
   `check` engine out of scope ("stays; `check` reuses it verbatim") so the
-  command migration stayed mechanical. But `cli_check.sfn` is not a CLI-dispatch
-  module — it is the `check` *engine* (group resolution, diagnostic rendering,
-  `--json` envelope, import-interface loading), coupled to the typecheck
-  import-loader diamond rule. It belongs alongside the frontend/pass machinery
-  (a `check/` or `frontend/` home), parallel to how Phase A carved `build/`,
-  leaving `cli/commands/check.sfn` as the thin command. #1968 performs that
-  relocation.
+  command migration stayed mechanical. The follow-up relocation keeps group
+  resolution, diagnostic rendering, the `--json` envelope, and import-interface
+  loading alongside the frontend/pass machinery instead of the CLI command tree,
+  leaving `cli/commands/check.sfn` as the thin command.
 
-When #1967 and #1968 land, this section is the record of *why* the interim
+With #1967 and #1968 landed, this section is the record of *why* the interim
 homes were chosen; no status change is needed (the SFEP is already
 `Implemented` — these are polish, not completion criteria).
 
@@ -482,7 +479,7 @@ of `cli_main.sfn`; the Phase-A floor is ~1,409 lines while the
   compiler-safety.md` (8 GiB self-cap), `.claude/rules/no-bash-e2e.md`,
   `.claude/rules/formatting.md`.
 - **Current state (verified 2026-06-26):** `cli_main.sfn` 3,067 lines;
-  `cli_commands.sfn` 1,075; `cli_commands_utils.sfn` 713; `cli_check.sfn` 515;
+  `cli_commands.sfn` 1,075; `cli_commands_utils.sfn` 713; `check/engine.sfn` 515;
   `cli/main.sfn` 239; `cli/context.sfn` 96. `sailfin_cli_main_legacy`
   `cli_main.sfn:1918-2855` (937 lines). 8 migrated commands in
   `cli/commands/`; 7 unmigrated via legacy (`config`, `check`, `package`,

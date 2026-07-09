@@ -1778,7 +1778,7 @@ fn _format_assert_failure(test_path: string, failure: AssertFailure) -> string {
 // One distinct `(project_root, workspace_root)` resolution group for
 // the test runner. Every file in `entry_paths` shares those roots, so
 // `prepare_project_capsules_for_test` runs once per group with the
-// group's full file list as anchors. Mirrors `cli_check.sfn`'s
+// group's full file list as anchors. Mirrors `check/engine.sfn`'s
 // `CheckGroup`: per-group resolution avoids the multi-path workspace
 // bug where files past `files[0]` would otherwise inherit a
 // resolution computed from the wrong root, and amortises capsule
@@ -1806,7 +1806,7 @@ struct TestGroup {
 // Compute the resolution-group key for a test file path. Two files
 // share a group iff `discover_project_root` and
 // `discover_workspace_root` return the same value when walked from
-// each file's directory. Mirrors `cli_check.sfn:_check_group_key` —
+// each file's directory. Mirrors `check/engine.sfn:_check_group_key` —
 // kept in this module rather than lifted into a shared helper to keep
 // commit 4's blast radius bounded; consolidation is a follow-up.
 fn _test_group_key(file_path: string) -> string ![io] {
