@@ -5,8 +5,9 @@ the issue from it. See docs/conventions/linear-workflow.md.
 
 PR TITLE: Conventional Commit shape with the Linear issue id appended, e.g.
   feat(typecheck): register extern fn declarations (SFN-412)
-The trailing `(SFN-NNN)` is required so SFN-NNN is visible in the PR list and
-the squashed commit. Full spec: docs/conventions/issue-naming.md § 1.
+The trailing `(SFN-NNN)` is required on any PR completing a Linear leaf, so
+SFN-NNN is visible in the PR list and the squashed commit (omit it only for a
+PR with no backing issue). Full spec: docs/conventions/issue-naming.md § 1.
 -->
 
 ## Summary
