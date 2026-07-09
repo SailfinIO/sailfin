@@ -838,7 +838,21 @@ fn cache_store_artifact(root: string, key: CacheKey, kind: string, src_path: str
     let entry_dir = _cache_entry_dir(root, key);
     _ensure_dir_recursive_cmd(entry_dir);
     let dst = cache_artifact_path(root, key, kind);
-    return _cache_atomic_copy(src_path, dst);
+    let stored = _cache_atomic_copy(src_path, dst);
+    if stored {
+        // SFN-148: debug-gated emit ledger. A `.ll` store means a cache
+        // miss→emit just happened; recording the key digest lets a
+        // regression assert each dep module is emitted at most once per
+        // invocation (a duplicate digest == a stampede). Inert unless
+        // SAILFIN_EMIT_LEDGER is set, so real builds pay nothing.
+        if strings_equal(kind, "ll") {
+            let ledger = _get_env_cmd("SAILFIN_EMIT_LEDGER");
+            if ledger.length > 0 {
+                fs.appendFile(ledger, key.digest + "\n");
+            }
+        }
+    }
+    return stored;
 }
 
 // ----------------------------------------------------------------

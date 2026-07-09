@@ -703,6 +703,10 @@ fn run(matches: Matches, ctx: CliContext) -> int ![io, clock] {
         let mut sf_tb_misses: int = 0;
         let mut overall_rc: int = 0;
         if jobs > 1 {
+            // SFN-148: warm the dep-closure module cache once before the
+            // pool fans out, so the cold-start wave cache-hits instead of
+            // each child re-emitting the shared closure.
+            _prewarm_test_dep_closures(test_files, binary_dir);
             // #1236: bounded worker pool. A sliding window keeps at
             // most `jobs` children live: the launch loop tops the
             // window up via `process.spawn_with_env`, then the parent
@@ -1878,6 +1882,63 @@ fn _test_resolver_consumer_for_group(file_path: string) -> ResolverConsumer ![io
         walk_project_src: false,
         include_host_as_dep: true
     };
+}
+
+// SFN-148: pre-warm the shared module `.ll` cache once per invocation.
+// The parallel worker pool otherwise cold-starts a cache stampede —
+// every child in the first wave re-emits the same dep closure before any
+// cache write lands. Resolving + compiling the union closure here (per
+// resolver group) makes every child cache-hit. Best-effort: a warm
+// failure logs and returns; children then compile per file as before.
+fn _prewarm_test_dep_closures(test_files: string[], binary_dir: string) -> void ![io] {
+    // Partition into resolver groups exactly as the leaf path does
+    // (group key = capsule/project the file resolves under), so a
+    // multi-project invocation warms each project's closure separately.
+    let mut group_keys: string[] = [];
+    let mut group_files: string[][] = [];
+    let mut i: int = 0;
+    loop {
+        if i >= test_files.length { break; }
+        let key = _test_group_key(test_files[i]);
+        // find-or-create the group bucket
+        let mut gi: int = 0;
+        let mut found: int = -1;
+        loop {
+            if gi >= group_keys.length { break; }
+            if strings_equal(group_keys[gi], key) {
+                found = gi;
+                break;
+            }
+            gi += 1;
+        }
+        if found < 0 {
+            group_keys.push(key);
+            let empty: string[] = [];
+            group_files.push(empty);
+            found = group_keys.length - 1;
+        }
+        group_files[found].push(test_files[i]);
+        i += 1;
+    }
+    let mut g: int = 0;
+    loop {
+        if g >= group_files.length { break; }
+        let files = group_files[g];
+        if files.length > 0 {
+            let consumer = _test_resolver_consumer_for_group(files[0]);
+            // Trailing args MUST be exactly ("", "", binary_dir) —
+            // byte-identical to the child call site (currently
+            // test.sfn line ~1028). The module cache key folds
+            // `effective_exe`, which is derived from these args; any
+            // deviation derives a different key and children miss the
+            // warm entries.
+            let res = prepare_project_capsules_for_test(files, consumer, "", "", binary_dir);
+            if res.staging_failed {
+                print.err("[test] warning: dep-closure pre-warm failed for a group (children will compile per file)");
+            }
+        }
+        g += 1;
+    }
 }
 
 fn _find_test_group(groups: TestGroup[], key: string) -> int {

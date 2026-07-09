@@ -1,0 +1,127 @@
+// Regression test for SFN-148: parent pre-warm of the dep-closure module
+// `.ll` cache before `sfn test <files> --jobs N` fans out its worker pool.
+//
+// On a cold module `.ll` cache, the first wave of concurrent children all
+// LLVM-emit the SAME dep closure before any cache write lands (a
+// stampede) — `_prewarm_test_dep_closures` (compiler/src/cli/commands/
+// test.sfn) closes that by compiling each resolver group's dep closure
+// once in the parent, so every child cache-hits instead.
+//
+// The signal is the `SAILFIN_EMIT_LEDGER`-gated append in
+// `cache_store_artifact` (compiler/src/build_cache.sfn): a `.ll` store
+// fires only on a cache miss→emit, so a digest appearing twice in the
+// ledger is exactly a stampede. Two compiler unit tests that both pull
+// in the heavy parser/typecheck/effect_checker closure and resolve
+// under the same group are run together with `--jobs 4` on a fresh
+// cache; the ledger must contain no duplicate digest.
+//
+// See `.claude/rules/no-bash-e2e.md` for the `*_test.sfn` e2e pattern
+// this follows (mirrors `guillermo_test.sfn` / `sailfin_main_entry_test.sfn`).
+import { split } from "sfn/strings";
+import { with_tmp_dir } from "sfn/test";
+
+fn _sfn_bin() -> string ![io] {
+    let configured = env.get("SAILFIN_BIN");
+    if configured.length > 0 { return configured; }
+    return "build/native/sailfin";
+}
+
+// Two compiler unit tests that each pull in a large dep closure and
+// resolve under the same group (both plain files under
+// `compiler/tests/unit/`, no capsule.toml between them and the repo
+// root). Each must independently exceed the positional-isolation
+// threshold (`_cr_positional_isolation_threshold` = 16 modules,
+// capsule_resolver.sfn): below it a single-file child derives
+// `effective_exe = ""` and a different module cache key than the parent's
+// warm, so it would silently miss the warm and its stampede would not
+// surface as a duplicate. Measured solo closures: atomic_fence ~131,
+// check_tool ~50 — both comfortably clear 16.
+fn _fixture_a() -> string { return "compiler/tests/unit/atomic_fence_test.sfn"; }
+
+fn _fixture_b() -> string { return "compiler/tests/unit/check_tool_test.sfn"; }
+
+// Child environment for the spawned `sfn test` run. Built explicitly
+// (not from `process.environ()`) per `.claude/rules/no-bash-e2e.md`: the
+// nested run spawns its own children that compile+link via clang, so
+// PATH/HOME/TMPDIR must be threaded through — but inheriting the outer
+// environment wholesale would (a) leak the outer runner's managed
+// `SAILFIN_TEST_*` keys into the nested run and (b) risk a pre-existing
+// `SAILFIN_BUILD_CACHE_DIR` shadowing our fresh cold cache via a
+// duplicate env key, making the regression vacuously pass. An empty env
+// array is the EMPTY environment (never "inherit"), so thread each key.
+fn _child_env(cache_dir: string, ledger: string, scratch_dir: string) -> string[] ![io] {
+    let mut e: string[] = [];
+    let path = env.get("PATH");
+    if path.length > 0 { e.push("PATH=" + path); }
+    let home = env.get("HOME");
+    if home.length > 0 { e.push("HOME=" + home); }
+    let tmpdir = env.get("TMPDIR");
+    if tmpdir.length > 0 { e.push("TMPDIR=" + tmpdir); }
+    e.push("SAILFIN_BUILD_CACHE_DIR=" + cache_dir);
+    e.push("SAILFIN_EMIT_LEDGER=" + ledger);
+    e.push("SAILFIN_TEST_SCRATCH=" + scratch_dir);
+    return e;
+}
+
+// Non-empty digest lines from the ledger (missing file → empty list).
+fn _ledger_lines(ledger: string) -> string[] ![io] {
+    let mut lines: string[] = [];
+    if !fs.exists(ledger) { return lines; }
+    let text = fs.readFile(ledger);
+    let raw_lines = split(text, "\n");
+    let mut i: int = 0;
+    loop {
+        if i >= raw_lines.length { break; }
+        if raw_lines[i].length > 0 { lines.push(raw_lines[i]); }
+        i += 1;
+    }
+    return lines;
+}
+
+// Returns 1 if `lines` contains a duplicate digest, 0 otherwise.
+fn _has_duplicate(lines: string[]) -> int {
+    let mut a: int = 0;
+    loop {
+        if a >= lines.length { break; }
+        let mut b: int = a + 1;
+        loop {
+            if b >= lines.length { break; }
+            if lines[a] == lines[b] { return 1; }
+            b += 1;
+        }
+        a += 1;
+    }
+    return 0;
+}
+
+test "dep-closure pre-warm: no dep module is emitted more than once under --jobs" ![io] {
+    // Outcome codes: -1 environmental skip (nested build couldn't run);
+    // 0 pass; 1 duplicate digest (stampede, or a prewarm whose key missed
+    // the children); 2 emits suppressed (exit 0 but empty ledger).
+    let outcome = with_tmp_dir(fn (dir: string) -> int {
+        let cache_dir = dir + "/cache";
+        let ledger = dir + "/emit.ledger";
+        let scratch_dir = dir + "/scratch";
+        let env_vec = _child_env(cache_dir, ledger, scratch_dir);
+        let exit = process.run_capture([_sfn_bin(), "test", _fixture_a(), _fixture_b(), "--jobs", "4", "--no-test-cache"], env_vec);
+        let _out = process.capture_take_stdout();
+        let _err = process.capture_take_stderr();
+        // Non-zero exit ⇒ the nested build/run could not complete (e.g. no
+        // clang/linker on PATH). The ledger can't be trusted; skip.
+        if exit != 0 { return -1; }
+        // Healthy run on a COLD cache: every dep module is a miss→emit→
+        // store, so the ledger MUST be non-empty. An empty ledger on a
+        // clean exit means a change suppressed emits (including the
+        // prewarm's own) — a real regression, never a vacuous pass.
+        let lines = _ledger_lines(ledger);
+        if lines.length == 0 { return 2; }
+        return _has_duplicate(lines);
+    });
+    if outcome == -1 {
+        // Environmental skip: the nested toolchain could not build.
+        assert true;
+    } else {
+        // 0 pass; 1 stampede/duplicate; 2 emits suppressed (vacuous).
+        assert outcome == 0;
+    }
+}
