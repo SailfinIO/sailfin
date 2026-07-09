@@ -67,7 +67,7 @@ The next number is `max + 1`. Add a row in the same PR that introduces an SFEP.
 | [0042](./0042-nested-function-declarations.md) | Nested / Local Function Declarations (non-capturing static `fn` items) | Accepted | language |
 | [0043](./0043-phase-scoped-arena-reclamation.md) | Phase-scoped arena reclamation to reduce per-module peak RSS | Implemented | runtime |
 | [0044](./0044-test-runner-invocation-cache.md) | Invocation-scoped runtime identity + in-process sha256 for the test runner | Implemented | tooling |
-| [0045](./0045-shared-frontend-test-runner.md) | Shared-frontend test runner — parent compiles, children only execute | Accepted | tooling |
+| [0045](./0045-shared-frontend-test-runner.md) | Shared-frontend test runner — parent compiles, children only execute | Draft | tooling |
 
 ## Drafts under review (numbers assigned at merge)
 
