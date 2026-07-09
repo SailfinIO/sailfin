@@ -15,40 +15,49 @@ Cycle, blockers, and assignee.
 
 ## Lifecycle (Linear state machine)
 
+Workflow state is **Linear-native** — every node below is a Linear *status*, not
+a GitHub label. GitHub is only an intake surface: an external-contributor issue
+mirrors into Linear and its optional `needs-grooming` / `needs-design` **intake
+hints** (see § *Status semantics (GitHub intake → Linear)*) just pick the initial
+status. Those hints are never applied to a Linear-native `SFN-NNN` issue — the
+status field already carries grooming/design state.
+
 ```
-                                       ┌────────────────┐
-                                  ┌────►│ needs-grooming │
-                                  │     │ (placeholder)  │
-                                  │     └────────┬───────┘
-              human files issue ──┘              │  fill scope/criteria
-                                                 ▼
-                                       ┌────────────────┐
-                              ┌───────►│  needs-design  │◄──── grooming agent
-                              │        │  (architect    │
-                              │        │   queue)       │
-                              │        └────────┬───────┘
-                              │                 │
-                              │  needs-discussion (parked, awaits human)
-                              │                 │
-                              │                 ▼
-                              │        ┌────────────────┐
-                              │        │     Ready      │  ── eligible for /pickup
-                              │        └────────┬───────┘
-                              │                 │
-                              │                 ▼
-                              │        ┌────────────────┐
-                              │        │  In Progress   │
-                              │        └────────┬───────┘
-                              │                 │
-                              │                 ▼
-                              │        ┌────────────────┐
-                              │        │   PR opened    │
-                              │        │  (In Review;   │
-                              │        │  Done on merge │
-                              │        │  Fixes SFN-N)  │
-                              │        └────────────────┘
-                              │
-                  ── if blocker found anywhere above ──► Blocked
+  GitHub intake (external contributors only)
+  ┌──────────────────────────────────────────┐
+  │ human files issue → mirrors into Linear;  │
+  │ the initial Linear status comes from the  │
+  │ intake signal (see § Status semantics):   │
+  │ no hint → Triage, a needs-grooming /      │
+  │ needs-design hint → Backlog               │
+  └───────────────────────┬──────────────────┘
+                          ▼ (no hint)
+  Linear status (source of truth)
+        ┌──────────┐   /groom shapes scope,
+        │  Triage  │   criteria, estimate, type
+        └────┬─────┘
+             ▼
+        ┌──────────┐   groomed but not yet scheduled / design pending;
+        │ Backlog  │   ◄── intake with a grooming/design hint enters here
+        └────┬─────┘
+             ▼
+        ┌──────────┐  ── eligible for /pickup
+        │  Ready   │
+        └────┬─────┘
+             ▼
+        ┌────────────┐
+        │ In Progress│  ── /pickup claims + branches claude/sfn-N-…
+        └────┬───────┘
+             ▼
+        ┌────────────┐  PR opened (Fixes SFN-N);
+        │ In Review  │  Done on merge via Linear's GitHub integration
+        └────┬───────┘
+             ▼
+        ┌──────────┐
+        │   Done   │
+        └──────────┘
+
+  ── a blocker anywhere above ──► Blocked (via a Linear blocked-by relation)
 ```
 
 ## PR lifecycle

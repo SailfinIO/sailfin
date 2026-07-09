@@ -72,7 +72,7 @@ Codex to:
 
 Use `prompts/pickup.md` for autonomous issue work. It instructs Codex to:
 
-1. Query Linear `Ready` issues first, falling back to GitHub `claude-ready` labels only when Linear is unavailable, and rank them with the same priority order as Claude's `/pickup` command.
+1. Query Linear `Ready` issues (workflow state is Linear-native; there is no GitHub `claude-ready` label fallback — it is retired), and rank them with the same priority order as Claude's `/pickup` command.
 2. Verify pinned-seed freshness only when a compiler-source capability must already be present in the pinned seed.
 3. Claim the Linear issue, best-effort sync any GitHub mirror, and branch as `codex/SFN-123-<slug>` for Linear pickup.
 4. File out-of-scope bugs or obvious gaps as Sailfin Linear follow-ups using the templates in `docs/conventions/linear-templates.md`.

@@ -5,7 +5,7 @@ Use this prompt in Codex web or CLI when you want the Claude `/pickup` experienc
 ```text
 Pick up the next Sailfin issue and drive it to a pull request.
 
-Follow this repository's AGENTS.md and use the Sailfin pickup workflow in .codex/skills/sailfin-pickup/SKILL.md. If I provide `SFN-123`, use that Linear issue. If I provide a bare number, use that GitHub issue and resolve its Linear mirror. Otherwise select the highest-priority pickable issue in Linear's native `Ready` status, falling back to GitHub `claude-ready` labels only when Linear is unreachable.
+Follow this repository's AGENTS.md and use the Sailfin pickup workflow in .codex/skills/sailfin-pickup/SKILL.md. If I provide `SFN-123`, use that Linear issue. If I provide a bare number, use that GitHub issue and resolve its Linear mirror. Otherwise select the highest-priority pickable issue in Linear's native `Ready` status. Workflow state is Linear-native — there is no GitHub `claude-ready` label fallback (it is retired); if Linear is unreachable, stop and report rather than guessing from a GitHub label.
 
 Required workflow:
 1. Query Linear `Ready` issues for the Sailfin team and choose/validate the issue; fall back to `gh` for GitHub-only issues.

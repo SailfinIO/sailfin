@@ -37,8 +37,13 @@ the issue body is enough. When unsure, see the decision tree in SFEP-0001 §1.
 ## Lifecycle
 
 `Draft → Accepted → Implemented` (+ terminal `Withdrawn` / `Rejected` /
-`Superseded`). Map to the issue labels: `needs-design` → Draft,
-`design-approved` → Accepted, Stage1-readiness met → Implemented.
+`Superseded`). The SFEP's own `status:` front-matter is the source of truth,
+mirrored by the implementing Linear issue's native status — **not** by GitHub
+labels. (The `design-approved` workflow-state label is retired; `needs-design`
+survives only as a public GitHub external-intake hint and is never applied to a
+Linear-native `SFN-NNN` issue — Linear status carries the design-gate state.)
+Loosely: an ungroomed design is `Draft`, a design-gate-passed proposal is
+`Accepted`, and Stage1-readiness-met is `Implemented`.
 
 - Move to **Accepted** only when the design gate is passed (user/owner approval).
 - Move to **Implemented** only when the work clears the `CLAUDE.md` Stage1
