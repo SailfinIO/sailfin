@@ -22,40 +22,21 @@
 // Heap pointers stored in struct fields are `i64` addresses, cast to
 // typed `* T` views at the use site — matching scheduler.sfn.
 //
-// ── Struct layout (Linux x86_64, glibc) ──────────────────────────
-//   Channel byte size: six i64 fields (48 B) + PthreadMutex (40 B)
-//     + two PthreadCond (96 B) = 184 bytes.
+// ── Struct layout ────────────────────────────────────────────────
+//   Channel byte size (max-sized handles): six i64 fields (48 B) +
+//     PthreadMutex (64 B) + two PthreadCond (96 B) + `closed` i64 (8 B) +
+//     `elem_owned` i64 (8 B) = 224 bytes. The `Channel` struct and
+//     `_sfn_channel_struct_size_full` below carry the field offsets.
 //
-// ── Externs (re-declared inline) ─────────────────────────────────
-// Declared inline rather than imported from pthread.sfn / libc.sfn,
-// matching the scheduler.sfn precedent (#306).
-// Opaque storage for a `pthread_mutex_t`.  64 bytes — eight 8-byte slots,
-// sized to the larger macOS arm64 layout (`pthread_mutex_t` = 64 B; Linux
-// glibc uses only the first 40, the slack is never read).  Under-sizing to
-// 40 B overran the embedded handle on macOS arm64, corrupting heap metadata
-// under parallel load (#1265).  Opaque to Sailfin; libpthread owns the bytes.
-struct PthreadMutex {
-    _opaque0: i64;
-    _opaque1: i64;
-    _opaque2: i64;
-    _opaque3: i64;
-    _opaque4: i64;
-    _opaque5: i64;
-    _opaque6: i64;
-    _opaque7: i64;
-}
-
-// Opaque storage for a `pthread_cond_t`.  48 bytes on both supported
-// targets (Linux x86_64 glibc and macOS arm64) — six 8-byte slots, so
-// unlike the mutex it needs no max-sizing.
-struct PthreadCond {
-    _opaque0: i64;
-    _opaque1: i64;
-    _opaque2: i64;
-    _opaque3: i64;
-    _opaque4: i64;
-    _opaque5: i64;
-}
+// ── Opaque pthread-handle storage ────────────────────────────────
+// The `PthreadMutex` (64 B) / `PthreadCond` (48 B) opaque byte storage
+// embedded by value in `Channel` is the single source of truth in
+// `runtime/sfn/platform/pthread_layout.sfn`, imported here rather than
+// hand-copied — a stale copy is exactly the #1265 heap-corruption hazard
+// this de-duplication closes. The C-ABI `pthread_*` extern declarations
+// below stay re-declared inline per the #306 precedent (they reference the
+// imported struct as an opaque pointee).
+import { PthreadMutex, PthreadCond } from "../platform/pthread_layout";
 
 // Bounded MPMC channel.  `buffer_addr` points at a flat `capacity *
 // elem_size` byte array; slots are addressed by
@@ -112,12 +93,10 @@ extern fn pthread_cond_broadcast(c: * PthreadCond) -> i32;
 extern fn pthread_cond_destroy(c: * PthreadCond) -> i32;
 
 // ── Layout helpers ────────────────────────────────────────────────
-// Channel struct size without the trailing `closed` flag: 208 bytes.
-fn _sfn_channel_struct_size() -> i64 { return 208; }
-
-// Byte offset of the `closed` field.  `closed` is the LAST field,
-// appended after the two conds.  With the max-sized 64-byte mutex
-// (#1265) the struct layout is:
+// Byte offset of the `closed` field, which sits after the two conds. The
+// trailing `elem_owned` i64 was appended after `closed` (#1476), so
+// `closed` keeps its offset 208 and `elem_owned` is the final field. With
+// the max-sized 64-byte mutex (#1265) the struct layout is:
 //   [0..48)    six i64 cursors
 //   [48..112)  PthreadMutex (64 B)
 //   [112..160) not_empty PthreadCond (48 B)
