@@ -1,18 +1,18 @@
 ---
-sfep: TBD
+sfep: 0046
 title: Native Toolchain Version Pinning + Dispatch
-status: Draft
+status: Accepted
 type: tooling
 created: 2026-07-09
 updated: 2026-07-09
-author: "agent:compiler-architect"
-tracking:
+author: "agent:compiler-architect; human review: Michael Curtis"
+tracking: SFN-167, SFN-168
 supersedes:
 superseded-by:
 graduates-to:
 ---
 
-# SFEP-XXXX — Native Toolchain Version Pinning + Dispatch
+# SFEP-0046 — Native Toolchain Version Pinning + Dispatch
 
 ## 1. Summary
 
@@ -44,7 +44,7 @@ the wrong compiler, and the failure — if any — surfaces as a confusing type 
 codegen error rather than "your toolchain is too old."
 
 Concretely, I verified that a `[toolchain]` stanza is **silently ignored**
-today. `_parse_toml_internal` (`compiler/src/toml_parser.sfn:178`) recognizes
+today. `_parse_toml_internal` (`compiler/src/toml_parser.sfn:163`) recognizes
 only the sections `capsule`, `build`, `workspace`, `exports`, `dependencies`,
 `dev-dependencies`, and `capabilities` (the `if strings_equal(section, ...)`
 ladder at lines 200–246). An unknown section header sets the `section` local to
@@ -104,18 +104,16 @@ Decisions and rationale:
 - **Key name is `sfn`**, mirroring Go's `go 1.22` (the tool's own name is the
   key). One key, one string. This reads naturally: "`[toolchain] sfn =
   "0.8.0-alpha.2"`".
-- **Value is an exact-or-floor semver**, *not* a NPM-style range expression. A
-  bare `"0.8.0-alpha.2"` is a **minimum floor** in the spirit of Go's `go`
-  directive: the running toolchain must be `>=` the pin (see §3.3 for how
-  prereleases order). This matches user intent ("built with at least this") and
-  avoids shipping a full range-grammar parser pre-1.0. **[OWNER DECISION]** —
-  floor semantics (Go-style, recommended) vs. exact-pin semantics
-  (`rust-toolchain.toml`-style, "must equal"). I recommend **floor** because it
-  lets a project keep building under newer patch/alpha toolchains without a
-  manifest edit; exact-pin is more reproducible but forces a manifest bump on
-  every toolchain upgrade. The schema is identical either way; only the compare
-  predicate in §3.3 differs. Pending that decision, the design assumes floor and
-  notes the one-line change for exact.
+- **Value is a floor semver** (**DECIDED: Go-style floor**, not exact-pin, not an
+  NPM-style range). A bare `"0.8.0-alpha.2"` is a **minimum floor** in the spirit
+  of Go's `go` directive: the running toolchain must be `>=` the pin (see §3.3 for
+  how prereleases order). This matches user intent ("built with at least this")
+  and lets a project keep building under newer patch/alpha toolchains without a
+  manifest edit, and it avoids shipping a full range-grammar parser pre-1.0.
+  Exact-pin (`rust-toolchain.toml`-style "must equal") was rejected as the default
+  because it forces a manifest bump on every toolchain upgrade; the schema is
+  identical either way, so a future exact/range mode is a one-predicate addition
+  in §3.3 without a schema change.
 - **`channel` is optional and advisory in Phase 1.** When present it names the
   minimum acceptable prerelease channel (`stable` > `rc` > `beta` > `alpha`).
   Its primary job is to make prerelease comparison legible and to let a project
@@ -240,19 +238,21 @@ one are interchangeable:
 existing `~/.local/share/sailfin/versions` to converge with `install.sh`.
 `SAILFIN_HOME`/`INSTALL_BASE` overrides honored.)
 
-**Fetch source.** Reuse the release channel `install.sh` already uses: GitHub
-release assets `sailfin_<version>_<os>_<arch>.tar.gz` from
-`https://github.com/SailfinIO/sailfin/releases/download/<tag>/<asset>`
-(`install.sh:128,178`), with OS in {linux, macos, windows} and arch in
-{x86_64, arm64} (`install.sh:65,73`). The tag is derived from the version the
-same way `install.sh` does. **[OWNER DECISION]** — whether Phase 2 shells out to
-the existing `install.sh` (fastest to ship, keeps one download/trust code path)
-or reimplements the fetch natively in `.sfn` (`![io, net]`, no bash dependency,
-aligns with the pure-Sailfin-toolchain 1.0 goal). I recommend **shell out to
-`install.sh` for the first Phase 2 cut** (it already handles asset resolution,
-prerelease selection, checksum, symlinking, and Windows) and **file a follow-up
-to port it to a native `sfn toolchain install` command** so 1.0 has no bash in
-the toolchain path. The native port is where the `![net]` fetch logic lands.
+**Fetch is native `.sfn` — no shelling out to bash.** (**DECIDED: native
+Sailfin, not a shell-out to `install.sh`.**) The fetch/verify/extract path is a
+new `sfn toolchain install` command implemented in Sailfin with `![io, net]`,
+matching the pure-Sailfin-toolchain 1.0 goal — the toolchain must not depend on a
+bash installer to bootstrap itself. It reuses only the *release-asset layout*
+`install.sh` established (asset name `sailfin_<version>_<os>_<arch>.tar.gz` at
+`https://github.com/SailfinIO/sailfin/releases/download/<tag>/<asset>`, OS in
+{linux, macos, windows}, arch in {x86_64, arm64}), not the script itself. The
+native command owns asset resolution, prerelease selection, download, signature +
+digest verification (below), extraction, and the version-store symlink. `install.sh`
+remains only as a one-shot *initial* installer for a machine with no `sfn` at all
+(the chicken-and-egg bootstrap); once any `sfn` is present, all further toolchain
+acquisition is native. Accepting native fetch means the compiler's own
+`[capabilities] required` gains `net` — see §4; this is the deliberate,
+production-grade choice, not a side effect.
 
 **Dispatch.** After ensuring `~/.local/share/sailfin/versions/<pin>/sailfin`
 exists, the current process **re-execs** it with the original argv (a
@@ -263,58 +263,75 @@ so the dispatched toolchain, which will also read `[toolchain]` and satisfy the
 floor, does not attempt to dispatch again (and to hard-fail loudly if a fetched
 toolchain still doesn't satisfy the pin — a corrupt store or a bad release).
 
-**Trust model.** A downloaded toolchain is executable code; it must be verified
-before it is re-exec'd:
+**Trust model (production-grade, mandatory verification).** A downloaded toolchain
+is executable code that `sfn` is about to re-exec, so verification is not optional
+and not best-effort — it is a **fail-closed gate** modelled on what a production
+toolchain does (Go's checksum database + signed releases; corepack's integrity
+hashes; rustup's signed manifests):
 
-- **Digest pinning.** The store records `.sha256` of the downloaded tarball.
-  `install.sh` already downloads a known asset; Phase 2 records and, on reuse,
-  re-verifies the digest of the extracted tarball against the recorded value.
-- **[OWNER DECISION] — publish a signed manifest of release digests.** For real
-  supply-chain integrity (corepack verifies an integrity hash it ships in the
-  lockfile; Go uses the checksum DB), releases should publish a signed
-  `SHA256SUMS` (or the digests should be committed to a checksum file in-repo
-  that `sfn` ships). Absent a signature root, Phase 2 can only trust TLS + GitHub
-  release integrity, which is the same trust `install.sh` has today — acceptable
-  for alpha, **must** be hardened (a signing key + verified digest list) before
-  auto-dispatch is on by default. I recommend Phase 2 **defaults auto-dispatch
-  OFF** (opt in via `[toolchain] auto = true` or `SAILFIN_TOOLCHAIN=auto`,
-  mirroring Go's `GOTOOLCHAIN`) until the signed-digest story exists, so we never
-  silently execute unverified downloaded code.
+- **Signed release-digest manifest.** (**DECIDED: build the signing root; it is a
+  hard prerequisite of Phase 2 shipping.**) Each release publishes a
+  `SHA256SUMS` manifest of its assets plus a detached signature over that manifest
+  (a minisign/cosign-class Ed25519 signature). The signing **public key is
+  embedded in the `sfn` binary** (pinned at build time), so verification needs no
+  network trust-on-first-use. This is the supply-chain root; TLS + GitHub
+  integrity alone is explicitly **not** sufficient to execute downloaded code.
+- **Verification order (fail closed at each step).** Download the asset →
+  download `SHA256SUMS` + its signature → verify the signature against the
+  embedded public key → confirm the asset's SHA-256 is the one the manifest lists
+  → only then extract, record `.sha256` in the store, and mark the version usable.
+  Any failure aborts **before** the toolchain is extracted or executed, with a
+  clear error; a corrupt or unsigned asset is never re-exec'd.
+- **Reuse re-verification.** On every dispatch to an already-stored toolchain,
+  the recorded `.sha256` is re-checked against the on-disk binary before re-exec,
+  so a tampered store is caught too.
+- **Auto-dispatch defaults ON** (`SAILFIN_TOOLCHAIN=auto`), matching Go's
+  default — a fresh clone + `sfn build` transparently fetches, *verifies*, and
+  dispatches the pinned toolchain. This is safe to default-on **because**
+  verification is mandatory and fail-closed: we never silently execute unverified
+  code, so the production-grade behavior is the transparent one. `local`/`off`
+  remain available for air-gapped or CI-preinstalled environments (see the knob
+  below).
 
-**Offline behavior.** If fetch is needed but the network is unavailable (or
-auto-dispatch is off), fall back to the Phase 1 hard error with the exact
-`install.sh` one-liner the user can run manually. An already-fetched toolchain in
-the store is used offline with digest re-verification — no network needed once
-the pin is present locally.
+**Offline behavior.** If fetch is needed but the network is unavailable (or the
+knob is `local`), fall back to the Phase 1 hard error naming the exact
+`sfn toolchain install <version>` command the user can run when back online. An
+already-fetched toolchain in the store is used offline with digest
+re-verification — no network needed once the pin is present locally.
 
 **`GOTOOLCHAIN`-style control knob.** A single env/config lever governs the whole
 behavior, matching Go's `GOTOOLCHAIN`:
 
 | `SAILFIN_TOOLCHAIN` | Behavior |
 |---|---|
-| `auto` | verify; on mismatch fetch + dispatch (Phase 2 opt-in) |
+| `auto` (**default in Phase 2**) | verify the pin; on mismatch fetch + *verify* + dispatch |
 | `local` (default in Phase 1) | verify only; hard error on mismatch, never fetch |
 | `<version>` | force dispatch to that exact version regardless of the pin |
 | `off` | skip the gate entirely (equivalent to `--skip-toolchain-check`) |
 
+Signature/digest verification is mandatory whenever a toolchain is fetched or
+dispatched and is **not** disabled by any knob value except `off` (which skips the
+gate wholesale for explicit air-gapped/CI use).
+
 ## 4. Effect & capability impact
 
-Minimal and confined to the driver — **no language-semantics or effect-system
-change**. No new effect keyword, no new capability, no effect-checker rule.
+No language-semantics or effect-system change — **no new effect keyword, no new
+effect-checker rule**. The only capability-surface change is on the compiler's own
+manifest, and it is a **deliberate, accepted decision** (native fetch):
 
 - Phase 1 (parse `[toolchain]`, compare versions, gate the build) is pure driver
   orchestration. Reading the manifest and the running version is already `![io]`
   (the build commands are `![io]`); `semver.sfn` parsing/comparison is `![pure]`.
-- Phase 2 adds a network fetch. If Phase 2 ships as a native `sfn toolchain
-  install`, that fetch path is `![io, net]` — the **only** new effect surface in
-  this SFEP, and it lives in a new toolchain-management command, not in the
-  language. If Phase 2 shells out to `install.sh`, the subprocess spawn is
-  `![io]` (the network happens in the child). Either way the compiler's own
-  `[capabilities] required = ["io", "clock"]` (`compiler/capsule.toml:46`) gains
-  `net` **only if** the native fetch path is compiled into the driver — flag this
-  for the owner: adding `net` to the compiler's required capabilities is a
-  visible expansion of the toolchain's own capability surface and should be a
-  deliberate decision, not a side effect. Shelling to `install.sh` avoids it.
+- Phase 2's native `sfn toolchain install` fetch path is `![io, net]` — the only
+  new effect surface, living in a toolchain-management command, not in the
+  language. Because the fetch is native (not a shell-out), **the compiler's own
+  `[capabilities] required` gains `net`** (from `["io", "clock"]`,
+  `compiler/capsule.toml`). This is **DECIDED and accepted**: a self-fetching
+  toolchain legitimately needs the network capability, and declaring it honestly
+  is exactly the capability model working as intended (the compiler's own manifest
+  states the authority it actually uses). Verification (§3.5) uses only in-process
+  crypto over already-downloaded bytes, so it adds no further effect beyond the
+  `net` fetch itself.
 
 ## 5. Self-hosting impact
 
@@ -334,26 +351,24 @@ The additive-parse property is the self-hosting safety net:
   compiler from the pinned `0.8.0-alpha.2` seed with no seed cut — this is a
   bundled capability+consumer change in one PR (`.claude/rules/seed-dependency.md`
   default), not a seed-blocker.
-- **Does the compiler repo adopt `[toolchain]` or keep `.seed-version`?** Both,
-  for different jobs — they are not competitors:
-  - `.seed-version` **stays** as the seed pin for `make compile` self-hosting. It
-    names the *seed binary that bootstraps the compiler*, a concept that only
-    exists inside this repo. Nothing downstream should learn it exists.
-  - The compiler's `capsule.toml` **may** additionally gain a `[toolchain] sfn`
-    stanza — but doing so requires care: the compiler is built by the *seed*, and
-    the seed's version (0.8.0-alpha.2) is exactly the pin, so a floor check would
-    pass. However, turning the gate on for the compiler's own build risks a
-    chicken-and-egg during a seed bump (a new seed at 0.8.0-alpha.3 building a
-    source still pinning -alpha.2 is fine under floor; the reverse — an older seed
-    against a source pinning a newer toolchain — would hard-error). **Recommendation:
-    the compiler repo keeps `.seed-version` as its source of truth and does NOT
-    turn on the `[toolchain]` gate for its own `make compile`** (the driver already
-    special-cases self-build via `-p compiler`; the gate can be skipped when the
-    build is the in-tree compiler capsule, or simply left unpinned in the
-    compiler's `capsule.toml`). This keeps the two mechanisms cleanly separated:
-    `[toolchain]` for downstream products, `.seed-version` for the bootstrap. **[OWNER
-    DECISION]** if the owner prefers the compiler to dogfood `[toolchain]`, it can,
-    with `--skip-toolchain-check` wired into `make compile` during seed transitions.
+- **The compiler repo dogfoods `[toolchain]`.** (**DECIDED: yes — the compiler
+  adopts its own mechanism.**) `.seed-version` and `[toolchain]` coexist for
+  distinct jobs:
+  - `.seed-version` **stays** as the seed pin for `make compile` self-hosting — it
+    names the *seed binary that bootstraps the compiler*, a repo-internal concept
+    nothing downstream should learn.
+  - The compiler's `capsule.toml` **also gains a `[toolchain] sfn` stanza** and
+    the gate runs on the compiler's own build, so the toolchain eats its own dog
+    food: the same verification a product gets. Floor semantics make this
+    well-behaved — the seed's version *is* the pin, so `make compile` from the
+    pinned seed satisfies the floor; a newer seed also satisfies it. The only
+    hazard is the reverse (an *older* seed against a source that raised its
+    `[toolchain]` pin), which is exactly the case the gate *should* catch. The
+    seed bump does both edits together: `/pin-seed` advances `.seed-version` and
+    the `[toolchain]` pin in the same change, and `--skip-toolchain-check` /
+    `SAILFIN_TOOLCHAIN=off` is wired into `make compile` as the escape hatch for a
+    mid-transition self-build. This keeps the mechanisms honestly aligned rather
+    than exempting the compiler from the rule it ships.
 
 ## 6. Alternatives considered
 
@@ -385,6 +400,13 @@ The additive-parse property is the self-hosting safety net:
   than a single floor pin needs pre-1.0, and Go's single-directive model has
   proven sufficient. `semver.sfn` is structured so a range predicate can be added
   later without changing the schema.
+- **Shell out to `install.sh` for the Phase 2 fetch.** Rejected: it would keep
+  bash on the toolchain's own bootstrap path, against the pure-Sailfin-toolchain
+  1.0 goal, and it splits the trust/verification code across a script the compiler
+  can't statically reason about. Phase 2 fetches natively (`sfn toolchain install`,
+  `![io, net]`) and reuses only the release-asset *layout* `install.sh` established
+  (§3.5). `install.sh` survives solely as the one-shot installer for a machine with
+  no `sfn` yet.
 
 ## 7. Stage1 readiness mapping
 
@@ -456,11 +478,11 @@ fetch/dispatch (with the added `![io]`/`![net]` note from §4).
   install layout.
 - `docs/proposals/0003-tooling.md` — the built-in tooling surface (`sfn
   init/build/run/check/test`) this SFEP extends with the gate.
-- `install.sh` — the existing toolchain installer (asset naming
-  `sailfin_<version>_<os>_<arch>.tar.gz`, GitHub-release fetch, INSTALL_BASE
-  `~/.local/share/sailfin/versions`, prerelease selection, checksum) that Phase 2
-  reuses / ports.
-- `compiler/src/toml_parser.sfn` (`_parse_toml_internal:178`, `SailToml:7`,
+- `install.sh` — the one-shot bootstrap installer whose release-asset *layout*
+  (asset naming `sailfin_<version>_<os>_<arch>.tar.gz`, GitHub-release fetch,
+  INSTALL_BASE `~/.local/share/sailfin/versions`, prerelease selection) the native
+  `sfn toolchain install` reuses. Phase 2 does **not** shell out to it (§3.5, §6).
+- `compiler/src/toml_parser.sfn` (`_parse_toml_internal:163`, `SailToml:7`,
   `toml_generate:537`) — the section-parse ladder that silently ignores unknown
   sections today and where `[toolchain]` parsing lands.
 - `compiler/src/version.sfn` (`resolve_compiler_version:130`,
