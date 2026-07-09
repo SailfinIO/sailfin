@@ -12,6 +12,13 @@ struct PipeFds {
     wr: i32;
 }
 
+struct OwnedBuf {
+    ptr_addr: i64;
+    len: i64;
+    cap: i64;
+    arena_addr: i64;
+}
+
 extern fn pipe(fds: * i32) -> i32;
 
 extern fn write(fd: i32, buf: * u8, count: usize) -> i64;
@@ -19,6 +26,8 @@ extern fn write(fd: i32, buf: * u8, count: usize) -> i64;
 extern fn close(fd: i32) -> i32;
 
 extern fn malloc(size: usize) -> * u8;
+
+extern fn free(ptr: * u8) -> void;
 
 // `io.read_fd(fd, n)` returns at most `n` bytes from a single `read(2)`.
 test "io.read_fd: returns up to n bytes from the read end" ![io] {
@@ -32,7 +41,10 @@ test "io.read_fd: returns up to n bytes from the read end" ![io] {
     assert write(write_fd, payload as * u8, 6 as usize) == 6;
 
     // A 3-byte request returns exactly the first three bytes.
-    assert io.read_fd(read_fd as i64, 3) == "abc";
+    let b: OwnedBuf = io.read_fd(read_fd as i64, 3);
+    assert b.len == 3;
+    assert(b.ptr_addr as * u8 as string) == "abc";
+    free(b.ptr_addr as * u8);
 
     let _ = close(read_fd);
     let _ = close(write_fd);
@@ -52,7 +64,10 @@ test "io.read_fd: a short read returns fewer than n bytes" ![io] {
     // than blocking for the full 16.
     let _ = close(write_fd);
 
-    assert io.read_fd(read_fd as i64, 16) == "hi";
+    let b: OwnedBuf = io.read_fd(read_fd as i64, 16);
+    assert b.len == 2;
+    assert(b.ptr_addr as * u8 as string) == "hi";
+    free(b.ptr_addr as * u8);
 
     let _ = close(read_fd);
 }
@@ -94,4 +109,39 @@ test "io.read_line: an unterminated final line is returned at EOF" ![io] {
     assert io.read_line(read_fd as i64) == "tail";
 
     let _ = close(read_fd);
+}
+
+// An immediate EOF (write end closed with no data written) returns `null`,
+// distinguishing "no line at all" from a blank line.
+test "io.read_line: immediate EOF returns null" ![io] {
+    let buf: * u8 = malloc(8 as usize);
+    assert pipe(buf as * i32) == 0;
+    let fds: * PipeFds = buf as * PipeFds;
+    let read_fd: i32 = fds.rd;
+    let write_fd: i32 = fds.wr;
+
+    let _ = close(write_fd);
+
+    assert io.read_line(read_fd as i64) == null;
+
+    let _ = close(read_fd);
+}
+
+// A line consisting solely of a newline is a blank line, distinct from EOF.
+test "io.read_line: a blank line returns empty string not null" ![io] {
+    let buf: * u8 = malloc(8 as usize);
+    assert pipe(buf as * i32) == 0;
+    let fds: * PipeFds = buf as * PipeFds;
+    let read_fd: i32 = fds.rd;
+    let write_fd: i32 = fds.wr;
+
+    let payload: string = "\n";
+    assert write(write_fd, payload as * u8, 1 as usize) == 1;
+
+    let ln = io.read_line(read_fd as i64);
+    assert ln != null;
+    assert ln == "";
+
+    let _ = close(read_fd);
+    let _ = close(write_fd);
 }

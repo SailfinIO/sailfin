@@ -1101,6 +1101,17 @@ fn lower_to_llvm_lines_with_parsed_context(native_module: NativeModule, parse_ar
     // first occurrence and preserving order so the stage2==stage3 fixed
     // point is unaffected.
     lines = dedup_module_declare_lines(lines);
+    // SFN-154: a runtime-helper `declare` may reference a named struct type —
+    // e.g. `%OwnedBuf*` from `io.read_fd` — that this module neither defines nor
+    // forward-declares (the type reaches the helper-declare pass but is not
+    // emitted as a body here), and clang then rejects `use of undefined type`.
+    // Run this on the FINAL text, after mangling + declare-dedup, so it covers
+    // both the `mangle_symbols=false` runtime-sfn-source path and the
+    // `mangle_symbols=true` capsule path (mangling runs between the preamble's
+    // own type pass and here, so the fix must be last). Keys on emitted text: a
+    // module that already spells the full `%Name = type { ... }` body is skipped,
+    // so no LLVM redefinition.
+    lines = _append_missing_opaque_forward_decls(lines);
     if debug_lowering { print.err("emit-llvm: phase=mangle"); }
     if trace { print.err("test llvm: mangling stage done"); }
     if timing {
@@ -1290,6 +1301,74 @@ fn dedup_module_declare_lines(lines: string[]) -> string[] {
         index += 1;
     }
     return result;
+}
+
+// SFN-154: append `%Name = type opaque` for every named type referenced by a
+// `declare` line that lacks a `%Name = type ...` definition among `lines`.
+// A runtime-helper declare can name a struct type (e.g. `%OwnedBuf*` from
+// `io.read_fd`) in a module that neither defines nor forward-declares it, which
+// clang rejects as `use of undefined type`. LLVM resolves module-scope named
+// types independent of textual order, so appending the forward declaration
+// after its use is valid. Keys on emitted text only, so it never double-defines
+// a type the module already spells out in full (opaque or body).
+fn _append_missing_opaque_forward_decls(lines: string[]) -> string[] {
+    let mut defined: string[] = [];
+    let mut referenced: string[] = [];
+    let mut i: int = 0;
+    loop {
+        if i >= lines.length { break; }
+        let line = lines[i];
+        if starts_with(line, "%") {
+            let eq = index_of(line, " = type ");
+            if eq > 0 {
+                let name = substring(line, 0, eq);
+                if !string_array_contains(defined, name) {
+                    defined.push(name);
+                }
+            }
+        }
+        if starts_with(line, "declare ") {
+            let mut j: int = 0;
+            loop {
+                if j >= line.length { break; }
+                if substring(line, j, j + 1) == "%" {
+                    let mut k: int = j + 1;
+                    loop {
+                        if k >= line.length { break; }
+                        let ch = substring(line, k, k + 1);
+                        let mut stop: boolean = false;
+                        if ch == "*" { stop = true; }
+                        if ch == " " { stop = true; }
+                        if ch == "," { stop = true; }
+                        if ch == "(" { stop = true; }
+                        if ch == ")" { stop = true; }
+                        if ch == "}" { stop = true; }
+                        if ch == ">" { stop = true; }
+                        if stop { break; }
+                        k += 1;
+                    }
+                    if k > j + 1 {
+                        let name = substring(line, j, k);
+                        if !string_array_contains(referenced, name) {
+                            referenced.push(name);
+                        }
+                    }
+                    j = k;
+                } else { j += 1; }
+            }
+        }
+        i += 1;
+    }
+    let mut r: int = 0;
+    loop {
+        if r >= referenced.length { break; }
+        let name = referenced[r];
+        if !string_array_contains(defined, name) {
+            lines.push(name + " = type opaque");
+        }
+        r += 1;
+    }
+    return lines;
 }
 
 // Extract `%T` from `%T = type { ... }`. The name spans from the
