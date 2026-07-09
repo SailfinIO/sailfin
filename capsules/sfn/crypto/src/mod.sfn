@@ -252,6 +252,13 @@ fn base64_decode(s: string) -> string {
     // embedded whitespace or newline is out-of-alphabet, so MIME/PEM-wrapped
     // (line-broken) base64 also yields "" — feed it compact input.
     //
+    // Under the current NUL-terminated `string` model a decoded 0x00 byte is
+    // unrepresentable (`char_from_code(0)` is ""), so any input whose decoded
+    // output would contain a 0x00 byte also yields the "" sentinel rather than
+    // a truncated result. This covers text payloads (HTTP Basic, JSON-RPC,
+    // tokens); fully general binary decode arrives with the SfnString aggregate
+    // (#874 M1.A.2).
+    //
     // Usage:
     //   let decoded = base64_decode("aGVsbG8gd29ybGQ=");
     //   // decoded == "hello world"
@@ -280,8 +287,13 @@ fn base64_decode(s: string) -> string {
         if (pad2 || pad3) && (i + 4 != len) { return ""; }
         if pad2 && !pad3 { return ""; }
 
-        // Byte 0 is present in every quad.
+        // Byte 0 is present in every quad. A decoded 0x00 byte is
+        // unrepresentable in the current NUL-terminated `string` model
+        // (`char_from_code(0)` yields ""), so decoding collapses to the ""
+        // sentinel rather than silently dropping the byte and returning a
+        // truncated/corrupted payload.
         let b0: int = ((d0 << 2) | (d1 >> 4)) & 255;
+        if b0 == 0 { return ""; }
         out = out + char_from_code(b0);
 
         if pad2 {
@@ -291,6 +303,7 @@ fn base64_decode(s: string) -> string {
             let d2: int = base64_sextet(c2);
             if d2 < 0 { return ""; }
             let b1: int = ((d1 << 4) | (d2 >> 2)) & 255;
+            if b1 == 0 { return ""; }
             out = out + char_from_code(b1);
 
             if pad3 {
@@ -300,6 +313,7 @@ fn base64_decode(s: string) -> string {
                 let d3: int = base64_sextet(c3);
                 if d3 < 0 { return ""; }
                 let b2: int = ((d2 << 6) | d3) & 255;
+                if b2 == 0 { return ""; }
                 out = out + char_from_code(b2);
             }
         }

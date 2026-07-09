@@ -134,3 +134,16 @@ test "base64_decode: rejects pad in position 2 without position 3" {
 test "base64_decode: rejects padding outside the final quad" {
     assert base64_decode("Zg==Zm8=") == "";
 }
+
+// A decoded 0x00 byte is unrepresentable under the NUL-terminated `string`
+// model, so it collapses to the "" sentinel instead of silently truncating.
+test "base64_decode: rejects a decoded trailing NUL byte" {
+    // "AA==" decodes to the single byte 0x00.
+    assert base64_decode("AA==") == "";
+}
+
+test "base64_decode: rejects a decoded interior NUL byte" {
+    // "QQBB" decodes to the bytes 0x41 0x00 0x41 ("A\0A"); the interior NUL
+    // must collapse the whole result rather than yield a truncated "AA".
+    assert base64_decode("QQBB") == "";
+}
