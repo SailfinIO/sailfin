@@ -4,9 +4,9 @@ title: Shared-frontend test runner — parent compiles, children only execute
 status: Accepted
 type: tooling
 created: 2026-07-08
-updated: 2026-07-08
+updated: 2026-07-09
 author: "agent:compiler-architect; human review"
-tracking: "#2010, #1997"
+tracking: "SFN-152, #2010, #1997"
 supersedes:
 superseded-by:
 graduates-to:
