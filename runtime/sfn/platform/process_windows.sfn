@@ -683,6 +683,14 @@ fn sfn_process_handle_wait(handle_id: i64) -> i64 ![io] { return -1; }
 // `sfn_process_handle_*` Windows stubs above.
 fn sfn_io_poll_readable(fd: i64, timeout_ms: i64) -> bool ![io] { return false; }
 
+// `sfn_io_poll_any(fds, timeout_ms)` — Windows stub for the `io.poll_any`
+// builtin (SFN-155). The POSIX body (`runtime/sfn/process.sfn`) wraps a
+// multi-slot `poll(2)`, which mingw lacks for stdio/pipe fds. Until a
+// Windows fd multiplexer lands (epic #1540 B5), report "none ready"
+// (`-1`) so a caller falls back to a blocking read rather than spinning.
+// Mirrors the `sfn_io_poll_readable` Windows stub above.
+fn sfn_io_poll_any(fds: int[], timeout_ms: i64) -> i64 ![io] { return -1; }
+
 // `sfn_process_environ()` — empty `SfnArray` (`{ data@0, len@8, cap@16 }`
 // = 24 bytes, all zero). Must be a valid header (not null) so callers'
 // `.length` reads do not crash. Matches the C `_WIN32` empty-array shim

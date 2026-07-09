@@ -1496,6 +1496,12 @@ fn seed_default_runtime_helpers(initial: string[]) -> string[] {
     // separate-compilation modules that consume it emit a `declare` and
     // clang resolves the symbol against the runtime object.
     helpers = append_unique_effect(helpers, "io.poll_readable");
+    // SFN-155: `io.poll_any` lowers to the bare `sfn_io_poll_any` symbol
+    // (Sailfin-native body in `runtime/sfn/process.sfn`, Windows stub in
+    // `process_windows.sfn`). Declare-track it so separate-compilation
+    // modules that consume it emit a `declare` and clang resolves the
+    // symbol against the runtime object.
+    helpers = append_unique_effect(helpers, "io.poll_any");
     // #1579: `io.read_fd` / `io.read_line` lower to the bare
     // `sfn_read_fd` / `sfn_read_line` symbols (Sailfin-native bodies in
     // `runtime/sfn/io.sfn`). Declare-track them so separate-compilation

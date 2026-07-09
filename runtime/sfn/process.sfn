@@ -606,6 +606,85 @@ fn sfn_io_poll_readable(fd: i64, timeout_ms: i64) -> bool ![io] {
     return ready;
 }
 
+// ── io.poll_any ────────────────────────────────────────────────
+// `sfn_io_poll_any(fds, timeout_ms)` — SFN-155 (epic #1540 Track A,
+// gap A3). The multi-fd companion to `io.poll_readable`: waits on every
+// fd in `fds` at once with a single `poll(2)` and reports *which* one is
+// ready, so bidirectional stdio forwarding can wait on `{own stdin,
+// child stdout, child stderr}` together without deadlocking on whichever
+// side is quiet. Generalizes the two-slot `_drain_two_pipes` multiplex to
+// an N-slot user-chosen array.
+//
+// Returns the ready fd (`>= 0`) on readiness — the first slot whose
+// `revents` is non-empty (data, EOF/`POLLHUP`, or `POLLERR`, exactly the
+// conditions a follow-up `read(2)` must run for). Returns `-1` for
+// timeout (`poll` reports nothing ready), an empty array, an allocation
+// failure, or a non-EINTR `poll` error. `fd?` was rejected as the return
+// type: an optional `int` (`i64*`) has no working value-extraction
+// (SFN-182 — only `== null` round-trips), so the poll result would be
+// untellable; fds are always non-negative, so `-1` is the unambiguous
+// none sentinel — the classic `poll`/`select` idiom. Revisit `fd?` when
+// SFN-182 lands. `timeout_ms < 0`
+// blocks until some fd is readable; `0` polls and returns immediately;
+// `> 0` waits up to that many milliseconds.
+//
+// Lives in `process.sfn` (not `io.sfn`) for the same reason as
+// `sfn_io_poll_readable`: it needs the POSIX `poll(2)` + `errno` surface,
+// and only `process.sfn` is excluded from the Windows cross-build
+// (`process_windows.sfn` carries the `WSAPoll`-less stub). It reuses this
+// module's `poll` extern, `PollSlot` overlay, and `SFN_EINTR`.
+//
+// The pollfd array is `nfds` contiguous 8-byte `PollSlot`s. Each loop
+// iteration re-arms every slot (`fd` narrowed to the `poll` i32 ABI,
+// `events_revents = 1` → POLLIN with `revents` cleared) before polling,
+// so an `EINTR` re-poll starts from a clean `revents`. A negative fd in
+// the array is left in-slot; `poll` ignores fds `< 0` and never reports
+// them ready, matching `_drain_two_pipes`'s parked-fd contract.
+fn sfn_io_poll_any(fds: int[], timeout_ms: i64) -> i64 ![io] {
+    let nfds: i64 = fds.length;
+    if nfds <= 0 { return -1; }
+    let pbuf: * u8 = malloc((nfds * 8) as usize);
+    if pbuf as i64 == 0 { return -1; }
+    let to: i32 = timeout_ms as i32;
+    let mut result: i64 = -1;
+    loop {
+        // (Re-)arm every slot to POLLIN with revents cleared.
+        let mut i: i64 = 0;
+        loop {
+            if i >= nfds { break; }
+            let slot: * PollSlot = ((pbuf as i64) + i * 8) as * PollSlot;
+            slot.fd = fds[i] as i32;
+            slot.events_revents = 1;
+            i = i + 1;
+        }
+        let pr: i32 = poll(pbuf, nfds as usize, to);
+        if pr < 0 {
+            let err: i32 = sailfin_intrinsic_pointer_read_i32(sailfin_intrinsic_errno_location());
+            if err == SFN_EINTR {
+                // Interrupted before readiness — re-arm and poll again.
+            } else { break; }
+        } else {
+            if pr > 0 {
+                // Return the first ready slot's original (i64) fd.
+                let mut j: i64 = 0;
+                loop {
+                    if j >= nfds { break; }
+                    let done: * PollSlot = ((pbuf as i64) + j * 8) as * PollSlot;
+                    let revents: i32 = (done.events_revents >> 16) & 65535;
+                    if revents != 0 {
+                        result = fds[j];
+                        break;
+                    }
+                    j = j + 1;
+                }
+            }
+            break;
+        }
+    }
+    free(pbuf);
+    return result;
+}
+
 // ── process.exit ───────────────────────────────────────────────
 // Port of `sailfin_runtime_process_exit`. `code` arrives as `double`
 // per the descriptor's `parameter_types: ["double"]`; truncate

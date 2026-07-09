@@ -872,6 +872,25 @@ fn _rh_descriptors_06(descriptors_in: RuntimeHelperDescriptor[]) -> RuntimeHelpe
         target: "io.poll_readable", symbol: "sfn_io_poll_readable", return_type: "i1", parameter_types: ["i64", "i64"], effects: ["io"], native_signature: "sfn_io_poll_readable", c_abi_return_type: null
     });
 
+    // SFN-155 (epic #1540 Track A, gap A3): multi-fd readiness check.
+    // `io.poll_any(fds, timeout_ms)` waits on every fd in `fds` with one
+    // `poll(2)` and returns *which* fd is ready (`>= 0`), or `-1` for
+    // timeout / empty array / error. Lets a forwarder wait on `{own
+    // stdin, child stdout, child stderr}` together without deadlock, the
+    // multi-fd companion to `io.poll_readable`. Return is a sentinel `i64`
+    // (`-1` == none), not the issue's original `fd?`: an optional `int`
+    // (`i64*`) has no working value-extraction (SFN-182), so the poll
+    // result would be untellable; fds are non-negative, so `-1` is
+    // unambiguous. `fds` is an `int[]` SfnArray (`{ i64*, i64, i64 }*`);
+    // `timeout_ms` arrives as `int` (i64). Sailfin-native body in
+    // `runtime/sfn/process.sfn:sfn_io_poll_any` (defined there, not in
+    // `io.sfn`, because it needs the POSIX `poll(2)` + `errno` surface and
+    // only `process.sfn` is excluded from the Windows cross-build;
+    // `process_windows.sfn` carries the stub).
+    descriptors = append_runtime_helper(descriptors, RuntimeHelperDescriptor {
+        target: "io.poll_any", symbol: "sfn_io_poll_any", return_type: "i64", parameter_types: ["{ i64*, i64, i64 }*", "i64"], effects: ["io"], native_signature: "sfn_io_poll_any", c_abi_return_type: null
+    });
+
     // #1579 (epic #1540 Track A, gap A2): read the process's own stdin
     // (fd 0) incrementally without shelling out. SFN-154 upgraded the two
     // returns to production-grade typed values (Rust/Go parity):
