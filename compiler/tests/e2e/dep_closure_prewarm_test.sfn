@@ -94,11 +94,28 @@ fn _has_duplicate(lines: string[]) -> int {
     return 0;
 }
 
+// True when a `clang` toolchain is on PATH — the nested `sfn test` build
+// needs it (compile + link). Probing lets the test skip ONLY when the
+// host toolchain is absent, so a genuine nested-run failure (clang
+// present but `sfn test` regressed) is surfaced rather than masked.
+fn _clang_available() -> boolean ![io] {
+    let mut e: string[] = [];
+    let path = env.get("PATH");
+    if path.length > 0 { e.push("PATH=" + path); }
+    let exit = process.run_capture(["clang", "--version"], e);
+    let _o = process.capture_take_stdout();
+    let _er = process.capture_take_stderr();
+    return exit == 0;
+}
+
 test "dep-closure pre-warm: no dep module is emitted more than once under --jobs" ![io] {
-    // Outcome codes: -1 environmental skip (nested build couldn't run);
-    // 0 pass; 1 duplicate digest (stampede, or a prewarm whose key missed
-    // the children); 2 emits suppressed (exit 0 but empty ledger).
+    // Outcome codes: -1 skip (host toolchain absent); 0 pass; 1 duplicate
+    // digest (stampede, or a prewarm whose key missed the children); 2
+    // emits suppressed (exit 0 but empty ledger); 3 nested run failed with
+    // the toolchain present (a genuine `sfn test` regression to surface).
     let outcome = with_tmp_dir(fn (dir: string) -> int {
+        // Skip only when the toolchain the nested build needs is missing.
+        if !_clang_available() { return -1; }
         let cache_dir = dir + "/cache";
         let ledger = dir + "/emit.ledger";
         let scratch_dir = dir + "/scratch";
@@ -106,9 +123,9 @@ test "dep-closure pre-warm: no dep module is emitted more than once under --jobs
         let exit = process.run_capture([_sfn_bin(), "test", _fixture_a(), _fixture_b(), "--jobs", "4", "--no-test-cache"], env_vec);
         let _out = process.capture_take_stdout();
         let _err = process.capture_take_stderr();
-        // Non-zero exit ⇒ the nested build/run could not complete (e.g. no
-        // clang/linker on PATH). The ledger can't be trusted; skip.
-        if exit != 0 { return -1; }
+        // Toolchain is present, so a non-zero exit is a real failure of the
+        // nested `sfn test` (not an environmental skip) — surface it.
+        if exit != 0 { return 3; }
         // Healthy run on a COLD cache: every dep module is a miss→emit→
         // store, so the ledger MUST be non-empty. An empty ledger on a
         // clean exit means a change suppressed emits (including the
@@ -118,10 +135,10 @@ test "dep-closure pre-warm: no dep module is emitted more than once under --jobs
         return _has_duplicate(lines);
     });
     if outcome == -1 {
-        // Environmental skip: the nested toolchain could not build.
+        // Skip: the nested toolchain (clang) is not installed.
         assert true;
     } else {
-        // 0 pass; 1 stampede/duplicate; 2 emits suppressed (vacuous).
+        // 0 pass; 1 stampede/duplicate; 2 emits suppressed; 3 nested run failed.
         assert outcome == 0;
     }
 }

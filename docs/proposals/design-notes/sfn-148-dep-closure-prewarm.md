@@ -15,7 +15,7 @@ compiler dep closure (parser/typecheck/effect_checker/…). On a **cold** shared
 module `.ll` cache the first concurrent wave all LLVM-emit the same closure
 before any cache write lands — an 8× CPU / 5.8× wall stampede at jobs 8.
 
-## Decision: (a) parent pre-warm — rejected (b) single-flight lock
+## Decision: chose (a) parent pre-warm; rejected (b) single-flight lock
 
 Before fanning out children, the parent resolves the **union** dep closure across
 all test files (per resolver group) and compiles each unique module once into the
@@ -52,7 +52,7 @@ subprocess-per-module isolation + parallel-fan for free (large closure ⇒ non-e
 
 The warm call is thus byte-identical to the child's line 1028 except `entry_paths`
 is the whole group's file list. That multi-file-group shape of
-`prepare_project_capsules_for_test` is already the exercised in-process path
+`prepare_project_capsules_for_test` is already exercised in the in-process path
 (line 1028), and it only resolves + compiles module `.ll`s (no link, no run), so it
 sidesteps the resolver-union execution conflict (`test.sfn` ~560) that the
 subprocess fan-out exists to avoid.
