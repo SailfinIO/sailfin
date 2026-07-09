@@ -12,7 +12,7 @@
 // pulling the native-IR parser graph (which reaches `string_utils`)
 // through a second path.
 //
-// Diamond rule for callers: `cli_check.sfn` is the only consumer in
+// Diamond rule for callers: `check/engine.sfn` is the only consumer in
 // Track A2. Other callers should audit transitive import paths to
 // `string_utils` before adopting — `sfn test` does not dedupe shared
 // modules across import paths, so two reachable copies trigger

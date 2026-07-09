@@ -7,10 +7,10 @@
 // other Phase B commands (`lock`, `package`, `config`, `emit`) extended.
 //
 // `run` reconstructs the legacy positional args slice and delegates to
-// `handle_check_command(args, binary_dir)` in `cli_check.sfn` **verbatim**
+// `handle_check_command(args, binary_dir)` in `check/engine.sfn` **verbatim**
 // — output, the `--json` envelope schema, and exit codes are
 // byte-identical to today (parity oracles: the `check_*_test.sfn` family
-// under `compiler/tests/e2e/`). The handler stays in `cli_check.sfn` and
+// under `compiler/tests/e2e/`). The handler stays in `check/engine.sfn` and
 // is reused as-is; this migration is the `command_def()` + dispatch
 // wiring, not a rewrite.
 //
@@ -38,7 +38,7 @@ import {
     with_flag
 } from "sfn/cli";
 
-import { handle_check_command } from "../../cli_check";
+import { handle_check_command } from "../../check/engine";
 import { CliContext } from "../context";
 
 // The `sfn/cli` definition for `check`, registered on the v2 root via
