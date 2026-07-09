@@ -79,7 +79,7 @@ When in doubt, author a throwaway test that imports the symbol and run
 it under the cap:
 
 ```bash
-timeout 60 build/native/sailfin test /tmp/probe_test.sfn
+timeout 60 build/bin/sfn test /tmp/probe_test.sfn
 ```
 
 A light import links and passes in seconds; a heavy import surfaces as an

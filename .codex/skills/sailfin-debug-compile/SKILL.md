@@ -9,7 +9,7 @@ Use this skill whenever `sfn check`, `make compile`, a single `.sfn` build, or L
 
 ## Phase 1 — Isolate
 
-- For frontend errors, start with `sfn check <file>` or `build/native/sailfin check <file>`.
+- For frontend errors, start with `sfn check <file>` or `build/bin/sfn check <file>`.
 - For a direct compile/run reproduction, wrap the compiler invocation with `timeout 60`.
 - For self-hosting failures, capture the failing `make compile` output and preserve the log path.
 

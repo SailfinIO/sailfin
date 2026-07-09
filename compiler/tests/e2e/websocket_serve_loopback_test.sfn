@@ -63,7 +63,7 @@ fn _lb_port2_str() -> string { return "18885"; }
 fn _sfn_bin() -> string ![io] {
     let configured = env.get("SAILFIN_BIN");
     if configured.length > 0 { return configured; }
-    return "build/native/sailfin";
+    return "build/bin/sfn";
 }
 
 // `run_capture`/`spawn_with_env`'s empty env is the EMPTY environment, not

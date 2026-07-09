@@ -34,7 +34,7 @@ import { find } from "sfn/strings";
 fn _sfn_bin() -> string ![io] {
     let configured = env.get("SAILFIN_BIN");
     if configured.length > 0 { return configured; }
-    return "build/native/sailfin";
+    return "build/bin/sfn";
 }
 
 test "guillermo: command exits 0" ![io] {

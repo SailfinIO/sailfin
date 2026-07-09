@@ -4,7 +4,7 @@ routinely forget this step and discover it via a red CI run after pushing.
 
 Before committing changes that touch any `.sfn` file:
 
-1. Run `sfn fmt --write <files>` (or `build/native/sailfin fmt --write
+1. Run `sfn fmt --write <files>` (or `build/bin/sfn fmt --write
    compiler/src/ runtime/`) on every modified file. The formatter is
    zero-configuration — there is no formatting decision to make.
 2. Then run `sfn fmt --check` on the same paths to confirm a clean

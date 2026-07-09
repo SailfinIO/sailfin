@@ -14,7 +14,7 @@ set -euo pipefail
 #   bash scripts/bench_compile.sh --csv build/bench.csv
 #   bash scripts/bench_compile.sh --budget-time 60 --budget-mem 512000
 
-SEED="${SEED:-build/native/sailfin}"
+SEED="${SEED:-build/bin/sfn}"
 WORK_DIR="${WORK_DIR:-build/bench}"
 IMPORT_CONTEXT="${IMPORT_CONTEXT:-build/native/import-context}"
 CSV_OUT=""

@@ -24,7 +24,7 @@
 //      stage3 are compared (reusing the `--check-determinism` diff
 //      structs/renderers from `build_report.sfn`).
 //   5. promotion: the validated seedcheck binary is copied over the
-//      canonical `build/native/sailfin`.
+//      canonical `build/bin/sfn`.
 //
 // Per-stage isolation is load-bearing: the per-module `.ll` scratch
 // root is resolved from `SAILFIN_TEST_SCRATCH` (not `--work-dir`) by
@@ -69,10 +69,10 @@ struct SelfhostConfig {
 fn _selfhost_default_config() -> SelfhostConfig {
     return SelfhostConfig {
         work_dir: "build/selfhost",
-        first_pass: "build/native/sailfin",
-        seedcheck_out: "build/native/sailfin-seedcheck",
-        stage3_out: "build/native/sailfin-stage3",
-        promote_to: "build/native/sailfin",
+        first_pass: "build/bin/sfn",
+        seedcheck_out: "build/bin/sfn-seedcheck",
+        stage3_out: "build/bin/sfn-stage3",
+        promote_to: "build/bin/sfn",
         smoke_timeout: "10",
         json: false,
         no_promote: false,

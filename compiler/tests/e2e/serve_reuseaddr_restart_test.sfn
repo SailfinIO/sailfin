@@ -53,7 +53,7 @@ fn _rr_port_str() -> string { return "18791"; }
 fn _sfn_bin() -> string ![io] {
     let configured = env.get("SAILFIN_BIN");
     if configured.length > 0 { return configured; }
-    return "build/native/sailfin";
+    return "build/bin/sfn";
 }
 
 // The nested build LINKS a binary (clang + ld), so thread the parent's

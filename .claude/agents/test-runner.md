@@ -19,7 +19,7 @@ prefix is needed.
 For single-file compiler invocations, wrap with `timeout 60` (hang guard):
 
 ```bash
-timeout 60 build/native/sailfin run path/to/file.sfn
+timeout 60 build/bin/sfn run path/to/file.sfn
 ```
 
 For `make` targets, the Makefile handles its own timeouts:
@@ -40,7 +40,7 @@ make test
 | `make compile` | Self-hosting check (compiler compiles itself) | Before committing any `compiler/src/*.sfn` change (self-host invariant) |
 | `make check` | Full triple-pass validation (build + test + seedcheck) | Before declaring a feature shipped, before a release, or after a structural change |
 
-**Validation ladder — don't skip to the slow gate.** `sfn check` and `make check` are different tools: `sfn check` is a fast static lint (catches type/effect/parse errors without emitting IR or proving self-host), while `make check` is the heavyweight self-host + suite gate (~15–20 min). Iterate with `sfn check <the-files-you-touched>` for immediate feedback, run `make compile` to confirm self-host before committing, and reserve `make check` for ship/release/structural validation. Use `build/native/sailfin check <path>` if `sfn` is not on `PATH`.
+**Validation ladder — don't skip to the slow gate.** `sfn check` and `make check` are different tools: `sfn check` is a fast static lint (catches type/effect/parse errors without emitting IR or proving self-host), while `make check` is the heavyweight self-host + suite gate (~15–20 min). Iterate with `sfn check <the-files-you-touched>` for immediate feedback, run `make compile` to confirm self-host before committing, and reserve `make check` for ship/release/structural validation. Use `build/bin/sfn check <path>` if `sfn` is not on `PATH`.
 
 Test files live in:
 - `compiler/tests/unit/` — Unit tests for individual compiler modules
@@ -73,13 +73,13 @@ When tests fail:
 To run a specific test file:
 
 ```bash
-timeout 60 build/native/sailfin test compiler/tests/unit/specific_test.sfn
+timeout 60 build/bin/sfn test compiler/tests/unit/specific_test.sfn
 ```
 
 To run a specific example:
 
 ```bash
-timeout 60 build/native/sailfin run examples/basics/hello-world.sfn
+timeout 60 build/bin/sfn run examples/basics/hello-world.sfn
 ```
 
 ## What to Report

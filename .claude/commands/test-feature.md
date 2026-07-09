@@ -13,7 +13,7 @@ Run targeted tests for a specific compiler feature or area.
 
 2. Run the targeted tests:
    ```
-   timeout 60 build/native/sailfin test <test_file>
+   timeout 60 build/bin/sfn test <test_file>
    ```
 
 3. If tests pass, also run the full suite to check for regressions:

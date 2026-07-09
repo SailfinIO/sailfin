@@ -10,15 +10,15 @@ cd "$repo_root"
 
 printf '## Sailfin Codex session bootstrap\n'
 
-if [[ -x build/native/sailfin ]]; then
-  version=$(timeout 5 build/native/sailfin version 2>/dev/null | head -n1 || true)
+if [[ -x build/bin/sfn ]]; then
+  version=$(timeout 5 build/bin/sfn version 2>/dev/null | head -n1 || true)
   if [[ -n "$version" ]]; then
-    printf -- '- compiler: build/native/sailfin present — %s\n' "$version"
+    printf -- '- compiler: build/bin/sfn present — %s\n' "$version"
   else
-    printf -- '- compiler: build/native/sailfin present — version probe failed\n'
+    printf -- '- compiler: build/bin/sfn present — version probe failed\n'
   fi
 else
-  printf -- '- compiler: build/native/sailfin MISSING — run `make compile` to self-host from the seed\n'
+  printf -- '- compiler: build/bin/sfn MISSING — run `make compile` to self-host from the seed\n'
 fi
 
 if compgen -G 'build/seed/*' >/dev/null; then
@@ -27,8 +27,8 @@ else
   printf -- '- seed: MISSING — run `make fetch-seed` if a build needs the released seed\n'
 fi
 
-if [[ -x build/native/sailfin-seedcheck ]]; then
-  printf -- '- seedcheck: build/native/sailfin-seedcheck present\n'
+if [[ -x build/bin/sfn-seedcheck ]]; then
+  printf -- '- seedcheck: build/bin/sfn-seedcheck present\n'
 else
   printf -- '- seedcheck: not built (only needed for `make check`)\n'
 fi

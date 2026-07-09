@@ -281,7 +281,7 @@ Flow:
    `native_driver.c`) plus `runtime_globals.ll` and the Sailfin
    `runtime/prelude.sfn` (compiled separately to `prelude.o`) are compiled.
 8. **Final link.** `clang` links the compiler object, the runtime objects,
-   and the prelude object into `build/native/sailfin`.
+   and the prelude object into `build/bin/sfn`.
 
 ### 1.2 Building a user program (`sfn build`, `sfn run`)
 
@@ -1176,7 +1176,7 @@ Its only job is to put the schema on disk so Stage B can lean on it.
 - `ulimit -v 8388608 && make compile` — unchanged behavior.
 - `ulimit -v 8388608 && make test-unit` — new tests pass.
 - `ulimit -v 8388608 && make check` — fixed-point still holds.
-- Manual: `build/native/sailfin emit native workspace.toml` is **not**
+- Manual: `build/bin/sfn emit native workspace.toml` is **not**
   expected to do anything meaningful; this stage adds parsing, not
   loading semantics.
 

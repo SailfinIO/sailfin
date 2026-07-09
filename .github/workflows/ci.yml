@@ -269,7 +269,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          paths="build/native/sailfin build/native/import-context"
+          paths="build/bin/sfn build/native/import-context"
           if [ -f build/native/.build-stamp ]; then
             paths="$paths build/native/.build-stamp"
           fi
@@ -371,7 +371,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          paths="build/native/sailfin build/native/import-context"
+          paths="build/bin/sfn build/native/import-context"
           if [ -f build/native/.build-stamp ]; then
             paths="$paths build/native/.build-stamp"
           fi
@@ -472,9 +472,9 @@ jobs:
           # env) and fails -> status != "pass" -> the test aborts (134).
           # The binary IS up-to-date for this commit, so mark it current
           # and `make compile` becomes the intended no-op.
-          touch build/native/sailfin
+          touch build/bin/sfn
           [ -f build/native/.build-stamp ] && touch build/native/.build-stamp || true
-          ls -lh build/native/sailfin
+          ls -lh build/bin/sfn
 
       # Per-shard test-binary cache restore (#2008, SFEP-0044). The
       # build-tree artifact deliberately excludes build/cache/test-bin;
@@ -518,9 +518,9 @@ jobs:
         shell: bash {0}
         run: |
           set -euo pipefail
-          ls -lh build/native/sailfin
-          (file build/native/sailfin || true)
-          build/native/sailfin version || build/native/sailfin --version || true
+          ls -lh build/bin/sfn
+          (file build/bin/sfn || true)
+          build/bin/sfn version || build/bin/sfn --version || true
 
       # Examples regression sweep (epic #549). Every runnable example under
       # examples/ must still `check` + `run` end-to-end. The KNOWN_FAILING
@@ -555,7 +555,7 @@ jobs:
           fail=0
 
           # --- Missing-effect input must fail `sailfin check`. ---
-          if out="$(build/native/sailfin check "$BAD" 2>&1)"; then
+          if out="$(build/bin/sfn check "$BAD" 2>&1)"; then
             echo "[effect-gate] FAIL: sailfin check on $BAD exited 0 (expected non-zero)."
             echo "$out"
             fail=$((fail + 1))
@@ -575,7 +575,7 @@ jobs:
           fi
 
           # --- Missing-effect input must also fail `sailfin emit llvm`. ---
-          if build/native/sailfin emit llvm "$BAD" >/dev/null 2>&1; then
+          if build/bin/sfn emit llvm "$BAD" >/dev/null 2>&1; then
             echo "[effect-gate] FAIL: sailfin emit llvm on $BAD exited 0 (expected non-zero)."
             fail=$((fail + 1))
           else
@@ -583,7 +583,7 @@ jobs:
           fi
 
           # --- Clean-file control must succeed. ---
-          if ! ok_out="$(build/native/sailfin check "$OK" 2>&1)"; then
+          if ! ok_out="$(build/bin/sfn check "$OK" 2>&1)"; then
             echo "[effect-gate] FAIL: sailfin check on $OK exited non-zero (expected 0)."
             echo "$ok_out"
             fail=$((fail + 1))
@@ -611,7 +611,7 @@ jobs:
           fail=0
           # Per-file loop to avoid OOM on bulk --check
           while IFS= read -r f; do
-            if ! build/native/sailfin fmt --check "$f" > /dev/null 2>&1; then
+            if ! build/bin/sfn fmt --check "$f" > /dev/null 2>&1; then
               echo "[fmt] needs formatting: $f"
               fail=$((fail + 1))
             fi
@@ -647,7 +647,7 @@ jobs:
           )
           fail=0
           for f in "${canary_files[@]}"; do
-            if ! log="$(build/native/sailfin emit llvm "$f" 2>&1 1>/dev/null)"; then
+            if ! log="$(build/bin/sfn emit llvm "$f" 2>&1 1>/dev/null)"; then
               echo "[canary] emit crashed for $f"
               fail=$((fail + 1))
               continue
@@ -683,7 +683,7 @@ jobs:
         shell: bash {0}
         run: |
           set -euo pipefail
-          build/native/sailfin check compiler/src runtime
+          build/bin/sfn check compiler/src runtime
 
       - name: Fixed-point rebuild check (linux-x86_64)
         if: >-
@@ -713,31 +713,31 @@ jobs:
           rm -rf build/selfhost/native-selfhost1 build/selfhost/native-selfhost2
           mkdir -p build/selfhost/native-selfhost1 build/selfhost/native-selfhost2
           SAILFIN_TEST_SCRATCH="build/selfhost/native-selfhost1/scratch" \
-            build/native/sailfin build --no-cache -p compiler \
+            build/bin/sfn build --no-cache -p compiler \
               --work-dir build/selfhost/native-selfhost1 \
-              -o build/native/sailfin-selfhost1
+              -o build/bin/sfn-selfhost1
           SAILFIN_TEST_SCRATCH="build/selfhost/native-selfhost2/scratch" \
-            build/native/sailfin-selfhost1 build --no-cache -p compiler \
+            build/bin/sfn-selfhost1 build --no-cache -p compiler \
               --work-dir build/selfhost/native-selfhost2 \
-              -o build/native/sailfin-selfhost2
-          ls -lh build/native/sailfin-selfhost1 build/native/sailfin-selfhost2
-          (file build/native/sailfin-selfhost1 build/native/sailfin-selfhost2 || true)
-          build/native/sailfin-selfhost1 version || true
-          build/native/sailfin-selfhost2 version || true
+              -o build/bin/sfn-selfhost2
+          ls -lh build/bin/sfn-selfhost1 build/bin/sfn-selfhost2
+          (file build/bin/sfn-selfhost1 build/bin/sfn-selfhost2 || true)
+          build/bin/sfn-selfhost1 version || true
+          build/bin/sfn-selfhost2 version || true
           echo "[ci] fixed-point sha256:"
-          (sha256sum build/native/sailfin-selfhost1 build/native/sailfin-selfhost2 2>/dev/null || shasum -a 256 build/native/sailfin-selfhost1 build/native/sailfin-selfhost2)
+          (sha256sum build/bin/sfn-selfhost1 build/bin/sfn-selfhost2 2>/dev/null || shasum -a 256 build/bin/sfn-selfhost1 build/bin/sfn-selfhost2)
           if [ "${RUNNER_OS}" = "Linux" ]; then
-            if ! cmp -s build/native/sailfin-selfhost1 build/native/sailfin-selfhost2; then
+            if ! cmp -s build/bin/sfn-selfhost1 build/bin/sfn-selfhost2; then
               echo "[ci][error] fixed-point rebuild mismatch (binaries differ)" >&2
-              (cmp -l build/native/sailfin-selfhost1 build/native/sailfin-selfhost2 | head -n 20 || true)
+              (cmp -l build/bin/sfn-selfhost1 build/bin/sfn-selfhost2 | head -n 20 || true)
               exit 1
             fi
           else
             # macOS binaries (Mach-O) embed a per-link UUID (LC_UUID), so byte-for-byte
             # equality is not a stable determinism signal. Instead, assert the second
             # selfhosted compiler can run a minimal unit test.
-            (dwarfdump --uuid build/native/sailfin-selfhost1 build/native/sailfin-selfhost2 || true)
-            build/native/sailfin-selfhost2 test compiler/tests/unit/cli_version_test.sfn
+            (dwarfdump --uuid build/bin/sfn-selfhost1 build/bin/sfn-selfhost2 || true)
+            build/bin/sfn-selfhost2 test compiler/tests/unit/cli_version_test.sfn
           fi
 
       # NOTE (#1234): the Windows cross-compile + its installer upload
@@ -840,9 +840,9 @@ jobs:
           # env) and fails -> status != "pass" -> the test aborts (134).
           # The binary IS up-to-date for this commit, so mark it current
           # and `make compile` becomes the intended no-op.
-          touch build/native/sailfin
+          touch build/bin/sfn
           [ -f build/native/.build-stamp ] && touch build/native/.build-stamp || true
-          ls -lh build/native/sailfin
+          ls -lh build/bin/sfn
 
       # Per-shard test-binary cache restore (#2008, SFEP-0044) — same
       # contract as the Linux leg: prefix-restore from the latest prior
@@ -913,9 +913,9 @@ jobs:
         shell: bash {0}
         run: |
           set -euo pipefail
-          ls -lh build/native/sailfin
-          (file build/native/sailfin || true)
-          build/native/sailfin version || build/native/sailfin --version || true
+          ls -lh build/bin/sfn
+          (file build/bin/sfn || true)
+          build/bin/sfn version || build/bin/sfn --version || true
 
       # Regression guard for #615 / #807 — see the build-linux twin for
       # the full background. Runs on macOS arm64 too because the
@@ -930,7 +930,7 @@ jobs:
           fail=0
 
           # --- Missing-effect input must fail `sailfin check`. ---
-          if out="$(build/native/sailfin check "$BAD" 2>&1)"; then
+          if out="$(build/bin/sfn check "$BAD" 2>&1)"; then
             echo "[effect-gate] FAIL: sailfin check on $BAD exited 0 (expected non-zero)."
             echo "$out"
             fail=$((fail + 1))
@@ -950,7 +950,7 @@ jobs:
           fi
 
           # --- Missing-effect input must also fail `sailfin emit llvm`. ---
-          if build/native/sailfin emit llvm "$BAD" >/dev/null 2>&1; then
+          if build/bin/sfn emit llvm "$BAD" >/dev/null 2>&1; then
             echo "[effect-gate] FAIL: sailfin emit llvm on $BAD exited 0 (expected non-zero)."
             fail=$((fail + 1))
           else
@@ -958,7 +958,7 @@ jobs:
           fi
 
           # --- Clean-file control must succeed. ---
-          if ! ok_out="$(build/native/sailfin check "$OK" 2>&1)"; then
+          if ! ok_out="$(build/bin/sfn check "$OK" 2>&1)"; then
             echo "[effect-gate] FAIL: sailfin check on $OK exited non-zero (expected 0)."
             echo "$ok_out"
             fail=$((fail + 1))
@@ -986,7 +986,7 @@ jobs:
           fail=0
           # Per-file loop to avoid OOM on bulk --check
           while IFS= read -r f; do
-            if ! build/native/sailfin fmt --check "$f" > /dev/null 2>&1; then
+            if ! build/bin/sfn fmt --check "$f" > /dev/null 2>&1; then
               echo "[fmt] needs formatting: $f"
               fail=$((fail + 1))
             fi
@@ -1016,7 +1016,7 @@ jobs:
           )
           fail=0
           for f in "${canary_files[@]}"; do
-            if ! log="$(build/native/sailfin emit llvm "$f" 2>&1 1>/dev/null)"; then
+            if ! log="$(build/bin/sfn emit llvm "$f" 2>&1 1>/dev/null)"; then
               echo "[canary] emit crashed for $f"
               fail=$((fail + 1))
               continue
@@ -1046,7 +1046,7 @@ jobs:
         shell: bash {0}
         run: |
           set -euo pipefail
-          build/native/sailfin check compiler/src runtime
+          build/bin/sfn check compiler/src runtime
 
       - name: Enable test runner trace (macOS)
         if: ${{ matrix.primary }}
@@ -1063,7 +1063,7 @@ jobs:
         shell: bash {0}
         run: |
           set -euo pipefail
-          build/native/sailfin test compiler/tests/unit/cli_version_test.sfn
+          build/bin/sfn test compiler/tests/unit/cli_version_test.sfn
 
       - name: Fixed-point rebuild check (macos-arm64)
         if: >-
@@ -1093,31 +1093,31 @@ jobs:
           rm -rf build/selfhost/native-selfhost1 build/selfhost/native-selfhost2
           mkdir -p build/selfhost/native-selfhost1 build/selfhost/native-selfhost2
           SAILFIN_TEST_SCRATCH="build/selfhost/native-selfhost1/scratch" \
-            build/native/sailfin build --no-cache -p compiler \
+            build/bin/sfn build --no-cache -p compiler \
               --work-dir build/selfhost/native-selfhost1 \
-              -o build/native/sailfin-selfhost1
+              -o build/bin/sfn-selfhost1
           SAILFIN_TEST_SCRATCH="build/selfhost/native-selfhost2/scratch" \
-            build/native/sailfin-selfhost1 build --no-cache -p compiler \
+            build/bin/sfn-selfhost1 build --no-cache -p compiler \
               --work-dir build/selfhost/native-selfhost2 \
-              -o build/native/sailfin-selfhost2
-          ls -lh build/native/sailfin-selfhost1 build/native/sailfin-selfhost2
-          (file build/native/sailfin-selfhost1 build/native/sailfin-selfhost2 || true)
-          build/native/sailfin-selfhost1 version || true
-          build/native/sailfin-selfhost2 version || true
+              -o build/bin/sfn-selfhost2
+          ls -lh build/bin/sfn-selfhost1 build/bin/sfn-selfhost2
+          (file build/bin/sfn-selfhost1 build/bin/sfn-selfhost2 || true)
+          build/bin/sfn-selfhost1 version || true
+          build/bin/sfn-selfhost2 version || true
           echo "[ci] fixed-point sha256:"
-          (sha256sum build/native/sailfin-selfhost1 build/native/sailfin-selfhost2 2>/dev/null || shasum -a 256 build/native/sailfin-selfhost1 build/native/sailfin-selfhost2)
+          (sha256sum build/bin/sfn-selfhost1 build/bin/sfn-selfhost2 2>/dev/null || shasum -a 256 build/bin/sfn-selfhost1 build/bin/sfn-selfhost2)
           if [ "${RUNNER_OS}" = "Linux" ]; then
-            if ! cmp -s build/native/sailfin-selfhost1 build/native/sailfin-selfhost2; then
+            if ! cmp -s build/bin/sfn-selfhost1 build/bin/sfn-selfhost2; then
               echo "[ci][error] fixed-point rebuild mismatch (binaries differ)" >&2
-              (cmp -l build/native/sailfin-selfhost1 build/native/sailfin-selfhost2 | head -n 20 || true)
+              (cmp -l build/bin/sfn-selfhost1 build/bin/sfn-selfhost2 | head -n 20 || true)
               exit 1
             fi
           else
             # macOS binaries (Mach-O) embed a per-link UUID (LC_UUID), so byte-for-byte
             # equality is not a stable determinism signal. Instead, assert the second
             # selfhosted compiler can run a minimal unit test.
-            (dwarfdump --uuid build/native/sailfin-selfhost1 build/native/sailfin-selfhost2 || true)
-            build/native/sailfin-selfhost2 test compiler/tests/unit/cli_version_test.sfn
+            (dwarfdump --uuid build/bin/sfn-selfhost1 build/bin/sfn-selfhost2 || true)
+            build/bin/sfn-selfhost2 test compiler/tests/unit/cli_version_test.sfn
           fi
 
       - name: Upload native artifacts

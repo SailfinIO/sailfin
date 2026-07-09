@@ -8,11 +8,11 @@ cd "${CLAUDE_PROJECT_DIR:-$(pwd)}"
 
 echo "## Sailfin session bootstrap"
 
-if [[ -x build/native/sailfin ]]; then
-  version=$(timeout 5 build/native/sailfin version 2>/dev/null | head -n1 || echo "(version probe failed)")
-  echo "- compiler: build/native/sailfin present — $version"
+if [[ -x build/bin/sfn ]]; then
+  version=$(timeout 5 build/bin/sfn version 2>/dev/null | head -n1 || echo "(version probe failed)")
+  echo "- compiler: build/bin/sfn present — $version"
 else
-  echo "- compiler: build/native/sailfin MISSING — run \`make compile\` to self-host from the seed"
+  echo "- compiler: build/bin/sfn MISSING — run \`make compile\` to self-host from the seed"
 fi
 
 if compgen -G "build/seed/*" >/dev/null; then
@@ -21,8 +21,8 @@ else
   echo "- seed: MISSING — run \`make fetch-seed\`"
 fi
 
-if [[ -x build/native/sailfin-seedcheck ]]; then
-  echo "- seedcheck: build/native/sailfin-seedcheck present"
+if [[ -x build/bin/sfn-seedcheck ]]; then
+  echo "- seedcheck: build/bin/sfn-seedcheck present"
 else
   echo "- seedcheck: not built (only needed for \`make check\`)"
 fi

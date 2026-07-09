@@ -21,7 +21,7 @@ set -euo pipefail
 #   bash scripts/bench_runtime.sh --csv build/runtime.csv
 #   bash scripts/bench_runtime.sh --top 3 --budget-time 1000 --budget-mem 512000
 
-SEED="${SEED:-build/native/sailfin}"
+SEED="${SEED:-build/bin/sfn}"
 WORK_DIR="${WORK_DIR:-build/bench-runtime}"
 CSV_OUT=""
 TOP_N=0

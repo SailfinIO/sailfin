@@ -297,7 +297,7 @@ fn exe_path() -> * u8 ![io] {
 // `binary_dir(exe_path)` in this exact order:
 //
 //   1. `<exe_dir>/runtime`         — dev-tree (the binary at
-//                                     `build/native/sailfin`
+//                                     `build/bin/sfn`
 //                                     sits next to
 //                                     `build/native/runtime/`).
 //   2. `<exe_dir>/../runtime`      — installed tree (binary at

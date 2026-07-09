@@ -591,22 +591,22 @@ the file list is the implementation map for R.1–R.5.)
 ```bash
 # After R.1 (parser/AST only — no prelude change yet):
 ulimit -v 8388608 && make compile
-ulimit -v 8388608 && timeout 60 build/native/sailfin test compiler/tests/unit/result_parse_test.sfn
+ulimit -v 8388608 && timeout 60 build/bin/sfn test compiler/tests/unit/result_parse_test.sfn
 
 # After R.2 (generic enum monomorphisation + prelude Result/Error):
-ulimit -v 8388608 && timeout 60 build/native/sailfin test compiler/tests/unit/result_enum_lowering_test.sfn
+ulimit -v 8388608 && timeout 60 build/bin/sfn test compiler/tests/unit/result_enum_lowering_test.sfn
 
 # After R.3 (type rules):
-ulimit -v 8388608 && timeout 60 build/native/sailfin test compiler/tests/unit/result_question_typecheck_test.sfn
+ulimit -v 8388608 && timeout 60 build/bin/sfn test compiler/tests/unit/result_question_typecheck_test.sfn
 
 # After R.4 (emitter):
-ulimit -v 8388608 && timeout 60 build/native/sailfin test compiler/tests/integration/result_types_test.sfn
+ulimit -v 8388608 && timeout 60 build/bin/sfn test compiler/tests/integration/result_types_test.sfn
 
 # Full self-host + suite:
 make clean-build && make check
 
 # Formatting gate (every touched .sfn):
-build/native/sailfin fmt --check compiler/src/ runtime/
+build/bin/sfn fmt --check compiler/src/ runtime/
 ```
 
 ## Test Plan (R.1–R.5 round-trip cases)

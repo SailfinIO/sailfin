@@ -92,12 +92,12 @@ sfn selfhost [--work-dir DIR] [--first-pass BIN] [--seedcheck-out BIN]
 
 Defaults reproduce the current Makefile paths byte-for-byte:
 - `--work-dir build/selfhost`
-- `--first-pass build/native/sailfin` (the binary `make compile` produced; also
+- `--first-pass build/bin/sfn` (the binary `make compile` produced; also
   the running `sfn` — but we take it as a flag so the seed-vs-self distinction
   is explicit and testable)
-- `--seedcheck-out build/native/sailfin-seedcheck`
-- `--stage3-out build/native/sailfin-stage3`
-- `--promote-to build/native/sailfin`
+- `--seedcheck-out build/bin/sfn-seedcheck`
+- `--stage3-out build/bin/sfn-stage3`
+- `--promote-to build/bin/sfn`
 - `--timeout` = unset (no per-build timeout) unless provided; Make threads its
   `TIMEOUT_CMD` budget in.
 
@@ -162,7 +162,7 @@ binary. The orchestration is a straight port of the Makefile data-flow:
 2. **Stage2 (seedcheck) build:** spawn
    `sh -c "SAILFIN_TEST_SCRATCH=<s2-scratch> <first_pass> build --no-cache -p compiler --work-dir <s2-dir> -o <seedcheck-out>"`.
    The orchestrator may itself BE the first-pass binary (`make compile`
-   promotes it to `build/native/sailfin`), but it still spawns the named binary
+   promotes it to `build/bin/sfn`), but it still spawns the named binary
    as a subprocess rather than re-entering its own `build` codepath — this keeps
    the three stages as three honest, separately-resolvable binaries (mirrors
    `_run_determinism_pass2`'s "spawn the resolved self_exe" model,
@@ -273,17 +273,17 @@ The new `.ll`-dir snapshot loader (`_selfhost_snapshot_from_ll_dir`) lives in
 check-impl:
 	@$(MAKE) compile NATIVE_OPT="$(SELFHOST1_OPT)"
 	@echo "[check] running test suite on first-pass binary (early gate)..."
-	@$(MAKE) test NATIVE_BIN=build/native/sailfin TEST_BIN_CACHE_FLAGS=--no-test-cache TEST_JOBS=$(CHECK_TEST_JOBS)
+	@$(MAKE) test NATIVE_BIN=build/bin/sfn TEST_BIN_CACHE_FLAGS=--no-test-cache TEST_JOBS=$(CHECK_TEST_JOBS)
 	@echo "[check] verifying self-host (stage2/stage3 fixed point)..."
-	@build/native/sailfin selfhost \
+	@build/bin/sfn selfhost \
 		--work-dir build/selfhost \
-		--first-pass build/native/sailfin \
-		--seedcheck-out build/native/sailfin-seedcheck \
-		--stage3-out build/native/sailfin-stage3 \
-		--promote-to build/native/sailfin \
+		--first-pass build/bin/sfn \
+		--seedcheck-out build/bin/sfn-seedcheck \
+		--stage3-out build/bin/sfn-stage3 \
+		--promote-to build/bin/sfn \
 		$(SELFHOST_TIMEOUT_FLAG)
 	@echo "[check] running test suite with seedcheck binary..."
-	@$(MAKE) test NATIVE_BIN=build/native/sailfin-seedcheck TEST_BIN_CACHE_FLAGS=--no-test-cache TEST_JOBS=$(CHECK_TEST_JOBS)
+	@$(MAKE) test NATIVE_BIN=build/bin/sfn-seedcheck TEST_BIN_CACHE_FLAGS=--no-test-cache TEST_JOBS=$(CHECK_TEST_JOBS)
 ```
 
 The **build + smoke + fixed-point diff + promote core is one `sfn selfhost`
@@ -366,9 +366,9 @@ most coverage:
   inherits this limitation; stage2/stage3 are always `-O2`. Not a regression
   (Make has the same gap today), but document it so nobody expects
   `--opt` to flow through.
-- **R2 — promotion safety:** promotion `cp -f seedcheck → build/native/sailfin`
+- **R2 — promotion safety:** promotion `cp -f seedcheck → build/bin/sfn`
   overwrites the canonical binary mid-`make check`. If `sfn selfhost` is itself
-  `build/native/sailfin` (the running process), overwriting its own on-disk image
+  `build/bin/sfn` (the running process), overwriting its own on-disk image
   is safe on Linux (the running inode persists), but `--no-promote` in tests
   avoids the question entirely. Keep promotion as the **last** step after the
   diff renders.

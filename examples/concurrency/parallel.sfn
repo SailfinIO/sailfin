@@ -6,7 +6,7 @@
 // shared slot via a top-level worker, and `main` reads the joined totals
 // after the fan-out returns (the join establishes happens-before).
 //
-// Run: build/native/sailfin run examples/concurrency/parallel.sfn
+// Run: build/bin/sfn run examples/concurrency/parallel.sfn
 let mut g_results: int[] = [0, 0];
 
 fn computeTask1() -> int {

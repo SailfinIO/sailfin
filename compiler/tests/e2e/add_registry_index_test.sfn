@@ -24,7 +24,7 @@ import { contains, split } from "sfn/strings";
 fn _sfn_bin() -> string ![io] {
     let configured = env.get("SAILFIN_BIN");
     if configured.length > 0 { return configured; }
-    return "build/native/sailfin";
+    return "build/bin/sfn";
 }
 
 // Absolute path of the runner's working directory (repo root).
@@ -37,7 +37,7 @@ fn _pwd() -> string ![io] {
 }
 
 // Absolute compiler path: the tests `cd` into a temp dir before running,
-// so a repo-relative `build/native/sailfin` would not resolve.
+// so a repo-relative `build/bin/sfn` would not resolve.
 fn _sfn_bin_abs() -> string ![io] {
     let bin = _sfn_bin();
     if bin.length > 0 && bin[0] == "/" { return bin; }

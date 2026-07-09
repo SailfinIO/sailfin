@@ -164,7 +164,7 @@ the 1.5-3 min build. Two options:
   because shards run concurrently. The only cost is runner-minute
   consumption (4x build instead of 1x). Acceptable for Phase 1; ship it.
 - **1b (Phase 2, optimization):** split the build into its own job that
-  uploads `build/native/sailfin` + `build/native/import-context` +
+  uploads `build/bin/sfn` + `build/native/import-context` +
   `build/cache` as a workflow artifact (or `actions/cache` with a
   per-run key), and have each shard `needs:` that job and download
   instead of rebuilding. Saves the redundant build runner-minutes and

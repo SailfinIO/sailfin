@@ -132,14 +132,14 @@ jobs:
           set -euo pipefail
           # `make rebuild` forces a clean self-host so the bench measures this
           # commit's compiler, not a cached one. It produces both
-          # build/native/sailfin and build/native/import-context (both required
+          # build/bin/sfn and build/native/import-context (both required
           # by the bench scripts).
           if [ -n "${{ inputs.build_jobs }}" ]; then
             make rebuild CLANG="${{ inputs.clang }}" SEED_NATIVE="build/seed/bin/sailfin" BUILD_JOBS="${{ inputs.build_jobs }}"
           else
             make rebuild CLANG="${{ inputs.clang }}" SEED_NATIVE="build/seed/bin/sailfin"
           fi
-          build/native/sailfin version
+          build/bin/sfn version
 
       - name: Prepare output dir
         shell: bash

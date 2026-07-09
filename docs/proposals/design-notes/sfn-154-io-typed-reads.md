@@ -325,8 +325,8 @@ No further splitting — one honest S/M issue, one PR, no seed cut.
   `compiler/src/llvm/runtime_helpers.sfn` (CI gate).
 - `make compile` — self-host from the pinned seed (mandatory for the io.sfn body +
   descriptor change; not structural, no `make clean-build`).
-- `build/native/sailfin test compiler/tests/integration/io_read_fd_test.sfn` and
-  `build/native/sailfin test compiler/tests/e2e/io_read_fd_effect_test.sfn` — the
+- `build/bin/sfn test compiler/tests/integration/io_read_fd_test.sfn` and
+  `build/bin/sfn test compiler/tests/e2e/io_read_fd_effect_test.sfn` — the
   retyped assertions, incl. the new EOF-null and blank-line cases and E0400.
 - `make check` — full triple-pass self-host + suite before declaring shipped.
 

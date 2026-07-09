@@ -34,13 +34,13 @@
 // is unavailable (e.g. macOS dev boxes) the spawn fails and the check
 // is skipped rather than failed — CI is Linux, where it is the
 // canonical path.
-import { with_tmp_dir } from "sfn/test";
 import { find } from "sfn/strings";
+import { with_tmp_dir } from "sfn/test";
 
 fn _sfn_bin() -> string ![io] {
     let configured = env.get("SAILFIN_BIN");
     if configured.length > 0 { return configured; }
-    return "build/native/sailfin";
+    return "build/bin/sfn";
 }
 
 fn _fixture_src() -> string ![io] {

@@ -19,8 +19,8 @@
 // (and on out-of-tree marker files that survive the temp-dir teardown) after
 // the closure returns — the `sfn/test` idiom (see
 // `compiler/tests/e2e/sailfin_main_entry_test.sfn`).
-import { with_tmp_dir } from "sfn/test";
 import { find } from "sfn/strings";
+import { with_tmp_dir } from "sfn/test";
 
 // The compiler-under-test: `$SAILFIN_BIN` if set, else the self-hosted
 // binary relative to the repo root the runner starts from. Mirrors
@@ -28,7 +28,7 @@ import { find } from "sfn/strings";
 fn _sfn_bin() -> string ![io] {
     let configured = env.get("SAILFIN_BIN");
     if configured.length > 0 { return configured; }
-    return "build/native/sailfin";
+    return "build/bin/sfn";
 }
 
 // A fresh marker-file path under the runner's scratch dir (or `/tmp`), with

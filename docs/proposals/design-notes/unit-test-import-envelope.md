@@ -75,7 +75,7 @@ missing symbol.
 
 Open question 2 asked for a live reproduction (build a light-import test and a
 heavy-import test, capture the actual error). **This could not be executed in the
-spike environment:** there is no prebuilt `build/native/sailfin` and no seed
+spike environment:** there is no prebuilt `build/bin/sfn` and no seed
 binary on disk (`.seed-version` pins `0.7.0-alpha.19` but `build/seed/` is
 empty), and a from-scratch `make compile` is a 60–90 min self-host that exceeds
 the spike's tooling budget. The root cause above is therefore established by
@@ -165,7 +165,7 @@ future test authors know which `compiler/src` modules are unit-test-linkable.
 1. At least one test in `check_tool_test.sfn` imports a real exported symbol from the `tools/check.sfn` analysis area's dependency graph (`diagnostics_render`'s `join_effects` / `code_for_missing_effect`, which `tools/check.sfn:29` itself imports) instead of a `_local_*` copy.
 2. The `_local_*` helpers that have a linkable real peer are deleted from `check_tool_test.sfn` (`_local_join_effects`, `_local_code_for_first_description`; optionally `_local_build_effect_message`). The header comment documents which helpers remain (`_local_num_to_string`, `_local_render_summary`) and that the reason is heavy import closure, not linker capability.
 3. Mutating the real symbol (e.g. changing `join_effects`'s separator or `code_for_missing_effect`'s prefix logic in `compiler/src/diagnostics_render.sfn`) makes the migrated test FAIL — proving it exercises the real code, not a copy. (Verified by a temporary local edit during review; reverted.)
-4. No new segfaults or link failures: `build/native/sailfin test compiler/tests/unit/check_tool_test.sfn` passes, and the full `make test-unit` is green.
+4. No new segfaults or link failures: `build/bin/sfn test compiler/tests/unit/check_tool_test.sfn` passes, and the full `make test-unit` is green.
 5. `docs/conventions/` describes the supported test-import envelope (which `src` modules/symbols are linkable from unit tests and why heavy ones are not).
 
 ### Files Affected (corrected)
@@ -187,26 +187,26 @@ ulimit -v 8388608; make compile
 
 # 1. LIVE ROOT-CAUSE REPRO (record outputs in the PR).
 #    Light import — expected to LINK + PASS:
-ulimit -v 8388608; timeout 60 build/native/sailfin test \
+ulimit -v 8388608; timeout 60 build/bin/sfn test \
   compiler/tests/unit/check_tool_test.sfn
 #    Heavy import — author a throwaway test importing `number_to_string`
 #    from ../../src/main (or render_summary from ../../src/tools/check)
 #    and capture the actual failure (undefined ref / OOM / timeout):
-ulimit -v 8388608; timeout 60 build/native/sailfin test /tmp/heavy_import_test.sfn
+ulimit -v 8388608; timeout 60 build/bin/sfn test /tmp/heavy_import_test.sfn
 
 # 2. Migrated canary passes:
-ulimit -v 8388608; timeout 60 build/native/sailfin test \
+ulimit -v 8388608; timeout 60 build/bin/sfn test \
   compiler/tests/unit/check_tool_test.sfn
 
 # 3. AC#3 mutation check (temporary): change the ", " separator in
 #    diagnostics_render.join_effects, rebuild, confirm the migrated test
 #    FAILS, then revert.
 ulimit -v 8388608; make compile && \
-  build/native/sailfin test compiler/tests/unit/check_tool_test.sfn   # expect FAIL, then revert
+  build/bin/sfn test compiler/tests/unit/check_tool_test.sfn   # expect FAIL, then revert
 
 # 4. Full unit suite green + formatting:
 ulimit -v 8388608; make test-unit
-ulimit -v 8388608; timeout 30 build/native/sailfin fmt --check \
+ulimit -v 8388608; timeout 30 build/bin/sfn fmt --check \
   compiler/tests/unit/check_tool_test.sfn
 ```
 

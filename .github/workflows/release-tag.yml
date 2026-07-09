@@ -154,7 +154,7 @@ jobs:
           set -euo pipefail
           # The compiler self-applies its 8 GiB memory budget on Linux
           # (#1291) — no step-level ulimit needed.
-          out="$(build/native/sailfin run examples/basics/hello-world.sfn)"
+          out="$(build/bin/sfn run examples/basics/hello-world.sfn)"
           echo "$out"
           if ! printf '%s' "$out" | grep -q "Hello, Sailfin!"; then
             echo "[ci][error] hello-world smoke failed: expected 'Hello, Sailfin!' in output" >&2
@@ -171,7 +171,7 @@ jobs:
             echo "[ci][error] compiler/capsule.toml has '$file_version', expected '$expected'" >&2
             exit 1
           fi
-          actual="$(build/native/sailfin version | sed -n 's/.*sfn //p')"
+          actual="$(build/bin/sfn version | sed -n 's/.*sfn //p')"
           if [ "$actual" != "$expected" ]; then
             echo "[ci][error] built compiler reports '$actual', expected '$expected'" >&2
             exit 1

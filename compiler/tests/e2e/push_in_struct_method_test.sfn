@@ -35,7 +35,7 @@ import { find } from "sfn/strings";
 fn _sfn_bin() -> string ![io] {
     let configured = env.get("SAILFIN_BIN");
     if configured.length > 0 { return configured; }
-    return "build/native/sailfin";
+    return "build/bin/sfn";
 }
 
 // Inherit the full parent environment so the nested clang/ld the build
@@ -66,8 +66,7 @@ fn _builder_src() -> string {
 }
 
 fn _main_src() -> string {
-    return "import { Builder } from \"./builder\";\n"
-        + "\n"
+    return "import { Builder } from \"./builder\";\n" + "\n"
         + "fn main() -> int ![io] {\n"
         + "    let b = Builder{};\n"
         + "    let out = b.make([\"a\", \"b\"]);\n"
@@ -77,9 +76,7 @@ fn _main_src() -> string {
 }
 
 fn _capsule_toml() -> string {
-    return "[capsule]\n"
-        + "name = \"pushcap1700\"\n"
-        + "version = \"0.1.0\"\n"
+    return "[capsule]\n" + "name = \"pushcap1700\"\n" + "version = \"0.1.0\"\n"
         + "\n"
         + "[capabilities]\n"
         + "allow = [\"io\"]\n";

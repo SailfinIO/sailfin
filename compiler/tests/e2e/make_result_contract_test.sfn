@@ -205,7 +205,7 @@ fn _fakeseed_script() -> string {
 test "make result: failed cold rebuild reports status=fail (no stale fallback)" ![io] {
     // #1192 regression: a failed cold self-host rebuild must make `make
     // compile` FAIL (status:"fail"), not silently fall back to the prior
-    // build/native/sailfin and report status:"pass". Force the rebuild
+    // build/bin/sfn and report status:"pass". Force the rebuild
     // branch (FORCE=1) with a stub seed; FORCE / SEED_NATIVE are read from
     // the child env by the recipe, not as make-command-line variables.
     let dir = _scratch_dir();

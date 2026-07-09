@@ -153,7 +153,7 @@ throttled.
 ## Building From Source
 
 The compiler self-hosts from a released seed binary. `make compile` fetches
-the seed if needed and builds `build/native/sailfin`.
+the seed if needed and builds `build/bin/sfn`.
 
 ```sh
 make compile          # Build the self-hosted native compiler
@@ -166,9 +166,9 @@ make clean            # Remove packaged artifacts under dist/
 After compiling:
 
 ```sh
-build/native/sailfin --version
-build/native/sailfin run examples/basics/hello-world.sfn
-build/native/sailfin check compiler/src/
+build/bin/sfn --version
+build/bin/sfn run examples/basics/hello-world.sfn
+build/bin/sfn check compiler/src/
 ```
 
 If installed:

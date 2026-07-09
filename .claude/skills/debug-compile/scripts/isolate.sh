@@ -21,8 +21,8 @@ fi
 
 cd "${CLAUDE_PROJECT_DIR:-$(pwd)}"
 
-if [[ ! -x build/native/sailfin ]]; then
-  echo "build/native/sailfin missing — run \`make compile\` first" >&2
+if [[ ! -x build/bin/sfn ]]; then
+  echo "build/bin/sfn missing — run \`make compile\` first" >&2
   exit 69
 fi
 
@@ -35,7 +35,7 @@ ll="build/debug/${base}.ll"
 ll_err="build/debug/${base}.ll.stderr"
 
 echo "==> emit native -> $asm"
-if timeout 60 build/native/sailfin emit native "$file" >"$asm" 2>"$asm_err"; then
+if timeout 60 build/bin/sfn emit native "$file" >"$asm" 2>"$asm_err"; then
   lines=$(wc -l <"$asm")
   echo "    ok ($lines lines of .sfn-asm)"
 else
@@ -45,7 +45,7 @@ else
 fi
 
 echo "==> emit llvm  -> $ll"
-if timeout 60 build/native/sailfin emit llvm "$file" >"$ll" 2>"$ll_err"; then
+if timeout 60 build/bin/sfn emit llvm "$file" >"$ll" 2>"$ll_err"; then
   lines=$(wc -l <"$ll")
   echo "    ok ($lines lines of LLVM IR)"
 else

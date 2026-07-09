@@ -30,7 +30,7 @@ orchestrator's job, not yours.
 2. Make the change with `Edit`/`Write`, one pipeline stage at a time when the
    spec spans stages (lexer → parser → ast → typecheck → effects → emit → llvm).
 3. After touching any `.sfn` file, run `sfn fmt --write` then `sfn fmt --check`
-   on it (`build/native/sailfin fmt ...` if `sfn` isn't on PATH), and
+   on it (`build/bin/sfn fmt ...` if `sfn` isn't on PATH), and
    `sfn check <files>` for fast static validation. Wrap single-file compiles with
    `timeout 60`. (`.claude/rules/formatting.md`, `.claude/rules/compiler-safety.md`.)
 4. Report a tight diff summary: files touched, what changed, `fmt --check` and

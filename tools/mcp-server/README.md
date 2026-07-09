@@ -8,7 +8,7 @@ Part of the "AI agents are users" strategy described in [`CLAUDE.md`](../../CLAU
 
 | Tool | Compiler invocation | Purpose |
 |---|---|---|
-| `sailfin_version` | `sailfin version` | Smoke test — returns the compiler version. Fails loudly if `build/native/sailfin` is missing. |
+| `sailfin_version` | `sailfin version` | Smoke test — returns the compiler version. Fails loudly if `build/bin/sfn` is missing. |
 | `sailfin_check` | `sailfin check <path>` | Type + effect check a single `.sfn` file. Fast feedback during edits. |
 | `sailfin_diagnostics` | `sailfin check --json <path>` | Same analysis as `sailfin_check`, returned as the `sailfin-check/1` JSON envelope for programmatic consumption. |
 | `sailfin_emit_native` | `sailfin emit native <path>` | Emit `.sfn-asm` intermediate representation. Use for emit-stage diagnosis. |
@@ -53,7 +53,7 @@ npx @modelcontextprotocol/inspector node tools/mcp-server/dist/index.js
 ## Contract
 
 - Tools **never throw** on compiler non-zero exit — they return `isError: true` with structured `{exit, stdout, stderr, duration_ms, timed_out}` so the caller can iterate on diagnostics.
-- If `build/native/sailfin` is missing, every tool returns a clean error telling the caller to run `make compile`.
+- If `build/bin/sfn` is missing, every tool returns a clean error telling the caller to run `make compile`.
 - Paths outside the workspace (e.g. `/etc/passwd`, `../../elsewhere`) are rejected before invocation.
 
 ## Roadmap

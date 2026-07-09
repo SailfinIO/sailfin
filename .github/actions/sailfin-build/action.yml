@@ -248,12 +248,12 @@ runs:
       shell: bash {0}
       run: |
         set -euo pipefail
-        if [ ! -x build/native/sailfin ]; then
-          echo "[ci][error] skip-build mode: build/native/sailfin missing or not executable" >&2
-          ls -l build/native 2>/dev/null || true
+        if [ ! -x build/bin/sfn ]; then
+          echo "[ci][error] skip-build mode: build/bin/sfn missing or not executable" >&2
+          ls -l build/bin build/native 2>/dev/null || true
           exit 1
         fi
-        build/native/sailfin version
+        build/bin/sfn version
 
     - name: Prepare test artifacts
       if: ${{ inputs.mode != 'build-only' && inputs.mode != 'build-package' }}

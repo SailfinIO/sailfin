@@ -44,12 +44,12 @@ import { contains } from "sfn/strings";
 fn _sfn_bin() -> string ![io] {
     let configured = env.get("SAILFIN_BIN");
     if configured.length > 0 { return configured; }
-    return "build/native/sailfin";
+    return "build/bin/sfn";
 }
 
 // `run_capture`'s empty array is the *empty* environment; thread the
 // variables the toolchain needs. The bash-c cases additionally rely on
-// PATH so the runner-cwd-relative `build/native/sailfin` (passed as the
+// PATH so the runner-cwd-relative `build/bin/sfn` (passed as the
 // bash `$0`) and the shell itself resolve. Per-case SAILFIN_* trace/limit
 // vars are appended by the caller.
 fn _child_env() -> string[] ![io] {
@@ -106,7 +106,7 @@ fn _run_direct(extra: string[]) -> string ![io] {
 // Spawn through bash with an inherited `ulimit -v 4194304` (4 GiB) cap in
 // effect, then `exec "$0" version` so the compiler inherits the cap. The
 // SAILFIN_* trace vars are threaded via the env array. `$0` is the sfn
-// binary path (runner-cwd-relative `build/native/sailfin` resolves
+// binary path (runner-cwd-relative `build/bin/sfn` resolves
 // because PATH and the runner cwd are honored). Returns captured stderr.
 fn _run_under_cap(extra: string[]) -> string ![io] {
     let mut e = _child_env();

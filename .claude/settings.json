@@ -15,11 +15,11 @@
       "Bash(touch *)",
       "Bash(chmod *)",
       "Bash(ulimit *)",
-      "Bash(build/native/sailfin *)",
-      "Bash(timeout * build/native/sailfin *)",
-      "Bash(build/native/sailfin-seedcheck *)",
-      "Bash(timeout * build/native/sailfin-seedcheck *)",
-      "Bash(timeout 120 valgrind --tool=memcheck --track-origins=yes --error-exitcode=0 build/native/sailfin-seedcheck test compiler/tests/unit/function_signatures_test.sfn)",
+      "Bash(build/bin/sfn *)",
+      "Bash(timeout * build/bin/sfn *)",
+      "Bash(build/bin/sfn-seedcheck *)",
+      "Bash(timeout * build/bin/sfn-seedcheck *)",
+      "Bash(timeout 120 valgrind --tool=memcheck --track-origins=yes --error-exitcode=0 build/bin/sfn-seedcheck test compiler/tests/unit/function_signatures_test.sfn)",
       "Bash(git status*)",
       "Bash(git log*)",
       "Bash(git diff*)",
@@ -109,7 +109,7 @@
   "autoMode": {
     "allow": [
       "$defaults",
-      "Project build, test, and formatting commands are safe: make compile, make rebuild, make check, make test (and its make test-* variants), make bench, make fetch-seed, make clean, make clean-build, sfn, and build/native/sailfin invocations. make clean-build and make clean only remove the repository's own build/ and dist/ artifacts, never files outside the repo, so treat them as routine, not destructive. This does not extend to make install, which writes to PREFIX/bin outside the repo.",
+      "Project build, test, and formatting commands are safe: make compile, make rebuild, make check, make test (and its make test-* variants), make bench, make fetch-seed, make clean, make clean-build, sfn, and build/bin/sfn invocations. make clean-build and make clean only remove the repository's own build/ and dist/ artifacts, never files outside the repo, so treat them as routine, not destructive. This does not extend to make install, which writes to PREFIX/bin outside the repo.",
       "Scheduling and trigger tools from the Claude_Code_Remote MCP server are safe and must never prompt: mcp__Claude_Code_Remote__send_later, mcp__Claude_Code_Remote__create_trigger, mcp__Claude_Code_Remote__update_trigger, mcp__Claude_Code_Remote__delete_trigger, mcp__Claude_Code_Remote__fire_trigger, and mcp__Claude_Code_Remote__list_triggers. These only schedule, re-arm, fire, list, and cancel this session's own wake-ups (Routines) — routine agent self-management with no external blast radius. Approve every one of them without prompting, including send_later and delete_trigger.",
       "All tools from the sailfin MCP server (mcp__sailfin__*: sailfin_check, sailfin_diagnostics, sailfin_fmt_check, sailfin_fmt_write, sailfin_build, sailfin_test, sailfin_emit_native, sailfin_emit_llvm, sailfin_version) are safe. They are the project's own in-repo developer tooling — each is a pure passthrough to a single `sailfin` subcommand, path-restricted to the workspace root, and exists specifically for agents to use during development. Never prompt for them.",
       "Non-delete Linear MCP tools are safe and must never prompt. Linear is the project's planning source of truth (team SFN), so all Linear reads (mcp__Linear__list_*, mcp__Linear__get_*, mcp__Linear__search_*) and all non-destructive Linear writes (mcp__Linear__save_issue, save_project, save_comment, save_milestone, save_document, save_status_update, save_customer, save_customer_need, save_release, save_release_note, and any mcp__Linear__create_* mutation) are routine agent work — approve them without prompting, without needing an exhaustive per-tool enumeration. NEVER auto-approve a destructive Linear tool: the mcp__Linear__delete_* family (which includes the deny-listed delete_comment, delete_attachment, delete_customer, delete_customer_need, delete_status_update) must always be blocked or prompt, and any unrecognized mcp__Linear__delete_* — or any other Linear tool whose name implies destruction — must be treated as unsafe and prompt."

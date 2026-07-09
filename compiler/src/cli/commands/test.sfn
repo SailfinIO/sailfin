@@ -2272,8 +2272,17 @@ fn _emit_crash_diagnostic(basename: string, exit_code: int) -> void ![io] {
 // that `exe_path()` (#968) threads `binary_dir` portably.
 fn _resolve_test_self_path(binary_dir: string) -> string ![io] {
     if binary_dir.length > 0 {
-        let candidate = _path_join_cmd(binary_dir, "sailfin");
-        if fs.exists(candidate) { return candidate; }
+        // Probe the canonical `sfn` name first, then the legacy
+        // `sailfin` name (a binary that predates the build/bin/sfn
+        // rename), mirroring `_resolve_self_path`'s host-neutral list.
+        let names: string[] = ["sfn", "sailfin"];
+        let mut i: int = 0;
+        loop {
+            if i >= names.length { break; }
+            let candidate = _path_join_cmd(binary_dir, names[i]);
+            if fs.exists(candidate) { return candidate; }
+            i += 1;
+        }
     }
     return "";
 }

@@ -90,7 +90,7 @@ a phantom scope violation. List paths as starting points only.
 
 <!-- Exact commands a reviewer can run to confirm the change works. -->
 ```bash
-timeout 60 build/native/sailfin run path/to/example.sfn
+timeout 60 build/bin/sfn run path/to/example.sfn
 ```
 
 ## Size

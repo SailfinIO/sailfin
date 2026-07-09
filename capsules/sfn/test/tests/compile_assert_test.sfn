@@ -1,7 +1,7 @@
 // Tests for the sfn/test compile-as-test assertions (#974).
 //
 // Each test shells out to the real `sfn check --json` (resolved via
-// `$SAILFIN_BIN`, falling back to `build/native/sailfin`) over a snippet
+// `$SAILFIN_BIN`, falling back to `build/bin/sfn`) over a snippet
 // written to a fresh temp file, then asserts on the returned
 // `MatchResult`. They are `![io]`: `assert_compiles` /
 // `assert_does_not_compile` spawn a child process and write a temp file.

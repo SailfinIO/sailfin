@@ -119,7 +119,7 @@ fn _plain_port_str() -> string { return "18895"; }
 fn _sfn_bin() -> string ![io] {
     let configured = env.get("SAILFIN_BIN");
     if configured.length > 0 { return configured; }
-    return "build/native/sailfin";
+    return "build/bin/sfn";
 }
 
 // Full parent environment for the build + server + client subprocesses

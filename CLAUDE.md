@@ -51,7 +51,7 @@ make clean-build      # Remove build/* artifacts (keeps build/seed) — destruct
 make mcp-server       # Build the MCP server wrapper
 ```
 
-Run examples: `make compile && build/native/sailfin run examples/basics/hello-world.sfn`.
+Run examples: `make compile && build/bin/sfn run examples/basics/hello-world.sfn`.
 See `examples/README.md` for per-example capability requirements.
 
 **Validation ladder — use the cheapest tool that catches the error.** `sfn check`
@@ -72,7 +72,7 @@ and `make check` are different tools, not fast/slow versions of the same one:
    declaring a feature shipped, cutting a release, or after a structural change.
 
 Don't burn `make check` to discover a type or effect error `sfn check` would have
-caught in seconds. (Use `build/native/sailfin check <path>` if `sfn` is not on `PATH`.)
+caught in seconds. (Use `build/bin/sfn check <path>` if `sfn` is not on `PATH`.)
 
 **MCP tools (agentic clients).** When running as an MCP client (e.g. Claude Code
 with the `sailfin` server registered in `.mcp.json`), prefer the `sailfin_*` tools

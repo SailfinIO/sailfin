@@ -645,7 +645,7 @@ checker cannot resolve structurally contribute **zero effects, silently**:
   (`effect_checker.sfn:531`) has no `"Unknown"` arm and falls through to
   `return []` (`:621`).
 
-Reproduced and confirmed **live end to end** (`build/native/sailfin` 0.7.0-alpha.49):
+Reproduced and confirmed **live end to end** (`build/bin/sfn` 0.7.0-alpha.49):
 `fn f() { let x = print.info("hi") as * i64; }` passes `sfn check` (exit 0) with
 and without `SAILFIN_EFFECT_ENFORCE=1`, **and fires the side effect at runtime**
 (`[info] SIDE EFFECT FIRED`, run exits 0). An effectful operation reaches codegen

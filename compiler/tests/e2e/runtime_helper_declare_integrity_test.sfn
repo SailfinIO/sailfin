@@ -45,7 +45,7 @@ fn _sweeps() -> int { return 6; }
 fn _sfn_bin() -> string ![io] {
     let configured = env.get("SAILFIN_BIN");
     if configured.length > 0 { return configured; }
-    return "build/native/sailfin";
+    return "build/bin/sfn";
 }
 
 // `emit llvm` neither links nor spawns clang, so no PATH is required; thread

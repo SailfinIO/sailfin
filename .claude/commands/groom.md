@@ -193,7 +193,7 @@ Field mapping (canonical — see `docs/conventions/linear-workflow.md`):
 
 ## Verification
 ```bash
-timeout 60 build/native/sailfin run path/to/example.sfn
+timeout 60 build/bin/sfn run path/to/example.sfn
 ```
 
 ## Required in pinned seed

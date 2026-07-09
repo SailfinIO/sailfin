@@ -14,15 +14,15 @@
 //
 // Native e2e per `.claude/rules/no-bash-e2e.md`: drives subprocesses via
 // `process.run_capture` and asserts on captured output with `sfn/strings`.
-import { with_tmp_dir } from "sfn/test";
 import { find } from "sfn/strings";
+import { with_tmp_dir } from "sfn/test";
 
 // The compiler-under-test: $SAILFIN_BIN if set, else the self-hosted
 // binary relative to the repo root the runner starts from.
 fn _sfn_bin() -> string ![io] {
     let configured = env.get("SAILFIN_BIN");
     if configured.length > 0 { return configured; }
-    return "build/native/sailfin";
+    return "build/bin/sfn";
 }
 
 // A fixture whose second test overflows the stack — non-tail recursion

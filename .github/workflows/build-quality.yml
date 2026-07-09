@@ -154,7 +154,7 @@ jobs:
           make compile \
             CLANG="${CLANG:-clang-18}" \
             SEED_NATIVE="build/seed/bin/sailfin"
-          build/native/sailfin version
+          build/bin/sfn version
 
       - name: First pass (warm the cache)
         shell: bash
@@ -168,7 +168,7 @@ jobs:
           # diff. Keeping pass1.json on disk makes failures easier to
           # bisect after the fact (the diff of pass1.cache vs.
           # pass2.cache is the smoking gun for cache-key drift).
-          build/native/sailfin build -p compiler \
+          build/bin/sfn build -p compiler \
             --work-dir build/det-pass1 --json | tee pass1.json
           echo ""
           echo "[pass1] cache summary:"
@@ -203,7 +203,7 @@ jobs:
           # empty — triage via the printed `binary_sha256_{a,b}` and
           # `binary_path_{a,b}` instead. Foreign `-p` builds with
           # scope/name form get full per-module diffs.
-          build/native/sailfin build -p compiler \
+          build/bin/sfn build -p compiler \
             --check-determinism \
             --work-dir build/det-pass2 \
             --json | tee pass2.json
@@ -381,7 +381,7 @@ jobs:
           make compile \
             CLANG="${CLANG:-clang-18}" \
             SEED_NATIVE="build/seed/bin/sailfin"
-          build/native/sailfin version
+          build/bin/sfn version
 
       # Run the full `.sfn` suite with the test-bin cache ENABLED (no
       # `--no-test-cache`), populating `build/cache/test-bin/v<schema>`.
