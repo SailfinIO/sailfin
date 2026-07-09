@@ -9,6 +9,8 @@
 //                 header, query_param, reason_phrase, response,
 //                 response_with_status, json_response, not_found
 //   - server.sfn  serve (typed HTTP server on the M4 runtime)
+//   - router.sfn  Router, Params, MatchResult, router, route, dispatch,
+//                 match_pattern, param ({param} path capture)
 //   - mod.sfn     client (get, post, fetch)
 //
 // Build-out tracked by epic #1321; design in docs/proposals/0019-sfn-http-capsule.md.
@@ -31,6 +33,18 @@ export {
 
 // ---- Server ----
 export { serve, serve_tls } from "./server";
+
+// ---- Router (path-param capture, SFN-37) ----
+export {
+    Router,
+    Params,
+    MatchResult,
+    router,
+    route,
+    dispatch,
+    match_pattern,
+    param
+} from "./router";
 
 // Local bindings for the typed client (re-export above does not create
 // local scope): `fetch` returns a `Response` and parses it via the wire
