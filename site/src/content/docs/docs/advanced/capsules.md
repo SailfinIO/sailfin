@@ -76,6 +76,10 @@ required = ["io", "net"]
 
 [build]
 entry = "src/mod.sfn"
+
+[toolchain]
+sfn = "0.8.0-alpha.3"
+channel = "stable"
 ```
 
 ### Field Reference
@@ -109,6 +113,15 @@ Declares which effects this capsule uses. See the [Capability Declarations](#cap
 |---|---|---|---|
 | `entry` | string | `"src/mod.sfn"` | The source file the compiler starts from when building this capsule. For application capsules this is typically `"src/main.sfn"`. |
 
+#### `[toolchain]`
+
+Pins the `sfn` toolchain this capsule requires. See [Toolchain Pinning](#toolchain-pinning) for full detail.
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `sfn` | string | no | A semver floor — the running `sfn` must be `>=` this version. |
+| `channel` | string | no | Minimum acceptable stability channel: `"stable"`, `"rc"`, `"beta"`, or `"alpha"`. |
+
 ## Capability Declarations
 
 The `[capabilities]` section of `capsule.toml` lists the effects the capsule's code is permitted to use. This declaration has two purposes.
@@ -135,6 +148,37 @@ Valid capability values:
 | `unsafe` | `unsafe` blocks, `unsafe extern fn` calls |
 
 **Current status:** The capability manifest format is designed and the field is parsed. Compile-time enforcement against the manifest (rejecting capsule builds that use effects not listed in `required`) is planned for the native compiler.
+
+## Toolchain Pinning
+
+The `[toolchain]` section declares which `sfn` toolchain builds this capsule — the downstream-project analogue of Go's `go 1.22` directive or `rust-toolchain.toml`. It is optional; a manifest with no `[toolchain]` section is unaffected (unpinned projects keep working exactly as before).
+
+```toml
+[toolchain]
+sfn = "0.8.0-alpha.3"     # floor: the running toolchain must be >= this
+channel = "stable"         # optional: reject a lower-stability running toolchain
+```
+
+**Floor semantics (Go-style, not exact-pin).** `sfn` is a minimum version, not an exact match — the running `sfn` must be `>=` the pinned version, ordered by semver precedence (build metadata after `+` is ignored for comparison). A pin of `0.8.0-alpha.2` is satisfied by `0.8.0-alpha.2`, `0.8.0-alpha.3`, `0.8.0`, or `0.9.0`, and is rejected by `0.8.0-alpha.1` or any `0.7.x` toolchain.
+
+**`channel`** additionally requires a minimum stability level, ranked `stable` > `rc` > `beta` > `alpha`. `channel = "stable"` rejects any `-alpha`/`-beta`/`-rc` running toolchain regardless of its core version number. It is independent of (and additive to) the `sfn` floor.
+
+**Workspace vs. member precedence.** In a multi-capsule project, a `workspace.toml` `[toolchain]` pin is the default for every member; a member's own `capsule.toml` `[toolchain]` overrides it **per field** (a member can override just `sfn`, just `channel`, or both). See [Workspaces](./workspaces#toolchain-pinning).
+
+**The gate.** `sfn build`, `sfn run`, `sfn check`, and `sfn test` verify the pin after resolving the project/workspace root, before doing any other work. On a satisfied pin, the command proceeds silently. On a mismatch, it fails with a non-zero exit and a diagnostic:
+
+```
+error: toolchain mismatch
+  this project pins sfn >= 0.8.0-alpha.2 (capsule.toml [toolchain])
+  but the running toolchain is 0.7.4-alpha.1
+  install the pinned toolchain, or re-run with --skip-toolchain-check to override
+```
+
+Override the gate for a single invocation with `--skip-toolchain-check`, or for a whole shell/CI job with `SAILFIN_SKIP_TOOLCHAIN_CHECK=1` or `SAILFIN_TOOLCHAIN=off` (`=0` also works) — any of the three downgrade the hard error to a one-line warning and let the build proceed. See the [CLI reference](/docs/reference/cli#toolchain-pinning-flags) for the full flag/env list.
+
+**`sfn init` scaffolding.** `sfn init` writes a `[toolchain]` stanza pinned to the version of the `sfn` binary doing the scaffolding, so a freshly created capsule is born pinning the toolchain it was created with — matching `cargo new` stamping the edition and `go mod init` writing the `go` line.
+
+**Current status:** this is Phase 1 of the toolchain-pinning design (SFEP-0046) — declare and verify. Phase 2 (auto-fetching and re-execing the pinned toolchain when it isn't the one on `PATH`, `SAILFIN_TOOLCHAIN=auto`) is designed but not yet implemented; a version mismatch today always requires installing the pinned toolchain manually or passing the escape hatch.
 
 ## Dependencies
 
@@ -502,6 +546,7 @@ Capsule versions are immutable once published. To update a capsule, increment th
 | Public API | Functions and types with `export` keyword |
 | Dependency | Entry in `[dependencies]` + `import` in source |
 | Capability | Effect declared in `[capabilities] required = [...]` |
+| Toolchain pin | `[toolchain] sfn = "<floor>"` (+ optional `channel`); gated on `build`/`run`/`check`/`test` |
 | Import (relative) | `import { X } from "./module"` |
 | Import (registry) | `import { X } from "sfn/log"` |
 | Import (workspace) | `import { X } from "core"` |

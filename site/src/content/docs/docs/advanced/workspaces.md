@@ -55,6 +55,9 @@ Each subdirectory listed under `members` in `workspace.toml` is an independent c
 members = ["core", "api", "cli"]
 resolver = "v1"
 
+[toolchain]
+sfn = "0.8.0-alpha.3"
+
 [policies.unsafe]
 allowed_capsules = ["core"]
 require_annotation = "@security-reviewed"
@@ -78,6 +81,15 @@ allowed_capsules = ["api"]
 |---|---|---|---|
 | `members` | array of strings | yes | Relative paths to capsule directories. Each path must contain a `capsule.toml`. The resolver processes all members together. |
 | `resolver` | string | no | Dependency resolver version. Currently `"v1"`. This field exists for forward compatibility. |
+
+#### `[toolchain]`
+
+Pins the `sfn` toolchain for every member capsule by default. Same fields and floor semantics as a capsule's own `[toolchain]` (see [Toolchain Pinning](./capsules#toolchain-pinning)):
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `sfn` | string | no | A semver floor — the running `sfn` must be `>=` this version. |
+| `channel` | string | no | Minimum acceptable stability channel: `"stable"`, `"rc"`, `"beta"`, or `"alpha"`. |
 
 #### `[policies.<capability>]`
 
@@ -135,6 +147,25 @@ In an application that handles sensitive data, you may want only the designated 
 [policies.model]
 allowed_capsules = ["api"]
 ```
+
+## Toolchain Pinning
+
+A `workspace.toml` `[toolchain]` pin is the default for every member capsule. A member's own `capsule.toml` `[toolchain]` section overrides the workspace pin **per field**: a member can override just `sfn`, just `channel`, or both, and any field it doesn't set falls back to the workspace value.
+
+```toml
+# workspace.toml
+[toolchain]
+sfn = "0.8.0-alpha.3"
+channel = "alpha"
+```
+
+```toml
+# api/capsule.toml — overrides only `sfn`; inherits `channel = "alpha"` from the workspace
+[toolchain]
+sfn = "0.8.0-alpha.5"
+```
+
+`sfn build`/`run`/`check`/`test` resolve both the project root and the workspace root and apply this precedence before comparing against the running toolchain; see [Toolchain Pinning](./capsules#toolchain-pinning) for the gate behavior and escape hatches.
 
 ## Shared Dependencies
 
@@ -318,6 +349,7 @@ This configuration enforces:
 |---|---|
 | Workspace root | Directory containing `workspace.toml` |
 | Members | `[workspace] members = ["core", "api", "cli"]` |
+| Toolchain pin | `[toolchain] sfn = "<floor>"`; a member `capsule.toml` overrides per field |
 | Capability restriction | `[policies.unsafe] allowed_capsules = ["core"]` |
 | Shared dependency | `[shared-dependencies] "sfn/log" = "^0.1"` |
 | Intra-workspace dep | `"core" = { path = "../core" }` in capsule's `[dependencies]` |

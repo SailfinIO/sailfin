@@ -30,6 +30,7 @@ import { Command, Matches, command } from "sfn/cli";
 import { _get_env_cmd } from "../../build_flags";
 import { substring } from "../../string_utils";
 import { toml_generate } from "../../toml_parser";
+import { _strip_build_metadata, resolve_compiler_version } from "../../version";
 import { CliContext } from "../context";
 
 // The `sfn/cli` definition for `init`, registered on the v2 root via
@@ -63,7 +64,12 @@ fn run(matches: Matches, ctx: CliContext) -> int ![io] {
             }
         }
     }
-    let toml_text = toml_generate(pkg_name, "0.1.0", "", "src/main.sfn");
+    // Strip `+dev.<hash>` build metadata so a scaffold from an in-tree dev
+    // binary is born with a clean pin (`0.8.0-alpha.3`, not
+    // `0.8.0-alpha.3+dev.<hash>`); the floor check ignores build metadata
+    // either way (semver §10).
+    let toolchain_version = _strip_build_metadata(resolve_compiler_version(ctx.binary_dir));
+    let toml_text = toml_generate(pkg_name, "0.1.0", "", "src/main.sfn", toolchain_version);
     fs.writeFile("capsule.toml", toml_text);
     if !fs.exists("src") { fs.createDirectory("src", true); }
     if !fs.exists("src/main.sfn") {
