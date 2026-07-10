@@ -82,9 +82,10 @@ fn run(matches: Matches, ctx: CliContext) -> int ![io] {
     } else {
         print("enter your registry token:");
         // Read a single line from fd 0. `io.read_line(0) -> string?` returns
-        // `null` only on immediate EOF (no input at all); a blank line is
-        // `Some("")`, which falls through to the "empty token" guard below —
-        // matching the legacy `head -1` behaviour without the mktemp/rm shellout.
+        // `null` on immediate EOF (no input at all) or an allocation failure;
+        // a blank line is `Some("")`, which falls through to the "empty token"
+        // guard below — matching the legacy `head -1` behaviour without the
+        // mktemp/rm shellout.
         let line = io.read_line(0);
         if line != null { token = _toml_trim_cmd(line); } else {
             print("error: failed to read token");
