@@ -306,8 +306,11 @@ SEED_GLOBAL_BIN_DIR ?= build/toolchains/seed/bin
 # binary image does not carry the re-export miscompilation documented
 # in docs/rca/2026-04-18-reexport-diagnostic-gep.md). install.sh installs the
 # release binary as `sailfin` and always writes an `sfn` alias into
-# SEED_GLOBAL_BIN_DIR, so the canonical seed path is the `sfn` alias.
-SEED ?= build/toolchains/seed/bin/sfn
+# SEED_GLOBAL_BIN_DIR, so the canonical seed path is that `sfn` alias. Build it
+# from SEED_GLOBAL_BIN_DIR + EXE_EXT so it matches the fetched alias on every
+# platform (Windows writes `sfn.exe`); a bare `.../sfn` would look "missing" on
+# Windows and force a re-fetch every rebuild.
+SEED ?= $(SEED_GLOBAL_BIN_DIR)/sfn$(EXE_EXT)
 
 FETCHED_SEED ?= $(SEED_GLOBAL_BIN_DIR)/sfn$(EXE_EXT)
 
