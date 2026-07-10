@@ -1053,6 +1053,16 @@ fn _propagate_imported_callee_effects(name: string, imports: ImportSymbolTable, 
     loop {
         if e >= entry.effects.length { break; }
         let effect = entry.effects[e];
+        // `pure` is a no-op marker, not a capability (effect_taxonomy.sfn):
+        // it "never satisfies a real effect requirement", so it must never
+        // *be* propagated as one — otherwise an effectful caller of an
+        // imported `![pure]` function (e.g. the SFN-167 toolchain gate
+        // calling `semver_parse`) is spuriously flagged E0402 for a `pure`
+        // it can never legally declare (`![io, pure]` is contradictory).
+        if is_universally_allowed_effect(effect) {
+            e += 1;
+            continue;
+        }
         required = append_requirement(required, EffectRequirement {
             effect: effect, description: prefix + effect + "]", trigger: callee_trigger
         });
@@ -1095,6 +1105,12 @@ fn _propagate_imported_member_effects(member: string, imports: ImportSymbolTable
     loop {
         if e >= entry.effects.length { break; }
         let effect = entry.effects[e];
+        // `pure` is a no-op marker, never a real requirement (see the
+        // matching guard in `_propagate_imported_callee_effects`).
+        if is_universally_allowed_effect(effect) {
+            e += 1;
+            continue;
+        }
         required = append_requirement(required, EffectRequirement {
             effect: effect, description: prefix + effect + "]", trigger: member_trigger
         });

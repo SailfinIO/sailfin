@@ -1,27 +1,31 @@
 #!/usr/bin/env bash
 # detect_test_jobs.sh — Pick a sensible TEST_JOBS default for the current host.
 #
-# Heuristic: min(cores, mem_mb / 384), floor 1, cap 16.
+# Heuristic: min(cores, mem_mb / 384), floor 1, cap 16; macOS caps at 2.
 #
-# The 384 MB-per-job budget is sized for test-runner child processes, not
-# compiler-module builds. Measured child-process peak at the time of #1998:
+# The 384 MB-per-job budget is sized for the common test-runner child
+# process, not compiler-module builds. Measured child-process peak at the
+# time of #1998:
 #   * typical unit/integration test child   : ~50–80 MB RSS
-#   * e2e test that spawns a nested compiler : ~150 MB RSS (heaviest class)
-# The 384 MB budget gives ~2.5× headroom over the heaviest class to
-# absorb e2e tests that fork nested compiler+clang trees without
-# overcommitting the runner.
+# The 384 MB budget gives ample headroom over that common class.
 #
 # This deliberately differs from detect_build_jobs.sh's ~2 GB-per-job budget,
 # which is sized for per-module emit (heaviest module: ~1.76 GB peak RSS).
-# Using BUILD_JOBS' budget for test children would under-report parallelism
-# by ~5×: a 7 GB macOS runner that allows BUILD_JOBS=2 allows TEST_JOBS≈18,
-# bounded further by core count.
+# Using BUILD_JOBS' budget for every test child would under-report
+# parallelism by ~5× for the light majority.
 #
-# No macOS-specific ceiling: the 2-job cap in detect_build_jobs.sh exists
-# because two concurrent 1.6 GB module builds overcommit a 7 GB runner.
-# Test children are ~10× lighter, so the memory budget alone protects
-# the macOS CI runner (7168 / 384 ≈ 18 → naturally bounded by the 3-4
-# core count and the global cap of 16 anyway).
+# macOS additionally caps at 2 jobs, mirroring detect_build_jobs.sh. The
+# 384 MB budget is right for the light majority but wrong for the
+# build-and-run e2e class: an e2e test that spawns a nested cold
+# `sfn build`/`sfn run`/`sfn emit` peaks ~1.3–1.8 GB RSS while that nested
+# compile runs — the same weight class as a module build, not the ~150 MB
+# once assumed here. On the memory-constrained macOS runner (~7 GB) the
+# memory budget alone lets enough of those heavy children coincide to tip
+# the pool into OOM: the macOS-arm64 nightly self-host check kept aborting
+# with exit 134 / SIGABRT in the e2e phase, the victim test roaming run to
+# run (SFN-87). A flat 2-job cap bounds the concurrent-heavy-compile peak
+# the same way BUILD_JOBS=2 does; Linux is unaffected and an explicit
+# TEST_JOBS=N still wins.
 #
 # Cap 16: the runner's --jobs parameter accepts [1, 256] but the
 # sliding-window pool has diminishing returns past core count; 16 matches
@@ -67,8 +71,13 @@ by_mem=$((mem_mb / 384))
 jobs=$cores
 [ "$by_mem" -lt "$jobs" ] && jobs=$by_mem
 
-# Windows: xargs -P parallelism is unreliable under MSYS/Cygwin/Git Bash.
+# macOS caps at 2 (see header: bounds the concurrent build-and-run e2e
+# peak on the ~7 GB runner, SFN-87). Windows: xargs -P parallelism is
+# unreliable under MSYS/Cygwin/Git Bash.
 case "$uname_s" in
+    Darwin*)
+        [ "$jobs" -gt 2 ] && jobs=2
+        ;;
     MINGW*|MSYS*|CYGWIN*)
         jobs=1
         ;;

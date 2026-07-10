@@ -46,7 +46,7 @@ make test             # Run unit + integration + e2e suites
 make test-unit        # Run Sailfin-native unit tests
 make test-integration # Run Sailfin-native integration tests
 make clean            # Remove dist/ artifacts
-make clean-build      # Remove build/* artifacts (keeps build/seed by default)
+make clean-build      # Remove build/* artifacts (keeps build/toolchains/seed by default)
 ```
 
 For debugging, place scripts in `/scratch`.

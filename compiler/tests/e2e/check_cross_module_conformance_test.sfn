@@ -105,13 +105,13 @@ test "check cross-module conformance: resolver staged import-context" ![io] {
     let _err = process.capture_take_stderr();
 
     // The staged .sfn-asm for shape.sfn lands at:
-    //   build/native/import-context/<root_without_leading_slash>/src/shape.sfn-asm
+    //   build/compiler/import-context/<root_without_leading_slash>/src/shape.sfn-asm
     // Strip the leading "/" from root to build the subdir path.
     let mut root_rel = root;
     if find(root, "/", 0) == 0 {
         root_rel = substring(root, 1, root.length);
     }
-    let shape_asm = "build/native/import-context/" + root_rel
+    let shape_asm = "build/compiler/import-context/" + root_rel
         + "/src/shape.sfn-asm";
     assert fs.exists(shape_asm);
 }

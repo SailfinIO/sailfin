@@ -13,7 +13,7 @@ Use this skill when asked to update `.seed-version`.
 2. Show the current pin with `cat .seed-version`.
 3. Update only `.seed-version`.
 4. Run `make fetch-seed` to download the matching release binary.
-5. Run `build/seed/bin/sailfin version` and confirm it reports the expected version.
+5. Run `build/toolchains/seed/bin/sfn version` and confirm it reports the expected version.
 6. If requested or needed before merge, run `make compile`.
 7. Commit only `.seed-version` with `chore(seed): pin seed to <VERSION>`.
 

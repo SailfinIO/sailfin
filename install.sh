@@ -259,6 +259,29 @@ fi
 
 $MAYBE_SUDO install -m 0755 "$SRC_BINARY" "${TARGET_DIR}/${DEST_BASENAME}"
 
+# SFN-195: a compiler built from post-SFN-173 source (in-tree artifact renamed
+# to `sfn`; first released 0.8.0-alpha.3) resolves its own realpath dir and
+# re-invokes `<dir>/sfn` when spawning parallel emit workers. The release
+# artifact is still packaged as `sailfin`, so without a `sfn`-named peer IN THE
+# VERSIONED DIR every parallel `sfn build` (and `make rebuild` with a fetched
+# seed) dies with `<dir>/sfn: not found`. Provide the `sfn` name next to the
+# installed binary. Relative symlink (same dir) so it holds regardless of
+# absolute/relative TARGET_DIR; copy fallback for filesystems without symlinks.
+VERSIONED_ALIAS_BASENAME="sfn"
+if [ "$OS" = "windows" ] && [[ "$DEST_BASENAME" == *.exe ]]; then
+  VERSIONED_ALIAS_BASENAME="sfn.exe"
+fi
+if [ "$VERSIONED_ALIAS_BASENAME" != "$DEST_BASENAME" ]; then
+  VERSIONED_ALIAS_PATH="${TARGET_DIR}/${VERSIONED_ALIAS_BASENAME}"
+  if [ -L "$VERSIONED_ALIAS_PATH" ] || [ -f "$VERSIONED_ALIAS_PATH" ]; then
+    $MAYBE_SUDO rm -f "$VERSIONED_ALIAS_PATH"
+  fi
+  if ! $MAYBE_SUDO ln -s "$DEST_BASENAME" "$VERSIONED_ALIAS_PATH" 2>/dev/null; then
+    $MAYBE_SUDO cp -f "${TARGET_DIR}/${DEST_BASENAME}" "$VERSIONED_ALIAS_PATH"
+    $MAYBE_SUDO chmod 0755 "$VERSIONED_ALIAS_PATH" || true
+  fi
+fi
+
 # When INSTALL_BASE / GLOBAL_BIN_DIR are relative paths (as in CI), creating a
 # symlink to a relative TARGET_DIR will produce a broken link (the link target
 # is resolved relative to the link's directory). Resolve to absolute paths so

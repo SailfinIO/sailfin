@@ -207,8 +207,13 @@ test "asan: concurrent channel producer/consumer over the moved-OwnedBuf seam is
     let work_dir = dir + "/chanwd";
     let plain_bin = dir + "/chan_plain";
     let bexit = process.run_capture([_sfn_bin(), "build", "--work-dir", work_dir, "-o", plain_bin, src], _child_env());
-    let _bo = process.capture_take_stdout();
-    let _be = process.capture_take_stderr();
+    let bo = process.capture_take_stdout();
+    let be = process.capture_take_stderr();
+    if bexit != 0 {
+        print.err("ownedbuf-channel: nested `sfn build` failed\nstdout: " + bo
+            + "\nstderr: "
+            + be);
+    }
     assert bexit == 0;
 
     // Plain leg (always runs): the concurrent-only typed result (AC2).
@@ -527,8 +532,13 @@ test "asan: serve handlers over the moved-OwnedBuf req/resp seam are corruption-
     let work_dir = dir + "/srvwd";
     let plain_bin = dir + "/server_plain";
     let bexit = process.run_capture([_sfn_bin(), "build", "--work-dir", work_dir, "-o", plain_bin, main_path], _child_env());
-    let _bo = process.capture_take_stdout();
-    let _be = process.capture_take_stderr();
+    let bo = process.capture_take_stdout();
+    let be = process.capture_take_stderr();
+    if bexit != 0 {
+        print.err("ownedbuf-serve: nested `sfn build` failed\nstdout: " + bo
+            + "\nstderr: "
+            + be);
+    }
     assert bexit == 0;
 
     // Prefer the ASAN-instrumented server (covers AC1 + AC2 in one run);

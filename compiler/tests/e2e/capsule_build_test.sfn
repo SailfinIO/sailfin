@@ -117,7 +117,7 @@ test "capsule build: binary links and runs using capsule symbols" ![io] {
 
 // ---- Test 3: capsule import-context was staged ----
 // The import context for sfn/math lands at the CWD-relative
-// build/native/import-context/sfn/math/mod.sfn-asm (hardcoded in
+// build/compiler/import-context/sfn/math/mod.sfn-asm (hardcoded in
 // native_text_path_for_slug; always relative to the runner's CWD = repo root).
 test "capsule build: capsule import-context was staged" ![io] {
     _ensure_fixture();
@@ -129,7 +129,7 @@ test "capsule build: capsule import-context was staged" ![io] {
     let _e = process.capture_take_stderr();
     assert exit == 0;
 
-    assert fs.exists("build/native/import-context/sfn/math/mod.sfn-asm");
+    assert fs.exists("build/compiler/import-context/sfn/math/mod.sfn-asm");
 }
 
 // ---- Test 4: capsule .ll was produced under the per-capsule tree ----

@@ -294,16 +294,25 @@ test-impl:
 SEED_REPO ?= SailfinIO/sailfin
 SEED_VERSION ?= $(strip $(shell cat .seed-version 2>/dev/null))
 SEED_EXCLUDE_TAG ?=
-SEED_INSTALL_BASE ?= build/seed/versions
-SEED_GLOBAL_BIN_DIR ?= build/seed/bin
+# Repo-local seed toolchain store (SFN-174). The fetched pinned seed lives
+# under build/toolchains/seed — a store that names what it holds (a released
+# toolchain) rather than the legacy build/seed cache. The user-facing installer
+# store (~/.local/share/sailfin/versions) is unaffected.
+SEED_INSTALL_BASE ?= build/toolchains/seed/versions
+SEED_GLOBAL_BIN_DIR ?= build/toolchains/seed/bin
 
 # Default seed compiler used for self-hosting.
 # Points to the fetched seed binary (0.5.7+ — the first release whose
 # binary image does not carry the re-export miscompilation documented
-# in docs/rca/2026-04-18-reexport-diagnostic-gep.md).
-SEED ?= build/seed/bin/sailfin
+# in docs/rca/2026-04-18-reexport-diagnostic-gep.md). install.sh installs the
+# release binary as `sailfin` and always writes an `sfn` alias into
+# SEED_GLOBAL_BIN_DIR, so the canonical seed path is that `sfn` alias. Build it
+# from SEED_GLOBAL_BIN_DIR + EXE_EXT so it matches the fetched alias on every
+# platform (Windows writes `sfn.exe`); a bare `.../sfn` would look "missing" on
+# Windows and force a re-fetch every rebuild.
+SEED ?= $(SEED_GLOBAL_BIN_DIR)/sfn$(EXE_EXT)
 
-FETCHED_SEED ?= $(SEED_GLOBAL_BIN_DIR)/sailfin$(EXE_EXT)
+FETCHED_SEED ?= $(SEED_GLOBAL_BIN_DIR)/sfn$(EXE_EXT)
 
 fetch-seed:
 	@if [ -z "$(SEED_VERSION)" ]; then \
@@ -317,7 +326,7 @@ fetch-seed:
 		exit 1; \
 	fi
 	@echo "[fetch-seed] installing seed $(SEED_VERSION) into $(SEED_INSTALL_BASE)"
-	@mkdir -p build/seed
+	@mkdir -p build/toolchains/seed
 	@REPO="$(SEED_REPO)" VERSION="$(SEED_VERSION)" EXCLUDE_TAG="$(SEED_EXCLUDE_TAG)" \
 		GLOBAL_BIN_DIR="$(SEED_GLOBAL_BIN_DIR)" INSTALL_BASE="$(SEED_INSTALL_BASE)" \
 		BINARY="sailfin" ./install.sh
@@ -465,13 +474,13 @@ bench:
 		echo "[bench] missing $(NATIVE_BIN); run 'make compile' first"; \
 		exit 1; \
 	fi
-	@if [ ! -d build/native/import-context ]; then \
+	@if [ ! -d build/compiler/import-context ]; then \
 		echo "[bench] missing import-context; run 'make compile' first"; \
 		exit 1; \
 	fi
 	@bash scripts/bench_compile.sh \
 		--seed "$(NATIVE_BIN)" \
-		--import-context build/native/import-context \
+		--import-context build/compiler/import-context \
 		$(BENCH_ARGS)
 
 # Benchmark compiled-program runtime execution (the counterpart to `bench`,
@@ -512,12 +521,12 @@ test-arena:
 		echo "[test-arena] missing $(NATIVE_BIN); run 'make compile' first"; \
 		exit 1; \
 	fi
-	@if [ ! -d build/native/import-context ]; then \
+	@if [ ! -d build/compiler/import-context ]; then \
 		echo "[test-arena] missing import-context; run 'make compile' first"; \
 		exit 1; \
 	fi
 	@SEED="$(NATIVE_BIN)" \
-		IMPORT_CONTEXT=build/native/import-context \
+		IMPORT_CONTEXT=build/compiler/import-context \
 		bash scripts/test_arena.sh $(ARENA_ARGS)
 
 clean:
@@ -529,14 +538,16 @@ clean:
 mcp-server:
 	cd tools/mcp-server && npm ci --no-audit --no-fund && npm run build
 
-# Remove local build artifacts (keeps downloaded seed by default).
-# Use KEEP_SEED=0 to also delete build/seed.
+# Remove local build artifacts (keeps the downloaded seed toolchain by default).
+# The pinned seed lives under build/toolchains/seed (SFN-174); preserve the
+# whole build/toolchains store so KEEP_SEED keeps it intact.
+# Use KEEP_SEED=0 to also delete build/toolchains.
 .PHONY: clean-build clean-all
 clean-build:
 	@mkdir -p build
 	@for d in build/*; do \
 		base="$$(basename "$$d")"; \
-		if [ "$$base" = "seed" ] && [ "${KEEP_SEED:-1}" != "0" ]; then \
+		if [ "$$base" = "toolchains" ] && [ "${KEEP_SEED:-1}" != "0" ]; then \
 			continue; \
 		fi; \
 		rm -rf "$$d"; \
@@ -718,18 +729,19 @@ package: compile
 # (import-context) are present at their canonical location.
 #
 # `make rebuild` is the only path to producing `build/bin/sfn`,
-# so `build/native/import-context/` is guaranteed to land directly.
+# so `build/compiler/import-context/` is guaranteed to land directly
+# (the seed stages the canonical path during `build -p compiler`).
 # #941: the former `build/native/obj/runtime/prelude.o` check was
 # dropped — post-#940 the test runner links the runtime through the
 # declarative runtime-capsule path (emit-from-source + per-work-dir
 # cache), so no pre-staged `prelude.o` exists or is needed.
 ci-prepare-test-artifacts:
 	@set -eu; \
-	if [ ! -d build/native/import-context ] || [ -z "$$(find build/native/import-context -name '*.sfn-asm' -print -quit 2>/dev/null)" ]; then \
-		echo "[ci-prepare-test-artifacts][error] missing build/native/import-context — run 'make rebuild' first" >&2; \
+	if [ ! -d build/compiler/import-context ] || [ -z "$$(find build/compiler/import-context -name '*.sfn-asm' -print -quit 2>/dev/null)" ]; then \
+		echo "[ci-prepare-test-artifacts][error] missing build/compiler/import-context — run 'make rebuild' first" >&2; \
 		exit 1; \
 	fi; \
-	echo "[ci-prepare-test-artifacts] build/native/import-context present"
+	echo "[ci-prepare-test-artifacts] build/compiler/import-context present"
 
 # Package native compiler + installer artifacts for a given target label.
 # Stage C4 migration: this target now delegates to `sfn package`
@@ -784,6 +796,11 @@ ci-package-installer:
 #   no longer plumbs through.
 # - NATIVE_OPT / SELFHOST1_OPT are no longer honoured here — the
 #   driver hardcodes `-O2` for the link step.
+# - During a seed transition where compiler/capsule.toml's [toolchain] pin is
+#   newer than the seed that builds it, set SAILFIN_TOOLCHAIN=off to bypass the
+#   toolchain gate (SFEP-0046). The env form is forward-safe: a gate-unaware
+#   seed ignores the env, whereas the --skip-toolchain-check flag would be
+#   rejected as unknown by an older seed. Not needed while pin == seed version.
 rebuild:
 	@$(AGENT_REPORT) --target rebuild -- $(MAKE) rebuild-impl
 
@@ -823,11 +840,11 @@ rebuild-impl:
 	@# signatures are good enough for the in-build resolution; the
 	@# post-build block below re-stages them with NATIVE_OUT for the
 	@# canonical (proper-pointee) form. Mirrors the post-stage loop.
-	@mkdir -p build/native/import-context/runtime/sfn/platform
+	@mkdir -p build/compiler/import-context/runtime/sfn/platform
 	@seed=$$(cat build/.seed-resolved); \
 	for mod in libc posix pthread net; do \
-		asm_path="build/native/import-context/runtime/sfn/platform/$$mod.sfn-asm"; \
-		manifest_path="build/native/import-context/runtime/sfn/platform/$$mod.layout-manifest"; \
+		asm_path="build/compiler/import-context/runtime/sfn/platform/$$mod.sfn-asm"; \
+		manifest_path="build/compiler/import-context/runtime/sfn/platform/$$mod.layout-manifest"; \
 		if [ ! -f "$$asm_path" ]; then \
 			echo "[rebuild] pre-staging runtime/sfn/platform/$$mod.sfn-asm (seed)..."; \
 			if ! "$$seed" emit --module-name "runtime/sfn/platform/$$mod" -o "$$asm_path" native "runtime/sfn/platform/$$mod.sfn" >/dev/null 2>&1; then \
@@ -945,12 +962,12 @@ rebuild-impl:
 	@# build for cold-emit resolution) so the loop below re-emits them
 	@# with NATIVE_OUT — the canonical proper-pointee signatures, matching
 	@# the pre-#812 final state.
-	@rm -f build/native/import-context/runtime/sfn/platform/*.sfn-asm build/native/import-context/runtime/sfn/platform/*.layout-manifest
-	@mkdir -p build/native/import-context/runtime/sfn/platform
+	@rm -f build/compiler/import-context/runtime/sfn/platform/*.sfn-asm build/compiler/import-context/runtime/sfn/platform/*.layout-manifest
+	@mkdir -p build/compiler/import-context/runtime/sfn/platform
 	@set -e; \
 	for mod in libc posix pthread net; do \
-		asm_path="build/native/import-context/runtime/sfn/platform/$$mod.sfn-asm"; \
-		manifest_path="build/native/import-context/runtime/sfn/platform/$$mod.layout-manifest"; \
+		asm_path="build/compiler/import-context/runtime/sfn/platform/$$mod.sfn-asm"; \
+		manifest_path="build/compiler/import-context/runtime/sfn/platform/$$mod.layout-manifest"; \
 		if [ ! -f "$$asm_path" ]; then \
 			echo "[rebuild] staging runtime/sfn/platform/$$mod.sfn-asm..."; \
 			if ! $(NATIVE_OUT) emit --module-name "runtime/sfn/platform/$$mod" -o "$$asm_path" native "runtime/sfn/platform/$$mod.sfn" >/dev/null; then \
@@ -980,11 +997,11 @@ rebuild-impl:
 	@# layout-manifest (the struct layout) is required alongside the fn
 	@# signature, not just the signature. Same staging shape as the
 	@# platform loop above; the rm forces a canonical NATIVE_OUT re-emit.
-	@rm -f build/native/import-context/runtime/sfn/memory/ownedbuf.sfn-asm build/native/import-context/runtime/sfn/memory/ownedbuf.layout-manifest
-	@mkdir -p build/native/import-context/runtime/sfn/memory
+	@rm -f build/compiler/import-context/runtime/sfn/memory/ownedbuf.sfn-asm build/compiler/import-context/runtime/sfn/memory/ownedbuf.layout-manifest
+	@mkdir -p build/compiler/import-context/runtime/sfn/memory
 	@set -e; \
-	ob_asm="build/native/import-context/runtime/sfn/memory/ownedbuf.sfn-asm"; \
-	ob_manifest="build/native/import-context/runtime/sfn/memory/ownedbuf.layout-manifest"; \
+	ob_asm="build/compiler/import-context/runtime/sfn/memory/ownedbuf.sfn-asm"; \
+	ob_manifest="build/compiler/import-context/runtime/sfn/memory/ownedbuf.layout-manifest"; \
 	if [ ! -f "$$ob_asm" ]; then \
 		echo "[rebuild] staging runtime/sfn/memory/ownedbuf.sfn-asm..."; \
 		if ! $(NATIVE_OUT) emit --module-name "runtime/sfn/memory/ownedbuf" -o "$$ob_asm" native "runtime/sfn/memory/ownedbuf.sfn" >/dev/null; then \

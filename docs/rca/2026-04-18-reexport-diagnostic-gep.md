@@ -90,7 +90,7 @@ and 8 other opaque types that should have concrete layouts (`SymbolEntry`,
 
    ```bash
    ulimit -v 8388608
-   timeout 540 build/seed/bin/sailfin emit llvm compiler/src/main.sfn > main.ll
+   timeout 540 build/toolchains/seed/bin/sfn emit llvm compiler/src/main.sfn > main.ll
    llvm-as-18 -disable-output main.ll
    # error: base element of getelementptr must be sized
    ```
@@ -102,7 +102,7 @@ A cheaper reproducer, which skips most of the lowering and isolates the
 upstream cause:
 
 ```bash
-timeout 60 build/seed/bin/sailfin emit llvm compiler/src/native_ir_api.sfn 2>&1 \
+timeout 60 build/toolchains/seed/bin/sfn emit llvm compiler/src/native_ir_api.sfn 2>&1 \
   | grep "unknown function"
 # test llvm: diagnostic llvm lowering: call to unknown function `starts_with`
 # test llvm: diagnostic llvm lowering: unable to lower if condition in
@@ -519,7 +519,7 @@ Once we knew the failure mode was "call to unknown function" on a
 re-exported symbol, the minimal reproducer is:
 
 ```bash
-timeout 60 build/seed/bin/sailfin emit llvm compiler/src/native_ir_api.sfn 2>&1 \
+timeout 60 build/toolchains/seed/bin/sfn emit llvm compiler/src/native_ir_api.sfn 2>&1 \
   | grep "unknown function"
 ```
 

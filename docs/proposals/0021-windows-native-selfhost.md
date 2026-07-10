@@ -327,7 +327,7 @@ true unblocker — almost everything depends on de-shelling.
 
 **Mapping the brief's issues:** #1482 → M2; #1483 → M0. New issues: M1
 (host-OS), M3 (run_capture), M4 (child-spawn), M5 (fs-enum), M6 (driver target),
-M7–M12 (build/seed/CI).
+M7–M12 (build/toolchains/seed/CI).
 
 **Bundling note (decomposition discipline):** M5's fs-enum *capability* (the
 `fs_list_dir` sentinel) and its sole consumer (the Windows leg) land in **one

@@ -1,0 +1,113 @@
+// compiler/tests/integration/toolchain_gate_test.sfn
+//
+// SFN-167 / SFEP-0046 Phase 1: the `[toolchain]` pin gate on the
+// project-build path. Drives `sfn check <dir>` over a crafted `capsule.toml`
+// and asserts on the gate's behavior. `check` is frontend-only (no link, no
+// `program.ll` build cache), so this is fast and pool-safe. Native (no-bash)
+// per `.claude/rules/no-bash-e2e.md`: it spawns the compiler-under-test with
+// the runtime `process.*` builtins and asserts on captured output with
+// `sfn/strings::find` (the `![pure]` `expect_*` matchers can't be called from
+// an `![io]` test).
+import { find } from "sfn/strings";
+
+// The compiler-under-test: `$SAILFIN_BIN` if set, else the self-hosted binary
+// relative to the repo root the runner starts from (mirrors `sfn/test`'s
+// `_resolve_sfn_bin`).
+fn _sfn_bin() -> string ![io] {
+    let configured = env.get("SAILFIN_BIN");
+    if configured.length > 0 { return configured; }
+    return "build/bin/sfn";
+}
+
+// `run_capture`'s empty array is the *empty* environment; thread the vars the
+// nested `check` needs for a writable scratch under the parallel pool. No PATH
+// needed — `check` never links.
+fn _child_env() -> string[] ![io] {
+    let mut e: string[] = [];
+    let home = env.get("HOME");
+    if home.length > 0 { e.push("HOME=" + home); }
+    let tmpdir = env.get("TMPDIR");
+    if tmpdir.length > 0 { e.push("TMPDIR=" + tmpdir); }
+    let scratch = env.get("SAILFIN_TEST_SCRATCH");
+    if scratch.length > 0 { e.push("SAILFIN_TEST_SCRATCH=" + scratch); }
+    return e;
+}
+
+// Seed a unique project dir with a `capsule.toml` carrying `toolchain_body`
+// (the `[toolchain]` stanza under test) plus a trivial, valid `src/main.sfn`.
+// A per-`tag` path keeps concurrent children from colliding under the pool.
+fn _make_project(tag: string, toolchain_body: string) -> string ![io] {
+    let mut base = env.get("SAILFIN_TEST_SCRATCH");
+    if base.length == 0 { base = "/tmp"; }
+    let dir = base + "/sfn-toolchain-gate-" + tag;
+    fs.createDirectory(dir, true);
+    fs.createDirectory(dir + "/src", true);
+    let manifest = "[capsule]\nname = \"gatefix\"\nversion = \"0.1.0\"\n\n"
+        + toolchain_body
+        + "\n[build]\nentry = \"src/main.sfn\"\n";
+    fs.writeFile(dir + "/capsule.toml", manifest);
+    fs.writeFile(dir + "/src/main.sfn", "fn main() ![io] {\n    print(\"hi\");\n}\n");
+    return dir;
+}
+
+test "toolchain gate: an unsatisfiable version pin hard-errors" ![io] {
+    let dir = _make_project("hi-pin", "[toolchain]\nsfn = \"99.0.0\"\n");
+    let exit = process.run_capture([_sfn_bin(), "check", dir], _child_env());
+    let out = process.capture_take_stdout();
+    let err = process.capture_take_stderr();
+    assert exit != 0;
+    assert find(out + err, "toolchain mismatch", 0) >= 0;
+}
+
+test "toolchain gate: --skip-toolchain-check downgrades the pin to a warning" ![io] {
+    let dir = _make_project("skip", "[toolchain]\nsfn = \"99.0.0\"\n");
+    let exit = process.run_capture([_sfn_bin(), "check", "--skip-toolchain-check", dir], _child_env());
+    let out = process.capture_take_stdout();
+    let err = process.capture_take_stderr();
+    // The mismatch is downgraded and the command proceeds to a clean check.
+    assert exit == 0;
+    assert find(out + err, "error: toolchain mismatch", 0) < 0;
+}
+
+test "toolchain gate: SAILFIN_TOOLCHAIN=off downgrades the pin to a warning" ![io] {
+    let dir = _make_project("env-off", "[toolchain]\nsfn = \"99.0.0\"\n");
+    let mut e = _child_env();
+    e.push("SAILFIN_TOOLCHAIN=off");
+    let exit = process.run_capture([_sfn_bin(), "check", dir], e);
+    let out = process.capture_take_stdout();
+    let err = process.capture_take_stderr();
+    assert exit == 0;
+    assert find(out + err, "error: toolchain mismatch", 0) < 0;
+}
+
+test "toolchain gate: a satisfiable version pin passes the gate" ![io] {
+    let dir = _make_project("low-pin", "[toolchain]\nsfn = \"0.0.1\"\n");
+    let exit = process.run_capture([_sfn_bin(), "check", dir], _child_env());
+    let out = process.capture_take_stdout();
+    let err = process.capture_take_stderr();
+    // A satisfied pin passes the gate and the check itself succeeds.
+    assert exit == 0;
+    assert find(out + err, "toolchain mismatch", 0) < 0;
+}
+
+test "toolchain gate: channel = stable rejects a prerelease toolchain" ![io] {
+    // Conditioned on the running toolchain: `channel = "stable"` only rejects
+    // when the running `sfn` is itself a prerelease. This keeps the test valid
+    // after the project ships a stable (no-prerelease) toolchain.
+    let _v = process.run_capture([_sfn_bin(), "--version"], _child_env());
+    let ver = process.capture_take_stdout() + process.capture_take_stderr();
+    let is_prerelease = find(ver, "-alpha", 0) >= 0 || find(ver, "-beta", 0) >= 0
+        || find(ver, "-rc", 0) >= 0;
+
+    let dir = _make_project("chan", "[toolchain]\nchannel = \"stable\"\n");
+    let exit = process.run_capture([_sfn_bin(), "check", dir], _child_env());
+    let out = process.capture_take_stdout();
+    let err = process.capture_take_stderr();
+    if is_prerelease {
+        assert exit != 0;
+        assert find(out + err, "toolchain mismatch", 0) >= 0;
+    } else {
+        // A stable running toolchain satisfies `channel = "stable"`.
+        assert find(out + err, "toolchain mismatch", 0) < 0;
+    }
+}

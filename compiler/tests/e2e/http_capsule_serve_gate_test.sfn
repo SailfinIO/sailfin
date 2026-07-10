@@ -49,7 +49,7 @@ fn _child_env() -> string[] ![io] {
 // discovery (`workspace.toml`) resolves the `sfn/http` dependency — a
 // system tmp dir would not. Repo-relative; the runner starts from the
 // repo root. This tree is unique per test, but the `sfn/http`
-// import-context it stages into (`build/native/import-context/sfn/http`)
+// import-context it stages into (`build/compiler/import-context/sfn/http`)
 // is a shared, fixed path — NOT the sole `sfn/http` consumer in the e2e
 // pool (see the #1789 note in the test body).
 fn _app_root() -> string { return "build/http-capsule-gate-e2e"; }
@@ -91,7 +91,7 @@ test "http serve gate: emit staging lowers imported serve to the capsule fn, not
     let main_path = _write_consumer();
 
     // #1789: this test previously force-COLD the emit with
-    // `rm -rf build/native/import-context/sfn/http`. That path is the
+    // `rm -rf build/compiler/import-context/sfn/http`. That path is the
     // shared, fixed import-context tree — routed only by `--work-dir`
     // (which `emit` does not expose), NOT by `SAILFIN_TEST_SCRATCH` — so
     // under the parallel `--jobs N` pool the delete raced concurrent

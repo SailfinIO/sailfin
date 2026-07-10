@@ -395,7 +395,7 @@ fn _rh_descriptors_01(descriptors_in: RuntimeHelperDescriptor[]) -> RuntimeHelpe
     });
     // Per-symbol fallback signature for libc `nanosleep`, called from
     // `runtime/sfn/clock.sfn::sfn_sleep`. In the common path the
-    // staged `build/native/import-context/runtime/sfn/platform/posix.sfn-asm`
+    // staged `build/compiler/import-context/runtime/sfn/platform/posix.sfn-asm`
     // artifact makes the imported function entry win at call resolution
     // (issue #633 — `core_call_resolution.sfn` prefers the function
     // entry over the descriptor and clears `result_helper`), and the
@@ -417,7 +417,7 @@ fn _rh_descriptors_01(descriptors_in: RuntimeHelperDescriptor[]) -> RuntimeHelpe
     // from `runtime/sfn/clock.sfn::sfn_clock_monotonic_nanos` (#878).
     // Same fallback discipline as `nanosleep` directly above: in the
     // common path the staged
-    // `build/native/import-context/runtime/sfn/platform/posix.sfn-asm`
+    // `build/compiler/import-context/runtime/sfn/platform/posix.sfn-asm`
     // artifact makes the imported function entry win at call resolution
     // (#633) and `render_runtime_helper_declarations` skips this
     // descriptor via the `target == symbol` shadow check in

@@ -30,6 +30,12 @@ Compile and execute a Sailfin source file in a single step. The file is compiled
 sfn run <file.sfn>
 ```
 
+**Options:**
+
+| Flag | Description |
+|---|---|
+| `--skip-toolchain-check` | Bypass the `[toolchain]` pin check for this invocation — see [Toolchain Pinning Flags](#toolchain-pinning-flags) |
+
 **Examples:**
 
 ```bash
@@ -40,6 +46,7 @@ sfn run src/main.sfn
 
 **Behavior:**
 
+- Resolves the project/workspace root and verifies the `[toolchain]` pin, if any, before compiling (see [Toolchain Pinning Flags](#toolchain-pinning-flags)).
 - Compiles the source file from scratch on each invocation.
 - Effect annotations are checked at compile time; missing effects produce `effects.missing` diagnostics with fix-it hints.
 - The program runs in the same terminal session; stdout and stderr are connected to the calling terminal.
@@ -67,6 +74,12 @@ sfn test compiler/tests/unit/             # one suite, banner labelled "unit"
 sfn test compiler/tests/unit/arrays_test.sfn  # single file (no banner)
 sfn test compiler/tests/unit compiler/tests/integration capsules  # three suites
 ```
+
+**Options** (selected — see the suite discovery/filtering flags above):
+
+| Flag | Description |
+|---|---|
+| `--skip-toolchain-check` | Bypass the `[toolchain]` pin check for this invocation — see [Toolchain Pinning Flags](#toolchain-pinning-flags) |
 
 > **Note:** `--filter` is not yet supported. To narrow test scope, pass a specific file or directory path.
 
@@ -175,6 +188,7 @@ sfn check --quiet compiler/src   # suppress diagnostic output; exit code only
 | Flag | Description |
 |---|---|
 | `--quiet`, `-q` | Suppress diagnostic output; only the summary and exit code are produced |
+| `--skip-toolchain-check` | Bypass the `[toolchain]` pin check for this invocation — see [Toolchain Pinning Flags](#toolchain-pinning-flags) |
 | `-h`, `--help` | Print usage and exit |
 
 **What gets checked:**
@@ -232,6 +246,7 @@ sfn build <file.sfn> [-o <output>]
 | Flag | Description |
 |---|---|
 | `-o <output>` | Write the compiled binary to `output` instead of the default path |
+| `--skip-toolchain-check` | Bypass the `[toolchain]` pin check for this invocation — see [Toolchain Pinning Flags](#toolchain-pinning-flags) |
 
 **Examples:**
 
@@ -316,7 +331,7 @@ Sailfin ships with package-management commands that target a default public regi
 
 ### `sfn init`
 
-Scaffold a new Sailfin capsule in the current directory. Writes a `capsule.toml` manifest (with the capsule name inferred from the directory) and a starter `src/main.sfn`.
+Scaffold a new Sailfin capsule in the current directory. Writes a `capsule.toml` manifest (with the capsule name inferred from the directory) and a starter `src/main.sfn`. The generated manifest includes a `[toolchain] sfn = "<version>"` pin set to the version of the `sfn` binary running `init` — see [Toolchain Pinning Flags](#toolchain-pinning-flags).
 
 **Usage:**
 
@@ -425,6 +440,31 @@ Or put it in `~/.sfn/config.toml` once per workstation with `sfn config set regi
 
 ---
 
+## Toolchain Pinning Flags
+
+`sfn build`, `sfn run`, `sfn check`, and `sfn test` all verify a project's `[toolchain]` manifest pin (`capsule.toml` / `workspace.toml`) before doing any other work — floor semver + optional stability `channel`, with a member `capsule.toml` overriding a `workspace.toml` pin per field. See [Capsules & Packages → Toolchain Pinning](/docs/advanced/capsules#toolchain-pinning) for the manifest syntax and gate semantics. `sfn init` writes the pin for you (see [`sfn init`](#sfn-init) above).
+
+On a mismatch, the command exits non-zero with a diagnostic of this shape:
+
+```
+error: toolchain mismatch
+  this project pins sfn >= 0.8.0-alpha.2 (capsule.toml [toolchain])
+  but the running toolchain is 0.7.4-alpha.1
+  install the pinned toolchain, or re-run with --skip-toolchain-check to override
+```
+
+**Escape hatches** — any one of the following downgrades the hard error to a one-line warning on stderr and lets the command proceed:
+
+| Form | Scope |
+|---|---|
+| `--skip-toolchain-check` | This invocation only |
+| `SAILFIN_SKIP_TOOLCHAIN_CHECK=1` | Every `sfn` invocation in the current shell/CI job |
+| `SAILFIN_TOOLCHAIN=off` (or `=0`) | Every `sfn` invocation in the current shell/CI job |
+
+A project with no `[toolchain]` section is unaffected — the gate is a no-op. **Auto-fetching and dispatching to the pinned toolchain (`SAILFIN_TOOLCHAIN=auto`, `sfn toolchain install`) is designed but not yet implemented**; today a mismatch always requires installing the pinned version manually or using one of the escape hatches above.
+
+---
+
 ## Build System
 
 The repository Makefile provides higher-level build orchestration for the self-hosting workflow. These targets are for working on the Sailfin compiler itself; end users generally only need `sfn run` and `sfn test`.
@@ -442,9 +482,9 @@ The repository Makefile provides higher-level build orchestration for the self-h
 | `make test-integration` | Run integration tests from `compiler/tests/integration/*_test.sfn`. |
 | `make test-e2e` | Run end-to-end tests from `compiler/tests/e2e/*_test.sfn`. |
 | `make package` | Build and package native artifacts into `dist/`. Used for release artifacts. |
-| `make fetch-seed` | Download the latest released seed compiler from GitHub Releases into `build/seed/`. Requires `GITHUB_TOKEN`. |
+| `make fetch-seed` | Download the pinned seed compiler (`.seed-version`, override with `SEED_VERSION`) from GitHub Releases into `build/toolchains/seed/`. Requires `GITHUB_TOKEN`. |
 | `make clean` | Remove `dist/` packaged artifacts. Does not remove build intermediates. |
-| `make clean-build` | Remove `build/` artifacts (keeps `build/seed/` by default). Pass `KEEP_SEED=0` to also remove the downloaded seed. |
+| `make clean-build` | Remove `build/` artifacts (keeps the seed toolchain under `build/toolchains/` by default). Pass `KEEP_SEED=0` to also remove `build/toolchains/`. |
 | `make clean-all` | Remove both `dist/` and `build/` artifacts completely. |
 | `make help` | Print a summary of available targets. |
 
@@ -467,16 +507,18 @@ These environment variables influence the behavior of `sfn` and the Makefile bui
 | `SAILFIN_RUNTIME_ROOT` | `sfn` binary | Override the directory where `sfn` looks for the bundled runtime. By default, the runtime is resolved relative to the executable. |
 | `SFN_REGISTRY` | `sfn add` / `sfn publish` | Override the package registry base URL for this shell. Takes precedence over `~/.sfn/config.toml`. See [`sfn config`](#sfn-config-getsetunsetlist-key-value). |
 | `SFN_TOKEN` | `sfn publish` | Bearer token used when uploading a capsule. Takes precedence over `~/.sfn/credentials` written by `sfn login`. |
+| `SAILFIN_SKIP_TOOLCHAIN_CHECK` | `sfn build`/`run`/`check`/`test` | Set to `1` to downgrade a `[toolchain]` pin mismatch from a hard error to a warning for every invocation in the shell/CI job. See [Toolchain Pinning Flags](#toolchain-pinning-flags). |
+| `SAILFIN_TOOLCHAIN` | `sfn build`/`run`/`check`/`test` | `off` (or `0`) has the same effect as `SAILFIN_SKIP_TOOLCHAIN_CHECK=1`. `auto` (fetch + dispatch the pinned toolchain) is designed but not yet implemented. |
 | `PREFIX` | Makefile | Installation prefix. Defaults to `$HOME/.local`. The binary is installed to `$(PREFIX)/bin`. |
 | `GLOBAL_BIN_DIR` | Installer script | Override the installation bin directory directly (takes precedence over `PREFIX`). |
 | `GITHUB_TOKEN` | `make fetch-seed` | GitHub personal access token used to download seed releases from the `SailfinIO/sailfin` repository. Required for `make fetch-seed`. |
 | `BUILD_JOBS` | Makefile | Number of parallel compile jobs. Default: `1`. |
 | `BUILD_ARGS` | Makefile | Extra arguments passed through to the build orchestrator script. |
-| `SEED` | Makefile | Path to (or name of) the seed compiler used as the bootstrap. Defaults to `sfn` (resolved from `PATH`). |
+| `SEED` | Makefile | Path to (or name of) the seed compiler used as the bootstrap. Defaults to the fetched repo-local seed alias, `build/toolchains/seed/bin/sfn` (`sfn.exe` on Windows). |
 | `SEED_VERSION` | Makefile | Version tag of the seed to fetch. Defaults to `latest`. |
 | `NATIVE_OPT` | Makefile | Optimization level passed to `clang` when compiling LLVM IR. Defaults to `-O2`. |
 | `CLANG` | Makefile | `clang` executable to use. Defaults to `clang`. |
-| `KEEP_SEED` | `make clean-build` | Set to `0` to delete `build/seed/` during `make clean-build`. Defaults to `1` (seed is preserved). |
+| `KEEP_SEED` | `make clean-build` | Set to `0` to also delete `build/toolchains/` during `make clean-build`. Defaults to `1` (the seed toolchain is preserved). |
 
 ### Debug and trace variables
 
@@ -514,7 +556,7 @@ When `sfn test` is used, a non-zero exit code means at least one test failed. Al
 | `workspace.toml` | Workspace manifest — shared policies for multi-capsule projects |
 | `*.sfn-asm` | Native IR intermediate representation produced by `sfn emit native` |
 | `build/bin/sfn` | Default output path for the self-hosted compiler binary |
-| `build/seed/bin/sailfin` | Default path for the downloaded seed compiler |
+| `build/toolchains/seed/bin/sfn` | Default path for the downloaded seed compiler |
 | `dist/` | Release packaging output directory |
 
 ---
