@@ -1041,3 +1041,23 @@ test "recognized effects: multiple canonical effects are not flagged" {
     let violations = validate_recognized_effects(program);
     assert violations.length == 0;
 }
+
+test "recognized effects: a nested fn with an unrecognized root is flagged" {
+    // SFEP-0042: a nested/local `fn g() ![disk] { }` declared inside a
+    // routine body must not bypass E0404 just because it is not top-level.
+    // The missing-effect path walks nested fns, so recognition must too.
+    let nested = _fn_decl_with_effects("g", ["disk"], 5);
+    let mut outer_decorators: Decorator[] = [];
+    let outer_body = Block { tokens: [], text: "", statements: [nested] };
+    let outer = Statement.FunctionDeclaration {
+        signature: _signature("outer", ["io"], _span(4, 4)),
+        body: outer_body,
+        decorators: outer_decorators,
+        is_unsafe: false
+    };
+    let program = Program { statements: [outer] };
+    let violations = validate_recognized_effects(program);
+    assert violations.length == 1;
+    assert violations[0].routine_name == "g";
+    assert violations[0].unrecognized_effects[0] == "disk";
+}

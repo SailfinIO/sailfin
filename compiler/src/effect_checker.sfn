@@ -696,7 +696,9 @@ fn validate_recognized_effects(program: Program) -> UnrecognizedEffectViolation[
 
 fn _analyze_statement_recognition(statement: Statement) -> UnrecognizedEffectViolation[] {
     if statement.variant == "FunctionDeclaration" {
-        return _analyze_routine_recognition(statement.signature, statement.signature.name);
+        let mut issues = _analyze_routine_recognition(statement.signature, statement.signature.name);
+        issues = _append_unrecognized_violations(issues, _collect_body_recognition(statement.body));
+        return issues;
     }
     if statement.variant == "TestDeclaration" {
         // Tests carry a bare `effects` list, not a full signature —
@@ -712,7 +714,9 @@ fn _analyze_statement_recognition(statement: Statement) -> UnrecognizedEffectVio
             name_span: statement.name_span
         };
         let qualified = "test " + statement.name;
-        return _analyze_routine_recognition(signature, qualified);
+        let mut issues = _analyze_routine_recognition(signature, qualified);
+        issues = _append_unrecognized_violations(issues, _collect_body_recognition(statement.body));
+        return issues;
     }
     if statement.variant == "StructDeclaration" {
         let mut issues: UnrecognizedEffectViolation[] = [];
@@ -722,11 +726,33 @@ fn _analyze_statement_recognition(statement: Statement) -> UnrecognizedEffectVio
             let method = statement.methods[method_index];
             let qualified = statement.name + "." + method.signature.name;
             issues = _append_unrecognized_violations(issues, _analyze_routine_recognition(method.signature, qualified));
+            issues = _append_unrecognized_violations(issues, _collect_body_recognition(method.body));
             method_index += 1;
         }
         return issues;
     }
     return [];
+}
+
+// SFEP-0042: nested/local `fn` declarations inside a routine body carry
+// their own `![...]` clauses, so recognition must descend into them too.
+// The missing-effect path already analyzes nested fns
+// (`_analyze_routine_with_nested`); without this, a nested
+// `fn g() ![disk] { }` would bypass E0404 while its siblings at top level
+// are checked. Reuses the same nested-fn enumeration; the effect table is
+// irrelevant to recognition (it inspects only declared effect strings), so
+// an empty table is passed.
+fn _collect_body_recognition(body: Block) -> UnrecognizedEffectViolation[] {
+    let mut issues: UnrecognizedEffectViolation[] = [];
+    let nested = _collect_nested_fns_in_block(body, empty_import_symbols());
+    let mut i: int = 0;
+    loop {
+        if i >= nested.length { break; }
+        let decl = nested[i].decl;
+        issues = _append_unrecognized_violations(issues, _analyze_routine_recognition(decl.signature, decl.signature.name));
+        i += 1;
+    }
+    return issues;
 }
 
 fn _analyze_routine_recognition(signature: FunctionSignature, name: string) -> UnrecognizedEffectViolation[] {
