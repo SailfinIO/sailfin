@@ -105,6 +105,16 @@ test "cross-windows windows_stubs.ll defines the required Windows stubs" ![io] {
     assert contains(stubs, "define i64 @tls_read");
     assert contains(stubs, "define i64 @tls_write");
 
+    // OpenSSL EVP symbols pulled in by the `sfn/crypto` compiler dependency
+    // (SFN-168): the static mingw link has no `-lcrypto`, so these resolve to
+    // the Windows no-op stubs. `EVP_PKEY_new_raw_public_key` returning null
+    // keeps `ed25519_verify` fail-closed on Windows.
+    assert contains(stubs, "define i8* @EVP_PKEY_new_raw_public_key");
+    assert contains(stubs, "define i32 @EVP_DigestVerify");
+    assert contains(stubs, "define i8* @EVP_MD_CTX_new");
+    assert contains(stubs, "define i8* @EVP_sha256");
+    assert contains(stubs, "define i8* @HMAC");
+
     // windows_stubs.ll is a cross-windows-only object: NOT in the manifest
     // (its `ll-sources` is empty — adding windows_stubs would duplicate the
     // strong defs on Linux/macOS), but wired into the Makefile cross-windows

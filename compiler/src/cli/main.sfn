@@ -60,6 +60,7 @@ import { command_def as package_command_def, run as package_run } from "./comman
 import { command_def as publish_command_def, run as publish_run } from "./commands/publish";
 import { command_def as run_command_def, run as run_run } from "./commands/run";
 import { command_def as test_command_def, run as test_run } from "./commands/test";
+import { command_def as toolchain_command_def, run as toolchain_run } from "./commands/toolchain";
 import { command_def as version_command_def, run as version_run } from "./commands/version";
 import { CliContext, driver_prefix_length, parse_driver_prefix } from "./context";
 
@@ -90,6 +91,7 @@ fn _usage() -> string {
         + "  sfn package [--target T] [--out DIR] [--compiler-bin PATH] [--installer] [-p <capsule-path>]\n";
     out = out + "  sfn login   [token]\n";
     out = out + "  sfn config  <get|set|unset|list> [key] [value]\n";
+    out = out + "  sfn toolchain install <version>\n";
     out = out + "\n";
     out = out + "meta:\n";
     out = out + "  sfn version\n";
@@ -112,7 +114,7 @@ fn _usage() -> string {
 // `--runtime-root` / `--binary-dir` driver prefix that
 // `cli/context.sfn::parse_driver_prefix` consumes — the shape the
 // retired C driver injected as argv flags.
-fn sailfin_cli_main_with_paths(argv: string[], runtime_root: string, binary_dir: string) -> int ![io, clock] {
+fn sailfin_cli_main_with_paths(argv: string[], runtime_root: string, binary_dir: string) -> int ![clock, io, net] {
     let mut composed: string[] = [];
     if runtime_root.length > 0 {
         composed.push("--runtime-root");
@@ -161,7 +163,7 @@ fn _is_help_json_args(args: string[]) -> boolean {
     return false;
 }
 
-fn sailfin_cli_main_v2(argv: string[]) -> int ![io, clock] {
+fn sailfin_cli_main_v2(argv: string[]) -> int ![clock, io, net] {
     // Parse the driver-injected `--runtime-root` / `--binary-dir` prefix
     // (Issue 2.2) so `binary_dir` is available for version resolution
     // and the user-visible args can be sliced off the front.
@@ -207,6 +209,7 @@ fn sailfin_cli_main_v2(argv: string[]) -> int ![io, clock] {
     root = with_subcommand(root, fmt_command_def());
     root = with_subcommand(root, test_command_def());
     root = with_subcommand(root, config_command_def());
+    root = with_subcommand(root, toolchain_command_def());
     root = with_subcommand(root, cache_command_def());
     root = with_subcommand(root, lock_command_def());
     root = with_subcommand(root, package_command_def());
@@ -467,6 +470,24 @@ fn sailfin_cli_main_v2(argv: string[]) -> int ![io, clock] {
             if parse_ok { return cache_run(matches, ctx); }
             if parse_err.message.length > 0 { print(parse_err.message); } else {
                 print("usage: sfn cache <info|prune|clean>");
+            }
+            return 2;
+        }
+    }
+
+    // `sfn toolchain install <version>` — nested subcommand, so the
+    // dispatch gates on the descent path's root (`subcommand_path[0]`)
+    // exactly like `config`/`cache`. A clean parse dispatches to
+    // `toolchain.run`; a non-ok parse that descended into `toolchain`
+    // (missing `<version>`, unknown leaf, `--help`) is a usage error
+    // (exit 2) — the parser owns argument validation.
+    let toolchain_path: string[] = subcommand_path(matches);
+    if toolchain_path.length > 0 {
+        if strings_equal(toolchain_path[0], "toolchain") {
+            if ctx.trace_argv { _v2_trace_argv(argv); }
+            if parse_ok { return toolchain_run(matches, ctx); }
+            if parse_err.message.length > 0 { print(parse_err.message); } else {
+                print("usage: sfn toolchain install <version>");
             }
             return 2;
         }

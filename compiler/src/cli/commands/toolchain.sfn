@@ -1,0 +1,485 @@
+// compiler/src/cli/commands/toolchain.sfn
+//
+// `sfn toolchain install <version>` — the native, fail-closed acquire
+// side of the toolchain-pinning supply chain (SFEP-0046 §3.5, Phase 2
+// "acquire"). It downloads the pinned release tarball plus the signed
+// `SHA256SUMS` manifest, verifies the manifest signature against the
+// Ed25519 public key embedded in this binary (`release_trust.sfn`),
+// confirms the asset's SHA-256 matches the manifest, and only then
+// extracts the toolchain into the version store
+// (`~/.local/share/sailfin/versions/<version>/`). Any verification
+// failure aborts BEFORE extraction with a non-zero exit — a corrupt or
+// unsigned asset is never written into the store.
+//
+// The fetch is native Sailfin over the runtime HTTP adapter
+// (`http.download`, `![io, net]`) — it does NOT shell out to
+// `install.sh`; it reuses only the release-asset layout that installer
+// established (`sailfin_<version>_<os>_<arch>.tar.gz` under the GitHub
+// releases URL, INSTALL_BASE store). Re-exec dispatch + the
+// `SAILFIN_TOOLCHAIN` knob are the sibling leaf SFN-172, out of scope
+// here.
+import {
+    Command,
+    Matches,
+    arg,
+    command,
+    get,
+    subcommand,
+    with_arg,
+    with_subcommand
+} from "sfn/cli";
+import { ed25519_verify_utf8 } from "sfn/crypto";
+
+import { _sha256_of_file_cmd, _shell_read_cmd, _toml_trim_cmd } from "../../build/fs";
+import { _get_home_cmd } from "../../build_flags";
+import { number_to_string } from "../../num_format";
+import { release_signing_public_key_hex } from "../../release_trust";
+import {
+    char_code,
+    ends_with,
+    find_char_local,
+    starts_with,
+    strings_equal,
+    substring
+} from "../../string_utils";
+import { CliContext } from "../context";
+import { _is_safe_capsule_version_cmd } from "./cmd_shared";
+
+// The GitHub releases base the native fetch reads from. The release
+// asset layout (asset name + this URL shape) is the only thing reused
+// from `install.sh` (SFEP-0046 §3.5).
+let TOOLCHAIN_RELEASE_BASE = "https://github.com/SailfinIO/sailfin/releases/download";
+
+// The release base, overridable via `SAILFIN_TOOLCHAIN_RELEASE_BASE` for
+// air-gapped mirrors (à la `GOPROXY`) and for tests that serve a
+// controlled manifest from a local server. The `<tag>/<asset>` layout
+// under it is unchanged; only the host/prefix moves. Verification is
+// mandatory regardless of the base — a mirror is not a trust bypass.
+fn _release_base() -> string ![io] {
+    let override_base = env.get("SAILFIN_TOOLCHAIN_RELEASE_BASE");
+    if override_base.length > 0 {
+        // Trim trailing slashes so `<base>/<tag>/<asset>` never doubles the
+        // separator (`http://host//v0.8.0/...`), which some mirrors reject.
+        let mut b = override_base;
+        loop {
+            if b.length == 0 { break; }
+            if !strings_equal(substring(b, b.length - 1, b.length), "/") {
+                break;
+            }
+            b = substring(b, 0, b.length - 1);
+        }
+        if b.length > 0 { return b; }
+    }
+    return TOOLCHAIN_RELEASE_BASE;
+}
+
+// A path-safe, version-shaped install target, validated before any path/URL
+// interpolation. `_is_safe_capsule_version_cmd` blocks `/`, `\`, and `..`
+// traversal (the version is joined into the store path and the release URL);
+// the charset gate admits only the semver alphabet (digits, letters, `.`,
+// `-`, `+`), rejecting whitespace and control characters; and the first
+// character must be a digit (a semver core opens with one, §2), rejecting
+// non-version junk. A well-formed but nonexistent version still fails closed
+// at fetch, so full major.minor.patch parsing is not required here.
+fn _is_valid_install_version(ver: string) -> boolean {
+    if ver.length == 0 { return false; }
+    if !_is_safe_capsule_version_cmd(ver) { return false; }
+    if !_is_version_digit(substring(ver, 0, 1)) { return false; }
+    let mut i: int = 0;
+    loop {
+        if i >= ver.length { break; }
+        if !_is_version_char(substring(ver, i, i + 1)) { return false; }
+        i += 1;
+    }
+    return true;
+}
+
+// A single character allowed in a version string: the semver alphabet
+// `[0-9A-Za-z.+-]`. Excludes whitespace, control chars, and shell/URL metas.
+fn _is_version_char(ch: string) -> boolean {
+    let c = char_code(ch);
+    if c >= 48 && c <= 57 { return true; }
+    if c >= 65 && c <= 90 { return true; }
+    if c >= 97 && c <= 122 { return true; }
+    if c == 46 { return true; }
+    if c == 45 { return true; }
+    if c == 43 { return true; }
+    return false;
+}
+
+fn _is_version_digit(ch: string) -> boolean {
+    let c = char_code(ch);
+    if c < 48 { return false; }
+    if c > 57 { return false; }
+    return true;
+}
+
+// Resolve the version store base. `INSTALL_BASE` points directly at the
+// `versions` dir (the knob `install.sh` honors); `SAILFIN_HOME` names a
+// sailfin data root whose `versions` subdir is used; otherwise the
+// XDG-style default under `$HOME`. Returns "" when no home can be found.
+fn _versions_base() -> string ![io] {
+    let install_base = env.get("INSTALL_BASE");
+    if install_base.length > 0 { return install_base; }
+    let sfn_home = env.get("SAILFIN_HOME");
+    if sfn_home.length > 0 { return sfn_home + "/versions"; }
+    let home = _get_home_cmd();
+    if home.length == 0 { return ""; }
+    return home + "/.local/share/sailfin/versions";
+}
+
+// Canonical release OS token ("" if unrecognised). Mirrors the mapping
+// `install.sh`/`package.sfn` derive from `uname -s`.
+fn _detect_os() -> string ![io] {
+    let s = _shell_read_cmd("uname -s");
+    if strings_equal(s, "Linux") { return "linux"; }
+    if strings_equal(s, "Darwin") { return "macos"; }
+    if starts_with(s, "MINGW") { return "windows"; }
+    if starts_with(s, "MSYS") { return "windows"; }
+    if starts_with(s, "CYGWIN") { return "windows"; }
+    return "";
+}
+
+// Canonical release arch token ("" if unrecognised).
+fn _detect_arch() -> string ![io] {
+    let m = _shell_read_cmd("uname -m");
+    if strings_equal(m, "x86_64") { return "x86_64"; }
+    if strings_equal(m, "amd64") { return "x86_64"; }
+    if strings_equal(m, "aarch64") { return "arm64"; }
+    if strings_equal(m, "arm64") { return "arm64"; }
+    return "";
+}
+
+// Extract the SHA-256 hex digest the manifest records for `asset`, or
+// "" when the asset is not listed. Accepts both coreutils
+// (`<hash>  <name>`) and BSD binary-marker (`<hash> *<name>`) line
+// shapes; a trailing CR is tolerated.
+fn _digest_for_asset(sums_text: string, asset: string) -> string {
+    let n = sums_text.length;
+    let mut i: int = 0;
+    let mut line_start: int = 0;
+    loop {
+        if i > n { break; }
+        let mut at_boundary: boolean = false;
+        if i == n { at_boundary = true; } else {
+            if strings_equal(substring(sums_text, i, i + 1), "\n") {
+                at_boundary = true;
+            }
+        }
+        if at_boundary {
+            let line = substring(sums_text, line_start, i);
+            let digest = _parse_sums_line(line, asset);
+            if digest.length > 0 { return digest; }
+            line_start = i + 1;
+        }
+        i += 1;
+    }
+    return "";
+}
+
+// Parse one `SHA256SUMS` line; return the 64-hex digest when its named
+// file equals `asset`, else "".
+fn _parse_sums_line(line: string, asset: string) -> string {
+    let sp = find_char_local(line, " ", 0);
+    if sp <= 0 { return ""; }
+    let digest = substring(line, 0, sp);
+    if digest.length != 64 { return ""; }
+    // Skip the separator run, then an optional binary-mode '*' marker.
+    let mut j: int = sp;
+    loop {
+        if j >= line.length { break; }
+        if !strings_equal(substring(line, j, j + 1), " ") { break; }
+        j += 1;
+    }
+    if j < line.length {
+        if strings_equal(substring(line, j, j + 1), "*") { j += 1; }
+    }
+    let mut name = substring(line, j, line.length);
+    // Tolerate a trailing CR from CRLF manifests.
+    if ends_with(name, "\r") {
+        name = substring(name, 0, name.length - 1);
+    }
+    if strings_equal(name, asset) { return digest; }
+    return "";
+}
+
+// Find the directory inside the extracted archive that holds the
+// binary — the extract root directly, or a single top-level wrapper
+// dir. Returns "" when no `sailfin` binary is present.
+fn _find_extracted_root(extract_dir: string) -> string ![io] {
+    if _binary_in_root(extract_dir).length > 0 { return extract_dir; }
+    let entries = fs.listDirectory(extract_dir);
+    let mut i: int = 0;
+    loop {
+        if i >= entries.length { break; }
+        let cand = extract_dir + "/" + entries[i];
+        if _binary_in_root(cand).length > 0 { return cand; }
+        i += 1;
+    }
+    return "";
+}
+
+// Path to the `sailfin` binary within `root` (top-level or under
+// `bin/`), or "" if absent. `.exe` is accepted for Windows assets.
+fn _binary_in_root(root: string) -> string ![io] {
+    if fs.exists(root + "/sailfin") { return root + "/sailfin"; }
+    if fs.exists(root + "/bin/sailfin") { return root + "/bin/sailfin"; }
+    if fs.exists(root + "/sailfin.exe") { return root + "/sailfin.exe"; }
+    if fs.exists(root + "/bin/sailfin.exe") { return root + "/bin/sailfin.exe"; }
+    return "";
+}
+
+// Download `url` to `dest`. `http.download` writes the file only on a
+// successful (< 400) round-trip and returns null otherwise, so the
+// file's presence is the reliable success signal (avoids inspecting the
+// possibly-null return).
+fn _download_to(url: string, dest: string) -> boolean ![io, net] {
+    let _ = http.download(url, dest);
+    return fs.exists(dest);
+}
+
+// Core of `sfn toolchain install`: fetch, verify (signature + digest),
+// then extract into the version store. Fail-closed at every step.
+fn _toolchain_install(version_arg: string, work_root: string) -> int ![io, net] {
+    if version_arg.length == 0 {
+        print("error: sfn toolchain install requires a <version>");
+        print("usage: sfn toolchain install <version>");
+        return 2;
+    }
+    let mut ver = version_arg;
+    if starts_with(ver, "v") { ver = substring(ver, 1, ver.length); }
+    // Input hardening: `ver` is interpolated into the store path
+    // (`base + "/" + ver`) and the release URL, so it must be path-safe
+    // and version-shaped before any fetch. `_is_safe_capsule_version_cmd`
+    // rejects `/`, `\`, and `..` traversal; the first-character-digit
+    // check rejects non-version junk (a semver core opens with a digit,
+    // §2), which also excludes a leading `.` or `-`.
+    if !_is_valid_install_version(ver) {
+        print("error: not a valid version: \"" + version_arg + "\"");
+        return 1;
+    }
+
+    let os = _detect_os();
+    let arch = _detect_arch();
+    if os.length == 0 {
+        print("error: unsupported host OS (uname -s not linux/macos/windows)");
+        return 1;
+    }
+    if arch.length == 0 {
+        print("error: unsupported host architecture (uname -m not x86_64/arm64)");
+        return 1;
+    }
+
+    let base = _versions_base();
+    if base.length == 0 {
+        print("error: could not determine the toolchain store (set INSTALL_BASE or HOME)");
+        return 1;
+    }
+    let store_dir = base + "/" + ver;
+    let bin_path = store_dir + "/sailfin";
+    let sha_path = store_dir + "/.sha256";
+
+    let asset = "sailfin_" + ver + "_" + os + "_" + arch + ".tar.gz";
+    let tag = "v" + ver;
+    let release_base = _release_base() + "/" + tag;
+    let asset_url = release_base + "/" + asset;
+    let sums_url = release_base + "/SHA256SUMS";
+    let sig_url = release_base + "/SHA256SUMS.sig";
+
+    let tmp = work_root + "/.sfn-toolchain-" + ver;
+    process.run(["rm", "-rf", tmp]);
+    process.run(["mkdir", "-p", tmp]);
+
+    // 1. Fetch the signed manifest (small) — always, so a re-install
+    //    re-verifies the trust chain without re-downloading the tarball.
+    let sums_path = tmp + "/SHA256SUMS";
+    let sig_path = tmp + "/SHA256SUMS.sig";
+    if !_download_to(sums_url, sums_path) {
+        print("error: failed to download release manifest");
+        print("  " + sums_url);
+        process.run(["rm", "-rf", tmp]);
+        return 1;
+    }
+    if !_download_to(sig_url, sig_path) {
+        print("error: failed to download release manifest signature");
+        print("  " + sig_url);
+        process.run(["rm", "-rf", tmp]);
+        return 1;
+    }
+
+    // 2. Verify the manifest signature against the embedded public key.
+    //    The signature is over the raw SHA256SUMS bytes (NUL-free ASCII,
+    //    so fs.readFile reproduces them exactly).
+    let sums_text = fs.readFile(sums_path);
+    let sig_hex = _toml_trim_cmd(fs.readFile(sig_path));
+    let pubkey = release_signing_public_key_hex();
+    if !ed25519_verify_utf8(pubkey, sums_text, sig_hex) {
+        print("error: SHA256SUMS signature verification failed for " + tag);
+        print("  the release manifest is unsigned or tampered; refusing to install");
+        process.run(["rm", "-rf", tmp]);
+        return 1;
+    }
+
+    // 3. Resolve the asset's expected digest from the verified manifest.
+    let expected = _digest_for_asset(sums_text, asset);
+    if expected.length == 0 {
+        print("error: asset not listed in the signed manifest: " + asset);
+        process.run(["rm", "-rf", tmp]);
+        return 1;
+    }
+
+    // 4. Re-install short-circuit. The signed manifest was already
+    //    re-fetched and its signature re-verified above; here we confirm
+    //    the store's recorded tarball digest still matches that verified
+    //    manifest, then skip the (large) tarball re-download. The message
+    //    states exactly what was re-checked — the release-signature trust
+    //    chain and the recorded digest — not a re-hash of the on-disk
+    //    binary (dispatch-time on-disk re-verification is SFN-172).
+    if fs.exists(bin_path) {
+        if fs.exists(sha_path) {
+            let recorded = _toml_trim_cmd(fs.readFile(sha_path));
+            if strings_equal(recorded, expected) {
+                print("sfn toolchain: " + ver
+                    + " already installed; release signature re-verified");
+                print("  " + store_dir);
+                process.run(["rm", "-rf", tmp]);
+                return 0;
+            }
+        }
+    }
+
+    // 5. Download the tarball and confirm its digest BEFORE extraction.
+    let tarball = tmp + "/" + asset;
+    if !_download_to(asset_url, tarball) {
+        print("error: failed to download toolchain asset");
+        print("  " + asset_url);
+        process.run(["rm", "-rf", tmp]);
+        return 1;
+    }
+    let actual = _sha256_of_file_cmd(tarball);
+    if actual.length == 0 {
+        print("error: could not compute sha256 of the downloaded asset");
+        process.run(["rm", "-rf", tmp]);
+        return 1;
+    }
+    if !strings_equal(actual, expected) {
+        print("error: digest mismatch for " + asset + " — refusing to install");
+        print("  expected " + expected);
+        print("  actual   " + actual);
+        process.run(["rm", "-rf", tmp]);
+        return 1;
+    }
+
+    // 6. Verified — extract and lay out the store entry. The `.sha256`
+    //    marker is written LAST so a store dir without it reads as an
+    //    incomplete install on the next run.
+    let extract_dir = tmp + "/extract";
+    process.run(["mkdir", "-p", extract_dir]);
+    let tar_rc = process.run(["tar", "-xzf", tarball, "-C", extract_dir]);
+    if tar_rc != 0 {
+        print("error: failed to extract " + asset + " (tar exit "
+            + number_to_string(tar_rc)
+            + ")");
+        process.run(["rm", "-rf", tmp]);
+        return 1;
+    }
+    let root = _find_extracted_root(extract_dir);
+    if root.length == 0 {
+        print("error: no sailfin binary found in " + asset);
+        process.run(["rm", "-rf", tmp]);
+        return 1;
+    }
+    let src_bin = _binary_in_root(root);
+
+    // Every failure after `store_dir` is created removes it (not just `tmp`),
+    // so a partial install never leaves a half-populated version dir a later
+    // run could mistake for complete — the fail-closed store contract.
+    process.run(["mkdir", "-p", store_dir]);
+    let cp_rc = process.run(["cp", "-f", src_bin, bin_path]);
+    if cp_rc != 0 {
+        print("error: failed to install the toolchain binary into " + store_dir);
+        _cleanup_failed_install(store_dir, tmp);
+        return 1;
+    }
+    process.run(["chmod", "0755", bin_path]);
+
+    // `sfn`-named peer in the versioned dir (SFN-195): a post-SFN-173
+    // binary re-invokes `<dir>/sfn` for parallel emit workers. Relative
+    // symlink so it holds regardless of the store path; copy fallback
+    // for filesystems without symlinks — the fallback is checked too, so a
+    // failed alias is a hard error rather than a silently broken entry.
+    let alias_path = store_dir + "/sfn";
+    process.run(["rm", "-f", alias_path]);
+    let ln_rc = process.run(["ln", "-s", "sailfin", alias_path]);
+    if ln_rc != 0 {
+        let cp_alias_rc = process.run(["cp", "-f", bin_path, alias_path]);
+        if cp_alias_rc != 0 {
+            print("error: failed to create the sfn alias in " + store_dir);
+            _cleanup_failed_install(store_dir, tmp);
+            return 1;
+        }
+        process.run(["chmod", "0755", alias_path]);
+    }
+
+    // Bundled runtime, when the asset ships one (sfn run/build need it). A
+    // failed copy is fatal — an entry without its runtime would fail later at
+    // `sfn run`/`build`.
+    if fs.exists(root + "/runtime") {
+        process.run(["rm", "-rf", store_dir + "/runtime"]);
+        let rt_rc = process.run(["cp", "-R", root + "/runtime", store_dir
+            + "/runtime"]);
+        if rt_rc != 0 {
+            print("error: failed to install the runtime bundle into "
+                + store_dir);
+            _cleanup_failed_install(store_dir, tmp);
+            return 1;
+        }
+    }
+
+    // Completeness marker LAST: written only once the binary, alias, and
+    // runtime are in place. A verified write is the install's commit point —
+    // if it can't be written, the entry is not complete and is torn down.
+    fs.writeFile(sha_path, expected + "\n");
+    if !fs.exists(sha_path) {
+        print("error: failed to write the store marker " + sha_path);
+        _cleanup_failed_install(store_dir, tmp);
+        return 1;
+    }
+    process.run(["rm", "-rf", tmp]);
+
+    print("sfn toolchain: installed " + ver + " to " + store_dir);
+    print("  verified signature + sha256 " + expected);
+    return 0;
+}
+
+// Tear down a partial store entry and the temp work dir on a post-verification
+// install failure, keeping the store free of half-created version dirs.
+fn _cleanup_failed_install(store_dir: string, tmp: string) -> void ![io] {
+    process.run(["rm", "-rf", store_dir]);
+    process.run(["rm", "-rf", tmp]);
+}
+
+// The `sfn/cli` definition for `toolchain`, registered on the v2 root
+// via `with_subcommand`. One nested leaf today: `install <version>`.
+fn command_def() -> Command {
+    let install_cmd: Command = with_arg(command("install", "Download, verify, and store a pinned toolchain"), arg("version", "Toolchain version to install (e.g. 0.8.0-alpha.3)"));
+    return with_subcommand(command("toolchain", "Manage installed sfn toolchains"), install_cmd);
+}
+
+// Dispatch the parsed `toolchain` subcommand. `subcommand(matches)`
+// returns the leaf name (`install`), or `"toolchain"` for a bare
+// `sfn toolchain` — which prints usage. `ctx` carries no state this
+// command needs; the download work root defaults to the system temp
+// dir (TMPDIR, else /tmp).
+fn run(matches: Matches, ctx: CliContext) -> int ![io, net] {
+    let sub: string = subcommand(matches);
+    if strings_equal(sub, "install") {
+        let mut work_root = env.get("TMPDIR");
+        if work_root.length == 0 { work_root = "/tmp"; }
+        return _toolchain_install(get(matches, "version"), work_root);
+    }
+    print("usage: sfn toolchain install <version>");
+    return 2;
+}
+
+export { command_def, run };

@@ -74,12 +74,12 @@ extern fn apply_default_mem_limit() -> i32;
 // remaining external caller; left in place defensively so any
 // embedder still wiring up the seed's symbol table can resolve it.
 //
-// Issue 2.3 (#1161): now delegates to the imported `sailfin_cli_main_v2`
-// (`![io, clock]`). The cross-module import makes v2's `clock` effect
-// explicit at this call site, so the envelope grows from `![io]` to
-// `![io, clock]` — the same effect surface the live `@main` path
-// (`fn main` -> `sailfin_cli_main_with_paths` -> v2) already declares.
-fn native_cli_main(argv: string[]) -> int ![io, clock] {
+// Issue 2.3 (#1161): now delegates to the imported `sailfin_cli_main_v2`.
+// The cross-module import makes v2's effects explicit at this call site —
+// `![clock, io, net]`, matching the live `@main` path (`fn main` ->
+// `sailfin_cli_main_with_paths` -> v2). `net` entered the envelope with
+// the native `sfn toolchain install` fetch path (SFEP-0046 §3.5).
+fn native_cli_main(argv: string[]) -> int ![clock, io, net] {
     return sailfin_cli_main_v2(argv);
 }
 
@@ -147,7 +147,7 @@ fn _arena_telemetry_label(argv: string[]) -> string {
     return argv[0];
 }
 
-fn main(argv: string[]) -> int ![io, clock] {
+fn main(argv: string[]) -> int ![clock, io, net] {
     // Memory budget first — before argv parsing, telemetry, or any
     // allocation-heavy work, so a runaway compile can never outgrow
     // the host (issue #1245: an uncapped 8.3 GB `sfn check`
