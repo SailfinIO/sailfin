@@ -396,11 +396,10 @@ fn _cr_ensure_dir(path: string) -> void ![io] {
 // the staging area moves under `<root>/compiler/import-context` so the
 // build can be redirected away from CWD-relative `build/`.
 //
-// SFN-175: the canonical path moved from `build/native/import-context`
-// (a legacy Python-bootstrap-era layout). The current pinned seed still
-// stages to the old path during `make compile`; `imports.sfn` keeps a
-// one-release old-path read fallback and the Makefile copies the
-// seed-written tree old->new. Both retire at the next seed bump.
+// SFN-175 moved this from the legacy Python-bootstrap-era
+// `build/native/import-context`; SFN-194 retired the one-release old-path
+// read fallback + Makefile copy shim once a seed staging the new path was
+// pinned, so this is now the single canonical location.
 fn _cr_import_context_root(work_dir: string) -> string {
     if work_dir.length == 0 { return "build/compiler/import-context"; }
     return work_dir + "/compiler/import-context";
