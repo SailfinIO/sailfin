@@ -1,0 +1,114 @@
+// compiler/tests/e2e/process_exec_test.sfn
+//
+// The `process.exec` (`execve(2)`) runtime primitive — the seed-blocker
+// predecessor for SFN-172 toolchain re-exec dispatch (SFEP-0046 §3.5).
+// `process.exec(argv, env_flat)` replaces the current process image, so the
+// dispatched pinned toolchain's exit code and signals pass through
+// transparently. These tests exercise it end-to-end (parse → typecheck →
+// effect → emit → lower → link → run) by building a fixture that calls it:
+//
+//   1. exec into `/bin/echo`: on success `execve` never returns, so the
+//      marker reaches stdout and the post-exec fallback line is unreachable,
+//      and the observed exit code is echo's (0), not the fixture's.
+//   2. exec of a nonexistent path: the image is NOT replaced, so
+//      `process.exec` returns and the fixture's fallback path runs.
+import { find } from "sfn/strings";
+
+// The compiler-under-test: $SAILFIN_BIN if set, else the self-hosted binary
+// relative to the repo root the runner starts from (mirrors sfn/test's own
+// `_resolve_sfn_bin`).
+fn _sfn_bin() -> string ![io] {
+    let configured = env.get("SAILFIN_BIN");
+    if configured.length > 0 { return configured; }
+    return "build/bin/sfn";
+}
+
+// Child env for the nested `sfn build`: `run_capture`'s empty env is the
+// EMPTY environment (not "inherit"), so a build-spawning test must thread
+// PATH (the nested build runs clang + its linker), HOME, TMPDIR, and
+// SAILFIN_TEST_SCRATCH (per-invocation build-cache isolation under the
+// parallel pool). Per `.claude/rules/no-bash-e2e.md`.
+fn _child_env() -> string[] ![io] {
+    let mut e: string[] = [];
+    let path = env.get("PATH");
+    if path.length > 0 { e.push("PATH=" + path); }
+    let home = env.get("HOME");
+    if home.length > 0 { e.push("HOME=" + home); }
+    let tmpdir = env.get("TMPDIR");
+    if tmpdir.length > 0 { e.push("TMPDIR=" + tmpdir); }
+    let scratch = env.get("SAILFIN_TEST_SCRATCH");
+    if scratch.length > 0 { e.push("SAILFIN_TEST_SCRATCH=" + scratch); }
+    return e;
+}
+
+fn _scratch_root() -> string ![io] {
+    let s = env.get("SAILFIN_TEST_SCRATCH");
+    if s.length > 0 { return s; }
+    let t = env.get("TMPDIR");
+    if t.length > 0 { return t; }
+    return "/tmp";
+}
+
+// Build `src` to `binpath` with the compiler-under-test; returns the build
+// exit code. Threads the child env so the nested clang/link finds its tools.
+fn _build_fixture(src: string, binpath: string) -> int ![io] {
+    let exit = process.run_capture([_sfn_bin(), "build", "-o", binpath, src], _child_env());
+    let _out = process.capture_take_stdout();
+    let _err = process.capture_take_stderr();
+    return exit;
+}
+
+test "process.exec: replaces the image with /bin/echo" ![io] {
+    let root = _scratch_root() + "/sfn-process-exec-ok";
+    fs.createDirectory(root, true);
+    let src = root + "/main.sfn";
+    let bin = root + "/main";
+    // On a successful exec, `execve` never returns: echo's stdout carries the
+    // marker and SFN172_EXEC_FALLBACK is unreachable.
+    let program = "fn main() -> int ![io] {\n"
+        + "    let e: string[] = process.environ();\n"
+        + "    let _rc = process.exec([\"/bin/echo\", \"SFN172_EXEC_OK\"], e);\n"
+        + "    print.err(\"SFN172_EXEC_FALLBACK\");\n"
+        + "    return 42;\n"
+        + "}\n";
+    fs.writeFile(src, program);
+
+    let build_rc = _build_fixture(src, bin);
+    assert build_rc == 0;
+
+    let run_exit = process.run_capture([bin], _child_env());
+    let out = process.capture_take_stdout();
+    let err = process.capture_take_stderr();
+    // Image was replaced by echo: its exit code (0) is observed, its stdout
+    // carries the marker, and the fixture's post-exec fallback never ran.
+    assert run_exit == 0;
+    assert find(out, "SFN172_EXEC_OK", 0) >= 0;
+    assert find(out + err, "SFN172_EXEC_FALLBACK", 0) < 0;
+}
+
+test "process.exec: returns on a failed exec (image not replaced)" ![io] {
+    let root = _scratch_root() + "/sfn-process-exec-fail";
+    fs.createDirectory(root, true);
+    let src = root + "/main.sfn";
+    let bin = root + "/main";
+    // exec of a nonexistent path cannot replace the image, so `process.exec`
+    // returns and the fixture's fallback path runs to completion.
+    let program = "fn main() -> int ![io] {\n"
+        + "    let e: string[] = process.environ();\n"
+        + "    let _rc = process.exec([\"/nonexistent/sfn172/does-not-exist\"], e);\n"
+        + "    print.err(\"SFN172_EXEC_FALLBACK_REACHED\");\n"
+        + "    return 42;\n"
+        + "}\n";
+    fs.writeFile(src, program);
+
+    let build_rc = _build_fixture(src, bin);
+    assert build_rc == 0;
+
+    let run_exit = process.run_capture([bin], _child_env());
+    let out = process.capture_take_stdout();
+    let err = process.capture_take_stderr();
+    // The image was not replaced: the fixture continued past the failed exec,
+    // printed its marker, and returned its own exit code.
+    assert run_exit == 42;
+    assert find(out + err, "SFN172_EXEC_FALLBACK_REACHED", 0) >= 0;
+}
