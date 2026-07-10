@@ -588,7 +588,7 @@ fn _emit_runtime_sfn_to_obj(self_path: string, cap_prefix: string, src: string, 
 // under `out_dir` (`build/sailfin` by default, work-dir aware).
 //
 // Deliberately NOT the shared cwd-relative
-// `build/native/import-context/` tree: artifacts staged there are
+// `build/compiler/import-context/` tree: artifacts staged there are
 // consulted by `collect_imported_module_context_for_module`'s
 // on-disk lookup during EVERY emit in that cwd. The prelude imports
 // the runtime modules (`runtime/prelude.sfn` → `./sfn/array`,

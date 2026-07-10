@@ -276,7 +276,7 @@ test "check: location-only line includes file_path" {
 }
 
 test "check: location-only line works for arbitrary missing-artifact paths" {
-    let line = _local_render_location_only("build/native/import-context/sfn_prelude/mod.sfn-asm");
+    let line = _local_render_location_only("build/compiler/import-context/sfn_prelude/mod.sfn-asm");
     assert _contains(line, "import-context/sfn_prelude");
     assert _contains(line, ".sfn-asm");
 }

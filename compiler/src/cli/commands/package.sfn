@@ -404,8 +404,8 @@ fn _package_installer(target: string, out_dir: string, compiler_bin: string) -> 
     // saves a rebuild on first use. Same logic as the prelude
     // copy: presence is conditional, but once present a
     // failed `cp -R` is a bug, not a soft skip.
-    if fs.exists("build/native/import-context") {
-        let cp_import_ctx = process.run(["cp", "-R", "build/native/import-context", staging
+    if fs.exists("build/compiler/import-context") {
+        let cp_import_ctx = process.run(["cp", "-R", "build/compiler/import-context", staging
             + "/import-context"]);
         if cp_import_ctx != 0 {
             print("sfn package: failed to stage import-context (cp exit="

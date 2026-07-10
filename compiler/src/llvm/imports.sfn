@@ -210,12 +210,16 @@ fn collect_imported_module_context_for_module(imports: NativeImport[], current_m
 }
 
 fn _slug_alias_path_for_slug(slug: string) -> string {
-    return "build/native/import-context/" + slug + ".slugalias";
+    return "build/compiler/import-context/" + slug + ".slugalias";
 }
 
-fn _selfhost_slug_alias_path_for_slug(slug: string) -> string {
-    return "build/selfhost/native/seed_cwd/build/native/import-context/" + slug
-        + ".slugalias";
+// SFN-175: one-release old-path read fallback. The canonical import-context
+// tree moved to `build/compiler/import-context`, but the current pinned seed
+// still stages `build/native/import-context` during `make compile`. Reads try
+// the canonical path first and fall back here so transitional old-path trees
+// still resolve. Retires with the pre-stage + Makefile copy at the next seed bump.
+fn _compat_old_slug_alias_path_for_slug(slug: string) -> string {
+    return "build/native/import-context/" + slug + ".slugalias";
 }
 
 // #873: read the `.slugalias` sidecar the resolver drops at a capsule
@@ -225,7 +229,7 @@ fn _selfhost_slug_alias_path_for_slug(slug: string) -> string {
 fn _resolve_slug_alias(slug: string) -> string ![io] {
     let primary = _slug_alias_path_for_slug(slug);
     if fs.exists(primary) { return trim_text(fs.readFile(primary)); }
-    let fallback = _selfhost_slug_alias_path_for_slug(slug);
+    let fallback = _compat_old_slug_alias_path_for_slug(slug);
     if fs.exists(fallback) { return trim_text(fs.readFile(fallback)); }
     return "";
 }
@@ -394,7 +398,7 @@ fn resolve_import_module_slug_for_module(module: string, current_module_slug: st
 
     // compiler/tests often import compiler sources via "../../src/<name>",
     // which resolves to "compiler/src/<name>". Our import-context artifacts
-    // are rooted at build/native/import-context/<name>.* (the compiler's own
+    // are rooted at build/compiler/import-context/<name>.* (the compiler's own
     // sources are staged with the `compiler/src/` prefix stripped, mirroring
     // `module_name_from_path`), so strip that prefix to keep imports and
     // artifact layout consistent.
@@ -414,27 +418,29 @@ fn resolve_import_module_slug_for_module(module: string, current_module_slug: st
 }
 
 fn layout_manifest_path_for_slug(slug: string) -> string {
-    return "build/native/import-context/" + slug + ".layout-manifest";
+    return "build/compiler/import-context/" + slug + ".layout-manifest";
 }
 
 fn native_text_path_for_slug(slug: string) -> string {
+    return "build/compiler/import-context/" + slug + ".sfn-asm";
+}
+
+// SFN-175: one-release old-path read fallbacks (see
+// `_compat_old_slug_alias_path_for_slug`). Canonical reads target
+// `build/compiler/import-context`; these resolve transitional
+// `build/native/import-context` trees the current pinned seed still stages.
+fn _compat_old_layout_manifest_path_for_slug(slug: string) -> string {
+    return "build/native/import-context/" + slug + ".layout-manifest";
+}
+
+fn _compat_old_native_text_path_for_slug(slug: string) -> string {
     return "build/native/import-context/" + slug + ".sfn-asm";
-}
-
-fn _selfhost_layout_manifest_path_for_slug(slug: string) -> string {
-    return "build/selfhost/native/seed_cwd/build/native/import-context/" + slug
-        + ".layout-manifest";
-}
-
-fn _selfhost_native_text_path_for_slug(slug: string) -> string {
-    return "build/selfhost/native/seed_cwd/build/native/import-context/" + slug
-        + ".sfn-asm";
 }
 
 fn _resolve_layout_manifest_path_for_slug(slug: string) -> string ![io] {
     let primary = layout_manifest_path_for_slug(slug);
     if fs.exists(primary) { return primary; }
-    let fallback = _selfhost_layout_manifest_path_for_slug(slug);
+    let fallback = _compat_old_layout_manifest_path_for_slug(slug);
     if fs.exists(fallback) { return fallback; }
     return primary;
 }
@@ -442,7 +448,7 @@ fn _resolve_layout_manifest_path_for_slug(slug: string) -> string ![io] {
 fn _resolve_native_text_path_for_slug(slug: string) -> string ![io] {
     let primary = native_text_path_for_slug(slug);
     if fs.exists(primary) { return primary; }
-    let fallback = _selfhost_native_text_path_for_slug(slug);
+    let fallback = _compat_old_native_text_path_for_slug(slug);
     if fs.exists(fallback) { return fallback; }
     return primary;
 }

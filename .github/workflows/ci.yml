@@ -269,7 +269,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          paths="build/bin/sfn build/native/import-context"
+          paths="build/bin/sfn build/compiler/import-context"
           if [ -f build/native/.build-stamp ]; then
             paths="$paths build/native/.build-stamp"
           fi
@@ -371,7 +371,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          paths="build/bin/sfn build/native/import-context"
+          paths="build/bin/sfn build/compiler/import-context"
           if [ -f build/native/.build-stamp ]; then
             paths="$paths build/native/.build-stamp"
           fi

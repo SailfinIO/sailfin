@@ -16,7 +16,7 @@
 //   compiler/tests/e2e/cross_module_int_signature_test.sfn            (importer)
 //
 // The shared fixture's native ASM is staged under the default
-// `build/native/import-context/fixtures/` tree (CWD-relative, repo root)
+// `build/compiler/import-context/fixtures/` tree (CWD-relative, repo root)
 // so the importer's LLVM emit can resolve cross-module signatures.
 // Content is deterministic so concurrent parallel runs are safe.
 //
@@ -54,15 +54,15 @@ fn _importer_fixture() -> string {
 }
 
 // The shared fixture's .sfn-asm must live at
-// build/native/import-context/fixtures/<name>.sfn-asm so the default
+// build/compiler/import-context/fixtures/<name>.sfn-asm so the default
 // CWD-relative import-context lookup finds it when emitting the importer.
 // This is the same path `cd $SCRATCH && sfn emit native --module-name
-// fixtures/... -o $SCRATCH/build/native/import-context/fixtures/...` used
+// fixtures/... -o $SCRATCH/build/compiler/import-context/fixtures/...` used
 // in the original bash test, but here we write directly into the repo's
-// own build/native/import-context tree (deterministic content is safe
+// own build/compiler/import-context tree (deterministic content is safe
 // under concurrent runs).
 fn _staged_asm_path() -> string {
-    return "build/native/import-context/fixtures/cross_module_int_signature_shared.sfn-asm";
+    return "build/compiler/import-context/fixtures/cross_module_int_signature_shared.sfn-asm";
 }
 
 // Per-test LLVM IR output path (under SAILFIN_TEST_SCRATCH or /tmp).
@@ -72,13 +72,13 @@ fn _ll_path(tag: string) -> string ![io] {
     return base + "/sfn-xmod-int-sig-" + tag + ".ll";
 }
 
-// Stage the shared fixture's native ASM into build/native/import-context/fixtures/
+// Stage the shared fixture's native ASM into build/compiler/import-context/fixtures/
 // (CWD-relative). Emits only if not already present. Returns the asm path.
 fn _ensure_shared_asm_staged() -> string ![io] {
     let out = _staged_asm_path();
     if fs.exists(out) { return out; }
     // Ensure the directory exists.
-    fs.createDirectory("build/native/import-context/fixtures", true);
+    fs.createDirectory("build/compiler/import-context/fixtures", true);
     let exit = process.run_capture([_sfn_bin(), "emit", "--module-name", "fixtures/cross_module_int_signature_shared", "-o", out, "native", _shared_fixture()], _child_env());
     let _stdout = process.capture_take_stdout();
     let _stderr = process.capture_take_stderr();

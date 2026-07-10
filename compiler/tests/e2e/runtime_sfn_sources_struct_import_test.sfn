@@ -14,7 +14,7 @@
 // (`<cache-dir>/rt-import-context/<slug>.sfn-asm`), writes per-module
 // `.import-deps` sidecars for sibling imports, and threads the root into
 // each child emit via `--import-context`, so sibling signatures resolve
-// without publishing into the shared cwd `build/native/import-context/`
+// without publishing into the shared cwd `build/compiler/import-context/`
 // tree (publishing there regresses the prelude's lowering).
 //
 // The test:

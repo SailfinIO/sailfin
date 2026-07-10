@@ -368,7 +368,7 @@ fn _write_fetch_client(port_str: string) -> string ![io] {
 //
 // #1789: deliberately NO `--work-dir` here. This is the sole
 // `sfn/http`-consumer build in its CI e2e shard (`e2e-d`), so there is no
-// sibling to isolate the shared `build/native/import-context/sfn/http`
+// sibling to isolate the shared `build/compiler/import-context/sfn/http`
 // from — a private `--work-dir` would buy no isolation and only force a
 // slower COLD build, adding CPU/memory pressure under the parallel pool
 // that can starve this test's spawned server and blow the readiness poll.

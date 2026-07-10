@@ -474,13 +474,13 @@ bench:
 		echo "[bench] missing $(NATIVE_BIN); run 'make compile' first"; \
 		exit 1; \
 	fi
-	@if [ ! -d build/native/import-context ]; then \
+	@if [ ! -d build/compiler/import-context ]; then \
 		echo "[bench] missing import-context; run 'make compile' first"; \
 		exit 1; \
 	fi
 	@bash scripts/bench_compile.sh \
 		--seed "$(NATIVE_BIN)" \
-		--import-context build/native/import-context \
+		--import-context build/compiler/import-context \
 		$(BENCH_ARGS)
 
 # Benchmark compiled-program runtime execution (the counterpart to `bench`,
@@ -521,12 +521,12 @@ test-arena:
 		echo "[test-arena] missing $(NATIVE_BIN); run 'make compile' first"; \
 		exit 1; \
 	fi
-	@if [ ! -d build/native/import-context ]; then \
+	@if [ ! -d build/compiler/import-context ]; then \
 		echo "[test-arena] missing import-context; run 'make compile' first"; \
 		exit 1; \
 	fi
 	@SEED="$(NATIVE_BIN)" \
-		IMPORT_CONTEXT=build/native/import-context \
+		IMPORT_CONTEXT=build/compiler/import-context \
 		bash scripts/test_arena.sh $(ARENA_ARGS)
 
 clean:
@@ -729,18 +729,19 @@ package: compile
 # (import-context) are present at their canonical location.
 #
 # `make rebuild` is the only path to producing `build/bin/sfn`,
-# so `build/native/import-context/` is guaranteed to land directly.
+# so `build/compiler/import-context/` is guaranteed to land directly
+# (rebuild copies the seed-written tree to the canonical path; SFN-175).
 # #941: the former `build/native/obj/runtime/prelude.o` check was
 # dropped — post-#940 the test runner links the runtime through the
 # declarative runtime-capsule path (emit-from-source + per-work-dir
 # cache), so no pre-staged `prelude.o` exists or is needed.
 ci-prepare-test-artifacts:
 	@set -eu; \
-	if [ ! -d build/native/import-context ] || [ -z "$$(find build/native/import-context -name '*.sfn-asm' -print -quit 2>/dev/null)" ]; then \
-		echo "[ci-prepare-test-artifacts][error] missing build/native/import-context — run 'make rebuild' first" >&2; \
+	if [ ! -d build/compiler/import-context ] || [ -z "$$(find build/compiler/import-context -name '*.sfn-asm' -print -quit 2>/dev/null)" ]; then \
+		echo "[ci-prepare-test-artifacts][error] missing build/compiler/import-context — run 'make rebuild' first" >&2; \
 		exit 1; \
 	fi; \
-	echo "[ci-prepare-test-artifacts] build/native/import-context present"
+	echo "[ci-prepare-test-artifacts] build/compiler/import-context present"
 
 # Package native compiler + installer artifacts for a given target label.
 # Stage C4 migration: this target now delegates to `sfn package`
@@ -893,6 +894,17 @@ rebuild-impl:
 	@mkdir -p build/native $(dir $(NATIVE_OUT))
 	@cp -f build/sailfin/program $(NATIVE_OUT)
 	@chmod +x $(NATIVE_OUT)
+	@# SFN-175: the canonical import-context tree is `build/compiler/import-context`,
+	@# but the pinned seed still stages `build/native/import-context` (its baked
+	@# path — see the pre-stage block above, which the seed's `build -p compiler`
+	@# reads). Copy (not move) the seed-written tree old->new so every post-compile
+	@# consumer (test/bench/arena/package/CI) reads the canonical path while the
+	@# seed's warm-build cache survives at the old path. Retires at the next seed
+	@# bump, when the seed itself stages the new path (pre-stage + this copy + the
+	@# `imports.sfn` old-path read fallback all delete together).
+	@rm -rf build/compiler/import-context
+	@mkdir -p build/compiler
+	@cp -a build/native/import-context build/compiler/import-context
 	@# Save .ll files to a location `make test` won't clobber. Each
 	@# integration / e2e test's own `sfn build` overwrites
 	@# `build/sailfin/capsules/*.ll` and `build/sailfin/program.ll`
@@ -956,12 +968,12 @@ rebuild-impl:
 	@# build for cold-emit resolution) so the loop below re-emits them
 	@# with NATIVE_OUT — the canonical proper-pointee signatures, matching
 	@# the pre-#812 final state.
-	@rm -f build/native/import-context/runtime/sfn/platform/*.sfn-asm build/native/import-context/runtime/sfn/platform/*.layout-manifest
-	@mkdir -p build/native/import-context/runtime/sfn/platform
+	@rm -f build/compiler/import-context/runtime/sfn/platform/*.sfn-asm build/compiler/import-context/runtime/sfn/platform/*.layout-manifest
+	@mkdir -p build/compiler/import-context/runtime/sfn/platform
 	@set -e; \
 	for mod in libc posix pthread net; do \
-		asm_path="build/native/import-context/runtime/sfn/platform/$$mod.sfn-asm"; \
-		manifest_path="build/native/import-context/runtime/sfn/platform/$$mod.layout-manifest"; \
+		asm_path="build/compiler/import-context/runtime/sfn/platform/$$mod.sfn-asm"; \
+		manifest_path="build/compiler/import-context/runtime/sfn/platform/$$mod.layout-manifest"; \
 		if [ ! -f "$$asm_path" ]; then \
 			echo "[rebuild] staging runtime/sfn/platform/$$mod.sfn-asm..."; \
 			if ! $(NATIVE_OUT) emit --module-name "runtime/sfn/platform/$$mod" -o "$$asm_path" native "runtime/sfn/platform/$$mod.sfn" >/dev/null; then \
@@ -991,11 +1003,11 @@ rebuild-impl:
 	@# layout-manifest (the struct layout) is required alongside the fn
 	@# signature, not just the signature. Same staging shape as the
 	@# platform loop above; the rm forces a canonical NATIVE_OUT re-emit.
-	@rm -f build/native/import-context/runtime/sfn/memory/ownedbuf.sfn-asm build/native/import-context/runtime/sfn/memory/ownedbuf.layout-manifest
-	@mkdir -p build/native/import-context/runtime/sfn/memory
+	@rm -f build/compiler/import-context/runtime/sfn/memory/ownedbuf.sfn-asm build/compiler/import-context/runtime/sfn/memory/ownedbuf.layout-manifest
+	@mkdir -p build/compiler/import-context/runtime/sfn/memory
 	@set -e; \
-	ob_asm="build/native/import-context/runtime/sfn/memory/ownedbuf.sfn-asm"; \
-	ob_manifest="build/native/import-context/runtime/sfn/memory/ownedbuf.layout-manifest"; \
+	ob_asm="build/compiler/import-context/runtime/sfn/memory/ownedbuf.sfn-asm"; \
+	ob_manifest="build/compiler/import-context/runtime/sfn/memory/ownedbuf.layout-manifest"; \
 	if [ ! -f "$$ob_asm" ]; then \
 		echo "[rebuild] staging runtime/sfn/memory/ownedbuf.sfn-asm..."; \
 		if ! $(NATIVE_OUT) emit --module-name "runtime/sfn/memory/ownedbuf" -o "$$ob_asm" native "runtime/sfn/memory/ownedbuf.sfn" >/dev/null; then \

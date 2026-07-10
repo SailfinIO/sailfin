@@ -29,7 +29,7 @@ while [[ $# -gt 0 ]]; do
 done
 
 OUT_DIR="/tmp/sailfin-diag-det/out"
-IMPORT_CACHE="$REPO_ROOT/build/native/import-context"
+IMPORT_CACHE="$REPO_ROOT/build/compiler/import-context"
 
 [[ -x "$SEED" ]]         || { echo "missing seed: $SEED" >&2; exit 2; }
 [[ -d "$IMPORT_CACHE" ]] || { echo "missing import-context (run make compile first)" >&2; exit 2; }
@@ -49,10 +49,10 @@ do_module() {
 
     local mod_cwd="/tmp/sailfin-diag-det/cwd/$safe"
     rm -rf "$mod_cwd"
-    mkdir -p "$mod_cwd/build/native"
-    cp -a "$IMPORT_CACHE" "$mod_cwd/build/native/import-context"
-    rm -f "$mod_cwd/build/native/import-context/${slug}.sfn-asm" \
-          "$mod_cwd/build/native/import-context/${slug}.layout-manifest"
+    mkdir -p "$mod_cwd/build/compiler"
+    cp -a "$IMPORT_CACHE" "$mod_cwd/build/compiler/import-context"
+    rm -f "$mod_cwd/build/compiler/import-context/${slug}.sfn-asm" \
+          "$mod_cwd/build/compiler/import-context/${slug}.layout-manifest"
 
     local hashes="" sizes="" nonascii_total=0
     for (( k=1; k<=ITERS; k++ )); do

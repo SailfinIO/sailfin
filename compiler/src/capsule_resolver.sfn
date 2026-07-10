@@ -5,7 +5,7 @@
 // Replaces the text-level `inline_imports_for_source` hack in cli_commands.sfn
 // with real separate-compilation of capsule modules, using the same
 // import-context machinery the compiler uses on itself (the staged
-// .sfn-asm + .layout-manifest files under build/native/import-context).
+// .sfn-asm + .layout-manifest files under build/compiler/import-context).
 //
 // Flow invoked by `sfn build` and `sfn run`:
 //
@@ -23,7 +23,7 @@
 //
 //   3. stage_capsule_imports(sources, project_root)
 //        Emits .sfn-asm + .layout-manifest for each capsule source into
-//        build/native/import-context/<slug>.* so `compile_to_llvm_file_with_module`
+//        build/compiler/import-context/<slug>.* so `compile_to_llvm_file_with_module`
 //        on the main source sees the capsule's layout and symbols.
 //
 //   4. compile_capsule_modules(sources, project_root)
@@ -256,7 +256,7 @@ struct WorkspaceMember {
 // `asm_paths` is the list of staged `.sfn-asm` files the typechecker
 // should consume for cross-module interface conformance.
 struct CheckCapsuleResolution {
-    asm_paths: string[];  // build/native/import-context/<slug>.sfn-asm
+    asm_paths: string[];  // build/compiler/import-context/<slug>.sfn-asm
     capsule_count: int;  // post-dedupe count, for diagnostic output
     staging_failed: boolean;  // true on slug collision or stage-write failure
     // Phase F (`docs/proposals/0008-effect-validation.md` §5): the
@@ -279,7 +279,7 @@ struct CheckCapsuleResolution {
 // once `_collect_test_files_cmd`'s trailing-slash bug — which had
 // been masking the resolver's correctness — was fixed.)
 struct TestCapsuleResolution {
-    asm_paths: string[];  // build/native/import-context/<slug>.sfn-asm
+    asm_paths: string[];  // build/compiler/import-context/<slug>.sfn-asm
     // build/capsules/<scope>/<name>/ir/<rel>.ll (or legacy
     // build/sailfin/capsules/<mangled>.ll fallback). See
     // `CapsuleSource.ll_path` for the routing rules.
@@ -390,17 +390,20 @@ fn _cr_ensure_dir(path: string) -> void ![io] {
 
 // Resolve the import-context root (`.sfn-asm` + `.layout-manifest`
 // staging area). When `work_dir` is empty (the default `sfn build`
-// path with no `--work-dir`), this is the legacy `build/native/import-context`
+// path with no `--work-dir`), this is the canonical `build/compiler/import-context`
 // directory that `llvm/imports.sfn:_resolve_layout_manifest_path_for_slug`
 // scans. When `work_dir` is non-empty (`sfn build --work-dir <root>`),
-// the staging area moves under `<root>/native/import-context` so the
-// build can be redirected away from CWD-relative `build/` — the
-// driver-side equivalent of the prior `scripts/build.sh`'s
-// `IMPORT_CACHE` derivation (`SEED_CWD/build/native/import-context`;
-// the script itself was retired in Stage E PR7 / #383).
+// the staging area moves under `<root>/compiler/import-context` so the
+// build can be redirected away from CWD-relative `build/`.
+//
+// SFN-175: the canonical path moved from `build/native/import-context`
+// (a legacy Python-bootstrap-era layout). The current pinned seed still
+// stages to the old path during `make compile`; `imports.sfn` keeps a
+// one-release old-path read fallback and the Makefile copies the
+// seed-written tree old->new. Both retire at the next seed bump.
 fn _cr_import_context_root(work_dir: string) -> string {
-    if work_dir.length == 0 { return "build/native/import-context"; }
-    return work_dir + "/native/import-context";
+    if work_dir.length == 0 { return "build/compiler/import-context"; }
+    return work_dir + "/compiler/import-context";
 }
 
 // Validate a capsule.toml path segment is safe (no traversal).
@@ -898,7 +901,7 @@ fn enumerate_capsule_sources(project_root: string) -> CapsuleSource[] ![io] {
 // ---- Import-context staging ----
 // Emit .sfn-asm + .layout-manifest for a single capsule source. The
 // compiler's normal import resolver (llvm/imports.sfn:_resolve_layout_manifest_path_for_slug)
-// looks in build/native/import-context/<slug>.* so that's where we write.
+// looks in build/compiler/import-context/<slug>.* so that's where we write.
 //
 // Cache invalidation contract: a staged `.sfn-asm` + `.layout-manifest`
 // pair is a valid cache hit only when a `.srchash` sidecar written next to
@@ -3060,7 +3063,7 @@ fn _cr_resolve_and_dedupe(entry_paths: string[], consumer: ResolverConsumer) -> 
 
     // Slug-collision detection: two sources with the same slug but
     // different source paths would clobber each other under
-    // build/native/import-context/<slug>.* — surface the conflict so
+    // build/compiler/import-context/<slug>.* — surface the conflict so
     // the user can rename or restructure rather than silently picking
     // one.
     let mut deduped: CapsuleSource[] = [];
