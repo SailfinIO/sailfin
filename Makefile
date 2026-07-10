@@ -294,16 +294,22 @@ test-impl:
 SEED_REPO ?= SailfinIO/sailfin
 SEED_VERSION ?= $(strip $(shell cat .seed-version 2>/dev/null))
 SEED_EXCLUDE_TAG ?=
-SEED_INSTALL_BASE ?= build/seed/versions
-SEED_GLOBAL_BIN_DIR ?= build/seed/bin
+# Repo-local seed toolchain store (SFN-174). The fetched pinned seed lives
+# under build/toolchains/seed — a store that names what it holds (a released
+# toolchain) rather than the legacy build/seed cache. The user-facing installer
+# store (~/.local/share/sailfin/versions) is unaffected.
+SEED_INSTALL_BASE ?= build/toolchains/seed/versions
+SEED_GLOBAL_BIN_DIR ?= build/toolchains/seed/bin
 
 # Default seed compiler used for self-hosting.
 # Points to the fetched seed binary (0.5.7+ — the first release whose
 # binary image does not carry the re-export miscompilation documented
-# in docs/rca/2026-04-18-reexport-diagnostic-gep.md).
-SEED ?= build/seed/bin/sailfin
+# in docs/rca/2026-04-18-reexport-diagnostic-gep.md). install.sh installs the
+# release binary as `sailfin` and always writes an `sfn` alias into
+# SEED_GLOBAL_BIN_DIR, so the canonical seed path is the `sfn` alias.
+SEED ?= build/toolchains/seed/bin/sfn
 
-FETCHED_SEED ?= $(SEED_GLOBAL_BIN_DIR)/sailfin$(EXE_EXT)
+FETCHED_SEED ?= $(SEED_GLOBAL_BIN_DIR)/sfn$(EXE_EXT)
 
 fetch-seed:
 	@if [ -z "$(SEED_VERSION)" ]; then \
@@ -317,7 +323,7 @@ fetch-seed:
 		exit 1; \
 	fi
 	@echo "[fetch-seed] installing seed $(SEED_VERSION) into $(SEED_INSTALL_BASE)"
-	@mkdir -p build/seed
+	@mkdir -p build/toolchains/seed
 	@REPO="$(SEED_REPO)" VERSION="$(SEED_VERSION)" EXCLUDE_TAG="$(SEED_EXCLUDE_TAG)" \
 		GLOBAL_BIN_DIR="$(SEED_GLOBAL_BIN_DIR)" INSTALL_BASE="$(SEED_INSTALL_BASE)" \
 		BINARY="sailfin" ./install.sh
@@ -529,14 +535,16 @@ clean:
 mcp-server:
 	cd tools/mcp-server && npm ci --no-audit --no-fund && npm run build
 
-# Remove local build artifacts (keeps downloaded seed by default).
-# Use KEEP_SEED=0 to also delete build/seed.
+# Remove local build artifacts (keeps the downloaded seed toolchain by default).
+# The pinned seed lives under build/toolchains/seed (SFN-174); preserve the
+# whole build/toolchains store so KEEP_SEED keeps it intact.
+# Use KEEP_SEED=0 to also delete build/toolchains.
 .PHONY: clean-build clean-all
 clean-build:
 	@mkdir -p build
 	@for d in build/*; do \
 		base="$$(basename "$$d")"; \
-		if [ "$$base" = "seed" ] && [ "${KEEP_SEED:-1}" != "0" ]; then \
+		if [ "$$base" = "toolchains" ] && [ "${KEEP_SEED:-1}" != "0" ]; then \
 			continue; \
 		fi; \
 		rm -rf "$$d"; \

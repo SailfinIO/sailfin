@@ -242,7 +242,7 @@ re-running the script with the right environment. The driver
 Flow:
 
 1. **Seed acquisition.** `make fetch-seed` downloads a released compiler
-   (default `0.5.3-alpha.1`) to `build/seed/bin/sailfin` via `install.sh`.
+   (default `0.5.3-alpha.1`) to `build/toolchains/seed/bin/sfn` via `install.sh`.
    The seed must support `emit native` or the rebuild aborts.
 2. **Source discovery.** `build.sh` walks `compiler/src/**/*.sfn` plus
    `runtime/**/*.sfn`, then parses `[dependencies]` in

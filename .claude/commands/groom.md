@@ -79,8 +79,8 @@ not take "no frontend dependency" on faith. Run a throwaway `.sfn` snippet
 through the current seed:
 
 ```bash
-build/seed/bin/sailfin check /tmp/probe.sfn
-build/seed/bin/sailfin emit -o /tmp/probe.ll llvm /tmp/probe.sfn
+build/toolchains/seed/bin/sfn check /tmp/probe.sfn
+build/toolchains/seed/bin/sfn emit -o /tmp/probe.ll llvm /tmp/probe.sfn
 ```
 
 Confirm the construct can actually be expressed and emitted (not silently

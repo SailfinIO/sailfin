@@ -21,8 +21,8 @@ else
   printf -- '- compiler: build/bin/sfn MISSING — run `make compile` to self-host from the seed\n'
 fi
 
-if compgen -G 'build/seed/*' >/dev/null; then
-  printf -- '- seed: build/seed present\n'
+if compgen -G 'build/toolchains/seed/*' >/dev/null; then
+  printf -- '- seed: build/toolchains/seed present\n'
 else
   printf -- '- seed: MISSING — run `make fetch-seed` if a build needs the released seed\n'
 fi

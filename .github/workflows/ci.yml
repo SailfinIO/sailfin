@@ -116,7 +116,7 @@ jobs:
         run: |
           set -euo pipefail
           make fetch-seed SEED_VERSION="$SEED_VERSION"
-          build/seed/bin/sailfin version
+          build/toolchains/seed/bin/sfn version
 
       - name: sfn check compiler/src/ (parse + typecheck + effect-check)
         shell: bash
@@ -133,7 +133,7 @@ jobs:
           # runner VM and killing the runner agent (the #1243 failure
           # mode). time -v records the peak RSS either way.
           SAILFIN_USE_ARENA=1 /usr/bin/time -v \
-            build/seed/bin/sailfin check compiler/src/
+            build/toolchains/seed/bin/sfn check compiler/src/
 
   # One compiler build per OS, shared by every shard leg below (#1234,
   # "Lever 1 step 1b" of docs/proposals/0011-ci-test-speed.md §6 step 2).
@@ -473,7 +473,7 @@ jobs:
           # the freshly-checked-out sources. A nested `make compile` (run
           # by make_result_contract_test / make_report_contract_test) then
           # sees the binary as stale -> triggers `make rebuild` -> and,
-          # since build/seed is not bundled, fetches the seed over the
+          # since build/toolchains/seed is not bundled, fetches the seed over the
           # network (unauthenticated, no GITHUB_TOKEN in the test child
           # env) and fails -> status != "pass" -> the test aborts (134).
           # The binary IS up-to-date for this commit, so mark it current
@@ -851,7 +851,7 @@ jobs:
           # the freshly-checked-out sources. A nested `make compile` (run
           # by make_result_contract_test / make_report_contract_test) then
           # sees the binary as stale -> triggers `make rebuild` -> and,
-          # since build/seed is not bundled, fetches the seed over the
+          # since build/toolchains/seed is not bundled, fetches the seed over the
           # network (unauthenticated, no GITHUB_TOKEN in the test child
           # env) and fails -> status != "pass" -> the test aborts (134).
           # The binary IS up-to-date for this commit, so mark it current

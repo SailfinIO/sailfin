@@ -108,7 +108,7 @@ jobs:
         run: |
           set -euo pipefail
           make fetch-seed SEED_VERSION="$SEED_VERSION"
-          build/seed/bin/sailfin version
+          build/toolchains/seed/bin/sfn version
 
       - name: Build native compiler (timed clean self-host)
         id: build
@@ -122,7 +122,7 @@ jobs:
           # cached one. This wall time is the whole-build budget metric — it is
           # NOT the compile bench's serial sum of isolated per-module emits.
           start=$(date +%s)
-          make rebuild CLANG="clang-18" SEED_NATIVE="build/seed/bin/sailfin"
+          make rebuild CLANG="clang-18" SEED_NATIVE="build/toolchains/seed/bin/sfn"
           end=$(date +%s)
           build/bin/sfn version
           echo "wall_s=$((end - start))" >> "$GITHUB_OUTPUT"

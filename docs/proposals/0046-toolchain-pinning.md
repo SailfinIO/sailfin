@@ -79,7 +79,7 @@ rather than invent a novel mechanism.
 
 `make`/`install.sh` are the compiler-repo bootstrap. A downstream capsule has no
 `Makefile` and must never inherit the seed ritual — that plumbing knows about
-`.seed-version`, the seed cache under `build/seed`, and `<seed> build -p
+`.seed-version`, the seed cache under `build/toolchains/seed`, and `<seed> build -p
 compiler`, none of which are meaningful to a product. The user story is `sfn
 init` → edit code → `sfn build`, with the toolchain pinned **in the same manifest
 the user already edits**.

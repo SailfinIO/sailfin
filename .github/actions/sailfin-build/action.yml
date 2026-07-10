@@ -77,8 +77,8 @@ runs:
       if: ${{ inputs.mode != 'skip-build' && inputs.seed_version != '' && inputs.seed_version != 'latest' }}
       uses: actions/cache@v4
       with:
-        path: build/seed
-        key: sailfin-seed-${{ inputs.target }}-${{ inputs.seed_version }}
+        path: build/toolchains/seed
+        key: sailfin-seed-store-${{ inputs.target }}-${{ inputs.seed_version }}
 
     - name: Fetch released seed compiler
       if: ${{ inputs.mode != 'skip-build' }}
@@ -92,7 +92,7 @@ runs:
         fi
         # Skip the download on a seed-cache hit. The cache key pins the
         # exact version, so a present + invokable binary is the right one.
-        if [ -x build/seed/bin/sailfin ] && build/seed/bin/sailfin version >/dev/null 2>&1; then
+        if [ -x build/toolchains/seed/bin/sfn ] && build/toolchains/seed/bin/sfn version >/dev/null 2>&1; then
           echo "[ci] seed cache hit ($seed_version) — skipping fetch"
         else
           make fetch-seed \
@@ -100,8 +100,8 @@ runs:
               SEED_VERSION="$seed_version" \
               SEED_EXCLUDE_TAG="$seed_exclude_tag"
         fi
-        echo "[ci] seed binary: build/seed/bin/sailfin"
-        build/seed/bin/sailfin version
+        echo "[ci] seed binary: build/toolchains/seed/bin/sfn"
+        build/toolchains/seed/bin/sfn version
 
     # Restore the content-addressed module IR cache (`build/cache/`,
     # written by `<seed> build -p compiler`). Keys are content-safe:
@@ -214,12 +214,12 @@ runs:
         if [ -n "${{ inputs.build_jobs }}" ]; then
           make rebuild \
             CLANG="${{ inputs.clang }}" \
-            SEED_NATIVE="build/seed/bin/sailfin" \
+            SEED_NATIVE="build/toolchains/seed/bin/sfn" \
             BUILD_JOBS="${{ inputs.build_jobs }}"
         else
           make rebuild \
             CLANG="${{ inputs.clang }}" \
-            SEED_NATIVE="build/seed/bin/sailfin"
+            SEED_NATIVE="build/toolchains/seed/bin/sfn"
         fi
         _t1=$(date +%s)
         if [ "$_measure" = "1" ]; then
