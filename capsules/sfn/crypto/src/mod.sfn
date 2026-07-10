@@ -39,9 +39,13 @@ fn crypto_byte_hex(byte: int) -> string {
 
 fn hmac_sha256(key: string, data: string) -> string {
     // Compute HMAC-SHA-256 with OpenSSL and return the bare 64-character
-    // lowercase hex digest. Inputs are byte-oriented strings, matching
-    // `sha256_hex` / `base64_encode`. Allocation or OpenSSL failure yields
+    // lowercase hex digest. Inputs are NUL-free byte-oriented strings, matching
+    // `sha256_hex` / `base64_encode`; embedded 0x00 bytes are unrepresentable
+    // under the current NUL-terminated `string` model. Allocation, ABI bounds,
+    // or OpenSSL failure yields
     // the empty-string sentinel rather than exposing effects or panicking.
+    if key.length > 2147483647 { return ""; }
+
     let md: * u8 = EVP_sha256();
     if md as i64 == 0 { return ""; }
 
@@ -61,7 +65,7 @@ fn hmac_sha256(key: string, data: string) -> string {
     memset(out_len, 0, 8 as usize);
 
     let got: * u8 = HMAC(md, key as * u8, key.length as i32, data as * u8, data.length as usize, out, out_len);
-    if got as i64 == 0 {
+    if got as i64 == 0 || got as i64 != out as i64 {
         free(out_len);
         free(out);
         return "";
