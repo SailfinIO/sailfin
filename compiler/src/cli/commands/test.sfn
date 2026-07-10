@@ -85,7 +85,8 @@ import {
     TestCapsuleResolution,
     discover_project_root,
     discover_workspace_root,
-    prepare_project_capsules_for_test
+    prepare_project_capsules_for_test,
+    toolchain_gate
 } from "../../capsule_resolver";
 import { ImportSymbolTable, empty_import_symbols } from "../../effect_imports";
 import { compile_tests_to_llvm_file_with_module_imports, module_name_from_path } from "../../main";
@@ -314,7 +315,7 @@ fn _shard_keeps_index(item_index: int, shard_index: int, shard_total: int) -> bo
 // `--tag`, `--shard`), one int flag (`--jobs`), and a variadic `suite`
 // positional.
 fn command_def() -> Command {
-    return with_arg(with_flag(with_flag(with_flag(with_flag(with_flag(with_flag(with_flag(command("test", "Run Sailfin tests"), flag("json", "Emit a JSONL event stream")), flag("update-snapshots", "Re-baseline snapshot golden files this run")), flag("no-test-cache", "Bypass the per-test linked-binary cache")), flag_value_short("k", "k", "Only run tests whose name contains this substring")), flag_value("tag", "Only run tests carrying @tag(\"<value>\")")), flag_int("jobs", "Run up to N per-file children concurrently")), flag_value("shard", "Run only the I-th of N file-count-balanced shards (e.g. 1/3)")), arg_variadic("suite", "One or more suite paths (default: .)"));
+    return with_arg(with_flag(with_flag(with_flag(with_flag(with_flag(with_flag(with_flag(with_flag(command("test", "Run Sailfin tests"), flag("json", "Emit a JSONL event stream")), flag("update-snapshots", "Re-baseline snapshot golden files this run")), flag("no-test-cache", "Bypass the per-test linked-binary cache")), flag_value_short("k", "k", "Only run tests whose name contains this substring")), flag_value("tag", "Only run tests carrying @tag(\"<value>\")")), flag_int("jobs", "Run up to N per-file children concurrently")), flag_value("shard", "Run only the I-th of N file-count-balanced shards (e.g. 1/3)")), flag("skip-toolchain-check", "Bypass the [toolchain] pin check for this invocation")), arg_variadic("suite", "One or more suite paths (default: .)"));
 }
 
 fn run(matches: Matches, ctx: CliContext) -> int ![io, clock] {
@@ -327,6 +328,11 @@ fn run(matches: Matches, ctx: CliContext) -> int ![io, clock] {
     // the driver-parsed `CliContext` instead of the old extra params.
     let runtime_root: string = ctx.runtime_root;
     let binary_dir: string = ctx.binary_dir;
+    let _tc_suites: string[] = positionals(matches, "suite");
+    let mut _tc_hint: string = ".";
+    if _tc_suites.length > 0 { _tc_hint = _tc_suites[0]; }
+    let _tc = toolchain_gate(_tc_hint, binary_dir, has_flag(matches, "skip-toolchain-check"));
+    if _tc != 0 { return _tc; }
     let json_output: boolean = has_flag(matches, "json");
     let no_test_cache: boolean = has_flag(matches, "no-test-cache");
     let update_snapshots: boolean = has_flag(matches, "update-snapshots");

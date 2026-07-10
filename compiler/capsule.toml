@@ -1,7 +1,15 @@
 [capsule]
 name = "sailfin"
-version = "0.8.0-alpha.2"
+version = "0.8.0-alpha.3"
 description = "The Sailfin compiler — self-hosted, targeting LLVM via .sfn-asm IR"
+
+# Dogfood the toolchain pin (SFEP-0046). This floor must never exceed
+# [capsule].version above: the first-pass self-host binary runs at
+# [capsule].version and gates itself when building seedcheck, so a pin ahead
+# of the version would fail `make check` (use SAILFIN_TOOLCHAIN=off only for a
+# deliberate seed transition — see the Makefile note).
+[toolchain]
+sfn = "0.8.0-alpha.3"
 
 [dependencies]
 # Stage D PR2: declare the C runtime as an explicit dependency so

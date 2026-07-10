@@ -18,6 +18,10 @@ struct SailToml {
     build_implicit: boolean;  // [build] implicit = true
     workspace_members: string[];  // [workspace] members = [...]
     exports: string[];  // [exports] modules = [...]
+    // Toolchain pin (SFEP-0046 Phase 1). `[toolchain] sfn`/`channel`.
+    // Empty when the manifest is unpinned.
+    toolchain_sfn: string;
+    toolchain_channel: string;
 }
 
 struct TomlDependency {
@@ -172,7 +176,9 @@ fn _parse_toml_internal(text: string) -> SailToml {
         build_kind: "",
         build_implicit: false,
         workspace_members: [],
-        exports: []
+        exports: [],
+        toolchain_sfn: "",
+        toolchain_channel: ""
     };
     let lines = _toml_split_lines(text);
     let mut section: string = "";
@@ -206,6 +212,14 @@ fn _parse_toml_internal(text: string) -> SailToml {
             }
             if strings_equal(stripped_key, "description") {
                 toml.description = stripped_value;
+            }
+        }
+        if strings_equal(section, "toolchain") {
+            if strings_equal(stripped_key, "sfn") {
+                toml.toolchain_sfn = stripped_value;
+            }
+            if strings_equal(stripped_key, "channel") {
+                toml.toolchain_channel = stripped_value;
             }
         }
         if strings_equal(section, "build") {
@@ -267,6 +281,16 @@ fn toml_get_entry(text: string) -> string {
 fn toml_get_description(text: string) -> string {
     let t = _parse_toml_internal(text);
     return t.description;
+}
+
+fn toml_get_toolchain_sfn(text: string) -> string {
+    let t = _parse_toml_internal(text);
+    return t.toolchain_sfn;
+}
+
+fn toml_get_toolchain_channel(text: string) -> string {
+    let t = _parse_toml_internal(text);
+    return t.toolchain_channel;
 }
 
 // ---- Stage A getters (parse-only; no consumers yet) ----
@@ -534,12 +558,16 @@ fn toml_get_dependencies(text: string) -> string {
 }
 
 // Generate a capsule.toml string from individual fields
-fn toml_generate(name: string, version: string, description: string, entry: string) -> string {
+fn toml_generate(name: string, version: string, description: string, entry: string, toolchain_sfn: string) -> string {
     let mut out: string = "[capsule]\n";
     out = out + "name = \"" + name + "\"\n";
     out = out + "version = \"" + version + "\"\n";
     if description.length > 0 {
         out = out + "description = \"" + description + "\"\n";
+    }
+    if toolchain_sfn.length > 0 {
+        out = out + "\n[toolchain]\n";
+        out = out + "sfn = \"" + toolchain_sfn + "\"\n";
     }
     out = out + "\n[dependencies]\n";
     out = out + "\n[capabilities]\n";
@@ -628,6 +656,15 @@ fn _write_toml(toml: SailToml) -> string {
     out = out + "version = \"" + toml.version + "\"\n";
     if toml.description.length > 0 {
         out = out + "description = \"" + toml.description + "\"\n";
+    }
+    if toml.toolchain_sfn.length > 0 || toml.toolchain_channel.length > 0 {
+        out = out + "\n[toolchain]\n";
+        if toml.toolchain_sfn.length > 0 {
+            out = out + "sfn = \"" + toml.toolchain_sfn + "\"\n";
+        }
+        if toml.toolchain_channel.length > 0 {
+            out = out + "channel = \"" + toml.toolchain_channel + "\"\n";
+        }
     }
     out = out + "\n[dependencies]\n";
     let mut i: int = 0;

@@ -209,13 +209,33 @@ fn collect_imported_module_context_for_module(imports: NativeImport[], current_m
     };
 }
 
-fn _slug_alias_path_for_slug(slug: string) -> string {
-    return "build/native/import-context/" + slug + ".slugalias";
+// Import-context staging root for the in-process lowering reader. The
+// resolver's WRITER already routes staged `.sfn-asm` / `.layout-manifest` /
+// `.slugalias` sidecars under `_cr_import_context_root(work_dir)`
+// (`<work_dir>/compiler/import-context` when `--work-dir` is set, else the
+// fixed default), but this reader historically hardcoded the fixed default —
+// so a `--work-dir` build wrote its capsule interfaces into its private tree
+// yet lowered by reading the SHARED default one. Two concurrent builds then
+// re-published that shared tree and a reader could observe a torn set (a
+// capsule's per-module sidecars are renamed in independently), reporting a
+// missing layout / callee signature (SFN-167). Routing the reader through the
+// same root the writer computes closes that; empty work_dir keeps the
+// canonical default so single-build behavior is byte-identical. Set via
+// `set_import_context_root` at the `stage_capsule_imports` choke point,
+// mirroring the #1333 `program.ll` per-invocation routing and the
+// `test_runner_state.sfn` module-global setter pattern.
+let mut _import_context_root: string = "build/compiler/import-context";
+
+fn set_import_context_root(root: string) {
+    if root.length == 0 {
+        _import_context_root = "build/compiler/import-context";
+        return;
+    }
+    _import_context_root = root;
 }
 
-fn _selfhost_slug_alias_path_for_slug(slug: string) -> string {
-    return "build/selfhost/native/seed_cwd/build/native/import-context/" + slug
-        + ".slugalias";
+fn _slug_alias_path_for_slug(slug: string) -> string {
+    return _import_context_root + "/" + slug + ".slugalias";
 }
 
 // #873: read the `.slugalias` sidecar the resolver drops at a capsule
@@ -225,8 +245,6 @@ fn _selfhost_slug_alias_path_for_slug(slug: string) -> string {
 fn _resolve_slug_alias(slug: string) -> string ![io] {
     let primary = _slug_alias_path_for_slug(slug);
     if fs.exists(primary) { return trim_text(fs.readFile(primary)); }
-    let fallback = _selfhost_slug_alias_path_for_slug(slug);
-    if fs.exists(fallback) { return trim_text(fs.readFile(fallback)); }
     return "";
 }
 
@@ -394,7 +412,7 @@ fn resolve_import_module_slug_for_module(module: string, current_module_slug: st
 
     // compiler/tests often import compiler sources via "../../src/<name>",
     // which resolves to "compiler/src/<name>". Our import-context artifacts
-    // are rooted at build/native/import-context/<name>.* (the compiler's own
+    // are rooted at build/compiler/import-context/<name>.* (the compiler's own
     // sources are staged with the `compiler/src/` prefix stripped, mirroring
     // `module_name_from_path`), so strip that prefix to keep imports and
     // artifact layout consistent.
@@ -414,37 +432,19 @@ fn resolve_import_module_slug_for_module(module: string, current_module_slug: st
 }
 
 fn layout_manifest_path_for_slug(slug: string) -> string {
-    return "build/native/import-context/" + slug + ".layout-manifest";
+    return _import_context_root + "/" + slug + ".layout-manifest";
 }
 
 fn native_text_path_for_slug(slug: string) -> string {
-    return "build/native/import-context/" + slug + ".sfn-asm";
+    return _import_context_root + "/" + slug + ".sfn-asm";
 }
 
-fn _selfhost_layout_manifest_path_for_slug(slug: string) -> string {
-    return "build/selfhost/native/seed_cwd/build/native/import-context/" + slug
-        + ".layout-manifest";
+fn _resolve_layout_manifest_path_for_slug(slug: string) -> string {
+    return layout_manifest_path_for_slug(slug);
 }
 
-fn _selfhost_native_text_path_for_slug(slug: string) -> string {
-    return "build/selfhost/native/seed_cwd/build/native/import-context/" + slug
-        + ".sfn-asm";
-}
-
-fn _resolve_layout_manifest_path_for_slug(slug: string) -> string ![io] {
-    let primary = layout_manifest_path_for_slug(slug);
-    if fs.exists(primary) { return primary; }
-    let fallback = _selfhost_layout_manifest_path_for_slug(slug);
-    if fs.exists(fallback) { return fallback; }
-    return primary;
-}
-
-fn _resolve_native_text_path_for_slug(slug: string) -> string ![io] {
-    let primary = native_text_path_for_slug(slug);
-    if fs.exists(primary) { return primary; }
-    let fallback = _selfhost_native_text_path_for_slug(slug);
-    if fs.exists(fallback) { return fallback; }
-    return primary;
+fn _resolve_native_text_path_for_slug(slug: string) -> string {
+    return native_text_path_for_slug(slug);
 }
 
 fn normalize_import_module_path(value: string) -> string {

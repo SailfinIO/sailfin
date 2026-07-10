@@ -1,0 +1,31 @@
+// compiler/tests/unit/import_context_root_test.sfn
+//
+// SFN-167: the LLVM-lowering import-context reader must resolve staged capsule
+// sidecars under the SAME per-invocation root the resolver's writer uses
+// (`set_import_context_root`, called at the `stage_capsule_imports` choke
+// point with `_cr_import_context_root(work_dir)`). Before this, the reader
+// hardcoded the fixed shared `build/compiler/import-context/`, so a
+// `--work-dir` build wrote its capsule interfaces into its private tree yet
+// lowered by reading the shared one — which two concurrent builds could tear
+// (a capsule's per-module `.sfn-asm` / `.layout-manifest` sidecars are renamed
+// in independently), yielding "type not in lowering type context". This pins
+// the reader-root routing so a future edit can't silently re-hardcode the path.
+import {
+    layout_manifest_path_for_slug,
+    native_text_path_for_slug,
+    set_import_context_root
+} from "../../src/llvm/imports";
+
+test "import-context reader: empty root resolves the canonical shared default" {
+    set_import_context_root("");
+    assert layout_manifest_path_for_slug("sfn/http/mod") == "build/compiler/import-context/sfn/http/mod.layout-manifest";
+    assert native_text_path_for_slug("sfn/http/mod") == "build/compiler/import-context/sfn/http/mod.sfn-asm";
+}
+
+test "import-context reader: a --work-dir root routes both sidecar paths under it" {
+    set_import_context_root("/w/compiler/import-context");
+    assert layout_manifest_path_for_slug("sfn/http/types") == "/w/compiler/import-context/sfn/http/types.layout-manifest";
+    assert native_text_path_for_slug("sfn/http/types") == "/w/compiler/import-context/sfn/http/types.sfn-asm";
+    // Restore the canonical default for any subsequent reader in this process.
+    set_import_context_root("");
+}

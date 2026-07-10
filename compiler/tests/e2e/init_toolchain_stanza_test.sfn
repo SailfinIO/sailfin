@@ -1,0 +1,57 @@
+// compiler/tests/e2e/init_toolchain_stanza_test.sfn
+//
+// SFN-167 / SFEP-0046 Phase 1: `sfn init` scaffolds a `[toolchain]` pin
+// stamped with the version of the `sfn` doing the scaffolding (the `go mod
+// init` `go`-line equivalent). Drives `sfn init` in a fresh dir and asserts
+// the generated `capsule.toml` carries a `[toolchain] sfn` pin. Native per
+// `.claude/rules/no-bash-e2e.md`: a `bash -c "cd <dir> && ..."` vehicle only
+// supplies the child `cd` (`run_capture` cannot chdir); the assertions are
+// pure `sfn/strings::find` over the emitted manifest.
+import { find } from "sfn/strings";
+
+// `sfn init` writes into the *current directory*, so the child must run with
+// its cwd set to the scratch dir. Because the vehicle changes directory, the
+// binary path must be absolute (a cwd-relative `build/bin/sfn` would not
+// resolve post-`cd`).
+fn _abs_sfn_bin() -> string ![io] {
+    let configured = env.get("SAILFIN_BIN");
+    if configured.length > 0 {
+        // Use it only if already absolute.
+        if find(configured, "/", 0) == 0 { return configured; }
+    }
+    let pwd = env.get("PWD");
+    if pwd.length > 0 { return pwd + "/build/bin/sfn"; }
+    return "build/bin/sfn";
+}
+
+fn _child_env() -> string[] ![io] {
+    let mut e: string[] = [];
+    let path = env.get("PATH");
+    if path.length > 0 { e.push("PATH=" + path); }
+    let home = env.get("HOME");
+    if home.length > 0 { e.push("HOME=" + home); }
+    let tmpdir = env.get("TMPDIR");
+    if tmpdir.length > 0 { e.push("TMPDIR=" + tmpdir); }
+    return e;
+}
+
+test "sfn init: scaffolds a [toolchain] pin in the generated capsule.toml" ![io] {
+    let mut base = env.get("SAILFIN_TEST_SCRATCH");
+    if base.length == 0 { base = "/tmp"; }
+    let dir = base + "/sfn-init-toolchain";
+    fs.createDirectory(dir, true);
+
+    // Clean slate: `init` refuses to overwrite an existing `capsule.toml`, so
+    // a re-run must start fresh. `cd` into the dir so the scaffold lands there.
+    let bin = _abs_sfn_bin();
+    let cmd = "cd '" + dir + "' && rm -f capsule.toml src/main.sfn && '" + bin
+        + "' init";
+    let exit = process.run_capture(["bash", "-c", cmd], _child_env());
+    let out = process.capture_take_stdout();
+    let err = process.capture_take_stderr();
+    assert exit == 0;
+
+    let manifest = fs.readFile(dir + "/capsule.toml");
+    assert find(manifest, "[toolchain]", 0) >= 0;
+    assert find(manifest, "sfn =", 0) >= 0;
+}

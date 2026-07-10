@@ -132,6 +132,6 @@ test "byname link: capsule staged + compiled under the spec slug (sfn/crypto/mod
     let _e = process.capture_take_stderr();
     assert exit == 0;
 
-    assert fs.exists("build/native/import-context/sfn/crypto/mod.sfn-asm");
+    assert fs.exists("build/compiler/import-context/sfn/crypto/mod.sfn-asm");
     assert fs.exists("build/capsules/sfn/crypto/ir/mod.ll");
 }

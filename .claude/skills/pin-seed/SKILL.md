@@ -36,12 +36,12 @@ The script writes the normalized version to `.seed-version` (single line, no tra
 make fetch-seed
 ```
 
-`make fetch-seed` reads `.seed-version` and downloads the binary into `build/seed/bin/sailfin`. If the release does not exist on GitHub, the fetch fails — restore the previous pin and surface the error to the user.
+`make fetch-seed` reads `.seed-version` and downloads the binary into `build/toolchains/seed/bin/sfn`. If the release does not exist on GitHub, the fetch fails — restore the previous pin and surface the error to the user.
 
 ### 5. Smoke-verify the new seed
 
 ```bash
-build/seed/bin/sailfin version
+build/toolchains/seed/bin/sfn version
 ```
 
 Confirm the binary prints the expected version string. If it mismatches, abort and restore.

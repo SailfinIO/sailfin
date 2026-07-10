@@ -28,7 +28,7 @@
 //     under a non-`sailfin` name is what forces the miss.
 //
 // Each run uses its own work directory (staging writes to
-// `<cwd>/build/native/import-context`), so the two staged trees can
+// `<cwd>/build/compiler/import-context`), so the two staged trees can
 // be `diff -r`'d whole: same file set, same bytes. Spawning the real
 // binary (rather than importing resolver entry points) matches
 // production exactly and avoids dragging the whole driver into the
@@ -37,7 +37,7 @@
 // Each spawned `check` clears `SAILFIN_TEST_SCRATCH` (`SAILFIN_TEST_SCRATCH=`
 // prefix): the parent test runner sets it per-file, and the compiler now
 // routes the import-context staging under it (#1333). This test asserts on
-// the CWD-relative default (`<cwd>/build/native/import-context`), so it
+// the CWD-relative default (`<cwd>/build/compiler/import-context`), so it
 // must opt out of that redirection to exercise the default path.
 extern fn sailfin_runtime_shell_capture(cmd: * u8) -> * u8;
 
@@ -99,18 +99,18 @@ test "check staging: subprocess path stages byte-identical artifacts to in-proce
     // staged at least one `.sfn-asm` (the fixture's relative import
     // guarantees a non-empty resolution).
     let staged_a = process.run(["sh", "-c", "find " + work_a
-        + "/build/native/import-context -name '*.sfn-asm' | grep -q ."]);
+        + "/build/compiler/import-context -name '*.sfn-asm' | grep -q ."]);
     assert staged_a == 0;
     let staged_b = process.run(["sh", "-c", "find " + work_b
-        + "/build/native/import-context -name '*.sfn-asm' | grep -q ."]);
+        + "/build/compiler/import-context -name '*.sfn-asm' | grep -q ."]);
     assert staged_b == 0;
 
     // The headline equivalence: identical file set, identical bytes
     // (`.sfn-asm`, `.layout-manifest`, and `.srchash` sidecars all
     // participate in the recursive diff).
     let rc_diff = process.run(["diff", "-r", work_a
-        + "/build/native/import-context", work_b
-        + "/build/native/import-context"]);
+        + "/build/compiler/import-context", work_b
+        + "/build/compiler/import-context"]);
     assert rc_diff == 0;
 
     process.run(["rm", "-rf", root]);
@@ -153,7 +153,7 @@ test "check staging: warm re-run is a cache hit (staged artifacts untouched)" ![
     // `_cr_write_capsule_slug_aliases` writes no `.slugalias` on
     // either run. A capsule fixture with a scoped slug would rewrite
     // the alias each run and flake the `-newer` half of this probe.
-    let ctx = work + "/build/native/import-context";
+    let ctx = work + "/build/compiler/import-context";
     let set_cmd = "cd " + ctx + " && find . -type f | sort";
     let set_before = _shell_capture(set_cmd);
     assert set_before.length > 0;

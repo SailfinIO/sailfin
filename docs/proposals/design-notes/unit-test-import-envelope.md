@@ -76,7 +76,7 @@ missing symbol.
 Open question 2 asked for a live reproduction (build a light-import test and a
 heavy-import test, capture the actual error). **This could not be executed in the
 spike environment:** there is no prebuilt `build/bin/sfn` and no seed
-binary on disk (`.seed-version` pins `0.7.0-alpha.19` but `build/seed/` is
+binary on disk (`.seed-version` pins `0.7.0-alpha.19` but `build/toolchains/seed/` is
 empty), and a from-scratch `make compile` is a 60–90 min self-host that exceeds
 the spike's tooling budget. The root cause above is therefore established by
 **static import-graph analysis plus existing passing-test precedent**, which is

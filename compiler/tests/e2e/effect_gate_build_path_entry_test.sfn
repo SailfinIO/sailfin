@@ -10,7 +10,7 @@
 // capsule and ran `sfn build -p .`; here we drive `sfn build -p <abs>`
 // from the runner's repo-root cwd. The per-module sidecar lands at the
 // repo-root-relative
-// `build/native/import-context/<fixture-abs-path>/src/util/sib.import-deps`
+// `build/compiler/import-context/<fixture-abs-path>/src/util/sib.import-deps`
 // (slug derived from the source's absolute path, which is unique per
 // test tag so concurrent runs in the parallel pool never collide).
 //
@@ -109,11 +109,11 @@ fn _build(root: string) -> BuildRun ![io] {
 }
 
 // The slug for the sibling sidecar is derived from the source's absolute
-// path: `build/native/import-context/<root-without-leading-slash>/src/util/sib.import-deps`.
+// path: `build/compiler/import-context/<root-without-leading-slash>/src/util/sib.import-deps`.
 fn _sidecar_path(root: string) -> string {
     // Strip the leading "/" from the absolute root.
     let rel = substring(root, 1, root.length);
-    return "build/native/import-context/" + rel + "/src/util/sib.import-deps";
+    return "build/compiler/import-context/" + rel + "/src/util/sib.import-deps";
 }
 
 // ---- Test 1: good sibling — its sidecar lists the entry's .sfn-asm ----

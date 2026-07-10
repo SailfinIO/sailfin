@@ -125,8 +125,8 @@ jobs:
       - name: Restore seed cache
         uses: actions/cache@v6
         with:
-          path: build/seed
-          key: sailfin-seed-linux-x86_64-${{ steps.seed.outputs.seed_version }}
+          path: build/toolchains/seed
+          key: sailfin-seed-store-linux-x86_64-${{ steps.seed.outputs.seed_version }}
 
       - name: Fetch released seed compiler
         shell: bash
@@ -135,12 +135,12 @@ jobs:
           SEED_VERSION: ${{ steps.seed.outputs.seed_version }}
         run: |
           set -euo pipefail
-          if [ -x build/seed/bin/sailfin ] && build/seed/bin/sailfin version >/dev/null 2>&1; then
+          if [ -x build/toolchains/seed/bin/sfn ] && build/toolchains/seed/bin/sfn version >/dev/null 2>&1; then
             echo "[ci] seed cache hit ($SEED_VERSION) — skipping fetch"
           else
             make fetch-seed SEED_VERSION="$SEED_VERSION"
           fi
-          build/seed/bin/sailfin version
+          build/toolchains/seed/bin/sfn version
 
       - name: Self-host the compiler (make compile)
         shell: bash
@@ -153,7 +153,7 @@ jobs:
           # (#1291), so a runaway compile can't take down the runner.
           make compile \
             CLANG="${CLANG:-clang-18}" \
-            SEED_NATIVE="build/seed/bin/sailfin"
+            SEED_NATIVE="build/toolchains/seed/bin/sfn"
           build/bin/sfn version
 
       - name: First pass (warm the cache)
@@ -343,8 +343,8 @@ jobs:
       - name: Restore seed cache
         uses: actions/cache@v6
         with:
-          path: build/seed
-          key: sailfin-seed-linux-x86_64-${{ steps.seed.outputs.seed_version }}
+          path: build/toolchains/seed
+          key: sailfin-seed-store-linux-x86_64-${{ steps.seed.outputs.seed_version }}
 
       - name: Fetch released seed compiler
         shell: bash
@@ -353,12 +353,12 @@ jobs:
           SEED_VERSION: ${{ steps.seed.outputs.seed_version }}
         run: |
           set -euo pipefail
-          if [ -x build/seed/bin/sailfin ] && build/seed/bin/sailfin version >/dev/null 2>&1; then
+          if [ -x build/toolchains/seed/bin/sfn ] && build/toolchains/seed/bin/sfn version >/dev/null 2>&1; then
             echo "[ci] seed cache hit ($SEED_VERSION) — skipping fetch"
           else
             make fetch-seed SEED_VERSION="$SEED_VERSION"
           fi
-          build/seed/bin/sailfin version
+          build/toolchains/seed/bin/sfn version
 
       # Warm module-IR cache for a fast compile. Unlike the determinism
       # gate, this job has no cold-build requirement, so restoring is safe
@@ -380,7 +380,7 @@ jobs:
           set -euo pipefail
           make compile \
             CLANG="${CLANG:-clang-18}" \
-            SEED_NATIVE="build/seed/bin/sailfin"
+            SEED_NATIVE="build/toolchains/seed/bin/sfn"
           build/bin/sfn version
 
       # Run the full `.sfn` suite with the test-bin cache ENABLED (no

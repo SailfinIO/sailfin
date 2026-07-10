@@ -17,7 +17,7 @@ set -euo pipefail
 
 SEED="${SEED:-build/bin/sfn}"
 WORK_DIR="${WORK_DIR:-build/arena-test}"
-IMPORT_CONTEXT="${IMPORT_CONTEXT:-build/native/import-context}"
+IMPORT_CONTEXT="${IMPORT_CONTEXT:-build/compiler/import-context}"
 
 # ---------------------------------------------------------------------------
 # Arg parsing
@@ -86,9 +86,9 @@ compile_once() {
     local out_ll="$4"
     local stderr_log="$5"
 
-    mkdir -p "$module_cwd/build/native" "$module_cwd/build/sailfin"
-    rm -rf "$module_cwd/build/native/import-context"
-    cp -a "$ABS_IC" "$module_cwd/build/native/import-context"
+    mkdir -p "$module_cwd/build/compiler" "$module_cwd/build/sailfin"
+    rm -rf "$module_cwd/build/compiler/import-context"
+    cp -a "$ABS_IC" "$module_cwd/build/compiler/import-context"
 
     local abs_src
     abs_src="$(cd "$REPO_ROOT" && realpath "$src")"

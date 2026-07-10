@@ -16,7 +16,7 @@ set -euo pipefail
 
 SEED="${SEED:-build/bin/sfn}"
 WORK_DIR="${WORK_DIR:-build/bench}"
-IMPORT_CONTEXT="${IMPORT_CONTEXT:-build/native/import-context}"
+IMPORT_CONTEXT="${IMPORT_CONTEXT:-build/compiler/import-context}"
 CSV_OUT=""
 TOP_N=0
 BUDGET_TIME=0        # seconds; 0 = no budget
@@ -137,11 +137,11 @@ bench_module() {
 
     # Prepare isolated working directory
     local module_cwd="$WORK_DIR/tmp/${name}/seed_cwd"
-    mkdir -p "$module_cwd/build/native" "$module_cwd/build/sailfin"
-    rm -rf "$module_cwd/build/native/import-context"
-    cp -a "$IMPORT_CONTEXT" "$module_cwd/build/native/import-context"
-    rm -f "$module_cwd/build/native/import-context/${slug}.sfn-asm" 2>/dev/null || true
-    rm -f "$module_cwd/build/native/import-context/${slug}.layout-manifest" 2>/dev/null || true
+    mkdir -p "$module_cwd/build/compiler" "$module_cwd/build/sailfin"
+    rm -rf "$module_cwd/build/compiler/import-context"
+    cp -a "$IMPORT_CONTEXT" "$module_cwd/build/compiler/import-context"
+    rm -f "$module_cwd/build/compiler/import-context/${slug}.sfn-asm" 2>/dev/null || true
+    rm -f "$module_cwd/build/compiler/import-context/${slug}.layout-manifest" 2>/dev/null || true
 
     local out_ll="$WORK_DIR/${name}.ll"
     local time_log="$WORK_DIR/${name}.time"

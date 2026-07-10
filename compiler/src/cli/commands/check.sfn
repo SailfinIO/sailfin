@@ -38,14 +38,16 @@ import {
     with_flag
 } from "sfn/cli";
 
+import { toolchain_gate } from "../../capsule_resolver";
 import { handle_check_command } from "../../check/engine";
 import { CliContext } from "../context";
 
 // The `sfn/cli` definition for `check`, registered on the v2 root via
-// `with_subcommand`. Three boolean flags (`--quiet`/`-q`, `--json`,
-// `--allow-bare-assert`) and a variadic `[path...]` positional.
+// `with_subcommand`. Four boolean flags (`--quiet`/`-q`, `--json`,
+// `--allow-bare-assert`, `--skip-toolchain-check`) and a variadic
+// `[path...]` positional.
 fn command_def() -> Command {
-    return with_arg(with_flag(with_flag(with_flag(command("check", "Type-check and effect-check Sailfin source files"), flag_short("quiet", "q", "Suppress the human diagnostic stream")), flag("json", "Emit a machine-readable JSON envelope on stdout")), flag("allow-bare-assert", "Opt out of the W0210 bare-assert-in-test warning")), arg_variadic("path", "Files or directories to check (default: .)"));
+    return with_arg(with_flag(with_flag(with_flag(with_flag(command("check", "Type-check and effect-check Sailfin source files"), flag_short("quiet", "q", "Suppress the human diagnostic stream")), flag("json", "Emit a machine-readable JSON envelope on stdout")), flag("allow-bare-assert", "Opt out of the W0210 bare-assert-in-test warning")), flag("skip-toolchain-check", "Bypass the [toolchain] pin check for this invocation")), arg_variadic("path", "Files or directories to check (default: .)"));
 }
 
 // Reconstruct the legacy positional args slice from the typed matches and
@@ -55,6 +57,12 @@ fn command_def() -> Command {
 // exactly as before. `binary_dir` comes from the driver-parsed
 // `CliContext`.
 fn run(matches: Matches, ctx: CliContext) -> int ![io] {
+    let _tc_paths: string[] = positionals(matches, "path");
+    let mut _tc_hint: string = ".";
+    if _tc_paths.length > 0 { _tc_hint = _tc_paths[0]; }
+    let _tc = toolchain_gate(_tc_hint, ctx.binary_dir, has_flag(matches, "skip-toolchain-check"));
+    if _tc != 0 { return _tc; }
+
     let mut args: string[] = ["check"];
     if has_flag(matches, "quiet") { args.push("--quiet"); }
     if has_flag(matches, "json") { args.push("--json"); }

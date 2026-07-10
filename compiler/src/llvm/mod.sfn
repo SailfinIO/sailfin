@@ -149,7 +149,8 @@ export {
     load_imported_layout_manifests,
     collect_imported_module_context,
     resolve_import_module_slug,
-    apply_layout_manifest_to_module
+    apply_layout_manifest_to_module,
+    set_import_context_root
 } from "./imports";
 
 // Re-export rendering functions

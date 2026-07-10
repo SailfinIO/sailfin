@@ -121,7 +121,7 @@ jobs:
           set -euo pipefail
           echo "[bench] seed version: $SEED_VERSION"
           make fetch-seed SEED_VERSION="$SEED_VERSION"
-          build/seed/bin/sailfin version
+          build/toolchains/seed/bin/sfn version
 
       - name: Build native compiler (selfhost from released seed)
         shell: bash
@@ -132,12 +132,12 @@ jobs:
           set -euo pipefail
           # `make rebuild` forces a clean self-host so the bench measures this
           # commit's compiler, not a cached one. It produces both
-          # build/bin/sfn and build/native/import-context (both required
+          # build/bin/sfn and build/compiler/import-context (both required
           # by the bench scripts).
           if [ -n "${{ inputs.build_jobs }}" ]; then
-            make rebuild CLANG="${{ inputs.clang }}" SEED_NATIVE="build/seed/bin/sailfin" BUILD_JOBS="${{ inputs.build_jobs }}"
+            make rebuild CLANG="${{ inputs.clang }}" SEED_NATIVE="build/toolchains/seed/bin/sfn" BUILD_JOBS="${{ inputs.build_jobs }}"
           else
-            make rebuild CLANG="${{ inputs.clang }}" SEED_NATIVE="build/seed/bin/sailfin"
+            make rebuild CLANG="${{ inputs.clang }}" SEED_NATIVE="build/toolchains/seed/bin/sfn"
           fi
           build/bin/sfn version
 
