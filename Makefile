@@ -730,7 +730,7 @@ package: compile
 #
 # `make rebuild` is the only path to producing `build/bin/sfn`,
 # so `build/compiler/import-context/` is guaranteed to land directly
-# (rebuild copies the seed-written tree to the canonical path; SFN-175).
+# (the seed stages the canonical path during `build -p compiler`).
 # #941: the former `build/native/obj/runtime/prelude.o` check was
 # dropped — post-#940 the test runner links the runtime through the
 # declarative runtime-capsule path (emit-from-source + per-work-dir
@@ -835,11 +835,11 @@ rebuild-impl:
 	@# signatures are good enough for the in-build resolution; the
 	@# post-build block below re-stages them with NATIVE_OUT for the
 	@# canonical (proper-pointee) form. Mirrors the post-stage loop.
-	@mkdir -p build/native/import-context/runtime/sfn/platform
+	@mkdir -p build/compiler/import-context/runtime/sfn/platform
 	@seed=$$(cat build/.seed-resolved); \
 	for mod in libc posix pthread net; do \
-		asm_path="build/native/import-context/runtime/sfn/platform/$$mod.sfn-asm"; \
-		manifest_path="build/native/import-context/runtime/sfn/platform/$$mod.layout-manifest"; \
+		asm_path="build/compiler/import-context/runtime/sfn/platform/$$mod.sfn-asm"; \
+		manifest_path="build/compiler/import-context/runtime/sfn/platform/$$mod.layout-manifest"; \
 		if [ ! -f "$$asm_path" ]; then \
 			echo "[rebuild] pre-staging runtime/sfn/platform/$$mod.sfn-asm (seed)..."; \
 			if ! "$$seed" emit --module-name "runtime/sfn/platform/$$mod" -o "$$asm_path" native "runtime/sfn/platform/$$mod.sfn" >/dev/null 2>&1; then \
@@ -894,17 +894,6 @@ rebuild-impl:
 	@mkdir -p build/native $(dir $(NATIVE_OUT))
 	@cp -f build/sailfin/program $(NATIVE_OUT)
 	@chmod +x $(NATIVE_OUT)
-	@# SFN-175: the canonical import-context tree is `build/compiler/import-context`,
-	@# but the pinned seed still stages `build/native/import-context` (its baked
-	@# path — see the pre-stage block above, which the seed's `build -p compiler`
-	@# reads). Copy (not move) the seed-written tree old->new so every post-compile
-	@# consumer (test/bench/arena/package/CI) reads the canonical path while the
-	@# seed's warm-build cache survives at the old path. Retires at the next seed
-	@# bump, when the seed itself stages the new path (pre-stage + this copy + the
-	@# `imports.sfn` old-path read fallback all delete together).
-	@rm -rf build/compiler/import-context
-	@mkdir -p build/compiler
-	@cp -a build/native/import-context build/compiler/import-context
 	@# Save .ll files to a location `make test` won't clobber. Each
 	@# integration / e2e test's own `sfn build` overwrites
 	@# `build/sailfin/capsules/*.ll` and `build/sailfin/program.ll`

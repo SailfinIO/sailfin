@@ -213,15 +213,6 @@ fn _slug_alias_path_for_slug(slug: string) -> string {
     return "build/compiler/import-context/" + slug + ".slugalias";
 }
 
-// SFN-175: one-release old-path read fallback. The canonical import-context
-// tree moved to `build/compiler/import-context`, but the current pinned seed
-// still stages `build/native/import-context` during `make compile`. Reads try
-// the canonical path first and fall back here so transitional old-path trees
-// still resolve. Retires with the pre-stage + Makefile copy at the next seed bump.
-fn _compat_old_slug_alias_path_for_slug(slug: string) -> string {
-    return "build/native/import-context/" + slug + ".slugalias";
-}
-
 // #873: read the `.slugalias` sidecar the resolver drops at a capsule
 // source's PATH slug, mapping it to the source's CANONICAL spec slug
 // (`capsules/sfn/crypto/src/mod` → `sfn/crypto/mod`). Returns "" when no
@@ -229,8 +220,6 @@ fn _compat_old_slug_alias_path_for_slug(slug: string) -> string {
 fn _resolve_slug_alias(slug: string) -> string ![io] {
     let primary = _slug_alias_path_for_slug(slug);
     if fs.exists(primary) { return trim_text(fs.readFile(primary)); }
-    let fallback = _compat_old_slug_alias_path_for_slug(slug);
-    if fs.exists(fallback) { return trim_text(fs.readFile(fallback)); }
     return "";
 }
 
@@ -425,32 +414,12 @@ fn native_text_path_for_slug(slug: string) -> string {
     return "build/compiler/import-context/" + slug + ".sfn-asm";
 }
 
-// SFN-175: one-release old-path read fallbacks (see
-// `_compat_old_slug_alias_path_for_slug`). Canonical reads target
-// `build/compiler/import-context`; these resolve transitional
-// `build/native/import-context` trees the current pinned seed still stages.
-fn _compat_old_layout_manifest_path_for_slug(slug: string) -> string {
-    return "build/native/import-context/" + slug + ".layout-manifest";
+fn _resolve_layout_manifest_path_for_slug(slug: string) -> string {
+    return layout_manifest_path_for_slug(slug);
 }
 
-fn _compat_old_native_text_path_for_slug(slug: string) -> string {
-    return "build/native/import-context/" + slug + ".sfn-asm";
-}
-
-fn _resolve_layout_manifest_path_for_slug(slug: string) -> string ![io] {
-    let primary = layout_manifest_path_for_slug(slug);
-    if fs.exists(primary) { return primary; }
-    let fallback = _compat_old_layout_manifest_path_for_slug(slug);
-    if fs.exists(fallback) { return fallback; }
-    return primary;
-}
-
-fn _resolve_native_text_path_for_slug(slug: string) -> string ![io] {
-    let primary = native_text_path_for_slug(slug);
-    if fs.exists(primary) { return primary; }
-    let fallback = _compat_old_native_text_path_for_slug(slug);
-    if fs.exists(fallback) { return fallback; }
-    return primary;
+fn _resolve_native_text_path_for_slug(slug: string) -> string {
+    return native_text_path_for_slug(slug);
 }
 
 fn normalize_import_module_path(value: string) -> string {
