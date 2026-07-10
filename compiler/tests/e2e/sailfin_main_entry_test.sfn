@@ -43,13 +43,13 @@
 // `capsules/sfn/test/tests/fixtures_test.sfn`). Captured stdout is
 // stashed to an out-of-tree marker file so it survives the temp-dir
 // teardown and can be asserted after the fixture returns.
-import { with_tmp_dir } from "sfn/test";
 import { find } from "sfn/strings";
+import { with_tmp_dir } from "sfn/test";
 
 fn _sfn_bin() -> string ![io] {
     let configured = env.get("SAILFIN_BIN");
     if configured.length > 0 { return configured; }
-    return "build/native/sailfin";
+    return "build/bin/sfn";
 }
 
 fn _fixture_src() -> string ![io] {

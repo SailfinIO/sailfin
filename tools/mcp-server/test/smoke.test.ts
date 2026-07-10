@@ -30,7 +30,7 @@ interface Rpc {
 
 /**
  * Create a temporary workspace containing a stub compiler at
- * build/native/sailfin. The stub echoes a predictable payload on stdout
+ * build/bin/sfn. The stub echoes a predictable payload on stdout
  * so tests can assert on the MCP response shape.
  */
 function makeStubWorkspace(opts: {
@@ -43,7 +43,7 @@ function makeStubWorkspace(opts: {
   const stderrBody = opts.stderrBody ?? "";
 
   const root = mkdtempSync(path.join(tmpdir(), "sailfin-mcp-test-"));
-  mkdirSync(path.join(root, "build", "native"), { recursive: true });
+  mkdirSync(path.join(root, "build", "bin"), { recursive: true });
 
   const stub = `#!/usr/bin/env bash
 # Stub compiler for MCP smoke tests.
@@ -51,7 +51,7 @@ printf '%s' ${JSON.stringify(stdoutBody)}
 >&2 printf '%s' ${JSON.stringify(stderrBody)}
 exit ${exit}
 `;
-  const stubPath = path.join(root, "build", "native", "sailfin");
+  const stubPath = path.join(root, "build", "bin", "sfn");
   writeFileSync(stubPath, stub);
   chmodSync(stubPath, 0o755);
   return root;
@@ -241,7 +241,7 @@ test("workspace-boundary guard rejects /etc/passwd before invoking the compiler"
 });
 
 test("missing compiler binary returns a clean actionable error", async () => {
-  // Fresh temp dir with no build/native/sailfin stub.
+  // Fresh temp dir with no build/bin/sfn stub.
   const empty = mkdtempSync(path.join(tmpdir(), "sailfin-mcp-empty-"));
   await withServer(empty, async (client) => {
     const resp = await client.request("tools/call", {

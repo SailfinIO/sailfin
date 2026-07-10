@@ -11,7 +11,7 @@
 // The acceptance contract is *equivalence*: the staged artifact set
 // produced by the subprocess path must be byte-identical to the set
 // the legacy in-process path produces. This test drives both paths
-// end-to-end through the *shipped* `build/native/sailfin` binary:
+// end-to-end through the *shipped* `build/bin/sfn` binary:
 //
 //   - Run A invokes the binary normally. `fn main` threads
 //     `binary_dir` from `exe_path()`, `_resolve_check_self_path`
@@ -64,7 +64,7 @@ test "check staging: subprocess path stages byte-identical artifacts to in-proce
     // `printf '%s'` strips the trailing newline `realpath` emits —
     // a raw capture would split the `sh -c` scripts below in two
     // (same pattern as `_host_path` in `emit_retry_test.sfn`).
-    let exe = _shell_capture("printf '%s' \"$(realpath build/native/sailfin)\"");
+    let exe = _shell_capture("printf '%s' \"$(realpath build/bin/sfn)\"");
     assert exe.length > 0;
 
     // Run A: shipped binary under its real name -> `binary_dir`
@@ -125,7 +125,7 @@ test "check staging: warm re-run is a cache hit (staged artifacts untouched)" ![
     // `printf '%s'` strips the trailing newline `realpath` emits —
     // a raw capture would split the `sh -c` scripts below in two
     // (same pattern as `_host_path` in `emit_retry_test.sfn`).
-    let exe = _shell_capture("printf '%s' \"$(realpath build/native/sailfin)\"");
+    let exe = _shell_capture("printf '%s' \"$(realpath build/bin/sfn)\"");
     assert exe.length > 0;
 
     let work = root + "/work";

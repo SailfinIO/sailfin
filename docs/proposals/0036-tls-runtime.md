@@ -108,7 +108,7 @@ that needs no Sailfin→C callback:**
   existing socket timeouts bound them.
 
 **Feasibility probe results (run against the freshly self-hosted
-`build/native/sailfin`):**
+`build/bin/sfn`):**
 
 1. **Opaque-pointer externs — PASS.** A 19-extern `SSL_CTX_*`/`SSL_*` surface
    spelled with opaque `* u8` handles (`SSL_CTX_new(method: * u8) -> * u8`,

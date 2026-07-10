@@ -513,7 +513,7 @@ When `sfn test` is used, a non-zero exit code means at least one test failed. Al
 | `capsule.toml` | Capsule manifest — declares name, version, dependencies, and required capabilities |
 | `workspace.toml` | Workspace manifest — shared policies for multi-capsule projects |
 | `*.sfn-asm` | Native IR intermediate representation produced by `sfn emit native` |
-| `build/native/sailfin` | Default output path for the self-hosted compiler binary |
+| `build/bin/sfn` | Default output path for the self-hosted compiler binary |
 | `build/seed/bin/sailfin` | Default path for the downloaded seed compiler |
 | `dist/` | Release packaging output directory |
 
@@ -556,7 +556,7 @@ make rebuild
 **Run only unit tests in a specific directory:**
 
 ```bash
-build/native/sailfin test compiler/tests/unit/
+build/bin/sfn test compiler/tests/unit/
 ```
 
 **Run the CI validation gate locally:**

@@ -16,13 +16,13 @@
 // test must thread `SAILFIN_TEST_SCRATCH` (+ `PATH` for clang/linker) to
 // its nested build to avoid clobbering a sibling build under the pool.
 // See `.claude/rules/no-bash-e2e.md` and `sailfin_main_entry_test.sfn`.
-import { with_tmp_dir } from "sfn/test";
 import { find } from "sfn/strings";
+import { with_tmp_dir } from "sfn/test";
 
 fn _sfn_bin() -> string ![io] {
     let configured = env.get("SAILFIN_BIN");
     if configured.length > 0 { return configured; }
-    return "build/native/sailfin";
+    return "build/bin/sfn";
 }
 
 fn _fixture_src() -> string ![io] {

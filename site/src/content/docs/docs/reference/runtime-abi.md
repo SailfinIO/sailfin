@@ -113,7 +113,7 @@ define i32 @main(i32 %argc, i8** %argv) {
 ```
 
 In LLVM IR the entry symbol is spelled `@main`; after linking, tools
-like `nm` show it without the `@` sigil. `nm build/native/sailfin |
+like `nm` show it without the `@` sigil. `nm build/bin/sfn |
 grep -E ' T main$'` shows exactly one `T main` row, sourced from the
 Sailfin-emitted definition in `compiler/src/llvm/lowering/` (see
 the Runtime Migration table in `docs/status.md` for the pipeline trace).

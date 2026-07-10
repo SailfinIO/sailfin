@@ -51,7 +51,7 @@ The `examples/` directory is how developers first experience Sailfin. Review exa
 - **Progressive complexity** — `basics/` should be trivial, `advanced/` should showcase Sailfin's strengths
 - **Real-world relevance** — Do examples solve problems developers actually have?
 - **Effect annotations** — Are they minimal and well-explained with comments?
-- **Correctness** — Verify examples actually compile: `build/native/sailfin run examples/<file>.sfn`
+- **Correctness** — Verify examples actually compile: `build/bin/sfn run examples/<file>.sfn`
 
 ## Roadmap & Prioritization
 

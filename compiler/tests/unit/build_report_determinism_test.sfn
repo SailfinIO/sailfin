@@ -36,7 +36,7 @@ test "empty_determinism_snapshot: zero-valued fields" {
 // --------------------------------------------------------------
 test "compare_for_determinism: identical snapshots produce matched=true" {
     let a = DeterminismSnapshot {
-        binary_path: "build/native/sailfin",
+        binary_path: "build/bin/sfn",
         binary_sha256: "deadbeef",
         modules: [make_determinism_module("sfn/math/mod", "aa"), make_determinism_module("sfn/io/mod", "bb")]
     };
@@ -229,7 +229,7 @@ test "determinism_diff_to_json: matched=false on cache_key mismatch" {
 
 test "determinism_diff_to_json: binary mismatch surfaces both sha256s" {
     let a = DeterminismSnapshot {
-        binary_path: "build/native/sailfin",
+        binary_path: "build/bin/sfn",
         binary_sha256: "aa",
         modules: []
     };
@@ -243,7 +243,7 @@ test "determinism_diff_to_json: binary mismatch surfaces both sha256s" {
     assert _contains(json, "\"binary_match\":false");
     assert _contains(json, "\"binary_sha256_a\":\"aa\"");
     assert _contains(json, "\"binary_sha256_b\":\"bb\"");
-    assert _contains(json, "\"binary_path_a\":\"build/native/sailfin\"");
+    assert _contains(json, "\"binary_path_a\":\"build/bin/sfn\"");
 }
 
 // --------------------------------------------------------------

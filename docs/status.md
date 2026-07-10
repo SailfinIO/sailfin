@@ -130,7 +130,7 @@ here.
 ## Compiler Pipeline (Current)
 
 - `compiler/src/` is the primary toolchain; `make compile` produces
-  `build/native/sailfin`. Pipeline: Lexer → Parser → Type Checker →
+  `build/bin/sfn`. Pipeline: Lexer → Parser → Type Checker →
   Effect Checker → Native Emitter (`.sfn-asm`) → LLVM Lowering.
 - **Backend seam** (`compiler/src/backend.sfn`, #1112; SFEP-15 Stage 0):
   every codegen/link `clang` invocation routes through a `Backend` interface

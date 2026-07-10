@@ -272,7 +272,7 @@ sfn --version
 You can also run the binary directly without installing:
 
 ```bash
-build/native/sailfin --version
+build/bin/sfn --version
 ```
 
 > **Note:** `make compile` routes through `<seed> build -p compiler` — the

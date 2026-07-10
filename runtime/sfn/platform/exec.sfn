@@ -296,18 +296,18 @@ fn exe_path() -> * u8 ![io] {
 // scratch dirs); otherwise walks three candidates relative to
 // `binary_dir(exe_path)` in this exact order:
 //
-//   1. `<exe_dir>/runtime`         — dev-tree (the binary at
-//                                     `build/native/sailfin`
-//                                     sits next to
-//                                     `build/native/runtime/`).
+//   1. `<exe_dir>/runtime`         — runtime staged directly
+//                                     beside the binary (some
+//                                     packaged bin layouts).
 //   2. `<exe_dir>/../runtime`      — installed tree (binary at
-//                                     `~/.local/bin/sailfin`
-//                                     sits next to
-//                                     `~/.local/runtime/`).
-//   3. `<exe_dir>/../../runtime`   — packaged-bundle layout
-//                                     (binary nested two
-//                                     levels deep under a
-//                                     distribution prefix).
+//                                     `~/.local/bin/sfn` sits
+//                                     next to `~/.local/runtime/`).
+//   3. `<exe_dir>/../../runtime`   — dev-tree (`build/bin/sfn`,
+//                                     two levels under the repo
+//                                     root that holds `runtime/`)
+//                                     and packaged-bundle layouts
+//                                     nesting the binary two
+//                                     levels deep.
 //
 // Each candidate is `fs.exists`-probed; the first hit is
 // canonicalized via `realpath` and returned. Returns `""`

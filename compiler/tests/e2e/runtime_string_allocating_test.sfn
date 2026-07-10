@@ -19,7 +19,7 @@ import { find, contains } from "sfn/strings";
 fn _sfn_bin() -> string ![io] {
     let configured = env.get("SAILFIN_BIN");
     if configured.length > 0 { return configured; }
-    return "build/native/sailfin";
+    return "build/bin/sfn";
 }
 
 fn _scratch(tag: string) -> string ![io] {
@@ -48,7 +48,7 @@ fn _env() -> string[] ![io] {
 fn _repo_root() -> string ![io] {
     // The test runner runs from the repo root; derive it from a known path.
     // Use the scratch parent as a fallback but prefer CWD-relative detection
-    // via env. The repo root is where build/native/sailfin lives.
+    // via env. The repo root is where build/bin/sfn lives.
     let configured = env.get("SAILFIN_REPO_ROOT");
     if configured.length > 0 { return configured; }
     return ".";

@@ -29,11 +29,11 @@ is a single command; everything else is reading its output.
 make compile                             # self-host from the pinned seed
 
 # First pass — warm the cache. Mirrors the workflow.
-build/native/sailfin build -p compiler \
+build/bin/sfn build -p compiler \
   --work-dir build/det-pass1 --json | tee pass1.json
 
 # Second pass — runs determinism check + emits the warm-cache BuildReport.
-build/native/sailfin build -p compiler \
+build/bin/sfn build -p compiler \
   --check-determinism \
   --work-dir build/det-pass2 --json | tee pass2.json
 
@@ -79,9 +79,9 @@ git bisect good <known-good-sha>          # last successful build-quality.yml ru
 git bisect run bash -c '
   set -euo pipefail
   make compile >/dev/null 2>&1 || exit 125    # 125 = skip (build broken here)
-  build/native/sailfin build -p compiler \
+  build/bin/sfn build -p compiler \
     --work-dir build/det-pass1 --json >/dev/null
-  build/native/sailfin build -p compiler \
+  build/bin/sfn build -p compiler \
     --check-determinism --work-dir build/det-pass2 --json > pass2.json
   jq -se ".[] | select(.check == \"determinism\") | .matches" pass2.json | grep -q true
 '

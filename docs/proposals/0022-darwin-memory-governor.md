@@ -385,7 +385,7 @@ Mirror `mem_limit_selfcap_test.sfn` and the sanitizer-skip discipline. All
 
 ## 11. Verification commands
 
-- Per step: `build/native/sailfin check <touched .sfn>` then `make compile`.
+- Per step: `build/bin/sfn check <touched .sfn>` then `make compile`.
 - Step 1 local sanity: confirm `_cr_resolve_jobs` still 8 on this box (a debug
   trace or the unit test on the extracted formula).
 - Full gate before "shipped": `make check` (triple-pass self-host + suite),

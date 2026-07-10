@@ -51,7 +51,7 @@ import { _is_safe_capsule_version_cmd, _package_basename } from "./cmd_shared";
 // Without `-p`: packages the compiler. Reads `compiler/capsule.toml`
 // for version (the compiler's `[capsule].name` is single-segment so
 // no per-capsule sidecar exists for it). Default `--compiler-bin =
-// build/native/sailfin`. Tarball stem `sailfin-native-<target>-<version>`.
+// build/bin/sfn`. Tarball stem `sailfin-native-<target>-<version>`.
 //
 // With `-p <path>`: packages a user capsule. Reads the C2c sidecar at
 // `<path>/build/capsules/<scope>/<name>/manifest.json` (must exist —
@@ -75,7 +75,7 @@ fn handle_package_command(args: string[]) -> int ![io] {
     // Parse args.
     let mut target_arg: string = "";
     let mut out_dir: string = "dist";
-    let mut compiler_bin: string = "build/native/sailfin";
+    let mut compiler_bin: string = "build/bin/sfn";
     let mut capsule_path: string = "";
     let mut installer_mode: boolean = false;
     let mut argi: int = 1;
@@ -729,13 +729,13 @@ fn _package_find_substring(haystack: string, needle: string, start: int) -> int 
 // `with_subcommand`. Four optional value flags, one boolean flag, and one
 // short value flag `-p`.
 fn command_def() -> Command {
-    return with_flag(with_flag(with_flag(with_flag(with_flag(command("package", "Package a capsule or the compiler for distribution"), flag_value("target", "Platform target (e.g. linux-x86_64); auto-detected if absent")), flag_value("out", "Output directory (default: dist)")), flag_value("compiler-bin", "Path to the compiler binary (default: build/native/sailfin)")), flag("installer", "Package the compiler installer bundle")), flag_value_short("p", "p", "Capsule path to package (user-capsule mode)"));
+    return with_flag(with_flag(with_flag(with_flag(with_flag(command("package", "Package a capsule or the compiler for distribution"), flag_value("target", "Platform target (e.g. linux-x86_64); auto-detected if absent")), flag_value("out", "Output directory (default: dist)")), flag_value("compiler-bin", "Path to the compiler binary (default: build/bin/sfn)")), flag("installer", "Package the compiler installer bundle")), flag_value_short("p", "p", "Capsule path to package (user-capsule mode)"));
 }
 
 // Reconstruct the legacy positional args slice from the typed matches and
 // delegate to `handle_package_command` verbatim. Absent flags are omitted
 // from the slice so the handler applies its own defaults (`out` → "dist",
-// `compiler-bin` → "build/native/sailfin") and its own mutual-exclusion
+// `compiler-bin` → "build/bin/sfn") and its own mutual-exclusion
 // check exactly as before. `ctx` is part of the per-command contract but
 // unused here (package sources no driver state).
 fn run(matches: Matches, ctx: CliContext) -> int ![io] {

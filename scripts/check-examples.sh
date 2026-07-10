@@ -30,7 +30,7 @@
 
 set -u
 
-SAILFIN_BIN="${SAILFIN_BIN:-build/native/sailfin}"
+SAILFIN_BIN="${SAILFIN_BIN:-build/bin/sfn}"
 TIMEOUT="${SAILFIN_EXAMPLES_TIMEOUT:-25}"
 TSV=0
 [ "${1:-}" = "--tsv" ] && TSV=1

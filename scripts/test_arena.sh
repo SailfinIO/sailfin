@@ -15,7 +15,7 @@ set -euo pipefail
 #   bash scripts/test_arena.sh examples/basics/functions.sfn  # specific module
 #   bash scripts/test_arena.sh --all                          # all basics/
 
-SEED="${SEED:-build/native/sailfin}"
+SEED="${SEED:-build/bin/sfn}"
 WORK_DIR="${WORK_DIR:-build/arena-test}"
 IMPORT_CONTEXT="${IMPORT_CONTEXT:-build/native/import-context}"
 

@@ -47,7 +47,7 @@ bash scripts/install_precommit.sh --remove  # uninstall
 ```
 
 The hook only runs when staged changes touch `compiler/src/` or `runtime/`,
-and is silently skipped when `build/native/sailfin` is missing. Bypass with
+and is silently skipped when `build/bin/sfn` is missing. Bypass with
 `SAILFIN_SKIP_PRECOMMIT=1 git commit ...` or the standard `--no-verify`.
 
 ### Notes on Release Automation

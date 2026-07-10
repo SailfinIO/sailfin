@@ -25,7 +25,7 @@ The contract:
   old `ulimit -v` rule had. The budget is load-bearing on Linux/WSL only.
 
 **Timeouts still apply.** Wrap single-file compiler invocations with
-`timeout 60` (e.g. `timeout 60 build/native/sailfin run file.sfn`) — the
+`timeout 60` (e.g. `timeout 60 build/bin/sfn run file.sfn`) — the
 memory budget does not guard against hangs. `make` targets handle their
 own timeouts.
 

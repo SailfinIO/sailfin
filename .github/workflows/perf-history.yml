@@ -124,7 +124,7 @@ jobs:
           start=$(date +%s)
           make rebuild CLANG="clang-18" SEED_NATIVE="build/seed/bin/sailfin"
           end=$(date +%s)
-          build/native/sailfin version
+          build/bin/sfn version
           echo "wall_s=$((end - start))" >> "$GITHUB_OUTPUT"
           echo "[perf-history] clean build wall time: $((end - start))s (budget ${BUILD_BUDGET_S}s)"
 

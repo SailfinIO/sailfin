@@ -7,7 +7,7 @@
 // `test_runtime_sfn_sources_active.sh` (test-infra Phase 3, epic #842;
 // `.claude/rules/no-bash-e2e.md`). Pins the production link path: when
 // `runtime/capsule.toml` declares `sfn-sources = ["sfn/memory/arena.sfn"]`,
-// the resulting `build/native/sailfin` binary exports five
+// the resulting `build/bin/sfn` binary exports five
 // `sfn_arena_sfn_*` symbols sourced from Sailfin emission, plus the bare
 // arena-core exports #1309 moved into Sailfin
 // (`sfn_arena_create`/`alloc`/`global`/`enabled`), and the surviving bare
@@ -33,7 +33,7 @@ import {
 fn _sfn_bin() -> string ![io] {
     let configured = env.get("SAILFIN_BIN");
     if configured.length > 0 { return configured; }
-    return "build/native/sailfin";
+    return "build/bin/sfn";
 }
 
 // `run_capture`'s empty array is the *empty* environment; thread the

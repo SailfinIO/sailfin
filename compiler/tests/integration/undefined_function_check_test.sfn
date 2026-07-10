@@ -15,8 +15,8 @@
 // callee must check clean.
 //
 // Runs from the repo root (`make test-integration` invokes
-// `build/native/sailfin test compiler/tests/integration`), so the
-// `build/native/sailfin` binary resolves relative to that cwd. The
+// `build/bin/sfn test compiler/tests/integration`), so the
+// `build/bin/sfn` binary resolves relative to that cwd. The
 // child is launched with an *empty* environment on purpose: the binary
 // is named by an explicit slashed path (so `posix_spawnp` never
 // consults `PATH`), the runtime root is resolved exe-relative rather
@@ -51,18 +51,18 @@ fn _mint_fixture(name: string, source: string) -> string ![io] {
     return path;
 }
 
-// Run `build/native/sailfin check <path>` capturing both streams, and
+// Run `build/bin/sfn check <path>` capturing both streams, and
 // return the combined stdout+stderr so a case can assert on diagnostic
 // text regardless of which stream the renderer used.
 fn _check_output(path: string) -> string ![io] {
-    let _rc = process.run_capture(["build/native/sailfin", "check", path], []);
+    let _rc = process.run_capture(["build/bin/sfn", "check", path], []);
     let out = process.capture_take_stdout();
     let err = process.capture_take_stderr();
     return out + err;
 }
 
 fn _check_exit(path: string) -> i64 ![io] {
-    let rc = process.run_capture(["build/native/sailfin", "check", path], []);
+    let rc = process.run_capture(["build/bin/sfn", "check", path], []);
     // Drain the stashed capture buffers so a later `_check_output` /
     // `capture_take_*` call doesn't hand back this run's streams.
     let _o = process.capture_take_stdout();

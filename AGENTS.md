@@ -9,7 +9,7 @@
 
 ## Build, Test, and Development Commands
 
-- `sfn check <files>` (or `build/native/sailfin check <files>`) is the fast inner loop for parse/type/effect checking; it does not prove codegen, linking, or self-hosting.
+- `sfn check <files>` (or `build/bin/sfn check <files>`) is the fast inner loop for parse/type/effect checking; it does not prove codegen, linking, or self-hosting.
 - `make compile` self-hosts the compiler from the released seed pinned by `.seed-version`.
 - `make rebuild` forces a rebuild from the seed.
 - `make check` compiles if needed and runs the full validation gate, including seedcheck self-host validation.
@@ -31,7 +31,7 @@
 
 - `docs/style-guide.md` is the single source of truth for coding conventions (naming, comments, effect-annotation style, error handling, file size budgets); `.claude/rules/code-style.md` is the always-loaded summary. Headline rules: effects spelled explicitly and listed alphabetically (`fn foo() -> Bar ![io, model]`); `snake_case` functions/locals, `PascalCase` types, `_underscore` private helpers; comments explain *why* and cite issues/SFEPs — never `TODO`s, commented-out code, or "this PR" language.
 - Align terminology with the language spec at `site/src/content/docs/docs/reference/spec/` (capsule, fleet, provenance card) and note currency or latency literals as comments until syntax support arrives.
-- Before committing touched `.sfn` files under `compiler/src/` or `runtime/`, run `sfn fmt --write <files>` and then `sfn fmt --check <files>` (or the equivalent `build/native/sailfin` commands).
+- Before committing touched `.sfn` files under `compiler/src/` or `runtime/`, run `sfn fmt --write <files>` and then `sfn fmt --check <files>` (or the equivalent `build/bin/sfn` commands).
 - Stage regression tests beside related coverage in `compiler/tests/`; prefer Sailfin-native tests and slim fixtures over recorded generated output.
 - When adding language surface or runtime behavior, extend coverage and update `docs/status.md` first, then the relevant spec/preview page and roadmap if needed.
 - For non-trivial design changes, create or update an SFEP under `docs/proposals/` rather than burying design in issues or PR prose. Do not mark an SFEP `Implemented` until the feature meets the Stage1 readiness bar end-to-end and self-hosts.

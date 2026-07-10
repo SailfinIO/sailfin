@@ -25,7 +25,7 @@
 //      i64 probe fn).
 //   2. Runs `sfn build -p <ws>/capsules/sfn/test-app --work-dir <ws>/build`.
 //      The `--work-dir` rebases the cache dir to `<ws>/build/sailfin` and
-//      the default binary to `<ws>/build/native/sailfin` — giving the same
+//      the default binary to `<ws>/build/bin/sfn` — giving the same
 //      predictable artifact paths the bash test got from `cd "$ws"`
 //      without a cwd lever (`run_capture` has none).
 //   3. Asserts the build succeeds (fails with the lowering fatal pre-#1288).
@@ -42,7 +42,7 @@ import { find, contains } from "sfn/strings";
 fn _sfn_bin() -> string ![io] {
     let configured = env.get("SAILFIN_BIN");
     if configured.length > 0 { return configured; }
-    return "build/native/sailfin";
+    return "build/bin/sfn";
 }
 
 // The build spawns a nested clang + linker, so the child needs PATH (an

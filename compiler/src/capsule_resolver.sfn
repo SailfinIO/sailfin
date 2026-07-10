@@ -3197,7 +3197,7 @@ fn _cr_effective_isolation_exe(sailfin_exe: string, binary_dir: string, source_c
     if source_count < _cr_positional_isolation_threshold() {
         return sailfin_exe;
     }
-    return binary_dir + "/sailfin";
+    return binary_dir + "/sfn";
 }
 
 fn prepare_project_capsules(input_path: string, config: BuildCacheConfig, consumer: ResolverConsumer, sailfin_exe: string, work_dir: string, binary_dir: string) -> ProjectCapsuleResult ![io] {

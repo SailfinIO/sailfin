@@ -34,14 +34,14 @@ fn _mint_fixture(name: string, source: string) -> string ![io] {
 }
 
 fn _check_output(path: string) -> string ![io] {
-    let _rc = process.run_capture(["build/native/sailfin", "check", path], []);
+    let _rc = process.run_capture(["build/bin/sfn", "check", path], []);
     let out = process.capture_take_stdout();
     let err = process.capture_take_stderr();
     return out + err;
 }
 
 fn _check_exit(path: string) -> i64 ![io] {
-    let rc = process.run_capture(["build/native/sailfin", "check", path], []);
+    let rc = process.run_capture(["build/bin/sfn", "check", path], []);
     let _o = process.capture_take_stdout();
     let _e = process.capture_take_stderr();
     return rc;

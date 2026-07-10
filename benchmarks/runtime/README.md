@@ -41,7 +41,7 @@ bash scripts/bench_runtime.sh --iterations 10 --csv /tmp/baseline.csv
 bash scripts/bench_runtime.sh --budget-time 1000 --budget-mem 1048576
 ```
 
-Script flags: `--seed <bin>` (default `build/native/sailfin`), `--csv PATH`,
+Script flags: `--seed <bin>` (default `build/bin/sfn`), `--csv PATH`,
 `--top N`, `--iterations K` (default 5), `--workload <name>` (repeatable, default
 all), `--budget-time MS`, `--budget-mem KB`, `--work-dir DIR` (default
 `build/bench-runtime`). The script exits non-zero on any build failure, run

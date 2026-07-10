@@ -50,7 +50,7 @@ No source is moved here.
 ## 2. Current state (measured)
 
 All counts below are extracted statically from `compiler/src/` on
-2026-06-22 (`build/native/sailfin` is absent in this environment; every claim
+2026-06-22 (`build/bin/sfn` is absent in this environment; every claim
 is grounded in a path + line, not a compiler run).
 
 - **166** `.sfn` files, **99,093** LOC total.
@@ -439,9 +439,9 @@ IR lands at `build/capsules/sfn/compiler/ir/*.ll` and the legacy
    `sfn/compiler/ir/`. **Fix:** the flatten loop is path-generic; verify it
    captures `sfn/compiler` and, if the legacy flat-copy line is now redundant for
    the compiler, leave it (harmless) but rely on the scoped sweep.
-2. **`build/native/sailfin` output filename is unchanged.** The *binary* name
+2. **`build/bin/sfn` output filename is unchanged.** The *binary* name
    (`name = "sailfin"` → `sfn/compiler`) is decoupled from the *output path*
-   (`build/native/sailfin`) — the latter is `$(NATIVE_OUT)` in the Makefile and
+   (`build/bin/sfn`) — the latter is `$(NATIVE_OUT)` in the Makefile and
    the `cp -f build/sailfin/program $(NATIVE_OUT)` step, driven by the binary
    capsule's `[build] entry`/`kind`, not its `name`. Confirm the binary capsule
    continues to emit `program`/`program.ll` to `build/sailfin/` (the binary
@@ -761,8 +761,8 @@ Targeted checks:
   defaults `true`, parses `publish = false`, and `handle_publish_command` exits
   non-zero on a `publish=false` manifest; resolver refuses a `publish=false`
   registry candidate.
-- **Rename (#3):** `make compile` + `build/native/sailfin --version`; confirm
-  `build/native/sailfin` filename unchanged; `build/capsules/sfn/compiler/ir/`
+- **Rename (#3):** `make compile` + `build/bin/sfn --version`; confirm
+  `build/bin/sfn` filename unchanged; `build/capsules/sfn/compiler/ir/`
   populated; `make ci-cross-windows` links.
 - **Cycle break (#5):** `rg 'from ".*native_ir"' compiler-frontend/` returns
   only CO imports; `rg 'from ".*/(parser|typecheck|ast)' compiler-backend/`

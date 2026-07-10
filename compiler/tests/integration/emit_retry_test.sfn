@@ -10,7 +10,7 @@
 // corruption flake.
 //
 // The retry path is driven end-to-end through the *shipped*
-// `build/native/sailfin` binary, seeded with `SAILFIN_INJECT_FAULT=N`
+// `build/bin/sfn` binary, seeded with `SAILFIN_INJECT_FAULT=N`
 // (the production fault-injection env var `emit_llvm_with_retry`
 // reads). This is deliberate: the alternative — importing
 // `emit_helpers` and calling the in-process emitter from inside this
@@ -52,7 +52,7 @@ fn _retry_fixture() -> string ![io] {
 // the child exit code. Streams are drained so a later capture can't
 // hand back this run's buffers.
 fn _emit_with_faults(src: string, out: string, attempts: string, validate: boolean, faults: string) -> i64 ![io] {
-    let mut argv: string[] = ["build/native/sailfin", "emit"];
+    let mut argv: string[] = ["build/bin/sfn", "emit"];
     if validate { argv.push("--validate"); } else {
         argv.push("--no-validate");
     }

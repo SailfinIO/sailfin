@@ -1,4 +1,4 @@
-// Wrapper around `build/native/sailfin` invocations.
+// Wrapper around `build/bin/sfn` invocations.
 //
 // Every call from the MCP server funnels through `runSailfin` so the
 // memory cap, timeout, and workspace-path check live in exactly one place.
@@ -40,14 +40,14 @@ export function workspaceRoot(): string {
 
 export function compilerPath(): string {
   const suffix = process.platform === "win32" ? ".exe" : "";
-  return path.join(workspaceRoot(), "build", "native", `sailfin${suffix}`);
+  return path.join(workspaceRoot(), "build", "bin", `sfn${suffix}`);
 }
 
 export function assertCompilerExists(): void {
   const bin = compilerPath();
   if (!existsSync(bin)) {
     throw new SailfinError(
-      `build/native/sailfin not found at ${bin}. Run \`make compile\` first.`,
+      `build/bin/sfn not found at ${bin}. Run \`make compile\` first.`,
     );
   }
 }
@@ -111,7 +111,7 @@ export async function runSailfin(
   // compiler self-applies its 8 GiB memory budget on Linux, #1291.)
   //
   // `-l` sources the user's login profile (~/.bash_profile etc.). This
-  // is deliberate — we need the user's PATH so `build/native/sailfin`
+  // is deliberate — we need the user's PATH so `build/bin/sfn`
   // can locate `clang` and the rest of the toolchain. It does mean a
   // poisoned shell profile can influence the execution environment;
   // acceptable for a local dev tool, revisit if this server ever runs

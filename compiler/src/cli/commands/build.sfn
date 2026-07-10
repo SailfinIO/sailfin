@@ -310,7 +310,7 @@ fn run(matches: Matches, ctx: CliContext) -> int ![io] {
     // below for that decision). Small closures stay in-process.
     let mut sailfin_exe: string = "";
     if walk_src {
-        if binary_dir.length > 0 { sailfin_exe = binary_dir + "/sailfin"; }
+        if binary_dir.length > 0 { sailfin_exe = binary_dir + "/sfn"; }
     }
     let capsule_result = prepare_project_capsules(input_path, cache_config, consumer, sailfin_exe, work_dir, binary_dir);
     // Issue #991: a per-module emit failure (e.g. an effect-gate

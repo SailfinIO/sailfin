@@ -174,7 +174,7 @@ draws a normal caret-bearing diagnostic.
   `compiler/src/main.sfn` (test compilation; called by `sfn test`).
 - The build pipeline historically orchestrated by `scripts/build.sh` (since retired in Stage E PR7 / #383; orchestration now lives in the driver's resolver).
 
-This means: every `make compile` run, every `build/native/sailfin run foo.sfn`
+This means: every `make compile` run, every `build/bin/sfn run foo.sfn`
 invocation, every CI run that doesn't explicitly call `sfn check` ships with
 zero effect validation. The compiler tree itself has never seen an enforced
 effect-check run.
@@ -772,7 +772,7 @@ fn is_canonical_effect(name: string) -> boolean                 // NEW
 
 ```bash
 ulimit -v 8388608 && timeout 180 make compile
-ulimit -v 8388608 && timeout 30 build/native/sailfin check compiler/src/main.sfn
+ulimit -v 8388608 && timeout 30 build/bin/sfn check compiler/src/main.sfn
 # Expect: effect diagnostics now show file:line:column with caret.
 ulimit -v 8388608 && timeout 60 make test-unit
 ```
@@ -963,7 +963,7 @@ declarations now fail the build by default.
 ```bash
 ulimit -v 8388608 && timeout 240 make compile
 # Expect: succeeds without env override.
-ulimit -v 8388608 && timeout 30 build/native/sailfin run examples/basics/hello-world.sfn
+ulimit -v 8388608 && timeout 30 build/bin/sfn run examples/basics/hello-world.sfn
 # Expect: example still runs; main has correct ![io].
 ulimit -v 8388608 && timeout 600 make check
 ulimit -v 8388608 && timeout 60 make test-integration
@@ -1504,7 +1504,7 @@ across phases:
 
 ```bash
 # After Phase A
-ulimit -v 8388608 && timeout 30 build/native/sailfin check compiler/src/main.sfn 2>&1 \
+ulimit -v 8388608 && timeout 30 build/bin/sfn check compiler/src/main.sfn 2>&1 \
     | grep -E '\[E04(00|01)\]' \
     | head -5
 # Expect: each line shows --> file:line:column.
@@ -1529,7 +1529,7 @@ cat > /tmp/test_e0402.sfn <<'TEST'
 import { fetch } from "./helpers";  // helpers declares fetch ![net]
 fn run() { fetch("http://x"); }     // missing ![net]
 TEST
-ulimit -v 8388608 && timeout 30 build/native/sailfin check /tmp/test_e0402.sfn
+ulimit -v 8388608 && timeout 30 build/bin/sfn check /tmp/test_e0402.sfn
 # Expect: E0402 with caret on `fetch`.
 
 # After Phase F (synthetic test)
@@ -1542,7 +1542,7 @@ TOML
 cat > /tmp/cap_test/src/lib.sfn <<'LIB'
 fn fetch() ![net] { ... }
 LIB
-ulimit -v 8388608 && timeout 30 build/native/sailfin check /tmp/cap_test/
+ulimit -v 8388608 && timeout 30 build/bin/sfn check /tmp/cap_test/
 # Expect: E0403 — net outside capability surface.
 ```
 

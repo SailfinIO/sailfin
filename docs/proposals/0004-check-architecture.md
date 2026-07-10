@@ -1315,8 +1315,8 @@ ulimit -v 8388608 && timeout 300 make compile
 ulimit -v 8388608 && timeout 60 make test-unit
 
 # Stage 2: effect-checker uses spans
-ulimit -v 8388608 && timeout 60 build/native/sailfin test compiler/tests/unit/effect_checker_test.sfn
-ulimit -v 8388608 && timeout 30 bash compiler/tests/e2e/test_check_effect_call_site_caret.sh build/native/sailfin
+ulimit -v 8388608 && timeout 60 build/bin/sfn test compiler/tests/unit/effect_checker_test.sfn
+ulimit -v 8388608 && timeout 30 bash compiler/tests/e2e/test_check_effect_call_site_caret.sh build/bin/sfn
 
 # Stage 3: full self-host validation
 ulimit -v 8388608 && timeout 1800 make check
@@ -1427,10 +1427,10 @@ within current string-length tolerances.
 
 ```bash
 ulimit -v 8388608 && timeout 300 make compile
-ulimit -v 8388608 && timeout 60 build/native/sailfin test compiler/tests/unit/diagnostics_json_test.sfn
-ulimit -v 8388608 && timeout 60 bash compiler/tests/e2e/test_check_json_schema.sh build/native/sailfin
-ulimit -v 8388608 && timeout 30 build/native/sailfin check --json compiler/src/main.sfn | jq .
-ulimit -v 8388608 && timeout 30 build/native/sailfin check --json compiler/src/ | jq '.summary'
+ulimit -v 8388608 && timeout 60 build/bin/sfn test compiler/tests/unit/diagnostics_json_test.sfn
+ulimit -v 8388608 && timeout 60 bash compiler/tests/e2e/test_check_json_schema.sh build/bin/sfn
+ulimit -v 8388608 && timeout 30 build/bin/sfn check --json compiler/src/main.sfn | jq .
+ulimit -v 8388608 && timeout 30 build/bin/sfn check --json compiler/src/ | jq '.summary'
 
 # MCP smoke
 make mcp-server
@@ -1554,8 +1554,8 @@ ulimit -v 8388608 && timeout 300 make compile
 ulimit -v 8388608 && timeout 60 make test-unit
 
 # Stage 2: full B3
-ulimit -v 8388608 && timeout 60 build/native/sailfin test compiler/tests/unit/diagnostics_render_test.sfn
-ulimit -v 8388608 && timeout 30 bash compiler/tests/e2e/test_check_json_suggestion.sh build/native/sailfin
+ulimit -v 8388608 && timeout 60 build/bin/sfn test compiler/tests/unit/diagnostics_render_test.sfn
+ulimit -v 8388608 && timeout 30 bash compiler/tests/e2e/test_check_json_suggestion.sh build/bin/sfn
 
 # Stage 3: triple-pass fixed-point
 ulimit -v 8388608 && timeout 1800 make check
@@ -1627,7 +1627,7 @@ to the build path.
 ```bash
 ulimit -v 8388608 && timeout 300 make compile
 ulimit -v 8388608 && timeout 60 make test
-ulimit -v 8388608 && timeout 60 bash compiler/tests/integration/build_diagnostics_format_test.sh build/native/sailfin
+ulimit -v 8388608 && timeout 60 bash compiler/tests/integration/build_diagnostics_format_test.sh build/bin/sfn
 ulimit -v 8388608 && timeout 1800 make check
 ```
 

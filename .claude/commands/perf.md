@@ -29,7 +29,7 @@ Record:
 If the target is a hot path that's not directly visible in `make bench`, write a focused micro-benchmark — a small `.sfn` file that exercises the path heavily — and time it:
 
 ```bash
-/usr/bin/time -v build/native/sailfin emit native /tmp/bench_hotpath.sfn 2>&1 | tee build/bench-baseline-hotpath.txt
+/usr/bin/time -v build/bin/sfn emit native /tmp/bench_hotpath.sfn 2>&1 | tee build/bench-baseline-hotpath.txt
 ```
 
 Save the baseline numbers in a comment for later comparison.

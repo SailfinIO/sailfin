@@ -105,11 +105,11 @@ CLANG_LL_COMPILE := $(TIMEOUT_CMD) --kill-after=10 $(NATIVE_LL_TIMEOUT_SECONDS) 
 endif
 
 NATIVE_OBJ_DIR ?= build/native/obj
-NATIVE_OUT ?= build/native/sailfin$(EXE_EXT)
+NATIVE_OUT ?= build/bin/sfn$(EXE_EXT)
 NATIVE_LINK_EXTRA ?=
 
 # Preferred local path for the native compiler binary.
-NATIVE_BIN ?= build/native/sailfin$(EXE_EXT)
+NATIVE_BIN ?= build/bin/sfn$(EXE_EXT)
 
 # Which compiler binary to use for running Sailfin-native tests.
 # Default: the native compiler alias produced by `make compile`.
@@ -557,7 +557,7 @@ compile-impl:
 		: "rebuild propagates its non-zero exit instead of being masked by"; \
 		: "the trailing echo. With ; the if-compound returned the echo's 0,"; \
 		: "so make compile exited 0 / status:pass on a broken self-host and"; \
-		: "silently kept the stale build/native/sailfin."; \
+		: "silently kept the stale build/bin/sfn."; \
 		$(MAKE) rebuild && \
 		echo "[compile] built $(NATIVE_OUT)"; \
 	fi
@@ -577,7 +577,7 @@ check-strict:
 
 check-impl:
 	@$(MAKE) compile NATIVE_OPT="$(SELFHOST1_OPT)"
-	@seed="build/native/sailfin"; \
+	@seed="build/bin/sfn"; \
 	if [ ! -x "$$seed" ]; then \
 		echo "[check][error] missing $$seed (run: make compile)"; \
 		exit 1; \
@@ -595,19 +595,19 @@ check-impl:
 	@# (escape hatch for bisect / pre-release double-check).
 ifeq ($(CHECK_FULL_PASS1),1)
 	@echo "[check] CHECK_FULL_PASS1=1: running full suite on first-pass binary (jobs=$(CHECK_TEST_JOBS), test-timeout=$(CHECK_TEST_TIMEOUT)s)..."
-	@$(CHECK_TEST_TIMEOUT_ENV) $(MAKE) test NATIVE_BIN=build/native/sailfin TEST_BIN_CACHE_FLAGS=--no-test-cache TEST_JOBS=$(CHECK_TEST_JOBS)
+	@$(CHECK_TEST_TIMEOUT_ENV) $(MAKE) test NATIVE_BIN=build/bin/sfn TEST_BIN_CACHE_FLAGS=--no-test-cache TEST_JOBS=$(CHECK_TEST_JOBS)
 else
 	@echo "[check] pass1 smoke gate: hello-world + sfn/test capsule tests (jobs=$(CHECK_TEST_JOBS))..."
 	@t60=""; \
 	if command -v timeout >/dev/null 2>&1; then t60="timeout 60"; \
 	elif command -v gtimeout >/dev/null 2>&1; then t60="gtimeout 60"; fi; \
-	$$t60 build/native/sailfin run examples/basics/hello-world.sfn
+	$$t60 build/bin/sfn run examples/basics/hello-world.sfn
 	@if [ "$${SAILFIN_AGENT_REPORT:-}" = "1" ]; then \
 		mkdir -p build; \
 		set -o pipefail; \
-		build/native/sailfin test capsules/sfn/test/tests --jobs $(CHECK_TEST_JOBS) --json | tee build/agent-test.check-pass1.jsonl || exit $$?; \
+		build/bin/sfn test capsules/sfn/test/tests --jobs $(CHECK_TEST_JOBS) --json | tee build/agent-test.check-pass1.jsonl || exit $$?; \
 	else \
-		build/native/sailfin test capsules/sfn/test/tests --jobs $(CHECK_TEST_JOBS) || exit $$?; \
+		build/bin/sfn test capsules/sfn/test/tests --jobs $(CHECK_TEST_JOBS) || exit $$?; \
 	fi
 endif
 	@echo "[check] pass1 smoke passed — validating self-host (stage2/stage3 fixed point)..."
@@ -627,16 +627,16 @@ endif
 	@# so `NATIVE_OPT` overrides for stage2/stage3 are still ignored (no
 	@# regression — the prior shell had the same gap). The suite legs and
 	@# the first-pass `make compile` stay Make-driven (issue `Out:` scope).
-	@build/native/sailfin selfhost \
+	@build/bin/sfn selfhost \
 		--work-dir build/selfhost \
-		--first-pass build/native/sailfin \
-		--seedcheck-out build/native/sailfin-seedcheck \
-		--stage3-out build/native/sailfin-stage3 \
+		--first-pass build/bin/sfn \
+		--seedcheck-out build/bin/sfn-seedcheck \
+		--stage3-out build/bin/sfn-stage3 \
 		--promote-to $(NATIVE_BIN) \
 		--smoke-timeout 10 \
 		$(SELFHOST_STRICT_FLAG)
 	@echo "[check] running full test suite with seedcheck binary (cold backstop, jobs=$(CHECK_TEST_JOBS), test-timeout=$(CHECK_TEST_TIMEOUT)s)..."
-	@$(CHECK_TEST_TIMEOUT_ENV) $(MAKE) test NATIVE_BIN=build/native/sailfin-seedcheck TEST_BIN_CACHE_FLAGS=--no-test-cache TEST_JOBS=$(CHECK_TEST_JOBS)
+	@$(CHECK_TEST_TIMEOUT_ENV) $(MAKE) test NATIVE_BIN=build/bin/sfn-seedcheck TEST_BIN_CACHE_FLAGS=--no-test-cache TEST_JOBS=$(CHECK_TEST_JOBS)
 
 # Fast PR-feedback gate: run `sfn check` against the compiler tree and
 # the runtime prelude. No codegen, no clang, just parse + typecheck +
@@ -717,7 +717,7 @@ package: compile
 # Verify the build artifacts the Sailfin-native test runner expects
 # (import-context) are present at their canonical location.
 #
-# `make rebuild` is the only path to producing `build/native/sailfin`,
+# `make rebuild` is the only path to producing `build/bin/sfn`,
 # so `build/native/import-context/` is guaranteed to land directly.
 # #941: the former `build/native/obj/runtime/prelude.o` check was
 # dropped — post-#940 the test runner links the runtime through the
@@ -766,7 +766,7 @@ ci-package-installer:
 #   make rebuild
 #   make rebuild SEED_NATIVE=path/to/sailfin
 # Output:
-#   build/native/sailfin
+#   build/bin/sfn
 #
 # Routes through `<seed> build -p compiler` as the only path. The
 # pinned seed (`.seed-version`) ships the cumulative source-side
@@ -879,7 +879,7 @@ rebuild-impl:
 		if [ "$${SAILFIN_AGENT_REPORT:-}" = "1" ]; then rm -f build/native/.build-report.json; fi; \
 		exit 1; \
 	fi
-	@mkdir -p build/native
+	@mkdir -p build/native $(dir $(NATIVE_OUT))
 	@cp -f build/sailfin/program $(NATIVE_OUT)
 	@chmod +x $(NATIVE_OUT)
 	@# Save .ll files to a location `make test` won't clobber. Each

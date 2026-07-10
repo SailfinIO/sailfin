@@ -10,12 +10,12 @@
 # Usage:
 #   scripts/diag_determinism_sweep.sh [--seed PATH] [--jobs N] [--iters N]
 #
-# Defaults: --seed build/native/sailfin  --jobs 4  --iters 10
+# Defaults: --seed build/bin/sfn  --jobs 4  --iters 10
 # Output:   /tmp/sailfin-diag-det/results.tsv + per-module .ll files
 
 set -u
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-SEED="${SEED:-$REPO_ROOT/build/native/sailfin}"
+SEED="${SEED:-$REPO_ROOT/build/bin/sfn}"
 PAR=4
 ITERS=10
 

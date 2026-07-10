@@ -4,7 +4,7 @@ This folder contains Sailfin-native tests that are executed by the self-hosted n
 
 Preferred invocations:
 
-- `build/native/sailfin test <path>` (built binary produced by `make compile`)
+- `build/bin/sfn test <path>` (built binary produced by `make compile`)
 - `sfn test <path>` (installed compiler on PATH, e.g. after `make install`)
 
 The test runner discovers files named `*_test.sfn` under `<path>` (recursively), compiles each file with a synthesized harness, and executes it.

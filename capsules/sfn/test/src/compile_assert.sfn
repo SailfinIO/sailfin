@@ -27,7 +27,7 @@
 // `io`.
 //
 // Hermeticity: the `sfn` binary is resolved from `$SAILFIN_BIN` with a
-// documented fallback of `build/native/sailfin` (the self-hosted binary,
+// documented fallback of `build/bin/sfn` (the self-hosted binary,
 // relative to the repo root the test runs from), so CI can point the
 // assertions at any compiler without editing the test. The child is
 // spawned with an empty environment — `sfn check` on an import-free
@@ -90,7 +90,7 @@ fn _outcome_failed(raw: string) -> _CheckOutcome {
 fn _resolve_sfn_bin() -> string ![io] {
     let configured = env.get("SAILFIN_BIN");
     if configured.length > 0 { return configured; }
-    return "build/native/sailfin";
+    return "build/bin/sfn";
 }
 
 fn _join_effects(effects: string[]) -> string {

@@ -11,7 +11,7 @@
 //     [dependencies]
 //     "sfn/http" = "*"
 //
-// then, from the capsule root:  build/native/sailfin run src/main.sfn
+// then, from the capsule root:  build/bin/sfn run src/main.sfn
 //
 // (Capsule functions are only staged into a consumer's codegen through a
 // declared dependency — running this file in place under examples/web/,
