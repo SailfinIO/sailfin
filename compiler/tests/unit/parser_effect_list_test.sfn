@@ -1,0 +1,44 @@
+// Unit test pinning that the parser reads a dotted effect name in an
+// `![...]` clause as a single sub-effect string, not as two comma-split
+// atoms (SFEP-0017 D1). Before the dotted-effect grammar landed,
+// `![io.fs, net.http]` risked mis-parsing into `["io", "fs", "net",
+// "http"]`; this pins the correct `["io.fs", "net.http"]` shape straight
+// from real source through `parse_program`.
+import { parse_program } from "../../src/parser/mod";
+
+test "parser: a dotted effect list parses as two single sub-effect strings" ![io] {
+    let source = "fn f() ![io.fs, net.http] { }";
+    let program = parse_program(source);
+    assert program.statements.length == 1;
+    let fn_stmt = program.statements[0];
+    assert fn_stmt.variant == "FunctionDeclaration";
+    let effects = fn_stmt.signature.effects;
+    assert effects.length == 2;
+    assert effects[0] == "io.fs";
+    assert effects[1] == "net.http";
+}
+
+test "parser: a two-level dotted effect parses as a single string" ![io] {
+    let source = "fn f() ![io.fs.read] { }";
+    let program = parse_program(source);
+    assert program.statements.length == 1;
+    let fn_stmt = program.statements[0];
+    assert fn_stmt.variant == "FunctionDeclaration";
+    let effects = fn_stmt.signature.effects;
+    assert effects.length == 1;
+    assert effects[0] == "io.fs.read";
+}
+
+test "parser: a trailing dot with no segment recovers to the bare root" ![io] {
+    // Malformed `io.` (a `.` with no following identifier): accumulation
+    // stops at the `.`, the partial `io` is kept, and the `]` terminator
+    // is not consumed so the outer loop resyncs cleanly.
+    let source = "fn f() ![io.] { }";
+    let program = parse_program(source);
+    assert program.statements.length == 1;
+    let fn_stmt = program.statements[0];
+    assert fn_stmt.variant == "FunctionDeclaration";
+    let effects = fn_stmt.signature.effects;
+    assert effects.length == 1;
+    assert effects[0] == "io";
+}

@@ -1,0 +1,118 @@
+// Unit tests for compiler/src/effect_taxonomy.sfn's SFEP-0017 D1/D2
+// additions: dotted sub-effect recognition (`effect_root`,
+// `is_recognized_effect`) and lattice subsumption (`effect_subsumes`).
+// See docs/proposals/0017-hierarchical-effects.md §3.3 (subsumption
+// truth table) and §4 (manifest examples).
+import { effect_root, effect_subsumes, is_recognized_effect } from "../../src/effect_taxonomy";
+
+// -------------------------------------------------------------------
+// effect_root: the segment before the first `.`
+// -------------------------------------------------------------------
+test "effect_root: strips a two-level dotted suffix" {
+    assert effect_root("io.fs.read") == "io";
+}
+
+test "effect_root: strips a one-level dotted suffix" {
+    assert effect_root("io.fs") == "io";
+}
+
+test "effect_root: a bare canonical effect is its own root" {
+    assert effect_root("io") == "io";
+}
+
+test "effect_root: works for a non-io canonical root" {
+    assert effect_root("net.http") == "net";
+}
+
+// -------------------------------------------------------------------
+// effect_subsumes: `requirement ⊑ grant` (SFEP-0017 §3.3 truth table)
+// -------------------------------------------------------------------
+test "effect_subsumes: a coarse grant subsumes a dotted refinement" {
+    assert effect_subsumes("io", "io.fs");
+}
+
+test "effect_subsumes: a dotted refinement does not subsume its coarse root" {
+    assert ! effect_subsumes("io.fs", "io");
+}
+
+test "effect_subsumes: a mid-level grant subsumes a deeper refinement" {
+    assert effect_subsumes("io.fs", "io.fs.read");
+}
+
+test "effect_subsumes: an exact match subsumes itself" {
+    assert effect_subsumes("io.fs", "io.fs");
+}
+
+test "effect_subsumes: sibling sub-effects are unordered" {
+    assert ! effect_subsumes("io.fs", "io.console");
+}
+
+test "effect_subsumes: a coarse net grant subsumes net.http" {
+    assert effect_subsumes("net", "net.http");
+}
+
+test "effect_subsumes: net.http does not subsume net" {
+    assert ! effect_subsumes("net.http", "net");
+}
+
+test "effect_subsumes: cross-root pairs never subsume" {
+    assert ! effect_subsumes("net", "io.fs");
+}
+
+test "effect_subsumes: a textual prefix off a dot boundary does not subsume" {
+    assert ! effect_subsumes("io", "iox");
+}
+
+// -------------------------------------------------------------------
+// is_recognized_effect: root membership in the canonical six, or `pure`
+// -------------------------------------------------------------------
+test "is_recognized_effect: a bare canonical effect is recognized" {
+    assert is_recognized_effect("io");
+}
+
+test "is_recognized_effect: a one-level dotted sub-effect is recognized" {
+    assert is_recognized_effect("io.fs");
+}
+
+test "is_recognized_effect: a two-level dotted sub-effect is recognized" {
+    assert is_recognized_effect("io.fs.read");
+}
+
+test "is_recognized_effect: a dotted sub-effect under a different canonical root is recognized" {
+    assert is_recognized_effect("net.http");
+}
+
+test "is_recognized_effect: the pure sentinel is recognized" {
+    assert is_recognized_effect("pure");
+}
+
+test "is_recognized_effect: an unrecognized root is rejected" {
+    assert ! is_recognized_effect("disk");
+}
+
+test "is_recognized_effect: an unrecognized root with a dotted suffix is rejected" {
+    assert ! is_recognized_effect("disk.read");
+}
+
+test "is_recognized_effect: the orphaned fs remnant of a mis-split io.fs is rejected" {
+    assert ! is_recognized_effect("fs");
+}
+
+test "is_recognized_effect: filesystem is not a recognized root" {
+    assert ! is_recognized_effect("filesystem");
+}
+
+// -------------------------------------------------------------------
+// Backward compat: `![io]` still satisfies every existing io.* need
+// -------------------------------------------------------------------
+test "subsumption backward-compat: io subsumes io.fs" {
+    assert effect_subsumes("io", "io.fs");
+}
+
+test "subsumption backward-compat: io subsumes io.fs.read" {
+    assert effect_subsumes("io", "io.fs.read");
+}
+
+test "subsumption backward-compat: io subsumes io.console" {
+    assert effect_subsumes("io", "io.console");
+}

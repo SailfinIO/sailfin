@@ -24,7 +24,12 @@ import {
     TypeParameter
 } from "../../src/ast";
 import { code_for_missing_effect } from "../../src/diagnostics_render";
-import { EffectViolation, validate_effects, validate_effects_with_imports } from "../../src/effect_checker";
+import {
+    EffectViolation,
+    validate_effects,
+    validate_effects_with_imports,
+    validate_recognized_effects
+} from "../../src/effect_checker";
 import { append_import_function, empty_import_symbols } from "../../src/effect_imports";
 import { canonical_effects, is_canonical_effect } from "../../src/effect_taxonomy";
 import { effects_for_callee_target } from "../../src/llvm/runtime_helpers";
@@ -999,5 +1004,40 @@ test "effect ok: caller declaring the imported member's effect is clean" {
     let program = Program { statements: [import_stmt, caller] };
     let table = append_import_function(empty_import_symbols(), "fetch", ["net"]);
     let violations = validate_effects_with_imports(program, table);
+    assert violations.length == 0;
+}
+
+// -------------------------------------------------------------------
+// Gate G6: validate_recognized_effects (E0404, SFEP-0017 D1)
+// -------------------------------------------------------------------
+test "recognized effects: an unrecognized root produces one violation" {
+    let stmt = _fn_decl_with_effects("write_to_disk", ["disk"], 5);
+    let program = Program { statements: [stmt] };
+    let violations = validate_recognized_effects(program);
+    assert violations.length == 1;
+    let v = violations[0];
+    assert v.routine_name == "write_to_disk";
+    assert v.unrecognized_effects.length == 1;
+    assert v.unrecognized_effects[0] == "disk";
+}
+
+test "recognized effects: the pure sentinel is not flagged" {
+    let stmt = _fn_decl_with_effects("pure_helper", ["pure"], 5);
+    let program = Program { statements: [stmt] };
+    let violations = validate_recognized_effects(program);
+    assert violations.length == 0;
+}
+
+test "recognized effects: canonical effects are not flagged" {
+    let stmt = _fn_decl_with_effects("with_io", ["io"], 5);
+    let program = Program { statements: [stmt] };
+    let violations = validate_recognized_effects(program);
+    assert violations.length == 0;
+}
+
+test "recognized effects: multiple canonical effects are not flagged" {
+    let stmt = _fn_decl_with_effects("with_net_and_clock", ["net", "clock"], 5);
+    let program = Program { statements: [stmt] };
+    let violations = validate_recognized_effects(program);
     assert violations.length == 0;
 }

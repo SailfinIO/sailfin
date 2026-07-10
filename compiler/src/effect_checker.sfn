@@ -48,7 +48,7 @@ import {
     localize_import_symbols_for_program,
     lookup_imported_function
 } from "./effect_imports";
-import { is_universally_allowed_effect } from "./effect_taxonomy";
+import { effect_subsumes, is_recognized_effect, is_universally_allowed_effect } from "./effect_taxonomy";
 import { effects_for_callee_target } from "./llvm/runtime_helpers";
 import { Token, TokenKind } from "./token";
 
@@ -129,6 +129,23 @@ struct CapabilityViolation {
     routine_name: string;
     excess_effects: string[];  // effects declared but outside the capability surface
     capabilities_required: string[];  // the capsule's allowed surface (for the diagnostic note)
+    signature_token: Token?;
+    trigger: Token?;
+    severity: string;
+}
+
+// SFEP-0017 D1 (gate G6): a routine declared an effect whose refinement
+// root is not one of the canonical six (and is not the `pure` sentinel)
+// — e.g. `![disk]`, or the stray `fs` left behind if `io.fs` ever
+// mis-split into `["io","fs"]`. Distinct from `EffectViolation` (missing
+// a used effect) and `CapabilityViolation` (declared effect outside the
+// manifest surface): here the effect *string itself* names no known
+// capability. Renderer (`diagnostics_render.unrecognized_effect_violation_to_diagnostic`)
+// emits `E0404`. This is the live consumer of `is_recognized_effect` that
+// keeps the split-to-`fs` regression from reappearing silently.
+struct UnrecognizedEffectViolation {
+    routine_name: string;
+    unrecognized_effects: string[];  // declared effects whose root isn't canonical
     signature_token: Token?;
     trigger: Token?;
     severity: string;
@@ -630,7 +647,11 @@ fn _analyze_routine_capabilities(signature: FunctionSignature, name: string, cap
                 continue;
             }
         }
-        if !contains_effect(capabilities, effect) {
+        // SFEP-0017 Part 4: manifest `required = [...]` entries are grants;
+        // a function's declared effect is authorized iff some grant subsumes
+        // it. `required=["io"]` authorizes `![io.fs]`; `required=["io.fs"]`
+        // tightens the capsule and rejects `![io]` / `![io.console]`.
+        if !_any_subsumes(capabilities, effect) {
             excess = append_unique_effect(excess, effect);
         }
         i += 1;
@@ -645,6 +666,91 @@ fn _analyze_routine_capabilities(signature: FunctionSignature, name: string, cap
 }
 
 fn _append_capability_violations(violations: CapabilityViolation[], new_violations: CapabilityViolation[]) -> CapabilityViolation[] {
+    let mut result = violations;
+    let mut i: int = 0;
+    loop {
+        if i >= new_violations.length { break; }
+        result.push(new_violations[i]);
+        i += 1;
+    }
+    return result;
+}
+
+// Gate G6 entry (SFEP-0017 D1): cross-check every routine's *declared*
+// effects against the recognized-effect predicate. Any effect string
+// whose refinement root is not one of the canonical six (and is not
+// `pure`) produces an `UnrecognizedEffectViolation`, rendered as `E0404`.
+// Unlike the capability cross-check this needs no manifest surface — a
+// mis-rooted effect (`![disk]`, or a `fs` atom orphaned by the old
+// `io.fs` mis-parse) is always an error regardless of the capsule.
+fn validate_recognized_effects(program: Program) -> UnrecognizedEffectViolation[] {
+    let mut violations: UnrecognizedEffectViolation[] = [];
+    let mut index: int = 0;
+    loop {
+        if index >= program.statements.length { break; }
+        violations = _append_unrecognized_violations(violations, _analyze_statement_recognition(program.statements[index]));
+        index += 1;
+    }
+    return violations;
+}
+
+fn _analyze_statement_recognition(statement: Statement) -> UnrecognizedEffectViolation[] {
+    if statement.variant == "FunctionDeclaration" {
+        return _analyze_routine_recognition(statement.signature, statement.signature.name);
+    }
+    if statement.variant == "TestDeclaration" {
+        // Tests carry a bare `effects` list, not a full signature —
+        // synthesize the minimal shape `_analyze_routine_recognition`
+        // reads, mirroring `_analyze_statement_capabilities`.
+        let signature = FunctionSignature {
+            name: statement.name,
+            is_async: false,
+            parameters: [],
+            return_type: null,
+            effects: statement.effects,
+            type_parameters: [],
+            name_span: statement.name_span
+        };
+        let qualified = "test " + statement.name;
+        return _analyze_routine_recognition(signature, qualified);
+    }
+    if statement.variant == "StructDeclaration" {
+        let mut issues: UnrecognizedEffectViolation[] = [];
+        let mut method_index: int = 0;
+        loop {
+            if method_index >= statement.methods.length { break; }
+            let method = statement.methods[method_index];
+            let qualified = statement.name + "." + method.signature.name;
+            issues = _append_unrecognized_violations(issues, _analyze_routine_recognition(method.signature, qualified));
+            method_index += 1;
+        }
+        return issues;
+    }
+    return [];
+}
+
+fn _analyze_routine_recognition(signature: FunctionSignature, name: string) -> UnrecognizedEffectViolation[] {
+    if signature.effects.length == 0 { return []; }
+    let mut unrecognized: string[] = [];
+    let mut i: int = 0;
+    loop {
+        if i >= signature.effects.length { break; }
+        let effect = signature.effects[i];
+        if !is_recognized_effect(effect) {
+            unrecognized = append_unique_effect(unrecognized, effect);
+        }
+        i += 1;
+    }
+    if unrecognized.length == 0 { return []; }
+    let sig_token = _token_from_signature(signature.name_span, signature.name);
+    let mut result: UnrecognizedEffectViolation[] = [];
+    result.push(UnrecognizedEffectViolation {
+        routine_name: name, unrecognized_effects: unrecognized, signature_token: sig_token, trigger: sig_token, severity: "error"
+    });
+    return result;
+}
+
+fn _append_unrecognized_violations(violations: UnrecognizedEffectViolation[], new_violations: UnrecognizedEffectViolation[]) -> UnrecognizedEffectViolation[] {
     let mut result = violations;
     let mut i: int = 0;
     loop {
@@ -754,7 +860,7 @@ fn analyze_routine(signature: FunctionSignature, body: Block, decorators: Decora
                 continue;
             }
         }
-        if contains_effect(declared, effect) {
+        if _any_subsumes(declared, effect) {
             index += 1;
             continue;
         }
@@ -1470,6 +1576,23 @@ fn contains_effect(effects: string[], effect: string) -> boolean {
     loop {
         if index >= effects.length { break; }
         if effects[index] == effect { return true; }
+        index += 1;
+    }
+    return false;
+}
+
+// SFEP-0017 D2 satisfaction: a grant set covers a requirement iff some
+// grant subsumes it (`∃ g ∈ grants. requirement ⊑ g`). This replaces the
+// exact-string membership that `contains_effect` gives, so a broad grant
+// (`io`) satisfies a narrow requirement (`io.fs`) while a narrow grant
+// (`io.fs`) satisfies neither a bare-`io` requirement nor a sibling
+// (`io.console`). `contains_effect` stays as the exact-`==` primitive for
+// dedup callers (`append_unique_effect`).
+fn _any_subsumes(grants: string[], requirement: string) -> boolean {
+    let mut index: int = 0;
+    loop {
+        if index >= grants.length { break; }
+        if effect_subsumes(grants[index], requirement) { return true; }
         index += 1;
     }
     return false;

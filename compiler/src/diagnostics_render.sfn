@@ -31,7 +31,13 @@
 // and the seed compiler does not handle import cycles cleanly. The
 // duplication is small (~50 lines, four pure string helpers) and
 // changes here are decoupled from changes to `main.sfn`'s own copies.
-import { CapabilityViolation, EffectRequirement, EffectViolation } from "./effect_checker";
+import {
+    CapabilityViolation,
+    EffectRequirement,
+    EffectViolation,
+    UnrecognizedEffectViolation
+} from "./effect_checker";
+import { canonical_effects } from "./effect_taxonomy";
 import { substring } from "./string_utils";
 import { Token } from "./token";
 import { Diagnostic, FixSuggestion, TextEdit } from "./typecheck_types";
@@ -219,6 +225,46 @@ fn capability_violation_to_diagnostic(violation: CapabilityViolation) -> Diagnos
 
 fn _excess_plural_suffix(excess: string[]) -> string {
     if excess.length == 1 { return ""; }
+    return "s";
+}
+
+// Gate G6 (SFEP-0017 D1): render an `UnrecognizedEffectViolation` as an
+// `E0404` diagnostic. The failure is "the declared effect string names no
+// known capability" — its refinement root is outside the canonical six
+// and it is not the `pure` sentinel (e.g. `![disk]`, or a stray `fs` from
+// an `io.fs` mis-parse). The note names the recognized roots and the
+// dotted sub-effect form so the fix (correct the name, or drop the effect)
+// is obvious. Severity threads through the same `SAILFIN_EFFECT_ENFORCE`
+// contract as the sibling renderers.
+fn unrecognized_effect_violation_to_diagnostic(violation: UnrecognizedEffectViolation) -> Diagnostic {
+    let effects_text = join_effects(violation.unrecognized_effects);
+    let mut message = "function `" + violation.routine_name
+        + "` declares unrecognized effect"
+        + _unrecognized_plural_suffix(violation.unrecognized_effects)
+        + " !["
+        + effects_text
+        + "]";
+    message = message
+        + "\nnote: an effect root must be one of the canonical six !["
+        + join_effects(canonical_effects())
+        + "] or `pure`; sub-effects refine a canonical root (e.g. `io.fs`)";
+    message = message + "\nsuggestion: correct the effect name or remove !["
+        + effects_text
+        + "] from this function";
+    let mut sev = violation.severity;
+    if sev.length == 0 { sev = "error"; }
+    return Diagnostic {
+        code: "E0404",
+        severity: sev,
+        message: message,
+        file_path: "",
+        primary: violation.trigger,
+        suggestion: null
+    };
+}
+
+fn _unrecognized_plural_suffix(effects: string[]) -> string {
+    if effects.length == 1 { return ""; }
     return "s";
 }
 
@@ -433,5 +479,6 @@ export {
     effect_violation_to_diagnostic,
     join_effects,
     render_diagnostic,
-    split_source_lines
+    split_source_lines,
+    unrecognized_effect_violation_to_diagnostic
 };

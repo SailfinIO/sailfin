@@ -57,8 +57,55 @@ fn is_universally_allowed_effect(name: string) -> boolean {
     return name == "pure";
 }
 
+// The refinement root of a (possibly dotted) effect string: the
+// segment before the first `.`. `"io.fs.read" -> "io"`, `"io" -> "io"`.
+// SFEP-0017 D1 — sub-effects are dotted-name strings whose first
+// segment must be one of the canonical six; this extracts that segment
+// so recognition and subsumption key off the locked root, never a
+// seventh atom.
+fn effect_root(name: string) -> string {
+    let mut i: int = 0;
+    loop {
+        if i >= name.length { break; }
+        if name[i] == "." { return substring(name, 0, i); }
+        i += 1;
+    }
+    return name;
+}
+
+// A (possibly dotted) effect string is recognized iff it is the `pure`
+// sentinel or its refinement root is one of the canonical six
+// (SFEP-0017 D1). `canonical_effects()` is untouched — `io.fs` is
+// recognized by root membership, not by extending the locked set, so
+// no seventh atom is added. An unrecognized root (`disk`, or the `fs`
+// left behind if `io.fs` ever mis-split into `["io","fs"]`) is rejected
+// by the checker's E0404 pass, which is the live consumer of this
+// predicate.
+fn is_recognized_effect(name: string) -> boolean {
+    if is_universally_allowed_effect(name) { return true; }
+    return is_canonical_effect(effect_root(name));
+}
+
+// Subsumption in the refinement lattice (SFEP-0017 D2): a broad grant
+// subsumes a narrower requirement. `grant` subsumes `requirement` iff
+// `requirement ⊑ grant` — `requirement == grant`, or `grant` is a
+// strict dotted prefix of `requirement`. So `io` subsumes `io.fs`
+// (`io.fs ⊑ io`), `io.fs` does not subsume `io`, siblings `io.fs` /
+// `io.console` are unordered, and cross-root pairs never subsume. The
+// prefix must land on a `.` boundary so `io` does not spuriously
+// subsume `iox`.
+fn effect_subsumes(grant: string, requirement: string) -> boolean {
+    if requirement == grant { return true; }
+    if requirement.length <= grant.length { return false; }
+    if substring(requirement, 0, grant.length) != grant { return false; }
+    return requirement[grant.length] == ".";
+}
+
 export {
     canonical_effects,
     is_canonical_effect,
-    is_universally_allowed_effect
+    is_universally_allowed_effect,
+    effect_root,
+    is_recognized_effect,
+    effect_subsumes
 };

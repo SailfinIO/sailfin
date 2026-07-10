@@ -289,9 +289,31 @@ fn parse_effect_list(initial_parser: Parser) -> EffectParseResult {
             break;
         }
         if current.kind.variant == "Identifier" {
-            let effect = identifier_text(current);
-            effects.push(effect);
+            let mut effect = identifier_text(current);
             parser = parser_advance_raw(parser);
+            // Accumulate a dotted sub-effect name (`io.fs`, `io.fs.read`)
+            // into ONE effect string (SFEP-0017 D1). A dotted name is
+            // contiguous — `io` `.` `fs` with no intervening trivia — so
+            // peek raw for the `.` before skipping trivia. Prior behaviour
+            // let the generic fallback discard the `.` and split `io.fs`
+            // into two atoms `["io","fs"]`; the E0404 root-recognition
+            // pass now depends on the whole dotted string reaching it.
+            loop {
+                let dot = parser_peek_raw(parser);
+                if !symbol_matches(dot, ".") { break; }
+                let after_dot = parser_advance_raw(parser);
+                let segment = parser_peek_raw(after_dot);
+                if segment.kind.variant != "Identifier" {
+                    // Malformed `io.` with no trailing segment: stop
+                    // accumulating past the `.` and let the outer loop
+                    // resync on the next `]`/`,` terminator.
+                    parser = after_dot;
+                    break;
+                }
+                effect = effect + "." + identifier_text(segment);
+                parser = parser_advance_raw(after_dot);
+            }
+            effects.push(effect);
             parser = skip_trivia(parser);
             let separator = parser_peek_raw(parser);
             if symbol_matches(separator, ",") {

@@ -37,13 +37,16 @@ import {
     capability_violation_to_diagnostic,
     effect_violation_to_diagnostic,
     render_diagnostic,
-    split_source_lines
+    split_source_lines,
+    unrecognized_effect_violation_to_diagnostic
 } from "./diagnostics_render";
 import {
     CapabilityViolation,
     EffectViolation,
+    UnrecognizedEffectViolation,
     validate_capsule_capabilities,
-    validate_effects_with_imports
+    validate_effects_with_imports,
+    validate_recognized_effects
 } from "./effect_checker";
 import { ImportSymbolTable } from "./effect_imports";
 import { Diagnostic } from "./typecheck_types";
@@ -162,6 +165,24 @@ fn validate_and_render_effects_with_capabilities(program: Program, source: strin
         print.err(rendered);
         if severity == "error" { errors += 1; }
         k += 1;
+    }
+
+    // Gate G6 (SFEP-0017 D1): reject any declared effect whose root is
+    // outside the canonical six (and isn't `pure`) as `E0404`. Independent
+    // of the manifest surface — a mis-rooted effect is always an error.
+    // Shares the `SAILFIN_EFFECT_ENFORCE` severity contract.
+    let unrecognized_violations = validate_recognized_effects(program);
+    let mut u: int = 0;
+    loop {
+        if u >= unrecognized_violations.length { break; }
+        let mut uv: UnrecognizedEffectViolation = unrecognized_violations[u];
+        uv.severity = severity;
+        let mut udiag: Diagnostic = unrecognized_effect_violation_to_diagnostic(uv);
+        udiag.file_path = file_path;
+        let rendered = render_diagnostic(udiag, source_lines, "effect");
+        print.err(rendered);
+        if severity == "error" { errors += 1; }
+        u += 1;
     }
 
     return errors;
