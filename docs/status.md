@@ -1,6 +1,6 @@
 # Status
 
-Updated: 2026-07-08. Seed pinned to `0.8.0-alpha.1` (`.seed-version`);
+Updated: 2026-07-09. Seed pinned to `0.8.0-alpha.2` (`.seed-version`);
 the compiler version source of truth is `compiler/capsule.toml`.
 
 This document is the **current-state source of truth**: what ships today,
@@ -427,6 +427,7 @@ unit; history in the linked issues.
 | `platform/pthread.sfn` / `posix.sfn` / `net.sfn` skeletons | **Shipped** (2026-05-02) | Richer C-ABI shapes; seeds for scheduler, process, http modules |
 | `io.sfn` (`sfn_write_fd`) | **Shipped** (2026-05-04) | First Sailfin-native service wrapper over an imported extern |
 | `io.read_fd` / `io.read_line` stdin builtins | **Shipped** (#1579, epic #1540 Track A gap A2; typed returns SFN-154) | `io.read_fd(fd, n) -> OwnedBuf` (owned, length-explicit, binary-safe; `len` is the byte count from one `read(2)` of ≤ n bytes; empty/EOF/error/`n<=0` yields the canonical `{0,0,0,0}`) and `io.read_line(fd) -> string?` (byte-at-a-time up to the next newline, no over-read; `null` means immediate EOF, `Some("")` means a blank line) over the `read` extern in `runtime/sfn/io.sfn`; registered in `runtime_helpers.sfn` + declare-tracked in `lowering_helpers.sfn`, mirroring `io.poll_readable` (#1580). Lets a process read its own fd 0 (e.g. the MCP proxy's JSON-RPC frames). Effect-gated `![io]` (E0400 on a non-`![io]` caller). Retiring `login.sfn`'s `sh -c "head -1"` workaround still waits on a seed cut: the compiler is seed-compiled, so a compiler-source consumer must wait for a seed cut that includes the builtin. Pinned by `compiler/tests/integration/io_read_fd_test.sfn` (including EOF-null and blank-line cases) + `compiler/tests/e2e/io_read_fd_effect_test.sfn` |
+| `io.poll_any` multi-fd readiness builtin | **Shipped** (SFN-155, epic #1540 Track A gap A3) | `io.poll_any(fds: int[], timeout_ms) -> int` — the multi-fd companion to `io.poll_readable`: waits on every fd in `fds` with a single `poll(2)` and returns which fd is ready (`>= 0`), or `-1` for timeout / empty list / error, so a stdio forwarder can wait on `{own stdin, child stdout, child stderr}` together without deadlock. Return shape is a sentinel `int` (`-1` == none), not an optional `fd?` — `int?` optional value-extraction isn't yet supported by the compiler (only `== null` round-trips). Sailfin-native body in `runtime/sfn/process.sfn` (`sfn_io_poll_any`); Windows stub in `runtime/sfn/platform/process_windows.sfn` returns `-1`. Descriptor in `compiler/src/llvm/runtime_helpers.sfn` (`io.poll_any`); declare-tracked in `lowering_helpers.sfn`. Pinned by `compiler/tests/integration/io_poll_any_test.sfn` (pipe-driven, `![io]`, 5 cases) |
 | Sleep: call-site routing → `@sfn_sleep` over `nanosleep` → ms semantics | **Shipped** (#397, #307) | `runtime/sfn/clock.sfn` is the sole definition site; `sleep(ms)` end-to-end |
 | Clock readers (`sfn_clock_monotonic_nanos`, `sfn_clock_millis`) | **Shipped** (#878, #819) | M3.3 |
 | `exe_path` host-aware intrinsic + `exec.sfn` cutover | **Shipped** (#967, #968) | Second intrinsic-registry sentinel after errno (#877/#901) |
