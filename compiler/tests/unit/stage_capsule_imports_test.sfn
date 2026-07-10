@@ -4,7 +4,7 @@
 //
 // Before #514 the staging cache treated a present `.sfn-asm` + `.layout-manifest`
 // pair as an authoritative hit purely by existence, so the Makefile had to
-// wipe `build/native/import-context/*.sfn-asm` by hand on every rebuild. The
+// wipe `build/compiler/import-context/*.sfn-asm` by hand on every rebuild. The
 // fix records a `.srchash` sidecar holding the SHA-256 of the source; a hit
 // now requires that sidecar to match the source's current hash.
 //
@@ -77,8 +77,8 @@ fn _sct_stage(root: string, slug: string, src_path: string, asm_path: string, ma
 // Sidecar path shape
 // --------------------------------------------------------------
 test "stage cache: srchash sidecar is a sibling of the staged artifacts" {
-    assert _cr_srchash_path("build/native/import-context", "cli_main") == "build/native/import-context/cli_main.srchash";
-    assert _cr_srchash_path("build/native/import-context", "sfn/cli/mod") == "build/native/import-context/sfn/cli/mod.srchash";
+    assert _cr_srchash_path("build/compiler/import-context", "cli_main") == "build/compiler/import-context/cli_main.srchash";
+    assert _cr_srchash_path("build/compiler/import-context", "sfn/cli/mod") == "build/compiler/import-context/sfn/cli/mod.srchash";
 }
 
 // --------------------------------------------------------------

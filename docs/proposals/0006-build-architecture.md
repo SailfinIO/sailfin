@@ -292,7 +292,7 @@ single source file at a time.
   `compile_to_llvm_file_with_module(source, module_name, "build/sailfin/program.ll")`,
   then `clang`-links against the installed runtime bundle via
   `_clang_link`. It does **not** resolve imports itself; the compiler's
-  in-process import resolver reads from `build/native/import-context/` if
+  in-process import resolver reads from `build/compiler/import-context/` if
   present.
 - `sfn run <file>` — before compilation, calls `inline_imports_for_source`
   in `cli_commands.sfn`. That function performs *textual* import inlining:
@@ -827,7 +827,7 @@ build/capsules/sfn/compiler/
 ```
 
 The `.sfn-asm` + `.layout-manifest` pair replaces the current
-`build/native/import-context/` staging directory. Every consumer reads
+`build/compiler/import-context/` staging directory. Every consumer reads
 from `build/capsules/<dep>/ir/` for the dep's exported interface.
 
 ### 4.5 Resolver: one path for all imports
@@ -1651,7 +1651,7 @@ Raw CSV: `docs/baselines/compile-0.7.0-darwin-arm64.csv`.
 | Sum of isolated per-module emits | 566.73 s (serial; not the parallel build wall-time) |
 
 These are *isolated per-module* emit timings (each module emitted alone against
-`build/native/import-context`). Peak RSS of ~4.4 GB on a single module is under the
+`build/compiler/import-context`). Peak RSS of ~4.4 GB on a single module is under the
 8 GiB self-cap but is the standout regression candidate to watch — the heaviest
 emitters are the `llvm/expression_lowering/native/core*` family and the two CLI
 modules.

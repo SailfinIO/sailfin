@@ -288,8 +288,8 @@ fn run(matches: Matches, ctx: CliContext) -> int ![io] {
 
     // Resolve and compile any capsule deps declared in the project's
     // capsule.toml before compiling the main source. stage_capsule_imports
-    // writes .sfn-asm + .layout-manifest into <work_dir>/native/import-context/
-    // (or build/native/import-context/ when `--work-dir` is unset)
+    // writes .sfn-asm + .layout-manifest into <work_dir>/compiler/import-context/
+    // (or build/compiler/import-context/ when `--work-dir` is unset)
     // where the main module's lowering will find them.
     //
     // Stage D PR3: the `-p` self-host (`walk_src`) explicitly
