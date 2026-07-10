@@ -145,3 +145,20 @@ test "login: sets restrictive permissions" ![io] {
     assert fs.get_perms(home + "/.sfn") == 448;
     assert fs.get_perms(home + "/.sfn/credentials") == 384;
 }
+
+// ---- Test 9: login on immediate stdin EOF fails cleanly ----
+// Close the child's stdin with nothing written: `io.read_line(0)` sees an
+// immediate EOF and returns null, so `login` reports a read error, exits 1,
+// and writes no credentials (SFN-154 EOF-null path; `login` is its first
+// production consumer).
+test "login: immediate stdin EOF fails cleanly" ![io] {
+    let home = _home("eof");
+    let id = process.spawn_with_env([_sfn_bin(), "login"], _env(home));
+    assert id != 0;
+    process.handle_close_stdin(id);
+    let _out = process.handle_read_stdout(id);
+    let _err = process.handle_read_stderr(id);
+    let exit = process.handle_wait(id);
+    assert exit == 1;
+    assert ! fs.exists(home + "/.sfn/credentials");
+}

@@ -9,8 +9,10 @@
 // `login` takes a single optional positional `[token]`. When present it is
 // the registry token; when absent, `run` prompts and reads the token from
 // stdin exactly as the legacy handler did. The credential store
-// (`~/.sfn/credentials`), the `chmod 700/600` handling, the write-back
-// verification, and every exit code / message are reproduced byte-for-byte:
+// (`~/.sfn/credentials`), the `chmod 700/600` handling, and the write-back
+// verification are preserved, as are the exit codes below. Messages match
+// the legacy handler except that immediate stdin EOF now reports "failed to
+// read token" (SFN-154 made EOF distinguishable from a blank line):
 //   - 0 — credentials written and verified.
 //   - 1 — empty token, no home directory, or a failed write.
 // The usage error (2) for extra positionals is enforced by the v2 dispatch
@@ -43,7 +45,7 @@ import {
     with_arg
 } from "sfn/cli";
 
-import { _ensure_dir_recursive_cmd, _shell_read_cmd, _toml_trim_cmd } from "../../build/fs";
+import { _ensure_dir_recursive_cmd, _toml_trim_cmd } from "../../build/fs";
 import { _get_home_cmd } from "../../build_flags";
 import { CliContext } from "../context";
 
@@ -66,8 +68,10 @@ fn command_def() -> Command {
 
 // Save a registry token to `~/.sfn/credentials`. With a `token` positional
 // the value is used directly; without one, prompt and read a single line
-// from stdin. `ctx` is part of the per-command contract but unused here.
-// Byte-identical to the legacy `login` command-handler body.
+// from stdin via `io.read_line(0)` (SFN-154), replacing the legacy `head -1`
+// shellout. `ctx` is part of the per-command contract but unused here. Exit
+// codes and side effects match the legacy handler; the only message change
+// is the immediate-EOF path (see the header note).
 fn run(matches: Matches, ctx: CliContext) -> int ![io] {
     let token_arg = get(matches, "token");
     let mut token: string = "";
@@ -77,19 +81,16 @@ fn run(matches: Matches, ctx: CliContext) -> int ![io] {
         token = _toml_trim_cmd(token_arg);
     } else {
         print("enter your registry token:");
-        let tmp = _shell_read_cmd("mktemp /tmp/.sfn_login_XXXXXX");
-        if tmp.length == 0 {
-            print("error: failed to create secure temp file");
-            return 1;
-        }
-        let read_rc = process.run(["sh", "-c", "head -1 > " + tmp]);
-        if read_rc != 0 {
-            process.run(["rm", "-f", tmp]);
+        // Read a single line from fd 0. `io.read_line(0) -> string?` returns
+        // `null` on immediate EOF (no input at all) or an allocation failure;
+        // a blank line is `Some("")`, which falls through to the "empty token"
+        // guard below — matching the legacy `head -1` behaviour without the
+        // mktemp/rm shellout.
+        let line = io.read_line(0);
+        if line != null { token = _toml_trim_cmd(line); } else {
             print("error: failed to read token");
             return 1;
         }
-        if fs.exists(tmp) { token = _toml_trim_cmd(fs.readFile(tmp)); }
-        process.run(["rm", "-f", tmp]);
     }
 
     if token.length == 0 {
