@@ -60,7 +60,7 @@ fn _build_fixture(src: string, binpath: string) -> int ![io] {
 
 test "process.exec: replaces the image with /bin/echo" ![io] {
     let root = _scratch_root() + "/sfn-process-exec-ok";
-    process.run(["mkdir", "-p", root]);
+    fs.createDirectory(root, true);
     let src = root + "/main.sfn";
     let bin = root + "/main";
     // On a successful exec, `execve` never returns: echo's stdout carries the
@@ -88,7 +88,7 @@ test "process.exec: replaces the image with /bin/echo" ![io] {
 
 test "process.exec: returns on a failed exec (image not replaced)" ![io] {
     let root = _scratch_root() + "/sfn-process-exec-fail";
-    process.run(["mkdir", "-p", root]);
+    fs.createDirectory(root, true);
     let src = root + "/main.sfn";
     let bin = root + "/main";
     // exec of a nonexistent path cannot replace the image, so `process.exec`

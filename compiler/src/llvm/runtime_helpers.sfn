@@ -759,12 +759,18 @@ fn _rh_descriptors_05(descriptors_in: RuntimeHelperDescriptor[]) -> RuntimeHelpe
     descriptors = append_runtime_helper(descriptors, RuntimeHelperDescriptor {
         target: "process.run_capture", symbol: "sfn_process_run_capture", return_type: "i64", parameter_types: ["{ i8**, i64, i64 }*", "{ i8**, i64, i64 }*"], effects: ["io"], native_signature: "sfn_process_run_capture", c_abi_return_type: null
     });
-    // SFN-172 / SFEP-0046 §3.5: `process.exec(argv, env_flat)` — `execve(2)`
-    // process-image replacement for toolchain re-exec dispatch. Same 2-array
-    // shape as `process.run_capture` (argv + flat `KEY=VALUE` env). Only the
-    // freshly-built compiler emits this call (exclusively from the toolchain
-    // dispatcher), so — like `process.run_capture_cwd` above — no seed cut is
-    // required for the seed to build a compiler that uses it.
+    // SFN-199 / SFEP-0046 §3.5: `process.exec(argv, env_flat)` — `execve(2)`
+    // process-image replacement for toolchain re-exec dispatch (the SFN-172
+    // consumer). Same 2-array shape as `process.run_capture` (argv + flat
+    // `KEY=VALUE` env). Unlike `process.run_capture_cwd` below — which only
+    // `sfn/os` emits, and `sfn/os` is compiled by the freshly-built compiler —
+    // the dispatcher that will call `process.exec` lives in `compiler/src`,
+    // which the *pinned seed* compiles during `make compile`. So the seed's
+    // runtime-helper table must already contain this target before any
+    // `compiler/src` call site is added: this descriptor ships as a
+    // `seed-blocker` predecessor (no `compiler/src` caller yet, so it
+    // self-hosts now), and the SFN-172 consumer waits for a seed bump that
+    // carries it. See `.claude/rules/seed-dependency.md`.
     descriptors = append_runtime_helper(descriptors, RuntimeHelperDescriptor {
         target: "process.exec", symbol: "sfn_process_exec", return_type: "i64", parameter_types: ["{ i8**, i64, i64 }*", "{ i8**, i64, i64 }*"], effects: ["io"], native_signature: "sfn_process_exec", c_abi_return_type: null
     });
