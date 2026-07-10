@@ -648,15 +648,27 @@ fn sfn_io_poll_any(fds: int[], timeout_ms: i64) -> i64 ![io] {
     let to: i32 = timeout_ms as i32;
     let mut result: i64 = -1;
     loop {
-        // (Re-)arm every slot to POLLIN with revents cleared.
+        // (Re-)arm every slot to POLLIN with revents cleared, counting how
+        // many fds `poll(2)` will actually watch. `active` tracks the
+        // *narrowed* fd (`fd32`), so a value that wraps negative through the
+        // i32 `poll` ABI is treated as parked, exactly as `poll` itself
+        // treats it — not merely fds that were negative before narrowing.
         let mut i: i64 = 0;
+        let mut active: i64 = 0;
         loop {
             if i >= nfds { break; }
             let slot: * PollSlot = ((pbuf as i64) + i * 8) as * PollSlot;
-            slot.fd = fds[i] as i32;
+            let fd32: i32 = fds[i] as i32;
+            slot.fd = fd32;
             slot.events_revents = 1;
+            if fd32 >= 0 { active = active + 1; }
             i = i + 1;
         }
+        // No fd left to wait on: `poll` over an all-parked set with a
+        // blocking timeout would hang forever with nothing to wake it — a
+        // deadlock in a deadlock-avoidance primitive. Report none ready,
+        // mirroring `sfn_io_poll_readable`'s negative-fd short-circuit.
+        if active <= 0 { break; }
         let pr: i32 = poll(pbuf, nfds as usize, to);
         if pr < 0 {
             let err: i32 = sailfin_intrinsic_pointer_read_i32(sailfin_intrinsic_errno_location());

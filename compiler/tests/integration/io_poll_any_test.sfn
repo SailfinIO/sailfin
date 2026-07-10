@@ -104,3 +104,11 @@ test "io.poll_any: an empty fd list reports none ready (-1)" ![io] {
     let fds: int[] = [];
     assert io.poll_any(fds, 0) == -1;
 }
+
+// An all-negative (all-parked) list has no fd for poll(2) to watch. With a
+// blocking timeout this must still return -1 immediately — without the
+// active-fd guard, poll(2) over an all-parked set would hang forever.
+test "io.poll_any: an all-parked list does not block, reports -1" ![io] {
+    let fds: int[] = [-1, -2];
+    assert io.poll_any(fds, -1) == -1;
+}
