@@ -1,0 +1,25 @@
+// Tests for sfn/crypto HMAC-SHA-256 (RFC 4231, OpenSSL-backed).
+//
+// Known-answer vectors cover RFC 4231 §4.2 test cases 1-2 and pin the
+// lowercase bare-hex wrapper contract used by signed policy tokens.
+import { hmac_sha256 } from "../src/mod";
+
+fn repeat_byte(byte: int, count: int) -> string {
+    let mut out: string = "";
+    let mut i: int = 0;
+    loop {
+        if i >= count { break; }
+        out = out + char_from_code(byte);
+        i += 1;
+    }
+    return out;
+}
+
+test "hmac_sha256: RFC 4231 test case 1" {
+    let key = repeat_byte(11, 20);
+    assert hmac_sha256(key, "Hi There") == "b0344c61d8db38535ca8afceaf0bf12b881dc200c9833da726e9376c2e32cff7";
+}
+
+test "hmac_sha256: RFC 4231 test case 2" {
+    assert hmac_sha256("Jefe", "what do ya want for nothing?") == "5bdcc146bf60754e6a042426089575c75a003f089d2739839dec58b964ec3843";
+}
