@@ -24,6 +24,7 @@ The compiler identity mixed into the key is the build stamp
 | Tag at HEAD | `<version>` | Distinct per release → never collides across compilers. |
 | Clean commit | `<version>+dev.<hash>` | The commit hash changes on every commit → any committed codegen change busts downstream IR. |
 | Dirty tree | `<version>+dev.<hash>.dirty` | See §2 — the emitting binary's content hash is folded in. |
+| No git available | `<version>+dev` | No hash and no `.dirty` suffix, so the §2 binary-hash fold does **not** apply. Stable per checkout at a given capsule version — coherent for any single binary, but two different builds at the same `<version>` share the key. Only reachable outside a git checkout (release tarball, vendored source); a normal dev tree always lands in one of the rows above. |
 
 So a **released, CI, or committed** build can never serve stale IR from an
 emitter change: the version component already differs. SFN-181 scopes this out
@@ -59,19 +60,32 @@ clear is needed for the normal `sfn build -p` / `make compile` loop.**
 
 `cache_compiler_identity` reverts to the raw stamp (no binary-hash fold) when
 the emitting-binary path is empty — the **in-process serial fallback**
-(`sailfin_exe == ""`) used by `handle_check_command` and the `sfn test` runner.
-In practice this path does not expose the trap:
+(`sailfin_exe == ""`). Two callers reach it:
 
-- `sfn check` is frontend-only (parse + typecheck + effect-check); it emits no
-  `.ll` and touches no module-IR cache entry.
-- The `sfn test` runner keys its linked binaries on the *commit-stable*
-  `resolve_test_bin_identity_for_cache` identity, and `make check` / the full
-  suite pass `--no-test-cache` as the cold-build backstop.
+- **`sfn check`** — frontend-only (parse + typecheck + effect-check); it emits no
+  `.ll` and touches no module-IR cache entry, so the trap cannot apply.
+- **`sfn test` on a small import closure** — `_cr_effective_isolation_exe`
+  (`capsule_resolver.sfn`) keeps the in-process path (returns `""`) when the
+  closure is below the isolation threshold, and only switches to the
+  subprocess-per-module binary for large closures (an OOM guard). On that
+  in-process leg the module `.ll` cache *is* enabled
+  (`empty_build_cache_config()`), and `cache_compiler_identity("…​.dirty", "")`
+  falls back to the raw stamp — so **a same-commit dirty rebuild will not bust a
+  small fixture's cached module IR**. This is the one live residual of the trap.
+  It is narrow (only same-commit `.dirty` iterations, only sub-threshold
+  closures) and does not touch committed/released correctness.
 
-If a future in-process caller does start emitting `.ll` through
-`_cr_compile_one` with an empty `sailfin_exe`, fold a compiler-source or
-self-binary hash into the identity there too — that is the only remaining hole,
-and it is currently unreachable.
+Note the separation of layers here: the per-test **binary** cache is a distinct
+layer keyed on the *commit-stable* `resolve_test_bin_identity_for_cache`, and
+`--no-test-cache` disables **only** that binary layer (`cli/commands/test.sfn`).
+It does **not** force cold recompilation of cached `.ll` **modules** — so it is
+not a workaround for the module-IR staleness above. For that, see §4.
+
+Closing this residual in code would mean folding a self-binary (or
+compiler-source) hash into the identity when `effective_exe == ""` in
+`compile_capsule_modules`. It is left as a follow-up rather than bundled into
+this doc-only change; the §4 escape hatch covers it operationally in the
+meantime.
 
 ## 4. Escape hatch
 
@@ -83,6 +97,13 @@ whole cache:
 sfn build -p <capsule> --no-cache     # bypass lookup + store for this build
 sfn build -p <capsule> --clean        # wipe the schema-versioned cache subtree first
 SAILFIN_BUILD_CACHE_DIR=$(mktemp -d) sfn build -p <capsule>   # fresh, isolated cache
+```
+
+`sfn test` does not yet accept `--no-cache` / `--clean`, so for the small-closure
+test residual in §3 the lever is a fresh cache root:
+
+```bash
+SAILFIN_BUILD_CACHE_DIR=$(mktemp -d) sfn test <dir-or-_test.sfn>   # cold module cache
 ```
 
 `SAILFIN_CACHE_TRACE=1` (or `--cache-trace`) prints per-module `[cache hit]` /
