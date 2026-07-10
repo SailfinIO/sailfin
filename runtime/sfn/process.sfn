@@ -94,6 +94,11 @@ extern fn posix_spawnp(pid: * i32, path: * u8, file_actions: * u8, attrp: * u8, 
 
 extern fn waitpid(pid: i32, status: * i32, options: i32) -> i32;
 
+// `execve(2)` — replace the current process image. Used by toolchain
+// dispatch (`sfn_process_exec`, SFEP-0046 §3.5); on success it never
+// returns.
+extern fn execve(path: * u8, argv: * * u8, envp: * * u8) -> i32;
+
 extern fn sfn_str_to_cstr(s_data: * u8, s_len: i64, arena_slot: * u8) -> * u8;
 
 // libc `environ` (`char **`) referenced directly via `extern var`
@@ -414,6 +419,42 @@ fn _process_build_cstr_argv(items: string[]) -> * u8 {
     let zero: i64 = 0;
     atomic_store(null_slot, zero);
     return buf;
+}
+
+// Replace the current process image with `argv[0]` via `execve(2)`,
+// passing `argv` and `env_flat` (flat `"KEY=VALUE"` entries) as the new
+// argv/envp. This is the re-exec used by toolchain dispatch (SFEP-0046
+// §3.5): because the image is replaced (not a child spawn), the pinned
+// toolchain's exit code and signals pass through transparently, so a
+// dispatched build is indistinguishable from running the pinned `sfn`
+// directly. On success `execve` never returns; any return means the exec
+// failed (e.g. the binary is missing or not executable), and this hands
+// back -1 so the caller can fall back to an actionable error. `env_flat`
+// is the child environment verbatim — an empty array is the empty
+// environment (the `_process_build_cstr_argv` contract), never "inherit",
+// so a dispatching caller threads the parent's `process.environ()` plus
+// the re-entrancy guard explicitly. `execve` does NOT search `PATH` (unlike
+// the `posix_spawnp` in `run_capture`), so `argv[0]` must be an absolute or
+// explicitly-relative path to the binary.
+fn sfn_process_exec(argv: string[], env_flat: string[]) -> int ![io] {
+    let argc: i64 = argv.length;
+    if argc <= 0 { return -1; }
+    let child_argv: * u8 = _process_build_cstr_argv(argv);
+    if child_argv as i64 == 0 { return -1; }
+    let child_envp: * u8 = _process_build_cstr_argv(env_flat);
+    if child_envp as i64 == 0 {
+        free(child_argv);
+        return -1;
+    }
+    let first: string = argv[0];
+    let path: * u8 = sfn_str_to_cstr(first as * u8, first.length, null);
+    let argv_pp: * * u8 = child_argv as * * u8;
+    let envp_pp: * * u8 = child_envp as * * u8;
+    execve(path, argv_pp, envp_pp);
+    // Only reached if execve failed; the image was not replaced.
+    free(child_argv);
+    free(child_envp);
+    return -1;
 }
 
 // Read one chunk (≤4096 bytes) from `fd` directly into the tail of

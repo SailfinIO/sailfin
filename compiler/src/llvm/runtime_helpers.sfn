@@ -759,6 +759,15 @@ fn _rh_descriptors_05(descriptors_in: RuntimeHelperDescriptor[]) -> RuntimeHelpe
     descriptors = append_runtime_helper(descriptors, RuntimeHelperDescriptor {
         target: "process.run_capture", symbol: "sfn_process_run_capture", return_type: "i64", parameter_types: ["{ i8**, i64, i64 }*", "{ i8**, i64, i64 }*"], effects: ["io"], native_signature: "sfn_process_run_capture", c_abi_return_type: null
     });
+    // SFN-172 / SFEP-0046 §3.5: `process.exec(argv, env_flat)` — `execve(2)`
+    // process-image replacement for toolchain re-exec dispatch. Same 2-array
+    // shape as `process.run_capture` (argv + flat `KEY=VALUE` env). Only the
+    // freshly-built compiler emits this call (exclusively from the toolchain
+    // dispatcher), so — like `process.run_capture_cwd` above — no seed cut is
+    // required for the seed to build a compiler that uses it.
+    descriptors = append_runtime_helper(descriptors, RuntimeHelperDescriptor {
+        target: "process.exec", symbol: "sfn_process_exec", return_type: "i64", parameter_types: ["{ i8**, i64, i64 }*", "{ i8**, i64, i64 }*"], effects: ["io"], native_signature: "sfn_process_exec", c_abi_return_type: null
+    });
     // #1167: `process.run_capture_cwd` — `run_capture` plus a trailing
     // per-child `cwd` (`i8*`; empty/null = inherit). A SEPARATE target
     // from `process.run_capture` rather than a widened arity, because
