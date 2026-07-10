@@ -1,7 +1,7 @@
 // runtime/sfn/memory/rc.sfn
 //
-// Sailfin-native reference counting primitive shipped into the
-// `build/bin/sfn` binary alongside the C runtime. M2.3
+// Sailfin-native reference counting primitive linked into the
+// `build/bin/sfn` binary. M2.3
 // (issue #395, epic #389) lights up the second Sailfin-defined
 // runtime module after `runtime/sfn/memory/arena.sfn`.
 //

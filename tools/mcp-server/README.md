@@ -8,15 +8,15 @@ Part of the "AI agents are users" strategy described in [`CLAUDE.md`](../../CLAU
 
 | Tool | Compiler invocation | Purpose |
 |---|---|---|
-| `sailfin_version` | `sailfin version` | Smoke test — returns the compiler version. Fails loudly if `build/bin/sfn` is missing. |
-| `sailfin_check` | `sailfin check <path>` | Type + effect check a single `.sfn` file. Fast feedback during edits. |
-| `sailfin_diagnostics` | `sailfin check --json <path>` | Same analysis as `sailfin_check`, returned as the `sailfin-check/1` JSON envelope for programmatic consumption. |
-| `sailfin_emit_native` | `sailfin emit native <path>` | Emit `.sfn-asm` intermediate representation. Use for emit-stage diagnosis. |
-| `sailfin_emit_llvm` | `sailfin emit llvm <path>` | Emit LLVM IR. Use for lowering-stage or linker diagnosis. |
-| `sailfin_fmt_check` | `sailfin fmt --check <path>` | Report formatting differences without rewriting. |
-| `sailfin_fmt_write` | `sailfin fmt --write <path>` | Reformat a file or directory in place (canonical). Run before committing to satisfy the CI `fmt --check` gate. |
-| `sailfin_build` | `sailfin build <file>` / `-p <capsule>` | Build a single `.sfn` file or a capsule to a native binary. **Not** the compiler self-host (see below). |
-| `sailfin_test` | `sailfin test <path> [-k <name>] [--jobs N] [--json]` | Run a targeted suite directory or a single `_test.sfn` file. `path` required. |
+| `sailfin_version` | `sfn version` | Smoke test — returns the compiler version. Fails loudly if `build/bin/sfn` is missing. |
+| `sailfin_check` | `sfn check <path>` | Type + effect check a single `.sfn` file. Fast feedback during edits. |
+| `sailfin_diagnostics` | `sfn check --json <path>` | Same analysis as `sailfin_check`, returned as the `sailfin-check/1` JSON envelope for programmatic consumption. |
+| `sailfin_emit_native` | `sfn emit native <path>` | Emit `.sfn-asm` intermediate representation. Use for emit-stage diagnosis. |
+| `sailfin_emit_llvm` | `sfn emit llvm <path>` | Emit LLVM IR. Use for lowering-stage or linker diagnosis. |
+| `sailfin_fmt_check` | `sfn fmt --check <path>` | Report formatting differences without rewriting. |
+| `sailfin_fmt_write` | `sfn fmt --write <path>` | Reformat a file or directory in place (canonical). Run before committing to satisfy the CI `fmt --check` gate. |
+| `sailfin_build` | `sfn build <file>` / `-p <capsule>` | Build a single `.sfn` file or a capsule to a native binary. **Not** the compiler self-host (see below). |
+| `sailfin_test` | `sfn test <path> [-k <name>] [--jobs N] [--json]` | Run a targeted suite directory or a single `_test.sfn` file. `path` required. |
 
 **Design rule:** every tool is a *pure passthrough* to one `sailfin` subcommand — no build/test orchestration lives in the server. In particular, `sailfin_build` does **not** self-host the compiler: that build needs seed resolution and extern pre-staging (`make rebuild`), and the tool deliberately does not replicate it. Use `make compile` for the self-host build until that orchestration folds into the driver.
 
