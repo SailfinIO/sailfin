@@ -215,9 +215,9 @@ test "runtime sfn-source struct import builds, stages context, and round-trips (
 
     // Nothing may leak into the SHARED cwd-relative import-context tree
     // (the prelude-regression vector). With --work-dir the shared tree
-    // would be `<build_dir>/native/import-context`; assert no runtime
+    // would be `<build_dir>/compiler/import-context`; assert no runtime
     // sfn-source asm leaked there.
-    let shared = build_dir + "/native/import-context/runtime/sfn";
+    let shared = build_dir + "/compiler/import-context/runtime/sfn";
     assert ! fs.exists(shared + "/structlib.sfn-asm");
     assert ! fs.exists(shared + "/structuse.sfn-asm");
 

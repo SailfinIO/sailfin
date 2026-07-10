@@ -17,7 +17,7 @@
 //      stays in `make check` (stage2-vs-stage3 IR comparison); the former
 //      standalone `--check-determinism` double-build is dropped from the
 //      e2e leg so it no longer times out under the parallel pool (#1576).
-//   2. The set of staged filenames under `<DIR>/native/import-context/`
+//   2. The set of staged filenames under `<DIR>/compiler/import-context/`
 //      is identical between two `--work-dir` roots (we compare the full
 //      recursive filename set — strictly stronger than `.ll`-only).
 //
@@ -127,7 +127,7 @@ fn _collect_files(root: string, rel: string, acc: string[]) -> string[] ![io] {
 }
 
 fn _ic_file_set(work_dir: string) -> string[] ![io] {
-    let ic = work_dir + "/native/import-context";
+    let ic = work_dir + "/compiler/import-context";
     let mut acc: string[] = [];
     if !fs.exists(ic) { return acc; }
     return _collect_files(ic, ".", acc);
@@ -200,7 +200,7 @@ test "work-dir-parity: two --work-dir builds produce byte-identical compilers" !
 
 // ---- Test 2: import-context filename sets are identical ----
 // Compares the full recursive filename set under
-// `<DIR>/native/import-context/` between two distinct work-dir roots.
+// `<DIR>/compiler/import-context/` between two distinct work-dir roots.
 // Module names and relative paths there don't depend on link-time UUIDs,
 // so the sets must be exactly equal.
 test "work-dir-parity: import-context filename set matches across roots" ![io] {
