@@ -14,9 +14,9 @@
 // Design: SFEP-0046 §3.5.
 import { ed25519_verify_utf8 } from "../src/mod";
 
-let KEY = "a98fd921c2c18521f765b13c2c134e4ab447f98970f6ea255dce22a05c81029d";
+let KEY = "c317207101f06c10a341656e906e95d6e7199fcaa85d9c793455b07d740a44b9";
 let MSG = "Sailfin release manifest signing fixture (SFN-171) :: embedded Ed25519 public key verifies end-to-end.";
-let SIG = "5185a0d821576e996ed55d735c6267db1f02f49cd50a6f6bb59aeaae41508a1462e9044da40e434ccb5cbf6ba2edc17e2dc2f5e4be8e2065040e55d0c1b9c502";
+let SIG = "87f6ac376a3eb0617115e04bc3d951b34c92ff7386bcc95eb42e5fe3bb2dae9992173dabb84a0febbcf8d49c7098f8c381bbca1b80bac55069790d786944a502";
 
 test "release-signing: embedded key verifies a genuine signature" {
     assert ed25519_verify_utf8(KEY, MSG, SIG) == true;

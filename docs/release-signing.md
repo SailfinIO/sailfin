@@ -57,7 +57,7 @@ The embedded key is queryable from any built compiler:
 
 ```console
 $ sfn version --signing-key
-a98fd921c2c18521f765b13c2c134e4ab447f98970f6ea255dce22a05c81029d
+c317207101f06c10a341656e906e95d6e7199fcaa85d9c793455b07d740a44b9
 ```
 
 A consumer verifies a downloaded release with in-process crypto alone:
@@ -72,13 +72,21 @@ verify order (fail closed at each step):
 
 `ed25519_verify_utf8` is `sfn/crypto`'s verify-only Ed25519 primitive (SFN-170).
 
-## Bootstrap key ⚠️
+## Key provisioning status
 
-The keypair currently committed is a **bootstrap placeholder**: its private half
-was generated to mint the embedded key and the test fixture, and was **not
-retained**. Before the first production signed release, a maintainer **must**
-provision a real key and rotate (below). Until then, `SAILFIN_RELEASE_SIGNING_KEY`
-is unset and releases are published unsigned (and thus not auto-fetchable).
+The SFN-171 **bootstrap placeholder** keypair (whose private half was generated
+to mint the fixtures and then **not retained**) was retired in **SFN-196**. The
+committed/embedded key above is now the **production** key; its private half is
+held only as the `SAILFIN_RELEASE_SIGNING_KEY` CI secret and is never committed.
+
+One gate remains before signed releases verify for existing installs: because
+the public key is pinned at **build time** (§"The verification key"), the
+rotated key only verifies for toolchains built from a compiler that already
+carries it. So the rotation must reach the **pinned seed** (`/pin-seed`) before
+the first release is signed with the new key — otherwise an older toolchain
+cannot verify that release. Sequence the seed bump ahead of the first signed
+cut. A release built before the secret is configured is still published
+unsigned, and consumers fail closed on it (never silently trusted).
 
 ## Key generation & rotation
 

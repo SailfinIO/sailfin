@@ -8,15 +8,20 @@
 //
 // This mirrors the __version_fallback__ committed-constant pattern in
 // version.sfn: a plain source literal, no code generation. The matching
-// PRIVATE key is a CI secret and is never committed. The canonical committed
-// copy of this key in PEM form is .github/release-signing/ed25519-release.pub.pem;
-// the hex here is the same 32-byte key in the raw form ed25519_verify consumes.
-// Rotate the hex, the PEM, and the CI secret together.
+// PRIVATE key is a CI secret and is never committed. The same public key is
+// committed in two forms under .github/release-signing/ —
+// ed25519-release.pub.pem (canonical PEM/SPKI) and ed25519-release.pub.hex
+// (raw-hex convenience copy) — and the hex here is that raw 32-byte key in the
+// form ed25519_verify consumes. A rotation must move every copy together: this
+// constant, both committed .pem/.hex files, the test fixtures
+// (compiler/tests/unit/release_trust_test.sfn golden and
+// capsules/sfn/crypto/tests/release_signing_key_test.sfn KEY+SIG), and the CI
+// secret. docs/release-signing.md is the authoritative in-sync list.
 //
 // Trust model + rotation procedure: docs/release-signing.md.
 // Design: SFEP-0046 (docs/proposals/0046-toolchain-pinning.md) §3.5.
 // Raw 32-byte Ed25519 release-signing public key, lowercase hex (64 chars).
-let RELEASE_SIGNING_PUBLIC_KEY_HEX = "a98fd921c2c18521f765b13c2c134e4ab447f98970f6ea255dce22a05c81029d";
+let RELEASE_SIGNING_PUBLIC_KEY_HEX = "c317207101f06c10a341656e906e95d6e7199fcaa85d9c793455b07d740a44b9";
 
 // Pure accessor for the pinned release-signing public key (hex). The toolchain
 // fetch/verify path (SFN-168) passes this to ed25519_verify_utf8 to verify a
