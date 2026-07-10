@@ -360,7 +360,7 @@ Capsules ship under `capsules/sfn/` and are imported by bare name
 |---------|--------|--------|---------|-------------|
 | `sfn/strings` | `"strings"` | Shipped | None | Trim, case conversion, split/join, find/replace |
 | `sfn/json` | `"json"` | Shipped | None | JSON parsing, serialization, pretty-print |
-| `sfn/crypto` | `"crypto"` | Shipped | None | SHA-256, base64 encode (via C runtime) |
+| `sfn/crypto` | `"crypto"` | Shipped | None | Pure Sailfin SHA-256 + base64 encode/decode; OpenSSL-backed Ed25519 verify and HMAC-SHA-256 |
 | `sfn/math` | `"math"` | Shipped | None | abs, min/max, clamp, floor/ceil/round, pow, sum/mean |
 | `sfn/path` | `"path"` | Shipped | None | Path join, dirname, basename, ext, normalize |
 | `sfn/toml` | `"toml"` | Shipped | None | TOML v1.0 parsing, serialization, dotted-path access |

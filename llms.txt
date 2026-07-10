@@ -291,7 +291,7 @@ typecheck (E0808/E0809).
 |-----------|-------------|---------------|---------------|------------------------------------------|
 | sfn/strings | "strings" | Shipped       | None          | Trim, case, split/join, find/replace     |
 | sfn/json  | "json"      | Shipped       | None          | JSON parse, serialize, pretty-print      |
-| sfn/crypto| "crypto"    | Shipped       | None          | SHA-256, base64                          |
+| sfn/crypto| "crypto"    | Shipped       | None          | SHA-256, base64, Ed25519 verify, HMAC-SHA-256 |
 | sfn/math  | "math"      | Shipped       | None          | abs, min, max, clamp, pow, floor, ceil   |
 | sfn/path  | "path"      | Shipped       | None          | join, dirname, basename, ext, normalize  |
 | sfn/toml  | "toml"      | Shipped       | None          | TOML parsing and serialization           |
