@@ -52,6 +52,7 @@ import {
     is_valid_digest,
     sha256_of_file
 } from "./build_cache";
+import { _env_flag, _get_env_cmd } from "./build_flags";
 import {
     CapsuleArtifactLayout,
     capsule_artifact_layout_from_specs,
@@ -68,6 +69,7 @@ import {
 } from "./capsule_import_scan";
 import { _display_capsule_name_cmd } from "./capsule_names";
 import { emit_subprocess_with_retry } from "./emit_helpers";
+import { set_import_context_root } from "./llvm/mod";
 import { _LockEntry, lock_get_versions } from "./lock";
 import {
     compile_to_llvm_file_with_module,
@@ -77,15 +79,23 @@ import {
     write_native_text_file_with_module
 } from "./main";
 import { RuntimeCapsuleArtifacts, enumerate_runtime_capsule_artifacts } from "./runtime_capsule_resolver";
+import {
+    SemVer,
+    semver_is_valid,
+    semver_parse,
+    semver_satisfies_floor
+} from "./semver";
 import { contains_string, substring } from "./string_utils";
 import {
     toml_get_capabilities_required,
     toml_get_dependencies,
     toml_get_name,
+    toml_get_toolchain_channel,
+    toml_get_toolchain_sfn,
     toml_get_version,
     toml_get_workspace_members
 } from "./toml_parser";
-import { resolve_compiler_version_for_cache } from "./version";
+import { resolve_compiler_version, resolve_compiler_version_for_cache } from "./version";
 
 export {
     CapsuleSource,
@@ -113,6 +123,7 @@ export {
     resolve_relative_import,
     resolve_workspace_lock_entries,
     stage_capsule_imports,
+    toolchain_gate,
     workspace_member_for_spec
 };
 
@@ -539,6 +550,168 @@ fn discover_project_root(start_dir: string) -> string ![io] {
         depth += 1;
     }
     return "";
+}
+
+// ---- Toolchain pin gate (SFEP-0046 Phase 1) ----
+// Verify the running toolchain satisfies a manifest `[toolchain]` pin
+// (floor semantics: running >= pin). A `workspace.toml` pin is the default;
+// a member `capsule.toml` pin overrides it per field. Unpinned projects are
+// a no-op so the feature is additive. `--skip-toolchain-check`,
+// `SAILFIN_SKIP_TOOLCHAIN_CHECK`, and `SAILFIN_TOOLCHAIN=off` downgrade a
+// mismatch to a warning and proceed. Returns 0 to proceed, 1 on an enforced
+// mismatch.
+fn _toolchain_start_dir(hint: string) -> string {
+    if hint.length == 0 { return "."; }
+    let n = hint.length;
+    if n > 4 {
+        if strings_equal(substring(hint, n - 4, n), ".sfn") {
+            return _cr_dirname(hint);
+        }
+    }
+    return hint;
+}
+
+fn _toolchain_leading_id(prerelease: string) -> string {
+    if prerelease.length == 0 { return ""; }
+    let mut i: int = 0;
+    loop {
+        if i >= prerelease.length { break; }
+        if strings_equal(substring(prerelease, i, i + 1), ".") {
+            return substring(prerelease, 0, i);
+        }
+        i += 1;
+    }
+    return prerelease;
+}
+
+// Channel precedence: stable > rc > beta > alpha. An unrecognized pin
+// channel does not constrain (-1); an unrecognized running prerelease is
+// treated as most-unstable (0) so a `stable` pin still rejects it.
+fn _toolchain_channel_rank(name: string) -> int {
+    if strings_equal(name, "stable") { return 3; }
+    if strings_equal(name, "rc") { return 2; }
+    if strings_equal(name, "beta") { return 1; }
+    if strings_equal(name, "alpha") { return 0; }
+    return -1;
+}
+
+fn _toolchain_running_channel_rank(running: SemVer) -> int {
+    if running.prerelease.length == 0 { return 3; }
+    let id = _toolchain_leading_id(running.prerelease);
+    let rank = _toolchain_channel_rank(id);
+    if rank < 0 { return 0; }
+    return rank;
+}
+
+fn toolchain_gate(entry_hint: string, binary_dir: string, skip_flag: boolean) -> int ![io] {
+    let start = _toolchain_start_dir(entry_hint);
+    let project_root = discover_project_root(start);
+    let workspace_root = discover_workspace_root(start);
+
+    // Track each field's origin separately so the mismatch diagnostic
+    // attributes the pin accurately when a member capsule.toml overrides only
+    // one field of a workspace.toml default.
+    let mut pin_sfn: string = "";
+    let mut pin_channel: string = "";
+    let mut sfn_source: string = "";
+    let mut channel_source: string = "";
+    if workspace_root.length > 0 {
+        let ws_path = _cr_path_join(workspace_root, "workspace.toml");
+        if fs.exists(ws_path) {
+            let ws_text = fs.readFile(ws_path);
+            pin_sfn = toml_get_toolchain_sfn(ws_text);
+            pin_channel = toml_get_toolchain_channel(ws_text);
+            if pin_sfn.length > 0 { sfn_source = "workspace.toml"; }
+            if pin_channel.length > 0 { channel_source = "workspace.toml"; }
+        }
+    }
+    if project_root.length > 0 {
+        let cap_path = _cr_path_join(project_root, "capsule.toml");
+        if fs.exists(cap_path) {
+            let cap_text = fs.readFile(cap_path);
+            let m_sfn = toml_get_toolchain_sfn(cap_text);
+            let m_channel = toml_get_toolchain_channel(cap_text);
+            if m_sfn.length > 0 {
+                pin_sfn = m_sfn;
+                sfn_source = "capsule.toml";
+            }
+            if m_channel.length > 0 {
+                pin_channel = m_channel;
+                channel_source = "capsule.toml";
+            }
+        }
+    }
+
+    if pin_sfn.length == 0 && pin_channel.length == 0 { return 0; }
+
+    let running_str = resolve_compiler_version(binary_dir);
+    let running = semver_parse(running_str);
+
+    let mut ok: boolean = true;
+    if pin_sfn.length > 0 {
+        let pin = semver_parse(pin_sfn);
+        if semver_is_valid(pin) {
+            if semver_satisfies_floor(running, pin) == false { ok = false; }
+        } else {
+            print.err("warning: [toolchain] sfn = \"" + pin_sfn
+                + "\" is not a valid version; ignoring the pin");
+        }
+    }
+    if pin_channel.length > 0 {
+        let pin_rank = _toolchain_channel_rank(pin_channel);
+        if pin_rank < 0 {
+            print.err("warning: [toolchain] channel = \"" + pin_channel
+                + "\" is not a recognized channel (stable|rc|beta|alpha); ignoring the channel pin");
+        } else {
+            if _toolchain_running_channel_rank(running) < pin_rank {
+                ok = false;
+            }
+        }
+    }
+
+    if ok { return 0; }
+
+    let knob = _get_env_cmd("SAILFIN_TOOLCHAIN");
+    let knob_off = strings_equal(knob, "off") || strings_equal(knob, "0");
+    let skip = skip_flag || _env_flag("SAILFIN_SKIP_TOOLCHAIN_CHECK")
+        || knob_off;
+
+    let mut pin_desc: string = "";
+    if pin_sfn.length > 0 { pin_desc = "sfn >= " + pin_sfn; }
+    if pin_channel.length > 0 {
+        if pin_desc.length > 0 { pin_desc = pin_desc + " "; }
+        pin_desc = pin_desc + "(" + pin_channel + " channel)";
+    }
+    // Attribute the diagnostic to whichever file(s) actually contributed a
+    // pinned field — both, when a member override and a workspace default each
+    // supplied one.
+    let mut pin_source: string = sfn_source;
+    if channel_source.length > 0 {
+        if pin_source.length == 0 { pin_source = channel_source; } else {
+            if !strings_equal(pin_source, channel_source) {
+                pin_source = pin_source + " + " + channel_source;
+            }
+        }
+    }
+    if pin_source.length == 0 { pin_source = "capsule.toml"; }
+
+    if skip {
+        print.err("warning: toolchain mismatch — this project pins "
+            + pin_desc
+            + " ("
+            + pin_source
+            + " [toolchain]) but the running toolchain is "
+            + running_str
+            + "; proceeding (--skip-toolchain-check / SAILFIN_TOOLCHAIN=off)");
+        return 0;
+    }
+
+    print.err("error: toolchain mismatch");
+    print.err("  this project pins " + pin_desc + " (" + pin_source
+        + " [toolchain])");
+    print.err("  but the running toolchain is " + running_str);
+    print.err("  install the pinned toolchain, or re-run with --skip-toolchain-check to override");
+    return 1;
 }
 
 // ---- Dependency enumeration ----
@@ -1137,6 +1310,12 @@ fn _cr_extract_layout_manifest(asm_path: string, manifest_path: string) ![io] {
 // (`sfn test` today; `sfn check` threads its exe since #1246).
 fn stage_capsule_imports(sources: CapsuleSource[], sailfin_exe: string, work_dir: string) -> boolean ![io] {
     let context_root = _cr_import_context_root(work_dir);
+    // Route the in-process lowering reader to the same per-invocation
+    // import-context tree the writer below stages into, so a `--work-dir`
+    // build reads its OWN isolated interfaces rather than the shared default
+    // tree two concurrent builds can tear (SFN-167). Empty work_dir → the
+    // canonical default, so the default build path is unchanged.
+    set_import_context_root(context_root);
     if work_dir.length == 0 {
         _cr_ensure_dir("build");
         _cr_ensure_dir("build/native");

@@ -796,6 +796,11 @@ ci-package-installer:
 #   no longer plumbs through.
 # - NATIVE_OPT / SELFHOST1_OPT are no longer honoured here — the
 #   driver hardcodes `-O2` for the link step.
+# - During a seed transition where compiler/capsule.toml's [toolchain] pin is
+#   newer than the seed that builds it, set SAILFIN_TOOLCHAIN=off to bypass the
+#   toolchain gate (SFEP-0046). The env form is forward-safe: a gate-unaware
+#   seed ignores the env, whereas the --skip-toolchain-check flag would be
+#   rejected as unknown by an older seed. Not needed while pin == seed version.
 rebuild:
 	@$(AGENT_REPORT) --target rebuild -- $(MAKE) rebuild-impl
 
