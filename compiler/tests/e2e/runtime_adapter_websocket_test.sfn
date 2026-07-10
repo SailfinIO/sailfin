@@ -213,3 +213,12 @@ test "websocket.serve lowers to @sfn_websocket_serve, not the unbridged sentinel
     assert _calls(ir, "sfn_websocket_serve");
     assert ! _calls(ir, "sfn_websocket_unbridged");
 }
+
+test "websocket.serve_tls lowers to @sfn_websocket_serve_tls" ![io] {
+    let source = "fn main() -> int ![net] {\n"
+        + "    websocket.serve_tls(9, \"cert.pem\", \"key.pem\");\n"
+        + "    return 0;\n"
+        + "}\n";
+    let ir = _emit_source("websocket_serve_tls_probe", source);
+    assert _calls(ir, "sfn_websocket_serve_tls");
+}

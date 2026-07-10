@@ -9,7 +9,8 @@
 // carries a `_ws_` prefix to avoid a duplicate-symbol link error against
 // `http.sfn`'s identically-shaped helpers.
 //
-// Scope: `ws://` only (no TLS/`wss://`). Client: connect, send a single
+// Scope: client-side `ws://` only; the server supports plaintext `ws://`
+// and TLS-terminated `wss://`. Client: connect, send a single
 // masked TEXT frame, close. Server: bind/listen/accept, dispatching each
 // connection to a shared worker pool (#1923), echo TEXT/BINARY frames back
 // unmasked, reply to PING with PONG, absorb PONG, reassemble fragmented
@@ -24,6 +25,8 @@
 //   - `websocket.send(handle, msg)`   -> `sfn_websocket_send`    (i8*, i8*) -> i8*
 //   - `websocket.close(handle)`       -> `sfn_websocket_close`   (i8*) -> i8*
 //   - `websocket.serve(port)`         -> `sfn_websocket_serve`   (i32) -> void
+//   - `websocket.serve_tls(port, cert_path, key_path)`
+//                                      -> `sfn_websocket_serve_tls` (i32, i8*, i8*) -> void
 //
 // The handle is a `malloc(16)` cell: the connected socket fd is stored
 // as an `i32` at offset 0 (one byte at a time, matching http.sfn's
@@ -97,6 +100,19 @@ extern fn SHA1(d: * u8, n: usize, md: * u8) -> * u8;
 extern fn EVP_EncodeBlock(dst: * u8, src: * u8, srclen: i32) -> i32;
 
 extern fn RAND_bytes(buf: * u8, num: i32) -> i32;
+
+// ── TLS termination (platform/tls.sfn) ────────────────────────
+extern fn tls_server_ctx(cert_path: * u8, key_path: * u8) -> * u8;
+
+extern fn tls_accept_fd(ctx: * u8, fd: i32) -> * u8;
+
+extern fn tls_ctx_free(ctx: * u8) -> void;
+
+extern fn tls_read(ssl: * u8, buf: * u8, n: i64) -> i64;
+
+extern fn tls_write(ssl: * u8, buf: * u8, n: i64) -> i64;
+
+extern fn tls_shutdown_free(ssl: * u8) -> void;
 
 // ── Scheduler (scheduler.sfn) — the shared MPMC task queue + fixed
 // worker pool. `sfn_websocket_serve` creates one queue + pool, then
@@ -314,15 +330,19 @@ fn _ws_connect_tcp(host: * u8, port: i64) -> i32 ![net] {
     return 0 - 1;
 }
 
-// `_ws_send_all(fd, buf, total)` — write `total` bytes over the raw
-// socket, retrying on short sends. Returns false if a write ever
-// fails. `ws://` is plaintext only, so unlike `http.sfn`'s `_send_all`
-// there is no `ssl` argument.
-fn _ws_send_all(fd: i32, buf: * u8, total: i64) -> bool {
+// `_ws_send_all(fd, ssl, buf, total)` — write `total` bytes, retrying
+// on short sends. A null `ssl` uses the raw socket; a non-null `ssl` uses
+// `tls_write` for TLS-terminated websocket server connections.
+fn _ws_send_all(fd: i32, ssl: * u8, buf: * u8, total: i64) -> bool {
     let mut sent: i64 = 0;
     loop {
         if sent >= total { break; }
-        let n: i64 = send(fd, _ws_ptr_off(buf, sent), total - sent, 0);
+        let mut n: i64 = 0;
+        if ssl as i64 == 0 {
+            n = send(fd, _ws_ptr_off(buf, sent), total - sent, 0);
+        } else {
+            n = tls_write(ssl, _ws_ptr_off(buf, sent), total - sent);
+        }
         if n <= 0 { return false; }
         sent = sent + n;
     }
@@ -612,7 +632,7 @@ fn _ws_frame_send(fd: i32, opcode: i64, payload: * u8, payload_len: i64) -> bool
         i = i + 1;
     }
     free(mask);
-    let ok: bool = _ws_send_all(fd, out, total);
+    let ok: bool = _ws_send_all(fd, null, out, total);
     free(out);
     return ok;
 }
@@ -701,7 +721,7 @@ fn sfn_websocket_connect(url: * u8) -> * u8 ![net] {
     free(host);
     free(path);
 
-    let send_ok: bool = _ws_send_all(fd, req, off);
+    let send_ok: bool = _ws_send_all(fd, null, req, off);
     free(req);
     if !send_ok {
         free(key_b64);
@@ -880,11 +900,16 @@ fn _ws_srv_bind_listen(port: i64) -> i32 {
 // `_ws_recv_exact(fd, buf, n)` — loop `recv` until exactly `n` bytes have
 // landed in `buf`. Returns false on a short read, error, or EOF (any
 // `recv` returning <= 0) before `n` bytes are collected.
-fn _ws_recv_exact(fd: i32, buf: * u8, n: i64) -> bool {
+fn _ws_recv_exact(fd: i32, ssl: * u8, buf: * u8, n: i64) -> bool {
     let mut got: i64 = 0;
     loop {
         if got >= n { break; }
-        let r: i64 = recv(fd, _ws_ptr_off(buf, got), n - got, 0);
+        let mut r: i64 = 0;
+        if ssl as i64 == 0 {
+            r = recv(fd, _ws_ptr_off(buf, got), n - got, 0);
+        } else {
+            r = tls_read(ssl, _ws_ptr_off(buf, got), n - got);
+        }
         if r <= 0 { return false; }
         got = got + r;
     }
@@ -895,7 +920,7 @@ fn _ws_recv_exact(fd: i32, buf: * u8, n: i64) -> bool {
 // and send an UNMASKED RFC 6455 server frame (FIN=1; server→client MUST
 // NOT mask). Structurally `_ws_frame_send`'s counterpart minus the
 // masking key and XOR step. Returns false on OOM or a send failure.
-fn _ws_server_frame_send(fd: i32, opcode: i64, payload: * u8, payload_len: i64) -> bool {
+fn _ws_server_frame_send(fd: i32, ssl: * u8, opcode: i64, payload: * u8, payload_len: i64) -> bool {
     let byte0: i64 = 128 | (opcode & 15);
     let mut header_len: i64 = 2;
     if payload_len >= 126 && payload_len <= 65535 { header_len = 4; } else {
@@ -926,7 +951,7 @@ fn _ws_server_frame_send(fd: i32, opcode: i64, payload: * u8, payload_len: i64) 
     if payload as i64 != 0 && payload_len > 0 {
         memcpy(_ws_ptr_off(out, header_len), payload, payload_len as usize);
     }
-    let ok: bool = _ws_send_all(fd, out, total);
+    let ok: bool = _ws_send_all(fd, ssl, out, total);
     free(out);
     return ok;
 }
@@ -952,12 +977,12 @@ fn _ws_max_message_len() -> i64 { return 1048576; }
 // for the protocol-error (`1002`) and message-too-big (`1009`) teardown
 // paths. malloc(4), not 2: keeps the module's content+slack over-allocation
 // invariant even though only the first 2 bytes are sent.
-fn _ws_server_close_send(fd: i32, code: i64) -> bool {
+fn _ws_server_close_send(fd: i32, ssl: * u8, code: i64) -> bool {
     let body: * u8 = malloc(4 as usize);
     if body as i64 == 0 { return false; }
     memset(_ws_ptr_off(body, 0), ((code >> 8) & 255) as i32, 1 as usize);
     memset(_ws_ptr_off(body, 1), (code & 255) as i32, 1 as usize);
-    let ok: bool = _ws_server_frame_send(fd, 8, body, 2);
+    let ok: bool = _ws_server_frame_send(fd, ssl, 8, body, 2);
     free(body);
     return ok;
 }
@@ -974,7 +999,7 @@ fn _ws_server_close_send(fd: i32, code: i64) -> bool {
 //   2 = protocol error (an unmasked "client" frame) — reply close `1002`.
 //   3 = frame length exceeds `_ws_max_frame_len()` — reply close `1009`.
 // On any non-zero status the out-params are untouched (no payload to free).
-fn _ws_frame_read(fd: i32, out_fin: * i64, out_opcode: * i64, out_payload_slot: * i64, out_len_slot: * i64) -> i64 {
+fn _ws_frame_read(fd: i32, ssl: * u8, out_fin: * i64, out_opcode: * i64, out_payload_slot: * i64, out_len_slot: * i64) -> i64 {
     // malloc(12), not 8: the `len7 == 127` path fills 8 content bytes and
     // reads them with `_ws_byte_at`, whose 4-byte load at offset 7 touches
     // bytes 7..10 — so 8 content + 4 tail-load slack, matching this module's
@@ -982,7 +1007,7 @@ fn _ws_frame_read(fd: i32, out_fin: * i64, out_opcode: * i64, out_payload_slot: 
     // but the buffer is reused for the widest read).
     let hdr: * u8 = malloc(12 as usize);
     if hdr as i64 == 0 { return 1; }
-    if !_ws_recv_exact(fd, hdr, 2) {
+    if !_ws_recv_exact(fd, ssl, hdr, 2) {
         free(hdr);
         return 1;
     }
@@ -999,14 +1024,14 @@ fn _ws_frame_read(fd: i32, out_fin: * i64, out_opcode: * i64, out_payload_slot: 
     let len7: i64 = byte1 & 127;
     let mut len: i64 = len7;
     if len7 == 126 {
-        if !_ws_recv_exact(fd, hdr, 2) {
+        if !_ws_recv_exact(fd, ssl, hdr, 2) {
             free(hdr);
             return 1;
         }
         len = (_ws_byte_at(hdr, 0) << 8) | _ws_byte_at(hdr, 1);
     } else {
         if len7 == 127 {
-            if !_ws_recv_exact(fd, hdr, 8) {
+            if !_ws_recv_exact(fd, ssl, hdr, 8) {
                 free(hdr);
                 return 1;
             }
@@ -1034,7 +1059,7 @@ fn _ws_frame_read(fd: i32, out_fin: * i64, out_opcode: * i64, out_payload_slot: 
     // slack, matching `_ws_frame_send`'s identical over-allocation.
     let key: * u8 = malloc(8 as usize);
     if key as i64 == 0 { return 1; }
-    if !_ws_recv_exact(fd, key, 4) {
+    if !_ws_recv_exact(fd, ssl, key, 4) {
         free(key);
         return 1;
     }
@@ -1047,7 +1072,7 @@ fn _ws_frame_read(fd: i32, out_fin: * i64, out_opcode: * i64, out_payload_slot: 
         return 1;
     }
     if len > 0 {
-        if !_ws_recv_exact(fd, payload, len) {
+        if !_ws_recv_exact(fd, ssl, payload, len) {
             free(key);
             free(payload);
             return 1;
@@ -1076,11 +1101,14 @@ fn _ws_frame_read(fd: i32, out_fin: * i64, out_opcode: * i64, out_payload_slot: 
 // `_ws_recv_some` documents) and reply with the RFC 6455 `101`
 // response. Returns false on a malformed/missing
 // `Sec-WebSocket-Key` header or a recv/send failure.
-fn _ws_srv_handshake(fd: i32) -> bool {
+fn _ws_srv_handshake(fd: i32, ssl: * u8) -> bool {
     let req_cap: i64 = 2048;
     let buf: * u8 = malloc((req_cap + 4) as usize);
     if buf as i64 == 0 { return false; }
-    let n: i64 = _ws_recv_some(fd, buf, req_cap);
+    let mut n: i64 = 0;
+    if ssl as i64 == 0 { n = _ws_recv_some(fd, buf, req_cap); } else {
+        n = tls_read(ssl, buf, req_cap);
+    }
     if n <= 0 {
         free(buf);
         return false;
@@ -1139,14 +1167,14 @@ fn _ws_srv_handshake(fd: i32) -> bool {
     memset(_ws_ptr_off(resp, off), 0, 1 as usize);
     free(accept_val);
 
-    let ok: bool = _ws_send_all(fd, resp, off);
+    let ok: bool = _ws_send_all(fd, ssl, resp, off);
     free(resp);
     return ok;
 }
 
 // `_ws_conn_worker(ctx)` — the per-connection pool task body (#1923). It
-// matches the `Task` worker ABI (`fn (* u8) -> * u8`): `ctx` points at an
-// 8-byte cell `[client_fd: i64]` (freed here up front — no handler slot,
+// matches the `Task` worker ABI (`fn (* u8) -> * u8`): `ctx` points at a
+// 16-byte cell `[client_fd: i64, ssl: i64]` (freed here up front — no handler slot,
 // unlike `serve.sfn`'s 16-byte pair, since `websocket.serve` has no user
 // handler surface yet). Arms the socket timeouts, completes the RFC 6455
 // handshake, then loops reading client frames and driving the RFC 6455
@@ -1167,11 +1195,13 @@ fn _ws_conn_worker(ctx: * u8) -> * u8 {
     if ctx as i64 == 0 { return null; }
     let fd_slot: * i64 = ctx as * i64;
     let client_fd: i64 = atomic_load(fd_slot);
+    let ssl: * u8 = atomic_load(_ws_ptr_off(ctx, 8) as * i64) as * u8;
     free(ctx);
 
     let fd: i32 = client_fd as i32;
     _ws_set_socket_timeouts(fd);
-    if !_ws_srv_handshake(fd) {
+    if !_ws_srv_handshake(fd, ssl) {
+        if ssl as i64 != 0 { tls_shutdown_free(ssl); }
         close(fd);
         return null;
     }
@@ -1191,16 +1221,16 @@ fn _ws_conn_worker(ctx: * u8) -> * u8 {
         let mut opcode: i64 = 0;
         let mut payload_addr: i64 = 0;
         let mut len: i64 = 0;
-        let status: i64 = _ws_frame_read(fd, & fin, & opcode, & payload_addr, & len);
+        let status: i64 = _ws_frame_read(fd, ssl, & fin, & opcode, & payload_addr, & len);
         if status == 1 { break; }
         if status == 2 {
             // Unmasked client frame: close the handshake with `1002`.
-            _ws_server_close_send(fd, 1002);
+            _ws_server_close_send(fd, ssl, 1002);
             break;
         }
         if status == 3 {
             // Declared length over the cap: close with `1009` (too big).
-            _ws_server_close_send(fd, 1009);
+            _ws_server_close_send(fd, ssl, 1009);
             break;
         }
 
@@ -1211,7 +1241,7 @@ fn _ws_conn_worker(ctx: * u8) -> * u8 {
             // control frame. An empty client CLOSE round-trips as empty.
             let mut close_len: i64 = len;
             if close_len > 125 { close_len = 125; }
-            _ws_server_frame_send(fd, 8, payload_addr as * u8, close_len);
+            _ws_server_frame_send(fd, ssl, 8, payload_addr as * u8, close_len);
             free(payload_addr as * u8);
             break;
         }
@@ -1220,7 +1250,7 @@ fn _ws_conn_worker(ctx: * u8) -> * u8 {
             // 125-byte control-frame limit).
             let mut ping_len: i64 = len;
             if ping_len > 125 { ping_len = 125; }
-            _ws_server_frame_send(fd, 10, payload_addr as * u8, ping_len);
+            _ws_server_frame_send(fd, ssl, 10, payload_addr as * u8, ping_len);
             free(payload_addr as * u8);
             continue;
         }
@@ -1236,12 +1266,12 @@ fn _ws_conn_worker(ctx: * u8) -> * u8 {
                 free(payload_addr as * u8);
                 free(frag_buf as * u8);
                 frag_active = false;
-                _ws_server_close_send(fd, 1002);
+                _ws_server_close_send(fd, ssl, 1002);
                 break;
             }
             if fin == 1 {
                 // Complete single-frame message: echo it unchanged.
-                _ws_server_frame_send(fd, opcode, payload_addr as * u8, len);
+                _ws_server_frame_send(fd, ssl, opcode, payload_addr as * u8, len);
                 free(payload_addr as * u8);
                 continue;
             }
@@ -1257,7 +1287,7 @@ fn _ws_conn_worker(ctx: * u8) -> * u8 {
             if !frag_active {
                 // Continuation with no message in progress: protocol error.
                 free(payload_addr as * u8);
-                _ws_server_close_send(fd, 1002);
+                _ws_server_close_send(fd, ssl, 1002);
                 break;
             }
             let new_len: i64 = frag_len + len;
@@ -1267,7 +1297,7 @@ fn _ws_conn_worker(ctx: * u8) -> * u8 {
                 free(payload_addr as * u8);
                 free(frag_buf as * u8);
                 frag_active = false;
-                _ws_server_close_send(fd, 1009);
+                _ws_server_close_send(fd, ssl, 1009);
                 break;
             }
             let grown: * u8 = realloc(frag_buf as * u8, (new_len + 4) as usize);
@@ -1291,7 +1321,7 @@ fn _ws_conn_worker(ctx: * u8) -> * u8 {
             frag_len = new_len;
             if fin == 1 {
                 // Final fragment: echo the reassembled message as one frame.
-                _ws_server_frame_send(fd, frag_opcode, frag_buf as * u8, frag_len);
+                _ws_server_frame_send(fd, ssl, frag_opcode, frag_buf as * u8, frag_len);
                 free(frag_buf as * u8);
                 frag_active = false;
                 frag_buf = 0;
@@ -1303,8 +1333,28 @@ fn _ws_conn_worker(ctx: * u8) -> * u8 {
         free(payload_addr as * u8);
     }
     if frag_active { free(frag_buf as * u8); }
+    if ssl as i64 != 0 { tls_shutdown_free(ssl); }
     close(fd);
     return null;
+}
+
+fn _ws_enqueue_conn(queue: * u8, fd: i32, ssl: * u8) -> bool {
+    // Pack [client_fd, ssl] into a 16-byte ctx cell for the worker. Plaintext
+    // callers pass `ssl = null`; TLS callers pass the accepted `SSL*`.
+    let conn_ctx: * u8 = malloc(16 as usize);
+    if conn_ctx as i64 == 0 { return false; }
+    let fd_slot: * i64 = conn_ctx as * i64;
+    atomic_store(fd_slot, fd as i64);
+    atomic_store(_ws_ptr_off(conn_ctx, 8) as * i64, ssl as i64);
+
+    let worker: * fn (* u8) -> * u8 = _ws_conn_worker as * fn (* u8) -> * u8;
+    let task: * u8 = sfn_task_create_detached(worker as i64, conn_ctx as i64);
+    if task as i64 == 0 {
+        free(conn_ctx);
+        return false;
+    }
+    sfn_taskqueue_enqueue(queue, task);
+    return true;
 }
 
 // `sfn_websocket_serve(port)` — a v0 echo `ws://` server. Binds and
@@ -1343,23 +1393,63 @@ fn sfn_websocket_serve(port: i32) -> void ![net] {
         let fd: i32 = accept(listen_fd, null, null);
         if fd < 0 { break; }
 
-        // Pack [client_fd] into an 8-byte ctx cell for the worker.
-        let conn_ctx: * u8 = malloc(8 as usize);
-        if conn_ctx as i64 == 0 {
+        if !_ws_enqueue_conn(queue, fd, null) {
             close(fd);
             continue;
         }
-        let fd_slot: * i64 = conn_ctx as * i64;
-        atomic_store(fd_slot, fd as i64);
-
-        let worker: * fn (* u8) -> * u8 = _ws_conn_worker as * fn (* u8) -> * u8;
-        let task: * u8 = sfn_task_create_detached(worker as i64, conn_ctx as i64);
-        if task as i64 == 0 {
-            free(conn_ctx);
-            close(fd);
-            continue;
-        }
-        sfn_taskqueue_enqueue(queue, task);
     }
     close(listen_fd);
+}
+
+// `sfn_websocket_serve_tls(port, cert_path, key_path)` — TLS-terminated
+// `wss://` echo server. The certificate/key are loaded before binding so an
+// invalid TLS configuration fails closed with no plaintext listener on the
+// requested TLS port. Each accepted fd completes its TLS handshake before the
+// websocket HTTP upgrade and frame loop run through `tls_read`/`tls_write`.
+fn sfn_websocket_serve_tls(port: i32, cert_path: * u8, key_path: * u8) -> void ![net] {
+    let server_ctx: * u8 = tls_server_ctx(cert_path, key_path);
+    if server_ctx as i64 == 0 { return; }
+
+    let port_i64: i64 = port as i64;
+    if port_i64 <= 0 || port_i64 > 65535 {
+        tls_ctx_free(server_ctx);
+        return;
+    }
+    let listen_fd: i32 = _ws_srv_bind_listen(port_i64);
+    if listen_fd < 0 {
+        tls_ctx_free(server_ctx);
+        return;
+    }
+
+    let queue: * u8 = sfn_taskqueue_create(256);
+    if queue as i64 == 0 {
+        close(listen_fd);
+        tls_ctx_free(server_ctx);
+        return;
+    }
+    let scheduler: * u8 = sfn_scheduler_create(queue);
+    if scheduler as i64 == 0 {
+        sfn_taskqueue_destroy(queue);
+        close(listen_fd);
+        tls_ctx_free(server_ctx);
+        return;
+    }
+
+    loop {
+        let fd: i32 = accept(listen_fd, null, null);
+        if fd < 0 { break; }
+        _ws_set_socket_timeouts(fd);
+        let ssl: * u8 = tls_accept_fd(server_ctx, fd);
+        if ssl as i64 == 0 {
+            close(fd);
+            continue;
+        }
+        if !_ws_enqueue_conn(queue, fd, ssl) {
+            tls_shutdown_free(ssl);
+            close(fd);
+            continue;
+        }
+    }
+    close(listen_fd);
+    tls_ctx_free(server_ctx);
 }

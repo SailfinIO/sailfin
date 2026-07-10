@@ -1057,7 +1057,7 @@ fn _rh_descriptors_07(descriptors_in: RuntimeHelperDescriptor[]) -> RuntimeHelpe
     // `rendering.sfn::render_runtime_helper_declarations` were removed with
     // the bridge.
     //
-    // `websocket.serve` is now BRIDGED to the Sailfin-native server runtime
+    // `websocket.serve` / `.serve_tls` are now BRIDGED to the Sailfin-native server runtime
     // (#1877): `sfn_websocket_serve`, `parameter_types: ["i32"]` (the scalar
     // port; an object literal `{ port }` is NOT used because member-call
     // registry bridges marshal scalars, not struct literals), mirroring the
@@ -1078,6 +1078,9 @@ fn _rh_descriptors_07(descriptors_in: RuntimeHelperDescriptor[]) -> RuntimeHelpe
     // tighter than #1183's retained `net`-only check.
     descriptors = append_runtime_helper(descriptors, RuntimeHelperDescriptor {
         target: "websocket.serve", symbol: "sfn_websocket_serve", return_type: "void", parameter_types: ["i32"], effects: ["net"], native_signature: "sfn_websocket_serve", c_abi_return_type: null
+    });
+    descriptors = append_runtime_helper(descriptors, RuntimeHelperDescriptor {
+        target: "websocket.serve_tls", symbol: "sfn_websocket_serve_tls", return_type: "void", parameter_types: ["i32", "i8*", "i8*"], effects: ["net"], native_signature: "sfn_websocket_serve_tls", c_abi_return_type: null
     });
     descriptors = append_runtime_helper(descriptors, RuntimeHelperDescriptor {
         target: "websocket.send", symbol: "sfn_websocket_send", return_type: "i8*", parameter_types: ["i8*", "i8*"], effects: ["net"], native_signature: "sfn_websocket_send", c_abi_return_type: null
