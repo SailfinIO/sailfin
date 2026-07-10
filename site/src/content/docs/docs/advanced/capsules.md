@@ -79,7 +79,7 @@ entry = "src/mod.sfn"
 
 [toolchain]
 sfn = "0.8.0-alpha.3"
-channel = "stable"
+channel = "alpha"
 ```
 
 ### Field Reference
@@ -156,7 +156,7 @@ The `[toolchain]` section declares which `sfn` toolchain builds this capsule —
 ```toml
 [toolchain]
 sfn = "0.8.0-alpha.3"     # floor: the running toolchain must be >= this
-channel = "stable"         # optional: reject a lower-stability running toolchain
+channel = "alpha"          # optional: reject a lower-stability running toolchain
 ```
 
 **Floor semantics (Go-style, not exact-pin).** `sfn` is a minimum version, not an exact match — the running `sfn` must be `>=` the pinned version, ordered by semver precedence (build metadata after `+` is ignored for comparison). A pin of `0.8.0-alpha.2` is satisfied by `0.8.0-alpha.2`, `0.8.0-alpha.3`, `0.8.0`, or `0.9.0`, and is rejected by `0.8.0-alpha.1` or any `0.7.x` toolchain.

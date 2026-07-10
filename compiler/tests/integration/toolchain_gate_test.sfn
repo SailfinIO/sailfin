@@ -61,10 +61,11 @@ test "toolchain gate: an unsatisfiable version pin hard-errors" ![io] {
 
 test "toolchain gate: --skip-toolchain-check downgrades the pin to a warning" ![io] {
     let dir = _make_project("skip", "[toolchain]\nsfn = \"99.0.0\"\n");
-    let _exit = process.run_capture([_sfn_bin(), "check", "--skip-toolchain-check", dir], _child_env());
+    let exit = process.run_capture([_sfn_bin(), "check", "--skip-toolchain-check", dir], _child_env());
     let out = process.capture_take_stdout();
     let err = process.capture_take_stderr();
-    // The hard error must not fire (a downgraded warning is acceptable).
+    // The mismatch is downgraded and the command proceeds to a clean check.
+    assert exit == 0;
     assert find(out + err, "error: toolchain mismatch", 0) < 0;
 }
 
@@ -72,25 +73,41 @@ test "toolchain gate: SAILFIN_TOOLCHAIN=off downgrades the pin to a warning" ![i
     let dir = _make_project("env-off", "[toolchain]\nsfn = \"99.0.0\"\n");
     let mut e = _child_env();
     e.push("SAILFIN_TOOLCHAIN=off");
-    let _exit = process.run_capture([_sfn_bin(), "check", dir], e);
+    let exit = process.run_capture([_sfn_bin(), "check", dir], e);
     let out = process.capture_take_stdout();
     let err = process.capture_take_stderr();
+    assert exit == 0;
     assert find(out + err, "error: toolchain mismatch", 0) < 0;
 }
 
 test "toolchain gate: a satisfiable version pin passes the gate" ![io] {
     let dir = _make_project("low-pin", "[toolchain]\nsfn = \"0.0.1\"\n");
-    let _exit = process.run_capture([_sfn_bin(), "check", dir], _child_env());
+    let exit = process.run_capture([_sfn_bin(), "check", dir], _child_env());
     let out = process.capture_take_stdout();
     let err = process.capture_take_stderr();
+    // A satisfied pin passes the gate and the check itself succeeds.
+    assert exit == 0;
     assert find(out + err, "toolchain mismatch", 0) < 0;
 }
 
 test "toolchain gate: channel = stable rejects a prerelease toolchain" ![io] {
+    // Conditioned on the running toolchain: `channel = "stable"` only rejects
+    // when the running `sfn` is itself a prerelease. This keeps the test valid
+    // after the project ships a stable (no-prerelease) toolchain.
+    let _v = process.run_capture([_sfn_bin(), "--version"], _child_env());
+    let ver = process.capture_take_stdout() + process.capture_take_stderr();
+    let is_prerelease = find(ver, "-alpha", 0) >= 0 || find(ver, "-beta", 0) >= 0
+        || find(ver, "-rc", 0) >= 0;
+
     let dir = _make_project("chan", "[toolchain]\nchannel = \"stable\"\n");
     let exit = process.run_capture([_sfn_bin(), "check", dir], _child_env());
     let out = process.capture_take_stdout();
     let err = process.capture_take_stderr();
-    assert exit != 0;
-    assert find(out + err, "toolchain mismatch", 0) >= 0;
+    if is_prerelease {
+        assert exit != 0;
+        assert find(out + err, "toolchain mismatch", 0) >= 0;
+    } else {
+        // A stable running toolchain satisfies `channel = "stable"`.
+        assert find(out + err, "toolchain mismatch", 0) < 0;
+    }
 }

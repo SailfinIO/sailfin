@@ -607,18 +607,21 @@ fn toolchain_gate(entry_hint: string, binary_dir: string, skip_flag: boolean) ->
     let project_root = discover_project_root(start);
     let workspace_root = discover_workspace_root(start);
 
+    // Track each field's origin separately so the mismatch diagnostic
+    // attributes the pin accurately when a member capsule.toml overrides only
+    // one field of a workspace.toml default.
     let mut pin_sfn: string = "";
     let mut pin_channel: string = "";
-    let mut pin_source: string = "";
+    let mut sfn_source: string = "";
+    let mut channel_source: string = "";
     if workspace_root.length > 0 {
         let ws_path = _cr_path_join(workspace_root, "workspace.toml");
         if fs.exists(ws_path) {
             let ws_text = fs.readFile(ws_path);
             pin_sfn = toml_get_toolchain_sfn(ws_text);
             pin_channel = toml_get_toolchain_channel(ws_text);
-            if pin_sfn.length > 0 || pin_channel.length > 0 {
-                pin_source = "workspace.toml";
-            }
+            if pin_sfn.length > 0 { sfn_source = "workspace.toml"; }
+            if pin_channel.length > 0 { channel_source = "workspace.toml"; }
         }
     }
     if project_root.length > 0 {
@@ -629,11 +632,11 @@ fn toolchain_gate(entry_hint: string, binary_dir: string, skip_flag: boolean) ->
             let m_channel = toml_get_toolchain_channel(cap_text);
             if m_sfn.length > 0 {
                 pin_sfn = m_sfn;
-                pin_source = "capsule.toml";
+                sfn_source = "capsule.toml";
             }
             if m_channel.length > 0 {
                 pin_channel = m_channel;
-                if pin_source.length == 0 { pin_source = "capsule.toml"; }
+                channel_source = "capsule.toml";
             }
         }
     }
@@ -654,8 +657,14 @@ fn toolchain_gate(entry_hint: string, binary_dir: string, skip_flag: boolean) ->
         }
     }
     if pin_channel.length > 0 {
-        if _toolchain_running_channel_rank(running) < _toolchain_channel_rank(pin_channel) {
-            ok = false;
+        let pin_rank = _toolchain_channel_rank(pin_channel);
+        if pin_rank < 0 {
+            print.err("warning: [toolchain] channel = \"" + pin_channel
+                + "\" is not a recognized channel (stable|rc|beta|alpha); ignoring the channel pin");
+        } else {
+            if _toolchain_running_channel_rank(running) < pin_rank {
+                ok = false;
+            }
         }
     }
 
@@ -671,6 +680,17 @@ fn toolchain_gate(entry_hint: string, binary_dir: string, skip_flag: boolean) ->
     if pin_channel.length > 0 {
         if pin_desc.length > 0 { pin_desc = pin_desc + " "; }
         pin_desc = pin_desc + "(" + pin_channel + " channel)";
+    }
+    // Attribute the diagnostic to whichever file(s) actually contributed a
+    // pinned field — both, when a member override and a workspace default each
+    // supplied one.
+    let mut pin_source: string = sfn_source;
+    if channel_source.length > 0 {
+        if pin_source.length == 0 { pin_source = channel_source; } else {
+            if !strings_equal(pin_source, channel_source) {
+                pin_source = pin_source + " + " + channel_source;
+            }
+        }
     }
     if pin_source.length == 0 { pin_source = "capsule.toml"; }
 
