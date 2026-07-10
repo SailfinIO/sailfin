@@ -443,7 +443,13 @@ jobs:
       - name: Install clang (Linux)
         run: |
           sudo apt-get update
-          sudo apt-get install -y clang-18 llvm-18 jq
+          # lld provides the unversioned ld.lld/lld binaries the compiler's
+          # Linux-only linker auto-detect probes (compiler/src/build/link.sfn);
+          # llvm-18 ships only versioned names, so without lld every example/
+          # test link falls to the slower system-default linker instead of the
+          # intended fast path (SFN-176). ubuntu-24.04's default lld is
+          # version 18.
+          sudo apt-get install -y clang-18 llvm-18 lld jq
           echo "CLANG=clang-18" >> "$GITHUB_ENV"
 
       # Shared compiler build (#1234): download the per-OS tree built by
@@ -533,6 +539,16 @@ jobs:
       - name: Examples sweep (epic #549)
         if: ${{ matrix.primary }}
         shell: bash
+        env:
+          # The first example compiled (sorted order: advanced/decorators.sfn)
+          # pays the full cold module+object cache cost; on this shared runner
+          # that can exceed the script's 25s default and time out `sfn run` —
+          # surfacing as a RUN_FAIL whose only stderr is the `[link]` info line
+          # (misread as a linker fault in SFN-176). Give the cold first-example
+          # compile headroom; the non-terminating examples that must not run to
+          # completion are already excluded via the script's SKIP_RUN list, so
+          # a genuine hang is still caught.
+          SAILFIN_EXAMPLES_TIMEOUT: "60"
         run: scripts/check-examples.sh
 
       # Regression guard for #615 / #807: assert the effect gate
