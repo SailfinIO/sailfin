@@ -210,10 +210,9 @@ test "asan: concurrent channel producer/consumer over the moved-OwnedBuf seam is
     let bo = process.capture_take_stdout();
     let be = process.capture_take_stderr();
     if bexit != 0 {
-        print.err("[DIAG ownedbuf-channel build FAIL] stdout=<" + bo
-            + "> stderr=<"
-            + be
-            + ">");
+        print.err("ownedbuf-channel: nested `sfn build` failed\nstdout: " + bo
+            + "\nstderr: "
+            + be);
     }
     assert bexit == 0;
 
@@ -536,10 +535,9 @@ test "asan: serve handlers over the moved-OwnedBuf req/resp seam are corruption-
     let bo = process.capture_take_stdout();
     let be = process.capture_take_stderr();
     if bexit != 0 {
-        print.err("[DIAG ownedbuf-serve build FAIL] stdout=<" + bo
-            + "> stderr=<"
-            + be
-            + ">");
+        print.err("ownedbuf-serve: nested `sfn build` failed\nstdout: " + bo
+            + "\nstderr: "
+            + be);
     }
     assert bexit == 0;
 

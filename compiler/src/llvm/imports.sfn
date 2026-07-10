@@ -209,8 +209,33 @@ fn collect_imported_module_context_for_module(imports: NativeImport[], current_m
     };
 }
 
+// Import-context staging root for the in-process lowering reader. The
+// resolver's WRITER already routes staged `.sfn-asm` / `.layout-manifest` /
+// `.slugalias` sidecars under `_cr_import_context_root(work_dir)`
+// (`<work_dir>/compiler/import-context` when `--work-dir` is set, else the
+// fixed default), but this reader historically hardcoded the fixed default —
+// so a `--work-dir` build wrote its capsule interfaces into its private tree
+// yet lowered by reading the SHARED default one. Two concurrent builds then
+// re-published that shared tree and a reader could observe a torn set (a
+// capsule's per-module sidecars are renamed in independently), reporting a
+// missing layout / callee signature (SFN-167). Routing the reader through the
+// same root the writer computes closes that; empty work_dir keeps the
+// canonical default so single-build behavior is byte-identical. Set via
+// `set_import_context_root` at the `stage_capsule_imports` choke point,
+// mirroring the #1333 `program.ll` per-invocation routing and the
+// `test_runner_state.sfn` module-global setter pattern.
+let mut _import_context_root: string = "build/compiler/import-context";
+
+fn set_import_context_root(root: string) {
+    if root.length == 0 {
+        _import_context_root = "build/compiler/import-context";
+        return;
+    }
+    _import_context_root = root;
+}
+
 fn _slug_alias_path_for_slug(slug: string) -> string {
-    return "build/compiler/import-context/" + slug + ".slugalias";
+    return _import_context_root + "/" + slug + ".slugalias";
 }
 
 // #873: read the `.slugalias` sidecar the resolver drops at a capsule
@@ -407,11 +432,11 @@ fn resolve_import_module_slug_for_module(module: string, current_module_slug: st
 }
 
 fn layout_manifest_path_for_slug(slug: string) -> string {
-    return "build/compiler/import-context/" + slug + ".layout-manifest";
+    return _import_context_root + "/" + slug + ".layout-manifest";
 }
 
 fn native_text_path_for_slug(slug: string) -> string {
-    return "build/compiler/import-context/" + slug + ".sfn-asm";
+    return _import_context_root + "/" + slug + ".sfn-asm";
 }
 
 fn _resolve_layout_manifest_path_for_slug(slug: string) -> string {

@@ -47,6 +47,7 @@ import { _write_llvm_text } from "../../build/cache";
 import { _read_import_deps, _resolve_self_path } from "../../build/paths";
 import { stage_capsule_imports_for_emit } from "../../capsule_resolver";
 import { emit_llvm_with_retry, emit_parse_nonneg_int } from "../../emit_helpers";
+import { set_import_context_root } from "../../llvm/mod";
 import {
     compile_to_llvm_with_module_timed,
     compile_to_sailfin,
@@ -78,6 +79,13 @@ fn run(matches: Matches, ctx: CliContext) -> int ![io, clock] {
     // path reads `<root>/<module-name>.import-deps` so callee-effect
     // transitivity (`E0402`) is enforced on the build path.
     let import_context_root: string = get_or(matches, "import-context", "");
+    // Route the lowering reader to the passed per-invocation import-context
+    // tree (a build-internal worker emit under `--work-dir`) so it reads
+    // layout manifests / callee signatures from the same isolated tree the
+    // resolver staged, not the shared default (SFN-167). Empty → default.
+    if import_context_root.length > 0 {
+        set_import_context_root(import_context_root);
+    }
     // #515: `--attempts N` (N >= 1) sets the emit+validate attempt count via
     // the same nonneg parse the legacy body used; a bad / `< 1` value is
     // ignored so the bare CLI stays byte-for-byte behaviour-preserving.

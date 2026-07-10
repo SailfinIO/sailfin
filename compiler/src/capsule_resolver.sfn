@@ -69,6 +69,7 @@ import {
 } from "./capsule_import_scan";
 import { _display_capsule_name_cmd } from "./capsule_names";
 import { emit_subprocess_with_retry } from "./emit_helpers";
+import { set_import_context_root } from "./llvm/mod";
 import { _LockEntry, lock_get_versions } from "./lock";
 import {
     compile_to_llvm_file_with_module,
@@ -1309,6 +1310,12 @@ fn _cr_extract_layout_manifest(asm_path: string, manifest_path: string) ![io] {
 // (`sfn test` today; `sfn check` threads its exe since #1246).
 fn stage_capsule_imports(sources: CapsuleSource[], sailfin_exe: string, work_dir: string) -> boolean ![io] {
     let context_root = _cr_import_context_root(work_dir);
+    // Route the in-process lowering reader to the same per-invocation
+    // import-context tree the writer below stages into, so a `--work-dir`
+    // build reads its OWN isolated interfaces rather than the shared default
+    // tree two concurrent builds can tear (SFN-167). Empty work_dir → the
+    // canonical default, so the default build path is unchanged.
+    set_import_context_root(context_root);
     if work_dir.length == 0 {
         _cr_ensure_dir("build");
         _cr_ensure_dir("build/native");
