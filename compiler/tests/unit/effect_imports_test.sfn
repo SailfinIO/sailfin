@@ -236,6 +236,31 @@ test "validate_effects_with_imports: imported callee surfaces E0402-shaped viola
     assert prefix_match;
 }
 
+test "validate_effects_with_imports: imported ![pure] callee never surfaces E0402 (SFN-184)" {
+    // Regression (SFN-184): `pure` is a no-op marker — the taxonomy
+    // (`effect_taxonomy.sfn`) says it "never satisfies a real effect
+    // requirement" and is "not a capability", so it must never be
+    // *propagated as* a caller requirement either. Before the fix,
+    // `_propagate_imported_callee_effects` propagated `pure` like any
+    // other declared effect, so a caller of an imported `![pure]`
+    // function was spuriously flagged E0402 for a `pure` it can never
+    // legally declare (`![io, pure]` is contradictory). This broke the
+    // SFN-167 toolchain gate's `![io]` call into the `![pure]` semver
+    // primitive (SFN-169) at self-host time.
+    //
+    // `_routine_calling` builds `run()` with no declared effects — the
+    // strictest caller — calling an imported `pure_parse` declaring
+    // `![pure]`. Post-fix the propagated requirement set is empty, so
+    // there is no violation.
+    let mut global = empty_import_symbols();
+    global = append_import_function(global, "pure_parse", ["pure"]);
+    let import_stmt = _import_decl("pure_parse", null, "semver");
+    let routine_stmt = _routine_calling("run", "pure_parse", 5);
+    let program = Program { statements: [import_stmt, routine_stmt] };
+    let violations = validate_effects_with_imports(program, global);
+    assert violations.length == 0;
+}
+
 test "validate_effects_with_imports: aliased import resolves under the local name" {
     // Same setup as the previous test but with `import { fetch as
     // get }` — the call site reads `get()`. Localization must
@@ -429,6 +454,20 @@ test "member resolution: object-agnostic name match fires (pinned policy)" {
     let violations = validate_effects_with_imports(program, table);
     assert violations.length == 1;
     assert violations[0].routine_name == "run";
+}
+
+test "member resolution: imported ![pure] member callee never surfaces E0402 (SFN-184)" {
+    // Mirror of the direct-callee `![pure]` regression on the member
+    // path (`_propagate_imported_member_effects`): a `mod.pure_member()`
+    // whose imported target declares `![pure]` must not require `pure` of
+    // the caller. Pins both propagation guards so a future edit can't
+    // silently fix one and leave the other propagating `pure`.
+    let import_stmt = _import_decl("pure_member", null, "semver");
+    let caller = _routine_member_calling("run", "mod", "pure_member", 5);
+    let program = Program { statements: [import_stmt, caller] };
+    let table = append_import_function(empty_import_symbols(), "pure_member", ["pure"]);
+    let violations = validate_effects_with_imports(program, table);
+    assert violations.length == 0;
 }
 
 test "collision: a same-module local fn shadows a same-named import" {
