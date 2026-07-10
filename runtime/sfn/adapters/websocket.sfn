@@ -106,6 +106,8 @@ extern fn tls_server_ctx(cert_path: * u8, key_path: * u8) -> * u8;
 
 extern fn tls_accept_fd(ctx: * u8, fd: i32) -> * u8;
 
+extern fn tls_ctx_free(ctx: * u8) -> void;
+
 extern fn tls_read(ssl: * u8, buf: * u8, n: i64) -> i64;
 
 extern fn tls_write(ssl: * u8, buf: * u8, n: i64) -> i64;
@@ -1409,25 +1411,34 @@ fn sfn_websocket_serve_tls(port: i32, cert_path: * u8, key_path: * u8) -> void !
     if server_ctx as i64 == 0 { return; }
 
     let port_i64: i64 = port as i64;
-    if port_i64 <= 0 || port_i64 > 65535 { return; }
+    if port_i64 <= 0 || port_i64 > 65535 {
+        tls_ctx_free(server_ctx);
+        return;
+    }
     let listen_fd: i32 = _ws_srv_bind_listen(port_i64);
-    if listen_fd < 0 { return; }
+    if listen_fd < 0 {
+        tls_ctx_free(server_ctx);
+        return;
+    }
 
     let queue: * u8 = sfn_taskqueue_create(256);
     if queue as i64 == 0 {
         close(listen_fd);
+        tls_ctx_free(server_ctx);
         return;
     }
     let scheduler: * u8 = sfn_scheduler_create(queue);
     if scheduler as i64 == 0 {
         sfn_taskqueue_destroy(queue);
         close(listen_fd);
+        tls_ctx_free(server_ctx);
         return;
     }
 
     loop {
         let fd: i32 = accept(listen_fd, null, null);
         if fd < 0 { break; }
+        _ws_set_socket_timeouts(fd);
         let ssl: * u8 = tls_accept_fd(server_ctx, fd);
         if ssl as i64 == 0 {
             close(fd);
@@ -1440,4 +1451,5 @@ fn sfn_websocket_serve_tls(port: i32, cert_path: * u8, key_path: * u8) -> void !
         }
     }
     close(listen_fd);
+    tls_ctx_free(server_ctx);
 }
