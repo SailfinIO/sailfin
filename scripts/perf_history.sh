@@ -19,7 +19,7 @@
 #   runtime.csv  run_sha,run_date,workload,inner_ms_min,inner_ms_median,peak_kb,ops,ops_per_ms,status,seed_version,platform
 #   build.csv    run_sha,run_date,build_wall_s,budget_s
 #
-# The raw per-run CSVs come straight from scripts/bench_compile.sh --csv and
+# The raw per-run CSVs come straight from `sfn bench --compiler --csv` and
 # scripts/bench_runtime.sh --csv; this script only prepends the two run
 # columns. The whole-build budget row is separate because the compile bench
 # sums *isolated* per-module emit times (serial), which is not the parallel

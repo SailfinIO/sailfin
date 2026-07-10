@@ -149,7 +149,7 @@ dashboard.
 not a one-shot artifact. Regressions open work items automatically.
 
 *Adaptation:* a nightly workflow runs `make bench --csv` (per-module compile
-time + peak RSS — the harness already exists in `scripts/bench_compile.sh`)
+time + peak RSS — the harness already exists as `sfn bench --compiler`)
 and `make bench-runtime`, appends the CSVs plus commit SHA to an orphan
 `bench-data` branch, and compares against the rolling median of the last N
 runs. A regression beyond threshold (initially: >10% wall-time or >10% peak

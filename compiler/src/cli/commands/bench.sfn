@@ -1,0 +1,360 @@
+// compiler/src/cli/commands/bench.sfn
+//
+// `sfn bench --compiler` subcommand (SFN-61, epic #1503). Replaces
+// `scripts/bench_compile.sh`: benchmarks per-module compiler-emit time and
+// peak RSS by re-emitting each `compiler/src/**.sfn` module's LLVM IR
+// against a staged import-context, driving the build-internal emit path
+// (`--module-name` / `--import-context` / `--no-resolve-gate`) through the
+// metered subprocess primitive `process.run_capture_metered` so no per-module
+// cwd or directory copy is needed.
+import {
+    Command,
+    Matches,
+    command,
+    flag,
+    flag_int,
+    flag_repeat,
+    flag_value,
+    get_int,
+    get_or,
+    has,
+    has_flag,
+    repeated,
+    with_flag
+} from "sfn/cli";
+
+import { _collect_sfn_files_cmd } from "../../build/fs";
+import { _ensure_dir, _resolve_self_path } from "../../build/paths";
+import { module_name_from_path } from "../../main";
+import { number_to_string } from "../../num_format";
+import { index_of } from "../../string_utils";
+import { resolve_compiler_version } from "../../version";
+import { CliContext } from "../context";
+
+// The `sfn/cli` definition for `bench`, registered on the v2 root via
+// `with_subcommand`. `--compiler` selects the only implemented mode
+// (per-module compiler emit benchmarking); every other flag configures
+// that mode.
+fn command_def() -> Command {
+    return with_flag(with_flag(with_flag(with_flag(with_flag(with_flag(with_flag(with_flag(command("bench", "Benchmark compiler build performance"), flag("compiler", "Benchmark per-module compiler emit time + peak memory")), flag_repeat("module", "Benchmark only modules whose source path contains this substring (repeatable)")), flag_int("top", "Print the N slowest modules after the run")), flag_value("csv", "Write per-module results as CSV to this path")), flag_int("budget-time", "Fail (exit 2) if any module exceeds this wall time in seconds")), flag_int("budget-mem", "Fail (exit 2) if any module exceeds this peak RSS in KB")), flag_value("import-context", "Root of the staged import-context tree (default build/compiler/import-context)")), flag_value("work-dir", "Directory for emitted .ll outputs (default build/bench)"));
+}
+
+// Format an integer millisecond duration as fixed-point seconds with two
+// decimal places (e.g. `1234` -> `"1.23"`), matching the bash script's
+// `%.2f` wall-time column.
+fn _fmt_secs(ms: int) -> string {
+    let s = ms / 1000;
+    let cs = (ms % 1000) / 10;
+    let mut cs_str = number_to_string(cs);
+    if cs < 10 { cs_str = "0" + cs_str; }
+    return number_to_string(s) + "." + cs_str;
+}
+
+// Slug (path with slashes, no `.sfn`) for a `compiler/src/**.sfn` module,
+// reusing the same prefix-stripping logic the emit path itself uses for
+// symbol mangling, so the slug passed to `--module-name` matches the
+// import-context's on-disk artifact names exactly.
+fn _bench_slug(src: string) -> string { return module_name_from_path(src); }
+
+// Flatten a slug's slashes into `__` for a filesystem-safe, human-readable
+// module label (e.g. `parser/mod` -> `parser__mod`), matching the bash
+// script's `module_name_from_path` (sed `s|/|__|g`).
+fn _bench_flatten(slug: string) -> string {
+    let mut out = "";
+    let mut i = 0;
+    loop {
+        if i >= slug.length { break; }
+        let ch = slug[i];
+        if ch == "/" { out = out + "__"; } else { out = out + ch; }
+        i += 1;
+    }
+    return out;
+}
+
+fn _bench_child_env() -> string[] ![io] {
+    let mut e: string[] = [];
+    let path = env.get("PATH");
+    if path.length > 0 { e.push("PATH=" + path); }
+    let home = env.get("HOME");
+    if home.length > 0 { e.push("HOME=" + home); }
+    let tmpdir = env.get("TMPDIR");
+    if tmpdir.length > 0 { e.push("TMPDIR=" + tmpdir); }
+    return e;
+}
+
+// Count newline graphemes in `content` (the emitted `.ll` line count).
+fn _bench_count_lines(content: string) -> int {
+    let mut n = 0;
+    let mut i = 0;
+    loop {
+        if i >= content.length { break; }
+        if content[i] == "\n" { n += 1; }
+        i += 1;
+    }
+    return n;
+}
+
+// Filter `all` down to the first source whose path contains each of
+// `modules`, in `modules` order; warns to stderr on a filter with no match.
+fn _bench_filter_sources(all: string[], modules: string[]) -> string[] ![io] {
+    let mut out: string[] = [];
+    let mut mi = 0;
+    loop {
+        if mi >= modules.length { break; }
+        let m = modules[mi];
+        let mut found = "";
+        let mut si = 0;
+        loop {
+            if si >= all.length { break; }
+            if index_of(all[si], m) >= 0 {
+                found = all[si];
+                break;
+            }
+            si += 1;
+        }
+        if found.length == 0 {
+            print.err("[bench] warning: no source matching " + m);
+        } else { out.push(found); }
+        mi += 1;
+    }
+    return out;
+}
+
+fn run(matches: Matches, ctx: CliContext) -> int ![clock, io] {
+    if !has_flag(matches, "compiler") {
+        print.err("sfn bench: only --compiler mode is implemented (runtime-workload bench is a separate child of epic #1503)");
+        return 2;
+    }
+
+    let import_ctx = get_or(matches, "import-context", "build/compiler/import-context");
+    let work_dir = get_or(matches, "work-dir", "build/bench");
+    let csv_out = get_or(matches, "csv", "");
+    let mut top_n = 0;
+    if has(matches, "top") { top_n = get_int(matches, "top"); }
+    let mut budget_time = 0;
+    if has(matches, "budget-time") {
+        budget_time = get_int(matches, "budget-time");
+    }
+    let mut budget_mem = 0;
+    if has(matches, "budget-mem") {
+        budget_mem = get_int(matches, "budget-mem");
+    }
+    let modules = repeated(matches, "module");
+
+    if !fs.exists(import_ctx) {
+        print.err("[bench] error: import-context not found at " + import_ctx);
+        print.err("[bench] hint: run 'make compile' first");
+        return 1;
+    }
+
+    let self_bin = _resolve_self_path(ctx.binary_dir);
+    let version = resolve_compiler_version(ctx.binary_dir);
+
+    let all = _collect_sfn_files_cmd("compiler/src", 32);
+    let mut sources: string[] = all;
+    if modules.length > 0 { sources = _bench_filter_sources(all, modules); }
+
+    print("[bench] seed: " + self_bin + " (" + version + ")");
+    print("[bench] modules: " + number_to_string(sources.length));
+    print("");
+    print("  MODULE                                                     TIME      PEAK     IR LINES  STATUS");
+    print("  ------                                                     ----      ----     --------  ------");
+
+    _ensure_dir(work_dir);
+
+    let mut names: string[] = [];
+    let mut wall_ms_list: int[] = [];
+    let mut peak_kb_list: int[] = [];
+    let mut lines_list: int[] = [];
+    let mut status_list: string[] = [];
+
+    let child_env = _bench_child_env();
+
+    let mut i = 0;
+    loop {
+        if i >= sources.length { break; }
+        let src = sources[i];
+        let slug = _bench_slug(src);
+        let name = _bench_flatten(slug);
+        let out_ll = work_dir + "/" + name + ".ll";
+
+        let argv: string[] = [self_bin, "emit", "--module-name", slug, "--import-context", import_ctx, "--no-resolve-gate", "-o", out_ll, "llvm", src];
+
+        let _exit = process.run_capture_metered(argv, child_env);
+        let _o = process.capture_take_stdout();
+        let _e = process.capture_take_stderr();
+        let wall_ms = process.capture_take_wall_ms();
+        let peak_kb = process.capture_take_peak_rss_kb();
+
+        let mut ir_lines = 0;
+        let mut status = "ok";
+        if fs.exists(out_ll) {
+            let content = fs.readFile(out_ll);
+            if content.length == 0 { status = "FAIL"; } else {
+                ir_lines = _bench_count_lines(content);
+            }
+        } else { status = "FAIL"; }
+
+        if budget_time > 0 {
+            let seconds = wall_ms / 1000;
+            if seconds > budget_time && strings_equal(status, "ok") {
+                status = "SLOW";
+            }
+        }
+        if budget_mem > 0 && peak_kb > budget_mem {
+            if strings_equal(status, "ok") { status = "HIGHMEM"; } else {
+                status = status + "+HIGHMEM";
+            }
+        }
+
+        names.push(name);
+        wall_ms_list.push(wall_ms);
+        peak_kb_list.push(peak_kb);
+        lines_list.push(ir_lines);
+        status_list.push(status);
+
+        print("  " + name + "  " + _fmt_secs(wall_ms) + "s  " + number_to_string(peak_kb / 1024)
+            + "MB  "
+            + number_to_string(ir_lines)
+            + "  "
+            + status);
+        i += 1;
+    }
+
+    let mut total_ms = 0;
+    let mut max_ms = 0;
+    let mut max_ms_name = "";
+    let mut max_kb = 0;
+    let mut max_kb_name = "";
+    let mut fail_count = 0;
+    let mut slow_count = 0;
+    let mut highmem_count = 0;
+
+    i = 0;
+    loop {
+        if i >= names.length { break; }
+        total_ms += wall_ms_list[i];
+        if wall_ms_list[i] > max_ms {
+            max_ms = wall_ms_list[i];
+            max_ms_name = names[i];
+        }
+        if peak_kb_list[i] > max_kb {
+            max_kb = peak_kb_list[i];
+            max_kb_name = names[i];
+        }
+        if index_of(status_list[i], "FAIL") == 0 { fail_count += 1; }
+        if index_of(status_list[i], "SLOW") >= 0 { slow_count += 1; }
+        if index_of(status_list[i], "HIGHMEM") >= 0 { highmem_count += 1; }
+        i += 1;
+    }
+
+    print("");
+    print("==================================================================");
+    print("");
+    print("  SUMMARY");
+    print("  -------");
+    print("  Modules:       " + number_to_string(names.length));
+    print("  Total time:    " + _fmt_secs(total_ms) + "s");
+    print("  Slowest:       " + _fmt_secs(max_ms) + "s  (" + max_ms_name + ")");
+    print("  Peak memory:   " + number_to_string(max_kb / 1024) + "MB  ("
+        + max_kb_name
+        + ")");
+    if fail_count > 0 {
+        print("  FAILURES:      " + number_to_string(fail_count));
+    }
+    if budget_time > 0 {
+        print("  Over budget:   " + number_to_string(slow_count) + " modules > "
+            + number_to_string(budget_time)
+            + "s");
+    }
+    if budget_mem > 0 {
+        print("  Over memory:   " + number_to_string(highmem_count)
+            + " modules > "
+            + number_to_string(budget_mem / 1024)
+            + "MB");
+    }
+    print("");
+
+    if csv_out.length > 0 {
+        let csv_dir_slash = index_of(csv_out, "/");
+        if csv_dir_slash >= 0 {
+            let mut last_slash = -1;
+            let mut ci = 0;
+            loop {
+                if ci >= csv_out.length { break; }
+                if csv_out[ci] == "/" { last_slash = ci; }
+                ci += 1;
+            }
+            if last_slash > 0 {
+                _ensure_dir(substring(csv_out, 0, last_slash));
+            }
+        }
+        let mut csv_content = "module,time_s,peak_kb,ir_lines,status,seed_version\n";
+        i = 0;
+        loop {
+            if i >= names.length { break; }
+            csv_content = csv_content + names[i] + "," + _fmt_secs(wall_ms_list[i])
+                + ","
+                + number_to_string(peak_kb_list[i])
+                + ","
+                + number_to_string(lines_list[i])
+                + ","
+                + status_list[i]
+                + ","
+                + version
+                + "\n";
+            i += 1;
+        }
+        fs.writeFile(csv_out, csv_content);
+        print("[bench] wrote " + csv_out);
+    }
+
+    if top_n > 0 && names.length > top_n {
+        print("  TOP " + number_to_string(top_n) + " BY COMPILE TIME");
+        print("  -------------------------");
+        let mut order: int[] = [];
+        i = 0;
+        loop {
+            if i >= names.length { break; }
+            order.push(i);
+            i += 1;
+        }
+        let mut a = 0;
+        loop {
+            if a >= order.length { break; }
+            let mut best = a;
+            let mut b = a + 1;
+            loop {
+                if b >= order.length { break; }
+                if wall_ms_list[order[b]] > wall_ms_list[order[best]] {
+                    best = b;
+                }
+                b += 1;
+            }
+            let tmp = order[a];
+            order[a] = order[best];
+            order[best] = tmp;
+            a += 1;
+        }
+        let mut t = 0;
+        loop {
+            if t >= top_n { break; }
+            let idx = order[t];
+            print("  " + names[idx] + "  " + _fmt_secs(wall_ms_list[idx]) + "s");
+            t += 1;
+        }
+        print("");
+    }
+
+    if fail_count > 0 {
+        print.err("[bench] FAIL: " + number_to_string(fail_count)
+            + " modules failed to compile");
+        return 1;
+    }
+    if slow_count > 0 || highmem_count > 0 {
+        print.err("[bench] WARNING: budget violations detected");
+        return 2;
+    }
+    print("[bench] all modules within budget");
+    return 0;
+}
