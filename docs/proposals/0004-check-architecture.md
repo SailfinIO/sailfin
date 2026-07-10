@@ -1722,7 +1722,7 @@ pre-commit hook for contributors who want it.
     shell: bash {0}
     run: |
       set -euo pipefail
-      build/seed/bin/sailfin check compiler/src/ runtime/
+      build/toolchains/seed/bin/sfn check compiler/src/ runtime/
   ```
 
   Runs after `fetch-seed` but before any `make compile`. Failures

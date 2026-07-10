@@ -442,9 +442,9 @@ The repository Makefile provides higher-level build orchestration for the self-h
 | `make test-integration` | Run integration tests from `compiler/tests/integration/*_test.sfn`. |
 | `make test-e2e` | Run end-to-end tests from `compiler/tests/e2e/*_test.sfn`. |
 | `make package` | Build and package native artifacts into `dist/`. Used for release artifacts. |
-| `make fetch-seed` | Download the latest released seed compiler from GitHub Releases into `build/seed/`. Requires `GITHUB_TOKEN`. |
+| `make fetch-seed` | Download the pinned seed compiler (`.seed-version`, override with `SEED_VERSION`) from GitHub Releases into `build/toolchains/seed/`. Requires `GITHUB_TOKEN`. |
 | `make clean` | Remove `dist/` packaged artifacts. Does not remove build intermediates. |
-| `make clean-build` | Remove `build/` artifacts (keeps `build/seed/` by default). Pass `KEEP_SEED=0` to also remove the downloaded seed. |
+| `make clean-build` | Remove `build/` artifacts (keeps the seed toolchain under `build/toolchains/` by default). Pass `KEEP_SEED=0` to also remove `build/toolchains/`. |
 | `make clean-all` | Remove both `dist/` and `build/` artifacts completely. |
 | `make help` | Print a summary of available targets. |
 
@@ -472,11 +472,11 @@ These environment variables influence the behavior of `sfn` and the Makefile bui
 | `GITHUB_TOKEN` | `make fetch-seed` | GitHub personal access token used to download seed releases from the `SailfinIO/sailfin` repository. Required for `make fetch-seed`. |
 | `BUILD_JOBS` | Makefile | Number of parallel compile jobs. Default: `1`. |
 | `BUILD_ARGS` | Makefile | Extra arguments passed through to the build orchestrator script. |
-| `SEED` | Makefile | Path to (or name of) the seed compiler used as the bootstrap. Defaults to `sfn` (resolved from `PATH`). |
+| `SEED` | Makefile | Path to (or name of) the seed compiler used as the bootstrap. Defaults to the fetched repo-local seed alias, `build/toolchains/seed/bin/sfn` (`sfn.exe` on Windows). |
 | `SEED_VERSION` | Makefile | Version tag of the seed to fetch. Defaults to `latest`. |
 | `NATIVE_OPT` | Makefile | Optimization level passed to `clang` when compiling LLVM IR. Defaults to `-O2`. |
 | `CLANG` | Makefile | `clang` executable to use. Defaults to `clang`. |
-| `KEEP_SEED` | `make clean-build` | Set to `0` to delete `build/seed/` during `make clean-build`. Defaults to `1` (seed is preserved). |
+| `KEEP_SEED` | `make clean-build` | Set to `0` to also delete `build/toolchains/` during `make clean-build`. Defaults to `1` (the seed toolchain is preserved). |
 
 ### Debug and trace variables
 
@@ -514,7 +514,7 @@ When `sfn test` is used, a non-zero exit code means at least one test failed. Al
 | `workspace.toml` | Workspace manifest — shared policies for multi-capsule projects |
 | `*.sfn-asm` | Native IR intermediate representation produced by `sfn emit native` |
 | `build/bin/sfn` | Default output path for the self-hosted compiler binary |
-| `build/seed/bin/sailfin` | Default path for the downloaded seed compiler |
+| `build/toolchains/seed/bin/sfn` | Default path for the downloaded seed compiler |
 | `dist/` | Release packaging output directory |
 
 ---

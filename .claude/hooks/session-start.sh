@@ -15,8 +15,8 @@ else
   echo "- compiler: build/bin/sfn MISSING — run \`make compile\` to self-host from the seed"
 fi
 
-if compgen -G "build/seed/*" >/dev/null; then
-  echo "- seed: build/seed present"
+if compgen -G "build/toolchains/seed/*" >/dev/null; then
+  echo "- seed: build/toolchains/seed present"
 else
   echo "- seed: MISSING — run \`make fetch-seed\`"
 fi

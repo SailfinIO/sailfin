@@ -65,7 +65,7 @@ Before opening the PR, confirm the target binary actually downloads:
 SEED_VERSION="<target>" make fetch-seed
 ```
 
-This is non-destructive — it installs into `build/seed/versions/` and
+This is non-destructive — it installs into `build/toolchains/seed/versions/` and
 doesn't touch `.seed-version`. If the fetch fails (404, checksum,
 network), abort. If it succeeds, the binary is on disk and we know the
 pin is valid.
