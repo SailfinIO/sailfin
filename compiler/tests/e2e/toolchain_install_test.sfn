@@ -67,10 +67,12 @@ fn _env_with(extra: string[]) -> string[] ![io] {
     return e;
 }
 
-// The install command exits non-zero when the version dir was never
-// populated. `<store>/<ver>/sailfin` is the store's completeness marker.
+// A store entry is complete only once `.sha256` — written last, after the
+// binary/alias/runtime are in place — exists. Asserting on the marker (not
+// just the binary) catches a partial install where the binary was copied but
+// the marker was never written, matching the installer's fail-closed contract.
 fn _installed(store: string, ver: string) -> boolean ![io] {
-    return fs.exists(store + "/" + ver + "/sailfin");
+    return fs.exists(store + "/" + ver + "/.sha256");
 }
 
 test "toolchain install: missing version is a usage error" ![io] {

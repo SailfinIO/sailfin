@@ -112,3 +112,47 @@ define i64 @tls_write(i8* %ssl, i8* %buf, i64 %n) {
 define void @tls_shutdown_free(i8* %ssl) {
   ret void
 }
+
+; OpenSSL libcrypto EVP symbols pulled into the compiler by the `sfn/crypto`
+; dependency (SFN-168, SFEP-0046 §4): `sfn toolchain install` verifies a
+; signed release manifest with `ed25519_verify` (capsules/sfn/crypto/src/
+; ed25519.sfn), which calls these `EVP_*` externs. On Linux/macOS the
+; compiler's link resolves them from `-lcrypto` (already linked for TLS); the
+; static mingw link has no OpenSSL, mirroring the `@tls_*` exclusion above.
+; No-op stubs are the correct degraded Windows behavior and preserve the
+; fail-closed contract: `EVP_PKEY_new_raw_public_key` returning null makes
+; `ed25519_verify` return false (its `if pkey == 0` guard), so
+; `sfn toolchain install` on Windows refuses to install rather than skipping
+; verification. Native Windows crypto rides the same M10 OS-independent extern
+; surface as TLS. Sync pinned by
+; compiler/tests/e2e/cross_windows_runtime_modules_test.sfn.
+define i8* @EVP_PKEY_new_raw_public_key(i32 %key_type, i8* %e, i8* %key, i64 %keylen) {
+  ret i8* null
+}
+define void @EVP_PKEY_free(i8* %pkey) {
+  ret void
+}
+define i8* @EVP_MD_CTX_new() {
+  ret i8* null
+}
+define void @EVP_MD_CTX_free(i8* %ctx) {
+  ret void
+}
+define i32 @EVP_DigestVerifyInit(i8* %ctx, i8* %pctx, i8* %md_type, i8* %e, i8* %pkey) {
+  ret i32 0
+}
+define i32 @EVP_DigestVerify(i8* %ctx, i8* %sig, i64 %siglen, i8* %tbs, i64 %tbslen) {
+  ret i32 0
+}
+
+; `EVP_sha256` / `HMAC`: additional libcrypto symbols the whole-compiler
+; mingw link resolves from `-lcrypto` on Linux/macOS but which have no OpenSSL
+; provider in the static Windows link. No-op stubs keep the Windows link
+; closed; they are never reached on Windows (the crypto surface degrades to
+; fail-closed via the EVP stubs above).
+define i8* @EVP_sha256() {
+  ret i8* null
+}
+define i8* @HMAC(i8* %evp_md, i8* %key, i32 %key_len, i8* %d, i64 %n, i8* %md, i8* %md_len) {
+  ret i8* null
+}

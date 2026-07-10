@@ -57,19 +57,58 @@ let TOOLCHAIN_RELEASE_BASE = "https://github.com/SailfinIO/sailfin/releases/down
 // mandatory regardless of the base — a mirror is not a trust bypass.
 fn _release_base() -> string ![io] {
     let override_base = env.get("SAILFIN_TOOLCHAIN_RELEASE_BASE");
-    if override_base.length > 0 { return override_base; }
+    if override_base.length > 0 {
+        // Trim trailing slashes so `<base>/<tag>/<asset>` never doubles the
+        // separator (`http://host//v0.8.0/...`), which some mirrors reject.
+        let mut b = override_base;
+        loop {
+            if b.length == 0 { break; }
+            if !strings_equal(substring(b, b.length - 1, b.length), "/") {
+                break;
+            }
+            b = substring(b, 0, b.length - 1);
+        }
+        if b.length > 0 { return b; }
+    }
     return TOOLCHAIN_RELEASE_BASE;
 }
 
-// A path-safe, version-shaped install target. `_is_safe_capsule_version_cmd`
-// blocks `/`, `\`, and `..` traversal (the release version is joined into
-// the store path and the release URL); requiring the first character to
-// be an ASCII digit rejects non-version junk before any network round
-// trip (a semver core begins with a digit, §2).
+// A path-safe, version-shaped install target, validated before any path/URL
+// interpolation. `_is_safe_capsule_version_cmd` blocks `/`, `\`, and `..`
+// traversal (the version is joined into the store path and the release URL);
+// the charset gate admits only the semver alphabet (digits, letters, `.`,
+// `-`, `+`), rejecting whitespace and control characters; and the first
+// character must be a digit (a semver core opens with one, §2), rejecting
+// non-version junk. A well-formed but nonexistent version still fails closed
+// at fetch, so full major.minor.patch parsing is not required here.
 fn _is_valid_install_version(ver: string) -> boolean {
     if ver.length == 0 { return false; }
     if !_is_safe_capsule_version_cmd(ver) { return false; }
-    let c = char_code(substring(ver, 0, 1));
+    if !_is_version_digit(substring(ver, 0, 1)) { return false; }
+    let mut i: int = 0;
+    loop {
+        if i >= ver.length { break; }
+        if !_is_version_char(substring(ver, i, i + 1)) { return false; }
+        i += 1;
+    }
+    return true;
+}
+
+// A single character allowed in a version string: the semver alphabet
+// `[0-9A-Za-z.+-]`. Excludes whitespace, control chars, and shell/URL metas.
+fn _is_version_char(ch: string) -> boolean {
+    let c = char_code(ch);
+    if c >= 48 && c <= 57 { return true; }
+    if c >= 65 && c <= 90 { return true; }
+    if c >= 97 && c <= 122 { return true; }
+    if c == 46 { return true; }
+    if c == 45 { return true; }
+    if c == 43 { return true; }
+    return false;
+}
+
+fn _is_version_digit(ch: string) -> boolean {
+    let c = char_code(ch);
     if c < 48 { return false; }
     if c > 57 { return false; }
     return true;
@@ -352,11 +391,14 @@ fn _toolchain_install(version_arg: string, work_root: string) -> int ![io, net] 
     }
     let src_bin = _binary_in_root(root);
 
+    // Every failure after `store_dir` is created removes it (not just `tmp`),
+    // so a partial install never leaves a half-populated version dir a later
+    // run could mistake for complete — the fail-closed store contract.
     process.run(["mkdir", "-p", store_dir]);
     let cp_rc = process.run(["cp", "-f", src_bin, bin_path]);
     if cp_rc != 0 {
         print("error: failed to install the toolchain binary into " + store_dir);
-        process.run(["rm", "-rf", tmp]);
+        _cleanup_failed_install(store_dir, tmp);
         return 1;
     }
     process.run(["chmod", "0755", bin_path]);
@@ -364,27 +406,57 @@ fn _toolchain_install(version_arg: string, work_root: string) -> int ![io, net] 
     // `sfn`-named peer in the versioned dir (SFN-195): a post-SFN-173
     // binary re-invokes `<dir>/sfn` for parallel emit workers. Relative
     // symlink so it holds regardless of the store path; copy fallback
-    // for filesystems without symlinks.
+    // for filesystems without symlinks — the fallback is checked too, so a
+    // failed alias is a hard error rather than a silently broken entry.
     let alias_path = store_dir + "/sfn";
     process.run(["rm", "-f", alias_path]);
     let ln_rc = process.run(["ln", "-s", "sailfin", alias_path]);
     if ln_rc != 0 {
-        process.run(["cp", "-f", bin_path, alias_path]);
+        let cp_alias_rc = process.run(["cp", "-f", bin_path, alias_path]);
+        if cp_alias_rc != 0 {
+            print("error: failed to create the sfn alias in " + store_dir);
+            _cleanup_failed_install(store_dir, tmp);
+            return 1;
+        }
         process.run(["chmod", "0755", alias_path]);
     }
 
-    // Bundled runtime, when the asset ships one (sfn run/build need it).
+    // Bundled runtime, when the asset ships one (sfn run/build need it). A
+    // failed copy is fatal — an entry without its runtime would fail later at
+    // `sfn run`/`build`.
     if fs.exists(root + "/runtime") {
         process.run(["rm", "-rf", store_dir + "/runtime"]);
-        process.run(["cp", "-R", root + "/runtime", store_dir + "/runtime"]);
+        let rt_rc = process.run(["cp", "-R", root + "/runtime", store_dir
+            + "/runtime"]);
+        if rt_rc != 0 {
+            print("error: failed to install the runtime bundle into "
+                + store_dir);
+            _cleanup_failed_install(store_dir, tmp);
+            return 1;
+        }
     }
 
+    // Completeness marker LAST: written only once the binary, alias, and
+    // runtime are in place. A verified write is the install's commit point —
+    // if it can't be written, the entry is not complete and is torn down.
     fs.writeFile(sha_path, expected + "\n");
+    if !fs.exists(sha_path) {
+        print("error: failed to write the store marker " + sha_path);
+        _cleanup_failed_install(store_dir, tmp);
+        return 1;
+    }
     process.run(["rm", "-rf", tmp]);
 
     print("sfn toolchain: installed " + ver + " to " + store_dir);
     print("  verified signature + sha256 " + expected);
     return 0;
+}
+
+// Tear down a partial store entry and the temp work dir on a post-verification
+// install failure, keeping the store free of half-created version dirs.
+fn _cleanup_failed_install(store_dir: string, tmp: string) -> void ![io] {
+    process.run(["rm", "-rf", store_dir]);
+    process.run(["rm", "-rf", tmp]);
 }
 
 // The `sfn/cli` definition for `toolchain`, registered on the v2 root
