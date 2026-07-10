@@ -30,5 +30,5 @@ test "release_trust: embedded pubkey is 64 lowercase hex chars" {
 test "release_trust: embedded pubkey matches its golden value" {
     // Golden value pins the key so any change is an intentional rotation
     // (docs/release-signing.md lists every location that must move together).
-    assert release_signing_public_key_hex() == "a98fd921c2c18521f765b13c2c134e4ab447f98970f6ea255dce22a05c81029d";
+    assert release_signing_public_key_hex() == "c317207101f06c10a341656e906e95d6e7199fcaa85d9c793455b07d740a44b9";
 }

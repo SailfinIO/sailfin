@@ -16,7 +16,7 @@
 // Trust model + rotation procedure: docs/release-signing.md.
 // Design: SFEP-0046 (docs/proposals/0046-toolchain-pinning.md) §3.5.
 // Raw 32-byte Ed25519 release-signing public key, lowercase hex (64 chars).
-let RELEASE_SIGNING_PUBLIC_KEY_HEX = "a98fd921c2c18521f765b13c2c134e4ab447f98970f6ea255dce22a05c81029d";
+let RELEASE_SIGNING_PUBLIC_KEY_HEX = "c317207101f06c10a341656e906e95d6e7199fcaa85d9c793455b07d740a44b9";
 
 // Pure accessor for the pinned release-signing public key (hex). The toolchain
 // fetch/verify path (SFN-168) passes this to ed25519_verify_utf8 to verify a
