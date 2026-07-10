@@ -1,0 +1,198 @@
+// compiler/tests/e2e/toolchain_install_test.sfn
+//
+// End-to-end coverage for `sfn toolchain install <version>` — the
+// native, fail-closed toolchain acquire path (SFEP-0046 §3.5, Phase 2;
+// SFN-168). Native (no-bash) `*_test.sfn` per `.claude/rules/no-bash-e2e.md`:
+// it drives the compiler-under-test as a subprocess and asserts on the
+// captured output + on-disk store with `sfn/strings` + `fs.*` (an `![io]`
+// test cannot call the `![pure]` `expect_*` matchers).
+//
+// What it pins:
+//   1. arg validation — a missing `<version>` is a usage error (exit 2).
+//   2. input hardening — a non-semver / path-traversal `<version>` is
+//      rejected (exit 1) and never creates a store entry.
+//   3. fail-closed fetch — installing a version whose signed manifest
+//      cannot be fetched aborts non-zero with nothing written to the
+//      store. This invariant holds whether the host is online (the asset
+//      404s) or offline (the connection fails), so the leg needs no
+//      network guard.
+//   4. fail-closed verify — a manifest whose signature does not verify
+//      against the embedded release key is refused BEFORE extraction,
+//      with nothing written to the store. Driven against a local server
+//      via the `SAILFIN_TOOLCHAIN_RELEASE_BASE` mirror override; skipped
+//      when `python3`/`timeout` are unavailable (the tool-probe SKIP
+//      pattern the e2e rules establish).
+import { contains } from "sfn/strings";
+
+// The compiler-under-test: `$SAILFIN_BIN` if set, else the self-hosted
+// binary relative to the repo root the runner starts from (mirrors
+// `sfn/test`'s own `_resolve_sfn_bin`).
+fn _sfn_bin() -> string ![io] {
+    let configured = env.get("SAILFIN_BIN");
+    if configured.length > 0 { return configured; }
+    return "build/bin/sfn";
+}
+
+// A per-invocation scratch root. `SAILFIN_TEST_SCRATCH` keeps it unique
+// under the parallel pool; `/tmp` is the standalone fallback.
+fn _scratch_root() -> string ![io] {
+    let mut dir = env.get("SAILFIN_TEST_SCRATCH");
+    if dir.length == 0 { dir = "/tmp"; }
+    return dir + "/sfn-toolchain-install-e2e";
+}
+
+fn _has_cmd(name: string) -> boolean ![io] {
+    let probe = process.run(["sh", "-c", "command -v " + name
+        + " >/dev/null 2>&1"]);
+    return probe == 0;
+}
+
+fn _timeout_cmd() -> string ![io] {
+    if _has_cmd("timeout") { return "timeout"; }
+    if _has_cmd("gtimeout") { return "gtimeout"; }
+    return "";
+}
+
+// Full parent environment plus the caller's extra `KEY=VALUE` entries
+// (`run_capture`/`spawn_with_env`'s empty env is EMPTY, not "inherit",
+// so the child needs PATH etc. to find `uname`/`tar`/`sha256sum`).
+fn _env_with(extra: string[]) -> string[] ![io] {
+    let mut e = process.environ();
+    let mut i: int = 0;
+    loop {
+        if i >= extra.length { break; }
+        e.push(extra[i]);
+        i += 1;
+    }
+    return e;
+}
+
+// The install command exits non-zero when the version dir was never
+// populated. `<store>/<ver>/sailfin` is the store's completeness marker.
+fn _installed(store: string, ver: string) -> boolean ![io] {
+    return fs.exists(store + "/" + ver + "/sailfin");
+}
+
+test "toolchain install: missing version is a usage error" ![io] {
+    let exit = process.run_capture([_sfn_bin(), "toolchain", "install"], _env_with([]));
+    let out = process.capture_take_stdout();
+    let err = process.capture_take_stderr();
+    // The `sfn/cli` parser owns arg validation: a missing required
+    // positional descends into `toolchain` with a non-ok parse, which the
+    // dispatch answers with usage + exit 2.
+    assert exit == 2;
+    assert contains(out + err, "toolchain install");
+}
+
+test "toolchain install: a non-version string is rejected with no store entry" ![io] {
+    let store = _scratch_root() + "/reject-store";
+    process.run(["rm", "-rf", store]);
+    let exit = process.run_capture([_sfn_bin(), "toolchain", "install", "not-a-version"], _env_with(["INSTALL_BASE="
+        + store]));
+    let out = process.capture_take_stdout();
+    let err = process.capture_take_stderr();
+    assert exit == 1;
+    assert contains(out + err, "valid version");
+    // Input hardening: an invalid version is rejected before any fetch or
+    // store write, so nothing lands under the store base.
+    assert ! fs.exists(store + "/not-a-version");
+}
+
+test "toolchain install: a path-traversal version cannot escape the store" ![io] {
+    let store = _scratch_root() + "/traversal-store";
+    process.run(["rm", "-rf", store]);
+    let sentinel = _scratch_root() + "/traversal-sentinel";
+    process.run(["rm", "-rf", sentinel]);
+    // `../` components would let a naive `<base>/<ver>` join write outside
+    // the store; the semver validity gate must reject the version first.
+    let exit = process.run_capture([_sfn_bin(), "toolchain", "install", "../traversal-sentinel/pwned"], _env_with(["INSTALL_BASE="
+        + store]));
+    let out = process.capture_take_stdout();
+    let err = process.capture_take_stderr();
+    assert exit == 1;
+    assert contains(out + err, "valid version");
+    assert ! fs.exists(sentinel);
+}
+
+test "toolchain install: an unfetchable version fails closed with nothing stored" ![io] {
+    let store = _scratch_root() + "/unfetchable-store";
+    process.run(["rm", "-rf", store]);
+    // A version that will never be a real release: the signed manifest
+    // 404s (online) or the connection fails (offline). Either way the
+    // command must abort non-zero and write nothing — no network guard
+    // needed because the asserted invariant holds in both cases.
+    let ver = "0.0.0-nonexistent-e2e.1";
+    let exit = process.run_capture([_sfn_bin(), "toolchain", "install", ver], _env_with(["INSTALL_BASE="
+        + store]));
+    let _out = process.capture_take_stdout();
+    let _err = process.capture_take_stderr();
+    assert exit != 0;
+    assert ! _installed(store, ver);
+}
+
+test "toolchain install: a bad signature is refused before extraction" ![io] {
+    let tcmd = _timeout_cmd();
+    // Skip (still pass) when the local-server fixture can't run: no
+    // `python3` HTTP server, or no wall-clock `timeout` to reap it (there
+    // is no process-kill primitive). Legs above still cover fail-closed
+    // fetch without a server.
+    if !_has_cmd("python3") {
+        assert true;
+        return;
+    }
+    if tcmd.length == 0 {
+        assert true;
+        return;
+    }
+
+    let ver = "0.0.0-e2e.1";
+    let tag = "v" + ver;
+    let srv = _scratch_root() + "/badsig-srv";
+    let store = _scratch_root() + "/badsig-store";
+    process.run(["rm", "-rf", srv]);
+    process.run(["rm", "-rf", store]);
+    fs.createDirectory(srv + "/" + tag, true);
+    // A well-formed-but-unsigned manifest: any manifest text plus a
+    // syntactically valid (128-hex) signature that does not verify against
+    // the embedded release key. Verification must fail at the signature
+    // step, before the asset is ever downloaded or extracted.
+    fs.writeFile(srv + "/" + tag + "/SHA256SUMS", "0000000000000000000000000000000000000000000000000000000000000000  "
+        + "sailfin_"
+        + ver
+        + "_linux_x86_64.tar.gz\n");
+    fs.writeFile(srv + "/" + tag + "/SHA256SUMS.sig", "00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000");
+
+    let port = "18796";
+    let base = "http://127.0.0.1:" + port;
+    // `timeout <N> python3 -m http.server` self-reaps the blocking server.
+    let _pid = process.spawn_with_env([tcmd, "30", "python3", "-m", "http.server", port, "--bind", "127.0.0.1", "--directory", srv], process.environ());
+    // Poll the port with python's own socket until it accepts (bounded).
+    let poll = "import socket,sys,time\n" + "for _ in range(50):\n"
+        + "    try:\n"
+        + "        socket.create_connection(('127.0.0.1',"
+        + port
+        + "),0.2).close(); sys.exit(0)\n"
+        + "    except Exception:\n"
+        + "        time.sleep(0.1)\n"
+        + "sys.exit(1)\n";
+    let up = process.run_capture(["python3", "-c", poll], process.environ());
+    let _pout = process.capture_take_stdout();
+    let _perr = process.capture_take_stderr();
+    if up != 0 {
+        // Server never came up (sandboxed loopback, port clash): skip
+        // rather than flake.
+        assert true;
+        return;
+    }
+
+    let exit = process.run_capture([_sfn_bin(), "toolchain", "install", ver], _env_with(["INSTALL_BASE="
+        + store, "SAILFIN_TOOLCHAIN_RELEASE_BASE="
+        + base]));
+    let out = process.capture_take_stdout();
+    let err = process.capture_take_stderr();
+    // Fail-closed: non-zero exit, an error naming the signature, and NO
+    // store entry — the unverified toolchain was never extracted.
+    assert exit != 0;
+    assert contains(out + err, "signature");
+    assert ! _installed(store, ver);
+}
