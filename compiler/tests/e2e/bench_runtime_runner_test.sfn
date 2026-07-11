@@ -1,0 +1,90 @@
+// End-to-end smoke test for `sfn bench [<path>...]` runtime mode (SFN-63,
+// epic #1503), the native replacement for scripts/bench_runtime.sh. Drives the
+// compiler binary as a subprocess against the bundled `benchmarks/runtime`
+// workloads (filtered to one cheap workload so the suite stays fast) and
+// asserts on the table, CSV schema, and exit codes, per
+// .claude/rules/no-bash-e2e.md. Each spawned `sfn bench` builds the workload
+// via a nested `sfn build`, so the child env carries PATH (clang + linker) and
+// SAILFIN_TEST_SCRATCH (build-cache isolation under the parallel pool).
+import { find } from "sfn/strings";
+
+fn _sfn_bin() -> string ![io] {
+    let configured = env.get("SAILFIN_BIN");
+    if configured.length > 0 { return configured; }
+    return "build/bin/sfn";
+}
+
+fn _child_env() -> string[] ![io] {
+    let mut e: string[] = [];
+    let path = env.get("PATH");
+    if path.length > 0 { e.push("PATH=" + path); }
+    let home = env.get("HOME");
+    if home.length > 0 { e.push("HOME=" + home); }
+    let tmpdir = env.get("TMPDIR");
+    if tmpdir.length > 0 { e.push("TMPDIR=" + tmpdir); }
+    let scratch = env.get("SAILFIN_TEST_SCRATCH");
+    if scratch.length > 0 { e.push("SAILFIN_TEST_SCRATCH=" + scratch); }
+    return e;
+}
+
+// The bundled workloads exist under benchmarks/runtime in a normal checkout;
+// skip if the tree is absent (e.g. a sparse checkout) so the suite still runs.
+fn _workloads_present() -> boolean ![io] {
+    return fs.exists("benchmarks/runtime/string_find_format_bench.sfn");
+}
+
+test "bench: runtime mode builds a benchmarks/runtime workload and reports a table" ![io, clock] {
+    if !_workloads_present() {
+        assert true;
+        return;
+    }
+    let exit = process.run_capture([_sfn_bin(), "bench", "benchmarks/runtime", "--filter", "string_find_format", "--iterations", "1", "--warmup", "0"], _child_env());
+    let out = process.capture_take_stdout();
+    let err = process.capture_take_stderr();
+    assert exit == 0;
+    assert find(out + err, "string_find_format", 0) >= 0;
+    assert find(out + err, "SUMMARY", 0) >= 0;
+    assert find(out + err, "within budget", 0) >= 0;
+}
+
+test "bench: --csv writes the perf-history schema header and a workload row" ![io, clock] {
+    if !_workloads_present() {
+        assert true;
+        return;
+    }
+    let tmp = env.get("TMPDIR");
+    let mut dir = tmp.length > 0? tmp: "/tmp";
+    if !strings_equal(substring(dir, dir.length - 1, dir.length), "/") {
+        dir = dir + "/";
+    }
+    let csv = dir + "sfn_bench_runner_test.csv";
+    let exit = process.run_capture([_sfn_bin(), "bench", "benchmarks/runtime", "--filter", "string_find_format", "--iterations", "1", "--warmup", "0", "--csv", csv], _child_env());
+    let _o = process.capture_take_stdout();
+    let _e = process.capture_take_stderr();
+    assert exit == 0;
+    assert fs.exists(csv);
+    let content = fs.readFile(csv);
+    assert find(content, "workload,inner_ms_min,inner_ms_median,peak_kb,ops,ops_per_ms,status,seed_version,platform", 0) >= 0;
+    assert find(content, "string_find_format", 0) >= 0;
+}
+
+test "bench: an unmeetable memory budget exits 2" ![io, clock] {
+    if !_workloads_present() {
+        assert true;
+        return;
+    }
+    // 1 KB peak-RSS budget is exceeded by any process, so the workload is
+    // flagged HIGHMEM and the runner exits 2 (budget violation).
+    let exit = process.run_capture([_sfn_bin(), "bench", "benchmarks/runtime", "--filter", "string_find_format", "--iterations", "1", "--warmup", "0", "--budget-mem", "1"], _child_env());
+    let out = process.capture_take_stdout();
+    let _e = process.capture_take_stderr();
+    assert exit == 2;
+    assert find(out, "HIGHMEM", 0) >= 0;
+}
+
+test "bench: a path with no workloads exits 1" ![io, clock] {
+    let exit = process.run_capture([_sfn_bin(), "bench", "benchmarks/does-not-exist"], _child_env());
+    let _o = process.capture_take_stdout();
+    let _e = process.capture_take_stderr();
+    assert exit == 1;
+}

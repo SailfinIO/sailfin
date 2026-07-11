@@ -1,0 +1,41 @@
+// benchmarks/runtime/arena_alloc_for_range_bench.sfn
+//
+// Runtime-execution benchmark: arena bump allocation of a float-field struct
+// in a `for i in a..b` loop.
+//
+// The for-range, `number`-field counterpart to arena_alloc_bench.sfn: one unit
+// of work is a BATCH-iteration `for` loop that allocates a small float-field
+// struct each iteration. Covers non-integer struct allocation on the arena hot
+// path (`runtime/sfn/memory/arena.sfn`) and the for-range arm of the
+// per-iteration arena mark/rewind seam (#1515), which reclaims the non-escaping
+// `Cell` each pass so peak RSS stays flat (bounded by BATCH). The `sfn/bench`
+// harness runs BATCHES of them.
+//
+// Fixed work: BATCHES x BATCH is a compile-time constant. The reported op count
+// is BATCHES; the pre-migration workload reported BATCHES x BATCH. `keep`
+// defeats dead-code elimination. (`for i in 0..n` yields a float index, hence
+// the `number` fields and the `as int` on the returned sink.)
+import { benchmark_fixed, keep } from "sfn/bench";
+
+struct Cell {
+    a: number;
+    b: number;
+    c: number;
+}
+
+fn alloc_batch(n: int) -> int {
+    let mut acc: number = 0.0;
+    for j in 0 .. n {
+        let cell = Cell { a: j, b: j + 1, c: j + 2 };
+        acc = acc + cell.a + cell.b + cell.c;
+    }
+    return acc as int;
+}
+
+fn main() ![io, clock] {
+    let batches = 30000;
+    let batch = 1000;
+    let _ = benchmark_fixed("arena_alloc_for_range", batches, fn () -> int {
+        return keep(alloc_batch(batch));
+    });
+}

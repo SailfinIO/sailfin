@@ -1,0 +1,173 @@
+// benchmarks/runtime/http_proxy_hotpath_bench.sfn
+//
+// Runtime-execution benchmark: the MCP-proxy request hot path
+//   parse (HTTP/1.1 wire) -> policy decision (StrMap lookup) -> forward
+// (issue #1712, epic #1540 Track C gap C6; folds into the `sfn bench`
+// epic #1503).
+//
+// Purpose: a runnable baseline for the parse->policy->forward hot path, so
+// later perf work (keep-alive reuse, an epoll event loop) has a number to
+// compare against. It deliberately measures the CPU hot path only, with no
+// network: a real upstream forward is non-deterministic. The "forward" step is
+// the outbound-request serialization the proxy performs before it would hand
+// bytes to the socket.
+//
+// One unit of work is one parse->policy->forward pass over a fixed request; the
+// `sfn/bench` harness runs ITERS of them and times the window. The 150 ms
+// budget the pre-migration workload printed itself is now enforced by the
+// runner: `sfn bench --filter http_proxy_hotpath --budget-time 150`.
+//
+// What is real vs. representative:
+//   * Policy lookup uses the real prelude/stdlib `StrMap` (#1710) from
+//     `runtime/sfn/collections.sfn`.
+//   * Parsing is a representative inline HTTP/1.1 request parse mirroring
+//     `capsules/sfn/http/src/wire.sfn::parse_request`; the capsule parser
+//     cannot be reused here because each workload builds as a bare `.sfn` file
+//     and a capsule module with relative imports does not link into it. Keep
+//     the parse in sync with the wire parser's shape if it changes materially.
+import { benchmark_fixed, keep } from "sfn/bench";
+
+import {
+    StrMap,
+    str_map_get,
+    str_map_new,
+    str_map_set
+} from "../../runtime/sfn/collections";
+
+struct ParsedReq {
+    method: string;
+    path: string;
+    query: string;
+    headers: string[];
+    body: string;
+}
+
+// Drop a single trailing '\r' (CRLF tolerance), mirroring wire.sfn.
+fn strip_cr(s: string) -> string {
+    let n = s.length;
+    if n == 0 { return s; }
+    let last = substring(s, n - 1, n);
+    if strings_equal(last, "\r") { return substring(s, 0, n - 1); }
+    return s;
+}
+
+fn starts_with(s: string, p: string) -> boolean {
+    if p.length > s.length { return false; }
+    return strings_equal(substring(s, 0, p.length), p);
+}
+
+// Representative HTTP/1.1 request parse — mirrors the structure of
+// capsules/sfn/http/src/wire.sfn::parse_request (request line ->
+// method/target, target -> path/query, header lines until blank, body).
+fn parse_req(raw: string) -> ParsedReq {
+    let total = raw.length;
+
+    let line_nl = find_char(raw, "\n", 0);
+    let mut line_end = total;
+    if line_nl >= 0 { line_end = line_nl; }
+    let request_line = strip_cr(substring(raw, 0, line_end));
+
+    let mut method = "";
+    let mut target = "";
+    let sp1 = find_char(request_line, " ", 0);
+    if sp1 >= 0 {
+        method = substring(request_line, 0, sp1);
+        let sp2 = find_char(request_line, " ", sp1 + 1);
+        if sp2 >= 0 { target = substring(request_line, sp1 + 1, sp2); } else {
+            target = substring(request_line, sp1 + 1, request_line.length);
+        }
+    } else { method = request_line; }
+
+    let mut path = target;
+    let mut query = "";
+    let q = find_char(target, "?", 0);
+    if q >= 0 {
+        path = substring(target, 0, q);
+        query = substring(target, q + 1, target.length);
+    }
+
+    let mut headers: string[] = [];
+    let mut body = "";
+    let mut cursor = total;
+    if line_nl >= 0 { cursor = line_nl + 1; }
+    loop {
+        if cursor >= total { break; }
+        let nl = find_char(raw, "\n", cursor);
+        let mut end = total;
+        if nl >= 0 { end = nl; }
+        let line = strip_cr(substring(raw, cursor, end));
+        let mut next = total;
+        if nl >= 0 { next = nl + 1; }
+        if line.length == 0 {
+            body = substring(raw, next, total);
+            break;
+        }
+        headers.push(line);
+        if nl < 0 { break; }
+        cursor = next;
+    }
+
+    return ParsedReq {
+        method: method,
+        path: path,
+        query: query,
+        headers: headers,
+        body: body
+    };
+}
+
+// Serialize the outbound (forwarded) request: request line, header block with
+// the Host header rewritten to the upstream, then the body. This is the CPU
+// work the proxy does before writing to the upstream socket.
+fn build_forward(p: ParsedReq, upstream: string) -> string {
+    let mut target = p.path;
+    if p.query.length > 0 { target = p.path + "?" + p.query; }
+    let mut out = p.method + " " + target + " HTTP/1.1\r\n";
+    let mut i = 0;
+    loop {
+        if i >= p.headers.length { break; }
+        let h = p.headers[i];
+        if starts_with(h, "Host:") { out = out + "Host: " + upstream + "\r\n"; } else {
+            out = out + h + "\r\n";
+        }
+        i = i + 1;
+    }
+    out = out + "\r\n" + p.body;
+    return out;
+}
+
+// Representative proxy policy table: method+path -> decision.
+fn build_policy_table() -> StrMap {
+    let mut m = str_map_new();
+    m = str_map_set(m, "GET /api/orders", "allow");
+    m = str_map_set(m, "POST /api/orders", "allow");
+    m = str_map_set(m, "GET /api/users", "allow");
+    m = str_map_set(m, "POST /api/users", "allow");
+    m = str_map_set(m, "DELETE /api/users", "deny");
+    m = str_map_set(m, "GET /api/products", "allow");
+    m = str_map_set(m, "POST /api/login", "allow");
+    m = str_map_set(m, "GET /health", "allow");
+    m = str_map_set(m, "GET /metrics", "rate-limit");
+    m = str_map_set(m, "GET /admin", "deny");
+    m = str_map_set(m, "GET /api/search", "rate-limit");
+    m = str_map_set(m, "PUT /api/orders", "allow");
+    return m;
+}
+
+fn main() ![io, clock] {
+    let iters = 12000;
+    let upstream = "upstream.internal:8080";
+    let raw = "GET /api/orders?page=2&limit=50 HTTP/1.1\r\nHost: gateway.local\r\nUser-Agent: sfn-bench/1.0\r\nAccept: application/json\r\nAuthorization: Bearer tok-abc123\r\nX-Request-Id: 7f3a91c2\r\nContent-Length: 0\r\n\r\n";
+
+    // Build the policy table once (setup, not timed); captured read-only.
+    let table = build_policy_table();
+
+    let _ = benchmark_fixed("http_proxy_hotpath", iters, fn () -> int {
+        let req = parse_req(raw);
+        let key = req.method + " " + req.path;
+        let decision = str_map_get(table, key);
+        if decision == null { return keep(req.path.length); }
+        let fwd = build_forward(req, upstream);
+        return keep(fwd.length + decision.length);
+    });
+}
