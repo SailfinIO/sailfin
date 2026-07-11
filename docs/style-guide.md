@@ -142,7 +142,7 @@ comment**:
 
 ```sfn
 // Seed workaround (#998): 0.5.7 folds this allocation away. Remove when
-// .seed-version reaches >= 0.5.8.
+// bootstrap.toml [seed].version reaches >= 0.5.8.
 ```
 
 If you bump the seed or complete a migration, grep for comments citing the

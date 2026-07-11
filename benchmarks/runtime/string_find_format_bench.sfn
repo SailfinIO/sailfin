@@ -1,0 +1,23 @@
+// benchmarks/runtime/string_find_format_bench.sfn
+//
+// Runtime-execution benchmark: string scan + integer formatting.
+//
+// One unit of work scans a medium-length string for a character (a byte scan
+// via the prelude `find_char`) and formats an integer into a string
+// (`int as string` concatenated with a prefix). Stresses the string scan path
+// and the integer-to-string conversion in `runtime/sfn/string.sfn`; the
+// `sfn/bench` harness runs ITERATIONS of them.
+//
+// Fixed work: ITERATIONS is a compile-time constant. The scan index and the
+// formatted string's length feed `keep`, defeating dead-code elimination.
+import { benchmark_fixed, keep } from "sfn/bench";
+
+fn main() ![io, clock] {
+    let iterations = 220000;
+    let haystack = "the quick brown fox jumps over the lazy dog while the sun sets slowly over the hills";
+    let _ = benchmark_fixed("string_find_format", iterations, fn () -> int {
+        let idx = find_char(haystack, "z", 0);
+        let formatted = "n=" + (idx as string);
+        return keep(idx + formatted.length);
+    });
+}

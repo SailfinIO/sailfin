@@ -1,0 +1,28 @@
+// benchmarks/runtime/string_concat_bench.sfn
+//
+// Runtime-execution benchmark: string concatenation.
+//
+// One unit of work is a single short concat (`<tag> + "value"`); the `sfn/bench`
+// harness runs CONCATS of them. Stresses the concat/allocate path in
+// `runtime/sfn/string.sfn`. `tag` is a runtime local (not a literal in the
+// concat) so the two-operand concat is a real allocation the compiler cannot
+// fold to a constant, and its length feeds `keep`.
+//
+// Fixed work: CONCATS is a compile-time constant. The reported op count is
+// CONCATS; the pre-migration workload additionally built one large string via
+// repeated append (APPENDS) and reported APPENDS + CONCATS — the append phase
+// is dropped so the body is one representative concat.
+import { benchmark_fixed, keep } from "sfn/bench";
+
+fn concat_unit(tag: string) -> int {
+    let piece = tag + "value";
+    return piece.length;
+}
+
+fn main() ![io, clock] {
+    let concats = 2000000;
+    let tag = "item-";
+    let _ = benchmark_fixed("string_concat", concats, fn () -> int {
+        return keep(concat_unit(tag));
+    });
+}

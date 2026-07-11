@@ -1,0 +1,37 @@
+// benchmarks/runtime/exception_throw_bench.sfn
+//
+// Runtime-execution benchmark: exception frames (throw / catch).
+//
+// One unit of work runs a fixed batch of four `risky` calls in per-call
+// try/catch frames, exactly one of which throws (n == 0). Stresses the
+// exception setup/throw/catch path in `runtime/sfn/exception.sfn`; the
+// `sfn/bench` harness runs BATCHES of them, so roughly one in four `risky`
+// calls throws — the same ratio as the pre-migration workload.
+//
+// Fixed work: BATCHES is a compile-time constant (four `risky` calls each). The
+// reported op count is BATCHES; the pre-migration workload reported the total
+// `risky` call count (BATCHES x 4). `keep` defeats dead-code elimination.
+import { benchmark_fixed, keep } from "sfn/bench";
+
+fn risky(n: int) -> int {
+    if n % 4 == 0 { throw "boom"; }
+    return n;
+}
+
+fn one_batch() -> int {
+    let mut sink = 0;
+    let mut n = 0;
+    loop {
+        if n >= 4 { break; }
+        try { sink = sink + risky(n); } catch (e) { sink = sink + 1; }
+        n = n + 1;
+    }
+    return sink;
+}
+
+fn main() ![io, clock] {
+    let batches = 150000;
+    let _ = benchmark_fixed("exception_throw", batches, fn () -> int {
+        return keep(one_batch());
+    });
+}

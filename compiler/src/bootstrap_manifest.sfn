@@ -11,18 +11,13 @@
 // TOML parser before a seed exists; parsing reuses the generic
 // `toml_get_string` accessor. Validation fails closed: a missing version, an
 // unsupported policy, an unknown source, or `required = false` for a
-// github-release source is rejected before any fetch. During migration the
-// reader also compares against `.seed-version` and reports a mismatch naming
-// both files.
+// github-release source is rejected before any fetch.
 import { find_char_local, strings_equal, substring } from "./string_utils";
 import { toml_get_string } from "./toml_parser";
 
 // The path of the bootstrap manifest, relative to the checkout root the
 // build/dev commands run from.
 let BOOTSTRAP_MANIFEST_PATH = "bootstrap.toml";
-
-// The legacy seed pin kept in lockstep during migration (SFEP-0047 §3.3).
-let SEED_VERSION_PATH = ".seed-version";
 
 // The parsed, validated bootstrap seed policy. `ok` gates every consumer;
 // `error` carries the fail-closed diagnostic when `ok` is false. All string
@@ -54,9 +49,9 @@ struct BootstrapManifest {
     error: string;
 }
 
-// Strip leading/trailing ASCII whitespace (space, tab, CR, LF). Used for the
-// scalar `.seed-version` file, whose content is a bare version + trailing
-// newline. Pure so the migration comparison is unit-testable.
+// Strip leading/trailing ASCII whitespace (space, tab, CR, LF). Used when
+// rewriting `bootstrap.toml` lines in `rewrite_seed_version`. Pure so the
+// rewrite is unit-testable.
 fn _bm_trim(text: string) -> string {
     let mut start: int = 0;
     let mut end: int = text.length;
@@ -178,29 +173,6 @@ fn bootstrap_manifest_exists() -> boolean ![io] {
     return fs.exists(BOOTSTRAP_MANIFEST_PATH);
 }
 
-// Migration guard (SFEP-0047 §3.3, compatibility rule 3): while both files
-// coexist, `bootstrap.toml`'s `[seed].version` and `.seed-version` must
-// agree. Returns "" when they agree (or `.seed-version` is absent — the
-// bootstrap manifest is the source of truth); otherwise a diagnostic naming
-// both files. The manifest must already be `ok`.
-fn bootstrap_seed_version_mismatch(m: BootstrapManifest) -> string ![io] {
-    if !fs.exists(SEED_VERSION_PATH) { return ""; }
-    let legacy = _bm_trim(fs.readFile(SEED_VERSION_PATH));
-    // An existing `.seed-version` is part of the lockstep contract; an empty
-    // value is a broken pin file, not "no pin". Fail closed rather than
-    // silently ignoring it.
-    if legacy.length == 0 {
-        return "bootstrap seed mismatch: .seed-version exists but is empty; write \""
-            + m.version
-            + "\" to it (to match bootstrap.toml [seed].version) or delete it — see SFEP-0047";
-    }
-    if strings_equal(legacy, m.version) { return ""; }
-    return "bootstrap seed mismatch: bootstrap.toml [seed].version = \"" + m.version
-        + "\" but .seed-version = \""
-        + legacy
-        + "\"; reconcile them (bootstrap.toml is the source of truth) — see SFEP-0047";
-}
-
 // Rewrite the `version = "..."` line inside the `[seed]` section to
 // `new_ver`, preserving every other line. Returns "" when no such line
 // exists so the pin caller fails closed rather than writing an unchanged
@@ -253,7 +225,6 @@ export {
     BOOTSTRAP_MANIFEST_PATH,
     BootstrapManifest,
     bootstrap_manifest_exists,
-    bootstrap_seed_version_mismatch,
     parse_bootstrap_manifest,
     read_bootstrap_manifest,
     rewrite_seed_version

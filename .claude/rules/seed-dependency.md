@@ -8,7 +8,7 @@ cite it instead of restating the tree. Design record: SFEP-0026
 
 ## Why bundling is the default — the seed-cut tax
 
-`make compile` self-hosts against the binary pinned by `.seed-version`, not
+`make compile` self-hosts against the binary pinned by `bootstrap.toml [seed].version`, not
 against `main`. So a compiler-source capability (lowering / parsing / typecheck /
 intrinsic / runtime-prelude change that alters the compiler binary's behaviour)
 that lands in a **separate** PR from its consumer cannot self-host until that

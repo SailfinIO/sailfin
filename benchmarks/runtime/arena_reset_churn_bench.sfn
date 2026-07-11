@@ -1,0 +1,33 @@
+// benchmarks/runtime/arena_reset_churn_bench.sfn
+//
+// Runtime-execution benchmark: arena page reuse across allocation bursts.
+//
+// One unit of work is a single burst: `alloc_burst` fills a fresh array that
+// goes out of scope on return, so successive bursts re-walk and re-use the page
+// chain rather than growing it without bound. Stresses the page-reuse path in
+// `runtime/sfn/memory/arena.sfn`; the `sfn/bench` harness runs ROUNDS bursts.
+//
+// Fixed work: ROUNDS is a compile-time constant (BURST elements per burst).
+// The reported op count is ROUNDS (one burst per body call) — the
+// harness expresses ops as body invocations, where the pre-migration workload
+// reported ROUNDS x BURST. `keep` defeats dead-code elimination.
+import { benchmark_fixed, keep } from "sfn/bench";
+
+fn alloc_burst(n: int) -> int {
+    let mut arr: int[] = [];
+    let mut i = 0;
+    loop {
+        if i >= n { break; }
+        arr.push(i);
+        i = i + 1;
+    }
+    return arr.length;
+}
+
+fn main() ![io, clock] {
+    let rounds = 12000;
+    let burst = 5000;
+    let _ = benchmark_fixed("arena_reset_churn", rounds, fn () -> int {
+        return keep(alloc_burst(burst));
+    });
+}

@@ -10,6 +10,7 @@
 import {
     Command,
     Matches,
+    arg_variadic,
     command,
     flag,
     flag_int,
@@ -19,24 +20,48 @@ import {
     get_or,
     has,
     has_flag,
+    positionals,
     repeated,
+    with_arg,
     with_flag
 } from "sfn/cli";
 
-import { _collect_sfn_files_cmd } from "../../build/fs";
+import {
+    _collect_sfn_files_cmd,
+    _ends_with_cmd,
+    _path_join_cmd,
+    _shell_read_cmd
+} from "../../build/fs";
 import { _ensure_dir, _resolve_self_path } from "../../build/paths";
 import { module_name_from_path } from "../../main";
 import { number_to_string } from "../../num_format";
-import { index_of } from "../../string_utils";
+import { char_code_at_text, index_of } from "../../string_utils";
 import { resolve_compiler_version } from "../../version";
 import { CliContext } from "../context";
 
 // The `sfn/cli` definition for `bench`, registered on the v2 root via
-// `with_subcommand`. `--compiler` selects the only implemented mode
-// (per-module compiler emit benchmarking); every other flag configures
-// that mode.
+// `with_subcommand`. Two modes share one command: the default runtime mode
+// benchmarks compiled-program execution over `*_bench.sfn` workloads (the
+// variadic `path` positional), and `--compiler` selects per-module compiler
+// emit benchmarking (SFN-61). `--top` / `--csv` / `--budget-time` /
+// `--budget-mem` / `--work-dir` are shared; the remaining flags configure one
+// mode each. Built with sequential reassignment rather than a deeply-nested
+// `with_flag(...)` expression for readability as the flag surface grew.
 fn command_def() -> Command {
-    return with_flag(with_flag(with_flag(with_flag(with_flag(with_flag(with_flag(with_flag(command("bench", "Benchmark compiler build performance"), flag("compiler", "Benchmark per-module compiler emit time + peak memory")), flag_repeat("module", "Benchmark only modules whose source path contains this substring (repeatable)")), flag_int("top", "Print the N slowest modules after the run")), flag_value("csv", "Write per-module results as CSV to this path")), flag_int("budget-time", "Fail (exit 2) if any module exceeds this wall time in seconds")), flag_int("budget-mem", "Fail (exit 2) if any module exceeds this peak RSS in KB")), flag_value("import-context", "Root of the staged import-context tree (default build/compiler/import-context)")), flag_value("work-dir", "Directory for emitted .ll outputs (default build/bench)"));
+    let mut cmd = command("bench", "Benchmark compiled-program runtime or compiler build performance");
+    cmd = with_flag(cmd, flag("compiler", "Benchmark per-module compiler emit time + peak memory instead of runtime workloads"));
+    cmd = with_flag(cmd, flag_int("iterations", "Runtime mode: timed runs per workload after the warm-up (default 5)"));
+    cmd = with_flag(cmd, flag_int("warmup", "Runtime mode: discarded warm-up runs per workload before timing (default 1)"));
+    cmd = with_flag(cmd, flag_value("filter", "Runtime mode: only run workloads whose name matches this glob (e.g. arena*)"));
+    cmd = with_flag(cmd, flag_repeat("module", "Compiler mode: benchmark only modules whose source path contains this substring (repeatable)"));
+    cmd = with_flag(cmd, flag_value("import-context", "Compiler mode: root of the staged import-context tree (default build/compiler/import-context)"));
+    cmd = with_flag(cmd, flag_int("top", "Print the N slowest workloads/modules after the run"));
+    cmd = with_flag(cmd, flag_value("csv", "Write per-workload/per-module results as CSV to this path"));
+    cmd = with_flag(cmd, flag_int("budget-time", "Fail (exit 2) if any workload/module exceeds this budget (runtime: median inner-ms; compiler: wall seconds)"));
+    cmd = with_flag(cmd, flag_int("budget-mem", "Fail (exit 2) if any workload/module exceeds this peak RSS in KB"));
+    cmd = with_flag(cmd, flag_value("work-dir", "Directory for staged sources + built binaries / emitted .ll (default build/bench-exec, or build/bench for --compiler)"));
+    cmd = with_arg(cmd, arg_variadic("path", "Runtime mode: one or more workload files or directories of *_bench.sfn (default: benchmarks/runtime)"));
+    return cmd;
 }
 
 // Format an integer millisecond duration as fixed-point seconds with two
@@ -120,12 +145,16 @@ fn _bench_filter_sources(all: string[], modules: string[]) -> string[] ![io] {
     return out;
 }
 
+// Mode dispatch: `--compiler` runs the per-module emit benchmark (SFN-61);
+// the default runs the runtime-workload benchmark (SFN-63).
 fn run(matches: Matches, ctx: CliContext) -> int ![clock, io] {
-    if !has_flag(matches, "compiler") {
-        print.err("sfn bench: only --compiler mode is implemented (runtime-workload bench is a separate child of epic #1503)");
-        return 2;
+    if has_flag(matches, "compiler") {
+        return _run_compiler_mode(matches, ctx);
     }
+    return _run_runtime_mode(matches, ctx);
+}
 
+fn _run_compiler_mode(matches: Matches, ctx: CliContext) -> int ![clock, io] {
     let import_ctx = get_or(matches, "import-context", "build/compiler/import-context");
     let work_dir = get_or(matches, "work-dir", "build/bench");
     let csv_out = get_or(matches, "csv", "");
@@ -361,5 +390,644 @@ fn run(matches: Matches, ctx: CliContext) -> int ![clock, io] {
         return 2;
     }
     print("[bench] all modules within budget");
+    return 0;
+}
+
+// ---------------------------------------------------------------------------
+// Runtime mode (SFN-63): the `sfn bench [<path>...]` workload runner.
+// ---------------------------------------------------------------------------
+// Builds each `*_bench.sfn` workload once, discards `--warmup` runs, then times
+// `--iterations` runs via the metered subprocess primitive, parsing the
+// `sfn/bench` `bench-record/1` line for the inner-loop time and op count and
+// sampling peak RSS from the child's rusage. Aggregates min/median inner-ms +
+// peak RSS, checks `--budget-time` (median inner-ms) / `--budget-mem` (peak
+// RSS), and exits non-zero on build/run failure or budget violation. Replaces
+// the former `scripts/bench_runtime.sh` — the table, CSV schema, and exit codes
+// match it, so the perf-history CSV consumers (scripts/perf_history.sh) are
+// unaffected.
+let _BENCH_RT_DEFAULT_DIR: string = "benchmarks/runtime";
+
+// Lexicographic byte-order comparison: <0 if a<b, 0 if equal, >0 if a>b.
+fn _bench_rt_str_cmp(a: string, b: string) -> int {
+    let mut i = 0;
+    loop {
+        let a_end = i >= a.length;
+        let b_end = i >= b.length;
+        if a_end && b_end { return 0; }
+        if a_end { return -1; }
+        if b_end { return 1; }
+        let ca = char_code_at_text(a, i);
+        let cb = char_code_at_text(b, i);
+        if ca < cb { return -1; }
+        if ca > cb { return 1; }
+        i += 1;
+    }
+}
+
+// Return a lexicographically sorted copy of `xs` (insertion sort over a copy),
+// so discovered-workload and table/CSV order is stable regardless of the
+// filesystem's `listDirectory` order.
+fn _bench_rt_sorted(xs: string[]) -> string[] {
+    let mut a: string[] = [];
+    let mut c = 0;
+    loop {
+        if c >= xs.length { break; }
+        a.push(xs[c]);
+        c += 1;
+    }
+    let mut x = 1;
+    loop {
+        if x >= a.length { break; }
+        let key = a[x];
+        let mut j = x - 1;
+        loop {
+            if j < 0 { break; }
+            if _bench_rt_str_cmp(a[j], key) <= 0 { break; }
+            a[j + 1] = a[j];
+            j = j - 1;
+        }
+        a[j + 1] = key;
+        x += 1;
+    }
+    return a;
+}
+
+// Discover workloads from `paths`: a `.sfn` path is taken directly; a directory
+// contributes its `*_bench.sfn` entries (non-recursive — one workload = one
+// bare-file program). Missing paths warn and are skipped. Result is sorted.
+fn _bench_rt_discover(paths: string[]) -> string[] ![io] {
+    let mut found: string[] = [];
+    let mut pi = 0;
+    loop {
+        if pi >= paths.length { break; }
+        let p = paths[pi];
+        if _ends_with_cmd(p, ".sfn") {
+            if fs.exists(p) { found.push(p); } else {
+                print.err("[bench] warning: workload not found: " + p);
+            }
+        } else if fs.exists(p) {
+            let entries = fs.listDirectory(p);
+            let mut ei = 0;
+            loop {
+                if ei >= entries.length { break; }
+                let e = entries[ei];
+                if _ends_with_cmd(e, "_bench.sfn") {
+                    found.push(_path_join_cmd(p, e));
+                }
+                ei += 1;
+            }
+        } else { print.err("[bench] warning: path not found: " + p); }
+        pi += 1;
+    }
+    return _bench_rt_sorted(found);
+}
+
+// The final path component of `src` (everything after the last `/`).
+fn _bench_rt_basename(src: string) -> string {
+    let mut last_slash = -1;
+    let mut i = 0;
+    loop {
+        if i >= src.length { break; }
+        if char_code_at_text(src, i) == 47 { last_slash = i; }
+        i += 1;
+    }
+    if last_slash < 0 { return src; }
+    return substring(src, last_slash + 1, src.length);
+}
+
+// Workload label for the table/CSV: the basename with the `.sfn` and the
+// `_bench` convention suffix stripped (e.g. `arena_alloc_bench.sfn` ->
+// `arena_alloc`), preserving the pre-migration CSV `workload` column values so
+// perf-history rows stay continuous.
+fn _bench_rt_label(src: string) -> string {
+    let mut stem = _bench_rt_basename(src);
+    if _ends_with_cmd(stem, ".sfn") {
+        stem = substring(stem, 0, stem.length - 4);
+    }
+    if _ends_with_cmd(stem, "_bench") {
+        stem = substring(stem, 0, stem.length - 6);
+    }
+    return stem;
+}
+
+// Glob match with `*` (any run, incl. empty) and `?` (any one char); every
+// other char is literal. Iterative with backtracking to the last `*`.
+fn _bench_rt_glob(pattern: string, text: string) -> boolean {
+    let mut p = 0;
+    let mut t = 0;
+    let mut star = -1;
+    let mut mark = 0;
+    loop {
+        if t >= text.length { break; }
+        let p_in = p < pattern.length;
+        if p_in && (char_code_at_text(pattern, p) == 63 || char_code_at_text(pattern, p) == char_code_at_text(text, t)) {
+            p += 1;
+            t += 1;
+        } else if p_in && char_code_at_text(pattern, p) == 42 {
+            star = p;
+            mark = t;
+            p += 1;
+        } else if star >= 0 {
+            p = star + 1;
+            mark += 1;
+            t = mark;
+        } else { return false; }
+    }
+    loop {
+        if p >= pattern.length { break; }
+        if char_code_at_text(pattern, p) != 42 { return false; }
+        p += 1;
+    }
+    return true;
+}
+
+// Keep only workloads whose label matches the glob; warn if none match.
+fn _bench_rt_filter(sources: string[], pattern: string) -> string[] ![io] {
+    let mut out: string[] = [];
+    let mut i = 0;
+    loop {
+        if i >= sources.length { break; }
+        if _bench_rt_glob(pattern, _bench_rt_label(sources[i])) {
+            out.push(sources[i]);
+        }
+        i += 1;
+    }
+    if out.length == 0 {
+        print.err("[bench] warning: no workload matched filter " + pattern);
+    }
+    return out;
+}
+
+// The first `bench-record/1 ...` line in `text`, or "" if none is present.
+fn _bench_rt_record_line(text: string) -> string {
+    let at = index_of(text, "bench-record/1");
+    if at < 0 { return ""; }
+    let mut e = at;
+    loop {
+        if e >= text.length { break; }
+        if char_code_at_text(text, e) == 10 { break; }
+        e += 1;
+    }
+    return substring(text, at, e);
+}
+
+// The non-negative integer value of the `key` field (e.g. `ops=`, `inner_ms=`)
+// in a record line, or -1 if the key is absent or has no digits.
+fn _bench_rt_field(line: string, key: string) -> int {
+    let at = index_of(line, key);
+    if at < 0 { return -1; }
+    let mut i = at + key.length;
+    let mut val = 0;
+    let mut seen = false;
+    loop {
+        if i >= line.length { break; }
+        let c = char_code_at_text(line, i);
+        if c < 48 || c > 57 { break; }
+        val = val * 10 + (c - 48);
+        seen = true;
+        i += 1;
+    }
+    if !seen { return -1; }
+    return val;
+}
+
+fn _bench_rt_min(xs: int[]) -> int {
+    if xs.length == 0 { return 0; }
+    let mut m = xs[0];
+    let mut i = 1;
+    loop {
+        if i >= xs.length { break; }
+        if xs[i] < m { m = xs[i]; }
+        i += 1;
+    }
+    return m;
+}
+
+// Median of `xs` (insertion sort over a copy); even length averages the two
+// middle samples, matching the former `bench_runtime.sh`'s integer median.
+fn _bench_rt_median(xs: int[]) -> int {
+    let n = xs.length;
+    if n == 0 { return 0; }
+    let mut a: int[] = [];
+    let mut c = 0;
+    loop {
+        if c >= n { break; }
+        a.push(xs[c]);
+        c += 1;
+    }
+    let mut x = 1;
+    loop {
+        if x >= n { break; }
+        let key = a[x];
+        let mut j = x - 1;
+        loop {
+            if j < 0 { break; }
+            if a[j] <= key { break; }
+            a[j + 1] = a[j];
+            j = j - 1;
+        }
+        a[j + 1] = key;
+        x += 1;
+    }
+    if n % 2 == 1 { return a[n / 2]; }
+    return (a[n / 2 - 1] + a[n / 2]) / 2;
+}
+
+// Ops-per-millisecond as fixed-point with one decimal (e.g. `43.4`), rounded
+// half-up to match the retired bash script's `printf "%.1f"` column so
+// perf-history diffs stay quiet.
+fn _bench_rt_ops_per_ms(ops: int, median_ms: int) -> string {
+    if median_ms <= 0 { return "0.0"; }
+    let tenths = (ops * 10 + median_ms / 2) / median_ms;
+    return number_to_string(tenths / 10) + "." + number_to_string(tenths % 10);
+}
+
+// Left-justify `s` to `width` columns with trailing spaces (no truncation).
+fn _bench_rt_pad(s: string, width: int) -> string {
+    let mut out = s;
+    loop {
+        if out.length >= width { break; }
+        out = out + " ";
+    }
+    return out;
+}
+
+// Strip trailing ASCII whitespace (space, tab, CR, LF) — `_shell_read_cmd`
+// output carries a trailing newline that must not leak into the CSV column.
+fn _bench_rt_trim_end(s: string) -> string {
+    let mut end = s.length;
+    loop {
+        if end <= 0 { break; }
+        let c = char_code_at_text(s, end - 1);
+        if c == 32 || c == 9 || c == 13 || c == 10 { end -= 1; } else { break; }
+    }
+    return substring(s, 0, end);
+}
+
+// `<sysname> <machine>` (e.g. `Linux x86_64`) via `uname -s`/`-m`, the CSV
+// `platform` column — the same detection the rest of the compiler CLI uses.
+fn _bench_rt_platform() -> string ![io] {
+    let sysname = _bench_rt_trim_end(_shell_read_cmd("uname -s"));
+    let machine = _bench_rt_trim_end(_shell_read_cmd("uname -m"));
+    if sysname.length == 0 { return "unknown"; }
+    if machine.length == 0 { return sysname; }
+    return sysname + " " + machine;
+}
+
+// Ensure the parent directory of a `--csv` output path exists.
+fn _bench_rt_ensure_parent(path: string) ![io] {
+    let mut last_slash = -1;
+    let mut i = 0;
+    loop {
+        if i >= path.length { break; }
+        if path[i] == "/" { last_slash = i; }
+        i += 1;
+    }
+    if last_slash > 0 { _ensure_dir(substring(path, 0, last_slash)); }
+}
+
+struct RtResult {
+    name: string;
+    inner_min: int;
+    inner_median: int;
+    peak_kb: int;
+    ops: int;
+    ops_per_ms: string;
+    status: string;
+}
+
+// Build one workload once, then time it. `BUILDFAIL` skips the runs; `RUNFAIL`
+// marks a workload that produced no parseable record on at least one run.
+fn _bench_rt_one(self_bin: string, src: string, work_dir: string, child_env: string[], iterations: int, warmup: int, budget_time: int, budget_mem: int) -> RtResult ![clock, io] {
+    let name = _bench_rt_label(src);
+    let bin = work_dir + "/" + name;
+
+    // Build `src` in place by default — preserving its relative-import
+    // resolution and making `sfn bench <file>` a drop-in runner. Only when the
+    // path contains a `runtime/` segment do we stage a copy into `work_dir`
+    // first: `module_name_from_path` (compiler/src/main.sfn) roots a module slug
+    // at a `runtime/` segment found anywhere in the entry path, so a workload
+    // built from `benchmarks/runtime/` mis-slugs as a `runtime/` capsule module
+    // and fails to link its `sfn/bench` dependency (SFN-215). `work_dir` has no
+    // `runtime/` segment (default `build/bench-exec`) and is kept at repo depth
+    // 2 so a workload's own `../../runtime` relative import still resolves.
+    // Delete this staging when SFN-215 lands.
+    let mut entry = src;
+    if index_of(src, "runtime/") >= 0 {
+        let staged = work_dir + "/" + _bench_rt_basename(src);
+        fs.writeFile(staged, fs.readFile(src));
+        entry = staged;
+    }
+
+    let build_exit = process.run_capture([self_bin, "build", "-o", bin, entry], child_env);
+    let _bo = process.capture_take_stdout();
+    let _be = process.capture_take_stderr();
+    if build_exit != 0 {
+        return RtResult {
+            name: name,
+            inner_min: 0,
+            inner_median: 0,
+            peak_kb: 0,
+            ops: 0,
+            ops_per_ms: "0.0",
+            status: "BUILDFAIL"
+        };
+    }
+
+    let mut w = 0;
+    loop {
+        if w >= warmup { break; }
+        let _we = process.run_capture([bin], child_env);
+        let _wo = process.capture_take_stdout();
+        let _wr = process.capture_take_stderr();
+        w += 1;
+    }
+
+    let mut samples: int[] = [];
+    let mut ops = 0;
+    let mut peak_kb = 0;
+    let mut runfail = false;
+    let mut k = 0;
+    loop {
+        if k >= iterations { break; }
+        let _re = process.run_capture_metered([bin], child_env);
+        let out = process.capture_take_stdout();
+        let err = process.capture_take_stderr();
+        let _wall = process.capture_take_wall_ms();
+        // Raw `ru_maxrss` from the metered child: KiB on Linux/WSL (the bench
+        // memory leg's supported platforms), BYTES on Darwin. Darwin
+        // normalization is deferred at the primitive layer under epic #1503
+        // (`runtime/sfn/process.sfn`), so the peak-RSS column and `--budget-mem`
+        // are Linux-oriented here, matching the `--compiler` mode.
+        let rss = process.capture_take_peak_rss_kb();
+        if rss > peak_kb { peak_kb = rss; }
+        let rec = _bench_rt_record_line(out + err);
+        if rec.length == 0 { runfail = true; } else {
+            let ims = _bench_rt_field(rec, "inner_ms=");
+            let rops = _bench_rt_field(rec, "ops=");
+            if ims < 0 || rops < 0 { runfail = true; } else {
+                samples.push(ims);
+                ops = rops;
+            }
+        }
+        k += 1;
+    }
+
+    if samples.length == 0 {
+        return RtResult {
+            name: name,
+            inner_min: 0,
+            inner_median: 0,
+            peak_kb: peak_kb,
+            ops: 0,
+            ops_per_ms: "0.0",
+            status: "RUNFAIL"
+        };
+    }
+
+    let inner_min = _bench_rt_min(samples);
+    let inner_median = _bench_rt_median(samples);
+    let mut status = "ok";
+    if runfail { status = "RUNFAIL"; }
+    if budget_time > 0 && inner_median > budget_time {
+        if strings_equal(status, "ok") { status = "SLOW"; } else {
+            status = status + "+SLOW";
+        }
+    }
+    if budget_mem > 0 && peak_kb > budget_mem {
+        if strings_equal(status, "ok") { status = "HIGHMEM"; } else {
+            status = status + "+HIGHMEM";
+        }
+    }
+    return RtResult {
+        name: name,
+        inner_min: inner_min,
+        inner_median: inner_median,
+        peak_kb: peak_kb,
+        ops: ops,
+        ops_per_ms: _bench_rt_ops_per_ms(ops, inner_median),
+        status: status
+    };
+}
+
+fn _run_runtime_mode(matches: Matches, ctx: CliContext) -> int ![clock, io] {
+    let positional = positionals(matches, "path");
+    let mut paths: string[] = positional;
+    if paths.length == 0 { paths = [_BENCH_RT_DEFAULT_DIR]; }
+
+    let mut iterations = 5;
+    if has(matches, "iterations") {
+        iterations = get_int(matches, "iterations");
+    }
+    if iterations < 1 { iterations = 1; }
+    let mut warmup = 1;
+    if has(matches, "warmup") { warmup = get_int(matches, "warmup"); }
+    if warmup < 0 { warmup = 0; }
+    // Default kept free of a `runtime/` segment and at repo depth 2 so staged
+    // workloads build and their `../../runtime` relative imports resolve (see
+    // `_bench_rt_one` / SFN-215).
+    let work_dir = get_or(matches, "work-dir", "build/bench-exec");
+    let csv_out = get_or(matches, "csv", "");
+    let filter = get_or(matches, "filter", "");
+    let mut top_n = 0;
+    if has(matches, "top") { top_n = get_int(matches, "top"); }
+    let mut budget_time = 0;
+    if has(matches, "budget-time") {
+        budget_time = get_int(matches, "budget-time");
+    }
+    let mut budget_mem = 0;
+    if has(matches, "budget-mem") {
+        budget_mem = get_int(matches, "budget-mem");
+    }
+
+    let mut sources = _bench_rt_discover(paths);
+    if filter.length > 0 { sources = _bench_rt_filter(sources, filter); }
+    if sources.length == 0 {
+        print.err("[bench] error: no workloads to run");
+        return 1;
+    }
+
+    let self_bin = _resolve_self_path(ctx.binary_dir);
+    let version = resolve_compiler_version(ctx.binary_dir);
+    let platform = _bench_rt_platform();
+
+    print("[bench] runner: " + self_bin + " (" + version + ")");
+    print("[bench] platform: " + platform);
+    print("[bench] workloads: " + number_to_string(sources.length));
+    print("[bench] timed runs per workload: " + number_to_string(iterations)
+        + " (+"
+        + number_to_string(warmup)
+        + " warm-up)");
+    print("");
+    print("  " + _bench_rt_pad("WORKLOAD", 31) + " " + _bench_rt_pad("MEDIAN", 10)
+        + "  "
+        + _bench_rt_pad("PEAK", 8)
+        + "  "
+        + _bench_rt_pad("OPS/MS", 10)
+        + "  STATUS");
+    print("  " + _bench_rt_pad("--------", 31) + " " + _bench_rt_pad("------", 10)
+        + "  "
+        + _bench_rt_pad("----", 8)
+        + "  "
+        + _bench_rt_pad("------", 10)
+        + "  ------");
+
+    _ensure_dir(work_dir);
+    let child_env = process.environ();
+
+    let mut results: RtResult[] = [];
+    let mut i = 0;
+    loop {
+        if i >= sources.length { break; }
+        let r = _bench_rt_one(self_bin, sources[i], work_dir, child_env, iterations, warmup, budget_time, budget_mem);
+        print("  " + _bench_rt_pad(r.name, 31) + " " + _bench_rt_pad(number_to_string(r.inner_median)
+            + "ms", 10)
+            + "  "
+            + _bench_rt_pad(number_to_string(r.peak_kb / 1024)
+            + "MB", 8)
+            + "  "
+            + _bench_rt_pad(r.ops_per_ms, 10)
+            + "  "
+            + r.status);
+        results.push(r);
+        i += 1;
+    }
+
+    // Summary.
+    let mut buildfail = 0;
+    let mut runfail = 0;
+    let mut slow = 0;
+    let mut highmem = 0;
+    let mut max_mem = 0;
+    let mut max_mem_name = "";
+    let mut slowest = 0;
+    let mut slowest_name = "";
+    i = 0;
+    loop {
+        if i >= results.length { break; }
+        let r = results[i];
+        if r.peak_kb > max_mem {
+            max_mem = r.peak_kb;
+            max_mem_name = r.name;
+        }
+        if r.inner_median > slowest {
+            slowest = r.inner_median;
+            slowest_name = r.name;
+        }
+        if index_of(r.status, "BUILDFAIL") >= 0 { buildfail += 1; }
+        if index_of(r.status, "RUNFAIL") >= 0 { runfail += 1; }
+        if index_of(r.status, "SLOW") >= 0 { slow += 1; }
+        if index_of(r.status, "HIGHMEM") >= 0 { highmem += 1; }
+        i += 1;
+    }
+
+    print("");
+    print("==================================================================");
+    print("");
+    print("  SUMMARY");
+    print("  -------");
+    print("  Workloads:     " + number_to_string(results.length));
+    print("  Slowest:       " + number_to_string(slowest) + "ms  ("
+        + slowest_name
+        + ")");
+    print("  Peak memory:   " + number_to_string(max_mem / 1024) + "MB  ("
+        + max_mem_name
+        + ")");
+    if buildfail > 0 {
+        print("  BUILD FAILS:   " + number_to_string(buildfail));
+    }
+    if runfail > 0 {
+        print("  RUN FAILS:     " + number_to_string(runfail));
+    }
+    if budget_time > 0 {
+        print("  Over budget:   " + number_to_string(slow) + " workloads > "
+            + number_to_string(budget_time)
+            + "ms");
+    }
+    if budget_mem > 0 {
+        print("  Over memory:   " + number_to_string(highmem) + " workloads > "
+            + number_to_string(budget_mem / 1024)
+            + "MB");
+    }
+    print("");
+
+    if csv_out.length > 0 {
+        _bench_rt_ensure_parent(csv_out);
+        let mut csv = "workload,inner_ms_min,inner_ms_median,peak_kb,ops,ops_per_ms,status,seed_version,platform\n";
+        i = 0;
+        loop {
+            if i >= results.length { break; }
+            let r = results[i];
+            csv = csv + r.name + "," + number_to_string(r.inner_min) + ","
+                + number_to_string(r.inner_median)
+                + ","
+                + number_to_string(r.peak_kb)
+                + ","
+                + number_to_string(r.ops)
+                + ","
+                + r.ops_per_ms
+                + ","
+                + r.status
+                + ","
+                + version
+                + ","
+                + platform
+                + "\n";
+            i += 1;
+        }
+        fs.writeFile(csv_out, csv);
+        print("[bench] wrote " + csv_out);
+    }
+
+    if top_n > 0 && results.length > top_n {
+        print("  TOP " + number_to_string(top_n) + " BY MEDIAN INNER TIME");
+        print("  ------------------------------");
+        let mut order: int[] = [];
+        i = 0;
+        loop {
+            if i >= results.length { break; }
+            order.push(i);
+            i += 1;
+        }
+        let mut a = 0;
+        loop {
+            if a >= order.length { break; }
+            let mut best = a;
+            let mut b = a + 1;
+            loop {
+                if b >= order.length { break; }
+                if results[order[b]].inner_median > results[order[best]].inner_median {
+                    best = b;
+                }
+                b += 1;
+            }
+            let tmp = order[a];
+            order[a] = order[best];
+            order[best] = tmp;
+            a += 1;
+        }
+        let mut t = 0;
+        loop {
+            if t >= top_n { break; }
+            let r = results[order[t]];
+            print("  " + _bench_rt_pad(r.name, 31) + " " + number_to_string(r.inner_median)
+                + "ms");
+            t += 1;
+        }
+        print("");
+    }
+
+    if buildfail > 0 || runfail > 0 {
+        print.err("[bench] FAIL: " + number_to_string(buildfail)
+            + " build failure(s), "
+            + number_to_string(runfail)
+            + " run failure(s)");
+        return 1;
+    }
+    if slow > 0 || highmem > 0 {
+        print.err("[bench] WARNING: budget violations detected");
+        return 2;
+    }
+    print("[bench] all workloads within budget");
     return 0;
 }

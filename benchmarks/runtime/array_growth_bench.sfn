@@ -1,0 +1,39 @@
+// benchmarks/runtime/array_growth_bench.sfn
+//
+// Runtime-execution benchmark: array push / grow.
+//
+// One unit of work builds a fresh `int[]` of BATCH elements (exercising the
+// amortized-doubling grow path from empty), then sum-iterates it so the pushes
+// are not eliminated. Stresses the array push/grow path in
+// `runtime/sfn/array.sfn`; the `sfn/bench` harness runs BATCHES of them.
+//
+// Fixed work: BATCHES x BATCH is a compile-time constant. The reported op count
+// is BATCHES (one array build per body call), where the pre-migration workload
+// reported the total element count. `keep` defeats dead-code elimination.
+import { benchmark_fixed, keep } from "sfn/bench";
+
+fn build_and_sum(n: int) -> int {
+    let mut arr: int[] = [];
+    let mut i = 0;
+    loop {
+        if i >= n { break; }
+        arr.push(i * 3);
+        i = i + 1;
+    }
+    let mut total = 0;
+    let mut j = 0;
+    loop {
+        if j >= arr.length { break; }
+        total = total + arr[j];
+        j = j + 1;
+    }
+    return total;
+}
+
+fn main() ![io, clock] {
+    let batches = 12000;
+    let batch = 1000;
+    let _ = benchmark_fixed("array_growth", batches, fn () -> int {
+        return keep(build_and_sum(batch));
+    });
+}

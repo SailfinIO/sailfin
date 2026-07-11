@@ -3,13 +3,14 @@ name: Benchmark
 # Manually-triggered benchmarking run. Builds the compiler from the pinned
 # seed, then runs the compile-perf bench (`make bench` → `sfn bench --compiler`,
 # per-module emit time + peak RSS) and/or the runtime-execution bench
-# (`make bench-runtime` → scripts/bench_runtime.sh, compiled-program run time +
-# peak RSS), uploading the CSVs as artifacts.
+# (`make bench-runtime` → `sfn bench benchmarks/runtime`, compiled-program run
+# time + peak RSS), uploading the CSVs as artifacts.
 #
 # Use this to capture a fresh baseline (e.g. the Linux x86_64 runtime baseline
 # that the macOS dev host cannot produce — runtime wall/RSS are not
 # cross-platform comparable; see docs/perf/runtime-performance.md). The setup mirrors
-# nightly-selfhost.yml; the pinned seed lives in `.seed-version`.
+# nightly-selfhost.yml; the pinned seed lives in `bootstrap.toml`'s
+# [seed].version key.
 #
 # NOTE: workflow_dispatch workflows are only triggerable once the file exists on
 # the default branch (main). Merge it before expecting it in the Actions UI /
@@ -19,7 +20,7 @@ on:
   workflow_dispatch:
     inputs:
       seed_version:
-        description: "Seed version (blank defaults to `.seed-version` from checkout)"
+        description: "Seed version (blank defaults to bootstrap.toml [seed].version from checkout)"
         required: false
         default: ""
       suite:
@@ -70,7 +71,7 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v7
 
-      - name: Resolve seed version (input override → .seed-version)
+      - name: Resolve seed version (input override → bootstrap.toml)
         id: seed
         shell: bash
         env:
@@ -82,16 +83,19 @@ jobs:
             echo "[seed-pin] using seed $override (workflow_dispatch input override)"
             pin="$override"
           else
-            if [ ! -f .seed-version ]; then
-              echo "[seed-pin] .seed-version is missing from checkout" >&2
+            if [ ! -f bootstrap.toml ]; then
+              echo "[seed-pin] bootstrap.toml is missing from checkout" >&2
               exit 1
             fi
-            pin="$(tr -d '[:space:]' < .seed-version)"
+            pin="$(awk '
+              /^\[[^]]+\]/ { section=$0 }
+              section == "[seed]" && /^version[[:space:]]*=/ { gsub(/"/, "", $3); print $3; exit }
+            ' bootstrap.toml)"
             if [ -z "$pin" ]; then
-              echo "[seed-pin] .seed-version is empty" >&2
+              echo "[seed-pin] bootstrap.toml [seed].version is empty or missing" >&2
               exit 1
             fi
-            echo "[seed-pin] using seed $pin from .seed-version"
+            echo "[seed-pin] using seed $pin from bootstrap.toml"
           fi
           echo "seed_version=$pin" >> "$GITHUB_OUTPUT"
 

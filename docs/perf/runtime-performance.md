@@ -23,25 +23,25 @@ This is orthogonal to `make bench` (`sfn bench --compiler`), which measures
 
 ## How it works
 
-`make bench-runtime` → `scripts/bench_runtime.sh` builds each workload in
-`benchmarks/runtime/*.sfn` to a native binary **once** (never timed), then runs
-it `1 + K` times (default K=5), discarding a warm-up run. Each workload brackets
-its hot loop with `monotonic_millis()` (`![clock]`) and prints a single
-`RESULT <name> <inner_ms> <ops>` line; the harness records the self-timed inner
-wall (min + median over K runs) as the primary metric and wraps the process with
-GNU time (`/usr/bin/time -v` / `gtime`) for best-effort peak RSS. Iteration
-counts are compile-time constants so the *work* is fixed across releases and only
-performance varies.
+`make bench-runtime` → `sfn bench benchmarks/runtime` discovers each `*_bench.sfn`
+workload in `benchmarks/runtime/`, builds it to a native binary **once** (never
+timed), then runs it `1 + K` times (default K=5), discarding a warm-up run. Each
+workload calls `benchmark_fixed` (`sfn/bench`), which brackets its hot loop with
+the in-language timer and prints a single record line of the form
+`bench-record/1 ops=<int> inner_ms=<int> name=<label>`; the runner records the
+self-timed inner wall (min + median over K runs) as the primary metric and
+meters the subprocess for peak RSS via rusage. Iteration counts are compile-time constants so the *work*
+is fixed across releases and only performance varies.
 
 ```bash
 make compile                                            # prerequisite
 make bench-runtime BENCH_RUNTIME_ARGS="--csv out.csv"   # full suite
-make bench-runtime BENCH_RUNTIME_ARGS="--workload arena_alloc --top 1"
+make bench-runtime BENCH_RUNTIME_ARGS="--filter arena_alloc --top 1"
 ```
 
 Inner-ms is the headline because it isolates the runtime subsystem cost from
-process startup / runtime init. Peak RSS is a process-level max (best-effort:
-`0` when GNU time is absent; on macOS `brew install gnu-time`).
+process startup / runtime init. Peak RSS is a process-level max, measured from
+the metered subprocess's rusage.
 
 ## Workloads
 
@@ -183,7 +183,5 @@ above).
 - Capture the Linux x86_64 baseline on a Linux runner.
 - Wire `--budget-time` / `--budget-mem` into a CI regression gate once ≥2
   baselines exist to set non-flaky thresholds.
-- Fold `bench_runtime.sh` into `sfn bench --runtime` after the native `sfn bench`
-  subcommand lands (#1503), reusing its shared GNU-time / CSV / flag scaffolding.
 </content>
 </invoke>

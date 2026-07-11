@@ -305,42 +305,44 @@ jobs:
           PREV_TAG: ${{ steps.bump.outputs.prev_tag }}
         run: |
           set -euo pipefail
-          PRERELEASE_FLAG=""
+          prerelease_args=()
           if [ "$CHANNEL" != "stable" ]; then
-            PRERELEASE_FLAG="--prerelease"
+            prerelease_args=(--prerelease)
           fi
 
-          LATEST_FLAG=""
+          latest_args=()
           if [ "$CHANNEL" = "stable" ]; then
-            LATEST_FLAG="--latest"
+            latest_args=(--latest)
           fi
 
           # Only pass --notes-start-tag if the previous tag actually exists
-          NOTES_START=""
+          notes_start_args=()
           if git rev-parse "$PREV_TAG" >/dev/null 2>&1; then
-            NOTES_START="--notes-start-tag $PREV_TAG"
+            notes_start_args=(--notes-start-tag "$PREV_TAG")
           fi
 
           gh release create "$TAG" \
             --title "Sailfin $VERSION" \
             --generate-notes \
-            $NOTES_START \
-            $PRERELEASE_FLAG \
-            $LATEST_FLAG
+            "${notes_start_args[@]}" \
+            "${prerelease_args[@]}" \
+            "${latest_args[@]}"
 
       - name: Dry run summary
         if: inputs.dry_run == true
         run: |
-          echo "## Dry Run Summary" >> "$GITHUB_STEP_SUMMARY"
-          echo "" >> "$GITHUB_STEP_SUMMARY"
-          echo "| Field | Value |" >> "$GITHUB_STEP_SUMMARY"
-          echo "|-------|-------|" >> "$GITHUB_STEP_SUMMARY"
-          echo "| Current | ${{ steps.bump.outputs.prev_tag }} |" >> "$GITHUB_STEP_SUMMARY"
-          echo "| Next | ${{ steps.bump.outputs.tag }} |" >> "$GITHUB_STEP_SUMMARY"
-          echo "| Channel | ${{ inputs.channel }} |" >> "$GITHUB_STEP_SUMMARY"
-          echo "| Bump | ${{ inputs.bump }} |" >> "$GITHUB_STEP_SUMMARY"
-          echo "" >> "$GITHUB_STEP_SUMMARY"
-          echo "No changes were made (dry run)." >> "$GITHUB_STEP_SUMMARY"
+          {
+            echo "## Dry Run Summary"
+            echo ""
+            echo "| Field | Value |"
+            echo "|-------|-------|"
+            echo "| Current | ${{ steps.bump.outputs.prev_tag }} |"
+            echo "| Next | ${{ steps.bump.outputs.tag }} |"
+            echo "| Channel | ${{ inputs.channel }} |"
+            echo "| Bump | ${{ inputs.bump }} |"
+            echo ""
+            echo "No changes were made (dry run)."
+          } >> "$GITHUB_STEP_SUMMARY"
 
   build-assets:
     name: Build release assets
@@ -352,3 +354,36 @@ jobs:
     with:
       tag: ${{ needs.release.outputs.tag }}
     secrets: inherit
+
+  notify-slack-failure:
+    name: Notify Slack on release workflow failure
+    needs: release
+    if: failure()
+    runs-on: ubuntu-latest
+    permissions: {}
+    steps:
+      - name: Post Slack notification
+        shell: bash
+        env:
+          SLACK_RELEASE_WEBHOOK_URL: ${{ secrets.SLACK_RELEASE_WEBHOOK_URL }}
+          CHANNEL: ${{ inputs.channel }}
+          BUMP: ${{ inputs.bump }}
+        run: |
+          set -euo pipefail
+          if [ -z "${SLACK_RELEASE_WEBHOOK_URL:-}" ]; then
+            exit 0
+          fi
+          python3 - <<'PY' > /tmp/slack-payload.json
+          import json
+          import os
+          channel = os.environ.get("CHANNEL", "unknown")
+          bump = os.environ.get("BUMP", "unknown")
+          run_url = f"{os.environ['GITHUB_SERVER_URL']}/{os.environ['GITHUB_REPOSITORY']}/actions/runs/{os.environ['GITHUB_RUN_ID']}"
+          print(json.dumps({
+              "text": f":x: Sailfin release workflow failed before asset build (channel={channel}, bump={bump}).\\nRun: {run_url}"
+          }))
+          PY
+          curl -fsS -X POST \
+            -H 'Content-type: application/json' \
+            --data @/tmp/slack-payload.json \
+            "$SLACK_RELEASE_WEBHOOK_URL" >/dev/null || true

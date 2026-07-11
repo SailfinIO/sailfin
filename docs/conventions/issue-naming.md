@@ -421,6 +421,35 @@ For curated cuts `/release` lists the open items under the matching
 confirmation before dispatching. The gate is advisory — the human always
 has the final call.
 
+### Release cadence
+
+The public compiler train is a **2-week Monday cadence**. The scheduled
+`release-train.yml` workflow runs every Monday at 09:00 UTC and enforces the
+2-week boundary with ISO-week parity. On the cadence week, if the latest
+`nightly-selfhost.yml` run on `main` is green, the train automatically
+dispatches `release.yml` with `channel=alpha bump=minor`, producing the next
+minor alpha (`vX.Y.0-alpha.1`). Open release scope rolls forward; it is
+reported on the tracker but does not block the train.
+
+Manual cadence workflow runs do **not** dispatch by default. Use
+`confirm_dispatch=true` only for a deliberate repair or off-clock cut, and only
+when the same nightly self-host gate is clear.
+
+Routine alphas (`channel=alpha bump=prerelease`) remain manual/off-cadence.
+They are for urgent fixes, release-critical seed needs, or maintainer-curated
+snapshots between trains; they are not the public cadence contract.
+
+Stable promotion is **not** on a timer. Promote to `channel=stable` only when
+both conditions hold: the target release tracker is clear and `main` has seven
+consecutive green nightly self-host runs. The stable dispatch stays
+human-confirmed.
+
+Release workflows post high-signal notifications to Slack when
+`SLACK_RELEASE_WEBHOOK_URL` is configured in GitHub Actions secrets. The
+intended channel is `#sailfin-notifications`; notifications are limited to
+cadence dispatch/block events, cadence seed-pin PRs or failures, stable
+promotion review prompts, and release workflow/asset failures.
+
 ### Labels
 
 | Label | Hard gate at | Soft signal at |
@@ -459,13 +488,11 @@ curation, not the issue.
 
 ## Seed pinning
 
-The Sailfin compiler self-hosts from a released seed binary. The pin
-lives at `.seed-version` (single-line file at repo root) and is read by
-`make fetch-seed`, `ci.yml`, `nightly-selfhost.yml`, and
-`release-branches.yml`. **Bumping the pin is a separate concern from
-cutting a release** — `release.yml` deliberately doesn't touch
-`.seed-version` because the new binary doesn't exist at tag-creation
-time and most alpha releases shouldn't be pinned.
+The Sailfin compiler self-hosts from a released seed binary. The canonical
+pin lives in `bootstrap.toml` as `[seed].version`.
+**Bumping the pin is a separate concern from cutting a release** —
+`release.yml` deliberately doesn't touch the seed pin because the new binary
+doesn't exist at tag-creation time and most alpha releases shouldn't be pinned.
 
 **Seeds advance on the cadence, batched.** Per SFEP-0026 WS-C, the pin is
 **not** chased reactively per-need (the `0.7.0-alpha.49` treadmill). Routine
@@ -496,10 +523,13 @@ the need clears the release-critical bar.
 
 Mid-flight seed needs — a `needs-seed-cut` flag from the advisor, or a
 `seed-blocker` issue closing — **queue against the next scheduled cadence
-seed bump** by default. `/pin-seed` runs **once per cadence** against that
-cycle's alpha cut; it is not run reactively for each individual need. This
-is the SFEP-0026 §3.3 batching policy: trade a small latency on
-non-critical seed needs for a large reduction in cut/`pin-seed` overhead.
+seed bump** by default. After the cadence alpha assets publish, the
+`cadence-seed-pin.yml` workflow opens a draft PR that advances
+`bootstrap.toml [seed].version` (and the transitional mirror only while it
+exists). The pin advances **once per cadence**; it is not run reactively for
+each individual need. This is the SFEP-0026 §3.3 batching policy: trade a
+small latency on non-critical seed needs for a large reduction in seed-pin
+overhead.
 
 **The release-critical bar (the only thing that breaks the batch).** A
 mid-flight seed need may force an **off-cadence** seed cut only if **all
@@ -584,9 +614,9 @@ escalate to **"off-cadence seed cut may be warranted"** (it clears the
 release-critical bar above).
 
 It is idempotent (one advisory per PR per tracker) and **only flags** —
-it never dispatches `release.yml` or bumps `.seed-version`, and it never
-applies `release-critical-seed` (that marker is human/grooming-applied; the
-advisor only reads it). `/release-plan` consumes the `needs-seed-cut` label,
+it never dispatches `release.yml` or bumps the seed pin, and it never applies
+`release-critical-seed` (that marker is human/grooming-applied; the advisor
+only reads it). `/release-plan` consumes the `needs-seed-cut` label,
 surfacing a "Seed cut required" checklist section on the per-cycle tracking
 issue. A queued flag clears when the cadence `/pin-seed` lands; a
 release-critical flag clears when its off-cadence `/pin-seed` lands. Remove
@@ -628,7 +658,7 @@ When a current-seed bug breaks downstream work:
 
 The pin PR lives off `main` (never `claude/*`), is reviewed even though
 it's one line, and is never auto-merged — it cascades through every
-workflow that reads `.seed-version`.
+workflow that reads the compiler checkout seed pin.
 
 ## Milestones
 

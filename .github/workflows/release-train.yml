@@ -12,19 +12,18 @@ name: Release Train (cadence)
 #      self-host check), NOT the open scope. Whatever scoped work is not done
 #      ROLLS FORWARD to the next train: open `release:next-minor` items are
 #      surfaced for visibility but NEVER block the train (time-box semantics).
-#   3. Surfaces "ready to cut" on the tracker. It does **not** auto-dispatch
-#      the curated minor cut: the actual `release.yml` dispatch stays
-#      **human-confirmable**. A maintainer re-runs this workflow with
-#      `confirm_dispatch=true` to fire the cut once the cadence comment looks
-#      right (mirroring how `seed-cut-advisor.yml` only flags, never cuts).
+#   3. Dispatches the curated minor alpha automatically on scheduled cadence
+#      runs when the cut gate is green. Manual runs stay human-confirmable:
+#      re-run this workflow with `confirm_dispatch=true` to fire an off-clock
+#      or repair cut once the cadence comment looks right.
 #
 # It is a PLAIN, deterministic Actions workflow in the spirit of
 # `seed-cut-advisor.yml` — NOT a gh-aw `.md` source. No compiled `.lock.yml`,
 # no LLM engine, no ANTHROPIC_API_KEY. A single pinned `actions/github-script`
 # step does the version math / tracker upsert / gate evaluation / optional
-# dispatch. The routine daily alpha (`channel=alpha bump=prerelease`) is
-# unaffected — this is the curated minor train on the cadence, and its alpha
-# cut doubles as the scheduled seed bump (SFEP-0026 §3.3).
+# dispatch. Routine alpha prerelease bumps remain manual/off-cadence — this is
+# the curated minor train on the cadence, and its alpha cut doubles as the
+# scheduled seed bump (SFEP-0026 §3.3).
 #
 # See `.github/AGENTS.md`, `docs/conventions/issue-naming.md` "Release
 # tracking" / "Seed pinning", and `.claude/commands/release-plan.md` (which
@@ -45,7 +44,7 @@ on:
         type: boolean
         default: false
       confirm_dispatch:
-        description: "Actually dispatch release.yml for the cadence minor cut (requires a clear cut gate)"
+        description: "Manual confirmation: dispatch release.yml for the cadence minor cut (requires a clear cut gate)"
         required: false
         type: boolean
         default: false
@@ -81,6 +80,7 @@ jobs:
           DRY_RUN: ${{ inputs.dry_run }}
           CONFIRM_DISPATCH: ${{ inputs.confirm_dispatch }}
           FORCE: ${{ inputs.force }}
+          SLACK_RELEASE_WEBHOOK_URL: ${{ secrets.SLACK_RELEASE_WEBHOOK_URL }}
         with:
           github-token: ${{ secrets.RELEASE_PAT || secrets.GITHUB_TOKEN }}
           script: |
@@ -92,6 +92,22 @@ jobs:
             const isSchedule = context.eventName === 'schedule';
             const summary = [];
             const note = (s) => { core.info(s); summary.push(s); };
+            async function postSlack(text) {
+              const url = process.env.SLACK_RELEASE_WEBHOOK_URL || '';
+              if (!url) return;
+              try {
+                const res = await fetch(url, {
+                  method: 'POST',
+                  headers: { 'content-type': 'application/json' },
+                  body: JSON.stringify({ text }),
+                });
+                if (!res.ok) {
+                  core.warning(`Slack notification failed (${res.status}): ${await res.text()}`);
+                }
+              } catch (e) {
+                core.warning(`Slack notification failed: ${e.message}`);
+              }
+            }
 
             // --- 0. Bi-weekly cadence gate (scheduled runs only) --------------
             // ISO-8601 week number; even week == cadence week. Deterministic and
@@ -160,8 +176,11 @@ jobs:
                 + openNextMinor.map(i => '#' + i.number).join(', '));
 
             // --- 4. Open or update the tracker --------------------------------
+            // Trackers are looked up by exact title first. The `tracking` label
+            // is still applied for compatibility with older advisor tooling, but
+            // a missing label must not make the train miss an existing tracker.
             const existing = (await github.paginate(github.rest.issues.listForRepo, {
-              owner, repo, state: 'open', labels: 'tracking', per_page: 100,
+              owner, repo, state: 'open', per_page: 100,
             })).filter(i => !i.pull_request && i.title.trim() === trackerTitle);
             let tracker = existing[0] || null;
             if (existing.length > 1) {
@@ -182,9 +201,9 @@ jobs:
                   '_Auto-opened by the cadence release train. Run `/release-plan '
                     + target + '` to enrich the must-close / seed-blocker sub-issues and the seed-bump section._', '',
                   '## Cut gate', '',
-                  'This is a curated cadence cut. The train surfaces readiness; the actual '
-                    + '`release.yml` dispatch stays human-confirmable (re-run **Release Train** with '
-                    + '`confirm_dispatch=true`). Open scope rolls forward — it never blocks the train.', '',
+                  'This is a curated cadence cut. Scheduled train runs dispatch `release.yml` '
+                    + 'automatically when the nightly self-host gate is green; manual runs require '
+                    + '`confirm_dispatch=true`. Open scope rolls forward — it never blocks the train.', '',
                   '## Cross-references', '',
                   '- Cadence train: `.github/workflows/release-train.yml`',
                   '- Convention: `docs/conventions/issue-naming.md` "Release tracking" / "Seed pinning"',
@@ -199,6 +218,19 @@ jobs:
               }
             } else {
               note(`Tracker "${trackerTitle}" already open as #${tracker.number}.`);
+            }
+            if (tracker) {
+              const hasTracking = (tracker.labels || []).some(l => (typeof l === 'string' ? l : l.name) === 'tracking');
+              if (!hasTracking) {
+                if (dryRun) {
+                  note(`[dry-run] would ADD missing \`tracking\` label to tracker #${tracker.number}.`);
+                } else {
+                  await github.rest.issues.addLabels({
+                    owner, repo, issue_number: tracker.number, labels: ['tracking'],
+                  });
+                  note(`Added missing \`tracking\` label to tracker #${tracker.number}.`);
+                }
+              }
             }
 
             // --- 5. Idempotent cadence comment --------------------------------
@@ -215,14 +247,17 @@ jobs:
               const gateLine = cutGateClear
                 ? `✅ Cut gate clear — latest nightly self-host on \`${defaultBranch}\` is green.`
                 : `⛔ Cut gate NOT clear — ${nightly ? 'nightly self-host is ' + nightly.conclusion : 'no nightly run found'}; hold the cut until main is green.`;
+              const dispatchLine = cutGateClear
+                ? (isSchedule
+                    ? `**Auto-dispatching.** This scheduled cadence run will dispatch the curated minor (\`channel=alpha bump=minor\` → \`${maj}.${min + 1}.0-alpha.1\`).`
+                    : `**Ready to cut.** To dispatch the curated minor (\`channel=alpha bump=minor\` → \`${maj}.${min + 1}.0-alpha.1\`), re-run the **Release Train** workflow with \`confirm_dispatch=true\`.`)
+                : `**Not cutting.** The train rolls forward; it will re-evaluate next cadence boundary once main is green.`;
               const cadenceBody = [
                 `${cadenceMarker}`, '',
                 `Cadence train boundary reached for **${target}**.`, '',
                 gateLine, '',
                 `Rolling forward (not blocking): ${rollFwd}`, '',
-                cutGateClear
-                  ? `**Ready to cut.** To dispatch the curated minor (\`channel=alpha bump=minor\` → \`${maj}.${min + 1}.0-alpha.1\`, which is also this cadence's seed bump), re-run the **Release Train** workflow with \`confirm_dispatch=true\`.`
-                  : `**Not cutting.** The train rolls forward; it will re-evaluate next cadence boundary once main is green.`,
+                dispatchLine,
               ].join('\n');
               if (dryRun) {
                 note(`[dry-run] would ${already ? 'SKIP (already posted)' : 'POST'} the cadence comment on #${tracker.number}.`);
@@ -234,23 +269,39 @@ jobs:
               }
             }
 
-            // --- 6. Human-confirmable dispatch of release.yml -----------------
-            // Scheduled runs NEVER dispatch — they only surface readiness.
-            // A maintainer confirms by re-running with confirm_dispatch=true.
-            if (confirmDispatch && !isSchedule) {
+            // --- 6. Dispatch release.yml --------------------------------------
+            // Scheduled cadence runs are the public release train: if the gate is
+            // green, they dispatch automatically. Manual runs require explicit
+            // confirmation so repair/off-clock cuts stay deliberate.
+            const releaseTag = `v${maj}.${min + 1}.0-alpha.1`;
+            async function tagExists(tag) {
+              try {
+                await github.rest.git.getRef({ owner, repo, ref: `tags/${tag}` });
+                return true;
+              } catch (e) {
+                if (e.status === 404) return false;
+                throw e;
+              }
+            }
+            const shouldDispatch = isSchedule || confirmDispatch;
+            if (shouldDispatch) {
               if (dryRun) {
-                note('[dry-run] confirm_dispatch set but dry-run — not dispatching release.yml.');
+                note(`[dry-run] would ${isSchedule ? 'auto-dispatch' : 'dispatch'} release.yml (channel=alpha bump=minor) for ${releaseTag}.`);
               } else if (!cutGateClear) {
-                note('confirm_dispatch set but cut gate NOT clear — refusing to dispatch release.yml on a red main.');
+                note(`${isSchedule ? 'Scheduled train' : 'confirm_dispatch'} requested a cut, but cut gate is NOT clear — refusing to dispatch release.yml on a red main.`);
+                await postSlack(`:warning: Sailfin release train blocked for ${target}. Latest nightly self-host is ${nightly ? nightly.conclusion : 'missing'}.\nTracker: ${tracker ? tracker.html_url : trackerTitle}\nRun: https://github.com/${owner}/${repo}/actions/runs/${context.runId}`);
+              } else if (await tagExists(releaseTag)) {
+                note(`Release tag ${releaseTag} already exists — skipping dispatch.`);
               } else {
                 await github.rest.actions.createWorkflowDispatch({
                   owner, repo, workflow_id: 'release.yml', ref: defaultBranch,
                   inputs: { channel: 'alpha', bump: 'minor', dry_run: 'false' },
                 });
-                note(`Dispatched release.yml (channel=alpha bump=minor) → ${maj}.${min + 1}.0-alpha.1.`);
+                note(`Dispatched release.yml (channel=alpha bump=minor) → ${releaseTag}.`);
+                await postSlack(`:rocket: Sailfin release train dispatched ${releaseTag} (channel=alpha bump=minor).\nTracker: ${tracker ? tracker.html_url : trackerTitle}\nRun: https://github.com/${owner}/${repo}/actions/runs/${context.runId}`);
               }
-            } else if (confirmDispatch && isSchedule) {
-              note('confirm_dispatch is ignored on scheduled runs — dispatch is human-confirmable (re-run manually).');
+            } else {
+              note('Manual run without confirm_dispatch — surfaced readiness only.');
             }
 
             core.summary

@@ -26,7 +26,7 @@ compares their output.
 | File | Columns |
 |---|---|
 | `compile.csv` | `run_sha,run_date,` + `sfn bench --compiler --csv` header (`module,time_s,peak_kb,ir_lines,status,seed_version`) |
-| `runtime.csv` | `run_sha,run_date,` + `scripts/bench_runtime.sh --csv` header (`workload,inner_ms_min,inner_ms_median,peak_kb,ops,ops_per_ms,status,seed_version,platform`) |
+| `runtime.csv` | `run_sha,run_date,` + `sfn bench benchmarks/runtime --csv` header (`workload,inner_ms_min,inner_ms_median,peak_kb,ops,ops_per_ms,status,seed_version,platform`) |
 | `build.csv` | `run_sha,run_date,build_wall_s,budget_s` |
 
 Every nightly run appends one block of rows to each file. Append is

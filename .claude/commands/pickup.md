@@ -63,10 +63,13 @@ the binary `make compile` uses — this catches the "merged but not seeded"
 failure mode that broke the original #489 attempt. (`git` is available; use it.)
 
 ```bash
-SEED_TAG="v$(cat .seed-version)"
+SEED_TAG="v$(awk '
+  /^\[[^]]+\]/ { section=$0 }
+  section == "[seed]" && /^version[[:space:]]*=/ { gsub(/"/, "", $3); print $3; exit }
+' bootstrap.toml)"
 git fetch --tags origin "$SEED_TAG" 2>/dev/null || git fetch --tags origin
 git rev-parse --verify "${SEED_TAG}^{commit}" >/dev/null 2>&1 || {
-  echo "Seed tag $SEED_TAG does not resolve — check .seed-version."; exit 1; }
+  echo "Seed tag $SEED_TAG does not resolve — check bootstrap.toml [seed].version."; exit 1; }
 ```
 
 For each predecessor PR `#P` in `## Required in pinned seed`, read its merge

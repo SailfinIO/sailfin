@@ -1,0 +1,203 @@
+name: Cadence Seed Pin
+
+# After the release train cuts a new minor alpha, open a draft PR that adopts
+# that just-published toolchain as the compiler checkout seed. The canonical pin
+# is `bootstrap.toml [seed].version` (SFEP-0047), alongside the compiler
+# `[toolchain].sfn` floor in `compiler/capsule.toml`.
+
+on:
+  workflow_run:
+    workflows: ["Release"]
+    types: [completed]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Released cadence alpha tag to pin, e.g. v0.9.0-alpha.1"
+        required: true
+
+permissions:
+  contents: write
+  pull-requests: write
+
+concurrency:
+  group: cadence-seed-pin
+  cancel-in-progress: false
+
+jobs:
+  open-pin-pr:
+    name: Open seed-pin PR
+    if: github.event_name == 'workflow_dispatch' || github.event.workflow_run.conclusion == 'success'
+    runs-on: ubuntu-latest
+    env:
+      GH_TOKEN: ${{ secrets.RELEASE_PAT || secrets.GITHUB_TOKEN }}
+      SLACK_RELEASE_WEBHOOK_URL: ${{ secrets.SLACK_RELEASE_WEBHOOK_URL }}
+    steps:
+      - name: Checkout main
+        uses: actions/checkout@v7
+        with:
+          ref: main
+          fetch-depth: 0
+          token: ${{ secrets.RELEASE_PAT || secrets.GITHUB_TOKEN }}
+
+      - name: Resolve released version
+        id: version
+        shell: bash
+        env:
+          INPUT_TAG: ${{ inputs.tag }}
+        run: |
+          set -euo pipefail
+          if [ -n "${INPUT_TAG:-}" ]; then
+            tag="$INPUT_TAG"
+            version="${tag#v}"
+          else
+            version="$(sed -n 's/^version *= *"\([^"]*\)"/\1/p' compiler/capsule.toml)"
+            tag="v${version}"
+          fi
+          if [ -z "$version" ]; then
+            echo "::error::Could not resolve compiler version"
+            exit 1
+          fi
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+          echo "tag=$tag" >> "$GITHUB_OUTPUT"
+
+      - name: Open draft PR for cadence seed bump
+        shell: bash
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
+          TAG: ${{ steps.version.outputs.tag }}
+        run: |
+          set -euo pipefail
+          post_slack() {
+            if [ -z "${SLACK_RELEASE_WEBHOOK_URL:-}" ]; then
+              return 0
+            fi
+            SLACK_TEXT="$1" python3 - <<'PY' > /tmp/slack-payload.json
+          import json
+          import os
+          print(json.dumps({"text": os.environ["SLACK_TEXT"]}))
+          PY
+            curl -fsS -X POST \
+              -H 'Content-type: application/json' \
+              --data @/tmp/slack-payload.json \
+              "$SLACK_RELEASE_WEBHOOK_URL" >/dev/null || true
+          }
+
+          if [[ ! "$VERSION" =~ ^[0-9]+\.[0-9]+\.0-alpha\.1$ ]]; then
+            echo "[seed-pin] $VERSION is not a cadence minor alpha (*.0-alpha.1); skipping automatic seed-pin PR."
+            exit 0
+          fi
+
+          source_version="$(sed -n 's/^version *= *"\([^"]*\)"/\1/p' compiler/capsule.toml)"
+          if [ "$source_version" != "$VERSION" ]; then
+            echo "::error::compiler/capsule.toml is at $source_version, not $VERSION; refusing to pin a seed ahead of the source version."
+            exit 1
+          fi
+
+          if ! gh release view "$TAG" --json assets --jq '.assets | length' >/tmp/asset-count; then
+            echo "::error::Release $TAG is not visible yet"
+            exit 1
+          fi
+          assets="$(cat /tmp/asset-count)"
+          if [ "$assets" -eq 0 ]; then
+            echo "::error::Release $TAG has no uploaded assets yet; retry after release-tag completes."
+            exit 1
+          fi
+
+          current="$(awk '
+            /^\[[^]]+\]/ { section=$0 }
+            section == "[seed]" && /^version[[:space:]]*=/ {
+              gsub(/"/, "", $3); print $3; exit
+            }
+          ' bootstrap.toml)"
+          if [ "$current" = "$VERSION" ]; then
+            echo "[seed-pin] bootstrap.toml already pins $VERSION; nothing to do."
+            exit 0
+          fi
+
+          branch="bot/cadence-seed-pin-v${VERSION}"
+          if [ "$(gh pr list --head "$branch" --state open --json number --jq 'length')" != "0" ]; then
+            echo "[seed-pin] an open PR already exists for $branch; skipping."
+            exit 0
+          fi
+
+          git config user.name "Sailfin Release Bot"
+          git config user.email "releases@sailfin.io"
+          git checkout -b "$branch"
+
+          tmp="$(mktemp)"
+          awk -v v="$VERSION" '
+            /^\[[^]]+\]/ { section=$0 }
+            section == "[seed]" && /^version[[:space:]]*=/ {
+              sub(/"[^"]*"/, "\"" v "\"")
+            }
+            { print }
+          ' bootstrap.toml > "$tmp"
+          mv "$tmp" bootstrap.toml
+
+          tmp="$(mktemp)"
+          awk -v v="$VERSION" '
+            /^\[[^]]+\]/ { section=$0 }
+            section == "[toolchain]" && /^sfn[[:space:]]*=/ {
+              sub(/"[^"]*"/, "\"" v "\"")
+            }
+            { print }
+          ' compiler/capsule.toml > "$tmp"
+          mv "$tmp" compiler/capsule.toml
+
+          git add bootstrap.toml compiler/capsule.toml
+          if git diff --cached --quiet; then
+            echo "[seed-pin] no changes after rewrite; skipping."
+            exit 0
+          fi
+
+          git commit -m "chore(seed): pin cadence seed to ${VERSION}"
+          git push -u origin "$branch"
+
+          body="$(mktemp)"
+          cat > "$body" <<EOF
+          ## Summary
+
+          Pins the compiler checkout seed from \`${current}\` to \`${VERSION}\` after the cadence alpha \`${TAG}\` published release assets.
+
+          ## Notes
+
+          - Updates \`bootstrap.toml [seed].version\`, the canonical compiler-checkout seed policy.
+          - Updates \`compiler/capsule.toml [toolchain].sfn\` so the public toolchain floor tracks the adopted seed.
+
+          ## Verification
+
+          - \`gh release view ${TAG} --json assets\` returned ${assets} asset(s).
+          EOF
+
+          pr_url="$(gh pr create \
+            --draft \
+            --base main \
+            --head "$branch" \
+            --title "chore(seed): pin cadence seed to ${VERSION}" \
+            --body-file "$body")"
+          echo "$pr_url"
+          post_slack ":seedling: Sailfin cadence seed-pin PR opened for ${VERSION}.\nPR: ${pr_url}\nRelease: https://github.com/${GITHUB_REPOSITORY}/releases/tag/${TAG}"
+
+      - name: Notify Slack on seed-pin failure
+        if: failure()
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [ -z "${SLACK_RELEASE_WEBHOOK_URL:-}" ]; then
+            exit 0
+          fi
+          python3 - <<'PY' > /tmp/slack-payload.json
+          import json
+          import os
+          tag = os.environ.get("TAG", "unknown")
+          run_url = f"{os.environ['GITHUB_SERVER_URL']}/{os.environ['GITHUB_REPOSITORY']}/actions/runs/{os.environ['GITHUB_RUN_ID']}"
+          print(json.dumps({
+              "text": f":warning: Sailfin cadence seed-pin workflow failed for {tag}.\\nRun: {run_url}"
+          }))
+          PY
+          curl -fsS -X POST \
+            -H 'Content-type: application/json' \
+            --data @/tmp/slack-payload.json \
+            "$SLACK_RELEASE_WEBHOOK_URL" >/dev/null || true
+        env:
+          TAG: ${{ steps.version.outputs.tag }}

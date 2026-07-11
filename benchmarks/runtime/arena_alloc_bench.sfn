@@ -1,0 +1,46 @@
+// benchmarks/runtime/arena_alloc_bench.sfn
+//
+// Runtime-execution benchmark: arena bump allocation.
+//
+// One unit of work is a BATCH-iteration inner loop that allocates a small
+// non-escaping struct each iteration and sums its fields; the `sfn/bench`
+// harness runs BATCHES of them. Stresses the bump-allocator hot path (round-up
+// to alignment, advance cursor, page fallback) in `runtime/sfn/memory/arena.sfn`.
+// The inner `loop` directly allocates a non-escaping `Cell`, so the
+// per-iteration arena mark/rewind seam (#1514) reclaims it each pass and peak
+// RSS stays flat (bounded by BATCH, not BATCHES x BATCH) — the reclamation win
+// this benchmark exists to demonstrate. A single-alloc harness body cannot show
+// it: the harness accumulates over the whole timed window in one arena scope, so
+// the alloc must live in a directly-timed inner loop for the rewind to fire.
+//
+// Fixed work: BATCHES x BATCH is a compile-time constant so the measured cost is
+// comparable across releases. The reported op count is BATCHES (one inner loop
+// per body call); the pre-migration workload reported BATCHES x BATCH. `keep`
+// defeats dead-code elimination.
+import { benchmark_fixed, keep } from "sfn/bench";
+
+struct Cell {
+    a: int;
+    b: int;
+    c: int;
+}
+
+fn alloc_batch(n: int) -> int {
+    let mut acc = 0;
+    let mut j = 0;
+    loop {
+        if j >= n { break; }
+        let cell = Cell { a: j, b: j + 1, c: j + 2 };
+        acc = acc + cell.a + cell.b + cell.c;
+        j = j + 1;
+    }
+    return acc;
+}
+
+fn main() ![io, clock] {
+    let batches = 30000;
+    let batch = 1000;
+    let _ = benchmark_fixed("arena_alloc", batches, fn () -> int {
+        return keep(alloc_batch(batch));
+    });
+}
