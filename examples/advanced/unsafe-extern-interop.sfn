@@ -5,7 +5,7 @@ unsafe extern fn malloc(size: usize) -> *u8;
 unsafe extern fn free(ptr: *u8) -> void;
 
 // Safe wrapper around unsafe memory allocation
-fn allocate_and_free(size: usize) ![unsafe, io] -> void {
+fn allocate_and_free(size: usize) ![io] -> void {
     unsafe {
         let ptr = malloc(size);
 
@@ -20,6 +20,6 @@ fn allocate_and_free(size: usize) ![unsafe, io] -> void {
     }
 }
 
-fn main() ![unsafe, io] {
+fn main() ![io] {
     allocate_and_free(1024);
 }

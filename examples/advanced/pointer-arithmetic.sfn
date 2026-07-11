@@ -3,7 +3,7 @@
 unsafe extern fn malloc(size: usize) -> *u8;
 unsafe extern fn free(ptr: *u8) -> void;
 
-fn main() ![unsafe, io] {
+fn main() ![io] {
     unsafe {
         // Allocate space for 4 integers (4 bytes each)
         let arr = malloc(16) as *i32;

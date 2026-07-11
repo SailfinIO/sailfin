@@ -26,9 +26,14 @@ import {
     capability_violation_to_diagnostic,
     effect_violation_to_diagnostic,
     render_diagnostic,
-    split_source_lines
+    split_source_lines,
+    unrecognized_effect_violation_to_diagnostic
 } from "../diagnostics_render";
-import { validate_capsule_capabilities, validate_effects_with_imports } from "../effect_checker";
+import {
+    validate_capsule_capabilities,
+    validate_effects_with_imports,
+    validate_recognized_effects
+} from "../effect_checker";
 import { read_effect_enforcement_env, resolve_effect_enforcement } from "../effect_gate";
 import { ImportSymbolTable, empty_import_symbols } from "../effect_imports";
 import { collect_import_resolution_findings } from "../import_resolution_check";
@@ -146,6 +151,7 @@ fn check_source_with_imports(source: string, file_path: string, imported_interfa
     let type_diags = typecheck_diagnostics_with_import_symbols_prelude(program, imported_interfaces, function_effects, prelude_globals);
     let effect_violations = validate_effects_with_imports(program, function_effects);
     let capability_violations = validate_capsule_capabilities(program, capabilities_required);
+    let unrecognized_violations = validate_recognized_effects(program);
 
     let source_lines = split_source_lines(source);
     let mut combined: Diagnostic[] = [];
@@ -343,6 +349,24 @@ fn check_source_with_imports(source: string, file_path: string, imported_interfa
         if strings_equal(cdiag.severity, "error") { errors += 1; }
         if strings_equal(cdiag.severity, "warning") { warnings += 1; }
         ci += 1;
+    }
+
+    // Gate G6 (SFEP-0017 D1): an effect string whose root is outside the
+    // canonical six (and isn't `pure`) is rejected as `E0404`. Shares the
+    // effect-severity contract with the sibling streams above.
+    let mut ui2: int = 0;
+    loop {
+        if ui2 >= unrecognized_violations.length { break; }
+        let mut uv = unrecognized_violations[ui2];
+        uv.severity = effect_severity;
+        let mut udiag = unrecognized_effect_violation_to_diagnostic(uv);
+        udiag.file_path = file_path;
+        combined.push(udiag);
+        producers.push("effect");
+        rendered.push(render_diagnostic(udiag, source_lines, "effect"));
+        if strings_equal(udiag.severity, "error") { errors += 1; }
+        if strings_equal(udiag.severity, "warning") { warnings += 1; }
+        ui2 += 1;
     }
 
     return CheckResult {

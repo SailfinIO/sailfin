@@ -270,3 +270,48 @@ test "capabilities: multiple offending functions produce separate violations" {
     assert violations[1].routine_name == "b";
     assert violations[1].excess_effects[0] == "model";
 }
+
+// -------------------------------------------------------------------
+// Dotted sub-effect subsumption against the manifest (SFEP-0017 §4)
+// -------------------------------------------------------------------
+test "capabilities: a coarse grant authorizes a narrower dotted requirement" {
+    // required=["io"], function declares ![io.fs] — io subsumes io.fs.
+    let stmt = _function_declaring("read_file", ["io.fs"], 5);
+    let program = Program { statements: [stmt] };
+    let violations = validate_capsule_capabilities(program, ["io"]);
+    assert violations.length == 0;
+}
+
+test "capabilities: a tightened manifest rejects the general root effect" {
+    // required=["io.fs"], function declares ![io] — io.fs does not
+    // subsume io, so the coarser declaration is out of bounds.
+    let stmt = _function_declaring("read_anything", ["io"], 5);
+    let program = Program { statements: [stmt] };
+    let violations = validate_capsule_capabilities(program, ["io.fs"]);
+    assert violations.length == 1;
+}
+
+test "capabilities: a sibling sub-effect outside the grant is rejected" {
+    // required=["io.fs"], function declares ![io.console] — siblings
+    // are unordered, so io.fs does not subsume io.console.
+    let stmt = _function_declaring("log_stdout", ["io.console"], 5);
+    let program = Program { statements: [stmt] };
+    let violations = validate_capsule_capabilities(program, ["io.fs"]);
+    assert violations.length == 1;
+}
+
+test "capabilities: a deeper refinement inside the grant passes" {
+    // required=["io.fs"], function declares ![io.fs.read] — io.fs
+    // subsumes its own deeper refinement.
+    let stmt = _function_declaring("read_only", ["io.fs.read"], 5);
+    let program = Program { statements: [stmt] };
+    let violations = validate_capsule_capabilities(program, ["io.fs"]);
+    assert violations.length == 0;
+}
+
+test "capabilities: a coarse net grant authorizes net.http" {
+    let stmt = _function_declaring("fetch", ["net.http"], 5);
+    let program = Program { statements: [stmt] };
+    let violations = validate_capsule_capabilities(program, ["net"]);
+    assert violations.length == 0;
+}
