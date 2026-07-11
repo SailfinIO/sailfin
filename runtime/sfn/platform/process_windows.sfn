@@ -107,6 +107,16 @@ let mut pw_capture_stdout_addr: i64 = 0;
 
 let mut pw_capture_stderr_addr: i64 = 0;
 
+// Metered-capture slots for `run_capture_metered` (#1520 / epic #1503),
+// the measurement primitive the native `sfn bench` driver uses. Windows
+// has no `getrusage`/`wait4`, so wall-clock and peak-RSS metering degrade
+// to `0` here (bench's timing/memory leg is Linux/WSL-only per epic #1503);
+// the subprocess drive and stdout/stderr capture stay real. `i64` slots to
+// dodge the same non-`i64` module-mutable-global quirk noted above.
+let mut pw_capture_wall_ms: i64 = 0;
+
+let mut pw_capture_peak_rss_kb: i64 = 0;
+
 // `sfn_process_run(argv)` — real Windows spawn. Mirrors the retired
 // `sailfin_runtime.c:5564` `CreateProcessA` body: build a single quoted
 // command line (`"arg0" "arg1" ...`), spawn, block until exit, return
@@ -643,6 +653,34 @@ fn sfn_process_capture_take_stderr() -> * u8 ![io] {
     pw_capture_stderr_addr = 0;
     if addr == 0 { return _pw_empty_cstr(); }
     return addr as * u8;
+}
+
+// ── process.run_capture_metered (Windows) ─────────────────────────
+// Metered variant for the native `sfn bench` driver (#1520 / epic #1503).
+// The POSIX body (`process.sfn`) brackets the child with the monotonic
+// clock and threads a `struct rusage` through `wait4` for `ru_maxrss`;
+// neither is available here, so this delegates to the real `run_capture`
+// (subprocess drive + stdout/stderr capture stay honest) and reports `0`
+// wall time / peak RSS — the degraded-but-linking contract this module
+// documents for families it can't yet fully implement. Keeps the same
+// `![clock, io]` signature as the POSIX body so the builtin descriptor
+// (`llvm/runtime_helpers.sfn`) is platform-uniform.
+fn sfn_process_run_capture_metered(argv: string[], env_flat: string[]) -> i64 ![clock, io] {
+    pw_capture_wall_ms = 0;
+    pw_capture_peak_rss_kb = 0;
+    return sfn_process_run_capture(argv, env_flat);
+}
+
+fn sfn_process_capture_take_wall_ms() -> i64 ![io] {
+    let v: i64 = pw_capture_wall_ms;
+    pw_capture_wall_ms = 0;
+    return v;
+}
+
+fn sfn_process_capture_take_peak_rss_kb() -> i64 ![io] {
+    let v: i64 = pw_capture_peak_rss_kb;
+    pw_capture_peak_rss_kb = 0;
+    return v;
 }
 
 // `0` is the spawn-handle failure sentinel (not -1) — matches the C

@@ -178,9 +178,14 @@ fn run(matches: Matches, ctx: CliContext) -> int ![clock, io] {
         let name = _bench_flatten(slug);
         let out_ll = work_dir + "/" + name + ".ll";
 
+        // Clear any stale .ll so a failed emit can't inherit a prior run's
+        // output and be misreported as ok (module status keys off this
+        // file's presence + non-emptiness).
+        if fs.exists(out_ll) { fs.deleteFile(out_ll); }
+
         let argv: string[] = [self_bin, "emit", "--module-name", slug, "--import-context", import_ctx, "--no-resolve-gate", "-o", out_ll, "llvm", src];
 
-        let _exit = process.run_capture_metered(argv, child_env);
+        let exit_code = process.run_capture_metered(argv, child_env);
         let _o = process.capture_take_stdout();
         let _e = process.capture_take_stderr();
         let wall_ms = process.capture_take_wall_ms();
@@ -188,7 +193,7 @@ fn run(matches: Matches, ctx: CliContext) -> int ![clock, io] {
 
         let mut ir_lines = 0;
         let mut status = "ok";
-        if fs.exists(out_ll) {
+        if exit_code != 0 { status = "FAIL"; } else if fs.exists(out_ll) {
             let content = fs.readFile(out_ll);
             if content.length == 0 { status = "FAIL"; } else {
                 ir_lines = _bench_count_lines(content);

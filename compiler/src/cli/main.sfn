@@ -78,7 +78,7 @@ fn _usage() -> string {
     out = out
         + "  sfn cache <info|prune|clean> [--max-size N] [--max-age N] [--all-schemas]\n";
     out = out
-        + "  sfn bench --compiler [--module M]... [--top N] [--csv PATH] [--budget-time S] [--budget-mem KB]\n";
+        + "  sfn bench --compiler [--module M]... [--top N] [--csv PATH] [--budget-time S] [--budget-mem KB] [--import-context DIR] [--work-dir DIR]\n";
     out = out + "\n";
     out = out + "project:\n";
     out = out + "  sfn init\n";
@@ -562,7 +562,7 @@ fn sailfin_cli_main_v2(argv: string[]) -> int ![clock, io, net] {
     if strings_equal(subcommand(matches), "bench") {
         if ctx.trace_argv { _v2_trace_argv(argv); }
         if parse_ok { return bench_run(matches, ctx); }
-        print("usage: sfn bench --compiler [--module M]... [--top N] [--csv PATH] [--budget-time S] [--budget-mem KB]");
+        print("usage: sfn bench --compiler [--module M]... [--top N] [--csv PATH] [--budget-time S] [--budget-mem KB] [--import-context DIR] [--work-dir DIR]");
         return 2;
     }
 
