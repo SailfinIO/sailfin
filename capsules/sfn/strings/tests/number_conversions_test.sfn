@@ -33,6 +33,13 @@ test "strings: int_to_string formats negatives" {
     assert strings_equal(int_to_string(-120), "-120");
 }
 
+test "strings: int_to_string formats the extreme int values" {
+    // INT_MIN must format without relying on a `0 - value` negation, which
+    // would overflow (SFN-35). i64 bounds: -9223372036854775808 .. 9223372036854775807.
+    assert strings_equal(int_to_string(9223372036854775807), "9223372036854775807");
+    assert strings_equal(int_to_string(0 - 9223372036854775807 - 1), "-9223372036854775808");
+}
+
 test "strings: parse_int reads unsigned decimals" {
     assert _is_ok(parse_int("0"));
     assert _ok_value(parse_int("0")) == 0;
@@ -59,4 +66,5 @@ test "strings: parse_int rejects non-numeric input" {
     assert ! _is_ok(parse_int("-"));
     assert ! _is_ok(parse_int("+"));
     assert ! _is_ok(parse_int(" 5"));
+    assert ! _is_ok(parse_int("5 "));
 }

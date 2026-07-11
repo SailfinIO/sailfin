@@ -239,19 +239,20 @@ fn is_blank(text: string) -> boolean {
 
 fn int_to_string(value: int) -> string {
     // Format a base-10 integer; negatives get a leading "-", zero is "0".
-    // Replaces the per-capsule `_int_to_string` copies (SFN-35).
+    // Replaces the per-capsule `_int_to_string` copies (SFN-35). Digits are
+    // extracted on `value`'s own sign side — integer division truncates
+    // toward zero, so the remainder shares the dividend's sign and is negated
+    // to 0-9 — rather than via `0 - value`, which would overflow for the
+    // minimum int; INT_MIN therefore formats correctly.
     if value == 0 { return "0"; }
     let table = "0123456789";
+    let negative = value < 0;
     let mut n = value;
-    let mut negative = false;
-    if n < 0 {
-        negative = true;
-        n = 0 - n;
-    }
     let mut digits = "";
     loop {
         if n == 0 { break; }
-        let d = n - (n / 10) * 10;
+        let mut d = n - (n / 10) * 10;
+        if d < 0 { d = 0 - d; }
         digits = substring(table, d, d + 1) + digits;
         n = n / 10;
     }
