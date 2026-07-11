@@ -45,11 +45,8 @@ import { _ends_with, _ensure_dir } from "../../build/paths";
 import { _runtime_bundle_exists } from "../../build/runtime_objs";
 import { cache_root, merge_cache_stats, resolve_build_cache_config } from "../../build_cache";
 import { empty_resolver_consumer, prepare_project_capsules, toolchain_gate } from "../../capsule_resolver";
-import {
-    compile_to_llvm_file_with_module,
-    module_name_from_path,
-    number_to_string
-} from "../../main";
+import { format_backend_failure_banner } from "../../ice";
+import { compile_to_llvm_file_with_module, module_name_from_path } from "../../main";
 import { runtime_capsule_from_root } from "../../runtime_capsule_resolver";
 import { CliContext } from "../context";
 
@@ -169,7 +166,7 @@ fn run(matches: Matches, ctx: CliContext) -> int ![io] {
         // (the prior `process.run(["sfn", "run", input_path])` "seed
         // fallback" recursed into itself forever on a persistent failure,
         // #969).
-        print("link failed (clang exit=" + number_to_string(link_rc) + ")");
+        print.err(format_backend_failure_banner(binary_dir, "clang link", ll_path, link_rc));
         return link_rc;
     }
 

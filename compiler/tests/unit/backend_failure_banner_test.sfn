@@ -1,0 +1,20 @@
+// compiler/tests/unit/backend_failure_banner_test.sfn
+//
+// Regression for SFN-34: a backend (clang / llvm-link) failure must reach the
+// user as a Sailfin-branded internal-compiler-error banner naming the failing
+// IR path and a bug-report URL — not a bare `clang exit=N` line. Asserts on the
+// formatter directly (deterministic: binary_dir="" resolves the version
+// fallback) rather than reproducing a real link failure, mirroring how
+// version_resolution_test.sfn exercises resolve_compiler_version("").
+import { find } from "sfn/strings";
+
+import { format_backend_failure_banner } from "../../src/ice";
+
+test "backend banner: frames link failure as a Sailfin ICE with IR path and bug URL" ![io] {
+    let banner = format_backend_failure_banner("", "clang link", "build/sailfin/program.ll", 1);
+    assert find(banner, "internal compiler error (ICE)", 0) >= 0;
+    assert find(banner, "clang link", 0) >= 0;
+    assert find(banner, "build/sailfin/program.ll", 0) >= 0;
+    assert find(banner, "https://github.com/SailfinIO/sailfin/issues/new", 0) >= 0;
+    assert find(banner, "link failed (clang exit=", 0) < 0;
+}
