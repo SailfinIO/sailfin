@@ -9,8 +9,8 @@
 #
 # The native reader is compiler/src/bootstrap_manifest.sfn; `sfn build -p
 # compiler` and `sfn dev bootstrap ...` read this file to acquire, verify,
-# and dispatch the exact seed. During migration `.seed-version` is kept in
-# lockstep with `[seed].version` below; a mismatch is a hard error.
+# and dispatch the exact seed. `[seed].version` below is the sole
+# compiler-checkout seed source of truth.
 
 [seed]
 version = "0.8.0-alpha.5"

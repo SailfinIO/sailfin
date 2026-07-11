@@ -1,0 +1,115 @@
+// End-to-end schema-lock test for `sfn bench --json` (SFN-64), locking the
+// `sailfin.bench/v1` envelope across both compiler mode and runtime mode.
+// Drives the compiler binary as a subprocess and asserts on documented field
+// presence via `sfn/strings`, per .claude/rules/no-bash-e2e.md (the `sfn/test`
+// `expect_*` matchers are `![pure]` and unusable from an `![io]` subprocess
+// test). Skips when the import-context tree is not staged (compiler-mode
+// bench requires `make compile` to have produced it), matching
+// bench_compiler_test.sfn.
+import { find } from "sfn/strings";
+
+fn _sfn_bin() -> string ![io] {
+    let configured = env.get("SAILFIN_BIN");
+    if configured.length > 0 { return configured; }
+    return "build/bin/sfn";
+}
+
+fn _child_env() -> string[] ![io] {
+    let mut e: string[] = [];
+    let path = env.get("PATH");
+    if path.length > 0 { e.push("PATH=" + path); }
+    let home = env.get("HOME");
+    if home.length > 0 { e.push("HOME=" + home); }
+    let tmpdir = env.get("TMPDIR");
+    if tmpdir.length > 0 { e.push("TMPDIR=" + tmpdir); }
+    let scratch = env.get("SAILFIN_TEST_SCRATCH");
+    if scratch.length > 0 { e.push("SAILFIN_TEST_SCRATCH=" + scratch); }
+    return e;
+}
+
+test "bench json: --compiler emits sailfin.bench/v1 envelope" ![io] {
+    if !fs.exists("build/compiler/import-context") {
+        assert true;
+        return;
+    }
+    let exit = process.run_capture([_sfn_bin(), "bench", "--compiler", "--module", "num_format", "--json"], _child_env());
+    let out = process.capture_take_stdout();
+    let err = process.capture_take_stderr();
+    assert exit == 0;
+    assert find(out, "\"schema\":\"sailfin.bench/v1\"", 0) >= 0;
+    assert find(out, "\"command\":\"sfn bench\"", 0) >= 0;
+    assert find(out, "\"domain\":\"compiler\"", 0) >= 0;
+    assert find(out, "\"exit_code\":", 0) >= 0;
+    assert find(out, "\"tool\":", 0) >= 0;
+    assert find(out, "\"version\":", 0) >= 0;
+    assert find(out, "\"platform\":", 0) >= 0;
+    assert find(out, "\"config\":", 0) >= 0;
+    assert find(out, "\"iterations\":", 0) >= 0;
+    assert find(out, "\"warmup\":", 0) >= 0;
+    assert find(out, "\"results\":", 0) >= 0;
+    assert find(out, "\"name\":", 0) >= 0;
+    assert find(out, "\"ops\":", 0) >= 0;
+    assert find(out, "\"unit\":\"ms\"", 0) >= 0;
+    assert find(out, "\"time_ms\":", 0) >= 0;
+    assert find(out, "\"min\":", 0) >= 0;
+    assert find(out, "\"median\":", 0) >= 0;
+    assert find(out, "\"max\":", 0) >= 0;
+    assert find(out, "\"stddev\":", 0) >= 0;
+    assert find(out, "\"peak_rss_kb\":", 0) >= 0;
+    assert find(out, "\"status\":", 0) >= 0;
+    // Compiler-domain invariants: single fixed iteration, no warmup, ops
+    // is not a meaningful concept for a compile pass.
+    assert find(out, "\"config\":{\"iterations\":1,\"warmup\":0}", 0) >= 0;
+    assert find(out, "\"ops\":0", 0) >= 0;
+    assert err.length == 0;
+}
+
+test "bench json: runtime mode emits sailfin.bench/v1 envelope" ![io, clock] {
+    if !fs.exists("build/compiler/import-context") {
+        assert true;
+        return;
+    }
+    let workload = "benchmarks/runtime/arena_alloc_bench.sfn";
+    if !fs.exists(workload) {
+        assert true;
+        return;
+    }
+    let exit = process.run_capture([_sfn_bin(), "bench", workload, "--iterations", "2", "--json"], _child_env());
+    let out = process.capture_take_stdout();
+    let err = process.capture_take_stderr();
+    assert exit == 0;
+    assert find(out, "\"schema\":\"sailfin.bench/v1\"", 0) >= 0;
+    assert find(out, "\"command\":\"sfn bench\"", 0) >= 0;
+    assert find(out, "\"domain\":\"runtime\"", 0) >= 0;
+    assert find(out, "\"exit_code\":", 0) >= 0;
+    assert find(out, "\"tool\":", 0) >= 0;
+    assert find(out, "\"version\":", 0) >= 0;
+    assert find(out, "\"platform\":", 0) >= 0;
+    assert find(out, "\"config\":{\"iterations\":2,", 0) >= 0;
+    assert find(out, "\"results\":", 0) >= 0;
+    assert find(out, "\"name\":", 0) >= 0;
+    assert find(out, "\"ops\":", 0) >= 0;
+    assert find(out, "\"unit\":\"ms\"", 0) >= 0;
+    assert find(out, "\"time_ms\":", 0) >= 0;
+    assert find(out, "\"min\":", 0) >= 0;
+    assert find(out, "\"median\":", 0) >= 0;
+    assert find(out, "\"max\":", 0) >= 0;
+    assert find(out, "\"stddev\":", 0) >= 0;
+    assert find(out, "\"peak_rss_kb\":", 0) >= 0;
+    assert find(out, "\"status\":", 0) >= 0;
+    assert err.length == 0;
+}
+
+test "bench json: stdout is a single JSON object, no human table" ![io] {
+    if !fs.exists("build/compiler/import-context") {
+        assert true;
+        return;
+    }
+    let exit = process.run_capture([_sfn_bin(), "bench", "--compiler", "--module", "num_format", "--json"], _child_env());
+    let out = process.capture_take_stdout();
+    let _err = process.capture_take_stderr();
+    assert exit == 0;
+    assert find(out, "SUMMARY", 0) < 0;
+    assert find(out, "MODULE ", 0) < 0;
+    assert find(out, "{", 0) == 0;
+}

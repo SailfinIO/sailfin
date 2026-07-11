@@ -10,7 +10,7 @@
 //   sfn dev bootstrap build          fetch if needed, then build the compiler
 //                                    with the exact seed
 //   sfn dev bootstrap check          build + smoke-verify the built compiler
-//   sfn dev bootstrap pin <version>  update bootstrap.toml + .seed-version
+//   sfn dev bootstrap pin <version>  update bootstrap.toml [seed].version
 //
 // The steady-state contributor path is still `sfn build -p compiler`, which
 // enters bootstrap mode via `bootstrap_gate_or_dispatch` (exported here and
@@ -32,7 +32,6 @@ import {
     BOOTSTRAP_MANIFEST_PATH,
     BootstrapManifest,
     bootstrap_manifest_exists,
-    bootstrap_seed_version_mismatch,
     read_bootstrap_manifest,
     rewrite_seed_version
 } from "../../bootstrap_manifest";
@@ -129,19 +128,11 @@ fn _bootstrap_ensure_seed(m: BootstrapManifest) -> int ![io, net] {
     return 0;
 }
 
-// Read + validate the manifest and reconcile it against `.seed-version`.
-// Returns an `ok = false` manifest (with `error` set) on any failure so the
-// caller can print the diagnostic and bail without guessing a seed.
+// Read + validate the root `bootstrap.toml`. Returns an `ok = false` manifest
+// (with `error` set) on any failure so the caller can print the diagnostic and
+// bail without guessing a seed.
 fn _bootstrap_resolve_manifest() -> BootstrapManifest ![io] {
-    let mut m = read_bootstrap_manifest(BOOTSTRAP_MANIFEST_PATH);
-    if !m.ok { return m; }
-    let mism = bootstrap_seed_version_mismatch(m);
-    if mism.length > 0 {
-        m.ok = false;
-        m.error = mism;
-        return m;
-    }
-    return m;
+    return read_bootstrap_manifest(BOOTSTRAP_MANIFEST_PATH);
 }
 
 // ---- The build-command gate (steady-state `sfn build -p compiler`) ----
@@ -337,8 +328,7 @@ fn _dev_bootstrap_check() -> int ![io, net] {
     return 0;
 }
 
-// pin: update bootstrap.toml [seed].version and .seed-version in lockstep
-// (the migration compatibility contract). The public `[toolchain]` /
+// pin: update bootstrap.toml [seed].version. The public `[toolchain]` /
 // `[capsule].version` bump stays a deliberate, separately-reviewed step —
 // this prints the reminder rather than editing the compiler manifest.
 fn _dev_bootstrap_pin(new_version: string) -> int ![io] {
@@ -362,9 +352,8 @@ fn _dev_bootstrap_pin(new_version: string) -> int ![io] {
         return 1;
     }
     fs.writeFile(BOOTSTRAP_MANIFEST_PATH, rewritten);
-    fs.writeFile(".seed-version", ver + "\n");
     print("sfn dev bootstrap: pinned seed " + ver);
-    print("  updated bootstrap.toml [seed].version and .seed-version");
+    print("  updated bootstrap.toml [seed].version");
     print("  remember to bump compiler/capsule.toml [toolchain].sfn and [capsule].version when the source version advances (SFEP-0047 §3.4)");
     return 0;
 }

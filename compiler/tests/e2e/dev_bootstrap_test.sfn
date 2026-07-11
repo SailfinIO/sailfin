@@ -47,7 +47,7 @@ test "dev bootstrap: the pin leaf is reached three levels deep" ![io] {
     // `dev bootstrap pin` path — proving the nested tree routes to the leaf
     // rather than the generic fall-through. No version arg means no file is
     // written, so this stays offline and does not touch the real
-    // bootstrap.toml / .seed-version.
+    // bootstrap.toml.
     let exit = process.run_capture([_sfn_bin(), "dev", "bootstrap", "pin"], []);
     let out = process.capture_take_stdout();
     let err = process.capture_take_stderr();

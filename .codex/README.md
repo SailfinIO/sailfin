@@ -45,7 +45,7 @@ The remaining guardrail is time, not caller memory: wrap direct single-file comp
 
 ## Current project facts Codex must preserve
 
-- The native compiler is self-hosted from the released seed pinned by `.seed-version`.
+- The native compiler is self-hosted from the released seed pinned by `bootstrap.toml [seed].version`.
 - The runtime is Sailfin-native (`runtime/prelude.sfn` and `runtime/sfn/`); the old C runtime is gone.
 - `sfn check` is the fast parse/type/effect inner loop but does not prove codegen or self-hosting.
 - `make compile` is required before declaring `compiler/src/*.sfn` changes done; `make check` is the full gate.
