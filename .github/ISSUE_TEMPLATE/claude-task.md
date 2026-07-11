@@ -138,7 +138,7 @@ the seed binary), use the "Required in pinned seed" section below
 
 <!--
 List issue/PR numbers whose merged code must be present in the binary
-that `.seed-version` points at. Common cases:
+that `bootstrap.toml [seed].version` points at. Common cases:
   - This issue migrates compiler annotations that depend on a
     syntax/lowering change shipped in a prior PR.
   - This issue uses a new compiler intrinsic / diagnostic / IR shape

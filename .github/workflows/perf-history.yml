@@ -30,7 +30,7 @@ on:
   workflow_dispatch:
     inputs:
       seed_version:
-        description: "Seed version (blank defaults to `.seed-version` from checkout)"
+        description: "Seed version (blank defaults to bootstrap.toml [seed].version from checkout)"
         required: false
         default: ""
       dry_run:
@@ -75,7 +75,7 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v7
 
-      - name: Resolve seed version (input override → .seed-version)
+      - name: Resolve seed version (input override → bootstrap.toml)
         id: seed
         shell: bash
         env:
@@ -87,10 +87,13 @@ jobs:
             pin="$override"
             echo "[seed-pin] using seed $pin (workflow_dispatch input override)"
           else
-            [ -f .seed-version ] || { echo "[seed-pin] .seed-version is missing" >&2; exit 1; }
-            pin="$(tr -d '[:space:]' < .seed-version)"
-            [ -n "$pin" ] || { echo "[seed-pin] .seed-version is empty" >&2; exit 1; }
-            echo "[seed-pin] using seed $pin from .seed-version"
+            [ -f bootstrap.toml ] || { echo "[seed-pin] bootstrap.toml is missing" >&2; exit 1; }
+            pin="$(awk '
+              /^\[[^]]+\]/ { section=$0 }
+              section == "[seed]" && /^version[[:space:]]*=/ { gsub(/"/, "", $3); print $3; exit }
+            ' bootstrap.toml)"
+            [ -n "$pin" ] || { echo "[seed-pin] bootstrap.toml [seed].version is empty or missing" >&2; exit 1; }
+            echo "[seed-pin] using seed $pin from bootstrap.toml"
           fi
           echo "seed_version=$pin" >> "$GITHUB_OUTPUT"
 

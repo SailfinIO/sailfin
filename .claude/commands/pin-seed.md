@@ -1,8 +1,9 @@
 # Pin the Seed Version
 
-Open a PR bumping `.seed-version` (the repo-root pin file consumed by
-`make fetch-seed`, `ci.yml`, `nightly-selfhost.yml`, and
-`release-branches.yml`) to a newer Sailfin release.
+Open a PR bumping `bootstrap.toml [seed].version` (the repo-root seed
+pin consumed by `make fetch-seed`, `ci.yml`, `nightly-selfhost.yml`, and
+`release-branches.yml`) — and the compiler `[toolchain].sfn` floor — to a
+newer Sailfin release.
 
 This is the **manual half** of the release loop. `/release` cuts a new
 alpha; `/pin-seed` adopts it as the build seed once the binary is
@@ -33,7 +34,10 @@ Examples:
 
 1. Read the current pin:
    ```bash
-   cat .seed-version
+   awk '
+     /^\[[^]]+\]/ { section=$0 }
+     section == "[seed]" && /^version[[:space:]]*=/ { gsub(/"/, "", $3); print $3; exit }
+   ' bootstrap.toml
    ```
 2. If `$ARGUMENTS` provides a version, use it (strip leading `v`).
    Otherwise, list recent releases and pick the most recent:
@@ -66,7 +70,7 @@ SEED_VERSION="<target>" make fetch-seed
 ```
 
 This is non-destructive — it installs into `build/toolchains/seed/versions/` and
-doesn't touch `.seed-version`. If the fetch fails (404, checksum,
+doesn't touch `bootstrap.toml`. If the fetch fails (404, checksum,
 network), abort. If it succeeds, the binary is on disk and we know the
 pin is valid.
 
@@ -77,10 +81,10 @@ If `--dry-run`, skip this phase.
 ## Phase 3: GATHER CONTEXT FOR THE PR BODY
 
 1. **Closed `seed-blocker` issues since the last pin.** Use the
-   commit timestamp of the last `.seed-version` change as the
+   commit timestamp of the last `bootstrap.toml` change as the
    since-date:
    ```bash
-   last_pin_at="$(git log -1 --format=%cI .seed-version)"
+   last_pin_at="$(git log -1 --format=%cI bootstrap.toml)"
    ```
    Then:
    ```
@@ -112,10 +116,14 @@ If the branch already exists locally, switch to it instead and rebase
 on origin/main.
 
 ```bash
-echo "<TARGET>" > .seed-version
-git add .seed-version
+.claude/skills/pin-seed/scripts/pin.sh <TARGET>
+git add bootstrap.toml compiler/capsule.toml
 git commit -m "chore: bump seed to v<TARGET>"
 ```
+
+`pin.sh` rewrites `bootstrap.toml [seed].version` and the compiler
+`[toolchain].sfn` floor in lockstep (SFEP-0047 §3.4). It leaves
+`[capsule].version` alone (a release-time bump) and prints a reminder.
 
 If `--dry-run`, stop here without committing.
 
@@ -143,7 +151,8 @@ PR body template:
 ```markdown
 ## Summary
 
-Bumps `.seed-version` from `<current>` → `<target>`.
+Bumps `bootstrap.toml [seed].version` (and the compiler `[toolchain].sfn`
+floor) from `<current>` → `<target>`.
 
 `make fetch-seed` was run locally against the target and succeeded —
 the binary downloads cleanly.
@@ -197,8 +206,8 @@ Report:
   This breaks `make fetch-seed` for everyone. Phase 1 step 3 enforces
   this.
 - **Never auto-merge.** A human must review the pin — even a one-line
-  change to `.seed-version` cascades through CI, nightly self-host,
-  and the release-branches workflow.
+  change to `bootstrap.toml [seed].version` cascades through CI, nightly
+  self-host, and the release-branches workflow.
 - **Don't bundle other changes.** The pin is its own PR. If the user
   wants to drag in other fixes, they can rebase their feature branch
   on top after merge.

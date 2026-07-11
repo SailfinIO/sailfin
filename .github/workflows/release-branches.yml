@@ -17,12 +17,12 @@ name: CI (branch push)
 # This workflow validates that the branch is healthy.  It does NOT create
 # releases — use the manual "Release" workflow (release.yml) for that.
 #
-# The pinned seed version lives in `.seed-version` at the repo root.
-# A setup step below reads that file and exports the resolved value as
-# a step output (`steps.seed.outputs.seed_version`) so the downstream
-# composite action sees the correct pin. Kept in sync with ci.yml,
-# release-tag.yml, nightly-selfhost.yml, and the Makefile — all four
-# read the same `.seed-version` file. Bumping the seed is a one-line
+# The pinned seed version lives in `bootstrap.toml`'s [seed].version key
+# at the repo root. A setup step below reads that file and exports the
+# resolved value as a step output (`steps.seed.outputs.seed_version`) so
+# the downstream composite action sees the correct pin. Kept in sync with
+# ci.yml, release-tag.yml, nightly-selfhost.yml, and the Makefile — all
+# four read the same `bootstrap.toml`. Bumping the seed is a one-line
 # edit.
 
 on:
@@ -82,18 +82,21 @@ jobs:
             - name: Checkout repository
               uses: actions/checkout@v7
 
-            - name: Resolve seed version from .seed-version
+            - name: Resolve seed version from bootstrap.toml
               id: seed
               shell: bash
               run: |
                   set -euo pipefail
-                  if [ ! -f .seed-version ]; then
-                      echo "[seed-pin] .seed-version is missing from checkout" >&2
+                  if [ ! -f bootstrap.toml ]; then
+                      echo "[seed-pin] bootstrap.toml is missing from checkout" >&2
                       exit 1
                   fi
-                  pin="$(tr -d '[:space:]' < .seed-version)"
+                  pin="$(awk '
+                      /^\[[^]]+\]/ { section=$0 }
+                      section == "[seed]" && /^version[[:space:]]*=/ { gsub(/"/, "", $3); print $3; exit }
+                  ' bootstrap.toml)"
                   if [ -z "$pin" ]; then
-                      echo "[seed-pin] .seed-version is empty" >&2
+                      echo "[seed-pin] bootstrap.toml [seed].version is empty or missing" >&2
                       exit 1
                   fi
                   echo "[seed-pin] using seed $pin"

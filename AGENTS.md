@@ -10,7 +10,7 @@
 ## Build, Test, and Development Commands
 
 - `sfn check <files>` (or `build/bin/sfn check <files>`) is the fast inner loop for parse/type/effect checking; it does not prove codegen, linking, or self-hosting.
-- `make compile` self-hosts the compiler from the released seed pinned by `.seed-version`.
+- `make compile` self-hosts the compiler from the released seed pinned by `bootstrap.toml [seed].version`.
 - `make rebuild` forces a rebuild from the seed.
 - `make check` compiles if needed and runs the full validation gate, including seedcheck self-host validation.
 - `make test`, `make test-unit`, `make test-integration`, and `make test-e2e` run Sailfin-native test suites.

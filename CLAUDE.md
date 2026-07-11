@@ -45,7 +45,7 @@ make test-unit        # Sailfin-native unit tests
 make test-integration # Sailfin-native integration tests
 make test-e2e         # Sailfin-native e2e tests
 make bench            # Benchmark per-module compile time and memory
-make fetch-seed       # Download the pinned seed (.seed-version)
+make fetch-seed       # Download the pinned seed (bootstrap.toml [seed].version)
 make clean            # Remove dist/ artifacts
 make clean-build      # Remove build/* artifacts (keeps build/toolchains/seed) — destructive, gate on approval
 make mcp-server       # Build the MCP server wrapper
@@ -401,7 +401,7 @@ Examples are compiler-only unless marked with future-syntax comments.
   `__version_fallback__`.
 - **Release automation:** `.github/workflows/release.yml` (manual
   `workflow_dispatch`, pure bash). Release notes: `.github/workflows/release-notes.md`.
-- **Seed pinning is separate from release cutting** — `.seed-version` is bumped by
+- **Seed pinning is separate from release cutting** — `bootstrap.toml [seed].version` is bumped by
   `/pin-seed` after `release-tag.yml` uploads binaries, never by `release.yml`.
   The `seed-blocker` label tracks "must close before next seed bump" issues.
 - **Curation:** only `channel=alpha bump=prerelease` is uncurated; every other

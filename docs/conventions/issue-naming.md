@@ -489,8 +489,7 @@ curation, not the issue.
 ## Seed pinning
 
 The Sailfin compiler self-hosts from a released seed binary. The canonical
-pin lives in `bootstrap.toml` as `[seed].version`; during the SFEP-0047
-migration it is mirrored to `.seed-version` for older bootstrap paths.
+pin lives in `bootstrap.toml` as `[seed].version`.
 **Bumping the pin is a separate concern from cutting a release** —
 `release.yml` deliberately doesn't touch the seed pin because the new binary
 doesn't exist at tag-creation time and most alpha releases shouldn't be pinned.

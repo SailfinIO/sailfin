@@ -1,12 +1,12 @@
 name: CI (PR + merge queue)
 
-# The pinned seed version lives in `.seed-version` at the repo root.
+# The pinned seed version lives in `bootstrap.toml`'s [seed].version key.
 # A setup step in each job reads that file and exports the resolved
 # value as a step output (`steps.seed.outputs.seed_version`) so
 # downstream `uses: ./.github/actions/sailfin-build` sees the correct
 # pin. Kept in sync with release-branches.yml, release-tag.yml,
 # nightly-selfhost.yml, and the Makefile — all four read the same
-# `.seed-version` file. Bumping the seed is a one-line edit.
+# `bootstrap.toml`. Bumping the seed is a one-line edit.
 
 env:
   # Phase 0 / M0.5: pin arena allocator on for CI. Belt-and-suspenders
@@ -27,7 +27,7 @@ on:
       - 'capsules/**'
       - 'scripts/**'
       - 'Makefile'
-      - '.seed-version'
+      - 'bootstrap.toml'
       - '.github/workflows/ci.yml'
       - '.github/actions/**'
   # Merge queue (SFEP-0037 §3.1, the bors "not rocket science" rule):
@@ -91,18 +91,21 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v7
 
-      - name: Resolve seed version from .seed-version
+      - name: Resolve seed version from bootstrap.toml
         id: seed
         shell: bash
         run: |
           set -euo pipefail
-          if [ ! -f .seed-version ]; then
-            echo "[seed-pin] .seed-version is missing from checkout" >&2
+          if [ ! -f bootstrap.toml ]; then
+            echo "[seed-pin] bootstrap.toml is missing from checkout" >&2
             exit 1
           fi
-          pin="$(tr -d '[:space:]' < .seed-version)"
+          pin="$(awk '
+            /^\[[^]]+\]/ { section=$0 }
+            section == "[seed]" && /^version[[:space:]]*=/ { gsub(/"/, "", $3); print $3; exit }
+          ' bootstrap.toml)"
           if [ -z "$pin" ]; then
-            echo "[seed-pin] .seed-version is empty" >&2
+            echo "[seed-pin] bootstrap.toml [seed].version is empty or missing" >&2
             exit 1
           fi
           echo "[seed-pin] using seed $pin"
@@ -159,18 +162,21 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v7
 
-      - name: Resolve seed version from .seed-version
+      - name: Resolve seed version from bootstrap.toml
         id: seed
         shell: bash
         run: |
           set -euo pipefail
-          if [ ! -f .seed-version ]; then
-            echo "[seed-pin] .seed-version is missing from checkout" >&2
+          if [ ! -f bootstrap.toml ]; then
+            echo "[seed-pin] bootstrap.toml is missing from checkout" >&2
             exit 1
           fi
-          pin="$(tr -d '[:space:]' < .seed-version)"
+          pin="$(awk '
+            /^\[[^]]+\]/ { section=$0 }
+            section == "[seed]" && /^version[[:space:]]*=/ { gsub(/"/, "", $3); print $3; exit }
+          ' bootstrap.toml)"
           if [ -z "$pin" ]; then
-            echo "[seed-pin] .seed-version is empty" >&2
+            echo "[seed-pin] bootstrap.toml [seed].version is empty or missing" >&2
             exit 1
           fi
           echo "[seed-pin] using seed $pin"
@@ -303,18 +309,21 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v7
 
-      - name: Resolve seed version from .seed-version
+      - name: Resolve seed version from bootstrap.toml
         id: seed
         shell: bash
         run: |
           set -euo pipefail
-          if [ ! -f .seed-version ]; then
-            echo "[seed-pin] .seed-version is missing from checkout" >&2
+          if [ ! -f bootstrap.toml ]; then
+            echo "[seed-pin] bootstrap.toml is missing from checkout" >&2
             exit 1
           fi
-          pin="$(tr -d '[:space:]' < .seed-version)"
+          pin="$(awk '
+            /^\[[^]]+\]/ { section=$0 }
+            section == "[seed]" && /^version[[:space:]]*=/ { gsub(/"/, "", $3); print $3; exit }
+          ' bootstrap.toml)"
           if [ -z "$pin" ]; then
-            echo "[seed-pin] .seed-version is empty" >&2
+            echo "[seed-pin] bootstrap.toml [seed].version is empty or missing" >&2
             exit 1
           fi
           echo "[seed-pin] using seed $pin"
@@ -423,18 +432,21 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v7
 
-      - name: Resolve seed version from .seed-version
+      - name: Resolve seed version from bootstrap.toml
         id: seed
         shell: bash
         run: |
           set -euo pipefail
-          if [ ! -f .seed-version ]; then
-            echo "[seed-pin] .seed-version is missing from checkout" >&2
+          if [ ! -f bootstrap.toml ]; then
+            echo "[seed-pin] bootstrap.toml is missing from checkout" >&2
             exit 1
           fi
-          pin="$(tr -d '[:space:]' < .seed-version)"
+          pin="$(awk '
+            /^\[[^]]+\]/ { section=$0 }
+            section == "[seed]" && /^version[[:space:]]*=/ { gsub(/"/, "", $3); print $3; exit }
+          ' bootstrap.toml)"
           if [ -z "$pin" ]; then
-            echo "[seed-pin] .seed-version is empty" >&2
+            echo "[seed-pin] bootstrap.toml [seed].version is empty or missing" >&2
             exit 1
           fi
           echo "[seed-pin] using seed $pin"
@@ -807,18 +819,21 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v7
 
-      - name: Resolve seed version from .seed-version
+      - name: Resolve seed version from bootstrap.toml
         id: seed
         shell: bash
         run: |
           set -euo pipefail
-          if [ ! -f .seed-version ]; then
-            echo "[seed-pin] .seed-version is missing from checkout" >&2
+          if [ ! -f bootstrap.toml ]; then
+            echo "[seed-pin] bootstrap.toml is missing from checkout" >&2
             exit 1
           fi
-          pin="$(tr -d '[:space:]' < .seed-version)"
+          pin="$(awk '
+            /^\[[^]]+\]/ { section=$0 }
+            section == "[seed]" && /^version[[:space:]]*=/ { gsub(/"/, "", $3); print $3; exit }
+          ' bootstrap.toml)"
           if [ -z "$pin" ]; then
-            echo "[seed-pin] .seed-version is empty" >&2
+            echo "[seed-pin] bootstrap.toml [seed].version is empty or missing" >&2
             exit 1
           fi
           echo "[seed-pin] using seed $pin"
