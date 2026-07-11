@@ -1,6 +1,6 @@
 # Status
 
-Updated: 2026-07-11. Seed pinned to `0.8.0-alpha.4` (`bootstrap.toml`
+Updated: 2026-07-11. Seed pinned to `0.8.0-alpha.5` (`bootstrap.toml`
 `[seed].version` — SFEP-0047); the compiler version source of truth is
 `compiler/capsule.toml`.
 
