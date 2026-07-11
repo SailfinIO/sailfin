@@ -5,8 +5,8 @@
 // `sfn build`:
 //
 //   1. Backwards-compat `sfn run <file>` (no flags) still works.
-//   2. Cold run prints a summary with misses>=1, stores>=1.
-//   3. Warm run prints a summary with hits>=1, misses=0.
+//   2. Cold default run stays quiet unless telemetry is requested.
+//   3. Warm `--cache-trace` run prints a summary with hits>=1, misses=0.
 //   4. `--no-cache` suppresses the `[cache]` summary line entirely.
 //   5. `--cache-trace` emits per-module `[cache hit]` lines.
 //   6. `--clean` wipes `<cache_root>/v2/...` before building.
@@ -29,7 +29,7 @@
 //
 // NOTE: the `sfn/test` `expect_*` matchers are `![pure]` and cannot be
 // used from an `![io]` test; output is asserted with `sfn/strings` predicates.
-import { find, contains } from "sfn/strings";
+import { find } from "sfn/strings";
 
 fn _sfn_bin() -> string ![io] {
     let configured = env.get("SAILFIN_BIN");
@@ -121,15 +121,16 @@ test "sfn run <file> still works (no flags)" ![io] {
 
     assert exit == 0;
     assert find(log, "OK", 0) >= 0;
+    assert find(log, "[cache]", 0) < 0;
+    assert find(log, "[link]", 0) < 0;
 }
 
-// ---- Test 2: cold run prints cache summary with misses>=1, stores>=1 ----
+// ---- Test 2: cold default run stays quiet unless telemetry is requested ----
 // With a per-test fresh SAILFIN_TEST_SCRATCH, the runtime .o cache is also
 // cold — matching the bash original's mktemp-fresh scratch semantics.
-// The cold summary reports hits=0 for the fresh runtime build, then misses
-// and stores for the sfn/math module. In our fresh per-test scratch, both
-// the .ll module cache and the runtime .o cache start cold.
-test "first run prints cold cache summary (misses>=1, stores>=1)" ![io] {
+// The cache still does the work; it just does not leak telemetry into a
+// normal `sfn run` unless `--cache-trace` is requested.
+test "first run suppresses cache summary by default" ![io] {
     let mut base = env.get("SAILFIN_TEST_SCRATCH");
     if base.length == 0 { base = "/tmp"; }
     let root = base + "/sfn-rcf-t2";
@@ -141,16 +142,12 @@ test "first run prints cold cache summary (misses>=1, stores>=1)" ![io] {
     let log = _run_with(main_sfn, test_scratch, cache_dir, []);
 
     assert find(log, "OK", 0) >= 0;
-    // Cold run: the [cache] summary line must appear.
-    assert find(log, "[cache]", 0) >= 0;
-    // Cold run: no module was previously cached — misses > 0.
-    assert find(log, "misses=0", 0) < 0;
-    // Cold run: at least one store.
-    assert find(log, "stores=0", 0) < 0;
+    assert find(log, "[cache]", 0) < 0;
+    assert find(log, "[link]", 0) < 0;
 }
 
-// ---- Test 3: warm run prints summary with misses=0 ----
-test "warm run prints warm cache summary (hits>=1, misses=0)" ![io] {
+// ---- Test 3: warm --cache-trace run prints summary with misses=0 ----
+test "warm run with --cache-trace prints warm cache summary (hits>=1, misses=0)" ![io] {
     let mut base = env.get("SAILFIN_TEST_SCRATCH");
     if base.length == 0 { base = "/tmp"; }
     let root = base + "/sfn-rcf-t3";
@@ -162,7 +159,7 @@ test "warm run prints warm cache summary (hits>=1, misses=0)" ![io] {
     // First run to warm both caches.
     let _ = _run_with(main_sfn, test_scratch, cache_dir, []);
     // Second run: sfn/math .ll is now cached; runtime .o objects are cached.
-    let log = _run_with(main_sfn, test_scratch, cache_dir, []);
+    let log = _run_with(main_sfn, test_scratch, cache_dir, ["--cache-trace"]);
 
     assert find(log, "OK", 0) >= 0;
     // Warm run: all modules are now cached → misses=0.
@@ -225,8 +222,9 @@ test "sfn run --clean wipes the cache and rebuilds" ![io] {
     // Sanity: v2 cache dir must exist.
     assert fs.exists(cache_dir + "/v2");
 
-    // Run with --clean: wipes the .ll module cache and forces a re-miss.
-    let log = _run_with(main_sfn, test_scratch, cache_dir, ["--clean"]);
+    // Run with --clean and telemetry: wipes the .ll module cache and forces
+    // a re-miss.
+    let log = _run_with(main_sfn, test_scratch, cache_dir, ["--clean", "--cache-trace"]);
 
     assert find(log, "OK", 0) >= 0;
     // After --clean the .ll module cache is wiped → at least one miss and store.

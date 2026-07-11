@@ -158,7 +158,7 @@ fn _bootstrap_resolve_manifest() -> BootstrapManifest ![io] {
 // the build proceeds in-process. Dispatch only fires for a *different*
 // toolchain. `SAILFIN_BOOTSTRAP=off` (or `0`) skips the gate for the
 // seed-transition window where the pin is ahead of the seed.
-fn bootstrap_gate_or_dispatch(ctx: CliContext) -> int ![io, net] {
+fn bootstrap_gate_or_dispatch(ctx: CliContext) -> int ![clock, io, net] {
     // Only a compiler checkout (root bootstrap.toml present) has a seed to
     // dispatch. An ordinary capsule build never enters this path.
     if !bootstrap_manifest_exists() { return 0; }
@@ -383,7 +383,7 @@ fn command_def() -> Command {
 // Dispatch the parsed `dev` subcommand. `subcommand(matches)` returns the
 // deepest leaf (`fetch`/`build`/`check`/`pin`); a bare `sfn dev` or
 // `sfn dev bootstrap` prints usage.
-fn run(matches: Matches, ctx: CliContext) -> int ![io, net] {
+fn run(matches: Matches, ctx: CliContext) -> int ![clock, io, net] {
     let sub: string = subcommand(matches);
     if strings_equal(sub, "fetch") { return _dev_bootstrap_fetch(); }
     if strings_equal(sub, "build") { return _dev_bootstrap_build(); }

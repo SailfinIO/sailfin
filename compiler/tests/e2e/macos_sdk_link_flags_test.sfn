@@ -10,10 +10,11 @@
 // e2e failures because success depended on load-timed SDK re-detection.
 //
 // The discriminator is deterministic on Darwin: the link argv carries
-// `-isysroot` after the fix and not before, and a `![io]` runtime-linking
-// program built under a deliberately stripped env must succeed. On
-// non-Darwin the flags are a no-op, so assert they are absent — guarding
-// against accidentally emitting a macOS `-isysroot` on Linux.
+// `-isysroot` plus an explicit `-mmacosx-version-min` after the fix and not
+// before, and a `![io]` runtime-linking program built under a deliberately
+// stripped env must succeed. On non-Darwin the flags are a no-op, so assert
+// they are absent — guarding against accidentally emitting macOS-only flags on
+// Linux.
 //
 // Matchers note (#842): `sfn/test`'s `expect_*` matchers are `![pure]` and
 // cannot be called from an `![io]` test; assert on captured text directly.
@@ -89,6 +90,7 @@ test "macos-sdk-link: build carries explicit -isysroot and links under a strippe
     if _is_darwin() {
         // The fix: the link argv self-supplies the SDK.
         assert contains(err, "-isysroot");
+        assert contains(err, "-mmacosx-version-min=");
         assert contains(err, "/usr/lib");
         // Behavioural proof: the runtime-linking build succeeds without any
         // ambient SDK env — the regression was this link failing.
@@ -96,6 +98,7 @@ test "macos-sdk-link: build carries explicit -isysroot and links under a strippe
     } else {
         // No-op on non-Darwin: a Linux link must not carry a macOS SDK root.
         assert ! contains(err, "-isysroot");
+        assert ! contains(err, "-mmacosx-version-min=");
         assert exit == 0;
     }
 }

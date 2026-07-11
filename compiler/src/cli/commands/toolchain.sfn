@@ -552,7 +552,7 @@ fn _dispatch_knob_is_mode(knob: string) -> boolean {
 // A re-entrancy guard (`SAILFIN_TOOLCHAIN_DISPATCHED=<version>`) is set before
 // re-exec; if a dispatched toolchain re-enters here still unsatisfied, the
 // stored binary is wrong/corrupt, so this hard-fails loudly rather than looping.
-fn toolchain_gate_or_dispatch(entry_hint: string, ctx: CliContext, skip_flag: boolean) -> int ![io, net] {
+fn toolchain_gate_or_dispatch(entry_hint: string, ctx: CliContext, skip_flag: boolean) -> int ![clock, io, net] {
     let d: ToolchainDecision = toolchain_decide(entry_hint, ctx.binary_dir);
     if !d.pinned { return 0; }
     if d.satisfied { return 0; }
@@ -664,7 +664,7 @@ fn command_def() -> Command {
 // `sfn toolchain` — which prints usage. `ctx` carries no state this
 // command needs; the download work root defaults to the system temp
 // dir (TMPDIR, else /tmp).
-fn run(matches: Matches, ctx: CliContext) -> int ![io, net] {
+fn run(matches: Matches, ctx: CliContext) -> int ![clock, io, net] {
     let sub: string = subcommand(matches);
     if strings_equal(sub, "install") {
         let mut work_root = env.get("TMPDIR");
