@@ -52,7 +52,6 @@ import {
     is_valid_digest,
     sha256_of_file
 } from "./build_cache";
-import { _env_flag, _get_env_cmd } from "./build_flags";
 import {
     CapsuleArtifactLayout,
     capsule_artifact_layout_from_specs,
@@ -123,7 +122,9 @@ export {
     resolve_relative_import,
     resolve_workspace_lock_entries,
     stage_capsule_imports,
-    toolchain_gate,
+    ToolchainDecision,
+    toolchain_decide,
+    toolchain_print_mismatch,
     workspace_member_for_spec
 };
 
@@ -603,7 +604,29 @@ fn _toolchain_running_channel_rank(running: SemVer) -> int {
     return rank;
 }
 
-fn toolchain_gate(entry_hint: string, binary_dir: string, skip_flag: boolean) -> int ![io] {
+// The pin decision, split out of the gate (SFN-172) so the re-exec
+// dispatcher (`cli/commands/toolchain.sfn`) reuses the same discovery +
+// floor/channel evaluation before deciding to fetch-and-re-exec. `pinned` is
+// false for an unpinned project (the additive no-op); `satisfied` is the
+// floor+channel result. `pin_sfn` carries the version pin verbatim (the
+// dispatcher's default fetch target); `pin_desc`/`pin_source`/`running_str`
+// back the diagnostics.
+struct ToolchainDecision {
+    pinned: boolean;
+    satisfied: boolean;
+    pin_sfn: string;
+    pin_desc: string;
+    pin_source: string;
+    running_str: string;
+}
+
+// Discover the manifest `[toolchain]` pin and evaluate the running toolchain
+// against it (floor semantics: running >= pin; channel rank running >= pin).
+// A `workspace.toml` pin is the default; a member `capsule.toml` pin overrides
+// it per field. The running version is resolved only when a pin exists, so an
+// unpinned project reads no version (preserving the gate's early return).
+// Malformed pins warn and do not constrain, exactly as the gate did inline.
+fn toolchain_decide(entry_hint: string, binary_dir: string) -> ToolchainDecision ![io] {
     let start = _toolchain_start_dir(entry_hint);
     let project_root = discover_project_root(start);
     let workspace_root = discover_workspace_root(start);
@@ -642,10 +665,21 @@ fn toolchain_gate(entry_hint: string, binary_dir: string, skip_flag: boolean) ->
         }
     }
 
-    if pin_sfn.length == 0 && pin_channel.length == 0 { return 0; }
+    let mut d = ToolchainDecision {
+        pinned: false,
+        satisfied: true,
+        pin_sfn: "",
+        pin_desc: "",
+        pin_source: "",
+        running_str: ""
+    };
+    if pin_sfn.length == 0 && pin_channel.length == 0 { return d; }
+    d.pinned = true;
+    d.pin_sfn = pin_sfn;
 
     let running_str = resolve_compiler_version(binary_dir);
     let running = semver_parse(running_str);
+    d.running_str = running_str;
 
     let mut ok: boolean = true;
     if pin_sfn.length > 0 {
@@ -668,20 +702,21 @@ fn toolchain_gate(entry_hint: string, binary_dir: string, skip_flag: boolean) ->
             }
         }
     }
-
-    if ok { return 0; }
-
-    let knob = _get_env_cmd("SAILFIN_TOOLCHAIN");
-    let knob_off = strings_equal(knob, "off") || strings_equal(knob, "0");
-    let skip = skip_flag || _env_flag("SAILFIN_SKIP_TOOLCHAIN_CHECK")
-        || knob_off;
+    d.satisfied = ok;
 
     let mut pin_desc: string = "";
     if pin_sfn.length > 0 { pin_desc = "sfn >= " + pin_sfn; }
+    // Only describe a channel that was actually enforced: an unrecognized
+    // channel warns and does not constrain (above), so including it here would
+    // make the mismatch diagnostic claim a requirement that was never applied.
     if pin_channel.length > 0 {
-        if pin_desc.length > 0 { pin_desc = pin_desc + " "; }
-        pin_desc = pin_desc + "(" + pin_channel + " channel)";
+        if _toolchain_channel_rank(pin_channel) >= 0 {
+            if pin_desc.length > 0 { pin_desc = pin_desc + " "; }
+            pin_desc = pin_desc + "(" + pin_channel + " channel)";
+        }
     }
+    d.pin_desc = pin_desc;
+
     // Attribute the diagnostic to whichever file(s) actually contributed a
     // pinned field — both, when a member override and a workspace default each
     // supplied one.
@@ -694,24 +729,21 @@ fn toolchain_gate(entry_hint: string, binary_dir: string, skip_flag: boolean) ->
         }
     }
     if pin_source.length == 0 { pin_source = "capsule.toml"; }
+    d.pin_source = pin_source;
 
-    if skip {
-        print.err("warning: toolchain mismatch — this project pins "
-            + pin_desc
-            + " ("
-            + pin_source
-            + " [toolchain]) but the running toolchain is "
-            + running_str
-            + "; proceeding (--skip-toolchain-check / SAILFIN_TOOLCHAIN=off)");
-        return 0;
-    }
+    return d;
+}
 
+// The 4-line fail-closed mismatch diagnostic — the enforced-error output of
+// the pin gate. Shared by the dispatcher's `local`/no-fetch refusal path and
+// its no-concrete-version fallback (SFN-172); the gate + dispatch entry point
+// lives in `cli/commands/toolchain.sfn::toolchain_gate_or_dispatch`.
+fn toolchain_print_mismatch(d: ToolchainDecision) -> void ![io] {
     print.err("error: toolchain mismatch");
-    print.err("  this project pins " + pin_desc + " (" + pin_source
+    print.err("  this project pins " + d.pin_desc + " (" + d.pin_source
         + " [toolchain])");
-    print.err("  but the running toolchain is " + running_str);
+    print.err("  but the running toolchain is " + d.running_str);
     print.err("  install the pinned toolchain, or re-run with --skip-toolchain-check to override");
-    return 1;
 }
 
 // ---- Dependency enumeration ----

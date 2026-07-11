@@ -35,7 +35,8 @@ fn _empty_ctx() -> CliContext {
         runtime_root: "",
         binary_dir: "",
         registry_url: "",
-        trace_argv: false
+        trace_argv: false,
+        orig_args: []
     };
 }
 

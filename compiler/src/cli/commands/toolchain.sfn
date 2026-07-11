@@ -31,7 +31,8 @@ import {
 import { ed25519_verify_utf8 } from "sfn/crypto";
 
 import { _sha256_of_file_cmd, _shell_read_cmd, _toml_trim_cmd } from "../../build/fs";
-import { _get_home_cmd } from "../../build_flags";
+import { _env_flag, _get_home_cmd } from "../../build_flags";
+import { ToolchainDecision, toolchain_decide, toolchain_print_mismatch } from "../../capsule_resolver";
 import { number_to_string } from "../../num_format";
 import { release_signing_public_key_hex } from "../../release_trust";
 import {
@@ -459,6 +460,175 @@ fn _cleanup_failed_install(store_dir: string, tmp: string) -> void ![io] {
     process.run(["rm", "-rf", tmp]);
 }
 
+// ---- Re-exec dispatch (SFEP-0046 §3.5, Phase 2 "use" — SFN-172) ----
+// Turn a failed `[toolchain]` floor check into a self-fulfilling pin: fetch
+// the pinned toolchain (SFN-168) if absent, then re-exec it transparently so a
+// fresh clone + `sfn build` "just works". Auto-dispatch defaults ON — safe
+// because SFN-168's fetch is signature+digest verified and fail-closed.
+// Strip a leading `v` from a version so a `[toolchain] sfn = "v0.8.0"` pin and
+// a `0.8.0` store dir agree; the store layout is `<base>/<version>/` with no
+// `v` (matching `_toolchain_install`).
+fn _dispatch_normalize_ver(ver: string) -> string {
+    if ver.length == 0 { return ""; }
+    if starts_with(ver, "v") { return substring(ver, 1, ver.length); }
+    return ver;
+}
+
+// Work root for a dispatch-triggered fetch: the per-invocation scratch first
+// (`SAILFIN_TEST_SCRATCH` keeps parallel `sfn test --jobs N` children from
+// colliding under the pool), then `TMPDIR`, then `/tmp`. This extends the
+// install command's `TMPDIR`-then-`/tmp` fallback with the scratch prefix,
+// because dispatch can be triggered from inside the parallel test runner.
+fn _dispatch_work_root() -> string ![io] {
+    let scratch = env.get("SAILFIN_TEST_SCRATCH");
+    if scratch.length > 0 { return scratch; }
+    let tmp = env.get("TMPDIR");
+    if tmp.length > 0 { return tmp; }
+    return "/tmp";
+}
+
+// A store entry is dispatch-ready when both the binary and the non-empty
+// `.sha256` completeness marker are present — the same commit-point marker
+// `_toolchain_install` writes LAST, so a torn-down/partial install never reads
+// as ready. This is the offline-safe re-verification: the marker records the
+// tarball digest the signed manifest attested at install time. Re-hashing the
+// on-disk binary for tamper detection is a documented follow-up (the marker is
+// the tarball digest, not the binary's), not claimed here.
+fn _dispatch_store_ready(base: string, ver: string) -> boolean ![io] {
+    let store_dir = base + "/" + ver;
+    if !fs.exists(store_dir + "/sailfin") { return false; }
+    let sha_path = store_dir + "/.sha256";
+    if !fs.exists(sha_path) { return false; }
+    let recorded = _toml_trim_cmd(fs.readFile(sha_path));
+    if recorded.length == 0 { return false; }
+    return true;
+}
+
+// Is `knob` one of the reserved mode words rather than an explicit `<version>`?
+fn _dispatch_knob_is_mode(knob: string) -> boolean {
+    if knob.length == 0 { return true; }
+    if strings_equal(knob, "auto") { return true; }
+    if strings_equal(knob, "local") { return true; }
+    if strings_equal(knob, "off") { return true; }
+    if strings_equal(knob, "0") { return true; }
+    return false;
+}
+
+// The gate + dispatch entry the build/run/check/test commands call. It reuses
+// the `toolchain_decide` pin evaluation and, on a satisfied or unpinned
+// project, is a no-op (returns 0). On a mismatch it consults the
+// `SAILFIN_TOOLCHAIN` knob:
+//   auto (default) — ensure the pinned toolchain is in the store, then re-exec
+//     it with the original argv (process-image replacement, so exit codes and
+//     signals pass through);
+//   local          — verify only, never fetch: print the mismatch + install
+//     hint and exit 1;
+//   <version>      — force that version as the dispatch target;
+//   off / 0        — skip the gate (also `--skip-toolchain-check` /
+//     `SAILFIN_SKIP_TOOLCHAIN_CHECK`): warn and proceed.
+// A re-entrancy guard (`SAILFIN_TOOLCHAIN_DISPATCHED=<version>`) is set before
+// re-exec; if a dispatched toolchain re-enters here still unsatisfied, the
+// stored binary is wrong/corrupt, so this hard-fails loudly rather than looping.
+fn toolchain_gate_or_dispatch(entry_hint: string, ctx: CliContext, skip_flag: boolean) -> int ![io, net] {
+    let d: ToolchainDecision = toolchain_decide(entry_hint, ctx.binary_dir);
+    if !d.pinned { return 0; }
+    if d.satisfied { return 0; }
+
+    let knob = env.get("SAILFIN_TOOLCHAIN");
+    let knob_off = strings_equal(knob, "off") || strings_equal(knob, "0");
+    if skip_flag || _env_flag("SAILFIN_SKIP_TOOLCHAIN_CHECK") || knob_off {
+        print.err("warning: toolchain mismatch — this project pins " + d.pin_desc
+            + " ("
+            + d.pin_source
+            + " [toolchain]) but the running toolchain is "
+            + d.running_str
+            + "; proceeding (--skip-toolchain-check / SAILFIN_TOOLCHAIN=off)");
+        return 0;
+    }
+
+    // Re-entrancy guard. A dispatched toolchain re-reads `[toolchain]` and, if
+    // correct, satisfies the floor and returns above. Reaching here with the
+    // guard set means the fetched/stored toolchain is the wrong version or
+    // corrupt — hard-fail loudly, never dispatch again.
+    let dispatched = env.get("SAILFIN_TOOLCHAIN_DISPATCHED");
+    if dispatched.length > 0 {
+        print.err("error: toolchain dispatch loop — the dispatched toolchain "
+            + dispatched
+            + " still does not satisfy the pin ("
+            + d.pin_desc
+            + ")");
+        print.err("  the stored toolchain for " + dispatched
+            + " is the wrong version or corrupt");
+        print.err("  reinstall it: sfn toolchain install " + dispatched);
+        return 1;
+    }
+
+    // local — verify only, never fetch.
+    if strings_equal(knob, "local") {
+        toolchain_print_mismatch(d);
+        return 1;
+    }
+
+    // Resolve the dispatch target: the version pin by default, or an explicit
+    // `<version>` knob (any non-mode value). A channel-only pin has no version
+    // to fetch, so dispatch cannot proceed automatically.
+    let mut target = d.pin_sfn;
+    if !_dispatch_knob_is_mode(knob) { target = knob; }
+    target = _dispatch_normalize_ver(target);
+    if !_is_valid_install_version(target) {
+        print.err("error: toolchain mismatch and no concrete version to fetch");
+        print.err("  this project pins " + d.pin_desc + " (" + d.pin_source
+            + " [toolchain])");
+        print.err("  set SAILFIN_TOOLCHAIN=<version>, or install manually: sfn toolchain install <version>");
+        return 1;
+    }
+
+    let base = _versions_base();
+    if base.length == 0 {
+        print.err("error: could not determine the toolchain store (set INSTALL_BASE or HOME)");
+        return 1;
+    }
+    let bin_path = base + "/" + target + "/sailfin";
+
+    // Ensure the pinned toolchain is stored. An already-complete entry
+    // dispatches offline (marker re-verified by `_dispatch_store_ready`);
+    // otherwise fetch it (covers the offline-without-store case via the
+    // install command's actionable failure).
+    if !_dispatch_store_ready(base, target) {
+        let rc = _toolchain_install(target, _dispatch_work_root());
+        if rc != 0 {
+            print.err("error: could not obtain the pinned toolchain " + target);
+            print.err("  run: sfn toolchain install " + target);
+            return 1;
+        }
+        if !_dispatch_store_ready(base, target) {
+            print.err("error: the pinned toolchain " + target
+                + " is still not available after install");
+            print.err("  run: sfn toolchain install " + target);
+            return 1;
+        }
+    }
+
+    // Re-exec the stored toolchain, replaying the user-visible argv. The guard
+    // is threaded so the dispatched toolchain does not dispatch again. On a
+    // process-image replacement `process.exec` never returns; a return means
+    // the exec failed (missing/not-executable), so fall back to an actionable
+    // error rather than proceeding with the wrong toolchain.
+    let mut exec_argv: string[] = [bin_path];
+    let mut i: int = 0;
+    loop {
+        if i >= ctx.orig_args.length { break; }
+        exec_argv.push(ctx.orig_args[i]);
+        i += 1;
+    }
+    let mut exec_env: string[] = process.environ();
+    exec_env.push("SAILFIN_TOOLCHAIN_DISPATCHED=" + target);
+    let _rc = process.exec(exec_argv, exec_env);
+    print.err("error: failed to re-exec the pinned toolchain at " + bin_path);
+    print.err("  run: sfn toolchain install " + target);
+    return 1;
+}
+
 // The `sfn/cli` definition for `toolchain`, registered on the v2 root
 // via `with_subcommand`. One nested leaf today: `install <version>`.
 fn command_def() -> Command {
@@ -482,4 +652,4 @@ fn run(matches: Matches, ctx: CliContext) -> int ![io, net] {
     return 2;
 }
 
-export { command_def, run };
+export { command_def, run, toolchain_gate_or_dispatch };

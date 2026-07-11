@@ -453,7 +453,20 @@ error: toolchain mismatch
   install the pinned toolchain, or re-run with --skip-toolchain-check to override
 ```
 
-**Escape hatches** — any one of the following downgrades the hard error to a one-line warning on stderr and lets the command proceed:
+That diagnostic is what you see under `SAILFIN_TOOLCHAIN=local` (verify-only) or when the gate is otherwise unable to dispatch (see below). By default, though, `sfn` doesn't just error — it fetches and re-execs the pinned toolchain for you.
+
+**`SAILFIN_TOOLCHAIN` controls what happens on a mismatch:**
+
+| `SAILFIN_TOOLCHAIN` | Behavior |
+|---|---|
+| `auto` (**default**) | Ensure the pinned toolchain is present in the version store — fetching it via `sfn toolchain install` (Ed25519-signature + SHA-256 verified, fail-closed) if it isn't — then transparently **re-exec** it with the original argv. A fresh clone plus `sfn build` just works with zero manual steps. |
+| `local` | Verify only, never fetch: print the mismatch diagnostic above and exit non-zero. |
+| `<version>` | Force that exact version as the dispatch target, regardless of the pin. |
+| `off` (or `0`) | Skip the gate entirely — same as `--skip-toolchain-check`: warn and proceed on the running toolchain. |
+
+Auto-dispatch (`auto`) is the default because verification is mandatory and fail-closed whenever a toolchain is fetched or dispatched — `sfn` never silently runs unverified code. A **re-entrancy guard** (`SAILFIN_TOOLCHAIN_DISPATCHED=<version>`) is set before re-exec, so a dispatched toolchain that still doesn't satisfy its own pin hard-fails loudly instead of looping. Offline, an already-stored toolchain still dispatches (its completeness marker is re-verified locally, no network needed); offline with nothing stored, `sfn` falls back to the diagnostic above naming the exact `sfn toolchain install <version>` command to run once back online.
+
+**Escape hatches** — any one of the following downgrades the hard error to a one-line warning on stderr and lets the command proceed on the running toolchain, without dispatching:
 
 | Form | Scope |
 |---|---|
@@ -461,7 +474,7 @@ error: toolchain mismatch
 | `SAILFIN_SKIP_TOOLCHAIN_CHECK=1` | Every `sfn` invocation in the current shell/CI job |
 | `SAILFIN_TOOLCHAIN=off` (or `=0`) | Every `sfn` invocation in the current shell/CI job |
 
-A project with no `[toolchain]` section is unaffected — the gate is a no-op. **Auto-fetching and dispatching to the pinned toolchain (`SAILFIN_TOOLCHAIN=auto`, `sfn toolchain install`) is designed but not yet implemented**; today a mismatch always requires installing the pinned version manually or using one of the escape hatches above.
+A project with no `[toolchain]` section is unaffected — the gate is a no-op.
 
 ---
 
@@ -508,7 +521,8 @@ These environment variables influence the behavior of `sfn` and the Makefile bui
 | `SFN_REGISTRY` | `sfn add` / `sfn publish` | Override the package registry base URL for this shell. Takes precedence over `~/.sfn/config.toml`. See [`sfn config`](#sfn-config-getsetunsetlist-key-value). |
 | `SFN_TOKEN` | `sfn publish` | Bearer token used when uploading a capsule. Takes precedence over `~/.sfn/credentials` written by `sfn login`. |
 | `SAILFIN_SKIP_TOOLCHAIN_CHECK` | `sfn build`/`run`/`check`/`test` | Set to `1` to downgrade a `[toolchain]` pin mismatch from a hard error to a warning for every invocation in the shell/CI job. See [Toolchain Pinning Flags](#toolchain-pinning-flags). |
-| `SAILFIN_TOOLCHAIN` | `sfn build`/`run`/`check`/`test` | `off` (or `0`) has the same effect as `SAILFIN_SKIP_TOOLCHAIN_CHECK=1`. `auto` (fetch + dispatch the pinned toolchain) is designed but not yet implemented. |
+| `SAILFIN_TOOLCHAIN` | `sfn build`/`run`/`check`/`test` | Controls the toolchain-pin mismatch response: `auto` (default) fetches + verifies + re-execs the pinned toolchain; `local` verifies only and errors on mismatch; `<version>` forces that dispatch target; `off` (or `0`) has the same effect as `SAILFIN_SKIP_TOOLCHAIN_CHECK=1`. See [Toolchain Pinning Flags](#toolchain-pinning-flags). |
+| `SAILFIN_TOOLCHAIN_DISPATCHED` | `sfn build`/`run`/`check`/`test` | Set automatically by `sfn` before re-exec'ing a dispatched toolchain (`=<version>`) as a re-entrancy guard; not intended to be set by hand. |
 | `PREFIX` | Makefile | Installation prefix. Defaults to `$HOME/.local`. The binary is installed to `$(PREFIX)/bin`. |
 | `GLOBAL_BIN_DIR` | Installer script | Override the installation bin directory directly (takes precedence over `PREFIX`). |
 | `GITHUB_TOKEN` | `make fetch-seed` | GitHub personal access token used to download seed releases from the `SailfinIO/sailfin` repository. Required for `make fetch-seed`. |
