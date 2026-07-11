@@ -691,6 +691,20 @@ fn sfn_io_poll_readable(fd: i64, timeout_ms: i64) -> bool ![io] { return false; 
 // Mirrors the `sfn_io_poll_readable` Windows stub above.
 fn sfn_io_poll_any(fds: int[], timeout_ms: i64) -> i64 ![io] { return -1; }
 
+// `sfn_process_exec(argv, env_flat)` — Windows stub for the `process.exec`
+// re-exec primitive (SFN-199; consumed by toolchain dispatch, SFN-172). The
+// POSIX body (`runtime/sfn/process.sfn`) replaces the process image via
+// `execve(2)`; Windows has no equivalent image replacement (the CRT `_exec*`
+// family spawns a child and terminates the parent, so exit codes/signals do
+// not pass through transparently). Until a native Windows re-exec lands,
+// return the exec-failed sentinel `-1` — the toolchain dispatcher then falls
+// back to its actionable error rather than dispatching. Mirrors the
+// degraded-but-linking `sfn_process_spawn_with_env` stub above, and keeps the
+// cross-windows link resolved now that a caller references the symbol.
+fn sfn_process_exec(argv: string[], env_flat: string[]) -> int ![io] {
+    return -1;
+}
+
 // `sfn_process_environ()` — empty `SfnArray` (`{ data@0, len@8, cap@16 }`
 // = 24 bytes, all zero). Must be a valid header (not null) so callers'
 // `.length` reads do not crash. Matches the C `_WIN32` empty-array shim

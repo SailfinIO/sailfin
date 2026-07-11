@@ -706,9 +706,14 @@ fn toolchain_decide(entry_hint: string, binary_dir: string) -> ToolchainDecision
 
     let mut pin_desc: string = "";
     if pin_sfn.length > 0 { pin_desc = "sfn >= " + pin_sfn; }
+    // Only describe a channel that was actually enforced: an unrecognized
+    // channel warns and does not constrain (above), so including it here would
+    // make the mismatch diagnostic claim a requirement that was never applied.
     if pin_channel.length > 0 {
-        if pin_desc.length > 0 { pin_desc = pin_desc + " "; }
-        pin_desc = pin_desc + "(" + pin_channel + " channel)";
+        if _toolchain_channel_rank(pin_channel) >= 0 {
+            if pin_desc.length > 0 { pin_desc = pin_desc + " "; }
+            pin_desc = pin_desc + "(" + pin_channel + " channel)";
+        }
     }
     d.pin_desc = pin_desc;
 

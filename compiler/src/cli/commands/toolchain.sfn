@@ -476,8 +476,9 @@ fn _dispatch_normalize_ver(ver: string) -> string {
 
 // Work root for a dispatch-triggered fetch: the per-invocation scratch first
 // (`SAILFIN_TEST_SCRATCH` keeps parallel `sfn test --jobs N` children from
-// colliding), then `TMPDIR`, then `/tmp` — the same precedence the install
-// command's temp dir uses.
+// colliding under the pool), then `TMPDIR`, then `/tmp`. This extends the
+// install command's `TMPDIR`-then-`/tmp` fallback with the scratch prefix,
+// because dispatch can be triggered from inside the parallel test runner.
 fn _dispatch_work_root() -> string ![io] {
     let scratch = env.get("SAILFIN_TEST_SCRATCH");
     if scratch.length > 0 { return scratch; }
