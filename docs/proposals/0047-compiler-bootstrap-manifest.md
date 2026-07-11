@@ -4,7 +4,7 @@ title: Compiler Bootstrap Manifest
 status: Accepted
 type: tooling
 created: 2026-07-10
-updated: 2026-07-10
+updated: 2026-07-11
 author: "agent:codex; human review: Michael Curtis"
 tracking: SFN-197
 supersedes:

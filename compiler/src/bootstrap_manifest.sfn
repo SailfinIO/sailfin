@@ -1,0 +1,253 @@
+// compiler/src/bootstrap_manifest.sfn
+//
+// Reader + validator for the compiler checkout's root `bootstrap.toml` —
+// the exact stage0 seed policy for self-hosting (SFEP-0047). It answers
+// "which exact released compiler bootstraps this checkout?", distinct from
+// the capsule/workspace `[toolchain]` compatibility floor (SFEP-0046), which
+// answers "can this toolchain build this capsule?".
+//
+// The schema is a deliberately shallow TOML subset (section headers, string
+// and bool key/values, comments) so the bootstrap path never needs a full
+// TOML parser before a seed exists; parsing reuses the generic
+// `toml_get_string` accessor. Validation fails closed: a missing version, an
+// unsupported policy, an unknown source, or `required = false` for a
+// github-release source is rejected before any fetch. During migration the
+// reader also compares against `.seed-version` and reports a mismatch naming
+// both files.
+import { find_char_local, strings_equal, substring } from "./string_utils";
+import { toml_get_string } from "./toml_parser";
+
+// The path of the bootstrap manifest, relative to the checkout root the
+// build/dev commands run from.
+let BOOTSTRAP_MANIFEST_PATH = "bootstrap.toml";
+
+// The legacy seed pin kept in lockstep during migration (SFEP-0047 §3.3).
+let SEED_VERSION_PATH = ".seed-version";
+
+// The parsed, validated bootstrap seed policy. `ok` gates every consumer;
+// `error` carries the fail-closed diagnostic when `ok` is false. All string
+// fields other than `version` carry their schema default when the key is
+// absent, so a shallow manifest still yields a complete policy.
+//
+// Consumed today: `version`, `source`, `policy`, `install_base`, `bin_dir`,
+// and `verify_required` (the last gates the fail-closed check for a
+// github-release seed). `repo`, `asset_prefix`, `verify_mode`,
+// `verify_manifest`, and `verify_signature` are parsed and validated for
+// shape but not yet threaded into the fetch — the reused installer
+// (`toolchain_install_to_base`) still hardcodes the SFEP-0046 release-asset
+// layout. They are reserved so a maintainer can see the full contract and so
+// wiring them through later is additive; editing them in `bootstrap.toml`
+// has no effect until then.
+struct BootstrapManifest {
+    version: string;
+    source: string;
+    repo: string;
+    asset_prefix: string;
+    policy: string;
+    install_base: string;
+    bin_dir: string;
+    verify_mode: string;
+    verify_manifest: string;
+    verify_signature: string;
+    verify_required: boolean;
+    ok: boolean;
+    error: string;
+}
+
+// Strip leading/trailing ASCII whitespace (space, tab, CR, LF). Used for the
+// scalar `.seed-version` file, whose content is a bare version + trailing
+// newline. Pure so the migration comparison is unit-testable.
+fn _bm_trim(text: string) -> string {
+    let mut start: int = 0;
+    let mut end: int = text.length;
+    loop {
+        if start >= end { break; }
+        let c = text[start];
+        if strings_equal(c, " ") || strings_equal(c, "\t") || strings_equal(c, "\n")
+            || strings_equal(c, "\r") { start += 1; } else { break; }
+    }
+    loop {
+        if end <= start { break; }
+        let c = substring(text, end - 1, end);
+        if strings_equal(c, " ") || strings_equal(c, "\t") || strings_equal(c, "\n")
+            || strings_equal(c, "\r") { end -= 1; } else { break; }
+    }
+    return substring(text, start, end);
+}
+
+// Read a `[section] key` string with a fallback when the key is absent.
+fn _bm_str(text: string, section: string, key: string, fallback: string) -> string {
+    let v = toml_get_string(text, section, key);
+    if v.length == 0 { return fallback; }
+    return v;
+}
+
+// Read a `[section] key` bool. An absent key returns `fallback`; an explicit
+// `false` is the only value that reads false — any other non-empty value
+// (notably `true`) reads true. Keeps `required = false` detectable while
+// tolerating the unquoted `true` the schema documents.
+fn _bm_bool(text: string, section: string, key: string, fallback: boolean) -> boolean {
+    let v = toml_get_string(text, section, key);
+    if v.length == 0 { return fallback; }
+    if strings_equal(v, "false") { return false; }
+    return true;
+}
+
+// Parse (and validate) a bootstrap manifest from raw TOML text. Pure — no
+// IO — so the validation logic is directly unit-testable on literal strings.
+// The file-read wrapper (`read_bootstrap_manifest`) layers `![io]` on top.
+fn parse_bootstrap_manifest(text: string) -> BootstrapManifest {
+    let mut m = BootstrapManifest {
+        version: toml_get_string(text, "seed", "version"),
+        source: _bm_str(text, "seed", "source", "github-release"),
+        repo: _bm_str(text, "seed", "repo", "SailfinIO/sailfin"),
+        asset_prefix: _bm_str(text, "seed", "asset_prefix", "sailfin"),
+        policy: _bm_str(text, "seed", "policy", "exact"),
+        install_base: _bm_str(text, "store", "install_base", "build/toolchains/seed/versions"),
+        bin_dir: _bm_str(text, "store", "bin_dir", "build/toolchains/seed/bin"),
+        verify_mode: _bm_str(text, "verify", "mode", "signed-sha256sums"),
+        verify_manifest: _bm_str(text, "verify", "manifest", "SHA256SUMS"),
+        verify_signature: _bm_str(text, "verify", "signature", "SHA256SUMS.sig"),
+        verify_required: _bm_bool(text, "verify", "required", true),
+        ok: true,
+        error: ""
+    };
+
+    // Fail closed on ambiguous or unsupported config (SFEP-0047 §5): the
+    // build must never guess a seed version.
+    if m.version.length == 0 {
+        m.ok = false;
+        m.error = "bootstrap.toml: missing required [seed].version";
+        return m;
+    }
+    if !strings_equal(m.policy, "exact") {
+        m.ok = false;
+        m.error = "bootstrap.toml: unsupported [seed].policy \"" + m.policy
+            + "\" (only \"exact\" is accepted; a stage0 seed is not a floor)";
+        return m;
+    }
+    if !strings_equal(m.source, "github-release") && !strings_equal(m.source, "local-path") {
+        m.ok = false;
+        m.error = "bootstrap.toml: unsupported [seed].source \"" + m.source
+            + "\" (expected \"github-release\" or \"local-path\")";
+        return m;
+    }
+    // A remote seed must be verified — a mirror is not a trust bypass
+    // (SFEP-0047 §3.2). `required = false` is only meaningful for an explicit
+    // local override, which is never the committed github-release default.
+    if strings_equal(m.source, "github-release") && !m.verify_required {
+        m.ok = false;
+        m.error = "bootstrap.toml: [verify].required = false is not allowed for source = \"github-release\"";
+        return m;
+    }
+    return m;
+}
+
+// A manifest carrying only the fail-closed error, for the file-missing path.
+fn _bm_error(message: string) -> BootstrapManifest {
+    return BootstrapManifest {
+        version: "",
+        source: "",
+        repo: "",
+        asset_prefix: "",
+        policy: "",
+        install_base: "",
+        bin_dir: "",
+        verify_mode: "",
+        verify_manifest: "",
+        verify_signature: "",
+        verify_required: false,
+        ok: false,
+        error: message
+    };
+}
+
+// Read + parse + validate the root `bootstrap.toml`. Fails closed when the
+// file is absent (the caller must not fall back to a guessed seed).
+fn read_bootstrap_manifest(path: string) -> BootstrapManifest ![io] {
+    if !fs.exists(path) {
+        return _bm_error("bootstrap.toml: not found at " + path
+            + " (this is not a compiler checkout, or the bootstrap manifest is missing)");
+    }
+    return parse_bootstrap_manifest(fs.readFile(path));
+}
+
+// True when the checkout has a root bootstrap manifest — the signal that
+// `sfn build -p compiler` should consider bootstrap-mode dispatch.
+fn bootstrap_manifest_exists() -> boolean ![io] {
+    return fs.exists(BOOTSTRAP_MANIFEST_PATH);
+}
+
+// Migration guard (SFEP-0047 §3.3, compatibility rule 3): while both files
+// coexist, `bootstrap.toml`'s `[seed].version` and `.seed-version` must
+// agree. Returns "" when they agree (or `.seed-version` is absent — the
+// bootstrap manifest is the source of truth); otherwise a diagnostic naming
+// both files. The manifest must already be `ok`.
+fn bootstrap_seed_version_mismatch(m: BootstrapManifest) -> string ![io] {
+    if !fs.exists(SEED_VERSION_PATH) { return ""; }
+    let legacy = _bm_trim(fs.readFile(SEED_VERSION_PATH));
+    if legacy.length == 0 { return ""; }
+    if strings_equal(legacy, m.version) { return ""; }
+    return "bootstrap seed mismatch: bootstrap.toml [seed].version = \"" + m.version
+        + "\" but .seed-version = \""
+        + legacy
+        + "\"; reconcile them (bootstrap.toml is the source of truth) — see SFEP-0047";
+}
+
+// Rewrite the `version = "..."` line inside the `[seed]` section to
+// `new_ver`, preserving every other line. Returns "" when no such line
+// exists so the pin caller fails closed rather than writing an unchanged
+// file. A shallow line scan matching the shallow manifest schema; pure, so
+// the rewrite is unit-testable. Leading-`v` normalization of the version
+// string is the caller's job.
+fn rewrite_seed_version(text: string, new_ver: string) -> string {
+    let mut out: string = "";
+    let mut section: string = "";
+    let mut pos: int = 0;
+    let mut replaced: boolean = false;
+    let n = text.length;
+    loop {
+        if pos > n { break; }
+        let nl = find_char_local(text, "\n", pos);
+        let mut line_end: int = nl;
+        let mut has_nl: boolean = true;
+        if nl < 0 {
+            line_end = n;
+            has_nl = false;
+        }
+        let line = substring(text, pos, line_end);
+        let trimmed = _bm_trim(line);
+        let mut emit = line;
+        if trimmed.length > 0 && strings_equal(substring(trimmed, 0, 1), "[") {
+            let close = find_char_local(trimmed, "]", 0);
+            if close > 0 {
+                section = _bm_trim(substring(trimmed, 1, close));
+            }
+        } else if !replaced && strings_equal(section, "seed") {
+            let eq = find_char_local(trimmed, "=", 0);
+            if eq > 0 {
+                let key = _bm_trim(substring(trimmed, 0, eq));
+                if strings_equal(key, "version") {
+                    emit = "version = \"" + new_ver + "\"";
+                    replaced = true;
+                }
+            }
+        }
+        out = out + emit;
+        if has_nl { out = out + "\n"; }
+        if !has_nl { break; }
+        pos = line_end + 1;
+    }
+    if !replaced { return ""; }
+    return out;
+}
+
+export {
+    BOOTSTRAP_MANIFEST_PATH,
+    BootstrapManifest,
+    bootstrap_manifest_exists,
+    bootstrap_seed_version_mismatch,
+    parse_bootstrap_manifest,
+    read_bootstrap_manifest,
+    rewrite_seed_version
+};

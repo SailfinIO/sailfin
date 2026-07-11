@@ -213,7 +213,16 @@ fn _selfhost_build_stage(driver_bin: string, scratch_dir: string, work_subdir: s
     // Fresh scratch: drop any prior `.ll` so a stale module can't poison
     // the fixed-point comparison.
     process.run(["rm", "-rf", scratch_dir + "/capsules"]);
-    let cmd = "SAILFIN_TEST_SCRATCH=" + _shell_single_quote_arg(scratch_dir)
+    // `SAILFIN_BOOTSTRAP=off`: the selfhost stages MUST build with the given
+    // `driver_bin` (the fixed point is that the first-pass binary rebuilds
+    // itself), never dispatch to the pinned seed. `driver_bin` carries the
+    // *source* version, which is ahead of `bootstrap.toml [seed].version` for
+    // the whole span between a release and its seed cut — so the exact-match
+    // bootstrap gate (SFEP-0047) would otherwise fetch + re-exec the seed here
+    // and subvert the self-host check. Mirrors the `SAILFIN_TOOLCHAIN=off`
+    // seed-transition note in `compiler/capsule.toml`.
+    let cmd = "SAILFIN_BOOTSTRAP=off SAILFIN_TEST_SCRATCH="
+        + _shell_single_quote_arg(scratch_dir)
         + " "
         + _shell_single_quote_arg(driver_bin)
         + " build --no-cache -p compiler --work-dir "
