@@ -1,7 +1,7 @@
 # Runtime-execution benchmarks
 
 These benchmarks measure how fast **compiled Sailfin programs run** — the
-counterpart to the compiler *build-perf* bench (`scripts/bench_compile.sh`,
+counterpart to the compiler *build-perf* bench (`sfn bench --compiler`,
 `make bench`), which measures how fast the compiler emits IR.
 
 This is the surface the C→Sailfin runtime rewrite most affects: now that the C
@@ -33,7 +33,7 @@ make bench-runtime                                      # all workloads, 5 timed
 make bench-runtime BENCH_RUNTIME_ARGS="--iterations 10" # 10 timed runs each
 make bench-runtime BENCH_RUNTIME_ARGS="--csv build/runtime.csv"
 
-# Or the script directly (CLI mirrors scripts/bench_compile.sh):
+# Or the script directly (CLI mirrors `sfn bench --compiler`):
 bash scripts/bench_runtime.sh                           # all workloads
 bash scripts/bench_runtime.sh --workload arena_alloc    # one workload (repeatable)
 bash scripts/bench_runtime.sh --top 3                   # show 3 slowest

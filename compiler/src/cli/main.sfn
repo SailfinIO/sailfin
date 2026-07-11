@@ -46,6 +46,7 @@ import { handle_selfhost_command } from "../cli_selfhost";
 import { ice_set_binary_dir } from "../ice";
 import { number_to_string } from "../num_format";
 import { command_def as add_command_def, run as add_run } from "./commands/add";
+import { command_def as bench_command_def, run as bench_run } from "./commands/bench";
 import { command_def as build_command_def, run as build_run } from "./commands/build";
 import { command_def as cache_command_def, run as cache_run } from "./commands/cache";
 import { command_def as check_command_def, run as check_run } from "./commands/check";
@@ -76,6 +77,8 @@ fn _usage() -> string {
         + "  sfn emit  [--timing] [-o OUTPUT] [--module-name SLUG] [--import-context DIR] llvm|sailfin|native <file.sfn>\n";
     out = out
         + "  sfn cache <info|prune|clean> [--max-size N] [--max-age N] [--all-schemas]\n";
+    out = out
+        + "  sfn bench --compiler [--module M]... [--top N] [--csv PATH] [--budget-time S] [--budget-mem KB] [--import-context DIR] [--work-dir DIR]\n";
     out = out + "\n";
     out = out + "project:\n";
     out = out + "  sfn init\n";
@@ -221,6 +224,7 @@ fn sailfin_cli_main_v2(argv: string[]) -> int ![clock, io, net] {
     root = with_subcommand(root, check_command_def());
     root = with_subcommand(root, build_command_def());
     root = with_subcommand(root, run_command_def());
+    root = with_subcommand(root, bench_command_def());
 
     // Machine-readable top-level help for tools and agents. This bypasses
     // `parse()` intentionally: `--json` is a modifier for root help, not a
@@ -546,6 +550,23 @@ fn sailfin_cli_main_v2(argv: string[]) -> int ![clock, io, net] {
         if ctx.trace_argv { _v2_trace_argv(argv); }
         if parse_ok { return run_run(matches, ctx); }
         print("usage: sfn run [--no-cache] [--clean] [--cache-trace] <file.sfn>");
+        return 2;
+    }
+
+    // `sfn bench --compiler [--module M]... [--top N] [--csv PATH]
+    // [--budget-time S] [--budget-mem KB]` — the registered subcommand
+    // matched. A clean parse dispatches to `bench.run`, which owns the
+    // `--compiler`-mode gate (exit 2 when absent) and its own exit codes
+    // (0 clean / 1 module failures / 2 budget violations). A non-ok parse
+    // that still descended into `bench` (an unrecognized flag, a
+    // non-integer `--top`/`--budget-time`/`--budget-mem`, or `--help`) is
+    // a usage error (exit 2) — the parser owns argument validation. The
+    // literal `2` mirrors the dispatches above (the `sfn/cli` `EXIT_*`
+    // constants lower to 0 here).
+    if strings_equal(subcommand(matches), "bench") {
+        if ctx.trace_argv { _v2_trace_argv(argv); }
+        if parse_ok { return bench_run(matches, ctx); }
+        print("usage: sfn bench --compiler [--module M]... [--top N] [--csv PATH] [--budget-time S] [--budget-mem KB] [--import-context DIR] [--work-dir DIR]");
         return 2;
     }
 

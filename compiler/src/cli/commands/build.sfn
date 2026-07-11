@@ -60,11 +60,8 @@ import {
     parse_scope_name
 } from "../../capsule_artifact";
 import { ResolverConsumer, prepare_project_capsules } from "../../capsule_resolver";
-import {
-    compile_to_llvm_file_with_module,
-    module_name_from_path,
-    number_to_string
-} from "../../main";
+import { format_backend_failure_banner } from "../../ice";
+import { compile_to_llvm_file_with_module, module_name_from_path } from "../../main";
 import { runtime_capsule_from_root } from "../../runtime_capsule_resolver";
 import { CliContext } from "../context";
 import { toolchain_gate_or_dispatch } from "./toolchain";
@@ -354,8 +351,7 @@ fn run(matches: Matches, ctx: CliContext) -> int ![io, net] {
         let rc_obj = backend.assemble(ll_path, out_path, "-O2", no_includes);
         if rc_obj != 0 {
             if !json_flag {
-                print("library build failed (clang exit=" + number_to_string(rc_obj)
-                    + ")");
+                print.err(format_backend_failure_banner(binary_dir, "clang -c", ll_path, rc_obj));
             }
             return rc_obj;
         }
@@ -413,7 +409,7 @@ fn run(matches: Matches, ctx: CliContext) -> int ![io, net] {
     let rc = link_result.rc;
     if rc != 0 {
         if !json_flag {
-            print("link failed (clang exit=" + number_to_string(rc) + ")");
+            print.err(format_backend_failure_banner(binary_dir, "clang link", ll_path, rc));
         }
         return rc;
     }

@@ -474,7 +474,7 @@ file.
 
 The 615-line Makefile exists because `sfn` is incomplete. It glues
 together `build.sh` (compile), `install.sh` (seed fetch), `tools/package.sh`
-(package), `scripts/bench_compile.sh` (bench), `scripts/run_native_test.sh`
+(package), `scripts/run_native_test.sh`
 (test), `scripts/test_arena.sh` (arena gate), plus an inline 100-line
 MinGW cross-compile branch for Windows. Every target is a thin shell
 wrapper around a dedicated script.

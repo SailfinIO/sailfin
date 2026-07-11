@@ -24,6 +24,7 @@
 // the formatter when a panic fires. `binary_dir` is stashed (not the resolved
 // version) so the version's filesystem read is paid lazily, only on an actual
 // panic, not on every CLI invocation.
+import { number_to_string } from "./num_format";
 import { resolve_compiler_version } from "./version";
 
 // New-issue URL prefilled with the ICE template. Kept grep-stable: /triage
@@ -94,6 +95,29 @@ fn format_ice_banner(version: string, stage: string, source: string, message: st
     if stage_line.length == 0 { stage_line = "<unknown>"; }
     banner = banner + "note: stage: " + stage_line + "\n";
     if source.length > 0 { banner = banner + "note: source: " + source + "\n"; }
+    banner = banner + "note: file a report: " + ICE_ISSUE_URL + "\n";
+    return banner;
+}
+
+// Format a backend (clang / llvm-link) failure as a Sailfin-branded ICE
+// banner (SFN-34). A nonzero backend exit means driver-emitted IR was rejected
+// downstream — a compiler bug, not user error — so the failure is framed as an
+// internal compiler error naming the failing IR path and a bug-report pointer,
+// replacing the bare `clang exit=N` line. Printed (not thrown) by the CLI link
+// sites so the clang exit code still propagates as the process exit code: the
+// forward-only stage/source caveat in this file's header is exactly why link
+// orchestration must not `throw` a banner.
+fn format_backend_failure_banner(binary_dir: string, tool: string, ir_path: string, rc: int) -> string ![io] {
+    let version = resolve_compiler_version(binary_dir);
+    let mut banner: string = "error: internal compiler error (ICE): backend "
+        + tool
+        + " failed (exit "
+        + number_to_string(rc)
+        + ")\n";
+    banner = banner
+        + "note: the backend rejected compiler-emitted IR — this is a compiler bug, not an error in your code\n";
+    banner = banner + "note: version: " + version + "\n";
+    banner = banner + "note: failing IR: " + ir_path + "\n";
     banner = banner + "note: file a report: " + ICE_ISSUE_URL + "\n";
     return banner;
 }
