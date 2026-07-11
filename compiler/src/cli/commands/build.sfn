@@ -91,7 +91,7 @@ fn command_def() -> Command {
 // Flag reads replace the hand-rolled argv walk; the build body is verbatim.
 // The `runtime_root` empty→"runtime" fallback is applied here (not in
 // `parse_driver_prefix`) because it is a filesystem probe, not argv parsing.
-fn run(matches: Matches, ctx: CliContext) -> int ![io, net] {
+fn run(matches: Matches, ctx: CliContext) -> int ![clock, io, net] {
     let mut out_path: string = get_or(matches, "o", "");
     let capsule_path: string = get_or(matches, "p", "");
     let no_cache_flag: boolean = has_flag(matches, "no-cache");

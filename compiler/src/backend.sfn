@@ -113,14 +113,28 @@ interface Backend {
 // lazy-init contract in `llvm/lowering_debug_state.sfn`.
 let mut _macos_sdk_probe_done: boolean = false;
 let mut _macos_sdk_root: string = "";
+let mut _macos_deployment_probe_done: boolean = false;
+let mut _macos_deployment_target: string = "";
 
 fn _macos_sdk_link_flags() -> string[] ![io] {
     if !_macos_sdk_probe_done {
         _macos_sdk_root = _probe_macos_sdk_root();
         _macos_sdk_probe_done = true;
     }
-    if _macos_sdk_root.length == 0 { return []; }
-    return ["-isysroot", _macos_sdk_root, "-L" + _macos_sdk_root + "/usr/lib"];
+    if !_macos_deployment_probe_done {
+        _macos_deployment_target = _probe_macos_deployment_target();
+        _macos_deployment_probe_done = true;
+    }
+    let mut flags: string[] = [];
+    if _macos_sdk_root.length > 0 {
+        flags.push("-isysroot");
+        flags.push(_macos_sdk_root);
+        flags.push("-L" + _macos_sdk_root + "/usr/lib");
+    }
+    if _macos_deployment_target.length > 0 {
+        flags.push("-mmacosx-version-min=" + _macos_deployment_target);
+    }
+    return flags;
 }
 
 // Resolve the macOS SDK root, or "" when not on Darwin / none found.
@@ -144,6 +158,20 @@ fn _probe_macos_sdk_root() -> string ![io] {
     let clt = "/Library/Developer/CommandLineTools/SDKs/MacOSX.sdk";
     if fs.exists(clt) { return clt; }
     return "";
+}
+
+// Homebrew LLVM releases can lag Apple's Darwin-major mapping. On macOS 27,
+// clang 17 maps `arm64-apple-darwin27` to `macosx18.0`, making ld warn when
+// linking Homebrew dylibs built for the real host platform. Passing the host
+// deployment target avoids that stale inference while still honoring an
+// explicit caller-provided `MACOSX_DEPLOYMENT_TARGET`.
+fn _probe_macos_deployment_target() -> string ![io] {
+    let mut os: string = _get_env_cmd("SAILFIN_TARGET_OS");
+    if os.length == 0 { os = _shell_read_cmd("uname -s"); }
+    if os != "Darwin" { return ""; }
+    let explicit = _get_env_cmd("MACOSX_DEPLOYMENT_TARGET");
+    if explicit.length > 0 { return explicit; }
+    return _shell_read_cmd("v=\"$(SYSTEM_VERSION_COMPAT=0 sw_vers -productVersion 2>/dev/null)\"; IFS=.; set -- $v; if [ -n \"$1\" ] && [ -n \"$2\" ]; then printf '%s.%s' \"$1\" \"$2\"; fi");
 }
 
 // Build the clang link argv for the `sfn test` layout:

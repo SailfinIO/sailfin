@@ -7,7 +7,7 @@
 // travels with its only two consumers (`_clang_link`/`_clang_link_multi`).
 import { LinkPlan, LlvmTextBackend } from "../backend";
 import { CacheStats, empty_cache_stats } from "../build_cache";
-import { _get_env_cmd } from "../build_flags";
+import { _env_flag, _get_env_cmd } from "../build_flags";
 import { RuntimeCapsuleArtifacts } from "../runtime_capsule_resolver";
 import { _shell_read_cmd, _shell_single_quote_arg } from "./fs";
 import { _ensure_dir, _find_substring_from } from "./paths";
@@ -48,28 +48,32 @@ fn _linker_on_path(name: string) -> boolean ![io] {
 // `SAILFIN_LINKER`. lld's Mach-O backend has historically lagged ld64 on
 // edge cases and the path is not smoke-tested off Linux, so the safe
 // default is to do nothing rather than auto-flip an untested linker
-// (#343 risk note). The chosen linker is surfaced on a single `[link]`
-// info line — emitted on stderr, never stdout, so it cannot corrupt a
-// program's stdout under `sfn run` or any downstream pipe (mirrors the
-// `[cache]` line's stderr routing, #915).
+// (#343 risk note). The chosen linker is surfaced only when
+// `SAILFIN_TRACE_LINK` is enabled, sharing the trace path used by the
+// resolved clang argv.
+fn _trace_linker_choice(message: string) ![io] {
+    if _env_flag("SAILFIN_TRACE_LINK") {
+        print.err("[link] linker: " + message);
+    }
+}
+
 fn _resolve_linker() -> string ![io] {
     let linker_override = _get_env_cmd("SAILFIN_LINKER");
     if linker_override.length > 0 {
         if linker_override == "ld" || linker_override == "system"
             || linker_override == "default" {
-            print.err("[link] linker: system default (SAILFIN_LINKER="
+            _trace_linker_choice("system default (SAILFIN_LINKER="
                 + linker_override
                 + ")");
             return "";
         }
-        print.err("[link] linker: " + linker_override
-            + " (SAILFIN_LINKER override)");
+        _trace_linker_choice(linker_override + " (SAILFIN_LINKER override)");
         return "-fuse-ld=" + linker_override;
     }
 
     let os = _shell_read_cmd("uname -s");
     if os != "Linux" {
-        print.err("[link] linker: system default (auto-detect is Linux-only; "
+        _trace_linker_choice("system default (auto-detect is Linux-only; "
             + "set SAILFIN_LINKER=lld to opt in on "
             + os
             + ")");
@@ -77,14 +81,14 @@ fn _resolve_linker() -> string ![io] {
     }
 
     if _linker_on_path("mold") {
-        print.err("[link] linker: mold (auto-detected)");
+        _trace_linker_choice("mold (auto-detected)");
         return "-fuse-ld=mold";
     }
     if _linker_on_path("ld.lld") || _linker_on_path("lld") {
-        print.err("[link] linker: lld (auto-detected)");
+        _trace_linker_choice("lld (auto-detected)");
         return "-fuse-ld=lld";
     }
-    print.err("[link] linker: system default (mold/lld not found on PATH)");
+    _trace_linker_choice("system default (mold/lld not found on PATH)");
     return "";
 }
 

@@ -56,7 +56,7 @@ fn command_def() -> Command {
 // own `--json` ⇒ quiet coupling and its own empty-path ⇒ "." default
 // exactly as before. `binary_dir` comes from the driver-parsed
 // `CliContext`.
-fn run(matches: Matches, ctx: CliContext) -> int ![io, net] {
+fn run(matches: Matches, ctx: CliContext) -> int ![clock, io, net] {
     let _tc_paths: string[] = positionals(matches, "path");
     let mut _tc_hint: string = ".";
     if _tc_paths.length > 0 { _tc_hint = _tc_paths[0]; }

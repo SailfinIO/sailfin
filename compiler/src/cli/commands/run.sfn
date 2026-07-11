@@ -69,7 +69,7 @@ fn command_def() -> Command {
 // verbatim. The `runtime_root` empty→"runtime" fallback is applied here (not
 // in `parse_driver_prefix`) because it is a filesystem probe, not argv
 // parsing.
-fn run(matches: Matches, ctx: CliContext) -> int ![io, net] {
+fn run(matches: Matches, ctx: CliContext) -> int ![clock, io, net] {
     let no_cache_flag: boolean = has_flag(matches, "no-cache");
     let clean_flag: boolean = has_flag(matches, "clean");
     let cache_trace_flag: boolean = has_flag(matches, "cache-trace");
@@ -171,15 +171,17 @@ fn run(matches: Matches, ctx: CliContext) -> int ![io, net] {
         return link_rc;
     }
 
-    // Cache summary mirrors `sfn build`: quiet for builds with no cache
-    // activity (no manifest deps, or `--no-cache`). Runtime object-cache
-    // stats fold in alongside the `.ll` module cache total (#915), gated on
-    // `run_cache_config.enabled` so `--no-cache` stays quiet.
+    // Keep `sfn run` quiet by default: stdout/stderr should belong to the
+    // program unless the user asks for cache telemetry. Runtime object-cache
+    // stats still fold in alongside the `.ll` module cache total (#915),
+    // gated on `run_cache_config.enabled` so `--no-cache` stays quiet. The
+    // summary itself is gated on the resolved `run_cache_config.trace`, so
+    // `SAILFIN_CACHE_TRACE=1` layers in exactly like `--cache-trace`.
     let mut run_cache_stats = run_capsule_result.stats;
     if run_cache_config.enabled {
         run_cache_stats = merge_cache_stats(run_capsule_result.stats, link_result.stats);
     }
-    _print_cache_summary(run_cache_stats);
+    if run_cache_config.trace { _print_cache_summary(run_cache_stats); }
     let run_rc = process.run([exe_path]);
     return run_rc;
 }

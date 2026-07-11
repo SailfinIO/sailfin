@@ -135,8 +135,9 @@ here.
   `$SAILFIN_BUILD_CACHE_DIR` override; in-tree `build/cache/v2` fallback when
   `$HOME` is unresolvable and pinned in-tree for the compiler self-host build —
   SFEP-0040 §3.1) with per-source dep manifests,
-  `--no-cache` / `--clean` / `--cache-trace` flags, and a `[cache]` summary on
-  stderr (Stage C PR1–1f, #254–#259). `sfn cache info/prune/clean` (SFEP-0040
+  `--no-cache` / `--clean` / `--cache-trace` flags, a `[cache]` summary on
+  stderr for `sfn build`, and opt-in `sfn run` cache telemetry via
+  `--cache-trace` (Stage C PR1–1f, #254–#259). `sfn cache info/prune/clean` (SFEP-0040
   §3.2–3.4, #1893) adds bounded-size GC over the same store: `info` reports
   root/entry-count/size, `prune [--max-size <bytes>] [--max-age <days>]`
   evicts LRU (mtime touched on cache hit) with conservative defaults (~5 GiB /
@@ -205,8 +206,10 @@ here.
   and the seal-sufficient native backend (#1640) to plug in without
   re-hardcoding LLVM across the driver. `SAILFIN_TRACE_LINK=1` echoes the
   resolved clang link argv to stderr (`[trace-link] <argv>`, #1908) for both
-  the program and test link layouts — a read-only debugging aid with no
-  behavior change when unset.
+  the program and test link layouts; linker-choice diagnostics (`[link] ...`)
+  are trace-gated too. On Darwin, the backend self-supplies the SDK and host
+  deployment target so outdated Homebrew LLVM does not infer stale macOS
+  versions during links. The trace path has no behavior change when unset.
 - **Build-host OpenSSL dependency** (SFEP-0036, #1782/#1821). The native
   runtime links `-lssl -lcrypto` (TLS; `runtime/sfn/platform/tls.sfn`), so
   **every** Sailfin binary — including the compiler and each per-test binary
