@@ -230,13 +230,16 @@ fn _binary_in_root(root: string) -> string ![io] {
     return "";
 }
 
-// Download `url` to `dest`. `http.download` writes the file only on a
-// successful (< 400) round-trip and returns null otherwise, so the
-// file's presence is the reliable success signal (avoids inspecting the
-// possibly-null return).
+// Download `url` to `dest`, returning success. `http.download` writes the
+// file only on a successful (< 400, redirects followed — SFN-213) round-trip.
+// A present-but-empty file is NOT a success: an unfollowable redirect or a
+// truncated fetch can leave a zero-byte file, and treating it as downloaded
+// makes a later verification of empty bytes fail with a misleading signature
+// error. Require the file to exist AND be non-empty.
 fn _download_to(url: string, dest: string) -> boolean ![io, net] {
     let _ = http.download(url, dest);
-    return fs.exists(dest);
+    if !fs.exists(dest) { return false; }
+    return fs.readFile(dest).length > 0;
 }
 
 // `sfn toolchain install` against the user-facing version store
