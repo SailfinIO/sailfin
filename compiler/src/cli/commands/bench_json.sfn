@@ -25,7 +25,7 @@ struct BenchJsonResult {
     status: string;
 }
 
-// JSON string escaping: the six RFC 8259 escapes the rest of the compiler's
+// JSON string escaping: the five RFC 8259 escapes the rest of the compiler's
 // encoders emit (`\"`, `\\`, `\n`, `\r`, `\t`) with literal passthrough for
 // everything else. Bench names are module/workload slugs and platform/version
 // strings — ASCII-clean — but escaping keeps the envelope well-formed if a
@@ -62,8 +62,11 @@ fn _bj_number_field(name: string, value: int) -> string {
     return _bj_field(name, _bj_number_to_string(value));
 }
 
-// Local copy of `number_to_string` (see preamble) so the module stays
-// self-contained and avoids the seed-compiler import-cycle limitation.
+// Local integer formatter (self-contained per the preamble, avoiding the
+// seed-compiler import-cycle limitation). O(digits) via `/` and `%` — every
+// bench number (ms timing, peak RSS KiB, op count, exit code) is non-negative,
+// so the `0 - working` negation path is unreachable for real input and cannot
+// hit the i64-min overflow edge.
 fn _bj_number_to_string(value: int) -> string {
     if value == 0 { return "0"; }
     let mut working: int = value;
@@ -73,20 +76,12 @@ fn _bj_number_to_string(value: int) -> string {
         working = 0 - working;
     }
     let digits = "0123456789";
-    let mut remaining: int = working;
     let mut output: string = "";
     loop {
-        if remaining <= 0 { break; }
-        let mut temp: int = remaining;
-        let mut quotient: int = 0;
-        loop {
-            if temp < 10 { break; }
-            temp -= 10;
-            quotient += 1;
-        }
-        let ch = substring(digits, temp, temp + 1);
-        output = ch + output;
-        remaining = quotient;
+        if working <= 0 { break; }
+        let d = working % 10;
+        output = substring(digits, d, d + 1) + output;
+        working = working / 10;
     }
     if negative { output = "-" + output; }
     return output;

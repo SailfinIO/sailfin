@@ -424,8 +424,11 @@ test("sailfin_bench parses the envelope into structuredContent", async () => {
   });
   await withServer(workspace, async (client) => {
     const resp = await client.request("tools/call", {
+      // Runtime mode with no path: exercises the runBench(null) branch (no
+      // workspace-path resolution) and matches the runtime-domain stub
+      // envelope below.
       name: "sailfin_bench",
-      arguments: { compiler: true },
+      arguments: {},
     });
     const result = resp.result as {
       content: Array<{ type: string; text: string }>;

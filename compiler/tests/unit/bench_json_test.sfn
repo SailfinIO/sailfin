@@ -80,7 +80,9 @@ test "bench json: result carries all documented fields" {
 test "bench json: ends with trailing newline" {
     let out = render_bench_json_envelope("compiler", "0.0.0", "Linux x86_64", 1, 0, 0, _empty_results());
     assert out.length > 0;
-    assert _contains(out, "\n");
+    // Assert the FINAL byte is the newline, not merely that one appears
+    // somewhere — a value carrying an escaped "\n" must not satisfy this.
+    assert substring(out, out.length - 1, out.length) == "\n";
 }
 
 test "bench json: exit_code is encoded" {
