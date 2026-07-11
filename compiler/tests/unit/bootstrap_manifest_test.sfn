@@ -1,0 +1,93 @@
+// Unit tests for the compiler bootstrap manifest reader (SFEP-0047,
+// SFN-197). `parse_bootstrap_manifest` is pure (parses + validates raw TOML
+// text), so these tests exercise the fail-closed validation without touching
+// the filesystem.
+import { find } from "sfn/strings";
+
+import { parse_bootstrap_manifest, rewrite_seed_version } from "../../src/bootstrap_manifest";
+
+// A full, valid manifest. A function (not a module-level `let`) so the string
+// stays a local constant — a module-global string here trips the
+// runtime-evaluated-module-global link path (#1386-class).
+fn _full_manifest() -> string {
+    return "[seed]\nversion = \"0.8.0-alpha.4\"\nsource = \"github-release\"\nrepo = \"SailfinIO/sailfin\"\nasset_prefix = \"sailfin\"\npolicy = \"exact\"\n\n[store]\ninstall_base = \"build/toolchains/seed/versions\"\nbin_dir = \"build/toolchains/seed/bin\"\n\n[verify]\nmode = \"signed-sha256sums\"\nmanifest = \"SHA256SUMS\"\nsignature = \"SHA256SUMS.sig\"\nrequired = true\n";
+}
+
+test "bootstrap_manifest: reads all fields from a valid manifest" {
+    let m = parse_bootstrap_manifest(_full_manifest());
+    assert m.ok;
+    assert m.version == "0.8.0-alpha.4";
+    assert m.source == "github-release";
+    assert m.repo == "SailfinIO/sailfin";
+    assert m.asset_prefix == "sailfin";
+    assert m.policy == "exact";
+    assert m.install_base == "build/toolchains/seed/versions";
+    assert m.bin_dir == "build/toolchains/seed/bin";
+    assert m.verify_mode == "signed-sha256sums";
+    assert m.verify_manifest == "SHA256SUMS";
+    assert m.verify_signature == "SHA256SUMS.sig";
+    assert m.verify_required;
+}
+
+test "bootstrap_manifest: applies schema defaults for a shallow manifest" {
+    // Only the required version; every other field carries its default.
+    let m = parse_bootstrap_manifest("[seed]\nversion = \"0.8.0-alpha.4\"\n");
+    assert m.ok;
+    assert m.source == "github-release";
+    assert m.repo == "SailfinIO/sailfin";
+    assert m.asset_prefix == "sailfin";
+    assert m.policy == "exact";
+    assert m.install_base == "build/toolchains/seed/versions";
+    assert m.bin_dir == "build/toolchains/seed/bin";
+    assert m.verify_required;
+}
+
+test "bootstrap_manifest: rejects a missing [seed].version" {
+    let m = parse_bootstrap_manifest("[seed]\nsource = \"github-release\"\n");
+    assert ! m.ok;
+    assert find(m.error, "version", 0) >= 0;
+}
+
+test "bootstrap_manifest: rejects an unsupported policy" {
+    let m = parse_bootstrap_manifest("[seed]\nversion = \"0.8.0-alpha.4\"\npolicy = \"floor\"\n");
+    assert ! m.ok;
+    assert find(m.error, "policy", 0) >= 0;
+}
+
+test "bootstrap_manifest: rejects an unknown source" {
+    let m = parse_bootstrap_manifest("[seed]\nversion = \"0.8.0-alpha.4\"\nsource = \"ftp\"\n");
+    assert ! m.ok;
+    assert find(m.error, "source", 0) >= 0;
+}
+
+test "bootstrap_manifest: rejects required = false for github-release" {
+    let m = parse_bootstrap_manifest("[seed]\nversion = \"0.8.0-alpha.4\"\nsource = \"github-release\"\n\n[verify]\nrequired = false\n");
+    assert ! m.ok;
+    assert find(m.error, "required", 0) >= 0;
+}
+
+test "bootstrap_manifest: allows required = false only for a local-path source" {
+    let m = parse_bootstrap_manifest("[seed]\nversion = \"0.8.0-alpha.4\"\nsource = \"local-path\"\n\n[verify]\nrequired = false\n");
+    assert m.ok;
+    assert m.source == "local-path";
+    assert ! m.verify_required;
+}
+
+test "bootstrap_manifest: rewrite_seed_version replaces only the [seed].version line" {
+    let rewritten = rewrite_seed_version(_full_manifest(), "0.9.9-test");
+    // The new version is present and the old one is gone.
+    assert find(rewritten, "0.9.9-test", 0) >= 0;
+    assert find(rewritten, "0.8.0-alpha.4", 0) < 0;
+    // Other sections/keys are preserved.
+    assert find(rewritten, "install_base", 0) >= 0;
+    assert find(rewritten, "signed-sha256sums", 0) >= 0;
+    // The rewritten manifest still parses and validates.
+    let m = parse_bootstrap_manifest(rewritten);
+    assert m.ok;
+    assert m.version == "0.9.9-test";
+}
+
+test "bootstrap_manifest: rewrite_seed_version returns empty when no version line" {
+    let rewritten = rewrite_seed_version("[store]\nbin_dir = \"x\"\n", "0.9.9-test");
+    assert rewritten.length == 0;
+}

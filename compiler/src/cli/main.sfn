@@ -51,6 +51,7 @@ import { command_def as build_command_def, run as build_run } from "./commands/b
 import { command_def as cache_command_def, run as cache_run } from "./commands/cache";
 import { command_def as check_command_def, run as check_run } from "./commands/check";
 import { command_def as config_command_def, run as config_run } from "./commands/config";
+import { command_def as dev_command_def, run as dev_run } from "./commands/dev";
 import { command_def as emit_command_def, run as emit_run } from "./commands/emit";
 import { command_def as fmt_command_def, run as fmt_run } from "./commands/fmt";
 import { command_def as guillermo_command_def, run as guillermo_run } from "./commands/guillermo";
@@ -106,6 +107,9 @@ fn _usage() -> string {
         + "  sfn build -o build/native/examples/hello examples/basics/hello-world.sfn\n";
     out = out + "  sfn add acme/router\n";
     out = out + "  sfn config set registry https://registry.acme.internal\n";
+    out = out + "\n";
+    out = out
+        + "developer commands (compiler/toolchain maintainers): see sfn dev --help\n";
     return out;
 }
 
@@ -217,6 +221,7 @@ fn sailfin_cli_main_v2(argv: string[]) -> int ![clock, io, net] {
     root = with_subcommand(root, test_command_def());
     root = with_subcommand(root, config_command_def());
     root = with_subcommand(root, toolchain_command_def());
+    root = with_subcommand(root, dev_command_def());
     root = with_subcommand(root, cache_command_def());
     root = with_subcommand(root, lock_command_def());
     root = with_subcommand(root, package_command_def());
@@ -496,6 +501,22 @@ fn sailfin_cli_main_v2(argv: string[]) -> int ![clock, io, net] {
             if parse_ok { return toolchain_run(matches, ctx); }
             if parse_err.message.length > 0 { print(parse_err.message); } else {
                 print("usage: sfn toolchain install <version>");
+            }
+            return 2;
+        }
+    }
+
+    // `sfn dev bootstrap <fetch|build|check|pin>` — maintainer-only nested
+    // subcommands (SFEP-0047), gated on the descent path's root exactly like
+    // `toolchain`/`config`. A clean parse dispatches to `dev.run`; a non-ok
+    // parse that descended into `dev` is a usage error (exit 2).
+    let dev_path: string[] = subcommand_path(matches);
+    if dev_path.length > 0 {
+        if strings_equal(dev_path[0], "dev") {
+            if ctx.trace_argv { _v2_trace_argv(argv); }
+            if parse_ok { return dev_run(matches, ctx); }
+            if parse_err.message.length > 0 { print(parse_err.message); } else {
+                print("usage: sfn dev bootstrap <fetch|build|check|pin>");
             }
             return 2;
         }

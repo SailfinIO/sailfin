@@ -1,0 +1,30 @@
+# bootstrap.toml — the compiler checkout's exact stage0 seed policy.
+#
+# This is compiler-repo bootstrap policy, NOT the public capsule/workspace
+# `[toolchain]` compatibility floor (that lives in compiler/capsule.toml and
+# is SFEP-0046). `[toolchain]` answers "can this toolchain build this
+# capsule?" (a floor); this file answers "which exact released compiler
+# bootstraps this checkout?" (an exact seed). See SFEP-0047
+# (docs/proposals/0047-compiler-bootstrap-manifest.md).
+#
+# The native reader is compiler/src/bootstrap_manifest.sfn; `sfn build -p
+# compiler` and `sfn dev bootstrap ...` read this file to acquire, verify,
+# and dispatch the exact seed. During migration `.seed-version` is kept in
+# lockstep with `[seed].version` below; a mismatch is a hard error.
+
+[seed]
+version = "0.8.0-alpha.4"
+source = "github-release"
+repo = "SailfinIO/sailfin"
+asset_prefix = "sailfin"
+policy = "exact"
+
+[store]
+install_base = "build/toolchains/seed/versions"
+bin_dir = "build/toolchains/seed/bin"
+
+[verify]
+mode = "signed-sha256sums"
+manifest = "SHA256SUMS"
+signature = "SHA256SUMS.sig"
+required = true

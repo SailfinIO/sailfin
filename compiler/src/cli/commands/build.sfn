@@ -64,6 +64,7 @@ import { format_backend_failure_banner } from "../../ice";
 import { compile_to_llvm_file_with_module, module_name_from_path } from "../../main";
 import { runtime_capsule_from_root } from "../../runtime_capsule_resolver";
 import { CliContext } from "../context";
+import { bootstrap_gate_or_dispatch } from "./dev";
 import { toolchain_gate_or_dispatch } from "./toolchain";
 
 // The `sfn/cli` definition for `build`, registered on the v2 root via
@@ -148,6 +149,17 @@ fn run(matches: Matches, ctx: CliContext) -> int ![io, net] {
         cap_capsule_name = cap_spec.capsule_name;
         cap_version = cap_spec.version;
         cap_entry_relative = cap_spec.entry_relative;
+    }
+
+    // Bootstrap mode (SFEP-0047): `sfn build -p compiler` in a compiler
+    // checkout (capsule name "sailfin" + a root bootstrap.toml) self-hosts
+    // from the exact pinned seed. When the running toolchain is already that
+    // seed — every `make compile` self-host pass and any contributor on the
+    // pinned toolchain — this is a no-op and the build proceeds in-process;
+    // it only re-execs a *different* toolchain to the pinned stage0.
+    if strings_equal(cap_capsule_name, "sailfin") {
+        let _bs = bootstrap_gate_or_dispatch(ctx);
+        if _bs != 0 { return _bs; }
     }
     // Thread the resolved capsule name into the cache config so every
     // downstream `cache_root(...)` call (this fn, `_emit_build_report`,

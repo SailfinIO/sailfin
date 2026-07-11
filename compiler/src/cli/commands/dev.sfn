@@ -1,0 +1,398 @@
+// compiler/src/cli/commands/dev.sfn
+//
+// `sfn dev bootstrap ...` — the compiler-maintainer bootstrap surface
+// (SFEP-0047). These commands are developer/agent-only: they operate on the
+// compiler checkout's root `bootstrap.toml` (the exact stage0 seed policy)
+// and are deliberately kept out of the primary `sfn --help` list so ordinary
+// Sailfin application authors never see them.
+//
+//   sfn dev bootstrap fetch          acquire + verify the pinned seed only
+//   sfn dev bootstrap build          fetch if needed, then build the compiler
+//                                    with the exact seed
+//   sfn dev bootstrap check          build + smoke-verify the built compiler
+//   sfn dev bootstrap pin <version>  update bootstrap.toml + .seed-version
+//
+// The steady-state contributor path is still `sfn build -p compiler`, which
+// enters bootstrap mode via `bootstrap_gate_or_dispatch` (exported here and
+// called from `build.sfn`). Both share the same acquire-then-dispatch
+// implementation; the gate re-execs mid-`build`, while the explicit command
+// subprocesses the seed so it can report a result.
+import {
+    Command,
+    Matches,
+    arg,
+    command,
+    get,
+    subcommand,
+    with_arg,
+    with_subcommand
+} from "sfn/cli";
+
+import {
+    BOOTSTRAP_MANIFEST_PATH,
+    BootstrapManifest,
+    bootstrap_manifest_exists,
+    bootstrap_seed_version_mismatch,
+    read_bootstrap_manifest,
+    rewrite_seed_version
+} from "../../bootstrap_manifest";
+import { _shell_read_cmd, _toml_trim_cmd } from "../../build/fs";
+import { number_to_string } from "../../num_format";
+import { starts_with, strings_equal, substring } from "../../string_utils";
+import { _strip_build_metadata, resolve_compiler_version } from "../../version";
+import { CliContext } from "../context";
+import { toolchain_install_to_base } from "./toolchain";
+
+// Where a bootstrap-triggered fetch stages its download: the per-invocation
+// test scratch first (so parallel `sfn test --jobs N` children never collide),
+// then `TMPDIR`, then `/tmp`.
+fn _bootstrap_work_root() -> string ![io] {
+    let scratch = env.get("SAILFIN_TEST_SCRATCH");
+    if scratch.length > 0 { return scratch; }
+    let tmp = env.get("TMPDIR");
+    if tmp.length > 0 { return tmp; }
+    return "/tmp";
+}
+
+// Absolute path to `path` (relative paths are resolved against the current
+// working directory). Symlink targets must be absolute so the seed store's
+// `bin/` alias holds regardless of the directory a later `sfn` runs from.
+fn _bootstrap_abspath(path: string) -> string ![io] {
+    if starts_with(path, "/") { return path; }
+    let cwd = _shell_read_cmd("pwd");
+    if cwd.length == 0 { return path; }
+    return cwd + "/" + path;
+}
+
+// A seed store entry is ready to build/dispatch from when its `sailfin`
+// binary is present AND — when the native installer's `.sha256` completeness
+// marker exists — that marker is non-empty. The marker is written LAST, so a
+// present-but-empty/whitespace marker signals a torn install: not ready, so
+// `_bootstrap_fetch` re-runs the verified installer to repair it. When the
+// marker is ABSENT the entry is a migration-era `make fetch-seed`/`install.sh`
+// store (SFEP-0047 §3.3 keeps it as a transitional shim, and install.sh writes
+// no marker), which is ready to use as-is — requiring the marker there would
+// force a needless re-fetch of an already-usable seed.
+fn _bootstrap_store_ready(install_base: string, ver: string) -> boolean ![io] {
+    let store_dir = install_base + "/" + ver;
+    if !fs.exists(store_dir + "/sailfin") { return false; }
+    let sha_path = store_dir + "/.sha256";
+    if fs.exists(sha_path) {
+        let recorded = _toml_trim_cmd(fs.readFile(sha_path));
+        if recorded.length == 0 { return false; }
+    }
+    return true;
+}
+
+// The seed binary path within the store.
+fn _bootstrap_seed_bin(install_base: string, ver: string) -> string {
+    return install_base + "/" + ver + "/sailfin";
+}
+
+// Lay the `bin_dir` aliases (`sfn`, `sailfin`) over the freshly-installed
+// seed so the repo-local store is a drop-in for the `install.sh`-produced one
+// the Makefile's `SEED = build/toolchains/seed/bin/sfn` still reads during
+// migration. Best-effort: a filesystem without symlinks leaves the versioned
+// binary usable directly, which is all the native dispatch path needs.
+fn _bootstrap_link_bin(install_base: string, bin_dir: string, ver: string) -> void ![io] {
+    process.run(["mkdir", "-p", bin_dir]);
+    let abs_bin = _bootstrap_abspath(_bootstrap_seed_bin(install_base, ver));
+    process.run(["ln", "-sfn", abs_bin, bin_dir + "/sfn"]);
+    process.run(["ln", "-sfn", abs_bin, bin_dir + "/sailfin"]);
+}
+
+// Acquire + verify + install the pinned seed into the checkout's repo-local
+// store, then lay the `bin/` aliases. Reuses the toolchain installer's
+// fail-closed fetch/verify/extract pipeline against the bootstrap store base.
+fn _bootstrap_fetch(m: BootstrapManifest) -> int ![io, net] {
+    let rc = toolchain_install_to_base(m.version, m.install_base, _bootstrap_work_root());
+    if rc != 0 { return rc; }
+    _bootstrap_link_bin(m.install_base, m.bin_dir, m.version);
+    return 0;
+}
+
+// Ensure the pinned seed is present in the store, fetching (and verifying) it
+// when absent. Returns 0 when the store is ready.
+fn _bootstrap_ensure_seed(m: BootstrapManifest) -> int ![io, net] {
+    if _bootstrap_store_ready(m.install_base, m.version) { return 0; }
+    let rc = _bootstrap_fetch(m);
+    if rc != 0 {
+        print.err("error: could not obtain the pinned seed " + m.version);
+        print.err("  run: sfn dev bootstrap fetch");
+        return rc;
+    }
+    if !_bootstrap_store_ready(m.install_base, m.version) {
+        print.err("error: the pinned seed " + m.version
+            + " is still not available after install");
+        return 1;
+    }
+    return 0;
+}
+
+// Read + validate the manifest and reconcile it against `.seed-version`.
+// Returns an `ok = false` manifest (with `error` set) on any failure so the
+// caller can print the diagnostic and bail without guessing a seed.
+fn _bootstrap_resolve_manifest() -> BootstrapManifest ![io] {
+    let mut m = read_bootstrap_manifest(BOOTSTRAP_MANIFEST_PATH);
+    if !m.ok { return m; }
+    let mism = bootstrap_seed_version_mismatch(m);
+    if mism.length > 0 {
+        m.ok = false;
+        m.error = mism;
+        return m;
+    }
+    return m;
+}
+
+// ---- The build-command gate (steady-state `sfn build -p compiler`) ----
+//
+// Turn `sfn build -p compiler` into the smooth contributor path: when the
+// running toolchain is not the exact pinned seed, acquire it and re-exec it
+// so the compiler always self-hosts from the exact released stage0. Modeled
+// on `toolchain_gate_or_dispatch` (the `[toolchain]` floor gate), but keyed on
+// the exact bootstrap seed rather than a floor.
+//
+// Safe by construction: when the running toolchain's core version already
+// equals the pinned seed (the common case — a contributor on the pinned
+// toolchain, and every `make compile` self-host pass), this is a no-op and
+// the build proceeds in-process. Dispatch only fires for a *different*
+// toolchain. `SAILFIN_BOOTSTRAP=off` (or `0`) skips the gate for the
+// seed-transition window where the pin is ahead of the seed.
+fn bootstrap_gate_or_dispatch(ctx: CliContext) -> int ![io, net] {
+    // Only a compiler checkout (root bootstrap.toml present) has a seed to
+    // dispatch. An ordinary capsule build never enters this path.
+    if !bootstrap_manifest_exists() { return 0; }
+
+    let knob = env.get("SAILFIN_BOOTSTRAP");
+    if strings_equal(knob, "off") || strings_equal(knob, "0") { return 0; }
+
+    let m = _bootstrap_resolve_manifest();
+    if !m.ok {
+        print.err("error: " + m.error);
+        return 1;
+    }
+
+    // Exact-seed satisfaction: the running toolchain already IS the pinned
+    // seed (build metadata stripped so a `<ver>+dev.<hash>` self-host build
+    // matches the released `<ver>`). Build in-process — no dispatch.
+    let running = _strip_build_metadata(resolve_compiler_version(ctx.binary_dir));
+    if strings_equal(running, m.version) { return 0; }
+
+    // Re-entrancy guard: a dispatched seed re-reads bootstrap.toml and, if
+    // correct, satisfies the check above and returns. Reaching here with the
+    // guard set means the stored seed is the wrong version or corrupt.
+    let dispatched = env.get("SAILFIN_BOOTSTRAP_DISPATCHED");
+    if dispatched.length > 0 {
+        print.err("error: bootstrap dispatch loop — the dispatched seed "
+            + dispatched
+            + " still does not satisfy the pinned seed "
+            + m.version);
+        print.err("  the stored seed is the wrong version or corrupt");
+        print.err("  reinstall it: sfn dev bootstrap fetch");
+        return 1;
+    }
+
+    // A `local-path` source has no release to fetch; the running toolchain
+    // must be the seed. Emit an actionable error rather than dispatching.
+    if strings_equal(m.source, "local-path") {
+        print.err("error: bootstrap.toml pins a local-path seed " + m.version
+            + " but the running toolchain is "
+            + running);
+        print.err("  build with the pinned seed on PATH, or set SAILFIN_BOOTSTRAP=off");
+        return 1;
+    }
+
+    let ensured = _bootstrap_ensure_seed(m);
+    if ensured != 0 { return ensured; }
+
+    // Re-exec the stored seed, replaying the original argv. The guard is
+    // threaded so the dispatched seed does not dispatch again. On a
+    // process-image replacement `process.exec` never returns; a return means
+    // the exec failed (missing/not-executable).
+    let seed_bin = _bootstrap_seed_bin(m.install_base, m.version);
+    let mut exec_argv: string[] = [seed_bin];
+    let mut i: int = 0;
+    loop {
+        if i >= ctx.orig_args.length { break; }
+        exec_argv.push(ctx.orig_args[i]);
+        i += 1;
+    }
+    let mut exec_env: string[] = process.environ();
+    exec_env.push("SAILFIN_BOOTSTRAP_DISPATCHED=" + m.version);
+    let _rc = process.exec(exec_argv, exec_env);
+    print.err("error: failed to re-exec the pinned seed at " + seed_bin);
+    print.err("  run: sfn dev bootstrap fetch");
+    return 1;
+}
+
+// ---- `sfn dev bootstrap` subcommands ----
+// fetch: acquire + verify the pinned seed only.
+fn _dev_bootstrap_fetch() -> int ![io, net] {
+    let m = _bootstrap_resolve_manifest();
+    if !m.ok {
+        print.err("error: " + m.error);
+        return 1;
+    }
+    if strings_equal(m.source, "local-path") {
+        print.err("error: bootstrap.toml pins a local-path seed; nothing to fetch");
+        return 1;
+    }
+    if _bootstrap_store_ready(m.install_base, m.version) {
+        print("sfn dev bootstrap: seed " + m.version + " already present in "
+            + m.install_base
+            + "/"
+            + m.version);
+        _bootstrap_link_bin(m.install_base, m.bin_dir, m.version);
+        return 0;
+    }
+    let rc = _bootstrap_fetch(m);
+    if rc != 0 { return rc; }
+    print("sfn dev bootstrap: fetched seed " + m.version + " to " + m.install_base);
+    return 0;
+}
+
+// Run the pinned seed's `sfn build -p compiler` as a subprocess (not a
+// process-image replacement) so the command can report a result. The seed
+// binary is the exact stage0; the `SAILFIN_BOOTSTRAP_DISPATCHED` guard is not
+// needed because the invoked binary IS the seed (its core version satisfies
+// the pin, so its own gate is a no-op).
+fn _bootstrap_run_compiler_build(m: BootstrapManifest) -> int ![io] {
+    let seed_bin = _bootstrap_seed_bin(m.install_base, m.version);
+    return process.run([seed_bin, "build", "-p", "compiler"]);
+}
+
+// A `local-path` seed has no release to fetch; the seed must already be in
+// the store (a developer override). Reject before `_bootstrap_ensure_seed`
+// would try to GitHub-download the version. Returns the error string, or ""
+// when the source is fetchable.
+fn _bootstrap_local_path_reject(m: BootstrapManifest) -> string {
+    if strings_equal(m.source, "local-path") {
+        return "bootstrap.toml pins a local-path seed " + m.version
+            + "; place it in the store manually — there is nothing to fetch";
+    }
+    return "";
+}
+
+// build: fetch if needed, then build the compiler with the exact seed.
+fn _dev_bootstrap_build() -> int ![io, net] {
+    let m = _bootstrap_resolve_manifest();
+    if !m.ok {
+        print.err("error: " + m.error);
+        return 1;
+    }
+    let lp = _bootstrap_local_path_reject(m);
+    if lp.length > 0 {
+        print.err("error: " + lp);
+        return 1;
+    }
+    let ensured = _bootstrap_ensure_seed(m);
+    if ensured != 0 { return ensured; }
+    print("sfn dev bootstrap: building compiler with seed " + m.version);
+    let rc = _bootstrap_run_compiler_build(m);
+    if rc != 0 {
+        print.err("error: compiler build failed (seed " + m.version + ", exit "
+            + number_to_string(rc)
+            + ")");
+        return rc;
+    }
+    print("sfn dev bootstrap: built build/sailfin/program with seed " + m.version);
+    return 0;
+}
+
+// check: build with the exact seed, then smoke-verify the built compiler.
+fn _dev_bootstrap_check() -> int ![io, net] {
+    let m = _bootstrap_resolve_manifest();
+    if !m.ok {
+        print.err("error: " + m.error);
+        return 1;
+    }
+    let lp = _bootstrap_local_path_reject(m);
+    if lp.length > 0 {
+        print.err("error: " + lp);
+        return 1;
+    }
+    let ensured = _bootstrap_ensure_seed(m);
+    if ensured != 0 { return ensured; }
+    print("sfn dev bootstrap: building compiler with seed " + m.version);
+    let build_rc = _bootstrap_run_compiler_build(m);
+    if build_rc != 0 {
+        print.err("error: compiler build failed (seed " + m.version + ", exit "
+            + number_to_string(build_rc)
+            + ")");
+        return build_rc;
+    }
+    let built = "build/sailfin/program";
+    if !fs.exists(built) {
+        print.err("error: build did not produce " + built);
+        return 1;
+    }
+    let smoke_rc = process.run([built, "version"]);
+    if smoke_rc != 0 {
+        print.err("error: the built compiler failed its smoke check (exit "
+            + number_to_string(smoke_rc)
+            + ")");
+        return smoke_rc;
+    }
+    print("sfn dev bootstrap: seed " + m.version + " built a working compiler");
+    return 0;
+}
+
+// pin: update bootstrap.toml [seed].version and .seed-version in lockstep
+// (the migration compatibility contract). The public `[toolchain]` /
+// `[capsule].version` bump stays a deliberate, separately-reviewed step —
+// this prints the reminder rather than editing the compiler manifest.
+fn _dev_bootstrap_pin(new_version: string) -> int ![io] {
+    if new_version.length == 0 {
+        print.err("error: sfn dev bootstrap pin requires a <version>");
+        print.err("usage: sfn dev bootstrap pin <version>");
+        return 2;
+    }
+    let mut ver = new_version;
+    if starts_with(ver, "v") { ver = substring(ver, 1, ver.length); }
+    if !bootstrap_manifest_exists() {
+        print.err("error: no bootstrap.toml at " + BOOTSTRAP_MANIFEST_PATH
+            + " — run inside a compiler checkout");
+        return 1;
+    }
+    let text = fs.readFile(BOOTSTRAP_MANIFEST_PATH);
+    let rewritten = rewrite_seed_version(text, ver);
+    if rewritten.length == 0 {
+        print.err("error: could not find [seed].version in "
+            + BOOTSTRAP_MANIFEST_PATH);
+        return 1;
+    }
+    fs.writeFile(BOOTSTRAP_MANIFEST_PATH, rewritten);
+    fs.writeFile(".seed-version", ver + "\n");
+    print("sfn dev bootstrap: pinned seed " + ver);
+    print("  updated bootstrap.toml [seed].version and .seed-version");
+    print("  remember to bump compiler/capsule.toml [toolchain].sfn and [capsule].version when the source version advances (SFEP-0047 §3.4)");
+    return 0;
+}
+
+// The `sfn/cli` definition for `dev`, registered on the v2 root. One nested
+// group today: `bootstrap`, with fetch/build/check/pin leaves.
+fn command_def() -> Command {
+    let mut bootstrap: Command = command("bootstrap", "Compiler seed bootstrap (reads bootstrap.toml)");
+    bootstrap = with_subcommand(bootstrap, command("fetch", "Acquire and verify the pinned seed"));
+    bootstrap = with_subcommand(bootstrap, command("build", "Build the compiler with the exact seed"));
+    bootstrap = with_subcommand(bootstrap, command("check", "Build then smoke-verify the compiler"));
+    bootstrap = with_subcommand(bootstrap, with_arg(command("pin", "Update the pinned seed version"), arg("version", "Seed version to pin (e.g. 0.8.0-alpha.4)")));
+    return with_subcommand(command("dev", "Compiler/toolchain maintainer commands"), bootstrap);
+}
+
+// Dispatch the parsed `dev` subcommand. `subcommand(matches)` returns the
+// deepest leaf (`fetch`/`build`/`check`/`pin`); a bare `sfn dev` or
+// `sfn dev bootstrap` prints usage.
+fn run(matches: Matches, ctx: CliContext) -> int ![io, net] {
+    let sub: string = subcommand(matches);
+    if strings_equal(sub, "fetch") { return _dev_bootstrap_fetch(); }
+    if strings_equal(sub, "build") { return _dev_bootstrap_build(); }
+    if strings_equal(sub, "check") { return _dev_bootstrap_check(); }
+    if strings_equal(sub, "pin") {
+        return _dev_bootstrap_pin(get(matches, "version"));
+    }
+    print("usage: sfn dev bootstrap <fetch|build|check|pin>");
+    return 2;
+}
+
+export { bootstrap_gate_or_dispatch, command_def, run };

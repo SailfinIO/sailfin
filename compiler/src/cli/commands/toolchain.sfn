@@ -239,9 +239,25 @@ fn _download_to(url: string, dest: string) -> boolean ![io, net] {
     return fs.exists(dest);
 }
 
-// Core of `sfn toolchain install`: fetch, verify (signature + digest),
-// then extract into the version store. Fail-closed at every step.
+// `sfn toolchain install` against the user-facing version store
+// (`_versions_base()`). Thin wrapper over `toolchain_install_to_base` so the
+// bootstrap-seed path (SFN-197) can reuse the same fetch/verify/install
+// pipeline against the compiler checkout's repo-local seed store.
 fn _toolchain_install(version_arg: string, work_root: string) -> int ![io, net] {
+    let base = _versions_base();
+    if base.length == 0 {
+        print("error: could not determine the toolchain store (set INSTALL_BASE or HOME)");
+        return 1;
+    }
+    return toolchain_install_to_base(version_arg, base, work_root);
+}
+
+// Core installer: fetch, verify (signature + digest), then extract into the
+// store rooted at `store_base` (the `versions` dir; the entry lands at
+// `store_base/<version>/`). Fail-closed at every step. Callers own the store
+// choice — `_toolchain_install` passes the user store, the bootstrap path
+// passes the checkout's repo-local seed store.
+fn toolchain_install_to_base(version_arg: string, store_base: string, work_root: string) -> int ![io, net] {
     if version_arg.length == 0 {
         print("error: sfn toolchain install requires a <version>");
         print("usage: sfn toolchain install <version>");
@@ -271,12 +287,7 @@ fn _toolchain_install(version_arg: string, work_root: string) -> int ![io, net] 
         return 1;
     }
 
-    let base = _versions_base();
-    if base.length == 0 {
-        print("error: could not determine the toolchain store (set INSTALL_BASE or HOME)");
-        return 1;
-    }
-    let store_dir = base + "/" + ver;
+    let store_dir = store_base + "/" + ver;
     let bin_path = store_dir + "/sailfin";
     let sha_path = store_dir + "/.sha256";
 
@@ -652,4 +663,9 @@ fn run(matches: Matches, ctx: CliContext) -> int ![io, net] {
     return 2;
 }
 
-export { command_def, run, toolchain_gate_or_dispatch };
+export {
+    command_def,
+    run,
+    toolchain_gate_or_dispatch,
+    toolchain_install_to_base
+};
