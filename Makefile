@@ -483,12 +483,12 @@ bench:
 		$(BENCH_ARGS)
 
 # Benchmark compiled-program runtime execution (the counterpart to `bench`,
-# which measures compile time). Builds each workload under
-# benchmarks/runtime/ once, then times the binary's hot loop.
+# which measures compile time). `sfn bench` builds each `*_bench.sfn` workload
+# under benchmarks/runtime/ once, then times the binary's hot loop.
 # Usage:
 #   make bench-runtime                                           # all workloads
 #   make bench-runtime BENCH_RUNTIME_ARGS="--iterations 10"      # 10 timed runs each
-#   make bench-runtime BENCH_RUNTIME_ARGS="--workload arena_alloc"
+#   make bench-runtime BENCH_RUNTIME_ARGS="--filter arena*"
 #   make bench-runtime BENCH_RUNTIME_ARGS="--csv build/runtime.csv"
 #   make bench-runtime BENCH_RUNTIME_ARGS="--budget-time 1000 --budget-mem 1048576"
 BENCH_RUNTIME_ARGS ?=
@@ -497,9 +497,7 @@ bench-runtime:
 		echo "[bench-runtime] missing $(NATIVE_BIN); run 'make compile' first"; \
 		exit 1; \
 	fi
-	@bash scripts/bench_runtime.sh \
-		--seed "$(NATIVE_BIN)" \
-		$(BENCH_RUNTIME_ARGS)
+	@$(NATIVE_BIN) bench benchmarks/runtime $(BENCH_RUNTIME_ARGS)
 
 # =============================================================================
 # Arena correctness gate (Phase 0 / M0.5 prerequisite)

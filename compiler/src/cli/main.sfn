@@ -78,6 +78,8 @@ fn _usage() -> string {
     out = out
         + "  sfn cache <info|prune|clean> [--max-size N] [--max-age N] [--all-schemas]\n";
     out = out
+        + "  sfn bench [<path>...] [--iterations K] [--warmup W] [--filter GLOB] [--top N] [--csv PATH] [--budget-time MS] [--budget-mem KB] [--work-dir DIR]\n";
+    out = out
         + "  sfn bench --compiler [--module M]... [--top N] [--csv PATH] [--budget-time S] [--budget-mem KB] [--import-context DIR] [--work-dir DIR]\n";
     out = out + "\n";
     out = out + "project:\n";

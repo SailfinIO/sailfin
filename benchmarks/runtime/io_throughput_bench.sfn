@@ -1,0 +1,31 @@
+// benchmarks/runtime/io_throughput_bench.sfn
+//
+// Runtime-execution benchmark: file I/O throughput.
+//
+// One unit of work appends a fixed line to a temporary file via
+// `fs.appendFile`; the `sfn/bench` harness runs LINES of them. Writes to a temp
+// file (under $TMPDIR, falling back to /tmp) rather than stdout so the single
+// machine-parseable `bench-record/1` line is the only thing on stdout. Stresses
+// the filesystem adapter path (`runtime/sfn/adapters/filesystem.sfn`). The file
+// is truncated once before timing so each process run measures LINES appends.
+//
+// Fixed work: LINES is a compile-time constant. The append is a real I/O side
+// effect, so `keep` on a constant is enough to hold the body live.
+import { benchmark_fixed, keep } from "sfn/bench";
+
+import { fs } from "fs";
+
+fn main() ![io, clock] {
+    let lines = 20000;
+    let tmp = env.get("TMPDIR");
+    let dir = tmp.length > 0? tmp: "/tmp/";
+    let path = dir + "sfn_bench_io_throughput.txt";
+
+    // Truncate any previous run's file so each process run appends LINES lines.
+    fs.writeFile(path, "");
+
+    let _ = benchmark_fixed("io_throughput", lines, fn () -> int {
+        fs.appendFile(path, "log line for io throughput benchmark\n");
+        return keep(1);
+    });
+}

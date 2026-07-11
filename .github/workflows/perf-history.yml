@@ -11,7 +11,7 @@ name: Perf history
 # against the SFEP-0006 <5 min target.
 #
 # The bench harnesses themselves (`sfn bench --compiler`,
-# scripts/bench_runtime.sh) and their budgets are unchanged — this job only
+# `sfn bench benchmarks/runtime`) and their budgets are unchanged — this job only
 # records and compares their output. All data/compare logic lives in
 # scripts/perf_history.sh so the workflow stays thin; see
 # docs/perf/bench-history.md for how to read the `bench-data` branch.

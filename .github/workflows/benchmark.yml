@@ -3,8 +3,8 @@ name: Benchmark
 # Manually-triggered benchmarking run. Builds the compiler from the pinned
 # seed, then runs the compile-perf bench (`make bench` → `sfn bench --compiler`,
 # per-module emit time + peak RSS) and/or the runtime-execution bench
-# (`make bench-runtime` → scripts/bench_runtime.sh, compiled-program run time +
-# peak RSS), uploading the CSVs as artifacts.
+# (`make bench-runtime` → `sfn bench benchmarks/runtime`, compiled-program run
+# time + peak RSS), uploading the CSVs as artifacts.
 #
 # Use this to capture a fresh baseline (e.g. the Linux x86_64 runtime baseline
 # that the macOS dev host cannot produce — runtime wall/RSS are not

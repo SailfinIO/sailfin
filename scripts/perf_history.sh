@@ -20,7 +20,7 @@
 #   build.csv    run_sha,run_date,build_wall_s,budget_s
 #
 # The raw per-run CSVs come straight from `sfn bench --compiler --csv` and
-# scripts/bench_runtime.sh --csv; this script only prepends the two run
+# `sfn bench benchmarks/runtime --csv`; this script only prepends the two run
 # columns. The whole-build budget row is separate because the compile bench
 # sums *isolated* per-module emit times (serial), which is not the parallel
 # clean-build wall-time the SFEP-0006 <5 min target measures — the workflow

@@ -37,9 +37,14 @@ test "bench: --compiler on a single module reports a summary" ![io] {
     assert find(out + err, "SUMMARY", 0) >= 0;
 }
 
-test "bench: missing --compiler mode exits 2" ![io] {
-    let exit = process.run_capture([_sfn_bin(), "bench"], _child_env());
+// Without `--compiler`, `sfn bench` dispatches to runtime mode (SFN-63); the
+// runtime-mode surface itself is covered by bench_runtime_runner_test.sfn.
+// Here, assert the dispatch reaches runtime mode by pointing it at a path with
+// no workloads, which the runtime runner reports as an error (exit 1) rather
+// than the old "only --compiler is implemented" exit 2.
+test "bench: default (no --compiler) dispatches to runtime mode" ![io, clock] {
+    let exit = process.run_capture([_sfn_bin(), "bench", "benchmarks/does-not-exist"], _child_env());
     let _o = process.capture_take_stdout();
     let _e = process.capture_take_stderr();
-    assert exit == 2;
+    assert exit == 1;
 }
