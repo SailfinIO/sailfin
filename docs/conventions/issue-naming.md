@@ -448,7 +448,7 @@ Release workflows post high-signal notifications to Slack when
 `SLACK_RELEASE_WEBHOOK_URL` is configured in GitHub Actions secrets. The
 intended channel is `#sailfin-notifications`; notifications are limited to
 cadence dispatch/block events, cadence seed-pin PRs or failures, stable
-promotion eligibility, and release workflow/asset failures.
+promotion review prompts, and release workflow/asset failures.
 
 ### Labels
 

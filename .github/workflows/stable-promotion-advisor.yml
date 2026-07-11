@@ -1,10 +1,11 @@
 name: Stable Promotion Advisor
 
-# Stable promotion is intentionally human-confirmed, but the eligibility signal
+# Stable promotion is intentionally human-confirmed, but the review prompt
 # should not depend on someone remembering the calendar. This daily advisor
-# watches the current prerelease line and comments once when the stable gate is
-# clear: no open release:stable issues plus seven consecutive green scheduled
-# nightly self-host runs on main.
+# watches the current prerelease line and comments once when automated
+# preconditions are satisfied: no open release:stable issues plus seven
+# consecutive green scheduled nightly self-host runs on main. Maintainers still
+# review the release tracker before promotion.
 
 on:
   schedule:
@@ -23,7 +24,7 @@ concurrency:
 
 jobs:
   advise:
-    name: Check stable promotion gate
+    name: Check stable promotion preconditions
     runs-on: ubuntu-latest
     steps:
       - name: Checkout repository
@@ -32,7 +33,7 @@ jobs:
           fetch-depth: 1
           persist-credentials: false
 
-      - name: Evaluate stable gate
+      - name: Evaluate stable preconditions
         uses: actions/github-script@v9.0.0
         env:
           SLACK_RELEASE_WEBHOOK_URL: ${{ secrets.SLACK_RELEASE_WEBHOOK_URL }}
@@ -85,10 +86,11 @@ jobs:
             }
 
             const defaultBranch = context.payload.repository?.default_branch || 'main';
-            const runs = await github.paginate(github.rest.actions.listWorkflowRuns, {
+            const runsResponse = await github.rest.actions.listWorkflowRuns({
               owner, repo, workflow_id: 'nightly-selfhost.yml', branch: defaultBranch,
               event: 'schedule', status: 'completed', per_page: 20,
             });
+            const runs = runsResponse.data.workflow_runs;
             const recent = runs.slice(0, 7);
             const sevenGreen = recent.length === 7 && recent.every(r => r.conclusion === 'success');
             note(recent.length < 7
@@ -96,7 +98,7 @@ jobs:
               : `Last 7 scheduled nightly self-host conclusions: ${recent.map(r => r.conclusion).join(', ')}.`);
 
             if (openStable.length > 0 || !sevenGreen) {
-              note('Stable promotion gate is not clear.');
+              note('Stable promotion automated preconditions are not satisfied.');
               core.summary.addRaw('## Stable Promotion Advisor\n\n' + summary.map(s => '- ' + s).join('\n')).write();
               return;
             }
@@ -105,7 +107,7 @@ jobs:
               owner, repo, state: 'open', per_page: 100,
             })).filter(i => !i.pull_request && i.title.trim() === trackerTitle);
             if (trackers.length === 0) {
-              note(`Stable gate is clear, but no open tracker titled "${trackerTitle}" exists.`);
+              note(`Stable promotion automated preconditions are satisfied, but no open tracker titled "${trackerTitle}" exists.`);
               core.summary.addRaw('## Stable Promotion Advisor\n\n' + summary.map(s => '- ' + s).join('\n')).write();
               return;
             }
@@ -121,22 +123,22 @@ jobs:
             const comments = await github.paginate(github.rest.issues.listComments, {
               owner, repo, issue_number: tracker.number, per_page: 100,
             });
-            const marker = `Stable-promotion-advisor: ${target} eligible`;
+            const marker = `Stable-promotion-advisor: ${target} ready for human review`;
             if (comments.some(c => (c.body || '').includes(marker))) {
-              note(`Eligibility comment already exists on #${tracker.number}.`);
+              note(`Stable promotion review comment already exists on #${tracker.number}.`);
             } else {
               const body = [
                 marker, '',
-                `Stable promotion gate is clear for **${target}**:`,
+                `Stable promotion automated preconditions are satisfied for **${target}**:`,
                 '- no open `release:stable` issues',
                 '- seven consecutive scheduled `nightly-selfhost.yml` runs on `main` are green', '',
-                'Promotion remains human-confirmed. Run `release.yml` with `channel=stable` and `bump=prerelease` when ready.',
+                'Promotion remains human-confirmed. Review the release tracker for unresolved scope, then run `release.yml` with `channel=stable` and `bump=prerelease` when ready.',
               ].join('\n');
               await github.rest.issues.createComment({
                 owner, repo, issue_number: tracker.number, body,
               });
-              note(`Posted stable-promotion eligibility comment on #${tracker.number}.`);
-              await postSlack(`:white_check_mark: Sailfin ${target} is eligible for stable promotion.\nTracker: ${tracker.html_url}\nRun release.yml with channel=stable, bump=prerelease when ready.`);
+              note(`Posted stable-promotion review comment on #${tracker.number}.`);
+              await postSlack(`:white_check_mark: Sailfin ${target} passed automated stable-promotion checks.\nTracker: ${tracker.html_url}\nReview the tracker, then run release.yml with channel=stable, bump=prerelease when ready.`);
             }
 
             core.summary.addRaw('## Stable Promotion Advisor\n\n' + summary.map(s => '- ' + s).join('\n')).write();

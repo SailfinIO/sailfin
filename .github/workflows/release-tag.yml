@@ -389,6 +389,7 @@ jobs:
     needs: [build, upload]
     if: failure()
     runs-on: ubuntu-latest
+    permissions: {}
     steps:
       - name: Post Slack notification
         shell: bash
