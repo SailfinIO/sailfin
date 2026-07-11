@@ -39,8 +39,10 @@ here.
   SFN-168) fetches the pinned release asset
   (`sailfin_<version>_<os>_<arch>.tar.gz`) plus the signed `SHA256SUMS` +
   `SHA256SUMS.sig` natively (`http.download`, `![io, net]` — no shell-out to
-  `install.sh`), verifies the manifest signature against the embedded release
-  key (`sfn/crypto::ed25519_verify_utf8`) and the asset's SHA-256 against the
+  `install.sh`). GitHub release-asset URLs return a 3xx redirect to a signed CDN
+  URL, which the native HTTP client now follows (SFN-213). It verifies the
+  manifest signature against the embedded release key
+  (`sfn/crypto::ed25519_verify_utf8`) and the asset's SHA-256 against the
   manifest, then extracts into the version store
   (`~/.local/share/sailfin/versions/<version>/{sailfin,sfn,runtime/,.sha256}`,
   honoring `INSTALL_BASE`/`SAILFIN_HOME`). Verification is **fail-closed** —

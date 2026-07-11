@@ -230,10 +230,12 @@ fn _binary_in_root(root: string) -> string ![io] {
     return "";
 }
 
-// Download `url` to `dest`. `http.download` writes the file only on a
-// successful (< 400) round-trip and returns null otherwise, so the
-// file's presence is the reliable success signal (avoids inspecting the
-// possibly-null return).
+// Download `url` to `dest`, returning success. `http.download` writes the
+// file only on a successful (< 400, redirects followed — SFN-213) round-trip,
+// so the file's presence is the success signal. Emptiness is checked by the
+// caller where the small text artifacts are read (the manifest/signature); the
+// tarball's emptiness is caught by the sha256 digest mismatch, so this stays a
+// cheap existence check rather than slurping a multi-MB tarball into memory.
 fn _download_to(url: string, dest: string) -> boolean ![io, net] {
     let _ = http.download(url, dest);
     return fs.exists(dest);
@@ -324,6 +326,16 @@ fn toolchain_install_to_base(version_arg: string, store_base: string, work_root:
     //    so fs.readFile reproduces them exactly).
     let sums_text = fs.readFile(sums_path);
     let sig_hex = _toml_trim_cmd(fs.readFile(sig_path));
+    // An empty manifest or signature means the fetch returned no content (a
+    // transport error, or a redirect the client failed to follow) — report
+    // that accurately rather than as a signature-verification failure below.
+    if sums_text.length == 0 || sig_hex.length == 0 {
+        print("error: downloaded release manifest or signature is empty for "
+            + tag);
+        print("  the fetch returned no content (transport error or unfollowed redirect)");
+        process.run(["rm", "-rf", tmp]);
+        return 1;
+    }
     let pubkey = release_signing_public_key_hex();
     if !ed25519_verify_utf8(pubkey, sums_text, sig_hex) {
         print("error: SHA256SUMS signature verification failed for " + tag);

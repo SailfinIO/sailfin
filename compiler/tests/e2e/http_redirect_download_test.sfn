@@ -1,0 +1,55 @@
+// compiler/tests/e2e/http_redirect_download_test.sfn
+//
+// Regression for SFN-213: the native HTTP client must follow 3xx redirects.
+// GitHub release-asset URLs always 302-redirect to a signed CDN URL; before
+// the fix `http.download` wrote a 0-byte file, which broke the entire
+// toolchain fetch/verify path (`sfn toolchain install`, auto-dispatch,
+// `sfn dev bootstrap fetch`).
+//
+// The test distinguishes "offline" from "redirect broken": it first probes a
+// directly-served (non-redirecting) `raw.githubusercontent.com` URL, which
+// succeeds regardless of redirect support. Only when that probe confirms
+// connectivity does it require the *redirecting* release URL to yield the real
+// manifest — so a regression of redirect following fails the test rather than
+// silently skipping. A per-run `mkdtemp` dir keeps it race-free and hermetic.
+import { find } from "sfn/strings";
+
+test "http: follows 3xx redirects when downloading a github release asset" ![io, net] {
+    let dir = fs.mkdtemp("sfn-http-redirect-");
+    if dir.length == 0 {
+        assert true;
+        return;
+    }
+
+    // Connectivity probe: a directly-served (no-redirect) URL. Empty result
+    // means offline/blocked — clean up and skip rather than fail.
+    let probe = dir + "/probe";
+    let _p = http.download("https://raw.githubusercontent.com/SailfinIO/sailfin/main/README.md", probe);
+    let online = fs.exists(probe) && fs.readFile(probe).length > 0;
+    if !online {
+        if fs.exists(probe) { let _ = fs.deleteFile(probe); }
+        let _ = fs.removeDirectory(dir);
+        assert true;
+        return;
+    }
+
+    // Online: the release manifest URL 302-redirects to a CDN. With redirect
+    // following it must return the real, non-empty manifest naming the assets.
+    let dest = dir + "/sums";
+    let _d = http.download("https://github.com/SailfinIO/sailfin/releases/download/v0.8.0-alpha.4/SHA256SUMS", dest);
+    let dest_exists = fs.exists(dest);
+    let mut content = "";
+    if dest_exists { content = fs.readFile(dest); }
+    let ok_len = content.length > 100;
+    let ok_marker = find(content, "sailfin_0.8.0-alpha.4", 0) >= 0;
+
+    // Clean up before asserting so the suite stays hermetic regardless of the
+    // outcome.
+    if fs.exists(probe) { let _ = fs.deleteFile(probe); }
+    if dest_exists { let _ = fs.deleteFile(dest); }
+    let _ = fs.removeDirectory(dir);
+
+    assert dest_exists;
+    assert ok_len;
+    assert ok_marker;
+}

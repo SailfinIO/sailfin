@@ -56,11 +56,13 @@
 // `Transfer-Encoding: chunked` responses ARE decoded on the
 // get/post/download body-extraction path (`_extract_body` ->
 // `_decode_chunked`, #1708): the chunk framing is stripped and the
-// chunk data concatenated into the body. Remaining v0 limitation
-// (follow-up waves): no redirect following. Response bodies are
-// length-tracked end-to-end (`_recv_all` -> `_extract_body`), so
-// binary payloads with embedded NULs download faithfully even though
-// the get/post `i8*` return is also NUL-terminated for string use.
+// chunk data concatenated into the body. HTTP 3xx redirects are
+// followed (up to a bounded hop limit) so GitHub release-asset URLs —
+// which 302 to a signed CDN URL — download faithfully (SFN-213); see
+// `_http_send`. Response bodies are length-tracked end-to-end
+// (`_recv_all` -> `_extract_body`), so binary payloads with embedded
+// NULs download faithfully even though the get/post `i8*` return is
+// also NUL-terminated for string use.
 //
 // Effects: `![net]` for get/post, `![net, io]` for download (it
 // opens a file). The flipped descriptors carry the same effects, so
@@ -751,13 +753,99 @@ fn _tls_teardown(ssl: * u8, ctx: * u8) -> void ![net] {
     if ctx as i64 != 0 { tls_ctx_free(ctx); }
 }
 
-// `_http_send(url, is_post, body, auth_header)` — the shared
-// request/response core. Parses `url` (scheme/host/port/path),
-// connects, writes the request head (plus body for POST), drains
-// the response, and returns the extracted body (or null on any
-// failure). `auth_header`, when non-null and non-empty, is emitted
-// as an `Authorization:` header (POST only).
-fn _http_send(url: * u8, is_post: bool, body: * u8, auth_header: * u8, body_len_slot: * i64) -> * u8 ![net] {
+// `_http_status_code(resp)` — the numeric status from the response's
+// status line ("HTTP/1.1 NNN reason"). 0 when the line is absent/malformed.
+fn _http_status_code(resp: * u8) -> i64 {
+    if resp as i64 == 0 { return 0; }
+    let space: * u8 = strchr(resp, 32);
+    if space as i64 == 0 { return 0; }
+    return atoi(_ptr_off(space, 1)) as i64;
+}
+
+// `_http_header_len(resp)` — byte length of the header block (up to, not
+// including, the `\r\n\r\n` terminator), or -1 when no terminator is found.
+fn _http_header_len(resp: * u8) -> i64 {
+    if resp as i64 == 0 { return 0 - 1; }
+    let terminator: string = "\r\n\r\n";
+    let he: * u8 = strstr(resp, terminator as * u8);
+    if he as i64 == 0 { return 0 - 1; }
+    return (he as i64) - (resp as i64);
+}
+
+// `_http_resolve_relative(base_url, rel)` — resolve an absolute-path
+// `Location` (starting `/`) against `base_url`'s `scheme://authority`,
+// returning a fresh NUL-terminated URL. Null on OOM or a base without a
+// scheme separator. Only the absolute-path form is resolved here; a fully
+// absolute `Location` (with `://`) is used verbatim by the caller, and any
+// other relative form fails closed.
+fn _http_resolve_relative(base_url: * u8, rel: * u8) -> * u8 {
+    let sep: string = "://";
+    let scheme_sep: * u8 = strstr(base_url, sep as * u8);
+    if scheme_sep as i64 == 0 { return null; }
+    let auth_start: * u8 = _ptr_off(scheme_sep, 3);
+    let slash: * u8 = strchr(auth_start, 47);
+    let mut prefix_len: i64 = 0;
+    if slash as i64 != 0 { prefix_len = (slash as i64) - (base_url as i64); } else {
+        prefix_len = strlen(base_url) as i64;
+    }
+    let rel_len: i64 = strlen(rel) as i64;
+    let out: * u8 = malloc((prefix_len + rel_len + 1) as usize);
+    if out as i64 == 0 { return null; }
+    memcpy(out, base_url, prefix_len as usize);
+    memcpy(_ptr_off(out, prefix_len), rel, rel_len as usize);
+    memset(_ptr_off(out, prefix_len + rel_len), 0, 1 as usize);
+    return out;
+}
+
+// `_http_location_dup(resp, header_len, base_url)` — extract the redirect
+// target from a response's `Location` header as a fresh NUL-terminated URL,
+// or null when absent/unresolvable. Case-insensitive header match, bounded to
+// the header block (never reads the body). An absolute `Location` (with
+// `://`) is returned verbatim; an absolute-path `Location` (leading `/`) is
+// resolved against `base_url`; any other form fails closed (null).
+fn _http_location_dup(resp: * u8, header_len: i64, base_url: * u8) -> * u8 {
+    if resp as i64 == 0 { return null; }
+    let needle: string = "\r\nlocation:";
+    let idx: i64 = _ci_find(resp, header_len, needle as * u8, 11);
+    if idx < 0 { return null; }
+    let mut vs: i64 = idx + 11;
+    loop {
+        if vs >= header_len { break; }
+        let b: i64 = _byte_at(resp, vs);
+        if b == 32 || b == 9 { vs = vs + 1; } else { break; }
+    }
+    let mut ve: i64 = vs;
+    loop {
+        if ve >= header_len { break; }
+        let b: i64 = _byte_at(resp, ve);
+        if b == 13 || b == 10 { break; }
+        ve = ve + 1;
+    }
+    let vlen: i64 = ve - vs;
+    if vlen <= 0 { return null; }
+    let val: * u8 = _strdup_n(_ptr_off(resp, vs), vlen);
+    if val as i64 == 0 { return null; }
+    let sep: string = "://";
+    if strstr(val, sep as * u8) as i64 != 0 { return val; }
+    if _byte_at(val, 0) == 47 {
+        let resolved: * u8 = _http_resolve_relative(base_url, val);
+        free(val);
+        return resolved;
+    }
+    free(val);
+    return null;
+}
+
+// `_http_send_once(url, is_post, body, auth_header, ...)` — one
+// request/response round trip. Parses `url` (scheme/host/port/path),
+// connects, writes the request head (plus body for POST), drains the
+// response, and returns the extracted body (or null on any failure).
+// `auth_header`, when non-null and non-empty, is emitted as an
+// `Authorization:` header (POST only). Writes the response status through
+// `status_slot` and, for a 3xx with a `Location`, a fresh NUL-terminated
+// redirect-target URL (as an `i64`-cast pointer the caller owns and frees)
+// through `location_slot` — the redirect loop in `_http_send` consumes both.
+fn _http_send_once(url: * u8, is_post: bool, body: * u8, auth_header: * u8, body_len_slot: * i64, status_slot: * i64, location_slot: * i64) -> * u8 ![net] {
     // Detect the `https://` scheme — TLS-wrap the connection below.
     let https: string = "https://";
     let is_https: bool = (strstr(url, https as * u8) as i64) == (url as i64);
@@ -931,9 +1019,71 @@ fn _http_send(url: * u8, is_post: bool, body: * u8, auth_header: * u8, body_len_
     let resp: * u8 = _recv_all(fd, ssl, & total_len);
     _tls_teardown(ssl, tls_ctx);
     close(fd);
+    // Surface the status + any redirect target BEFORE body extraction, so the
+    // `_http_send` loop can follow a 3xx (whose body is empty) rather than
+    // returning it. `url` (unfreed) is the base for a relative `Location`.
+    atomic_store(status_slot, _http_status_code(resp));
+    let hlen: i64 = _http_header_len(resp);
+    let mut loc: * u8 = null;
+    if hlen >= 0 { loc = _http_location_dup(resp, hlen, url); }
+    atomic_store(location_slot, loc as i64);
     let result: * u8 = _extract_body(resp, total_len, body_len_slot);
     if resp as i64 != 0 { free(resp); }
     return result;
+}
+
+// `_http_send(url, is_post, body, auth_header)` — the shared request core,
+// following HTTP 3xx redirects (301/302/303/307/308) up to a bounded hop
+// limit. GitHub release-asset URLs always 302-redirect to a signed CDN URL,
+// so redirect following is required for the toolchain fetch/verify path
+// (SFN-213). Fail-closed: a redirect with no `Location`, or one past the hop
+// limit, returns null rather than a misleading empty body. Security: the
+// `Authorization` header is never forwarded across a redirect (the signed CDN
+// URL carries its own query-string auth), and 301/302/303 downgrade to GET
+// (dropping the body); 307/308 preserve the method and body.
+fn _http_send(url: * u8, is_post: bool, body: * u8, auth_header: * u8, body_len_slot: * i64) -> * u8 ![net] {
+    if url as i64 == 0 { return null; }
+    let mut cur: * u8 = _strdup_n(url, strlen(url) as i64);
+    if cur as i64 == 0 { return null; }
+    let mut post: bool = is_post;
+    let mut auth_eff: * u8 = auth_header;
+    let mut hops: i64 = 0;
+    let max_hops: i64 = 5;
+    let mut out: * u8 = null;
+    loop {
+        let mut status: i64 = 0;
+        let mut loc_i: i64 = 0;
+        let result: * u8 = _http_send_once(cur, post, body, auth_eff, body_len_slot, & status, & loc_i);
+        let loc: * u8 = loc_i as * u8;
+        let is_redirect: bool = status == 301 || status == 302 || status == 303
+            || status == 307
+            || status == 308;
+        if !is_redirect {
+            if loc as i64 != 0 { free(loc); }
+            free(cur);
+            out = result;
+            break;
+        }
+        // A redirect we cannot follow (no `Location`, or past the hop limit)
+        // fails closed — never hand back the empty 3xx body as if it were the
+        // resource.
+        if loc as i64 == 0 || hops >= max_hops {
+            if loc as i64 != 0 { free(loc); }
+            free(cur);
+            if result as i64 != 0 { free(result); }
+            out = null;
+            break;
+        }
+        free(cur);
+        cur = loc;
+        if result as i64 != 0 { free(result); }
+        atomic_store(body_len_slot, 0);
+        // 301/302/303 → GET (drop body); 307/308 preserve method + body.
+        if status != 307 && status != 308 { post = false; }
+        auth_eff = null;
+        hops = hops + 1;
+    }
+    return out;
 }
 
 // `_append(dst, off, src)` — copy the NUL-terminated `src` into
