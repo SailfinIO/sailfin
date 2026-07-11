@@ -12,6 +12,7 @@
 //   - sailfin_fmt_write       — reformat in place (canonical)
 //   - sailfin_build           — build a .sfn file / capsule to a binary
 //   - sailfin_test            — run a targeted suite or single test
+//   - sailfin_bench           — benchmark compiler build or runtime workloads
 //
 // Every tool goes through runSailfin(), which enforces the timeout
 // and keeps invocations inside the workspace.
@@ -159,6 +160,53 @@ const fmtWritePathSchema = z
     "Path to a .sfn file or directory to reformat in place, relative to the workspace root.",
   );
 
+const benchCompilerSchema = z
+  .boolean()
+  .optional()
+  .describe(
+    "Benchmark compiler-mode: per-module compile time + memory across the compiler source tree (--compiler). When omitted/false, benchmarks runtime workloads instead. Ignores `path` when true.",
+  );
+
+const benchPathSchema = z
+  .string()
+  .min(1)
+  .optional()
+  .describe(
+    "Runtime mode only: a workload file or directory, relative to the workspace root. Ignored when `compiler` is true. Defaults to the compiler's built-in runtime workload set (benchmarks/runtime) when omitted.",
+  );
+
+const benchTopSchema = z
+  .number()
+  .int()
+  .min(1)
+  .optional()
+  .describe("Only report the top N results by time (maps to --top N).");
+
+const benchFilterSchema = z
+  .string()
+  .min(1)
+  .optional()
+  .describe(
+    "Runtime mode: only run workloads whose name matches this glob (maps to --filter GLOB).",
+  );
+
+const benchModuleSchema = z
+  .string()
+  .min(1)
+  .optional()
+  .describe(
+    "Compiler mode: only report modules whose path contains this substring (maps to --module SUBSTR).",
+  );
+
+const benchIterationsSchema = z
+  .number()
+  .int()
+  .min(1)
+  .optional()
+  .describe(
+    "Runtime mode: number of timed iterations per workload (maps to --iterations K).",
+  );
+
 // Cold builds (especially macOS) and broad test suites take minutes, not
 // seconds — give them headroom over runSailfin's 60s default. Both block
 // the MCP channel for their duration, which is why sailfin_test requires a
@@ -166,6 +214,7 @@ const fmtWritePathSchema = z
 const BUILD_TIMEOUT_MS = 600_000; // 10 min
 const TEST_TIMEOUT_MS = 600_000; // 10 min
 const FMT_WRITE_TIMEOUT_MS = 120_000; // 2 min — dir-wide fmt touches many files
+const BENCH_TIMEOUT_MS = 600_000; // 10 min — compiler-mode walks the whole compiler/src tree
 
 server.registerTool(
   "sailfin_version",
@@ -392,6 +441,103 @@ server.registerTool(
       }
       const result = await runSailfin(args, { timeoutMs: TEST_TIMEOUT_MS });
       return formatResult("sailfin test", result);
+    });
+    return out as ToolResult;
+  },
+);
+
+// Machine-readable counterpart used for benchmarking. Returns the
+// `sailfin.bench/v1` envelope (documented at
+// `docs/reference/bench-json-schema.md`) parsed into
+// `structuredContent`, mirroring `sailfin_diagnostics`. Falls back to
+// surfacing the raw stdout on parse failure — that path also signals
+// isError since bench setup errors (missing import-context, no
+// workloads) exit 1 with a plain-text stderr message and no JSON.
+server.registerTool(
+  "sailfin_bench",
+  {
+    title: "Benchmark compiler build or runtime workloads",
+    description:
+      "Run `sailfin bench --json` and return the sailfin.bench/v1 JSON envelope. Pass `compiler: true` to benchmark per-module compile time and memory across the compiler source tree (--compiler); omit it to benchmark runtime workloads (optionally scoped with `path`, `filter`, `iterations`). Use `top` to limit results and `module` (compiler mode) to filter by path substring. Schema documented at docs/reference/bench-json-schema.md. Runs under a 10-minute timeout.",
+    inputSchema: {
+      compiler: benchCompilerSchema,
+      path: benchPathSchema,
+      top: benchTopSchema,
+      filter: benchFilterSchema,
+      module: benchModuleSchema,
+      iterations: benchIterationsSchema,
+    },
+  },
+  async ({ compiler, path: userPath, top, filter, module, iterations }) => {
+    const isCompilerMode = compiler === true;
+    const hasPath = typeof userPath === "string" && userPath.length > 0;
+
+    async function runBench(resolvedPath: string | null): Promise<ToolResult> {
+      const args = ["bench"];
+      if (isCompilerMode) {
+        args.push("--compiler");
+      } else if (resolvedPath !== null) {
+        args.push(resolvedPath);
+      }
+      if (typeof top === "number") {
+        args.push("--top", String(top));
+      }
+      if (!isCompilerMode && typeof filter === "string" && filter.length > 0) {
+        args.push("--filter", filter);
+      }
+      if (isCompilerMode && typeof module === "string" && module.length > 0) {
+        args.push("--module", module);
+      }
+      if (!isCompilerMode && typeof iterations === "number") {
+        args.push("--iterations", String(iterations));
+      }
+      args.push("--json");
+
+      const result = await runSailfin(args, { timeoutMs: BENCH_TIMEOUT_MS });
+      // sfn bench exits 0 (clean), 1 (build/emit failure — still emits a
+      // valid envelope in most cases), or 2 (budget violation — still a
+      // valid envelope). Only a failure to parse the envelope is a tool
+      // error.
+      let envelope: Record<string, unknown> | null = null;
+      let parseError: string | null = null;
+      try {
+        envelope = JSON.parse(result.stdout) as Record<string, unknown>;
+      } catch (err) {
+        parseError = err instanceof Error ? err.message : String(err);
+      }
+      const ok = envelope !== null;
+      const header = ok
+        ? `sailfin bench: ok (exit=${result.exit}, ${result.durationMs}ms)`
+        : `sailfin bench: FAIL (envelope did not parse as JSON: ${parseError})`;
+      const body = [
+        header,
+        ok ? "" : `--- raw stdout ---\n${result.stdout}`,
+        result.stderr.length > 0 ? `--- stderr ---\n${result.stderr}` : "",
+      ]
+        .filter(Boolean)
+        .join("\n\n");
+      const structured: Record<string, unknown> =
+        ok && envelope !== null
+          ? envelope
+          : {
+              exit: result.exit,
+              duration_ms: result.durationMs,
+              parse_error: parseError ?? "",
+              raw_stdout: result.stdout,
+              raw_stderr: result.stderr,
+            };
+      return {
+        isError: !ok,
+        content: [{ type: "text", text: body }],
+        structuredContent: structured,
+      } satisfies ToolResult;
+    }
+
+    if (isCompilerMode || !hasPath) {
+      return await runBench(null);
+    }
+    const out = await withResolvedPath(userPath as string, async (abs) => {
+      return await runBench(abs);
     });
     return out as ToolResult;
   },
