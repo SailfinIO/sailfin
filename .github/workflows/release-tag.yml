@@ -212,7 +212,7 @@ jobs:
           # hit skips the mirror; on a miss, download is bounded + retried.
           DEB_DIR="$HOME/.cache/mingw-debs"
           mkdir -p "$DEB_DIR"
-          if ! ls "$DEB_DIR"/*.deb >/dev/null 2>&1; then
+          if ! find "$DEB_DIR" -maxdepth 1 -type f -name '*.deb' -print -quit | grep -q .; then
             for attempt in 1 2 3; do
               echo "[mingw] download attempt ${attempt}/3"
               if sudo timeout 300 apt-get update \
@@ -232,7 +232,8 @@ jobs:
             sudo rm -rf "$DEB_DIR/partial"
             sudo chown -R "$(id -u):$(id -g)" "$DEB_DIR"
           else
-            echo "[mingw] cache hit: $(ls "$DEB_DIR"/*.deb | wc -l) package(s)"
+            deb_count="$(find "$DEB_DIR" -maxdepth 1 -type f -name '*.deb' | wc -l | tr -d ' ')"
+            echo "[mingw] cache hit: ${deb_count} package(s)"
           fi
           sudo dpkg -i "$DEB_DIR"/*.deb \
             || sudo apt-get install -y --no-install-recommends -f
@@ -309,7 +310,7 @@ jobs:
         run: |
           set -euo pipefail
           version="${RELEASE_TAG#v}"
-          for payload in $(find dist -maxdepth 1 -type f -name 'installer-*.tar.gz'); do
+          while IFS= read -r -d '' payload; do
             label="$(basename "$payload" .tar.gz)"
             case "$label" in
               *linux-x86_64*)
@@ -336,7 +337,7 @@ jobs:
             else
               shasum -a 256 "dist/${installer_name}" > "dist/${installer_name}.sha256"
             fi
-          done
+          done < <(find dist -maxdepth 1 -type f -name 'installer-*.tar.gz' -print0)
 
       # Supply-chain root: publish a signed SHA256SUMS manifest over the release
       # assets so `sfn` can verify a fetched toolchain against the public key
@@ -382,3 +383,32 @@ jobs:
             dist/SHA256SUMS.sig
         env:
           GITHUB_TOKEN: ${{ secrets.RELEASE_PAT || secrets.GITHUB_TOKEN }}
+
+  notify-slack-failure:
+    name: Notify Slack on release asset failure
+    needs: [build, upload]
+    if: failure()
+    runs-on: ubuntu-latest
+    steps:
+      - name: Post Slack notification
+        shell: bash
+        env:
+          SLACK_RELEASE_WEBHOOK_URL: ${{ secrets.SLACK_RELEASE_WEBHOOK_URL }}
+        run: |
+          set -euo pipefail
+          if [ -z "${SLACK_RELEASE_WEBHOOK_URL:-}" ]; then
+            exit 0
+          fi
+          python3 - <<'PY' > /tmp/slack-payload.json
+          import json
+          import os
+          tag = os.environ["RELEASE_TAG"]
+          run_url = f"{os.environ['GITHUB_SERVER_URL']}/{os.environ['GITHUB_REPOSITORY']}/actions/runs/{os.environ['GITHUB_RUN_ID']}"
+          print(json.dumps({
+              "text": f":x: Sailfin release asset build/upload failed for {tag}.\\nRun: {run_url}"
+          }))
+          PY
+          curl -fsS -X POST \
+            -H 'Content-type: application/json' \
+            --data @/tmp/slack-payload.json \
+            "$SLACK_RELEASE_WEBHOOK_URL" >/dev/null || true
