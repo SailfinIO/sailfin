@@ -495,7 +495,7 @@ The repository Makefile provides higher-level build orchestration for the self-h
 | `make test-integration` | Run integration tests from `compiler/tests/integration/*_test.sfn`. |
 | `make test-e2e` | Run end-to-end tests from `compiler/tests/e2e/*_test.sfn`. |
 | `make package` | Build and package native artifacts into `dist/`. Used for release artifacts. |
-| `make fetch-seed` | Download the pinned seed compiler (`.seed-version`, override with `SEED_VERSION`) from GitHub Releases into `build/toolchains/seed/`. Requires `GITHUB_TOKEN`. |
+| `make fetch-seed` | Download the pinned seed compiler (`bootstrap.toml [seed].version`, override with `SEED_VERSION`) from GitHub Releases into `build/toolchains/seed/`. Requires `GITHUB_TOKEN`. |
 | `make clean` | Remove `dist/` packaged artifacts. Does not remove build intermediates. |
 | `make clean-build` | Remove `build/` artifacts (keeps the seed toolchain under `build/toolchains/` by default). Pass `KEEP_SEED=0` to also remove `build/toolchains/`. |
 | `make clean-all` | Remove both `dist/` and `build/` artifacts completely. |

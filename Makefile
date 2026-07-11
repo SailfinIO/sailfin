@@ -287,12 +287,13 @@ test-impl:
 # Install a released seed compiler into the workspace.
 # Requires a GitHub token in GITHUB_TOKEN.
 #
-# The canonical seed version lives in `.seed-version` at the repo root —
-# every CI workflow reads that same file via a setup step so the four
-# pins (Makefile + 4 workflows) never drift again. See the header of
-# `.github/workflows/ci.yml` for the workflow-side plumbing.
+# The canonical seed version lives in `bootstrap.toml` at the repo root
+# under `[seed].version` (SFEP-0047) — every CI workflow reads that same
+# key via a setup step so the pins (Makefile + workflows) never drift
+# again. See the header of `.github/workflows/ci.yml` for the workflow-side
+# plumbing, and `compiler/src/bootstrap_manifest.sfn` for the native reader.
 SEED_REPO ?= SailfinIO/sailfin
-SEED_VERSION ?= $(strip $(shell cat .seed-version 2>/dev/null))
+SEED_VERSION ?= $(strip $(shell awk '/^\[[^]]+\]/ { section=$$0 } section == "[seed]" && /^version[[:space:]]*=/ { gsub(/"/, "", $$3); print $$3; exit }' bootstrap.toml 2>/dev/null))
 SEED_EXCLUDE_TAG ?=
 # Repo-local seed toolchain store (SFN-174). The fetched pinned seed lives
 # under build/toolchains/seed — a store that names what it holds (a released
@@ -317,11 +318,11 @@ FETCHED_SEED ?= $(SEED_GLOBAL_BIN_DIR)/sfn$(EXE_EXT)
 fetch-seed:
 	@if [ -z "$(SEED_VERSION)" ]; then \
 		echo "[fetch-seed][error] SEED_VERSION is empty." >&2; \
-		echo "[fetch-seed][error] The pin lives in .seed-version at the repo root." >&2; \
-		if [ ! -f .seed-version ]; then \
-			echo "[fetch-seed][error] .seed-version is missing — restore it or pass SEED_VERSION=... explicitly." >&2; \
+		echo "[fetch-seed][error] The pin lives in bootstrap.toml [seed].version at the repo root." >&2; \
+		if [ ! -f bootstrap.toml ]; then \
+			echo "[fetch-seed][error] bootstrap.toml is missing — restore it or pass SEED_VERSION=... explicitly." >&2; \
 		else \
-			echo "[fetch-seed][error] .seed-version is present but empty — write a version (e.g. 0.5.9) to it." >&2; \
+			echo "[fetch-seed][error] bootstrap.toml has no [seed].version — set it (e.g. 0.5.9) or pass SEED_VERSION=... explicitly." >&2; \
 		fi; \
 		exit 1; \
 	fi
@@ -778,7 +779,7 @@ ci-package-installer:
 #   build/bin/sfn
 #
 # Routes through `<seed> build -p compiler` as the only path. The
-# pinned seed (`.seed-version`) ships the cumulative source-side
+# pinned seed (`bootstrap.toml [seed].version`) ships the cumulative source-side
 # fixes that keep cold builds of the 138-module compiler inside
 # the 8 GB virtual-memory cap that CI runners and
 # `compiler-safety.md` enforce: binary-capsule `src/` walker +
@@ -821,7 +822,7 @@ rebuild-impl:
 	fi; \
 	if ! "$$seed" --version >/dev/null 2>&1; then \
 		echo "[rebuild][error] seed compiler $$seed is not invokable" >&2; \
-		echo "[rebuild][error] expected pinned seed (see .seed-version); run: make fetch-seed" >&2; \
+		echo "[rebuild][error] expected pinned seed (see bootstrap.toml [seed].version); run: make fetch-seed" >&2; \
 		exit 1; \
 	fi; \
 	echo "$$seed" > build/.seed-resolved
@@ -889,7 +890,7 @@ rebuild-impl:
 	if [ "$$build_rc" -ne 0 ] || [ ! -f build/sailfin/program ]; then \
 		echo "[rebuild][error] sfn build failed (exit=$$build_rc) or did not produce build/sailfin/program" >&2; \
 		echo "[rebuild][error] expected the seed's subprocess-stage path to keep the cold build under the 8 GiB memory budget" >&2; \
-		echo "[rebuild][error] if this is a regression, rerun with BUILD_ARGS='--cache-trace' to bisect, or fall back to the prior seed via .seed-version" >&2; \
+		echo "[rebuild][error] if this is a regression, rerun with BUILD_ARGS='--cache-trace' to bisect, or fall back to the prior seed via bootstrap.toml [seed].version" >&2; \
 		if [ "$${SAILFIN_AGENT_REPORT:-}" = "1" ]; then rm -f build/native/.build-report.json; fi; \
 		exit 1; \
 	fi

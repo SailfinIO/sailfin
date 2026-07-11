@@ -40,7 +40,7 @@ concurrency:
 
 jobs:
   advise:
-    # Only real merges into main: releases to beta/rc don't update .seed-version.
+    # Only real merges into main: releases to beta/rc don't update the seed pin (bootstrap.toml).
     if: >-
       github.event.pull_request.merged == true &&
       github.event.pull_request.base.ref == 'main'

@@ -38,7 +38,7 @@ try to resolve the Linear mirror by querying the issue number or URL.
 
 ## Seed dependency policy
 
-`make compile` self-hosts against the binary pinned by `.seed-version`, so a compiler-source capability that a consumer needs in the pinned seed can force a seed cut. Apply the project seed-dependency rule:
+`make compile` self-hosts against the binary pinned by `bootstrap.toml [seed].version`, so a compiler-source capability that a consumer needs in the pinned seed can force a seed cut. Apply the project seed-dependency rule:
 
 - Bundle a capability with its single tightly-coupled consumer by default; this avoids manufacturing a seed cut.
 - Split only when the capability has multiple consumers, is genuinely independent, or has a large blast radius.

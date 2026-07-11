@@ -191,7 +191,7 @@ classify() {
 		FAILURE="crash"
 	elif [ "$RC" -eq 124 ] || [ "$RC" -eq 137 ]; then
 		FAILURE="timeout"
-	elif out_has "missing seed compiler|is not invokable|SEED_VERSION is empty|\[fetch-seed\]\[error\]|(seed|\.seed-version|fetch-seed|SEED=)[^[:cntrl:]]*No such file or directory|run: make compile|run 'make compile'|GITHUB_TOKEN"; then
+	elif out_has "missing seed compiler|is not invokable|SEED_VERSION is empty|\[fetch-seed\]\[error\]|(seed|bootstrap\.toml|fetch-seed|SEED=)[^[:cntrl:]]*No such file or directory|run: make compile|run 'make compile'|GITHUB_TOKEN"; then
 		FAILURE="setup-error"
 	elif out_has 'passed, [1-9][0-9]* failed|\[check\]\[FAIL\]|assertion failed|[0-9]+ failed ═══'; then
 		FAILURE="test-failure"

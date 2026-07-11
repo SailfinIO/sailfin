@@ -237,7 +237,8 @@ emitting a body:
 ### Seed dependencies
 
 For each leaf, evaluate whether a predecessor must be **in the pinned seed
-binary**, not just merged. `make compile` runs against `.seed-version`, so a
+binary**, not just merged. `make compile` runs against the seed pinned in
+`bootstrap.toml`, so a
 compiler-source dependency merged but not seeded fails to self-host.
 
 Apply: if the leaf touches `compiler/src/` or `runtime/prelude.sfn` AND its

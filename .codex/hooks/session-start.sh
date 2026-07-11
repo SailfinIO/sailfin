@@ -45,8 +45,11 @@ printf -- '- branch: %s\n' "$branch"
 version_pin=$(sed -n 's/^version[[:space:]]*=[[:space:]]*"\([^"]*\)".*/version = \1/p' compiler/capsule.toml 2>/dev/null | head -n1 || true)
 [[ -n "$version_pin" ]] && printf -- '- capsule: %s\n' "$version_pin"
 
-if [[ -f .seed-version ]]; then
-  seed_pin=$(tr -d '[:space:]' < .seed-version)
+if [[ -f bootstrap.toml ]]; then
+  seed_pin=$(awk '
+    /^\[[^]]+\]/ { section=$0 }
+    section == "[seed]" && /^version[[:space:]]*=/ { gsub(/"/, "", $3); print $3; exit }
+  ' bootstrap.toml)
   [[ -n "$seed_pin" ]] && printf -- '- pinned seed: v%s\n' "$seed_pin"
 fi
 

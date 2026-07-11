@@ -2,9 +2,8 @@ name: Cadence Seed Pin
 
 # After the release train cuts a new minor alpha, open a draft PR that adopts
 # that just-published toolchain as the compiler checkout seed. The canonical pin
-# is `bootstrap.toml [seed].version` (SFEP-0047); `.seed-version` is updated only
-# while it exists during the migration window, so SFN-214 can delete it without
-# redesigning this workflow.
+# is `bootstrap.toml [seed].version` (SFEP-0047), alongside the compiler
+# `[toolchain].sfn` floor in `compiler/capsule.toml`.
 
 on:
   workflow_run:
@@ -145,14 +144,7 @@ jobs:
           ' compiler/capsule.toml > "$tmp"
           mv "$tmp" compiler/capsule.toml
 
-          if [ -f .seed-version ]; then
-            printf '%s\n' "$VERSION" > .seed-version
-          fi
-
           git add bootstrap.toml compiler/capsule.toml
-          if [ -f .seed-version ]; then
-            git add .seed-version
-          fi
           if git diff --cached --quiet; then
             echo "[seed-pin] no changes after rewrite; skipping."
             exit 0
@@ -171,7 +163,6 @@ jobs:
 
           - Updates \`bootstrap.toml [seed].version\`, the canonical compiler-checkout seed policy.
           - Updates \`compiler/capsule.toml [toolchain].sfn\` so the public toolchain floor tracks the adopted seed.
-          - Updates \`.seed-version\` only if that transitional file still exists; SFN-214 can remove it without changing this workflow.
 
           ## Verification
 
