@@ -89,6 +89,7 @@ import {
     toolchain_gate
 } from "../../capsule_resolver";
 import { ImportSymbolTable, empty_import_symbols } from "../../effect_imports";
+import { format_backend_failure_banner } from "../../ice";
 import { compile_tests_to_llvm_file_with_module_imports, module_name_from_path } from "../../main";
 import { LayoutManifest } from "../../native_ir";
 import { number_to_string } from "../../num_format";
@@ -1272,8 +1273,7 @@ fn run(matches: Matches, ctx: CliContext) -> int ![io, clock] {
             if trace_runner { print.err("test runner: link start"); }
             let link_rc = _clang_link_test_cmd_with_deps(ll_path, exe_path, runtime_root, groups[group_idx].dep_ll_paths, scratch_root, binary_dir);
             if link_rc != 0 {
-                print.err("link failed (clang exit=" + number_to_string(link_rc)
-                    + ")");
+                print.err(format_backend_failure_banner(binary_dir, "clang link", ll_path, link_rc));
                 if json_output {
                     let outcome = _outcome_setup_failure(_synthetic_assert_failure(path, "link failed (clang exit="
                         + number_to_string(link_rc)
