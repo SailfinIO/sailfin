@@ -18,7 +18,10 @@ import { fs } from "fs";
 fn main() ![io, clock] {
     let lines = 20000;
     let tmp = env.get("TMPDIR");
-    let dir = tmp.length > 0? tmp: "/tmp/";
+    let mut dir = tmp.length > 0? tmp: "/tmp";
+    if !strings_equal(substring(dir, dir.length - 1, dir.length), "/") {
+        dir = dir + "/";
+    }
     let path = dir + "sfn_bench_io_throughput.txt";
 
     // Truncate any previous run's file so each process run appends LINES lines.

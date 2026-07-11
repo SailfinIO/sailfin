@@ -27,10 +27,10 @@ This is orthogonal to `make bench` (`sfn bench --compiler`), which measures
 workload in `benchmarks/runtime/`, builds it to a native binary **once** (never
 timed), then runs it `1 + K` times (default K=5), discarding a warm-up run. Each
 workload calls `benchmark_fixed` (`sfn/bench`), which brackets its hot loop with
-the in-language timer and prints a single `bench-record/1 ops=<int>
-inner_ms=<int> name=<label>` line; the runner records the self-timed inner wall
-(min + median over K runs) as the primary metric and meters the subprocess for
-peak RSS via rusage. Iteration counts are compile-time constants so the *work*
+the in-language timer and prints a single record line of the form
+`bench-record/1 ops=<int> inner_ms=<int> name=<label>`; the runner records the
+self-timed inner wall (min + median over K runs) as the primary metric and
+meters the subprocess for peak RSS via rusage. Iteration counts are compile-time constants so the *work*
 is fixed across releases and only performance varies.
 
 ```bash

@@ -53,7 +53,10 @@ test "bench: --csv writes the perf-history schema header and a workload row" ![i
         return;
     }
     let tmp = env.get("TMPDIR");
-    let dir = tmp.length > 0? tmp: "/tmp/";
+    let mut dir = tmp.length > 0? tmp: "/tmp";
+    if !strings_equal(substring(dir, dir.length - 1, dir.length), "/") {
+        dir = dir + "/";
+    }
     let csv = dir + "sfn_bench_runner_test.csv";
     let exit = process.run_capture([_sfn_bin(), "bench", "benchmarks/runtime", "--filter", "string_find_format", "--iterations", "1", "--warmup", "0", "--csv", csv], _child_env());
     let _o = process.capture_take_stdout();
