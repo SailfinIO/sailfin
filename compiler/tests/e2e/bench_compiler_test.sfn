@@ -1,0 +1,45 @@
+// End-to-end smoke test for `sfn bench --compiler` (SFN-61, epic #1503),
+// the native replacement for scripts/bench_compile.sh. Drives the compiler
+// binary as a subprocess and asserts on exit code + summary output, per
+// .claude/rules/no-bash-e2e.md. Skips when the import-context tree is not
+// staged (bench requires `make compile` to have produced it).
+import { find } from "sfn/strings";
+
+fn _sfn_bin() -> string ![io] {
+    let configured = env.get("SAILFIN_BIN");
+    if configured.length > 0 { return configured; }
+    return "build/bin/sfn";
+}
+
+fn _child_env() -> string[] ![io] {
+    let mut e: string[] = [];
+    let path = env.get("PATH");
+    if path.length > 0 { e.push("PATH=" + path); }
+    let home = env.get("HOME");
+    if home.length > 0 { e.push("HOME=" + home); }
+    let tmpdir = env.get("TMPDIR");
+    if tmpdir.length > 0 { e.push("TMPDIR=" + tmpdir); }
+    let scratch = env.get("SAILFIN_TEST_SCRATCH");
+    if scratch.length > 0 { e.push("SAILFIN_TEST_SCRATCH=" + scratch); }
+    return e;
+}
+
+test "bench: --compiler on a single module reports a summary" ![io] {
+    // Skip when import-context is not staged (no `make compile` yet).
+    if !fs.exists("build/compiler/import-context") {
+        assert true;
+        return;
+    }
+    let exit = process.run_capture([_sfn_bin(), "bench", "--compiler", "--module", "num_format", "--top", "1"], _child_env());
+    let out = process.capture_take_stdout();
+    let err = process.capture_take_stderr();
+    assert exit == 0;
+    assert find(out + err, "SUMMARY", 0) >= 0;
+}
+
+test "bench: missing --compiler mode exits 2" ![io] {
+    let exit = process.run_capture([_sfn_bin(), "bench"], _child_env());
+    let _o = process.capture_take_stdout();
+    let _e = process.capture_take_stderr();
+    assert exit == 2;
+}

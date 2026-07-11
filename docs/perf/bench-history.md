@@ -25,7 +25,7 @@ compares their output.
 
 | File | Columns |
 |---|---|
-| `compile.csv` | `run_sha,run_date,` + `scripts/bench_compile.sh --csv` header (`module,time_s,peak_kb,ir_lines,status,seed_version`) |
+| `compile.csv` | `run_sha,run_date,` + `sfn bench --compiler --csv` header (`module,time_s,peak_kb,ir_lines,status,seed_version`) |
 | `runtime.csv` | `run_sha,run_date,` + `scripts/bench_runtime.sh --csv` header (`workload,inner_ms_min,inner_ms_median,peak_kb,ops,ops_per_ms,status,seed_version,platform`) |
 | `build.csv` | `run_sha,run_date,build_wall_s,budget_s` |
 
@@ -58,7 +58,7 @@ dashboard (and later alerting) has history to work with.
 
 ### The whole-build budget is measured separately
 
-`bench_compile.sh` sums **isolated** per-module `emit llvm` timings; that serial
+`sfn bench --compiler` sums **isolated** per-module `emit llvm` timings; that serial
 sum is **not** the parallel clean-build wall-time the SFEP-0006 `<5 min`
 (`300 s`) target measures. So the job times a real `make rebuild` and records
 that wall-time in `build.csv`; the compare step checks *that* number against the

@@ -478,8 +478,7 @@ bench:
 		echo "[bench] missing import-context; run 'make compile' first"; \
 		exit 1; \
 	fi
-	@bash scripts/bench_compile.sh \
-		--seed "$(NATIVE_BIN)" \
+	@$(NATIVE_BIN) bench --compiler \
 		--import-context build/compiler/import-context \
 		$(BENCH_ARGS)
 

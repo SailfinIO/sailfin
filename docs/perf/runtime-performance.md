@@ -18,7 +18,7 @@ programs, so a regression in the ported runtime would ship silently. This
 baseline is the instrument that catches one — and the number we point at when
 claiming the pure-Sailfin runtime is performance-credible for 1.0.
 
-This is orthogonal to `make bench` (`scripts/bench_compile.sh`), which measures
+This is orthogonal to `make bench` (`sfn bench --compiler`), which measures
 *compile* time + peak RSS per compiler module, not program execution.
 
 ## How it works

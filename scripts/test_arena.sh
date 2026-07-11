@@ -62,7 +62,7 @@ mkdir -p "$WORK_DIR"
 
 # Produce a directory-safe slug for a module source path so siblings with
 # the same basename (e.g. `foo/main.sfn` and `bar/main.sfn`) don't collide
-# in $WORK_DIR. Mirrors the slug strategy in scripts/bench_compile.sh.
+# in $WORK_DIR. Mirrors the slug strategy in `sfn bench --compiler` (compiler/src/cli/commands/bench.sfn).
 module_slug_from_path() {
     local src="$1"
     printf '%s' "$src" | sed -e 's#^\./##' -e 's#\.sfn$##' -e 's#/#__#g' -e 's#[^A-Za-z0-9._-]#_#g'

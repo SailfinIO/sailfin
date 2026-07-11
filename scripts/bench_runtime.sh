@@ -9,7 +9,7 @@ set -euo pipefail
 # prints. Reports min/median inner-loop time and max peak RSS, and
 # optionally writes CSV for tracking regressions.
 #
-# This is the runtime-execution counterpart to bench_compile.sh: that one
+# This is the runtime-execution counterpart to `sfn bench --compiler`: that one
 # measures how fast the compiler *emits IR*; this one measures how fast
 # *compiled Sailfin programs run* — the surface the C→Sailfin runtime
 # rewrite most affects.
@@ -56,8 +56,7 @@ fi
 # Resolve to absolute — the seed and binaries are invoked from the work dir.
 SEED="$(cd "$(dirname "$SEED")" && echo "$(pwd)/$(basename "$SEED")")"
 
-# Detect GNU time for memory measurement (optional). Same detection as
-# bench_compile.sh.
+# Detect GNU time for memory measurement (optional). Same GNU-time detection.
 GNU_TIME=""
 if command -v /usr/bin/time &>/dev/null && /usr/bin/time -v true 2>/dev/null; then
     GNU_TIME="/usr/bin/time"
