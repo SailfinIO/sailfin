@@ -56,17 +56,16 @@ fn keep(x: int) -> int {
 // The one record the `sfn bench` runner (SFN-63) parses: a stable versioned
 // prefix, then space-separated `key=value` fields with `name` last so a name
 // containing spaces is still recoverable as the remainder of the line. One
-// record is emitted per benchmark on stdout.
+// record is emitted per benchmark on stdout. Built with `{{ }}` interpolation
+// — the idiom the runtime workloads already use and the documented-safe way to
+// reach stdout on this compiler (benchmarks/runtime/README.md:104-108), which
+// sidesteps the `+`-concatenation-to-`print` quirk entirely.
 fn record_line(name: string, ops: int, inner_ms: int) -> string {
-    return "bench-record/1 ops=" + number_to_string(ops) + " inner_ms="
-        + number_to_string(inner_ms)
-        + " name="
-        + name;
+    return "bench-record/1 ops={{ops}} inner_ms={{inner_ms}} name={{name}}";
 }
 
-// Emit the record. The line is bound to a local before printing: on this
-// compiler a `+`-concatenation passed straight to `print` produces no stdout
-// output, whereas a bound string prints (benchmarks/runtime/README.md).
+// Emit the record on stdout. The interpolated line is bound to a local before
+// printing, matching the runtime workloads' proven pattern.
 fn _emit(name: string, ops: int, inner_ms: int) ![io] {
     let line = record_line(name, ops, inner_ms);
     print(line);
