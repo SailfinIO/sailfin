@@ -167,7 +167,7 @@ fn sailfin_cli_main_v2(argv: string[]) -> int ![clock, io, net] {
     // Parse the driver-injected `--runtime-root` / `--binary-dir` prefix
     // (Issue 2.2) so `binary_dir` is available for version resolution
     // and the user-visible args can be sliced off the front.
-    let ctx: CliContext = parse_driver_prefix(argv);
+    let mut ctx: CliContext = parse_driver_prefix(argv);
     // Stash `binary_dir` for the ICE banner (SFEP-0037 §3.2, #1807): an
     // uncaught pipeline `throw` — which the `@main` wrapper prints as the ICE
     // banner — resolves the version from this lazily, so the banner carries
@@ -185,6 +185,10 @@ fn sailfin_cli_main_v2(argv: string[]) -> int ![clock, io, net] {
         args.push(argv[i]);
         i += 1;
     }
+    // The user-visible argv the toolchain dispatcher (SFN-172) replays onto the
+    // pinned toolchain on a re-exec. Captured here (not in `parse_driver_prefix`)
+    // because the prefix slice is computed at this level.
+    ctx.orig_args = args;
 
     // Root command, composed from each subcommand's `command_def()`. Built
     // incrementally (one `with_subcommand` reassignment per command) rather

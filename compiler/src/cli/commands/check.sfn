@@ -38,9 +38,9 @@ import {
     with_flag
 } from "sfn/cli";
 
-import { toolchain_gate } from "../../capsule_resolver";
 import { handle_check_command } from "../../check/engine";
 import { CliContext } from "../context";
+import { toolchain_gate_or_dispatch } from "./toolchain";
 
 // The `sfn/cli` definition for `check`, registered on the v2 root via
 // `with_subcommand`. Four boolean flags (`--quiet`/`-q`, `--json`,
@@ -56,11 +56,11 @@ fn command_def() -> Command {
 // own `--json` ⇒ quiet coupling and its own empty-path ⇒ "." default
 // exactly as before. `binary_dir` comes from the driver-parsed
 // `CliContext`.
-fn run(matches: Matches, ctx: CliContext) -> int ![io] {
+fn run(matches: Matches, ctx: CliContext) -> int ![io, net] {
     let _tc_paths: string[] = positionals(matches, "path");
     let mut _tc_hint: string = ".";
     if _tc_paths.length > 0 { _tc_hint = _tc_paths[0]; }
-    let _tc = toolchain_gate(_tc_hint, ctx.binary_dir, has_flag(matches, "skip-toolchain-check"));
+    let _tc = toolchain_gate_or_dispatch(_tc_hint, ctx, has_flag(matches, "skip-toolchain-check"));
     if _tc != 0 { return _tc; }
 
     let mut args: string[] = ["check"];

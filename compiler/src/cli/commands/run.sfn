@@ -44,7 +44,7 @@ import { _clang_link_multi } from "../../build/link";
 import { _ends_with, _ensure_dir } from "../../build/paths";
 import { _runtime_bundle_exists } from "../../build/runtime_objs";
 import { cache_root, merge_cache_stats, resolve_build_cache_config } from "../../build_cache";
-import { empty_resolver_consumer, prepare_project_capsules, toolchain_gate } from "../../capsule_resolver";
+import { empty_resolver_consumer, prepare_project_capsules } from "../../capsule_resolver";
 import {
     compile_to_llvm_file_with_module,
     module_name_from_path,
@@ -52,6 +52,7 @@ import {
 } from "../../main";
 import { runtime_capsule_from_root } from "../../runtime_capsule_resolver";
 import { CliContext } from "../context";
+import { toolchain_gate_or_dispatch } from "./toolchain";
 
 // The `sfn/cli` definition for `run`, registered on the v2 root via
 // `with_subcommand`. Three boolean flags and a variadic positional
@@ -71,7 +72,7 @@ fn command_def() -> Command {
 // verbatim. The `runtime_root` empty→"runtime" fallback is applied here (not
 // in `parse_driver_prefix`) because it is a filesystem probe, not argv
 // parsing.
-fn run(matches: Matches, ctx: CliContext) -> int ![io] {
+fn run(matches: Matches, ctx: CliContext) -> int ![io, net] {
     let no_cache_flag: boolean = has_flag(matches, "no-cache");
     let clean_flag: boolean = has_flag(matches, "clean");
     let cache_trace_flag: boolean = has_flag(matches, "cache-trace");
@@ -101,7 +102,7 @@ fn run(matches: Matches, ctx: CliContext) -> int ![io] {
         return 1;
     }
 
-    let _tc = toolchain_gate(input_path, ctx.binary_dir, has_flag(matches, "skip-toolchain-check"));
+    let _tc = toolchain_gate_or_dispatch(input_path, ctx, has_flag(matches, "skip-toolchain-check"));
     if _tc != 0 { return _tc; }
 
     // #1411: route the top-level `run.ll`/`run` executable under the

@@ -51,8 +51,14 @@ fn _make_project(tag: string, toolchain_body: string) -> string ![io] {
 }
 
 test "toolchain gate: an unsatisfiable version pin hard-errors" ![io] {
+    // `SAILFIN_TOOLCHAIN=local` selects the verify-only path (SFN-172): the
+    // gate prints the fail-closed mismatch and never fetches. The default
+    // `auto` would instead try to fetch-and-dispatch the pinned version — that
+    // dispatch path is covered by `e2e/toolchain_dispatch_test.sfn`.
     let dir = _make_project("hi-pin", "[toolchain]\nsfn = \"99.0.0\"\n");
-    let exit = process.run_capture([_sfn_bin(), "check", dir], _child_env());
+    let mut e = _child_env();
+    e.push("SAILFIN_TOOLCHAIN=local");
+    let exit = process.run_capture([_sfn_bin(), "check", dir], e);
     let out = process.capture_take_stdout();
     let err = process.capture_take_stderr();
     assert exit != 0;

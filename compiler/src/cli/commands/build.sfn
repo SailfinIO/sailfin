@@ -59,7 +59,7 @@ import {
     is_safe_scope_name,
     parse_scope_name
 } from "../../capsule_artifact";
-import { ResolverConsumer, prepare_project_capsules, toolchain_gate } from "../../capsule_resolver";
+import { ResolverConsumer, prepare_project_capsules } from "../../capsule_resolver";
 import {
     compile_to_llvm_file_with_module,
     module_name_from_path,
@@ -67,6 +67,7 @@ import {
 } from "../../main";
 import { runtime_capsule_from_root } from "../../runtime_capsule_resolver";
 import { CliContext } from "../context";
+import { toolchain_gate_or_dispatch } from "./toolchain";
 
 // The `sfn/cli` definition for `build`, registered on the v2 root via
 // `with_subcommand`. Two short value flags (`-o`, `-p`), five boolean
@@ -92,7 +93,7 @@ fn command_def() -> Command {
 // Flag reads replace the hand-rolled argv walk; the build body is verbatim.
 // The `runtime_root` empty→"runtime" fallback is applied here (not in
 // `parse_driver_prefix`) because it is a filesystem probe, not argv parsing.
-fn run(matches: Matches, ctx: CliContext) -> int ![io] {
+fn run(matches: Matches, ctx: CliContext) -> int ![io, net] {
     let mut out_path: string = get_or(matches, "o", "");
     let capsule_path: string = get_or(matches, "p", "");
     let no_cache_flag: boolean = has_flag(matches, "no-cache");
@@ -111,7 +112,7 @@ fn run(matches: Matches, ctx: CliContext) -> int ![io] {
 
     let mut _tc_hint: string = capsule_path;
     if _tc_hint.length == 0 { _tc_hint = input_path; }
-    let _tc = toolchain_gate(_tc_hint, ctx.binary_dir, has_flag(matches, "skip-toolchain-check"));
+    let _tc = toolchain_gate_or_dispatch(_tc_hint, ctx, has_flag(matches, "skip-toolchain-check"));
     if _tc != 0 { return _tc; }
 
     let binary_dir: string = ctx.binary_dir;

@@ -165,7 +165,7 @@ channel = "alpha"          # optional: reject a lower-stability running toolchai
 
 **Workspace vs. member precedence.** In a multi-capsule project, a `workspace.toml` `[toolchain]` pin is the default for every member; a member's own `capsule.toml` `[toolchain]` overrides it **per field** (a member can override just `sfn`, just `channel`, or both). See [Workspaces](./workspaces#toolchain-pinning).
 
-**The gate.** `sfn build`, `sfn run`, `sfn check`, and `sfn test` verify the pin after resolving the project/workspace root, before doing any other work. On a satisfied pin, the command proceeds silently. On a mismatch, it fails with a non-zero exit and a diagnostic:
+**The gate.** `sfn build`, `sfn run`, `sfn check`, and `sfn test` verify the pin after resolving the project/workspace root, before doing any other work. On a satisfied pin, the command proceeds silently. On a mismatch, the default behavior (`SAILFIN_TOOLCHAIN=auto`) is to transparently fetch (if not already in the version store) and re-exec the pinned toolchain — a fresh clone plus `sfn build` just works with no manual install step. Under `SAILFIN_TOOLCHAIN=local`, or when auto-dispatch itself can't proceed (offline with nothing stored), the command instead fails with a non-zero exit and a diagnostic:
 
 ```
 error: toolchain mismatch
@@ -174,11 +174,11 @@ error: toolchain mismatch
   install the pinned toolchain, or re-run with --skip-toolchain-check to override
 ```
 
-Override the gate for a single invocation with `--skip-toolchain-check`, or for a whole shell/CI job with `SAILFIN_SKIP_TOOLCHAIN_CHECK=1` or `SAILFIN_TOOLCHAIN=off` (`=0` also works) — any of the three downgrade the hard error to a one-line warning and let the build proceed. See the [CLI reference](/docs/reference/cli#toolchain-pinning-flags) for the full flag/env list.
+Override the gate for a single invocation with `--skip-toolchain-check`, or for a whole shell/CI job with `SAILFIN_SKIP_TOOLCHAIN_CHECK=1` or `SAILFIN_TOOLCHAIN=off` (`=0` also works) — any of the three downgrade the hard error to a one-line warning and let the build proceed on the running toolchain, without dispatching. See the [CLI reference](/docs/reference/cli#toolchain-pinning-flags) for the full flag/env list and the `SAILFIN_TOOLCHAIN` knob modes (`auto`/`local`/`<version>`/`off`).
 
 **`sfn init` scaffolding.** `sfn init` writes a `[toolchain]` stanza pinned to the version of the `sfn` binary doing the scaffolding, so a freshly created capsule is born pinning the toolchain it was created with — matching `cargo new` stamping the edition and `go mod init` writing the `go` line.
 
-**Current status:** this is Phase 1 of the toolchain-pinning design (SFEP-0046) — declare and verify. Phase 2 (auto-fetching and re-execing the pinned toolchain when it isn't the one on `PATH`, `SAILFIN_TOOLCHAIN=auto`) is designed but not yet implemented; a version mismatch today always requires installing the pinned toolchain manually or passing the escape hatch.
+**Current status:** declare, verify, and fetch + re-exec dispatch (SFEP-0046 §3.1–3.5) are all implemented — a version mismatch under the default `auto` mode now resolves itself. The proposal itself stays `Accepted` rather than `Implemented`, since it tracks a handful of adjacent issues beyond dispatch.
 
 ## Dependencies
 

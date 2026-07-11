@@ -1,0 +1,201 @@
+// compiler/tests/e2e/toolchain_dispatch_test.sfn
+//
+// End-to-end coverage for toolchain re-exec dispatch + the
+// `SAILFIN_TOOLCHAIN` knob (SFEP-0046 §3.5, Phase 2 "use"; SFN-172).
+// Native (no-bash) `*_test.sfn` per `.claude/rules/no-bash-e2e.md`: it
+// drives the compiler-under-test as a subprocess against a pre-seeded
+// stub store and asserts on the captured output.
+//
+// The dispatch trigger is a `[toolchain]` pin the running toolchain
+// cannot satisfy — `sfn = "999.0.0"` (no such release will exist), so the
+// floor check fails and `auto` proceeds to fetch-and-re-exec. Instead of a
+// real fetch, the store is pre-seeded with a stub `sailfin` that echoes a
+// unique marker; observing the marker in the child's stdout proves the
+// re-exec (`process.exec`) replaced the image with the stored toolchain.
+//
+// What it pins:
+//   1. auto (default) dispatches to a complete pre-seeded store entry.
+//   2. the re-entrancy guard (`SAILFIN_TOOLCHAIN_DISPATCHED`) refuses to
+//      dispatch again and hard-fails loudly.
+//   3. `local` verifies only — never fetches, never dispatches.
+//   4. an incomplete store entry (no `.sha256` marker) is not dispatched;
+//      `auto` falls through to a fail-closed install that names the hint.
+//   5. `off` (and `--skip-toolchain-check`) skips the gate and proceeds.
+//   6. an explicit `<version>` knob forces that version as the target.
+import { contains } from "sfn/strings";
+
+// The compiler-under-test: `$SAILFIN_BIN` if set, else the self-hosted
+// binary relative to the repo root the runner starts from (mirrors
+// `sfn/test`'s own `_resolve_sfn_bin`).
+fn _sfn_bin() -> string ![io] {
+    let configured = env.get("SAILFIN_BIN");
+    if configured.length > 0 { return configured; }
+    return "build/bin/sfn";
+}
+
+// A per-invocation scratch root. `SAILFIN_TEST_SCRATCH` keeps it unique
+// under the parallel pool; `/tmp` is the standalone fallback.
+fn _scratch_root() -> string ![io] {
+    let mut dir = env.get("SAILFIN_TEST_SCRATCH");
+    if dir.length == 0 { dir = "/tmp"; }
+    return dir + "/sfn-toolchain-dispatch-e2e";
+}
+
+// The marker the stub echoes; its presence in the child's stdout is the
+// dispatch signal (the image was replaced by the stored stub).
+fn _marker() -> string { return "DISPATCH_STUB_EXEC_OK_7f3a"; }
+
+// Full parent environment plus the caller's extra `KEY=VALUE` entries
+// (`run_capture`'s empty env is EMPTY, not "inherit", so the child needs
+// PATH etc. to resolve `chmod`/`uname` and, on dispatch, the stub's `sh`).
+fn _env_with(extra: string[]) -> string[] ![io] {
+    let mut e = process.environ();
+    let mut i: int = 0;
+    loop {
+        if i >= extra.length { break; }
+        e.push(extra[i]);
+        i += 1;
+    }
+    return e;
+}
+
+// Seed a store entry `<store>/<ver>/sailfin` as an executable stub that
+// echoes `marker` and exits 0, regardless of the argv it is re-exec'd
+// with. When `complete` is true the `.sha256` completeness marker is
+// written last (the installer's commit-point contract), so the entry
+// reads as dispatch-ready; when false the entry is left partial.
+fn _seed_stub(store: string, ver: string, marker: string, complete: boolean) -> void ![io] {
+    let dir = store + "/" + ver;
+    process.run(["rm", "-rf", dir]);
+    fs.createDirectory(dir, true);
+    let bin = dir + "/sailfin";
+    fs.writeFile(bin, "#!/bin/sh\necho \"" + marker + "\"\nexit 0\n");
+    process.run(["chmod", "+x", bin]);
+    if complete {
+        fs.writeFile(dir + "/.sha256", "0000000000000000000000000000000000000000000000000000000000000000\n");
+    }
+}
+
+// Seed a project whose `[toolchain]` pin is `pin_ver` and a trivial
+// source file the gate's entry hint points at. Returns the source path.
+fn _seed_project(root: string, pin_ver: string) -> string ![io] {
+    process.run(["rm", "-rf", root]);
+    fs.createDirectory(root, true);
+    fs.writeFile(root + "/capsule.toml", "[capsule]\nname = \"dispatch-e2e\"\nversion = \"0.0.1\"\n\n[toolchain]\nsfn = \""
+        + pin_ver
+        + "\"\n");
+    let src = root + "/main.sfn";
+    fs.writeFile(src, "fn main() -> int { return 0; }\n");
+    return src;
+}
+
+test "toolchain dispatch: auto re-execs a complete pre-seeded store entry" ![io] {
+    let store = _scratch_root() + "/auto-store";
+    let proj = _scratch_root() + "/auto-proj";
+    _seed_stub(store, "999.0.0", _marker(), true);
+    let src = _seed_project(proj, "999.0.0");
+
+    // Default knob (unset) is `auto`. The running toolchain cannot satisfy
+    // a 999.0.0 floor, so the gate dispatches to the stored stub.
+    let exit = process.run_capture([_sfn_bin(), "check", src], _env_with(["INSTALL_BASE="
+        + store]));
+    let out = process.capture_take_stdout();
+    let err = process.capture_take_stderr();
+    // The stub echoed its marker and exited 0 — the image was replaced.
+    assert contains(out + err, _marker());
+    assert exit == 0;
+}
+
+test "toolchain dispatch: the re-entrancy guard refuses a second dispatch" ![io] {
+    let store = _scratch_root() + "/guard-store";
+    let proj = _scratch_root() + "/guard-proj";
+    _seed_stub(store, "999.0.0", _marker(), true);
+    let src = _seed_project(proj, "999.0.0");
+
+    // A dispatched toolchain that still cannot satisfy the pin means the
+    // stored binary is wrong/corrupt; pre-setting the guard simulates that
+    // re-entry. The gate must hard-fail loudly, never re-exec.
+    let exit = process.run_capture([_sfn_bin(), "check", src], _env_with(["INSTALL_BASE="
+        + store, "SAILFIN_TOOLCHAIN_DISPATCHED=999.0.0"]));
+    let out = process.capture_take_stdout();
+    let err = process.capture_take_stderr();
+    assert exit != 0;
+    assert contains(out + err, "dispatch loop");
+    // No re-exec occurred — the stub marker is absent.
+    assert ! contains(out + err, _marker());
+}
+
+test "toolchain dispatch: local verifies only and never fetches" ![io] {
+    let store = _scratch_root() + "/local-store";
+    let proj = _scratch_root() + "/local-proj";
+    _seed_stub(store, "999.0.0", _marker(), true);
+    let src = _seed_project(proj, "999.0.0");
+
+    // `local` refuses to fetch or dispatch even with a ready store entry:
+    // it prints the standard fail-closed mismatch and exits non-zero.
+    let exit = process.run_capture([_sfn_bin(), "check", src], _env_with(["INSTALL_BASE="
+        + store, "SAILFIN_TOOLCHAIN=local"]));
+    let out = process.capture_take_stdout();
+    let err = process.capture_take_stderr();
+    assert exit != 0;
+    assert contains(out + err, "toolchain mismatch");
+    assert ! contains(out + err, _marker());
+}
+
+test "toolchain dispatch: an incomplete store entry is not dispatched" ![io] {
+    let store = _scratch_root() + "/partial-store";
+    let proj = _scratch_root() + "/partial-proj";
+    // Binary present but NO `.sha256` marker — a partial install.
+    _seed_stub(store, "999.0.0", _marker(), false);
+    let src = _seed_project(proj, "999.0.0");
+
+    // `auto` must reject the partial entry (not exec it) and fall through to
+    // a fetch. 999.0.0 is unfetchable (404 online / connection fail offline),
+    // so the install aborts non-zero with the actionable hint — no network
+    // guard needed because the invariant holds in both cases.
+    let exit = process.run_capture([_sfn_bin(), "check", src], _env_with(["INSTALL_BASE="
+        + store]));
+    let out = process.capture_take_stdout();
+    let err = process.capture_take_stderr();
+    assert exit != 0;
+    // Never re-exec'd the partial binary.
+    assert ! contains(out + err, _marker());
+    // The failure names the recovery command.
+    assert contains(out + err, "toolchain install");
+}
+
+test "toolchain dispatch: off skips the gate and proceeds" ![io] {
+    let store = _scratch_root() + "/off-store";
+    let proj = _scratch_root() + "/off-proj";
+    _seed_stub(store, "999.0.0", _marker(), true);
+    let src = _seed_project(proj, "999.0.0");
+
+    // `off` downgrades the mismatch to a warning and proceeds with the
+    // running toolchain — no dispatch.
+    let exit = process.run_capture([_sfn_bin(), "check", src], _env_with(["INSTALL_BASE="
+        + store, "SAILFIN_TOOLCHAIN=off"]));
+    let out = process.capture_take_stdout();
+    let err = process.capture_take_stderr();
+    assert contains(out + err, "proceeding");
+    assert ! contains(out + err, _marker());
+    // The real check ran against a trivially valid source.
+    assert exit == 0;
+}
+
+test "toolchain dispatch: an explicit version forces that dispatch target" ![io] {
+    let store = _scratch_root() + "/forced-store";
+    let proj = _scratch_root() + "/forced-proj";
+    // Pin is 999.0.0, but the knob forces 888.0.0 — only that stub is
+    // seeded, and its distinct marker proves the knob (not the pin) chose
+    // the target.
+    let forced_marker = "DISPATCH_FORCED_888_a19c";
+    _seed_stub(store, "888.0.0", forced_marker, true);
+    let src = _seed_project(proj, "999.0.0");
+
+    let exit = process.run_capture([_sfn_bin(), "check", src], _env_with(["INSTALL_BASE="
+        + store, "SAILFIN_TOOLCHAIN=888.0.0"]));
+    let out = process.capture_take_stdout();
+    let err = process.capture_take_stderr();
+    assert contains(out + err, forced_marker);
+    assert exit == 0;
+}

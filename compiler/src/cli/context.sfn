@@ -26,6 +26,11 @@ struct CliContext {
     binary_dir: string;
     registry_url: string;
     trace_argv: boolean;
+    // The user-visible argv (driver prefix stripped) the toolchain-dispatch
+    // re-exec replays onto the pinned toolchain (SFN-172). Empty until
+    // `sailfin_cli_main_v2` fills it after slicing the prefix — the parse here
+    // does not have the sliced view, so `parse_driver_prefix` leaves it [].
+    orig_args: string[];
 }
 
 // Single source of truth for the prefix walk. Both public entry
@@ -89,7 +94,8 @@ fn parse_driver_prefix(argv: string[]) -> CliContext ![io] {
         runtime_root: prefix.runtime_root,
         binary_dir: prefix.binary_dir,
         registry_url: "",
-        trace_argv: false
+        trace_argv: false,
+        orig_args: []
     };
     ctx.trace_argv = _env_flag("SAILFIN_TRACE_ARGV") || _legacy_flag_file("build/sailfin/.trace_argv");
     return ctx;
