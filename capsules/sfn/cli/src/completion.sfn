@@ -56,8 +56,9 @@ fn _completion_top_words(node: HelpNode) -> string {
 }
 
 fn _completion_command_words(cmd: HelpNode) -> string {
-    // Per-command candidates: nested subcommand names, each flag's long
-    // form, and the built-in `--help`.
+    // Per-command candidates: nested subcommand names, each flag's long and
+    // short forms, and the built-in `-h` / `--help`. The parser accepts a
+    // flag's short form and `-h` at every level, so completion offers both.
     let mut words: string[] = [];
     let mut si: int = 0;
     loop {
@@ -75,8 +76,12 @@ fn _completion_command_words(cmd: HelpNode) -> string {
         if cmd.flags[fi].long_name.length > 0 {
             words.push("--" + cmd.flags[fi].long_name);
         }
+        if cmd.flags[fi].short_name.length > 0 {
+            words.push("-" + cmd.flags[fi].short_name);
+        }
         fi += 1;
     }
+    words.push("-h");
     words.push("--help");
     return _completion_join(words);
 }

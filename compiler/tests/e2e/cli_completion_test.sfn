@@ -63,13 +63,15 @@ test "cli completion: bash script is deterministic and names registered commands
     assert contains(out1, "_sfn_complete()");
     assert contains(out1, "compgen -W");
 
-    // Command coverage is derived from the registered tree, so known
-    // subcommands appear both in the top-level word list and as case arms.
-    assert contains(out1, "build");
-    assert contains(out1, "run");
-    assert contains(out1, "check");
-    assert contains(out1, "test");
-    assert contains(out1, "completion");
+    // Command coverage is derived from the registered tree. Anchor on the
+    // per-command `case` arm label ("    <name>)") rather than a bare
+    // substring: an unanchored `contains(out, "run")` would also match the
+    // script's `return` statements and mask a missing `run` subcommand.
+    assert contains(out1, "\n    build)\n");
+    assert contains(out1, "\n    run)\n");
+    assert contains(out1, "\n    check)\n");
+    assert contains(out1, "\n    test)\n");
+    assert contains(out1, "\n    completion)\n");
 }
 
 test "cli completion: generated bash script passes bash -n syntax check" ![io] {
