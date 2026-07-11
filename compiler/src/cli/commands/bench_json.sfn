@@ -1,0 +1,220 @@
+// compiler/src/cli/commands/bench_json.sfn
+//
+// `sailfin.bench/v1` JSON envelope for `sfn bench --json` (SFN-64, epic
+// #1503). A pure, I/O-free encoder: both bench modes normalize their
+// per-module / per-workload results into `BenchJsonResult` records and hand
+// them here to render the versioned envelope documented at
+// `docs/reference/bench-json-schema.md`. The JSON primitive helpers are
+// duplicated locally rather than imported from `diagnostics_json.sfn` — the
+// same seed-compiler import-cycle constraint that module documents — so this
+// file stays self-contained for its unit tests.
+// A single benchmarked unit, normalized across both bench domains. For the
+// compiler domain each module contributes one emit sample, so `time_min`,
+// `time_median`, and `time_max` collapse to the same wall-clock value and
+// `time_stddev` is 0; `ops` is 0 (module emit has no op count). For the
+// runtime domain the fields carry the workload's inner-loop timing spread and
+// op count.
+struct BenchJsonResult {
+    name: string;
+    ops: int;
+    time_min: int;
+    time_median: int;
+    time_max: int;
+    time_stddev: int;
+    peak_rss_kb: int;
+    status: string;
+}
+
+// JSON string escaping: the five RFC 8259 escapes the rest of the compiler's
+// encoders emit (`\"`, `\\`, `\n`, `\r`, `\t`) with literal passthrough for
+// everything else. Bench names are module/workload slugs and platform/version
+// strings — ASCII-clean — but escaping keeps the envelope well-formed if a
+// path ever carries a quote.
+fn _bj_escape_string(s: string) -> string {
+    let mut out: string = "";
+    let mut i: int = 0;
+    loop {
+        if i >= s.length { break; }
+        let ch = substring(s, i, i + 1);
+        if ch == "\"" { out = out + "\\\""; } else if ch == "\\" {
+            out = out + "\\\\";
+        } else if ch == "\n" { out = out + "\\n"; } else if ch == "\r" {
+            out = out + "\\r";
+        } else if ch == "\t" { out = out + "\\t"; } else { out = out + ch; }
+        i += 1;
+    }
+    return out;
+}
+
+fn _bj_quote(s: string) -> string {
+    return "\"" + _bj_escape_string(s) + "\"";
+}
+
+fn _bj_field(name: string, value: string) -> string {
+    return _bj_quote(name) + ":" + value;
+}
+
+fn _bj_string_field(name: string, value: string) -> string {
+    return _bj_field(name, _bj_quote(value));
+}
+
+fn _bj_number_field(name: string, value: int) -> string {
+    return _bj_field(name, _bj_number_to_string(value));
+}
+
+// Local integer formatter (self-contained per the preamble, avoiding the
+// seed-compiler import-cycle limitation). O(digits) via `/` and `%` — every
+// bench number (ms timing, peak RSS KiB, op count, exit code) is non-negative,
+// so the `0 - working` negation path is unreachable for real input and cannot
+// hit the i64-min overflow edge.
+fn _bj_number_to_string(value: int) -> string {
+    if value == 0 { return "0"; }
+    let mut working: int = value;
+    let mut negative: boolean = false;
+    if working < 0 {
+        negative = true;
+        working = 0 - working;
+    }
+    let digits = "0123456789";
+    let mut output: string = "";
+    loop {
+        if working <= 0 { break; }
+        let d = working % 10;
+        output = substring(digits, d, d + 1) + output;
+        working = working / 10;
+    }
+    if negative { output = "-" + output; }
+    return output;
+}
+
+// Join already-built JSON fragments with `sep`.
+fn _bj_join(parts: string[], sep: string) -> string {
+    let mut out: string = "";
+    let mut i: int = 0;
+    loop {
+        if i >= parts.length { break; }
+        if i > 0 { out = out + sep; }
+        out = out + parts[i];
+        i += 1;
+    }
+    return out;
+}
+
+// Substring presence test (no dependency on string_utils::index_of, keeping
+// the encoder self-contained per the module preamble).
+fn _bj_has(hay: string, needle: string) -> boolean {
+    if needle.length == 0 { return true; }
+    if needle.length > hay.length { return false; }
+    let last = hay.length - needle.length;
+    let mut i: int = 0;
+    loop {
+        if i > last { break; }
+        if substring(hay, i, i + needle.length) == needle { return true; }
+        i += 1;
+    }
+    return false;
+}
+
+// Collapse one raw status token to the documented enum. The bench modes emit
+// `ok` / `FAIL` / `BUILDFAIL` / `RUNFAIL` / `SLOW` / `HIGHMEM`; every failure
+// token maps to `fail`, and `slow` / `highmem` lowercase. An unrecognized
+// token passes through unchanged so a future status shows up rather than
+// silently vanishing.
+fn _bj_map_token(t: string) -> string {
+    if t == "ok" { return "ok"; }
+    if _bj_has(t, "FAIL") { return "fail"; }
+    if t == "SLOW" { return "slow"; }
+    if t == "HIGHMEM" { return "highmem"; }
+    return t;
+}
+
+fn _bj_append_status(acc: string, tok: string) -> string {
+    if tok.length == 0 { return acc; }
+    if acc.length == 0 { return tok; }
+    return acc + "+" + tok;
+}
+
+// Normalize a mode's raw status (possibly `+`-joined, e.g. `SLOW+HIGHMEM`) to
+// the documented `ok` / `fail` / `slow` / `highmem` enum, preserving `+`
+// combinations. Empty input normalizes to `ok`.
+fn _bj_normalize_status(raw: string) -> string {
+    let mut out: string = "";
+    let mut token: string = "";
+    let mut i: int = 0;
+    loop {
+        if i >= raw.length { break; }
+        let ch = substring(raw, i, i + 1);
+        if ch == "+" {
+            out = _bj_append_status(out, _bj_map_token(token));
+            token = "";
+        } else { token = token + ch; }
+        i += 1;
+    }
+    out = _bj_append_status(out, _bj_map_token(token));
+    if out.length == 0 { return "ok"; }
+    return out;
+}
+
+fn _bj_render_tool(version: string, platform: string) -> string {
+    let mut p: string[] = [];
+    p.push(_bj_string_field("version", version));
+    p.push(_bj_string_field("platform", platform));
+    return "{" + _bj_join(p, ",") + "}";
+}
+
+fn _bj_render_config(iterations: int, warmup: int) -> string {
+    let mut p: string[] = [];
+    p.push(_bj_number_field("iterations", iterations));
+    p.push(_bj_number_field("warmup", warmup));
+    return "{" + _bj_join(p, ",") + "}";
+}
+
+fn _bj_render_time_ms(min: int, median: int, max: int, stddev: int) -> string {
+    let mut p: string[] = [];
+    p.push(_bj_number_field("min", min));
+    p.push(_bj_number_field("median", median));
+    p.push(_bj_number_field("max", max));
+    p.push(_bj_number_field("stddev", stddev));
+    return "{" + _bj_join(p, ",") + "}";
+}
+
+// `unit` labels the `time_ms` block, which is always milliseconds; it is a
+// fixed `"ms"` today and reserved for a finer-grained unit under a schema
+// bump.
+fn _bj_render_result(r: BenchJsonResult) -> string {
+    let mut p: string[] = [];
+    p.push(_bj_string_field("name", r.name));
+    p.push(_bj_number_field("ops", r.ops));
+    p.push(_bj_string_field("unit", "ms"));
+    p.push(_bj_field("time_ms", _bj_render_time_ms(r.time_min, r.time_median, r.time_max, r.time_stddev)));
+    p.push(_bj_number_field("peak_rss_kb", r.peak_rss_kb));
+    p.push(_bj_string_field("status", _bj_normalize_status(r.status)));
+    return "{" + _bj_join(p, ",") + "}";
+}
+
+fn _bj_render_results(results: BenchJsonResult[]) -> string {
+    let mut items: string[] = [];
+    let mut i: int = 0;
+    loop {
+        if i >= results.length { break; }
+        items.push(_bj_render_result(results[i]));
+        i += 1;
+    }
+    return "[" + _bj_join(items, ",") + "]";
+}
+
+// Render the full `sailfin.bench/v1` envelope. `domain` is `compiler` or
+// `runtime`; `exit_code` mirrors the process exit (0 ok, 1 build/run/emit
+// failure, 2 budget violation). Trailing newline matches the other `--json`
+// surfaces.
+fn render_bench_json_envelope(domain: string, version: string, platform: string, iterations: int, warmup: int, exit_code: int, results: BenchJsonResult[]) -> string {
+    let mut parts: string[] = [];
+    parts.push(_bj_string_field("schema", "sailfin.bench/v1"));
+    parts.push(_bj_string_field("command", "sfn bench"));
+    parts.push(_bj_string_field("domain", domain));
+    parts.push(_bj_number_field("exit_code", exit_code));
+    parts.push(_bj_field("tool", _bj_render_tool(version, platform)));
+    parts.push(_bj_field("config", _bj_render_config(iterations, warmup)));
+    parts.push(_bj_field("results", _bj_render_results(results)));
+    return "{" + _bj_join(parts, ",") + "}\n";
+}
