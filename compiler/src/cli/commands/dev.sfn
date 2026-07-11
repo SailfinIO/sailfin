@@ -36,7 +36,7 @@ import {
     read_bootstrap_manifest,
     rewrite_seed_version
 } from "../../bootstrap_manifest";
-import { _shell_read_cmd } from "../../build/fs";
+import { _shell_read_cmd, _toml_trim_cmd } from "../../build/fs";
 import { number_to_string } from "../../num_format";
 import { starts_with, strings_equal, substring } from "../../string_utils";
 import { _strip_build_metadata, resolve_compiler_version } from "../../version";
@@ -65,16 +65,23 @@ fn _bootstrap_abspath(path: string) -> string ![io] {
 }
 
 // A seed store entry is ready to build/dispatch from when its `sailfin`
-// binary is present. The native verified installer writes a `.sha256`
-// completeness marker LAST, but during migration `make fetch-seed`
-// (`install.sh`) populates the same store WITHOUT that marker (SFEP-0047
-// §3.3 keeps it as a transitional shim), so requiring the marker here would
-// force a needless re-fetch of an already-usable seed. Readiness is
-// therefore binary-presence; `_bootstrap_fetch` still runs the verified
-// installer whenever the store is not ready.
+// binary is present AND — when the native installer's `.sha256` completeness
+// marker exists — that marker is non-empty. The marker is written LAST, so a
+// present-but-empty/whitespace marker signals a torn install: not ready, so
+// `_bootstrap_fetch` re-runs the verified installer to repair it. When the
+// marker is ABSENT the entry is a migration-era `make fetch-seed`/`install.sh`
+// store (SFEP-0047 §3.3 keeps it as a transitional shim, and install.sh writes
+// no marker), which is ready to use as-is — requiring the marker there would
+// force a needless re-fetch of an already-usable seed.
 fn _bootstrap_store_ready(install_base: string, ver: string) -> boolean ![io] {
     let store_dir = install_base + "/" + ver;
-    return fs.exists(store_dir + "/sailfin");
+    if !fs.exists(store_dir + "/sailfin") { return false; }
+    let sha_path = store_dir + "/.sha256";
+    if fs.exists(sha_path) {
+        let recorded = _toml_trim_cmd(fs.readFile(sha_path));
+        if recorded.length == 0 { return false; }
+    }
+    return true;
 }
 
 // The seed binary path within the store.
