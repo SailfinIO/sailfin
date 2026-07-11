@@ -9,6 +9,13 @@ Sailfin uses a manually-triggered release workflow instead of auto-releasing on
 every merge.  The canonical version lives in `compiler/capsule.toml` and is
 mirrored in `compiler/src/version.sfn`.
 
+The public minor-alpha train is automated separately by
+`.github/workflows/release-train.yml`: on the 2-week Monday cadence, a scheduled
+train run dispatches `release.yml` with `channel=alpha bump=minor` when the
+latest nightly self-host check on `main` is green. Manual `/release` remains the
+path for routine alpha prereleases, hotfix/off-cadence cuts, and stable
+promotion.
+
 The workflow accepts two inputs:
 - **channel**: `alpha` | `beta` | `rc` | `stable`
 - **bump**: `prerelease` | `patch` | `minor` | `major`
@@ -166,10 +173,9 @@ After the dispatch summary, suggest running `/pin-seed` as a follow-up
 when **any** of these is true:
 
 - The cut is `bump=patch` (almost always implies a hotfix-pin).
-- A `seed-blocker` issue closed since the current `.seed-version` was
-  set:
+- A `seed-blocker` issue closed since the current seed pin was set:
   ```bash
-  last_pin_at="$(git log -1 --format=%cI .seed-version)"
+  last_pin_at="$(git log -1 --format=%cI bootstrap.toml)"
   ```
   ```
   mcp__github__search_issues query='repo:SailfinIO/sailfin is:issue is:closed label:seed-blocker closed:>=<last_pin_at>'

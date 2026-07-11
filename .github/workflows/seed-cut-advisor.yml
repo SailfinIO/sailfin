@@ -149,10 +149,11 @@ jobs:
               core.info('No release-critical marker — advisory queues for the next cadence bump.');
             }
 
-            // 4. Resolve the ACTIVE release tracker dynamically: open, labeled
-            //    `tracking`, title `Release: vX.Y.Z`. Never hardcoded.
+            // 4. Resolve the ACTIVE release tracker dynamically: open issue,
+            //    title `Release: vX.Y.Z`. The `tracking` label is restored if
+            //    missing, but label drift must not hide the tracker.
             const trackers = (await github.paginate(github.rest.issues.listForRepo, {
-              owner, repo, state: 'open', labels: 'tracking', per_page: 100,
+              owner, repo, state: 'open', per_page: 100,
             })).filter(i => !i.pull_request && /^Release:\s*v\d+\.\d+\.\d+\b/.test(i.title));
             if (trackers.length === 0) {
               core.info('No open semver Release tracker (Release: vX.Y.Z) — logging and exiting 0 without posting.');
@@ -169,6 +170,17 @@ jobs:
             const tracker = trackers[0]; // nearest (lowest) unreleased version
             if (trackers.length > 1) {
               core.info(`Multiple open trackers; using nearest ${tracker.title} (#${tracker.number}).`);
+            }
+            const trackerHasTracking = (tracker.labels || []).some(l => (typeof l === 'string' ? l : l.name) === 'tracking');
+            if (!trackerHasTracking) {
+              try {
+                await github.rest.issues.addLabels({
+                  owner, repo, issue_number: tracker.number, labels: ['tracking'],
+                });
+                core.info(`Added missing tracking label to #${tracker.number}.`);
+              } catch (e) {
+                core.warning(`Could not add tracking label to #${tracker.number}: ${e.message}`);
+              }
             }
 
             // 5. Idempotency: skip if an advisory for THIS PR already exists.
