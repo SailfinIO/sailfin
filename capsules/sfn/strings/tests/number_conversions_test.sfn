@@ -1,0 +1,62 @@
+// Tests for the sfn/strings int<->string surface (SFN-35): `int_to_string`
+// (base-10 formatter) and `parse_int` (strict base-10 parser). These are the
+// canonical helpers that replaced the per-capsule `_int_to_string` copies in
+// sfn/http and sfn/cli.
+import { int_to_string, parse_int } from "../src/mod";
+
+fn _ok_value(result: Result<int, string>) -> int {
+    match result {
+        Result.Ok { value } => { return value; },
+        Result.Err { error } => { return -999999; }
+    }
+    return -999999;
+}
+
+fn _is_ok(result: Result<int, string>) -> boolean {
+    match result {
+        Result.Ok { value } => { return true; },
+        Result.Err { error } => { return false; }
+    }
+    return false;
+}
+
+test "strings: int_to_string formats zero and positives" {
+    assert strings_equal(int_to_string(0), "0");
+    assert strings_equal(int_to_string(7), "7");
+    assert strings_equal(int_to_string(42), "42");
+    assert strings_equal(int_to_string(120), "120");
+    assert strings_equal(int_to_string(1000000), "1000000");
+}
+
+test "strings: int_to_string formats negatives" {
+    assert strings_equal(int_to_string(-7), "-7");
+    assert strings_equal(int_to_string(-120), "-120");
+}
+
+test "strings: parse_int reads unsigned decimals" {
+    assert _is_ok(parse_int("0"));
+    assert _ok_value(parse_int("0")) == 0;
+    assert _ok_value(parse_int("42")) == 42;
+    assert _ok_value(parse_int("1000000")) == 1000000;
+}
+
+test "strings: parse_int reads signed decimals" {
+    assert _ok_value(parse_int("-7")) == 0 - 7;
+    assert _ok_value(parse_int("+9")) == 9;
+    assert _ok_value(parse_int("-1000000")) == 0 - 1000000;
+}
+
+test "strings: parse_int round-trips int_to_string" {
+    assert _ok_value(parse_int(int_to_string(0))) == 0;
+    assert _ok_value(parse_int(int_to_string(2036))) == 2036;
+    assert _ok_value(parse_int(int_to_string(0 - 2036))) == 0 - 2036;
+}
+
+test "strings: parse_int rejects non-numeric input" {
+    assert ! _is_ok(parse_int(""));
+    assert ! _is_ok(parse_int("abc"));
+    assert ! _is_ok(parse_int("12a"));
+    assert ! _is_ok(parse_int("-"));
+    assert ! _is_ok(parse_int("+"));
+    assert ! _is_ok(parse_int(" 5"));
+}

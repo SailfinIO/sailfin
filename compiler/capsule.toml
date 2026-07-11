@@ -41,6 +41,13 @@ sfn = "0.8.0-alpha.3"
 # matches the `sfn/runtime-native` convention; the capsule is at
 # 0.13.1 (workspace member `capsules/sfn/cli`).
 "sfn/cli" = "*"
+# SFN-35: `sfn/cli` now imports `int_to_string` from `sfn/strings` (dropping
+# its private `_int_to_string` copies), so the self-hosted build must stage
+# `sfn/strings` too — capsule dependency resolution here is flat, not
+# transitive, so a capsule the compiler reaches only through `sfn/cli` must be
+# declared directly. `sfn/strings` is a pure (`required = []`) source capsule
+# (workspace member `capsules/sfn/strings`).
+"sfn/strings" = "*"
 # SFEP-0046 §3.5 / §4: `sfn toolchain install` verifies a signed release
 # manifest with `ed25519_verify_utf8` before extracting a fetched
 # toolchain. Declared like `sfn/cli` — a normal source capsule staged +

@@ -236,3 +236,62 @@ fn is_blank(text: string) -> boolean {
     // Returns true if the string is empty or contains only whitespace.
     return trim(text).length == 0;
 }
+
+fn int_to_string(value: int) -> string {
+    // Format a base-10 integer; negatives get a leading "-", zero is "0".
+    // Replaces the per-capsule `_int_to_string` copies (SFN-35).
+    if value == 0 { return "0"; }
+    let table = "0123456789";
+    let mut n = value;
+    let mut negative = false;
+    if n < 0 {
+        negative = true;
+        n = 0 - n;
+    }
+    let mut digits = "";
+    loop {
+        if n == 0 { break; }
+        let d = n - (n / 10) * 10;
+        digits = substring(table, d, d + 1) + digits;
+        n = n / 10;
+    }
+    if negative { return "-" + digits; }
+    return digits;
+}
+
+fn parse_int(text: string) -> Result<int, string> {
+    // Parse a base-10 integer with an optional leading "+"/"-". The whole
+    // string must be a sign followed by at least one digit; empty input, a
+    // lone sign, or any non-digit byte (including a trailing one) is an
+    // error. Overflow past the int range is not detected (SFN-35).
+    let n = text.length;
+    if n == 0 {
+        return Result.Err { error: "parse_int: empty string" };
+    }
+    let mut i: int = 0;
+    let mut negative = false;
+    let first = text[0];
+    if first == "-" {
+        negative = true;
+        i = 1;
+    } else if first == "+" { i = 1; }
+    if i >= n {
+        return Result.Err { error: "parse_int: no digits in \"" + text + "\"" };
+    }
+    let mut value: int = 0;
+    loop {
+        if i >= n { break; }
+        let code = char_code(text[i]);
+        if code < 48 || code > 57 {
+            return Result.Err {
+                error: "parse_int: invalid digit in \"" + text + "\""
+            };
+        }
+        value = value * 10 + (code - 48);
+        i += 1;
+    }
+    if negative {
+        return Result.Ok { value: 0 - value };
+    }
+    return Result.Ok { value: value };
+}

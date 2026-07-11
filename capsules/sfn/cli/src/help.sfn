@@ -13,6 +13,8 @@
 // modularization proposal §3.1) because it is only used by the help
 // renderer. Keeping it next to its only caller avoids a circular import
 // between `parser.sfn` (which calls `_format_help`) and `help.sfn`.
+import { int_to_string } from "sfn/strings";
+
 import {
     Command,
     HelpFlag,
@@ -176,33 +178,7 @@ fn _json_bool_field(name: string, value: boolean) -> string {
 }
 
 fn _json_number_field(name: string, value: int) -> string {
-    return _json_field(name, _json_number_to_string(value));
-}
-
-fn _json_number_to_string(value: int) -> string {
-    if value == 0 { return "0"; }
-    let digits = "0123456789";
-    let mut working = value;
-    let mut negative = false;
-    if working < 0 {
-        negative = true;
-        working = 0 - working;
-    }
-    let mut out = "";
-    loop {
-        if working <= 0 { break; }
-        let mut temp = working;
-        let mut quotient = 0;
-        loop {
-            if temp < 10 { break; }
-            temp -= 10;
-            quotient += 1;
-        }
-        out = substring(digits, temp, temp + 1) + out;
-        working = quotient;
-    }
-    if negative { out = "-" + out; }
-    return out;
+    return _json_field(name, int_to_string(value));
 }
 
 fn _json_join(parts: string[], sep: string) -> string {

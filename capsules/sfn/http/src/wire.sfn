@@ -15,31 +15,11 @@
 // only, no percent-decoding of paths/queries, no chunked decoding, no
 // multi-line (obs-fold) header continuation. Header names are matched
 // case-insensitively (RFC 7230 §3.2); values are returned trimmed.
+import { int_to_string } from "sfn/strings";
+
 import { Request, Response } from "./types";
 
 // ── private helpers ───────────────────────────────────────────────
-// Minimal base-10 int formatter (the prelude exposes no int->string
-// intrinsic to capsules yet; mirrors sfn/cli's `_int_to_string`).
-fn _int_to_string(value: int) -> string {
-    if value == 0 { return "0"; }
-    let table = "0123456789";
-    let mut n = value;
-    let mut negative = false;
-    if n < 0 {
-        negative = true;
-        n = 0 - n;
-    }
-    let mut digits = "";
-    loop {
-        if n == 0 { break; }
-        let d = n - (n / 10) * 10;
-        digits = substring(table, d, d + 1) + digits;
-        n = n / 10;
-    }
-    if negative { return "-" + digits; }
-    return digits;
-}
-
 // Strip ASCII spaces and tabs from both ends (header field values are
 // `OWS`-padded). Newlines are not expected mid-field after line splitting.
 fn _trim(value: string) -> string {
@@ -314,7 +294,7 @@ fn parse_response(raw: string) -> Response {
 // connection alive for an HTTP/1.1 client that did not send `Connection:
 // close` (see `server.sfn::_sfn_http_trampoline`). v0 is text bodies only.
 fn serialize_response(rsp: Response, keep_alive: boolean = false) -> string {
-    let mut out = "HTTP/1.1 " + _int_to_string(rsp.status) + " " + reason_phrase(rsp.status)
+    let mut out = "HTTP/1.1 " + int_to_string(rsp.status) + " " + reason_phrase(rsp.status)
         + "\r\n";
     let mut i = 0;
     loop {
@@ -323,7 +303,7 @@ fn serialize_response(rsp: Response, keep_alive: boolean = false) -> string {
         if !_has_crlf(h) && !_is_reserved_header(h) { out = out + h + "\r\n"; }
         i = i + 1;
     }
-    out = out + "Content-Length: " + _int_to_string(rsp.body.length) + "\r\n";
+    out = out + "Content-Length: " + int_to_string(rsp.body.length) + "\r\n";
     if keep_alive { out = out + "Connection: keep-alive\r\n"; } else {
         out = out + "Connection: close\r\n";
     }
