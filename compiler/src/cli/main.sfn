@@ -50,6 +50,7 @@ import { command_def as bench_command_def, run as bench_run } from "./commands/b
 import { command_def as build_command_def, run as build_run } from "./commands/build";
 import { command_def as cache_command_def, run as cache_run } from "./commands/cache";
 import { command_def as check_command_def, run as check_run } from "./commands/check";
+import { command_def as completion_command_def, run as completion_run } from "./commands/completion";
 import { command_def as config_command_def, run as config_run } from "./commands/config";
 import { command_def as dev_command_def, run as dev_run } from "./commands/dev";
 import { command_def as emit_command_def, run as emit_run } from "./commands/emit";
@@ -102,6 +103,7 @@ fn _usage() -> string {
     out = out + "meta:\n";
     out = out + "  sfn version\n";
     out = out + "  sfn --version\n";
+    out = out + "  sfn completion <shell>\n";
     out = out + "\n";
     out = out + "examples:\n";
     out = out + "  sfn run examples/basics/hello-world.sfn\n";
@@ -232,6 +234,7 @@ fn sailfin_cli_main_v2(argv: string[]) -> int ![clock, io, net] {
     root = with_subcommand(root, build_command_def());
     root = with_subcommand(root, run_command_def());
     root = with_subcommand(root, bench_command_def());
+    root = with_subcommand(root, completion_command_def());
 
     // Machine-readable top-level help for tools and agents. This bypasses
     // `parse()` intentionally: `--json` is a modifier for root help, not a
@@ -590,6 +593,25 @@ fn sailfin_cli_main_v2(argv: string[]) -> int ![clock, io, net] {
         if ctx.trace_argv { _v2_trace_argv(argv); }
         if parse_ok { return bench_run(matches, ctx); }
         print("usage: sfn bench --compiler [--module M]... [--top N] [--csv PATH] [--budget-time S] [--budget-mem KB] [--import-context DIR] [--work-dir DIR]");
+        return 2;
+    }
+
+    // `sfn completion <shell>` — the registered subcommand matched. Unlike
+    // the other subcommands, `run` also receives the root `HelpNode`
+    // (`render_help_tree(root)`): the completion generator introspects the
+    // whole command tree — the same source `--help --json` renders — not just
+    // this command's matches. A clean parse dispatches to `completion.run`
+    // (exit 0 / exit 2 on an unsupported shell); a non-ok parse that still
+    // descended into `completion` (a missing/surplus positional, or `--help`)
+    // is a usage error (exit 2) — the parser owns argument validation. The
+    // literal `2` mirrors the dispatches above (the `sfn/cli` `EXIT_*`
+    // constants lower to 0 here).
+    if strings_equal(subcommand(matches), "completion") {
+        if ctx.trace_argv { _v2_trace_argv(argv); }
+        if parse_ok {
+            return completion_run(matches, ctx, render_help_tree(root));
+        }
+        print("usage: sfn completion <shell>");
         return 2;
     }
 

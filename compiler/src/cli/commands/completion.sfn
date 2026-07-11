@@ -1,0 +1,62 @@
+// compiler/src/cli/commands/completion.sfn
+//
+// `completion` subcommand (SFEP-0027 Phase D, carried from SFEP-0009 §5):
+// emit a shell-completion script enumerating the registered command tree.
+// The script is generated from the live `sfn/cli` HelpNode — the same
+// introspection source as `--help --json` — so it cannot drift from the
+// commands and flags the CLI actually exposes.
+//
+// `command_def()` registers `completion <shell>` on the v2 root; `run` reads
+// the `<shell>` positional, validates it against `completion_shells()`, and
+// prints the generated script. The root `HelpNode` is threaded in from the
+// dispatcher (`main.sfn`) because the generator introspects the whole tree,
+// not just this command's own matches.
+import {
+    Command,
+    HelpNode,
+    Matches,
+    arg,
+    command,
+    completion_shells,
+    get,
+    render_completion,
+    with_arg
+} from "sfn/cli";
+
+import { CliContext } from "../context";
+
+// The `sfn/cli` definition for `completion`, registered on the v2 root via
+// `with_subcommand`. One required positional selects the target shell.
+fn command_def() -> Command {
+    return with_arg(command("completion", "Print a shell-completion script for the sfn command tree"), arg("shell", "Target shell: bash"));
+}
+
+fn _shell_list() -> string {
+    let shells = completion_shells();
+    if shells.length == 0 { return ""; }
+    let mut out = shells[0];
+    let mut i: int = 1;
+    loop {
+        if i >= shells.length { break; }
+        out = out + ", " + shells[i];
+        i += 1;
+    }
+    return out;
+}
+
+// Print the completion script for the requested shell. `ctx` is part of the
+// per-command contract but unused; `root` is the full command tree the script
+// is generated from. Exit 0 on a supported shell; exit 2 (usage error) on an
+// unsupported one, matching the CLI's other argument-validation exits.
+fn run(matches: Matches, ctx: CliContext, root: HelpNode) -> int ![io] {
+    let shell = get(matches, "shell");
+    let script = render_completion(root, shell);
+    if script.length == 0 {
+        print.err("error: unsupported shell '" + shell + "' (supported: "
+            + _shell_list()
+            + ")");
+        return 2;
+    }
+    print(script);
+    return 0;
+}

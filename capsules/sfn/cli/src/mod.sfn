@@ -35,6 +35,8 @@
 //   - matches.sfn     get, get_or, has_flag, has, subcommand, positionals
 //   - help.sfn        help, print_help, render_help_tree,
 //                     render_help_text, _format_help, width helpers
+//   - completion.sfn  completion_shells, render_completion (shell-completion
+//                     scripts from the same HelpNode tree)
 //   - style.sfn       bold, dim, color helpers, no_color_active,
 //                     style_for_stream, style_with_mode,
 //                     style_resolve, paint, paint_* helpers,
@@ -137,6 +139,9 @@ export {
     render_help_json,
     render_help_text
 } from "./help";
+
+// ---- Shell completion ----
+export { completion_shells, render_completion } from "./completion";
 
 // ---- Terminal styling ----
 export {
