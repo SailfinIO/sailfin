@@ -8,7 +8,9 @@
 // `SAILFIN_LINKER` override, and falls back to the system default.
 //
 // Observable CLI contract pinned here:
-//   - the chosen linker is surfaced on a `[link] linker: …` line,
+//   - the chosen linker is surfaced on a `[link] linker: …` line under
+//     `SAILFIN_TRACE_LINK=1` (the diagnostic is trace-gated so a default
+//     `sfn run`/`sfn build` stays quiet),
 //   - that line goes to STDERR, never stdout (so it cannot corrupt a
 //     program's stdout under a downstream pipe — the #915 invariant),
 //   - `SAILFIN_LINKER=ld` forces the system default (no `-fuse-ld`),
@@ -61,12 +63,15 @@ fn _src() -> string {
 // Build the probe with the given SAILFIN_LINKER value (empty = auto-
 // detect), capturing stdout/stderr to SEPARATE marker files (so the
 // stdout-purity assertion is meaningful). Returns the build exit code.
+// `SAILFIN_TRACE_LINK=1` is threaded so the trace-gated `[link] linker:`
+// diagnostic is emitted for the assertions below.
 fn _build(tag: string, linker: string) -> int ![io] {
     let dir = _dir(tag);
     fs.createDirectory(dir, true);
     let src = dir + "/main.sfn";
     fs.writeFile(src, _src());
     let mut e = _child_env();
+    e.push("SAILFIN_TRACE_LINK=1");
     if linker.length > 0 { e.push("SAILFIN_LINKER=" + linker); }
     let rc = process.run_capture([_sfn_bin(), "build", "-o", _bin(tag), src], e);
     let out = process.capture_take_stdout();

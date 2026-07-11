@@ -174,12 +174,14 @@ fn run(matches: Matches, ctx: CliContext) -> int ![clock, io, net] {
     // Keep `sfn run` quiet by default: stdout/stderr should belong to the
     // program unless the user asks for cache telemetry. Runtime object-cache
     // stats still fold in alongside the `.ll` module cache total (#915),
-    // gated on `run_cache_config.enabled` so `--no-cache` stays quiet.
+    // gated on `run_cache_config.enabled` so `--no-cache` stays quiet. The
+    // summary itself is gated on the resolved `run_cache_config.trace`, so
+    // `SAILFIN_CACHE_TRACE=1` layers in exactly like `--cache-trace`.
     let mut run_cache_stats = run_capsule_result.stats;
     if run_cache_config.enabled {
         run_cache_stats = merge_cache_stats(run_capsule_result.stats, link_result.stats);
     }
-    if cache_trace_flag { _print_cache_summary(run_cache_stats); }
+    if run_cache_config.trace { _print_cache_summary(run_cache_stats); }
     let run_rc = process.run([exe_path]);
     return run_rc;
 }
