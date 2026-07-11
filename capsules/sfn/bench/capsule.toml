@@ -1,0 +1,13 @@
+[capsule]
+name = "sfn/bench"
+version = "0.1.0"
+description = "In-language microbenchmark harness for Sailfin (the parallel to sfn/test)"
+
+[dependencies]
+
+[capabilities]
+required = ["clock", "io"]
+
+[build]
+entry = "src/mod.sfn"
+kind = "library"

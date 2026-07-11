@@ -1,0 +1,150 @@
+// capsules/sfn/bench/src/mod.sfn — In-language microbenchmark harness.
+//
+// The benchmarking parallel to `sfn/test`: a Sailfin program links this
+// capsule to measure its own hot paths, and the bundled runtime workloads
+// migrate onto it (SFN-63). A harness call brackets a caller-supplied `body`
+// closure with the monotonic clock, auto-calibrates the invocation count so
+// the timed window dwarfs the (whole-millisecond) timer resolution, defeats
+// dead-code elimination via `keep`, and emits one structured, machine-
+// parseable record per benchmark for the `sfn bench` runner (SFN-63) to
+// aggregate.
+//
+// Timing rides the prelude's public `monotonic_millis()` (`![clock]`).
+// Nanosecond-resolution bracketing waits on a public `monotonic_nanos()`,
+// deferred to the rusage child of the `sfn bench` epic per SFN-62's scope
+// note ("monotonic_nanos if not added by the rusage child"); auto-calibration
+// is what makes the coarse timer sufficient in the meantime.
+//
+// Effect model: a `body: fn () -> int` parameter carries no effect row — the
+// effect checker attributes a closure's effects to the scope that *defines*
+// it, so a caller that builds an `![io]`/`![clock]` body already accounts for
+// those effects; the harness only declares the `![clock, io]` it uses
+// directly (clock brackets + record print). This mirrors `sfn/test`'s scoped
+// fixtures (capsules/sfn/test/src/fixtures.sfn).
+// Grow the timed window to at least this many milliseconds before reporting,
+// so whole-millisecond quantization contributes under ~1% of the measurement.
+// Auto-calibration exists precisely because the timer is coarse.
+let _TARGET_MS: int = 100;
+
+// Bounds on the calibration search, guarding the input-driven growth loop
+// (code-style: guard counters on growth loops). A body whose single batch is
+// already slower than the target reports at the cap rather than spinning.
+let _MAX_OPS: int = 2000000000;
+let _MAX_GROWS: int = 60;
+
+// Invocation count for the first calibration batch.
+let _SEED_OPS: int = 1024;
+
+// ---------------------------------------------------------------------------
+// Black-box sink
+// ---------------------------------------------------------------------------
+// Force the optimizer to materialize `x` so a benchmarked computation whose
+// result is otherwise unused is not eliminated. A data-dependent branch on a
+// runtime value the compiler cannot fold does the job (the Rust `black_box`
+// intent) without an effect. Callers wrap the final result of the code under
+// test; the harness threads every `body` return through it internally.
+fn keep(x: int) -> int {
+    // 2147483647 is an arbitrary sentinel the compiler cannot prove `x` avoids,
+    // so the branch — and with it `x` — is never folded away.
+    if x == 2147483647 { return 0 - x; }
+    return x;
+}
+
+// ---------------------------------------------------------------------------
+// Structured record
+// ---------------------------------------------------------------------------
+// The one record the `sfn bench` runner (SFN-63) parses: a stable versioned
+// prefix, then space-separated `key=value` fields with `name` last so a name
+// containing spaces is still recoverable as the remainder of the line. One
+// record is emitted per benchmark on stdout.
+fn record_line(name: string, ops: int, inner_ms: int) -> string {
+    return "bench-record/1 ops=" + number_to_string(ops) + " inner_ms="
+        + number_to_string(inner_ms)
+        + " name="
+        + name;
+}
+
+// Emit the record. The line is bound to a local before printing: on this
+// compiler a `+`-concatenation passed straight to `print` produces no stdout
+// output, whereas a bound string prints (benchmarks/runtime/README.md).
+fn _emit(name: string, ops: int, inner_ms: int) ![io] {
+    let line = record_line(name, ops, inner_ms);
+    print(line);
+}
+
+// ---------------------------------------------------------------------------
+// Timed execution
+// ---------------------------------------------------------------------------
+// Invoke `body` exactly `count` times, threading its returned sink through an
+// accumulator so the optimizer cannot prove the calls dead. Returns the raw
+// accumulation; callers pass it through `keep` before it escapes. `body`'s own
+// effects are charged to the scope that defines it, so this helper is
+// effect-free.
+fn _run(body: fn () -> int, count: int) -> int {
+    let mut acc = 0;
+    let mut i = 0;
+    loop {
+        if i >= count { break; }
+        acc = acc + body();
+        i = i + 1;
+    }
+    return acc;
+}
+
+// Next calibration batch size: when the last window was unmeasurable (0 ms),
+// leap by a fixed factor; otherwise scale toward twice the target for
+// headroom, never shrinking and never overflowing the cap.
+fn _next_ops(ops: int, inner_ms: int) -> int {
+    if inner_ms <= 0 {
+        let leap = ops * 8;
+        if leap > _MAX_OPS { return _MAX_OPS; }
+        return leap;
+    }
+    let scaled = ops * _TARGET_MS * 2 / inner_ms;
+    let mut next = scaled;
+    if next <= ops { next = ops * 2; }
+    if next > _MAX_OPS { next = _MAX_OPS; }
+    return next;
+}
+
+// ---------------------------------------------------------------------------
+// Public harness
+// ---------------------------------------------------------------------------
+// Run `body` exactly `ops` times under the monotonic clock, emit the record,
+// and return the black-box-kept accumulation of `body`'s returns. The fixed-
+// count variant: deterministic given a deterministic body, so it is what the
+// harness's own tests drive and what a caller reaches for to control the
+// invocation count directly rather than auto-calibrating.
+fn benchmark_fixed(name: string, ops: int, body: fn () -> int) -> int ![clock, io] {
+    let start = monotonic_millis();
+    let acc = _run(body, ops);
+    let inner_ms = monotonic_millis() - start;
+    let kept = keep(acc);
+    _emit(name, ops, inner_ms);
+    return kept;
+}
+
+// Auto-calibrating harness (the headline API): grow the invocation count until
+// a timed batch reaches the target window, then emit that batch's record. This
+// removes the hand-tuned iteration constants the ad-hoc workloads carry — the
+// body is one unit of work and the harness supplies the repetition. Returns
+// the black-box-kept accumulation so the calibrated work cannot be elided.
+fn benchmark(name: string, body: fn () -> int) -> int ![clock, io] {
+    let mut ops = _SEED_OPS;
+    let mut acc = 0;
+    let mut inner_ms = 0;
+    let mut grows = 0;
+    loop {
+        let start = monotonic_millis();
+        acc = _run(body, ops);
+        inner_ms = monotonic_millis() - start;
+        if inner_ms >= _TARGET_MS { break; }
+        if ops >= _MAX_OPS { break; }
+        if grows >= _MAX_GROWS { break; }
+        grows = grows + 1;
+        ops = _next_ops(ops, inner_ms);
+    }
+    let kept = keep(acc);
+    _emit(name, ops, inner_ms);
+    return kept;
+}

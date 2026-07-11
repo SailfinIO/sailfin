@@ -1,0 +1,25 @@
+// Tests for the sfn/bench harness (SFN-62): the black-box sink, the structured
+// record format, and the fixed-count runner's invocation count. The auto-
+// calibrating `benchmark(...)` is covered end-to-end by `sample_run_test.sfn`
+// (its calibrated op count is timing-dependent, so it is exercised through the
+// runnable sample rather than pinned here).
+import { benchmark_fixed, keep, record_line } from "../src/mod";
+
+test "bench: keep returns its argument unchanged" {
+    assert keep(5) == 5;
+    assert keep(0) == 0;
+    assert keep(0 - 7) == 0 - 7;
+}
+
+test "bench: record_line formats the structured bench record" {
+    let line = record_line("arena_alloc", 1000, 50);
+    assert line == "bench-record/1 ops=1000 inner_ms=50 name=arena_alloc";
+}
+
+test "bench: benchmark_fixed invokes the body exactly ops times" ![clock, io] {
+    // Each body call returns 1, so the black-box-kept accumulation equals the
+    // invocation count — a deterministic proof the fixed runner drives `body`
+    // exactly `ops` times.
+    let n = benchmark_fixed("unit", 10, fn () -> int { return 1; });
+    assert n == 10;
+}
