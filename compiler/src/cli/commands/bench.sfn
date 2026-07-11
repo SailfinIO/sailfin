@@ -38,6 +38,7 @@ import { number_to_string } from "../../num_format";
 import { char_code_at_text, index_of } from "../../string_utils";
 import { resolve_compiler_version } from "../../version";
 import { CliContext } from "../context";
+import { BenchJsonResult, render_bench_json_envelope } from "./bench_json";
 
 // The `sfn/cli` definition for `bench`, registered on the v2 root via
 // `with_subcommand`. Two modes share one command: the default runtime mode
@@ -60,6 +61,7 @@ fn command_def() -> Command {
     cmd = with_flag(cmd, flag_int("budget-time", "Fail (exit 2) if any workload/module exceeds this budget (runtime: median inner-ms; compiler: wall seconds)"));
     cmd = with_flag(cmd, flag_int("budget-mem", "Fail (exit 2) if any workload/module exceeds this peak RSS in KB"));
     cmd = with_flag(cmd, flag_value("work-dir", "Directory for staged sources + built binaries / emitted .ll (default build/bench-exec, or build/bench for --compiler)"));
+    cmd = with_flag(cmd, flag("json", "Emit results as a sailfin.bench/v1 JSON envelope on stdout, suppressing the human table (redirect to a file; pairs with --csv)"));
     cmd = with_arg(cmd, arg_variadic("path", "Runtime mode: one or more workload files or directories of *_bench.sfn (default: benchmarks/runtime)"));
     return cmd;
 }
@@ -169,6 +171,7 @@ fn _run_compiler_mode(matches: Matches, ctx: CliContext) -> int ![clock, io] {
         budget_mem = get_int(matches, "budget-mem");
     }
     let modules = repeated(matches, "module");
+    let json = has_flag(matches, "json");
 
     if !fs.exists(import_ctx) {
         print.err("[bench] error: import-context not found at " + import_ctx);
@@ -178,16 +181,19 @@ fn _run_compiler_mode(matches: Matches, ctx: CliContext) -> int ![clock, io] {
 
     let self_bin = _resolve_self_path(ctx.binary_dir);
     let version = resolve_compiler_version(ctx.binary_dir);
+    let platform = _bench_rt_platform();
 
     let all = _collect_sfn_files_cmd("compiler/src", 32);
     let mut sources: string[] = all;
     if modules.length > 0 { sources = _bench_filter_sources(all, modules); }
 
-    print("[bench] seed: " + self_bin + " (" + version + ")");
-    print("[bench] modules: " + number_to_string(sources.length));
-    print("");
-    print("  MODULE                                                     TIME      PEAK     IR LINES  STATUS");
-    print("  ------                                                     ----      ----     --------  ------");
+    if !json {
+        print("[bench] seed: " + self_bin + " (" + version + ")");
+        print("[bench] modules: " + number_to_string(sources.length));
+        print("");
+        print("  MODULE                                                     TIME      PEAK     IR LINES  STATUS");
+        print("  ------                                                     ----      ----     --------  ------");
+    }
 
     _ensure_dir(work_dir);
 
@@ -247,11 +253,14 @@ fn _run_compiler_mode(matches: Matches, ctx: CliContext) -> int ![clock, io] {
         lines_list.push(ir_lines);
         status_list.push(status);
 
-        print("  " + name + "  " + _fmt_secs(wall_ms) + "s  " + number_to_string(peak_kb / 1024)
-            + "MB  "
-            + number_to_string(ir_lines)
-            + "  "
-            + status);
+        if !json {
+            print("  " + name + "  " + _fmt_secs(wall_ms) + "s  "
+                + number_to_string(peak_kb / 1024)
+                + "MB  "
+                + number_to_string(ir_lines)
+                + "  "
+                + status);
+        }
         i += 1;
     }
 
@@ -282,32 +291,36 @@ fn _run_compiler_mode(matches: Matches, ctx: CliContext) -> int ![clock, io] {
         i += 1;
     }
 
-    print("");
-    print("==================================================================");
-    print("");
-    print("  SUMMARY");
-    print("  -------");
-    print("  Modules:       " + number_to_string(names.length));
-    print("  Total time:    " + _fmt_secs(total_ms) + "s");
-    print("  Slowest:       " + _fmt_secs(max_ms) + "s  (" + max_ms_name + ")");
-    print("  Peak memory:   " + number_to_string(max_kb / 1024) + "MB  ("
-        + max_kb_name
-        + ")");
-    if fail_count > 0 {
-        print("  FAILURES:      " + number_to_string(fail_count));
+    if !json {
+        print("");
+        print("==================================================================");
+        print("");
+        print("  SUMMARY");
+        print("  -------");
+        print("  Modules:       " + number_to_string(names.length));
+        print("  Total time:    " + _fmt_secs(total_ms) + "s");
+        print("  Slowest:       " + _fmt_secs(max_ms) + "s  (" + max_ms_name
+            + ")");
+        print("  Peak memory:   " + number_to_string(max_kb / 1024) + "MB  ("
+            + max_kb_name
+            + ")");
+        if fail_count > 0 {
+            print("  FAILURES:      " + number_to_string(fail_count));
+        }
+        if budget_time > 0 {
+            print("  Over budget:   " + number_to_string(slow_count)
+                + " modules > "
+                + number_to_string(budget_time)
+                + "s");
+        }
+        if budget_mem > 0 {
+            print("  Over memory:   " + number_to_string(highmem_count)
+                + " modules > "
+                + number_to_string(budget_mem / 1024)
+                + "MB");
+        }
+        print("");
     }
-    if budget_time > 0 {
-        print("  Over budget:   " + number_to_string(slow_count) + " modules > "
-            + number_to_string(budget_time)
-            + "s");
-    }
-    if budget_mem > 0 {
-        print("  Over memory:   " + number_to_string(highmem_count)
-            + " modules > "
-            + number_to_string(budget_mem / 1024)
-            + "MB");
-    }
-    print("");
 
     if csv_out.length > 0 {
         let csv_dir_slash = index_of(csv_out, "/");
@@ -340,10 +353,10 @@ fn _run_compiler_mode(matches: Matches, ctx: CliContext) -> int ![clock, io] {
             i += 1;
         }
         fs.writeFile(csv_out, csv_content);
-        print("[bench] wrote " + csv_out);
+        if !json { print("[bench] wrote " + csv_out); }
     }
 
-    if top_n > 0 && names.length > top_n {
+    if !json && top_n > 0 && names.length > top_n {
         print("  TOP " + number_to_string(top_n) + " BY COMPILE TIME");
         print("  -------------------------");
         let mut order: int[] = [];
@@ -378,6 +391,28 @@ fn _run_compiler_mode(matches: Matches, ctx: CliContext) -> int ![clock, io] {
             t += 1;
         }
         print("");
+    }
+
+    let mut exit_code = 0;
+    if fail_count > 0 { exit_code = 1; } else if slow_count > 0 || highmem_count > 0 {
+        exit_code = 2;
+    }
+
+    if json {
+        // Compiler mode measures one emit per module, so the spread collapses
+        // to a single wall-clock sample (min = median = max, stddev = 0) and
+        // there is no op count. config mirrors that: one iteration, no warm-up.
+        let mut jresults: BenchJsonResult[] = [];
+        let mut ji = 0;
+        loop {
+            if ji >= names.length { break; }
+            jresults.push(BenchJsonResult {
+                name: names[ji], ops: 0, time_min: wall_ms_list[ji], time_median: wall_ms_list[ji], time_max: wall_ms_list[ji], time_stddev: 0, peak_rss_kb: peak_kb_list[ji], status: status_list[ji]
+            });
+            ji += 1;
+        }
+        print(render_bench_json_envelope("compiler", version, platform, 1, 0, exit_code, jresults));
+        return exit_code;
     }
 
     if fail_count > 0 {
@@ -603,6 +638,57 @@ fn _bench_rt_min(xs: int[]) -> int {
     return m;
 }
 
+fn _bench_rt_max(xs: int[]) -> int {
+    if xs.length == 0 { return 0; }
+    let mut m = xs[0];
+    let mut i = 1;
+    loop {
+        if i >= xs.length { break; }
+        if xs[i] > m { m = xs[i]; }
+        i += 1;
+    }
+    return m;
+}
+
+// Floor integer square root via binary search — no float dependency, so the
+// stddev column stays int-only like the rest of the bench math.
+fn _bench_rt_isqrt(n: int) -> int {
+    if n <= 0 { return 0; }
+    let mut lo = 1;
+    let mut hi = n;
+    loop {
+        if lo >= hi { break; }
+        let mid = (lo + hi + 1) / 2;
+        if mid <= n / mid { lo = mid; } else { hi = mid - 1; }
+    }
+    return lo;
+}
+
+// Population standard deviation (floor, ms) of the timing samples, for the
+// JSON `time_ms.stddev` field. Integer mean and variance keep the value in
+// the same millisecond units as the other timing columns.
+fn _bench_rt_stddev(xs: int[]) -> int {
+    let n = xs.length;
+    if n == 0 { return 0; }
+    let mut sum = 0;
+    let mut i = 0;
+    loop {
+        if i >= n { break; }
+        sum += xs[i];
+        i += 1;
+    }
+    let mean = sum / n;
+    let mut acc = 0;
+    i = 0;
+    loop {
+        if i >= n { break; }
+        let d = xs[i] - mean;
+        acc += d * d;
+        i += 1;
+    }
+    return _bench_rt_isqrt(acc / n);
+}
+
 // Median of `xs` (insertion sort over a copy); even length averages the two
 // middle samples, matching the former `bench_runtime.sh`'s integer median.
 fn _bench_rt_median(xs: int[]) -> int {
@@ -690,6 +776,8 @@ struct RtResult {
     name: string;
     inner_min: int;
     inner_median: int;
+    inner_max: int;
+    inner_stddev: int;
     peak_kb: int;
     ops: int;
     ops_per_ms: string;
@@ -727,6 +815,8 @@ fn _bench_rt_one(self_bin: string, src: string, work_dir: string, child_env: str
             name: name,
             inner_min: 0,
             inner_median: 0,
+            inner_max: 0,
+            inner_stddev: 0,
             peak_kb: 0,
             ops: 0,
             ops_per_ms: "0.0",
@@ -778,6 +868,8 @@ fn _bench_rt_one(self_bin: string, src: string, work_dir: string, child_env: str
             name: name,
             inner_min: 0,
             inner_median: 0,
+            inner_max: 0,
+            inner_stddev: 0,
             peak_kb: peak_kb,
             ops: 0,
             ops_per_ms: "0.0",
@@ -787,6 +879,8 @@ fn _bench_rt_one(self_bin: string, src: string, work_dir: string, child_env: str
 
     let inner_min = _bench_rt_min(samples);
     let inner_median = _bench_rt_median(samples);
+    let inner_max = _bench_rt_max(samples);
+    let inner_stddev = _bench_rt_stddev(samples);
     let mut status = "ok";
     if runfail { status = "RUNFAIL"; }
     if budget_time > 0 && inner_median > budget_time {
@@ -803,6 +897,8 @@ fn _bench_rt_one(self_bin: string, src: string, work_dir: string, child_env: str
         name: name,
         inner_min: inner_min,
         inner_median: inner_median,
+        inner_max: inner_max,
+        inner_stddev: inner_stddev,
         peak_kb: peak_kb,
         ops: ops,
         ops_per_ms: _bench_rt_ops_per_ms(ops, inner_median),
@@ -839,6 +935,7 @@ fn _run_runtime_mode(matches: Matches, ctx: CliContext) -> int ![clock, io] {
     if has(matches, "budget-mem") {
         budget_mem = get_int(matches, "budget-mem");
     }
+    let json = has_flag(matches, "json");
 
     let mut sources = _bench_rt_discover(paths);
     if filter.length > 0 { sources = _bench_rt_filter(sources, filter); }
@@ -851,26 +948,28 @@ fn _run_runtime_mode(matches: Matches, ctx: CliContext) -> int ![clock, io] {
     let version = resolve_compiler_version(ctx.binary_dir);
     let platform = _bench_rt_platform();
 
-    print("[bench] runner: " + self_bin + " (" + version + ")");
-    print("[bench] platform: " + platform);
-    print("[bench] workloads: " + number_to_string(sources.length));
-    print("[bench] timed runs per workload: " + number_to_string(iterations)
-        + " (+"
-        + number_to_string(warmup)
-        + " warm-up)");
-    print("");
-    print("  " + _bench_rt_pad("WORKLOAD", 31) + " " + _bench_rt_pad("MEDIAN", 10)
-        + "  "
-        + _bench_rt_pad("PEAK", 8)
-        + "  "
-        + _bench_rt_pad("OPS/MS", 10)
-        + "  STATUS");
-    print("  " + _bench_rt_pad("--------", 31) + " " + _bench_rt_pad("------", 10)
-        + "  "
-        + _bench_rt_pad("----", 8)
-        + "  "
-        + _bench_rt_pad("------", 10)
-        + "  ------");
+    if !json {
+        print("[bench] runner: " + self_bin + " (" + version + ")");
+        print("[bench] platform: " + platform);
+        print("[bench] workloads: " + number_to_string(sources.length));
+        print("[bench] timed runs per workload: " + number_to_string(iterations)
+            + " (+"
+            + number_to_string(warmup)
+            + " warm-up)");
+        print("");
+        print("  " + _bench_rt_pad("WORKLOAD", 31) + " " + _bench_rt_pad("MEDIAN", 10)
+            + "  "
+            + _bench_rt_pad("PEAK", 8)
+            + "  "
+            + _bench_rt_pad("OPS/MS", 10)
+            + "  STATUS");
+        print("  " + _bench_rt_pad("--------", 31) + " " + _bench_rt_pad("------", 10)
+            + "  "
+            + _bench_rt_pad("----", 8)
+            + "  "
+            + _bench_rt_pad("------", 10)
+            + "  ------");
+    }
 
     _ensure_dir(work_dir);
     let child_env = process.environ();
@@ -880,15 +979,17 @@ fn _run_runtime_mode(matches: Matches, ctx: CliContext) -> int ![clock, io] {
     loop {
         if i >= sources.length { break; }
         let r = _bench_rt_one(self_bin, sources[i], work_dir, child_env, iterations, warmup, budget_time, budget_mem);
-        print("  " + _bench_rt_pad(r.name, 31) + " " + _bench_rt_pad(number_to_string(r.inner_median)
-            + "ms", 10)
-            + "  "
-            + _bench_rt_pad(number_to_string(r.peak_kb / 1024)
-            + "MB", 8)
-            + "  "
-            + _bench_rt_pad(r.ops_per_ms, 10)
-            + "  "
-            + r.status);
+        if !json {
+            print("  " + _bench_rt_pad(r.name, 31) + " " + _bench_rt_pad(number_to_string(r.inner_median)
+                + "ms", 10)
+                + "  "
+                + _bench_rt_pad(number_to_string(r.peak_kb / 1024)
+                + "MB", 8)
+                + "  "
+                + _bench_rt_pad(r.ops_per_ms, 10)
+                + "  "
+                + r.status);
+        }
         results.push(r);
         i += 1;
     }
@@ -921,35 +1022,38 @@ fn _run_runtime_mode(matches: Matches, ctx: CliContext) -> int ![clock, io] {
         i += 1;
     }
 
-    print("");
-    print("==================================================================");
-    print("");
-    print("  SUMMARY");
-    print("  -------");
-    print("  Workloads:     " + number_to_string(results.length));
-    print("  Slowest:       " + number_to_string(slowest) + "ms  ("
-        + slowest_name
-        + ")");
-    print("  Peak memory:   " + number_to_string(max_mem / 1024) + "MB  ("
-        + max_mem_name
-        + ")");
-    if buildfail > 0 {
-        print("  BUILD FAILS:   " + number_to_string(buildfail));
+    if !json {
+        print("");
+        print("==================================================================");
+        print("");
+        print("  SUMMARY");
+        print("  -------");
+        print("  Workloads:     " + number_to_string(results.length));
+        print("  Slowest:       " + number_to_string(slowest) + "ms  ("
+            + slowest_name
+            + ")");
+        print("  Peak memory:   " + number_to_string(max_mem / 1024) + "MB  ("
+            + max_mem_name
+            + ")");
+        if buildfail > 0 {
+            print("  BUILD FAILS:   " + number_to_string(buildfail));
+        }
+        if runfail > 0 {
+            print("  RUN FAILS:     " + number_to_string(runfail));
+        }
+        if budget_time > 0 {
+            print("  Over budget:   " + number_to_string(slow) + " workloads > "
+                + number_to_string(budget_time)
+                + "ms");
+        }
+        if budget_mem > 0 {
+            print("  Over memory:   " + number_to_string(highmem)
+                + " workloads > "
+                + number_to_string(budget_mem / 1024)
+                + "MB");
+        }
+        print("");
     }
-    if runfail > 0 {
-        print("  RUN FAILS:     " + number_to_string(runfail));
-    }
-    if budget_time > 0 {
-        print("  Over budget:   " + number_to_string(slow) + " workloads > "
-            + number_to_string(budget_time)
-            + "ms");
-    }
-    if budget_mem > 0 {
-        print("  Over memory:   " + number_to_string(highmem) + " workloads > "
-            + number_to_string(budget_mem / 1024)
-            + "MB");
-    }
-    print("");
 
     if csv_out.length > 0 {
         _bench_rt_ensure_parent(csv_out);
@@ -976,10 +1080,10 @@ fn _run_runtime_mode(matches: Matches, ctx: CliContext) -> int ![clock, io] {
             i += 1;
         }
         fs.writeFile(csv_out, csv);
-        print("[bench] wrote " + csv_out);
+        if !json { print("[bench] wrote " + csv_out); }
     }
 
-    if top_n > 0 && results.length > top_n {
+    if !json && top_n > 0 && results.length > top_n {
         print("  TOP " + number_to_string(top_n) + " BY MEDIAN INNER TIME");
         print("  ------------------------------");
         let mut order: int[] = [];
@@ -1015,6 +1119,25 @@ fn _run_runtime_mode(matches: Matches, ctx: CliContext) -> int ![clock, io] {
             t += 1;
         }
         print("");
+    }
+
+    let mut exit_code = 0;
+    if buildfail > 0 || runfail > 0 { exit_code = 1; } else if slow > 0
+        || highmem > 0 { exit_code = 2; }
+
+    if json {
+        let mut jresults: BenchJsonResult[] = [];
+        let mut ji = 0;
+        loop {
+            if ji >= results.length { break; }
+            let r = results[ji];
+            jresults.push(BenchJsonResult {
+                name: r.name, ops: r.ops, time_min: r.inner_min, time_median: r.inner_median, time_max: r.inner_max, time_stddev: r.inner_stddev, peak_rss_kb: r.peak_kb, status: r.status
+            });
+            ji += 1;
+        }
+        print(render_bench_json_envelope("runtime", version, platform, iterations, warmup, exit_code, jresults));
+        return exit_code;
     }
 
     if buildfail > 0 || runfail > 0 {

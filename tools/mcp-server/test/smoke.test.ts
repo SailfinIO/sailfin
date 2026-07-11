@@ -136,13 +136,14 @@ async function withServer<T>(
   }
 }
 
-test("tools/list exposes all nine tools with correct names", async () => {
+test("tools/list exposes all ten tools with correct names", async () => {
   const workspace = makeStubWorkspace();
   await withServer(workspace, async (client) => {
     const resp = await client.request("tools/list");
     const result = resp.result as { tools: Array<{ name: string }> };
     const names = result.tools.map((t) => t.name).sort();
     assert.deepEqual(names, [
+      "sailfin_bench",
       "sailfin_build",
       "sailfin_check",
       "sailfin_diagnostics",
@@ -390,6 +391,66 @@ test("sailfin_diagnostics flags isError when envelope does not parse", async () 
       result.structuredContent!.raw_stdout,
       "this is not JSON at all",
     );
+  });
+});
+
+test("sailfin_bench parses the envelope into structuredContent", async () => {
+  // Stub `sfn bench --json` output that mirrors the real
+  // sailfin.bench/v1 envelope. The MCP server parses it and surfaces
+  // the parsed object as structuredContent so MCP clients can act on
+  // benchmark results programmatically.
+  const envelope = JSON.stringify({
+    schema: "sailfin.bench/v1",
+    command: "sfn bench",
+    domain: "runtime",
+    exit_code: 0,
+    tool: { version: "0.0.0-stub", platform: "Linux x86_64" },
+    config: { iterations: 5, warmup: 1 },
+    results: [
+      {
+        name: "arena_alloc",
+        ops: 1000,
+        unit: "ms",
+        time_ms: { min: 10, median: 12, max: 15, stddev: 2 },
+        peak_rss_kb: 2048,
+        status: "ok",
+      },
+    ],
+  });
+  const workspace = makeStubWorkspace({
+    exitCode: 0,
+    stdoutBody: envelope,
+    stderrBody: "",
+  });
+  await withServer(workspace, async (client) => {
+    const resp = await client.request("tools/call", {
+      name: "sailfin_bench",
+      arguments: { compiler: true },
+    });
+    const result = resp.result as {
+      content: Array<{ type: string; text: string }>;
+      isError?: boolean;
+      structuredContent?: Record<string, unknown>;
+    };
+    assert.notEqual(
+      result.isError,
+      true,
+      "clean envelope parse should NOT be flagged as a tool error",
+    );
+    assert.ok(
+      result.structuredContent,
+      "structuredContent must carry the parsed envelope",
+    );
+    assert.equal(result.structuredContent!.schema, "sailfin.bench/v1");
+    assert.equal(result.structuredContent!.domain, "runtime");
+    const results = result.structuredContent!.results as Array<{
+      name: string;
+      time_ms: { median: number };
+      status: string;
+    }>;
+    assert.equal(results[0].name, "arena_alloc");
+    assert.equal(results[0].time_ms.median, 12);
+    assert.equal(results[0].status, "ok");
   });
 });
 

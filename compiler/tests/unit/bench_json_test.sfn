@@ -1,0 +1,132 @@
+// Unit tests for `compiler/src/cli/commands/bench_json.sfn` —
+// `sfn bench --json`'s pure encoder. Boundary tests for the schema
+// (`sailfin.bench/v1`, documented at `docs/reference/bench-json-schema.md`)
+// and for the status normalization / empty-array / escaping paths that the
+// e2e schema-lock test (`compiler/tests/e2e/bench_json_schema_test.sfn`)
+// exercises only for the happy path.
+//
+// The `_bj_*` helpers are module-private, so these drive the public
+// `render_bench_json_envelope` with crafted `BenchJsonResult` inputs — the
+// same boundary-through-the-public-entry approach as
+// `diagnostics_json_test.sfn`.
+import { BenchJsonResult, render_bench_json_envelope } from "../../src/cli/commands/bench_json";
+import { index_of } from "../../src/string_utils";
+
+fn _contains(haystack: string, needle: string) -> boolean {
+    return index_of(haystack, needle) >= 0;
+}
+
+fn _result(name: string, status: string) -> BenchJsonResult {
+    return BenchJsonResult {
+        name: name,
+        ops: 0,
+        time_min: 10,
+        time_median: 12,
+        time_max: 15,
+        time_stddev: 2,
+        peak_rss_kb: 2048,
+        status: status
+    };
+}
+
+fn _empty_results() -> BenchJsonResult[] {
+    let results: BenchJsonResult[] = [];
+    return results;
+}
+
+fn _one(status: string) -> BenchJsonResult[] {
+    let mut results: BenchJsonResult[] = [];
+    results.push(_result("arena_alloc", status));
+    return results;
+}
+
+// -------------------------------------------------------------------
+// Envelope shape
+// -------------------------------------------------------------------
+test "bench json: empty results renders as []" {
+    let out = render_bench_json_envelope("compiler", "0.0.0", "Linux x86_64", 1, 0, 0, _empty_results());
+    assert _contains(out, "sailfin.bench/v1");
+    assert _contains(out, "sfn bench");
+    assert _contains(out, "\"results\":[]");
+}
+
+test "bench json: top-level fields present" {
+    let out = render_bench_json_envelope("runtime", "0.8.0", "Linux x86_64", 5, 1, 0, _one("ok"));
+    assert _contains(out, "\"schema\":\"sailfin.bench/v1\"");
+    assert _contains(out, "\"command\":\"sfn bench\"");
+    assert _contains(out, "\"domain\":\"runtime\"");
+    assert _contains(out, "\"exit_code\":0");
+    assert _contains(out, "\"tool\":");
+    assert _contains(out, "\"version\":\"0.8.0\"");
+    assert _contains(out, "\"platform\":\"Linux x86_64\"");
+    assert _contains(out, "\"config\":");
+    assert _contains(out, "\"iterations\":5");
+    assert _contains(out, "\"warmup\":1");
+}
+
+test "bench json: result carries all documented fields" {
+    let out = render_bench_json_envelope("runtime", "0.8.0", "Linux x86_64", 5, 1, 0, _one("ok"));
+    assert _contains(out, "\"name\":\"arena_alloc\"");
+    assert _contains(out, "\"ops\":0");
+    assert _contains(out, "\"unit\":\"ms\"");
+    assert _contains(out, "\"time_ms\":");
+    assert _contains(out, "\"min\":10");
+    assert _contains(out, "\"median\":12");
+    assert _contains(out, "\"max\":15");
+    assert _contains(out, "\"stddev\":2");
+    assert _contains(out, "\"peak_rss_kb\":2048");
+}
+
+test "bench json: ends with trailing newline" {
+    let out = render_bench_json_envelope("compiler", "0.0.0", "Linux x86_64", 1, 0, 0, _empty_results());
+    assert out.length > 0;
+    assert _contains(out, "\n");
+}
+
+test "bench json: exit_code is encoded" {
+    let out = render_bench_json_envelope("runtime", "0.0.0", "Linux x86_64", 2, 1, 2, _one("highmem"));
+    assert _contains(out, "\"exit_code\":2");
+}
+
+// -------------------------------------------------------------------
+// Status normalization
+// -------------------------------------------------------------------
+test "bench json: ok status passes through" {
+    let out = render_bench_json_envelope("runtime", "0.0.0", "p", 5, 1, 0, _one("ok"));
+    assert _contains(out, "\"status\":\"ok\"");
+}
+
+test "bench json: FAIL normalizes to fail" {
+    let out = render_bench_json_envelope("compiler", "0.0.0", "p", 1, 0, 1, _one("FAIL"));
+    assert _contains(out, "\"status\":\"fail\"");
+}
+
+test "bench json: BUILDFAIL and RUNFAIL normalize to fail" {
+    let build = render_bench_json_envelope("runtime", "0.0.0", "p", 5, 1, 1, _one("BUILDFAIL"));
+    assert _contains(build, "\"status\":\"fail\"");
+    let run = render_bench_json_envelope("runtime", "0.0.0", "p", 5, 1, 1, _one("RUNFAIL"));
+    assert _contains(run, "\"status\":\"fail\"");
+}
+
+test "bench json: SLOW and HIGHMEM lowercase" {
+    let slow = render_bench_json_envelope("runtime", "0.0.0", "p", 5, 1, 2, _one("SLOW"));
+    assert _contains(slow, "\"status\":\"slow\"");
+    let mem = render_bench_json_envelope("runtime", "0.0.0", "p", 5, 1, 2, _one("HIGHMEM"));
+    assert _contains(mem, "\"status\":\"highmem\"");
+}
+
+test "bench json: combined status preserves the + join" {
+    let out = render_bench_json_envelope("runtime", "0.0.0", "p", 5, 1, 2, _one("SLOW+HIGHMEM"));
+    assert _contains(out, "\"status\":\"slow+highmem\"");
+}
+
+// -------------------------------------------------------------------
+// String escaping
+// -------------------------------------------------------------------
+test "bench json: a quote in a name is escaped" {
+    // A workload named with an embedded quote must not break the envelope.
+    let mut results: BenchJsonResult[] = [];
+    results.push(_result("a\"b", "ok"));
+    let escaped = render_bench_json_envelope("runtime", "0.0.0", "p", 5, 1, 0, results);
+    assert _contains(escaped, "a\\\"b");
+}
