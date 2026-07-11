@@ -1,6 +1,6 @@
 [capsule]
 name = "sfn/bench"
-version = "0.1.0"
+version = "0.2.0"
 description = "In-language microbenchmark harness for Sailfin (the parallel to sfn/test)"
 
 [dependencies]
