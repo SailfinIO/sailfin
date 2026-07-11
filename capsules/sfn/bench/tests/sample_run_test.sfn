@@ -1,0 +1,28 @@
+// End-to-end proof that a `*_bench.sfn` on the sfn/bench harness compiles,
+// runs, and prints the structured record (SFN-62 acceptance criterion). Drives
+// the bundled sample through `sfn run` as a subprocess and asserts the
+// `bench-record/1` line lands on stdout — the shape the `sfn bench` runner
+// (SFN-63) parses.
+import { find } from "sfn/strings";
+
+fn _sfn_bin() -> string ![io] {
+    let configured = env.get("SAILFIN_BIN");
+    if configured.length > 0 { return configured; }
+    return "build/bin/sfn";
+}
+
+// Inherit the full parent environment for the nested `sfn run` via
+// `process.environ()`. That carries the vars the nested compile needs: PATH
+// (it shells out to clang + linker), HOME/TMPDIR, and SAILFIN_TEST_SCRATCH,
+// which the compiler routes the build-cache dir under so a parallel `sfn test`
+// pool does not collide on build/sailfin (.claude/rules/no-bash-e2e.md).
+fn _child_env() -> string[] ![io] { return process.environ(); }
+
+test "bench: sample bench compiles, runs, and prints the structured record" ![io] {
+    let exit = process.run_capture([_sfn_bin(), "run", "capsules/sfn/bench/examples/sample_bench.sfn"], _child_env());
+    let out = process.capture_take_stdout();
+    let _ = process.capture_take_stderr();
+    assert exit == 0;
+    assert find(out, "bench-record/1", 0) >= 0;
+    assert find(out, "name=sample", 0) >= 0;
+}

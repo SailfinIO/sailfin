@@ -1,0 +1,21 @@
+// capsules/sfn/bench/examples/sample_bench.sfn — a runnable `*_bench.sfn`.
+//
+// The minimal end-to-end shape of a benchmark on the `sfn/bench` harness: a
+// single unit of work whose result feeds the black-box sink, handed to the
+// auto-calibrating `benchmark(...)`. The harness supplies the repetition and
+// emits one `bench-record/1 ...` line on stdout — no hand-tuned iteration
+// constant, no manual dead-code guard. Build and run it directly:
+//
+//   sfn run capsules/sfn/bench/examples/sample_bench.sfn
+import { benchmark, keep } from "sfn/bench";
+
+// One unit of work: a couple of integer mixes, kept so the loop is not elided.
+fn _work(seed: int) -> int {
+    let a = seed * 2654435761;
+    let b = a + 1013904223;
+    return keep(b);
+}
+
+fn main() ![clock, io] {
+    let _ = benchmark("sample", fn () -> int { return _work(7); });
+}
