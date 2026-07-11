@@ -13,7 +13,7 @@
 # lockstep with `[seed].version` below; a mismatch is a hard error.
 
 [seed]
-version = "0.8.0-alpha.4"
+version = "0.8.0-alpha.5"
 source = "github-release"
 repo = "SailfinIO/sailfin"
 asset_prefix = "sailfin"
