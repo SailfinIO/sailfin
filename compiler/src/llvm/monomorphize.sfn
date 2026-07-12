@@ -601,6 +601,15 @@ fn _mono_rewrite_expr(expr: string, env_names: string[], env_types: string[], gf
     let mut insts: MonoInst[] = [];
     let mut token: string = "";
     let mut index: int = 0;
+    // The most recent generic-struct type annotation seen in this expression
+    // (`List<int>` in a `.let x : List<int> = ...` line), captured as the
+    // return-type-site instantiation for a static constructor call further
+    // right on the same line (`List.new()`). SFEP-0038 §3.6 (#1941): a static
+    // method call carries no `T`-typed argument, so `T` is knowable only from
+    // the binding's expected type — the annotation the `<`-branch below has
+    // already parsed by the time the call is scanned.
+    let mut anno_base: string = "";
+    let mut anno_args: string[] = [];
     loop {
         if index >= expr.length { break; }
         let ch = substring(expr, index, index + 1);
@@ -709,6 +718,11 @@ fn _mono_rewrite_expr(expr: string, env_names: string[], env_types: string[], gf
                             insts = insts.push(MonoInst {
                                 base: token, args: aargs, mangled: amangled, kind: "struct"
                             });
+                            // Remember this annotation as the expected type for a
+                            // static constructor call later on the same line
+                            // (`.let x : List<int> = List.new()`).
+                            anno_base = token;
+                            anno_args = aargs;
                             token = "";
                             index = aclose + 1;
                             continue;
@@ -798,6 +812,24 @@ fn _mono_rewrite_expr(expr: string, env_names: string[], env_types: string[], gf
                                 index = brace.after;
                                 continue;
                             }
+                        }
+                    }
+                }
+            }
+            // Static-method call on a generic struct: `List.new(...)`. The
+            // callee has no `T`-typed argument, so the instantiation comes from
+            // the binding's expected type — the `List<int>` annotation captured
+            // above on this same line (SFEP-0038 §3.6, #1941). Rewrite the
+            // receiver `List` to the mangled specialization `List$int` so the
+            // downstream call resolves against it exactly as a concrete
+            // struct's static method (`BankAccount.new`) already does. The
+            // annotation branch already recorded the `List$int` instantiation.
+            if ch == "." {
+                if anno_base == token {
+                    if anno_args.length > 0 {
+                        if _mono_find_struct(gstructs, token) >= 0 {
+                            out = out + _mono_mangled_name(token, anno_args);
+                            token = "";
                         }
                     }
                 }
