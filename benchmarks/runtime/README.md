@@ -26,7 +26,7 @@ times `--iterations` runs (default 5) via a metered subprocess that reports
 wall time and peak RSS from rusage. It parses each run's `bench-record/1` line,
 aggregates min/median inner-ms and max peak RSS across the timed runs, checks
 any `--budget-*` gates, and reports the result (table, `--csv`, or both). It
-replaces the retired `scripts/bench_runtime.sh`.
+replaces the retired runtime bench shell script.
 
 One internal detail worth knowing: the runner stages each workload into
 `--work-dir` before building, because `module_name_from_path` mis-roots any

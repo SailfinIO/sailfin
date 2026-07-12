@@ -678,7 +678,7 @@ sfn bootstrap                # fetch a seed binary (replaces install.sh for
 sfn package                  # produce distributable tarballs
                              #   (replaces tools/package.sh)
 sfn bench                    # run benchmarks
-                             #   (replaces scripts/bench_compile.sh)
+                             #   (--compiler + runtime-workload modes; shipped)
 ```
 
 `sfn run`, `sfn test`, `sfn check` all delegate to the same build pipeline
@@ -690,8 +690,8 @@ and only differ in what they do with the artifact:
 - `sfn check` → `sfn build --emit=ir` stopping after typecheck + effects,
   no codegen.
 
-`sfn package` and `sfn bench` subsume `tools/package.sh` and
-`scripts/bench_compile.sh` respectively. Together with `sfn bootstrap`
+`sfn package` and `sfn bench` subsume `tools/package.sh` and the former
+compile-time bench shell script respectively. Together with `sfn bootstrap`
 replacing `install.sh` for updates, this leaves zero build-related shell
 scripts in steady state. (`install.sh` stays as a one-shot first-install
 curl target for users who don't have `sfn` yet.)
@@ -1490,8 +1490,8 @@ with `build.sh`, CI cache-hit floor) still stand and break down as:
   Manifest schema is `DistManifest.schema_version = "1"` — adds
   `kind` (compiler / installer / binary / library), `capsule`,
   and `tarball` fields beyond what `tools/package.sh` emitted.
-- **C5 — `sfn bench` + `sfn bootstrap`.** Replace
-  `scripts/bench_compile.sh` and (for upgrade users) `install.sh`.
+- **C5 — `sfn bench` + `sfn bootstrap`.** Replace the former
+  compile-time bench shell script and (for upgrade users) `install.sh`.
   After this, the prior `scripts/build.sh` was the only
   build-related shell script remaining — Stage D / Stage E PR7
   retired it.

@@ -1,7 +1,7 @@
 // compiler/src/cli/commands/bench.sfn
 //
-// `sfn bench --compiler` subcommand (SFN-61, epic #1503). Replaces
-// `scripts/bench_compile.sh`: benchmarks per-module compiler-emit time and
+// `sfn bench --compiler` subcommand (SFN-61, epic #1503). The native
+// replacement for the retired compile-time bench shell script: benchmarks per-module compiler-emit time and
 // peak RSS by re-emitting each `compiler/src/**.sfn` module's LLVM IR
 // against a staged import-context, driving the build-internal emit path
 // (`--module-name` / `--import-context` / `--no-resolve-gate`) through the
@@ -437,7 +437,7 @@ fn _run_compiler_mode(matches: Matches, ctx: CliContext) -> int ![clock, io] {
 // sampling peak RSS from the child's rusage. Aggregates min/median inner-ms +
 // peak RSS, checks `--budget-time` (median inner-ms) / `--budget-mem` (peak
 // RSS), and exits non-zero on build/run failure or budget violation. Replaces
-// the former `scripts/bench_runtime.sh` — the table, CSV schema, and exit codes
+// the former runtime bench shell script — the table, CSV schema, and exit codes
 // match it, so the perf-history CSV consumers (scripts/perf_history.sh) are
 // unaffected.
 let _BENCH_RT_DEFAULT_DIR: string = "benchmarks/runtime";
@@ -690,7 +690,7 @@ fn _bench_rt_stddev(xs: int[]) -> int {
 }
 
 // Median of `xs` (insertion sort over a copy); even length averages the two
-// middle samples, matching the former `bench_runtime.sh`'s integer median.
+// middle samples, matching the former runtime bench script's integer median.
 fn _bench_rt_median(xs: int[]) -> int {
     let n = xs.length;
     if n == 0 { return 0; }
