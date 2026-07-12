@@ -316,10 +316,10 @@ sfn --version
 **Example output:**
 
 ```
-sfn 0.5.1
+sfn <version>
 ```
 
-The version string follows semantic versioning: `<major>.<minor>.<patch>` for stable releases, `<major>.<minor>.<patch>-alpha.<n>` for pre-releases. Local dev builds include a git hash suffix: `<version>+dev.<hash>` (e.g. `sfn 0.5.1+dev.abc1234`).
+The version string follows semantic versioning: `<major>.<minor>.<patch>` for stable releases, `<major>.<minor>.<patch>-alpha.<n>` for pre-releases. Local dev builds include a git hash suffix: `<version>+dev.<hash>`.
 
 The version is read from `compiler/capsule.toml` at runtime. For installed binaries where that file is not available, a baked-in fallback is used.
 
@@ -482,20 +482,30 @@ A project with no `[toolchain]` section is unaffected — the gate is a no-op.
 
 The repository Makefile provides higher-level build orchestration for the self-hosting workflow. These targets are for working on the Sailfin compiler itself; end users generally only need `sfn run` and `sfn test`.
 
+For host dependencies, OpenSSL setup, and the full source-build environment
+guide, see
+[`docs/development-setup.md`](https://github.com/SailfinIO/sailfin/blob/main/docs/development-setup.md).
+
 ### Complete target reference
 
 | Target | Description |
 |---|---|
 | `make compile` | Build the native compiler binary from a released seed, using the self-hosting pipeline. Skips rebuild if the binary is up to date. |
-| `make rebuild` | Force a rebuild from a released seed regardless of timestamps. Routes through `<seed> build -p compiler` (the self-hosting driver path); the prior `scripts/build.sh` orchestrator was retired in Stage E PR7 (#383) and is no longer in-tree. |
+| `make rebuild` | Force a rebuild from a released seed regardless of timestamps. Routes through `<seed> build -p compiler`. |
 | `make install` | Install the built compiler binary into `$(BINDIR)` (default: `~/.local/bin`). Requires `make compile` to have run first. |
 | `make check` | Compile (if needed), build a `sailfin-seedcheck` binary, verify it can run `hello-world.sfn`, then run the full test suite against it. This is the authoritative CI gate. |
-| `make test` | Run the full Sailfin-native test suite (unit + integration + e2e). Requires `make compile` first. |
+| `make check-strict` | Same as `make check`, but a stage2/stage3 fixed-point mismatch is fatal. |
+| `make check-fast` | Run `sfn check` over `compiler/src/` and `runtime/` without codegen or clang. |
+| `make test` | Run the full Sailfin-native test suite (unit + integration + e2e + capsule tests). Builds first if `build/bin/sfn` is missing. |
 | `make test-unit` | Run unit tests from `compiler/tests/unit/*_test.sfn`. |
 | `make test-integration` | Run integration tests from `compiler/tests/integration/*_test.sfn`. |
 | `make test-e2e` | Run end-to-end tests from `compiler/tests/e2e/*_test.sfn`. |
-| `make package` | Build and package native artifacts into `dist/`. Used for release artifacts. |
-| `make fetch-seed` | Download the pinned seed compiler (`bootstrap.toml [seed].version`, override with `SEED_VERSION`) from GitHub Releases into `build/toolchains/seed/`. Requires `GITHUB_TOKEN`. |
+| `make test-capsules` | Run per-capsule tests under `capsules/`. |
+| `make package` | Build and package native artifacts into `dist/`. |
+| `make fetch-seed` | Download the pinned seed compiler (`bootstrap.toml [seed].version`, override with `SEED_VERSION`) from GitHub Releases into `build/toolchains/seed/`. Set `GITHUB_TOKEN` to raise GitHub API rate limits. |
+| `make bench` | Benchmark compiler per-module compile time and memory. |
+| `make bench-runtime` | Benchmark compiled-program runtime execution. |
+| `make mcp-server` | Build the Sailfin MCP server under `tools/mcp-server/`. |
 | `make clean` | Remove `dist/` packaged artifacts. Does not remove build intermediates. |
 | `make clean-build` | Remove `build/` artifacts (keeps the seed toolchain under `build/toolchains/` by default). Pass `KEEP_SEED=0` to also remove `build/toolchains/`. |
 | `make clean-all` | Remove both `dist/` and `build/` artifacts completely. |
@@ -503,11 +513,18 @@ The repository Makefile provides higher-level build orchestration for the self-h
 
 ---
 
-### Parallelism
+### Parallelism and validation shape
 
-`<seed> build -p compiler` (the path `make rebuild` now routes through, as of Stage E PR2) runs `stage_capsule_imports` and `compile_capsule_modules` in parallel via the resolver's xargs fan-out (Stage E PR3 / #278). Cold builds measure **~2m27s** on a 4-core box with the parallel resolver — matching the historical ~2 min with `--jobs 4` that the prior (now retired) `bash scripts/build.sh` used to provide. Parallelism is controlled by `SAILFIN_BUILD_JOBS` (default: `nproc`, clamped to `[1, 8]`); `SAILFIN_BUILD_JOBS=1` keeps the pre-PR3 sequential path available as a regression-bisect escape hatch. The formerly-load-bearing `scripts/build.sh` was deleted in Stage E PR7 (#383); there is no longer a parallel-build escape hatch outside the driver.
+`make rebuild` routes through `<seed> build -p compiler`; the Sailfin-native
+driver owns compiler module scheduling. The driver reads
+`SAILFIN_BUILD_JOBS`; set it to a positive integer for build-parallelism
+bisects or memory-constrained hosts.
 
-The `~2 GB-per-job` divisor reflects the per-module peak RSS documented in `docs/proposals/0006-build-architecture.md` → Phase 6 (heaviest module ~1.76 GB after the `lowering_core.sfn` decomposition). With 2 jobs running the heaviest pair concurrently, peak concurrent memory is ~3.5 GB — fits the macOS 7 GB ceiling with OS + Actions agent overhead. Hosts with more RAM are still capped by `nproc` first.
+`make test` parallelism is controlled by `TEST_JOBS`, which is auto-detected
+from CPU and memory. `make check` uses `CHECK_TEST_JOBS` for its cold seedcheck
+suite and `CHECK_TEST_TIMEOUT` for the per-test timeout. Use
+`SELFHOST_STRICT=1` or `make check-strict` when a stage2/stage3 fixed-point
+mismatch must fail the run.
 
 ---
 
@@ -518,20 +535,35 @@ These environment variables influence the behavior of `sfn` and the Makefile bui
 | Variable | Scope | Description |
 |---|---|---|
 | `SAILFIN_RUNTIME_ROOT` | `sfn` binary | Override the directory where `sfn` looks for the bundled runtime. By default, the runtime is resolved relative to the executable. |
+| `SAILFIN_MEM_LIMIT` | `sfn` binary | Override the compiler's Linux self-applied 8 GiB virtual-memory cap. Use bytes, `unlimited`, `off`, or `0`. |
+| `SAILFIN_OPENSSL_PREFIX` | build/link | Override macOS OpenSSL discovery. The driver expects libraries under `$SAILFIN_OPENSSL_PREFIX/lib`. |
+| `SAILFIN_BUILD_JOBS` | `sfn build -p compiler` | Override compiler module scheduling inside the build driver. Use `1` for serial bisects or a small value on memory-constrained hosts. |
 | `SFN_REGISTRY` | `sfn add` / `sfn publish` | Override the package registry base URL for this shell. Takes precedence over `~/.sfn/config.toml`. See [`sfn config`](#sfn-config-getsetunsetlist-key-value). |
 | `SFN_TOKEN` | `sfn publish` | Bearer token used when uploading a capsule. Takes precedence over `~/.sfn/credentials` written by `sfn login`. |
 | `SAILFIN_SKIP_TOOLCHAIN_CHECK` | `sfn build`/`run`/`check`/`test` | Set to `1` to downgrade a `[toolchain]` pin mismatch from a hard error to a warning for every invocation in the shell/CI job. See [Toolchain Pinning Flags](#toolchain-pinning-flags). |
 | `SAILFIN_TOOLCHAIN` | `sfn build`/`run`/`check`/`test` | Controls the toolchain-pin mismatch response: `auto` (default) fetches + verifies + re-execs the pinned toolchain; `local` verifies only and errors on mismatch; `<version>` forces that dispatch target; `off` (or `0`) has the same effect as `SAILFIN_SKIP_TOOLCHAIN_CHECK=1`. See [Toolchain Pinning Flags](#toolchain-pinning-flags). |
 | `SAILFIN_TOOLCHAIN_DISPATCHED` | `sfn build`/`run`/`check`/`test` | Set automatically by `sfn` before re-exec'ing a dispatched toolchain (`=<version>`) as a re-entrancy guard; not intended to be set by hand. |
 | `PREFIX` | Makefile | Installation prefix. Defaults to `$HOME/.local`. The binary is installed to `$(PREFIX)/bin`. |
+| `BINDIR` | Makefile | Installation bin directory. Defaults to `$(PREFIX)/bin`. |
+| `INSTALL_NAME` | Makefile | Installed binary name. Defaults to `sfn`. |
+| `DESTDIR` | Makefile | Staging prefix for packaging-style installs. |
 | `GLOBAL_BIN_DIR` | Installer script | Override the installation bin directory directly (takes precedence over `PREFIX`). |
-| `GITHUB_TOKEN` | `make fetch-seed` | GitHub personal access token used to download seed releases from the `SailfinIO/sailfin` repository. Required for `make fetch-seed`. |
-| `BUILD_JOBS` | Makefile | Number of parallel compile jobs. Default: `1`. |
-| `BUILD_ARGS` | Makefile | Extra arguments passed through to the build orchestrator script. |
+| `GITHUB_TOKEN` | installer / `make fetch-seed` | GitHub token used to raise API rate limits and access release assets. |
+| `BUILD_ARGS` | Makefile | Extra arguments passed through to `sfn build -p compiler`, for example `--no-cache --cache-trace`. |
 | `SEED` | Makefile | Path to (or name of) the seed compiler used as the bootstrap. Defaults to the fetched repo-local seed alias, `build/toolchains/seed/bin/sfn` (`sfn.exe` on Windows). |
-| `SEED_VERSION` | Makefile | Version tag of the seed to fetch. Defaults to `latest`. |
-| `NATIVE_OPT` | Makefile | Optimization level passed to `clang` when compiling LLVM IR. Defaults to `-O2`. |
+| `SEED_VERSION` | Makefile | Version tag of the seed to fetch. Defaults to `bootstrap.toml [seed].version`. |
+| `SEED_NATIVE` | Makefile | One-off path to the seed used by `make rebuild`, taking precedence over `SEED`. |
+| `NATIVE_BIN` | Makefile | Compiler binary used by test, check, and bench targets. Defaults to `build/bin/sfn`. |
+| `NATIVE_OUT` | Makefile | Output path for `make rebuild`. Defaults to `build/bin/sfn`. |
 | `CLANG` | Makefile | `clang` executable to use. Defaults to `clang`. |
+| `SAILFIN_CC` | Makefile on macOS | Target of the local clang shim used by seed/built compiler subprocesses. Defaults to `/usr/bin/clang`. |
+| `CLANG_LL_FLAGS` | Makefile | Extra flags when compiling `.ll` files with clang. |
+| `TEST_JOBS` | Makefile | Parallel `sfn test --jobs N` children for `make test*`. Defaults to auto-detected CPU/memory budget. |
+| `CHECK_TEST_JOBS` | Makefile | Parallelism for `make check` test legs. Defaults to `TEST_JOBS`. |
+| `CHECK_TEST_TIMEOUT` | Makefile | Per-test timeout for `make check`'s cold full-suite leg. Defaults to `1800`. |
+| `CHECK_FULL_PASS1` | Makefile | Set to `1` to restore the older full first-pass suite before seedcheck. |
+| `SELFHOST_STRICT` | Makefile | Set to `1` to make stage2/stage3 fixed-point mismatch fatal. |
+| `JSON=1` | Makefile | Enable structured agent reports for agent-facing targets. |
 | `KEEP_SEED` | `make clean-build` | Set to `0` to also delete `build/toolchains/` during `make clean-build`. Defaults to `1` (the seed toolchain is preserved). |
 
 ### Debug and trace variables
@@ -540,11 +572,15 @@ These variables enable verbose runtime diagnostics. They are intended for compil
 
 | Variable | Description |
 |---|---|
-| `SAILFIN_TRACE_ARGV` | Print the argument vector received by `sailfin_cli_main` on startup (honored by the Sailfin entry point in `compiler/src/cli_main.sfn`). |
-| `SAILFIN_TRACE_CRASH` | Enable extended crash diagnostics. |
-| `SAILFIN_TRACE_ALLOC_STATS` | Print allocation statistics on exit. |
-| `SAILFIN_TRACE_LARGE_ARRAY_BACKTRACE` | Capture backtraces for unusually large array allocations. |
-| `SAILFIN_DEBUG_DUMP_BUDGET` | Control debug-dump output budget. |
+| `SAILFIN_TRACE_ARGV` | Print the argument vector received by the CLI entry point. |
+| `SAILFIN_TRACE_LINK` | Print resolved clang/link command details. |
+| `SAILFIN_CACHE_TRACE` | Print build cache hit/miss diagnostics; equivalent to `--cache-trace` on build/run paths. |
+| `SAILFIN_TEST_TIMEOUT` | Override the per-test timeout used by `sfn test`. |
+| `SAILFIN_TEST_KEEP_SCRATCH` | Keep `sfn test` scratch directories for post-mortem debugging. |
+| `SAILFIN_TRACE_LOWERING` | Enable LLVM lowering trace output for compiler debugging. |
+| `SAILFIN_DUMP_ARENA_STATS` | Print runtime arena statistics on exit. |
+| `SAILFIN_DEBUG_FORCE_PANIC` | Force an internal panic in a named compiler stage for ICE-path testing. |
+| `SAILFIN_INJECT_FAULT` | Inject transient emit failures for retry-path testing. |
 
 ---
 

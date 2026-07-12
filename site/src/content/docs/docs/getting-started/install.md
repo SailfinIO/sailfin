@@ -23,17 +23,19 @@ Sailfin runs on the following platforms:
 WSL (Windows Subsystem for Linux) and Git Bash on Windows are also supported and
 use the Linux install path.
 
-### LLVM
+### Compiler and linker tools
 
-LLVM 17+ is required by the Sailfin compiler. **The installer and release binaries do not bundle LLVM/clang** — you must have them installed on your system even when installing via the script. If you are building the compiler from source, see the [Building from source](#building-from-source) section below for additional details.
+The installer only downloads and places the released `sfn` binary. To compile,
+run, or test Sailfin programs, the current backend still needs LLVM tools 17+
+or 18+ plus `clang` and the platform linker. Release binaries do not bundle
+LLVM/clang.
 
-### C toolchain / linker
+The installer script itself also requires `curl`, `tar`, `uname`, `mktemp`, and
+`jq` on Linux/macOS because it selects release assets through the GitHub API.
 
-To install Sailfin via the script or a prebuilt release binary, you do **not** need a C toolchain; the installer does not invoke `gcc` or `clang`.
-
-However, the Sailfin CLI uses a C toolchain (typically `clang` plus a system linker) to produce native executables. If you plan to compile, run, or test Sailfin programs on Linux or macOS, you must have a working `clang`/LLVM toolchain installed.
-
-A C linker is also required when building the Sailfin compiler itself from source. See [Building from source](#building-from-source) for details.
+If you are building Sailfin itself from source, you also need `bash`, `make`,
+OpenSSL development libraries, and the source-build dependencies listed in
+[Building from source](#building-from-source).
 
 ---
 
@@ -49,7 +51,7 @@ curl -fsSL https://raw.githubusercontent.com/SailfinIO/sailfin/main/install.sh |
 
 The script will:
 1. Detect your OS and architecture
-2. Download the latest stable release binary from GitHub Releases
+2. Download the latest matching release binary from GitHub Releases
 3. Install `sailfin` and `sfn` to `~/.local/bin`
 4. Print confirmation when complete
 
@@ -57,7 +59,7 @@ Example output:
 
 ```
 Detected: linux/x86_64
-Downloading sfn 0.5.1...
+Downloading sfn <version>...
 Installed sailfin -> /home/you/.local/bin/sailfin
 Installed sfn    -> /home/you/.local/bin/sfn
 Done. Run 'sfn --version' to verify.
@@ -79,7 +81,7 @@ Example output:
 
 ```
 Detected: windows/x86_64
-Downloading sfn 0.5.1...
+Downloading sfn <version>...
 Installed sailfin.exe -> C:\Users\you\AppData\Local\sailfin\bin\sailfin.exe
 Installed sfn.exe     -> C:\Users\you\AppData\Local\sailfin\bin\sfn.exe
 Added C:\Users\you\AppData\Local\sailfin\bin to user PATH.
@@ -102,7 +104,7 @@ sfn --version
 Expected output:
 
 ```
-sfn 0.5.1
+sfn <version>
 ```
 
 If the command is not found, see [Troubleshooting](#troubleshooting) below.
@@ -111,32 +113,42 @@ If the command is not found, see [Troubleshooting](#troubleshooting) below.
 
 ## Pinning a Version
 
-The pinned stable version for Sailfin development is **`v0.5.1`**.
-Releases past this point are pre-stabilization builds and may have known issues.
-Unless you have a specific reason to use a newer build, pin to the stable version.
+Sailfin is pre-1.0, so pin exact release versions in CI and reproducible setup
+scripts. Omit `VERSION` for the latest release asset that matches your platform.
+Compiler repository development uses the exact seed version in
+[`bootstrap.toml`](https://github.com/SailfinIO/sailfin/blob/main/bootstrap.toml),
+not a hard-coded docs-page version.
 
 ### Linux and macOS
 
+Replace the example version with the release you want to pin:
+
 ```bash
-VERSION=0.5.1 curl -fsSL https://raw.githubusercontent.com/SailfinIO/sailfin/main/install.sh | bash
+VERSION=0.8.0-alpha.5
+curl -fsSL https://raw.githubusercontent.com/SailfinIO/sailfin/main/install.sh | VERSION="$VERSION" bash
 ```
 
-Note the placement of `VERSION=...` before `curl`. This passes the variable into
-the curl subprocess's environment, which the install script reads.
+You can also pass the version as an install-script argument:
+
+```bash
+VERSION=0.8.0-alpha.5
+curl -fsSL https://raw.githubusercontent.com/SailfinIO/sailfin/main/install.sh | bash -s -- --version "$VERSION"
+```
 
 ### Windows (PowerShell)
 
+Replace the example version with the release you want to pin:
+
 ```powershell
-$env:VERSION = "0.5.1"
+$env:VERSION = "0.8.0-alpha.5"
 irm https://raw.githubusercontent.com/SailfinIO/sailfin/main/install.ps1 | iex
 ```
 
 Set `$env:VERSION` before invoking `iex` so the script reads it.
 
-> **Why pin?** The Sailfin project is marching toward a 1.0 release. Intermediate
-> alpha builds may include regressions as large parts of the compiler are rewritten.
-> `v0.5.1` is the version CI uses as its seed compiler and is the most
-> thoroughly validated build available.
+> **Why pin?** The Sailfin project is marching toward a 1.0 release. Alpha
+> builds may include regressions as large parts of the compiler and runtime are
+> rewritten. Pinning gives CI and onboarding scripts a reproducible toolchain.
 
 ---
 
@@ -161,7 +173,7 @@ You can override the install directory by setting `GLOBAL_BIN_DIR` before runnin
 the script:
 
 ```bash
-GLOBAL_BIN_DIR=/usr/local/bin curl -fsSL https://raw.githubusercontent.com/SailfinIO/sailfin/main/install.sh | bash
+curl -fsSL https://raw.githubusercontent.com/SailfinIO/sailfin/main/install.sh | GLOBAL_BIN_DIR=/usr/local/bin bash
 ```
 
 ### Confirming the binaries are on PATH
@@ -171,7 +183,7 @@ which sfn
 # /home/you/.local/bin/sfn
 
 sfn --version
-# sfn 0.5.1
+# sfn <version>
 ```
 
 On Windows:
@@ -194,7 +206,7 @@ every platform binary with direct download links.
 
 Go to the [Downloads](/dl) page or directly to
 [github.com/SailfinIO/sailfin/releases](https://github.com/SailfinIO/sailfin/releases)
-and locate the release for `v0.5.1`. Release assets follow this naming
+and locate the release you want to install. Release assets follow this naming
 convention:
 
 ```
@@ -205,18 +217,20 @@ Examples:
 
 | Asset name | Platform |
 |---|---|
-| `sailfin_0.5.1_linux_x86_64.tar.gz` | Linux x86_64 |
-| `sailfin_0.5.1_macos_arm64.tar.gz` | macOS Apple Silicon |
-| `sailfin_0.5.1_windows_x86_64.tar.gz` | Windows x86_64 |
+| `sailfin_${VERSION}_linux_x86_64.tar.gz` | Linux x86_64 |
+| `sailfin_${VERSION}_macos_arm64.tar.gz` | macOS Apple Silicon |
+| `sailfin_${VERSION}_windows_x86_64.tar.gz` | Windows x86_64 |
 
 ### Step 2: Extract and place the binary
 
 ```bash
+VERSION=0.8.0-alpha.5
+
 # Download (replace the filename with the one that matches your platform)
-curl -LO https://github.com/SailfinIO/sailfin/releases/download/v0.5.1/sailfin_0.5.1_linux_x86_64.tar.gz
+curl -LO "https://github.com/SailfinIO/sailfin/releases/download/v${VERSION}/sailfin_${VERSION}_linux_x86_64.tar.gz"
 
 # Extract
-tar -xzf sailfin_0.5.1_linux_x86_64.tar.gz
+tar -xzf "sailfin_${VERSION}_linux_x86_64.tar.gz"
 
 # The archive contains bin/sailfin and bin/sfn
 # Move them to a directory on your PATH
@@ -230,7 +244,7 @@ chmod +x ~/.local/bin/sailfin ~/.local/bin/sfn
 
 ```bash
 sfn --version
-# sfn 0.5.1
+# sfn <version>
 ```
 
 ---
@@ -244,10 +258,16 @@ Building from source is useful when:
 
 ### Prerequisites
 
-- `git`
-- LLVM 17+ (`llvm-17` or `llvm-18` packages on most Linux distributions; Homebrew `llvm` on macOS)
-- A C compiler: `gcc` or `clang`
-- `make`
+- `git`, `bash`, `make`
+- `curl`, `tar`, `mktemp`, `uname`, `jq`
+- LLVM tools 17+ or 18+ (`llvm-link`, `llvm-as`)
+- `clang` and the platform linker
+- OpenSSL development libraries (`libssl-dev`, `openssl-devel`, or Homebrew `openssl@3`)
+- `shasum -a 256` or `sha256sum`
+
+See the
+[compiler/runtime development setup](https://github.com/SailfinIO/sailfin/blob/main/docs/development-setup.md)
+for per-platform package commands and the complete supported build flag table.
 
 ### Steps
 
@@ -256,7 +276,7 @@ Building from source is useful when:
 git clone https://github.com/SailfinIO/sailfin.git
 cd sailfin
 
-# Build the native compiler by self-hosting from the released seed
+# Build the native compiler by self-hosting from the released seed pinned in bootstrap.toml
 make compile
 
 # Install to ~/.local/bin (or set PREFIX to override)
@@ -276,9 +296,9 @@ build/bin/sfn --version
 ```
 
 > **Note:** `make compile` routes through `<seed> build -p compiler` — the
-> Sailfin-native driver — and requires `bash`, `clang`, and LLVM tools
-> including `llvm-link`. `make fetch-seed` also requires `jq`. (The prior
-> `scripts/build.sh` orchestrator was retired in Stage E PR7 / #383.)
+> Sailfin-native driver — and requires `bash`, `clang`, LLVM tools, `jq`, and
+> OpenSSL development libraries. The prior `scripts/build.sh` orchestrator is
+> no longer in-tree.
 
 ---
 
@@ -292,7 +312,8 @@ existing binaries in-place:
 curl -fsSL https://raw.githubusercontent.com/SailfinIO/sailfin/main/install.sh | bash
 
 # Linux / macOS: update to a specific version
-VERSION=0.5.1 curl -fsSL https://raw.githubusercontent.com/SailfinIO/sailfin/main/install.sh | bash
+VERSION=0.8.0-alpha.5
+curl -fsSL https://raw.githubusercontent.com/SailfinIO/sailfin/main/install.sh | VERSION="$VERSION" bash
 ```
 
 ```powershell
@@ -300,8 +321,8 @@ VERSION=0.5.1 curl -fsSL https://raw.githubusercontent.com/SailfinIO/sailfin/mai
 irm https://raw.githubusercontent.com/SailfinIO/sailfin/main/install.ps1 | iex
 ```
 
-As with the initial install, pinning to a known stable version is recommended
-over updating to the absolute latest build.
+As with the initial install, pinning to a known release version is recommended
+for CI and reproducible environments.
 
 ---
 
@@ -361,29 +382,32 @@ The binary may not be marked executable. Fix it:
 chmod +x ~/.local/bin/sailfin ~/.local/bin/sfn
 ```
 
-### `LLVM not found` error
+### Missing LLVM, clang, or OpenSSL during a build
 
-This error only occurs when **building from source**. Install LLVM 17+:
+Install the source-build dependencies for your platform:
 
 ```bash
 # Ubuntu / Debian
-sudo apt-get install llvm-17 clang-17
+sudo apt-get install clang-18 llvm-18 libssl-dev jq
 
 # Fedora / RHEL
-sudo dnf install llvm17 clang17
+sudo dnf install clang llvm llvm-devel openssl-devel jq
 
 # macOS (Homebrew)
-brew install llvm
+brew install jq llvm openssl@3
 ```
 
-If LLVM is installed but not detected, set the path explicitly:
+If Homebrew LLVM is installed but `llvm-link` is not detected, put it on `PATH`:
 
 ```bash
-LLVM_PREFIX=/usr/lib/llvm-17 make compile
+export PATH="$(brew --prefix llvm)/bin:$PATH"
 ```
 
-Pre-built release binaries require LLVM 17+ to be installed on your system
-(see [LLVM](#llvm) above).
+If macOS cannot find OpenSSL at link time, set:
+
+```bash
+export SAILFIN_OPENSSL_PREFIX="$(brew --prefix openssl@3)"
+```
 
 ### GitHub API rate limiting during install
 
@@ -391,11 +415,11 @@ The install script calls the GitHub Releases API to find the latest version. If
 you hit rate limits (common in CI environments), set a GitHub token:
 
 ```bash
-GITHUB_TOKEN=ghp_your_token_here curl -fsSL https://raw.githubusercontent.com/SailfinIO/sailfin/main/install.sh | bash
+curl -fsSL https://raw.githubusercontent.com/SailfinIO/sailfin/main/install.sh | GITHUB_TOKEN=ghp_your_token_here bash
 ```
 
-Alternatively, pin the version explicitly with `VERSION=0.5.1` — this
-skips the API call and downloads the asset directly.
+Alternatively, pin the version explicitly with `VERSION=<version>` — this
+constructs the asset name directly and can avoid the release-list lookup.
 
 ### Windows: script execution policy
 
