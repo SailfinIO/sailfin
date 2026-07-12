@@ -7,6 +7,7 @@
 import {
     _det_all_sizes_zero,
     _det_distinct_count,
+    _det_parse_row,
     _det_safe_of,
     _det_slug_of
 } from "../../src/cli/commands/dev_det_sweep";
@@ -57,4 +58,19 @@ test "det-sweep: a mixed size row is not all-zero" {
 
 test "det-sweep: an empty sizes field is not emit-failed" {
     assert ! _det_all_sizes_zero("");
+}
+
+test "det-sweep: parse strips the trailing newline from the sizes field" {
+    // The row file is written with a trailing "\n"; the parsed sizes field
+    // must not carry it, or the emit-failed guard would miss an all-zero row.
+    let row = _det_parse_row("runtime/prelude\t1\t0\t 0 0\n");
+    assert _det_all_sizes_zero(row.sizes);
+    assert row.module == "runtime/prelude";
+    assert row.distinct == 1;
+}
+
+test "det-sweep: parse reads a real (non-empty) row without a false emit-fail" {
+    let row = _det_parse_row("cli/main\t1\t0\t 46317 46317\n");
+    assert ! _det_all_sizes_zero(row.sizes);
+    assert row.distinct == 1;
 }

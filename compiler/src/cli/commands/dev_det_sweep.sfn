@@ -35,6 +35,7 @@ import {
     _shell_read_cmd
 } from "../../build/fs";
 import { number_to_string } from "../../num_format";
+import { _sort_strings_cmd } from "../../string_cmd_utils";
 import {
     char_code_at_text,
     ends_with,
@@ -228,12 +229,23 @@ struct _DetRow {
 // zero-value row (`module == ""`) when the input does not have the expected
 // four fields.
 fn _det_parse_row(line: string) -> _DetRow {
+    // Row files are written with a trailing "\n"; strip trailing newlines and
+    // carriage returns so the final (`sizes`) field is not polluted — an
+    // uncleaned "\n" would make `_det_all_sizes_zero` miss an all-zero row and
+    // silently pass a broken sweep.
+    let mut trimmed = line;
+    loop {
+        if trimmed.length == 0 { break; }
+        let last = substring(trimmed, trimmed.length - 1, trimmed.length);
+        if !strings_equal(last, "\n") && !strings_equal(last, "\r") { break; }
+        trimmed = substring(trimmed, 0, trimmed.length - 1);
+    }
     let mut fields: string[] = [];
     let mut cur = "";
     let mut i = 0;
     loop {
-        if i >= line.length { break; }
-        let ch = substring(line, i, i + 1);
+        if i >= trimmed.length { break; }
+        let ch = substring(trimmed, i, i + 1);
         if strings_equal(ch, "\t") {
             fields.push(cur);
             cur = "";
@@ -274,7 +286,9 @@ fn _det_parse_int(s: string) -> int {
 }
 
 // Enumerate the modules to sweep: explicit `roots` positionals win; else the
-// script's default (`compiler/src`, `runtime`).
+// script's default (`compiler/src`, `runtime`). The collected list is sorted
+// so `results.tsv` ordering and diagnostics are stable across filesystems
+// (`fs.listDirectory` order is not), matching the retired `find ... | sort`.
 fn _det_enumerate_modules(roots: string[]) -> string[] ![io] {
     let mut use_roots = roots;
     if use_roots.length == 0 { use_roots = ["compiler/src", "runtime"]; }
@@ -291,7 +305,7 @@ fn _det_enumerate_modules(roots: string[]) -> string[] ![io] {
         }
         ri += 1;
     }
-    return modules;
+    return _sort_strings_cmd(modules);
 }
 
 fn _det_orchestrate(seed: string, jobs: int, iters: int, out_in: string, roots: string[], ctx: CliContext) -> int ![io] {
@@ -313,6 +327,15 @@ fn _det_orchestrate(seed: string, jobs: int, iters: int, out_in: string, roots: 
     let repo_root = _shell_read_cmd("pwd");
     let mut out = out_in;
     if !starts_with(out, "/") { out = repo_root + "/" + out; }
+
+    // The sweep `rm -rf`s its `--out` dir to start clean; refuse paths whose
+    // deletion would be catastrophic (filesystem root, or the repo checkout the
+    // sweep runs from). A maintainer command is still a footgun otherwise.
+    if out.length == 0 || strings_equal(out, "/") || strings_equal(out, repo_root) {
+        print.err("sfn dev determinism-sweep: refusing --out '" + out
+            + "' (would delete the filesystem root or the repo checkout)");
+        return 2;
+    }
 
     process.run(["rm", "-rf", out]);
     _ensure_dir_cmd(out + "/rows");
@@ -342,15 +365,24 @@ fn _det_orchestrate(seed: string, jobs: int, iters: int, out_in: string, roots: 
     }
 
     let mut rows: _DetRow[] = [];
+    let mut missing: string[] = [];
     let mut mi = 0;
     loop {
         if mi >= modules.length { break; }
         let row_path = out + "/rows/" + _det_safe_of(modules[mi]) + ".tsv";
+        let mut parsed = false;
         if fs.exists(row_path) {
             let text = fs.readFile(row_path);
             let row = _det_parse_row(text);
-            if row.module.length > 0 { rows.push(row); }
+            if row.module.length > 0 {
+                rows.push(row);
+                parsed = true;
+            }
         }
+        // A worker that crashed, was killed, or failed to spawn leaves no
+        // (or an unparseable) row. Dropping it silently would undercount
+        // failures and could exit 0 on an incomplete sweep, so track it.
+        if !parsed { missing.push(modules[mi]); }
         mi += 1;
     }
 
@@ -418,16 +450,27 @@ fn _det_orchestrate(seed: string, jobs: int, iters: int, out_in: string, roots: 
         ei += 1;
     }
     print.err("");
+    print.err("=== modules with no result (worker produced no row) ===");
+    let mut wi = 0;
+    loop {
+        if wi >= missing.length { break; }
+        print.err(missing[wi]);
+        wi += 1;
+    }
+    print.err("");
     print.err("totals: non-deterministic=" + number_to_string(nondet)
         + " nonascii="
         + number_to_string(nonascii)
         + " emit-failed="
-        + number_to_string(emit_failed));
+        + number_to_string(emit_failed)
+        + " no-result="
+        + number_to_string(missing.length));
 
-    // A module that never emitted (all-zero sizes) makes the determinism
-    // verdict vacuous, so fail loudly rather than pass on empty output — this
-    // is a harness/config error (e.g. an unresolvable seed), not a clean run.
-    if nondet > 0 || emit_failed > 0 { return 1; }
+    // Fail loudly rather than pass on an incomplete or vacuous sweep: a module
+    // that never emitted (all-zero sizes) or whose worker left no row at all
+    // (crash/spawn failure) makes the determinism verdict unsound — these are
+    // harness/config errors (e.g. an unresolvable seed), not a clean run.
+    if nondet > 0 || emit_failed > 0 || missing.length > 0 { return 1; }
     return 0;
 }
 
@@ -471,5 +514,6 @@ export {
     _det_slug_of,
     _det_safe_of,
     _det_distinct_count,
-    _det_all_sizes_zero
+    _det_all_sizes_zero,
+    _det_parse_row
 };
