@@ -64,9 +64,13 @@ test "perf-history: a seed bump resets baselines and files no regressions" ![io]
         + "cur,2026-07-12,foo,2.0,20000,500,OK,0.8.0\n"
         + "cur,2026-07-12,bar,2.0,20000,500,OK,0.8.0\n";
     fs.writeFile(dir + "/compile.csv", csv);
-    let _exit = _run_compare(dir);
+    let exit = _run_compare(dir);
     let out = process.capture_take_stdout();
     let err = process.capture_take_stderr();
+    // compare exits 0 on the no-regression path; a non-zero exit means the
+    // script itself broke (bad flag, missing tool) and must fail the test
+    // rather than be masked by a summary-text match.
+    assert exit == 0;
     assert contains(out, "no regressions detected");
     assert contains(err, "seed changed");
 }
@@ -81,8 +85,9 @@ test "perf-history: a same-seed regression is still caught" ![io] {
         + "cur,2026-07-12,foo,1.5,10000,500,OK,0.8.0\n"
         + "cur,2026-07-12,bar,1.0,10000,500,OK,0.8.0\n";
     fs.writeFile(dir + "/compile.csv", csv);
-    let _exit = _run_compare(dir);
+    let exit = _run_compare(dir);
     let out = process.capture_take_stdout();
     let _err = process.capture_take_stderr();
+    assert exit == 0;
     assert contains(out, "1 regression line(s) written");
 }
