@@ -1,0 +1,129 @@
+// compiler/tests/e2e/dev_shard_test.sfn
+//
+// Drives the native `sfn dev shard` surface (SFN-200) that retired
+// scripts/test_shards.sh: the named CI shard taxonomy (`names`/`list`) and the
+// coverage lint (`cover`). Exercises the read-only commands against the real
+// test tree — a full `run` would compile+link a whole shard, so only its error
+// path is asserted here.
+import {
+    contains,
+    ends_with,
+    find,
+    split,
+    trim
+} from "sfn/strings";
+
+// The compiler-under-test: $SAILFIN_BIN if set, else the self-hosted binary
+// relative to the repo root the runner starts from (mirrors sfn/test's own
+// `_resolve_sfn_bin`).
+fn _sfn_bin() -> string ![io] {
+    let configured = env.get("SAILFIN_BIN");
+    if configured.length > 0 { return configured; }
+    return "build/bin/sfn";
+}
+
+// Non-empty trimmed lines of a command's stdout.
+fn _lines(out: string) -> string[] {
+    let raw = split(out, "\n");
+    let mut lines: string[] = [];
+    let mut i: int = 0;
+    loop {
+        if i >= raw.length { break; }
+        let t = trim(raw[i]);
+        if t.length > 0 { lines.push(t); }
+        i += 1;
+    }
+    return lines;
+}
+
+fn _list_contains(lines: string[], needle: string) -> boolean {
+    let mut i: int = 0;
+    loop {
+        if i >= lines.length { break; }
+        if lines[i] == needle { return true; }
+        i += 1;
+    }
+    return false;
+}
+
+test "dev shard: names lists the eight CI shards" ![io] {
+    let exit = process.run_capture([_sfn_bin(), "dev", "shard", "names"], []);
+    let out = process.capture_take_stdout();
+    let _ = process.capture_take_stderr();
+    assert exit == 0;
+    let names = _lines(out);
+    assert names.length == 8;
+    assert find(out, "unit-a", 0) >= 0;
+    assert find(out, "int-caps", 0) >= 0;
+    assert find(out, "e2e-d", 0) >= 0;
+}
+
+test "dev shard: cover reports the map partitions the test surface" ![io] {
+    let exit = process.run_capture([_sfn_bin(), "dev", "shard", "cover"], []);
+    let out = process.capture_take_stdout();
+    let err = process.capture_take_stderr();
+    assert exit == 0;
+    assert find(out + err, "[shard-cover] ok", 0) >= 0;
+}
+
+test "dev shard: list unit-a yields unit test files under the stride" ![io] {
+    let exit = process.run_capture([_sfn_bin(), "dev", "shard", "list", "unit-a"], []);
+    let out = process.capture_take_stdout();
+    let _ = process.capture_take_stderr();
+    assert exit == 0;
+    let files = _lines(out);
+    assert files.length > 0;
+    let mut i: int = 0;
+    loop {
+        if i >= files.length { break; }
+        assert ends_with(files[i], "_test.sfn");
+        assert contains(files[i], "compiler/tests/unit");
+        i += 1;
+    }
+}
+
+test "dev shard: list int-caps spans integration and capsules" ![io] {
+    let exit = process.run_capture([_sfn_bin(), "dev", "shard", "list", "int-caps"], []);
+    let out = process.capture_take_stdout();
+    let _ = process.capture_take_stderr();
+    assert exit == 0;
+    assert find(out, "compiler/tests/integration", 0) >= 0;
+    assert find(out, "capsules/", 0) >= 0;
+}
+
+test "dev shard: the unit shards partition disjointly" ![io] {
+    // unit-a and unit-b keep different residue classes of the same sorted
+    // list, so no file may appear in both.
+    let _e1 = process.run_capture([_sfn_bin(), "dev", "shard", "list", "unit-a"], []);
+    let a_out = process.capture_take_stdout();
+    let _a_err = process.capture_take_stderr();
+    let _e2 = process.run_capture([_sfn_bin(), "dev", "shard", "list", "unit-b"], []);
+    let b_out = process.capture_take_stdout();
+    let _b_err = process.capture_take_stderr();
+    let a = _lines(a_out);
+    let b = _lines(b_out);
+    assert a.length > 0;
+    assert b.length > 0;
+    let mut i: int = 0;
+    loop {
+        if i >= a.length { break; }
+        assert ! _list_contains(b, a[i]);
+        i += 1;
+    }
+}
+
+test "dev shard: list rejects an unknown shard name" ![io] {
+    let exit = process.run_capture([_sfn_bin(), "dev", "shard", "list", "nope"], []);
+    let _ = process.capture_take_stdout();
+    let err = process.capture_take_stderr();
+    assert exit == 2;
+    assert find(err, "unknown shard", 0) >= 0;
+}
+
+test "dev shard: run rejects an unknown shard name" ![io] {
+    let exit = process.run_capture([_sfn_bin(), "dev", "shard", "run", "nope"], []);
+    let _ = process.capture_take_stdout();
+    let err = process.capture_take_stderr();
+    assert exit == 2;
+    assert find(err, "unknown shard", 0) >= 0;
+}

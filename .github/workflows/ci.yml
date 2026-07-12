@@ -52,21 +52,39 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  # Cheap guard (no build): assert the shard map in scripts/test_shards.sh
-  # still covers every test file `make test` runs — no gaps, no overlaps.
-  # The whole point of sharding is parallelism; this is the only thing
-  # standing between "rebalance the shards" and "silently stop running
-  # some tests". Fails fast before the expensive build legs spin up.
+  # Assert the native shard map (`sfn dev shard`, SFN-200) still covers every
+  # test file `make test` runs — no gaps, no overlaps. The whole point of
+  # sharding is parallelism; this is the only thing standing between
+  # "rebalance the shards" and "silently stop running some tests". The map now
+  # lives in the compiler (compiler/src/cli/commands/dev_shard.sfn), so the
+  # lint reuses the already-built compiler tree rather than a bash file-tree
+  # check — it runs alongside the shard legs off the shared per-OS build.
   shard-cover:
     name: Shard-cover lint
+    needs: build-compiler-linux
     runs-on: ubuntu-24.04
-    timeout-minutes: 5
+    timeout-minutes: 10
     steps:
       - name: Checkout repository
         uses: actions/checkout@v7
+
+      - name: Download shared compiler build
+        uses: actions/download-artifact@v8
+        with:
+          name: ci-build-tree-linux-x86_64
+
+      - name: Extract shared compiler build
+        shell: bash
+        run: |
+          set -euo pipefail
+          tar -xzf "build-tree-linux-x86_64.tar.gz"
+          rm -f "build-tree-linux-x86_64.tar.gz"
+          touch build/bin/sfn
+          ls -lh build/bin/sfn
+
       - name: Assert shard map covers the full test surface
         shell: bash
-        run: make test-shard-cover
+        run: build/bin/sfn dev shard cover
 
   # Fast static-analysis pre-flight: run `sfn check` over the whole
   # compiler tree using the *pinned seed* binary (no self-host build
@@ -155,7 +173,6 @@ jobs:
   # job ids keep each OS's shard legs gated only on their own build.
   build-compiler-linux:
     name: Build compiler [linux-x86_64]
-    needs: shard-cover
     runs-on: ubuntu-24.04
     timeout-minutes: 120
     steps:
@@ -295,7 +312,6 @@ jobs:
 
   build-compiler-macos:
     name: Build compiler [macos-arm64]
-    needs: shard-cover
     # macos-26: the `macos-latest` label migrated to macOS 26 on
     # 2026-06-15, so macos-15 runners are now scarce (PR queue stalls
     # waiting for them). The nightly-selfhost canary has been validating
@@ -405,7 +421,8 @@ jobs:
   # (#1234 — no per-leg `make rebuild`) then runs only its shard.
   # `primary: true` designates the one leg per OS that also runs the
   # one-shot steps (fmt/canary/effect-gate/package/upload) so they
-  # don't run 4x. Shard names live in scripts/test_shards.sh.
+  # don't run 4x. Shard names live in compiler/src/cli/commands/dev_shard.sfn
+  # (`sfn dev shard names`).
   #
   # build-linux and build-macos are separate job ids (not one os-matrix
   # job) so each OS's legs gate only on their own compiler build — see
@@ -798,7 +815,7 @@ jobs:
     # macos-26: adopted from the nightly-selfhost canary now that the
     # `macos-latest` migration (2026-06-15) has made macos-15 runners
     # scarce. The *test runner* is serial (`sailfin test --jobs 1` via
-    # `test_shards.sh run`), but each fixture build fans out internally
+    # `sfn dev shard run`), but each fixture build fans out internally
     # to `_cr_resolve_jobs()` emit workers. `RLIMIT_AS` is a no-op on
     # Darwin, so that fan-out is the only memory backpressure on macOS;
     # it is now RAM-aware (#1532, `docs/proposals/0022-darwin-memory-governor.md`)

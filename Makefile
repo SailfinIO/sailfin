@@ -162,7 +162,7 @@ TEST_BIN_CACHE_FLAGS ?=
 # than BUILD_JOBS' ~2 GB budget, which is sized for per-module emit.
 # Override with `TEST_JOBS=N` on the command line or in the environment;
 # an explicit value always wins. CI sharding (`make test-shard`) is
-# unaffected — it reads SAILFIN_TEST_JOBS directly from scripts/test_shards.sh.
+# unaffected — `sfn dev shard run` reads SAILFIN_TEST_JOBS directly (SFN-200).
 # See docs/proposals/0044-test-runner-invocation-cache.md and #1998.
 TEST_JOBS ?= $(shell bash scripts/detect_test_jobs.sh 2>/dev/null || echo 1)
 TEST_JOBS_FLAG = --jobs $(TEST_JOBS)
@@ -426,11 +426,11 @@ test-capsules-impl:
 # Sharded test execution for parallel CI legs. Phase 1 of
 # docs/proposals/0011-ci-test-speed.md (#843 Track A): the test suite is
 # ~90% of PR CI wall time and runs serially, so we fan it across
-# concurrent CI legs. `scripts/test_shards.sh` owns the shard -> file
-# mapping (single source of truth); `test-shard-cover` asserts the union
-# of all shards equals `make test`'s surface so a rebalance can never
-# silently drop coverage. Shard names: unit-a unit-b unit-c int-caps
-# e2e-a e2e-b e2e-c e2e-d (see scripts/test_shards.sh for the map).
+# concurrent CI legs. `sfn dev shard` owns the shard -> file mapping
+# natively (SFN-200, single source of truth); `test-shard-cover` asserts
+# the union of all shards equals `make test`'s surface so a rebalance can
+# never silently drop coverage. Shard names: unit-a unit-b unit-c int-caps
+# e2e-a e2e-b e2e-c e2e-d (see compiler/src/cli/commands/dev_shard.sfn).
 #   make test-shard SHARD=unit-a
 .PHONY: test-shard test-shard-cover
 SHARD ?=
@@ -445,17 +445,32 @@ test-shard:
 	fi
 	@# Every shard is a disjoint slice of the unified `*_test.sfn` runner
 	@# (the legacy e2e `.sh` shards were retired with the bash suite — #840).
-	@# JSON=1 gate (#1235): `JSON=1 make test-shard` (or SAILFIN_AGENT_REPORT=1
-	@# in the env, as the macOS measurement legs set) makes test_shards.sh
-	@# forward `--json` and tee build/agent-test.shard-<shard>.jsonl, whose
-	@# `summary` event carries cache.test_bin_hit_rate (#1230). Default
-	@# (gate off) keeps the byte-identical human run — see scripts/test_shards.sh.
-	@bash scripts/test_shards.sh run "$(SHARD)" "$(NATIVE_BIN)"
+	@# `sfn dev shard run` owns the named shard map natively (SFN-200);
+	@# SAILFIN_TEST_JOBS is read there directly. JSON=1 gate (#1235):
+	@# `JSON=1 make test-shard` (or SAILFIN_AGENT_REPORT=1 in the env, as the
+	@# macOS measurement legs set) forwards `--json` and tees
+	@# build/agent-test.shard-<shard>.jsonl, whose `summary` event carries
+	@# cache.test_bin_hit_rate (#1230); pipefail preserves the runner's exit
+	@# code across the tee. Default (gate off) is the byte-identical human run.
+	@rc=0; \
+	if [ "$${SAILFIN_AGENT_REPORT:-}" = "1" ]; then \
+		mkdir -p build; \
+		set -o pipefail; \
+		$(NATIVE_BIN) dev shard run "$(SHARD)" --json | tee build/agent-test.shard-$(SHARD).jsonl || rc=$$?; \
+	else \
+		$(NATIVE_BIN) dev shard run "$(SHARD)" || rc=$$?; \
+	fi; \
+	exit $$rc
 
-# Coverage guard: fail if the shard map drops or double-counts any test
-# file relative to `make test`. Needs no compiler — pure file-tree check.
+# Coverage guard: fail if the shard map drops or double-counts any test file
+# relative to `make test`. `sfn dev shard cover` (SFN-200) is a pure file-tree
+# check; it needs a built compiler, so build one if the binary is absent.
 test-shard-cover:
-	@bash scripts/test_shards.sh cover
+	@if [ ! -x $(NATIVE_BIN) ]; then \
+		echo "[test-shard-cover] missing $(NATIVE_BIN); running make compile"; \
+		$(MAKE) compile; \
+	fi
+	@$(NATIVE_BIN) dev shard cover
 
 # Run the full Sailfin-native test suite using the *self-hosted* compiler.
 # This ensures tests cover the same binary we intend to ship for 1.0.

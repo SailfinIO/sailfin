@@ -54,7 +54,8 @@ Optional (not yet required): `Fast static check (sfn check compiler/src/)`
 a few cycles. The effect-gate smoke and fmt gates are steps *inside* the
 primary `unit-a` legs, so they are covered by those legs' checks.
 
-If a shard is added/renamed in `scripts/test_shards.sh` and the `ci.yml`
+If a shard is added/renamed in the native shard map
+(`compiler/src/cli/commands/dev_shard.sfn`, `sfn dev shard`) and the `ci.yml`
 matrices, update the required-checks list in the same change — a renamed
 job leaves a permanently-"Expected" required check that blocks the queue.
 
