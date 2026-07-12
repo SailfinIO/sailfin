@@ -5,6 +5,29 @@
 // verification (RFC 8032). No effects required — pure computation.
 export { ed25519_verify, ed25519_verify_utf8 } from "./ed25519";
 
+export { sha1_hex } from "./sha1";
+
+export { sha384_hex } from "./sha384";
+
+export { hmac_sha256_bytes, hkdf_sha256_extract, hkdf_sha256_expand } from "./hkdf";
+
+export { poly1305_mac } from "./poly1305";
+
+// Constant-time / masking helpers shared by the Phase A hash and cipher
+// primitives (SFEP-0048 §3.3-3.4).
+export {
+    mask32,
+    rotl32,
+    rotr32,
+    ct_eq_bytes,
+    load_u32_be,
+    store_u32_be,
+    load_u32_le,
+    store_u32_le
+} from "./bits";
+
+export { chacha20_block, chacha20_xor } from "./chacha20";
+
 // ── OpenSSL HMAC-SHA256 surface (libcrypto) ──────────────────────
 // OpenSSL is already linked for the native TLS runtime (`-lcrypto`). The
 // externs carry no effect surface; `hmac_sha256` is deterministic pure

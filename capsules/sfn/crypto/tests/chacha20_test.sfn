@@ -1,0 +1,75 @@
+// capsules/sfn/crypto/tests/chacha20_test.sfn
+//
+// Known-answer coverage for sfn/crypto ChaCha20 (RFC 8439 §2.3.2 block
+// function, §2.4.2 encryption) plus a fail-closed bad-key-length check.
+import { chacha20_block, chacha20_xor } from "../src/chacha20";
+
+// Map a single hex digit character to its 0-15 value, or -1 if not hex.
+fn _hexval(c: string) -> int {
+    let code: int = char_code(c) & 255;
+    if code >= 48 && code <= 57 {
+        return code - 48;
+    }  // '0'..'9'
+    if code >= 97 && code <= 102 {
+        return code - 97 + 10;
+    }  // 'a'..'f'
+    if code >= 65 && code <= 70 {
+        return code - 65 + 10;
+    }  // 'A'..'F'
+    return -1;
+}
+
+// Decode a lowercase/uppercase hex string into an int[] of bytes.
+fn hexb(s: string) -> int[] {
+    let mut out: int[] = [];
+    let mut i: int = 0;
+    loop {
+        if i + 1 >= s.length { break; }
+        let hi: int = _hexval(s[i]);
+        let lo: int = _hexval(s[i + 1]);
+        out.push(((hi << 4) | lo) & 255);
+        i += 2;
+    }
+    return out;
+}
+
+// Plain (non-constant-time) byte-array equality for test assertions.
+fn eq_bytes(a: int[], b: int[]) -> bool {
+    if a.length != b.length { return false; }
+    let mut i: int = 0;
+    loop {
+        if i >= a.length { break; }
+        if a[i] != b[i] { return false; }
+        i += 1;
+    }
+    return true;
+}
+
+test "chacha20_block: RFC 8439 §2.3.2 keystream block" {
+    // key = 00 01 02 ... 1f, counter = 1, nonce = 00 00 00 09 00 00 00 4a 00 00 00 00
+    let key: int[] = hexb("000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f");
+    let nonce: int[] = hexb("000000090000004a00000000");
+    let ks: int[] = chacha20_block(key, 1, nonce);
+    assert ks.length == 64;
+    assert eq_bytes(ks, hexb("10f1e7e4d13b5915500fdd1fa32071c4c7d1f4c733c068030422aa9ac3d46c4ed2826446079faa0914c2d705d98b02a2b5129cd1de164eb9cbd083e8a2503c4e"));
+}
+
+test "chacha20_xor: RFC 8439 §2.4.2 encryption" {
+    let key: int[] = hexb("000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f");
+    let nonce: int[] = hexb("000000000000004a00000000");
+    // plaintext: "Ladies and Gentlemen of the class of '99: If I could offer
+    // you only one tip for the future, sunscreen would be it." (114 bytes)
+    let pt: int[] = hexb("4c616469657320616e642047656e746c656d656e206f662074686520636c617373206f66202739393a204966204920636f756c64206f6666657220796f75206f6e6c79206f6e652074697020666f7220746865206675747572652c2073756e73637265656e20776f756c642062652069742e");
+    let ct: int[] = chacha20_xor(key, 1, nonce, pt);
+    assert eq_bytes(ct, hexb("6e2e359a2568f98041ba0728dd0d6981e97e7aec1d4360c20a27afccfd9fae0bf91b65c5524733ab8f593dabcd62b3571639d624e65152ab8f530c359f0861d807ca0dbf500d6a6156a38e088a22b65e52bc514d16ccf806818ce91ab77937365af90bbf74a35be6b40b8eedf2785e42874d"));
+    // Round-trip: XOR again recovers the plaintext.
+    let back: int[] = chacha20_xor(key, 1, nonce, ct);
+    assert eq_bytes(back, pt);
+}
+
+test "chacha20_block: rejects bad key length" {
+    let bad: int[] = [1, 2, 3];
+    let nonce: int[] = hexb("000000090000004a00000000");
+    let ks: int[] = chacha20_block(bad, 1, nonce);
+    assert ks.length == 0;
+}

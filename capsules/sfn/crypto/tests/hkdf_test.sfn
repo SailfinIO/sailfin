@@ -1,0 +1,90 @@
+// capsules/sfn/crypto/tests/hkdf_test.sfn
+//
+// Regression coverage for HKDF-SHA-256 (RFC 5869) and its internal pure
+// HMAC-SHA-256: RFC 4231 test case 1 cross-checks the HMAC, and RFC 5869
+// test cases 1 and 3 cover extract/expand, including empty salt/info and
+// out-of-range length rejection.
+import { hmac_sha256_bytes, hkdf_sha256_extract, hkdf_sha256_expand } from "../src/hkdf";
+
+// Parse an even-length lowercase hex string into an int[] of bytes.
+fn hexb(s: string) -> int[] {
+    let digits: string = "0123456789abcdef";
+    let mut out: int[] = [];
+    let mut i: int = 0;
+    loop {
+        if i >= s.length { break; }
+        let hi: int = _hexval(s[i]);
+        let lo: int = _hexval(s[i + 1]);
+        out.push(((hi << 4) | lo) & 255);
+        i += 2;
+    }
+    return out;
+}
+
+fn _hexval(c: string) -> int {
+    let code: int = char_code(c) & 255;
+    if code >= 48 && code <= 57 {
+        return code - 48;
+    }  // '0'-'9'
+    if code >= 97 && code <= 102 {
+        return code - 97 + 10;
+    }  // 'a'-'f'
+    return 0;
+}
+
+fn eq_bytes(a: int[], b: int[]) -> bool {
+    if a.length != b.length { return false; }
+    let mut i: int = 0;
+    loop {
+        if i >= a.length { break; }
+        if a[i] != b[i] { return false; }
+        i += 1;
+    }
+    return true;
+}
+
+// RFC 4231 test case 1 cross-checks the internal pure HMAC-SHA-256.
+test "hmac_sha256_bytes: RFC 4231 test case 1" {
+    let key: int[] = hexb("0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b");  // 20 x 0x0b
+    let data: int[] = [72, 105, 32, 84, 104, 101, 114, 101];  // "Hi There"
+    let mac: int[] = hmac_sha256_bytes(key, data);
+    assert eq_bytes(mac, hexb("b0344c61d8db38535ca8afceaf0bf12b881dc200c9833da726e9376c2e32cff7"));
+}
+
+test "hkdf: RFC 5869 test case 1 extract" {
+    let ikm: int[] = hexb("0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b");  // 22 x 0x0b
+    let salt: int[] = hexb("000102030405060708090a0b0c");
+    let prk: int[] = hkdf_sha256_extract(salt, ikm);
+    assert eq_bytes(prk, hexb("077709362c2e32df0ddc3f0dc47bba6390b6c73bb50f9c3122ec844ad7c2b3e5"));
+}
+
+test "hkdf: RFC 5869 test case 1 expand (L=42)" {
+    let prk: int[] = hexb("077709362c2e32df0ddc3f0dc47bba6390b6c73bb50f9c3122ec844ad7c2b3e5");
+    let info: int[] = hexb("f0f1f2f3f4f5f6f7f8f9");
+    let okm: int[] = hkdf_sha256_expand(prk, info, 42);
+    assert eq_bytes(okm, hexb("3cb25f25faacd57a90434f64d0362f2a2d2d0a90cf1a5a4c5db02d56ecc4c5bf34007208d5b887185865"));
+}
+
+test "hkdf: RFC 5869 test case 3 (empty salt and info)" {
+    let ikm: int[] = hexb("0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b");  // 22 x 0x0b
+    let salt: int[] = [];
+    let prk: int[] = hkdf_sha256_extract(salt, ikm);
+    assert eq_bytes(prk, hexb("19ef24a32c717b167f33a91d6f648bdf96596776afdb6377ac434c1c293ccb04"));
+    let info: int[] = [];
+    let okm: int[] = hkdf_sha256_expand(prk, info, 42);
+    assert eq_bytes(okm, hexb("8da4e775a563c18f715f802a063c5a31b8a11f5c5ee1879ec3454e5f3c738d2d9d201395faa4b61a96c8"));
+}
+
+test "hkdf: expand rejects out-of-range length" {
+    let prk: int[] = hexb("077709362c2e32df0ddc3f0dc47bba6390b6c73bb50f9c3122ec844ad7c2b3e5");
+    let info: int[] = [];
+    let empty: int[] = hkdf_sha256_expand(prk, info, 0);
+    assert empty.length == 0;
+}
+
+test "hkdf: expand rejects a PRK shorter than HashLen" {
+    let short_prk: int[] = hexb("077709362c2e32df0ddc3f0dc47bba63");  // 16 bytes < 32
+    let info: int[] = [];
+    let empty: int[] = hkdf_sha256_expand(short_prk, info, 42);
+    assert empty.length == 0;
+}

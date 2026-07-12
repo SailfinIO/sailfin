@@ -1,0 +1,98 @@
+// capsules/sfn/crypto/src/chacha20.sfn
+//
+// ChaCha20 stream cipher (RFC 8439 §2.3-2.4), pure 32-bit ARX. Phase B
+// consumer: the ChaCha20-Poly1305 AEAD (with `poly1305`). Uses the RFC 8439
+// profile: a 32-bit block counter (word 12) and a 96-bit nonce (words 13-15).
+import { rotl32, load_u32_le, store_u32_le } from "./bits";
+
+// The 4 ChaCha20 constant words ("expand 32-byte k").
+fn _chacha20_c0() -> int { return 1634760805; }
+
+fn _chacha20_c1() -> int { return 857760878; }
+
+fn _chacha20_c2() -> int { return 2036477234; }
+
+fn _chacha20_c3() -> int { return 1797285236; }
+
+// Apply the ChaCha quarter-round to state words s[a], s[b], s[c], s[d]
+// in place.
+fn _chacha20_quarter_round(s: int[], a: int, b: int, c: int, d: int) -> void {
+    let mask: int = 4294967295;
+    s[a] = (s[a] + s[b]) & mask;
+    s[d] = rotl32((s[d] ^ s[a]) & mask, 16);
+    s[c] = (s[c] + s[d]) & mask;
+    s[b] = rotl32((s[b] ^ s[c]) & mask, 12);
+    s[a] = (s[a] + s[b]) & mask;
+    s[d] = rotl32((s[d] ^ s[a]) & mask, 8);
+    s[c] = (s[c] + s[d]) & mask;
+    s[b] = rotl32((s[b] ^ s[c]) & mask, 7);
+}
+
+// Produce one 64-byte ChaCha20 keystream block. `key` is 32 bytes, `nonce` is
+// 12 bytes (RFC 8439 96-bit nonce), `counter` is the 32-bit block counter.
+// Returns 64 keystream bytes as an int[]. Returns [] if key.length != 32 or
+// nonce.length != 12 (fail-closed).
+fn chacha20_block(key: int[], counter: int, nonce: int[]) -> int[] {
+    let empty: int[] = [];
+    if key.length != 32 { return empty; }
+    if nonce.length != 12 { return empty; }
+
+    let mask: int = 4294967295;
+    let mut s: int[] = [_chacha20_c0(), _chacha20_c1(), _chacha20_c2(), _chacha20_c3(), load_u32_le(key, 0), load_u32_le(key, 4), load_u32_le(key, 8), load_u32_le(key, 12), load_u32_le(key, 16), load_u32_le(key, 20), load_u32_le(key, 24), load_u32_le(key, 28), counter & mask, load_u32_le(nonce, 0), load_u32_le(nonce, 4), load_u32_le(nonce, 8),];
+
+    let mut w: int[] = [s[0], s[1], s[2], s[3], s[4], s[5], s[6], s[7], s[8], s[9], s[10], s[11], s[12], s[13], s[14], s[15],];
+
+    let mut round: int = 0;
+    loop {
+        if round >= 10 { break; }
+        _chacha20_quarter_round(w, 0, 4, 8, 12);
+        _chacha20_quarter_round(w, 1, 5, 9, 13);
+        _chacha20_quarter_round(w, 2, 6, 10, 14);
+        _chacha20_quarter_round(w, 3, 7, 11, 15);
+        _chacha20_quarter_round(w, 0, 5, 10, 15);
+        _chacha20_quarter_round(w, 1, 6, 11, 12);
+        _chacha20_quarter_round(w, 2, 7, 8, 13);
+        _chacha20_quarter_round(w, 3, 4, 9, 14);
+        round += 1;
+    }
+
+    let mut out: int[] = [];
+    let mut i: int = 0;
+    loop {
+        if i >= 16 { break; }
+        store_u32_le(out, (w[i] + s[i]) & mask);
+        i += 1;
+    }
+    return out;
+}
+
+// XOR `data` with the ChaCha20 keystream starting at `initial_counter`,
+// producing ciphertext (or, applied again, plaintext). key=32 bytes,
+// nonce=12 bytes. Returns an int[] of the same length as data. Returns [] on a
+// bad key/nonce length. This is the RFC 8439 §2.4 chacha20_encrypt.
+fn chacha20_xor(key: int[], initial_counter: int, nonce: int[], data: int[]) -> int[] {
+    let empty: int[] = [];
+    if key.length != 32 { return empty; }
+    if nonce.length != 12 { return empty; }
+
+    let mask: int = 4294967295;
+    let mut counter: int = initial_counter & mask;
+    let mut out: int[] = [];
+    let mut i: int = 0;
+    loop {
+        if i >= data.length { break; }
+        let ks: int[] = chacha20_block(key, counter, nonce);
+        let mut j: int = 0;
+        loop {
+            if j >= 64 { break; }
+            if i + j >= data.length { break; }
+            out.push((data[i + j] ^ ks[j]) & 255);
+            j += 1;
+        }
+        i += 64;
+        counter = (counter + 1) & mask;
+    }
+    return out;
+}
+
+export { chacha20_block, chacha20_xor };

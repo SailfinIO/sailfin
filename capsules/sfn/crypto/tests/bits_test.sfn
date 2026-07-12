@@ -1,0 +1,79 @@
+// capsules/sfn/crypto/tests/bits_test.sfn
+//
+// Regression coverage for the sfn/crypto bits module: masking, rotates,
+// constant-time byte comparison, and big/little-endian word codecs.
+import {
+    mask32,
+    rotl32,
+    rotr32,
+    ct_eq_bytes,
+    load_u32_be,
+    store_u32_be,
+    load_u32_le,
+    store_u32_le
+} from "../src/bits";
+
+test "bits: mask32 is 0xffffffff" { assert mask32() == 4294967295; }
+
+test "bits: rotl32 of 1 by 1 is 2" { assert rotl32(1, 1) == 2; }
+
+test "bits: rotl32 wraps the top bit" {
+    // 0x80000000 rotated left by 1 == 0x00000001
+    assert rotl32(2147483648, 1) == 1;
+}
+
+test "bits: rotr32 of 1 by 1 wraps to top bit" {
+    // 0x00000001 rotated right by 1 == 0x80000000
+    assert rotr32(1, 1) == 2147483648;
+}
+
+test "bits: rotl32 then rotr32 is identity" {
+    assert rotr32(rotl32(305419896, 7), 7) == 305419896;  // 0x12345678
+}
+
+test "bits: ct_eq_bytes equal" {
+    assert ct_eq_bytes([1, 2, 3], [1, 2, 3]) == true;
+}
+
+test "bits: ct_eq_bytes differ" {
+    assert ct_eq_bytes([1, 2, 3], [1, 2, 4]) == false;
+}
+
+test "bits: ct_eq_bytes length mismatch" {
+    assert ct_eq_bytes([1, 2], [1, 2, 3]) == false;
+}
+
+test "bits: ct_eq_bytes empty" {
+    let a: int[] = [];
+    let b: int[] = [];
+    assert ct_eq_bytes(a, b) == true;
+}
+
+test "bits: load_u32_be" {
+    // 0x12345678
+    assert load_u32_be([18, 52, 86, 120], 0) == 305419896;
+}
+
+test "bits: store_u32_be round-trips" {
+    let mut out: int[] = [];
+    store_u32_be(out, 305419896);  // 0x12345678
+    assert out.length == 4;
+    assert out[0] == 18;
+    assert out[1] == 52;
+    assert out[2] == 86;
+    assert out[3] == 120;
+    assert load_u32_be(out, 0) == 305419896;
+}
+
+test "bits: load_u32_le" {
+    // bytes 78 56 34 12 little-endian == 0x12345678
+    assert load_u32_le([120, 86, 52, 18], 0) == 305419896;
+}
+
+test "bits: store_u32_le round-trips" {
+    let mut out: int[] = [];
+    store_u32_le(out, 305419896);
+    assert out.length == 4;
+    assert out[0] == 120;
+    assert load_u32_le(out, 0) == 305419896;
+}

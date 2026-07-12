@@ -1,0 +1,206 @@
+// capsules/sfn/crypto/src/sha384.sfn
+//
+// SHA-384 (FIPS 180-4) implemented in pure Sailfin as SHA-512 truncated to
+// 384 bits with a different initial state. SHA-512 is a 64-bit-word hash,
+// and under Sailfin's signed-i64 `int` a naive single-`int` 64-bit word
+// would corrupt `>>` (LLVM `ashr` sign-extends once bit 63 is set). Every
+// 64-bit word is therefore held as a `[hi, lo]` pair of 32-bit limbs (each
+// masked to `[0, 2^32)`), and every 64-bit rotate/shift/xor/add is
+// implemented limb-wise with explicit carry (SFEP-0048
+// §3.3 item 4).
+import { load_u32_be, store_u32_be } from "./bits";
+
+// 64-bit XOR: componentwise.
+fn xor64(a: int[], b: int[]) -> int[] {
+    return [(a[0] ^ b[0]) & 4294967295, (a[1] ^ b[1]) & 4294967295];
+}
+
+// 64-bit AND: componentwise.
+fn and64(a: int[], b: int[]) -> int[] {
+    return [(a[0] & b[0]) & 4294967295, (a[1] & b[1]) & 4294967295];
+}
+
+// 64-bit NOT within 64 bits.
+fn not64(a: int[]) -> int[] {
+    return [(a[0] ^ 4294967295) & 4294967295, (a[1] ^ 4294967295) & 4294967295];
+}
+
+// 64-bit modular add with carry from lo into hi. `a[1] + b[1] < 2^33` fits
+// comfortably in i64, so the carry is bit 32 of that sum; likewise
+// `a[0] + b[0] + carry < 2^33`. No i64 overflow.
+fn add64(a: int[], b: int[]) -> int[] {
+    let lo: int = (a[1] + b[1]) & 4294967295;
+    let carry: int = ((a[1] + b[1]) >> 32) & 1;
+    let hi: int = (a[0] + b[0] + carry) & 4294967295;
+    return [hi, lo];
+}
+
+// 64-bit logical right shift by n (0 < n < 64). Zero-fill — this is the
+// point of the limb split, since a naive `>>` on a single int would ashr.
+fn shr64(a: int[], n: int) -> int[] {
+    if n == 0 { return [a[0], a[1]]; }
+    if n < 32 {
+        let lo: int = ((a[1] >> n) | (a[0] << (32 - n))) & 4294967295;
+        let hi: int = (a[0] >> n) & 4294967295;
+        return [hi, lo];
+    }
+    let lo: int = (a[0] >> (n - 32)) & 4294967295;
+    return [0, lo];
+}
+
+// 64-bit logical left shift by n (0 < n < 64) — needed only inside rotr64.
+fn shl64(a: int[], n: int) -> int[] {
+    if n == 0 { return [a[0], a[1]]; }
+    if n < 32 {
+        let hi: int = ((a[0] << n) | (a[1] >> (32 - n))) & 4294967295;
+        let lo: int = (a[1] << n) & 4294967295;
+        return [hi, lo];
+    }
+    let hi: int = (a[1] << (n - 32)) & 4294967295;
+    return [hi, 0];
+}
+
+// 64-bit rotate right by n (0 < n < 64): ROTR(x,n) = (x >> n) | (x << (64 - n)).
+fn rotr64(a: int[], n: int) -> int[] {
+    let right: int[] = shr64(a, n);
+    let left: int[] = shl64(a, 64 - n);
+    return [(right[0] | left[0]) & 4294967295, (right[1] | left[1]) & 4294967295];
+}
+
+// Render a 64-bit `[hi, lo]` word as 16 lowercase hex characters.
+fn sha384_word_hex(hi: int, lo: int) -> string {
+    let digits: string[] = ["0", "1", "2", "3", "4", "5", "6", "7", "8", "9", "a", "b", "c", "d", "e", "f",];
+    let mut out: string = "";
+    let mut shift: int = 28;
+    loop {
+        if shift < 0 { break; }
+        out = out + digits[(hi >> shift) & 15];
+        shift -= 4;
+    }
+    shift = 28;
+    loop {
+        if shift < 0 { break; }
+        out = out + digits[(lo >> shift) & 15];
+        shift -= 4;
+    }
+    return out;
+}
+
+// The 80 SHA-512 round constants (FIPS 180-4 §4.2.3), each as a `[hi, lo]`
+// decimal pair (hex literals unavailable). Verified against the SHA-384
+// known-answer vectors in sha384_test.sfn — a single wrong entry fails them.
+fn sha384_round_constants() -> int[][] {
+    return [[1116352408, 3609767458], [1899447441, 602891725], [3049323471, 3964484399], [3921009573, 2173295548], [961987163, 4081628472], [1508970993, 3053834265], [2453635748, 2937671579], [2870763221, 3664609560], [3624381080, 2734883394], [310598401, 1164996542], [607225278, 1323610764], [1426881987, 3590304994], [1925078388, 4068182383], [2162078206, 991336113], [2614888103, 633803317], [3248222580, 3479774868], [3835390401, 2666613458], [4022224774, 944711139], [264347078, 2341262773], [604807628, 2007800933], [770255983, 1495990901], [1249150122, 1856431235], [1555081692, 3175218132], [1996064986, 2198950837], [2554220882, 3999719339], [2821834349, 766784016], [2952996808, 2566594879], [3210313671, 3203337956], [3336571891, 1034457026], [3584528711, 2466948901], [113926993, 3758326383], [338241895, 168717936], [666307205, 1188179964], [773529912, 1546045734], [1294757372, 1522805485], [1396182291, 2643833823], [1695183700, 2343527390], [1986661051, 1014477480], [2177026350, 1206759142], [2456956037, 344077627], [2730485921, 1290863460], [2820302411, 3158454273], [3259730800, 3505952657], [3345764771, 106217008], [3516065817, 3606008344], [3600352804, 1432725776], [4094571909, 1467031594], [275423344, 851169720], [430227734, 3100823752], [506948616, 1363258195], [659060556, 3750685593], [883997877, 3785050280], [958139571, 3318307427], [1322822218, 3812723403], [1537002063, 2003034995], [1747873779, 3602036899], [1955562222, 1575990012], [2024104815, 1125592928], [2227730452, 2716904306], [2361852424, 442776044], [2428436474, 593698344], [2756734187, 3733110249], [3204031479, 2999351573], [3329325298, 3815920427], [3391569614, 3928383900], [3515267271, 566280711], [3940187606, 3454069534], [4118630271, 4000239992], [116418474, 1914138554], [174292421, 2731055270], [289380356, 3203993006], [460393269, 320620315], [685471733, 587496836], [852142971, 1086792851], [1017036298, 365543100], [1126000580, 2618297676], [1288033470, 3409855158], [1501505948, 4234509866], [1607167915, 987167468], [1816402316, 1246189591],];
+}
+
+fn sha384_hex(data: string) -> string {
+    // Compute the SHA-384 digest of `data` (byte-oriented over raw UTF-8
+    // bytes, matching `sha384sum`) and return the bare 96-character
+    // lowercase hex string.
+    let mut bytes: int[] = [];
+    let mut bi: int = 0;
+    loop {
+        if bi >= data.length { break; }
+        bytes.push(char_code(data[bi]) & 255);
+        bi += 1;
+    }
+    let bit_len: int = bytes.length * 8;
+
+    // Pad: 0x80, zeros until length % 128 == 112, then the 128-bit
+    // big-endian message length in bits. `bit_len` fits in 64 bits, so the
+    // high 64 bits of the 128-bit length are all zero.
+    bytes.push(128);
+    loop {
+        if (bytes.length % 128) == 112 { break; }
+        bytes.push(0);
+    }
+    let mut zi: int = 0;
+    loop {
+        if zi >= 8 { break; }
+        bytes.push(0);
+        zi += 1;
+    }
+    let len_hi: int = (bit_len >> 32) & 4294967295;
+    let len_lo: int = bit_len & 4294967295;
+    store_u32_be(bytes, len_hi);
+    store_u32_be(bytes, len_lo);
+
+    // Initial state H[0..7] (SHA-384 IV).
+    let mut h: int[][] = [[3418070365, 3238371032], [1654270250, 914150663], [2438529370, 812702999], [355462360, 4144912697], [1731405415, 4290775857], [2394180231, 1750603025], [3675008525, 1694076839], [1203062813, 3204075428],];
+
+    let k: int[][] = sha384_round_constants();
+
+    let num_blocks: int = bytes.length / 128;
+    let mut block: int = 0;
+    loop {
+        if block >= num_blocks { break; }
+        let base: int = block * 128;
+
+        let mut w: int[][] = [];
+        let mut t: int = 0;
+        loop {
+            if t >= 16 { break; }
+            let j: int = base + t * 8;
+            w.push([load_u32_be(bytes, j), load_u32_be(bytes, j + 4)]);
+            t += 1;
+        }
+        t = 16;
+        loop {
+            if t >= 80 { break; }
+            let w15: int[] = w[t - 15];
+            let w2: int[] = w[t - 2];
+            let s0: int[] = xor64(xor64(rotr64(w15, 1), rotr64(w15, 8)), shr64(w15, 7));
+            let s1: int[] = xor64(xor64(rotr64(w2, 19), rotr64(w2, 61)), shr64(w2, 6));
+            w.push(add64(add64(add64(w[t - 16], s0), w[t - 7]), s1));
+            t += 1;
+        }
+
+        let mut a: int[] = h[0];
+        let mut b: int[] = h[1];
+        let mut c: int[] = h[2];
+        let mut d: int[] = h[3];
+        let mut e: int[] = h[4];
+        let mut f: int[] = h[5];
+        let mut g: int[] = h[6];
+        let mut hh: int[] = h[7];
+
+        let mut r: int = 0;
+        loop {
+            if r >= 80 { break; }
+            let big_s1: int[] = xor64(xor64(rotr64(e, 14), rotr64(e, 18)), rotr64(e, 41));
+            let ch: int[] = xor64(and64(e, f), and64(not64(e), g));
+            let t1: int[] = add64(add64(add64(add64(hh, big_s1), ch), k[r]), w[r]);
+            let big_s0: int[] = xor64(xor64(rotr64(a, 28), rotr64(a, 34)), rotr64(a, 39));
+            let maj: int[] = xor64(xor64(and64(a, b), and64(a, c)), and64(b, c));
+            let t2: int[] = add64(big_s0, maj);
+            hh = g;
+            g = f;
+            f = e;
+            e = add64(d, t1);
+            d = c;
+            c = b;
+            b = a;
+            a = add64(t1, t2);
+            r += 1;
+        }
+
+        h[0] = add64(h[0], a);
+        h[1] = add64(h[1], b);
+        h[2] = add64(h[2], c);
+        h[3] = add64(h[3], d);
+        h[4] = add64(h[4], e);
+        h[5] = add64(h[5], f);
+        h[6] = add64(h[6], g);
+        h[7] = add64(h[7], hh);
+        block += 1;
+    }
+
+    // SHA-384 truncates to the first 6 of the 8 state words.
+    return sha384_word_hex(h[0][0], h[0][1]) + sha384_word_hex(h[1][0], h[1][1])
+        + sha384_word_hex(h[2][0], h[2][1])
+        + sha384_word_hex(h[3][0], h[3][1])
+        + sha384_word_hex(h[4][0], h[4][1])
+        + sha384_word_hex(h[5][0], h[5][1]);
+}
+
+export { sha384_hex };

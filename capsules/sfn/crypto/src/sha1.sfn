@@ -1,0 +1,132 @@
+// capsules/sfn/crypto/src/sha1.sfn
+//
+// SHA-1 (RFC 3174 / RFC 6234 §5) implemented in pure Sailfin. Same 32-bit-word
+// ARX shape as the shipped SHA-256 (SFEP-0048): all
+// arithmetic is masked to 32 bits after every operation, rotates go through
+// `bits::rotl32`. Used to compute the RFC 6455 WebSocket
+// `Sec-WebSocket-Accept` value (Phase D consumer).
+import { rotl32, load_u32_be, store_u32_be } from "./bits";
+
+// Render a 32-bit word as 8 lowercase hex characters.
+fn sha1_word_hex(x: int) -> string {
+    let digits: string[] = ["0", "1", "2", "3", "4", "5", "6", "7", "8", "9", "a", "b", "c", "d", "e", "f",];
+    let mut out: string = "";
+    let mut shift: int = 28;
+    loop {
+        if shift < 0 { break; }
+        out = out + digits[(x >> shift) & 15];
+        shift -= 4;
+    }
+    return out;
+}
+
+fn sha1_hex(data: string) -> string {
+    // Compute the SHA-1 digest of `data` and return the bare 40-character
+    // lowercase hex string.
+    //
+    // Usage:
+    //   let h = sha1_hex("abc");
+    //   // h == "a9993e364706816aba3e25717850c26c9cd0d89d"
+    let mask: int = 4294967295;
+
+    // 1. Decode the input into a byte sequence (byte-oriented, matches
+    //    `sha1sum` for arbitrary content, not just ASCII).
+    let mut bytes: int[] = [];
+    let mut bi: int = 0;
+    loop {
+        if bi >= data.length { break; }
+        bytes.push(char_code(data[bi]) & 255);
+        bi += 1;
+    }
+    let bit_len: int = bytes.length * 8;
+
+    // 2. Pad: append 0x80, then zeros until length ≡ 56 (mod 64), then the
+    //    64-bit big-endian message length in bits.
+    bytes.push(128);
+    loop {
+        if (bytes.length % 64) == 56 { break; }
+        bytes.push(0);
+    }
+    let hi: int = (bit_len >> 32) & mask;
+    let lo: int = bit_len & mask;
+    store_u32_be(bytes, hi);
+    store_u32_be(bytes, lo);
+
+    // Initial hash state H[0..4].
+    let mut h0: int = 1732584193;
+    let mut h1: int = 4023233417;
+    let mut h2: int = 2562383102;
+    let mut h3: int = 271733878;
+    let mut h4: int = 3285377520;
+
+    // 3. Process each 64-byte block.
+    let num_blocks: int = bytes.length / 64;
+    let mut block: int = 0;
+    loop {
+        if block >= num_blocks { break; }
+        let base: int = block * 64;
+
+        // Build the 80-word message schedule.
+        let mut w: int[] = [];
+        let mut t: int = 0;
+        loop {
+            if t >= 16 { break; }
+            w.push(load_u32_be(bytes, base + t * 4));
+            t += 1;
+        }
+        t = 16;
+        loop {
+            if t >= 80 { break; }
+            w.push(rotl32((w[t - 3] ^ w[t - 8] ^ w[t - 14] ^ w[t - 16]) & mask, 1));
+            t += 1;
+        }
+
+        let mut a: int = h0;
+        let mut b: int = h1;
+        let mut c: int = h2;
+        let mut d: int = h3;
+        let mut e: int = h4;
+
+        let mut r: int = 0;
+        loop {
+            if r >= 80 { break; }
+            let mut f: int = 0;
+            let mut k: int = 0;
+            if r < 20 {
+                let notb: int = b ^ mask;
+                f = ((b & c) | (notb & d)) & mask;
+                k = 1518500249;
+            } else if r < 40 {
+                f = (b ^ c ^ d) & mask;
+                k = 1859775393;
+            } else if r < 60 {
+                f = ((b & c) | (b & d) | (c & d)) & mask;
+                k = 2400959708;
+            } else {
+                f = (b ^ c ^ d) & mask;
+                k = 3395469782;
+            }
+
+            let temp: int = (rotl32(a, 5) + f + e + k + w[r]) & mask;
+            e = d;
+            d = c;
+            c = rotl32(b, 30);
+            b = a;
+            a = temp;
+            r += 1;
+        }
+
+        h0 = (h0 + a) & mask;
+        h1 = (h1 + b) & mask;
+        h2 = (h2 + c) & mask;
+        h3 = (h3 + d) & mask;
+        h4 = (h4 + e) & mask;
+        block += 1;
+    }
+
+    return sha1_word_hex(h0) + sha1_word_hex(h1) + sha1_word_hex(h2)
+        + sha1_word_hex(h3)
+        + sha1_word_hex(h4);
+}
+
+export { sha1_hex };

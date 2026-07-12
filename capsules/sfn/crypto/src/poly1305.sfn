@@ -1,0 +1,227 @@
+// capsules/sfn/crypto/src/poly1305.sfn
+//
+// Poly1305 one-time message authentication code (RFC 8439 §2.5), the AEAD
+// tag primitive paired with ChaCha20 (SFEP-0048 §3.3 item
+// 5). Implemented with the 5x26-bit limb schedule ("poly1305-donna 32") so
+// every intermediate product stays inside signed i64 without a native
+// unsigned 64-bit carry chain.
+import { load_u32_le, store_u32_le } from "./bits";
+
+// The 26-bit limb mask, 2^26 - 1.
+fn _limb_mask() -> int { return 67108863; }
+
+// Extract five 26-bit limbs from four little-endian 32-bit words, matching
+// the interleaved bit layout r0..r4 in the spec (bits 0..129 across w0..w3).
+fn _extract_limbs(w0: int, w1: int, w2: int, w3: int) -> int[] {
+    let mask: int = _limb_mask();
+    let n0: int = w0 & mask;
+    let n1: int = ((w0 >> 26) | (w1 << 6)) & mask;
+    let n2: int = ((w1 >> 20) | (w2 << 12)) & mask;
+    let n3: int = ((w2 >> 14) | (w3 << 18)) & mask;
+    let n4: int = (w3 >> 8) & mask;
+    return [n0, n1, n2, n3, n4];
+}
+
+// Compute the 16-byte Poly1305 MAC of `msg` under the 32-byte one-time `key`
+// (RFC 8439 §2.5). key[0..15] is r (clamped internally), key[16..31] is s.
+// Returns the 16-byte tag as an int[]. Returns [] if key.length != 32
+// (fail-closed).
+fn poly1305_mac(msg: int[], key: int[]) -> int[] {
+    if key.length != 32 { return []; }
+
+    let mask: int = _limb_mask();
+
+    // Clamp r: mask the raw little-endian words per RFC 8439 §2.5.1, then
+    // derive the five 26-bit limbs from the already-clamped words.
+    let mut t0: int = load_u32_le(key, 0);
+    let mut t1: int = load_u32_le(key, 4);
+    let mut t2: int = load_u32_le(key, 8);
+    let mut t3: int = load_u32_le(key, 12);
+    t0 = t0 & 268435455;  // 0x0fffffff
+    t1 = t1 & 268435452;  // 0x0ffffffc
+    t2 = t2 & 268435452;  // 0x0ffffffc
+    t3 = t3 & 268435452;  // 0x0ffffffc
+
+    let r_limbs: int[] = _extract_limbs(t0, t1, t2, t3);
+    let r0: int = r_limbs[0];
+    let r1: int = r_limbs[1];
+    let r2: int = r_limbs[2];
+    let r3: int = r_limbs[3];
+    let r4: int = r_limbs[4];
+
+    // Precompute the x5 wraparound multipliers used by the reduction below.
+    let s1: int = r1 * 5;
+    let s2: int = r2 * 5;
+    let s3: int = r3 * 5;
+    let s4: int = r4 * 5;
+
+    let mut h0: int = 0;
+    let mut h1: int = 0;
+    let mut h2: int = 0;
+    let mut h3: int = 0;
+    let mut h4: int = 0;
+
+    let mut i: int = 0;
+    loop {
+        if i >= msg.length { break; }
+        let blen: int = _min_int(16, msg.length - i);
+
+        // Zero-pad the block into a 16-byte buffer before limb extraction.
+        let mut b: int[] = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+        let mut j: int = 0;
+        loop {
+            if j >= blen { break; }
+            b[j] = msg[i + j];
+            j += 1;
+        }
+
+        let w0: int = load_u32_le(b, 0);
+        let w1: int = load_u32_le(b, 4);
+        let w2: int = load_u32_le(b, 8);
+        let w3: int = load_u32_le(b, 12);
+        let n: int[] = _extract_limbs(w0, w1, w2, w3);
+        let mut n0: int = n[0];
+        let mut n1: int = n[1];
+        let mut n2: int = n[2];
+        let mut n3: int = n[3];
+        let mut n4: int = n[4];
+
+        // Set the high bit at bit position 8*blen (2^24 lands in limb 4 for
+        // a full 16-byte block, matching the "n4 + 2^24" special case).
+        let bit_pos: int = 8 * blen;
+        let lb: int = bit_pos / 26;
+        let bb: int = bit_pos % 26;
+        let bit_value: int = 1 << bb;
+        if lb == 0 { n0 = n0 + bit_value; }
+        if lb == 1 { n1 = n1 + bit_value; }
+        if lb == 2 { n2 = n2 + bit_value; }
+        if lb == 3 { n3 = n3 + bit_value; }
+        if lb == 4 { n4 = n4 + bit_value; }
+
+        h0 += n0;
+        h1 += n1;
+        h2 += n2;
+        h3 += n3;
+        h4 += n4;
+
+        // Multiply the accumulator by r mod 2^130-5 with the x5 wraparound
+        // reduction; every column stays comfortably below 2^63 (spec Feasibility).
+        let mut d0: int = h0 * r0 + h1 * s4 + h2 * s3 + h3 * s2 + h4 * s1;
+        let mut d1: int = h0 * r1 + h1 * r0 + h2 * s4 + h3 * s3 + h4 * s2;
+        let mut d2: int = h0 * r2 + h1 * r1 + h2 * r0 + h3 * s4 + h4 * s3;
+        let mut d3: int = h0 * r3 + h1 * r2 + h2 * r1 + h3 * r0 + h4 * s4;
+        let mut d4: int = h0 * r4 + h1 * r3 + h2 * r2 + h3 * r1 + h4 * r0;
+
+        // Carry-propagate d0..d4 back into 26-bit limbs.
+        let mut c: int = d0 >> 26;
+        h0 = d0 & mask;
+        d1 = d1 + c;
+        c = d1 >> 26;
+        h1 = d1 & mask;
+        d2 = d2 + c;
+        c = d2 >> 26;
+        h2 = d2 & mask;
+        d3 = d3 + c;
+        c = d3 >> 26;
+        h3 = d3 & mask;
+        d4 = d4 + c;
+        c = d4 >> 26;
+        h4 = d4 & mask;
+        h0 = h0 + c * 5;  // top carry x5 (2^130 == 5 mod 2^130-5)
+        c = h0 >> 26;
+        h0 = h0 & mask;
+        h1 = h1 + c;
+
+        i += 16;
+    }
+
+    // Fully carry h0..h4 before the final reduction (spec Finalize step 1,
+    // matching the poly1305-donna finish). At loop exit h1 may hold an
+    // unmasked bit 26; without this pass the keep-h branch below would
+    // serialize that dirty limb and drop the carry at bit 52.
+    let mut fc: int = h1 >> 26;
+    h1 = h1 & mask;
+    h2 = h2 + fc;
+    fc = h2 >> 26;
+    h2 = h2 & mask;
+    h3 = h3 + fc;
+    fc = h3 >> 26;
+    h3 = h3 & mask;
+    h4 = h4 + fc;
+    fc = h4 >> 26;
+    h4 = h4 & mask;
+    h0 = h0 + fc * 5;
+    fc = h0 >> 26;
+    h0 = h0 & mask;
+    h1 = h1 + fc;
+
+    // Final reduction: h - (2^130-5) via a borrow chain, keeping g only if
+    // it did not borrow past bit 130. The tag is public output (not a
+    // secret comparison), so a plain branch on the sign of g4 is acceptable
+    // here per the spec's constant-time scoping note.
+    let g0_raw: int = h0 + 5;
+    let mut c2: int = g0_raw >> 26;
+    let g0: int = g0_raw & mask;
+    let g1_raw: int = h1 + c2;
+    c2 = g1_raw >> 26;
+    let g1: int = g1_raw & mask;
+    let g2_raw: int = h2 + c2;
+    c2 = g2_raw >> 26;
+    let g2: int = g2_raw & mask;
+    let g3_raw: int = h3 + c2;
+    c2 = g3_raw >> 26;
+    let g3: int = g3_raw & mask;
+    let g4: int = h4 + c2 - 67108864;
+
+    let mut fh0: int = h0;
+    let mut fh1: int = h1;
+    let mut fh2: int = h2;
+    let mut fh3: int = h3;
+    let mut fh4: int = h4;
+    if g4 >= 0 {
+        fh0 = g0;
+        fh1 = g1;
+        fh2 = g2;
+        fh3 = g3;
+        fh4 = g4;
+    }
+
+    // Recombine the five 26-bit limbs into four 32-bit words, then add s.
+    let word_mask: int = 4294967295;
+    let mut f0: int = (fh0 | (fh1 << 26)) & word_mask;
+    let mut f1: int = ((fh1 >> 6) | (fh2 << 20)) & word_mask;
+    let mut f2: int = ((fh2 >> 12) | (fh3 << 14)) & word_mask;
+    let mut f3: int = ((fh3 >> 18) | (fh4 << 8)) & word_mask;
+
+    let sv0: int = load_u32_le(key, 16);
+    let sv1: int = load_u32_le(key, 20);
+    let sv2: int = load_u32_le(key, 24);
+    let sv3: int = load_u32_le(key, 28);
+
+    let mut acc: int = f0 + sv0;
+    f0 = acc & word_mask;
+    let mut carry: int = (acc >> 32) & 1;
+    acc = f1 + sv1 + carry;
+    f1 = acc & word_mask;
+    carry = (acc >> 32) & 1;
+    acc = f2 + sv2 + carry;
+    f2 = acc & word_mask;
+    carry = (acc >> 32) & 1;
+    acc = f3 + sv3 + carry;
+    f3 = acc & word_mask;
+
+    let mut tag: int[] = [];
+    store_u32_le(tag, f0);
+    store_u32_le(tag, f1);
+    store_u32_le(tag, f2);
+    store_u32_le(tag, f3);
+    return tag;
+}
+
+// Smaller of two ints.
+fn _min_int(a: int, b: int) -> int {
+    if a < b { return a; }
+    return b;
+}
+
+export { poly1305_mac };

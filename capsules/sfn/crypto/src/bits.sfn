@@ -1,0 +1,83 @@
+// capsules/sfn/crypto/src/bits.sfn
+//
+// Constant-time / masking helper module for the sfn/crypto capsule
+// (SFEP-0048 §3.3-3.4). Centralizes the mandated
+// safe-integer idioms — 32-bit masking, rotates, constant-time byte
+// comparison, and big/little-endian word (de)serialization — so the
+// other Phase A primitives (sha1, sha384, chacha20, poly1305) call a
+// single tested source instead of re-inlining these expressions.
+// The 0xffffffff 32-bit mask as a decimal constant.
+fn mask32() -> int { return 4294967295; }
+
+// Rotate a 32-bit word left by n bits (0 <= n < 32). Result masked to 32
+// bits. `x` must already be a masked 32-bit value so `>>` (LLVM `ashr`)
+// behaves as a logical shift.
+fn rotl32(x: int, n: int) -> int {
+    return ((x << n) | (x >> (32 - n))) & 4294967295;
+}
+
+// Rotate a 32-bit word right by n bits (0 <= n < 32). Result masked to 32
+// bits. `x` must already be a masked 32-bit value so `>>` (LLVM `ashr`)
+// behaves as a logical shift.
+fn rotr32(x: int, n: int) -> int {
+    return ((x >> n) | (x << (32 - n))) & 4294967295;
+}
+
+// Constant-time byte-array equality. Returns false immediately on a length
+// mismatch (length is public), otherwise accumulates the OR of per-byte XOR
+// differences with no data-dependent branch or early return.
+fn ct_eq_bytes(a: int[], b: int[]) -> bool {
+    if a.length != b.length { return false; }
+
+    let mut diff: int = 0;
+    let mut i: int = 0;
+    loop {
+        if i >= a.length { break; }
+        diff = diff | ((a[i] & 255) ^ (b[i] & 255));
+        i += 1;
+    }
+    return diff == 0;
+}
+
+// Read a big-endian 32-bit word from bytes[off..off+4]. Caller guarantees
+// off+4 <= bytes.length. Result in [0, 2^32).
+fn load_u32_be(bytes: int[], off: int) -> int {
+    return (((bytes[off] & 255) << 24) | ((bytes[off + 1] & 255) << 16) | ((bytes[off
+        + 2] & 255) << 8) | (bytes[off
+        + 3] & 255)) & 4294967295;
+}
+
+// Append the 4 big-endian bytes of the 32-bit word x to out (via out.push).
+fn store_u32_be(out: int[], x: int) -> void {
+    out.push((x >> 24) & 255);
+    out.push((x >> 16) & 255);
+    out.push((x >> 8) & 255);
+    out.push(x & 255);
+}
+
+// Read a little-endian 32-bit word from bytes[off..off+4]. Caller guarantees
+// off+4 <= bytes.length. Result in [0, 2^32).
+fn load_u32_le(bytes: int[], off: int) -> int {
+    return ((bytes[off] & 255) | ((bytes[off + 1] & 255) << 8) | ((bytes[off + 2] & 255) << 16) | ((bytes[off
+        + 3] & 255) << 24)) & 4294967295;
+}
+
+// Append the 4 little-endian bytes of the 32-bit word x to out (via
+// out.push).
+fn store_u32_le(out: int[], x: int) -> void {
+    out.push(x & 255);
+    out.push((x >> 8) & 255);
+    out.push((x >> 16) & 255);
+    out.push((x >> 24) & 255);
+}
+
+export {
+    mask32,
+    rotl32,
+    rotr32,
+    ct_eq_bytes,
+    load_u32_be,
+    store_u32_be,
+    load_u32_le,
+    store_u32_le
+};
