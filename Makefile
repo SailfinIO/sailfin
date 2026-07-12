@@ -518,11 +518,10 @@ bench-runtime:
 # =============================================================================
 # Arena correctness gate (Phase 0 / M0.5 prerequisite)
 # =============================================================================
-# Compiles a module twice (with and without SAILFIN_USE_ARENA=1) and diffs
-# the emitted LLVM IR. Until the arena allocator lands, the env var is a
-# no-op and the diff is trivially identical — the harness still validates.
-# Once M0.5 lands (see docs/proposals/0025-native-runtime-architecture.md #321-arenas), this becomes the
-# correctness gate: any divergence means the arena is corrupting output.
+# Emits a module twice (with and without SAILFIN_USE_ARENA=1) and diffs the
+# LLVM IR: any divergence means the arena allocator is corrupting compiler
+# output. The gate is now a native command (`sfn dev arena`, SFN-201) — this
+# target is a thin wrapper retained until SFN-60 retires the Makefile.
 #
 # Usage:
 #   make test-arena                         # default: examples/basics/hello-world.sfn
@@ -534,13 +533,7 @@ test-arena:
 		echo "[test-arena] missing $(NATIVE_BIN); run 'make compile' first"; \
 		exit 1; \
 	fi
-	@if [ ! -d build/compiler/import-context ]; then \
-		echo "[test-arena] missing import-context; run 'make compile' first"; \
-		exit 1; \
-	fi
-	@SEED="$(NATIVE_BIN)" \
-		IMPORT_CONTEXT=build/compiler/import-context \
-		bash scripts/test_arena.sh $(ARENA_ARGS)
+	@$(NATIVE_BIN) dev arena $(ARENA_ARGS)
 
 clean:
 	rm -rf dist
