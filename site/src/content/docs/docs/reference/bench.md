@@ -32,6 +32,11 @@ sfn bench                     # runtime workloads under benchmarks/runtime
 sfn bench path/to/workloads   # runtime workloads under an explicit path
 ```
 
+> **Peak-memory caveat.** In both modes the `PEAK` column and `--budget-mem`
+> are Linux/WSL-oriented — peak RSS is reported in KiB as the Linux kernel
+> gives it, and cross-OS (notably macOS) normalization is still deferred, so
+> both are most meaningful on Linux today.
+
 ---
 
 ## Compiler mode
@@ -50,7 +55,7 @@ run that first.
 | Flag | Default | Description |
 |---|---|---|
 | `--compiler` | off | Select compiler mode. |
-| `--module <substr>` | all modules | Only benchmark modules whose source path contains `<substr>`. Repeatable; each occurrence adds a filter. Warns if a filter matches nothing. |
+| `--module <substr>` | all modules | Benchmark the **first** module whose source path contains `<substr>` (one module per occurrence — not every match). Repeatable; each occurrence adds one module. Warns if a substring matches nothing. |
 | `--import-context <dir>` | `build/compiler/import-context` | Root of the staged import-context tree. Missing → error, exit 1. |
 | `--top <n>` | off | After the run, print the `n` slowest modules. |
 | `--csv <path>` | none | Also write per-module results as CSV to `<path>` (parent dir created). |
@@ -98,7 +103,7 @@ workloads.
 | `<path>...` | `benchmarks/runtime` | One or more `*_bench.sfn` files or directories of them. |
 | `--iterations <k>` | `5` | Timed runs per workload after warm-up (floored to 1). |
 | `--warmup <w>` | `1` | Discarded warm-up runs per workload before timing (floored to 0). |
-| `--filter <glob>` | none | Only run workloads whose name matches `<glob>` (`*`/`?` supported). Warns if none match. |
+| `--filter <glob>` | none | Only run workloads whose name matches `<glob>` (`*`/`?` supported). If it matches nothing, the run has no workloads: the command warns and exits 1 (`no workloads to run`), so a filter typo fails the command. |
 | `--top <n>` | off | After the run, print the `n` slowest workloads. |
 | `--csv <path>` | none | Also write per-workload results as CSV to `<path>`. |
 | `--budget-time <ms>` | off | Median inner-time budget in **milliseconds**. Exceeding it marks the workload `SLOW` and exits 2. |
