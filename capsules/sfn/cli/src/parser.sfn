@@ -23,6 +23,8 @@
 //   * parse failures -> print `error.message` to stderr, exit 2
 // Its observable behavior (stderr text, exit codes) is byte-identical
 // to the pre-`parse()` implementation.
+import { int_to_string } from "sfn/strings";
+
 import { EXIT_OK, EXIT_USAGE } from "./exit_codes";
 import { _format_help } from "./help";
 import {
@@ -154,7 +156,7 @@ fn parse(cmd: Command, argv: string[]) -> Result<ParseResult, ParseError> {
                             + " "
                             + _choice_detail(f.choices, value)
                             + " (argv["
-                            + _int_to_string(value_idx)
+                            + int_to_string(value_idx)
                             + "])"), f.long_name, "");
                     }
                 } else {
@@ -165,7 +167,7 @@ fn parse(cmd: Command, argv: string[]) -> Result<ParseResult, ParseError> {
                             + " "
                             + detail
                             + " (argv["
-                            + _int_to_string(value_idx)
+                            + int_to_string(value_idx)
                             + "])"), f.long_name, "");
                     }
                 }
@@ -212,7 +214,7 @@ fn parse(cmd: Command, argv: string[]) -> Result<ParseResult, ParseError> {
                             + " "
                             + _choice_detail(f.choices, argv[idx])
                             + " (argv["
-                            + _int_to_string(idx)
+                            + int_to_string(idx)
                             + "])"), f.long_name, "");
                     }
                 } else {
@@ -223,7 +225,7 @@ fn parse(cmd: Command, argv: string[]) -> Result<ParseResult, ParseError> {
                             + " "
                             + detail
                             + " (argv["
-                            + _int_to_string(idx)
+                            + int_to_string(idx)
                             + "])"), f.long_name, "");
                     }
                 }
@@ -855,26 +857,4 @@ fn _is_valid_float(value: string) -> boolean {
     }
     if digits == 0 { return false; }
     return true;
-}
-
-fn _int_to_string(value: int) -> string {
-    // Minimal base-10 int formatter for diagnostic messages. The
-    // prelude has no int->string intrinsic exposed to capsules yet.
-    if value == 0 { return "0"; }
-    let table = "0123456789";
-    let mut n = value;
-    let mut negative = false;
-    if n < 0 {
-        negative = true;
-        n = 0 - n;
-    }
-    let mut digits = "";
-    loop {
-        if n == 0 { break; }
-        let d = n - (n / 10) * 10;
-        digits = substring(table, d, d + 1) + digits;
-        n = n / 10;
-    }
-    if negative { return "-" + digits; }
-    return digits;
 }

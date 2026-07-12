@@ -41,6 +41,17 @@ sfn = "0.8.0-alpha.3"
 # matches the `sfn/runtime-native` convention; the capsule is at
 # 0.13.1 (workspace member `capsules/sfn/cli`).
 "sfn/cli" = "*"
+# SFN-35: `sfn/cli` (and `sfn/http`) import `int_to_string` from `sfn/strings`,
+# dropping their private `_int_to_string` copies. `enumerate_capsule_sources`
+# now resolves the transitive closure, so `sfn/strings` is reached through
+# `sfn/cli` automatically — but `make compile` self-hosts against the PINNED
+# SEED (`bootstrap.toml [seed]`), whose resolver is still flat. Until a seed
+# carrying the transitive resolver is pinned, `sfn/strings` must stay declared
+# directly here or the seed's flat build leaves `int_to_string__sfn__strings__mod`
+# undefined at link. Drop this line in the same change that pins such a seed.
+# `sfn/strings` is a pure (`required = []`) source capsule (workspace member
+# `capsules/sfn/strings`).
+"sfn/strings" = "*"
 # SFEP-0046 §3.5 / §4: `sfn toolchain install` verifies a signed release
 # manifest with `ed25519_verify_utf8` before extracting a fetched
 # toolchain. Declared like `sfn/cli` — a normal source capsule staged +

@@ -1037,14 +1037,46 @@ fn enumerate_capsule_sources(project_root: string) -> CapsuleSource[] ![io] {
         }
     }
 
-    let mut i: int = 0;
+    // Worklist for transitive dependency resolution (SFN-35). A capsule's
+    // public API may call into its own declared deps — e.g. `sfn/http`'s
+    // `serialize_response` uses `sfn/strings::int_to_string` — so a consumer
+    // that declares only `sfn/http` must still get `sfn/strings` staged and
+    // linked, or the call site's `int_to_string__sfn__strings__mod` symbol is
+    // undefined at link. Each staged dep's own `capsule.toml [dependencies]`
+    // is walked and its deps enqueued, deduped by spec (`visited`) and cycle-
+    // guarded. `queue_direct` marks the project's own declared deps so the
+    // "absent from capsule.lock" hint only fires for those — a transitive dep
+    // the user never named directly should not demand a `sfn add`.
+    let mut queue_specs: string[] = [];
+    let mut queue_versions: string[] = [];
+    let mut queue_direct: boolean[] = [];
+    let mut qseed: int = 0;
     loop {
-        if i >= entries.length { break; }
-        let entry = entries[i];
-        i += 1;
+        if qseed >= entries.length { break; }
+        queue_specs.push(entries[qseed].spec);
+        queue_versions.push(entries[qseed].version);
+        queue_direct.push(true);
+        qseed += 1;
+    }
+    let mut visited: string[] = [];
+    let mut qi: int = 0;
+    let queue_guard: int = 4096;
+    loop {
+        if qi >= queue_specs.length { break; }
+        // Guard the transitive walk against a pathological / cyclic manifest
+        // graph (input-driven loop): the `visited` dedup already bounds it to
+        // one visit per distinct spec, so this only ever trips on a manifest
+        // set larger than any real workspace.
+        if qi >= queue_guard { break; }
+        let spec = queue_specs[qi];
+        let version = queue_versions[qi];
+        let is_direct = queue_direct[qi];
+        qi += 1;
         // Stage D PR2: skip runtime capsule deps — handled
         // separately by `enumerate_runtime_capsule_artifacts`.
-        if contains_string(runtime_cap_names, entry.spec) { continue; }
+        if contains_string(runtime_cap_names, spec) { continue; }
+        if contains_string(visited, spec) { continue; }
+        visited.push(spec);
         // Prefer the workspace member map for a declared sibling dep;
         // fall back to the project-relative + `~/.sfn/cache` locator for
         // end-user (non-workspace) builds. `_cr_collect_capsule_sources`
@@ -1053,17 +1085,17 @@ fn enumerate_capsule_sources(project_root: string) -> CapsuleSource[] ![io] {
         // expectation regardless of which lookup supplied it.
         let mut src_dir: string = "";
         if members.length > 0 {
-            src_dir = workspace_member_for_spec(members, entry.spec);
+            src_dir = workspace_member_for_spec(members, spec);
         }
         if src_dir.length == 0 {
             // Lockfile-pinned version wins over the capsule.toml range.
             // Precedence: workspace.lock (#1071) > capsule.lock (#1048) >
             // capsule.toml range. Workspace siblings are resolved above and
             // never reach this branch, so sibling-first resolution holds.
-            let mut effective_version: string = entry.version;
+            let mut effective_version: string = version;
             let mut resolved_from_lock: boolean = false;
             if ws_has_lock {
-                let ws_locked = _cr_lookup_locked_version(ws_lock_entries, entry.spec);
+                let ws_locked = _cr_lookup_locked_version(ws_lock_entries, spec);
                 if ws_locked.length > 0 {
                     effective_version = ws_locked;
                     resolved_from_lock = true;
@@ -1071,31 +1103,51 @@ fn enumerate_capsule_sources(project_root: string) -> CapsuleSource[] ![io] {
             }
             // Fall back to capsule.lock only when workspace.lock did not
             // pin this dep. The missing-from-capsule.lock diagnostic is
-            // suppressed when workspace.lock already supplied the version.
+            // suppressed when workspace.lock already supplied the version,
+            // and only fires for a project-declared (direct) dep.
             if !resolved_from_lock && has_lock {
-                let locked = _cr_lookup_locked_version(lock_entries, entry.spec);
-                if locked.length > 0 { effective_version = locked; } else {
-                    print.err("capsule-resolver: dependency \"" + entry.spec
+                let locked = _cr_lookup_locked_version(lock_entries, spec);
+                if locked.length > 0 { effective_version = locked; } else if is_direct {
+                    print.err("capsule-resolver: dependency \"" + spec
                         + "\" is declared in capsule.toml but absent from"
                         + " capsule.lock — run `sfn add "
-                        + entry.spec
+                        + spec
                         + "` to lock it");
                 }
             }
-            src_dir = _cr_locate_capsule_src(project_root, entry.spec, effective_version);
+            src_dir = _cr_locate_capsule_src(project_root, spec, effective_version);
         }
         if src_dir.length > 0 {
-            let found = _cr_collect_capsule_sources(src_dir, entry.spec);
+            let found = _cr_collect_capsule_sources(src_dir, spec);
             let mut fi: int = 0;
             loop {
                 if fi >= found.length { break; }
                 sources.push(found[fi]);
                 fi += 1;
             }
+            // Enqueue this dep's OWN declared deps (transitive closure). The
+            // dep's manifest sits beside its `src/` dir. Runtime-capsule and
+            // already-visited specs are filtered here as well as at dequeue.
+            let dep_manifest = _cr_path_join(_cr_dirname(src_dir), "capsule.toml");
+            if fs.exists(dep_manifest) {
+                let dep_text = fs.readFile(dep_manifest);
+                let dep_entries = _cr_parse_deps(toml_get_dependencies(dep_text));
+                let mut di: int = 0;
+                loop {
+                    if di >= dep_entries.length { break; }
+                    let de = dep_entries[di];
+                    di += 1;
+                    if contains_string(visited, de.spec) { continue; }
+                    if contains_string(runtime_cap_names, de.spec) { continue; }
+                    queue_specs.push(de.spec);
+                    queue_versions.push(de.version);
+                    queue_direct.push(false);
+                }
+            }
         } else {
-            print.err("capsule-resolver: could not locate source for \"" + entry.spec
+            print.err("capsule-resolver: could not locate source for \"" + spec
                 + "\" — run `sfn add "
-                + entry.spec
+                + spec
                 + "` to populate the cache");
         }
     }

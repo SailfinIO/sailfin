@@ -1,0 +1,76 @@
+// Regression for transitive capsule dependency resolution (SFN-35).
+//
+// A program that declares only `sfn/http` must still get `sfn/http`'s own
+// declared dependency `sfn/strings` staged and linked: `sfn/http`'s
+// `serialize_response` formats the status code via
+// `sfn/strings::int_to_string`, so a flat (non-transitive) resolver left
+// `int_to_string__sfn__strings__mod` undefined at link
+// (`capsule_resolver.sfn::enumerate_capsule_sources` now walks the full
+// dependency closure). This builds and runs such a consumer, asserting the
+// link succeeds and the formatted status reaches the framed output — a
+// build-only proof, no server/socket path, so it holds on every platform.
+import { find } from "sfn/strings";
+
+// The compiler-under-test: $SAILFIN_BIN if set, else the self-hosted
+// binary relative to the repo root the runner starts from.
+fn _sfn_bin() -> string ![io] {
+    let configured = env.get("SAILFIN_BIN");
+    if configured.length > 0 { return configured; }
+    return "build/bin/sfn";
+}
+
+// Full parent environment for the nested build (PATH for clang/linker,
+// SAILFIN_TEST_SCRATCH for per-invocation `program.ll` isolation under the
+// parallel pool — see .claude/rules/no-bash-e2e.md).
+fn _child_env() -> string[] ![io] { return process.environ(); }
+
+// Written under the repo's `build/` so workspace discovery resolves
+// `sfn/http` (and its transitive `sfn/strings`) as workspace members.
+fn _root() -> string { return "build/transitive-dep-link-e2e"; }
+
+test "capsule resolver: transitive dep of a declared capsule links and runs" ![io] {
+    let root = _root();
+    fs.createDirectory(root + "/src", true);
+    fs.writeFile(root + "/capsule.toml", "[capsule]\n"
+        + "name = \"sfn/transitive-dep-e2e-app\"\n"
+        + "version = \"0.0.1\"\n"
+        + "\n"
+        + "[dependencies]\n"
+        + "\"sfn/http\" = \"*\"\n"
+        + "\n"
+        + "[capabilities]\n"
+        + "required = [\"io\", \"net\"]\n"
+        + "\n"
+        + "[build]\n"
+        + "entry = \"src/main.sfn\"\n"
+        + "kind = \"library\"\n");
+    // Only `sfn/http` is imported; `serialize_response` reaches
+    // `sfn/strings::int_to_string` transitively through the http wire layer.
+    fs.writeFile(root + "/src/main.sfn", "import { serialize_response, Response } from \"sfn/http\";\n"
+        + "\n"
+        + "fn main() -> int ![net, io] {\n"
+        + "    let rsp = Response { status: 200, headers: [], body: \"hi\" };\n"
+        + "    print.info(serialize_response(rsp, false));\n"
+        + "    return 0;\n"
+        + "}\n");
+
+    let bin = root + "/app-bin";
+    let build_exit = process.run_capture([_sfn_bin(), "build", "-o", bin, root
+        + "/src/main.sfn"], _child_env());
+    let build_out = process.capture_take_stdout();
+    let build_err = process.capture_take_stderr();
+    // The pre-fix failure mode: `undefined symbol:
+    // int_to_string__sfn__strings__mod` at the link step.
+    assert find(build_out + build_err, "undefined symbol", 0) < 0;
+    assert build_exit == 0;
+
+    let run_exit = process.run_capture([bin], _child_env());
+    let run_out = process.capture_take_stdout();
+    let _run_err = process.capture_take_stderr();
+    assert run_exit == 0;
+    // `int_to_string(200)` reached the framed status line — the transitive
+    // symbol was linked AND executes correctly.
+    assert find(run_out, "HTTP/1.1 200", 0) >= 0;
+
+    let _rm = process.run(["rm", "-rf", root]);
+}

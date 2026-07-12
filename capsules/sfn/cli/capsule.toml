@@ -4,6 +4,10 @@ version = "0.15.0"
 description = "CLI argument parsing and terminal output for Sailfin"
 
 [dependencies]
+# `sfn/strings::int_to_string` replaces the capsule's private `_int_to_string`
+# base-10 formatter copies (parser diagnostics, `print` status lines, JSON help
+# numbers) (SFN-35).
+"sfn/strings" = "*"
 
 [capabilities]
 required = ["io"]

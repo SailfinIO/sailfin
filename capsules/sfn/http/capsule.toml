@@ -4,6 +4,9 @@ version = "0.11.0"
 description = "HTTP client and server for Sailfin"
 
 [dependencies]
+# `sfn/strings::int_to_string` replaces the capsule's private `_int_to_string`
+# base-10 formatter used for status codes and Content-Length (SFN-35).
+"sfn/strings" = "*"
 
 [capabilities]
 required = ["io", "net"]

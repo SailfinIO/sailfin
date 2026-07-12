@@ -13,6 +13,8 @@
 // (`<severity>[<code>]: <message>`) byte-for-byte, so Phase 5 Issue
 // 5.3 can fold the two code paths together without a wire-format
 // change.
+import { int_to_string } from "sfn/strings";
+
 import {
     paint_blue,
     paint_cyan,
@@ -44,30 +46,6 @@ fn print_hint(message: string) -> void ![io] {
 }
 
 // ── print_diag / print_status (issue #793, proposal §7 Issue 1.4) ─────
-fn _int_to_string(value: int) -> string {
-    // Minimal base-10 int formatter. The prelude has no int->string
-    // intrinsic exposed to capsules yet; this mirrors the private
-    // helper in `parser.sfn` (kept local to honor the issue's
-    // Files-Affected scope).
-    if value == 0 { return "0"; }
-    let table = "0123456789";
-    let mut n = value;
-    let mut negative = false;
-    if n < 0 {
-        negative = true;
-        n = 0 - n;
-    }
-    let mut digits = "";
-    loop {
-        if n == 0 { break; }
-        let d = n - (n / 10) * 10;
-        digits = substring(table, d, d + 1) + digits;
-        n = n / 10;
-    }
-    if negative { return "-" + digits; }
-    return digits;
-}
-
 fn diag_prefix(severity: string) -> string {
     // Canonical severity word for a diagnostic line. Matches the
     // leading `severity` token rendered by
@@ -115,7 +93,7 @@ fn diag_line(s: Style, severity: string, message: string) -> string {
 fn status_line(s: Style, step: int, total: int, message: string) -> string {
     // Pure builder for a progress line: "[<step>/<total>] <message>".
     // The "[step/total]" counter is dimmed when the style is enabled.
-    let counter = "[" + _int_to_string(step) + "/" + _int_to_string(total) + "]";
+    let counter = "[" + int_to_string(step) + "/" + int_to_string(total) + "]";
     return paint_dim(s, counter) + " " + message;
 }
 
