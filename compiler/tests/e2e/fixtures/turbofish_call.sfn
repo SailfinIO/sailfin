@@ -1,0 +1,16 @@
+// Fixture for the turbofish end-to-end test (SFN-329). Exercises an
+// explicit type-argument call in both the single-argument form
+// (`id<int>(41)`) and the comma form (`pick<int>(4, 9)`). The declared type
+// parameter is inferable from the value arguments, so the existing
+// argument-unification monomorphizer resolves both instantiations; the
+// turbofish syntax must parse, typecheck, build, and run. Exit code 45
+// (41 + 4) is the observable acceptance signal.
+fn id<T>(x: T) -> T { return x; }
+
+fn pick<T>(a: T, b: T) -> T { return a; }
+
+fn main() -> int ![io] {
+    let a = id < int > (41);
+    let b = pick < int > (4, 9);
+    return a + b;
+}

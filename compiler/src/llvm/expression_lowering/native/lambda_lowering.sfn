@@ -754,7 +754,8 @@ fn _rewrite_expression(ctx: LiftContext, expression: Expression) -> ExpressionRe
             expression: Expression.Call {
                 callee: renamed_callee,
                 arguments: new_args,
-                span: expression.span
+                span: expression.span,
+                type_arguments: expression.type_arguments
             }
         };
     }

@@ -1423,7 +1423,8 @@ fn parse_assert_statement(parser: Parser) -> BlockStatementParseResult {
         }, Expression.NumberLiteral {
             value: _assert_int_to_string(assert_col)
         }, Expression.StringLiteral { value: "assertion failed" }],
-        span: null
+        span: null,
+        type_arguments: []
     };
     let fail_statement = Statement.ExpressionStatement {
         expression: fail_call,

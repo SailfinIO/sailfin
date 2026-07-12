@@ -1,0 +1,113 @@
+// Unit tests for turbofish call parsing (SFN-329).
+//
+// Before the fix, an explicit type-argument call `f<int>(x)` misparsed at
+// expression position: the postfix chain had no `<` arm, so the precedence
+// climb consumed `<`/`>` as comparison operators and produced the chained
+// comparison `(f < int) > (x)` (which then tripped E0808 / E0818). The fix
+// adds a turbofish arm to `parse_postfix_chain` that speculatively scans a
+// balanced `< ... >` type-argument list and commits to a `Call` — carrying
+// the explicit `type_arguments` — only when `(` immediately follows the
+// closing `>`. A `<` that does not fit that shape stays a comparison.
+import { Expression } from "../../src/ast";
+import { parse_program } from "../../src/parser/mod";
+
+// Initializer of the first top-level `let` in `source`.
+fn first_initializer(source: string) -> Expression ![io] {
+    let program = parse_program(source);
+    let stmt = program.statements[0];
+    assert stmt.variant == "VariableDeclaration";
+    let init = stmt.initializer;
+    assert init != null;
+    return init;
+}
+
+// -------------------------------------------------------------------
+// A single type argument: `id<int>(41)` is a `Call` carrying one explicit
+// type argument and the one value argument.
+// -------------------------------------------------------------------
+test "turbofish: single type argument parses as a call" ![io] {
+    let init = first_initializer("let x = id<int>(41);");
+    assert init.variant == "Call";
+    assert init.type_arguments.length == 1;
+    assert init.type_arguments[0].text == "int";
+    assert init.arguments.length == 1;
+    assert init.arguments[0].variant == "NumberLiteral";
+}
+
+// -------------------------------------------------------------------
+// The comma form `apply<int>(3, g)` no longer degrades to `Raw`: it is a
+// `Call` with both value arguments intact.
+// -------------------------------------------------------------------
+test "turbofish: call with comma arguments does not degrade to Raw" ![io] {
+    let init = first_initializer("let x = apply<int>(3, g);");
+    assert init.variant == "Call";
+    assert init.type_arguments.length == 1;
+    assert init.type_arguments[0].text == "int";
+    assert init.arguments.length == 2;
+}
+
+// -------------------------------------------------------------------
+// Multiple type arguments: `pair<int, string>(a, b)` splits the list into
+// two type arguments at the top-level comma.
+// -------------------------------------------------------------------
+test "turbofish: multiple type arguments split at the top-level comma" ![io] {
+    let init = first_initializer("let x = pair<int, string>(a, b);");
+    assert init.variant == "Call";
+    assert init.type_arguments.length == 2;
+    assert init.type_arguments[0].text == "int";
+    assert init.type_arguments[1].text == "string";
+    assert init.arguments.length == 2;
+}
+
+// -------------------------------------------------------------------
+// A comma nested inside a function-pointer type argument does not split
+// the type-argument list: `apply<fn(int, int) -> int>(f)` is one type
+// argument, not two (only top-level commas separate type arguments).
+// -------------------------------------------------------------------
+test "turbofish: comma inside a fn-pointer type argument does not split the list" ![io] {
+    let init = first_initializer("let x = apply<fn(int, int) -> int>(f);");
+    assert init.variant == "Call";
+    assert init.type_arguments.length == 1;
+    assert init.arguments.length == 1;
+}
+
+// -------------------------------------------------------------------
+// A nested generic type argument closes with `>>`: `wrap<Box<int>>(v)`
+// deglues the double-close into one inner `>` (kept in the argument text)
+// plus the list terminator, yielding a single type argument.
+// -------------------------------------------------------------------
+test "turbofish: nested generic type argument deglues the double close" ![io] {
+    let init = first_initializer("let x = wrap<Box<int>>(v);");
+    assert init.variant == "Call";
+    assert init.type_arguments.length == 1;
+    assert init.arguments.length == 1;
+}
+
+// -------------------------------------------------------------------
+// No regression: a genuine comparison chain `a < b > c` (no callee/`(`
+// shape) still parses as a comparison, not a turbofish call.
+// -------------------------------------------------------------------
+test "turbofish: comparison chain without a following paren stays a comparison" ![io] {
+    let init = first_initializer("let x = a < b > c;");
+    assert init.variant == "Binary";
+    assert init.operator == ">";
+}
+
+// -------------------------------------------------------------------
+// No regression: a single comparison `a < b` is unaffected.
+// -------------------------------------------------------------------
+test "turbofish: a bare less-than is still a comparison" ![io] {
+    let init = first_initializer("let x = a < b;");
+    assert init.variant == "Binary";
+    assert init.operator == "<";
+}
+
+// -------------------------------------------------------------------
+// No regression: an ordinary call carries no explicit type arguments.
+// -------------------------------------------------------------------
+test "turbofish: ordinary call has an empty type-argument list" ![io] {
+    let init = first_initializer("let x = id(41);");
+    assert init.variant == "Call";
+    assert init.type_arguments.length == 0;
+    assert init.arguments.length == 1;
+}
