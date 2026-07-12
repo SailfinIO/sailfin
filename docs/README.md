@@ -7,6 +7,7 @@ documentation lives on the docs site.**
 ## Where to find things
 
 - **What runs today (feature matrix)** → `docs/status.md`
+- **Compiler/runtime development setup** → `docs/development-setup.md`
 - **Language specification** → [sailfin.dev/docs/reference/spec/](https://sailfin.dev/docs/reference/spec/)
   (source under `site/src/content/docs/docs/reference/spec/`, split by chapter)
 - **Grammar (EBNF)** → [sailfin.dev/docs/reference/grammar](https://sailfin.dev/docs/reference/grammar)

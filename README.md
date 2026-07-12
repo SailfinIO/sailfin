@@ -130,7 +130,8 @@ curl -fsSL https://raw.githubusercontent.com/SailfinIO/sailfin/main/install.sh |
 To pin a specific release:
 
 ```sh
-curl -fsSL https://raw.githubusercontent.com/SailfinIO/sailfin/main/install.sh | VERSION=<version> bash
+VERSION=0.8.0-alpha.5
+curl -fsSL https://raw.githubusercontent.com/SailfinIO/sailfin/main/install.sh | VERSION="$VERSION" bash
 ```
 
 ### Windows PowerShell
@@ -152,8 +153,12 @@ throttled.
 
 ## Building From Source
 
-The compiler self-hosts from a released seed binary. `make compile` fetches
-the seed if needed and builds `build/bin/sfn`.
+The compiler self-hosts from the released seed pinned in
+[`bootstrap.toml`](bootstrap.toml). Source builds require `bash`, `make`, `jq`,
+LLVM tools 17+ or 18+, `clang`, and OpenSSL development libraries because the
+Sailfin-native runtime links TLS into every binary. See
+[`docs/development-setup.md`](docs/development-setup.md) for per-platform
+dependency installation and the supported build flags.
 
 ```sh
 make compile          # Build the self-hosted native compiler

@@ -22,6 +22,10 @@ make compile   # Build the compiler from seed
 make test      # Verify everything works
 ```
 
+For host dependencies, OpenSSL/LLVM setup, and supported Makefile/CLI build
+flags, see the
+[compiler and runtime development setup](https://github.com/SailfinIO/sailfin/blob/main/docs/development-setup.md).
+
 3. Create a feature branch:
 
 ```bash
