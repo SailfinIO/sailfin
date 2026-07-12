@@ -55,6 +55,11 @@ env:
   PERF_THRESHOLD_PCT: "10"
   BUILD_BUDGET_S: "300"
   DATA_BRANCH: "bench-data"
+  # Systemic-flood cap: if more than this many distinct modules regress in a
+  # single run — the signature of an environmental shift (seed bump, runner /
+  # toolchain change) rather than that many independent code regressions —
+  # file one aggregated issue instead of one-per-module (SFN-330).
+  PERF_SYSTEMIC_MODULES: "10"
 
 jobs:
   perf-history:
@@ -274,7 +279,54 @@ jobs:
             --force >/dev/null 2>&1 || true
 
           data_url="${{ github.server_url }}/${REPO}/tree/${DATA_BRANCH}"
-          cut -f1 regressions.tsv | sort -u | while IFS= read -r module; do
+
+          # Systemic-flood cap (SFN-330): count distinct regressing modules,
+          # excluding the <whole-build> budget pseudo-row (which always files
+          # its own issue). When more than PERF_SYSTEMIC_MODULES regress at
+          # once, that is an environmental shift, not that many independent
+          # code regressions — file ONE aggregated issue and drop the per-
+          # module fan-out. The seed-scoped baseline in perf_history.sh already
+          # suppresses the seed-bump case upstream; this is the backstop for
+          # any other broad shift (runner class, toolchain, a cross-cutting
+          # change).
+          modules_file="$(mktemp)"
+          cut -f1 regressions.tsv | grep -vFx '<whole-build>' | sort -u > "$modules_file" || true
+          module_count="$(grep -c . "$modules_file" || true)"
+          has_wholebuild="$(cut -f1 regressions.tsv | grep -cFx '<whole-build>' || true)"
+
+          remaining_file="$(mktemp)"
+          if [ "${module_count:-0}" -gt "${PERF_SYSTEMIC_MODULES}" ]; then
+            syn_title="perf regression: systemic — ${module_count} modules (${SHA:0:12})"
+            {
+              echo "# ${syn_title}"
+              echo ""
+              echo "Auto-filed by \`perf-history.yml\` (SFEP-0037 §3.3). **${module_count}** modules regressed beyond +${PERF_THRESHOLD_PCT}% vs the rolling median in a single nightly run. A broad simultaneous shift is almost always a shared environmental cause (seed bump, runner class, toolchain change) rather than ${module_count} independent code regressions, so this is filed as **one** aggregated issue instead of ${module_count} per-module issues (SFN-330). Investigate the shared cause first; see \`docs/perf/bench-history.md\` for how to read \`${DATA_BRANCH}\` and reproduce locally (\`make bench\`)."
+              echo ""
+              echo "**Run:** ${RUN_URL}"
+              echo "**Commit:** \`${SHA}\`"
+              echo "**Baseline:** rolling median of the last ${PERF_MIN_RUNS} same-seed runs on \`${DATA_BRANCH}\` (threshold +${PERF_THRESHOLD_PCT}%)"
+              echo "**Data:** ${data_url}"
+              echo ""
+              echo "## Regressed modules (${module_count})"
+              echo ""
+              awk -F'\t' '$1 != "<whole-build>" { printf "- **%s** / %s: current `%s` vs median `%s` (**+%s%%**)\n", $1, $2, $3, $4, $5 }' regressions.tsv
+            } > perf-systemic-body.md
+            new_number="$(gh issue create --repo "$REPO" \
+              --title "$syn_title" \
+              --label "type:perf" \
+              --label "perf-regression" \
+              --body-file perf-systemic-body.md \
+              | awk -F/ '/^https:/{print $NF}')"
+            echo "[perf-history] systemic regression: opened aggregated issue #${new_number} for ${module_count} modules"
+            # Only the whole-build budget breach (if any) still files below.
+            : > "$remaining_file"
+            [ "${has_wholebuild:-0}" -gt 0 ] && printf '%s\n' '<whole-build>' > "$remaining_file"
+          else
+            cp "$modules_file" "$remaining_file"
+            [ "${has_wholebuild:-0}" -gt 0 ] && printf '%s\n' '<whole-build>' >> "$remaining_file"
+          fi
+
+          while IFS= read -r module; do
             [ -n "$module" ] || continue
             title="perf regression: ${module}"
             metrics="$(awk -F'\t' -v m="$module" \
@@ -292,7 +344,7 @@ jobs:
             {
               echo "**Run:** ${RUN_URL}"
               echo "**Commit:** \`${SHA}\`"
-              echo "**Baseline:** rolling median of the last ${PERF_MIN_RUNS} runs on \`${DATA_BRANCH}\` (threshold +${PERF_THRESHOLD_PCT}%)"
+              echo "**Baseline:** rolling median of the last ${PERF_MIN_RUNS} same-seed runs on \`${DATA_BRANCH}\` (threshold +${PERF_THRESHOLD_PCT}%)"
               echo "**Data:** ${data_url}"
               echo ""
               echo "${metrics}"
@@ -322,7 +374,7 @@ jobs:
                 | awk -F/ '/^https:/{print $NF}')"
               echo "[perf-history] opened issue #${new_number} for ${module}"
             fi
-          done
+          done < "$remaining_file"
 
       - name: Upload run CSVs (artifact)
         if: always()

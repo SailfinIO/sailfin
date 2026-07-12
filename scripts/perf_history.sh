@@ -168,11 +168,12 @@ cmd_compare() {
         NR == 1 { next }
         NF == 0 { next }
         {
-            sha = $1; module = $3; t = $4 + 0; p = $5 + 0; st = $7
+            sha = $1; module = $3; t = $4 + 0; p = $5 + 0; st = $7; sv = $8
             if (!(sha in seen)) { seen[sha] = 1; order[++n] = sha }
+            runseed[sha] = sv
             k = sha SUBSEP module
-            tval[k] = t; pval[k] = p; sval[k] = st
-            if (sha == CUR) curmods[module] = 1
+            tval[k] = t; pval[k] = p; sval[k] = st; svval[k] = sv
+            if (sha == CUR) { curmods[module] = 1; cur_seed = sv }
         }
         END {
             pc = 0
@@ -181,25 +182,40 @@ cmd_compare() {
                 printf("perf_history: cold start — %d prior run(s) < %d required; no comparison\n", pc, N) > "/dev/stderr"
                 exit 0
             }
-            wstart = pc - N + 1
+            # Seed-scoped baseline: a module is compared only against prior
+            # samples produced by the SAME pinned seed (compile.csv col 8,
+            # seed_version). A seed bump rebuilds every module with a different
+            # compiler binary, shifting all timings/RSS at once; comparing
+            # across that boundary flags the whole tree as regressed and floods
+            # triage (SFN-330). After a bump a module has < N same-seed samples
+            # and falls through the per-module cold-start skip below until N
+            # nightlies accrue under the new seed.
+            if (cur_seed != "" && runseed[prior[pc]] != "" && runseed[prior[pc]] != cur_seed) {
+                printf("perf_history: seed changed %s -> %s; per-module baselines reset (need %d same-seed runs before comparison resumes)\n", runseed[prior[pc]], cur_seed, N) > "/dev/stderr"
+            }
             for (module in curmods) {
                 ck = CUR SUBSEP module
                 if (!(ck in tval) || sval[ck] ~ /FAIL/) continue
-                tc = 0; mc = 0
-                for (i = wstart; i <= pc; i++) {
+                # Same-seed, non-FAIL prior samples for this module, in
+                # chronological (append) order; the rolling window is the last
+                # N of these.
+                tc = 0
+                for (i = 1; i <= pc; i++) {
                     bk = prior[i] SUBSEP module
-                    if ((bk in tval) && sval[bk] !~ /FAIL/) {
-                        tsamp[++tc] = tval[bk]; psamp[++mc] = pval[bk]
+                    if ((bk in tval) && sval[bk] !~ /FAIL/ && svval[bk] == cur_seed) {
+                        tsamp[++tc] = tval[bk]; psamp[tc] = pval[bk]
                     }
                 }
                 if (tc < N) { delete tsamp; delete psamp; continue }
-                mt = median(tsamp, tc); mp = median(psamp, mc)
+                w = 0
+                for (i = tc - N + 1; i <= tc; i++) { wt[++w] = tsamp[i]; wp[w] = psamp[i] }
+                mt = median(wt, N); mp = median(wp, N)
                 ct = tval[ck]; cp = pval[ck]
                 if (mt > 0 && ct > mt * (1 + TH / 100))
                     printf("%s\ttime_s\t%.4f\t%.4f\t%.1f\n", module, ct, mt, (ct / mt - 1) * 100)
                 if (mp > 0 && cp > mp * (1 + TH / 100))
                     printf("%s\tpeak_kb\t%.0f\t%.0f\t%.1f\n", module, cp, mp, (cp / mp - 1) * 100)
-                delete tsamp; delete psamp
+                delete tsamp; delete psamp; delete wt; delete wp
             }
         }
         ' "$compile_csv" >> "$out"

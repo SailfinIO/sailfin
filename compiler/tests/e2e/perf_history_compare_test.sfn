@@ -1,0 +1,88 @@
+// compiler/tests/e2e/perf_history_compare_test.sfn
+//
+// Regression coverage for the seed-scoped baseline in
+// `scripts/perf_history.sh compare` (SFN-330). The nightly perf-history job
+// once filed one issue per module on a seed bump because the rolling-median
+// baseline mixed samples from different pinned seeds; a new seed rebuilds
+// every module with a different compiler binary, shifting all timings at once
+// and tripping the +10% gate tree-wide. The compare now windows each module
+// against same-seed samples only, so a seed change resets the baseline (a
+// module falls through the per-module cold-start skip until N same-seed runs
+// accrue) while a genuine same-seed regression is still caught.
+//
+// Drives the script as a subprocess (no bash e2e scripts — see
+// .claude/rules/no-bash-e2e.md) and asserts on captured stdout/stderr.
+import { contains } from "sfn/strings";
+
+// The compare path is pure shell/awk with no gh dependency, so bash plus the
+// coreutils it calls (cut/grep/awk/mktemp) is all the child needs — thread
+// PATH (and HOME/TMPDIR for good measure); run_capture's empty env is the
+// EMPTY environment, not "inherit".
+fn _child_env() -> string[] ![io] {
+    let mut e: string[] = [];
+    let path = env.get("PATH");
+    if path.length > 0 { e.push("PATH=" + path); }
+    let home = env.get("HOME");
+    if home.length > 0 { e.push("HOME=" + home); }
+    let tmpdir = env.get("TMPDIR");
+    if tmpdir.length > 0 { e.push("TMPDIR=" + tmpdir); }
+    return e;
+}
+
+fn _header() -> string {
+    return "run_sha,run_date,module,time_s,peak_kb,ir_lines,status,seed_version\n";
+}
+
+// Eight prior nightly runs (distinct shas = chronological order) at a stable
+// 1.0s / 10000kb for both foo and bar, all produced by `seed`.
+fn _prior_rows(seed: string) -> string {
+    let mut s = "";
+    let mut i = 1;
+    loop {
+        if i > 8 { break; }
+        let day = number_to_string(i);
+        s = s + "sha" + day + ",2026-07-01,foo,1.0,10000,500,OK," + seed + "\n";
+        s = s + "sha" + day + ",2026-07-01,bar,1.0,10000,500,OK," + seed + "\n";
+        i += 1;
+    }
+    return s;
+}
+
+fn _run_compare(dir: string) -> int ![io] {
+    return process.run_capture(["bash", "scripts/perf_history.sh", "compare", "--data-dir", dir, "--sha", "cur", "--min-runs", "7", "--threshold-pct", "10", "--out", dir
+        + "/out.tsv"], _child_env());
+}
+
+test "perf-history: a seed bump resets baselines and files no regressions" ![io] {
+    let dir = "build/perf-history-compare-test/seedbump";
+    fs.createDirectory(dir, true);
+    // Prior runs under 0.7.0; current run under the bumped 0.8.0 with every
+    // module 2x slower and 2x peak — a cross-seed comparison WOULD flag the
+    // whole tree, but same-seed windowing leaves the current run with zero
+    // baseline samples, so nothing is filed.
+    let csv = _header() + _prior_rows("0.7.0")
+        + "cur,2026-07-12,foo,2.0,20000,500,OK,0.8.0\n"
+        + "cur,2026-07-12,bar,2.0,20000,500,OK,0.8.0\n";
+    fs.writeFile(dir + "/compile.csv", csv);
+    let _exit = _run_compare(dir);
+    let out = process.capture_take_stdout();
+    let err = process.capture_take_stderr();
+    assert contains(out, "no regressions detected");
+    assert contains(err, "seed changed");
+}
+
+test "perf-history: a same-seed regression is still caught" ![io] {
+    let dir = "build/perf-history-compare-test/sameseed";
+    fs.createDirectory(dir, true);
+    // Same seed throughout; foo jumps 1.0 -> 1.5 (+50%) while bar and every
+    // peak_kb stay flat, so exactly one regression line (foo/time_s) is
+    // written.
+    let csv = _header() + _prior_rows("0.8.0")
+        + "cur,2026-07-12,foo,1.5,10000,500,OK,0.8.0\n"
+        + "cur,2026-07-12,bar,1.0,10000,500,OK,0.8.0\n";
+    fs.writeFile(dir + "/compile.csv", csv);
+    let _exit = _run_compare(dir);
+    let out = process.capture_take_stdout();
+    let _err = process.capture_take_stderr();
+    assert contains(out, "1 regression line(s) written");
+}
