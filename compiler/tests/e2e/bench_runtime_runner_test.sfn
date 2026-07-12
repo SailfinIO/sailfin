@@ -1,5 +1,5 @@
 // End-to-end smoke test for `sfn bench [<path>...]` runtime mode (SFN-63,
-// epic #1503), the native replacement for scripts/bench_runtime.sh. Drives the
+// epic #1503), the native replacement for the retired runtime bench script. Drives the
 // compiler binary as a subprocess against the bundled `benchmarks/runtime`
 // workloads (filtered to one cheap workload so the suite stays fast) and
 // asserts on the table, CSV schema, and exit codes, per

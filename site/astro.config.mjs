@@ -70,6 +70,7 @@ export default defineConfig({
             { label: "Effect System", link: "/docs/reference/effects" },
             { label: "Standard Library", link: "/docs/reference/standard-library" },
             { label: "CLI Reference", link: "/docs/reference/cli" },
+            { label: "Benchmarking", link: "/docs/reference/bench" },
             { label: "Runtime ABI", link: "/docs/reference/runtime-abi" },
           ],
         },
