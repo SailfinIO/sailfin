@@ -1,0 +1,519 @@
+// compiler/src/cli/commands/dev_det_sweep.sfn
+//
+// `sfn dev determinism-sweep ...` — the compiler-maintainer emit-hashing
+// determinism repro harness (SFN-202). Emits each `.sfn` module N times
+// under concurrent load and hashes every output; any module producing more
+// than one distinct hash is a candidate corruption site. Retires
+// scripts/diag_determinism_sweep.sh so `sfn` is the single source of truth
+// for the primary repro tool for the intermittent IR corruption bug.
+//
+//   sfn dev determinism-sweep [--seed PATH] [--jobs N] [--iters N] [--out DIR] [path...]
+//
+// The command re-enters itself in a hidden worker mode (`--module <src>`) so
+// the orchestrator can fan modules out across a sliding-window process pool
+// (mirroring `sfn test`'s pool, `_reap_test_child`/`spawn_with_env`) rather
+// than shelling out to `xargs -P` the way the retired script did.
+import {
+    Command,
+    Matches,
+    arg_variadic,
+    command,
+    flag_int,
+    flag_value,
+    get_int,
+    get_or,
+    has,
+    positionals,
+    with_arg,
+    with_flag
+} from "sfn/cli";
+
+import {
+    _collect_sfn_files_cmd,
+    _ensure_dir_cmd,
+    _sha256_of_text_file,
+    _shell_read_cmd
+} from "../../build/fs";
+import { number_to_string } from "../../num_format";
+import { _sort_strings_cmd } from "../../string_cmd_utils";
+import {
+    char_code_at_text,
+    ends_with,
+    starts_with,
+    strings_equal,
+    substring
+} from "../../string_utils";
+import { CliContext } from "../context";
+import { _resolve_test_self_path } from "./test";
+
+// Module slug: strip a leading `compiler/src/` prefix, then a leading
+// `runtime/` prefix, then a trailing `.sfn`, then — if the ORIGINAL path
+// started with `runtime/` — re-prefix `runtime/`. Mirrors
+// scripts/diag_determinism_sweep.sh's `do_module` (lines 42-46) so slugs
+// (and the row/artifact filenames derived from them) stay byte-identical.
+fn _det_slug_of(src: string) -> string {
+    let is_runtime = starts_with(src, "runtime/");
+    let mut slug = src;
+    if starts_with(slug, "compiler/src/") {
+        slug = substring(slug, 13, slug.length);
+    }
+    if starts_with(slug, "runtime/") {
+        slug = substring(slug, 8, slug.length);
+    }
+    if ends_with(slug, ".sfn") {
+        slug = substring(slug, 0, slug.length - 4);
+    }
+    if is_runtime { slug = "runtime/" + slug; }
+    return slug;
+}
+
+// Filesystem-safe form of a slug: every `/` flattened to `_` (bash line 48).
+fn _det_safe_of(src: string) -> string {
+    let slug = _det_slug_of(src);
+    let mut out = "";
+    let mut i = 0;
+    loop {
+        if i >= slug.length { break; }
+        let ch = substring(slug, i, i + 1);
+        if strings_equal(ch, "/") { out = out + "_"; } else { out = out + ch; }
+        i += 1;
+    }
+    return out;
+}
+
+// Number of distinct strings in `values` — O(n^2) dedup, fine for the
+// iters-sized (<= a few hundred) hash lists this checks.
+fn _det_distinct_count(values: string[]) -> int {
+    let mut uniq: string[] = [];
+    let mut i = 0;
+    loop {
+        if i >= values.length { break; }
+        let mut seen = false;
+        let mut j = 0;
+        loop {
+            if j >= uniq.length { break; }
+            if strings_equal(uniq[j], values[i]) {
+                seen = true;
+                break;
+            }
+            j += 1;
+        }
+        if !seen { uniq.push(values[i]); }
+        i += 1;
+    }
+    return uniq.length;
+}
+
+// Whether every whitespace-separated size token in a row's `sizes` field is
+// "0" — i.e. the module produced no output on any iteration. Such a module is
+// "deterministic" only vacuously (every hash is the sentinel EMPTY); it means
+// the emit itself failed for that module, so the orchestrator treats it as a
+// harness/config error rather than a clean pass. Returns false for an empty
+// token set (nothing to judge).
+fn _det_all_sizes_zero(sizes: string) -> boolean {
+    let mut saw_token = false;
+    let mut cur = "";
+    let padded = sizes + " ";
+    let mut i = 0;
+    loop {
+        if i >= padded.length { break; }
+        let ch = substring(padded, i, i + 1);
+        if strings_equal(ch, " ") {
+            if cur.length > 0 {
+                saw_token = true;
+                if !strings_equal(cur, "0") { return false; }
+                cur = "";
+            }
+        } else { cur = cur + ch; }
+        i += 1;
+    }
+    return saw_token;
+}
+
+// Number of characters in `text` with a code point above 127 — a
+// best-effort proxy for the script's `tr -d '\000-\177' | wc -c` byte count
+// (an approximation for any multi-byte UTF-8 sequence, acceptable since this
+// is a diagnostic signal, not a correctness gate).
+fn _det_count_nonascii(text: string) -> int {
+    let mut count = 0;
+    let mut i = 0;
+    loop {
+        if i >= text.length { break; }
+        let code = char_code_at_text(text, i);
+        if code > 127 { count += 1; }
+        i += 1;
+    }
+    return count;
+}
+
+fn _det_worker_argv(self_exe: string, seed: string, iters: int, out: string, src: string) -> string[] {
+    return [self_exe, "dev", "determinism-sweep", "--module", src, "--seed", seed, "--iters", number_to_string(iters), "--out", out];
+}
+
+// Emit `src` `iters` times in an isolated per-module cwd, hash each output,
+// and write the aggregate row to `<out>/rows/<safe>.tsv`. Ports
+// scripts/diag_determinism_sweep.sh's `do_module` (lines 40-78) for a single
+// module. `out` MUST already be absolute (the orchestrator abspaths it once
+// before spawning workers) so the worker's mod_cwd and the orchestrator's row
+// read agree regardless of either side's own cwd.
+fn _det_worker(src: string, seed: string, iters: int, out: string) -> int ![io] {
+    let slug = _det_slug_of(src);
+    let safe = _det_safe_of(src);
+
+    let repo_root = _shell_read_cmd("pwd");
+    let mut abs_src = src;
+    if !starts_with(abs_src, "/") { abs_src = repo_root + "/" + src; }
+    // `emit` runs with cwd = mod_cwd, so a relative seed path (the default
+    // `build/bin/sfn`) would resolve against the module dir and fail to exec.
+    // Absolutize it against the repo root the orchestrator was launched from.
+    let mut abs_seed = seed;
+    if !starts_with(abs_seed, "/") { abs_seed = repo_root + "/" + seed; }
+
+    let mod_cwd = out + "/cwd/" + safe;
+    process.run(["rm", "-rf", mod_cwd]);
+    _ensure_dir_cmd(mod_cwd + "/build/compiler");
+    process.run(["cp", "-a", repo_root + "/build/compiler/import-context", mod_cwd
+        + "/build/compiler/import-context"]);
+    process.run(["rm", "-f", mod_cwd + "/build/compiler/import-context/" + slug
+        + ".sfn-asm", mod_cwd
+        + "/build/compiler/import-context/"
+        + slug
+        + ".layout-manifest"]);
+
+    let mut hashes: string[] = [];
+    let mut sizes = "";
+    let mut nonascii_total = 0;
+    let base_env = process.environ();
+    let mut k = 1;
+    loop {
+        if k > iters { break; }
+        process.run(["rm", "-rf", mod_cwd + "/build/sailfin"]);
+        _ensure_dir_cmd(mod_cwd + "/build/sailfin");
+        let out_ll = out + "/out/" + safe + ".iter" + number_to_string(k)
+            + ".ll";
+        let _ec = process.run_capture_cwd(["timeout", "60", abs_seed, "emit", "-o", out_ll, "llvm", abs_src], base_env, mod_cwd);
+        let _o = process.capture_take_stdout();
+        let _e = process.capture_take_stderr();
+
+        let mut h = _sha256_of_text_file(out_ll);
+        if h.length == 0 { h = "EMPTY"; }
+        let mut sz = 0;
+        if fs.exists(out_ll) {
+            let contents = fs.readFile(out_ll);
+            sz = contents.length;
+            nonascii_total += _det_count_nonascii(contents);
+        }
+        hashes.push(h);
+        sizes = sizes + " " + number_to_string(sz);
+        k += 1;
+    }
+
+    let distinct = _det_distinct_count(hashes);
+    let row = slug + "\t" + number_to_string(distinct) + "\t" + number_to_string(nonascii_total)
+        + "\t"
+        + sizes;
+    fs.writeFile(out + "/rows/" + safe + ".tsv", row + "\n");
+    print(row);
+    return 0;
+}
+
+// Parsed TSV row for one module's aggregate result.
+struct _DetRow {
+    module: string;
+    distinct: int;
+    nonascii: int;
+    sizes: string;
+}
+
+// Parse a tab-separated `module\tdistinct\tnonascii\tsizes` row. Returns a
+// zero-value row (`module == ""`) when the input does not have the expected
+// four fields.
+fn _det_parse_row(line: string) -> _DetRow {
+    // Row files are written with a trailing "\n"; strip trailing newlines and
+    // carriage returns so the final (`sizes`) field is not polluted — an
+    // uncleaned "\n" would make `_det_all_sizes_zero` miss an all-zero row and
+    // silently pass a broken sweep.
+    let mut trimmed = line;
+    loop {
+        if trimmed.length == 0 { break; }
+        let last = substring(trimmed, trimmed.length - 1, trimmed.length);
+        if !strings_equal(last, "\n") && !strings_equal(last, "\r") { break; }
+        trimmed = substring(trimmed, 0, trimmed.length - 1);
+    }
+    let mut fields: string[] = [];
+    let mut cur = "";
+    let mut i = 0;
+    loop {
+        if i >= trimmed.length { break; }
+        let ch = substring(trimmed, i, i + 1);
+        if strings_equal(ch, "\t") {
+            fields.push(cur);
+            cur = "";
+        } else { cur = cur + ch; }
+        i += 1;
+    }
+    fields.push(cur);
+    if fields.length < 4 {
+        return _DetRow {
+            module: "",
+            distinct: 0,
+            nonascii: 0,
+            sizes: ""
+        };
+    }
+    return _DetRow {
+        module: fields[0],
+        distinct: _det_parse_int(fields[1]),
+        nonascii: _det_parse_int(fields[2]),
+        sizes: fields[3]
+    };
+}
+
+// Minimal non-negative decimal parser for the row fields written by
+// `number_to_string` above — avoids pulling in a general int-parse dependency
+// for two small fixed-format columns.
+fn _det_parse_int(s: string) -> int {
+    let mut value = 0;
+    let mut i = 0;
+    loop {
+        if i >= s.length { break; }
+        let code = char_code_at_text(s, i);
+        if code < 48 || code > 57 { break; }
+        value = value * 10 + (code - 48);
+        i += 1;
+    }
+    return value;
+}
+
+// Enumerate the modules to sweep: explicit `roots` positionals win; else the
+// script's default (`compiler/src`, `runtime`). The collected list is sorted
+// so `results.tsv` ordering and diagnostics are stable across filesystems
+// (`fs.listDirectory` order is not), matching the retired `find ... | sort`.
+fn _det_enumerate_modules(roots: string[]) -> string[] ![io] {
+    let mut use_roots = roots;
+    if use_roots.length == 0 { use_roots = ["compiler/src", "runtime"]; }
+    let mut modules: string[] = [];
+    let mut ri = 0;
+    loop {
+        if ri >= use_roots.length { break; }
+        let found = _collect_sfn_files_cmd(use_roots[ri], 25);
+        let mut fi = 0;
+        loop {
+            if fi >= found.length { break; }
+            modules.push(found[fi]);
+            fi += 1;
+        }
+        ri += 1;
+    }
+    return _sort_strings_cmd(modules);
+}
+
+fn _det_orchestrate(seed: string, jobs: int, iters: int, out_in: string, roots: string[], ctx: CliContext) -> int ![io] {
+    if !fs.is_executable(seed) {
+        print.err("missing seed: " + seed);
+        return 2;
+    }
+    if !fs.exists("build/compiler/import-context") {
+        print.err("missing import-context (run make compile first)");
+        return 2;
+    }
+
+    let self_exe_probe = _resolve_test_self_path(ctx.binary_dir);
+    let mut self_exe = self_exe_probe;
+    if self_exe.length == 0 { self_exe = seed; }
+
+    let modules = _det_enumerate_modules(roots);
+
+    let repo_root = _shell_read_cmd("pwd");
+    let mut out = out_in;
+    if !starts_with(out, "/") { out = repo_root + "/" + out; }
+
+    // The sweep `rm -rf`s its `--out` dir to start clean; refuse paths whose
+    // deletion would be catastrophic (filesystem root, or the repo checkout the
+    // sweep runs from). A maintainer command is still a footgun otherwise.
+    if out.length == 0 || strings_equal(out, "/") || strings_equal(out, repo_root) {
+        print.err("sfn dev determinism-sweep: refusing --out '" + out
+            + "' (would delete the filesystem root or the repo checkout)");
+        return 2;
+    }
+
+    process.run(["rm", "-rf", out]);
+    _ensure_dir_cmd(out + "/rows");
+    _ensure_dir_cmd(out + "/out");
+    _ensure_dir_cmd(out + "/cwd");
+
+    print.err("[det-sweep] seed=" + seed + " modules=" + number_to_string(modules.length)
+        + " jobs="
+        + number_to_string(jobs)
+        + " iters="
+        + number_to_string(iters));
+
+    let base_env = process.environ();
+    let mut handles: int[] = [];
+    let mut launched = 0;
+    let mut ti = 0;
+    loop {
+        if ti >= modules.length { break; }
+        loop {
+            if launched >= modules.length { break; }
+            if launched - ti >= jobs { break; }
+            handles.push(process.spawn_with_env(_det_worker_argv(self_exe, seed, iters, out, modules[launched]), base_env));
+            launched += 1;
+        }
+        let _rc = process.handle_wait(handles[ti]);
+        ti += 1;
+    }
+
+    let mut rows: _DetRow[] = [];
+    let mut missing: string[] = [];
+    let mut mi = 0;
+    loop {
+        if mi >= modules.length { break; }
+        let row_path = out + "/rows/" + _det_safe_of(modules[mi]) + ".tsv";
+        let mut parsed = false;
+        if fs.exists(row_path) {
+            let text = fs.readFile(row_path);
+            let row = _det_parse_row(text);
+            if row.module.length > 0 {
+                rows.push(row);
+                parsed = true;
+            }
+        }
+        // A worker that crashed, was killed, or failed to spawn leaves no
+        // (or an unparseable) row. Dropping it silently would undercount
+        // failures and could exit 0 on an incomplete sweep, so track it.
+        if !parsed { missing.push(modules[mi]); }
+        mi += 1;
+    }
+
+    let mut results = "module\tdistinct\tnonascii_total\tsizes\n";
+    let mut ri = 0;
+    loop {
+        if ri >= rows.length { break; }
+        results = results + rows[ri].module + "\t" + number_to_string(rows[ri].distinct)
+            + "\t"
+            + number_to_string(rows[ri].nonascii)
+            + "\t"
+            + rows[ri].sizes
+            + "\n";
+        ri += 1;
+    }
+    fs.writeFile(out + "/results.tsv", results);
+
+    print.err("[det-sweep] done");
+    print.err("");
+    print.err("=== modules with distinct > 1 (non-deterministic) ===");
+    let mut nondet = 0;
+    let mut di = 0;
+    loop {
+        if di >= rows.length { break; }
+        if rows[di].distinct > 1 {
+            print.err(rows[di].module + "\t" + number_to_string(rows[di].distinct)
+                + "\t"
+                + number_to_string(rows[di].nonascii)
+                + "\t"
+                + rows[di].sizes);
+            nondet += 1;
+        }
+        di += 1;
+    }
+    print.err("");
+    print.err("=== modules with nonascii_total > 0 ===");
+    let mut nonascii = 0;
+    let mut ni = 0;
+    loop {
+        if ni >= rows.length { break; }
+        if rows[ni].nonascii > 0 {
+            print.err(rows[ni].module + "\t" + number_to_string(rows[ni].distinct)
+                + "\t"
+                + number_to_string(rows[ni].nonascii)
+                + "\t"
+                + rows[ni].sizes);
+            nonascii += 1;
+        }
+        ni += 1;
+    }
+    print.err("");
+    print.err("=== modules that produced no output (emit failed) ===");
+    let mut emit_failed = 0;
+    let mut ei = 0;
+    loop {
+        if ei >= rows.length { break; }
+        if _det_all_sizes_zero(rows[ei].sizes) {
+            print.err(rows[ei].module + "\t" + number_to_string(rows[ei].distinct)
+                + "\t"
+                + number_to_string(rows[ei].nonascii)
+                + "\t"
+                + rows[ei].sizes);
+            emit_failed += 1;
+        }
+        ei += 1;
+    }
+    print.err("");
+    print.err("=== modules with no result (worker produced no row) ===");
+    let mut wi = 0;
+    loop {
+        if wi >= missing.length { break; }
+        print.err(missing[wi]);
+        wi += 1;
+    }
+    print.err("");
+    print.err("totals: non-deterministic=" + number_to_string(nondet)
+        + " nonascii="
+        + number_to_string(nonascii)
+        + " emit-failed="
+        + number_to_string(emit_failed)
+        + " no-result="
+        + number_to_string(missing.length));
+
+    // Fail loudly rather than pass on an incomplete or vacuous sweep: a module
+    // that never emitted (all-zero sizes) or whose worker left no row at all
+    // (crash/spawn failure) makes the determinism verdict unsound — these are
+    // harness/config errors (e.g. an unresolvable seed), not a clean run.
+    if nondet > 0 || emit_failed > 0 || missing.length > 0 { return 1; }
+    return 0;
+}
+
+fn det_sweep_command_def() -> Command {
+    let mut sweep: Command = command("determinism-sweep", "Emit each module N times under load; flag any with non-deterministic IR (retires scripts/diag_determinism_sweep.sh)");
+    sweep = with_flag(sweep, flag_value("seed", "Path to the candidate compiler binary (default build/bin/sfn)"));
+    sweep = with_flag(sweep, flag_int("jobs", "Modules to sweep concurrently (default 4)"));
+    sweep = with_flag(sweep, flag_int("iters", "Emit iterations per module (default 10)"));
+    sweep = with_flag(sweep, flag_value("out", "Output/artifact directory (default /tmp/sailfin-diag-det)"));
+    sweep = with_flag(sweep, flag_value("module", "internal: run the sweep for a single module (worker mode)"));
+    sweep = with_arg(sweep, arg_variadic("path", "Roots to sweep (default: compiler/src runtime)"));
+    return sweep;
+}
+
+fn det_sweep_run(matches: Matches, ctx: CliContext) -> int ![io] {
+    let seed = get_or(matches, "seed", "build/bin/sfn");
+    let mut jobs = 4;
+    if has(matches, "jobs") { jobs = get_int(matches, "jobs"); }
+    if jobs < 1 || jobs > 256 {
+        print.err("sfn dev determinism-sweep: --jobs must be in [1, 256]");
+        return 2;
+    }
+    let mut iters = 10;
+    if has(matches, "iters") { iters = get_int(matches, "iters"); }
+    if iters < 1 {
+        print.err("sfn dev determinism-sweep: --iters must be >= 1");
+        return 2;
+    }
+    let out = get_or(matches, "out", "/tmp/sailfin-diag-det");
+    let module = get_or(matches, "module", "");
+
+    if module.length > 0 {
+        return _det_worker(module, seed, iters, out);
+    }
+    return _det_orchestrate(seed, jobs, iters, out, positionals(matches, "path"), ctx);
+}
+
+export {
+    det_sweep_command_def,
+    det_sweep_run,
+    _det_slug_of,
+    _det_safe_of,
+    _det_distinct_count,
+    _det_all_sizes_zero,
+    _det_parse_row
+};

@@ -2780,5 +2780,6 @@ export {
     _parse_jobs_value,
     _parse_shard_index,
     _parse_shard_total,
-    _shard_keeps_index
+    _shard_keeps_index,
+    _resolve_test_self_path
 };

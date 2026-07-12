@@ -1,0 +1,76 @@
+// Unit tests for the pure helpers behind `sfn dev determinism-sweep`
+// (SFN-202): the module-slug/safe-name derivation and the distinct-hash
+// reducer that decide artifact filenames and the non-determinism verdict.
+// Gating these in milliseconds keeps the full-tree sweep (a slow, real
+// multi-emit harness driven by `make check-determinism`) out of the suite
+// while still covering the logic most likely to regress.
+import {
+    _det_all_sizes_zero,
+    _det_distinct_count,
+    _det_parse_row,
+    _det_safe_of,
+    _det_slug_of
+} from "../../src/cli/commands/dev_det_sweep";
+
+test "det-sweep: slug strips compiler/src prefix" {
+    assert _det_slug_of("compiler/src/ast.sfn") == "ast";
+}
+
+test "det-sweep: slug keeps nested compiler/src path" {
+    assert _det_slug_of("compiler/src/llvm/lowering/entrypoints.sfn") == "llvm/lowering/entrypoints";
+}
+
+test "det-sweep: slug re-prefixes runtime for top-level runtime module" {
+    assert _det_slug_of("runtime/prelude.sfn") == "runtime/prelude";
+}
+
+test "det-sweep: slug re-prefixes runtime for nested runtime module" {
+    assert _det_slug_of("runtime/sfn/io.sfn") == "runtime/sfn/io";
+}
+
+test "det-sweep: safe name flattens slashes to underscores" {
+    assert _det_safe_of("runtime/sfn/io.sfn") == "runtime_sfn_io";
+}
+
+test "det-sweep: distinct count is one for identical hashes (deterministic)" {
+    assert _det_distinct_count(["a", "a", "a"]) == 1;
+}
+
+test "det-sweep: distinct count flags a mismatch (non-deterministic)" {
+    assert _det_distinct_count(["a", "b", "a"]) == 2;
+}
+
+test "det-sweep: a failed emit (EMPTY) counts as a distinct hash" {
+    assert _det_distinct_count(["EMPTY", "a"]) == 2;
+}
+
+test "det-sweep: all-zero sizes flags an emit-failed module" {
+    assert _det_all_sizes_zero(" 0 0 0");
+}
+
+test "det-sweep: a real size means the module emitted" {
+    assert ! _det_all_sizes_zero(" 46317 46317");
+}
+
+test "det-sweep: a mixed size row is not all-zero" {
+    assert ! _det_all_sizes_zero(" 0 46317");
+}
+
+test "det-sweep: an empty sizes field is not emit-failed" {
+    assert ! _det_all_sizes_zero("");
+}
+
+test "det-sweep: parse strips the trailing newline from the sizes field" {
+    // The row file is written with a trailing "\n"; the parsed sizes field
+    // must not carry it, or the emit-failed guard would miss an all-zero row.
+    let row = _det_parse_row("runtime/prelude\t1\t0\t 0 0\n");
+    assert _det_all_sizes_zero(row.sizes);
+    assert row.module == "runtime/prelude";
+    assert row.distinct == 1;
+}
+
+test "det-sweep: parse reads a real (non-empty) row without a false emit-fail" {
+    let row = _det_parse_row("cli/main\t1\t0\t 46317 46317\n");
+    assert ! _det_all_sizes_zero(row.sizes);
+    assert row.distinct == 1;
+}

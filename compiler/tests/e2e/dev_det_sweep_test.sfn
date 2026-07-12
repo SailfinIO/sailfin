@@ -1,0 +1,72 @@
+// End-to-end test for `sfn dev determinism-sweep` (SFN-202) — the native
+// port of the retired scripts/diag_determinism_sweep.sh emit-hashing harness.
+//
+// Asserts the exit-code contract the Makefile's `check-determinism` gate
+// relies on: sweeping a single module for one iteration on a known-good
+// compiler exits 0 (the module emitted, so it is trivially deterministic and
+// not emit-failed). This is the leg that would have caught the "relative seed
+// path → every emit silently produces no output → false pass" class, since
+// the emit-failed guard turns an all-empty sweep into a non-zero exit.
+//
+// Skips (asserts true) when `build/compiler/import-context` is absent — the
+// staged separate-compilation cache the sweep copies per module only exists
+// after `make compile`, mirroring the harness's own preflight. See
+// `.claude/rules/no-bash-e2e.md` for the subprocess-driven e2e pattern.
+import { find } from "sfn/strings";
+
+fn _sfn_bin() -> string ![io] {
+    let configured = env.get("SAILFIN_BIN");
+    if configured.length > 0 { return configured; }
+    return "build/bin/sfn";
+}
+
+// The sweep spawns a nested `emit` subprocess, so the child needs a populated
+// environment (PATH for `timeout`/the seed, plus per-invocation scratch);
+// `run_capture`'s empty env is the *empty* environment, not "inherit".
+fn _child_env() -> string[] ![io] {
+    let mut e: string[] = [];
+    let path = env.get("PATH");
+    if path.length > 0 { e.push("PATH=" + path); }
+    let home = env.get("HOME");
+    if home.length > 0 { e.push("HOME=" + home); }
+    let tmpdir = env.get("TMPDIR");
+    if tmpdir.length > 0 { e.push("TMPDIR=" + tmpdir); }
+    let scratch = env.get("SAILFIN_TEST_SCRATCH");
+    if scratch.length > 0 { e.push("SAILFIN_TEST_SCRATCH=" + scratch); }
+    return e;
+}
+
+fn _out_dir() -> string ![io] {
+    let scratch = env.get("SAILFIN_TEST_SCRATCH");
+    if scratch.length > 0 { return scratch + "/det-sweep-e2e"; }
+    return "/tmp/det-sweep-e2e";
+}
+
+test "det-sweep: a known-good compiler sweeps one module deterministically (exit 0)" ![io] {
+    // Linux-only: the determinism sweep is the self-host reproducibility gate
+    // driven by `make check-determinism` (Linux), and macOS determinism parity
+    // is out of scope (SFN-97). `/proc` presence is the Linux probe the runtime
+    // itself uses (runtime/sfn/platform/rlimit.sfn); skip elsewhere rather than
+    // exercise a gate the tool does not target — the sweep's per-emit `timeout`
+    // wrapper and env plumbing are Linux-shaped.
+    if !fs.exists("/proc/self/status") {
+        assert true;
+        return;
+    }
+    if !fs.exists("build/compiler/import-context") {
+        // No staged import-context (pre-`make compile`); the harness would
+        // preflight-fail. Skip rather than assert a false negative.
+        assert true;
+        return;
+    }
+    let bin = _sfn_bin();
+    let exit = process.run_capture([bin, "dev", "determinism-sweep", "--seed", bin, "--jobs", "1", "--iters", "1", "--out", _out_dir(), "runtime/sfn/io.sfn"], _child_env());
+    let out = process.capture_take_stdout();
+    let err = process.capture_take_stderr();
+    // A good compiler emits the module and is deterministic → exit 0. A
+    // regression that made every emit produce nothing would trip the
+    // emit-failed guard and exit 1, failing here.
+    assert exit == 0;
+    // The summary line is always printed to stderr; confirm the run reached it.
+    assert find(err, "totals: non-deterministic=", 0) >= 0;
+}
