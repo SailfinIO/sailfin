@@ -391,16 +391,17 @@ jobs:
 
       # Run the full `.sfn` suite with the test-bin cache ENABLED (no
       # `--no-test-cache`), populating `build/cache/test-bin/v<schema>`.
-      # Loop the shard names from scripts/test_shards.sh (the single
-      # source of truth). Retry-once mirrors the PR action's #892 flake
-      # mitigation so one non-deterministic codegen flake doesn't skip
-      # the save (a persistent failure still fails → no save).
+      # Loop the shard names from `sfn dev shard names` (the native single
+      # source of truth, SFN-200; `build/bin/sfn` exists after the compile
+      # above). Retry-once mirrors the PR action's #892 flake mitigation so
+      # one non-deterministic codegen flake doesn't skip the save (a
+      # persistent failure still fails → no save).
       - name: Warm test-bin cache (run .sfn shards, cache enabled)
         shell: bash
         run: |
           set -euo pipefail
           run_shard() { make test-shard SHARD="$1"; }
-          for shard in $(bash scripts/test_shards.sh sfn-names); do
+          for shard in $(build/bin/sfn dev shard names); do
             echo "[warm] shard $shard"
             if ! run_shard "$shard"; then
               echo "::warning title=test flake (likely #892)::shard $shard failed on attempt 1; retrying once."

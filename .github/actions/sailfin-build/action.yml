@@ -25,7 +25,7 @@ inputs:
     required: false
     default: ""
   shard:
-    description: "Test shard to run (unit-a|unit-b|unit-c|int-caps|e2e-a|e2e-b|e2e-c|e2e-d). Empty = run the full `make test` suite. See scripts/test_shards.sh."
+    description: "Test shard to run (unit-a|unit-b|unit-c|int-caps|e2e-a|e2e-b|e2e-c|e2e-d). Empty = run the full `make test` suite. See `sfn dev shard names` (compiler/src/cli/commands/dev_shard.sfn)."
     required: false
     default: ""
   test_jobs:
@@ -33,7 +33,7 @@ inputs:
     required: false
     default: ""
   shard_test_jobs:
-    description: "Per-file parallelism WITHIN a shard leg (SAILFIN_TEST_JOBS, forwarded to `scripts/test_shards.sh run`). Only consulted when `shard` is set. Empty/1 = serial (byte-identical to the historical shard run). Benchmarked sweet spots: 3 on 4-vCPU/16GB ubuntu, 2 on 3-vCPU/7GB macos-arm64 (no RLIMIT_AS backstop there). Peak RSS stays a fraction of the runner budget because test fixtures emit ~30x lighter than a heavy compiler module."
+    description: "Per-file parallelism WITHIN a shard leg (SAILFIN_TEST_JOBS, read by `sfn dev shard run`). Only consulted when `shard` is set. Empty/1 = serial (byte-identical to the historical shard run). Benchmarked sweet spots: 3 on 4-vCPU/16GB ubuntu, 2 on 3-vCPU/7GB macos-arm64 (no RLIMIT_AS backstop there). Peak RSS stays a fraction of the runner budget because test fixtures emit ~30x lighter than a heavy compiler module."
     required: false
     default: ""
   package:
@@ -268,11 +268,11 @@ runs:
       run: |
         set -euo pipefail
         # #1235 measurement (macOS only). Time the test phase and flip on
-        # the SAILFIN_AGENT_REPORT gate so `make test-shard` →
-        # scripts/test_shards.sh forwards `--json` + tees
-        # build/agent-test.shard-<shard>.jsonl, whose `summary` event carries
-        # cache.test_bin_hit_rate (#1230). Additive + macOS-scoped; Linux
-        # shard legs keep the byte-identical human run.
+        # the SAILFIN_AGENT_REPORT gate so `make test-shard` forwards `--json`
+        # to `sfn dev shard run` and tees build/agent-test.shard-<shard>.jsonl,
+        # whose `summary` event carries cache.test_bin_hit_rate (#1230).
+        # Additive + macOS-scoped; Linux shard legs keep the byte-identical
+        # human run.
         _measure=0
         if [ "${{ inputs.target }}" = "macos-arm64" ]; then
           _measure=1
@@ -293,7 +293,7 @@ runs:
         # legs equals `make test` (asserted by the shard-cover lint).
         # Per-file parallelism within a shard leg (benchmarked: ~2x e2e /
         # ~6x unit throughput, peak RSS a fraction of the runner budget).
-        # Forwarded via SAILFIN_TEST_JOBS, which scripts/test_shards.sh reads.
+        # Forwarded via SAILFIN_TEST_JOBS, which `sfn dev shard run` reads.
         # Empty/unset keeps the byte-identical serial shard run.
         if [ -n "${{ inputs.shard_test_jobs }}" ]; then
           export SAILFIN_TEST_JOBS="${{ inputs.shard_test_jobs }}"

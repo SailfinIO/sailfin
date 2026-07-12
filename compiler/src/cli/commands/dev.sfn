@@ -24,6 +24,7 @@ import {
     command,
     get,
     subcommand,
+    subcommand_path,
     with_arg,
     with_subcommand
 } from "sfn/cli";
@@ -40,6 +41,7 @@ import { number_to_string } from "../../num_format";
 import { starts_with, strings_equal, substring } from "../../string_utils";
 import { _strip_build_metadata, resolve_compiler_version } from "../../version";
 import { CliContext } from "../context";
+import { shard_command_def, shard_run } from "./dev_shard";
 import { toolchain_install_to_base } from "./toolchain";
 
 // Where a bootstrap-triggered fetch stages its download: the per-invocation
@@ -358,21 +360,31 @@ fn _dev_bootstrap_pin(new_version: string) -> int ![io] {
     return 0;
 }
 
-// The `sfn/cli` definition for `dev`, registered on the v2 root. One nested
-// group today: `bootstrap`, with fetch/build/check/pin leaves.
+// The `sfn/cli` definition for `dev`, registered on the v2 root. Two nested
+// groups: `bootstrap` (fetch/build/check/pin leaves) and `shard` (the CI
+// test-shard surface, SFN-200).
 fn command_def() -> Command {
     let mut bootstrap: Command = command("bootstrap", "Compiler seed bootstrap (reads bootstrap.toml)");
     bootstrap = with_subcommand(bootstrap, command("fetch", "Acquire and verify the pinned seed"));
     bootstrap = with_subcommand(bootstrap, command("build", "Build the compiler with the exact seed"));
     bootstrap = with_subcommand(bootstrap, command("check", "Build then smoke-verify the compiler"));
     bootstrap = with_subcommand(bootstrap, with_arg(command("pin", "Update the pinned seed version"), arg("version", "Seed version to pin (e.g. 0.8.0-alpha.4)")));
-    return with_subcommand(command("dev", "Compiler/toolchain maintainer commands"), bootstrap);
+    let mut dev: Command = with_subcommand(command("dev", "Compiler/toolchain maintainer commands"), bootstrap);
+    dev = with_subcommand(dev, shard_command_def());
+    return dev;
 }
 
 // Dispatch the parsed `dev` subcommand. `subcommand(matches)` returns the
 // deepest leaf (`fetch`/`build`/`check`/`pin`); a bare `sfn dev` or
 // `sfn dev bootstrap` prints usage.
 fn run(matches: Matches, ctx: CliContext) -> int ![clock, io, net] {
+    // `sfn dev shard <leaf>` routes to the shard surface; the descent path's
+    // second element (`["dev", "shard", ...]`) distinguishes it from the
+    // `bootstrap` group whose leaves are dispatched below.
+    let path: string[] = subcommand_path(matches);
+    if path.length >= 2 && strings_equal(path[1], "shard") {
+        return shard_run(matches, ctx);
+    }
     let sub: string = subcommand(matches);
     if strings_equal(sub, "fetch") { return _dev_bootstrap_fetch(); }
     if strings_equal(sub, "build") { return _dev_bootstrap_build(); }

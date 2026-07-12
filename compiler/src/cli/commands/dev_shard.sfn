@@ -1,0 +1,393 @@
+// compiler/src/cli/commands/dev_shard.sfn
+//
+// `sfn dev shard ...` — the compiler-maintainer CI test-shard surface
+// (SFN-200). Owns the named CI shard taxonomy (unit-a/b/c, int-caps,
+// e2e-a/b/c/d) and its coverage lint natively, retiring
+// scripts/test_shards.sh so `sfn` — not a bash script — is the single
+// source of truth for how `make test`'s surface is partitioned across the
+// parallel CI legs. Each named shard is a set of test roots plus a
+// file-count-balanced stride (`I/N`); running one is `sfn test <roots>
+// --shard I/N`, whose stride (`_shard_keeps_index`, #1237) matches the
+// legacy awk stride byte-for-byte.
+//
+//   sfn dev shard names           list the shard names, one per line
+//   sfn dev shard list <name>     print a shard's test files, one per line
+//   sfn dev shard run <name>      run a shard's tests (honours --json/--jobs)
+//   sfn dev shard cover           assert the shards partition make test's surface
+import {
+    Command,
+    Matches,
+    arg,
+    command,
+    flag,
+    flag_int,
+    get,
+    get_int,
+    has,
+    has_flag,
+    parse,
+    parse_is_ok,
+    parse_matches,
+    subcommand,
+    with_arg,
+    with_flag,
+    with_subcommand
+} from "sfn/cli";
+
+import { _get_env_cmd } from "../../build_flags";
+import { number_to_string } from "../../num_format";
+import { _sort_strings_cmd } from "../../string_cmd_utils";
+import { strings_equal } from "../../string_utils";
+import { CliContext } from "../context";
+import {
+    _collect_test_files_cmd,
+    _parse_jobs_value,
+    _shard_keeps_index,
+    command_def as test_command_def,
+    run as test_run
+} from "./test";
+
+// A named CI shard: the test roots it discovers and the file-count-balanced
+// stride it keeps. `total == 0` means "no stride — run every file under
+// `roots`" (the int-caps leg: integration + capsules with no split). The
+// union of every shard's file set equals `make test`'s surface; `_shard_cover`
+// proves it holds after any rebalance.
+struct ShardDef {
+    name: string;
+    roots: string[];
+    index: int;
+    total: int;
+}
+
+// The CI shard map (formerly `SFN_SHARDS` in scripts/test_shards.sh). Kept in
+// one place so the runner, `list`, and the cover lint can never drift apart.
+fn _shard_defs() -> ShardDef[] {
+    let unit = "compiler/tests/unit";
+    let integ = "compiler/tests/integration";
+    let e2e = "compiler/tests/e2e";
+    let mut defs: ShardDef[] = [];
+    defs.push(ShardDef {
+        name: "unit-a", roots: [unit], index: 1, total: 3
+    });
+    defs.push(ShardDef {
+        name: "unit-b", roots: [unit], index: 2, total: 3
+    });
+    defs.push(ShardDef {
+        name: "unit-c", roots: [unit], index: 3, total: 3
+    });
+    defs.push(ShardDef {
+        name: "int-caps", roots: [integ, "capsules"], index: 0, total: 0
+    });
+    defs.push(ShardDef {
+        name: "e2e-a", roots: [e2e], index: 1, total: 4
+    });
+    defs.push(ShardDef {
+        name: "e2e-b", roots: [e2e], index: 2, total: 4
+    });
+    defs.push(ShardDef {
+        name: "e2e-c", roots: [e2e], index: 3, total: 4
+    });
+    defs.push(ShardDef {
+        name: "e2e-d", roots: [e2e], index: 4, total: 4
+    });
+    return defs;
+}
+
+// The roots `make test` discovers (`sfn test compiler/tests/unit
+// compiler/tests/integration compiler/tests/e2e capsules`). The cover lint
+// compares the shards' union against the discovery of exactly these roots.
+fn _make_test_roots() -> string[] {
+    return ["compiler/tests/unit", "compiler/tests/integration", "compiler/tests/e2e", "capsules"];
+}
+
+// Discover the `_test.sfn` files under `roots`, concatenating each root's own
+// sorted list — the exact order `sfn test <roots>` builds before applying
+// `--shard`, so a shard's file set here matches what the runner runs.
+fn _discover(roots: string[]) -> string[] ![io] {
+    let mut files: string[] = [];
+    let mut ri: int = 0;
+    loop {
+        if ri >= roots.length { break; }
+        let sorted = _sort_strings_cmd(_collect_test_files_cmd(roots[ri], 25));
+        let mut fi: int = 0;
+        loop {
+            if fi >= sorted.length { break; }
+            files.push(sorted[fi]);
+            fi += 1;
+        }
+        ri += 1;
+    }
+    return files;
+}
+
+// A shard's file set: its roots' discovery, then the `I/N` stride
+// (`_shard_keeps_index`, mirroring the runner's `--shard`). A zero total runs
+// the whole discovery unpartitioned.
+fn _shard_files(def: ShardDef) -> string[] ![io] {
+    let all = _discover(def.roots);
+    if def.total <= 0 { return all; }
+    let mut kept: string[] = [];
+    let mut i: int = 0;
+    loop {
+        if i >= all.length { break; }
+        if _shard_keeps_index(i, def.index, def.total) {
+            kept.push(all[i]);
+        }
+        i += 1;
+    }
+    return kept;
+}
+
+// Resolve a shard by name. A `""`-named result signals "unknown shard".
+fn _find_shard(name: string) -> ShardDef {
+    let defs = _shard_defs();
+    let mut i: int = 0;
+    loop {
+        if i >= defs.length { break; }
+        if strings_equal(defs[i].name, name) { return defs[i]; }
+        i += 1;
+    }
+    return ShardDef {
+        name: "",
+        roots: [],
+        index: 0,
+        total: 0
+    };
+}
+
+fn _known_shards_hint() -> string {
+    return "unit-a unit-b unit-c int-caps e2e-a e2e-b e2e-c e2e-d";
+}
+
+// Whether `sorted` (already lexicographically sorted) contains `needle`.
+fn _sorted_contains(sorted: string[], needle: string) -> boolean {
+    let mut i: int = 0;
+    loop {
+        if i >= sorted.length { break; }
+        if strings_equal(sorted[i], needle) { return true; }
+        i += 1;
+    }
+    return false;
+}
+
+// Drop adjacent duplicates from a sorted list.
+fn _dedup_sorted(sorted: string[]) -> string[] {
+    let mut out: string[] = [];
+    let mut i: int = 0;
+    loop {
+        if i >= sorted.length { break; }
+        if out.length == 0 || !strings_equal(out[out.length - 1], sorted[i]) {
+            out.push(sorted[i]);
+        }
+        i += 1;
+    }
+    return out;
+}
+
+// `sfn dev shard names` — the shard names, one per line (replaces both
+// `test_shards.sh names` and `sfn-names`, now identical).
+fn _shard_names() -> int ![io] {
+    let defs = _shard_defs();
+    let mut i: int = 0;
+    loop {
+        if i >= defs.length { break; }
+        print(defs[i].name);
+        i += 1;
+    }
+    return 0;
+}
+
+// `sfn dev shard list <name>` — the shard's discovered files, one per line.
+fn _shard_list(name: string) -> int ![io] {
+    let def = _find_shard(name);
+    if def.name.length == 0 {
+        print.err("sfn dev shard: unknown shard '" + name + "' (want: "
+            + _known_shards_hint()
+            + ")");
+        return 2;
+    }
+    let files = _shard_files(def);
+    let mut i: int = 0;
+    loop {
+        if i >= files.length { break; }
+        print(files[i]);
+        i += 1;
+    }
+    return 0;
+}
+
+// Per-file parallelism for a shard leg: an explicit `--jobs N` wins; otherwise
+// `SAILFIN_TEST_JOBS` (the CI env knob, forwarded by the composite action) is
+// honoured. Any out-of-range or non-numeric value falls back to serial (1)
+// rather than failing the leg — mirroring scripts/test_shards.sh's guard.
+fn _resolve_jobs(matches: Matches) -> int ![io] {
+    if has(matches, "jobs") {
+        let j = get_int(matches, "jobs");
+        if j < 1 || j > 256 { return 1; }
+        return j;
+    }
+    let env_v = _get_env_cmd("SAILFIN_TEST_JOBS");
+    if env_v.length == 0 { return 1; }
+    let parsed = _parse_jobs_value(env_v);
+    if parsed < 1 { return 1; }
+    return parsed;
+}
+
+// `sfn dev shard run <name>` — run the shard's tests. Faithful to
+// scripts/test_shards.sh's `exec "$native" test <files>`: re-run the shard's
+// roots through the same `sfn test` pipeline in process with the
+// file-count-balanced `--shard I/N` stride, so the toolchain gate, per-test
+// cache, and JSONL reporting behave identically to a direct `sfn test`.
+// Building the argv and re-parsing (rather than synthesizing a Matches) keeps
+// the test command's own flag contract the single source of truth.
+fn _shard_run_one(name: string, json: boolean, jobs: int, ctx: CliContext) -> int ![clock, io, net] {
+    let def = _find_shard(name);
+    if def.name.length == 0 {
+        print.err("sfn dev shard: unknown shard '" + name + "'");
+        print.err("  known shards: " + _known_shards_hint());
+        return 2;
+    }
+    let mut argv: string[] = ["sfn", "test"];
+    let mut ri: int = 0;
+    loop {
+        if ri >= def.roots.length { break; }
+        argv.push(def.roots[ri]);
+        ri += 1;
+    }
+    if def.total > 0 {
+        argv.push("--shard");
+        argv.push(number_to_string(def.index) + "/" + number_to_string(def.total));
+    }
+    if jobs > 1 {
+        argv.push("--jobs");
+        argv.push(number_to_string(jobs));
+    }
+    if json { argv.push("--json"); }
+
+    let mut root: Command = command("sfn", "Sailfin compiler");
+    root = with_subcommand(root, test_command_def());
+    let parsed = parse(root, argv);
+    if !parse_is_ok(parsed) {
+        print.err("sfn dev shard: internal error building the test invocation for '"
+            + name
+            + "'");
+        return 70;
+    }
+    return test_run(parse_matches(parsed), ctx);
+}
+
+// `sfn dev shard cover` — assert the shards partition `make test`'s surface:
+// no file assigned to two shards, no discovered file left uncovered, no shard
+// listing a file outside the surface. The `sfn/cli` `EXIT_*` constants lower
+// to 0 in an importing module (see main.sfn), so the non-zero failure exit is
+// a literal `1`, matching scripts/test_shards.sh's `rc`.
+fn _shard_cover() -> int ![io] {
+    let defs = _shard_defs();
+    let mut concat: string[] = [];
+    let mut di: int = 0;
+    loop {
+        if di >= defs.length { break; }
+        let files = _shard_files(defs[di]);
+        let mut fi: int = 0;
+        loop {
+            if fi >= files.length { break; }
+            concat.push(files[fi]);
+            fi += 1;
+        }
+        di += 1;
+    }
+    let concat_sorted = _sort_strings_cmd(concat);
+    let full = _dedup_sorted(_sort_strings_cmd(_discover(_make_test_roots())));
+
+    let mut rc: int = 0;
+
+    // Duplicates: a file assigned to more than one shard.
+    let mut dup_reported: boolean = false;
+    let mut i: int = 1;
+    loop {
+        if i >= concat_sorted.length { break; }
+        if strings_equal(concat_sorted[i], concat_sorted[i - 1]) {
+            if !dup_reported {
+                print.err("[shard-cover] FAIL: *_test.sfn in more than one shard:");
+                dup_reported = true;
+            }
+            print.err("  " + concat_sorted[i]);
+            rc = 1;
+        }
+        i += 1;
+    }
+
+    let union = _dedup_sorted(concat_sorted);
+
+    // Missing: a discovered file no shard covers.
+    let mut missing_reported: boolean = false;
+    let mut mi: int = 0;
+    loop {
+        if mi >= full.length { break; }
+        if !_sorted_contains(union, full[mi]) {
+            if !missing_reported {
+                print.err("[shard-cover] FAIL: *_test.sfn not covered by any shard:");
+                missing_reported = true;
+            }
+            print.err("  " + full[mi]);
+            rc = 1;
+        }
+        mi += 1;
+    }
+
+    // Extra: a shard lists a file outside the discovery surface.
+    let mut extra_reported: boolean = false;
+    let mut ei: int = 0;
+    loop {
+        if ei >= union.length { break; }
+        if !_sorted_contains(full, union[ei]) {
+            if !extra_reported {
+                print.err("[shard-cover] FAIL: shard lists *_test.sfn outside the test surface:");
+                extra_reported = true;
+            }
+            print.err("  " + union[ei]);
+            rc = 1;
+        }
+        ei += 1;
+    }
+
+    if rc == 0 {
+        print("[shard-cover] ok: " + number_to_string(full.length)
+            + " *_test.sfn across "
+            + number_to_string(defs.length)
+            + " shards; no gaps or overlaps");
+    }
+    return rc;
+}
+
+// The `sfn/cli` definition for the `shard` group nested under `dev`.
+fn shard_command_def() -> Command {
+    let mut shard: Command = command("shard", "CI test-shard selection + coverage (retires scripts/test_shards.sh)");
+    shard = with_subcommand(shard, command("names", "List the CI shard names, one per line"));
+    shard = with_subcommand(shard, with_arg(command("list", "Print a shard's test files, one per line"), arg("shard", "Shard name (e.g. unit-a)")));
+    let mut run_cmd: Command = with_arg(command("run", "Run a shard's tests"), arg("shard", "Shard name (e.g. unit-a)"));
+    run_cmd = with_flag(run_cmd, flag("json", "Emit a JSONL event stream"));
+    run_cmd = with_flag(run_cmd, flag_int("jobs", "Run up to N per-file children concurrently"));
+    shard = with_subcommand(shard, run_cmd);
+    shard = with_subcommand(shard, command("cover", "Assert the shards cover make test's surface"));
+    return shard;
+}
+
+// Dispatch a parsed `sfn dev shard <leaf>`. `subcommand(matches)` returns the
+// deepest leaf (`names`/`list`/`run`/`cover`); a bare `sfn dev shard` prints
+// usage.
+fn shard_run(matches: Matches, ctx: CliContext) -> int ![clock, io, net] {
+    let leaf: string = subcommand(matches);
+    if strings_equal(leaf, "names") { return _shard_names(); }
+    if strings_equal(leaf, "list") {
+        return _shard_list(get(matches, "shard"));
+    }
+    if strings_equal(leaf, "cover") { return _shard_cover(); }
+    if strings_equal(leaf, "run") {
+        return _shard_run_one(get(matches, "shard"), has_flag(matches, "json"), _resolve_jobs(matches), ctx);
+    }
+    print("usage: sfn dev shard <names|list|run|cover>");
+    return 2;
+}
+
+export { shard_command_def, shard_run };
