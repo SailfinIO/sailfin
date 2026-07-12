@@ -156,9 +156,9 @@ fn poly1305_mac(msg: int[], key: int[]) -> int[] {
     h1 = h1 + fc;
 
     // Final reduction: h - (2^130-5) via a borrow chain, keeping g only if
-    // it did not borrow past bit 130. The tag is public output (not a
-    // secret comparison), so a plain branch on the sign of g4 is acceptable
-    // here per the spec's constant-time scoping note.
+    // it did not borrow past bit 130. The selection is branch-free (masked)
+    // so finalize is constant-time with respect to the key, matching
+    // poly1305-donna's finish (SFEP-0048 §3.3).
     let g0_raw: int = h0 + 5;
     let mut c2: int = g0_raw >> 26;
     let g0: int = g0_raw & mask;
@@ -173,18 +173,21 @@ fn poly1305_mac(msg: int[], key: int[]) -> int[] {
     let g3: int = g3_raw & mask;
     let g4: int = h4 + c2 - 67108864;
 
-    let mut fh0: int = h0;
-    let mut fh1: int = h1;
-    let mut fh2: int = h2;
-    let mut fh3: int = h3;
-    let mut fh4: int = h4;
-    if g4 >= 0 {
-        fh0 = g0;
-        fh1 = g1;
-        fh2 = g2;
-        fh3 = g3;
-        fh4 = g4;
-    }
+    // Branch-free select: `(g4 >> 63) & 1` is g4's sign bit (1 when the borrow
+    // reached past bit 130, so h < 2^130-5 and we keep h; 0 when we take the
+    // reduced g). Isolating bit 63 with `& 1` is robust regardless of shift
+    // signedness. Spreading the 0/1 flag to an all-ones/all-zeros limb mask via
+    // subtraction: `0 - borrow` and `borrow - 1` land on -1 (two's-complement
+    // all-ones) for exactly one side, so `fh = (h & mask_h) | (g & mask_g)`
+    // picks h or g with no data-dependent branch.
+    let borrow: int = (g4 >> 63) & 1;
+    let mask_h: int = 0 - borrow;
+    let mask_g: int = borrow - 1;
+    let fh0: int = (h0 & mask_h) | (g0 & mask_g);
+    let fh1: int = (h1 & mask_h) | (g1 & mask_g);
+    let fh2: int = (h2 & mask_h) | (g2 & mask_g);
+    let fh3: int = (h3 & mask_h) | (g3 & mask_g);
+    let fh4: int = (h4 & mask_h) | (g4 & mask_g);
 
     // Recombine the five 26-bit limbs into four 32-bit words, then add s.
     let word_mask: int = 4294967295;
