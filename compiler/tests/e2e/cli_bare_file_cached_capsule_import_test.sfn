@@ -1,0 +1,124 @@
+// End-to-end regression for SFN-216: a bare `sfn build main.sfn` — no
+// sibling `capsule.toml` and no ancestor `workspace.toml` — that imports
+// and calls a function defined directly in a cached capsule's entry
+// module (`mod.sfn`) must link and run.
+//
+// Before the fix, the manifest-less + workspace-less path staged nothing
+// for a scoped import: the resolver's relative-walk leg only handles
+// `./`-imports, the manifest leg is `capsule.toml`-gated, and the
+// workspace-implicit leg is `workspace.toml`-gated. With none present,
+// the imported capsule was never compiled as its own unit, so the entry-
+// module callee's signature was unknown to LLVM lowering (a `[fatal]`) —
+// and, once resolved, its symbol was undefined at link
+// (`undefined symbol: greet__demo__greeter__mod`). `sfn/http` `fetch`/`get`
+// and `sfn/strings` `int_to_string` are the real-world cases. CI never
+// exercised the manifest-less path — every other e2e fixture writes a
+// `capsule.toml` — so this guards the newly-added
+// `enumerate_cache_implicit_sources` leg (capsule_resolver.sfn).
+//
+// Hermetic by construction: a synthetic `demo/greeter` capsule is written
+// into a throwaway `HOME`'s cache (~/.sfn/cache/capsules/demo/greeter/
+// 0.1.0/src/mod.sfn) and the child build runs with `HOME` pointed at it,
+// so the test touches no real user cache and does not depend on any
+// shipped capsule's evolving source. The entry file lives under
+// `fs.mkdtemp`'s `/tmp` dir — deliberately outside the repo — so no
+// `workspace.toml` ancestor is discoverable and the cache path (not the
+// workspace-implicit path) is the one under test.
+import { find } from "sfn/strings";
+import { with_tmp_dir } from "sfn/test";
+
+fn _sfn_bin() -> string ![io] {
+    let configured = env.get("SAILFIN_BIN");
+    if configured.length > 0 { return configured; }
+    return "build/bin/sfn";
+}
+
+// Child environment for the spawned `sfn build`, with `HOME` overridden
+// to the throwaway cache root. Start from the parent snapshot (PATH plus
+// the macOS SDK/toolchain vars the nested clang/ld need, and
+// SAILFIN_TEST_SCRATCH for parallel build-cache isolation, #1333), drop
+// any inherited `HOME`, then append the override so the resolver's
+// `_cr_get_home()` (`$HOME`) finds the synthetic capsule.
+fn _child_env_with_home(home: string) -> string[] ![io] {
+    let parent = process.environ();
+    let mut e: string[] = [];
+    let mut i: int = 0;
+    loop {
+        if i >= parent.length { break; }
+        let entry = parent[i];
+        i += 1;
+        if find(entry, "HOME=", 0) == 0 { continue; }
+        e.push(entry);
+    }
+    e.push("HOME=" + home);
+    return e;
+}
+
+// A fresh marker-file path under the runner's scratch dir (or `/tmp`),
+// stale value removed, living outside the `with_tmp_dir` tree so it
+// survives teardown.
+fn _marker(name: string) -> string ![io] {
+    let mut dir = env.get("SAILFIN_TEST_SCRATCH");
+    if dir.length == 0 { dir = "/tmp"; }
+    fs.createDirectory(dir, true);
+    let path = dir + "/sfn-216-cached-" + name + ".out";
+    if fs.exists(path) { fs.deleteFile(path); }
+    return path;
+}
+
+// Write the synthetic `demo/greeter` capsule into `<home>`'s cache and a
+// bare `main.sfn` (no capsule.toml) that imports its entry-module `greet`,
+// build, then run. Stashes the run's stdout to `out_marker`; returns the
+// run's exit code, or `-100` if the build itself failed.
+//
+// Two cached versions are written — 0.1.0 (`greet` → "hello …") and 0.2.0
+// (`greet` → "hi …") — so the run's output ("hi …" vs "hello …") also
+// pins the version-selection policy: with no lockfile to pin one, the
+// newest cached version must win (`_cr_locate_cached_capsule_src_latest`).
+fn _build_and_run(out_marker: string) -> int ![io] {
+    return with_tmp_dir(fn (dir: string) -> int {
+        let cache_base = dir + "/.sfn/cache/capsules/demo/greeter";
+        let older_src = cache_base + "/0.1.0/src";
+        fs.createDirectory(older_src, true);
+        fs.writeFile(older_src + "/mod.sfn", "fn greet(name: string) -> string {\n"
+            + "    return \"hello \" + name;\n"
+            + "}\n");
+        let newer_src = cache_base + "/0.2.0/src";
+        fs.createDirectory(newer_src, true);
+        fs.writeFile(newer_src + "/mod.sfn", "fn greet(name: string) -> string {\n"
+            + "    return \"hi \" + name;\n"
+            + "}\n");
+
+        let srcpath = dir + "/main.sfn";
+        fs.writeFile(srcpath, "import { greet } from \"demo/greeter\";\n\n"
+            + "fn main() ![io] {\n"
+            + "    print.info(greet(\"sfn216\"));\n"
+            + "}\n");
+
+        let binpath = dir + "/main";
+        let build_exit = process.run_capture([_sfn_bin(), "build", "-o", binpath, srcpath], _child_env_with_home(dir));
+        let _bo = process.capture_take_stdout();
+        let _be = process.capture_take_stderr();
+        if build_exit != 0 { return -100; }
+
+        let run_exit = process.run_capture([binpath], []);
+        let out = process.capture_take_stdout();
+        let _re = process.capture_take_stderr();
+        fs.writeFile(out_marker, out);
+        return run_exit;
+    });
+}
+
+test "bare-file: cached capsule's entry-module fn links and runs (no manifest, no workspace)" ![io] {
+    let marker = _marker("greet");
+    let exit = _build_and_run(marker);
+    // Assert build+run succeeded (`-100` == build failure) before touching
+    // the marker: on a build failure the marker is never written.
+    assert exit == 0;
+    let out = fs.readFile(marker);
+    if fs.exists(marker) { fs.deleteFile(marker); }
+    // The newest cached version (0.2.0 → "hi …") must be selected, not the
+    // older 0.1.0 ("hello …") — pins the version-selection policy.
+    assert find(out, "hi sfn216", 0) >= 0;
+    assert find(out, "hello sfn216", 0) < 0;
+}

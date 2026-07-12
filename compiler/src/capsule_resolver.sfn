@@ -80,6 +80,7 @@ import {
 import { RuntimeCapsuleArtifacts, enumerate_runtime_capsule_artifacts } from "./runtime_capsule_resolver";
 import {
     SemVer,
+    semver_compare,
     semver_is_valid,
     semver_parse,
     semver_satisfies_floor
@@ -852,6 +853,59 @@ fn _cr_locate_capsule_src(project_root: string, spec: string, version: string) -
         + "/src";
     if fs.exists(cached) { return cached; }
     return "";
+}
+
+// Locate the src/ dir for a scoped capsule in the user cache
+// (~/.sfn/cache/capsules/<scope>/<name>/<version>/src), choosing the
+// highest semver version present. Used by the manifest-less, workspace-
+// less bare-build path (SFN-216): a bare `sfn build main.sfn` has no
+// capsule.toml or capsule.lock to pin a version, so the newest cached
+// version is selected. Returns "" if the capsule is not cached or no
+// cached version has a src/ dir.
+fn _cr_locate_cached_capsule_src_latest(spec: string) -> string ![io] {
+    let slash = _cr_find_char(spec, "/", 0);
+    if slash <= 0 { return ""; }
+    let slash2 = _cr_find_char(substring(spec, slash + 1, spec.length), "/", 0);
+    if slash2 >= 0 { return ""; }
+    let scope = substring(spec, 0, slash);
+    let name = substring(spec, slash + 1, spec.length);
+    if !_cr_is_safe_segment(scope) { return ""; }
+    if !_cr_is_safe_segment(name) { return ""; }
+    let home = _cr_get_home();
+    if home.length == 0 { return ""; }
+    let base = home + "/.sfn/cache/capsules/" + scope + "/" + name;
+    if !fs.exists(base) { return ""; }
+    let entries = fs.listDirectory(base);
+    let mut best_version: string = "";
+    let mut has_best: boolean = false;
+    // `best_parsed` is only read when `has_best` is true; the placeholder
+    // seed keeps the type inferred as SemVer without importing the name.
+    let mut best_parsed = semver_parse("0.0.0");
+    let guard: int = 4096;
+    let mut i: int = 0;
+    loop {
+        if i >= entries.length { break; }
+        if i >= guard { break; }
+        let ver = entries[i];
+        i += 1;
+        if ver.length == 0 { continue; }
+        if ver[0] == "." { continue; }
+        if !_cr_is_safe_version(ver) { continue; }
+        let parsed = semver_parse(ver);
+        if !semver_is_valid(parsed) { continue; }
+        let src = base + "/" + ver + "/src";
+        if !fs.exists(src) { continue; }
+        if !has_best {
+            has_best = true;
+            best_parsed = parsed;
+            best_version = ver;
+        } else if semver_compare(parsed, best_parsed) > 0 {
+            best_parsed = parsed;
+            best_version = ver;
+        }
+    }
+    if !has_best { return ""; }
+    return base + "/" + best_version + "/src";
 }
 
 // Walk a capsule src/ dir iteratively (BFS) and collect every .sfn file,
@@ -3019,6 +3073,67 @@ fn enumerate_workspace_implicit_sources(entry_path: string, members: WorkspaceMe
     return out;
 }
 
+// Resolve scoped imports of a bare-build entry file against the user
+// cache (~/.sfn/cache), the manifest-less + workspace-less analogue of
+// `enumerate_workspace_implicit_sources` (SFN-216). A bare `sfn build
+// main.sfn` with neither a capsule.toml nor a workspace.toml still needs
+// an imported capsule (`sfn/strings`, `sfn/http`) that the user `sfn
+// add`ed into the cache to be staged + compiled as its own unit, so its
+// entry-module functions mangle under the canonical `<scope>/<name>/mod`
+// slug and both the frontend signature lookup and the final link resolve.
+// Without this, the import is unstaged: the call site can't find the
+// callee's signature (lowering [fatal]) or, once resolved, the symbol is
+// undefined at link.
+//
+// BFS-walks each staged capsule's own scoped imports so an import of
+// sfn/http that internally imports sfn/strings pulls both in (each must
+// itself be cached). Version selection picks the newest cached version —
+// there is no lockfile to pin one in the manifest-less path.
+fn enumerate_cache_implicit_sources(entry_path: string) -> CapsuleSource[] ![io] {
+    let mut out: CapsuleSource[] = [];
+    if entry_path.length == 0 { return out; }
+    let mut covered: string[] = [];
+    let mut paths_to_scan: string[] = [entry_path];
+    let mut head: int = 0;
+    let max_iterations: int = 1024;
+    let mut iterations: int = 0;
+    loop {
+        if head >= paths_to_scan.length { break; }
+        if iterations >= max_iterations { break; }
+        iterations += 1;
+        let path = paths_to_scan[head];
+        head += 1;
+        if !fs.exists(path) { continue; }
+        let source = fs.readFile(path);
+        let specs = collect_scoped_import_specs(source);
+        let mut i: int = 0;
+        loop {
+            if i >= specs.length { break; }
+            let spec = specs[i];
+            i += 1;
+            // Canonicalise to "scope/name" (drop any submodule suffix).
+            let first = _cr_find_char(spec, "/", 0);
+            if first <= 0 { continue; }
+            let second = _cr_find_char(spec, "/", first + 1);
+            let mut canonical = spec;
+            if second > 0 { canonical = substring(spec, 0, second); }
+            if _cr_string_array_contains(covered, canonical) { continue; }
+            let src_dir = _cr_locate_cached_capsule_src_latest(canonical);
+            if src_dir.length == 0 { continue; }
+            covered.push(canonical);
+            let found = _cr_collect_capsule_sources(src_dir, canonical);
+            let mut j: int = 0;
+            loop {
+                if j >= found.length { break; }
+                out.push(found[j]);
+                paths_to_scan.push(found[j].source_path);
+                j += 1;
+            }
+        }
+    }
+    return out;
+}
+
 // ---- Top-level orchestrator ----
 // Parse the dep keys (e.g. "sfn/cli", "sfn/http") from the
 // `name=version\n` text returned by toml_get_dependencies. Used to seed the
@@ -3310,6 +3425,33 @@ fn _cr_resolve_and_dedupe(entry_paths: string[], consumer: ResolverConsumer) -> 
                 wi += 1;
             }
             wi_entry += 1;
+        }
+    }
+
+    // (4) Cache-implicit imports (SFN-216): a bare `sfn build main.sfn`
+    // with neither a capsule.toml (no project_root) nor a workspace.toml
+    // (no workspace_root) resolves scoped imports the user `sfn add`ed
+    // into ~/.sfn/cache. Gated on BOTH roots being absent so it never
+    // double-stages a spec the manifest or workspace legs already
+    // supplied — two sources with the same canonical slug but different
+    // source paths (member src vs cache src) would trip the slug-collision
+    // detector below. When a manifest or workspace is present, those legs
+    // own scoped resolution (declared deps fall back to the cache via
+    // `_cr_locate_capsule_src`).
+    if project_root.length == 0 {
+        if workspace_root.length == 0 {
+            let mut ci_entry: int = 0;
+            loop {
+                if ci_entry >= entry_paths.length { break; }
+                let cached = enumerate_cache_implicit_sources(entry_paths[ci_entry]);
+                let mut cci: int = 0;
+                loop {
+                    if cci >= cached.length { break; }
+                    sources.push(cached[cci]);
+                    cci += 1;
+                }
+                ci_entry += 1;
+            }
         }
     }
 
