@@ -69,6 +69,84 @@ test "monomorphize struct: specialized header preserves a substituted implements
     assert ! _has(out, "implements Show<T>");
 }
 
+test "monomorphize struct: static constructor call instantiates from the binding annotation" {
+    // `let numbers: List<int> = List.new()` — a static method on a generic
+    // struct whose instantiation comes from the binding's expected type, not
+    // from an argument (SFEP-0038 §3.6, #1941). The annotation `List<int>`
+    // seeds the `List$int` specialization; the call receiver `List` is then
+    // rewritten to `List$int` so it resolves like a concrete struct's static
+    // method. The nested `.method` blocks (`new`, `add`) mirror emit_native's
+    // shape.
+    let src = ".module m\n" + ".struct List<T>\n"
+        + ".layout struct name=List size=8 align=8\n"
+        + ".layout field items type=T[] offset=0 size=8 align=8\n"
+        + "    .field items: T[]\n"
+        + "    .method new() -> List<T>\n"
+        + "    .meta return List<T>\n"
+        + "    .meta effects none\n"
+        + "        ret null\n"
+        + "    .endmethod\n"
+        + "    .method add(self, item: T) -> void\n"
+        + "    .meta return void\n"
+        + "    .meta effects none\n"
+        + "    .param self\n"
+        + "    .param item: T\n"
+        + "        eval self.items.push(item)\n"
+        + "    .endmethod\n"
+        + ".endstruct\n"
+        + "\n"
+        + ".fn main() ![io]\n"
+        + ".meta return void\n"
+        + ".meta effects io\n"
+        + "    .let numbers : List<int> = List.new()\n"
+        + "    eval numbers.add(1)\n"
+        + ".endfn\n";
+    let out = monomorphize_native_text(src);
+    // The static constructor call resolves to the specialization (`List$int.new`).
+    assert _has(out, "List$int.new(");
+    // The specialized struct block exists, carrying its methods.
+    assert _has(out, ".struct List$int");
+    assert _has(out, ".method new");
+    assert _has(out, ".method add");
+    // No generic `T` field type survives into the specialized layout/field.
+    assert _has(out, ".field items: int[]");
+    // The original generic definition is dropped.
+    assert ! _has(out, ".struct List<T>");
+    // The unmangled receiver must not survive at the call site.
+    assert ! _has(out, "List.new(");
+}
+
+test "monomorphize struct: unannotated static constructor call is not instantiated" {
+    // Without a binding annotation (`let n = List.new()`) the instantiation
+    // is unknowable — there is no `T`-typed argument to infer from. The pass
+    // must leave the call unmangled and force no specialization, so the
+    // downstream lowering fails on the genuinely uninstantiable call rather
+    // than the pass guessing a type (SFEP-0038 §3.6, #1941). This pins the
+    // feature as strictly return-type-site driven.
+    let src = ".module m\n" + ".struct List<T>\n"
+        + ".layout struct name=List size=8 align=8\n"
+        + ".layout field items type=T[] offset=0 size=8 align=8\n"
+        + "    .field items: T[]\n"
+        + "    .method new() -> List<T>\n"
+        + "    .meta return List<T>\n"
+        + "    .meta effects none\n"
+        + "        ret null\n"
+        + "    .endmethod\n"
+        + ".endstruct\n"
+        + "\n"
+        + ".fn main() ![io]\n"
+        + ".meta return void\n"
+        + ".meta effects io\n"
+        + "    .let n = List.new()\n"
+        + ".endfn\n";
+    let out = monomorphize_native_text(src);
+    // The call is left unmangled (no expected type to instantiate from).
+    assert _has(out, "List.new(");
+    // No specialization is fabricated from a guessed type.
+    assert ! _has(out, "List$int");
+    assert ! _has(out, ".struct List$");
+}
+
 test "monomorphize struct: module with no generic struct is a byte-for-byte no-op" {
     let src = ".module m\n" + ".struct Plain\n"
         + ".layout struct name=Plain size=8 align=8\n"
