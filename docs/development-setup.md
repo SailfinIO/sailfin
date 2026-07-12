@@ -208,7 +208,7 @@ local source build unless you are changing the build driver itself.
 These are the build flags exposed by the compiler CLI:
 
 ```text
-sfn build [-o OUTPUT] [-p PATH] [--no-cache] [--clean] [--cache-trace] [--json] [--work-dir DIR] [--check-determinism] (<file.sfn> | -p <capsule-path>)
+sfn build [-o OUTPUT] [-p PATH] [--no-cache] [--clean] [--cache-trace] [--json] [--work-dir DIR] [--check-determinism] [--skip-toolchain-check] (<file.sfn> | -p <capsule-path>)
 ```
 
 | Flag | Meaning |
@@ -221,14 +221,15 @@ sfn build [-o OUTPUT] [-p PATH] [--no-cache] [--clean] [--cache-trace] [--json] 
 | `--json` | Emit the structured build report. Used by CI and agent report tooling. |
 | `--work-dir DIR` | Use `DIR` for build scratch/output state. |
 | `--check-determinism` | Run the build determinism check. |
+| `--skip-toolchain-check` | Bypass the `[toolchain]` pin check for this invocation. |
 
 Related compiler commands expose their own flags:
 
 | Command | Supported flags |
 |---|---|
-| `sfn check` | `--quiet`, `--json`, `--allow-bare-assert` |
-| `sfn run` | `--no-cache`, `--clean`, `--cache-trace` |
-| `sfn test` | `--json`, `-k NAME`, `--tag TAG`, `--update-snapshots`, `--no-test-cache`, `--jobs N` |
+| `sfn check` | `--quiet`, `--json`, `--allow-bare-assert`, `--skip-toolchain-check` |
+| `sfn run` | `--no-cache`, `--clean`, `--cache-trace`, `--skip-toolchain-check` |
+| `sfn test` | `--json`, `-k NAME`, `--tag TAG`, `--update-snapshots`, `--no-test-cache`, `--jobs N`, `--shard I/N`, `--skip-toolchain-check` |
 | `sfn fmt` | `--check`, `--write` |
 | `sfn emit` | `--timing`, `-o OUTPUT`, `--module-name SLUG`, `--import-context DIR`, `--attempts N`, `--no-retry`, `--validate`, `--no-validate`, `--no-resolve-gate` |
 | `sfn package` | `--target T`, `--out DIR`, `--compiler-bin PATH`, `--installer`, `-p <capsule-path>` |

@@ -63,7 +63,7 @@ Multiple path arguments group tests into named **suites** for reporting: each pa
 **Usage:**
 
 ```bash
-sfn test [--json] [path...]
+sfn test [--json] [-k NAME] [--tag TAG] [--update-snapshots] [--no-test-cache] [--jobs N] [--shard I/N] [--skip-toolchain-check] [path...]
 ```
 
 **Examples:**
@@ -79,6 +79,13 @@ sfn test compiler/tests/unit compiler/tests/integration capsules  # three suites
 
 | Flag | Description |
 |---|---|
+| `--json` | Emit a JSONL event stream. |
+| `-k NAME` | Only run tests whose name contains `NAME`. |
+| `--tag TAG` | Only run tests carrying `@tag("TAG")`. |
+| `--update-snapshots` | Re-baseline snapshot golden files. |
+| `--no-test-cache` | Bypass the per-test linked-binary cache. |
+| `--jobs N` | Run up to `N` per-file test children concurrently. |
+| `--shard I/N` | Run only the `I`-th of `N` file-count-balanced shards. |
 | `--skip-toolchain-check` | Bypass the `[toolchain]` pin check for this invocation — see [Toolchain Pinning Flags](#toolchain-pinning-flags) |
 
 > **Note:** `--filter` is not yet supported. To narrow test scope, pass a specific file or directory path.
