@@ -43,6 +43,16 @@ fn _out_dir() -> string ![io] {
 }
 
 test "det-sweep: a known-good compiler sweeps one module deterministically (exit 0)" ![io] {
+    // Linux-only: the determinism sweep is the self-host reproducibility gate
+    // driven by `make check-determinism` (Linux), and macOS determinism parity
+    // is out of scope (SFN-97). `/proc` presence is the Linux probe the runtime
+    // itself uses (runtime/sfn/platform/rlimit.sfn); skip elsewhere rather than
+    // exercise a gate the tool does not target — the sweep's per-emit `timeout`
+    // wrapper and env plumbing are Linux-shaped.
+    if !fs.exists("/proc/self/status") {
+        assert true;
+        return;
+    }
     if !fs.exists("build/compiler/import-context") {
         // No staged import-context (pre-`make compile`); the harness would
         // preflight-fail. Skip rather than assert a false negative.
