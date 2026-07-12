@@ -1290,9 +1290,29 @@ fn parse_postfix_chain(state: ExpressionTokens, expression: Expression) -> Expre
             current_expression = Expression.Call {
                 callee: current_expression,
                 arguments: call_result.arguments,
-                span: null
+                span: null,
+                type_arguments: []
             };
             continue;
+        }
+        // Turbofish call `f<T1, T2>(args)` (SFN-329). A bare `<` in postfix
+        // position is ambiguous with the less-than comparison operator, so we
+        // speculatively scan a balanced `< ... >` type-argument list and
+        // COMMIT to a generic call only when `(` immediately follows the
+        // closing `>`. A `<` that does not fit that shape is left unconsumed
+        // and breaks the chain, so the precedence climb parses it as a
+        // comparison (`x < y > z` is unchanged). Gated to an `Identifier`
+        // callee — member turbofish (`x.f<T>()`) is out of scope (SFN-329).
+        if strings_equal(sym, "<") {
+            if current_expression.variant == "Identifier" {
+                let turbofish = parse_turbofish_call(current_state, current_expression);
+                if turbofish.success {
+                    current_state = turbofish.state;
+                    current_expression = turbofish.expression;
+                    continue;
+                }
+            }
+            break;
         }
         if strings_equal(sym, "[") {
             let index_state = expression_tokens_advance(current_state);
@@ -1359,6 +1379,120 @@ fn parse_postfix_chain(state: ExpressionTokens, expression: Expression) -> Expre
     return ExpressionParseResult {
         state: current_state,
         expression: current_expression,
+        success: true
+    };
+}
+
+// ============================================================================
+// Turbofish Call Disambiguation (SFN-329)
+// ============================================================================
+// `state` is positioned at the `<` that follows a turbofish-eligible callee.
+// Speculatively scan a balanced `< ... >` type-argument list and, only when
+// `(` immediately follows the closing `>`, parse the call arguments and return
+// a `Call` carrying the explicit `type_arguments`. Any shape that is not
+// `<types>(` — an unbalanced list, an empty `<>`, or a `>` not followed by `(`
+// — returns `success:false` with the ORIGINAL `state` untouched, so the caller
+// leaves the `<` for the precedence climb to parse as a comparison. Nested
+// generic arguments (`f<Map<int, string>>(x)`) are supported via `>>`-degluing,
+// mirroring `read_cast_target`. The loop is input-driven, so it is bounded by a
+// guard counter.
+fn parse_turbofish_call(state: ExpressionTokens, callee: Expression) -> ExpressionParseResult {
+    // Consume the opening `<` (the caller confirmed it).
+    let mut cursor = expression_tokens_advance(state);
+    let mut type_arguments: TypeAnnotation[] = [];
+    let mut current_text: string = "";
+    let mut angle_depth: int = 1;
+    let mut guard: int = 0;
+
+    loop {
+        guard += 1;
+        if guard > 100000 { return expression_parse_failure(state); }
+        if expression_tokens_is_at_end(cursor) {
+            return expression_parse_failure(state);
+        }
+        let tok = expression_tokens_peek(cursor);
+        if tok.kind.variant != "Symbol" {
+            current_text = _cast_target_append(current_text, tok.lexeme);
+            cursor = expression_tokens_advance(cursor);
+            continue;
+        }
+        let lx = tok.lexeme;
+        if strings_equal(lx, "<") {
+            angle_depth += 1;
+            current_text = _cast_target_append(current_text, "<");
+            cursor = expression_tokens_advance(cursor);
+        } else if strings_equal(lx, ">>") {
+            // A `>>` closes two levels at once. It ends the outer list only
+            // when exactly two are open (the inner generic plus this list);
+            // the inner close becomes part of the current argument's text.
+            if angle_depth == 2 {
+                current_text = _cast_target_append(current_text, ">");
+                cursor = expression_tokens_advance(cursor);
+                angle_depth = 0;
+                break;
+            }
+            if angle_depth > 2 {
+                angle_depth -= 2;
+                current_text = _cast_target_append(current_text, ">>");
+                cursor = expression_tokens_advance(cursor);
+            } else {
+                // `angle_depth == 1`: a stray second `>` — not a turbofish.
+                return expression_parse_failure(state);
+            }
+        } else if strings_equal(lx, ">") {
+            angle_depth -= 1;
+            if angle_depth == 0 {
+                cursor = expression_tokens_advance(cursor);
+                break;
+            }
+            current_text = _cast_target_append(current_text, ">");
+            cursor = expression_tokens_advance(cursor);
+        } else if strings_equal(lx, ",") {
+            if angle_depth == 1 {
+                type_arguments.push(TypeAnnotation { text: current_text });
+                current_text = "";
+                cursor = expression_tokens_advance(cursor);
+            } else {
+                current_text = _cast_target_append(current_text, ",");
+                cursor = expression_tokens_advance(cursor);
+            }
+        } else {
+            current_text = _cast_target_append(current_text, lx);
+            cursor = expression_tokens_advance(cursor);
+        }
+    }
+
+    // Flush the final argument. An empty final slot is ignored, so a trailing
+    // comma (`<int,>`) is tolerated; a fully empty list (`<>`) yields no type
+    // arguments and is not a turbofish — fall back to comparison parsing.
+    if current_text.length > 0 {
+        type_arguments.push(TypeAnnotation { text: current_text });
+    }
+    if type_arguments.length == 0 { return expression_parse_failure(state); }
+
+    // Commit only when `(` immediately follows the type-argument list.
+    if expression_tokens_is_at_end(cursor) {
+        return expression_parse_failure(state);
+    }
+    let paren = expression_tokens_peek(cursor);
+    if paren.kind.variant != "Symbol" {
+        return expression_parse_failure(state);
+    }
+    if !strings_equal(paren.lexeme, "(") {
+        return expression_parse_failure(state);
+    }
+
+    let call_result = parse_call_arguments(cursor);
+    if !call_result.success { return expression_parse_failure(state); }
+
+    return ExpressionParseResult {
+        state: call_result.state,
+        expression: Expression.Call {
+            callee: callee,
+            arguments: call_result.arguments,
+            span: null,
+            type_arguments: type_arguments
+        },
         success: true
     };
 }

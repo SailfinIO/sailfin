@@ -318,7 +318,8 @@ fn replace_first_try(expression: Expression, bind_name: string) -> TryReplace {
                 expression: Expression.Call {
                     callee: callee.expression,
                     arguments: expression.arguments,
-                    span: expression.span
+                    span: expression.span,
+                    type_arguments: expression.type_arguments
                 },
                 operand: callee.operand,
                 found: true
@@ -330,7 +331,8 @@ fn replace_first_try(expression: Expression, bind_name: string) -> TryReplace {
                 expression: Expression.Call {
                     callee: expression.callee,
                     arguments: args.items,
-                    span: expression.span
+                    span: expression.span,
+                    type_arguments: expression.type_arguments
                 },
                 operand: args.operand,
                 found: true

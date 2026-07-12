@@ -1,0 +1,55 @@
+// End-to-end coverage for turbofish calls (SFN-329). Drives the production
+// `sfn check` / `sfn build` paths as subprocesses to pin the acceptance
+// criteria: an explicit type-argument call `f<int>(args)` parses,
+// typechecks, builds, and runs — in both the single-argument and comma
+// forms. The type parameter is inferable from the value arguments, so the
+// existing argument-unification monomorphizer resolves the instantiation.
+//
+// Matchers note: the `sfn/test` `expect_*` matchers are `![pure]` and cannot
+// be called from an `![io]` test; assert on captured output / exit codes
+// instead (#842). Build isolation follows `.claude/rules/no-bash-e2e.md`:
+// the full parent environment is threaded (PATH for clang/ld,
+// SAILFIN_TEST_SCRATCH for per-invocation build-cache isolation under the
+// parallel pool).
+import { contains } from "sfn/strings";
+
+fn _sfn_bin() -> string ![io] {
+    let configured = env.get("SAILFIN_BIN");
+    if configured.length > 0 { return configured; }
+    return "build/bin/sfn";
+}
+
+fn _child_env() -> string[] ![io] { return process.environ(); }
+
+fn _scratch_dir() -> string ![io] {
+    let mut dir = env.get("SAILFIN_TEST_SCRATCH");
+    if dir.length == 0 { dir = "/tmp"; }
+    fs.createDirectory(dir, true);
+    return dir;
+}
+
+test "turbofish e2e: explicit type-argument call typechecks clean" ![io] {
+    let exit = process.run_capture([_sfn_bin(), "check", "compiler/tests/e2e/fixtures/turbofish_call.sfn"], _child_env());
+    let out = process.capture_take_stdout();
+    let err = process.capture_take_stderr();
+    // The pre-fix misparse surfaced as E0808 (function-as-value); it must be
+    // gone now that `id<int>(...)` parses as a call.
+    assert ! contains(out + err, "E0808");
+    assert exit == 0;
+}
+
+test "turbofish e2e: single and comma forms build and run" ![io] {
+    let dir = _scratch_dir();
+    let bin = dir + "/sfn-turbofish-bin";
+    if fs.exists(bin) { fs.deleteFile(bin); }
+    let build_exit = process.run_capture([_sfn_bin(), "build", "-o", bin, "compiler/tests/e2e/fixtures/turbofish_call.sfn"], _child_env());
+    let _bo = process.capture_take_stdout();
+    let _be = process.capture_take_stderr();
+    assert build_exit == 0;
+    let run_exit = process.run_capture([bin], _child_env());
+    let _ro = process.capture_take_stdout();
+    let _re = process.capture_take_stderr();
+    if fs.exists(bin) { fs.deleteFile(bin); }
+    // 41 (id<int>) + 4 (pick<int>) = 45.
+    assert run_exit == 45;
+}

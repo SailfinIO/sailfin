@@ -69,7 +69,15 @@ enum Expression {
     Call {
         callee: Expression,
         arguments: Expression[],
-        span: SourceSpan?
+        span: SourceSpan?,
+        // Explicit turbofish type arguments `f<T1, T2>(args)` (SFN-329).
+        // Empty for an ordinary or inference-resolved call; the field is
+        // appended last so the seed compiler's positional-GEP field
+        // indexing for the existing fields stays stable. Carried on the
+        // node for faithful parsing; the monomorphizer still resolves the
+        // repro forms by unifying argument types, so these are inert until
+        // the return-only-position turbofish gap (SFEP-0038) is closed.
+        type_arguments: TypeAnnotation[]
     },
     Index { sequence: Expression, index: Expression },
     Array { elements: Expression[] },
