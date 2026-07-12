@@ -1,0 +1,78 @@
+// capsules/sfn/crypto/tests/poly1305_test.sfn
+//
+// Regression coverage for the sfn/crypto poly1305 module: RFC 8439 §2.5.2
+// test vector, a full-carry finalize vector for the keep-h reduction branch,
+// the empty-message edge case, and bad-key-length rejection.
+import { poly1305_mac } from "../src/poly1305";
+
+fn hexb(s: string) -> int[] {
+    let mut out: int[] = [];
+    let mut i: int = 0;
+    loop {
+        if i >= s.length { break; }
+        let hi: int = _hexval(s[i]);
+        let lo: int = _hexval(s[i + 1]);
+        out.push(((hi << 4) | lo) & 255);
+        i += 2;
+    }
+    return out;
+}
+
+fn _hexval(c: string) -> int {
+    let code: int = char_code(c) & 255;
+    if code >= 48 && code <= 57 {
+        return code - 48;
+    }  // '0'-'9'
+    if code >= 97 && code <= 102 {
+        return code - 97 + 10;
+    }  // 'a'-'f'
+    return 0;
+}
+
+fn eq_bytes(a: int[], b: int[]) -> bool {
+    if a.length != b.length { return false; }
+    let mut i: int = 0;
+    loop {
+        if i >= a.length { break; }
+        if a[i] != b[i] { return false; }
+        i += 1;
+    }
+    return true;
+}
+
+test "poly1305_mac: RFC 8439 §2.5.2" {
+    let key: int[] = hexb("85d6be7857556d337f4452fe42d506a80103808afb0db2fd4abff6af4149f51b");
+    // msg = "Cryptographic Forum Research Group" (34 bytes)
+    let msg: int[] = hexb("43727970746f6772617068696320466f72756d2052657365617263682047726f7570");
+    let tag: int[] = poly1305_mac(msg, key);
+    assert tag.length == 16;
+    assert eq_bytes(tag, hexb("a8061dc1305136c6c22b8baf0c0127a9"));
+}
+
+test "poly1305_mac: empty message" {
+    // Empty message → tag is s mod 2^128 = key[16..31] little-endian unchanged.
+    let key: int[] = hexb("85d6be7857556d337f4452fe42d506a80103808afb0db2fd4abff6af4149f51b");
+    let msg: int[] = [];
+    let tag: int[] = poly1305_mac(msg, key);
+    assert eq_bytes(tag, hexb("0103808afb0db2fd4abff6af4149f51b"));
+}
+
+test "poly1305_mac: full-carry finalize (h-branch with dirty h1 limb)" {
+    // Adversarially constructed known-answer vector (verified against the
+    // RFC 8439 big-integer reference): clamp-maximal r, s = 0, and a third
+    // block chosen so the per-block loop exits with bit 26 of h1 set while
+    // the final select keeps h. Without the full-carry pass in finalize the
+    // serialized tag drops that carry (byte 6 reads 70 instead of 80).
+    let key: int[] = hexb("ffffffffffffffffffffffffffffffff00000000000000000000000000000000");
+    let msg: int[] = hexb("ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffdbb15c00ffffffffffffffffffffffff");
+    let tag: int[] = poly1305_mac(msg, key);
+    assert tag.length == 16;
+    assert eq_bytes(tag, hexb("6b881517000080fb2980e3234b802893"));
+}
+
+test "poly1305_mac: rejects bad key length" {
+    let key: int[] = [1, 2, 3];
+    let msg: int[] = [4, 5, 6];
+    let tag: int[] = poly1305_mac(msg, key);
+    assert tag.length == 0;
+}

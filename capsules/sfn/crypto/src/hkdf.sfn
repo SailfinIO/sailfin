@@ -1,0 +1,265 @@
+// capsules/sfn/crypto/src/hkdf.sfn
+//
+// HKDF-SHA-256 (RFC 5869) for the sfn/crypto capsule — the TLS 1.3 key
+// schedule's key-derivation primitive (SFEP draft-native-crypto.md, Phase B).
+// Operates end-to-end on `int[]` byte arrays (never `string`) because PRK
+// and expand-output blocks are arbitrary binary that routinely contain 0x00
+// bytes, which a Sailfin `string` cannot represent. Ships its own pure
+// `int[]`-based SHA-256/HMAC-SHA-256 rather than the shipped string-based,
+// OpenSSL-backed `hmac_sha256` (`mod.sfn`).
+import { rotr32, store_u32_be } from "./bits";
+
+// FIPS 180-4 SHA-256 round constants K[0..63].
+fn _sha256_k() -> int[] {
+    return [1116352408, 1899447441, 3049323471, 3921009573, 961987163, 1508970993, 2453635748, 2870763221, 3624381080, 310598401, 607225278, 1426881987, 1925078388, 2162078206, 2614888103, 3248222580, 3835390401, 4022224774, 264347078, 604807628, 770255983, 1249150122, 1555081692, 1996064986, 2554220882, 2821834349, 2952996808, 3210313671, 3336571891, 3584528711, 113926993, 338241895, 666307205, 773529912, 1294757372, 1396182291, 1695183700, 1986661051, 2177026350, 2456956037, 2730485921, 2820302411, 3259730800, 3345764771, 3516065817, 3600352804, 4094571909, 275423344, 430227734, 506948616, 659060556, 883997877, 958139571, 1322822218, 1537002063, 1747873779, 1955562222, 2024104815, 2227730452, 2361852424, 2428436474, 2756734187, 3204031479, 3329325298,];
+}
+
+// Compute the SHA-256 digest of a byte array, returning the 32 digest bytes
+// as an int[]. Mechanical transcription of the shipped `sha256_hex`
+// (mod.sfn): input is already an int[] (no string decode), and the digest is
+// pushed as big-endian bytes (via `bits::store_u32_be`) instead of hex.
+fn _sha256_bytes(msg: int[]) -> int[] {
+    let mask: int = 4294967295;
+
+    let mut bytes: int[] = [];
+    let mut bi: int = 0;
+    loop {
+        if bi >= msg.length { break; }
+        bytes.push(msg[bi] & 255);
+        bi += 1;
+    }
+    let bit_len: int = bytes.length * 8;
+
+    bytes.push(128);
+    loop {
+        if (bytes.length % 64) == 56 { break; }
+        bytes.push(0);
+    }
+    let hi: int = (bit_len >> 32) & mask;
+    let lo: int = bit_len & mask;
+    bytes.push((hi >> 24) & 255);
+    bytes.push((hi >> 16) & 255);
+    bytes.push((hi >> 8) & 255);
+    bytes.push(hi & 255);
+    bytes.push((lo >> 24) & 255);
+    bytes.push((lo >> 16) & 255);
+    bytes.push((lo >> 8) & 255);
+    bytes.push(lo & 255);
+
+    let k: int[] = _sha256_k();
+
+    let mut h0: int = 1779033703;
+    let mut h1: int = 3144134277;
+    let mut h2: int = 1013904242;
+    let mut h3: int = 2773480762;
+    let mut h4: int = 1359893119;
+    let mut h5: int = 2600822924;
+    let mut h6: int = 528734635;
+    let mut h7: int = 1541459225;
+
+    let num_blocks: int = bytes.length / 64;
+    let mut block: int = 0;
+    loop {
+        if block >= num_blocks { break; }
+        let base: int = block * 64;
+
+        let mut w: int[] = [];
+        let mut t: int = 0;
+        loop {
+            if t >= 16 { break; }
+            let j: int = base + t * 4;
+            let word: int = ((bytes[j] << 24) | (bytes[j + 1] << 16) | (bytes[j
+                + 2] << 8) | bytes[j
+                + 3]) & mask;
+            w.push(word);
+            t += 1;
+        }
+        t = 16;
+        loop {
+            if t >= 64 { break; }
+            let w15: int = w[t - 15];
+            let w2: int = w[t - 2];
+            let s0: int = (rotr32(w15, 7) ^ rotr32(w15, 18) ^ ((w15 >> 3) & mask)) & mask;
+            let s1: int = (rotr32(w2, 17) ^ rotr32(w2, 19) ^ ((w2 >> 10) & mask)) & mask;
+            w.push((w[t - 16] + s0 + w[t - 7] + s1) & mask);
+            t += 1;
+        }
+
+        let mut a: int = h0;
+        let mut b: int = h1;
+        let mut c: int = h2;
+        let mut d: int = h3;
+        let mut e: int = h4;
+        let mut f: int = h5;
+        let mut g: int = h6;
+        let mut h: int = h7;
+
+        let mut r: int = 0;
+        loop {
+            if r >= 64 { break; }
+            let big_s1: int = (rotr32(e, 6) ^ rotr32(e, 11) ^ rotr32(e, 25)) & mask;
+            let ch: int = ((e & f) ^ ((mask ^ e) & g)) & mask;
+            let temp1: int = (h + big_s1 + ch + k[r] + w[r]) & mask;
+            let big_s0: int = (rotr32(a, 2) ^ rotr32(a, 13) ^ rotr32(a, 22)) & mask;
+            let maj: int = ((a & b) ^ (a & c) ^ (b & c)) & mask;
+            let temp2: int = (big_s0 + maj) & mask;
+            h = g;
+            g = f;
+            f = e;
+            e = (d + temp1) & mask;
+            d = c;
+            c = b;
+            b = a;
+            a = (temp1 + temp2) & mask;
+            r += 1;
+        }
+
+        h0 = (h0 + a) & mask;
+        h1 = (h1 + b) & mask;
+        h2 = (h2 + c) & mask;
+        h3 = (h3 + d) & mask;
+        h4 = (h4 + e) & mask;
+        h5 = (h5 + f) & mask;
+        h6 = (h6 + g) & mask;
+        h7 = (h7 + h) & mask;
+        block += 1;
+    }
+
+    let mut out: int[] = [];
+    store_u32_be(out, h0);
+    store_u32_be(out, h1);
+    store_u32_be(out, h2);
+    store_u32_be(out, h3);
+    store_u32_be(out, h4);
+    store_u32_be(out, h5);
+    store_u32_be(out, h6);
+    store_u32_be(out, h7);
+    return out;
+}
+
+// Pure HMAC-SHA-256 over byte arrays. key and data are int[] byte arrays
+// (values 0-255); returns the 32-byte MAC as an int[]. RFC 2104.
+fn hmac_sha256_bytes(key: int[], data: int[]) -> int[] {
+    let mut k: int[] = key;
+    if k.length > 64 { k = _sha256_bytes(k); }
+
+    let mut k_pad: int[] = [];
+    let mut ki: int = 0;
+    loop {
+        if ki >= k.length { break; }
+        k_pad.push(k[ki] & 255);
+        ki += 1;
+    }
+    loop {
+        if k_pad.length >= 64 { break; }
+        k_pad.push(0);
+    }
+
+    let mut ipad: int[] = [];
+    let mut opad: int[] = [];
+    let mut pi: int = 0;
+    loop {
+        if pi >= 64 { break; }
+        ipad.push((k_pad[pi] ^ 54) & 255);
+        opad.push((k_pad[pi] ^ 92) & 255);
+        pi += 1;
+    }
+
+    let mut inner_msg: int[] = [];
+    let mut ii: int = 0;
+    loop {
+        if ii >= ipad.length { break; }
+        inner_msg.push(ipad[ii]);
+        ii += 1;
+    }
+    let mut di: int = 0;
+    loop {
+        if di >= data.length { break; }
+        inner_msg.push(data[di] & 255);
+        di += 1;
+    }
+    let inner: int[] = _sha256_bytes(inner_msg);
+
+    let mut outer_msg: int[] = [];
+    let mut oi: int = 0;
+    loop {
+        if oi >= opad.length { break; }
+        outer_msg.push(opad[oi]);
+        oi += 1;
+    }
+    let mut ni: int = 0;
+    loop {
+        if ni >= inner.length { break; }
+        outer_msg.push(inner[ni]);
+        ni += 1;
+    }
+    return _sha256_bytes(outer_msg);
+}
+
+// HKDF-Extract (RFC 5869 §2.2). salt and ikm are int[] byte arrays; salt may
+// be empty (treated as HashLen=32 zero bytes per the RFC). Returns the
+// 32-byte PRK.
+fn hkdf_sha256_extract(salt: int[], ikm: int[]) -> int[] {
+    let mut s: int[] = salt;
+    if s.length == 0 {
+        let mut zeros: int[] = [];
+        let mut zi: int = 0;
+        loop {
+            if zi >= 32 { break; }
+            zeros.push(0);
+            zi += 1;
+        }
+        s = zeros;
+    }
+    return hmac_sha256_bytes(s, ikm);
+}
+
+// HKDF-Expand (RFC 5869 §2.3). prk is a >=32-byte int[]; info is an int[]
+// (may be empty); length is the desired output length in bytes (1..=8160 =
+// 255*32). Returns `length` output bytes as an int[]. Returns [] (empty) if
+// length is out of range (fail-closed).
+fn hkdf_sha256_expand(prk: int[], info: int[], length: int) -> int[] {
+    if length < 1 || length > 8160 { return []; }
+
+    let n: int = (length + 31) / 32;
+    let mut t: int[] = [];
+    let mut okm: int[] = [];
+    let mut i: int = 1;
+    loop {
+        if i > n { break; }
+
+        let mut msg: int[] = [];
+        let mut ti: int = 0;
+        loop {
+            if ti >= t.length { break; }
+            msg.push(t[ti]);
+            ti += 1;
+        }
+        let mut fi: int = 0;
+        loop {
+            if fi >= info.length { break; }
+            msg.push(info[fi] & 255);
+            fi += 1;
+        }
+        msg.push(i & 255);
+
+        t = hmac_sha256_bytes(prk, msg);
+
+        let mut tj: int = 0;
+        loop {
+            if tj >= t.length { break; }
+            okm.push(t[tj]);
+            tj += 1;
+        }
+        i += 1;
+    }
+
+    let mut result: int[] = [];
+    let mut ri: int = 0;
+    loop {
+        if ri >= length { break; }
+        result.push(okm[ri]);
+        ri += 1;
+    }
+    return result;
+}
