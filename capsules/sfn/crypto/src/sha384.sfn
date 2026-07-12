@@ -6,7 +6,7 @@
 // would corrupt `>>` (LLVM `ashr` sign-extends once bit 63 is set). Every
 // 64-bit word is therefore held as a `[hi, lo]` pair of 32-bit limbs (each
 // masked to `[0, 2^32)`), and every 64-bit rotate/shift/xor/add is
-// implemented limb-wise with explicit carry (SFEP draft-native-crypto.md
+// implemented limb-wise with explicit carry (SFEP-0048
 // §3.3 item 4).
 import { load_u32_be, store_u32_be } from "./bits";
 

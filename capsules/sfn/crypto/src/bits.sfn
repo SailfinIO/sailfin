@@ -1,7 +1,7 @@
 // capsules/sfn/crypto/src/bits.sfn
 //
 // Constant-time / masking helper module for the sfn/crypto capsule
-// (SFEP draft-native-crypto.md §3.3-3.4). Centralizes the mandated
+// (SFEP-0048 §3.3-3.4). Centralizes the mandated
 // safe-integer idioms — 32-bit masking, rotates, constant-time byte
 // comparison, and big/little-endian word (de)serialization — so the
 // other Phase A primitives (sha1, sha384, chacha20, poly1305) call a
@@ -42,8 +42,9 @@ fn ct_eq_bytes(a: int[], b: int[]) -> bool {
 // Read a big-endian 32-bit word from bytes[off..off+4]. Caller guarantees
 // off+4 <= bytes.length. Result in [0, 2^32).
 fn load_u32_be(bytes: int[], off: int) -> int {
-    return ((bytes[off] << 24) | (bytes[off + 1] << 16) | (bytes[off + 2] << 8) | bytes[off
-        + 3]) & 4294967295;
+    return (((bytes[off] & 255) << 24) | ((bytes[off + 1] & 255) << 16) | ((bytes[off
+        + 2] & 255) << 8) | (bytes[off
+        + 3] & 255)) & 4294967295;
 }
 
 // Append the 4 big-endian bytes of the 32-bit word x to out (via out.push).
@@ -57,8 +58,8 @@ fn store_u32_be(out: int[], x: int) -> void {
 // Read a little-endian 32-bit word from bytes[off..off+4]. Caller guarantees
 // off+4 <= bytes.length. Result in [0, 2^32).
 fn load_u32_le(bytes: int[], off: int) -> int {
-    return (bytes[off] | (bytes[off + 1] << 8) | (bytes[off + 2] << 16) | (bytes[off
-        + 3] << 24)) & 4294967295;
+    return ((bytes[off] & 255) | ((bytes[off + 1] & 255) << 8) | ((bytes[off + 2] & 255) << 16) | ((bytes[off
+        + 3] & 255) << 24)) & 4294967295;
 }
 
 // Append the 4 little-endian bytes of the 32-bit word x to out (via

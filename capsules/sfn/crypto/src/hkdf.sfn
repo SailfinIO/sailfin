@@ -1,7 +1,7 @@
 // capsules/sfn/crypto/src/hkdf.sfn
 //
 // HKDF-SHA-256 (RFC 5869) for the sfn/crypto capsule — the TLS 1.3 key
-// schedule's key-derivation primitive (SFEP draft-native-crypto.md, Phase B).
+// schedule's key-derivation primitive (SFEP-0048, Phase B).
 // Operates end-to-end on `int[]` byte arrays (never `string`) because PRK
 // and expand-output blocks are arbitrary binary that routinely contain 0x00
 // bytes, which a Sailfin `string` cannot represent. Ships its own pure
@@ -214,12 +214,15 @@ fn hkdf_sha256_extract(salt: int[], ikm: int[]) -> int[] {
     return hmac_sha256_bytes(s, ikm);
 }
 
-// HKDF-Expand (RFC 5869 §2.3). prk is a >=32-byte int[]; info is an int[]
-// (may be empty); length is the desired output length in bytes (1..=8160 =
-// 255*32). Returns `length` output bytes as an int[]. Returns [] (empty) if
-// length is out of range (fail-closed).
+// HKDF-Expand (RFC 5869 §2.3). prk is a >=32-byte int[] (HashLen for
+// SHA-256); info is an int[] (may be empty); length is the desired output
+// length in bytes (1..=8160 = 255*32). Returns `length` output bytes as an
+// int[]. Returns [] (empty) if length is out of range or prk is shorter than
+// HashLen (fail-closed — a too-short PRK would silently yield a non-standard
+// derivation).
 fn hkdf_sha256_expand(prk: int[], info: int[], length: int) -> int[] {
     if length < 1 || length > 8160 { return []; }
+    if prk.length < 32 { return []; }
 
     let n: int = (length + 31) / 32;
     let mut t: int[] = [];

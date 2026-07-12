@@ -1,7 +1,7 @@
 ---
-sfep: TBD
+sfep: 0048
 title: Native crypto + TLS stack — removing the OpenSSL dependency
-status: Draft
+status: Accepted
 type: runtime
 created: 2026-07-12
 updated: 2026-07-12
@@ -12,7 +12,7 @@ superseded-by:
 graduates-to:
 ---
 
-# SFEP-XXXX — Native crypto + TLS stack — removing the OpenSSL dependency
+# SFEP-0048 — Native crypto + TLS stack — removing the OpenSSL dependency
 
 ## 1. Summary
 

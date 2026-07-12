@@ -14,7 +14,7 @@ export { hmac_sha256_bytes, hkdf_sha256_extract, hkdf_sha256_expand } from "./hk
 export { poly1305_mac } from "./poly1305";
 
 // Constant-time / masking helpers shared by the Phase A hash and cipher
-// primitives (SFEP draft-native-crypto.md §3.3-3.4).
+// primitives (SFEP-0048 §3.3-3.4).
 export {
     mask32,
     rotl32,

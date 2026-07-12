@@ -1,7 +1,7 @@
 // capsules/sfn/crypto/src/sha1.sfn
 //
 // SHA-1 (RFC 3174 / RFC 6234 §5) implemented in pure Sailfin. Same 32-bit-word
-// ARX shape as the shipped SHA-256 (SFEP draft-native-crypto.md): all
+// ARX shape as the shipped SHA-256 (SFEP-0048): all
 // arithmetic is masked to 32 bits after every operation, rotates go through
 // `bits::rotl32`. Used to compute the RFC 6455 WebSocket
 // `Sec-WebSocket-Accept` value (Phase D consumer).

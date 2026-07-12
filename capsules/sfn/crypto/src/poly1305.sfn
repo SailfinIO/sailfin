@@ -1,7 +1,7 @@
 // capsules/sfn/crypto/src/poly1305.sfn
 //
 // Poly1305 one-time message authentication code (RFC 8439 §2.5), the AEAD
-// tag primitive paired with ChaCha20 (SFEP draft-native-crypto.md §3.3 item
+// tag primitive paired with ChaCha20 (SFEP-0048 §3.3 item
 // 5). Implemented with the 5x26-bit limb schedule ("poly1305-donna 32") so
 // every intermediate product stays inside signed i64 without a native
 // unsigned 64-bit carry chain.

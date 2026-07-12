@@ -81,3 +81,10 @@ test "hkdf: expand rejects out-of-range length" {
     let empty: int[] = hkdf_sha256_expand(prk, info, 0);
     assert empty.length == 0;
 }
+
+test "hkdf: expand rejects a PRK shorter than HashLen" {
+    let short_prk: int[] = hexb("077709362c2e32df0ddc3f0dc47bba63");  // 16 bytes < 32
+    let info: int[] = [];
+    let empty: int[] = hkdf_sha256_expand(short_prk, info, 42);
+    assert empty.length == 0;
+}
