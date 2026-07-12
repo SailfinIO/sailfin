@@ -79,7 +79,16 @@ jobs:
           set -euo pipefail
           tar -xzf "build-tree-linux-x86_64.tar.gz"
           rm -f "build-tree-linux-x86_64.tar.gz"
-          touch build/bin/sfn
+          # Assert the binary survived the artifact round-trip executable
+          # rather than `touch`-ing it: cover runs no nested `make compile`,
+          # so the shard legs' mtime fix does not apply here, and creating an
+          # empty placeholder would only defer a missing-binary failure into a
+          # confusing exec error one step later.
+          if [ ! -x build/bin/sfn ]; then
+            echo "[shard-cover] build/bin/sfn missing or not executable in the shared compiler artifact" >&2
+            ls -l build/bin 2>/dev/null || true
+            exit 1
+          fi
           ls -lh build/bin/sfn
 
       - name: Assert shard map covers the full test surface
