@@ -1402,6 +1402,13 @@ fn parse_turbofish_call(state: ExpressionTokens, callee: Expression) -> Expressi
     let mut type_arguments: TypeAnnotation[] = [];
     let mut current_text: string = "";
     let mut angle_depth: int = 1;
+    // Non-angle delimiter depths so a comma nested inside a function-pointer
+    // (`fn(int, int) -> int`), tuple, array, or object type argument is not
+    // mistaken for a top-level type-argument separator (mirrors
+    // `split_token_slices_by_comma` in parser/token_utils.sfn).
+    let mut paren_depth: int = 0;
+    let mut brace_depth: int = 0;
+    let mut bracket_depth: int = 0;
     let mut guard: int = 0;
 
     loop {
@@ -1417,7 +1424,31 @@ fn parse_turbofish_call(state: ExpressionTokens, callee: Expression) -> Expressi
             continue;
         }
         let lx = tok.lexeme;
-        if strings_equal(lx, "<") {
+        if strings_equal(lx, "(") {
+            paren_depth += 1;
+            current_text = _cast_target_append(current_text, "(");
+            cursor = expression_tokens_advance(cursor);
+        } else if strings_equal(lx, ")") {
+            if paren_depth > 0 { paren_depth -= 1; }
+            current_text = _cast_target_append(current_text, ")");
+            cursor = expression_tokens_advance(cursor);
+        } else if strings_equal(lx, "{") {
+            brace_depth += 1;
+            current_text = _cast_target_append(current_text, "{");
+            cursor = expression_tokens_advance(cursor);
+        } else if strings_equal(lx, "}") {
+            if brace_depth > 0 { brace_depth -= 1; }
+            current_text = _cast_target_append(current_text, "}");
+            cursor = expression_tokens_advance(cursor);
+        } else if strings_equal(lx, "[") {
+            bracket_depth += 1;
+            current_text = _cast_target_append(current_text, "[");
+            cursor = expression_tokens_advance(cursor);
+        } else if strings_equal(lx, "]") {
+            if bracket_depth > 0 { bracket_depth -= 1; }
+            current_text = _cast_target_append(current_text, "]");
+            cursor = expression_tokens_advance(cursor);
+        } else if strings_equal(lx, "<") {
             angle_depth += 1;
             current_text = _cast_target_append(current_text, "<");
             cursor = expression_tokens_advance(cursor);
@@ -1448,7 +1479,9 @@ fn parse_turbofish_call(state: ExpressionTokens, callee: Expression) -> Expressi
             current_text = _cast_target_append(current_text, ">");
             cursor = expression_tokens_advance(cursor);
         } else if strings_equal(lx, ",") {
-            if angle_depth == 1 {
+            let top_level = angle_depth == 1 && paren_depth == 0 && brace_depth == 0
+                && bracket_depth == 0;
+            if top_level {
                 type_arguments.push(TypeAnnotation { text: current_text });
                 current_text = "";
                 cursor = expression_tokens_advance(cursor);

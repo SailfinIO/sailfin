@@ -60,6 +60,18 @@ test "turbofish: multiple type arguments split at the top-level comma" ![io] {
 }
 
 // -------------------------------------------------------------------
+// A comma nested inside a function-pointer type argument does not split
+// the type-argument list: `apply<fn(int, int) -> int>(f)` is one type
+// argument, not two (only top-level commas separate type arguments).
+// -------------------------------------------------------------------
+test "turbofish: comma inside a fn-pointer type argument does not split the list" ![io] {
+    let init = first_initializer("let x = apply<fn(int, int) -> int>(f);");
+    assert init.variant == "Call";
+    assert init.type_arguments.length == 1;
+    assert init.arguments.length == 1;
+}
+
+// -------------------------------------------------------------------
 // A nested generic type argument closes with `>>`: `wrap<Box<int>>(v)`
 // deglues the double-close into one inner `>` (kept in the argument text)
 // plus the list terminator, yielding a single type argument.
