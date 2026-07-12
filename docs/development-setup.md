@@ -194,7 +194,7 @@ environment variables for shell-wide behavior.
 | `PREFIX`, `BINDIR`, `INSTALL_NAME`, `DESTDIR` | `make install` | `~/.local`, `$(PREFIX)/bin`, `sfn`, empty | Installation path/name controls. |
 | `BENCH_ARGS` | `make bench` | empty | Extra args for compiler compile-time benchmarks. |
 | `BENCH_RUNTIME_ARGS` | `make bench-runtime` | empty | Extra args for runtime execution benchmarks. |
-| `ARENA_ARGS` | `make test-arena` | empty | Inputs/options for the arena IR identity harness. |
+| `ARENA_ARGS` | `make test-arena` | empty | Args forwarded to the native arena IR gate (`sfn dev arena`), e.g. `--all` or a module path. |
 | `KEEP_SEED=0` | `make clean-build` | keep seed | Also removes `build/toolchains/` during cleanup. |
 | `MINGW_CC` | `make ci-cross-windows` | `x86_64-w64-mingw32-gcc` | Windows cross-link compiler from Linux. |
 

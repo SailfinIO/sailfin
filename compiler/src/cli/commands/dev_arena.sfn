@@ -1,0 +1,276 @@
+// compiler/src/cli/commands/dev_arena.sfn
+//
+// `sfn dev arena ...` — the compiler-maintainer arena/no-arena LLVM IR
+// equivalence gate (SFN-201). Owns the Phase 0 arena correctness gate
+// natively, retiring scripts/test_arena.sh so `sfn` — not a bash helper —
+// is the single source of truth for the check that survives the Makefile's
+// retirement (SFN-60). Each module is emitted twice through the same
+// `sfn emit llvm` path, once with `SAILFIN_USE_ARENA=0` (malloc /
+// owned-string-hash path) and once with `SAILFIN_USE_ARENA=1` (arena on),
+// and the two `.ll` outputs are compared byte-for-byte: any divergence
+// means the arena allocator is corrupting compiler output.
+//
+//   sfn dev arena                     check examples/basics/hello-world.sfn
+//   sfn dev arena --all               check every examples/basics/*.sfn
+//   sfn dev arena examples/basics/functions.sfn ...   check the named files
+import {
+    Command,
+    Matches,
+    arg_variadic,
+    command,
+    flag,
+    has_flag,
+    positionals,
+    with_arg,
+    with_flag
+} from "sfn/cli";
+
+import { _collect_sfn_files_cmd } from "../../build/fs";
+import { _ensure_dir, _resolve_self_path } from "../../build/paths";
+import { number_to_string } from "../../num_format";
+import { _sort_strings_cmd } from "../../string_cmd_utils";
+import {
+    char_code_at_text,
+    starts_with,
+    strings_equal,
+    substring
+} from "../../string_utils";
+import { CliContext } from "../context";
+
+// Where the two emitted `.ll` files land, one pair per module. Mirrors the
+// script's default WORK_DIR so a developer's muscle memory (and any stray
+// gitignore entry) still points at the same tree.
+fn _arena_work_dir() -> string { return "build/arena-test"; }
+
+// The default single-module coverage the bare command reproduces (the
+// script's no-arg case).
+fn _arena_default_module() -> string {
+    return "examples/basics/hello-world.sfn";
+}
+
+// A filesystem-safe slug for a source path so siblings with the same
+// basename don't collide in the work dir: strip a leading `./` and the
+// `.sfn` suffix, flatten `/` to `__`, and replace any other non
+// `[A-Za-z0-9._-]` byte with `_`. Mirrors the script's
+// `module_slug_from_path`.
+fn _arena_slug(src: string) -> string {
+    let mut s = src;
+    if starts_with(s, "./") { s = substring(s, 2, s.length); }
+    if s.length >= 4 && strings_equal(substring(s, s.length - 4, s.length), ".sfn") {
+        s = substring(s, 0, s.length - 4);
+    }
+    let mut out = "";
+    let mut i = 0;
+    loop {
+        if i >= s.length { break; }
+        let ch = s[i];
+        if strings_equal(ch, "/") { out = out + "__"; } else {
+            let code = char_code_at_text(s, i);
+            let is_alnum = (code >= 48 && code <= 57) || (code >= 65 && code <= 90)
+                || (code >= 97
+                && code <= 122);
+            let is_ok = is_alnum || strings_equal(ch, ".") || strings_equal(ch, "_")
+                || strings_equal(ch, "-");
+            if is_ok { out = out + ch; } else { out = out + "_"; }
+        }
+        i += 1;
+    }
+    return out;
+}
+
+// Child env for one emit: a clean, predictable environment (PATH/HOME/TMPDIR
+// so the emit path's helpers resolve, SAILFIN_TEST_SCRATCH so any capsule
+// import staging stays per-invocation under the parallel test pool) plus the
+// arena toggle under test. Building the env explicitly — rather than
+// inheriting and appending — avoids a second `SAILFIN_USE_ARENA` shadowing an
+// inherited one.
+fn _arena_child_env(arena: string) -> string[] ![io] {
+    let mut e: string[] = [];
+    let path = env.get("PATH");
+    if path.length > 0 { e.push("PATH=" + path); }
+    let home = env.get("HOME");
+    if home.length > 0 { e.push("HOME=" + home); }
+    let tmpdir = env.get("TMPDIR");
+    if tmpdir.length > 0 { e.push("TMPDIR=" + tmpdir); }
+    let scratch = env.get("SAILFIN_TEST_SCRATCH");
+    if scratch.length > 0 { e.push("SAILFIN_TEST_SCRATCH=" + scratch); }
+    e.push("SAILFIN_USE_ARENA=" + arena);
+    return e;
+}
+
+// First byte index at which `a` and `b` differ, or -1 when identical. A
+// strict-prefix relationship reports the shorter length as the divergence
+// point.
+fn _first_diff_index(a: string, b: string) -> int {
+    let mut n = a.length;
+    if b.length < n { n = b.length; }
+    let mut i = 0;
+    loop {
+        if i >= n { break; }
+        if !strings_equal(a[i], b[i]) { return i; }
+        i += 1;
+    }
+    if a.length != b.length { return n; }
+    return -1;
+}
+
+// 1-based line number of the line containing byte index `pos`.
+fn _line_number_at(s: string, pos: int) -> int {
+    let mut line = 1;
+    let mut i = 0;
+    loop {
+        if i >= pos { break; }
+        if i >= s.length { break; }
+        if strings_equal(s[i], "\n") { line += 1; }
+        i += 1;
+    }
+    return line;
+}
+
+// The line (without its trailing newline) containing byte index `pos`.
+fn _line_at(s: string, pos: int) -> string {
+    let mut start = pos;
+    if start > s.length { start = s.length; }
+    loop {
+        if start <= 0 { break; }
+        if strings_equal(s[start - 1], "\n") { break; }
+        start -= 1;
+    }
+    let mut endp = pos;
+    if endp < start { endp = start; }
+    loop {
+        if endp >= s.length { break; }
+        if strings_equal(s[endp], "\n") { break; }
+        endp += 1;
+    }
+    return substring(s, start, endp);
+}
+
+// Emit `src` twice (arena off, then on) and compare the two `.ll` outputs.
+// Returns true on identical IR (PASS), false on any emit failure, empty
+// output, or divergence (FAIL) — printing a diagnostic that names the file
+// and, on divergence, the line where the two arena modes disagree.
+fn _arena_check_module(self_bin: string, src: string) -> boolean ![io] {
+    if !fs.exists(src) {
+        print("[arena] FAIL: source not found: " + src);
+        return false;
+    }
+    let work_dir = _arena_work_dir();
+    let slug = _arena_slug(src);
+    let no_ll = work_dir + "/" + slug + ".no_arena.ll";
+    let yes_ll = work_dir + "/" + slug + ".with_arena.ll";
+
+    if fs.exists(no_ll) { fs.deleteFile(no_ll); }
+    let no_exit = process.run_capture([self_bin, "emit", "-o", no_ll, "llvm", src], _arena_child_env("0"));
+    let _no_out = process.capture_take_stdout();
+    let no_err = process.capture_take_stderr();
+    if no_exit != 0 {
+        print("[arena] FAIL (SAILFIN_USE_ARENA=0 emit failed): " + src);
+        if no_err.length > 0 { print.err(no_err); }
+        return false;
+    }
+
+    if fs.exists(yes_ll) { fs.deleteFile(yes_ll); }
+    let yes_exit = process.run_capture([self_bin, "emit", "-o", yes_ll, "llvm", src], _arena_child_env("1"));
+    let _yes_out = process.capture_take_stdout();
+    let yes_err = process.capture_take_stderr();
+    if yes_exit != 0 {
+        print("[arena] FAIL (SAILFIN_USE_ARENA=1 emit failed): " + src);
+        if yes_err.length > 0 { print.err(yes_err); }
+        return false;
+    }
+
+    let no_content = fs.readFile(no_ll);
+    let yes_content = fs.readFile(yes_ll);
+    if no_content.length == 0 {
+        print("[arena] FAIL: SAILFIN_USE_ARENA=0 output empty/missing for "
+            + src);
+        return false;
+    }
+    if yes_content.length == 0 {
+        print("[arena] FAIL: SAILFIN_USE_ARENA=1 output empty/missing for "
+            + src);
+        return false;
+    }
+
+    if strings_equal(no_content, yes_content) {
+        print("[arena] PASS: " + src + " (" + number_to_string(no_content.length)
+            + " bytes identical)");
+        return true;
+    }
+
+    let idx = _first_diff_index(no_content, yes_content);
+    print("[arena] FAIL: " + src
+        + " LLVM IR differs with/without SAILFIN_USE_ARENA");
+    print("[arena]   SAILFIN_USE_ARENA=0: " + no_ll);
+    print("[arena]   SAILFIN_USE_ARENA=1: " + yes_ll);
+    if idx >= 0 {
+        print("[arena]   first divergence at line " + number_to_string(_line_number_at(no_content, idx))
+            + ":");
+        print("[arena]     [arena=0] " + _line_at(no_content, idx));
+        print("[arena]     [arena=1] " + _line_at(yes_content, idx));
+    }
+    return false;
+}
+
+// Resolve the module set to check: explicit positionals win; else `--all`
+// expands to every `examples/basics/*.sfn` (sorted for determinism); else the
+// single default module.
+fn _arena_modules(matches: Matches) -> string[] ![io] {
+    let explicit = positionals(matches, "module");
+    if explicit.length > 0 { return explicit; }
+    if has_flag(matches, "all") {
+        return _sort_strings_cmd(_collect_sfn_files_cmd("examples/basics", 1));
+    }
+    return [_arena_default_module()];
+}
+
+// `sfn dev arena [--all] [<module>...]` — run the equivalence gate across the
+// resolved module set. Exit 0 when every module's IR is arena-invariant, 1 on
+// any failure (matching the script's `exit $(( fail > 0 ))`).
+fn arena_run(matches: Matches, ctx: CliContext) -> int ![io] {
+    let self_bin = _resolve_self_path(ctx.binary_dir);
+    if self_bin.length == 0 {
+        print.err("[arena] error: could not resolve the running compiler binary");
+        print.err("[arena] hint: run 'sfn dev bootstrap build' (or 'make compile') first");
+        return 1;
+    }
+
+    let modules = _arena_modules(matches);
+    _ensure_dir(_arena_work_dir());
+
+    print("[arena] seed: " + self_bin);
+    print("[arena] modules: " + number_to_string(modules.length));
+    print("");
+
+    let mut pass = 0;
+    let mut fail = 0;
+    let mut i = 0;
+    loop {
+        if i >= modules.length { break; }
+        if _arena_check_module(self_bin, modules[i]) { pass += 1; } else {
+            fail += 1;
+        }
+        i += 1;
+    }
+
+    print("");
+    print("[arena] summary: " + number_to_string(pass) + " passed, "
+        + number_to_string(fail)
+        + " failed (of "
+        + number_to_string(modules.length)
+        + ")");
+    if fail > 0 { return 1; }
+    return 0;
+}
+
+// The `sfn/cli` definition for the `arena` group nested under `dev`. A single
+// action (no leaves): a `--all` flag plus a variadic `<module>` positional.
+fn arena_command_def() -> Command {
+    let mut arena: Command = command("arena", "Arena/no-arena LLVM IR equivalence gate (retires scripts/test_arena.sh)");
+    arena = with_flag(arena, flag("all", "Check every examples/basics/*.sfn (default: hello-world.sfn)"));
+    arena = with_arg(arena, arg_variadic("module", "One or more .sfn source files to check (default: examples/basics/hello-world.sfn)"));
+    return arena;
+}
+
+export { arena_command_def, arena_run };

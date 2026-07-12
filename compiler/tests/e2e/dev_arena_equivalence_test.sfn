@@ -1,0 +1,61 @@
+// E2E test for `sfn dev arena` — the native arena/no-arena LLVM IR
+// equivalence gate (SFN-201, the native replacement for the retired
+// scripts/test_arena.sh). Drives the built binary against the in-tree
+// examples/basics set and asserts the gate reports arena-invariant IR.
+//
+// `sfn dev arena` spawns two `sfn emit llvm` children per module, one under
+// SAILFIN_USE_ARENA=0 and one under =1, and diffs their output. The outer
+// process forwards PATH/HOME/TMPDIR/SAILFIN_TEST_SCRATCH into those children,
+// so the test must put them in the outer child env (an empty `run_capture`
+// env is the *empty* environment, not "inherit"). The PASS / summary lines
+// land on stdout; the `expect_*` matchers are `![pure]` and unusable from an
+// `![io]` test, so output is asserted with `sfn/strings::find`.
+import { find } from "sfn/strings";
+
+fn _sfn_bin() -> string ![io] {
+    let configured = env.get("SAILFIN_BIN");
+    if configured.length > 0 { return configured; }
+    return "build/bin/sfn";
+}
+
+fn _arena_env() -> string[] ![io] {
+    let mut e: string[] = [];
+    let path = env.get("PATH");
+    if path.length > 0 { e.push("PATH=" + path); }
+    let home = env.get("HOME");
+    if home.length > 0 { e.push("HOME=" + home); }
+    let tmpdir = env.get("TMPDIR");
+    if tmpdir.length > 0 { e.push("TMPDIR=" + tmpdir); }
+    let scratch = env.get("SAILFIN_TEST_SCRATCH");
+    if scratch.length > 0 { e.push("SAILFIN_TEST_SCRATCH=" + scratch); }
+    return e;
+}
+
+test "dev arena: default coverage passes on hello-world" ![io] {
+    let exit = process.run_capture([_sfn_bin(), "dev", "arena"], _arena_env());
+    let out = process.capture_take_stdout();
+    let _err = process.capture_take_stderr();
+    assert exit == 0;
+    assert find(out, "[arena] PASS: examples/basics/hello-world.sfn", 0) >= 0;
+    assert find(out, "0 failed", 0) >= 0;
+}
+
+test "dev arena: --all covers the examples/basics set with identical IR" ![io] {
+    let exit = process.run_capture([_sfn_bin(), "dev", "arena", "--all"], _arena_env());
+    let out = process.capture_take_stdout();
+    let _err = process.capture_take_stderr();
+    assert exit == 0;
+    // The expanded set is more than one module and every one is arena-invariant.
+    assert find(out, "[arena] modules:", 0) >= 0;
+    assert find(out, "[arena] PASS: examples/basics/", 0) >= 0;
+    assert find(out, "0 failed", 0) >= 0;
+}
+
+test "dev arena: an explicit module argument is checked" ![io] {
+    let exit = process.run_capture([_sfn_bin(), "dev", "arena", "examples/basics/hello-world.sfn"], _arena_env());
+    let out = process.capture_take_stdout();
+    let _err = process.capture_take_stderr();
+    assert exit == 0;
+    assert find(out, "[arena] modules: 1", 0) >= 0;
+    assert find(out, "[arena] PASS: examples/basics/hello-world.sfn", 0) >= 0;
+}
