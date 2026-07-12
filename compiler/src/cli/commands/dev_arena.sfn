@@ -37,10 +37,17 @@ import {
 } from "../../string_utils";
 import { CliContext } from "../context";
 
-// Where the two emitted `.ll` files land, one pair per module. Mirrors the
-// script's default WORK_DIR so a developer's muscle memory (and any stray
-// gitignore entry) still points at the same tree.
-fn _arena_work_dir() -> string { return "build/arena-test"; }
+// Where the two emitted `.ll` files land, one pair per module. Rooted under
+// `SAILFIN_TEST_SCRATCH` when set so parallel `sfn test --jobs N` children
+// (which the runner isolates via that scratch) never clobber each other's
+// outputs; otherwise the script's default `build/arena-test`, so a
+// developer's muscle memory (and any stray gitignore entry) still points at
+// the same tree.
+fn _arena_work_dir() -> string ![io] {
+    let scratch = env.get("SAILFIN_TEST_SCRATCH");
+    if scratch.length > 0 { return scratch + "/arena-test"; }
+    return "build/arena-test";
+}
 
 // The default single-module coverage the bare command reproduces (the
 // script's no-arg case).
