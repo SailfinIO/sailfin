@@ -716,7 +716,7 @@ check-determinism:
 		exit 1; \
 	fi
 	@echo "[check-determinism] running determinism sweep (jobs=$(CHECK_DET_JOBS) iters=$(CHECK_DET_ITERS))..."
-	@bash scripts/diag_determinism_sweep.sh --seed "$(NATIVE_BIN)" --jobs $(CHECK_DET_JOBS) --iters $(CHECK_DET_ITERS)
+	@$(NATIVE_BIN) dev determinism-sweep --seed "$(NATIVE_BIN)" --jobs $(CHECK_DET_JOBS) --iters $(CHECK_DET_ITERS)
 
 # =============================================================================
 # Packaging (release artifacts)

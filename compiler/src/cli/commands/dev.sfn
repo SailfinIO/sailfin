@@ -42,6 +42,7 @@ import { starts_with, strings_equal, substring } from "../../string_utils";
 import { _strip_build_metadata, resolve_compiler_version } from "../../version";
 import { CliContext } from "../context";
 import { arena_command_def, arena_run } from "./dev_arena";
+import { det_sweep_command_def, det_sweep_run } from "./dev_det_sweep";
 import { shard_command_def, shard_run } from "./dev_shard";
 import { toolchain_install_to_base } from "./toolchain";
 
@@ -374,6 +375,7 @@ fn command_def() -> Command {
     let mut dev: Command = with_subcommand(command("dev", "Compiler/toolchain maintainer commands"), bootstrap);
     dev = with_subcommand(dev, shard_command_def());
     dev = with_subcommand(dev, arena_command_def());
+    dev = with_subcommand(dev, det_sweep_command_def());
     return dev;
 }
 
@@ -393,6 +395,13 @@ fn run(matches: Matches, ctx: CliContext) -> int ![clock, io, net] {
     // distinguishes it from the `bootstrap` leaves dispatched below.
     if path.length >= 2 && strings_equal(path[1], "arena") {
         return arena_run(matches, ctx);
+    }
+    // `sfn dev determinism-sweep [--seed …] [--jobs N] [--iters N] [--out DIR]
+    // [path…]` routes to the emit-hashing determinism harness (SFN-202); the
+    // descent path's second element (`["dev", "determinism-sweep"]`)
+    // distinguishes it from the `bootstrap` leaves dispatched below.
+    if path.length >= 2 && strings_equal(path[1], "determinism-sweep") {
+        return det_sweep_run(matches, ctx);
     }
     let sub: string = subcommand(matches);
     if strings_equal(sub, "fetch") { return _dev_bootstrap_fetch(); }

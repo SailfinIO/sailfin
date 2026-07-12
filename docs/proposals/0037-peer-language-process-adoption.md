@@ -73,7 +73,7 @@ handling stopped scaling:
 - **No reduction, no fuzzing, no bisection.** Agents hand-minimize failing
   repros (burning orchestrator-tier tokens on labor `llvm-reduce`/C-Reduce do
   deterministically), nothing fuzzes the parser/formatter (the closest tools
-  are `diag_determinism_sweep.sh` and `test_arena.sh`, which are differential
+  are `sfn dev determinism-sweep` and `test_arena.sh`, which are differential
   in spirit but not generative), and nothing walks the dense released-seed
   history to find a first-bad seed the way `cargo-bisect-rustc` walks
   nightlies.
