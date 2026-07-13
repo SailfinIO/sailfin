@@ -25,9 +25,10 @@ fn _get_home_cmd() -> string ![io] { return _get_env_cmd("HOME"); }
 // `.dump_test_sources`) raced when a parent compiler spawned a
 // child for runtime-module emit — the child inherited the parent's
 // cwd and silently picked up parent-toggled flags. Env vars
-// inherit by default but the parent can clear them per-spawn with
-// `sh -c "SAILFIN_X= <self> ..."`. See `_compile_runtime_sfn_sources`
-// in `cli_main.sfn` for the producer side. `_legacy_flag_file`
+// inherit by default but the parent clears them per-spawn by passing
+// an explicit `run_capture` child env that drops these keys
+// (`_runtime_emit_child_env`, SFN-50). See that helper in
+// `build/runtime_objs.sfn` for the producer side. `_legacy_flag_file`
 // preserves one release of back-compat for scripts that still
 // `touch build/sailfin/.foo`; drop in the next release.
 fn _env_flag(name: string) -> boolean ![io] {
