@@ -1311,6 +1311,12 @@ fn parse_postfix_chain(state: ExpressionTokens, expression: Expression) -> Expre
                     current_expression = turbofish.expression;
                     continue;
                 }
+                let generic_struct = parse_generic_struct_literal(current_state, current_expression);
+                if generic_struct.success {
+                    current_state = generic_struct.state;
+                    current_expression = generic_struct.expression;
+                    continue;
+                }
             }
             break;
         }
@@ -1525,6 +1531,143 @@ fn parse_turbofish_call(state: ExpressionTokens, callee: Expression) -> Expressi
             arguments: call_result.arguments,
             span: null,
             type_arguments: type_arguments
+        },
+        success: true
+    };
+}
+
+fn format_type_argument_list(type_arguments: TypeAnnotation[]) -> string {
+    let mut text: string = "<";
+    let mut index: int = 0;
+    loop {
+        if index >= type_arguments.length { break; }
+        if index > 0 { text = text + ", "; }
+        text = text + type_arguments[index].text;
+        index += 1;
+    }
+    return text + ">";
+}
+
+// `state` is positioned at the `<` after an identifier. This mirrors
+// `parse_turbofish_call`, but commits only when a struct literal `{...}`
+// immediately follows the balanced type-argument list. Otherwise it leaves
+// `<` for the precedence climb so comparison parsing remains unchanged.
+fn parse_generic_struct_literal(state: ExpressionTokens, target: Expression) -> ExpressionParseResult {
+    if target.variant != "Identifier" {
+        return expression_parse_failure(state);
+    }
+
+    let mut cursor = expression_tokens_advance(state);
+    let mut type_arguments: TypeAnnotation[] = [];
+    let mut current_text: string = "";
+    let mut angle_depth: int = 1;
+    let mut paren_depth: int = 0;
+    let mut brace_depth: int = 0;
+    let mut bracket_depth: int = 0;
+    let mut guard: int = 0;
+
+    loop {
+        guard += 1;
+        if guard > 100000 { return expression_parse_failure(state); }
+        if expression_tokens_is_at_end(cursor) {
+            return expression_parse_failure(state);
+        }
+        let tok = expression_tokens_peek(cursor);
+        if tok.kind.variant != "Symbol" {
+            current_text = _cast_target_append(current_text, tok.lexeme);
+            cursor = expression_tokens_advance(cursor);
+            continue;
+        }
+        let lx = tok.lexeme;
+        if strings_equal(lx, "(") {
+            paren_depth += 1;
+            current_text = _cast_target_append(current_text, "(");
+            cursor = expression_tokens_advance(cursor);
+        } else if strings_equal(lx, ")") {
+            if paren_depth > 0 { paren_depth -= 1; }
+            current_text = _cast_target_append(current_text, ")");
+            cursor = expression_tokens_advance(cursor);
+        } else if strings_equal(lx, "{") {
+            brace_depth += 1;
+            current_text = _cast_target_append(current_text, "{");
+            cursor = expression_tokens_advance(cursor);
+        } else if strings_equal(lx, "}") {
+            if brace_depth > 0 { brace_depth -= 1; }
+            current_text = _cast_target_append(current_text, "}");
+            cursor = expression_tokens_advance(cursor);
+        } else if strings_equal(lx, "[") {
+            bracket_depth += 1;
+            current_text = _cast_target_append(current_text, "[");
+            cursor = expression_tokens_advance(cursor);
+        } else if strings_equal(lx, "]") {
+            if bracket_depth > 0 { bracket_depth -= 1; }
+            current_text = _cast_target_append(current_text, "]");
+            cursor = expression_tokens_advance(cursor);
+        } else if strings_equal(lx, "<") {
+            angle_depth += 1;
+            current_text = _cast_target_append(current_text, "<");
+            cursor = expression_tokens_advance(cursor);
+        } else if strings_equal(lx, ">>") {
+            if angle_depth == 2 {
+                current_text = _cast_target_append(current_text, ">");
+                cursor = expression_tokens_advance(cursor);
+                angle_depth = 0;
+                break;
+            }
+            if angle_depth > 2 {
+                angle_depth -= 2;
+                current_text = _cast_target_append(current_text, ">>");
+                cursor = expression_tokens_advance(cursor);
+            } else { return expression_parse_failure(state); }
+        } else if strings_equal(lx, ">") {
+            angle_depth -= 1;
+            if angle_depth == 0 {
+                cursor = expression_tokens_advance(cursor);
+                break;
+            }
+            current_text = _cast_target_append(current_text, ">");
+            cursor = expression_tokens_advance(cursor);
+        } else if strings_equal(lx, ",") {
+            let top_level = angle_depth == 1 && paren_depth == 0 && brace_depth == 0
+                && bracket_depth == 0;
+            if top_level {
+                type_arguments.push(TypeAnnotation { text: current_text });
+                current_text = "";
+                cursor = expression_tokens_advance(cursor);
+            } else {
+                current_text = _cast_target_append(current_text, ",");
+                cursor = expression_tokens_advance(cursor);
+            }
+        } else {
+            current_text = _cast_target_append(current_text, lx);
+            cursor = expression_tokens_advance(cursor);
+        }
+    }
+
+    if current_text.length > 0 {
+        type_arguments.push(TypeAnnotation { text: current_text });
+    }
+    if type_arguments.length == 0 { return expression_parse_failure(state); }
+
+    if expression_tokens_is_at_end(cursor) {
+        return expression_parse_failure(state);
+    }
+    let brace = expression_tokens_peek(cursor);
+    if brace.kind.variant != "Symbol" {
+        return expression_parse_failure(state);
+    }
+    if !strings_equal(brace.lexeme, "{") {
+        return expression_parse_failure(state);
+    }
+
+    let fields_result = parse_object_literal(expression_tokens_advance(cursor));
+    if !fields_result.success { return expression_parse_failure(state); }
+
+    return ExpressionParseResult {
+        state: fields_result.state,
+        expression: Expression.Struct {
+            type_name: [target.name + format_type_argument_list(type_arguments)],
+            fields: fields_result.fields
         },
         success: true
     };
