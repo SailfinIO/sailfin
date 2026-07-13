@@ -1,0 +1,139 @@
+// capsules/sfn/crypto/tests/aead_chacha20poly1305_test.sfn
+//
+// Regression coverage for the sfn/crypto ChaCha20-Poly1305 AEAD: the
+// RFC 8439 §2.8.2 seal known-answer vector, the matching open round-trip, and
+// tamper-detection (a flipped ciphertext byte, a flipped AAD byte, and a
+// truncated input must all fail closed).
+import { chacha20poly1305_seal, chacha20poly1305_open } from "../src/aead_chacha20poly1305";
+
+fn hexb(s: string) -> int[] {
+    let mut out: int[] = [];
+    let mut i: int = 0;
+    loop {
+        if i >= s.length { break; }
+        let hi: int = _hexval(s[i]);
+        let lo: int = _hexval(s[i + 1]);
+        out.push(((hi << 4) | lo) & 255);
+        i += 2;
+    }
+    return out;
+}
+
+fn _hexval(c: string) -> int {
+    let code: int = char_code(c) & 255;
+    if code >= 48 && code <= 57 {
+        return code - 48;
+    }  // '0'-'9'
+    if code >= 97 && code <= 102 {
+        return code - 97 + 10;
+    }  // 'a'-'f'
+    return 0;
+}
+
+fn eq_bytes(a: int[], b: int[]) -> bool {
+    if a.length != b.length { return false; }
+    let mut i: int = 0;
+    loop {
+        if i >= a.length { break; }
+        if a[i] != b[i] { return false; }
+        i += 1;
+    }
+    return true;
+}
+
+// The RFC 8439 §2.8.2 test-vector inputs, shared across the seal/open tests.
+fn _rfc_key() -> int[] {
+    return hexb("808182838485868788898a8b8c8d8e8f909192939495969798999a9b9c9d9e9f");
+}
+
+fn _rfc_nonce() -> int[] { return hexb("070000004041424344454647"); }
+
+fn _rfc_aad() -> int[] { return hexb("50515253c0c1c2c3c4c5c6c7"); }
+
+fn _rfc_plaintext() -> int[] {
+    // "Ladies and Gentlemen of the class of '99: If I could offer you only
+    //  one tip for the future, sunscreen would be it." (114 bytes)
+    return hexb("4c616469657320616e642047656e746c656d656e206f662074686520636c617373206f66202739393a204966204920636f756c64206f6666657220796f75206f6e6c79206f6e652074697020666f7220746865206675747572652c2073756e73637265656e20776f756c642062652069742e");
+}
+
+fn _rfc_ciphertext_with_tag() -> int[] {
+    // §2.8.2 ciphertext (114 bytes) ‖ tag (16 bytes).
+    return hexb("d31a8d34648e60db7b86afbc53ef7ec2a4aded51296e08fea9e2b5a736ee62d63dbea45e8ca9671282fafb69da92728b1a71de0a9e060b2905d6a5b67ecd3b3692ddbd7f2d778b8c9803aee328091b58fab324e4fad675945585808b4831d7bc3ff4def08e4b7a9de576d26586cec64b61161ae10b594f09e26a7e902ecbd0600691");
+}
+
+test "chacha20poly1305: RFC 8439 §2.8.2 seal vector" {
+    let out: int[] = chacha20poly1305_seal(_rfc_key(), _rfc_nonce(), _rfc_aad(), _rfc_plaintext());
+    // 114 ciphertext bytes + 16 tag bytes.
+    assert out.length == 130;
+    assert eq_bytes(out, _rfc_ciphertext_with_tag());
+}
+
+test "chacha20poly1305: open round-trips the §2.8.2 vector" {
+    let opened: Result<int[], string> = chacha20poly1305_open(_rfc_key(), _rfc_nonce(), _rfc_aad(), _rfc_ciphertext_with_tag());
+    match opened {
+        Result.Ok { value } => {
+            assert eq_bytes(value, _rfc_plaintext());
+        },
+        Result.Err { error } => { assert false; }
+    }
+}
+
+test "chacha20poly1305: open rejects a flipped ciphertext byte" {
+    let mut ct: int[] = _rfc_ciphertext_with_tag();
+    ct[0] = ct[0] ^ 1;  // flip one ciphertext bit
+    let opened: Result<int[], string> = chacha20poly1305_open(_rfc_key(), _rfc_nonce(), _rfc_aad(), ct);
+    match opened {
+        Result.Ok { value } => { assert false; },
+        Result.Err { error } => { assert true; }
+    }
+}
+
+test "chacha20poly1305: open rejects a flipped tag byte" {
+    let mut ct: int[] = _rfc_ciphertext_with_tag();
+    let last: int = ct.length - 1;
+    ct[last] = ct[last] ^ 128;  // flip one tag bit
+    let opened: Result<int[], string> = chacha20poly1305_open(_rfc_key(), _rfc_nonce(), _rfc_aad(), ct);
+    match opened {
+        Result.Ok { value } => { assert false; },
+        Result.Err { error } => { assert true; }
+    }
+}
+
+test "chacha20poly1305: open rejects tampered AAD" {
+    let mut aad: int[] = _rfc_aad();
+    aad[0] = aad[0] ^ 1;
+    let opened: Result<int[], string> = chacha20poly1305_open(_rfc_key(), _rfc_nonce(), aad, _rfc_ciphertext_with_tag());
+    match opened {
+        Result.Ok { value } => { assert false; },
+        Result.Err { error } => { assert true; }
+    }
+}
+
+test "chacha20poly1305: open rejects input shorter than the tag" {
+    let short: int[] = [1, 2, 3, 4, 5];
+    let opened: Result<int[], string> = chacha20poly1305_open(_rfc_key(), _rfc_nonce(), _rfc_aad(), short);
+    match opened {
+        Result.Ok { value } => { assert false; },
+        Result.Err { error } => { assert true; }
+    }
+}
+
+test "chacha20poly1305: seal/open round-trip with empty AAD and plaintext" {
+    let key: int[] = _rfc_key();
+    let nonce: int[] = _rfc_nonce();
+    let aad: int[] = [];
+    let plaintext: int[] = [];
+    let sealed: int[] = chacha20poly1305_seal(key, nonce, aad, plaintext);
+    // Empty plaintext → ciphertext is empty, so the output is the 16-byte tag.
+    assert sealed.length == 16;
+    let opened: Result<int[], string> = chacha20poly1305_open(key, nonce, aad, sealed);
+    match opened {
+        Result.Ok { value } => { assert value.length == 0; },
+        Result.Err { error } => { assert false; }
+    }
+}
+
+test "chacha20poly1305: seal rejects a bad key length" {
+    let out: int[] = chacha20poly1305_seal([1, 2, 3], _rfc_nonce(), _rfc_aad(), _rfc_plaintext());
+    assert out.length == 0;
+}

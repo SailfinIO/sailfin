@@ -28,6 +28,8 @@ export {
 
 export { chacha20_block, chacha20_xor } from "./chacha20";
 
+export { chacha20poly1305_seal, chacha20poly1305_open } from "./aead_chacha20poly1305";
+
 // ── OpenSSL HMAC-SHA256 surface (libcrypto) ──────────────────────
 // OpenSSL is already linked for the native TLS runtime (`-lcrypto`). The
 // externs carry no effect surface; `hmac_sha256` is deterministic pure
