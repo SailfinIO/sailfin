@@ -1,28 +1,28 @@
-// Regression: concurrent cold builds must not race on the runtime
-// object cache-key tmp file.
+// Concurrent cold-build smoke test for the runtime object cache.
 //
-// Root cause (the macOS nightly self-host check, roaming build-and-run
-// failures): `_sha256_of_string` (compiler/src/build_cache.sfn) hashed
-// the runtime object cache key by writing to a SINGLE fixed tmp path
-// `/tmp/.sfn_build_cache_hash_<suffix>` and then `rm -f`-ing it. The
+// History (the macOS nightly self-host check, roaming build-and-run
+// failures): `_sha256_of_string` (compiler/src/build_cache.sfn) once
+// hashed the runtime object cache key by writing to a SINGLE fixed tmp
+// path `/tmp/.sfn_build_cache_hash_<suffix>` and then `rm -f`-ing it. The
 // `<suffix>` (`cap_prefix + basename + opt_flag`, e.g.
-// `sfn__runtime-native__prelude_sfn-O2`) is IDENTICAL across concurrent
+// `sfn__runtime-native__prelude_sfn-O2`) was IDENTICAL across concurrent
 // builds of the same runtime source, so two parallel `sfn run`/`sfn
 // build` workers collided on that path — one `rm`-ed the file out from
 // under the other's `sha256sum` (`No such file or directory`), and the
-// poisoned key flipped a cache hit into a partial/wrong result, ending
-// in a nested-build failure (assert abort, exit 134). The collision is
-// PROCESS-GLOBAL — it bites even when each test's nested build is
-// otherwise isolated via its own `SAILFIN_TEST_SCRATCH` (which is the
-// case under `make check`'s per-file `sub-<i>` scratch + `--jobs N`).
+// poisoned key flipped a cache hit into a partial/wrong result, ending in
+// a nested-build failure (assert abort, exit 134). That collision was
+// PROCESS-GLOBAL — it bit even when each nested build was otherwise
+// isolated via its own `SAILFIN_TEST_SCRATCH`.
 //
-// The fix routes that tmp file through `mktemp` so every worker gets a
-// unique path. This test models the CI contention exactly: N concurrent
-// cold `sfn run`s, EACH with its own `SAILFIN_TEST_SCRATCH` (so the
-// per-invocation `run.ll`/`.o`/binary are isolated per child, mirroring
-// the per-file `sub-<i>`), all still sharing the one global tmp hash
-// path. Pre-fix this flakes; post-fix every child builds and prints its
-// own marker.
+// That race is now structurally impossible: `_sha256_of_string` hashes
+// in-process (no shared tmp file, no deterministic
+// `/tmp/.sfn_build_cache_hash_*` path). This test therefore no longer
+// guards a live race — it is a concurrent cold-build smoke test plus a
+// macOS-arm64 peak-RSS bound (see the fan-out note on the test itself,
+// #1726 / SFN-87). It models the CI contention: N concurrent cold `sfn
+// run`s, EACH with its own `SAILFIN_TEST_SCRATCH` (so the per-invocation
+// `run.ll`/`.o`/binary stay isolated per child), asserting every child
+// builds and prints its own marker with no cross-contamination.
 import { contains } from "sfn/strings";
 
 fn _sfn_bin() -> string ![io] {
@@ -44,8 +44,8 @@ fn _scratch_base() -> string ![io] {
 // child exits 0 and prints its own marker with no cross-contamination.
 fn _race_round(base: string, round: int, n: int) -> boolean ![io] {
     // Build the `bash -c` vehicle: launch N `sfn run`s in the background,
-    // each with a distinct SAILFIN_TEST_SCRATCH, then `wait`. The shared
-    // global /tmp hash path is what concurrency stresses.
+    // each with a distinct SAILFIN_TEST_SCRATCH, then `wait`. Concurrent
+    // cold runtime compiles are what this stresses.
     let bin = _sfn_bin();
     let mut script = "";
     let mut k = 0;
@@ -60,7 +60,7 @@ fn _race_round(base: string, round: int, n: int) -> boolean ![io] {
         fs.writeFile(src, "fn main() ![io] {\n    print.info(\"" + marker
             + "\");\n}\n");
         // Each child gets its own scratch so run.ll/.o/binary are isolated;
-        // only the global cache-key tmp path is shared across children.
+        // the runtime object cache they populate is the only shared state.
         script = script + "( export SAILFIN_TEST_SCRATCH='" + child_scratch
             + "'; '"
             + bin
@@ -128,9 +128,18 @@ fn _race_round(base: string, round: int, n: int) -> boolean ![io] {
 
 test "concurrent cold builds do not race on the runtime objkey tmp file" ![io] {
     let base = _scratch_base();
-    // 6 concurrent builds × 2 rounds = 12 cold runtime compiles hammering
-    // the shared cache-key tmp path. Modest fan-out keeps wall-time bounded
-    // while still reliably tripping the pre-fix race.
-    assert _race_round(base, 0, 6);
-    assert _race_round(base, 1, 6);
+    // 3 concurrent builds × 2 rounds. The tmp-file race this guards is
+    // now structurally impossible — `_sha256_of_string` hashes in-process
+    // (`build_cache.sfn`), so there is no shared tmp path left to collide
+    // on — leaving this a concurrent-cold-build smoke test. The fan-out is
+    // capped at 3 (was 6) to bound peak RSS: each cold runtime compile
+    // peaks ~1.3–1.8 GB, and on the memory-constrained macOS-arm64 runner
+    // (~7 GB) this test's burst was the sole amplifier tipping the e2e
+    // pool into OOM — the roaming SIGABRT (exit 134) nightly flake, #1726
+    // / SFN-87. Every peer build-and-run e2e test runs its nested compiles
+    // sequentially (≤1 concurrent); only this one bursts, so bounding it
+    // here bounds the pool-wide peak. 3-way still exercises concurrent
+    // cold runtime compiles.
+    assert _race_round(base, 0, 3);
+    assert _race_round(base, 1, 3);
 }
