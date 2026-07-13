@@ -431,6 +431,13 @@ dispatches `release.yml` with `channel=alpha bump=minor`, producing the next
 minor alpha (`vX.Y.0-alpha.1`). Open release scope rolls forward; it is
 reported on the tracker but does not block the train.
 
+The train must not skip a stable release line. If `main` is already on a
+prerelease version such as `0.8.0-alpha.N` and the matching stable tag
+(`v0.8.0`) does not exist, the next minor train is held. The workflow comments
+on the pending stable tracker, posts the Slack block notification, and refuses
+to dispatch `channel=alpha bump=minor` for `0.9.0-alpha.1` until the current
+stable line has shipped.
+
 Manual cadence workflow runs do **not** dispatch by default. Use
 `confirm_dispatch=true` only for a deliberate repair or off-clock cut, and only
 when the same nightly self-host gate is clear.
