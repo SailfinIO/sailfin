@@ -8,19 +8,22 @@
 // branch (`core_call_emission.sfn`) emits a `call` to the host's concrete
 // `errno`-slot locator — `@__errno_location` on Linux/glibc, `@__error` on
 // Darwin/macOS, `@_errno` on Windows/mingw — chosen at emit time from
-// `SAILFIN_TARGET_OS` (cross-compile target override) or the `uname -s`
-// host probe (`errno_locator_symbol()` in `lowering_debug_state.sfn`). The
-// same compiler source thus links on every platform when built natively
-// (the IR is target-neutral; the host clang resolves the symbol). The
-// result is an `i32*` that feeds straight into
+// `SAILFIN_TARGET_OS` (cross-compile target override) or the non-shelling
+// `_host_os()` host probe (`errno_locator_symbol()` in
+// `lowering_debug_state.sfn`, SFN-49). The same compiler source thus links on
+// every platform when built natively (the IR is target-neutral; the host clang
+// resolves the symbol). The result is an `i32*` that feeds straight into
 // `sailfin_intrinsic_pointer_read_i32`.
 //
 // Host-independent. The Linux/Darwin/Windows paths are forced via the
-// `SAILFIN_TARGET_OS` override (consulted before the `uname -s` host
+// `SAILFIN_TARGET_OS` override (consulted before the `_host_os()` host
 // probe), so they assert the same thing on Linux or macOS CI. A precedence
-// test additionally installs a `uname` shim on PATH forcing the *opposite*
-// host OS, proving `SAILFIN_TARGET_OS` wins over the host probe (the
-// cross-compile path, #890). For each path it pins:
+// test sets `SAILFIN_TARGET_OS` to the *opposite* of the real host, proving
+// the override wins over the host probe (the cross-compile path, #890). An
+// unset-override test additionally pins that the bare `_host_os()` probe
+// selects a POSIX leg — never mingw's `@_errno` — on a POSIX CI host, guarding
+// the SFN-49 de-shell against a host mis-detection regression. For each path it
+// pins:
 //
 //   1. typecheck       — `sfn check <fixture>` exits 0.
 //   2. locator call    — emitted IR contains `call i32* @<sym>()`.
@@ -94,9 +97,11 @@ fn _fixture_path() -> string ![io] {
     return src;
 }
 
-// Install a `uname` shim under `dir` that reports `os` for `uname -s` and
-// delegates everything else to the real binary, so the compiler's
-// `uname -s` probe resolves to the forced platform. Returns `dir`.
+// Install a `uname` shim under `dir` that reports `os` for `uname -s`. Since
+// SFN-49 retired the compiler's `uname -s` host probe (now the non-shelling
+// `_host_os()`), the shim no longer steers detection — it is kept so the
+// precedence test proves `SAILFIN_TARGET_OS` wins even with a contradictory
+// `uname` on PATH. Returns `dir`.
 fn _make_uname_shim(dir: string, os: string) -> string ![io] {
     fs.createDirectory(dir, true);
     let shim = dir + "/uname";
@@ -167,8 +172,10 @@ test "errno-locator: SAILFIN_TARGET_OS=Darwin overrides uname=Linux (@__error)" 
     let src = _fixture_path();
     let shimdir = _make_uname_shim(_scratch_dir() + "/shim-errno-override", "Linux");
     // Build the env by hand so the shim dir leads PATH (a second `PATH=`
-    // in the array would be ambiguous). The shim's `uname` therefore wins
-    // over the host's; SAILFIN_TARGET_OS=Darwin must still override it.
+    // in the array would be ambiguous). Post-SFN-49 the shim's `uname` is
+    // inert (the host probe no longer shells out); the real CI host is
+    // Linux/macOS (never Windows), so SAILFIN_TARGET_OS=Darwin must override
+    // it to @__error regardless.
     let mut e: string[] = [];
     let path = env.get("PATH");
     e.push("PATH=" + shimdir + ":" + path);
@@ -184,6 +191,20 @@ test "errno-locator: SAILFIN_TARGET_OS=Darwin overrides uname=Linux (@__error)" 
     assert ir.length > 0;
     assert contains(ir, "call i32* @__error()");
     assert ! contains(ir, "@__errno_location(");
+}
+
+test "errno-locator: unset SAILFIN_TARGET_OS selects a POSIX leg on a POSIX host, never @_errno" ![io] {
+    // Guards the SFN-49 de-shell: with no override, `errno_locator_symbol()`
+    // consults the bare `_host_os()` probe. On the Linux/macOS CI runner it must
+    // resolve to a POSIX leg (`@__errno_location` or `@__error`) and never
+    // mis-detect the host as native Windows (`@_errno`) — the regression the
+    // fs/env marker probe replaces the `uname -s` shellout to avoid.
+    let src = _fixture_path();
+    let ir = _emit(src, _base_env(), "hostprobe");
+    fs.deleteFile(src);
+    assert ir.length > 0;
+    assert ! contains(ir, "@_errno(");
+    assert contains(ir, "@__errno_location(") || contains(ir, "@__error(");
 }
 
 test "errno-locator: sentinel symbol never emitted as call/declare" ![io] {

@@ -127,25 +127,27 @@ let mut _stat_buf_size_value: int = 0;
 // `docs/proposals/0021-windows-native-selfhost.md` §4.2(E)). Retires the
 // `_shell_read_cmd("uname -s")` fallback the emit-time leg locators below used
 // to resolve the build host: `sh`/`uname` are unavailable on native Windows, so
-// the compiler can no longer shell out to detect its own platform. Instead it
-// reads the same filesystem markers the runtime already gates on —
-// `/proc/self/status` (present on Linux, never on Darwin) and
-// `/System/Library/CoreServices` (present on macOS, never on Linux) — see
-// `runtime/sfn/platform/rlimit.sfn` and `runtime/sfn/platform/sizes_linux.sfn`.
-// Returns the `uname -s`-compatible OS name the locators compare against, so a
-// single binary bakes the correct legs on every host and Linux/macOS select the
-// same legs as before. Neither marker present means native Windows. The
-// `SAILFIN_TARGET_OS` override is checked first by every caller and still wins
-// for the cross-compile path. Edge case: a `/proc`-less Linux host (a minimal
-// chroot/container) falls through both markers to `"Windows"` where the retired
-// `uname -s` syscall returned `"Linux"` — set `SAILFIN_TARGET_OS=Linux` there,
-// since the errno leg would otherwise bake `_errno` and fail to link. Real build
-// hosts always mount `/proc` (the same assumption `runtime/sfn/platform/rlimit.sfn`
-// already makes for its address-space cap).
+// the compiler can no longer shell out to detect its own platform. Instead each
+// host is identified by a marker it exposes without a subprocess:
+//   - `/proc/self/status` (present on Linux, never on Darwin) — the same gate
+//     `runtime/sfn/platform/rlimit.sfn` / `sizes_linux.sfn` already use.
+//   - `/System/Library/CoreServices` (present on macOS, never on Linux).
+//   - `%SystemRoot%` (set on every native Windows install; `getenv` works on
+//     Windows even where the fs sentinels do not yet — proposal §4.2), a
+//     *positive* Windows signal so an unknown host is never mistaken for one.
+// Any other host falls back to the dominant Linux leg — which the locators' own
+// comments note "is never wrong" — so a `/proc`-less Linux box (a minimal
+// chroot/container) keeps the leg `uname -s` gave it rather than baking mingw's
+// `_errno` and failing to link. Returns the `uname -s`-compatible OS name the
+// locators compare against, so a single binary bakes the correct legs on every
+// host and Linux/macOS select the same legs as before. The `SAILFIN_TARGET_OS`
+// override is checked first by every caller and still wins for the cross-compile
+// path.
 fn _host_os() -> string ![io] {
     if fs.exists("/proc/self/status") { return "Linux"; }
     if fs.exists("/System/Library/CoreServices") { return "Darwin"; }
-    return "Windows";
+    if _get_env_cmd("SystemRoot").length > 0 { return "Windows"; }
+    return "Linux";
 }
 
 // True when the user requested LLVM-lowering stderr trace via

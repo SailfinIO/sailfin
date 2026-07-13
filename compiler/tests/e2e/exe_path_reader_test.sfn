@@ -10,11 +10,14 @@
 // emitted as a real `call`/`declare`.
 //
 // This pins that shape against the real shipped module. It is
-// host-independent: each platform leg is forced via a `uname` shim on
-// PATH (Linux/Darwin) and the `SAILFIN_TARGET_OS` cross-compile override
-// (Windows), so it asserts the same thing whether CI runs on Linux or
-// macOS hardware. Emitted IR is plain text (no NUL bytes), so reading it
-// with `fs.readFile` and asserting via `sfn/strings::contains` is sound.
+// host-independent: each platform leg is forced via the `SAILFIN_TARGET_OS`
+// override. SFN-49 retired the `uname -s` host probe the leg selection once
+// keyed off (now the non-shelling `_host_os()`), so a `uname` PATH shim can no
+// longer fake a non-host platform — the override is the only lever that selects
+// a leg other than the real host's. It asserts the same thing whether CI runs
+// on Linux or macOS hardware. Emitted IR is plain text (no NUL bytes), so
+// reading it with `fs.readFile` and asserting via `sfn/strings::contains` is
+// sound.
 //
 // NOTE: assert with `sfn/strings` predicates — the `sfn/test` `expect_*`
 // matchers are `![pure]` and cannot be used from an `![io]` test (#842).
@@ -49,42 +52,11 @@ fn _base_env() -> string[] ![io] {
     return e;
 }
 
-// Write a `uname` shim that reports `os` for `-s` and delegates every
-// other invocation to the real binary. Returns the shim directory.
-fn _make_uname_shim(os: string) -> string ![io] {
-    let dir = _scratch_base() + "/sfn-exe-path-reader/shim-" + os;
-    fs.createDirectory(dir, true);
-    fs.writeFile(dir + "/uname", "#!/bin/sh\n"
-        + "if [ \"$1\" = \"-s\" ]; then echo \""
-        + os
-        + "\"; exit 0; fi\n"
-        + "exec /usr/bin/uname \"$@\"\n");
-    fs.set_perms(dir + "/uname", 493);  // 0o755
-    return dir;
-}
-
-// Emit LLVM IR for exec.sfn with `uname -s` forced to `os` via a PATH
-// shim. Returns the emitted .ll text.
-fn _emit_for_os(os: string, tag: string) -> string ![io] {
-    let shimdir = _make_uname_shim(os);
-    let out = _scratch_base() + "/sfn-exe-path-reader/exec-" + tag + ".ll";
-    let mut e: string[] = ["PATH=" + shimdir + ":" + env.get("PATH")];
-    let home = env.get("HOME");
-    if home.length > 0 { e.push("HOME=" + home); }
-    let tmpdir = env.get("TMPDIR");
-    if tmpdir.length > 0 { e.push("TMPDIR=" + tmpdir); }
-    let scratch = env.get("SAILFIN_TEST_SCRATCH");
-    if scratch.length > 0 { e.push("SAILFIN_TEST_SCRATCH=" + scratch); }
-    let exit = process.run_capture([_sfn_bin(), "emit", "-o", out, "llvm", _exec_sfn()], e);
-    let _o = process.capture_take_stdout();
-    let _e = process.capture_take_stderr();
-    assert exit == 0;
-    return fs.readFile(out);
-}
-
-// Emit with the cross-compile target override SAILFIN_TARGET_OS set.
+// Emit LLVM IR for exec.sfn with the target leg forced via SAILFIN_TARGET_OS.
 fn _emit_for_target_os(target_os: string, tag: string) -> string ![io] {
-    let out = _scratch_base() + "/sfn-exe-path-reader/exec-" + tag + ".ll";
+    let dir = _scratch_base() + "/sfn-exe-path-reader";
+    fs.createDirectory(dir, true);
+    let out = dir + "/exec-" + tag + ".ll";
     let mut e = _base_env();
     e.push("SAILFIN_TARGET_OS=" + target_os);
     let exit = process.run_capture([_sfn_bin(), "emit", "-o", out, "llvm", _exec_sfn()], e);
@@ -104,7 +76,7 @@ test "exe-path-reader: sfn check passes on exec.sfn" ![io] {
 
 // ---- Linux leg: readlink + interned /proc/self/exe + realpath ----
 test "exe-path-reader: Linux leg shape" ![io] {
-    let ll = _emit_for_os("Linux", "linux");
+    let ll = _emit_for_target_os("Linux", "linux");
     assert contains(ll, "call i64 @readlink(");
     assert contains(ll, "c\"/proc/self/exe");
     assert contains(ll, "call i8* @realpath(");
@@ -117,7 +89,7 @@ test "exe-path-reader: Linux leg shape" ![io] {
 
 // ---- Darwin leg: _NSGetExecutablePath + strlen (+declare) + realpath ----
 test "exe-path-reader: Darwin leg shape" ![io] {
-    let ll = _emit_for_os("Darwin", "darwin");
+    let ll = _emit_for_target_os("Darwin", "darwin");
     assert contains(ll, "call i32 @_NSGetExecutablePath(");
     assert contains(ll, "call i64 @strlen(");
     // exec.sfn inlines its externs, so the call must be backed by a
