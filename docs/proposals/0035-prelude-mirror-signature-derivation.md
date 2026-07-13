@@ -1,10 +1,10 @@
 ---
 sfep: 0035
 title: Deriving prelude-mirror registry signatures from the prelude (kill latent ABI drift)
-status: Accepted
+status: Implemented
 type: runtime
 created: 2026-06-29
-updated: 2026-06-29
+updated: 2026-07-13
 author: "agent:compiler-architect; human review"
 tracking: "#572, #1779, #1780"
 supersedes:
@@ -243,6 +243,44 @@ priority. The guard closes the correctness gap immediately; the derivation
 removes the duplication so this coupling cannot resurface. Both are actionable
 work to be done in close sequence, not a now-versus-someday split. See §6 for
 why A and B lost and why C-derivation is the structural target rather than A.
+
+**Realization (#1780).** Two premises in the paragraphs above were corrected
+when the work landed:
+
+1. **The fallback is a main-build path, not just the `test`-command path.** The
+   mirror descriptors fire for *any* module that calls a prelude free function
+   without importing the prelude (the E0420 implicit-runtime typecheck allowance
+   has no emit-layer counterpart) — including `compiler/src/toml_parser.sfn`
+   (`string_starts_with`), compiled on **every `make compile`**, plus
+   `sfn/strings`, `sfn/http`, `sfn/crypto`, `sfn/test`. So `make compile` — not
+   just `make test` — is the binding gate, and deleting the rows outright breaks
+   *call emission* (`resolve_call_signature` → `call to unknown function`
+   `[fatal]`), not merely the declare.
+
+2. **"Consult the live prelude define directly" = Option A.** Those modules have
+   no prelude artifact in their lowering context, and the anti-staging policy
+   (`build/runtime_objs.sfn`, `capsule_resolver.sfn::stage_capsule_imports_for_emit`)
+   forbids publishing it there. Making the live define present in every module is
+   the staged-artifact + cold-build-ordering work Option A was rejected for.
+
+The shipped realization keeps Option C's *intent* — kill the hand-typed **LLVM
+transcription** (the actual drift vector) — without the Option-A build-graph
+change: a single **source-typed** signature set
+(`compiler/src/llvm/prelude_mirror_signatures.sfn`) that the declare-emitter
+(`render_runtime_helper_declarations`) and the call-return resolver
+(`resolve_call_signature`) lower through the same `map_return_type` /
+`collect_parameter_types` an imported prelude call uses. An ABI-lowering move
+(e.g. SFEP-0033's `{i8*, i64}`) is absorbed with zero mirror edits, and
+`char_from_code` is corrected from the old `i8*` row to the prelude's real
+`{i8*, i64}` shape (a pre-existing latent drift, §2.1). The hand-typed
+`runtime_helpers.sfn` rows and their `seed_default_runtime_helpers` /
+`_is_prelude_mirror_target` scaffolding are removed; the §3.1 reconciliation
+guard is **retained and retargeted** (derived signature vs imported prelude
+signature) as the anti-drift net that keeps the source-typed set trustworthy on
+every build where a mirror symbol is imported. A residual 6-entry source-typed
+table remains — literal zero-duplication (no second location at all) would
+require Option A and is deliberately not pursued for a 6-symbol problem,
+consistent with §6's rejection of A.
 
 ## 4. Effect & capability impact
 

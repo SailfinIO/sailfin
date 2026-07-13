@@ -1,21 +1,23 @@
 // compiler/tests/unit/prelude_mirror_drift_fatal_test.sfn
 //
-// T2 for #1779 (SFEP-0035 §3.1): the prelude-mirror reconciliation guard
-// actually FATALS on drift — the failure mode the whole guard exists to catch.
+// T2 for #1779 (SFEP-0035 §3.1), retargeted for #1780 (SFEP-0035 §3.2): the
+// prelude-mirror reconciliation guard actually FATALS on drift — the failure
+// mode the whole guard exists to catch.
 //
 // `render_runtime_helper_declarations` reconciles each *enumerated*
-// prelude-mirror registry row (`_is_prelude_mirror_target`) against the imported
-// prelude function's real lowered signature before deferring to it (#633
-// suppression). When the two disagree it throws a `signature drift` fatal naming
-// the target and both shapes; the synthesized `@main` wrapper renders that to
-// stderr and exits non-zero, so `make compile` fails at the moment drift is
-// introduced instead of silently mis-declaring the helper on a fallback path.
-// The gate is an explicit six-target set, NOT every `target == symbol &&
-// native_signature == null` row: the libc-fallback rows (`nanosleep` /
-// `clock_gettime`) share that structural shape but are exempt (pinned by the
-// `nanosleep` case below).
+// prelude-mirror symbol (`is_prelude_mirror_symbol`,
+// `prelude_mirror_signatures.sfn`) against the imported prelude function's
+// real lowered signature before deferring to it (#633 suppression). When the
+// two disagree it throws a `prelude-mirror signature drift: derived '<name>'
+// lowers to ... but prelude '<name>' lowers to ...` fatal naming the target
+// and both shapes; the synthesized `@main` wrapper renders that to stderr and
+// exits non-zero, so `make compile` fails at the moment drift is introduced
+// instead of silently mis-declaring the helper on a fallback path. The gate is
+// an explicit six-target set, NOT every `target == symbol && native_signature
+// == null` row: the libc-fallback rows (`nanosleep` / `clock_gettime`) share
+// that structural shape but are exempt (pinned by the `nanosleep` case below).
 //
-// Here the real registry `char_code` row (i64 ⟵ [{i8*, i64}]) is fed an
+// Here the derived `char_code` signature (i64 ⟵ [{i8*, i64}]) is fed an
 // imported `char_code` whose return deliberately disagrees (string ⇒
 // {i8*, i64}), so the guard must fire.
 import { expect_to_throw, expect_to_throw_with } from "sfn/test";
@@ -56,21 +58,21 @@ fn _fn(name: string, return_type: string, parameters: NativeParameter[]) -> Nati
     };
 }
 
-// An imported `char_code` whose RETURN drifts from the registry row: the
-// registry declares `i64`, but a `string` return lowers to `{i8*, i64}`. The
-// single `string` parameter still matches the registry (`{i8*, i64}`), so the
-// mismatch is isolated to the return.
+// An imported `char_code` whose RETURN drifts from the derived signature: the
+// derived shape is `i64` (source `int`), but a `string` return lowers to
+// `{i8*, i64}`. The single `string` parameter still matches the derived
+// signature (`{i8*, i64}`), so the mismatch is isolated to the return.
 fn _drifted_char_code() -> NativeFunction[] {
     return [_fn("char_code", "string", [_param("string")])];
 }
 
-// An imported `char_code` whose signature MATCHES the registry row
+// An imported `char_code` whose signature MATCHES the derived signature
 // (int ⇒ i64, string ⇒ {i8*, i64}) — the positive control.
 fn _matching_char_code() -> NativeFunction[] {
     return [_fn("char_code", "int", [_param("string")])];
 }
 
-// An imported `nanosleep` whose lowered signature disagrees with the registry
+// An imported `nanosleep` whose lowered signature disagrees with its registry
 // row (registry: i32 ⟵ [i8*, i8*]). `nanosleep` satisfies the structural
 // `target == symbol && native_signature == null` mirror shape but is a
 // libc-fallback row, NOT a prelude mirror — its registry `i8*` is the

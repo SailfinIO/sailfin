@@ -1,0 +1,78 @@
+// compiler/tests/unit/prelude_mirror_derivation_test.sfn
+//
+// T1 for #1780 (SFEP-0035 §3.2): the derived-declare fallback path.
+// `render_runtime_helper_declarations` now derives each of the six
+// prelude-mirror declares from the source-typed signatures in
+// `prelude_mirror_signatures.sfn`, lowered through the same
+// `map_return_type` / `collect_parameter_types` a real imported function
+// goes through, instead of a hand-typed LLVM-shape registry row. With no
+// matching imported/local function present, the emitter falls back to
+// emitting the derived `declare` line directly.
+//
+// This pins the exact derived shape for all six mirror symbols (verified
+// via `sfn emit llvm`), most importantly `char_from_code`, which now
+// derives `{i8*, i64}` — correcting the old hand-typed registry row's
+// `i8*` (a pre-existing latent ABI drift, SFEP-0035 §2.1).
+import { render_runtime_helper_declarations } from "../../src/llvm/rendering";
+import { TypeContext } from "../../src/llvm/types";
+import { NativeFunction } from "../../src/native_ir";
+
+fn _empty_context() -> TypeContext {
+    return TypeContext {
+        structs: [],
+        enums: [],
+        interfaces: [],
+        vtables: []
+    };
+}
+
+// True iff some line in `lines` is exactly `expected`.
+fn _has_line(lines: string[], expected: string) -> boolean {
+    let mut i: int = 0;
+    loop {
+        if i >= lines.length { break; }
+        if lines[i] == expected { return true; }
+        i += 1;
+    }
+    return false;
+}
+
+fn _derive(target: string) -> string[] {
+    let no_locals: NativeFunction[] = [];
+    let no_imports: NativeFunction[] = [];
+    return render_runtime_helper_declarations([target], no_locals, no_imports, _empty_context());
+}
+
+test "prelude-mirror derivation (#1780): char_code derives declare i64 @char_code({i8*, i64})" {
+    let lines = _derive("char_code");
+    assert _has_line(lines, "declare i64 @char_code({i8*, i64})");
+}
+
+test "prelude-mirror derivation (#1780): char_at derives declare {i8*, i64} @char_at({i8*, i64}, i64)" {
+    let lines = _derive("char_at");
+    assert _has_line(lines, "declare {i8*, i64} @char_at({i8*, i64}, i64)");
+}
+
+test "prelude-mirror derivation (#1780): char_from_code derives declare {i8*, i64} @char_from_code(i64)" {
+    let lines = _derive("char_from_code");
+    // The fix: the derived shape is `{i8*, i64}`, matching the prelude's
+    // real `(code: int) -> string` signature...
+    assert _has_line(lines, "declare {i8*, i64} @char_from_code(i64)");
+    // ...never the old hand-typed registry row's `i8*`.
+    assert ! _has_line(lines, "declare i8* @char_from_code(i64)");
+}
+
+test "prelude-mirror derivation (#1780): find_char derives declare i64 @find_char({i8*, i64}, {i8*, i64}, i64)" {
+    let lines = _derive("find_char");
+    assert _has_line(lines, "declare i64 @find_char({i8*, i64}, {i8*, i64}, i64)");
+}
+
+test "prelude-mirror derivation (#1780): string_starts_with derives declare i1 @string_starts_with({i8*, i64}, {i8*, i64})" {
+    let lines = _derive("string_starts_with");
+    assert _has_line(lines, "declare i1 @string_starts_with({i8*, i64}, {i8*, i64})");
+}
+
+test "prelude-mirror derivation (#1780): record_eq_flag_message derives declare i1 @record_eq_flag_message(i1, {i8*, i64}, i1, {i8*, i64})" {
+    let lines = _derive("record_eq_flag_message");
+    assert _has_line(lines, "declare i1 @record_eq_flag_message(i1, {i8*, i64}, i1, {i8*, i64})");
+}

@@ -72,31 +72,39 @@ preamble's `render_runtime_helper_declarations` then emits a single
 `declare` per used target's effective symbol — no aliases, no
 per-target fallbacks.
 
-## Prelude-mirror reconciliation invariant (#1779)
+## Prelude-mirror derivation + reconciliation invariant (#1779, #1780)
 
-A **prelude-mirror row** (`target == symbol` and `native_signature == null`,
-whose `return_type`/`parameter_types` transcribe a `runtime/prelude.sfn`
-function by hand) must stay ABI-identical to that prelude definition. On any
-build where the mirror symbol is imported, `render_runtime_helper_declarations`
-(`rendering.sfn`) reconciles the registry row against the imported function's
-actual lowered signature before deferring to the prelude declare, and **throws a
-`signature drift` fatal on mismatch** — so drift fails `make compile` at the
-moment it is introduced rather than silently mis-declaring the helper on a
-fallback path. When you edit a mirror row (or its prelude function), change both
-in lock-step.
+Six `runtime/prelude.sfn` free functions — `char_code`, `char_at`,
+`char_from_code`, `find_char`, `string_starts_with`, `record_eq_flag_message` —
+are called by modules that do **not** import the prelude (the E0420
+implicit-runtime typecheck allowance has no emit-layer counterpart, so
+`find_function_by_name_or_import` returns null for them). Their `declare` lines
+and call-return shapes are **derived** from the source-typed signature set in
+`compiler/src/llvm/prelude_mirror_signatures.sfn` (#1780, SFEP-0035 §3.2) — not
+hand-typed as registry rows. The declare-emitter
+(`render_runtime_helper_declarations`) and the call-return resolver
+(`resolve_call_signature`) lower those source signatures through the same
+`map_return_type` / `collect_parameter_types` an imported prelude call uses, so an
+ABI-lowering move (e.g. the SFEP-0033 `{i8*, i64}` string ABI) is absorbed
+automatically and never needs a mirror edit. **To change one of these six, edit
+`prelude_mirror_signatures.sfn` and the prelude function in lock-step** — there
+are no registry rows to sync.
 
-Reconciliation is gated on an **explicit enumeration** of the prelude-mirror
-targets (`_is_prelude_mirror_target` in `rendering.sfn`: `char_code`, `char_at`,
-`char_from_code`, `find_char`, `string_starts_with`, `record_eq_flag_message`),
-**not** the raw `target == symbol && native_signature == null` predicate: the
-libc-fallback rows `nanosleep` / `clock_gettime` also match that structural
-shape but are not prelude mirrors — their registry signature is the deliberate
-opaque-pointee (`i8*`) form that differs by design from the `%Timespec*` import
-they defer to, so reconciling them would false-positive. Those rows keep the
-plain #633 import suppression without reconciliation. Design record:
-SFEP-0035 §3.1; the follow-up that derives these rows from the prelude (removing
-the hand-typed duplication, and this enumeration with it) is SFEP-0035 §3.2
-(#1780).
+The **reconciliation guard** is retained and retargeted: on any build where a
+mirror symbol *is* imported, `render_runtime_helper_declarations` reconciles the
+derived signature against the imported function's actual lowered signature and
+**throws a `prelude-mirror signature drift` fatal on mismatch** — so drift fails
+`make compile` at the moment it is introduced rather than silently mis-declaring
+the helper for a non-importing caller. This is the anti-drift net that keeps the
+source-typed signature set trustworthy; the unit shape test pins the derived
+LLVM shapes for all six independently of whether a symbol happens to be imported.
+
+The libc-fallback rows `nanosleep` / `clock_gettime` still match the structural
+`target == symbol && native_signature == null` shape but are **not** prelude
+mirrors — their registry signature is the deliberate opaque-pointee (`i8*`) form
+that differs by design from the `%Timespec*` import they defer to. They keep the
+plain #633 import suppression without reconciliation. Design record: SFEP-0035
+§3.1 (the guard, #1779) and §3.2 (the derivation, #1780).
 
 ## Returning the `{i8*, i64}` aggregate from a Sailfin body (`SfnString`)
 

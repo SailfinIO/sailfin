@@ -34,6 +34,7 @@ import { split_lines } from "../../native_ir_utils_text";
 import { char_code, substring } from "../../string_utils";
 import { append_unique_effect } from "../effects";
 import { resolve_import_artifact_slug, resolve_import_module_slug_for_module } from "../imports";
+import { is_prelude_mirror_symbol } from "../prelude_mirror_signatures";
 import { find_function_by_name, should_internalize_function } from "../rendering";
 import { runtime_helper_descriptors } from "../runtime_helpers";
 import {
@@ -1323,6 +1324,35 @@ fn collect_runtime_helper_targets_from_lines(lines: string[]) -> string[] {
     return targets;
 }
 
+// #1780 (SFEP-0035 §3.2): scan emitted LLVM IR for `call ... @<symbol>(` sites
+// naming one of the six prelude-mirror free functions (`char_code`, `char_at`,
+// `char_from_code`, `find_char`, `string_starts_with`, `record_eq_flag_message`)
+// and return the ones present. Descriptor-independent by design — the hand-typed
+// mirror rows were removed, so `collect_runtime_helper_targets_from_lines`
+// (which maps a called symbol → target only via a descriptor) no longer sees
+// these symbols. The declare-emitter (`render_runtime_helper_declarations`)
+// consumes this list to derive a `declare` for each mirror symbol a
+// non-prelude-importing caller actually references.
+fn collect_prelude_mirror_symbols_from_lines(lines: string[]) -> string[] {
+    let mut called: string[] = [];
+    let mut i: int = 0;
+    loop {
+        if i >= lines.length { break; }
+        called = merge_call_symbols_from_line(called, lines[i]);
+        i += 1;
+    }
+    let mut targets: string[] = [];
+    let mut c: int = 0;
+    loop {
+        if c >= called.length { break; }
+        if is_prelude_mirror_symbol(called[c]) {
+            targets = append_unique_effect(targets, called[c]);
+        }
+        c += 1;
+    }
+    return targets;
+}
+
 // Seed an accumulator with the default set of runtime-helper targets the
 // compiler must always declare.  Each entry that remains in this list
 // after M1.7.5a (#501) is genuinely *undiscoverable* by both walkers:
@@ -1388,7 +1418,6 @@ fn seed_default_runtime_helpers(initial: string[]) -> string[] {
     helpers = append_unique_effect(helpers, "string.append");
     helpers = append_unique_effect(helpers, "number_to_string");
     helpers = append_unique_effect(helpers, "strings_equal");
-    helpers = append_unique_effect(helpers, "char_code");
     helpers = append_unique_effect(helpers, "runtime_raise_value_error_fn");
     helpers = append_unique_effect(helpers, "runtime_assert_fail_fn");
     // Phase 5a: arena mark/rewind for in-process multi-module tools.
@@ -1453,10 +1482,12 @@ fn seed_default_runtime_helpers(initial: string[]) -> string[] {
     helpers = append_unique_effect(helpers, "fs.mkdtemp");
     helpers = append_unique_effect(helpers, "fs.is_executable");
     helpers = append_unique_effect(helpers, "fs.symlink");
-    // Additional helpers used by the compiler but not auto-collected
+    // Additional helpers used by the compiler but not auto-collected.
+    // The prelude-mirror symbols `char_code` / `find_char` / `string_starts_with`
+    // were removed here by #1780 (SFEP-0035 §3.2): their declares are now derived
+    // and driven by `collect_prelude_mirror_symbols_from_lines`, so seeding them
+    // unconditionally is dead (and would seed a target with no descriptor).
     helpers = append_unique_effect(helpers, "monotonic_millis");
-    helpers = append_unique_effect(helpers, "find_char");
-    helpers = append_unique_effect(helpers, "string_starts_with");
     helpers = append_unique_effect(helpers, "process.run");
     helpers = append_unique_effect(helpers, "process.exit");
     // `env.get` / `env.home` lower to the bare `sfn_getenv` / `sfn_home_dir`

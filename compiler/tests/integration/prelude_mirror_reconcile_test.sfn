@@ -1,30 +1,26 @@
 // compiler/tests/integration/prelude_mirror_reconcile_test.sfn
 //
-// T1 for #1779 (SFEP-0035 §3.1): the prelude-mirror reconciliation guard's
-// positive path. `render_runtime_helper_declarations` reconciles each
-// *enumerated* prelude-mirror registry row (`_is_prelude_mirror_target`) against
-// the imported prelude function's real lowered signature before deferring to
-// the imported declare (#633 suppression); a drift throws a fatal. The gate is
-// an explicit six-target set, NOT every `target == symbol && native_signature
-// == null` row — libc-fallback rows (`nanosleep` / `clock_gettime`) share that
-// structural shape but are exempt (see the `nanosleep` case in the T2 unit
-// test).
+// T1 for #1779 (SFEP-0035 §3.1), retargeted for #1780 (SFEP-0035 §3.2): the
+// prelude-mirror reconciliation guard's positive path.
+// `render_runtime_helper_declarations` reconciles each *enumerated*
+// prelude-mirror signature (`is_prelude_mirror_symbol`,
+// `prelude_mirror_signatures.sfn`) against the imported prelude function's
+// real lowered signature before deferring to the imported declare (#633
+// suppression); a drift throws a fatal. The gate is an explicit six-target
+// set, NOT every `target == symbol && native_signature == null` row —
+// libc-fallback rows (`nanosleep` / `clock_gettime`) share that structural
+// shape but are exempt (see the `nanosleep` case in the T2 unit test).
 //
-// This pins the SFEP §2.1 table for the rows whose registry shape matches the
-// prelude define today: feeding each with its true prelude source-level
-// signature must reconcile cleanly (no throw) and suppress the registry row
-// (the import wins, so the helper symbol is NOT re-declared here). If a future
-// change drifts one of these registry rows away from its prelude definition,
-// the guard fires and this test goes red.
+// This pins the SFEP §2.1 table for all six mirror symbols: feeding each with
+// its true prelude source-level signature must reconcile cleanly (no throw)
+// and suppress the derived declare (the import wins, so the helper symbol is
+// NOT re-declared here). If a future change drifts a derived signature away
+// from its prelude definition, the guard fires and this test goes red.
 //
-// `char_from_code` is intentionally excluded: its registry row declares `i8*`
-// while the prelude `char_from_code(code: int) -> string` lowers to
-// `{i8*, i64}`. That row is a pre-existing latent drift that never surfaces at
-// build time because `char_from_code` is emitted from the registry directly and
-// is never imported/shadowed — so the guard never reconciles it. Structurally
-// deriving (and thereby fixing) the hand-typed rows is the sequenced follow-up
-// #1780 (SFEP-0035 §3.2); this guard only makes drift loud when a mirror symbol
-// IS imported.
+// `char_from_code` now reconciles clean like the other five: #1780 replaced
+// the old hand-typed registry row's `i8*` with the derived `{i8*, i64}` shape
+// (matching the prelude's real `char_from_code(code: int) -> string`), so it
+// no longer needs the exclusion this test previously carried.
 import { find } from "sfn/strings";
 
 import { render_runtime_helper_declarations } from "../../src/llvm/rendering";
@@ -115,4 +111,9 @@ test "prelude-mirror reconcile (#1779): record_eq_flag_message reconciles clean 
     // prelude: record_eq_flag_message(boolean, string, boolean, string) -> boolean
     //          ⇒  i1 ⟵ [i1, {i8*, i64}, i1, {i8*, i64}]
     assert _reconciles_and_suppresses("record_eq_flag_message", "boolean", [_param("boolean"), _param("string"), _param("boolean"), _param("string")]);
+}
+
+test "prelude-mirror reconcile (#1780): char_from_code reconciles clean and is suppressed" {
+    // prelude: char_from_code(code: int) -> string  ⇒  {i8*, i64} ⟵ [i64]
+    assert _reconciles_and_suppresses("char_from_code", "string", [_param("int")]);
 }

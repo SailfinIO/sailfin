@@ -75,6 +75,7 @@ import {
 import { emit_llvm_function } from "./emission";
 import {
     collect_defined_function_symbols,
+    collect_prelude_mirror_symbols_from_lines,
     collect_runtime_helper_targets_from_lines,
     extend_native_enums,
     extend_native_interfaces,
@@ -1030,6 +1031,17 @@ fn lower_to_llvm_lines_with_parsed_context(native_module: NativeModule, parse_ar
         if _pli >= post_lowering_targets.length { break; }
         tmp_helpers = append_unique_effect(tmp_helpers, post_lowering_targets[_pli]);
         _pli += 1;
+    }
+    // #1780 (SFEP-0035 §3.2): add the prelude-mirror symbols this module calls
+    // (descriptor-independent, since the hand-typed rows were removed) so the
+    // declare-emitter derives a `declare` for each one referenced by a
+    // non-prelude-importing caller.
+    let mirror_targets = collect_prelude_mirror_symbols_from_lines(body_lines);
+    let mut _mti: int = 0;
+    loop {
+        if _mti >= mirror_targets.length { break; }
+        tmp_helpers = append_unique_effect(tmp_helpers, mirror_targets[_mti]);
+        _mti += 1;
     }
     runtime_helpers = seed_default_runtime_helpers(tmp_helpers);
     // #1436: detect whether this module *defines* `@runtime` (the
