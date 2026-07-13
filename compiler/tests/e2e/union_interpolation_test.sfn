@@ -1,4 +1,4 @@
-// End-to-end regression for SFN-343 / GitHub #2281.
+// End-to-end regression for SFN-343 / GitHub #2281 and SFN-346 / GitHub #2292.
 //
 // Interpolating an `int | null` value used to stringify to a null operand,
 // causing the entire print statement to disappear with exit 0. A null literal
@@ -46,6 +46,20 @@ fn _build_and_run(out_marker: string) -> int ![io] {
     });
 }
 
+fn _emit_ir(out_marker: string) -> int ![io] {
+    return with_tmp_dir(fn (dir: string) -> int {
+        let srcpath = dir + "/probe.sfn";
+        fs.writeFile(srcpath, _fixture_src());
+        let llpath = dir + "/probe.ll";
+        let emit_exit = process.run_capture([_sfn_bin(), "emit", "-o", llpath, "llvm", srcpath], _child_env());
+        let _eo = process.capture_take_stdout();
+        let _ee = process.capture_take_stderr();
+        if emit_exit != 0 { return emit_exit; }
+        fs.writeFile(out_marker, fs.readFile(llpath));
+        return 0;
+    });
+}
+
 test "union interpolation: optional int payload renders in direct, narrowed, and match-bound forms" ![io] {
     let marker = _marker("optional-int");
     let exit = _build_and_run(marker);
@@ -61,4 +75,15 @@ test "union interpolation: optional int payload renders in direct, narrowed, and
     assert expect_eq_bool(find(out, "label ready\n", 0) >= 0, true).ok;
     assert expect_eq_bool(find(out, "after\n", 0) >= 0, true).ok;
     assert expect_eq_bool(find(out, "mid 0 end", 0) < 0, true).ok;
+}
+
+test "union interpolation: null literal uses declared null arm for ambiguous pointer unions" ![io] {
+    let marker = _marker("ambiguous-null-ir");
+    let exit = _emit_ir(marker);
+    assert expect_eq_int(exit, 0).ok;
+    let ir = fs.readFile(marker);
+    if fs.exists(marker) { fs.deleteFile(marker); }
+
+    assert expect_eq_bool(find(ir, "insertvalue { i32, i8*, i8* } undef, i32 1, 0", 0) >= 0, true).ok;
+    assert expect_eq_bool(find(ir, "bitcast i8* null to { i32", 0) < 0, true).ok;
 }

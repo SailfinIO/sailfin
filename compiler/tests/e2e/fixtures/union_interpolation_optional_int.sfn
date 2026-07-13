@@ -9,6 +9,7 @@ fn main() ![io] {
     }
     let h: int | null = null;
     print("null {{h}}");
+    let raw: any | null = null;
     let label: string | null = "ready";
     print("label {{label}}");
     print("after");

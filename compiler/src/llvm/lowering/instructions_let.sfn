@@ -5,7 +5,7 @@ import { NativeFunction, NativeInstruction, NativeSourceSpan } from "../../nativ
 import { index_of, substring } from "../../string_utils";
 import { array_pointer_element_type } from "../expression_lowering/arrays";
 import { analyze_value_ownership, detect_borrow_conflicts, lower_expression } from "../expression_lowering/native/core";
-import { coerce_operand_to_type } from "../expression_lowering/native/core_operands";
+import { coerce_null_literal_to_union_variant, coerce_operand_to_type } from "../expression_lowering/native/core_operands";
 import {
     append_local_binding,
     mark_last_local_consumed,
@@ -13,7 +13,7 @@ import {
 } from "../expression_lowering/native/core_scopes";
 import { is_heap_type, map_array_pointer_type } from "../expression_lowering/native/core_type_mapping";
 import { detect_suspension_conflicts } from "../expression_lowering/native/statement_suspension";
-import { map_local_type } from "../expression_lowering/native/statement_type_mapping";
+import { is_union_annotation, map_local_type, split_union_annotations } from "../expression_lowering/native/statement_type_mapping";
 import { find_local_binding, find_parameter_binding, mark_parameter_consumed } from "../expressions_bindings";
 import { default_return_literal, format_local_pointer_name } from "../expressions_helpers";
 import {
@@ -62,6 +62,19 @@ fn _bool_into_numeric(from_type: string, to_type: string) -> boolean {
     if to_kind == "int" { return true; }
     if to_kind == "float" { return true; }
     return false;
+}
+
+fn _null_union_variant_index(annotation: string) -> int {
+    let normalized = trim_text(annotation);
+    if !is_union_annotation(normalized) { return -1; }
+    let parts = split_union_annotations(normalized);
+    let mut index: int = 0;
+    loop {
+        if index >= parts.length { break; }
+        if trim_text(parts[index]) == "null" { return index; }
+        index += 1;
+    }
+    return -1;
 }
 
 // Extract the lifted lambda symbol from a `<closure_pair @<name> ...>`
@@ -543,7 +556,21 @@ fn lower_let_instruction(function: NativeFunction, instruction: NativeInstructio
 
     let mut stored_value: string = default_return_literal(llvm_type);
     if operand != null {
-        if operand.llvm_type == llvm_type {
+        let null_union_variant = _null_union_variant_index(effective_annotation);
+        let annotated_null_union = coerce_null_literal_to_union_variant(operand, operand.llvm_type, llvm_type, null_union_variant, current_temp, current_lines);
+        if annotated_null_union != null {
+            current_lines = annotated_null_union.lines;
+            current_temp = annotated_null_union.temp_index;
+            if annotated_null_union.operand != null {
+                let stored = annotated_null_union.operand;
+                stored_value = stored.value;
+                current_lines.push("  store " + llvm_type + " " + stored.value
+                    + ", "
+                    + llvm_type
+                    + "* "
+                    + pointer);
+            }
+        } else if operand.llvm_type == llvm_type {
             // Identity coercion — use operand directly
             stored_value = operand.value;
             current_lines.push("  store " + llvm_type + " " + operand.value
