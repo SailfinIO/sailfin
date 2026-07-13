@@ -1,0 +1,73 @@
+// compiler/tests/integration/match_arm_binding_scope_test.sfn
+//
+// Regression coverage for the match-arm binding scope leak in the LLVM
+// lowering (`instructions_match.sfn`). Each match arm is an independent
+// scope, but the lowering used to propagate an arm's `base_locals` (its
+// pattern bindings plus arm-body `let`s) into the shared `current_locals`
+// after lowering the arm. The next sibling arm then cloned that scope and
+// inherited a binding whose `alloca` lived in the previous arm's body block
+// — a block that does not dominate the sibling. A reload of that binding in
+// the sibling arm (the emitter materializes in-scope locals before an
+// `assert`) produced `Instruction does not dominate all uses`, which the
+// LLVM verifier rejects: clang refused the IR with a bare `link failed
+// (clang exit=1)` on the verifier-running toolchains (macOS CI's Homebrew
+// LLVM). Lenient toolchains codegen the dead reload and mask it, so the only
+// reliable guard is the IR verifier itself.
+//
+// This drives the shipped `build/bin/sfn emit --validate llvm`: the
+// `--validate` cascade round-trips the emitted IR through `llvm-as`, whose
+// verifier catches the dominance violation. A regression makes the emit exit
+// nonzero on any host with `llvm-as` on PATH; where it is absent the cascade
+// skips validation and the fixture (valid IR) still emits cleanly, so the
+// test never flakes.
+extern fn sailfin_runtime_shell_capture(cmd: * u8) -> * u8;
+
+fn _host_path() -> string ![io] {
+    let p = sailfin_runtime_shell_capture("printf '%s' \"$PATH\"");
+    if p.length == 0 { return "/usr/local/bin:/usr/bin:/bin"; }
+    return p;
+}
+
+// A Result match whose `Ok` arm binds `value` and uses it, while the sibling
+// `Err` arm binds `error` and runs an `assert`. This is the exact shape that
+// leaked the `value` binding into the `Err` arm's scope. The `assert`s make
+// the emitter reload in-scope locals, surfacing the leaked binding as a
+// cross-arm `load` in the pre-fix lowering.
+fn _match_fixture() -> string ![io] {
+    let dir = fs.mkdtemp("sfn-match-scope-");
+    assert dir.length > 0;
+    let path = dir + "/match_scope.sfn";
+    fs.writeFile(path, "fn _make(ok: bool) -> Result<int, string> {\n"
+        + "    if ok { return Result.Ok { value: 5 }; }\n"
+        + "    return Result.Err { error: \"no\" };\n"
+        + "}\n"
+        + "\n"
+        + "test \"match arm binding scope\" {\n"
+        + "    match _make(true) {\n"
+        + "        Result.Ok { value } => { assert value == 5; },\n"
+        + "        Result.Err { error } => { assert error.length > 0; }\n"
+        + "    }\n"
+        + "}\n");
+    return path;
+}
+
+// `emit --validate llvm` through the shipped binary, threading the parent
+// PATH so the `--validate` cascade's `llvm-as` lookup resolves (an empty env
+// array is the empty environment, not "inherit").
+fn _emit_validate(src: string, out: string) -> i64 ![io] {
+    let rc = process.run_capture(["build/bin/sfn", "emit", "--validate", "-o", out, "llvm", src], ["PATH="
+        + _host_path()]);
+    let _o = process.capture_take_stdout();
+    let _e = process.capture_take_stderr();
+    return rc;
+}
+
+test "match arm binding scope: sibling arms lower to verifier-clean IR" ![io] {
+    let src = _match_fixture();
+    let out = src + ".ll";
+    let rc = _emit_validate(src, out);
+    assert rc == 0;
+    assert fs.exists(out);
+    fs.deleteFile(out);
+    fs.deleteFile(src);
+}

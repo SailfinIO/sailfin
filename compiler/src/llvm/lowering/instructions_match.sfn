@@ -783,7 +783,16 @@ fn lower_match_instruction(function: NativeFunction, start_index: int, llvm_retu
         lifetime_regions = extend_lifetime_regions(lifetime_regions, body_result.lifetime_regions);
         current_lines = extend_string_array(current_lines, body_result.lines);
         current_allocas = body_result.allocas;
-        current_locals = base_locals;
+        // Do NOT propagate this arm's `base_locals` into `current_locals`.
+        // Each arm is an independent scope: its pattern bindings (and any
+        // arm-body `let`s) allocate in the arm's body block, which does not
+        // dominate sibling arms. Leaking them here made the next arm clone a
+        // binding whose alloca lives in a non-dominating block, so a reload of
+        // it in the sibling arm produced `Instruction does not dominate all
+        // uses` and clang rejected the IR. `current_locals` stays the pristine
+        // pre-match scope, which is also the correct post-match scope (arm
+        // bindings are out of scope once the match ends). Cross-arm mutation of
+        // *outer* locals is handled separately via `arm_mutations_list` + phi.
         current_temp = body_result.temp_index;
         current_block_counter = body_result.block_counter;
         current_next_local = body_result.next_local_id;

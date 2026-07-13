@@ -1,0 +1,149 @@
+// capsules/sfn/crypto/src/aead_chacha20poly1305.sfn
+//
+// ChaCha20-Poly1305 AEAD (RFC 8439 §2.8), the only AEAD in the SFEP-0048
+// TLS 1.3 cut. Composes the Phase A ChaCha20 stream cipher and Poly1305 MAC
+// into authenticated encryption: `seal` returns ciphertext‖tag, `open`
+// verifies the tag in constant time and fail-closes on any tamper. Pure
+// computation — no effects.
+import { ct_eq_bytes } from "./bits";
+import { chacha20_block, chacha20_xor } from "./chacha20";
+import { poly1305_mac } from "./poly1305";
+
+// Derive the Poly1305 one-time key from the ChaCha20 block-0 keystream
+// (counter 0), per RFC 8439 §2.6: the first 32 bytes of the keystream block.
+// Returns [] on a bad key/nonce length (chacha20_block fails closed).
+fn _poly1305_key_gen(key: int[], nonce: int[]) -> int[] {
+    let block: int[] = chacha20_block(key, 0, nonce);
+    if block.length < 32 { return []; }
+    let mut otk: int[] = [];
+    let mut i: int = 0;
+    loop {
+        if i >= 32 { break; }
+        otk.push(block[i]);
+        i += 1;
+    }
+    return otk;
+}
+
+// Append every byte of `src` to `dst` (arrays are reference-typed, so the
+// caller's buffer grows in place).
+fn _append_bytes(dst: int[], src: int[]) -> void {
+    let mut i: int = 0;
+    loop {
+        if i >= src.length { break; }
+        dst.push(src[i]);
+        i += 1;
+    }
+}
+
+// Append the zero padding that rounds a run of `len` bytes up to the next
+// 16-byte boundary (RFC 8439 §2.8 pad16); nothing when already aligned.
+fn _append_pad16(dst: int[], len: int) -> void {
+    let rem: int = len % 16;
+    if rem == 0 { return; }
+    let pad: int = 16 - rem;
+    let mut i: int = 0;
+    loop {
+        if i >= pad { break; }
+        dst.push(0);
+        i += 1;
+    }
+}
+
+// Append `n` as 8 little-endian bytes (RFC 8439 §2.8 le64). Lengths are
+// small non-negative ints, so the arithmetic shift stays logical.
+fn _append_le64(dst: int[], n: int) -> void {
+    let mut k: int = 0;
+    loop {
+        if k >= 8 { break; }
+        dst.push((n >> (8 * k)) & 255);
+        k += 1;
+    }
+}
+
+// Build the Poly1305 MAC input for the AEAD:
+//   AAD ‖ pad16(AAD) ‖ ciphertext ‖ pad16(ciphertext) ‖ le64(aad_len) ‖ le64(ct_len)
+// (RFC 8439 §2.8).
+fn _mac_input(aad: int[], ciphertext: int[]) -> int[] {
+    let mut data: int[] = [];
+    _append_bytes(data, aad);
+    _append_pad16(data, aad.length);
+    _append_bytes(data, ciphertext);
+    _append_pad16(data, ciphertext.length);
+    _append_le64(data, aad.length);
+    _append_le64(data, ciphertext.length);
+    return data;
+}
+
+// Seal `plaintext` under `key` (32 bytes) and `nonce` (12 bytes) with the
+// additional authenticated data `aad`, per RFC 8439 §2.8. Returns
+// ciphertext‖tag (ciphertext is `plaintext.length` bytes, tag is 16 bytes).
+// Returns [] on a bad key/nonce length (fail-closed).
+fn chacha20poly1305_seal(key: int[], nonce: int[], aad: int[], plaintext: int[]) -> int[] {
+    let empty: int[] = [];
+    if key.length != 32 { return empty; }
+    if nonce.length != 12 { return empty; }
+
+    let otk: int[] = _poly1305_key_gen(key, nonce);
+    // Encrypt with the block counter starting at 1; counter 0 produced the
+    // Poly1305 one-time key above.
+    let ciphertext: int[] = chacha20_xor(key, 1, nonce, plaintext);
+    let mac_data: int[] = _mac_input(aad, ciphertext);
+    let tag: int[] = poly1305_mac(mac_data, otk);
+
+    let mut out: int[] = [];
+    _append_bytes(out, ciphertext);
+    _append_bytes(out, tag);
+    return out;
+}
+
+// Verify and decrypt `ciphertext_with_tag` (ciphertext‖16-byte tag) under
+// `key`/`nonce` and `aad`, per RFC 8439 §2.8. On a valid tag returns
+// `Ok(plaintext)`; on any tampered ciphertext, AAD, key, or nonce it
+// fail-closes with `Err`. The tag check is constant-time (`bits::ct_eq_bytes`,
+// no data-dependent early return), so a forgery cannot be distinguished from a
+// valid tag by timing; decryption runs only after that branch-free compare.
+fn chacha20poly1305_open(key: int[], nonce: int[], aad: int[], ciphertext_with_tag: int[]) -> Result<int[], string> {
+    if key.length != 32 {
+        return Result.Err { error: "chacha20poly1305_open: bad key length" };
+    }
+    if nonce.length != 12 {
+        return Result.Err { error: "chacha20poly1305_open: bad nonce length" };
+    }
+    if ciphertext_with_tag.length < 16 {
+        return Result.Err {
+            error: "chacha20poly1305_open: input shorter than tag"
+        };
+    }
+
+    let ct_len: int = ciphertext_with_tag.length - 16;
+    let mut ciphertext: int[] = [];
+    let mut i: int = 0;
+    loop {
+        if i >= ct_len { break; }
+        ciphertext.push(ciphertext_with_tag[i]);
+        i += 1;
+    }
+    let mut received_tag: int[] = [];
+    let mut j: int = ct_len;
+    loop {
+        if j >= ciphertext_with_tag.length { break; }
+        received_tag.push(ciphertext_with_tag[j]);
+        j += 1;
+    }
+
+    let otk: int[] = _poly1305_key_gen(key, nonce);
+    let mac_data: int[] = _mac_input(aad, ciphertext);
+    let expected_tag: int[] = poly1305_mac(mac_data, otk);
+
+    if !ct_eq_bytes(expected_tag, received_tag) {
+        return Result.Err {
+            error: "chacha20poly1305_open: authentication failed"
+        };
+    }
+
+    let plaintext: int[] = chacha20_xor(key, 1, nonce, ciphertext);
+    return Result.Ok { value: plaintext };
+}
+
+export { chacha20poly1305_seal, chacha20poly1305_open };
