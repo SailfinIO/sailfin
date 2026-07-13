@@ -188,6 +188,10 @@ fn _clock_obj(build_dir: string) -> string {
     return build_dir + "/sailfin/sfn__runtime-native__clock.sfn-O2.o";
 }
 
+fn _clock_ll(build_dir: string) -> string {
+    return build_dir + "/sailfin/sfn__runtime-native__clock.sfn-O2.ll";
+}
+
 // nm <binary> | grep ' [Tt] _?sym' — true if `sym` is a defined text
 // symbol (optional `_` prefix for macOS Mach-O).
 fn _nm_has_defined(obj: string, sym: string) -> boolean ![io] {
@@ -217,6 +221,20 @@ test "runtime sfn-source consumer fires and produces a cached .o/.ll (#308)" ![i
     // marker .ll and .o under the build cache dir.
     assert fs.exists(_marker_ll(build_dir));
     assert fs.exists(_marker_obj(build_dir));
+
+    // SFN-344: the driver self-staged `runtime/sfn/platform/posix`
+    // (clock.sfn's sole cross-module extern import) into this cold
+    // build's private `rt-import-context`, so clock's emit resolves
+    // `nanosleep`/`clock_gettime` to the source-of-truth `%Timespec*`
+    // signature rather than the opaque `i8*` #414 fallback descriptor.
+    // The workspace copies posix.sfn in but pre-populates no
+    // import-context, so a `%Timespec*` declare proves the driver staged
+    // it. Guards against a regression to the fallback form.
+    assert fs.exists(_clock_ll(build_dir));
+    let clock_ir = fs.readFile(_clock_ll(build_dir));
+    assert contains(clock_ir, "@nanosleep(%Timespec*");
+    assert contains(clock_ir, "@clock_gettime(i32, %Timespec*");
+    assert ! contains(clock_ir, "@nanosleep(i8*, i8*)");
 }
 
 // ---- Test 2: the disable gate short-circuits the consumer ----
