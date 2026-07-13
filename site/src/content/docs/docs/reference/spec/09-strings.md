@@ -16,3 +16,6 @@ let nested = "User: {{ user.name.trim() }}"; // arbitrary expressions
 Mandatory double braces. Whitespace at the edges is ignored: `{{name}}` and
 `{{ name }}` are equivalent. The compiler lowers interpolated strings into
 segment arrays evaluated at runtime.
+
+Primitive optional unions such as `int | null` render the active non-null
+payload in direct, flow-narrowed, and match-bound positions.

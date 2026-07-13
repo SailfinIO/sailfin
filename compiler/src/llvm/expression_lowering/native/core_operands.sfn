@@ -1668,6 +1668,23 @@ fn coerce_general_fallback(operand: LLVMOperand, operand_type: string, target: s
                 has_value = true;
                 value_text = operand.value;
             } else {
+                let variant_numeric = coerce_numeric_primitive(operand, operand_type, variant_type, local_temp, local_lines);
+                if variant_numeric != null {
+                    let mut _vndi: int = 0;
+                    loop {
+                        if _vndi >= variant_numeric.diagnostics.length { break; }
+                        diagnostics.push(variant_numeric.diagnostics[_vndi]);
+                        _vndi += 1;
+                    }
+                    if variant_numeric.operand != null {
+                        local_lines = variant_numeric.lines;
+                        local_temp = variant_numeric.temp_index;
+                        has_value = true;
+                        value_text = variant_numeric.operand.value;
+                    }
+                }
+            }
+            if !has_value {
                 let mut _elif78: boolean = false;
                 if !ends_with_pointer_suffix(operand_type) {
                     if ends_with_pointer_suffix(variant_type) { _elif78 = true; }
