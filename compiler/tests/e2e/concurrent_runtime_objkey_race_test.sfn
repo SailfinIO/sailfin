@@ -128,9 +128,18 @@ fn _race_round(base: string, round: int, n: int) -> boolean ![io] {
 
 test "concurrent cold builds do not race on the runtime objkey tmp file" ![io] {
     let base = _scratch_base();
-    // 6 concurrent builds × 2 rounds = 12 cold runtime compiles hammering
-    // the shared cache-key tmp path. Modest fan-out keeps wall-time bounded
-    // while still reliably tripping the pre-fix race.
-    assert _race_round(base, 0, 6);
-    assert _race_round(base, 1, 6);
+    // 3 concurrent builds × 2 rounds. The tmp-file race this guards is
+    // now structurally impossible — `_sha256_of_string` hashes in-process
+    // (`build_cache.sfn`), so there is no shared tmp path left to collide
+    // on — leaving this a concurrent-cold-build smoke test. The fan-out is
+    // capped at 3 (was 6) to bound peak RSS: each cold runtime compile
+    // peaks ~1.3–1.8 GB, and on the memory-constrained macOS-arm64 runner
+    // (~7 GB) this test's burst was the sole amplifier tipping the e2e
+    // pool into OOM — the roaming SIGABRT (exit 134) nightly flake, #1726
+    // / SFN-87. Every peer build-and-run e2e test runs its nested compiles
+    // sequentially (≤1 concurrent); only this one bursts, so bounding it
+    // here bounds the pool-wide peak. 3-way still exercises concurrent
+    // cold runtime compiles.
+    assert _race_round(base, 0, 3);
+    assert _race_round(base, 1, 3);
 }
