@@ -7,5 +7,7 @@ fn main() ![io] {
         null: print("match null");
         _: print("match {{g}}");
     }
+    let label: string | null = "ready";
+    print("label {{label}}");
     print("after");
 }

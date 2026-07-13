@@ -56,6 +56,7 @@ test "union interpolation: optional int payload renders in direct, narrowed, and
     assert expect_eq_bool(find(out, "mid 5 end\n", 0) >= 0, true).ok;
     assert expect_eq_bool(find(out, "narrow 5\n", 0) >= 0, true).ok;
     assert expect_eq_bool(find(out, "match 5\n", 0) >= 0, true).ok;
+    assert expect_eq_bool(find(out, "label ready\n", 0) >= 0, true).ok;
     assert expect_eq_bool(find(out, "after\n", 0) >= 0, true).ok;
     assert expect_eq_bool(find(out, "mid 0 end", 0) < 0, true).ok;
     assert expect_eq_bool(find(out, "match null", 0) < 0, true).ok;

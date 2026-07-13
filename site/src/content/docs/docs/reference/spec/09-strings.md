@@ -18,4 +18,4 @@ Mandatory double braces. Whitespace at the edges is ignored: `{{name}}` and
 segment arrays evaluated at runtime.
 
 Primitive optional unions such as `int | null` render the active non-null
-payload after ordinary flow narrowing and match-bound payload narrowing.
+payload in direct, flow-narrowed, and match-bound positions.
