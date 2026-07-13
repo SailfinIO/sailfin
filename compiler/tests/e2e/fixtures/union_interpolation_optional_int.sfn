@@ -1,0 +1,11 @@
+fn main() ![io] {
+    print("before");
+    let g: int | null = 5;
+    print("mid {{g}} end");
+    if g != null { print("narrow {{g}}"); }
+    match g {
+        null: print("match null");
+        _: print("match {{g}}");
+    }
+    print("after");
+}
