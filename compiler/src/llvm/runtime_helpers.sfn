@@ -1576,7 +1576,7 @@ fn _rh_descriptors_11(descriptors_in: RuntimeHelperDescriptor[]) -> RuntimeHelpe
 
     // #1780 (SFEP-0035 §3.2): the hand-typed `find_char` / `string_starts_with`
     // / `record_eq_flag_message` prelude-mirror rows were removed here. Like the
-    // `char_code` cluster in `_rh_descriptors_04`, these are prelude free
+    // `char_code` cluster in `_rh_descriptors_09`, these are prelude free
     // functions (`runtime/prelude.sfn`) called cross-module by their bare name;
     // their declares are now derived from the source-typed signature set in
     // `compiler/src/llvm/prelude_mirror_signatures.sfn` and driven by

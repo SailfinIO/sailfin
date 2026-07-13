@@ -36,8 +36,9 @@ fn _fixture_src() -> string {
         + "    let c = char_at(\"hello\", 1);\n"
         + "    let idx = find_char(\"hello\", \"l\", 0);\n"
         + "    let sw = string_starts_with(\"hello\", \"he\");\n"
+        + "    let req = record_eq_flag_message(true, \"ok\", true, \"ok\");\n"
         + "    print.info(\"roundtrip=\" + number_to_string(code) + \" at=\" + c + \" idx=\" + number_to_string(idx));\n"
-        + "    if code == 104 { if sw { return 0; } }\n"
+        + "    if code == 104 { if sw { if req { return 0; } } }\n"
         + "    return 1;\n"
         + "}\n";
 }
