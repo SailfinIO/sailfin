@@ -28,8 +28,7 @@ import {
     _mktemp_sibling_cmd,
     _sha256_of_file_cmd,
     _sha256_of_text_file,
-    _shell_read_cmd,
-    _shell_single_quote_arg
+    _shell_read_cmd
 } from "./fs";
 import { sha256_hex_of_string } from "./hash";
 import {
@@ -486,6 +485,70 @@ fn _runtime_obj_key_with_sibling_deps(base_key: string, ctx_root: string, slug: 
     return key;
 }
 
+// SFN-50: the child compiler's environment for a runtime sfn-source
+// emit — the parent's full environment (PATH, HOME, the macOS
+// SDK/toolchain vars the child's clang/ld need, …) with the four
+// build/debug toggles cleared and the legacy-flag-file probe guard
+// forced on. This is the argv-array replacement for the former
+// `sh -c "SAILFIN_X= … SAILFIN_NO_LEGACY_PROBE=1 <self> emit …"` prefix
+// (`sh` is unavailable on native Windows — epic #1485,
+// `docs/proposals/windows-native-selfhost.md` §4.2(C)). `run_capture`
+// takes the child env explicitly (an empty array is the empty
+// environment, never "inherit"), so the parent env is enumerated via
+// `process.environ()` and the managed keys are dropped before the
+// canonical value is appended. Clearing a toggle is a drop, not a
+// `KEY=` empty entry: `_env_flag` (`build_flags.sfn`) reads both an
+// unset and an empty var as false, and dropping avoids a duplicate
+// `KEY=` pair that POSIX `getenv` (first-match) would otherwise let the
+// inherited value shadow.
+fn _runtime_emit_child_env() -> string[] ![io] {
+    let base = process.environ();
+    let mut child_env: string[] = [];
+    let mut i: int = 0;
+    loop {
+        if i >= base.length { break; }
+        let entry = base[i];
+        if !_runtime_env_entry_has_key(entry, "SAILFIN_TRACE_EMIT") && !_runtime_env_entry_has_key(entry, "SAILFIN_SKIP_TYPECHECK")
+            && !_runtime_env_entry_has_key(entry, "SAILFIN_TRACE_TEST_RUNNER")
+            && !_runtime_env_entry_has_key(entry, "SAILFIN_DUMP_TEST_SOURCES")
+            && !_runtime_env_entry_has_key(entry, "SAILFIN_NO_LEGACY_PROBE") {
+            child_env.push(entry);
+        }
+        i += 1;
+    }
+    child_env.push("SAILFIN_NO_LEGACY_PROBE=1");
+    return child_env;
+}
+
+// True when `entry` ("KEY=VALUE" or a bare "KEY") names exactly `key`.
+// Mirrors `cli/commands/test.sfn::_env_entry_has_key`; a private copy
+// keeps this build-driver module self-contained (the two share no
+// env-utility module).
+fn _runtime_env_entry_has_key(entry: string, key: string) -> boolean {
+    let klen: int = key.length;
+    if entry.length < klen { return false; }
+    if !strings_equal(substring(entry, 0, klen), key) { return false; }
+    if entry.length == klen { return true; }
+    return strings_equal(substring(entry, klen, klen + 1), "=");
+}
+
+// SFN-50: re-emit a child emit's captured stdout/stderr on the parent's
+// matching stream. The former `sh -c` path let the child inherit the
+// parent's stdio, so an emit failure's diagnostics reached the terminal
+// directly; `run_capture` stashes them instead, so they are drained and
+// re-printed to preserve that visibility. `print` / `print.err` append
+// a newline, so one trailing newline is stripped for a byte-faithful
+// round-trip; an empty capture prints nothing. Mirrors
+// `cli/commands/test.sfn::_emit_captured_stream`.
+fn _runtime_emit_captured_stream(text: string, to_stderr: boolean) -> void ![io] {
+    if text.length == 0 { return; }
+    let mut out = text;
+    if substring(out, out.length - 1, out.length) == "\n" {
+        out = substring(out, 0, out.length - 1);
+    }
+    if to_stderr { print.err(out); } else { print(out); }
+}
+
 fn _emit_runtime_sfn_to_obj(self_path: string, cap_prefix: string, src: string, out_dir: string, opt_flag: string, shared_cache_root: string, ctx_root: string, compiler_identity: string) -> RuntimeEmitResult ![io] {
     let mut stats = empty_cache_stats();
     let slug = module_name_from_path(src);
@@ -539,10 +602,10 @@ fn _emit_runtime_sfn_to_obj(self_path: string, cap_prefix: string, src: string, 
     stats.misses = stats.misses + 1;
     // Cache miss: regenerate the `.ll` unconditionally (a cached one
     // is stale by definition here), then compile the `.o` and record
-    // the key. Build the `sh -c` argv: each `KEY= ` clears that toggle
-    // for the child; everything else inherits from the parent (PATH,
-    // HOME, PWD, etc.). The shell-quote escaping protects against
-    // paths that contain spaces or shell metacharacters.
+    // the key. The child emit spawns shell-free via `run_capture` with
+    // an explicit argv and the cleared-toggle child env
+    // (`_runtime_emit_child_env`, SFN-50); no argument quoting is needed
+    // since no shell tokenizes the argv.
     // #1288: `--import-context` points at the private rt-import-context
     // root. A module with a staged `.import-deps` sidecar threads its
     // sibling sfn-source signatures into the emit
@@ -550,17 +613,10 @@ fn _emit_runtime_sfn_to_obj(self_path: string, cap_prefix: string, src: string, 
     // without one — including the `prelude-entry`, which shares this
     // emit path but is never staged — reads an absent sidecar, gets an
     // empty dep list, and degrades to the exact pre-#1288 legacy emit.
-    let cmd = "SAILFIN_TRACE_EMIT= SAILFIN_SKIP_TYPECHECK= SAILFIN_TRACE_TEST_RUNNER= SAILFIN_DUMP_TEST_SOURCES= SAILFIN_NO_LEGACY_PROBE=1 "
-        + _shell_single_quote_arg(self_path)
-        + " emit --module-name "
-        + _shell_single_quote_arg(slug)
-        + " --import-context "
-        + _shell_single_quote_arg(ctx_root)
-        + " -o "
-        + _shell_single_quote_arg(ll_path)
-        + " llvm "
-        + _shell_single_quote_arg(src);
-    let rc = process.run(["sh", "-c", cmd]);
+    let emit_argv: string[] = [self_path, "emit", "--module-name", slug, "--import-context", ctx_root, "-o", ll_path, "llvm", src];
+    let rc = process.run_capture(emit_argv, _runtime_emit_child_env());
+    _runtime_emit_captured_stream(process.capture_take_stdout(), false);
+    _runtime_emit_captured_stream(process.capture_take_stderr(), true);
     if rc != 0 {
         print("sfn build: failed to emit runtime sfn-source " + src
             + " (child exit="
@@ -645,22 +701,18 @@ fn _stage_one_runtime_sfn_import_context(self_path: string, src: string, slug: s
     let staged = _mktemp_sibling_cmd(asm_path);
     let mut emit_target: string = asm_path;
     if staged.length > 0 { emit_target = staged; }
-    // Same env-clearing `sh -c` contract as `_emit_runtime_sfn_to_obj`
-    // (see the race-safety note on `_compile_runtime_sfn_sources`).
+    // Same shell-free child-emit contract as `_emit_runtime_sfn_to_obj`
+    // (explicit argv + `_runtime_emit_child_env`, SFN-50; see the
+    // race-safety note on `_compile_runtime_sfn_sources`).
     // `--no-resolve-gate` (#906): this is a build-internal per-module
     // NATIVE emit with no import context of its own, so the lowering
     // dry-run gate would falsely reject the very cross-module calls
     // this staging exists to resolve; the build's LLVM emit stage
     // owns fail-closed.
-    let cmd = "SAILFIN_TRACE_EMIT= SAILFIN_SKIP_TYPECHECK= SAILFIN_TRACE_TEST_RUNNER= SAILFIN_DUMP_TEST_SOURCES= SAILFIN_NO_LEGACY_PROBE=1 "
-        + _shell_single_quote_arg(self_path)
-        + " emit --module-name "
-        + _shell_single_quote_arg(slug)
-        + " --no-resolve-gate -o "
-        + _shell_single_quote_arg(emit_target)
-        + " native "
-        + _shell_single_quote_arg(src);
-    let rc = process.run(["sh", "-c", cmd]);
+    let emit_argv: string[] = [self_path, "emit", "--module-name", slug, "--no-resolve-gate", "-o", emit_target, "native", src];
+    let rc = process.run_capture(emit_argv, _runtime_emit_child_env());
+    _runtime_emit_captured_stream(process.capture_take_stdout(), false);
+    _runtime_emit_captured_stream(process.capture_take_stderr(), true);
     if rc != 0 {
         print("sfn build: failed to stage runtime sfn-source import-context for "
             + src
