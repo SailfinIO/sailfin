@@ -1,9 +1,10 @@
 // End-to-end regression for SFN-343 / GitHub #2281.
 //
 // Interpolating an `int | null` value used to stringify to a null operand,
-// causing the entire print statement to disappear with exit 0. This builds
-// and runs a fixture so the LLVM lowering, union boxing, stringification, and
-// runtime print path all have to agree on the live payload.
+// causing the entire print statement to disappear with exit 0. A null literal
+// in the same union slot later regressed into a null-pointer aggregate load.
+// This builds and runs a fixture so LLVM lowering, union boxing,
+// stringification, and the runtime print path all have to agree on both arms.
 import { find } from "sfn/strings";
 import { expect_eq_bool, expect_eq_int, with_tmp_dir } from "sfn/test";
 
@@ -56,8 +57,8 @@ test "union interpolation: optional int payload renders in direct, narrowed, and
     assert expect_eq_bool(find(out, "mid 5 end\n", 0) >= 0, true).ok;
     assert expect_eq_bool(find(out, "narrow 5\n", 0) >= 0, true).ok;
     assert expect_eq_bool(find(out, "match 5\n", 0) >= 0, true).ok;
+    assert expect_eq_bool(find(out, "null null\n", 0) >= 0, true).ok;
     assert expect_eq_bool(find(out, "label ready\n", 0) >= 0, true).ok;
     assert expect_eq_bool(find(out, "after\n", 0) >= 0, true).ok;
     assert expect_eq_bool(find(out, "mid 0 end", 0) < 0, true).ok;
-    assert expect_eq_bool(find(out, "match null", 0) < 0, true).ok;
 }
