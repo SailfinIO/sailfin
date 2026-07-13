@@ -810,7 +810,21 @@ fn _stage_runtime_sfn_import_context(self_path: string, runtime_capsules: Runtim
 // `module_name_from_path` of its source — the two agree for a runtime
 // relative import, but staging at the resolved slug keeps them aligned
 // even when the source lives in a relocated workspace (the consumer
-// e2e). Fail-closed like the sibling loop above.
+// e2e).
+//
+// Fail-closed applies to a DISCOVERED stageable extern: once a
+// non-sibling relative import resolves to an existing `.sfn`, a failed
+// emit aborts the whole staging pass (return false), exactly like the
+// sibling loop. A relative import whose reconstructed source does NOT
+// exist is intentionally skipped rather than fataled: `_resolve_relative
+// _import_source` yields a candidate path for every relative import, but
+// a non-existent one is not a file-backed platform extern to stage here
+// (a bare capsule spec — `dep_src == ""` — or a directory/aliased import
+// resolved by other staging), so fataling would break legitimate
+// non-platform imports. Any genuinely un-stageable extern degrades to
+// the retained #414 fallback descriptor, and the consumer e2e asserts
+// the canonical `%Timespec*` form so a staging regression fails a test
+// rather than passing silently.
 fn _stage_imported_platform_externs(self_path: string, staged_src_paths: string[], staged_slugs: string[], staged_asm_paths: string[], ctx_root: string, compiler_identity: string) -> boolean ![io] {
     let source_count = staged_slugs.length;
     let mut pi: int = 0;
