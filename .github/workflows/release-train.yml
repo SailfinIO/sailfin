@@ -6,8 +6,9 @@ name: Release Train (cadence)
 # Monday-start cadence (docs/conventions/issue-naming.md "Release tracking").
 # At each train boundary it:
 #
-#   1. Opens or updates the `Release: vX.Y.Z` tracker for the cadence minor
-#      (the next minor of the current capsule.toml version).
+#   1. Opens or updates the `Release: vX.Y.Z` tracker for the cadence minor,
+#      unless the current prerelease line still lacks its stable tag; in that
+#      case it holds on the pending stable tracker instead.
 #   2. Evaluates the *cut gate* — the health of `main` (the latest Nightly
 #      self-host check), NOT the open scope. Whatever scoped work is not done
 #      ROLLS FORWARD to the next train: open `release:next-minor` items are
@@ -127,19 +128,38 @@ jobs:
             }
             note(`Cadence week (ISO week ${week}); event=${context.eventName}, dryRun=${dryRun}.`);
 
-            // --- 1. Compute the cadence minor target --------------------------
-            // Next minor of the current capsule.toml version. e.g.
-            // 0.7.0-alpha.49 -> v0.8.0. release.yml `channel=alpha bump=minor`
-            // produces 0.8.0-alpha.1, which doubles as the cadence seed bump.
+            async function tagExists(tag) {
+              try {
+                await github.rest.git.getRef({ owner, repo, ref: `tags/${tag}` });
+                return true;
+              } catch (e) {
+                if (e.status === 404) return false;
+                throw e;
+              }
+            }
+
+            // --- 1. Compute the cadence target --------------------------------
+            // Normally this is the next minor of the current capsule.toml version
+            // (0.7.0 -> v0.8.0, dispatching 0.8.0-alpha.1). If the current
+            // source version is already on a prerelease line, the stable tag for
+            // that line must ship before the train advances to the next minor.
             const capsule = fs.readFileSync('compiler/capsule.toml', 'utf8');
             const vm = capsule.match(/^version\s*=\s*"([^"]+)"/m);
             if (!vm) { core.setFailed('Could not read version from compiler/capsule.toml'); return; }
-            const cm = vm[1].match(/^(\d+)\.(\d+)\.(\d+)/);
+            const cm = vm[1].match(/^(\d+)\.(\d+)\.(\d+)(-.+)?$/);
             if (!cm) { core.setFailed(`Cannot parse version '${vm[1]}'`); return; }
-            const [maj, min] = [parseInt(cm[1], 10), parseInt(cm[2], 10)];
-            const target = `v${maj}.${min + 1}.0`;
+            const [maj, min, patch] = [parseInt(cm[1], 10), parseInt(cm[2], 10), parseInt(cm[3], 10)];
+            const prerelease = cm[4] || '';
+            const pendingStableTag = `v${maj}.${min}.${patch}`;
+            const stableTagExists = prerelease ? await tagExists(pendingStableTag) : true;
+            const pendingStable = !!prerelease && !stableTagExists;
+            const target = pendingStable ? pendingStableTag : `v${maj}.${min + 1}.0`;
             const trackerTitle = `Release: ${target}`;
-            note(`Current ${vm[1]} → cadence minor target ${target} (tracker "${trackerTitle}").`);
+            if (pendingStable) {
+              note(`Current ${vm[1]} is a prerelease line, and stable tag ${pendingStableTag} does not exist — holding the next minor train until ${pendingStableTag} is promoted.`);
+            } else {
+              note(`Current ${vm[1]} → cadence minor target ${target} (tracker "${trackerTitle}").`);
+            }
 
             // --- 2. Cut gate: health of main (NOT open scope) -----------------
             // The train is time-boxed: open scope rolls forward and never gates
@@ -247,11 +267,13 @@ jobs:
               const gateLine = cutGateClear
                 ? `✅ Cut gate clear — latest nightly self-host on \`${defaultBranch}\` is green.`
                 : `⛔ Cut gate NOT clear — ${nightly ? 'nightly self-host is ' + nightly.conclusion : 'no nightly run found'}; hold the cut until main is green.`;
-              const dispatchLine = cutGateClear
-                ? (isSchedule
-                    ? `**Auto-dispatching.** This scheduled cadence run will dispatch the curated minor (\`channel=alpha bump=minor\` → \`${maj}.${min + 1}.0-alpha.1\`).`
-                    : `**Ready to cut.** To dispatch the curated minor (\`channel=alpha bump=minor\` → \`${maj}.${min + 1}.0-alpha.1\`), re-run the **Release Train** workflow with \`confirm_dispatch=true\`.`)
-                : `**Not cutting.** The train rolls forward; it will re-evaluate next cadence boundary once main is green.`;
+              const dispatchLine = pendingStable
+                ? `**Not advancing.** The \`${pendingStableTag}\` stable tag is missing; promote the current prerelease line before the train can open the next minor alpha.`
+                : (cutGateClear
+                    ? (isSchedule
+                        ? `**Auto-dispatching.** This scheduled cadence run will dispatch the curated minor (\`channel=alpha bump=minor\` → \`${maj}.${min + 1}.0-alpha.1\`).`
+                        : `**Ready to cut.** To dispatch the curated minor (\`channel=alpha bump=minor\` → \`${maj}.${min + 1}.0-alpha.1\`), re-run the **Release Train** workflow with \`confirm_dispatch=true\`.`)
+                    : `**Not cutting.** The train rolls forward; it will re-evaluate next cadence boundary once main is green.`);
               const cadenceBody = [
                 `${cadenceMarker}`, '',
                 `Cadence train boundary reached for **${target}**.`, '',
@@ -274,19 +296,15 @@ jobs:
             // green, they dispatch automatically. Manual runs require explicit
             // confirmation so repair/off-clock cuts stay deliberate.
             const releaseTag = `v${maj}.${min + 1}.0-alpha.1`;
-            async function tagExists(tag) {
-              try {
-                await github.rest.git.getRef({ owner, repo, ref: `tags/${tag}` });
-                return true;
-              } catch (e) {
-                if (e.status === 404) return false;
-                throw e;
-              }
-            }
             const shouldDispatch = isSchedule || confirmDispatch;
             if (shouldDispatch) {
               if (dryRun) {
-                note(`[dry-run] would ${isSchedule ? 'auto-dispatch' : 'dispatch'} release.yml (channel=alpha bump=minor) for ${releaseTag}.`);
+                note(pendingStable
+                  ? `[dry-run] would BLOCK next-minor dispatch because ${pendingStableTag} stable has not shipped.`
+                  : `[dry-run] would ${isSchedule ? 'auto-dispatch' : 'dispatch'} release.yml (channel=alpha bump=minor) for ${releaseTag}.`);
+              } else if (pendingStable) {
+                note(`${isSchedule ? 'Scheduled train' : 'confirm_dispatch'} requested a next-minor cut, but ${pendingStableTag} stable has not shipped — refusing to advance to ${releaseTag}.`);
+                await postSlack(`:warning: Sailfin release train blocked before next minor. Stable ${pendingStableTag} is still pending from ${vm[1]}.\nTracker: ${tracker ? tracker.html_url : trackerTitle}\nRun: https://github.com/${owner}/${repo}/actions/runs/${context.runId}`);
               } else if (!cutGateClear) {
                 note(`${isSchedule ? 'Scheduled train' : 'confirm_dispatch'} requested a cut, but cut gate is NOT clear — refusing to dispatch release.yml on a red main.`);
                 await postSlack(`:warning: Sailfin release train blocked for ${target}. Latest nightly self-host is ${nightly ? nightly.conclusion : 'missing'}.\nTracker: ${tracker ? tracker.html_url : trackerTitle}\nRun: https://github.com/${owner}/${repo}/actions/runs/${context.runId}`);
