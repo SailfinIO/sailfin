@@ -86,6 +86,7 @@ import {
     semver_satisfies_floor
 } from "./semver";
 import { contains_string, substring } from "./string_utils";
+import { test_runner_scratch_root } from "./test_runner_state";
 import {
     toml_get_capabilities_required,
     toml_get_dependencies,
@@ -465,12 +466,17 @@ fn mangle_slug(slug: string) -> string {
 // `sfn test` runs from racing on `build/sailfin/capsules/<slug>.ll`.
 // The multi-file `sfn test` runner mints such a root via `mktemp -d`
 // (issue #850, replacing the retired `scripts/run_native_test.sh`)
-// and hands it to each child via `env`. The env var is read once via
-// the shell printf trick the resolver already uses for
+// and hands it to each child via `env`. Single-file `sfn test` runs set
+// the same root in process-local `test_runner_state`, because their
+// resolver work runs in the current process and cannot mutate its own
+// environment. The env var is read once via the shell printf trick the
+// resolver already uses for
 // `SAILFIN_BUILD_JOBS`; an empty value falls through to the default
 // so that `unset SAILFIN_TEST_SCRATCH` and `SAILFIN_TEST_SCRATCH=`
 // behave identically (no surprise paths on a stripped env).
 fn _cr_scratch_root() -> string ![io] {
+    let active_test_root = test_runner_scratch_root();
+    if active_test_root.length > 0 { return active_test_root; }
     let env = _cr_shell_read("printf '%s' \"$SAILFIN_TEST_SCRATCH\"");
     if env.length > 0 { return env; }
     return "build/sailfin";
