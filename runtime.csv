@@ -99,3 +99,13 @@ db7551f76be6a6130fa6477d3b71795a7e9e8ba2,2026-07-12T08:24:42Z,http_proxy_hotpath
 db7551f76be6a6130fa6477d3b71795a7e9e8ba2,2026-07-12T08:24:42Z,io_throughput,136,137,8532,20000,146.0,ok,0.8.0-alpha.5,Linux x86_64
 db7551f76be6a6130fa6477d3b71795a7e9e8ba2,2026-07-12T08:24:42Z,string_concat,124,127,50764,2000000,15748.0,ok,0.8.0-alpha.5,Linux x86_64
 db7551f76be6a6130fa6477d3b71795a7e9e8ba2,2026-07-12T08:24:42Z,string_find_format,39,40,30956,220000,5500.0,ok,0.8.0-alpha.5,Linux x86_64
+abcfd04eb45c0f795c9fbe5e2dacb3cadab98d0f,2026-07-13T09:16:25Z,arena_alloc,792,813,8504,30000,36.9,ok,0.8.0-alpha.5,Linux x86_64
+abcfd04eb45c0f795c9fbe5e2dacb3cadab98d0f,2026-07-13T09:16:25Z,arena_alloc_for_range,823,824,8504,30000,36.4,ok,0.8.0-alpha.5,Linux x86_64
+abcfd04eb45c0f795c9fbe5e2dacb3cadab98d0f,2026-07-13T09:16:25Z,arena_reset_churn,643,645,779292,12000,18.6,ok,0.8.0-alpha.5,Linux x86_64
+abcfd04eb45c0f795c9fbe5e2dacb3cadab98d0f,2026-07-13T09:16:25Z,array_growth,137,138,100004,12000,87.0,ok,0.8.0-alpha.5,Linux x86_64
+abcfd04eb45c0f795c9fbe5e2dacb3cadab98d0f,2026-07-13T09:16:25Z,array_map_filter,222,222,165532,8000,36.0,ok,0.8.0-alpha.5,Linux x86_64
+abcfd04eb45c0f795c9fbe5e2dacb3cadab98d0f,2026-07-13T09:16:25Z,exception_throw,372,374,8760,150000,401.1,ok,0.8.0-alpha.5,Linux x86_64
+abcfd04eb45c0f795c9fbe5e2dacb3cadab98d0f,2026-07-13T09:16:25Z,http_proxy_hotpath,64,65,48156,12000,184.6,ok,0.8.0-alpha.5,Linux x86_64
+abcfd04eb45c0f795c9fbe5e2dacb3cadab98d0f,2026-07-13T09:16:25Z,io_throughput,170,171,8760,20000,117.0,ok,0.8.0-alpha.5,Linux x86_64
+abcfd04eb45c0f795c9fbe5e2dacb3cadab98d0f,2026-07-13T09:16:25Z,string_concat,133,134,50752,2000000,14925.4,ok,0.8.0-alpha.5,Linux x86_64
+abcfd04eb45c0f795c9fbe5e2dacb3cadab98d0f,2026-07-13T09:16:25Z,string_find_format,42,43,30992,220000,5116.3,ok,0.8.0-alpha.5,Linux x86_64
