@@ -137,3 +137,28 @@ test "chacha20poly1305: seal rejects a bad key length" {
     let out: int[] = chacha20poly1305_seal([1, 2, 3], _rfc_nonce(), _rfc_aad(), _rfc_plaintext());
     assert out.length == 0;
 }
+
+test "chacha20poly1305: seal rejects a bad nonce length" {
+    // An 8-byte nonce is a common malformed input (the RFC 8439 IV without the
+    // 32-bit fixed-common part prepended); seal must fail closed.
+    let short_nonce: int[] = hexb("4041424344454647");
+    let out: int[] = chacha20poly1305_seal(_rfc_key(), short_nonce, _rfc_aad(), _rfc_plaintext());
+    assert out.length == 0;
+}
+
+test "chacha20poly1305: open rejects a bad key length" {
+    let opened: Result<int[], string> = chacha20poly1305_open([1, 2, 3], _rfc_nonce(), _rfc_aad(), _rfc_ciphertext_with_tag());
+    match opened {
+        Result.Ok { value } => { assert false; },
+        Result.Err { error } => { assert true; }
+    }
+}
+
+test "chacha20poly1305: open rejects a bad nonce length" {
+    let short_nonce: int[] = hexb("4041424344454647");
+    let opened: Result<int[], string> = chacha20poly1305_open(_rfc_key(), short_nonce, _rfc_aad(), _rfc_ciphertext_with_tag());
+    match opened {
+        Result.Ok { value } => { assert false; },
+        Result.Err { error } => { assert true; }
+    }
+}
