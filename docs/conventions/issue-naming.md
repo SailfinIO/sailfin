@@ -435,7 +435,7 @@ The train must not skip a stable release line. If `main` is already on a
 prerelease version such as `0.8.0-alpha.N` and the matching stable tag
 (`v0.8.0`) does not exist, the next minor train is held. The workflow comments
 on the pending stable tracker, posts the Slack block notification, and refuses
-to dispatch `channel=alpha bump=minor` for `0.9.0-alpha.1` until the current
+to dispatch `channel=alpha bump=minor` for `v0.9.0-alpha.1` until the current
 stable line has shipped.
 
 Manual cadence workflow runs do **not** dispatch by default. Use
