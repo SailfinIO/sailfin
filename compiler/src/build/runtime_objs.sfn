@@ -627,8 +627,7 @@ fn _runtime_sfn_ctx_root(out_dir: string) -> string {
 // (#1011) so a concurrent reader never observes a torn artifact.
 // The `native` emit stage is import-context-free by design (#906),
 // so staging order across the sfn-sources list does not matter.
-fn _stage_one_runtime_sfn_import_context(self_path: string, src: string, ctx_root: string, compiler_identity: string) -> boolean ![io] {
-    let slug = module_name_from_path(src);
+fn _stage_one_runtime_sfn_import_context(self_path: string, src: string, slug: string, ctx_root: string, compiler_identity: string) -> boolean ![io] {
     let asm_path = ctx_root + "/" + slug + ".sfn-asm";
     // #1996 / SFEP-0044 §3-A: stamped fast path — same shape as the
     // `.o` emit hook. The stamp lives in the warm objdir, which is the
@@ -692,14 +691,15 @@ fn _stage_one_runtime_sfn_import_context(self_path: string, src: string, ctx_roo
     return true;
 }
 
-// Write a module's `.import-deps` sidecar (one staged sibling
-// `.sfn-asm` path per line — the exact shape `_read_import_deps`
-// parses and the resolver's `_cr_stage_import_deps` writes). Only
-// imports that resolve to a STAGED SIBLING sfn-source are listed;
-// platform extern modules (`./platform/posix`, …) are not
-// sfn-sources, keep riding the on-disk #812 artifacts, and a module
-// with no sibling imports gets no sidecar at all — its child emit
-// then degrades to the exact pre-#1288 legacy path.
+// Write a module's `.import-deps` sidecar (one staged `.sfn-asm`
+// path per line — the exact shape `_read_import_deps` parses and the
+// resolver's `_cr_stage_import_deps` writes). An import is listed
+// when its resolved slug is in `staged_slugs`: a staged sibling
+// sfn-source, or (SFN-344) an imported platform extern module staged
+// by `_stage_imported_platform_externs` (e.g. `runtime/sfn/clock.sfn`
+// -> `./platform/posix` for nanosleep/clock_gettime). A module with
+// no such imports gets no sidecar at all — its child emit then
+// degrades to the exact pre-#1288 legacy path.
 fn _write_runtime_sfn_import_deps(asm_path: string, slug: string, ctx_root: string, staged_slugs: string[]) -> void ![io] {
     let deps_path = ctx_root + "/" + slug + ".import-deps";
     let asm_text = fs.readFile(asm_path);
@@ -757,6 +757,7 @@ fn _write_runtime_sfn_import_deps(asm_path: string, slug: string, ctx_root: stri
 fn _stage_runtime_sfn_import_context(self_path: string, runtime_capsules: RuntimeCapsuleArtifacts[], ctx_root: string, compiler_identity: string) -> boolean ![io] {
     let mut staged_slugs: string[] = [];
     let mut staged_asm_paths: string[] = [];
+    let mut staged_src_paths: string[] = [];
     let mut i: int = 0;
     loop {
         if i >= runtime_capsules.length { break; }
@@ -765,18 +766,29 @@ fn _stage_runtime_sfn_import_context(self_path: string, runtime_capsules: Runtim
         loop {
             if si >= cap.sfn_sources.length { break; }
             let src = cap.sfn_sources[si];
-            if !_stage_one_runtime_sfn_import_context(self_path, src, ctx_root, compiler_identity) {
+            let slug = module_name_from_path(src);
+            if !_stage_one_runtime_sfn_import_context(self_path, src, slug, ctx_root, compiler_identity) {
                 return false;
             }
-            let slug = module_name_from_path(src);
             staged_slugs.push(slug);
             staged_asm_paths.push(ctx_root + "/" + slug + ".sfn-asm");
+            staged_src_paths.push(src);
             si += 1;
         }
         i += 1;
     }
-    // Second pass (all siblings now staged): derive each module's
-    // sibling deps from its own `.import` entries.
+    // SFN-344: stage imported platform extern modules (all siblings are
+    // staged above, so their `.import` entries are now readable). A
+    // runtime sfn-source may import a pure `extern fn` platform module
+    // that is not itself an sfn-source — e.g. `runtime/sfn/clock.sfn` ->
+    // `./platform/posix` for `nanosleep`/`clock_gettime`. Without staging
+    // it here the importer's LLVM emit falls back to the opaque #414
+    // descriptor; staging lets it render the source-of-truth signature.
+    if !_stage_imported_platform_externs(self_path, staged_src_paths, staged_slugs, staged_asm_paths, ctx_root, compiler_identity) {
+        return false;
+    }
+    // Second pass (all siblings + imported platform externs now staged):
+    // derive each module's deps from its own `.import` entries.
     let mut di: int = 0;
     loop {
         if di >= staged_slugs.length { break; }
@@ -784,6 +796,92 @@ fn _stage_runtime_sfn_import_context(self_path: string, runtime_capsules: Runtim
         di += 1;
     }
     return true;
+}
+
+// SFN-344: discover and stage the platform extern modules imported by
+// the runtime sfn-sources. `staged_slugs` / `staged_asm_paths` grow in
+// place so the caller's deps-writing pass lists these modules in the
+// importer's `.import-deps` sidecar, and the child `--import-context`
+// emit resolves the extern's real return type (e.g. `nanosleep`'s
+// `%Timespec*` signature) instead of the opaque #414 descriptor.
+//
+// The extern module is staged at the slug the deps writer resolves the
+// import to (`resolve_import_module_slug_for_module`), not at
+// `module_name_from_path` of its source — the two agree for a runtime
+// relative import, but staging at the resolved slug keeps them aligned
+// even when the source lives in a relocated workspace (the consumer
+// e2e). Fail-closed like the sibling loop above.
+fn _stage_imported_platform_externs(self_path: string, staged_src_paths: string[], staged_slugs: string[], staged_asm_paths: string[], ctx_root: string, compiler_identity: string) -> boolean ![io] {
+    let source_count = staged_slugs.length;
+    let mut pi: int = 0;
+    loop {
+        if pi >= source_count { break; }
+        let importer_src = staged_src_paths[pi];
+        let importer_slug = staged_slugs[pi];
+        let asm_text = fs.readFile(staged_asm_paths[pi]);
+        let entries = parse_native_imports_for_import(asm_text);
+        let mut ei: int = 0;
+        loop {
+            if ei >= entries.length { break; }
+            if entries[ei].kind == "import" {
+                let dep_slug = resolve_import_module_slug_for_module(entries[ei].module, importer_slug);
+                if dep_slug.length > 0 && !_slug_already_staged(staged_slugs, dep_slug) {
+                    let dep_src = _resolve_relative_import_source(importer_src, entries[ei].module);
+                    if dep_src.length > 0 && fs.exists(dep_src) {
+                        if !_stage_one_runtime_sfn_import_context(self_path, dep_src, dep_slug, ctx_root, compiler_identity) {
+                            return false;
+                        }
+                        staged_slugs.push(dep_slug);
+                        staged_asm_paths.push(ctx_root + "/" + dep_slug
+                            + ".sfn-asm");
+                    }
+                }
+            }
+            ei += 1;
+        }
+        pi += 1;
+    }
+    return true;
+}
+
+fn _slug_already_staged(staged_slugs: string[], slug: string) -> boolean {
+    let mut i: int = 0;
+    loop {
+        if i >= staged_slugs.length { break; }
+        if staged_slugs[i] == slug { return true; }
+        i += 1;
+    }
+    return false;
+}
+
+// Resolve a relative import string (`./platform/posix`,
+// `../platform/pthread_layout`) against the importing source's
+// directory, returning the `.sfn` source path. A non-relative module
+// (a bare capsule spec) is not a sibling source and returns "".
+fn _resolve_relative_import_source(importer_src: string, module: string) -> string {
+    if !_has_prefix(module, "./") {
+        if !_has_prefix(module, "../") { return ""; }
+    }
+    let mut base = _dirname(importer_src);
+    let mut rel = module;
+    loop {
+        if _has_prefix(rel, "./") {
+            rel = substring(rel, 2, rel.length);
+            continue;
+        }
+        if _has_prefix(rel, "../") {
+            base = _dirname(base);
+            rel = substring(rel, 3, rel.length);
+            continue;
+        }
+        break;
+    }
+    return _path_join(base, rel) + ".sfn";
+}
+
+fn _has_prefix(s: string, prefix: string) -> boolean {
+    if s.length < prefix.length { return false; }
+    return substring(s, 0, prefix.length) == prefix;
 }
 
 fn _compile_runtime_sfn_sources(runtime_capsules: RuntimeCapsuleArtifacts[], out_dir: string, opt_flag: string, binary_dir: string, shared_cache_root: string) -> RuntimeLinkInputs ![io] {

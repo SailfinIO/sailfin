@@ -834,35 +834,17 @@ rebuild-impl:
 		exit 1; \
 	fi; \
 	echo "$$seed" > build/.seed-resolved
-	@# #812: pre-stage the runtime/sfn/platform extern modules with the
-	@# SEED *before* `sfn build -p compiler`. `runtime/sfn/io.sfn` calls
-	@# `write` (from `./platform/libc`) and `runtime/sfn/clock.sfn` calls
-	@# `nanosleep` (from `./platform/posix`); their cold emit during the
-	@# build must read those `.sfn-asm` to resolve the extern return
-	@# types. On a true cold build (no `.ll` cache — e.g. CI `make
-	@# rebuild`) the resolver's staging order is not guaranteed to stage
-	@# these before io.sfn/clock.sfn emit, so the build fails with
-	@# "cannot resolve return type for call to `write`". The seed-emitted
-	@# signatures are good enough for the in-build resolution; the
-	@# post-build block below re-stages them with NATIVE_OUT for the
-	@# canonical (proper-pointee) form. Mirrors the post-stage loop.
-	@mkdir -p build/compiler/import-context/runtime/sfn/platform
-	@seed=$$(cat build/.seed-resolved); \
-	for mod in libc posix pthread net; do \
-		asm_path="build/compiler/import-context/runtime/sfn/platform/$$mod.sfn-asm"; \
-		manifest_path="build/compiler/import-context/runtime/sfn/platform/$$mod.layout-manifest"; \
-		if [ ! -f "$$asm_path" ]; then \
-			echo "[rebuild] pre-staging runtime/sfn/platform/$$mod.sfn-asm (seed)..."; \
-			if ! "$$seed" emit --module-name "runtime/sfn/platform/$$mod" -o "$$asm_path" native "runtime/sfn/platform/$$mod.sfn" >/dev/null 2>&1; then \
-				echo "[rebuild][warn] seed pre-stage failed for platform/$$mod.sfn; post-stage will retry with NATIVE_OUT" >&2; \
-				rm -f "$$asm_path"; \
-			fi; \
-		fi; \
-		if [ -f "$$asm_path" ] && [ ! -f "$$manifest_path" ]; then \
-			grep '^\.layout' "$$asm_path" > "$$manifest_path" 2>/dev/null || :; \
-			[ -f "$$manifest_path" ] || touch "$$manifest_path"; \
-		fi; \
-	done
+	@# SFN-344 retired the #812 seed pre-stage of runtime/sfn/platform/*.
+	@# `sfn build -p compiler` now self-stages the platform extern
+	@# import-context (`runtime/sfn/clock.sfn` -> `./platform/posix` for
+	@# nanosleep/clock_gettime) into its private `rt-import-context` tree
+	@# via `_stage_imported_platform_externs`
+	@# (compiler/src/build/runtime_objs.sfn), so a cold self-host build
+	@# resolves the extern return types with no external pre-staging. The
+	@# stale `write` rationale never applied post-#306 (`runtime/sfn/io.sfn`
+	@# inlines its `write` extern). The post-build block below still stages
+	@# posix + ownedbuf into the SHARED tree — but only as the
+	@# `ci-cross-windows` (SFN-58) prerequisite, not for this build.
 	@# Wipe stale `build/sailfin/program` so the existence check
 	@# below can't be fooled by an old binary surviving a failed
 	@# seed run. The `set -o pipefail` + bash wrapper captures
@@ -946,52 +928,37 @@ rebuild-impl:
 	@# .ll+.o staging that used to live here is gone. ci-cross-windows now emits
 	@# the Windows-target runtime IR itself (self-contained loop below), and the
 	@# installer bundles the runtime .sfn sources (see _package_installer).
-	@# Stage import-context for `runtime/sfn/platform/*.sfn` extern-fn
-	@# modules. `runtime/sfn/clock.sfn` imports `nanosleep` from
-	@# `./platform/posix`, and `runtime/sfn/io.sfn` imports `write`
-	@# from `./platform/libc`; without these `.sfn-asm` artifacts on
-	@# disk, `collect_imported_module_context_for_module`
-	@# (compiler/src/llvm/imports.sfn) falls back to empty native text
-	@# and `render_imported_function_declarations` cannot emit the
-	@# extern's source-of-truth signature. Today's fallback is the
-	@# `seed_default_runtime_helpers` workaround (a forced `nanosleep`
-	@# entry in the helper preamble emits `declare i32 @nanosleep(i8*,
-	@# i8*)` with opaque-pointee types); staging here lets the import
-	@# path emit the proper `declare i32 @nanosleep(%Timespec*,
-	@# %Timespec*)` from posix.sfn instead. Issue #414 closes that
-	@# arc; the workaround entry retires in the same PR. Layout
-	@# manifests are extern-fn-only (no structs/enums), so the
-	@# companion file is intentionally empty — stage_capsule_imports
-	@# does the same when `_cr_extract_layout_manifest` finds no
-	@# `.layout` lines in the emitted asm.
-	@# #812: drop the seed pre-staged platform asm (staged before the
-	@# build for cold-emit resolution) so the loop below re-emits them
-	@# with NATIVE_OUT — the canonical proper-pointee signatures, matching
-	@# the pre-#812 final state.
+	@# Cross-windows (SFN-58) prerequisite: stage `runtime/sfn/platform/posix`
+	@# import-context into the SHARED tree. `ci-cross-windows`'s hand-rolled
+	@# RUNTIME_MODS loop re-emits `runtime/sfn/clock.sfn` standalone (no
+	@# `--import-context`), so its `collect_imported_module_context_for_module`
+	@# reads posix's `nanosleep`/`clock_gettime` signatures from this shared
+	@# default tree. The self-host `sfn build -p compiler` no longer relies on
+	@# this — it self-stages posix into its private `rt-import-context` tree
+	@# (SFN-344, `_stage_imported_platform_externs`). Only `posix` is staged:
+	@# `libc`/`pthread`/`net` are inlined (`#306`), never imported, so their
+	@# shared asm was never read (IR-neutral to drop). posix is extern-fn-only
+	@# (no structs), so the layout-manifest is intentionally empty — mirrors
+	@# `_cr_extract_layout_manifest` when it finds no `.layout` lines.
+	@# The rm forces a canonical NATIVE_OUT re-emit each build.
 	@rm -f build/compiler/import-context/runtime/sfn/platform/*.sfn-asm build/compiler/import-context/runtime/sfn/platform/*.layout-manifest
 	@mkdir -p build/compiler/import-context/runtime/sfn/platform
 	@set -e; \
-	for mod in libc posix pthread net; do \
-		asm_path="build/compiler/import-context/runtime/sfn/platform/$$mod.sfn-asm"; \
-		manifest_path="build/compiler/import-context/runtime/sfn/platform/$$mod.layout-manifest"; \
-		if [ ! -f "$$asm_path" ]; then \
-			echo "[rebuild] staging runtime/sfn/platform/$$mod.sfn-asm..."; \
-			if ! $(NATIVE_OUT) emit --module-name "runtime/sfn/platform/$$mod" -o "$$asm_path" native "runtime/sfn/platform/$$mod.sfn" >/dev/null; then \
-				echo "[rebuild][error] emit native failed for runtime/sfn/platform/$$mod.sfn" >&2; \
-				rm -f "$$asm_path"; \
-				exit 1; \
-			fi; \
-			if [ ! -s "$$asm_path" ]; then \
-				echo "[rebuild][error] emit native produced empty $$asm_path" >&2; \
-				rm -f "$$asm_path"; \
-				exit 1; \
-			fi; \
-		fi; \
-		if [ ! -f "$$manifest_path" ]; then \
-			grep '^\.layout' "$$asm_path" > "$$manifest_path" 2>/dev/null || :; \
-			[ -f "$$manifest_path" ] || touch "$$manifest_path"; \
-		fi; \
-	done
+	asm_path="build/compiler/import-context/runtime/sfn/platform/posix.sfn-asm"; \
+	manifest_path="build/compiler/import-context/runtime/sfn/platform/posix.layout-manifest"; \
+	echo "[rebuild] staging runtime/sfn/platform/posix.sfn-asm (cross-windows)..."; \
+	if ! $(NATIVE_OUT) emit --module-name "runtime/sfn/platform/posix" -o "$$asm_path" native "runtime/sfn/platform/posix.sfn" >/dev/null; then \
+		echo "[rebuild][error] emit native failed for runtime/sfn/platform/posix.sfn" >&2; \
+		rm -f "$$asm_path"; \
+		exit 1; \
+	fi; \
+	if [ ! -s "$$asm_path" ]; then \
+		echo "[rebuild][error] emit native produced empty $$asm_path" >&2; \
+		rm -f "$$asm_path"; \
+		exit 1; \
+	fi; \
+	grep '^\.layout' "$$asm_path" > "$$manifest_path" 2>/dev/null || :; \
+	[ -f "$$manifest_path" ] || touch "$$manifest_path"
 	@# #1289 (#1283 Gap 1): runtime/sfn/string.sfn imports OwnedBuf /
 	@# owned_buf_new / owned_buf_append from ./memory/ownedbuf. The
 	@# hand-rolled cross-windows RUNTIME_MODS loop (ci-cross-windows)
