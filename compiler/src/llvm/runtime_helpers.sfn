@@ -1291,37 +1291,13 @@ fn _rh_descriptors_09(descriptors_in: RuntimeHelperDescriptor[]) -> RuntimeHelpe
     descriptors = append_runtime_helper(descriptors, RuntimeHelperDescriptor {
         target: "string.cmp_lv", symbol: "sfn_str_cmp_lv", return_type: "i32", parameter_types: ["i8*", "i64", "i8*", "i64"], effects: [], native_signature: null, c_abi_return_type: null
     });
-    descriptors = append_runtime_helper(descriptors, RuntimeHelperDescriptor {
-        target: "char_code", symbol: "char_code", return_type: "i64", parameter_types: ["{i8*, i64}"], effects: [], native_signature: null, c_abi_return_type: null
-    });
-    // #1572: `char_at(value, index)` — bare-name descriptor mirroring the
-    // `char_from_code` / `char_code` rows below/above. `char_at` is a prelude
-    // free function (`runtime/prelude.sfn`); modules that call it without
-    // importing the prelude (e.g. `sfn/strings`'s `to_upper`/`to_lower`)
-    // resolve through `context_functions` on a normal build, but the test
-    // command path never loads the prelude `.sfn-asm`, so the callee signature
-    // was unknown and lowering emitted a spurious `cannot resolve return type`
-    // [fatal]. This row resolves the return type (`{i8*, i64}`, matching the
-    // prelude's emitted `{i8*, i64} @char_at({i8*, i64}, i64)`) so the call
-    // lowers to `call {i8*, i64} @char_at` and links to the prelude body.
-    // `native_signature: null` — the symbol IS the prelude function; self-host
-    // is unaffected since `find_function_by_name_or_import` resolves `char_at`
-    // before this descriptor is ever consulted.
-    descriptors = append_runtime_helper(descriptors, RuntimeHelperDescriptor {
-        target: "char_at", symbol: "char_at", return_type: "{i8*, i64}", parameter_types: ["{i8*, i64}", "i64"], effects: [], native_signature: null, c_abi_return_type: null
-    });
-    // #874: `char_from_code(code)` — raw single-byte string constructor, the
-    // write counterpart to `char_code`'s read. Bare-name descriptor so user
-    // call sites resolve the return type and emit `call i8* @char_from_code`,
-    // linking to the prelude's `char_from_code` definition (which forwards to
-    // the C `sfn_str_from_byte` trampoline). `native_signature: null` — same
-    // shape as the `char_code` row above; the symbol IS the prelude function.
-    // Self-host is unaffected: the prelude's own body resolves through its
-    // inline `extern fn sfn_str_from_byte` / function entry (#633), not this
-    // descriptor, so the seed never needs the row to build the prelude.
-    descriptors = append_runtime_helper(descriptors, RuntimeHelperDescriptor {
-        target: "char_from_code", symbol: "char_from_code", return_type: "i8*", parameter_types: ["i64"], effects: [], native_signature: null, c_abi_return_type: null
-    });
+    // #1780 (SFEP-0035 §3.2): the hand-typed `char_code` / `char_at` /
+    // `char_from_code` prelude-mirror rows were removed here. Their declares and
+    // call-return shapes are now derived from the source-typed signature set in
+    // `compiler/src/llvm/prelude_mirror_signatures.sfn`, lowered through the same
+    // `map_return_type` / `collect_parameter_types` an imported prelude call
+    // uses — so an ABI move never needs a mirror edit, and `char_from_code` is
+    // corrected from the old `i8*` row to the prelude's real `{i8*, i64}` shape.
     // M2.5 (#403): the bare `number_to_string` C trampoline (a one-line
     // wrapper around `sailfin_runtime_number_to_string`) becomes
     // unreferenced once this descriptor targets the wave-2
@@ -1597,24 +1573,15 @@ fn _rh_descriptors_11(descriptors_in: RuntimeHelperDescriptor[]) -> RuntimeHelpe
     descriptors = append_runtime_helper(descriptors, RuntimeHelperDescriptor {
         target: "fs.read_bytes", symbol: "sfn_fs_read_bytes", return_type: "i8*", parameter_types: ["i8*", "i8*"], effects: ["io"], native_signature: "sfn_fs_read_bytes", c_abi_return_type: null
     });
-    // Prelude functions called directly by their original name.
-    // These are defined in runtime/prelude.sfn and compiled into
-    // runtime__prelude.ll.  Cross-module calls reference them as
-    // @find_char, etc. — they need declares in every module that
-    // calls them.
-    // Note: monotonic_millis is already registered above (target:
-    // "monotonic_millis" → sfn_clock_millis) so it is not duplicated
-    // here.
-    descriptors = append_runtime_helper(descriptors, RuntimeHelperDescriptor {
-        target: "find_char", symbol: "find_char", return_type: "i64", parameter_types: ["{i8*, i64}", "{i8*, i64}", "i64"], effects: [], native_signature: null, c_abi_return_type: null
-    });
-    descriptors = append_runtime_helper(descriptors, RuntimeHelperDescriptor {
-        target: "string_starts_with", symbol: "string_starts_with", return_type: "i1", parameter_types: ["{i8*, i64}", "{i8*, i64}"], effects: [], native_signature: null, c_abi_return_type: null
-    });
-    descriptors = append_runtime_helper(descriptors, RuntimeHelperDescriptor {
-        target: "record_eq_flag_message", symbol: "record_eq_flag_message", return_type: "i1", parameter_types: ["i1", "{i8*, i64}", "i1", "{i8*, i64}"], effects: [], native_signature: null, c_abi_return_type: null
-    });
 
+    // #1780 (SFEP-0035 §3.2): the hand-typed `find_char` / `string_starts_with`
+    // / `record_eq_flag_message` prelude-mirror rows were removed here. Like the
+    // `char_code` cluster in `_rh_descriptors_09`, these are prelude free
+    // functions (`runtime/prelude.sfn`) called cross-module by their bare name;
+    // their declares are now derived from the source-typed signature set in
+    // `compiler/src/llvm/prelude_mirror_signatures.sfn` and driven by
+    // `collect_prelude_mirror_symbols_from_lines`. (monotonic_millis stays
+    // registered above as `monotonic_millis` → `sfn_clock_millis`.)
     return descriptors;
 }
 

@@ -1,0 +1,92 @@
+// compiler/src/llvm/prelude_mirror_signatures.sfn
+//
+// Source-typed signature set for the six prelude "mirror" free functions
+// (`runtime/prelude.sfn`) that modules call without importing the prelude, via
+// the E0420 implicit-runtime typecheck allowance (`char_code`, `char_at`,
+// `char_from_code`, `find_char`, `string_starts_with`, `record_eq_flag_message`).
+//
+// SFEP-0035 §3.2 (#1780) replaced the hand-typed LLVM-shape mirror rows in
+// `runtime_helpers.sfn` with these source-level signatures. The declare-emitter
+// (`render_runtime_helper_declarations` in `rendering.sfn`) and the call-return
+// resolver (`resolve_call_signature` in
+// `expression_lowering/native/core_call_resolution.sfn`) lower them through the
+// same `map_return_type` / `collect_parameter_types` a real imported prelude
+// function goes through — so an ABI-lowering move (e.g. the SFEP-0033
+// `{i8*, i64}` length-aware string ABI) is absorbed automatically and never
+// needs a mirror edit. That is the drift class this set structurally closes.
+//
+// `char_from_code` carries the prelude's real `(code: int) -> string` shape,
+// which lowers to `{i8*, i64}` — correcting the old registry row's `i8*`, a
+// pre-existing latent ABI drift (SFEP-0035 §2.1) masked only because System V
+// x86-64 returns the pointer field in `rax`.
+//
+// The reconciliation guard (SFN-89, retargeted in `rendering.sfn`) proves each
+// entry still matches the prelude define on any build where the symbol is
+// imported; the unit shape test pins the derived LLVM shapes for all six.
+//
+// Invariant: these six are declared by scanning emitted `call @<sym>(` sites
+// (`collect_prelude_mirror_symbols_from_lines`), so a bare function-pointer use
+// (`@char_code` not followed by `(` — passed to `map`, stored in a vtable) would
+// NOT be seen and would emit no declare. None of the six is a first-class value
+// today. If one ever becomes one, extend that scan (or reinstate an
+// unconditional declare) rather than assuming a call site exists.
+import { NativeFunction, NativeParameter } from "../native_ir";
+
+// The enumerated mirror names. A fast membership check (no allocation) for the
+// per-call-site and per-line scan paths.
+fn is_prelude_mirror_symbol(name: string) -> boolean {
+    if name == "char_code" { return true; }
+    if name == "char_at" { return true; }
+    if name == "char_from_code" { return true; }
+    if name == "find_char" { return true; }
+    if name == "string_starts_with" { return true; }
+    if name == "record_eq_flag_message" { return true; }
+    return false;
+}
+
+fn _mirror_param(type_annotation: string) -> NativeParameter {
+    return NativeParameter {
+        name: "p",
+        type_annotation: type_annotation,
+        mutable: false,
+        default_value: null,
+        span: null
+    };
+}
+
+fn _mirror_fn(name: string, return_type: string, parameter_types: string[]) -> NativeFunction {
+    let mut params: NativeParameter[] = [];
+    let mut index: int = 0;
+    loop {
+        if index >= parameter_types.length { break; }
+        params.push(_mirror_param(parameter_types[index]));
+        index += 1;
+    }
+    return NativeFunction {
+        name: name,
+        is_async: false,
+        parameters: params,
+        return_type: return_type,
+        effects: [],
+        decorators: [],
+        is_extern: true,
+        instructions: []
+    };
+}
+
+// The six prelude mirror signatures in source-level types (lowered to LLVM by
+// the caller). Order is stable so derived declares emit deterministically.
+fn prelude_mirror_signatures() -> NativeFunction[] {
+    return [_mirror_fn("char_code", "int", ["string"]), _mirror_fn("char_at", "string", ["string", "int"]), _mirror_fn("char_from_code", "string", ["int"]), _mirror_fn("find_char", "int", ["string", "string", "int"]), _mirror_fn("string_starts_with", "boolean", ["string", "string"]), _mirror_fn("record_eq_flag_message", "boolean", ["boolean", "string", "boolean", "string"])];
+}
+
+fn find_prelude_mirror_signature(name: string) -> NativeFunction? {
+    let sigs = prelude_mirror_signatures();
+    let mut index: int = 0;
+    loop {
+        if index >= sigs.length { break; }
+        if sigs[index].name == name { return sigs[index]; }
+        index += 1;
+    }
+    return null;
+}

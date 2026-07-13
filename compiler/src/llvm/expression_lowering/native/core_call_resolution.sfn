@@ -7,6 +7,7 @@ import { find_last_index_of_char, index_of, substring } from "../../../string_ut
 import { is_atomic_builtin, lower_atomic_builtin } from "../../atomics";
 import { is_byte_load_builtin, lower_byte_load } from "../../byte_load";
 import { is_simple_identifier } from "../../expressions_helpers";
+import { find_prelude_mirror_signature } from "../../prelude_mirror_signatures";
 import { find_function_by_name, find_function_by_name_or_import } from "../../rendering_helpers";
 import { find_runtime_helper, make_concat_descriptor, make_push_descriptor } from "../../runtime_helpers";
 import { empty_string_constant_set, merge_string_constants } from "../../strings";
@@ -1632,9 +1633,22 @@ fn resolve_call_signature(trimmed_target: string, helper_descriptor: RuntimeHelp
             llvm_return = descriptor.return_type;
             expected_params = descriptor.parameter_types;
         } else {
-            result_diagnostics.push("llvm lowering: call to unknown function `"
-                + result_target
-                + "`");
+            // #1780 (SFEP-0035 §3.2): a prelude free function called without
+            // importing the prelude (the E0420 implicit-runtime allowance has
+            // no emit-layer counterpart, so `function_entry` is null here).
+            // Derive its return/parameter shape from the source-typed mirror
+            // signature via the same `map_return_type`/`collect_parameter_types`
+            // an imported call would use — replacing the hand-typed
+            // `runtime_helpers.sfn` mirror rows (removed with this change).
+            let mirror_sig = find_prelude_mirror_signature(result_target);
+            if mirror_sig != null {
+                llvm_return = map_return_type(context, mirror_sig.return_type);
+                expected_params = collect_parameter_types(context, mirror_sig.parameters, result_target);
+            } else {
+                result_diagnostics.push("llvm lowering: call to unknown function `"
+                    + result_target
+                    + "`");
+            }
         }
     }
 
