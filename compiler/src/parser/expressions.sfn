@@ -1295,20 +1295,19 @@ fn parse_postfix_chain(state: ExpressionTokens, expression: Expression) -> Expre
             };
             continue;
         }
-        // Turbofish call `f<T1, T2>(args)` (SFN-329). A bare `<` in postfix
-        // position is ambiguous with the less-than comparison operator, so we
-        // speculatively scan a balanced `< ... >` type-argument list and
-        // COMMIT to a generic call only when `(` immediately follows the
-        // closing `>`. A `<` that does not fit that shape is left unconsumed
-        // and breaks the chain, so the precedence climb parses it as a
-        // comparison (`x < y > z` is unchanged). Gated to an `Identifier`
-        // callee — member turbofish (`x.f<T>()`) is out of scope (SFN-329).
+        // Type-argument postfixes `f<T>(args)` (SFN-329) and
+        // `Box<T> { ... }` (SFN-342). A bare `<` in postfix position is
+        // ambiguous with less-than, so the helper scans a balanced `<...>`
+        // once and commits only when `(` or `{` follows. Other shapes stay
+        // comparisons (`x < y > z` and `a < b` are unchanged). Gated to an
+        // `Identifier` callee/target; member turbofish (`x.f<T>()`) remains
+        // out of scope (SFN-329).
         if strings_equal(sym, "<") {
             if current_expression.variant == "Identifier" {
-                let turbofish = parse_turbofish_call(current_state, current_expression);
-                if turbofish.success {
-                    current_state = turbofish.state;
-                    current_expression = turbofish.expression;
+                let generic = parse_type_argument_postfix(current_state, current_expression);
+                if generic.success {
+                    current_state = generic.state;
+                    current_expression = generic.expression;
                     continue;
                 }
             }
@@ -1384,19 +1383,72 @@ fn parse_postfix_chain(state: ExpressionTokens, expression: Expression) -> Expre
 }
 
 // ============================================================================
-// Turbofish Call Disambiguation (SFN-329)
+// Type-Argument Postfix Disambiguation (SFN-329 / SFN-342)
 // ============================================================================
-// `state` is positioned at the `<` that follows a turbofish-eligible callee.
-// Speculatively scan a balanced `< ... >` type-argument list and, only when
-// `(` immediately follows the closing `>`, parse the call arguments and return
-// a `Call` carrying the explicit `type_arguments`. Any shape that is not
-// `<types>(` — an unbalanced list, an empty `<>`, or a `>` not followed by `(`
-// — returns `success:false` with the ORIGINAL `state` untouched, so the caller
-// leaves the `<` for the precedence climb to parse as a comparison. Nested
-// generic arguments (`f<Map<int, string>>(x)`) are supported via `>>`-degluing,
-// mirroring `read_cast_target`. The loop is input-driven, so it is bounded by a
-// guard counter.
-fn parse_turbofish_call(state: ExpressionTokens, callee: Expression) -> ExpressionParseResult {
+struct TypeArgumentListScanResult {
+    state: ExpressionTokens;
+    type_arguments: TypeAnnotation[];
+    success: boolean;
+}
+
+// `state` is positioned at the `<` after an identifier. Speculatively scan a
+// balanced `< ... >` once, then commit based on the token that follows:
+// `(` produces a turbofish `Call`, `{` produces an explicit type-argument
+// struct literal, and every other shape leaves `<` for comparison parsing.
+fn parse_type_argument_postfix(state: ExpressionTokens, target: Expression) -> ExpressionParseResult {
+    if target.variant != "Identifier" {
+        return expression_parse_failure(state);
+    }
+
+    let scanned = scan_type_argument_list(state);
+    if !scanned.success { return expression_parse_failure(state); }
+    if expression_tokens_is_at_end(scanned.state) {
+        return expression_parse_failure(state);
+    }
+
+    let next = expression_tokens_peek(scanned.state);
+    if next.kind.variant != "Symbol" {
+        return expression_parse_failure(state);
+    }
+
+    if strings_equal(next.lexeme, "(") {
+        let call_result = parse_call_arguments(scanned.state);
+        if !call_result.success { return expression_parse_failure(state); }
+
+        return ExpressionParseResult {
+            state: call_result.state,
+            expression: Expression.Call {
+                callee: target,
+                arguments: call_result.arguments,
+                span: null,
+                type_arguments: scanned.type_arguments
+            },
+            success: true
+        };
+    }
+
+    if strings_equal(next.lexeme, "{") {
+        let fields_result = parse_object_literal(expression_tokens_advance(scanned.state));
+        if !fields_result.success { return expression_parse_failure(state); }
+
+        return ExpressionParseResult {
+            state: fields_result.state,
+            expression: Expression.Struct {
+                type_name: [target.name + format_type_argument_list(scanned.type_arguments)],
+                fields: fields_result.fields
+            },
+            success: true
+        };
+    }
+
+    return expression_parse_failure(state);
+}
+
+// Scan a balanced `< ... >` type-argument list. Nested generic arguments
+// (`Box<Map<int, string>>`) are supported via `>>` degluing, mirroring
+// `read_cast_target`. A failed scan leaves the caller free to parse `<` as a
+// comparison operator.
+fn scan_type_argument_list(state: ExpressionTokens) -> TypeArgumentListScanResult {
     // Consume the opening `<` (the caller confirmed it).
     let mut cursor = expression_tokens_advance(state);
     let mut type_arguments: TypeAnnotation[] = [];
@@ -1413,9 +1465,19 @@ fn parse_turbofish_call(state: ExpressionTokens, callee: Expression) -> Expressi
 
     loop {
         guard += 1;
-        if guard > 100000 { return expression_parse_failure(state); }
+        if guard > 100000 {
+            return TypeArgumentListScanResult {
+                state: state,
+                type_arguments: [],
+                success: false
+            };
+        }
         if expression_tokens_is_at_end(cursor) {
-            return expression_parse_failure(state);
+            return TypeArgumentListScanResult {
+                state: state,
+                type_arguments: [],
+                success: false
+            };
         }
         let tok = expression_tokens_peek(cursor);
         if tok.kind.variant != "Symbol" {
@@ -1468,7 +1530,11 @@ fn parse_turbofish_call(state: ExpressionTokens, callee: Expression) -> Expressi
                 cursor = expression_tokens_advance(cursor);
             } else {
                 // `angle_depth == 1`: a stray second `>` — not a turbofish.
-                return expression_parse_failure(state);
+                return TypeArgumentListScanResult {
+                    state: state,
+                    type_arguments: [],
+                    success: false
+                };
             }
         } else if strings_equal(lx, ">") {
             angle_depth -= 1;
@@ -1501,33 +1567,31 @@ fn parse_turbofish_call(state: ExpressionTokens, callee: Expression) -> Expressi
     if current_text.length > 0 {
         type_arguments.push(TypeAnnotation { text: current_text });
     }
-    if type_arguments.length == 0 { return expression_parse_failure(state); }
-
-    // Commit only when `(` immediately follows the type-argument list.
-    if expression_tokens_is_at_end(cursor) {
-        return expression_parse_failure(state);
-    }
-    let paren = expression_tokens_peek(cursor);
-    if paren.kind.variant != "Symbol" {
-        return expression_parse_failure(state);
-    }
-    if !strings_equal(paren.lexeme, "(") {
-        return expression_parse_failure(state);
+    if type_arguments.length == 0 {
+        return TypeArgumentListScanResult {
+            state: state,
+            type_arguments: [],
+            success: false
+        };
     }
 
-    let call_result = parse_call_arguments(cursor);
-    if !call_result.success { return expression_parse_failure(state); }
-
-    return ExpressionParseResult {
-        state: call_result.state,
-        expression: Expression.Call {
-            callee: callee,
-            arguments: call_result.arguments,
-            span: null,
-            type_arguments: type_arguments
-        },
+    return TypeArgumentListScanResult {
+        state: cursor,
+        type_arguments: type_arguments,
         success: true
     };
+}
+
+fn format_type_argument_list(type_arguments: TypeAnnotation[]) -> string {
+    let mut text: string = "<";
+    let mut index: int = 0;
+    loop {
+        if index >= type_arguments.length { break; }
+        if index > 0 { text = text + ", "; }
+        text = text + type_arguments[index].text;
+        index += 1;
+    }
+    return text + ">";
 }
 
 // ============================================================================

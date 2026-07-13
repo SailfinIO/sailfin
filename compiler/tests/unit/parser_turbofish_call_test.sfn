@@ -84,6 +84,21 @@ test "turbofish: nested generic type argument deglues the double close" ![io] {
 }
 
 // -------------------------------------------------------------------
+// A generic struct literal `Box<int> { ... }` shares the same `<...>`
+// ambiguity as turbofish calls, but commits when `{` follows the balanced
+// type-argument list. It must parse as a `Struct`, not `(Box < int) > {...}`.
+// -------------------------------------------------------------------
+test "turbofish: explicit type-argument struct literal parses as Struct" ![io] {
+    let init = first_initializer("let x = Box<int> { value: 42 };");
+    assert init.variant == "Struct";
+    assert init.type_name.length == 1;
+    assert init.type_name[0] == "Box<int>";
+    assert init.fields.length == 1;
+    assert init.fields[0].name == "value";
+    assert init.fields[0].value.variant == "NumberLiteral";
+}
+
+// -------------------------------------------------------------------
 // No regression: a genuine comparison chain `a < b > c` (no callee/`(`
 // shape) still parses as a comparison, not a turbofish call.
 // -------------------------------------------------------------------

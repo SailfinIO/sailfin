@@ -109,6 +109,15 @@ test "monomorphize struct e2e: Box<int> emits a concrete specialized struct type
     assert _count_match(ir, "%Box ", "= type") == 0;
 }
 
+test "monomorphize struct e2e: explicit type-argument literal reads back 42" ![io] {
+    let dir = _scratch_dir();
+    let marker = dir + "/sfn-mono-explicit-struct.out";
+    if fs.exists(marker) { fs.deleteFile(marker); }
+    let exit = _build_and_run("compiler/tests/e2e/fixtures/explicit_type_args_struct_literal.sfn", "explicitstruct", marker);
+    assert exit == 42;
+    if fs.exists(marker) { fs.deleteFile(marker); }
+}
+
 test "monomorphize struct e2e: Pair<int, string> both fields read back" ![io] {
     let dir = _scratch_dir();
     let marker = dir + "/sfn-mono-pair.out";

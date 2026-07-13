@@ -113,6 +113,7 @@ import {
     enter_test_runner_mode,
     exit_test_runner_mode,
     set_test_filters,
+    set_test_scratch_root,
     test_decl_is_matching_test,
     test_decl_matches_filters,
     test_filters_active
@@ -425,10 +426,13 @@ fn run(matches: Matches, ctx: CliContext) -> int ![clock, io, net] {
     _ensure_dir_cmd("build");
     _ensure_dir_cmd("build/sailfin");
     // Capture whether the caller pinned the scratch root before
-    // resolving it: the multi-file path mints an ephemeral `mktemp`
-    // root (and owns its cleanup) only when this is empty.
+    // resolving it. Unpinned test invocations get an ephemeral root so
+    // separate `sfn test <file>` processes cannot race on
+    // `build/sailfin/test.ll` or resolver capsule `.ll` paths.
     let scratch_env = _get_env_cmd("SAILFIN_TEST_SCRATCH");
-    let scratch_root = _test_scratch_root();
+    let scratch_choice = _resolve_test_scratch_root(scratch_env);
+    let scratch_root = scratch_choice.root;
+    let scratch_owned = scratch_choice.owned;
     _ensure_dir_cmd(scratch_root);
     _ensure_dir_cmd(scratch_root + "/test-o0");
     // Sub-frame mode (#1121): set by the multi-file parent on each child
@@ -449,6 +453,7 @@ fn run(matches: Matches, ctx: CliContext) -> int ![clock, io, net] {
     let trace_runner = _env_flag("SAILFIN_TRACE_TEST_RUNNER")
         || _legacy_flag_file("build/sailfin/.trace_test_runner");
     enter_test_runner_mode(trace_runner);
+    set_test_scratch_root(scratch_root);
 
     // Walk each suite's path for `_test.sfn` files. `file_suite_index`
     // tracks the originating suite per file so the loop can attribute
@@ -546,6 +551,7 @@ fn run(matches: Matches, ctx: CliContext) -> int ![clock, io, net] {
                 print(render_summary_event(0, 0, 0, 0, 0, 0));
             }
             exit_test_runner_mode();
+            _cleanup_test_scratch(scratch_owned, scratch_root, true);
             return 0;
         }
         let mut hi: int = 0;
@@ -558,6 +564,7 @@ fn run(matches: Matches, ctx: CliContext) -> int ![clock, io, net] {
         }
         if emit_banners { _emit_suite_banners(suites); }
         exit_test_runner_mode();
+        _cleanup_test_scratch(scratch_owned, scratch_root, true);
         return 0;
     }
 
@@ -593,34 +600,10 @@ fn run(matches: Matches, ctx: CliContext) -> int ![clock, io, net] {
         // `scripts/run_native_test.sh` (issue #850). The script ran
         // each test under a fresh `mktemp -d` and removed it on
         // success (preserving on failure for post-mortem); the runner
-        // owns that lifecycle now. Only when the caller didn't pin
-        // `SAILFIN_TEST_SCRATCH` — seedcheck/stage3 set it explicitly
-        // and manage their own tree. Safe here (and only here)
-        // because the multi-file path only orchestrates child
-        // subprocesses, handing each its scratch via `env`; no
-        // in-process resolver runs against this root, so the
-        // read-only runtime env contract (no `setenv`) isn't the
-        // problem it would be on the single-file leaf path.
-        let mut sub_root = scratch_root;
-        let mut scratch_owned = false;
-        if scratch_env.length == 0 {
-            // Honor TMPDIR (macOS CI points it at /var/folders/...,
-            // and contributors may aim it at tmpfs/quota dirs),
-            // falling back to /tmp — matching the deleted wrapper's
-            // `${TMPDIR:-/tmp}`. Resolved Sailfin-side via _get_env_cmd
-            // rather than shell `${VAR:-default}` expansion because
-            // `${` is the reserved (parser-pending) interpolation
-            // sigil and isn't safe to embed in a string literal.
-            let mut tmp_base = _get_env_cmd("TMPDIR");
-            if tmp_base.length == 0 { tmp_base = "/tmp"; }
-            tmp_base = _strip_trailing_slashes_cmd(tmp_base);
-            let tmp = _shell_read_cmd("mktemp -d \"" + tmp_base
-                + "/sfn-test-XXXXXX\"");
-            if tmp.length > 0 {
-                sub_root = tmp;
-                scratch_owned = true;
-            }
-        }
+        // owns that lifecycle now. Command entry resolves the root once:
+        // caller-pinned `SAILFIN_TEST_SCRATCH` roots are preserved, and
+        // unpinned roots are cleaned after success.
+        let sub_root = scratch_root;
         // Per-test wall-clock cap, also ported from the wrapper. Wraps
         // each `<self> test <file>` child — the exact shape the script
         // used to `timeout`. A child killed by the cap exits 124 and
@@ -1041,6 +1024,7 @@ fn run(matches: Matches, ctx: CliContext) -> int ![clock, io, net] {
             // Resolver already emitted a structured error to stderr
             // (slug collision, stage-write, or compile failure).
             exit_test_runner_mode();
+            _cleanup_test_scratch(scratch_owned, scratch_root, false);
             return 2;
         }
         // Single-pass loader: returns both the parsed interface set
@@ -1446,6 +1430,7 @@ fn run(matches: Matches, ctx: CliContext) -> int ![clock, io, net] {
         _emit_suite_banners(suites);
     }
     exit_test_runner_mode();
+    _cleanup_test_scratch(scratch_owned, scratch_root, overall_rc == 0);
     return overall_rc;
 }
 
@@ -1659,6 +1644,32 @@ fn _test_scratch_root() -> string ![io] {
     let env = _get_env_cmd("SAILFIN_TEST_SCRATCH");
     if env.length > 0 { return env; }
     return "build/sailfin";
+}
+
+struct TestScratchRoot {
+    root: string;
+    owned: boolean;
+}
+
+fn _resolve_test_scratch_root(scratch_env: string) -> TestScratchRoot ![io] {
+    if scratch_env.length > 0 {
+        return TestScratchRoot { root: scratch_env, owned: false };
+    }
+
+    // Honor TMPDIR (macOS CI points it at /var/folders/..., and
+    // contributors may aim it at tmpfs/quota dirs), falling back to /tmp.
+    // Resolved Sailfin-side via _get_env_cmd rather than shell
+    // `${VAR:-default}` expansion because `${` is the reserved
+    // parser-pending interpolation sigil and is not safe in a string literal.
+    let mut tmp_base = _get_env_cmd("TMPDIR");
+    if tmp_base.length == 0 { tmp_base = "/tmp"; }
+    tmp_base = _strip_trailing_slashes_cmd(tmp_base);
+    let tmp = _shell_read_cmd("mktemp -d \"" + tmp_base + "/sfn-test-XXXXXX\"");
+    if tmp.length > 0 {
+        return TestScratchRoot { root: tmp, owned: true };
+    }
+
+    return TestScratchRoot { root: _test_scratch_root(), owned: false };
 }
 
 // ---- Exported command handlers ----

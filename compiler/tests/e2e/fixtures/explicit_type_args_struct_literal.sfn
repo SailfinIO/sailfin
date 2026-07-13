@@ -1,0 +1,20 @@
+// Regression fixture for SFN-342: explicit type-argument struct literals
+// must parse and emit as struct construction, not as comparison syntax.
+struct Box<T> {
+    value: T;
+}
+
+struct List<T> {
+    items: T[];
+}
+
+fn main() -> int ![io] {
+    let b: Box<int> = Box < int > {
+        value: 42
+    };
+    let empty: List<int> = List < int > {
+        items: []
+    };
+    if empty.items.length != 0 { return 1; }
+    return b.value;
+}

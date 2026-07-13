@@ -43,6 +43,7 @@ import {
 // pure reads of process-local state — no IO, no effect.
 let mut _active: boolean = false;
 let mut _trace: boolean = false;
+let mut _scratch_root: string = "";
 
 // Mark the running compile as part of a `sfn test` invocation.
 // `trace` is the resolved value of the `SAILFIN_TRACE_TEST_RUNNER`
@@ -55,6 +56,12 @@ fn enter_test_runner_mode(trace: boolean) {
     _trace = trace;
 }
 
+// Record the scratch root chosen by the test runner for this process.
+// Resolver code running in-process consults this before falling back to the
+// environment, so single-file `sfn test` invocations can use an ephemeral
+// root without mutating the process environment.
+fn set_test_scratch_root(root: string) { _scratch_root = root; }
+
 // Clear the markers. Called from every return path of
 // `cli/commands/test.sfn:run`. Idempotent: safe to call when the
 // markers are already cleared (e.g. defensive cleanup in a
@@ -62,6 +69,7 @@ fn enter_test_runner_mode(trace: boolean) {
 fn exit_test_runner_mode() {
     _active = false;
     _trace = false;
+    _scratch_root = "";
 }
 
 // True when the running compile was invoked via `sfn test`. Read
@@ -82,6 +90,11 @@ fn test_runner_active() -> boolean { return _active; }
 fn test_runner_trace() -> boolean {
     if !_active { return false; }
     return _trace;
+}
+
+fn test_runner_scratch_root() -> string {
+    if !_active { return ""; }
+    return _scratch_root;
 }
 
 // ── Test discovery filters (`-k` / `--tag`, issue #849) ──────────────
