@@ -591,6 +591,21 @@ fn _drain_two_pipes(out_fd_in: i32, err_fd_in: i32, gb_out: * GrowBuf, gb_err: *
     free(pbuf);
 }
 
+// Clamp a Sailfin `int` (i64) millisecond timeout to the `poll(2)` i32
+// `timeout` ABI, shared by both poll wrappers so they never diverge. A
+// `timeout_ms` above `i32::MAX` (~24.8 days, the max finite `poll` wait)
+// would wrap to a negative i32 and silently flip a finite wait into an
+// infinite block, so pin it to `i32::MAX`. Any negative value is the
+// `poll` "block until ready" sentinel — normalize to `-1` so an extreme
+// negative (e.g. `i64::MIN`, whose low 32 bits are 0) can't narrow to a
+// `0` zero-timeout poll. `0` polls and returns immediately.
+fn _clamp_poll_timeout_ms(timeout_ms: i64) -> i32 {
+    if timeout_ms < 0 { return -1; }
+    let max_ms: i64 = 2147483647;
+    if timeout_ms > max_ms { return max_ms as i32; }
+    return timeout_ms as i32;
+}
+
 // ── io.poll_readable ───────────────────────────────────────────
 // `sfn_io_poll_readable(fd, timeout_ms)` — #1580 (epic #1540 Track A,
 // gap A3). The user-callable single-fd readiness check behind the
@@ -624,7 +639,7 @@ fn sfn_io_poll_readable(fd: i64, timeout_ms: i64) -> bool ![io] {
     let pbuf: * u8 = malloc(8 as usize);
     if pbuf as i64 == 0 { return false; }
     let slot: * PollSlot = pbuf as * PollSlot;
-    let to: i32 = timeout_ms as i32;
+    let to: i32 = _clamp_poll_timeout_ms(timeout_ms);
     let mut ready: bool = false;
     loop {
         slot.fd = fd as i32;
@@ -686,7 +701,7 @@ fn sfn_io_poll_any(fds: int[], timeout_ms: i64) -> i64 ![io] {
     if nfds <= 0 { return -1; }
     let pbuf: * u8 = malloc((nfds * 8) as usize);
     if pbuf as i64 == 0 { return -1; }
-    let to: i32 = timeout_ms as i32;
+    let to: i32 = _clamp_poll_timeout_ms(timeout_ms);
     let mut result: i64 = -1;
     loop {
         // (Re-)arm every slot to POLLIN with revents cleared, counting how
