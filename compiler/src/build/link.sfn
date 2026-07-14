@@ -159,13 +159,25 @@ fn _runtime_retain_root_flags(runtime_objs: string[]) -> string[] ![io] {
 // object-cache stats the link accumulated (#915). The link is the
 // only place the runtime C/LL/sfn object cache is consulted, so the
 // caller folds `stats` into the build-wide `[cache]` summary.
+//
+// `ran_backend` distinguishes a genuine backend (clang/llvm-link) failure
+// from a driver-side preflight bailout that never reached `backend.link`
+// (SFN-212): the missing-runtime-bundle and runtime-object-assembly early
+// returns each already print their own diagnostic, so callers gate the
+// SFN-34 backend-failure ICE banner on this flag rather than on `rc != 0`
+// — a config/environment error is not a compiler bug.
 struct LinkResult {
     rc: int;
     stats: CacheStats;
+    ran_backend: boolean;
 }
 
 fn _failed_link_result() -> LinkResult {
-    return LinkResult { rc: 1, stats: empty_cache_stats() };
+    return LinkResult {
+        rc: 1,
+        stats: empty_cache_stats(),
+        ran_backend: false
+    };
 }
 
 fn _clang_link_with_opt(ll_path: string, out_path: string, runtime_root: string, runtime_capsules: RuntimeCapsuleArtifacts[], opt_flag: string, cache_dir: string, binary_dir: string, shared_cache_root: string) -> LinkResult ![io] {
@@ -213,7 +225,13 @@ fn _clang_link_multi_with_opt(ll_paths: string[], out_path: string, runtime_root
     }
     let inputs = assemble_runtime_capsule_link_inputs(runtime_capsules, cache_dir, opt_flag, binary_dir, shared_cache_root);
     if !inputs.success {
-        return LinkResult { rc: 1, stats: inputs.stats };
+        // Pre-backend bailout: runtime object assembly failed and printed
+        // its own diagnostic; the backend never ran (SFN-212).
+        return LinkResult {
+            rc: 1,
+            stats: inputs.stats,
+            ran_backend: false
+        };
     }
     runtime_objs = inputs.object_paths;
     runtime_link_libs = inputs.link_libs;
@@ -267,7 +285,7 @@ fn _clang_link_multi_with_opt(ll_paths: string[], out_path: string, runtime_root
         test_mode: false
     };
     let rc = backend.link(plan);
-    return LinkResult { rc: rc, stats: inputs.stats };
+    return LinkResult { rc: rc, stats: inputs.stats, ran_backend: true };
 }
 
 // (#1701) The `link_test_objects` indirection that previously lived here —

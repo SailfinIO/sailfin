@@ -420,7 +420,12 @@ fn run(matches: Matches, ctx: CliContext) -> int ![clock, io, net] {
     let link_result = _clang_link_multi(all_lls, exe_path, runtime_root, build_runtime_caps, binary_dir, sailfin_cache_dir, build_shared_cache_root);
     let rc = link_result.rc;
     if rc != 0 {
-        if !json_flag {
+        // The SFN-34 backend-failure ICE banner only applies when the
+        // backend actually ran. A driver-side preflight bailout (missing
+        // runtime bundle, runtime object-assembly failure) already printed
+        // its own diagnostic — framing it as a compiler bug misattributes a
+        // config/environment error (SFN-212).
+        if !json_flag && link_result.ran_backend {
             print.err(format_backend_failure_banner(binary_dir, "clang link", ll_path, rc));
         }
         return rc;
