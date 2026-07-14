@@ -95,7 +95,11 @@ Create or promote only leaf issues. Each proposed issue must include:
 - Goal in one or two sentences.
 - Semantic `In`/`Out` scope, not a brittle file checklist.
 - Acceptance criteria with observable behavior.
-- Verification commands or test expectations.
+- Verification commands or test expectations. Prefer `make compile` plus the
+  narrowest relevant `build/bin/sfn test <path>` / `-k` / `--tag` command for a
+  compiler leaf. Reserve `make test`, `make check`, and `make check-strict` for
+  full-suite, release, determinism, self-host fixed-point, structural compiler,
+  or high-risk regression gates.
 - Estimate on the Sailfin scale: `1` = XS, `2` = S, `3` = M.
 - Design/status/source evidence: SFEP/design note, `docs/status.md` row, failing
   test class, code location, release blocker, or prior issue/PR.

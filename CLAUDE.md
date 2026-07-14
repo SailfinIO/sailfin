@@ -44,6 +44,7 @@ make test             # Run the full suite
 make test-unit        # Sailfin-native unit tests
 make test-integration # Sailfin-native integration tests
 make test-e2e         # Sailfin-native e2e tests
+build/bin/sfn test <path> [-k <name>] # Target a suite dir, one test file, or named test
 make bench            # Benchmark per-module compile time and memory
 make fetch-seed       # Download the pinned seed (bootstrap.toml [seed].version)
 make clean            # Remove dist/ artifacts
@@ -68,11 +69,16 @@ and `make check` are different tools, not fast/slow versions of the same one:
    `make compile` before declaring any `compiler/src/*.sfn` change done.
 2. **`make compile`** — self-hosts the compiler. Required before committing any
    `compiler/src/*.sfn` change (the self-host invariant).
-3. **`make check`** — full triple-pass self-host + suite (~15–20 min). Reserve for
+3. **Targeted tests** — run `build/bin/sfn test <path>` (suite directory or single
+   `*_test.sfn`) and add `-k <name>` when one test inside a file is enough.
+   Issue acceptance should name these narrow commands unless the issue itself is
+   a full-suite gate.
+4. **`make check`** — full triple-pass self-host + suite (~15–20 min). Reserve for
    declaring a feature shipped, cutting a release, or after a structural change.
 
-Don't burn `make check` to discover a type or effect error `sfn check` would have
-caught in seconds. (Use `build/bin/sfn check <path>` if `sfn` is not on `PATH`.)
+Don't burn `make check` or `make test` to discover a type/effect error or a
+single regression failure that `sfn check` or a targeted `sfn test <path>` would
+have caught quickly. (Use `build/bin/sfn check <path>` if `sfn` is not on `PATH`.)
 
 **MCP tools (agentic clients).** When running as an MCP client (e.g. Claude Code
 with the `sailfin` server registered in `.mcp.json`), prefer the `sailfin_*` tools

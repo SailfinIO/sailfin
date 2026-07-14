@@ -153,11 +153,12 @@ route the rest to Sonnet specialists per `.claude/rules/model-allocation.md`:
   entangled with design**.
 - **Review gate stays Opus.** Run the cheap mechanical checks first
   (`sfn fmt --check`, `sfn check <files>`), then spawn the Opus `code-reviewer`.
-- **Failures triage on Sonnet first.** A failing `make compile`/`make test`
+- **Failures triage on Sonnet first.** A failing `make compile` or targeted test
   goes to `test-runner` (sonnet) to classify: trivial (fmt, missing import,
   typo, stale test) → fix via `implementer`; genuine (miscompile, IR rejection,
   self-host break, perf/memory regression) → escalate to the Opus
-  `seed-stabilizer`.
+  `seed-stabilizer`. Treat `make test`/`make check` as full-gate requests, not
+  the default pickup path.
 
 ### Reconcile the advisory map, then check for real scope growth
 
@@ -216,15 +217,17 @@ defaulting to bundle.**
 Walk every acceptance criterion in the body. Each must pass before opening the PR:
 
 ```bash
-make compile    # self-hosts
-make test       # no regressions
-# plus any issue-specific verification commands
+# issue-specific commands from ## Verification
+make compile    # when the issue touches compiler self-hosting surface
+build/bin/sfn test path/to/relevant_test.sfn
 ```
 
-Route a failing `make compile`/`make test` through `test-runner` (sonnet) to
-classify before escalating; don't spend Opus on a formatting error. If a
-criterion turns out impossible or wrong, comment on the Linear issue and pause
-— do not declare done with unmet criteria.
+Do not substitute the full suite for a targeted issue unless the issue asks for
+it or the implementation turns out to be structural/high-risk. Route a failing
+`make compile` or targeted test through `test-runner` (sonnet) to classify
+before escalating; don't spend Opus on a formatting error. If a criterion turns
+out impossible or wrong, comment on the Linear issue and pause — do not declare
+done with unmet criteria.
 
 ---
 

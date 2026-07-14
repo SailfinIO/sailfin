@@ -37,7 +37,8 @@ If a similar construct works elsewhere, compare emitted `.sfn-asm` or `.ll` and 
 - Run `sfn check <touched .sfn files>` for the fast parse/type/effect loop.
 - Run `sfn fmt --write` and `sfn fmt --check` on touched `.sfn` files under `compiler/src/` or `runtime/`.
 - Run `make compile` for compiler-source changes.
-- Run targeted tests, then `make test` or `make check` according to risk.
+- Run targeted tests. Use `make test` or `make check` only when the issue asks
+  for a full gate or the fix is structural, release-facing, or high-risk.
 
 ## Constraints
 

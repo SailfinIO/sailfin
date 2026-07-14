@@ -81,8 +81,9 @@ self-implementing a small, subtle function). But if the spec ("adapt
 
 ## Tiered escalation: don't wake Opus for trivia
 
-A failing `make compile`/`make test` does **not** go straight to the Opus
-`seed-stabilizer`. Route it through the Sonnet `test-runner` first to classify:
+A failing `make compile`, targeted test, `make test`, or `make check` does **not**
+go straight to the Opus `seed-stabilizer`. Route it through the Sonnet
+`test-runner` first to classify:
 
 - **Trivial** (fmt error, missing import, obvious typo, a test that just needs
   updating) → fix on Sonnet (`implementer`) under the orchestrator's direction.

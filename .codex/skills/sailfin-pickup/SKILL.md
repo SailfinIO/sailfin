@@ -112,7 +112,7 @@ the current issue/PR or GitHub mirror when available.
 
 ## PR handoff
 
-- Run the verification commands from the issue body plus the Sailfin check ladder.
+- Run the verification commands from the issue body plus the Sailfin check ladder. Do not expand to `make test` or `make check` unless the issue asks for a full gate or the implementation is structural/high-risk.
 - Commit atomically with a Conventional Commit style message, for example `fix(compiler): handle ...`.
 - Open a PR whose body includes scope, issue links, SFEP/design link when
   applicable, verification commands, and residual concerns. Use `Closes #N`

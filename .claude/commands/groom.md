@@ -186,14 +186,16 @@ Field mapping (canonical — see `docs/conventions/linear-workflow.md`):
 ## Acceptance Criteria
 - [ ] ...
 - [ ] make compile passes
-- [ ] make test passes
+- [ ] targeted tests named under Verification pass
 
 ## Files Affected (advisory map — non-binding, expected to drift)
 - compiler/src/... — ...   # likely-relevant starting points; non-exhaustive, no line numbers/counts
 
 ## Verification
 ```bash
-timeout 60 build/bin/sfn run path/to/example.sfn
+make compile                  # for compiler/src, self-hosting, or runtime ABI changes
+build/bin/sfn test path/to/relevant_test.sfn
+build/bin/sfn test compiler/tests/unit -k "relevant test name"
 ```
 
 ## Required in pinned seed
