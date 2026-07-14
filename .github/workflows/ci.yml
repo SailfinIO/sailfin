@@ -152,10 +152,11 @@ jobs:
   # same front-end `make compile` self-hosts with), so this cannot drift
   # from what the build accepts for parse/typecheck.
   #
-  # Intentionally NOT a `needs:` dependency of `build` — it runs in
-  # parallel so a green PR pays zero added latency, while a red result
-  # still shows up early. Promote it to a required gate via branch
-  # protection once it has proven stable across a few cycles.
+  # Intentionally NOT a `needs:` dependency of the build/test jobs — it
+  # runs in parallel so a green PR pays zero added latency, while a red
+  # result still shows up early. It is included in `Required CI gate` for
+  # source-touching PRs, so branch protection sees this as part of the
+  # aggregate required check rather than as a standalone required job.
   check-fast:
     name: Fast static check (sfn check compiler/src/)
     needs: ci-scope
@@ -1327,6 +1328,7 @@ jobs:
     runs-on: ubuntu-24.04
     timeout-minutes: 5
     env:
+      CI_SCOPE_RESULT: ${{ needs.ci-scope.result }}
       SOURCE_CI: ${{ needs.ci-scope.outputs.source }}
       CHECK_FAST: ${{ needs.check-fast.result }}
       BUILD_COMPILER_LINUX: ${{ needs.build-compiler-linux.result }}
@@ -1346,13 +1348,24 @@ jobs:
             echo ""
             echo "| check | result |"
             echo "| --- | --- |"
-            echo "| CI scope | ${SOURCE_CI:-unset} |"
+            echo "| CI scope job | ${CI_SCOPE_RESULT:-unset} |"
+            echo "| CI scope output | ${SOURCE_CI:-unset} |"
           } >> "$GITHUB_STEP_SUMMARY"
 
-          if [ "${SOURCE_CI:-false}" != "true" ]; then
+          if [ "${CI_SCOPE_RESULT:-}" != "success" ]; then
+            echo "[required-ci] CI scope did not succeed; failing closed." >&2
+            exit 1
+          fi
+
+          if [ "${SOURCE_CI:-}" = "false" ]; then
             echo "[required-ci] compiler CI is out of scope for this PR; required gate passes."
             echo "| Compiler CI | skipped by path scope |" >> "$GITHUB_STEP_SUMMARY"
             exit 0
+          fi
+
+          if [ "${SOURCE_CI:-}" != "true" ]; then
+            echo "[required-ci] CI scope emitted unexpected source value: ${SOURCE_CI:-unset}" >&2
+            exit 1
           fi
 
           fail=0
