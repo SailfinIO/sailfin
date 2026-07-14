@@ -28,19 +28,27 @@ For `make` targets, the Makefile handles its own timeouts:
 make test
 ```
 
+Do not choose `make test` just because a change is complete. For ordinary issue
+acceptance, run the verification commands from the issue body: usually
+`make compile` when compiler self-hosting surface changed, followed by targeted
+`build/bin/sfn test <path>` / `-k <name>` commands. Use full-suite `make test` or
+`make check` only when the issue asks for a full gate, the change is structural
+or release-facing, or the orchestrator explicitly requests it.
+
 ## Test Structure
 
 | Command | Scope | When to Use |
 |---|---|---|
 | `sfn check <files>` | Static analysis only (parse + typecheck + effect-check; no IR, no `clang`, no self-host) | **Inner loop** — after every edit, before paying for a rebuild. Seconds for a few files; ~5 min for the whole `compiler/src/` tree |
-| `make test` | Full suite (unit + integration + e2e) | After completing all changes |
-| `make test-unit` | Unit tests only | After modifying a single compiler pass |
-| `make test-integration` | Integration tests only | After cross-module changes |
-| `make test-e2e` | End-to-end tests only | After user-facing behavior changes |
+| `build/bin/sfn test <path> [-k name]` | Targeted suite dir, single `*_test.sfn`, or named test | Default issue verification after the relevant compiler binary exists |
+| `make test` | Full suite (unit + integration + e2e) | Only for explicit full-suite, broad regression, or high-risk gates |
+| `make test-unit` | Unit suite | When the issue asks for the whole unit tier, otherwise target the relevant file |
+| `make test-integration` | Integration suite | When the issue asks for the whole integration tier, otherwise target the relevant file |
+| `make test-e2e` | End-to-end suite | When the issue asks for the whole e2e tier, otherwise target the relevant file |
 | `make compile` | Self-hosting check (compiler compiles itself) | Before committing any `compiler/src/*.sfn` change (self-host invariant) |
 | `make check` | Full triple-pass validation (build + test + seedcheck) | Before declaring a feature shipped, before a release, or after a structural change |
 
-**Validation ladder — don't skip to the slow gate.** `sfn check` and `make check` are different tools: `sfn check` is a fast static lint (catches type/effect/parse errors without emitting IR or proving self-host), while `make check` is the heavyweight self-host + suite gate (~15–20 min). Iterate with `sfn check <the-files-you-touched>` for immediate feedback, run `make compile` to confirm self-host before committing, and reserve `make check` for ship/release/structural validation. Use `build/bin/sfn check <path>` if `sfn` is not on `PATH`.
+**Validation ladder — don't skip to the slow gate.** `sfn check` and `make check` are different tools: `sfn check` is a fast static lint (catches type/effect/parse errors without emitting IR or proving self-host), while `make check` is the heavyweight self-host + suite gate (~15–20 min). Iterate with `sfn check <the-files-you-touched>` for immediate feedback, run `make compile` to confirm self-host before committing compiler-source changes, then run targeted `build/bin/sfn test <path>` commands from the issue. Reserve `make test` and `make check` for ship/release/structural validation or explicit full-suite requests. Use `build/bin/sfn check <path>` if `sfn` is not on `PATH`.
 
 Test files live in:
 - `compiler/tests/unit/` — Unit tests for individual compiler modules
@@ -74,6 +82,12 @@ To run a specific test file:
 
 ```bash
 timeout 60 build/bin/sfn test compiler/tests/unit/specific_test.sfn
+```
+
+To run one named test inside a file:
+
+```bash
+timeout 60 build/bin/sfn test compiler/tests/unit/specific_test.sfn -k "case name"
 ```
 
 To run a specific example:

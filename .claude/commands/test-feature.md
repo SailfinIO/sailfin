@@ -16,12 +16,15 @@ Run targeted tests for a specific compiler feature or area.
    timeout 60 build/bin/sfn test <test_file>
    ```
 
-3. If tests pass, also run the full suite to check for regressions:
+3. If tests pass and the issue explicitly asks for broader coverage, or the
+   change is structural/high-risk, run the relevant broader gate:
    ```
    make test
    ```
 
-4. Report results: which tests passed, which failed, and for failures include the diagnostic output with source locations.
+4. Otherwise, stop at the targeted run and report why that scope is sufficient.
+
+5. Report results: which tests passed, which failed, and for failures include the diagnostic output with source locations.
 
 ## Important
 

@@ -31,9 +31,9 @@ Implement the feature **one pipeline stage at a time**, following the architect'
 6. **LLVM Lowering** (`compiler/src/llvm/`) — LLVM IR generation
 7. **Tests** — unit tests in `compiler/tests/unit/`, integration tests in `compiler/tests/integration/`. End-to-end tests go in `compiler/tests/e2e/` as `*_test.sfn` using `sfn/test` — **never** new bash scripts (the `compiler/tests/e2e/*.sh` surface was fully migrated and deleted; see `.claude/rules/no-bash-e2e.md` for the native e2e recipe, e.g. `guillermo_test.sfn`)
 
-After each stage, run targeted tests to verify:
+After each stage, run the narrowest targeted test that covers that stage:
 ```bash
-make test-unit
+build/bin/sfn test <relevant_test_file.sfn>
 ```
 
 After all stages are complete, verify self-hosting:
@@ -61,10 +61,11 @@ If the reviewer flags issues, fix them before proceeding. Re-run the reviewer af
 
 ## Phase 4: VALIDATE
 
-Spawn the **test-runner** agent to run the full validation suite:
+Spawn the **test-runner** agent to run the issue's verification commands and the
+smallest sufficient broader gate. For ordinary feature leaves, this is usually:
 
 ```bash
-make test
+build/bin/sfn test <relevant_test_file_or_dir>
 ```
 
 Then verify self-hosting still works:
@@ -72,7 +73,10 @@ Then verify self-hosting still works:
 make compile
 ```
 
-If tests fail, diagnose and fix. Do not proceed to documentation with failing tests.
+Use `make test` or `make check` here only when the issue explicitly asks for a
+full gate, the feature is being declared shipped, or the change is structural or
+release-facing. If tests fail, diagnose and fix. Do not proceed to documentation
+with failing tests.
 
 ---
 

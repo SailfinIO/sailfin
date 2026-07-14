@@ -153,11 +153,12 @@ route the rest to Sonnet specialists per `.claude/rules/model-allocation.md`:
   entangled with design**.
 - **Review gate stays Opus.** Run the cheap mechanical checks first
   (`sfn fmt --check`, `sfn check <files>`), then spawn the Opus `code-reviewer`.
-- **Failures triage on Sonnet first.** A failing `make compile`/`make test`
+- **Failures triage on Sonnet first.** A failing `make compile` or targeted test
   goes to `test-runner` (sonnet) to classify: trivial (fmt, missing import,
   typo, stale test) → fix via `implementer`; genuine (miscompile, IR rejection,
   self-host break, perf/memory regression) → escalate to the Opus
-  `seed-stabilizer`.
+  `seed-stabilizer`. Treat `make test`/`make check` as full-gate requests, not
+  the default pickup path.
 
 ### Reconcile the advisory map, then check for real scope growth
 

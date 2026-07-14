@@ -1,5 +1,5 @@
 The Sailfin compiler must always be able to compile itself. Before committing any change to compiler source files (compiler/src/*.sfn):
 
-1. Run `make compile` (or `make check`) before `make test` so the test suite does not run against a stale compiler binary
+1. Run `make compile` (or `make check`) before targeted `build/bin/sfn test <path>` or suite validation so tests do not run against a stale compiler binary
 2. If the change is structural (file splits, new modules, renamed exports), run `make clean-build` before rebuilding
 3. Fix the compiler source, never the build driver — the driver (`compiler/src/cli_main.sfn` + `compiler/src/capsule_resolver.sfn`; formerly the prior `scripts/build.sh`, now retired) is pure orchestration with no fixups
