@@ -6,9 +6,19 @@
 // formatter directly (deterministic: binary_dir="" resolves the version
 // fallback) rather than reproducing a real link failure, mirroring how
 // version_resolution_test.sfn exercises resolve_compiler_version("").
+//
+// SFN-212 extends this: the ICE banner must only fire for a genuine backend
+// failure, not for a driver-side preflight bailout that never invoked the
+// backend. That gate is a `ran_backend` flag on `LinkResult`; the
+// missing-runtime-bundle preflight is exercised here deterministically (no
+// clang) by driving `_clang_link_multi` with an empty runtime-capsule set. The
+// genuine-backend leg (banner still fires) is covered end-to-end in
+// compiler/tests/e2e/backend_failure_gate_test.sfn.
 import { find } from "sfn/strings";
 
+import { _clang_link_multi } from "../../src/build/link";
 import { format_backend_failure_banner } from "../../src/ice";
+import { RuntimeCapsuleArtifacts } from "../../src/runtime_capsule_resolver";
 
 test "backend banner: frames link failure as a Sailfin ICE with IR path and bug URL" ![io] {
     let banner = format_backend_failure_banner("", "clang link", "build/sailfin/program.ll", 1);
@@ -17,4 +27,16 @@ test "backend banner: frames link failure as a Sailfin ICE with IR path and bug 
     assert find(banner, "build/sailfin/program.ll", 0) >= 0;
     assert find(banner, "https://github.com/SailfinIO/sailfin/issues/new", 0) >= 0;
     assert find(banner, "link failed (clang exit=", 0) < 0;
+}
+
+test "backend banner gate: a missing-runtime-bundle preflight does not signal a backend run (SFN-212)" ![io] {
+    // An empty runtime-capsule set is the missing-runtime-bundle preflight:
+    // `_clang_link_multi` prints its own "runtime bundle/manifest missing"
+    // diagnostic and returns before `backend.link`. The result must report
+    // `ran_backend == false` so the CLI link sites suppress the ICE banner —
+    // a config/environment error is not a compiler bug.
+    let no_caps: RuntimeCapsuleArtifacts[] = [];
+    let result = _clang_link_multi(["unused.ll"], "unused.bin", "no-such-runtime-root", no_caps, "", "build/sailfin", "");
+    assert result.rc == 1;
+    assert result.ran_backend == false;
 }

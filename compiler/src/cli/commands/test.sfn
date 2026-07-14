@@ -1255,9 +1255,16 @@ fn run(matches: Matches, ctx: CliContext) -> int ![clock, io, net] {
             }
 
             if trace_runner { print.err("test runner: link start"); }
-            let link_rc = _clang_link_test_cmd_with_deps(ll_path, exe_path, runtime_root, groups[group_idx].dep_ll_paths, scratch_root, binary_dir);
+            let link_res = _clang_link_test_cmd_with_deps(ll_path, exe_path, runtime_root, groups[group_idx].dep_ll_paths, scratch_root, binary_dir);
+            let link_rc = link_res.rc;
             if link_rc != 0 {
-                print.err(format_backend_failure_banner(binary_dir, "clang link", ll_path, link_rc));
+                // Only a genuine backend failure earns the SFN-34 ICE banner;
+                // a preflight bailout already printed its own diagnostic
+                // (SFN-212). The `[test] FAIL` line and overall_rc below are
+                // unconditional, preserving exit-code fidelity either way.
+                if link_res.ran_backend {
+                    print.err(format_backend_failure_banner(binary_dir, "clang link", ll_path, link_rc));
+                }
                 if json_output {
                     let outcome = _outcome_setup_failure(_synthetic_assert_failure(path, "link failed (clang exit="
                         + number_to_string(link_rc)
@@ -1492,7 +1499,19 @@ fn _dep_object_for_ll(ll_path: string, dep_obj_dir: string, clang_id: string) ->
 // symbol tests need, and the backstop became dead code. See
 // `docs/proposals/0006-build-architecture.md` Stage B for the full
 // trail.
-fn _clang_link_test_cmd_with_deps(ll_path: string, out_path: string, runtime_root: string, dep_ll_paths: string[], cache_dir: string, binary_dir: string) -> int ![io] {
+// Outcome of a test-binary link: the clang exit code plus whether the
+// backend actually ran (SFN-212). The two pre-backend preflight bailouts
+// (missing runtime bundle, runtime object-assembly failure) each print
+// their own diagnostic and return `ran_backend: false`, so the caller can
+// gate the SFN-34 backend-failure ICE banner on a genuine backend failure
+// rather than on any nonzero rc — mirroring `LinkResult` on the build/run
+// path (`build/link.sfn`).
+struct TestLinkResult {
+    rc: int;
+    ran_backend: boolean;
+}
+
+fn _clang_link_test_cmd_with_deps(ll_path: string, out_path: string, runtime_root: string, dep_ll_paths: string[], cache_dir: string, binary_dir: string) -> TestLinkResult ![io] {
     // `-Wno-override-module`: every emitted `.ll` carries its own `target
     // triple`, which clang's link overrides — matching the suppression on
     // every other clang invocation in cli_main.sfn so the test path is not
@@ -1551,14 +1570,21 @@ fn _clang_link_test_cmd_with_deps(ll_path: string, out_path: string, runtime_roo
         print.err("sfn test: runtime bundle/manifest missing — expected "
             + runtime_root
             + "/capsule.toml (kind = \"runtime\")");
-        return 1;
+        // Pre-backend bailout: this preflight diagnostic stands alone; the
+        // backend never ran, so the caller must not stack the ICE banner
+        // (SFN-212).
+        return TestLinkResult { rc: 1, ran_backend: false };
     }
     _ensure_dir_cmd(rt_cache_dir);
     // Test link path keeps runtime objects work-dir-local (shared root
     // empty); the shared content-addressed runtime cache (#1096) is
     // scoped to the build/run path that feeds the build-quality gate.
     let rt = assemble_runtime_capsule_link_inputs(runtime_caps, rt_cache_dir, "-O0", binary_dir, "");
-    if !rt.success { return 1; }
+    // Pre-backend bailout: runtime object assembly failed; the backend never
+    // ran (SFN-212).
+    if !rt.success {
+        return TestLinkResult { rc: 1, ran_backend: false };
+    }
     // The runtime capsule's `link-libs` (runtime/capsule.toml) already
     // carries `-lm` / `-lpthread`. Track which math/thread libs flow
     // through so the defensive push below does not re-add a lib the
@@ -1614,7 +1640,8 @@ fn _clang_link_test_cmd_with_deps(ll_path: string, out_path: string, runtime_roo
         libs: libs,
         test_mode: true
     };
-    return backend.link(plan);
+    let link_rc = backend.link(plan);
+    return TestLinkResult { rc: link_rc, ran_backend: true };
 }
 
 // Resolve the per-test scratch root used for the test runner's

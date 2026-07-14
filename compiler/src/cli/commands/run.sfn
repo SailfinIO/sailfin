@@ -166,8 +166,14 @@ fn run(matches: Matches, ctx: CliContext) -> int ![clock, io, net] {
         // source — never paper over it. Fail closed with the clang exit code
         // (the prior `process.run(["sfn", "run", input_path])` "seed
         // fallback" recursed into itself forever on a persistent failure,
-        // #969).
-        print.err(format_backend_failure_banner(binary_dir, "clang link", ll_path, link_rc));
+        // #969). The SFN-34 backend-failure ICE banner is gated on the
+        // backend having actually run: a preflight bailout (missing runtime
+        // bundle / assembly failure) already printed its own diagnostic, so
+        // stacking a "file a compiler bug" frame on it misattributes a
+        // config/environment error (SFN-212).
+        if link_result.ran_backend {
+            print.err(format_backend_failure_banner(binary_dir, "clang link", ll_path, link_rc));
+        }
         return link_rc;
     }
 

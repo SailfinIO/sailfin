@@ -1,0 +1,72 @@
+// compiler/tests/e2e/backend_failure_gate_test.sfn
+//
+// Regression for SFN-212: the SFN-34 backend-failure ICE banner must still
+// fire for a *genuine* backend failure, so the DX win of SFN-34 survives the
+// gate that suppresses it on driver-side preflight bailouts. This drives the
+// genuine-backend leg — a program calling an `extern` symbol that is defined
+// nowhere assembles fine (`clang -c` accepts the `declare`) but fails at the
+// final clang link with an undefined-reference error, a real backend failure —
+// and asserts the Sailfin ICE banner appears. The preflight leg (banner
+// suppressed) is covered deterministically at the unit level in
+// compiler/tests/unit/backend_failure_banner_test.sfn.
+//
+// Build isolation mirrors sailfin_main_entry_test.sfn: the child `sfn build`
+// inherits the full environment (PATH for clang/linker, SAILFIN_TEST_SCRATCH
+// for per-invocation build-cache isolation under the parallel pool). The
+// captured output is stashed to an out-of-tree marker file so it survives the
+// `with_tmp_dir` teardown and can be asserted after the closure returns.
+import { find } from "sfn/strings";
+import { with_tmp_dir } from "sfn/test";
+
+fn _sfn_bin() -> string ![io] {
+    let configured = env.get("SAILFIN_BIN");
+    if configured.length > 0 { return configured; }
+    return "build/bin/sfn";
+}
+
+fn _child_env() -> string[] ![io] { return process.environ(); }
+
+fn _marker(name: string) -> string ![io] {
+    let mut dir = env.get("SAILFIN_TEST_SCRATCH");
+    if dir.length == 0 { dir = "/tmp"; }
+    fs.createDirectory(dir, true);
+    let path = dir + "/sfn212-backend-gate-" + name + ".out";
+    if fs.exists(path) { fs.deleteFile(path); }
+    return path;
+}
+
+// An `extern fn` with no defining object anywhere: the emitted IR carries a
+// `declare` + call, so `clang -c` succeeds but the final link fails with an
+// undefined-reference error. Mirrors the proven extern-fixture shape in
+// sc_nprocessors_onln_sentinel_test.sfn, with a symbol that resolves nowhere.
+fn _undefined_symbol_fixture() -> string {
+    return "extern fn sfn212_missing_backend_symbol() -> i64;\n\nfn main() -> void {\n    let n: i64 = sfn212_missing_backend_symbol();\n}\n";
+}
+
+// Build the undefined-symbol fixture; stash the child's combined stdout+stderr
+// to `out_marker` and return the build's exit code.
+fn _build_undefined_symbol(out_marker: string) -> int ![io] {
+    return with_tmp_dir(fn (dir: string) -> int {
+        let srcpath = dir + "/undef.sfn";
+        fs.writeFile(srcpath, _undefined_symbol_fixture());
+        let binpath = dir + "/undef";
+        let build_exit = process.run_capture([_sfn_bin(), "build", "-o", binpath, srcpath], _child_env());
+        let out = process.capture_take_stdout();
+        let err = process.capture_take_stderr();
+        fs.writeFile(out_marker, out + err);
+        return build_exit;
+    });
+}
+
+test "backend banner gate: a genuine backend link failure still prints the Sailfin ICE banner (SFN-212)" ![io] {
+    let marker = _marker("undef");
+    let exit = _build_undefined_symbol(marker);
+    let out = fs.readFile(marker);
+    if fs.exists(marker) { fs.deleteFile(marker); }
+    // The link fails on the undefined reference, so the build exits non-zero...
+    assert exit != 0;
+    // ...and because the backend actually ran, the SFN-34 ICE banner fires
+    // (SFN-34 behaviour preserved through the SFN-212 gate).
+    assert find(out, "internal compiler error (ICE): backend", 0) >= 0;
+    assert find(out, "clang link", 0) >= 0;
+}

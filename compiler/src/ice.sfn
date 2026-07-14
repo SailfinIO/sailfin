@@ -100,13 +100,18 @@ fn format_ice_banner(version: string, stage: string, source: string, message: st
 }
 
 // Format a backend (clang / llvm-link) failure as a Sailfin-branded ICE
-// banner (SFN-34). A nonzero backend exit means driver-emitted IR was rejected
-// downstream — a compiler bug, not user error — so the failure is framed as an
-// internal compiler error naming the failing IR path and a bug-report pointer,
-// replacing the bare `clang exit=N` line. Printed (not thrown) by the CLI link
-// sites so the clang exit code still propagates as the process exit code: the
-// forward-only stage/source caveat in this file's header is exactly why link
-// orchestration must not `throw` a banner.
+// banner (SFN-34). A nonzero exit from a backend that actually ran usually
+// means driver-emitted IR was rejected downstream — a compiler bug, not user
+// error — so the failure is framed as an internal compiler error naming the
+// failing IR path and a bug-report pointer, replacing the bare `clang exit=N`
+// line. The CLI link sites gate this banner on the backend having actually run
+// (SFN-212): a driver-side preflight bailout that never invoked the backend
+// (missing runtime bundle, runtime object-assembly failure) prints only its
+// own diagnostic, since that is a config/environment error rather than a
+// compiler bug. Printed (not thrown) by the CLI link sites so the clang exit
+// code still propagates as the process exit code: the forward-only
+// stage/source caveat in this file's header is exactly why link orchestration
+// must not `throw` a banner.
 fn format_backend_failure_banner(binary_dir: string, tool: string, ir_path: string, rc: int) -> string ![io] {
     let version = resolve_compiler_version(binary_dir);
     let mut banner: string = "error: internal compiler error (ICE): backend "
@@ -115,7 +120,7 @@ fn format_backend_failure_banner(binary_dir: string, tool: string, ir_path: stri
         + number_to_string(rc)
         + ")\n";
     banner = banner
-        + "note: the backend rejected compiler-emitted IR — this is a compiler bug, not an error in your code\n";
+        + "note: a backend failure on compiler-emitted IR usually means a compiler bug (not an error in your code), though it can also stem from the toolchain, configuration, or IO\n";
     banner = banner + "note: version: " + version + "\n";
     banner = banner + "note: failing IR: " + ir_path + "\n";
     banner = banner + "note: file a report: " + ICE_ISSUE_URL + "\n";
