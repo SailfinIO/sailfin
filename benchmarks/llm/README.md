@@ -47,6 +47,13 @@ export ANTHROPIC_API_KEY=...
 ./build/sfn350 --adapter anthropic --model claude-sonnet-4-20250514 --arm sailfin
 ```
 
+You can also place provider keys in a repo-local `.env` file:
+
+```dotenv
+OPENAI_API_KEY=...
+ANTHROPIC_API_KEY=...
+```
+
 Useful filters:
 
 ```bash
@@ -61,6 +68,7 @@ Environment:
 - `SFN350_TIMEOUT_CMD`: optional command prefix for Sailfin compile and run
   commands, for example `timeout 60`.
 - `OPENAI_API_KEY` / `ANTHROPIC_API_KEY`: required for real model adapters.
+  The runner prefers shell environment values and falls back to `.env`.
 
 ## Notes
 

@@ -98,7 +98,7 @@ fn _usage() -> string {
     return "usage: sfn run benchmarks/llm/sfn350.sfn -- [--adapter stub|openai|anthropic] [--real] [--model M] [--arm A] [--task T] [--max-iters N] [--results-dir DIR]\n"
         + "\n"
         + "defaults: --adapter stub --model gpt-4.1 --max-iters 5 --results-dir build/sfn350-results\n"
-        + "env: OPENAI_API_KEY, ANTHROPIC_API_KEY, SAILFIN_BIN, SFN350_TIMEOUT_CMD\n";
+        + "env: OPENAI_API_KEY, ANTHROPIC_API_KEY, SAILFIN_BIN, SFN350_TIMEOUT_CMD; API keys may also be set in .env\n";
 }
 
 fn _valid_adapter(value: string) -> boolean {
@@ -183,6 +183,52 @@ fn _parse_config(argv: string[]) -> Config ![io] {
         i += 1;
     }
     return cfg;
+}
+
+fn _strip_dotenv_export(line: string) -> string {
+    if line.length >= 7 && substring(line, 0, 7) == "export " {
+        return trim(substring(line, 7, line.length));
+    }
+    return line;
+}
+
+fn _strip_dotenv_quotes(value: string) -> string {
+    let v = trim(value);
+    if v.length >= 2 {
+        let first = v[0];
+        let last = v[v.length - 1];
+        if first == "\"" && last == "\"" {
+            return substring(v, 1, v.length - 1);
+        }
+        if first == "'" && last == "'" {
+            return substring(v, 1, v.length - 1);
+        }
+    }
+    return v;
+}
+
+fn _dotenv_get(key: string) -> string ![io] {
+    if !fs.exists(".env") { return ""; }
+    let lines = split(fs.readFile(".env"), "\n");
+    let mut i: int = 0;
+    loop {
+        if i >= lines.length { break; }
+        let line = _strip_dotenv_export(trim(lines[i]));
+        if line.length > 0 && line[0] != "#" {
+            let eq = find(line, "=", 0);
+            if eq > 0 && trim(substring(line, 0, eq)) == key {
+                return _strip_dotenv_quotes(substring(line, eq + 1, line.length));
+            }
+        }
+        i += 1;
+    }
+    return "";
+}
+
+fn _env_or_dotenv(key: string) -> string ![io] {
+    let configured = env.get(key);
+    if configured.length > 0 { return configured; }
+    return _dotenv_get(key);
 }
 
 fn _sfn_bin() -> string ![io] {
@@ -325,10 +371,10 @@ fn _messages_json(messages: JsonValue[]) -> JsonValue {
 fn _curl_env(adapter: string) -> string[] ![io] {
     let mut out = process.environ();
     if adapter == "openai" {
-        let key = env.get("OPENAI_API_KEY");
+        let key = _env_or_dotenv("OPENAI_API_KEY");
         if key.length > 0 { out.push("OPENAI_API_KEY=" + key); }
     } else if adapter == "anthropic" {
-        let key2 = env.get("ANTHROPIC_API_KEY");
+        let key2 = _env_or_dotenv("ANTHROPIC_API_KEY");
         if key2.length > 0 { out.push("ANTHROPIC_API_KEY=" + key2); }
     }
     return out;
