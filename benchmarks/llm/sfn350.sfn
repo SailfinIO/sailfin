@@ -1,0 +1,963 @@
+// SFN-350 native benchmark runner.
+//
+// This ports the adjacent prototype's raw-model, iterate-to-green harness into
+// Sailfin so the compiler repo does not need to carry Python benchmark code.
+import {
+    JsonValue,
+    array_at,
+    array_val,
+    bool_val,
+    get_array,
+    get_number,
+    get_string,
+    get_value,
+    number_val,
+    object_val,
+    parse,
+    string_val,
+    stringify,
+    stringify_pretty
+} from "sfn/json";
+import {
+    contains,
+    find,
+    join,
+    split,
+    trim
+} from "sfn/strings";
+
+import { fs } from "fs";
+
+struct Fixture {
+    name: string;
+    content: string;
+}
+
+struct Case {
+    input: string;
+    expect: string;
+    stable_runs: int;
+}
+
+struct Starter {
+    arm: string;
+    source: string;
+}
+
+struct Task {
+    id: string;
+    category: string;
+    prompt: string;
+    io_contract: string;
+    fixtures: Fixture[];
+    cases: Case[];
+    starters: Starter[];
+}
+
+struct ArmConfig {
+    name: string;
+    lang: string;
+    entry: string;
+    compile: string[];
+    run: string[];
+    effect_keywords: string[];
+}
+
+struct Config {
+    adapter: string;
+    model: string;
+    max_iters: int;
+    results_dir: string;
+    stub: boolean;
+    tasks: string[];
+    arms: string[];
+}
+
+struct Completion {
+    text: string;
+    tokens: int;
+}
+
+struct GradeResult {
+    passed: boolean;
+    feedback: string;
+    category: string;
+}
+
+struct Record {
+    task: string;
+    category: string;
+    arm: string;
+    passed: boolean;
+    iterations: int;
+    tokens: int;
+    fail_categories: string[];
+}
+
+fn _usage() -> string {
+    return "usage: sfn run benchmarks/llm/sfn350.sfn -- [--adapter stub|openai|anthropic] [--real] [--model M] [--arm A] [--task T] [--max-iters N] [--results-dir DIR]\n"
+        + "\n"
+        + "defaults: --adapter stub --model gpt-4.1 --max-iters 5 --results-dir build/sfn350-results\n"
+        + "env: OPENAI_API_KEY, ANTHROPIC_API_KEY, SAILFIN_BIN, SFN350_TIMEOUT_CMD; API keys may also be set in .env or benchmarks/llm/.env\n";
+}
+
+fn _valid_adapter(value: string) -> boolean {
+    return value == "stub" || value == "openai" || value == "anthropic";
+}
+
+fn _parse_int(text: string, fallback: int) -> int {
+    let t = trim(text);
+    if t.length == 0 { return fallback; }
+    let mut i: int = 0;
+    let mut sign: int = 1;
+    if t[0] == "-" {
+        sign = -1;
+        i = 1;
+    }
+    let mut out: int = 0;
+    loop {
+        if i >= t.length { break; }
+        let code = char_code(t[i]);
+        if code < 48 || code > 57 { return fallback; }
+        out = out * 10 + (code - 48);
+        i += 1;
+    }
+    return out * sign;
+}
+
+fn _default_config() -> Config {
+    return Config {
+        adapter: "stub",
+        model: "gpt-4.1",
+        max_iters: 5,
+        results_dir: "build/sfn350-results",
+        stub: true,
+        tasks: [],
+        arms: []
+    };
+}
+
+fn _parse_config(argv: string[]) -> Config ![io] {
+    let mut cfg = _default_config();
+    let mut i: int = 1;
+    loop {
+        if i >= argv.length { break; }
+        let arg = argv[i];
+        if arg == "--help" || arg == "-h" {
+            print(_usage());
+            process.exit(0);
+        } else if arg == "--adapter" && i + 1 < argv.length {
+            cfg.adapter = argv[i + 1];
+            if !_valid_adapter(cfg.adapter) {
+                print.err("unknown adapter: " + cfg.adapter);
+                print.err(_usage());
+                process.exit(2);
+            }
+            cfg.stub = cfg.adapter == "stub";
+            i += 1;
+        } else if arg == "--model" && i + 1 < argv.length {
+            cfg.model = argv[i + 1];
+            i += 1;
+        } else if arg == "--max-iters" && i + 1 < argv.length {
+            cfg.max_iters = _parse_int(argv[i + 1], cfg.max_iters);
+            i += 1;
+        } else if arg == "--results-dir" && i + 1 < argv.length {
+            cfg.results_dir = argv[i + 1];
+            i += 1;
+        } else if arg == "--task" && i + 1 < argv.length {
+            cfg.tasks.push(argv[i + 1]);
+            i += 1;
+        } else if arg == "--arm" && i + 1 < argv.length {
+            cfg.arms.push(argv[i + 1]);
+            i += 1;
+        } else if arg == "--real" {
+            if cfg.adapter == "stub" {
+                cfg.adapter = "openai";
+                cfg.stub = false;
+            }
+        } else {
+            print.err("unknown or incomplete argument: " + arg);
+            print.err(_usage());
+            process.exit(2);
+        }
+        i += 1;
+    }
+    return cfg;
+}
+
+fn _strip_dotenv_export(line: string) -> string {
+    if line.length >= 7 && substring(line, 0, 7) == "export " {
+        return trim(substring(line, 7, line.length));
+    }
+    return line;
+}
+
+fn _strip_dotenv_quotes(value: string) -> string {
+    let v = trim(value);
+    if v.length >= 2 {
+        let first = v[0];
+        let last = v[v.length - 1];
+        if first == "\"" && last == "\"" {
+            return substring(v, 1, v.length - 1);
+        }
+        if first == "'" && last == "'" {
+            return substring(v, 1, v.length - 1);
+        }
+    }
+    return v;
+}
+
+fn _dotenv_get_from(path: string, key: string) -> string ![io] {
+    if !fs.exists(path) { return ""; }
+    let lines = split(fs.readFile(path), "\n");
+    let mut i: int = 0;
+    loop {
+        if i >= lines.length { break; }
+        let line = _strip_dotenv_export(trim(lines[i]));
+        if line.length > 0 && line[0] != "#" {
+            let eq = find(line, "=", 0);
+            if eq > 0 && trim(substring(line, 0, eq)) == key {
+                return _strip_dotenv_quotes(substring(line, eq + 1, line.length));
+            }
+        }
+        i += 1;
+    }
+    return "";
+}
+
+fn _dotenv_get(key: string) -> string ![io] {
+    let direct = _dotenv_get_from(".env", key);
+    if direct.length > 0 { return direct; }
+    return _dotenv_get_from("benchmarks/llm/.env", key);
+}
+
+fn _env_or_dotenv(key: string) -> string ![io] {
+    let configured = env.get(key);
+    if configured.length > 0 { return configured; }
+    return _dotenv_get(key);
+}
+
+fn _current_dir() -> string ![io] {
+    let exit = process.run_capture(["pwd"], process.environ());
+    let out = trim(process.capture_take_stdout());
+    let _err = process.capture_take_stderr();
+    if exit == 0 { return out; }
+    return "";
+}
+
+fn _sfn_bin() -> string ![io] {
+    let configured = env.get("SAILFIN_BIN");
+    if configured.length > 0 { return configured; }
+    let pwd = env.get("PWD");
+    if pwd.length > 0 && fs.exists(pwd + "/build/bin/sfn") {
+        return pwd + "/build/bin/sfn";
+    }
+    let cwd = _current_dir();
+    if cwd.length > 0 && fs.exists(cwd + "/build/bin/sfn") {
+        return cwd + "/build/bin/sfn";
+    }
+    return "build/bin/sfn";
+}
+
+fn _timeout_prefix() -> string[] ![io] {
+    let t = env.get("SFN350_TIMEOUT_CMD");
+    if t.length == 0 { return []; }
+    return split(t, " ");
+}
+
+fn _child_env() -> string[] ![io] { return process.environ(); }
+
+fn _contains_value(values: string[], value: string) -> boolean {
+    let mut i: int = 0;
+    loop {
+        if i >= values.length { break; }
+        if values[i] == value { return true; }
+        i += 1;
+    }
+    return false;
+}
+
+fn _selected(selected: string[], value: string) -> boolean {
+    if selected.length == 0 { return true; }
+    return _contains_value(selected, value);
+}
+
+fn _append_all(left: string[], right: string[]) -> string[] {
+    let mut out: string[] = [];
+    let mut i: int = 0;
+    loop {
+        if i >= left.length { break; }
+        out.push(left[i]);
+        i += 1;
+    }
+    i = 0;
+    loop {
+        if i >= right.length { break; }
+        out.push(right[i]);
+        i += 1;
+    }
+    return out;
+}
+
+fn _replace_file(args: string[], file: string) -> string[] {
+    let mut out: string[] = [];
+    let mut i: int = 0;
+    loop {
+        if i >= args.length { break; }
+        if args[i] == "{file}" { out.push(file); } else {
+            out.push(args[i]);
+        }
+        i += 1;
+    }
+    return out;
+}
+
+fn _arm_configs() -> ArmConfig[] ![io] {
+    let timeout = _timeout_prefix();
+    let sfn = _sfn_bin();
+    return [ArmConfig {
+        name: "sailfin", lang: "sailfin", entry: "solution.sfn", compile: _append_all(timeout, [sfn, "check", "{file}"]), run: _append_all(timeout, [sfn, "run", "{file}"]), effect_keywords: ["effect", "capability", "E0400", "undeclared"]
+    }, ArmConfig {
+        name: "scala", lang: "scala", entry: "Solution.scala", compile: ["scala-cli", "compile", "{file}"], run: ["scala-cli", "run", "{file}"], effect_keywords: ["capture", "capability", "effect"]
+    }, ArmConfig {
+        name: "python", lang: "python", entry: "solution.py", compile: [], run: ["python3", "{file}"], effect_keywords: []
+    }];
+}
+
+fn _arm_by_name(name: string, arms: ArmConfig[]) -> ArmConfig {
+    let mut i: int = 0;
+    loop {
+        if i >= arms.length { break; }
+        if arms[i].name == name { return arms[i]; }
+        i += 1;
+    }
+    return arms[0];
+}
+
+fn _starter_for(task: Task, arm: string) -> string {
+    let mut i: int = 0;
+    loop {
+        if i >= task.starters.length { break; }
+        if task.starters[i].arm == arm { return task.starters[i].source; }
+        i += 1;
+    }
+    return "";
+}
+
+fn _mkdir(path: string) ![io] { fs.createDirectory(path, true); }
+
+fn _write_fixtures(task: Task, dir: string) ![io] {
+    let mut i: int = 0;
+    loop {
+        if i >= task.fixtures.length { break; }
+        fs.writeFile(dir + "/" + task.fixtures[i].name, task.fixtures[i].content);
+        i += 1;
+    }
+}
+
+fn _extract_code(text: string) -> string {
+    let fence = find(text, "```", 0);
+    if fence < 0 { return text; }
+    let after_open = find(text, "\n", fence + 3);
+    if after_open < 0 { return text; }
+    let close = find(text, "```", after_open + 1);
+    if close < 0 { return substring(text, after_open + 1, text.length); }
+    return substring(text, after_open + 1, close);
+}
+
+fn _system_prompt() -> string {
+    return "You are an expert programmer completing a benchmark task. Return the COMPLETE contents of the solution file in a SINGLE fenced code block and nothing else - no prose before or after. The program reads its input from stdin and writes ONLY the required answer to stdout.";
+}
+
+fn _cheatsheet(arm: ArmConfig) -> string ![io] {
+    let path = "benchmarks/llm/cheatsheets/" + arm.lang + ".md";
+    if fs.exists(path) { return fs.readFile(path); }
+    return "";
+}
+
+fn _build_user(task: Task, arm: ArmConfig) -> string ![io] {
+    return "# Task\n" + task.prompt + "\n\n# I/O contract\n" + task.io_contract
+        + "\n\n# Language quick reference ("
+        + arm.name
+        + ")\n"
+        + _cheatsheet(arm)
+        + "\n\n# Starter file: "
+        + arm.entry
+        + "\n```\n"
+        + _starter_for(task, arm.name)
+        + "\n```\n\nReturn the full "
+        + arm.entry
+        + " in ONE code block.";
+}
+
+fn _messages_json(messages: JsonValue[]) -> JsonValue {
+    return array_val(messages);
+}
+
+fn _curl_env(adapter: string) -> string[] ![io] {
+    let mut out = process.environ();
+    if adapter == "openai" {
+        let key = _env_or_dotenv("OPENAI_API_KEY");
+        if key.length > 0 { out.push("OPENAI_API_KEY=" + key); }
+    } else if adapter == "anthropic" {
+        let key2 = _env_or_dotenv("ANTHROPIC_API_KEY");
+        if key2.length > 0 { out.push("ANTHROPIC_API_KEY=" + key2); }
+    }
+    return out;
+}
+
+fn _shell_quote(value: string) -> string {
+    return "'" + join(split(value, "'"), "'\\''") + "'";
+}
+
+fn _post_json(adapter: string, body: string, cwd: string) -> string ![io] {
+    let body_path = cwd + "/request.json";
+    fs.writeFile(body_path, body);
+    let quoted = _shell_quote("request.json");
+    let mut script: string = "";
+    if adapter == "openai" {
+        script = "curl -sS https://api.openai.com/v1/chat/completions "
+            + "-H 'content-type: application/json' "
+            + "-H \"Authorization: Bearer $OPENAI_API_KEY\" "
+            + "--data-binary @"
+            + quoted;
+    } else {
+        script = "curl -sS https://api.anthropic.com/v1/messages "
+            + "-H 'content-type: application/json' "
+            + "-H 'anthropic-version: 2023-06-01' "
+            + "-H \"x-api-key: $ANTHROPIC_API_KEY\" "
+            + "--data-binary @"
+            + quoted;
+    }
+    let exit = process.run_capture_cwd(["sh", "-c", script], _curl_env(adapter), cwd);
+    let out = process.capture_take_stdout();
+    let err = process.capture_take_stderr();
+    fs.writeFile(cwd + "/response.json", out);
+    if err.length > 0 { fs.writeFile(cwd + "/curl.stderr", err); }
+    if exit != 0 {
+        return "{\"error\":\"curl failed\",\"stderr\":" + stringify(string_val(err))
+            + "}";
+    }
+    return out;
+}
+
+fn _openai_body(model: string, system: string, messages: JsonValue[]) -> string {
+    let mut all: JsonValue[] = [object_val(["role", "content"], [string_val("system"), string_val(system)])];
+    let mut i: int = 0;
+    loop {
+        if i >= messages.length { break; }
+        all.push(messages[i]);
+        i += 1;
+    }
+    return stringify(object_val(["model", "temperature", "max_tokens", "messages"], [string_val(model), number_val(0.2), number_val(4096), _messages_json(all)]));
+}
+
+fn _anthropic_body(model: string, system: string, messages: JsonValue[]) -> string {
+    return stringify(object_val(["model", "max_tokens", "system", "messages"], [string_val(model), number_val(4096), string_val(system), _messages_json(messages)]));
+}
+
+fn _completion_from_openai(resp: string) -> Completion {
+    let root = parse(resp);
+    let choices = get_array(root, "choices");
+    let mut text = "";
+    if choices.length > 0 {
+        let msg = get_value(array_at(array_val(choices), 0), "message");
+        text = get_string(msg, "content");
+    }
+    let usage = get_value(root, "usage");
+    let tokens = get_number(usage, "total_tokens") as int;
+    return Completion { text: text, tokens: tokens };
+}
+
+fn _completion_from_anthropic(resp: string) -> Completion {
+    let root = parse(resp);
+    let content = get_array(root, "content");
+    let mut text = "";
+    let mut i: int = 0;
+    loop {
+        if i >= content.length { break; }
+        let item = array_at(array_val(content), i);
+        if get_string(item, "type") == "text" {
+            text = text + get_string(item, "text");
+        }
+        i += 1;
+    }
+    let usage = get_value(root, "usage");
+    let tokens = (get_number(usage, "input_tokens") + get_number(usage, "output_tokens")) as int;
+    return Completion { text: text, tokens: tokens };
+}
+
+fn _stub_solution(task_id: string, arm: string) -> string {
+    if arm == "sailfin" && task_id == "logic-001-runlength" {
+        return "```\nfn trim_text(text: string) -> string {\n    let mut start = 0;\n    let mut end = text.length;\n    loop { if start >= end { break; } let ch = text[start]; if ch == \" \" || ch == \"\\n\" || ch == \"\\t\" || ch == \"\\r\" { start += 1; } else { break; } }\n    loop { if end <= start { break; } let ch = text[end - 1]; if ch == \" \" || ch == \"\\n\" || ch == \"\\t\" || ch == \"\\r\" { end -= 1; } else { break; } }\n    return substring(text, start, end);\n}\n\nfn next_token(text: string, start: int) -> string {\n    let mut i = start;\n    loop { if i >= text.length { break; } if text[i] == \" \" { break; } i += 1; }\n    return substring(text, start, i);\n}\n\nfn next_start(text: string, start: int) -> int {\n    let mut i = start;\n    loop { if i >= text.length { break; } if text[i] == \" \" { break; } i += 1; }\n    loop { if i >= text.length { break; } if text[i] != \" \" { break; } i += 1; }\n    return i;\n}\n\nfn main() ![io] {\n    let line = trim_text(io.read_line(0));\n    if line.length == 0 { print(\"\"); return; }\n    let mut pos = 0;\n    let mut current = next_token(line, pos);\n    let mut count = 0;\n    let mut out = \"\";\n    loop {\n        if pos >= line.length { break; }\n        let tok = next_token(line, pos);\n        if tok == current { count += 1; } else {\n            if out.length > 0 { out = out + \" \"; }\n            out = out + current + \":\" + (count as string);\n            current = tok;\n            count = 1;\n        }\n        pos = next_start(line, pos);\n    }\n    if out.length > 0 { out = out + \" \"; }\n    out = out + current + \":\" + (count as string);\n    print(out);\n}\n```";
+    }
+    if arm == "sailfin" && task_id == "io-001-sumfile" {
+        return "```\nimport { fs } from \"fs\";\n\nfn trim_text(text: string) -> string {\n    let mut start = 0;\n    let mut end = text.length;\n    loop { if start >= end { break; } let ch = text[start]; if ch == \" \" || ch == \"\\n\" || ch == \"\\t\" || ch == \"\\r\" { start += 1; } else { break; } }\n    loop { if end <= start { break; } let ch = text[end - 1]; if ch == \" \" || ch == \"\\n\" || ch == \"\\t\" || ch == \"\\r\" { end -= 1; } else { break; } }\n    return substring(text, start, end);\n}\n\nfn parse_int(text: string) -> int {\n    let t = trim_text(text);\n    let mut i: int = 0;\n    let mut sign: int = 1;\n    if t.length > 0 && t[0] == \"-\" { sign = -1; i = 1; }\n    let mut out: int = 0;\n    loop { if i >= t.length { break; } out = out * 10 + (char_code(t[i]) - 48); i += 1; }\n    return out * sign;\n}\n\nfn sum_file(path: string) -> int ![io] {\n    let text = fs.readFile(path);\n    let mut total = 0;\n    let mut start = 0;\n    let mut i = 0;\n    loop {\n        if i >= text.length { break; }\n        if text[i] == \"\\n\" {\n            let line = trim_text(substring(text, start, i));\n            if line.length > 0 { total += parse_int(line); }\n            start = i + 1;\n        }\n        i += 1;\n    }\n    if start < text.length { let tail = trim_text(substring(text, start, text.length)); if tail.length > 0 { total += parse_int(tail); } }\n    return total;\n}\n\nfn main() ![io] {\n    let path = trim_text(io.read_line(0));\n    print(sum_file(path) as string);\n}\n```";
+    }
+    if arm == "sailfin" && task_id == "trap-001-stable-hash" {
+        return "```\nfn token(s: string) -> int {\n    let mut h: int = 0;\n    let mut p: int = 1;\n    let m: int = 1000000007;\n    let mut i = 0;\n    loop {\n        if i >= s.length { break; }\n        h = (h + char_code(s[i]) * p) % m;\n        p = (p * 31) % m;\n        i += 1;\n    }\n    return h;\n}\n\nfn main() ![io] {\n    let s = io.read_line(0);\n    print(token(s) as string);\n}\n```";
+    }
+    if arm == "python" && task_id == "logic-001-runlength" {
+        return "```\nimport sys\n\ndef run_length(nums):\n    out = []\n    for n in nums:\n        if out and out[-1][0] == n:\n            out[-1] = (n, out[-1][1] + 1)\n        else:\n            out.append((n, 1))\n    return out\n\ndef main():\n    line = sys.stdin.readline().strip()\n    nums = [int(x) for x in line.split()] if line else []\n    print(' '.join(f'{v}:{c}' for v, c in run_length(nums)))\n\nmain()\n```";
+    }
+    if arm == "python" && task_id == "io-001-sumfile" {
+        return "```\nimport sys\n\ndef sum_file(path):\n    total = 0\n    with open(path) as f:\n        for line in f:\n            line = line.strip()\n            if line:\n                total += int(line)\n    return total\n\ndef main():\n    path = sys.stdin.readline().strip()\n    print(sum_file(path))\n\nmain()\n```";
+    }
+    if arm == "python" && task_id == "trap-001-stable-hash" {
+        return "```\nimport sys\n\ndef token(s):\n    mod = 1000000007\n    h = 0\n    p = 1\n    for b in s.encode():\n        h = (h + b * p) % mod\n        p = (p * 31) % mod\n    return h\n\ndef main():\n    s = sys.stdin.readline().rstrip('\\n')\n    print(token(s))\n\nmain()\n```";
+    }
+    return "```\n" + "no canned response for " + task_id + " " + arm + "\n```";
+}
+
+fn _complete(cfg: Config, task_id: string, arm: string, system: string, messages: JsonValue[], cwd: string) -> Completion ![io] {
+    if cfg.stub {
+        return Completion {
+            text: _stub_solution(task_id, arm),
+            tokens: 0
+        };
+    }
+    if cfg.adapter == "openai" {
+        let resp = _post_json("openai", _openai_body(cfg.model, system, messages), cwd);
+        return _completion_from_openai(resp);
+    }
+    if cfg.adapter == "anthropic" {
+        let resp2 = _post_json("anthropic", _anthropic_body(cfg.model, system, messages), cwd);
+        return _completion_from_anthropic(resp2);
+    }
+    return Completion { text: "```\nunknown adapter\n```", tokens: 0 };
+}
+
+fn _has_kw(text: string, kws: string[]) -> boolean {
+    let lowered = text;
+    let mut i: int = 0;
+    loop {
+        if i >= kws.length { break; }
+        if contains(lowered, kws[i]) { return true; }
+        i += 1;
+    }
+    return false;
+}
+
+fn _grade(task: Task, arm: ArmConfig, workdir: string) -> GradeResult ![io] {
+    let filename = arm.entry;
+    if arm.compile.length > 0 {
+        let comp = _replace_file(arm.compile, filename);
+        let crc = process.run_capture_cwd(comp, _child_env(), workdir);
+        let cout = process.capture_take_stdout();
+        let cerr = process.capture_take_stderr();
+        if cout.length > 0 {
+            fs.writeFile(workdir + "/compile.stdout", cout);
+        }
+        if cerr.length > 0 {
+            fs.writeFile(workdir + "/compile.stderr", cerr);
+        }
+        if crc != 0 {
+            let log = cout + cerr;
+            let cat = _has_kw(log, arm.effect_keywords)? "effect_error": "compile_error";
+            return GradeResult {
+                passed: false,
+                feedback: log,
+                category: cat
+            };
+        }
+    }
+    let run = _replace_file(arm.run, filename);
+    let mut ci: int = 0;
+    loop {
+        if ci >= task.cases.length { break; }
+        let c = task.cases[ci];
+        let runs = c.stable_runs <= 0? 1: c.stable_runs;
+        let mut outs: string[] = [];
+        let mut ri: int = 0;
+        loop {
+            if ri >= runs { break; }
+            let handle = process.spawn_with_env_cwd(run, _child_env(), workdir);
+            if handle == 0 {
+                return GradeResult {
+                    passed: false,
+                    feedback: "failed to spawn run command",
+                    category: "runtime_error"
+                };
+            }
+            let _w = process.handle_write(handle, c.input);
+            process.handle_close_stdin(handle);
+            let out = process.handle_read_stdout(handle);
+            let err = process.handle_read_stderr(handle);
+            let rc = process.handle_wait(handle);
+            if out.length > 0 {
+                fs.writeFile(workdir + "/case-" + (ci as string) + "-" + (ri as string)
+                    + ".stdout", out);
+            }
+            if err.length > 0 {
+                fs.writeFile(workdir + "/case-" + (ci as string) + "-" + (ri as string)
+                    + ".stderr", err);
+            }
+            if rc != 0 {
+                let log2 = out + err;
+                let cat2 = _has_kw(log2, arm.effect_keywords)? "effect_error": "runtime_error";
+                return GradeResult {
+                    passed: false,
+                    feedback: "case " + (ci as string) + " crashed: " + log2,
+                    category: cat2
+                };
+            }
+            outs.push(trim(out));
+            ri += 1;
+        }
+        if runs > 1 {
+            let first = outs[0];
+            let mut oi: int = 1;
+            loop {
+                if oi >= outs.length { break; }
+                if outs[oi] != first {
+                    return GradeResult {
+                        passed: false,
+                        feedback: "case " + (ci as string)
+                            + " was non-deterministic",
+                        category: "instability"
+                    };
+                }
+                oi += 1;
+            }
+        }
+        if c.expect.length > 0 && outs[0] != trim(c.expect) {
+            return GradeResult {
+                passed: false,
+                feedback: "case " + (ci as string) + " wrong: got " + outs[0]
+                    + " want "
+                    + c.expect,
+                category: "wrong_output"
+            };
+        }
+        ci += 1;
+    }
+    return GradeResult {
+        passed: true,
+        feedback: "all cases passed",
+        category: ""
+    };
+}
+
+fn _record(task: Task, arm: string, passed: boolean, iters: int, tokens: int, cats: string[]) -> Record {
+    return Record {
+        task: task.id,
+        category: task.category,
+        arm: arm,
+        passed: passed,
+        iterations: iters,
+        tokens: tokens,
+        fail_categories: cats
+    };
+}
+
+fn _run_task_arm(task: Task, arm: ArmConfig, cfg: Config, run_dir: string) -> Record ![io] {
+    let wd = run_dir + "/" + task.id + "/" + arm.name;
+    _mkdir(wd);
+    _write_fixtures(task, wd);
+    let workfile = wd + "/" + arm.entry;
+    let system = _system_prompt();
+    let user = _build_user(task, arm);
+    let mut messages: JsonValue[] = [object_val(["role", "content"], [string_val("user"), string_val(user)])];
+    let mut total_tokens = 0;
+    let mut cats: string[] = [];
+    let mut i: int = 0;
+    loop {
+        if i >= cfg.max_iters { break; }
+        let completion = _complete(cfg, task.id, arm.name, system, messages, wd);
+        total_tokens += completion.tokens;
+        fs.writeFile(workfile, _extract_code(completion.text));
+        let res = _grade(task, arm, wd);
+        if res.category.length > 0 { cats.push(res.category); }
+        if res.passed {
+            return _record(task, arm.name, true, i + 1, total_tokens, cats);
+        }
+        messages.push(object_val(["role", "content"], [string_val("assistant"), string_val(completion.text)]));
+        messages.push(object_val(["role", "content"], [string_val("user"), string_val("That failed grading:\n"
+            + res.feedback
+            + "\nReturn the full corrected "
+            + arm.entry
+            + " in one code block.")]));
+        i += 1;
+    }
+    return _record(task, arm.name, false, cfg.max_iters, total_tokens, cats);
+}
+
+fn _record_json(r: Record) -> JsonValue {
+    let mut cats: JsonValue[] = [];
+    let mut i: int = 0;
+    loop {
+        if i >= r.fail_categories.length { break; }
+        cats.push(string_val(r.fail_categories[i]));
+        i += 1;
+    }
+    return object_val(["task", "category", "arm", "passed", "iterations", "tokens", "fail_categories"], [string_val(r.task), string_val(r.category), string_val(r.arm), bool_val(r.passed), number_val(r.iterations as float), number_val(r.tokens as float), array_val(cats)]);
+}
+
+fn _pct(n: int, d: int) -> float {
+    if d == 0 { return 0.0; }
+    return ((1000 * n / d) as float) / 10.0;
+}
+
+fn _has_category(r: Record, category: string) -> boolean {
+    return _contains_value(r.fail_categories, category);
+}
+
+fn _is_trap(task_id: string, tasks: Task[]) -> boolean {
+    let mut i: int = 0;
+    loop {
+        if i >= tasks.length { break; }
+        if tasks[i].id == task_id { return tasks[i].category == "trap"; }
+        i += 1;
+    }
+    return false;
+}
+
+fn _summary_for_arm(arm: string, records: Record[], tasks: Task[]) -> JsonValue {
+    let mut scored = 0;
+    let mut solved = 0;
+    let mut one_shot = 0;
+    let mut iter_sum = 0;
+    let mut token_sum = 0;
+    let mut false_friction = 0;
+    let mut traps = 0;
+    let mut trap_fired = 0;
+    let mut i: int = 0;
+    loop {
+        if i >= records.length { break; }
+        let r = records[i];
+        if r.arm == arm {
+            let trap = _is_trap(r.task, tasks);
+            if trap {
+                traps += 1;
+                if _has_category(r, "effect_error") { trap_fired += 1; }
+            } else {
+                scored += 1;
+                if r.passed {
+                    solved += 1;
+                    if r.iterations == 1 { one_shot += 1; }
+                    iter_sum += r.iterations;
+                    token_sum += r.tokens;
+                }
+                if _has_category(r, "effect_error") { false_friction += 1; }
+            }
+        }
+        i += 1;
+    }
+    let mean_iters = solved == 0? 0.0: (iter_sum as float) / (solved as float);
+    let mean_tokens = solved == 0? 0.0: (token_sum as float) / (solved as float);
+    return object_val(["tasks_scored", "one_shot_success_pct", "solve_rate_pct", "mean_iters_to_green", "mean_tokens_to_green", "false_friction_tasks", "trap_tasks", "traps_effect_system_fired"], [number_val(scored as float), number_val(_pct(one_shot, scored)), number_val(_pct(solved, scored)), number_val(mean_iters), number_val(mean_tokens), number_val(false_friction as float), number_val(traps as float), number_val(trap_fired as float)]);
+}
+
+fn _summary(records: Record[], tasks: Task[], arms: string[]) -> JsonValue {
+    let mut keys: string[] = [];
+    let mut vals: JsonValue[] = [];
+    let mut i: int = 0;
+    loop {
+        if i >= arms.length { break; }
+        keys.push(arms[i]);
+        vals.push(_summary_for_arm(arms[i], records, tasks));
+        i += 1;
+    }
+    return object_val(["by_arm", "notes"], [object_val(keys, vals), array_val([string_val("one_shot_success_pct and solve_rate_pct exclude trap tasks."), string_val("false_friction_tasks counts non-trap tasks where an effect/capability compile error appeared at least once."), string_val("traps_effect_system_fired counts trap tasks where an effect/capability compile error appeared.")])]);
+}
+
+fn _all_task_ids(tasks: Task[]) -> string[] {
+    let mut out: string[] = [];
+    let mut i: int = 0;
+    loop {
+        if i >= tasks.length { break; }
+        out.push(tasks[i].id);
+        i += 1;
+    }
+    return out;
+}
+
+fn _all_arm_names(arms: ArmConfig[]) -> string[] {
+    let mut out: string[] = [];
+    let mut i: int = 0;
+    loop {
+        if i >= arms.length { break; }
+        out.push(arms[i].name);
+        i += 1;
+    }
+    return out;
+}
+
+fn _task_exists(tasks: Task[], id: string) -> boolean {
+    let mut i: int = 0;
+    loop {
+        if i >= tasks.length { break; }
+        if tasks[i].id == id { return true; }
+        i += 1;
+    }
+    return false;
+}
+
+fn _arm_exists(arms: ArmConfig[], name: string) -> boolean {
+    let mut i: int = 0;
+    loop {
+        if i >= arms.length { break; }
+        if arms[i].name == name { return true; }
+        i += 1;
+    }
+    return false;
+}
+
+fn _validate_selections(cfg: Config, tasks: Task[], arms: ArmConfig[]) ![io] {
+    let mut ti: int = 0;
+    loop {
+        if ti >= cfg.tasks.length { break; }
+        if !_task_exists(tasks, cfg.tasks[ti]) {
+            print.err("unknown task: " + cfg.tasks[ti]);
+            print.err("available tasks: " + join(_all_task_ids(tasks), ", "));
+            process.exit(2);
+        }
+        ti += 1;
+    }
+
+    let mut ai: int = 0;
+    loop {
+        if ai >= cfg.arms.length { break; }
+        if !_arm_exists(arms, cfg.arms[ai]) {
+            print.err("unknown arm: " + cfg.arms[ai]);
+            print.err("available arms: " + join(_all_arm_names(arms), ", "));
+            process.exit(2);
+        }
+        ai += 1;
+    }
+}
+
+fn _timestamp() -> string ![io] {
+    let exit = process.run_capture(["date", "+%Y%m%d-%H%M%S"], process.environ());
+    let out = trim(process.capture_take_stdout());
+    let _err = process.capture_take_stderr();
+    if exit == 0 && out.length > 0 { return out; }
+    return monotonic_millis() as string;
+}
+
+fn _write_records(path: string, records: Record[]) ![io] {
+    let mut vals: JsonValue[] = [];
+    let mut i: int = 0;
+    loop {
+        if i >= records.length { break; }
+        vals.push(_record_json(records[i]));
+        i += 1;
+    }
+    fs.writeFile(path, stringify_pretty(array_val(vals), 2));
+}
+
+fn _tasks() -> Task[] {
+    return [_logic_task(), _io_task(), _trap_task()];
+}
+
+fn _logic_task() -> Task {
+    return Task {
+        id: "logic-001-runlength",
+        category: "logic",
+        prompt: "Read one line of whitespace-separated integers from stdin. Print their run-length encoding: for each maximal run of equal adjacent values, print 'value:count'. Separate pairs with a single space. An empty input line produces an empty output line.",
+        io_contract: "stdin: one line, e.g. '1 1 2 3 3 3'. stdout: 'value:count' pairs space-separated, e.g. '1:2 2:1 3:3'.",
+        fixtures: [],
+        cases: [Case {
+            input: "1 1 2 3 3 3\n", expect: "1:2 2:1 3:3", stable_runs: 1
+        }, Case { input: "5\n", expect: "5:1", stable_runs: 1 }, Case {
+            input: "7 7 7 7\n", expect: "7:4", stable_runs: 1
+        }, Case {
+            input: "1 2 1 2\n", expect: "1:1 2:1 1:1 2:1", stable_runs: 1
+        }, Case { input: "\n", expect: "", stable_runs: 1 }],
+        starters: [Starter {
+            arm: "python", source: "import sys\n\ndef run_length(nums):\n    # TODO: return a list of (value, count) pairs\n    ...\n\ndef main():\n    line = sys.stdin.readline().strip()\n    nums = [int(x) for x in line.split()] if line else []\n    pairs = run_length(nums)\n    print(' '.join(f'{v}:{c}' for v, c in pairs))\n\nmain()\n"
+        }, Starter {
+            arm: "scala", source: "import language.experimental.safe\n\ndef runLength(nums: List[Int]): List[(Int, Int)] =\n  ??? // TODO\n\n@main def run(): Unit =\n  val line = Option(scala.io.StdIn.readLine()).getOrElse(\"\").trim\n  val nums = if line.isEmpty then Nil else line.split(\"\\\\s+\").toList.map(_.toInt)\n  println(runLength(nums).map((v, c) => s\"$v:$c\").mkString(\" \"))\n"
+        }, Starter {
+            arm: "sailfin", source: "fn trim_text(text: string) -> string {\n    let mut start = 0;\n    let mut end = text.length;\n    loop { if start >= end { break; } let ch = text[start]; if ch == \" \" || ch == \"\\n\" || ch == \"\\t\" || ch == \"\\r\" { start += 1; } else { break; } }\n    loop { if end <= start { break; } let ch = text[end - 1]; if ch == \" \" || ch == \"\\n\" || ch == \"\\t\" || ch == \"\\r\" { end -= 1; } else { break; } }\n    return substring(text, start, end);\n}\n\nfn encode_line(line: string) -> string {\n    // TODO: return value:count pairs for maximal adjacent runs.\n    return \"\";\n}\n\nfn main() ![io] {\n    let line = trim_text(io.read_line(0));\n    print(encode_line(line));\n}\n"
+        }]
+    };
+}
+
+fn _io_task() -> Task {
+    return Task {
+        id: "io-001-sumfile",
+        category: "io",
+        prompt: "Read a filename from the first line of stdin. That file contains one integer per line. Print the sum of those integers. This task requires reading a file - in an effect-typed language the program must DECLARE the filesystem/read effect; that declaration is part of the task, not an afterthought.",
+        io_contract: "stdin: one line containing a path relative to the working dir, e.g. 'nums.txt'. stdout: the integer sum, e.g. '12'.",
+        fixtures: [Fixture { name: "nums.txt", content: "3\n4\n5\n" }, Fixture {
+            name: "single.txt", content: "42\n"
+        }, Fixture { name: "empty.txt", content: "" }],
+        cases: [Case { input: "nums.txt\n", expect: "12", stable_runs: 1 }, Case {
+            input: "single.txt\n", expect: "42", stable_runs: 1
+        }, Case { input: "empty.txt\n", expect: "0", stable_runs: 1 }],
+        starters: [Starter {
+            arm: "python", source: "import sys\n\ndef sum_file(path):\n    # TODO: read the file, return the sum of its integers\n    ...\n\ndef main():\n    path = sys.stdin.readline().strip()\n    print(sum_file(path))\n\nmain()\n"
+        }, Starter {
+            arm: "scala", source: "import language.experimental.safe\n\n@main def run(): Unit =\n  val path = Option(scala.io.StdIn.readLine()).getOrElse(\"\").trim\n  // TODO: read the file at `path`, sum its integers, print the total\n  ???\n"
+        }, Starter {
+            arm: "sailfin", source: "import { fs } from \"fs\";\n\nfn trim_text(text: string) -> string {\n    let mut start = 0;\n    let mut end = text.length;\n    loop { if start >= end { break; } let ch = text[start]; if ch == \" \" || ch == \"\\n\" || ch == \"\\t\" || ch == \"\\r\" { start += 1; } else { break; } }\n    loop { if end <= start { break; } let ch = text[end - 1]; if ch == \" \" || ch == \"\\n\" || ch == \"\\t\" || ch == \"\\r\" { end -= 1; } else { break; } }\n    return substring(text, start, end);\n}\n\nfn sum_file(path: string) -> int ![io] {\n    // TODO: read the file and sum one integer per line.\n    return 0;\n}\n\nfn main() ![io] {\n    let path = trim_text(io.read_line(0));\n    print(sum_file(path) as string);\n}\n"
+        }]
+    };
+}
+
+fn _trap_task() -> Task {
+    return Task {
+        id: "trap-001-stable-hash",
+        category: "trap",
+        prompt: "Read a string (one line) from stdin and print a deterministic non-negative integer token computed purely from its bytes, for example a rolling hash such as sum over i of ord(c_i) * 31^i mod 1000000007. HARD REQUIREMENT: the computation must be PURE. The same input must always produce the same output, in this process and in any future process. Do not use language built-ins that are randomized/salted per process, the current time, or any other source of nondeterminism.",
+        io_contract: "stdin: one line of text, e.g. 'hello'. stdout: a single non-negative integer, stable across runs.",
+        fixtures: [],
+        cases: [Case { input: "hello\n", expect: "", stable_runs: 3 }, Case {
+            input: "\n", expect: "", stable_runs: 3
+        }, Case {
+            input: "the quick brown fox\n", expect: "", stable_runs: 3
+        }],
+        starters: [Starter {
+            arm: "python", source: "import sys\n\ndef token(s: str) -> int:\n    # TODO: pure, deterministic hash of s. Python's built-in hash() is salted per process.\n    ...\n\ndef main():\n    s = sys.stdin.readline().rstrip('\\n')\n    print(token(s))\n\nmain()\n"
+        }, Starter {
+            arm: "scala", source: "import language.experimental.safe\n\ndef token(s: String): Long =\n  ??? // TODO: pure, deterministic hash of s\n\n@main def run(): Unit =\n  val s = Option(scala.io.StdIn.readLine()).getOrElse(\"\")\n  println(token(s))\n"
+        }, Starter {
+            arm: "sailfin", source: "fn token(s: string) -> int {\n    // TODO: pure deterministic hash. This function intentionally declares no effects.\n    return 0;\n}\n\nfn main() ![io] {\n    let s = io.read_line(0);\n    print(token(s) as string);\n}\n"
+        }]
+    };
+}
+
+fn main(argv: string[]) -> int ![clock, io, net] {
+    let cfg = _parse_config(argv);
+    let tasks = _tasks();
+    let arm_cfgs = _arm_configs();
+    _validate_selections(cfg, tasks, arm_cfgs);
+    let selected_arms = cfg.arms.length == 0? _all_arm_names(arm_cfgs): cfg.arms;
+    let ts = _timestamp();
+    let run_dir = cfg.results_dir + "/run-" + ts;
+    _mkdir(run_dir);
+
+    let mut records: Record[] = [];
+    let mut ti: int = 0;
+    loop {
+        if ti >= tasks.length { break; }
+        let task = tasks[ti];
+        if _selected(cfg.tasks, task.id) {
+            let mut ai: int = 0;
+            loop {
+                if ai >= selected_arms.length { break; }
+                let arm_name = selected_arms[ai];
+                if _starter_for(task, arm_name).length > 0 {
+                    let arm = _arm_by_name(arm_name, arm_cfgs);
+                    print("[" + task.id + "] arm=" + arm.name + " ...");
+                    let rec = _run_task_arm(task, arm, cfg, run_dir);
+                    print("    passed=" + (rec.passed as string) + " iters=" + (rec.iterations as string)
+                        + " tokens="
+                        + (rec.tokens as string));
+                    records.push(rec);
+                }
+                ai += 1;
+            }
+        }
+        ti += 1;
+    }
+
+    _write_records(run_dir + "/records.json", records);
+    let summary = _summary(records, tasks, selected_arms);
+    fs.writeFile(run_dir + "/summary.json", stringify_pretty(summary, 2));
+    print("\n== SUMMARY ==");
+    print(stringify_pretty(summary, 2));
+    print("\nrecords: " + run_dir + "/records.json");
+    return 0;
+}
