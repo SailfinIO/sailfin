@@ -11,8 +11,9 @@
 //      suite passes (fallback contract, #2013).
 //
 // Follows the `guillermo_test.sfn` shape: `_sfn_bin()` honours `SAILFIN_BIN`,
-// `_child_env()` threads PATH/HOME/TMPDIR/SAILFIN_TEST_SCRATCH per the
-// build-and-run isolation rule (`.claude/rules/no-bash-e2e.md`).
+// `_child_env()` threads PATH/HOME/TMPDIR/SAILFIN_TEST_SCRATCH and the
+// parent cache knobs per the build-and-run isolation rule
+// (`.claude/rules/no-bash-e2e.md`).
 import { find, split, contains } from "sfn/strings";
 
 fn _sfn_bin() -> string ![io] {
@@ -30,6 +31,12 @@ fn _child_env(scratch: string, objdir: string) -> string[] ![io] {
     let tmpdir = env.get("TMPDIR");
     if tmpdir.length > 0 { e.push("TMPDIR=" + tmpdir); }
     if scratch.length > 0 { e.push("SAILFIN_TEST_SCRATCH=" + scratch); }
+    let build_cache = env.get("SAILFIN_BUILD_CACHE_DIR");
+    if build_cache.length > 0 {
+        e.push("SAILFIN_BUILD_CACHE_DIR=" + build_cache);
+    }
+    let no_cache = env.get("SAILFIN_NO_CACHE");
+    if no_cache.length > 0 { e.push("SAILFIN_NO_CACHE=" + no_cache); }
     if objdir.length > 0 {
         e.push("SAILFIN_TEST_RUNTIME_OBJDIR=" + objdir);
     }
