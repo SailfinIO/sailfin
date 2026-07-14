@@ -44,7 +44,7 @@ make test             # Run the full suite
 make test-unit        # Sailfin-native unit tests
 make test-integration # Sailfin-native integration tests
 make test-e2e         # Sailfin-native e2e tests
-build/bin/sfn test <path> [-k name] # Target a suite dir, one test file, or named test
+build/bin/sfn test <path> [-k <name>] # Target a suite dir, one test file, or named test
 make bench            # Benchmark per-module compile time and memory
 make fetch-seed       # Download the pinned seed (bootstrap.toml [seed].version)
 make clean            # Remove dist/ artifacts

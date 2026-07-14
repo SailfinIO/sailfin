@@ -40,7 +40,7 @@ or release-facing, or the orchestrator explicitly requests it.
 | Command | Scope | When to Use |
 |---|---|---|
 | `sfn check <files>` | Static analysis only (parse + typecheck + effect-check; no IR, no `clang`, no self-host) | **Inner loop** — after every edit, before paying for a rebuild. Seconds for a few files; ~5 min for the whole `compiler/src/` tree |
-| `build/bin/sfn test <path> [-k name]` | Targeted suite dir, single `*_test.sfn`, or named test | Default issue verification after the relevant compiler binary exists |
+| `build/bin/sfn test <path> [-k <name>]` | Targeted suite dir, single `*_test.sfn`, or named test | Default issue verification after the relevant compiler binary exists |
 | `make test` | Full suite (unit + integration + e2e) | Only for explicit full-suite, broad regression, or high-risk gates |
 | `make test-unit` | Unit suite | When the issue asks for the whole unit tier, otherwise target the relevant file |
 | `make test-integration` | Integration suite | When the issue asks for the whole integration tier, otherwise target the relevant file |
