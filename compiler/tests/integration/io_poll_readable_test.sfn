@@ -74,3 +74,32 @@ test "io.poll_readable: a closed write end signals readable EOF" ![io] {
 test "io.poll_readable: a negative fd is never readable" ![io] {
     assert io.poll_readable(-1, 0) == false;
 }
+
+test "io.poll_readable: an over-i32::MAX timeout is accepted on a ready fd" ![io] {
+    // SFN-183: `timeout_ms` (i64) is clamped to the `poll(2)` i32 ABI
+    // before narrowing (`_clamp_poll_timeout_ms`). These values used to
+    // wrap silently — `4294967296 as i32` is `0`, `2147483648 as i32` is
+    // `i32::MIN` — corrupting the wait. The finite-wait duration itself is
+    // not assertable in a fast test (a clamped over-max wait is ~24.8
+    // days; an unready fd would hang), so this drives the clamp path on a
+    // pre-readable pipe, where `poll` returns at once regardless: the
+    // oversized timeout must be accepted and still report readable.
+    let buf: * u8 = malloc(8 as usize);
+    assert pipe(buf as * i32) == 0;
+    let fds: * PipeFds = buf as * PipeFds;
+    let read_fd: i32 = fds.rd;
+    let write_fd: i32 = fds.wr;
+
+    let payload: string = "x";
+    assert write(write_fd, payload as * u8, 1 as usize) == 1;
+
+    // 0x1_0000_0000 (narrowed to 0 pre-fix) and 0x8000_0000 (narrowed to
+    // i32::MIN pre-fix) are both above i32::MAX; a large-magnitude negative
+    // must still read as the infinite sentinel, not a wrapped value.
+    assert io.poll_readable(read_fd as i64, 4294967296) == true;
+    assert io.poll_readable(read_fd as i64, 2147483648) == true;
+    assert io.poll_readable(read_fd as i64, -4294967296) == true;
+
+    let _ = close(read_fd);
+    let _ = close(write_fd);
+}

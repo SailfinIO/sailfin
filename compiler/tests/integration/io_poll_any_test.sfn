@@ -112,3 +112,31 @@ test "io.poll_any: an all-parked list does not block, reports -1" ![io] {
     let fds: int[] = [-1, -2];
     assert io.poll_any(fds, -1) == -1;
 }
+
+test "io.poll_any: an over-i32::MAX timeout is accepted on a ready fd" ![io] {
+    // SFN-183: `timeout_ms` is clamped to the `poll(2)` i32 ABI before
+    // narrowing, shared with `io.poll_readable` via `_clamp_poll_timeout_ms`
+    // so the two wrappers can't diverge. `4294967296` (→ 0 pre-fix) and
+    // `2147483648` (→ i32::MIN pre-fix) are above i32::MAX; the finite wait
+    // itself is unassertable (a clamped over-max wait is ~24.8 days), so
+    // this drives the clamp on a pre-readable pipe where `poll` returns at
+    // once: the oversized timeout must still single out the ready fd.
+    let buf_a: * u8 = malloc(8 as usize);
+    let buf_b: * u8 = malloc(8 as usize);
+    assert pipe(buf_a as * i32) == 0;
+    assert pipe(buf_b as * i32) == 0;
+    let a: * PipeFds = buf_a as * PipeFds;
+    let b: * PipeFds = buf_b as * PipeFds;
+
+    let payload: string = "x";
+    assert write(b.wr, payload as * u8, 1 as usize) == 1;
+
+    let fds: int[] = [a.rd as i64, b.rd as i64];
+    assert io.poll_any(fds, 4294967296) == b.rd as i64;
+    assert io.poll_any(fds, 2147483648) == b.rd as i64;
+
+    let _ = close(a.rd);
+    let _ = close(a.wr);
+    let _ = close(b.rd);
+    let _ = close(b.wr);
+}
