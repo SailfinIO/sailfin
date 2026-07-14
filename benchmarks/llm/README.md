@@ -44,10 +44,11 @@ export OPENAI_API_KEY=...
 ./build/sfn350 --adapter openai --model gpt-4.1 --arm sailfin --arm python
 
 export ANTHROPIC_API_KEY=...
-./build/sfn350 --adapter anthropic --model claude-sonnet-4-20250514 --arm sailfin
+./build/sfn350 --adapter anthropic --model claude-sonnet-5 --arm sailfin
 ```
 
-You can also place provider keys in a repo-local `.env` file:
+You can also place provider keys in a repo-local `.env` file or
+`benchmarks/llm/.env`:
 
 ```dotenv
 OPENAI_API_KEY=...
@@ -68,7 +69,8 @@ Environment:
 - `SFN350_TIMEOUT_CMD`: optional command prefix for Sailfin compile and run
   commands, for example `timeout 60`.
 - `OPENAI_API_KEY` / `ANTHROPIC_API_KEY`: required for real model adapters.
-  The runner prefers shell environment values and falls back to `.env`.
+  The runner prefers shell environment values and falls back to `.env`, then
+  `benchmarks/llm/.env`.
 
 ## Notes
 

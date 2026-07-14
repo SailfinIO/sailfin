@@ -98,7 +98,7 @@ fn _usage() -> string {
     return "usage: sfn run benchmarks/llm/sfn350.sfn -- [--adapter stub|openai|anthropic] [--real] [--model M] [--arm A] [--task T] [--max-iters N] [--results-dir DIR]\n"
         + "\n"
         + "defaults: --adapter stub --model gpt-4.1 --max-iters 5 --results-dir build/sfn350-results\n"
-        + "env: OPENAI_API_KEY, ANTHROPIC_API_KEY, SAILFIN_BIN, SFN350_TIMEOUT_CMD; API keys may also be set in .env\n";
+        + "env: OPENAI_API_KEY, ANTHROPIC_API_KEY, SAILFIN_BIN, SFN350_TIMEOUT_CMD; API keys may also be set in .env or benchmarks/llm/.env\n";
 }
 
 fn _valid_adapter(value: string) -> boolean {
@@ -207,9 +207,9 @@ fn _strip_dotenv_quotes(value: string) -> string {
     return v;
 }
 
-fn _dotenv_get(key: string) -> string ![io] {
-    if !fs.exists(".env") { return ""; }
-    let lines = split(fs.readFile(".env"), "\n");
+fn _dotenv_get_from(path: string, key: string) -> string ![io] {
+    if !fs.exists(path) { return ""; }
+    let lines = split(fs.readFile(path), "\n");
     let mut i: int = 0;
     loop {
         if i >= lines.length { break; }
@@ -225,17 +225,37 @@ fn _dotenv_get(key: string) -> string ![io] {
     return "";
 }
 
+fn _dotenv_get(key: string) -> string ![io] {
+    let direct = _dotenv_get_from(".env", key);
+    if direct.length > 0 { return direct; }
+    return _dotenv_get_from("benchmarks/llm/.env", key);
+}
+
 fn _env_or_dotenv(key: string) -> string ![io] {
     let configured = env.get(key);
     if configured.length > 0 { return configured; }
     return _dotenv_get(key);
 }
 
+fn _current_dir() -> string ![io] {
+    let exit = process.run_capture(["pwd"], process.environ());
+    let out = trim(process.capture_take_stdout());
+    let _err = process.capture_take_stderr();
+    if exit == 0 { return out; }
+    return "";
+}
+
 fn _sfn_bin() -> string ![io] {
     let configured = env.get("SAILFIN_BIN");
     if configured.length > 0 { return configured; }
     let pwd = env.get("PWD");
-    if pwd.length > 0 { return pwd + "/build/bin/sfn"; }
+    if pwd.length > 0 && fs.exists(pwd + "/build/bin/sfn") {
+        return pwd + "/build/bin/sfn";
+    }
+    let cwd = _current_dir();
+    if cwd.length > 0 && fs.exists(cwd + "/build/bin/sfn") {
+        return cwd + "/build/bin/sfn";
+    }
     return "build/bin/sfn";
 }
 
@@ -263,8 +283,14 @@ fn _selected(selected: string[], value: string) -> boolean {
 }
 
 fn _append_all(left: string[], right: string[]) -> string[] {
-    let mut out = left;
+    let mut out: string[] = [];
     let mut i: int = 0;
+    loop {
+        if i >= left.length { break; }
+        out.push(left[i]);
+        i += 1;
+    }
+    i = 0;
     loop {
         if i >= right.length { break; }
         out.push(right[i]);
@@ -387,7 +413,7 @@ fn _shell_quote(value: string) -> string {
 fn _post_json(adapter: string, body: string, cwd: string) -> string ![io] {
     let body_path = cwd + "/request.json";
     fs.writeFile(body_path, body);
-    let quoted = _shell_quote(body_path);
+    let quoted = _shell_quote("request.json");
     let mut script: string = "";
     if adapter == "openai" {
         script = "curl -sS https://api.openai.com/v1/chat/completions "
@@ -406,6 +432,8 @@ fn _post_json(adapter: string, body: string, cwd: string) -> string ![io] {
     let exit = process.run_capture_cwd(["sh", "-c", script], _curl_env(adapter), cwd);
     let out = process.capture_take_stdout();
     let err = process.capture_take_stderr();
+    fs.writeFile(cwd + "/response.json", out);
+    if err.length > 0 { fs.writeFile(cwd + "/curl.stderr", err); }
     if exit != 0 {
         return "{\"error\":\"curl failed\",\"stderr\":" + stringify(string_val(err))
             + "}";
@@ -425,7 +453,7 @@ fn _openai_body(model: string, system: string, messages: JsonValue[]) -> string 
 }
 
 fn _anthropic_body(model: string, system: string, messages: JsonValue[]) -> string {
-    return stringify(object_val(["model", "max_tokens", "temperature", "system", "messages"], [string_val(model), number_val(4096), number_val(0.2), string_val(system), _messages_json(messages)]));
+    return stringify(object_val(["model", "max_tokens", "system", "messages"], [string_val(model), number_val(4096), string_val(system), _messages_json(messages)]));
 }
 
 fn _completion_from_openai(resp: string) -> Completion {
@@ -517,6 +545,12 @@ fn _grade(task: Task, arm: ArmConfig, workdir: string) -> GradeResult ![io] {
         let crc = process.run_capture_cwd(comp, _child_env(), workdir);
         let cout = process.capture_take_stdout();
         let cerr = process.capture_take_stderr();
+        if cout.length > 0 {
+            fs.writeFile(workdir + "/compile.stdout", cout);
+        }
+        if cerr.length > 0 {
+            fs.writeFile(workdir + "/compile.stderr", cerr);
+        }
         if crc != 0 {
             let log = cout + cerr;
             let cat = _has_kw(log, arm.effect_keywords)? "effect_error": "compile_error";
@@ -550,6 +584,14 @@ fn _grade(task: Task, arm: ArmConfig, workdir: string) -> GradeResult ![io] {
             let out = process.handle_read_stdout(handle);
             let err = process.handle_read_stderr(handle);
             let rc = process.handle_wait(handle);
+            if out.length > 0 {
+                fs.writeFile(workdir + "/case-" + (ci as string) + "-" + (ri as string)
+                    + ".stdout", out);
+            }
+            if err.length > 0 {
+                fs.writeFile(workdir + "/case-" + (ci as string) + "-" + (ri as string)
+                    + ".stderr", err);
+            }
             if rc != 0 {
                 let log2 = out + err;
                 let cat2 = _has_kw(log2, arm.effect_keywords)? "effect_error": "runtime_error";
