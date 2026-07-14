@@ -18,8 +18,8 @@ Use this skill whenever a task touches Sailfin compiler sources, runtime code, t
 
 1. Documentation/config-only change: run a fast syntax/readability check when available, otherwise `git diff --check`.
 2. Sailfin source edit inner loop: run `sfn check <touched files>` (or `build/bin/sfn check <path>`) to catch parse/type/effect errors quickly.
-3. Test-only or example change: run the targeted test first, then `make test` when a compiler binary exists.
-4. Compiler/runtime source change: run `make compile` before `make test`; use `make check` when declaring a shipped feature, cutting a release, or after higher-risk changes.
+3. Test-only or example change: run the targeted test first; run a broader suite only when the issue asks for it or risk warrants it.
+4. Compiler/runtime source change: run `make compile` when the change touches compiler self-hosting surface, then run the targeted `build/bin/sfn test <path>` / `-k` / `--tag` commands. Use `make check` when declaring a shipped feature, cutting a release, or after higher-risk changes.
 5. Structural compiler change: run `make clean-build` before rebuilding.
 
 ## SFEP and docs coupling

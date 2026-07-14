@@ -34,6 +34,24 @@ Examples: `fix(parser): reject unterminated type effects`,
 Do not create or apply Linear labels for status, priority, estimate, release,
 blockers, assignee, cycle, or Project membership.
 
+**Acceptance and verification**
+
+Ready issues should use the smallest sufficient verification ladder. Acceptance
+criteria describe observable behavior; verification lists runnable commands.
+
+- Include `make compile` for `compiler/src/*.sfn` changes, self-hosting changes,
+  runtime ABI changes, or work that must prove the compiler still rebuilds from
+  the pinned seed.
+- Prefer targeted `build/bin/sfn test <path>` commands over `make test`, where
+  `<path>` is a suite directory, capsule test directory, or single
+  `*_test.sfn` file. Use `-k <name>` or `--tag <tag>` when the issue only needs
+  specific tests inside a file.
+- Use `make test`, `make check`, or `make check-strict` only when the issue is
+  explicitly a full-suite, release, determinism, self-host fixed-point,
+  structural compiler, or high-risk regression gate.
+- For docs/config-only work, use `git diff --check` or another cheap
+  repo-appropriate check instead of a compiler suite.
+
 **Description**
 
 ```markdown
@@ -58,12 +76,12 @@ Out:
 ## Acceptance criteria
 
 - <observable condition>
-- <test/docs/status expectation>
+- <test/docs/status expectation, named semantically>
 
 ## Verification
 
-- `<command>`
-- `<command>`
+- `make compile` (when the change touches compiler self-hosting surface)
+- `build/bin/sfn test <targeted-dir-or-file> [-k <test-name>]`
 
 ## Links
 

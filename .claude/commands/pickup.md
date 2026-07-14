@@ -216,15 +216,17 @@ defaulting to bundle.**
 Walk every acceptance criterion in the body. Each must pass before opening the PR:
 
 ```bash
-make compile    # self-hosts
-make test       # no regressions
-# plus any issue-specific verification commands
+# issue-specific commands from ## Verification
+make compile    # when the issue touches compiler self-hosting surface
+build/bin/sfn test path/to/relevant_test.sfn
 ```
 
-Route a failing `make compile`/`make test` through `test-runner` (sonnet) to
-classify before escalating; don't spend Opus on a formatting error. If a
-criterion turns out impossible or wrong, comment on the Linear issue and pause
-— do not declare done with unmet criteria.
+Do not substitute the full suite for a targeted issue unless the issue asks for
+it or the implementation turns out to be structural/high-risk. Route a failing
+`make compile` or targeted test through `test-runner` (sonnet) to classify
+before escalating; don't spend Opus on a formatting error. If a criterion turns
+out impossible or wrong, comment on the Linear issue and pause — do not declare
+done with unmet criteria.
 
 ---
 

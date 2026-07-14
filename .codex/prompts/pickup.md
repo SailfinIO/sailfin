@@ -15,7 +15,7 @@ Required workflow:
 5. Restate the issue goal, scope, acceptance criteria, files affected, design references, and verification plan.
 6. Implement the smallest focused change that satisfies the issue.
 7. If you discover a real bug or obvious gap outside the claimed scope, search Linear for duplicates and file a Sailfin (`SFN`) follow-up using Linear-native status, priority, estimate, Project, blocker, and relation fields. Use only canonical `type:*` and `area:*` labels, and follow `docs/conventions/linear-templates.md`.
-8. Run the issue's verification commands plus the Sailfin safety checks from .codex/skills/sailfin-check/SKILL.md.
+8. Run the issue's verification commands plus the Sailfin safety checks from .codex/skills/sailfin-check/SKILL.md. Prefer targeted `build/bin/sfn test <path>` / `-k` / `--tag` commands; reserve `make test` and `make check` for issues that explicitly need a full gate or structural/high-risk changes.
 9. Commit the changes and open a PR with the Linear issue link plus `Closes #<issue>` when a GitHub mirror exists.
 
 The compiler self-caps memory at 8 GiB on Linux; do not use a `ulimit` prefix. Wrap direct single-file compiler invocations with `timeout 60`.
