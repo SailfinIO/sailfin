@@ -11,7 +11,6 @@ import {
     get_number,
     get_string,
     get_value,
-    null_val,
     number_val,
     object_val,
     parse,
@@ -24,7 +23,6 @@ import {
     find,
     join,
     split,
-    starts_with,
     trim
 } from "sfn/strings";
 
@@ -97,10 +95,14 @@ struct Record {
 }
 
 fn _usage() -> string {
-    return "usage: sfn run benchmarks/llm/sfn350.sfn -- [--adapter stub|openai|anthropic] [--model M] [--arm A] [--task T] [--max-iters N] [--results-dir DIR]\n"
+    return "usage: sfn run benchmarks/llm/sfn350.sfn -- [--adapter stub|openai|anthropic] [--real] [--model M] [--arm A] [--task T] [--max-iters N] [--results-dir DIR]\n"
         + "\n"
         + "defaults: --adapter stub --model gpt-4.1 --max-iters 5 --results-dir build/sfn350-results\n"
         + "env: OPENAI_API_KEY, ANTHROPIC_API_KEY, SAILFIN_BIN, SFN350_TIMEOUT_CMD\n";
+}
+
+fn _valid_adapter(value: string) -> boolean {
+    return value == "stub" || value == "openai" || value == "anthropic";
 }
 
 fn _parse_int(text: string, fallback: int) -> int {
@@ -146,6 +148,11 @@ fn _parse_config(argv: string[]) -> Config ![io] {
             process.exit(0);
         } else if arg == "--adapter" && i + 1 < argv.length {
             cfg.adapter = argv[i + 1];
+            if !_valid_adapter(cfg.adapter) {
+                print.err("unknown adapter: " + cfg.adapter);
+                print.err(_usage());
+                process.exit(2);
+            }
             cfg.stub = cfg.adapter == "stub";
             i += 1;
         } else if arg == "--model" && i + 1 < argv.length {
@@ -237,7 +244,7 @@ fn _arm_configs() -> ArmConfig[] ![io] {
     let timeout = _timeout_prefix();
     let sfn = _sfn_bin();
     return [ArmConfig {
-        name: "sailfin", lang: "sailfin", entry: "solution.sfn", compile: _append_all(timeout, [sfn, "check", "{file}"]), run: [sfn, "run", "{file}"], effect_keywords: ["effect", "capability", "E0400", "undeclared"]
+        name: "sailfin", lang: "sailfin", entry: "solution.sfn", compile: _append_all(timeout, [sfn, "check", "{file}"]), run: _append_all(timeout, [sfn, "run", "{file}"]), effect_keywords: ["effect", "capability", "E0400", "undeclared"]
     }, ArmConfig {
         name: "scala", lang: "scala", entry: "Solution.scala", compile: ["scala-cli", "compile", "{file}"], run: ["scala-cli", "run", "{file}"], effect_keywords: ["capture", "capability", "effect"]
     }, ArmConfig {
@@ -457,7 +464,7 @@ fn _has_kw(text: string, kws: string[]) -> boolean {
     return false;
 }
 
-fn _grade(task: Task, arm: ArmConfig, workfile: string, workdir: string) -> GradeResult ![io] {
+fn _grade(task: Task, arm: ArmConfig, workdir: string) -> GradeResult ![io] {
     let filename = arm.entry;
     if arm.compile.length > 0 {
         let comp = _replace_file(arm.compile, filename);
@@ -571,7 +578,7 @@ fn _run_task_arm(task: Task, arm: ArmConfig, cfg: Config, run_dir: string) -> Re
         let completion = _complete(cfg, task.id, arm.name, system, messages, wd);
         total_tokens += completion.tokens;
         fs.writeFile(workfile, _extract_code(completion.text));
-        let res = _grade(task, arm, workfile, wd);
+        let res = _grade(task, arm, wd);
         if res.category.length > 0 { cats.push(res.category); }
         if res.passed {
             return _record(task, arm.name, true, i + 1, total_tokens, cats);
@@ -584,7 +591,7 @@ fn _run_task_arm(task: Task, arm: ArmConfig, cfg: Config, run_dir: string) -> Re
             + " in one code block.")]));
         i += 1;
     }
-    return _record(task, arm.name, false, 0, total_tokens, cats);
+    return _record(task, arm.name, false, cfg.max_iters, total_tokens, cats);
 }
 
 fn _record_json(r: Record) -> JsonValue {
@@ -688,6 +695,50 @@ fn _all_arm_names(arms: ArmConfig[]) -> string[] {
     return out;
 }
 
+fn _task_exists(tasks: Task[], id: string) -> boolean {
+    let mut i: int = 0;
+    loop {
+        if i >= tasks.length { break; }
+        if tasks[i].id == id { return true; }
+        i += 1;
+    }
+    return false;
+}
+
+fn _arm_exists(arms: ArmConfig[], name: string) -> boolean {
+    let mut i: int = 0;
+    loop {
+        if i >= arms.length { break; }
+        if arms[i].name == name { return true; }
+        i += 1;
+    }
+    return false;
+}
+
+fn _validate_selections(cfg: Config, tasks: Task[], arms: ArmConfig[]) ![io] {
+    let mut ti: int = 0;
+    loop {
+        if ti >= cfg.tasks.length { break; }
+        if !_task_exists(tasks, cfg.tasks[ti]) {
+            print.err("unknown task: " + cfg.tasks[ti]);
+            print.err("available tasks: " + join(_all_task_ids(tasks), ", "));
+            process.exit(2);
+        }
+        ti += 1;
+    }
+
+    let mut ai: int = 0;
+    loop {
+        if ai >= cfg.arms.length { break; }
+        if !_arm_exists(arms, cfg.arms[ai]) {
+            print.err("unknown arm: " + cfg.arms[ai]);
+            print.err("available arms: " + join(_all_arm_names(arms), ", "));
+            process.exit(2);
+        }
+        ai += 1;
+    }
+}
+
 fn _timestamp() -> string ![io] {
     let exit = process.run_capture(["date", "+%Y%m%d-%H%M%S"], process.environ());
     let out = trim(process.capture_take_stdout());
@@ -783,6 +834,7 @@ fn main(argv: string[]) -> int ![clock, io, net] {
     let cfg = _parse_config(argv);
     let tasks = _tasks();
     let arm_cfgs = _arm_configs();
+    _validate_selections(cfg, tasks, arm_cfgs);
     let selected_arms = cfg.arms.length == 0? _all_arm_names(arm_cfgs): cfg.arms;
     let ts = _timestamp();
     let run_dir = cfg.results_dir + "/run-" + ts;
