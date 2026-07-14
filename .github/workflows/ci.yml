@@ -21,25 +21,21 @@ permissions:
 
 on:
   pull_request:
-    paths:
-      - 'compiler/**'
-      - 'runtime/**'
-      - 'capsules/**'
-      - 'scripts/**'
-      - 'Makefile'
-      - 'bootstrap.toml'
-      - '.github/workflows/ci.yml'
-      - '.github/actions/**'
+    # Keep the workflow itself present on every PR. GitHub required
+    # status checks cannot distinguish "workflow skipped by paths:" from
+    # "check still pending", so path decisions happen inside `ci-scope`
+    # and the always-running `Required CI gate` job reports the final
+    # require-able status.
+    types: [opened, synchronize, reopened, ready_for_review]
   # Merge queue (SFEP-0037 §3.1, the bors "not rocket science" rule):
   # run the same PR-gating surface on the speculative merge commit so
-  # branch protection's required checks gate the queue, not the stale
-  # PR head. `merge_group` does not support `paths:` filtering, so every
-  # queued merge runs full CI regardless of the diff — deliberate: the
-  # queue must never land an untested combination. No job in this
-  # workflow is conditioned on `github.event_name`, so the full job set
-  # runs in queue context (the fixed-point rebuild steps stay off — they
-  # are gated to `refs/heads/main|rc`, which a queue ref is not, same as
-  # PR context today). Enablement steps: docs/runbooks/merge-queue.md.
+  # branch protection's required checks gate the queue, not the stale PR
+  # head. `merge_group` does not support `paths:` filtering; `ci-scope`
+  # therefore marks queue runs as in-scope and the full job set runs for
+  # every queued merge. Deliberate: the queue must never land an untested
+  # combination. The fixed-point rebuild steps stay off — they are gated
+  # to `refs/heads/main|rc`, which a queue ref is not, same as PR context
+  # today. Enablement steps: docs/runbooks/merge-queue.md.
   # `checks_requested` is the only activity type Actions supports for
   # merge_group (and the default); stated explicitly for clarity.
   merge_group:
@@ -52,6 +48,55 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  ci-scope:
+    name: CI scope
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    outputs:
+      source: ${{ steps.scope.outputs.source }}
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+
+      - name: Determine compiler CI scope
+        id: scope
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          source=true
+          reason="full compiler CI for ${GITHUB_EVENT_NAME}"
+
+          if [ "${GITHUB_EVENT_NAME}" = "pull_request" ]; then
+            source=false
+            reason="no compiler/runtime/build-system paths changed"
+            base="${{ github.event.pull_request.base.sha }}"
+            head="${{ github.event.pull_request.head.sha }}"
+
+            git diff --name-only "$base" "$head" | tee changed-files.txt
+
+            while IFS= read -r path; do
+              case "$path" in
+                compiler/*|runtime/*|capsules/*|scripts/*|Makefile|bootstrap.toml|.github/workflows/ci.yml|.github/actions/*)
+                  source=true
+                  reason="compiler/runtime/build-system path changed: $path"
+                  break
+                  ;;
+              esac
+            done < changed-files.txt
+          fi
+
+          echo "source=$source" >> "$GITHUB_OUTPUT"
+          echo "[ci-scope] source=$source ($reason)"
+          {
+            echo "### CI scope"
+            echo ""
+            echo "- compiler CI in scope: \`$source\`"
+            echo "- reason: $reason"
+          } >> "$GITHUB_STEP_SUMMARY"
+
   # Assert the native shard map (`sfn dev shard`, SFN-200) still covers every
   # test file `make test` runs — no gaps, no overlaps. The whole point of
   # sharding is parallelism; this is the only thing standing between
@@ -61,7 +106,8 @@ jobs:
   # check — it runs alongside the shard legs off the shared per-OS build.
   shard-cover:
     name: Shard-cover lint
-    needs: build-compiler-linux
+    needs: [ci-scope, build-compiler-linux]
+    if: ${{ needs.ci-scope.outputs.source == 'true' }}
     runs-on: ubuntu-24.04
     timeout-minutes: 10
     steps:
@@ -106,12 +152,15 @@ jobs:
   # same front-end `make compile` self-hosts with), so this cannot drift
   # from what the build accepts for parse/typecheck.
   #
-  # Intentionally NOT a `needs:` dependency of `build` — it runs in
-  # parallel so a green PR pays zero added latency, while a red result
-  # still shows up early. Promote it to a required gate via branch
-  # protection once it has proven stable across a few cycles.
+  # Intentionally NOT a `needs:` dependency of the build/test jobs — it
+  # runs in parallel so a green PR pays zero added latency, while a red
+  # result still shows up early. It is included in `Required CI gate` for
+  # source-touching PRs, so branch protection sees this as part of the
+  # aggregate required check rather than as a standalone required job.
   check-fast:
     name: Fast static check (sfn check compiler/src/)
+    needs: ci-scope
+    if: ${{ needs.ci-scope.outputs.source == 'true' }}
     runs-on: ubuntu-24.04
     timeout-minutes: 20
     steps:
@@ -182,6 +231,8 @@ jobs:
   # job ids keep each OS's shard legs gated only on their own build.
   build-compiler-linux:
     name: Build compiler [linux-x86_64]
+    needs: ci-scope
+    if: ${{ needs.ci-scope.outputs.source == 'true' }}
     runs-on: ubuntu-24.04
     timeout-minutes: 120
     steps:
@@ -253,7 +304,9 @@ jobs:
           # mirror stall fails fast and self-recovers.
           DEB_DIR="$HOME/.cache/mingw-debs"
           mkdir -p "$DEB_DIR"
-          if ! ls "$DEB_DIR"/*.deb >/dev/null 2>&1; then
+          shopt -s nullglob
+          debs=("$DEB_DIR"/*.deb)
+          if [ "${#debs[@]}" -eq 0 ]; then
             for attempt in 1 2 3; do
               echo "[mingw] download attempt ${attempt}/3"
               if sudo timeout 300 apt-get update \
@@ -273,9 +326,10 @@ jobs:
             sudo rm -rf "$DEB_DIR/partial"
             sudo chown -R "$(id -u):$(id -g)" "$DEB_DIR"
           else
-            echo "[mingw] cache hit: $(ls "$DEB_DIR"/*.deb | wc -l) package(s)"
+            echo "[mingw] cache hit: ${#debs[@]} package(s)"
           fi
-          sudo dpkg -i "$DEB_DIR"/*.deb \
+          debs=("$DEB_DIR"/*.deb)
+          sudo dpkg -i "${debs[@]}" \
             || sudo apt-get install -y --no-install-recommends -f
           x86_64-w64-mingw32-gcc --version | head -1
 
@@ -301,14 +355,14 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          paths="build/bin/sfn build/compiler/import-context"
+          paths=(build/bin/sfn build/compiler/import-context)
           if [ -f build/native/.build-stamp ]; then
-            paths="$paths build/native/.build-stamp"
+            paths+=(build/native/.build-stamp)
           fi
           if [ -d build/cache ]; then
-            paths="$paths build/cache"
+            paths+=(build/cache)
           fi
-          tar --exclude 'build/cache/test-bin' -czf "build-tree-linux-x86_64.tar.gz" $paths
+          tar --exclude 'build/cache/test-bin' -czf "build-tree-linux-x86_64.tar.gz" "${paths[@]}"
           ls -lh "build-tree-linux-x86_64.tar.gz"
 
       - name: Upload compiler build tree
@@ -321,6 +375,8 @@ jobs:
 
   build-compiler-macos:
     name: Build compiler [macos-arm64]
+    needs: ci-scope
+    if: ${{ needs.ci-scope.outputs.source == 'true' }}
     # macos-26: the `macos-latest` label migrated to macOS 26 on
     # 2026-06-15, so macos-15 runners are now scarce (PR queue stalls
     # waiting for them). The nightly-selfhost canary has been validating
@@ -405,14 +461,14 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          paths="build/bin/sfn build/compiler/import-context"
+          paths=(build/bin/sfn build/compiler/import-context)
           if [ -f build/native/.build-stamp ]; then
-            paths="$paths build/native/.build-stamp"
+            paths+=(build/native/.build-stamp)
           fi
           if [ -d build/cache ]; then
-            paths="$paths build/cache"
+            paths+=(build/cache)
           fi
-          tar --exclude 'build/cache/test-bin' -czf "build-tree-macos-arm64.tar.gz" $paths
+          tar --exclude 'build/cache/test-bin' -czf "build-tree-macos-arm64.tar.gz" "${paths[@]}"
           ls -lh "build-tree-macos-arm64.tar.gz"
 
       - name: Upload compiler build tree
@@ -442,7 +498,8 @@ jobs:
   # migrated — epic #840). The shard-cover job fails if the map drifts.
   build-linux:
     name: Build + Test [linux-x86_64 / ${{ matrix.shard }}]
-    needs: build-compiler-linux
+    needs: [ci-scope, build-compiler-linux]
+    if: ${{ needs.ci-scope.outputs.source == 'true' }}
     runs-on: ubuntu-24.04
     timeout-minutes: 120
     strategy:
@@ -820,7 +877,8 @@ jobs:
 
   build-macos:
     name: Build + Test [macos-arm64 / ${{ matrix.shard }}]
-    needs: build-compiler-macos
+    needs: [ci-scope, build-compiler-macos]
+    if: ${{ needs.ci-scope.outputs.source == 'true' }}
     # macos-26: adopted from the nightly-selfhost canary now that the
     # `macos-latest` migration (2026-06-15) has made macos-15 runners
     # scarce. The *test runner* is serial (`sailfin test --jobs 1` via
@@ -1204,7 +1262,8 @@ jobs:
   # that regression can never ship again.
   smoke-windows:
     name: Smoke test [windows-x86_64]
-    needs: build-compiler-linux
+    needs: [ci-scope, build-compiler-linux]
+    if: ${{ needs.ci-scope.outputs.source == 'true' }}
     runs-on: windows-latest
     timeout-minutes: 15
     steps:
@@ -1253,3 +1312,84 @@ jobs:
         run: |
           set -euo pipefail
           "$SAILFIN_EXE" check examples/basics/hello-world.sfn
+
+  required-ci:
+    name: Required CI gate
+    needs:
+      - ci-scope
+      - check-fast
+      - build-compiler-linux
+      - build-compiler-macos
+      - shard-cover
+      - build-linux
+      - build-macos
+      - smoke-windows
+    if: ${{ always() }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    env:
+      CI_SCOPE_RESULT: ${{ needs.ci-scope.result }}
+      SOURCE_CI: ${{ needs.ci-scope.outputs.source }}
+      CHECK_FAST: ${{ needs.check-fast.result }}
+      BUILD_COMPILER_LINUX: ${{ needs.build-compiler-linux.result }}
+      BUILD_COMPILER_MACOS: ${{ needs.build-compiler-macos.result }}
+      SHARD_COVER: ${{ needs.shard-cover.result }}
+      BUILD_LINUX: ${{ needs.build-linux.result }}
+      BUILD_MACOS: ${{ needs.build-macos.result }}
+      SMOKE_WINDOWS: ${{ needs.smoke-windows.result }}
+    steps:
+      - name: Summarize required CI result
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          {
+            echo "### Required CI gate"
+            echo ""
+            echo "| check | result |"
+            echo "| --- | --- |"
+            echo "| CI scope job | ${CI_SCOPE_RESULT:-unset} |"
+            echo "| CI scope output | ${SOURCE_CI:-unset} |"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+          if [ "${CI_SCOPE_RESULT:-}" != "success" ]; then
+            echo "[required-ci] CI scope did not succeed; failing closed." >&2
+            exit 1
+          fi
+
+          if [ "${SOURCE_CI:-}" = "false" ]; then
+            echo "[required-ci] compiler CI is out of scope for this PR; required gate passes."
+            echo "| Compiler CI | skipped by path scope |" >> "$GITHUB_STEP_SUMMARY"
+            exit 0
+          fi
+
+          if [ "${SOURCE_CI:-}" != "true" ]; then
+            echo "[required-ci] CI scope emitted unexpected source value: ${SOURCE_CI:-unset}" >&2
+            exit 1
+          fi
+
+          fail=0
+          check() {
+            name="$1"
+            result="$2"
+            echo "[required-ci] $name: $result"
+            echo "| $name | $result |" >> "$GITHUB_STEP_SUMMARY"
+            if [ "$result" != "success" ]; then
+              fail=$((fail + 1))
+            fi
+          }
+
+          check "Fast static check (sfn check compiler/src/)" "$CHECK_FAST"
+          check "Build compiler [linux-x86_64]" "$BUILD_COMPILER_LINUX"
+          check "Build compiler [macos-arm64]" "$BUILD_COMPILER_MACOS"
+          check "Shard-cover lint" "$SHARD_COVER"
+          check "Build + Test [linux-x86_64]" "$BUILD_LINUX"
+          check "Build + Test [macos-arm64]" "$BUILD_MACOS"
+          check "Smoke test [windows-x86_64]" "$SMOKE_WINDOWS"
+
+          if [ "$fail" -gt 0 ]; then
+            echo "[required-ci] $fail required compiler CI job(s) did not succeed." >&2
+            exit 1
+          fi
+
+          echo "[required-ci] all required compiler CI jobs passed."
