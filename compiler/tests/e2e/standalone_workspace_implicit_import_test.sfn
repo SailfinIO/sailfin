@@ -1,0 +1,62 @@
+// Regression for SFN-348: a standalone source file outside the repo
+// workspace can still import a bundled workspace capsule when `sfn run`
+// is invoked from the checkout. Before the fix, `sfn check` could see
+// `sfn/strings`, but `run` did not compile/link the capsule module for
+// a `/tmp/*.sfn` entry and failed during lowering or clang link.
+import { contains } from "sfn/strings";
+import { with_tmp_dir } from "sfn/test";
+
+fn _sfn_bin() -> string ![io] {
+    let configured = env.get("SAILFIN_BIN");
+    if configured.length > 0 { return configured; }
+    return "build/bin/sfn";
+}
+
+fn _child_env() -> string[] ![io] {
+    let mut out: string[] = [];
+    let path = env.get("PATH");
+    if path.length > 0 { out.push("PATH=" + path); }
+    let home = env.get("HOME");
+    if home.length > 0 { out.push("HOME=" + home); }
+    let tmpdir = env.get("TMPDIR");
+    if tmpdir.length > 0 { out.push("TMPDIR=" + tmpdir); }
+    let scratch = env.get("SAILFIN_TEST_SCRATCH");
+    if scratch.length > 0 { out.push("SAILFIN_TEST_SCRATCH=" + scratch); }
+    return out;
+}
+
+fn _marker(name: string) -> string ![io] {
+    let mut dir = env.get("SAILFIN_TEST_SCRATCH");
+    if dir.length == 0 { dir = "/tmp"; }
+    fs.createDirectory(dir, true);
+    let path = dir + "/sfn-348-standalone-" + name + ".out";
+    if fs.exists(path) { fs.deleteFile(path); }
+    return path;
+}
+
+fn _run_standalone_program(marker: string) -> int ![io] {
+    return with_tmp_dir(fn (dir: string) -> int {
+        let src = dir + "/repro.sfn";
+        fs.writeFile(src, "import { split, trim, join } from \"sfn/strings\";\n\n"
+            + "fn main() ![io] {\n"
+            + "    let text = trim(\" a b \");\n"
+            + "    let parts = split(text, \" \");\n"
+            + "    print(join(parts, \"-\"));\n"
+            + "}\n");
+
+        let exit = process.run_capture([_sfn_bin(), "run", src], _child_env());
+        let out = process.capture_take_stdout();
+        let err = process.capture_take_stderr();
+        fs.writeFile(marker, out + err);
+        return exit;
+    });
+}
+
+test "standalone run: cwd workspace stages imported sfn/strings capsule" ![io] {
+    let marker = _marker("strings");
+    let exit = _run_standalone_program(marker);
+    assert exit == 0;
+    let output = fs.readFile(marker);
+    if fs.exists(marker) { fs.deleteFile(marker); }
+    assert contains(output, "a-b");
+}
