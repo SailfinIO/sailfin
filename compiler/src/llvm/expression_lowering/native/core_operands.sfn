@@ -1563,6 +1563,53 @@ fn coerce_pointer_or_struct(operand: LLVMOperand, operand_type: string, target: 
     return null;
 }
 
+fn coerce_null_literal_to_union_variant(operand: LLVMOperand, operand_type: string, target: string, variant_index: int, temp_index: int, lines: string[]) -> CoercionResult? {
+    if operand_type != "i8*" { return null; }
+    if operand.value != "null" { return null; }
+    if !is_union_llvm_type(target) { return null; }
+    if variant_index < 0 { return null; }
+
+    let variants = parse_union_payload_types(target);
+    if variant_index >= variants.length { return null; }
+    if variants[variant_index] != "i8*" { return null; }
+
+    let tag_temp = format_temp_name(temp_index);
+    let union_temp = format_temp_name(temp_index + 1);
+    let mut current_lines: string[] = lines;
+    current_lines.push("  " + tag_temp + " = insertvalue " + target
+        + " undef, i32 "
+        + number_to_string(variant_index)
+        + ", 0");
+    current_lines.push("  " + union_temp + " = insertvalue " + target + " "
+        + tag_temp
+        + ", i8* null, "
+        + number_to_string(variant_index
+        + 1));
+    let coerced = LLVMOperand { llvm_type: target, value: union_temp };
+    return CoercionResult {
+        lines: current_lines,
+        temp_index: temp_index + 2,
+        operand: coerced,
+        diagnostics: []
+    };
+}
+
+fn single_i8_union_variant_index(target: string) -> int {
+    if !is_union_llvm_type(target) { return -1; }
+    let variants = parse_union_payload_types(target);
+    let mut found_index: int = -1;
+    let mut index: int = 0;
+    loop {
+        if index >= variants.length { break; }
+        if variants[index] == "i8*" {
+            if found_index >= 0 { return -1; }
+            found_index = index;
+        }
+        index += 1;
+    }
+    return found_index;
+}
+
 // General coercion fallbacks: boxing, union construction, pointer variance, null handling.
 fn coerce_general_fallback(operand: LLVMOperand, operand_type: string, target: string, temp_index: int, lines: string[]) -> CoercionResult? ![io] {
     let mut current_lines: string[] = lines;
@@ -2454,6 +2501,16 @@ fn coerce_operand_to_type(operand: LLVMOperand, target_type: string, temp_index:
             lines: numeric.lines,
             temp_index: recover_temp_from_lines(numeric.lines, numeric.temp_index),
             operand: numeric.operand,
+            diagnostics: diagnostics
+        };
+    }
+    let null_union_variant = single_i8_union_variant_index(target);
+    let null_union = coerce_null_literal_to_union_variant(operand, operand_type, target, null_union_variant, temp_index, current_lines);
+    if null_union != null {
+        return CoercionResult {
+            lines: null_union.lines,
+            temp_index: recover_temp_from_lines(null_union.lines, null_union.temp_index),
+            operand: null_union.operand,
             diagnostics: diagnostics
         };
     }
