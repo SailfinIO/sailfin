@@ -182,6 +182,17 @@ fn module_name_from_path(source_path: string) -> string {
         if normalized.length > 0 {
             if normalized[0] == "/" { is_absolute = true; }
         }
+        // A Windows drive-letter path (`C:/...`, post `\`->`/` normalization
+        // above) is also absolute; treat it as such so a genuine runtime-member
+        // source reached by its absolute path keeps its `runtime/...` slug on
+        // Windows instead of falling through to the relative first-segment rule.
+        if !is_absolute {
+            if normalized.length >= 3 {
+                if normalized[1] == ":" {
+                    if normalized[2] == "/" { is_absolute = true; }
+                }
+            }
+        }
         if is_absolute {
             let mut last_runtime: int = -1;
             let runtime_search_limit = normalized.length - runtime_prefix.length;

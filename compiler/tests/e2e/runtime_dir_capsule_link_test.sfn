@@ -25,21 +25,12 @@ fn _sfn_bin() -> string ![io] {
     return "build/bin/sfn";
 }
 
-// The build spawns a nested clang + linker, so thread PATH; SAILFIN_TEST_SCRATCH
-// routes the program.ll build-cache per invocation so the parallel pool does
-// not collide on build/sailfin.
-fn _child_env() -> string[] ![io] {
-    let mut e: string[] = [];
-    let path = env.get("PATH");
-    if path.length > 0 { e.push("PATH=" + path); }
-    let home = env.get("HOME");
-    if home.length > 0 { e.push("HOME=" + home); }
-    let tmpdir = env.get("TMPDIR");
-    if tmpdir.length > 0 { e.push("TMPDIR=" + tmpdir); }
-    let scratch = env.get("SAILFIN_TEST_SCRATCH");
-    if scratch.length > 0 { e.push("SAILFIN_TEST_SCRATCH=" + scratch); }
-    return e;
-}
+// Inherit the full parent environment: the nested build links `-lm` (the
+// probe imports sfn/math), and a minimal PATH/HOME/TMPDIR set links on Linux
+// but fails on macOS with `ld: library 'm' not found` (#1410). process.environ()
+// also carries SAILFIN_TEST_SCRATCH so the program.ll build-cache is isolated
+// per invocation (#1333). Mirrors sailfin_main_panic_test.sfn::_child_env.
+fn _child_env() -> string[] ![io] { return process.environ(); }
 
 // A bare source under a NESTED `runtime/` directory — the `runtime/` segment is
 // the SFN-215 trigger. `abs` from the sfn/math capsule is referenced (and
@@ -73,12 +64,12 @@ test "runtime dir: bare file under a nested runtime/ dir links its capsule dep" 
     let exit = process.run_capture([_sfn_bin(), "build", "-o", bin, _probe_path()], _child_env());
     let out = process.capture_take_stdout();
     let err = process.capture_take_stderr();
-    // The pre-fix failure is a link error (`undefined symbol: ...`); a clean
-    // exit is the regression signal that the sfn/math dep object was linked.
-    if exit != 0 {
-        // Surface the link diagnostic on failure for triage.
-        assert find(out + err, "undefined symbol", 0) < 0;
-    }
+    // The SFN-215 regression is a link failure whose signature is
+    // `undefined symbol: <dep>` (the sfn/math object dropped from the link);
+    // if it reappears, flag it explicitly before the exit-code check.
+    let regressed = find(out + err, "undefined symbol", 0) >= 0;
+    assert ! regressed;
+    // A clean exit is the positive signal that the sfn/math dep object linked.
     assert exit == 0;
 }
 
