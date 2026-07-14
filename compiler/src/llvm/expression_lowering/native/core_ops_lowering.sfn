@@ -38,6 +38,7 @@ import {
     harmonise_operands
 } from "./core_operands";
 import { lines_end_with_terminator, strip_enclosing_parentheses } from "./core_operators";
+import { is_number_literal } from "./core_text";
 import { emit_runtime_call, empty_runtime_call_overrides } from "./runtime_call";
 
 fn lower_logical_not_with_operand(operand: LLVMOperand, temp_index: int, lines: string[], diagnostics: string[], string_constants: StringConstant[]) -> ExpressionResult ![io] {
@@ -255,38 +256,94 @@ fn lower_binary_operation(expression: string, match: OperatorMatch, bindings: Pa
         };
     }
 
-    let left_result = lower_expression(left_text, bindings, locals, temp_index, lines, functions, context, "");
-    diagnostics = extend_string_array(diagnostics, left_result.diagnostics);
-    let mut string_constants: StringConstant[] = left_result.string_constants;
-    if left_result.operand == null {
-        return ExpressionResult {
-            lines: left_result.lines,
-            temp_index: left_result.temp_index,
-            operand: null,
-            diagnostics: diagnostics,
-            string_constants: string_constants
+    // Slice B (2026-05-02) + SFN-132: literal-context propagation is
+    // bidirectional. The typed (non-literal) operand lowers first with no
+    // expected type, and its resulting LLVM type becomes the expected type
+    // for a bare numeric literal on the other side — so a bare integer
+    // literal (e.g. `2` in `x << 2`, or `0` in `0 - x`) takes the
+    // integer-literal short-circuit and adopts the sibling's kind instead
+    // of defaulting to `double`/`i64` and tripping the int↔float refusal in
+    // `harmonise_operands`. Historically only the RHS received this hint
+    // (`x - 0` lowered clean but `0 - x` fatalled). When the LHS is the
+    // bare literal and the RHS is typed, lower the RHS first and feed its
+    // type back. Reordering is safe because it only happens when the LHS is
+    // a bare numeric literal, which has no side effects, so the RHS's
+    // evaluation order stays unobservable.
+    let _left_is_number_literal = is_number_literal(left_text);
+    let _right_is_number_literal = is_number_literal(right_text);
+    let mut string_constants: StringConstant[] = empty_string_constant_set();
+    let mut left_result: ExpressionResult = ExpressionResult {
+        lines: lines,
+        temp_index: temp_index,
+        operand: null,
+        diagnostics: [],
+        string_constants: empty_string_constant_set()
+    };
+    let mut right_result: ExpressionResult = left_result;
+    if _left_is_number_literal && !_right_is_number_literal {
+        let right_first = lower_expression(right_text, bindings, locals, temp_index, lines, functions, context, "");
+        diagnostics = extend_string_array(diagnostics, right_first.diagnostics);
+        string_constants = right_first.string_constants;
+        if right_first.operand == null {
+            return ExpressionResult {
+                lines: right_first.lines,
+                temp_index: right_first.temp_index,
+                operand: null,
+                diagnostics: diagnostics,
+                string_constants: string_constants
+            };
+        }
+        let left_second = lower_expression(left_text, bindings, locals, right_first.temp_index, right_first.lines, functions, context, right_first.operand.llvm_type);
+        diagnostics = extend_string_array(diagnostics, left_second.diagnostics);
+        string_constants = merge_string_constants(string_constants, left_second.string_constants);
+        if left_second.operand == null {
+            return ExpressionResult {
+                lines: left_second.lines,
+                temp_index: left_second.temp_index,
+                operand: null,
+                diagnostics: diagnostics,
+                string_constants: string_constants
+            };
+        }
+        left_result = left_second;
+        right_result = ExpressionResult {
+            lines: left_second.lines,
+            temp_index: left_second.temp_index,
+            operand: right_first.operand,
+            diagnostics: [],
+            string_constants: empty_string_constant_set()
         };
-    }
-
-    // Slice B (2026-05-02): propagate the LHS's LLVM type to the
-    // RHS so a bare integer literal (e.g. `2` in `x << 2`) takes
-    // the integer-literal short-circuit at `core.sfn:465-505`
-    // rather than defaulting to `double`.
-    let mut _right_expected: string = "";
-    if left_result.operand != null {
-        _right_expected = left_result.operand.llvm_type;
-    }
-    let right_result = lower_expression(right_text, bindings, locals, left_result.temp_index, left_result.lines, functions, context, _right_expected);
-    diagnostics = extend_string_array(diagnostics, right_result.diagnostics);
-    string_constants = merge_string_constants(string_constants, right_result.string_constants);
-    if right_result.operand == null {
-        return ExpressionResult {
-            lines: right_result.lines,
-            temp_index: right_result.temp_index,
-            operand: null,
-            diagnostics: diagnostics,
-            string_constants: string_constants
-        };
+    } else {
+        let left_first = lower_expression(left_text, bindings, locals, temp_index, lines, functions, context, "");
+        diagnostics = extend_string_array(diagnostics, left_first.diagnostics);
+        string_constants = left_first.string_constants;
+        if left_first.operand == null {
+            return ExpressionResult {
+                lines: left_first.lines,
+                temp_index: left_first.temp_index,
+                operand: null,
+                diagnostics: diagnostics,
+                string_constants: string_constants
+            };
+        }
+        let mut _right_expected: string = "";
+        if left_first.operand != null {
+            _right_expected = left_first.operand.llvm_type;
+        }
+        let right_second = lower_expression(right_text, bindings, locals, left_first.temp_index, left_first.lines, functions, context, _right_expected);
+        diagnostics = extend_string_array(diagnostics, right_second.diagnostics);
+        string_constants = merge_string_constants(string_constants, right_second.string_constants);
+        if right_second.operand == null {
+            return ExpressionResult {
+                lines: right_second.lines,
+                temp_index: right_second.temp_index,
+                operand: null,
+                diagnostics: diagnostics,
+                string_constants: string_constants
+            };
+        }
+        left_result = left_first;
+        right_result = right_second;
     }
 
     if match.symbol == "+" {
@@ -776,50 +833,110 @@ fn lower_comparison_operation(expression: string, match: OperatorMatch, bindings
         };
     }
 
-    let left_result = lower_expression(left_text, bindings, locals, temp_index, lines, functions, context, "");
-    diagnostics = extend_string_array(diagnostics, left_result.diagnostics);
-    let mut string_constants: StringConstant[] = left_result.string_constants;
-    if left_result.operand == null {
-        return ExpressionResult {
-            lines: left_result.lines,
-            temp_index: left_result.temp_index,
-            operand: null,
-            diagnostics: diagnostics,
-            string_constants: string_constants
-        };
-    }
-
-    // Slice E.3b (#556): mirror Slice B's LHS → RHS type propagation
-    // for numeric-shaped LHS (int or float), so a numeric literal on
-    // the RHS (e.g. `0` in `length > 0`, or `1.5` in `x > 1.5`) takes
-    // the matching literal short-circuit and doesn't trip
-    // `dominant_type`'s int↔float refusal with `i64 vs double`.
-    // Pointer-shaped LHS (e.g. `tp.bound == null`) intentionally skips
-    // the hint so `null` lowers via its default `i8*` path and
-    // `harmonise_operands` retypes it via the existing pointer-null
-    // seam — propagating a struct-pointer expected_type through
-    // `lower_expression`'s null literal handler causes a downstream
-    // miscompile that surfaces as a runtime segfault when the boxed
-    // struct is later loaded (observed in `typecheck_imports_test`'s
-    // pointer-vs-null asserts).
-    let mut _right_expected: string = "";
-    if left_result.operand != null {
-        let _lhs_kind = numeric_type_kind(left_result.operand.llvm_type);
-        if _lhs_kind == "int" || _lhs_kind == "float" {
-            _right_expected = left_result.operand.llvm_type;
+    // Slice E.3b (#556) + SFN-132: numeric literal-context propagation is
+    // bidirectional for comparisons. Normally the LHS lowers first and a
+    // numeric-shaped LHS's type (int or float) is fed to a bare numeric
+    // literal RHS (e.g. `0` in `length > 0`, or `1.5` in `x > 1.5`) so it
+    // takes the matching literal short-circuit and doesn't trip
+    // `dominant_type`'s int↔float refusal with `i64 vs double`. When the
+    // LHS is the bare literal and the RHS is typed (`0 < x`), lower the RHS
+    // first and, if it is numeric-shaped, feed its type back so the literal
+    // adopts it. Reordering is safe because it only happens when the LHS is
+    // a bare numeric literal (no side effects), so the RHS's evaluation
+    // order stays unobservable.
+    //
+    // Pointer-shaped operands intentionally skip the hint (e.g.
+    // `tp.bound == null`) so `null` lowers via its default `i8*` path and
+    // `harmonise_operands` retypes it via the existing pointer-null seam —
+    // propagating a struct-pointer expected_type through `lower_expression`'s
+    // null literal handler causes a downstream miscompile that surfaces as a
+    // runtime segfault when the boxed struct is later loaded (observed in
+    // `typecheck_imports_test`'s pointer-vs-null asserts). The reverse branch
+    // only ever feeds a hint to a bare *numeric* literal, never to `null`,
+    // and only when the sibling is numeric-shaped.
+    let _left_is_number_literal = is_number_literal(left_text);
+    let _right_is_number_literal = is_number_literal(right_text);
+    let mut string_constants: StringConstant[] = empty_string_constant_set();
+    let mut left_result: ExpressionResult = ExpressionResult {
+        lines: lines,
+        temp_index: temp_index,
+        operand: null,
+        diagnostics: [],
+        string_constants: empty_string_constant_set()
+    };
+    let mut right_result: ExpressionResult = left_result;
+    if _left_is_number_literal && !_right_is_number_literal {
+        let right_first = lower_expression(right_text, bindings, locals, temp_index, lines, functions, context, "");
+        diagnostics = extend_string_array(diagnostics, right_first.diagnostics);
+        string_constants = right_first.string_constants;
+        if right_first.operand == null {
+            return ExpressionResult {
+                lines: right_first.lines,
+                temp_index: right_first.temp_index,
+                operand: null,
+                diagnostics: diagnostics,
+                string_constants: string_constants
+            };
         }
-    }
-    let right_result = lower_expression(right_text, bindings, locals, left_result.temp_index, left_result.lines, functions, context, _right_expected);
-    diagnostics = extend_string_array(diagnostics, right_result.diagnostics);
-    string_constants = merge_string_constants(string_constants, right_result.string_constants);
-    if right_result.operand == null {
-        return ExpressionResult {
-            lines: right_result.lines,
-            temp_index: right_result.temp_index,
-            operand: null,
-            diagnostics: diagnostics,
-            string_constants: string_constants
+        let mut _left_expected: string = "";
+        let _rhs_kind = numeric_type_kind(right_first.operand.llvm_type);
+        if _rhs_kind == "int" || _rhs_kind == "float" {
+            _left_expected = right_first.operand.llvm_type;
+        }
+        let left_second = lower_expression(left_text, bindings, locals, right_first.temp_index, right_first.lines, functions, context, _left_expected);
+        diagnostics = extend_string_array(diagnostics, left_second.diagnostics);
+        string_constants = merge_string_constants(string_constants, left_second.string_constants);
+        if left_second.operand == null {
+            return ExpressionResult {
+                lines: left_second.lines,
+                temp_index: left_second.temp_index,
+                operand: null,
+                diagnostics: diagnostics,
+                string_constants: string_constants
+            };
+        }
+        left_result = left_second;
+        right_result = ExpressionResult {
+            lines: left_second.lines,
+            temp_index: left_second.temp_index,
+            operand: right_first.operand,
+            diagnostics: [],
+            string_constants: empty_string_constant_set()
         };
+    } else {
+        let left_first = lower_expression(left_text, bindings, locals, temp_index, lines, functions, context, "");
+        diagnostics = extend_string_array(diagnostics, left_first.diagnostics);
+        string_constants = left_first.string_constants;
+        if left_first.operand == null {
+            return ExpressionResult {
+                lines: left_first.lines,
+                temp_index: left_first.temp_index,
+                operand: null,
+                diagnostics: diagnostics,
+                string_constants: string_constants
+            };
+        }
+        let mut _right_expected: string = "";
+        if left_first.operand != null {
+            let _lhs_kind = numeric_type_kind(left_first.operand.llvm_type);
+            if _lhs_kind == "int" || _lhs_kind == "float" {
+                _right_expected = left_first.operand.llvm_type;
+            }
+        }
+        let right_second = lower_expression(right_text, bindings, locals, left_first.temp_index, left_first.lines, functions, context, _right_expected);
+        diagnostics = extend_string_array(diagnostics, right_second.diagnostics);
+        string_constants = merge_string_constants(string_constants, right_second.string_constants);
+        if right_second.operand == null {
+            return ExpressionResult {
+                lines: right_second.lines,
+                temp_index: right_second.temp_index,
+                operand: null,
+                diagnostics: diagnostics,
+                string_constants: string_constants
+            };
+        }
+        left_result = left_first;
+        right_result = right_second;
     }
 
     let mut alignment_lines: string[] = right_result.lines;

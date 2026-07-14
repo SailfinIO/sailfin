@@ -1,0 +1,182 @@
+// End-to-end test for SFN-132: int-literal/float arithmetic must be
+// positionally symmetric. Sailfin's literal-context propagation lets a bare
+// numeric literal adopt a sibling operand's kind (so `0` beside a `float`
+// lowers as `double`, not `i64`). Historically that hint only flowed
+// left→right, so `x - 0` lowered clean but `0 - x` fatalled with
+// "ABI primitive mismatch: arithmetic mixes i64 (int) and double (float)"
+// (root-caused during SFN-119 / PR #1976). The fix makes the propagation
+// bidirectional in `lower_binary_operation` / `lower_comparison_operation`
+// (`compiler/src/llvm/expression_lowering/native/core_ops_lowering.sfn`):
+// when the literal is on the left and the sibling is typed, the typed side
+// lowers first and feeds its type back.
+//
+// Each sub-test lowers a tiny fixture to LLVM IR via `sfn emit llvm`. Because
+// the pre-fix failure is a lowering-stage fatal (invisible to the frontend
+// `sfn check`), a real build/emit is required — `assert_compiles` would not
+// catch it. Emit fails closed on the fatal (PR #1976), so a regression
+// resurfaces here as an empty IR string.
+//
+// NOTE on matchers: the `sfn/test` `expect_*` matchers are `![pure]` and so
+// cannot be called from an `![io]` test like these. Assert on the captured
+// `.ll` text with `sfn/strings` predicates instead. (#842.)
+import { contains, split, starts_with } from "sfn/strings";
+
+fn _sfn_bin() -> string ![io] {
+    let configured = env.get("SAILFIN_BIN");
+    if configured.length > 0 { return configured; }
+    return "build/bin/sfn";
+}
+
+// Child environment for the spawned `sfn emit`. `process.run_capture` treats
+// an empty array as the *empty* environment (not "inherit"), so the relevant
+// variables must be threaded explicitly:
+//   - `PATH` (+ `HOME`/`TMPDIR`): keeps any subprocess the compiler shells out
+//     to resolvable.
+//   - `SAILFIN_TEST_SCRATCH`: the runner's per-file scratch, which the
+//     compiler routes its build-cache dir under (#1333) so a parallel run
+//     (`--jobs N>1`) does not collide on the fixed `build/sailfin`.
+fn _child_env() -> string[] ![io] {
+    let mut e: string[] = [];
+    let path = env.get("PATH");
+    if path.length > 0 { e.push("PATH=" + path); }
+    let home = env.get("HOME");
+    if home.length > 0 { e.push("HOME=" + home); }
+    let tmpdir = env.get("TMPDIR");
+    if tmpdir.length > 0 { e.push("TMPDIR=" + tmpdir); }
+    let scratch = env.get("SAILFIN_TEST_SCRATCH");
+    if scratch.length > 0 { e.push("SAILFIN_TEST_SCRATCH=" + scratch); }
+    return e;
+}
+
+fn _scratch_dir() -> string ![io] {
+    let mut dir = env.get("SAILFIN_TEST_SCRATCH");
+    if dir.length == 0 { dir = "/tmp"; }
+    fs.createDirectory(dir, true);
+    return dir;
+}
+
+// Whether any single line of `text` contains both `a` and `b` — the faithful
+// stand-in for a `grep -E "a.*b"` over one line.
+fn _has_line_with_both(text: string, a: string, b: string) -> bool {
+    let lines = split(text, "\n");
+    let mut i = 0;
+    loop {
+        if i >= lines.length { break; }
+        if contains(lines[i], a) && contains(lines[i], b) { return true; }
+        i += 1;
+    }
+    return false;
+}
+
+// Extract the body of the function whose `define` line starts with
+// `header_prefix`. LLVM `define` lines start at column 0, so a prefix match
+// is exact; collection stops at the closing `}` at column 0.
+fn _fn_body(ir: string, header_prefix: string) -> string {
+    let lines = split(ir, "\n");
+    let mut out = "";
+    let mut inside = false;
+    let mut i = 0;
+    loop {
+        if i >= lines.length { break; }
+        let line = lines[i];
+        if !inside {
+            if starts_with(line, header_prefix) {
+                inside = true;
+                out = out + line + "\n";
+            }
+        } else {
+            out = out + line + "\n";
+            if starts_with(line, "}") { break; }
+        }
+        i += 1;
+    }
+    return out;
+}
+
+// Write `source` to a scratch `.sfn` keyed by `tag`, lower it to LLVM IR via
+// `sfn emit llvm`, and return the whole IR text. Returns "" on emit failure
+// so callers assert on the emptiness (the pre-fix ABI-mismatch fatal makes
+// emit fail closed).
+fn _emit_llvm(source: string, tag: string) -> string ![io] {
+    let dir = _scratch_dir();
+    let src = dir + "/sfn-litpos-" + tag + ".sfn";
+    let ll = dir + "/sfn-litpos-" + tag + ".ll";
+    fs.writeFile(src, source);
+    if fs.exists(ll) { fs.deleteFile(ll); }
+    let exit = process.run_capture([_sfn_bin(), "emit", "-o", ll, "llvm", src], _child_env());
+    let _o = process.capture_take_stdout();
+    let _e = process.capture_take_stderr();
+    if exit != 0 { return ""; }
+    if !fs.exists(ll) { return ""; }
+    let ir = fs.readFile(ll);
+    fs.deleteFile(ll);
+    fs.deleteFile(src);
+    return ir;
+}
+
+// ---- arithmetic: `0 - x` (int literal on the LEFT, float on the right) ----
+// The SFN-132 fix: the literal `0` must adopt the float sibling's `double`
+// kind and lower as `fsub double`, not fatal on an i64/double mix.
+test "numeric-literal-position: `0 - x` lowers as fsub double" ![io] {
+    let ir = _emit_llvm("fn f(x: float) -> float {\n    return 0 - x;\n}\n", "sub_lit_left");
+    assert ir.length > 0;
+    let body = _fn_body(ir, "define double @f");
+    assert body.length > 0;
+    assert contains(body, "fsub double");
+    // No int-literal leak: the `0` must not stay i64 and get sitofp'd.
+    assert ! _has_line_with_both(body, "sitofp", "to double");
+    assert ! contains(body, "ABI primitive mismatch");
+}
+
+// ---- arithmetic: `x - 0` (float on the left, int literal on the RIGHT) ----
+// The historically-working direction — pinned so the fix keeps both
+// positions identical.
+test "numeric-literal-position: `x - 0` still lowers as fsub double" ![io] {
+    let ir = _emit_llvm("fn g(x: float) -> float {\n    return x - 0;\n}\n", "sub_lit_right");
+    assert ir.length > 0;
+    let body = _fn_body(ir, "define double @g");
+    assert body.length > 0;
+    assert contains(body, "fsub double");
+    assert ! _has_line_with_both(body, "sitofp", "to double");
+}
+
+// ---- comparison: `0 < x` (int literal on the LEFT, float on the right) ----
+// Mirrors the Slice E.3b propagation for `lower_comparison_operation`: the
+// literal `0` adopts the float kind and lowers as `fcmp` over `double`.
+test "numeric-literal-position: `0 < x` lowers as fcmp over double" ![io] {
+    let ir = _emit_llvm("fn c(x: float) -> bool {\n    return 0 < x;\n}\n", "cmp_lit_left");
+    assert ir.length > 0;
+    let body = _fn_body(ir, "define i1 @c");
+    assert body.length > 0;
+    assert _has_line_with_both(body, "fcmp", "double");
+    assert ! _has_line_with_both(body, "sitofp", "to double");
+    assert ! contains(body, "ABI primitive mismatch");
+}
+
+// ---- comparison: `x > 0` (float on the left, int literal on the RIGHT) ----
+// The historically-working comparison direction — pinned for symmetry.
+test "numeric-literal-position: `x > 0` still lowers as fcmp over double" ![io] {
+    let ir = _emit_llvm("fn d(x: float) -> bool {\n    return x > 0;\n}\n", "cmp_lit_right");
+    assert ir.length > 0;
+    let body = _fn_body(ir, "define i1 @d");
+    assert body.length > 0;
+    assert _has_line_with_both(body, "fcmp", "double");
+    assert ! _has_line_with_both(body, "sitofp", "to double");
+}
+
+// ---- refusal boundary: a FLOAT literal beside an INT variable still fatals,
+// in BOTH positions. The fix only lets an *integer* literal adopt a float
+// sibling's kind; a float literal cannot take an integer target, so this stays
+// a genuine int↔float mix that `harmonise_operands` refuses (emit fails
+// closed). Pinning both directions proves the fix is not a broad coercion
+// policy reversal — the strict typed-operand refusal is untouched and
+// symmetric (design-note SFN-132).
+test "numeric-literal-position: `1.5 - x` (float literal, int var) still refuses" ![io] {
+    let ir = _emit_llvm("fn r(x: int) -> float {\n    return 1.5 - x;\n}\n", "refuse_lit_left");
+    assert ir.length == 0;
+}
+
+test "numeric-literal-position: `x - 1.5` (int var, float literal) still refuses" ![io] {
+    let ir = _emit_llvm("fn s(x: int) -> float {\n    return x - 1.5;\n}\n", "refuse_lit_right");
+    assert ir.length == 0;
+}
