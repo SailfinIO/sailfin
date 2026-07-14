@@ -1,0 +1,98 @@
+// compiler/tests/e2e/runtime_dir_capsule_link_test.sfn
+//
+// Regression for SFN-215: `module_name_from_path` (compiler/src/main.sfn)
+// rooted a module slug at a `runtime/` segment found ANYWHERE in the entry
+// path, so a user source built from a `runtime/`-named directory (e.g.
+// `benchmarks/runtime/foo.sfn`) was mis-slugged as a runtime-capsule module.
+// The staged capsule IR was produced but its object was excluded from the
+// link, so the binary failed with `undefined symbol: <dep>`. The fix roots at
+// `runtime/` only when it is the first named segment of the path.
+//
+// The fixture is a bare `.sfn` file under a NESTED `runtime/` directory that
+// imports a workspace-member capsule (`sfn/math`) and is built with
+// `sfn build -o`. Before the fix the link fails with an undefined `sfn/math`
+// symbol; after it the build links and the binary runs.
+//
+// In-tree fixture under build/ so discover_workspace_root finds the repo's
+// workspace.toml (which registers capsules/). NOTE: assert on captured output
+// with sfn/strings predicates — the sfn/test expect_* matchers are ![pure] and
+// cannot be used from an ![io] test.
+import { find } from "sfn/strings";
+
+fn _sfn_bin() -> string ![io] {
+    let configured = env.get("SAILFIN_BIN");
+    if configured.length > 0 { return configured; }
+    return "build/bin/sfn";
+}
+
+// The build spawns a nested clang + linker, so thread PATH; SAILFIN_TEST_SCRATCH
+// routes the program.ll build-cache per invocation so the parallel pool does
+// not collide on build/sailfin.
+fn _child_env() -> string[] ![io] {
+    let mut e: string[] = [];
+    let path = env.get("PATH");
+    if path.length > 0 { e.push("PATH=" + path); }
+    let home = env.get("HOME");
+    if home.length > 0 { e.push("HOME=" + home); }
+    let tmpdir = env.get("TMPDIR");
+    if tmpdir.length > 0 { e.push("TMPDIR=" + tmpdir); }
+    let scratch = env.get("SAILFIN_TEST_SCRATCH");
+    if scratch.length > 0 { e.push("SAILFIN_TEST_SCRATCH=" + scratch); }
+    return e;
+}
+
+// A bare source under a NESTED `runtime/` directory — the `runtime/` segment is
+// the SFN-215 trigger. `abs` from the sfn/math capsule is referenced (and
+// guarded from dead-code stripping) so the link must pull in the dep.
+fn _probe_path() -> string {
+    return "build/sfn215-runtime-regress/runtime/probe.sfn";
+}
+
+fn _out_bin() -> string ![io] {
+    let mut base = env.get("SAILFIN_TEST_SCRATCH");
+    if base.length == 0 { base = "/tmp"; }
+    return base + "/sfn215-runtime-regress-probe";
+}
+
+fn _ensure_fixture() ![io] {
+    fs.createDirectory("build/sfn215-runtime-regress/runtime", true);
+    fs.writeFile(_probe_path(), "import { abs } from \"sfn/math\";\n\n"
+        + "fn main() ![io] {\n"
+        + "    let r = abs(0.0 - 3.5);\n"
+        + "    if r > 3.0 {\n"
+        + "        print(\"sfn215-ok\");\n"
+        + "    } else {\n"
+        + "        print(\"sfn215-bad\");\n"
+        + "    }\n"
+        + "}\n");
+}
+
+test "runtime dir: bare file under a nested runtime/ dir links its capsule dep" ![io] {
+    _ensure_fixture();
+    let bin = _out_bin();
+    let exit = process.run_capture([_sfn_bin(), "build", "-o", bin, _probe_path()], _child_env());
+    let out = process.capture_take_stdout();
+    let err = process.capture_take_stderr();
+    // The pre-fix failure is a link error (`undefined symbol: ...`); a clean
+    // exit is the regression signal that the sfn/math dep object was linked.
+    if exit != 0 {
+        // Surface the link diagnostic on failure for triage.
+        assert find(out + err, "undefined symbol", 0) < 0;
+    }
+    assert exit == 0;
+}
+
+test "runtime dir: the linked binary runs and reaches its capsule dep" ![io] {
+    _ensure_fixture();
+    let bin = _out_bin();
+    let build_exit = process.run_capture([_sfn_bin(), "build", "-o", bin, _probe_path()], _child_env());
+    let _bo = process.capture_take_stdout();
+    let _be = process.capture_take_stderr();
+    assert build_exit == 0;
+
+    let run_exit = process.run_capture([bin], _child_env());
+    let run_out = process.capture_take_stdout();
+    let _re = process.capture_take_stderr();
+    assert run_exit == 0;
+    assert find(run_out, "sfn215-ok", 0) >= 0;
+}

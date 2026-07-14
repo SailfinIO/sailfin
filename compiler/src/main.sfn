@@ -161,19 +161,67 @@ fn module_name_from_path(source_path: string) -> string {
         index += 1;
     }
     if last_compiler >= 0 { start = last_compiler + compiler_prefix.length; } else {
-        let mut last_runtime: int = -1;
-        let runtime_search_limit = normalized.length - runtime_prefix.length;
-        index = 0;
-        loop {
-            if index > runtime_search_limit { break; }
-            if substring(normalized, index, index + runtime_prefix.length) == runtime_prefix {
-                last_runtime = index;
-            }
-            index += 1;
+        // An ABSOLUTE path keeps the historical rooting: root at the last
+        // `runtime/` occurrence so a genuine runtime-member source reached by
+        // its absolute path (e.g. `/home/user/sailfin/runtime/sfn/type_meta.sfn`,
+        // which the user-build runtime-dep path passes) still slugs to
+        // `runtime/sfn/type_meta`. An absolute prefix is opaque — its component
+        // count is not a reliable signal for whether `runtime/` is the member
+        // root — so absolute paths are left as before.
+        //
+        // A RELATIVE path roots at `runtime/` ONLY when it is the FIRST named
+        // segment — the real workspace-member root, reached as `runtime/...`
+        // (workspace-relative), `./runtime/...`, or `../runtime/...` (a subdir
+        // build). A relative path that merely NESTS a `runtime/` segment under
+        // another directory (`benchmarks/runtime/foo.sfn`, `build/bench-runtime/...`)
+        // is a user source, not the runtime member, so it keeps its full
+        // project-relative slug. Rooting such a path at `runtime/` mis-slugged
+        // the entry as a runtime-capsule module and dropped its `sfn/bench` (or
+        // any workspace-member capsule) dependency from the link (SFN-215).
+        let mut is_absolute: boolean = false;
+        if normalized.length > 0 {
+            if normalized[0] == "/" { is_absolute = true; }
         }
-        if last_runtime >= 0 {
-            // Keep the runtime/ prefix in the module name.
-            start = last_runtime;
+        if is_absolute {
+            let mut last_runtime: int = -1;
+            let runtime_search_limit = normalized.length - runtime_prefix.length;
+            index = 0;
+            loop {
+                if index > runtime_search_limit { break; }
+                if substring(normalized, index, index + runtime_prefix.length) == runtime_prefix {
+                    last_runtime = index;
+                }
+                index += 1;
+            }
+            if last_runtime >= 0 {
+                // Keep the runtime/ prefix in the module name.
+                start = last_runtime;
+            }
+        } else {
+            let mut first_named: int = 0;
+            loop {
+                let remaining = normalized.length - first_named;
+                if remaining >= 3 {
+                    if substring(normalized, first_named, first_named + 3) == "../" {
+                        first_named += 3;
+                        continue;
+                    }
+                }
+                if remaining >= 2 {
+                    if substring(normalized, first_named, first_named + 2) == "./" {
+                        first_named += 2;
+                        continue;
+                    }
+                }
+                break;
+            }
+            if first_named + runtime_prefix.length <= normalized.length {
+                if substring(normalized, first_named, first_named
+                    + runtime_prefix.length) == runtime_prefix {
+                    // Keep the runtime/ prefix in the module name.
+                    start = first_named;
+                }
+            }
         }
     }
 
