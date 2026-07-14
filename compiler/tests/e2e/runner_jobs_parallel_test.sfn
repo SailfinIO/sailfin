@@ -37,6 +37,12 @@ fn _child_env() -> string[] ![io] {
     if tmpdir.length > 0 { e.push("TMPDIR=" + tmpdir); }
     let scratch = env.get("SAILFIN_TEST_SCRATCH");
     if scratch.length > 0 { e.push("SAILFIN_TEST_SCRATCH=" + scratch); }
+    let build_cache = env.get("SAILFIN_BUILD_CACHE_DIR");
+    if build_cache.length > 0 {
+        e.push("SAILFIN_BUILD_CACHE_DIR=" + build_cache);
+    }
+    let no_cache = env.get("SAILFIN_NO_CACHE");
+    if no_cache.length > 0 { e.push("SAILFIN_NO_CACHE=" + no_cache); }
     return e;
 }
 
