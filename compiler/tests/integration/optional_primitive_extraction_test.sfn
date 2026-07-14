@@ -1,0 +1,53 @@
+// Regression coverage for SFN-182: optional primitive values lower as nullable
+// scalar pointers (`int?` -> `i64*`, etc.). After a non-null guard, assigning
+// the narrowed optional into its primitive type must load the stored payload.
+fn maybe_int(value: int) -> int? {
+    if value < 0 { return null; }
+    return value;
+}
+
+fn maybe_boolean(value: boolean) -> boolean? {
+    if value { return value; }
+    return null;
+}
+
+fn maybe_float(value: float) -> float? {
+    if value < 0.0 { return null; }
+    return value;
+}
+
+test "optional primitive: int value extracts after null guard" {
+    let present: int? = maybe_int(42);
+    assert present != null;
+    if present != null {
+        let value: int = present;
+        assert value == 42;
+    }
+
+    let absent: int? = maybe_int(-1);
+    assert absent == null;
+}
+
+test "optional primitive: boolean value extracts after null guard" {
+    let present: boolean? = maybe_boolean(true);
+    assert present != null;
+    if present != null {
+        let value: boolean = present;
+        assert value;
+    }
+
+    let absent: boolean? = maybe_boolean(false);
+    assert absent == null;
+}
+
+test "optional primitive: float value extracts after null guard" {
+    let present: float? = maybe_float(2.5);
+    assert present != null;
+    if present != null {
+        let value: float = present;
+        assert value == 2.5;
+    }
+
+    let absent: float? = maybe_float(-1.0);
+    assert absent == null;
+}
