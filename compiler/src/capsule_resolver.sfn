@@ -930,10 +930,29 @@ fn _cr_collect_capsule_sources(src_dir: string, spec: string) -> CapsuleSource[]
     let mut dir_queue: string[] = [src_dir];
     let mut slug_queue: string[] = [spec];
     let mut head: int = 0;
-    let max_depth: int = 32;
+    // Belt-and-suspenders cap on the BFS — guards against a pathological
+    // symlink loop or a runaway listDirectory binding. The previous
+    // implementation used `head >= max_depth` with `max_depth = 32`, which
+    // capped on QUEUE INDEX (directories visited), not tree depth, and would
+    // silently truncate any capsule with more than 32 directories under
+    // `src/` — dropping reachable `.sfn` files into undefined symbols at link
+    // with no diagnostic (#2146). Mirrors the diagnostic shape of
+    // `enumerate_relative_sources` / `enumerate_binary_capsule_sources` so a
+    // hit surfaces a clear bug-report hook instead of dropping modules.
+    let max_iterations: int = 4096;
+    let mut iterations: int = 0;
     loop {
         if head >= dir_queue.length { break; }
-        if head >= max_depth { break; }
+        if iterations >= max_iterations {
+            print.err("capsule-resolver: _cr_collect_capsule_sources hit "
+                + "iteration cap ("
+                + number_to_string(max_iterations)
+                + ") under "
+                + src_dir
+                + " — some sources may be missing; please file a bug");
+            break;
+        }
+        iterations += 1;
         let dir = dir_queue[head];
         let slug_prefix = slug_queue[head];
         head += 1;
