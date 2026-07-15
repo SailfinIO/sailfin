@@ -86,6 +86,7 @@ struct Config {
     self_test_timeouts: boolean;
     check_packets: boolean;
     contamination_probe: boolean;
+    ablation: string;
     tasks: string[];
     arms: string[];
 }
@@ -103,6 +104,14 @@ struct GradeResult {
     category: string;
 }
 
+struct FailureAttribution {
+    primary: string;
+    secondary: string[];
+    track_b_attribution: string;
+    language_denominator: boolean;
+    manual_review: boolean;
+}
+
 struct Record {
     attempt_id: string;
     task: string;
@@ -111,6 +120,7 @@ struct Record {
     kind: string;
     arm: string;
     model_family: string;
+    track: string;
     repeat: int;
     passed: boolean;
     iterations: int;
@@ -122,6 +132,12 @@ struct Record {
     diff_chars: int;
     human_interventions: int;
     fail_categories: string[];
+    primary_failure: string;
+    secondary_failures: string[];
+    track_b_attribution: string;
+    language_denominator: boolean;
+    ablation: string;
+    ablation_treatment: string;
 }
 
 struct PairMetric {
@@ -138,7 +154,7 @@ struct Interval {
 }
 
 fn _usage() -> string {
-    return "usage: sfn run benchmarks/llm/sfn350.sfn -- [--track a|b] [--adapter stub|openai|anthropic] [--real] [--model M] [--reasoning-effort E] [--model-family F] [--arm A] [--task T] [--max-iters N] [--repeats N] [--seed N] [--dry-run] [--schema-probe] [--contamination-probe] [--check-packets] [--verify-graders] [--self-test-analysis] [--self-test-timeouts] [--results-dir DIR]\n"
+    return "usage: sfn run benchmarks/llm/sfn350.sfn -- [--track a|b] [--ablation primary|examples|diagnostics|primitive] [--adapter stub|openai|anthropic] [--real] [--model M] [--reasoning-effort E] [--model-family F] [--arm A] [--task T] [--max-iters N] [--repeats N] [--seed N] [--dry-run] [--schema-probe] [--contamination-probe] [--check-packets] [--verify-graders] [--self-test-analysis] [--self-test-timeouts] [--results-dir DIR]\n"
         + "\n"
         + "defaults: --track a --adapter stub --model gpt-5.6-terra --reasoning-effort medium --model-family unspecified --max-iters 5 --repeats 1 --seed 350 --results-dir build/sfn350-results\n"
         + "env: OPENAI_API_KEY, ANTHROPIC_API_KEY, SAILFIN_BIN, TACIT_LIBRARY_JAR, SFN350_TIMEOUT_CMD; API keys may also be set in .env or benchmarks/llm/.env\n";
@@ -152,6 +168,11 @@ fn _valid_reasoning_effort(value: string) -> boolean {
     return value == "none" || value == "low" || value == "medium" || value == "high"
         || value == "xhigh"
         || value == "max";
+}
+
+fn _valid_ablation(value: string) -> boolean {
+    return value == "primary" || value == "examples" || value == "diagnostics"
+        || value == "primitive";
 }
 
 fn _parse_int(text: string, fallback: int) -> int {
@@ -193,6 +214,7 @@ fn _default_config() -> Config {
         self_test_timeouts: false,
         check_packets: false,
         contamination_probe: false,
+        ablation: "primary",
         tasks: [],
         arms: []
     };
@@ -222,6 +244,13 @@ fn _parse_config(argv: string[]) -> Config ![io] {
                 process.exit(2);
             }
             cfg.stub = cfg.adapter == "stub";
+            i += 1;
+        } else if arg == "--ablation" && i + 1 < argv.length {
+            cfg.ablation = argv[i + 1];
+            if !_valid_ablation(cfg.ablation) {
+                print.err("unknown ablation: " + cfg.ablation);
+                process.exit(2);
+            }
             i += 1;
         } else if arg == "--model" && i + 1 < argv.length {
             cfg.model = argv[i + 1];
@@ -277,6 +306,10 @@ fn _parse_config(argv: string[]) -> Config ![io] {
     }
     if cfg.repeats < 1 {
         print.err("--repeats must be at least 1");
+        process.exit(2);
+    }
+    if cfg.ablation != "primary" && cfg.track != "b" {
+        print.err("--ablation requires --track b");
         process.exit(2);
     }
     return cfg;
@@ -611,11 +644,40 @@ fn _system_prompt() -> string {
     return "You are an expert programmer completing a benchmark task. Return the COMPLETE contents of the solution file in a SINGLE fenced code block and nothing else - no prose before or after. The program reads its input from stdin and writes ONLY the required answer to stdout.";
 }
 
-fn _cheatsheet(arm: ArmConfig) -> string ![io] {
+fn _ablation_treatment(cfg: Config, task_index: int, repeat: int) -> string {
+    if cfg.ablation == "primary" { return "primary"; }
+    let parity = cfg.seed + repeat + task_index;
+    let treatment = parity % 2 == 0;
+    if cfg.ablation == "examples" {
+        return treatment? "expanded": "concise";
+    }
+    if cfg.ablation == "diagnostics" {
+        return treatment? "minimal": "full";
+    }
+    return treatment? "local": "available";
+}
+
+fn _packet_supplement(arm: ArmConfig, name: string) -> string ![io] {
+    let path = _repo_root() + "/benchmarks/llm/packets/" + arm.lang + "/" + name
+        + ".md";
+    if fs.exists(path) { return fs.readFile(path); }
+    return "";
+}
+
+fn _cheatsheet(arm: ArmConfig, cfg: Config, treatment: string) -> string ![io] {
     if arm.name == "sailfin-b" || arm.name == "rill-17" {
         let packet_path = _repo_root() + "/benchmarks/llm/packets/" + arm.lang
             + "/packet.md";
-        if fs.exists(packet_path) { return fs.readFile(packet_path); }
+        if fs.exists(packet_path) {
+            let mut material = fs.readFile(packet_path);
+            if cfg.ablation == "examples" && treatment == "expanded" {
+                material = material + "\n\n" + _packet_supplement(arm, "expanded-examples");
+            }
+            if cfg.ablation == "primitive" && treatment == "local" {
+                material = material + "\n\n" + _packet_supplement(arm, "local-primitive");
+            }
+            return material;
+        }
         return "";
     }
     let path = "benchmarks/llm/cheatsheets/" + arm.lang + ".md";
@@ -623,15 +685,21 @@ fn _cheatsheet(arm: ArmConfig) -> string ![io] {
     return "";
 }
 
-fn _build_user(task: Task, arm: ArmConfig) -> string ![io] {
+fn _build_user(task: Task, arm: ArmConfig, cfg: Config, treatment: string) -> string ![io] {
     let reference_label = arm.name == "sailfin-b" || arm.name == "rill-17"? "Controlled learning packet": "Language quick reference";
-    return "# Task\n" + task.prompt + "\n\n# I/O contract\n" + task.io_contract
+    let mut ablation_instruction = "";
+    if cfg.ablation == "primitive" && treatment == "local" {
+        ablation_instruction = "\n\n# Primitive ablation\nThe built-in half-open slicing primitive is unavailable in this condition. Use the packet-documented local_slice helper and do not call the built-in slicing primitive.";
+    }
+    return "# Task\n" + task.prompt + ablation_instruction
+        + "\n\n# I/O contract\n"
+        + task.io_contract
         + "\n\n# "
         + reference_label
         + " ("
         + arm.name
         + ")\n"
-        + _cheatsheet(arm)
+        + _cheatsheet(arm, cfg, treatment)
         + "\n\n# Starter file: "
         + arm.entry
         + "\n```\n"
@@ -1351,7 +1419,110 @@ fn _verify_graders(tasks: Task[], arms: ArmConfig[], run_dir: string) ![clock, i
     print("offline known-good/known-bad grader verification completed; declared gaps are recorded in results.json");
 }
 
-fn _record(task: Task, arm: string, cfg: Config, attempt_id: string, repeat: int, passed: boolean, iters: int, input_tokens: int, output_tokens: int, elapsed_ms: int, source_chars: int, diff_chars: int, cats: string[]) -> Record {
+fn _explicit_failure_category(feedback: string) -> string {
+    let categories = ["pretrained_syntax_library_interference", "rule_absent_from_materials", "rule_present_not_applied", "invented_syntax_or_api", "correct_program_rejected", "check_build_run_divergence", "compiler_crash_hang_or_ice", "unhelpful_diagnostic_or_failed_repair", "missing_or_excessively_awkward_primitive", "ordinary_semantic_or_test_failure", "capability_false_friction", "provider_or_setup_invalidation"];
+    let mut i: int = 0;
+    loop {
+        if i >= categories.length { break; }
+        if contains(feedback, "[attribution:" + categories[i] + "]") {
+            return categories[i];
+        }
+        i += 1;
+    }
+    return "";
+}
+
+fn _track_b_attribution(primary: string) -> string {
+    if primary == "provider_or_setup_invalidation" { return "run_invalidation"; }
+    if primary == "rule_absent_from_materials" { return "packet_defect"; }
+    if primary == "correct_program_rejected" || primary == "check_build_run_divergence"
+        || primary == "compiler_crash_hang_or_ice"
+        || primary == "unhelpful_diagnostic_or_failed_repair" {
+        return "implementation_defect";
+    }
+    return "intrinsic_failure";
+}
+
+fn _classify_failure(cfg: Config, task: Task, grade_category: string, feedback: string, iteration: int) -> FailureAttribution {
+    let explicit = _explicit_failure_category(feedback);
+    let mut primary = explicit;
+    if primary.length == 0 {
+        if grade_category == "provider_error" || grade_category == "scaffold_error" {
+            primary = "provider_or_setup_invalidation";
+        } else if grade_category == "effect_error" || grade_category == "trap_not_rejected" {
+            primary = "capability_false_friction";
+        } else if grade_category == "timeout" {
+            primary = "compiler_crash_hang_or_ice";
+        } else if grade_category == "compile_error" {
+            primary = "invented_syntax_or_api";
+        } else if grade_category == "primitive_unavailable" {
+            primary = "missing_or_excessively_awkward_primitive";
+        } else { primary = "ordinary_semantic_or_test_failure"; }
+    }
+    let mut secondary: string[] = [];
+    if iteration > 1 && primary != "unhelpful_diagnostic_or_failed_repair" {
+        secondary.push("unhelpful_diagnostic_or_failed_repair");
+    }
+    let track_b = _track_b_attribution(primary);
+    let mut denominator = primary != "provider_or_setup_invalidation";
+    if cfg.track == "b" && (track_b == "packet_defect" || track_b == "implementation_defect") {
+        denominator = false;
+    }
+    return FailureAttribution {
+        primary: primary,
+        secondary: secondary,
+        track_b_attribution: track_b,
+        language_denominator: denominator,
+        manual_review: explicit.length == 0 && (grade_category == "compile_error"
+            || grade_category == "runtime_error"
+            || grade_category == "wrong_output")
+    };
+}
+
+fn _success_attribution() -> FailureAttribution {
+    return FailureAttribution {
+        primary: "",
+        secondary: [],
+        track_b_attribution: "not_applicable",
+        language_denominator: true,
+        manual_review: false
+    };
+}
+
+fn _self_test_failure_taxonomy() ![io] {
+    let categories = ["pretrained_syntax_library_interference", "rule_absent_from_materials", "rule_present_not_applied", "invented_syntax_or_api", "correct_program_rejected", "check_build_run_divergence", "compiler_crash_hang_or_ice", "unhelpful_diagnostic_or_failed_repair", "missing_or_excessively_awkward_primitive", "ordinary_semantic_or_test_failure", "capability_false_friction", "provider_or_setup_invalidation"];
+    let task = _logic_task();
+    let mut cfg = _default_config();
+    cfg.track = "b";
+    let mut i: int = 0;
+    loop {
+        if i >= categories.length { break; }
+        let got = _classify_failure(cfg, task, "fixture", "[attribution:"
+            + categories[i]
+            + "]", 1);
+        if got.primary != categories[i] {
+            print.err("failure taxonomy fixture did not classify " + categories[i]);
+            process.exit(1);
+        }
+        i += 1;
+    }
+    let setup = _classify_failure(cfg, task, "provider_error", "fixture", 1);
+    let defect = _classify_failure(cfg, task, "fixture", "[attribution:correct_program_rejected]", 1);
+    cfg.track = "a";
+    let adoption = _classify_failure(cfg, task, "fixture", "[attribution:correct_program_rejected]", 1);
+    if setup.language_denominator || defect.language_denominator || defect.track_b_attribution != "implementation_defect"
+        || !adoption.language_denominator {
+        print.err("failure taxonomy denominator policy fixtures failed");
+        process.exit(1);
+    }
+    print("failure taxonomy and denominator policy fixtures passed");
+}
+
+fn _write_iteration_attribution(path: string, iteration: int, category: string, attribution: FailureAttribution) ![io] {
+    fs.writeFile(path, stringify_pretty(object_val(["iteration", "grader_category", "primary", "secondary", "track_b_attribution", "language_denominator", "manual_review"], [number_val(iteration as float), string_val(category), string_val(attribution.primary), _string_array_json(attribution.secondary), string_val(attribution.track_b_attribution), bool_val(attribution.language_denominator), bool_val(attribution.manual_review)]), 2));
+}
+
+fn _record(task: Task, arm: string, cfg: Config, attempt_id: string, repeat: int, passed: boolean, iters: int, input_tokens: int, output_tokens: int, elapsed_ms: int, source_chars: int, diff_chars: int, cats: string[], attribution: FailureAttribution, treatment: string) -> Record {
     return Record {
         attempt_id: attempt_id,
         task: task.id,
@@ -1360,6 +1531,7 @@ fn _record(task: Task, arm: string, cfg: Config, attempt_id: string, repeat: int
         kind: task.kind,
         arm: arm,
         model_family: cfg.model_family,
+        track: cfg.track,
         repeat: repeat,
         passed: passed,
         iterations: iters,
@@ -1370,18 +1542,47 @@ fn _record(task: Task, arm: string, cfg: Config, attempt_id: string, repeat: int
         source_chars: source_chars,
         diff_chars: diff_chars,
         human_interventions: 0,
-        fail_categories: cats
+        fail_categories: cats,
+        primary_failure: attribution.primary,
+        secondary_failures: attribution.secondary,
+        track_b_attribution: attribution.track_b_attribution,
+        language_denominator: passed || attribution.language_denominator,
+        ablation: cfg.ablation,
+        ablation_treatment: treatment
     };
 }
 
-fn _run_task_arm(task: Task, arm: ArmConfig, cfg: Config, run_dir: string, attempt_id: string, repeat: int) -> Record ![clock, io] {
+fn _grade_with_ablation(task: Task, arm: ArmConfig, cfg: Config, treatment: string, source: string, workdir: string, iteration: int) -> GradeResult ![clock, io] {
+    if cfg.ablation == "primitive" && treatment == "local" {
+        let forbidden = arm.name == "rill-17"? "span(": "substring(";
+        if contains(source, forbidden) {
+            return GradeResult {
+                passed: false,
+                feedback: "the local-primitive condition forbids " + forbidden
+                    + "; use local_slice from the supplied supplement [attribution:rule_present_not_applied]",
+                category: "primitive_unavailable"
+            };
+        }
+    }
+    return _grade(task, arm, workdir, iteration);
+}
+
+fn _repair_feedback(cfg: Config, treatment: string, result: GradeResult) -> string {
+    if cfg.ablation == "diagnostics" && treatment == "minimal" {
+        return "grading failed; phase=" + result.category;
+    }
+    return result.feedback;
+}
+
+fn _run_task_arm(task: Task, task_index: int, arm: ArmConfig, cfg: Config, run_dir: string, attempt_id: string, repeat: int) -> Record ![clock, io] {
     let started = monotonic_millis();
     let wd = run_dir + "/attempts/" + attempt_id;
     _mkdir(wd);
     _write_fixtures(task, wd);
     let workfile = wd + "/" + arm.entry;
     let system = _system_prompt();
-    let user = _build_user(task, arm);
+    let treatment = _ablation_treatment(cfg, task_index, repeat);
+    let user = _build_user(task, arm, cfg, treatment);
     fs.writeFile(wd + "/system.txt", system);
     fs.writeFile(wd + "/user.txt", user);
     let mut messages: JsonValue[] = [object_val(["role", "content"], [string_val("user"), string_val(user)])];
@@ -1390,6 +1591,7 @@ fn _run_task_arm(task: Task, arm: ArmConfig, cfg: Config, run_dir: string, attem
     let mut source_chars = 0;
     let mut diff_chars = 0;
     let mut cats: string[] = [];
+    let mut attribution = _success_attribution();
     let mut i: int = 0;
     loop {
         if i >= cfg.max_iters { break; }
@@ -1404,7 +1606,10 @@ fn _run_task_arm(task: Task, arm: ArmConfig, cfg: Config, run_dir: string, attem
             cats.push("provider_" + classification);
             fs.writeFile(wd + "/provider.error", completion.error);
             fs.writeFile(wd + "/provider-failure.json", stringify_pretty(object_val(["classification", "setup_class", "iteration", "error"], [string_val(classification), bool_val(_is_setup_failure_class(classification)), number_val(iteration as float), string_val(completion.error)]), 2));
-            return _record(task, arm.name, cfg, attempt_id, repeat, false, i + 1, input_tokens, output_tokens, (monotonic_millis() - started) as int, source_chars, diff_chars, cats);
+            attribution = _classify_failure(cfg, task, "provider_error", completion.error, iteration);
+            _write_iteration_attribution(wd + "/classification-" + (iteration as string)
+                + ".json", iteration, "provider_error", attribution);
+            return _record(task, arm.name, cfg, attempt_id, repeat, false, i + 1, input_tokens, output_tokens, (monotonic_millis() - started) as int, source_chars, diff_chars, cats, attribution, treatment);
         }
         let source = _extract_code(completion.text);
         source_chars = source.length;
@@ -1412,20 +1617,23 @@ fn _run_task_arm(task: Task, arm: ArmConfig, cfg: Config, run_dir: string, attem
         diff_chars = source_chars >= starter_chars? source_chars - starter_chars: starter_chars - source_chars;
         fs.writeFile(workfile, source);
         fs.writeFile(wd + "/source-" + (iteration as string) + ".txt", source);
-        let res = _grade(task, arm, wd, iteration);
+        let res = _grade_with_ablation(task, arm, cfg, treatment, source, wd, iteration);
         if res.category.length > 0 { cats.push(res.category); }
         if res.passed {
-            return _record(task, arm.name, cfg, attempt_id, repeat, true, i + 1, input_tokens, output_tokens, (monotonic_millis() - started) as int, source_chars, diff_chars, cats);
+            return _record(task, arm.name, cfg, attempt_id, repeat, true, i + 1, input_tokens, output_tokens, (monotonic_millis() - started) as int, source_chars, diff_chars, cats, attribution, treatment);
         }
+        attribution = _classify_failure(cfg, task, res.category, res.feedback, iteration);
+        _write_iteration_attribution(wd + "/classification-" + (iteration as string)
+            + ".json", iteration, res.category, attribution);
         messages.push(object_val(["role", "content"], [string_val("assistant"), string_val(completion.text)]));
         messages.push(object_val(["role", "content"], [string_val("user"), string_val("That failed grading:\n"
-            + res.feedback
+            + _repair_feedback(cfg, treatment, res)
             + "\nReturn the full corrected "
             + arm.entry
             + " in one code block.")]));
         i += 1;
     }
-    return _record(task, arm.name, cfg, attempt_id, repeat, false, cfg.max_iters, input_tokens, output_tokens, (monotonic_millis() - started) as int, source_chars, diff_chars, cats);
+    return _record(task, arm.name, cfg, attempt_id, repeat, false, cfg.max_iters, input_tokens, output_tokens, (monotonic_millis() - started) as int, source_chars, diff_chars, cats, attribution, treatment);
 }
 
 fn _record_json(r: Record) -> JsonValue {
@@ -1436,7 +1644,7 @@ fn _record_json(r: Record) -> JsonValue {
         cats.push(string_val(r.fail_categories[i]));
         i += 1;
     }
-    return object_val(["attempt_id", "task", "template", "category", "kind", "arm", "model_family", "repeat", "passed", "iterations", "tokens", "input_tokens", "output_tokens", "elapsed_ms", "source_chars", "diff_chars", "human_interventions", "fail_categories"], [string_val(r.attempt_id), string_val(r.task), string_val(r.template), string_val(r.category), string_val(r.kind), string_val(r.arm), string_val(r.model_family), number_val(r.repeat as float), bool_val(r.passed), number_val(r.iterations as float), number_val(r.tokens as float), number_val(r.input_tokens as float), number_val(r.output_tokens as float), number_val(r.elapsed_ms as float), number_val(r.source_chars as float), number_val(r.diff_chars as float), number_val(r.human_interventions as float), array_val(cats)]);
+    return object_val(["attempt_id", "task", "template", "category", "kind", "arm", "model_family", "track", "repeat", "passed", "iterations", "tokens", "input_tokens", "output_tokens", "elapsed_ms", "source_chars", "diff_chars", "human_interventions", "fail_categories", "primary_failure", "secondary_failures", "track_b_attribution", "language_denominator", "ablation", "ablation_treatment"], [string_val(r.attempt_id), string_val(r.task), string_val(r.template), string_val(r.category), string_val(r.kind), string_val(r.arm), string_val(r.model_family), string_val(r.track), number_val(r.repeat as float), bool_val(r.passed), number_val(r.iterations as float), number_val(r.tokens as float), number_val(r.input_tokens as float), number_val(r.output_tokens as float), number_val(r.elapsed_ms as float), number_val(r.source_chars as float), number_val(r.diff_chars as float), number_val(r.human_interventions as float), array_val(cats), string_val(r.primary_failure), _string_array_json(r.secondary_failures), string_val(r.track_b_attribution), bool_val(r.language_denominator), string_val(r.ablation), string_val(r.ablation_treatment)]);
 }
 
 fn _pct(n: int, d: int) -> float {
@@ -1485,6 +1693,23 @@ fn _is_confirmatory(task_id: string, tasks: Task[]) -> boolean {
     return false;
 }
 
+fn _track_b_instance_valid(record: Record, records: Record[]) -> boolean {
+    if record.track != "b" { return true; }
+    let mut i: int = 0;
+    loop {
+        if i >= records.length { break; }
+        let other = records[i];
+        if other.task == record.task && other.model_family == record.model_family
+            && other.repeat == record.repeat
+            && (other.track_b_attribution == "packet_defect"
+            || other.track_b_attribution == "implementation_defect") {
+            return false;
+        }
+        i += 1;
+    }
+    return true;
+}
+
 fn _summary_for_arm(arm: string, records: Record[], tasks: Task[]) -> JsonValue {
     let mut scored = 0;
     let mut solved = 0;
@@ -1507,7 +1732,7 @@ fn _summary_for_arm(arm: string, records: Record[], tasks: Task[]) -> JsonValue 
             if trap {
                 traps += 1;
                 if _has_category(r, "effect_error") { trap_fired += 1; }
-            } else {
+            } else if r.language_denominator && _track_b_instance_valid(r, records) {
                 scored += 1;
                 if r.passed {
                     solved += 1;
@@ -1519,7 +1744,9 @@ fn _summary_for_arm(arm: string, records: Record[], tasks: Task[]) -> JsonValue 
                     elapsed_sum += r.elapsed_ms;
                     source_char_sum += r.source_chars;
                 }
-                if _has_category(r, "effect_error") { false_friction += 1; }
+                if r.primary_failure == "capability_false_friction" {
+                    false_friction += 1;
+                }
             }
         }
         i += 1;
@@ -1544,6 +1771,49 @@ fn _summary(records: Record[], tasks: Task[], arms: string[]) -> JsonValue {
         i += 1;
     }
     return object_val(["by_arm", "notes"], [object_val(keys, vals), array_val([string_val("one_shot_success_pct and solve_rate_pct exclude trap tasks."), string_val("false_friction_tasks counts non-trap tasks where an effect/capability compile error appeared at least once."), string_val("traps_effect_system_fired counts trap tasks where an effect/capability compile error appeared.")])]);
+}
+
+fn _ablation_cell(arm: string, treatment: string, records: Record[], tasks: Task[]) -> JsonValue {
+    let mut observations = 0;
+    let mut solved = 0;
+    let mut one_shot = 0;
+    let mut iteration_sum = 0;
+    let mut i: int = 0;
+    loop {
+        if i >= records.length { break; }
+        let r = records[i];
+        if r.arm == arm && r.ablation_treatment == treatment && r.language_denominator
+            && _track_b_instance_valid(r, records)
+            && _is_confirmatory(r.task, tasks)
+            && !_is_trap(r.task, tasks) {
+            observations += 1;
+            if r.passed {
+                solved += 1;
+                if r.iterations == 1 { one_shot += 1; }
+                iteration_sum += r.iterations;
+            } else { iteration_sum += 6; }
+        }
+        i += 1;
+    }
+    let mean_iterations = observations == 0? 0.0: (iteration_sum as float) / (observations as float);
+    return object_val(["observations", "one_shot_success_pct", "solve_rate_pct", "mean_iterations_failures_assigned_6"], [number_val(observations as float), number_val(_pct(one_shot, observations)), number_val(_pct(solved, observations)), number_val(mean_iterations)]);
+}
+
+fn _ablation_summary(cfg: Config, records: Record[], tasks: Task[], arms: string[]) -> JsonValue {
+    let mut treatments = ["primary", "primary"];
+    if cfg.ablation == "examples" { treatments = ["concise", "expanded"]; }
+    if cfg.ablation == "diagnostics" { treatments = ["full", "minimal"]; }
+    if cfg.ablation == "primitive" { treatments = ["available", "local"]; }
+    let mut arm_keys: string[] = [];
+    let mut arm_values: JsonValue[] = [];
+    let mut ai: int = 0;
+    loop {
+        if ai >= arms.length { break; }
+        arm_keys.push(arms[ai]);
+        arm_values.push(object_val(treatments, [_ablation_cell(arms[ai], treatments[0], records, tasks), _ablation_cell(arms[ai], treatments[1], records, tasks)]));
+        ai += 1;
+    }
+    return object_val(["dimension", "treatments", "by_arm", "primary_pool_eligible"], [string_val(cfg.ablation), _string_array_json(treatments), object_val(arm_keys, arm_values), bool_val(cfg.ablation == "primary")]);
 }
 
 fn _matching_record_index(records: Record[], task: string, arm: string, model_family: string, repeat: int) -> int {
@@ -1579,6 +1849,10 @@ fn _paired_metrics(primary: string, baseline: string, records: Record[], tasks: 
             let bi = _matching_record_index(records, sail.task, baseline, sail.model_family, sail.repeat);
             if bi >= 0 {
                 let base = records[bi];
+                if !sail.language_denominator || !base.language_denominator || !_track_b_instance_valid(sail, records) {
+                    i += 1;
+                    continue;
+                }
                 let sail_one = sail.passed && sail.iterations == 1? 1.0: 0.0;
                 let base_one = base.passed && base.iterations == 1? 1.0: 0.0;
                 let mi = _pair_metric_index(out, sail.task);
@@ -1699,7 +1973,7 @@ fn _analysis_for_baseline(primary: string, baseline: string, records: Record[], 
     return object_val(["paired_ordinary_observations", "task_clusters", "minimum_100_met", "one_shot_advantage_percentage_points_95ci", "iterations_to_green_advantage_95ci"], [number_val(observations as float), number_val(metrics.length as float), bool_val(observations >= 100), _interval_json(one_shot, 100.0), _interval_json(iterations, 1.0)]);
 }
 
-fn _analysis(records: Record[], tasks: Task[], arms: string[], seed: int, run_valid: boolean, invalid_reason: string) -> JsonValue {
+fn _analysis(records: Record[], tasks: Task[], arms: string[], seed: int, run_valid: boolean, invalid_reason: string, primary_pool_eligible: boolean) -> JsonValue {
     let mut keys: string[] = [];
     let mut values: JsonValue[] = [];
     let mut authorized = true;
@@ -1721,7 +1995,8 @@ fn _analysis(records: Record[], tasks: Task[], arms: string[], seed: int, run_va
     }
     if baselines == 0 { authorized = false; }
     if !run_valid { authorized = false; }
-    return object_val(["decision_authorized", "run_valid", "invalid_reason", "by_baseline", "notes"], [bool_val(authorized), bool_val(run_valid), string_val(invalid_reason), object_val(keys, values), array_val([string_val("Intervals resample frozen task instances, preserving repeat clusters."), string_val("Positive advantages favor Sailfin. No GO/NO interpretation is performed by the runner."), string_val("Provider failures remain attempted observations and are never dropped from the corpus."), string_val("Setup-class provider failures invalidate GO/NO interpretation and stop additional paid observations.")])]);
+    if !primary_pool_eligible { authorized = false; }
+    return object_val(["decision_authorized", "run_valid", "invalid_reason", "primary_pool_eligible", "by_baseline", "notes"], [bool_val(authorized), bool_val(run_valid), string_val(invalid_reason), bool_val(primary_pool_eligible), object_val(keys, values), array_val([string_val("Intervals resample frozen task instances, preserving repeat clusters."), string_val("Positive advantages favor Sailfin. No GO/NO interpretation is performed by the runner."), string_val("Provider failures remain attempted observations and are never dropped from the corpus."), string_val("Setup-class provider failures invalidate GO/NO interpretation and stop additional paid observations."), string_val("Ablation runs are secondary analyses and cannot authorize the primary Track B decision.")])]);
 }
 
 fn _self_test_analysis() ![io] {
@@ -1956,6 +2231,29 @@ fn _validate_packets() ![io] {
         print.err("Track B matched packet budget exceeds 5% band");
         process.exit(1);
     }
+    let supplements = ["expanded-examples.md", "local-primitive.md"];
+    let mut si: int = 0;
+    loop {
+        if si >= supplements.length { break; }
+        let left = _repo_root() + "/benchmarks/llm/packets/sailfin-b/"
+            + supplements[si];
+        let right = _repo_root() + "/benchmarks/llm/packets/rill-17/"
+            + supplements[si];
+        if !fs.exists(left) || !fs.exists(right) {
+            print.err("Track B ablation supplement missing: " + supplements[si]);
+            process.exit(1);
+        }
+        let left_tokens = _estimated_tokens(fs.readFile(left));
+        let right_tokens = _estimated_tokens(fs.readFile(right));
+        let smaller = left_tokens < right_tokens? left_tokens: right_tokens;
+        let larger = left_tokens > right_tokens? left_tokens: right_tokens;
+        if smaller <= 0 || larger * 100 > smaller * 105 {
+            print.err("Track B ablation supplement exceeds 5% matched band: "
+                + supplements[si]);
+            process.exit(1);
+        }
+        si += 1;
+    }
     print("Track B packet completeness and matched-budget checks passed");
 }
 
@@ -1965,7 +2263,14 @@ fn _packet_manifest(track: string) -> JsonValue ![io] {
     }
     let sfn_path = _packet_path("sailfin-b");
     let rill_path = _packet_path("rill-17");
-    return object_val(["enabled", "token_estimate_method", "sailfin-b", "rill-17"], [bool_val(true), string_val("UTF-8 source characters divided by 4; exact provider input tokens remain recorded per attempt"), object_val(["version", "path", "sha256"], [string_val(_packet_version("sailfin-b")), string_val(sfn_path), string_val(_sha256_file(sfn_path))]), object_val(["version", "path", "sha256"], [string_val(_packet_version("rill-17")), string_val(rill_path), string_val(_sha256_file(rill_path))])]);
+    let sfn_dir = _repo_root() + "/benchmarks/llm/packets/sailfin-b/";
+    let rill_dir = _repo_root() + "/benchmarks/llm/packets/rill-17/";
+    let supplements = object_val(["sailfin-b-expanded-examples", "rill-17-expanded-examples", "sailfin-b-local-primitive", "rill-17-local-primitive"], [string_val(_sha256_file(sfn_dir
+        + "expanded-examples.md")), string_val(_sha256_file(rill_dir
+        + "expanded-examples.md")), string_val(_sha256_file(sfn_dir
+        + "local-primitive.md")), string_val(_sha256_file(rill_dir
+        + "local-primitive.md"))]);
+    return object_val(["enabled", "token_estimate_method", "sailfin-b", "rill-17", "ablation_supplement_sha256"], [bool_val(true), string_val("UTF-8 source characters divided by 4; exact provider input tokens remain recorded per attempt"), object_val(["version", "path", "sha256"], [string_val(_packet_version("sailfin-b")), string_val(sfn_path), string_val(_sha256_file(sfn_path))]), object_val(["version", "path", "sha256"], [string_val(_packet_version("rill-17")), string_val(rill_path), string_val(_sha256_file(rill_path))]), supplements]);
 }
 
 fn _write_records(path: string, records: Record[]) ![io] {
@@ -2000,7 +2305,8 @@ fn _write_run_manifest(path: string, cfg: Config, arms: string[], run_valid: boo
     let commands = object_val(["sailfin_compile", "sailfin_run", "rill17_check", "rill17_run", "scala_compile", "scala_run", "scala_tacit_compile", "scala_tacit_run", "python_run"], [_string_array_json(_append_all(timeout, [_sfn_bin(), "check", "{file}"])), _string_array_json(_append_all(timeout, [_sfn_bin(), "run", "{file}"])), _string_array_json(_append_all(timeout, ["sh", rill, _sfn_bin(), "check", "{file}"])), _string_array_json(_append_all(timeout, ["sh", rill, _sfn_bin(), "run", "{file}"])), _string_array_json(_append_all(timeout, ["scala-cli", "compile", "--server=false", "{file}"])), _string_array_json(_append_all(timeout, ["scala-cli", "run", "--server=false", "{file}"])), _string_array_json(_append_all(timeout, ["scala-cli", "compile", "--server=false", "--scala", "3.10.0-RC1-bin-20260616-4733954-NIGHTLY", "--scalac-option", "-experimental", "--jar", _tacit_jar(), _tacit_scaffold(), "{file}"])), _string_array_json(_append_all(timeout, ["scala-cli", "run", "--server=false", "--scala", "3.10.0-RC1-bin-20260616-4733954-NIGHTLY", "--scalac-option", "-experimental", "--jar", _tacit_jar(), _tacit_scaffold(), "{file}"])), _string_array_json(_append_all(timeout, ["python3", "{file}"]))]);
     let deadline = object_val(["default_seconds", "effective_value", "effective_prefix", "override_env", "override_value"], [number_val(60.0), string_val(join(timeout, " ")), _string_array_json(timeout), string_val("SFN350_TIMEOUT_CMD"), string_val(env.get("SFN350_TIMEOUT_CMD"))]);
     let protocol_path = _repo_root() + "/benchmarks/llm/PROTOCOL-V2.md";
-    let manifest = object_val(["protocol_id", "protocol_sha256", "track", "adapter", "model", "model_family", "openai_reasoning_effort", "max_iters", "repeats", "seed", "sampling", "arms", "packets", "toolchains", "execution_deadline", "commands", "human_interventions", "run_valid", "invalid_reason"], [string_val("sfn-agent-benchmark/v2.0.0"), string_val(_sha256_file(protocol_path)), string_val(cfg.track), string_val(cfg.adapter), string_val(cfg.model), string_val(cfg.model_family), string_val(manifest_effort), number_val(cfg.max_iters as float), number_val(cfg.repeats as float), number_val(cfg.seed as float), string_val(sampling), array_val(arm_vals), _packet_manifest(cfg.track), toolchains, deadline, commands, number_val(0.0), bool_val(run_valid), string_val(invalid_reason)]);
+    let ablation = object_val(["dimension", "assignment", "primary_pool_eligible"], [string_val(cfg.ablation), string_val("seeded parity of frozen attempt identity; paired arms receive the same treatment"), bool_val(cfg.ablation == "primary")]);
+    let manifest = object_val(["protocol_id", "protocol_sha256", "track", "adapter", "model", "model_family", "openai_reasoning_effort", "max_iters", "repeats", "seed", "sampling", "arms", "packets", "ablation", "toolchains", "execution_deadline", "commands", "human_interventions", "run_valid", "invalid_reason"], [string_val("sfn-agent-benchmark/v2.0.0"), string_val(_sha256_file(protocol_path)), string_val(cfg.track), string_val(cfg.adapter), string_val(cfg.model), string_val(cfg.model_family), string_val(manifest_effort), number_val(cfg.max_iters as float), number_val(cfg.repeats as float), number_val(cfg.seed as float), string_val(sampling), array_val(arm_vals), _packet_manifest(cfg.track), ablation, toolchains, deadline, commands, number_val(0.0), bool_val(run_valid), string_val(invalid_reason)]);
     fs.writeFile(path, stringify_pretty(manifest, 2));
 }
 
@@ -2010,7 +2316,7 @@ fn _starter_tokens(task: Task, arm: string) -> int {
     return _estimated_tokens(_starter_for(task, arm));
 }
 
-fn _write_corpus_manifest(path: string, tasks: Task[], arms: ArmConfig[]) ![io] {
+fn _write_corpus_manifest(path: string, cfg: Config, tasks: Task[], arms: ArmConfig[]) ![io] {
     let band_percent = _arm_exists(arms, "sailfin-b")? 105: 125;
     let mut instances: JsonValue[] = [];
     let mut templates: string[] = [];
@@ -2034,7 +2340,7 @@ fn _write_corpus_manifest(path: string, tasks: Task[], arms: ArmConfig[]) ![io] 
                 if ai >= arms.length { break; }
                 arm_keys.push(arms[ai].name);
                 let starter_tokens = _starter_tokens(task, arms[ai].name);
-                let scaffold_tokens = _estimated_tokens(_build_user(task, arms[ai]));
+                let scaffold_tokens = _estimated_tokens(_build_user(task, arms[ai], cfg, "primary"));
                 starter_vals.push(number_val(starter_tokens as float));
                 scaffold_vals.push(number_val(scaffold_tokens as float));
                 if scaffold_tokens < scaffold_min {
@@ -2059,7 +2365,7 @@ fn _write_corpus_manifest(path: string, tasks: Task[], arms: ArmConfig[]) ![io] 
     i = 0;
     loop {
         if i >= arms.length { break; }
-        let tokens = _estimated_tokens(_cheatsheet(arms[i]));
+        let tokens = _estimated_tokens(_cheatsheet(arms[i], cfg, "primary"));
         cheat_keys.push(arms[i].name);
         cheat_vals.push(number_val(tokens as float));
         if tokens < min_tokens { min_tokens = tokens; }
@@ -2087,7 +2393,8 @@ fn _write_schedule(path: string, cfg: Config, tasks: Task[], arms: ArmConfig[], 
                     if ai >= selected_arms.length { break; }
                     let arm = selected_arms[ai];
                     if _starter_for(task, arm).length > 0 {
-                        values.push(object_val(["attempt_id", "task", "template", "kind", "arm", "model_family", "repeat", "seed"], [string_val(_attempt_id(cfg, task, arm, repeat)), string_val(task.id), string_val(task.template), string_val(task.kind), string_val(arm), string_val(cfg.model_family), number_val(repeat as float), number_val(cfg.seed as float)]));
+                        let treatment = _ablation_treatment(cfg, ti, repeat);
+                        values.push(object_val(["attempt_id", "task", "template", "kind", "arm", "model_family", "repeat", "seed", "ablation", "ablation_treatment"], [string_val(_attempt_id(cfg, task, arm, repeat)), string_val(task.id), string_val(task.template), string_val(task.kind), string_val(arm), string_val(cfg.model_family), number_val(repeat as float), number_val(cfg.seed as float), string_val(cfg.ablation), string_val(treatment)]));
                     }
                     ai += 1;
                 }
@@ -2106,7 +2413,7 @@ fn _write_failure_index(path: string, run_dir: string, records: Record[]) ![io] 
         if i >= records.length { break; }
         let r = records[i];
         if !r.passed || r.fail_categories.length > 0 {
-            values.push(object_val(["attempt_id", "task", "arm", "passed", "fail_categories", "artifact_dir"], [string_val(r.attempt_id), string_val(r.task), string_val(r.arm), bool_val(r.passed), _string_array_json(r.fail_categories), string_val(run_dir
+            values.push(object_val(["attempt_id", "task", "arm", "passed", "primary", "secondary", "track_b_attribution", "language_denominator", "fail_categories", "artifact_dir"], [string_val(r.attempt_id), string_val(r.task), string_val(r.arm), bool_val(r.passed), string_val(r.primary_failure), _string_array_json(r.secondary_failures), string_val(r.track_b_attribution), bool_val(r.language_denominator), _string_array_json(r.fail_categories), string_val(run_dir
                 + "/attempts/"
                 + r.attempt_id)]));
         }
@@ -2120,6 +2427,8 @@ fn _write_blind_export(run_dir: string, records: Record[], arms: ArmConfig[], ta
     _mkdir(blind_dir);
     let mut index: JsonValue[] = [];
     let mut key: JsonValue[] = [];
+    let mut classifications: JsonValue[] = [];
+    let mut automatic: JsonValue[] = [];
     let mut n = 1;
     let mut i: int = 0;
     loop {
@@ -2132,8 +2441,10 @@ fn _write_blind_export(run_dir: string, records: Record[], arms: ArmConfig[], ta
                 let blind_id = "BLIND-" + (n as string);
                 let export_path = blind_dir + "/" + blind_id + ".txt";
                 fs.writeFile(export_path, fs.readFile(source_path));
-                index.push(object_val(["blind_id", "task", "template", "source", "passed"], [string_val(blind_id), string_val(r.task), string_val(r.template), string_val(export_path), bool_val(r.passed)]));
+                index.push(object_val(["blind_id", "task", "template", "source", "passed", "manual_review_requested"], [string_val(blind_id), string_val(r.task), string_val(r.template), string_val(export_path), bool_val(r.passed), bool_val(r.primary_failure.length > 0)]));
                 key.push(object_val(["blind_id", "attempt_id", "arm", "model_family"], [string_val(blind_id), string_val(r.attempt_id), string_val(r.arm), string_val(r.model_family)]));
+                classifications.push(object_val(["blind_id", "manual_primary", "manual_secondary", "reviewer", "rationale"], [string_val(blind_id), string_val(""), array_val([]), string_val(""), string_val("")]));
+                automatic.push(object_val(["blind_id", "primary", "secondary"], [string_val(blind_id), string_val(r.primary_failure), _string_array_json(r.secondary_failures)]));
                 n += 1;
             }
         }
@@ -2141,6 +2452,8 @@ fn _write_blind_export(run_dir: string, records: Record[], arms: ArmConfig[], ta
     }
     fs.writeFile(blind_dir + "/index.json", stringify_pretty(array_val(index), 2));
     fs.writeFile(blind_dir + "/key.json", stringify_pretty(array_val(key), 2));
+    fs.writeFile(blind_dir + "/classifications.json", stringify_pretty(array_val(classifications), 2));
+    fs.writeFile(blind_dir + "/automatic-classifications.json", stringify_pretty(array_val(automatic), 2));
 }
 
 fn _tasks() -> Task[] {
@@ -2452,6 +2765,7 @@ fn main(argv: string[]) -> int ![clock, io, net] {
     let cfg = _parse_config(argv);
     if cfg.self_test_analysis {
         _self_test_provider_schemas();
+        _self_test_failure_taxonomy();
         _self_test_analysis();
         return 0;
     }
@@ -2474,7 +2788,7 @@ fn main(argv: string[]) -> int ![clock, io, net] {
     let run_dir = cfg.results_dir + "/run-" + ts;
     _mkdir(run_dir);
     _write_run_manifest(run_dir + "/run.json", cfg, selected_arms, true, "");
-    _write_corpus_manifest(run_dir + "/corpus.json", tasks, arm_cfgs);
+    _write_corpus_manifest(run_dir + "/corpus.json", cfg, tasks, arm_cfgs);
     _write_schedule(run_dir + "/schedule.json", cfg, tasks, arm_cfgs, selected_arms);
     if cfg.contamination_probe {
         if cfg.track != "b" {
@@ -2522,7 +2836,7 @@ fn main(argv: string[]) -> int ![clock, io, net] {
                             + " attempt="
                             + attempt_id
                             + " ...");
-                        let rec = _run_task_arm(task, arm, cfg, run_dir, attempt_id, repeat);
+                        let rec = _run_task_arm(task, ti, arm, cfg, run_dir, attempt_id, repeat);
                         print("    passed=" + (rec.passed as string) + " iters="
                             + (rec.iterations as string)
                             + " tokens="
@@ -2550,8 +2864,11 @@ fn main(argv: string[]) -> int ![clock, io, net] {
     _write_records(run_dir + "/records.json", records);
     let summary = _summary(records, tasks, selected_arms);
     fs.writeFile(run_dir + "/summary.json", stringify_pretty(summary, 2));
-    let analysis = _analysis(records, tasks, selected_arms, cfg.seed, run_valid, invalid_reason);
+    let analysis = _analysis(records, tasks, selected_arms, cfg.seed, run_valid, invalid_reason, cfg.ablation == "primary");
     fs.writeFile(run_dir + "/analysis.json", stringify_pretty(analysis, 2));
+    if cfg.ablation != "primary" {
+        fs.writeFile(run_dir + "/ablation.json", stringify_pretty(_ablation_summary(cfg, records, tasks, selected_arms), 2));
+    }
     _write_failure_index(run_dir + "/failures.json", run_dir, records);
     _write_blind_export(run_dir, records, arm_cfgs, tasks);
     print("\n== SUMMARY ==");
