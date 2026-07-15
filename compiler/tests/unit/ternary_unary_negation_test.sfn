@@ -1,0 +1,13 @@
+// SFN-356: lowering a unary-negated ternary arm used to return partially
+// emitted LLVM after defining only the then block. The conditional branch
+// still targeted the missing else block, so LLVM rejected the module before
+// it could link. Compiling this test proves the then, else, and merge blocks
+// are all defined; the assertions exercise both incoming phi edges.
+fn _absolute_value(value: int) -> int {
+    return value < 0? - value: value;
+}
+
+test "ternary: unary negation lowers both branches (SFN-356)" {
+    assert _absolute_value(-4) == 4;
+    assert _absolute_value(7) == 7;
+}

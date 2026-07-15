@@ -1,6 +1,6 @@
 # Status
 
-Updated: 2026-07-13. Seed pinned to `0.8.0-alpha.5` (`bootstrap.toml`
+Updated: 2026-07-15. Seed pinned to `0.8.0-alpha.5` (`bootstrap.toml`
 `[seed].version` — SFEP-0047); the compiler version source of truth is
 `compiler/capsule.toml`.
 
@@ -258,7 +258,9 @@ here.
   same way in **#1690**: a ternary now parses into a structured `Conditional`
   node (`cond ? then : else`) the effect checker walks, unioning the effects of
   all three children, so `cond ? readFile() : x` can no longer reach codegen
-  effect-free (`E0400`). The disambiguation leaves the postfix `?` try operator
+  effect-free (`E0400`); native lowering supports numeric unary-negation in
+  either branch while preserving defined then/else/merge control flow. The
+  disambiguation leaves the postfix `?` try operator
   (`a()?`, `a()?.b()?`) untouched — a `?` is ternary only when the token after it
   can start an expression *and* a top-level `:` follows. The previously
   Raw-degraded effect-escapes are now structured into real AST nodes the effect
