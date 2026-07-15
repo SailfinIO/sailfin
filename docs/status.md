@@ -128,8 +128,12 @@ here.
   all resolve dependencies through `capsule_resolver.sfn`
   (`prepare_project_capsules*`): relative imports, manifest `[dependencies]`,
   and workspace-implicit `sfn/X` imports in one pass. Textual import inlining
-  is gone (Stages A–B). By-name and relative imports of a workspace capsule
-  converge to one mangled symbol (#873).
+  is gone (Stages A–B). Standalone files resolve bundled workspace imports
+  from the running compiler's `binary_dir`, so `check`, `build`, and `run`
+  keep the same import closure when the caller changes cwd (SFN-352 / #2312),
+  while unresolved specs still fall back to the user capsule cache. By-name
+  and relative imports of a workspace capsule converge to one mangled symbol
+  (#873).
 - **Build cache.** Content-addressed cache defaulting to a shared per-user root
   (`$XDG_CACHE_HOME/sailfin/v2` or `$HOME/.cache/sailfin/v2`, schema-suffixed;
   `$SAILFIN_BUILD_CACHE_DIR` override; in-tree `build/cache/v2` fallback when

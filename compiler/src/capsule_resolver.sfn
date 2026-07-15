@@ -3267,7 +3267,7 @@ struct ResolverDedupeResult {
 // §4.4). Construction sites emit `ll_path = ""`; the layout
 // decision is centralized here so both manifest deps and
 // relative-imports route through the same policy.
-fn _cr_resolve_and_dedupe(entry_paths: string[], consumer: ResolverConsumer) -> ResolverDedupeResult ![io] {
+fn _cr_resolve_and_dedupe(entry_paths: string[], consumer: ResolverConsumer, bundled_workspace_start: string) -> ResolverDedupeResult ![io] {
     let mut sources: CapsuleSource[] = [];
     let empty_sources: CapsuleSource[] = [];
     let empty_specs: string[] = [];
@@ -3296,7 +3296,18 @@ fn _cr_resolve_and_dedupe(entry_paths: string[], consumer: ResolverConsumer) -> 
     let source_workspace_root = discover_workspace_root(anchor_dir);
     let mut workspace_root = source_workspace_root;
     if workspace_root.length == 0 {
-        workspace_root = discover_workspace_root("");
+        // SFN-352: the compiler driver supplies an absolute binary directory,
+        // which remains stable when a standalone command runs with the entry
+        // directory as cwd. Prefer that anchor for bundled workspace capsules;
+        // retain the cwd probe for direct/internal callers without driver
+        // context. An installed compiler normally finds no workspace from
+        // either anchor and continues into the cache-implicit leg below.
+        if bundled_workspace_start.length > 0 {
+            workspace_root = discover_workspace_root(bundled_workspace_start);
+        }
+        if workspace_root.length == 0 {
+            workspace_root = discover_workspace_root("");
+        }
     }
     let mut members: WorkspaceMember[] = [];
     if workspace_root.length > 0 {
@@ -3658,7 +3669,7 @@ fn prepare_project_capsules(input_path: string, config: BuildCacheConfig, consum
     let empty_events: ModuleCacheEvent[] = [];
     let empty_runtime_capsules: RuntimeCapsuleArtifacts[] = [];
     let entry_paths: string[] = [input_path];
-    let resolved = _cr_resolve_and_dedupe(entry_paths, consumer);
+    let resolved = _cr_resolve_and_dedupe(entry_paths, consumer, binary_dir);
     if resolved.has_collision {
         // Slug collision is a setup error (already reported by
         // `_cr_resolve_and_dedupe`), not a "no deps" build.
@@ -3805,9 +3816,9 @@ fn prepare_project_capsules(input_path: string, config: BuildCacheConfig, consum
 //   - Standalone files outside any capsule.toml are valid input and
 //     return an empty resolution (no error) — relative-import walking
 //     still happens via `enumerate_relative_sources`.
-fn prepare_project_capsules_for_check(entry_paths: string[], consumer: ResolverConsumer, sailfin_exe: string, work_dir: string) -> CheckCapsuleResolution ![io] {
+fn prepare_project_capsules_for_check(entry_paths: string[], consumer: ResolverConsumer, sailfin_exe: string, work_dir: string, binary_dir: string) -> CheckCapsuleResolution ![io] {
     let empty_paths: string[] = [];
-    let resolved = _cr_resolve_and_dedupe(entry_paths, consumer);
+    let resolved = _cr_resolve_and_dedupe(entry_paths, consumer, binary_dir);
     // Phase F: surface the manifest's capability surface even on
     // the early-exit paths. A collision/stage failure shouldn't
     // silently disable E0403 for a clean re-run; the failure modes
@@ -3892,7 +3903,7 @@ fn prepare_project_capsules_for_check(entry_paths: string[], consumer: ResolverC
 // succeeded; false on a slug collision or staging error.
 fn stage_capsule_imports_for_emit(entry_path: string, sailfin_exe: string, work_dir: string) -> boolean ![io] {
     let entry_paths: string[] = [entry_path];
-    let resolved = _cr_resolve_and_dedupe(entry_paths, empty_resolver_consumer());
+    let resolved = _cr_resolve_and_dedupe(entry_paths, empty_resolver_consumer(), "");
     if resolved.has_collision { return false; }
     // No declared capsule dependencies → nothing to stage. A bare
     // runtime/prelude emit (no consumer manifest) lands here untouched.
@@ -3928,7 +3939,7 @@ fn stage_capsule_imports_for_emit(entry_path: string, sailfin_exe: string, work_
 //     branch of `_cr_resolve_and_dedupe`.
 fn prepare_project_capsules_for_test(entry_paths: string[], consumer: ResolverConsumer, sailfin_exe: string, work_dir: string, binary_dir: string) -> TestCapsuleResolution ![io] {
     let empty_paths: string[] = [];
-    let resolved = _cr_resolve_and_dedupe(entry_paths, consumer);
+    let resolved = _cr_resolve_and_dedupe(entry_paths, consumer, binary_dir);
     // Phase F: thread `capabilities_required` through every exit
     // path. Same rationale as `prepare_project_capsules_for_check`:
     // staging failures are setup-time concerns, not manifest

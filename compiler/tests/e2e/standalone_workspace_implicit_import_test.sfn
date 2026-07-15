@@ -1,8 +1,8 @@
-// Regression for SFN-348: a standalone source file outside the repo
-// workspace can still import a bundled workspace capsule when `sfn run`
-// is invoked from the checkout. Before the fix, `sfn check` could see
-// `sfn/strings`, but `run` did not compile/link the capsule module for
-// a `/tmp/*.sfn` entry and failed during lowering or clang link.
+// Regressions for SFN-348 and SFN-352: a standalone source file outside the
+// repo workspace can import a bundled workspace capsule regardless of whether
+// the compiler starts in the checkout or the entry file's directory. Before
+// SFN-352, `sfn check` passed from the entry cwd, but `build` and `run` did not
+// stage `sfn/strings` and failed during lowering.
 import { contains, find } from "sfn/strings";
 import { with_tmp_dir } from "sfn/test";
 
@@ -10,6 +10,16 @@ fn _sfn_bin() -> string ![io] {
     let configured = env.get("SAILFIN_BIN");
     if configured.length > 0 { return configured; }
     return "build/bin/sfn";
+}
+
+fn _sfn_bin_abs() -> string ![io] {
+    let bin = _sfn_bin();
+    if bin.length > 0 {
+        if find(bin, "/", 0) == 0 { return bin; }
+    }
+    let root = env.get("PWD");
+    if root.length > 0 { return root + "/" + bin; }
+    return bin;
 }
 
 fn _child_env() -> string[] ![io] {
@@ -36,9 +46,10 @@ fn _marker(name: string) -> string ![io] {
     return path;
 }
 
-fn _run_standalone_program(marker: string) -> int ![io] {
+fn _run_standalone_program_from_entry_cwd(marker: string) -> int ![io] {
     return with_tmp_dir(fn (dir: string) -> int {
         let src = dir + "/repro.sfn";
+        let bin = dir + "/repro";
         fs.writeFile(src, "import { split, trim, join } from \"sfn/strings\";\n\n"
             + "fn main() ![io] {\n"
             + "    let text = trim(\" a b \");\n"
@@ -46,17 +57,34 @@ fn _run_standalone_program(marker: string) -> int ![io] {
             + "    print(join(parts, \"-\"));\n"
             + "}\n");
 
-        let exit = process.run_capture([_sfn_bin(), "run", src], _child_env());
-        let out = process.capture_take_stdout();
-        let err = process.capture_take_stderr();
-        fs.writeFile(marker, out + err);
-        return exit;
+        let sfn = _sfn_bin_abs();
+        let check_exit = process.run_capture_cwd([sfn, "check", "repro.sfn"], _child_env(), dir);
+        let check_out = process.capture_take_stdout();
+        let check_err = process.capture_take_stderr();
+        if check_exit != 0 {
+            fs.writeFile(marker, check_out + check_err);
+            return check_exit;
+        }
+
+        let build_exit = process.run_capture_cwd([sfn, "build", "-o", bin, "repro.sfn"], _child_env(), dir);
+        let build_out = process.capture_take_stdout();
+        let build_err = process.capture_take_stderr();
+        if build_exit != 0 {
+            fs.writeFile(marker, build_out + build_err);
+            return build_exit;
+        }
+
+        let run_exit = process.run_capture_cwd([sfn, "run", "repro.sfn"], _child_env(), dir);
+        let run_out = process.capture_take_stdout();
+        let run_err = process.capture_take_stderr();
+        fs.writeFile(marker, run_out + run_err);
+        return run_exit;
     });
 }
 
-test "standalone run: cwd workspace stages imported sfn/strings capsule" ![io] {
-    let marker = _marker("strings");
-    let exit = _run_standalone_program(marker);
+test "standalone check/build/run: entry cwd stages bundled sfn/strings" ![io] {
+    let marker = _marker("strings-entry-cwd");
+    let exit = _run_standalone_program_from_entry_cwd(marker);
     assert exit == 0;
     let output = fs.readFile(marker);
     if fs.exists(marker) { fs.deleteFile(marker); }
