@@ -11,8 +11,9 @@ name: Seed per-shard test-bin cache (main scope)
 # This workflow is the dedicated main-scoped seeder: on a push to `main`
 # that could change any test binary's identity, it builds the compiler once
 # per OS and runs each shard's test phase with the test-bin cache enabled,
-# letting the SAME `actions/cache` step ci.yml uses save
-# `test-bin-<os>-<shard>-<sha>` under the default-branch scope. PRs then
+# then saves `test-bin-<os>-<shard>-<sha>` under the default-branch scope
+# (explicit `actions/cache/save`, gated on a green shard run — the
+# main-scoped-producer convention build-quality.yml uses). PRs then
 # restore it via the `test-bin-<os>-<shard>-` prefix. Entry keys
 # self-validate (build_cache.sfn folds test-source hash + dep closure +
 # compiler + runtime identity, #1233), so a compiler-source PR still misses
@@ -199,9 +200,9 @@ jobs:
 
   # Per-shard seed legs: run only this OS+shard's tests with the test-bin
   # cache enabled, so build/cache/test-bin holds exactly this shard's slice,
-  # then let `actions/cache` save it under the main-scoped
-  # `test-bin-<os>-<shard>-<sha>` key. Per-shard isolation keeps each entry
-  # small (a leg never carries another shard's binaries).
+  # then save it under the main-scoped `test-bin-<os>-<shard>-<sha>` key
+  # (success-gated `actions/cache/save`). Per-shard isolation keeps each
+  # entry small (a leg never carries another shard's binaries).
   seed-linux:
     name: Seed test-bin [linux-x86_64 / ${{ matrix.shard }}]
     needs: build-compiler-linux
@@ -259,11 +260,11 @@ jobs:
           [ -f build/native/.build-stamp ] && touch build/native/.build-stamp || true
           ls -lh build/bin/sfn
 
-      # `actions/cache` (not `/restore`) so the post-job save fires: on
-      # push:main the ref is refs/heads/main, so the save lands in the
-      # default-branch scope PRs can read. Key copied verbatim from ci.yml.
-      - name: Seed per-shard test-binary cache
-        uses: actions/cache@v6
+      # Restore the prior main seed so this run only recompiles what
+      # changed (incremental warmth for the seeder itself). Key copied
+      # verbatim from ci.yml's shard legs so the schemes never drift.
+      - name: Restore per-shard test-binary cache
+        uses: actions/cache/restore@v6
         with:
           path: build/cache/test-bin
           key: test-bin-${{ runner.os }}-${{ matrix.shard }}-${{ github.sha }}
@@ -282,6 +283,22 @@ jobs:
           shard: ${{ matrix.shard }}
           shard_test_jobs: "3"
           package: "false"
+
+      # Save-only, gated on a green shard run. This is a main-scoped
+      # producer that PRs consume, so it follows build-quality.yml's
+      # test-bin-baseline convention (explicit save-only) rather than
+      # ci.yml's PR-scoped shard legs (combined `actions/cache`). With no
+      # `if:`, the step runs only when every prior step — including the
+      # shard run — succeeded, so a failed or partial run never publishes a
+      # fresh key that would supersede the last green seed. On push:main the
+      # ref is refs/heads/main, so the save lands in the default-branch
+      # scope PRs restore via the `test-bin-<os>-<shard>-` prefix. A re-run
+      # of the same sha finds the key present and no-ops.
+      - name: Save per-shard test-binary cache
+        uses: actions/cache/save@v6
+        with:
+          path: build/cache/test-bin
+          key: test-bin-${{ runner.os }}-${{ matrix.shard }}-${{ github.sha }}
 
   seed-macos:
     name: Seed test-bin [macos-arm64 / ${{ matrix.shard }}]
@@ -338,8 +355,10 @@ jobs:
           [ -f build/native/.build-stamp ] && touch build/native/.build-stamp || true
           ls -lh build/bin/sfn
 
-      - name: Seed per-shard test-binary cache
-        uses: actions/cache@v6
+      # Restore + success-gated save — see the Linux twin for the
+      # main-scoped-producer rationale. Key copied verbatim from ci.yml.
+      - name: Restore per-shard test-binary cache
+        uses: actions/cache/restore@v6
         with:
           path: build/cache/test-bin
           key: test-bin-${{ runner.os }}-${{ matrix.shard }}-${{ github.sha }}
@@ -358,3 +377,9 @@ jobs:
           shard: ${{ matrix.shard }}
           shard_test_jobs: "3"
           package: "false"
+
+      - name: Save per-shard test-binary cache
+        uses: actions/cache/save@v6
+        with:
+          path: build/cache/test-bin
+          key: test-bin-${{ runner.os }}-${{ matrix.shard }}-${{ github.sha }}
