@@ -1,9 +1,11 @@
-# SFN-350 LLM benchmark
+# Sailfin agent-language benchmark
 
-The decision protocol and the latest pilot interpretation live in
-[`EXPERIMENT.md`](EXPERIMENT.md). Do not use the three seed tasks alone to make
-a GO/NO decision: they are an offline/pilot harness set, not the frozen
-confirmatory benchmark.
+The frozen two-track v2 preregistration lives in
+[`PROTOCOL-V2.md`](PROTOCOL-V2.md). The SFN-350 v1 decision protocol and pilot
+interpretation remain preserved in [`EXPERIMENT.md`](EXPERIMENT.md) as
+historical evidence only. Do not reuse v1 paid outputs as v2 confirmatory data,
+and do not use the three seed tasks alone to make a decision: they are an
+offline/pilot harness set, not the frozen confirmatory benchmark.
 
 This directory contains a native Sailfin benchmark harness for measuring how
 well raw LLM APIs solve the same small programming tasks across language arms.
