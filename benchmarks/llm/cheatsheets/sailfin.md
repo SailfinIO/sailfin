@@ -14,7 +14,8 @@ fn sum_file(path: string) -> int ![io] {
 
 For standalone benchmark files, prefer local helpers for `trim`, `split`, and
 `join` rather than importing `sfn/strings`; the current bare-file runner can
-typecheck those imports but fail during lowering.
+typecheck those imports but fail during lowering when invoked from the isolated
+task working directory.
 
 Useful basics:
 
@@ -30,4 +31,3 @@ let part = substring(text, start, end);
 let code = char_code(ch);
 let label = n as string;
 ```
-
