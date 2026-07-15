@@ -306,7 +306,7 @@ fn handle_check_command(args: string[], binary_dir: string) -> int ![io] {
         // stage in subprocesses (bounded parent arena). Warm runs
         // spawn nothing — the per-module cache hit short-circuits
         // before the subprocess branch.
-        let resolution = prepare_project_capsules_for_check(groups[gi].entry_paths, empty_resolver_consumer(), check_self_exe, "");
+        let resolution = prepare_project_capsules_for_check(groups[gi].entry_paths, empty_resolver_consumer(), check_self_exe, "", binary_dir);
         if resolution.staging_failed {
             // The resolver already wrote a structured error to
             // stderr (slug collision or stage-write failure).
