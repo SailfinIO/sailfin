@@ -1,11 +1,16 @@
-# SFN-350 decision protocol
+# SFN-350 decision protocol (v1 historical record)
 
-Status: **pre-registration incomplete; language decision not yet authorized**.
+Status: **completed historical pilot; superseded for new decision-making by
+the [v2 preregistration](PROTOCOL-V2.md)**.
 
 This protocol operationalizes the decision gate in Linear SFN-350 and the
 Notion “Experiment Plan — Earn the Commitment”. The benchmark must be capable
 of disproving the Sailfin thesis. Results from harness development and task
 tuning are pilots, not confirmatory evidence.
+
+SFN-350 remains evidence about current adoption ergonomics under the v1
+condition. Its paid outputs are not confirmatory evidence for v2 and must not
+be pooled with either v2 track.
 
 ## Decision rule
 
