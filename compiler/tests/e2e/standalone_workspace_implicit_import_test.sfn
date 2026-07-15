@@ -3,7 +3,7 @@
 // is invoked from the checkout. Before the fix, `sfn check` could see
 // `sfn/strings`, but `run` did not compile/link the capsule module for
 // a `/tmp/*.sfn` entry and failed during lowering or clang link.
-import { contains } from "sfn/strings";
+import { contains, find } from "sfn/strings";
 import { with_tmp_dir } from "sfn/test";
 
 fn _sfn_bin() -> string ![io] {
@@ -13,15 +13,17 @@ fn _sfn_bin() -> string ![io] {
 }
 
 fn _child_env() -> string[] ![io] {
+    let parent = process.environ();
     let mut out: string[] = [];
-    let path = env.get("PATH");
-    if path.length > 0 { out.push("PATH=" + path); }
-    let home = env.get("HOME");
-    if home.length > 0 { out.push("HOME=" + home); }
-    let tmpdir = env.get("TMPDIR");
-    if tmpdir.length > 0 { out.push("TMPDIR=" + tmpdir); }
-    let scratch = env.get("SAILFIN_TEST_SCRATCH");
-    if scratch.length > 0 { out.push("SAILFIN_TEST_SCRATCH=" + scratch); }
+    let mut i: int = 0;
+    loop {
+        if i >= parent.length { break; }
+        let entry = parent[i];
+        i += 1;
+        if find(entry, "SAILFIN_TEST_RUNTIME_OBJDIR=", 0) == 0 { continue; }
+        if find(entry, "SAILFIN_TEST_RUNTIME_STAMP=", 0) == 0 { continue; }
+        out.push(entry);
+    }
     return out;
 }
 

@@ -3296,8 +3296,7 @@ fn _cr_resolve_and_dedupe(entry_paths: string[], consumer: ResolverConsumer) -> 
     let source_workspace_root = discover_workspace_root(anchor_dir);
     let mut workspace_root = source_workspace_root;
     if workspace_root.length == 0 {
-        let cwd = _cr_shell_read("pwd");
-        if cwd.length > 0 { workspace_root = discover_workspace_root(cwd); }
+        workspace_root = discover_workspace_root("");
     }
     let mut members: WorkspaceMember[] = [];
     if workspace_root.length > 0 {
