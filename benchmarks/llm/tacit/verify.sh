@@ -3,12 +3,15 @@ set -euo pipefail
 
 readonly root="$(git rev-parse --show-toplevel)"
 readonly here="$root/benchmarks/llm/tacit"
-readonly scala_version="3.10.0-RC1-bin-20260616-4733954-NIGHTLY"
-readonly jar="${TACIT_LIBRARY_JAR:-$root/build/toolchains/tacit/0.2.1/TACIT-library.jar}"
+readonly pins="$here/versions.json"
+scala_version="$(python3 -c 'import json, sys; print(json.load(open(sys.argv[1]))[sys.argv[2]])' "$pins" scala_version)"
+tacit_version="$(python3 -c 'import json, sys; print(json.load(open(sys.argv[1]))[sys.argv[2]])' "$pins" tacit_version)"
+readonly scala_version tacit_version
+readonly jar="${TACIT_LIBRARY_JAR:-$root/build/toolchains/tacit/$tacit_version/TACIT-library.jar}"
 readonly out="$root/build/sfn350-tacit-smoke"
 
 if [[ ! -f "$jar" ]]; then
-  echo "missing TACIT 0.2.1 library: run benchmarks/llm/tacit/fetch.sh" >&2
+  echo "missing TACIT $tacit_version library: run benchmarks/llm/tacit/fetch.sh" >&2
   exit 2
 fi
 
@@ -36,4 +39,4 @@ if ! grep -Eq "outlives its scope|leaks into outer capture set" "$out/trap.stder
   exit 1
 fi
 
-echo "TACIT 0.2.1 honest I/O and capture-leak oracle passed"
+echo "TACIT $tacit_version honest I/O and capture-leak oracle passed"

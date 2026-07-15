@@ -857,10 +857,20 @@ fn _grade(task: Task, arm: ArmConfig, workdir: string, iteration: int) -> GradeR
                 let server_err = process.handle_read_stderr(server_handle);
                 let server_rc = process.handle_wait(server_handle);
                 if server_out.length > 0 {
-                    fs.writeFile(workdir + "/http-grader.stdout", server_out);
+                    fs.writeFile(workdir + "/iteration-" + (iteration as string)
+                        + "-case-"
+                        + (ci as string)
+                        + "-"
+                        + (ri as string)
+                        + "-http-grader.stdout", server_out);
                 }
                 if server_err.length > 0 {
-                    fs.writeFile(workdir + "/http-grader.stderr", server_err);
+                    fs.writeFile(workdir + "/iteration-" + (iteration as string)
+                        + "-case-"
+                        + (ci as string)
+                        + "-"
+                        + (ri as string)
+                        + "-http-grader.stderr", server_err);
                 }
                 if server_rc != 0 {
                     return GradeResult {

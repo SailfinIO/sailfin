@@ -1,5 +1,5 @@
 {
-  "description": "Deterministic paired-bootstrap fixture used by --self-test-analysis",
+  "description": "Reference values mirrored by the inline --self-test-analysis fixture",
   "seed": 350,
   "task_clusters": [
     {
