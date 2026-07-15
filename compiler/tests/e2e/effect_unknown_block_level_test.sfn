@@ -109,7 +109,28 @@ test "nested unknown: nested while surfaces E0411 only (no E0819 dedup)" ![io] {
     assert find(r.out, "\"code\":\"E0819\"", 0) < 0;
 }
 
-// ---- Test 3: a clean nested block stays clean (no spurious E0819) ----
+// ---- Test 3: unsupported `while` remains visible through `loop` ----
+// The token-scanner shape from SFN-358 put `while` inside a supported `loop`.
+// Typecheck must recurse through that body before codegen can silently omit
+// the unsupported statement and leave the scan position unchanged forever.
+test "nested unknown: while in loop surfaces E0411" ![io] {
+    let root = _fixture_dir("while-in-loop");
+    let source = "fn scan(line: string) -> string {\n"
+        + "    let mut pos = 0;\n"
+        + "    loop {\n"
+        + "        while pos < line.length { pos += 1; }\n"
+        + "        let value = substring(line, 0, pos);\n"
+        + "        return value;\n"
+        + "    }\n"
+        + "}\n";
+    let path = _write(root, "while_in_loop.sfn", source);
+    let r = _check(path);
+    assert r.exit == 1;
+    assert contains(r.out, "\"code\":\"E0411\"");
+    assert find(r.out, "\"code\":\"E0819\"", 0) < 0;
+}
+
+// ---- Test 4: a clean nested block stays clean (no spurious E0819) ----
 // Guards against the gate mis-firing on ordinary block statements.
 test "nested unknown: a valid nested block does not emit E0819" ![io] {
     let root = _fixture_dir("clean");

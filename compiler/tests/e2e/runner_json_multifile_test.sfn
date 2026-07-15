@@ -106,7 +106,8 @@ test "multi-file 'sfn test <dir> --json' exits 0 with valid jsonl (#1121)" ![io]
     let mut line_start: int = 0;
     loop {
         let nl = find(out, "\n", line_start);
-        let line_end: int = if nl >= 0 { nl } else { out.length as int };
+        let mut line_end: int = out.length as int;
+        if nl >= 0 { line_end = nl; }
         let line_len: int = line_end - line_start;
         if line_len > 0 {
             // Slice: check that the character at line_start is `{`
