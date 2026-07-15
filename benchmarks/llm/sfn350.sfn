@@ -64,6 +64,7 @@ struct ArmConfig {
     entry: string;
     compile: string[];
     run: string[];
+    timeout_prefix: string[];
     effect_keywords: string[];
 }
 
@@ -81,6 +82,7 @@ struct Config {
     schema_probe: boolean;
     verify_graders: boolean;
     self_test_analysis: boolean;
+    self_test_timeouts: boolean;
     tasks: string[];
     arms: string[];
 }
@@ -133,7 +135,7 @@ struct Interval {
 }
 
 fn _usage() -> string {
-    return "usage: sfn run benchmarks/llm/sfn350.sfn -- [--adapter stub|openai|anthropic] [--real] [--model M] [--reasoning-effort E] [--model-family F] [--arm A] [--task T] [--max-iters N] [--repeats N] [--seed N] [--dry-run] [--schema-probe] [--verify-graders] [--self-test-analysis] [--results-dir DIR]\n"
+    return "usage: sfn run benchmarks/llm/sfn350.sfn -- [--adapter stub|openai|anthropic] [--real] [--model M] [--reasoning-effort E] [--model-family F] [--arm A] [--task T] [--max-iters N] [--repeats N] [--seed N] [--dry-run] [--schema-probe] [--verify-graders] [--self-test-analysis] [--self-test-timeouts] [--results-dir DIR]\n"
         + "\n"
         + "defaults: --adapter stub --model gpt-5.6-terra --reasoning-effort medium --model-family unspecified --max-iters 5 --repeats 1 --seed 350 --results-dir build/sfn350-results\n"
         + "env: OPENAI_API_KEY, ANTHROPIC_API_KEY, SAILFIN_BIN, TACIT_LIBRARY_JAR, SFN350_TIMEOUT_CMD; API keys may also be set in .env or benchmarks/llm/.env\n";
@@ -184,6 +186,7 @@ fn _default_config() -> Config {
         schema_probe: false,
         verify_graders: false,
         self_test_analysis: false,
+        self_test_timeouts: false,
         tasks: [],
         arms: []
     };
@@ -248,6 +251,8 @@ fn _parse_config(argv: string[]) -> Config ![io] {
             cfg.schema_probe = true;
         } else if arg == "--verify-graders" { cfg.verify_graders = true; } else if arg == "--self-test-analysis" {
             cfg.self_test_analysis = true;
+        } else if arg == "--self-test-timeouts" {
+            cfg.self_test_timeouts = true;
         } else {
             print.err("unknown or incomplete argument: " + arg);
             print.err(_usage());
@@ -356,17 +361,31 @@ fn _tacit_scaffold() -> string ![io] {
     return _repo_root() + "/benchmarks/llm/tacit/Scaffold.scala";
 }
 
-fn _scala_command(action: string, task: Task, file: string) -> string[] ![io] {
+fn _scala_command(action: string, task: Task, file: string, timeout: string[]) -> string[] ![io] {
     if !task.uses_tacit {
-        return ["scala-cli", action, "--server=false", file];
+        return _append_all(timeout, ["scala-cli", action, "--server=false", file]);
     }
-    return ["scala-cli", action, "--server=false", "--scala", "3.10.0-RC1-bin-20260616-4733954-NIGHTLY", "--scalac-option", "-experimental", "--jar", _tacit_jar(), _tacit_scaffold(), file];
+    return _append_all(timeout, ["scala-cli", action, "--server=false", "--scala", "3.10.0-RC1-bin-20260616-4733954-NIGHTLY", "--scalac-option", "-experimental", "--jar", _tacit_jar(), _tacit_scaffold(), file]);
+}
+
+fn _default_timeout_command() -> string ![io] {
+    let timeout = process.run_capture(["sh", "-c", "command -v timeout 2>/dev/null"], process.environ());
+    let timeout_path = trim(process.capture_take_stdout());
+    let _timeout_err = process.capture_take_stderr();
+    if timeout == 0 && timeout_path.length > 0 { return "timeout"; }
+    let gtimeout = process.run_capture(["sh", "-c", "command -v gtimeout 2>/dev/null"], process.environ());
+    let gtimeout_path = trim(process.capture_take_stdout());
+    let _gtimeout_err = process.capture_take_stderr();
+    if gtimeout == 0 && gtimeout_path.length > 0 { return "gtimeout"; }
+    // Preserve a finite-failure contract when the host lacks the required tool:
+    // generated commands fail to spawn instead of silently running unbounded.
+    return "timeout";
 }
 
 fn _timeout_prefix() -> string[] ![io] {
     let t = env.get("SFN350_TIMEOUT_CMD");
-    if t.length == 0 { return []; }
-    return split(t, " ");
+    if t.length > 0 { return split(t, " "); }
+    return [_default_timeout_command(), "60"];
 }
 
 fn _child_env() -> string[] ![io] { return process.environ(); }
@@ -416,16 +435,19 @@ fn _replace_file(args: string[], file: string) -> string[] {
     return out;
 }
 
-fn _arm_configs() -> ArmConfig[] ![io] {
-    let timeout = _timeout_prefix();
+fn _arm_configs_with_timeout(timeout: string[]) -> ArmConfig[] ![io] {
     let sfn = _sfn_bin();
     return [ArmConfig {
-        name: "sailfin", lang: "sailfin", entry: "solution.sfn", compile: _append_all(timeout, [sfn, "check", "{file}"]), run: _append_all(timeout, [sfn, "run", "{file}"]), effect_keywords: ["effect", "capability", "E0400", "undeclared"]
+        name: "sailfin", lang: "sailfin", entry: "solution.sfn", compile: _append_all(timeout, [sfn, "check", "{file}"]), run: _append_all(timeout, [sfn, "run", "{file}"]), timeout_prefix: timeout, effect_keywords: ["effect", "capability", "E0400", "undeclared"]
     }, ArmConfig {
-        name: "scala", lang: "scala", entry: "Solution.scala", compile: ["scala-cli", "compile", "--server=false", "{file}"], run: ["scala-cli", "run", "--server=false", "{file}"], effect_keywords: ["CaptureChecking", "capability", "effect", "leaks into outer capture set", "outlives its scope"]
+        name: "scala", lang: "scala", entry: "Solution.scala", compile: _append_all(timeout, ["scala-cli", "compile", "--server=false", "{file}"]), run: _append_all(timeout, ["scala-cli", "run", "--server=false", "{file}"]), timeout_prefix: timeout, effect_keywords: ["CaptureChecking", "capability", "effect", "leaks into outer capture set", "outlives its scope"]
     }, ArmConfig {
-        name: "python", lang: "python", entry: "solution.py", compile: [], run: ["python3", "{file}"], effect_keywords: []
+        name: "python", lang: "python", entry: "solution.py", compile: [], run: _append_all(timeout, ["python3", "{file}"]), timeout_prefix: timeout, effect_keywords: []
     }];
+}
+
+fn _arm_configs() -> ArmConfig[] ![io] {
+    return _arm_configs_with_timeout(_timeout_prefix());
 }
 
 fn _arm_by_name(name: string, arms: ArmConfig[]) -> ArmConfig {
@@ -815,6 +837,13 @@ fn _has_kw(text: string, kws: string[]) -> boolean {
     return false;
 }
 
+fn _is_timeout_exit(code: int) -> boolean { return code == 124; }
+
+fn _write_timeout_marker(path: string, command: string[], code: int) ![io] {
+    fs.writeFile(path, "exit_code=" + (code as string) + "\ncommand=" + join(command, " ")
+        + "\n");
+}
+
 fn _grade(task: Task, arm: ArmConfig, workdir: string, iteration: int) -> GradeResult ![clock, io] {
     let filename = arm.entry;
     if task.uses_tacit && arm.name == "scala" && !fs.exists(_tacit_jar()) {
@@ -825,17 +854,26 @@ fn _grade(task: Task, arm: ArmConfig, workdir: string, iteration: int) -> GradeR
         };
     }
     if arm.compile.length > 0 {
-        let comp = arm.name == "scala"? _scala_command("compile", task, filename): _replace_file(arm.compile, filename);
+        let comp = arm.name == "scala" && task.uses_tacit? _scala_command("compile", task, filename, arm.timeout_prefix): _replace_file(arm.compile, filename);
         let crc = process.run_capture_cwd(comp, _child_env(), workdir);
         let cout = process.capture_take_stdout();
         let cerr = process.capture_take_stderr();
-        if cout.length > 0 {
+        if cout.length > 0 || _is_timeout_exit(crc) {
             fs.writeFile(workdir + "/compile-" + (iteration as string)
                 + ".stdout", cout);
         }
-        if cerr.length > 0 {
+        if cerr.length > 0 || _is_timeout_exit(crc) {
             fs.writeFile(workdir + "/compile-" + (iteration as string)
                 + ".stderr", cerr);
+        }
+        if _is_timeout_exit(crc) {
+            _write_timeout_marker(workdir + "/compile-" + (iteration as string)
+                + ".timeout", comp, crc);
+            return GradeResult {
+                passed: false,
+                feedback: "compile deadline expired",
+                category: "timeout"
+            };
         }
         if crc != 0 {
             let log = cout + cerr;
@@ -854,7 +892,7 @@ fn _grade(task: Task, arm: ArmConfig, workdir: string, iteration: int) -> GradeR
             };
         }
     }
-    let run = arm.name == "scala"? _scala_command("run", task, filename): _replace_file(arm.run, filename);
+    let run = arm.name == "scala" && task.uses_tacit? _scala_command("run", task, filename, arm.timeout_prefix): _replace_file(arm.run, filename);
     let mut ci: int = 0;
     loop {
         if ci >= task.cases.length { break; }
@@ -920,7 +958,7 @@ fn _grade(task: Task, arm: ArmConfig, workdir: string, iteration: int) -> GradeR
                     };
                 }
             }
-            if out.length > 0 {
+            if out.length > 0 || _is_timeout_exit(rc) {
                 fs.writeFile(workdir + "/iteration-" + (iteration as string)
                     + "-case-"
                     + (ci as string)
@@ -928,13 +966,27 @@ fn _grade(task: Task, arm: ArmConfig, workdir: string, iteration: int) -> GradeR
                     + (ri as string)
                     + ".stdout", out);
             }
-            if err.length > 0 {
+            if err.length > 0 || _is_timeout_exit(rc) {
                 fs.writeFile(workdir + "/iteration-" + (iteration as string)
                     + "-case-"
                     + (ci as string)
                     + "-"
                     + (ri as string)
                     + ".stderr", err);
+            }
+            if _is_timeout_exit(rc) {
+                let timeout_base = workdir + "/iteration-" + (iteration as string)
+                    + "-case-"
+                    + (ci as string)
+                    + "-"
+                    + (ri as string);
+                _write_timeout_marker(timeout_base + ".timeout", run, rc);
+                return GradeResult {
+                    passed: false,
+                    feedback: "case " + (ci as string)
+                        + " execution deadline expired",
+                    category: "timeout"
+                };
             }
             if rc != 0 {
                 let log2 = out + err;
@@ -1560,8 +1612,10 @@ fn _write_run_manifest(path: string, cfg: Config, arms: string[]) ![io] {
         manifest_effort = cfg.reasoning_effort;
     }
     let toolchains = object_val(["sailfin", "python", "scala_cli", "scala", "tacit", "tacit_library", "tacit_library_sha256"], [string_val(_command_version([_sfn_bin(), "--version"])), string_val(_command_version(["python3", "--version"])), string_val(_command_version(["scala-cli", "version"])), string_val("3.10.0-RC1-bin-20260616-4733954-NIGHTLY"), string_val("0.2.1"), string_val(_tacit_jar()), string_val("5985f69fd13437ccf43d8c8c613a4681f71c574d7b84ca239aa33385f98e5462")]);
-    let commands = object_val(["sailfin_compile", "sailfin_run", "scala_compile", "scala_tacit_compile", "python_run"], [_string_array_json([_sfn_bin(), "check", "{file}"]), _string_array_json([_sfn_bin(), "run", "{file}"]), _string_array_json(["scala-cli", "compile", "--server=false", "{file}"]), _string_array_json(["scala-cli", "compile", "--server=false", "--scala", "3.10.0-RC1-bin-20260616-4733954-NIGHTLY", "--scalac-option", "-experimental", "--jar", _tacit_jar(), _tacit_scaffold(), "{file}"]), _string_array_json(["python3", "{file}"])]);
-    let manifest = object_val(["adapter", "model", "model_family", "openai_reasoning_effort", "max_iters", "repeats", "seed", "sampling", "arms", "toolchains", "commands", "human_interventions"], [string_val(cfg.adapter), string_val(cfg.model), string_val(cfg.model_family), string_val(manifest_effort), number_val(cfg.max_iters as float), number_val(cfg.repeats as float), number_val(cfg.seed as float), string_val(sampling), array_val(arm_vals), toolchains, commands, number_val(0.0)]);
+    let timeout = _timeout_prefix();
+    let commands = object_val(["sailfin_compile", "sailfin_run", "scala_compile", "scala_run", "scala_tacit_compile", "scala_tacit_run", "python_run"], [_string_array_json(_append_all(timeout, [_sfn_bin(), "check", "{file}"])), _string_array_json(_append_all(timeout, [_sfn_bin(), "run", "{file}"])), _string_array_json(_append_all(timeout, ["scala-cli", "compile", "--server=false", "{file}"])), _string_array_json(_append_all(timeout, ["scala-cli", "run", "--server=false", "{file}"])), _string_array_json(_append_all(timeout, ["scala-cli", "compile", "--server=false", "--scala", "3.10.0-RC1-bin-20260616-4733954-NIGHTLY", "--scalac-option", "-experimental", "--jar", _tacit_jar(), _tacit_scaffold(), "{file}"])), _string_array_json(_append_all(timeout, ["scala-cli", "run", "--server=false", "--scala", "3.10.0-RC1-bin-20260616-4733954-NIGHTLY", "--scalac-option", "-experimental", "--jar", _tacit_jar(), _tacit_scaffold(), "{file}"])), _string_array_json(_append_all(timeout, ["python3", "{file}"]))]);
+    let deadline = object_val(["default_seconds", "effective_value", "effective_prefix", "override_env", "override_value"], [number_val(60.0), string_val(join(timeout, " ")), _string_array_json(timeout), string_val("SFN350_TIMEOUT_CMD"), string_val(env.get("SFN350_TIMEOUT_CMD"))]);
+    let manifest = object_val(["adapter", "model", "model_family", "openai_reasoning_effort", "max_iters", "repeats", "seed", "sampling", "arms", "toolchains", "execution_deadline", "commands", "human_interventions"], [string_val(cfg.adapter), string_val(cfg.model), string_val(cfg.model_family), string_val(manifest_effort), number_val(cfg.max_iters as float), number_val(cfg.repeats as float), number_val(cfg.seed as float), string_val(sampling), array_val(arm_vals), toolchains, deadline, commands, number_val(0.0)]);
     fs.writeFile(path, stringify_pretty(manifest, 2));
 }
 
@@ -1712,6 +1766,53 @@ fn _tasks() -> Task[] {
         i += 1;
     }
     return out;
+}
+
+fn _self_test_timeouts() ![clock, io] {
+    let root = _repo_root() + "/build/sfn350-timeout-self-test/run-"
+        + _timestamp();
+    let fixture_root = _repo_root() + "/benchmarks/llm/timeout-fixtures";
+    let sfn = _sfn_bin();
+    let timeout = _default_timeout_command();
+    let arms = [ArmConfig {
+        name: "sailfin", lang: "sailfin", entry: "solution.sfn", compile: [timeout, "60", sfn, "check", "{file}"], run: [timeout, "1", sfn, "run", "{file}"], timeout_prefix: [timeout, "1"], effect_keywords: ["effect", "capability", "E0400", "undeclared"]
+    }, ArmConfig {
+        name: "scala", lang: "scala", entry: "Solution.scala", compile: [timeout, "60", "scala-cli", "compile", "--server=false", "{file}"], run: [timeout, "1", "scala-cli", "run", "--server=false", "{file}"], timeout_prefix: [timeout, "1"], effect_keywords: ["CaptureChecking", "capability", "effect"]
+    }, ArmConfig {
+        name: "python", lang: "python", entry: "solution.py", compile: [], run: [timeout, "1", "python3", "{file}"], timeout_prefix: [timeout, "1"], effect_keywords: []
+    }];
+    let task = Task {
+        id: "timeout-self-test",
+        template: "timeout-self-test",
+        category: "test-infra",
+        kind: "ordinary",
+        confirmatory: false,
+        uses_tacit: false,
+        prompt: "",
+        io_contract: "",
+        fixtures: [],
+        cases: [Case { input: "", expect: "", stable_runs: 1 }],
+        starters: []
+    };
+    let mut i: int = 0;
+    loop {
+        if i >= arms.length { break; }
+        let arm = arms[i];
+        let workdir = root + "/" + arm.name;
+        _mkdir(workdir);
+        fs.writeFile(workdir + "/" + arm.entry, fs.readFile(fixture_root + "/"
+            + arm.entry));
+        let result = _grade(task, arm, workdir, 1);
+        let marker = workdir + "/iteration-1-case-0-0.timeout";
+        if result.category != "timeout" || !fs.exists(marker) {
+            print.err("timeout self-test failed for " + arm.name + ": " + result.category
+                + " "
+                + result.feedback);
+            process.exit(1);
+        }
+        i += 1;
+    }
+    print("offline timeout fixtures terminated in all benchmark arms");
 }
 
 fn _ordinary_starters() -> Starter[] {
@@ -1965,6 +2066,10 @@ fn main(argv: string[]) -> int ![clock, io, net] {
     if cfg.self_test_analysis {
         _self_test_provider_schemas();
         _self_test_analysis();
+        return 0;
+    }
+    if cfg.self_test_timeouts {
+        _self_test_timeouts();
         return 0;
     }
     let tasks = _tasks();
