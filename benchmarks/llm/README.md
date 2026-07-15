@@ -111,6 +111,41 @@ Provider failures retain their raw request/response files and a classified
 invalidate `run.json` and `analysis.json` and stop the remaining paid schedule;
 the attempted observation remains in `records.json`.
 
+Each failed grading iteration also writes `classification-N.json` with one
+primary SFN-364 category, optional secondary causes, Track B attribution, and
+language-denominator eligibility. The final record mirrors those fields.
+Track A keeps compiler/runtime defects as user-visible adoption failures;
+Track B excludes an implementation-defective paired instance across every arm
+and reports the attribution separately. `blind-review/classifications.json`
+contains no arm/model identity or automatic label for manual review;
+`key.json` and `automatic-classifications.json` are separate audit artifacts.
+The closed primary-category values are:
+`pretrained_syntax_library_interference`, `rule_absent_from_materials`,
+`rule_present_not_applied`, `invented_syntax_or_api`,
+`correct_program_rejected`, `check_build_run_divergence`,
+`compiler_crash_hang_or_ice`, `unhelpful_diagnostic_or_failed_repair`,
+`missing_or_excessively_awkward_primitive`,
+`ordinary_semantic_or_test_failure`, `capability_false_friction`, and
+`provider_or_setup_invalidation`.
+
+Track B ablations run separately from the frozen primary condition:
+
+```bash
+./build/sfn350 --track b --ablation examples --repeats 5 --dry-run
+./build/sfn350 --track b --ablation diagnostics --repeats 5 --dry-run
+./build/sfn350 --track b --ablation primitive --repeats 5 --dry-run
+```
+
+The seed and frozen attempt identity assign paired arms to balanced treatments.
+`examples` compares the concise packet with matched expanded supplements;
+`diagnostics` compares full repair text with a normalized phase-only message;
+and `primitive` compares the packet primitive with a documented local
+implementation. `schedule.json` records every assignment and completed runs
+write `ablation.json`. Ablation runs set `primary_pool_eligible: false` and
+cannot authorize Track B's primary decision. First-emission versus
+compiler-guided repair remains directly observable through `iterations` and
+the per-iteration classification artifacts.
+
 ## Real run
 
 ```bash
