@@ -99,6 +99,52 @@ fn lower_logical_not_result(result: ExpressionResult, base_diagnostics: string[]
     return lower_logical_not_with_operand(result.operand, result.temp_index, result.lines, combined, result.string_constants);
 }
 
+fn lower_numeric_negation_result(result: ExpressionResult, base_diagnostics: string[]) -> ExpressionResult ![io] {
+    let diagnostics = extend_string_array(base_diagnostics, result.diagnostics);
+    if result.operand == null {
+        return ExpressionResult {
+            lines: result.lines,
+            temp_index: result.temp_index,
+            operand: null,
+            diagnostics: diagnostics,
+            string_constants: result.string_constants
+        };
+    }
+
+    let operand = result.operand;
+    let operand_type = trim_text(operand.llvm_type);
+    let operand_kind = numeric_type_kind(operand_type);
+    let result_temp = format_temp_name(result.temp_index);
+    let mut current_lines = result.lines;
+    if operand_kind == "int" {
+        current_lines.push("  " + result_temp + " = sub " + operand_type
+            + " 0, "
+            + operand.value);
+    } else if operand_kind == "float" {
+        current_lines.push("  " + result_temp + " = fneg " + operand_type + " "
+            + operand.value);
+    } else {
+        let with_issue = append_string(diagnostics, "llvm lowering: cannot negate non-numeric type `"
+            + operand_type
+            + "`");
+        return ExpressionResult {
+            lines: current_lines,
+            temp_index: result.temp_index,
+            operand: null,
+            diagnostics: with_issue,
+            string_constants: result.string_constants
+        };
+    }
+
+    return ExpressionResult {
+        lines: current_lines,
+        temp_index: result.temp_index + 1,
+        operand: LLVMOperand { llvm_type: operand_type, value: result_temp },
+        diagnostics: diagnostics,
+        string_constants: result.string_constants
+    };
+}
+
 fn lower_ternary_expression(parse: TernaryParseResult, bindings: ParameterBinding[], locals: LocalBinding[], temp_index: int, lines: string[], functions: NativeFunction[], context: TypeContext, expected_type: string) -> ExpressionResult ![io] {
     let mut diagnostics: string[] = parse.diagnostics;
     let mut string_constants: StringConstant[] = empty_string_constant_set();
@@ -1437,6 +1483,7 @@ fn lower_logical_or(expression: string, match: OperatorMatch, bindings: Paramete
 export {
     lower_logical_not_with_operand,
     lower_logical_not_result,
+    lower_numeric_negation_result,
     lower_ternary_expression,
     lower_binary_operation,
     lower_comparison_operation,

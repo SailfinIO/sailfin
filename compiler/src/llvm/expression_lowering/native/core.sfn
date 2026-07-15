@@ -376,6 +376,7 @@ import {
 import {
     lower_logical_not_with_operand,
     lower_logical_not_result,
+    lower_numeric_negation_result,
     lower_ternary_expression,
     lower_binary_operation,
     lower_comparison_operation,
@@ -1170,6 +1171,13 @@ fn lower_expression(expression: string, bindings: ParameterBinding[], locals: Lo
             if operand_text.length > 0 {
                 let lowered_operand = lower_expression(operand_text, bindings, locals, temp_index, lines, functions, context, "");
                 return lower_logical_not_result(lowered_operand, diagnostics);
+            }
+        }
+        if substring(stripped, 0, 1) == "-" {
+            let operand_text = trim_text(substring(stripped, 1, stripped.length));
+            if operand_text.length > 0 {
+                let lowered_operand = lower_expression(operand_text, bindings, locals, temp_index, lines, functions, context, expected_type);
+                return lower_numeric_negation_result(lowered_operand, diagnostics);
             }
         }
         if substring(stripped, 0, 1) == "*" {
