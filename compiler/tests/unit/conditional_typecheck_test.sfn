@@ -124,3 +124,8 @@ test "conditional: a non-`-` unary branch is not misclassified" ![io] {
     // branch has nothing to mismatch against. Guards the operator-gate fix.
     assert _codes_for("fn main() { true ? !5 : \"s\"; }", "E0304") == 0;
 }
+
+test "conditional: bare empty array branch is rejected end-to-end (SFN-351)" ![io] {
+    let source = "fn make_parts() -> string[] { return [\"x\"]; } fn main() { let parts = true? []: make_parts(); }";
+    assert _codes_for(source, "E0304") == 1;
+}

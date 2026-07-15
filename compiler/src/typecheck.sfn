@@ -1642,7 +1642,7 @@ fn try_operator_result_type(operand_type: string) -> string? {
 // The literal-inferred type of a ternary branch/condition, as a plain type
 // string. Mirrors the emitter's `infer_expression_type`
 // (`emit_native_format.sfn`) for the literal forms: number -> "int"/"float"
-// (dot detection), string -> "string", boolean -> "boolean", null -> "null".
+// (dot detection), string -> "string", boolean -> "boolean", null -> "null", and bare [] -> "empty_array".
 // A signed numeric literal parses as `Unary { -, NumberLiteral }`, so it is
 // unwrapped to its numeric kind. Any other form yields "" (not inferable).
 fn _conditional_branch_type(expression: Expression?) -> string {
@@ -1653,6 +1653,10 @@ fn _conditional_branch_type(expression: Expression?) -> string {
     if expression.variant == "StringLiteral" { return "string"; }
     if expression.variant == "BooleanLiteral" { return "boolean"; }
     if expression.variant == "NullLiteral" { return "null"; }
+    if expression.variant == "Array" {
+        if expression.elements.length == 0 { return "empty_array"; }
+        return "";
+    }
     if expression.variant == "Unary" {
         // Only a signed numeric literal (`Unary { "-", NumberLiteral }`) carries
         // a numeric kind; other prefix operators (`!`, `*`, `&`) do not, so
@@ -1703,6 +1707,17 @@ fn check_conditional_types(condition_type: string, then_type: string, else_type:
         if !strings_equal(condition_type, "boolean") {
             diagnostics.push(make_conditional_non_boolean_condition_diagnostic(condition_type, span));
         }
+    }
+
+    // A bare [] branch has no element type without an expected type from an
+    // annotation or contextual inference. The lowering path currently defaults
+    // that branch independently, which can create a runnable program whose
+    // array length/capacity are read through the wrong element shape (SFN-351).
+    // Fail closed until expression inference can contextually type [] from the
+    // sibling branch.
+    if strings_equal(then_type, "empty_array") || strings_equal(else_type, "empty_array") {
+        diagnostics.push(make_conditional_branch_mismatch_diagnostic(then_type, else_type, span));
+        return diagnostics;
     }
 
     // Both branches known but no unified type -> an incompatible pair. A "null"
