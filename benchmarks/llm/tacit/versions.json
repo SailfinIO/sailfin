@@ -1,0 +1,7 @@
+{
+  "tacit_version": "0.2.1",
+  "tacit_library_url": "https://github.com/lampepfl/tacit/releases/download/0.2.1/TACIT-library.jar",
+  "tacit_library_sha256": "5985f69fd13437ccf43d8c8c613a4681f71c574d7b84ca239aa33385f98e5462",
+  "scala_version": "3.10.0-RC1-bin-20260616-4733954-NIGHTLY",
+  "scala_cli_version": "1.15.0"
+}

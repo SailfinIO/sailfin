@@ -29,5 +29,14 @@ loop {
 
 let part = substring(text, start, end);
 let code = char_code(ch);
-let label = n as string;
+    let label = n as string;
 ```
+
+For filesystem work, import `{ fs }` from `"fs"` and declare `![io]`. For a
+local HTTP task, call `http.get_body(url)` from a function declaring `![net]`;
+`main` normally needs effects in alphabetical order, such as `![io, net]`.
+Structured-concurrency tasks should use a nursery and scoped `spawn` calls,
+then join before leaving the nursery. Keep generated output exact and do not
+print diagnostics. A helper without an effect annotation must remain pure:
+file, clock, environment, process, random, and network access must be rejected
+there rather than hidden behind another helper.
