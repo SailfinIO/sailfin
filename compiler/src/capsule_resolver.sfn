@@ -3114,10 +3114,16 @@ fn enumerate_workspace_implicit_sources(entry_path: string, members: WorkspaceMe
 // sfn/http that internally imports sfn/strings pulls both in (each must
 // itself be cached). Version selection picks the newest cached version —
 // there is no lockfile to pin one in the manifest-less path.
-fn enumerate_cache_implicit_sources(entry_path: string) -> CapsuleSource[] ![io] {
+fn enumerate_cache_implicit_sources(entry_path: string, excluded_specs: string[]) -> CapsuleSource[] ![io] {
     let mut out: CapsuleSource[] = [];
     if entry_path.length == 0 { return out; }
     let mut covered: string[] = [];
+    let mut ei: int = 0;
+    loop {
+        if ei >= excluded_specs.length { break; }
+        covered.push(excluded_specs[ei]);
+        ei += 1;
+    }
     let mut paths_to_scan: string[] = [entry_path];
     let mut head: int = 0;
     let max_iterations: int = 1024;
@@ -3287,7 +3293,11 @@ fn _cr_resolve_and_dedupe(entry_paths: string[], consumer: ResolverConsumer) -> 
     // a capsule source's slug to its spec slug.
     let anchor_dir = _cr_dirname(entry_paths[0]);
 
-    let workspace_root = discover_workspace_root(anchor_dir);
+    let source_workspace_root = discover_workspace_root(anchor_dir);
+    let mut workspace_root = source_workspace_root;
+    if workspace_root.length == 0 {
+        workspace_root = discover_workspace_root("");
+    }
     let mut members: WorkspaceMember[] = [];
     if workspace_root.length > 0 {
         members = load_workspace_members(workspace_root);
@@ -3454,21 +3464,32 @@ fn _cr_resolve_and_dedupe(entry_paths: string[], consumer: ResolverConsumer) -> 
     }
 
     // (4) Cache-implicit imports (SFN-216): a bare `sfn build main.sfn`
-    // with neither a capsule.toml (no project_root) nor a workspace.toml
-    // (no workspace_root) resolves scoped imports the user `sfn add`ed
-    // into ~/.sfn/cache. Gated on BOTH roots being absent so it never
-    // double-stages a spec the manifest or workspace legs already
-    // supplied — two sources with the same canonical slug but different
-    // source paths (member src vs cache src) would trip the slug-collision
-    // detector below. When a manifest or workspace is present, those legs
-    // own scoped resolution (declared deps fall back to the cache via
-    // `_cr_locate_capsule_src`).
+    // with no source-anchored capsule.toml/workspace.toml resolves scoped
+    // imports the user `sfn add`ed into ~/.sfn/cache. If step (3) found a
+    // cwd workspace fallback for bundled capsules (SFN-348), still run the
+    // cache leg for specs that workspace did not satisfy; otherwise a
+    // `/tmp/main.sfn` run from the Sailfin checkout would lose access to
+    // cached third-party capsules like `demo/greeter`. Excluding specs
+    // already present in `sources` prevents double-staging the same
+    // canonical slug from both the cwd workspace and the user cache.
     if project_root.length == 0 {
-        if workspace_root.length == 0 {
+        if source_workspace_root.length == 0 {
+            let mut cache_excluded: string[] = [];
+            let mut csi: int = 0;
+            loop {
+                if csi >= sources.length { break; }
+                let spec = sources[csi].spec;
+                if spec.length > 0 {
+                    if !_cr_string_array_contains(cache_excluded, spec) {
+                        cache_excluded.push(spec);
+                    }
+                }
+                csi += 1;
+            }
             let mut ci_entry: int = 0;
             loop {
                 if ci_entry >= entry_paths.length { break; }
-                let cached = enumerate_cache_implicit_sources(entry_paths[ci_entry]);
+                let cached = enumerate_cache_implicit_sources(entry_paths[ci_entry], cache_excluded);
                 let mut cci: int = 0;
                 loop {
                     if cci >= cached.length { break; }
