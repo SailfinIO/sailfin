@@ -122,6 +122,12 @@ pooled with the replacement run.
 Fresh non-scored schema probes passed for the rotated credentials and exact
 model IDs `gpt-5.6-terra` and `claude-sonnet-5` on 2026-07-15.
 
+These probes validate response shape only; they do not prove that the account
+is authorized for full task requests or repair turns. The bounded paid
+three-arm probe is the authorization gate. An authentication/permission or
+quota/billing failure invalidates the run for GO/NO use, preserves the failed
+attempt and provider artifacts, and stops further paid observations.
+
 Status remains **MURKY with negative Sonnet signals; language decision not yet
 authorized**.
 
