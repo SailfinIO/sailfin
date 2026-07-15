@@ -1,5 +1,10 @@
 # SFN-350 LLM benchmark
 
+The decision protocol and the latest pilot interpretation live in
+[`EXPERIMENT.md`](EXPERIMENT.md). Do not use the three seed tasks alone to make
+a GO/NO decision: they are an offline/pilot harness set, not the frozen
+confirmatory benchmark.
+
 This directory contains a native Sailfin benchmark harness for measuring how
 well raw LLM APIs solve the same small programming tasks across language arms.
 It replaces the adjacent Python prototype without checking Python harness code
@@ -75,6 +80,7 @@ Environment:
 ## Notes
 
 The Sailfin starter snippets avoid `sfn/strings` imports in generated bare-file
-submissions because today `sfn check` accepts them but `sfn run` can fail to
-lower those imported helper calls from a bare benchmark file. Keep this in mind
-when expanding the task set.
+submissions. `sfn run <path>` from the repository root now stages these imports,
+but invoking the compiler from the isolated task working directory still passes
+`sfn check` and fails during LLVM lowering. Keep this in mind when expanding the
+task set.

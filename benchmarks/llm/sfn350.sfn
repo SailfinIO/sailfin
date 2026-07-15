@@ -75,7 +75,9 @@ struct Config {
 
 struct Completion {
     text: string;
-    tokens: int;
+    input_tokens: int;
+    output_tokens: int;
+    error: string;
 }
 
 struct GradeResult {
@@ -91,6 +93,10 @@ struct Record {
     passed: boolean;
     iterations: int;
     tokens: int;
+    input_tokens: int;
+    output_tokens: int;
+    elapsed_ms: int;
+    source_chars: int;
     fail_categories: string[];
 }
 
@@ -318,7 +324,7 @@ fn _arm_configs() -> ArmConfig[] ![io] {
     return [ArmConfig {
         name: "sailfin", lang: "sailfin", entry: "solution.sfn", compile: _append_all(timeout, [sfn, "check", "{file}"]), run: _append_all(timeout, [sfn, "run", "{file}"]), effect_keywords: ["effect", "capability", "E0400", "undeclared"]
     }, ArmConfig {
-        name: "scala", lang: "scala", entry: "Solution.scala", compile: ["scala-cli", "compile", "{file}"], run: ["scala-cli", "run", "{file}"], effect_keywords: ["capture", "capability", "effect"]
+        name: "scala", lang: "scala", entry: "Solution.scala", compile: ["scala-cli", "compile", "--server=false", "{file}"], run: ["scala-cli", "run", "--server=false", "{file}"], effect_keywords: ["capture", "capability", "effect"]
     }, ArmConfig {
         name: "python", lang: "python", entry: "solution.py", compile: [], run: ["python3", "{file}"], effect_keywords: []
     }];
@@ -458,6 +464,15 @@ fn _anthropic_body(model: string, system: string, messages: JsonValue[]) -> stri
 
 fn _completion_from_openai(resp: string) -> Completion {
     let root = parse(resp);
+    let api_error = get_string(get_value(root, "error"), "message");
+    if api_error.length > 0 {
+        return Completion {
+            text: "",
+            input_tokens: 0,
+            output_tokens: 0,
+            error: api_error
+        };
+    }
     let choices = get_array(root, "choices");
     let mut text = "";
     if choices.length > 0 {
@@ -465,12 +480,25 @@ fn _completion_from_openai(resp: string) -> Completion {
         text = get_string(msg, "content");
     }
     let usage = get_value(root, "usage");
-    let tokens = get_number(usage, "total_tokens") as int;
-    return Completion { text: text, tokens: tokens };
+    return Completion {
+        text: text,
+        input_tokens: get_number(usage, "prompt_tokens") as int,
+        output_tokens: get_number(usage, "completion_tokens") as int,
+        error: ""
+    };
 }
 
 fn _completion_from_anthropic(resp: string) -> Completion {
     let root = parse(resp);
+    let api_error = get_string(get_value(root, "error"), "message");
+    if api_error.length > 0 {
+        return Completion {
+            text: "",
+            input_tokens: 0,
+            output_tokens: 0,
+            error: api_error
+        };
+    }
     let content = get_array(root, "content");
     let mut text = "";
     let mut i: int = 0;
@@ -483,8 +511,12 @@ fn _completion_from_anthropic(resp: string) -> Completion {
         i += 1;
     }
     let usage = get_value(root, "usage");
-    let tokens = (get_number(usage, "input_tokens") + get_number(usage, "output_tokens")) as int;
-    return Completion { text: text, tokens: tokens };
+    return Completion {
+        text: text,
+        input_tokens: get_number(usage, "input_tokens") as int,
+        output_tokens: get_number(usage, "output_tokens") as int,
+        error: ""
+    };
 }
 
 fn _stub_solution(task_id: string, arm: string) -> string {
@@ -513,7 +545,9 @@ fn _complete(cfg: Config, task_id: string, arm: string, system: string, messages
     if cfg.stub {
         return Completion {
             text: _stub_solution(task_id, arm),
-            tokens: 0
+            input_tokens: 0,
+            output_tokens: 0,
+            error: ""
         };
     }
     if cfg.adapter == "openai" {
@@ -524,7 +558,12 @@ fn _complete(cfg: Config, task_id: string, arm: string, system: string, messages
         let resp2 = _post_json("anthropic", _anthropic_body(cfg.model, system, messages), cwd);
         return _completion_from_anthropic(resp2);
     }
-    return Completion { text: "```\nunknown adapter\n```", tokens: 0 };
+    return Completion {
+        text: "```\nunknown adapter\n```",
+        input_tokens: 0,
+        output_tokens: 0,
+        error: "unknown adapter"
+    };
 }
 
 fn _has_kw(text: string, kws: string[]) -> boolean {
@@ -638,19 +677,24 @@ fn _grade(task: Task, arm: ArmConfig, workdir: string) -> GradeResult ![io] {
     };
 }
 
-fn _record(task: Task, arm: string, passed: boolean, iters: int, tokens: int, cats: string[]) -> Record {
+fn _record(task: Task, arm: string, passed: boolean, iters: int, input_tokens: int, output_tokens: int, elapsed_ms: int, source_chars: int, cats: string[]) -> Record {
     return Record {
         task: task.id,
         category: task.category,
         arm: arm,
         passed: passed,
         iterations: iters,
-        tokens: tokens,
+        tokens: input_tokens + output_tokens,
+        input_tokens: input_tokens,
+        output_tokens: output_tokens,
+        elapsed_ms: elapsed_ms,
+        source_chars: source_chars,
         fail_categories: cats
     };
 }
 
 fn _run_task_arm(task: Task, arm: ArmConfig, cfg: Config, run_dir: string) -> Record ![io] {
+    let started = monotonic_millis();
     let wd = run_dir + "/" + task.id + "/" + arm.name;
     _mkdir(wd);
     _write_fixtures(task, wd);
@@ -658,18 +702,28 @@ fn _run_task_arm(task: Task, arm: ArmConfig, cfg: Config, run_dir: string) -> Re
     let system = _system_prompt();
     let user = _build_user(task, arm);
     let mut messages: JsonValue[] = [object_val(["role", "content"], [string_val("user"), string_val(user)])];
-    let mut total_tokens = 0;
+    let mut input_tokens = 0;
+    let mut output_tokens = 0;
+    let mut source_chars = 0;
     let mut cats: string[] = [];
     let mut i: int = 0;
     loop {
         if i >= cfg.max_iters { break; }
         let completion = _complete(cfg, task.id, arm.name, system, messages, wd);
-        total_tokens += completion.tokens;
-        fs.writeFile(workfile, _extract_code(completion.text));
+        input_tokens += completion.input_tokens;
+        output_tokens += completion.output_tokens;
+        if completion.error.length > 0 {
+            cats.push("provider_error");
+            fs.writeFile(wd + "/provider.error", completion.error);
+            return _record(task, arm.name, false, i + 1, input_tokens, output_tokens, (monotonic_millis() - started) as int, source_chars, cats);
+        }
+        let source = _extract_code(completion.text);
+        source_chars = source.length;
+        fs.writeFile(workfile, source);
         let res = _grade(task, arm, wd);
         if res.category.length > 0 { cats.push(res.category); }
         if res.passed {
-            return _record(task, arm.name, true, i + 1, total_tokens, cats);
+            return _record(task, arm.name, true, i + 1, input_tokens, output_tokens, (monotonic_millis() - started) as int, source_chars, cats);
         }
         messages.push(object_val(["role", "content"], [string_val("assistant"), string_val(completion.text)]));
         messages.push(object_val(["role", "content"], [string_val("user"), string_val("That failed grading:\n"
@@ -679,7 +733,7 @@ fn _run_task_arm(task: Task, arm: ArmConfig, cfg: Config, run_dir: string) -> Re
             + " in one code block.")]));
         i += 1;
     }
-    return _record(task, arm.name, false, cfg.max_iters, total_tokens, cats);
+    return _record(task, arm.name, false, cfg.max_iters, input_tokens, output_tokens, (monotonic_millis() - started) as int, source_chars, cats);
 }
 
 fn _record_json(r: Record) -> JsonValue {
@@ -690,7 +744,7 @@ fn _record_json(r: Record) -> JsonValue {
         cats.push(string_val(r.fail_categories[i]));
         i += 1;
     }
-    return object_val(["task", "category", "arm", "passed", "iterations", "tokens", "fail_categories"], [string_val(r.task), string_val(r.category), string_val(r.arm), bool_val(r.passed), number_val(r.iterations as float), number_val(r.tokens as float), array_val(cats)]);
+    return object_val(["task", "category", "arm", "passed", "iterations", "tokens", "input_tokens", "output_tokens", "elapsed_ms", "source_chars", "fail_categories"], [string_val(r.task), string_val(r.category), string_val(r.arm), bool_val(r.passed), number_val(r.iterations as float), number_val(r.tokens as float), number_val(r.input_tokens as float), number_val(r.output_tokens as float), number_val(r.elapsed_ms as float), number_val(r.source_chars as float), array_val(cats)]);
 }
 
 fn _pct(n: int, d: int) -> float {
@@ -718,6 +772,10 @@ fn _summary_for_arm(arm: string, records: Record[], tasks: Task[]) -> JsonValue 
     let mut one_shot = 0;
     let mut iter_sum = 0;
     let mut token_sum = 0;
+    let mut input_token_sum = 0;
+    let mut output_token_sum = 0;
+    let mut elapsed_sum = 0;
+    let mut source_char_sum = 0;
     let mut false_friction = 0;
     let mut traps = 0;
     let mut trap_fired = 0;
@@ -737,6 +795,10 @@ fn _summary_for_arm(arm: string, records: Record[], tasks: Task[]) -> JsonValue 
                     if r.iterations == 1 { one_shot += 1; }
                     iter_sum += r.iterations;
                     token_sum += r.tokens;
+                    input_token_sum += r.input_tokens;
+                    output_token_sum += r.output_tokens;
+                    elapsed_sum += r.elapsed_ms;
+                    source_char_sum += r.source_chars;
                 }
                 if _has_category(r, "effect_error") { false_friction += 1; }
             }
@@ -745,7 +807,11 @@ fn _summary_for_arm(arm: string, records: Record[], tasks: Task[]) -> JsonValue 
     }
     let mean_iters = solved == 0? 0.0: (iter_sum as float) / (solved as float);
     let mean_tokens = solved == 0? 0.0: (token_sum as float) / (solved as float);
-    return object_val(["tasks_scored", "one_shot_success_pct", "solve_rate_pct", "mean_iters_to_green", "mean_tokens_to_green", "false_friction_tasks", "trap_tasks", "traps_effect_system_fired"], [number_val(scored as float), number_val(_pct(one_shot, scored)), number_val(_pct(solved, scored)), number_val(mean_iters), number_val(mean_tokens), number_val(false_friction as float), number_val(traps as float), number_val(trap_fired as float)]);
+    let mean_input_tokens = solved == 0? 0.0: (input_token_sum as float) / (solved as float);
+    let mean_output_tokens = solved == 0? 0.0: (output_token_sum as float) / (solved as float);
+    let mean_elapsed_ms = solved == 0? 0.0: (elapsed_sum as float) / (solved as float);
+    let mean_source_chars = solved == 0? 0.0: (source_char_sum as float) / (solved as float);
+    return object_val(["tasks_scored", "one_shot_success_pct", "solve_rate_pct", "mean_iters_to_green", "mean_tokens_to_green", "mean_input_tokens_to_green", "mean_output_tokens_to_green", "mean_elapsed_ms_to_green", "mean_source_chars_to_green", "false_friction_tasks", "trap_tasks", "traps_effect_system_fired"], [number_val(scored as float), number_val(_pct(one_shot, scored)), number_val(_pct(solved, scored)), number_val(mean_iters), number_val(mean_tokens), number_val(mean_input_tokens), number_val(mean_output_tokens), number_val(mean_elapsed_ms), number_val(mean_source_chars), number_val(false_friction as float), number_val(traps as float), number_val(trap_fired as float)]);
 }
 
 fn _summary(records: Record[], tasks: Task[], arms: string[]) -> JsonValue {
@@ -846,6 +912,19 @@ fn _write_records(path: string, records: Record[]) ![io] {
     fs.writeFile(path, stringify_pretty(array_val(vals), 2));
 }
 
+fn _write_run_manifest(path: string, cfg: Config, arms: string[]) ![io] {
+    let mut arm_vals: JsonValue[] = [];
+    let mut i: int = 0;
+    loop {
+        if i >= arms.length { break; }
+        arm_vals.push(string_val(arms[i]));
+        i += 1;
+    }
+    let sampling = cfg.adapter == "anthropic"? "provider default (Sonnet 5 rejects temperature)": "temperature=0.2";
+    let manifest = object_val(["adapter", "model", "max_iters", "sampling", "arms"], [string_val(cfg.adapter), string_val(cfg.model), number_val(cfg.max_iters as float), string_val(sampling), array_val(arm_vals)]);
+    fs.writeFile(path, stringify_pretty(manifest, 2));
+}
+
 fn _tasks() -> Task[] {
     return [_logic_task(), _io_task(), _trap_task()];
 }
@@ -867,7 +946,7 @@ fn _logic_task() -> Task {
         starters: [Starter {
             arm: "python", source: "import sys\n\ndef run_length(nums):\n    # TODO: return a list of (value, count) pairs\n    ...\n\ndef main():\n    line = sys.stdin.readline().strip()\n    nums = [int(x) for x in line.split()] if line else []\n    pairs = run_length(nums)\n    print(' '.join(f'{v}:{c}' for v, c in pairs))\n\nmain()\n"
         }, Starter {
-            arm: "scala", source: "import language.experimental.safe\n\ndef runLength(nums: List[Int]): List[(Int, Int)] =\n  ??? // TODO\n\n@main def run(): Unit =\n  val line = Option(scala.io.StdIn.readLine()).getOrElse(\"\").trim\n  val nums = if line.isEmpty then Nil else line.split(\"\\\\s+\").toList.map(_.toInt)\n  println(runLength(nums).map((v, c) => s\"$v:$c\").mkString(\" \"))\n"
+            arm: "scala", source: "import language.experimental.captureChecking\n\ndef runLength(nums: List[Int]): List[(Int, Int)] =\n  ??? // TODO\n\n@main def run(): Unit =\n  val line = Option(scala.io.StdIn.readLine()).getOrElse(\"\").trim\n  val nums = if line.isEmpty then Nil else line.split(\"\\\\s+\").toList.map(_.toInt)\n  println(runLength(nums).map((v, c) => s\"$v:$c\").mkString(\" \"))\n"
         }, Starter {
             arm: "sailfin", source: "fn trim_text(text: string) -> string {\n    let mut start = 0;\n    let mut end = text.length;\n    loop { if start >= end { break; } let ch = text[start]; if ch == \" \" || ch == \"\\n\" || ch == \"\\t\" || ch == \"\\r\" { start += 1; } else { break; } }\n    loop { if end <= start { break; } let ch = text[end - 1]; if ch == \" \" || ch == \"\\n\" || ch == \"\\t\" || ch == \"\\r\" { end -= 1; } else { break; } }\n    return substring(text, start, end);\n}\n\nfn encode_line(line: string) -> string {\n    // TODO: return value:count pairs for maximal adjacent runs.\n    return \"\";\n}\n\nfn main() ![io] {\n    let line = trim_text(io.read_line(0));\n    print(encode_line(line));\n}\n"
         }]
@@ -889,7 +968,7 @@ fn _io_task() -> Task {
         starters: [Starter {
             arm: "python", source: "import sys\n\ndef sum_file(path):\n    # TODO: read the file, return the sum of its integers\n    ...\n\ndef main():\n    path = sys.stdin.readline().strip()\n    print(sum_file(path))\n\nmain()\n"
         }, Starter {
-            arm: "scala", source: "import language.experimental.safe\n\n@main def run(): Unit =\n  val path = Option(scala.io.StdIn.readLine()).getOrElse(\"\").trim\n  // TODO: read the file at `path`, sum its integers, print the total\n  ???\n"
+            arm: "scala", source: "import language.experimental.captureChecking\n\n@main def run(): Unit =\n  val path = Option(scala.io.StdIn.readLine()).getOrElse(\"\").trim\n  // TODO: read the file at `path`, sum its integers, print the total\n  ???\n"
         }, Starter {
             arm: "sailfin", source: "import { fs } from \"fs\";\n\nfn trim_text(text: string) -> string {\n    let mut start = 0;\n    let mut end = text.length;\n    loop { if start >= end { break; } let ch = text[start]; if ch == \" \" || ch == \"\\n\" || ch == \"\\t\" || ch == \"\\r\" { start += 1; } else { break; } }\n    loop { if end <= start { break; } let ch = text[end - 1]; if ch == \" \" || ch == \"\\n\" || ch == \"\\t\" || ch == \"\\r\" { end -= 1; } else { break; } }\n    return substring(text, start, end);\n}\n\nfn sum_file(path: string) -> int ![io] {\n    // TODO: read the file and sum one integer per line.\n    return 0;\n}\n\nfn main() ![io] {\n    let path = trim_text(io.read_line(0));\n    print(sum_file(path) as string);\n}\n"
         }]
@@ -911,7 +990,7 @@ fn _trap_task() -> Task {
         starters: [Starter {
             arm: "python", source: "import sys\n\ndef token(s: str) -> int:\n    # TODO: pure, deterministic hash of s. Python's built-in hash() is salted per process.\n    ...\n\ndef main():\n    s = sys.stdin.readline().rstrip('\\n')\n    print(token(s))\n\nmain()\n"
         }, Starter {
-            arm: "scala", source: "import language.experimental.safe\n\ndef token(s: String): Long =\n  ??? // TODO: pure, deterministic hash of s\n\n@main def run(): Unit =\n  val s = Option(scala.io.StdIn.readLine()).getOrElse(\"\")\n  println(token(s))\n"
+            arm: "scala", source: "import language.experimental.captureChecking\n\ndef token(s: String): Long =\n  ??? // TODO: pure, deterministic hash of s\n\n@main def run(): Unit =\n  val s = Option(scala.io.StdIn.readLine()).getOrElse(\"\")\n  println(token(s))\n"
         }, Starter {
             arm: "sailfin", source: "fn token(s: string) -> int {\n    // TODO: pure deterministic hash. This function intentionally declares no effects.\n    return 0;\n}\n\nfn main() ![io] {\n    let s = io.read_line(0);\n    print(token(s) as string);\n}\n"
         }]
@@ -954,6 +1033,7 @@ fn main(argv: string[]) -> int ![clock, io, net] {
     }
 
     _write_records(run_dir + "/records.json", records);
+    _write_run_manifest(run_dir + "/run.json", cfg, selected_arms);
     let summary = _summary(records, tasks, selected_arms);
     fs.writeFile(run_dir + "/summary.json", stringify_pretty(summary, 2));
     print("\n== SUMMARY ==");
