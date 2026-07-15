@@ -34,6 +34,13 @@ predeclared 25% prompt-scaffold token band.
 The default `stub` adapter returns canned solutions for offline plumbing tests.
 Real runs use `openai` or `anthropic` through `curl` from native Sailfin.
 
+Track B adds the packet-taught `sailfin-b` arm and the nonce `rill-17`
+synthetic control. Rill-17 is an experimental control, not a product
+competitor: its surface tokens are translated deterministically into the same
+frozen Sailfin subset, so types, primitives, effects, execution, and graders
+remain matched. Its only purpose is to reduce pretrained-language familiarity
+in the controlled-learnability comparison.
+
 ## Build
 
 ```bash
@@ -50,6 +57,31 @@ build/bin/sfn build -o build/sfn350 benchmarks/llm/sfn350.sfn
 ./build/sfn350 --self-test-timeouts
 benchmarks/llm/verify-provider-auth.sh
 ```
+
+Validate Track B packet completeness, six-example limits, 1,800–2,200-token
+normalized prose budgets, and the 5% matched-arm band before any provider call:
+
+```bash
+./build/sfn350 --track b --check-packets
+./build/sfn350 --track b --adapter stub --verify-graders \
+  --results-dir build/sfn350-track-b-grader-smoke
+```
+
+The packet hashes and versions are recorded in every Track B `run.json`.
+Before showing either packet to a real model, capture the blinded recognition
+probe and review its rubric:
+
+```bash
+./build/sfn350 --track b --adapter openai --model gpt-5.6-terra \
+  --reasoning-effort medium --contamination-probe \
+  --results-dir build/sfn350-track-b-probes
+```
+
+The generated report starts with `"cleared": false`. Set it to `true` only
+after the blinded key confirms no exact or substantively correct prior Rill-17
+knowledge, then point `SFN350_CONTAMINATION_REPORT` at that reviewed report.
+Real Track B execution fails closed without it. Sailfin-B recognition is
+recorded as residual familiarity but does not itself invalidate the run.
 
 Fetch and verify the pinned TACIT comparator once, then the smoke can run with
 the Scala compiler and library caches offline:

@@ -69,6 +69,7 @@ struct ArmConfig {
 }
 
 struct Config {
+    track: string;
     adapter: string;
     model: string;
     reasoning_effort: string;
@@ -83,6 +84,8 @@ struct Config {
     verify_graders: boolean;
     self_test_analysis: boolean;
     self_test_timeouts: boolean;
+    check_packets: boolean;
+    contamination_probe: boolean;
     tasks: string[];
     arms: string[];
 }
@@ -135,9 +138,9 @@ struct Interval {
 }
 
 fn _usage() -> string {
-    return "usage: sfn run benchmarks/llm/sfn350.sfn -- [--adapter stub|openai|anthropic] [--real] [--model M] [--reasoning-effort E] [--model-family F] [--arm A] [--task T] [--max-iters N] [--repeats N] [--seed N] [--dry-run] [--schema-probe] [--verify-graders] [--self-test-analysis] [--self-test-timeouts] [--results-dir DIR]\n"
+    return "usage: sfn run benchmarks/llm/sfn350.sfn -- [--track a|b] [--adapter stub|openai|anthropic] [--real] [--model M] [--reasoning-effort E] [--model-family F] [--arm A] [--task T] [--max-iters N] [--repeats N] [--seed N] [--dry-run] [--schema-probe] [--contamination-probe] [--check-packets] [--verify-graders] [--self-test-analysis] [--self-test-timeouts] [--results-dir DIR]\n"
         + "\n"
-        + "defaults: --adapter stub --model gpt-5.6-terra --reasoning-effort medium --model-family unspecified --max-iters 5 --repeats 1 --seed 350 --results-dir build/sfn350-results\n"
+        + "defaults: --track a --adapter stub --model gpt-5.6-terra --reasoning-effort medium --model-family unspecified --max-iters 5 --repeats 1 --seed 350 --results-dir build/sfn350-results\n"
         + "env: OPENAI_API_KEY, ANTHROPIC_API_KEY, SAILFIN_BIN, TACIT_LIBRARY_JAR, SFN350_TIMEOUT_CMD; API keys may also be set in .env or benchmarks/llm/.env\n";
 }
 
@@ -173,6 +176,7 @@ fn _parse_int(text: string, fallback: int) -> int {
 
 fn _default_config() -> Config {
     return Config {
+        track: "a",
         adapter: "stub",
         model: "gpt-5.6-terra",
         reasoning_effort: "medium",
@@ -187,6 +191,8 @@ fn _default_config() -> Config {
         verify_graders: false,
         self_test_analysis: false,
         self_test_timeouts: false,
+        check_packets: false,
+        contamination_probe: false,
         tasks: [],
         arms: []
     };
@@ -201,6 +207,13 @@ fn _parse_config(argv: string[]) -> Config ![io] {
         if arg == "--help" || arg == "-h" {
             print(_usage());
             process.exit(0);
+        } else if arg == "--track" && i + 1 < argv.length {
+            cfg.track = argv[i + 1];
+            if cfg.track != "a" && cfg.track != "b" {
+                print.err("unknown track: " + cfg.track);
+                process.exit(2);
+            }
+            i += 1;
         } else if arg == "--adapter" && i + 1 < argv.length {
             cfg.adapter = argv[i + 1];
             if !_valid_adapter(cfg.adapter) {
@@ -253,6 +266,8 @@ fn _parse_config(argv: string[]) -> Config ![io] {
             cfg.self_test_analysis = true;
         } else if arg == "--self-test-timeouts" {
             cfg.self_test_timeouts = true;
+        } else if arg == "--check-packets" { cfg.check_packets = true; } else if arg == "--contamination-probe" {
+            cfg.contamination_probe = true;
         } else {
             print.err("unknown or incomplete argument: " + arg);
             print.err(_usage());
@@ -435,8 +450,105 @@ fn _replace_file(args: string[], file: string) -> string[] {
     return out;
 }
 
-fn _arm_configs_with_timeout(timeout: string[]) -> ArmConfig[] ![io] {
+fn _rill_identifier(value: string) -> string {
+    if value == "fn" { return "craft"; }
+    if value == "let" { return "bind"; }
+    if value == "mut" { return "flux"; }
+    if value == "return" { return "yield"; }
+    if value == "if" { return "when"; }
+    if value == "else" { return "otherwise"; }
+    if value == "loop" { return "cycle"; }
+    if value == "break" { return "halt"; }
+    if value == "continue" { return "resume"; }
+    if value == "import" { return "draw"; }
+    if value == "from" { return "via"; }
+    if value == "as" { return "cast"; }
+    if value == "string" { return "glyphs"; }
+    if value == "int" { return "whole"; }
+    if value == "boolean" { return "truth"; }
+    if value == "void" { return "empty"; }
+    if value == "true" { return "aye"; }
+    if value == "false" { return "nay"; }
+    if value == "print" { return "emit"; }
+    if value == "substring" { return "span"; }
+    if value == "char_code" { return "rune_code"; }
+    if value == "io" { return "console"; }
+    if value == "net" { return "link"; }
+    if value == "fs" { return "vault"; }
+    if value == "http" { return "loopweb"; }
+    if value == "read_line" { return "take_line"; }
+    if value == "readFile" { return "read_text"; }
+    if value == "get_body" { return "fetch_body"; }
+    return value;
+}
+
+fn _is_identifier_start(ch: string) -> boolean {
+    let code = char_code(ch);
+    return (code >= 65 && code <= 90) || (code >= 97 && code <= 122) || ch == "_";
+}
+
+fn _is_identifier_part(ch: string) -> boolean {
+    let code = char_code(ch);
+    return _is_identifier_start(ch) || (code >= 48 && code <= 57);
+}
+
+fn _sailfin_to_rill(source: string) -> string {
+    let mut out = "";
+    let mut i = 0;
+    let mut quoted = false;
+    loop {
+        if i >= source.length { break; }
+        let ch = source[i];
+        if quoted {
+            out = out + ch;
+            if ch == "\\" && i + 1 < source.length {
+                out = out + source[i + 1];
+                i += 2;
+                continue;
+            }
+            if ch == "\"" { quoted = false; }
+            i += 1;
+            continue;
+        }
+        if ch == "\"" {
+            quoted = true;
+            out = out + ch;
+            i += 1;
+            continue;
+        }
+        if ch == "!" && i + 1 < source.length && source[i + 1] == "[" {
+            out = out + "with[";
+            i += 2;
+            continue;
+        }
+        if _is_identifier_start(ch) {
+            let start = i;
+            i += 1;
+            loop {
+                if i >= source.length || !_is_identifier_part(source[i]) {
+                    break;
+                }
+                i += 1;
+            }
+            out = out + _rill_identifier(substring(source, start, i));
+            continue;
+        }
+        out = out + ch;
+        i += 1;
+    }
+    return out;
+}
+
+fn _arm_configs_with_timeout(timeout: string[], track: string) -> ArmConfig[] ![io] {
     let sfn = _sfn_bin();
+    if track == "b" {
+        let translator = _repo_root() + "/benchmarks/llm/rill17.sh";
+        return [ArmConfig {
+            name: "sailfin-b", lang: "sailfin-b", entry: "solution.sfn", compile: _append_all(timeout, [sfn, "check", "{file}"]), run: _append_all(timeout, [sfn, "run", "{file}"]), timeout_prefix: timeout, effect_keywords: ["effect", "capability", "E0400", "undeclared"]
+        }, ArmConfig {
+            name: "rill-17", lang: "rill-17", entry: "solution.r17", compile: _append_all(timeout, ["sh", translator, sfn, "check", "{file}"]), run: _append_all(timeout, ["sh", translator, sfn, "run", "{file}"]), timeout_prefix: timeout, effect_keywords: ["effect", "capability", "E0400", "undeclared"]
+        }];
+    }
     return [ArmConfig {
         name: "sailfin", lang: "sailfin", entry: "solution.sfn", compile: _append_all(timeout, [sfn, "check", "{file}"]), run: _append_all(timeout, [sfn, "run", "{file}"]), timeout_prefix: timeout, effect_keywords: ["effect", "capability", "E0400", "undeclared"]
     }, ArmConfig {
@@ -446,8 +558,8 @@ fn _arm_configs_with_timeout(timeout: string[]) -> ArmConfig[] ![io] {
     }];
 }
 
-fn _arm_configs() -> ArmConfig[] ![io] {
-    return _arm_configs_with_timeout(_timeout_prefix());
+fn _arm_configs(track: string) -> ArmConfig[] ![io] {
+    return _arm_configs_with_timeout(_timeout_prefix(), track);
 }
 
 fn _arm_by_name(name: string, arms: ArmConfig[]) -> ArmConfig {
@@ -461,6 +573,10 @@ fn _arm_by_name(name: string, arms: ArmConfig[]) -> ArmConfig {
 }
 
 fn _starter_for(task: Task, arm: string) -> string {
+    if arm == "sailfin-b" { return _starter_for(task, "sailfin"); }
+    if arm == "rill-17" {
+        return _sailfin_to_rill(_starter_for(task, "sailfin"));
+    }
     let mut i: int = 0;
     loop {
         if i >= task.starters.length { break; }
@@ -496,14 +612,23 @@ fn _system_prompt() -> string {
 }
 
 fn _cheatsheet(arm: ArmConfig) -> string ![io] {
+    if arm.name == "sailfin-b" || arm.name == "rill-17" {
+        let packet_path = _repo_root() + "/benchmarks/llm/packets/" + arm.lang
+            + "/packet.md";
+        if fs.exists(packet_path) { return fs.readFile(packet_path); }
+        return "";
+    }
     let path = "benchmarks/llm/cheatsheets/" + arm.lang + ".md";
     if fs.exists(path) { return fs.readFile(path); }
     return "";
 }
 
 fn _build_user(task: Task, arm: ArmConfig) -> string ![io] {
+    let reference_label = arm.name == "sailfin-b" || arm.name == "rill-17"? "Controlled learning packet": "Language quick reference";
     return "# Task\n" + task.prompt + "\n\n# I/O contract\n" + task.io_contract
-        + "\n\n# Language quick reference ("
+        + "\n\n# "
+        + reference_label
+        + " ("
         + arm.name
         + ")\n"
         + _cheatsheet(arm)
@@ -761,6 +886,74 @@ fn _run_schema_probe(cfg: Config, run_dir: string) ![io] {
     print("provider schema probe passed: " + run_dir + "/schema-probe.json");
 }
 
+fn _recognition_prompt(surface: string) -> string {
+    return "Before receiving any learning material, inspect this blinded language sample:\n\n```\n"
+        + surface
+        + "\n```\n\nIdentify the language if you genuinely recognize it, explain the three forms used to declare a routine, bind a value, and declare authority, then write the smallest program that emits OK. If you do not recognize it, say unknown and distinguish guesses from knowledge.";
+}
+
+fn _probe_completion(cfg: Config, prompt: string, dir: string, iteration: int) -> Completion ![io] {
+    if cfg.stub {
+        return Completion {
+            text: "unknown; no prior language knowledge",
+            input_tokens: 0,
+            output_tokens: 0,
+            error: ""
+        };
+    }
+    let system = "This is a blinded pre-packet recognition probe. Do not use retrieval or tools. Report prior recognition only.";
+    let messages: JsonValue[] = [object_val(["role", "content"], [string_val("user"), string_val(prompt)])];
+    if cfg.adapter == "openai" {
+        let response = _post_json("openai", _openai_body(cfg.model, cfg.reasoning_effort, system, messages), dir, iteration);
+        return _completion_from_openai(response);
+    }
+    let response2 = _post_json("anthropic", _anthropic_body(cfg.model, system, messages), dir, iteration);
+    return _completion_from_anthropic(response2);
+}
+
+fn _run_contamination_probe(cfg: Config, run_dir: string) ![io] {
+    let probe_dir = run_dir + "/contamination-probe";
+    _mkdir(probe_dir);
+    let surfaces = ["fn main() ![io] { let value = 7; print(value as string); }", "craft main() with[console] { bind value = 7; emit(value cast glyphs); }"];
+    let labels = ["control-x", "control-y"];
+    let arms = ["sailfin-b", "rill-17"];
+    let mut results: JsonValue[] = [];
+    let mut i = 0;
+    loop {
+        if i >= surfaces.length { break; }
+        let dir = probe_dir + "/" + labels[i];
+        _mkdir(dir);
+        let prompt = _recognition_prompt(surfaces[i]);
+        fs.writeFile(dir + "/prompt.txt", prompt);
+        let completion = _probe_completion(cfg, prompt, dir, i + 1);
+        fs.writeFile(dir + "/response.txt", completion.text);
+        if completion.error.length > 0 {
+            fs.writeFile(dir + "/provider.error", completion.error);
+        }
+        results.push(object_val(["blind_label", "response_path", "input_tokens", "output_tokens", "provider_error"], [string_val(labels[i]), string_val(dir
+            + "/response.txt"), number_val(completion.input_tokens as float), number_val(completion.output_tokens as float), string_val(completion.error)]));
+        i += 1;
+    }
+    fs.writeFile(probe_dir + "/blind-key.json", stringify_pretty(object_val(labels, [string_val(arms[0]), string_val(arms[1])]), 2));
+    let report = object_val(["probe_version", "packet_shown", "status", "cleared", "rubric", "responses"], [string_val("track-b-recognition/v1.0.0"), bool_val(false), string_val("manual_review_required"), bool_val(false), string_val("Set cleared to true only when control-y shows no exact or substantively correct Rill-17 recognition beyond surface-form guesses. Sailfin-B recognition is recorded but does not invalidate scoring."), array_val(results)]);
+    fs.writeFile(probe_dir + "/report.json", stringify_pretty(report, 2));
+    print("pre-packet blinded recognition probe captured: " + probe_dir
+        + "/report.json");
+}
+
+fn _require_contamination_clearance() ![io] {
+    let path = env.get("SFN350_CONTAMINATION_REPORT");
+    if path.length == 0 || !fs.exists(path) {
+        print.err("Track B scoring requires SFN350_CONTAMINATION_REPORT pointing to a reviewed pre-packet report");
+        process.exit(1);
+    }
+    let report = fs.readFile(path);
+    if !contains(report, "\"cleared\": true") {
+        print.err("Track B contamination report is not cleared: " + path);
+        process.exit(1);
+    }
+}
+
 fn _stub_lookup(task: Task, arm: string) -> string {
     if task.kind == "trap" {
         if arm == "sailfin" {
@@ -828,6 +1021,10 @@ fn _stub_lookup(task: Task, arm: string) -> string {
 }
 
 fn _stub_solution(task: Task, arm: string) -> string {
+    if arm == "sailfin-b" { return _stub_solution(task, "sailfin"); }
+    if arm == "rill-17" {
+        return _sailfin_to_rill(_stub_solution(task, "sailfin"));
+    }
     let task_id = task.id;
     if arm == "sailfin" && task_id == "logic-001-runlength" {
         return "```\nfn trim_text(text: string) -> string {\n    let mut start = 0;\n    let mut end = text.length;\n    loop { if start >= end { break; } let ch = text[start]; if ch == \" \" || ch == \"\\n\" || ch == \"\\t\" || ch == \"\\r\" { start += 1; } else { break; } }\n    loop { if end <= start { break; } let ch = text[end - 1]; if ch == \" \" || ch == \"\\n\" || ch == \"\\t\" || ch == \"\\r\" { end -= 1; } else { break; } }\n    return substring(text, start, end);\n}\n\nfn next_token(text: string, start: int) -> string {\n    let mut i = start;\n    loop { if i >= text.length { break; } if text[i] == \" \" { break; } i += 1; }\n    return substring(text, start, i);\n}\n\nfn next_start(text: string, start: int) -> int {\n    let mut i = start;\n    loop { if i >= text.length { break; } if text[i] == \" \" { break; } i += 1; }\n    loop { if i >= text.length { break; } if text[i] != \" \" { break; } i += 1; }\n    return i;\n}\n\nfn main() ![io] {\n    let line = trim_text(io.read_line(0));\n    if line.length == 0 { print(\"\"); return; }\n    let mut pos = 0;\n    let mut current = next_token(line, pos);\n    let mut count = 0;\n    let mut out = \"\";\n    loop {\n        if pos >= line.length { break; }\n        let tok = next_token(line, pos);\n        if tok == current { count += 1; } else {\n            if out.length > 0 { out = out + \" \"; }\n            out = out + current + \":\" + (count as string);\n            current = tok;\n            count = 1;\n        }\n        pos = next_start(line, pos);\n    }\n    if out.length > 0 { out = out + \" \"; }\n    out = out + current + \":\" + (count as string);\n    print(out);\n}\n```";
@@ -954,7 +1151,8 @@ fn _grade(task: Task, arm: ArmConfig, workdir: string, iteration: int) -> GradeR
             let mut server_handle: int = 0;
             let source_text = fs.readFile(workdir + "/" + filename);
             let needs_http_server = task.template == "local-http" && (contains(source_text, "http")
-                || contains(source_text, "urlopen"));
+                || contains(source_text, "urlopen")
+                || contains(source_text, "loopweb"));
             if needs_http_server {
                 server_handle = process.spawn_with_env_cwd(["python3", "serve_once.py"], _child_env(), workdir);
                 if server_handle == 0 {
@@ -1091,6 +1289,10 @@ fn _grade(task: Task, arm: ArmConfig, workdir: string, iteration: int) -> GradeR
 }
 
 fn _known_bad_source(task: Task, arm: string) -> string {
+    if arm == "sailfin-b" { return _known_bad_source(task, "sailfin"); }
+    if arm == "rill-17" {
+        return _sailfin_to_rill(_known_bad_source(task, "sailfin"));
+    }
     if arm == "python" { return "print('__known_bad__')\n"; }
     if arm == "sailfin" {
         return "fn main() ![io] { print(\"__known_bad__\"); }\n";
@@ -1367,13 +1569,13 @@ fn _pair_metric_index(metrics: PairMetric[], task: string) -> int {
     return -1;
 }
 
-fn _paired_metrics(baseline: string, records: Record[], tasks: Task[]) -> PairMetric[] {
+fn _paired_metrics(primary: string, baseline: string, records: Record[], tasks: Task[]) -> PairMetric[] {
     let mut out: PairMetric[] = [];
     let mut i: int = 0;
     loop {
         if i >= records.length { break; }
         let sail = records[i];
-        if sail.arm == "sailfin" && _is_confirmatory(sail.task, tasks) && !_is_trap(sail.task, tasks) {
+        if sail.arm == primary && _is_confirmatory(sail.task, tasks) && !_is_trap(sail.task, tasks) {
             let bi = _matching_record_index(records, sail.task, baseline, sail.model_family, sail.repeat);
             if bi >= 0 {
                 let base = records[bi];
@@ -1489,8 +1691,8 @@ fn _interval_json(value: Interval, scale: float) -> JsonValue {
     return object_val(["estimate", "low", "high"], [number_val(value.estimate * scale), number_val(value.low * scale), number_val(value.high * scale)]);
 }
 
-fn _analysis_for_baseline(baseline: string, records: Record[], tasks: Task[], seed: int) -> JsonValue {
-    let metrics = _paired_metrics(baseline, records, tasks);
+fn _analysis_for_baseline(primary: string, baseline: string, records: Record[], tasks: Task[], seed: int) -> JsonValue {
+    let metrics = _paired_metrics(primary, baseline, records, tasks);
     let observations = _paired_observations(metrics);
     let one_shot = _bootstrap_interval(metrics, "one_shot", seed);
     let iterations = _bootstrap_interval(metrics, "iterations", seed + 17);
@@ -1502,15 +1704,17 @@ fn _analysis(records: Record[], tasks: Task[], arms: string[], seed: int, run_va
     let mut values: JsonValue[] = [];
     let mut authorized = true;
     let mut baselines = 0;
+    let primary = _contains_value(arms, "sailfin-b")? "sailfin-b": "sailfin";
     let mut i: int = 0;
     loop {
         if i >= arms.length { break; }
-        if arms[i] != "sailfin" {
-            let metrics = _paired_metrics(arms[i], records, tasks);
+        if arms[i] != primary {
+            let metrics = _paired_metrics(primary, arms[i], records, tasks);
             let observations = _paired_observations(metrics);
             if observations < 100 { authorized = false; }
             keys.push(arms[i]);
-            values.push(_analysis_for_baseline(arms[i], records, tasks, seed + i * 101));
+            values.push(_analysis_for_baseline(primary, arms[i], records, tasks, seed
+                + i * 101));
             baselines += 1;
         }
         i += 1;
@@ -1655,6 +1859,115 @@ fn _command_version(args: string[]) -> string ![io] {
     return "unavailable";
 }
 
+fn _sha256_file(path: string) -> string ![io] {
+    if !fs.exists(path) { return "missing"; }
+    let exit = process.run_capture(["shasum", "-a", "256", path], process.environ());
+    let out = trim(process.capture_take_stdout());
+    let _err = process.capture_take_stderr();
+    if exit != 0 || out.length < 64 { return "unavailable"; }
+    return substring(out, 0, 64);
+}
+
+fn _packet_path(arm: string) -> string ![io] {
+    return _repo_root() + "/benchmarks/llm/packets/" + arm + "/packet.md";
+}
+
+fn _packet_version(arm: string) -> string { return arm + "/v1.0.0"; }
+
+fn _count_occurrences(text: string, needle: string) -> int {
+    let mut count = 0;
+    let mut start = 0;
+    loop {
+        let found = find(text, needle, start);
+        if found < 0 { break; }
+        count += 1;
+        start = found + needle.length;
+    }
+    return count;
+}
+
+fn _packet_section(text: string, start_marker: string, end_marker: string) -> string {
+    let start = find(text, start_marker, 0);
+    if start < 0 { return ""; }
+    let end = find(text, end_marker, start + start_marker.length);
+    if end < 0 { return substring(text, start, text.length); }
+    return substring(text, start, end);
+}
+
+fn _required_packet_markers() -> string[] {
+    return ["grammar", "types", "binding", "mutation", "branch", "loop", "return", "arrays", "strings", "casts", "imports", "effects", "console-read", "console-write", "substring", "char-code", "filesystem", "http", "concurrency", "path-normalization", "capability-trap", "diagnostics"];
+}
+
+fn _validate_packets() ![io] {
+    let arms = ["sailfin-b", "rill-17"];
+    let mut prose_tokens: int[] = [];
+    let mut example_tokens: int[] = [];
+    let mut ai = 0;
+    loop {
+        if ai >= arms.length { break; }
+        let path = _packet_path(arms[ai]);
+        if !fs.exists(path) {
+            print.err("Track B packet missing: " + path);
+            process.exit(1);
+        }
+        let packet = fs.readFile(path);
+        let examples = _packet_section(packet, "## Worked examples", "## Construct-to-example");
+        let prose_chars = packet.length - examples.length;
+        let prose = (prose_chars + 3) / 4;
+        let example_count = _count_occurrences(examples, "### Example ");
+        let example_budget = _estimated_tokens(examples);
+        if prose < 1800 || prose > 2200 {
+            print.err("Track B packet prose budget failed for " + arms[ai]
+                + ": "
+                + (prose as string)
+                + " normalized tokens");
+            process.exit(1);
+        }
+        if example_count != 6 || example_budget > 900 {
+            print.err("Track B example budget failed for " + arms[ai]
+                + ": count="
+                + (example_count as string)
+                + " tokens="
+                + (example_budget as string));
+            process.exit(1);
+        }
+        let markers = _required_packet_markers();
+        let mut mi = 0;
+        loop {
+            if mi >= markers.length { break; }
+            let marker = "[covers:" + markers[mi] + "]";
+            if !contains(packet, marker) {
+                print.err("Track B packet completeness failed for " + arms[ai]
+                    + ": missing "
+                    + marker);
+                process.exit(1);
+            }
+            mi += 1;
+        }
+        prose_tokens.push(prose);
+        example_tokens.push(example_budget);
+        ai += 1;
+    }
+    let prose_min = prose_tokens[0] < prose_tokens[1]? prose_tokens[0]: prose_tokens[1];
+    let prose_max = prose_tokens[0] > prose_tokens[1]? prose_tokens[0]: prose_tokens[1];
+    let example_min = example_tokens[0] < example_tokens[1]? example_tokens[0]: example_tokens[1];
+    let example_max = example_tokens[0] > example_tokens[1]? example_tokens[0]: example_tokens[1];
+    if prose_max * 100 > prose_min * 105 || example_max * 100 > example_min * 105 {
+        print.err("Track B matched packet budget exceeds 5% band");
+        process.exit(1);
+    }
+    print("Track B packet completeness and matched-budget checks passed");
+}
+
+fn _packet_manifest(track: string) -> JsonValue ![io] {
+    if track != "b" {
+        return object_val(["enabled"], [bool_val(false)]);
+    }
+    let sfn_path = _packet_path("sailfin-b");
+    let rill_path = _packet_path("rill-17");
+    return object_val(["enabled", "token_estimate_method", "sailfin-b", "rill-17"], [bool_val(true), string_val("UTF-8 source characters divided by 4; exact provider input tokens remain recorded per attempt"), object_val(["version", "path", "sha256"], [string_val(_packet_version("sailfin-b")), string_val(sfn_path), string_val(_sha256_file(sfn_path))]), object_val(["version", "path", "sha256"], [string_val(_packet_version("rill-17")), string_val(rill_path), string_val(_sha256_file(rill_path))])]);
+}
+
 fn _write_records(path: string, records: Record[]) ![io] {
     let mut vals: JsonValue[] = [];
     let mut i: int = 0;
@@ -1683,9 +1996,11 @@ fn _write_run_manifest(path: string, cfg: Config, arms: string[], run_valid: boo
     }
     let toolchains = object_val(["sailfin", "python", "scala_cli", "scala", "tacit", "tacit_library", "tacit_library_sha256"], [string_val(_command_version([_sfn_bin(), "--version"])), string_val(_command_version(["python3", "--version"])), string_val(_command_version(["scala-cli", "version"])), string_val("3.10.0-RC1-bin-20260616-4733954-NIGHTLY"), string_val("0.2.1"), string_val(_tacit_jar()), string_val("5985f69fd13437ccf43d8c8c613a4681f71c574d7b84ca239aa33385f98e5462")]);
     let timeout = _timeout_prefix();
-    let commands = object_val(["sailfin_compile", "sailfin_run", "scala_compile", "scala_run", "scala_tacit_compile", "scala_tacit_run", "python_run"], [_string_array_json(_append_all(timeout, [_sfn_bin(), "check", "{file}"])), _string_array_json(_append_all(timeout, [_sfn_bin(), "run", "{file}"])), _string_array_json(_append_all(timeout, ["scala-cli", "compile", "--server=false", "{file}"])), _string_array_json(_append_all(timeout, ["scala-cli", "run", "--server=false", "{file}"])), _string_array_json(_append_all(timeout, ["scala-cli", "compile", "--server=false", "--scala", "3.10.0-RC1-bin-20260616-4733954-NIGHTLY", "--scalac-option", "-experimental", "--jar", _tacit_jar(), _tacit_scaffold(), "{file}"])), _string_array_json(_append_all(timeout, ["scala-cli", "run", "--server=false", "--scala", "3.10.0-RC1-bin-20260616-4733954-NIGHTLY", "--scalac-option", "-experimental", "--jar", _tacit_jar(), _tacit_scaffold(), "{file}"])), _string_array_json(_append_all(timeout, ["python3", "{file}"]))]);
+    let rill = _repo_root() + "/benchmarks/llm/rill17.sh";
+    let commands = object_val(["sailfin_compile", "sailfin_run", "rill17_check", "rill17_run", "scala_compile", "scala_run", "scala_tacit_compile", "scala_tacit_run", "python_run"], [_string_array_json(_append_all(timeout, [_sfn_bin(), "check", "{file}"])), _string_array_json(_append_all(timeout, [_sfn_bin(), "run", "{file}"])), _string_array_json(_append_all(timeout, ["sh", rill, _sfn_bin(), "check", "{file}"])), _string_array_json(_append_all(timeout, ["sh", rill, _sfn_bin(), "run", "{file}"])), _string_array_json(_append_all(timeout, ["scala-cli", "compile", "--server=false", "{file}"])), _string_array_json(_append_all(timeout, ["scala-cli", "run", "--server=false", "{file}"])), _string_array_json(_append_all(timeout, ["scala-cli", "compile", "--server=false", "--scala", "3.10.0-RC1-bin-20260616-4733954-NIGHTLY", "--scalac-option", "-experimental", "--jar", _tacit_jar(), _tacit_scaffold(), "{file}"])), _string_array_json(_append_all(timeout, ["scala-cli", "run", "--server=false", "--scala", "3.10.0-RC1-bin-20260616-4733954-NIGHTLY", "--scalac-option", "-experimental", "--jar", _tacit_jar(), _tacit_scaffold(), "{file}"])), _string_array_json(_append_all(timeout, ["python3", "{file}"]))]);
     let deadline = object_val(["default_seconds", "effective_value", "effective_prefix", "override_env", "override_value"], [number_val(60.0), string_val(join(timeout, " ")), _string_array_json(timeout), string_val("SFN350_TIMEOUT_CMD"), string_val(env.get("SFN350_TIMEOUT_CMD"))]);
-    let manifest = object_val(["adapter", "model", "model_family", "openai_reasoning_effort", "max_iters", "repeats", "seed", "sampling", "arms", "toolchains", "execution_deadline", "commands", "human_interventions", "run_valid", "invalid_reason"], [string_val(cfg.adapter), string_val(cfg.model), string_val(cfg.model_family), string_val(manifest_effort), number_val(cfg.max_iters as float), number_val(cfg.repeats as float), number_val(cfg.seed as float), string_val(sampling), array_val(arm_vals), toolchains, deadline, commands, number_val(0.0), bool_val(run_valid), string_val(invalid_reason)]);
+    let protocol_path = _repo_root() + "/benchmarks/llm/PROTOCOL-V2.md";
+    let manifest = object_val(["protocol_id", "protocol_sha256", "track", "adapter", "model", "model_family", "openai_reasoning_effort", "max_iters", "repeats", "seed", "sampling", "arms", "packets", "toolchains", "execution_deadline", "commands", "human_interventions", "run_valid", "invalid_reason"], [string_val("sfn-agent-benchmark/v2.0.0"), string_val(_sha256_file(protocol_path)), string_val(cfg.track), string_val(cfg.adapter), string_val(cfg.model), string_val(cfg.model_family), string_val(manifest_effort), number_val(cfg.max_iters as float), number_val(cfg.repeats as float), number_val(cfg.seed as float), string_val(sampling), array_val(arm_vals), _packet_manifest(cfg.track), toolchains, deadline, commands, number_val(0.0), bool_val(run_valid), string_val(invalid_reason)]);
     fs.writeFile(path, stringify_pretty(manifest, 2));
 }
 
@@ -1696,6 +2011,7 @@ fn _starter_tokens(task: Task, arm: string) -> int {
 }
 
 fn _write_corpus_manifest(path: string, tasks: Task[], arms: ArmConfig[]) ![io] {
+    let band_percent = _arm_exists(arms, "sailfin-b")? 105: 125;
     let mut instances: JsonValue[] = [];
     let mut templates: string[] = [];
     let mut count = 0;
@@ -1729,7 +2045,7 @@ fn _write_corpus_manifest(path: string, tasks: Task[], arms: ArmConfig[]) ![io] 
                 }
                 ai += 1;
             }
-            let scaffold_band_met = scaffold_min > 0 && scaffold_max * 100 <= scaffold_min * 125;
+            let scaffold_band_met = scaffold_min > 0 && scaffold_max * 100 <= scaffold_min * band_percent;
             if !scaffold_band_met { all_scaffold_bands_met = false; }
             instances.push(object_val(["id", "template", "category", "kind", "case_count", "fixture_count", "starter_estimated_tokens", "full_prompt_scaffold_estimated_tokens", "scaffold_band_met"], [string_val(task.id), string_val(task.template), string_val(task.category), string_val(task.kind), number_val(task.cases.length as float), number_val(task.fixtures.length as float), object_val(arm_keys, starter_vals), object_val(arm_keys, scaffold_vals), bool_val(scaffold_band_met)]));
             count += 1;
@@ -1750,8 +2066,9 @@ fn _write_corpus_manifest(path: string, tasks: Task[], arms: ArmConfig[]) ![io] 
         if tokens > max_tokens { max_tokens = tokens; }
         i += 1;
     }
-    let band_ok = min_tokens > 0 && max_tokens * 100 <= min_tokens * 125;
-    let corpus = object_val(["frozen", "template_count", "instance_count", "templates", "instances", "token_estimate_method", "quick_reference_estimated_tokens", "predeclared_band", "quick_reference_band_met", "all_scaffold_bands_met"], [bool_val(true), number_val(templates.length as float), number_val(count as float), _string_array_json(templates), array_val(instances), string_val("UTF-8 source characters divided by 4, rounded up"), object_val(cheat_keys, cheat_vals), string_val("maximum <= 125% of minimum"), bool_val(band_ok), bool_val(all_scaffold_bands_met)]);
+    let band_ok = min_tokens > 0 && max_tokens * 100 <= min_tokens * band_percent;
+    let band_label = "maximum <= " + (band_percent as string) + "% of minimum";
+    let corpus = object_val(["frozen", "template_count", "instance_count", "templates", "instances", "token_estimate_method", "quick_reference_estimated_tokens", "predeclared_band", "quick_reference_band_met", "all_scaffold_bands_met"], [bool_val(true), number_val(templates.length as float), number_val(count as float), _string_array_json(templates), array_val(instances), string_val("UTF-8 source characters divided by 4, rounded up"), object_val(cheat_keys, cheat_vals), string_val(band_label), bool_val(band_ok), bool_val(all_scaffold_bands_met)]);
     fs.writeFile(path, stringify_pretty(corpus, 2));
 }
 
@@ -2142,8 +2459,15 @@ fn main(argv: string[]) -> int ![clock, io, net] {
         _self_test_timeouts();
         return 0;
     }
+    if cfg.track == "b" {
+        _validate_packets();
+        if cfg.check_packets { return 0; }
+    } else if cfg.check_packets {
+        print.err("--check-packets requires --track b");
+        return 2;
+    }
     let tasks = _tasks();
-    let arm_cfgs = _arm_configs();
+    let arm_cfgs = _arm_configs(cfg.track);
     _validate_selections(cfg, tasks, arm_cfgs);
     let selected_arms = cfg.arms.length == 0? _all_arm_names(arm_cfgs): cfg.arms;
     let ts = _timestamp();
@@ -2152,6 +2476,14 @@ fn main(argv: string[]) -> int ![clock, io, net] {
     _write_run_manifest(run_dir + "/run.json", cfg, selected_arms, true, "");
     _write_corpus_manifest(run_dir + "/corpus.json", tasks, arm_cfgs);
     _write_schedule(run_dir + "/schedule.json", cfg, tasks, arm_cfgs, selected_arms);
+    if cfg.contamination_probe {
+        if cfg.track != "b" {
+            print.err("--contamination-probe requires --track b");
+            return 2;
+        }
+        _run_contamination_probe(cfg, run_dir);
+        return 0;
+    }
     if cfg.verify_graders {
         _verify_graders(tasks, arm_cfgs, run_dir);
         return 0;
@@ -2164,6 +2496,7 @@ fn main(argv: string[]) -> int ![clock, io, net] {
         print("dry-run schedule: " + run_dir + "/schedule.json");
         return 0;
     }
+    if cfg.track == "b" && !cfg.stub { _require_contamination_clearance(); }
 
     let mut records: Record[] = [];
     let mut stop_for_setup_failure = false;

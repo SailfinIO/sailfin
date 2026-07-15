@@ -1,0 +1,101 @@
+// Rill-17 is a nonce experimental control for the Track B benchmark. It is
+// deliberately a thin, deterministic surface dialect over the frozen
+// Sailfin-B subset so both arms share semantics, primitives, and graders.
+import { fs } from "fs";
+
+fn is_identifier_start(ch: string) -> boolean {
+    let code = char_code(ch);
+    return (code >= 65 && code <= 90) || (code >= 97 && code <= 122) || ch == "_";
+}
+
+fn is_identifier_part(ch: string) -> boolean {
+    let code = char_code(ch);
+    return is_identifier_start(ch) || (code >= 48 && code <= 57);
+}
+
+fn sailfin_identifier(value: string) -> string {
+    if value == "craft" { return "fn"; }
+    if value == "bind" { return "let"; }
+    if value == "flux" { return "mut"; }
+    if value == "yield" { return "return"; }
+    if value == "when" { return "if"; }
+    if value == "otherwise" { return "else"; }
+    if value == "cycle" { return "loop"; }
+    if value == "halt" { return "break"; }
+    if value == "resume" { return "continue"; }
+    if value == "draw" { return "import"; }
+    if value == "via" { return "from"; }
+    if value == "cast" { return "as"; }
+    if value == "glyphs" { return "string"; }
+    if value == "whole" { return "int"; }
+    if value == "truth" { return "boolean"; }
+    if value == "empty" { return "void"; }
+    if value == "aye" { return "true"; }
+    if value == "nay" { return "false"; }
+    if value == "emit" { return "print"; }
+    if value == "span" { return "substring"; }
+    if value == "rune_code" { return "char_code"; }
+    if value == "console" { return "io"; }
+    if value == "link" { return "net"; }
+    if value == "vault" { return "fs"; }
+    if value == "loopweb" { return "http"; }
+    if value == "take_line" { return "read_line"; }
+    if value == "read_text" { return "readFile"; }
+    if value == "fetch_body" { return "get_body"; }
+    if value == "with" { return "!"; }
+    return value;
+}
+
+fn translate(source: string) -> string {
+    let mut out = "";
+    let mut i = 0;
+    let mut quoted = false;
+    loop {
+        if i >= source.length { break; }
+        let ch = source[i];
+        if quoted {
+            out = out + ch;
+            if ch == "\\" && i + 1 < source.length {
+                out = out + source[i + 1];
+                i += 2;
+                continue;
+            }
+            if ch == "\"" { quoted = false; }
+            i += 1;
+            continue;
+        }
+        if ch == "\"" {
+            quoted = true;
+            out = out + ch;
+            i += 1;
+            continue;
+        }
+        if is_identifier_start(ch) {
+            let start = i;
+            i += 1;
+            loop {
+                if i >= source.length || !is_identifier_part(source[i]) {
+                    break;
+                }
+                i += 1;
+            }
+            out = out + sailfin_identifier(substring(source, start, i));
+            continue;
+        }
+        out = out + ch;
+        i += 1;
+    }
+    return out;
+}
+
+fn main(argv: string[]) -> int ![io] {
+    if argv.length != 4 || (argv[2] != "check" && argv[2] != "run") {
+        print.err("usage: rill17 <sfn-bin> check|run <source.r17>");
+        return 2;
+    }
+    let output = argv[3] + ".translated.sfn";
+    fs.writeFile(output, translate(fs.readFile(argv[3])));
+    let rc = process.exec([argv[1], argv[2], output], process.environ());
+    print.err("failed to execute Sailfin toolchain: exit " + (rc as string));
+    return rc;
+}
