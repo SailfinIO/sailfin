@@ -1,0 +1,360 @@
+name: Seed per-shard test-bin cache (main scope)
+
+# SFN-151: the per-shard test-binary cache (#2008, SFEP-0044) restored by
+# ci.yml's shard legs is only ever *saved* during `pull_request` /
+# `merge_group` runs, whose `actions/cache` entries are scoped to the PR /
+# queue ref and are invisible to sibling PRs and to `main`. No run ever
+# writes a main-scoped `test-bin-<os>-<shard>-*` entry, so every fresh PR
+# starts 0% cold by construction (the older `sailfin-testbin-*` baseline in
+# build-quality.yml is a different key scheme and Linux-only).
+#
+# This workflow is the dedicated main-scoped seeder: on a push to `main`
+# that could change any test binary's identity, it builds the compiler once
+# per OS and runs each shard's test phase with the test-bin cache enabled,
+# letting the SAME `actions/cache` step ci.yml uses save
+# `test-bin-<os>-<shard>-<sha>` under the default-branch scope. PRs then
+# restore it via the `test-bin-<os>-<shard>-` prefix. Entry keys
+# self-validate (build_cache.sfn folds test-source hash + dep closure +
+# compiler + runtime identity, #1233), so a compiler-source PR still misses
+# and cold-starts correctly — seeding never weakens key inputs.
+#
+# The cache key expression here is copied verbatim from ci.yml's shard legs
+# so the two never drift; if that key changes, change it in both places.
+
+env:
+  # Match ci.yml: pin the arena allocator on for CI builds.
+  SAILFIN_USE_ARENA: "1"
+
+permissions:
+  contents: read
+
+on:
+  push:
+    branches: [main]
+    # Only re-seed when a change could alter a test binary's cache identity
+    # (compiler, runtime, seed pin) or this seeding machinery itself. A
+    # docs-only push leaves every entry valid, so PRs still hit the last
+    # seed — skipping those pushes keeps the seeder light.
+    paths:
+      - "compiler/**"
+      - "runtime/**"
+      - "bootstrap.toml"
+      - ".github/workflows/seed-test-bin.yml"
+      - ".github/actions/sailfin-build/**"
+  # Manual re-seed (e.g. after a seed bump or a cache eviction).
+  workflow_dispatch:
+    inputs: {}
+
+concurrency:
+  # Newest main wins: a burst of merges only needs the latest sources seeded,
+  # and this avoids a serial backlog of stale-SHA seed runs. The tradeoff is
+  # starvation — if sustained main cadence is shorter than a full seed run,
+  # an in-flight run can be cancelled before its post-job save lands, so no
+  # fresh entry appears. That degrades cache *warmth* only, never
+  # correctness: PRs keep restoring the last completed main seed via the
+  # prefix, and entries self-validate (#1233). Flip cancel-in-progress to
+  # false if main throughput ever makes the starvation real.
+  group: seed-test-bin-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  # Shared per-OS compiler build (mirrors ci.yml's build-compiler-* jobs,
+  # minus the Windows cross-compile and packaging the seeder doesn't need).
+  build-compiler-linux:
+    name: Build compiler [linux-x86_64]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 120
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v7
+
+      - name: Resolve seed version from bootstrap.toml
+        id: seed
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [ ! -f bootstrap.toml ]; then
+            echo "[seed-pin] bootstrap.toml is missing from checkout" >&2
+            exit 1
+          fi
+          pin="$(awk '
+            /^\[[^]]+\]/ { section=$0 }
+            section == "[seed]" && /^version[[:space:]]*=/ { gsub(/"/, "", $3); print $3; exit }
+          ' bootstrap.toml)"
+          if [ -z "$pin" ]; then
+            echo "[seed-pin] bootstrap.toml [seed].version is empty or missing" >&2
+            exit 1
+          fi
+          echo "[seed-pin] using seed $pin"
+          echo "seed_version=$pin" >> "$GITHUB_OUTPUT"
+
+      - name: Install clang (Linux)
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y clang-18 llvm-18 lld jq
+          echo "CLANG=clang-18" >> "$GITHUB_ENV"
+
+      - name: Build native compiler (via Makefile)
+        uses: ./.github/actions/sailfin-build
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          mode: build-only
+          target: linux-x86_64
+          clang: clang-18
+          seed_version: ${{ steps.seed.outputs.seed_version }}
+          package: "false"
+
+      # Bounded shard payload — same include/exclude rationale as ci.yml's
+      # build-compiler-linux: ship the compiler + import-context + module-IR
+      # cache, exclude build/cache/test-bin (each seed leg populates its own).
+      - name: Bundle compiler tree for shard legs
+        shell: bash
+        run: |
+          set -euo pipefail
+          paths=(build/bin/sfn build/compiler/import-context)
+          if [ -f build/native/.build-stamp ]; then
+            paths+=(build/native/.build-stamp)
+          fi
+          if [ -d build/cache ]; then
+            paths+=(build/cache)
+          fi
+          tar --exclude 'build/cache/test-bin' -czf "build-tree-linux-x86_64.tar.gz" "${paths[@]}"
+          ls -lh "build-tree-linux-x86_64.tar.gz"
+
+      - name: Upload compiler build tree
+        uses: actions/upload-artifact@v7
+        with:
+          name: seed-build-tree-linux-x86_64
+          path: build-tree-linux-x86_64.tar.gz
+          if-no-files-found: error
+          retention-days: 1
+
+  build-compiler-macos:
+    name: Build compiler [macos-arm64]
+    runs-on: macos-26
+    timeout-minutes: 120
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v7
+
+      - name: Resolve seed version from bootstrap.toml
+        id: seed
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [ ! -f bootstrap.toml ]; then
+            echo "[seed-pin] bootstrap.toml is missing from checkout" >&2
+            exit 1
+          fi
+          pin="$(awk '
+            /^\[[^]]+\]/ { section=$0 }
+            section == "[seed]" && /^version[[:space:]]*=/ { gsub(/"/, "", $3); print $3; exit }
+          ' bootstrap.toml)"
+          if [ -z "$pin" ]; then
+            echo "[seed-pin] bootstrap.toml [seed].version is empty or missing" >&2
+            exit 1
+          fi
+          echo "[seed-pin] using seed $pin"
+          echo "seed_version=$pin" >> "$GITHUB_OUTPUT"
+
+      - name: Install jq + LLVM tools (macOS)
+        shell: bash
+        run: |
+          brew install jq llvm
+          echo "$(brew --prefix llvm)/bin" >> "$GITHUB_PATH"
+
+      - name: Build native compiler (via Makefile)
+        uses: ./.github/actions/sailfin-build
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          mode: build-only
+          target: macos-arm64
+          clang: clang
+          seed_version: ${{ steps.seed.outputs.seed_version }}
+          package: "false"
+
+      - name: Bundle compiler tree for shard legs
+        shell: bash
+        run: |
+          set -euo pipefail
+          paths=(build/bin/sfn build/compiler/import-context)
+          if [ -f build/native/.build-stamp ]; then
+            paths+=(build/native/.build-stamp)
+          fi
+          if [ -d build/cache ]; then
+            paths+=(build/cache)
+          fi
+          tar --exclude 'build/cache/test-bin' -czf "build-tree-macos-arm64.tar.gz" "${paths[@]}"
+          ls -lh "build-tree-macos-arm64.tar.gz"
+
+      - name: Upload compiler build tree
+        uses: actions/upload-artifact@v7
+        with:
+          name: seed-build-tree-macos-arm64
+          path: build-tree-macos-arm64.tar.gz
+          if-no-files-found: error
+          retention-days: 1
+
+  # Per-shard seed legs: run only this OS+shard's tests with the test-bin
+  # cache enabled, so build/cache/test-bin holds exactly this shard's slice,
+  # then let `actions/cache` save it under the main-scoped
+  # `test-bin-<os>-<shard>-<sha>` key. Per-shard isolation keeps each entry
+  # small (a leg never carries another shard's binaries).
+  seed-linux:
+    name: Seed test-bin [linux-x86_64 / ${{ matrix.shard }}]
+    needs: build-compiler-linux
+    runs-on: ubuntu-24.04
+    timeout-minutes: 120
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [unit-a, unit-b, unit-c, int-caps, e2e-a, e2e-b, e2e-c, e2e-d]
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v7
+
+      - name: Resolve seed version from bootstrap.toml
+        id: seed
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [ ! -f bootstrap.toml ]; then
+            echo "[seed-pin] bootstrap.toml is missing from checkout" >&2
+            exit 1
+          fi
+          pin="$(awk '
+            /^\[[^]]+\]/ { section=$0 }
+            section == "[seed]" && /^version[[:space:]]*=/ { gsub(/"/, "", $3); print $3; exit }
+          ' bootstrap.toml)"
+          if [ -z "$pin" ]; then
+            echo "[seed-pin] bootstrap.toml [seed].version is empty or missing" >&2
+            exit 1
+          fi
+          echo "[seed-pin] using seed $pin"
+          echo "seed_version=$pin" >> "$GITHUB_OUTPUT"
+
+      - name: Install clang (Linux)
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y clang-18 llvm-18 lld jq
+          echo "CLANG=clang-18" >> "$GITHUB_ENV"
+
+      - name: Download shared compiler build
+        uses: actions/download-artifact@v8
+        with:
+          name: seed-build-tree-linux-x86_64
+
+      - name: Extract shared compiler build
+        shell: bash
+        run: |
+          set -euo pipefail
+          tar -xzf "build-tree-linux-x86_64.tar.gz"
+          rm -f "build-tree-linux-x86_64.tar.gz"
+          # Mark the artifact binary current for this commit so a nested
+          # `make compile` in a test stays the intended no-op (see ci.yml's
+          # extract step for the exit-134 history behind this touch).
+          touch build/bin/sfn
+          [ -f build/native/.build-stamp ] && touch build/native/.build-stamp || true
+          ls -lh build/bin/sfn
+
+      # `actions/cache` (not `/restore`) so the post-job save fires: on
+      # push:main the ref is refs/heads/main, so the save lands in the
+      # default-branch scope PRs can read. Key copied verbatim from ci.yml.
+      - name: Seed per-shard test-binary cache
+        uses: actions/cache@v6
+        with:
+          path: build/cache/test-bin
+          key: test-bin-${{ runner.os }}-${{ matrix.shard }}-${{ github.sha }}
+          restore-keys: |
+            test-bin-${{ runner.os }}-${{ matrix.shard }}-
+
+      - name: Run shard tests (populate test-bin cache)
+        uses: ./.github/actions/sailfin-build
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          mode: skip-build
+          target: linux-x86_64
+          clang: clang-18
+          seed_version: ${{ steps.seed.outputs.seed_version }}
+          shard: ${{ matrix.shard }}
+          shard_test_jobs: "3"
+          package: "false"
+
+  seed-macos:
+    name: Seed test-bin [macos-arm64 / ${{ matrix.shard }}]
+    needs: build-compiler-macos
+    runs-on: macos-26
+    timeout-minutes: 120
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [unit-a, unit-b, unit-c, int-caps, e2e-a, e2e-b, e2e-c, e2e-d]
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v7
+
+      - name: Resolve seed version from bootstrap.toml
+        id: seed
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [ ! -f bootstrap.toml ]; then
+            echo "[seed-pin] bootstrap.toml is missing from checkout" >&2
+            exit 1
+          fi
+          pin="$(awk '
+            /^\[[^]]+\]/ { section=$0 }
+            section == "[seed]" && /^version[[:space:]]*=/ { gsub(/"/, "", $3); print $3; exit }
+          ' bootstrap.toml)"
+          if [ -z "$pin" ]; then
+            echo "[seed-pin] bootstrap.toml [seed].version is empty or missing" >&2
+            exit 1
+          fi
+          echo "[seed-pin] using seed $pin"
+          echo "seed_version=$pin" >> "$GITHUB_OUTPUT"
+
+      - name: Install jq + LLVM tools (macOS)
+        shell: bash
+        run: |
+          brew install jq llvm
+          echo "$(brew --prefix llvm)/bin" >> "$GITHUB_PATH"
+
+      - name: Download shared compiler build
+        uses: actions/download-artifact@v8
+        with:
+          name: seed-build-tree-macos-arm64
+
+      - name: Extract shared compiler build
+        shell: bash
+        run: |
+          set -euo pipefail
+          tar -xzf "build-tree-macos-arm64.tar.gz"
+          rm -f "build-tree-macos-arm64.tar.gz"
+          # See the Linux twin / ci.yml for the touch rationale.
+          touch build/bin/sfn
+          [ -f build/native/.build-stamp ] && touch build/native/.build-stamp || true
+          ls -lh build/bin/sfn
+
+      - name: Seed per-shard test-binary cache
+        uses: actions/cache@v6
+        with:
+          path: build/cache/test-bin
+          key: test-bin-${{ runner.os }}-${{ matrix.shard }}-${{ github.sha }}
+          restore-keys: |
+            test-bin-${{ runner.os }}-${{ matrix.shard }}-
+
+      - name: Run shard tests (populate test-bin cache)
+        uses: ./.github/actions/sailfin-build
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          mode: skip-build
+          target: macos-arm64
+          clang: clang
+          seed_version: ${{ steps.seed.outputs.seed_version }}
+          shard: ${{ matrix.shard }}
+          shard_test_jobs: "3"
+          package: "false"
