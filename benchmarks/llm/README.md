@@ -45,6 +45,7 @@ build/bin/sfn build -o build/sfn350 benchmarks/llm/sfn350.sfn
 ./build/sfn350 --adapter stub --arm sailfin --results-dir build/sfn350-smoke-sailfin
 ./build/sfn350 --adapter stub --arm python --results-dir build/sfn350-smoke-python
 ./build/sfn350 --self-test-analysis
+./build/sfn350 --self-test-timeouts
 benchmarks/llm/verify-provider-auth.sh
 ```
 
@@ -126,8 +127,11 @@ Environment:
 
 - `SAILFIN_BIN`: compiler binary used by the Sailfin arm. Defaults to
   `$PWD/build/bin/sfn`.
-- `SFN350_TIMEOUT_CMD`: optional command prefix for Sailfin compile and run
-  commands, for example `timeout 60`.
+- `SFN350_TIMEOUT_CMD`: optional full command-prefix override for every generated
+  compile and run command, for example `timeout 120`. The default is `timeout 60`
+  (`gtimeout 60` on hosts where GNU timeout uses that name). Timeout expiry is
+  recorded separately from compile/runtime errors, including empty stdout and
+  stderr files plus a `.timeout` marker for the failed iteration.
 - `OPENAI_API_KEY` / `ANTHROPIC_API_KEY`: required for real model adapters.
   The runner prefers shell environment values and falls back to `.env`, then
   `benchmarks/llm/.env`.
