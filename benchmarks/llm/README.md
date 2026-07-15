@@ -45,6 +45,7 @@ build/bin/sfn build -o build/sfn350 benchmarks/llm/sfn350.sfn
 ./build/sfn350 --adapter stub --arm sailfin --results-dir build/sfn350-smoke-sailfin
 ./build/sfn350 --adapter stub --arm python --results-dir build/sfn350-smoke-python
 ./build/sfn350 --self-test-analysis
+benchmarks/llm/verify-provider-auth.sh
 ```
 
 Fetch and verify the pinned TACIT comparator once, then the smoke can run with
@@ -75,7 +76,8 @@ failure artifact; and `blind-review/` exports sources plus a separate key.
 
 ```bash
 export OPENAI_API_KEY=...
-./build/sfn350 --adapter openai --model gpt-4.1 --arm sailfin --arm python
+./build/sfn350 --adapter openai --model gpt-5.6-terra \
+  --reasoning-effort medium --arm sailfin --arm scala --arm python
 
 export ANTHROPIC_API_KEY=...
 ./build/sfn350 --adapter anthropic --model claude-sonnet-5 --arm sailfin
@@ -85,7 +87,8 @@ Before a scored run, probe each configured adapter once without adding an
 observation:
 
 ```bash
-./build/sfn350 --adapter openai --model <frozen-id> --schema-probe
+./build/sfn350 --adapter openai --model gpt-5.6-terra \
+  --reasoning-effort medium --schema-probe
 ./build/sfn350 --adapter anthropic --model <frozen-id> --schema-probe
 ```
 
@@ -115,7 +118,8 @@ Useful filters:
 
 ```bash
 ./build/sfn350 --adapter stub --task io-001-sumfile --arm sailfin
-./build/sfn350 --adapter openai --model gpt-4.1 --max-iters 3
+./build/sfn350 --adapter openai --model gpt-5.6-terra \
+  --reasoning-effort medium --max-iters 3
 ```
 
 Environment:
@@ -142,3 +146,10 @@ Confirmatory outputs must not be collected until the runner includes SFN-352
 and both live schema probes have passed with exact model IDs frozen. Provider
 failures remain observations; rerunning selected failures or deleting their
 artifact directories invalidates the preregistered run.
+
+The OpenAI adapter defaults to `gpt-5.6-terra` with reasoning effort `medium`.
+GPT-5 requests use `max_completion_tokens` and omit temperature; explicitly
+selected legacy models retain the older `max_tokens` plus temperature request
+shape. Provider credentials are written only to a temporary header file for
+the duration of each `curl` request and removed on shell exit rather than being
+expanded into the child process argument list.

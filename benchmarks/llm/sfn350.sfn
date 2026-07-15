@@ -70,6 +70,7 @@ struct ArmConfig {
 struct Config {
     adapter: string;
     model: string;
+    reasoning_effort: string;
     max_iters: int;
     repeats: int;
     seed: int;
@@ -132,14 +133,20 @@ struct Interval {
 }
 
 fn _usage() -> string {
-    return "usage: sfn run benchmarks/llm/sfn350.sfn -- [--adapter stub|openai|anthropic] [--real] [--model M] [--model-family F] [--arm A] [--task T] [--max-iters N] [--repeats N] [--seed N] [--dry-run] [--schema-probe] [--verify-graders] [--self-test-analysis] [--results-dir DIR]\n"
+    return "usage: sfn run benchmarks/llm/sfn350.sfn -- [--adapter stub|openai|anthropic] [--real] [--model M] [--reasoning-effort E] [--model-family F] [--arm A] [--task T] [--max-iters N] [--repeats N] [--seed N] [--dry-run] [--schema-probe] [--verify-graders] [--self-test-analysis] [--results-dir DIR]\n"
         + "\n"
-        + "defaults: --adapter stub --model gpt-4.1 --model-family unspecified --max-iters 5 --repeats 1 --seed 350 --results-dir build/sfn350-results\n"
+        + "defaults: --adapter stub --model gpt-5.6-terra --reasoning-effort medium --model-family unspecified --max-iters 5 --repeats 1 --seed 350 --results-dir build/sfn350-results\n"
         + "env: OPENAI_API_KEY, ANTHROPIC_API_KEY, SAILFIN_BIN, TACIT_LIBRARY_JAR, SFN350_TIMEOUT_CMD; API keys may also be set in .env or benchmarks/llm/.env\n";
 }
 
 fn _valid_adapter(value: string) -> boolean {
     return value == "stub" || value == "openai" || value == "anthropic";
+}
+
+fn _valid_reasoning_effort(value: string) -> boolean {
+    return value == "none" || value == "low" || value == "medium" || value == "high"
+        || value == "xhigh"
+        || value == "max";
 }
 
 fn _parse_int(text: string, fallback: int) -> int {
@@ -165,7 +172,8 @@ fn _parse_int(text: string, fallback: int) -> int {
 fn _default_config() -> Config {
     return Config {
         adapter: "stub",
-        model: "gpt-4.1",
+        model: "gpt-5.6-terra",
+        reasoning_effort: "medium",
         max_iters: 5,
         repeats: 1,
         seed: 350,
@@ -201,6 +209,14 @@ fn _parse_config(argv: string[]) -> Config ![io] {
             i += 1;
         } else if arg == "--model" && i + 1 < argv.length {
             cfg.model = argv[i + 1];
+            i += 1;
+        } else if arg == "--reasoning-effort" && i + 1 < argv.length {
+            cfg.reasoning_effort = argv[i + 1];
+            if !_valid_reasoning_effort(cfg.reasoning_effort) {
+                print.err("unknown reasoning effort: " + cfg.reasoning_effort);
+                print.err(_usage());
+                process.exit(2);
+            }
             i += 1;
         } else if arg == "--max-iters" && i + 1 < argv.length {
             cfg.max_iters = _parse_int(argv[i + 1], cfg.max_iters);
@@ -503,18 +519,24 @@ fn _post_json(adapter: string, body: string, cwd: string, iteration: int) -> str
     let body_path = cwd + "/request" + suffix;
     fs.writeFile(body_path, body);
     let quoted = _shell_quote("request" + suffix);
-    let mut script: string = "";
+    let auth_setup = "auth_file=\"$(mktemp \"${TMPDIR:-/tmp}/sfn350-auth.XXXXXX\")\"; "
+        + "trap 'rm -f \"$auth_file\"' EXIT; ";
+    let mut script: string = auth_setup;
     if adapter == "openai" {
-        script = "curl -sS https://api.openai.com/v1/chat/completions "
+        script = script
+            + "printf '%s\\n' \"Authorization: Bearer $OPENAI_API_KEY\" > \"$auth_file\"; "
+            + "curl -sS https://api.openai.com/v1/chat/completions "
             + "-H 'content-type: application/json' "
-            + "-H \"Authorization: Bearer $OPENAI_API_KEY\" "
+            + "-H \"@$auth_file\" "
             + "--data-binary @"
             + quoted;
     } else {
-        script = "curl -sS https://api.anthropic.com/v1/messages "
+        script = script
+            + "printf '%s\\n' \"x-api-key: $ANTHROPIC_API_KEY\" > \"$auth_file\"; "
+            + "curl -sS https://api.anthropic.com/v1/messages "
             + "-H 'content-type: application/json' "
             + "-H 'anthropic-version: 2023-06-01' "
-            + "-H \"x-api-key: $ANTHROPIC_API_KEY\" "
+            + "-H \"@$auth_file\" "
             + "--data-binary @"
             + quoted;
     }
@@ -532,13 +554,20 @@ fn _post_json(adapter: string, body: string, cwd: string, iteration: int) -> str
     return out;
 }
 
-fn _openai_body(model: string, system: string, messages: JsonValue[]) -> string {
+fn _uses_gpt5_request(model: string) -> boolean {
+    return model.length >= 5 && substring(model, 0, 5) == "gpt-5";
+}
+
+fn _openai_body(model: string, reasoning_effort: string, system: string, messages: JsonValue[]) -> string {
     let mut all: JsonValue[] = [object_val(["role", "content"], [string_val("system"), string_val(system)])];
     let mut i: int = 0;
     loop {
         if i >= messages.length { break; }
         all.push(messages[i]);
         i += 1;
+    }
+    if _uses_gpt5_request(model) {
+        return stringify(object_val(["model", "reasoning_effort", "max_completion_tokens", "messages"], [string_val(model), string_val(reasoning_effort), number_val(4096), _messages_json(all)]));
     }
     return stringify(object_val(["model", "temperature", "max_tokens", "messages"], [string_val(model), number_val(0.2), number_val(4096), _messages_json(all)]));
 }
@@ -620,6 +649,17 @@ fn _self_test_provider_schemas() ![io] {
         print.err("provider response/usage schema fixtures failed");
         process.exit(1);
     }
+    let messages = [object_val(["role", "content"], [string_val("user"), string_val("OK")])];
+    let terra = _openai_body("gpt-5.6-terra", "medium", "system", messages);
+    let legacy = _openai_body("gpt-4.1", "medium", "system", messages);
+    if !contains(terra, "\"reasoning_effort\":\"medium\"") || !contains(terra, "\"max_completion_tokens\":4096")
+        || contains(terra, "\"temperature\"")
+        || contains(terra, "\"max_tokens\"")
+        || !contains(legacy, "\"temperature\":0.2")
+        || !contains(legacy, "\"max_tokens\":4096") {
+        print.err("provider request schema fixtures failed");
+        process.exit(1);
+    }
 }
 
 fn _run_schema_probe(cfg: Config, run_dir: string) ![io] {
@@ -636,7 +676,7 @@ fn _run_schema_probe(cfg: Config, run_dir: string) ![io] {
         error: ""
     };
     if cfg.adapter == "openai" {
-        completion = _completion_from_openai(_post_json("openai", _openai_body(cfg.model, system, messages), run_dir, 0));
+        completion = _completion_from_openai(_post_json("openai", _openai_body(cfg.model, cfg.reasoning_effort, system, messages), run_dir, 0));
     } else {
         completion = _completion_from_anthropic(_post_json("anthropic", _anthropic_body(cfg.model, system, messages), run_dir, 0));
     }
@@ -749,7 +789,7 @@ fn _complete(cfg: Config, task: Task, arm: string, system: string, messages: Jso
         };
     }
     if cfg.adapter == "openai" {
-        let resp = _post_json("openai", _openai_body(cfg.model, system, messages), cwd, iteration);
+        let resp = _post_json("openai", _openai_body(cfg.model, cfg.reasoning_effort, system, messages), cwd, iteration);
         return _completion_from_openai(resp);
     }
     if cfg.adapter == "anthropic" {
@@ -1512,10 +1552,16 @@ fn _write_run_manifest(path: string, cfg: Config, arms: string[]) ![io] {
         arm_vals.push(string_val(arms[i]));
         i += 1;
     }
-    let sampling = cfg.adapter == "anthropic"? "provider default": "temperature=0.2";
+    let mut sampling = "temperature=0.2";
+    let mut manifest_effort = "not applicable";
+    if cfg.adapter == "anthropic" { sampling = "provider default"; } else if _uses_gpt5_request(cfg.model) {
+        sampling = "reasoning_effort=" + cfg.reasoning_effort
+            + "; temperature omitted";
+        manifest_effort = cfg.reasoning_effort;
+    }
     let toolchains = object_val(["sailfin", "python", "scala_cli", "scala", "tacit", "tacit_library", "tacit_library_sha256"], [string_val(_command_version([_sfn_bin(), "--version"])), string_val(_command_version(["python3", "--version"])), string_val(_command_version(["scala-cli", "version"])), string_val("3.10.0-RC1-bin-20260616-4733954-NIGHTLY"), string_val("0.2.1"), string_val(_tacit_jar()), string_val("5985f69fd13437ccf43d8c8c613a4681f71c574d7b84ca239aa33385f98e5462")]);
     let commands = object_val(["sailfin_compile", "sailfin_run", "scala_compile", "scala_tacit_compile", "python_run"], [_string_array_json([_sfn_bin(), "check", "{file}"]), _string_array_json([_sfn_bin(), "run", "{file}"]), _string_array_json(["scala-cli", "compile", "--server=false", "{file}"]), _string_array_json(["scala-cli", "compile", "--server=false", "--scala", "3.10.0-RC1-bin-20260616-4733954-NIGHTLY", "--scalac-option", "-experimental", "--jar", _tacit_jar(), _tacit_scaffold(), "{file}"]), _string_array_json(["python3", "{file}"])]);
-    let manifest = object_val(["adapter", "model", "model_family", "max_iters", "repeats", "seed", "sampling", "arms", "toolchains", "commands", "human_interventions"], [string_val(cfg.adapter), string_val(cfg.model), string_val(cfg.model_family), number_val(cfg.max_iters as float), number_val(cfg.repeats as float), number_val(cfg.seed as float), string_val(sampling), array_val(arm_vals), toolchains, commands, number_val(0.0)]);
+    let manifest = object_val(["adapter", "model", "model_family", "openai_reasoning_effort", "max_iters", "repeats", "seed", "sampling", "arms", "toolchains", "commands", "human_interventions"], [string_val(cfg.adapter), string_val(cfg.model), string_val(cfg.model_family), string_val(manifest_effort), number_val(cfg.max_iters as float), number_val(cfg.repeats as float), number_val(cfg.seed as float), string_val(sampling), array_val(arm_vals), toolchains, commands, number_val(0.0)]);
     fs.writeFile(path, stringify_pretty(manifest, 2));
 }
 

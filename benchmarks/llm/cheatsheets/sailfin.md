@@ -12,10 +12,12 @@ fn sum_file(path: string) -> int ![io] {
 }
 ```
 
-For standalone benchmark files, prefer local helpers for `trim`, `split`, and
-`join` rather than importing `sfn/strings`; the current bare-file runner can
-typecheck those imports but fail during lowering when invoked from the isolated
-task working directory.
+For standalone benchmark files, import `trim`, `split`, and `join` from
+`sfn/strings` when those helpers are useful:
+
+```sailfin
+import { join, split, trim } from "sfn/strings";
+```
 
 Useful basics:
 
