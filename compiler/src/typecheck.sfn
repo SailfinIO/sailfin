@@ -1640,9 +1640,11 @@ fn try_operator_result_type(operand_type: string) -> string? {
 // `Conditional` arm of `walk_expression`) and directly under
 // `conditional_typecheck_test.sfn`.
 // The literal-inferred type of a ternary branch/condition, as a plain type
-// string. Mirrors the emitter's `infer_expression_type`
-// (`emit_native_format.sfn`) for the literal forms: number -> "int"/"float"
-// (dot detection), string -> "string", boolean -> "boolean", null -> "null", and bare [] -> "empty_array".
+// string. Tracks the emitter's scalar literal inference for number ->
+// "int"/"float" (dot detection), string -> "string", boolean -> "boolean",
+// and null -> "null". It intentionally adds the internal "empty_array"
+// sentinel for bare [] conditional branches so SFN-351 fails closed until the
+// checker can contextually infer array element types.
 // A signed numeric literal parses as `Unary { -, NumberLiteral }`, so it is
 // unwrapped to its numeric kind. Any other form yields "" (not inferable).
 fn _conditional_branch_type(expression: Expression?) -> string {
@@ -1681,6 +1683,12 @@ fn _conditional_number_kind(value: string) -> string {
     return "int";
 }
 
+fn _conditional_branch_diagnostic_type(branch_type: string) -> string {
+    if strings_equal(branch_type, "empty_array") { return "[]"; }
+    if branch_type.length == 0 { return "unknown"; }
+    return branch_type;
+}
+
 // Unify two ternary branch types under exact/null-compatible rules (#1715). A
 // "null" branch unifies with the other branch's type; two known non-null types
 // unify only when equal. Returns "" when either side is unknown or the two are
@@ -1716,7 +1724,9 @@ fn check_conditional_types(condition_type: string, then_type: string, else_type:
     // Fail closed until expression inference can contextually type [] from the
     // sibling branch.
     if strings_equal(then_type, "empty_array") || strings_equal(else_type, "empty_array") {
-        diagnostics.push(make_conditional_branch_mismatch_diagnostic(then_type, else_type, span));
+        let display_then = _conditional_branch_diagnostic_type(then_type);
+        let display_else = _conditional_branch_diagnostic_type(else_type);
+        diagnostics.push(make_conditional_branch_mismatch_diagnostic(display_then, display_else, span));
         return diagnostics;
     }
 

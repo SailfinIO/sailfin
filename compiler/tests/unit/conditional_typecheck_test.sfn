@@ -8,6 +8,7 @@
 // the end-to-end tests confirm the `walk_expression` `Conditional` arm fires
 // the same diagnostics through `typecheck_diagnostics`.
 import { parse_program } from "../../src/parser/mod";
+import { index_of } from "../../src/string_utils";
 import {
     check_conditional_types,
     conditional_result_type,
@@ -29,6 +30,10 @@ fn _count_code(diagnostics: Diagnostic[], code: string) -> int {
 fn _codes_for(source: string, code: string) -> int ![io] {
     let program = parse_program(source);
     return _count_code(typecheck_diagnostics(program), code);
+}
+
+fn _contains(haystack: string, needle: string) -> boolean {
+    return index_of(haystack, needle) >= 0;
 }
 
 // --- Pure rule: branch unification (E0304) ---------------------------------
@@ -126,6 +131,10 @@ test "conditional: a non-`-` unary branch is not misclassified" ![io] {
 }
 
 test "conditional: bare empty array branch is rejected end-to-end (SFN-351)" ![io] {
-    let source = "fn make_parts() -> string[] { return [\"x\"]; } fn main() { let parts = true? []: make_parts(); }";
-    assert _codes_for(source, "E0304") == 1;
+    let source = "fn make_parts() -> string[] { return [\"x\"]; } fn main() { let parts = true ? [] : make_parts(); }";
+    let diagnostics = typecheck_diagnostics(parse_program(source));
+    assert _count_code(diagnostics, "E0304") == 1;
+    assert _contains(diagnostics[0].message, "`then` branch is `[]`");
+    assert _contains(diagnostics[0].message, "`else` branch is `unknown`");
+    assert ! _contains(diagnostics[0].message, "empty_array");
 }
