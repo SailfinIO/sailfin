@@ -757,6 +757,12 @@ fn check_statement(statement: Statement, ctx: TypeckCtx) -> ScopeResult {
             diagnostics: target_diags.concat(iter_diags).concat(body_diags)
         };
     }
+    if statement.variant == "LoopStatement" {
+        return ScopeResult {
+            bindings: bindings,
+            diagnostics: check_block(statement.body, ctx_with_bindings(ctx, bindings, scope_start))
+        };
+    }
     if statement.variant == "MatchStatement" {
         let mut diagnostics = walk_expression(statement.expression, ctx);
         let mut index: int = 0;
