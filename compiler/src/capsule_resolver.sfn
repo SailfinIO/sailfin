@@ -3302,7 +3302,9 @@ fn _cr_resolve_and_dedupe(entry_paths: string[], consumer: ResolverConsumer, bun
         // retain the cwd probe for direct/internal callers without driver
         // context. An installed compiler normally finds no workspace from
         // either anchor and continues into the cache-implicit leg below.
-        workspace_root = discover_workspace_root(bundled_workspace_start);
+        if bundled_workspace_start.length > 0 {
+            workspace_root = discover_workspace_root(bundled_workspace_start);
+        }
         if workspace_root.length == 0 {
             workspace_root = discover_workspace_root("");
         }
