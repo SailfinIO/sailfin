@@ -1,0 +1,54 @@
+{
+  "corpus_id": "sfn-365-v2.0.0-provider-gate-failure",
+  "observed_at": "2026-07-15T21:50:33Z",
+  "issue": "SFN-365",
+  "repository_commit": "702109c8474458ebdebdac25984cb5ed9d053260",
+  "protocol": {
+    "id": "sfn-agent-benchmark/v2.0.0",
+    "sha256": "631d27f568bc52e6a1f84ddfd801fe95a7a95a21596ebbfb8daa01838153546b"
+  },
+  "harness_sha256": "112971f0d928c64773486bdbe841e81fff05b7b41281fa5bcd5d883dda5332dc",
+  "gate": "non_scored_provider_schema_probe",
+  "scored": false,
+  "human_interventions": 0,
+  "request_sha256": "6b942e0221268b822dccca6cce6368ff05e6db993e9da02a7b4436d8cbfefb5b",
+  "request": {
+    "model": "gpt-5.6-terra",
+    "reasoning_effort": "medium",
+    "max_completion_tokens": 4096,
+    "messages": [
+      {
+        "role": "system",
+        "content": "This is a non-scored provider schema probe."
+      },
+      {
+        "role": "user",
+        "content": "Reply with exactly OK."
+      }
+    ]
+  },
+  "response_sha256": "a4fdff890dc743b10bf23f605f77bf5f2ad54c87539634b8fb0ecf2f36c773ad",
+  "response": {
+    "error": {
+      "message": "You have insufficient permissions for this operation.",
+      "type": "invalid_request_error",
+      "param": null,
+      "code": null
+    }
+  },
+  "normalized_result_sha256": "6cfa38bab03328a9ac6a6c9fd4e1a0591ea21b5666c5d0d1f7bd728e48959d66",
+  "normalized_result": {
+    "adapter": "openai",
+    "model": "gpt-5.6-terra",
+    "scored": false,
+    "text": "",
+    "input_tokens": 0,
+    "output_tokens": 0,
+    "error": "You have insufficient permissions for this operation."
+  },
+  "classification": "provider_setup_auth_permission",
+  "stopping_rule_applied": true,
+  "track_a_observations": 0,
+  "track_b_observations": 0,
+  "confirmatory_authorized": false
+}
