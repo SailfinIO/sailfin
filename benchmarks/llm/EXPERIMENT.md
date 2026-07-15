@@ -103,19 +103,39 @@ justified.** The immediate NO-GO applies to the current benchmark design, not
 to Sailfin itself. Running more repetitions of these three tasks would measure
 the same ceiling effect rather than answer SFN-350.
 
+## 2026-07-15 balanced-pilot correction
+
+The first balanced pilot paired `claude-sonnet-5` with `gpt-4.1`. Its OpenAI
+half is excluded from the language decision because GPT-4.1 predates Sonnet 5
+by more than a year and is not a contemporary replication family. The
+internally controlled Sonnet 5 observations remain directional pilot evidence:
+Sailfin reached 33.3% one-shot success across nine ordinary templates, versus
+88.8% for Scala + TACIT and 100% for Python, but one attempt per template is
+not enough to authorize GO or NO.
+
+The replacement OpenAI family is `gpt-5.6-terra`, selected as the current
+strong intelligence/cost tier closest to Sonnet. Its Chat Completions request
+freezes reasoning effort at `medium`, uses `max_completion_tokens`, and omits
+temperature. Historical GPT-4.1 artifacts remain pilot history and must not be
+pooled with the replacement run.
+
+Fresh non-scored schema probes passed for the rotated credentials and exact
+model IDs `gpt-5.6-terra` and `claude-sonnet-5` on 2026-07-15.
+
+Status remains **MURKY with negative Sonnet signals; language decision not yet
+authorized**.
+
 ## Remaining pre-registration gates
 
-- Merge the implementation that freezes 10 templates, 40 instances, hidden
-  graders, and the cross-arm known-good/known-bad offline verification.
-- Merge the pinned TACIT 0.2.1 library integration and its honest-I/O plus
-  capability-leak oracle.
-- Add a second model family credential/adapter or an equivalent independently
-  served model family, then pass one non-scored schema probe per adapter and
-  freeze the exact model IDs.
-- Merge repeat/seed orchestration, task-cluster bootstrap analysis, blind-review
-  export, and the complete failure-corpus index.
-- Resolver prerequisite satisfied by SFN-352 (`f073fb1f`); confirmatory runs
-  must be based on that commit or later.
+- Merge the Terra request schema, credential-transport hardening, corrected
+  `sfn/strings` guidance, and the updated model freeze.
+- Run one non-confirmatory paid task per arm with Terra, then a fresh balanced
+  10-template Terra pilot with zero human intervention.
+- Compare Terra with the preserved Sonnet 5 pilot. Only schedule the
+  confirmatory repetitions after the paired model families are technically
+  valid and the benchmark is frozen on a clean commit.
+- Resolver prerequisite satisfied by SFN-352 (`f073fb1f`); future runs must be
+  based on `f073fb1f` or later.
 
 ## 2026-07-15 `sfn/strings` follow-up
 
