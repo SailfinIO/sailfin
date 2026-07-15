@@ -72,6 +72,10 @@ toolchain identities and exact commands; `corpus.json` freezes task metadata;
 `schedule.json` contains stable attempt IDs; `records.json`, `summary.json`, and
 `analysis.json` retain scored observations; `failures.json` indexes every
 failure artifact; and `blind-review/` exports sources plus a separate key.
+Provider failures retain their raw request/response files and a classified
+`provider-failure.json`. Authentication/permission and quota/billing failures
+invalidate `run.json` and `analysis.json` and stop the remaining paid schedule;
+the attempted observation remains in `records.json`.
 
 ## Real run
 
@@ -92,6 +96,11 @@ observation:
   --reasoning-effort medium --schema-probe
 ./build/sfn350 --adapter anthropic --model <frozen-id> --schema-probe
 ```
+
+A schema probe validates only the configured request and response shape. It is
+not an authorization gate for full task requests. The bounded paid three-arm
+probe remains the authorization gate and must complete without a setup-class
+provider failure before confirmatory observations are scheduled.
 
 Schedule five balanced attempts per instance, arm, and model family without
 making provider calls:

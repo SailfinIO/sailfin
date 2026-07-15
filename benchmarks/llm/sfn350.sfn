@@ -604,6 +604,30 @@ fn _api_error(root: JsonValue) -> string {
     return get_string(error, "message");
 }
 
+fn _provider_failure_class(error: string) -> string {
+    if contains(error, "insufficient permissions") || contains(error, "permission")
+        || contains(error, "Permission")
+        || contains(error, "unauthorized")
+        || contains(error, "Unauthorized")
+        || contains(error, "authentication")
+        || contains(error, "Authentication")
+        || contains(error, "invalid api key")
+        || contains(error, "Invalid API key") { return "auth_permission"; }
+    if contains(error, "quota") || contains(error, "Quota") || contains(error, "billing")
+        || contains(error, "Billing")
+        || contains(error, "payment required")
+        || contains(error, "Payment Required") { return "quota_billing"; }
+    if contains(error, "curl failed") || contains(error, "timeout") || contains(error, "Timeout")
+        || contains(error, "temporarily unavailable")
+        || contains(error, "rate limit")
+        || contains(error, "Rate limit") { return "transport_transient"; }
+    return "model_response";
+}
+
+fn _is_setup_failure_class(classification: string) -> boolean {
+    return classification == "auth_permission" || classification == "quota_billing";
+}
+
 fn _completion_from_openai(resp: string) -> Completion {
     let root = parse(resp);
     let api_error = _api_error(root);
@@ -622,6 +646,14 @@ fn _completion_from_openai(resp: string) -> Completion {
         text = get_string(msg, "content");
     }
     let usage = get_value(root, "usage");
+    if text.length == 0 {
+        return Completion {
+            text: "",
+            input_tokens: get_number(usage, "prompt_tokens") as int,
+            output_tokens: get_number(usage, "completion_tokens") as int,
+            error: "model returned no response content"
+        };
+    }
     return Completion {
         text: text,
         input_tokens: get_number(usage, "prompt_tokens") as int,
@@ -653,6 +685,14 @@ fn _completion_from_anthropic(resp: string) -> Completion {
         i += 1;
     }
     let usage = get_value(root, "usage");
+    if text.length == 0 {
+        return Completion {
+            text: "",
+            input_tokens: get_number(usage, "input_tokens") as int,
+            output_tokens: get_number(usage, "output_tokens") as int,
+            error: "model returned no response content"
+        };
+    }
     return Completion {
         text: text,
         input_tokens: get_number(usage, "input_tokens") as int,
@@ -664,11 +704,20 @@ fn _completion_from_anthropic(resp: string) -> Completion {
 fn _self_test_provider_schemas() ![io] {
     let openai = _completion_from_openai("{\"choices\":[{\"message\":{\"content\":\"OK\"}}],\"usage\":{\"prompt_tokens\":7,\"completion_tokens\":1}}");
     let anthropic = _completion_from_anthropic("{\"content\":[{\"type\":\"text\",\"text\":\"OK\"}],\"usage\":{\"input_tokens\":7,\"output_tokens\":1}}");
+    let empty = _completion_from_openai("{\"choices\":[],\"usage\":{\"prompt_tokens\":7,\"completion_tokens\":0}}");
     if openai.text != "OK" || openai.input_tokens != 7 || openai.output_tokens != 1
         || anthropic.text != "OK"
         || anthropic.input_tokens != 7
-        || anthropic.output_tokens != 1 {
+        || anthropic.output_tokens != 1
+        || _provider_failure_class(empty.error) != "model_response" {
         print.err("provider response/usage schema fixtures failed");
+        process.exit(1);
+    }
+    if _provider_failure_class("You have insufficient permissions") != "auth_permission"
+        || _provider_failure_class("billing quota exhausted") != "quota_billing"
+        || _provider_failure_class("curl failed: connection timeout") != "transport_transient"
+        || _provider_failure_class("model returned no choices") != "model_response" {
+        print.err("provider failure classification fixtures failed");
         process.exit(1);
     }
     let messages = [object_val(["role", "content"], [string_val("user"), string_val("OK")])];
@@ -1148,8 +1197,11 @@ fn _run_task_arm(task: Task, arm: ArmConfig, cfg: Config, run_dir: string, attem
         output_tokens += completion.output_tokens;
         fs.writeFile(wd + "/completion-" + (iteration as string) + ".txt", completion.text);
         if completion.error.length > 0 {
+            let classification = _provider_failure_class(completion.error);
             cats.push("provider_error");
+            cats.push("provider_" + classification);
             fs.writeFile(wd + "/provider.error", completion.error);
+            fs.writeFile(wd + "/provider-failure.json", stringify_pretty(object_val(["classification", "setup_class", "iteration", "error"], [string_val(classification), bool_val(_is_setup_failure_class(classification)), number_val(iteration as float), string_val(completion.error)]), 2));
             return _record(task, arm.name, cfg, attempt_id, repeat, false, i + 1, input_tokens, output_tokens, (monotonic_millis() - started) as int, source_chars, diff_chars, cats);
         }
         let source = _extract_code(completion.text);
@@ -1192,6 +1244,23 @@ fn _pct(n: int, d: int) -> float {
 
 fn _has_category(r: Record, category: string) -> boolean {
     return _contains_value(r.fail_categories, category);
+}
+
+fn _setup_failure_class(r: Record) -> string {
+    if _has_category(r, "provider_auth_permission") { return "auth_permission"; }
+    if _has_category(r, "provider_quota_billing") { return "quota_billing"; }
+    return "";
+}
+
+fn _run_setup_failure_class(records: Record[]) -> string {
+    let mut i: int = 0;
+    loop {
+        if i >= records.length { break; }
+        let classification = _setup_failure_class(records[i]);
+        if classification.length > 0 { return classification; }
+        i += 1;
+    }
+    return "";
 }
 
 fn _is_trap(task_id: string, tasks: Task[]) -> boolean {
@@ -1428,7 +1497,7 @@ fn _analysis_for_baseline(baseline: string, records: Record[], tasks: Task[], se
     return object_val(["paired_ordinary_observations", "task_clusters", "minimum_100_met", "one_shot_advantage_percentage_points_95ci", "iterations_to_green_advantage_95ci"], [number_val(observations as float), number_val(metrics.length as float), bool_val(observations >= 100), _interval_json(one_shot, 100.0), _interval_json(iterations, 1.0)]);
 }
 
-fn _analysis(records: Record[], tasks: Task[], arms: string[], seed: int) -> JsonValue {
+fn _analysis(records: Record[], tasks: Task[], arms: string[], seed: int, run_valid: boolean, invalid_reason: string) -> JsonValue {
     let mut keys: string[] = [];
     let mut values: JsonValue[] = [];
     let mut authorized = true;
@@ -1447,7 +1516,8 @@ fn _analysis(records: Record[], tasks: Task[], arms: string[], seed: int) -> Jso
         i += 1;
     }
     if baselines == 0 { authorized = false; }
-    return object_val(["decision_authorized", "by_baseline", "notes"], [bool_val(authorized), object_val(keys, values), array_val([string_val("Intervals resample frozen task instances, preserving repeat clusters."), string_val("Positive advantages favor Sailfin. No GO/NO interpretation is performed by the runner."), string_val("Provider failures remain paired observations and are never dropped from denominators.")])]);
+    if !run_valid { authorized = false; }
+    return object_val(["decision_authorized", "run_valid", "invalid_reason", "by_baseline", "notes"], [bool_val(authorized), bool_val(run_valid), string_val(invalid_reason), object_val(keys, values), array_val([string_val("Intervals resample frozen task instances, preserving repeat clusters."), string_val("Positive advantages favor Sailfin. No GO/NO interpretation is performed by the runner."), string_val("Provider failures remain attempted observations and are never dropped from the corpus."), string_val("Setup-class provider failures invalidate GO/NO interpretation and stop additional paid observations.")])]);
 }
 
 fn _self_test_analysis() ![io] {
@@ -1596,7 +1666,7 @@ fn _write_records(path: string, records: Record[]) ![io] {
     fs.writeFile(path, stringify_pretty(array_val(vals), 2));
 }
 
-fn _write_run_manifest(path: string, cfg: Config, arms: string[]) ![io] {
+fn _write_run_manifest(path: string, cfg: Config, arms: string[], run_valid: boolean, invalid_reason: string) ![io] {
     let mut arm_vals: JsonValue[] = [];
     let mut i: int = 0;
     loop {
@@ -1615,7 +1685,7 @@ fn _write_run_manifest(path: string, cfg: Config, arms: string[]) ![io] {
     let timeout = _timeout_prefix();
     let commands = object_val(["sailfin_compile", "sailfin_run", "scala_compile", "scala_run", "scala_tacit_compile", "scala_tacit_run", "python_run"], [_string_array_json(_append_all(timeout, [_sfn_bin(), "check", "{file}"])), _string_array_json(_append_all(timeout, [_sfn_bin(), "run", "{file}"])), _string_array_json(_append_all(timeout, ["scala-cli", "compile", "--server=false", "{file}"])), _string_array_json(_append_all(timeout, ["scala-cli", "run", "--server=false", "{file}"])), _string_array_json(_append_all(timeout, ["scala-cli", "compile", "--server=false", "--scala", "3.10.0-RC1-bin-20260616-4733954-NIGHTLY", "--scalac-option", "-experimental", "--jar", _tacit_jar(), _tacit_scaffold(), "{file}"])), _string_array_json(_append_all(timeout, ["scala-cli", "run", "--server=false", "--scala", "3.10.0-RC1-bin-20260616-4733954-NIGHTLY", "--scalac-option", "-experimental", "--jar", _tacit_jar(), _tacit_scaffold(), "{file}"])), _string_array_json(_append_all(timeout, ["python3", "{file}"]))]);
     let deadline = object_val(["default_seconds", "effective_value", "effective_prefix", "override_env", "override_value"], [number_val(60.0), string_val(join(timeout, " ")), _string_array_json(timeout), string_val("SFN350_TIMEOUT_CMD"), string_val(env.get("SFN350_TIMEOUT_CMD"))]);
-    let manifest = object_val(["adapter", "model", "model_family", "openai_reasoning_effort", "max_iters", "repeats", "seed", "sampling", "arms", "toolchains", "execution_deadline", "commands", "human_interventions"], [string_val(cfg.adapter), string_val(cfg.model), string_val(cfg.model_family), string_val(manifest_effort), number_val(cfg.max_iters as float), number_val(cfg.repeats as float), number_val(cfg.seed as float), string_val(sampling), array_val(arm_vals), toolchains, deadline, commands, number_val(0.0)]);
+    let manifest = object_val(["adapter", "model", "model_family", "openai_reasoning_effort", "max_iters", "repeats", "seed", "sampling", "arms", "toolchains", "execution_deadline", "commands", "human_interventions", "run_valid", "invalid_reason"], [string_val(cfg.adapter), string_val(cfg.model), string_val(cfg.model_family), string_val(manifest_effort), number_val(cfg.max_iters as float), number_val(cfg.repeats as float), number_val(cfg.seed as float), string_val(sampling), array_val(arm_vals), toolchains, deadline, commands, number_val(0.0), bool_val(run_valid), string_val(invalid_reason)]);
     fs.writeFile(path, stringify_pretty(manifest, 2));
 }
 
@@ -2079,7 +2149,7 @@ fn main(argv: string[]) -> int ![clock, io, net] {
     let ts = _timestamp();
     let run_dir = cfg.results_dir + "/run-" + ts;
     _mkdir(run_dir);
-    _write_run_manifest(run_dir + "/run.json", cfg, selected_arms);
+    _write_run_manifest(run_dir + "/run.json", cfg, selected_arms, true, "");
     _write_corpus_manifest(run_dir + "/corpus.json", tasks, arm_cfgs);
     _write_schedule(run_dir + "/schedule.json", cfg, tasks, arm_cfgs, selected_arms);
     if cfg.verify_graders {
@@ -2096,17 +2166,20 @@ fn main(argv: string[]) -> int ![clock, io, net] {
     }
 
     let mut records: Record[] = [];
+    let mut stop_for_setup_failure = false;
     let mut ti: int = 0;
     loop {
-        if ti >= tasks.length { break; }
+        if ti >= tasks.length || stop_for_setup_failure { break; }
         let task = tasks[ti];
         if _selected(cfg.tasks, task.id) {
             let mut repeat = 1;
             loop {
-                if repeat > cfg.repeats { break; }
+                if repeat > cfg.repeats || stop_for_setup_failure { break; }
                 let mut ai: int = 0;
                 loop {
-                    if ai >= selected_arms.length { break; }
+                    if ai >= selected_arms.length || stop_for_setup_failure {
+                        break;
+                    }
                     let arm_name = selected_arms[ai];
                     if _starter_for(task, arm_name).length > 0 {
                         let arm = _arm_by_name(arm_name, arm_cfgs);
@@ -2122,6 +2195,11 @@ fn main(argv: string[]) -> int ![clock, io, net] {
                             + " tokens="
                             + (rec.tokens as string));
                         records.push(rec);
+                        if _setup_failure_class(rec).length > 0 {
+                            stop_for_setup_failure = true;
+                            print.err("setup-class provider failure; stopping paid schedule after preserving attempt "
+                                + attempt_id);
+                        }
                     }
                     ai += 1;
                 }
@@ -2131,10 +2209,15 @@ fn main(argv: string[]) -> int ![clock, io, net] {
         ti += 1;
     }
 
+    let setup_failure = _run_setup_failure_class(records);
+    let run_valid = setup_failure.length == 0;
+    let mut invalid_reason = "";
+    if !run_valid { invalid_reason = "provider_setup_" + setup_failure; }
+    _write_run_manifest(run_dir + "/run.json", cfg, selected_arms, run_valid, invalid_reason);
     _write_records(run_dir + "/records.json", records);
     let summary = _summary(records, tasks, selected_arms);
     fs.writeFile(run_dir + "/summary.json", stringify_pretty(summary, 2));
-    let analysis = _analysis(records, tasks, selected_arms, cfg.seed);
+    let analysis = _analysis(records, tasks, selected_arms, cfg.seed, run_valid, invalid_reason);
     fs.writeFile(run_dir + "/analysis.json", stringify_pretty(analysis, 2));
     _write_failure_index(run_dir + "/failures.json", run_dir, records);
     _write_blind_export(run_dir, records, arm_cfgs, tasks);
