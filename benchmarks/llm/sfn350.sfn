@@ -462,9 +462,15 @@ fn _anthropic_body(model: string, system: string, messages: JsonValue[]) -> stri
     return stringify(object_val(["model", "max_tokens", "system", "messages"], [string_val(model), number_val(4096), string_val(system), _messages_json(messages)]));
 }
 
+fn _api_error(root: JsonValue) -> string {
+    let error = get_value(root, "error");
+    if error.kind == "string" { return error.string_value; }
+    return get_string(error, "message");
+}
+
 fn _completion_from_openai(resp: string) -> Completion {
     let root = parse(resp);
-    let api_error = get_string(get_value(root, "error"), "message");
+    let api_error = _api_error(root);
     if api_error.length > 0 {
         return Completion {
             text: "",
@@ -490,7 +496,7 @@ fn _completion_from_openai(resp: string) -> Completion {
 
 fn _completion_from_anthropic(resp: string) -> Completion {
     let root = parse(resp);
-    let api_error = get_string(get_value(root, "error"), "message");
+    let api_error = _api_error(root);
     if api_error.length > 0 {
         return Completion {
             text: "",
@@ -693,7 +699,7 @@ fn _record(task: Task, arm: string, passed: boolean, iters: int, input_tokens: i
     };
 }
 
-fn _run_task_arm(task: Task, arm: ArmConfig, cfg: Config, run_dir: string) -> Record ![io] {
+fn _run_task_arm(task: Task, arm: ArmConfig, cfg: Config, run_dir: string) -> Record ![clock, io] {
     let started = monotonic_millis();
     let wd = run_dir + "/" + task.id + "/" + arm.name;
     _mkdir(wd);
@@ -920,7 +926,7 @@ fn _write_run_manifest(path: string, cfg: Config, arms: string[]) ![io] {
         arm_vals.push(string_val(arms[i]));
         i += 1;
     }
-    let sampling = cfg.adapter == "anthropic"? "provider default (Sonnet 5 rejects temperature)": "temperature=0.2";
+    let sampling = cfg.adapter == "anthropic"? "provider default": "temperature=0.2";
     let manifest = object_val(["adapter", "model", "max_iters", "sampling", "arms"], [string_val(cfg.adapter), string_val(cfg.model), number_val(cfg.max_iters as float), string_val(sampling), array_val(arm_vals)]);
     fs.writeFile(path, stringify_pretty(manifest, 2));
 }
