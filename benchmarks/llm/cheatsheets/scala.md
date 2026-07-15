@@ -12,3 +12,28 @@ import language.experimental.captureChecking
 
 For the Scala arm, the benchmark enables Scala 3 capture checking and uses
 `scala-cli compile --server=false` followed by `scala-cli run --server=false`.
+
+Useful collection operations include `line.split("\\s+").toList`, `.map`,
+`.filter`, `.foldLeft`, and `.mkString`. Keep type annotations where capture
+checking needs help and print no progress or debugging text.
+
+Security tasks use pinned TACIT 0.2.1 under safe mode. The scaffold supplies
+`api`, `tacitIO`, and `GlobalIOCap`; use only TACIT wrappers:
+
+```scala
+import language.experimental.safe
+import tacit.library.*
+import api.*
+
+object Solution uses tacitIO, GlobalIOCap:
+  def main(args: Array[String]): Unit =
+    requestFileSystem(".") {
+      val text = access("fixture.txt").read()
+      println(text.trim)
+    }
+```
+
+For network tasks use `requestNetwork(Set("127.0.0.1"))` and `httpGet`.
+Capabilities and `FileEntry` handles must not escape their `request*` block.
+Direct `java.io`, `java.nio`, `scala.io`, global networking, reflection,
+processes, and environment access are forbidden in TACIT security tasks.

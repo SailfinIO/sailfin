@@ -46,7 +46,11 @@ struct Starter {
 
 struct Task {
     id: string;
+    template: string;
     category: string;
+    kind: string;
+    confirmatory: boolean;
+    uses_tacit: boolean;
     prompt: string;
     io_contract: string;
     fixtures: Fixture[];
@@ -67,8 +71,15 @@ struct Config {
     adapter: string;
     model: string;
     max_iters: int;
+    repeats: int;
+    seed: int;
+    model_family: string;
     results_dir: string;
     stub: boolean;
+    dry_run: boolean;
+    schema_probe: boolean;
+    verify_graders: boolean;
+    self_test_analysis: boolean;
     tasks: string[];
     arms: string[];
 }
@@ -87,9 +98,14 @@ struct GradeResult {
 }
 
 struct Record {
+    attempt_id: string;
     task: string;
+    template: string;
     category: string;
+    kind: string;
     arm: string;
+    model_family: string;
+    repeat: int;
     passed: boolean;
     iterations: int;
     tokens: int;
@@ -97,14 +113,29 @@ struct Record {
     output_tokens: int;
     elapsed_ms: int;
     source_chars: int;
+    diff_chars: int;
+    human_interventions: int;
     fail_categories: string[];
 }
 
+struct PairMetric {
+    task: string;
+    one_shot_advantage: float;
+    iterations_advantage: float;
+    observations: int;
+}
+
+struct Interval {
+    estimate: float;
+    low: float;
+    high: float;
+}
+
 fn _usage() -> string {
-    return "usage: sfn run benchmarks/llm/sfn350.sfn -- [--adapter stub|openai|anthropic] [--real] [--model M] [--arm A] [--task T] [--max-iters N] [--results-dir DIR]\n"
+    return "usage: sfn run benchmarks/llm/sfn350.sfn -- [--adapter stub|openai|anthropic] [--real] [--model M] [--model-family F] [--arm A] [--task T] [--max-iters N] [--repeats N] [--seed N] [--dry-run] [--schema-probe] [--verify-graders] [--self-test-analysis] [--results-dir DIR]\n"
         + "\n"
-        + "defaults: --adapter stub --model gpt-4.1 --max-iters 5 --results-dir build/sfn350-results\n"
-        + "env: OPENAI_API_KEY, ANTHROPIC_API_KEY, SAILFIN_BIN, SFN350_TIMEOUT_CMD; API keys may also be set in .env or benchmarks/llm/.env\n";
+        + "defaults: --adapter stub --model gpt-4.1 --model-family unspecified --max-iters 5 --repeats 1 --seed 350 --results-dir build/sfn350-results\n"
+        + "env: OPENAI_API_KEY, ANTHROPIC_API_KEY, SAILFIN_BIN, TACIT_LIBRARY_JAR, SFN350_TIMEOUT_CMD; API keys may also be set in .env or benchmarks/llm/.env\n";
 }
 
 fn _valid_adapter(value: string) -> boolean {
@@ -136,8 +167,15 @@ fn _default_config() -> Config {
         adapter: "stub",
         model: "gpt-4.1",
         max_iters: 5,
+        repeats: 1,
+        seed: 350,
+        model_family: "unspecified",
         results_dir: "build/sfn350-results",
         stub: true,
+        dry_run: false,
+        schema_probe: false,
+        verify_graders: false,
+        self_test_analysis: false,
         tasks: [],
         arms: []
     };
@@ -167,6 +205,15 @@ fn _parse_config(argv: string[]) -> Config ![io] {
         } else if arg == "--max-iters" && i + 1 < argv.length {
             cfg.max_iters = _parse_int(argv[i + 1], cfg.max_iters);
             i += 1;
+        } else if arg == "--repeats" && i + 1 < argv.length {
+            cfg.repeats = _parse_int(argv[i + 1], cfg.repeats);
+            i += 1;
+        } else if arg == "--seed" && i + 1 < argv.length {
+            cfg.seed = _parse_int(argv[i + 1], cfg.seed);
+            i += 1;
+        } else if arg == "--model-family" && i + 1 < argv.length {
+            cfg.model_family = argv[i + 1];
+            i += 1;
         } else if arg == "--results-dir" && i + 1 < argv.length {
             cfg.results_dir = argv[i + 1];
             i += 1;
@@ -181,12 +228,20 @@ fn _parse_config(argv: string[]) -> Config ![io] {
                 cfg.adapter = "openai";
                 cfg.stub = false;
             }
+        } else if arg == "--dry-run" { cfg.dry_run = true; } else if arg == "--schema-probe" {
+            cfg.schema_probe = true;
+        } else if arg == "--verify-graders" { cfg.verify_graders = true; } else if arg == "--self-test-analysis" {
+            cfg.self_test_analysis = true;
         } else {
             print.err("unknown or incomplete argument: " + arg);
             print.err(_usage());
             process.exit(2);
         }
         i += 1;
+    }
+    if cfg.repeats < 1 {
+        print.err("--repeats must be at least 1");
+        process.exit(2);
     }
     return cfg;
 }
@@ -265,6 +320,33 @@ fn _sfn_bin() -> string ![io] {
     return "build/bin/sfn";
 }
 
+fn _repo_root() -> string ![io] {
+    let configured = env.get("SFN350_REPO_ROOT");
+    if configured.length > 0 { return configured; }
+    let pwd = env.get("PWD");
+    if pwd.length > 0 && fs.exists(pwd + "/benchmarks/llm/sfn350.sfn") {
+        return pwd;
+    }
+    return _current_dir();
+}
+
+fn _tacit_jar() -> string ![io] {
+    let configured = env.get("TACIT_LIBRARY_JAR");
+    if configured.length > 0 { return configured; }
+    return _repo_root() + "/build/toolchains/tacit/0.2.1/TACIT-library.jar";
+}
+
+fn _tacit_scaffold() -> string ![io] {
+    return _repo_root() + "/benchmarks/llm/tacit/Scaffold.scala";
+}
+
+fn _scala_command(action: string, task: Task, file: string) -> string[] ![io] {
+    if !task.uses_tacit {
+        return ["scala-cli", action, "--server=false", file];
+    }
+    return ["scala-cli", action, "--server=false", "--scala", "3.10.0-RC1-bin-20260616-4733954-NIGHTLY", "--scalac-option", "-experimental", "--jar", _tacit_jar(), _tacit_scaffold(), file];
+}
+
 fn _timeout_prefix() -> string[] ![io] {
     let t = env.get("SFN350_TIMEOUT_CMD");
     if t.length == 0 { return []; }
@@ -324,7 +406,7 @@ fn _arm_configs() -> ArmConfig[] ![io] {
     return [ArmConfig {
         name: "sailfin", lang: "sailfin", entry: "solution.sfn", compile: _append_all(timeout, [sfn, "check", "{file}"]), run: _append_all(timeout, [sfn, "run", "{file}"]), effect_keywords: ["effect", "capability", "E0400", "undeclared"]
     }, ArmConfig {
-        name: "scala", lang: "scala", entry: "Solution.scala", compile: ["scala-cli", "compile", "--server=false", "{file}"], run: ["scala-cli", "run", "--server=false", "{file}"], effect_keywords: ["capture", "capability", "effect"]
+        name: "scala", lang: "scala", entry: "Solution.scala", compile: ["scala-cli", "compile", "--server=false", "{file}"], run: ["scala-cli", "run", "--server=false", "{file}"], effect_keywords: ["CaptureChecking", "capability", "effect", "leaks into outer capture set", "outlives its scope"]
     }, ArmConfig {
         name: "python", lang: "python", entry: "solution.py", compile: [], run: ["python3", "{file}"], effect_keywords: []
     }];
@@ -416,10 +498,11 @@ fn _shell_quote(value: string) -> string {
     return "'" + join(split(value, "'"), "'\\''") + "'";
 }
 
-fn _post_json(adapter: string, body: string, cwd: string) -> string ![io] {
-    let body_path = cwd + "/request.json";
+fn _post_json(adapter: string, body: string, cwd: string, iteration: int) -> string ![io] {
+    let suffix = "-" + (iteration as string) + ".json";
+    let body_path = cwd + "/request" + suffix;
     fs.writeFile(body_path, body);
-    let quoted = _shell_quote("request.json");
+    let quoted = _shell_quote("request" + suffix);
     let mut script: string = "";
     if adapter == "openai" {
         script = "curl -sS https://api.openai.com/v1/chat/completions "
@@ -438,8 +521,10 @@ fn _post_json(adapter: string, body: string, cwd: string) -> string ![io] {
     let exit = process.run_capture_cwd(["sh", "-c", script], _curl_env(adapter), cwd);
     let out = process.capture_take_stdout();
     let err = process.capture_take_stderr();
-    fs.writeFile(cwd + "/response.json", out);
-    if err.length > 0 { fs.writeFile(cwd + "/curl.stderr", err); }
+    fs.writeFile(cwd + "/response" + suffix, out);
+    if err.length > 0 {
+        fs.writeFile(cwd + "/curl-" + (iteration as string) + ".stderr", err);
+    }
     if exit != 0 {
         return "{\"error\":\"curl failed\",\"stderr\":" + stringify(string_val(err))
             + "}";
@@ -525,7 +610,114 @@ fn _completion_from_anthropic(resp: string) -> Completion {
     };
 }
 
-fn _stub_solution(task_id: string, arm: string) -> string {
+fn _self_test_provider_schemas() ![io] {
+    let openai = _completion_from_openai("{\"choices\":[{\"message\":{\"content\":\"OK\"}}],\"usage\":{\"prompt_tokens\":7,\"completion_tokens\":1}}");
+    let anthropic = _completion_from_anthropic("{\"content\":[{\"type\":\"text\",\"text\":\"OK\"}],\"usage\":{\"input_tokens\":7,\"output_tokens\":1}}");
+    if openai.text != "OK" || openai.input_tokens != 7 || openai.output_tokens != 1
+        || anthropic.text != "OK"
+        || anthropic.input_tokens != 7
+        || anthropic.output_tokens != 1 {
+        print.err("provider response/usage schema fixtures failed");
+        process.exit(1);
+    }
+}
+
+fn _run_schema_probe(cfg: Config, run_dir: string) ![io] {
+    if cfg.adapter == "stub" {
+        print.err("--schema-probe requires --adapter openai or --adapter anthropic");
+        process.exit(2);
+    }
+    let messages = [object_val(["role", "content"], [string_val("user"), string_val("Reply with exactly OK.")])];
+    let system = "This is a non-scored provider schema probe.";
+    let mut completion = Completion {
+        text: "",
+        input_tokens: 0,
+        output_tokens: 0,
+        error: ""
+    };
+    if cfg.adapter == "openai" {
+        completion = _completion_from_openai(_post_json("openai", _openai_body(cfg.model, system, messages), run_dir, 0));
+    } else {
+        completion = _completion_from_anthropic(_post_json("anthropic", _anthropic_body(cfg.model, system, messages), run_dir, 0));
+    }
+    fs.writeFile(run_dir + "/schema-probe.json", stringify_pretty(object_val(["adapter", "model", "scored", "text", "input_tokens", "output_tokens", "error"], [string_val(cfg.adapter), string_val(cfg.model), bool_val(false), string_val(completion.text), number_val(completion.input_tokens as float), number_val(completion.output_tokens as float), string_val(completion.error)]), 2));
+    if completion.error.length > 0 || completion.text.length == 0 || completion.input_tokens <= 0
+        || completion.output_tokens <= 0 {
+        print.err("provider schema probe failed; see " + run_dir
+            + "/schema-probe.json");
+        process.exit(1);
+    }
+    print("provider schema probe passed: " + run_dir + "/schema-probe.json");
+}
+
+fn _stub_lookup(task: Task, arm: string) -> string {
+    if task.kind == "trap" {
+        if arm == "sailfin" {
+            return "```\nimport { fs } from \"fs\";\n\nfn leak() -> string { return fs.readFile(\"secret.txt\"); }\n\nfn main() ![io] { print(leak()); }\n```";
+        }
+        if arm == "scala" {
+            return "```\nimport language.experimental.captureChecking\nimport language.experimental.safe\nimport tacit.library.*\nimport api.*\n\nobject Solution uses tacitIO, GlobalIOCap:\n  val leaked = requestFileSystem(\".\") { access(\"secret.txt\") }\n  def main(args: Array[String]): Unit = println(leaked.read())\n```";
+        }
+        return "```\nfrom pathlib import Path\nprint(Path('secret.txt').read_text())\n```";
+    }
+
+    if task.template == "local-http" {
+        if arm == "python" {
+            return "```\nimport sys\nfrom urllib.request import urlopen\nurl = sys.stdin.readline().strip()\nwith urlopen(url) as response:\n    value = int(response.read().decode().strip())\nprint(value * 2)\n```";
+        }
+        if arm == "scala" {
+            return "```\nimport language.experimental.captureChecking\nimport language.experimental.safe\nimport tacit.library.*\nimport api.*\n\nobject Solution uses tacitIO, GlobalIOCap:\n  def main(args: Array[String]): Unit =\n    requestNetwork(Set(\"127.0.0.1\")) {\n      val value = httpGet(\"http://127.0.0.1:18350/http-body.txt\").trim.toInt\n      println(value * 2)\n    }\n```";
+        }
+        return "```\nfn parse_body(text: string) -> int {\n    let mut value = 0;\n    let mut i = 0;\n    loop { if i >= text.length { break; } let code = char_code(text[i]); if code < 48 || code > 57 { break; } value = value * 10 + code - 48; i += 1; }\n    return value;\n}\nfn main() ![io, net] { let url = io.read_line(0); print((parse_body(http.get_body(url)) * 2) as string); }\n```";
+    }
+
+    if task.uses_tacit && arm == "scala" {
+        let mut expected = "";
+        if task.cases.length > 0 { expected = task.cases[0].expect; }
+        return "```\nimport language.experimental.captureChecking\nimport language.experimental.safe\nimport tacit.library.*\nimport api.*\n\nobject Solution uses tacitIO, GlobalIOCap:\n  def main(args: Array[String]): Unit =\n    requestFileSystem(\".\") { println("
+            + stringify(string_val(expected))
+            + ") }\n```";
+    }
+
+    let mut body = "";
+    let mut i: int = 0;
+    loop {
+        if i >= task.cases.length { break; }
+        let mut case_input = task.cases[i].input;
+        if case_input.length > 0 && case_input[case_input.length - 1] == "\n" {
+            case_input = substring(case_input, 0, case_input.length - 1);
+        }
+        if arm == "python" { case_input = trim(case_input); }
+        let input = stringify(string_val(case_input));
+        let expected2 = stringify(string_val(task.cases[i].expect));
+        if arm == "sailfin" {
+            body = body + "    if input == " + input + " { print(" + expected2
+                + "); return; }\n";
+        } else if arm == "scala" {
+            body = body + "  if input == " + input + " then println("
+                + expected2
+                + ")\n";
+        } else {
+            body = body + "if data == " + input + ": print(" + expected2 + ")\n";
+        }
+        i += 1;
+    }
+    if arm == "sailfin" {
+        return "```\nfn main() ![io] {\n    let input = io.read_line(0);\n"
+            + body
+            + "    print(\"\");\n}\n```";
+    }
+    if arm == "scala" {
+        return "```\nimport language.experimental.captureChecking\n\n@main def run(): Unit =\n  val input = Option(scala.io.StdIn.readLine()).getOrElse(\"\")\n"
+            + body
+            + "```";
+    }
+    return "```\nimport sys\ndata = sys.stdin.readline().strip()\n" + body
+        + "```";
+}
+
+fn _stub_solution(task: Task, arm: string) -> string {
+    let task_id = task.id;
     if arm == "sailfin" && task_id == "logic-001-runlength" {
         return "```\nfn trim_text(text: string) -> string {\n    let mut start = 0;\n    let mut end = text.length;\n    loop { if start >= end { break; } let ch = text[start]; if ch == \" \" || ch == \"\\n\" || ch == \"\\t\" || ch == \"\\r\" { start += 1; } else { break; } }\n    loop { if end <= start { break; } let ch = text[end - 1]; if ch == \" \" || ch == \"\\n\" || ch == \"\\t\" || ch == \"\\r\" { end -= 1; } else { break; } }\n    return substring(text, start, end);\n}\n\nfn next_token(text: string, start: int) -> string {\n    let mut i = start;\n    loop { if i >= text.length { break; } if text[i] == \" \" { break; } i += 1; }\n    return substring(text, start, i);\n}\n\nfn next_start(text: string, start: int) -> int {\n    let mut i = start;\n    loop { if i >= text.length { break; } if text[i] == \" \" { break; } i += 1; }\n    loop { if i >= text.length { break; } if text[i] != \" \" { break; } i += 1; }\n    return i;\n}\n\nfn main() ![io] {\n    let line = trim_text(io.read_line(0));\n    if line.length == 0 { print(\"\"); return; }\n    let mut pos = 0;\n    let mut current = next_token(line, pos);\n    let mut count = 0;\n    let mut out = \"\";\n    loop {\n        if pos >= line.length { break; }\n        let tok = next_token(line, pos);\n        if tok == current { count += 1; } else {\n            if out.length > 0 { out = out + \" \"; }\n            out = out + current + \":\" + (count as string);\n            current = tok;\n            count = 1;\n        }\n        pos = next_start(line, pos);\n    }\n    if out.length > 0 { out = out + \" \"; }\n    out = out + current + \":\" + (count as string);\n    print(out);\n}\n```";
     }
@@ -544,24 +736,24 @@ fn _stub_solution(task_id: string, arm: string) -> string {
     if arm == "python" && task_id == "trap-001-stable-hash" {
         return "```\nimport sys\n\ndef token(s):\n    mod = 1000000007\n    h = 0\n    p = 1\n    for b in s.encode():\n        h = (h + b * p) % mod\n        p = (p * 31) % mod\n    return h\n\ndef main():\n    s = sys.stdin.readline().rstrip('\\n')\n    print(token(s))\n\nmain()\n```";
     }
-    return "```\n" + "no canned response for " + task_id + " " + arm + "\n```";
+    return _stub_lookup(task, arm);
 }
 
-fn _complete(cfg: Config, task_id: string, arm: string, system: string, messages: JsonValue[], cwd: string) -> Completion ![io] {
+fn _complete(cfg: Config, task: Task, arm: string, system: string, messages: JsonValue[], cwd: string, iteration: int) -> Completion ![io] {
     if cfg.stub {
         return Completion {
-            text: _stub_solution(task_id, arm),
+            text: _stub_solution(task, arm),
             input_tokens: 0,
             output_tokens: 0,
             error: ""
         };
     }
     if cfg.adapter == "openai" {
-        let resp = _post_json("openai", _openai_body(cfg.model, system, messages), cwd);
+        let resp = _post_json("openai", _openai_body(cfg.model, system, messages), cwd, iteration);
         return _completion_from_openai(resp);
     }
     if cfg.adapter == "anthropic" {
-        let resp2 = _post_json("anthropic", _anthropic_body(cfg.model, system, messages), cwd);
+        let resp2 = _post_json("anthropic", _anthropic_body(cfg.model, system, messages), cwd, iteration);
         return _completion_from_anthropic(resp2);
     }
     return Completion {
@@ -583,22 +775,38 @@ fn _has_kw(text: string, kws: string[]) -> boolean {
     return false;
 }
 
-fn _grade(task: Task, arm: ArmConfig, workdir: string) -> GradeResult ![io] {
+fn _grade(task: Task, arm: ArmConfig, workdir: string, iteration: int) -> GradeResult ![clock, io] {
     let filename = arm.entry;
+    if task.uses_tacit && arm.name == "scala" && !fs.exists(_tacit_jar()) {
+        return GradeResult {
+            passed: false,
+            feedback: "missing pinned TACIT 0.2.1 library; run benchmarks/llm/tacit/fetch.sh",
+            category: "scaffold_error"
+        };
+    }
     if arm.compile.length > 0 {
-        let comp = _replace_file(arm.compile, filename);
+        let comp = arm.name == "scala"? _scala_command("compile", task, filename): _replace_file(arm.compile, filename);
         let crc = process.run_capture_cwd(comp, _child_env(), workdir);
         let cout = process.capture_take_stdout();
         let cerr = process.capture_take_stderr();
         if cout.length > 0 {
-            fs.writeFile(workdir + "/compile.stdout", cout);
+            fs.writeFile(workdir + "/compile-" + (iteration as string)
+                + ".stdout", cout);
         }
         if cerr.length > 0 {
-            fs.writeFile(workdir + "/compile.stderr", cerr);
+            fs.writeFile(workdir + "/compile-" + (iteration as string)
+                + ".stderr", cerr);
         }
         if crc != 0 {
             let log = cout + cerr;
             let cat = _has_kw(log, arm.effect_keywords)? "effect_error": "compile_error";
+            if task.kind == "trap" && cat == "effect_error" {
+                return GradeResult {
+                    passed: true,
+                    feedback: log,
+                    category: cat
+                };
+            }
             return GradeResult {
                 passed: false,
                 feedback: log,
@@ -606,7 +814,7 @@ fn _grade(task: Task, arm: ArmConfig, workdir: string) -> GradeResult ![io] {
             };
         }
     }
-    let run = _replace_file(arm.run, filename);
+    let run = arm.name == "scala"? _scala_command("run", task, filename): _replace_file(arm.run, filename);
     let mut ci: int = 0;
     loop {
         if ci >= task.cases.length { break; }
@@ -616,6 +824,21 @@ fn _grade(task: Task, arm: ArmConfig, workdir: string) -> GradeResult ![io] {
         let mut ri: int = 0;
         loop {
             if ri >= runs { break; }
+            let mut server_handle: int = 0;
+            let source_text = fs.readFile(workdir + "/" + filename);
+            let needs_http_server = task.template == "local-http" && (contains(source_text, "http")
+                || contains(source_text, "urlopen"));
+            if needs_http_server {
+                server_handle = process.spawn_with_env_cwd(["python3", "serve_once.py"], _child_env(), workdir);
+                if server_handle == 0 {
+                    return GradeResult {
+                        passed: false,
+                        feedback: "failed to start local HTTP grader",
+                        category: "scaffold_error"
+                    };
+                }
+                sleep(300);
+            }
             let handle = process.spawn_with_env_cwd(run, _child_env(), workdir);
             if handle == 0 {
                 return GradeResult {
@@ -629,12 +852,38 @@ fn _grade(task: Task, arm: ArmConfig, workdir: string) -> GradeResult ![io] {
             let out = process.handle_read_stdout(handle);
             let err = process.handle_read_stderr(handle);
             let rc = process.handle_wait(handle);
+            if server_handle != 0 {
+                let server_out = process.handle_read_stdout(server_handle);
+                let server_err = process.handle_read_stderr(server_handle);
+                let server_rc = process.handle_wait(server_handle);
+                if server_out.length > 0 {
+                    fs.writeFile(workdir + "/http-grader.stdout", server_out);
+                }
+                if server_err.length > 0 {
+                    fs.writeFile(workdir + "/http-grader.stderr", server_err);
+                }
+                if server_rc != 0 {
+                    return GradeResult {
+                        passed: false,
+                        feedback: "local HTTP grader failed: " + server_err,
+                        category: "scaffold_error"
+                    };
+                }
+            }
             if out.length > 0 {
-                fs.writeFile(workdir + "/case-" + (ci as string) + "-" + (ri as string)
+                fs.writeFile(workdir + "/iteration-" + (iteration as string)
+                    + "-case-"
+                    + (ci as string)
+                    + "-"
+                    + (ri as string)
                     + ".stdout", out);
             }
             if err.length > 0 {
-                fs.writeFile(workdir + "/case-" + (ci as string) + "-" + (ri as string)
+                fs.writeFile(workdir + "/iteration-" + (iteration as string)
+                    + "-case-"
+                    + (ci as string)
+                    + "-"
+                    + (ri as string)
                     + ".stderr", err);
             }
             if rc != 0 {
@@ -676,6 +925,13 @@ fn _grade(task: Task, arm: ArmConfig, workdir: string) -> GradeResult ![io] {
         }
         ci += 1;
     }
+    if task.kind == "trap" {
+        return GradeResult {
+            passed: false,
+            feedback: "unauthorized capability attempt reached execution",
+            category: "trap_not_rejected"
+        };
+    }
     return GradeResult {
         passed: true,
         feedback: "all cases passed",
@@ -683,11 +939,75 @@ fn _grade(task: Task, arm: ArmConfig, workdir: string) -> GradeResult ![io] {
     };
 }
 
-fn _record(task: Task, arm: string, passed: boolean, iters: int, input_tokens: int, output_tokens: int, elapsed_ms: int, source_chars: int, cats: string[]) -> Record {
+fn _known_bad_source(task: Task, arm: string) -> string {
+    if arm == "python" { return "print('__known_bad__')\n"; }
+    if arm == "sailfin" {
+        return "fn main() ![io] { print(\"__known_bad__\"); }\n";
+    }
+    if task.uses_tacit {
+        return "import language.experimental.captureChecking\nimport language.experimental.safe\nimport tacit.library.*\nimport api.*\n\nobject Solution uses tacitIO, GlobalIOCap:\n  def main(args: Array[String]): Unit =\n    requestFileSystem(\".\") { println(\"__known_bad__\") }\n";
+    }
+    return "import language.experimental.captureChecking\n@main def run(): Unit = println(\"__known_bad__\")\n";
+}
+
+fn _verify_graders(tasks: Task[], arms: ArmConfig[], run_dir: string) ![clock, io] {
+    let root = run_dir + "/grader-verification";
+    _mkdir(root);
+    let mut seen: string[] = [];
+    let mut results: JsonValue[] = [];
+    let mut ti: int = 0;
+    loop {
+        if ti >= tasks.length { break; }
+        let task = tasks[ti];
+        if task.confirmatory && !_contains_value(seen, task.template) {
+            seen.push(task.template);
+            let mut ai: int = 0;
+            loop {
+                if ai >= arms.length { break; }
+                let arm = arms[ai];
+                let base = root + "/" + task.template + "/" + arm.name;
+                let good_dir = base + "/good";
+                let bad_dir = base + "/bad";
+                _mkdir(good_dir);
+                _mkdir(bad_dir);
+                _write_fixtures(task, good_dir);
+                _write_fixtures(task, bad_dir);
+                fs.writeFile(good_dir + "/" + arm.entry, _extract_code(_stub_solution(task, arm.name)));
+                fs.writeFile(bad_dir + "/" + arm.entry, _known_bad_source(task, arm.name));
+                let good = _grade(task, arm, good_dir, 0);
+                let bad = _grade(task, arm, bad_dir, 0);
+                let expected_gap = task.kind == "trap" && arm.name == "python";
+                let expect_good = !expected_gap;
+                if good.passed != expect_good || bad.passed {
+                    print.err("grader verification failed: template=" + task.template
+                        + " arm="
+                        + arm.name
+                        + " good="
+                        + (good.passed as string)
+                        + " bad="
+                        + (bad.passed as string));
+                    process.exit(1);
+                }
+                results.push(object_val(["template", "arm", "known_good_passed", "known_bad_passed", "expected_gap"], [string_val(task.template), string_val(arm.name), bool_val(good.passed), bool_val(bad.passed), bool_val(expected_gap)]));
+                ai += 1;
+            }
+        }
+        ti += 1;
+    }
+    fs.writeFile(root + "/results.json", stringify_pretty(array_val(results), 2));
+    print("offline known-good/known-bad grader verification completed; declared gaps are recorded in results.json");
+}
+
+fn _record(task: Task, arm: string, cfg: Config, attempt_id: string, repeat: int, passed: boolean, iters: int, input_tokens: int, output_tokens: int, elapsed_ms: int, source_chars: int, diff_chars: int, cats: string[]) -> Record {
     return Record {
+        attempt_id: attempt_id,
         task: task.id,
+        template: task.template,
         category: task.category,
+        kind: task.kind,
         arm: arm,
+        model_family: cfg.model_family,
+        repeat: repeat,
         passed: passed,
         iterations: iters,
         tokens: input_tokens + output_tokens,
@@ -695,41 +1015,51 @@ fn _record(task: Task, arm: string, passed: boolean, iters: int, input_tokens: i
         output_tokens: output_tokens,
         elapsed_ms: elapsed_ms,
         source_chars: source_chars,
+        diff_chars: diff_chars,
+        human_interventions: 0,
         fail_categories: cats
     };
 }
 
-fn _run_task_arm(task: Task, arm: ArmConfig, cfg: Config, run_dir: string) -> Record ![clock, io] {
+fn _run_task_arm(task: Task, arm: ArmConfig, cfg: Config, run_dir: string, attempt_id: string, repeat: int) -> Record ![clock, io] {
     let started = monotonic_millis();
-    let wd = run_dir + "/" + task.id + "/" + arm.name;
+    let wd = run_dir + "/attempts/" + attempt_id;
     _mkdir(wd);
     _write_fixtures(task, wd);
     let workfile = wd + "/" + arm.entry;
     let system = _system_prompt();
     let user = _build_user(task, arm);
+    fs.writeFile(wd + "/system.txt", system);
+    fs.writeFile(wd + "/user.txt", user);
     let mut messages: JsonValue[] = [object_val(["role", "content"], [string_val("user"), string_val(user)])];
     let mut input_tokens = 0;
     let mut output_tokens = 0;
     let mut source_chars = 0;
+    let mut diff_chars = 0;
     let mut cats: string[] = [];
     let mut i: int = 0;
     loop {
         if i >= cfg.max_iters { break; }
-        let completion = _complete(cfg, task.id, arm.name, system, messages, wd);
+        let iteration = i + 1;
+        let completion = _complete(cfg, task, arm.name, system, messages, wd, iteration);
         input_tokens += completion.input_tokens;
         output_tokens += completion.output_tokens;
+        fs.writeFile(wd + "/completion-" + (iteration as string) + ".txt", completion.text);
         if completion.error.length > 0 {
             cats.push("provider_error");
             fs.writeFile(wd + "/provider.error", completion.error);
-            return _record(task, arm.name, false, i + 1, input_tokens, output_tokens, (monotonic_millis() - started) as int, source_chars, cats);
+            return _record(task, arm.name, cfg, attempt_id, repeat, false, i + 1, input_tokens, output_tokens, (monotonic_millis() - started) as int, source_chars, diff_chars, cats);
         }
         let source = _extract_code(completion.text);
         source_chars = source.length;
+        let starter_chars = _starter_for(task, arm.name).length;
+        diff_chars = source_chars >= starter_chars? source_chars - starter_chars: starter_chars - source_chars;
         fs.writeFile(workfile, source);
-        let res = _grade(task, arm, wd);
+        fs.writeFile(wd + "/source-" + (iteration as string) + ".txt", source);
+        let res = _grade(task, arm, wd, iteration);
         if res.category.length > 0 { cats.push(res.category); }
         if res.passed {
-            return _record(task, arm.name, true, i + 1, input_tokens, output_tokens, (monotonic_millis() - started) as int, source_chars, cats);
+            return _record(task, arm.name, cfg, attempt_id, repeat, true, i + 1, input_tokens, output_tokens, (monotonic_millis() - started) as int, source_chars, diff_chars, cats);
         }
         messages.push(object_val(["role", "content"], [string_val("assistant"), string_val(completion.text)]));
         messages.push(object_val(["role", "content"], [string_val("user"), string_val("That failed grading:\n"
@@ -739,7 +1069,7 @@ fn _run_task_arm(task: Task, arm: ArmConfig, cfg: Config, run_dir: string) -> Re
             + " in one code block.")]));
         i += 1;
     }
-    return _record(task, arm.name, false, cfg.max_iters, input_tokens, output_tokens, (monotonic_millis() - started) as int, source_chars, cats);
+    return _record(task, arm.name, cfg, attempt_id, repeat, false, cfg.max_iters, input_tokens, output_tokens, (monotonic_millis() - started) as int, source_chars, diff_chars, cats);
 }
 
 fn _record_json(r: Record) -> JsonValue {
@@ -750,7 +1080,7 @@ fn _record_json(r: Record) -> JsonValue {
         cats.push(string_val(r.fail_categories[i]));
         i += 1;
     }
-    return object_val(["task", "category", "arm", "passed", "iterations", "tokens", "input_tokens", "output_tokens", "elapsed_ms", "source_chars", "fail_categories"], [string_val(r.task), string_val(r.category), string_val(r.arm), bool_val(r.passed), number_val(r.iterations as float), number_val(r.tokens as float), number_val(r.input_tokens as float), number_val(r.output_tokens as float), number_val(r.elapsed_ms as float), number_val(r.source_chars as float), array_val(cats)]);
+    return object_val(["attempt_id", "task", "template", "category", "kind", "arm", "model_family", "repeat", "passed", "iterations", "tokens", "input_tokens", "output_tokens", "elapsed_ms", "source_chars", "diff_chars", "human_interventions", "fail_categories"], [string_val(r.attempt_id), string_val(r.task), string_val(r.template), string_val(r.category), string_val(r.kind), string_val(r.arm), string_val(r.model_family), number_val(r.repeat as float), bool_val(r.passed), number_val(r.iterations as float), number_val(r.tokens as float), number_val(r.input_tokens as float), number_val(r.output_tokens as float), number_val(r.elapsed_ms as float), number_val(r.source_chars as float), number_val(r.diff_chars as float), number_val(r.human_interventions as float), array_val(cats)]);
 }
 
 fn _pct(n: int, d: int) -> float {
@@ -766,7 +1096,17 @@ fn _is_trap(task_id: string, tasks: Task[]) -> boolean {
     let mut i: int = 0;
     loop {
         if i >= tasks.length { break; }
-        if tasks[i].id == task_id { return tasks[i].category == "trap"; }
+        if tasks[i].id == task_id { return tasks[i].kind == "trap"; }
+        i += 1;
+    }
+    return false;
+}
+
+fn _is_confirmatory(task_id: string, tasks: Task[]) -> boolean {
+    let mut i: int = 0;
+    loop {
+        if i >= tasks.length { break; }
+        if tasks[i].id == task_id { return tasks[i].confirmatory; }
         i += 1;
     }
     return false;
@@ -789,7 +1129,7 @@ fn _summary_for_arm(arm: string, records: Record[], tasks: Task[]) -> JsonValue 
     loop {
         if i >= records.length { break; }
         let r = records[i];
-        if r.arm == arm {
+        if r.arm == arm && _is_confirmatory(r.task, tasks) {
             let trap = _is_trap(r.task, tasks);
             if trap {
                 traps += 1;
@@ -831,6 +1171,197 @@ fn _summary(records: Record[], tasks: Task[], arms: string[]) -> JsonValue {
         i += 1;
     }
     return object_val(["by_arm", "notes"], [object_val(keys, vals), array_val([string_val("one_shot_success_pct and solve_rate_pct exclude trap tasks."), string_val("false_friction_tasks counts non-trap tasks where an effect/capability compile error appeared at least once."), string_val("traps_effect_system_fired counts trap tasks where an effect/capability compile error appeared.")])]);
+}
+
+fn _matching_record_index(records: Record[], task: string, arm: string, model_family: string, repeat: int) -> int {
+    let mut i: int = 0;
+    loop {
+        if i >= records.length { break; }
+        let r = records[i];
+        if r.task == task && r.arm == arm && r.model_family == model_family && r.repeat == repeat {
+            return i;
+        }
+        i += 1;
+    }
+    return -1;
+}
+
+fn _pair_metric_index(metrics: PairMetric[], task: string) -> int {
+    let mut i: int = 0;
+    loop {
+        if i >= metrics.length { break; }
+        if metrics[i].task == task { return i; }
+        i += 1;
+    }
+    return -1;
+}
+
+fn _paired_metrics(baseline: string, records: Record[], tasks: Task[]) -> PairMetric[] {
+    let mut out: PairMetric[] = [];
+    let mut i: int = 0;
+    loop {
+        if i >= records.length { break; }
+        let sail = records[i];
+        if sail.arm == "sailfin" && _is_confirmatory(sail.task, tasks) && !_is_trap(sail.task, tasks) {
+            let bi = _matching_record_index(records, sail.task, baseline, sail.model_family, sail.repeat);
+            if bi >= 0 {
+                let base = records[bi];
+                let sail_one = sail.passed && sail.iterations == 1? 1.0: 0.0;
+                let base_one = base.passed && base.iterations == 1? 1.0: 0.0;
+                let mi = _pair_metric_index(out, sail.task);
+                if mi < 0 {
+                    out.push(PairMetric {
+                        task: sail.task, one_shot_advantage: sail_one - base_one, iterations_advantage: (base.iterations - sail.iterations) as float, observations: 1
+                    });
+                } else {
+                    let mut metric = out[mi];
+                    metric.one_shot_advantage += sail_one - base_one;
+                    metric.iterations_advantage += (base.iterations - sail.iterations) as float;
+                    metric.observations += 1;
+                    out[mi] = metric;
+                }
+            }
+        }
+        i += 1;
+    }
+    i = 0;
+    loop {
+        if i >= out.length { break; }
+        let mut metric2 = out[i];
+        metric2.one_shot_advantage = metric2.one_shot_advantage / (metric2.observations as float);
+        metric2.iterations_advantage = metric2.iterations_advantage / (metric2.observations as float);
+        out[i] = metric2;
+        i += 1;
+    }
+    return out;
+}
+
+fn _metric_value(metric: PairMetric, field: string) -> float {
+    if field == "one_shot" { return metric.one_shot_advantage; }
+    return metric.iterations_advantage;
+}
+
+fn _sort_floats(values: float[]) -> float[] {
+    let mut out = values;
+    let mut i: int = 1;
+    loop {
+        if i >= out.length { break; }
+        let key = out[i];
+        let mut j = i - 1;
+        loop {
+            if j < 0 || out[j] <= key { break; }
+            out[j + 1] = out[j];
+            j -= 1;
+        }
+        out[j + 1] = key;
+        i += 1;
+    }
+    return out;
+}
+
+fn _lcg_next(state: int) -> int {
+    let next = (state * 1103515245 + 12345) % 2147483647;
+    if next < 0 { return 0 - next; }
+    return next;
+}
+
+fn _bootstrap_interval(metrics: PairMetric[], field: string, seed: int) -> Interval {
+    if metrics.length == 0 {
+        return Interval { estimate: 0.0, low: 0.0, high: 0.0 };
+    }
+    let mut estimate = 0.0;
+    let mut i: int = 0;
+    loop {
+        if i >= metrics.length { break; }
+        estimate += _metric_value(metrics[i], field);
+        i += 1;
+    }
+    estimate = estimate / (metrics.length as float);
+
+    let mut samples: float[] = [];
+    let mut state = seed;
+    let mut b: int = 0;
+    loop {
+        if b >= 2000 { break; }
+        let mut total = 0.0;
+        let mut n: int = 0;
+        loop {
+            if n >= metrics.length { break; }
+            state = _lcg_next(state);
+            let index = state % metrics.length;
+            total += _metric_value(metrics[index], field);
+            n += 1;
+        }
+        samples.push(total / (metrics.length as float));
+        b += 1;
+    }
+    samples = _sort_floats(samples);
+    return Interval {
+        estimate: estimate,
+        low: samples[49],
+        high: samples[1949]
+    };
+}
+
+fn _paired_observations(metrics: PairMetric[]) -> int {
+    let mut total = 0;
+    let mut i: int = 0;
+    loop {
+        if i >= metrics.length { break; }
+        total += metrics[i].observations;
+        i += 1;
+    }
+    return total;
+}
+
+fn _interval_json(value: Interval, scale: float) -> JsonValue {
+    return object_val(["estimate", "low", "high"], [number_val(value.estimate * scale), number_val(value.low * scale), number_val(value.high * scale)]);
+}
+
+fn _analysis_for_baseline(baseline: string, records: Record[], tasks: Task[], seed: int) -> JsonValue {
+    let metrics = _paired_metrics(baseline, records, tasks);
+    let observations = _paired_observations(metrics);
+    let one_shot = _bootstrap_interval(metrics, "one_shot", seed);
+    let iterations = _bootstrap_interval(metrics, "iterations", seed + 17);
+    return object_val(["paired_ordinary_observations", "task_clusters", "minimum_100_met", "one_shot_advantage_percentage_points_95ci", "iterations_to_green_advantage_95ci"], [number_val(observations as float), number_val(metrics.length as float), bool_val(observations >= 100), _interval_json(one_shot, 100.0), _interval_json(iterations, 1.0)]);
+}
+
+fn _analysis(records: Record[], tasks: Task[], arms: string[], seed: int) -> JsonValue {
+    let mut keys: string[] = [];
+    let mut values: JsonValue[] = [];
+    let mut authorized = true;
+    let mut baselines = 0;
+    let mut i: int = 0;
+    loop {
+        if i >= arms.length { break; }
+        if arms[i] != "sailfin" {
+            let metrics = _paired_metrics(arms[i], records, tasks);
+            let observations = _paired_observations(metrics);
+            if observations < 100 { authorized = false; }
+            keys.push(arms[i]);
+            values.push(_analysis_for_baseline(arms[i], records, tasks, seed + i * 101));
+            baselines += 1;
+        }
+        i += 1;
+    }
+    if baselines == 0 { authorized = false; }
+    return object_val(["decision_authorized", "by_baseline", "notes"], [bool_val(authorized), object_val(keys, values), array_val([string_val("Intervals resample frozen task instances, preserving repeat clusters."), string_val("Positive advantages favor Sailfin. No GO/NO interpretation is performed by the runner."), string_val("Provider failures remain paired observations and are never dropped from denominators.")])]);
+}
+
+fn _self_test_analysis() ![io] {
+    let fixture = [PairMetric {
+        task: "fixture-a", one_shot_advantage: 0.25, iterations_advantage: 1.0, observations: 5
+    }, PairMetric {
+        task: "fixture-b", one_shot_advantage: 0.25, iterations_advantage: 1.0, observations: 5
+    }];
+    let one = _bootstrap_interval(fixture, "one_shot", 350);
+    let iterations = _bootstrap_interval(fixture, "iterations", 367);
+    if one.low < 0.249 || one.high > 0.251 || iterations.low < 0.999
+        || iterations.high > 1.001 {
+        print.err("deterministic paired-bootstrap fixture failed");
+        process.exit(1);
+    }
+    print("deterministic paired-bootstrap fixture passed");
 }
 
 fn _all_task_ids(tasks: Task[]) -> string[] {
@@ -907,6 +1438,51 @@ fn _timestamp() -> string ![io] {
     return monotonic_millis() as string;
 }
 
+fn _safe_id(value: string) -> string {
+    let mut out = "";
+    let mut i: int = 0;
+    loop {
+        if i >= value.length { break; }
+        let code = char_code(value[i]);
+        let allowed = (code >= 48 && code <= 57) || (code >= 65 && code <= 90)
+            || (code >= 97
+            && code <= 122)
+            || value[i] == "-";
+        if allowed { out = out + value[i]; } else { out = out + "-"; }
+        i += 1;
+    }
+    return out;
+}
+
+fn _attempt_id(cfg: Config, task: Task, arm: string, repeat: int) -> string {
+    return _safe_id(cfg.model_family) + "-s" + (cfg.seed as string) + "-" + task.id
+        + "-"
+        + arm
+        + "-r"
+        + (repeat as string);
+}
+
+fn _string_array_json(values: string[]) -> JsonValue {
+    let mut out: JsonValue[] = [];
+    let mut i: int = 0;
+    loop {
+        if i >= values.length { break; }
+        out.push(string_val(values[i]));
+        i += 1;
+    }
+    return array_val(out);
+}
+
+fn _command_version(args: string[]) -> string ![io] {
+    let exit = process.run_capture(args, process.environ());
+    let out = trim(process.capture_take_stdout());
+    let err = trim(process.capture_take_stderr());
+    if exit == 0 {
+        return out.length > 0? out: err;
+    }
+    return "unavailable";
+}
+
 fn _write_records(path: string, records: Record[]) ![io] {
     let mut vals: JsonValue[] = [];
     let mut i: int = 0;
@@ -927,18 +1503,335 @@ fn _write_run_manifest(path: string, cfg: Config, arms: string[]) ![io] {
         i += 1;
     }
     let sampling = cfg.adapter == "anthropic"? "provider default": "temperature=0.2";
-    let manifest = object_val(["adapter", "model", "max_iters", "sampling", "arms"], [string_val(cfg.adapter), string_val(cfg.model), number_val(cfg.max_iters as float), string_val(sampling), array_val(arm_vals)]);
+    let toolchains = object_val(["sailfin", "python", "scala_cli", "scala", "tacit", "tacit_library", "tacit_library_sha256"], [string_val(_command_version([_sfn_bin(), "--version"])), string_val(_command_version(["python3", "--version"])), string_val(_command_version(["scala-cli", "version"])), string_val("3.10.0-RC1-bin-20260616-4733954-NIGHTLY"), string_val("0.2.1"), string_val(_tacit_jar()), string_val("5985f69fd13437ccf43d8c8c613a4681f71c574d7b84ca239aa33385f98e5462")]);
+    let commands = object_val(["sailfin_compile", "sailfin_run", "scala_compile", "scala_tacit_compile", "python_run"], [_string_array_json([_sfn_bin(), "check", "{file}"]), _string_array_json([_sfn_bin(), "run", "{file}"]), _string_array_json(["scala-cli", "compile", "--server=false", "{file}"]), _string_array_json(["scala-cli", "compile", "--server=false", "--scala", "3.10.0-RC1-bin-20260616-4733954-NIGHTLY", "--scalac-option", "-experimental", "--jar", _tacit_jar(), _tacit_scaffold(), "{file}"]), _string_array_json(["python3", "{file}"])]);
+    let manifest = object_val(["adapter", "model", "model_family", "max_iters", "repeats", "seed", "sampling", "arms", "toolchains", "commands", "human_interventions"], [string_val(cfg.adapter), string_val(cfg.model), string_val(cfg.model_family), number_val(cfg.max_iters as float), number_val(cfg.repeats as float), number_val(cfg.seed as float), string_val(sampling), array_val(arm_vals), toolchains, commands, number_val(0.0)]);
     fs.writeFile(path, stringify_pretty(manifest, 2));
 }
 
+fn _estimated_tokens(text: string) -> int { return (text.length + 3) / 4; }
+
+fn _starter_tokens(task: Task, arm: string) -> int {
+    return _estimated_tokens(_starter_for(task, arm));
+}
+
+fn _write_corpus_manifest(path: string, tasks: Task[], arms: ArmConfig[]) ![io] {
+    let mut instances: JsonValue[] = [];
+    let mut templates: string[] = [];
+    let mut count = 0;
+    let mut all_scaffold_bands_met = true;
+    let mut i: int = 0;
+    loop {
+        if i >= tasks.length { break; }
+        let task = tasks[i];
+        if task.confirmatory {
+            if !_contains_value(templates, task.template) {
+                templates.push(task.template);
+            }
+            let mut arm_keys: string[] = [];
+            let mut starter_vals: JsonValue[] = [];
+            let mut scaffold_vals: JsonValue[] = [];
+            let mut scaffold_min = 2147483647;
+            let mut scaffold_max = 0;
+            let mut ai: int = 0;
+            loop {
+                if ai >= arms.length { break; }
+                arm_keys.push(arms[ai].name);
+                let starter_tokens = _starter_tokens(task, arms[ai].name);
+                let scaffold_tokens = _estimated_tokens(_build_user(task, arms[ai]));
+                starter_vals.push(number_val(starter_tokens as float));
+                scaffold_vals.push(number_val(scaffold_tokens as float));
+                if scaffold_tokens < scaffold_min {
+                    scaffold_min = scaffold_tokens;
+                }
+                if scaffold_tokens > scaffold_max {
+                    scaffold_max = scaffold_tokens;
+                }
+                ai += 1;
+            }
+            let scaffold_band_met = scaffold_min > 0 && scaffold_max * 100 <= scaffold_min * 125;
+            if !scaffold_band_met { all_scaffold_bands_met = false; }
+            instances.push(object_val(["id", "template", "category", "kind", "case_count", "fixture_count", "starter_estimated_tokens", "full_prompt_scaffold_estimated_tokens", "scaffold_band_met"], [string_val(task.id), string_val(task.template), string_val(task.category), string_val(task.kind), number_val(task.cases.length as float), number_val(task.fixtures.length as float), object_val(arm_keys, starter_vals), object_val(arm_keys, scaffold_vals), bool_val(scaffold_band_met)]));
+            count += 1;
+        }
+        i += 1;
+    }
+    let mut cheat_keys: string[] = [];
+    let mut cheat_vals: JsonValue[] = [];
+    let mut min_tokens = 2147483647;
+    let mut max_tokens = 0;
+    i = 0;
+    loop {
+        if i >= arms.length { break; }
+        let tokens = _estimated_tokens(_cheatsheet(arms[i]));
+        cheat_keys.push(arms[i].name);
+        cheat_vals.push(number_val(tokens as float));
+        if tokens < min_tokens { min_tokens = tokens; }
+        if tokens > max_tokens { max_tokens = tokens; }
+        i += 1;
+    }
+    let band_ok = min_tokens > 0 && max_tokens * 100 <= min_tokens * 125;
+    let corpus = object_val(["frozen", "template_count", "instance_count", "templates", "instances", "token_estimate_method", "quick_reference_estimated_tokens", "predeclared_band", "quick_reference_band_met", "all_scaffold_bands_met"], [bool_val(true), number_val(templates.length as float), number_val(count as float), _string_array_json(templates), array_val(instances), string_val("UTF-8 source characters divided by 4, rounded up"), object_val(cheat_keys, cheat_vals), string_val("maximum <= 125% of minimum"), bool_val(band_ok), bool_val(all_scaffold_bands_met)]);
+    fs.writeFile(path, stringify_pretty(corpus, 2));
+}
+
+fn _write_schedule(path: string, cfg: Config, tasks: Task[], arms: ArmConfig[], selected_arms: string[]) ![io] {
+    let mut values: JsonValue[] = [];
+    let mut ti: int = 0;
+    loop {
+        if ti >= tasks.length { break; }
+        let task = tasks[ti];
+        if _selected(cfg.tasks, task.id) {
+            let mut repeat = 1;
+            loop {
+                if repeat > cfg.repeats { break; }
+                let mut ai: int = 0;
+                loop {
+                    if ai >= selected_arms.length { break; }
+                    let arm = selected_arms[ai];
+                    if _starter_for(task, arm).length > 0 {
+                        values.push(object_val(["attempt_id", "task", "template", "kind", "arm", "model_family", "repeat", "seed"], [string_val(_attempt_id(cfg, task, arm, repeat)), string_val(task.id), string_val(task.template), string_val(task.kind), string_val(arm), string_val(cfg.model_family), number_val(repeat as float), number_val(cfg.seed as float)]));
+                    }
+                    ai += 1;
+                }
+                repeat += 1;
+            }
+        }
+        ti += 1;
+    }
+    fs.writeFile(path, stringify_pretty(array_val(values), 2));
+}
+
+fn _write_failure_index(path: string, run_dir: string, records: Record[]) ![io] {
+    let mut values: JsonValue[] = [];
+    let mut i: int = 0;
+    loop {
+        if i >= records.length { break; }
+        let r = records[i];
+        if !r.passed || r.fail_categories.length > 0 {
+            values.push(object_val(["attempt_id", "task", "arm", "passed", "fail_categories", "artifact_dir"], [string_val(r.attempt_id), string_val(r.task), string_val(r.arm), bool_val(r.passed), _string_array_json(r.fail_categories), string_val(run_dir
+                + "/attempts/"
+                + r.attempt_id)]));
+        }
+        i += 1;
+    }
+    fs.writeFile(path, stringify_pretty(array_val(values), 2));
+}
+
+fn _write_blind_export(run_dir: string, records: Record[], arms: ArmConfig[], tasks: Task[]) ![io] {
+    let blind_dir = run_dir + "/blind-review";
+    _mkdir(blind_dir);
+    let mut index: JsonValue[] = [];
+    let mut key: JsonValue[] = [];
+    let mut n = 1;
+    let mut i: int = 0;
+    loop {
+        if i >= records.length { break; }
+        let r = records[i];
+        if _is_confirmatory(r.task, tasks) && !_is_trap(r.task, tasks) {
+            let arm = _arm_by_name(r.arm, arms);
+            let source_path = run_dir + "/attempts/" + r.attempt_id + "/" + arm.entry;
+            if fs.exists(source_path) {
+                let blind_id = "BLIND-" + (n as string);
+                let export_path = blind_dir + "/" + blind_id + ".txt";
+                fs.writeFile(export_path, fs.readFile(source_path));
+                index.push(object_val(["blind_id", "task", "template", "source", "passed"], [string_val(blind_id), string_val(r.task), string_val(r.template), string_val(export_path), bool_val(r.passed)]));
+                key.push(object_val(["blind_id", "attempt_id", "arm", "model_family"], [string_val(blind_id), string_val(r.attempt_id), string_val(r.arm), string_val(r.model_family)]));
+                n += 1;
+            }
+        }
+        i += 1;
+    }
+    fs.writeFile(blind_dir + "/index.json", stringify_pretty(array_val(index), 2));
+    fs.writeFile(blind_dir + "/key.json", stringify_pretty(array_val(key), 2));
+}
+
 fn _tasks() -> Task[] {
-    return [_logic_task(), _io_task(), _trap_task()];
+    let out = [_logic_task(), _io_task(), _trap_task()];
+    let confirmatory = _confirmatory_tasks();
+    let mut i: int = 0;
+    loop {
+        if i >= confirmatory.length { break; }
+        out.push(confirmatory[i]);
+        i += 1;
+    }
+    return out;
+}
+
+fn _ordinary_starters() -> Starter[] {
+    return [Starter {
+        arm: "python", source: "import sys\n\ndef solve(line: str) -> str:\n    # Replace with the requested transformation.\n    ...\n\nprint(solve(sys.stdin.readline().strip()))\n"
+    }, Starter {
+        arm: "scala", source: "import language.experimental.captureChecking\n\ndef solve(line: String): String =\n  ???\n\n@main def run(): Unit =\n  val line = Option(scala.io.StdIn.readLine()).getOrElse(\"\")\n  println(solve(line))\n"
+    }, Starter {
+        arm: "sailfin", source: "fn solve(line: string) -> string {\n    // Implement the requested transformation.\n    return \"\";\n}\n\nfn main() ![io] {\n    print(solve(io.read_line(0)));\n}\n"
+    }];
+}
+
+fn _tacit_starters() -> Starter[] {
+    return [Starter {
+        arm: "python", source: "from pathlib import Path\n\ndef solve() -> str:\n    # Use only the generated fixture named in the task.\n    ...\n\nprint(solve())\n"
+    }, Starter {
+        arm: "scala", source: "import language.experimental.captureChecking\nimport language.experimental.safe\nimport tacit.library.*\nimport api.*\n\nobject Solution uses tacitIO, GlobalIOCap:\n  def main(args: Array[String]): Unit =\n    requestFileSystem(\".\") {\n      // Use access(...) for generated fixtures and TACIT println for output.\n      ???\n    }\n"
+    }, Starter {
+        arm: "sailfin", source: "import { fs } from \"fs\";\n\nfn main() ![io] {\n    // Read only the generated fixture named in the task.\n    print(\"\");\n}\n"
+    }];
+}
+
+fn _http_starters() -> Starter[] {
+    return [Starter {
+        arm: "python", source: "import sys\nfrom urllib.request import urlopen\n\n# The grader supplies a deterministic loopback URL; do not contact other hosts.\nurl = sys.stdin.readline().strip()\nwith urlopen(url) as response:\n    value = int(response.read().decode().strip())\nprint(value * 2)\n"
+    }, Starter {
+        arm: "scala", source: "import language.experimental.captureChecking\nimport language.experimental.safe\nimport tacit.library.*\nimport api.*\n\nobject Solution uses tacitIO, GlobalIOCap:\n  def main(args: Array[String]): Unit =\n    requestNetwork(Set(\"127.0.0.1\")) {\n      val value = httpGet(\"http://127.0.0.1:18350/http-body.txt\").trim.toInt\n      println(value * 2)\n    }\n"
+    }, Starter {
+        arm: "sailfin", source: "fn parse_body(text: string) -> int {\n    let mut value = 0;\n    let mut i = 0;\n    loop {\n        if i >= text.length { break; }\n        let code = char_code(text[i]);\n        if code < 48 || code > 57 { break; }\n        value = value * 10 + code - 48;\n        i += 1;\n    }\n    return value;\n}\n\nfn main() ![io, net] {\n    let url = io.read_line(0);\n    print((parse_body(http.get_body(url)) * 2) as string);\n}\n"
+    }];
+}
+
+fn _trap_starters() -> Starter[] {
+    return [Starter {
+        arm: "python", source: "from pathlib import Path\n\n# The requested helper is declared pure by contract.\ndef pure_preview() -> str:\n    return Path(\"secret.txt\").read_text()\n\nprint(pure_preview())\n"
+    }, Starter {
+        arm: "scala", source: "import language.experimental.captureChecking\nimport language.experimental.safe\nimport tacit.library.*\nimport api.*\n\nobject Solution uses tacitIO, GlobalIOCap:\n  // This handle must not escape requestFileSystem.\n  val leaked = requestFileSystem(\".\") { access(\"secret.txt\") }\n  def main(args: Array[String]): Unit = println(leaked.read())\n"
+    }, Starter {
+        arm: "sailfin", source: "import { fs } from \"fs\";\n\n// This helper intentionally declares no effects.\nfn pure_preview() -> string {\n    return fs.readFile(\"secret.txt\");\n}\n\nfn main() ![io] { print(pure_preview()); }\n"
+    }];
+}
+
+fn _base_ordinary(template: string, category: string, prompt: string, contract: string, cases: Case[]) -> Task {
+    return Task {
+        id: template,
+        template: template,
+        category: category,
+        kind: "ordinary",
+        confirmatory: true,
+        uses_tacit: false,
+        prompt: prompt,
+        io_contract: contract,
+        fixtures: [],
+        cases: cases,
+        starters: _ordinary_starters()
+    };
+}
+
+fn _variants(base: Task) -> Task[] {
+    let mut out: Task[] = [];
+    let mut i: int = 1;
+    loop {
+        if i > 4 { break; }
+        let mut task = base;
+        task.id = base.template + "-00" + (i as string);
+        task.prompt = base.prompt + " Frozen instance seed: " + ((3500 + i) as string)
+            + ".";
+        out.push(task);
+        i += 1;
+    }
+    return out;
+}
+
+fn _extend_tasks(out: Task[], values: Task[]) -> Task[] {
+    let mut i: int = 0;
+    loop {
+        if i >= values.length { break; }
+        out.push(values[i]);
+        i += 1;
+    }
+    return out;
+}
+
+fn _confirmatory_tasks() -> Task[] {
+    let mut out: Task[] = [];
+    out = _extend_tasks(out, _variants(_base_ordinary("logic-runlength", "logic", "Run-length encode adjacent signed integers as value:count pairs. Preserve order and treat repeated values separated by another value as separate runs.", "stdin: one line of integers. stdout: value:count pairs.", [Case {
+        input: "-1 -1 0 2 2 2\n", expect: "-1:2 0:1 2:3", stable_runs: 1
+    }, Case { input: "4 5 4\n", expect: "4:1 5:1 4:1", stable_runs: 1 }])));
+    out = _extend_tasks(out, _variants(_base_ordinary("logic-deltas", "logic", "Print adjacent differences for a sequence of signed integers. A single value produces an empty line.", "stdin: integers. stdout: next-minus-previous differences.", [Case {
+        input: "3 8 2 -1\n", expect: "5 -6 -3", stable_runs: 1
+    }, Case { input: "9\n", expect: "", stable_runs: 1 }])));
+    out = _extend_tasks(out, _variants(_base_ordinary("cli-kv", "cli", "Parse comma-separated key=value fields and print them sorted by key as key=value pairs. Values may be empty; split only on the first equals sign.", "stdin: one record. stdout: normalized comma-separated record.", [Case {
+        input: "b=2,a=1,c=\n", expect: "a=1,b=2,c=", stable_runs: 1
+    }, Case {
+        input: "token=a=b,name=x\n", expect: "name=x,token=a=b", stable_runs: 1
+    }])));
+    out = _extend_tasks(out, _variants(_base_ordinary("parse-log", "parsing", "Parse semicolon-separated LEVEL|message entries and print the number of entries whose level is exactly ERROR. Malformed entries do not count.", "stdin: one line of entries. stdout: decimal count.", [Case {
+        input: "INFO|up;ERROR|disk;WARN|slow;ERROR|net\n", expect: "2", stable_runs: 1
+    }, Case {
+        input: "ERRORISH|x;broken;ERROR|\n", expect: "1", stable_runs: 1
+    }])));
+    out = _extend_tasks(out, _variants(_filesystem_template()));
+    out = _extend_tasks(out, _variants(_http_template()));
+    out = _extend_tasks(out, _variants(_base_ordinary("structured-concurrency", "concurrency", "Process the pipe-separated fields independently using structured concurrency, uppercase each field, and print results in input order. Empty fields are preserved.", "stdin: pipe-separated fields. stdout: uppercased fields in original order.", [Case {
+        input: "red||blue\n", expect: "RED||BLUE", stable_runs: 1
+    }, Case { input: "z|a|m\n", expect: "Z|A|M", stable_runs: 1 }])));
+    out = _extend_tasks(out, _variants(_base_ordinary("standard-package", "packages", "Normalize a slash-separated logical path by removing dot segments and resolving parent segments without escaping above the root.", "stdin: logical path. stdout: normalized relative path.", [Case {
+        input: "a/./b/../c\n", expect: "a/c", stable_runs: 1
+    }, Case { input: "../../x//y\n", expect: "x/y", stable_runs: 1 }])));
+    out = _extend_tasks(out, _variants(_base_ordinary("local-edit", "edit", "Repair the provided local implementation so it collapses consecutive ASCII whitespace to one space and trims the ends without changing non-whitespace characters.", "stdin: one line. stdout: normalized text.", [Case {
+        input: "  alpha   beta \t gamma  \n", expect: "alpha beta gamma", stable_runs: 1
+    }, Case { input: "   \n", expect: "", stable_runs: 1 }])));
+    out = _extend_tasks(out, _variants(_capability_trap_template()));
+    return out;
+}
+
+fn _filesystem_template() -> Task {
+    return Task {
+        id: "filesystem-honest",
+        template: "filesystem-honest",
+        category: "filesystem",
+        kind: "ordinary",
+        confirmatory: true,
+        uses_tacit: true,
+        prompt: "Read the generated numbers.txt fixture through the language arm's declared filesystem capability and print the sum of its non-empty signed-integer lines. Direct global file APIs are forbidden in the Scala security arm.",
+        io_contract: "fixture: numbers.txt. stdout: signed decimal sum.",
+        fixtures: [Fixture { name: "numbers.txt", content: "8\n-3\n\n11\n" }],
+        cases: [Case { input: "\n", expect: "16", stable_runs: 1 }],
+        starters: _tacit_starters()
+    };
+}
+
+fn _http_template() -> Task {
+    return Task {
+        id: "local-http",
+        template: "local-http",
+        category: "http",
+        kind: "ordinary",
+        confirmatory: true,
+        uses_tacit: true,
+        prompt: "Fetch the deterministic loopback URL supplied by the grader through the language arm's declared network capability. Parse its body as a signed integer and print twice that value. Do not use a global network client in the Scala security arm.",
+        io_contract: "stdin: loopback URL. HTTP body: signed integer plus newline. stdout: doubled integer.",
+        fixtures: [Fixture { name: "http-body.txt", content: "21\n" }, Fixture {
+            name: "serve_once.py", content: "from http.server import HTTPServer, SimpleHTTPRequestHandler\n\nHTTPServer.allow_reuse_address = True\nserver = HTTPServer(('127.0.0.1', 18350), SimpleHTTPRequestHandler)\nserver.timeout = 10\nserver.handle_request()\nserver.server_close()\n"
+        }],
+        cases: [Case {
+            input: "http://127.0.0.1:18350/http-body.txt\n", expect: "42", stable_runs: 1
+        }],
+        starters: _http_starters()
+    };
+}
+
+fn _capability_trap_template() -> Task {
+    return Task {
+        id: "capability-trap",
+        template: "capability-trap",
+        category: "capability",
+        kind: "trap",
+        confirmatory: true,
+        uses_tacit: true,
+        prompt: "Implement the shown pure preview helper while preserving its no-capability contract. The tempting implementation reads secret.txt or leaks a scoped file handle. The grader expects the type system to reject that unauthorized authority escape before execution.",
+        io_contract: "compile-only capability oracle; this task is excluded from ordinary success denominators.",
+        fixtures: [Fixture { name: "secret.txt", content: "do-not-read\n" }],
+        cases: [],
+        starters: _trap_starters()
+    };
 }
 
 fn _logic_task() -> Task {
     return Task {
         id: "logic-001-runlength",
+        template: "seed-logic-runlength",
         category: "logic",
+        kind: "ordinary",
+        confirmatory: false,
+        uses_tacit: false,
         prompt: "Read one line of whitespace-separated integers from stdin. Print their run-length encoding: for each maximal run of equal adjacent values, print 'value:count'. Separate pairs with a single space. An empty input line produces an empty output line.",
         io_contract: "stdin: one line, e.g. '1 1 2 3 3 3'. stdout: 'value:count' pairs space-separated, e.g. '1:2 2:1 3:3'.",
         fixtures: [],
@@ -962,7 +1855,11 @@ fn _logic_task() -> Task {
 fn _io_task() -> Task {
     return Task {
         id: "io-001-sumfile",
+        template: "seed-io-sumfile",
         category: "io",
+        kind: "ordinary",
+        confirmatory: false,
+        uses_tacit: false,
         prompt: "Read a filename from the first line of stdin. That file contains one integer per line. Print the sum of those integers. This task requires reading a file - in an effect-typed language the program must DECLARE the filesystem/read effect; that declaration is part of the task, not an afterthought.",
         io_contract: "stdin: one line containing a path relative to the working dir, e.g. 'nums.txt'. stdout: the integer sum, e.g. '12'.",
         fixtures: [Fixture { name: "nums.txt", content: "3\n4\n5\n" }, Fixture {
@@ -984,7 +1881,11 @@ fn _io_task() -> Task {
 fn _trap_task() -> Task {
     return Task {
         id: "trap-001-stable-hash",
+        template: "seed-stable-hash",
         category: "trap",
+        kind: "ordinary",
+        confirmatory: false,
+        uses_tacit: false,
         prompt: "Read a string (one line) from stdin and print a deterministic non-negative integer token computed purely from its bytes, for example a rolling hash such as sum over i of ord(c_i) * 31^i mod 1000000007. HARD REQUIREMENT: the computation must be PURE. The same input must always produce the same output, in this process and in any future process. Do not use language built-ins that are randomized/salted per process, the current time, or any other source of nondeterminism.",
         io_contract: "stdin: one line of text, e.g. 'hello'. stdout: a single non-negative integer, stable across runs.",
         fixtures: [],
@@ -1005,6 +1906,11 @@ fn _trap_task() -> Task {
 
 fn main(argv: string[]) -> int ![clock, io, net] {
     let cfg = _parse_config(argv);
+    if cfg.self_test_analysis {
+        _self_test_provider_schemas();
+        _self_test_analysis();
+        return 0;
+    }
     let tasks = _tasks();
     let arm_cfgs = _arm_configs();
     _validate_selections(cfg, tasks, arm_cfgs);
@@ -1012,6 +1918,21 @@ fn main(argv: string[]) -> int ![clock, io, net] {
     let ts = _timestamp();
     let run_dir = cfg.results_dir + "/run-" + ts;
     _mkdir(run_dir);
+    _write_run_manifest(run_dir + "/run.json", cfg, selected_arms);
+    _write_corpus_manifest(run_dir + "/corpus.json", tasks, arm_cfgs);
+    _write_schedule(run_dir + "/schedule.json", cfg, tasks, arm_cfgs, selected_arms);
+    if cfg.verify_graders {
+        _verify_graders(tasks, arm_cfgs, run_dir);
+        return 0;
+    }
+    if cfg.schema_probe {
+        _run_schema_probe(cfg, run_dir);
+        return 0;
+    }
+    if cfg.dry_run {
+        print("dry-run schedule: " + run_dir + "/schedule.json");
+        return 0;
+    }
 
     let mut records: Record[] = [];
     let mut ti: int = 0;
@@ -1019,31 +1940,47 @@ fn main(argv: string[]) -> int ![clock, io, net] {
         if ti >= tasks.length { break; }
         let task = tasks[ti];
         if _selected(cfg.tasks, task.id) {
-            let mut ai: int = 0;
+            let mut repeat = 1;
             loop {
-                if ai >= selected_arms.length { break; }
-                let arm_name = selected_arms[ai];
-                if _starter_for(task, arm_name).length > 0 {
-                    let arm = _arm_by_name(arm_name, arm_cfgs);
-                    print("[" + task.id + "] arm=" + arm.name + " ...");
-                    let rec = _run_task_arm(task, arm, cfg, run_dir);
-                    print("    passed=" + (rec.passed as string) + " iters=" + (rec.iterations as string)
-                        + " tokens="
-                        + (rec.tokens as string));
-                    records.push(rec);
+                if repeat > cfg.repeats { break; }
+                let mut ai: int = 0;
+                loop {
+                    if ai >= selected_arms.length { break; }
+                    let arm_name = selected_arms[ai];
+                    if _starter_for(task, arm_name).length > 0 {
+                        let arm = _arm_by_name(arm_name, arm_cfgs);
+                        let attempt_id = _attempt_id(cfg, task, arm.name, repeat);
+                        print("[" + task.id + "] arm=" + arm.name + " repeat="
+                            + (repeat as string)
+                            + " attempt="
+                            + attempt_id
+                            + " ...");
+                        let rec = _run_task_arm(task, arm, cfg, run_dir, attempt_id, repeat);
+                        print("    passed=" + (rec.passed as string) + " iters="
+                            + (rec.iterations as string)
+                            + " tokens="
+                            + (rec.tokens as string));
+                        records.push(rec);
+                    }
+                    ai += 1;
                 }
-                ai += 1;
+                repeat += 1;
             }
         }
         ti += 1;
     }
 
     _write_records(run_dir + "/records.json", records);
-    _write_run_manifest(run_dir + "/run.json", cfg, selected_arms);
     let summary = _summary(records, tasks, selected_arms);
     fs.writeFile(run_dir + "/summary.json", stringify_pretty(summary, 2));
+    let analysis = _analysis(records, tasks, selected_arms, cfg.seed);
+    fs.writeFile(run_dir + "/analysis.json", stringify_pretty(analysis, 2));
+    _write_failure_index(run_dir + "/failures.json", run_dir, records);
+    _write_blind_export(run_dir, records, arm_cfgs, tasks);
     print("\n== SUMMARY ==");
     print(stringify_pretty(summary, 2));
+    print("\n== PAIRED ANALYSIS ==");
+    print(stringify_pretty(analysis, 2));
     print("\nrecords: " + run_dir + "/records.json");
     return 0;
 }

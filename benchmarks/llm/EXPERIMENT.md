@@ -105,13 +105,17 @@ the same ceiling effect rather than answer SFN-350.
 
 ## Remaining pre-registration gates
 
-- Implement and freeze the 10 templates, 30–50 instances, and hidden graders.
-- Integrate the installed TACIT 0.2.1 capability library/server as the Scala
-  security baseline.
+- Merge the implementation that freezes 10 templates, 40 instances, hidden
+  graders, and the cross-arm known-good/known-bad offline verification.
+- Merge the pinned TACIT 0.2.1 library integration and its honest-I/O plus
+  capability-leak oracle.
 - Add a second model family credential/adapter or an equivalent independently
-  served model family.
-- Add repeat/seed orchestration and paired statistical analysis.
-- Blind code-quality review and publish the full failure corpus.
+  served model family, then pass one non-scored schema probe per adapter and
+  freeze the exact model IDs.
+- Merge repeat/seed orchestration, task-cluster bootstrap analysis, blind-review
+  export, and the complete failure-corpus index.
+- Resolver prerequisite satisfied by SFN-352 (`f073fb1f`); confirmatory runs
+  must be based on that commit or later.
 
 ## 2026-07-15 `sfn/strings` follow-up
 
@@ -133,3 +137,6 @@ both failed at runtime compilation, as did the otherwise unchanged trap after
 the model opportunistically imported `trim`. This supports the token-overhead
 hypothesis but does not improve ergonomics until the isolated-cwd resolver path
 is fixed or the benchmark adopts an explicit project compilation model.
+
+Resolution: SFN-352 merged as `f073fb1f`; the frozen corpus and future model
+runs must use that commit or later.

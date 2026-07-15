@@ -1,0 +1,22 @@
+{
+  "description": "Deterministic paired-bootstrap fixture used by --self-test-analysis",
+  "seed": 350,
+  "task_clusters": [
+    {
+      "task": "fixture-a",
+      "observations": 5,
+      "one_shot_advantage": 0.25,
+      "iterations_to_green_advantage": 1.0
+    },
+    {
+      "task": "fixture-b",
+      "observations": 5,
+      "one_shot_advantage": 0.25,
+      "iterations_to_green_advantage": 1.0
+    }
+  ],
+  "expected": {
+    "one_shot_advantage_95ci": [0.25, 0.25],
+    "iterations_to_green_advantage_95ci": [1.0, 1.0]
+  }
+}
