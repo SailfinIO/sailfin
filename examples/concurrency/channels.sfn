@@ -2,8 +2,8 @@
 // Bounded channels ship as the language builtin `channel(N)` (capacity N),
 // with `.send` / `.receive` over the by-pointer element ABI. A receive target
 // annotated `int` loads the element at the right width. The typed `sync`
-// capsule wrapper (`Channel<int>`, `channel<T>()`) and `async`/`await` are not
-// yet shipped — see docs/status.md and #829.
+// capsule wrapper (`Channel<int>`, `channel<T>()`) is not yet shipped. `await`
+// works on futures created by `spawn`, not on synchronous channel receives.
 fn main() ![io] {
     let messages = channel(1);
 

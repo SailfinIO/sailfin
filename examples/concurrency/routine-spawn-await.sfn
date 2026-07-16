@@ -1,0 +1,8 @@
+// Shipped v0 structured concurrency: a routine nursery joins its spawned task.
+fn main() ![io] {
+    routine {
+        let task = spawn fn () -> int { return 40 + 2; };
+        let result: int = await task;
+        print("Result: {{result}}");
+    }
+}

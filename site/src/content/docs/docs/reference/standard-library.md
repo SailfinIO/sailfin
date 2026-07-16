@@ -301,9 +301,10 @@ You should not call this function directly. It appears in generated code and in 
 ### Concurrency and Async Utilities
 
 > **Status:** `routine`, `await`, and `parallel` are shipped language
-> constructs, and the `Channel<T>` type from the `sync` module works today
-> (see the examples below). Structured-concurrency supervision — scope
-> semantics, cancellation, and `spawn` — is on the [roadmap](/roadmap).
+> constructs. `spawn fn() -> T { ... }` is also shipped, and `routine { ... }`
+> is the structured-concurrency nursery that joins its children. The v0
+> `channel(N)` surface is a language builtin; the typed `sfn/sync` capsule
+> wrapper is not yet built.
 
 #### `monotonic_millis() -> int ![clock]`
 
@@ -318,39 +319,40 @@ fn timed_operation() ![io, clock] {
 }
 ```
 
-#### `channel<T>() -> Channel<T>` and `channel<T>(capacity: int) -> Channel<T>`
+#### `channel(capacity: int)` — language construct
 
-Create an unbuffered or bounded channel for passing values between concurrent
-tasks. `capacity = 0` (the no-argument form) produces an unbuffered
-(synchronous) channel. Imported from the `sync` module.
+Create a bounded MPMC channel for passing values between concurrent tasks. The
+capacity is fixed at construction. Elements are pointer-sized in v0; when a
+bare channel's element kind cannot be inferred, annotate the receive target as
+`int` or `float`. A `Channel<T>` binding annotation enforces the element kind,
+but the generic `channel<T>(...)` constructor and typed `sfn/sync` capsule API
+are not yet shipped.
 
 ```sfn
-import { Channel, channel } from "sync";
-
-async fn main() ![io] {
-    let messages: Channel<int> = channel();
+fn main() ![io] {
+    let messages = channel(1);
 
     routine {
         messages.send(42);
     }
 
-    let result: int = await messages.receive();
+    let result: int = messages.receive();
     print("Received: {{result}}");
 }
 ```
 
-#### `Channel<T>.send(value: T)` and `Channel<T>.receive() -> T`
+#### Channel `send`, `receive`, and `close`
 
-Send a value into the channel, or await the next value out. `send` returns
-immediately on a buffered channel (blocks when the buffer is full); `receive`
-yields via `await` until a value is available.
+`send` blocks when the bounded buffer is full, `receive` blocks when it is
+empty, and `close` closes the channel. `send` and `receive` require `![io]` as a
+conservative v0 effect. They are synchronous channel methods; do not prefix a
+receive with `await`.
 
 ```sfn
-import { Channel, channel } from "sync";
 import { sleep } from "time";
 
 fn main() ![clock, io] {
-    let buffer: Channel<int> = channel(10); // bounded buffer
+    let buffer = channel(10);
 
     routine {
         for i in 1..20 {
@@ -362,7 +364,7 @@ fn main() ![clock, io] {
 
     routine {
         loop {
-            let item = await buffer.receive();
+            let item: int = buffer.receive();
             print("Consumed {{item}}");
             sleep(1000);
         }
@@ -370,9 +372,9 @@ fn main() ![clock, io] {
 }
 ```
 
-> **Coming in 1.0:** `Channel<T>.close()` and explicit cancellation, plus a
-> structured `scope { ... }` supervisor for grouping routines. See the
-> [roadmap](/roadmap).
+> **Not in v0:** cancel-on-fault nursery behavior, async-I/O integration, and
+> the generic `channel<T>(...)` constructor. There is no separate
+> `scope { ... }` construct; `routine { ... }` is the shipped supervisor.
 
 #### `parallel [ ... ]` — language construct
 

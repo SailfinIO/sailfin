@@ -77,7 +77,8 @@ Effect annotations (`![...]`) flag the runtime capabilities you need to declare 
 | `dynamic-task-scheduling.sfn` | `io`          | Work-stealing queue feeding background routines.            |
 | `parallel.sfn`                | `io`          | `parallel [...]` execution returning aggregated results.    |
 | `producer-consumer.sfn`       | `clock`, `io` | Bounded buffer with `sleep` pacing producers and consumers. |
-| `routines.sfn`                | `io`          | Named and unnamed routines writing to the console.          |
+| `routine-spawn-await.sfn`     | `io`          | Checked v0 nursery, spawn, and typed-await surface.          |
+| `routines.sfn`                | `io`          | Unnamed routine nursery writing to the console.              |
 
 ### `advanced/`
 
