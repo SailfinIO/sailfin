@@ -14,7 +14,7 @@ import {
 } from "../expression_lowering/native/core_text";
 import { find_local_binding } from "../expressions_bindings";
 import { format_temp_name } from "../expressions_helpers";
-import { make_child_scope_id } from "../lifetime";
+import { is_scope_descendant, make_child_scope_id } from "../lifetime";
 import { find_function_by_name_or_import } from "../rendering_helpers";
 import { empty_string_constant_set, merge_string_constants } from "../strings";
 import {
@@ -392,6 +392,18 @@ fn lower_match_instruction(function: NativeFunction, start_index: int, llvm_retu
     loop {
         if preload_index >= current_locals.length { break; }
         let local = current_locals[preload_index];
+        // Only preload a binding whose alloca dominates this match entry.
+        // A sibling-arm pattern binding can leak into `current_locals` (its
+        // alloca lives in a non-dominating arm body block); loading it here
+        // emits IR that fails the LLVM verifier ("Instruction does not
+        // dominate all uses", SFN-378). Skip the load but push a placeholder
+        // so `preloaded_locals` stays index-aligned with `current_locals` for
+        // `find_preloaded_value`.
+        if !is_scope_descendant(local.scope_id, scope_id) {
+            preloaded_locals.push("");
+            preload_index += 1;
+            continue;
+        }
         let preload_temp = format_temp_name(current_temp);
         current_temp += 1;
         let preload_line = "  " + preload_temp + " = load " + local.llvm_type

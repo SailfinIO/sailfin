@@ -28,7 +28,12 @@ fn find_preloaded_value(locals: LocalBinding[], preloaded_values: string[], name
         let check_local = locals[local_index];
         if check_local.name == name {
             if local_index < preloaded_values.length {
-                return preloaded_values[local_index];
+                let preloaded = preloaded_values[local_index];
+                // An empty entry marks a binding whose alloca does not
+                // dominate the preload point, so no load was emitted for it
+                // (SFN-378). Skip it and keep scanning for a dominating
+                // shadow of the same name rather than returning a bad value.
+                if preloaded.length > 0 { return preloaded; }
             }
         }
         local_index += 1;

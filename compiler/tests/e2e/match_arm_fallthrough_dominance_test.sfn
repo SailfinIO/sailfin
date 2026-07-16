@@ -1,0 +1,107 @@
+// compiler/tests/e2e/match_arm_fallthrough_dominance_test.sfn
+//
+// Shape-pinning coverage for SFN-378: a `match` arm whose body falls through
+// into trailing control flow (a nested `match`/`if`, rather than an immediate
+// `return`) must lower to verifier-clean LLVM IR.
+//
+// The LLVM lowering preloads in-scope locals before a match/if branch to feed
+// phi merges (`instructions_match.sfn`, `instructions_if.sfn`). A sibling
+// arm's pattern binding could leak into the preloaded local set; its `alloca`
+// lives in the sibling arm's body block, which does not dominate the arm that
+// falls through, so a `load` from it emitted `Instruction does not dominate
+// all uses` (rejected by the macOS arm64 lowering and the Windows `llvm-link`
+// cross-link; Linux `clang -O` tolerates it — #1389 class). The fix filters
+// each preload by scope dominance (`is_scope_descendant`).
+//
+// SCOPE OF THIS TEST: it pins that the nested-match/if fall-through *shape*
+// lowers to verifier-clean IR. It does NOT reproduce the SFN-378 leak in
+// isolation: that leak was an allocator-state-dependent aliasing of
+// `current_locals` that only manifests under the ~261-module self-host build,
+// where `clone_local_bindings`'s copy failed to isolate. In a single-file
+// compile the copy isolates correctly, so this fixture emits identical clean
+// IR against both the buggy and the fixed compiler. The real regression guard
+// is the self-host build of `sfn/crypto/tls13_record` at full scale; this
+// fixture documents and pins the source shape.
+//
+// Drives the shipped `build/bin/sfn emit --validate llvm`: the `--validate`
+// cascade round-trips the emitted IR through `llvm-as`, whose verifier catches
+// a dominance violation. Where `llvm-as` is absent the cascade skips
+// validation and the fixture (valid IR) still emits cleanly, so it never
+// flakes. The emitting child inherits the full parent environment via
+// `process.environ()` so `PATH` (the `llvm-as` lookup) and
+// `SAILFIN_TEST_SCRATCH` (build-cache isolation under the parallel pool,
+// #1333) both flow through.
+fn _sfn_bin() -> string ![io] {
+    let configured = env.get("SAILFIN_BIN");
+    if configured.length > 0 { return configured; }
+    return "build/bin/sfn";
+}
+
+fn _scratch_dir() -> string ![io] {
+    let mut dir = env.get("SAILFIN_TEST_SCRATCH");
+    if dir.length == 0 { dir = "/tmp"; }
+    fs.createDirectory(dir, true);
+    return dir;
+}
+
+// The exact SFN-378 shape (mirrors `tls13_open_record`): an outer `match` on a
+// `Result` whose `Err` arm binds `error`, and whose `Ok` arm binds `value` and
+// then falls through into a nested `match` — itself ending in a trailing `if`
+// — instead of returning immediately. The sibling `error` bindings are the
+// ones that must never be reloaded in a block their `alloca` does not
+// dominate.
+fn _fixture_source() -> string {
+    return "fn _classify(x: int) -> Result<int, string> {\n"
+        + "    if x < 0 { return Result.Err { error: \"negative\" }; }\n"
+        + "    return Result.Ok { value: x };\n"
+        + "}\n"
+        + "\n"
+        + "fn _open(x: int) -> Result<int, string> {\n"
+        + "    let outer: Result<int, string> = _classify(x);\n"
+        + "    match outer {\n"
+        + "        Result.Err { error } => {\n"
+        + "            return Result.Err { error: error };\n"
+        + "        },\n"
+        + "        Result.Ok { value } => {\n"
+        + "            let inner: Result<int, string> = _classify(value - 1);\n"
+        + "            match inner {\n"
+        + "                Result.Err { error } => {\n"
+        + "                    return Result.Err { error: error };\n"
+        + "                },\n"
+        + "                Result.Ok { value } => {\n"
+        + "                    if value > 100 {\n"
+        + "                        return Result.Err { error: \"overflow\" };\n"
+        + "                    }\n"
+        + "                    return Result.Ok { value: value };\n"
+        + "                }\n"
+        + "            }\n"
+        + "        }\n"
+        + "    }\n"
+        + "}\n"
+        + "\n"
+        + "test \"match arm fallthrough dominance\" {\n"
+        + "    match _open(42) {\n"
+        + "        Result.Ok { value } => { assert value == 41; },\n"
+        + "        Result.Err { error } => { assert error.length > 0; }\n"
+        + "    }\n"
+        + "}\n";
+}
+
+test "match arm fallthrough: nested match/if in an arm lowers to verifier-clean IR" ![io] {
+    let src = _scratch_dir() + "/match_arm_fallthrough_378.sfn";
+    if fs.exists(src) { fs.deleteFile(src); }
+    fs.writeFile(src, _fixture_source());
+    let out = _scratch_dir() + "/match_arm_fallthrough_378.ll";
+    if fs.exists(out) { fs.deleteFile(out); }
+
+    // `emit --validate llvm` runs the emitted IR through the `llvm-as`
+    // verifier; a dominance violation makes it exit non-zero.
+    let exit = process.run_capture([_sfn_bin(), "emit", "--validate", "-o", out, "llvm", src], process.environ());
+    let _sout = process.capture_take_stdout();
+    let _serr = process.capture_take_stderr();
+
+    assert exit == 0;
+    assert fs.exists(out);
+    fs.deleteFile(out);
+    fs.deleteFile(src);
+}

@@ -7,7 +7,7 @@ import { lower_expression } from "../expression_lowering/native/core";
 import { format_scope_id, pop_scope_metadata, push_scope_metadata } from "../expression_lowering/native/core_scopes";
 import { find_local_binding, find_parameter_binding } from "../expressions_bindings";
 import { default_return_literal, format_temp_name } from "../expressions_helpers";
-import { make_child_scope_id } from "../lifetime";
+import { is_scope_descendant, make_child_scope_id } from "../lifetime";
 import { append_string_constant, merge_string_constants } from "../strings";
 import {
     BlockLoweringResult,
@@ -374,6 +374,18 @@ fn lower_if_instruction(function: NativeFunction, start_index: int, llvm_return:
     loop {
         if preload_index >= current_locals.length { break; }
         let local = current_locals[preload_index];
+        // Only preload a binding whose alloca dominates this branch point.
+        // A sibling-arm pattern binding can leak into the locals threaded
+        // into a nested `if` (its alloca lives in a non-dominating arm body
+        // block); loading it here emits IR that fails the LLVM verifier
+        // ("Instruction does not dominate all uses", SFN-378). Skip the load
+        // but push a placeholder so `preloaded_locals` stays index-aligned
+        // with `current_locals` for `find_preloaded_value`.
+        if !is_scope_descendant(local.scope_id, scope_id) {
+            preloaded_locals.push("");
+            preload_index += 1;
+            continue;
+        }
         let preload_temp = format_temp_name(current_temp);
         current_temp += 1;
         let preload_line = "  " + preload_temp + " = load " + local.llvm_type
