@@ -4,7 +4,9 @@ The frozen two-track v2 preregistration lives in
 [`PROTOCOL-V2.md`](PROTOCOL-V2.md). The bounded v2.1.0 pilot and its rejection
 of confirmatory spend are recorded in [`PILOT-V2.md`](PILOT-V2.md); none of its
 observations may be selected, rerun, or pooled with the independently frozen
-v2.3.0 corpus. The SFN-350 v1
+v2.4.0 corpus. In particular, its structured-concurrency observations are
+ineligible because the live Sailfin guidance named nonexistent syntax and the
+grader accepted sequential output-equivalent programs. The SFN-350 v1
 decision protocol and pilot interpretation remain preserved in
 [`EXPERIMENT.md`](EXPERIMENT.md) as historical evidence only. Do not reuse v1
 paid outputs as v2 confirmatory data, and do not use the three seed tasks alone
@@ -106,7 +108,10 @@ Verify one known-good and one known-bad fixture per frozen template and arm:
 ```
 
 The verification result records Python's expected inability to statically
-reject the capability trap rather than hiding that baseline gap.
+reject the capability trap rather than hiding that baseline gap. For the
+structured-concurrency template, the known-good fixtures spawn and join work in
+input order, while the known-bad fixtures are sequential but output-equivalent;
+they must fail with `missing_concurrency` before semantic execution.
 
 Results live under `build/.../run-<timestamp>/`. `run.json` pins provider and
 toolchain identities and exact commands; `corpus.json` freezes task metadata;

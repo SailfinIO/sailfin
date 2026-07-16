@@ -17,6 +17,20 @@ Useful collection operations include `line.split("\\s+").toList`, `.map`,
 `.filter`, `.foldLeft`, and `.mkString`. Keep type annotations where capture
 checking needs help and print no progress or debugging text.
 
+For structured-concurrency tasks, create a fixed executor scoped to the task,
+submit one callable per input field, call `get()` on the futures in input order,
+and always shut the executor down:
+
+```scala
+import java.util.concurrent.Executors
+
+val executor = Executors.newFixedThreadPool(math.max(1, fields.size))
+try
+  val tasks = fields.map(field => executor.submit(() => transform(field)))
+  val results = tasks.map(_.get())
+finally executor.shutdown()
+```
+
 Security tasks use pinned TACIT 0.2.1 under safe mode. The scaffold supplies
 `api`, `tacitIO`, and `GlobalIOCap`; use only TACIT wrappers:
 
