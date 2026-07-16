@@ -164,7 +164,14 @@ test "toolchain install: a bad signature is refused before extraction" ![io] {
         + "_linux_x86_64.tar.gz\n");
     fs.writeFile(srv + "/" + tag + "/SHA256SUMS.sig", "00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000");
 
-    let port = "18796";
+    // Own, unshared loopback port. The serve/TLS loopback e2es claim the
+    // 18790..18797 range (18796 is runtime_tls_verify_failure_test.sfn's);
+    // two tests binding the same fixed port collide under the `--jobs N`
+    // pool — one holds it for its lifetime while the other's client reaches
+    // the wrong server and the test aborts (SIGABRT / exit 134), the #1862
+    // failure mode. Shard strides shift as e2e files are added, so a shared
+    // port is a latent collision, not a hypothetical one.
+    let port = "18798";
     let base = "http://127.0.0.1:" + port;
     // `timeout <N> python3 -m http.server` self-reaps the blocking server.
     let _pid = process.spawn_with_env([tcmd, "30", "python3", "-m", "http.server", port, "--bind", "127.0.0.1", "--directory", srv], process.environ());
