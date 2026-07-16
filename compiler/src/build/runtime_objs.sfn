@@ -290,12 +290,31 @@ fn _clang_compile_runtime_capsule_objects(runtime_capsules: RuntimeCapsuleArtifa
                 stats.hits = stats.hits + 1;
             } else {
                 stats.misses = stats.misses + 1;
+                // Write to a sibling temp then atomically rename into
+                // place (SFN-87, #1726): `out_dir` is a shared, best-effort
+                // prewarmed objdir (`SAILFIN_TEST_RUNTIME_OBJDIR`), so a
+                // prewarm miss can put two pool children in this branch
+                // for the same `obj` concurrently. An in-place write let
+                // a torn `.o` reach `_runtime_obj_cache_record`'s `.key`
+                // sidecar as if it were complete.
+                let obj_tmp = _mktemp_sibling_cmd(obj);
+                if obj_tmp.length == 0 {
+                    print("sfn build: failed to stage runtime c-source object "
+                        + obj);
+                    return _failed_runtime_link_inputs();
+                }
                 // Per-function/per-datum sections (in `assemble`) so the
                 // final link's dead-strip (`--gc-sections` / `-dead_strip`)
                 // can drop functions no consumer references (#1047).
-                let rc = llvm_assemble(src, obj, opt_flag, include_flags);
+                let rc = llvm_assemble(src, obj_tmp, opt_flag, include_flags);
                 if rc != 0 {
+                    process.run(["rm", "-f", obj_tmp]);
                     print("sfn build: failed to compile runtime c-source " + src);
+                    return _failed_runtime_link_inputs();
+                }
+                if !_atomic_rename_into_place(obj_tmp, obj) {
+                    print("sfn build: failed to stage runtime c-source object "
+                        + obj);
                     return _failed_runtime_link_inputs();
                 }
                 _runtime_obj_cache_record(obj, key);
@@ -327,10 +346,25 @@ fn _clang_compile_runtime_capsule_objects(runtime_capsules: RuntimeCapsuleArtifa
             } else {
                 stats.misses = stats.misses + 1;
                 let no_includes: string[] = [];
-                let rc = llvm_assemble(src, obj, opt_flag, no_includes);
+                // Sibling temp + atomic rename (SFN-87, #1726) — see the
+                // matching c-source branch above for why the shared,
+                // best-effort prewarmed objdir needs this.
+                let obj_tmp = _mktemp_sibling_cmd(obj);
+                if obj_tmp.length == 0 {
+                    print("sfn build: failed to stage runtime ll-source object "
+                        + obj);
+                    return _failed_runtime_link_inputs();
+                }
+                let rc = llvm_assemble(src, obj_tmp, opt_flag, no_includes);
                 if rc != 0 {
+                    process.run(["rm", "-f", obj_tmp]);
                     print("sfn build: failed to assemble runtime ll-source "
                         + src);
+                    return _failed_runtime_link_inputs();
+                }
+                if !_atomic_rename_into_place(obj_tmp, obj) {
+                    print("sfn build: failed to stage runtime ll-source object "
+                        + obj);
                     return _failed_runtime_link_inputs();
                 }
                 _runtime_obj_cache_record(obj, key);
@@ -670,22 +704,48 @@ fn _emit_runtime_sfn_to_obj(self_path: string, cap_prefix: string, src: string, 
     // without one — including the `prelude-entry`, which shares this
     // emit path but is never staged — reads an absent sidecar, gets an
     // empty dep list, and degrades to the exact pre-#1288 legacy emit.
-    let emit_argv: string[] = [self_path, "emit", "--module-name", slug, "--import-context", ctx_root, "-o", ll_path, "llvm", src];
+    // Sibling temp + atomic rename for both the `.ll` and the `.o`
+    // (SFN-87, #1726): `out_dir` is a shared, best-effort prewarmed
+    // objdir (`SAILFIN_TEST_RUNTIME_OBJDIR`), so a prewarm miss can put
+    // two pool children in this cache-miss branch for the same source
+    // concurrently. Emitting/assembling in place let a torn `.ll`/`.o`
+    // reach `_runtime_obj_cache_record`'s `.key` sidecar as if complete.
+    let ll_tmp = _mktemp_sibling_cmd(ll_path);
+    if ll_tmp.length == 0 {
+        print("sfn build: failed to stage runtime sfn-source ir " + ll_path);
+        return RuntimeEmitResult { obj_path: "", stats: stats };
+    }
+    let emit_argv: string[] = [self_path, "emit", "--module-name", slug, "--import-context", ctx_root, "-o", ll_tmp, "llvm", src];
     let rc = process.run_capture(emit_argv, _runtime_emit_child_env());
     _runtime_emit_captured_stream(process.capture_take_stdout(), false);
     _runtime_emit_captured_stream(process.capture_take_stderr(), true);
     if rc != 0 {
+        process.run(["rm", "-f", ll_tmp]);
         print("sfn build: failed to emit runtime sfn-source " + src
             + " (child exit="
             + number_to_string(rc)
             + ")");
         return RuntimeEmitResult { obj_path: "", stats: stats };
     }
+    if !_atomic_rename_into_place(ll_tmp, ll_path) {
+        print("sfn build: failed to stage runtime sfn-source ir " + ll_path);
+        return RuntimeEmitResult { obj_path: "", stats: stats };
+    }
     let no_includes: string[] = [];
-    let rc2 = llvm_assemble(ll_path, obj_path, opt_flag, no_includes);
+    let obj_tmp = _mktemp_sibling_cmd(obj_path);
+    if obj_tmp.length == 0 {
+        print("sfn build: failed to stage runtime sfn-source object " + obj_path);
+        return RuntimeEmitResult { obj_path: "", stats: stats };
+    }
+    let rc2 = llvm_assemble(ll_path, obj_tmp, opt_flag, no_includes);
     if rc2 != 0 {
+        process.run(["rm", "-f", obj_tmp]);
         print("sfn build: failed to compile runtime sfn-source object "
             + obj_path);
+        return RuntimeEmitResult { obj_path: "", stats: stats };
+    }
+    if !_atomic_rename_into_place(obj_tmp, obj_path) {
+        print("sfn build: failed to stage runtime sfn-source object " + obj_path);
         return RuntimeEmitResult { obj_path: "", stats: stats };
     }
     _runtime_obj_cache_record(obj_path, key);

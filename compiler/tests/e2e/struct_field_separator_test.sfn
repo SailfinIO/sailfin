@@ -21,6 +21,7 @@
 // cannot be called from an `![io]` test like these. Assert on the captured
 // text with `sfn/strings` predicates instead. (#842.)
 import { contains } from "sfn/strings";
+import { report_child_failure } from "sfn/test";
 
 fn _sfn_bin() -> string ![io] {
     let configured = env.get("SAILFIN_BIN");
@@ -60,11 +61,7 @@ fn _emit(source: string, tag: string, kind: string, ext: string) -> string ![io]
     if exit != 0 {
         // Surface child output so a macOS-nightly re-fire is diagnosable
         // (OOM/SIGABRT vs. an emit bug) — otherwise swallowed (#1462).
-        print.err("[struct-sep] emit failed tag=" + tag + " exit="
-            + number_to_string(exit)
-            + " output:\n"
-            + o
-            + e);
+        report_child_failure("struct-sep emit " + tag, exit, o, e);
         return "";
     }
     if !fs.exists(out) { return ""; }
@@ -86,11 +83,7 @@ fn _run(source: string, tag: string) -> string ![io] {
     if exit != 0 {
         // Surface child output so a macOS-nightly re-fire is diagnosable
         // (OOM/SIGABRT vs. a run-pipeline bug) — otherwise swallowed (#1462).
-        print.err("[struct-sep] run failed tag=" + tag + " exit="
-            + number_to_string(exit)
-            + " output:\n"
-            + out
-            + err);
+        report_child_failure("struct-sep run " + tag, exit, out, err);
         return "";
     }
     return out + err;

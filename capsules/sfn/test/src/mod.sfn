@@ -407,3 +407,12 @@ export { CompileExpect, assert_compiles, assert_does_not_compile } from "./compi
 // companion: it runs the child in `cwd` via the same `os::run_capture`
 // (#1167 per-child cwd), with no process-global `chdir`. See `fixtures.sfn`.
 export { with_cwd, with_env, with_tmp_dir } from "./fixtures";
+
+// ---------------------------------------------------------------------------
+// Child-process failure diagnostics (SFN-87 / #1726)
+// ---------------------------------------------------------------------------
+// `report_child_failure(tag, exit, out, err)` prints a failed child's exit
+// code and captured stdout/stderr to stderr, and is a no-op on success — so
+// a call site stays a single unconditional line before its `assert exit ==
+// 0`. See `child_diag.sfn`.
+export { report_child_failure } from "./child_diag";

@@ -27,6 +27,7 @@
 // not auto-discover `runtime/native/capsule.toml`. See
 // `.claude/rules/no-bash-e2e.md`.
 import { find } from "sfn/strings";
+import { report_child_failure } from "sfn/test";
 
 fn _sfn_bin() -> string ![io] {
     let configured = env.get("SAILFIN_BIN");
@@ -78,6 +79,7 @@ fn _build(tag: string, linker: string) -> int ![io] {
     let err = process.capture_take_stderr();
     fs.writeFile(dir + "/build.out", out);
     fs.writeFile(dir + "/build.err", err);
+    report_child_failure("linker-selection build " + tag, rc, out, err);
     return rc;
 }
 
@@ -92,7 +94,8 @@ test "linker: auto-detect surfaces [link] on stderr (not stdout) and runs" ![io]
     assert find(out, "[link] linker:", 0) < 0;
     let run_rc = process.run_capture([_bin("auto")], []);
     let run_out = process.capture_take_stdout();
-    let _re = process.capture_take_stderr();
+    let run_err = process.capture_take_stderr();
+    report_child_failure("linker-selection auto run", run_rc, run_out, run_err);
     assert run_rc == 0;
     assert find(run_out, "LINKER_OK", 0) >= 0;
 }
@@ -104,7 +107,8 @@ test "linker: SAILFIN_LINKER=ld forces the system default and runs" ![io] {
     assert find(err, "[link] linker: system default (SAILFIN_LINKER=ld)", 0) >= 0;
     let run_rc = process.run_capture([_bin("ld")], []);
     let run_out = process.capture_take_stdout();
-    let _re = process.capture_take_stderr();
+    let run_err = process.capture_take_stderr();
+    report_child_failure("linker-selection ld run", run_rc, run_out, run_err);
     assert run_rc == 0;
     assert find(run_out, "LINKER_OK", 0) >= 0;
 }
@@ -119,7 +123,8 @@ test "linker: SAILFIN_LINKER=lld selects lld via override (when installed)" ![io
         assert find(err, "[link] linker: lld (SAILFIN_LINKER override)", 0) >= 0;
         let run_rc = process.run_capture([_bin("lld")], []);
         let run_out = process.capture_take_stdout();
-        let _re = process.capture_take_stderr();
+        let run_err = process.capture_take_stderr();
+        report_child_failure("linker-selection lld run", run_rc, run_out, run_err);
         assert run_rc == 0;
         assert find(run_out, "LINKER_OK", 0) >= 0;
     }

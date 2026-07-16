@@ -1,0 +1,86 @@
+// Tests for `report_child_failure` (SFN-87 / #1726).
+//
+// `report_child_failure(tag, exit, out, err)` prints a failed child's
+// captured output to stderr and is a no-op on `exit == 0`. It has no
+// return value, so the success-path no-op and the tag/output framing on
+// the failure path are proven by shelling out to a real `sfn run` fixture
+// and inspecting the child's captured stderr — the same subprocess
+// pattern `compile_assert_test.sfn` uses to exercise `![io]` helpers that
+// only print.
+import { find } from "sfn/strings";
+
+import { report_child_failure } from "../src/mod";
+
+fn _sfn_bin() -> string ![io] {
+    let configured = env.get("SAILFIN_BIN");
+    if configured.length > 0 { return configured; }
+    return "build/bin/sfn";
+}
+
+// Falls back to the test runner's own default scratch root
+// (`_test_scratch_root` in `cli/commands/test.sfn`) rather than `/tmp`: a
+// single-file `sfn test <file>` invocation never dispatches a per-file
+// child (that only happens when the target expands to >1 file), so
+// `SAILFIN_TEST_SCRATCH` is unset and a fixture written under `/tmp` sits
+// outside the repo tree — `discover_project_root` then finds no
+// `capsule.toml`/`workspace.toml` walking up from it, and the fixture's own
+// `import { report_child_failure } from "sfn/test"` cannot resolve.
+// `build/sailfin` stays inside the checkout either way.
+fn _scratch_dir() -> string ![io] {
+    let mut dir = env.get("SAILFIN_TEST_SCRATCH");
+    if dir.length == 0 { dir = "build/sailfin"; }
+    fs.createDirectory(dir, true);
+    return dir;
+}
+
+struct ProbeResult {
+    exit: int,
+    out: string,
+    err: string
+}
+
+// Run `body` as a standalone program's `main`, importing `report_child_failure`
+// from the capsule under test, and return its exit code and captured streams.
+fn _run_probe(tag: string, body: string) -> ProbeResult ![io] {
+    let dir = _scratch_dir();
+    let src = dir + "/sfn-child-diag-" + tag + ".sfn";
+    let source = "import { report_child_failure } from \"sfn/test\";\n\nfn main() ![io] {\n"
+        + body
+        + "\n}\n";
+    fs.writeFile(src, source);
+    let exit = process.run_capture([_sfn_bin(), "run", src], process.environ());
+    let out = process.capture_take_stdout();
+    let err = process.capture_take_stderr();
+    fs.deleteFile(src);
+    return ProbeResult { exit: exit, out: out, err: err };
+}
+
+// `exit == 0` is the no-op case: nothing is written to stderr. The probe's
+// own exit code is asserted (not discarded) so this cannot pass vacuously
+// when the fixture itself fails to compile/run — the exact anti-pattern
+// `report_child_failure` exists to eliminate (SFN-87 / #1726).
+test "report_child_failure: no-op on exit == 0" ![io] {
+    let result = _run_probe("noop", "report_child_failure(\"probe\", 0, \"should-not-appear-out\", \"should-not-appear-err\");");
+    if result.exit != 0 {
+        report_child_failure("child-diag noop probe", result.exit, result.out, result.err);
+    }
+    assert result.exit == 0;
+    assert find(result.err, "should-not-appear-out", 0) < 0;
+    assert find(result.err, "should-not-appear-err", 0) < 0;
+}
+
+// A non-zero exit prints the tag and both captured streams so a CI log is
+// greppable — this is the exact shape #1726 needs to root-cause the
+// macOS-nightly roaming flake. The probe process itself must still exit 0
+// (only the argument passed to `report_child_failure` is non-zero); that
+// exit is asserted too so a fixture crash cannot masquerade as a pass.
+test "report_child_failure: non-zero exit surfaces tag and both streams" ![io] {
+    let result = _run_probe("fail", "report_child_failure(\"probe-tag\", 7, \"child-stdout-marker\", \"child-stderr-marker\");");
+    if result.exit != 0 {
+        report_child_failure("child-diag fail probe", result.exit, result.out, result.err);
+    }
+    assert result.exit == 0;
+    assert find(result.err, "probe-tag", 0) >= 0;
+    assert find(result.err, "child-stdout-marker", 0) >= 0;
+    assert find(result.err, "child-stderr-marker", 0) >= 0;
+}
