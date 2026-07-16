@@ -1,0 +1,21 @@
+// capsules/sfn/test/src/child_diag.sfn — Child-process failure diagnostics
+// (SFN-87 / #1726).
+//
+// E2e tests that spawn a nested `sfn run`/`build`/`check`/`emit` via
+// `process.run_capture` and assert `exit == 0` tend to discard the child's
+// captured stdout/stderr. When the child fails, the only surviving output
+// is `assertion failed` — the real error (OOM, SIGABRT, a genuine emit
+// bug) is lost, which is why the macOS-nightly roaming e2e flake has never
+// been root-caused. `report_child_failure` is the one reusable helper that
+// surfaces both streams on failure instead.
+//
+// `report_child_failure` is `![io]` (it prints) and therefore cannot be
+// built from the `expect_*` matchers in this capsule, which are `![pure]`.
+fn report_child_failure(tag: string, exit: int, out: string, err: string) ![io] {
+    if exit == 0 { return; }
+    print.err("[" + tag + "] child failed exit=" + number_to_string(exit)
+        + " stdout:\n"
+        + out
+        + "\nstderr:\n"
+        + err);
+}

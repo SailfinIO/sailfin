@@ -30,6 +30,7 @@
 // NOTE: the `sfn/test` `expect_*` matchers are `![pure]` and cannot be
 // used from an `![io]` test; output is asserted with `sfn/strings` predicates.
 import { find } from "sfn/strings";
+import { report_child_failure } from "sfn/test";
 
 fn _sfn_bin() -> string ![io] {
     let configured = env.get("SAILFIN_BIN");
@@ -119,6 +120,7 @@ test "sfn run <file> still works (no flags)" ![io] {
     let err = process.capture_take_stderr();
     let log = out + err;
 
+    report_child_failure("run-cache-flags no-flags run", exit, out, err);
     assert exit == 0;
     assert find(log, "OK", 0) >= 0;
     assert find(log, "[cache]", 0) < 0;

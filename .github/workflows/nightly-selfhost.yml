@@ -49,17 +49,26 @@ jobs:
             package_label: linux-x86_64
             clang: clang-18
             # Strict self-host gate (#1830): a stage2/stage3 fixed-point
-            # mismatch fails this leg instead of warn-and-promote. Linux is
-            # the enforced surface; macOS stays warn-only (its strict
-            # participation is a separate sub-issue).
+            # mismatch fails this leg instead of warn-and-promote.
             selfhost_strict: "1"
           # Trialing macos-26 ahead of the 2026-06-15 `macos-latest` migration:
           # nightly is the early-warning canary for fixed-point / determinism
           # breakage on the new image before CI and release jobs adopt it.
+          #
+          # Strict on macOS too (SFN-87 / #1726). It was warn-only because the
+          # check could not pass: ld64 derives a Mach-O's ad-hoc code-signature
+          # identifier from the linked output's basename, and the driver linked
+          # stage2/stage3 to different basenames, so `binary_match` was
+          # structurally unsatisfiable and every run reported a mismatch even
+          # though all 240 module digests were identical. With both stages
+          # linked to a common basename the fixed point is reached (binary
+          # included), and `sfn selfhost` now gates strict on module-IR
+          # divergence rather than the binary sha, which macOS packaging makes
+          # an unreliable signal.
           - os: macos-26
             package_label: macos-arm64
             clang: clang
-            selfhost_strict: "0"
+            selfhost_strict: "1"
     steps:
       - name: Checkout repository
         uses: actions/checkout@v7

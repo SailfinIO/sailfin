@@ -22,6 +22,7 @@
 // full JSON parser (sfn/json::parse hangs on complex input when imported
 // transitively via the workspace resolver in the compiler test context).
 import { contains, find, split } from "sfn/strings";
+import { report_child_failure } from "sfn/test";
 
 fn _sfn_bin() -> string ![io] {
     let configured = env.get("SAILFIN_BIN");
@@ -99,8 +100,9 @@ fn _ensure_fixtures() ![io] {
 fn _run_build(args: string[]) -> int ![io] {
     _ensure_fixtures();
     let exit = process.run_capture(args, _child_env());
-    let _o = process.capture_take_stdout();
-    let _e = process.capture_take_stderr();
+    let out = process.capture_take_stdout();
+    let err = process.capture_take_stderr();
+    report_child_failure("capsule-artifact-sidecar build", exit, out, err);
     return exit;
 }
 
@@ -272,6 +274,7 @@ test "sidecar: binary at canonical path runs and prints expected marker" ![io] {
     let run_exit = process.run_capture([bin], _child_env());
     let run_out = process.capture_take_stdout();
     let run_err = process.capture_take_stderr();
+    report_child_failure("capsule-artifact-sidecar widgetcli run", run_exit, run_out, run_err);
     assert run_exit == 0;
     assert contains(run_out + run_err, "widgetcli ok");
 }
@@ -350,6 +353,7 @@ test "sidecar: bare capsule name builds without scope/name-form warning" ![io] {
     let exit = process.run_capture([_sfn_bin(), "build", "-p", _bare_root()], _child_env());
     let out = process.capture_take_stdout();
     let err = process.capture_take_stderr();
+    report_child_failure("capsule-artifact-sidecar bare-name build", exit, out, err);
     assert exit == 0;
     // A legitimate bare name must not trip the stderr warning.
     assert ! contains(out + err, "is not in scope/name form");

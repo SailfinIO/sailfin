@@ -25,6 +25,7 @@
 // `sfn/test` `expect_*` matchers are `![pure]` and cannot be used from an
 // `![io]` test (#842).
 import { contains } from "sfn/strings";
+import { report_child_failure } from "sfn/test";
 
 fn _sfn_bin() -> string ![io] {
     let configured = env.get("SAILFIN_BIN");
@@ -91,8 +92,9 @@ fn _cmp_identical(a: string, b: string) -> boolean ![io] {
 fn _build_compiler_into(work_dir: string) -> int ![io] {
     if fs.exists(work_dir + "/native/sailfin") { return 0; }
     let exit = process.run_capture([_sfn_bin(), "build", "-p", "compiler", "--work-dir", work_dir], _child_env());
-    let _o = process.capture_take_stdout();
-    let _e = process.capture_take_stderr();
+    let out = process.capture_take_stdout();
+    let err = process.capture_take_stderr();
+    report_child_failure("work-dir-parity build " + work_dir, exit, out, err);
     return exit;
 }
 

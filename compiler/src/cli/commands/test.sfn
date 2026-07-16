@@ -777,6 +777,8 @@ fn run(matches: Matches, ctx: CliContext) -> int ![clock, io, net] {
                     // explicitly so the failure is attributed, not a gap.
                     if !json_output && _is_signal_exit(rc) {
                         _emit_crash_diagnostic(_package_basename(path), rc);
+                    } else if !json_output && rc == 134 {
+                        _emit_crash_diagnostic_neutral(_package_basename(path), rc);
                     }
                     suites[suite_idx].fail_count += 1;
                     suites[suite_idx].failed_files.push(_package_basename(path));
@@ -842,6 +844,8 @@ fn run(matches: Matches, ctx: CliContext) -> int ![clock, io, net] {
                     // the unflushed crash buffer).
                     if !json_output && _is_signal_exit(rc) {
                         _emit_crash_diagnostic(_package_basename(rpath), rc);
+                    } else if !json_output && rc == 134 {
+                        _emit_crash_diagnostic_neutral(_package_basename(rpath), rc);
                     }
                     suites[rsuite_idx].fail_count += 1;
                     suites[rsuite_idx].failed_files.push(_package_basename(rpath));
@@ -893,6 +897,8 @@ fn run(matches: Matches, ctx: CliContext) -> int ![clock, io, net] {
                     // unflushed crash buffer; surface an attributed FAIL.
                     if !json_output && _is_signal_exit(rc) {
                         _emit_crash_diagnostic(_package_basename(path), rc);
+                    } else if !json_output && rc == 134 {
+                        _emit_crash_diagnostic_neutral(_package_basename(path), rc);
                     }
                     suites[suite_idx].fail_count += 1;
                     suites[suite_idx].failed_files.push(_package_basename(path));
@@ -2289,8 +2295,15 @@ fn _should_retry_test(exit_code: int, retries_disabled: boolean) -> boolean {
 // error) is NOT misattributed as a crash. `timeout`'s own 124/125/126/
 // 127 codes sit below the window, so a wall-clock kill (which prints its
 // own message) never trips this path either.
+//
+// 134 (128 + SIGABRT) is excluded from the crash wording even though it
+// falls in this window: `assert` -> `sailfin_assert_fail` ->
+// `sfn_raise_value_error` -> `abort()` (runtime/sfn/assert.sfn,
+// runtime/sfn/exception.sfn) makes 134 the ordinary exit code of a failed
+// assertion, not evidence of an OOM/SIGABRT crash — conflating the two
+// caused a multi-week misdiagnosis (SFN-87, #1726).
 fn _is_signal_exit(exit_code: int) -> boolean {
-    return exit_code > 128 && exit_code <= 192;
+    return exit_code > 128 && exit_code <= 192 && exit_code != 134;
 }
 
 // Emit a synthetic, attributed FAIL line for a signal-killed child whose
@@ -2300,10 +2313,26 @@ fn _is_signal_exit(exit_code: int) -> boolean {
 // The wording stops short of asserting total output loss — a child may
 // have flushed some lines before the signal — so it points at the likely
 // cause (crash before stdio flush) without overclaiming.
+//
+// 134 never reaches this path (`_is_signal_exit` excludes it, SFN-87,
+// #1726): it is the exit code of a failed `assert` calling `abort()`, not
+// a distinct crash signal, and `_emit_crash_diagnostic_neutral` covers it
+// with wording that doesn't assert a cause.
 fn _emit_crash_diagnostic(basename: string, exit_code: int) -> void ![io] {
     print("[test] FAIL: " + basename + " (exit code " + number_to_string(exit_code)
         + " — child terminated by signal; output may be truncated "
         + "(crash before stdio flush))");
+}
+
+// 134 is the exit code of any failed `assert` (which raises through
+// `abort()`), not a distinct crash — see `_is_signal_exit`. Emit a
+// neutral note pointing at the test's own `assertion failed` line (the
+// authoritative signal) rather than implying a truncated/corrupted
+// crash the way `_emit_crash_diagnostic` does for real signal kills.
+fn _emit_crash_diagnostic_neutral(basename: string, exit_code: int) -> void ![io] {
+    print("[test] FAIL: " + basename + " (exit code " + number_to_string(exit_code)
+        + " — this is the ordinary exit code of a failed assertion or "
+        + "abort(); see the test's own reported assertion line above)");
 }
 
 // Resolve the path to this compiler binary so the multi-file runner

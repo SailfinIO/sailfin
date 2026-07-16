@@ -32,6 +32,7 @@
 // cannot be called from an `![io]` test. Assert on captured stdout with
 // `sfn/strings` predicates instead. (#842.)
 import { contains } from "sfn/strings";
+import { report_child_failure } from "sfn/test";
 
 fn _sfn_bin() -> string ![io] {
     let configured = env.get("SAILFIN_BIN");
@@ -77,6 +78,7 @@ fn _run_and_capture(label: string, source: string) -> string ![io] {
     let exit = process.run_capture([_sfn_bin(), "run", src], _child_env());
     let out = process.capture_take_stdout();
     let err = process.capture_take_stderr();
+    report_child_failure("channel-runtime-roundtrip " + label, exit, out, err);
     if exit != 0 { return "RUN_FAILED:" + out + err; }
     return out + err;
 }

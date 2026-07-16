@@ -35,6 +35,7 @@
 // `_emit_runtime_sfn_source` uses, `cli_main.sfn:1197`), keeping this a
 // pure-orchestration driver that post-processes no artifact.
 import {
+    _dirname_cmd,
     _ensure_dir_recursive_cmd,
     _sha256_of_file_cmd,
     _sha256_of_text_file,
@@ -179,12 +180,26 @@ fn _selfhost_collect_ll_files(root: string) -> string[] ![io] {
     return results;
 }
 
-// Build a determinism snapshot from a stage's `.ll` scratch dir plus
-// its linked binary. The `.ll` digests carry the fixed-point check (the
-// Makefile compared only these); the binary sha is folded in as a
-// strictly-stronger signal (a benign binary-only divergence is a
-// non-fatal warning in the default mode, so `make check` stays green).
-fn _selfhost_snapshot(capsules_dir: string, binary_path: string) -> DeterminismSnapshot ![io] {
+// Build a determinism snapshot from a stage's `.ll` scratch dir, its
+// sailfin cache dir, and its linked binary. The `.ll` digests carry the
+// fixed-point check (the Makefile compared only these); the binary sha
+// is folded in as a strictly-stronger signal (a benign binary-only
+// divergence is a non-fatal warning in the default mode, so `make check`
+// stays green). On macOS the binary sha is NOT a reliable divergence
+// signal — ld64's ad-hoc code signature embeds the linked output's
+// basename, so even byte-identical inputs linked to different basenames
+// hash differently (SFN-87 / #1726); the `.ll` module digests are the
+// authoritative fixed-point check.
+//
+// `runtime_dir` is the stage's sailfin cache dir,
+// `<work_dir>/sailfin/` (`build/cache.sfn::_resolve_sailfin_cache_dir_for_work`,
+// ~L173-183): the top-level module's `program.ll`/`program.o` plus driver
+// scratch, which happens to include the runtime modules pulled in by that
+// top-level module. It sits outside `capsules_dir` and would otherwise be
+// invisible to the module diff. Its entries are prefixed `cache/` (not
+// `runtime/` — `program.ll` is not a runtime module) so a divergence
+// there renders as a named module line, not an opaque binary sha.
+fn _selfhost_snapshot(capsules_dir: string, runtime_dir: string, binary_path: string) -> DeterminismSnapshot ![io] {
     let files = _selfhost_collect_ll_files(capsules_dir);
     let mut modules: DeterminismModule[] = [];
     let mut i: int = 0;
@@ -194,6 +209,15 @@ fn _selfhost_snapshot(capsules_dir: string, binary_path: string) -> DeterminismS
         let sha = _sha256_of_text_file(files[i]);
         modules.push(make_determinism_module(slug, sha));
         i += 1;
+    }
+    let runtime_files = _selfhost_collect_ll_files(runtime_dir);
+    let mut ri: int = 0;
+    loop {
+        if ri >= runtime_files.length { break; }
+        let slug = "cache/" + _selfhost_basename(runtime_files[ri]);
+        let sha = _sha256_of_text_file(runtime_files[ri]);
+        modules.push(make_determinism_module(slug, sha));
+        ri += 1;
     }
     let binary_sha = _sha256_of_file_cmd(binary_path);
     return DeterminismSnapshot {
@@ -323,9 +347,38 @@ fn handle_selfhost_command(args: string[], binary_dir: string) -> int ![io] {
     let s2_work = cfg.work_dir + "/native-seedcheck";
     let s2_scratch = s2_work + "/scratch";
     let s2_capsules = s2_scratch + "/capsules";
+    let s2_runtime = s2_work + "/sailfin";
     let s3_work = cfg.work_dir + "/native-stage3";
     let s3_scratch = s3_work + "/scratch";
     let s3_capsules = s3_scratch + "/capsules";
+    let s3_runtime = s3_work + "/sailfin";
+
+    // Both stages link to the SAME basename (`sfn`), only in different
+    // stage directories: on macOS, ld64's ad-hoc code signature embeds
+    // the linked output's basename as its identifier, so linking stage2
+    // and stage3 to different basenames (`sfn-seedcheck` vs
+    // `sfn-stage3`) makes their binaries diverge even when every emitted
+    // `.ll` module is byte-identical, making `binary_match` structurally
+    // unsatisfiable (SFN-87 / #1726). Linking both to `sfn` and copying
+    // the result out afterward keeps the two stages' signatures aligned
+    // while preserving `cfg.seedcheck_out` / `cfg.stage3_out` for every
+    // existing external consumer (`make test NATIVE_BIN=...`,
+    // `--promote-to`).
+    //
+    // The link lands under a `bin/` subdirectory, not directly in
+    // `<stage_work>`: `<stage_work>/sailfin` is the runtime/driver cache
+    // DIRECTORY (`_resolve_sailfin_cache_dir_for_work`), so a sibling
+    // `<stage_work>/sfn` binary collides with nothing today but running
+    // it fails downstream lookups that expect `sailfin` to be a
+    // directory next to the binary — proven by a local repro where
+    // `sha256sum` on the linked path errored "Is a directory" and the
+    // seedcheck binary could not stage its own runtime sfn-source
+    // import context. `<stage_work>/bin/sfn` keeps the same basename
+    // property while removing that sibling collision.
+    let s2_bin_dir = s2_work + "/bin";
+    let s3_bin_dir = s3_work + "/bin";
+    let s2_linked_bin = s2_bin_dir + "/sfn";
+    let s3_linked_bin = s3_bin_dir + "/sfn";
 
     if !fs.exists(cfg.first_pass) {
         print.err("[selfhost] first-pass binary missing: " + cfg.first_pass
@@ -335,11 +388,34 @@ fn handle_selfhost_command(args: string[], binary_dir: string) -> int ![io] {
 
     // ---- stage2 (seedcheck): built by the first-pass binary ----
     if !cfg.json { print("[selfhost] building stage2 (seedcheck)..."); }
-    let s2_rc = _selfhost_build_stage(cfg.first_pass, s2_scratch, s2_work, cfg.seedcheck_out);
+    _ensure_dir_recursive_cmd(s2_bin_dir);
+    let s2_rc = _selfhost_build_stage(cfg.first_pass, s2_scratch, s2_work, s2_linked_bin);
     if s2_rc != 0 {
         print.err("[selfhost] stage2 build failed (exit=" + number_to_string(s2_rc)
             + ")");
         return s2_rc;
+    }
+    // `_selfhost_build_stage` only ensures `work_subdir` exists; the copy
+    // destination's parent is a caller-supplied path (`--seedcheck-out`)
+    // that the spawned build never creates, unlike its own `-o` parent
+    // (`build.sfn:303`'s `_ensure_dir`).
+    _ensure_dir_recursive_cmd(_dirname_cmd(cfg.seedcheck_out));
+    let s2_promote_rc = process.run(["cp", "-f", s2_linked_bin, cfg.seedcheck_out]);
+    if s2_promote_rc != 0 {
+        print.err("[selfhost] failed to copy stage2 binary → " + cfg.seedcheck_out);
+        return s2_promote_rc;
+    }
+    // A stage that contributes zero `.ll` files from its sailfin cache dir
+    // silently drops that coverage from the fixed-point diff below without
+    // affecting `matched` — a false "all clear". We just built this stage,
+    // so a wrong `s2_runtime` path or a cache path that skipped `.ll`
+    // emission is worth surfacing immediately.
+    if _selfhost_collect_ll_files(s2_runtime).length == 0 {
+        print.err("[selfhost] WARNING: stage2 contributed zero .ll modules from its "
+            + "sailfin cache dir "
+            + s2_runtime
+            + " — that coverage in the "
+            + "fixed-point diff is not effective");
     }
 
     // ---- smoke gate: seedcheck binary runs a real program ----
@@ -357,38 +433,77 @@ fn handle_selfhost_command(args: string[], binary_dir: string) -> int ![io] {
     if !cfg.json {
         print("[selfhost] building stage3 (driven by seedcheck) for fixed-point check...");
     }
-    let s3_rc = _selfhost_build_stage(cfg.seedcheck_out, s3_scratch, s3_work, cfg.stage3_out);
+    _ensure_dir_recursive_cmd(s3_bin_dir);
+    let s3_rc = _selfhost_build_stage(cfg.seedcheck_out, s3_scratch, s3_work, s3_linked_bin);
     if s3_rc != 0 {
         print.err("[selfhost] stage3 build failed (exit=" + number_to_string(s3_rc)
             + ")");
         return s3_rc;
     }
+    _ensure_dir_recursive_cmd(_dirname_cmd(cfg.stage3_out));
+    let s3_promote_rc = process.run(["cp", "-f", s3_linked_bin, cfg.stage3_out]);
+    if s3_promote_rc != 0 {
+        print.err("[selfhost] failed to copy stage3 binary → " + cfg.stage3_out);
+        return s3_promote_rc;
+    }
+    if _selfhost_collect_ll_files(s3_runtime).length == 0 {
+        print.err("[selfhost] WARNING: stage3 contributed zero .ll modules from its "
+            + "sailfin cache dir "
+            + s3_runtime
+            + " — that coverage in the "
+            + "fixed-point diff is not effective");
+    }
 
     // ---- fixed-point diff: stage2 vs stage3 ----
-    let snap2 = _selfhost_snapshot(s2_capsules, cfg.seedcheck_out);
-    let snap3 = _selfhost_snapshot(s3_capsules, cfg.stage3_out);
+    // Hashed from the same-basename linked paths, not `cfg.seedcheck_out`
+    // / `cfg.stage3_out` — those differ only by copy destination, but the
+    // whole point of the same-basename link is that the *linked* outputs
+    // carry an aligned ad-hoc signature.
+    let snap2 = _selfhost_snapshot(s2_capsules, s2_runtime, s2_linked_bin);
+    let snap3 = _selfhost_snapshot(s3_capsules, s3_runtime, s3_linked_bin);
     let diff = compare_for_determinism(snap2, snap3);
+
+    // `diff.matched` also folds in `binary_match`, which is NOT a
+    // reliable divergence signal on macOS (see `_selfhost_snapshot`'s
+    // header comment, SFN-87 / #1726): ld64's ad-hoc code signature can
+    // make byte-identical `.ll` inputs link to different binary shas for
+    // reasons unrelated to the compiler's fixed-point property. Gate the
+    // human-readable status and `--strict` on `module_diffs`, the
+    // authoritative IR-level check, so a binary-only divergence never
+    // reads as "not yet a fixed point".
+    let ir_matched = diff.module_diffs.length == 0;
 
     if cfg.json { print(determinism_diff_to_json(diff)); } else {
         if diff.matched {
             print("[selfhost] stage2 == stage3: compiler is a fixed point");
+        } else if ir_matched {
+            print("[selfhost] stage2 == stage3: every module IR digest matched");
         } else {
             print("[selfhost] stage2 != stage3: compiler output is not yet a fixed point");
         }
         print(determinism_diff_to_text(diff));
     }
 
+    if ir_matched && !diff.binary_match {
+        print.err("[selfhost] WARNING: all module IR matched but the linked "
+            + "binary sha256 differs — on macOS this is expected ld64/"
+            + "ad-hoc-codesign packaging variance, not an IR fixed-point "
+            + "failure (SFN-87 / #1726). Non-fatal, including under --strict.");
+    }
+
     // ---- exit / promotion policy ----
-    // Default (warn): a mismatch is non-fatal — promote the validated
-    // seedcheck binary and exit 0, exactly as the Makefile did. Strict:
-    // a mismatch fails (exit 1) and we do NOT promote a non-fixed-point
-    // binary.
-    if !diff.matched && cfg.strict {
+    // Default (warn): a real IR mismatch is non-fatal — promote the
+    // validated seedcheck binary and exit 0, exactly as the Makefile did.
+    // Strict: a real IR mismatch fails (exit 1) and we do NOT promote a
+    // non-fixed-point binary. A binary-sha-only divergence (IR matched)
+    // is never fatal, even under --strict — see the WARNING above.
+    if !ir_matched && cfg.strict {
         print.err("[selfhost] --strict: fixed-point mismatch is fatal");
         return 1;
     }
 
     if !cfg.no_promote {
+        _ensure_dir_recursive_cmd(_dirname_cmd(cfg.promote_to));
         let promote_rc = process.run(["cp", "-f", cfg.seedcheck_out, cfg.promote_to]);
         if promote_rc != 0 {
             print.err("[selfhost] failed to promote seedcheck → " + cfg.promote_to);

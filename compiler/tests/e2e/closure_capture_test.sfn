@@ -25,6 +25,7 @@
 // the `sfn/test` `expect_*` matchers are `![pure]` and cannot be called
 // from an `![io]` test.
 import { trim_right } from "sfn/strings";
+import { report_child_failure } from "sfn/test";
 
 // The compiler-under-test: `$SAILFIN_BIN` if set, else the self-hosted
 // binary relative to the repo root the runner starts from. Mirrors
@@ -64,7 +65,8 @@ struct RunOut {
 fn _run_fixture(path: string) -> RunOut ![io] {
     let exit = process.run_capture([_sfn_bin(), "run", path], _child_env());
     let out = process.capture_take_stdout();
-    let _err = process.capture_take_stderr();
+    let err = process.capture_take_stderr();
+    report_child_failure("closure-capture run " + path, exit, out, err);
     return RunOut { exit: exit, out: trim_right(out) };
 }
 

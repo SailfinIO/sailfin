@@ -58,9 +58,11 @@ test "selfhost_snapshot: identical .ll sets + same binary => fixed point" ![io] 
     _write_ll(s3, "mod_b.ll", "; identical b\n");
 
     // Point both snapshots at the same binary so binary_sha256 agrees;
-    // the `.ll` digests then carry the fixed-point decision.
-    let snap2 = _selfhost_snapshot(s2, bin);
-    let snap3 = _selfhost_snapshot(s3, bin);
+    // the `.ll` digests then carry the fixed-point decision. No runtime
+    // dir fixture is written, so `_selfhost_collect_ll_files` returns
+    // empty for it — the capsules-dir behavior is unaffected.
+    let snap2 = _selfhost_snapshot(s2, root + "/s2/runtime", bin);
+    let snap3 = _selfhost_snapshot(s3, root + "/s3/runtime", bin);
     let diff = compare_for_determinism(snap2, snap3);
     assert diff.matched;
     assert diff.binary_match;
@@ -79,7 +81,9 @@ test "selfhost_snapshot: one differing .ll surfaces as a module diff" ![io] {
     _write_ll(s3, "mod_a.ll", "; a\n");
     _write_ll(s3, "mod_b.ll", "; b PERTURBED\n");
 
-    let diff = compare_for_determinism(_selfhost_snapshot(s2, bin), _selfhost_snapshot(s3, bin));
+    let diff = compare_for_determinism(_selfhost_snapshot(s2, root
+        + "/s2/runtime", bin), _selfhost_snapshot(s3, root
+        + "/s3/runtime", bin));
     assert ! diff.matched;
     assert diff.binary_match;
     assert diff.module_diffs.length == 1;
@@ -98,11 +102,92 @@ test "selfhost_snapshot: module missing in stage3 surfaces as only_in_a" ![io] {
     _write_ll(s2, "mod_b.ll", "; b\n");
     _write_ll(s3, "mod_a.ll", "; a\n");
 
-    let diff = compare_for_determinism(_selfhost_snapshot(s2, bin), _selfhost_snapshot(s3, bin));
+    let diff = compare_for_determinism(_selfhost_snapshot(s2, root
+        + "/s2/runtime", bin), _selfhost_snapshot(s3, root
+        + "/s3/runtime", bin));
     assert ! diff.matched;
     assert diff.module_diffs.length == 1;
     assert diff.module_diffs[0].slug == "mod_b.ll";
     assert diff.module_diffs[0].kind == "only_in_a";
+}
+
+// --------------------------------------------------------------
+// _selfhost_snapshot — runtime/cache-dir `.ll` coverage (SFN-87 / #1726).
+// Every case above passes a `<root>/sN/runtime` path that is never
+// created, so `_selfhost_collect_ll_files` returns empty for it and the
+// runtime-dir branch of `_selfhost_snapshot` (cli_selfhost.sfn:213-221) is
+// never exercised. These cases actually populate that dir.
+// --------------------------------------------------------------
+test "selfhost_snapshot: runtime dir .ll contributes a module slugged cache/<basename>" ![io] {
+    let root = fs.mkdtemp("sfn-selfhost-runtime-slug-");
+    let bin = root + "/fakebin";
+    fs.writeFile(bin, "same binary");
+
+    let caps = root + "/capsules";
+    _write_ll(caps, "mod_a.ll", "; a\n");
+    let runtime = root + "/runtime";
+    _write_ll(runtime, "arena.ll", "; arena\n");
+
+    let snap = _selfhost_snapshot(caps, runtime, bin);
+    assert snap.modules.length == 2;
+    let mut found = false;
+    let mut i: int = 0;
+    loop {
+        if i >= snap.modules.length { break; }
+        if snap.modules[i].slug == "cache/arena.ll" { found = true; }
+        i += 1;
+    }
+    assert found;
+}
+
+test "selfhost_snapshot: runtime-only divergence surfaces as a named module diff" ![io] {
+    let root = fs.mkdtemp("sfn-selfhost-runtime-differ-");
+    let bin = root + "/fakebin";
+    fs.writeFile(bin, "same binary");
+
+    let s2 = root + "/s2/capsules";
+    let s3 = root + "/s3/capsules";
+    _write_ll(s2, "mod_a.ll", "; a\n");
+    _write_ll(s3, "mod_a.ll", "; a\n");
+
+    let s2_runtime = root + "/s2/runtime";
+    let s3_runtime = root + "/s3/runtime";
+    _write_ll(s2_runtime, "arena.ll", "; arena original\n");
+    _write_ll(s3_runtime, "arena.ll", "; arena PERTURBED\n");
+
+    let diff = compare_for_determinism(_selfhost_snapshot(s2, s2_runtime, bin), _selfhost_snapshot(s3, s3_runtime, bin));
+    assert ! diff.matched;
+    assert diff.binary_match;
+    assert diff.module_diffs.length == 1;
+    assert diff.module_diffs[0].slug == "cache/arena.ll";
+    assert diff.module_diffs[0].kind == "differ";
+}
+
+test "selfhost_snapshot: runtime module does not collide with a same-basename capsule module" ![io] {
+    let root = fs.mkdtemp("sfn-selfhost-runtime-collide-");
+    let bin = root + "/fakebin";
+    fs.writeFile(bin, "same binary");
+
+    let caps = root + "/capsules";
+    let runtime = root + "/runtime";
+    // Same basename in both dirs: the capsule slug is bare ("arena.ll"),
+    // the runtime slug is prefixed ("cache/arena.ll") — distinct entries.
+    _write_ll(caps, "arena.ll", "; capsule arena\n");
+    _write_ll(runtime, "arena.ll", "; runtime arena\n");
+
+    let snap = _selfhost_snapshot(caps, runtime, bin);
+    assert snap.modules.length == 2;
+    let mut has_bare = false;
+    let mut has_prefixed = false;
+    let mut i: int = 0;
+    loop {
+        if i >= snap.modules.length { break; }
+        if snap.modules[i].slug == "arena.ll" { has_bare = true; }
+        if snap.modules[i].slug == "cache/arena.ll" { has_prefixed = true; }
+        i += 1;
+    }
+    assert has_bare;
+    assert has_prefixed;
 }
 
 // --------------------------------------------------------------
