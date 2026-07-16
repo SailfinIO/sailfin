@@ -193,8 +193,13 @@ fn _kp_recv_one(fd: i32) -> string {
         }
         if n == 0 {
             // EOF before completing — return what arrived (the caller asserts).
+            // Copy out before `free`: `* u8 as string` aliases `buf` (the cast
+            // shim reuses the pointer, it does not copy — see
+            // core_cast_lowering.sfn), so returning the bare cast and freeing
+            // would hand back a dangling string (SFN-345).
             memset(_kp_ptr_off(buf, len), 0, 1 as usize);
-            let partial = buf as string;
+            let full = buf as string;
+            let partial = substring(full, 0, len);
             free(buf);
             return partial;
         }
@@ -240,8 +245,18 @@ fn _kp_recv_all(fd: i32) -> string {
         if n == 0 { break; }
         len = len + n;
     }
+    // Copy the drained bytes into an owned string BEFORE freeing the buffer.
+    // `* u8 as string` aliases `buf` (the cast shim reuses the data pointer
+    // rather than copying — core_cast_lowering.sfn), so `let out = buf as
+    // string; free(buf); return out;` returned a string pointing at freed
+    // memory. On macOS 26/27 the allocator scribbles a free-list pointer into
+    // the head of the freed block, overwriting the `HTTP/1.1` status-line
+    // prefix while the tail survived; Linux/macOS-18 left the block intact so
+    // the read happened to succeed. `substring` (the same copy `_kp_recv_one`
+    // makes before its own free) yields an independent buffer (SFN-345).
     memset(_kp_ptr_off(buf, len), 0, 1 as usize);
-    let out = buf as string;
+    let full = buf as string;
+    let out = substring(full, 0, len);
     free(buf);
     return out;
 }
