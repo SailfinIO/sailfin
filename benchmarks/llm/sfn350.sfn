@@ -797,8 +797,23 @@ fn _openai_chat_body(model: string, system: string, messages: JsonValue[]) -> st
     return stringify(object_val(["model", "temperature", "max_tokens", "messages"], [string_val(model), number_val(0.2), number_val(4096), _messages_json(all)]));
 }
 
+fn _anthropic_max_output_tokens() -> int { return 8192; }
+
+fn _anthropic_answer_headroom_tokens() -> int { return 2048; }
+
+// Frozen Anthropic response budget (SFN-367). A 4096-token total let extended
+// thinking consume the whole response and return stop_reason=max_tokens with
+// thinking-only content and no answer text, silently spending scored attempts.
+// The total is raised and a reserved answer headroom is recorded so the budget
+// leaves room for answer text; a response that still exhausts it is a
+// provider-response invalidation (see _completion_from_anthropic) that stops the
+// paid batch.
+fn _anthropic_response_budget_policy() -> JsonValue {
+    return object_val(["max_output_tokens", "reserved_answer_headroom_tokens", "thinking_exhaustion_policy"], [number_val(_anthropic_max_output_tokens() as float), number_val(_anthropic_answer_headroom_tokens() as float), string_val("stop_reason=max_tokens with no answer text is a provider-response invalidation; the paid batch stops and correction requires a fresh balanced batch under a new protocol version")]);
+}
+
 fn _anthropic_body(model: string, system: string, messages: JsonValue[]) -> string {
-    return stringify(object_val(["model", "max_tokens", "system", "messages"], [string_val(model), number_val(4096), string_val(system), _messages_json(messages)]));
+    return stringify(object_val(["model", "max_tokens", "system", "messages"], [string_val(model), number_val(_anthropic_max_output_tokens() as float), string_val(system), _messages_json(messages)]));
 }
 
 fn _api_error(root: JsonValue) -> string {
@@ -824,6 +839,9 @@ fn _provider_failure_class(error: string) -> string {
         || contains(error, "temporarily unavailable")
         || contains(error, "rate limit")
         || contains(error, "Rate limit") { return "transport_transient"; }
+    if contains(error, "stop_reason=max_tokens") {
+        return "response_budget_exhausted";
+    }
     return "model_response";
 }
 
@@ -934,6 +952,18 @@ fn _completion_from_anthropic(resp: string) -> Completion {
         i += 1;
     }
     let usage = get_value(root, "usage");
+    let stop_reason = get_string(root, "stop_reason");
+    if text.length == 0 && stop_reason == "max_tokens" {
+        // Thinking-only exhaustion: the response spent its output budget before
+        // emitting any answer text. This is a provider-response invalidation, not
+        // a language observation (SFN-367).
+        return Completion {
+            text: "",
+            input_tokens: get_number(usage, "input_tokens") as int,
+            output_tokens: get_number(usage, "output_tokens") as int,
+            error: "anthropic stop_reason=max_tokens with no answer text (thinking-only response, output budget exhausted)"
+        };
+    }
     if text.length == 0 {
         return Completion {
             text: "",
@@ -972,6 +1002,7 @@ fn _self_test_provider_schemas() ![io] {
     let messages = [object_val(["role", "content"], [string_val("user"), string_val("OK")])];
     let terra = _openai_responses_body("gpt-5.6-terra", "medium", "system", messages);
     let legacy = _openai_chat_body("gpt-4.1", "system", messages);
+    let claude = _anthropic_body("claude-sonnet-5", "system", messages);
     if !contains(terra, "\"reasoning\":{\"effort\":\"medium\"}") || !contains(terra, "\"max_output_tokens\":4096")
         || !contains(terra, "\"store\":false")
         || !contains(terra, "\"instructions\":\"system\"")
@@ -979,7 +1010,8 @@ fn _self_test_provider_schemas() ![io] {
         || contains(terra, "\"temperature\"")
         || contains(terra, "\"max_tokens\"")
         || !contains(legacy, "\"temperature\":0.2")
-        || !contains(legacy, "\"max_tokens\":4096") {
+        || !contains(legacy, "\"max_tokens\":4096")
+        || !contains(claude, "\"max_tokens\":8192") {
         print.err("provider request schema fixtures failed");
         process.exit(1);
     }
@@ -1727,21 +1759,61 @@ fn _has_category(r: Record, category: string) -> boolean {
     return _contains_value(r.fail_categories, category);
 }
 
-fn _setup_failure_class(r: Record) -> string {
+// A provider-response invalidation stops the paid batch immediately (PROTOCOL-V2
+// section 6): provider authorization/setup failures and unfrozen model responses.
+// The Anthropic thinking-only max_tokens exhaustion (SFN-367) is the latter.
+fn _batch_invalidation_reason(r: Record) -> string {
     if _has_category(r, "provider_auth_permission") { return "auth_permission"; }
     if _has_category(r, "provider_quota_billing") { return "quota_billing"; }
+    if _has_category(r, "provider_response_budget_exhausted") {
+        return "response_budget_exhausted";
+    }
     return "";
 }
 
-fn _run_setup_failure_class(records: Record[]) -> string {
+fn _run_batch_invalidation_reason(records: Record[]) -> string {
     let mut i: int = 0;
     loop {
         if i >= records.length { break; }
-        let classification = _setup_failure_class(records[i]);
+        let classification = _batch_invalidation_reason(records[i]);
         if classification.length > 0 { return classification; }
         i += 1;
     }
     return "";
+}
+
+fn _self_test_response_invalidation() ![io] {
+    let thinking_only = _completion_from_anthropic("{\"content\":[{\"type\":\"thinking\",\"thinking\":\"reasoning without ever emitting an answer\"}],\"stop_reason\":\"max_tokens\",\"usage\":{\"input_tokens\":120,\"output_tokens\":8192}}");
+    let partial_text = _completion_from_anthropic("{\"content\":[{\"type\":\"text\",\"text\":\"partial\"}],\"stop_reason\":\"max_tokens\",\"usage\":{\"input_tokens\":120,\"output_tokens\":8192}}");
+    let generic_empty = _completion_from_anthropic("{\"content\":[],\"usage\":{\"input_tokens\":7,\"output_tokens\":0}}");
+    if thinking_only.text.length != 0 || thinking_only.error.length == 0
+        || _provider_failure_class(thinking_only.error) != "response_budget_exhausted"
+        || partial_text.text != "partial"
+        || partial_text.error.length != 0
+        || _provider_failure_class(generic_empty.error) != "model_response" {
+        print.err("anthropic thinking-only max_tokens fixtures failed");
+        process.exit(1);
+    }
+    let task = _logic_task();
+    let mut cfg = _default_config();
+    cfg.track = "a";
+    let attribution_a = _classify_failure(cfg, task, "provider_error", thinking_only.error, 1);
+    cfg.track = "b";
+    let attribution_b = _classify_failure(cfg, task, "provider_error", thinking_only.error, 1);
+    if attribution_a.language_denominator || attribution_b.language_denominator
+        || attribution_a.primary != "provider_or_setup_invalidation" {
+        print.err("thinking-only response must be excluded from both language denominators");
+        process.exit(1);
+    }
+    let cats = ["provider_error", "provider_" + _provider_failure_class(thinking_only.error)];
+    let rec = _record(task, "sailfin", cfg, "selftest-thinking", 1, false, 1, thinking_only.input_tokens, thinking_only.output_tokens, 0, 0, 0, cats, attribution_b, "primary");
+    if _batch_invalidation_reason(rec) != "response_budget_exhausted"
+        || _run_batch_invalidation_reason([rec]) != "response_budget_exhausted"
+        || rec.language_denominator {
+        print.err("thinking-only response must stop the paid batch as a provider-response invalidation");
+        process.exit(1);
+    }
+    print("anthropic thinking-only response invalidation fixtures passed");
 }
 
 fn _is_trap(task_id: string, tasks: Task[]) -> boolean {
@@ -2378,7 +2450,7 @@ fn _write_run_manifest(path: string, cfg: Config, arms: string[], run_valid: boo
     let protocol_path = _repo_root() + "/benchmarks/llm/PROTOCOL-V2.md";
     let ablation = object_val(["dimension", "assignment", "primary_pool_eligible"], [string_val(cfg.ablation), string_val("seeded parity of frozen attempt identity; paired arms receive the same treatment"), bool_val(cfg.ablation == "primary")]);
     let openai_api = cfg.adapter != "openai"? "not_applicable": (_uses_gpt5_request(cfg.model)? "responses": "chat_completions");
-    let manifest = object_val(["protocol_id", "protocol_sha256", "track", "adapter", "model", "model_family", "openai_api", "openai_reasoning_effort", "max_iters", "repeats", "seed", "sampling", "arms", "packets", "ablation", "toolchains", "execution_deadline", "commands", "human_interventions", "run_valid", "invalid_reason"], [string_val("sfn-agent-benchmark/v2.1.0"), string_val(_sha256_file(protocol_path)), string_val(cfg.track), string_val(cfg.adapter), string_val(cfg.model), string_val(cfg.model_family), string_val(openai_api), string_val(manifest_effort), number_val(cfg.max_iters as float), number_val(cfg.repeats as float), number_val(cfg.seed as float), string_val(sampling), array_val(arm_vals), _packet_manifest(cfg.track), ablation, toolchains, deadline, commands, number_val(0.0), bool_val(run_valid), string_val(invalid_reason)]);
+    let manifest = object_val(["protocol_id", "protocol_sha256", "track", "adapter", "model", "model_family", "openai_api", "openai_reasoning_effort", "max_iters", "repeats", "seed", "sampling", "anthropic_response_budget", "arms", "packets", "ablation", "toolchains", "execution_deadline", "commands", "human_interventions", "run_valid", "invalid_reason"], [string_val("sfn-agent-benchmark/v2.2.0"), string_val(_sha256_file(protocol_path)), string_val(cfg.track), string_val(cfg.adapter), string_val(cfg.model), string_val(cfg.model_family), string_val(openai_api), string_val(manifest_effort), number_val(cfg.max_iters as float), number_val(cfg.repeats as float), number_val(cfg.seed as float), string_val(sampling), _anthropic_response_budget_policy(), array_val(arm_vals), _packet_manifest(cfg.track), ablation, toolchains, deadline, commands, number_val(0.0), bool_val(run_valid), string_val(invalid_reason)]);
     fs.writeFile(path, stringify_pretty(manifest, 2));
 }
 
@@ -2838,6 +2910,7 @@ fn main(argv: string[]) -> int ![clock, io, net] {
     if cfg.self_test_analysis {
         _self_test_provider_schemas();
         _self_test_failure_taxonomy();
+        _self_test_response_invalidation();
         _self_test_analysis();
         return 0;
     }
@@ -2885,18 +2958,18 @@ fn main(argv: string[]) -> int ![clock, io, net] {
     if cfg.track == "b" && !cfg.stub { _require_contamination_clearance(); }
 
     let mut records: Record[] = [];
-    let mut stop_for_setup_failure = false;
+    let mut stop_for_invalidation = false;
     let mut ti: int = 0;
     loop {
-        if ti >= tasks.length || stop_for_setup_failure { break; }
+        if ti >= tasks.length || stop_for_invalidation { break; }
         let task = tasks[ti];
         if _selected(cfg.tasks, task.id) {
             let mut repeat = 1;
             loop {
-                if repeat > cfg.repeats || stop_for_setup_failure { break; }
+                if repeat > cfg.repeats || stop_for_invalidation { break; }
                 let mut ai: int = 0;
                 loop {
-                    if ai >= selected_arms.length || stop_for_setup_failure {
+                    if ai >= selected_arms.length || stop_for_invalidation {
                         break;
                     }
                     let arm_name = selected_arms[ai];
@@ -2914,9 +2987,12 @@ fn main(argv: string[]) -> int ![clock, io, net] {
                             + " tokens="
                             + (rec.tokens as string));
                         records.push(rec);
-                        if _setup_failure_class(rec).length > 0 {
-                            stop_for_setup_failure = true;
-                            print.err("setup-class provider failure; stopping paid schedule after preserving attempt "
+                        let invalidation = _batch_invalidation_reason(rec);
+                        if invalidation.length > 0 {
+                            stop_for_invalidation = true;
+                            print.err("provider-response invalidation ("
+                                + invalidation
+                                + "); stopping paid schedule after preserving attempt "
                                 + attempt_id);
                         }
                     }
@@ -2928,10 +3004,14 @@ fn main(argv: string[]) -> int ![clock, io, net] {
         ti += 1;
     }
 
-    let setup_failure = _run_setup_failure_class(records);
-    let run_valid = setup_failure.length == 0;
+    let invalidation = _run_batch_invalidation_reason(records);
+    let run_valid = invalidation.length == 0;
     let mut invalid_reason = "";
-    if !run_valid { invalid_reason = "provider_setup_" + setup_failure; }
+    if !run_valid {
+        if invalidation == "auth_permission" || invalidation == "quota_billing" {
+            invalid_reason = "provider_setup_" + invalidation;
+        } else { invalid_reason = "provider_" + invalidation; }
+    }
     _write_run_manifest(run_dir + "/run.json", cfg, selected_arms, run_valid, invalid_reason);
     _write_records(run_dir + "/records.json", records);
     let summary = _summary(records, tasks, selected_arms);
