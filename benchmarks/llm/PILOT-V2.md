@@ -1,96 +1,103 @@
 # Sailfin agent benchmark v2 bounded-pilot readout
 
-Protocol: `sfn-agent-benchmark/v2.0.0`
+Protocol: `sfn-agent-benchmark/v2.1.0`
 
 Linear: [SFN-365](https://linear.app/sailfin/issue/SFN-365/experimentbench-run-bounded-v2-pilots-and-authorize-or-reject)
 
-Repository commit at execution: `702109c8474458ebdebdac25984cb5ed9d053260`
+Decision: **confirmatory spend rejected under v2.1.0**.
 
-Decision: **confirmatory spend rejected under v2.0.0**.
+## Correction to the v2.0 preflight
 
-## Gate outcome
+The initial v2.0 OpenAI schema probe used Chat Completions and returned an
+insufficient-permissions error. That was a harness transport defect, not
+evidence that the configured account or key lacked access to
+`gpt-5.6-terra`: the same key and model succeeded through the Responses API.
+No scored v2.0 observation was collected. Version 2.1 changes the current-model
+OpenAI transport to Responses and records the selected API in the run manifest;
+legacy OpenAI models retain the Chat Completions adapter.
 
-The 2026-07-15 bounded run passed the offline grader, packet, isomorphism,
-timeout, provider-transport, and manifest gates. The first live request was the
-required non-scored OpenAI schema probe for frozen model `gpt-5.6-terra` with
-reasoning effort `medium`. The provider returned
-`invalid_request_error: You have insufficient permissions for this operation.`
+## Gates and bounded sequence
 
-This is a provider authorization/setup invalidation. Section 6 of the frozen
-protocol requires the affected batch to stop immediately and preserve the
-failure. No Anthropic request, contamination probe, unscored task, Track A
-observation, or Track B observation was scheduled after the failure. Human
-interventions inside attempts were zero because no attempt began.
+The v2.1 offline graders, packet/isomorphism checks, timeout tests, manifest
+checks, live provider schema probes, and blinded contamination probes passed
+for both model families. Neither model recognized Rill-17. One unscored task
+per arm and model family then completed successfully; the Anthropic Rill-17
+smoke needed one ordinary repair iteration.
 
-The sanitized complete provider exchange is published in
-[`results/sfn-365-v2.0.0-provider-gate-failure.json`](results/sfn-365-v2.0.0-provider-gate-failure.json).
-The local raw run directory remains under
-`build/sfn365-provider-probes-openai/run-20260715-175033/` and is excluded from
-version control with the rest of `build/`.
+The OpenAI Track A schedule completed all 40 instances in all three arms (120
+attempts). During the Anthropic Track A schedule, 13 attempts received one or
+more valid HTTP responses whose entire 4,096-token allowance was consumed by
+hidden thinking, with `stop_reason: max_tokens` and no answer text. Those
+attempts were correctly excluded from language denominators, but the runner
+continued instead of applying the protocol's immediate-stop rule. The
+Anthropic schedule is therefore invalid and cannot be interpreted or pooled.
 
-## Offline gate record
+Track B was not started. The protocol orders Track A first and bars further
+paid calls after a provider-response invalidation or failed useful-variance
+gate.
 
-The following commands completed successfully before the provider call:
+## Track A — current adoption
 
-```bash
-build/bin/sfn check benchmarks/llm/sfn350.sfn
-build/bin/sfn build -o build/sfn350 benchmarks/llm/sfn350.sfn
-./build/sfn350 --adapter stub --arm sailfin --results-dir build/sfn365-offline-smoke-sailfin
-./build/sfn350 --adapter stub --arm python --results-dir build/sfn365-offline-smoke-python
-./build/sfn350 --self-test-analysis
-./build/sfn350 --self-test-timeouts
-benchmarks/llm/verify-provider-auth.sh
-./build/sfn350 --track b --check-packets
-./build/sfn350 --track b --adapter stub --verify-graders --results-dir build/sfn365-track-b-grader-smoke
-benchmarks/llm/tacit/fetch.sh
-benchmarks/llm/tacit/verify.sh
-SFN350_SCALA_OFFLINE=1 benchmarks/llm/tacit/verify.sh
-./build/sfn350 --verify-graders --results-dir build/sfn365-grader-smoke
-```
+The complete OpenAI family schedule produced these ordinary-task pilot
+statistics:
 
-All 20 Track B template/arm pairs accepted their known-good fixture and
-rejected their known-bad fixture. All 30 Track A template/arm pairs did the
-same except the preregistered Python capability-trap gap: Python cannot
-statically reject the unauthorized operation. This expected comparator limit
-is recorded by the grader and is not a check/build/run divergence. TACIT 0.2.1
-passed both connected-cache and forced-offline verification.
+| Arm | One-shot | Solved | Mean iterations to green | Varying templates |
+|---|---:|---:|---:|---:|
+| Sailfin | 72.2% | 88.8% | 1.19 | 3 |
+| Scala | 77.7% | 100% | 1.25 | 3 |
+| Python | 88.8% | 100% | 1.11 | 0 |
 
-The live gate then failed on:
+Sailfin's one-shot difference was -5.56 percentage points versus Scala (95%
+cluster-bootstrap interval -25.00 to +13.89) and -16.67 points versus Python
+(-30.56 to -2.78). Four Sailfin structured-concurrency instances remained red
+after the repair budget. The Sailfin effect system fired on all four capability
+traps, as did the Scala wrappers; Python fired on none, which is the
+preregistered comparator limitation.
 
-```bash
-./build/sfn350 --adapter openai --model gpt-5.6-terra \
-  --reasoning-effort medium --schema-probe \
-  --results-dir build/sfn365-provider-probes-openai
-```
+These are directional observations about present-day adoption ergonomics for
+the OpenAI family only. They are not a cross-family Track A conclusion. The
+pilot also fails the preregistered useful-variance gate because Python has no
+template containing both a one-shot pass and failure.
 
-## Evidence boundaries
+The Anthropic summary is published for audit only. Its apparent rates (Sailfin
+53.3%, Scala 90.9%, Python 97.2%) use incomplete, unequal denominators after
+provider-response invalidations and are not estimates. Scala and Python would
+also exceed the 90% ceiling threshold.
 
-### Track A — current adoption
+## Track B — intrinsic learnability
 
-No bounded-pilot observations were collected. The gate failure is not evidence
-for or against Sailfin's present-day adoption readiness, relative success,
-tooling ergonomics, or ecosystem position.
+There are no scored Track B observations, so this run supplies no evidence
+about Sailfin-B versus Rill-17 intrinsic learnability. Passing packet,
+isomorphism, contamination, and unscored smoke gates establishes setup
+readiness only.
 
-### Track B — intrinsic learnability
+## Neither track
 
-No contamination probe or bounded-pilot observation was collected. The gate
-failure is not evidence for or against Sailfin-B's learnability relative to
-Rill-17, packet completeness in a fresh model session, or intrinsic language
-design.
+The v2.0 Chat endpoint mismatch and the v2.1 Sonnet thinking-budget exhaustion
+are benchmark-setup evidence. They cannot enter either language denominator or
+be converted into language, ecosystem, or product claims. SFN-367 tracks the
+required response-budget, classification, and immediate-stop correction.
 
-### Neither track
+## Published failure corpus
 
-The only live evidence is that the configured OpenAI account was not authorized
-for the frozen `gpt-5.6-terra` schema probe at the time of execution. This is
-evidence about experiment setup only. It cannot enter either language
-denominator and cannot be converted into a technical or product claim.
+The checked-in result set preserves both Track A manifests, summaries,
+analyses, and every machine-classified failed attempt:
+
+- [OpenAI Terra failures](results/sfn-365-v2.1.0/openai-terra-track-a-failures.json)
+  (34 attempts, including repaired attempts)
+- [Anthropic Sonnet failures](results/sfn-365-v2.1.0/anthropic-sonnet-track-a-failures.json)
+  (39 attempts, including all 13 provider-response invalidations)
+
+The sibling `run`, `summary`, and `analysis` JSON files record the frozen
+configuration and aggregate results. Raw prompts, responses, emitted source,
+tool output, and timing remain in the immutable local run directories under
+`build/sfn365-v21-pilot-track-a-*/`; secrets are not present in the published
+corpus.
 
 ## Authorization decision
 
-The bounded-pilot authorization conditions were not met: the provider gate was
-invalid, both paired schedules are empty, and neither track has a variance or
-grader-stability result from real model output. No confirmatory call is
-authorized under `sfn-agent-benchmark/v2.0.0`. Any future experiment must fix
-provider authorization, apply the protocol's required version/change control,
-and begin again with a fresh balanced batch; this invalid batch must never be
-pooled with it.
+No confirmatory run is authorized. Track A lacks a complete valid paired
+schedule across both model families and fails useful variance; Track B was
+correctly not purchased. Fixing the Sonnet response policy and task difficulty
+requires a new protocol/corpus version and a fresh balanced batch. No selected
+v2.1 success or failure may be rerun or pooled into that batch.

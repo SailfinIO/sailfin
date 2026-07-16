@@ -1,8 +1,8 @@
 # Sailfin agent-language benchmark
 
 The frozen two-track v2 preregistration lives in
-[`PROTOCOL-V2.md`](PROTOCOL-V2.md). The bounded v2.0.0 gate and its rejection of
-confirmatory spend are recorded in [`PILOT-V2.md`](PILOT-V2.md). The SFN-350 v1
+[`PROTOCOL-V2.md`](PROTOCOL-V2.md). The bounded v2.1.0 pilot and its rejection
+of confirmatory spend are recorded in [`PILOT-V2.md`](PILOT-V2.md). The SFN-350 v1
 decision protocol and pilot interpretation remain preserved in
 [`EXPERIMENT.md`](EXPERIMENT.md) as historical evidence only. Do not reuse v1
 paid outputs as v2 confirmatory data, and do not use the three seed tasks alone
@@ -232,8 +232,9 @@ failures remain observations; rerunning selected failures or deleting their
 artifact directories invalidates the preregistered run.
 
 The OpenAI adapter defaults to `gpt-5.6-terra` with reasoning effort `medium`.
-GPT-5 requests use `max_completion_tokens` and omit temperature; explicitly
-selected legacy models retain the older `max_tokens` plus temperature request
-shape. Provider credentials are written only to a temporary header file for
+GPT-5 requests use the Responses API with `max_output_tokens`,
+`reasoning.effort`, and no temperature; explicitly selected legacy models use
+Chat Completions with the older `max_tokens` plus temperature request shape.
+Provider credentials are written only to a temporary header file for
 the duration of each `curl` request and removed on shell exit rather than being
 expanded into the child process argument list.

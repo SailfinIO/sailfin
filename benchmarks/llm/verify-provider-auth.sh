@@ -39,7 +39,8 @@ for arg in "$@"; do
     fi
     case "$arg" in
         -H) expect_header=1 ;;
-        https://api.openai.com/*) endpoint=openai ;;
+        https://api.openai.com/v1/responses) endpoint=openai-responses ;;
+        https://api.openai.com/v1/chat/completions) endpoint=openai-chat ;;
         https://api.anthropic.com/*) endpoint=anthropic ;;
     esac
 done
@@ -59,17 +60,20 @@ if [ -n "${SFN350_MOCK_STATE:-}" ]; then
     printf '%s\n' "$count" > "$SFN350_MOCK_STATE"
 fi
 
-if [ "$endpoint" = openai ]; then
+if [ "$endpoint" = openai-responses ]; then
     grep -q '^Authorization: Bearer sfn350-openai-sentinel$' "$header_file"
     if [ "${SFN350_MOCK_MODE:-}" = deny_after_schema ] && [ "$count" -gt 1 ]; then
         printf '%s\n' '{"error":{"type":"invalid_request_error","message":"You have insufficient permissions for this operation."}}'
     elif [ "${SFN350_MOCK_MODE:-}" = success_then_deny ] && [ "$count" -gt 1 ]; then
         printf '%s\n' '{"error":{"type":"invalid_request_error","message":"You have insufficient permissions for this operation."}}'
     elif [ "${SFN350_MOCK_MODE:-}" = success_then_deny ]; then
-        printf '%s\n' '{"choices":[{"message":{"content":"```python\nimport sys\n\ndef run_length(nums):\n    out = []\n    for n in nums:\n        if out and out[-1][0] == n:\n            out[-1] = (n, out[-1][1] + 1)\n        else:\n            out.append((n, 1))\n    return out\n\nline = sys.stdin.readline().strip()\nnums = [int(x) for x in line.split()] if line else []\nprint(\" \".join(f\"{v}:{c}\" for v, c in run_length(nums)))\n```"}}],"usage":{"prompt_tokens":100,"completion_tokens":100}}'
+        printf '%s\n' '{"output":[{"type":"message","content":[{"type":"output_text","text":"```python\nimport sys\n\ndef run_length(nums):\n    out = []\n    for n in nums:\n        if out and out[-1][0] == n:\n            out[-1] = (n, out[-1][1] + 1)\n        else:\n            out.append((n, 1))\n    return out\n\nline = sys.stdin.readline().strip()\nnums = [int(x) for x in line.split()] if line else []\nprint(\" \".join(f\"{v}:{c}\" for v, c in run_length(nums)))\n```"}]}],"usage":{"input_tokens":100,"output_tokens":100}}'
     else
-        printf '%s\n' '{"choices":[{"message":{"content":"OK"}}],"usage":{"prompt_tokens":7,"completion_tokens":1}}'
+        printf '%s\n' '{"output":[{"type":"message","content":[{"type":"output_text","text":"OK"}]}],"usage":{"input_tokens":7,"output_tokens":1}}'
     fi
+elif [ "$endpoint" = openai-chat ]; then
+    grep -q '^Authorization: Bearer sfn350-openai-sentinel$' "$header_file"
+    printf '%s\n' '{"choices":[{"message":{"content":"OK"}}],"usage":{"prompt_tokens":7,"completion_tokens":1}}'
 elif [ "$endpoint" = anthropic ]; then
     grep -q '^x-api-key: sfn350-anthropic-sentinel$' "$header_file"
     printf '%s\n' '{"content":[{"type":"text","text":"OK"}],"usage":{"input_tokens":7,"output_tokens":1}}'
