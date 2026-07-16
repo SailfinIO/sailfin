@@ -138,28 +138,31 @@ jobs:
           export SEED_NATIVE="build/toolchains/seed/bin/sfn"
           make check SELFHOST_STRICT="$SELFHOST_STRICT"
 
+      # `find`, not `**`: macOS runners ship bash 3.2, which has no
+      # `globstar`, so `shopt -s globstar` errored out and the recursive
+      # glob silently matched nothing — on the one leg whose failures we
+      # most need to read (SFN-375). The retry-log step never enabled
+      # `globstar` at all, so its `**` degraded to a single level on both
+      # platforms. `find -path` needs no shell option and behaves the same
+      # on bash 3.2 and 5.x.
       - name: Surface non-empty phase_types diagnostics
         if: always()
         shell: bash
         run: |
           set +e
-          shopt -s globstar nullglob
-          files=(build/selfhost/**/build/sailfin/.phase_types_diagnostics)
-          for f in "${files[@]}"; do
-            if [ -s "$f" ]; then
+          find build/selfhost -path '*/build/sailfin/.phase_types_diagnostics' -size +0c 2>/dev/null |
+            while IFS= read -r f; do
               echo "== $f =="
               cat "$f"
-            fi
-          done
+            done
 
       - name: Surface retry-log entries
         if: always()
         shell: bash
         run: |
           set +e
-          for log in build/selfhost/**/raw/retry_log.tsv; do
-            if [ -s "$log" ]; then
+          find build/selfhost -path '*/raw/retry_log.tsv' -size +0c 2>/dev/null |
+            while IFS= read -r log; do
               echo "== $log =="
               cat "$log"
-            fi
-          done
+            done
