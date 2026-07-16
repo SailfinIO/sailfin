@@ -1,0 +1,9 @@
+{
+  "adapter": "anthropic",
+  "model": "claude-sonnet-5",
+  "scored": false,
+  "text": "",
+  "input_tokens": 0,
+  "output_tokens": 0,
+  "error": "Overloaded"
+}

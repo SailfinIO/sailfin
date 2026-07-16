@@ -1,0 +1,43 @@
+{
+  "issue": "SFN-372",
+  "protocol_id": "sfn-agent-benchmark/v2.5.0",
+  "corpus_id": "sfn-agent-benchmark-corpus/v2.5.0",
+  "repository_commit": "2c1022806de1ee32ab528f90ad9bfe81b0d34cc7",
+  "protocol_sha256": "157072ad9bc08d40f7affa78846786d4add42792634e3bc05437db07b96d0d92",
+  "corpus_manifest_sha256": "34cbcfe14d2dd10fa168ebce66c86ce62468a270b39b7e785bf49ccd07d21145",
+  "harness_sha256": "f75c4b9800c66483c12894d1ec78ce0b926cca0e97863e5e5a39c1a8e4725929",
+  "blockers": {
+    "SFN-367": "3f0fbb1811923dec7609ccf081004b2885273c29",
+    "SFN-368": "f30ebf52290bcefda82b5f75c3b1c3104a4d1546",
+    "SFN-369": "fc2595b32b942774c30d69f951d168c58e9542af",
+    "SFN-376": "2c1022806de1ee32ab528f90ad9bfe81b0d34cc7"
+  },
+  "grader_audit_sha256": {
+    "track_a": "2fe5664e8e6b996ab286de4ee0cd7f0949a2eae40fed224f05c05355b16f3852",
+    "track_b": "fe865da04dd70b9aa4b7059c95e24973316bc542461cca21e2454f842478fa26"
+  },
+  "schedules": {
+    "track_a_openai": {
+      "attempts": 129,
+      "sha256": "97ed52e96be284b1049f4ba502571457caa1c341f2a9d2ec7463c1a7783bfb19"
+    },
+    "track_a_anthropic": {
+      "attempts": 129,
+      "sha256": "df267da666c3390d6e2c3fd3ac5bf5b6300c773dc549188306d139cf15febafb"
+    },
+    "track_b_openai": {
+      "attempts": 86,
+      "sha256": "a922c60f21cc940eb3f46a02a2c54f4e7c017acb91d6bf74d2ec239704ff9109"
+    },
+    "track_b_anthropic": {
+      "attempts": 86,
+      "sha256": "f70b36ed939ff11c01680d8d7dfec74681d3127d6ac86f08c4aeaa26ac211da1"
+    }
+  },
+  "human_interventions": 0,
+  "scored_observations": 0,
+  "stopped_at": "anthropic_schema_probe",
+  "stop_reason": "provider_overloaded_without_frozen_retry_policy",
+  "confirmation_authorized": false,
+  "follow_up": "SFN-377"
+}

@@ -1,4 +1,70 @@
-# Sailfin agent benchmark v2 bounded-pilot readout
+# Sailfin agent benchmark v2.5 bounded-pilot readout
+
+Protocol: `sfn-agent-benchmark/v2.5.0`
+
+Linear: [SFN-372](https://linear.app/sailfin/issue/SFN-372/experimentbench-run-fresh-v2-pilots-after-validity-fixes)
+
+Decision: **confirmatory spend rejected under v2.5.0 before scored execution**.
+
+## Frozen gate
+
+All four validity blockers were Done and merged into the tested commit before
+the run began. The independent-instance, Anthropic response-budget, Track A
+structured-concurrency, and Track B structured-concurrency repairs are pinned
+in the [v2.5 pilot manifest](results/sfn-372-v2.5.0/pilot-manifest.json).
+
+The formatter, Sailfin check/build, frozen-instance validation, Sailfin and
+Python stub smokes, timeout and response-invalidation fixtures, provider-auth
+fixtures, TACIT online/offline oracle, packet budget/isomorphism checks, and
+full Track A and Track B known-good/known-bad grader audits passed. Fresh
+balanced schedules were generated for both model families: 129 Track A
+attempts per family and 86 Track B attempts per family. No v2.1 observation
+was selected, rerun, or pooled.
+
+## Immediate stopping event
+
+The unscored OpenAI schema probe passed against exact model ID
+`gpt-5.6-terra`. The next gate, the unscored Anthropic schema probe against
+`claude-sonnet-5`, returned provider error type `overloaded_error` with message
+`Overloaded` and no model text.
+
+Version 2.5 does not classify that response as its frozen
+`transport_transient` category and defines no bounded provider retry. Retrying
+manually would introduce a post-freeze, provider-specific policy. The run
+therefore stopped before contamination probes, unscored arm tasks, or any
+Track A or Track B scored request. [SFN-377](https://linear.app/sailfin/issue/SFN-377/fixbench-classify-and-retry-provider-overloads-symmetrically)
+tracks the required symmetric retry policy and version bump.
+
+## Track A — current adoption
+
+There are no scored Track A observations under v2.5.0. The passing offline
+grader audit and OpenAI schema probe establish setup evidence only; they do not
+support a language, ecosystem, or adoption conclusion.
+
+## Track B — intrinsic learnability
+
+There are no scored Track B observations under v2.5.0. Track B was correctly
+not started because the protocol orders provider setup, contamination, and
+unscored authorization gates before either paid schedule.
+
+## Published failure corpus
+
+The checked-in [v2.5 result set](results/sfn-372-v2.5.0/) contains the frozen
+pilot manifest, both schema-probe summaries, and the complete raw Anthropic
+request/response pair. The raw response includes the provider request ID; no
+credential or secret is present.
+
+## Authorization decision
+
+No confirmatory run is authorized. Neither track has a complete paired pilot,
+and the Anthropic setup gate did not pass under the frozen policy. A corrected
+run requires the protocol/corpus version bump and fresh balanced schedules
+specified by SFN-377. No v2.5 setup result may be converted into a language
+observation or pooled into that batch.
+
+---
+
+# Historical record: Sailfin agent benchmark v2.1 bounded-pilot readout
 
 Protocol: `sfn-agent-benchmark/v2.1.0`
 

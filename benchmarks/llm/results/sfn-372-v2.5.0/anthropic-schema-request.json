@@ -1,0 +1,11 @@
+{
+  "model": "claude-sonnet-5",
+  "max_tokens": 8192,
+  "system": "This is a non-scored provider schema probe.",
+  "messages": [
+    {
+      "role": "user",
+      "content": "Reply with exactly OK."
+    }
+  ]
+}
