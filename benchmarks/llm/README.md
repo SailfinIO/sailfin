@@ -2,7 +2,9 @@
 
 The frozen two-track v2 preregistration lives in
 [`PROTOCOL-V2.md`](PROTOCOL-V2.md). The bounded v2.1.0 pilot and its rejection
-of confirmatory spend are recorded in [`PILOT-V2.md`](PILOT-V2.md). The SFN-350 v1
+of confirmatory spend are recorded in [`PILOT-V2.md`](PILOT-V2.md); none of its
+observations may be selected, rerun, or pooled with the independently frozen
+v2.3.0 corpus. The SFN-350 v1
 decision protocol and pilot interpretation remain preserved in
 [`EXPERIMENT.md`](EXPERIMENT.md) as historical evidence only. Do not reuse v1
 paid outputs as v2 confirmatory data, and do not use the three seed tasks alone
@@ -26,12 +28,15 @@ The runner preserves three seed tasks as non-confirmatory smoke coverage:
 - `io-001-sumfile`
 - `trap-001-stable-hash`
 
-The frozen confirmatory corpus adds 10 templates with four stable instances
-each (40 instances): two logic transformations, CLI normalization, parsing,
-honest filesystem and loopback-HTTP capabilities, structured concurrency,
-standard-package use, a local edit, and a capability-leak trap. `corpus.json`
-records IDs, categories, ordinary/trap membership, hidden-case counts, and the
-predeclared 25% prompt-scaffold token band.
+The frozen confirmatory corpus adds 10 templates with four independently
+allocated stable instances each (40 instances): two logic transformations,
+CLI normalization, parsing, honest filesystem and loopback-HTTP capabilities,
+structured concurrency, standard-package use, a local edit, and a
+capability-leak trap. `corpus.json`
+records IDs, categories, ordinary/trap membership, hidden-case counts, prompt
+and hidden-fixture SHA-256 identities, and the predeclared 25% prompt-scaffold
+token band. Startup validation rejects cumulative instance markers, duplicate
+four-way fixture sets, and cross-instance mutation.
 
 The default `stub` adapter returns canned solutions for offline plumbing tests.
 Real runs use `openai` or `anthropic` through `curl` from native Sailfin.
