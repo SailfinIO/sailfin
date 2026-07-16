@@ -1331,9 +1331,13 @@ fn _grade(task: Task, arm: ArmConfig, workdir: string, iteration: int) -> GradeR
     if task.template == "structured-concurrency" {
         let source = fs.readFile(workdir + "/" + filename);
         let mut missing = "";
-        if arm.name == "sailfin" && (!contains(source, "routine {") || !contains(source, "spawn fn() ->")
+        if (arm.name == "sailfin" || arm.name == "sailfin-b") && (!contains(source, "routine {")
+            || !contains(source, "spawn fn() ->")
             || !contains(source, "await ")) {
             missing = "Sailfin requires routine { ... }, spawn fn() -> T { ... }, and await";
+        } else if arm.name == "rill-17" && (!contains(source, "routine {") || !contains(source, "spawn craft() ->")
+            || !contains(source, "await ")) {
+            missing = "Rill-17 requires routine { ... }, spawn craft() -> T { ... }, and await";
         } else if arm.name == "scala" && (!contains(source, "Executors.newFixedThreadPool")
             || !contains(source, ".submit(")
             || !contains(source, ".get()")
@@ -2584,7 +2588,7 @@ fn _write_run_manifest(path: string, cfg: Config, arms: string[], run_valid: boo
     let protocol_path = _repo_root() + "/benchmarks/llm/PROTOCOL-V2.md";
     let ablation = object_val(["dimension", "assignment", "primary_pool_eligible"], [string_val(cfg.ablation), string_val("seeded parity of frozen attempt identity; paired arms receive the same treatment"), bool_val(cfg.ablation == "primary")]);
     let openai_api = cfg.adapter != "openai"? "not_applicable": (_uses_gpt5_request(cfg.model)? "responses": "chat_completions");
-    let manifest = object_val(["protocol_id", "protocol_sha256", "track", "adapter", "model", "model_family", "openai_api", "openai_reasoning_effort", "max_iters", "repeats", "seed", "sampling", "anthropic_response_budget", "arms", "packets", "ablation", "toolchains", "execution_deadline", "commands", "human_interventions", "run_valid", "invalid_reason"], [string_val("sfn-agent-benchmark/v2.4.0"), string_val(_sha256_file(protocol_path)), string_val(cfg.track), string_val(cfg.adapter), string_val(cfg.model), string_val(cfg.model_family), string_val(openai_api), string_val(manifest_effort), number_val(cfg.max_iters as float), number_val(cfg.repeats as float), number_val(cfg.seed as float), string_val(sampling), _anthropic_response_budget_policy(), array_val(arm_vals), _packet_manifest(cfg.track), ablation, toolchains, deadline, commands, number_val(0.0), bool_val(run_valid), string_val(invalid_reason)]);
+    let manifest = object_val(["protocol_id", "protocol_sha256", "track", "adapter", "model", "model_family", "openai_api", "openai_reasoning_effort", "max_iters", "repeats", "seed", "sampling", "anthropic_response_budget", "arms", "packets", "ablation", "toolchains", "execution_deadline", "commands", "human_interventions", "run_valid", "invalid_reason"], [string_val("sfn-agent-benchmark/v2.5.0"), string_val(_sha256_file(protocol_path)), string_val(cfg.track), string_val(cfg.adapter), string_val(cfg.model), string_val(cfg.model_family), string_val(openai_api), string_val(manifest_effort), number_val(cfg.max_iters as float), number_val(cfg.repeats as float), number_val(cfg.seed as float), string_val(sampling), _anthropic_response_budget_policy(), array_val(arm_vals), _packet_manifest(cfg.track), ablation, toolchains, deadline, commands, number_val(0.0), bool_val(run_valid), string_val(invalid_reason)]);
     fs.writeFile(path, stringify_pretty(manifest, 2));
 }
 
@@ -2658,7 +2662,7 @@ fn _write_corpus_manifest(path: string, cfg: Config, tasks: Task[], arms: ArmCon
     }
     let band_ok = min_tokens > 0 && max_tokens * 100 <= min_tokens * band_percent;
     let band_label = "maximum <= " + (band_percent as string) + "% of minimum";
-    let corpus = object_val(["corpus_id", "frozen", "template_count", "instance_count", "templates", "instances", "token_estimate_method", "quick_reference_estimated_tokens", "predeclared_band", "quick_reference_band_met", "all_scaffold_bands_met"], [string_val("sfn-agent-benchmark-corpus/v2.4.0"), bool_val(true), number_val(templates.length as float), number_val(count as float), _string_array_json(templates), array_val(instances), string_val("UTF-8 source characters divided by 4, rounded up"), object_val(cheat_keys, cheat_vals), string_val(band_label), bool_val(band_ok), bool_val(all_scaffold_bands_met)]);
+    let corpus = object_val(["corpus_id", "frozen", "template_count", "instance_count", "templates", "instances", "token_estimate_method", "quick_reference_estimated_tokens", "predeclared_band", "quick_reference_band_met", "all_scaffold_bands_met"], [string_val("sfn-agent-benchmark-corpus/v2.5.0"), bool_val(true), number_val(templates.length as float), number_val(count as float), _string_array_json(templates), array_val(instances), string_val("UTF-8 source characters divided by 4, rounded up"), object_val(cheat_keys, cheat_vals), string_val(band_label), bool_val(band_ok), bool_val(all_scaffold_bands_met)]);
     fs.writeFile(path, stringify_pretty(corpus, 2));
 }
 

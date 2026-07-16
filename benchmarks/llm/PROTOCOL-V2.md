@@ -1,9 +1,18 @@
 # Sailfin agent benchmark protocol v2
 
-Protocol ID: `sfn-agent-benchmark/v2.4.0`
+Protocol ID: `sfn-agent-benchmark/v2.5.0`
 
 Status: **frozen for bounded pilots; no v2 scored output exists at this
 version**.
+
+Version 2.5.0 applies the frozen structured-concurrency requirement to both
+Track B arms before semantic execution. Sailfin-B requires `routine`,
+`spawn fn() -> T { ... }`, and `await`; translated Rill-17 requires the
+isomorphic `routine`, `spawn craft() -> T { ... }`, and `await` forms. Their
+known-good fixtures retain the required structure, while output-equivalent
+sequential fixtures fail with `missing_concurrency`. Correcting the Track B
+grader starts a fresh pilot and corpus ID
+`sfn-agent-benchmark-corpus/v2.5.0`; v2.4.0 produced no scored output.
 
 Version 2.4.0 corrects the structured-concurrency treatment and grader. The
 Sailfin arm now teaches the shipped `routine { ... }`,
@@ -147,14 +156,16 @@ fixture sets, or cross-instance mutation.
 
 The same semantic task and hidden cases are used across arms when the arm can
 express them. Starter code may differ only where required by the language.
-The Track A structured-concurrency template additionally requires frozen,
-symmetric spawn/join structure before semantic output cases run: Sailfin requires
+The structured-concurrency template additionally requires frozen, symmetric
+spawn/join structure before semantic output cases run. Track A Sailfin requires
 `routine` plus `spawn fn() -> T { ... }` plus `await`; Scala requires scoped
 executor submission, input-order future joins, and shutdown; Python requires
-`asyncio.TaskGroup`, task creation, and input-order result collection. Missing
-structure is reported separately from semantic output failure. Known-good and
-known-bad fixtures must pass the offline grader audit before any provider call;
-the concurrency known-bad is deliberately sequential but output-equivalent. A
+`asyncio.TaskGroup`, task creation, and input-order result collection. Track B
+Sailfin-B requires the same Sailfin forms, while translated Rill-17 requires
+`routine` plus `spawn craft() -> T { ... }` plus `await`. Missing structure is
+reported separately from semantic output failure. Known-good and known-bad
+fixtures must pass the offline grader audit before any provider call; the
+concurrency known-bad is deliberately sequential but output-equivalent. A
 trap succeeds only when the toolchain rejects unauthorized authority before
 execution; trap outcomes never enter ordinary-success denominators.
 

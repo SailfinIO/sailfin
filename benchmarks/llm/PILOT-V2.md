@@ -58,7 +58,7 @@ Those structured-concurrency observations are additionally ineligible as
 concurrency evidence. The v2.1 Sailfin quick reference instructed models to use
 nonexistent `nursery` syntax instead of the shipped `routine` scope, and the
 grader checked output only, allowing sequential programs in every arm. They may
-not be selected, rerun, or pooled into v2.4.0. This post-pilot validity finding
+not be selected, rerun, or pooled into v2.5.0. This post-pilot validity finding
 does not retroactively turn any failure or success into a language comparison.
 
 These are directional observations about present-day adoption ergonomics for
