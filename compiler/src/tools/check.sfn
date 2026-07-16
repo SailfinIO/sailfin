@@ -99,10 +99,20 @@ fn _parse_diagnostic_for_unknown(stmt: Statement, file_path: string) -> Diagnost
         anchor = stmt.tokens[0];
         near = " near `" + stmt.tokens[0].lexeme + "`";
     }
+    // A malformed-but-dispatched declaration (`fn broken( {`, `let x = ;`,
+    // `struct S { x: }`) carries a precise `E05xx` code + message set by the
+    // parser (SFN-18). A genuinely unrecognized top-level construct carries
+    // neither and renders as the generic `E0500`. Both are `producer: parse`.
+    let mut code: string = "E0500";
+    let mut message: string = "parse error: unrecognized syntax" + near;
+    if stmt.code.length > 0 {
+        code = stmt.code;
+        message = stmt.message;
+    }
     return Diagnostic {
-        code: "E0500",
+        code: code,
         severity: "error",
-        message: "parse error: unrecognized syntax" + near,
+        message: message,
         file_path: file_path,
         primary: anchor,
         suggestion: null

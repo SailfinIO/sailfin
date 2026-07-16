@@ -73,12 +73,21 @@ struct ParameterParseResult {
 struct ParameterListParseResult {
     parser: Parser;
     parameters: Parameter[];
+    // False when the list terminated without a closing `)` (malformed input
+    // such as `fn broken( {`); `parse_function` turns this into an `E0501`
+    // parse diagnostic (SFN-18). Callers that don't gate on it ignore it.
+    closed: boolean;
 }
 
 struct StructFieldParseResult {
     parser: Parser;
     field: FieldDeclaration?;
     success: boolean;
+    // True when the member had a field prefix (`name:`) but the required
+    // type annotation was absent (`struct S { x: }`). Distinguishes a
+    // malformed field from a non-field member so `parse_struct` can mint an
+    // `E0503` parse diagnostic rather than silently dropping it (SFN-18).
+    missing_type: boolean;
 }
 
 struct MethodParseResult {

@@ -471,8 +471,17 @@ enum Statement {
         body: Block;
         decorators: Decorator[];
     },
+    // The parser's error-recovery node. `code`/`message` are empty for a
+    // genuinely unrecognized top-level construct (rendered as the generic
+    // `E0500`), and carry a precise parse code (`E05xx`) + message when a
+    // committed declaration production abandons a malformed declaration —
+    // e.g. a broken parameter list, a `let` with no initializer, or a struct
+    // field with no type (SFN-18). `sfn check` mints the diagnostic and the
+    // build gate rejects it before lowering.
     Unknown {
         tokens: Token[];
         text: string;
+        code: string;
+        message: string;
     }
 }

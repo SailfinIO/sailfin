@@ -1,0 +1,195 @@
+// Regression coverage for SFN-18: malformed-but-dispatched top-level
+// declarations must fail closed with a precise `E05xx` parse diagnostic
+// instead of falling through to a garbage AST node or an ICE at LLVM
+// lowering. Covers all three recovery sites
+// (`compiler/src/parser/declarations.sfn`):
+//   - `fn broken( {`   -> E0501 (unclosed parameter list)
+//   - `let x = ;`      -> E0502 (missing initializer expression)
+//   - `struct S { x: }` -> E0503 (missing field type)
+//
+// Driven through `sfn check --json` (the machine-checkable envelope, see
+// `check_json_schema_test.sfn`) plus one build-side probe proving the
+// build path itself rejects a malformed declaration before LLVM lowering
+// (no executable, no ICE noise). The `sfn/test` `expect_*` matchers are
+// `![pure]` and cannot be called from these `![io]` tests.
+import { contains } from "sfn/strings";
+import { with_tmp_dir } from "sfn/test";
+
+fn _sfn_bin() -> string ![io] {
+    let configured = env.get("SAILFIN_BIN");
+    if configured.length > 0 { return configured; }
+    return "build/bin/sfn";
+}
+
+// Pure-frontend `sfn check` needs no clang, but thread PATH/HOME so a
+// constrained CI shell still resolves anything the frontend touches.
+fn _child_env() -> string[] ![io] {
+    let mut e: string[] = [];
+    let path = env.get("PATH");
+    if path.length > 0 { e.push("PATH=" + path); }
+    let home = env.get("HOME");
+    if home.length > 0 { e.push("HOME=" + home); }
+    return e;
+}
+
+// Full environment for a nested `sfn build` (needs clang + linker on
+// PATH, plus SAILFIN_TEST_SCRATCH for build-cache isolation under the
+// parallel runner — see `.claude/rules/no-bash-e2e.md`).
+fn _build_child_env() -> string[] ![io] { return process.environ(); }
+
+struct CheckRun {
+    exit: int,
+    out: string,
+    err: string
+}
+
+// Scratch base for fixtures, keyed by tag so the parallel pool never
+// collides. Materializes a minimal capsule/workspace context plus the
+// per-case fixture under it.
+fn _fixture_dir(tag: string) -> string ![io] {
+    let mut base = env.get("SAILFIN_TEST_SCRATCH");
+    if base.length == 0 { base = "/tmp"; }
+    let root = base + "/sfn-malformed-decl-" + tag;
+    fs.createDirectory(root + "/src", true);
+    fs.writeFile(root + "/workspace.toml", "[workspace]\nmembers = []\n");
+    fs.writeFile(root + "/capsule.toml", "[capsule]\n"
+        + "name = \"malformed-decl-test\"\n"
+        + "version = \"0.1.0\"\n"
+        + "description = \"E2E for SFN-18 malformed top-level declarations\"\n\n"
+        + "[capabilities]\n"
+        + "required = [\"io\"]\n\n"
+        + "[build]\n"
+        + "entry = \"src/main.sfn\"\n");
+    return root;
+}
+
+fn _write(root: string, name: string, source: string) -> string ![io] {
+    let path = root + "/src/" + name;
+    fs.writeFile(path, source);
+    return path;
+}
+
+fn _check(path: string) -> CheckRun ![io] {
+    let exit = process.run_capture([_sfn_bin(), "check", "--json", path], _child_env());
+    let out = process.capture_take_stdout();
+    let err = process.capture_take_stderr();
+    return CheckRun { exit: exit, out: out, err: err };
+}
+
+// ---- Test 1: unclosed parameter list -> E0501 ----
+test "parse malformed: unclosed parameter list surfaces E0501" ![io] {
+    let root = _fixture_dir("fn-broken");
+    let path = _write(root, "fn_broken.sfn", "fn broken( {\n");
+    let r = _check(path);
+    assert r.exit == 1;
+    assert contains(r.out, "\"code\":\"E0501\"");
+    assert contains(r.out, "\"producer\":\"parse\"");
+    assert contains(r.out, "\"severity\":\"error\"");
+    assert contains(r.out, "expected `)` to close the parameter list of function `broken`");
+}
+
+// ---- Test 2: missing initializer expression -> E0502 ----
+test "parse malformed: missing initializer expression surfaces E0502" ![io] {
+    let root = _fixture_dir("let-missing-init");
+    let path = _write(root, "let_missing_init.sfn", "let x = ;\n");
+    let r = _check(path);
+    assert r.exit == 1;
+    assert contains(r.out, "\"code\":\"E0502\"");
+    assert contains(r.out, "\"producer\":\"parse\"");
+    assert contains(r.out, "expected an initializer expression after `=`");
+}
+
+// ---- Test 3: missing field type -> E0503 ----
+test "parse malformed: missing struct field type surfaces E0503" ![io] {
+    let root = _fixture_dir("struct-missing-type");
+    let path = _write(root, "struct_missing_type.sfn", "struct S { x: }\n");
+    let r = _check(path);
+    assert r.exit == 1;
+    assert contains(r.out, "\"code\":\"E0503\"");
+    assert contains(r.out, "\"producer\":\"parse\"");
+    assert contains(r.out, "expected a type after `:`");
+}
+
+// ---- Test 4: recovery — the declaration after a malformed one is not
+// swallowed. Two independent malformed declarations in one file must
+// each surface their own E05xx event, proving the parser recovered and
+// kept scanning after the first abandonment instead of dropping the
+// rest of the file. ----
+test "parse malformed: recovery does not swallow the next declaration" ![io] {
+    let root = _fixture_dir("recovery");
+    let path = _write(root, "recovery.sfn", "struct S { x: }\nlet y = ;\n");
+    let r = _check(path);
+    assert r.exit == 1;
+    assert contains(r.out, "\"code\":\"E0503\"");
+    assert contains(r.out, "\"code\":\"E0502\"");
+}
+
+// ---- Test 5: build-side rejection — a malformed declaration fails the
+// build before LLVM lowering: no executable is produced and the
+// diagnostic is the precise parse message, not linker/ICE noise. ----
+fn _build_broken(marker: string) -> int ![io] {
+    return with_tmp_dir(fn (dir: string) -> int {
+        let srcpath = dir + "/src.sfn";
+        fs.writeFile(srcpath, "fn broken( {\nfn main() { }\n");
+        let binpath = dir + "/out.bin";
+        let build_exit = process.run_capture([_sfn_bin(), "build", "-o", binpath, srcpath], _build_child_env());
+        let out = process.capture_take_stdout();
+        let err = process.capture_take_stderr();
+        let bin_marker = "no";
+        if fs.exists(binpath) { bin_marker = "yes"; }
+        fs.writeFile(marker, out + err + "\n---BIN_EXISTS:" + bin_marker);
+        return build_exit;
+    });
+}
+
+test "parse malformed: build rejects unclosed parameter list before lowering" ![io] {
+    let mut scratch = env.get("SAILFIN_TEST_SCRATCH");
+    if scratch.length == 0 { scratch = "/tmp"; }
+    fs.createDirectory(scratch, true);
+    let marker = scratch + "/sfn-malformed-decl-build.out";
+    if fs.exists(marker) { fs.deleteFile(marker); }
+    let exit = _build_broken(marker);
+    assert exit != 0;
+    let combined = fs.readFile(marker);
+    if fs.exists(marker) { fs.deleteFile(marker); }
+    assert contains(combined, "---BIN_EXISTS:no");
+    assert contains(combined, "E0501");
+    assert contains(combined, "expected `)` to close the parameter list of function `broken`");
+}
+
+// ---- Test 6: negative controls stay clean ----
+test "parse malformed: well-formed function stays clean" ![io] {
+    let root = _fixture_dir("ok-fn");
+    let path = _write(root, "ok_fn.sfn", "fn good() { }\n");
+    let r = _check(path);
+    assert r.exit == 0;
+    assert contains(r.out, "\"errors\":0");
+}
+
+test "parse malformed: well-formed struct stays clean" ![io] {
+    let root = _fixture_dir("ok-struct");
+    let path = _write(root, "ok_struct.sfn", "struct S { x: int }\nfn main() { }\n");
+    let r = _check(path);
+    assert r.exit == 0;
+    assert contains(r.out, "\"errors\":0");
+}
+
+test "parse malformed: declaration-only let stays clean" ![io] {
+    let root = _fixture_dir("ok-let");
+    let path = _write(root, "ok_let.sfn", "let x;\nfn main() { }\n");
+    let r = _check(path);
+    assert r.exit == 0;
+    assert contains(r.out, "\"errors\":0");
+}
+
+// A trailing comma before `)` closes the parameter list (parity with call
+// arguments and struct fields) — it must NOT be read as a phantom parameter
+// and must NOT mint a misleading E0501. Guards the SFN-18 unclosed-list
+// detection against false positives on valid multiline signatures.
+test "parse malformed: trailing comma in parameter list stays clean" ![io] {
+    let root = _fixture_dir("ok-trailing-comma");
+    let path = _write(root, "ok_trailing_comma.sfn", "fn f(\n  a: int,\n  b: int,\n) { }\nfn main() { }\n");
+    let r = _check(path);
+    assert r.exit == 0;
+    assert contains(r.out, "\"errors\":0");
+}

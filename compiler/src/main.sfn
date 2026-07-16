@@ -94,6 +94,38 @@ fn _reject_reexport_violations(program: Program) -> boolean ![io] {
     return true;
 }
 
+// Refuse compilation when the parser left any top-level `Statement.Unknown` in
+// the program — either a malformed-but-dispatched declaration carrying a
+// precise `E05xx` code (`fn broken( {`, `let x = ;`, `struct S { x: }`) or a
+// genuinely unrecognized top-level construct. Reports each via print.err and
+// returns true so the caller bails before lowering/linking. This turns the old
+// "missing-main linker ICE" into a precise parse error and matches the E05xx
+// `producer: parse` diagnostics `sfn check` surfaces for the same nodes
+// (SFN-18).
+fn _reject_parse_errors(program: Program) -> boolean ![io] {
+    let mut found: boolean = false;
+    let mut i: int = 0;
+    loop {
+        if i >= program.statements.length { break; }
+        let stmt = program.statements[i];
+        if stmt.variant == "Unknown" {
+            if stmt.code.length > 0 {
+                print.err("error[" + stmt.code + "]: " + stmt.message);
+            } else {
+                let mut near: string = "";
+                if stmt.tokens.length > 0 {
+                    near = " near `" + stmt.tokens[0].lexeme + "`";
+                }
+                print.err("error[E0500]: parse error: unrecognized syntax"
+                    + near);
+            }
+            found = true;
+        }
+        i += 1;
+    }
+    return found;
+}
+
 fn compile_to_sailfin(source: string) -> string ![io] {
     let program: Program = parse_program(source);
     let prelude_globals = load_prelude_global_names(runtime_helper_call_names());
@@ -102,6 +134,7 @@ fn compile_to_sailfin(source: string) -> string ![io] {
         _emit_typecheck_diagnostics(diagnostics, source, "main");
         return "";
     }
+    if _reject_parse_errors(program) { return ""; }
     if _reject_reexport_violations(program) { return ""; }
     if validate_and_render_effects(program, source, "main", empty_import_symbols()) > 0 {
         return "";
@@ -284,6 +317,7 @@ fn compile_to_llvm(source: string) -> string ![io] {
         _emit_typecheck_diagnostics(diagnostics, source, "main");
         return "";
     }
+    if _reject_parse_errors(program) { return ""; }
     if _reject_reexport_violations(program) { return ""; }
     if validate_and_render_effects(program, source, "main", empty_import_symbols()) > 0 {
         return "";
@@ -339,6 +373,7 @@ fn print_llvm_with_module(source: string, module_name: string) -> boolean ![io] 
             return false;
         }
     }
+    if _reject_parse_errors(program) { return false; }
     if _reject_reexport_violations(program) { return false; }
     if validate_and_render_effects(program, source, module_name, empty_import_symbols()) > 0 {
         return false;
@@ -367,6 +402,7 @@ fn compile_to_llvm_with_module(source: string, module_name: string) -> string ![
     } else {
         print.err("emit-llvm: skipping typecheck (SAILFIN_SKIP_TYPECHECK set, or legacy build/sailfin/.skip_typecheck file present)");
     }
+    if _reject_parse_errors(program) { return ""; }
     if _reject_reexport_violations(program) { return ""; }
     ice_enter_stage("effects");
     if validate_and_render_effects(program, source, module_name, empty_import_symbols()) > 0 {
@@ -432,6 +468,11 @@ fn compile_to_llvm_with_module_timed(source: string, module_name: string) -> str
     } else {
         t_typecheck = _ms_since(t1);
         print.err("emit-llvm: skipping typecheck (SAILFIN_SKIP_TYPECHECK set, or legacy build/sailfin/.skip_typecheck file present)");
+    }
+    if _reject_parse_errors(program) {
+        print.err(_timing_line(module_name, "parse", t_parse));
+        print.err(_timing_line(module_name, "typecheck", t_typecheck));
+        return "";
     }
     if _reject_reexport_violations(program) {
         print.err(_timing_line(module_name, "parse", t_parse));
@@ -565,6 +606,7 @@ fn compile_tests_to_llvm_file_with_module_imports(source: string, module_name: s
         _emit_typecheck_diagnostics(diagnostics, source, module_name);
         return false;
     }
+    if _reject_parse_errors(program) { return false; }
     if _reject_reexport_violations(program) { return false; }
     // Phase E + F: thread the resolver-built function-effect table
     // (E0402) and capsule capability surface (E0403). Empty
@@ -624,6 +666,7 @@ fn compile_to_native_text_with_module(source: string, module_name: string) -> st
         _emit_typecheck_diagnostics(diagnostics, source, module_name);
         return "";
     }
+    if _reject_parse_errors(program) { return ""; }
     if _reject_reexport_violations(program) { return ""; }
     if validate_and_render_effects(program, source, module_name, empty_import_symbols()) > 0 {
         return "";
@@ -651,6 +694,7 @@ fn write_native_text_file_with_module(source: string, module_name: string, out_p
         _emit_typecheck_diagnostics(diagnostics, source, module_name);
         return false;
     }
+    if _reject_parse_errors(program) { return false; }
     if _reject_reexport_violations(program) { return false; }
     if validate_and_render_effects(program, source, module_name, empty_import_symbols()) > 0 {
         return false;
@@ -760,6 +804,7 @@ fn compile_to_llvm_file_with_module_imports(source: string, module_name: string,
     } else {
         print.err("emit-llvm-file: skipping typecheck (SAILFIN_SKIP_TYPECHECK set, or legacy build/sailfin/.skip_typecheck file present)");
     }
+    if _reject_parse_errors(program) { return false; }
     if _reject_reexport_violations(program) { return false; }
     let mut imports = empty_import_symbols();
     // Staged direct-import `.sfn-asm` bodies (including the walk-excluded

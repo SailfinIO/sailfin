@@ -450,13 +450,15 @@ fn parse_parameter_list(initial_parser: Parser) -> ParameterListParseResult {
     let mut parser: Parser = initial_parser;
     parser = skip_trivia(parser);
     let mut parameters: Parameter[] = [];
+    let mut closed: boolean = false;
 
     let token = parser_peek_raw(parser);
     if symbol_matches(token, ")") {
         parser = parser_advance_raw(parser);
         return ParameterListParseResult {
             parser: parser,
-            parameters: parameters
+            parameters: parameters,
+            closed: true
         };
     }
 
@@ -469,16 +471,35 @@ fn parse_parameter_list(initial_parser: Parser) -> ParameterListParseResult {
         if symbol_matches(separator, ",") {
             parser = parser_advance_raw(parser);
             parser = skip_trivia(parser);
+            // A trailing comma before `)` closes the list (parity with call
+            // arguments and struct fields); otherwise `parse_single_parameter`
+            // would read `)` as a phantom parameter and the malformed-list
+            // guard below would mint a misleading E0501. SFN-18.
+            if symbol_matches(parser_peek_raw(parser), ")") {
+                parser = parser_advance_raw(parser);
+                closed = true;
+                break;
+            }
             continue;
         }
         if symbol_matches(separator, ")") {
             parser = parser_advance_raw(parser);
+            closed = true;
             break;
         }
-        if separator.kind.variant == "EndOfFile" { break; }
+        // Any other separator — a stray token or EOF mid-list — means the
+        // list was never closed with `)`. Stop WITHOUT consuming the token so
+        // `parse_function` can resync at it and any independent declaration
+        // that follows still parses (`fn broken( {\nfn good() {}` must not
+        // swallow `fn good` as bogus parameters). SFN-18.
+        break;
     }
 
-    return ParameterListParseResult { parser: parser, parameters: parameters };
+    return ParameterListParseResult {
+        parser: parser,
+        parameters: parameters,
+        closed: closed
+    };
 }
 
 fn parse_single_parameter(initial_parser: Parser) -> ParameterParseResult {
@@ -739,6 +760,10 @@ fn parse_variable(initial_parser: Parser) -> StatementParseResult {
 fn parse_variable_with_storage(initial_parser: Parser, is_thread_local: boolean) -> StatementParseResult {
     let mut parser: Parser = initial_parser;
     parser = skip_trivia(parser);
+    // Span of the whole declaration, for the malformed-declaration recovery
+    // node (SFN-18). Anchors at the leading `let`.
+    let decl_tokens_ref = parser.tokens;
+    let decl_start_index = parser.index;
     let mut statement_tokens: Token[] = [];
     let let_token = parser_peek_raw(parser);
     statement_tokens = append_token(statement_tokens, let_token);
@@ -782,6 +807,7 @@ fn parse_variable_with_storage(initial_parser: Parser, is_thread_local: boolean)
 
     let mut initializer: Expression? = null;
     let mut initializer_span: SourceSpan? = null;
+    let mut missing_init: boolean = false;
     parser = skip_trivia(parser);
     let assign = parser_peek_raw(parser);
     if symbol_matches(assign, "=") {
@@ -798,6 +824,11 @@ fn parse_variable_with_storage(initial_parser: Parser, is_thread_local: boolean)
         if capture.tokens.length > 0 {
             initializer_span = source_span_from_tokens(capture.tokens);
             initializer = expression_from_tokens(capture.tokens);
+        } else {
+            // `let x = ;` — the `=` commits to an initializer that is absent.
+            // (`let x;` with no `=` is a legal uninitialized binding and is
+            // not flagged.) SFN-18.
+            missing_init = true;
         }
     }
 
@@ -806,6 +837,13 @@ fn parse_variable_with_storage(initial_parser: Parser, is_thread_local: boolean)
     if symbol_matches(terminator, ";") {
         statement_tokens = append_token(statement_tokens, terminator);
         parser = parser_advance_raw(parser);
+    }
+
+    if missing_init {
+        let stmt = _malformed_declaration(decl_tokens_ref, decl_start_index, parser.index, "E0502", "parse error: expected an initializer expression after `=` in declaration of `"
+            + name
+            + "`");
+        return StatementParseResult { parser: parser, statement: stmt };
     }
 
     let span = source_span_from_tokens(statement_tokens);
@@ -828,6 +866,11 @@ fn parse_variable_with_storage(initial_parser: Parser, is_thread_local: boolean)
 fn parse_function(initial_parser: Parser, starts_with_async: boolean, decorators: Decorator[], starts_with_unsafe: boolean) -> StatementParseResult {
     let mut parser: Parser = initial_parser;
     parser = skip_trivia(parser);
+    // Span of the whole declaration, for the malformed-declaration recovery
+    // node (SFN-18). Captured after the leading skip so it anchors at the
+    // first keyword (`fn` / `async` / `unsafe`).
+    let decl_tokens_ref = parser.tokens;
+    let decl_start_index = parser.index;
     let mut is_unsafe = false;
     if starts_with_unsafe {
         parser = consume_keyword(parser, "unsafe");
@@ -869,6 +912,17 @@ fn parse_function(initial_parser: Parser, starts_with_async: boolean, decorators
     let parameter_result = parse_parameter_list(parser);
     parser = parameter_result.parser;
     let parameters = parameter_result.parameters;
+
+    // A parameter list that never closed with `)` is a malformed declaration
+    // (`fn broken( {`). Abandon it as a precise `E0501` parse error instead of
+    // emitting a garbage `FunctionDeclaration`; the parser is already
+    // positioned for recovery (SFN-18).
+    if !parameter_result.closed {
+        let stmt = _malformed_declaration(decl_tokens_ref, decl_start_index, parser.index, "E0501", "parse error: expected `)` to close the parameter list of function `"
+            + name
+            + "`");
+        return StatementParseResult { parser: parser, statement: stmt };
+    }
 
     parser = skip_trivia(parser);
     let mut return_type: TypeAnnotation? = null;
@@ -1078,6 +1132,10 @@ fn parse_extern_var(initial_parser: Parser, starts_with_unsafe: boolean, decorat
 fn parse_struct(initial_parser: Parser, decorators: Decorator[]) -> StatementParseResult {
     let mut parser: Parser = initial_parser;
     parser = skip_trivia(parser);
+    // Span of the whole declaration, for the malformed-declaration recovery
+    // node (SFN-18). Anchors at the leading `struct`.
+    let decl_tokens_ref = parser.tokens;
+    let decl_start_index = parser.index;
     parser = consume_keyword(parser, "struct");
 
     parser = skip_trivia(parser);
@@ -1100,6 +1158,7 @@ fn parse_struct(initial_parser: Parser, decorators: Decorator[]) -> StatementPar
 
     let mut fields: FieldDeclaration[] = [];
     let mut methods: MethodDeclaration[] = [];
+    let mut saw_malformed_field: boolean = false;
 
     loop {
         parser = skip_trivia(parser);
@@ -1137,7 +1196,19 @@ fn parse_struct(initial_parser: Parser, decorators: Decorator[]) -> StatementPar
             continue;
         }
 
+        // A member with a field prefix (`name:`) but no type is a malformed
+        // field, not an unrecognized member — record it so the whole struct
+        // is abandoned as an `E0503` parse error. Still `skip_struct_member`
+        // to resync past `}` so an independent later declaration parses. SFN-18.
+        if field_result.missing_type { saw_malformed_field = true; }
         parser = skip_struct_member(member_start);
+    }
+
+    if saw_malformed_field {
+        let stmt = _malformed_declaration(decl_tokens_ref, decl_start_index, parser.index, "E0503", "parse error: expected a type after `:` in a field of struct `"
+            + name
+            + "`");
+        return StatementParseResult { parser: parser, statement: stmt };
     }
 
     let statement = Statement.StructDeclaration {
@@ -1169,7 +1240,8 @@ fn parse_struct_field(parser: Parser) -> StructFieldParseResult {
         return StructFieldParseResult {
             parser: parser,
             field: null,
-            success: false
+            success: false,
+            missing_type: false
         };
     }
 
@@ -1184,7 +1256,8 @@ fn parse_struct_field(parser: Parser) -> StructFieldParseResult {
         return StructFieldParseResult {
             parser: parser,
             field: null,
-            success: false
+            success: false,
+            missing_type: false
         };
     }
 
@@ -1195,10 +1268,14 @@ fn parse_struct_field(parser: Parser) -> StructFieldParseResult {
     current = capture.parser;
     let type_text = trim_text(tokens_to_text(capture.tokens));
     if type_text.length == 0 {
+        // `struct S { x: }` — the `:` commits to a field type that is absent.
+        // Flag it so `parse_struct` mints an `E0503` parse error rather than
+        // dropping the field via `skip_struct_member` (SFN-18).
         return StructFieldParseResult {
             parser: parser,
             field: null,
-            success: false
+            success: false,
+            missing_type: true
         };
     }
 
@@ -1219,7 +1296,8 @@ fn parse_struct_field(parser: Parser) -> StructFieldParseResult {
         return StructFieldParseResult {
             parser: parser,
             field: null,
-            success: false
+            success: false,
+            missing_type: false
         };
     }
 
@@ -1233,7 +1311,8 @@ fn parse_struct_field(parser: Parser) -> StructFieldParseResult {
     return StructFieldParseResult {
         parser: current,
         field: field,
-        success: true
+        success: true,
+        missing_type: false
     };
 }
 
@@ -1467,7 +1546,8 @@ fn parse_enum_variant_field(parser: Parser) -> StructFieldParseResult {
         return StructFieldParseResult {
             parser: parser,
             field: null,
-            success: false
+            success: false,
+            missing_type: false
         };
     }
 
@@ -1481,7 +1561,8 @@ fn parse_enum_variant_field(parser: Parser) -> StructFieldParseResult {
         return StructFieldParseResult {
             parser: parser,
             field: null,
-            success: false
+            success: false,
+            missing_type: false
         };
     }
     current = sep_result.parser;
@@ -1502,7 +1583,8 @@ fn parse_enum_variant_field(parser: Parser) -> StructFieldParseResult {
         return StructFieldParseResult {
             parser: parser,
             field: null,
-            success: false
+            success: false,
+            missing_type: false
         };
     }
 
@@ -1529,7 +1611,8 @@ fn parse_enum_variant_field(parser: Parser) -> StructFieldParseResult {
     return StructFieldParseResult {
         parser: current,
         field: field,
-        success: true
+        success: true,
+        missing_type: false
     };
 }
 
@@ -1833,6 +1916,23 @@ fn parse_lifecycle_hook(initial_parser: Parser, decorators: Decorator[], kind: s
 // ============================================================================
 // Unknown Statement (fallback)
 // ============================================================================
+// Build a `Statement.Unknown` recovery node carrying a precise parse code
+// (`E05xx`) and message for a malformed-but-dispatched declaration (SFN-18).
+// The token slice `[start_index, end_index)` spans the abandoned declaration
+// so `sfn check` anchors the diagnostic at its first token and the build gate
+// (`main.sfn::_reject_parse_errors`) can render it. Unlike `parse_unknown`,
+// this scans nothing — the calling production has already positioned the
+// parser for recovery.
+fn _malformed_declaration(tokens_ref: Token[], start_index: int, end_index: int, code: string, message: string) -> Statement {
+    let toks = token_slice(tokens_ref, start_index, end_index);
+    return Statement.Unknown {
+        tokens: toks,
+        text: tokens_to_text(toks),
+        code: code,
+        message: message
+    };
+}
+
 fn parse_unknown(initial_parser: Parser) -> StatementParseResult {
     let mut parser: Parser = initial_parser;
     parser = skip_trivia(parser);
@@ -1880,7 +1980,12 @@ fn parse_unknown(initial_parser: Parser) -> StatementParseResult {
 
     let mut text: string = tokens_to_text(tokens);
     if truncated { text = text + " /* parse_unknown truncated */"; }
-    let block = Statement.Unknown { tokens: tokens, text: text };
+    let block = Statement.Unknown {
+        tokens: tokens,
+        text: text,
+        code: "",
+        message: ""
+    };
     parser = skip_trivia(current);
     return StatementParseResult { parser: parser, statement: block };
 }
