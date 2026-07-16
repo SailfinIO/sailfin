@@ -1,9 +1,16 @@
 # Sailfin agent benchmark protocol v2
 
-Protocol ID: `sfn-agent-benchmark/v2.2.0`
+Protocol ID: `sfn-agent-benchmark/v2.3.0`
 
 Status: **frozen for bounded pilots; no v2 scored output exists at this
 version**.
+
+Version 2.3.0 replaces aliased task clones with four independently allocated
+prompts and hidden fixture sets per template. Each prompt has exactly one
+instance marker, and the corpus manifest records distinct prompt and hidden-
+fixture SHA-256 identities within every template. This corpus validity repair
+starts a fresh pilot. No v2.1.0 observation may be selected, rerun, or pooled
+with v2.3.0; v2.2.0 produced no scored output.
 
 Version 2.1.0 replaced the unusable OpenAI Chat Completions transport with the
 Responses API before any scored output was collected. The v2.0.0 preflight is
@@ -108,9 +115,13 @@ comes first.
 
 ### Task corpus
 
-The corpus has ten templates and four frozen, non-textbook instances per
-template. Hidden fixtures vary values and edge cases without introducing an
-undeclared language feature or library operation.
+The corpus has ten templates and four independently allocated, frozen,
+non-textbook instances per template. Hidden fixtures vary values and edge cases
+without introducing an undeclared language feature or library operation. Every
+prompt contains exactly one `[instance:<id>]` marker. Prompt and hidden-fixture
+SHA-256 identities are distinct within a template and recorded in
+`corpus.json`; the harness fails closed on cumulative markers, duplicate
+fixture sets, or cross-instance mutation.
 
 | Template group | Count | Primary purpose |
 | --- | ---: | --- |

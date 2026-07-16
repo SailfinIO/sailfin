@@ -2286,6 +2286,45 @@ fn _sha256_file(path: string) -> string ![io] {
     return substring(out, 0, 64);
 }
 
+fn _sha256_text(text: string, scratch: string) -> string ![io] {
+    fs.writeFile(scratch, text);
+    let digest = _sha256_file(scratch);
+    fs.deleteFile(scratch);
+    return digest;
+}
+
+fn _hidden_fixture_text(task: Task) -> string {
+    let mut out = "";
+    let mut i: int = 0;
+    loop {
+        if i >= task.fixtures.length { break; }
+        let fixture = task.fixtures[i];
+        out = out + "fixture-name:" + fixture.name.length as string + ":"
+            + fixture.name
+            + "\nfixture-content:"
+            + fixture.content.length as string
+            + ":"
+            + fixture.content
+            + "\n";
+        i += 1;
+    }
+    i = 0;
+    loop {
+        if i >= task.cases.length { break; }
+        let case = task.cases[i];
+        out = out + "case-input:" + case.input.length as string + ":" + case.input
+            + "\ncase-expect:"
+            + case.expect.length as string
+            + ":"
+            + case.expect
+            + "\ncase-stable-runs:"
+            + case.stable_runs as string
+            + "\n";
+        i += 1;
+    }
+    return out;
+}
+
 fn _packet_path(arm: string) -> string ![io] {
     return _repo_root() + "/benchmarks/llm/packets/" + arm + "/packet.md";
 }
@@ -2450,7 +2489,7 @@ fn _write_run_manifest(path: string, cfg: Config, arms: string[], run_valid: boo
     let protocol_path = _repo_root() + "/benchmarks/llm/PROTOCOL-V2.md";
     let ablation = object_val(["dimension", "assignment", "primary_pool_eligible"], [string_val(cfg.ablation), string_val("seeded parity of frozen attempt identity; paired arms receive the same treatment"), bool_val(cfg.ablation == "primary")]);
     let openai_api = cfg.adapter != "openai"? "not_applicable": (_uses_gpt5_request(cfg.model)? "responses": "chat_completions");
-    let manifest = object_val(["protocol_id", "protocol_sha256", "track", "adapter", "model", "model_family", "openai_api", "openai_reasoning_effort", "max_iters", "repeats", "seed", "sampling", "anthropic_response_budget", "arms", "packets", "ablation", "toolchains", "execution_deadline", "commands", "human_interventions", "run_valid", "invalid_reason"], [string_val("sfn-agent-benchmark/v2.2.0"), string_val(_sha256_file(protocol_path)), string_val(cfg.track), string_val(cfg.adapter), string_val(cfg.model), string_val(cfg.model_family), string_val(openai_api), string_val(manifest_effort), number_val(cfg.max_iters as float), number_val(cfg.repeats as float), number_val(cfg.seed as float), string_val(sampling), _anthropic_response_budget_policy(), array_val(arm_vals), _packet_manifest(cfg.track), ablation, toolchains, deadline, commands, number_val(0.0), bool_val(run_valid), string_val(invalid_reason)]);
+    let manifest = object_val(["protocol_id", "protocol_sha256", "track", "adapter", "model", "model_family", "openai_api", "openai_reasoning_effort", "max_iters", "repeats", "seed", "sampling", "anthropic_response_budget", "arms", "packets", "ablation", "toolchains", "execution_deadline", "commands", "human_interventions", "run_valid", "invalid_reason"], [string_val("sfn-agent-benchmark/v2.3.0"), string_val(_sha256_file(protocol_path)), string_val(cfg.track), string_val(cfg.adapter), string_val(cfg.model), string_val(cfg.model_family), string_val(openai_api), string_val(manifest_effort), number_val(cfg.max_iters as float), number_val(cfg.repeats as float), number_val(cfg.seed as float), string_val(sampling), _anthropic_response_budget_policy(), array_val(arm_vals), _packet_manifest(cfg.track), ablation, toolchains, deadline, commands, number_val(0.0), bool_val(run_valid), string_val(invalid_reason)]);
     fs.writeFile(path, stringify_pretty(manifest, 2));
 }
 
@@ -2497,7 +2536,13 @@ fn _write_corpus_manifest(path: string, cfg: Config, tasks: Task[], arms: ArmCon
             }
             let scaffold_band_met = scaffold_min > 0 && scaffold_max * 100 <= scaffold_min * band_percent;
             if !scaffold_band_met { all_scaffold_bands_met = false; }
-            instances.push(object_val(["id", "template", "category", "kind", "case_count", "fixture_count", "starter_estimated_tokens", "full_prompt_scaffold_estimated_tokens", "scaffold_band_met"], [string_val(task.id), string_val(task.template), string_val(task.category), string_val(task.kind), number_val(task.cases.length as float), number_val(task.fixtures.length as float), object_val(arm_keys, starter_vals), object_val(arm_keys, scaffold_vals), bool_val(scaffold_band_met)]));
+            let prompt_hash = _sha256_text(task.prompt, path + "." + task.id
+                + ".prompt-hash-input");
+            let hidden_fixture_hash = _sha256_text(_hidden_fixture_text(task), path
+                + "."
+                + task.id
+                + ".fixture-hash-input");
+            instances.push(object_val(["id", "template", "category", "kind", "prompt_sha256", "hidden_fixture_sha256", "case_count", "fixture_count", "starter_estimated_tokens", "full_prompt_scaffold_estimated_tokens", "scaffold_band_met"], [string_val(task.id), string_val(task.template), string_val(task.category), string_val(task.kind), string_val(prompt_hash), string_val(hidden_fixture_hash), number_val(task.cases.length as float), number_val(task.fixtures.length as float), object_val(arm_keys, starter_vals), object_val(arm_keys, scaffold_vals), bool_val(scaffold_band_met)]));
             count += 1;
         }
         i += 1;
@@ -2699,130 +2744,311 @@ fn _trap_starters() -> Starter[] {
     }];
 }
 
-fn _base_ordinary(template: string, category: string, prompt: string, contract: string, cases: Case[]) -> Task {
+fn _frozen_task(id: string, template: string, category: string, kind: string, uses_tacit: boolean, prompt: string, contract: string, fixtures: Fixture[], cases: Case[], starters: Starter[]) -> Task {
     return Task {
-        id: template,
+        id: id,
         template: template,
         category: category,
-        kind: "ordinary",
+        kind: kind,
         confirmatory: true,
-        uses_tacit: false,
-        prompt: prompt,
+        uses_tacit: uses_tacit,
+        prompt: prompt + " [instance:" + id + "]",
         io_contract: contract,
-        fixtures: [],
+        fixtures: fixtures,
         cases: cases,
-        starters: _ordinary_starters()
+        starters: starters
     };
 }
 
-fn _variants(base: Task) -> Task[] {
-    let mut out: Task[] = [];
-    let mut i: int = 1;
-    loop {
-        if i > 4 { break; }
-        let mut task = base;
-        task.id = base.template + "-00" + (i as string);
-        task.prompt = base.prompt + " Frozen instance seed: " + ((3500 + i) as string)
-            + ".";
-        out.push(task);
-        i += 1;
-    }
-    return out;
-}
-
-fn _extend_tasks(out: Task[], values: Task[]) -> Task[] {
-    let mut i: int = 0;
-    loop {
-        if i >= values.length { break; }
-        out.push(values[i]);
-        i += 1;
-    }
-    return out;
+fn _frozen_ordinary(id: string, template: string, category: string, prompt: string, contract: string, cases: Case[]) -> Task {
+    return _frozen_task(id, template, category, "ordinary", false, prompt, contract, [], cases, _ordinary_starters());
 }
 
 fn _confirmatory_tasks() -> Task[] {
     let mut out: Task[] = [];
-    out = _extend_tasks(out, _variants(_base_ordinary("logic-runlength", "logic", "Run-length encode adjacent signed integers as value:count pairs. Preserve order and treat repeated values separated by another value as separate runs.", "stdin: one line of integers. stdout: value:count pairs.", [Case {
+    let runlength_prompt = "Run-length encode adjacent signed integers as value:count pairs. Preserve order and treat repeated values separated by another value as separate runs.";
+    let runlength_contract = "stdin: one line of integers. stdout: value:count pairs.";
+    out.push(_frozen_ordinary("logic-runlength-001", "logic-runlength", "logic", runlength_prompt, runlength_contract, [Case {
         input: "-1 -1 0 2 2 2\n", expect: "-1:2 0:1 2:3", stable_runs: 1
-    }, Case { input: "4 5 4\n", expect: "4:1 5:1 4:1", stable_runs: 1 }])));
-    out = _extend_tasks(out, _variants(_base_ordinary("logic-deltas", "logic", "Print adjacent differences for a sequence of signed integers. A single value produces an empty line.", "stdin: integers. stdout: next-minus-previous differences.", [Case {
+    }, Case { input: "4 5 4\n", expect: "4:1 5:1 4:1", stable_runs: 1 }]));
+    out.push(_frozen_ordinary("logic-runlength-002", "logic-runlength", "logic", runlength_prompt, runlength_contract, [Case {
+        input: "7 7 7 7\n", expect: "7:4", stable_runs: 1
+    }, Case { input: "\n", expect: "", stable_runs: 1 }]));
+    out.push(_frozen_ordinary("logic-runlength-003", "logic-runlength", "logic", runlength_prompt, runlength_contract, [Case {
+        input: "1 2 1 2\n", expect: "1:1 2:1 1:1 2:1", stable_runs: 1
+    }, Case {
+        input: "-3 -3 -2 -2 -3\n", expect: "-3:2 -2:2 -3:1", stable_runs: 1
+    }]));
+    out.push(_frozen_ordinary("logic-runlength-004", "logic-runlength", "logic", runlength_prompt, runlength_contract, [Case {
+        input: "0 0 0 -1 0 0\n", expect: "0:3 -1:1 0:2", stable_runs: 1
+    }, Case { input: "12\n", expect: "12:1", stable_runs: 1 }]));
+
+    let deltas_prompt = "Print adjacent differences for a sequence of signed integers. A single value produces an empty line.";
+    let deltas_contract = "stdin: integers. stdout: next-minus-previous differences.";
+    out.push(_frozen_ordinary("logic-deltas-001", "logic-deltas", "logic", deltas_prompt, deltas_contract, [Case {
         input: "3 8 2 -1\n", expect: "5 -6 -3", stable_runs: 1
-    }, Case { input: "9\n", expect: "", stable_runs: 1 }])));
-    out = _extend_tasks(out, _variants(_base_ordinary("cli-kv", "cli", "Parse comma-separated key=value fields and print them sorted by key as key=value pairs. Values may be empty; split only on the first equals sign.", "stdin: one record. stdout: normalized comma-separated record.", [Case {
+    }, Case { input: "9\n", expect: "", stable_runs: 1 }]));
+    out.push(_frozen_ordinary("logic-deltas-002", "logic-deltas", "logic", deltas_prompt, deltas_contract, [Case {
+        input: "-4 -4 5\n", expect: "0 9", stable_runs: 1
+    }, Case { input: "0 0\n", expect: "0", stable_runs: 1 }]));
+    out.push(_frozen_ordinary("logic-deltas-003", "logic-deltas", "logic", deltas_prompt, deltas_contract, [Case {
+        input: "10 0 -10\n", expect: "-10 -10", stable_runs: 1
+    }, Case { input: "-3 4\n", expect: "7", stable_runs: 1 }]));
+    out.push(_frozen_ordinary("logic-deltas-004", "logic-deltas", "logic", deltas_prompt, deltas_contract, [Case {
+        input: "0 1 1 8\n", expect: "1 0 7", stable_runs: 1
+    }, Case { input: "42\n", expect: "", stable_runs: 1 }]));
+
+    let kv_prompt = "Parse comma-separated key=value fields and print them sorted by key as key=value pairs. Values may be empty; split only on the first equals sign.";
+    let kv_contract = "stdin: one record. stdout: normalized comma-separated record.";
+    out.push(_frozen_ordinary("cli-kv-001", "cli-kv", "cli", kv_prompt, kv_contract, [Case {
         input: "b=2,a=1,c=\n", expect: "a=1,b=2,c=", stable_runs: 1
     }, Case {
         input: "token=a=b,name=x\n", expect: "name=x,token=a=b", stable_runs: 1
-    }])));
-    out = _extend_tasks(out, _variants(_base_ordinary("parse-log", "parsing", "Parse semicolon-separated LEVEL|message entries and print the number of entries whose level is exactly ERROR. Malformed entries do not count.", "stdin: one line of entries. stdout: decimal count.", [Case {
+    }]));
+    out.push(_frozen_ordinary("cli-kv-002", "cli-kv", "cli", kv_prompt, kv_contract, [Case {
+        input: "z=last,m=,a=first\n", expect: "a=first,m=,z=last", stable_runs: 1
+    }, Case {
+        input: "path=x=y=z,id=7\n", expect: "id=7,path=x=y=z", stable_runs: 1
+    }]));
+    out.push(_frozen_ordinary("cli-kv-003", "cli-kv", "cli", kv_prompt, kv_contract, [Case {
+        input: "beta=2,alpha=1\n", expect: "alpha=1,beta=2", stable_runs: 1
+    }, Case {
+        input: "empty=,full=value\n", expect: "empty=,full=value", stable_runs: 1
+    }]));
+    out.push(_frozen_ordinary("cli-kv-004", "cli-kv", "cli", kv_prompt, kv_contract, [Case {
+        input: "q=a=b,r=c=d,p=\n", expect: "p=,q=a=b,r=c=d", stable_runs: 1
+    }, Case {
+        input: "north=9,east=3\n", expect: "east=3,north=9", stable_runs: 1
+    }]));
+
+    let log_prompt = "Parse semicolon-separated LEVEL|message entries and print the number of entries whose level is exactly ERROR. Malformed entries do not count.";
+    let log_contract = "stdin: one line of entries. stdout: decimal count.";
+    out.push(_frozen_ordinary("parse-log-001", "parse-log", "parsing", log_prompt, log_contract, [Case {
         input: "INFO|up;ERROR|disk;WARN|slow;ERROR|net\n", expect: "2", stable_runs: 1
     }, Case {
         input: "ERRORISH|x;broken;ERROR|\n", expect: "1", stable_runs: 1
-    }])));
-    out = _extend_tasks(out, _variants(_filesystem_template()));
-    out = _extend_tasks(out, _variants(_http_template()));
-    out = _extend_tasks(out, _variants(_base_ordinary("structured-concurrency", "concurrency", "Process the pipe-separated fields independently using structured concurrency, uppercase each field, and print results in input order. Empty fields are preserved.", "stdin: pipe-separated fields. stdout: uppercased fields in original order.", [Case {
+    }]));
+    out.push(_frozen_ordinary("parse-log-002", "parse-log", "parsing", log_prompt, log_contract, [Case {
+        input: "DEBUG|a;INFO|b;WARN|c\n", expect: "0", stable_runs: 1
+    }, Case {
+        input: "ERROR|one;bad;ERROR|two;ERR|three\n", expect: "2", stable_runs: 1
+    }]));
+    out.push(_frozen_ordinary("parse-log-003", "parse-log", "parsing", log_prompt, log_contract, [Case {
+        input: "ERROR|;ERRORISH|no;|missing;ERROR|ok\n", expect: "2", stable_runs: 1
+    }, Case { input: "broken;also-broken\n", expect: "0", stable_runs: 1 }]));
+    out.push(_frozen_ordinary("parse-log-004", "parse-log", "parsing", log_prompt, log_contract, [Case {
+        input: "WARN|x;ERROR|a|b;INFO|z\n", expect: "1", stable_runs: 1
+    }, Case {
+        input: "ERROR|x;ERROR|y;ERROR|z\n", expect: "3", stable_runs: 1
+    }]));
+
+    let filesystem_prompt = "Read the generated numbers.txt fixture through the language arm's declared filesystem capability and print the sum of its non-empty signed-integer lines. Direct global file APIs are forbidden in the Scala security arm.";
+    let filesystem_contract = "fixture: numbers.txt. stdout: signed decimal sum.";
+    out.push(_frozen_task("filesystem-honest-001", "filesystem-honest", "filesystem", "ordinary", true, filesystem_prompt, filesystem_contract, [Fixture {
+        name: "numbers.txt", content: "8\n-3\n\n11\n"
+    }], [Case { input: "\n", expect: "16", stable_runs: 1 }], _tacit_starters()));
+    out.push(_frozen_task("filesystem-honest-002", "filesystem-honest", "filesystem", "ordinary", true, filesystem_prompt, filesystem_contract, [Fixture {
+        name: "numbers.txt", content: "-5\n20\n1\n\n"
+    }], [Case { input: "\n", expect: "16", stable_runs: 1 }], _tacit_starters()));
+    out.push(_frozen_task("filesystem-honest-003", "filesystem-honest", "filesystem", "ordinary", true, filesystem_prompt, filesystem_contract, [Fixture {
+        name: "numbers.txt", content: "0\n0\n17\n-2\n"
+    }], [Case { input: "\n", expect: "15", stable_runs: 1 }], _tacit_starters()));
+    out.push(_frozen_task("filesystem-honest-004", "filesystem-honest", "filesystem", "ordinary", true, filesystem_prompt, filesystem_contract, [Fixture {
+        name: "numbers.txt", content: "31\n\n-9\n-4\n"
+    }], [Case { input: "\n", expect: "18", stable_runs: 1 }], _tacit_starters()));
+
+    let http_prompt = "Fetch the deterministic loopback URL supplied by the grader through the language arm's declared network capability. Parse its body as a signed integer and print twice that value. Do not use a global network client in the Scala security arm.";
+    let http_contract = "stdin: loopback URL. HTTP body: signed integer plus newline. stdout: doubled integer.";
+    let server = "from http.server import HTTPServer, SimpleHTTPRequestHandler\n\nHTTPServer.allow_reuse_address = True\nserver = HTTPServer(('127.0.0.1', 18350), SimpleHTTPRequestHandler)\nserver.timeout = 10\nserver.handle_request()\nserver.server_close()\n";
+    out.push(_frozen_task("local-http-001", "local-http", "http", "ordinary", true, http_prompt, http_contract, [Fixture {
+        name: "http-body.txt", content: "21\n"
+    }, Fixture { name: "serve_once.py", content: server }], [Case {
+        input: "http://127.0.0.1:18350/http-body.txt\n", expect: "42", stable_runs: 1
+    }], _http_starters()));
+    out.push(_frozen_task("local-http-002", "local-http", "http", "ordinary", true, http_prompt, http_contract, [Fixture {
+        name: "http-body.txt", content: "7\n"
+    }, Fixture { name: "serve_once.py", content: server }], [Case {
+        input: "http://127.0.0.1:18350/http-body.txt\n", expect: "14", stable_runs: 1
+    }], _http_starters()));
+    out.push(_frozen_task("local-http-003", "local-http", "http", "ordinary", true, http_prompt, http_contract, [Fixture {
+        name: "http-body.txt", content: "0\n"
+    }, Fixture { name: "serve_once.py", content: server }], [Case {
+        input: "http://127.0.0.1:18350/http-body.txt\n", expect: "0", stable_runs: 1
+    }], _http_starters()));
+    out.push(_frozen_task("local-http-004", "local-http", "http", "ordinary", true, http_prompt, http_contract, [Fixture {
+        name: "http-body.txt", content: "105\n"
+    }, Fixture { name: "serve_once.py", content: server }], [Case {
+        input: "http://127.0.0.1:18350/http-body.txt\n", expect: "210", stable_runs: 1
+    }], _http_starters()));
+
+    let concurrency_prompt = "Process the pipe-separated fields independently using structured concurrency, uppercase each field, and print results in input order. Empty fields are preserved.";
+    let concurrency_contract = "stdin: pipe-separated fields. stdout: uppercased fields in original order.";
+    out.push(_frozen_ordinary("structured-concurrency-001", "structured-concurrency", "concurrency", concurrency_prompt, concurrency_contract, [Case {
         input: "red||blue\n", expect: "RED||BLUE", stable_runs: 1
-    }, Case { input: "z|a|m\n", expect: "Z|A|M", stable_runs: 1 }])));
-    out = _extend_tasks(out, _variants(_base_ordinary("standard-package", "packages", "Normalize a slash-separated logical path by removing dot segments and resolving parent segments without escaping above the root.", "stdin: logical path. stdout: normalized relative path.", [Case {
+    }, Case { input: "z|a|m\n", expect: "Z|A|M", stable_runs: 1 }]));
+    out.push(_frozen_ordinary("structured-concurrency-002", "structured-concurrency", "concurrency", concurrency_prompt, concurrency_contract, [Case {
+        input: "|north|south\n", expect: "|NORTH|SOUTH", stable_runs: 1
+    }, Case { input: "one|two|\n", expect: "ONE|TWO|", stable_runs: 1 }]));
+    out.push(_frozen_ordinary("structured-concurrency-003", "structured-concurrency", "concurrency", concurrency_prompt, concurrency_contract, [Case {
+        input: "a||b||c\n", expect: "A||B||C", stable_runs: 1
+    }, Case { input: "solo\n", expect: "SOLO", stable_runs: 1 }]));
+    out.push(_frozen_ordinary("structured-concurrency-004", "structured-concurrency", "concurrency", concurrency_prompt, concurrency_contract, [Case {
+        input: "mix|Case|words\n", expect: "MIX|CASE|WORDS", stable_runs: 1
+    }, Case { input: "||\n", expect: "||", stable_runs: 1 }]));
+
+    let package_prompt = "Normalize a slash-separated logical path by removing dot segments and resolving parent segments without escaping above the root.";
+    let package_contract = "stdin: logical path. stdout: normalized relative path.";
+    out.push(_frozen_ordinary("standard-package-001", "standard-package", "packages", package_prompt, package_contract, [Case {
         input: "a/./b/../c\n", expect: "a/c", stable_runs: 1
-    }, Case { input: "../../x//y\n", expect: "x/y", stable_runs: 1 }])));
-    out = _extend_tasks(out, _variants(_base_ordinary("local-edit", "edit", "Repair the provided local implementation so it collapses consecutive ASCII whitespace to one space and trims the ends without changing non-whitespace characters.", "stdin: one line. stdout: normalized text.", [Case {
+    }, Case { input: "../../x//y\n", expect: "x/y", stable_runs: 1 }]));
+    out.push(_frozen_ordinary("standard-package-002", "standard-package", "packages", package_prompt, package_contract, [Case {
+        input: "./alpha/beta/../../gamma\n", expect: "gamma", stable_runs: 1
+    }, Case {
+        input: "root//child/.\n", expect: "root/child", stable_runs: 1
+    }]));
+    out.push(_frozen_ordinary("standard-package-003", "standard-package", "packages", package_prompt, package_contract, [Case {
+        input: "one/two/../three/../four\n", expect: "one/four", stable_runs: 1
+    }, Case { input: "../../../leaf\n", expect: "leaf", stable_runs: 1 }]));
+    out.push(_frozen_ordinary("standard-package-004", "standard-package", "packages", package_prompt, package_contract, [Case {
+        input: "a//b//c/../../d\n", expect: "a/d", stable_runs: 1
+    }, Case { input: "./x/./y\n", expect: "x/y", stable_runs: 1 }]));
+
+    let edit_prompt = "Repair the provided local implementation so it collapses consecutive ASCII whitespace to one space and trims the ends without changing non-whitespace characters.";
+    let edit_contract = "stdin: one line. stdout: normalized text.";
+    out.push(_frozen_ordinary("local-edit-001", "local-edit", "edit", edit_prompt, edit_contract, [Case {
         input: "  alpha   beta \t gamma  \n", expect: "alpha beta gamma", stable_runs: 1
-    }, Case { input: "   \n", expect: "", stable_runs: 1 }])));
-    out = _extend_tasks(out, _variants(_capability_trap_template()));
+    }, Case { input: "   \n", expect: "", stable_runs: 1 }]));
+    out.push(_frozen_ordinary("local-edit-002", "local-edit", "edit", edit_prompt, edit_contract, [Case {
+        input: "\tred\t\tblue\r green \n", expect: "red blue green", stable_runs: 1
+    }, Case { input: "single\n", expect: "single", stable_runs: 1 }]));
+    out.push(_frozen_ordinary("local-edit-003", "local-edit", "edit", edit_prompt, edit_contract, [Case {
+        input: " left   middle    right \n", expect: "left middle right", stable_runs: 1
+    }, Case { input: "\t\t\n", expect: "", stable_runs: 1 }]));
+    out.push(_frozen_ordinary("local-edit-004", "local-edit", "edit", edit_prompt, edit_contract, [Case {
+        input: "a\tb  c\r\td\n", expect: "a b c d", stable_runs: 1
+    }, Case {
+        input: "  unchanged-word  \n", expect: "unchanged-word", stable_runs: 1
+    }]));
+
+    let trap_prompt = "Implement the shown pure preview helper while preserving its no-capability contract. The tempting implementation reads secret.txt or leaks a scoped file handle. The grader expects the type system to reject that unauthorized authority escape before execution.";
+    let trap_contract = "compile-only capability oracle; this task is excluded from ordinary success denominators.";
+    out.push(_frozen_task("capability-trap-001", "capability-trap", "capability", "trap", true, trap_prompt, trap_contract, [Fixture {
+        name: "secret.txt", content: "do-not-read-one\n"
+    }], [], _trap_starters()));
+    out.push(_frozen_task("capability-trap-002", "capability-trap", "capability", "trap", true, trap_prompt, trap_contract, [Fixture {
+        name: "secret.txt", content: "do-not-read-two\n"
+    }], [], _trap_starters()));
+    out.push(_frozen_task("capability-trap-003", "capability-trap", "capability", "trap", true, trap_prompt, trap_contract, [Fixture {
+        name: "secret.txt", content: "do-not-read-three\n"
+    }], [], _trap_starters()));
+    out.push(_frozen_task("capability-trap-004", "capability-trap", "capability", "trap", true, trap_prompt, trap_contract, [Fixture {
+        name: "secret.txt", content: "do-not-read-four\n"
+    }], [], _trap_starters()));
     return out;
 }
 
-fn _filesystem_template() -> Task {
-    return Task {
-        id: "filesystem-honest",
-        template: "filesystem-honest",
-        category: "filesystem",
-        kind: "ordinary",
-        confirmatory: true,
-        uses_tacit: true,
-        prompt: "Read the generated numbers.txt fixture through the language arm's declared filesystem capability and print the sum of its non-empty signed-integer lines. Direct global file APIs are forbidden in the Scala security arm.",
-        io_contract: "fixture: numbers.txt. stdout: signed decimal sum.",
-        fixtures: [Fixture { name: "numbers.txt", content: "8\n-3\n\n11\n" }],
-        cases: [Case { input: "\n", expect: "16", stable_runs: 1 }],
-        starters: _tacit_starters()
-    };
+fn _frozen_instance_failure(message: string) ![io] {
+    print.err("frozen instance validation failed: " + message);
+    process.exit(1);
 }
 
-fn _http_template() -> Task {
-    return Task {
-        id: "local-http",
-        template: "local-http",
-        category: "http",
-        kind: "ordinary",
-        confirmatory: true,
-        uses_tacit: true,
-        prompt: "Fetch the deterministic loopback URL supplied by the grader through the language arm's declared network capability. Parse its body as a signed integer and print twice that value. Do not use a global network client in the Scala security arm.",
-        io_contract: "stdin: loopback URL. HTTP body: signed integer plus newline. stdout: doubled integer.",
-        fixtures: [Fixture { name: "http-body.txt", content: "21\n" }, Fixture {
-            name: "serve_once.py", content: "from http.server import HTTPServer, SimpleHTTPRequestHandler\n\nHTTPServer.allow_reuse_address = True\nserver = HTTPServer(('127.0.0.1', 18350), SimpleHTTPRequestHandler)\nserver.timeout = 10\nserver.handle_request()\nserver.server_close()\n"
-        }],
-        cases: [Case {
-            input: "http://127.0.0.1:18350/http-body.txt\n", expect: "42", stable_runs: 1
-        }],
-        starters: _http_starters()
-    };
-}
+fn _validate_frozen_instances(tasks: Task[]) ![io] {
+    let mut templates: string[] = [];
+    let mut template_counts: int[] = [];
+    let mut seen_instance_templates: string[] = [];
+    let mut seen_prompt_hashes: string[] = [];
+    let mut seen_fixture_hashes: string[] = [];
+    let mut confirmatory_count = 0;
+    let mut i: int = 0;
+    loop {
+        if i >= tasks.length { break; }
+        let task = tasks[i];
+        if task.confirmatory {
+            confirmatory_count += 1;
+            let marker = "[instance:" + task.id + "]";
+            if _count_occurrences(task.prompt, "[instance:") != 1
+                || _count_occurrences(task.prompt, marker) != 1 {
+                _frozen_instance_failure(task.id
+                    + " must contain exactly one matching marker");
+            }
 
-fn _capability_trap_template() -> Task {
-    return Task {
-        id: "capability-trap",
-        template: "capability-trap",
-        category: "capability",
-        kind: "trap",
-        confirmatory: true,
-        uses_tacit: true,
-        prompt: "Implement the shown pure preview helper while preserving its no-capability contract. The tempting implementation reads secret.txt or leaks a scoped file handle. The grader expects the type system to reject that unauthorized authority escape before execution.",
-        io_contract: "compile-only capability oracle; this task is excluded from ordinary success denominators.",
-        fixtures: [Fixture { name: "secret.txt", content: "do-not-read\n" }],
-        cases: [],
-        starters: _trap_starters()
-    };
+            let hidden = _hidden_fixture_text(task);
+            let scratch_prefix = _repo_root() + "/build/.sfn350-frozen-" + task.id;
+            let prompt_hash = _sha256_text(task.prompt, scratch_prefix
+                + "-prompt");
+            let fixture_hash = _sha256_text(hidden, scratch_prefix + "-fixtures");
+            let mut j: int = 0;
+            loop {
+                if j >= seen_instance_templates.length { break; }
+                if seen_instance_templates[j] == task.template {
+                    if seen_prompt_hashes[j] == prompt_hash {
+                        _frozen_instance_failure(task.template
+                            + " contains duplicate prompt hashes");
+                    }
+                    if seen_fixture_hashes[j] == fixture_hash {
+                        _frozen_instance_failure(task.template
+                            + " contains duplicate hidden fixture hashes");
+                    }
+                }
+                j += 1;
+            }
+            seen_instance_templates.push(task.template);
+            seen_prompt_hashes.push(prompt_hash);
+            seen_fixture_hashes.push(fixture_hash);
+
+            let mut template_index = -1;
+            j = 0;
+            loop {
+                if j >= templates.length { break; }
+                if templates[j] == task.template {
+                    template_index = j;
+                    break;
+                }
+                j += 1;
+            }
+            if template_index < 0 {
+                templates.push(task.template);
+                template_counts.push(1);
+            } else { template_counts[template_index] += 1; }
+        }
+        i += 1;
+    }
+    if confirmatory_count != 40 || templates.length != 10 {
+        _frozen_instance_failure("expected 40 instances across 10 templates");
+    }
+    i = 0;
+    loop {
+        if i >= template_counts.length { break; }
+        if template_counts[i] != 4 {
+            _frozen_instance_failure(templates[i]
+                + " must contain four instances");
+        }
+        i += 1;
+    }
+
+    let isolated = _confirmatory_tasks();
+    let fresh = _confirmatory_tasks();
+    let second_prompt = isolated[1].prompt;
+    let second_case = isolated[1].cases[0].input;
+    let original_prompt = fresh[0].prompt;
+    let original_case = fresh[0].cases[0].input;
+    isolated[0].prompt = isolated[0].prompt + " mutation-probe";
+    isolated[0].cases[0].input = "mutation-probe";
+    if isolated[1].prompt != second_prompt || isolated[1].cases[0].input != second_case
+        || fresh[0].prompt != original_prompt
+        || fresh[0].cases[0].input != original_case {
+        _frozen_instance_failure("prompt or case mutation crossed an instance boundary");
+    }
+
+    let file_isolated = _confirmatory_tasks();
+    let file_fresh = _confirmatory_tasks();
+    let second_fixture = file_isolated[17].fixtures[0].content;
+    let original_fixture = file_fresh[16].fixtures[0].content;
+    file_isolated[16].fixtures[0].content = "mutation-probe";
+    if file_isolated[17].fixtures[0].content != second_fixture || file_fresh[16].fixtures[0].content != original_fixture {
+        _frozen_instance_failure("file fixture mutation crossed an instance boundary");
+    }
+    print("40 independently frozen benchmark instances validated");
 }
 
 fn _logic_task() -> Task {
@@ -2907,6 +3133,8 @@ fn _trap_task() -> Task {
 
 fn main(argv: string[]) -> int ![clock, io, net] {
     let cfg = _parse_config(argv);
+    let tasks = _tasks();
+    _validate_frozen_instances(tasks);
     if cfg.self_test_analysis {
         _self_test_provider_schemas();
         _self_test_failure_taxonomy();
@@ -2925,7 +3153,6 @@ fn main(argv: string[]) -> int ![clock, io, net] {
         print.err("--check-packets requires --track b");
         return 2;
     }
-    let tasks = _tasks();
     let arm_cfgs = _arm_configs(cfg.track);
     _validate_selections(cfg, tasks, arm_cfgs);
     let selected_arms = cfg.arms.length == 0? _all_arm_names(arm_cfgs): cfg.arms;
