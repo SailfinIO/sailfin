@@ -62,7 +62,9 @@ fi
 
 if [ "$endpoint" = openai-responses ]; then
     grep -q '^Authorization: Bearer sfn350-openai-sentinel$' "$header_file"
-    if [ "${SFN350_MOCK_MODE:-}" = deny_after_schema ] && [ "$count" -gt 1 ]; then
+    if [ "${SFN350_MOCK_MODE:-}" = overload_always ]; then
+        printf '%s\n' '{"error":{"type":"overloaded_error","message":"Overloaded"}}'
+    elif [ "${SFN350_MOCK_MODE:-}" = deny_after_schema ] && [ "$count" -gt 1 ]; then
         printf '%s\n' '{"error":{"type":"invalid_request_error","message":"You have insufficient permissions for this operation."}}'
     elif [ "${SFN350_MOCK_MODE:-}" = success_then_deny ] && [ "$count" -gt 1 ]; then
         printf '%s\n' '{"error":{"type":"invalid_request_error","message":"You have insufficient permissions for this operation."}}'
@@ -76,7 +78,11 @@ elif [ "$endpoint" = openai-chat ]; then
     printf '%s\n' '{"choices":[{"message":{"content":"OK"}}],"usage":{"prompt_tokens":7,"completion_tokens":1}}'
 elif [ "$endpoint" = anthropic ]; then
     grep -q '^x-api-key: sfn350-anthropic-sentinel$' "$header_file"
-    printf '%s\n' '{"content":[{"type":"text","text":"OK"}],"usage":{"input_tokens":7,"output_tokens":1}}'
+    if [ "${SFN350_MOCK_MODE:-}" = overload_once ] && [ "$count" -eq 1 ]; then
+        printf '%s\n' '{"type":"error","error":{"type":"overloaded_error","message":"Overloaded"}}'
+    else
+        printf '%s\n' '{"content":[{"type":"text","text":"OK"}],"usage":{"input_tokens":7,"output_tokens":1}}'
+    fi
 else
     echo "unknown endpoint" >&2
     exit 93
@@ -94,6 +100,21 @@ PATH="$tmp/bin:$PATH" TMPDIR="$tmp/auth" \
     ANTHROPIC_API_KEY=sfn350-anthropic-sentinel \
     "$runner" --adapter anthropic --model claude-sonnet-5 \
     --schema-probe --results-dir "$tmp/results/anthropic"
+
+overload_once_state="$tmp/overload-once-state"
+PATH="$tmp/bin:$PATH" TMPDIR="$tmp/auth" \
+    SFN350_MOCK_MODE=overload_once SFN350_MOCK_STATE="$overload_once_state" \
+    ANTHROPIC_API_KEY=sfn350-anthropic-sentinel \
+    "$runner" --adapter anthropic --model claude-sonnet-5 \
+    --schema-probe --results-dir "$tmp/results/overload-once"
+
+overload_exhausted_state="$tmp/overload-exhausted-state"
+PATH="$tmp/bin:$PATH" TMPDIR="$tmp/auth" \
+    SFN350_MOCK_MODE=overload_always SFN350_MOCK_STATE="$overload_exhausted_state" \
+    OPENAI_API_KEY=sfn350-openai-sentinel \
+    "$runner" --adapter openai --model gpt-5.6-terra \
+    --reasoning-effort medium --task logic-001-runlength --arm sailfin \
+    --results-dir "$tmp/results/overload-exhausted"
 
 schema_state="$tmp/schema-state"
 PATH="$tmp/bin:$PATH" TMPDIR="$tmp/auth" \
@@ -117,7 +138,8 @@ PATH="$tmp/bin:$PATH" TMPDIR="$tmp/auth" \
     --reasoning-effort medium --task logic-001-runlength \
     --arm python --arm sailfin --results-dir "$tmp/results/intermittent-arm"
 
-python3 - "$tmp/results/intermittent-paid" "$tmp/results/intermittent-arm" <<'PY'
+python3 - "$tmp/results/intermittent-paid" "$tmp/results/intermittent-arm" \
+    "$tmp/results/overload-once" "$tmp/results/overload-exhausted" <<'PY'
 import json
 import pathlib
 import sys
@@ -137,6 +159,28 @@ for root, expected_records in ((pathlib.Path(sys.argv[1]), 1), (pathlib.Path(sys
     failure = json.loads((run_dir / "attempts" / failed["attempt_id"] / "provider-failure.json").read_text())
     assert failure["classification"] == "auth_permission"
     assert failure["setup_class"] is True
+
+overload_once = next(pathlib.Path(sys.argv[3]).glob("run-*"))
+schema = json.loads((overload_once / "schema-probe.json").read_text())
+assert schema["provider_attempts"] == 2
+assert schema["error"] == ""
+retry = json.loads((overload_once / "provider-retry-0-try-1.json").read_text())
+assert retry["classification"] == "transport_transient"
+assert retry["next_provider_attempt"] == 2
+
+overload_exhausted = next(pathlib.Path(sys.argv[4]).glob("run-*"))
+manifest = json.loads((overload_exhausted / "run.json").read_text())
+analysis = json.loads((overload_exhausted / "analysis.json").read_text())
+records = json.loads((overload_exhausted / "records.json").read_text())
+assert manifest["run_valid"] is False
+assert manifest["invalid_reason"] == "provider_transport_retry_exhausted"
+assert analysis["decision_authorized"] is False
+assert len(records) == 1
+assert records[0]["language_denominator"] is False
+assert "provider_transport_transient" in records[0]["fail_categories"]
+failure = json.loads((overload_exhausted / "attempts" / records[0]["attempt_id"] / "provider-failure.json").read_text())
+assert failure["provider_attempts"] == 3
+assert failure["classification"] == "transport_transient"
 PY
 
 if find "$tmp/auth" -type f -print -quit | grep -q .; then
@@ -144,4 +188,4 @@ if find "$tmp/auth" -type f -print -quit | grep -q .; then
     exit 94
 fi
 
-echo "provider credential transport and setup-failure verification passed"
+echo "provider credential transport, symmetric transient retry, and setup-failure verification passed"
