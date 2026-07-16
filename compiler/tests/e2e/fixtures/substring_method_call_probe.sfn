@@ -1,0 +1,30 @@
+// Fixture for substring_method_call_test.sfn (SFN-145).
+//
+// Exercises the string method-call form `s.substring(start, end)` on both
+// a `string`-typed *local* and a `string`-typed *parameter*. Before the
+// fix, the #1041 fail-closed guard in core_call_resolution.sfn treated the
+// primitive annotation `string` like an unregistered user struct and
+// aborted LLVM lowering with "cannot resolve return type for call to
+// `stamp.substring`". The receiver must instead route as arg0 to the
+// `substring` runtime helper, producing the same result as the
+// free-function form `substring(stamp, start, end)`.
+//
+// `substring` is end-exclusive: substring("hello world", 0, 5) == "hello",
+// substring("hello world", 6, 11) == "world".
+fn head(text: string, n: int) -> string {
+    // Method-call form on a string *parameter* (second guard path).
+    return text.substring(0, n);
+}
+
+fn main() ![io] {
+    let stamp: string = "hello world";
+    // Method-call form on a string *local* (first guard path).
+    let five = stamp.substring(0, 5);
+    let six = stamp.substring(6, 11);
+    // Free-function form must agree with the method-call form.
+    let free_five = substring(stamp, 0, 5);
+    print("param=" + head(stamp, 5));
+    print("local=" + five);
+    print("tail=" + six);
+    print("free=" + free_five);
+}

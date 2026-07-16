@@ -1,0 +1,85 @@
+// End-to-end test for the string method-call form `s.substring(a, b)`
+// (SFN-145).
+//
+// `stamp.substring(pos, end)` on a `string`-typed local/parameter used to
+// abort LLVM lowering with `cannot resolve return type for call to
+// `stamp.substring` — callee signature is not known to the compiler`,
+// while the free-function form `substring(stamp, pos, end)` lowered fine.
+// Root cause: the #1041 fail-closed guard in
+// `compiler/src/llvm/expression_lowering/native/core_call_resolution.sfn`
+// treated the primitive annotation `string` like an unregistered user
+// struct and returned early, so the receiver-as-arg0 runtime-helper
+// fallback (which routes to the `substring` descriptor) was unreachable.
+// The fix exempts primitive receiver types from that guard.
+//
+// The failure is at *lowering*, which `sfn check` does not exercise (only
+// parse/typecheck/effect-check), so `assert_compiles` would not catch a
+// regression — this test must build a binary and run it. Build/parallel-
+// runner hygiene (temp-dir build, `_child_env` inheriting `PATH` +
+// `SAILFIN_TEST_SCRATCH`) mirrors `module_global_runtime_init_test` — see
+// `.claude/rules/no-bash-e2e.md` for the why.
+import { find } from "sfn/strings";
+import { with_tmp_dir } from "sfn/test";
+
+fn _sfn_bin() -> string ![io] {
+    let configured = env.get("SAILFIN_BIN");
+    if configured.length > 0 { return configured; }
+    return "build/bin/sfn";
+}
+
+fn _fixture_src() -> string ![io] {
+    return fs.readFile("compiler/tests/e2e/fixtures/substring_method_call_probe.sfn");
+}
+
+fn _child_env() -> string[] ![io] {
+    // Inherit the full parent environment: PATH/HOME/TMPDIR plus the macOS
+    // SDK/toolchain vars the nested clang/ld need, and SAILFIN_TEST_SCRATCH
+    // for per-invocation build-cache isolation (#1333).
+    return process.environ();
+}
+
+// A fresh out-of-tree marker path (survives `with_tmp_dir` teardown).
+fn _marker(name: string) -> string ![io] {
+    let mut dir = env.get("SAILFIN_TEST_SCRATCH");
+    if dir.length == 0 { dir = "/tmp"; }
+    fs.createDirectory(dir, true);
+    let path = dir + "/sfn-substring-method-" + name + ".out";
+    if fs.exists(path) { fs.deleteFile(path); }
+    return path;
+}
+
+// Build the probe in a temp dir and run it. Stashes captured stdout to
+// `out_marker`; returns the run's exit code, or `-100` on build failure.
+fn _build_and_run(out_marker: string) -> int ![io] {
+    return with_tmp_dir(fn (dir: string) -> int {
+        let srcpath = dir + "/probe.sfn";
+        fs.writeFile(srcpath, _fixture_src());
+        let binpath = dir + "/probe";
+        let build_exit = process.run_capture([_sfn_bin(), "build", "-o", binpath, srcpath], _child_env());
+        let _bo = process.capture_take_stdout();
+        let _be = process.capture_take_stderr();
+        if build_exit != 0 { return -100; }
+        let run_exit = process.run_capture([binpath], []);
+        let out = process.capture_take_stdout();
+        let _re = process.capture_take_stderr();
+        fs.writeFile(out_marker, out);
+        return run_exit;
+    });
+}
+
+test "substring: string method-call form builds, runs, and matches the free function" ![io] {
+    let marker = _marker("probe");
+    let exit = _build_and_run(marker);
+    // Reject the `-100` build-failure sentinel: before the fix the build
+    // aborted at lowering, so a non-zero exit means the regression is back.
+    assert exit == 0;
+    let out = fs.readFile(marker);
+    if fs.exists(marker) { fs.deleteFile(marker); }
+    // Method-call form on a string parameter.
+    assert find(out, "param=hello", 0) >= 0;
+    // Method-call form on a string local.
+    assert find(out, "local=hello", 0) >= 0;
+    assert find(out, "tail=world", 0) >= 0;
+    // Free-function form agrees with the method-call form.
+    assert find(out, "free=hello", 0) >= 0;
+}

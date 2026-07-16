@@ -51,6 +51,35 @@ import {
     map_return_type
 } from "./core_type_mapping";
 
+// A method-call base whose declared type is a built-in scalar (`string`,
+// `int`, the sized-int family, ...) can never be an unregistered user
+// struct, so the #1041 fail-closed guard below must not fire on it.
+// Exempting these lets `s.substring(a, b)` fall through to the
+// runtime-helper fallback (which routes the receiver as arg0 to the
+// `substring` descriptor) instead of aborting lowering with a spurious
+// "not in the lowering type context" fatal (SFN-145).
+// The spellings mirror `map_primitive_type` (`type_mapping.sfn`) — keep the
+// two in sync so a primitive receiver is never mistaken for a user struct.
+fn _is_primitive_receiver_type(name: string) -> boolean {
+    if name == "string" { return true; }
+    if name == "int" { return true; }
+    if name == "float" { return true; }
+    if name == "number" { return true; }
+    if name == "boolean" { return true; }
+    if name == "bool" { return true; }
+    if name == "i8" { return true; }
+    if name == "i16" { return true; }
+    if name == "i32" { return true; }
+    if name == "i64" { return true; }
+    if name == "u8" { return true; }
+    if name == "u16" { return true; }
+    if name == "u32" { return true; }
+    if name == "u64" { return true; }
+    if name == "f32" { return true; }
+    if name == "f64" { return true; }
+    return false;
+}
+
 // Pre-resolution dispatch hook for atomic builtins (M0-Atomics — see
 // `compiler/src/llvm/atomics.sfn` and issue #331). Returns a non-null
 // `ExpressionResult` when `trimmed_target` matches one of the six
@@ -851,16 +880,18 @@ fn resolve_call_method_target(trimmed_target: string, arguments: string[], bindi
                                     }
                                     if !_pre_is_channel_method {
                                         if is_simple_identifier(_pre_struct) {
-                                            if find_struct_info_by_name(context, _pre_struct) == null {
-                                                // Interface-typed locals carry a bare
-                                                // annotation too (e.g. `let m: Meter`);
-                                                // their `m.total()` calls are valid trait
-                                                // dispatch handled by the downstream
-                                                // `trait_dispatch__` branch. Only fail
-                                                // closed when the name is neither a
-                                                // struct nor an interface in context.
-                                                if find_interface_info_by_name(context, _pre_struct) == null {
-                                                    _pre_fail_closed = true;
+                                            if !_is_primitive_receiver_type(_pre_struct) {
+                                                if find_struct_info_by_name(context, _pre_struct) == null {
+                                                    // Interface-typed locals carry a bare
+                                                    // annotation too (e.g. `let m: Meter`);
+                                                    // their `m.total()` calls are valid trait
+                                                    // dispatch handled by the downstream
+                                                    // `trait_dispatch__` branch. Only fail
+                                                    // closed when the name is neither a
+                                                    // struct nor an interface in context.
+                                                    if find_interface_info_by_name(context, _pre_struct) == null {
+                                                        _pre_fail_closed = true;
+                                                    }
                                                 }
                                             }
                                         }
@@ -922,8 +953,21 @@ fn resolve_call_method_target(trimmed_target: string, arguments: string[], bindi
                                                 + "__"
                                                 + _pre_field;
                                         } else {
-                                            result_target = _pre_struct
-                                                + _pre_field;
+                                            if _is_primitive_receiver_type(_pre_struct) {
+                                                // SFN-145: a primitive receiver
+                                                // (`string`, `int`, ...) has no
+                                                // fused `<Type><field>` method.
+                                                // Route to the bare field name so
+                                                // `s.substring(a, b)` resolves to
+                                                // the prelude `substring` / runtime
+                                                // helper with the receiver injected
+                                                // as arg0 — i.e. the method form
+                                                // desugars to `substring(s, a, b)`.
+                                                result_target = _pre_field;
+                                            } else {
+                                                result_target = _pre_struct
+                                                    + _pre_field;
+                                            }
                                         }
                                         injected_argument_count = 1;
                                     }
@@ -1329,12 +1373,14 @@ fn resolve_parsed_method_dispatch(result_target: string, arguments: string[], bi
                         if !_g_is_channel_method {
                             if _g_annotation.length > 0 {
                                 if is_simple_identifier(_g_annotation) {
-                                    if find_struct_info_by_name(context, _g_annotation) == null {
-                                        // Exclude interface-typed bases: `m.total()`
-                                        // on `let m: Meter` is valid trait dispatch,
-                                        // not an unresolved struct.
-                                        if find_interface_info_by_name(context, _g_annotation) == null {
-                                            _g_fail_closed = true;
+                                    if !_is_primitive_receiver_type(_g_annotation) {
+                                        if find_struct_info_by_name(context, _g_annotation) == null {
+                                            // Exclude interface-typed bases: `m.total()`
+                                            // on `let m: Meter` is valid trait dispatch,
+                                            // not an unresolved struct.
+                                            if find_interface_info_by_name(context, _g_annotation) == null {
+                                                _g_fail_closed = true;
+                                            }
                                         }
                                     }
                                 }

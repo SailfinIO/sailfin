@@ -135,3 +135,20 @@ test "method base with interface-typed annotation does not fail closed" ![io] {
     let result = lower_call_expression("acct.total", [], [], locals, 0, lines, [], context);
     assert ! _has_fatal_unresolved_base(result.diagnostics);
 }
+
+// -------------------------------------------------------------------
+// No regression (SFN-145): a primitive-typed base (`string`, `int`, the
+// sized-int family, ...) is a bare identifier absent from `context.structs`,
+// but it can never be an unregistered user struct, so the guard must NOT
+// fail closed on it. Exempting primitives lets `s.substring(a, b)` fall
+// through to the receiver-as-arg0 runtime-helper fallback instead of
+// aborting lowering with a spurious "not in the lowering type context"
+// fatal.
+// -------------------------------------------------------------------
+test "method base with primitive (string) annotation does not fail closed" ![io] {
+    let context = _empty_context();
+    let mut lines: string[] = [];
+    let locals: LocalBinding[] = [_local_with_annotation("string")];
+    let result = lower_call_expression("acct.substring", [], [], locals, 0, lines, [], context);
+    assert ! _has_fatal_unresolved_base(result.diagnostics);
+}
