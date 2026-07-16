@@ -17,7 +17,7 @@ fn computeHeavyTask() -> int ![clock] {
 }
 
 fn main() ![io, net] {
-    serve(handleRequest, {
+    serve(handleRequest as * u8, {
         port: 8080
     });
     print("Server is running on http://localhost:8080");
