@@ -1,0 +1,474 @@
+// capsules/sfn/crypto/src/tls13_schedule.sfn
+//
+// TLS 1.3 key schedule (RFC 8446 §7.1) for the sfn/crypto capsule
+// (SFEP-0048, Phase B). Builds HKDF-Expand-Label / Derive-Secret and the
+// Early -> Handshake -> Master secret ladder on top of the Phase A HKDF +
+// SHA-256/SHA-384 primitives, so the handshake and record layers can derive
+// traffic secrets.
+//
+// The cipher suite hash is selected by the secret length: 32 bytes selects
+// SHA-256 (TLS_AES_128_GCM_SHA256 / TLS_CHACHA20_POLY1305_SHA256), 48 bytes
+// selects SHA-384 (TLS_AES_256_GCM_SHA384). Every TLS 1.3 chaining secret and
+// transcript hash is exactly Hash.length bytes, so this inference is exact.
+// A secret whose length is neither 32 nor 48 fails closed to [] rather than
+// producing a non-standard derivation.
+//
+// Operates end-to-end on `int[]` byte arrays (never `string`) because secrets
+// and expand outputs are arbitrary binary that routinely contain 0x00 bytes,
+// which a Sailfin `string` cannot represent. SHA-256 HMAC/HKDF are reused from
+// `hkdf.sfn`; the SHA-384 stack (HMAC block size 128, 48-byte output) is
+// vendored here following the `_sha256_bytes` precedent in `hkdf.sfn`, since no
+// `int[]`-producing SHA-384 is exported.
+import { load_u32_be, store_u32_be } from "./bits";
+import { hkdf_sha256_expand, hmac_sha256_bytes } from "./hkdf";
+
+// ── SHA-384 over int[] bytes ─────────────────────────────────────
+// SHA-384 is SHA-512 truncated to 384 bits with a distinct IV. Under
+// Sailfin's signed-i64 `int`, a naive single-`int` 64-bit word would corrupt
+// `>>` (LLVM `ashr` sign-extends once bit 63 is set), so every 64-bit word is
+// held as a `[hi, lo]` pair of 32-bit limbs (each masked to `[0, 2^32)`) and
+// every 64-bit op is done limb-wise with explicit carry (SFEP-0048 §3.3 item
+// 4), mirroring `sha384.sfn`.
+fn _xor64(a: int[], b: int[]) -> int[] {
+    return [(a[0] ^ b[0]) & 4294967295, (a[1] ^ b[1]) & 4294967295];
+}
+
+fn _and64(a: int[], b: int[]) -> int[] {
+    return [(a[0] & b[0]) & 4294967295, (a[1] & b[1]) & 4294967295];
+}
+
+fn _not64(a: int[]) -> int[] {
+    return [(a[0] ^ 4294967295) & 4294967295, (a[1] ^ 4294967295) & 4294967295];
+}
+
+fn _add64(a: int[], b: int[]) -> int[] {
+    let lo: int = (a[1] + b[1]) & 4294967295;
+    let carry: int = ((a[1] + b[1]) >> 32) & 1;
+    let hi: int = (a[0] + b[0] + carry) & 4294967295;
+    return [hi, lo];
+}
+
+fn _shr64(a: int[], n: int) -> int[] {
+    if n == 0 { return [a[0], a[1]]; }
+    if n < 32 {
+        let lo: int = ((a[1] >> n) | (a[0] << (32 - n))) & 4294967295;
+        let hi: int = (a[0] >> n) & 4294967295;
+        return [hi, lo];
+    }
+    let lo: int = (a[0] >> (n - 32)) & 4294967295;
+    return [0, lo];
+}
+
+fn _shl64(a: int[], n: int) -> int[] {
+    if n == 0 { return [a[0], a[1]]; }
+    if n < 32 {
+        let hi: int = ((a[0] << n) | (a[1] >> (32 - n))) & 4294967295;
+        let lo: int = (a[1] << n) & 4294967295;
+        return [hi, lo];
+    }
+    let hi: int = (a[1] << (n - 32)) & 4294967295;
+    return [hi, 0];
+}
+
+fn _rotr64(a: int[], n: int) -> int[] {
+    let right: int[] = _shr64(a, n);
+    let left: int[] = _shl64(a, 64 - n);
+    return [(right[0] | left[0]) & 4294967295, (right[1] | left[1]) & 4294967295];
+}
+
+// The 80 SHA-512 round constants (FIPS 180-4 §4.2.3), each as a `[hi, lo]`
+// decimal pair (hex literals unavailable in Sailfin source).
+fn _sha512_round_constants() -> int[][] {
+    return [[1116352408, 3609767458], [1899447441, 602891725], [3049323471, 3964484399], [3921009573, 2173295548], [961987163, 4081628472], [1508970993, 3053834265], [2453635748, 2937671579], [2870763221, 3664609560], [3624381080, 2734883394], [310598401, 1164996542], [607225278, 1323610764], [1426881987, 3590304994], [1925078388, 4068182383], [2162078206, 991336113], [2614888103, 633803317], [3248222580, 3479774868], [3835390401, 2666613458], [4022224774, 944711139], [264347078, 2341262773], [604807628, 2007800933], [770255983, 1495990901], [1249150122, 1856431235], [1555081692, 3175218132], [1996064986, 2198950837], [2554220882, 3999719339], [2821834349, 766784016], [2952996808, 2566594879], [3210313671, 3203337956], [3336571891, 1034457026], [3584528711, 2466948901], [113926993, 3758326383], [338241895, 168717936], [666307205, 1188179964], [773529912, 1546045734], [1294757372, 1522805485], [1396182291, 2643833823], [1695183700, 2343527390], [1986661051, 1014477480], [2177026350, 1206759142], [2456956037, 344077627], [2730485921, 1290863460], [2820302411, 3158454273], [3259730800, 3505952657], [3345764771, 106217008], [3516065817, 3606008344], [3600352804, 1432725776], [4094571909, 1467031594], [275423344, 851169720], [430227734, 3100823752], [506948616, 1363258195], [659060556, 3750685593], [883997877, 3785050280], [958139571, 3318307427], [1322822218, 3812723403], [1537002063, 2003034995], [1747873779, 3602036899], [1955562222, 1575990012], [2024104815, 1125592928], [2227730452, 2716904306], [2361852424, 442776044], [2428436474, 593698344], [2756734187, 3733110249], [3204031479, 2999351573], [3329325298, 3815920427], [3391569614, 3928383900], [3515267271, 566280711], [3940187606, 3454069534], [4118630271, 4000239992], [116418474, 1914138554], [174292421, 2731055270], [289380356, 3203993006], [460393269, 320620315], [685471733, 587496836], [852142971, 1086792851], [1017036298, 365543100], [1126000580, 2618297676], [1288033470, 3409855158], [1501505948, 4234509866], [1607167915, 987167468], [1816402316, 1246189591],];
+}
+
+// Compute the SHA-384 digest of a byte array, returning the 48 digest bytes
+// as an int[] (big-endian). Byte-oriented over `msg` (values masked & 255).
+fn _sha384_bytes(msg: int[]) -> int[] {
+    let mut bytes: int[] = [];
+    let mut bi: int = 0;
+    loop {
+        if bi >= msg.length { break; }
+        bytes.push(msg[bi] & 255);
+        bi += 1;
+    }
+    let bit_len: int = bytes.length * 8;
+
+    // Pad: 0x80, zeros until length % 128 == 112, then the 128-bit big-endian
+    // bit length. `bit_len` fits in 64 bits, so the high 64 bits are zero.
+    bytes.push(128);
+    loop {
+        if (bytes.length % 128) == 112 { break; }
+        bytes.push(0);
+    }
+    let mut zi: int = 0;
+    loop {
+        if zi >= 8 { break; }
+        bytes.push(0);
+        zi += 1;
+    }
+    let len_hi: int = (bit_len >> 32) & 4294967295;
+    let len_lo: int = bit_len & 4294967295;
+    store_u32_be(bytes, len_hi);
+    store_u32_be(bytes, len_lo);
+
+    // Initial state H[0..7] (SHA-384 IV).
+    let mut h: int[][] = [[3418070365, 3238371032], [1654270250, 914150663], [2438529370, 812702999], [355462360, 4144912697], [1731405415, 4290775857], [2394180231, 1750603025], [3675008525, 1694076839], [1203062813, 3204075428],];
+
+    let k: int[][] = _sha512_round_constants();
+
+    let num_blocks: int = bytes.length / 128;
+    let mut block: int = 0;
+    loop {
+        if block >= num_blocks { break; }
+        let base: int = block * 128;
+
+        let mut w: int[][] = [];
+        let mut t: int = 0;
+        loop {
+            if t >= 16 { break; }
+            let j: int = base + t * 8;
+            w.push([load_u32_be(bytes, j), load_u32_be(bytes, j + 4)]);
+            t += 1;
+        }
+        t = 16;
+        loop {
+            if t >= 80 { break; }
+            let w15: int[] = w[t - 15];
+            let w2: int[] = w[t - 2];
+            let s0: int[] = _xor64(_xor64(_rotr64(w15, 1), _rotr64(w15, 8)), _shr64(w15, 7));
+            let s1: int[] = _xor64(_xor64(_rotr64(w2, 19), _rotr64(w2, 61)), _shr64(w2, 6));
+            w.push(_add64(_add64(_add64(w[t - 16], s0), w[t - 7]), s1));
+            t += 1;
+        }
+
+        let mut a: int[] = h[0];
+        let mut b: int[] = h[1];
+        let mut c: int[] = h[2];
+        let mut d: int[] = h[3];
+        let mut e: int[] = h[4];
+        let mut f: int[] = h[5];
+        let mut g: int[] = h[6];
+        let mut hh: int[] = h[7];
+
+        let mut r: int = 0;
+        loop {
+            if r >= 80 { break; }
+            let big_s1: int[] = _xor64(_xor64(_rotr64(e, 14), _rotr64(e, 18)), _rotr64(e, 41));
+            let ch: int[] = _xor64(_and64(e, f), _and64(_not64(e), g));
+            let t1: int[] = _add64(_add64(_add64(_add64(hh, big_s1), ch), k[r]), w[r]);
+            let big_s0: int[] = _xor64(_xor64(_rotr64(a, 28), _rotr64(a, 34)), _rotr64(a, 39));
+            let maj: int[] = _xor64(_xor64(_and64(a, b), _and64(a, c)), _and64(b, c));
+            let t2: int[] = _add64(big_s0, maj);
+            hh = g;
+            g = f;
+            f = e;
+            e = _add64(d, t1);
+            d = c;
+            c = b;
+            b = a;
+            a = _add64(t1, t2);
+            r += 1;
+        }
+
+        h[0] = _add64(h[0], a);
+        h[1] = _add64(h[1], b);
+        h[2] = _add64(h[2], c);
+        h[3] = _add64(h[3], d);
+        h[4] = _add64(h[4], e);
+        h[5] = _add64(h[5], f);
+        h[6] = _add64(h[6], g);
+        h[7] = _add64(h[7], hh);
+        block += 1;
+    }
+
+    // SHA-384 truncates to the first 6 of the 8 state words = 48 bytes.
+    let mut out: int[] = [];
+    let mut oi: int = 0;
+    loop {
+        if oi >= 6 { break; }
+        store_u32_be(out, h[oi][0]);
+        store_u32_be(out, h[oi][1]);
+        oi += 1;
+    }
+    return out;
+}
+
+// Pure HMAC-SHA-384 over byte arrays (RFC 2104). SHA-384's block size is 128
+// bytes (it is SHA-512-based), not 64. key and data are int[] byte arrays;
+// returns the 48-byte MAC.
+fn _hmac_sha384_bytes(key: int[], data: int[]) -> int[] {
+    let mut k: int[] = key;
+    if k.length > 128 { k = _sha384_bytes(k); }
+
+    let mut k_pad: int[] = [];
+    let mut ki: int = 0;
+    loop {
+        if ki >= k.length { break; }
+        k_pad.push(k[ki] & 255);
+        ki += 1;
+    }
+    loop {
+        if k_pad.length >= 128 { break; }
+        k_pad.push(0);
+    }
+
+    let mut ipad: int[] = [];
+    let mut opad: int[] = [];
+    let mut pi: int = 0;
+    loop {
+        if pi >= 128 { break; }
+        ipad.push((k_pad[pi] ^ 54) & 255);
+        opad.push((k_pad[pi] ^ 92) & 255);
+        pi += 1;
+    }
+
+    let mut inner_msg: int[] = [];
+    let mut ii: int = 0;
+    loop {
+        if ii >= ipad.length { break; }
+        inner_msg.push(ipad[ii]);
+        ii += 1;
+    }
+    let mut di: int = 0;
+    loop {
+        if di >= data.length { break; }
+        inner_msg.push(data[di] & 255);
+        di += 1;
+    }
+    let inner: int[] = _sha384_bytes(inner_msg);
+
+    let mut outer_msg: int[] = [];
+    let mut oi: int = 0;
+    loop {
+        if oi >= opad.length { break; }
+        outer_msg.push(opad[oi]);
+        oi += 1;
+    }
+    let mut ni: int = 0;
+    loop {
+        if ni >= inner.length { break; }
+        outer_msg.push(inner[ni]);
+        ni += 1;
+    }
+    return _sha384_bytes(outer_msg);
+}
+
+// HKDF-Expand over SHA-384 (RFC 5869 §2.3, HashLen=48). Fail-closed to [] for
+// an out-of-range length or a PRK shorter than HashLen, matching the SHA-256
+// `hkdf_sha256_expand` contract.
+fn _hkdf_sha384_expand(prk: int[], info: int[], length: int) -> int[] {
+    if length < 1 || length > 12240 { return []; }
+    if prk.length < 48 { return []; }
+
+    let n: int = (length + 47) / 48;
+    let mut t: int[] = [];
+    let mut okm: int[] = [];
+    let mut i: int = 1;
+    loop {
+        if i > n { break; }
+
+        let mut msg: int[] = [];
+        let mut ti: int = 0;
+        loop {
+            if ti >= t.length { break; }
+            msg.push(t[ti]);
+            ti += 1;
+        }
+        let mut fi: int = 0;
+        loop {
+            if fi >= info.length { break; }
+            msg.push(info[fi] & 255);
+            fi += 1;
+        }
+        msg.push(i & 255);
+
+        t = _hmac_sha384_bytes(prk, msg);
+
+        let mut tj: int = 0;
+        loop {
+            if tj >= t.length { break; }
+            okm.push(t[tj]);
+            tj += 1;
+        }
+        i += 1;
+    }
+
+    let mut result: int[] = [];
+    let mut ri: int = 0;
+    loop {
+        if ri >= length { break; }
+        result.push(okm[ri]);
+        ri += 1;
+    }
+    return result;
+}
+
+// ── Hash dispatch (hash_len = 32 -> SHA-256, 48 -> SHA-384) ───────
+fn _hkdf_expand(hash_len: int, prk: int[], info: int[], length: int) -> int[] {
+    if hash_len == 48 { return _hkdf_sha384_expand(prk, info, length); }
+    return hkdf_sha256_expand(prk, info, length);
+}
+
+// HKDF-Extract (RFC 5869 §2.2) = HMAC(salt, ikm), with an absent salt treated
+// as HashLen zero bytes.
+fn _hkdf_extract(hash_len: int, salt: int[], ikm: int[]) -> int[] {
+    let mut s: int[] = salt;
+    if s.length == 0 {
+        let mut zeros: int[] = [];
+        let mut zi: int = 0;
+        loop {
+            if zi >= hash_len { break; }
+            zeros.push(0);
+            zi += 1;
+        }
+        s = zeros;
+    }
+    if hash_len == 48 { return _hmac_sha384_bytes(s, ikm); }
+    return hmac_sha256_bytes(s, ikm);
+}
+
+// Transcript-Hash of the empty message — the context for every
+// Derive-Secret(secret, "derived", "") ladder transition (RFC 8446 §7.1).
+// SHA-256("") and SHA-384("") are fixed constants (FIPS 180-4); a wrong byte
+// fails the RFC 8448 §3 ladder vectors.
+fn _empty_transcript_hash(hash_len: int) -> int[] {
+    if hash_len == 48 {
+        return [56, 176, 96, 167, 81, 172, 150, 56, 76, 217, 50, 126, 177, 177, 227, 106, 33, 253, 183, 17, 20, 190, 7, 67, 76, 12, 199, 191, 99, 246, 225, 218, 39, 78, 222, 191, 231, 111, 101, 251, 213, 26, 210, 241, 72, 152, 185, 91,];
+    }
+    return [227, 176, 196, 66, 152, 252, 28, 20, 154, 251, 244, 200, 153, 111, 185, 36, 39, 174, 65, 228, 100, 155, 147, 76, 164, 149, 153, 27, 120, 82, 184, 85,];
+}
+
+// ── HKDF-Expand-Label / Derive-Secret (RFC 8446 §7.1) ────────────
+// HKDF-Expand-Label(Secret, Label, Context, Length):
+//   HkdfLabel = uint16(Length) ‖ opaque("tls13 " ‖ Label)<7..255>
+//                             ‖ opaque(Context)<0..255>
+//   = HKDF-Expand(Secret, HkdfLabel, Length)
+// The hash is selected by Secret's length (32 -> SHA-256, 48 -> SHA-384); a
+// Secret of any other length, or an out-of-range Length / label / context,
+// fails closed to [].
+fn hkdf_expand_label(secret: int[], label: string, context: int[], length: int) -> int[] {
+    let hash_len: int = secret.length;
+    if hash_len != 32 && hash_len != 48 { return []; }
+    if length < 1 || length > 65535 { return []; }
+    if context.length > 255 { return []; }
+
+    // "tls13 " ‖ label as bytes (the 6-byte prefix is fixed ASCII).
+    let mut full_label: int[] = [116, 108, 115, 49, 51, 32,];  // "tls13 "
+    let mut li: int = 0;
+    loop {
+        if li >= label.length { break; }
+        full_label.push(char_code(label[li]) & 255);
+        li += 1;
+    }
+    if full_label.length < 7 || full_label.length > 255 { return []; }
+
+    let mut info: int[] = [];
+    info.push((length >> 8) & 255);
+    info.push(length & 255);
+    info.push(full_label.length & 255);
+    let mut fi: int = 0;
+    loop {
+        if fi >= full_label.length { break; }
+        info.push(full_label[fi]);
+        fi += 1;
+    }
+    info.push(context.length & 255);
+    let mut ci: int = 0;
+    loop {
+        if ci >= context.length { break; }
+        info.push(context[ci] & 255);
+        ci += 1;
+    }
+
+    return _hkdf_expand(hash_len, secret, info, length);
+}
+
+// Derive-Secret(Secret, Label, Transcript-Hash) =
+//   HKDF-Expand-Label(Secret, Label, Transcript-Hash, Hash.length).
+// The output length is Hash.length, inferred from Secret's length.
+fn derive_secret(secret: int[], label: string, transcript_hash: int[]) -> int[] {
+    return hkdf_expand_label(secret, label, transcript_hash, secret.length);
+}
+
+// ── The secret ladder (RFC 8446 §7.1) ────────────────────────────
+// Early Secret = HKDF-Extract(0, PSK). An absent PSK (empty) is treated as
+// Hash.length zero bytes. `hash_len` selects the cipher-suite hash (32 or 48).
+fn tls13_early_secret(psk: int[], hash_len: int) -> int[] {
+    if hash_len != 32 && hash_len != 48 { return []; }
+    let mut ikm: int[] = psk;
+    if ikm.length == 0 {
+        let mut zeros: int[] = [];
+        let mut zi: int = 0;
+        loop {
+            if zi >= hash_len { break; }
+            zeros.push(0);
+            zi += 1;
+        }
+        ikm = zeros;
+    }
+    let empty_salt: int[] = [];
+    return _hkdf_extract(hash_len, empty_salt, ikm);
+}
+
+// Handshake Secret = HKDF-Extract(Derive-Secret(EarlySecret, "derived", ""),
+//                                 (EC)DHE shared secret).
+// Hash is inferred from `early_secret`'s length.
+fn tls13_handshake_secret(early_secret: int[], shared_secret: int[]) -> int[] {
+    let hash_len: int = early_secret.length;
+    if hash_len != 32 && hash_len != 48 { return []; }
+    let derived: int[] = derive_secret(early_secret, "derived", _empty_transcript_hash(hash_len));
+    return _hkdf_extract(hash_len, derived, shared_secret);
+}
+
+// Master Secret = HKDF-Extract(Derive-Secret(HandshakeSecret, "derived", ""),
+//                              0). Hash is inferred from `handshake_secret`.
+fn tls13_master_secret(handshake_secret: int[]) -> int[] {
+    let hash_len: int = handshake_secret.length;
+    if hash_len != 32 && hash_len != 48 { return []; }
+    let derived: int[] = derive_secret(handshake_secret, "derived", _empty_transcript_hash(hash_len));
+    let mut zeros: int[] = [];
+    let mut zi: int = 0;
+    loop {
+        if zi >= hash_len { break; }
+        zeros.push(0);
+        zi += 1;
+    }
+    return _hkdf_extract(hash_len, derived, zeros);
+}
+
+// client_handshake_traffic_secret =
+//   Derive-Secret(HandshakeSecret, "c hs traffic", ClientHello..ServerHello).
+fn tls13_client_handshake_traffic_secret(handshake_secret: int[], transcript_hash: int[]) -> int[] {
+    return derive_secret(handshake_secret, "c hs traffic", transcript_hash);
+}
+
+// server_handshake_traffic_secret =
+//   Derive-Secret(HandshakeSecret, "s hs traffic", ClientHello..ServerHello).
+fn tls13_server_handshake_traffic_secret(handshake_secret: int[], transcript_hash: int[]) -> int[] {
+    return derive_secret(handshake_secret, "s hs traffic", transcript_hash);
+}
+
+// client_application_traffic_secret_0 =
+//   Derive-Secret(MasterSecret, "c ap traffic", ClientHello..server Finished).
+fn tls13_client_application_traffic_secret(master_secret: int[], transcript_hash: int[]) -> int[] {
+    return derive_secret(master_secret, "c ap traffic", transcript_hash);
+}
+
+// server_application_traffic_secret_0 =
+//   Derive-Secret(MasterSecret, "s ap traffic", ClientHello..server Finished).
+fn tls13_server_application_traffic_secret(master_secret: int[], transcript_hash: int[]) -> int[] {
+    return derive_secret(master_secret, "s ap traffic", transcript_hash);
+}
+
+export {
+    hkdf_expand_label,
+    derive_secret,
+    tls13_early_secret,
+    tls13_handshake_secret,
+    tls13_master_secret,
+    tls13_client_handshake_traffic_secret,
+    tls13_server_handshake_traffic_secret,
+    tls13_client_application_traffic_secret,
+    tls13_server_application_traffic_secret
+};
