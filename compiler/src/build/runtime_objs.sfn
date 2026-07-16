@@ -105,6 +105,63 @@ fn _runtime_obj_prefix(capsule_name: string) -> string {
     return out + "__";
 }
 
+// SFN-146: derive a STABLE runtime-relative module slug (`runtime/<rel>`)
+// for a runtime-capsule source, rooted at the capsule's on-disk root
+// (`manifest_dir`) rather than at whatever `runtime/` segment happens to
+// appear in the absolute path. `module_name_from_path` roots an absolute
+// source at its last literal `runtime/` path segment, so a source reached
+// through an out-of-tree `SAILFIN_RUNTIME_ROOT` whose directory is not
+// named `runtime` (e.g. `/tmp/x/runtime-copy/sfn/type_meta.sfn`) found no
+// such segment and slugged to its full absolute path. That path-derived
+// slug neither starts with `runtime/` — so `apply_module_symbol_mangling`
+// mangled every stable runtime ABI symbol — nor matched
+// `type_descriptors.sfn`'s `_module_owns_register`, which then emitted a
+// `sfn_type_register` ctor + declare into `type_meta`'s own module and
+// collided with its real definition (`invalid redefinition of function`).
+// Re-anchoring at `manifest_dir` and re-prefixing with the canonical
+// `runtime/` reproduces the in-tree slug byte-for-byte and keeps both
+// invariants regardless of where the root lives. `manifest_dir` is
+// lexically normalized at construction (runtime_capsule_resolver.sfn), the
+// same normalization the resolved `src` paths get, so it is a clean prefix
+// of every runtime source even for a non-canonical `SAILFIN_RUNTIME_ROOT`
+// (trailing slash, `./`). The `module_name_from_path` fallback is a
+// defensive last resort for a `src` genuinely not under `manifest_dir`.
+fn _runtime_module_slug(manifest_dir: string, src: string) -> string {
+    if manifest_dir.length > 0 {
+        let prefix = manifest_dir + "/";
+        if src.length > prefix.length && substring(src, 0, prefix.length) == prefix {
+            let rel = substring(src, prefix.length, src.length);
+            return "runtime/" + _strip_module_ext(rel);
+        }
+    }
+    return module_name_from_path(src);
+}
+
+// Strip the final path segment's extension: `sfn/type_meta.sfn` ->
+// `sfn/type_meta`, `prelude.sfn` -> `prelude`. Mirrors the extension
+// handling in `module_name_from_path` (last `.` after the last `/`).
+fn _strip_module_ext(rel: string) -> string {
+    let mut last_slash: int = -1;
+    let mut i: int = 0;
+    loop {
+        if i >= rel.length { break; }
+        if substring(rel, i, i + 1) == "/" { last_slash = i; }
+        i += 1;
+    }
+    let mut dot: int = -1;
+    let mut k: int = rel.length;
+    loop {
+        if k <= last_slash + 1 { break; }
+        k -= 1;
+        if substring(rel, k, k + 1) == "." {
+            dot = k;
+            break;
+        }
+    }
+    if dot >= 0 { return substring(rel, 0, dot); }
+    return rel;
+}
+
 // Content-addressed cache gate for a runtime object compile (#632).
 // A previously-compiled `.o` at `obj_path` may be reused iff the
 // object exists AND the sidecar `<obj_path>.key` records a content
@@ -414,7 +471,7 @@ fn write_runtime_identity_stamp(runtime_capsules: RuntimeCapsuleArtifacts[], out
         loop {
             if sj >= srcs.length { break; }
             let src = srcs[sj];
-            let slug = module_name_from_path(src);
+            let slug = _runtime_module_slug(cap.manifest_dir, src);
             let obj_base = cap_prefix + _path_basename(src) + opt_flag + ".o";
             let obj_key = _runtime_obj_key_with_sibling_deps(runtime_object_cache_key_with_identity(src, opt_flag, compiler_identity), ctx_root, slug);
             if obj_key.length > 0 {
@@ -549,9 +606,9 @@ fn _runtime_emit_captured_stream(text: string, to_stderr: boolean) -> void ![io]
     if to_stderr { print.err(out); } else { print(out); }
 }
 
-fn _emit_runtime_sfn_to_obj(self_path: string, cap_prefix: string, src: string, out_dir: string, opt_flag: string, shared_cache_root: string, ctx_root: string, compiler_identity: string) -> RuntimeEmitResult ![io] {
+fn _emit_runtime_sfn_to_obj(self_path: string, cap_prefix: string, src: string, out_dir: string, opt_flag: string, shared_cache_root: string, ctx_root: string, compiler_identity: string, manifest_dir: string) -> RuntimeEmitResult ![io] {
     let mut stats = empty_cache_stats();
-    let slug = module_name_from_path(src);
+    let slug = _runtime_module_slug(manifest_dir, src);
     let ll_path = _path_join(out_dir, cap_prefix + _path_basename(src)
         + opt_flag
         + ".ll");
@@ -818,7 +875,7 @@ fn _stage_runtime_sfn_import_context(self_path: string, runtime_capsules: Runtim
         loop {
             if si >= cap.sfn_sources.length { break; }
             let src = cap.sfn_sources[si];
-            let slug = module_name_from_path(src);
+            let slug = _runtime_module_slug(cap.manifest_dir, src);
             if !_stage_one_runtime_sfn_import_context(self_path, src, slug, ctx_root, compiler_identity) {
                 return false;
             }
@@ -1015,7 +1072,7 @@ fn _compile_runtime_sfn_sources(runtime_capsules: RuntimeCapsuleArtifacts[], out
         loop {
             if si >= cap.sfn_sources.length { break; }
             let src = cap.sfn_sources[si];
-            let emit = _emit_runtime_sfn_to_obj(self_path, cap_prefix, src, out_dir, opt_flag, shared_cache_root, ctx_root, compiler_identity);
+            let emit = _emit_runtime_sfn_to_obj(self_path, cap_prefix, src, out_dir, opt_flag, shared_cache_root, ctx_root, compiler_identity, cap.manifest_dir);
             stats = merge_cache_stats(stats, emit.stats);
             if emit.obj_path.length == 0 {
                 return _failed_runtime_link_inputs();
@@ -1162,7 +1219,7 @@ fn assemble_runtime_capsule_link_inputs(runtime_capsules: RuntimeCapsuleArtifact
                 // `.import-deps` sidecar — the threaded context root
                 // is inert here and the prelude keeps its legacy
                 // descriptor-based emit byte-for-byte (#940 Risk R2).
-                let prelude_emit = _emit_runtime_sfn_to_obj(self_path, cap_prefix, cap.prelude_entry, out_dir, opt_flag, shared_cache_root, _runtime_sfn_ctx_root(out_dir), compiler_identity);
+                let prelude_emit = _emit_runtime_sfn_to_obj(self_path, cap_prefix, cap.prelude_entry, out_dir, opt_flag, shared_cache_root, _runtime_sfn_ctx_root(out_dir), compiler_identity, cap.manifest_dir);
                 stats = merge_cache_stats(stats, prelude_emit.stats);
                 if prelude_emit.obj_path.length == 0 {
                     return _failed_runtime_link_inputs();

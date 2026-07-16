@@ -262,7 +262,20 @@ fn _rcr_artifacts_from_manifest(workspace_root: string, member_path: string, man
     if kind != "runtime" { return empty_runtime_capsule_artifacts(); }
     let name = toml_get_name(manifest_text);
     if name.length == 0 { return empty_runtime_capsule_artifacts(); }
-    let manifest_dir = _rcr_path_join(workspace_root, member_path);
+    // SFN-146: lexically normalize `manifest_dir` (strip trailing slashes,
+    // collapse `.`/`..`) the same way `_rcr_resolve_path` normalizes the
+    // resolved source paths. `runtime_capsule_from_root` passes the value
+    // `resolve_runtime_root` returns for `SAILFIN_RUNTIME_ROOT` verbatim
+    // (no `realpath`, no trailing-slash strip — runtime/sfn/platform/exec.sfn),
+    // so an operator root like `/x/runtime-copy/` or `./runtime-copy` would
+    // otherwise leave `manifest_dir` a non-canonical prefix of the
+    // (normalized) `sfn_sources`, defeating the runtime-relative slug
+    // derivation in `runtime_objs.sfn::_runtime_module_slug` and
+    // reintroducing the out-of-tree duplicate-`sfn_type_register` failure.
+    // Normalizing here keeps `manifest_dir` a clean prefix of every resolved
+    // source; the per-source joins already normalize, so this is idempotent
+    // for the in-tree (already-canonical) root.
+    let manifest_dir = _rcr_normalize_path(_rcr_path_join(workspace_root, member_path));
     let c_sources_rel = toml_get_c_sources(manifest_text);
     let ll_sources_rel = toml_get_ll_sources(manifest_text);
     let sfn_sources_rel = toml_get_sfn_sources(manifest_text);
