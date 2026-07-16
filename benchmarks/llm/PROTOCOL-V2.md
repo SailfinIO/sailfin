@@ -1,9 +1,15 @@
 # Sailfin agent benchmark protocol v2
 
-Protocol ID: `sfn-agent-benchmark/v2.0.0`
+Protocol ID: `sfn-agent-benchmark/v2.1.0`
 
 Status: **frozen for bounded pilots; no v2 scored output exists at this
 version**.
+
+Version 2.1.0 replaces the unusable OpenAI Chat Completions transport with the
+Responses API before any scored output was collected. The exact model,
+reasoning effort, prompts, tasks, arms, attempt counts, graders, thresholds,
+and stopping rules are unchanged. The v2.0.0 preflight is invalid setup
+evidence only and cannot be pooled with v2.1.0.
 
 Linear: [SFN-362](https://linear.app/sailfin/issue/SFN-362/specbench-preregister-v2-adoption-and-controlled-learnability)
 
@@ -55,6 +61,11 @@ Both tracks use two independently trained contemporary model families:
 
 1. Anthropic: exact model ID `claude-sonnet-5`.
 2. OpenAI: exact model ID `gpt-5.6-terra`, reasoning effort `medium`.
+
+The OpenAI family uses `POST /v1/responses`, with the system prompt in
+`instructions`, conversation turns in `input`, reasoning effort in
+`reasoning.effort`, and no response storage. The Anthropic family uses
+`POST /v1/messages`.
 
 The system prompt, sampling policy, output limit, repair limit, timeout policy,
 task order randomization, and hidden-test visibility are identical across arms

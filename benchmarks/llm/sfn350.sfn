@@ -715,7 +715,7 @@ fn _messages_json(messages: JsonValue[]) -> JsonValue {
 
 fn _curl_env(adapter: string) -> string[] ![io] {
     let mut out = process.environ();
-    if adapter == "openai" {
+    if adapter == "openai-responses" || adapter == "openai-chat" {
         let key = _env_or_dotenv("OPENAI_API_KEY");
         if key.length > 0 { out.push("OPENAI_API_KEY=" + key); }
     } else if adapter == "anthropic" {
@@ -737,7 +737,15 @@ fn _post_json(adapter: string, body: string, cwd: string, iteration: int) -> str
     let auth_setup = "auth_file=\"$(mktemp \"${TMPDIR:-/tmp}/sfn350-auth.XXXXXX\")\"; "
         + "trap 'rm -f \"$auth_file\"' EXIT; ";
     let mut script: string = auth_setup;
-    if adapter == "openai" {
+    if adapter == "openai-responses" {
+        script = script
+            + "printf '%s\\n' \"Authorization: Bearer $OPENAI_API_KEY\" > \"$auth_file\"; "
+            + "curl -sS https://api.openai.com/v1/responses "
+            + "-H 'content-type: application/json' "
+            + "-H \"@$auth_file\" "
+            + "--data-binary @"
+            + quoted;
+    } else if adapter == "openai-chat" {
         script = script
             + "printf '%s\\n' \"Authorization: Bearer $OPENAI_API_KEY\" > \"$auth_file\"; "
             + "curl -sS https://api.openai.com/v1/chat/completions "
@@ -773,16 +781,18 @@ fn _uses_gpt5_request(model: string) -> boolean {
     return model.length >= 5 && substring(model, 0, 5) == "gpt-5";
 }
 
-fn _openai_body(model: string, reasoning_effort: string, system: string, messages: JsonValue[]) -> string {
+fn _openai_responses_body(model: string, reasoning_effort: string, system: string, messages: JsonValue[]) -> string {
+    let reasoning = object_val(["effort"], [string_val(reasoning_effort)]);
+    return stringify(object_val(["model", "reasoning", "max_output_tokens", "store", "instructions", "input"], [string_val(model), reasoning, number_val(4096), bool_val(false), string_val(system), _messages_json(messages)]));
+}
+
+fn _openai_chat_body(model: string, system: string, messages: JsonValue[]) -> string {
     let mut all: JsonValue[] = [object_val(["role", "content"], [string_val("system"), string_val(system)])];
     let mut i: int = 0;
     loop {
         if i >= messages.length { break; }
         all.push(messages[i]);
         i += 1;
-    }
-    if _uses_gpt5_request(model) {
-        return stringify(object_val(["model", "reasoning_effort", "max_completion_tokens", "messages"], [string_val(model), string_val(reasoning_effort), number_val(4096), _messages_json(all)]));
     }
     return stringify(object_val(["model", "temperature", "max_tokens", "messages"], [string_val(model), number_val(0.2), number_val(4096), _messages_json(all)]));
 }
@@ -855,6 +865,52 @@ fn _completion_from_openai(resp: string) -> Completion {
     };
 }
 
+fn _completion_from_openai_responses(resp: string) -> Completion {
+    let root = parse(resp);
+    let api_error = _api_error(root);
+    if api_error.length > 0 {
+        return Completion {
+            text: "",
+            input_tokens: 0,
+            output_tokens: 0,
+            error: api_error
+        };
+    }
+    let output = get_array(root, "output");
+    let mut text = "";
+    let mut i: int = 0;
+    loop {
+        if i >= output.length { break; }
+        let item = array_at(array_val(output), i);
+        let content = get_array(item, "content");
+        let mut j: int = 0;
+        loop {
+            if j >= content.length { break; }
+            let part = array_at(array_val(content), j);
+            if get_string(part, "type") == "output_text" {
+                text = text + get_string(part, "text");
+            }
+            j += 1;
+        }
+        i += 1;
+    }
+    let usage = get_value(root, "usage");
+    if text.length == 0 {
+        return Completion {
+            text: "",
+            input_tokens: get_number(usage, "input_tokens") as int,
+            output_tokens: get_number(usage, "output_tokens") as int,
+            error: "model returned no response content"
+        };
+    }
+    return Completion {
+        text: text,
+        input_tokens: get_number(usage, "input_tokens") as int,
+        output_tokens: get_number(usage, "output_tokens") as int,
+        error: ""
+    };
+}
+
 fn _completion_from_anthropic(resp: string) -> Completion {
     let root = parse(resp);
     let api_error = _api_error(root);
@@ -895,9 +951,9 @@ fn _completion_from_anthropic(resp: string) -> Completion {
 }
 
 fn _self_test_provider_schemas() ![io] {
-    let openai = _completion_from_openai("{\"choices\":[{\"message\":{\"content\":\"OK\"}}],\"usage\":{\"prompt_tokens\":7,\"completion_tokens\":1}}");
+    let openai = _completion_from_openai_responses("{\"output\":[{\"type\":\"message\",\"content\":[{\"type\":\"output_text\",\"text\":\"OK\"}]}],\"usage\":{\"input_tokens\":7,\"output_tokens\":1}}");
     let anthropic = _completion_from_anthropic("{\"content\":[{\"type\":\"text\",\"text\":\"OK\"}],\"usage\":{\"input_tokens\":7,\"output_tokens\":1}}");
-    let empty = _completion_from_openai("{\"choices\":[],\"usage\":{\"prompt_tokens\":7,\"completion_tokens\":0}}");
+    let empty = _completion_from_openai_responses("{\"output\":[],\"usage\":{\"input_tokens\":7,\"output_tokens\":0}}");
     if openai.text != "OK" || openai.input_tokens != 7 || openai.output_tokens != 1
         || anthropic.text != "OK"
         || anthropic.input_tokens != 7
@@ -914,9 +970,12 @@ fn _self_test_provider_schemas() ![io] {
         process.exit(1);
     }
     let messages = [object_val(["role", "content"], [string_val("user"), string_val("OK")])];
-    let terra = _openai_body("gpt-5.6-terra", "medium", "system", messages);
-    let legacy = _openai_body("gpt-4.1", "medium", "system", messages);
-    if !contains(terra, "\"reasoning_effort\":\"medium\"") || !contains(terra, "\"max_completion_tokens\":4096")
+    let terra = _openai_responses_body("gpt-5.6-terra", "medium", "system", messages);
+    let legacy = _openai_chat_body("gpt-4.1", "system", messages);
+    if !contains(terra, "\"reasoning\":{\"effort\":\"medium\"}") || !contains(terra, "\"max_output_tokens\":4096")
+        || !contains(terra, "\"store\":false")
+        || !contains(terra, "\"instructions\":\"system\"")
+        || !contains(terra, "\"input\":[")
         || contains(terra, "\"temperature\"")
         || contains(terra, "\"max_tokens\"")
         || !contains(legacy, "\"temperature\":0.2")
@@ -940,7 +999,11 @@ fn _run_schema_probe(cfg: Config, run_dir: string) ![io] {
         error: ""
     };
     if cfg.adapter == "openai" {
-        completion = _completion_from_openai(_post_json("openai", _openai_body(cfg.model, cfg.reasoning_effort, system, messages), run_dir, 0));
+        if _uses_gpt5_request(cfg.model) {
+            completion = _completion_from_openai_responses(_post_json("openai-responses", _openai_responses_body(cfg.model, cfg.reasoning_effort, system, messages), run_dir, 0));
+        } else {
+            completion = _completion_from_openai(_post_json("openai-chat", _openai_chat_body(cfg.model, system, messages), run_dir, 0));
+        }
     } else {
         completion = _completion_from_anthropic(_post_json("anthropic", _anthropic_body(cfg.model, system, messages), run_dir, 0));
     }
@@ -972,8 +1035,12 @@ fn _probe_completion(cfg: Config, prompt: string, dir: string, iteration: int) -
     let system = "This is a blinded pre-packet recognition probe. Do not use retrieval or tools. Report prior recognition only.";
     let messages: JsonValue[] = [object_val(["role", "content"], [string_val("user"), string_val(prompt)])];
     if cfg.adapter == "openai" {
-        let response = _post_json("openai", _openai_body(cfg.model, cfg.reasoning_effort, system, messages), dir, iteration);
-        return _completion_from_openai(response);
+        if _uses_gpt5_request(cfg.model) {
+            let response = _post_json("openai-responses", _openai_responses_body(cfg.model, cfg.reasoning_effort, system, messages), dir, iteration);
+            return _completion_from_openai_responses(response);
+        }
+        let response2 = _post_json("openai-chat", _openai_chat_body(cfg.model, system, messages), dir, iteration);
+        return _completion_from_openai(response2);
     }
     let response2 = _post_json("anthropic", _anthropic_body(cfg.model, system, messages), dir, iteration);
     return _completion_from_anthropic(response2);
@@ -1125,8 +1192,12 @@ fn _complete(cfg: Config, task: Task, arm: string, system: string, messages: Jso
         };
     }
     if cfg.adapter == "openai" {
-        let resp = _post_json("openai", _openai_body(cfg.model, cfg.reasoning_effort, system, messages), cwd, iteration);
-        return _completion_from_openai(resp);
+        if _uses_gpt5_request(cfg.model) {
+            let resp = _post_json("openai-responses", _openai_responses_body(cfg.model, cfg.reasoning_effort, system, messages), cwd, iteration);
+            return _completion_from_openai_responses(resp);
+        }
+        let resp2 = _post_json("openai-chat", _openai_chat_body(cfg.model, system, messages), cwd, iteration);
+        return _completion_from_openai(resp2);
     }
     if cfg.adapter == "anthropic" {
         let resp2 = _post_json("anthropic", _anthropic_body(cfg.model, system, messages), cwd, iteration);
@@ -2306,7 +2377,8 @@ fn _write_run_manifest(path: string, cfg: Config, arms: string[], run_valid: boo
     let deadline = object_val(["default_seconds", "effective_value", "effective_prefix", "override_env", "override_value"], [number_val(60.0), string_val(join(timeout, " ")), _string_array_json(timeout), string_val("SFN350_TIMEOUT_CMD"), string_val(env.get("SFN350_TIMEOUT_CMD"))]);
     let protocol_path = _repo_root() + "/benchmarks/llm/PROTOCOL-V2.md";
     let ablation = object_val(["dimension", "assignment", "primary_pool_eligible"], [string_val(cfg.ablation), string_val("seeded parity of frozen attempt identity; paired arms receive the same treatment"), bool_val(cfg.ablation == "primary")]);
-    let manifest = object_val(["protocol_id", "protocol_sha256", "track", "adapter", "model", "model_family", "openai_reasoning_effort", "max_iters", "repeats", "seed", "sampling", "arms", "packets", "ablation", "toolchains", "execution_deadline", "commands", "human_interventions", "run_valid", "invalid_reason"], [string_val("sfn-agent-benchmark/v2.0.0"), string_val(_sha256_file(protocol_path)), string_val(cfg.track), string_val(cfg.adapter), string_val(cfg.model), string_val(cfg.model_family), string_val(manifest_effort), number_val(cfg.max_iters as float), number_val(cfg.repeats as float), number_val(cfg.seed as float), string_val(sampling), array_val(arm_vals), _packet_manifest(cfg.track), ablation, toolchains, deadline, commands, number_val(0.0), bool_val(run_valid), string_val(invalid_reason)]);
+    let openai_api = cfg.adapter != "openai"? "not_applicable": (_uses_gpt5_request(cfg.model)? "responses": "chat_completions");
+    let manifest = object_val(["protocol_id", "protocol_sha256", "track", "adapter", "model", "model_family", "openai_api", "openai_reasoning_effort", "max_iters", "repeats", "seed", "sampling", "arms", "packets", "ablation", "toolchains", "execution_deadline", "commands", "human_interventions", "run_valid", "invalid_reason"], [string_val("sfn-agent-benchmark/v2.1.0"), string_val(_sha256_file(protocol_path)), string_val(cfg.track), string_val(cfg.adapter), string_val(cfg.model), string_val(cfg.model_family), string_val(openai_api), string_val(manifest_effort), number_val(cfg.max_iters as float), number_val(cfg.repeats as float), number_val(cfg.seed as float), string_val(sampling), array_val(arm_vals), _packet_manifest(cfg.track), ablation, toolchains, deadline, commands, number_val(0.0), bool_val(run_valid), string_val(invalid_reason)]);
     fs.writeFile(path, stringify_pretty(manifest, 2));
 }
 
