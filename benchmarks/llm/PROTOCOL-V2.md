@@ -1,17 +1,29 @@
 # Sailfin agent benchmark protocol v2
 
-Protocol ID: `sfn-agent-benchmark/v2.1.0`
+Protocol ID: `sfn-agent-benchmark/v2.2.0`
 
 Status: **frozen for bounded pilots; no v2 scored output exists at this
 version**.
 
-Version 2.1.0 replaces the unusable OpenAI Chat Completions transport with the
-Responses API before any scored output was collected. The exact model,
-reasoning effort, prompts, tasks, arms, attempt counts, graders, thresholds,
-and stopping rules are unchanged. The v2.0.0 preflight is invalid setup
-evidence only and cannot be pooled with v2.1.0.
+Version 2.1.0 replaced the unusable OpenAI Chat Completions transport with the
+Responses API before any scored output was collected. The v2.0.0 preflight is
+invalid setup evidence only and cannot be pooled with v2.1.0.
 
-Linear: [SFN-362](https://linear.app/sailfin/issue/SFN-362/specbench-preregister-v2-adoption-and-controlled-learnability)
+Version 2.2.0 freezes the Anthropic response budget (section 2) so extended
+thinking cannot consume the entire output allowance, and makes an Anthropic
+`stop_reason: max_tokens` response with no answer text an explicit
+provider-response invalidation that stops the paid batch immediately (section
+6). This changes a request setting and a stopping rule, so it starts a fresh
+pilot under a new minor version; no v2.1.0 attempt, success, or failure may be
+reused, rerun, or pooled into the corrected run, and the corrected run is a
+fresh balanced batch across every arm and model family, not a selective rerun
+of the invalidated arms. The estimands, prompts, tasks, arms, attempt counts,
+graders, thresholds, model families, and every other stopping rule are
+unchanged.
+
+Linear:
+[SFN-362](https://linear.app/sailfin/issue/SFN-362/specbench-preregister-v2-adoption-and-controlled-learnability),
+[SFN-367](https://linear.app/sailfin/issue/SFN-367/fixbench-stop-sonnet-thinking-exhaustion-from-invalidating-v2-batches)
 
 This preregistration separates two questions that the v1 experiment combined:
 
@@ -66,6 +78,15 @@ The OpenAI family uses `POST /v1/responses`, with the system prompt in
 `instructions`, conversation turns in `input`, reasoning effort in
 `reasoning.effort`, and no response storage. The Anthropic family uses
 `POST /v1/messages`.
+
+The frozen output budget leaves room for answer text after hidden reasoning.
+The Anthropic request sets `max_tokens` to 8,192 with at least 2,048 tokens of
+reserved answer headroom; the run manifest records this policy under
+`anthropic_response_budget`. If an Anthropic response still returns
+`stop_reason: max_tokens` with no answer text — extended thinking having
+consumed the entire allowance — it is a provider-response invalidation under
+section 6, not a language observation, and the paid batch stops immediately.
+Such a response never enters any language denominator.
 
 The system prompt, sampling policy, output limit, repair limit, timeout policy,
 task order randomization, and hidden-test visibility are identical across arms
@@ -348,16 +369,21 @@ they do not shrink the denominator opportunistically.
 
 Stop the affected batch immediately when any of these occurs:
 
-- provider authorization/setup invalidation or an unfrozen model response;
+- provider authorization/setup invalidation or an unfrozen model response,
+  including an Anthropic `stop_reason: max_tokens` response with no answer text
+  (thinking-only response-budget exhaustion);
 - evidence of prompt/hidden-test leakage or Rill-17 contamination;
 - a wrong grader, packet-completeness failure, or mismatched arm semantics;
 - an unresolved known-good check/build/run divergence;
 - loss of artifact capture, attempt identity, or schedule integrity;
 - the predeclared paid-call or cost ceiling is reached.
 
-Preserve all artifacts and label the batch invalid or incomplete. Fixing the
-cause requires the applicable version bump and a fresh balanced batch. Do not
-continue unaffected arms to manufacture an unpaired result.
+The stop is triggered by the first such event: the remaining scored schedule is
+not purchased. Preserve all artifacts and label the batch invalid or
+incomplete. Fixing the cause requires the applicable version bump and a fresh
+balanced batch across every arm and model family — never a selective rerun of
+only the invalidated attempts or arms. Do not continue unaffected arms to
+manufacture an unpaired result.
 
 Ordinary provider errors covered by a frozen, arm-independent retry policy do
 not trigger a stop. There is no efficacy, futility, or significance stopping
