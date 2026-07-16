@@ -1,0 +1,66 @@
+// End-to-end regression for SFN-347 / GitHub #2294.
+//
+// After SFN-346 boxed null literals into union locals as a properly tagged
+// `{ i32, <payloads...> }` aggregate, a `match` on a null-active inline union
+// still fell through to `_` because the match-condition lowering had no
+// recognizer for a bare `null:` arm — it dropped into the scalar fallback,
+// which cannot compare `i8* null` against the union aggregate. This builds and
+// runs a fixture so LLVM lowering, union boxing, and the match branch selection
+// all have to agree that a null-active union selects the `null:` arm while a
+// live payload still selects `_`.
+import { find } from "sfn/strings";
+import { expect_eq_bool, expect_eq_int, with_tmp_dir } from "sfn/test";
+
+fn _sfn_bin() -> string ![io] {
+    let configured = env.get("SAILFIN_BIN");
+    if configured.length > 0 { return configured; }
+    return "build/bin/sfn";
+}
+
+fn _fixture_src() -> string ![io] {
+    return fs.readFile("compiler/tests/e2e/fixtures/union_match_null_arm.sfn");
+}
+
+fn _child_env() -> string[] ![io] { return process.environ(); }
+
+fn _marker(name: string) -> string ![io] {
+    let mut dir = env.get("SAILFIN_TEST_SCRATCH");
+    if dir.length == 0 { dir = "/tmp"; }
+    fs.createDirectory(dir, true);
+    let path = dir + "/sfn-union-match-null-" + name + ".out";
+    if fs.exists(path) { fs.deleteFile(path); }
+    return path;
+}
+
+fn _build_and_run(out_marker: string) -> int ![io] {
+    return with_tmp_dir(fn (dir: string) -> int {
+        let srcpath = dir + "/probe.sfn";
+        fs.writeFile(srcpath, _fixture_src());
+        let binpath = dir + "/probe";
+        let build_exit = process.run_capture([_sfn_bin(), "build", "-o", binpath, srcpath], _child_env());
+        let _bo = process.capture_take_stdout();
+        let _be = process.capture_take_stderr();
+        if build_exit != 0 { return -100; }
+        let run_exit = process.run_capture([binpath], []);
+        let out = process.capture_take_stdout();
+        let _re = process.capture_take_stderr();
+        fs.writeFile(out_marker, out);
+        return run_exit;
+    });
+}
+
+test "match union: null-active arm selects null case, live payload selects wildcard" ![io] {
+    let marker = _marker("both-arms");
+    let exit = _build_and_run(marker);
+    assert expect_eq_int(exit, 0).ok;
+    let out = fs.readFile(marker);
+    if fs.exists(marker) { fs.deleteFile(marker); }
+
+    // Null-active union reaches the `null:` arm (the SFN-347 fix).
+    assert expect_eq_bool(find(out, "h is null\n", 0) >= 0, true).ok;
+    // ...and does not fall through to `_` (the pre-fix behavior).
+    assert expect_eq_bool(find(out, "h not null", 0) < 0, true).ok;
+    // Live-payload union match is unchanged: int-active still selects `_`.
+    assert expect_eq_bool(find(out, "g not null\n", 0) >= 0, true).ok;
+    assert expect_eq_bool(find(out, "g is null", 0) < 0, true).ok;
+}
