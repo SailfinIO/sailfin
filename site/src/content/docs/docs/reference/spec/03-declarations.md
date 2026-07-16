@@ -54,13 +54,14 @@ fn save(path: string, data: string) ![io] {
 }
 
 async fn fetch(url: string) -> string ![net] {
-    // await is planned — see Part B
+    // `async fn` is structural in v0 and runs synchronously.
     return http.get(url);
 }
 ```
 
 - Effect annotations `![...]` come after the parameter list and optional return type
-- `async fn` records the `is_async` flag; `await` is not yet parsed (Part B)
+- `async fn` records the `is_async` flag, but its return value is not yet a live
+  future. `await` is implemented for futures created by `spawn fn() -> T { ... }`.
 - Decorators `@name` are parsed as metadata (no semantic enforcement today)
 - Default parameter values: `fn f(x: int = 0)`
 - Generic functions: `fn first<T>(items: T[]) -> T?`

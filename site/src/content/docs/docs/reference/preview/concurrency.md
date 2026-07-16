@@ -6,24 +6,36 @@ sidebar:
 ---
 
 ```sfn
-// v0: `routine { }`, channels, `spawn`/`await`, and `parallel` work today.
-// `async fn` return-value `await` is not yet wired into the live typecheck walk.
-
-fn process_batch(items: string[]) ![io] {
-    let messages = channel(4);   // bounded MPMC channel, capacity 4
-
+// Shipped v0 structured concurrency: a routine nursery joins its spawned task.
+fn main() ![io] {
     routine {
-        messages.send(42);       // runs inside the structured-concurrency nursery
+        let task = spawn fn () -> int { return 40 + 2; };
+        let result: int = await task;
+        print("Result: {{result}}");
     }
-
-    let task = spawn fn() -> int { return 1 + 1; };
-    let result: int = await task;   // runs on the thread pool; await joins
 }
 ```
 
+This checked example is maintained at
+[`examples/concurrency/routine-spawn-await.sfn`](https://github.com/SailfinIO/sailfin/blob/main/examples/concurrency/routine-spawn-await.sfn)
+and prints `Result: 42`.
+
 ## What ships today (v0)
 
-`routine { }` lowers to a real structured-concurrency nursery (`sfn_nursery_enter`/`sfn_nursery_exit`), `channel(N)` runs end-to-end as a bounded MPMC channel, `spawn fn() -> T { ... }` runs tasks on the thread pool and `await` joins them returning the typed result, and `parallel [...]` fans tasks out across the pool and joins them. The worker pool floors at two workers; use `SAILFIN_THREADS=N` to override. See [docs/status.md](/docs/status.md) for per-feature detail.
+`routine { }` lowers to a real structured-concurrency nursery
+(`sfn_nursery_enter`/`sfn_nursery_exit`), `channel(N)` runs end-to-end as a
+bounded MPMC channel, `spawn fn() -> T { ... }` runs tasks on the thread pool
+and `await` joins them returning the typed result, and `parallel [...]` fans
+tasks out across the pool and joins them. The worker pool floors at two workers;
+use `SAILFIN_THREADS=N` to override. See
+[docs/status.md](https://github.com/SailfinIO/sailfin/blob/main/docs/status.md)
+for per-feature detail.
+
+`routine` is the nursery boundary; there is no separate `scope { ... }`
+construct. Nursery exit joins every child, and non-local exits (`return`,
+`throw`, `break`, or `continue`) from the body are rejected. The v0 nursery is
+per-thread, joins without destroying its state, and does not cancel sibling
+tasks when one fails.
 
 ### Capture-env ownership for `spawn` / `parallel` (#1475, epic #1466)
 

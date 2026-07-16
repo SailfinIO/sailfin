@@ -157,7 +157,7 @@ Statement          = VariableDeclaration
                    | ContinueStatement
                    | MatchStatement
                    | TryStatement
-                   | RoutineDeclaration
+                   | RoutineStatement
                    | ReturnStatement
                    | ThrowStatement
                    | WithStatement
@@ -180,7 +180,7 @@ InlineExpression   = Expression [ ";" ] ;
 TryStatement       = "try" Block [ "catch" [ "(" Identifier ")" ] Block ]
                      [ "finally" Block ] ;
 
-RoutineDeclaration = "routine" [ Identifier | StringLiteral ] Block ;
+RoutineStatement   = "routine" Block [ ";" ] ;
 
 ReturnStatement    = "return" [ Expression ] ";" ;
 ThrowStatement     = "throw" Expression ";" ;
@@ -196,9 +196,9 @@ Assignment         = Expression ( "=" | "+=" | "-=" | "*=" | "/=" ) Expression ;
 ExpressionStatement = Expression ";" ;
 ```
 
-> **Note**: `RoutineDeclaration` (`routine { }`, `routine "name" { }`) appears in
-> example code today, but full runtime support (scheduling, joins) is planned for
-> 1.0. See the [roadmap](/roadmap).
+> **Note**: `routine { }` is the shipped v0 nursery boundary. Exiting the block
+> joins all tasks spawned within it. The earlier named form
+> `routine "name" { }` is not supported.
 
 ## Expressions
 
@@ -206,7 +206,7 @@ ExpressionStatement = Expression ";" ;
 
 | Level | Operators | Notes |
 |-------|-----------|-------|
-| 1 (highest) | `!` `-` `+` (unary), `&`, `&mut`, `*` (deref), `await` | Right-associative |
+| 1 (highest) | `!` `-` `+` (unary), `&`, `&mut`, `*` (deref), `spawn`, `await` | Right-associative |
 | 2 | `*` `/` | Left-associative |
 | 3 | `+` `-` | Left-associative |
 | 4 | `<` `<=` `>` `>=` | Left-associative |
@@ -235,7 +235,7 @@ Equality           = Comparison { (("==" | "!=") Comparison) | ("is" Type) } ;
 Comparison         = Term { ("<" | "<=" | ">" | ">=") Term } ;
 Term               = Factor { ("+" | "-") Factor } ;
 Factor             = Unary { ("*" | "/") Unary } ;
-Unary              = ("!" | "-" | "+" | "await") Unary
+Unary              = ("!" | "-" | "+" | "await" | "spawn") Unary
                    | "&" [ "mut" ] Unary
                    | "&" "raw" Unary
                    | "borrow" "(" Expression ")"
@@ -371,11 +371,16 @@ They do not affect overload resolution and exist for readability.
 The following identifiers are reserved and may not appear where a plain
 `Identifier` is expected:
 
-`fn` `async` `await` `extern` `let` `mut` `unsafe` `struct` `enum`
+`fn` `async` `extern` `let` `mut` `unsafe` `struct` `enum`
 `interface` `type` `import` `export` `if` `else` `for` `in` `while` `loop`
 `match` `return` `break` `continue` `try` `catch` `finally` `throw` `model`
-`tool` `pipeline` `test` `prompt` `system` `user` `assistant` `routine`
-`scope` `with` `true` `false` `null` `assert`
+`tool` `pipeline` `test` `prompt` `system` `user` `assistant` `with` `true`
+`false` `null` `assert`
+
+`routine`, `spawn`, and `await` are contextual keywords: the parser recognizes
+them only in their statement or prefix-expression positions. `scope` is an
+ordinary identifier; the earlier `scope { ... }` concurrency design was
+superseded by the shipped `routine { ... }` nursery.
 
 The array syntax is `Type[]` (e.g. `number[]`, `string[]`). Arrays expose
 `.length` and `.push(value)`.

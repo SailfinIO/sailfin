@@ -51,16 +51,20 @@ fn identity<T>(value: T) -> T {
 
 **Status: Parsed**
 
-Mark a function as asynchronous. The `async` modifier is recognized by the parser and captured in the AST, but `await` is not yet parsed or enforced. Currently, `async fn` is structurally identical to `fn` at runtime.
+Mark a function as asynchronous. The `async` modifier is recognized by the
+parser and captured in the AST, but its return value is not yet a live future.
+Currently, `async fn` is structurally identical to `fn` at runtime.
 
 ```sfn
 async fn fetch_user(id: string) -> User ![net] {
-    // async/await semantics are planned; currently runs synchronously
+    // Runs synchronously in v0.
     return http.get("/users/{{ id }}");
 }
 ```
 
-> **Note:** `await` is not yet implemented. See the [Concurrency](#concurrency) section.
+> **Note:** `await` works on a future created by `spawn`; awaiting an `async fn`
+> return value is not yet wired into the live typecheck walk. See
+> [Concurrency](#concurrency).
 
 ---
 
@@ -454,78 +458,61 @@ fn divide(a: float, b: float) -> float {
 
 ## Concurrency
 
-> **Status:** `routine { }` is parsed today and appears in example code; `channel()` and `parallel [...]` are available as prelude-backed primitives (see [Standard Library](/docs/reference/standard-library)). Full structured-concurrency semantics (`scope`, `await`, joined shutdown) are on the [roadmap](/roadmap).
-
-### `routine`
-
-**Status: Parsed**
-
-Introduce a concurrent task block. The surface syntax is `routine { body }` or
-`routine "name" { body }` — anonymous or named. Full scheduler and join
-semantics are on the [roadmap](/roadmap).
+The shipped v0 surface is `routine { ... }`, `spawn fn() -> T { ... }`, and
+`await task`. These are language constructs, not prelude functions. The example
+below is checked from
+[`examples/concurrency/routine-spawn-await.sfn`](https://github.com/SailfinIO/sailfin/blob/main/examples/concurrency/routine-spawn-await.sfn).
 
 ```sfn
-import { Channel, channel } from "sync";
-
+// Shipped v0 structured concurrency: a routine nursery joins its spawned task.
 fn main() ![io] {
-    let messages: Channel<string> = channel();
     routine {
-        messages.send("hello");
-    }
-    routine "consumer" {
-        print(await messages.receive());
+        let task = spawn fn () -> int { return 40 + 2; };
+        let result: int = await task;
+        print("Result: {{result}}");
     }
 }
 ```
+
+### `routine`
+
+**Status: Implemented (v0 nursery)**
+
+Open a structured-concurrency nursery with `routine { body }`. Leaving the
+block waits for every task spawned in that nursery, so no child outlives it.
+Named `routine "name" { ... }` syntax is not part of v0. Non-local exits from
+the body are rejected. v0 joins all tasks without cancel-on-fault, does not
+destroy the nursery after joining, and keeps nursery state per thread.
 
 ---
 
 ### `scope`
 
-**Status: Planned**
+**Status: Not a language construct**
 
-Define a structured-concurrency scope. All routines spawned inside a `scope` block are joined before the block exits.
-
-```sfn
-// Planned — not yet implemented
-scope {
-    routine { fetch_data("https://api.example.com/a"); }
-    routine { fetch_data("https://api.example.com/b"); }
-}
-// both tasks complete here
-```
+Earlier previews used `scope { ... }` for structured concurrency. That design
+was superseded: `routine { ... }` is the shipped nursery boundary. `scope` is
+not a keyword or a planned alias.
 
 ---
 
 ### `await`
 
-**Status: Planned**
+**Status: Implemented for spawned tasks (v0)**
 
-Await the result of an `async fn` or a concurrent future. Not yet parsed.
-
-```sfn
-// Planned — not yet implemented
-async fn load_user(id: string) -> User ![net] {
-    let response = await http.get("/users/{{ id }}");
-    return response.body;
-}
-```
+Join a future returned by `spawn` and produce its typed result. Awaiting an
+`async fn` return value is not yet wired into the live typecheck walk.
 
 ---
 
 ### `spawn`
 
-**Status: Planned (language keyword)**
+**Status: Implemented (v0)**
 
-Spawn a concurrent task. The prelude provides `spawn(task, name)` as a runtime function today; the `spawn` keyword for structured concurrency is planned.
-
-```sfn
-// Planned language keyword — not yet implemented
-// (prelude function spawn() is available today)
-spawn {
-    process_queue();
-}
-```
+Spawn a zero-argument task lambda on the runtime thread pool. The shipped typed
+form is `spawn fn() -> T { ... }`; the return type selects the future kind and
+`await` joins the task. `spawn` requires `![io]` in v0. A captured owned value
+moves into the task and cannot be reused by the sender.
 
 ---
 
