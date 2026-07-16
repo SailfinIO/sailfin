@@ -1,0 +1,253 @@
+// capsules/sfn/crypto/tests/tls13_record_test.sfn
+//
+// Regression coverage for the sfn/crypto TLS 1.3 record layer (RFC 8446 §5):
+// per-record nonce derivation (§5.3) against hand-computed known answers, the
+// seal→open round-trip (content + type recovered, padding stripped), and
+// fail-closed rejection of malformed / oversized / tampered records.
+import { tls13_record_nonce, tls13_seal_record, tls13_open_record } from "../src/tls13_record";
+
+fn eq_bytes(a: int[], b: int[]) -> bool {
+    if a.length != b.length { return false; }
+    let mut i: int = 0;
+    loop {
+        if i >= a.length { break; }
+        if a[i] != b[i] { return false; }
+        i += 1;
+    }
+    return true;
+}
+
+// A deterministic 32-byte key [0,1,...,31] and 12-byte write_iv
+// [0,1,...,11] shared across the round-trip tests.
+fn _key32() -> int[] {
+    let mut k: int[] = [];
+    let mut i: int = 0;
+    loop {
+        if i >= 32 { break; }
+        k.push(i & 255);
+        i += 1;
+    }
+    return k;
+}
+
+fn _iv12() -> int[] {
+    return [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11];
+}
+
+// ── Per-record nonce (RFC 8446 §5.3) ─────────────────────────────
+// nonce = write_iv XOR (00 00 00 00 ‖ seq_be_8). With write_iv = [0..11]:
+// only the low bytes that the sequence number reaches change.
+test "tls13_record_nonce: seq 0 is the write_iv unchanged" {
+    // 8-byte big-endian 0 XORed in leaves the IV untouched.
+    let nonce: int[] = tls13_record_nonce(_iv12(), 0);
+    assert eq_bytes(nonce, [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11]);
+}
+
+test "tls13_record_nonce: seq 1 flips only the last byte" {
+    // byte[11] = 11 ^ 1 = 10.
+    let nonce: int[] = tls13_record_nonce(_iv12(), 1);
+    assert eq_bytes(nonce, [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 10]);
+}
+
+test "tls13_record_nonce: seq 255 fills the last byte" {
+    // byte[11] = 11 ^ 255 = 244.
+    let nonce: int[] = tls13_record_nonce(_iv12(), 255);
+    assert eq_bytes(nonce, [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 244]);
+}
+
+test "tls13_record_nonce: seq 256 reaches the second-lowest byte" {
+    // seq 0x0100 → byte[10] = 10 ^ 1 = 11, byte[11] = 11 ^ 0 = 11.
+    let nonce: int[] = tls13_record_nonce(_iv12(), 256);
+    assert eq_bytes(nonce, [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 11, 11]);
+}
+
+test "tls13_record_nonce: multi-byte seq XORs all eight low bytes" {
+    // seq 0x0102030405060708 → padded bytes[4..11] = [1,2,3,4,5,6,7,8],
+    // XORed with write_iv[4..11] = [4,5,6,7,8,9,10,11].
+    let nonce: int[] = tls13_record_nonce(_iv12(), 72623859790382856);
+    assert eq_bytes(nonce, [0, 1, 2, 3, 5, 7, 5, 3, 13, 15, 13, 3]);
+}
+
+test "tls13_record_nonce: rejects a bad iv length" {
+    let nonce: int[] = tls13_record_nonce([0, 1, 2, 3], 0);
+    assert nonce.length == 0;
+}
+
+// ── Seal / open round-trip (RFC 8446 §5.2) ───────────────────────
+test "tls13_record: seal produces a well-formed TLSCiphertext header" {
+    let content: int[] = [104, 101, 108, 108, 111];  // "hello"
+    let record: int[] = tls13_seal_record(_key32(), _iv12(), 0, 22, content, 0);
+    // header(5) ‖ ciphertext(inner) ‖ tag(16), where the TLSInnerPlaintext is
+    // content(5) ‖ type(1) = 6 bytes: 5 + 6 + 16 = 27 bytes.
+    assert record.length == 27;
+    assert record[0] == 23;  // application_data
+    assert record[1] == 3;  // legacy_record_version 0x0303
+    assert record[2] == 3;
+    // uint16 length = encrypted_record length = record.length - 5 = 22.
+    let declared: int = ((record[3] & 255) << 8) | (record[4] & 255);
+    assert declared == record.length - 5;
+    assert declared == 22;
+}
+
+test "tls13_record: seal then open recovers the content and type" {
+    let content: int[] = [104, 101, 108, 108, 111, 33];  // "hello!"
+    let record: int[] = tls13_seal_record(_key32(), _iv12(), 7, 22, content, 0);
+    let opened: Result<TlsRecordPlaintext, string> = tls13_open_record(_key32(), _iv12(), 7, record);
+    match opened {
+        Result.Ok { value } => {
+            assert value.content_type == 22;
+            assert eq_bytes(value.content, content);
+        },
+        Result.Err { error } => { assert false; }
+    }
+}
+
+test "tls13_record: padding is stripped on open" {
+    let content: int[] = [1, 2, 3, 4];
+    // 17 bytes of zero padding after the content type.
+    let record: int[] = tls13_seal_record(_key32(), _iv12(), 3, 23, content, 17);
+    let opened: Result<TlsRecordPlaintext, string> = tls13_open_record(_key32(), _iv12(), 3, record);
+    match opened {
+        Result.Ok { value } => {
+            assert value.content_type == 23;
+            assert eq_bytes(value.content, content);
+        },
+        Result.Err { error } => { assert false; }
+    }
+}
+
+test "tls13_record: empty content round-trips" {
+    let content: int[] = [];
+    let record: int[] = tls13_seal_record(_key32(), _iv12(), 0, 21, content, 0);
+    let opened: Result<TlsRecordPlaintext, string> = tls13_open_record(_key32(), _iv12(), 0, record);
+    match opened {
+        Result.Ok { value } => {
+            assert value.content_type == 21;
+            assert value.content.length == 0;
+        },
+        Result.Err { error } => { assert false; }
+    }
+}
+
+// ── Fail-closed rejection (RFC 8446 §5) ──────────────────────────
+test "tls13_record: open rejects a wrong sequence number" {
+    // The per-record nonce depends on seq; opening at a different seq derives a
+    // different nonce, so the AEAD tag fails.
+    let content: int[] = [9, 8, 7];
+    let record: int[] = tls13_seal_record(_key32(), _iv12(), 5, 22, content, 0);
+    let opened: Result<TlsRecordPlaintext, string> = tls13_open_record(_key32(), _iv12(), 6, record);
+    match opened {
+        Result.Ok { value } => { assert false; },
+        Result.Err { error } => { assert true; }
+    }
+}
+
+test "tls13_record: open rejects a flipped ciphertext byte" {
+    let content: int[] = [9, 8, 7];
+    let mut record: int[] = tls13_seal_record(_key32(), _iv12(), 0, 22, content, 0);
+    record[5] = record[5] ^ 1;  // first encrypted_record byte
+    let opened: Result<TlsRecordPlaintext, string> = tls13_open_record(_key32(), _iv12(), 0, record);
+    match opened {
+        Result.Ok { value } => { assert false; },
+        Result.Err { error } => { assert true; }
+    }
+}
+
+test "tls13_record: open rejects a tampered header (AAD) byte" {
+    let content: int[] = [9, 8, 7];
+    let mut record: int[] = tls13_seal_record(_key32(), _iv12(), 0, 22, content, 0);
+    record[1] = record[1] ^ 1;  // flip legacy_record_version → AAD mismatch
+    let opened: Result<TlsRecordPlaintext, string> = tls13_open_record(_key32(), _iv12(), 0, record);
+    match opened {
+        Result.Ok { value } => { assert false; },
+        Result.Err { error } => { assert true; }
+    }
+}
+
+test "tls13_record: open rejects a length/body mismatch" {
+    let content: int[] = [9, 8, 7];
+    let mut record: int[] = tls13_seal_record(_key32(), _iv12(), 0, 22, content, 0);
+    record.push(0);  // extra trailing byte: declared length no longer matches
+    let opened: Result<TlsRecordPlaintext, string> = tls13_open_record(_key32(), _iv12(), 0, record);
+    match opened {
+        Result.Ok { value } => { assert false; },
+        Result.Err { error } => { assert true; }
+    }
+}
+
+test "tls13_record: open rejects a short record header" {
+    let opened: Result<TlsRecordPlaintext, string> = tls13_open_record(_key32(), _iv12(), 0, [23, 3, 3]);
+    match opened {
+        Result.Ok { value } => { assert false; },
+        Result.Err { error } => { assert true; }
+    }
+}
+
+test "tls13_record: open rejects a non-application_data outer type" {
+    let content: int[] = [1, 2, 3];
+    let mut record: int[] = tls13_seal_record(_key32(), _iv12(), 0, 22, content, 0);
+    record[0] = 22;  // outer type must be application_data(23)
+    let opened: Result<TlsRecordPlaintext, string> = tls13_open_record(_key32(), _iv12(), 0, record);
+    match opened {
+        Result.Ok { value } => { assert false; },
+        Result.Err { error } => { assert true; }
+    }
+}
+
+test "tls13_record: open rejects an oversized encrypted_record" {
+    // A body of 2^14 + 257 = 16641 bytes exceeds the 2^14 + 256 cap; the guard
+    // fires before any decryption (bounded work).
+    let mut record: int[] = [23, 3, 3, 65, 1];  // declared length = 16641
+    let mut i: int = 0;
+    loop {
+        if i >= 16641 { break; }
+        record.push(0);
+        i += 1;
+    }
+    let opened: Result<TlsRecordPlaintext, string> = tls13_open_record(_key32(), _iv12(), 0, record);
+    match opened {
+        Result.Ok { value } => { assert false; },
+        Result.Err { error } => { assert true; }
+    }
+}
+
+test "tls13_record: open rejects an all-zero plaintext (no content type)" {
+    // Sealing an empty content with type 0 and no padding yields a single-zero
+    // TLSInnerPlaintext; open must fail to find a non-zero content type.
+    let content: int[] = [];
+    let record: int[] = tls13_seal_record(_key32(), _iv12(), 0, 0, content, 0);
+    let opened: Result<TlsRecordPlaintext, string> = tls13_open_record(_key32(), _iv12(), 0, record);
+    match opened {
+        Result.Ok { value } => { assert false; },
+        Result.Err { error } => { assert true; }
+    }
+}
+
+// ── Seal fail-closed on bad inputs ───────────────────────────────
+test "tls13_record: seal rejects a bad key length" {
+    let record: int[] = tls13_seal_record([1, 2, 3], _iv12(), 0, 22, [1, 2, 3], 0);
+    assert record.length == 0;
+}
+
+test "tls13_record: seal rejects a bad iv length" {
+    let record: int[] = tls13_seal_record(_key32(), [1, 2, 3], 0, 22, [1, 2, 3], 0);
+    assert record.length == 0;
+}
+
+test "tls13_record: seal rejects negative padding" {
+    let record: int[] = tls13_seal_record(_key32(), _iv12(), 0, 22, [1, 2, 3], -1);
+    assert record.length == 0;
+}
+
+test "tls13_record: seal rejects content over the plaintext cap" {
+    // 2^14 + 1 = 16385 bytes exceeds the 2^14 fragment cap.
+    let mut content: int[] = [];
+    let mut i: int = 0;
+    loop {
+        if i >= 16385 { break; }
+        content.push(0);
+        i += 1;
+    }
+    let record: int[] = tls13_seal_record(_key32(), _iv12(), 0, 22, content, 0);
+    assert record.length == 0;
+}
