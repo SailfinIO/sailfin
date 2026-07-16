@@ -1237,10 +1237,12 @@ fn coerce_and_emit_call(trimmed_target: string, operands: LLVMOperand[], expecte
     // Windows (where those POSIX symbols do not link). The Windows leg walks
     // `FindFirstFileA`/`FindNextFileA`/`FindClose`, reading `cFileName` at
     // `WIN32_FIND_DATAA` byte offset 44. Both legs delegate the portable
-    // per-entry work — dot filter, name dup, array append — to the module's
-    // bare Sailfin/runtime helpers (`_fs_name_is_dot`, `_fs_dup_cstr`,
-    // `sailfin_runtime_append_string_v2`), which link on every target; the
-    // wrapper sorts the result. The loop-carried accumulator lives in a single
+    // per-entry work — dot filter, name dup, array new/append — to the
+    // module's bare `_fs_*` helpers (`_fs_name_is_dot`, `_fs_dup_cstr`,
+    // `_fs_new_str_array`, `_fs_append_str`), which link on every target and
+    // keep the volatile `@sailfin_runtime_*` array symbols out of the lowering
+    // (#727 emission audit); the wrapper sorts the result. The loop-carried
+    // accumulator lives in a single
     // `alloca i8*` cell with a back-edge (no hand-authored phi) so the emitted
     // SSA is trivially dominated. Only the host leg's directory-iteration
     // symbols enter the IR — the point of the sentinel.
@@ -1361,7 +1363,7 @@ fn coerce_and_emit_call(trimmed_target: string, operands: LLVMOperand[], expecte
                     let _w_ae = format_temp_name(result_temp);
                     result_temp = result_temp + 1;
                     result_lines.push("  " + _w_ae
-                        + " = call i8* @sailfin_runtime_concat_v2(i8* null, i8* null)");
+                        + " = call i8* @_fs_new_str_array()");
                     result_lines.push("  store i8* " + _w_ae + ", i8** "
                         + _w_slot);
                     result_lines.push("  br label %" + _w_done);
@@ -1370,7 +1372,7 @@ fn coerce_and_emit_call(trimmed_target: string, operands: LLVMOperand[], expecte
                     let _w_a0 = format_temp_name(result_temp);
                     result_temp = result_temp + 1;
                     result_lines.push("  " + _w_a0
-                        + " = call i8* @sailfin_runtime_concat_v2(i8* null, i8* null)");
+                        + " = call i8* @_fs_new_str_array()");
                     result_lines.push("  store i8* " + _w_a0 + ", i8** "
                         + _w_slot);
                     result_lines.push("  br label %" + _w_body);
@@ -1421,7 +1423,7 @@ fn coerce_and_emit_call(trimmed_target: string, operands: LLVMOperand[], expecte
                     result_lines.push("  " + _w_cur + " = load i8*, i8** "
                         + _w_slot);
                     result_lines.push("  " + _w_nx
-                        + " = call i8* @sailfin_runtime_append_string_v2(i8* "
+                        + " = call i8* @_fs_append_str(i8* "
                         + _w_cur
                         + ", i8* "
                         + _w_c
@@ -1511,7 +1513,7 @@ fn coerce_and_emit_call(trimmed_target: string, operands: LLVMOperand[], expecte
                     let _p_ae = format_temp_name(result_temp);
                     result_temp = result_temp + 1;
                     result_lines.push("  " + _p_ae
-                        + " = call i8* @sailfin_runtime_concat_v2(i8* null, i8* null)");
+                        + " = call i8* @_fs_new_str_array()");
                     result_lines.push("  store i8* " + _p_ae + ", i8** "
                         + _p_slot);
                     result_lines.push("  br label %" + _p_done);
@@ -1524,7 +1526,7 @@ fn coerce_and_emit_call(trimmed_target: string, operands: LLVMOperand[], expecte
                     result_lines.push("  " + _p_off
                         + " = call i64 @_fs_dirent_dname_offset()");
                     result_lines.push("  " + _p_a0
-                        + " = call i8* @sailfin_runtime_concat_v2(i8* null, i8* null)");
+                        + " = call i8* @_fs_new_str_array()");
                     result_lines.push("  store i8* " + _p_a0 + ", i8** "
                         + _p_slot);
                     result_lines.push("  br label %" + _p_loop);
@@ -1596,7 +1598,7 @@ fn coerce_and_emit_call(trimmed_target: string, operands: LLVMOperand[], expecte
                     result_lines.push("  " + _p_cur + " = load i8*, i8** "
                         + _p_slot);
                     result_lines.push("  " + _p_nx
-                        + " = call i8* @sailfin_runtime_append_string_v2(i8* "
+                        + " = call i8* @_fs_append_str(i8* "
                         + _p_cur
                         + ", i8* "
                         + _p_c

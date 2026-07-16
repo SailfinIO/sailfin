@@ -266,6 +266,22 @@ extern fn sailfin_runtime_concat_v2(a: * u8, b: * u8) -> * u8;
 
 extern fn sailfin_runtime_append_string_v2(a: * u8, text: * u8) -> * u8;
 
+// Thin portable wrappers over the runtime array core, emitted as the
+// `call` targets of the `sailfin_intrinsic_fs_list_dir` sentinel's per-leg
+// IR (SFN-51). Naming them `_fs_*` keeps the lowering's hardcoded array
+// symbols STABLE — the #727 emission audit
+// (`lowering_no_bare_runtime_emissions_test.sfn`) pins every hardcoded
+// `@sailfin_runtime_*` string emitted under the lowering dirs, and routing
+// the container ops through these wrappers keeps that volatile prefix out
+// of `core_call_emission.sfn`. Both are target-neutral (no `opendir`/Win32).
+fn _fs_new_str_array() -> * u8 {
+    return sailfin_runtime_concat_v2(null, null);
+}
+
+fn _fs_append_str(arr: * u8, s: * u8) -> * u8 {
+    return sailfin_runtime_append_string_v2(arr, s);
+}
+
 // Byte offset of `struct dirent::d_name`, per platform. `readdir` returns
 // the address of the `struct dirent`; the entry name is the NUL-terminated
 // C string that begins at that address + this offset — `d_name` is an

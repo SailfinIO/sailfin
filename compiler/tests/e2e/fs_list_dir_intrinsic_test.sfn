@@ -171,10 +171,16 @@ test "fs-list-dir: both legs delegate the portable per-entry helpers" ![io] {
     assert ir_win.length > 0;
     assert contains(ir_linux, "call i1 @_fs_name_is_dot(");
     assert contains(ir_linux, "call i8* @_fs_dup_cstr(");
-    assert contains(ir_linux, "call i8* @sailfin_runtime_append_string_v2(");
+    assert contains(ir_linux, "call i8* @_fs_new_str_array(");
+    assert contains(ir_linux, "call i8* @_fs_append_str(");
     assert contains(ir_win, "call i1 @_fs_name_is_dot(");
     assert contains(ir_win, "call i8* @_fs_dup_cstr(");
-    assert contains(ir_win, "call i8* @sailfin_runtime_append_string_v2(");
+    assert contains(ir_win, "call i8* @_fs_new_str_array(");
+    assert contains(ir_win, "call i8* @_fs_append_str(");
+    // The volatile `@sailfin_runtime_*` array symbols stay out of the
+    // lowering (#727 emission audit); they live behind the `_fs_*` wrappers.
+    assert ! contains(ir_linux, "@sailfin_runtime_append_string_v2(");
+    assert ! contains(ir_win, "@sailfin_runtime_concat_v2(");
 }
 
 test "fs-list-dir: sentinel symbol never emitted as call/declare" ![io] {
