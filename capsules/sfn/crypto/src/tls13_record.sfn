@@ -1,0 +1,284 @@
+// capsules/sfn/crypto/src/tls13_record.sfn
+//
+// TLS 1.3 record layer (RFC 8446 §5) for the sfn/crypto capsule (SFEP-0048,
+// Phase B). Frames/deframes the `TLSCiphertext` wire record, builds and strips
+// the `TLSInnerPlaintext` (content ‖ type ‖ zero padding), derives the
+// per-record AEAD nonce (§5.3), and seals/opens records through the
+// ChaCha20-Poly1305 AEAD (RFC 8439 §2.8) with the record header as the AAD.
+//
+// The handshake that establishes the traffic keys/IVs is a separate concern
+// (the key schedule lives in `tls13_schedule.sfn`); this module takes the
+// per-direction write_key / write_iv and the 64-bit record sequence number as
+// inputs. Key update / KeyUpdate is out of the minimal cut.
+//
+// Operates end-to-end on `int[]` byte arrays (never `string`): records are
+// arbitrary binary that routinely contain 0x00 bytes, which a Sailfin `string`
+// cannot represent (SFEP-0048 §3.3 item 6). Length arithmetic is on plain
+// signed `int`; record lengths and the sequence number are non-negative and
+// far below 2^31, so `>>` (LLVM `ashr`) stays logical.
+import { chacha20poly1305_seal, chacha20poly1305_open } from "./aead_chacha20poly1305";
+
+// ── Constants (RFC 8446 §5) ──────────────────────────────────────
+// ContentType application_data(23) — the outer opaque_type of every TLS 1.3
+// TLSCiphertext record. The real content type is carried inside the encrypted
+// TLSInnerPlaintext.
+fn tls_content_type_application_data() -> int { return 23; }
+
+// The Poly1305 authentication tag length appended by the AEAD (RFC 8439 §2.8).
+fn _tag_len() -> int { return 16; }
+
+// Maximum TLSPlaintext.fragment / decrypted content length: 2^14 (RFC 8446
+// §5.1). A larger plaintext fails closed rather than being framed.
+fn _max_plaintext() -> int { return 16384; }
+
+// Maximum TLSCiphertext.encrypted_record length: 2^14 + 256 (RFC 8446 §5.2).
+// A record whose body exceeds this is rejected (record_overflow).
+fn _max_encrypted_record() -> int { return 16640; }
+
+// ── Byte helpers ─────────────────────────────────────────────────
+// Append every byte of `src` to `dst`, masked to a byte (arrays are
+// reference-typed, so the caller's buffer grows in place).
+fn _append(dst: int[], src: int[]) -> void {
+    let mut i: int = 0;
+    loop {
+        if i >= src.length { break; }
+        dst.push(src[i] & 255);
+        i += 1;
+    }
+}
+
+// ── Per-record nonce (RFC 8446 §5.3) ─────────────────────────────
+// The 64-bit record sequence number is encoded big-endian and left-padded with
+// zeros to the 12-byte IV length, then XORed with the static write_iv. Returns
+// [] on a bad IV length (fail-closed). `seq` is a non-negative record sequence
+// number (a TLS 1.3 connection rekeys/closes long before the counter would
+// approach 2^63, so the arithmetic shift stays logical).
+fn tls13_record_nonce(write_iv: int[], seq: int) -> int[] {
+    let empty: int[] = [];
+    if write_iv.length != 12 { return empty; }
+
+    // 8-byte big-endian sequence number, left-padded to 12 bytes: bytes 0..3
+    // stay zero, bytes 4..11 hold the sequence number (MSB first).
+    let mut padded: int[] = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+    let mut k: int = 0;
+    loop {
+        if k >= 8 { break; }
+        padded[11 - k] = (seq >> (8 * k)) & 255;
+        k += 1;
+    }
+
+    let mut nonce: int[] = [];
+    let mut i: int = 0;
+    loop {
+        if i >= 12 { break; }
+        nonce.push(((write_iv[i] & 255) ^ padded[i]) & 255);
+        i += 1;
+    }
+    return nonce;
+}
+
+// ── TLSInnerPlaintext framing (RFC 8446 §5.2, §5.4) ──────────────
+// The decrypted content plus its true content type, recovered from a
+// TLSInnerPlaintext after the zero padding is stripped.
+struct TlsRecordPlaintext {
+    content_type: int;
+    content: int[];
+}
+
+// Build the TLSInnerPlaintext: content ‖ ContentType ‖ zeros[padding]
+// (RFC 8446 §5.2). Bytes are masked to `[0, 256)`.
+fn _encode_inner_plaintext(content: int[], content_type: int, padding: int) -> int[] {
+    let mut inner: int[] = [];
+    _append(inner, content);
+    inner.push(content_type & 255);
+    let mut p: int = 0;
+    loop {
+        if p >= padding { break; }
+        inner.push(0);
+        p += 1;
+    }
+    return inner;
+}
+
+// Recover content + type from a decrypted TLSInnerPlaintext by scanning from
+// the end for the last non-zero octet — the content type (RFC 8446 §5.2/§5.4).
+// Fails closed if the plaintext is all zeros (no content type present).
+fn _decode_inner_plaintext(inner: int[]) -> Result<TlsRecordPlaintext, string> {
+    let mut idx: int = inner.length - 1;
+    loop {
+        if idx < 0 { break; }
+        if (inner[idx] & 255) != 0 { break; }
+        idx -= 1;
+    }
+    if idx < 0 {
+        return Result.Err {
+            error: "tls13_open_record: no content type (all-zero plaintext)"
+        };
+    }
+
+    let content_type: int = inner[idx] & 255;
+    let mut content: int[] = [];
+    let mut i: int = 0;
+    loop {
+        if i >= idx { break; }
+        content.push(inner[i] & 255);
+        i += 1;
+    }
+    return Result.Ok {
+        value: TlsRecordPlaintext {
+            content_type: content_type,
+            content: content
+        }
+    };
+}
+
+// ── Seal / open ──────────────────────────────────────────────────
+// Seal `content` (of true type `content_type`) into a TLS 1.3 wire record
+// under `write_key` (32 bytes) / `write_iv` (12 bytes) at sequence number
+// `seq`, appending `padding` zero bytes to the TLSInnerPlaintext (RFC 8446
+// §5.2). Returns the full TLSCiphertext: a 5-byte header
+// (opaque_type=23 ‖ 0x0303 ‖ uint16 length) ‖ AEAD(encrypted_record). The
+// 5-byte header is the AEAD's additional authenticated data (§5.2). Returns []
+// on any bad length (fail-closed): bad key/IV length, negative padding, or a
+// content/record that exceeds the RFC size caps.
+fn tls13_seal_record(write_key: int[], write_iv: int[], seq: int, content_type: int, content: int[], padding: int) -> int[] {
+    let empty: int[] = [];
+    if write_key.length != 32 { return empty; }
+    if write_iv.length != 12 { return empty; }
+    if padding < 0 { return empty; }
+    if content.length > _max_plaintext() { return empty; }
+
+    let inner: int[] = _encode_inner_plaintext(content, content_type, padding);
+    // encrypted_record = AEAD ciphertext (inner.length bytes) ‖ tag.
+    let enc_len: int = inner.length + _tag_len();
+    if enc_len > _max_encrypted_record() { return empty; }
+
+    // AAD = the 5-byte TLSCiphertext header (RFC 8446 §5.2).
+    let mut header: int[] = [];
+    header.push(tls_content_type_application_data());
+    header.push(3);  // legacy_record_version 0x0303 (TLS 1.2), high byte
+    header.push(3);  // low byte
+    header.push((enc_len >> 8) & 255);
+    header.push(enc_len & 255);
+
+    let nonce: int[] = tls13_record_nonce(write_iv, seq);
+    if nonce.length != 12 { return empty; }
+
+    let sealed: int[] = chacha20poly1305_seal(write_key, nonce, header, inner);
+    if sealed.length != enc_len {
+        return empty;
+    }  // AEAD failed closed
+
+    let mut out: int[] = [];
+    _append(out, header);
+    _append(out, sealed);
+    return out;
+}
+
+// Open a TLS 1.3 wire record (`record` = 5-byte header ‖ encrypted_record)
+// under `read_key` (32 bytes) / `read_iv` (12 bytes) at sequence number `seq`.
+// Validates the header framing, reconstructs the AAD from the received header,
+// derives the per-record nonce, AEAD-opens the encrypted_record (constant-time
+// tag check), and strips the TLSInnerPlaintext padding to recover the content
+// and its true type. Fail-closed with `Err` on any malformed/oversized record,
+// a tag mismatch, or an all-zero plaintext. The work done is bounded by the
+// record length (all guards run before decryption).
+fn tls13_open_record(read_key: int[], read_iv: int[], seq: int, record: int[]) -> Result<TlsRecordPlaintext, string> {
+    if read_key.length != 32 {
+        return Result.Err { error: "tls13_open_record: bad key length" };
+    }
+    if read_iv.length != 12 {
+        return Result.Err { error: "tls13_open_record: bad iv length" };
+    }
+    if record.length < 5 {
+        return Result.Err { error: "tls13_open_record: short record header" };
+    }
+
+    let opaque_type: int = record[0] & 255;
+    if opaque_type != tls_content_type_application_data() {
+        return Result.Err {
+            error: "tls13_open_record: unexpected outer content type"
+        };
+    }
+
+    let declared: int = ((record[3] & 255) << 8) | (record[4] & 255);
+    let body_len: int = record.length - 5;
+    if declared != body_len {
+        return Result.Err { error: "tls13_open_record: length mismatch" };
+    }
+    if declared > _max_encrypted_record() {
+        return Result.Err { error: "tls13_open_record: record overflow" };
+    }
+    if declared < _tag_len() {
+        return Result.Err {
+            error: "tls13_open_record: encrypted_record shorter than tag"
+        };
+    }
+
+    // AAD = the 5 received header bytes verbatim (RFC 8446 §5.2); any tampered
+    // header byte fails the AEAD tag below.
+    let mut aad: int[] = [];
+    let mut h: int = 0;
+    loop {
+        if h >= 5 { break; }
+        aad.push(record[h] & 255);
+        h += 1;
+    }
+
+    let mut enc: int[] = [];
+    let mut e: int = 5;
+    loop {
+        if e >= record.length { break; }
+        enc.push(record[e] & 255);
+        e += 1;
+    }
+
+    let nonce: int[] = tls13_record_nonce(read_iv, seq);
+    if nonce.length != 12 {
+        return Result.Err { error: "tls13_open_record: bad iv length" };
+    }
+
+    let opened: Result<int[], string> = chacha20poly1305_open(read_key, nonce, aad, enc);
+    match opened {
+        Result.Err { error } => {
+            return Result.Err { error: error };
+        },
+        Result.Ok { value } => { return _open_decode_and_check(value); }
+    }
+}
+
+// Decode the recovered TLSInnerPlaintext, then enforce the content-length cap.
+// Split out of tls13_open_record so no `match` arm carries trailing control
+// flow. Remove once the pinned seed no longer reloads a sibling arm's pattern
+// binding when a `match` arm falls through into a nested `match`/`if` (SFN-378):
+// that miscompile emits IR failing the LLVM verifier with "Instruction does not
+// dominate all uses" (the sibling binding's alloca does not dominate the
+// reload). Every arm here terminates in an immediate `return`, which the seed
+// lowers correctly.
+fn _open_decode_and_check(inner: int[]) -> Result<TlsRecordPlaintext, string> {
+    let decoded: Result<TlsRecordPlaintext, string> = _decode_inner_plaintext(inner);
+    match decoded {
+        Result.Err { error } => {
+            return Result.Err { error: error };
+        },
+        Result.Ok { value } => { return _open_check_length(value); }
+    }
+}
+
+// Fail closed if the recovered content exceeds the RFC 8446 §5.1 plaintext cap.
+// Kept out of the `match` arm above for the same seed reason (SFN-378): an `if`
+// inside a `match` arm is trailing control flow and triggers the reload bug.
+fn _open_check_length(plaintext: TlsRecordPlaintext) -> Result<TlsRecordPlaintext, string> {
+    if plaintext.content.length > _max_plaintext() {
+        return Result.Err { error: "tls13_open_record: content overflow" };
+    }
+    return Result.Ok { value: plaintext };
+}
+
+export {
+    TlsRecordPlaintext,
+    tls_content_type_application_data,
+    tls13_record_nonce,
+    tls13_seal_record,
+    tls13_open_record
+};

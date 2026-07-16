@@ -46,6 +46,17 @@ export { chacha20_block, chacha20_xor } from "./chacha20";
 
 export { chacha20poly1305_seal, chacha20poly1305_open } from "./aead_chacha20poly1305";
 
+// TLS 1.3 record layer (RFC 8446 §5) — TLSCiphertext framing, per-record nonce
+// derivation, and AEAD seal/open with the record header as AAD (SFEP-0048
+// Phase B).
+export {
+    TlsRecordPlaintext,
+    tls_content_type_application_data,
+    tls13_record_nonce,
+    tls13_seal_record,
+    tls13_open_record
+} from "./tls13_record";
+
 // ── HMAC-SHA-256 (pure Sailfin) ──────────────────────────────────
 // RFC 2104 / RFC 4231. The digest is computed by the shared `int[]`-based
 // `hmac_sha256_bytes` (hkdf.sfn) over pure SHA-256; this hex wrapper decodes
