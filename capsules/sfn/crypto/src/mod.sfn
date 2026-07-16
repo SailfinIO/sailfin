@@ -3,6 +3,8 @@
 // Provides SHA-256 hashing (data integrity, checksums, content-addressable
 // storage), base64 encode/decode, and verify-only Ed25519 signature
 // verification (RFC 8032). No effects required — pure computation.
+import { hmac_sha256_bytes } from "./hkdf";
+
 export { ed25519_verify, ed25519_verify_utf8 } from "./ed25519";
 
 export { sha1_hex } from "./sha1";
@@ -44,83 +46,45 @@ export { chacha20_block, chacha20_xor } from "./chacha20";
 
 export { chacha20poly1305_seal, chacha20poly1305_open } from "./aead_chacha20poly1305";
 
-// ── OpenSSL HMAC-SHA256 surface (libcrypto) ──────────────────────
-// OpenSSL is already linked for the native TLS runtime (`-lcrypto`). The
-// externs carry no effect surface; `hmac_sha256` is deterministic pure
-// computation over its byte-string inputs.
-extern fn EVP_sha256() -> * u8;
-
-extern fn HMAC(evp_md: * u8, key: * u8, key_len: i32, data: * u8, data_len: usize, md: * u8, md_len: * u8) -> * u8;
-
-extern fn malloc(size: usize) -> * u8;
-
-extern fn free(ptr: * u8) -> void;
-
-extern fn memset(dst: * u8, byte: i32, n: usize) -> * u8;
-
-// Read one byte from an 8-aligned native allocation. Sailfin's current raw
-// pointer codegen does not expose a direct `load i8`, so this mirrors the
-// runtime OwnedBuf byte reader: load the enclosing little-endian i64 word,
-// then shift/mask the requested byte. `malloc` returns suitably aligned
-// storage, and the HMAC output buffer is 32 bytes (a multiple of 8).
-fn crypto_load_byte(addr: i64) -> int {
-    let word_addr: i64 = (addr / 8) * 8;
-    let shift: i64 = (addr - word_addr) * 8;
-    let slot: * i64 = word_addr as * i64;
-    let word: i64 = atomic_load(slot);
-    return (word >> shift) & 255;
-}
-
+// ── HMAC-SHA-256 (pure Sailfin) ──────────────────────────────────
+// RFC 2104 / RFC 4231. The digest is computed by the shared `int[]`-based
+// `hmac_sha256_bytes` (hkdf.sfn) over pure SHA-256; this hex wrapper decodes
+// the byte-oriented key/data strings, runs the MAC, and hex-encodes the 32
+// output bytes. Retiring the former `HMAC`/`EVP_sha256` libcrypto externs is
+// SFEP-0048 Phase D prep toward a zero-OpenSSL build.
 fn crypto_byte_hex(byte: int) -> string {
     let digits: string[] = ["0", "1", "2", "3", "4", "5", "6", "7", "8", "9", "a", "b", "c", "d", "e", "f",];
     return digits[(byte >> 4) & 15] + digits[byte & 15];
 }
 
 fn hmac_sha256(key: string, data: string) -> string {
-    // Compute HMAC-SHA-256 with OpenSSL and return the bare 64-character
-    // lowercase hex digest. Inputs are NUL-free byte-oriented strings, matching
-    // `sha256_hex` / `base64_encode`; embedded 0x00 bytes are unrepresentable
-    // under the current NUL-terminated `string` model. Allocation, ABI bounds,
-    // or OpenSSL failure yields
-    // the empty-string sentinel rather than exposing effects or panicking.
-    if key.length > 2147483647 { return ""; }
-
-    let md: * u8 = EVP_sha256();
-    if md as i64 == 0 { return ""; }
-
-    let out: * u8 = malloc(32 as usize);
-    if out as i64 == 0 { return ""; }
-    memset(out, 0, 32 as usize);
-
-    // `unsigned int *md_len`; allocate a full 8-byte word so OpenSSL's
-    // 4-byte write is inside an aligned word allocation. The wrapper's
-    // contract is fixed-size SHA-256 output, so success is the returned
-    // output pointer matching `out`; the exact length value is not read.
-    let out_len: * u8 = malloc(8 as usize);
-    if out_len as i64 == 0 {
-        free(out);
-        return "";
-    }
-    memset(out_len, 0, 8 as usize);
-
-    let got: * u8 = HMAC(md, key as * u8, key.length as i32, data as * u8, data.length as usize, out, out_len);
-    if got as i64 == 0 || got as i64 != out as i64 {
-        free(out_len);
-        free(out);
-        return "";
-    }
-
-    let mut hex: string = "";
-    let base: i64 = out as i64;
-    let mut i: i64 = 0;
+    // Return the bare 64-character lowercase hex HMAC-SHA-256 digest. Inputs are
+    // NUL-free byte-oriented strings, matching `sha256_hex` / `base64_encode`
+    // (`s[i]` is the i-th byte, `char_code` its 0-255 value); embedded 0x00
+    // bytes are unrepresentable under the current NUL-terminated `string` model.
+    let mut key_bytes: int[] = [];
+    let mut ki: int = 0;
     loop {
-        if i >= 32 { break; }
-        hex = hex + crypto_byte_hex(crypto_load_byte(base + i));
+        if ki >= key.length { break; }
+        key_bytes.push(char_code(key[ki]) & 255);
+        ki += 1;
+    }
+    let mut data_bytes: int[] = [];
+    let mut di: int = 0;
+    loop {
+        if di >= data.length { break; }
+        data_bytes.push(char_code(data[di]) & 255);
+        di += 1;
+    }
+
+    let mac: int[] = hmac_sha256_bytes(key_bytes, data_bytes);
+    let mut hex: string = "";
+    let mut i: int = 0;
+    loop {
+        if i >= mac.length { break; }
+        hex = hex + crypto_byte_hex(mac[i] & 255);
         i += 1;
     }
-
-    free(out_len);
-    free(out);
     return hex;
 }
 

@@ -1,7 +1,8 @@
-// Tests for sfn/crypto HMAC-SHA-256 (RFC 4231, OpenSSL-backed).
+// Tests for sfn/crypto HMAC-SHA-256 (RFC 4231), pure Sailfin.
 //
-// Known-answer vectors cover RFC 4231 §4.2 test cases 1-2 and pin the
-// lowercase bare-hex wrapper contract used by signed policy tokens.
+// Known-answer vectors cover RFC 4231 §4 test cases 1-4 and 6 and pin the
+// lowercase bare-hex wrapper contract used by signed policy tokens. Case 6
+// exercises the key-longer-than-block hashing branch of the pure MAC.
 import { hmac_sha256 } from "../src/mod";
 
 fn repeat_byte(byte: int, count: int) -> string {
@@ -15,6 +16,18 @@ fn repeat_byte(byte: int, count: int) -> string {
     return out;
 }
 
+// Bytes start, start+1, ..., start+count-1 as a string (RFC 4231 case 4 key).
+fn byte_range(start: int, count: int) -> string {
+    let mut out: string = "";
+    let mut i: int = 0;
+    loop {
+        if i >= count { break; }
+        out = out + char_from_code((start + i) & 255);
+        i += 1;
+    }
+    return out;
+}
+
 test "hmac_sha256: RFC 4231 test case 1" {
     let key = repeat_byte(11, 20);
     assert hmac_sha256(key, "Hi There") == "b0344c61d8db38535ca8afceaf0bf12b881dc200c9833da726e9376c2e32cff7";
@@ -22,4 +35,21 @@ test "hmac_sha256: RFC 4231 test case 1" {
 
 test "hmac_sha256: RFC 4231 test case 2" {
     assert hmac_sha256("Jefe", "what do ya want for nothing?") == "5bdcc146bf60754e6a042426089575c75a003f089d2739839dec58b964ec3843";
+}
+
+test "hmac_sha256: RFC 4231 test case 3" {
+    let key = repeat_byte(170, 20);
+    let data = repeat_byte(221, 50);
+    assert hmac_sha256(key, data) == "773ea91e36800e46854db8ebd09181a72959098b3ef8c122d9635514ced565fe";
+}
+
+test "hmac_sha256: RFC 4231 test case 4" {
+    let key = byte_range(1, 25);
+    let data = repeat_byte(205, 50);
+    assert hmac_sha256(key, data) == "82558a389a443c0ea4cc819899f2083a85f0faa3e578f8077a2e3ff46729665b";
+}
+
+test "hmac_sha256: RFC 4231 test case 6 (key longer than block)" {
+    let key = repeat_byte(170, 131);
+    assert hmac_sha256(key, "Test Using Larger Than Block-Size Key - Hash Key First") == "60e431591ee0b67f0d8a26aacbf5b77f8e0bc6213728c5140546040f0ee37f54";
 }

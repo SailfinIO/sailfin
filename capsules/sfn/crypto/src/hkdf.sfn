@@ -4,9 +4,9 @@
 // schedule's key-derivation primitive (SFEP-0048, Phase B).
 // Operates end-to-end on `int[]` byte arrays (never `string`) because PRK
 // and expand-output blocks are arbitrary binary that routinely contain 0x00
-// bytes, which a Sailfin `string` cannot represent. Ships its own pure
-// `int[]`-based SHA-256/HMAC-SHA-256 rather than the shipped string-based,
-// OpenSSL-backed `hmac_sha256` (`mod.sfn`).
+// bytes, which a Sailfin `string` cannot represent. `hmac_sha256_bytes` here
+// is the pure SHA-256/HMAC-SHA-256 source of truth: the string-based hex
+// wrapper `hmac_sha256` (`mod.sfn`) now delegates to it (SFEP-0048 Phase D).
 import { rotr32, store_u32_be } from "./bits";
 
 // FIPS 180-4 SHA-256 round constants K[0..63].
