@@ -44,7 +44,7 @@ make test             # Run the full suite
 make test-unit        # Sailfin-native unit tests
 make test-integration # Sailfin-native integration tests
 make test-e2e         # Sailfin-native e2e tests
-build/bin/sfn test <path> [-k <name>] # Target a suite dir, one test file, or named test
+build/bin/sfn test <path> [-k <name>] # Target a suite dir, one test file, or named test; jobs auto-size to CPU/RAM
 make bench            # Benchmark per-module compile time and memory
 make fetch-seed       # Download the pinned seed (bootstrap.toml [seed].version)
 make clean            # Remove dist/ artifacts
@@ -54,6 +54,9 @@ make mcp-server       # Build the MCP server wrapper
 
 Run examples: `make compile && build/bin/sfn run examples/basics/hello-world.sfn`.
 See `examples/README.md` for per-example capability requirements.
+`sfn test` runs files in parallel by default using a native CPU/RAM budget;
+use `--jobs N` for an invocation or `SAILFIN_TEST_JOBS=N` for a shell/CI pin.
+An explicit flag wins over the environment, and `--jobs 1` is the serial path.
 
 **Validation ladder — use the cheapest tool that catches the error.** `sfn check`
 and `make check` are different tools, not fast/slow versions of the same one:

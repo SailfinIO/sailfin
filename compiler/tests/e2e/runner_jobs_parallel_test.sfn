@@ -3,9 +3,9 @@
 //
 // Native replacement for `test_runner_jobs_parallel.sh` (test-infra
 // Phase 3, epic #842). The multi-file runner's per-file children run
-// concurrently through a bounded worker pool when `--jobs N` (N > 1)
-// is passed; `--jobs 1` (the default) keeps the serial path byte-
-// identical to the pre-#1236 runner. This test pins the equivalence
+// concurrently through a bounded worker pool when the resolved jobs value
+// is greater than 1; `--jobs 1` keeps the serial path byte-identical to the
+// pre-#1236 runner. This test pins the equivalence
 // contract from the issue's acceptance criteria:
 //
 //   1. `--jobs 4` yields the SAME pass/fail tally and the same coherent
@@ -91,7 +91,7 @@ fn _count_occurrences(haystack: string, needle: string) -> int {
 test "human mode: --jobs 4 banner tally matches --jobs 1 (#1236)" ![io] {
     let dir = _make_pass_dir("t1");
 
-    let serial_exit = process.run_capture([_sfn_bin(), "test", dir], _child_env());
+    let serial_exit = process.run_capture([_sfn_bin(), "test", dir, "--jobs", "1"], _child_env());
     let serial_out = process.capture_take_stdout();
     let _ = process.capture_take_stderr();
 
@@ -118,7 +118,7 @@ test "human mode: --jobs 4 banner tally matches --jobs 1 (#1236)" ![io] {
 test "--json: --jobs 4 aggregates match --jobs 1 (single frame) (#1236)" ![io] {
     let dir = _make_pass_dir("t2");
 
-    let serial_exit = process.run_capture([_sfn_bin(), "test", dir, "--json"], _child_env());
+    let serial_exit = process.run_capture([_sfn_bin(), "test", dir, "--jobs", "1", "--json"], _child_env());
     let serial_out = process.capture_take_stdout();
     let _ = process.capture_take_stderr();
 

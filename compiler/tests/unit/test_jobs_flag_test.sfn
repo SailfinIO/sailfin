@@ -1,10 +1,6 @@
-// #1236: unit coverage for `_parse_jobs_value`, the `sfn test --jobs N`
-// value parser. The flag gates the multi-file runner's bounded worker
-// pool, so the parser must accept exactly the plain positive decimal
-// integers in [1, 256] and reject everything else — `handle_test_command`
-// maps a `-1` return to a usage error (exit 2) rather than silently
-// running serial or unbounded.
-import { _parse_jobs_value } from "../../src/cli/commands/test";
+// #1236 / SFN-91: unit coverage for the explicit jobs parser and the pure
+// RAM+CPU budget behind the native default.
+import { _parse_jobs_value, _test_jobs_budget } from "../../src/cli/commands/test";
 
 test "jobs: plain positive integer parses" {
     assert _parse_jobs_value("4") == 4;
@@ -40,4 +36,19 @@ test "jobs: trailing garbage rejected" {
 
 test "jobs: leading whitespace rejected" {
     assert _parse_jobs_value(" 4") == -1;
+}
+
+test "jobs: auto budget is bounded by CPU and memory (SFN-91)" {
+    assert _test_jobs_budget(17179869184, 8, false) == 8;
+    assert _test_jobs_budget(1610612736, 8, false) == 4;
+}
+
+test "jobs: auto budget floors small and unknown hosts to serial (SFN-91)" {
+    assert _test_jobs_budget(268435456, 8, false) == 1;
+    assert _test_jobs_budget(0, 8, false) == 1;
+}
+
+test "jobs: auto budget applies global and Darwin caps (SFN-91)" {
+    assert _test_jobs_budget(68719476736, 64, false) == 16;
+    assert _test_jobs_budget(68719476736, 64, true) == 2;
 }

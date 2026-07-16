@@ -203,12 +203,9 @@ fn _suite_name_from_path(path: string) -> string {
 // parsed worker count, or `-1` for anything that is not a plain
 // positive decimal integer in [1, 256]. The 256 ceiling is a sanity
 // cap, not a tuning hint: every pooled child is a full compiler
-// invocation whose leaf compile can peak at multiple GB, so callers
-// must size N to the machine's RAM budget — each child runs under
-// its own 8 GB virtual-memory cap, and CI runners (macOS ~7 GB)
-// sustain only a small N. The conservative default is `--jobs 1`
-// (the serial path), which stays byte-identical to the pre-#1236
-// runner.
+// invocation whose leaf compile can peak at multiple GB. Explicit
+// `--jobs 1` keeps the byte-identical serial path; absent an override,
+// `_resolve_test_jobs` chooses a RAM+CPU-aware native default.
 fn _parse_jobs_value(text: string) -> int {
     if text.length == 0 { return -1; }
     let mut i: int = 0;
@@ -224,6 +221,84 @@ fn _parse_jobs_value(text: string) -> int {
     }
     if n < 1 { return -1; }
     return n;
+}
+
+// SFN-91: pure half of the native test-worker budget. Mirrors the retired
+// Makefile helper's `min(cores, RAM/384 MiB)` policy, with a floor of 1,
+// global cap of 16, and Darwin cap of 2 for nested cold-build tests. Unknown
+// RAM is deliberately fail-closed to serial: the test pool has no shared
+// RLIMIT_AS backstop, so CPU-only fan-out can OOM a small host.
+fn _test_jobs_budget(memsize_bytes: int, nproc: int, is_darwin: boolean) -> int {
+    if memsize_bytes <= 0 { return 1; }
+    let mut cores = nproc;
+    if cores < 1 { cores = 1; }
+    let per_job_bytes: int = 402653184;
+    let mut by_mem = memsize_bytes / per_job_bytes;
+    if by_mem < 1 { by_mem = 1; }
+    let mut jobs = cores;
+    if by_mem < jobs { jobs = by_mem; }
+    if is_darwin && jobs > 2 { jobs = 2; }
+    if jobs > 16 { jobs = 16; }
+    if jobs < 1 { jobs = 1; }
+    return jobs;
+}
+
+// Native host probe for test-runner parallelism. This reuses the compiler's
+// popen-backed `_shell_read_cmd` primitive (also used by the emit fan-out
+// clamp) rather than depending on the Makefile or a helper script. Linux and
+// Darwin have reliable probes; unknown/Windows shells stay serial.
+fn _resolve_auto_test_jobs() -> int ![io] {
+    let host = _shell_read_cmd("uname -s 2>/dev/null");
+    let mut is_darwin: boolean = false;
+    let mut cores_text: string = "";
+    let mut mem_text: string = "";
+    if _has_prefix_cmd(host, "Linux") {
+        cores_text = _shell_read_cmd("{ nproc 2>/dev/null || getconf _NPROCESSORS_ONLN 2>/dev/null || echo 1; }");
+        mem_text = _shell_read_cmd("awk '/^MemTotal:/{printf \"%d\", $2*1024; exit}' /proc/meminfo 2>/dev/null");
+    } else {
+        if _has_prefix_cmd(host, "Darwin") {
+            is_darwin = true;
+            cores_text = _shell_read_cmd("sysctl -n hw.ncpu 2>/dev/null");
+            mem_text = _shell_read_cmd("sysctl -n hw.memsize 2>/dev/null");
+        } else { return 1; }
+    }
+    let cores = _parse_positive_decimal_cmd(cores_text);
+    let memory = _parse_positive_decimal_cmd(mem_text);
+    return _test_jobs_budget(memory, cores, is_darwin);
+}
+
+// Parse an unbounded positive decimal host measurement. `_parse_jobs_value`
+// intentionally caps at 256, which is correct for worker counts but not RAM
+// byte totals.
+fn _parse_positive_decimal_cmd(text: string) -> int {
+    if text.length == 0 { return -1; }
+    let mut value: int = 0;
+    let mut i: int = 0;
+    loop {
+        if i >= text.length { break; }
+        let c = char_code_at_text(text, i);
+        if c < 48 { return -1; }
+        if c > 57 { return -1; }
+        value = value * 10 + (c - 48);
+        i += 1;
+    }
+    if value < 1 { return -1; }
+    return value;
+}
+
+// Resolve test jobs with one precedence contract shared by direct tests and
+// `sfn dev shard run`: explicit flag > SAILFIN_TEST_JOBS > host auto-budget.
+// A malformed environment override fails closed to serial; explicit range
+// errors are returned to the caller so the normal usage error remains intact.
+fn _resolve_test_jobs(matches: Matches) -> int ![io] {
+    if has(matches, "jobs") { return get_int(matches, "jobs"); }
+    let env_jobs = _get_env_cmd("SAILFIN_TEST_JOBS");
+    if env_jobs.length > 0 {
+        let parsed = _parse_jobs_value(env_jobs);
+        if parsed < 1 { return 1; }
+        return parsed;
+    }
+    return _resolve_auto_test_jobs();
 }
 
 // `sailfin test --shard I/N` partitioning (issue #1237, test-infra
@@ -345,18 +420,14 @@ fn run(matches: Matches, ctx: CliContext) -> int ![clock, io, net] {
     let name_filter: string = get_or(matches, "k", "");
     let tag_filter: string = get_or(matches, "tag", "");
     // `--jobs` is a `flag_int`: `parse()` already rejected non-integer
-    // input. Preserve the legacy [1, 256] range guard (exit 2) here —
-    // `flag_int` validates integer-ness, not range. Absent → 1 (the
-    // serial path), byte-identical to the pre-migration default.
-    let mut jobs: int = 1;
-    if has(matches, "jobs") {
-        jobs = get_int(matches, "jobs");
-        if jobs < 1 || jobs > 256 {
-            print("sfn test: --jobs requires a positive integer in [1, 256] (got '"
-                + number_to_string(jobs)
-                + "')");
-            return 2;
-        }
+    // input. Preserve the [1, 256] range guard (exit 2) here; absent flags
+    // resolve through SAILFIN_TEST_JOBS and then the native host budget.
+    let jobs: int = _resolve_test_jobs(matches);
+    if jobs < 1 || jobs > 256 {
+        print("sfn test: --jobs requires a positive integer in [1, 256] (got '"
+            + number_to_string(jobs)
+            + "')");
+        return 2;
     }
     // `--shard I/N` (issue #1237): run only the I-th of N file-count-
     // balanced shards of the discovered surface. Absent → no sharding
@@ -2845,6 +2916,8 @@ export {
     _collect_test_files_cmd,
     _suite_name_from_path,
     _parse_jobs_value,
+    _resolve_test_jobs,
+    _test_jobs_budget,
     _parse_shard_index,
     _parse_shard_total,
     _shard_keeps_index,
