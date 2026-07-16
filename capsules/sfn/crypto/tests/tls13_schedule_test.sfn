@@ -1,0 +1,176 @@
+// capsules/sfn/crypto/tests/tls13_schedule_test.sfn
+//
+// Known-answer coverage for the TLS 1.3 key schedule (RFC 8446 §7.1).
+//
+// The SHA-256 ladder is checked end-to-end against the canonical RFC 8448
+// ("TLS 1.3 Traces") §3 "Simple 1-RTT Handshake" (cipher suite
+// TLS_AES_128_GCM_SHA256): early -> derived -> handshake -> {c,s} hs traffic
+// -> derived -> master -> {c,s} ap traffic, plus the record-layer key/iv
+// HKDF-Expand-Label derivations. RFC 8448 has no SHA-384 trace, so the SHA-384
+// path (TLS_AES_256_GCM_SHA384) is checked against reference vectors computed
+// with Python's `hmac`/`hashlib` per RFC 8446 §7.1 (a wrong byte anywhere in
+// the vendored SHA-384/HMAC/HKDF stack fails these). hkdf_expand_label's
+// HkdfLabel byte encoding is validated implicitly: reproducing RFC 8448's
+// `expanded` outputs is only possible with the exact `"tls13 " ‖ label`
+// structure.
+import {
+    hkdf_expand_label,
+    derive_secret,
+    tls13_early_secret,
+    tls13_handshake_secret,
+    tls13_master_secret,
+    tls13_client_handshake_traffic_secret,
+    tls13_server_handshake_traffic_secret,
+    tls13_client_application_traffic_secret,
+    tls13_server_application_traffic_secret
+} from "../src/tls13_schedule";
+
+// Parse an even-length lowercase hex string into an int[] of bytes.
+fn hexb(s: string) -> int[] {
+    let mut out: int[] = [];
+    let mut i: int = 0;
+    loop {
+        if i >= s.length { break; }
+        let hi: int = _hexval(s[i]);
+        let lo: int = _hexval(s[i + 1]);
+        out.push(((hi << 4) | lo) & 255);
+        i += 2;
+    }
+    return out;
+}
+
+fn _hexval(c: string) -> int {
+    let code: int = char_code(c) & 255;
+    if code >= 48 && code <= 57 {
+        return code - 48;
+    }  // '0'-'9'
+    if code >= 97 && code <= 102 {
+        return code - 97 + 10;
+    }  // 'a'-'f'
+    return 0;
+}
+
+fn eq_bytes(a: int[], b: int[]) -> bool {
+    if a.length != b.length { return false; }
+    let mut i: int = 0;
+    loop {
+        if i >= a.length { break; }
+        if a[i] != b[i] { return false; }
+        i += 1;
+    }
+    return true;
+}
+
+// A zero-length byte array (no PSK; empty context).
+fn empty() -> int[] { return []; }
+
+// ── RFC 8448 §3: SHA-256 secret ladder ───────────────────────────
+test "tls13: RFC 8448 early secret (no PSK)" {
+    let early: int[] = tls13_early_secret(empty(), 32);
+    assert eq_bytes(early, hexb("33ad0a1c607ec03b09e6cd9893680ce210adf300aa1f2660e1b22e10f170f92a"));
+}
+
+test "tls13: RFC 8448 handshake secret" {
+    let early: int[] = tls13_early_secret(empty(), 32);
+    let shared: int[] = hexb("8bd4054fb55b9d63fdfbacf9f04b9f0d35e6d63f537563efd46272900f89492d");
+    let hs: int[] = tls13_handshake_secret(early, shared);
+    assert eq_bytes(hs, hexb("1dc826e93606aa6fdc0aadc12f741b01046aa6b99f691ed221a9f0ca043fbeac"));
+}
+
+test "tls13: RFC 8448 client/server handshake traffic secrets" {
+    let early: int[] = tls13_early_secret(empty(), 32);
+    let shared: int[] = hexb("8bd4054fb55b9d63fdfbacf9f04b9f0d35e6d63f537563efd46272900f89492d");
+    let hs: int[] = tls13_handshake_secret(early, shared);
+    let th: int[] = hexb("860c06edc07858ee8e78f0e7428c58edd6b43f2ca3e6e95f02ed063cf0e1cad8");
+    let chs: int[] = tls13_client_handshake_traffic_secret(hs, th);
+    let shs: int[] = tls13_server_handshake_traffic_secret(hs, th);
+    assert eq_bytes(chs, hexb("b3eddb126e067f35a780b3abf45e2d8f3b1a950738f52e9600746a0e27a55a21"));
+    assert eq_bytes(shs, hexb("b67b7d690cc16c4e75e54213cb2d37b4e9c912bcded9105d42befd59d391ad38"));
+}
+
+test "tls13: RFC 8448 master secret" {
+    let early: int[] = tls13_early_secret(empty(), 32);
+    let shared: int[] = hexb("8bd4054fb55b9d63fdfbacf9f04b9f0d35e6d63f537563efd46272900f89492d");
+    let hs: int[] = tls13_handshake_secret(early, shared);
+    let master: int[] = tls13_master_secret(hs);
+    assert eq_bytes(master, hexb("18df06843d13a08bf2a449844c5f8a478001bc4d4c627984d5a41da8d0402919"));
+}
+
+test "tls13: RFC 8448 client/server application traffic secrets" {
+    let early: int[] = tls13_early_secret(empty(), 32);
+    let shared: int[] = hexb("8bd4054fb55b9d63fdfbacf9f04b9f0d35e6d63f537563efd46272900f89492d");
+    let hs: int[] = tls13_handshake_secret(early, shared);
+    let master: int[] = tls13_master_secret(hs);
+    let th: int[] = hexb("9608102a0f1ccc6db6250b7b7e417b1a000eaada3daae4777a7686c9ff83df13");
+    let cap: int[] = tls13_client_application_traffic_secret(master, th);
+    let sap: int[] = tls13_server_application_traffic_secret(master, th);
+    assert eq_bytes(cap, hexb("9e40646ce79a7f9dc05af8889bce6552875afa0b06df0087f792ebb7c17504a5"));
+    assert eq_bytes(sap, hexb("a11af9f05531f856ad47116b45a950328204b4f44bfb6b3a4b4f1f3fcb631643"));
+}
+
+// hkdf_expand_label with an arbitrary output length + empty context is the
+// record-layer traffic-key/iv calc (RFC 8446 §7.3). Derived from the RFC 8448
+// §3 client application traffic secret.
+test "tls13: SHA-256 traffic key/iv via hkdf_expand_label" {
+    let cap: int[] = hexb("9e40646ce79a7f9dc05af8889bce6552875afa0b06df0087f792ebb7c17504a5");
+    let key: int[] = hkdf_expand_label(cap, "key", empty(), 16);
+    let iv: int[] = hkdf_expand_label(cap, "iv", empty(), 12);
+    assert eq_bytes(key, hexb("17422dda596ed5d9acd890e3c63f5051"));
+    assert eq_bytes(iv, hexb("5b78923dee08579033e523d9"));
+}
+
+// ── SHA-384 path (reference vectors, RFC 8446 §7.1) ──────────────
+test "tls13: SHA-384 early + handshake + traffic secrets" {
+    let early: int[] = tls13_early_secret(empty(), 48);
+    assert eq_bytes(early, hexb("7ee8206f5570023e6dc7519eb1073bc4e791ad37b5c382aa10ba18e2357e716971f9362f2c2fe2a76bfd78dfec4ea9b5"));
+
+    let shared: int[] = hexb("000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f202122232425262728292a2b2c2d2e2f");
+    let hs: int[] = tls13_handshake_secret(early, shared);
+    assert eq_bytes(hs, hexb("deb1becd84738bdcbf73bdd28bd2209d2fe51b84986a4fbb63d7e3902c00a7d867db2d8e1af869b952dcab5d7f482cab"));
+
+    let th: int[] = hexb("2de987d4a4a88e1ee8c28df89d54de8db56a35d493366a0c6a55bc16f5ef942c2473b04fecd3b9cc454d6e8c2ddc1abd");
+    let chs: int[] = tls13_client_handshake_traffic_secret(hs, th);
+    let shs: int[] = tls13_server_handshake_traffic_secret(hs, th);
+    assert eq_bytes(chs, hexb("d910d078b67f1c535983c00debfa06e16b3202d6111de0ad3929e5a9097e0be3f77bd48df5ce2f42a021dcc207365bae"));
+    assert eq_bytes(shs, hexb("7dcde23aaf55d446723839a71f5a5762de0421a23eded371622d4a88561cdc5790a1355c268d16eba8f285e3fbe04149"));
+}
+
+test "tls13: SHA-384 traffic key/iv via hkdf_expand_label" {
+    let chs: int[] = hexb("d910d078b67f1c535983c00debfa06e16b3202d6111de0ad3929e5a9097e0be3f77bd48df5ce2f42a021dcc207365bae");
+    let key: int[] = hkdf_expand_label(chs, "key", empty(), 16);
+    let iv: int[] = hkdf_expand_label(chs, "iv", empty(), 12);
+    assert eq_bytes(key, hexb("c9ec0d6fe6a49292c43294d20a3a2690"));
+    assert eq_bytes(iv, hexb("9419c6be39cacb62fd41dbd9"));
+}
+
+// ── derive_secret and fail-closed behavior ───────────────────────
+test "tls13: derive_secret output length matches hash length" {
+    let secret32: int[] = hexb("1dc826e93606aa6fdc0aadc12f741b01046aa6b99f691ed221a9f0ca043fbeac");
+    let th32: int[] = hexb("860c06edc07858ee8e78f0e7428c58edd6b43f2ca3e6e95f02ed063cf0e1cad8");
+    let out32: int[] = derive_secret(secret32, "c hs traffic", th32);
+    assert out32.length == 32;
+
+    let secret48: int[] = hexb("deb1becd84738bdcbf73bdd28bd2209d2fe51b84986a4fbb63d7e3902c00a7d867db2d8e1af869b952dcab5d7f482cab");
+    let th48: int[] = hexb("2de987d4a4a88e1ee8c28df89d54de8db56a35d493366a0c6a55bc16f5ef942c2473b04fecd3b9cc454d6e8c2ddc1abd");
+    let out48: int[] = derive_secret(secret48, "c hs traffic", th48);
+    assert out48.length == 48;
+}
+
+test "tls13: hkdf_expand_label fails closed on an invalid secret length" {
+    let bad: int[] = hexb("077709362c2e32df0ddc3f0dc47bba63");  // 16 bytes, neither 32 nor 48
+    let out: int[] = hkdf_expand_label(bad, "key", empty(), 16);
+    assert out.length == 0;
+}
+
+test "tls13: early secret fails closed on an invalid hash length" {
+    let out: int[] = tls13_early_secret(empty(), 20);
+    assert out.length == 0;
+}
+
+// The uint16 HkdfLabel length field admits up to 65535, but HKDF-Expand caps
+// output at 255*HashLen; a request in that gap must still fail closed.
+test "tls13: hkdf_expand_label fails closed on an over-max output length" {
+    let secret: int[] = hexb("9e40646ce79a7f9dc05af8889bce6552875afa0b06df0087f792ebb7c17504a5");  // 32 bytes
+    let out: int[] = hkdf_expand_label(secret, "key", empty(), 9000);  // > 255*32 = 8160
+    assert out.length == 0;
+}
