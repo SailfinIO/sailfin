@@ -3,9 +3,15 @@
 // Match case condition lowering (split from instructions_match.sfn).
 import { NativeFunction } from "../../native_ir";
 import { lower_expression } from "../expression_lowering/native/core";
-import { emit_boolean_and, emit_comparison_instruction, harmonise_operands } from "../expression_lowering/native/core_operands";
+import {
+    emit_boolean_and,
+    emit_comparison_instruction,
+    harmonise_operands,
+    single_i8_union_variant_index
+} from "../expression_lowering/native/core_operands";
 import { parse_enum_literal, parse_struct_pattern } from "../expression_lowering/native/core_parse";
-import { is_union_llvm_type, parse_union_payload_types } from "../expression_lowering/native/core_text";
+import { is_null_literal, is_union_llvm_type, parse_union_payload_types } from "../expression_lowering/native/core_text";
+import { split_union_annotations } from "../expression_lowering/native/statement_type_mapping";
 import { format_temp_name } from "../expressions_helpers";
 import { empty_string_constant_set, merge_string_constants } from "../strings";
 import {
@@ -38,6 +44,23 @@ import {
 } from "../types";
 import { number_to_string, trim_text } from "../utils";
 import { lower_condition_to_i1 } from "./instructions_condition";
+
+// SFN-347: locate the union payload slot that carries the `null` arm so a
+// bare `null:` match case can tag-compare against it. Prefer the declared
+// annotation (e.g. `int | null`) — its `|`-split index is the discriminant
+// SFN-346 stamps into the tag, and it disambiguates when several payloads
+// share the `i8*` shape (`any | null`). When the annotation is absent or
+// unhelpful, fall back to the sole `i8*` slot in the union's LLVM type.
+fn _match_null_variant_index(subject_type_annotation: string, subject_llvm_type: string) -> int {
+    let parts = split_union_annotations(trim_text(subject_type_annotation));
+    let mut index: int = 0;
+    loop {
+        if index >= parts.length { break; }
+        if trim_text(parts[index]) == "null" { return index; }
+        index += 1;
+    }
+    return single_i8_union_variant_index(subject_llvm_type);
+}
 
 fn lower_match_case_condition(function_name: string, subject_operand: LLVMOperand, subject_type_annotation: string, case: MatchCaseStructure, bindings: ParameterBinding[], locals: LocalBinding[], temp_index: int, lines: string[], functions: NativeFunction[], context: TypeContext) -> MatchCaseCondition ![io] {
     let mut diagnostics: string[] = [];
@@ -242,115 +265,156 @@ fn lower_match_case_condition(function_name: string, subject_operand: LLVMOperan
         } else {
             // Union/struct pattern matching: allow `TypeName { field }` against inline unions.
             if is_union_llvm_type(subject_operand.llvm_type) {
-                let union_parts = parse_union_payload_types(subject_operand.llvm_type);
-                let struct_parse = parse_struct_pattern(case.pattern);
-                if struct_parse.recognized {
-                    if struct_parse.success {
-                        let info = find_struct_info_by_name(context, struct_parse.type_name);
-                        if info != null {
-                            // Find which union variant corresponds to this struct.
-                            let mut idx: int = 0;
-                            let mut found_index: int = -1;
-                            loop {
-                                if idx >= union_parts.length { break; }
-                                let part = union_parts[idx];
-                                let mut _if234: boolean = false;
-                                if part == info.llvm_name + "*" {
-                                    _if234 = true;
-                                }
-                                if part == info.llvm_name { _if234 = true; }
-                                if _if234 {
-                                    found_index = idx;
-                                    break;
-                                }
-                                idx += 1;
-                            }
-                            if found_index >= 0 {
-                                // Extract and compare tag.
-                                let tag_temp = format_temp_name(current_temp);
-                                current_temp += 1;
-                                current_lines.push("  " + tag_temp
-                                    + " = extractvalue "
-                                    + subject_operand.llvm_type
-                                    + " "
-                                    + subject_operand.value
-                                    + ", 0");
-                                let tag_operand = LLVMOperand {
-                                    llvm_type: "i32",
-                                    value: tag_temp
-                                };
-                                let expected_tag_value = number_to_string(found_index);
-                                let expected_tag = LLVMOperand {
-                                    llvm_type: "i32",
-                                    value: expected_tag_value
-                                };
-                                let comparison = emit_comparison_instruction("==", tag_operand, expected_tag, current_temp, current_lines);
-                                let mut _ci5: int = 0;
+                if is_null_literal(case.pattern) {
+                    // SFN-347: a bare `null:` arm against an inline union. The
+                    // subject is the tagged `{ i32, <payloads...> }` aggregate
+                    // SFN-346 builds for `let x: T | null = null`. Recognise it
+                    // by extracting the discriminant (field 0) and comparing to
+                    // the null variant's index — the same tag-compare the enum
+                    // and `TypeName { field }` branches use — instead of
+                    // dropping into the scalar fallback, which cannot compare
+                    // `i8* null` against the aggregate and yields a null
+                    // condition (an unconditional fallthrough to `_`).
+                    let null_index = _match_null_variant_index(subject_type_annotation, subject_operand.llvm_type);
+                    if null_index >= 0 {
+                        let tag_temp = format_temp_name(current_temp);
+                        current_temp += 1;
+                        current_lines.push("  " + tag_temp + " = extractvalue "
+                            + subject_operand.llvm_type
+                            + " "
+                            + subject_operand.value
+                            + ", 0");
+                        let tag_operand = LLVMOperand {
+                            llvm_type: "i32",
+                            value: tag_temp
+                        };
+                        let expected_tag = LLVMOperand {
+                            llvm_type: "i32",
+                            value: number_to_string(null_index)
+                        };
+                        let comparison = emit_comparison_instruction("==", tag_operand, expected_tag, current_temp, current_lines);
+                        let mut _cin: int = 0;
+                        loop {
+                            if _cin >= comparison.diagnostics.length { break; }
+                            diagnostics.push(comparison.diagnostics[_cin]);
+                            _cin += 1;
+                        }
+                        current_lines = comparison.lines;
+                        current_temp = comparison.temp_index;
+                        condition_operand = comparison.operand;
+                        union_variant_index = null_index;
+                    }
+                } else {
+                    let union_parts = parse_union_payload_types(subject_operand.llvm_type);
+                    let struct_parse = parse_struct_pattern(case.pattern);
+                    if struct_parse.recognized {
+                        if struct_parse.success {
+                            let info = find_struct_info_by_name(context, struct_parse.type_name);
+                            if info != null {
+                                // Find which union variant corresponds to this struct.
+                                let mut idx: int = 0;
+                                let mut found_index: int = -1;
                                 loop {
-                                    if _ci5 >= comparison.diagnostics.length {
+                                    if idx >= union_parts.length { break; }
+                                    let part = union_parts[idx];
+                                    let mut _if234: boolean = false;
+                                    if part == info.llvm_name + "*" {
+                                        _if234 = true;
+                                    }
+                                    if part == info.llvm_name { _if234 = true; }
+                                    if _if234 {
+                                        found_index = idx;
                                         break;
                                     }
-                                    diagnostics.push(comparison.diagnostics[_ci5]);
-                                    _ci5 += 1;
+                                    idx += 1;
                                 }
-                                current_lines = comparison.lines;
-                                current_temp = comparison.temp_index;
-                                condition_operand = comparison.operand;
-
-                                // Collect binding info for any `{ field }` bindings.
-                                let mut fidx: int = 0;
-                                loop {
-                                    if fidx >= struct_parse.fields.length {
-                                        break;
-                                    }
-                                    let pattern_field = struct_parse.fields[fidx];
-                                    if pattern_field.value.length == 0 {
-                                        let mut sfi: int = 0;
-                                        let mut field_info: StructFieldInfo? = null;
-                                        loop {
-                                            if sfi >= info.fields.length {
-                                                break;
-                                            }
-                                            if info.fields[sfi].name == pattern_field.name {
-                                                field_info = info.fields[sfi];
-                                                break;
-                                            }
-                                            sfi += 1;
+                                if found_index >= 0 {
+                                    // Extract and compare tag.
+                                    let tag_temp = format_temp_name(current_temp);
+                                    current_temp += 1;
+                                    current_lines.push("  " + tag_temp
+                                        + " = extractvalue "
+                                        + subject_operand.llvm_type
+                                        + " "
+                                        + subject_operand.value
+                                        + ", 0");
+                                    let tag_operand = LLVMOperand {
+                                        llvm_type: "i32",
+                                        value: tag_temp
+                                    };
+                                    let expected_tag_value = number_to_string(found_index);
+                                    let expected_tag = LLVMOperand {
+                                        llvm_type: "i32",
+                                        value: expected_tag_value
+                                    };
+                                    let comparison = emit_comparison_instruction("==", tag_operand, expected_tag, current_temp, current_lines);
+                                    let mut _ci5: int = 0;
+                                    loop {
+                                        if _ci5 >= comparison.diagnostics.length {
+                                            break;
                                         }
-                                        if field_info != null {
-                                            let mut updated_structs = union_struct_bindings;
-                                            updated_structs = updated_structs.push(MatchStructFieldBinding {
-                                                field_name: pattern_field.name, field_type: field_info.llvm_type, field_index: field_info.index
-                                            });
-                                            union_struct_bindings = updated_structs;
+                                        diagnostics.push(comparison.diagnostics[_ci5]);
+                                        _ci5 += 1;
+                                    }
+                                    current_lines = comparison.lines;
+                                    current_temp = comparison.temp_index;
+                                    condition_operand = comparison.operand;
+
+                                    // Collect binding info for any `{ field }` bindings.
+                                    let mut fidx: int = 0;
+                                    loop {
+                                        if fidx >= struct_parse.fields.length {
+                                            break;
+                                        }
+                                        let pattern_field = struct_parse.fields[fidx];
+                                        if pattern_field.value.length == 0 {
+                                            let mut sfi: int = 0;
+                                            let mut field_info: StructFieldInfo? = null;
+                                            loop {
+                                                if sfi >= info.fields.length {
+                                                    break;
+                                                }
+                                                if info.fields[sfi].name == pattern_field.name {
+                                                    field_info = info.fields[sfi];
+                                                    break;
+                                                }
+                                                sfi += 1;
+                                            }
+                                            if field_info != null {
+                                                let mut updated_structs = union_struct_bindings;
+                                                updated_structs = updated_structs.push(MatchStructFieldBinding {
+                                                    field_name: pattern_field.name, field_type: field_info.llvm_type, field_index: field_info.index
+                                                });
+                                                union_struct_bindings = updated_structs;
+                                            } else {
+                                                diagnostics.push("llvm lowering: match pattern field `"
+                                                    + pattern_field.name
+                                                    + "` not found in struct `"
+                                                    + struct_parse.type_name
+                                                    + "`");
+                                            }
                                         } else {
-                                            diagnostics.push("llvm lowering: match pattern field `"
+                                            diagnostics.push("llvm lowering: match struct field literal patterns are not supported for `"
                                                 + pattern_field.name
-                                                + "` not found in struct `"
-                                                + struct_parse.type_name
                                                 + "`");
                                         }
-                                    } else {
-                                        diagnostics.push("llvm lowering: match struct field literal patterns are not supported for `"
-                                            + pattern_field.name
-                                            + "`");
+                                        fidx += 1;
                                     }
-                                    fidx += 1;
-                                }
 
-                                union_variant_index = found_index;
-                                union_struct_info = info;
+                                    union_variant_index = found_index;
+                                    union_struct_info = info;
+                                } else {
+                                    diagnostics.push("llvm lowering: match struct pattern `"
+                                        + struct_parse.type_name
+                                        + "` does not match union type `"
+                                        + subject_operand.llvm_type
+                                        + "`");
+                                }
                             } else {
-                                diagnostics.push("llvm lowering: match struct pattern `"
+                                diagnostics.push("llvm lowering: match pattern references unknown struct `"
                                     + struct_parse.type_name
-                                    + "` does not match union type `"
-                                    + subject_operand.llvm_type
                                     + "`");
                             }
-                        } else {
-                            diagnostics.push("llvm lowering: match pattern references unknown struct `"
-                                + struct_parse.type_name
-                                + "`");
                         }
                     }
                 }

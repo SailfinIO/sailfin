@@ -1,0 +1,16 @@
+fn main() ![io] {
+    // SFN-347: a null-active inline union must select the `null:` arm
+    // instead of falling through to `_`.
+    let h: int | null = null;
+    match h {
+        null: print("h is null");
+        _: print("h not null");
+    }
+    // Live-payload union match behavior stays unchanged: the int-active
+    // arm still falls through to `_`.
+    let g: int | null = 5;
+    match g {
+        null: print("g is null");
+        _: print("g not null");
+    }
+}
