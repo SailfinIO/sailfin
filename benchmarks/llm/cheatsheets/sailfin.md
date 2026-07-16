@@ -37,8 +37,24 @@ let code = char_code(ch);
 For filesystem work, import `{ fs }` from `"fs"` and declare `![io]`. For a
 local HTTP task, call `http.get_body(url)` from a function declaring `![net]`;
 `main` normally needs effects in alphabetical order, such as `![io, net]`.
-Structured-concurrency tasks should use a nursery and scoped `spawn` calls,
-then join before leaving the nursery. Keep generated output exact and do not
-print diagnostics. A helper without an effect annotation must remain pure:
+Structured-concurrency tasks use the shipped `routine { ... }` nursery,
+`spawn fn() -> T { ... }` task lambdas, and `await` joins. Spawn tasks in input
+order, retain their handles in that order, and await them in the same order
+before printing. The concurrency primitives currently require `![io]`:
+
+```sailfin
+fn main() ![io] {
+    routine {
+        let left = spawn fn() -> int { return 20; };
+        let right = spawn fn() -> int { return 22; };
+        let first: int = await left;
+        let second: int = await right;
+        print((first + second) as string);
+    }
+}
+```
+
+Keep generated output exact and do not print diagnostics. A helper without an
+effect annotation must remain pure:
 file, clock, environment, process, random, and network access must be rejected
 there rather than hidden behind another helper.

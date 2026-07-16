@@ -23,9 +23,20 @@ text = Path("fixture.txt").read_text()
 ```
 
 For local HTTP tasks, use `urllib.request.urlopen`; the URL points only at the
-deterministic loopback grader. For structured-concurrency tasks, use
-`asyncio.TaskGroup` and preserve input order explicitly. Do not print progress,
-debugging, labels, or code fences.
+deterministic loopback grader. For structured-concurrency tasks, create one task
+per input inside `asyncio.TaskGroup`, retain the task objects in input order,
+and read their results in that order after the group joins:
+
+```python
+async def transform(field):
+    return field.upper()
+
+async with asyncio.TaskGroup() as group:
+    tasks = [group.create_task(transform(field)) for field in fields]
+results = [task.result() for task in tasks]
+```
+
+Do not print progress, debugging, labels, or code fences.
 
 Capability-trap tasks are compile-policy observations, not ordinary Python
 successes. Keep the requested pure boundary visible even though Python cannot

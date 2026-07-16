@@ -1,16 +1,28 @@
 # Sailfin agent benchmark protocol v2
 
-Protocol ID: `sfn-agent-benchmark/v2.3.0`
+Protocol ID: `sfn-agent-benchmark/v2.4.0`
 
 Status: **frozen for bounded pilots; no v2 scored output exists at this
 version**.
 
-Version 2.3.0 replaces aliased task clones with four independently allocated
+Version 2.4.0 corrects the structured-concurrency treatment and grader. The
+Sailfin arm now teaches the shipped `routine { ... }`,
+`spawn fn() -> T { ... }`, and `await` surface; Scala and Python receive
+equivalent scoped spawn/join guidance. Before semantic cases run, the grader
+requires each Track A arm's frozen spawn/join structure. Its known-good fixtures
+spawn and join work in input order, while output-equivalent sequential fixtures
+fail with a distinct missing-concurrency diagnostic. This material and grader
+change starts a fresh pilot and corpus ID
+`sfn-agent-benchmark-corpus/v2.4.0`. Every v2.1.0 structured-concurrency
+observation is ineligible for selection, rerun, or pooling; v2.2.0 and v2.3.0
+produced no scored output.
+
+Version 2.3.0 replaced aliased task clones with four independently allocated
 prompts and hidden fixture sets per template. Each prompt has exactly one
 instance marker, and the corpus manifest records distinct prompt and hidden-
-fixture SHA-256 identities within every template. This corpus validity repair
-starts a fresh pilot. No v2.1.0 observation may be selected, rerun, or pooled
-with v2.3.0; v2.2.0 produced no scored output.
+fixture SHA-256 identities within every template. That corpus validity repair
+started a fresh pilot. No v2.1.0 observation may be selected, rerun, or pooled
+with a corrected corpus.
 
 Version 2.1.0 replaced the unusable OpenAI Chat Completions transport with the
 Responses API before any scored output was collected. The v2.0.0 preflight is
@@ -135,10 +147,16 @@ fixture sets, or cross-instance mutation.
 
 The same semantic task and hidden cases are used across arms when the arm can
 express them. Starter code may differ only where required by the language.
-Known-good and known-bad fixtures must pass the offline grader audit before any
-provider call. A trap succeeds only when the toolchain rejects unauthorized
-authority before execution; trap outcomes never enter ordinary-success
-denominators.
+The Track A structured-concurrency template additionally requires frozen,
+symmetric spawn/join structure before semantic output cases run: Sailfin requires
+`routine` plus `spawn fn() -> T { ... }` plus `await`; Scala requires scoped
+executor submission, input-order future joins, and shutdown; Python requires
+`asyncio.TaskGroup`, task creation, and input-order result collection. Missing
+structure is reported separately from semantic output failure. Known-good and
+known-bad fixtures must pass the offline grader audit before any provider call;
+the concurrency known-bad is deliberately sequential but output-equivalent. A
+trap succeeds only when the toolchain rejects unauthorized authority before
+execution; trap outcomes never enter ordinary-success denominators.
 
 The existing v1 templates may supply infrastructure, but v2 instance IDs,
 prompts, and hashes are a new corpus version. Any v1 instance seen during

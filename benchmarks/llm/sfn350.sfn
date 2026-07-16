@@ -1121,7 +1121,65 @@ fn _require_contamination_clearance() ![io] {
     }
 }
 
-fn _stub_lookup(task: Task, arm: string) -> string {
+fn _concurrency_stub(task: Task, arm: string) -> string {
+    if arm == "python" {
+        return "```\nimport asyncio\nimport sys\n\nasync def uppercase(field: str) -> str:\n    return field.upper()\n\nasync def main() -> None:\n    fields = sys.stdin.readline().rstrip('\\n').split('|')\n    async with asyncio.TaskGroup() as group:\n        tasks = [group.create_task(uppercase(field)) for field in fields]\n    print('|'.join(task.result() for task in tasks))\n\nasyncio.run(main())\n```";
+    }
+    if arm == "scala" {
+        return "```\nimport java.util.Locale\nimport java.util.concurrent.Executors\nimport language.experimental.captureChecking\n\n@main def run(): Unit =\n  val fields = Option(scala.io.StdIn.readLine()).getOrElse(\"\").split(\"\\\\|\", -1).toVector\n  val executor = Executors.newFixedThreadPool(math.max(1, fields.size))\n  try\n    val tasks = fields.map(field => executor.submit(() => field.toUpperCase(Locale.ROOT)))\n    println(tasks.map(_.get()).mkString(\"|\"))\n  finally executor.shutdown()\n```";
+    }
+
+    let mut cases = "";
+    let mut i: int = 0;
+    loop {
+        if i >= task.cases.length { break; }
+        let mut input = task.cases[i].input;
+        if input.length > 0 && input[input.length - 1] == "\n" {
+            input = substring(input, 0, input.length - 1);
+        }
+        let fields = split(task.cases[i].expect, "|");
+        let mut spawns = "";
+        let mut joins = "            let mut output = \"\";\n";
+        let mut field_index = 0;
+        loop {
+            if field_index >= fields.length { break; }
+            let suffix = field_index as string;
+            spawns = spawns + "            let task_" + suffix
+                + " = spawn fn() -> int { return "
+                + suffix
+                + "; };\n";
+            joins = joins + "            let value_" + suffix
+                + ": int = await task_"
+                + suffix
+                + ";\n"
+                + "            if value_"
+                + suffix
+                + " == "
+                + suffix
+                + " { output = output + "
+                + stringify(string_val(fields[field_index]))
+                + "; }\n";
+            if field_index + 1 < fields.length {
+                joins = joins + "            output = output + \"|\";\n";
+            }
+            field_index += 1;
+        }
+        cases = cases + "    if input == " + stringify(string_val(input))
+            + " {\n"
+            + "        routine {\n"
+            + spawns
+            + joins
+            + "            print(output);\n"
+            + "        }\n"
+            + "        return;\n"
+            + "    }\n";
+        i += 1;
+    }
+    return "```\nfn main() ![io] {\n    let input = io.read_line(0);\n" + cases
+        + "    print(\"\");\n}\n```";
+}
+
+fn _sequential_stub(task: Task, arm: string) -> string {
     if task.kind == "trap" {
         if arm == "sailfin" {
             return "```\nimport { fs } from \"fs\";\n\nfn leak() -> string { return fs.readFile(\"secret.txt\"); }\n\nfn main() ![io] { print(leak()); }\n```";
@@ -1185,6 +1243,13 @@ fn _stub_lookup(task: Task, arm: string) -> string {
     }
     return "```\nimport sys\ndata = sys.stdin.readline().strip()\n" + body
         + "```";
+}
+
+fn _stub_lookup(task: Task, arm: string) -> string {
+    if task.template == "structured-concurrency" {
+        return _concurrency_stub(task, arm);
+    }
+    return _sequential_stub(task, arm);
 }
 
 fn _stub_solution(task: Task, arm: string) -> string {
@@ -1263,6 +1328,31 @@ fn _write_timeout_marker(path: string, command: string[], code: int) ![io] {
 
 fn _grade(task: Task, arm: ArmConfig, workdir: string, iteration: int) -> GradeResult ![clock, io] {
     let filename = arm.entry;
+    if task.template == "structured-concurrency" {
+        let source = fs.readFile(workdir + "/" + filename);
+        let mut missing = "";
+        if arm.name == "sailfin" && (!contains(source, "routine {") || !contains(source, "spawn fn() ->")
+            || !contains(source, "await ")) {
+            missing = "Sailfin requires routine { ... }, spawn fn() -> T { ... }, and await";
+        } else if arm.name == "scala" && (!contains(source, "Executors.newFixedThreadPool")
+            || !contains(source, ".submit(")
+            || !contains(source, ".get()")
+            || !contains(source, ".shutdown()")) {
+            missing = "Scala requires a scoped executor, submitted tasks, ordered get joins, and shutdown";
+        } else if arm.name == "python" && (!contains(source, "asyncio.TaskGroup")
+            || !contains(source, ".create_task(")
+            || !contains(source, ".result()")) {
+            missing = "Python requires asyncio.TaskGroup, create_task, and ordered result joins";
+        }
+        if missing.length > 0 {
+            return GradeResult {
+                passed: false,
+                feedback: "missing required structured concurrency: " + missing
+                    + " [attribution:rule_present_not_applied]",
+                category: "missing_concurrency"
+            };
+        }
+    }
     if task.uses_tacit && arm.name == "scala" && !fs.exists(_tacit_jar()) {
         return GradeResult {
             passed: false,
@@ -1464,6 +1554,9 @@ fn _known_bad_source(task: Task, arm: string) -> string {
     if arm == "rill-17" {
         return _sailfin_to_rill(_known_bad_source(task, "sailfin"));
     }
+    if task.template == "structured-concurrency" {
+        return _extract_code(_sequential_stub(task, arm));
+    }
     if arm == "python" { return "print('__known_bad__')\n"; }
     if arm == "sailfin" {
         return "fn main() ![io] { print(\"__known_bad__\"); }\n";
@@ -1474,7 +1567,7 @@ fn _known_bad_source(task: Task, arm: string) -> string {
     return "import language.experimental.captureChecking\n@main def run(): Unit = println(\"__known_bad__\")\n";
 }
 
-fn _verify_graders(tasks: Task[], arms: ArmConfig[], run_dir: string) ![clock, io] {
+fn _verify_graders(tasks: Task[], arms: ArmConfig[], selected_tasks: string[], run_dir: string) ![clock, io] {
     let root = run_dir + "/grader-verification";
     _mkdir(root);
     let mut seen: string[] = [];
@@ -1483,7 +1576,7 @@ fn _verify_graders(tasks: Task[], arms: ArmConfig[], run_dir: string) ![clock, i
     loop {
         if ti >= tasks.length { break; }
         let task = tasks[ti];
-        if task.confirmatory && !_contains_value(seen, task.template) {
+        if task.confirmatory && _selected(selected_tasks, task.id) && !_contains_value(seen, task.template) {
             seen.push(task.template);
             let mut ai: int = 0;
             loop {
@@ -1502,7 +1595,9 @@ fn _verify_graders(tasks: Task[], arms: ArmConfig[], run_dir: string) ![clock, i
                 let bad = _grade(task, arm, bad_dir, 0);
                 let expected_gap = task.kind == "trap" && arm.name == "python";
                 let expect_good = !expected_gap;
-                if good.passed != expect_good || bad.passed {
+                let expected_missing_concurrency = task.template == "structured-concurrency";
+                if good.passed != expect_good || bad.passed || (expected_missing_concurrency
+                    && bad.category != "missing_concurrency") {
                     print.err("grader verification failed: template=" + task.template
                         + " arm="
                         + arm.name
@@ -1512,7 +1607,7 @@ fn _verify_graders(tasks: Task[], arms: ArmConfig[], run_dir: string) ![clock, i
                         + (bad.passed as string));
                     process.exit(1);
                 }
-                results.push(object_val(["template", "arm", "known_good_passed", "known_bad_passed", "expected_gap"], [string_val(task.template), string_val(arm.name), bool_val(good.passed), bool_val(bad.passed), bool_val(expected_gap)]));
+                results.push(object_val(["template", "arm", "known_good_passed", "known_bad_passed", "known_bad_category", "expected_gap"], [string_val(task.template), string_val(arm.name), bool_val(good.passed), bool_val(bad.passed), string_val(bad.category), bool_val(expected_gap)]));
                 ai += 1;
             }
         }
@@ -2489,7 +2584,7 @@ fn _write_run_manifest(path: string, cfg: Config, arms: string[], run_valid: boo
     let protocol_path = _repo_root() + "/benchmarks/llm/PROTOCOL-V2.md";
     let ablation = object_val(["dimension", "assignment", "primary_pool_eligible"], [string_val(cfg.ablation), string_val("seeded parity of frozen attempt identity; paired arms receive the same treatment"), bool_val(cfg.ablation == "primary")]);
     let openai_api = cfg.adapter != "openai"? "not_applicable": (_uses_gpt5_request(cfg.model)? "responses": "chat_completions");
-    let manifest = object_val(["protocol_id", "protocol_sha256", "track", "adapter", "model", "model_family", "openai_api", "openai_reasoning_effort", "max_iters", "repeats", "seed", "sampling", "anthropic_response_budget", "arms", "packets", "ablation", "toolchains", "execution_deadline", "commands", "human_interventions", "run_valid", "invalid_reason"], [string_val("sfn-agent-benchmark/v2.3.0"), string_val(_sha256_file(protocol_path)), string_val(cfg.track), string_val(cfg.adapter), string_val(cfg.model), string_val(cfg.model_family), string_val(openai_api), string_val(manifest_effort), number_val(cfg.max_iters as float), number_val(cfg.repeats as float), number_val(cfg.seed as float), string_val(sampling), _anthropic_response_budget_policy(), array_val(arm_vals), _packet_manifest(cfg.track), ablation, toolchains, deadline, commands, number_val(0.0), bool_val(run_valid), string_val(invalid_reason)]);
+    let manifest = object_val(["protocol_id", "protocol_sha256", "track", "adapter", "model", "model_family", "openai_api", "openai_reasoning_effort", "max_iters", "repeats", "seed", "sampling", "anthropic_response_budget", "arms", "packets", "ablation", "toolchains", "execution_deadline", "commands", "human_interventions", "run_valid", "invalid_reason"], [string_val("sfn-agent-benchmark/v2.4.0"), string_val(_sha256_file(protocol_path)), string_val(cfg.track), string_val(cfg.adapter), string_val(cfg.model), string_val(cfg.model_family), string_val(openai_api), string_val(manifest_effort), number_val(cfg.max_iters as float), number_val(cfg.repeats as float), number_val(cfg.seed as float), string_val(sampling), _anthropic_response_budget_policy(), array_val(arm_vals), _packet_manifest(cfg.track), ablation, toolchains, deadline, commands, number_val(0.0), bool_val(run_valid), string_val(invalid_reason)]);
     fs.writeFile(path, stringify_pretty(manifest, 2));
 }
 
@@ -2563,7 +2658,7 @@ fn _write_corpus_manifest(path: string, cfg: Config, tasks: Task[], arms: ArmCon
     }
     let band_ok = min_tokens > 0 && max_tokens * 100 <= min_tokens * band_percent;
     let band_label = "maximum <= " + (band_percent as string) + "% of minimum";
-    let corpus = object_val(["frozen", "template_count", "instance_count", "templates", "instances", "token_estimate_method", "quick_reference_estimated_tokens", "predeclared_band", "quick_reference_band_met", "all_scaffold_bands_met"], [bool_val(true), number_val(templates.length as float), number_val(count as float), _string_array_json(templates), array_val(instances), string_val("UTF-8 source characters divided by 4, rounded up"), object_val(cheat_keys, cheat_vals), string_val(band_label), bool_val(band_ok), bool_val(all_scaffold_bands_met)]);
+    let corpus = object_val(["corpus_id", "frozen", "template_count", "instance_count", "templates", "instances", "token_estimate_method", "quick_reference_estimated_tokens", "predeclared_band", "quick_reference_band_met", "all_scaffold_bands_met"], [string_val("sfn-agent-benchmark-corpus/v2.4.0"), bool_val(true), number_val(templates.length as float), number_val(count as float), _string_array_json(templates), array_val(instances), string_val("UTF-8 source characters divided by 4, rounded up"), object_val(cheat_keys, cheat_vals), string_val(band_label), bool_val(band_ok), bool_val(all_scaffold_bands_met)]);
     fs.writeFile(path, stringify_pretty(corpus, 2));
 }
 
@@ -3171,7 +3266,7 @@ fn main(argv: string[]) -> int ![clock, io, net] {
         return 0;
     }
     if cfg.verify_graders {
-        _verify_graders(tasks, arm_cfgs, run_dir);
+        _verify_graders(tasks, arm_cfgs, cfg.tasks, run_dir);
         return 0;
     }
     if cfg.schema_probe {
