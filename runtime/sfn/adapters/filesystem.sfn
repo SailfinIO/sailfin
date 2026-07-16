@@ -233,6 +233,20 @@ extern fn readdir(dirp: * u8) -> * u8;
 
 extern fn closedir(dirp: * u8) -> i32;
 
+// Win32 directory-enumeration primitives for the `sailfin_intrinsic_fs_list_dir`
+// sentinel's Windows leg (SFN-51, epic #1485; `core_call_emission.sfn`). Like
+// `GetFileAttributesA` above they are inlined `extern fn` here so the sentinel's
+// emitted `call`s bind to a `declare`; unused on POSIX (declared-not-called ⇒
+// link-safe, no relocation), lowered only when `fs_platform_leg() == "mingw"`.
+// `FindFirstFileA`/`FindNextFileA` fill a caller-provided `WIN32_FIND_DATAA`
+// buffer (spelled `* u8`) and return a `HANDLE` / `BOOL`; `FindClose` releases
+// the handle.
+extern fn FindFirstFileA(pattern: * u8, data: * u8) -> * u8;
+
+extern fn FindNextFileA(handle: * u8, data: * u8) -> i32;
+
+extern fn FindClose(handle: * u8) -> i32;
+
 // `strcmp` (ISO C — links and behaves identically on Linux / macOS /
 // Windows) backs the `.`/`..` entry filter and the name sort in
 // `sfn_fs_list_dir`. Same redeclaration pattern `type_meta.sfn` and
@@ -251,6 +265,22 @@ extern fn strcmp(a: * u8, b: * u8) -> i32;
 extern fn sailfin_runtime_concat_v2(a: * u8, b: * u8) -> * u8;
 
 extern fn sailfin_runtime_append_string_v2(a: * u8, text: * u8) -> * u8;
+
+// Thin portable wrappers over the runtime array core, emitted as the
+// `call` targets of the `sailfin_intrinsic_fs_list_dir` sentinel's per-leg
+// IR (SFN-51). Naming them `_fs_*` keeps the lowering's hardcoded array
+// symbols STABLE — the #727 emission audit
+// (`lowering_no_bare_runtime_emissions_test.sfn`) pins every hardcoded
+// `@sailfin_runtime_*` string emitted under the lowering dirs, and routing
+// the container ops through these wrappers keeps that volatile prefix out
+// of `core_call_emission.sfn`. Both are target-neutral (no `opendir`/Win32).
+fn _fs_new_str_array() -> * u8 {
+    return sailfin_runtime_concat_v2(null, null);
+}
+
+fn _fs_append_str(arr: * u8, s: * u8) -> * u8 {
+    return sailfin_runtime_append_string_v2(arr, s);
+}
 
 // Byte offset of `struct dirent::d_name`, per platform. `readdir` returns
 // the address of the `struct dirent`; the entry name is the NUL-terminated
@@ -640,29 +670,39 @@ fn _fs_sort_str_array(arr: * u8) -> void {
     free(tmp);
 }
 
-// `sfn_fs_list_dir(path)` — enumerate the entries of `path`, returning
-// a sorted `SfnArray` (`{ i8**, i64, i64 }*`, spelled `* u8`) that
-// omits `.` and `..`. Pure Sailfin (#1317, epic #1308 C8): walk
-// `opendir`/`readdir`/`closedir`, read each entry's name at
-// `dirent + DIRENT_DNAME_OFFSET`, `strdup` it (the `dirent` buffer is
-// reused across `readdir` calls), append it through the runtime array
-// core, then `strcmp`-sort in place. Mirrors the C
-// `sailfin_adapter_fs_list_directory_v2` contract exactly: a null or
-// empty `path` lists the current directory, and an `opendir` failure
-// returns an empty array (never null) so callers can iterate
-// unconditionally.
 // `_fs_dirent_dname_offset()` — byte offset of `struct dirent::d_name`,
 // selected at runtime per platform (Linux 19 / macOS arm64 21). Linux is
 // detected via the `/proc/self/status` existence probe — the same gate
 // `runtime/sfn/platform/rlimit.sfn` uses (present ⇒ Linux; absent ⇒
 // Darwin). Resolving at runtime keeps a single self-hosting binary correct
-// on both targets without an emit-time `cfg` split (#1409).
+// on both POSIX targets without an emit-time `cfg` split (#1409). Now
+// consumed by the `sailfin_intrinsic_fs_list_dir` sentinel's POSIX leg
+// (`core_call_emission.sfn`), which emits a `call` to it while reading each
+// `dirent`'s name — not from any Sailfin call site here.
 fn _fs_dirent_dname_offset() -> i64 ![io] {
     let proc_status: string = "/proc/self/status";
     if sfn_fs_exists(proc_status as * u8) { return DIRENT_DNAME_OFFSET_LINUX; }
     return DIRENT_DNAME_OFFSET_DARWIN;
 }
 
+// `sfn_fs_list_dir(path)` — enumerate the entries of `path`, returning
+// a sorted `SfnArray` (`{ i8**, i64, i64 }*`, spelled `* u8`) that omits
+// `.` and `..`. Pure Sailfin (#1317, epic #1308 C8): walk
+// `opendir`/`readdir`/`closedir`, read each entry's name at
+// `dirent + _fs_dirent_dname_offset()`, `strdup` it (the `dirent` buffer is
+// reused across `readdir` calls), append it through the runtime array core,
+// then `strcmp`-sort in place. A null or empty `path` lists the current
+// directory; an `opendir` failure returns an empty array (never null) so
+// callers can iterate unconditionally.
+//
+// The native-Windows-correct replacement — the `sailfin_intrinsic_fs_list_dir`
+// sentinel (SFN-51, epic #1485; `core_call_emission.sfn`), whose Windows leg
+// lowers `FindFirstFileA`/`FindNextFileA`/`FindClose` reading
+// `WIN32_FIND_DATAA.cFileName` — is staged in the compiler but not yet
+// consumed here: because this module is the compiler's own runtime, `sfn
+// build -p compiler` compiles it with the pinned seed, which cannot resolve
+// the new intrinsic until a seed bump carries it. The body flips to the
+// sentinel once the pinned seed ships it.
 fn sfn_fs_list_dir(path: * u8) -> * u8 ![io] {
     // Null/empty path ⇒ current directory (C body's `path_str = "."`).
     let mut target: * u8 = path;
