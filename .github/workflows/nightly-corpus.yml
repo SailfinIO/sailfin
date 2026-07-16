@@ -1,0 +1,118 @@
+name: Nightly corpus run
+
+# Whole-program corpus diff (SFN-92, SFEP-0037 §3.4). Compiles the in-tree
+# corpus (examples/, benchmarks/runtime/, capsules/) with BOTH the candidate
+# (freshly self-hosted) compiler and the pinned seed, and fails on:
+#   (a) a regression — the seed accepts an entry but the candidate rejects it;
+#   (b) a check-green/build-red disagreement on the candidate (the #1386/#1389
+#       invariant, asserted corpus-wide) outside the known frontend-ahead set;
+#   (c) fmt instability — a corpus file not at the candidate formatter's fixed
+#       point.
+# Prior art: Rust's crater, Swift's source-compatibility suite. All logic lives
+# in scripts/corpus-run.sh; this workflow is a thin driver.
+#
+# Complements nightly-selfhost.yml (triple-pass fixed point): that job proves
+# the compiler compiles ITSELF; this one proves it does not regress the
+# real-code corpus relative to the last released seed. Scheduled an hour
+# earlier so a corpus regression is visible before the self-host canary.
+#
+# The pinned seed version lives in bootstrap.toml's [seed].version. The resolve
+# step reads it (or the seed_version dispatch input) exactly as
+# nightly-selfhost.yml does — kept in sync with that job and the Makefile.
+
+on:
+  schedule:
+    - cron: '0 6 * * *'
+  workflow_dispatch:
+    inputs:
+      seed_version:
+        description: "Seed version (blank defaults to bootstrap.toml [seed].version from checkout)"
+        required: false
+        default: ""
+
+permissions:
+  contents: read
+
+concurrency:
+  group: nightly-corpus
+  cancel-in-progress: false
+
+jobs:
+  corpus-run:
+    name: corpus diff (candidate vs pinned seed)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 120
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v7
+
+      - name: Resolve seed version (input override → bootstrap.toml)
+        id: seed
+        shell: bash
+        env:
+          INPUT_SEED_VERSION: ${{ inputs.seed_version }}
+        run: |
+          set -euo pipefail
+          override="$(printf '%s' "$INPUT_SEED_VERSION" | tr -d '[:space:]')"
+          if [ -n "$override" ]; then
+            echo "[seed-pin] using seed $override (workflow_dispatch input override)"
+            pin="$override"
+          else
+            if [ ! -f bootstrap.toml ]; then
+              echo "[seed-pin] bootstrap.toml is missing from checkout" >&2
+              exit 1
+            fi
+            pin="$(awk '
+              /^\[[^]]+\]/ { section=$0 }
+              section == "[seed]" && /^version[[:space:]]*=/ { gsub(/"/, "", $3); print $3; exit }
+            ' bootstrap.toml)"
+            if [ -z "$pin" ]; then
+              echo "[seed-pin] bootstrap.toml [seed].version is empty or missing" >&2
+              exit 1
+            fi
+            echo "[seed-pin] using seed $pin from bootstrap.toml"
+          fi
+          echo "seed_version=$pin" >> "$GITHUB_OUTPUT"
+
+      - name: Install clang
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y clang-18 llvm-18 jq
+
+      - name: Fetch released seed compiler (the oracle)
+        shell: bash
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          SEED_VERSION: ${{ steps.seed.outputs.seed_version }}
+        run: |
+          set -euo pipefail
+          echo "[corpus] seed version: $SEED_VERSION"
+          make fetch-seed SEED_VERSION="$SEED_VERSION"
+          build/toolchains/seed/bin/sfn version
+
+      - name: Self-host the candidate compiler
+        shell: bash
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          CLANG: clang-18
+        run: |
+          set -euo pipefail
+          export SEED_NATIVE="build/toolchains/seed/bin/sfn"
+          make compile
+          build/bin/sfn version
+
+      - name: Corpus run (candidate vs seed)
+        shell: bash
+        env:
+          CLANG: clang-18
+        run: |
+          set -euo pipefail
+          scripts/corpus-run.sh --json build/corpus-run.json
+
+      - name: Upload corpus summary
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: corpus-run-summary
+          path: build/corpus-run.json
+          if-no-files-found: warn
