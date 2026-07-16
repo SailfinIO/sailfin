@@ -1227,6 +1227,414 @@ fn coerce_and_emit_call(trimmed_target: string, operands: LLVMOperand[], expecte
         }
     }
 
+    // `list_dir(path) -> i8*` sentinel (SFN-51, epic #1485,
+    // `docs/proposals/0021-windows-native-selfhost.md` §4.2(B)): enumerate a
+    // directory into a sorted `SfnArray` (`{ i8**, i64, i64 }*`, spelled i8*)
+    // that omits `.`/`..`. The POSIX leg walks `opendir`/`readdir`/`closedir`
+    // and reads each entry name at `dirent + _fs_dirent_dname_offset()` — the
+    // exact loop `sfn_fs_list_dir`'s body previously emitted, now behind the
+    // sentinel so the libc `opendir` family is never *called* on native
+    // Windows (where those POSIX symbols do not link). The Windows leg walks
+    // `FindFirstFileA`/`FindNextFileA`/`FindClose`, reading `cFileName` at
+    // `WIN32_FIND_DATAA` byte offset 44. Both legs delegate the portable
+    // per-entry work — dot filter, name dup, array append — to the module's
+    // bare Sailfin/runtime helpers (`_fs_name_is_dot`, `_fs_dup_cstr`,
+    // `sailfin_runtime_append_string_v2`), which link on every target; the
+    // wrapper sorts the result. The loop-carried accumulator lives in a single
+    // `alloca i8*` cell with a back-edge (no hand-authored phi) so the emitted
+    // SSA is trivially dominated. Only the host leg's directory-iteration
+    // symbols enter the IR — the point of the sentinel.
+    if helper_descriptor != null {
+        if helper_descriptor.symbol == "sailfin_intrinsic_fs_list_dir" {
+            if final_operands.length < 1 {
+                result_diagnostics.push("llvm lowering: sailfin_intrinsic_fs_list_dir requires (path: i8*) operand");
+            } else {
+                let _ld_leg = fs_platform_leg();
+                let _ld_path = final_operands[0].value;
+                let _ld_id = number_to_string(result_temp);
+                if _ld_leg == "mingw" {
+                    let _w_empty = "fs_list_dir_empty_" + _ld_id;
+                    let _w_init = "fs_list_dir_init_" + _ld_id;
+                    let _w_body = "fs_list_dir_body_" + _ld_id;
+                    let _w_keep = "fs_list_dir_keep_" + _ld_id;
+                    let _w_app = "fs_list_dir_append_" + _ld_id;
+                    let _w_adv = "fs_list_dir_advance_" + _ld_id;
+                    let _w_close = "fs_list_dir_close_" + _ld_id;
+                    let _w_done = "fs_list_dir_done_" + _ld_id;
+                    // WIN32_FIND_DATAA buffer (over-allocated; the ANSI struct
+                    // is ~320 bytes with `cFileName` at offset 44).
+                    let _w_buf = format_temp_name(result_temp);
+                    result_temp = result_temp + 1;
+                    let _w_bufp = format_temp_name(result_temp);
+                    result_temp = result_temp + 1;
+                    let _w_plen = format_temp_name(result_temp);
+                    result_temp = result_temp + 1;
+                    let _w_psz = format_temp_name(result_temp);
+                    result_temp = result_temp + 1;
+                    let _w_pat = format_temp_name(result_temp);
+                    result_temp = result_temp + 1;
+                    let _w_cp = format_temp_name(result_temp);
+                    result_temp = result_temp + 1;
+                    let _w_pati = format_temp_name(result_temp);
+                    result_temp = result_temp + 1;
+                    let _w_s0 = format_temp_name(result_temp);
+                    result_temp = result_temp + 1;
+                    let _w_s0p = format_temp_name(result_temp);
+                    result_temp = result_temp + 1;
+                    let _w_s1 = format_temp_name(result_temp);
+                    result_temp = result_temp + 1;
+                    let _w_s1p = format_temp_name(result_temp);
+                    result_temp = result_temp + 1;
+                    let _w_s2 = format_temp_name(result_temp);
+                    result_temp = result_temp + 1;
+                    let _w_s2p = format_temp_name(result_temp);
+                    result_temp = result_temp + 1;
+                    let _w_h = format_temp_name(result_temp);
+                    result_temp = result_temp + 1;
+                    let _w_hi = format_temp_name(result_temp);
+                    result_temp = result_temp + 1;
+                    let _w_hbad = format_temp_name(result_temp);
+                    result_temp = result_temp + 1;
+                    let _w_slot = format_temp_name(result_temp);
+                    result_temp = result_temp + 1;
+                    result_lines.push("  " + _w_buf
+                        + " = alloca [592 x i8], align 8");
+                    result_lines.push("  " + _w_bufp
+                        + " = getelementptr [592 x i8], [592 x i8]* "
+                        + _w_buf
+                        + ", i32 0, i32 0");
+                    // Search pattern = path + "\\*" + NUL (92='\\', 42='*').
+                    result_lines.push("  " + _w_plen
+                        + " = call i64 @strlen(i8* "
+                        + _ld_path
+                        + ")");
+                    result_lines.push("  " + _w_psz + " = add i64 " + _w_plen
+                        + ", 3");
+                    result_lines.push("  " + _w_pat + " = call i8* @malloc(i64 "
+                        + _w_psz
+                        + ")");
+                    result_lines.push("  " + _w_cp + " = call i8* @memcpy(i8* "
+                        + _w_pat
+                        + ", i8* "
+                        + _ld_path
+                        + ", i64 "
+                        + _w_plen
+                        + ")");
+                    result_lines.push("  " + _w_pati + " = ptrtoint i8* "
+                        + _w_pat
+                        + " to i64");
+                    result_lines.push("  " + _w_s0 + " = add i64 " + _w_pati
+                        + ", "
+                        + _w_plen);
+                    result_lines.push("  " + _w_s0p + " = inttoptr i64 " + _w_s0
+                        + " to i8*");
+                    result_lines.push("  store i8 92, i8* " + _w_s0p);
+                    result_lines.push("  " + _w_s1 + " = add i64 " + _w_s0
+                        + ", 1");
+                    result_lines.push("  " + _w_s1p + " = inttoptr i64 " + _w_s1
+                        + " to i8*");
+                    result_lines.push("  store i8 42, i8* " + _w_s1p);
+                    result_lines.push("  " + _w_s2 + " = add i64 " + _w_s0
+                        + ", 2");
+                    result_lines.push("  " + _w_s2p + " = inttoptr i64 " + _w_s2
+                        + " to i8*");
+                    result_lines.push("  store i8 0, i8* " + _w_s2p);
+                    result_lines.push("  " + _w_h
+                        + " = call i8* @FindFirstFileA(i8* "
+                        + _w_pat
+                        + ", i8* "
+                        + _w_bufp
+                        + ")");
+                    result_lines.push("  call void @free(i8* " + _w_pat + ")");
+                    // INVALID_HANDLE_VALUE == (HANDLE)-1.
+                    result_lines.push("  " + _w_hi + " = ptrtoint i8* " + _w_h
+                        + " to i64");
+                    result_lines.push("  " + _w_hbad + " = icmp eq i64 " + _w_hi
+                        + ", -1");
+                    result_lines.push("  " + _w_slot + " = alloca i8*");
+                    result_lines.push("  br i1 " + _w_hbad + ", label %"
+                        + _w_empty
+                        + ", label %"
+                        + _w_init);
+                    result_lines.push("");
+                    result_lines.push(_w_empty + ":");
+                    let _w_ae = format_temp_name(result_temp);
+                    result_temp = result_temp + 1;
+                    result_lines.push("  " + _w_ae
+                        + " = call i8* @sailfin_runtime_concat_v2(i8* null, i8* null)");
+                    result_lines.push("  store i8* " + _w_ae + ", i8** "
+                        + _w_slot);
+                    result_lines.push("  br label %" + _w_done);
+                    result_lines.push("");
+                    result_lines.push(_w_init + ":");
+                    let _w_a0 = format_temp_name(result_temp);
+                    result_temp = result_temp + 1;
+                    result_lines.push("  " + _w_a0
+                        + " = call i8* @sailfin_runtime_concat_v2(i8* null, i8* null)");
+                    result_lines.push("  store i8* " + _w_a0 + ", i8** "
+                        + _w_slot);
+                    result_lines.push("  br label %" + _w_body);
+                    result_lines.push("");
+                    // FindFirstFileA already loaded the first entry; process the
+                    // current buffer, then advance with FindNextFileA.
+                    result_lines.push(_w_body + ":");
+                    let _w_n = format_temp_name(result_temp);
+                    result_temp = result_temp + 1;
+                    let _w_isdot = format_temp_name(result_temp);
+                    result_temp = result_temp + 1;
+                    result_lines.push("  " + _w_n + " = getelementptr i8, i8* "
+                        + _w_bufp
+                        + ", i64 44");
+                    result_lines.push("  " + _w_isdot
+                        + " = call i1 @_fs_name_is_dot(i8* "
+                        + _w_n
+                        + ")");
+                    result_lines.push("  br i1 " + _w_isdot + ", label %"
+                        + _w_adv
+                        + ", label %"
+                        + _w_keep);
+                    result_lines.push("");
+                    result_lines.push(_w_keep + ":");
+                    let _w_c = format_temp_name(result_temp);
+                    result_temp = result_temp + 1;
+                    let _w_ci = format_temp_name(result_temp);
+                    result_temp = result_temp + 1;
+                    let _w_cn = format_temp_name(result_temp);
+                    result_temp = result_temp + 1;
+                    result_lines.push("  " + _w_c
+                        + " = call i8* @_fs_dup_cstr(i8* "
+                        + _w_n
+                        + ")");
+                    result_lines.push("  " + _w_ci + " = ptrtoint i8* " + _w_c
+                        + " to i64");
+                    result_lines.push("  " + _w_cn + " = icmp eq i64 " + _w_ci
+                        + ", 0");
+                    result_lines.push("  br i1 " + _w_cn + ", label %" + _w_adv
+                        + ", label %"
+                        + _w_app);
+                    result_lines.push("");
+                    result_lines.push(_w_app + ":");
+                    let _w_cur = format_temp_name(result_temp);
+                    result_temp = result_temp + 1;
+                    let _w_nx = format_temp_name(result_temp);
+                    result_temp = result_temp + 1;
+                    result_lines.push("  " + _w_cur + " = load i8*, i8** "
+                        + _w_slot);
+                    result_lines.push("  " + _w_nx
+                        + " = call i8* @sailfin_runtime_append_string_v2(i8* "
+                        + _w_cur
+                        + ", i8* "
+                        + _w_c
+                        + ")");
+                    result_lines.push("  store i8* " + _w_nx + ", i8** "
+                        + _w_slot);
+                    result_lines.push("  br label %" + _w_adv);
+                    result_lines.push("");
+                    result_lines.push(_w_adv + ":");
+                    let _w_more = format_temp_name(result_temp);
+                    result_temp = result_temp + 1;
+                    let _w_morenz = format_temp_name(result_temp);
+                    result_temp = result_temp + 1;
+                    result_lines.push("  " + _w_more
+                        + " = call i32 @FindNextFileA(i8* "
+                        + _w_h
+                        + ", i8* "
+                        + _w_bufp
+                        + ")");
+                    result_lines.push("  " + _w_morenz + " = icmp ne i32 "
+                        + _w_more
+                        + ", 0");
+                    result_lines.push("  br i1 " + _w_morenz + ", label %"
+                        + _w_body
+                        + ", label %"
+                        + _w_close);
+                    result_lines.push("");
+                    result_lines.push(_w_close + ":");
+                    let _w_fc = format_temp_name(result_temp);
+                    result_temp = result_temp + 1;
+                    result_lines.push("  " + _w_fc
+                        + " = call i32 @FindClose(i8* "
+                        + _w_h
+                        + ")");
+                    result_lines.push("  br label %" + _w_done);
+                    result_lines.push("");
+                    result_lines.push(_w_done + ":");
+                    let _w_res = format_temp_name(result_temp);
+                    result_temp = result_temp + 1;
+                    result_lines.push("  " + _w_res + " = load i8*, i8** "
+                        + _w_slot);
+                    let _w_operand = LLVMOperand {
+                        llvm_type: "i8*",
+                        value: _w_res
+                    };
+                    return ExpressionResult {
+                        lines: result_lines,
+                        temp_index: result_temp,
+                        operand: _w_operand,
+                        diagnostics: result_diagnostics,
+                        string_constants: collected_string_constants
+                    };
+                } else {
+                    let _p_empty = "fs_list_dir_empty_" + _ld_id;
+                    let _p_init = "fs_list_dir_init_" + _ld_id;
+                    let _p_loop = "fs_list_dir_loop_" + _ld_id;
+                    let _p_body = "fs_list_dir_body_" + _ld_id;
+                    let _p_keep = "fs_list_dir_keep_" + _ld_id;
+                    let _p_app = "fs_list_dir_append_" + _ld_id;
+                    let _p_close = "fs_list_dir_close_" + _ld_id;
+                    let _p_done = "fs_list_dir_done_" + _ld_id;
+                    let _p_dir = format_temp_name(result_temp);
+                    result_temp = result_temp + 1;
+                    let _p_diri = format_temp_name(result_temp);
+                    result_temp = result_temp + 1;
+                    let _p_bad = format_temp_name(result_temp);
+                    result_temp = result_temp + 1;
+                    let _p_slot = format_temp_name(result_temp);
+                    result_temp = result_temp + 1;
+                    result_lines.push("  " + _p_dir
+                        + " = call i8* @opendir(i8* "
+                        + _ld_path
+                        + ")");
+                    result_lines.push("  " + _p_diri + " = ptrtoint i8* "
+                        + _p_dir
+                        + " to i64");
+                    result_lines.push("  " + _p_bad + " = icmp eq i64 "
+                        + _p_diri
+                        + ", 0");
+                    result_lines.push("  " + _p_slot + " = alloca i8*");
+                    result_lines.push("  br i1 " + _p_bad + ", label %"
+                        + _p_empty
+                        + ", label %"
+                        + _p_init);
+                    result_lines.push("");
+                    result_lines.push(_p_empty + ":");
+                    let _p_ae = format_temp_name(result_temp);
+                    result_temp = result_temp + 1;
+                    result_lines.push("  " + _p_ae
+                        + " = call i8* @sailfin_runtime_concat_v2(i8* null, i8* null)");
+                    result_lines.push("  store i8* " + _p_ae + ", i8** "
+                        + _p_slot);
+                    result_lines.push("  br label %" + _p_done);
+                    result_lines.push("");
+                    result_lines.push(_p_init + ":");
+                    let _p_off = format_temp_name(result_temp);
+                    result_temp = result_temp + 1;
+                    let _p_a0 = format_temp_name(result_temp);
+                    result_temp = result_temp + 1;
+                    result_lines.push("  " + _p_off
+                        + " = call i64 @_fs_dirent_dname_offset()");
+                    result_lines.push("  " + _p_a0
+                        + " = call i8* @sailfin_runtime_concat_v2(i8* null, i8* null)");
+                    result_lines.push("  store i8* " + _p_a0 + ", i8** "
+                        + _p_slot);
+                    result_lines.push("  br label %" + _p_loop);
+                    result_lines.push("");
+                    result_lines.push(_p_loop + ":");
+                    let _p_e = format_temp_name(result_temp);
+                    result_temp = result_temp + 1;
+                    let _p_ei = format_temp_name(result_temp);
+                    result_temp = result_temp + 1;
+                    let _p_en = format_temp_name(result_temp);
+                    result_temp = result_temp + 1;
+                    result_lines.push("  " + _p_e + " = call i8* @readdir(i8* "
+                        + _p_dir
+                        + ")");
+                    result_lines.push("  " + _p_ei + " = ptrtoint i8* " + _p_e
+                        + " to i64");
+                    result_lines.push("  " + _p_en + " = icmp eq i64 " + _p_ei
+                        + ", 0");
+                    result_lines.push("  br i1 " + _p_en + ", label %"
+                        + _p_close
+                        + ", label %"
+                        + _p_body);
+                    result_lines.push("");
+                    result_lines.push(_p_body + ":");
+                    let _p_ni = format_temp_name(result_temp);
+                    result_temp = result_temp + 1;
+                    let _p_n = format_temp_name(result_temp);
+                    result_temp = result_temp + 1;
+                    let _p_isdot = format_temp_name(result_temp);
+                    result_temp = result_temp + 1;
+                    result_lines.push("  " + _p_ni + " = add i64 " + _p_ei
+                        + ", "
+                        + _p_off);
+                    result_lines.push("  " + _p_n + " = inttoptr i64 " + _p_ni
+                        + " to i8*");
+                    result_lines.push("  " + _p_isdot
+                        + " = call i1 @_fs_name_is_dot(i8* "
+                        + _p_n
+                        + ")");
+                    result_lines.push("  br i1 " + _p_isdot + ", label %"
+                        + _p_loop
+                        + ", label %"
+                        + _p_keep);
+                    result_lines.push("");
+                    result_lines.push(_p_keep + ":");
+                    let _p_c = format_temp_name(result_temp);
+                    result_temp = result_temp + 1;
+                    let _p_ci = format_temp_name(result_temp);
+                    result_temp = result_temp + 1;
+                    let _p_cn = format_temp_name(result_temp);
+                    result_temp = result_temp + 1;
+                    result_lines.push("  " + _p_c
+                        + " = call i8* @_fs_dup_cstr(i8* "
+                        + _p_n
+                        + ")");
+                    result_lines.push("  " + _p_ci + " = ptrtoint i8* " + _p_c
+                        + " to i64");
+                    result_lines.push("  " + _p_cn + " = icmp eq i64 " + _p_ci
+                        + ", 0");
+                    result_lines.push("  br i1 " + _p_cn + ", label %" + _p_loop
+                        + ", label %"
+                        + _p_app);
+                    result_lines.push("");
+                    result_lines.push(_p_app + ":");
+                    let _p_cur = format_temp_name(result_temp);
+                    result_temp = result_temp + 1;
+                    let _p_nx = format_temp_name(result_temp);
+                    result_temp = result_temp + 1;
+                    result_lines.push("  " + _p_cur + " = load i8*, i8** "
+                        + _p_slot);
+                    result_lines.push("  " + _p_nx
+                        + " = call i8* @sailfin_runtime_append_string_v2(i8* "
+                        + _p_cur
+                        + ", i8* "
+                        + _p_c
+                        + ")");
+                    result_lines.push("  store i8* " + _p_nx + ", i8** "
+                        + _p_slot);
+                    result_lines.push("  br label %" + _p_loop);
+                    result_lines.push("");
+                    result_lines.push(_p_close + ":");
+                    let _p_rc = format_temp_name(result_temp);
+                    result_temp = result_temp + 1;
+                    result_lines.push("  " + _p_rc
+                        + " = call i32 @closedir(i8* "
+                        + _p_dir
+                        + ")");
+                    result_lines.push("  br label %" + _p_done);
+                    result_lines.push("");
+                    result_lines.push(_p_done + ":");
+                    let _p_res = format_temp_name(result_temp);
+                    result_temp = result_temp + 1;
+                    result_lines.push("  " + _p_res + " = load i8*, i8** "
+                        + _p_slot);
+                    let _p_operand = LLVMOperand {
+                        llvm_type: "i8*",
+                        value: _p_res
+                    };
+                    return ExpressionResult {
+                        lines: result_lines,
+                        temp_index: result_temp,
+                        operand: _p_operand,
+                        diagnostics: result_diagnostics,
+                        string_constants: collected_string_constants
+                    };
+                }
+            }
+        }
+    }
+
     // Pointer-read intrinsics (#875, epic #763): lower directly to an LLVM
     // `load` of the descriptor's width instead of a `call`. The load element
     // type is driven by `return_type` ("i32"/"i64"), not by parsing the

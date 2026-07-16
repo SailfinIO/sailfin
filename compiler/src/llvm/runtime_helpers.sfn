@@ -353,6 +353,7 @@ fn _rh_descriptors_01(descriptors_in: RuntimeHelperDescriptor[]) -> RuntimeHelpe
     //   mkdtemp(template)     -> bool    ; POSIX `mkdtemp(3)`, Windows `false` stub
     //   fs_exists(path)       -> bool    ; POSIX `stat`==0,  Windows GetFileAttributesA
     //   get_perms(path)       -> i64     ; POSIX stat+st_mode, Windows `-1` stub
+    //   list_dir(path)        -> i8*     ; POSIX opendir/readdir, Windows FindFirstFile
     descriptors = append_runtime_helper(descriptors, RuntimeHelperDescriptor {
         target: "sailfin_intrinsic_fs_symlink", symbol: "sailfin_intrinsic_fs_symlink", return_type: "i1", parameter_types: ["i8*", "i8*"], effects: ["io"], native_signature: null, c_abi_return_type: null
     });
@@ -364,6 +365,9 @@ fn _rh_descriptors_01(descriptors_in: RuntimeHelperDescriptor[]) -> RuntimeHelpe
     });
     descriptors = append_runtime_helper(descriptors, RuntimeHelperDescriptor {
         target: "sailfin_intrinsic_fs_get_perms", symbol: "sailfin_intrinsic_fs_get_perms", return_type: "i64", parameter_types: ["i8*"], effects: ["io"], native_signature: null, c_abi_return_type: null
+    });
+    descriptors = append_runtime_helper(descriptors, RuntimeHelperDescriptor {
+        target: "sailfin_intrinsic_fs_list_dir", symbol: "sailfin_intrinsic_fs_list_dir", return_type: "i8*", parameter_types: ["i8*"], effects: ["io"], native_signature: null, c_abi_return_type: null
     });
 
     // Network intrinsics.

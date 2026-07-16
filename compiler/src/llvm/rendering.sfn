@@ -307,11 +307,13 @@ fn render_runtime_helper_declarations(used_targets: string[], local_functions: N
             if descriptor.target == "sailfin_intrinsic_exe_path" {
                 _preamble_inlined = true;
             }
-            // #1308: the fs-sentinel targets never appear as a real
+            // #1308 / SFN-51: the fs-sentinel targets never appear as a real
             // `call @sailfin_intrinsic_fs_*(` — the lowering branch emits the
-            // host leg's concrete primitive (`symlink`/`mkdtemp`/`stat`) or a
-            // bare immediate (the Windows stub) instead. Skip the bogus
-            // declare; the concrete leg's declare comes from its own row.
+            // host leg's concrete primitive (`symlink`/`mkdtemp`/`stat`,
+            // `opendir`/`FindFirstFileA`) or a bare immediate (the Windows
+            // stub) instead. Skip the bogus declare; the concrete leg's
+            // declare comes from its own row (for `list_dir`, the `opendir`
+            // family / `FindFirstFileA` externs in `filesystem.sfn`).
             if descriptor.target == "sailfin_intrinsic_fs_symlink" {
                 _preamble_inlined = true;
             }
@@ -322,6 +324,9 @@ fn render_runtime_helper_declarations(used_targets: string[], local_functions: N
                 _preamble_inlined = true;
             }
             if descriptor.target == "sailfin_intrinsic_fs_get_perms" {
+                _preamble_inlined = true;
+            }
+            if descriptor.target == "sailfin_intrinsic_fs_list_dir" {
                 _preamble_inlined = true;
             }
             // #1601 / #1876 / #1877: the Call-form `serve` stays

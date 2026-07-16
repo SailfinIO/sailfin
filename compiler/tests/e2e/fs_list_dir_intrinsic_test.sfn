@@ -1,0 +1,193 @@
+// E2E test for the host-aware directory-enumeration sentinel
+// (SFN-51, epic #1485, `docs/proposals/0021-windows-native-selfhost.md`
+// §4.2(B) / M5). Sibling of `exe_path_intrinsic_test.sfn` /
+// `errno_locator_test.sfn` — the same epic-#763-class host-aware sentinel
+// shape.
+//
+// `sailfin_intrinsic_fs_list_dir(path: i8*) -> i8*` is a registry sentinel
+// whose lowering branch (`core_call_emission.sfn`) emits a per-target
+// enumeration *loop* — not a plain symbol swap — chosen at emit time from
+// `fs_platform_leg()` (`SAILFIN_TARGET_OS` override, else the host probe):
+//
+//   Linux/Darwin -> opendir / readdir / closedir, name at
+//                   `dirent + _fs_dirent_dname_offset()`
+//   Windows      -> FindFirstFileA / FindNextFileA / FindClose, name at
+//                   `WIN32_FIND_DATAA.cFileName` (byte offset 44)
+//
+// Both legs delegate the portable per-entry work (dot filter, name dup,
+// array append) to the same bare runtime helpers, so only the host leg's
+// directory-iteration symbols enter the IR. This is what lets the single
+// `filesystem.ll` link on native Windows (where the POSIX `opendir` family
+// does not exist): the sentinel guarantees `opendir` is never *called* on
+// the Windows leg.
+//
+// Host-independent: the legs are forced via `SAILFIN_TARGET_OS` (consulted
+// before the host probe), so they assert the same thing on Linux or macOS
+// CI. For each leg it pins:
+//
+//   1. typecheck  — `sfn check <fixture>` exits 0 (the sentinel is seeded
+//                   into the resolution scope; no extern needed).
+//   2. leg calls  — the host primitives' `call`s appear.
+//   3. no others  — the other platform's iteration primitives do not.
+//   4. helpers    — the portable per-entry helpers are shared by both legs.
+//   5. no sentinel — no `call`/`declare` targets the sentinel name itself.
+//
+// NOTE on matchers: the `sfn/test` `expect_*` matchers are `![pure]` and so
+// cannot be called from an `![io]` test like this. Assert on the captured
+// `.ll` text with `sfn/strings` predicates instead (#842).
+import { contains, split } from "sfn/strings";
+
+fn _sfn_bin() -> string ![io] {
+    let configured = env.get("SAILFIN_BIN");
+    if configured.length > 0 { return configured; }
+    return "build/bin/sfn";
+}
+
+fn _scratch_dir() -> string ![io] {
+    let mut dir = env.get("SAILFIN_TEST_SCRATCH");
+    if dir.length == 0 { dir = "/tmp"; }
+    fs.createDirectory(dir, true);
+    return dir;
+}
+
+fn _base_env() -> string[] ![io] {
+    let mut e: string[] = [];
+    let path = env.get("PATH");
+    if path.length > 0 { e.push("PATH=" + path); }
+    let home = env.get("HOME");
+    if home.length > 0 { e.push("HOME=" + home); }
+    let tmpdir = env.get("TMPDIR");
+    if tmpdir.length > 0 { e.push("TMPDIR=" + tmpdir); }
+    let scratch = env.get("SAILFIN_TEST_SCRATCH");
+    if scratch.length > 0 { e.push("SAILFIN_TEST_SCRATCH=" + scratch); }
+    return e;
+}
+
+fn _env_with_target(target_os: string) -> string[] ![io] {
+    let mut e = _base_env();
+    e.push("SAILFIN_TARGET_OS=" + target_os);
+    return e;
+}
+
+fn _any_line_with(text: string, a: string, b: string) -> bool {
+    let lines = split(text, "\n");
+    let mut i = 0;
+    loop {
+        if i >= lines.length { break; }
+        if contains(lines[i], a) && contains(lines[i], b) { return true; }
+        i += 1;
+    }
+    return false;
+}
+
+// Fixture mirrors the real consumer shape (`sfn_fs_list_dir`): pass a path
+// `i8*` to the sentinel and return its `i8*` result. The sentinel name is
+// seeded as a source-level global by `runtime_helper_call_names()`, so no
+// extern is needed for it; `malloc` is externed because the fixture does
+// not import the prelude.
+fn _fixture_source() -> string {
+    return "extern fn malloc(size: usize) -> * u8;\n\nfn probe_list_dir() -> * u8 {\n    let buf: * u8 = malloc(8 as usize);\n    return sailfin_intrinsic_fs_list_dir(buf);\n}\n\nfn main() -> void {\n    let a: * u8 = probe_list_dir();\n}\n";
+}
+
+fn _fixture_path() -> string ![io] {
+    let dir = _scratch_dir();
+    let src = dir + "/sfn-fs-list-dir-probe.sfn";
+    fs.writeFile(src, _fixture_source());
+    return src;
+}
+
+fn _emit(src: string, child_env: string[], tag: string) -> string ![io] {
+    let dir = _scratch_dir();
+    let ll = dir + "/sfn-fs-list-dir-" + tag + ".ll";
+    if fs.exists(ll) { fs.deleteFile(ll); }
+    let exit = process.run_capture([_sfn_bin(), "emit", "-o", ll, "llvm", src], child_env);
+    let _o = process.capture_take_stdout();
+    let _e = process.capture_take_stderr();
+    if exit != 0 { return ""; }
+    if !fs.exists(ll) { return ""; }
+    let ir = fs.readFile(ll);
+    fs.deleteFile(ll);
+    return ir;
+}
+
+test "fs-list-dir: sfn check passes on the fixture" ![io] {
+    let src = _fixture_path();
+    let exit = process.run_capture([_sfn_bin(), "check", src], _base_env());
+    let _o = process.capture_take_stdout();
+    let _e = process.capture_take_stderr();
+    fs.deleteFile(src);
+    assert exit == 0;
+}
+
+test "fs-list-dir: Linux leg walks opendir/readdir/closedir, no Win32 primitive" ![io] {
+    let src = _fixture_path();
+    let ir = _emit(src, _env_with_target("Linux"), "linux");
+    fs.deleteFile(src);
+    assert ir.length > 0;
+    assert contains(ir, "call i8* @opendir(");
+    assert contains(ir, "call i8* @readdir(");
+    assert contains(ir, "call i32 @closedir(");
+    // Per-entry name offset resolved at runtime on the POSIX leg.
+    assert contains(ir, "call i64 @_fs_dirent_dname_offset(");
+    assert ! contains(ir, "@FindFirstFileA(");
+    assert ! contains(ir, "@FindNextFileA(");
+    assert ! contains(ir, "@FindClose(");
+}
+
+test "fs-list-dir: Darwin leg also walks opendir/readdir, no Win32 primitive" ![io] {
+    let src = _fixture_path();
+    let ir = _emit(src, _env_with_target("Darwin"), "darwin");
+    fs.deleteFile(src);
+    assert ir.length > 0;
+    assert contains(ir, "call i8* @opendir(");
+    assert contains(ir, "call i8* @readdir(");
+    assert ! contains(ir, "@FindFirstFileA(");
+}
+
+test "fs-list-dir: Windows leg walks FindFirstFileA/FindNextFileA/FindClose, no POSIX primitive" ![io] {
+    let src = _fixture_path();
+    let ir = _emit(src, _env_with_target("Windows"), "windows");
+    fs.deleteFile(src);
+    assert ir.length > 0;
+    assert contains(ir, "call i8* @FindFirstFileA(");
+    assert contains(ir, "call i32 @FindNextFileA(");
+    assert contains(ir, "call i32 @FindClose(");
+    // WIN32_FIND_DATAA.cFileName is read at byte offset 44.
+    assert _any_line_with(ir, "getelementptr i8", "i64 44");
+    assert ! contains(ir, "call i8* @opendir(");
+    assert ! contains(ir, "call i8* @readdir(");
+    assert ! contains(ir, "call i32 @closedir(");
+    // The runtime dirent-offset probe is POSIX-only; the Windows leg bakes
+    // the constant offset instead.
+    assert ! contains(ir, "call i64 @_fs_dirent_dname_offset(");
+}
+
+test "fs-list-dir: both legs delegate the portable per-entry helpers" ![io] {
+    let src = _fixture_path();
+    let ir_linux = _emit(src, _env_with_target("Linux"), "linux-helpers");
+    let ir_win = _emit(src, _env_with_target("Windows"), "windows-helpers");
+    fs.deleteFile(src);
+    assert ir_linux.length > 0;
+    assert ir_win.length > 0;
+    assert contains(ir_linux, "call i1 @_fs_name_is_dot(");
+    assert contains(ir_linux, "call i8* @_fs_dup_cstr(");
+    assert contains(ir_linux, "call i8* @sailfin_runtime_append_string_v2(");
+    assert contains(ir_win, "call i1 @_fs_name_is_dot(");
+    assert contains(ir_win, "call i8* @_fs_dup_cstr(");
+    assert contains(ir_win, "call i8* @sailfin_runtime_append_string_v2(");
+}
+
+test "fs-list-dir: sentinel symbol never emitted as call/declare" ![io] {
+    let src = _fixture_path();
+    let targets = ["Linux", "Darwin", "Windows"];
+    let mut i = 0;
+    loop {
+        if i >= targets.length { break; }
+        let ir = _emit(src, _env_with_target(targets[i]), "leak-" + targets[i]);
+        assert ir.length > 0;
+        assert ! _any_line_with(ir, "call ", "@sailfin_intrinsic_fs_list_dir");
+        assert ! _any_line_with(ir, "declare ", "@sailfin_intrinsic_fs_list_dir");
+        i += 1;
+    }
+    fs.deleteFile(src);
+}
