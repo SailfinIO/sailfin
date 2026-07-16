@@ -1,10 +1,9 @@
 // Tests for sfn/strings capsule string-manipulation helpers.
 //
-// Moved from compiler/tests/unit/fmt_test.sfn. Helpers stay inlined here —
-// the original was constrained to functions that don't reach the prelude
-// `char_code`/`char_at` paths. When `import { ... } from "../src/mod"`
-// becomes safe (no duplicate-declare emission, prelude paths covered by
-// the real capsule), drop the `_`-prefixed copies and import the real API.
+// The older fmt regressions below stay inlined because they predate direct
+// capsule imports; new public-surface coverage imports the real API.
+import { ascii_lowercase, ascii_uppercase } from "../src/mod";
+
 fn _find(text: string, needle: string, start: int) -> int {
     if needle.length == 0 { return start; }
     if needle.length > text.length { return -1; }
@@ -98,6 +97,26 @@ fn _is_empty(text: string) -> boolean { return text.length == 0; }
 fn _is_blank(text: string) -> boolean { return _trim(text).length == 0; }
 
 // -- Tests --
+test "strings: ASCII uppercase converts boundary letters" {
+    assert strings_equal(ascii_uppercase("azAZ"), "AZAZ");
+}
+
+test "strings: ASCII lowercase converts boundary letters" {
+    assert strings_equal(ascii_lowercase("AZaz"), "azaz");
+}
+
+test "strings: ASCII conversion preserves digits, punctuation, and empty strings" {
+    assert strings_equal(ascii_uppercase("09-_.!?"), "09-_.!?");
+    assert strings_equal(ascii_lowercase("09-_.!?"), "09-_.!?");
+    assert strings_equal(ascii_uppercase(""), "");
+    assert strings_equal(ascii_lowercase(""), "");
+}
+
+test "strings: ASCII conversion preserves mixed non-ASCII content" {
+    assert strings_equal(ascii_uppercase("Café Δ az"), "CAFé Δ AZ");
+    assert strings_equal(ascii_lowercase("Café Δ AZ"), "café Δ az");
+}
+
 test "fmt: trim_left" {
     assert strings_equal(_trim_left("  hello"), "hello");
     assert strings_equal(_trim_left("hello  "), "hello  ");

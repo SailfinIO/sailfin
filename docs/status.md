@@ -437,7 +437,7 @@ Capsules ship under `capsules/sfn/` and are imported by bare name
 
 | Capsule | Import | Status | Effects | Description |
 |---------|--------|--------|---------|-------------|
-| `sfn/strings` | `"strings"` | Shipped | None | Trim, case conversion, split/join, find/replace |
+| `sfn/strings` | `"strings"` | Shipped | None | Trim, explicit ASCII-only `ascii_uppercase` / `ascii_lowercase` conversion (non-ASCII bytes unchanged), split/join, find/replace |
 | `sfn/json` | `"json"` | Shipped | None | JSON parsing, serialization, pretty-print |
 | `sfn/crypto` | `"crypto"` | Shipped | None | Pure Sailfin SHA-256/SHA-1/SHA-384 + base64, HKDF-SHA-256, ChaCha20, Poly1305, and bit/constant-time helpers (SFEP-0048 Phase A); OpenSSL-backed Ed25519 verify and HMAC-SHA-256 |
 | `sfn/math` | `"math"` | Shipped | None | abs, min/max, clamp, floor/ceil/round, pow, sum/mean |

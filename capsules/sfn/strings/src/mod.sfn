@@ -120,7 +120,7 @@ fn to_upper(ch: string) -> string {
     let code = char_code(ch);
     if code >= 97 && code <= 122 {
         // a-z → A-Z
-        return char_at(ch, code - 32);
+        return char_from_code(code - 32);
     }
     return ch;
 }
@@ -130,7 +130,7 @@ fn to_lower(ch: string) -> string {
     let code = char_code(ch);
     if code >= 65 && code <= 90 {
         // A-Z → a-z
-        return char_at(ch, code + 32);
+        return char_from_code(code + 32);
     }
     return ch;
 }
@@ -171,8 +171,12 @@ fn trim_right(text: string) -> string {
     return substring(text, 0, end);
 }
 
-fn to_upper_all(text: string) -> string {
-    // Convert all ASCII lowercase characters to uppercase.
+fn to_upper_all(text: string) -> string { return ascii_uppercase(text); }
+
+fn to_lower_all(text: string) -> string { return ascii_lowercase(text); }
+
+fn ascii_uppercase(text: string) -> string {
+    // Convert ASCII a-z to A-Z. Every non-ASCII byte is copied unchanged.
     let mut out: string = "";
     let mut i: int = 0;
     loop {
@@ -183,8 +187,8 @@ fn to_upper_all(text: string) -> string {
     return out;
 }
 
-fn to_lower_all(text: string) -> string {
-    // Convert all ASCII uppercase characters to lowercase.
+fn ascii_lowercase(text: string) -> string {
+    // Convert ASCII A-Z to a-z. Every non-ASCII byte is copied unchanged.
     let mut out: string = "";
     let mut i: int = 0;
     loop {
