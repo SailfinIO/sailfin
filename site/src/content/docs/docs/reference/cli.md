@@ -527,9 +527,12 @@ driver owns compiler module scheduling. The driver reads
 `SAILFIN_BUILD_JOBS`; set it to a positive integer for build-parallelism
 bisects or memory-constrained hosts.
 
-`make test` parallelism is controlled by `TEST_JOBS`, which is auto-detected
-from CPU and memory. `make check` uses `CHECK_TEST_JOBS` for its cold seedcheck
-suite and `CHECK_TEST_TIMEOUT` for the per-test timeout. Use
+`sfn test` and `sfn dev shard run` auto-detect parallelism from CPU and memory
+(`min(cores, RAM/384 MiB)`, floor 1, cap 16, with a macOS cap of 2). An explicit
+`--jobs N` wins over `SAILFIN_TEST_JOBS=N`; use `--jobs 1` for the serial path.
+The Makefile compatibility layer forwards its `TEST_JOBS` budget, while
+`make check` uses `CHECK_TEST_JOBS` for its cold seedcheck suite and
+`CHECK_TEST_TIMEOUT` for the per-test timeout. Use
 `SELFHOST_STRICT=1` or `make check-strict` when a stage2/stage3 fixed-point
 mismatch must fail the run.
 
@@ -545,6 +548,7 @@ These environment variables influence the behavior of `sfn` and the Makefile bui
 | `SAILFIN_MEM_LIMIT` | `sfn` binary | Override the compiler's Linux self-applied 8 GiB virtual-memory cap. Use bytes, `unlimited`, `off`, or `0`. |
 | `SAILFIN_OPENSSL_PREFIX` | build/link | Override macOS OpenSSL discovery. The driver expects libraries under `$SAILFIN_OPENSSL_PREFIX/lib`. |
 | `SAILFIN_BUILD_JOBS` | `sfn build -p compiler` | Override compiler module scheduling inside the build driver. Use `1` for serial bisects or a small value on memory-constrained hosts. |
+| `SAILFIN_TEST_JOBS` | `sfn test` / `sfn dev shard run` | Override the native CPU/RAM-aware per-file worker default. An explicit `--jobs N` takes precedence; use `1` for serial execution. |
 | `SFN_REGISTRY` | `sfn add` / `sfn publish` | Override the package registry base URL for this shell. Takes precedence over `~/.sfn/config.toml`. See [`sfn config`](#sfn-config-getsetunsetlist-key-value). |
 | `SFN_TOKEN` | `sfn publish` | Bearer token used when uploading a capsule. Takes precedence over `~/.sfn/credentials` written by `sfn login`. |
 | `SAILFIN_SKIP_TOOLCHAIN_CHECK` | `sfn build`/`run`/`check`/`test` | Set to `1` to downgrade a `[toolchain]` pin mismatch from a hard error to a warning for every invocation in the shell/CI job. See [Toolchain Pinning Flags](#toolchain-pinning-flags). |

@@ -172,6 +172,10 @@ These are the supported knobs for source builds and local validation. Prefer
 command-line Make variables (`make test TEST_JOBS=4`) for one-off runs and
 environment variables for shell-wide behavior.
 
+Direct `sfn test` invocations auto-size their per-file worker pool from CPU and
+RAM. Pin `SAILFIN_TEST_JOBS=N` for a shell or CI job, or pass `--jobs N` for one
+invocation; the explicit flag wins, and `--jobs 1` selects the serial path.
+
 | Override | Applies to | Default | Notes |
 |---|---|---|---|
 | `SEED_VERSION` | `make fetch-seed` | `bootstrap.toml [seed].version` | Fetch a different released seed intentionally. Normal development should use the checked-in pin. |

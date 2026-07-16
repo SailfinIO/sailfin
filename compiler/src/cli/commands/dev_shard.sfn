@@ -34,14 +34,13 @@ import {
     with_subcommand
 } from "sfn/cli";
 
-import { _get_env_cmd } from "../../build_flags";
 import { number_to_string } from "../../num_format";
 import { _sort_strings_cmd } from "../../string_cmd_utils";
 import { strings_equal } from "../../string_utils";
 import { CliContext } from "../context";
 import {
     _collect_test_files_cmd,
-    _parse_jobs_value,
+    _resolve_test_jobs,
     _shard_keeps_index,
     command_def as test_command_def,
     run as test_run
@@ -216,21 +215,14 @@ fn _shard_list(name: string) -> int ![io] {
     return 0;
 }
 
-// Per-file parallelism for a shard leg: an explicit `--jobs N` wins; otherwise
-// `SAILFIN_TEST_JOBS` (the CI env knob, forwarded by the composite action) is
-// honoured. Any out-of-range or non-numeric value falls back to serial (1)
-// rather than failing the leg — mirroring scripts/test_shards.sh's guard.
+// Per-file parallelism for a shard leg shares the direct test resolver:
+// explicit `--jobs N` > `SAILFIN_TEST_JOBS` > native host auto-budget. Any
+// invalid explicit value falls back to serial here; reparsing the synthesized
+// test invocation then preserves its own flag contract.
 fn _resolve_jobs(matches: Matches) -> int ![io] {
-    if has(matches, "jobs") {
-        let j = get_int(matches, "jobs");
-        if j < 1 || j > 256 { return 1; }
-        return j;
-    }
-    let env_v = _get_env_cmd("SAILFIN_TEST_JOBS");
-    if env_v.length == 0 { return 1; }
-    let parsed = _parse_jobs_value(env_v);
-    if parsed < 1 { return 1; }
-    return parsed;
+    let jobs = _resolve_test_jobs(matches);
+    if jobs < 1 || jobs > 256 { return 1; }
+    return jobs;
 }
 
 // `sfn dev shard run <name>` — run the shard's tests. Faithful to
@@ -258,7 +250,7 @@ fn _shard_run_one(name: string, json: boolean, jobs: int, ctx: CliContext) -> in
         argv.push("--shard");
         argv.push(number_to_string(def.index) + "/" + number_to_string(def.total));
     }
-    if jobs > 1 {
+    if jobs >= 1 {
         argv.push("--jobs");
         argv.push(number_to_string(jobs));
     }
