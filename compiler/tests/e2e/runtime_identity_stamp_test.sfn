@@ -18,11 +18,12 @@
 //      (cross-invocation leak guard).
 //   3. A child handed a garbage SAILFIN_TEST_RUNTIME_STAMP falls back
 //      to full hashing — it exits 0 with tests passing (no crash).
-//   4. A runtime content change on a fresh invocation causes the runtime
-//      object to be rebuilt (the nonce/sidecar staleness contract).
-//      Documented skip until #2005: out-of-tree SAILFIN_RUNTIME_ROOT is
-//      broken by a duplicate sfn_type_register__<path-slug> definition
-//      in type_meta's emit, so a private runtime copy cannot warm.
+//   4. An out-of-tree SAILFIN_RUNTIME_ROOT (a `runtime/` copy under a
+//      directory NOT named `runtime`) warms, and a runtime content change
+//      across invocations is observed (the staleness contract). This also
+//      guards SFN-146 / #2005: pre-fix, the private copy could not warm at
+//      all — its path-derived module slug doubled `type_meta`'s
+//      `sfn_type_register` definition (`invalid redefinition of function`).
 //
 // All nested `sfn test` invocations use two trivial fixture files as the
 // "test suite" so each nested run is fast (no real suite dirs). Fixtures
@@ -208,37 +209,78 @@ test "stamp: garbage nonce falls back to full hashing — no crash, tests pass" 
     assert single_exit == 0;
 }
 
-// ---- Test 4: runtime content change across invocations rebuilds the object ----
+// ---- Test 4: runtime content change across invocations (private copy) ----
 //
 // The load-bearing staleness test: if a runtime source changes between two
-// invocations, the second invocation must rebuild the affected runtime object.
-// The nonce closes the cross-invocation leak: a child from run 2 never
-// validates the stamp written by run 1 (different nonce), so it falls back to
-// full hashing, compares the new content hash against the old .key sidecar,
-// and rebuilds.
+// invocations, the second invocation must observe the change. The nonce
+// closes the cross-invocation leak: a child from run 2 never validates the
+// stamp written by run 1 (different nonce), so it falls back to full hashing,
+// compares the new content hash against the old `.key` sidecar, and rebuilds.
 //
-// The intended shape (blocked, see below): copy `runtime/` into the tmp
-// scratch, point the nested runner at the copy via `SAILFIN_RUNTIME_ROOT`
-// (honored FIRST by `resolve_runtime_root`, runtime/sfn/platform/exec.sfn,
-// and inherited by the runner's per-file children — the serial `env`
-// wrapper overlays without `-i`, the pool path copies the full environ),
-// append a per-run-unique token to the copy's `clock.sfn`, rerun, and
-// assert the `.key` sidecar CONTENT changed.
+// Shape: copy `runtime/` into the tmp scratch under a directory deliberately
+// NOT named `runtime` (`runtime-copy`), point the nested runner at the copy
+// via `SAILFIN_RUNTIME_ROOT` (honored FIRST by `resolve_runtime_root`,
+// runtime/sfn/platform/exec.sfn, and inherited by the runner's per-file
+// children — the serial `env` wrapper overlays without `-i`, the pool path
+// copies the full environ), warm once, append a per-run-unique token to the
+// copy's `clock.sfn`, warm again over the SAME scratch (fresh invocation,
+// fresh nonce), and assert the folded runtime `identity=` changed — the
+// content edit is observed across invocations.
 //
-// BLOCKED by #2005: an out-of-tree SAILFIN_RUNTIME_ROOT produces a
-// duplicate `sfn_type_register__<path-slug>` definition in type_meta's
-// emitted .ll, so the private copy's runtime warm fails before the
-// staleness contract can be exercised (reproduced 2026-07-08 while
-// implementing this test). Editing the repo's own runtime/sfn/** from a
-// test is not an option — sibling tests build against it concurrently.
-//
-// Until #2005 lands, the contract is covered by: (a) manual verification
-// 2026-07-08 — editing runtime/sfn/clock.sfn between invocations rebuilt
-// clock.o and rewrote its sidecar + stamp; (b) tests 2 and 3 above, which
-// prove the nonce scope guard (fresh nonce per invocation; mismatched
-// nonce falls back to hashing); (c) the pre-existing runtime-object cache
-// tests guarding the `.key` sidecar contract (#632/#969). When #2005 is
-// fixed, replace this body with the intended shape.
-test "stamp: runtime content change across invocations rebuilds the object" ![io] {
-    assert true;
+// This case was previously an unrunnable skip: an out-of-tree
+// SAILFIN_RUNTIME_ROOT whose directory is not literally `runtime`
+// path-derived its module slug to the full absolute path, which mangled the
+// stable runtime ABI symbols and doubled `type_meta`'s `sfn_type_register`
+// definition (`invalid redefinition of function ...`) so the private copy
+// could not warm (#2005 / SFN-146). `_runtime_module_slug` now roots the
+// slug at the capsule's on-disk root and re-prefixes it with the canonical
+// `runtime/`, so `exit == 0` here is itself the #2005 regression guard.
+test "stamp: out-of-tree runtime root warms and observes a content change" ![io] {
+    let scratch = fs.mkdtemp("sfn-stamp-t4-");
+    let dirs = _make_fixture_dirs(scratch, "t4");
+
+    // Copy the repo runtime tree to `runtime-copy` — no `runtime/` path
+    // segment, so it exercises the fixed runtime-relative slug derivation
+    // (pre-fix this dir name is exactly what broke the warm).
+    let runtime_copy = scratch + "/runtime-copy";
+    let cp_exit = process.run_capture(["cp", "-R", "runtime", runtime_copy], _child_env_with_scratch(scratch));
+    let _ = process.capture_take_stdout();
+    let _ = process.capture_take_stderr();
+    assert cp_exit == 0;
+
+    // First warm against the private copy. Pre-#2005 this failed at link
+    // (`invalid redefinition of function sfn_type_register__<path-slug>`)
+    // during the runtime warm; the fix keeps the slug `runtime/...`.
+    let mut env1 = _child_env_with_scratch(scratch);
+    env1.push("SAILFIN_RUNTIME_ROOT=" + runtime_copy);
+    let exit1 = process.run_capture([_sfn_bin(), "test", dirs[0], dirs[1]], env1);
+    let _ = process.capture_take_stdout();
+    let _ = process.capture_take_stderr();
+    assert exit1 == 0;
+    let identity1 = _stamp_field(_read_stamp(scratch), "identity");
+    assert identity1.length == 64;
+
+    // Mutate a runtime source in the private copy, then rerun on a FRESH
+    // invocation over the same scratch. The folded runtime identity must
+    // change — the content edit is observed across invocations (the
+    // staleness contract this test was written to cover).
+    let clock_path = runtime_copy + "/sfn/clock.sfn";
+    fs.writeFile(clock_path, fs.readFile(clock_path)
+        + "\n// sfn-146 staleness probe\n");
+
+    // Point the second warm at the copy with a TRAILING SLASH. `SAILFIN_
+    // RUNTIME_ROOT` is honored verbatim (no `realpath`), so this exercises
+    // the `manifest_dir` normalization (SFN-146): a non-canonical root must
+    // still yield the stable `runtime/...` slug, otherwise the slug falls
+    // back to the full path and the warm fails exactly as pre-fix.
+    let mut env2 = _child_env_with_scratch(scratch);
+    env2.push("SAILFIN_RUNTIME_ROOT=" + runtime_copy + "/");
+    let exit2 = process.run_capture([_sfn_bin(), "test", dirs[0], dirs[1]], env2);
+    let _ = process.capture_take_stdout();
+    let _ = process.capture_take_stderr();
+    assert exit2 == 0;
+    let identity2 = _stamp_field(_read_stamp(scratch), "identity");
+    assert identity2.length == 64;
+
+    assert identity1 != identity2;
 }
