@@ -243,24 +243,36 @@ fn tls13_open_record(read_key: int[], read_iv: int[], seq: int, record: int[]) -
         Result.Err { error } => {
             return Result.Err { error: error };
         },
-        Result.Ok { value } => {
-            let inner: int[] = value;
-            let decoded: Result<TlsRecordPlaintext, string> = _decode_inner_plaintext(inner);
-            match decoded {
-                Result.Err { error } => {
-                    return Result.Err { error: error };
-                },
-                Result.Ok { value } => {
-                    if value.content.length > _max_plaintext() {
-                        return Result.Err {
-                            error: "tls13_open_record: content overflow"
-                        };
-                    }
-                    return Result.Ok { value: value };
-                }
-            }
-        }
+        Result.Ok { value } => { return _open_decode_and_check(value); }
     }
+}
+
+// Decode the recovered TLSInnerPlaintext, then enforce the content-length cap.
+// Split out of tls13_open_record so no `match` arm carries trailing control
+// flow. Remove once the pinned seed no longer reloads a sibling arm's pattern
+// binding when a `match` arm falls through into a nested `match`/`if` (SFN-378):
+// that miscompile emits IR failing the LLVM verifier with "Instruction does not
+// dominate all uses" (the sibling binding's alloca does not dominate the
+// reload). Every arm here terminates in an immediate `return`, which the seed
+// lowers correctly.
+fn _open_decode_and_check(inner: int[]) -> Result<TlsRecordPlaintext, string> {
+    let decoded: Result<TlsRecordPlaintext, string> = _decode_inner_plaintext(inner);
+    match decoded {
+        Result.Err { error } => {
+            return Result.Err { error: error };
+        },
+        Result.Ok { value } => { return _open_check_length(value); }
+    }
+}
+
+// Fail closed if the recovered content exceeds the RFC 8446 §5.1 plaintext cap.
+// Kept out of the `match` arm above for the same seed reason (SFN-378): an `if`
+// inside a `match` arm is trailing control flow and triggers the reload bug.
+fn _open_check_length(plaintext: TlsRecordPlaintext) -> Result<TlsRecordPlaintext, string> {
+    if plaintext.content.length > _max_plaintext() {
+        return Result.Err { error: "tls13_open_record: content overflow" };
+    }
+    return Result.Ok { value: plaintext };
 }
 
 export {
