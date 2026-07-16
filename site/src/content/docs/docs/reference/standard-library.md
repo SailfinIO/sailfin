@@ -59,6 +59,22 @@ The following functions are still recognized by the runtime for backward compati
 
 These functions operate on Sailfin strings using Unicode grapheme clusters as the unit of indexing. "Index" always means a grapheme-cluster index, not a byte offset or code-unit index.
 
+#### `ascii_uppercase(text: string) -> string` and `ascii_lowercase(text: string) -> string`
+
+Convert only the ASCII letters `a`–`z` or `A`–`Z`, respectively. Digits,
+punctuation, and every non-ASCII byte are copied unchanged. These pure helpers
+come from the `sfn/strings` capsule; they do not perform locale-sensitive
+conversion or Unicode case folding.
+
+```sfn
+import { ascii_lowercase, ascii_uppercase } from "sfn/strings";
+
+ascii_uppercase("Café 42"); // "CAFé 42"
+ascii_lowercase("Δ-HTTP");  // "Δ-http"
+```
+
+---
+
 #### `substring(text: string, start: int, end: int) -> string`
 
 Extract the substring from grapheme index `start` (inclusive) to `end` (exclusive). Both bounds are clamped to `[0, text.length]`. Returns `""` when the resulting range is empty or inverted.
