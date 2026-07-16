@@ -1,0 +1,8 @@
+{
+  "probe_version": "track-b-recognition/v1.0.0",
+  "protocol_id": "sfn-agent-benchmark/v2.6.0",
+  "packet_shown": false,
+  "cleared": true,
+  "review": "Both model families identified Rill-17 as unknown and explicitly labeled syntax extrapolation as a guess. Neither response showed exact or substantively correct prior Rill-17 knowledge beyond the visible sample.",
+  "model_families": ["openai-terra", "anthropic-sonnet"]
+}

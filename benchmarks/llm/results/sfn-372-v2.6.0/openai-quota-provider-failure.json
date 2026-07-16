@@ -1,0 +1,10 @@
+{
+  "attempt_id": "openai-terra-s350-structured-concurrency-003-sailfin-r1",
+  "classification": "quota_billing",
+  "setup_class": true,
+  "iteration": 2,
+  "provider_attempts": 1,
+  "error_type": "insufficient_quota",
+  "error_code": "insufficient_quota",
+  "error": "You exceeded your current quota, please check your plan and billing details."
+}

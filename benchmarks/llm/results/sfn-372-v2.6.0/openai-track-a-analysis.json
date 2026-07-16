@@ -1,0 +1,10 @@
+{
+  "decision_authorized": false,
+  "run_valid": false,
+  "invalid_reason": "provider_setup_quota_billing",
+  "primary_pool_eligible": false,
+  "records_preserved": 79,
+  "paired_instances_completed": 26,
+  "minimum_100_met": false,
+  "interpretation": "Setup and partial-run audit evidence only; no adoption, learnability, or product conclusion is permitted."
+}

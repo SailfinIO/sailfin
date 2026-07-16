@@ -1,0 +1,10 @@
+{
+  "partial_audit_only": true,
+  "paired_instances_completed": 26,
+  "by_arm": {
+    "sailfin": { "one_shot_success_pct": 73.0, "solve_rate_pct": 96.1, "mean_iters_to_green": 1.4 },
+    "scala": { "one_shot_success_pct": 57.6, "solve_rate_pct": 100.0, "mean_iters_to_green": 1.53846153846154 },
+    "python": { "one_shot_success_pct": 96.1, "solve_rate_pct": 100.0, "mean_iters_to_green": 1.03846153846154 }
+  },
+  "warning": "Incomplete unequal schedule after provider quota invalidation; values are not estimates and cannot be pooled."
+}

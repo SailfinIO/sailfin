@@ -1,9 +1,19 @@
 # Sailfin agent benchmark protocol v2
 
-Protocol ID: `sfn-agent-benchmark/v2.5.0`
+Protocol ID: `sfn-agent-benchmark/v2.6.0`
 
-Status: **frozen for bounded pilots; no v2 scored output exists at this
-version**.
+Status: **frozen for bounded pilots; the first v2.6 batch stopped on provider
+quota and produced no complete valid scored output**.
+
+Version 2.6.0 freezes symmetric transient-provider handling after the v2.5.0
+Anthropic schema probe returned `overloaded_error`. Curl failures, timeouts,
+rate limits, overloads, and service-unavailable responses are classified as
+`transport_transient` for every provider path. Each logical request permits
+three total provider attempts with 1,000 ms and 2,000 ms backoffs. Every raw
+request, response, and retry decision is preserved. Exhaustion stops the
+balanced batch and never enters a language denominator. This request and
+stopping-policy change starts a fresh pilot and corpus ID
+`sfn-agent-benchmark-corpus/v2.6.0`; v2.5.0 produced no scored output.
 
 Version 2.5.0 applies the frozen structured-concurrency requirement to both
 Track B arms before semantic execution. Sailfin-B requires `routine`,
@@ -82,6 +92,10 @@ Every pilot and confirmatory run manifest must record:
 - every arm, task instance, attempt ID, exclusion, ablation assignment, and
   stopping event.
 
+Real provider execution fails closed when the repository is dirty. The
+recorded commit, protocol hash, and harness hash must identify the exact code
+used for every setup, pilot, and confirmatory request.
+
 A wording-only correction that cannot change execution or interpretation may
 increment the patch version. Any change to an estimand, arm, task, packet,
 grader, model, attempt count, exclusion, threshold, or stopping rule increments
@@ -115,6 +129,14 @@ reserved answer headroom; the run manifest records this policy under
 consumed the entire allowance — it is a provider-response invalidation under
 section 6, not a language observation, and the paid batch stops immediately.
 Such a response never enters any language denominator.
+
+The frozen provider retry policy applies identically to schema probes,
+contamination probes, unscored authorization tasks, scored tasks, all arms,
+and both provider families. Only `transport_transient` responses are retried:
+the initial request plus at most two retries, after 1,000 ms and 2,000 ms.
+Authentication/permission, quota/billing, model-response, and response-budget
+failures are not retried. Retry exhaustion stops the remaining balanced batch,
+preserves every artifact, and cannot enter a language denominator.
 
 The system prompt, sampling policy, output limit, repair limit, timeout policy,
 task order randomization, and hidden-test visibility are identical across arms

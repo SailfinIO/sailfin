@@ -96,6 +96,7 @@ struct Completion {
     input_tokens: int;
     output_tokens: int;
     error: string;
+    provider_attempts: int;
 }
 
 struct GradeResult {
@@ -729,8 +730,9 @@ fn _shell_quote(value: string) -> string {
     return "'" + join(split(value, "'"), "'\\''") + "'";
 }
 
-fn _post_json(adapter: string, body: string, cwd: string, iteration: int) -> string ![io] {
-    let suffix = "-" + (iteration as string) + ".json";
+fn _post_json(adapter: string, body: string, cwd: string, iteration: int, provider_attempt: int) -> string ![io] {
+    let suffix = "-" + (iteration as string) + "-try-" + (provider_attempt as string)
+        + ".json";
     let body_path = cwd + "/request" + suffix;
     fs.writeFile(body_path, body);
     let quoted = _shell_quote("request" + suffix);
@@ -768,7 +770,8 @@ fn _post_json(adapter: string, body: string, cwd: string, iteration: int) -> str
     let err = process.capture_take_stderr();
     fs.writeFile(cwd + "/response" + suffix, out);
     if err.length > 0 {
-        fs.writeFile(cwd + "/curl-" + (iteration as string) + ".stderr", err);
+        fs.writeFile(cwd + "/curl-" + (iteration as string) + "-try-" + (provider_attempt as string)
+            + ".stderr", err);
     }
     if exit != 0 {
         return "{\"error\":\"curl failed\",\"stderr\":" + stringify(string_val(err))
@@ -812,6 +815,17 @@ fn _anthropic_response_budget_policy() -> JsonValue {
     return object_val(["max_output_tokens", "reserved_answer_headroom_tokens", "thinking_exhaustion_policy"], [number_val(_anthropic_max_output_tokens() as float), number_val(_anthropic_answer_headroom_tokens() as float), string_val("stop_reason=max_tokens with no answer text is a provider-response invalidation; the paid batch stops and correction requires a fresh balanced batch under a new protocol version")]);
 }
 
+fn _provider_retry_max_attempts() -> int { return 3; }
+
+fn _provider_retry_backoff_ms(provider_attempt: int) -> int {
+    if provider_attempt <= 1 { return 1000; }
+    return 2000;
+}
+
+fn _provider_retry_policy() -> JsonValue {
+    return object_val(["max_attempts", "backoff_ms", "retryable_classification", "exhaustion_policy"], [number_val(_provider_retry_max_attempts() as float), array_val([number_val(1000.0), number_val(2000.0)]), string_val("transport_transient"), string_val("retry exhaustion stops the balanced batch and never enters a language denominator")]);
+}
+
 fn _anthropic_body(model: string, system: string, messages: JsonValue[]) -> string {
     return stringify(object_val(["model", "max_tokens", "system", "messages"], [string_val(model), number_val(_anthropic_max_output_tokens() as float), string_val(system), _messages_json(messages)]));
 }
@@ -837,6 +851,10 @@ fn _provider_failure_class(error: string) -> string {
         || contains(error, "Payment Required") { return "quota_billing"; }
     if contains(error, "curl failed") || contains(error, "timeout") || contains(error, "Timeout")
         || contains(error, "temporarily unavailable")
+        || contains(error, "service unavailable")
+        || contains(error, "Service Unavailable")
+        || contains(error, "overloaded")
+        || contains(error, "Overloaded")
         || contains(error, "rate limit")
         || contains(error, "Rate limit") { return "transport_transient"; }
     if contains(error, "stop_reason=max_tokens") {
@@ -857,7 +875,8 @@ fn _completion_from_openai(resp: string) -> Completion {
             text: "",
             input_tokens: 0,
             output_tokens: 0,
-            error: api_error
+            error: api_error,
+            provider_attempts: 1
         };
     }
     let choices = get_array(root, "choices");
@@ -872,14 +891,16 @@ fn _completion_from_openai(resp: string) -> Completion {
             text: "",
             input_tokens: get_number(usage, "prompt_tokens") as int,
             output_tokens: get_number(usage, "completion_tokens") as int,
-            error: "model returned no response content"
+            error: "model returned no response content",
+            provider_attempts: 1
         };
     }
     return Completion {
         text: text,
         input_tokens: get_number(usage, "prompt_tokens") as int,
         output_tokens: get_number(usage, "completion_tokens") as int,
-        error: ""
+        error: "",
+        provider_attempts: 1
     };
 }
 
@@ -891,7 +912,8 @@ fn _completion_from_openai_responses(resp: string) -> Completion {
             text: "",
             input_tokens: 0,
             output_tokens: 0,
-            error: api_error
+            error: api_error,
+            provider_attempts: 1
         };
     }
     let output = get_array(root, "output");
@@ -918,14 +940,16 @@ fn _completion_from_openai_responses(resp: string) -> Completion {
             text: "",
             input_tokens: get_number(usage, "input_tokens") as int,
             output_tokens: get_number(usage, "output_tokens") as int,
-            error: "model returned no response content"
+            error: "model returned no response content",
+            provider_attempts: 1
         };
     }
     return Completion {
         text: text,
         input_tokens: get_number(usage, "input_tokens") as int,
         output_tokens: get_number(usage, "output_tokens") as int,
-        error: ""
+        error: "",
+        provider_attempts: 1
     };
 }
 
@@ -937,7 +961,8 @@ fn _completion_from_anthropic(resp: string) -> Completion {
             text: "",
             input_tokens: 0,
             output_tokens: 0,
-            error: api_error
+            error: api_error,
+            provider_attempts: 1
         };
     }
     let content = get_array(root, "content");
@@ -961,7 +986,8 @@ fn _completion_from_anthropic(resp: string) -> Completion {
             text: "",
             input_tokens: get_number(usage, "input_tokens") as int,
             output_tokens: get_number(usage, "output_tokens") as int,
-            error: "anthropic stop_reason=max_tokens with no answer text (thinking-only response, output budget exhausted)"
+            error: "anthropic stop_reason=max_tokens with no answer text (thinking-only response, output budget exhausted)",
+            provider_attempts: 1
         };
     }
     if text.length == 0 {
@@ -969,14 +995,53 @@ fn _completion_from_anthropic(resp: string) -> Completion {
             text: "",
             input_tokens: get_number(usage, "input_tokens") as int,
             output_tokens: get_number(usage, "output_tokens") as int,
-            error: "model returned no response content"
+            error: "model returned no response content",
+            provider_attempts: 1
         };
     }
     return Completion {
         text: text,
         input_tokens: get_number(usage, "input_tokens") as int,
         output_tokens: get_number(usage, "output_tokens") as int,
-        error: ""
+        error: "",
+        provider_attempts: 1
+    };
+}
+
+fn _provider_completion_once(cfg: Config, system: string, messages: JsonValue[], cwd: string, iteration: int, provider_attempt: int) -> Completion ![io] {
+    if cfg.adapter == "openai" {
+        if _uses_gpt5_request(cfg.model) {
+            return _completion_from_openai_responses(_post_json("openai-responses", _openai_responses_body(cfg.model, cfg.reasoning_effort, system, messages), cwd, iteration, provider_attempt));
+        }
+        return _completion_from_openai(_post_json("openai-chat", _openai_chat_body(cfg.model, system, messages), cwd, iteration, provider_attempt));
+    }
+    return _completion_from_anthropic(_post_json("anthropic", _anthropic_body(cfg.model, system, messages), cwd, iteration, provider_attempt));
+}
+
+fn _provider_completion(cfg: Config, system: string, messages: JsonValue[], cwd: string, iteration: int) -> Completion ![clock, io] {
+    let mut provider_attempt = 1;
+    loop {
+        let mut completion = _provider_completion_once(cfg, system, messages, cwd, iteration, provider_attempt);
+        completion.provider_attempts = provider_attempt;
+        let classification = _provider_failure_class(completion.error);
+        if completion.error.length == 0 || classification != "transport_transient"
+            || provider_attempt >= _provider_retry_max_attempts() {
+            return completion;
+        }
+        let backoff_ms = _provider_retry_backoff_ms(provider_attempt);
+        fs.writeFile(cwd + "/provider-retry-" + (iteration as string) + "-try-"
+            + (provider_attempt as string)
+            + ".json", stringify_pretty(object_val(["classification", "provider_attempt", "next_provider_attempt", "backoff_ms", "error"], [string_val(classification), number_val(provider_attempt as float), number_val((provider_attempt
+            + 1) as float), number_val(backoff_ms as float), string_val(completion.error)]), 2));
+        sleep(backoff_ms);
+        provider_attempt += 1;
+    }
+    return Completion {
+        text: "",
+        input_tokens: 0,
+        output_tokens: 0,
+        error: "unreachable provider retry state",
+        provider_attempts: 0
     };
 }
 
@@ -995,6 +1060,8 @@ fn _self_test_provider_schemas() ![io] {
     if _provider_failure_class("You have insufficient permissions") != "auth_permission"
         || _provider_failure_class("billing quota exhausted") != "quota_billing"
         || _provider_failure_class("curl failed: connection timeout") != "transport_transient"
+        || _provider_failure_class("Overloaded") != "transport_transient"
+        || _provider_failure_class("Service Unavailable") != "transport_transient"
         || _provider_failure_class("model returned no choices") != "model_response" {
         print.err("provider failure classification fixtures failed");
         process.exit(1);
@@ -1017,7 +1084,7 @@ fn _self_test_provider_schemas() ![io] {
     }
 }
 
-fn _run_schema_probe(cfg: Config, run_dir: string) ![io] {
+fn _run_schema_probe(cfg: Config, run_dir: string) ![clock, io] {
     if cfg.adapter == "stub" {
         print.err("--schema-probe requires --adapter openai or --adapter anthropic");
         process.exit(2);
@@ -1028,18 +1095,11 @@ fn _run_schema_probe(cfg: Config, run_dir: string) ![io] {
         text: "",
         input_tokens: 0,
         output_tokens: 0,
-        error: ""
+        error: "",
+        provider_attempts: 0
     };
-    if cfg.adapter == "openai" {
-        if _uses_gpt5_request(cfg.model) {
-            completion = _completion_from_openai_responses(_post_json("openai-responses", _openai_responses_body(cfg.model, cfg.reasoning_effort, system, messages), run_dir, 0));
-        } else {
-            completion = _completion_from_openai(_post_json("openai-chat", _openai_chat_body(cfg.model, system, messages), run_dir, 0));
-        }
-    } else {
-        completion = _completion_from_anthropic(_post_json("anthropic", _anthropic_body(cfg.model, system, messages), run_dir, 0));
-    }
-    fs.writeFile(run_dir + "/schema-probe.json", stringify_pretty(object_val(["adapter", "model", "scored", "text", "input_tokens", "output_tokens", "error"], [string_val(cfg.adapter), string_val(cfg.model), bool_val(false), string_val(completion.text), number_val(completion.input_tokens as float), number_val(completion.output_tokens as float), string_val(completion.error)]), 2));
+    completion = _provider_completion(cfg, system, messages, run_dir, 0);
+    fs.writeFile(run_dir + "/schema-probe.json", stringify_pretty(object_val(["adapter", "model", "scored", "text", "input_tokens", "output_tokens", "provider_attempts", "error"], [string_val(cfg.adapter), string_val(cfg.model), bool_val(false), string_val(completion.text), number_val(completion.input_tokens as float), number_val(completion.output_tokens as float), number_val(completion.provider_attempts as float), string_val(completion.error)]), 2));
     if completion.error.length > 0 || completion.text.length == 0 || completion.input_tokens <= 0
         || completion.output_tokens <= 0 {
         print.err("provider schema probe failed; see " + run_dir
@@ -1055,30 +1115,22 @@ fn _recognition_prompt(surface: string) -> string {
         + "\n```\n\nIdentify the language if you genuinely recognize it, explain the three forms used to declare a routine, bind a value, and declare authority, then write the smallest program that emits OK. If you do not recognize it, say unknown and distinguish guesses from knowledge.";
 }
 
-fn _probe_completion(cfg: Config, prompt: string, dir: string, iteration: int) -> Completion ![io] {
+fn _probe_completion(cfg: Config, prompt: string, dir: string, iteration: int) -> Completion ![clock, io] {
     if cfg.stub {
         return Completion {
             text: "unknown; no prior language knowledge",
             input_tokens: 0,
             output_tokens: 0,
-            error: ""
+            error: "",
+            provider_attempts: 0
         };
     }
     let system = "This is a blinded pre-packet recognition probe. Do not use retrieval or tools. Report prior recognition only.";
     let messages: JsonValue[] = [object_val(["role", "content"], [string_val("user"), string_val(prompt)])];
-    if cfg.adapter == "openai" {
-        if _uses_gpt5_request(cfg.model) {
-            let response = _post_json("openai-responses", _openai_responses_body(cfg.model, cfg.reasoning_effort, system, messages), dir, iteration);
-            return _completion_from_openai_responses(response);
-        }
-        let response2 = _post_json("openai-chat", _openai_chat_body(cfg.model, system, messages), dir, iteration);
-        return _completion_from_openai(response2);
-    }
-    let response2 = _post_json("anthropic", _anthropic_body(cfg.model, system, messages), dir, iteration);
-    return _completion_from_anthropic(response2);
+    return _provider_completion(cfg, system, messages, dir, iteration);
 }
 
-fn _run_contamination_probe(cfg: Config, run_dir: string) ![io] {
+fn _run_contamination_probe(cfg: Config, run_dir: string) ![clock, io] {
     let probe_dir = run_dir + "/contamination-probe";
     _mkdir(probe_dir);
     let surfaces = ["fn main() ![io] { let value = 7; print(value as string); }", "craft main() with[console] { bind value = 7; emit(value cast glyphs); }"];
@@ -1279,33 +1331,17 @@ fn _stub_solution(task: Task, arm: string) -> string {
     return _stub_lookup(task, arm);
 }
 
-fn _complete(cfg: Config, task: Task, arm: string, system: string, messages: JsonValue[], cwd: string, iteration: int) -> Completion ![io] {
+fn _complete(cfg: Config, task: Task, arm: string, system: string, messages: JsonValue[], cwd: string, iteration: int) -> Completion ![clock, io] {
     if cfg.stub {
         return Completion {
             text: _stub_solution(task, arm),
             input_tokens: 0,
             output_tokens: 0,
-            error: ""
+            error: "",
+            provider_attempts: 0
         };
     }
-    if cfg.adapter == "openai" {
-        if _uses_gpt5_request(cfg.model) {
-            let resp = _post_json("openai-responses", _openai_responses_body(cfg.model, cfg.reasoning_effort, system, messages), cwd, iteration);
-            return _completion_from_openai_responses(resp);
-        }
-        let resp2 = _post_json("openai-chat", _openai_chat_body(cfg.model, system, messages), cwd, iteration);
-        return _completion_from_openai(resp2);
-    }
-    if cfg.adapter == "anthropic" {
-        let resp2 = _post_json("anthropic", _anthropic_body(cfg.model, system, messages), cwd, iteration);
-        return _completion_from_anthropic(resp2);
-    }
-    return Completion {
-        text: "```\nunknown adapter\n```",
-        input_tokens: 0,
-        output_tokens: 0,
-        error: "unknown adapter"
-    };
+    return _provider_completion(cfg, system, messages, cwd, iteration);
 }
 
 fn _has_kw(text: string, kws: string[]) -> boolean {
@@ -1807,7 +1843,7 @@ fn _run_task_arm(task: Task, task_index: int, arm: ArmConfig, cfg: Config, run_d
             cats.push("provider_error");
             cats.push("provider_" + classification);
             fs.writeFile(wd + "/provider.error", completion.error);
-            fs.writeFile(wd + "/provider-failure.json", stringify_pretty(object_val(["classification", "setup_class", "iteration", "error"], [string_val(classification), bool_val(_is_setup_failure_class(classification)), number_val(iteration as float), string_val(completion.error)]), 2));
+            fs.writeFile(wd + "/provider-failure.json", stringify_pretty(object_val(["classification", "setup_class", "iteration", "provider_attempts", "error"], [string_val(classification), bool_val(_is_setup_failure_class(classification)), number_val(iteration as float), number_val(completion.provider_attempts as float), string_val(completion.error)]), 2));
             attribution = _classify_failure(cfg, task, "provider_error", completion.error, iteration);
             _write_iteration_attribution(wd + "/classification-" + (iteration as string)
                 + ".json", iteration, "provider_error", attribution);
@@ -1864,6 +1900,9 @@ fn _has_category(r: Record, category: string) -> boolean {
 fn _batch_invalidation_reason(r: Record) -> string {
     if _has_category(r, "provider_auth_permission") { return "auth_permission"; }
     if _has_category(r, "provider_quota_billing") { return "quota_billing"; }
+    if _has_category(r, "provider_transport_transient") {
+        return "transport_retry_exhausted";
+    }
     if _has_category(r, "provider_response_budget_exhausted") {
         return "response_budget_exhausted";
     }
@@ -2376,6 +2415,10 @@ fn _command_version(args: string[]) -> string ![io] {
     return "unavailable";
 }
 
+fn _repository_dirty() -> boolean ![io] {
+    return _command_version(["git", "status", "--porcelain"]).length > 0;
+}
+
 fn _sha256_file(path: string) -> string ![io] {
     if !fs.exists(path) { return "missing"; }
     let exit = process.run_capture(["shasum", "-a", "256", path], process.environ());
@@ -2586,9 +2629,12 @@ fn _write_run_manifest(path: string, cfg: Config, arms: string[], run_valid: boo
     let commands = object_val(["sailfin_compile", "sailfin_run", "rill17_check", "rill17_run", "scala_compile", "scala_run", "scala_tacit_compile", "scala_tacit_run", "python_run"], [_string_array_json(_append_all(timeout, [_sfn_bin(), "check", "{file}"])), _string_array_json(_append_all(timeout, [_sfn_bin(), "run", "{file}"])), _string_array_json(_append_all(timeout, ["sh", rill, _sfn_bin(), "check", "{file}"])), _string_array_json(_append_all(timeout, ["sh", rill, _sfn_bin(), "run", "{file}"])), _string_array_json(_append_all(timeout, ["scala-cli", "compile", "--server=false", "{file}"])), _string_array_json(_append_all(timeout, ["scala-cli", "run", "--server=false", "{file}"])), _string_array_json(_append_all(timeout, ["scala-cli", "compile", "--server=false", "--scala", "3.10.0-RC1-bin-20260616-4733954-NIGHTLY", "--scalac-option", "-experimental", "--jar", _tacit_jar(), _tacit_scaffold(), "{file}"])), _string_array_json(_append_all(timeout, ["scala-cli", "run", "--server=false", "--scala", "3.10.0-RC1-bin-20260616-4733954-NIGHTLY", "--scalac-option", "-experimental", "--jar", _tacit_jar(), _tacit_scaffold(), "{file}"])), _string_array_json(_append_all(timeout, ["python3", "{file}"]))]);
     let deadline = object_val(["default_seconds", "effective_value", "effective_prefix", "override_env", "override_value"], [number_val(60.0), string_val(join(timeout, " ")), _string_array_json(timeout), string_val("SFN350_TIMEOUT_CMD"), string_val(env.get("SFN350_TIMEOUT_CMD"))]);
     let protocol_path = _repo_root() + "/benchmarks/llm/PROTOCOL-V2.md";
+    let harness_path = _repo_root() + "/benchmarks/llm/sfn350.sfn";
+    let repository_commit = _command_version(["git", "rev-parse", "HEAD"]);
+    let repository_dirty = _repository_dirty();
     let ablation = object_val(["dimension", "assignment", "primary_pool_eligible"], [string_val(cfg.ablation), string_val("seeded parity of frozen attempt identity; paired arms receive the same treatment"), bool_val(cfg.ablation == "primary")]);
     let openai_api = cfg.adapter != "openai"? "not_applicable": (_uses_gpt5_request(cfg.model)? "responses": "chat_completions");
-    let manifest = object_val(["protocol_id", "protocol_sha256", "track", "adapter", "model", "model_family", "openai_api", "openai_reasoning_effort", "max_iters", "repeats", "seed", "sampling", "anthropic_response_budget", "arms", "packets", "ablation", "toolchains", "execution_deadline", "commands", "human_interventions", "run_valid", "invalid_reason"], [string_val("sfn-agent-benchmark/v2.5.0"), string_val(_sha256_file(protocol_path)), string_val(cfg.track), string_val(cfg.adapter), string_val(cfg.model), string_val(cfg.model_family), string_val(openai_api), string_val(manifest_effort), number_val(cfg.max_iters as float), number_val(cfg.repeats as float), number_val(cfg.seed as float), string_val(sampling), _anthropic_response_budget_policy(), array_val(arm_vals), _packet_manifest(cfg.track), ablation, toolchains, deadline, commands, number_val(0.0), bool_val(run_valid), string_val(invalid_reason)]);
+    let manifest = object_val(["protocol_id", "protocol_sha256", "repository_commit", "repository_dirty", "harness_sha256", "track", "adapter", "model", "model_family", "openai_api", "openai_reasoning_effort", "max_iters", "repeats", "seed", "sampling", "anthropic_response_budget", "provider_retry_policy", "arms", "packets", "ablation", "toolchains", "execution_deadline", "commands", "human_interventions", "run_valid", "invalid_reason"], [string_val("sfn-agent-benchmark/v2.6.0"), string_val(_sha256_file(protocol_path)), string_val(repository_commit), bool_val(repository_dirty), string_val(_sha256_file(harness_path)), string_val(cfg.track), string_val(cfg.adapter), string_val(cfg.model), string_val(cfg.model_family), string_val(openai_api), string_val(manifest_effort), number_val(cfg.max_iters as float), number_val(cfg.repeats as float), number_val(cfg.seed as float), string_val(sampling), _anthropic_response_budget_policy(), _provider_retry_policy(), array_val(arm_vals), _packet_manifest(cfg.track), ablation, toolchains, deadline, commands, number_val(0.0), bool_val(run_valid), string_val(invalid_reason)]);
     fs.writeFile(path, stringify_pretty(manifest, 2));
 }
 
@@ -2662,7 +2708,7 @@ fn _write_corpus_manifest(path: string, cfg: Config, tasks: Task[], arms: ArmCon
     }
     let band_ok = min_tokens > 0 && max_tokens * 100 <= min_tokens * band_percent;
     let band_label = "maximum <= " + (band_percent as string) + "% of minimum";
-    let corpus = object_val(["corpus_id", "frozen", "template_count", "instance_count", "templates", "instances", "token_estimate_method", "quick_reference_estimated_tokens", "predeclared_band", "quick_reference_band_met", "all_scaffold_bands_met"], [string_val("sfn-agent-benchmark-corpus/v2.5.0"), bool_val(true), number_val(templates.length as float), number_val(count as float), _string_array_json(templates), array_val(instances), string_val("UTF-8 source characters divided by 4, rounded up"), object_val(cheat_keys, cheat_vals), string_val(band_label), bool_val(band_ok), bool_val(all_scaffold_bands_met)]);
+    let corpus = object_val(["corpus_id", "frozen", "template_count", "instance_count", "templates", "instances", "token_estimate_method", "quick_reference_estimated_tokens", "predeclared_band", "quick_reference_band_met", "all_scaffold_bands_met"], [string_val("sfn-agent-benchmark-corpus/v2.6.0"), bool_val(true), number_val(templates.length as float), number_val(count as float), _string_array_json(templates), array_val(instances), string_val("UTF-8 source characters divided by 4, rounded up"), object_val(cheat_keys, cheat_vals), string_val(band_label), bool_val(band_ok), bool_val(all_scaffold_bands_met)]);
     fs.writeFile(path, stringify_pretty(corpus, 2));
 }
 
@@ -3261,6 +3307,10 @@ fn main(argv: string[]) -> int ![clock, io, net] {
     _write_run_manifest(run_dir + "/run.json", cfg, selected_arms, true, "");
     _write_corpus_manifest(run_dir + "/corpus.json", cfg, tasks, arm_cfgs);
     _write_schedule(run_dir + "/schedule.json", cfg, tasks, arm_cfgs, selected_arms);
+    if !cfg.stub && _repository_dirty() {
+        print.err("real provider execution requires a clean repository so the frozen commit and hashes identify the exact run");
+        return 2;
+    }
     if cfg.contamination_probe {
         if cfg.track != "b" {
             print.err("--contamination-probe requires --track b");

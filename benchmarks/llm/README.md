@@ -1,13 +1,15 @@
 # Sailfin agent-language benchmark
 
 The frozen two-track v2 preregistration lives in
-[`PROTOCOL-V2.md`](PROTOCOL-V2.md). The bounded v2.1.0 pilot and its rejection
-of confirmatory spend are recorded in [`PILOT-V2.md`](PILOT-V2.md); none of its
-observations may be selected, rerun, or pooled with the independently frozen
-v2.5.0 corpus. In particular, its structured-concurrency observations are
-ineligible because the live Sailfin guidance named nonexistent syntax and the
-grader accepted sequential output-equivalent programs. The SFN-350 v1
-decision protocol and pilot interpretation remain preserved in
+[`PROTOCOL-V2.md`](PROTOCOL-V2.md). The bounded v2.6.0 pilot and its OpenAI
+quota stop are recorded in [`PILOT-V2.md`](PILOT-V2.md), followed by the
+historical v2.1.0 readout. Version 2.6 freezes symmetric transient-provider
+retries after the v2.5 setup attempt exposed missing overload handling. No
+v2.1, v2.5, or partial v2.6 observation may be selected, rerun, or pooled with
+a fresh balanced batch. In particular, v2.1 structured-concurrency
+observations are ineligible because the live Sailfin guidance named nonexistent
+syntax and the grader accepted sequential output-equivalent programs. The
+SFN-350 v1 decision protocol and pilot interpretation remain preserved in
 [`EXPERIMENT.md`](EXPERIMENT.md) as historical evidence only. Do not reuse v1
 paid outputs as v2 confirmatory data, and do not use the three seed tasks alone
 to make a decision: they are an offline/pilot harness set, not the frozen
