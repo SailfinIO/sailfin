@@ -1563,13 +1563,23 @@ fn collect_effects_from_expression(expression: Expression?, imports: ImportSymbo
         if expression.port != null {
             required = merge_requirements(required, collect_effects_from_expression(expression.port, imports));
         }
-        // Registry-driven: the live `serve(...)` enforcement path. Derive
-        // the requirement set from the `serve` descriptor row (#1601, #1629)
-        // -> [io, net], replacing the former hardcoded `net`-only literal so
-        // it stays in lockstep with the Call-arm `serve` and a future `serve`
-        // effect change flows through with zero edits. Carets at the `serve`
-        // keyword token.
-        required = _append_builtin_effects(required, "serve", serve_trigger);
+        // SFN-29 (#1329): a `serve` that resolves to a user-defined or
+        // imported function carries THAT function's declared effects
+        // (in-module `E0400` for a same-module `fn serve`, cross-module
+        // `E0402` for an imported one) rather than the builtin serve's
+        // fixed requirement — matching the lowering gate in
+        // `llvm/expression_lowering/native/core.sfn`, which only lowers
+        // builtin serve when no resolvable `serve` is in scope. The
+        // per-program table (`_merge_local_functions` +
+        // `localize_import_symbols_for_program`) holds this unit's own
+        // top-level `fn serve` and its imports, never the implicit prelude,
+        // so a bare builtin serve falls through to the registry-driven
+        // ![io, net] requirement (#1601, #1629). Carets at the `serve` token.
+        if lookup_imported_function(imports, "serve") != null {
+            required = _propagate_imported_callee_effects("serve", imports, required, serve_trigger);
+        } else {
+            required = _append_builtin_effects(required, "serve", serve_trigger);
+        }
         return required;
     }
     return [];

@@ -1,0 +1,112 @@
+// End-to-end coverage for SFN-29 (#1329): a `serve(...)` that resolves to a
+// user-defined (or imported) function is validated through the ordinary
+// call-site rules, while the bare builtin concurrency `serve(handler, port)`
+// keeps its permissive path.
+//
+// The parser always commits a `serve(` token sequence to `Expression.Serve`
+// (`compiler/src/parser/expressions.sfn`), so the builtin-vs-resolvable
+// distinction is made downstream — in typecheck and the effect checker —
+// mirroring the lowering gate in
+// `compiler/src/llvm/expression_lowering/native/core.sfn`, which only lowers
+// builtin serve to `@sfn_serve` when no resolvable `serve` is in scope.
+//
+// These drive the whole frontend (parse -> typecheck -> effect-check) via
+// `sfn/test`'s `assert_compiles` / `assert_does_not_compile`, which shell out
+// to `sfn check --json`. They are `![io]`: those assertions spawn a child and
+// write a temp file.
+import { CompileExpect, assert_compiles, assert_does_not_compile } from "sfn/test";
+
+// A local `fn serve(...)` shadows the builtin, so `serve(handler, 8080)` with
+// a BARE function argument is rejected exactly as any ordinary call would be:
+// a function used in value position must be address-taken (E0808).
+fn _local_serve_bare_handler_source() -> string {
+    return "fn handler(req: * u8) -> int { return 0; }\n"
+        + "fn serve(h: * u8, port: int) -> void ![io, net] { }\n"
+        + "fn main() ![io, net] {\n"
+        + "    serve(handler, 8080);\n"
+        + "}\n";
+}
+
+// The same local `fn serve(...)`, but the handler is correctly address-taken,
+// so the call is accepted.
+fn _local_serve_addr_handler_source() -> string {
+    return "fn handler(req: * u8) -> int { return 0; }\n"
+        + "fn serve(h: * u8, port: int) -> void ![io, net] { }\n"
+        + "fn main() ![io, net] {\n"
+        + "    serve(handler as * u8, 8080);\n"
+        + "}\n";
+}
+
+// A resolvable `serve` declaring only `![net]` must require only `net` of its
+// caller — its OWN declared effects — not the builtin serve's fixed
+// `![io, net]`. Under the old always-builtin path this would have reported a
+// missing `io`; under call-site resolution it type-checks clean.
+fn _local_serve_declared_effects_source() -> string {
+    return "fn handler(req: * u8) -> int { return 0; }\n"
+        + "fn serve(h: * u8, port: int) -> void ![net] { }\n"
+        + "fn main() ![net] {\n"
+        + "    serve(handler as * u8, 8080);\n"
+        + "}\n";
+}
+
+// No local/imported `serve` is in scope, so this is the bare builtin
+// concurrency serve: its handler is passed straight through to `@sfn_serve`,
+// a bare handler is NOT rejected, and the builtin requires `![io, net]`.
+fn _builtin_serve_source() -> string {
+    return "fn handler(req: * u8) -> int { return 0; }\n"
+        + "fn main() ![io, net] {\n"
+        + "    serve(handler, 8080);\n"
+        + "}\n";
+}
+
+// An `extern fn serve` must take the builtin path in BOTH frontend passes
+// (typecheck + effect checker), because the effect checker's per-program
+// table registers only `FunctionDeclaration`s, not extern declarations. So a
+// bare handler is NOT rejected and the builtin `![io, net]` requirement holds
+// — this compiles under `![io, net]`. (Under a predicate that also treated
+// `extern fn serve` as resolvable, typecheck alone would reject the bare
+// handler with E0808 while the effect checker still used builtin semantics;
+// the two passes must agree.)
+fn _extern_serve_source() -> string {
+    return "extern fn serve(h: * u8, port: int) -> void;\n"
+        + "fn handler(req: * u8) -> int { return 0; }\n"
+        + "fn main() ![io, net] {\n"
+        + "    serve(handler, 8080);\n"
+        + "}\n";
+}
+
+test "serve resolvable: local fn serve with a bare handler is rejected (E0808)" ![io] {
+    // Match the E0808 message text: the `--json` envelope carries the code in
+    // a separate `code` field that `assert_does_not_compile` does not scan, so
+    // assert on the stable message body instead.
+    let result = assert_does_not_compile(_local_serve_bare_handler_source(), "cannot be used as a value here");
+    assert result.ok;
+}
+
+test "serve resolvable: local fn serve with an address-taken handler compiles" ![io] {
+    let result = assert_compiles(_local_serve_addr_handler_source(), CompileExpect {
+        effects: [], ok: true, diagnostic_pattern: ""
+    });
+    assert result.ok;
+}
+
+test "serve resolvable: uses the resolved fn's declared effects, not builtin io+net" ![io] {
+    let result = assert_compiles(_local_serve_declared_effects_source(), CompileExpect {
+        effects: [], ok: true, diagnostic_pattern: ""
+    });
+    assert result.ok;
+}
+
+test "serve builtin: a bare handler stays permissive (no E0808) under ![io, net]" ![io] {
+    let result = assert_compiles(_builtin_serve_source(), CompileExpect {
+        effects: [], ok: true, diagnostic_pattern: ""
+    });
+    assert result.ok;
+}
+
+test "serve extern: extern fn serve takes the builtin path in both frontend passes" ![io] {
+    let result = assert_compiles(_extern_serve_source(), CompileExpect {
+        effects: [], ok: true, diagnostic_pattern: ""
+    });
+    assert result.ok;
+}
