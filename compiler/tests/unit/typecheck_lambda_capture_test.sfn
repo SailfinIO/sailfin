@@ -380,3 +380,27 @@ test "captures: nested lambdas carry distinct body-span identifiers" ![io] {
     }
     assert ! both_match;
 }
+
+test "captures: assignment target and rhs record enclosing captures" ![io] {
+    let source = "let x: int = 1; let mut acc: int = 0; let f = fn() { acc = x; };";
+    let program = parse_program(source);
+    let records = analyze_lambda_captures(program);
+    assert records.length == 1;
+    assert records[0].captures.length == 2;
+    assert strings_equal(records[0].captures[0].name, "acc");
+    assert records[0].captures[0].mutable;
+    assert ! records[0].captures[0].by_value;
+    assert strings_equal(records[0].captures[1].name, "x");
+}
+
+test "captures: compound assignment records mutable target and rhs" ![io] {
+    let source = "let mut g: int = 0; let x: int = 2; let f = fn() { g = g + x; };";
+    let program = parse_program(source);
+    let records = analyze_lambda_captures(program);
+    assert records.length == 1;
+    assert records[0].captures.length == 2;
+    assert strings_equal(records[0].captures[0].name, "g");
+    assert records[0].captures[0].mutable;
+    assert ! records[0].captures[0].by_value;
+    assert strings_equal(records[0].captures[1].name, "x");
+}

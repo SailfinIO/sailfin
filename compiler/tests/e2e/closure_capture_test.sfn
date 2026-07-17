@@ -111,3 +111,9 @@ test "closure: un-annotated inferred-int capture via fn(int) -> int param prints
     assert r.exit == 0;
     assert r.out == "105";
 }
+
+test "closure: mutable capture assignment propagates to enclosing let" ![io] {
+    let r = _run_fixture("compiler/tests/e2e/fixtures/closure_mutable_capture/main.sfn");
+    assert r.exit == 0;
+    assert r.out == "9";
+}

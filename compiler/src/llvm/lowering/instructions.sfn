@@ -251,10 +251,11 @@ fn lower_instruction_range(function: NativeFunction, start_index: int, end: int,
                         _pi += 1;
                     }
                     if _is_prologue {
-                        let prologue_result = _lower_closure_env_load_prologue_marker(trimmed_expression, current_bindings, current_temp, current_lines);
+                        let prologue_result = _lower_closure_env_load_prologue_marker(trimmed_expression, current_bindings, current_locals, current_temp, current_lines, scope_id, scope_depth);
                         diagnostics = extend_string_array(diagnostics, prologue_result.diagnostics);
                         current_lines = prologue_result.lines;
                         current_bindings = prologue_result.bindings;
+                        current_locals = prologue_result.locals;
                         current_temp = prologue_result.temp_index;
                         // Don't bump `index` or set `_tag_handled` here —
                         // the surrounding tag==1 block does both at its
@@ -698,6 +699,7 @@ fn lower_instruction_range(function: NativeFunction, start_index: int, end: int,
 struct _ClosureEnvPrologueLowerResult {
     lines: string[];
     bindings: ParameterBinding[];
+    locals: LocalBinding[];
     temp_index: int;
     diagnostics: string[];
 }
@@ -708,7 +710,7 @@ struct _ClosureEnvPrologueLowerResult {
 // `%__env` after `sanitize_symbol` (see
 // `prepare_parameters_from_function`); we hardcode that name here
 // rather than threading the binding through.
-fn _lower_closure_env_load_prologue_marker(marker: string, bindings: ParameterBinding[], temp_index: int, lines: string[]) -> _ClosureEnvPrologueLowerResult {
+fn _lower_closure_env_load_prologue_marker(marker: string, bindings: ParameterBinding[], locals: LocalBinding[], temp_index: int, lines: string[], scope_id: string, scope_depth: int) -> _ClosureEnvPrologueLowerResult {
     let mut diagnostics: string[] = [];
     let lambda_id = _parse_prologue_int(marker, "lambda_id=");
     let captures_text = _parse_prologue_string(marker, "captures=");
@@ -726,18 +728,26 @@ fn _lower_closure_env_load_prologue_marker(marker: string, bindings: ParameterBi
         li += 1;
     }
     let mut new_bindings: ParameterBinding[] = bindings;
+    let mut new_locals: LocalBinding[] = locals;
     let mut bi: int = 0;
     loop {
         if bi >= prologue.bindings.length { break; }
         let loaded = prologue.bindings[bi];
-        new_bindings.push(ParameterBinding {
-            name: loaded.name, llvm_name: loaded.llvm_name, llvm_type: loaded.llvm_type, type_annotation: captures[bi].type_text, consumed: false, span: null, narrowed_variant: ""
-        });
+        if captures[bi].mutable {
+            new_locals = append_local_binding(new_locals, LocalBinding {
+                name: loaded.name, pointer: loaded.llvm_name, llvm_type: loaded.llvm_type, type_annotation: captures[bi].type_text, ownership: null, consumed: false, scope_id: scope_id, scope_depth: scope_depth, allocation_kind: "stack", init_sentinel: "", narrowed_variant: ""
+            });
+        } else {
+            new_bindings.push(ParameterBinding {
+                name: loaded.name, llvm_name: loaded.llvm_name, llvm_type: loaded.llvm_type, type_annotation: captures[bi].type_text, consumed: false, span: null, narrowed_variant: ""
+            });
+        }
         bi += 1;
     }
     return _ClosureEnvPrologueLowerResult {
         lines: new_lines,
         bindings: new_bindings,
+        locals: new_locals,
         temp_index: prologue.next_temp,
         diagnostics: diagnostics
     };
