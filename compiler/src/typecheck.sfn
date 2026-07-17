@@ -1894,6 +1894,39 @@ fn channel_send_diagnostics(expression: Expression, bindings: SymbolEntry[]) -> 
     return check_channel_send(entry.element_kind, sent_kind, expression.span);
 }
 
+// The monomorphized element kind a `let x = await ch.receive()` initializer
+// yields (#1944): `await` over a channel `receive` is the degenerate
+// pass-through of the channel's element type — the receive already blocks
+// synchronously, so there is no `Future<T>` to unwrap (Go's model: `receive`
+// yields the element type directly). Returns null unless the initializer is
+// exactly `await <ident>.receive()` and `<ident>` resolves to a `Channel<T>`
+// binding (non-empty `element_kind`). Like `await_result_type` /
+// `check_await_operand`, this is a pure resolution primitive exercised by
+// `concurrency_typecheck_test.sfn`, NOT wired into the live walk: `SymbolEntry.
+// element_kind` marks "this symbol IS a `Channel<K>`", so recording it on a
+// received *value* would mislead `channel_send_diagnostics`. The live-walk
+// wiring waits on the expression-type inferencer (#829); the runtime dispatch
+// of a fn-typed received local is delivered independently in lowering
+// (`instructions_let.sfn` / `core_concurrency_lowering.sfn`).
+fn await_receive_result_kind(initializer: Expression?, bindings: SymbolEntry[]) -> string? {
+    if initializer == null { return null; }
+    if !strings_equal(initializer.variant, "Await") { return null; }
+    let operand = initializer.operand;
+    if operand == null { return null; }
+    if !strings_equal(operand.variant, "Call") { return null; }
+    let callee = operand.callee;
+    if callee == null { return null; }
+    if !strings_equal(callee.variant, "Member") { return null; }
+    if !strings_equal(callee.member, "receive") { return null; }
+    let receiver = callee.object;
+    if receiver == null { return null; }
+    if !strings_equal(receiver.variant, "Identifier") { return null; }
+    let entry = find_symbol(bindings, receiver.name);
+    if entry == null { return null; }
+    if entry.element_kind.length == 0 { return null; }
+    return entry.element_kind;
+}
+
 // Resolution probe (issue #811). Returns whether `name` resolves to an
 // imported free function in the localized `imports` table. Since #812
 // flipped enforcement on, the walker's Call branch resolves callees
@@ -1943,6 +1976,10 @@ fn walk_block_expressions(block: Block, ctx: TypeckCtx) -> Diagnostic[] {
             if statement.type_annotation != null {
                 let resolved = channel_element_kind(statement.type_annotation.text);
                 if resolved != null { elem_kind = resolved; }
+            }
+            if elem_kind.length == 0 {
+                let awaited = await_receive_result_kind(statement.initializer, bindings);
+                if awaited != null { elem_kind = awaited; }
             }
             let registration = register_local_symbol(bindings, statement.name, "variable", statement.span, scope_start, false, false, elem_kind);
             bindings = registration.bindings;

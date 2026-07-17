@@ -1,0 +1,61 @@
+// E2E: a channel of `fn() -> void` closure values dispatches correctly
+// after `await ch.receive()` (#1944, SFEP-0030 item 2). The received
+// fn-value round-trips the pointer-width ring and dispatches through the
+// closure seam with a null env.
+//
+// Fixture source uses string concatenation (NOT `{{ }}` interpolation) so
+// the host compiler does not interpolate the fixture before it is written
+// — matching `channel_producer_consumer_exec_test.sfn`.
+import { contains } from "sfn/strings";
+
+fn _sfn_bin() -> string ![io] {
+    let configured = env.get("SAILFIN_BIN");
+    if configured.length > 0 { return configured; }
+    return "build/bin/sfn";
+}
+
+fn _child_env() -> string[] ![io] {
+    let mut e: string[] = [];
+    let path = env.get("PATH");
+    if path.length > 0 { e.push("PATH=" + path); }
+    let home = env.get("HOME");
+    if home.length > 0 { e.push("HOME=" + home); }
+    let tmpdir = env.get("TMPDIR");
+    if tmpdir.length > 0 { e.push("TMPDIR=" + tmpdir); }
+    let scratch = env.get("SAILFIN_TEST_SCRATCH");
+    if scratch.length > 0 { e.push("SAILFIN_TEST_SCRATCH=" + scratch); }
+    return e;
+}
+
+fn _scratch_dir() -> string ![io] {
+    let mut base = env.get("SAILFIN_TEST_SCRATCH");
+    if base.length == 0 { base = "/tmp"; }
+    fs.createDirectory(base, true);
+    return fs.mkdtemp(base + "/sfn-chan-fnval-");
+}
+
+fn _run_and_capture(label: string, source: string) -> string ![io] {
+    let dir = _scratch_dir();
+    let src = dir + "/" + label + ".sfn";
+    fs.writeFile(src, source);
+    let exit = process.run_capture([_sfn_bin(), "run", src], _child_env());
+    let out = process.capture_take_stdout();
+    let err = process.capture_take_stderr();
+    if exit != 0 { return "RUN_FAILED:" + out + err; }
+    return out + err;
+}
+
+test "channel: fn value elements dispatch after await receive (#1944)" ![io] {
+    let out = _run_and_capture("chan_fnval", "import { Channel, channel } from \"sync\";\n"
+        + "fn main() ![io] {\n"
+        + "    let tasks: Channel<fn() -> void> = channel(2);\n"
+        + "    tasks.send(fn() { print(\"Task A executed!\"); });\n"
+        + "    tasks.send(fn() { print(\"Task B executed!\"); });\n"
+        + "    let first = await tasks.receive();\n"
+        + "    first();\n"
+        + "    let second = await tasks.receive();\n"
+        + "    second();\n"
+        + "}");
+    assert contains(out, "Task A executed!");
+    assert contains(out, "Task B executed!");
+}
