@@ -887,6 +887,18 @@ fn check_statement(statement: Statement, ctx: TypeckCtx) -> ScopeResult {
                 anchor = statement.tokens[0];
                 near = " near `" + statement.tokens[0].lexeme + "`";
             }
+            // When the parser already abandoned this node with a precise parse
+            // code (a committed declaration production minting `E05xx`, e.g. a
+            // malformed nested `let` -> `E0504`, SFN-384), surface that instead
+            // of the generic `E0819` so the diagnostic names the real defect.
+            if statement.code.length > 0 {
+                return ScopeResult {
+                    bindings: bindings,
+                    diagnostics: [Diagnostic {
+                        code: statement.code, severity: "error", message: statement.message, file_path: "", primary: anchor, suggestion: null
+                    }]
+                };
+            }
             return ScopeResult {
                 bindings: bindings,
                 diagnostics: [make_unparseable_statement_diagnostic(anchor, near)]
