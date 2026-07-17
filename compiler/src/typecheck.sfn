@@ -40,12 +40,14 @@ import {
     check_interface_field_members,
     check_interface_members,
     check_intersection_value_type_annotation,
+    check_malformed_array_annotation,
     check_object_literal_target,
     check_struct_fields,
     check_struct_implements_interfaces,
     check_struct_methods,
     check_type_parameters,
     check_unanalyzable_raw,
+    classify_declared_primitive,
     classify_fn_cast,
     clone_bindings,
     detect_removed_ai_keyword,
@@ -63,6 +65,7 @@ import {
     make_fn_value_position_diagnostic,
     make_main_signature_param_count_diagnostic,
     make_main_signature_param_type_diagnostic,
+    make_mixed_arithmetic_diagnostic,
     make_nested_fn_capture_diagnostic,
     make_parse_error_diagnostic,
     make_removed_keyword_diagnostic,
@@ -72,9 +75,11 @@ import {
     make_try_non_result_fn_diagnostic,
     make_try_non_result_operand_diagnostic,
     make_undefined_function_diagnostic,
+    make_unknown_primitive_method_diagnostic,
     make_unparseable_statement_diagnostic,
     make_unsupported_statement_keyword_diagnostic,
     parse_type_arguments,
+    primitive_has_method,
     register_local_symbol,
     register_symbol,
     resolve_interface_annotation,
@@ -82,6 +87,7 @@ import {
     signature_is_c_abi,
     signature_is_generic,
     spawn_future_kind,
+    token_from_name,
     type_is_future,
     type_is_result
 } from "./typecheck_types";
@@ -272,7 +278,7 @@ fn _symbols_from_global_names(names: string[]) -> SymbolEntry[] {
     loop {
         if i >= names.length { break; }
         out.push(SymbolEntry {
-            name: names[i], kind: "prelude", span: null, is_generic: false, is_c_abi: false, element_kind: ""
+            name: names[i], kind: "prelude", span: null, is_generic: false, is_c_abi: false, element_kind: "", declared_prim: ""
         });
         i += 1;
     }
@@ -360,7 +366,7 @@ fn _collect_imported_call_symbols(program: Program) -> SymbolEntry[] {
                     if alias_str.length > 0 { local_name = alias_str; }
                 }
                 symbols.push(SymbolEntry {
-                    name: local_name, kind: "import", span: null, is_generic: false, is_c_abi: false, element_kind: ""
+                    name: local_name, kind: "import", span: null, is_generic: false, is_c_abi: false, element_kind: "", declared_prim: ""
                 });
                 s += 1;
             }
@@ -539,14 +545,19 @@ fn check_statement(statement: Statement, ctx: TypeckCtx) -> ScopeResult {
             let resolved = channel_element_kind(statement.type_annotation.text);
             if resolved != null { elem_kind = resolved; }
         }
-        let registration = register_local_symbol(bindings, statement.name, "variable", statement.span, scope_start, false, false, elem_kind);
+        let mut decl_prim: string = "";
+        if statement.type_annotation != null {
+            decl_prim = classify_declared_primitive(statement.type_annotation.text);
+        }
+        let registration = register_local_symbol(bindings, statement.name, "variable", statement.span, scope_start, false, false, elem_kind, decl_prim);
         let walk_diags = walk_expression(statement.initializer, ctx);
         let annotation_diags = check_bare_fn_type_annotation(statement.type_annotation, statement.name, statement.span);
+        let array_diags = check_malformed_array_annotation(statement.type_annotation, statement.name, statement.span);
         let intersection_diags = check_intersection_value_type_annotation(statement.type_annotation, statement.name, statement.span);
         let object_literal_diags = check_object_literal_target(statement.initializer, statement.type_annotation, statement.name, statement.span, top_level);
         return ScopeResult {
             bindings: registration.bindings,
-            diagnostics: registration.diagnostics.concat(walk_diags).concat(annotation_diags).concat(intersection_diags).concat(object_literal_diags)
+            diagnostics: registration.diagnostics.concat(walk_diags).concat(annotation_diags).concat(array_diags).concat(intersection_diags).concat(object_literal_diags)
         };
     }
     if statement.variant == "FunctionDeclaration" {
@@ -826,6 +837,7 @@ fn check_statement(statement: Statement, ctx: TypeckCtx) -> ScopeResult {
             _ci += 1;
         }
         diagnostics = diagnostics.concat(check_bare_fn_type_annotation(statement.aliased_type, statement.name, statement.name_span));
+        diagnostics = diagnostics.concat(check_malformed_array_annotation(statement.aliased_type, statement.name, statement.name_span));
         diagnostics = diagnostics.concat(check_intersection_value_type_annotation(statement.aliased_type, statement.name, statement.name_span));
         return ScopeResult {
             bindings: registration.bindings,
@@ -922,7 +934,11 @@ fn seed_parameter_scope(signature: FunctionSignature, top_level: SymbolEntry[]) 
     let mut diagnostics: Diagnostic[] = [];
 
     for parameter in signature.parameters {
-        let registration = register_local_symbol(bindings, parameter.name, "parameter", parameter.span, param_scope_start);
+        let mut param_prim: string = "";
+        if parameter.type_annotation != null {
+            param_prim = classify_declared_primitive(parameter.type_annotation.text);
+        }
+        let registration = register_local_symbol(bindings, parameter.name, "parameter", parameter.span, param_scope_start, false, false, "", param_prim);
         bindings = registration.bindings;
         let mut _ci: int = 0;
         loop {
@@ -991,7 +1007,7 @@ fn _build_nested_fn_scope(signature: FunctionSignature, ctx: TypeckCtx) -> Scope
         if !has_symbol(ctx.top_level, entry.name) {
             if !is_function_kind(entry.kind) {
                 scope.push(SymbolEntry {
-                    name: entry.name, kind: "outer_local", span: entry.span, is_generic: false, is_c_abi: false, element_kind: ""
+                    name: entry.name, kind: "outer_local", span: entry.span, is_generic: false, is_c_abi: false, element_kind: "", declared_prim: ""
                 });
             }
         }
@@ -1021,7 +1037,11 @@ fn _build_nested_fn_scope(signature: FunctionSignature, ctx: TypeckCtx) -> Scope
     let param_scope_start = scope.length;
     let mut diagnostics: Diagnostic[] = [];
     for parameter in signature.parameters {
-        let registration = register_local_symbol(scope, parameter.name, "parameter", parameter.span, param_scope_start);
+        let mut nparam_prim: string = "";
+        if parameter.type_annotation != null {
+            nparam_prim = classify_declared_primitive(parameter.type_annotation.text);
+        }
+        let registration = register_local_symbol(scope, parameter.name, "parameter", parameter.span, param_scope_start, false, false, "", nparam_prim);
         scope = registration.bindings;
         let mut _ci: int = 0;
         loop {
@@ -1355,11 +1375,23 @@ fn walk_expression(expression: Expression?, ctx: TypeckCtx) -> Diagnostic[] {
         // element type -> E0815 (#1942). Silent unless the mismatch is
         // certain (see `channel_send_diagnostics`).
         diagnostics = diagnostics.concat(channel_send_diagnostics(expression, bindings));
+        // `field.to_uppercase()` on a proven primitive receiver whose method
+        // resolves to neither a primitive method descriptor nor a free callable
+        // -> E0012 (SFN-385). Silent unless the receiver's primitive kind is
+        // known and the method is provably unresolvable (see
+        // `primitive_method_diagnostics`), so it rejects exactly the calls the
+        // lowerer would fatal on ("callee signature is not known").
+        diagnostics = diagnostics.concat(primitive_method_diagnostics(expression, ctx));
         return diagnostics;
     }
     if expression.variant == "Binary" {
         let mut diagnostics = walk_expression(expression.left, ctx);
         diagnostics = diagnostics.concat(walk_expression(expression.right, ctx));
+        // `a + b` mixing a proven `int` and `float` operand -> E0306 (SFN-385).
+        // Silent unless both operands' numeric kinds are known and differ, so it
+        // rejects exactly the arithmetic the lowerer would fatal on ("ABI
+        // primitive mismatch").
+        diagnostics = diagnostics.concat(mixed_arithmetic_diagnostics(expression, bindings));
         return diagnostics;
     }
     if expression.variant == "Unary" {
@@ -1446,6 +1478,7 @@ fn walk_expression(expression: Expression?, ctx: TypeckCtx) -> Diagnostic[] {
             let parameter = expression.parameters[_lp];
             if lambda_span == null { lambda_span = parameter.span; }
             diagnostics = diagnostics.concat(check_bare_fn_type_annotation(parameter.type_annotation, parameter.name, parameter.span));
+            diagnostics = diagnostics.concat(check_malformed_array_annotation(parameter.type_annotation, parameter.name, parameter.span));
             diagnostics = diagnostics.concat(check_intersection_value_type_annotation(parameter.type_annotation, parameter.name, parameter.span));
             _lp += 1;
         }
@@ -1464,6 +1497,7 @@ fn walk_expression(expression: Expression?, ctx: TypeckCtx) -> Diagnostic[] {
             }
         }
         diagnostics = diagnostics.concat(check_bare_fn_type_annotation(expression.return_type, "lambda", lambda_span));
+        diagnostics = diagnostics.concat(check_malformed_array_annotation(expression.return_type, "lambda", lambda_span));
         diagnostics = diagnostics.concat(check_intersection_value_type_annotation(expression.return_type, "lambda", lambda_span));
         return diagnostics;
     }
@@ -1894,6 +1928,116 @@ fn channel_send_diagnostics(expression: Expression, bindings: SymbolEntry[]) -> 
     return check_channel_send(entry.element_kind, sent_kind, expression.span);
 }
 
+// SFN-385: reject `recv.method(...)` on a primitive receiver whose method is
+// provably unresolvable. The lowerer resolves such a call by (1) a primitive
+// method descriptor (`substring` family) or (2) fusing the receiver as arg0 to a
+// free callable (`s.substring(a, b)` -> `substring(s, a, b)`); it fatals with
+// "callee signature is not known" only when BOTH miss. This mirror rejects
+// exactly that set: it fires only when the receiver's primitive kind is known
+// (an explicitly-annotated binding/parameter, or a primitive literal) and the
+// method is neither a whitelisted primitive method (`primitive_has_method`) nor
+// an in-scope callable (builtin / imported / bound name). Every other receiver
+// — user type, unannotated binding, complex expression — yields the fail-open
+// "" kind and stays silent, so no valid program is rejected.
+fn primitive_method_diagnostics(expression: Expression, ctx: TypeckCtx) -> Diagnostic[] {
+    let callee = expression.callee;
+    if callee == null { return []; }
+    if !strings_equal(callee.variant, "Member") { return []; }
+    let receiver = callee.object;
+    if receiver == null { return []; }
+    let mut prim: string = "";
+    if strings_equal(receiver.variant, "Identifier") {
+        let entry = find_symbol(ctx.bindings, receiver.name);
+        if entry != null { prim = entry.declared_prim; }
+    } else if strings_equal(receiver.variant, "StringLiteral") {
+        prim = "string";
+    } else if strings_equal(receiver.variant, "NumberLiteral") {
+        prim = _conditional_number_kind(receiver.value);
+    } else if strings_equal(receiver.variant, "BooleanLiteral") {
+        prim = "boolean";
+    }
+    if prim.length == 0 { return []; }
+    let member = callee.member;
+    // (1) a genuine primitive method descriptor -> valid, silent.
+    if primitive_has_method(prim, member) { return []; }
+    // (2) fuses to a free callable named `member` -> valid, silent. Mirrors the
+    // lowerer's receiver-arg0 fusion (`substring` is a prelude global, so a
+    // bound-name hit; an imported helper is an import hit).
+    if is_builtin_call_name(member) { return []; }
+    if lookup_imported_function(ctx.imports, member) != null { return []; }
+    if find_symbol(ctx.bindings, member) != null { return []; }
+    return [make_unknown_primitive_method_diagnostic(prim, member, token_from_name(member, callee.span))];
+}
+
+// SFN-385: the anchor span for a mixed-arithmetic diagnostic. The `Binary` node
+// itself carries no span (ast.sfn), so borrow one from an operand that has one
+// (`Identifier`/`Member`); `null` when neither does (the diagnostic still
+// renders, without a caret).
+fn _arith_operand_span(expression: Expression?) -> SourceSpan? {
+    if expression == null { return null; }
+    if strings_equal(expression.variant, "Identifier") {
+        return expression.span;
+    }
+    if strings_equal(expression.variant, "Member") { return expression.span; }
+    return null;
+}
+
+// SFN-385: the numeric primitive class ("int" | "float" | "") of an arithmetic
+// operand. A numeric literal (optionally negated) classifies by its spelling; a
+// named binding classifies by its explicit annotation (`declared_prim`), but
+// only when that annotation is `int`/`float`. Everything else is the fail-open
+// "" — a member access, a call, a nested expression, or an unannotated binding
+// carries no statically-known kind, so the check stays silent on it.
+fn operand_numeric_class(expression: Expression?, bindings: SymbolEntry[]) -> string {
+    if expression == null { return ""; }
+    if strings_equal(expression.variant, "NumberLiteral") {
+        return _conditional_number_kind(expression.value);
+    }
+    if strings_equal(expression.variant, "Unary") {
+        if strings_equal(expression.operator, "-") {
+            if expression.operand != null {
+                if strings_equal(expression.operand.variant, "NumberLiteral") {
+                    return _conditional_number_kind(expression.operand.value);
+                }
+            }
+        }
+        return "";
+    }
+    if strings_equal(expression.variant, "Identifier") {
+        let entry = find_symbol(bindings, expression.name);
+        if entry == null { return ""; }
+        if strings_equal(entry.declared_prim, "int") { return "int"; }
+        if strings_equal(entry.declared_prim, "float") { return "float"; }
+        return "";
+    }
+    return "";
+}
+
+// SFN-385: reject arithmetic that mixes a proven `int` and a proven `float`
+// operand -> E0306. Fires only for the arithmetic operators (`+ - * / %`) and
+// only when both operands' numeric classes are known and differ — precisely the
+// case the lowerer fatals on ("ABI primitive mismatch: arithmetic mixes ...").
+// Any operand the checker cannot classify yields "" and suppresses the
+// diagnostic, so same-type and inference-dependent arithmetic is untouched.
+fn mixed_arithmetic_diagnostics(expression: Expression, bindings: SymbolEntry[]) -> Diagnostic[] {
+    let op = expression.operator;
+    let mut is_arith: boolean = false;
+    if strings_equal(op, "+") { is_arith = true; }
+    if strings_equal(op, "-") { is_arith = true; }
+    if strings_equal(op, "*") { is_arith = true; }
+    if strings_equal(op, "/") { is_arith = true; }
+    if strings_equal(op, "%") { is_arith = true; }
+    if !is_arith { return []; }
+    let lk = operand_numeric_class(expression.left, bindings);
+    if lk.length == 0 { return []; }
+    let rk = operand_numeric_class(expression.right, bindings);
+    if rk.length == 0 { return []; }
+    if strings_equal(lk, rk) { return []; }
+    let mut anchor = _arith_operand_span(expression.left);
+    if anchor == null { anchor = _arith_operand_span(expression.right); }
+    return [make_mixed_arithmetic_diagnostic(lk, rk, op, anchor)];
+}
+
 // The monomorphized element kind a `let x = await ch.receive()` initializer
 // yields (#1944): `await` over a channel `receive` is the degenerate
 // pass-through of the channel's element type — the receive already blocks
@@ -2008,11 +2152,12 @@ fn walk_statement_expressions(statement: Statement, ctx: TypeckCtx) -> Diagnosti
     if statement.variant == "VariableDeclaration" {
         let init_diags = walk_expression(statement.initializer, ctx);
         let annotation_diags = check_bare_fn_type_annotation(statement.type_annotation, statement.name, statement.span);
+        let array_diags2 = check_malformed_array_annotation(statement.type_annotation, statement.name, statement.span);
         let intersection_diags = check_intersection_value_type_annotation(statement.type_annotation, statement.name, statement.span);
         // The lambda-body `let` twin of the primary let-site E0828 (#1905):
         // classify a bare object-literal initializer against its annotation.
         let object_literal_diags = check_object_literal_target(statement.initializer, statement.type_annotation, statement.name, statement.span, ctx.top_level);
-        return init_diags.concat(annotation_diags).concat(intersection_diags).concat(object_literal_diags);
+        return init_diags.concat(annotation_diags).concat(array_diags2).concat(intersection_diags).concat(object_literal_diags);
     }
     if statement.variant == "IfStatement" {
         let mut diagnostics = walk_expression(statement.condition, ctx);

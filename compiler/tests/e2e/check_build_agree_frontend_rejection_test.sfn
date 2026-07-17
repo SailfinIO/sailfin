@@ -1,0 +1,78 @@
+// End-to-end regression for SFN-385: locks the check-side of three
+// check/build divergences closed. Before this diagnostic set, these three
+// program shapes checked green with `sfn check` but only failed later
+// (at `sfn build`, or silently miscompiled). `sfn check` alone now rejects
+// each of them, so this test is check-only — it never invokes `sfn build`;
+// the point is that static analysis catches the error without codegen/link.
+//
+// - E0012 — method call on a primitive that resolves to nothing.
+// - E0830 — malformed array type spelling (`[int]` / `[]string`).
+// - E0306 — arithmetic mixing a proven `int` and `float`.
+//
+// Mirrors check_build_agree_module_global_test.sfn's process/env/scratch
+// hygiene for the parallel test pool (`.claude/rules/no-bash-e2e.md`).
+fn _sfn_bin() -> string ![io] {
+    let configured = env.get("SAILFIN_BIN");
+    if configured.length > 0 { return configured; }
+    return "build/bin/sfn";
+}
+
+// Inherit the full parent environment so the nested `sfn check` toolchain
+// resolves normally under the parallel pool.
+fn _child_env() -> string[] ![io] { return process.environ(); }
+
+fn _scratch_dir() -> string ![io] {
+    let mut dir = env.get("SAILFIN_TEST_SCRATCH");
+    if dir.length == 0 { dir = "/tmp"; }
+    fs.createDirectory(dir, true);
+    return dir;
+}
+
+fn _write_scratch(name: string, source: string) -> string ![io] {
+    let path = _scratch_dir() + "/" + name;
+    fs.writeFile(path, source);
+    return path;
+}
+
+test "check/build agree: unknown method on primitive is rejected by check (E0012, SFN-385)" ![io] {
+    let source = "fn u(field: string) -> string { return field.to_uppercase(); } "
+        + "fn main() -> int { let _ = u(\"h\"); return 0; }";
+    let srcpath = _write_scratch("sfn-385-e0012.sfn", source);
+
+    let check_exit = process.run_capture([_sfn_bin(), "check", srcpath], _child_env());
+    let _co = process.capture_take_stdout();
+    let _ce = process.capture_take_stderr();
+
+    if fs.exists(srcpath) { fs.deleteFile(srcpath); }
+
+    // Frontend now rejects — previously this checked green (E0012 gap).
+    assert check_exit != 0;
+}
+
+test "check/build agree: malformed array type is rejected by check (E0830, SFN-385)" ![io] {
+    let source = "fn main() -> int { let xs: []string = []; return 0; }";
+    let srcpath = _write_scratch("sfn-385-e0830.sfn", source);
+
+    let check_exit = process.run_capture([_sfn_bin(), "check", srcpath], _child_env());
+    let _co = process.capture_take_stdout();
+    let _ce = process.capture_take_stderr();
+
+    if fs.exists(srcpath) { fs.deleteFile(srcpath); }
+
+    // Frontend now rejects — previously this checked green (E0830 gap).
+    assert check_exit != 0;
+}
+
+test "check/build agree: int+float arithmetic mix is rejected by check (E0306, SFN-385)" ![io] {
+    let source = "fn main() -> int { let a: int = 3; let b: float = 2.0; let c = a + b; return 0; }";
+    let srcpath = _write_scratch("sfn-385-e0306.sfn", source);
+
+    let check_exit = process.run_capture([_sfn_bin(), "check", srcpath], _child_env());
+    let _co = process.capture_take_stdout();
+    let _ce = process.capture_take_stderr();
+
+    if fs.exists(srcpath) { fs.deleteFile(srcpath); }
+
+    // Frontend now rejects — previously this checked green (E0306 gap).
+    assert check_exit != 0;
+}

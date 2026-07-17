@@ -1,0 +1,140 @@
+// Unit tests for the SFN-385 check/build divergence closures: three
+// static-analysis diagnostics that make `sfn check` reject programs that
+// previously checked green but only failed at `sfn build` (or lowering).
+//
+// - E0012 — a method call on a primitive type that resolves to nothing
+//   (e.g. `field.to_uppercase()` where `field: string`).
+// - E0830 — a malformed array type spelling (`[int]` or `[]string`
+//   instead of the canonical `int[]` / `string[]`).
+// - E0306 — arithmetic mixing a proven `int` and `float` operand.
+//
+// These parse a small `.sfn` source through `parse_program` and run
+// `typecheck_diagnostics` end-to-end, asserting on the `Diagnostic.code`
+// field, mirroring typecheck_bare_fn_type_test.sfn.
+import { parse_program } from "../../src/parser/mod";
+import { typecheck_diagnostics } from "../../src/typecheck";
+import { Diagnostic } from "../../src/typecheck_types";
+
+fn _has_code(diagnostics: Diagnostic[], code: string) -> boolean {
+    let mut i: int = 0;
+    loop {
+        if i >= diagnostics.length { break; }
+        if strings_equal(diagnostics[i].code, code) { return true; }
+        i += 1;
+    }
+    return false;
+}
+
+// -------------------------------------------------------------------
+// E0012 — method call on a primitive that resolves to nothing.
+// -------------------------------------------------------------------
+test "frontend-rejection: rejects unknown method on string-typed param (E0012)" ![io] {
+    let source = "fn u(field: string) -> string { return field.to_uppercase(); } "
+        + "fn main() -> int { let _ = u(\"h\"); return 0; }";
+    let program = parse_program(source);
+    let diagnostics = typecheck_diagnostics(program);
+    assert _has_code(diagnostics, "E0012");
+}
+
+test "frontend-rejection: accepts real method on string-typed param" ![io] {
+    let source = "fn t(s: string) -> string { return s.substring(0, 1); } "
+        + "fn main() -> int { let _ = t(\"h\"); return 0; }";
+    let program = parse_program(source);
+    let diagnostics = typecheck_diagnostics(program);
+    assert ! _has_code(diagnostics, "E0012");
+}
+
+test "frontend-rejection: unannotated receiver stays silent for E0012 (fail-open)" ![io] {
+    let source = "fn main() -> int { let x = something(); let _ = x.whatever(); return 0; }";
+    let program = parse_program(source);
+    let diagnostics = typecheck_diagnostics(program);
+    assert ! _has_code(diagnostics, "E0012");
+}
+
+// -------------------------------------------------------------------
+// E0830 — malformed array type spelling.
+// -------------------------------------------------------------------
+test "frontend-rejection: rejects bracket-prefix array type [int] (E0830)" ![io] {
+    let source = "fn main() -> int { let xs: [int] = []; return 0; }";
+    let program = parse_program(source);
+    let diagnostics = typecheck_diagnostics(program);
+    assert _has_code(diagnostics, "E0830");
+}
+
+test "frontend-rejection: rejects bracket-prefix array type []string (E0830)" ![io] {
+    let source = "fn main() -> int { let xs: []string = []; return 0; }";
+    let program = parse_program(source);
+    let diagnostics = typecheck_diagnostics(program);
+    assert _has_code(diagnostics, "E0830");
+}
+
+test "frontend-rejection: accepts canonical array type int[]" ![io] {
+    let source = "fn main() -> int { let xs: int[] = []; return 0; }";
+    let program = parse_program(source);
+    let diagnostics = typecheck_diagnostics(program);
+    assert ! _has_code(diagnostics, "E0830");
+}
+
+test "frontend-rejection: accepts canonical array type string[]" ![io] {
+    let source = "fn main() -> int { let xs: string[] = []; return 0; }";
+    let program = parse_program(source);
+    let diagnostics = typecheck_diagnostics(program);
+    assert ! _has_code(diagnostics, "E0830");
+}
+
+test "frontend-rejection: rejects malformed array type in parameter position (E0830)" ![io] {
+    let source = "fn f(xs: []string) -> int { return 0; }";
+    let program = parse_program(source);
+    let diagnostics = typecheck_diagnostics(program);
+    assert _has_code(diagnostics, "E0830");
+}
+
+// -------------------------------------------------------------------
+// E0306 — arithmetic mixing a proven int and float.
+// -------------------------------------------------------------------
+test "frontend-rejection: rejects named int+float arithmetic mix (E0306)" ![io] {
+    let source = "fn main() -> int { let a: int = 3; let b: float = 2.0; let c = a + b; return 0; }";
+    let program = parse_program(source);
+    let diagnostics = typecheck_diagnostics(program);
+    assert _has_code(diagnostics, "E0306");
+}
+
+test "frontend-rejection: rejects literal int+float arithmetic mix (E0306)" ![io] {
+    let source = "fn main() -> int { let c = 3 + 2.0; return 0; }";
+    let program = parse_program(source);
+    let diagnostics = typecheck_diagnostics(program);
+    assert _has_code(diagnostics, "E0306");
+}
+
+test "frontend-rejection: accepts same-type int arithmetic" ![io] {
+    let source = "fn main() -> int { let a: int = 3; let b: int = 2; let c = a + b; return 0; }";
+    let program = parse_program(source);
+    let diagnostics = typecheck_diagnostics(program);
+    assert ! _has_code(diagnostics, "E0306");
+}
+
+test "frontend-rejection: accepts mixed-width int-class arithmetic" ![io] {
+    let source = "fn main() -> int { let a: int = 3; let b: i32 = 2; let c = a + b; return 0; }";
+    let program = parse_program(source);
+    let diagnostics = typecheck_diagnostics(program);
+    assert ! _has_code(diagnostics, "E0306");
+}
+
+// Asymmetric mix — a `float` binding on the left, an `int` literal on the
+// right — still rejects, pinning that operand order is irrelevant.
+test "frontend-rejection: rejects float-var plus int-literal arithmetic (E0306)" ![io] {
+    let source = "fn main() -> int { let a: float = 2.0; let c = a + 5; return 0; }";
+    let program = parse_program(source);
+    let diagnostics = typecheck_diagnostics(program);
+    assert _has_code(diagnostics, "E0306");
+}
+
+// Fail-open across a capture boundary: a primitive local captured into a
+// nested fn is tagged `outer_local` with no `declared_prim`, so a method
+// call on it stays silent (E0012 must not fire — under-firing is safe).
+test "frontend-rejection: captured outer primitive stays silent (no E0012)" ![io] {
+    let source = "fn outer() -> int { let s: string = \"hi\"; fn inner() -> int { let _ = s.to_uppercase(); return 0; } return inner(); }";
+    let program = parse_program(source);
+    let diagnostics = typecheck_diagnostics(program);
+    assert ! _has_code(diagnostics, "E0012");
+}
