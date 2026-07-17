@@ -790,24 +790,7 @@ fn _bench_rt_one(self_bin: string, src: string, work_dir: string, child_env: str
     let name = _bench_rt_label(src);
     let bin = work_dir + "/" + name;
 
-    // Build `src` in place by default — preserving its relative-import
-    // resolution and making `sfn bench <file>` a drop-in runner. Only when the
-    // path contains a `runtime/` segment do we stage a copy into `work_dir`
-    // first: `module_name_from_path` (compiler/src/main.sfn) roots a module slug
-    // at a `runtime/` segment found anywhere in the entry path, so a workload
-    // built from `benchmarks/runtime/` mis-slugs as a `runtime/` capsule module
-    // and fails to link its `sfn/bench` dependency (SFN-215). `work_dir` has no
-    // `runtime/` segment (default `build/bench-exec`) and is kept at repo depth
-    // 2 so a workload's own `../../runtime` relative import still resolves.
-    // Delete this staging when SFN-215 lands.
-    let mut entry = src;
-    if index_of(src, "runtime/") >= 0 {
-        let staged = work_dir + "/" + _bench_rt_basename(src);
-        fs.writeFile(staged, fs.readFile(src));
-        entry = staged;
-    }
-
-    let build_exit = process.run_capture([self_bin, "build", "-o", bin, entry], child_env);
+    let build_exit = process.run_capture([self_bin, "build", "-o", bin, src], child_env);
     let _bo = process.capture_take_stdout();
     let _be = process.capture_take_stderr();
     if build_exit != 0 {
@@ -919,9 +902,7 @@ fn _run_runtime_mode(matches: Matches, ctx: CliContext) -> int ![clock, io] {
     let mut warmup = 1;
     if has(matches, "warmup") { warmup = get_int(matches, "warmup"); }
     if warmup < 0 { warmup = 0; }
-    // Default kept free of a `runtime/` segment and at repo depth 2 so staged
-    // workloads build and their `../../runtime` relative imports resolve (see
-    // `_bench_rt_one` / SFN-215).
+    // Directory for the built workload binaries (one per workload).
     let work_dir = get_or(matches, "work-dir", "build/bench-exec");
     let csv_out = get_or(matches, "csv", "");
     let filter = get_or(matches, "filter", "");

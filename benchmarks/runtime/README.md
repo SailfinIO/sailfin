@@ -28,12 +28,6 @@ aggregates min/median inner-ms and max peak RSS across the timed runs, checks
 any `--budget-*` gates, and reports the result (table, `--csv`, or both). It
 replaces the retired runtime bench shell script.
 
-One internal detail worth knowing: the runner stages each workload into
-`--work-dir` before building, because `module_name_from_path` mis-roots any
-entry path containing a `runtime/` segment as a `runtime/` capsule module
-(SFN-215) — which would otherwise break the `sfn/bench` link for
-`benchmarks/runtime/*.sfn`. This is transparent to callers.
-
 ## Running
 
 ```bash
