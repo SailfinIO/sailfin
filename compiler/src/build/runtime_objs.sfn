@@ -40,6 +40,15 @@ import {
     _read_import_deps,
     _resolve_self_path
 } from "./paths";
+// Target conditioning (SFN-52, SFEP-0021 §4.2(A)): rewrite the runtime
+// module set (process→process_windows swap, rlimit drop) and add
+// `windows_stubs.ll` to the link inputs for a Windows target. Identity /
+// skipped off Windows, so Linux/macOS link inputs are byte-identical.
+import {
+    build_target_os,
+    target_condition_runtime_sfn_sources,
+    target_os_is_windows
+} from "./target";
 
 // Issue #940: validate the declarative runtime bundle by the
 // presence of `<root>/capsule.toml` (the manifest the implicit
@@ -1209,8 +1218,37 @@ fn _openssl_link_search_flags() -> string[] ![io] {
     return ["-L" + dir];
 }
 
+// Rewrite the runtime capsule set for `target_os` (SFN-52). Only the
+// `sfn_sources` list is target-conditioned here (the POSIX↔Windows process
+// swap + rlimit drop); the `link_libs` POSIX filter is applied once at the
+// final link (`LlvmTextBackend.link`), so it covers the `sfn test` link
+// layout too. Non-Windows returns the input array verbatim (identity), so
+// every downstream compile iterates the same list as before. A free
+// function taking `target_os` as a string keeps it pure; the `![io]`
+// caller resolves the target.
+fn _condition_runtime_capsules(caps: RuntimeCapsuleArtifacts[], target_os: string) -> RuntimeCapsuleArtifacts[] {
+    if !target_os_is_windows(target_os) { return caps; }
+    let mut out: RuntimeCapsuleArtifacts[] = [];
+    let mut i: int = 0;
+    loop {
+        if i >= caps.length { break; }
+        let c = caps[i];
+        out.push(RuntimeCapsuleArtifacts {
+            capsule_name: c.capsule_name, manifest_dir: c.manifest_dir, c_sources: c.c_sources, ll_sources: c.ll_sources, sfn_sources: target_condition_runtime_sfn_sources(c.sfn_sources, target_os), include_dirs: c.include_dirs, link_libs: c.link_libs, prelude_entry: c.prelude_entry
+        });
+        i += 1;
+    }
+    return out;
+}
+
 fn assemble_runtime_capsule_link_inputs(runtime_capsules: RuntimeCapsuleArtifacts[], out_dir: string, opt_flag: string, binary_dir: string, shared_cache_root: string) -> RuntimeLinkInputs ![io] {
-    let inputs = _clang_compile_runtime_capsule_objects(runtime_capsules, out_dir, opt_flag, shared_cache_root);
+    // SFN-52 (SFEP-0021 §4.2(A), M6): condition the runtime capsule set for
+    // the build target before any compile iterates it — Windows swaps
+    // process.sfn→process_windows.sfn and drops the Linux-only rlimit.sfn.
+    // Identity off Windows, so Linux/macOS link inputs are byte-identical.
+    let target_os = build_target_os();
+    let capsules = _condition_runtime_capsules(runtime_capsules, target_os);
+    let inputs = _clang_compile_runtime_capsule_objects(capsules, out_dir, opt_flag, shared_cache_root);
     if !inputs.success { return _failed_runtime_link_inputs(); }
     let mut objects: string[] = inputs.object_paths;
     // Prepend the Darwin OpenSSL keg `-L` (if any) so `-lssl`/`-lcrypto`
@@ -1227,7 +1265,7 @@ fn assemble_runtime_capsule_link_inputs(runtime_capsules: RuntimeCapsuleArtifact
     let mut stats = inputs.stats;
     // `sfn-sources` + `prelude-entry` are materialized here (the
     // prelude rides the same emit path as of #940).
-    let sfn_inputs = _compile_runtime_sfn_sources(runtime_capsules, out_dir, opt_flag, binary_dir, shared_cache_root);
+    let sfn_inputs = _compile_runtime_sfn_sources(capsules, out_dir, opt_flag, binary_dir, shared_cache_root);
     if !sfn_inputs.success { return _failed_runtime_link_inputs(); }
     stats = merge_cache_stats(stats, sfn_inputs.stats);
     let mut soi: int = 0;
@@ -1250,8 +1288,8 @@ fn assemble_runtime_capsule_link_inputs(runtime_capsules: RuntimeCapsuleArtifact
     let mut has_prelude: boolean = false;
     let mut pp: int = 0;
     loop {
-        if pp >= runtime_capsules.length { break; }
-        if runtime_capsules[pp].prelude_entry.length > 0 {
+        if pp >= capsules.length { break; }
+        if capsules[pp].prelude_entry.length > 0 {
             has_prelude = true;
             break;
         }
@@ -1271,8 +1309,8 @@ fn assemble_runtime_capsule_link_inputs(runtime_capsules: RuntimeCapsuleArtifact
         let compiler_identity = cache_compiler_identity(resolve_compiler_version(""), self_path);
         let mut pi: int = 0;
         loop {
-            if pi >= runtime_capsules.length { break; }
-            let cap = runtime_capsules[pi];
+            if pi >= capsules.length { break; }
+            let cap = capsules[pi];
             if cap.prelude_entry.length > 0 {
                 let cap_prefix = _runtime_obj_prefix(cap.capsule_name);
                 // #1288: the prelude is never staged, so it has no
@@ -1288,6 +1326,37 @@ fn assemble_runtime_capsule_link_inputs(runtime_capsules: RuntimeCapsuleArtifact
             }
             pi += 1;
         }
+    }
+    // SFN-52 (SFEP-0021 §4.2(A), M6): a native Windows (MSVC) link needs the
+    // hand-written stub IR (`realpath`→`_fullpath`, the assert/serve no-ops,
+    // and the crypto/TLS/rand no-op stubs) that the mingw Makefile links
+    // today. It is deliberately absent from the manifest `ll-sources` — its
+    // strong defs would duplicate the runtime's own on Linux/macOS — so the
+    // driver adds it only for a Windows target, compiled with the same
+    // `-target` triple via `llvm_assemble`. `<runtime-root>/ir/windows_stubs.ll`.
+    if target_os_is_windows(target_os) && capsules.length > 0 {
+        let stub_src = _path_join(capsules[0].manifest_dir, "ir/windows_stubs.ll");
+        let stub_obj = _path_join(out_dir, "windows_stubs.ll" + opt_flag + ".o");
+        let stub_tmp = _mktemp_sibling_cmd(stub_obj);
+        if stub_tmp.length == 0 {
+            print("sfn build: failed to stage windows_stubs.ll object "
+                + stub_obj);
+            return _failed_runtime_link_inputs();
+        }
+        let no_includes: string[] = [];
+        let rc = llvm_assemble(stub_src, stub_tmp, opt_flag, no_includes);
+        if rc != 0 {
+            process.run(["rm", "-f", stub_tmp]);
+            print("sfn build: failed to assemble windows_stubs.ll (" + stub_src
+                + ")");
+            return _failed_runtime_link_inputs();
+        }
+        if !_atomic_rename_into_place(stub_tmp, stub_obj) {
+            print("sfn build: failed to stage windows_stubs.ll object "
+                + stub_obj);
+            return _failed_runtime_link_inputs();
+        }
+        objects.push(stub_obj);
     }
     return RuntimeLinkInputs {
         object_paths: objects,

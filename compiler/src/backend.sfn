@@ -42,6 +42,10 @@ import { _llvm_text_assemble_argv } from "./build/clang_argv";
 // `_shell_read_cmd` runs a command and trims its stdout — used by the
 // macOS SDK probe (`uname -s`, `xcrun --show-sdk-path`).
 import { _shell_read_cmd } from "./build/fs";
+// Target conditioning (SFN-52, SFEP-0021 §4.2(A)): the final link resolves
+// the build target once and threads the `-target` triple + POSIX-lib
+// filtering through both link layouts. All identity/empty on Linux/macOS.
+import { build_target_os, target_clang_flags, target_filter_link_libs } from "./build/target";
 // `_env_flag` gives `SAILFIN_TRACE_LINK` the same toggle semantics ("",
 // "0", "false" are off) as the other `SAILFIN_TRACE_*` knobs;
 // `_get_env_cmd` reads a single env var (the macOS SDK probe below).
@@ -278,22 +282,69 @@ fn _llvm_text_trace_link(argv: string[]) ![io] {
     print.err(line);
 }
 
+// Concatenate two clang-driver-flag slices (SFN-52). Used to prefix the
+// `-target` pair ahead of the macOS SDK flags so both ride the single
+// `sdk_flags` slice the argv builders already splice after
+// `-Wno-override-module`. A free function (not a struct-method body)
+// because it calls the array builtin `.push` — see the file-header
+// self-host note. Empty `a` (the non-Windows case) returns `b` verbatim.
+fn _concat_driver_flags(a: string[], b: string[]) -> string[] {
+    let mut out: string[] = [];
+    let mut i: int = 0;
+    loop {
+        if i >= a.length { break; }
+        out.push(a[i]);
+        i += 1;
+    }
+    let mut j: int = 0;
+    loop {
+        if j >= b.length { break; }
+        out.push(b[j]);
+        j += 1;
+    }
+    return out;
+}
+
+// Return a copy of `plan` with `libs` filtered for `target_os` (SFN-52).
+// On Windows the POSIX/OpenSSL libs are dropped (MSVC/UCRT auto-links its
+// CRT); on every other target `target_filter_link_libs` is the identity,
+// so the returned plan is structurally equal and the link argv stays
+// byte-identical (#1112). A free function so the LinkPlan literal is not
+// constructed inside a struct-method body (file-header self-host note).
+fn _target_conditioned_plan(plan: LinkPlan, target_os: string) -> LinkPlan {
+    return LinkPlan {
+        objects: plan.objects,
+        ir_inputs: plan.ir_inputs,
+        out_path: plan.out_path,
+        opt_flag: plan.opt_flag,
+        link_flags: plan.link_flags,
+        libs: target_filter_link_libs(plan.libs, target_os),
+        test_mode: plan.test_mode
+    };
+}
+
 // The current behaviour: emit textual LLVM IR and drive `clang` for
 // assembly and linking. The methods delegate argv construction to the
 // free functions above (see the self-host note in the file header).
 struct LlvmTextBackend {
     fn assemble(self, src: string, out: string, opt_flag: string, include_flags: string[]) -> int ![io] {
-        return process.run(_llvm_text_assemble_argv(src, out, opt_flag, include_flags));
+        let target_flags = target_clang_flags(build_target_os());
+        return process.run(_llvm_text_assemble_argv(src, out, opt_flag, include_flags, target_flags));
     }
 
     fn link(self, plan: LinkPlan) -> int ![io] {
-        let sdk_flags = _macos_sdk_link_flags();
-        if plan.test_mode {
-            let test_argv = _llvm_text_link_test_argv(plan, sdk_flags);
+        // Resolve the build target once (SFN-52): prefix the `-target`
+        // triple ahead of the macOS SDK flags and filter POSIX libs. All
+        // no-ops off Windows, so Linux/macOS argv is byte-identical.
+        let target_os = build_target_os();
+        let driver_flags = _concat_driver_flags(target_clang_flags(target_os), _macos_sdk_link_flags());
+        let eff_plan = _target_conditioned_plan(plan, target_os);
+        if eff_plan.test_mode {
+            let test_argv = _llvm_text_link_test_argv(eff_plan, driver_flags);
             _llvm_text_trace_link(test_argv);
             return process.run(test_argv);
         }
-        let program_argv = _llvm_text_link_program_argv(plan, sdk_flags);
+        let program_argv = _llvm_text_link_program_argv(eff_plan, driver_flags);
         _llvm_text_trace_link(program_argv);
         return process.run(program_argv);
     }
