@@ -1,0 +1,51 @@
+{
+  "by_arm": {
+    "sailfin": {
+      "tasks_scored": 36,
+      "one_shot_success_pct": 69.4,
+      "solve_rate_pct": 94.4,
+      "mean_iters_to_green": 1.32352941176471,
+      "mean_tokens_to_green": 2248.76470588235,
+      "mean_input_tokens_to_green": 1006.82352941176,
+      "mean_output_tokens_to_green": 1241.94117647059,
+      "mean_elapsed_ms_to_green": 24782.5882352941,
+      "mean_source_chars_to_green": 1149.38235294118,
+      "false_friction_tasks": 0,
+      "trap_tasks": 4,
+      "traps_effect_system_fired": 4
+    },
+    "scala": {
+      "tasks_scored": 36,
+      "one_shot_success_pct": 72.2,
+      "solve_rate_pct": 100,
+      "mean_iters_to_green": 1.33333333333333,
+      "mean_tokens_to_green": 1539.47222222222,
+      "mean_input_tokens_to_green": 946.555555555556,
+      "mean_output_tokens_to_green": 592.916666666667,
+      "mean_elapsed_ms_to_green": 14810.8611111111,
+      "mean_source_chars_to_green": 489.861111111111,
+      "false_friction_tasks": 0,
+      "trap_tasks": 4,
+      "traps_effect_system_fired": 4
+    },
+    "python": {
+      "tasks_scored": 36,
+      "one_shot_success_pct": 91.6,
+      "solve_rate_pct": 100,
+      "mean_iters_to_green": 1.11111111111111,
+      "mean_tokens_to_green": 790,
+      "mean_input_tokens_to_green": 561.305555555556,
+      "mean_output_tokens_to_green": 228.694444444444,
+      "mean_elapsed_ms_to_green": 3672.52777777778,
+      "mean_source_chars_to_green": 303.055555555556,
+      "false_friction_tasks": 0,
+      "trap_tasks": 4,
+      "traps_effect_system_fired": 0
+    }
+  },
+  "notes": [
+    "one_shot_success_pct and solve_rate_pct exclude trap tasks.",
+    "false_friction_tasks counts non-trap tasks where an effect/capability compile error appeared at least once.",
+    "traps_effect_system_fired counts trap tasks where an effect/capability compile error appeared."
+  ]
+}

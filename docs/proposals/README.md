@@ -71,6 +71,7 @@ The next number is `max + 1`. Add a row in the same PR that introduces an SFEP.
 | [0046](./0046-toolchain-pinning.md) | Native Toolchain Version Pinning + Dispatch | Accepted | tooling |
 | [0047](./0047-compiler-bootstrap-manifest.md) | Compiler Bootstrap Manifest | Accepted | tooling |
 | [0048](./0048-native-crypto.md) | Native Crypto + TLS Stack — Removing the OpenSSL Dependency | Accepted | runtime |
+| [0049](./0049-concurrency-effect-transparency.md) | Effect-transparency for concurrency-primitive leaves (spawn / parallel / channel send·receive) | Implemented | language |
 
 ## Drafts under review (numbers assigned at merge)
 
@@ -88,6 +89,7 @@ language gaps surfaced by the 2026-07 grammar/object-model audit:
 | [`draft-derive`](./draft-derive.md) | Derivable Interface Implementations (`@derive`) | language |
 | [`draft-string-interpolation-dollar`](./draft-string-interpolation-dollar.md) | String Interpolation with `${ }` (migrating off `{{ }}`) | language |
 | [`draft-nullable-access-operators`](./draft-nullable-access-operators.md) | Nullable Access Operators (`?.` and `??`) | language |
+| [`draft-import-surface-compaction`](./draft-import-surface-compaction.md) | Import-surface compaction across the phase rewind to cut emit peak RSS | runtime |
 
 SFEP-0038 (`0038-generic-constraints.md`, Implemented) is the root foundation:
 `draft-generic-collections`, `draft-derive`, and SFEP-0028 all depend on it. Draft diagnostic codes are

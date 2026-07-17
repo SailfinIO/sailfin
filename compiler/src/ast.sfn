@@ -320,6 +320,28 @@ fn decorator_names(decorators: Decorator[]) -> string[] {
     return names;
 }
 
+// The compiler-recognized marker name a function declaration carries to
+// declare itself decorator-eligible (`@decorator`). It is an ordinary
+// decorator on the declaration, not a keyword (SFEP-0023 §4.1), so
+// recognition is a plain name match rather than a grammar addition.
+fn decorator_marker_name() -> string { return "decorator"; }
+
+// True when `decorators` contains the `@decorator` marker, i.e. the
+// declaration is an exported decorator definition (SFEP-0023 §4.2). Lives
+// here beside `decorator_names` because `ast` defines `Decorator`, so the
+// `Decorator[]` walk is layout-safe (the seed-opaque hazard the
+// `decorator_semantics.sfn` header warns about only applies to modules
+// that do not define the struct).
+fn has_decorator_marker(decorators: Decorator[]) -> boolean {
+    let mut index: int = 0;
+    loop {
+        if index >= decorators.length { break; }
+        if decorators[index].name == decorator_marker_name() { return true; }
+        index += 1;
+    }
+    return false;
+}
+
 struct ImportSpecifier {
     name: string;
     alias: string?;

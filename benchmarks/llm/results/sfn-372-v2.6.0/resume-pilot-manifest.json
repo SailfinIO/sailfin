@@ -1,0 +1,56 @@
+{
+  "issue": "SFN-372",
+  "protocol_id": "sfn-agent-benchmark/v2.6.0",
+  "corpus_id": "sfn-agent-benchmark-corpus/v2.6.0",
+  "source_commit": "e4f68270e44e2e86ac2edbf27a39ce10d3fef818",
+  "source_worktree_dirty": false,
+  "protocol_sha256": "fdcc0793767ad0d6c7fbee7c486b4a2255be2759462554c2ffa328a795bb887c",
+  "harness_sha256": "9ac61ae44dffbd1bf04b1b23a6d9b3f7656435daf853bfe726c4d4eb742671d3",
+  "blockers": {
+    "SFN-367": "3f0fbb1811923dec7609ccf081004b2885273c29",
+    "SFN-368": "f30ebf52290bcefda82b5f75c3b1c3104a4d1546",
+    "SFN-369": "fc2595b32b942774c30d69f951d168c58e9542af",
+    "SFN-376": "2c1022806de1ee32ab528f90ad9bfe81b0d34cc7"
+  },
+  "grader_audit_sha256": {
+    "track_a": "2fe5664e8e6b996ab286de4ee0cd7f0949a2eae40fed224f05c05355b16f3852",
+    "track_b": "fe865da04dd70b9aa4b7059c95e24973316bc542461cca21e2454f842478fa26"
+  },
+  "frozen_schedules": {
+    "track_a_openai": {
+      "attempts": 120,
+      "sha256": "cad4f35c4a9fc52639057ffba3df17c195a87a1936bc95263505ee84c0bb887b"
+    },
+    "track_a_anthropic": {
+      "attempts": 120,
+      "sha256": "0a958d6e351310df4893f1bcbd90e1761f3c82a0480811b1fc648ce36f627fa3"
+    },
+    "track_b_openai": {
+      "attempts": 80,
+      "sha256": "0b14ef0b3d03d1985d76337563b470010176a8d8b4e259262ef43667421015a1"
+    },
+    "track_b_anthropic": {
+      "attempts": 80,
+      "sha256": "56afafd63bd4ce0782aaf20caec6fb0b6c853db61abdccde343fb58ca1cd2a2f"
+    }
+  },
+  "setup": {
+    "schema_probes_passed": true,
+    "contamination_cleared": true,
+    "unscored_arm_tasks_completed": 10,
+    "unscored_one_shot_green": 9,
+    "unscored_ordinary_failures": 1,
+    "human_interventions": 0
+  },
+  "track_a": {
+    "openai_records": 120,
+    "openai_run_valid": true,
+    "anthropic_records": 76,
+    "anthropic_run_valid": false,
+    "anthropic_invalid_reason": "provider_response_budget_exhausted"
+  },
+  "track_b_started": false,
+  "confirmation_authorized": false,
+  "successor_blocker": "SFN-383",
+  "decision": "Reject confirmatory spend under v2.6.0. Enforce Anthropic answer headroom, freeze a successor protocol/corpus version, and restart a completely fresh balanced batch."
+}

@@ -169,6 +169,35 @@ extern fn posix_spawn_file_actions_addchdir_np(fa: * u8, path: * u8) -> i32;
 // `4` is used directly.
 let SFN_EINTR: i32 = 4;
 
+// Darwin `poll(2)` can fail with `EAGAIN` when a transient internal
+// allocation fails — its man page: "The allocation of internal data
+// structures fails. A subsequent request may succeed." Linux `poll`
+// never returns it. Under whole-suite memory pressure this surfaced as a
+// rare macos-arm64 capture truncation: the drain treated the error as
+// fatal, closed the pipes with the child's bytes still buffered, and
+// returned an empty capture even though the child exited 0 (SFN-391).
+// `EAGAIN` is 35 on Darwin, 11 on Linux; both are accepted as retryable.
+// The other-platform value can never be returned by `poll` on this host
+// (35=ENOTEMPTY / 11=EDEADLK there), so honoring both stays portable.
+let SFN_EAGAIN_DARWIN: i32 = 35;
+let SFN_EAGAIN_LINUX: i32 = 11;
+
+// True for the `poll(2)` errno values that warrant re-arming and
+// re-polling rather than abandoning the wait: `EINTR` (a signal) and
+// `EAGAIN` (a transient Darwin allocation failure). Any other poll error
+// is a real fault and breaks the loop. Read/write `EINTR` retries keep
+// their own inline check — `EAGAIN` there would mean a non-blocking fd,
+// which these blocking pipes never are. The retry is unbounded (no guard
+// counter), matching the `EINTR` sites: the man page classifies `EAGAIN`
+// as transient ("a subsequent request may succeed"), and a bounded
+// give-up would reintroduce the silent capture truncation this fixes.
+fn _poll_err_retryable(err: i32) -> bool {
+    if err == SFN_EINTR { return true; }
+    if err == SFN_EAGAIN_DARWIN { return true; }
+    if err == SFN_EAGAIN_LINUX { return true; }
+    return false;
+}
+
 // ── metered-capture support (#1520) ────────────────────────────────
 // `wait4` is `waitpid` plus a `struct rusage` out-param the kernel
 // fills with the reaped child's resource usage. A NULL `rusage` makes
@@ -221,6 +250,99 @@ fn _monotonic_nanos() -> i64 ![clock] {
     let sec: i64 = sailfin_intrinsic_pointer_read_i64(sec_ptr);
     let nsec: i64 = sailfin_intrinsic_pointer_read_i64(nsec_ptr);
     return sec * 1000000000 + nsec;
+}
+
+// ── per-child RLIMIT_AS support (SFN-45) ────────────────────────────
+// Backs `process.run_capture_rlimit_as`: run a captured child under a
+// chosen Linux RLIMIT_AS (address-space) soft cap so native e2e tests can
+// exercise the inherited-cap path (`runtime/sfn/platform/rlimit.sfn`)
+// without a `bash -c "ulimit -v N"` vehicle (`.claude/rules/no-bash-e2e.md`).
+//
+// `posix_spawn` exposes no rlimit file-action and `setrlimit` is
+// process-global, so the cap is applied by bracketing the `posix_spawnp`
+// call: the parent lowers its OWN soft RLIMIT_AS just before the spawn and
+// restores it immediately after. glibc `posix_spawn` clones with
+// CLONE_VM|CLONE_VFORK, suspending the parent until the child `execve`s, so
+// the child inherits the lowered cap and enforces it at its own `execve`
+// while the parent never runs (nor allocates) under it. ONLY the soft
+// limit (`rlim_cur`) is touched — an unprivileged process cannot raise a
+// lowered hard limit back up (EPERM), and the soft limit is what the kernel
+// enforces for allocation. Linux-only (RLIMIT_AS is 9 on Linux x86_64 but 5
+// on Darwin, where it is not the memory floor anyway): gated on the same
+// `/proc/self/status` probe the self-cap uses.
+//
+// Scope caveat: `setrlimit` is process-global, so the bracket is only
+// child-scoped because the parent is single-threaded across the window (the
+// vfork suspend covers the child; within-file tests run serially and cross-
+// file parallelism uses separate subprocesses). A future in-process
+// thread-parallel runner would need per-child scoping (a fork/exec path
+// setting the rlimit in the child) — the same process-global-mutation
+// hazard `.claude/rules/no-bash-e2e.md` flags for setenv/chdir.
+extern fn getrlimit(resource: i32, rlim: * u8) -> i32;
+
+extern fn setrlimit(resource: i32, rlim: * u8) -> i32;
+
+extern fn sfn_fs_exists(path: * u8) -> bool;
+
+// Overlay matching the Linux x86_64 `struct rlimit`: two 8-byte slots
+// (`rlim_cur`, `rlim_max`). `RLIM_INFINITY` reads back as -1 through the
+// i64 view. Mirrors `RLimit` in `runtime/sfn/platform/rlimit.sfn`, kept
+// local for the #306 cross-module limitation the file header documents.
+struct CapRLimit {
+    cur: i64;
+    max: i64;
+}
+
+// Lower the parent's soft RLIMIT_AS to `as_bytes` (clamped to the current
+// hard cap) ahead of a spawn, returning a heap buffer holding the ORIGINAL
+// limit for `_cap_restore_as` to write back — or null when no cap was
+// applied (`as_bytes <= 0`, a non-Linux host, or a getrlimit/setrlimit/OOM
+// failure; the cap is advisory, exactly like the self-cap). RLIMIT_AS is
+// resource 9 on Linux x86_64 (a hex literal folds to 0 on the seed, so the
+// decimal is inlined — the same discipline the status masks use).
+fn _cap_lower_as_for_child(as_bytes: i64) -> * u8 {
+    if as_bytes <= 0 { return 0 as * u8; }
+    let s_proc: string = "/proc/self/status";
+    if !sfn_fs_exists(s_proc as * u8) { return 0 as * u8; }
+    let saved: * u8 = malloc(16 as usize);
+    if saved as i64 == 0 { return 0 as * u8; }
+    if getrlimit(9, saved) != 0 {
+        free(saved);
+        return 0 as * u8;
+    }
+    let orig: * CapRLimit = saved as * CapRLimit;
+    // Build the lowered limit in a temp buffer so `saved` stays pristine
+    // for the restore. Never lower the hard limit (`orig.max` is copied
+    // through unchanged): a lowered hard cap could not be raised back.
+    let lowered: * u8 = malloc(16 as usize);
+    if lowered as i64 == 0 {
+        free(saved);
+        return 0 as * u8;
+    }
+    let lo: * CapRLimit = lowered as * CapRLimit;
+    let mut cur: i64 = as_bytes;
+    if orig.max != -1 {
+        if cur > orig.max { cur = orig.max; }
+    }
+    lo.cur = cur;
+    lo.max = orig.max;
+    let rc: i32 = setrlimit(9, lowered);
+    free(lowered);
+    if rc != 0 {
+        free(saved);
+        return 0 as * u8;
+    }
+    return saved;
+}
+
+// Restore the parent's RLIMIT_AS from the buffer `_cap_lower_as_for_child`
+// returned, then free it. A null buffer (no cap applied) is a no-op.
+// Restoring the original soft limit (<= the unchanged hard limit) cannot
+// fail on the raise path.
+fn _cap_restore_as(saved: * u8) {
+    if saved as i64 == 0 { return; }
+    setrlimit(9, saved);
+    free(saved);
 }
 
 fn sfn_process_run(argv: string[]) -> float ![io] {
@@ -555,8 +677,10 @@ fn _drain_two_pipes(out_fd_in: i32, err_fd_in: i32, gb_out: * GrowBuf, gb_err: *
         let pr: i32 = poll(pbuf, 2 as usize, -1);
         if pr < 0 {
             let err: i32 = sailfin_intrinsic_pointer_read_i32(sailfin_intrinsic_errno_location());
-            if err == SFN_EINTR {
-                // Interrupted — re-arm and poll again.
+            if _poll_err_retryable(err) {
+                // Interrupted or a transient Darwin EAGAIN — re-arm and
+                // poll again rather than abandoning the child's unread
+                // bytes (SFN-391).
             } else { break; }
         } else {
             if out_fd >= 0 {
@@ -647,8 +771,9 @@ fn sfn_io_poll_readable(fd: i64, timeout_ms: i64) -> bool ![io] {
         let pr: i32 = poll(pbuf, 1 as usize, to);
         if pr < 0 {
             let err: i32 = sailfin_intrinsic_pointer_read_i32(sailfin_intrinsic_errno_location());
-            if err == SFN_EINTR {
-                // Interrupted before readiness — re-arm and poll again.
+            if _poll_err_retryable(err) {
+                // Interrupted or a transient Darwin EAGAIN before
+                // readiness — re-arm and poll again (SFN-391).
             } else { break; }
         } else {
             if pr > 0 {
@@ -728,8 +853,9 @@ fn sfn_io_poll_any(fds: int[], timeout_ms: i64) -> i64 ![io] {
         let pr: i32 = poll(pbuf, nfds as usize, to);
         if pr < 0 {
             let err: i32 = sailfin_intrinsic_pointer_read_i32(sailfin_intrinsic_errno_location());
-            if err == SFN_EINTR {
-                // Interrupted before readiness — re-arm and poll again.
+            if _poll_err_retryable(err) {
+                // Interrupted or a transient Darwin EAGAIN before
+                // readiness — re-arm and poll again (SFN-391).
             } else { break; }
         } else {
             if pr > 0 {
@@ -775,7 +901,7 @@ fn sfn_process_exit(code: float) -> void ![io] {
 // NULL makes `wait4` behave exactly like the former `waitpid` — the plain
 // `run_capture` wrapper passes NULL, so its behaviour is byte-for-byte
 // unchanged.
-fn _run_capture_impl(argv: string[], env_flat: string[], rusage_buf: * u8, cwd: * u8) -> i64 ![io] {
+fn _run_capture_impl(argv: string[], env_flat: string[], rusage_buf: * u8, cwd: * u8, as_bytes: i64) -> i64 ![io] {
     if sfn_capture_stdout_addr != 0 {
         free(sfn_capture_stdout_addr as * u8);
         sfn_capture_stdout_addr = 0;
@@ -883,7 +1009,12 @@ fn _run_capture_impl(argv: string[], env_flat: string[], rusage_buf: * u8, cwd: 
     let path: * u8 = sfn_str_to_cstr(first as * u8, first.length, null);
     let argv_pp: * * u8 = child_argv as * * u8;
     let envp_pp: * * u8 = child_envp as * * u8;
+    // Per-child RLIMIT_AS (SFN-45): lower the parent's soft cap around the
+    // vforked spawn so the child inherits it, then restore immediately —
+    // a null `cap_saved` (no cap requested / non-Linux) makes both no-ops.
+    let cap_saved: * u8 = _cap_lower_as_for_child(as_bytes);
     let spawn_err: i32 = posix_spawnp(pid_ptr, path, actions, null, argv_pp, envp_pp);
+    _cap_restore_as(cap_saved);
     posix_spawn_file_actions_destroy(actions);
     free(actions);
     if spawn_err != 0 {
@@ -966,7 +1097,7 @@ fn _run_capture_impl(argv: string[], env_flat: string[], rusage_buf: * u8, cwd: 
 // calls to it) — the per-child cwd lives in the separate `_cwd` variant
 // below (#1167), never by widening this signature.
 fn sfn_process_run_capture(argv: string[], env_flat: string[]) -> i64 ![io] {
-    return _run_capture_impl(argv, env_flat, 0 as * u8, 0 as * u8);
+    return _run_capture_impl(argv, env_flat, 0 as * u8, 0 as * u8, 0);
 }
 
 // `process.run_capture_cwd` (#1167): `run_capture` with a per-child
@@ -978,7 +1109,21 @@ fn sfn_process_run_capture(argv: string[], env_flat: string[]) -> i64 ![io] {
 // builtin keeps its arity (no seed cut): only the freshly-built
 // compiler emits this 3-arg call, exclusively from `sfn/os`.
 fn sfn_process_run_capture_cwd(argv: string[], env_flat: string[], cwd: * u8) -> i64 ![io] {
-    return _run_capture_impl(argv, env_flat, 0 as * u8, cwd);
+    return _run_capture_impl(argv, env_flat, 0 as * u8, cwd, 0);
+}
+
+// `process.run_capture_rlimit_as` (SFN-45): `run_capture` plus a per-child
+// Linux RLIMIT_AS (address-space) soft cap in bytes, letting native e2e
+// tests exercise the inherited-cap path (`runtime/sfn/platform/rlimit.sfn`)
+// without a `bash -c "ulimit -v N"` vehicle (`.claude/rules/no-bash-e2e.md`).
+// `as_bytes <= 0` (or a non-Linux host) runs the child uncapped, exactly
+// like plain `run_capture`. A SEPARATE symbol, not a wider `run_capture`
+// arity, for the same seed-stability reason as `_cwd` (#1167): the pinned
+// seed emits 2-arg `run_capture` calls, so only the freshly-built compiler
+// emits this 3-arg call (from the mem-limit e2e test) — no seed cut. The
+// cap mechanism is documented on `_cap_lower_as_for_child`.
+fn sfn_process_run_capture_rlimit_as(argv: string[], env_flat: string[], as_bytes: i64) -> i64 ![io] {
+    return _run_capture_impl(argv, env_flat, 0 as * u8, 0 as * u8, as_bytes);
 }
 
 // ── process.run_capture_metered ────────────────────────────────
@@ -1006,7 +1151,7 @@ fn sfn_process_run_capture_metered(argv: string[], env_flat: string[]) -> i64 ![
     let start: i64 = _monotonic_nanos();
     // Metered capture keeps its 2-arg descriptor; the child inherits the
     // parent cwd (null cwd → no per-child `chdir`).
-    let rc: i64 = _run_capture_impl(argv, env_flat, rusage_buf, 0 as * u8);
+    let rc: i64 = _run_capture_impl(argv, env_flat, rusage_buf, 0 as * u8, 0);
     let end: i64 = _monotonic_nanos();
 
     let mut elapsed: i64 = end - start;

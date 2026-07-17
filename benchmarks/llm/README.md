@@ -1,12 +1,14 @@
 # Sailfin agent-language benchmark
 
 The frozen two-track v2 preregistration lives in
-[`PROTOCOL-V2.md`](PROTOCOL-V2.md). The bounded v2.6.0 pilot and its OpenAI
-quota stop are recorded in [`PILOT-V2.md`](PILOT-V2.md), followed by the
-historical v2.1.0 readout. Version 2.6 freezes symmetric transient-provider
-retries after the v2.5 setup attempt exposed missing overload handling. No
-v2.1, v2.5, or partial v2.6 observation may be selected, rerun, or pooled with
-a fresh balanced batch. In particular, v2.1 structured-concurrency
+[`PROTOCOL-V2.md`](PROTOCOL-V2.md). The bounded v2.6.0 attempts and their
+OpenAI quota and Anthropic response-budget stops are recorded in
+[`PILOT-V2.md`](PILOT-V2.md), followed by the historical v2.1.0 readout.
+Version 2.6 freezes symmetric transient-provider retries after the v2.5 setup
+attempt exposed missing overload handling. SFN-383 blocks another paid run
+until Anthropic answer headroom is enforced under a successor version. No
+v2.1, v2.5, or v2.6 observation may be selected, rerun, or pooled with a fresh
+balanced batch. In particular, v2.1 structured-concurrency
 observations are ineligible because the live Sailfin guidance named nonexistent
 syntax and the grader accepted sequential output-equivalent programs. The
 SFN-350 v1 decision protocol and pilot interpretation remain preserved in

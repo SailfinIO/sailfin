@@ -23,10 +23,13 @@
 //   console.log("…")     io     Member  (descriptor)
 //   http.get("…")        net    Member  (descriptor + namespace union)
 //   websocket.send("…")  net    Member  (explicit net, #1601)
-//   spawn(task)          io     Spawn   (parser → Spawn node; Call arm also covered)
-//   parallel [task]      io     Parallel(parser → Parallel node; registry `spawn_task` row)
-//   ch.send(v)           io     Member  (registry `channel_send` row, #1655)
-//   ch.receive()         io     Member  (registry `channel_receive` row, #1655)
+//   spawn(task)          none   Spawn   (parser → Spawn node; effect-transparent, SFEP-0049)
+//   spawn(io body)        io    Spawn   (effect inherited from the spawned body)
+//   parallel [task]      none   Parallel(parser → Parallel node; effect-transparent, SFEP-0049)
+//   parallel [io task]    io    Parallel(effect inherited from the task body)
+//   ch.send(v)           none   Member  (effect-transparent, SFEP-0049)
+//   ch.send(io arg)       io    Member  (effect inherited from the argument walk)
+//   ch.receive()          none  Member  (effect-transparent, SFEP-0049)
 //   serve(handler)       net    Serve   (parser → Serve node; Call arm also covered)
 //   sleep(1.0)           clock  Call    (descriptor)
 //
@@ -103,6 +106,15 @@ fn _assert_detects(snippet: string, effect: string) ![io] {
     assert _reqs_contain(reqs, effect);
 }
 
+// The effect-transparency counterpart (SFEP-0049): the resolution path
+// attributes NO effect for `snippet` — used to prove a concurrency
+// primitive (spawn/parallel/channel op) over a pure body/argument
+// contributes nothing of its own.
+fn _assert_no_detect(snippet: string) ![io] {
+    let reqs = _resolution_reqs(snippet);
+    assert reqs.length == 0;
+}
+
 // -------------------------------------------------------------------
 // Per-family coverage cases (one per effectful builtin/concurrency family)
 // -------------------------------------------------------------------
@@ -137,42 +149,57 @@ test "detect: websocket.* member -> net" ![io] {
     _assert_detects("websocket.send(\"m\")", "net");
 }
 
-test "detect: spawn(...) -> io (Spawn node, real source)" ![io] {
+test "detect: spawn(...) requires nothing over a pure body (Spawn node, real source)" ![io] {
     // Pin the parser routing: real `spawn(...)` source becomes a `Spawn`
-    // node, so the `Spawn` variant arm carries the effect. If a future
+    // node, so the `Spawn` variant arm still routes here. If a future
     // parser change re-routes this through the generic `Call` path, this
-    // assertion fails and forces a re-check of arm coverage.
+    // assertion fails and forces a re-check of arm coverage. SFEP-0049
+    // (effect transparency): the primitive itself contributes no effect —
+    // a pure spawned body attributes nothing.
     assert _probe_expr("spawn(task)").variant == "Spawn";
-    _assert_detects("spawn(task)", "io");
+    _assert_no_detect("spawn(task)");
 }
 
-test "detect: spawn(...) -> io (defensive Call+Identifier arm)" ![io] {
+test "detect: spawn(...) attributes io from an io body (Spawn node)" ![io] {
+    // The primitive stays transparent; the caller inherits exactly the
+    // effects of the spawned body.
+    _assert_detects("spawn(fn () { print.info(\"x\"); })", "io");
+}
+
+test "detect: spawn(...) requires nothing over no argument (defensive Call+Identifier arm)" ![io] {
     // The detector also keeps a `Call`+Identifier arm for `spawn` that the
     // parser never reaches; cover it directly so a future change can't
-    // silently drop it.
+    // silently reintroduce a phantom effect there.
     let reqs = collect_effects_from_expression(_bare_call("spawn"), empty_import_symbols());
-    assert _reqs_contain(reqs, "io");
+    assert reqs.length == 0;
 }
 
-test "detect: parallel [...] -> io (Parallel node, registry-driven, #1655)" ![io] {
-    // Pin parser routing AND the registry-driven effect: `parallel [...]`
-    // becomes a `Parallel` node whose arm derives `io` from the `spawn_task`
-    // descriptor row (parallel is fan-out of spawns; no dedicated `parallel`
-    // row exists so the unimplemented paren-call `parallel(...)` stays
-    // fail-closed in lowering). A future row edit flows through here with no
-    // checker change — guarding the unified source of truth #1655 established.
+test "detect: parallel [...] requires nothing over a pure task (Parallel node)" ![io] {
+    // Pin parser routing: `parallel [...]` becomes a `Parallel` node. SFEP-0049
+    // (effect transparency): parallel contributes no effect of its own — a
+    // pure task body attributes nothing.
     assert _probe_expr("parallel [task]").variant == "Parallel";
-    _assert_detects("parallel [task]", "io");
+    _assert_no_detect("parallel [task]");
 }
 
-test "detect: channel .send(...) -> io (Member arm, registry-driven, #1655)" ![io] {
-    // `ch.send(v)` is a Member-callee call; the arm maps `send` ->
-    // `channel_send` and derives `io` from that row.
-    _assert_detects("ch.send(v)", "io");
+test "detect: parallel [...] attributes io from an io task (Parallel node)" ![io] {
+    _assert_detects("parallel [fn () { print.info(\"x\"); }]", "io");
 }
 
-test "detect: channel .receive() -> io (Member arm, registry-driven, #1655)" ![io] {
-    _assert_detects("ch.receive()", "io");
+test "detect: channel .send(...) requires nothing over a pure value (Member arm)" ![io] {
+    // `ch.send(v)` is a Member-callee call. SFEP-0049 (effect transparency):
+    // the channel op contributes no effect of its own — a pure value
+    // attributes nothing.
+    _assert_no_detect("ch.send(v)");
+}
+
+test "detect: channel .send(...) attributes io from an io argument (Member arm)" ![io] {
+    // The effect is inherited via the argument walk, not the `send` op.
+    _assert_detects("ch.send(fs.read(p))", "io");
+}
+
+test "detect: channel .receive() requires nothing (Member arm)" ![io] {
+    _assert_no_detect("ch.receive()");
 }
 
 test "detect: serve(...) -> net (Serve node, real source)" ![io] {

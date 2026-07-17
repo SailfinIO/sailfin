@@ -107,10 +107,11 @@ fn _make_io_violating_routine(name: string, declared_effects: string[], span_lin
 }
 
 // Build a FunctionDeclaration whose body is a structured `spawn worker()`
-// expression (an AST `Spawn` node, not a `Raw` text body). The spawned call
-// is effect-free on its own, so the only required effect is the `io` the
-// `spawn` prefix carries — exercising the #1082 effect-checker descent that
-// the old `"spawn("` text heuristic misses for the prefix syntax.
+// expression (an AST `Spawn` node, not a `Raw` text body). `worker` is an
+// unresolved, effect-free callee, so under effect-transparency (SFEP-0049)
+// the spawn attributes nothing — exercising the #1082 effect-checker descent
+// (the old `"spawn("` text heuristic misses the prefix syntax) and the
+// "never a phantom io" fallback for an unresolved spawn target.
 fn _make_spawn_routine(name: string, declared_effects: string[], span_line: int) -> Statement {
     let span = _span(span_line, 4);
     let callee = Expression.Identifier { name: "worker", span: null };
@@ -122,6 +123,49 @@ fn _make_spawn_routine(name: string, declared_effects: string[], span_line: int)
     };
     let spawn_expr = Expression.Spawn {
         operand: call,
+        span: span,
+        kind: ""
+    };
+    let body_stmt = Statement.ExpressionStatement {
+        expression: spawn_expr,
+        span: null
+    };
+    let body_block = Block {
+        tokens: [],
+        text: "",
+        statements: [body_stmt]
+    };
+    let mut empty_decorators: Decorator[] = [];
+    return Statement.FunctionDeclaration {
+        signature: _signature(name, declared_effects, span),
+        body: body_block,
+        decorators: empty_decorators,
+        is_unsafe: false
+    };
+}
+
+// Build a FunctionDeclaration whose body is `spawn print.info(...)` — the
+// spawned operand itself requires `io`. Under effect-transparency (SFEP-0049)
+// the `spawn` primitive contributes nothing, so the caller must declare
+// exactly the spawned body's effects; a `[]` declaration under-declares `io`
+// and violates — the positive counterpart proving io-body propagation still
+// enforces after the primitive stopped fabricating a fixed `io`.
+fn _make_spawn_io_routine(name: string, declared_effects: string[], span_line: int) -> Statement {
+    let span = _span(span_line, 4);
+    let object = Expression.Identifier { name: "print", span: null };
+    let member_expr = Expression.Member {
+        object: object,
+        member: "info",
+        span: null
+    };
+    let no_args: Expression[] = [];
+    let io_call = Expression.Call {
+        callee: member_expr,
+        arguments: no_args,
+        span: null
+    };
+    let spawn_expr = Expression.Spawn {
+        operand: io_call,
         span: span,
         kind: ""
     };
@@ -234,17 +278,32 @@ test "effect violation: trigger falls back to signature_token when no call-site 
 // -------------------------------------------------------------------
 // Concurrency-node effect descent (#1082)
 // -------------------------------------------------------------------
-test "effect violation: spawn prefix requires io" {
-    // `spawn <expr>` carries `io` like the Call-form `spawn(...)` handler,
-    // even though the prefix syntax escapes the `"spawn("` text heuristic.
+test "effect transparency: spawn of an unresolved/pure body requires no effect" {
+    // Effect-transparency (SFEP-0049): `spawn worker()` over an unresolved
+    // (effect-free) callee attributes nothing — the primitive contributes no
+    // effect of its own and there is no visible body effect to inherit — so a
+    // routine declaring `[]` type-checks clean. This is the canonical witness
+    // of the "never a phantom io" fallback for an unresolved spawn target.
     let stmt = _make_spawn_routine("launcher", [], 5);
     let program = Program { statements: [stmt] };
     let violations = validate_effects(program);
-    assert violations.length == 1;
-    assert violations[0].routine_name == "launcher";
+    assert violations.length == 0;
 }
 
-test "effect violation: spawn declaring io type-checks clean" {
+test "effect transparency: spawn of an io body propagates io" {
+    // The spawned body's effects propagate to the caller: a `spawn print.info(...)`
+    // body requires `io`, so a routine declaring `[]` under-declares and
+    // violates — proving io-body propagation still enforces (SFEP-0049).
+    let stmt = _make_spawn_io_routine("leaky", [], 5);
+    let program = Program { statements: [stmt] };
+    let violations = validate_effects(program);
+    assert violations.length == 1;
+    assert violations[0].routine_name == "leaky";
+}
+
+test "effect transparency: spawn over-declaring io type-checks clean" {
+    // Over-declaration remains legal: a routine may declare `![io]` even though
+    // its pure `spawn worker()` body requires nothing (SFEP-0049).
     let mut io_effects: string[] = ["io"];
     let stmt = _make_spawn_routine("ok", io_effects, 5);
     let program = Program { statements: [stmt] };
@@ -604,20 +663,17 @@ test "effect violation: declared ![io] suppresses TryOperator operand violation"
     assert violations.length == 0;
 }
 
-test "effect violation: bare spawn() Call carets at the callee identifier" {
-    // `spawn(...)` is the in-module synthetic effect (no Member
-    // chain). The trigger should be the callee identifier's span,
-    // not the function signature.
+test "effect transparency: bare spawn() Call requires no effect" {
+    // Effect-transparency (SFEP-0049): the Call-form `spawn(...)` arm appends
+    // the `spawn_task` row's (now empty) effects, so a bare `spawn(...)` over
+    // no effectful argument produces no violation — the Call-form went
+    // transparent alongside the prefix form. (Caret-at-callee for a primitive
+    // that DOES carry an effect stays covered by the sleep/print/console
+    // bare-call tests below.)
     let stmt = _routine_with_bare_call("worker", [], 8, "spawn", 11, 5);
     let program = Program { statements: [stmt] };
     let violations = validate_effects(program);
-    assert violations.length == 1;
-    let v = violations[0];
-    assert v.trigger != null;
-    let trig: Token? = v.trigger;
-    assert trig.line == 11;
-    assert trig.column == 5;
-    assert trig.lexeme == "spawn";
+    assert violations.length == 0;
 }
 
 test "effect violation: bare sleep() Call carets at the callee for clock effect" {
@@ -774,11 +830,11 @@ test "effect (#1601): websocket.broadcast (no exact row) requires net via namesp
 }
 
 test "effect (#1601): websocket.close declaring ![net] is clean" {
-    // Use `close`, not `send`/`receive`: those member names also trip the
-    // object-agnostic channel send/receive heuristic (-> io), so
-    // `websocket.send` legitimately requires BOTH net and io. `close` is a
-    // plain websocket op, so the registry-derived `["net"]` alone
-    // satisfies it — isolating the #1601 net requirement.
+    // Use `close` to isolate the #1601 net requirement cleanly. (`send`/
+    // `receive` also match the object-agnostic channel send/receive arm, which
+    // is now effect-transparent under SFEP-0049 — it adds nothing — so
+    // `websocket.send` requires only net today; `close` keeps this test
+    // independent of that arm regardless.)
     let stmt = _routine_with_member_call("close_ok", ["net"], 1, "websocket", "close", 4, 5);
     let program = Program { statements: [stmt] };
     let violations = validate_effects(program);
@@ -832,8 +888,10 @@ test "effect violation: AST trigger overrides signature fallback" {
     // Lock the precedence rule in: when the body walker captures a
     // per-call-site trigger, that trigger wins over the signature
     // token. Otherwise effect diagnostics on long routines would
-    // continue carets at the declaration.
-    let stmt = _routine_with_bare_call("longfn", [], 50, "spawn", 200, 4);
+    // continue carets at the declaration. Uses a bare `sleep` (clock) as the
+    // effect generator — `spawn` is effect-transparent post-SFEP-0049 and no
+    // longer yields a violation to caret.
+    let stmt = _routine_with_bare_call("longfn", [], 50, "sleep", 200, 4);
     let program = Program { statements: [stmt] };
     let violations = validate_effects(program);
     assert violations.length == 1;

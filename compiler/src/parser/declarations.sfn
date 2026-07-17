@@ -833,6 +833,17 @@ fn parse_variable_with_storage(initial_parser: Parser, is_thread_local: boolean)
     let name = identifier_text(name_token);
     parser = parser_advance_raw(parser);
 
+    // A `let`/`let mut` binding must be followed by an identifier. When it is
+    // not (`let{`, `let =`, `let 3`), the declaration is malformed: abandon it
+    // as a precise `E0504` parse error instead of taking the stray token as the
+    // binding name and emitting a garbage `VariableDeclaration`. Advancing past
+    // the offending token above keeps the block/recovery loop making progress
+    // (SFN-384).
+    if name_token.kind.variant != "Identifier" {
+        let stmt = _malformed_declaration(decl_tokens_ref, decl_start_index, parser.index, "E0504", "parse error: expected an identifier after `let`");
+        return StatementParseResult { parser: parser, statement: stmt };
+    }
+
     let mut type_annotation: TypeAnnotation? = null;
     parser = skip_trivia(parser);
     let separator_token = parser_peek_raw(parser);
@@ -1009,6 +1020,18 @@ fn parse_function(initial_parser: Parser, starts_with_async: boolean, decorators
     let block_result = parse_block(parser);
     parser = block_result.parser;
     let body = block_result.block;
+
+    // A body that opened with `{` but hit EOF before its closing `}` is a
+    // truncated declaration. Abandon it as a precise `E0505` parse error rather
+    // than emitting a `FunctionDeclaration` whose body silently swallowed the
+    // rest of the file (including a valid `main`), which otherwise slips past
+    // check and reaches the linker as a missing-`main` ICE (SFN-384).
+    if !block_result.closed {
+        let stmt = _malformed_declaration(decl_tokens_ref, decl_start_index, parser.index, "E0505", "parse error: expected `}` to close the body of function `"
+            + name
+            + "`");
+        return StatementParseResult { parser: parser, statement: stmt };
+    }
 
     let signature = FunctionSignature {
         name: name,

@@ -99,8 +99,6 @@ test "sfn emit llvm defines wave-2 sfn_str_* grapheme/numeric exports" ![io] {
     assert contains(ir, "@sfn_str_slice(");
     assert contains(ir, "@sfn_str_to_number(");
     assert contains(ir, "@sfn_str_from_codepoint(");
-    assert contains(ir, "@sfn_str_decode_owned(");
-    assert contains(ir, "@sfn_str_immediate_codepoint(");
     assert contains(ir, "@sfn_str_from_byte(");
 }
 

@@ -5,9 +5,11 @@
 import {
     JsonValue,
     array_at,
+    array_length,
     array_val,
     bool_val,
     get_array,
+    get_bool,
     get_number,
     get_string,
     get_value,
@@ -86,6 +88,7 @@ struct Config {
     self_test_timeouts: boolean;
     check_packets: boolean;
     contamination_probe: boolean;
+    reanalyze_dir: string;
     ablation: string;
     tasks: string[];
     arms: string[];
@@ -111,6 +114,24 @@ struct FailureAttribution {
     track_b_attribution: string;
     language_denominator: boolean;
     manual_review: boolean;
+}
+
+// A frozen classification signature: a representative captured grader
+// stdout/stderr plus the expected corrected attribution. It is the single
+// source of truth shared by the `--self-test-analysis` fixtures and the
+// `--reanalyze` offline corpus correction, so the classifier the audit uses is
+// exactly the classifier the fixtures freeze (SFN-387).
+struct ClassificationSignature {
+    name: string;
+    grader_category: string;
+    feedback: string;
+    iteration: int;
+    expected_primary: string;
+    expected_secondary: string;
+    expected_track_b: string;
+    compiler_owned: boolean;
+    recorded_primary: string;
+    provenance: string;
 }
 
 struct Record {
@@ -155,7 +176,7 @@ struct Interval {
 }
 
 fn _usage() -> string {
-    return "usage: sfn run benchmarks/llm/sfn350.sfn -- [--track a|b] [--ablation primary|examples|diagnostics|primitive] [--adapter stub|openai|anthropic] [--real] [--model M] [--reasoning-effort E] [--model-family F] [--arm A] [--task T] [--max-iters N] [--repeats N] [--seed N] [--dry-run] [--schema-probe] [--contamination-probe] [--check-packets] [--verify-graders] [--self-test-analysis] [--self-test-timeouts] [--results-dir DIR]\n"
+    return "usage: sfn run benchmarks/llm/sfn350.sfn -- [--track a|b] [--ablation primary|examples|diagnostics|primitive] [--adapter stub|openai|anthropic] [--real] [--model M] [--reasoning-effort E] [--model-family F] [--arm A] [--task T] [--max-iters N] [--repeats N] [--seed N] [--dry-run] [--schema-probe] [--contamination-probe] [--check-packets] [--verify-graders] [--self-test-analysis] [--self-test-timeouts] [--reanalyze DIR] [--results-dir DIR]\n"
         + "\n"
         + "defaults: --track a --adapter stub --model gpt-5.6-terra --reasoning-effort medium --model-family unspecified --max-iters 5 --repeats 1 --seed 350 --results-dir build/sfn350-results\n"
         + "env: OPENAI_API_KEY, ANTHROPIC_API_KEY, SAILFIN_BIN, TACIT_LIBRARY_JAR, SFN350_TIMEOUT_CMD; API keys may also be set in .env or benchmarks/llm/.env\n";
@@ -215,6 +236,7 @@ fn _default_config() -> Config {
         self_test_timeouts: false,
         check_packets: false,
         contamination_probe: false,
+        reanalyze_dir: "",
         ablation: "primary",
         tasks: [],
         arms: []
@@ -298,6 +320,9 @@ fn _parse_config(argv: string[]) -> Config ![io] {
             cfg.self_test_timeouts = true;
         } else if arg == "--check-packets" { cfg.check_packets = true; } else if arg == "--contamination-probe" {
             cfg.contamination_probe = true;
+        } else if arg == "--reanalyze" && i + 1 < argv.length {
+            cfg.reanalyze_dir = argv[i + 1];
+            i += 1;
         } else {
             print.err("unknown or incomplete argument: " + arg);
             print.err(_usage());
@@ -1681,11 +1706,62 @@ fn _track_b_attribution(primary: string) -> string {
     return "intrinsic_failure";
 }
 
+// Sailfin ICE / compiler-panic markers. `internal compiler error (ICE):` is a
+// grep-stable contract emitted by compiler/src/ice.sfn for both driver panics
+// and backend (clang / llvm-link) failures on compiler-emitted IR (SFN-34), so
+// it is the primary signal that a failure the grader captured is compiler-owned
+// rather than a defect in the generated program.
+fn _has_compiler_ice_marker(text: string) -> boolean {
+    return contains(text, "internal compiler error") || contains(text, "the compiler unexpectedly panicked");
+}
+
+// Non-ICE compiler-owned backend / lowering / IR / link failures on
+// compiler-emitted artifacts. These are the SFN-372 v2.6 signatures that leaked
+// past `check` and only failed at build/run: invalid LLVM IR, unresolved callee
+// signatures, ABI primitive mismatch, and a missing `_main` after malformed
+// source was wrongly accepted. Reaching the run phase means `check` already
+// passed, so any of these markers there is a check-green/build-red divergence.
+fn _has_compiler_backend_marker(text: string) -> boolean {
+    return contains(text, "a backend failure on compiler-emitted IR")
+        || contains(text, "backend clang failed")
+        || contains(text, "backend clang link failed")
+        || contains(text, "backend llvm-link failed")
+        || contains(text, "LLVM ERROR")
+        || contains(text, "invalid LLVM IR")
+        || contains(text, "unresolved call")
+        || contains(text, "unresolved callee")
+        || contains(text, "ABI primitive mismatch")
+        || contains(text, "undefined reference to `_main'")
+        || contains(text, "undefined symbol: _main")
+        || contains(text, "Undefined symbols");
+}
+
 fn _classify_failure(cfg: Config, task: Task, grade_category: string, feedback: string, iteration: int) -> FailureAttribution {
     let explicit = _explicit_failure_category(feedback);
+    // Only the compile (`check`) and run (`sfn run`) phases put captured
+    // toolchain stdout/stderr into `feedback`; `wrong_output`, `instability`,
+    // etc. carry the model program's own output, where a marker substring would
+    // be a false positive. Restrict the compiler-owned scan to those two phases.
+    let toolchain_phase = grade_category == "compile_error" || grade_category == "runtime_error";
+    let ice = toolchain_phase && _has_compiler_ice_marker(feedback);
+    let backend = toolchain_phase && _has_compiler_backend_marker(feedback);
+    // Only the run phase is reached after `check` returns 0, so a compiler-owned
+    // marker here is a check-green/build-red divergence; a compile-phase marker
+    // is the compiler crashing during `check` itself.
+    let run_phase = grade_category == "runtime_error";
     let mut primary = explicit;
+    let mut divergence = false;
     if primary.length == 0 {
-        if grade_category == "provider_error" || grade_category == "scaffold_error" {
+        if ice {
+            // An ICE marker is compiler-owned regardless of phase and can never
+            // be an ordinary semantic/test failure (SFN-387 acceptance).
+            primary = "compiler_crash_hang_or_ice";
+            divergence = run_phase;
+        } else if backend {
+            if run_phase { primary = "check_build_run_divergence"; } else {
+                primary = "compiler_crash_hang_or_ice";
+            }
+        } else if grade_category == "provider_error" || grade_category == "scaffold_error" {
             primary = "provider_or_setup_invalidation";
         } else if grade_category == "effect_error" || grade_category == "trap_not_rejected" {
             primary = "capability_false_friction";
@@ -1698,6 +1774,7 @@ fn _classify_failure(cfg: Config, task: Task, grade_category: string, feedback: 
         } else { primary = "ordinary_semantic_or_test_failure"; }
     }
     let mut secondary: string[] = [];
+    if divergence { secondary.push("check_build_run_divergence"); }
     if iteration > 1 && primary != "unhelpful_diagnostic_or_failed_repair" {
         secondary.push("unhelpful_diagnostic_or_failed_repair");
     }
@@ -1711,7 +1788,10 @@ fn _classify_failure(cfg: Config, task: Task, grade_category: string, feedback: 
         secondary: secondary,
         track_b_attribution: track_b,
         language_denominator: denominator,
-        manual_review: explicit.length == 0 && (grade_category == "compile_error"
+        // A marker-detected compiler-owned failure is auto-attributed with
+        // confidence, so it no longer needs a human tiebreak; only the ambiguous
+        // uncategorized grader buckets do.
+        manual_review: explicit.length == 0 && !ice && !backend && (grade_category == "compile_error"
             || grade_category == "runtime_error"
             || grade_category == "wrong_output")
     };
@@ -1754,6 +1834,91 @@ fn _self_test_failure_taxonomy() ![io] {
         process.exit(1);
     }
     print("failure taxonomy and denominator policy fixtures passed");
+}
+
+// The frozen SFN-372 v2.6 classification signatures. Each `feedback` is a
+// representative captured grader stdout/stderr for one of the exact v2.6
+// artifact classes (SFN-387 context / PR #2395). The compiler-owned entries
+// were exported as `ordinary_semantic_or_test_failure` / `invented_syntax_or_api`
+// in v2.6; the controls (ordinary runtime error, generated-program timeout,
+// wrong output) must stay unchanged so the classifier does not over-attribute.
+fn _string_array_contains(values: string[], needle: string) -> boolean {
+    let mut i: int = 0;
+    loop {
+        if i >= values.length { break; }
+        if values[i] == needle { return true; }
+        i += 1;
+    }
+    return false;
+}
+
+fn _sfn372_signatures() -> ClassificationSignature[] {
+    return [ClassificationSignature {
+        name: "backend_clang_link_ice", grader_category: "runtime_error", feedback: "case 0 crashed: error: internal compiler error (ICE): backend clang failed (exit 1)\nnote: a backend failure on compiler-emitted IR usually means a compiler bug (not an error in your code)\nnote: failing IR: build/sailfin/program.ll", iteration: 1, expected_primary: "compiler_crash_hang_or_ice", expected_secondary: "check_build_run_divergence", expected_track_b: "implementation_defect", compiler_owned: true, recorded_primary: "ordinary_semantic_or_test_failure", provenance: "SFN-372 v2.6 / PR #2395: internal compiler error (ICE): backend clang link failed"
+    }, ClassificationSignature {
+        name: "lowerer_fatal_during_check", grader_category: "compile_error", feedback: "error: internal compiler error (ICE): lowering encountered an unsupported construct\nnote: the compiler unexpectedly panicked — this is a bug\nnote: stage: lowering", iteration: 1, expected_primary: "compiler_crash_hang_or_ice", expected_secondary: "", expected_track_b: "implementation_defect", compiler_owned: true, recorded_primary: "invented_syntax_or_api", provenance: "SFN-372 v2.6 / PR #2395: lowerer fatal"
+    }, ClassificationSignature {
+        name: "invalid_ir_check_green_build_red", grader_category: "runtime_error", feedback: "case 0 crashed: LLVM ERROR: Invalid bitcast\nerror: invalid LLVM IR: 'double' used where a pointer was expected after unresolved call signature", iteration: 1, expected_primary: "check_build_run_divergence", expected_secondary: "", expected_track_b: "implementation_defect", compiler_owned: true, recorded_primary: "ordinary_semantic_or_test_failure", provenance: "SFN-372 v2.6 / PR #2395: invalid LLVM IR / unresolved callee signature after check passed"
+    }, ClassificationSignature {
+        name: "ordinary_runtime_error_control", grader_category: "runtime_error", feedback: "case 0 crashed: panic: index out of range: 5 >= 3", iteration: 1, expected_primary: "ordinary_semantic_or_test_failure", expected_secondary: "", expected_track_b: "intrinsic_failure", compiler_owned: false, recorded_primary: "ordinary_semantic_or_test_failure", provenance: "control: ordinary generated-program runtime failure must not be reclassified"
+    }, ClassificationSignature {
+        name: "generated_program_timeout_control", grader_category: "timeout", feedback: "case 0 execution deadline expired", iteration: 1, expected_primary: "compiler_crash_hang_or_ice", expected_secondary: "", expected_track_b: "implementation_defect", compiler_owned: false, recorded_primary: "compiler_crash_hang_or_ice", provenance: "control: existing timeout attribution is unchanged by SFN-387"
+    }, ClassificationSignature {
+        name: "wrong_output_control", grader_category: "wrong_output", feedback: "case 0 wrong: got 7 want 12", iteration: 1, expected_primary: "ordinary_semantic_or_test_failure", expected_secondary: "", expected_track_b: "intrinsic_failure", compiler_owned: false, recorded_primary: "ordinary_semantic_or_test_failure", provenance: "control: ordinary wrong-output must not be reclassified"
+    }, ClassificationSignature {
+        name: "marker_in_program_output_control", grader_category: "wrong_output", feedback: "case 0 wrong: got LLVM ERROR: not really — printed by the program want ok", iteration: 1, expected_primary: "ordinary_semantic_or_test_failure", expected_secondary: "", expected_track_b: "intrinsic_failure", compiler_owned: false, recorded_primary: "ordinary_semantic_or_test_failure", provenance: "control: a compiler-marker substring in the model program's own output must not be reclassified as compiler-owned (wrong_output means the toolchain succeeded)"
+    }];
+}
+
+fn _self_test_compiler_owned_classification() ![io] {
+    let task = _logic_task();
+    let mut cfg = _default_config();
+    cfg.track = "b";
+    let sigs = _sfn372_signatures();
+    let mut i: int = 0;
+    loop {
+        if i >= sigs.length { break; }
+        let s = sigs[i];
+        let got = _classify_failure(cfg, task, s.grader_category, s.feedback, s.iteration);
+        if got.primary != s.expected_primary {
+            print.err("compiler-owned classification fixture " + s.name
+                + " expected primary "
+                + s.expected_primary
+                + " but got "
+                + got.primary);
+            process.exit(1);
+        }
+        if got.track_b_attribution != s.expected_track_b {
+            print.err("compiler-owned classification fixture " + s.name
+                + " expected track_b "
+                + s.expected_track_b
+                + " but got "
+                + got.track_b_attribution);
+            process.exit(1);
+        }
+        if s.expected_secondary.length > 0 && !_string_array_contains(got.secondary, s.expected_secondary) {
+            print.err("compiler-owned classification fixture " + s.name
+                + " expected secondary to contain "
+                + s.expected_secondary);
+            process.exit(1);
+        }
+        // SFN-387 acceptance: an ICE marker can never yield an ordinary failure.
+        if s.compiler_owned && got.primary == "ordinary_semantic_or_test_failure" {
+            print.err("compiler-owned classification fixture " + s.name
+                + " must not be ordinary_semantic_or_test_failure");
+            process.exit(1);
+        }
+        // Track A must still expose the user's failed outcome even when Track B
+        // attributes the failure to the compiler.
+        let adoption = _classify_failure(_default_config(), task, s.grader_category, s.feedback, s.iteration);
+        if !adoption.language_denominator {
+            print.err("compiler-owned classification fixture " + s.name
+                + " dropped the Track A adoption denominator");
+            process.exit(1);
+        }
+        i += 1;
+    }
+    print("compiler-owned classification fixtures passed");
 }
 
 fn _write_iteration_attribution(path: string, iteration: int, category: string, attribution: FailureAttribution) ![io] {
@@ -2756,6 +2921,70 @@ fn _write_failure_index(path: string, run_dir: string, records: Record[]) ![io] 
     fs.writeFile(path, stringify_pretty(array_val(values), 2));
 }
 
+// Offline reanalysis of a preserved failure corpus (SFN-387). The v2.6 raw
+// per-attempt stderr was not preserved in `results/sfn-372-v2.6.0/` (only the
+// exported failure index and manifests were), so the correction is derived by
+// running the frozen classifier over the documented v2.6 compiler-owned
+// signatures and reporting the recorded index's contaminated bucket alongside
+// it. The output is audit-only: it never rescores the rejected batch.
+fn _reanalyze_index_summary(dir: string, filename: string) -> JsonValue ![io] {
+    let path = dir + "/" + filename;
+    let root = parse(fs.readFile(path));
+    let n = array_length(root);
+    let mut total: int = 0;
+    let mut ordinary: int = 0;
+    let mut ordinary_runtime: int = 0;
+    let mut i: int = 0;
+    loop {
+        if i >= n { break; }
+        let entry = array_at(root, i);
+        total += 1;
+        let primary = get_string(entry, "primary");
+        if primary == "ordinary_semantic_or_test_failure" {
+            ordinary += 1;
+            if contains(stringify(get_value(entry, "fail_categories")), "runtime_error") {
+                ordinary_runtime += 1;
+            }
+        }
+        i += 1;
+    }
+    return object_val(["file", "total_failures", "recorded_ordinary_semantic", "recorded_ordinary_semantic_with_runtime_error"], [string_val(filename), number_val(total as float), number_val(ordinary as float), number_val(ordinary_runtime as float)]);
+}
+
+fn _reanalyze_corpus(dir: string) ![io] {
+    let candidates = ["resume-anthropic-track-a-failures.json", "resume-openai-track-a-failures.json", "anthropic-track-a-failures.json", "openai-track-a-failures.json"];
+    let mut recorded: JsonValue[] = [];
+    let mut ci: int = 0;
+    loop {
+        if ci >= candidates.length { break; }
+        if fs.exists(dir + "/" + candidates[ci]) {
+            recorded.push(_reanalyze_index_summary(dir, candidates[ci]));
+        }
+        ci += 1;
+    }
+    let task = _logic_task();
+    let mut cfg = _default_config();
+    cfg.track = "b";
+    let sigs = _sfn372_signatures();
+    let mut corrected: JsonValue[] = [];
+    let mut changed_count: int = 0;
+    let mut si: int = 0;
+    loop {
+        if si >= sigs.length { break; }
+        let s = sigs[si];
+        let got = _classify_failure(cfg, task, s.grader_category, s.feedback, s.iteration);
+        let changed = got.primary != s.recorded_primary;
+        if changed { changed_count += 1; }
+        corrected.push(object_val(["signature", "grader_category", "compiler_owned", "v2_6_recorded_primary", "corrected_primary", "corrected_secondary", "corrected_track_b", "changed", "provenance"], [string_val(s.name), string_val(s.grader_category), bool_val(s.compiler_owned), string_val(s.recorded_primary), string_val(got.primary), _string_array_json(got.secondary), string_val(got.track_b_attribution), bool_val(changed), string_val(s.provenance)]));
+        si += 1;
+    }
+    let doc = object_val(["generated_by", "source_corpus", "scoreable", "raw_stderr_preserved", "protocol_note", "note", "recorded_index", "corrected_signatures", "changed_classifications"], [string_val("sfn350 --reanalyze (frozen SFN-387 classifier)"), string_val(dir), bool_val(false), bool_val(false), string_val("v2.6.0 remains rejected and non-scoreable (PR #2395); this corrected index is audit-only. The corrected classifier is frozen here for the SFN-383 successor protocol before any paid execution."), string_val("Raw per-attempt stderr was not preserved in the v2.6 corpus; corrected classifications are derived by running the frozen classifier over the documented v2.6 compiler-owned signatures. `recorded_index` reports the contaminated ordinary-semantic bucket in the preserved failure index that hid these compiler defects."), array_val(recorded), array_val(corrected), number_val(changed_count as float)]);
+    let out_path = dir + "/corrected-failures.json";
+    fs.writeFile(out_path, stringify_pretty(doc, 2));
+    print("offline reanalysis complete: " + out_path);
+    print(stringify_pretty(doc, 2));
+}
+
 fn _write_blind_export(run_dir: string, records: Record[], arms: ArmConfig[], tasks: Task[]) ![io] {
     let blind_dir = run_dir + "/blind-review";
     _mkdir(blind_dir);
@@ -3283,12 +3512,17 @@ fn main(argv: string[]) -> int ![clock, io, net] {
     if cfg.self_test_analysis {
         _self_test_provider_schemas();
         _self_test_failure_taxonomy();
+        _self_test_compiler_owned_classification();
         _self_test_response_invalidation();
         _self_test_analysis();
         return 0;
     }
     if cfg.self_test_timeouts {
         _self_test_timeouts();
+        return 0;
+    }
+    if cfg.reanalyze_dir.length > 0 {
+        _reanalyze_corpus(cfg.reanalyze_dir);
         return 0;
     }
     if cfg.track == "b" {

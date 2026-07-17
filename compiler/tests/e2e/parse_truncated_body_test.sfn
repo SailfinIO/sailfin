@@ -1,0 +1,181 @@
+// Regression coverage for SFN-384: a function body that opens with `{`
+// but reaches EOF before its closing `}` (a truncated/cut-off source)
+// must fail closed with a precise `E0505` parse diagnostic instead of
+// falling through to LLVM lowering/linking and producing an ICE or an
+// "undefined symbol: main" link failure. Also covers the sibling
+// malformed-`let`-name case (`E0504`), where a `let`/`let mut` binding
+// whose name token is not an identifier surfaces the same way, both at
+// top level and nested inside a closed function body (where it
+// resurfaces via typecheck rather than parse). Follows the SFN-18
+// malformed-declaration pattern (`parse_malformed_declaration_test.sfn`)
+// but targets the truncated-body recovery site instead of the unclosed
+// parameter-list / missing-initializer / missing-field-type sites that
+// SFN-18 covers.
+//
+// Driven through `sfn check --json` (the machine-checkable envelope, see
+// `check_json_schema_test.sfn`) plus a build-side probe proving the
+// build path itself rejects a truncated body before LLVM lowering (no
+// executable, no ICE noise). The `sfn/test` `expect_*` matchers are
+// `![pure]` and cannot be called from these `![io]` tests.
+import { contains } from "sfn/strings";
+import { with_tmp_dir } from "sfn/test";
+
+fn _sfn_bin() -> string ![io] {
+    let configured = env.get("SAILFIN_BIN");
+    if configured.length > 0 { return configured; }
+    return "build/bin/sfn";
+}
+
+// Pure-frontend `sfn check` needs no clang, but thread PATH/HOME so a
+// constrained CI shell still resolves anything the frontend touches.
+fn _child_env() -> string[] ![io] {
+    let mut e: string[] = [];
+    let path = env.get("PATH");
+    if path.length > 0 { e.push("PATH=" + path); }
+    let home = env.get("HOME");
+    if home.length > 0 { e.push("HOME=" + home); }
+    return e;
+}
+
+// Full environment for a nested `sfn build` (needs clang + linker on
+// PATH, plus SAILFIN_TEST_SCRATCH for build-cache isolation under the
+// parallel runner — see `.claude/rules/no-bash-e2e.md`).
+fn _build_child_env() -> string[] ![io] { return process.environ(); }
+
+struct CheckRun {
+    exit: int,
+    out: string,
+    err: string
+}
+
+// Scratch base for fixtures, keyed by tag so the parallel pool never
+// collides. Materializes a minimal capsule/workspace context plus the
+// per-case fixture under it.
+fn _fixture_dir(tag: string) -> string ![io] {
+    let mut base = env.get("SAILFIN_TEST_SCRATCH");
+    if base.length == 0 { base = "/tmp"; }
+    let root = base + "/sfn-truncated-body-" + tag;
+    fs.createDirectory(root + "/src", true);
+    fs.writeFile(root + "/workspace.toml", "[workspace]\nmembers = []\n");
+    fs.writeFile(root + "/capsule.toml", "[capsule]\n"
+        + "name = \"truncated-body-test\"\n"
+        + "version = \"0.1.0\"\n"
+        + "description = \"E2E for SFN-384 truncated function bodies\"\n\n"
+        + "[capabilities]\n"
+        + "required = [\"io\"]\n\n"
+        + "[build]\n"
+        + "entry = \"src/main.sfn\"\n");
+    return root;
+}
+
+fn _write(root: string, name: string, source: string) -> string ![io] {
+    let path = root + "/src/" + name;
+    fs.writeFile(path, source);
+    return path;
+}
+
+fn _check(path: string) -> CheckRun ![io] {
+    let exit = process.run_capture([_sfn_bin(), "check", "--json", path], _child_env());
+    let out = process.capture_take_stdout();
+    let err = process.capture_take_stderr();
+    return CheckRun { exit: exit, out: out, err: err };
+}
+
+// ---- Test 1: the recorded repro — a cut-off function body -> E0505 ----
+test "parse truncated: cut-off function body surfaces E0505" ![io] {
+    let root = _fixture_dir("cutoff-fn");
+    let source = "fn parse_int(token: string) -> int {\n    let mut idx = 0;\n    let mut neg = false;\n\n    if token.length > 0 {\n        let{\n";
+    let path = _write(root, "cutoff_fn.sfn", source);
+    let r = _check(path);
+    assert r.exit == 1;
+    assert contains(r.out, "\"code\":\"E0505\"");
+    assert contains(r.out, "\"producer\":\"parse\"");
+    assert contains(r.out, "\"severity\":\"error\"");
+    assert contains(r.out, "expected `}` to close the body of function `parse_int`");
+}
+
+// ---- Test 2: build-side rejection — a truncated body fails the build
+// before LLVM lowering: no executable is produced and the diagnostic is
+// the precise parse message, not linker/ICE noise. ----
+fn _build_broken(marker: string) -> int ![io] {
+    return with_tmp_dir(fn (dir: string) -> int {
+        let srcpath = dir + "/src.sfn";
+        let source = "fn parse_int(token: string) -> int {\n    let mut idx = 0;\n    let mut neg = false;\n\n    if token.length > 0 {\n        let{\n";
+        fs.writeFile(srcpath, source);
+        let binpath = dir + "/out.bin";
+        let build_exit = process.run_capture([_sfn_bin(), "build", "-o", binpath, srcpath], _build_child_env());
+        let out = process.capture_take_stdout();
+        let err = process.capture_take_stderr();
+        let bin_marker = "no";
+        if fs.exists(binpath) { bin_marker = "yes"; }
+        fs.writeFile(marker, out + err + "\n---BIN_EXISTS:" + bin_marker);
+        return build_exit;
+    });
+}
+
+test "parse truncated: build rejects a cut-off body before lowering" ![io] {
+    let mut scratch = env.get("SAILFIN_TEST_SCRATCH");
+    if scratch.length == 0 { scratch = "/tmp"; }
+    fs.createDirectory(scratch, true);
+    let marker = scratch + "/sfn-truncated-body-build.out";
+    if fs.exists(marker) { fs.deleteFile(marker); }
+    let exit = _build_broken(marker);
+    assert exit != 0;
+    let combined = fs.readFile(marker);
+    if fs.exists(marker) { fs.deleteFile(marker); }
+    assert contains(combined, "---BIN_EXISTS:no");
+    assert contains(combined, "E0505");
+    assert ! contains(combined, "internal compiler error");
+    assert ! contains(combined, "undefined symbol: main");
+}
+
+// ---- Test 3: a cut-off body ahead of a valid `main` must not be
+// silently dropped — the whole program still fails to compile. ----
+test "parse truncated: cut-off body before a valid main is rejected, not silently dropped" ![io] {
+    let root = _fixture_dir("cutoff-before-main");
+    let source = "fn parse_int(token: string) -> int {\n    let mut idx = 0;\n\n    if token.length > 0 {\n        let{\n\nfn main() ![io] {\n    print.info(\"hi\");\n}\n";
+    let path = _write(root, "cutoff_before_main.sfn", source);
+    let r = _check(path);
+    assert r.exit == 1;
+    assert contains(r.out, "\"code\":\"E0505\"");
+}
+
+// ---- Test 4: malformed nested let name inside a CLOSED body -> E0504 ----
+test "parse truncated: malformed nested let surfaces E0504" ![io] {
+    let root = _fixture_dir("nested-let-malformed");
+    let source = "fn foo() -> int {\n    if true {\n        let{\n    }\n    return 0;\n}\nfn main() { }\n";
+    let path = _write(root, "nested_let_malformed.sfn", source);
+    let r = _check(path);
+    assert r.exit == 1;
+    assert contains(r.out, "\"code\":\"E0504\"");
+    assert contains(r.out, "expected an identifier after `let`");
+}
+
+// ---- Test 5: malformed top-level let name -> E0504 ----
+test "parse truncated: top-level malformed let name surfaces E0504" ![io] {
+    let root = _fixture_dir("toplevel-let-malformed");
+    let path = _write(root, "toplevel_let_malformed.sfn", "let 3 = 5;\nfn main() { }\n");
+    let r = _check(path);
+    assert r.exit == 1;
+    assert contains(r.out, "\"code\":\"E0504\"");
+    assert contains(r.out, "\"producer\":\"parse\"");
+}
+
+// ---- Test 6: negative control — well-formed nested lets stay clean ----
+test "parse truncated: well-formed nested lets stay clean" ![io] {
+    let root = _fixture_dir("ok-nested-let");
+    let source = "fn foo() -> int {\n    if true {\n        let x = 1;\n    }\n    return 0;\n}\nfn main() { }\n";
+    let path = _write(root, "ok_nested_let.sfn", source);
+    let r = _check(path);
+    assert r.exit == 0;
+    assert contains(r.out, "\"errors\":0");
+}
+
+// ---- Test 7: negative control — declaration-only let stays clean ----
+test "parse truncated: declaration-only let stays clean" ![io] {
+    let root = _fixture_dir("ok-decl-only-let");
+    let path = _write(root, "ok_decl_only_let.sfn", "fn foo() {\n    let x;\n}\nfn main() { }\n");
+    let r = _check(path);
+    assert r.exit == 0;
+    assert contains(r.out, "\"errors\":0");
+}

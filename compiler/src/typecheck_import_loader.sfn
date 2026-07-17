@@ -28,7 +28,12 @@
 // artifact from looking like a benign module that just happened to
 // export only structs/functions.
 import { Statement } from "./ast";
-import { ImportSymbolTable, append_import_function, empty_import_symbols } from "./effect_imports";
+import {
+    ImportSymbolTable,
+    append_import_decorator_function,
+    empty_import_symbols
+} from "./effect_imports";
+import { NativeFunction } from "./native_ir";
 import { parse_native_artifact_for_import_context } from "./native_ir_api";
 import { interfaces_from_native } from "./typecheck_imports";
 
@@ -107,7 +112,13 @@ fn interfaces_from_native_artifact(text: string) -> ArtifactInterfaceParse {
         // imported from `runtime/sfn/platform/*.sfn` resolve
         // cross-module.
         if !function.is_extern {
-            function_effects = append_import_function(function_effects, function.name, function.effects);
+            // SFEP-0023 §4.2: carry a per-export `is_decorator` bit alongside
+            // the effects so the decorator resolver can distinguish an imported
+            // decorator from an ordinary imported function. The bit rides the
+            // same `.sfn-asm` metadata channel — `NativeFunction.decorators`
+            // already round-trips the `@decorator` marker — so no new artifact
+            // plumbing is needed.
+            function_effects = append_import_decorator_function(function_effects, function.name, function.effects, _native_function_is_tier1_decorator(function));
         }
         i += 1;
     }
@@ -116,6 +127,51 @@ fn interfaces_from_native_artifact(text: string) -> ArtifactInterfaceParse {
         function_effects: function_effects,
         diagnostics: parsed.diagnostics
     };
+}
+
+// SFEP-0023 §4.1/§4.2: a staged export is a well-formed Tier 1 decorator
+// when it carries the `@decorator` marker *and* matches the entry-hook
+// contract shape `(string[], string) -> void` (args then function-name
+// descriptor). A `@decorator`-marked function with the wrong shape is not
+// treated as a decorator here — at the use site it then resolves as
+// "imported but not a decorator" (E0701) rather than silently accepting a
+// mis-typed hook. The marker round-trips through `NativeFunction.decorators`
+// as the bare name `"decorator"` (`.decorator @decorator`), and the native
+// parameter/return types are raw source-text strings, so the shape check is
+// a whitespace-insensitive string compare.
+fn _native_function_is_tier1_decorator(function: NativeFunction) -> boolean {
+    if !_decorators_contain_marker(function.decorators) { return false; }
+    if function.parameters.length != 2 { return false; }
+    if _strip_spaces(function.parameters[0].type_annotation) != "string[]" {
+        return false;
+    }
+    if _strip_spaces(function.parameters[1].type_annotation) != "string" {
+        return false;
+    }
+    if _strip_spaces(function.return_type) != "void" { return false; }
+    return true;
+}
+
+fn _decorators_contain_marker(decorators: string[]) -> boolean {
+    let mut index: int = 0;
+    loop {
+        if index >= decorators.length { break; }
+        if decorators[index] == "decorator" { return true; }
+        index += 1;
+    }
+    return false;
+}
+
+fn _strip_spaces(text: string) -> string {
+    let mut out: string = "";
+    let mut index: int = 0;
+    loop {
+        if index >= text.length { break; }
+        let ch = text[index];
+        if ch != " " { out = out + ch; }
+        index += 1;
+    }
+    return out;
 }
 
 // #1953: the set of every symbol name defined anywhere in `sfn check`'s
@@ -270,7 +326,11 @@ fn load_imported_interfaces_from_paths(paths: string[]) -> ImportedInterfaceLoad
         loop {
             if k >= parsed.function_effects.functions.length { break; }
             let entry = parsed.function_effects.functions[k];
-            function_effects = append_import_function(function_effects, entry.name, entry.effects);
+            // Preserve the SFEP-0023 §4.2 `is_decorator` bit across the
+            // per-batch merge — a plain `append_import_function` would reset
+            // it to false, defeating the metadata channel before it reaches
+            // `localize_import_symbols_for_program`.
+            function_effects = append_import_decorator_function(function_effects, entry.name, entry.effects, entry.is_decorator);
             k += 1;
         }
         if parsed.interfaces.length == 0 { skipped.push(path); } else {

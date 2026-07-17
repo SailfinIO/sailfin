@@ -1,0 +1,166 @@
+// compiler/tests/unit/target_conditioning_test.sfn
+//
+// Regression guard for the M6 build-target conditioning (SFN-52,
+// SFEP-0021 §4.2(A)): the driver must invoke clang/linker for the MSVC
+// Windows target (triple `x86_64-pc-windows-msvc`, `-fuse-ld=lld`, no
+// POSIX/OpenSSL link libs) while leaving the Linux/macOS clang argv and
+// link inputs byte-identical (#1112 zero-behaviour gate).
+//
+// These are pure assertions over the target-conditioning helpers
+// (`build/target.sfn`) plus the clang-argv builders that consume them, so
+// the Windows leg is exercised on any host without a real Windows link —
+// the same override-driven pattern the emit-time locator tests use
+// (`errno_locator_test.sfn`), and the argv-shape pattern of
+// `backend_link_libs_parity_test.sfn`.
+import { expect_eq_bool, expect_eq_str, expect_eq_str_array } from "sfn/test";
+
+import { LinkPlan, _llvm_text_link_program_argv, _llvm_text_link_test_argv } from "../../src/backend";
+import { _llvm_text_assemble_argv } from "../../src/build/clang_argv";
+import {
+    target_clang_flags,
+    target_clang_triple,
+    target_condition_runtime_sfn_sources,
+    target_filter_link_libs,
+    target_forced_linker_flag,
+    target_os_is_windows,
+    target_uses_gnu_link_gc
+} from "../../src/build/target";
+
+// Membership check over an emitted argv (`string[]`).
+fn _argv_contains(argv: string[], needle: string) -> boolean ![pure] {
+    let mut i: int = 0;
+    loop {
+        if i >= argv.length { break; }
+        if argv[i] == needle { return true; }
+        i += 1;
+    }
+    return false;
+}
+
+// ---- Target OS classification ----
+test "target: only Windows is classified as the MSVC target" ![pure] {
+    assert expect_eq_bool(target_os_is_windows("Windows"), true).ok;
+    assert expect_eq_bool(target_os_is_windows("Linux"), false).ok;
+    assert expect_eq_bool(target_os_is_windows("Darwin"), false).ok;
+}
+
+// ---- clang -target triple ----
+test "target: host targets add no -target triple" ![pure] {
+    // Linux/macOS keep clang's host default → empty triple, empty flags,
+    // so no `-target` flag is ever added (byte-identical argv).
+    assert expect_eq_str(target_clang_triple("Linux"), "").ok;
+    assert expect_eq_str(target_clang_triple("Darwin"), "").ok;
+    let empty: string[] = [];
+    assert expect_eq_str_array(target_clang_flags("Linux"), empty).ok;
+    assert expect_eq_str_array(target_clang_flags("Darwin"), empty).ok;
+}
+
+test "target: Windows uses the MSVC triple" ![pure] {
+    assert expect_eq_str(target_clang_triple("Windows"), "x86_64-pc-windows-msvc").ok;
+    let expected: string[] = ["-target", "x86_64-pc-windows-msvc"];
+    assert expect_eq_str_array(target_clang_flags("Windows"), expected).ok;
+}
+
+// ---- Linker selection ----
+test "target: Windows forces lld, host targets do not" ![pure] {
+    assert expect_eq_str(target_forced_linker_flag("Windows"), "-fuse-ld=lld").ok;
+    assert expect_eq_str(target_forced_linker_flag("Linux"), "").ok;
+    assert expect_eq_str(target_forced_linker_flag("Darwin"), "").ok;
+}
+
+test "target: GNU section-GC flags are kept off Windows, skipped on Windows" ![pure] {
+    // lld-link rejects `-Wl,--gc-sections` / `-Wl,-u,<sym>`; the driver
+    // must skip them for a Windows target and keep them everywhere else.
+    assert expect_eq_bool(target_uses_gnu_link_gc("Linux"), true).ok;
+    assert expect_eq_bool(target_uses_gnu_link_gc("Darwin"), true).ok;
+    assert expect_eq_bool(target_uses_gnu_link_gc("Windows"), false).ok;
+}
+
+// ---- Link-lib filtering ----
+test "target: host link libs pass through unchanged" ![pure] {
+    let libs: string[] = ["-L/opt/homebrew/opt/openssl@3/lib", "-lssl", "-lcrypto", "-lm", "-lpthread"];
+    // Identity on Linux/macOS → the POSIX/OpenSSL libs are preserved.
+    assert expect_eq_str_array(target_filter_link_libs(libs, "Linux"), libs).ok;
+    assert expect_eq_str_array(target_filter_link_libs(libs, "Darwin"), libs).ok;
+}
+
+test "target: Windows drops POSIX and OpenSSL link libs, keeps others" ![pure] {
+    let libs: string[] = ["-L/some/dir", "-lssl", "-lcrypto", "-lm", "-lpthread", "-lcustom"];
+    // MSVC/UCRT auto-links its CRT; the crypto/tls libs resolve to
+    // windows_stubs.ll no-ops. Non-lib flags (`-L…`) and unrelated libs
+    // survive.
+    let expected: string[] = ["-L/some/dir", "-lcustom"];
+    assert expect_eq_str_array(target_filter_link_libs(libs, "Windows"), expected).ok;
+}
+
+// ---- Runtime module-set conditioning ----
+test "target: host runtime module set is unchanged" ![pure] {
+    let sources: string[] = ["/rt/sfn/runtime_globals.sfn", "/rt/sfn/process.sfn", "/rt/sfn/platform/rlimit.sfn", "/rt/sfn/io.sfn"];
+    assert expect_eq_str_array(target_condition_runtime_sfn_sources(sources, "Linux"), sources).ok;
+    assert expect_eq_str_array(target_condition_runtime_sfn_sources(sources, "Darwin"), sources).ok;
+}
+
+test "target: Windows swaps process.sfn and drops rlimit.sfn" ![pure] {
+    let sources: string[] = ["/rt/sfn/runtime_globals.sfn", "/rt/sfn/process.sfn", "/rt/sfn/platform/rlimit.sfn", "/rt/sfn/io.sfn"];
+    // process.sfn → its Win32 sibling (cross-directory), rlimit.sfn dropped,
+    // every other module preserved in order.
+    let expected: string[] = ["/rt/sfn/runtime_globals.sfn", "/rt/sfn/platform/process_windows.sfn", "/rt/sfn/io.sfn"];
+    assert expect_eq_str_array(target_condition_runtime_sfn_sources(sources, "Windows"), expected).ok;
+}
+
+// ---- Assemble argv splicing ----
+test "target: assemble argv is byte-identical with no target flags" ![pure] {
+    // The host path passes [] and must reproduce the pre-conditioning argv
+    // exactly (#1112).
+    let no_target: string[] = [];
+    let no_includes: string[] = [];
+    let argv = _llvm_text_assemble_argv("in.ll", "out.o", "-O2", no_includes, no_target);
+    let expected: string[] = ["clang", "-O2", "-Wno-override-module", "-ffunction-sections", "-fdata-sections", "-c", "in.ll", "-o", "out.o"];
+    assert expect_eq_str_array(argv, expected).ok;
+}
+
+test "target: assemble argv splices -target after the opt flag" ![pure] {
+    let target: string[] = ["-target", "x86_64-pc-windows-msvc"];
+    let includes: string[] = ["-Iinc"];
+    let argv = _llvm_text_assemble_argv("in.ll", "out.o", "-O2", includes, target);
+    let expected: string[] = ["clang", "-O2", "-target", "x86_64-pc-windows-msvc", "-Wno-override-module", "-ffunction-sections", "-fdata-sections", "-Iinc", "-c", "in.ll", "-o", "out.o"];
+    assert expect_eq_str_array(argv, expected).ok;
+}
+
+// ---- Link argv carries the -target driver flag ----
+fn _driver_plan(test_mode: boolean) -> LinkPlan ![pure] {
+    return LinkPlan {
+        objects: ["runtime.o"],
+        ir_inputs: ["main.ll"],
+        out_path: "a.exe",
+        opt_flag: "-O2",
+        link_flags: [],
+        libs: [],
+        test_mode: test_mode
+    };
+}
+
+test "target: program link argv carries -target when the driver flags do" ![pure] {
+    // `LlvmTextBackend.link` prefixes `target_clang_flags(target_os)` onto
+    // the driver-flag slice both layouts splice after `-Wno-override-module`.
+    let driver_flags: string[] = ["-target", "x86_64-pc-windows-msvc"];
+    let argv = _llvm_text_link_program_argv(_driver_plan(false), driver_flags);
+    assert expect_eq_bool(_argv_contains(argv, "-target"), true).ok;
+    assert expect_eq_bool(_argv_contains(argv, "x86_64-pc-windows-msvc"), true).ok;
+}
+
+test "target: test link argv carries -target when the driver flags do" ![pure] {
+    let driver_flags: string[] = ["-target", "x86_64-pc-windows-msvc"];
+    let argv = _llvm_text_link_test_argv(_driver_plan(true), driver_flags);
+    assert expect_eq_bool(_argv_contains(argv, "-target"), true).ok;
+    assert expect_eq_bool(_argv_contains(argv, "x86_64-pc-windows-msvc"), true).ok;
+}
+
+// Sanity: the host driver-flag slice ([]) adds no -target to either layout.
+test "target: host link argv carries no -target flag" ![pure] {
+    let no_driver: string[] = [];
+    let program_argv = _llvm_text_link_program_argv(_driver_plan(false), no_driver);
+    let test_argv = _llvm_text_link_test_argv(_driver_plan(true), no_driver);
+    assert expect_eq_bool(_argv_contains(program_argv, "-target"), false).ok;
+    assert expect_eq_bool(_argv_contains(test_argv, "-target"), false).ok;
+}

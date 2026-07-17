@@ -1,0 +1,15 @@
+{
+  "model": "claude-sonnet-5",
+  "attempt_id": "anthropic-sonnet-s350-structured-concurrency-002-sailfin-r1",
+  "iteration": 2,
+  "stop_reason": "max_tokens",
+  "content_types": ["thinking"],
+  "text_blocks": 0,
+  "usage": {
+    "input_tokens": 1753,
+    "output_tokens": 8192,
+    "thinking_tokens": 8191
+  },
+  "classification": "provider_response_budget_exhausted",
+  "language_denominator": false
+}

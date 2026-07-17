@@ -1,0 +1,162 @@
+// Unit tests for compiler/src/decorator_resolver.sfn (SFN-70,
+// SFEP-0023 §4.2 step A): resolving an applied `@foo` decorator on a
+// function declaration against the localized import table, plus the
+// built-in fallback and diagnostic paths (E0701/E0702).
+//
+// Tests construct AST values via small flat helper functions to stay
+// shallow — some seed compilers segfault on deeply nested struct-literal
+// initialisers in test bodies (see `effect_imports_test.sfn` preamble for
+// the same workaround).
+import {
+    Block,
+    Decorator,
+    DecoratorArgument,
+    Expression,
+    FunctionSignature,
+    Parameter,
+    Program,
+    Statement,
+    TypeParameter
+} from "../../src/ast";
+import {
+    DecoratorResolution,
+    resolve_decorators,
+    resolved_decorators_for_function
+} from "../../src/decorator_resolver";
+import { append_import_decorator_function, empty_import_symbols } from "../../src/effect_imports";
+
+// -------------------------------------------------------------------
+// Builder helpers
+// -------------------------------------------------------------------
+fn _empty_block() -> Block {
+    return Block { tokens: [], text: "", statements: [] };
+}
+
+fn _signature(name: string) -> FunctionSignature {
+    let mut empty_params: Parameter[] = [];
+    let mut empty_effects: string[] = [];
+    let mut empty_type_params: TypeParameter[] = [];
+    return FunctionSignature {
+        name: name,
+        is_async: false,
+        parameters: empty_params,
+        return_type: null,
+        effects: empty_effects,
+        type_parameters: empty_type_params,
+        name_span: null
+    };
+}
+
+fn _decorator(name: string) -> Decorator {
+    let mut empty_arguments: DecoratorArgument[] = [];
+    return Decorator { name: name, arguments: empty_arguments };
+}
+
+fn _decorator_with_arg(name: string, arg: string) -> Decorator {
+    let literal = Expression.StringLiteral { value: arg };
+    let argument = DecoratorArgument { name: null, expression: literal };
+    return Decorator { name: name, arguments: [argument] };
+}
+
+fn _fn_with_decorators(fn_name: string, decorators: Decorator[]) -> Statement {
+    return Statement.FunctionDeclaration {
+        signature: _signature(fn_name),
+        body: _empty_block(),
+        decorators: decorators,
+        is_unsafe: false
+    };
+}
+
+fn _program(statements: Statement[]) -> Program {
+    return Program { statements: statements };
+}
+
+// -------------------------------------------------------------------
+// Tests
+// -------------------------------------------------------------------
+test "resolve_decorators: imported @decorator-marked function resolves to a ResolvedDecorator" {
+    let mut table = empty_import_symbols();
+    table = append_import_decorator_function(table, "logExecution", ["io"], true);
+    let handler = _fn_with_decorators("handler", [_decorator("logExecution")]);
+    let program = _program([handler]);
+
+    let resolution = resolve_decorators(program, table);
+    assert resolution.functions.length == 1;
+    assert resolution.functions[0].function_name == "handler";
+    assert resolution.functions[0].decorators.length == 1;
+    let resolved = resolution.functions[0].decorators[0];
+    assert resolved.local_name == "logExecution";
+    assert resolved.export_name == "logExecution";
+    assert resolved.tier == 1;
+    assert resolved.effects.length == 1;
+    assert resolved.effects[0] == "io";
+    assert resolution.diagnostics.length == 0;
+}
+
+test "resolve_decorators: decorator arguments are carried into the resolved record" {
+    let mut table = empty_import_symbols();
+    table = append_import_decorator_function(table, "logExecution", ["io"], true);
+    let handler = _fn_with_decorators("handler", [_decorator_with_arg("logExecution", "label")]);
+    let program = _program([handler]);
+
+    let resolution = resolve_decorators(program, table);
+    assert resolution.functions.length == 1;
+    assert resolution.functions[0].decorators.length == 1;
+    let resolved = resolution.functions[0].decorators[0];
+    assert resolved.arguments.length == 1;
+}
+
+test "resolve_decorators: non-decorator imported symbol emits E0701" {
+    let mut table = empty_import_symbols();
+    table = append_import_decorator_function(table, "plainHelper", ["io"], false);
+    let handler = _fn_with_decorators("handler", [_decorator("plainHelper")]);
+    let program = _program([handler]);
+
+    let resolution = resolve_decorators(program, table);
+    assert resolution.diagnostics.length == 1;
+    assert resolution.diagnostics[0].code == "E0701";
+    let handler_decorators = resolved_decorators_for_function(resolution, "handler");
+    assert handler_decorators.length == 0;
+}
+
+test "resolve_decorators: unknown un-imported decorator emits E0702" {
+    let table = empty_import_symbols();
+    let handler = _fn_with_decorators("handler", [_decorator("myCustomThing")]);
+    let program = _program([handler]);
+
+    let resolution = resolve_decorators(program, table);
+    assert resolution.diagnostics.length == 1;
+    assert resolution.diagnostics[0].code == "E0702";
+}
+
+test "resolve_decorators: un-imported built-in logExecution still resolves via fallback" {
+    let table = empty_import_symbols();
+    let handler = _fn_with_decorators("handler", [_decorator("logExecution")]);
+    let program = _program([handler]);
+
+    let resolution = resolve_decorators(program, table);
+    assert resolution.functions.length == 1;
+    assert resolution.functions[0].decorators.length == 1;
+    let resolved = resolution.functions[0].decorators[0];
+    assert resolved.effects[0] == "io";
+    assert resolution.diagnostics.length == 0;
+}
+
+test "resolve_decorators: the @decorator marker itself is not resolved as an application" {
+    let table = empty_import_symbols();
+    let definition = _fn_with_decorators("logExecution", [_decorator("decorator")]);
+    let program = _program([definition]);
+
+    let resolution = resolve_decorators(program, table);
+    assert resolution.diagnostics.length == 0;
+    let decorators = resolved_decorators_for_function(resolution, "logExecution");
+    assert decorators.length == 0;
+}
+
+test "resolved_decorators_for_function: returns empty for an unknown function name" {
+    let table = empty_import_symbols();
+    let program = _program([]);
+    let resolution = resolve_decorators(program, table);
+    let decorators = resolved_decorators_for_function(resolution, "nope");
+    assert decorators.length == 0;
+}

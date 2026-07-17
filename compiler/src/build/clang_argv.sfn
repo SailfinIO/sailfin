@@ -20,8 +20,29 @@
 //
 // `backend.sfn`'s `LlvmTextBackend.assemble` delegates here too, so the argv
 // shape stays defined in exactly one place.
-fn _llvm_text_assemble_argv(src: string, out: string, opt_flag: string, include_flags: string[]) -> string[] {
-    let mut args: string[] = ["clang", opt_flag, "-Wno-override-module", "-ffunction-sections", "-fdata-sections"];
+//
+// Importing `./target` (a struct-free leaf over `build_flags`/`paths`) does
+// not reintroduce the `LlvmTextBackend` vtable hazard the module note above
+// warns about — `target.sfn` declares no interface-implementing struct.
+import { build_target_os, target_clang_flags } from "./target";
+
+// `target_flags` (SFN-52, SFEP-0021 §4.2(A)) carries the `-target <triple>`
+// pair for a cross/Windows target, or [] for the host default. It is
+// spliced right after `opt_flag` — an empty slice leaves the argv
+// byte-identical to the pre-target-conditioning form on Linux/macOS
+// (#1112). The flags are resolved by the `![io]` caller (`llvm_assemble` /
+// `LlvmTextBackend.assemble`) so this argv builder stays pure.
+fn _llvm_text_assemble_argv(src: string, out: string, opt_flag: string, include_flags: string[], target_flags: string[]) -> string[] {
+    let mut args: string[] = ["clang", opt_flag];
+    let mut ti: int = 0;
+    loop {
+        if ti >= target_flags.length { break; }
+        args.push(target_flags[ti]);
+        ti += 1;
+    }
+    args.push("-Wno-override-module");
+    args.push("-ffunction-sections");
+    args.push("-fdata-sections");
     let mut i: int = 0;
     loop {
         if i >= include_flags.length { break; }
@@ -39,8 +60,15 @@ fn _llvm_text_assemble_argv(src: string, out: string, opt_flag: string, include_
 // `LlvmTextBackend{}.assemble(...)` (both delegate to
 // `_llvm_text_assemble_argv` + `process.run`). Build-driver callers use this
 // so they need not import `backend.sfn` — see the module note above.
+//
+// The `-target` triple is resolved here from the build target
+// (`build_target_os()`, SFN-52) so every `.ll`/`.c` → `.o` assemble the
+// driver runs — runtime c/ll-sources, emitted runtime sfn-sources, and the
+// per-test dependency objects — compiles for the same target as the final
+// link, with no change at the call sites. Empty on Linux/macOS.
 fn llvm_assemble(src: string, out: string, opt_flag: string, include_flags: string[]) -> int ![io] {
-    return process.run(_llvm_text_assemble_argv(src, out, opt_flag, include_flags));
+    let target_flags = target_clang_flags(build_target_os());
+    return process.run(_llvm_text_assemble_argv(src, out, opt_flag, include_flags, target_flags));
 }
 
 export { _llvm_text_assemble_argv, llvm_assemble };

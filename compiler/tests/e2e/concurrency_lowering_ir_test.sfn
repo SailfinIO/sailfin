@@ -115,6 +115,38 @@ test "concurrency-ir: spawn capturing OwnedBuf uses by-value env + owned_buf_ctx
     assert contains(ir, "sfn_spawn_int_owned_buf_ctx");
 }
 
+// SFN-381: the same fixture with a *mutable* first-capture OwnedBuf must be
+// REFUSED, never silently miscompiled. A `let mut buf` binding encodes the
+// capture as `ref_mut` (an 8-byte `%OwnedBuf*` slot pointer at env offset 0),
+// but the `owned_buf` tag (set from `type_text == "OwnedBuf"` alone) would
+// select the `_owned_buf_ctx` trampoline that reads offset 0 as a by-value
+// 32-byte OwnedBuf — a pointer/aggregate size collision (corruption / UAF).
+// The lowering emits a `[fatal]` diagnostic and writes no `.ll`. `_emit_llvm`
+// is not reused here because it discards stderr; this drives the compile
+// directly to assert on the diagnostic text.
+test "concurrency-ir: spawn capturing mutable OwnedBuf is rejected, not miscompiled (SFN-381)" ![io] {
+    let dir = _scratch_dir();
+    let src = dir + "/sfn-concurrency-ir-spawn_owned_buf_mut.sfn";
+    let ll = dir + "/sfn-concurrency-ir-spawn_owned_buf_mut.ll";
+    let source = "struct OwnedBuf {\n    ptr_addr: int;\n    len: int;\n    cap: int;\n    arena_addr: int;\n}\n\nfn main() ![io] {\n    let mut buf: OwnedBuf = OwnedBuf { ptr_addr: 0, len: 7, cap: 8, arena_addr: 0 };\n    let f = spawn fn() -> int { return buf.len; };\n}\n";
+    fs.writeFile(src, source);
+    if fs.exists(ll) { fs.deleteFile(ll); }
+    let exit = process.run_capture([_sfn_bin(), "emit", "-o", ll, "llvm", src], _child_env());
+    let _o = process.capture_take_stdout();
+    let err = process.capture_take_stderr();
+    fs.deleteFile(src);
+    let ll_exists = fs.exists(ll);
+    if ll_exists { fs.deleteFile(ll); }
+    // Refused: non-zero exit and no `.ll` written (fail-closed).
+    assert exit != 0;
+    assert ! ll_exists;
+    // Fatal diagnostic names the offending mutable OwnedBuf capture and cites
+    // SFN-381 so the user sees why the build aborted.
+    assert contains(err, "[fatal]");
+    assert contains(err, "OwnedBuf");
+    assert contains(err, "SFN-381");
+}
+
 // parallel [<lambda>, ...] → a single sfn_parallel fan-out/join call (#1474).
 // Each task's lifted-lambda closure pair `{i8*, i8*}` is unpacked (extractvalue)
 // into an (fn_ptr, ctx) i64 pair and handed to the runtime combinator, which

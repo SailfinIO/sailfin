@@ -1,0 +1,56 @@
+// Unit tests for the SFEP-0023 §4.2 `is_decorator` metadata channel:
+// that the bit derived from a staged `.sfn-asm` artifact
+// (`@decorator` marker + Tier 1 shape `(string[], string) -> void`)
+// survives the artifact parse into the `ImportSymbolTable`.
+//
+// This guards the two `is_decorator` drop sites that once reset the bit
+// to false during aggregation (the per-batch merge and
+// `localize_import_symbols_for_program`) — a plain unit test on the
+// resolver alone bypasses this path by synthesizing the table directly.
+//
+// Imports are deliberately limited to the loader and `effect_imports`
+// (a leaf) so the test binary reaches `string_utils` only through the
+// native-IR parser graph — a single path, avoiding the duplicate-symbol
+// diamond the `typecheck_import_loader.sfn` header warns about.
+import { interfaces_from_native_artifact } from "../../src/typecheck_import_loader";
+
+// Assemble a `.sfn-asm` function block. `decorator_lines` and
+// `param_lines` are pre-joined artifact directives so a caller can vary
+// the marker and the parameter shape independently.
+fn _artifact(header: string, decorator_lines: string, return_line: string, param_lines: string) -> string {
+    let mut text = ".module m\n";
+    if decorator_lines.length > 0 { text = text + decorator_lines + "\n"; }
+    text = text + header + "\n";
+    text = text + return_line + "\n";
+    text = text + ".meta effects io\n";
+    if param_lines.length > 0 { text = text + param_lines + "\n"; }
+    text = text + ".endfn\n";
+    return text;
+}
+
+test "is_decorator channel: well-formed @decorator export surfaces is_decorator=true" {
+    let text = _artifact(".fn logExecution(args: string[], fn_name: string) -> void ![io]", ".decorator @decorator", ".meta return void", ".param args: string[]\n.param fn_name: string");
+    let parse = interfaces_from_native_artifact(text);
+    assert parse.function_effects.functions.length == 1;
+    assert parse.function_effects.functions[0].name == "logExecution";
+    assert parse.function_effects.functions[0].is_decorator;
+}
+
+test "is_decorator channel: a plain imported function is not a decorator" {
+    let text = _artifact(".fn helper(x: string) -> void ![io]", "", ".meta return void", ".param x: string");
+    let parse = interfaces_from_native_artifact(text);
+    assert parse.function_effects.functions.length == 1;
+    assert parse.function_effects.functions[0].name == "helper";
+    assert ! parse.function_effects.functions[0].is_decorator;
+}
+
+test "is_decorator channel: @decorator with the wrong Tier 1 shape is rejected" {
+    // Marked `@decorator` but the contract shape is `(string) -> void`,
+    // not `(string[], string) -> void`; the loader must not mark it, so
+    // the use site later resolves it as E0701 rather than silently
+    // accepting a mis-typed hook.
+    let text = _artifact(".fn mishaped(fn_name: string) -> void ![io]", ".decorator @decorator", ".meta return void", ".param fn_name: string");
+    let parse = interfaces_from_native_artifact(text);
+    assert parse.function_effects.functions.length == 1;
+    assert ! parse.function_effects.functions[0].is_decorator;
+}

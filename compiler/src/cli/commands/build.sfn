@@ -48,7 +48,7 @@ import {
 import { _do_determinism_check } from "../../build/determinism";
 import { _clang_link_multi } from "../../build/link";
 import { _dirname, _ensure_dir } from "../../build/paths";
-import { _runtime_bundle_exists } from "../../build/runtime_objs";
+import { _runtime_bundle_exists, clean_runtime_object_cache } from "../../build/runtime_objs";
 import { cache_root, merge_cache_stats, resolve_build_cache_config } from "../../build_cache";
 import { emit_compiler_build_stamp_if_applicable } from "../../build_stamp";
 import {
@@ -416,6 +416,22 @@ fn run(matches: Matches, ctx: CliContext) -> int ![clock, io, net] {
     let mut build_shared_cache_root: string = "";
     if cache_config.enabled {
         build_shared_cache_root = cache_root(cache_config.capsule_name);
+    }
+    // SFN-14: force runtime objects to recompile from scratch on `--clean`.
+    // `cache_clean` (`build_cache.sfn`) wipes only the module cache root;
+    // the runtime object cache has two tiers that both survive it — the
+    // work-dir-local `.o`/`.key`/`.ll` under `sailfin_cache_dir`, and (since
+    // #1096) the shared content-addressed tier under
+    // `build_shared_cache_root`. Remove the local artifacts AND disable the
+    // shared tier for THIS build, so neither re-serves the objects the local
+    // wipe just cleared (a shared re-fetch would otherwise re-materialize the
+    // local sidecars and count as a cache hit, masking the clean). Scope is
+    // this invocation only — disabling the shared root mirrors `--no-cache`
+    // and leaves the shared store intact for other work-dirs. `-O2` matches
+    // the opt level `_clang_link_multi` compiles the runtime objects with.
+    if clean_flag {
+        build_shared_cache_root = "";
+        clean_runtime_object_cache(build_runtime_caps, sailfin_cache_dir, "-O2");
     }
     let link_result = _clang_link_multi(all_lls, exe_path, runtime_root, build_runtime_caps, binary_dir, sailfin_cache_dir, build_shared_cache_root);
     let rc = link_result.rc;

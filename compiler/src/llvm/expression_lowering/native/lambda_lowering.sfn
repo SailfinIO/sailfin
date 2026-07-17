@@ -239,6 +239,25 @@ fn closure_pair_fatal_mutable_marker(lambda_id: int, capture_name: string) -> st
         + ">";
 }
 
+// Marker for refusing IR emission on a spawn/parallel task lambda whose FIRST
+// capture is a *mutable* `OwnedBuf` (SFN-381). The `owned_buf` gate below sets
+// the `owned_buf` tag from `type_text == "OwnedBuf"` alone, which selects the
+// `_owned_buf_ctx` trampoline family — that trampoline reads env offset 0 as a
+// by-value 32-byte `OwnedBuf`. But a mutable capture lowers by reference
+// (`ref_mut`), so the env field is an 8-byte `%OwnedBuf*` slot pointer. The two
+// ABIs collide (pointer/aggregate size mismatch → corruption / UAF, a
+// #1205-class hazard). Correct by-reference-across-thread lowering is not yet
+// implemented (it also needs to escape the mutable slot off the spawning frame),
+// so the combination is rejected rather than silently miscompiled. The lowering
+// side recognises this prefix and pushes a `llvm lowering [fatal]:` diagnostic
+// naming the offender — the build then refuses to write IR.
+fn closure_pair_fatal_owned_buf_mut_marker(lambda_id: int, capture_name: string) -> string {
+    return "<closure_pair_fatal_owned_buf_mut lambda_id=" + number_to_string(lambda_id)
+        + " name="
+        + capture_name
+        + ">";
+}
+
 // Symbol name for the lifted top-level function. Stable across
 // runs — drives the LLVM `define @sfn_lambda_<N>` symbol.
 fn lifted_function_name(lambda_id: int) -> string {
@@ -1037,12 +1056,29 @@ fn _rewrite_lambda(ctx: LiftContext, lambda_in: Expression, owned_env: boolean) 
     // (env-container free only, status quo) rather than reading the wrong
     // 32 bytes.
     let mut owned_buf: boolean = false;
+    let mut fatal_owned_buf_mut: boolean = false;
     if owned_env {
         if record.captures.length > 0 {
-            if record.captures[0].type_text == "OwnedBuf" { owned_buf = true; }
+            if record.captures[0].type_text == "OwnedBuf" {
+                // SFN-381: a *mutable* first-capture OwnedBuf across a
+                // spawn/parallel boundary encodes as `ref_mut` (an 8-byte
+                // `%OwnedBuf*` slot pointer), but the `owned_buf` tag selects
+                // the `_owned_buf_ctx` trampoline that reads env offset 0 as a
+                // by-value 32-byte OwnedBuf — an ABI/size collision. Refuse it
+                // rather than miscompile; the immutable case keeps the by-value
+                // owned_buf fast-path (#1476).
+                if record.captures[0].mutable { fatal_owned_buf_mut = true; } else {
+                    owned_buf = true;
+                }
+            }
         }
     }
-    let marker_text = closure_pair_env_alloc_marker(lambda_id, _encode_captures(record.captures), owned_env, owned_buf);
+    let mut marker_text: string = "";
+    if fatal_owned_buf_mut {
+        marker_text = closure_pair_fatal_owned_buf_mut_marker(lambda_id, record.captures[0].name);
+    } else {
+        marker_text = closure_pair_env_alloc_marker(lambda_id, _encode_captures(record.captures), owned_env, owned_buf);
+    }
     return ExpressionRewriteResult {
         ctx: new_ctx,
         expression: Expression.Raw { text: marker_text, span: null }
@@ -1356,6 +1392,7 @@ export {
     closure_env_load_prologue_marker,
     closure_pair_env_alloc_marker,
     closure_pair_fatal_mutable_marker,
+    closure_pair_fatal_owned_buf_mut_marker,
     closure_pair_marker,
     closure_sentinel_type_text,
     lift_non_capturing_lambdas,

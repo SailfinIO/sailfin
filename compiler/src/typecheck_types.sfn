@@ -87,6 +87,11 @@ struct SymbolEntry {
     // `spawn_future_kind` produces), so `check_channel_send` can enforce
     // element-type on `ch.send(v)` (#1942). Empty for every other symbol.
     element_kind: string;
+    // For a `variable`/`parameter` bound with an explicit primitive type
+    // annotation: the normalized closed primitive kind ("string" | "int" |
+    // "float" | "boolean"), or "" for anything compound/unannotated/user-typed.
+    // Fail-open sentinel "" — a use-site check must stay silent on "" (SFN-385).
+    declared_prim: string;
 }
 
 struct SymbolCollectionResult {
@@ -241,6 +246,115 @@ fn check_bare_fn_type_annotation(annotation: TypeAnnotation?, anchor_name: strin
     if annotation == null { return []; }
     if !_is_bare_fn_type_annotation(annotation.text) { return []; }
     return [make_bare_fn_type_diagnostic(annotation.text, token_from_name(anchor_name, anchor_span))];
+}
+
+// E0830: a malformed array-type spelling. Canonical Sailfin arrays are the
+// `T[]` suffix form; no valid type annotation begins with `[`, so a `[`-leading
+// spelling is always malformed. Steers to the canonical `T[]` form —
+// `[]string` -> `string[]`, `[int]` -> `int[]` (SFN-385).
+fn make_malformed_array_annotation_diagnostic(type_text: string, suggested: string, anchor: Token?) -> Diagnostic {
+    let bare = trim_text(type_text);
+    let mut fix_message: string = "Sailfin arrays are written `T[]` (element type followed by `[]`)";
+    if suggested.length > 0 { fix_message = "write it as `" + suggested + "`"; }
+    let fix = FixSuggestion { message: fix_message, edits: [] };
+    return Diagnostic {
+        code: "E0830",
+        severity: "error",
+        message: "malformed array type `" + bare
+            + "`; Sailfin arrays are written `T[]`",
+        file_path: "",
+        primary: anchor,
+        suggestion: fix
+    };
+}
+
+// Reject a malformed array-type spelling in any position that accepts a type
+// annotation. Fires only when the (trimmed) annotation begins with `[` — no
+// canonical Sailfin type spelling does, so this cannot flag a valid type. The
+// suggested fix-it reconstructs the canonical `T[]` form from `[]T` or `[T]`.
+fn check_malformed_array_annotation(annotation: TypeAnnotation?, anchor_name: string, anchor_span: SourceSpan?) -> Diagnostic[] {
+    if annotation == null { return []; }
+    let trimmed = trim_text(annotation.text);
+    if !starts_with(trimmed, "[") { return []; }
+    let mut inner: string = "";
+    if starts_with(trimmed, "[]") {
+        inner = trim_text(slice_text(trimmed, 2, trimmed.length));
+    } else if ends_with(trimmed, "]") {
+        inner = trim_text(slice_text(trimmed, 1, trimmed.length - 1));
+    }
+    let mut suggested: string = "";
+    if inner.length > 0 { suggested = inner + "[]"; }
+    return [make_malformed_array_annotation_diagnostic(annotation.text, suggested, token_from_name(anchor_name, anchor_span))];
+}
+
+// SFN-385: the closed set of genuine method-call forms per primitive receiver —
+// names the lowerer dispatches via a runtime *method descriptor* rather than by
+// fusing the receiver into a free function. Source of truth is the descriptor
+// table in `llvm/runtime_helpers.sfn` (string descriptors: `substring`,
+// `substring_unchecked`, `grapheme_at`); ported by name only (no `llvm/` import)
+// so typecheck can consult it. Every other valid "method" resolves through
+// free-function fusion, handled by the caller's callable gate — so this table
+// stays small on purpose. When runtime_helpers.sfn adds a primitive method
+// descriptor, mirror the name here (the same mirror-on-add contract
+// `channel_element_kind` carries). Numeric/boolean primitives have no method
+// descriptors (their operations are operators / free functions).
+fn primitive_has_method(prim: string, name: string) -> boolean {
+    if strings_equal(prim, "string") {
+        if strings_equal(name, "substring") { return true; }
+        if strings_equal(name, "substring_unchecked") { return true; }
+        if strings_equal(name, "grapheme_at") { return true; }
+        return false;
+    }
+    return false;
+}
+
+// E0012: a method call on a primitive receiver that resolves to no primitive
+// method and no in-scope free function. The fix-it steers `string` uppercase /
+// lowercase attempts to the free functions `ascii_uppercase` / `ascii_lowercase`
+// (`sfn/strings`); otherwise it points at the free-function form (SFN-385).
+fn make_unknown_primitive_method_diagnostic(prim: string, member: string, anchor: Token?) -> Diagnostic {
+    let mut fix_message: string = "call it as a free function `" + member
+        + "(<receiver>, ...)` if one exists, or check the spelling";
+    if strings_equal(prim, "string") {
+        if strings_equal(member, "to_uppercase") {
+            fix_message = "`string` has no `to_uppercase` method; import and call the free function `ascii_uppercase(<receiver>)` from `sfn/strings`";
+        } else if strings_equal(member, "to_lowercase") {
+            fix_message = "`string` has no `to_lowercase` method; import and call the free function `ascii_lowercase(<receiver>)` from `sfn/strings`";
+        }
+    }
+    let fix = FixSuggestion { message: fix_message, edits: [] };
+    return Diagnostic {
+        code: "E0012",
+        severity: "error",
+        message: "method `" + member + "` does not exist on `" + prim + "`; `"
+            + prim
+            + "` has no such method and no function `"
+            + member
+            + "` is in scope",
+        file_path: "",
+        primary: anchor,
+        suggestion: fix
+    };
+}
+
+// E0306: arithmetic that mixes an `int` and a `float` operand. Sailfin does not
+// implicitly convert between the two; the fix-it echoes the emitter's own
+// guidance (`as float` / `as int`) so users see one voice (SFN-385).
+fn make_mixed_arithmetic_diagnostic(left_kind: string, right_kind: string, op: string, span: SourceSpan?) -> Diagnostic {
+    let fix = FixSuggestion {
+        message: "add `as float` or `as int` to one operand so both sides are the same numeric type",
+        edits: []
+    };
+    return Diagnostic {
+        code: "E0306",
+        severity: "error",
+        message: "arithmetic `" + op + "` mixes `" + left_kind + "` and `"
+            + right_kind
+            + "`; Sailfin does not implicitly convert between `int` and `float`",
+        file_path: "",
+        primary: token_from_name(op, span),
+        suggestion: fix
+    };
 }
 
 // -------------------------------------------------------------------
@@ -497,6 +611,7 @@ fn check_struct_fields(fields: FieldDeclaration[]) -> Diagnostic[] {
             diagnostics.push(make_duplicate_symbol_diagnostic(name, "struct field", token_from_name(name, field.name_span)));
         } else { seen.push(name); }
         diagnostics = diagnostics.concat(check_bare_fn_type_annotation(field.type_annotation, name, field.name_span));
+        diagnostics = diagnostics.concat(check_malformed_array_annotation(field.type_annotation, name, field.name_span));
         diagnostics = diagnostics.concat(check_intersection_value_type_annotation(field.type_annotation, name, field.name_span));
         _fi += 1;
     }
@@ -972,6 +1087,55 @@ fn channel_element_kind(type_text: string) -> string? {
     return resolved;
 }
 
+// The normalized closed primitive kind an explicit type annotation denotes,
+// or "" for anything compound (array `T[]`, optional `T?`, generic `<...>`,
+// pointer `*`, fn-type, spaced/qualified) or any non-primitive/user type. The
+// "" sentinel is fail-open: a use-site check (SFN-385 unknown-method /
+// mixed-arithmetic) must never fire on it. Integer widths collapse to "int"
+// and float widths to "float", matching `numeric_type_kind`'s granularity.
+fn classify_declared_primitive(annotation: string) -> string {
+    let trimmed = trim_text(annotation);
+    if trimmed.length == 0 { return ""; }
+    // Any compound-type punctuation or internal space disqualifies: arrays
+    // (`[`/`]`), optionals (`?`), generics (`<`/`>`), pointers (`*`),
+    // fn-types (`(`), qualified/spaced spellings. Only a bare primitive word
+    // survives to the closed tables below.
+    let mut i: int = 0;
+    loop {
+        if i >= trimmed.length { break; }
+        let ch = trimmed[i];
+        if strings_equal(ch, "[") { return ""; }
+        if strings_equal(ch, "]") { return ""; }
+        if strings_equal(ch, "?") { return ""; }
+        if strings_equal(ch, "<") { return ""; }
+        if strings_equal(ch, ">") { return ""; }
+        if strings_equal(ch, "*") { return ""; }
+        if strings_equal(ch, "(") { return ""; }
+        if strings_equal(ch, " ") { return ""; }
+        i += 1;
+    }
+    if strings_equal(trimmed, "string") { return "string"; }
+    if strings_equal(trimmed, "SfnString") { return "string"; }
+    if strings_equal(trimmed, "int") { return "int"; }
+    if strings_equal(trimmed, "i64") { return "int"; }
+    if strings_equal(trimmed, "i32") { return "int"; }
+    if strings_equal(trimmed, "i16") { return "int"; }
+    if strings_equal(trimmed, "i8") { return "int"; }
+    if strings_equal(trimmed, "u64") { return "int"; }
+    if strings_equal(trimmed, "u32") { return "int"; }
+    if strings_equal(trimmed, "u16") { return "int"; }
+    if strings_equal(trimmed, "u8") { return "int"; }
+    if strings_equal(trimmed, "usize") { return "int"; }
+    if strings_equal(trimmed, "isize") { return "int"; }
+    if strings_equal(trimmed, "float") { return "float"; }
+    if strings_equal(trimmed, "f64") { return "float"; }
+    if strings_equal(trimmed, "f32") { return "float"; }
+    if strings_equal(trimmed, "number") { return "float"; }
+    if strings_equal(trimmed, "boolean") { return "boolean"; }
+    if strings_equal(trimmed, "bool") { return "boolean"; }
+    return "";
+}
+
 // True when `type_text` names one of the six future types.
 fn type_is_future(type_text: string) -> boolean {
     return future_element_kind(type_text) != null;
@@ -1192,6 +1356,7 @@ fn check_enum_variants(variants: EnumVariant[]) -> Diagnostic[] {
             if _evf >= variant.fields.length { break; }
             let field = variant.fields[_evf];
             diagnostics = diagnostics.concat(check_bare_fn_type_annotation(field.type_annotation, field.name, field.name_span));
+            diagnostics = diagnostics.concat(check_malformed_array_annotation(field.type_annotation, field.name, field.name_span));
             diagnostics = diagnostics.concat(check_intersection_value_type_annotation(field.type_annotation, field.name, field.name_span));
             _evf += 1;
         }
@@ -1233,10 +1398,12 @@ fn check_function_signature(signature: FunctionSignature, interfaces: Statement[
         if _pi >= signature.parameters.length { break; }
         let parameter = signature.parameters[_pi];
         diagnostics = diagnostics.concat(check_bare_fn_type_annotation(parameter.type_annotation, parameter.name, parameter.span));
+        diagnostics = diagnostics.concat(check_malformed_array_annotation(parameter.type_annotation, parameter.name, parameter.span));
         diagnostics = diagnostics.concat(check_intersection_value_type_annotation(parameter.type_annotation, parameter.name, parameter.span));
         _pi += 1;
     }
     diagnostics = diagnostics.concat(check_bare_fn_type_annotation(signature.return_type, signature.name, signature.name_span));
+    diagnostics = diagnostics.concat(check_malformed_array_annotation(signature.return_type, signature.name, signature.name_span));
     diagnostics = diagnostics.concat(check_intersection_value_type_annotation(signature.return_type, signature.name, signature.name_span));
     return diagnostics;
 }
@@ -2075,7 +2242,7 @@ fn check_type_parameters(type_parameters: TypeParameter[], interfaces: Statement
 // compiler's own LLVM lowering uses the pattern e.g.
 // `compiler/src/llvm/lowering/instructions_loops.sfn:492,597`). Other kinds
 // (function/struct/enum/interface/type/test) keep the duplicate diagnostic.
-fn register_local_symbol(bindings: SymbolEntry[], name: string, kind: string, span: SourceSpan?, scope_start: int, is_generic: boolean = false, is_c_abi: boolean = false, element_kind: string = "") -> ScopeResult {
+fn register_local_symbol(bindings: SymbolEntry[], name: string, kind: string, span: SourceSpan?, scope_start: int, is_generic: boolean = false, is_c_abi: boolean = false, element_kind: string = "", declared_prim: string = "") -> ScopeResult {
     if !strings_equal(kind, "variable") {
         if has_symbol_in_range(bindings, name, scope_start) {
             return ScopeResult {
@@ -2085,7 +2252,7 @@ fn register_local_symbol(bindings: SymbolEntry[], name: string, kind: string, sp
         }
     }
 
-    let updated = append_symbol(bindings, name, kind, span, is_generic, is_c_abi, element_kind);
+    let updated = append_symbol(bindings, name, kind, span, is_generic, is_c_abi, element_kind, declared_prim);
     return ScopeResult { bindings: updated, diagnostics: [] };
 }
 
@@ -2103,10 +2270,10 @@ fn register_symbol(name: string, kind: string, span: SourceSpan?, existing: Symb
     };
 }
 
-fn append_symbol(symbols: SymbolEntry[], name: string, kind: string, span: SourceSpan?, is_generic: boolean = false, is_c_abi: boolean = false, element_kind: string = "") -> SymbolEntry[] {
+fn append_symbol(symbols: SymbolEntry[], name: string, kind: string, span: SourceSpan?, is_generic: boolean = false, is_c_abi: boolean = false, element_kind: string = "", declared_prim: string = "") -> SymbolEntry[] {
     let mut updated: SymbolEntry[] = clone_bindings(symbols);
     updated.push(SymbolEntry {
-        name: name, kind: kind, span: span, is_generic: is_generic, is_c_abi: is_c_abi, element_kind: element_kind
+        name: name, kind: kind, span: span, is_generic: is_generic, is_c_abi: is_c_abi, element_kind: element_kind, declared_prim: declared_prim
     });
     return updated;
 }

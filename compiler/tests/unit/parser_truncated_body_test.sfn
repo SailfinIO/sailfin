@@ -1,0 +1,31 @@
+// Regression coverage for SFN-384: `parse_program` must reject a
+// function body that opens with `{` but reaches EOF before its closing
+// `}`, yielding a top-level `Statement.Unknown` carrying parse code
+// `E0505` instead of silently truncating the AST. Also covers the
+// sibling malformed-`let`-name recovery (`let{`), which yields
+// `Statement.Unknown` with code `E0504`. Exercises the parser directly
+// (no `sfn check`/`sfn build` round trip) — see
+// `compiler/tests/e2e/parse_truncated_body_test.sfn` for the
+// diagnostics-envelope and build-side coverage.
+import { Block, Program, Statement } from "../../src/ast";
+import { parse_program } from "../../src/parser/mod";
+
+test "parser truncated: cut-off function body yields Unknown E0505" ![io] {
+    let program = parse_program("fn foo() {\n    let x = 1;\n");
+    assert program.statements.length >= 1;
+    let stmt = program.statements[0];
+    assert stmt.variant == "Unknown";
+    assert stmt.code == "E0505";
+}
+
+test "parser truncated: malformed let name yields Unknown E0504" ![io] {
+    let program = parse_program("let{\n");
+    let stmt = program.statements[0];
+    assert stmt.variant == "Unknown";
+    assert stmt.code == "E0504";
+}
+
+test "parser truncated: closed body with nested let stays a FunctionDeclaration" ![io] {
+    let program = parse_program("fn foo() {\n    let x = 1;\n}\n");
+    assert program.statements[0].variant == "FunctionDeclaration";
+}
