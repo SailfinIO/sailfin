@@ -1738,8 +1738,13 @@ fn _has_compiler_backend_marker(text: string) -> boolean {
 
 fn _classify_failure(cfg: Config, task: Task, grade_category: string, feedback: string, iteration: int) -> FailureAttribution {
     let explicit = _explicit_failure_category(feedback);
-    let ice = _has_compiler_ice_marker(feedback);
-    let backend = _has_compiler_backend_marker(feedback);
+    // Only the compile (`check`) and run (`sfn run`) phases put captured
+    // toolchain stdout/stderr into `feedback`; `wrong_output`, `instability`,
+    // etc. carry the model program's own output, where a marker substring would
+    // be a false positive. Restrict the compiler-owned scan to those two phases.
+    let toolchain_phase = grade_category == "compile_error" || grade_category == "runtime_error";
+    let ice = toolchain_phase && _has_compiler_ice_marker(feedback);
+    let backend = toolchain_phase && _has_compiler_backend_marker(feedback);
     // Only the run phase is reached after `check` returns 0, so a compiler-owned
     // marker here is a check-green/build-red divergence; a compile-phase marker
     // is the compiler crashing during `check` itself.
@@ -1860,6 +1865,8 @@ fn _sfn372_signatures() -> ClassificationSignature[] {
         name: "generated_program_timeout_control", grader_category: "timeout", feedback: "case 0 execution deadline expired", iteration: 1, expected_primary: "compiler_crash_hang_or_ice", expected_secondary: "", expected_track_b: "implementation_defect", compiler_owned: false, recorded_primary: "compiler_crash_hang_or_ice", provenance: "control: existing timeout attribution is unchanged by SFN-387"
     }, ClassificationSignature {
         name: "wrong_output_control", grader_category: "wrong_output", feedback: "case 0 wrong: got 7 want 12", iteration: 1, expected_primary: "ordinary_semantic_or_test_failure", expected_secondary: "", expected_track_b: "intrinsic_failure", compiler_owned: false, recorded_primary: "ordinary_semantic_or_test_failure", provenance: "control: ordinary wrong-output must not be reclassified"
+    }, ClassificationSignature {
+        name: "marker_in_program_output_control", grader_category: "wrong_output", feedback: "case 0 wrong: got LLVM ERROR: not really — printed by the program want ok", iteration: 1, expected_primary: "ordinary_semantic_or_test_failure", expected_secondary: "", expected_track_b: "intrinsic_failure", compiler_owned: false, recorded_primary: "ordinary_semantic_or_test_failure", provenance: "control: a compiler-marker substring in the model program's own output must not be reclassified as compiler-owned (wrong_output means the toolchain succeeded)"
     }];
 }
 
@@ -2944,7 +2951,7 @@ fn _reanalyze_index_summary(dir: string, filename: string) -> JsonValue ![io] {
     return object_val(["file", "total_failures", "recorded_ordinary_semantic", "recorded_ordinary_semantic_with_runtime_error"], [string_val(filename), number_val(total as float), number_val(ordinary as float), number_val(ordinary_runtime as float)]);
 }
 
-fn _reanalyze_corpus(dir: string) ![clock, io] {
+fn _reanalyze_corpus(dir: string) ![io] {
     let candidates = ["resume-anthropic-track-a-failures.json", "resume-openai-track-a-failures.json", "anthropic-track-a-failures.json", "openai-track-a-failures.json"];
     let mut recorded: JsonValue[] = [];
     let mut ci: int = 0;

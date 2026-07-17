@@ -87,6 +87,17 @@
       "corrected_track_b": "intrinsic_failure",
       "changed": false,
       "provenance": "control: ordinary wrong-output must not be reclassified"
+    },
+    {
+      "signature": "marker_in_program_output_control",
+      "grader_category": "wrong_output",
+      "compiler_owned": false,
+      "v2_6_recorded_primary": "ordinary_semantic_or_test_failure",
+      "corrected_primary": "ordinary_semantic_or_test_failure",
+      "corrected_secondary": [],
+      "corrected_track_b": "intrinsic_failure",
+      "changed": false,
+      "provenance": "control: a compiler-marker substring in the model program's own output must not be reclassified as compiler-owned (wrong_output means the toolchain succeeded)"
     }
   ],
   "changed_classifications": 3
