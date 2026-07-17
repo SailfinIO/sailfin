@@ -108,12 +108,20 @@ before_all → (before_each → test → after_each)* → after_all
 - **One hook per kind per file.** Declaring two `before_each` blocks in
   one file is a duplicate-symbol error. (Composition across imported
   files and multiple hooks per kind are planned.)
-- **A failing hook aborts the suite.** Like a failing assertion, an error
-  inside a hook aborts the test process; a `HOOK before_all` / `HOOK
-  after_all` marker is printed to stderr so the failure is attributable to
-  the hook rather than a test. The richer "mark dependent tests `fail`
-  (not `error`)" classification requires a recoverable per-test harness
-  and is not yet available.
+
+**Hook-failure classification (SFN-17).** The synthesized harness recovers
+from a failed assertion inside a test or hook instead of aborting the
+suite process, so remaining tests in the file still run:
+
+- A failing `before_each` marks each affected test `fail` with a message
+  naming the hook (`hook before_each failed: <message>`).
+- A failing `before_all` marks every test in the file `fail` (its setup
+  never completed).
+- A failing `after_each` / `after_all` is attributed to the hook, not to a
+  test, and surfaces as a `hook` event in the `--json` stream.
+
+A genuine crash (SIGSEGV / non-assertion `abort()`) is not recoverable and
+is still reported at the file level via the crash-attribution path.
 
 ---
 
@@ -131,11 +139,11 @@ output.
 
 ### Event shapes
 
-Three event kinds, schema-versioned:
+Four event kinds, schema-versioned:
 
 ```jsonc
 // First line — exactly once per run.
-{"event":"start","total":42,"schema_version":1}
+{"event":"start","total":42,"schema_version":2}
 
 // One per test, in source order.
 {"event":"test","name":"answer is 42","file":"path/to/foo_test.sfn",
@@ -149,6 +157,12 @@ Three event kinds, schema-versioned:
  "assertion":{"file":"path/to/foo_test.sfn","line":8,"col":12,
               "message":"expected x == 42, got 41"}}
 
+// One per failing lifecycle hook (SFN-17). `hook` is the kind
+// (before_all / before_each / after_each / after_all); `test` is the
+// associated test name for after_each, empty for before_all/after_all.
+{"event":"hook","hook":"after_all","test":"","status":"fail",
+ "message":"assertion failed"}
+
 // Last line — exactly once per run. The `cache` object reports the
 // per-test binary cache (see "Per-test binary cache" below).
 {"event":"summary","passed":40,"failed":1,"skipped":1,"duration_ms":1284,
@@ -160,7 +174,7 @@ Three event kinds, schema-versioned:
 | Event     | Field            | Type      | Meaning                                                         |
 |-----------|------------------|-----------|-----------------------------------------------------------------|
 | `start`   | `total`          | integer   | Count of test declarations the runner discovered up front.      |
-| `start`   | `schema_version` | integer   | Currently `1`. Bumped only on a breaking change.                |
+| `start`   | `schema_version` | integer   | Currently `2`. Bumped only on a breaking change.                |
 | `test`    | `name`           | string    | The literal `test "..."` name from source.                      |
 | `test`    | `file`           | string    | Source file path, as discovered by `sfn test`.                  |
 | `test`    | `line`           | integer   | 1-based source line of the `test` keyword.                      |
@@ -229,7 +243,7 @@ invocation and is exact.
 ### Schema version policy
 
 `schema_version` is a monotonically increasing integer attached to the
-`start` event. The current version is `1`.
+`start` event. The current version is `2`.
 
 - Adding optional fields to existing events is **not** a breaking change.
   Consumers are expected to ignore unknown fields.
