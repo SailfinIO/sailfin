@@ -1782,6 +1782,7 @@ fn _classify_failure(cfg: Config, task: Task, grade_category: string, feedback: 
         primary: primary,
         secondary: secondary,
         track_b_attribution: track_b,
+        language_denominator: denominator,
         // A marker-detected compiler-owned failure is auto-attributed with
         // confidence, so it no longer needs a human tiebreak; only the ambiguous
         // uncategorized grader buckets do.

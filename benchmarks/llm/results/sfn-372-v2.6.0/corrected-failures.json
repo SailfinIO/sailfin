@@ -1,0 +1,93 @@
+{
+  "generated_by": "sfn350 --reanalyze (frozen SFN-387 classifier)",
+  "source_corpus": "benchmarks/llm/results/sfn-372-v2.6.0",
+  "scoreable": false,
+  "raw_stderr_preserved": false,
+  "protocol_note": "v2.6.0 remains rejected and non-scoreable (PR #2395); this corrected index is audit-only. The corrected classifier is frozen here for the SFN-383 successor protocol before any paid execution.",
+  "note": "Raw per-attempt stderr was not preserved in the v2.6 corpus; corrected classifications are derived by running the frozen classifier over the documented v2.6 compiler-owned signatures. `recorded_index` reports the contaminated ordinary-semantic bucket in the preserved failure index that hid these compiler defects.",
+  "recorded_index": [
+    {
+      "file": "resume-anthropic-track-a-failures.json",
+      "total_failures": 23,
+      "recorded_ordinary_semantic": 13,
+      "recorded_ordinary_semantic_with_runtime_error": 8
+    },
+    {
+      "file": "resume-openai-track-a-failures.json",
+      "total_failures": 36,
+      "recorded_ordinary_semantic": 19,
+      "recorded_ordinary_semantic_with_runtime_error": 7
+    }
+  ],
+  "corrected_signatures": [
+    {
+      "signature": "backend_clang_link_ice",
+      "grader_category": "runtime_error",
+      "compiler_owned": true,
+      "v2_6_recorded_primary": "ordinary_semantic_or_test_failure",
+      "corrected_primary": "compiler_crash_hang_or_ice",
+      "corrected_secondary": [
+        "check_build_run_divergence"
+      ],
+      "corrected_track_b": "implementation_defect",
+      "changed": true,
+      "provenance": "SFN-372 v2.6 / PR #2395: internal compiler error (ICE): backend clang link failed"
+    },
+    {
+      "signature": "lowerer_fatal_during_check",
+      "grader_category": "compile_error",
+      "compiler_owned": true,
+      "v2_6_recorded_primary": "invented_syntax_or_api",
+      "corrected_primary": "compiler_crash_hang_or_ice",
+      "corrected_secondary": [],
+      "corrected_track_b": "implementation_defect",
+      "changed": true,
+      "provenance": "SFN-372 v2.6 / PR #2395: lowerer fatal"
+    },
+    {
+      "signature": "invalid_ir_check_green_build_red",
+      "grader_category": "runtime_error",
+      "compiler_owned": true,
+      "v2_6_recorded_primary": "ordinary_semantic_or_test_failure",
+      "corrected_primary": "check_build_run_divergence",
+      "corrected_secondary": [],
+      "corrected_track_b": "implementation_defect",
+      "changed": true,
+      "provenance": "SFN-372 v2.6 / PR #2395: invalid LLVM IR / unresolved callee signature after check passed"
+    },
+    {
+      "signature": "ordinary_runtime_error_control",
+      "grader_category": "runtime_error",
+      "compiler_owned": false,
+      "v2_6_recorded_primary": "ordinary_semantic_or_test_failure",
+      "corrected_primary": "ordinary_semantic_or_test_failure",
+      "corrected_secondary": [],
+      "corrected_track_b": "intrinsic_failure",
+      "changed": false,
+      "provenance": "control: ordinary generated-program runtime failure must not be reclassified"
+    },
+    {
+      "signature": "generated_program_timeout_control",
+      "grader_category": "timeout",
+      "compiler_owned": false,
+      "v2_6_recorded_primary": "compiler_crash_hang_or_ice",
+      "corrected_primary": "compiler_crash_hang_or_ice",
+      "corrected_secondary": [],
+      "corrected_track_b": "implementation_defect",
+      "changed": false,
+      "provenance": "control: existing timeout attribution is unchanged by SFN-387"
+    },
+    {
+      "signature": "wrong_output_control",
+      "grader_category": "wrong_output",
+      "compiler_owned": false,
+      "v2_6_recorded_primary": "ordinary_semantic_or_test_failure",
+      "corrected_primary": "ordinary_semantic_or_test_failure",
+      "corrected_secondary": [],
+      "corrected_track_b": "intrinsic_failure",
+      "changed": false,
+      "provenance": "control: ordinary wrong-output must not be reclassified"
+    }
+  ],
+  "changed_classifications": 3
+}
