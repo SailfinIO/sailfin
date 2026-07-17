@@ -1,0 +1,117 @@
+// End-to-end test for SFN-14: `sfn build --clean` must also wipe the
+// per-work-dir runtime object cache.
+//
+// `cache_clean` (`build_cache.sfn`) removes only the content-addressed
+// cache root (`cache_root()` -> `build/cache/<schema>`). The runtime
+// object `.o` + content-key `.key` sidecars live in a DIFFERENT location —
+// the build work-dir (`<work-dir>/sailfin/`) — so before the fix a
+// `--clean` build still served every runtime object from the surviving
+// work-dir-local cache (`_runtime_obj_cache_hit` trusts the local sidecar
+// before any shared lookup). This pins the contract that a `--clean`
+// rebuild in a WARM work-dir recompiles the runtime objects (cache miss)
+// instead of reusing them.
+//
+// Discriminating sequence, all in ONE work-dir:
+//   A. cold build   -> compiles + caches the runtime objects locally.
+//   B. warm rebuild -> local cache hits: the `[cache]` summary reports
+//                      misses=0 (confirms the local cache is warm).
+//   C. `--clean`    -> SFN-14 wipes the local `.o`/`.key` (and `cache_clean`
+//      rebuild         wipes the shared root), so the runtime objects
+//                      recompile: the summary must NOT report misses=0.
+// Without the fix, step C's local sidecars survive and it reports
+// misses=0, so this test fails.
+//
+// Assert on the captured `[cache]` summary with `sfn/strings` predicates —
+// the `sfn/test` `expect_*` matchers are `![pure]` and cannot be called
+// from an `![io]` test (#842). The summary prints to stderr (#915);
+// `run_capture` splits the streams so we concatenate stdout+stderr.
+import { find } from "sfn/strings";
+
+fn _sfn_bin() -> string ![io] {
+    let configured = env.get("SAILFIN_BIN");
+    if configured.length > 0 { return configured; }
+    return "build/bin/sfn";
+}
+
+// Child env for a nested build: PATH (clang/linker), HOME, TMPDIR, the
+// inherited SAILFIN_TEST_SCRATCH, plus a dedicated shared cache root so the
+// run is genuinely cold and never touches the repo's `build/cache/` tree.
+fn _build_env(cache_dir: string) -> string[] ![io] {
+    let mut e: string[] = [];
+    let path = env.get("PATH");
+    if path.length > 0 { e.push("PATH=" + path); }
+    let home = env.get("HOME");
+    if home.length > 0 { e.push("HOME=" + home); }
+    let tmpdir = env.get("TMPDIR");
+    if tmpdir.length > 0 { e.push("TMPDIR=" + tmpdir); }
+    let scratch = env.get("SAILFIN_TEST_SCRATCH");
+    if scratch.length > 0 { e.push("SAILFIN_TEST_SCRATCH=" + scratch); }
+    e.push("SAILFIN_BUILD_CACHE_DIR=" + cache_dir);
+    return e;
+}
+
+// A kernel-unique per-invocation root (mirrors bash `mktemp -d`). A fresh
+// root every run keeps each build's shared cache genuinely cold.
+fn _root() -> string ![io] { return fs.mkdtemp("sfn-clean-rtobj-"); }
+
+// The one-line program has no `.ll` module-cache deps of its own, so the
+// `[cache]` summary reflects only the runtime objects.
+fn _write_hello(root: string) -> string ![io] {
+    let src = root + "/hello.sfn";
+    fs.writeFile(src, "fn main() -> int {\n    return 0;\n}\n");
+    return src;
+}
+
+// Count runtime-object key sidecars directly under `<work-dir>/sailfin/`.
+// The runtime compile paths write `<cap_prefix><basename>-O2.o.key` there
+// (opt_flag is `-O2`), so a `-O2.o.key` suffix uniquely names them.
+fn _count_runtime_keys(objdir: string) -> int ![io] {
+    if !fs.exists(objdir) { return 0; }
+    let entries = fs.listDirectory(objdir);
+    let mut n: int = 0;
+    let mut i: int = 0;
+    loop {
+        if i >= entries.length { break; }
+        if find(entries[i], "-O2.o.key", 0) >= 0 { n = n + 1; }
+        i = i + 1;
+    }
+    return n;
+}
+
+test "build --clean recompiles the work-dir runtime object cache (SFN-14)" ![io] {
+    let root = _root();
+    let cache = root + "/cache";
+    let work = root + "/wd";
+    let out = root + "/hello";
+    let src = _write_hello(root);
+    let objdir = work + "/sailfin";
+
+    // A: cold build populates the work-dir-local runtime object cache.
+    let exit_a = process.run_capture([_sfn_bin(), "build", src, "-o", out, "--work-dir", work], _build_env(cache));
+    let _out_a = process.capture_take_stdout();
+    let _err_a = process.capture_take_stderr();
+    assert exit_a == 0;
+    // The cache location the fix targets must actually be populated.
+    assert _count_runtime_keys(objdir) >= 1;
+
+    // B: warm rebuild, SAME work-dir, no `--clean` -> local cache hits,
+    // so the runtime objects are NOT recompiled: misses=0.
+    let exit_b = process.run_capture([_sfn_bin(), "build", src, "-o", out, "--work-dir", work], _build_env(cache));
+    let out_b = process.capture_take_stdout();
+    let err_b = process.capture_take_stderr();
+    assert exit_b == 0;
+    let log_b = out_b + err_b;
+    assert find(log_b, "[cache]", 0) >= 0;
+    assert find(log_b, "misses=0", 0) >= 0;
+
+    // C: `--clean` rebuild, SAME work-dir -> SFN-14 wipes the local
+    // `.o`/`.key`, so the runtime objects recompile from scratch. The
+    // build must still succeed AND the summary must NOT report misses=0.
+    let exit_c = process.run_capture([_sfn_bin(), "build", src, "-o", out, "--work-dir", work, "--clean"], _build_env(cache));
+    let out_c = process.capture_take_stdout();
+    let err_c = process.capture_take_stderr();
+    assert exit_c == 0;
+    let log_c = out_c + err_c;
+    assert find(log_c, "[cache]", 0) >= 0;
+    assert find(log_c, "misses=0", 0) < 0;
+}
