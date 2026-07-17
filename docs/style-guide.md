@@ -216,6 +216,7 @@ relative to `compiler/src/`):
 | `E03xx` | Duplicate symbols / type conflicts; mixed `int`/`float` arithmetic operand reject (`E0306`, SFN-385) | `typecheck*.sfn` |
 | `E04xx` | Effect violations (`E0404` unrecognized effect root, SFEP-0017); relative-import resolution (`E0430` cannot find module, `E0431` symbol not defined in closure, #1953) | `diagnostics_render.sfn`, `effect_checker.sfn`, `typecheck_types.sfn` |
 | `E05xx`–`E06xx` | Build / check tooling; parse diagnostics `E0500` (unrecognized top-level construct), `E0501` (malformed function parameter list), `E0502` (missing variable initializer), `E0503` (missing struct field type) | `tools/check.sfn` |
+| `E07xx` | Decorator resolution (SFEP-0023): `E0701` (imported symbol is not a decorator), `E0702` (unknown decorator — not imported, not a built-in) | `decorator_resolver.sfn` |
 | `E08xx` | `Result` / `?` operator; extern C-ABI (`E0801`–`E0805`); bare function-type annotation reject (`E0826`); malformed array type spelling reject (`E0830`, SFN-385) | `typecheck_types.sfn` |
 | `E09xx` | Ownership / affine types | `ownership_checker.sfn` |
 
