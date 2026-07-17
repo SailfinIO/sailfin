@@ -1287,12 +1287,13 @@ fn collect_effects_from_expression(expression: Expression?, imports: ImportSymbo
             // call expressions (e.g. the runtime fail-call wrapper).
             let callee_trigger = _token_from_span(expression.callee.span, name);
             if name == "spawn" {
-                // Registry-driven (#1655): derive the effect from the
-                // `spawn_task` descriptor row so the checker and the
-                // registry share one source of truth (mirrors the `serve`
-                // arm below). The row carries `io` as a deliberate
-                // conservative placeholder — see runtime_helpers.sfn and
-                // the effect-transparency successor #1702.
+                // Registry-driven (#1655): derive the primitive's own effect
+                // from the `spawn_task` descriptor row. Effect-transparent
+                // (SFEP-0049): that row is now `[]`, so this appends nothing
+                // and the requirement is exactly the spawned body's effects
+                // collected above. The registry-driven append stays (not
+                // deleted) so a future scheduler-level effect on the row flows
+                // through with no arm edit.
                 required = _append_builtin_effects(required, "spawn_task", callee_trigger);
             }
             // Registry-driven bare builtins: `print(...)` / `console(...)`
@@ -1332,14 +1333,14 @@ fn collect_effects_from_expression(expression: Expression?, imports: ImportSymbo
         }
 
         // Channel send/receive: `channel_var.send(value)` and
-        // `channel_var.receive()` are concurrency I/O operations and
-        // require `![io]`. These are expressed as Member-callee calls
-        // (not dedicated AST nodes), so we check the callee's member
-        // name here. The object name is not checked — any `.send()`/
-        // `.receive()` call site is treated as a channel operation,
-        // consistent with the conservative policy used for `fs.*` (io),
-        // `http.*` (net), etc. The trigger carets the method token so
-        // the diagnostic points at the offending operation.
+        // `channel_var.receive()` are in-process concurrency operations that
+        // are effect-transparent (SFEP-0049) — the primitive requires no
+        // effect of its own; the effect is whatever flows through the
+        // argument. These are expressed as Member-callee calls (not dedicated
+        // AST nodes), so we check the callee's member name here. The object
+        // name is not checked — any `.send()`/`.receive()` call site is
+        // treated as a channel operation. The trigger carets the method token
+        // so a diagnostic (from an effectful argument) points at the operation.
         if expression.callee.variant == "Member" {
             let method = expression.callee.member;
             let mut _is_channel_op: boolean = false;

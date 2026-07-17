@@ -1116,27 +1116,29 @@ fn _rh_descriptors_08(descriptors_in: RuntimeHelperDescriptor[]) -> RuntimeHelpe
 
     // Concurrency adapters — flipped to sfn_* symbols (#1091).
     //
-    // `effects: ["io"]` (#1655): the three concurrency-primitive rows
-    // (`spawn_task`, `channel_send`, `channel_receive`) carry `io` so the
-    // effect checker's spawn/parallel/channel arms can derive their
-    // requirement from this registry — the single source of truth — instead
-    // of hardcoding the literal (mirrors the `serve` row above, #1629). The
-    // `Parallel`-node arm routes through `spawn_task` (parallel is fan-out of
-    // spawns, so its effect IS the spawn effect); deliberately NO `parallel`
-    // descriptor row is added — the paren-call `parallel(...)` of the
-    // unimplemented `sfn/sync` surface must stay fail-closed in lowering
-    // ("cannot resolve return type for call to `parallel`",
-    // `sync_rejects_unimplemented_concurrency_test.sfn`), and a descriptor
-    // row would make that call resolvable. `io` here is a deliberate
-    // CONSERVATIVE PLACEHOLDER: the v0 scheduler primitives
+    // Effect-transparent (SFEP-0049, SFN-86): the three concurrency-primitive
+    // rows (`spawn_task`, `channel_send`, `channel_receive`) carry
+    // `effects: []` — the in-process primitive contributes no effect of its
+    // own. The effect checker's spawn/parallel/channel arms already recurse
+    // into the spawned/sent body and then append this row's effects; deriving
+    // the primitive's own contribution from this registry (the single source
+    // of truth, #1655) means an empty row adds nothing, so an op over a pure
+    // body requires no effect and an op over an effectful body inherits
+    // exactly that body's effects. The v0 scheduler primitives
     // (`runtime/sfn/concurrency/channel.sfn`, `nursery.sfn`) are pure pthread
-    // mutex/condvar/MPMC queue and touch no fs/net/console/clock, so under
-    // the canonical taxonomy none actually exercises `io`. The principled end
-    // state is effect-transparency (the spawned body's own effects propagate,
-    // the primitive adds nothing), deferred to the structured-concurrency
-    // redesign (#1702, gated on #829).
+    // mutex/condvar/MPMC queue and touch no fs/net/console/clock, so under the
+    // canonical taxonomy none exercises `io` — the prior `["io"]` was a
+    // conservative placeholder, now retired. The `Parallel`-node arm routes
+    // through `spawn_task` (parallel is fan-out of spawns, so its effect IS
+    // the spawn effect); deliberately NO `parallel` descriptor row is added —
+    // the paren-call `parallel(...)` of the unimplemented `sfn/sync` surface
+    // must stay fail-closed in lowering ("cannot resolve return type for call
+    // to `parallel`", `sync_rejects_unimplemented_concurrency_test.sfn`), and
+    // a descriptor row would make that call resolvable. The join-side
+    // (`await`, nursery exit) effect semantics are out of scope here —
+    // deferred to the concurrency-maturity work (SFN-124).
     descriptors = append_runtime_helper(descriptors, RuntimeHelperDescriptor {
-        target: "spawn_task", symbol: "sfn_spawn_task", return_type: "i8*", parameter_types: ["i8*"], effects: ["io"], native_signature: "sfn_spawn_task", c_abi_return_type: null
+        target: "spawn_task", symbol: "sfn_spawn_task", return_type: "i8*", parameter_types: ["i8*"], effects: [], native_signature: "sfn_spawn_task", c_abi_return_type: null
     });
     // Channel rows match `runtime/sfn/concurrency/channel.sfn` exactly
     // (#1266): create takes (capacity: i64, elem_size: i64); send takes a
@@ -1154,10 +1156,10 @@ fn _rh_descriptors_08(descriptors_in: RuntimeHelperDescriptor[]) -> RuntimeHelpe
         target: "channel_create", symbol: "sfn_channel_create", return_type: "i8*", parameter_types: ["i64", "i64", "i64"], effects: [], native_signature: "sfn_channel_create", c_abi_return_type: null
     });
     descriptors = append_runtime_helper(descriptors, RuntimeHelperDescriptor {
-        target: "channel_send", symbol: "sfn_channel_send", return_type: "i64", parameter_types: ["i8*", "i8*"], effects: ["io"], native_signature: "sfn_channel_send", c_abi_return_type: null
+        target: "channel_send", symbol: "sfn_channel_send", return_type: "i64", parameter_types: ["i8*", "i8*"], effects: [], native_signature: "sfn_channel_send", c_abi_return_type: null
     });
     descriptors = append_runtime_helper(descriptors, RuntimeHelperDescriptor {
-        target: "channel_receive", symbol: "sfn_channel_recv", return_type: "i8*", parameter_types: ["i8*"], effects: ["io"], native_signature: "sfn_channel_recv", c_abi_return_type: null
+        target: "channel_receive", symbol: "sfn_channel_recv", return_type: "i8*", parameter_types: ["i8*"], effects: [], native_signature: "sfn_channel_recv", c_abi_return_type: null
     });
     descriptors = append_runtime_helper(descriptors, RuntimeHelperDescriptor {
         target: "channel_close", symbol: "sfn_channel_close", return_type: "void", parameter_types: ["i8*"], effects: [], native_signature: "sfn_channel_close", c_abi_return_type: null
