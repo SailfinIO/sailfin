@@ -333,6 +333,27 @@ fn try_lower_channel_method(member_target: MemberAccessParse, argument_entries: 
         recv_result_type = recv_trunc_to;
         recv_result_value = narrowed;
     }
+    // #1944: a `fn(...)`-typed receive target expects the `{i8*, i8*}` closure
+    // pair, but the ring stored only the pointer-width first word (`fn_ptr`)
+    // of a non-capturing lambda's `{fn_ptr, null}` pair (the 8-byte `elem_size`
+    // a bare `channel()` passes). Reconstruct `{fn_ptr, null}` from the loaded
+    // `i8*` so the store into the local's pair slot is a clean pair-to-pair
+    // store and `try_resolve_closure_callee` dispatches it with a null env —
+    // exactly the shape a non-capturing lambda literal carries. Without this
+    // the pair slot is zero-filled and dispatch calls a null pointer.
+    if starts_with(expected_type, "{i8*, i8*}") {
+        let pair_lo = format_temp_name(ch_temp);
+        ch_temp += 1;
+        ch_lines.push("  " + pair_lo + " = insertvalue {i8*, i8*} undef, i8* "
+            + recv_result_value
+            + ", 0");
+        let pair_full = format_temp_name(ch_temp);
+        ch_temp += 1;
+        ch_lines.push("  " + pair_full + " = insertvalue {i8*, i8*} " + pair_lo
+            + ", i8* null, 1");
+        recv_result_type = "{i8*, i8*}";
+        recv_result_value = pair_full;
+    }
     let recv_operand = LLVMOperand {
         llvm_type: recv_result_type,
         value: recv_result_value
@@ -1018,6 +1039,31 @@ fn lower_serve_expression(stripped: string, bindings: ParameterBinding[], locals
     };
 }
 
+// True when `remainder` is a `<base>.receive()` call whose `<base>` resolves
+// to a channel binding (#1944). `await` over such a receive is a degenerate
+// pass-through: a channel receive already blocks synchronously, so there is no
+// thread-backed future to join — unlike `await spawn(...)`, which routes
+// through `sfn_await_*` on a `%SailfinFuture*` pointer.
+fn _is_channel_receive_remainder(remainder: string, bindings: ParameterBinding[], locals: LocalBinding[]) -> boolean {
+    let trimmed = trim_text(remainder);
+    let recv_pos = index_of(trimmed, ".receive()");
+    if recv_pos < 0 { return false; }
+    if recv_pos + 10 != trimmed.length { return false; }
+    let base = trim_text(substring(trimmed, 0, recv_pos));
+    if !is_simple_identifier(base) { return false; }
+    let mut base_annotation: string = "";
+    let base_local = find_local_binding(locals, base);
+    if base_local != null { base_annotation = base_local.type_annotation; } else {
+        let base_parameter = find_parameter_binding(bindings, base);
+        if base_parameter != null {
+            base_annotation = base_parameter.type_annotation;
+        }
+    }
+    if base_annotation == "channel" { return true; }
+    if starts_with(base_annotation, "channel:") { return true; }
+    return false;
+}
+
 // `await <expr>` joins a thread-backed future and extracts its value.
 // Extracted sibling of `lower_expression` for the operand-present case
 // (the `await` prefix followed by space/tab/`(`); the no-operand and
@@ -1048,6 +1094,21 @@ fn lower_await_expression(stripped: string, bindings: ParameterBinding[], locals
             lines: lowered.lines,
             temp_index: lowered.temp_index,
             operand: null,
+            diagnostics: diagnostics,
+            string_constants: lowered.string_constants
+        };
+    }
+
+    // #1944: `await ch.receive()` is degenerate — the receive already blocked
+    // synchronously, so there is no future to join. Yield the receive's value
+    // (for a `fn(...)` channel, the `{i8*, i8*}` closure pair the receive
+    // lowering reconstructed) unchanged, bypassing the `%SailfinFuture*`
+    // pointer check below that only the `spawn`-backed futures satisfy.
+    if _is_channel_receive_remainder(remainder, bindings, locals) {
+        return ExpressionResult {
+            lines: lowered.lines,
+            temp_index: lowered.temp_index,
+            operand: lowered.operand,
             diagnostics: diagnostics,
             string_constants: lowered.string_constants
         };

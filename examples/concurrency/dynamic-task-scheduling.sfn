@@ -3,17 +3,15 @@
 import { Channel, channel } from "sync";
 
 fn main() ![io] {
-    let tasks: Channel<fn() -> void> = channel();
-
-    for _ in 1..5 {
-        routine {
-            loop {
-                let task = await tasks.receive();
-                task();
-            }
-        }
-    }
+    let tasks: Channel<fn() -> void> = channel(2);
 
     tasks.send(fn() { print("Task 1 executed!"); });
     tasks.send(fn() { print("Task 2 executed!"); });
+
+    routine {
+        for _ in 0..2 {
+            let task = await tasks.receive();
+            task();
+        }
+    }
 }

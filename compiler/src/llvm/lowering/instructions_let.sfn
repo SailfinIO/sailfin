@@ -202,6 +202,62 @@ fn _base_array_element_type(base: string, locals: LocalBinding[], bindings: Para
     return elem;
 }
 
+// Extract the `fn(...)` element text from a `Channel<fn() -> void>` source
+// annotation, or "" for any non-fn element (#1944). Only a function-typed
+// element is recovered — every other `Channel<T>` keeps the bare `channel`
+// binding annotation, so this widens no existing channel behaviour. The outer
+// `>` is always the last character (the `>` inside a `->` return arrow is
+// interior), so stripping the `Channel<` prefix and the final `>` isolates the
+// element even for `fn() -> void`.
+fn _channel_annotation_fn_element(annotation: string) -> string {
+    let trimmed = trim_text(annotation);
+    if !starts_with(trimmed, "Channel<") { return ""; }
+    if trimmed.length < 9 { return ""; }
+    if substring(trimmed, trimmed.length - 1, trimmed.length) != ">" {
+        return "";
+    }
+    let inner = trim_text(substring(trimmed, 8, trimmed.length - 1));
+    if !starts_with(inner, "fn(") { return ""; }
+    return inner;
+}
+
+// Recover the `fn(...)` element text carried by a `channel:fn() -> void`
+// binding annotation (#1944), or "" when the binding is a bare `channel` or a
+// non-fn `channel:<kind>`. The mirror of `_channel_annotation_fn_element` on
+// the lowered-binding side.
+fn _channel_binding_fn_element(annotation: string) -> string {
+    if !starts_with(annotation, "channel:") { return ""; }
+    let elem = trim_text(substring(annotation, 8, annotation.length));
+    if !starts_with(elem, "fn(") { return ""; }
+    return elem;
+}
+
+// Extract the channel base identifier from an `await <base>.receive()`
+// initializer, or "" when the initializer is not that shape (#1944). Only a
+// simple-identifier base is recognised (mirroring the typecheck receiver
+// guard); a compound base fails the binding lookup at the call site anyway.
+fn _await_receive_channel_base(value: string) -> string {
+    let trimmed = trim_text(value);
+    if !starts_with(trimmed, "await ") { return ""; }
+    let rest = trim_text(substring(trimmed, 6, trimmed.length));
+    let recv_pos = index_of(rest, ".receive()");
+    if recv_pos < 0 { return ""; }
+    if recv_pos + 10 != rest.length { return ""; }
+    let base = trim_text(substring(rest, 0, recv_pos));
+    if base.length == 0 { return ""; }
+    let first = substring(base, 0, 1);
+    if !is_identifier_start_char(first) { return ""; }
+    let mut index: int = 1;
+    loop {
+        if index >= base.length { break; }
+        if !is_identifier_part_char(substring(base, index, index + 1)) {
+            return "";
+        }
+        index += 1;
+    }
+    return base;
+}
+
 fn lower_let_instruction(function: NativeFunction, instruction: NativeInstruction, bindings: ParameterBinding[], locals: LocalBinding[], allocas: string[], lines: string[], temp_index: int, next_local_id: int, next_region_id: int, functions: NativeFunction[], context: TypeContext, scope_id: string, scope_depth: int, current_label: string) -> LetLoweringResult ![io] {
     let mut diagnostics: string[] = [];
     let mut current_lines: string[] = lines;
@@ -266,6 +322,24 @@ fn lower_let_instruction(function: NativeFunction, instruction: NativeInstructio
                 effective_annotation = "int[][]";
             } else if _base_array_element_type(hof_base, current_locals, current_bindings, context) == "i64" {
                 effective_annotation = "int[]";
+            }
+        }
+    }
+    // #1944: an un-annotated `let task = await ch.receive()` on a channel of
+    // `fn(...)` adopts the channel's function-value element type as its
+    // annotation, so the local lays out as the `{i8*, i8*}` closure pair and
+    // `try_resolve_closure_callee` dispatches `task()` through the same seam a
+    // lambda-bound local uses (SFEP-0030 item 2). Gated on an empty source
+    // annotation (an explicit `let task: fn() -> void = ...` already carries
+    // it) and on the channel binding preserving a `channel:fn(...)` element,
+    // so no other channel or initializer shape is touched.
+    if trim_text(effective_annotation).length == 0 {
+        let recv_base = _await_receive_channel_base(instruction.value);
+        if recv_base.length > 0 {
+            let base_local = find_local_binding(current_locals, recv_base);
+            if base_local != null {
+                let fn_elem = _channel_binding_fn_element(base_local.type_annotation);
+                if fn_elem.length > 0 { effective_annotation = fn_elem; }
             }
         }
     }
@@ -745,7 +819,18 @@ fn lower_let_instruction(function: NativeFunction, instruction: NativeInstructio
     {
         let trimmed_init = trim_text(instruction.value);
         if starts_with(trimmed_init, "channel(") {
-            local_type_annotation = "channel";
+            // #1944: a `Channel<fn(...)>` binding preserves its function-value
+            // element as `channel:fn(...)` so an un-annotated `await
+            // ch.receive()` target can recover the `fn(...)` type for closure
+            // dispatch. `fn(...)` is pointer-width (the `{fn_ptr, null}` first
+            // word round-trips the 8-byte ring slot for a non-capturing
+            // lambda), so receive stays on the by-pointer path — the kind is
+            // not a struct, so it never opts into the full-width aggregate
+            // load. Every non-fn `Channel<T>` keeps the bare `channel` binding.
+            let fn_elem = _channel_annotation_fn_element(instruction.type_annotation);
+            if fn_elem.length > 0 {
+                local_type_annotation = "channel:" + fn_elem;
+            } else { local_type_annotation = "channel"; }
         } else {
             if starts_with(trimmed_init, "channel:") {
                 // Preserve the element kind on the binding (#1466) so the

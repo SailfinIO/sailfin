@@ -9,14 +9,42 @@
 // checker has no expression-type inferencer (#829), so live await/channel-send
 // enforcement waits on that workstream. `spawn_future_kind` mirrors
 // `llvm/type_mapping.sfn:831-905` so emit-native (#1084) agrees on the kind.
+import { Expression } from "../../src/ast";
+import { parse_program } from "../../src/parser/mod";
 import { index_of } from "../../src/string_utils";
 import {
+    await_receive_result_kind,
     await_result_type,
     check_await_operand,
     check_channel_send,
     check_spawn_kind
 } from "../../src/typecheck";
-import { future_element_kind, spawn_future_kind, type_is_future } from "../../src/typecheck_types";
+import {
+    SymbolEntry,
+    future_element_kind,
+    register_local_symbol,
+    spawn_future_kind,
+    type_is_future
+} from "../../src/typecheck_types";
+
+// Initializer of the first top-level `let` in `source` — the same
+// navigation `parser_concurrency_test.sfn::first_let_initializer` uses.
+fn _first_let_initializer(source: string) -> Expression ![io] {
+    let program = parse_program(source);
+    let stmt = program.statements[0];
+    assert stmt.variant == "VariableDeclaration";
+    let init = stmt.initializer;
+    assert init != null;
+    return init;
+}
+
+// Collapse the not-found case so the assert sites stay free of optional
+// narrowing.
+fn _receive_kind(initializer: Expression?, bindings: SymbolEntry[]) -> string {
+    let resolved = await_receive_result_kind(initializer, bindings);
+    if resolved == null { return "<no-receive-kind>"; }
+    return resolved;
+}
 
 // Collapse the not-found cases so the assert sites stay free of optional
 // narrowing.
@@ -134,4 +162,32 @@ test "channel element: kind resolved from a declared annotation" {
     // a follow-up; the resolver is ready for it).
     assert strings_equal(spawn_future_kind("int"), "int");
     assert strings_equal(spawn_future_kind("string"), "string");
+}
+
+// --- live await-result typing: `await ch.receive()` -> channel element kind
+// (#1944) ----------------------------------------------------------------
+test "await receive: result kind flows from an int channel binding" ![io] {
+    let initializer = _first_let_initializer("let task = await ch.receive();");
+    let bindings = register_local_symbol([], "ch", "variable", null, 0, false, false, "int").bindings;
+    assert strings_equal(_receive_kind(initializer, bindings), "int");
+}
+
+test "await receive: a fn-typed channel yields the coarse ptr kind" ![io] {
+    // `Channel<fn() -> void>` elements resolve through the catch-all `ptr`
+    // future kind, same as any non-scalar element type.
+    let initializer = _first_let_initializer("let task = await ch.receive();");
+    let bindings = register_local_symbol([], "ch", "variable", null, 0, false, false, "ptr").bindings;
+    assert strings_equal(_receive_kind(initializer, bindings), "ptr");
+}
+
+test "await receive: a non-await initializer has no receive kind" ![io] {
+    let initializer = _first_let_initializer("let x = 5;");
+    let bindings = register_local_symbol([], "ch", "variable", null, 0, false, false, "int").bindings;
+    assert strings_equal(_receive_kind(initializer, bindings), "<no-receive-kind>");
+}
+
+test "await receive: an unbound channel identifier has no receive kind" ![io] {
+    let initializer = _first_let_initializer("let task = await ch.receive();");
+    let empty_bindings: SymbolEntry[] = [];
+    assert strings_equal(_receive_kind(initializer, empty_bindings), "<no-receive-kind>");
 }
