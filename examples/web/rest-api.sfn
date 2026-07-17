@@ -10,7 +10,7 @@ fn handleRequest(req, res) ![io] {
 }
 
 fn main() ![io, net] {
-    serve(handleRequest, {
+    serve(handleRequest as * u8, {
         port: 3000
     });
     print("Server is running on http://localhost:3000");

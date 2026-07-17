@@ -1269,6 +1269,37 @@ fn register_raw_pattern_bindings(text: string, bindings: SymbolEntry[]) -> Symbo
     return result;
 }
 
+// SFN-29 (#1329): whether a `serve` name resolves to a user-defined or
+// imported function, in which case a `serve(...)` call site is validated
+// like an ordinary call rather than as the builtin concurrency `serve`.
+// A `function` (top-level `fn serve`) or `import` (import-specifier)
+// binding named `serve` is resolvable; the implicit prelude `serve`
+// (kind `"prelude"`) is not — matching the lowering gate, which resolves
+// against this unit's own functions/imports and never the implicit
+// prelude (`llvm/rendering_helpers.sfn::find_function_by_name_or_import`).
+//
+// `extern function` is deliberately EXCLUDED so this predicate agrees with
+// the effect checker's discriminator: `effect_checker._merge_local_functions`
+// registers only `FunctionDeclaration`s in the per-program effect table, not
+// `ExternFunctionDeclaration`s, so an `extern fn serve` takes the builtin
+// path there. Excluding it here keeps both frontend passes consistent —
+// both treat `extern fn serve` as the builtin (conservative, fail-closed).
+// Aligning `extern fn serve` as fully resolvable would require registering
+// every extern in the effect table, a broad blast radius out of scope here.
+fn _serve_resolves_to_user_fn(bindings: SymbolEntry[]) -> boolean {
+    let mut i: int = 0;
+    loop {
+        if i >= bindings.length { break; }
+        let entry = bindings[i];
+        if entry.name == "serve" {
+            if strings_equal(entry.kind, "function") { return true; }
+            if strings_equal(entry.kind, "import") { return true; }
+        }
+        i += 1;
+    }
+    return false;
+}
+
 fn walk_expression(expression: Expression?, ctx: TypeckCtx) -> Diagnostic[] {
     let bindings = ctx.bindings;
     let imports = ctx.imports;
@@ -1521,6 +1552,25 @@ fn walk_expression(expression: Expression?, ctx: TypeckCtx) -> Diagnostic[] {
     if expression.variant == "Channel" {
         if expression.capacity == null { return []; }
         return walk_expression(expression.capacity, ctx);
+    }
+    if expression.variant == "Serve" {
+        // SFN-29 (#1329): a `serve(...)` token sequence always parses to
+        // `Expression.Serve`, but a `serve` that resolves to a user-defined
+        // or imported function must be validated through the ordinary
+        // call-site argument rules — so a bare function argument trips E0808
+        // exactly as it would for any other call. This mirrors the lowering
+        // gate in `llvm/expression_lowering/native/core.sfn`, which only
+        // lowers builtin serve to `@sfn_serve` when no resolvable `serve` is
+        // in scope. The bare builtin concurrency serve keeps its permissive
+        // treatment (its handler is passed straight through to `@sfn_serve`).
+        if _serve_resolves_to_user_fn(bindings) {
+            let mut diagnostics = walk_expression(expression.handler, ctx);
+            if expression.port != null {
+                diagnostics = diagnostics.concat(walk_expression(expression.port, ctx));
+            }
+            return diagnostics;
+        }
+        return [];
     }
     // A parser-originated diagnostic node (issue #1531): the parser emitted
     // this for syntax that must fail closed (e.g. the internal-only
