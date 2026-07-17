@@ -1390,6 +1390,12 @@ fn run(matches: Matches, ctx: CliContext) -> int ![clock, io, net] {
         // (e.g. the multi-file runner) already exported the env var.
         let fail_record_path = scratch_root + "/fail.bin";
         if fs.exists(fail_record_path) { fs.deleteFile(fail_record_path); }
+        // SFN-17: the recoverable harness appends to results.log ("ab"),
+        // so clear any leftover from a prior iteration/retry before exec —
+        // otherwise stale records would double-count into this file's
+        // classification.
+        let results_log_path = scratch_root + "/results.log";
+        if fs.exists(results_log_path) { fs.deleteFile(results_log_path); }
 
         if trace_runner { print.err("test runner: exec start"); }
         let mut run_rc = process.run(_test_exec_argv(scratch_root, exe_path, update_snapshots, json_output));
@@ -1422,6 +1428,9 @@ fn run(matches: Matches, ctx: CliContext) -> int ![clock, io, net] {
             if fs.exists(fail_record_path) {
                 fs.deleteFile(fail_record_path);
             }
+            if fs.exists(results_log_path) {
+                fs.deleteFile(results_log_path);
+            }
             run_rc = process.run(_test_exec_argv(scratch_root, exe_path, update_snapshots, json_output));
         }
         if trace_runner {
@@ -1434,11 +1443,18 @@ fn run(matches: Matches, ctx: CliContext) -> int ![clock, io, net] {
         let failure = _consume_assert_failure_record(scratch_root);
         let results = _consume_test_results_log(scratch_root);
         let file_elapsed_ms = monotonic_millis() - file_start_ms;
-        // SFN-17: when the recoverable harness produced per-test records,
-        // classify from them (source of truth) instead of the fail.bin
-        // index-inference. A crash before any record falls through to the
-        // exit-code path below (results empty).
-        if results.length > 0 {
+        // SFN-17: classify from the harness's per-test records (source of
+        // truth) instead of the fail.bin index-inference — but only when
+        // the records *explain* the exit code. `@main` exits non-zero iff
+        // `sfn_test_failures() != 0`, and every failure increment writes a
+        // record, so `run_rc == 0` (clean) or a failing record present
+        // means the records are authoritative. A non-zero exit with only
+        // passing records is a hard crash (SIGSEGV / non-throw `abort()`)
+        // that bypassed `@main` after an earlier test passed — it must
+        // fall through to the file-level crash path below, not be masked
+        // as pass (#1206 / `crash_attribution_test.sfn`).
+        let results_explain = run_rc == 0 || _records_have_failure(results);
+        if results.length > 0 && results_explain {
             let packed = _emit_results_events(entries, results, failure, json_output, file_elapsed_ms as int, path);
             let res_failed = _trj_decode_failed(packed);
             if json_output {
@@ -1458,7 +1474,12 @@ fn run(matches: Matches, ctx: CliContext) -> int ![clock, io, net] {
                     suites[file_suite_index[index]].pass_count += 1;
                 }
             }
-            if res_failed > 0 && overall_rc == 0 { overall_rc = 1; }
+            // Propagate the child's real exit code (1 for a recovered
+            // assert; a signal code if a later test crashed after an
+            // earlier one already failed) rather than a synthetic 1.
+            if res_failed > 0 && overall_rc == 0 {
+                if run_rc != 0 { overall_rc = run_rc; } else { overall_rc = 1; }
+            }
             sailfin_intrinsic_runtime_arena_rewind(test_scratch_mark);
             index += 1;
             continue;
@@ -1945,6 +1966,22 @@ fn _collect_test_records(records: TestResultRecord[]) -> TestResultRecord[] {
         i += 1;
     }
     return out;
+}
+
+// SFN-17: true when any record is a failure (a `T fail` or any `H`
+// record — hook records are always failures). Used to decide whether
+// `results.log` *explains* a non-zero exit: a hard crash (SIGSEGV/abort,
+// which `setjmp` cannot catch) after a passing test leaves a non-empty
+// log with only `pass` records, and must NOT be classified as pass — it
+// falls through to the file-level crash path instead.
+fn _records_have_failure(records: TestResultRecord[]) -> boolean {
+    let mut i: int = 0;
+    loop {
+        if i >= records.length { break; }
+        if strings_equal(records[i].status, "fail") { return true; }
+        i += 1;
+    }
+    return false;
 }
 
 // SFN-17: structured per-test/hook classification from `results.log`.

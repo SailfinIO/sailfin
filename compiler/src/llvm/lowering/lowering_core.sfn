@@ -407,6 +407,9 @@ fn lower_to_llvm_lines_with_parsed_context_for_tests(native_module: NativeModule
     if !_harness_has_declare(base.lines, "sfn_exception_pop_frame") {
         harness_declares = extend_string_lines(harness_declares, ["declare void @sfn_exception_pop_frame(i8*)",]);
     }
+    if !_harness_has_declare(base.lines, "sfn_exception_reset_head") {
+        harness_declares = extend_string_lines(harness_declares, ["declare void @sfn_exception_reset_head()",]);
+    }
     if !_harness_has_declare(base.lines, "sfn_take_exception") {
         harness_declares = extend_string_lines(harness_declares, ["declare i8* @sfn_take_exception(i8*)",]);
     }
@@ -441,7 +444,7 @@ fn lower_to_llvm_lines_with_parsed_context_for_tests(native_module: NativeModule
         harness = extend_string_lines(harness, _harness_region_setup("r0", "run_r0", "caught_r0"));
         harness = extend_string_lines(harness, ["run_r0:", "  call void @sfn_test_set_phase(i32 0)", "  call void @"
             + before_all_sym
-            + "()", "  call void @sfn_exception_pop_frame(i8* %frame.i8)", "  br label %"
+            + "()", "  call void @sfn_exception_reset_head()", "  br label %"
             + next0, "caught_r0:", "  %msg.r0 = call i8* @sfn_take_exception(i8* %frame.i8)", "  %eb0 = getelementptr [1 x i8], [1 x i8]* @.trn_empty, i64 0, i64 0", "  call void @sfn_test_report_caught(i8* %eb0, i8* %msg.r0)", "  br label %skipall", "skipall:",]);
         let mut _si: int = 0;
         loop {
@@ -511,7 +514,7 @@ fn lower_to_llvm_lines_with_parsed_context_for_tests(native_module: NativeModule
                 + after_each_sym
                 + "()",]);
         }
-        harness = extend_string_lines(harness, ["  call void @sfn_exception_pop_frame(i8* %frame.i8)", "  br label %"
+        harness = extend_string_lines(harness, ["  call void @sfn_exception_reset_head()", "  br label %"
             + next_lbl, caught_lbl
             + ":", "  %msg."
             + rid
@@ -546,7 +549,7 @@ fn lower_to_llvm_lines_with_parsed_context_for_tests(native_module: NativeModule
             + rid));
         harness = extend_string_lines(harness, ["run_" + rid + ":", "  call void @sfn_test_set_phase(i32 4)", "  call void @"
             + after_all_sym
-            + "()", "  call void @sfn_exception_pop_frame(i8* %frame.i8)", "  br label %epilogue", "caught_"
+            + "()", "  call void @sfn_exception_reset_head()", "  br label %epilogue", "caught_"
             + rid
             + ":", "  %msg."
             + rid

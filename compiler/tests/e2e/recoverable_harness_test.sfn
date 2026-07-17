@@ -1,0 +1,82 @@
+// End-to-end tests for the recoverable test harness (SFN-17).
+//
+// A `sfn test --json` run continues past a failing test body, marks every
+// test under a failing `before_each` as failed, and attributes a failing
+// `after_all` to the hook rather than to any individual test. This is a
+// build-and-run e2e: the spawned `sfn test` compiles the fixture to a
+// harness binary, so the child env threads the full parent environment
+// (PATH/HOME/TMPDIR for clang + its linker; SAILFIN_TEST_SCRATCH for
+// per-invocation build-cache isolation under the parallel pool — #1333;
+// see `.claude/rules/no-bash-e2e.md`).
+//
+// NOTE: assert on captured output with `sfn/strings` predicates — the
+// `sfn/test` `expect_*` matchers are `![pure]` and cannot be called from
+// an `![io]` test (#842).
+import { find } from "sfn/strings";
+
+fn _sfn_bin() -> string ![io] {
+    let configured = env.get("SAILFIN_BIN");
+    if configured.length > 0 { return configured; }
+    return "build/bin/sfn";
+}
+
+// Inherit the full parent environment: PATH/HOME/TMPDIR (plus any macOS
+// SDK/toolchain vars) for the nested clang/linker, and SAILFIN_TEST_SCRATCH
+// for per-invocation build-cache isolation (#1333). Mirrors
+// lifecycle_hook_ordering_test.sfn.
+fn _child_env() -> string[] ![io] { return process.environ(); }
+
+struct TestRun {
+    exit: int,
+    out: string
+}
+
+// Write `src` into a fresh temp dir and run `sfn test <dir> --json`,
+// returning the exit code and combined stdout+stderr.
+fn _run_json(src: string) -> TestRun ![io] {
+    let dir = fs.mkdtemp("sfn-recoverable-");
+    fs.writeFile(dir + "/recoverable_test.sfn", src);
+    let argv: string[] = [_sfn_bin(), "test", dir, "--json", "--no-test-cache"];
+    let exit = process.run_capture(argv, _child_env());
+    let out = process.capture_take_stdout();
+    let err = process.capture_take_stderr();
+    return TestRun { exit: exit, out: out + err };
+}
+
+// ---- Test 1: a failing test does not stop later tests from running ----
+test "recoverable harness: continue after a failing test" ![io] {
+    let src = "test \"alpha passes\" {\n    assert 1 == 1;\n}\n\n"
+        + "test \"beta fails\" {\n    assert 1 == 2;\n}\n\n"
+        + "test \"gamma passes\" {\n    assert 3 == 3;\n}\n";
+    let r = _run_json(src);
+    let out = r.out;
+    assert find(out, "\"name\":\"alpha passes\"", 0) >= 0;
+    assert find(out, "\"name\":\"gamma passes\"", 0) >= 0;
+    // The key proof: gamma ran AND passed after beta failed — continuation
+    // across more than one test, not just a single retry.
+    assert find(out, "\"passed\":2,\"failed\":1,\"skipped\":0", 0) >= 0;
+}
+
+// ---- Test 2: a failing before_each fails every test it wraps ----
+test "recoverable harness: failing before_each fails each test" ![io] {
+    let src = "before_each {\n    assert 1 == 2;\n}\n\n"
+        + "test \"one\" {\n    assert 1 == 1;\n}\n\n"
+        + "test \"two\" {\n    assert 1 == 1;\n}\n";
+    let r = _run_json(src);
+    let out = r.out;
+    assert find(out, "\"passed\":0,\"failed\":2,\"skipped\":0", 0) >= 0;
+    assert find(out, "\"name\":\"one\"", 0) >= 0;
+    assert find(out, "\"name\":\"two\"", 0) >= 0;
+}
+
+// ---- Test 3: a failing after_all is attributed to the hook, not a test ----
+test "recoverable harness: failing after_all is attributed to the hook" ![io] {
+    let src = "after_all {\n    assert 1 == 2;\n}\n\n"
+        + "test \"one\" {\n    assert 1 == 1;\n}\n\n"
+        + "test \"two\" {\n    assert 2 == 2;\n}\n";
+    let r = _run_json(src);
+    let out = r.out;
+    assert find(out, "\"event\":\"hook\"", 0) >= 0;
+    assert find(out, "\"hook\":\"after_all\"", 0) >= 0;
+    assert find(out, "\"passed\":2", 0) >= 0;
+}
