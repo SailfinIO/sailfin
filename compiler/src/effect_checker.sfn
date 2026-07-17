@@ -1353,8 +1353,9 @@ fn collect_effects_from_expression(expression: Expression?, imports: ImportSymbo
                 // `channel_receive`) and derive the effect from the row. The
                 // mapping is required — passing the bare `method` to
                 // `effects_for_callee_target` would miss the exact row and
-                // namespace-union to `[]`, silently dropping the effect. The
-                // rows carry `io` as a conservative placeholder (#1702).
+                // namespace-union to `[]`. Effect-transparent (SFEP-0049):
+                // the rows are now `[]`, so a pure `ch.send(v)`/`ch.receive()`
+                // requires nothing; any effect comes from the argument walk.
                 let channel_target = "channel_" + method;
                 required = _append_builtin_effects(required, channel_target, callee_trigger);
             }
@@ -1518,18 +1519,21 @@ fn collect_effects_from_expression(expression: Expression?, imports: ImportSymbo
         return collect_effects_from_expression(expression.operand, imports);
     }
     // Concurrency frontend nodes (epic #965, issues #1079-#1082). Mirror the
-    // Call-form name handlers above so the new prefix/construct syntax carries
-    // the same effects: `spawn`/`parallel` → io, `serve` → net. Each arm also
-    // recurses into its operands/children so effectful calls nested inside a
-    // `spawn <expr>` / `await <expr>` / `channel(...)` / `parallel [...]` /
-    // `serve(...)` are still discovered (the old `"spawn("` text heuristic does
-    // not match the prefix `spawn <expr>` form). `await`/`channel` contribute
-    // no effect of their own — they only recurse.
+    // Call-form name handlers above. `serve` → [io, net]; `spawn`/`parallel`
+    // are effect-transparent (SFEP-0049) — they contribute no effect of their
+    // own. Each arm recurses into its operands/children so effectful calls
+    // nested inside a `spawn <expr>` / `await <expr>` / `channel(...)` /
+    // `parallel [...]` / `serve(...)` are discovered and propagate (the old
+    // `"spawn("` text heuristic does not match the prefix `spawn <expr>`
+    // form). `await`/`channel` likewise contribute no effect of their own —
+    // they only recurse.
     if expression.variant == "Spawn" {
         let spawn_trigger = _token_from_span(expression.span, "spawn");
         let mut required = collect_effects_from_expression(expression.operand, imports);
-        // Registry-driven (#1655): `spawn_task` row -> [io] (conservative
-        // placeholder; effect-transparency successor #1702).
+        // Registry-driven (#1655): append the `spawn_task` row's effects.
+        // Effect-transparent (SFEP-0049): the row is `[]`, so `required` is
+        // exactly the operand's effects collected above; the append stays so a
+        // future scheduler-level effect on the row flows through with no edit.
         required = _append_builtin_effects(required, "spawn_task", spawn_trigger);
         return required;
     }
@@ -1549,12 +1553,13 @@ fn collect_effects_from_expression(expression: Expression?, imports: ImportSymbo
             required = merge_requirements(required, collect_effects_from_expression(expression.tasks[task_index], imports));
             task_index += 1;
         }
-        // Registry-driven (#1655): parallel is fan-out of spawns, so derive
-        // its effect from the `spawn_task` row -> [io]. No dedicated
-        // `parallel` descriptor row exists: the paren-call `parallel(...)` of
-        // the unimplemented `sfn/sync` surface must stay fail-closed in
-        // lowering, which a row would break (conservative placeholder;
-        // effect-transparency successor #1702).
+        // Registry-driven (#1655): parallel is fan-out of spawns, so it takes
+        // its own effect from the `spawn_task` row. Effect-transparent
+        // (SFEP-0049): that row is `[]`, so `required` is exactly the union of
+        // the task bodies' effects merged above. No dedicated `parallel`
+        // descriptor row exists: the paren-call `parallel(...)` of the
+        // unimplemented `sfn/sync` surface must stay fail-closed in lowering,
+        // which a row would break; the empty-append preserves that property.
         required = _append_builtin_effects(required, "spawn_task", parallel_trigger);
         return required;
     }
