@@ -1982,27 +1982,16 @@ fn _arith_operand_span(expression: Expression?) -> SourceSpan? {
     return null;
 }
 
-// SFN-385: the numeric primitive class ("int" | "float" | "") of an arithmetic
-// operand. A numeric literal (optionally negated) classifies by its spelling; a
-// named binding classifies by its explicit annotation (`declared_prim`), but
-// only when that annotation is `int`/`float`. Everything else is the fail-open
-// "" — a member access, a call, a nested expression, or an unannotated binding
-// carries no statically-known kind, so the check stays silent on it.
+// SFN-385: the numeric primitive class ("int" | "float" | "") of a *named*
+// arithmetic operand, from its explicit annotation (`declared_prim`). Only a
+// named binding is classified: a bare numeric literal is deliberately left "",
+// because the lowerer coerces a literal against a typed sibling in an
+// order/direction-dependent way (`lower_binary_operation`, "literal-context
+// propagation is bidirectional"), so a literal operand carries no reliable
+// static mismatch. Everything else (member access, call, nested expr,
+// unannotated or non-numeric binding) is also the fail-open "".
 fn operand_numeric_class(expression: Expression?, bindings: SymbolEntry[]) -> string {
     if expression == null { return ""; }
-    if strings_equal(expression.variant, "NumberLiteral") {
-        return _conditional_number_kind(expression.value);
-    }
-    if strings_equal(expression.variant, "Unary") {
-        if strings_equal(expression.operator, "-") {
-            if expression.operand != null {
-                if strings_equal(expression.operand.variant, "NumberLiteral") {
-                    return _conditional_number_kind(expression.operand.value);
-                }
-            }
-        }
-        return "";
-    }
     if strings_equal(expression.variant, "Identifier") {
         let entry = find_symbol(bindings, expression.name);
         if entry == null { return ""; }
@@ -2015,10 +2004,15 @@ fn operand_numeric_class(expression: Expression?, bindings: SymbolEntry[]) -> st
 
 // SFN-385: reject arithmetic that mixes a proven `int` and a proven `float`
 // operand -> E0306. Fires only for the arithmetic operators (`+ - * / %`) and
-// only when both operands' numeric classes are known and differ — precisely the
-// case the lowerer fatals on ("ABI primitive mismatch: arithmetic mixes ...").
-// Any operand the checker cannot classify yields "" and suppresses the
-// diagnostic, so same-type and inference-dependent arithmetic is untouched.
+// only when BOTH operands are named bindings with known, differing numeric
+// kinds. This is the one arithmetic shape the lowerer *always* fatals on
+// ("ABI primitive mismatch"): two typed (non-literal) operands have no
+// literal-coercion escape hatch, so a differing int/float pair is a guaranteed
+// mismatch regardless of operand order. Literal-involving mixes are left "" and
+// fall through to the lowerer's own fatal — replicating their order-dependent
+// coercion rule in the frontend would risk false positives (e.g. the valid
+// `let x: float = 1; x + 2` in numeric_int_default_test.sfn), which is the
+// unsafe direction. Fail-open on anything unclassified.
 fn mixed_arithmetic_diagnostics(expression: Expression, bindings: SymbolEntry[]) -> Diagnostic[] {
     let op = expression.operator;
     let mut is_arith: boolean = false;

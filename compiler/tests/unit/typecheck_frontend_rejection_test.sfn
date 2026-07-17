@@ -99,11 +99,17 @@ test "frontend-rejection: rejects named int+float arithmetic mix (E0306)" ![io] 
     assert _has_code(diagnostics, "E0306");
 }
 
-test "frontend-rejection: rejects literal int+float arithmetic mix (E0306)" ![io] {
+// Deliberate fail-open boundary: a literal-involving mix (`3 + 2.0`) is NOT
+// caught by E0306 at check time. The lowerer coerces a literal against its
+// sibling in an order/direction-dependent way, so a frontend rule over literals
+// would risk false positives on the valid coercions; such mixes are left to the
+// lowerer's own "ABI primitive mismatch" fatal (still rejected end-to-end, just
+// not at the frontend). E0306 fires only on two typed (named) operands.
+test "frontend-rejection: literal-only int+float mix is left to the lowerer (no E0306)" ![io] {
     let source = "fn main() -> int { let c = 3 + 2.0; return 0; }";
     let program = parse_program(source);
     let diagnostics = typecheck_diagnostics(program);
-    assert _has_code(diagnostics, "E0306");
+    assert ! _has_code(diagnostics, "E0306");
 }
 
 test "frontend-rejection: accepts same-type int arithmetic" ![io] {
@@ -120,13 +126,16 @@ test "frontend-rejection: accepts mixed-width int-class arithmetic" ![io] {
     assert ! _has_code(diagnostics, "E0306");
 }
 
-// Asymmetric mix — a `float` binding on the left, an `int` literal on the
-// right — still rejects, pinning that operand order is irrelevant.
-test "frontend-rejection: rejects float-var plus int-literal arithmetic (E0306)" ![io] {
+// A bare numeric literal paired with a typed operand coerces to the typed
+// side's kind in lowering (bidirectional literal-context propagation in
+// `lower_binary_operation`), so `float_var + int_literal` compiles and must NOT
+// be rejected — pinning the literal-coercion exemption that keeps E0306 in exact
+// parity with the lowerer (regression: numeric_int_default_test.sfn case 3).
+test "frontend-rejection: accepts typed-var plus numeric-literal arithmetic" ![io] {
     let source = "fn main() -> int { let a: float = 2.0; let c = a + 5; return 0; }";
     let program = parse_program(source);
     let diagnostics = typecheck_diagnostics(program);
-    assert _has_code(diagnostics, "E0306");
+    assert ! _has_code(diagnostics, "E0306");
 }
 
 // Fail-open across a capture boundary: a primitive local captured into a
