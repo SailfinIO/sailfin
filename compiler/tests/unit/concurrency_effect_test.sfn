@@ -1,11 +1,11 @@
 // Unit tests for concurrency-node effect requirements (issue #1083,
-// epic #965 M4). The effect checker must produce an `io` violation for
-// `spawn`, channel-send, and channel-receive operations inside a
-// function that does not declare `![io]`, and an `io`+`net` violation
-// for `serve` without `![io, net]` (the live `Serve`-node arm is
-// registry-driven off the `serve` descriptor row -> [io, net]; #1601,
-// #1629). With the matching effect(s) declared, the checker produces
-// zero violations.
+// epic #965 M4). Under effect-transparency (SFEP-0049) `spawn`,
+// channel-`send`, and channel-`receive` contribute NO effect of their
+// own: a pure body/value requires nothing, and an effectful body/argument
+// propagates its own effects. `serve` still requires `![io, net]` (the
+// live `Serve`-node arm is registry-driven off the `serve` descriptor
+// row -> [io, net]; #1601, #1629). With the matching effect(s) declared,
+// the checker produces zero violations.
 //
 // `spawn` and `serve` are first-class AST nodes (Expression.Spawn /
 // Expression.Serve, added in #1079). Channel send/receive are
@@ -63,8 +63,9 @@ fn _empty_block() -> Block {
 }
 
 // Build a FunctionDeclaration whose body contains a single `spawn <callee>()`
-// expression node (Expression.Spawn). The spawned callee is an effect-free
-// identifier call so the only required effect is `io` from the spawn prefix.
+// expression node (Expression.Spawn). The spawned callee is an unresolved,
+// effect-free identifier call, so under effect-transparency (SFEP-0049) the
+// spawn attributes nothing.
 fn _make_spawn_fn(name: string, effects: string[], span_line: int) -> Statement {
     let callee = Expression.Identifier { name: "worker", span: null };
     let mut no_args: Expression[] = [];
@@ -75,6 +76,45 @@ fn _make_spawn_fn(name: string, effects: string[], span_line: int) -> Statement 
     };
     let spawn_expr = Expression.Spawn {
         operand: inner_call,
+        span: _span(span_line + 1, 4),
+        kind: ""
+    };
+    let body_stmt = Statement.ExpressionStatement {
+        expression: spawn_expr,
+        span: null
+    };
+    let body_block = Block {
+        tokens: [],
+        text: "",
+        statements: [body_stmt]
+    };
+    let mut no_decorators: Decorator[] = [];
+    return Statement.FunctionDeclaration {
+        signature: _signature(name, effects, span_line),
+        body: body_block,
+        decorators: no_decorators,
+        is_unsafe: false
+    };
+}
+
+// Build a FunctionDeclaration whose body is `spawn print.info()` — the spawned
+// operand itself requires `io`, so the effect propagates to the caller
+// (SFEP-0049: the primitive adds nothing, the body's effect is inherited).
+fn _make_spawn_io_fn(name: string, effects: string[], span_line: int) -> Statement {
+    let print_obj = Expression.Identifier { name: "print", span: null };
+    let member = Expression.Member {
+        object: print_obj,
+        member: "info",
+        span: null
+    };
+    let mut no_args: Expression[] = [];
+    let io_call = Expression.Call {
+        callee: member,
+        arguments: no_args,
+        span: null
+    };
+    let spawn_expr = Expression.Spawn {
+        operand: io_call,
         span: _span(span_line + 1, 4),
         kind: ""
     };
@@ -158,6 +198,55 @@ fn _make_channel_send_fn(name: string, effects: string[], span_line: int) -> Sta
     };
 }
 
+// Build a FunctionDeclaration whose body is `chan.send(fs.read(p))` — the sent
+// argument requires `io`, so the effect propagates via the argument walk
+// (SFEP-0049: the channel op itself adds nothing).
+fn _make_channel_send_io_fn(name: string, effects: string[], span_line: int) -> Statement {
+    let chan_obj = Expression.Identifier { name: "chan", span: null };
+    let callee = Expression.Member {
+        object: chan_obj,
+        member: "send",
+        span: _span(span_line + 1, 4)
+    };
+    let fs_obj = Expression.Identifier { name: "fs", span: null };
+    let fs_read = Expression.Member {
+        object: fs_obj,
+        member: "read",
+        span: null
+    };
+    let path = Expression.Identifier { name: "p", span: null };
+    let mut read_args: Expression[] = [];
+    read_args.push(path);
+    let io_arg = Expression.Call {
+        callee: fs_read,
+        arguments: read_args,
+        span: null
+    };
+    let mut send_args: Expression[] = [];
+    send_args.push(io_arg);
+    let call_expr = Expression.Call {
+        callee: callee,
+        arguments: send_args,
+        span: null
+    };
+    let body_stmt = Statement.ExpressionStatement {
+        expression: call_expr,
+        span: null
+    };
+    let body_block = Block {
+        tokens: [],
+        text: "",
+        statements: [body_stmt]
+    };
+    let mut no_decorators: Decorator[] = [];
+    return Statement.FunctionDeclaration {
+        signature: _signature(name, effects, span_line),
+        body: body_block,
+        decorators: no_decorators,
+        is_unsafe: false
+    };
+}
+
 // Build a FunctionDeclaration whose body contains a `chan.receive()` call.
 // This is expressed as Call { callee: Member { object: "chan", member: "receive" } }.
 fn _make_channel_receive_fn(name: string, effects: string[], span_line: int) -> Statement {
@@ -192,18 +281,26 @@ fn _make_channel_receive_fn(name: string, effects: string[], span_line: int) -> 
 }
 
 // -------------------------------------------------------------------
-// spawn — requires io
+// spawn — effect-transparent (SFEP-0049)
 // -------------------------------------------------------------------
-test "concurrency: spawn without ![io] is diagnosed" {
+test "concurrency: spawn of a pure body requires no effect" {
     let mut no_effects: string[] = [];
-    let stmt = _make_spawn_fn("launch_without_io", no_effects, 1);
+    let stmt = _make_spawn_fn("launch_pure", no_effects, 1);
+    let program = Program { statements: [stmt] };
+    let violations = validate_effects(program);
+    assert violations.length == 0;
+}
+
+test "concurrency: spawn of an io body propagates io" {
+    let mut no_effects: string[] = [];
+    let stmt = _make_spawn_io_fn("launch_io_body", no_effects, 1);
     let program = Program { statements: [stmt] };
     let violations = validate_effects(program);
     assert violations.length == 1;
-    assert violations[0].routine_name == "launch_without_io";
+    assert violations[0].routine_name == "launch_io_body";
 }
 
-test "concurrency: spawn with ![io] is clean" {
+test "concurrency: spawn over-declaring io is clean" {
     let mut io_effects: string[] = ["io"];
     let stmt = _make_spawn_fn("launch_with_io", io_effects, 1);
     let program = Program { statements: [stmt] };
@@ -261,18 +358,26 @@ test "concurrency: serve with ![io, net] is clean" {
 }
 
 // -------------------------------------------------------------------
-// channel send — requires io
+// channel send — effect-transparent (SFEP-0049)
 // -------------------------------------------------------------------
-test "concurrency: channel send without ![io] is diagnosed" {
+test "concurrency: channel send of a pure value requires no effect" {
     let mut no_effects: string[] = [];
-    let stmt = _make_channel_send_fn("sender_without_io", no_effects, 1);
+    let stmt = _make_channel_send_fn("sender_pure", no_effects, 1);
+    let program = Program { statements: [stmt] };
+    let violations = validate_effects(program);
+    assert violations.length == 0;
+}
+
+test "concurrency: channel send of an io argument propagates io" {
+    let mut no_effects: string[] = [];
+    let stmt = _make_channel_send_io_fn("sender_io_arg", no_effects, 1);
     let program = Program { statements: [stmt] };
     let violations = validate_effects(program);
     assert violations.length == 1;
-    assert violations[0].routine_name == "sender_without_io";
+    assert violations[0].routine_name == "sender_io_arg";
 }
 
-test "concurrency: channel send with ![io] is clean" {
+test "concurrency: channel send over-declaring io is clean" {
     let mut io_effects: string[] = ["io"];
     let stmt = _make_channel_send_fn("sender_with_io", io_effects, 1);
     let program = Program { statements: [stmt] };
@@ -281,18 +386,20 @@ test "concurrency: channel send with ![io] is clean" {
 }
 
 // -------------------------------------------------------------------
-// channel receive — requires io
+// channel receive — effect-transparent (SFEP-0049)
 // -------------------------------------------------------------------
-test "concurrency: channel receive without ![io] is diagnosed" {
+// `receive()` takes no argument, so it is always effect-free now — there is
+// no argument through which an effect could propagate (any effect comes from
+// what the caller does with the received value, not the receive itself).
+test "concurrency: channel receive requires no effect" {
     let mut no_effects: string[] = [];
-    let stmt = _make_channel_receive_fn("receiver_without_io", no_effects, 1);
+    let stmt = _make_channel_receive_fn("receiver_pure", no_effects, 1);
     let program = Program { statements: [stmt] };
     let violations = validate_effects(program);
-    assert violations.length == 1;
-    assert violations[0].routine_name == "receiver_without_io";
+    assert violations.length == 0;
 }
 
-test "concurrency: channel receive with ![io] is clean" {
+test "concurrency: channel receive over-declaring io is clean" {
     let mut io_effects: string[] = ["io"];
     let stmt = _make_channel_receive_fn("receiver_with_io", io_effects, 1);
     let program = Program { statements: [stmt] };

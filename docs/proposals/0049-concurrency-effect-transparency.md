@@ -1,7 +1,7 @@
 ---
 sfep: 0049
 title: Effect-transparency for concurrency-primitive leaves (spawn / parallel / channel send·receive)
-status: Accepted
+status: Implemented
 type: language
 created: 2026-07-17
 updated: 2026-07-17
@@ -9,7 +9,7 @@ author: "agent:compiler-architect; human review"
 tracking: "SFN-86, #1702"
 supersedes:
 superseded-by:
-graduates-to:
+graduates-to: "docs/status.md (§concurrency); site/src/content/docs/docs/reference/preview/concurrency.md"
 ---
 
 # SFEP-0049 — Effect-transparency for concurrency-primitive leaves (spawn / parallel / channel send·receive)
@@ -307,25 +307,24 @@ This SFEP **is** an effect-system change; that is its entire subject.
 
 - [x] **Parses** — no new syntax; `spawn`/`parallel`/`channel`/`.send`/`.receive`
       already parse into their AST nodes/Member calls.
-- [ ] **Type-checks / effect-checks** — the substance of this SFEP: the four arms
+- [x] **Type-checks / effect-checks** — the substance of this SFEP: the four arms
       attribute the body's effects and no phantom `io`. Verified by the retargeted
-      `effect_detection_test.sfn` / `effect_checker_test.sfn` assertions (§8).
+      `effect_detection_test.sfn` / `effect_checker_test.sfn` / `concurrency_effect_test.sfn`
+      assertions (§8).
 - [x] **Emits valid `.sfn-asm`** — unchanged; the emitter/lowering for the
       primitives is untouched, only their effect metadata changes.
 - [x] **Lowers to LLVM IR** — unchanged; `sfn_spawn_task`/`sfn_channel_send`/
       `sfn_channel_recv` symbols and their call lowering are unaffected.
-- [ ] **Regression coverage** — retargeted unit assertions plus at least one
-      positive (io-body propagates) and one negative (pure-body requires nothing)
-      case per primitive (§8).
-- [ ] **Self-hosts** — `make compile` from the pinned seed; the change is a
+- [x] **Regression coverage** — three effect test files retargeted, each with a
+      positive (io-body/io-arg propagates → `E0400`) and negative (pure op requires
+      nothing) case per primitive (§8).
+- [x] **Self-hosts** — `make compile` from the pinned seed passes; the change is a
       strict relaxation, so the tree self-hosts a fortiori.
-- [ ] **`sfn fmt --check` clean** — every touched `.sfn` (`runtime_helpers.sfn`,
-      the two effect tests) formatted.
-- [ ] **Documented in `docs/status.md` + spec** — flip the concurrency
-      rows/effect notes from "`spawn`/`parallel`/channel ops require `![io]`
-      (placeholder)" to "effect-transparent: the spawned/sent body's effects
-      propagate; the primitive adds none," and update the concurrency spec/preview
-      chapter accordingly.
+- [x] **`sfn fmt --check` clean** — every touched `.sfn` (`runtime_helpers.sfn`,
+      `effect_checker.sfn`, the three effect tests) formatted.
+- [x] **Documented in `docs/status.md` + spec** — the concurrency rows/effect notes
+      in `docs/status.md` and the preview `concurrency.md` chapter flipped from the
+      `![io]`-placeholder wording to the effect-transparent description.
 
 ## 8. Test plan
 

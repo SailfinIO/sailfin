@@ -27,11 +27,10 @@
 //      from sfn, this leg accepts EITHER the default token OR the
 //      inherited-cap token (a CI leg may carry a step-level cap).
 //
-// `process.run_capture(argv, env)` cannot set `ulimit -v` / RLIMIT_AS,
-// so the cases that need an inherited external cap spawn through bash as
-// the vehicle:
-//   bash -c 'ulimit -v 4194304; exec "$0" version' <sfn-bin>
-// with the SAILFIN_* trace/limit vars threaded in the env array.
+// The cases that need an inherited external cap spawn the compiler under a
+// per-child RLIMIT_AS via `process.run_capture_rlimit_as(argv, env, bytes)`
+// (SFN-45), with the SAILFIN_* trace/limit vars threaded in the env array —
+// no `bash -c "ulimit -v N"` vehicle (`.claude/rules/no-bash-e2e.md`).
 //
 // Non-Linux: RLIMIT_AS is not honored (Darwin) — the driver no-ops via
 // its /proc probe, so every test skips when /proc/self/status is absent.
@@ -48,10 +47,10 @@ fn _sfn_bin() -> string ![io] {
 }
 
 // `run_capture`'s empty array is the *empty* environment; thread the
-// variables the toolchain needs. The bash-c cases additionally rely on
-// PATH so the runner-cwd-relative `build/bin/sfn` (passed as the
-// bash `$0`) and the shell itself resolve. Per-case SAILFIN_* trace/limit
-// vars are appended by the caller.
+// variables the toolchain needs. PATH is kept so a bare `SAILFIN_BIN`
+// name still resolves (the default `build/bin/sfn` is cwd-relative and
+// needs none). Per-case SAILFIN_* trace/limit vars are appended by the
+// caller.
 fn _child_env() -> string[] ![io] {
     let mut e: string[] = [];
     let path = env.get("PATH");
@@ -103,11 +102,13 @@ fn _run_direct(extra: string[]) -> string ![io] {
     return err;
 }
 
-// Spawn through bash with an inherited `ulimit -v 4194304` (4 GiB) cap in
-// effect, then `exec "$0" version` so the compiler inherits the cap. The
-// SAILFIN_* trace vars are threaded via the env array. `$0` is the sfn
-// binary path (runner-cwd-relative `build/bin/sfn` resolves
-// because PATH and the runner cwd are honored). Returns captured stderr.
+// Spawn the compiler directly (no shell) under a 4 GiB RLIMIT_AS soft cap
+// via `process.run_capture_rlimit_as` (SFN-45), so the compiler inherits an
+// external cap exactly as the former `bash -c "ulimit -v 4194304"` vehicle
+// set one — but with no shell dependency (`.claude/rules/no-bash-e2e.md`).
+// `ulimit -v` counts KiB, so the old 4194304 KiB is 4294967296 bytes. The
+// SAILFIN_* trace vars are threaded via the env array. Returns captured
+// stderr.
 fn _run_under_cap(extra: string[]) -> string ![io] {
     let mut e = _child_env();
     let mut i = 0;
@@ -116,8 +117,7 @@ fn _run_under_cap(extra: string[]) -> string ![io] {
         e.push(extra[i]);
         i += 1;
     }
-    let argv = ["bash", "-c", "ulimit -v 4194304; exec \"$0\" version", _sfn_bin()];
-    let _exit = process.run_capture(argv, e);
+    let _exit = process.run_capture_rlimit_as([_sfn_bin(), "version"], e, 4294967296);
     let _o = process.capture_take_stdout();
     let err = process.capture_take_stderr();
     return err;
@@ -134,8 +134,10 @@ test "mem-limit: inherited external RLIMIT_AS cap left in place" ![io] {
     assert contains(err, "[mem-limit] inherited RLIMIT_AS cap left in place");
 }
 
-// 2. Explicit override applies even under an external cap (1 GiB, below
-//    the 4 GiB hard cap so the setrlimit raise path cannot fail).
+// 2. Explicit override applies even under an external cap (1 GiB): the
+//    child lowers its inherited 4 GiB soft cap to 1 GiB, a soft-limit
+//    lowering bounded by the inherited (infinite) hard cap, so setrlimit
+//    cannot fail.
 test "mem-limit: explicit SAILFIN_MEM_LIMIT override applies under a cap" ![io] {
     if !_is_linux() {
         assert true;
