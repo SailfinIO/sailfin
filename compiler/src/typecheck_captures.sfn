@@ -329,20 +329,11 @@ fn walk_expression(scope: LocalBinding[], expression: Expression?) -> CaptureWal
         let else_value = walk_expression(scope, expression.else_value);
         return merge_results(merge_results(cond, then_value), else_value);
     }
-    // Assignment `target <op> rhs` (#1627/#1741) is DELIBERATELY not descended
-    // here. The other six structural walkers (effect checker, typecheck,
-    // ownership, both formatters, lambda-lowering) DO carry an Assignment arm —
-    // only the capture walk omits one, on purpose. Capturing a binding through
-    // an assignment (`fn() { g = g + x; }`) where the target/rhs is an enclosing
-    // `let mut` (most acutely a module-level mutable global) makes that binding
-    // a MUTABLE capture, which the lift pass refuses as a fatal (#687,
-    // mutable captures not yet supported). Before #1627 assignment was a `Raw`
-    // node that this walk already dropped (it returns `empty_walk_result()` for
-    // `Raw`), so descending now would NOT be a faithful re-structuring — it
-    // would surface mutable captures that previously self-hosted and ran
-    // (e.g. a parallel worker accumulating into a module global). Falling
-    // through to the empty result below preserves that pre-#1627 behaviour
-    // exactly; assignment-position capture detection waits on #687.
+    if expression.variant == "Assignment" {
+        let target = walk_expression(scope, expression.target);
+        let rhs = walk_expression(scope, expression.rhs);
+        return merge_results(target, rhs);
+    }
     if expression.variant == "Call" {
         let mut result = walk_expression(scope, expression.callee);
         let mut i: int = 0;
@@ -492,8 +483,10 @@ fn build_captures(outer_scope: LocalBinding[], free_names: string[]) -> Capture[
         let name = free_names[i];
         let binding = find_binding(outer_scope, name);
         if binding != null {
+            let mut capture_by_value = binding.by_value;
+            if binding.mutable { capture_by_value = false; }
             captures.push(Capture {
-                name: binding.name, type_text: binding.type_text, by_value: binding.by_value, mutable: binding.mutable, span: binding.span
+                name: binding.name, type_text: binding.type_text, by_value: capture_by_value, mutable: binding.mutable, span: binding.span
             });
         }
         i += 1;

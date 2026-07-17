@@ -1,0 +1,12 @@
+// compiler/tests/e2e/fixtures/closure_mutable_capture/main.sfn
+//
+// SFN-88: a lifted lambda mutates an enclosing `let mut` through the
+// closure env by-reference slot, and the enclosing scope observes it.
+fn main() ![io] {
+    let mut acc: int = 1;
+    let x: int = 4;
+    let bump = fn () { acc = acc + x; };
+    bump();
+    bump();
+    print(acc);
+}
