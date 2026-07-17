@@ -1,0 +1,75 @@
+// End-to-end test for the `![rand]` effect gate on `sfn/crypto::random_bytes`
+// (SFEP-0048 Phase D, SFN-123).
+//
+// Pins the acceptance criterion "the effect gate is real": a caller that omits
+// `![rand]` must fail `sfn check` when it calls the public `random_bytes`
+// wrapper, while a caller that declares `![rand]` passes. The enforcement rides
+// on the existing callee-effect propagation (`effect_imports.sfn`), not on any
+// call-name detector — `random_bytes` carries `![rand]` on its declaration and
+// propagation does the rest.
+//
+// Modeled on `check_effect_call_site_caret_test.sfn`: write a fixture, run the
+// frontend-only `sfn check`, and assert on the combined stdout+stderr with
+// `sfn/strings` predicates (the `sfn/test` `expect_*` matchers are `![pure]`
+// and cannot be called from an `![io]` test). `sfn check` links nothing, so the
+// child runs with an empty environment; `sfn/crypto` resolves against the
+// capsule search path rooted at the runner's cwd (the repo root), the same way
+// this test's own `import ... from "sfn/strings"` resolves.
+import { find } from "sfn/strings";
+
+fn _sfn_bin() -> string ![io] {
+    let configured = env.get("SAILFIN_BIN");
+    if configured.length > 0 { return configured; }
+    return "build/bin/sfn";
+}
+
+// A caller that declares `![rand]` and calls the public wrapper — must check.
+fn _ok_source() -> string {
+    return "import { random_bytes } from \"sfn/crypto\";\n"
+        + "fn make_key() -> int ![rand] {\n"
+        + "    return random_bytes(16).length;\n"
+        + "}\n"
+        + "export { make_key };\n";
+}
+
+// The same call from a function that omits `![rand]` — must fail effect-check.
+fn _missing_source() -> string {
+    return "import { random_bytes } from \"sfn/crypto\";\n"
+        + "fn make_key() -> int {\n"
+        + "    return random_bytes(16).length;\n"
+        + "}\n"
+        + "export { make_key };\n";
+}
+
+struct _CheckRun {
+    exit: int;
+    output: string;
+}
+
+fn _run_check(source: string) -> _CheckRun ![io] {
+    let dir = fs.mkdtemp("sfn-rand-effect-");
+    let path = dir + "/fixture.sfn";
+    fs.writeFile(path, source);
+    let exit = process.run_capture([_sfn_bin(), "check", path], []);
+    let out = process.capture_take_stdout();
+    let err = process.capture_take_stderr();
+    fs.deleteFile(path);
+    fs.removeDirectory(dir);
+    return _CheckRun { exit: exit, output: out + err };
+}
+
+test "rand effect gate: a ![rand] caller of random_bytes checks clean" ![io] {
+    let r = _run_check(_ok_source());
+    assert r.exit == 0;
+}
+
+test "rand effect gate: a caller missing ![rand] fails effect-check" ![io] {
+    let r = _run_check(_missing_source());
+    // Diagnostics found → non-zero exit, and the diagnostic names the `rand`
+    // effect that propagated from `random_bytes`. The exact code is E0402
+    // (cross-module import) or E0400 (in-module) depending on how propagation
+    // attributes the imported callee; assert on the effect name to stay robust.
+    assert r.exit != 0;
+    assert find(r.output, "rand", 0) >= 0;
+    assert find(r.output, "E040", 0) >= 0;
+}

@@ -156,3 +156,20 @@ define i8* @EVP_sha256() {
 define i8* @HMAC(i8* %evp_md, i8* %key, i32 %key_len, i8* %d, i64 %n, i8* %md, i8* %md_len) {
   ret i8* null
 }
+
+; Native OS entropy primitive (SFN-123, SFEP-0048 Phase D).
+; `runtime/sfn/platform/rand.sfn` is excluded from RUNTIME_MODS — its
+; `getentropy(2)` / `/dev/urandom` (`open`/`read`/`close`) externs have no
+; static-mingw provider (the process.sfn / rlimit.sfn / tls.sfn exclusion
+; precedent). The compiler links `sfn/crypto`, whose `random_bytes` wrapper
+; references `@sfn_rand_fill`, so the standalone-emitted crypto IR needs it
+; defined at the Windows link. A fail-closed stub (return 0 = failure) is the
+; correct degraded behavior: `random_bytes` surfaces `[]`, never zeroed or
+; partial entropy. It is unreached during normal compiler operation (the
+; compiler only pulls `sfn/crypto` for `ed25519_verify`, and the WebSocket
+; adapter that consumes it for real is itself excluded from RUNTIME_MODS);
+; native Windows entropy rides the same M10 OS-independent surface as TLS.
+; Sync pinned by compiler/tests/e2e/cross_windows_runtime_modules_test.sfn.
+define i32 @sfn_rand_fill(i8* %buf, i64 %n) {
+  ret i32 0
+}

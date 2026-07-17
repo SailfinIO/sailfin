@@ -99,7 +99,13 @@ extern fn SHA1(d: * u8, n: usize, md: * u8) -> * u8;
 
 extern fn EVP_EncodeBlock(dst: * u8, src: * u8, srclen: i32) -> i32;
 
-extern fn RAND_bytes(buf: * u8, num: i32) -> i32;
+// ── Native entropy (platform/rand.sfn) ────────────────────────
+// `sfn_rand_fill(buf, n)` fills `n` cryptographically secure random bytes and
+// returns 1 on success, 0 on failure (fail-closed). Replaces OpenSSL
+// `RAND_bytes` for the RFC 6455 masking key and the client handshake
+// `Sec-WebSocket-Key` (SFEP-0048 Phase D, SFN-123). Declared inline per the
+// same cross-module-extern workaround (#306) as the sockets above.
+extern fn sfn_rand_fill(buf: * u8, n: i64) -> i32;
 
 // ── TLS termination (platform/tls.sfn) ────────────────────────
 extern fn tls_server_ctx(cert_path: * u8, key_path: * u8) -> * u8;
@@ -621,7 +627,11 @@ fn _ws_frame_send(fd: i32, opcode: i64, payload: * u8, payload_len: i64) -> bool
         free(out);
         return false;
     }
-    RAND_bytes(mask, 4);
+    if sfn_rand_fill(mask, 4) != 1 {
+        free(mask);
+        free(out);
+        return false;
+    }
     memcpy(_ws_ptr_off(out, header_len), mask, 4 as usize);
     let mut i: i64 = 0;
     loop {
@@ -663,7 +673,13 @@ fn sfn_websocket_connect(url: * u8) -> * u8 ![net] {
         close(fd);
         return null;
     }
-    RAND_bytes(keybuf, 16);
+    if sfn_rand_fill(keybuf, 16) != 1 {
+        free(keybuf);
+        free(host);
+        free(path);
+        close(fd);
+        return null;
+    }
     let key_b64: * u8 = malloc(25 as usize);
     if key_b64 as i64 == 0 {
         free(keybuf);

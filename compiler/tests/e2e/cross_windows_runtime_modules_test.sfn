@@ -2,9 +2,10 @@
 // links a hardcoded list of runtime Sailfin modules (`RUNTIME_MODS`). That
 // list is a copy of `runtime/capsule.toml`'s `sfn-sources` array plus its
 // `prelude-entry`, MINUS `process.sfn`, the pthread-dependent
-// `concurrency/*` modules, `platform/rlimit.sfn`, and `assert.sfn`, PLUS the
-// Windows-only `platform/process_windows.sfn` (which is intentionally NOT in
-// the manifest). If the manifest and the Makefile drift, the Windows bridge
+// `concurrency/*` modules, `platform/rlimit.sfn`, `platform/rand.sfn`, and
+// `assert.sfn`, PLUS the Windows-only `platform/process_windows.sfn` (which is
+// intentionally NOT in the manifest). If the manifest and the Makefile drift,
+// the Windows bridge
 // would silently drop or double-link a runtime module; these static checks
 // fail the moment they diverge.
 //
@@ -61,6 +62,13 @@ test "cross-windows RUNTIME_MODS / manifest per-module contracts" ![io] {
     assert contains(manifest, "\"sfn/platform/rlimit.sfn\"");
     assert ! contains(makefile, "runtime/sfn/platform/rlimit.sfn");
 
+    // rand.sfn (SFN-123): in the manifest, excluded from RUNTIME_MODS — its
+    // getentropy / /dev/urandom externs have no static-mingw provider. The
+    // compiler pulls @sfn_rand_fill via the sfn/crypto `random_bytes` export,
+    // resolved to the windows_stubs.ll fail-closed no-op stub.
+    assert contains(manifest, "\"sfn/platform/rand.sfn\"");
+    assert ! contains(makefile, "runtime/sfn/platform/rand.sfn");
+
     // tls.sfn (#1782): in the manifest, excluded from RUNTIME_MODS — it
     // pulls the OpenSSL externs, which cannot resolve in a static mingw
     // link (Windows TLS is #1485 M10). http.sfn forward-declares its
@@ -114,6 +122,11 @@ test "cross-windows windows_stubs.ll defines the required Windows stubs" ![io] {
     assert contains(stubs, "define i8* @EVP_MD_CTX_new");
     assert contains(stubs, "define i8* @EVP_sha256");
     assert contains(stubs, "define i8* @HMAC");
+
+    // Native entropy primitive (SFN-123): rand.sfn is excluded from
+    // RUNTIME_MODS, so the compiler's @sfn_rand_fill reference (pulled in by
+    // the sfn/crypto `random_bytes` export) resolves to this fail-closed stub.
+    assert contains(stubs, "define i32 @sfn_rand_fill");
 
     // windows_stubs.ll is a cross-windows-only object: NOT in the manifest
     // (its `ll-sources` is empty — adding windows_stubs would duplicate the

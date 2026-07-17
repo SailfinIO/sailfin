@@ -46,7 +46,7 @@ ll-sources = []
 #   `compiler/tests/e2e/test_runtime_sfn_sources_link_consumer.sh`.
 #
 # Single-line array per the parser limitation noted above.
-sfn-sources = ["sfn/runtime_globals.sfn", "sfn/memory/arena.sfn", "sfn/memory/rc.sfn", "sfn/memory/mem.sfn", "sfn/memory/ownedbuf.sfn", "sfn/string.sfn", "sfn/array.sfn", "sfn/clock.sfn", "sfn/process.sfn", "sfn/io.sfn", "sfn/exception.sfn", "sfn/assert.sfn", "sfn/type_meta.sfn", "sfn/platform/exec.sfn", "sfn/platform/rlimit.sfn", "sfn/platform/tls.sfn", "sfn/platform/pthread_layout.sfn", "sfn/adapters/filesystem.sfn", "sfn/adapters/http.sfn", "sfn/adapters/websocket.sfn", "sfn/adapters/net.sfn", "sfn/concurrency/scheduler.sfn", "sfn/concurrency/nursery.sfn", "sfn/concurrency/future.sfn", "sfn/concurrency/channel.sfn", "sfn/concurrency/parallel.sfn", "sfn/concurrency/serve.sfn"]
+sfn-sources = ["sfn/runtime_globals.sfn", "sfn/memory/arena.sfn", "sfn/memory/rc.sfn", "sfn/memory/mem.sfn", "sfn/memory/ownedbuf.sfn", "sfn/string.sfn", "sfn/array.sfn", "sfn/clock.sfn", "sfn/process.sfn", "sfn/io.sfn", "sfn/exception.sfn", "sfn/assert.sfn", "sfn/type_meta.sfn", "sfn/platform/exec.sfn", "sfn/platform/rlimit.sfn", "sfn/platform/tls.sfn", "sfn/platform/pthread_layout.sfn", "sfn/platform/rand.sfn", "sfn/adapters/filesystem.sfn", "sfn/adapters/http.sfn", "sfn/adapters/websocket.sfn", "sfn/adapters/net.sfn", "sfn/concurrency/scheduler.sfn", "sfn/concurrency/nursery.sfn", "sfn/concurrency/future.sfn", "sfn/concurrency/channel.sfn", "sfn/concurrency/parallel.sfn", "sfn/concurrency/serve.sfn"]
 include-dirs = []
 # `-lssl -lcrypto`: OpenSSL, linked into every Sailfin binary for the
 # native runtime's TLS surface (`sfn/platform/tls.sfn`, SFEP-0036). The
