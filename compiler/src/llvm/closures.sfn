@@ -171,11 +171,14 @@ fn percent_unescape_capture_text(text: string) -> string {
 // source-level type annotation contained. The inter-capture
 // separator is `;` (not `,`) so the env-alloc marker survives the
 // comma-splitting call-argument parser when a capturing lambda is
-// passed directly to a function (see #1106). `by_value` is set true
-// (M1.5 captures are by-value snapshots) and `mutable` is false
-// (the lift pass refuses mutable captures via a separate fatal
-// marker before any encoding happens — anything that reaches
-// `decode_captures` is guaranteed-immutable).
+// passed directly to a function (see #1106). An optional third
+// segment is the capture mode: absent (two-part `name:type`) means a
+// by-value snapshot (`by_value = true`, `mutable = false`); `ref_mut`
+// (#1747/SFN-88) marks a mutable capture lowered by reference, so the
+// env stores the enclosing slot pointer (`by_value = false`,
+// `mutable = true`). The encoder omits the segment for by-value
+// captures, so the two-part form stays byte-identical to prior
+// behaviour.
 fn decode_captures(encoded: string) -> Capture[] {
     let mut captures: Capture[] = [];
     if encoded.length == 0 { return captures; }

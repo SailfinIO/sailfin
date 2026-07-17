@@ -329,3 +329,22 @@ test "captures: decode_captures recovers generic-typed entries" {
     assert decoded[1].name == "handler";
     assert decoded[1].type_text == "fn(int) -> boolean";
 }
+
+test "captures: decode_captures maps the mode segment to by_value/mutable" {
+    // The optional third segment is the capture mode (#1747/SFN-88): a
+    // two-part `name:type` field is a by-value snapshot, while a
+    // three-part `name:type:ref_mut` field is a mutable capture lowered
+    // by reference. decode must map each form to the right
+    // `by_value`/`mutable` flags so the env-field shape agrees between
+    // the lambda-site alloc and the lifted-body prologue.
+    let decoded: Capture[] = decode_captures("acc:int:ref_mut;x:int");
+    assert decoded.length == 2;
+    assert decoded[0].name == "acc";
+    assert decoded[0].type_text == "int";
+    assert ! decoded[0].by_value;
+    assert decoded[0].mutable;
+    assert decoded[1].name == "x";
+    assert decoded[1].type_text == "int";
+    assert decoded[1].by_value;
+    assert ! decoded[1].mutable;
+}
