@@ -48,11 +48,11 @@ A task lambda that captures variables from the enclosing scope owns its heap env
 
 **Boundary.** This covers the env-container lifetime for value and pointer-identity captures. `OwnedBuf`/string capture-buffer ownership across the thread boundary (result-aliases, length-carrying buffers) is deferred to #1476.
 
-### Effect requirement (`![io]`, conservative — #1655)
+### Effect transparency (SFEP-0049)
 
-`spawn`, `parallel`, and channel `send`/`receive` currently require the `![io]` effect. As of #1655 this requirement is derived from a single source of truth — the runtime-helper descriptor registry — rather than hardcoded in the effect checker, so the checker and the registry can never disagree.
+`spawn`, `parallel`, and channel `send`/`receive` are **effect-transparent**: the in-process primitive contributes no effect of its own, and the caller inherits exactly the effects of the body it spawns/sends. A concurrency op over a **pure** body requires no effect; over an effectful body (e.g. one that calls `print`), that body's effects (`io`, …) propagate. The requirement is derived from a single source of truth — the runtime-helper descriptor registry (#1655), whose concurrency rows now carry no effect — so the checker and the registry can never disagree.
 
-`io` here is a deliberate **conservative placeholder**: the v0 scheduler primitives are pure in-process pthread mutex/condvar/MPMC-queue and touch no filesystem, network, console, or clock, so under the canonical taxonomy (`io, net, model, gpu, rand, clock`) none of them genuinely exercises `io`. The principled end state is **effect-transparency** — the spawned/joined body's own effects propagate and the primitive itself adds none — tracked as #1702 (gated on the structured-concurrency runtime settling). Until then, a function that uses any concurrency primitive must declare `![io]`.
+This is principled, not conservative: the v0 scheduler primitives are pure in-process pthread mutex/condvar/MPMC-queue and touch no filesystem, network, console, or clock, so under the canonical taxonomy (`io, net, model, gpu, rand, clock`) none genuinely exercises `io` — as Go treats goroutine spawn as effect-free. The **join-side** counterpart (`await` and `routine {}` nursery-exit effect propagation) is out of scope here and tracked with the concurrency-maturity work (SFN-124).
 
 **Remaining pre-1.0 work**: full `async fn` return-value `await` wired into the live typecheck walk (#1944), typed `Channel<T>` generic constructor (#1942), typed result-array collection from `parallel`, and `OwnedBuf` capture-buffer ABI across the thread boundary (#1476).
 See the [roadmap](/roadmap).
