@@ -71,6 +71,7 @@ The next number is `max + 1`. Add a row in the same PR that introduces an SFEP.
 | [0046](./0046-toolchain-pinning.md) | Native Toolchain Version Pinning + Dispatch | Accepted | tooling |
 | [0047](./0047-compiler-bootstrap-manifest.md) | Compiler Bootstrap Manifest | Accepted | tooling |
 | [0048](./0048-native-crypto.md) | Native Crypto + TLS Stack — Removing the OpenSSL Dependency | Accepted | runtime |
+| [0049](./0049-concurrency-effect-transparency.md) | Effect-transparency for concurrency-primitive leaves (spawn / parallel / channel send·receive) | Accepted | language |
 
 ## Drafts under review (numbers assigned at merge)
 
