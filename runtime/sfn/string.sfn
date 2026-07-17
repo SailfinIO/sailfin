@@ -93,11 +93,11 @@ extern fn strtod(nptr: * u8, endptr: * * u8) -> f64;
 // #1315 (C4 of epic #1308): the accessor family — `byte_at`/`find_byte`/
 // `codepoint`/`grapheme_at`/`grapheme_count` — are now real Sailfin
 // bodies below (bare-named emission targets; the C defs are `static`).
-// They cannot, under today's seed, single-byte-load a `* u8`, decode the
-// immediate-codepoint pseudo-pointer encoding, or reproduce the
-// platform-gated grapheme production, so they call these four narrow C
-// bridge primitives (`sailfin_runtime.c`). All retire with the
-// immediate-encoding deletion (#1283 / #822).
+// They cannot, under today's seed, single-byte-load a `* u8` or reproduce
+// the platform-gated grapheme production, so they call two narrow C bridge
+// primitives (`sailfin_runtime.c`). These retire with the SfnString
+// aggregate flip (#1283). The immediate-codepoint decode is already gone:
+// the `(byte << 32)` encoding is retired (#1420/#822).
 //
 // `codepoint`/`grapheme_count` return `f64` (not `i64`): the registry
 // rows (`runtime_helpers.sfn:617,993`) expose them to callers as `i64`
@@ -105,16 +105,13 @@ extern fn strtod(nptr: * u8, endptr: * * u8) -> f64;
 // site. Returning `f64` here keeps that ABI byte-identical, so no
 // registry edit and no seed cut are needed (the seed still emits the
 // `double`-coerced call sites).
-// #1308 (immediate-encoding teardown): `sfn_str_immediate_codepoint` and
-// `sfn_str_decode_owned` are now trivial Sailfin bodies (the C defs are
-// deleted). After the producer flip (#1420) no `(byte << 32)` immediate can
-// exist at runtime, so classification always reports "not an immediate" and
-// decoding is the identity. The decode bridge's old `_runtime_enter` bump is
-// dropped: the concat-reuse window it invalidated is vestigial (the
-// `_concat_reuse_*` globals are write-only, never read). The remaining
-// immediate-arms in the bodies below are now provably dead (`cp` is always
-// -1); they are deleted, along with the C classifier + ~36 consumer guards, in
-// the #822 file-deletion cleanup.
+// #1308 (immediate-encoding teardown): the `(byte << 32)` tagged
+// pseudo-pointer encoding is fully retired — the producer flip (#1420) means
+// no immediate can exist at runtime, and the C runtime it decoded against is
+// deleted (#822). The `sfn_str_immediate_codepoint` classifier and
+// `sfn_str_decode_owned` identity bridge, and the dead `if cp >= 0 { ... }`
+// consumer arms they guarded, have been removed; the bodies below handle only
+// the real-pointer case.
 //
 // #1308: `read_byte` / `grapheme_byte` are now native Sailfin (the C defs are
 // deleted, seed 0.7.0-alpha.41 carries the `load_byte` builtin). They read a
@@ -125,10 +122,6 @@ extern fn strtod(nptr: * u8, endptr: * * u8) -> f64;
 // the C `(int64_t)(unsigned char)real[idx]`; `grapheme_byte` reuses
 // `sfn_str_from_byte` (the arena-backed single-byte producer) for the 1-byte
 // buffer the C body built with `malloc(2)`.
-fn sfn_str_immediate_codepoint(s: * u8) -> i64 { return -1; }
-
-fn sfn_str_decode_owned(s: * u8) -> * u8 { return s; }
-
 fn sfn_str_read_byte(s: * u8, idx: i64) -> i64 {
     return load_byte((s as i64) + idx);
 }
@@ -240,10 +233,8 @@ extern fn sfn_arena_realloc(arena: * u8, ptr: * u8, old_size: usize, new_size: u
 extern fn sfn_raise_value_error(message: * u8) -> void;
 
 // #1372: UTF-8 byte length of a validated codepoint — mirrors the
-// branch widths of the C `_utf8_encode`. Used to size an immediate-
-// codepoint pseudo-pointer's grapheme without materialising it (the
-// owning `sfn_str_decode_owned` bridge mallocs per call, which would
-// leak unboundedly on the `char_at`-result hot path — see `sfn_str_len`).
+// branch widths of the C `_utf8_encode`. Used to size a codepoint's UTF-8
+// encoding before writing its bytes (see the encoder above).
 // NB: decimal literals (128/2048/65536) deliberately — the seed lexer has no
 // `0x` hex support (hex literals silently lower to 0). Decimal is exact and
 // portable across seeds; flip to hex once the lexer learns `0x`.
@@ -275,77 +266,29 @@ fn _sfn_utf8_byte(cp: i64, n: i64, i: i64) -> i64 {
     return 128 | (cp & 63);
 }
 
-// #1372: compare an immediate codepoint `cp` (a single grapheme) against
-// a real, deref-safe string `real` of byte length `len`. Reproduces the
-// `strcmp(utf8(cp), real)` arm of the C `_strings_equal_fast` without
-// allocating — the loop is bounded by the UTF-8 width (<= 4).
-fn _sfn_imm_eq_real(cp: i64, real: * u8, len: i64) -> bool {
-    let n: i64 = _sfn_utf8_byte_len(cp);
-    if len != n { return false; }
-    let mut i: i64 = 0;
-    loop {
-        if i >= n { break; }
-        if sfn_str_read_byte(real, i) != _sfn_utf8_byte(cp, n, i) {
-            return false;
-        }
-        i = i + 1;
-    }
-    return true;
-}
-
 // `sfn_str_len(s)` — #1372 (C5 of epic #1308): the real Sailfin body for
 // the `string.length` emission target (the C `sfn_str_len` def is now
-// `static`). Classifies an immediate-codepoint pseudo-pointer FIRST via the
-// non-allocating `sfn_str_immediate_codepoint` bridge (the #714/#716 crash
-// class — `char_at` results arrive tagged; `decode_owned` would malloc per
-// call and leak on this hot path), returning the codepoint's UTF-8 byte
-// width. A real pointer is bounded-scanned with libc `strnlen` (16 MiB cap)
-// after `decode_owned` (a pass-through that does NOT allocate for real
-// pointers but bumps the call-seq, matching the #1315 accessor discipline).
-// Byte-identical to the retired `sailfin_runtime_string_length` delegator,
-// whose non-ASAN path is exactly `strnlen(s, 16 MiB)`.
+// `static`). A real pointer is bounded-scanned with libc `strnlen`
+// (16 MiB cap). Byte-identical to the retired `sailfin_runtime_string_length`
+// delegator, whose non-ASAN path is exactly `strnlen(s, 16 MiB)`.
 fn sfn_str_len(s: * u8) -> i64 {
     if (s as i64) == 0 { return 0; }
-    let cp: i64 = sfn_str_immediate_codepoint(s);
-    if cp >= 0 { return _sfn_utf8_byte_len(cp); }
-    let real: * u8 = sfn_str_decode_owned(s);
-    return strnlen(real, 16777216) as i64;
+    return strnlen(s, 16777216) as i64;
 }
 
 // `sfn_str_eq(a, b)` — #1372: the real Sailfin body for the string `==`
 // emission target (the C `sfn_str_eq` def is now `static`). Reproduces
-// `_strings_equal_fast` arm-for-arm: pointer-equal (covers both-null and two
-// identical immediates, whose `(cp<<32)` values match) is equal;
-// exactly-one-null is not; two immediates compare by codepoint; an immediate
-// vs a real string compares the codepoint's UTF-8 bytes against the real
-// bytes (`_sfn_imm_eq_real`); two real strings compare by length + `memcmp`.
-// Immediates are classified via the non-allocating `sfn_str_immediate_codepoint`
-// bridge first — string `==` compares `char_at` results (tagged pseudo-
-// pointers, #714/#716), so an unconditional `decode_owned` would malloc per
-// comparison and leak. The real-involved paths route the (real) operand
-// through `decode_owned` (pass-through, no alloc) for its call-seq bump,
-// preserving the #892 concat-reuse invalidation the C `sfn_str_eq` made on entry.
+// `_strings_equal_fast` arm-for-arm: pointer-equal (covers both-null) is
+// equal; exactly-one-null is not; two real strings compare by length +
+// `memcmp`.
 fn sfn_str_eq(a: * u8, b: * u8) -> bool {
     if (a as i64) == (b as i64) { return true; }
     if (a as i64) == 0 { return false; }
     if (b as i64) == 0 { return false; }
-    let ca: i64 = sfn_str_immediate_codepoint(a);
-    let cb: i64 = sfn_str_immediate_codepoint(b);
-    if ca >= 0 {
-        if cb >= 0 { return ca == cb; }
-        let rb: * u8 = sfn_str_decode_owned(b);
-        let lb: i64 = strnlen(rb, 16777216) as i64;
-        return _sfn_imm_eq_real(ca, rb, lb);
-    }
-    let ra: * u8 = sfn_str_decode_owned(a);
-    if cb >= 0 {
-        let la: i64 = strnlen(ra, 16777216) as i64;
-        return _sfn_imm_eq_real(cb, ra, la);
-    }
-    let la2: i64 = strnlen(ra, 16777216) as i64;
+    let la2: i64 = strnlen(a, 16777216) as i64;
     let lb2: i64 = strnlen(b, 16777216) as i64;
     if la2 != lb2 { return false; }
-    return memcmp(ra, b, la2 as usize) == 0;
+    return memcmp(a, b, la2 as usize) == 0;
 }
 
 // `sfn_str_eq_lv(a_data, a_len, b_data, b_len)` — #1704: length-aware (`_lv`)
@@ -366,52 +309,6 @@ fn sfn_str_eq_lv(a_data: * u8, a_len: i64, b_data: * u8, b_len: i64) -> bool {
     return memcmp(a_data, b_data, a_len as usize) == 0;
 }
 
-// #1365: lexicographic compare of two immediate codepoints by their UTF-8
-// encodings — the ordered analogue of the imm-vs-imm arm of `sfn_str_eq`.
-// Walks `min(na, nb)` bytes via `_sfn_utf8_byte`; first non-zero byte delta
-// (unsigned) decides, else the shorter encoding sorts first.
-fn _sfn_imm_cmp_imm(ca: i64, cb: i64) -> i32 {
-    let na: i64 = _sfn_utf8_byte_len(ca);
-    let nb: i64 = _sfn_utf8_byte_len(cb);
-    let mut m: i64 = na;
-    if nb < m { m = nb; }
-    let mut i: i64 = 0;
-    loop {
-        if i >= m { break; }
-        let ba: i64 = _sfn_utf8_byte(ca, na, i);
-        let bb: i64 = _sfn_utf8_byte(cb, nb, i);
-        if ba < bb { return -1; }
-        if ba > bb { return 1; }
-        i = i + 1;
-    }
-    if na < nb { return -1; }
-    if na > nb { return 1; }
-    return 0;
-}
-
-// #1365: lexicographic compare of an immediate codepoint `cp` against a real,
-// deref-safe string `real` of byte length `len` — the ordered analogue of
-// `_sfn_imm_eq_real`. `cp` is on the LEFT; callers comparing real-vs-immediate
-// invert the sign. Bytes are read unsigned (`sfn_str_read_byte` zero-extends),
-// matching `memcmp`'s unsigned-byte ordering.
-fn _sfn_imm_cmp_real(cp: i64, real: * u8, len: i64) -> i32 {
-    let n: i64 = _sfn_utf8_byte_len(cp);
-    let mut m: i64 = n;
-    if len < m { m = len; }
-    let mut i: i64 = 0;
-    loop {
-        if i >= m { break; }
-        let ba: i64 = _sfn_utf8_byte(cp, n, i);
-        let bb: i64 = sfn_str_read_byte(real, i);
-        if ba < bb { return -1; }
-        if ba > bb { return 1; }
-        i = i + 1;
-    }
-    if n < len { return -1; }
-    if n > len { return 1; }
-    return 0;
-}
-
 // `sfn_str_cmp(a, b)` — #1365: lexicographic ordering for the string `<`/`>`/
 // `<=`/`>=` emission target. Returns <0 / 0 / >0 like libc `strcmp`, ordering
 // by unsigned byte value with the shorter string first on a shared prefix. The
@@ -419,38 +316,18 @@ fn _sfn_imm_cmp_real(cp: i64, real: * u8, len: i64) -> i32 {
 // previously these operators fell through to an empty predicate and the guarded
 // branch was silently dropped (no `{i8*, i64}` arm in
 // `comparison_predicate_for_symbol`). Mirrors `sfn_str_eq` arm-for-arm:
-// pointer-equal (both-null / identical immediates) is 0; a single null sorts
-// first (null < any real string); immediates are classified via the
-// non-allocating `sfn_str_immediate_codepoint` bridge (always -1 post-#1420, so
-// the real-vs-real arm is the live one — the immediate arms are defensive
-// parity). Real operands route through `sfn_str_decode_owned` (identity, no
-// alloc) for the call-seq bump, then `memcmp` over the common length with a
+// pointer-equal (both-null) is 0; a single null sorts first (null < any real
+// string); real operands compare via `memcmp` over the common length with a
 // length tie-break.
 fn sfn_str_cmp(a: * u8, b: * u8) -> i32 {
     if (a as i64) == (b as i64) { return 0; }
     if (a as i64) == 0 { return -1; }
     if (b as i64) == 0 { return 1; }
-    let ca: i64 = sfn_str_immediate_codepoint(a);
-    let cb: i64 = sfn_str_immediate_codepoint(b);
-    if ca >= 0 {
-        if cb >= 0 { return _sfn_imm_cmp_imm(ca, cb); }
-        let rb: * u8 = sfn_str_decode_owned(b);
-        let lb: i64 = strnlen(rb, 16777216) as i64;
-        return _sfn_imm_cmp_real(ca, rb, lb);
-    }
-    let ra: * u8 = sfn_str_decode_owned(a);
-    if cb >= 0 {
-        let la: i64 = strnlen(ra, 16777216) as i64;
-        let r: i32 = _sfn_imm_cmp_real(cb, ra, la);
-        if r < 0 { return 1; }
-        if r > 0 { return -1; }
-        return 0;
-    }
-    let la2: i64 = strnlen(ra, 16777216) as i64;
+    let la2: i64 = strnlen(a, 16777216) as i64;
     let lb2: i64 = strnlen(b, 16777216) as i64;
     let mut m: i64 = la2;
     if lb2 < m { m = lb2; }
-    let r: i32 = memcmp(ra, b, m as usize);
+    let r: i32 = memcmp(a, b, m as usize);
     if r != 0 { return r; }
     if la2 < lb2 { return -1; }
     if la2 > lb2 { return 1; }
@@ -481,56 +358,24 @@ fn sfn_str_cmp_lv(a_data: * u8, a_len: i64, b_data: * u8, b_len: i64) -> i32 {
 }
 
 // `_sfn_substring_unchecked(text, start, end)` — #1308 (M1.A.2): the i64-indexed
-// substring entrypoint, now a real Sailfin body (the C
-// `sailfin_runtime_substring_unchecked` def is `static`, retaining only its two
-// internal C callers). Byte-faithful to that C body's three arms:
+// substring entrypoint, a real Sailfin body. Two arms:
 //   1. NULL text → the empty string.
-//   2. Immediate-codepoint pseudo-pointer (classified by the non-allocating
-//      `sfn_str_immediate_codepoint` bridge, #714/#716): slice the codepoint's
-//      UTF-8 encoding WITHOUT dereferencing `text`. Both bounds clamp to the
-//      encoded width `n` (the C `start > n` / `end > n` arms); bytes are written
-//      via `_sfn_utf8_byte` directly, so no real buffer is materialised.
-//   3. Real pointer: truly unchecked — trust the caller's bounds (already
+//   2. Real pointer: truly unchecked — trust the caller's bounds (already
 //      validated via `.length`), clamping only `start >= 0` and `end >= start`,
 //      then `memcpy [start, end)`.
+// The immediate-codepoint pseudo-pointer arm is gone: the `(byte << 32)`
+// encoding is retired (#1420/#822), so `text` is always a real pointer.
 // Arena-backed (the process-global arena, like `sfn_str_concat` /
 // `sfn_str_from_codepoint`) rather than the C body's `_rt_malloc` + owned-string
 // tracking: the arena reclaims on rewind, the discipline the rest of the ported
 // string surface already follows. The `roundup8(length + 1)` 8-aligned alloc +
 // `_num_put_byte` trailing NUL keeps the word read-modify-write in-bounds (the
 // seed cannot lower a single-byte `* u8` store). A non-owning `Slice` view stays
-// blocked on #1283 (an immediate pseudo-pointer has no real `text + start`).
+// blocked on #1283 (the SfnString aggregate flip).
 fn _sfn_substring_unchecked(text: * u8, start: i64, end: i64) -> * u8 {
     if (text as i64) == 0 {
         let empty: string = "";
         return empty as * u8;
-    }
-
-    let cp: i64 = sfn_str_immediate_codepoint(text);
-    if cp >= 0 {
-        let n: i64 = _sfn_utf8_byte_len(cp);
-        let mut s: i64 = start;
-        if s < 0 { s = 0; }
-        let mut e: i64 = end;
-        if e < s { e = s; }
-        if s > n { s = n; }
-        if e > n { e = n; }
-        let length: i64 = e - s;
-        let cap: i64 = ((length + 1 + 7) / 8) * 8;
-        let arena: * u8 = sfn_arena_global();
-        let out: * u8 = sfn_arena_alloc(arena, cap as usize, 8 as usize);
-        if (out as i64) == 0 {
-            let empty: string = "";
-            return empty as * u8;
-        }
-        let mut i: i64 = 0;
-        loop {
-            if i >= length { break; }
-            _num_put_byte(out as i64 + i, _sfn_utf8_byte(cp, n, s + i));
-            i = i + 1;
-        }
-        _num_put_byte(out as i64 + length, 0);
-        return out;
     }
 
     let mut rs: i64 = start;
@@ -660,9 +505,9 @@ fn sfn_str_sfn_from_cstr(s: * u8) -> SfnString {
 // never read/written). These bodies mirror that exactly: they allocate fresh
 // per call and introduce NO `_runtime_enter` / reuse-seq bump. (Over-bumping a
 // hot path was the O(n²)/8 GiB-OOM failure mode of the abandoned real-buffer
-// attempt; avoided here by construction.) `sfn_str_decode_owned` (the
-// immediate-decode bridge) is a pass-through for real pointers, so the chained
-// `a + b + c` hot path performs no extra allocation.
+// attempt; avoided here by construction.) With the immediate-codepoint
+// encoding retired (#1420/#822), operands are always real pointers, so the
+// chained `a + b + c` hot path performs no extra allocation.
 // `_sfn_resolve_arena(arena_slot)` derefs the `SfnArena **` slot once to the
 // live arena handle, falling back to the process-global arena when the slot
 // or its contents are null (the C `sfn_str_concat`'s defensive resolution).
@@ -716,8 +561,8 @@ fn _sfn_check_concat_limit(alen: i64, blen: i64) -> void {
 }
 
 // `sfn_str_concat(a, b, arena_slot)` — bump `a.len + b.len + 1` bytes into the
-// resolved arena, memcpy both (immediate-decoded) payloads, NUL-terminate, and
-// return the `{data, total}` aggregate. See the family comment above.
+// resolved arena, memcpy both payloads, NUL-terminate, and return the
+// `{data, total}` aggregate. See the family comment above.
 //
 // Allocation. The C body requested `sfn_arena_alloc(arena, total + 1, 1)`;
 // this asks for `roundup8(total + 1)` bytes at 8-byte alignment instead. That
@@ -748,17 +593,13 @@ fn sfn_str_concat(a_data: * u8, a_len: i64, b_data: * u8, b_len: i64, arena_slot
         return empty;
     }
 
-    // Decode immediate-codepoint operands before the memcpy (a pass-through for
-    // real pointers, so the chained-concat hot path does not allocate). `alen`
-    // / `blen` are already the decoded UTF-8 byte widths the caller computed.
-    let a_real: * u8 = sfn_str_decode_owned(a_data);
-    let b_real: * u8 = sfn_str_decode_owned(b_data);
+    // `alen` / `blen` are already the UTF-8 byte widths the caller computed.
     if alen > 0 {
-        if (a_real as i64) != 0 { memcpy(data, a_real, alen as usize); }
+        if (a_data as i64) != 0 { memcpy(data, a_data, alen as usize); }
     }
     if blen > 0 {
-        if (b_real as i64) != 0 {
-            memcpy((data as i64 + alen) as * u8, b_real, blen as usize);
+        if (b_data as i64) != 0 {
+            memcpy((data as i64 + alen) as * u8, b_data, blen as usize);
         }
     }
     _num_put_byte(data as i64 + total, 0);
@@ -767,14 +608,14 @@ fn sfn_str_concat(a_data: * u8, a_len: i64, b_data: * u8, b_len: i64, arena_slot
 
 // `sfn_str_append(dst, suffix, arena_slot)` — grow `dst` in place (or relocate)
 // to hold `dst.len + suffix.len` bytes via the arena's grow-if-at-tip realloc,
-// memcpy the (immediate-decoded) suffix at the tail, NUL-terminate, and write
+// memcpy the suffix at the tail, NUL-terminate, and write
 // the updated `{data, len}` back through `dst` (a `SfnString *`). No emission
 // site targets this (`native_signature: null` at `runtime_helpers.sfn`); it is
 // ported for link-completeness, sharing concat's arena / limit machinery. The
 // `dst` fields are read/written through the `{data@0, len@8}` layout with the
 // `atomic_load` / `atomic_store` word discipline the runtime uses for `* T`
-// field access under the seed. An immediate-codepoint / null `dst.data` has no
-// real buffer to grow, so the body no-ops (the C body's guard).
+// field access under the seed. A null `dst.data` has no real buffer to grow,
+// so the body no-ops (the C body's guard).
 fn sfn_str_append(dst: * u8, suffix_data: * u8, suffix_len: i64, arena_slot: * u8) -> void {
     if (dst as i64) == 0 { return; }
     if suffix_len <= 0 { return; }
@@ -785,7 +626,6 @@ fn sfn_str_append(dst: * u8, suffix_data: * u8, suffix_len: i64, arena_slot: * u
     let old_data: i64 = atomic_load(data_slot);
     let old_len: i64 = atomic_load(len_slot);
     if old_data == 0 { return; }
-    if sfn_str_immediate_codepoint(old_data as * u8) >= 0 { return; }
 
     let mut olen: i64 = old_len;
     if olen < 0 { olen = 0; }
@@ -800,10 +640,9 @@ fn sfn_str_append(dst: * u8, suffix_data: * u8, suffix_len: i64, arena_slot: * u
     let grown: * u8 = sfn_arena_realloc(arena, old_data as * u8, (olen + 1) as usize, new_cap as usize, 8 as usize);
     if (grown as i64) == 0 { return; }
 
-    let suffix_real: * u8 = sfn_str_decode_owned(suffix_data);
     if slen > 0 {
-        if (suffix_real as i64) != 0 {
-            memcpy((grown as i64 + olen) as * u8, suffix_real, slen as usize);
+        if (suffix_data as i64) != 0 {
+            memcpy((grown as i64 + olen) as * u8, suffix_data, slen as usize);
         }
     }
     _num_put_byte(grown as i64 + new_len, 0);
@@ -816,16 +655,15 @@ fn sfn_str_append(dst: * u8, suffix_data: * u8, suffix_len: i64, arena_slot: * u
 // The bare names below ARE the emission targets (the C defs in
 // `sailfin_runtime.c` are now `static`); the `sfn_str_sfn_*` proof-of-life
 // infix wrappers they replace are retired (mirroring #1314's number/int
-// flip). Each body owns its control flow in Sailfin and calls the four
-// narrow C bridges (`sfn_str_decode_owned` / `sfn_str_immediate_codepoint`
-// / `sfn_str_read_byte` / `sfn_str_grapheme_byte`) only for the operations
-// the seed cannot express in Sailfin today: a single-byte `* u8` load, the
-// immediate-codepoint pseudo-pointer decode, and the platform-gated
-// grapheme production. Behaviour is byte-identical to the prior C
-// trampolines — including the bootstrap "treat each UTF-8 byte as a
-// grapheme" simplification and the first-byte `codepoint` for multi-byte
-// sequences. The bridges (and this dance) retire with the SfnString
-// aggregate flip / immediate-encoding deletion (#1283 / #822).
+// flip). Each body owns its control flow in Sailfin and calls the two
+// narrow C bridges (`sfn_str_read_byte` / `sfn_str_grapheme_byte`) only for
+// the operations the seed cannot express in Sailfin today: a single-byte
+// `* u8` load and the platform-gated grapheme production. Behaviour is
+// byte-identical to the prior C trampolines — including the bootstrap "treat
+// each UTF-8 byte as a grapheme" simplification and the first-byte
+// `codepoint` for multi-byte sequences. These bridges retire with the
+// SfnString aggregate flip (#1283). The immediate-codepoint decode bridge is
+// already gone: the `(byte << 32)` encoding is retired (#1420/#822).
 //
 // `codepoint` / `grapheme_count` return `f64`, not `i64`: their registry
 // rows (`runtime_helpers.sfn:617,993`) keep a `double` C-ABI return + a
@@ -835,8 +673,7 @@ fn sfn_str_append(dst: * u8, suffix_data: * u8, suffix_len: i64, arena_slot: * u
 // simplification: the UTF-8 byte length (one byte == one grapheme),
 // exactly as the legacy walker computed.
 fn sfn_str_grapheme_count(s: * u8) -> f64 {
-    let real: * u8 = sfn_str_decode_owned(s);
-    let len: i64 = strnlen(real, 16777216) as i64;
+    let len: i64 = strnlen(s, 16777216) as i64;
     return len as f64;
 }
 
@@ -851,28 +688,20 @@ fn sfn_str_grapheme_count_lv(s_data: * u8, s_len: i64) -> f64 {
     return s_len as f64;
 }
 
-// `sfn_str_grapheme_at(s, idx)` — the `idx`-th grapheme of `s`. An
-// immediate-codepoint input is a single grapheme at index 0 (returned
-// unchanged, never dereferenced); a real ASCII byte is produced as an
-// immediate pseudo-pointer (Linux) or a 1-byte buffer by the platform-
-// gated `sfn_str_grapheme_byte` bridge. Out-of-range or non-integral
-// indices yield the empty string. The decode + `string_length` guard the
-// `grapheme_byte` dereference (a corrupted pointer scans to length 0).
+// `sfn_str_grapheme_at(s, idx)` — the `idx`-th grapheme of `s`, produced as a
+// 1-byte string by the platform-gated `sfn_str_grapheme_byte` bridge.
+// Out-of-range or non-integral indices yield the empty string. The
+// `string_length` guard bounds the `grapheme_byte` dereference (a corrupted
+// pointer scans to length 0).
 fn sfn_str_grapheme_at(s: * u8, idx: f64) -> * u8 {
     if (s as i64) == 0 { return sfn_str_from_byte(0); }
     let iidx: i64 = idx as i64;
     if (iidx as f64) != idx { return sfn_str_from_byte(0); }
-    let imm: i64 = sfn_str_immediate_codepoint(s);
-    if imm >= 0 {
-        if iidx == 0 { return s; }
-        return sfn_str_from_byte(0);
-    }
     if iidx < 0 { return sfn_str_from_byte(0); }
-    let real: * u8 = sfn_str_decode_owned(s);
-    let len: i64 = strnlen(real, 16777216) as i64;
+    let len: i64 = strnlen(s, 16777216) as i64;
     if len <= 0 { return sfn_str_from_byte(0); }
     if iidx >= len { return sfn_str_from_byte(0); }
-    return sfn_str_grapheme_byte(real, iidx);
+    return sfn_str_grapheme_byte(s, iidx);
 }
 
 // `sfn_str_grapheme_at_lv(s_data, s_len, idx)` — #1704: length-aware (`_lv`)
@@ -924,18 +753,15 @@ fn sfn_str_find_byte(s_data: * u8, s_len: i64, byte_value: i64, start_index: i64
 }
 
 // `sfn_str_codepoint(s)` — first codepoint of `s`, or -1 for a null/empty
-// string. Preserves the legacy `char_code` semantics exactly: an immediate
-// input returns its codepoint value (via `sfn_str_immediate_codepoint`, no
-// dereference); a real string returns its first byte (the documented
-// bootstrap simplification for multi-byte sequences).
+// string. Preserves the legacy `char_code` semantics exactly: returns the
+// first byte of the string (the documented bootstrap simplification for
+// multi-byte sequences). With the immediate-codepoint encoding retired
+// (#1420/#822), `s` is always a real pointer.
 fn sfn_str_codepoint(s: * u8) -> f64 {
     if (s as i64) == 0 { return -1.0; }
-    let imm: i64 = sfn_str_immediate_codepoint(s);
-    if imm >= 0 { return imm as f64; }
-    let real: * u8 = sfn_str_decode_owned(s);
-    let len: i64 = strnlen(real, 16777216) as i64;
+    let len: i64 = strnlen(s, 16777216) as i64;
     if len <= 0 { return -1.0; }
-    return sfn_str_read_byte(real, 0) as f64;
+    return sfn_str_read_byte(s, 0) as f64;
 }
 
 // `sfn_str_codepoint_lv(s_data, s_len)` — #1704: length-aware (`_lv`) first
@@ -977,22 +803,12 @@ fn sfn_str_sfn_from_byte(byte_value: i64) -> * u8 {
 
 // `sfn_str_to_number(s)` — #1372: the real Sailfin body for the
 // `string.to_number` emission target (the C `sfn_str_to_number` def is
-// now `static`). Classifies an immediate-codepoint pseudo-pointer FIRST
-// via the non-allocating `sfn_str_immediate_codepoint` bridge — the C
-// body decoded inline before `strtod` because the operand can arrive
-// tagged (#714/#716), and an unconditional owning decode would leak. An
-// immediate is a single codepoint: an ASCII digit yields its value, any
-// other single character yields `0.0` — exactly what `strtod` returns for
-// the equivalent one-character string. A real pointer is already
-// deref-safe, so `strtod` parses the NUL-terminated payload directly
-// (`endptr` discarded via `null`). Null yields `0.0`.
+// now `static`). With the immediate-codepoint encoding retired (#1420/#822),
+// `s` is always a real, deref-safe pointer, so `strtod` parses the
+// NUL-terminated payload directly (`endptr` discarded via `null`). Null
+// yields `0.0`.
 fn sfn_str_to_number(s: * u8) -> f64 {
     if (s as i64) == 0 { return 0.0; }
-    let cp: i64 = sfn_str_immediate_codepoint(s);
-    if cp >= 0 {
-        if cp >= 48 && cp <= 57 { return (cp - 48) as f64; }
-        return 0.0;
-    }
     return strtod(s, null);
 }
 
@@ -1004,9 +820,9 @@ fn sfn_str_to_number(s: * u8) -> f64 {
 // A non-NUL-terminated interior view (`{data+start, end-start}`, #1454) then
 // parses ONLY its bytes and never over-reads into the source tail. The carried
 // length is the aggregate field, never a NUL scan — scanning a non-terminated
-// view is exactly the over-read this fixes. The immediate-codepoint and
-// null/empty fast paths are preserved so numeric results stay byte-identical to
-// `sfn_str_to_number` for NUL-terminated inputs. The bare body above is retained
+// view is exactly the over-read this fixes. The null/empty fast path is
+// preserved so numeric results stay byte-identical to `sfn_str_to_number`
+// for NUL-terminated inputs. The bare body above is retained
 // as the old-`i8*` ABI trampoline for the pinned seed during `make compile`; the
 // `string.to_number` descriptor's `native_signature` resolves freshly-emitted IR
 // to this `_lv` symbol. The `roundup8(s_len + 1)` 8-aligned alloc + `_num_put_byte`
@@ -1015,11 +831,6 @@ fn sfn_str_to_number(s: * u8) -> f64 {
 // use.
 fn sfn_str_to_number_lv(s_data: * u8, s_len: i64) -> f64 {
     if (s_data as i64) == 0 { return 0.0; }
-    let cp: i64 = sfn_str_immediate_codepoint(s_data);
-    if cp >= 0 {
-        if cp >= 48 && cp <= 57 { return (cp - 48) as f64; }
-        return 0.0;
-    }
     let mut n: i64 = s_len;
     if n < 0 { n = 0; }
     if n == 0 { return 0.0; }

@@ -1,11 +1,10 @@
 // #1318 (C5 of epic #1308): regression coverage for the Sailfin-native
 // `sfn_str_concat` body that replaced the C entrypoint. The interesting case
 // the existing `string_concat_test` / `string_stress_test` files do not pin is
-// concatenation where an operand is an *immediate-codepoint pseudo-pointer* —
-// the tagged, bufferless shape an indexed character (`s[i]`) carries pre-M1.A.2.
-// The native body decodes such operands through the `sfn_str_decode_owned`
-// bridge before the memcpy; these tests confirm an immediate + real (and
-// immediate + immediate) concat round-trips byte-for-byte.
+// concatenation where an operand is an indexed character (`s[i]`). With the
+// immediate-codepoint encoding retired (#1420/#822), `s[i]` yields an ordinary
+// one-byte grapheme string; these tests confirm that indexed-character
+// concatenation round-trips byte-for-byte.
 test "concat: immediate char + real string" {
     let src = "hello";
     let r = src[0] + "!";
