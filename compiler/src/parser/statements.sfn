@@ -115,9 +115,12 @@ fn parse_block(initial_parser: Parser) -> BlockParseResult {
     parser = skip_trivia(parser);
     let token = parser_peek_raw(parser);
     if !symbol_matches(token, "{") {
+        // No `{` at all: the legitimate no-body case (interface method
+        // signatures). Nothing was opened, so nothing is unclosed.
         return BlockParseResult {
             parser: parser,
-            block: Block { tokens: [], text: "", statements: [] }
+            block: Block { tokens: [], text: "", statements: [] },
+            closed: true
         };
     }
 
@@ -125,6 +128,7 @@ fn parse_block(initial_parser: Parser) -> BlockParseResult {
     let mut current = parser_advance_raw(parser);
     let mut block_end_index: int = start_index;
     let mut statements: Statement[] = [];
+    let mut closed: boolean = false;
 
     loop {
         current = skip_trivia(current);
@@ -132,8 +136,12 @@ fn parse_block(initial_parser: Parser) -> BlockParseResult {
         if symbol_matches(tok, "}") {
             block_end_index = current.index + 1;
             current = parser_advance_raw(current);
+            closed = true;
             break;
         }
+        // Truncated body: EOF before the closing `}`. Leave `closed` false so
+        // `parse_function` can reject it (E0505) rather than emitting a
+        // silently-empty body that loses `main` and ICEs at link (SFN-384).
         if tok.kind.variant == "EndOfFile" { break; }
 
         let block_result = parse_block_statement(current);
@@ -167,7 +175,11 @@ fn parse_block(initial_parser: Parser) -> BlockParseResult {
         text: text,
         statements: statements
     };
-    return BlockParseResult { parser: skip_trivia(current), block: block };
+    return BlockParseResult {
+        parser: skip_trivia(current),
+        block: block,
+        closed: closed
+    };
 }
 
 fn trim_block_tokens_local(tokens: Token[]) -> Token[] {

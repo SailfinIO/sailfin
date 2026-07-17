@@ -186,7 +186,12 @@ here.
   (`struct S { x: }`) — now produce `E0501`/`E0502`/`E0503` parse diagnostics
   in `sfn check` and are rejected by `build` before LLVM lowering/linking
   (SFN-18); recovery still lets an independent following declaration parse
-  and report on its own.
+  and report on its own. A `let` binding whose name is not an identifier
+  (`let{`, `let 3`) produces `E0504`, and a function body that opens with `{`
+  but hits EOF before its closing `}` (a truncated/cut-off program) produces
+  `E0505` — both reject in `check` and `build` before lowering, so a truncated
+  body can no longer silently lose `main` and surface as a missing-`main`
+  linker ICE (SFN-384).
 - **Import-resolution checking (#1953).** `sfn check` now diagnoses a
   relative `import { ... } from "./x"`/`"../x"` that resolves to no module
   on disk (`E0430`) and a named specifier defined nowhere in the staged

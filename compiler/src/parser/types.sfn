@@ -60,6 +60,13 @@ struct BlockStatementParseResult {
 struct BlockParseResult {
     parser: Parser;
     block: Block;
+    // False when the block opened with `{` but never reached its closing `}`
+    // (source truncated mid-body, e.g. a provider returning a cut-off program).
+    // `parse_function` turns this into an `E0505` parse diagnostic so a
+    // truncated body cannot silently lose `main` and reach the linker as an ICE
+    // (SFN-384). True for a properly closed block and for the legitimate
+    // no-body case (`{` absent), so callers that don't gate on it are unchanged.
+    closed: boolean;
 }
 
 // ============================================================================
