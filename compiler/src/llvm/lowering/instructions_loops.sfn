@@ -6,7 +6,7 @@ import { char_code, grapheme_at, substring } from "../../string_utils";
 import { lower_expression } from "../expression_lowering/native/core";
 import { find_local_binding } from "../expressions_bindings";
 import { format_temp_name } from "../expressions_helpers";
-import { make_child_scope_id } from "../lifetime";
+import { is_scope_descendant, make_child_scope_id } from "../lifetime";
 import { trace_lowering } from "../lowering_debug_state";
 import { empty_string_constant_set, merge_string_constants } from "../strings";
 import {
@@ -191,6 +191,19 @@ fn lower_loop_instruction(function: NativeFunction, start_index: int, llvm_retur
     loop {
         if preload_index >= current_locals.length { break; }
         let local = current_locals[preload_index];
+        // Only preload a binding whose alloca dominates this loop preheader.
+        // A sibling-arm pattern binding can leak into `current_locals` (its
+        // alloca lives in a non-dominating arm body block); loading it here and
+        // feeding it into a live loop phi emits IR that fails the LLVM verifier
+        // ("Instruction does not dominate all uses", SFN-378 class — worse at a
+        // loop because the value feeds a real phi, not dead code). Skip the load
+        // but push a placeholder so `preloaded_locals` stays index-aligned with
+        // `base_locals` for the phi consumer below (which tolerates "").
+        if !is_scope_descendant(local.scope_id, scope_id) {
+            preloaded_locals.push("");
+            preload_index += 1;
+            continue;
+        }
         let preload_temp = format_temp_name(current_temp);
         current_temp += 1;
         let preload_line = "  " + preload_temp + " = load " + local.llvm_type

@@ -1,0 +1,151 @@
+// compiler/tests/e2e/loop_in_match_arm_dominance_test.sfn
+//
+// Shape-pinning coverage for SFN-380 (follow-up to SFN-378): a `loop` nested
+// inside a `match` arm, with a sibling arm binding in scope, must lower to
+// verifier-clean LLVM IR and produce correct active-phi output.
+//
+// The loop lowering preloads all in-scope locals before the preheader and
+// feeds them into the header phi nodes (`instructions_loops.sfn`). Unlike the
+// match/if preload — whose values feed dead code — the loop's preloaded values
+// are actively consumed into real phis. A sibling arm's pattern binding leaking
+// into the preloaded local set (the SFN-378 leak class) would therefore load
+// from an `alloca` that does not dominate the preheader and feed it into a live
+// phi: a genuine miscompile, not a dead `load`. The fix filters each preload by
+// scope dominance (`is_scope_descendant`), pushing an index-aligned placeholder
+// for a skipped slot so the phi consumer stays positionally aligned.
+//
+// SCOPE OF THIS TEST: it pins that the loop-inside-match-arm *shape* lowers to
+// verifier-clean IR and computes the correct loop result. Like its SFN-378
+// sibling (`match_arm_fallthrough_dominance_test.sfn`), it does NOT reproduce
+// the underlying leak in isolation — that leak is an allocator-state-dependent
+// aliasing of `current_locals` that only manifests under the full self-host
+// build. In a single-file compile the clone isolates correctly, so this fixture
+// emits identical clean IR against both the buggy and fixed compiler; it
+// documents and pins the source shape and the active-phi arithmetic.
+//
+// Drives the shipped `build/bin/sfn emit --validate llvm`: the `--validate`
+// cascade round-trips the emitted IR through `llvm-as`, whose verifier catches
+// a dominance violation. Where `llvm-as` is absent the cascade skips validation
+// and the fixture (valid IR) still emits cleanly, so it never flakes. The
+// emitting child inherits the full parent environment via `process.environ()`
+// so `PATH` (the `llvm-as` lookup) and `SAILFIN_TEST_SCRATCH` (build-cache
+// isolation under the parallel pool, #1333) both flow through.
+fn _sfn_bin() -> string ![io] {
+    let configured = env.get("SAILFIN_BIN");
+    if configured.length > 0 { return configured; }
+    return "build/bin/sfn";
+}
+
+fn _scratch_dir() -> string ![io] {
+    let mut dir = env.get("SAILFIN_TEST_SCRATCH");
+    if dir.length == 0 { dir = "/tmp"; }
+    fs.createDirectory(dir, true);
+    return dir;
+}
+
+// A loop nested inside the `Ok` arm of a `match`, while the sibling `Err` arm
+// binds `error`. The loop mutates `acc` and `i` (the locals that feed the loop
+// header phis), so the preloaded outer-scope locals must not be contaminated by
+// the sibling `error` binding — otherwise the preheader would load a
+// non-dominating value straight into an active phi.
+fn _fixture_source() -> string {
+    return "fn _classify(x: int) -> Result<int, string> {\n"
+        + "    if x < 0 { return Result.Err { error: \"negative\" }; }\n"
+        + "    return Result.Ok { value: x };\n"
+        + "}\n"
+        + "\n"
+        + "fn _sum_to(x: int) -> Result<int, string> {\n"
+        + "    let outer: Result<int, string> = _classify(x);\n"
+        + "    match outer {\n"
+        + "        Result.Err { error } => {\n"
+        + "            return Result.Err { error: error };\n"
+        + "        },\n"
+        + "        Result.Ok { value } => {\n"
+        + "            let mut acc: int = 0;\n"
+        + "            let mut i: int = 0;\n"
+        + "            loop {\n"
+        + "                if i >= value { break; }\n"
+        + "                acc = acc + i;\n"
+        + "                i = i + 1;\n"
+        + "            }\n"
+        + "            return Result.Ok { value: acc };\n"
+        + "        }\n"
+        + "    }\n"
+        + "}\n"
+        + "\n"
+        + "test \"loop in match arm dominance\" {\n"
+        + "    match _sum_to(5) {\n"
+        + "        Result.Ok { value } => { assert value == 10; },\n"
+        + "        Result.Err { error } => { assert error.length > 0; }\n"
+        + "    }\n"
+        + "}\n";
+}
+
+// Real top-level counterparts of `_fixture_source` (same loop-in-match-arm
+// shape), so an in-process test block can assert the active-phi arithmetic
+// directly. The `emit --validate` leg pins verifier-clean IR; this pins that
+// the loop header phis compute the right value. On Linux `clang -O` tolerates a
+// dominance violation (#1389 class), so IR validation and runtime output are
+// independent checks — both acceptance criteria need their own leg.
+fn _classify(x: int) -> Result<int, string> {
+    if x < 0 {
+        return Result.Err { error: "negative" };
+    }
+    return Result.Ok { value: x };
+}
+
+fn _sum_to(x: int) -> Result<int, string> {
+    let outer: Result<int, string> = _classify(x);
+    match outer {
+        Result.Err { error } => {
+            return Result.Err { error: error };
+        },
+        Result.Ok { value } => {
+            let mut acc: int = 0;
+            let mut i: int = 0;
+            loop {
+                if i >= value { break; }
+                acc = acc + i;
+                i = i + 1;
+            }
+            return Result.Ok { value: acc };
+        }
+    }
+}
+
+test "loop in match arm: active-phi output is correct" {
+    // value = 5 → 0+1+2+3+4 = 10 (loop runs, phis advance each iteration).
+    match _sum_to(5) {
+        Result.Ok { value } => { assert value == 10; },
+        Result.Err { error } => { assert false; }
+    }
+    // value = 0 → loop never enters; the phi keeps the preheader value (0).
+    match _sum_to(0) {
+        Result.Ok { value } => { assert value == 0; },
+        Result.Err { error } => { assert false; }
+    }
+    // Sibling `Err` arm still reachable and correct.
+    match _sum_to(-1) {
+        Result.Ok { value } => { assert false; },
+        Result.Err { error } => { assert error.length > 0; }
+    }
+}
+
+test "loop in match arm: loop nested in a match arm lowers to verifier-clean IR" ![io] {
+    let src = _scratch_dir() + "/loop_in_match_arm_380.sfn";
+    if fs.exists(src) { fs.deleteFile(src); }
+    fs.writeFile(src, _fixture_source());
+    let out = _scratch_dir() + "/loop_in_match_arm_380.ll";
+    if fs.exists(out) { fs.deleteFile(out); }
+
+    // `emit --validate llvm` runs the emitted IR through the `llvm-as`
+    // verifier; a dominance violation makes it exit non-zero.
+    let exit = process.run_capture([_sfn_bin(), "emit", "--validate", "-o", out, "llvm", src], process.environ());
+    let _sout = process.capture_take_stdout();
+    let _serr = process.capture_take_stderr();
+
+    assert exit == 0;
+    assert fs.exists(out);
+    fs.deleteFile(out);
+    fs.deleteFile(src);
+}
