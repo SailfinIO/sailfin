@@ -981,6 +981,61 @@ fn coerce_and_emit_call(trimmed_target: string, operands: LLVMOperand[], expecte
         }
     }
 
+    // `read_link(path, buf, size) -> i64` sentinel (SFN-46): the single-hop
+    // `readlink(2)` byte count. POSIX legs emit `call i64 @readlink(...)`;
+    // the Windows leg is a bare `i64 -1` stub so the MinGW-absent `readlink`
+    // symbol never enters the IR. The caller (`sfn_fs_read_link`) owns the
+    // buffer and turns a `<= 0` return into `""`.
+    if helper_descriptor != null {
+        if helper_descriptor.symbol == "sailfin_intrinsic_fs_read_link" {
+            if final_operands.length < 3 {
+                result_diagnostics.push("llvm lowering: sailfin_intrinsic_fs_read_link requires (path: i8*, buf: i8*, size: i64) operands");
+            } else {
+                let _fs_leg = fs_platform_leg();
+                if _fs_leg == "mingw" {
+                    // Windows stub: no `readlink` symbol in the IR; always fail.
+                    let _fs_stub = LLVMOperand {
+                        llvm_type: "i64",
+                        value: "-1"
+                    };
+                    return ExpressionResult {
+                        lines: result_lines,
+                        temp_index: result_temp,
+                        operand: _fs_stub,
+                        diagnostics: result_diagnostics,
+                        string_constants: collected_string_constants
+                    };
+                } else {
+                    // POSIX (linux/darwin): readlink(path, buf, size).
+                    let _fs_path = final_operands[0].value;
+                    let _fs_buf = final_operands[1].value;
+                    let _fs_size = final_operands[2].value;
+                    let _fs_n = format_temp_name(result_temp);
+                    result_temp = result_temp + 1;
+                    result_lines.push("  " + _fs_n
+                        + " = call i64 @readlink(i8* "
+                        + _fs_path
+                        + ", i8* "
+                        + _fs_buf
+                        + ", i64 "
+                        + _fs_size
+                        + ")");
+                    let _fs_operand = LLVMOperand {
+                        llvm_type: "i64",
+                        value: _fs_n
+                    };
+                    return ExpressionResult {
+                        lines: result_lines,
+                        temp_index: result_temp,
+                        operand: _fs_operand,
+                        diagnostics: result_diagnostics,
+                        string_constants: collected_string_constants
+                    };
+                }
+            }
+        }
+    }
+
     // `mkdtemp(template) -> bool` sentinel (#1308): POSIX legs call
     // `mkdtemp(3)` (returns the mutated template buffer or NULL); the
     // Windows leg is a bare `false` stub so the MinGW-absent symbol never

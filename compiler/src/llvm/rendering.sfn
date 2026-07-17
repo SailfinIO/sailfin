@@ -329,6 +329,9 @@ fn render_runtime_helper_declarations(used_targets: string[], local_functions: N
             if descriptor.target == "sailfin_intrinsic_fs_list_dir" {
                 _preamble_inlined = true;
             }
+            if descriptor.target == "sailfin_intrinsic_fs_read_link" {
+                _preamble_inlined = true;
+            }
             // #1601 / #1876 / #1877: the Call-form `serve` stays
             // effect-metadata-only, so it stays sentinel-skipped — its
             // descriptor `symbol` is deliberately fake (`sfn_serve_unbridged`)
