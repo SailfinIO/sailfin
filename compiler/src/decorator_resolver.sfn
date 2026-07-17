@@ -1,0 +1,243 @@
+// compiler/src/decorator_resolver.sfn
+//
+// SFEP-0023 (Capsule-Defined Decorators) §4.2: resolve each applied
+// decorator `@foo` on a function declaration to the exported function it
+// names, so a decorator becomes an ordinary imported symbol rather than a
+// compiler-hardcoded string match. This module is the "unblocker" pass
+// (SFEP-0023 §7 issue #1): it produces the resolved sidecar and the
+// resolution diagnostics; the effect-inference (§4.3) and lowering (§4.4)
+// consumers land in follow-up issues.
+//
+// The result is a **sidecar** keyed by function name, threaded like
+// `ImportSymbolTable` rather than stored on the `Decorator` AST node — the
+// `Decorator` struct layout is seed-opaque-sensitive (see the
+// `decorator_semantics.sfn` header), so this pass never mutates it. It only
+// reads `Decorator.name` / `Decorator.arguments`, the same read `ast` and
+// `emit_native` already perform.
+//
+// Resolution keys on the localized import table
+// (`localize_import_symbols_for_program`), whose `ImportedFunctionSignature`
+// entries now carry an `is_decorator` bit set by the loader for well-formed
+// `@decorator` exports. Ordering: this pass runs after import resolution
+// (so the localized table exists) and before effect-inference finalization
+// (which will, in issue #2, consume `ResolvedDecorator.effects`).
+import {
+    DecoratorArgument,
+    Program,
+    Statement,
+    decorator_marker_name,
+    has_decorator_marker
+} from "./ast";
+import {
+    ImportSymbolTable,
+    ImportedFunctionSignature,
+    lookup_imported_function
+} from "./effect_imports";
+import { Diagnostic, FixSuggestion } from "./typecheck_types";
+
+// One resolved decorator application. `local_name` is the name written at
+// the use site (`@logExecution`); `export_name` is the exporting-module
+// symbol it resolves to (equal to `local_name` today — reversing an
+// `import { x as y }` alias to the original export is a lowering concern
+// deferred to issue #3, SFEP-0023 §4.4). `capsule` is the source capsule
+// and is left empty until provenance is threaded through the import table
+// (also issue #3; the import table carries only name/effects/marker today).
+// `effects` are the decorator function's declared effects, which issue #2
+// will union into the decorated function's required-effect set. `tier` is 1
+// for the only contract shipped (SFEP-0023 §4.1, entry hook). `arguments`
+// carries the decorator's own call arguments (`@logExecution("label")`) so
+// the lowering can marshal them ahead of the function-name descriptor.
+struct ResolvedDecorator {
+    local_name: string;
+    capsule: string;
+    export_name: string;
+    effects: string[];
+    tier: int;
+    arguments: DecoratorArgument[];
+}
+
+// The resolved decorators for one function declaration, keyed by the
+// decorated function's name so downstream passes (issue #2's effect union)
+// can index the sidecar by the function they are analyzing.
+struct ResolvedFunctionDecorators {
+    function_name: string;
+    decorators: ResolvedDecorator[];
+}
+
+// The pass result: the per-function sidecar plus any resolution
+// diagnostics. Diagnostics are minted here (E0701/E0702) but not yet routed
+// into the mainline effect gate — that wiring lands with the effect and
+// lowering consumers (issues #2/#3), so this step is purely additive and
+// self-hosts against the old seed.
+struct DecoratorResolution {
+    functions: ResolvedFunctionDecorators[];
+    diagnostics: Diagnostic[];
+}
+
+// The temporary built-in fallback registry (SFEP-0023 §4.2). Until the
+// dogfooding migration completes (§4.5 step F), un-imported legacy use of
+// `@logExecution`/`@trace` must still resolve instead of erroring, so those
+// names resolve to a built-in `![io]` decorator when not found in the
+// import table. This is the seam deleted in issue #5.
+fn _is_builtin_decorator(name: string) -> boolean {
+    if name == "logExecution" { return true; }
+    if name == "logexecution" { return true; }
+    if name == "trace" { return true; }
+    return false;
+}
+
+fn _builtin_decorator_effects() -> string[] {
+    let mut effects: string[] = [];
+    effects.push("io");
+    return effects;
+}
+
+fn _clone_effects(effects: string[]) -> string[] {
+    let mut clone: string[] = [];
+    let mut index: int = 0;
+    loop {
+        if index >= effects.length { break; }
+        clone.push(effects[index]);
+        index += 1;
+    }
+    return clone;
+}
+
+fn _make_resolved(local_name: string, capsule: string, effects: string[], arguments: DecoratorArgument[]) -> ResolvedDecorator {
+    return ResolvedDecorator {
+        local_name: local_name,
+        capsule: capsule,
+        export_name: local_name,
+        effects: _clone_effects(effects),
+        tier: 1,
+        arguments: arguments
+    };
+}
+
+// E0701: `@foo` names a symbol that is imported but is not a decorator.
+fn _not_a_decorator_diagnostic(name: string) -> Diagnostic {
+    let fix = FixSuggestion {
+        message: "mark the definition of `" + name
+            + "` with `@decorator` if it is meant to be applied as `@"
+            + name
+            + "`",
+        edits: []
+    };
+    return Diagnostic {
+        code: "E0701",
+        severity: "error",
+        message: "`" + name
+            + "` is imported but is not a decorator; only a function marked `@decorator` can be applied as `@"
+            + name
+            + "`",
+        file_path: "",
+        primary: null,
+        suggestion: fix
+    };
+}
+
+// E0702: `@foo` is neither imported nor a recognized built-in decorator.
+fn _unknown_decorator_diagnostic(name: string) -> Diagnostic {
+    let fix = FixSuggestion {
+        message: "import the decorator into scope, e.g. `import { " + name
+            + " } from \"<capsule>\";`",
+        edits: []
+    };
+    return Diagnostic {
+        code: "E0702",
+        severity: "error",
+        message: "unknown decorator `@" + name
+            + "` (did you forget to import it?)",
+        file_path: "",
+        primary: null,
+        suggestion: fix
+    };
+}
+
+// Resolve every applied decorator on `program`'s top-level function
+// declarations against `localized` (the per-program import table produced
+// by `localize_import_symbols_for_program`). The `@decorator` marker itself
+// is skipped — it declares the definition, it is not an application to
+// resolve.
+//
+// Scope: only top-level `FunctionDeclaration` decorators are walked here.
+// `MethodDeclaration.decorators` (SFEP-0023 §4.2 "function/method") are
+// resolved by the effect/lowering consumers in SFN-71/SFN-72, not by this
+// step-A pass.
+fn resolve_decorators(program: Program, localized: ImportSymbolTable) -> DecoratorResolution {
+    let mut functions: ResolvedFunctionDecorators[] = [];
+    let mut diagnostics: Diagnostic[] = [];
+
+    let mut s: int = 0;
+    loop {
+        if s >= program.statements.length { break; }
+        let statement = program.statements[s];
+        if statement.variant == "FunctionDeclaration" {
+            // A function marked `@decorator` is a decorator *definition*, not
+            // a use site; do not try to resolve the marker on itself.
+            let is_definition = has_decorator_marker(statement.decorators);
+            let mut resolved: ResolvedDecorator[] = [];
+            let decorators = statement.decorators;
+            let mut d: int = 0;
+            loop {
+                if d >= decorators.length { break; }
+                let decorator = decorators[d];
+                let name = decorator.name;
+                if name == decorator_marker_name() {
+                    d += 1;
+                    continue;
+                }
+                let entry_opt = lookup_imported_function(localized, name);
+                if entry_opt != null {
+                    let entry: ImportedFunctionSignature? = entry_opt;
+                    if entry.is_decorator {
+                        resolved.push(_make_resolved(name, "", entry.effects, decorator.arguments));
+                    } else {
+                        diagnostics.push(_not_a_decorator_diagnostic(name));
+                    }
+                } else {
+                    if _is_builtin_decorator(name) {
+                        resolved.push(_make_resolved(name, "", _builtin_decorator_effects(), decorator.arguments));
+                    } else {
+                        diagnostics.push(_unknown_decorator_diagnostic(name));
+                    }
+                }
+                d += 1;
+            }
+            if resolved.length > 0 || is_definition {
+                functions.push(ResolvedFunctionDecorators {
+                    function_name: statement.signature.name, decorators: resolved
+                });
+            }
+        }
+        s += 1;
+    }
+
+    return DecoratorResolution {
+        functions: functions,
+        diagnostics: diagnostics
+    };
+}
+
+// Look up the resolved decorators recorded for a given function name.
+// Returns an empty list when the function carried no resolvable decorators.
+fn resolved_decorators_for_function(resolution: DecoratorResolution, function_name: string) -> ResolvedDecorator[] {
+    let mut i: int = 0;
+    loop {
+        if i >= resolution.functions.length { break; }
+        if resolution.functions[i].function_name == function_name {
+            return resolution.functions[i].decorators;
+        }
+        i += 1;
+    }
+    let empty: ResolvedDecorator[] = [];
+    return empty;
+}
+
+export {
+    ResolvedDecorator,
+    ResolvedFunctionDecorators,
+    DecoratorResolution,
+    resolve_decorators,
+    resolved_decorators_for_function
+};
