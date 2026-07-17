@@ -252,25 +252,32 @@ test "lift #687: shadowing — capture `x` resolves to prologue, not outer" ![io
     assert user_return.variant == "ReturnStatement";
 }
 
-test "lift #687: mutable capture is refused with a fatal marker" ![io] {
-    // Per the M1.5 capture freeze, mutable captures are not yet
-    // supported. The lifting pass emits a
-    // `closure_pair_fatal_mutable` marker instead of synthesising a
-    // lifted function — the LLVM-side handler turns it into a
-    // `llvm lowering [fatal]:` diagnostic and the build refuses to
-    // write IR.
+test "lift #687: mutable capture lifts by reference (ref_mut marker)" ![io] {
+    // Mutable captures now lower by reference (#1747/SFN-88): the lift
+    // pass synthesises a lifted function exactly like an immutable
+    // capture, but the closure-pair and prologue markers carry the
+    // `ref_mut` mode segment so the env stores the enclosing slot
+    // pointer and the lifted body resolves the capture as an
+    // addressable local (writes propagate outward).
     let source = "fn main() { let mut x: int = 1; let f = fn() -> int { return x; }; }";
     let program = parse_program(source);
     let result: LiftResult = lift_non_capturing_lambdas(program);
-    // Mutable-capture refusal short-circuits before counter advance
-    // so the lambda_id stays at 0 (the first available slot).
-    assert result.counter == 0;
-    assert result.program.statements.length == 1;
+    assert result.counter == 1;
+    assert result.program.statements.length == 2;
     let main_fn: Statement = result.program.statements[0];
     let lambda_stmt: Statement = main_fn.body.statements[1];
     let init: Expression = lambda_stmt.initializer;
     assert init.variant == "Raw";
-    assert init.text == "<closure_pair_fatal_mutable lambda_id=0 name=x>";
+    assert init.text == "<closure_pair @sfn_lambda_0 env_alloc lambda_id=0 captures=x:int:ref_mut>";
+
+    let lifted: Statement = result.program.statements[1];
+    assert lifted.variant == "FunctionDeclaration";
+    assert lifted.signature.name == "sfn_lambda_0";
+    assert lifted.body.statements.length >= 1;
+    let prologue: Statement = lifted.body.statements[0];
+    assert prologue.variant == "ExpressionStatement";
+    assert prologue.expression.variant == "Raw";
+    assert prologue.expression.text == "<closure_env_load_prologue lambda_id=0 captures=x:int:ref_mut>";
 }
 
 // ── Capture-payload percent escape round-trip ────────────────────────
@@ -321,4 +328,23 @@ test "captures: decode_captures recovers generic-typed entries" {
     assert decoded[0].type_text == "Map<string, int>";
     assert decoded[1].name == "handler";
     assert decoded[1].type_text == "fn(int) -> boolean";
+}
+
+test "captures: decode_captures maps the mode segment to by_value/mutable" {
+    // The optional third segment is the capture mode (#1747/SFN-88): a
+    // two-part `name:type` field is a by-value snapshot, while a
+    // three-part `name:type:ref_mut` field is a mutable capture lowered
+    // by reference. decode must map each form to the right
+    // `by_value`/`mutable` flags so the env-field shape agrees between
+    // the lambda-site alloc and the lifted-body prologue.
+    let decoded: Capture[] = decode_captures("acc:int:ref_mut;x:int");
+    assert decoded.length == 2;
+    assert decoded[0].name == "acc";
+    assert decoded[0].type_text == "int";
+    assert ! decoded[0].by_value;
+    assert decoded[0].mutable;
+    assert decoded[1].name == "x";
+    assert decoded[1].type_text == "int";
+    assert decoded[1].by_value;
+    assert ! decoded[1].mutable;
 }

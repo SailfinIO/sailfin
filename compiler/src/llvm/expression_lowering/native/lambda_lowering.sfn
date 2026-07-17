@@ -403,29 +403,29 @@ fn _encode_captures(captures: Capture[]) -> string {
         if index > 0 { buffer = buffer + ";"; }
         buffer = buffer + percent_escape_capture_text(capture.name) + ":"
             + percent_escape_capture_text(capture.type_text);
+        let mode = _capture_mode_text(capture);
+        if mode != "value" {
+            buffer = buffer + ":" + percent_escape_capture_text(mode);
+        }
         index += 1;
     }
     return buffer;
 }
 
-// ── Mutable-capture refusal ─────────────────────────────────────────
+// ── Capture mode encoding ───────────────────────────────────────────
 //
-// Returns the name of the first mutable capture, or the empty string
-// when every capture is immutable. The lifting pass uses this to
-// emit a `closure_pair_fatal_mutable_marker` instead of a real
-// closure-pair so the LLVM-side dispatcher can surface a
-// `llvm lowering [fatal]:` diagnostic naming the offender. M1.5 ABI
-// freezes captures as by-value snapshots; mutable-capture semantics
-// require additional infrastructure (heap-allocated cells) that
-// lands post-M1.
-fn _find_mutable_capture_name(captures: Capture[]) -> string {
-    let mut index: int = 0;
-    loop {
-        if index >= captures.length { break; }
-        if captures[index].mutable { return captures[index].name; }
-        index += 1;
-    }
-    return "";
+// Only mutability drives by-reference lowering: a mutable capture lands as
+// `ref_mut`, so the env stores the enclosing slot pointer and the lifted body
+// installs that pointer as an addressable local. Every other capture keeps the
+// by-value snapshot ABI (`value`), regardless of `by_value`, which upstream is
+// a primitive-vs-heap layout heuristic (`is_primitive_type`), NOT a
+// by-reference request — treating a non-primitive immutable capture as a
+// reference pointer breaks the by-value env ABI (#1476). The marker mode
+// segment round-trips this through `decode_captures`, which tolerates a
+// missing segment as `value` so immutable captures keep their two-part form.
+fn _capture_mode_text(capture: Capture) -> string {
+    if capture.mutable { return "ref_mut"; }
+    return "value";
 }
 
 // ── Synthesis: lifted FunctionDeclaration ───────────────────────────
@@ -1006,19 +1006,9 @@ fn _rewrite_lambda(ctx: LiftContext, lambda_in: Expression, owned_env: boolean) 
         };
     }
 
-    // Capturing path (#687). Mutable captures are unsupported in M1.5
-    // — emit the fatal marker and DO NOT advance the counter or
-    // synthesise a lifted function (the lambda site would otherwise
-    // reference a sfn_lambda_<N> symbol that does not exist).
-    let mutable_name = _find_mutable_capture_name(record.captures);
-    if mutable_name.length > 0 {
-        let fatal_text = closure_pair_fatal_mutable_marker(ctx.counter, mutable_name);
-        return ExpressionRewriteResult {
-            ctx: ctx,
-            expression: Expression.Raw { text: fatal_text, span: null }
-        };
-    }
-
+    // Capturing path (#687/#1747). Mutable captures now lower by reference:
+    // the env stores the enclosing slot pointer and the lifted body resolves
+    // the capture as an addressable local, so writes propagate outward.
     let lambda_id = ctx.counter;
     let descend_ctx: LiftContext = LiftContext {
         counter: (ctx.counter + 1) as int,

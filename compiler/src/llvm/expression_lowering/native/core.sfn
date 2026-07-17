@@ -655,7 +655,10 @@ fn _resolve_capture_operands(captures: Capture[], bindings: ParameterBinding[], 
             // emitted here for a nested capture) can be used
             // directly. The prologue path produces `pointer = %t<N>`
             // (an SSA value name), so this discriminates correctly.
-            if substring(local.pointer, 0, 2) == "%l" {
+            if capture.mutable {
+                value_text = local.pointer;
+                value_type = local.llvm_type + "*";
+            } else if substring(local.pointer, 0, 2) == "%l" {
                 let load_result = load_local_operand(local, current_temp, current_lines);
                 current_lines = load_result.lines;
                 current_temp = load_result.temp_index;

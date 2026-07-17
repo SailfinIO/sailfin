@@ -171,11 +171,14 @@ fn percent_unescape_capture_text(text: string) -> string {
 // source-level type annotation contained. The inter-capture
 // separator is `;` (not `,`) so the env-alloc marker survives the
 // comma-splitting call-argument parser when a capturing lambda is
-// passed directly to a function (see #1106). `by_value` is set true
-// (M1.5 captures are by-value snapshots) and `mutable` is false
-// (the lift pass refuses mutable captures via a separate fatal
-// marker before any encoding happens — anything that reaches
-// `decode_captures` is guaranteed-immutable).
+// passed directly to a function (see #1106). An optional third
+// segment is the capture mode: absent (two-part `name:type`) means a
+// by-value snapshot (`by_value = true`, `mutable = false`); `ref_mut`
+// (#1747/SFN-88) marks a mutable capture lowered by reference, so the
+// env stores the enclosing slot pointer (`by_value = false`,
+// `mutable = true`). The encoder omits the segment for by-value
+// captures, so the two-part form stays byte-identical to prior
+// behaviour.
 fn decode_captures(encoded: string) -> Capture[] {
     let mut captures: Capture[] = [];
     if encoded.length == 0 { return captures; }
@@ -196,25 +199,34 @@ fn decode_captures(encoded: string) -> Capture[] {
         if field_text.length == 0 { continue; }
         let mut name_raw: string = "";
         let mut type_raw: string = "";
-        let mut at_type: boolean = false;
+        let mut mode_raw: string = "";
+        let mut part_index: int = 0;
         let mut fi: int = 0;
         loop {
             if fi >= field_text.length { break; }
             let fch = field_text[fi];
             if fch == ":" {
-                if !at_type {
-                    at_type = true;
+                if part_index < 2 {
+                    part_index += 1;
                     fi += 1;
                     continue;
                 }
             }
-            if at_type { type_raw = type_raw + fch; } else {
-                name_raw = name_raw + fch;
-            }
+            if part_index == 0 { name_raw = name_raw + fch; } else if part_index == 1 {
+                type_raw = type_raw + fch;
+            } else { mode_raw = mode_raw + fch; }
             fi += 1;
         }
+        let mode = percent_unescape_capture_text(mode_raw);
+        let mut by_value: boolean = true;
+        let mut is_mutable: boolean = false;
+        if mode == "ref" { by_value = false; }
+        if mode == "ref_mut" {
+            by_value = false;
+            is_mutable = true;
+        }
         captures.push(Capture {
-            name: percent_unescape_capture_text(name_raw), type_text: percent_unescape_capture_text(type_raw), by_value: true, mutable: false, span: null
+            name: percent_unescape_capture_text(name_raw), type_text: percent_unescape_capture_text(type_raw), by_value: by_value, mutable: is_mutable, span: null
         });
     }
     return captures;
@@ -321,6 +333,10 @@ fn closure_field_llvm_type(capture: Capture) -> string {
     let mapped = map_type_annotation(annotation);
     if mapped.length == 0 { return "i8*"; }
     if mapped == "void" { return "i8*"; }
+    if !capture.by_value {
+        if ends_with_pointer_suffix(mapped) { return mapped; }
+        return mapped + "*";
+    }
     // M1.A.2: a closure env is a heap container struct holding captures by
     // value, so a captured `string` rides as an `i8*` data pointer (the same
     // in-memory container shape as struct fields / array elements), not the
@@ -509,7 +525,8 @@ fn emit_closure_env_alloc(layout: ClosureEnvLayout, operands: ClosureCaptureOper
         if field_index >= layout.fields.length { break; }
         let field = layout.fields[field_index];
         let mut value = _find_operand(operands, field.name);
-        let operand_type = _find_operand_type(operands, field.name);
+        let mut operand_type = _find_operand_type(operands, field.name);
+        if field.mutable { operand_type = field.llvm_type; }
         if value.length == 0 { value = _field_zero_value(field.llvm_type); }
         // M1.A.2: a `string` capture is the scalar `{i8*, i64}` aggregate at
         // the capture site, but its env field is the `i8*` container shape
@@ -600,8 +617,12 @@ fn emit_closure_env_load_prologue(layout: ClosureEnvLayout, env_param_name: stri
         lines.push("  " + loaded + " = load " + field.llvm_type + ", " + field.llvm_type
             + "* "
             + field_ptr);
+        let mut binding_type = field.llvm_type;
+        if field.mutable {
+            binding_type = substring(field.llvm_type, 0, field.llvm_type.length - 1);
+        }
         bindings.push(ClosureEnvLoadedBinding {
-            name: field.name, llvm_type: field.llvm_type, llvm_name: loaded
+            name: field.name, llvm_type: binding_type, llvm_name: loaded
         });
         field_index += 1;
     }

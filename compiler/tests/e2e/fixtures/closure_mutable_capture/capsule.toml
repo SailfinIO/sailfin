@@ -1,0 +1,4 @@
+[capsule]
+name = "fixture/closure-mutable-capture"
+version = "0.0.0"
+description = "Isolated capsule manifest for the SFN-88 mutable-capture e2e fixture."
