@@ -1203,6 +1203,9 @@ fn _ws_srv_handshake(fd: i32, ssl: * u8) -> bool {
 //   - CLOSE (0x8): the client's close code (+ optional reason) is echoed,
 //     completing the close handshake, then the connection closes.
 //   - An unmasked or over-large frame is refused with close `1002` / `1009`.
+//   - RFC 6455 §5.5 control-frame hardening: a control frame (0x8/0x9/0xA)
+//     with a payload > 125 bytes or FIN=0, a reserved opcode (0x3–0x7,
+//     0xB–0xF), or a 1-byte CLOSE body is refused with close `1002`.
 // Returns null (serve is fire-and-forget; the `Task` result is unused).
 // Calls only effect-free externs and effect-erased helpers, so it carries no
 // effect annotation — matching `serve.sfn::_serve_conn_worker` and
@@ -1250,7 +1253,57 @@ fn _ws_conn_worker(ctx: * u8) -> * u8 {
             break;
         }
 
+        // RFC 6455 §5.5: control frames (CLOSE 0x8 / PING 0x9 / PONG 0xA) MUST
+        // carry a payload <= 125 bytes and MUST NOT be fragmented (FIN=1). A
+        // control frame violating either is a protocol error — fail the
+        // connection with close `1002` rather than clamping or draining it (the
+        // send side clamps its own control replies; this rejects a
+        // non-conforming *client* control frame).
+        if opcode == 8 || opcode == 9 || opcode == 10 {
+            if len > 125 || fin == 0 {
+                free(payload_addr as * u8);
+                if frag_active {
+                    free(frag_buf as * u8);
+                    frag_active = false;
+                }
+                _ws_server_close_send(fd, ssl, 1002);
+                break;
+            }
+        }
+
+        // RFC 6455 §5.2: opcodes 0x3–0x7 (reserved non-control) and 0xB–0xF
+        // (reserved control) carry no defined meaning; a client using one is a
+        // protocol error — fail with close `1002` rather than silently draining
+        // it.
+        if opcode == 3 || opcode == 4 || opcode == 5 || opcode == 6 || opcode == 7
+            || opcode == 11
+            || opcode == 12
+            || opcode == 13
+            || opcode == 14
+            || opcode == 15 {
+            free(payload_addr as * u8);
+            if frag_active {
+                free(frag_buf as * u8);
+                frag_active = false;
+            }
+            _ws_server_close_send(fd, ssl, 1002);
+            break;
+        }
+
         if opcode == 8 {
+            // RFC 6455 §5.5.1: a CLOSE body is either empty or >= 2 bytes (a
+            // 2-byte status code). A 1-byte body cannot form a status code, so
+            // it is a malformed close — fail with `1002` rather than echoing a
+            // truncated reply.
+            if len == 1 {
+                free(payload_addr as * u8);
+                if frag_active {
+                    free(frag_buf as * u8);
+                    frag_active = false;
+                }
+                _ws_server_close_send(fd, ssl, 1002);
+                break;
+            }
             // CLOSE: echo the client's status code (+ optional reason) rather
             // than a bare empty CLOSE, clamped to the 125-byte control-frame
             // limit (RFC 6455 §5.5) so the reply stays a valid short-length
@@ -1345,7 +1398,10 @@ fn _ws_conn_worker(ctx: * u8) -> * u8 {
             }
             continue;
         }
-        // Any other (reserved) opcode: drain and ignore.
+        // Unreachable: opcodes 0x0–0x2 and 0x8–0xA are handled above and
+        // 0x3–0x7 / 0xB–0xF are rejected as reserved before reaching here. Free
+        // defensively so a future opcode addition that falls through cannot
+        // leak the payload buffer.
         free(payload_addr as * u8);
     }
     if frag_active { free(frag_buf as * u8); }
