@@ -1297,9 +1297,81 @@ fn assemble_runtime_capsule_link_inputs(runtime_capsules: RuntimeCapsuleArtifact
     };
 }
 
+// SFN-14: force a from-scratch runtime-object rebuild for `sfn build
+// --clean`. `cache_clean` (`build_cache.sfn`) wipes only the
+// content-addressed cache root (`cache_root()` → `build/cache/<schema>`);
+// the per-work-dir runtime object cache lives under `out_dir`
+// (`build/sailfin/`, or `<work-dir>/sailfin/`), outside that root, so a
+// `--clean` build otherwise reused cached runtime `.o`s. This removes
+// exactly the runtime artifacts the compile paths write into `out_dir` —
+// the `.o`, its content-key `.key` sidecar, and (for the sfn-source /
+// prelude-entry emit path) the `.ll` intermediate — leaving `out_dir`'s
+// unrelated, shared artifacts (`program.ll`/`.o`, the rt-import-context
+// tree) untouched. The filename derivation MIRRORS the compile paths in
+// `_clang_compile_runtime_capsule_objects` and `_emit_runtime_sfn_to_obj`
+// (`cap_prefix + basename + opt_flag`); keep the two in sync. Scope is the
+// current runtime source set — a source removed since the last build
+// leaves an orphaned `.o`, which is inert (never linked, never reused: the
+// link consumes the freshly-computed object paths and every reuse is
+// content-key gated). `rm -f` is idempotent, so an unpopulated cache is a
+// clean no-op.
+fn clean_runtime_object_cache(runtime_capsules: RuntimeCapsuleArtifacts[], out_dir: string, opt_flag: string) ![io] {
+    let mut argv: string[] = ["rm", "-f"];
+    let mut i: int = 0;
+    loop {
+        if i >= runtime_capsules.length { break; }
+        let cap = runtime_capsules[i];
+        let cap_prefix = _runtime_obj_prefix(cap.capsule_name);
+        // c-sources / ll-sources: `.o` + `.key` (no `.ll` intermediate).
+        let mut ci: int = 0;
+        loop {
+            if ci >= cap.c_sources.length { break; }
+            let obj = _path_join(out_dir, cap_prefix + _path_basename(cap.c_sources[ci])
+                + opt_flag
+                + ".o");
+            argv.push(obj);
+            argv.push(obj + ".key");
+            ci += 1;
+        }
+        let mut li: int = 0;
+        loop {
+            if li >= cap.ll_sources.length { break; }
+            let obj = _path_join(out_dir, cap_prefix + _path_basename(cap.ll_sources[li])
+                + opt_flag
+                + ".o");
+            argv.push(obj);
+            argv.push(obj + ".key");
+            li += 1;
+        }
+        // sfn-sources: `.o` + `.key` + the emitted `.ll` intermediate.
+        let mut si: int = 0;
+        loop {
+            if si >= cap.sfn_sources.length { break; }
+            let base = cap_prefix + _path_basename(cap.sfn_sources[si])
+                + opt_flag;
+            argv.push(_path_join(out_dir, base + ".o"));
+            argv.push(_path_join(out_dir, base + ".o.key"));
+            argv.push(_path_join(out_dir, base + ".ll"));
+            si += 1;
+        }
+        // prelude-entry rides the same sfn emit path (`.o`/`.key`/`.ll`).
+        if cap.prelude_entry.length > 0 {
+            let base = cap_prefix + _path_basename(cap.prelude_entry) + opt_flag;
+            argv.push(_path_join(out_dir, base + ".o"));
+            argv.push(_path_join(out_dir, base + ".o.key"));
+            argv.push(_path_join(out_dir, base + ".ll"));
+        }
+        i += 1;
+    }
+    // No runtime sources resolved → nothing to remove.
+    if argv.length <= 2 { return; }
+    process.run(argv);
+}
+
 export {
     RuntimeLinkInputs,
     assemble_runtime_capsule_link_inputs,
+    clean_runtime_object_cache,
     runtime_stamp_identity,
     write_runtime_identity_stamp,
     _runtime_bundle_exists
