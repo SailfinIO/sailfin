@@ -1,0 +1,115 @@
+// compiler/src/test_results.sfn
+//
+// Typed shape + pure parser for the recoverable test harness's
+// `results.log` file (SFN-17). A test binary appends one
+// tab-separated record per line to `${SAILFIN_TEST_SCRATCH}/results.log`
+// as each test/hook completes, so the runner can recover partial
+// results even when the process aborts mid-suite.
+//
+// Wire format (tab-separated, one record per line; name/message fields
+// are stripped of tab/newline by the writer, so tab-splitting is
+// unambiguous):
+//
+//     T\tpass\t<test-name>
+//     T\tfail\t<test-name>\t<message>
+//     H\tfail\t<hook-kind>\t<test-name-or-empty>\t<message>
+//
+// `T` records are per-test results: `pass` has 3 fields (no message),
+// `fail` has 4 fields. `H` records are hook failures: always 5 fields;
+// `<hook-kind>` is one of `before_all`/`before_each`/`after_each`/
+// `after_all`; `<test-name-or-empty>` is the associated test name for
+// `after_each`, empty for `before_all`/`after_all`. Lines that are
+// empty or don't match (wrong field count for the kind, unknown kind)
+// are skipped, not fatal.
+import { split_lines, split_text } from "./native_ir_utils_text";
+
+struct TestResultRecord {
+    kind: string;
+    status: string;
+    name: string;
+    hook: string;
+    message: string;
+}
+
+fn _tr_make_record(kind: string, status: string, name: string, hook: string, message: string) -> TestResultRecord {
+    return TestResultRecord {
+        kind: kind,
+        status: status,
+        name: name,
+        hook: hook,
+        message: message
+    };
+}
+
+fn _tr_is_known_hook(hook: string) -> boolean {
+    if hook == "before_all" { return true; }
+    if hook == "before_each" { return true; }
+    if hook == "after_each" { return true; }
+    if hook == "after_all" { return true; }
+    return false;
+}
+
+// Parse a single `T` record's fields into a `TestResultRecord`, or
+// `null` when the field count doesn't match a known `T` shape.
+fn _tr_parse_t_record(fields: string[]) -> TestResultRecord? {
+    if fields.length == 3 {
+        if fields[1] == "pass" {
+            return _tr_make_record("T", "pass", fields[2], "", "");
+        }
+    }
+    if fields.length == 4 {
+        if fields[1] == "fail" {
+            return _tr_make_record("T", "fail", fields[2], "", fields[3]);
+        }
+    }
+    return null;
+}
+
+// Parse a single `H` record's fields into a `TestResultRecord`, or
+// `null` when the shape doesn't match (wrong field count, unknown
+// status, or unrecognized hook kind).
+fn _tr_parse_h_record(fields: string[]) -> TestResultRecord? {
+    if fields.length != 5 { return null; }
+    if fields[1] != "fail" { return null; }
+    let hook = fields[2];
+    if !_tr_is_known_hook(hook) { return null; }
+    return _tr_make_record("H", "fail", fields[3], hook, fields[4]);
+}
+
+// Parse the contents of `results.log` into an ordered list of
+// `TestResultRecord`s. Malformed or unrecognized lines are skipped
+// rather than aborting the parse — a partially-written or corrupted
+// log still yields whatever prefix of records is well-formed.
+fn parse_test_results_log(bytes: string) -> TestResultRecord[] {
+    let mut out: TestResultRecord[] = [];
+    let lines = split_lines(bytes);
+    let mut i: int = 0;
+    loop {
+        if i >= lines.length { break; }
+        let line = lines[i];
+        i += 1;
+        if line.length == 0 { continue; }
+        let fields = split_text(line, "\t");
+        if fields.length == 0 { continue; }
+        let kind = fields[0];
+        if kind == "T" {
+            let record = _tr_parse_t_record(fields);
+            if record != null {
+                let r: TestResultRecord = record;
+                out.push(r);
+            }
+            continue;
+        }
+        if kind == "H" {
+            let record = _tr_parse_h_record(fields);
+            if record != null {
+                let r: TestResultRecord = record;
+                out.push(r);
+            }
+            continue;
+        }
+    }
+    return out;
+}
+
+export { TestResultRecord, parse_test_results_log };

@@ -48,6 +48,18 @@ extern fn sfn_str_to_cstr(s_data: * u8, s_len: i64, arena_slot: * u8) -> * u8;
 // and a `try`/`catch` can observe it. Sailfin-native (exception.sfn).
 extern fn sfn_raise_value_error(message: * u8) -> void;
 
+// SFN-17: recoverable-harness support. Reach the exception chain head
+// and the throw primitive (both Sailfin-native, exception.sfn) so a
+// failed assertion inside a harness-pushed frame unwinds via
+// setjmp/longjmp back to the synthesized `@main` instead of aborting the
+// whole suite process. The frame head is typed as an opaque `* u8` here
+// (only null-checked); the real return is `* SfnExceptionFrame` in
+// exception.sfn — pointer-compatible at link. See
+// `docs/proposals/design-notes/sfn-17-recoverable-test-harness.md`.
+extern fn sfn_exception_frame_head() -> * u8;
+
+extern fn sfn_throw(message: * u8) -> void;
+
 // The SFAF record is written PIECE-BY-PIECE with `fwrite` (the proven
 // `arena.sfn` stats pattern), NOT via `string + ...` concat: in a runtime
 // module `string + i64` does not reliably stringify the integer (it
@@ -122,6 +134,171 @@ fn _assert_write_i64(fp: * u8, value: i64) -> void ![io] {
     let _ = fwrite(buf, 1 as usize, nd as usize, fp);
 }
 
+// SFN-17: recoverable test harness. The synthesized `@main`
+// (`compiler/src/llvm/lowering/lowering_core.sfn`) wraps every hook/test
+// call in an inline `setjmp` frame and records a per-test/hook result to
+// `${SAILFIN_TEST_SCRATCH}/results.log` so the runner reports
+// pass/fail/error per test even after a failure — instead of the first
+// failed assert aborting the whole file's suite process. The harness sets
+// the phase slot before each sub-call so `sfn_test_report_caught` can
+// classify the failing region. Design record:
+// `docs/proposals/design-notes/sfn-17-recoverable-test-harness.md`.
+//
+// Phase encoding: 0=before_all, 1=before_each, 2=test, 3=after_each,
+// 4=after_all. Single-threaded per test process (parallel `--jobs N` runs
+// separate processes), so a plain thread-local slot suffices.
+thread_local let mut sfn_test_phase: i64 = 0;
+
+thread_local let mut sfn_test_fail_count: i64 = 0;
+
+// Set the current lifecycle phase (called by the harness before each
+// hook/test sub-call). No I/O — a bare global store.
+fn sfn_test_set_phase(phase: i32) -> void { sfn_test_phase = phase as i64; }
+
+// Return the accumulated failure count, driving the synthesized `@main`
+// exit code (non-zero when anything failed, so recovery never masks a
+// failure as exit 0).
+fn sfn_test_failures() -> i32 { return sfn_test_fail_count as i32; }
+
+// Open `${SAILFIN_TEST_SCRATCH}/results.log` in append mode, or null when
+// no scratch dir is set (the binary was run outside the test runner —
+// recovery still works, only the structured log is skipped).
+fn _test_open_results() -> * u8 ![io] {
+    let scratch_name: string = "SAILFIN_TEST_SCRATCH";
+    let scratch: * u8 = getenv(scratch_name as * u8);
+    if (scratch as i64) == 0 { return null; }
+    let scratch_s: string = scratch as string;
+    if scratch_s.length == 0 { return null; }
+    let path: string = scratch_s + "/results.log";
+    let mode: string = "ab";
+    return fopen(path as * u8, mode as * u8);
+}
+
+// Append `T\tpass\t<name>` — a passing test. Fields are tab-separated and
+// every value is written through `_assert_write_stripped` so an embedded
+// tab/newline cannot break the line-delimited record.
+fn sfn_test_report_pass(name: * u8) -> void ![io] {
+    let fp: * u8 = _test_open_results();
+    if (fp as i64) == 0 { return; }
+    let tab: string = "\t";
+    let nl: string = "\n";
+    let kind: string = "T";
+    let status: string = "pass";
+    _assert_write_lit(fp, kind);
+    _assert_write_lit(fp, tab);
+    _assert_write_lit(fp, status);
+    _assert_write_lit(fp, tab);
+    _assert_write_stripped(fp, name);
+    _assert_write_lit(fp, nl);
+    let _ = fclose(fp);
+}
+
+// Record a caught failure, classified by the phase slot the harness set
+// before the failing sub-call. Always increments the failure counter (so
+// the exit code reflects it) even when no scratch dir is configured.
+fn sfn_test_report_caught(name: * u8, msg: * u8) -> void ![io] {
+    let phase: i64 = sfn_test_phase;
+    let fp: * u8 = _test_open_results();
+    if (fp as i64) != 0 {
+        let tab: string = "\t";
+        let nl: string = "\n";
+        let fail: string = "fail";
+        let t_kind: string = "T";
+        let h_kind: string = "H";
+        let empty: string = "";
+        if phase == 1 {
+            // before_each failed → mark THIS test failed (AC1), naming the
+            // hook in the message.
+            let pfx: string = "hook before_each failed: ";
+            _assert_write_lit(fp, t_kind);
+            _assert_write_lit(fp, tab);
+            _assert_write_lit(fp, fail);
+            _assert_write_lit(fp, tab);
+            _assert_write_stripped(fp, name);
+            _assert_write_lit(fp, tab);
+            _assert_write_lit(fp, pfx);
+            _assert_write_stripped(fp, msg);
+            _assert_write_lit(fp, nl);
+        } else if phase == 3 {
+            // after_each failed → attribute to the hook, carrying the test
+            // whose teardown failed (AC3).
+            let hk: string = "after_each";
+            _assert_write_lit(fp, h_kind);
+            _assert_write_lit(fp, tab);
+            _assert_write_lit(fp, fail);
+            _assert_write_lit(fp, tab);
+            _assert_write_lit(fp, hk);
+            _assert_write_lit(fp, tab);
+            _assert_write_stripped(fp, name);
+            _assert_write_lit(fp, tab);
+            _assert_write_stripped(fp, msg);
+            _assert_write_lit(fp, nl);
+        } else if phase == 0 {
+            // before_all failed → hook record; the harness additionally
+            // cascades a per-test skip via `sfn_test_report_skipped`.
+            let hk0: string = "before_all";
+            _assert_write_lit(fp, h_kind);
+            _assert_write_lit(fp, tab);
+            _assert_write_lit(fp, fail);
+            _assert_write_lit(fp, tab);
+            _assert_write_lit(fp, hk0);
+            _assert_write_lit(fp, tab);
+            _assert_write_lit(fp, empty);
+            _assert_write_lit(fp, tab);
+            _assert_write_stripped(fp, msg);
+            _assert_write_lit(fp, nl);
+        } else if phase == 4 {
+            // after_all failed → hook record (AC3).
+            let hk4: string = "after_all";
+            _assert_write_lit(fp, h_kind);
+            _assert_write_lit(fp, tab);
+            _assert_write_lit(fp, fail);
+            _assert_write_lit(fp, tab);
+            _assert_write_lit(fp, hk4);
+            _assert_write_lit(fp, tab);
+            _assert_write_lit(fp, empty);
+            _assert_write_lit(fp, tab);
+            _assert_write_stripped(fp, msg);
+            _assert_write_lit(fp, nl);
+        } else {
+            // phase 2 (test body) failed → T fail <name> <msg>.
+            _assert_write_lit(fp, t_kind);
+            _assert_write_lit(fp, tab);
+            _assert_write_lit(fp, fail);
+            _assert_write_lit(fp, tab);
+            _assert_write_stripped(fp, name);
+            _assert_write_lit(fp, tab);
+            _assert_write_stripped(fp, msg);
+            _assert_write_lit(fp, nl);
+        }
+        let _ = fclose(fp);
+    }
+    sfn_test_fail_count = sfn_test_fail_count + 1;
+}
+
+// Record a test skipped-and-failed because its `before_all` failed (AC1
+// cascade). Emitted once per test by the harness after a caught
+// `before_all`.
+fn sfn_test_report_skipped(name: * u8) -> void ![io] {
+    let fp: * u8 = _test_open_results();
+    if (fp as i64) != 0 {
+        let tab: string = "\t";
+        let nl: string = "\n";
+        let kind: string = "T";
+        let fail: string = "fail";
+        let reason: string = "hook before_all failed";
+        _assert_write_lit(fp, kind);
+        _assert_write_lit(fp, tab);
+        _assert_write_lit(fp, fail);
+        _assert_write_lit(fp, tab);
+        _assert_write_stripped(fp, name);
+        _assert_write_lit(fp, tab);
+        _assert_write_lit(fp, reason);
+        _assert_write_lit(fp, nl);
+    }
+    sfn_test_fail_count = sfn_test_fail_count + 1;
+}
+
 // `sailfin_assert_fail(file, line, col, msg)` — the assertion-failure
 // handler. Writes the SFAF record (if a test scratch dir is set) then
 // raises a value error.
@@ -161,7 +338,15 @@ fn sailfin_assert_fail(file: * u8, line: i64, col: i64, msg: * u8) -> void ![io]
         let fallback2: string = "assertion failed";
         raise_msg = fallback2 as * u8;
     }
-    sfn_raise_value_error(raise_msg);
+    // SFN-17: inside a harness-pushed exception frame, unwind via
+    // `sfn_throw` (setjmp/longjmp back to the synthesized `@main`, which
+    // records the failure and continues) instead of aborting. With no
+    // frame on the chain — every non-harness assert, user program, and
+    // any old-seed-built harness — behavior is byte-identical to before:
+    // `sfn_raise_value_error` writes the message to fd 2 and `abort()`s.
+    if (sfn_exception_frame_head() as i64) != 0 { sfn_throw(raise_msg); } else {
+        sfn_raise_value_error(raise_msg);
+    }
 }
 
 // `runtime_assert_fail_fn(file, line, col, msg)` — the bare trampoline

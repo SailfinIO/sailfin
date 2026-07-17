@@ -33,7 +33,7 @@ import { substring } from "./string_utils";
 // Bumped only on a breaking change to any of the three event shapes.
 // Consumers (the planned MCP `sailfin_test_runner` tool, CI scrapers,
 // the `assert_compiles` integration) hard-fail on unknown values.
-let TEST_RUNNER_JSON_SCHEMA_VERSION: int = 1;
+let TEST_RUNNER_JSON_SCHEMA_VERSION: int = 2;
 
 // One test entry collected from a parsed source file. Populated by
 // `collect_test_entries` before the test binary runs so the runner
@@ -210,6 +210,19 @@ fn render_test_event(name: string, file: string, line: int, status: string, dura
     return "{" + _trj_join(parts, ",") + "}";
 }
 
+// One per lifecycle-hook failure (`before_all`/`before_each`/
+// `after_each`/`after_all`). `test` is the associated test name for
+// `after_each`, empty for `before_all`/`after_all`.
+fn render_hook_event(hook: string, test: string, status: string, message: string) -> string {
+    let mut parts: string[] = [];
+    parts.push(_trj_string_field("event", "hook"));
+    parts.push(_trj_string_field("hook", hook));
+    parts.push(_trj_string_field("test", test));
+    parts.push(_trj_string_field("status", status));
+    parts.push(_trj_string_field("message", message));
+    return "{" + _trj_join(parts, ",") + "}";
+}
+
 // Format the per-test-binary cache hit rate as a fixed 4-decimal
 // fraction (#1230). Mirrors `build_report.sfn::_br_format_hit_rate`
 // so CI gates can compare `cache.test_bin_hit_rate >= X` the same way
@@ -328,6 +341,7 @@ export {
     collect_test_entries,
     locate_failing_test,
     render_assert_failure_json,
+    render_hook_event,
     render_start_event,
     render_summary_event,
     render_test_event
