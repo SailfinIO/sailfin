@@ -402,9 +402,11 @@ fn _encode_captures(captures: Capture[]) -> string {
         let capture = captures[index];
         if index > 0 { buffer = buffer + ";"; }
         buffer = buffer + percent_escape_capture_text(capture.name) + ":"
-            + percent_escape_capture_text(capture.type_text)
-            + ":"
-            + percent_escape_capture_text(_capture_mode_text(capture));
+            + percent_escape_capture_text(capture.type_text);
+        let mode = _capture_mode_text(capture);
+        if mode != "value" {
+            buffer = buffer + ":" + percent_escape_capture_text(mode);
+        }
         index += 1;
     }
     return buffer;
@@ -412,13 +414,17 @@ fn _encode_captures(captures: Capture[]) -> string {
 
 // ── Capture mode encoding ───────────────────────────────────────────
 //
-// Mutable captures lower by reference: the env stores the enclosing slot
-// pointer and the lifted body installs that pointer as an addressable local.
-// Immutable captures keep the by-value snapshot ABI. The marker mode segment
-// round-trips that distinction through `decode_captures`.
+// Only mutability drives by-reference lowering: a mutable capture lands as
+// `ref_mut`, so the env stores the enclosing slot pointer and the lifted body
+// installs that pointer as an addressable local. Every other capture keeps the
+// by-value snapshot ABI (`value`), regardless of `by_value`, which upstream is
+// a primitive-vs-heap layout heuristic (`is_primitive_type`), NOT a
+// by-reference request — treating a non-primitive immutable capture as a
+// reference pointer breaks the by-value env ABI (#1476). The marker mode
+// segment round-trips this through `decode_captures`, which tolerates a
+// missing segment as `value` so immutable captures keep their two-part form.
 fn _capture_mode_text(capture: Capture) -> string {
     if capture.mutable { return "ref_mut"; }
-    if !capture.by_value { return "ref"; }
     return "value";
 }
 
