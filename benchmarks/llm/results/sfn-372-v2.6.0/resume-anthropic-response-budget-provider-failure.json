@@ -1,0 +1,7 @@
+{
+  "classification": "response_budget_exhausted",
+  "setup_class": false,
+  "iteration": 2,
+  "provider_attempts": 1,
+  "error": "anthropic stop_reason=max_tokens with no answer text (thinking-only response, output budget exhausted)"
+}

@@ -1,0 +1,15 @@
+{
+  "probe_version": "track-b-recognition/v1.0.0",
+  "reviewed_at": "2026-07-17",
+  "packet_shown": false,
+  "openai_terra": {
+    "cleared": true,
+    "rill_17_prior_knowledge": false,
+    "finding": "The response identified the language as unknown and labeled every syntax interpretation as an unverified surface-form guess."
+  },
+  "anthropic_sonnet": {
+    "cleared": true,
+    "rill_17_prior_knowledge": false,
+    "finding": "The response identified the language as synthetic or unknown and explicitly declined to infer a grammar from the blinded sample."
+  }
+}

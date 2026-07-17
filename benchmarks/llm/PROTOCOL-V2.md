@@ -2,8 +2,16 @@
 
 Protocol ID: `sfn-agent-benchmark/v2.6.0`
 
-Status: **frozen for bounded pilots; the first v2.6 batch stopped on provider
-quota and produced no complete valid scored output**.
+Status: **audit-only; v2.6 attempts stopped on provider quota and Anthropic
+response-budget invalidations and produced no complete valid paired output**.
+
+The resumed v2.6 bounded batch demonstrated that the recorded 2,048-token
+Anthropic answer headroom was descriptive rather than enforced: a repair turn
+returned `stop_reason=max_tokens` with 8,191 thinking tokens, no text, and an
+8,192-token total allowance. SFN-383 blocks further paid execution until the
+request schema enforces headroom, the protocol/corpus minor version is bumped,
+and a completely fresh balanced batch is frozen. No v2.6 observation is
+eligible for selection, rerun, or pooling into that successor.
 
 Version 2.6.0 freezes symmetric transient-provider handling after the v2.5.0
 Anthropic schema probe returned `overloaded_error`. Curl failures, timeouts,
@@ -61,7 +69,8 @@ unchanged.
 
 Linear:
 [SFN-362](https://linear.app/sailfin/issue/SFN-362/specbench-preregister-v2-adoption-and-controlled-learnability),
-[SFN-367](https://linear.app/sailfin/issue/SFN-367/fixbench-stop-sonnet-thinking-exhaustion-from-invalidating-v2-batches)
+[SFN-367](https://linear.app/sailfin/issue/SFN-367/fixbench-stop-sonnet-thinking-exhaustion-from-invalidating-v2-batches),
+[SFN-383](https://linear.app/sailfin/issue/SFN-383/fixbench-enforce-anthropic-answer-headroom-on-every-response)
 
 This preregistration separates two questions that the v1 experiment combined:
 
