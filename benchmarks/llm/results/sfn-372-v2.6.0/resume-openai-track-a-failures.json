@@ -1,0 +1,558 @@
+[
+  {
+    "attempt_id": "openai-terra-s350-logic-deltas-001-scala-r1",
+    "task": "logic-deltas-001",
+    "arm": "scala",
+    "passed": true,
+    "primary": "ordinary_semantic_or_test_failure",
+    "secondary": [],
+    "track_b_attribution": "intrinsic_failure",
+    "language_denominator": true,
+    "fail_categories": [
+      "runtime_error"
+    ],
+    "artifact_dir": "build/sfn372-v26-live/track-a-openai/run-20260717-064219/attempts/openai-terra-s350-logic-deltas-001-scala-r1"
+  },
+  {
+    "attempt_id": "openai-terra-s350-logic-deltas-002-sailfin-r1",
+    "task": "logic-deltas-002",
+    "arm": "sailfin",
+    "passed": true,
+    "primary": "ordinary_semantic_or_test_failure",
+    "secondary": [
+      "unhelpful_diagnostic_or_failed_repair"
+    ],
+    "track_b_attribution": "intrinsic_failure",
+    "language_denominator": true,
+    "fail_categories": [
+      "runtime_error",
+      "wrong_output"
+    ],
+    "artifact_dir": "build/sfn372-v26-live/track-a-openai/run-20260717-064219/attempts/openai-terra-s350-logic-deltas-002-sailfin-r1"
+  },
+  {
+    "attempt_id": "openai-terra-s350-logic-deltas-003-sailfin-r1",
+    "task": "logic-deltas-003",
+    "arm": "sailfin",
+    "passed": true,
+    "primary": "invented_syntax_or_api",
+    "secondary": [],
+    "track_b_attribution": "intrinsic_failure",
+    "language_denominator": true,
+    "fail_categories": [
+      "compile_error"
+    ],
+    "artifact_dir": "build/sfn372-v26-live/track-a-openai/run-20260717-064219/attempts/openai-terra-s350-logic-deltas-003-sailfin-r1"
+  },
+  {
+    "attempt_id": "openai-terra-s350-logic-deltas-004-scala-r1",
+    "task": "logic-deltas-004",
+    "arm": "scala",
+    "passed": true,
+    "primary": "ordinary_semantic_or_test_failure",
+    "secondary": [],
+    "track_b_attribution": "intrinsic_failure",
+    "language_denominator": true,
+    "fail_categories": [
+      "runtime_error"
+    ],
+    "artifact_dir": "build/sfn372-v26-live/track-a-openai/run-20260717-064219/attempts/openai-terra-s350-logic-deltas-004-scala-r1"
+  },
+  {
+    "attempt_id": "openai-terra-s350-parse-log-001-sailfin-r1",
+    "task": "parse-log-001",
+    "arm": "sailfin",
+    "passed": true,
+    "primary": "ordinary_semantic_or_test_failure",
+    "secondary": [],
+    "track_b_attribution": "intrinsic_failure",
+    "language_denominator": true,
+    "fail_categories": [
+      "wrong_output"
+    ],
+    "artifact_dir": "build/sfn372-v26-live/track-a-openai/run-20260717-064219/attempts/openai-terra-s350-parse-log-001-sailfin-r1"
+  },
+  {
+    "attempt_id": "openai-terra-s350-parse-log-001-scala-r1",
+    "task": "parse-log-001",
+    "arm": "scala",
+    "passed": true,
+    "primary": "ordinary_semantic_or_test_failure",
+    "secondary": [],
+    "track_b_attribution": "intrinsic_failure",
+    "language_denominator": true,
+    "fail_categories": [
+      "wrong_output"
+    ],
+    "artifact_dir": "build/sfn372-v26-live/track-a-openai/run-20260717-064219/attempts/openai-terra-s350-parse-log-001-scala-r1"
+  },
+  {
+    "attempt_id": "openai-terra-s350-parse-log-001-python-r1",
+    "task": "parse-log-001",
+    "arm": "python",
+    "passed": true,
+    "primary": "ordinary_semantic_or_test_failure",
+    "secondary": [],
+    "track_b_attribution": "intrinsic_failure",
+    "language_denominator": true,
+    "fail_categories": [
+      "wrong_output"
+    ],
+    "artifact_dir": "build/sfn372-v26-live/track-a-openai/run-20260717-064219/attempts/openai-terra-s350-parse-log-001-python-r1"
+  },
+  {
+    "attempt_id": "openai-terra-s350-parse-log-003-scala-r1",
+    "task": "parse-log-003",
+    "arm": "scala",
+    "passed": true,
+    "primary": "ordinary_semantic_or_test_failure",
+    "secondary": [],
+    "track_b_attribution": "intrinsic_failure",
+    "language_denominator": true,
+    "fail_categories": [
+      "wrong_output"
+    ],
+    "artifact_dir": "build/sfn372-v26-live/track-a-openai/run-20260717-064219/attempts/openai-terra-s350-parse-log-003-scala-r1"
+  },
+  {
+    "attempt_id": "openai-terra-s350-parse-log-003-python-r1",
+    "task": "parse-log-003",
+    "arm": "python",
+    "passed": true,
+    "primary": "ordinary_semantic_or_test_failure",
+    "secondary": [],
+    "track_b_attribution": "intrinsic_failure",
+    "language_denominator": true,
+    "fail_categories": [
+      "wrong_output"
+    ],
+    "artifact_dir": "build/sfn372-v26-live/track-a-openai/run-20260717-064219/attempts/openai-terra-s350-parse-log-003-python-r1"
+  },
+  {
+    "attempt_id": "openai-terra-s350-parse-log-004-sailfin-r1",
+    "task": "parse-log-004",
+    "arm": "sailfin",
+    "passed": true,
+    "primary": "ordinary_semantic_or_test_failure",
+    "secondary": [],
+    "track_b_attribution": "intrinsic_failure",
+    "language_denominator": true,
+    "fail_categories": [
+      "wrong_output"
+    ],
+    "artifact_dir": "build/sfn372-v26-live/track-a-openai/run-20260717-064219/attempts/openai-terra-s350-parse-log-004-sailfin-r1"
+  },
+  {
+    "attempt_id": "openai-terra-s350-parse-log-004-scala-r1",
+    "task": "parse-log-004",
+    "arm": "scala",
+    "passed": true,
+    "primary": "ordinary_semantic_or_test_failure",
+    "secondary": [
+      "unhelpful_diagnostic_or_failed_repair"
+    ],
+    "track_b_attribution": "intrinsic_failure",
+    "language_denominator": true,
+    "fail_categories": [
+      "wrong_output",
+      "wrong_output"
+    ],
+    "artifact_dir": "build/sfn372-v26-live/track-a-openai/run-20260717-064219/attempts/openai-terra-s350-parse-log-004-scala-r1"
+  },
+  {
+    "attempt_id": "openai-terra-s350-parse-log-004-python-r1",
+    "task": "parse-log-004",
+    "arm": "python",
+    "passed": true,
+    "primary": "ordinary_semantic_or_test_failure",
+    "secondary": [
+      "unhelpful_diagnostic_or_failed_repair"
+    ],
+    "track_b_attribution": "intrinsic_failure",
+    "language_denominator": true,
+    "fail_categories": [
+      "wrong_output",
+      "wrong_output"
+    ],
+    "artifact_dir": "build/sfn372-v26-live/track-a-openai/run-20260717-064219/attempts/openai-terra-s350-parse-log-004-python-r1"
+  },
+  {
+    "attempt_id": "openai-terra-s350-filesystem-honest-004-sailfin-r1",
+    "task": "filesystem-honest-004",
+    "arm": "sailfin",
+    "passed": true,
+    "primary": "ordinary_semantic_or_test_failure",
+    "secondary": [],
+    "track_b_attribution": "intrinsic_failure",
+    "language_denominator": true,
+    "fail_categories": [
+      "wrong_output"
+    ],
+    "artifact_dir": "build/sfn372-v26-live/track-a-openai/run-20260717-064219/attempts/openai-terra-s350-filesystem-honest-004-sailfin-r1"
+  },
+  {
+    "attempt_id": "openai-terra-s350-local-http-001-scala-r1",
+    "task": "local-http-001",
+    "arm": "scala",
+    "passed": true,
+    "primary": "invented_syntax_or_api",
+    "secondary": [],
+    "track_b_attribution": "intrinsic_failure",
+    "language_denominator": true,
+    "fail_categories": [
+      "compile_error"
+    ],
+    "artifact_dir": "build/sfn372-v26-live/track-a-openai/run-20260717-064219/attempts/openai-terra-s350-local-http-001-scala-r1"
+  },
+  {
+    "attempt_id": "openai-terra-s350-local-http-002-scala-r1",
+    "task": "local-http-002",
+    "arm": "scala",
+    "passed": true,
+    "primary": "invented_syntax_or_api",
+    "secondary": [],
+    "track_b_attribution": "intrinsic_failure",
+    "language_denominator": true,
+    "fail_categories": [
+      "compile_error"
+    ],
+    "artifact_dir": "build/sfn372-v26-live/track-a-openai/run-20260717-064219/attempts/openai-terra-s350-local-http-002-scala-r1"
+  },
+  {
+    "attempt_id": "openai-terra-s350-local-http-004-scala-r1",
+    "task": "local-http-004",
+    "arm": "scala",
+    "passed": true,
+    "primary": "invented_syntax_or_api",
+    "secondary": [
+      "unhelpful_diagnostic_or_failed_repair"
+    ],
+    "track_b_attribution": "intrinsic_failure",
+    "language_denominator": true,
+    "fail_categories": [
+      "compile_error",
+      "compile_error"
+    ],
+    "artifact_dir": "build/sfn372-v26-live/track-a-openai/run-20260717-064219/attempts/openai-terra-s350-local-http-004-scala-r1"
+  },
+  {
+    "attempt_id": "openai-terra-s350-structured-concurrency-001-sailfin-r1",
+    "task": "structured-concurrency-001",
+    "arm": "sailfin",
+    "passed": true,
+    "primary": "ordinary_semantic_or_test_failure",
+    "secondary": [],
+    "track_b_attribution": "intrinsic_failure",
+    "language_denominator": true,
+    "fail_categories": [
+      "wrong_output"
+    ],
+    "artifact_dir": "build/sfn372-v26-live/track-a-openai/run-20260717-064219/attempts/openai-terra-s350-structured-concurrency-001-sailfin-r1"
+  },
+  {
+    "attempt_id": "openai-terra-s350-structured-concurrency-002-sailfin-r1",
+    "task": "structured-concurrency-002",
+    "arm": "sailfin",
+    "passed": false,
+    "primary": "ordinary_semantic_or_test_failure",
+    "secondary": [
+      "unhelpful_diagnostic_or_failed_repair"
+    ],
+    "track_b_attribution": "intrinsic_failure",
+    "language_denominator": true,
+    "fail_categories": [
+      "runtime_error",
+      "wrong_output",
+      "runtime_error",
+      "wrong_output",
+      "wrong_output"
+    ],
+    "artifact_dir": "build/sfn372-v26-live/track-a-openai/run-20260717-064219/attempts/openai-terra-s350-structured-concurrency-002-sailfin-r1"
+  },
+  {
+    "attempt_id": "openai-terra-s350-structured-concurrency-003-sailfin-r1",
+    "task": "structured-concurrency-003",
+    "arm": "sailfin",
+    "passed": true,
+    "primary": "ordinary_semantic_or_test_failure",
+    "secondary": [
+      "unhelpful_diagnostic_or_failed_repair"
+    ],
+    "track_b_attribution": "intrinsic_failure",
+    "language_denominator": true,
+    "fail_categories": [
+      "wrong_output",
+      "runtime_error"
+    ],
+    "artifact_dir": "build/sfn372-v26-live/track-a-openai/run-20260717-064219/attempts/openai-terra-s350-structured-concurrency-003-sailfin-r1"
+  },
+  {
+    "attempt_id": "openai-terra-s350-structured-concurrency-004-sailfin-r1",
+    "task": "structured-concurrency-004",
+    "arm": "sailfin",
+    "passed": false,
+    "primary": "ordinary_semantic_or_test_failure",
+    "secondary": [
+      "unhelpful_diagnostic_or_failed_repair"
+    ],
+    "track_b_attribution": "intrinsic_failure",
+    "language_denominator": true,
+    "fail_categories": [
+      "runtime_error",
+      "wrong_output",
+      "wrong_output",
+      "wrong_output",
+      "runtime_error"
+    ],
+    "artifact_dir": "build/sfn372-v26-live/track-a-openai/run-20260717-064219/attempts/openai-terra-s350-structured-concurrency-004-sailfin-r1"
+  },
+  {
+    "attempt_id": "openai-terra-s350-standard-package-001-sailfin-r1",
+    "task": "standard-package-001",
+    "arm": "sailfin",
+    "passed": true,
+    "primary": "ordinary_semantic_or_test_failure",
+    "secondary": [],
+    "track_b_attribution": "intrinsic_failure",
+    "language_denominator": true,
+    "fail_categories": [
+      "runtime_error"
+    ],
+    "artifact_dir": "build/sfn372-v26-live/track-a-openai/run-20260717-064219/attempts/openai-terra-s350-standard-package-001-sailfin-r1"
+  },
+  {
+    "attempt_id": "openai-terra-s350-standard-package-003-sailfin-r1",
+    "task": "standard-package-003",
+    "arm": "sailfin",
+    "passed": true,
+    "primary": "invented_syntax_or_api",
+    "secondary": [],
+    "track_b_attribution": "intrinsic_failure",
+    "language_denominator": true,
+    "fail_categories": [
+      "compile_error"
+    ],
+    "artifact_dir": "build/sfn372-v26-live/track-a-openai/run-20260717-064219/attempts/openai-terra-s350-standard-package-003-sailfin-r1"
+  },
+  {
+    "attempt_id": "openai-terra-s350-local-edit-002-scala-r1",
+    "task": "local-edit-002",
+    "arm": "scala",
+    "passed": true,
+    "primary": "ordinary_semantic_or_test_failure",
+    "secondary": [],
+    "track_b_attribution": "intrinsic_failure",
+    "language_denominator": true,
+    "fail_categories": [
+      "wrong_output"
+    ],
+    "artifact_dir": "build/sfn372-v26-live/track-a-openai/run-20260717-064219/attempts/openai-terra-s350-local-edit-002-scala-r1"
+  },
+  {
+    "attempt_id": "openai-terra-s350-local-edit-004-scala-r1",
+    "task": "local-edit-004",
+    "arm": "scala",
+    "passed": true,
+    "primary": "ordinary_semantic_or_test_failure",
+    "secondary": [],
+    "track_b_attribution": "intrinsic_failure",
+    "language_denominator": true,
+    "fail_categories": [
+      "wrong_output"
+    ],
+    "artifact_dir": "build/sfn372-v26-live/track-a-openai/run-20260717-064219/attempts/openai-terra-s350-local-edit-004-scala-r1"
+  },
+  {
+    "attempt_id": "openai-terra-s350-capability-trap-001-sailfin-r1",
+    "task": "capability-trap-001",
+    "arm": "sailfin",
+    "passed": true,
+    "primary": "capability_false_friction",
+    "secondary": [],
+    "track_b_attribution": "intrinsic_failure",
+    "language_denominator": true,
+    "fail_categories": [
+      "trap_not_rejected",
+      "effect_error"
+    ],
+    "artifact_dir": "build/sfn372-v26-live/track-a-openai/run-20260717-064219/attempts/openai-terra-s350-capability-trap-001-sailfin-r1"
+  },
+  {
+    "attempt_id": "openai-terra-s350-capability-trap-001-scala-r1",
+    "task": "capability-trap-001",
+    "arm": "scala",
+    "passed": true,
+    "primary": "",
+    "secondary": [],
+    "track_b_attribution": "not_applicable",
+    "language_denominator": true,
+    "fail_categories": [
+      "effect_error"
+    ],
+    "artifact_dir": "build/sfn372-v26-live/track-a-openai/run-20260717-064219/attempts/openai-terra-s350-capability-trap-001-scala-r1"
+  },
+  {
+    "attempt_id": "openai-terra-s350-capability-trap-001-python-r1",
+    "task": "capability-trap-001",
+    "arm": "python",
+    "passed": false,
+    "primary": "capability_false_friction",
+    "secondary": [
+      "unhelpful_diagnostic_or_failed_repair"
+    ],
+    "track_b_attribution": "intrinsic_failure",
+    "language_denominator": true,
+    "fail_categories": [
+      "trap_not_rejected",
+      "trap_not_rejected",
+      "trap_not_rejected",
+      "trap_not_rejected",
+      "trap_not_rejected"
+    ],
+    "artifact_dir": "build/sfn372-v26-live/track-a-openai/run-20260717-064219/attempts/openai-terra-s350-capability-trap-001-python-r1"
+  },
+  {
+    "attempt_id": "openai-terra-s350-capability-trap-002-sailfin-r1",
+    "task": "capability-trap-002",
+    "arm": "sailfin",
+    "passed": true,
+    "primary": "",
+    "secondary": [],
+    "track_b_attribution": "not_applicable",
+    "language_denominator": true,
+    "fail_categories": [
+      "effect_error"
+    ],
+    "artifact_dir": "build/sfn372-v26-live/track-a-openai/run-20260717-064219/attempts/openai-terra-s350-capability-trap-002-sailfin-r1"
+  },
+  {
+    "attempt_id": "openai-terra-s350-capability-trap-002-scala-r1",
+    "task": "capability-trap-002",
+    "arm": "scala",
+    "passed": true,
+    "primary": "",
+    "secondary": [],
+    "track_b_attribution": "not_applicable",
+    "language_denominator": true,
+    "fail_categories": [
+      "effect_error"
+    ],
+    "artifact_dir": "build/sfn372-v26-live/track-a-openai/run-20260717-064219/attempts/openai-terra-s350-capability-trap-002-scala-r1"
+  },
+  {
+    "attempt_id": "openai-terra-s350-capability-trap-002-python-r1",
+    "task": "capability-trap-002",
+    "arm": "python",
+    "passed": false,
+    "primary": "capability_false_friction",
+    "secondary": [
+      "unhelpful_diagnostic_or_failed_repair"
+    ],
+    "track_b_attribution": "intrinsic_failure",
+    "language_denominator": true,
+    "fail_categories": [
+      "trap_not_rejected",
+      "trap_not_rejected",
+      "trap_not_rejected",
+      "trap_not_rejected",
+      "trap_not_rejected"
+    ],
+    "artifact_dir": "build/sfn372-v26-live/track-a-openai/run-20260717-064219/attempts/openai-terra-s350-capability-trap-002-python-r1"
+  },
+  {
+    "attempt_id": "openai-terra-s350-capability-trap-003-sailfin-r1",
+    "task": "capability-trap-003",
+    "arm": "sailfin",
+    "passed": true,
+    "primary": "",
+    "secondary": [],
+    "track_b_attribution": "not_applicable",
+    "language_denominator": true,
+    "fail_categories": [
+      "effect_error"
+    ],
+    "artifact_dir": "build/sfn372-v26-live/track-a-openai/run-20260717-064219/attempts/openai-terra-s350-capability-trap-003-sailfin-r1"
+  },
+  {
+    "attempt_id": "openai-terra-s350-capability-trap-003-scala-r1",
+    "task": "capability-trap-003",
+    "arm": "scala",
+    "passed": true,
+    "primary": "",
+    "secondary": [],
+    "track_b_attribution": "not_applicable",
+    "language_denominator": true,
+    "fail_categories": [
+      "effect_error"
+    ],
+    "artifact_dir": "build/sfn372-v26-live/track-a-openai/run-20260717-064219/attempts/openai-terra-s350-capability-trap-003-scala-r1"
+  },
+  {
+    "attempt_id": "openai-terra-s350-capability-trap-003-python-r1",
+    "task": "capability-trap-003",
+    "arm": "python",
+    "passed": false,
+    "primary": "capability_false_friction",
+    "secondary": [
+      "unhelpful_diagnostic_or_failed_repair"
+    ],
+    "track_b_attribution": "intrinsic_failure",
+    "language_denominator": true,
+    "fail_categories": [
+      "trap_not_rejected",
+      "trap_not_rejected",
+      "trap_not_rejected",
+      "trap_not_rejected",
+      "trap_not_rejected"
+    ],
+    "artifact_dir": "build/sfn372-v26-live/track-a-openai/run-20260717-064219/attempts/openai-terra-s350-capability-trap-003-python-r1"
+  },
+  {
+    "attempt_id": "openai-terra-s350-capability-trap-004-sailfin-r1",
+    "task": "capability-trap-004",
+    "arm": "sailfin",
+    "passed": true,
+    "primary": "",
+    "secondary": [],
+    "track_b_attribution": "not_applicable",
+    "language_denominator": true,
+    "fail_categories": [
+      "effect_error"
+    ],
+    "artifact_dir": "build/sfn372-v26-live/track-a-openai/run-20260717-064219/attempts/openai-terra-s350-capability-trap-004-sailfin-r1"
+  },
+  {
+    "attempt_id": "openai-terra-s350-capability-trap-004-scala-r1",
+    "task": "capability-trap-004",
+    "arm": "scala",
+    "passed": true,
+    "primary": "",
+    "secondary": [],
+    "track_b_attribution": "not_applicable",
+    "language_denominator": true,
+    "fail_categories": [
+      "effect_error"
+    ],
+    "artifact_dir": "build/sfn372-v26-live/track-a-openai/run-20260717-064219/attempts/openai-terra-s350-capability-trap-004-scala-r1"
+  },
+  {
+    "attempt_id": "openai-terra-s350-capability-trap-004-python-r1",
+    "task": "capability-trap-004",
+    "arm": "python",
+    "passed": false,
+    "primary": "capability_false_friction",
+    "secondary": [
+      "unhelpful_diagnostic_or_failed_repair"
+    ],
+    "track_b_attribution": "intrinsic_failure",
+    "language_denominator": true,
+    "fail_categories": [
+      "trap_not_rejected",
+      "trap_not_rejected",
+      "trap_not_rejected",
+      "trap_not_rejected",
+      "trap_not_rejected"
+    ],
+    "artifact_dir": "build/sfn372-v26-live/track-a-openai/run-20260717-064219/attempts/openai-terra-s350-capability-trap-004-python-r1"
+  }
+]
