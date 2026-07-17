@@ -795,6 +795,18 @@ fn _rh_descriptors_05(descriptors_in: RuntimeHelperDescriptor[]) -> RuntimeHelpe
     descriptors = append_runtime_helper(descriptors, RuntimeHelperDescriptor {
         target: "process.run_capture_cwd", symbol: "sfn_process_run_capture_cwd", return_type: "i64", parameter_types: ["{ i8**, i64, i64 }*", "{ i8**, i64, i64 }*", "i8*"], effects: ["io"], native_signature: "sfn_process_run_capture_cwd", c_abi_return_type: null
     });
+    // SFN-45: `process.run_capture_rlimit_as` — `run_capture` plus a
+    // trailing per-child Linux RLIMIT_AS soft cap in bytes (`i64`; <= 0 or
+    // a non-Linux host = uncapped). A SEPARATE target from
+    // `process.run_capture` rather than a widened arity, for the same
+    // reason as `_cwd` above: the pinned seed emits 2-arg `run_capture`
+    // calls, so widening would desync them from the runtime body. Only the
+    // freshly-built compiler emits this 3-arg call, exclusively from the
+    // mem-limit e2e test, so no seed cut is required. See
+    // `.claude/rules/seed-dependency.md`.
+    descriptors = append_runtime_helper(descriptors, RuntimeHelperDescriptor {
+        target: "process.run_capture_rlimit_as", symbol: "sfn_process_run_capture_rlimit_as", return_type: "i64", parameter_types: ["{ i8**, i64, i64 }*", "{ i8**, i64, i64 }*", "i64"], effects: ["io"], native_signature: "sfn_process_run_capture_rlimit_as", c_abi_return_type: null
+    });
     descriptors = append_runtime_helper(descriptors, RuntimeHelperDescriptor {
         target: "process.capture_take_stdout", symbol: "sfn_process_capture_take_stdout", return_type: "i8*", parameter_types: [], effects: ["io"], native_signature: "sfn_process_capture_take_stdout", c_abi_return_type: null
     });
