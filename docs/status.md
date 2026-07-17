@@ -180,7 +180,13 @@ here.
   build paths; diagnostics carry `severity` + `file_path`. Effect diagnostics
   carry structured `FixSuggestion`/`TextEdit` for `sfn fix` / LSP (Track B).
   `sfn check` surfaces parse errors (`E0500`, #974) and implicit re-export
-  bans (`E0600`) via the shared `reexport_check.sfn`.
+  bans (`E0600`) via the shared `reexport_check.sfn`. Malformed-but-dispatched
+  top-level declarations — a broken parameter list (`fn broken( {`), a missing
+  variable initializer (`let x = ;`), and a missing struct field type
+  (`struct S { x: }`) — now produce `E0501`/`E0502`/`E0503` parse diagnostics
+  in `sfn check` and are rejected by `build` before LLVM lowering/linking
+  (SFN-18); recovery still lets an independent following declaration parse
+  and report on its own.
 - **Import-resolution checking (#1953).** `sfn check` now diagnoses a
   relative `import { ... } from "./x"`/`"../x"` that resolves to no module
   on disk (`E0430`) and a named specifier defined nowhere in the staged

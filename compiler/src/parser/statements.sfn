@@ -1595,7 +1595,12 @@ fn parse_unknown_statement(initial_parser: Parser) -> StatementParseResult {
 
     let mut text: string = tokens_to_text(tokens);
     if truncated { text = text + " /* parse_unknown truncated */"; }
-    let block = Statement.Unknown { tokens: tokens, text: text };
+    let block = Statement.Unknown {
+        tokens: tokens,
+        text: text,
+        code: "",
+        message: ""
+    };
     parser = skip_trivia(current);
     return StatementParseResult { parser: parser, statement: block };
 }

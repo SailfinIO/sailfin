@@ -145,12 +145,23 @@ lowering it to an internal "unknown statement", so a file like `@@@ !!!` or a
 stray `}` now yields one `E0500` event and `exit_code: 1` instead of being
 reported as clean.
 
-**Known limitation.** Only constructs the parser cannot dispatch at all become
-unknown statements. Malformed-but-recognized declarations — e.g. a function
-with a broken parameter list (`fn broken( {`) — parse into a recovered
-declaration node and are **not yet** flagged. Catching those requires
-parser-level error recovery (a threaded diagnostics channel), tracked
-separately; `E05xx` is reserved for the full range as that lands.
+A malformed-but-dispatched top-level declaration — one the parser recognizes
+the shape of but cannot finish parsing — is also flagged, each anchored at the
+first token of the malformed declaration:
+
+- `E0501` — malformed function parameter list, e.g. `fn broken( {`:
+  "expected `)` to close the parameter list of function `<name>`".
+- `E0502` — missing variable initializer, e.g. `let x = ;`: "expected an
+  initializer expression after `=` in declaration of `<name>`". (`let x;`
+  with no `=` is a legal uninitialized binding and is not flagged.)
+- `E0503` — missing struct field type, e.g. `struct S { x: }`: "expected a
+  type after `:` in a field of struct `<name>`".
+
+Parser recovery means one malformed declaration does not stop the run: an
+independent declaration that follows still parses and reports its own
+diagnostics (or none, if it's clean). The build path (`sfn build`) rejects the
+same three cases before LLVM lowering/linking — no executable is produced and
+no ICE occurs.
 
 ## Examples
 
