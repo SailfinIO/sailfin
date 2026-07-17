@@ -1,0 +1,150 @@
+// compiler/src/build/target.sfn
+//
+// Build target descriptor (SFN-52 / SFEP-0021 §4.2(A), M6). One resolved
+// target-OS string drives every target-divergent build decision — the
+// clang `-target` triple, the link libraries, the linker choice, and the
+// runtime module set — so a future first-class `sfn build --target`
+// (Makefile:988 promise) only has to seed that string instead of
+// special-casing Windows inline across the driver.
+//
+// The target OS is the `SAILFIN_TARGET_OS` override (the cross-compile +
+// e2e-test hook) else a non-shelling host probe, mirroring the emit-time
+// `_host_os()` locator in `llvm/lowering_debug_state.sfn` (SFN-49, M1) —
+// the two must agree so a module's emitted platform legs match the link
+// target. Values are uname-style: "Linux" | "Darwin" | "Windows".
+//
+// Zero-behaviour contract (#1112): every non-Windows target returns an
+// identity/empty result here, so the assembled clang argv and link inputs
+// on Linux and macOS are byte-identical to the pre-target-conditioning
+// driver. `-target` is only ever added when its triple is non-empty
+// (Windows only today), `-lm`/`-lpthread` are only ever dropped for a
+// Windows target, and the runtime module set is only ever rewritten for a
+// Windows target.
+import { _get_env_cmd } from "../build_flags";
+import { _dirname, _path_basename, _path_join } from "./paths";
+
+// Non-shelling host-OS probe. Deliberately mirrors
+// `llvm/lowering_debug_state.sfn::_host_os` (the SFN-49 de-shell): a
+// `/proc/self/status` probe for Linux, a `/System/Library/CoreServices`
+// probe for Darwin, then the `SystemRoot` env var for Windows, defaulting
+// to Linux. No `uname`/`sh` subprocess — native Windows has neither.
+fn _build_host_os() -> string ![io] {
+    if fs.exists("/proc/self/status") { return "Linux"; }
+    if fs.exists("/System/Library/CoreServices") { return "Darwin"; }
+    if _get_env_cmd("SystemRoot").length > 0 { return "Windows"; }
+    return "Linux";
+}
+
+// The resolved build target OS: the `SAILFIN_TARGET_OS` override wins (the
+// cross-compile + e2e-test hook the emit-time locators already honor),
+// else the host probe.
+fn build_target_os() -> string ![io] {
+    let target_override = _get_env_cmd("SAILFIN_TARGET_OS");
+    if target_override.length > 0 { return target_override; }
+    return _build_host_os();
+}
+
+fn target_os_is_windows(target_os: string) -> boolean {
+    return target_os == "Windows";
+}
+
+// The clang `-target` triple for `target_os`, or "" to use clang's host
+// default. Only Windows diverges (the MSVC ABI: `x86_64-pc-windows-msvc`,
+// linking `lld-link` + the UCRT); every other target keeps the host
+// default so no `-target` flag is added at all.
+fn target_clang_triple(target_os: string) -> string {
+    if target_os_is_windows(target_os) { return "x86_64-pc-windows-msvc"; }
+    return "";
+}
+
+// The `-target <triple>` clang flag pair for `target_os`, or [] when the
+// host default is used (non-Windows). Pure — callers resolve `target_os`
+// via `build_target_os()` in an `![io]` context and pass it in.
+fn target_clang_flags(target_os: string) -> string[] {
+    let triple = target_clang_triple(target_os);
+    if triple.length == 0 { return []; }
+    return ["-target", triple];
+}
+
+// The `-fuse-ld=` flag a target forces regardless of host auto-detection.
+// A Windows (MSVC) target links with `lld-link` via `-fuse-ld=lld`; every
+// other target returns "" so the driver's existing Linux-only mold/lld
+// auto-detect (and the `SAILFIN_LINKER` override) is unchanged.
+fn target_forced_linker_flag(target_os: string) -> string {
+    if target_os_is_windows(target_os) { return "-fuse-ld=lld"; }
+    return "";
+}
+
+// True when a target's linker rejects the GNU-style section-GC and
+// force-undefined flags (`-Wl,--gc-sections`, `-Wl,-u,<sym>`) the POSIX
+// link path emits. `lld-link` (the MSVC linker) uses `/OPT:REF` /
+// `/INCLUDE:` instead, so for a Windows target the driver skips the GNU
+// dead-strip + retain-root flags rather than emit inputs `lld-link` would
+// reject. (The MSVC-native equivalents are tuned against a real link in
+// SFEP-0021 M7; here the point is a clean lld-link invocation.) Every
+// non-Windows target keeps the GNU flags → byte-identical link.
+fn target_uses_gnu_link_gc(target_os: string) -> boolean {
+    return !target_os_is_windows(target_os);
+}
+
+// Drop POSIX-only link libraries for a Windows (MSVC/UCRT) target:
+// `-lm`/`-lpthread` are POSIX, and `-lssl`/`-lcrypto` resolve to the
+// `windows_stubs.ll` no-op crypto stubs, so none are passed to the MSVC
+// link (`ws2_32`/`kernel32` are auto-linked by clang). Every other target
+// returns the list unchanged (identity → byte-identical link).
+fn target_filter_link_libs(libs: string[], target_os: string) -> string[] {
+    if !target_os_is_windows(target_os) { return libs; }
+    let mut kept: string[] = [];
+    let mut i: int = 0;
+    loop {
+        if i >= libs.length { break; }
+        let lib = libs[i];
+        let posix = lib == "-lm" || lib == "-lpthread" || lib == "-lssl" || lib == "-lcrypto";
+        if !posix { kept.push(lib); }
+        i += 1;
+    }
+    return kept;
+}
+
+// Rewrite the runtime capsule's `sfn-sources` list for `target_os`. On
+// Windows the POSIX `process.sfn` (posix_spawnp/waitpid) is swapped for
+// its Win32 sibling `platform/process_windows.sfn`, and the Linux-only
+// `platform/rlimit.sfn` RLIMIT_AS self-cap module is dropped (a no-op on
+// Windows). This mirrors the mingw Makefile `RUNTIME_MODS` swap and is the
+// extensible seam for the broader MSVC exclusion set (the crypto/pthread/
+// concurrency modules backed by `windows_stubs.ll`), which is finalized
+// empirically against a real native link in SFEP-0021 M7. Every other
+// target returns the list unchanged.
+//
+// `sources` are already runtime-root-resolved absolute paths; match on the
+// basename so the manifest-root prefix is irrelevant, and rebuild the
+// swapped path from the source's own directory so it stays correctly
+// rooted (`<root>/sfn/process.sfn` → `<root>/sfn/platform/process_windows.sfn`).
+fn target_condition_runtime_sfn_sources(sources: string[], target_os: string) -> string[] {
+    if !target_os_is_windows(target_os) { return sources; }
+    let mut out: string[] = [];
+    let mut i: int = 0;
+    loop {
+        if i >= sources.length { break; }
+        let src = sources[i];
+        let base = _path_basename(src);
+        if base == "rlimit.sfn" {
+            // Excluded on Windows: the RLIMIT_AS self-cap is Linux-only.
+        } else if base == "process.sfn" {
+            out.push(_path_join(_dirname(src), "platform/process_windows.sfn"));
+        } else { out.push(src); }
+        i += 1;
+    }
+    return out;
+}
+
+export {
+    build_target_os,
+    target_os_is_windows,
+    target_clang_triple,
+    target_clang_flags,
+    target_forced_linker_flag,
+    target_uses_gnu_link_gc,
+    target_filter_link_libs,
+    target_condition_runtime_sfn_sources
+};
