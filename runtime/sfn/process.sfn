@@ -169,6 +169,35 @@ extern fn posix_spawn_file_actions_addchdir_np(fa: * u8, path: * u8) -> i32;
 // `4` is used directly.
 let SFN_EINTR: i32 = 4;
 
+// Darwin `poll(2)` can fail with `EAGAIN` when a transient internal
+// allocation fails — its man page: "The allocation of internal data
+// structures fails. A subsequent request may succeed." Linux `poll`
+// never returns it. Under whole-suite memory pressure this surfaced as a
+// rare macos-arm64 capture truncation: the drain treated the error as
+// fatal, closed the pipes with the child's bytes still buffered, and
+// returned an empty capture even though the child exited 0 (SFN-391).
+// `EAGAIN` is 35 on Darwin, 11 on Linux; both are accepted as retryable.
+// The other-platform value can never be returned by `poll` on this host
+// (35=ENOTEMPTY / 11=EDEADLK there), so honoring both stays portable.
+let SFN_EAGAIN_DARWIN: i32 = 35;
+let SFN_EAGAIN_LINUX: i32 = 11;
+
+// True for the `poll(2)` errno values that warrant re-arming and
+// re-polling rather than abandoning the wait: `EINTR` (a signal) and
+// `EAGAIN` (a transient Darwin allocation failure). Any other poll error
+// is a real fault and breaks the loop. Read/write `EINTR` retries keep
+// their own inline check — `EAGAIN` there would mean a non-blocking fd,
+// which these blocking pipes never are. The retry is unbounded (no guard
+// counter), matching the `EINTR` sites: the man page classifies `EAGAIN`
+// as transient ("a subsequent request may succeed"), and a bounded
+// give-up would reintroduce the silent capture truncation this fixes.
+fn _poll_err_retryable(err: i32) -> bool {
+    if err == SFN_EINTR { return true; }
+    if err == SFN_EAGAIN_DARWIN { return true; }
+    if err == SFN_EAGAIN_LINUX { return true; }
+    return false;
+}
+
 // ── metered-capture support (#1520) ────────────────────────────────
 // `wait4` is `waitpid` plus a `struct rusage` out-param the kernel
 // fills with the reaped child's resource usage. A NULL `rusage` makes
@@ -648,8 +677,10 @@ fn _drain_two_pipes(out_fd_in: i32, err_fd_in: i32, gb_out: * GrowBuf, gb_err: *
         let pr: i32 = poll(pbuf, 2 as usize, -1);
         if pr < 0 {
             let err: i32 = sailfin_intrinsic_pointer_read_i32(sailfin_intrinsic_errno_location());
-            if err == SFN_EINTR {
-                // Interrupted — re-arm and poll again.
+            if _poll_err_retryable(err) {
+                // Interrupted or a transient Darwin EAGAIN — re-arm and
+                // poll again rather than abandoning the child's unread
+                // bytes (SFN-391).
             } else { break; }
         } else {
             if out_fd >= 0 {
@@ -740,8 +771,9 @@ fn sfn_io_poll_readable(fd: i64, timeout_ms: i64) -> bool ![io] {
         let pr: i32 = poll(pbuf, 1 as usize, to);
         if pr < 0 {
             let err: i32 = sailfin_intrinsic_pointer_read_i32(sailfin_intrinsic_errno_location());
-            if err == SFN_EINTR {
-                // Interrupted before readiness — re-arm and poll again.
+            if _poll_err_retryable(err) {
+                // Interrupted or a transient Darwin EAGAIN before
+                // readiness — re-arm and poll again (SFN-391).
             } else { break; }
         } else {
             if pr > 0 {
@@ -821,8 +853,9 @@ fn sfn_io_poll_any(fds: int[], timeout_ms: i64) -> i64 ![io] {
         let pr: i32 = poll(pbuf, nfds as usize, to);
         if pr < 0 {
             let err: i32 = sailfin_intrinsic_pointer_read_i32(sailfin_intrinsic_errno_location());
-            if err == SFN_EINTR {
-                // Interrupted before readiness — re-arm and poll again.
+            if _poll_err_retryable(err) {
+                // Interrupted or a transient Darwin EAGAIN before
+                // readiness — re-arm and poll again (SFN-391).
             } else { break; }
         } else {
             if pr > 0 {
