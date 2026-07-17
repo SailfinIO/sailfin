@@ -847,5 +847,70 @@ test "websocket.serve loopback: ping/pong, fragmentation, close-code, protocol e
     assert code_1009b == 1009;
     close(fd6);
 
+    // Case 7 (RFC 6455 §5.5): a control frame (PING) with a payload > 125
+    // bytes is a protocol error — refused with CLOSE 1002, not clamped.
+    let fd7: i32 = _lb_open_ready(port);
+    assert fd7 >= 0;
+    let ctl_len: i64 = 126;
+    let ctl_buf: * u8 = malloc((ctl_len + 4) as usize);
+    assert ctl_buf as i64 != 0;
+    memset(ctl_buf, 65, ctl_len as usize);
+    assert _lb_send_frame_raw(fd7, 1, 9, true, ctl_buf, ctl_len);
+    free(ctl_buf);
+    let mut op_over: i64 = 0 - 1;
+    let mut code_over: i64 = 0 - 1;
+    assert _lb_read_close(fd7, & op_over, & code_over);
+    print.info("[websocket-serve-protocol] control-over125 opcode=" + op_over
+        + " code="
+        + code_over);
+    assert op_over == 8;
+    assert code_over == 1002;
+    close(fd7);
+
+    // Case 8 (RFC 6455 §5.5): a fragmented control frame (PING with FIN=0) is
+    // a protocol error — control frames MUST NOT be fragmented — refused 1002.
+    let fd8: i32 = _lb_open_ready(port);
+    assert fd8 >= 0;
+    assert _lb_send_frame_raw(fd8, 0, 9, true, "pingdata" as * u8, 8);
+    let mut op_frag_ctl: i64 = 0 - 1;
+    let mut code_frag_ctl: i64 = 0 - 1;
+    assert _lb_read_close(fd8, & op_frag_ctl, & code_frag_ctl);
+    print.info("[websocket-serve-protocol] control-fin0 opcode=" + op_frag_ctl
+        + " code="
+        + code_frag_ctl);
+    assert op_frag_ctl == 8;
+    assert code_frag_ctl == 1002;
+    close(fd8);
+
+    // Case 9 (RFC 6455 §5.2): a reserved opcode (0x3, reserved non-control) is
+    // a protocol error — refused 1002, not silently drained.
+    let fd9: i32 = _lb_open_ready(port);
+    assert fd9 >= 0;
+    assert _lb_send_frame_raw(fd9, 1, 3, true, "x" as * u8, 1);
+    let mut op_resv: i64 = 0 - 1;
+    let mut code_resv: i64 = 0 - 1;
+    assert _lb_read_close(fd9, & op_resv, & code_resv);
+    print.info("[websocket-serve-protocol] reserved-opcode opcode=" + op_resv
+        + " code="
+        + code_resv);
+    assert op_resv == 8;
+    assert code_resv == 1002;
+    close(fd9);
+
+    // Case 10 (RFC 6455 §5.5.1): a CLOSE with a 1-byte body cannot form a
+    // 2-byte status code — a malformed close, refused 1002 rather than echoed.
+    let fd10: i32 = _lb_open_ready(port);
+    assert fd10 >= 0;
+    assert _lb_send_frame_raw(fd10, 1, 8, true, "x" as * u8, 1);
+    let mut op_badclose: i64 = 0 - 1;
+    let mut code_badclose: i64 = 0 - 1;
+    assert _lb_read_close(fd10, & op_badclose, & code_badclose);
+    print.info("[websocket-serve-protocol] close-1byte opcode=" + op_badclose
+        + " code="
+        + code_badclose);
+    assert op_badclose == 8;
+    assert code_badclose == 1002;
+    close(fd10);
+
     let _rm = process.run(["rm", "-rf", _app_root3()]);
 }
