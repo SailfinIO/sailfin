@@ -94,21 +94,36 @@ The identical `EINTR`-only pattern existed in the two sibling poll loops,
 `sfn_io_poll_readable` and `sfn_io_poll_any` (backing `io.poll_readable` /
 `io.poll_any`), which would drop readiness on the same transient error.
 
-### On the co-occurring SIGABRT (Error 134)
+### On the "co-occurring SIGABRT" (Error 134) — it is the failed assertion, not a second crash
 
-macOS `libmalloc` raises `SIGABRT` on detected heap corruption / invalid-free,
-not on plain allocation failure (which returns NULL). The capture path's buffer
-arithmetic is bounds-correct (`_growbuf_read_from` pre-grows to
-`cap >= len + 4097` before a ≤4096 read; `_growbuf_take`'s terminator is always
-in-bounds), and no live double-free was demonstrable on the two-`run_capture`
-sequence this test executes. The most parsimonious reading is that the
-shard-level abort came from a *different* concurrent test child under the *same*
-memory pressure that induced the `poll` `EAGAIN` here — both downstream of one
-transient resource exhaustion, not a shared heap-corruption bug. This is not
-proven; if a future repro shows the abort inside the `runtime_io_print_test.sfn`
-child specifically, the `capture_take_stdout` builtin's `i8*`→`string`
-conversion (`compiler/src/llvm/runtime_helpers.sfn`) is the one ownership seam
-that was not closed by reading alone.
+The issue read the shard-level `Error 134` as evidence of a separate SIGABRT
+(`128 + 6`). It is not a distinct failure: **exit 134 is the ordinary exit code
+of a failed Sailfin assertion.** A failed `assert` calls
+`sailfin_assert_fail` → `sfn_raise_value_error` (`runtime/sfn/assert.sfn:164`),
+whose emission is `write(2) + abort()` (`runtime/sfn/exception.sfn`, cited at
+`runtime/sfn/string.sfn:230`) — so every assertion failure terminates the test
+process with `SIGABRT` → 134. The test runner special-cases exactly this
+(`compiler/src/cli/commands/test.sfn:851/918/971`: "the ordinary exit code of a
+failed assertion or abort()").
+
+So the chain is a single failure:
+
+```
+poll EAGAIN drops buffered bytes → empty capture
+  → assert find(out, "[info] alpha\n") >= 0  fails (line 90)
+  → sfn_raise_value_error → abort()
+  → exit 134   (the shard's "Error 134 / SIGABRT")
+```
+
+Removing the empty capture removes the assertion failure, which removes the
+abort. There is no separate heap-corruption bug to chase: `libmalloc` aborts on
+invalid-free, but the capture path's buffer arithmetic is bounds-correct
+(`_growbuf_read_from` pre-grows to `cap >= len + 4097` before a ≤4096 read;
+`_growbuf_take`'s terminator is always in-bounds) and no live double-free was
+demonstrable on the two-`run_capture` sequence this test executes. (An earlier
+hypothesis that the 134 came from a *different* concurrent test child is
+superseded by this finding — the assertion's own abort is the simpler and
+correct explanation.)
 
 ## Fix
 
