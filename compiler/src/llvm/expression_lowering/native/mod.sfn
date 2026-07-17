@@ -85,6 +85,7 @@ export {
     closure_env_load_prologue_marker,
     closure_pair_env_alloc_marker,
     closure_pair_fatal_mutable_marker,
+    closure_pair_fatal_owned_buf_mut_marker,
     closure_pair_marker,
     closure_sentinel_type_text,
     lift_non_capturing_lambdas,

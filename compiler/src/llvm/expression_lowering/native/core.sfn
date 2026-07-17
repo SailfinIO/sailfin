@@ -870,6 +870,33 @@ fn lower_expression(expression: string, bindings: ParameterBinding[], locals: Lo
         };
     }
 
+    // Mutable-OwnedBuf-across-spawn refusal (SFN-381). The lifting pass emits
+    // this marker in place of a real closure pair when a spawn/parallel task
+    // lambda's FIRST capture is a mutable `OwnedBuf`: the `owned_buf`
+    // trampoline reads env offset 0 as a by-value 32-byte OwnedBuf, but a
+    // mutable capture lowers by reference (an 8-byte `%OwnedBuf*` slot
+    // pointer) — the two ABIs collide. The `[fatal]` prefix matches the
+    // sentinel scanned by `lowering_core.sfn:has_fatal_lowering_diagnostic`,
+    // so IR writes are skipped and the build exits non-zero.
+    if starts_with(stripped, "<closure_pair_fatal_owned_buf_mut ") {
+        let cap_name = _parse_marker_string_field(stripped, "name=");
+        let lam_id = _parse_marker_int_field(stripped, "lambda_id=");
+        let mut name_for_diag: string = cap_name;
+        if name_for_diag.length == 0 { name_for_diag = "<unknown>"; }
+        diagnostics.push("llvm lowering [fatal]: spawn/parallel task lambda #"
+            + number_to_string(lam_id)
+            + " captures mutable `OwnedBuf` `"
+            + name_for_diag
+            + "` by reference across the task boundary (not yet supported, see SFN-381)");
+        return ExpressionResult {
+            lines: lines,
+            temp_index: temp_index,
+            operand: null,
+            diagnostics: diagnostics,
+            string_constants: empty_constants
+        };
+    }
+
     // Concurrency frontend lowering (M4.0, epic #965, issue #1085).
     // The parser builds `Spawn`/`Channel`/`Parallel`/`Serve` nodes and
     // `emit_native_format` (#1084) renders them to `.sfn-asm` text:
