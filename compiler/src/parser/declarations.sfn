@@ -28,7 +28,7 @@ import {
     strings_equal,
     substring
 } from "../string_utils";
-import { Token } from "../token";
+import { Token, TokenKind } from "../token";
 import { expression_from_tokens, normalize_expression } from "./expressions";
 import { parse_block } from "./statements";
 import {
@@ -333,6 +333,30 @@ fn parse_effect_list(initial_parser: Parser) -> EffectParseResult {
 // ============================================================================
 // Type Parameter Clause
 // ============================================================================
+// True when `sym` is a run of one or more `>` characters (`>`, `>>`, `>>>`) —
+// the lexer glues adjacent closing angle brackets into a single shift token.
+fn _is_gt_run(sym: string) -> boolean {
+    if sym.length == 0 { return false; }
+    let mut i: int = 0;
+    loop {
+        if i >= sym.length { break; }
+        if sym[i] != ">" { return false; }
+        i += 1;
+    }
+    return true;
+}
+
+// A synthetic single `>` symbol token, positioned at `src`, used to unglue a
+// `>>` shift token back into the individual angle closes it represents.
+fn _gt_token(src: Token) -> Token {
+    return Token {
+        kind: TokenKind.Symbol(),
+        lexeme: ">",
+        line: src.line,
+        column: src.column
+    };
+}
+
 fn parse_type_parameter_clause(parser: Parser) -> TypeParameterParseResult {
     let mut current = skip_trivia(parser);
     let token = parser_peek_raw(current);
@@ -349,12 +373,37 @@ fn parse_type_parameter_clause(parser: Parser) -> TypeParameterParseResult {
         if tok.kind.variant == "EndOfFile" { break; }
         if tok.kind.variant == "Symbol" {
             let sym = tok.lexeme;
-            if strings_equal(sym, "<") { depth += 1; } else if strings_equal(sym, ">") {
-                depth -= 1;
-                if depth == 0 {
-                    current = parser_advance_raw(current);
-                    break;
+            if strings_equal(sym, "<") {
+                depth += 1;
+                collected = append_token(collected, tok);
+                current = parser_advance_raw(current);
+                continue;
+            }
+            if _is_gt_run(sym) {
+                // A `>`-run token (`>`, `>>`, …) closes one angle level per
+                // `>`. The lexer glues the closing brackets of nested generic
+                // bounds like `From<int>>` into a single `>>` shift token; the
+                // inner `>` (closing `From<int>`) belongs in the collected
+                // bound text, while the `>` that returns depth to 0 closes the
+                // type-parameter clause and stops the scan. Ungluing it here
+                // keeps a valid `fn f<E: From<int>>(...)` from over-consuming
+                // into the parameter list (SFN-18).
+                let run = sym.length;
+                let mut gi: int = 0;
+                let mut clause_closed = false;
+                loop {
+                    if gi >= run { break; }
+                    depth -= 1;
+                    if depth == 0 {
+                        clause_closed = true;
+                        break;
+                    }
+                    collected = append_token(collected, _gt_token(tok));
+                    gi += 1;
                 }
+                current = parser_advance_raw(current);
+                if clause_closed { break; }
+                continue;
             }
         }
         collected = append_token(collected, tok);

@@ -193,3 +193,16 @@ test "parse malformed: trailing comma in parameter list stays clean" ![io] {
     assert r.exit == 0;
     assert contains(r.out, "\"errors\":0");
 }
+
+// A generic bound whose nested generic closes with a lexer-glued `>>`
+// (`fn f<E: From<int>>(a: E)`) is valid: the type-parameter clause ungluees
+// the `>>` so the parameter list still sees a clean `(a: E)`. This must NOT
+// trip the SFN-18 unclosed-parameter-list detection (`E0501`) — the pre-fix
+// param loop only limped through it by silently absorbing phantom parameters.
+test "parse malformed: generic bound with glued >> stays clean" ![io] {
+    let root = _fixture_dir("ok-generic-bound");
+    let path = _write(root, "ok_generic_bound.sfn", "interface From<T> { fn from(value: T) -> Self; }\nfn f<E: From<int>>(a: E) -> E { return a; }\nfn main() { }\n");
+    let r = _check(path);
+    assert r.exit == 0;
+    assert contains(r.out, "\"errors\":0");
+}
