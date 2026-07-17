@@ -1,0 +1,60 @@
+// capsules/sfn/crypto/tests/rand_test.sfn
+//
+// Tests for the CSPRNG wrapper (SFEP-0048 Phase D, SFN-123). Unlike the other
+// sfn/crypto tests (pure known-answer vectors), `random_bytes` reads the host
+// OS entropy source, so these are `![rand]` liveness/length/shape smoke tests,
+// never statistical-quality assertions. The effect gate itself (a missing
+// `![rand]` caller must fail effect-check) is pinned separately by
+// `compiler/tests/e2e/rand_effect_gate_test.sfn`.
+import { random_bytes } from "../src/rand";
+
+test "random_bytes: fills exactly N bytes at the WebSocket sizes" ![rand] {
+    // 4 = RFC 6455 masking key, 16 = handshake Sec-WebSocket-Key.
+    assert random_bytes(4).length == 4;
+    assert random_bytes(16).length == 16;
+    assert random_bytes(32).length == 32;
+}
+
+test "random_bytes: fills exactly N across a getentropy chunk boundary" ![rand] {
+    // getentropy caps each syscall at 256 bytes; 300 forces the fill loop.
+    assert random_bytes(300).length == 300;
+}
+
+test "random_bytes: every byte is a 0..255 octet" ![rand] {
+    let a = random_bytes(64);
+    assert a.length == 64;
+    let mut i = 0;
+    loop {
+        if i >= a.length { break; }
+        assert a[i] >= 0;
+        assert a[i] <= 255;
+        i = i + 1;
+    }
+}
+
+test "random_bytes: two successive calls differ (liveness)" ![rand] {
+    let a = random_bytes(32);
+    let b = random_bytes(32);
+    assert a.length == 32;
+    assert b.length == 32;
+    // Liveness only, not randomness quality: two independent 32-byte draws
+    // colliding is ~2^-256.
+    let mut differs = false;
+    let mut i = 0;
+    loop {
+        if i >= a.length { break; }
+        if a[i] != b[i] {
+            differs = true;
+            break;
+        }
+        i = i + 1;
+    }
+    assert differs;
+}
+
+test "random_bytes: non-positive length returns empty (fail-closed shape)" ![rand] {
+    // Fail-closed: never a zeroed or partial buffer. n <= 0 yields [], which a
+    // caller detects as `length != n`, not a silent all-zero key.
+    assert random_bytes(0).length == 0;
+    assert random_bytes(-1).length == 0;
+}

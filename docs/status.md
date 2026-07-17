@@ -372,7 +372,8 @@ here.
 | Effect annotations (`![...]`) | Shipped | |
 | Effect enforcement — `io`, `net`, `clock` | **Enforced** | Build fails on undeclared use (Phase D default `error`) |
 | Effect enforcement — `model` | Reserved | Declarable; detector lands with the `sfn/ai` capsule (post-1.0) |
-| Effect enforcement — `gpu`, `rand` | Parsed only | Reserved in the taxonomy; no detectors yet |
+| Effect enforcement — `gpu` | Parsed only | Reserved in the taxonomy; no detectors yet |
+| Effect enforcement — `rand` | **Enforced** (entropy boundary) | `sfn/crypto::random_bytes` (SFEP-0048 Phase D) establishes the `![rand]` boundary end-to-end: it propagates to callers via the existing callee-effect propagation and a caller without `![rand]` fails effect-check. Scope: only `random_bytes` carries the effect — there is still no auto call-name detector for arbitrary RNG identifiers |
 | Cross-module effect propagation | **Shipped** | `E0402` (Phase E); E2 deferred |
 | Capsule capability cross-check | **Shipped** | `E0403` (Phase F) |
 | Hierarchical sub-effects (`io.fs`, `net.http`) | **Shipped (G6)** | Dotted sub-effect names parse as single effect strings and satisfy by subsumption — a broad grant subsumes a narrow requirement (`io.fs ⊑ io`), so every existing `![io]` stays valid and a manifest may *tighten* with `required = ["io.fs"]` (SFEP-0017 D1/D2/D4). Unrecognized effect roots are rejected (`E0404`). `canonical_effects()` is unchanged — the six roots stay locked; sub-effects refine *within* them. Detection still emits bare roots — narrowing a body's *requirement* to a sub-effect (`io.fs` for a filesystem op) is G7 (SFN-99). `effect_taxonomy.sfn`: `effect_root` / `is_recognized_effect` / `effect_subsumes` |
@@ -439,7 +440,7 @@ Capsules ship under `capsules/sfn/` and are imported by bare name
 |---------|--------|--------|---------|-------------|
 | `sfn/strings` | `"strings"` | Shipped | None | Trim, explicit ASCII-only `ascii_uppercase` / `ascii_lowercase` conversion (non-ASCII bytes unchanged), split/join, find/replace |
 | `sfn/json` | `"json"` | Shipped | None | JSON parsing, serialization, pretty-print |
-| `sfn/crypto` | `"crypto"` | Shipped | None | Pure Sailfin SHA-256/SHA-1/SHA-384 + base64, HMAC-SHA-256, HKDF-SHA-256, ChaCha20, Poly1305, and bit/constant-time helpers (SFEP-0048 Phase A + Phase D prep); OpenSSL-backed Ed25519 verify |
+| `sfn/crypto` | `"crypto"` | Shipped | `![rand]` (`random_bytes` only) | Pure Sailfin SHA-256/SHA-1/SHA-384 + base64, HMAC-SHA-256, HKDF-SHA-256, ChaCha20, Poly1305, and bit/constant-time helpers (SFEP-0048 Phase A + Phase D prep); OpenSSL-backed Ed25519 verify; `random_bytes(n: int) -> int[] ![rand]` (`capsules/sfn/crypto/src/rand.sfn`) — the capsule's sole effectful function, returning `n` cryptographically secure bytes from the OS entropy source (`getentropy`/`getrandom`, `/dev/urandom` read-loop fallback) via the runtime primitive `sfn_rand_fill` (`runtime/sfn/platform/rand.sfn`); fails closed to `[]` on non-positive `n` or an entropy-source error (never zeroed/partial output). Backs the WebSocket adapter's masking key and handshake key generation, retiring its OpenSSL `RAND_bytes` extern (SHA-1/`EVP_EncodeBlock` OpenSSL externs remain, so `-lssl -lcrypto` is still linked) |
 | `sfn/math` | `"math"` | Shipped | None | abs, min/max, clamp, floor/ceil/round, pow, sum/mean |
 | `sfn/path` | `"path"` | Shipped | None | Path join, dirname, basename, ext, normalize |
 | `sfn/toml` | `"toml"` | Shipped | None | TOML v1.0 parsing, serialization, dotted-path access |

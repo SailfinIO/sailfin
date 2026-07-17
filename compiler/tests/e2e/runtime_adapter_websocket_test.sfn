@@ -10,8 +10,9 @@
 //   3. emit shape  — the module emits a `define` for every sfn_websocket_*
 //                    client export and `declare`s the BSD-sockets libc
 //                    surface (socket/connect/send/recv/close) plus the
-//                    OpenSSL handshake surface it links (RAND_bytes,
-//                    EVP_EncodeBlock).
+//                    handshake crypto surface it links (EVP_EncodeBlock, still
+//                    OpenSSL, and the native `sfn_rand_fill` entropy primitive
+//                    that retired the OpenSSL `RAND_bytes` extern).
 //   4. routing     — `websocket.connect/.send/.close` member calls lower to
 //                    real `@sfn_websocket_*` calls and NOT the unbridged
 //                    `@sfn_websocket_unbridged` sentinel.
@@ -167,14 +168,17 @@ test "websocket emit: declares the BSD-sockets libc surface" ![io] {
     assert _has_declare(ir, "close");
 }
 
-test "websocket emit: declares the OpenSSL handshake surface it links" ![io] {
+test "websocket emit: declares the handshake crypto surface it links" ![io] {
     let ir = _emit_module("websocket", "runtime/sfn/adapters/websocket.sfn");
     assert ir != "EMIT_FAILED";
-    // The RFC 6455 client masks every frame (RAND_bytes) and base64-encodes
-    // the Sec-WebSocket-Key (EVP_EncodeBlock) — both from libcrypto, already
-    // linked repo-wide via `-lssl -lcrypto` (runtime/capsule.toml).
-    assert _has_declare(ir, "RAND_bytes");
+    // The RFC 6455 client base64-encodes the Sec-WebSocket-Key
+    // (EVP_EncodeBlock, still libcrypto, linked repo-wide via `-lssl -lcrypto`)
+    // and now sources the masking key + handshake key from the native entropy
+    // primitive (`sfn_rand_fill`, runtime/sfn/platform/rand.sfn), which retired
+    // the OpenSSL `RAND_bytes` extern (SFEP-0048 Phase D, SFN-123).
     assert _has_declare(ir, "EVP_EncodeBlock");
+    assert _has_declare(ir, "sfn_rand_fill");
+    assert ! _has_declare(ir, "RAND_bytes");
 }
 
 test "websocket.connect/.send/.close lower to @sfn_websocket_*, not the unbridged sentinel" ![io] {

@@ -196,7 +196,8 @@ fn _lb_send_masked(fd: i32, opcode: i64, payload: string) -> bool {
     memset(_lb_ptr_off(out, 0), byte0 as i32, 1 as usize);
     memset(_lb_ptr_off(out, 1), (128 | payload_len) as i32, 1 as usize);
     // A fixed (non-random) mask key is fine here — this is a directed test
-    // vehicle, not the production client (which uses RAND_bytes).
+    // vehicle, not the production client (which uses the native `sfn_rand_fill`
+    // entropy primitive).
     let mut k: i64 = 0;
     loop {
         if k >= 4 { break; }
@@ -259,7 +260,7 @@ fn _lb_read_frame(fd: i32, out_opcode: * i64) -> string {
 // 126 + 16-bit, 127 + 64-bit) so the fragmentation / control-code / oversize
 // tests can drive frames the string-based `_lb_send_masked` cannot. A fixed
 // mask key is fine for a directed test vehicle (the production client uses
-// `RAND_bytes`).
+// the native `sfn_rand_fill` entropy primitive).
 fn _lb_send_frame_raw(fd: i32, fin: i64, opcode: i64, masked: bool, payload: * u8, payload_len: i64) -> bool {
     // Guard against a negative length underflowing `total` into a huge
     // `as usize` allocation if a future caller mis-passes it.
