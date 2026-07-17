@@ -7,10 +7,13 @@
 // surface end-to-end.
 import {
     JsonValue,
+    ParseLimits,
+    ParseOutcome,
     array_at,
     array_length,
     array_val,
     bool_val,
+    default_limits,
     get_bool,
     get_value,
     has_key,
@@ -18,6 +21,7 @@ import {
     number_val,
     object_val,
     parse,
+    parse_with_limits,
     string_val,
     stringify
 } from "../src/mod";
@@ -119,8 +123,8 @@ test "json: deeply-nested object is rejected at the depth cap without crashing" 
 }
 
 test "json: over-length input is rejected at the size cap" {
-    // _max_input_len() is 10_000_000; double a seed string past it. The
-    // length guard returns null_val() before any recursion runs.
+    // default_limits().max_input_len is 10_000_000; double a seed string past
+    // it. The length guard returns null_val() before any recursion runs.
     let mut big: string = "1";
     loop {
         if big.length > 10000000 { break; }
@@ -147,6 +151,60 @@ test "json: moderately-nested document within the cap parses unchanged" {
     }
     assert strings_equal(cur.kind, "number");
     assert cur.number_value == 42;
+}
+
+// -- Configurable limits + clean error signalling (SFN-156) --
+test "json: parse_with_limits reports ok on a valid document within caps" {
+    let doc = object_val(["k"], [string_val("v")]);
+    let outcome: ParseOutcome = parse_with_limits(stringify(doc), default_limits());
+    assert outcome.ok == true;
+    assert outcome.error.length == 0;
+    assert strings_equal(outcome.value.kind, "object");
+    assert has_key(outcome.value, "k");
+}
+
+test "json: a tightened depth cap rejects nesting the default would accept" {
+    // Depth 5 parses fine under the default 1000 cap...
+    let doc = _repeat("[", 5) + "42" + _repeat("]", 5);
+    let ok: ParseOutcome = parse_with_limits(doc, default_limits());
+    assert ok.ok == true;
+    // ...but a caller-supplied max_depth of 3 rejects it cleanly.
+    let tight: ParseLimits = ParseLimits {
+        max_depth: 3,
+        max_input_len: 10000000
+    };
+    let breach: ParseOutcome = parse_with_limits(doc, tight);
+    assert breach.ok == false;
+    assert breach.error.length > 0;
+    assert strings_equal(breach.error, "maximum nesting depth exceeded");
+    // The partial tree still re-wraps to the outer container kind.
+    assert strings_equal(breach.value.kind, "array");
+}
+
+test "json: a tightened size cap rejects input the default would accept" {
+    let doc = "[1,2,3,4,5]";
+    let ok: ParseOutcome = parse_with_limits(doc, default_limits());
+    assert ok.ok == true;
+    let tight: ParseLimits = ParseLimits { max_depth: 1000, max_input_len: 4 };
+    let breach: ParseOutcome = parse_with_limits(doc, tight);
+    assert breach.ok == false;
+    assert strings_equal(breach.error, "input exceeds maximum size");
+    assert strings_equal(breach.value.kind, "null");
+}
+
+test "json: depth breach is distinguishable from a valid null value" {
+    // A legitimate `null` parses ok; a depth breach does not — the caller can
+    // tell them apart via `ok`/`error` even though both carry a null value.
+    let good: ParseOutcome = parse_with_limits("null", default_limits());
+    assert good.ok == true;
+    assert good.error.length == 0;
+    let tight: ParseLimits = ParseLimits {
+        max_depth: 1,
+        max_input_len: 10000000
+    };
+    let breach: ParseOutcome = parse_with_limits("[[[1]]]", tight);
+    assert breach.ok == false;
+    assert breach.error.length > 0;
 }
 
 // -- Escape decode/encode coverage (#1619) --

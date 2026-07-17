@@ -191,14 +191,33 @@ fn stringify(value: JsonValue) -> string {
 // ---- Parsing ----
 // Minimal recursive-descent JSON parser.
 //
-// Hardened against stack-exhaustion DoS (#1585): recursion depth is
-// bounded by `_max_depth()` and total input length by `_max_input_len()`.
+// Hardened against stack-exhaustion DoS (#1585, SFN-156): recursion depth
+// and total input length are bounded by a caller-supplied `ParseLimits`.
 // Adversarial JSON-RPC reaches this parser on the proxy hot path, so a
 // pathologically deep document (e.g. thousands of nested `[`) must be
-// rejected at the cap rather than overflowing the native stack.
-fn _max_depth() -> int { return 1000; }
+// rejected at the cap rather than overflowing the native stack, and the
+// caller must be able to tighten the caps for its own trust boundary.
+struct ParseLimits {
+    max_depth: int;  // maximum nesting depth before a clean reject
+    max_input_len: int;  // maximum input length (text.length) before a clean reject
+}
 
-fn _max_input_len() -> int { return 10000000; }
+// Sane defaults used by the bare `parse(text)` entry point. Callers that
+// inspect untrusted traffic under a tighter budget pass their own limits to
+// `parse_with_limits`.
+fn default_limits() -> ParseLimits {
+    return ParseLimits { max_depth: 1000, max_input_len: 10000000 };
+}
+
+// Outcome of a bounded parse: `ok` is false when a guard was breached, with
+// `error` carrying a stable human-readable reason ("" when ok). `value` holds
+// the (possibly partial) tree so callers that only need best-effort data can
+// still read it.
+struct ParseOutcome {
+    ok: boolean;
+    error: string;
+    value: JsonValue;
+}
 
 fn _skip_whitespace(text: string, pos: int) -> int {
     let mut p: int = pos;
@@ -213,33 +232,66 @@ fn _skip_whitespace(text: string, pos: int) -> int {
 }
 
 fn parse(text: string) -> JsonValue {
-    // Parse a JSON string into a JsonValue tree.
-    // Returns null_val() on parse error, over-length input, or input that
-    // nests deeper than `_max_depth()`.
-    if text.length > _max_input_len() { return null_val(); }
-    let result = _parse_value(text, 0, 0);
-    return result.value;
+    // Parse a JSON string into a JsonValue tree using the default limits.
+    // Returns null_val() on over-length input; on a depth breach it returns
+    // the best-effort (partial) tree without crashing. Callers that need to
+    // distinguish a guard breach from valid data use `parse_with_limits`.
+    return parse_with_limits(text, default_limits()).value;
+}
+
+fn parse_with_limits(text: string, limits: ParseLimits) -> ParseOutcome {
+    // Parse under caller-supplied depth/size caps, reporting a clean error
+    // rather than crashing when either is breached. The size cap is checked
+    // up front; the depth cap is enforced during recursion and its breach is
+    // propagated out through `_ParseResult.error`.
+    if text.length > limits.max_input_len {
+        return ParseOutcome {
+            ok: false,
+            error: "input exceeds maximum size",
+            value: null_val()
+        };
+    }
+    let result = _parse_value(text, 0, 0, limits);
+    if result.error.length > 0 {
+        return ParseOutcome {
+            ok: false,
+            error: result.error,
+            value: result.value
+        };
+    }
+    return ParseOutcome { ok: true, error: "", value: result.value };
 }
 
 struct _ParseResult {
     value: JsonValue;
     pos: int;
+    error: string;  // "" on success; a guard-breach reason otherwise
 }
 
 fn _parse_result(value: JsonValue, pos: int) -> _ParseResult {
-    return _ParseResult { value: value, pos: pos };
+    return _ParseResult { value: value, pos: pos, error: "" };
 }
 
-fn _parse_value(text: string, start: int, depth: int) -> _ParseResult {
+fn _parse_result_err(value: JsonValue, pos: int, error: string) -> _ParseResult {
+    return _ParseResult { value: value, pos: pos, error: error };
+}
+
+fn _parse_value(text: string, start: int, depth: int, limits: ParseLimits) -> _ParseResult {
     let pos = _skip_whitespace(text, start);
     if pos >= text.length { return _parse_result(null_val(), pos); }
     // Bound recursion: reject input that nests past the depth cap instead
     // of recursing until the native stack overflows (#1585).
-    if depth > _max_depth() { return _parse_result(null_val(), pos); }
+    if depth > limits.max_depth {
+        return _parse_result_err(null_val(), pos, "maximum nesting depth exceeded");
+    }
     let ch = text[pos];
     if ch == "\"" { return _parse_string(text, pos); }
-    if ch == "{" { return _parse_object(text, pos, depth); }
-    if ch == "[" { return _parse_array(text, pos, depth); }
+    if ch == "{" {
+        return _parse_object(text, pos, depth, limits);
+    }
+    if ch == "[" {
+        return _parse_array(text, pos, depth, limits);
+    }
     if ch == "t" || ch == "f" { return _parse_bool(text, pos); }
     if ch == "n" { return _parse_result(null_val(), pos + 4); }
     // Must be a number
@@ -349,7 +401,7 @@ fn _parse_bool(text: string, start: int) -> _ParseResult {
     return _parse_result(bool_val(false), start + 5);
 }
 
-fn _parse_array(text: string, start: int, depth: int) -> _ParseResult {
+fn _parse_array(text: string, start: int, depth: int, limits: ParseLimits) -> _ParseResult {
     let mut p: int = start + 1;  // skip [
     let mut items: JsonValue[] = [];
     p = _skip_whitespace(text, p);
@@ -358,8 +410,13 @@ fn _parse_array(text: string, start: int, depth: int) -> _ParseResult {
     }
     loop {
         if p >= text.length { break; }
-        let item = _parse_value(text, p, depth + 1);
+        let item = _parse_value(text, p, depth + 1, limits);
         items.push(item.value);
+        // Propagate a guard breach (e.g. depth cap) out with the partial tree
+        // instead of continuing to parse structurally-broken input.
+        if item.error.length > 0 {
+            return _parse_result_err(array_val(items), item.pos, item.error);
+        }
         p = _skip_whitespace(text, item.pos);
         if p < text.length && text[p] == "," { p += 1; } else { break; }
     }
@@ -368,7 +425,7 @@ fn _parse_array(text: string, start: int, depth: int) -> _ParseResult {
     return _parse_result(array_val(items), p);
 }
 
-fn _parse_object(text: string, start: int, depth: int) -> _ParseResult {
+fn _parse_object(text: string, start: int, depth: int, limits: ParseLimits) -> _ParseResult {
     let mut p: int = start + 1;  // skip {
     let mut keys: string[] = [];
     let mut values: JsonValue[] = [];
@@ -385,8 +442,11 @@ fn _parse_object(text: string, start: int, depth: int) -> _ParseResult {
         p = _skip_whitespace(text, key_result.pos);
         if p < text.length && text[p] == ":" { p += 1; }
         // Parse value
-        let val_result = _parse_value(text, p, depth + 1);
+        let val_result = _parse_value(text, p, depth + 1, limits);
         values.push(val_result.value);
+        if val_result.error.length > 0 {
+            return _parse_result_err(object_val(keys, values), val_result.pos, val_result.error);
+        }
         p = _skip_whitespace(text, val_result.pos);
         if p < text.length && text[p] == "," { p += 1; } else { break; }
     }
