@@ -1,0 +1,161 @@
+// E2E test for the host-aware single-hop readlink sentinel
+// (`sailfin_intrinsic_fs_read_link`). Sibling of
+// `fs_list_dir_intrinsic_test.sfn` / `exe_path_intrinsic_test.sfn` — the
+// same epic-#1308-class host-aware fs sentinel shape.
+//
+// `sailfin_intrinsic_fs_read_link(path: i8*, buf: i8*, size: i64) -> i64`
+// is a registry sentinel whose lowering branch (`core_call_emission.sfn`)
+// emits a per-target sequence chosen at emit time from `fs_platform_leg()`
+// (`SAILFIN_TARGET_OS` override, else the host probe):
+//
+//   Linux/Darwin -> readlink(path, buf, size)  (POSIX byte count)
+//   Windows      -> a bare `i64 -1` stub (no `readlink` symbol in the IR)
+//
+// This is what lets the single `filesystem.ll` link on native Windows,
+// where the POSIX `readlink` symbol does not exist: the sentinel
+// guarantees `readlink` is never *called* on the Windows leg. The runtime
+// consumer (`sfn_fs_read_link`, surfaced as `fs.read_link`) lands once this
+// sentinel is in the pinned seed — the runtime is seed-compiled during
+// `sfn build -p compiler`, so its call to this sentinel needs the seed to
+// already know it (see `.claude/rules/seed-dependency.md`).
+//
+// Host-independent: the legs are forced via `SAILFIN_TARGET_OS` (consulted
+// before the host probe), so they assert the same thing on Linux or macOS
+// CI. For each leg it pins:
+//
+//   1. typecheck   — `sfn check <fixture>` exits 0 (the sentinel is seeded
+//                    into the resolution scope; no extern needed).
+//   2. POSIX leg   — the `readlink` `call` appears.
+//   3. Windows leg — `readlink` never appears (the stub keeps it out).
+//   4. no sentinel — no `call`/`declare` targets the sentinel name itself.
+//
+// NOTE on matchers: the `sfn/test` `expect_*` matchers are `![pure]` and so
+// cannot be called from an `![io]` test like this. Assert on the captured
+// `.ll` text with `sfn/strings` predicates instead (#842).
+import { contains, split } from "sfn/strings";
+import { report_child_failure } from "sfn/test";
+
+fn _sfn_bin() -> string ![io] {
+    let configured = env.get("SAILFIN_BIN");
+    if configured.length > 0 { return configured; }
+    return "build/bin/sfn";
+}
+
+fn _scratch_dir() -> string ![io] {
+    let mut dir = env.get("SAILFIN_TEST_SCRATCH");
+    if dir.length == 0 { dir = "/tmp"; }
+    fs.createDirectory(dir, true);
+    return dir;
+}
+
+fn _base_env() -> string[] ![io] {
+    let mut e: string[] = [];
+    let path = env.get("PATH");
+    if path.length > 0 { e.push("PATH=" + path); }
+    let home = env.get("HOME");
+    if home.length > 0 { e.push("HOME=" + home); }
+    let tmpdir = env.get("TMPDIR");
+    if tmpdir.length > 0 { e.push("TMPDIR=" + tmpdir); }
+    let scratch = env.get("SAILFIN_TEST_SCRATCH");
+    if scratch.length > 0 { e.push("SAILFIN_TEST_SCRATCH=" + scratch); }
+    return e;
+}
+
+fn _env_with_target(target_os: string) -> string[] ![io] {
+    let mut e = _base_env();
+    e.push("SAILFIN_TARGET_OS=" + target_os);
+    return e;
+}
+
+fn _any_line_with(text: string, a: string, b: string) -> bool {
+    let lines = split(text, "\n");
+    let mut i = 0;
+    loop {
+        if i >= lines.length { break; }
+        if contains(lines[i], a) && contains(lines[i], b) { return true; }
+        i += 1;
+    }
+    return false;
+}
+
+// Fixture mirrors the real consumer shape (`sfn_fs_read_link`): pass a
+// path `i8*`, a buffer `i8*`, and a size `i64` to the sentinel and return
+// its `i64` byte count. The sentinel name is seeded as a source-level
+// global by `runtime_helper_call_names()`, so no extern is needed for it;
+// `malloc` is externed because the fixture does not import the prelude.
+fn _fixture_source() -> string {
+    return "extern fn malloc(size: usize) -> * u8;\n\nfn probe_read_link() -> i64 {\n    let cap: i64 = 4096;\n    let path: * u8 = malloc(cap as usize);\n    let buf: * u8 = malloc(cap as usize);\n    return sailfin_intrinsic_fs_read_link(path, buf, cap);\n}\n\nfn main() -> void {\n    let n: i64 = probe_read_link();\n}\n";
+}
+
+fn _fixture_path() -> string ![io] {
+    let dir = _scratch_dir();
+    let src = dir + "/sfn-fs-read-link-probe.sfn";
+    fs.writeFile(src, _fixture_source());
+    return src;
+}
+
+fn _emit(src: string, child_env: string[], tag: string) -> string ![io] {
+    let dir = _scratch_dir();
+    let ll = dir + "/sfn-fs-read-link-" + tag + ".ll";
+    if fs.exists(ll) { fs.deleteFile(ll); }
+    let exit = process.run_capture([_sfn_bin(), "emit", "-o", ll, "llvm", src], child_env);
+    let out = process.capture_take_stdout();
+    let err = process.capture_take_stderr();
+    report_child_failure("fs-read-link-intrinsic emit " + tag, exit, out, err);
+    if exit != 0 { return ""; }
+    if !fs.exists(ll) { return ""; }
+    let ir = fs.readFile(ll);
+    fs.deleteFile(ll);
+    return ir;
+}
+
+test "fs-read-link: sfn check passes on the fixture" ![io] {
+    let src = _fixture_path();
+    let exit = process.run_capture([_sfn_bin(), "check", src], _base_env());
+    let out = process.capture_take_stdout();
+    let err = process.capture_take_stderr();
+    fs.deleteFile(src);
+    report_child_failure("fs-read-link-intrinsic check", exit, out, err);
+    assert exit == 0;
+}
+
+test "fs-read-link: Linux leg calls readlink" ![io] {
+    let src = _fixture_path();
+    let ir = _emit(src, _env_with_target("Linux"), "linux");
+    fs.deleteFile(src);
+    assert ir.length > 0;
+    assert contains(ir, "call i64 @readlink(");
+}
+
+test "fs-read-link: Darwin leg also calls readlink (POSIX)" ![io] {
+    let src = _fixture_path();
+    let ir = _emit(src, _env_with_target("Darwin"), "darwin");
+    fs.deleteFile(src);
+    assert ir.length > 0;
+    assert contains(ir, "call i64 @readlink(");
+}
+
+test "fs-read-link: Windows leg stubs out, no readlink symbol in the IR" ![io] {
+    let src = _fixture_path();
+    let ir = _emit(src, _env_with_target("Windows"), "windows");
+    fs.deleteFile(src);
+    assert ir.length > 0;
+    // The MinGW-absent `readlink` must never enter the IR — the Windows
+    // leg emits a bare `i64 -1` stub instead of a call.
+    assert ! contains(ir, "@readlink(");
+}
+
+test "fs-read-link: sentinel symbol never emitted as call/declare" ![io] {
+    let src = _fixture_path();
+    let targets = ["Linux", "Darwin", "Windows"];
+    let mut i = 0;
+    loop {
+        if i >= targets.length { break; }
+        let ir = _emit(src, _env_with_target(targets[i]), "leak-" + targets[i]);
+        assert ir.length > 0;
+        assert ! _any_line_with(ir, "call ", "@sailfin_intrinsic_fs_read_link");
+        assert ! _any_line_with(ir, "declare ", "@sailfin_intrinsic_fs_read_link");
+        i += 1;
+    }
+    fs.deleteFile(src);
+}
