@@ -1,0 +1,14 @@
+// compiler/tests/e2e/fixtures/range_map/main.sfn
+//
+// SFN-114 acceptance — `(0..n).map(f)` as eager sugar over the array HOF.
+// A `Range` receiver has no method surface, so the emitter materializes
+// `[0, 1, 2]` and dispatches `runtime_array_map_fn` over it (SFEP-0028 (D)).
+// `(0..3).map(i => i*i)` = [0, 1, 4]; indexing the annotated result proves
+// the mapped values. Before SFN-114 this fataled at lowering with
+// "cannot resolve return type for call to `0..3.map`".
+fn main() ![io] {
+    let squares: int[] = (0 .. 3).map(fn (i) -> int { return i * i; });
+    print(squares[0]);
+    print(squares[1]);
+    print(squares[2]);
+}

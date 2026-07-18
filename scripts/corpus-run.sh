@@ -112,7 +112,7 @@ NO_RUN=(
 # not README prose — remove an entry when its gate lands (it flips to XPASS and
 # the ratchet flags it). Keep it in sync with scripts/check-examples.sh.
 KNOWN_BUILD_RED=(
-    "examples/advanced/matrix-multiplication.sfn"        # range .map/.reduce HOFs — #1943/#1945 (epic #1883)
+    "examples/advanced/matrix-multiplication.sfn"        # range HOFs shipped (SFN-114); now blocked on nested-lambda transitive-capture typing — SFN-396 (epic #1883)
     "examples/advanced/web-server-with-concurrency.sfn"  # net response method lowering — epic #1883
     "examples/concurrency/dynamic-task-scheduling.sfn"   # typed channel then live await — #1942/#1944
     "examples/web/rest-api.sfn"                          # `res.send` return-type lowering — epic #1883

@@ -1,0 +1,13 @@
+// compiler/tests/e2e/fixtures/range_empty/main.sfn
+//
+// SFN-114 acceptance — empty / descending ranges. `sfn_range_materialize`
+// clamps `end <= start` to a zero-length `int[]` (SFEP-0028 (D)), so the
+// bespoke zero-length path in the materializer is exercised: a descending
+// `(5..2).map` yields an empty array, and `(3..3).reduce(7, +)` returns the
+// initial accumulator unchanged (empty range = no folds).
+fn main() ![io] {
+    let desc: int[] = (5 .. 2).map(fn (i) -> int { return i; });
+    print(desc.length);
+    let total = (3 .. 3).reduce(7, fn (acc, k) -> int { return acc + k; });
+    print(total);
+}

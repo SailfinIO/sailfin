@@ -1198,6 +1198,11 @@ fn _rh_descriptors_08(descriptors_in: RuntimeHelperDescriptor[]) -> RuntimeHelpe
     descriptors = append_runtime_helper(descriptors, RuntimeHelperDescriptor {
         target: "runtime_array_reduce_fn", symbol: "sfn_array_sfn_reduce", return_type: "i64", parameter_types: ["i8*", "i64", "{i8*, i8*}"], effects: [], native_signature: "sfn_array_sfn_reduce", c_abi_return_type: null
     });
+    // SFN-114: range higher-order functions materialize `(start..end)` into an
+    // `int[]` SfnArray, then dispatch the array-HOF descriptors above. SFEP-0028 (D).
+    descriptors = append_runtime_helper(descriptors, RuntimeHelperDescriptor {
+        target: "runtime_range_materialize_fn", symbol: "sfn_range_materialize", return_type: "i8*", parameter_types: ["i64", "i64"], effects: [], native_signature: "sfn_range_materialize", c_abi_return_type: null
+    });
 
     // String utility helpers
     //

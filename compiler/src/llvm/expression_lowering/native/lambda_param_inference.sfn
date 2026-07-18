@@ -473,6 +473,12 @@ fn receiver_element_type(receiver: Expression, bindings: BindingEntry[]) -> stri
     if receiver.variant == "Identifier" {
         return _element_type_from_array_text(lookup_binding_type(bindings, receiver.name));
     }
+    // SFN-114: a range receiver `(start..end)` materializes to an `int[]`, so
+    // range HOF callbacks (`(0..n).map/reduce/filter`) are always int-element.
+    // Without this the untyped callback params (e.g. `fn(acc, k) -> int`, whose
+    // params carry no annotation) default to the wrong width and segfault when
+    // the runtime passes i64 values — the #1683 backfill gap, for ranges.
+    if receiver.variant == "Range" { return "int"; }
     return "";
 }
 
