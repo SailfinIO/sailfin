@@ -150,6 +150,84 @@ fn _hook_call_symbol(functions: NativeFunction[], kind: string, module_suffix: s
     return "";
 }
 
+// SFN-17: recoverable test harness helpers. The synthesized `@main` wraps
+// each hook/test call in an inline `setjmp` frame (modeled on the proven
+// `instructions_try.sfn` template) so a failed `assert` unwinds back to
+// the harness instead of aborting the whole file's suite process. Design:
+// `docs/proposals/design-notes/sfn-17-recoverable-test-harness.md`.
+// True when `lines` already contains a `declare` for `@symbol(...)`. The
+// harness must not re-declare a runtime symbol the base module already
+// declared (e.g. `@setjmp` in a test that also uses `try`/`catch`) — a
+// duplicate textual `declare` is an LLVM parse error.
+fn _harness_has_declare(lines: string[], symbol: string) -> boolean {
+    let needle = "@" + symbol + "(";
+    let mut i: int = 0;
+    loop {
+        if i >= lines.length { break; }
+        let ln = lines[i];
+        if ln.length >= 8 {
+            if substring(ln, 0, 8) == "declare " {
+                if index_of(ln, needle) >= 0 { return true; }
+            }
+        }
+        i += 1;
+    }
+    return false;
+}
+
+// Emit the inline frame setup for one harness region: re-init the reused
+// frame's jmp_buf slot (index 1) and message slot (index 2), push the
+// frame, `setjmp`, and branch to the run/caught labels. `rid` uniquifies
+// the SSA temps; the single `%frame`/`%jmpbuf` alloca pair (declared once
+// in `entry`) is reused across regions since the harness is fully
+// unrolled (no harness local is live across a `setjmp`).
+fn _harness_region_setup(rid: string, run_label: string, caught_label: string) -> string[] {
+    return ["  %jbslot." + rid
+        + " = getelementptr [3 x i64], [3 x i64]* %frame, i64 0, i64 1", "  %jbaddr."
+        + rid
+        + " = ptrtoint i8* %jmpbuf.i8 to i64", "  store i64 %jbaddr."
+        + rid
+        + ", i64* %jbslot."
+        + rid, "  %msgslot."
+        + rid
+        + " = getelementptr [3 x i64], [3 x i64]* %frame, i64 0, i64 2", "  store i64 0, i64* %msgslot."
+        + rid, "  call void @sfn_exception_push_frame(i8* %frame.i8)", "  %sj."
+        + rid
+        + " = call i32 @setjmp(i8* %jmpbuf.i8)", "  %first."
+        + rid
+        + " = icmp eq i32 %sj."
+        + rid
+        + ", 0", "  br i1 %first."
+        + rid
+        + ", label %"
+        + run_label
+        + ", label %"
+        + caught_label];
+}
+
+// Emit the lines that print a NUL-terminated string global `gvar` (LLVM
+// array length `arr_len`, byte length `byte_len`) to stderr via the
+// `{i8*, i64}` SfnString ABI of `sfn_print_err`. `tp` uniquifies the SSA
+// temps. Mirrors the marker-print shape the pre-SFN-17 harness inlined.
+fn _harness_print_marker(gvar: string, arr_len: string, byte_len: string, tp: string) -> string[] {
+    return ["  %" + tp + " = getelementptr [" + arr_len + " x i8], [" + arr_len
+        + " x i8]* "
+        + gvar
+        + ", i64 0, i64 0", "  %"
+        + tp
+        + ".agg0 = insertvalue {i8*, i64} undef, i8* %"
+        + tp
+        + ", 0", "  %"
+        + tp
+        + ".agg1 = insertvalue {i8*, i64} %"
+        + tp
+        + ".agg0, i64 "
+        + byte_len
+        + ", 1", "  call void @sfn_print_err({i8*, i64} %"
+        + tp
+        + ".agg1)"];
+}
+
 fn lower_to_llvm_lines_with_parsed_context_for_tests(native_module: NativeModule, parse: ParseNativeResult, imported_manifests: LayoutManifest[], imported_native_texts: string[], imported_diagnostics: string[]) -> LoweredLLVMLinesResult ![io] {
     let mut native_text_for_recovery: string = "";
     if native_module.artifacts != null {
@@ -207,166 +285,298 @@ fn lower_to_llvm_lines_with_parsed_context_for_tests(native_module: NativeModule
     // names never start with `runtime/`, so the runtime-ABI mangling
     // exemption in `apply_module_symbol_mangling` does not apply here.
     let harness_module_suffix = sanitize_module_suffix(native_module.module_name);
-    let mut harness_globals: string[] = [];
-    let mut harness: string[] = ["define i32 @main(i32 %argc, i8** %argv) {", "entry:"];
 
     // Lifecycle hooks (#975). Resolve each kind's mangled call symbol (or ""
-    // when absent). `before_all` runs once before the test loop, `after_all`
-    // once after it, and `before_each`/`after_each` wrap each test call below.
+    // when absent). `before_all` runs once before the tests, `after_all`
+    // once after, and `before_each`/`after_each` wrap each test.
     let before_all_sym = _hook_call_symbol(parse.functions, "before_all", harness_module_suffix);
     let before_each_sym = _hook_call_symbol(parse.functions, "before_each", harness_module_suffix);
     let after_each_sym = _hook_call_symbol(parse.functions, "after_each", harness_module_suffix);
     let after_all_sym = _hook_call_symbol(parse.functions, "after_all", harness_module_suffix);
+    let mut has_before_all: boolean = false;
+    if before_all_sym.length > 0 { has_before_all = true; }
+    let mut has_after_all: boolean = false;
+    if after_all_sym.length > 0 { has_after_all = true; }
 
-    // before_all: emit an attributable `HOOK before_all` stderr marker (no RUN
-    // line precedes it, so a failing before_all would otherwise be unascribed)
-    // then call the hook once.
-    if before_all_sym.length > 0 {
-        let ba_msg = "  HOOK before_all";
-        let ba_esc = escape_string_for_llvm(ba_msg);
-        let ba_len = number_to_string(ba_msg.length + 1);
-        let ba_blen = number_to_string(ba_msg.length);
-        harness_globals = extend_string_lines(harness_globals, ["@.hba = private unnamed_addr constant ["
-            + ba_len
-            + " x i8] c\""
-            + ba_esc
-            + "\\00\"",]);
-        harness = extend_string_lines(harness, ["  %hba = getelementptr ["
-            + ba_len
-            + " x i8], ["
-            + ba_len
-            + " x i8]* @.hba, i64 0, i64 0", "  %hba.agg0 = insertvalue {i8*, i64} undef, i8* %hba, 0", "  %hba.agg1 = insertvalue {i8*, i64} %hba.agg0, i64 "
-            + ba_blen
-            + ", 1", "  call void @sfn_print_err({i8*, i64} %hba.agg1)", "  call void @"
-            + before_all_sym
-            + "()",]);
-    }
-
-    let mut ti: int = 0;
-    let mut test_idx: int = 0;
+    // Collect test call symbols + clean labels in source order (string
+    // arrays built via `extend_string_lines`, never `.push`, which
+    // produces unresolvable symbols in this emit path).
+    let mut test_syms: string[] = [];
+    let mut test_labels: string[] = [];
+    let mut _cti: int = 0;
     loop {
-        if ti >= parse.functions.length { break; }
-        if parse.functions[ti].name.length >= 5 {
-            if substring(parse.functions[ti].name, 0, 5) == "test:" {
-                let bare_sym = sanitize_symbol(parse.functions[ti].name);
-                // Mirror `apply_module_symbol_mangling`'s guard: it
-                // skips symbols that already contain `__` to avoid
-                // double-qualification, leaving such definitions
-                // unmangled. If a user names a test function whose
-                // sanitized form already has `__`, the harness must
-                // call the bare symbol — appending `__<suffix>` here
-                // would produce an undefined reference at link time.
+        if _cti >= parse.functions.length { break; }
+        let fname = parse.functions[_cti].name;
+        if fname.length >= 5 {
+            if substring(fname, 0, 5) == "test:" {
+                let bare_sym = sanitize_symbol(fname);
+                // Mirror `apply_module_symbol_mangling`'s guard: a
+                // sanitized name already containing `__` is left
+                // unmangled (appending `__<suffix>` would be an
+                // undefined reference at link time).
                 let mut sym = bare_sym;
                 if index_of(bare_sym, "__") < 0 {
                     sym = bare_sym + "__" + harness_module_suffix;
                 }
-                let label = substring(parse.functions[ti].name, 5, parse.functions[ti].name.length);
-                let msg = "  RUN  " + label;
-                let idx_s = number_to_string(test_idx);
-                let msg_arr_len = number_to_string(msg.length + 1);
-                let msg_byte_len = number_to_string(msg.length);
-                let escaped = escape_string_for_llvm(msg);
-                harness_globals = extend_string_lines(harness_globals, ["@.tname."
-                    + idx_s
-                    + " = private unnamed_addr constant ["
-                    + msg_arr_len
-                    + " x i8] c\""
-                    + escaped
-                    + "\\00\"",]);
-                // M2.8 (#401): the print.err descriptor flipped to
-                // `sfn_print_err` with the `{i8*, i64}` SfnString
-                // aggregate ABI, so the test harness builds the
-                // aggregate from the `i8*` GEP result (data pointer
-                // + byte length excluding NUL) before the call.
-                harness = extend_string_lines(harness, ["  %tn" + idx_s
-                    + " = getelementptr ["
-                    + msg_arr_len
-                    + " x i8], ["
-                    + msg_arr_len
-                    + " x i8]* @.tname."
-                    + idx_s
-                    + ", i64 0, i64 0", "  %tn"
-                    + idx_s
-                    + ".agg0 = insertvalue {i8*, i64} undef, i8* %tn"
-                    + idx_s
-                    + ", 0", "  %tn"
-                    + idx_s
-                    + ".agg1 = insertvalue {i8*, i64} %tn"
-                    + idx_s
-                    + ".agg0, i64 "
-                    + msg_byte_len
-                    + ", 1", "  call void @sfn_print_err({i8*, i64} %tn"
-                    + idx_s
-                    + ".agg1)",]);
-                // Lifecycle wrapping (#975): before_each -> test -> after_each.
-                // A failing before_each/after_each is attributable via the RUN
-                // line just emitted above for this test.
-                if before_each_sym.length > 0 {
-                    harness = extend_string_lines(harness, ["  call void @"
-                        + before_each_sym
-                        + "()",]);
-                }
-                harness = extend_string_lines(harness, ["  call void @" + sym
-                    + "()",]);
-                if after_each_sym.length > 0 {
-                    harness = extend_string_lines(harness, ["  call void @"
-                        + after_each_sym
-                        + "()",]);
-                }
-                test_idx += 1;
+                test_syms = extend_string_lines(test_syms, [sym]);
+                test_labels = extend_string_lines(test_labels, [substring(fname, 5, fname.length)]);
             }
         }
-        ti += 1;
+        _cti += 1;
     }
-    // after_all: emit an attributable `HOOK after_all` stderr marker (the last
-    // RUN line belongs to the final test, not this hook) then call it once,
-    // after every test has run and before the suite-pass summary.
-    if after_all_sym.length > 0 {
+    let n_tests = test_syms.length;
+
+    // Region layout: [before_all?] [test 0 .. test n-1] [after_all?]. Each
+    // region has entry label `region<r>`; its normal successor is the next
+    // region, and the last region falls to `epilogue`.
+    let mut base_t: int = 0;
+    if has_before_all { base_t = 1; }
+    let mut total_regions: int = base_t + n_tests;
+    if has_after_all { total_regions = total_regions + 1; }
+
+    // ---- String-constant globals ----
+    let mut harness_globals: string[] = [];
+    // Empty name for hook (before_all/after_all) report records.
+    harness_globals = extend_string_lines(harness_globals, ["@.trn_empty = private unnamed_addr constant [1 x i8] c\"\\00\"",]);
+    // Per-test RUN marker + clean-name globals.
+    let mut _gi: int = 0;
+    loop {
+        if _gi >= n_tests { break; }
+        let idx_s = number_to_string(_gi);
+        let run_msg = "  RUN  " + test_labels[_gi];
+        let run_esc = escape_string_for_llvm(run_msg);
+        let run_arr = number_to_string(run_msg.length + 1);
+        harness_globals = extend_string_lines(harness_globals, ["@.tname."
+            + idx_s
+            + " = private unnamed_addr constant ["
+            + run_arr
+            + " x i8] c\""
+            + run_esc
+            + "\\00\"",]);
+        let nm_esc = escape_string_for_llvm(test_labels[_gi]);
+        let nm_arr = number_to_string(test_labels[_gi].length + 1);
+        harness_globals = extend_string_lines(harness_globals, ["@.trn." + idx_s
+            + " = private unnamed_addr constant ["
+            + nm_arr
+            + " x i8] c\""
+            + nm_esc
+            + "\\00\"",]);
+        _gi += 1;
+    }
+    if has_before_all {
+        let ba_msg = "  HOOK before_all";
+        let ba_esc = escape_string_for_llvm(ba_msg);
+        harness_globals = extend_string_lines(harness_globals, ["@.hba = private unnamed_addr constant ["
+            + number_to_string(ba_msg.length
+            + 1)
+            + " x i8] c\""
+            + ba_esc
+            + "\\00\"",]);
+    }
+    if has_after_all {
         let aa_msg = "  HOOK after_all";
         let aa_esc = escape_string_for_llvm(aa_msg);
-        let aa_len = number_to_string(aa_msg.length + 1);
-        let aa_blen = number_to_string(aa_msg.length);
         harness_globals = extend_string_lines(harness_globals, ["@.haa = private unnamed_addr constant ["
-            + aa_len
+            + number_to_string(aa_msg.length
+            + 1)
             + " x i8] c\""
             + aa_esc
             + "\\00\"",]);
-        harness = extend_string_lines(harness, ["  %haa = getelementptr ["
-            + aa_len
-            + " x i8], ["
-            + aa_len
-            + " x i8]* @.haa, i64 0, i64 0", "  %haa.agg0 = insertvalue {i8*, i64} undef, i8* %haa, 0", "  %haa.agg1 = insertvalue {i8*, i64} %haa.agg0, i64 "
-            + aa_blen
-            + ", 1", "  call void @sfn_print_err({i8*, i64} %haa.agg1)", "  call void @"
-            + after_all_sym
-            + "()",]);
+    }
+    let pass_msg = "  PASS  (all " + number_to_string(n_tests)
+        + " tests passed)";
+    let pass_esc = escape_string_for_llvm(pass_msg);
+    harness_globals = extend_string_lines(harness_globals, ["@.tpass = private unnamed_addr constant ["
+        + number_to_string(pass_msg.length
+        + 1)
+        + " x i8] c\""
+        + pass_esc
+        + "\\00\"",]);
+
+    // ---- Deduped declares for the runtime symbols the harness calls ----
+    // `@main` never calls `@sfn_throw` directly — the throw fires inside
+    // `sailfin_assert_fail`, longjmp'ing back to the harness's own
+    // `setjmp`. `@sfn_print_err` is already declared by the base module.
+    let mut harness_declares: string[] = [];
+    if !_harness_has_declare(base.lines, "setjmp") {
+        harness_declares = extend_string_lines(harness_declares, ["declare i32 @setjmp(i8*)",]);
+    }
+    if !_harness_has_declare(base.lines, "sfn_exception_push_frame") {
+        harness_declares = extend_string_lines(harness_declares, ["declare void @sfn_exception_push_frame(i8*)",]);
+    }
+    if !_harness_has_declare(base.lines, "sfn_exception_pop_frame") {
+        harness_declares = extend_string_lines(harness_declares, ["declare void @sfn_exception_pop_frame(i8*)",]);
+    }
+    if !_harness_has_declare(base.lines, "sfn_exception_reset_head") {
+        harness_declares = extend_string_lines(harness_declares, ["declare void @sfn_exception_reset_head()",]);
+    }
+    if !_harness_has_declare(base.lines, "sfn_take_exception") {
+        harness_declares = extend_string_lines(harness_declares, ["declare i8* @sfn_take_exception(i8*)",]);
+    }
+    if !_harness_has_declare(base.lines, "sfn_test_set_phase") {
+        harness_declares = extend_string_lines(harness_declares, ["declare void @sfn_test_set_phase(i32)",]);
+    }
+    if !_harness_has_declare(base.lines, "sfn_test_report_pass") {
+        harness_declares = extend_string_lines(harness_declares, ["declare void @sfn_test_report_pass(i8*)",]);
+    }
+    if !_harness_has_declare(base.lines, "sfn_test_report_caught") {
+        harness_declares = extend_string_lines(harness_declares, ["declare void @sfn_test_report_caught(i8*, i8*)",]);
+    }
+    if !_harness_has_declare(base.lines, "sfn_test_report_skipped") {
+        harness_declares = extend_string_lines(harness_declares, ["declare void @sfn_test_report_skipped(i8*)",]);
+    }
+    if !_harness_has_declare(base.lines, "sfn_test_failures") {
+        harness_declares = extend_string_lines(harness_declares, ["declare i32 @sfn_test_failures()",]);
     }
 
-    let pass_msg = "  PASS  (all " + number_to_string(test_idx)
-        + " tests passed)";
-    let pass_escaped = escape_string_for_llvm(pass_msg);
-    let pass_len_s = number_to_string(pass_msg.length + 1);
-    let pass_byte_len = number_to_string(pass_msg.length);
-    harness_globals = extend_string_lines(harness_globals, ["@.tpass = private unnamed_addr constant ["
-        + pass_len_s
-        + " x i8] c\""
-        + pass_escaped
-        + "\\00\"",]);
-    // M2.8 (#401): mirror the `@.tname` flip above — pack the
-    // `i8*` GEP result into a `{i8*, i64}` aggregate before
-    // calling the flipped `@sfn_print_err`.
-    harness = extend_string_lines(harness, ["  %tp = getelementptr ["
-        + pass_len_s
-        + " x i8], ["
-        + pass_len_s
-        + " x i8]* @.tpass, i64 0, i64 0", "  %tp.agg0 = insertvalue {i8*, i64} undef, i8* %tp, 0", "  %tp.agg1 = insertvalue {i8*, i64} %tp.agg0, i64 "
-        + pass_byte_len
-        + ", 1", "  call void @sfn_print_err({i8*, i64} %tp.agg1)", "  ret i32 0", "}",]);
+    // ---- @main body ----
+    let mut harness: string[] = ["define i32 @main(i32 %argc, i8** %argv) {", "entry:", "  %frame = alloca [3 x i64]", "  %jmpbuf = alloca [32 x i64]", "  %frame.i8 = bitcast [3 x i64]* %frame to i8*", "  %jmpbuf.i8 = bitcast [32 x i64]* %jmpbuf to i8*", "  br label %region0"];
+
+    // before_all region: on success continue to region 1 (first test); on
+    // failure report the hook, cascade a `fail` for every test, and skip
+    // straight to the epilogue (tests and after_all do not run).
+    if has_before_all {
+        let mut next0 = "epilogue";
+        if total_regions > 1 { next0 = "region1"; }
+        harness = extend_string_lines(harness, ["region0:",]);
+        harness = extend_string_lines(harness, _harness_print_marker("@.hba", number_to_string(("  HOOK before_all").length
+            + 1), number_to_string(("  HOOK before_all").length), "hba"));
+        harness = extend_string_lines(harness, _harness_region_setup("r0", "run_r0", "caught_r0"));
+        harness = extend_string_lines(harness, ["run_r0:", "  call void @sfn_test_set_phase(i32 0)", "  call void @"
+            + before_all_sym
+            + "()", "  call void @sfn_exception_reset_head()", "  br label %"
+            + next0, "caught_r0:", "  %msg.r0 = call i8* @sfn_take_exception(i8* %frame.i8)", "  %eb0 = getelementptr [1 x i8], [1 x i8]* @.trn_empty, i64 0, i64 0", "  call void @sfn_test_report_caught(i8* %eb0, i8* %msg.r0)", "  br label %skipall", "skipall:",]);
+        let mut _si: int = 0;
+        loop {
+            if _si >= n_tests { break; }
+            let sidx = number_to_string(_si);
+            let snm_arr = number_to_string(test_labels[_si].length + 1);
+            harness = extend_string_lines(harness, ["  %nmS" + sidx
+                + " = getelementptr ["
+                + snm_arr
+                + " x i8], ["
+                + snm_arr
+                + " x i8]* @.trn."
+                + sidx
+                + ", i64 0, i64 0", "  call void @sfn_test_report_skipped(i8* %nmS"
+                + sidx
+                + ")",]);
+            _si += 1;
+        }
+        harness = extend_string_lines(harness, ["  br label %epilogue",]);
+    }
+
+    // Test regions.
+    let mut _ri: int = 0;
+    loop {
+        if _ri >= n_tests { break; }
+        let rj = base_t + _ri;
+        let rj_s = number_to_string(rj);
+        let rid = "r" + rj_s;
+        let tj_s = number_to_string(_ri);
+        let run_lbl = "run_" + rid;
+        let caught_lbl = "caught_" + rid;
+        let mut next_lbl = "epilogue";
+        if rj < total_regions - 1 {
+            next_lbl = "region" + number_to_string(rj + 1);
+        }
+        let run_arr = number_to_string(("  RUN  " + test_labels[_ri]).length + 1);
+        let run_blen = number_to_string(("  RUN  " + test_labels[_ri]).length);
+        let nm_arr = number_to_string(test_labels[_ri].length + 1);
+        // Region entry: RUN marker, then frame setup.
+        harness = extend_string_lines(harness, ["region" + rj_s + ":",]);
+        harness = extend_string_lines(harness, _harness_print_marker("@.tname."
+            + tj_s, run_arr, run_blen, "tn"
+            + rj_s));
+        harness = extend_string_lines(harness, _harness_region_setup(rid, run_lbl, caught_lbl));
+        // run: before_each -> test -> report_pass -> after_each -> pop.
+        harness = extend_string_lines(harness, [run_lbl + ":",]);
+        if before_each_sym.length > 0 {
+            harness = extend_string_lines(harness, ["  call void @sfn_test_set_phase(i32 1)", "  call void @"
+                + before_each_sym
+                + "()",]);
+        }
+        harness = extend_string_lines(harness, ["  call void @sfn_test_set_phase(i32 2)", "  call void @"
+            + test_syms[_ri]
+            + "()", "  %tnp"
+            + rj_s
+            + " = getelementptr ["
+            + nm_arr
+            + " x i8], ["
+            + nm_arr
+            + " x i8]* @.trn."
+            + tj_s
+            + ", i64 0, i64 0", "  call void @sfn_test_report_pass(i8* %tnp"
+            + rj_s
+            + ")",]);
+        if after_each_sym.length > 0 {
+            harness = extend_string_lines(harness, ["  call void @sfn_test_set_phase(i32 3)", "  call void @"
+                + after_each_sym
+                + "()",]);
+        }
+        harness = extend_string_lines(harness, ["  call void @sfn_exception_reset_head()", "  br label %"
+            + next_lbl, caught_lbl
+            + ":", "  %msg."
+            + rid
+            + " = call i8* @sfn_take_exception(i8* %frame.i8)", "  %cnp"
+            + rj_s
+            + " = getelementptr ["
+            + nm_arr
+            + " x i8], ["
+            + nm_arr
+            + " x i8]* @.trn."
+            + tj_s
+            + ", i64 0, i64 0", "  call void @sfn_test_report_caught(i8* %cnp"
+            + rj_s
+            + ", i8* %msg."
+            + rid
+            + ")", "  br label %"
+            + next_lbl,]);
+        _ri += 1;
+    }
+
+    // after_all region (last region when present): run then fall to
+    // epilogue; a caught failure is attributed to the hook.
+    if has_after_all {
+        let ra = total_regions - 1;
+        let ra_s = number_to_string(ra);
+        let rid = "r" + ra_s;
+        harness = extend_string_lines(harness, ["region" + ra_s + ":",]);
+        harness = extend_string_lines(harness, _harness_print_marker("@.haa", number_to_string(("  HOOK after_all").length
+            + 1), number_to_string(("  HOOK after_all").length), "haa"));
+        harness = extend_string_lines(harness, _harness_region_setup(rid, "run_"
+            + rid, "caught_"
+            + rid));
+        harness = extend_string_lines(harness, ["run_" + rid + ":", "  call void @sfn_test_set_phase(i32 4)", "  call void @"
+            + after_all_sym
+            + "()", "  call void @sfn_exception_reset_head()", "  br label %epilogue", "caught_"
+            + rid
+            + ":", "  %msg."
+            + rid
+            + " = call i8* @sfn_take_exception(i8* %frame.i8)", "  %ea"
+            + ra_s
+            + " = getelementptr [1 x i8], [1 x i8]* @.trn_empty, i64 0, i64 0", "  call void @sfn_test_report_caught(i8* %ea"
+            + ra_s
+            + ", i8* %msg."
+            + rid
+            + ")", "  br label %epilogue",]);
+    }
+
+    // Epilogue: exit non-zero when anything failed (recovery must never
+    // mask a failure as exit 0); print the PASS banner only on a clean run
+    // so existing all-pass assertions still see it.
+    let pass_arr = number_to_string(pass_msg.length + 1);
+    let pass_blen = number_to_string(pass_msg.length);
+    harness = extend_string_lines(harness, ["epilogue:", "  %failn = call i32 @sfn_test_failures()", "  %anyfail = icmp ne i32 %failn, 0", "  br i1 %anyfail, label %retblk, label %passblk", "passblk:",]);
+    harness = extend_string_lines(harness, _harness_print_marker("@.tpass", pass_arr, pass_blen, "tp"));
+    harness = extend_string_lines(harness, ["  br label %retblk", "retblk:", "  %rc = select i1 %anyfail, i32 1, i32 0", "  ret i32 %rc", "}",]);
 
     let mut updated = base;
     if updated.lines.length > 0 {
         updated.lines = extend_string_lines(updated.lines, [""]);
     }
+    updated.lines = extend_string_lines(updated.lines, harness_declares);
+    updated.lines = extend_string_lines(updated.lines, [""]);
     updated.lines = extend_string_lines(updated.lines, harness_globals);
     updated.lines = extend_string_lines(updated.lines, [""]);
     updated.lines = extend_string_lines(updated.lines, harness);

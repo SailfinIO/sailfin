@@ -276,6 +276,19 @@ fn sfn_exception_pop_frame(frame: * SfnExceptionFrame) -> void {
     }
 }
 
+// `sfn_exception_reset_head()` clears the chain head to empty without
+// walking it. The SFN-17 synthesized test harness calls this after each
+// per-test frame so a dangling frame leaked by the test body — a `return`
+// inside a `try` block does not currently pop its frame, so a helper like
+// `sfn/test::with_tmp_dir` that returns from inside its `try` leaves a
+// stale frame whose `jmp_buf` points at dead stack — cannot corrupt the
+// next test's chain (a subsequent `pop_frame` would otherwise walk the
+// stale `prev` and segfault). Safe only at a root scope where no live
+// frame should survive (the harness `@main` is exactly that). The
+// underlying `return`-in-`try` frame leak is tracked as a separate
+// try-lowering follow-up.
+fn sfn_exception_reset_head() -> void { sfn_exception_frame_head_addr = 0; }
+
 // `sfn_try_enter(frame)` is the architect's composite primitive
 // (§2.4.2): push `frame` onto the chain head, then `setjmp` on
 // `frame.jmp_buf`. Returns 0 on first call, non-zero when a

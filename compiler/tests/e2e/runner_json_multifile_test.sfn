@@ -17,7 +17,7 @@
 // one `summary`) holds regardless of how many files ran. This test pins:
 //
 //   1. A 2-file `--json` run exits 0 and every stdout line is valid JSON.
-//   2. The stream carries `schema_version`:1 (on the `start` event).
+//   2. The stream carries `schema_version`:2 (on the `start` event).
 //   3. Single-frame contract: exactly one `start` and one `summary`.
 //   4. The single `start` total and `summary` passed are run-level
 //      aggregates across all files.
@@ -119,15 +119,15 @@ test "multi-file 'sfn test <dir> --json' exits 0 with valid jsonl (#1121)" ![io]
     }
 }
 
-// ---- Test 2: schema_version 1 is present on the start event ----
-test "stream carries schema_version 1 events (#1121)" ![io] {
+// ---- Test 2: schema_version 2 is present on the start event ----
+test "stream carries schema_version 2 events (#1121)" ![io] {
     let dir = _make_pass_dir("t2");
     let exit = process.run_capture([_sfn_bin(), "test", dir, "--json"], _child_env());
     let out = process.capture_take_stdout();
     let _ = process.capture_take_stderr();
 
     assert exit == 0;
-    assert find(out, "\"schema_version\":1", 0) >= 0;
+    assert find(out, "\"schema_version\":2", 0) >= 0;
 }
 
 // ---- Test 3: single-frame contract ----

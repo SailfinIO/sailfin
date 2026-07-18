@@ -45,8 +45,8 @@ fn _failure(file: string, line: int, col: int, message: string) -> AssertFailure
 // --------------------------------------------------------------
 // Schema version constant
 // --------------------------------------------------------------
-test "test_runner_json: schema version is 1 (consumers hard-fail on unknown)" {
-    assert TEST_RUNNER_JSON_SCHEMA_VERSION == 1;
+test "test_runner_json: schema version is 2 (consumers hard-fail on unknown)" {
+    assert TEST_RUNNER_JSON_SCHEMA_VERSION == 2;
 }
 
 // --------------------------------------------------------------
@@ -54,12 +54,12 @@ test "test_runner_json: schema version is 1 (consumers hard-fail on unknown)" {
 // --------------------------------------------------------------
 test "test_runner_json: start event golden shape" {
     let line = render_start_event(7);
-    assert line == "{\"event\":\"start\",\"total\":7,\"schema_version\":1}";
+    assert line == "{\"event\":\"start\",\"total\":7,\"schema_version\":2}";
 }
 
 test "test_runner_json: start event handles zero-test discovery" {
     let line = render_start_event(0);
-    assert line == "{\"event\":\"start\",\"total\":0,\"schema_version\":1}";
+    assert line == "{\"event\":\"start\",\"total\":0,\"schema_version\":2}";
 }
 
 // --------------------------------------------------------------

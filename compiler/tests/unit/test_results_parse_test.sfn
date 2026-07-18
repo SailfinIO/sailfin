@@ -1,0 +1,50 @@
+// Regression coverage for the recoverable test harness's `results.log`
+// parser (SFN-17). The wire format is tab-separated, one record per
+// line; malformed lines are skipped rather than aborting the parse.
+import { parse_test_results_log } from "../../src/test_results";
+
+test "test_results: T pass record has empty message" {
+    let records = parse_test_results_log("T\tpass\tmy test");
+    assert records.length == 1;
+    assert records[0].kind == "T";
+    assert records[0].status == "pass";
+    assert records[0].name == "my test";
+    assert records[0].message == "";
+}
+
+test "test_results: T fail record captures the message" {
+    let records = parse_test_results_log("T\tfail\tmy test\tboom");
+    assert records.length == 1;
+    assert records[0].kind == "T";
+    assert records[0].status == "fail";
+    assert records[0].name == "my test";
+    assert records[0].message == "boom";
+}
+
+test "test_results: H fail before_each record captures hook and test name" {
+    let records = parse_test_results_log("H\tfail\tbefore_each\tmy test\thook before_each failed: boom");
+    assert records.length == 1;
+    assert records[0].kind == "H";
+    assert records[0].status == "fail";
+    assert records[0].hook == "before_each";
+    assert records[0].name == "my test";
+    assert records[0].message == "hook before_each failed: boom";
+}
+
+test "test_results: H fail after_all record has empty test name" {
+    let records = parse_test_results_log("H\tfail\tafter_all\t\tteardown boom");
+    assert records.length == 1;
+    assert records[0].kind == "H";
+    assert records[0].status == "fail";
+    assert records[0].hook == "after_all";
+    assert records[0].name == "";
+    assert records[0].message == "teardown boom";
+}
+
+test "test_results: malformed line is skipped, valid record still parses" {
+    let records = parse_test_results_log("garbage\nT\tpass\tmy test");
+    assert records.length == 1;
+    assert records[0].kind == "T";
+    assert records[0].status == "pass";
+    assert records[0].name == "my test";
+}

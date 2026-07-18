@@ -101,10 +101,12 @@ import {
     index_of,
     substring
 } from "../../string_utils";
+import { TestResultRecord, parse_test_results_log } from "../../test_results";
 import {
     TestEntry,
     collect_test_entries,
     locate_failing_test,
+    render_hook_event,
     render_start_event,
     render_summary_event,
     render_test_event
@@ -1388,6 +1390,12 @@ fn run(matches: Matches, ctx: CliContext) -> int ![clock, io, net] {
         // (e.g. the multi-file runner) already exported the env var.
         let fail_record_path = scratch_root + "/fail.bin";
         if fs.exists(fail_record_path) { fs.deleteFile(fail_record_path); }
+        // SFN-17: the recoverable harness appends to results.log ("ab"),
+        // so clear any leftover from a prior iteration/retry before exec —
+        // otherwise stale records would double-count into this file's
+        // classification.
+        let results_log_path = scratch_root + "/results.log";
+        if fs.exists(results_log_path) { fs.deleteFile(results_log_path); }
 
         if trace_runner { print.err("test runner: exec start"); }
         let mut run_rc = process.run(_test_exec_argv(scratch_root, exe_path, update_snapshots, json_output));
@@ -1420,6 +1428,9 @@ fn run(matches: Matches, ctx: CliContext) -> int ![clock, io, net] {
             if fs.exists(fail_record_path) {
                 fs.deleteFile(fail_record_path);
             }
+            if fs.exists(results_log_path) {
+                fs.deleteFile(results_log_path);
+            }
             run_rc = process.run(_test_exec_argv(scratch_root, exe_path, update_snapshots, json_output));
         }
         if trace_runner {
@@ -1430,7 +1441,49 @@ fn run(matches: Matches, ctx: CliContext) -> int ![clock, io, net] {
         // so a stale record from a previous iteration can't leak
         // into the next pass. `present=false` is the pass case.
         let failure = _consume_assert_failure_record(scratch_root);
+        let results = _consume_test_results_log(scratch_root);
         let file_elapsed_ms = monotonic_millis() - file_start_ms;
+        // SFN-17: classify from the harness's per-test records (source of
+        // truth) instead of the fail.bin index-inference — but only when
+        // the records *explain* the exit code. `@main` exits non-zero iff
+        // `sfn_test_failures() != 0`, and every failure increment writes a
+        // record, so `run_rc == 0` (clean) or a failing record present
+        // means the records are authoritative. A non-zero exit with only
+        // passing records is a hard crash (SIGSEGV / non-throw `abort()`)
+        // that bypassed `@main` after an earlier test passed — it must
+        // fall through to the file-level crash path below, not be masked
+        // as pass (#1206 / `crash_attribution_test.sfn`).
+        let results_explain = run_rc == 0 || _records_have_failure(results);
+        if results.length > 0 && results_explain {
+            let packed = _emit_results_events(entries, results, failure, json_output, file_elapsed_ms as int, path);
+            let res_failed = _trj_decode_failed(packed);
+            if json_output {
+                total_passed += _trj_decode_passed(packed);
+                total_failed += res_failed;
+                total_skipped += _trj_decode_skipped(packed);
+            } else {
+                let rf_basename = _package_basename(path);
+                if res_failed > 0 {
+                    print("[test] FAIL: " + rf_basename + " (exit code "
+                        + number_to_string(run_rc)
+                        + ")");
+                    suites[file_suite_index[index]].fail_count += 1;
+                    suites[file_suite_index[index]].failed_files.push(rf_basename);
+                } else {
+                    print("[test] PASS: " + _package_basename(path));
+                    suites[file_suite_index[index]].pass_count += 1;
+                }
+            }
+            // Propagate the child's real exit code (1 for a recovered
+            // assert; a signal code if a later test crashed after an
+            // earlier one already failed) rather than a synthetic 1.
+            if res_failed > 0 && overall_rc == 0 {
+                if run_rc != 0 { overall_rc = run_rc; } else { overall_rc = 1; }
+            }
+            sailfin_intrinsic_runtime_arena_rewind(test_scratch_mark);
+            index += 1;
+            continue;
+        }
         if run_rc != 0 {
             if json_output {
                 let mut effective = failure;
@@ -1882,6 +1935,149 @@ fn _consume_assert_failure_record(scratch_root: string) -> AssertFailure ![io] {
     let bytes = fs.readFile(path);
     fs.deleteFile(path);
     return _parse_assert_failure_record(bytes);
+}
+
+// SFN-17: read + clear `results.log`, the per-test/hook result log the
+// recoverable harness appends. Returns an empty list when absent (old
+// harness, or a crash before any record was written) — the caller then
+// falls back to the fail.bin index-inference path.
+fn _consume_test_results_log(scratch_root: string) -> TestResultRecord[] ![io] {
+    let path = scratch_root + "/results.log";
+    if !fs.exists(path) { return []; }
+    let bytes = fs.readFile(path);
+    fs.deleteFile(path);
+    return parse_test_results_log(bytes);
+}
+
+// SFN-17: collect the `T` (per-test) records in emission order. The
+// harness writes exactly one `T` record per test in source order (a
+// pass, or a fail; a passed test whose `after_each` fails still has one
+// `T pass` plus a separate `H` record). Matching these to `entries` by
+// position is robust to the display-name/symbol-name mismatch: the
+// harness only has the sanitized `test:` symbol (spaces stripped), while
+// `collect_test_entries` keeps the raw test name — but both sequences are
+// the non-hook tests in identical source order.
+fn _collect_test_records(records: TestResultRecord[]) -> TestResultRecord[] {
+    let mut out: TestResultRecord[] = [];
+    let mut i: int = 0;
+    loop {
+        if i >= records.length { break; }
+        if strings_equal(records[i].kind, "T") { out.push(records[i]); }
+        i += 1;
+    }
+    return out;
+}
+
+// SFN-17: true when any record is a failure (a `T fail` or any `H`
+// record — hook records are always failures). Used to decide whether
+// `results.log` *explains* a non-zero exit: a hard crash (SIGSEGV/abort,
+// which `setjmp` cannot catch) after a passing test leaves a non-empty
+// log with only `pass` records, and must NOT be classified as pass — it
+// falls through to the file-level crash path instead.
+fn _records_have_failure(records: TestResultRecord[]) -> boolean {
+    let mut i: int = 0;
+    loop {
+        if i >= records.length { break; }
+        if strings_equal(records[i].status, "fail") { return true; }
+        i += 1;
+    }
+    return false;
+}
+
+// SFN-17: structured per-test/hook classification from `results.log`.
+// Replaces the fail.bin index-inference when the recoverable harness
+// produced real per-test records — each test is classified by its own
+// record (source of truth), and hook failures surface as distinct
+// events (JSON) / lines (human). `failure` (the first fail.bin SFAF
+// record) enriches the first failing test's assertion with file:line:col.
+// Returns pass/fail/skip packed as `_emit_file_test_events` does.
+fn _emit_results_events(entries: TestEntry[], records: TestResultRecord[], failure: AssertFailure, json_output: boolean, elapsed_ms: int, test_path: string) -> int ![io] {
+    let t_records = _collect_test_records(records);
+    // --- Counting from the records (source of truth). This must not
+    // depend on `entries`, which is populated only in `--json` mode
+    // (line ~1238); a human-mode run has `entries == []` but still needs
+    // correct pass/fail counts driving the file banner + exit code. ---
+    let mut passed: int = 0;
+    let mut failed: int = 0;
+    let mut tr: int = 0;
+    loop {
+        if tr >= t_records.length { break; }
+        if strings_equal(t_records[tr].status, "pass") { passed += 1; } else {
+            failed += 1;
+        }
+        tr += 1;
+    }
+    let mut hcount: int = 0;
+    let mut hc: int = 0;
+    loop {
+        if hc >= records.length { break; }
+        if strings_equal(records[hc].kind, "H") { hcount += 1; }
+        hc += 1;
+    }
+    failed += hcount;
+    // Tests with no record ran neither pass nor fail (a crash before
+    // reaching them). Only knowable when `entries` is present (`--json`).
+    let mut skipped: int = 0;
+    if entries.length > t_records.length {
+        skipped = entries.length - t_records.length;
+    }
+    // --- Emission. JSON emits one event per entry (needs `entries`, only
+    // present in `--json` mode); human mode prints a detail line per
+    // failing test from the records directly (per-test pass lines are
+    // noise in the human stream, matching the pre-SFN-17 banner style). ---
+    if json_output {
+        let per_test_ms = _trj_per_test_duration(elapsed_ms, entries.length);
+        let mut idx: int = 0;
+        loop {
+            if idx >= entries.length { break; }
+            let entry = entries[idx];
+            let mut status: string = "skip";
+            let mut event_failure: AssertFailure = _empty_assert_failure();
+            if idx < t_records.length {
+                let r = t_records[idx];
+                if strings_equal(r.status, "pass") { status = "pass"; } else {
+                    status = "fail";
+                    if failure.present && strings_equal(failure.message, r.message) {
+                        event_failure = failure;
+                    } else {
+                        event_failure = _synthetic_assert_failure(test_path, r.message);
+                    }
+                }
+            }
+            print(render_test_event(entry.name, entry.file, entry.line, status, per_test_ms, entry.effects, event_failure));
+            idx += 1;
+        }
+    } else {
+        let mut tri: int = 0;
+        loop {
+            if tri >= t_records.length { break; }
+            let r = t_records[tri];
+            if strings_equal(r.status, "fail") {
+                let mut ef: AssertFailure = _synthetic_assert_failure(test_path, r.message);
+                if failure.present && strings_equal(failure.message, r.message) {
+                    ef = failure;
+                }
+                print("[test] FAIL: " + r.name + " (" + _format_assert_failure(test_path, ef)
+                    + ")");
+            }
+            tri += 1;
+        }
+    }
+    // Hook-failure events (AC3/AC4), in record order, after the tests.
+    let mut hi: int = 0;
+    loop {
+        if hi >= records.length { break; }
+        let r = records[hi];
+        if strings_equal(r.kind, "H") {
+            if json_output {
+                print(render_hook_event(r.hook, r.name, r.status, r.message));
+            } else {
+                print("[test] HOOK FAIL: " + r.hook + " (" + r.message + ")");
+            }
+        }
+        hi += 1;
+    }
+    return passed * 1000000 + failed * 1000 + skipped;
 }
 
 // Format an AssertFailure for human-readable test runner output.
