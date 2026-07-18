@@ -1,24 +1,29 @@
 // examples/concurrency/producer-consumer.sfn
-
 import { Channel, channel } from "sync";
-import { sleep } from "time";
 
-fn main() ![clock, io] {
-    let buffer: Channel<int> = channel(10); // bounded buffer
+fn main() ![io] {
+    // A bounded channel sized to hold the whole batch. The producer runs in a
+    // structured-concurrency `routine` nursery that fills the buffer and joins;
+    // `main` then drains every item. Two runtime notes shape this example:
+    //   - `await` works on futures created by `spawn`, not on a synchronous
+    //     channel receive (see examples/concurrency/channels.sfn), so the
+    //     consumer receives directly into a typed `int`.
+    //   - a `for i in ..` range variable is a float; the pointer-width int
+    //     channel round-trips cleanly only for int payloads, so the producer
+    //     sends an explicit `int` counter.
+    let buffer: Channel<int> = channel(20);
 
+    let mut n: int = 0;
     routine {
-        for i in 1..20 {
-            print("Producing {{i}}");
-            buffer.send(i);
-            sleep(500);
+        for _ in 1 .. 20 {
+            n = n + 1;
+            print("Producing {{n}}");
+            buffer.send(n);
         }
     }
 
-    routine {
-        loop {
-            let item = await buffer.receive();
-            print("Consumed {{item}}");
-            sleep(1000);
-        }
+    for _ in 1 .. 20 {
+        let item: int = buffer.receive();
+        print("Consumed {{item}}");
     }
 }
