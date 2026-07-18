@@ -882,6 +882,34 @@ fn _rh_descriptors_06(descriptors_in: RuntimeHelperDescriptor[]) -> RuntimeHelpe
         target: "process.handle_wait", symbol: "sfn_process_handle_wait", return_type: "i64", parameter_types: ["i64"], effects: ["io"], native_signature: "sfn_process_handle_wait", c_abi_return_type: null
     });
 
+    // SFEP-0050: process-handle stderr-streaming primitives. The streamed
+    // test-record transport rides the child's stderr; the runner demuxes
+    // stdout(user) + stderr(records) via `io.poll_any` over the two raw
+    // fds, so it needs accessors for those fds (`handle_stdout_fd` /
+    // `handle_stderr_fd`), a stderr counterpart of the framed-stdout
+    // chunk read (`handle_read_bytes_stderr`), the stderr EOF predicate
+    // (`handle_stderr_at_eof`), and a handle-owned deadline kill
+    // (`handle_kill`, SIGKILL) that retires the outer `timeout(1)`
+    // wrapper. Same Sailfin-native bodies + always-declare pattern as the
+    // framed-stdout cluster above (`runtime/sfn/process.sfn`); the cross-
+    // windows path resolves them from the degraded stubs in
+    // `runtime/sfn/platform/process_windows.sfn`.
+    descriptors = append_runtime_helper(descriptors, RuntimeHelperDescriptor {
+        target: "process.handle_stdout_fd", symbol: "sfn_process_handle_stdout_fd", return_type: "i64", parameter_types: ["i64"], effects: ["io"], native_signature: "sfn_process_handle_stdout_fd", c_abi_return_type: null
+    });
+    descriptors = append_runtime_helper(descriptors, RuntimeHelperDescriptor {
+        target: "process.handle_stderr_fd", symbol: "sfn_process_handle_stderr_fd", return_type: "i64", parameter_types: ["i64"], effects: ["io"], native_signature: "sfn_process_handle_stderr_fd", c_abi_return_type: null
+    });
+    descriptors = append_runtime_helper(descriptors, RuntimeHelperDescriptor {
+        target: "process.handle_read_bytes_stderr", symbol: "sfn_process_handle_read_bytes_stderr", return_type: "i8*", parameter_types: ["i64", "i64"], effects: ["io"], native_signature: "sfn_process_handle_read_bytes_stderr", c_abi_return_type: null
+    });
+    descriptors = append_runtime_helper(descriptors, RuntimeHelperDescriptor {
+        target: "process.handle_stderr_at_eof", symbol: "sfn_process_handle_stderr_at_eof", return_type: "i1", parameter_types: ["i64"], effects: ["io"], native_signature: "sfn_process_handle_stderr_at_eof", c_abi_return_type: null
+    });
+    descriptors = append_runtime_helper(descriptors, RuntimeHelperDescriptor {
+        target: "process.handle_kill", symbol: "sfn_process_handle_kill", return_type: "i64", parameter_types: ["i64"], effects: ["io"], native_signature: "sfn_process_handle_kill", c_abi_return_type: null
+    });
+
     // #1242: environ-iteration primitive. Returns every `"KEY=VALUE"`
     // entry of the calling process's environment as an
     // `SfnArray<string>` — the same array-return shape as

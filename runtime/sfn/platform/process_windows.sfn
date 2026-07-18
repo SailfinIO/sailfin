@@ -712,6 +712,33 @@ fn sfn_process_handle_read_stderr(handle_id: i64) -> * u8 ![io] {
 
 fn sfn_process_handle_wait(handle_id: i64) -> i64 ![io] { return -1; }
 
+// SFEP-0050 process-handle stderr-streaming primitives — degraded-but-
+// linking Windows stubs, mirroring the `handle_read_stdout`→empty /
+// `handle_wait`→-1 posture above. The spawn family already returns the
+// `0` failure sentinel here (`sfn_process_spawn_with_env`), so the
+// streamed-record test runner degrades to non-streaming on Windows;
+// these keep the cross-windows link resolved once the runner (in the
+// Windows compiler binary) references them, and honor the file header's
+// POSIX/Windows lockstep contract. The fd accessors report `-1` (no fd),
+// `read_bytes_stderr` the empty string, `stderr_at_eof` `true` (so a
+// caller framing until EOF stops immediately instead of spinning), and
+// `handle_kill` `-1` (no child to signal). The SFEP-0050 streamed-record
+// transport is POSIX-only until the M4 child-spawn consumer (file header)
+// makes `spawn_with_env` real on Windows.
+fn sfn_process_handle_stdout_fd(handle_id: i64) -> i64 ![io] { return -1; }
+
+fn sfn_process_handle_stderr_fd(handle_id: i64) -> i64 ![io] { return -1; }
+
+fn sfn_process_handle_read_bytes_stderr(handle_id: i64, n: i64) -> * u8 ![io] {
+    return _pw_empty_cstr();
+}
+
+fn sfn_process_handle_stderr_at_eof(handle_id: i64) -> bool ![io] {
+    return true;
+}
+
+fn sfn_process_handle_kill(handle_id: i64) -> i64 ![io] { return -1; }
+
 // `sfn_io_poll_readable(fd, timeout_ms)` — Windows stub for the
 // `io.poll_readable` builtin (#1580). The POSIX body
 // (`runtime/sfn/process.sfn`) wraps `poll(2)`, which mingw lacks for
