@@ -110,7 +110,7 @@ test "IR: channel send from closing scope emits no sender-side rc_release call (
         + "        ch.send(msg);\n"
         + "        i += 1;\n"
         + "    }\n"
-        + "    let got = ch.receive();\n"
+        + "    let got: string = ch.receive();\n"
         + "}");
     assert ir != "EMIT_FAILED";
     // Proves the boundary actually lowered.
@@ -128,7 +128,7 @@ test "IR: channel-typed parameter base also suppresses the sender drop (#1094)" 
         + "fn main() ![io] {\n"
         + "    let ch = channel(4);\n"
         + "    producer(ch);\n"
-        + "    let got = ch.receive();\n"
+        + "    let got: string = ch.receive();\n"
         + "}");
     assert ir != "EMIT_FAILED";
     assert contains(ir, "sfn_channel_send");
