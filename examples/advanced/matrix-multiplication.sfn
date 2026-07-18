@@ -18,5 +18,20 @@ fn main() ![io] {
     let a = [[1, 2], [3, 4]];
     let b = [[5, 6], [7, 8]];
     let result = multiply(a, b);
-    print("Result: {{result}}");
+    // Print each cell of the product (a·b = [[19, 22], [43, 50]]). Nested
+    // `int[][]` values do not yet render through `{{ }}` interpolation, so the
+    // scalar cells are printed directly.
+    print("Result:");
+    let mut i: int = 0;
+    loop {
+        if i >= result.length { break; }
+        let row = result[i];
+        let mut j: int = 0;
+        loop {
+            if j >= row.length { break; }
+            print(row[j]);
+            j = j + 1;
+        }
+        i = i + 1;
+    }
 }

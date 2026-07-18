@@ -54,7 +54,6 @@ SKIP_RUN=(
 # remove each entry when its gate lands (it will flip to XPASS and the ratchet
 # will flag it).
 KNOWN_FAILING=(
-    "examples/advanced/matrix-multiplication.sfn"      # range HOFs shipped (SFN-114); now blocked on nested-lambda transitive-capture typing — SFN-396 (epic #1883)
 )
 
 in_list() {

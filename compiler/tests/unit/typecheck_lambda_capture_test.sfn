@@ -272,6 +272,37 @@ test "captures: nested lambda's parameter doesn't bleed into outer capture set" 
     assert strings_equal(records[1].parameter_names[0], "x");
 }
 
+// SFN-396: an un-annotated array/range HOF callback parameter captured by a
+// NESTED lambda must carry its inferred element type (`int`), not the empty
+// `type_text` that lays the env field out as the opaque `i8*` slot while the
+// stored value is an `i64` (invalid `store i8* %v, i8** ...` IR). The outer
+// `map` callback's `n` is used only inside the inner lambda, so it is a capture
+// of the inner record — which must see `int`.
+test "captures: nested lambda inherits HOF callback param's inferred int type" ![io] {
+    let source = "let ns: int[] = [1, 2]; let f = ns.map(fn (n) -> int { return fn() -> int { return n; }; });";
+    let program = parse_program(source);
+    let records = analyze_lambda_captures(program);
+    assert records.length == 2;
+    assert records[1].captures.length == 1;
+    assert strings_equal(records[1].captures[0].name, "n");
+    assert strings_equal(records[1].captures[0].type_text, "int");
+    assert records[1].captures[0].by_value;
+}
+
+// SFN-396: an un-annotated `let len = xs.length` captured by a closure must
+// infer `int` — `.length` on an array (or string) lowers to an `i64`
+// extractvalue, so the capture cannot fall back to `i8*`.
+test "captures: un-annotated .length initializer infers int type_text" ![io] {
+    let source = "let xs: int[] = [1, 2]; let len = xs.length; let f = fn() -> int { return len; };";
+    let program = parse_program(source);
+    let records = analyze_lambda_captures(program);
+    assert records.length == 1;
+    assert records[0].captures.length == 1;
+    assert strings_equal(records[0].captures[0].name, "len");
+    assert strings_equal(records[0].captures[0].type_text, "int");
+    assert records[0].captures[0].by_value;
+}
+
 // -------------------------------------------------------------------
 // Determinism — capture order must match first-appearance order,
 // and duplicate references must collapse to a single Capture.

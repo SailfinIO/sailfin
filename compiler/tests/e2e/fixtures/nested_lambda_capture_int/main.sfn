@@ -1,0 +1,55 @@
+// compiler/tests/e2e/fixtures/nested_lambda_capture_int/main.sfn
+//
+// SFN-396 regression fixture: matrix multiply via triple-nested lambdas, where
+// an outer callback's un-annotated parameter (`row`/`col`) and an un-annotated
+// `.length` `let` (`colsA`/`colsB`) are captured transitively by a NESTED inner
+// lambda. Before the fix each such capture's closure-env field fell back to the
+// opaque `i8*` slot while the stored value was an `i64`, emitting
+// `store i8* %v, i8** ...` — invalid IR the verifier rejected at link
+// (`'%tN' defined with type 'i64' but expected 'ptr'`).
+//
+// Two multiply variants pin both fix arms and both receiver shapes:
+//   * `multiply_hof`   — array-literal HOF receivers (`rows`/`cols`/`ks`); the
+//                        captured `row`/`col` are un-annotated `map` callback
+//                        parameters (HOF param-type inference).
+//   * `multiply_range` — range HOF receivers (`(0..n)`) plus un-annotated
+//                        `let colsA = a[0].length`; captures the `.length` `let`
+//                        and range-callback parameters transitively.
+//
+// a·b for a=[[1,2],[3,4]], b=[[5,6],[7,8]] is [[19,22],[43,50]].
+fn multiply_hof(a: int[][], b: int[][]) -> int[][] {
+    let rows = [0, 1];
+    let cols = [0, 1];
+    let ks = [0, 1];
+    return rows.map(fn (row) -> int[] {
+        return cols.map(fn (col) -> int {
+            return ks.reduce(0, fn (acc, k) -> int {
+                return acc + a[row][k] * b[k][col];
+            });
+        });
+    });
+}
+
+fn multiply_range(a: int[][], b: int[][]) -> int[][] {
+    let rowsA = a.length;
+    let colsA = a[0].length;
+    let colsB = b[0].length;
+    return (0 .. rowsA).map(fn (row) -> int[] {
+        return (0 .. colsB).map(fn (col) -> int {
+            return (0 .. colsA).reduce(0, fn (acc, k) -> int {
+                return acc + a[row][k] * b[k][col];
+            });
+        });
+    });
+}
+
+fn main() ![io] {
+    let a = [[1, 2], [3, 4]];
+    let b = [[5, 6], [7, 8]];
+    let h = multiply_hof(a, b);
+    let r = multiply_range(a, b);
+    print(h[0][0]);
+    print(h[1][1]);
+    print(r[0][0]);
+    print(r[1][1]);
+}
