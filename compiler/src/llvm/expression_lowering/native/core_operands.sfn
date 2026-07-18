@@ -2529,6 +2529,30 @@ fn coerce_operand_to_type(operand: LLVMOperand, target_type: string, temp_index:
             diagnostics: diagnostics
         };
     }
+    // A `spawn` future pointer coerced into a non-pointer scalar slot is the
+    // SFN-386 double-slot corruption (an inferred-empty `[]` element type):
+    // reject it here as a `[fatal]` backstop so malformed IR from that shape
+    // can never silently reach clang, even if E0831 somehow missed it.
+    if starts_with(operand_type, "%SailfinFuture") {
+        let mut _future_scalar: boolean = false;
+        if target == "double" { _future_scalar = true; }
+        if target == "i64" { _future_scalar = true; }
+        if target == "i1" { _future_scalar = true; }
+        if target == "i8*" { _future_scalar = true; }
+        if _future_scalar {
+            diagnostics.push("[fatal] llvm lowering: cannot coerce task handle `"
+                + operand.llvm_type
+                + "` to `"
+                + target
+                + "`; a `spawn` future pointer was stored through a non-pointer slot (see E0831)");
+            return CoercionResult {
+                lines: current_lines,
+                temp_index: recover_temp_from_lines(current_lines, temp_index),
+                operand: null,
+                diagnostics: diagnostics
+            };
+        }
+    }
     let general = coerce_general_fallback(operand, operand_type, target, temp_index, current_lines);
     if general != null {
         let mut _gd_i: int = 0;

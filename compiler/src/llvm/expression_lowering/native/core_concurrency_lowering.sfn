@@ -1117,7 +1117,19 @@ fn lower_await_expression(stripped: string, bindings: ParameterBinding[], locals
     let future_operand = lowered.operand;
     let await_symbol = await_symbol_for_future_pointer_type(future_operand.llvm_type);
     if await_symbol.length == 0 {
-        let with_issue = append_string(diagnostics, "llvm lowering: await expects a Future pointer, got `"
+        // Escalate to `[fatal]` only for the SFN-386 corruption shape: an
+        // `await` on a `double` operand, which can only come from an
+        // inferred-empty `[]` handle array's double-typed element slot. Other
+        // non-future operands (e.g. the loose `i8*` `async fn`/ptr await path
+        // that awaits typing wiring is still pending on, #829) keep the prior
+        // non-fatal behavior so this backstop does not fail-close programs the
+        // frontend still accepts.
+        let mut await_prefix: string = "";
+        if strings_equal(future_operand.llvm_type, "double") {
+            await_prefix = "[fatal] ";
+        }
+        let with_issue = append_string(diagnostics, await_prefix
+            + "llvm lowering: await expects a Future pointer, got `"
             + future_operand.llvm_type
             + "`");
         return ExpressionResult {

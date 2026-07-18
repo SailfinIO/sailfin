@@ -1,0 +1,204 @@
+// End-to-end coverage for SFN-386: an inferred-empty `[]` array populated by
+// `spawn` task handles must not silently miscompile.
+//
+// Background. `let mut handles = []` has no element type, so the empty literal
+// bakes the array's LLVM element type as `double`. A later
+// `handles.push(spawn fn() -> string { ... })` then stored the future *pointer*
+// through that `double` slot (dereferencing the handle and reinterpreting 8
+// bytes as an f64), and an indexed `await handles[i]` emitted no `sfn_await_*`
+// call at all — producing garbage output, a `bounds_check` abort, or a clang
+// ICE (`%tN defined with type 'double' but expected 'ptr'`) depending on shape.
+//
+// The fix rejects the pattern at check time with E0831 (no user-writable handle
+// type exists to annotate, so it fails closed rather than infers — mirroring the
+// SFN-351 empty-`[]` conditional-branch precedent), plus a `[fatal]` lowering
+// backstop so any handle→scalar-slot combination the frontend rule does not
+// enumerate can never hand malformed IR to clang.
+//
+// no-bash-e2e (`.claude/rules/no-bash-e2e.md`): fixtures are written to a
+// scratch dir and driven through `sfn check` / `sfn build` subprocesses; the
+// `![io]` tests assert on captured stdout+stderr with `sfn/strings::find`.
+import { find } from "sfn/strings";
+
+fn _sfn_bin() -> string ![io] {
+    let configured = env.get("SAILFIN_BIN");
+    if configured.length > 0 { return configured; }
+    return "build/bin/sfn";
+}
+
+// `process.run_capture`'s empty array is the *empty* environment; thread the
+// variables the toolchain needs. A `sfn build` fixture links clang (needs PATH)
+// and routes the build cache under SAILFIN_TEST_SCRATCH so a parallel run does
+// not collide on the fixed build/sailfin (#1333).
+fn _child_env() -> string[] ![io] {
+    let mut e: string[] = [];
+    let path = env.get("PATH");
+    if path.length > 0 { e.push("PATH=" + path); }
+    let home = env.get("HOME");
+    if home.length > 0 { e.push("HOME=" + home); }
+    let tmpdir = env.get("TMPDIR");
+    if tmpdir.length > 0 { e.push("TMPDIR=" + tmpdir); }
+    let scratch = env.get("SAILFIN_TEST_SCRATCH");
+    if scratch.length > 0 { e.push("SAILFIN_TEST_SCRATCH=" + scratch); }
+    return e;
+}
+
+fn _scratch_dir() -> string ![io] {
+    let mut base = env.get("SAILFIN_TEST_SCRATCH");
+    if base.length == 0 { base = "/tmp"; }
+    fs.createDirectory(base, true);
+    return fs.mkdtemp(base + "/sfn-empty-handle-");
+}
+
+// Write `src` to a unique scratch `.sfn` and return its path.
+fn _write_fixture(tag: string, src: string) -> string ![io] {
+    let dir = _scratch_dir();
+    let path = dir + "/" + tag + ".sfn";
+    fs.writeFile(path, src);
+    return path;
+}
+
+// Run `sfn check` on a fixture and return captured stdout+stderr.
+fn _check_output(tag: string, src: string) -> string ![io] {
+    let path = _write_fixture(tag, src);
+    let _exit = process.run_capture([_sfn_bin(), "check", path], _child_env());
+    let out = process.capture_take_stdout();
+    let err = process.capture_take_stderr();
+    return out + err;
+}
+
+// Result of a `sfn build`: exit code plus combined stdout+stderr.
+struct BuildResult {
+    exit: int;
+    output: string;
+}
+
+fn _build(tag: string, src: string) -> BuildResult ![io] {
+    let path = _write_fixture(tag, src);
+    let dir = _scratch_dir();
+    let bin = dir + "/" + tag + ".bin";
+    let exit = process.run_capture([_sfn_bin(), "build", "-o", bin, path], _child_env());
+    let out = process.capture_take_stdout();
+    let err = process.capture_take_stderr();
+    return BuildResult { exit: exit, output: out + err };
+}
+
+// ---- reject: the recorded repro family (E0831 during check) ----
+test "empty-handle-array: single no-capture handle is rejected with E0831" ![io] {
+    let src = "fn main() -> int ![io] {\n" + "    routine {\n"
+        + "        let mut handles = [];\n"
+        + "        handles.push(spawn fn() -> string { return \"x\"; });\n"
+        + "    }\n"
+        + "    return 0;\n"
+        + "}\n";
+    let output = _check_output("single", src);
+    assert find(output, "E0831", 0) >= 0;
+}
+
+test "empty-handle-array: a capturing handle lambda is rejected with E0831" ![io] {
+    let src = "fn main() -> int ![io] {\n" + "    routine {\n"
+        + "        let item = \"a\";\n"
+        + "        let mut handles = [];\n"
+        + "        handles.push(spawn fn() -> string { return item + \"!\"; });\n"
+        + "    }\n"
+        + "    return 0;\n"
+        + "}\n";
+    let output = _check_output("capture", src);
+    assert find(output, "E0831", 0) >= 0;
+}
+
+test "empty-handle-array: multiple pushes are rejected with E0831" ![io] {
+    let src = "fn main() -> int ![io] {\n" + "    routine {\n"
+        + "        let mut handles = [];\n"
+        + "        handles.push(spawn fn() -> string { return \"a\"; });\n"
+        + "        handles.push(spawn fn() -> string { return \"b\"; });\n"
+        + "    }\n"
+        + "    return 0;\n"
+        + "}\n";
+    let output = _check_output("multi", src);
+    assert find(output, "E0831", 0) >= 0;
+}
+
+test "empty-handle-array: the full push + indexed-await repro is rejected with E0831" ![io] {
+    let src = "fn main() -> int ![io] {\n" + "    routine {\n"
+        + "        let mut handles = [];\n"
+        + "        handles.push(spawn fn() -> string { return \"x\"; });\n"
+        + "        let transformed: string = await handles[0];\n"
+        + "        print.info(transformed);\n"
+        + "    }\n"
+        + "    return 0;\n"
+        + "}\n";
+    let output = _check_output("full", src);
+    assert find(output, "E0831", 0) >= 0;
+}
+
+test "empty-handle-array: a plain-function-body handle push is rejected with E0831" ![io] {
+    // The primary (non-lambda, non-routine) `check_statement` path — the twin
+    // of the `walk_block_expressions` lambda-body path.
+    let src = "fn main() -> int ![io] {\n" + "    let mut handles = [];\n"
+        + "    handles.push(spawn fn() -> string { return \"x\"; });\n"
+        + "    return 0;\n"
+        + "}\n";
+    let output = _check_output("plain", src);
+    assert find(output, "E0831", 0) >= 0;
+}
+
+// ---- backstop: any handle→scalar-slot shape the frontend rule does not
+// enumerate must fail the build with a `[fatal]` diagnostic, never reach clang.
+test "empty-handle-array: indexed await without a push fails closed at lowering" ![io] {
+    let src = "fn main() -> int ![io] {\n" + "    routine {\n"
+        + "        let mut h = [];\n"
+        + "        let x: string = await h[0];\n"
+        + "        print.info(x);\n"
+        + "    }\n"
+        + "    return 0;\n"
+        + "}\n";
+    let result = _build("backstop", src);
+    assert result.exit != 0;
+    assert find(result.output, "[fatal]", 0) >= 0;
+}
+
+// ---- preserve the working path: a seeded (non-empty) handle array fixes its
+// element type at the literal, so push + indexed await still compiles and runs.
+test "seeded-handle-array: a non-empty handle array still builds and runs" ![io] {
+    let src = "fn main() -> int ![io] {\n" + "    routine {\n"
+        + "        let mut hs = [spawn fn() -> int { return 1; }];\n"
+        + "        hs.push(spawn fn() -> int { return 2; });\n"
+        + "        let v: int = await hs[0];\n"
+        + "        print.info(\"ok\");\n"
+        + "    }\n"
+        + "    return 0;\n"
+        + "}\n";
+    let result = _build("seeded", src);
+    assert result.exit == 0;
+}
+
+// ---- routine-body typecheck descent: enabling E0831 required typecheck to
+// descend into `routine { }` bodies (previously skipped entirely). Pin both
+// directions — a defect inside a routine is now caught, and a clean routine
+// body does not newly false-fire.
+test "routine body: a statement-level defect inside a routine is now caught at check" ![io] {
+    // A `while` (E0411) inside a `routine { }` previously passed silently
+    // because typecheck never descended into routine bodies; the descent added
+    // for E0831 now surfaces it — the general guarantee the SFN-386 fix relies on.
+    let src = "fn main() -> int ![io] {\n" + "    routine {\n"
+        + "        let mut i = 0;\n"
+        + "        while i < 3 { i = i + 1; }\n"
+        + "    }\n"
+        + "    return 0;\n"
+        + "}\n";
+    let output = _check_output("routine-defect", src);
+    assert find(output, "E0411", 0) >= 0;
+}
+
+test "routine body: a clean routine body still checks without a false positive" ![io] {
+    let src = "fn main() -> int ![io] {\n" + "    routine {\n"
+        + "        let g = spawn fn() -> int { return 1; };\n"
+        + "        let v: int = await g;\n"
+        + "        print.info(\"ok\");\n"
+        + "    }\n"
+        + "    return 0;\n"
+        + "}\n";
+    let output = _check_output("routine-clean", src);
+    assert find(output, "checked 1 files: ok", 0) >= 0;
+}

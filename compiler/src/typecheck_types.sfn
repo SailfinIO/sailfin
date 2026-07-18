@@ -1212,6 +1212,26 @@ fn make_channel_send_mismatch_diagnostic(channel_kind: string, sent_kind: string
     };
 }
 
+// E0831 — a `spawn` task handle is pushed into a local whose declared
+// element kind is the inferred-empty-`[]` sentinel. The empty literal bakes
+// the array's LLVM element type as `double`, so the pushed future pointer is
+// stored through a double slot and corrupted (SFN-386). There is no writable
+// handle type to annotate the array with, so this is rejected rather than
+// inferred — mirroring the SFN-351 fail-closed precedent for the identical
+// empty-`[]` root cause (`channel_send_diagnostics`).
+fn make_spawn_handle_into_empty_array_diagnostic(name: string, span: SourceSpan?) -> Diagnostic {
+    let message = "cannot push a `spawn` task handle into `" + name
+        + "`, an inferred-empty `[]` array: it has no element type and there is no writable handle type to annotate. Instead, `await` each handle directly at the spawn site, or seed the array non-empty with a handle (`let mut hs = [spawn ...]`) so its element type is fixed.";
+    return Diagnostic {
+        code: "E0831",
+        severity: "error",
+        message: message,
+        file_path: "",
+        primary: token_from_name("push", span),
+        suggestion: null
+    };
+}
+
 fn extract_generic_argument_block(annotation_text: string) -> string? {
     let trimmed = trim_text(annotation_text);
     let mut index: int = 0;
