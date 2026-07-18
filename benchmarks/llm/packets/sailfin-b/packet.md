@@ -1,6 +1,6 @@
 # Sailfin-B controlled learning packet
 
-Packet ID: `sailfin-b/v1.0.0`. Sailfin-B is the frozen task-relevant subset used only by benchmark Track B. Treat this packet as the complete language and library authority for the tasks. Do not rely on prior Sailfin knowledge.
+Packet ID: `sailfin-b/v1.1.0`. Sailfin-B is the frozen task-relevant subset used only by benchmark Track B. Treat this packet as the complete language and library authority for the tasks. Do not rely on prior Sailfin knowledge.
 
 ## Lexical and grammar rules
 
@@ -12,7 +12,7 @@ Imports use `import { name } from "module";`. The packet lists every allowed mod
 
 ## Types, values, mutability, and control flow
 
-`int` is a signed integer. `string` is UTF-8 text indexed by the task subset as one-character strings. `boolean` has `true` and `false`. `T[]` is a growable ordered array; `.length` is its element count and `.push(value)` appends. Local inference comes from the initializer, but function parameters and returned values are explicit. Equality compares values. Integer division truncates toward zero. `%` is remainder. String `+` concatenates, and `int as string` produces signed decimal text. Reading `text[i]` requires `0 <= i < text.length`; hidden fixtures never require invalid indexing.
+`int` is a signed integer. `string` is UTF-8 text indexed by the task subset as one-character strings. `boolean` has `true` and `false`. `T[]` is a growable ordered array; `.length` is its element count and `.push(value)` appends. Write the element type explicitly for an empty array, as in `let mut xs: string[] = [];`, because an empty initializer has nothing to infer from. Local inference comes from the initializer, but function parameters and returned values are explicit. Equality compares values. Integer division truncates toward zero. `%` is remainder. String `+` concatenates, and `int as string` produces signed decimal text. Reading `text[i]` requires `0 <= i < text.length`; hidden fixtures never require invalid indexing.
 
 Conditions must be boolean. `&&` and `||` short-circuit left to right. A `let` initializer is evaluated once. `loop` has no implicit iterator or exit. For counted work, create a mutable index, test it, and increment it. Arrays preserve insertion order. Empty strings and empty arrays are valid. The benchmark expects exact stdout, so do not add labels, debugging lines, or surrounding spaces.
 
@@ -31,11 +31,12 @@ Compiler feedback may report syntax, type, missing effect, runtime, or wrong-out
 - `substring(text, start, end) -> string` returns the half-open slice `[start,end)`. Equal bounds return `""`.
 - `char_code(ch) -> int` returns the Unicode scalar value of the one-character string used by ASCII fixtures.
 - `text.length -> int`, `array.length -> int`, and `array.push(value)` behave as described above.
+- `import { ascii_uppercase, int_to_string, parse_int } from "sfn/strings";` exposes pure helpers: `ascii_uppercase(text) -> string` uppercases ASCII `a`–`z`; `int_to_string(value) -> string` formats a signed decimal; `parse_int(text) -> Result<int, string>` reads an optional-sign decimal, consumed with `match r { Result.Ok { value } => { ... }, Result.Err { error } => { ... } }`. Prefer these to a hand-written loop.
 - `import { fs } from "fs";` exposes `fs.readFile(path) -> string`. It returns the complete file text and requires `io`. Fixtures may contain blank lines and a final newline.
 - `http.get_body(url) -> string` returns the deterministic loopback response body and requires `net`. The body may end with newline and must be parsed explicitly.
 - `sleep`, global file access, global HTTP clients, environment access, current time, randomness, and process spawning are unavailable.
 
-Integer parsing is explicit: handle an optional leading `-`, then accumulate digits with `char_code(ch) - 48`. Whitespace tested by edit tasks is ASCII space, tab, carriage return, or newline. Splitting, sorting, uppercase conversion, path normalization, and task transformations must be implemented from the documented primitives or starter code; no undeclared standard package is assumed. Structured-concurrency tasks may preserve the starter's task-local structure, but grading observes only deterministic input-order output and exposes no race-dependent primitive.
+Whitespace tested by edit tasks is ASCII space, tab, carriage return, or newline. Splitting, sorting, path normalization, and task transformations must be implemented from the documented primitives or starter code; only the modules listed above are available. Structured-concurrency tasks may preserve the starter's task-local structure, but grading observes only deterministic input-order output and exposes no race-dependent primitive.
 
 ## Task derivation notes
 
@@ -50,19 +51,20 @@ Known-good programs are checked and executed against every declared case. Known-
 fn magnitude(x: int) -> int { if x < 0 { return -x; } return x; }
 ```
 
-### Example 2 — counted loop and string cast
+### Example 2 — typed array: push and index
+```sailfin
+fn echo_first(s: string) -> string { let mut xs: string[] = []; xs.push(s); return xs[0]; }
+```
+
+### Example 3 — shipped ASCII uppercase helper
+```sailfin
+import { ascii_uppercase } from "sfn/strings";
+fn shout(text: string) -> string { return ascii_uppercase(text); }
+```
+
+### Example 4 — counted loop and string cast
 ```sailfin
 fn count_to(n: int) -> string { let mut i = 0; let mut out = ""; loop { if i >= n { break; } out = out + (i as string); i += 1; } return out; }
-```
-
-### Example 3 — half-open string slice
-```sailfin
-fn first(text: string) -> string { if text.length == 0 { return ""; } return substring(text, 0, 1); }
-```
-
-### Example 4 — console entry point
-```sailfin
-fn main() ![io] { let line = io.read_line(0); print(line); }
 ```
 
 ### Example 5 — declared filesystem authority
@@ -74,12 +76,11 @@ fn main() ![io] { print(load("numbers.txt")); }
 
 ### Example 6 — loopback network authority
 ```sailfin
-// The grader supplies the only permitted loopback URL on standard input.
 fn main() ![io, net] { let url = io.read_line(0); print(http.get_body(url)); }
 ```
 
 ## Construct-to-example and completeness index
 
-Functions and returns: 1–6. Bindings and mutation: 2, 4–6. Branches: 1–3. Loops: 2. Strings, length, slicing, casts: 2–4. Console I/O: 4–6. Imports and filesystem effects: 5. Network effects: 6. Pure/effect boundary: compare 1–3 with 4–6.
+Functions and returns: 1–6. Bindings and mutation: 2, 4, 5. Branches: 1. Loops: 4. Typed arrays, push, indexing: 2. Strings, casts: 4. Shipped `sfn/strings` helpers (`parse_int`, `int_to_string`, `ascii_uppercase`): Available primitives plus 3. Console I/O: 5–6. Imports and filesystem effects: 5. Network effects: 6. Pure/effect boundary: compare 1–4 with 5–6.
 
 Mechanical coverage markers: `[covers:grammar] [covers:types] [covers:binding] [covers:mutation] [covers:branch] [covers:loop] [covers:return] [covers:arrays] [covers:strings] [covers:casts] [covers:imports] [covers:effects] [covers:console-read] [covers:console-write] [covers:substring] [covers:char-code] [covers:filesystem] [covers:http] [covers:concurrency] [covers:path-normalization] [covers:capability-trap] [covers:diagnostics]`.

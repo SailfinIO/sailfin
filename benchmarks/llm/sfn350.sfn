@@ -2669,7 +2669,12 @@ fn _packet_path(arm: string) -> string ![io] {
     return _repo_root() + "/benchmarks/llm/packets/" + arm + "/packet.md";
 }
 
-fn _packet_version(arm: string) -> string { return arm + "/v1.0.0"; }
+fn _packet_version(arm: string) -> string {
+    // SFN-388 revised the Sailfin-B packet to teach the shipped array and
+    // sfn/strings surfaces; rill-17 is unchanged and keeps v1.0.0.
+    if arm == "sailfin-b" { return arm + "/v1.1.0"; }
+    return arm + "/v1.0.0";
+}
 
 fn _count_occurrences(text: string, needle: string) -> int {
     let mut count = 0;
@@ -2777,6 +2782,37 @@ fn _validate_packets() ![io] {
         si += 1;
     }
     print("Track B packet completeness and matched-budget checks passed");
+}
+
+fn _self_test_frozen_packet_examples() ![io] {
+    // SFN-388: the frozen Sailfin-B packet must teach the shipped array and
+    // sfn/strings surfaces (string[], explicitly typed empty arrays, .push,
+    // indexing, parse_int/int_to_string/ascii_uppercase) so Track B attempts
+    // stop hand-rolling them. Assert the assembled live request the harness
+    // would send for the sailfin-b arm actually carries those frozen examples,
+    // offline, before any paid batch. rill-17 is intentionally not mirrored
+    // (equivalent-arm review records the language-specific APIs).
+    let cfg = _default_config();
+    let arms = _arm_configs("b");
+    let arm = arms[0];
+    if arm.name != "sailfin-b" {
+        print.err("frozen packet self-test: expected sailfin-b as the first Track B arm");
+        process.exit(1);
+    }
+    let user = _build_user(_logic_task(), arm, cfg, "primary");
+    let required = ["sailfin-b/v1.1.0", "string[]", "let mut xs: string[] = []", "xs.push", "parse_int", "int_to_string", "ascii_uppercase", "Result.Ok", "from \"sfn/strings\""];
+    let mut i: int = 0;
+    loop {
+        if i >= required.length { break; }
+        if !contains(user, required[i]) {
+            print.err("frozen packet self-test: live request is missing \""
+                + required[i]
+                + "\"");
+            process.exit(1);
+        }
+        i += 1;
+    }
+    print("frozen Sailfin-B packet teaches arrays and sfn/strings helpers in the live request");
 }
 
 fn _packet_manifest(track: string) -> JsonValue ![io] {
@@ -3547,6 +3583,7 @@ fn main(argv: string[]) -> int ![clock, io, net] {
         _self_test_failure_taxonomy();
         _self_test_compiler_owned_classification();
         _self_test_response_invalidation();
+        _self_test_frozen_packet_examples();
         _self_test_analysis();
         return 0;
     }
