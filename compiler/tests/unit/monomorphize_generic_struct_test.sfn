@@ -116,6 +116,41 @@ test "monomorphize struct: static constructor call instantiates from the binding
     assert ! _has(out, "List.new(");
 }
 
+test "monomorphize struct: constructor body struct literal is mangled to the specialization" {
+    // The specialized method body itself must be swept: `return List<T> {
+    // items: [] }` substitutes to `List<int> { ... }`, which must then be
+    // mangled to `List$int { ... }`. Without the second sweep over struct
+    // method bodies the literal stays the unregistered `List<int>`, fails
+    // struct-literal resolution, and the constructor collapses to `ret i8*
+    // null` — the caller then loads through null and traps (#1941). The
+    // `.method`/`.meta return` return-type annotations must mangle too.
+    let src = ".module m\n" + ".struct List<T>\n"
+        + ".layout struct name=List size=8 align=8\n"
+        + ".layout field items type=T[] offset=0 size=8 align=8\n"
+        + "    .field items: T[]\n"
+        + "    .method new() -> List<T>\n"
+        + "    .meta return List<T>\n"
+        + "    .meta effects none\n"
+        + "        ret List<T> { items: [] }\n"
+        + "    .endmethod\n"
+        + ".endstruct\n"
+        + "\n"
+        + ".fn main() ![io]\n"
+        + ".meta return void\n"
+        + ".meta effects io\n"
+        + "    .let numbers : List<int> = List.new()\n"
+        + ".endfn\n";
+    let out = monomorphize_native_text(src);
+    // The constructor's return struct literal is mangled to the specialization.
+    assert _has(out, "List$int { items: [] }");
+    // The method return-type annotations are mangled, not left as `List<int>`.
+    assert _has(out, ".method new() -> List$int");
+    assert _has(out, ".meta return List$int");
+    // No unmangled generic-syntax literal survives in the specialized body.
+    assert ! _has(out, "List<int> { items: [] }");
+    assert ! _has(out, "ret List<int>");
+}
+
 test "monomorphize struct: unannotated static constructor call is not instantiated" {
     // Without a binding annotation (`let n = List.new()`) the instantiation
     // is unknowable — there is no `T`-typed argument to infer from. The pass

@@ -54,7 +54,6 @@ SKIP_RUN=(
 # remove each entry when its gate lands (it will flip to XPASS and the ratchet
 # will flag it).
 KNOWN_FAILING=(
-    "examples/advanced/generic-structures.sfn"         # static-ctor monomorphization landed (SFN-110); still gated on SFN-342 (Type<Args>{} literal) + SFN-343 (int|null interp) — epic #1883
 )
 
 in_list() {

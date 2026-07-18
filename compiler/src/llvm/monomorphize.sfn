@@ -1190,7 +1190,17 @@ fn _mono_collect_structs(lines: string[]) -> MonoStruct[] {
 // to the mangled symbol and its `<...>` clause dropped, yielding an ordinary
 // monomorphic struct the unchanged downstream lowering registers as
 // `%Box$int = type { i64 }`.
-fn _mono_specialize_struct(gs: MonoStruct, inst: MonoInst) -> string {
+//
+// Like `_mono_specialize` for generic free functions, this runs a second sweep
+// (`_mono_rewrite_expr`) over the substituted lines so generic syntax inside a
+// method body is mangled: a static constructor `fn new() -> List<T> { return
+// List<T> { items: [] }; }` has its `.method`/`.meta return` header and its
+// `ret List<int> { items: [] }` return rewritten to the mangled `List$int`.
+// Without it the literal stays the unregistered `List<int>`, fails
+// struct-literal resolution, and the body collapses to `ret i8* null` (#1941).
+// The instantiations that sweep discovers are returned so the caller closes
+// them transitively on the worklist.
+fn _mono_specialize_struct(gs: MonoStruct, inst: MonoInst, gfns: MonoFn[], allfns: MonoFn[], gstructs: MonoStruct[]) -> MonoSpec {
     let tp = gs.type_params;
     let args = inst.args;
     let mut out: string[] = [];
@@ -1237,7 +1247,34 @@ fn _mono_specialize_struct(gs: MonoStruct, inst: MonoInst) -> string {
         }
         index += 1;
     }
-    return _mono_join_lines(out);
+    // Second sweep: rewrite generic syntax (struct literals, type annotations,
+    // static-ctor call sites) inside method bodies using the substituted env,
+    // mirroring `_mono_specialize`. This mangles `List<int> { items: [] }` in a
+    // `new()` body to `List$int { items: [] }` so the constructor lowers to a
+    // real struct build instead of `ret i8* null` (#1941).
+    //
+    // The env is built once over the whole struct block, not per method (the fn
+    // path scopes it per function). Harmless for the current single-annotation
+    // constructor shape; per-method scoping to avoid cross-method name capture
+    // in multi-method generic structs is tracked in SFN-406.
+    let env_names = _mono_build_env_names(out);
+    let env_types = _mono_build_env_types(out);
+    let mut out_lines: string[] = [];
+    let mut insts: MonoInst[] = [];
+    let mut j: int = 0;
+    loop {
+        if j >= out.length { break; }
+        let rw = _mono_rewrite_expr(out[j], env_names, env_types, gfns, allfns, gstructs);
+        out_lines = out_lines.push(rw.text);
+        let mut k: int = 0;
+        loop {
+            if k >= rw.insts.length { break; }
+            insts = insts.push(rw.insts[k]);
+            k += 1;
+        }
+        j += 1;
+    }
+    return MonoSpec { lines: out_lines, insts: insts };
 }
 
 // Entry point: monomorphize generic functions and structs in a `.sfn-asm`
@@ -1339,7 +1376,14 @@ fn monomorphize_native_text(text: string) -> string {
         if inst.kind == "struct" {
             let sgi = _mono_find_struct(gstructs, inst.base);
             if sgi < 0 { continue; }
-            specialized_structs = specialized_structs.push(_mono_specialize_struct(gstructs[sgi], inst));
+            let sspec = _mono_specialize_struct(gstructs[sgi], inst, gfns, allfns, gstructs);
+            specialized_structs = specialized_structs.push(_mono_join_lines(sspec.lines));
+            let mut ssi: int = 0;
+            loop {
+                if ssi >= sspec.insts.length { break; }
+                worklist = worklist.push(sspec.insts[ssi]);
+                ssi += 1;
+            }
             continue;
         }
         let gi = _mono_find_fn(gfns, inst.base);
