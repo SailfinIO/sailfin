@@ -17,6 +17,7 @@
 // `sfn/test` `expect_*` matchers are `![pure]` and cannot be called from
 // an `![io]` test (#842).
 import { find } from "sfn/strings";
+import { clean_runner_env, nested_runner_scratch } from "sfn/test";
 
 fn _sfn_bin() -> string ![io] {
     let configured = env.get("SAILFIN_BIN");
@@ -24,11 +25,13 @@ fn _sfn_bin() -> string ![io] {
     return "build/bin/sfn";
 }
 
-// Inherit the full parent environment: PATH/HOME/TMPDIR (plus any macOS
-// SDK/toolchain vars) for the nested clang/linker, and SAILFIN_TEST_SCRATCH
-// for per-invocation build-cache isolation (#1333). Mirrors
-// update_snapshots_flag_test.sfn.
-fn _child_env() -> string[] ![io] { return process.environ(); }
+// A clean top-level child environment for the nested `sfn test`: the
+// ambient environment (PATH/HOME/TMPDIR + clang/linker vars) minus the
+// parallel pool's per-child orchestration keys, with SAILFIN_TEST_SCRATCH
+// re-pointed at an isolated nested scratch (SFN-401).
+fn _child_env() -> string[] ![io] {
+    return clean_runner_env(nested_runner_scratch("lifecycle-hook"));
+}
 
 // A hooks-bearing fixture: four lifecycle hooks plus two ordinary tests.
 // Each block prints a distinctive marker via `print.info`, so the captured

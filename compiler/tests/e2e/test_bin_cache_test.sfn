@@ -51,6 +51,7 @@ fn _sfn_bin() -> string ![io] {
 // HOME, TMPDIR, the inherited SAILFIN_TEST_SCRATCH, plus the dedicated
 // per-invocation shared cache root. The runtime root is resolved relative
 // to the runner's cwd (repo root), so no --runtime-root is threaded.
+// env-safe (SFN-401): hand-built minimal child env — no raw process.environ() pool-key leak (isolation is via the fresh per-invocation SAILFIN_BUILD_CACHE_DIR).
 fn _suite_env(cache_dir: string) -> string[] ![io] {
     let mut e: string[] = [];
     let path = env.get("PATH");

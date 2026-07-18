@@ -9,7 +9,8 @@
 //
 // Matchers note (#842): `sfn/test`'s `expect_*` matchers are `![pure]` and
 // cannot be called from an `![io]` test; assert on captured text directly.
-import { contains } from "sfn/strings";
+import { contains, find } from "sfn/strings";
+import { clean_runner_env, nested_runner_scratch } from "sfn/test";
 
 fn _sfn_bin() -> string ![io] {
     let configured = env.get("SAILFIN_BIN");
@@ -25,22 +26,23 @@ fn _scratch_dir() -> string ![io] {
     return dir;
 }
 
-fn _has_key(entry: string, key: string) -> boolean {
-    if entry.length < key.length { return false; }
-    return substring(entry, 0, key.length) == key;
-}
-
-// Inherit the parent env (the nested build links clang + ld via `PATH` and
-// routes its build cache under `SAILFIN_TEST_SCRATCH`), dropping any ambient
-// `SAILFIN_TRACE_LINK` so `traced` alone decides the child's value.
+// A clean top-level child environment for the nested build/test (SFN-401):
+// the ambient PATH/HOME/TMPDIR (for clang + its linker) minus the parallel
+// pool's per-child keys, with SAILFIN_TEST_SCRATCH re-pointed at an isolated
+// nested scratch. `SAILFIN_TRACE_LINK` is NOT a pool-managed key, so
+// `clean_runner_env` passes any ambient value through — strip it explicitly
+// here so `traced` alone decides the child's value (otherwise a dev/CI shell
+// that exported `SAILFIN_TRACE_LINK` would break the untraced negative case).
 fn _child_env(traced: boolean) -> string[] ![io] {
-    let base = process.environ();
+    let base = clean_runner_env(nested_runner_scratch("trace-link"));
     let mut e: string[] = [];
-    let mut i = 0;
+    let mut i: int = 0;
     loop {
         if i >= base.length { break; }
-        if !_has_key(base[i], "SAILFIN_TRACE_LINK=") { e.push(base[i]); }
-        i = i + 1;
+        if find(base[i], "SAILFIN_TRACE_LINK=", 0) != 0 {
+            e.push(base[i]);
+        }
+        i += 1;
     }
     if traced { e.push("SAILFIN_TRACE_LINK=1"); }
     return e;

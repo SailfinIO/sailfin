@@ -27,6 +27,7 @@ fn _sfn_bin() -> string ![io] {
     return "build/bin/sfn";
 }
 
+// env-safe (SFN-401): hand-built minimal child env — no raw process.environ() pool-key leak (the outer SAILFIN_TEST_SCRATCH is threaded through deliberately).
 fn _child_env() -> string[] ![io] {
     let mut e: string[] = [];
     let path = env.get("PATH");

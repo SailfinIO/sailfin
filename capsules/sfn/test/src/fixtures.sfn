@@ -29,6 +29,7 @@
 // C runtime surface is introduced.
 import { remove_all } from "sfn/fs";
 import { Env, ProcessOutput, run_capture } from "sfn/os";
+import { find } from "sfn/strings";
 
 // Create a fresh temporary directory, hand its absolute path to `body`,
 // and recursively remove the whole tree on scope exit — on both the
@@ -132,4 +133,81 @@ fn with_env(args: string[], env: Env, body: fn (ProcessOutput) -> int) -> int ![
 fn with_cwd(args: string[], env: Env, cwd: string, body: fn (ProcessOutput) -> int) -> int ![io] {
     let out = run_capture(args, env, cwd);
     return body(out);
+}
+
+// ---------------------------------------------------------------------------
+// Clean environment for a nested `sfn test` (SFN-401)
+// ---------------------------------------------------------------------------
+// An e2e test that spawns a NESTED `sfn test` (or `sfn build` / `sfn run`) as
+// a subprocess must hand it a clean TOP-LEVEL environment: it inherits the
+// ambient environment (PATH/HOME/TMPDIR + toolchain vars its clang/linker
+// need) but NONE of the per-child orchestration keys the *parent* pool set on
+// us. Inheriting those binds the nested run to the parent's private state and
+// breaks it in pool-only, platform-flaky ways that evade local serial runs —
+// three separate symptoms bit one e2e in SFN-17 / PR #2411: the nested runner
+// adopts the parent's `SAILFIN_TEST_SCRATCH` and clobbers its harness-IPC
+// files, emits as a JSON subframe under `SAILFIN_TEST_JSON_SUBFRAME` (routing
+// its `summary` off stdout), and binds the nested build to the parent's shared
+// runtime object cache + stamp nonce via `SAILFIN_TEST_RUNTIME_OBJDIR` /
+// `SAILFIN_TEST_RUNTIME_STAMP`.
+// The per-child environment keys the parallel test pool injects on every
+// spawned test process. This list MUST mirror the set stripped and re-added by
+// `_pool_child_env` in `compiler/src/cli/commands/test.sfn` — a capsule cannot
+// import compiler-internal modules, so this is a deliberate paired copy. When
+// a new pool key is added to `_pool_child_env`, add it here too so a nested
+// runner keeps inheriting a clean environment.
+fn _pool_managed_keys() -> string[] {
+    return ["SAILFIN_TEST_SCRATCH", "SAILFIN_TEST_RUNTIME_OBJDIR", "SAILFIN_TEST_RUNTIME_STAMP", "SAILFIN_UPDATE_SNAPSHOTS", "SAILFIN_TEST_JSON_SUBFRAME",];
+}
+
+// True when `entry` ("KEY=VALUE") carries one of the pool-managed keys. Matched
+// by exact `KEY=` prefix so a value that merely contains the substring is
+// unaffected.
+fn _is_pool_managed(entry: string) -> boolean {
+    let keys = _pool_managed_keys();
+    let mut i: int = 0;
+    loop {
+        if i >= keys.length { break; }
+        if find(entry, keys[i] + "=", 0) == 0 { return true; }
+        i += 1;
+    }
+    return false;
+}
+
+// Mint an isolated per-invocation scratch path for a nested runner. When the
+// outer pool set our own `SAILFIN_TEST_SCRATCH`, the nested scratch is a subdir
+// of it — it stays under the runner-managed tree and is unique per test file
+// (the pool's scratch is per-file), and stays warm across a file's sequential
+// nested runs. Otherwise (a standalone run with no runner) a fresh temp dir is
+// minted. `label` distinguishes multiple nested spawns within one test file;
+// pass a stable, file-specific name (e.g. `"lifecycle-hook"`).
+fn nested_runner_scratch(label: string) -> string ![io] {
+    let outer = env.get("SAILFIN_TEST_SCRATCH");
+    if outer.length > 0 { return outer + "/" + label; }
+    return fs.mkdtemp("sfn-nested-runner-");
+}
+
+// Build a clean top-level child environment for spawning a nested `sfn test`
+// (or `sfn build` / `sfn run`) subprocess. Returns `process.environ()` with
+// every pool-managed key (see `_pool_managed_keys`) stripped and
+// `SAILFIN_TEST_SCRATCH` re-pointed at `nested_scratch` — an isolated dir the
+// caller owns, typically from `nested_runner_scratch(...)`. Pass an empty
+// `nested_scratch` to strip the pool keys without re-adding a scratch. Callers
+// that deliberately want an otherwise-managed key (e.g. a nested build binding
+// its own `SAILFIN_TEST_RUNTIME_OBJDIR`, or a test threading its own trace
+// flag) push it onto the returned array. Use with the raw
+// `process.run_capture(argv, env)` builtin the e2e tests call.
+fn clean_runner_env(nested_scratch: string) -> string[] ![io] {
+    let all = process.environ();
+    let mut out: string[] = [];
+    let mut i: int = 0;
+    loop {
+        if i >= all.length { break; }
+        if !_is_pool_managed(all[i]) { out.push(all[i]); }
+        i += 1;
+    }
+    if nested_scratch.length > 0 {
+        out.push("SAILFIN_TEST_SCRATCH=" + nested_scratch);
+    }
+    return out;
 }

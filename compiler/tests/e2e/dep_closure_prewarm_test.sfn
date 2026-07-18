@@ -49,6 +49,7 @@ fn _fixture_b() -> string { return "compiler/tests/unit/check_tool_test.sfn"; }
 // `SAILFIN_BUILD_CACHE_DIR` shadowing our fresh cold cache via a
 // duplicate env key, making the regression vacuously pass. An empty env
 // array is the EMPTY environment (never "inherit"), so thread each key.
+// (SFN-401)
 fn _child_env(cache_dir: string, ledger: string, scratch_dir: string) -> string[] ![io] {
     let mut e: string[] = [];
     let path = env.get("PATH");

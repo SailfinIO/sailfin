@@ -32,6 +32,7 @@ fn _sfn_bin() -> string ![io] {
 // a fresh per-invocation SAILFIN_TEST_SCRATCH, plus any extra entries
 // (e.g. a trace flag). An empty array is the *empty* environment, not
 // "inherit", so everything the child needs is threaded explicitly.
+// env-safe (SFN-401): hand-built minimal child env — no raw process.environ() pool-key leak; nested SAILFIN_TEST_SCRATCH is isolated per call.
 fn _child_env(scratch: string, extra: string[]) -> string[] ![io] {
     let mut e: string[] = ["SAILFIN_TEST_SCRATCH=" + scratch];
     let path = env.get("PATH");

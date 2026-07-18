@@ -22,7 +22,7 @@
 // nested compile runs `clang` + its linker) and `SAILFIN_TEST_SCRATCH`
 // (so the parallel pool does not collide on the fixed `build/sailfin`
 // program.ll cache — #1333). See `.claude/rules/no-bash-e2e.md`.
-import { with_tmp_dir } from "sfn/test";
+import { clean_runner_env, nested_runner_scratch, with_tmp_dir } from "sfn/test";
 
 fn _sfn_bin() -> string ![io] {
     let configured = env.get("SAILFIN_BIN");
@@ -39,12 +39,14 @@ fn _probe_src() -> string {
 }
 
 fn _child_env() -> string[] ![io] {
-    // Inherit the full parent environment: PATH/HOME/TMPDIR plus the macOS
-    // SDK/toolchain vars the nested clang/ld need (a minimal set links on
-    // Linux but fails on macOS with `ld: library 'm' not found`, #1410),
-    // and SAILFIN_TEST_SCRATCH for per-invocation build-cache isolation
-    // (#1333). Mirrors serve_loopback_test.sfn / process_environ_test.sfn.
-    return process.environ();
+    // A clean top-level child environment for the nested `sfn test`
+    // (SFN-401): the ambient PATH/HOME/TMPDIR/macOS toolchain vars minus
+    // the parallel pool's per-child keys, with SAILFIN_TEST_SCRATCH
+    // re-pointed at an isolated nested scratch. Stripping the inherited
+    // SAILFIN_UPDATE_SNAPSHOTS is correct here: this test proves the
+    // `--update-snapshots` argv flag alone drives the var, not an
+    // inherited ambient one.
+    return clean_runner_env(nested_runner_scratch("update-snapshots"));
 }
 
 // Run `sfn test [flag] <positional>` against a freshly-written probe in a

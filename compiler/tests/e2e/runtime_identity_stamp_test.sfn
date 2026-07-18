@@ -47,6 +47,7 @@ fn _sfn_bin() -> string ![io] {
 // unreachable without PATH; the per-test scratch isolates each test's
 // objdir (the stamp lands under it) from sibling tests in the parallel
 // pool (#1333).
+// env-safe (SFN-401): hand-built minimal child env — no raw process.environ() pool-key leak; nested SAILFIN_TEST_SCRATCH is isolated per call.
 fn _child_env_with_scratch(scratch: string) -> string[] ![io] {
     let mut e: string[] = [];
     let path = env.get("PATH");
