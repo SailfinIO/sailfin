@@ -1102,6 +1102,27 @@ fn _is_channel_receive_remainder(remainder: string, bindings: ParameterBinding[]
     return false;
 }
 
+// Returns the receiver channel binding's `type_annotation` for a
+// `<ident>.receive()` remainder — `"channel"` (untyped) or `"channel:<kind>"`
+// (element-typed) — and `""` when the remainder is not a simple channel
+// receive or the base identifier is unbound. Mirrors the lookup in
+// `_is_channel_receive_remainder` so the fail-closed guard in
+// `lower_await_expression` (SFN-397) can distinguish an untyped-channel
+// receive (element kind unresolvable) from a kind-typed one.
+fn _channel_receive_base_annotation(remainder: string, bindings: ParameterBinding[], locals: LocalBinding[]) -> string {
+    let trimmed = trim_text(remainder);
+    let recv_pos = index_of(trimmed, ".receive()");
+    if recv_pos < 0 { return ""; }
+    if recv_pos + 10 != trimmed.length { return ""; }
+    let base = trim_text(substring(trimmed, 0, recv_pos));
+    if !is_simple_identifier(base) { return ""; }
+    let base_local = find_local_binding(locals, base);
+    if base_local != null { return base_local.type_annotation; }
+    let base_parameter = find_parameter_binding(bindings, base);
+    if base_parameter != null { return base_parameter.type_annotation; }
+    return "";
+}
+
 // `await <expr>` joins a thread-backed future and extracts its value.
 // Extracted sibling of `lower_expression` for the operand-present case
 // (the `await` prefix followed by space/tab/`(`); the no-operand and
@@ -1143,6 +1164,34 @@ fn lower_await_expression(stripped: string, bindings: ParameterBinding[], locals
     // lowering reconstructed) unchanged, bypassing the `%SailfinFuture*`
     // pointer check below that only the `spawn`-backed futures satisfy.
     if _is_channel_receive_remainder(remainder, bindings, locals) {
+        // SFN-397: a bare `channel` binding (from `let ch = channel(N)`)
+        // carries no element kind, so an un-annotated `await ch.receive()`
+        // reaches `try_lower_channel_method` with an empty `expected_type`
+        // and defaults to the untyped `i8*` (by-pointer) load — which
+        // reinterprets a non-pointer payload (int/bool/float, sent as a raw
+        // 8-byte value) as a pointer and hands back a garbage operand that
+        // SIGSEGVs on the first dereference downstream. The element kind is
+        // unresolvable here, so fail closed instead of emitting that operand.
+        // A `channel:<kind>` binding or a typed destination
+        // (`let x: T = ...`, non-empty `expected_type`) resolves the element
+        // and stays on the working pass-through below.
+        let recv_base_annotation = _channel_receive_base_annotation(remainder, bindings, locals);
+        if recv_base_annotation == "channel" {
+            if trim_text(expected_type).length == 0 {
+                let unresolved = append_string(diagnostics, "[fatal] llvm lowering: `await "
+                    + trim_text(remainder)
+                    + "` cannot resolve the received element type; annotate the "
+                    + "receiving binding (`let x: T = await <channel>.receive()`) "
+                    + "so the channel payload type is known");
+                return ExpressionResult {
+                    lines: lowered.lines,
+                    temp_index: lowered.temp_index,
+                    operand: null,
+                    diagnostics: unresolved,
+                    string_constants: lowered.string_constants
+                };
+            }
+        }
         return ExpressionResult {
             lines: lowered.lines,
             temp_index: lowered.temp_index,

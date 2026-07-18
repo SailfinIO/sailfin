@@ -1,0 +1,106 @@
+// E2E: `await <channel>.receive()` inside a `routine { }` nursery (SFN-397).
+//
+// Two guarantees, both proven by actually compiling + running via
+// `sailfin run` (the native no-bash e2e contract, `.claude/rules/no-bash-e2e.md`):
+//
+//   1. The sanctioned channel-receive-await sugar lowers correctly inside a
+//      nursery: `routine { let x: int = await ch.receive(); ... }` runs to
+//      exit 0 with the received values intact (no SIGSEGV). The receive
+//      blocks synchronously, so `await` is a degenerate pass-through — there
+//      is no thread-backed future to join.
+//
+//   2. An UNTYPED channel receive-await that cannot resolve its element kind
+//      FAILS CLOSED with a fatal compile diagnostic instead of emitting
+//      garbage IR. `let a = await ch.receive()` on a bare `let ch =
+//      channel(N)` binding (no destination annotation) previously defaulted
+//      to the untyped `i8*` by-pointer load, reinterpreting a raw int payload
+//      as a pointer and SIGSEGVing on the first downstream use (exit 139).
+//      The build must now reject it at compile time (non-zero exit, never a
+//      139 crash) and name the fix (annotate the binding / use `Channel<T>`).
+//
+// Fixtures build observable output with string concatenation +
+// `number_to_string`, NOT `{{ }}` interpolation, so the host compiler does
+// not interpolate the fixture before it is written.
+import { contains } from "sfn/strings";
+
+fn _sfn_bin() -> string ![io] {
+    let configured = env.get("SAILFIN_BIN");
+    if configured.length > 0 { return configured; }
+    return "build/bin/sfn";
+}
+
+// `process.run_capture`'s empty array is the *empty* environment, not
+// "inherit". `sfn run` spawns a nested clang + linker, so the child needs
+// PATH (else the linker is not found). SAILFIN_TEST_SCRATCH routes the
+// program.ll build-cache per invocation so the parallel pool does not
+// collide on the fixed build/sailfin (#1333).
+fn _child_env() -> string[] ![io] {
+    let mut e: string[] = [];
+    let path = env.get("PATH");
+    if path.length > 0 { e.push("PATH=" + path); }
+    let home = env.get("HOME");
+    if home.length > 0 { e.push("HOME=" + home); }
+    let tmpdir = env.get("TMPDIR");
+    if tmpdir.length > 0 { e.push("TMPDIR=" + tmpdir); }
+    let scratch = env.get("SAILFIN_TEST_SCRATCH");
+    if scratch.length > 0 { e.push("SAILFIN_TEST_SCRATCH=" + scratch); }
+    return e;
+}
+
+// A unique per-invocation scratch root so fixture source paths never collide
+// under the parallel pool.
+fn _scratch_dir() -> string ![io] {
+    let mut base = env.get("SAILFIN_TEST_SCRATCH");
+    if base.length == 0 { base = "/tmp"; }
+    fs.createDirectory(base, true);
+    return fs.mkdtemp(base + "/sfn-routine-await-recv-");
+}
+
+// ── (1) sanctioned channel-receive-await inside a routine runs correctly ──
+test "routine await-receive: typed receive returns the value, no SIGSEGV (SFN-397)" ![io] {
+    let dir = _scratch_dir();
+    let src = dir + "/ok.sfn";
+    fs.writeFile(src, "fn main() ![io] {\n" + "    let ch = channel(2);\n"
+        + "    ch.send(41);\n"
+        + "    ch.send(1);\n"
+        + "    routine {\n"
+        + "        let a: int = await ch.receive();\n"
+        + "        let b: int = await ch.receive();\n"
+        + "        print.info(\"routine sum: \" + number_to_string(a + b));\n"
+        + "    }\n"
+        + "    ch.close();\n"
+        + "}");
+    let exit = process.run_capture([_sfn_bin(), "run", src], _child_env());
+    let out = process.capture_take_stdout();
+    let err = process.capture_take_stderr();
+    // Exit 0 and the correct total — a regression to the old lowering would
+    // SIGSEGV (139) or print a garbage value.
+    assert exit == 0;
+    assert contains(out + err, "routine sum: 42");
+}
+
+// ── (2) untyped channel receive-await fails closed at compile time ────────
+test "routine await-receive: untyped channel receive-await fails closed, not garbage IR (SFN-397)" ![io] {
+    let dir = _scratch_dir();
+    let src = dir + "/unresolved.sfn";
+    // Bare `channel(N)` + un-annotated `let a = await ch.receive()`: the
+    // element kind is unresolvable, so the build must reject it rather than
+    // emit an operand that reinterprets the int payload as a pointer.
+    fs.writeFile(src, "fn main() ![io] {\n" + "    let ch = channel(2);\n"
+        + "    ch.send(7);\n"
+        + "    routine {\n"
+        + "        let a = await ch.receive();\n"
+        + "        print.info(\"got: \" + number_to_string(a));\n"
+        + "    }\n"
+        + "    ch.close();\n"
+        + "}");
+    let exit = process.run_capture([_sfn_bin(), "run", src], _child_env());
+    let out = process.capture_take_stdout();
+    let err = process.capture_take_stderr();
+    // Must be a compile-time rejection: non-zero exit that is NOT the 139
+    // SIGSEGV the old garbage-IR path produced.
+    assert exit != 0;
+    assert exit != 139;
+    // And the diagnostic must name the unresolved element type.
+    assert contains(out + err, "cannot resolve the received");
+}
