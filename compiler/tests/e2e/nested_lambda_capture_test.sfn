@@ -1,0 +1,49 @@
+// End-to-end regression for SFN-396 — a variable captured by an OUTER lambda
+// but used only inside a NESTED inner lambda must lay out its closure-env field
+// as the real scalar (`i64`), not the opaque `i8*` fallback. The captured
+// values here are un-annotated HOF callback parameters (`row`/`col`) and an
+// un-annotated `let colsA = a[0].length`; before the fix each fell back to
+// `i8*` while the stored value was an `i64`, emitting `store i8* %v, i8** ...`
+// — invalid IR the verifier rejected at link (`'%tN' defined with type 'i64'
+// but expected 'ptr'`). Triple-nested matrix multiply is the canonical trigger.
+//
+// Drives the compiler-under-test as a subprocess with the runtime `process.*`
+// builtins and asserts on captured stdout — the canonical e2e pattern (see
+// `.claude/rules/no-bash-e2e.md`, `closure_capture_inferred_pivot_test.sfn`).
+import { trim_right } from "sfn/strings";
+
+// The compiler-under-test: `$SAILFIN_BIN` if set, else the self-hosted binary
+// relative to the repo root the runner starts from. Mirrors `sfn/test`'s
+// `_resolve_sfn_bin` so CI can point the test at any compiler.
+fn _sfn_bin() -> string ![io] {
+    let configured = env.get("SAILFIN_BIN");
+    if configured.length > 0 { return configured; }
+    return "build/bin/sfn";
+}
+
+// `sfn run` compiles+links+executes the fixture, so the spawned compiler needs
+// a real environment (PATH for the linker, SAILFIN_TEST_SCRATCH for
+// per-invocation build-cache isolation under the parallel pool, #1333).
+fn _child_env() -> string[] ![io] { return process.environ(); }
+
+struct RunOut {
+    exit: int;
+    out: string;
+}
+
+fn _run_fixture(path: string) -> RunOut ![io] {
+    let exit = process.run_capture([_sfn_bin(), "run", path], _child_env());
+    let out = process.capture_take_stdout();
+    let _err = process.capture_take_stderr();
+    return RunOut { exit: exit, out: trim_right(out) };
+}
+
+test "nested lambda capture: transitively-captured int params/lengths compile and run" ![io] {
+    let r = _run_fixture("compiler/tests/e2e/fixtures/nested_lambda_capture_int/main.sfn");
+    // Exit 0 proves the IR linked (the pre-fix bug failed here); the output
+    // proves each transitively-captured value carried its real `i64` through
+    // the nested env. a·b = [[19,22],[43,50]] for both the array-HOF and range
+    // variants, so [0][0]=19 and [1][1]=50 from each.
+    assert r.exit == 0;
+    assert r.out == "19\n50\n19\n50";
+}

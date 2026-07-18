@@ -55,7 +55,6 @@ SKIP_RUN=(
 # will flag it).
 KNOWN_FAILING=(
     "examples/advanced/generic-structures.sfn"         # static-ctor monomorphization landed (SFN-110); still gated on SFN-342 (Type<Args>{} literal) + SFN-343 (int|null interp) — epic #1883
-    "examples/advanced/matrix-multiplication.sfn"      # range HOFs shipped (SFN-114); now blocked on nested-lambda transitive-capture typing — SFN-396 (epic #1883)
 )
 
 in_list() {
