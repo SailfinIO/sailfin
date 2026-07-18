@@ -4,10 +4,10 @@
 // test under a failing `before_each` as failed, and attributes a failing
 // `after_all` to the hook rather than to any individual test. This is a
 // build-and-run e2e: the spawned `sfn test` compiles the fixture to a
-// harness binary, so the child env threads the full parent environment
-// (PATH/HOME/TMPDIR for clang + its linker; SAILFIN_TEST_SCRATCH for
-// per-invocation build-cache isolation under the parallel pool — #1333;
-// see `.claude/rules/no-bash-e2e.md`).
+// harness binary, so the child env threads the parent environment
+// (PATH/HOME/TMPDIR for clang + its linker) but STRIPS
+// `SAILFIN_TEST_SCRATCH` so the nested runner isolates its own scratch —
+// see `_child_env` below and `.claude/rules/no-bash-e2e.md`.
 //
 // NOTE: assert on captured output with `sfn/strings` predicates — the
 // `sfn/test` `expect_*` matchers are `![pure]` and cannot be called from
@@ -20,11 +20,33 @@ fn _sfn_bin() -> string ![io] {
     return "build/bin/sfn";
 }
 
-// Inherit the full parent environment: PATH/HOME/TMPDIR (plus any macOS
-// SDK/toolchain vars) for the nested clang/linker, and SAILFIN_TEST_SCRATCH
-// for per-invocation build-cache isolation (#1333). Mirrors
-// lifecycle_hook_ordering_test.sfn.
-fn _child_env() -> string[] ![io] { return process.environ(); }
+// Inherit the parent environment (PATH/HOME/TMPDIR plus any macOS
+// SDK/toolchain vars) for the nested clang/linker, but STRIP
+// `SAILFIN_TEST_SCRATCH`: this test spawns a nested `sfn test`, which is a
+// full runner that mints its own per-invocation scratch when the var is
+// unset (`_resolve_test_scratch_root` → `mktemp`). If we instead threaded
+// our own `SAILFIN_TEST_SCRATCH`, the nested runner would *adopt* it and
+// then clear+consume `results.log`/`fail.bin` in that shared root — the
+// very harness-IPC files our own recoverable harness writes for THIS
+// file's tests — clobbering them so later tests are misclassified as
+// skipped (serial) or mis-attributed as a failure (parallel pool). The
+// clobber races the outer harness's per-test append; macOS arm64 loses it
+// deterministically, which is why this bit only the macos-arm64 leg. The
+// nested `mktemp` scratch is itself per-invocation unique, so build-cache
+// isolation (#1333) is preserved.
+fn _child_env() -> string[] ![io] {
+    let all = process.environ();
+    let mut out: string[] = [];
+    let mut i: int = 0;
+    loop {
+        if i >= all.length { break; }
+        if find(all[i], "SAILFIN_TEST_SCRATCH=", 0) != 0 {
+            out.push(all[i]);
+        }
+        i += 1;
+    }
+    return out;
+}
 
 struct TestRun {
     exit: int,
