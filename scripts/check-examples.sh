@@ -47,10 +47,6 @@ SKIP_RUN=(
     "examples/web/rest-api.sfn"
     "examples/web/websocket-chat.sfn"
     "examples/advanced/web-server-with-concurrency.sfn"
-    # Non-terminating: an infinite `loop { await buffer.receive() }` consumer,
-    # so `sfn run` never returns (like the blocking servers). A bounded rewrite
-    # returns it to the runnable set — tracked in #1946 (epic #1883).
-    "examples/concurrency/producer-consumer.sfn"
 )
 
 # Runnable examples that fail today on a feature that is not yet shipped — NOT a
