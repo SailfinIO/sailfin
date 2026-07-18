@@ -1,0 +1,68 @@
+// End-to-end regression for SFN-408 / GitHub #2448.
+//
+// Interpolating a primitive-element array into a `{{ }}` string used to
+// stringify to a null operand, which dropped the entire enclosing `print`
+// (literal prefix included) at exit 0 with no diagnostic. This builds and
+// runs a fixture so LLVM lowering, the `coerce_operand_to_string` array arm,
+// the `array.to_string` runtime helper, and the print path all agree on the
+// int / nested-int / boolean / string element kinds.
+//
+// `float[]` is deferred to a seed bump (it needs a pointer-read-f64 intrinsic
+// the pinned seed lacks); its loud-failure behavior is covered by the sibling
+// negative test `interp_unsupported_fatal_test.sfn`.
+import { find } from "sfn/strings";
+import { expect_eq_bool, expect_eq_int, with_tmp_dir } from "sfn/test";
+
+fn _sfn_bin() -> string ![io] {
+    let configured = env.get("SAILFIN_BIN");
+    if configured.length > 0 { return configured; }
+    return "build/bin/sfn";
+}
+
+fn _fixture_src() -> string ![io] {
+    return fs.readFile("compiler/tests/e2e/fixtures/interp_array_render.sfn");
+}
+
+fn _child_env() -> string[] ![io] { return process.environ(); }
+
+fn _marker(name: string) -> string ![io] {
+    let mut dir = env.get("SAILFIN_TEST_SCRATCH");
+    if dir.length == 0 { dir = "/tmp"; }
+    fs.createDirectory(dir, true);
+    let path = dir + "/sfn-array-interp-" + name + ".out";
+    if fs.exists(path) { fs.deleteFile(path); }
+    return path;
+}
+
+fn _build_and_run(out_marker: string) -> int ![io] {
+    return with_tmp_dir(fn (dir: string) -> int {
+        let srcpath = dir + "/probe.sfn";
+        fs.writeFile(srcpath, _fixture_src());
+        let binpath = dir + "/probe";
+        let build_exit = process.run_capture([_sfn_bin(), "build", "-o", binpath, srcpath], _child_env());
+        let _bo = process.capture_take_stdout();
+        let _be = process.capture_take_stderr();
+        if build_exit != 0 { return -100; }
+        let run_exit = process.run_capture([binpath], []);
+        let out = process.capture_take_stdout();
+        let _re = process.capture_take_stderr();
+        fs.writeFile(out_marker, out);
+        return run_exit;
+    });
+}
+
+test "array interpolation: int, nested int, boolean, and string arrays render bracketed" ![io] {
+    let marker = _marker("render");
+    let exit = _build_and_run(marker);
+    assert expect_eq_int(exit, 0).ok;
+    let out = fs.readFile(marker);
+    if fs.exists(marker) { fs.deleteFile(marker); }
+
+    // The whole `print` used to vanish, prefix included — assert the prefix survives.
+    assert expect_eq_bool(find(out, "before\n", 0) >= 0, true).ok;
+    assert expect_eq_bool(find(out, "Result: [[19, 22], [43, 50]]\n", 0) >= 0, true).ok;
+    assert expect_eq_bool(find(out, "ints: [1, 2, 3]\n", 0) >= 0, true).ok;
+    assert expect_eq_bool(find(out, "bools: [true, false]\n", 0) >= 0, true).ok;
+    assert expect_eq_bool(find(out, "strs: [a, b]\n", 0) >= 0, true).ok;
+    assert expect_eq_bool(find(out, "after\n", 0) >= 0, true).ok;
+}

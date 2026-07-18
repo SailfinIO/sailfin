@@ -1320,6 +1320,17 @@ fn _rh_descriptors_08(descriptors_in: RuntimeHelperDescriptor[]) -> RuntimeHelpe
     descriptors = append_runtime_helper(descriptors, RuntimeHelperDescriptor {
         target: "number.to_string", symbol: "sfn_number_to_str", return_type: "i8*", parameter_types: ["double"], effects: [], native_signature: "sfn_number_to_str", c_abi_return_type: null
     });
+    // SFN-408: `array.to_string` renders an `int[]`/`bool[]`/`string[]` (or a
+    // nested array, `depth` levels deep) as its bracketed source-literal form.
+    // Delegates to the Sailfin-native `sfn_array_to_string(desc, kind, depth)`
+    // in `runtime/sfn/array.sfn` (`desc` the `SfnArray` descriptor pointer,
+    // `kind` the leaf element formatter, `depth` the array-of-array nesting).
+    // `float[]`/`number[]` is intentionally excluded — it hits the E0832 fatal
+    // floor until the pointer-read-f64 intrinsic is seeded (SFN-408 follow-up).
+    // Pure like `number.to_string` — no arena/ptr param, no effects.
+    descriptors = append_runtime_helper(descriptors, RuntimeHelperDescriptor {
+        target: "array.to_string", symbol: "sfn_array_to_string", return_type: "{i8*, i64}", parameter_types: ["i8*", "i32", "i32"], effects: [], native_signature: "sfn_array_to_string", c_abi_return_type: null
+    });
     return descriptors;
 }
 

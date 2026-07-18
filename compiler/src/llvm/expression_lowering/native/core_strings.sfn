@@ -5,6 +5,7 @@ import { format_temp_name } from "../../expressions_helpers";
 import { empty_string_constant_set, escape_string_for_llvm } from "../../strings";
 import { ExpressionResult, LLVMOperand, StringConstant } from "../../types";
 import { append_string, number_to_string } from "../../utils";
+import { array_pointer_element_type } from "../arrays";
 import { coerce_operand_to_type, harmonise_operands } from "./core_operands";
 import {
     is_union_llvm_type,
@@ -684,8 +685,77 @@ fn coerce_operand_to_string(operand: LLVMOperand, temp_index: int, lines: string
         };
     }
 
-    let diagnostics: string[] = ["llvm lowering: unable to convert `" + operand.llvm_type
-        + "` to string"];
+    // SFN-408: a primitive-element array operand (`{ T*, i64, i64 }*`)
+    // renders as its bracketed source-literal form (`int[]` -> `[19, 22]`,
+    // `int[][]` -> `[[19, 22], [43, 50]]`). Detect the array-pointer shape and
+    // walk its nesting `depth`, then map the leaf element llvm_type to a
+    // formatter `kind` (0=i64, 2=i1, 3=i8*). The dynamic-length per-element
+    // loop can't be emitted here (this helper is straight-line SSA with no
+    // block counter), so dispatch to the Sailfin-native `array.to_string`
+    // runtime helper. A leaf element type outside the supported set falls
+    // through to the fatal floor below.
+    //
+    // `double` (`float[]`/`number[]`) is intentionally omitted: reading a
+    // double from memory in the runtime helper needs a
+    // `sailfin_intrinsic_pointer_read_f64` intrinsic the pinned seed does
+    // not carry (the runtime is compiled by the seed), so `float[]` fails
+    // loudly at the E0832 floor until that intrinsic is seeded (SFN-408
+    // follow-up) — never the old silent empty output.
+    let element_type = array_pointer_element_type(operand.llvm_type);
+    if element_type.length > 0 {
+        let mut base = element_type;
+        let mut depth = 0;
+        loop {
+            let inner = array_pointer_element_type(base);
+            if inner.length == 0 { break; }
+            base = inner;
+            depth += 1;
+        }
+        let mut kind = -1;
+        if base == "i64" { kind = 0; }
+        if base == "i1" { kind = 2; }
+        if base == "i8*" { kind = 3; }
+        if kind >= 0 {
+            let cast_temp = format_temp_name(temp_index);
+            let out_lines = append_string(lines, "  " + cast_temp
+                + " = bitcast "
+                + operand.llvm_type
+                + " "
+                + operand.value
+                + " to i8*");
+            let desc_operand = LLVMOperand {
+                llvm_type: "i8*",
+                value: cast_temp
+            };
+            let kind_operand = LLVMOperand {
+                llvm_type: "i32",
+                value: number_to_string(kind)
+            };
+            let depth_operand = LLVMOperand {
+                llvm_type: "i32",
+                value: number_to_string(depth)
+            };
+            let ats_operands: LLVMOperand[] = [desc_operand, kind_operand, depth_operand];
+            let ats_result = emit_runtime_call("array.to_string", ats_operands, empty_runtime_call_overrides(), temp_index
+                + 1, out_lines);
+            return ExpressionResult {
+                lines: ats_result.lines,
+                temp_index: ats_result.temp_index,
+                operand: ats_result.operand,
+                diagnostics: ats_result.diagnostics,
+                string_constants: empty_constants
+            };
+        }
+    }
+
+    // SFN-408 safety floor: an interpolation operand with no stringify arm
+    // above must fail the build loudly. The `[fatal]` marker is what
+    // `has_fatal_lowering_diagnostic` (lowering_core.sfn) requires to block
+    // IR emission — without it, the null operand silently drops the whole
+    // enclosing `print`/`call` at exit 0 (the SFN-408 / SFN-343 footgun).
+    let diagnostics: string[] = ["llvm lowering [fatal]: E0832: cannot stringify interpolated operand of LLVM type `"
+        + operand.llvm_type
+        + "` (no Display arm)"];
     return ExpressionResult {
         lines: lines,
         temp_index: temp_index,
