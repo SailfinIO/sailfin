@@ -632,3 +632,34 @@ fn sfn_array_sfn_reduce(arr: * u8, initial: i64, reducer: fn (int, int) -> int) 
         return acc;
     }
 }
+
+// `sfn_range_materialize(start, end) -> int[]` — the eager-sugar backing
+// for range higher-order functions `(start..end).map/filter/reduce(...)`
+// (SFN-114, SFEP-0028 (D)). A `Range` has no method surface, so the
+// emitter materializes `[start, start+1, …, end-1]` into a fresh pointer-
+// width `SfnArray` (`{ data @0, len @8, cap @16 }`) and dispatches the
+// existing `int[]` array-HOF seam over it — no new element width. An
+// empty or descending range (`end <= start`) yields a zero-length array.
+// The container is freshly, uniquely owned (#1218 / E9). The exclusive
+// upper bound matches `for i in start..end` loop lowering.
+fn sfn_range_materialize(start: int, end: int) -> * u8 {
+    unsafe {
+        let mut len: i64 = (end as i64) - (start as i64);
+        if len < 0 { len = 0; }
+        let out: * u8 = _sfn_array_alloc_v2(len, 8);
+        if (out as i64) == 0 { return null; }
+        // out.len = len (the allocator already wrote cap = len).
+        atomic_store((out as i64 + 8) as * i64, len);
+        let buf: i64 = atomic_load(out as * i64);
+        if buf != 0 {
+            let base: i64 = start as i64;
+            let mut i: i64 = 0;
+            loop {
+                if i >= len { break; }
+                atomic_store((buf + i * 8) as * i64, base + i);
+                i = i + 1;
+            }
+        }
+        return out;
+    }
+}

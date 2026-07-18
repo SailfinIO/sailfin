@@ -1,0 +1,64 @@
+// End-to-end test for range higher-order functions — `(start..end).map(f)`
+// and `(start..end).reduce(init, f)` as eager sugar over the shipped array
+// HOFs (SFN-114, SFEP-0028 (D)).
+//
+// A `Range` has no method surface (it is otherwise consumed only by
+// `for`-loop lowering), so a HOF call on a range materializes the range
+// into an `int[]` SfnArray via `sfn_range_materialize(start, end)` and
+// dispatches the existing `runtime_array_{map,reduce}_fn` seam. Before
+// SFN-114 both fixtures fataled at lowering with "cannot resolve return
+// type for call to `0..N.map/reduce`".
+//
+// Drives the compiler-under-test as a subprocess with the runtime
+// `process.*` builtins and asserts on captured stdout — the canonical e2e
+// pattern (see `.claude/rules/no-bash-e2e.md`, `array_map_reduce_chain_test.sfn`).
+import { trim_right } from "sfn/strings";
+
+// The compiler-under-test: `$SAILFIN_BIN` if set, else the self-hosted
+// binary relative to the repo root the runner starts from. Mirrors
+// `sfn/test`'s `_resolve_sfn_bin` so CI can point the test at any compiler.
+fn _sfn_bin() -> string ![io] {
+    let configured = env.get("SAILFIN_BIN");
+    if configured.length > 0 { return configured; }
+    return "build/bin/sfn";
+}
+
+// `sfn run` compiles+links+executes the fixture, so the spawned compiler
+// needs a real environment (PATH for the linker, plus SAILFIN_TEST_SCRATCH
+// for per-invocation build-cache isolation under the parallel pool, #1333).
+fn _child_env() -> string[] ![io] { return process.environ(); }
+
+struct RunOut {
+    exit: int;
+    out: string;
+}
+
+// Compile+run a fixture and return its exit code plus the trailing-
+// newline-normalized stdout.
+fn _run_fixture(path: string) -> RunOut ![io] {
+    let exit = process.run_capture([_sfn_bin(), "run", path], _child_env());
+    let out = process.capture_take_stdout();
+    let _err = process.capture_take_stderr();
+    return RunOut { exit: exit, out: trim_right(out) };
+}
+
+test "range map: (0..3).map(i => i*i) yields [0, 1, 4]" ![io] {
+    let r = _run_fixture("compiler/tests/e2e/fixtures/range_map/main.sfn");
+    assert r.exit == 0;
+    // squares[0..2] printed one per line = 0, 1, 4.
+    assert r.out == "0\n1\n4";
+}
+
+test "range reduce: (0..5).reduce(0, +) sums to 10" ![io] {
+    let r = _run_fixture("compiler/tests/e2e/fixtures/range_reduce/main.sfn");
+    assert r.exit == 0;
+    // 0 + 1 + 2 + 3 + 4 = 10.
+    assert r.out == "10";
+}
+
+test "range empty: descending/empty ranges yield a zero-length array" ![io] {
+    let r = _run_fixture("compiler/tests/e2e/fixtures/range_empty/main.sfn");
+    assert r.exit == 0;
+    // (5..2).map(...).length == 0; (3..3).reduce(7, +) == 7 (init, no folds).
+    assert r.out == "0\n7";
+}

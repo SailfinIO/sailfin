@@ -41,7 +41,12 @@ import { array_pointer_element_type } from "../arrays";
 import { lower_closure_pair_marker, lower_expression } from "./core";
 import { collect_parameter_types } from "./core_helpers";
 import { load_local_operand } from "./core_operands";
-import { parse_member_access } from "./core_parse";
+import {
+    find_member_access_separator,
+    find_top_level_range_separator,
+    parse_member_access,
+    parse_range_iterable
+} from "./core_parse";
 import { find_local_binding, find_parameter_binding } from "./core_scopes";
 import { sanitize_symbol } from "./core_text";
 import {
@@ -50,6 +55,7 @@ import {
     map_parameter_type,
     map_return_type
 } from "./core_type_mapping";
+import { emit_runtime_call, empty_runtime_call_overrides } from "./runtime_call";
 
 // A method-call base whose declared type is a built-in scalar (`string`,
 // `int`, the sized-int family, ...) can never be an unregistered user
@@ -459,6 +465,119 @@ fn resolve_call_method_target(trimmed_target: string, arguments: string[], bindi
             is_closure_dispatch = true;
             closure_return_type = closure_info.return_type;
             closure_parameter_types = closure_info.parameter_types;
+        }
+    }
+
+    // SFN-114: range higher-order functions — `(start..end).map/filter/reduce(...)`.
+    // A `Range` receiver has no binding and no method surface (it is otherwise
+    // consumed only by `for`-loop lowering), so it never reaches the array-method
+    // fast path below (which requires a `is_simple_identifier` base). Materialize
+    // the range into an `int[]` SfnArray via `sfn_range_materialize(start, end)`
+    // and route the result through the existing array-HOF descriptors — the
+    // element is always pointer-width `i64`, so no new width machinery is needed.
+    // Eager sugar over array HOFs; the lazy iterator protocol is the post-1.0
+    // successor (SFEP-0028 (D)). Single-level only: the base must be a bare
+    // `start..end` range receiver — a chained `(a..b).map(f).filter(g)` is out
+    // of scope (its inner receiver lowers to a temp before this point).
+    if method_operand == null {
+        if injected_argument_count == 0 {
+            let _rng_sep = find_member_access_separator(result_target);
+            if _rng_sep > 0 {
+                let _rng_base = trim_text(substring(result_target, 0, _rng_sep));
+                let _rng_field = trim_text(substring(result_target, _rng_sep + 1, result_target.length));
+                let mut _rng_is_hof: boolean = false;
+                if _rng_field == "map" { _rng_is_hof = true; }
+                if _rng_field == "filter" { _rng_is_hof = true; }
+                if _rng_field == "reduce" { _rng_is_hof = true; }
+                if _rng_is_hof {
+                    if find_top_level_range_separator(_rng_base) >= 0 {
+                        let _rng_parse = parse_range_iterable(_rng_base);
+                        // A malformed range base (`..3`, `5..`) surfaces the
+                        // parser's own diagnostic; without this the caller only
+                        // sees the generic fall-through "callee signature is not
+                        // known" error.
+                        if !_rng_parse.success {
+                            let mut _rcpd: int = 0;
+                            loop {
+                                if _rcpd >= _rng_parse.diagnostics.length {
+                                    break;
+                                }
+                                result_diagnostics.push(_rng_parse.diagnostics[_rcpd]);
+                                _rcpd += 1;
+                            }
+                        }
+                        if _rng_parse.success {
+                            let _rng_start = lower_expression(_rng_parse.start, bindings, locals, result_temp, result_lines, functions, context, "i64");
+                            let mut _rci0: int = 0;
+                            loop {
+                                if _rci0 >= _rng_start.diagnostics.length {
+                                    break;
+                                }
+                                result_diagnostics.push(_rng_start.diagnostics[_rci0]);
+                                _rci0 += 1;
+                            }
+                            result_string_constants = merge_string_constants(result_string_constants, _rng_start.string_constants);
+                            result_lines = _rng_start.lines;
+                            result_temp = _rng_start.temp_index;
+                            let _rng_end = lower_expression(_rng_parse.end, bindings, locals, result_temp, result_lines, functions, context, "i64");
+                            let mut _rci1: int = 0;
+                            loop {
+                                if _rci1 >= _rng_end.diagnostics.length {
+                                    break;
+                                }
+                                result_diagnostics.push(_rng_end.diagnostics[_rci1]);
+                                _rci1 += 1;
+                            }
+                            result_string_constants = merge_string_constants(result_string_constants, _rng_end.string_constants);
+                            result_lines = _rng_end.lines;
+                            result_temp = _rng_end.temp_index;
+                            if _rng_start.operand != null {
+                                if _rng_end.operand != null {
+                                    let _rng_ov = empty_runtime_call_overrides();
+                                    let _rng_ops: LLVMOperand[] = [_rng_start.operand, _rng_end.operand];
+                                    let _rng_call = emit_runtime_call("runtime_range_materialize_fn", _rng_ops, _rng_ov, result_temp, result_lines);
+                                    let mut _rci2: int = 0;
+                                    loop {
+                                        if _rci2 >= _rng_call.diagnostics.length {
+                                            break;
+                                        }
+                                        result_diagnostics.push(_rng_call.diagnostics[_rci2]);
+                                        _rci2 += 1;
+                                    }
+                                    result_string_constants = merge_string_constants(result_string_constants, _rng_call.string_constants);
+                                    result_lines = _rng_call.lines;
+                                    result_temp = _rng_call.temp_index;
+                                    if _rng_call.operand != null {
+                                        method_operand = _rng_call.operand;
+                                        injected_argument_count = 1;
+                                        if _rng_field == "map" {
+                                            let _rng_desc = find_runtime_helper("runtime_array_map_fn");
+                                            if _rng_desc != null {
+                                                result_target = "runtime_array_map_fn";
+                                                helper_descriptor = _rng_desc;
+                                            }
+                                        }
+                                        if _rng_field == "filter" {
+                                            let _rng_desc = find_runtime_helper("runtime_array_filter_fn");
+                                            if _rng_desc != null {
+                                                result_target = "runtime_array_filter_fn";
+                                                helper_descriptor = _rng_desc;
+                                            }
+                                        }
+                                        if _rng_field == "reduce" {
+                                            let _rng_desc = find_runtime_helper("runtime_array_reduce_fn");
+                                            if _rng_desc != null {
+                                                result_target = "runtime_array_reduce_fn";
+                                                helper_descriptor = _rng_desc;
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
         }
     }
 

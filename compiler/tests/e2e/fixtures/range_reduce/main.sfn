@@ -1,0 +1,11 @@
+// compiler/tests/e2e/fixtures/range_reduce/main.sfn
+//
+// SFN-114 acceptance — `(0..n).reduce(init, f)` as eager sugar over the
+// array HOF. The range materializes to `[0, 1, 2, 3, 4]` and dispatches
+// `runtime_array_reduce_fn` (SFEP-0028 (D)). Sum = 0+1+2+3+4 = 10. Before
+// SFN-114 this fataled at lowering with "cannot resolve return type for
+// call to `0..5.reduce`".
+fn main() ![io] {
+    let total = (0 .. 5).reduce(0, fn (acc, k) -> int { return acc + k; });
+    print(total);
+}
