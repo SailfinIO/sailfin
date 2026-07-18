@@ -13,6 +13,26 @@ fn parse_assignment_expression(expression: string) -> AssignmentParseResult {
     let trimmed = trim_text(expression);
     let mut paren_depth: int = 0;
     let mut bracket_depth: int = 0;
+    // SFN-409: also track `<`/`>` angle depth, but ONLY at the top level
+    // (outside `()`/`[]`). A bare spawn/closure expression statement arrives
+    // here as an internal native-IR marker (`spawn:int <closure_pair
+    // @sfn_lambda_0 env_alloc owned_env lambda_id=0 captures=g_ch:>`) whose
+    // payload contains literal `=` signs (`lambda_id=0`, `captures=...`).
+    // Without angle tracking the first such `=` is mis-read as a top-level
+    // assignment, the statement is routed to the assignment branch, fails to
+    // find a matching local, and is dropped with a non-fatal diagnostic — so
+    // the spawn emits no IR at all (the nursery then joins zero tasks and a
+    // following `receive()` blocks forever). The marker's `<`/`>` are always
+    // top-level, so gating the angle counter on `paren_depth == 0 &&
+    // bracket_depth == 0` still balances it. The gate is load-bearing:
+    // `<`/`<<` are unbalanced operators, so a subscript lvalue such as
+    // `buf[i << 2] = v` (valid index-assignment) would otherwise leave the
+    // counter stuck above 0 past the closing `]` and swallow the genuine
+    // top-level `=`. A real assignment's *top-level* lvalue text never
+    // contains a bare `<` before its `=` (any `<` there lives inside the
+    // `[...]` subscript, which the gate excludes), so this cannot mask a
+    // genuine assignment.
+    let mut angle_depth: int = 0;
     let mut index: int = 0;
     loop {
         if index >= trimmed.length { break; }
@@ -37,9 +57,26 @@ fn parse_assignment_expression(expression: string) -> AssignmentParseResult {
             index += 1;
             continue;
         }
+        if ch == "<" {
+            if paren_depth == 0 {
+                if bracket_depth == 0 { angle_depth += 1; }
+            }
+            index += 1;
+            continue;
+        }
+        if ch == ">" {
+            if paren_depth == 0 {
+                if bracket_depth == 0 {
+                    if angle_depth > 0 { angle_depth -= 1; }
+                }
+            }
+            index += 1;
+            continue;
+        }
         let mut _if141: boolean = false;
         if paren_depth > 0 { _if141 = true; }
         if bracket_depth > 0 { _if141 = true; }
+        if angle_depth > 0 { _if141 = true; }
         if _if141 {
             index += 1;
             continue;

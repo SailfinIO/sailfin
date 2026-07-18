@@ -353,6 +353,20 @@ fn lower_expression_statement(function_name: string, instruction: NativeInstruct
     let consumption = ownership_analysis.consumption;
 
     let _lowered = lower_expression(expression, current_bindings, current_locals, current_temp, current_lines, functions, context, "");
+    // SFN-409: read the lowered IR and SSA cursor back. `lower_expression`
+    // returns its emitted lines in `.lines`, which is NOT always the same
+    // array object it was handed — a sub-lowering that reassigns its working
+    // array (e.g. `lower_spawn_typed_expression`, which rebinds to the
+    // operand's returned `.lines`) detaches from the caller's array, so a
+    // bare `spawn f();` expression statement had its entire body (env_alloc,
+    // closure pair, `sfn_spawn_*` call) dropped — the nursery then joined
+    // zero tasks and a following `receive()` blocked forever. A bare call
+    // that happens to mutate in place (`print.info(...)`) masked the gap. The
+    // assignment and return paths already read `.lines`/`.temp_index` back
+    // (see the simple-assignment branch and `lower_return_instruction`); do
+    // the same here.
+    current_lines = _lowered.lines;
+    current_temp = _lowered.temp_index;
     // Issue #1838: propagate the expression's string constants (e.g. the
     // `@.runtime.field.*` field-name globals a dynamic member access emits
     // for an interpolated `{{admin.name}}`). A bare call statement like
