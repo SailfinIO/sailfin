@@ -12,73 +12,24 @@
 // NOTE: assert on captured output with `sfn/strings` predicates — the
 // `sfn/test` `expect_*` matchers are `![pure]` and cannot be called from
 // an `![io]` test (#842).
+//
+// This test spawns a nested `sfn test`, which is itself a full runner. To
+// behave as a clean TOP-LEVEL runner, that nested process must inherit the
+// ambient environment (PATH/HOME/TMPDIR + toolchain vars its clang/linker
+// need) but NONE of the per-child test-orchestration keys the *parent*
+// runner set on us — leaking any of them (`SAILFIN_TEST_SCRATCH`,
+// `SAILFIN_TEST_JSON_SUBFRAME`, `SAILFIN_TEST_RUNTIME_OBJDIR` /
+// `_STAMP`, `SAILFIN_UPDATE_SNAPSHOTS`) binds the nested run to the parent's
+// private state and breaks it pool-only. `clean_runner_env` /
+// `nested_runner_scratch` (`sfn/test`) build that clean env; the shared key
+// set and its rationale live in `fixtures.sfn` (SFN-401).
 import { find } from "sfn/strings";
+import { clean_runner_env, nested_runner_scratch } from "sfn/test";
 
 fn _sfn_bin() -> string ![io] {
     let configured = env.get("SAILFIN_BIN");
     if configured.length > 0 { return configured; }
     return "build/bin/sfn";
-}
-
-// This test spawns a nested `sfn test`, which is itself a full runner. To
-// behave as a clean TOP-LEVEL runner, that nested process must inherit the
-// ambient environment (PATH/HOME/TMPDIR + macOS SDK/toolchain vars, needed
-// by its clang/linker) but NONE of the per-child test-orchestration keys
-// the *parent* runner set on us — they bind the nested runner to the
-// parent's private state. `_pool_child_env` (`cli/commands/test.sfn`) owns
-// exactly this key set; leaking any of them into a nested run breaks it:
-//   - `SAILFIN_TEST_SCRATCH` — the nested runner ADOPTS it verbatim and
-//     routes ITS `results.log`/`fail.bin` there, clobbering the ones our
-//     own recoverable harness writes for THIS file's tests (mis-classifies
-//     later tests). We replace it with an isolated per-file subdir.
-//   - `SAILFIN_TEST_JSON_SUBFRAME` — set on us under the parallel pool;
-//     inherited, it makes the nested runner emit as a *subframe*, writing
-//     its `summary` event to `_subframe_summary.json` instead of stdout,
-//     so our `find(out, "\"passed\":2,...")` assertions never see it. This
-//     was the pool-only 3/3 failure.
-//   - `SAILFIN_TEST_RUNTIME_OBJDIR` / `SAILFIN_TEST_RUNTIME_STAMP` — bind
-//     the nested build to the parent's shared runtime object cache + its
-//     invocation stamp nonce (#1996: a nested runner's nonce must never
-//     validate the parent's stamp). Dropped so the nested build stays
-//     self-contained under its own scratch.
-//   - `SAILFIN_UPDATE_SNAPSHOTS` — orthogonal to this test; dropped so a
-//     parent `--update-snapshots` run can't leak snapshot-writes into it.
-// Only `SAILFIN_TEST_SCRATCH` is re-added, pointed at a subdir of our own
-// scratch: isolated from our harness-IPC files, unique per test file (our
-// scratch is per-file in the pool), and warm across this file's sequential
-// nested runs (only the first pays the cold runtime compile).
-fn _nested_scratch() -> string ![io] {
-    let outer = env.get("SAILFIN_TEST_SCRATCH");
-    if outer.length > 0 { return outer + "/nested-runner"; }
-    // Standalone run (no test runner set our scratch): mint a private dir.
-    return fs.mkdtemp("sfn-recoverable-scratch-");
-}
-
-// True when `entry` ("KEY=VALUE") is one of the per-child test-runner keys
-// the parent manages — the set `_pool_child_env` strips + re-adds. Matched
-// by exact `KEY=` prefix so a value containing the substring is unaffected.
-fn _is_runner_managed(entry: string) -> boolean {
-    if find(entry, "SAILFIN_TEST_SCRATCH=", 0) == 0 { return true; }
-    if find(entry, "SAILFIN_TEST_RUNTIME_OBJDIR=", 0) == 0 { return true; }
-    if find(entry, "SAILFIN_TEST_RUNTIME_STAMP=", 0) == 0 { return true; }
-    if find(entry, "SAILFIN_TEST_JSON_SUBFRAME=", 0) == 0 { return true; }
-    if find(entry, "SAILFIN_UPDATE_SNAPSHOTS=", 0) == 0 { return true; }
-    return false;
-}
-
-// Build the nested child env: the ambient environment minus every
-// per-child runner key, plus our isolated nested `SAILFIN_TEST_SCRATCH`.
-fn _child_env(nested_scratch: string) -> string[] ![io] {
-    let all = process.environ();
-    let mut out: string[] = [];
-    let mut i: int = 0;
-    loop {
-        if i >= all.length { break; }
-        if !_is_runner_managed(all[i]) { out.push(all[i]); }
-        i += 1;
-    }
-    out.push("SAILFIN_TEST_SCRATCH=" + nested_scratch);
-    return out;
 }
 
 struct TestRun {
@@ -92,7 +43,7 @@ fn _run_json(src: string) -> TestRun ![io] {
     let dir = fs.mkdtemp("sfn-recoverable-");
     fs.writeFile(dir + "/recoverable_test.sfn", src);
     let argv: string[] = [_sfn_bin(), "test", dir, "--json", "--no-test-cache"];
-    let exit = process.run_capture(argv, _child_env(_nested_scratch()));
+    let exit = process.run_capture(argv, clean_runner_env(nested_runner_scratch("nested-runner")));
     let out = process.capture_take_stdout();
     let err = process.capture_take_stderr();
     return TestRun { exit: exit, out: out + err };

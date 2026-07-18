@@ -28,7 +28,13 @@
 import { ProcessOutput, env_empty, env_set } from "sfn/os";
 import { find } from "sfn/strings";
 
-import { with_cwd, with_env, with_tmp_dir } from "../src/mod";
+import {
+    clean_runner_env,
+    nested_runner_scratch,
+    with_cwd,
+    with_env,
+    with_tmp_dir
+} from "../src/mod";
 
 // Scratch root for marker files. Prefer the runner's
 // `SAILFIN_TEST_SCRATCH`; fall back to `/tmp` for a direct
@@ -262,4 +268,70 @@ test "with_cwd: body return value threads back out" ![io] {
         return out.exit;
     });
     assert r == 5;
+}
+
+// ---------------------------------------------------------------------------
+// clean_runner_env / nested_runner_scratch — clean env for a nested runner (SFN-401)
+// ---------------------------------------------------------------------------
+// `clean_runner_env(nested_scratch)` returns `process.environ()` with the
+// parallel pool's per-child orchestration keys stripped and
+// `SAILFIN_TEST_SCRATCH` re-pointed at `nested_scratch`. The stripped key set
+// (`fixtures.sfn::_pool_managed_keys`) MUST mirror `_pool_child_env`
+// (`compiler/src/cli/commands/test.sfn`) — a capsule cannot import that
+// compiler-internal module, so the list is a deliberate paired copy. These
+// tests guard the "add a pool key, forget to mirror it" regression by
+// asserting the four non-scratch pool keys never survive and scratch is
+// re-pointed exactly once, whatever the ambient environment.
+// Count entries in `env_flat` whose key is exactly `key` (a `KEY=` prefix).
+fn _count_key(env_flat: string[], key: string) -> int {
+    let mut n: int = 0;
+    let mut i: int = 0;
+    loop {
+        if i >= env_flat.length { break; }
+        if find(env_flat[i], key + "=", 0) == 0 { n += 1; }
+        i += 1;
+    }
+    return n;
+}
+
+// None of the non-scratch pool keys survive the strip. The assertion holds
+// whether or not the ambient env carries them (under the parallel pool it
+// does; standalone it may not) — the invariant is that the result never
+// contains them.
+test "clean_runner_env: strips the pool orchestration keys" ![io] {
+    let e = clean_runner_env("/tmp/sfn-401-scratch");
+    assert _count_key(e, "SAILFIN_TEST_RUNTIME_OBJDIR") == 0;
+    assert _count_key(e, "SAILFIN_TEST_RUNTIME_STAMP") == 0;
+    assert _count_key(e, "SAILFIN_UPDATE_SNAPSHOTS") == 0;
+    assert _count_key(e, "SAILFIN_TEST_JSON_SUBFRAME") == 0;
+}
+
+// The ambient `SAILFIN_TEST_SCRATCH` (if any) is stripped and replaced, never
+// duplicated, and the result carries exactly the isolated path passed in.
+test "clean_runner_env: re-points SAILFIN_TEST_SCRATCH exactly once" ![io] {
+    let e = clean_runner_env("/tmp/sfn-401-scratch");
+    assert _count_key(e, "SAILFIN_TEST_SCRATCH") == 1;
+    let mut found = false;
+    let mut i: int = 0;
+    loop {
+        if i >= e.length { break; }
+        if e[i] == "SAILFIN_TEST_SCRATCH=/tmp/sfn-401-scratch" { found = true; }
+        i += 1;
+    }
+    assert found;
+}
+
+// An empty `nested_scratch` strips the scratch key without re-adding one.
+test "clean_runner_env: empty scratch strips without re-adding" ![io] {
+    let e = clean_runner_env("");
+    assert _count_key(e, "SAILFIN_TEST_SCRATCH") == 0;
+}
+
+// The minted scratch is non-empty and, under a runner that set an outer
+// scratch, nests below it (isolated per label); standalone it is a fresh dir.
+test "nested_runner_scratch: derives an isolated path under the outer scratch" ![io] {
+    let outer = env.get("SAILFIN_TEST_SCRATCH");
+    let s = nested_runner_scratch("unit-label");
+    assert s.length > 0;
+    if outer.length > 0 { assert s == outer + "/unit-label"; }
 }

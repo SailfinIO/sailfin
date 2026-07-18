@@ -25,6 +25,7 @@
 // The `sfn/test` `expect_*` matchers are `![pure]` and cannot be called
 // from an `![io]` test, so output is asserted with `sfn/strings::find`.
 import { find } from "sfn/strings";
+import { clean_runner_env, nested_runner_scratch } from "sfn/test";
 
 // The compiler-under-test: `$SAILFIN_BIN` if set, else the self-hosted
 // binary relative to the repo root the runner starts from. Mirrors
@@ -44,12 +45,11 @@ fn _sfn_bin() -> string ![io] {
 // under which the compiler routes the `program.ll` build-cache dir
 // (#1333) so a parallel run does not collide on `build/sailfin`.
 fn _child_env() -> string[] ![io] {
-    // Inherit the full parent environment: PATH/HOME/TMPDIR plus the macOS
-    // SDK/toolchain vars the nested clang/ld need (a minimal set links on
-    // Linux but fails on macOS with `ld: library 'm' not found`, #1410),
-    // and SAILFIN_TEST_SCRATCH for per-invocation build-cache isolation
-    // (#1333). Mirrors serve_loopback_test.sfn / process_environ_test.sfn.
-    return process.environ();
+    // A clean top-level child environment for the nested `sfn test`
+    // (SFN-401): the ambient PATH/HOME/TMPDIR/macOS toolchain vars minus
+    // the parallel pool's per-child keys, with SAILFIN_TEST_SCRATCH
+    // re-pointed at an isolated nested scratch.
+    return clean_runner_env(nested_runner_scratch("async-coerce"));
 }
 
 // Fixtures live next to this test; the path is relative to the runner's

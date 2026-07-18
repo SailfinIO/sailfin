@@ -18,6 +18,7 @@
 // for `clang`/the linker and `SAILFIN_TEST_SCRATCH` for parallel-runner
 // build-cache isolation — see `_child_env` and `.claude/rules/no-bash-e2e.md`.
 import { find } from "sfn/strings";
+import { clean_runner_env, nested_runner_scratch } from "sfn/test";
 
 fn _sfn_bin() -> string ![io] {
     let configured = env.get("SAILFIN_BIN");
@@ -40,12 +41,11 @@ fn _cast_fixture() -> string {
 // `SAILFIN_TEST_SCRATCH` so the `program.ll` build cache routes per-
 // invocation (#1333) rather than colliding on the fixed `build/sailfin`.
 fn _child_env() -> string[] ![io] {
-    // Inherit the full parent environment: PATH/HOME/TMPDIR plus the macOS
-    // SDK/toolchain vars the nested clang/ld need (a minimal set links on
-    // Linux but fails on macOS with `ld: library 'm' not found`, #1410),
-    // and SAILFIN_TEST_SCRATCH for per-invocation build-cache isolation
-    // (#1333). Mirrors serve_loopback_test.sfn / process_environ_test.sfn.
-    return process.environ();
+    // A clean top-level child environment for the nested `sfn test`
+    // (SFN-401): the ambient PATH/HOME/TMPDIR/macOS toolchain vars minus
+    // the parallel pool's per-child keys, with SAILFIN_TEST_SCRATCH
+    // re-pointed at an isolated nested scratch.
+    return clean_runner_env(nested_runner_scratch("bool-numeric"));
 }
 
 test "bool->int binding refuses with the #537 fix-it" ![io] {

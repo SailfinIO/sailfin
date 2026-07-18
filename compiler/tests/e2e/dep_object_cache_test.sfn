@@ -13,7 +13,8 @@
 // Follows the `guillermo_test.sfn` shape: `_sfn_bin()` honours `SAILFIN_BIN`,
 // `_child_env()` threads PATH/HOME/TMPDIR/SAILFIN_TEST_SCRATCH and the
 // parent cache knobs per the build-and-run isolation rule
-// (`.claude/rules/no-bash-e2e.md`).
+// (`.claude/rules/no-bash-e2e.md`). env-safe (SFN-401): hand-built minimal
+// env, no raw process.environ() pool-key leak.
 import { find, split, contains } from "sfn/strings";
 
 fn _sfn_bin() -> string ![io] {

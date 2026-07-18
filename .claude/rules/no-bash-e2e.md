@@ -131,6 +131,49 @@ only lever for the latter two, which have no `--work-dir`). For a caller
 *outside* the test runner (no `SAILFIN_TEST_SCRATCH`), `sfn build
 --work-dir <dir>` is the equivalent explicit per-invocation isolation.
 
+### A nested `sfn test`/`build`/`run` must not thread raw `process.environ()`
+
+An e2e that spawns a **nested full runner** — `sfn test`, `sfn build`, or
+`sfn run` as a subprocess of a test that is itself running under `sailfin
+test` — must not build that child's env from a raw `process.environ()`
+inheritance. `process.environ()` carries the *parent* pool's per-child
+orchestration keys (`SAILFIN_TEST_SCRATCH`, `SAILFIN_TEST_JSON_SUBFRAME`,
+`SAILFIN_TEST_RUNTIME_OBJDIR` / `_STAMP`, `SAILFIN_UPDATE_SNAPSHOTS`), and
+leaking any of them into the nested runner binds it to the parent's private
+state: the nested run adopts the parent's `SAILFIN_TEST_SCRATCH` and
+clobbers its harness-IPC files, emits as a JSON subframe under
+`SAILFIN_TEST_JSON_SUBFRAME` (routing its `summary` off stdout), or binds
+the nested build to the parent's shared runtime object cache/stamp nonce.
+These symptoms are **pool-only** — they evade a local serial run, so a raw
+`process.environ()` leak in this position can sit undetected until CI runs
+the file under `--jobs N>1` (SFN-401, PR #2411).
+
+Use the shared `sfn/test` helpers instead of hand-rolling this:
+
+```sfn
+import { clean_runner_env, nested_runner_scratch } from "sfn/test";
+// ...
+let exit = process.run_capture(argv, clean_runner_env(nested_runner_scratch("<label>")));
+```
+
+`nested_runner_scratch(label)` mints an isolated per-invocation scratch dir
+(a subdir of the outer `SAILFIN_TEST_SCRATCH` when present, else a fresh
+temp dir), and `clean_runner_env(nested_scratch)` returns
+`process.environ()` with the pool-managed keys stripped and
+`SAILFIN_TEST_SCRATCH` re-pointed at `nested_scratch`. The stripped key set
+in `fixtures.sfn::_pool_managed_keys()` **must mirror** `_pool_child_env` in
+`compiler/src/cli/commands/test.sfn` — a capsule cannot import
+compiler-internal modules, so it is a deliberate paired copy; if a new pool
+key is ever added there, add it to `_pool_managed_keys()` too. A caller that
+needs one otherwise-managed key back (e.g. a nested build binding its own
+`SAILFIN_TEST_RUNTIME_OBJDIR`, or a test threading a one-off trace flag)
+pushes it onto the returned array after the call.
+
+This is orthogonal to the hand-built minimal envs above (`PATH`/`HOME`/
+`TMPDIR` + a few explicit keys) — those never call raw `process.environ()`
+in the first place, so they carry no pool-key leak and don't need
+`clean_runner_env`.
+
 ## Driving shells and external tools from a `*_test.sfn`
 
 There is no separate "bash is allowed" carve-out — an `![io]` test can do

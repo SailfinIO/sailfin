@@ -39,6 +39,7 @@ fn _sfn_bin() -> string ![io] {
 // The build spawns nested clang + linker, so the child needs PATH.
 // SAILFIN_TEST_SCRATCH routes the program.ll cache per invocation so
 // the parallel pool does not collide on build/sailfin (#1333).
+// env-safe (SFN-401): hand-built minimal child env — no raw process.environ() pool-key leak (the outer SAILFIN_TEST_SCRATCH is threaded through deliberately).
 fn _child_env() -> string[] ![io] {
     let mut e: string[] = [];
     let path = env.get("PATH");

@@ -15,7 +15,7 @@
 // Native e2e per `.claude/rules/no-bash-e2e.md`: drives subprocesses via
 // `process.run_capture` and asserts on captured output with `sfn/strings`.
 import { find } from "sfn/strings";
-import { with_tmp_dir } from "sfn/test";
+import { clean_runner_env, nested_runner_scratch, with_tmp_dir } from "sfn/test";
 
 // The compiler-under-test: $SAILFIN_BIN if set, else the self-hosted
 // binary relative to the repo root the runner starts from.
@@ -45,9 +45,10 @@ fn _crash_fixture_src() -> string {
 }
 
 // Per-child environment for the nested `sailfin test` / `agent_report.sh`
-// spawn. Threads the full parent environment so the nested build finds
-// `clang`/the linker (PATH) and isolates its build-cache under the
-// runner's per-file `SAILFIN_TEST_SCRATCH` (#1333), then:
+// spawn. Builds a clean top-level child environment via `clean_runner_env`
+// (ambient PATH/HOME/TMPDIR for clang/linker, minus the parallel pool's
+// per-child orchestration keys, with an isolated nested
+// `SAILFIN_TEST_SCRATCH` — SFN-401), then:
 //   - strips `SAILFIN_INNER` / `SAILFIN_AGENT_REPORT`: when THIS suite
 //     runs under `make test` the wrapper exports them, and an inherited
 //     `SAILFIN_INNER` makes the nested `agent_report.sh` run
@@ -56,7 +57,7 @@ fn _crash_fixture_src() -> string {
 //   - disables the signal-kill retry (`SAILFIN_TEST_RETRY=0`) so the
 //     crash is observed once, deterministically (no doubled wall-clock).
 fn _child_env() -> string[] ![io] {
-    let raw = process.environ();
+    let raw = clean_runner_env(nested_runner_scratch("crash-attribution"));
     let mut e: string[] = [];
     let mut i: int = 0;
     loop {

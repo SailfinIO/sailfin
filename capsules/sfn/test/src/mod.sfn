@@ -406,7 +406,19 @@ export { CompileExpect, assert_compiles, assert_does_not_compile } from "./compi
 // `with_cwd(args, env, cwd, body)` (issue #1168) is its cwd-scoping
 // companion: it runs the child in `cwd` via the same `os::run_capture`
 // (#1167 per-child cwd), with no process-global `chdir`. See `fixtures.sfn`.
-export { with_cwd, with_env, with_tmp_dir } from "./fixtures";
+// `clean_runner_env(nested_scratch)` / `nested_runner_scratch(label)`
+// (SFN-401) build a clean top-level child environment for an e2e test that
+// spawns a *nested* `sfn test`/`sfn build`/`sfn run`: they strip the per-child
+// pool-orchestration keys the parent runner set (which otherwise bind the
+// nested run to the parent's private state under `--jobs N>1`) and re-point
+// `SAILFIN_TEST_SCRATCH` at an isolated subdir. See `fixtures.sfn`.
+export {
+    clean_runner_env,
+    nested_runner_scratch,
+    with_cwd,
+    with_env,
+    with_tmp_dir
+} from "./fixtures";
 
 // ---------------------------------------------------------------------------
 // Child-process failure diagnostics (SFN-87 / #1726)
