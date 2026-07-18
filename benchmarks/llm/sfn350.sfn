@@ -1125,6 +1125,7 @@ fn _self_test_provider_schemas() ![io] {
     let repair_messages = [object_val(["role", "content"], [string_val("user"), string_val("Solve it.")]), object_val(["role", "content"], [string_val("assistant"), string_val("first attempt")]), object_val(["role", "content"], [string_val("user"), string_val("Repair: fix the failing case.")])];
     let claude_repair = _anthropic_body("claude-sonnet-5", "system", repair_messages);
     if _anthropic_thinking_budget_tokens() >= _anthropic_max_output_tokens()
+        || _anthropic_thinking_budget_tokens() < 1024
         || _anthropic_thinking_budget_tokens() != _anthropic_max_output_tokens() - _anthropic_answer_headroom_tokens()
         || !contains(claude, think_expect)
         || !contains(claude_repair, "\"max_tokens\":8192")
