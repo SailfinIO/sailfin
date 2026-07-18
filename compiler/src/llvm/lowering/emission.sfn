@@ -526,7 +526,7 @@ fn emit_llvm_function(function: NativeFunction, functions: NativeFunction[], eff
             + " fn_count="
             + number_to_string(functions.length));
     }
-    let _eb_result = lower_instruction_range(function, 0, fn_instr_count, llvm_return, preparation.bindings, module_globals, [], [], decorator_temp_index, 0, 0, 0, functions, [], context, format_root_scope_id(fn_name), 0, entry_label);
+    let _eb_result = lower_instruction_range(function, 0, fn_instr_count, llvm_return, preparation.bindings, module_globals, [], [], decorator_temp_index, 0, 0, 0, functions, [], [], context, format_root_scope_id(fn_name), 0, entry_label);
 
     let _eb_body_lines = _eb_result.lines;
     let _eb_allocas = _eb_result.allocas;

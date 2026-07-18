@@ -33,6 +33,7 @@ import {
     ParameterBinding,
     RoutineStructure,
     StringConstant,
+    TryFrameContext,
     TypeContext
 } from "../types";
 import { extend_string_array, number_to_string } from "../utils";
@@ -175,7 +176,7 @@ fn collect_routine_escape_diagnostics(instructions: NativeInstruction[], body_st
     return diagnostics;
 }
 
-fn lower_routine_instruction(function: NativeFunction, start_index: int, llvm_return: string, bindings: ParameterBinding[], locals: LocalBinding[], allocas: string[], lines: string[], temp_index: int, block_counter: int, next_local_id: int, next_region_id: int, functions: NativeFunction[], loop_stack: LoopContext[], end: int, context: TypeContext, scope_id: string, scope_depth: int, current_label: string) -> BlockLoweringResult ![io] {
+fn lower_routine_instruction(function: NativeFunction, start_index: int, llvm_return: string, bindings: ParameterBinding[], locals: LocalBinding[], allocas: string[], lines: string[], temp_index: int, block_counter: int, next_local_id: int, next_region_id: int, functions: NativeFunction[], loop_stack: LoopContext[], try_stack: TryFrameContext[], end: int, context: TypeContext, scope_id: string, scope_depth: int, current_label: string) -> BlockLoweringResult ![io] {
     let mut diagnostics: string[] = [];
     let mut current_lines: string[] = lines;
     let mut current_allocas: string[] = allocas;
@@ -213,7 +214,7 @@ fn lower_routine_instruction(function: NativeFunction, start_index: int, llvm_re
     // Lower the body inline. Spawns within register against the nursery
     // at runtime; no compiler handle-tracking is needed.
     let body_scope_id = make_child_scope_id(scope_id, nursery_temp);
-    let body_result = lower_instruction_range(function, structure.body_start, structure.body_end, llvm_return, current_bindings, locals, current_allocas, [], current_temp, current_block_counter, current_next_local, current_next_region, functions, loop_stack, context, body_scope_id, scope_depth
+    let body_result = lower_instruction_range(function, structure.body_start, structure.body_end, llvm_return, current_bindings, locals, current_allocas, [], current_temp, current_block_counter, current_next_local, current_next_region, functions, loop_stack, try_stack, context, body_scope_id, scope_depth
         + 1, current_label);
 
     let mut _bd: int = 0;

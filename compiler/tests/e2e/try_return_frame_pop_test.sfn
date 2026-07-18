@@ -1,0 +1,286 @@
+// End-to-end test for SFN-400: an early `return`/`break`/`continue` inside a
+// `try` body must pop the exception frame the `try` pushed before transferring
+// control, so it does not leak a dangling `SfnExceptionFrame` (whose `jmp_buf`
+// points at now-dead stack) on the per-thread chain.
+//
+// Before the fix, `lower_try_instruction` emitted `sfn_exception_pop_frame`
+// only on the try's normal fall-through exit (the `if !try_result.terminated`
+// guard). A `return` inside the body set `terminated == true`, so the pop was
+// skipped and the frame leaked — the exact hazard `sfn/test::with_tmp_dir`
+// (`return` inside its `try`) hit under the SFN-17 per-test frame harness
+// (segfault when a later `sfn_exception_pop_frame` walked the stale `prev`).
+//
+// Design note: `docs/proposals/design-notes/sfn-400-try-frame-early-exit-pop.md`.
+//
+// Two assertion styles (mirroring `try_catch_frames_test.sfn`):
+//   1. IR-shape pins — the emitted `.ll` pops the frame before the `ret` on the
+//      return-in-try path, and pops both frames on a nested inner return.
+//   2. runtime behaviour — a return-in-try helper (and a break crossing a try
+//      scope) called under an outer exception frame still catches a subsequent
+//      throw, with no segfault and no mis-target. This is the guarantee IR
+//      pinning alone cannot prove (it is the SFN-17 repro shape).
+//
+// `sfn/test`'s `expect_*` matchers are `![pure]` and cannot be called from an
+// `![io]` test (#842); IR assertions use `sfn/strings` predicates.
+import { find, contains } from "sfn/strings";
+
+fn _sfn_bin() -> string ![io] {
+    let configured = env.get("SAILFIN_BIN");
+    if configured.length > 0 { return configured; }
+    return "build/bin/sfn";
+}
+
+// `run_capture`'s empty array is the *empty* environment; thread the variables
+// the toolchain needs. `emit` does not link, but `build` spawns clang + the
+// linker (needs PATH), and SAILFIN_TEST_SCRATCH routes the build-cache per
+// invocation for parallel-pool isolation (#1333).
+fn _child_env() -> string[] ![io] {
+    let mut e: string[] = [];
+    let path = env.get("PATH");
+    if path.length > 0 { e.push("PATH=" + path); }
+    let home = env.get("HOME");
+    if home.length > 0 { e.push("HOME=" + home); }
+    let tmpdir = env.get("TMPDIR");
+    if tmpdir.length > 0 { e.push("TMPDIR=" + tmpdir); }
+    let scratch = env.get("SAILFIN_TEST_SCRATCH");
+    if scratch.length > 0 { e.push("SAILFIN_TEST_SCRATCH=" + scratch); }
+    return e;
+}
+
+fn _scratch_dir() -> string ![io] {
+    let mut dir = env.get("SAILFIN_TEST_SCRATCH");
+    if dir.length == 0 { dir = "/tmp"; }
+    dir = dir + "/sfn-try-return-frame-pop";
+    fs.createDirectory(dir, true);
+    return dir;
+}
+
+// Count non-overlapping occurrences of `needle` in `haystack`.
+fn _count(haystack: string, needle: string) -> int {
+    if needle.length == 0 { return 0; }
+    let mut n: int = 0;
+    let mut pos: int = 0;
+    loop {
+        let idx = find(haystack, needle, pos);
+        if idx < 0 { break; }
+        n += 1;
+        pos = idx + needle.length;
+    }
+    return n;
+}
+
+// Body text of the function whose `define` line contains `anchor`, from the
+// start of its `define` line through its closing `}`. Empty string when the
+// anchor is absent. Scopes IR assertions to the target user function.
+fn _fn_body(ll: string, anchor: string) -> string {
+    let idx = find(ll, anchor, 0);
+    if idx < 0 { return ""; }
+    let mut start = idx;
+    loop {
+        if start <= 0 { break; }
+        if substring(ll, start - 1, start) == "\n" { break; }
+        start -= 1;
+    }
+    let close = find(ll, "\n}", idx);
+    let mut end = close;
+    if end < 0 { end = ll.length; } else { end = close + 2; }
+    return substring(ll, start, end);
+}
+
+// Emit LLVM IR for `src_path` to `out_path` and read it back; "" on a non-zero
+// exit or missing output.
+fn _emit_ir(tag: string, src_path: string) -> string ![io] {
+    let dir = _scratch_dir();
+    let out_path = dir + "/" + tag + ".ll";
+    if fs.exists(out_path) { fs.deleteFile(out_path); }
+    let exit = process.run_capture([_sfn_bin(), "emit", "-o", out_path, "llvm", src_path], _child_env());
+    let _o = process.capture_take_stdout();
+    let _e = process.capture_take_stderr();
+    if exit != 0 { return ""; }
+    if !fs.exists(out_path) { return ""; }
+    return fs.readFile(out_path);
+}
+
+// Write `source` to `dir/name` and return the path.
+fn _write_fixture(name: string, source: string) -> string ![io] {
+    let dir = _scratch_dir();
+    let path = dir + "/" + name;
+    fs.writeFile(path, source);
+    return path;
+}
+
+// Build `src_path` to a binary and run it; returns "<exit>\n<stdout+stderr>".
+// A leaked/stale frame surfaces here as a crash (non-zero, often a signal
+// exit), which the runtime-behaviour tests assert against.
+fn _build_and_run(tag: string, src_path: string) -> string ![io] {
+    let dir = _scratch_dir();
+    let out_bin = dir + "/" + tag + ".out";
+    if fs.exists(out_bin) { fs.deleteFile(out_bin); }
+    let build_exit = process.run_capture([_sfn_bin(), "build", "-o", out_bin, src_path], _child_env());
+    let _bo = process.capture_take_stdout();
+    let _be = process.capture_take_stderr();
+    if build_exit != 0 { return "build-failed"; }
+    if !fs.exists(out_bin) { return "build-missing"; }
+    let run_exit = process.run_capture([out_bin], _child_env());
+    let run_out = process.capture_take_stdout();
+    let run_err = process.capture_take_stderr();
+    if run_exit == 0 { return "0\n" + run_out + run_err; }
+    return "nonzero\n" + run_out + run_err;
+}
+
+// ---- IR-shape pins ------------------------------------------------------
+test "sfn-400: return inside try pops the frame before the ret" ![io] {
+    // `f` is the only `@f`-prefixed symbol, so `_fn_body` scopes to it.
+    let src = _write_fixture("ret_in_try.sfn", "fn f() -> int ![io] {\n"
+        + "    try {\n"
+        + "        return 7;\n"
+        + "    } catch (e) {\n"
+        + "        return 0;\n"
+        + "    }\n"
+        + "}\n"
+        + "fn main() ![io] { let x = f(); print(\"x\"); }\n");
+    let ll = _emit_ir("ret_in_try", src);
+    assert ll.length > 0;
+    let body = _fn_body(ll, "@f__");
+    assert body.length > 0;
+    // Exactly one frame is pushed and one popped in `f`; the pop is on the
+    // return-in-try path (before the fix this block was a bare `ret i64 7`).
+    assert _count(body, "call void @sfn_exception_push_frame") == 1;
+    assert _count(body, "call void @sfn_exception_pop_frame") == 1;
+    let pop_idx = find(body, "call void @sfn_exception_pop_frame", 0);
+    let ret_idx = find(body, "ret i64 7", 0);
+    assert pop_idx >= 0;
+    assert ret_idx >= 0;
+    assert pop_idx < ret_idx;
+}
+
+test "sfn-400: nested return pops both frames innermost-first before the ret" ![io] {
+    let src = _write_fixture("nested_ret.sfn", "fn g() -> int ![io] {\n"
+        + "    try {\n"
+        + "        try {\n"
+        + "            return 1;\n"
+        + "        } catch (a) {\n"
+        + "            return 2;\n"
+        + "        }\n"
+        + "    } catch (b) {\n"
+        + "        return 3;\n"
+        + "    }\n"
+        + "}\n"
+        + "fn main() ![io] { let x = g(); print(\"x\"); }\n");
+    let ll = _emit_ir("nested_ret", src);
+    assert ll.length > 0;
+    let body = _fn_body(ll, "@g__");
+    assert body.length > 0;
+    // The innermost `return 1` sits under two open frames; both must be popped
+    // before its `ret`. Window the text immediately preceding `ret i64 1` and
+    // assert exactly two pops land there.
+    let ret_idx = find(body, "ret i64 1", 0);
+    assert ret_idx >= 0;
+    let mut win_start = ret_idx - 200;
+    if win_start < 0 { win_start = 0; }
+    let window = substring(body, win_start, ret_idx);
+    assert _count(window, "call void @sfn_exception_pop_frame") == 2;
+}
+
+// ---- runtime behaviour --------------------------------------------------
+test "sfn-400: return-in-try helper under an outer frame still catches a throw" ![io] {
+    // `h` returns from inside its own try (leaking a frame before the fix).
+    // `main` calls it, then opens a fresh try and throws: before the fix the
+    // stale frame corrupted the chain and the throw crashed / mis-targeted.
+    let src = _write_fixture("outer_frame.sfn", "fn h() -> string ![io] {\n"
+        + "    try {\n"
+        + "        return \"ok\";\n"
+        + "    } catch (e) {\n"
+        + "        return \"catch\";\n"
+        + "    }\n"
+        + "}\n"
+        + "fn main() ![io] {\n"
+        + "    let a = h();\n"
+        + "    print(a);\n"
+        + "    try {\n"
+        + "        throw \"boom\";\n"
+        + "    } catch (e) {\n"
+        + "        print(e);\n"
+        + "    }\n"
+        + "}\n");
+    let result = _build_and_run("outer_frame", src);
+    assert contains(result, "0\n");
+    assert contains(result, "ok");
+    assert contains(result, "boom");
+}
+
+test "sfn-400: loop-in-try — break does not over-pop the enclosing try frame" ![io] {
+    // The loop is INSIDE the try, so `break` must NOT pop the try frame — the
+    // subsequent `throw` still longjmps back to this try's own catch. An
+    // over-pop would drop the frame and crash at the throw.
+    let src = _write_fixture("loop_in_try.sfn", "fn main() ![io] {\n"
+        + "    try {\n"
+        + "        loop { break; }\n"
+        + "        print(\"after\");\n"
+        + "        throw \"x\";\n"
+        + "    } catch (e) {\n"
+        + "        print(e);\n"
+        + "    }\n"
+        + "}\n");
+    let result = _build_and_run("loop_in_try", src);
+    assert contains(result, "0\n");
+    assert contains(result, "after");
+    assert contains(result, "x");
+}
+
+test "sfn-400: try-in-loop — break crossing a try scope pops that frame" ![io] {
+    // The try is INSIDE the loop and `break` exits the loop from within the
+    // try body, crossing (and so must pop) the try's frame. If it leaked, the
+    // later top-level try's push + throw would walk the stale frame and crash.
+    let src = _write_fixture("try_in_loop.sfn", "fn main() ![io] {\n"
+        + "    let mut n = 0;\n"
+        + "    loop {\n"
+        + "        try {\n"
+        + "            n = n + 1;\n"
+        + "            break;\n"
+        + "        } catch (e) {\n"
+        + "            print(\"unexpected\");\n"
+        + "        }\n"
+        + "    }\n"
+        + "    print(\"looped\");\n"
+        + "    try {\n"
+        + "        throw \"boom\";\n"
+        + "    } catch (e) {\n"
+        + "        print(e);\n"
+        + "    }\n"
+        + "}\n");
+    let result = _build_and_run("try_in_loop", src);
+    assert contains(result, "0\n");
+    assert contains(result, "looped");
+    assert contains(result, "boom");
+}
+
+test "sfn-400: return from an array-for body inside a try pops the frame" ![io] {
+    // The `for x in <array>` body lowers through `lower_for_array`, a distinct
+    // path from range-for and bare `loop`. A `return` there must also pop the
+    // enclosing try frame — this guards the sibling path that the loop/range
+    // cases do not exercise.
+    let src = _write_fixture("array_for_ret.sfn", "fn af() -> string ![io] {\n"
+        + "    try {\n"
+        + "        for x in [1, 2, 3] {\n"
+        + "            return \"early\";\n"
+        + "        }\n"
+        + "    } catch (e) {\n"
+        + "        return \"catch\";\n"
+        + "    }\n"
+        + "    return \"end\";\n"
+        + "}\n"
+        + "fn main() ![io] {\n"
+        + "    let a = af();\n"
+        + "    print(a);\n"
+        + "    try {\n"
+        + "        throw \"boom\";\n"
+        + "    } catch (e) {\n"
+        + "        print(e);\n"
+        + "    }\n"
+        + "}\n");
+    let result = _build_and_run("array_for_ret", src);
+    assert contains(result, "0\n");
+    assert contains(result, "early");
+    assert contains(result, "boom");
+}

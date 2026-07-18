@@ -603,6 +603,21 @@ struct LoopStructure {
     diagnostics: string[];
 }
 
+// SFN-400: a per-try-frame entry on the `try_stack` threaded through
+// `lower_instruction_range`, mirroring `LoopContext`. Lets an early-exit
+// terminator (`return`/`break`/`continue`) emit the missing
+// `sfn_exception_pop_frame` call that only the normal fall-through exit
+// emitted before this fix (see the SFN-400 design note).
+struct TryFrameContext {
+    // The `i8*` SSA operand of the frame alloca (LLVMOperand{ "i8*", %tN }),
+    // captured at the push site; dominates the whole try body, so it is a
+    // valid pop argument at any early-exit terminator within the body.
+    frame_operand: LLVMOperand;
+    // The try's enclosing scope id (the analogue of LoopContext.outer_scope_id),
+    // used to bound which frames a break/continue must pop.
+    scope_id: string;
+}
+
 // Span of a `routine { }` body (issue #1181): the instruction range
 // between `.routine` and its matching `.endroutine`. Mirrors
 // `LoopStructure`; the routine lowering has no loop/phi machinery.

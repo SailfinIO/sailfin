@@ -30,6 +30,7 @@ import {
     ParameterBinding,
     ParameterPreparation,
     StringConstant,
+    TryFrameContext,
     TypeContext
 } from "../../types";
 // Import utilities
@@ -403,7 +404,7 @@ fn lower_expression_statement(function_name: string, instruction: NativeInstruct
     };
 }
 
-fn lower_return_instruction(function: NativeFunction, instruction: NativeInstruction, llvm_return: string, bindings: ParameterBinding[], locals: LocalBinding[], temp_index: int, lines: string[], next_region_id: int, scope_id: string, scope_depth: int, functions: NativeFunction[], context: TypeContext) -> ExpressionStatementResult ![io] {
+fn lower_return_instruction(function: NativeFunction, instruction: NativeInstruction, llvm_return: string, bindings: ParameterBinding[], locals: LocalBinding[], temp_index: int, lines: string[], next_region_id: int, scope_id: string, scope_depth: int, functions: NativeFunction[], context: TypeContext, try_stack: TryFrameContext[]) -> ExpressionStatementResult ![io] {
     let mut diagnostics: string[] = [];
     let mut current_lines: string[] = lines;
     let mut current_temp: int = temp_index;
@@ -457,6 +458,25 @@ fn lower_return_instruction(function: NativeFunction, instruction: NativeInstruc
             _ed_i += 1;
         }
         current_temp = _empty_result.next_temp;
+        // SFN-400: an early `return` skips the try's normal-exit pop
+        // (`instructions_try.sfn`'s `if !try_result.terminated` guard),
+        // leaking a dangling exception frame. Pop every frame still open
+        // at this return point, innermost-first, before the terminator.
+        let mut _tf_i0: int = try_stack.length - 1;
+        loop {
+            if _tf_i0 < 0 { break; }
+            let _tf0 = try_stack[_tf_i0];
+            let _pop0 = emit_runtime_call("sfn_exception_pop_frame", [_tf0.frame_operand], empty_runtime_call_overrides(), current_temp, current_lines);
+            let mut _pop0_di: int = 0;
+            loop {
+                if _pop0_di >= _pop0.diagnostics.length { break; }
+                diagnostics.push(_pop0.diagnostics[_pop0_di]);
+                _pop0_di += 1;
+            }
+            current_lines = _pop0.lines;
+            current_temp = _pop0.temp_index;
+            _tf_i0 -= 1;
+        }
         if safe_llvm_return == "void" { current_lines.push("  ret void"); } else {
             diagnostics.push("llvm lowering: missing return value in `"
                 + fn_name
@@ -759,6 +779,24 @@ fn lower_return_instruction(function: NativeFunction, instruction: NativeInstruc
         _ret_i += 1;
     }
     current_temp = _ret_result.next_temp;
+    // SFN-400: same early-exit frame pop as the empty/void return path
+    // above — this value-returning `ret` also skips the try's
+    // normal-exit pop when the return sits inside a try body.
+    let mut _tf_i1: int = try_stack.length - 1;
+    loop {
+        if _tf_i1 < 0 { break; }
+        let _tf1 = try_stack[_tf_i1];
+        let _pop1 = emit_runtime_call("sfn_exception_pop_frame", [_tf1.frame_operand], empty_runtime_call_overrides(), current_temp, current_lines);
+        let mut _pop1_di: int = 0;
+        loop {
+            if _pop1_di >= _pop1.diagnostics.length { break; }
+            diagnostics.push(_pop1.diagnostics[_pop1_di]);
+            _pop1_di += 1;
+        }
+        current_lines = _pop1.lines;
+        current_temp = _pop1.temp_index;
+        _tf_i1 -= 1;
+    }
     current_lines.push("  ret " + coerced_operand.llvm_type + " "
         + coerced_operand.value);
     if trace {
