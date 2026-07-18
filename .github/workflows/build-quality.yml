@@ -313,7 +313,16 @@ jobs:
   test-bin-baseline:
     name: Warm test-bin cache (linux-x86_64)
     runs-on: ubuntu-24.04
-    timeout-minutes: 60
+    # The warm step runs the whole `.sfn` suite with a COLD test-bin cache
+    # (this job is that cache's producer, so it restores module-IR but never
+    # test-bin), compiling every test binary from scratch. That cold pass is
+    # inherently ~53 min, leaving no headroom under a 60 min cap: a cold
+    # module-IR cache (any compiler/runtime edit rolls the key) or the
+    # retry-once flake path (#892) pushes total past 60 and the job is
+    # cancelled before `Save test-bin cache` runs — which then leaves the
+    # cache unsaved, so the next run pays the cold cost again. Provision for
+    # the real cost plus the retry path. See docs/proposals/0011-ci-test-speed.md.
+    timeout-minutes: 90
     steps:
       - name: Checkout repository
         uses: actions/checkout@v7
