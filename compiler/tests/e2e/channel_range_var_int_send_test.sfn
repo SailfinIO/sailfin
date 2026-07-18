@@ -1,0 +1,131 @@
+// E2E regression: a `for i in a..b` range induction variable sent through a
+// typed `Channel<int>` must round-trip its exact integer values (SFN-398).
+//
+// The range induction variable lowers to `double` (`instructions_for_range.sfn`
+// allocas it as `alloca double`). Before the fix, channel `send` stored the
+// operand's raw IEEE-754 `double` bit-pattern into the 8-byte ring slot, and
+// the typed `int` receive reinterpreted those bits as an i64 — reading back
+// garbage (~4.6e18) instead of the loop value. The fix threads the
+// `Channel<int>` element kind onto the binding as `channel:int`
+// (`instructions_let.sfn`) and coerces the `double` operand with `fptosi` to
+// the i64 ring width before the spill (`core_concurrency_lowering.sfn`).
+//
+// Native (no-bash) e2e per `.claude/rules/no-bash-e2e.md`: compile+run the
+// fixtures via `sailfin run` and assert on captured stdout. Output is built
+// with concatenation + `number_to_string` (NOT `{{ }}`) so the host compiler
+// does not interpolate the fixture before it is written (see the note in
+// channel_runtime_roundtrip_test.sfn).
+import { contains } from "sfn/strings";
+import { report_child_failure } from "sfn/test";
+
+fn _sfn_bin() -> string ![io] {
+    let configured = env.get("SAILFIN_BIN");
+    if configured.length > 0 { return configured; }
+    return "build/bin/sfn";
+}
+
+// `process.run_capture`'s empty array is the *empty* environment, not
+// "inherit". `sfn run` spawns a nested clang + linker, so the child needs
+// PATH (else the linker is not found). SAILFIN_TEST_SCRATCH routes the
+// program.ll build-cache per invocation so the parallel pool does not
+// collide on the fixed build/sailfin (#1333).
+fn _child_env() -> string[] ![io] {
+    let mut e: string[] = [];
+    let path = env.get("PATH");
+    if path.length > 0 { e.push("PATH=" + path); }
+    let home = env.get("HOME");
+    if home.length > 0 { e.push("HOME=" + home); }
+    let tmpdir = env.get("TMPDIR");
+    if tmpdir.length > 0 { e.push("TMPDIR=" + tmpdir); }
+    let scratch = env.get("SAILFIN_TEST_SCRATCH");
+    if scratch.length > 0 { e.push("SAILFIN_TEST_SCRATCH=" + scratch); }
+    return e;
+}
+
+// A unique per-invocation scratch root so the fixture source paths never
+// collide under the parallel pool.
+fn _scratch_dir() -> string ![io] {
+    let mut base = env.get("SAILFIN_TEST_SCRATCH");
+    if base.length == 0 { base = "/tmp"; }
+    fs.createDirectory(base, true);
+    return fs.mkdtemp(base + "/sfn-channel-rangevar-");
+}
+
+// Compile + run a source snippet via `sailfin run` and return its combined
+// stdout+stderr (or "RUN_FAILED" on a non-zero exit).
+fn _run_and_capture(label: string, source: string) -> string ![io] {
+    let dir = _scratch_dir();
+    let src = dir + "/" + label + ".sfn";
+    fs.writeFile(src, source);
+    let exit = process.run_capture([_sfn_bin(), "run", src], _child_env());
+    let out = process.capture_take_stdout();
+    let err = process.capture_take_stderr();
+    report_child_failure("channel-range-var-int-send " + label, exit, out, err);
+    if exit != 0 { return "RUN_FAILED:" + out + err; }
+    return out + err;
+}
+
+// ── (1) literal-bound range induction var through Channel<int> ───────
+// `1..5` (exclusive) yields i = 1,2,3,4. Each `ch.send(i)` sends the
+// `double`-lowered loop variable; the typed receive must read the exact
+// integer back, not the reinterpreted IEEE-754 bit pattern.
+test "channel range var: literal-bound `for i in 1..5` round-trips exact ints (SFN-398)" ![io] {
+    let out = _run_and_capture("range_literal", "fn main() ![io] {\n"
+        + "    let ch: Channel<int> = channel(8);\n"
+        + "    for i in 1..5 {\n"
+        + "        ch.send(i);\n"
+        + "    }\n"
+        + "    let a: int = ch.receive();\n"
+        + "    let b: int = ch.receive();\n"
+        + "    let c: int = ch.receive();\n"
+        + "    let d: int = ch.receive();\n"
+        + "    print.info(\"range vals: \" + number_to_string(a) + \",\"\n"
+        + "        + number_to_string(b) + \",\" + number_to_string(c) + \",\"\n"
+        + "        + number_to_string(d));\n"
+        + "    print.info(\"range sum: \" + number_to_string(a + b + c + d));\n"
+        + "    ch.close();\n"
+        + "}");
+    assert contains(out, "range vals: 1,2,3,4");
+    assert contains(out, "range sum: 10");
+}
+
+// ── (2) variable-bound range induction var through Channel<int> ──────
+// `lo..hi` with runtime bounds yields i = 10,11,12; proves the coercion
+// is on the induction variable itself, not a constant-folded literal.
+test "channel range var: variable-bound `for i in lo..hi` round-trips exact ints (SFN-398)" ![io] {
+    let out = _run_and_capture("range_variable", "fn main() ![io] {\n"
+        + "    let ch: Channel<int> = channel(8);\n"
+        + "    let lo: int = 10;\n"
+        + "    let hi: int = 13;\n"
+        + "    for i in lo..hi {\n"
+        + "        ch.send(i);\n"
+        + "    }\n"
+        + "    let a: int = ch.receive();\n"
+        + "    let b: int = ch.receive();\n"
+        + "    let c: int = ch.receive();\n"
+        + "    print.info(\"var range: \" + number_to_string(a) + \",\"\n"
+        + "        + number_to_string(b) + \",\" + number_to_string(c));\n"
+        + "    ch.close();\n"
+        + "}");
+    assert contains(out, "var range: 10,11,12");
+}
+
+// ── (3) range induction var through a sized-int Channel<i32> ─────────
+// Exercises the sized-int arm of `_channel_annotation_int_element`: the
+// `double` operand is `fptosi`-coerced to the i64 ring width on send, and
+// the `i32` receive loads the i64 slot and truncates. `5..8` yields 5,6,7.
+test "channel range var: `for i in 5..8` round-trips exact ints through Channel<i32> (SFN-398)" ![io] {
+    let out = _run_and_capture("range_i32", "fn main() ![io] {\n"
+        + "    let ch: Channel<i32> = channel(8);\n"
+        + "    for i in 5..8 {\n"
+        + "        ch.send(i);\n"
+        + "    }\n"
+        + "    let a: i32 = ch.receive();\n"
+        + "    let b: i32 = ch.receive();\n"
+        + "    let c: i32 = ch.receive();\n"
+        + "    print.info(\"i32 vals: \" + number_to_string(a) + \",\"\n"
+        + "        + number_to_string(b) + \",\" + number_to_string(c));\n"
+        + "    ch.close();\n"
+        + "}");
+    assert contains(out, "i32 vals: 5,6,7");
+}

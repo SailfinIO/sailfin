@@ -221,6 +221,35 @@ fn _channel_annotation_fn_element(annotation: string) -> string {
     return inner;
 }
 
+// Recover a primitive INTEGER element kind carried by a `Channel<int>` /
+// `Channel<i32>` (etc.) source annotation, or "" when the element is not a
+// recognized integer type. Threaded onto the binding as `channel:<kind>`
+// (SFN-398) so channel send lowering can coerce a `double`-lowered operand
+// (a `for i in a..b` range induction variable lowers to `double`) to the
+// declared integer width instead of storing raw IEEE-754 bits into the i64
+// ring slot. Only integer kinds opt in: non-integer scalars (float/bool/
+// string) round-trip correctly on the bare `channel` path, and struct
+// elements keep the by-pointer path via an explicit `channel:K(N)` initializer.
+fn _channel_annotation_int_element(annotation: string) -> string {
+    let trimmed = trim_text(annotation);
+    if !starts_with(trimmed, "Channel<") { return ""; }
+    if trimmed.length < 9 { return ""; }
+    if substring(trimmed, trimmed.length - 1, trimmed.length) != ">" {
+        return "";
+    }
+    let inner = trim_text(substring(trimmed, 8, trimmed.length - 1));
+    if inner == "int" { return inner; }
+    if inner == "i8" { return inner; }
+    if inner == "i16" { return inner; }
+    if inner == "i32" { return inner; }
+    if inner == "i64" { return inner; }
+    if inner == "u8" { return inner; }
+    if inner == "u16" { return inner; }
+    if inner == "u32" { return inner; }
+    if inner == "u64" { return inner; }
+    return "";
+}
+
 // Recover the `fn(...)` element text carried by a `channel:fn() -> void`
 // binding annotation (#1944), or "" when the binding is a bare `channel` or a
 // non-fn `channel:<kind>`. The mirror of `_channel_annotation_fn_element` on
@@ -830,7 +859,19 @@ fn lower_let_instruction(function: NativeFunction, instruction: NativeInstructio
             let fn_elem = _channel_annotation_fn_element(instruction.type_annotation);
             if fn_elem.length > 0 {
                 local_type_annotation = "channel:" + fn_elem;
-            } else { local_type_annotation = "channel"; }
+            } else {
+                // SFN-398: preserve a primitive INTEGER element kind
+                // (`Channel<int>` → `channel:int`) so channel send lowering can
+                // coerce a `double`-lowered operand back to the declared
+                // integer width. A `for i in a..b` range induction variable
+                // lowers to `double`; without the kind, `send` stores raw
+                // IEEE-754 bits into the i64 ring slot and the typed receive
+                // reinterprets them as garbage.
+                let int_elem = _channel_annotation_int_element(instruction.type_annotation);
+                if int_elem.length > 0 {
+                    local_type_annotation = "channel:" + int_elem;
+                } else { local_type_annotation = "channel"; }
+            }
         } else {
             if starts_with(trimmed_init, "channel:") {
                 // Preserve the element kind on the binding (#1466) so the

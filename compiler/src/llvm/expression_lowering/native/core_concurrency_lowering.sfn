@@ -43,6 +43,24 @@ import {
 } from "./core_type_mapping";
 import { emit_runtime_call, empty_runtime_call_overrides } from "./runtime_call";
 
+// SFN-398: whether a `channel:<kind>` element kind names an integer type.
+// Drives the `double` → i64 `fptosi` coercion on send (the range induction
+// variable lowers to `double`). Non-integer kinds (float/struct/fn) are not
+// coerced: float channels round-trip `double` directly and struct/fn kinds
+// take their own paths.
+fn _channel_kind_is_integer(kind: string) -> boolean {
+    if kind == "int" { return true; }
+    if kind == "i8" { return true; }
+    if kind == "i16" { return true; }
+    if kind == "i32" { return true; }
+    if kind == "i64" { return true; }
+    if kind == "u8" { return true; }
+    if kind == "u16" { return true; }
+    if kind == "u32" { return true; }
+    if kind == "u64" { return true; }
+    return false;
+}
+
 // ── Channel send / receive bespoke lowering (#1266) ──────────────────
 // `runtime/sfn/concurrency/channel.sfn` implements the §2.6.4 surface:
 //   sfn_channel_create(capacity: i64, elem_size: i64) -> * u8
@@ -178,6 +196,26 @@ fn try_lower_channel_method(member_target: MemberAccessParse, argument_entries: 
                 + ", 0");
             elem_type = "i8*";
             elem_value = data_ptr;
+        }
+        // SFN-398: a `for i in a..b` range induction variable lowers to
+        // `double`, but a `Channel<int>` slot holds an integer. When the
+        // channel's declared element kind is an integer type and the operand
+        // arrived as a `double`, convert it to the i64 ring width with a
+        // signed FP-to-int cast instead of storing the raw IEEE-754 bits
+        // (which the typed receive reinterprets as garbage). The kind is
+        // threaded onto the binding as `channel:<int-kind>`
+        // (`instructions_let.sfn`); a float/number channel keeps the bare
+        // `channel` annotation, so its `double` operand round-trips untouched.
+        if elem_type == "double" {
+            if _channel_kind_is_integer(channel_elem_kind) {
+                let coerced_int = format_temp_name(ch_temp);
+                ch_temp += 1;
+                ch_lines.push("  " + coerced_int + " = fptosi double "
+                    + elem_value
+                    + " to i64");
+                elem_type = "i64";
+                elem_value = coerced_int;
+            }
         }
         // Widen every narrow integer to i64 so the spill slot covers the
         // full 8-byte elem_size — an i8/i16/i32 alloca would leave the
