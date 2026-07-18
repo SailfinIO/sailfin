@@ -75,7 +75,7 @@ jobs:
             SLACK_TEXT="$1" python3 - <<'PY' > /tmp/slack-payload.json
           import json
           import os
-          print(json.dumps({"text": os.environ["SLACK_TEXT"]}))
+          print(json.dumps({"text": os.environ["SLACK_TEXT"].replace("\\n", "\n")}))
           PY
             curl -fsS -X POST \
               -H 'Content-type: application/json' \

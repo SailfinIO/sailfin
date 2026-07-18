@@ -37,7 +37,7 @@ jobs:
           version = os.environ.get("SEED_VERSION", "").strip() or "(unknown)"
           pr_url = os.environ["PR_URL"]
           print(json.dumps({
-              "text": f":seedling: Sailfin seed pinned to {version} (PR merged).\\nPR: {pr_url}"
+              "text": f":seedling: Sailfin seed pinned to {version} (PR merged).\nPR: {pr_url}"
           }))
           PY
           curl -fsS -X POST \

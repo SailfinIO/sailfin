@@ -410,8 +410,9 @@ Examples are compiler-only unless marked with future-syntax comments.
   `__version_fallback__`.
 - **Release automation:** stable minor releases are cut **automatically** on a
   **weekly** cadence by `.github/workflows/release-train.yml` whenever `main`
-  is green (the latest scheduled `nightly-selfhost.yml` run **and** the latest
-  `ci.yml` run on `main` both succeeded). Open release scope always rolls
+  is green — a `nightly-selfhost.yml` run whose `head_sha` equals current
+  `main` HEAD succeeded (the gate binds to the exact commit being tagged;
+  per-commit CI is already guaranteed by the merge queue). Open release scope always rolls
   forward and never blocks the train. `.github/workflows/release.yml` (manual
   `workflow_dispatch`, pure bash) remains the **manual/override path** — use
   it for an off-cadence or repair cut, or to promote a channel (`beta`/`rc`).

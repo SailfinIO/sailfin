@@ -548,14 +548,31 @@ or a human sign-off. It does not change WS-A or WS-B.
   - The former **`pendingStable` HOLD** (refusing to cut the next minor alpha
     while a prior stable line hadn't shipped) is **removed** — it no longer
     applies once the train ships stable directly.
-- **The cut gate is the health of `main` only.** A train dispatches when
-  **both** the latest scheduled `nightly-selfhost.yml` run on `main` succeeded
-  **and** the latest `ci.yml` run on `main` succeeded. There is no longer a
-  separate N-consecutive-green-days quality timer for stable promotion — the
-  gate is "is `main` green right now," checked at cut time. Open release scope
-  (unclosed `release:*`-labeled items) **always rolls forward and never blocks
-  the train** — the time-box/roll-forward semantics from the original §3.3
-  design are retained unchanged.
+- **The cut gate is a green nightly self-host that verified the exact HEAD to
+  be tagged.** A train dispatches only when a `nightly-selfhost.yml` run whose
+  `head_sha` equals current `main` HEAD completed **successfully** — the gate
+  binds to the commit being released, not merely to "the latest nightly went
+  green" (which could reflect a stale, pre-regression SHA). `ci.yml` is *not*
+  part of the gate: it runs on `pull_request`/`merge_group`, never on push to
+  `main`, so per-commit single-pass self-host is already guaranteed by the
+  merge queue; the nightly adds the triple-pass `make check` the queue does not
+  run. If HEAD is not yet nightly-verified at a cadence boundary, the train
+  dispatches a fresh nightly and holds; that nightly's completion re-triggers
+  the train (via `workflow_run`) and the cut fires once HEAD is green. There is
+  no longer a separate N-consecutive-green-days quality timer. Open release
+  scope (unclosed `release:*`-labeled items) **always rolls forward and never
+  blocks the train** — the time-box/roll-forward semantics from the original
+  §3.3 design are retained unchanged.
+- **The self-host check is the *only* automated quality signal before GA — an
+  explicit, owner-directed acceptance.** With stable promotion fully automated,
+  the weekly train blesses whatever is on `main` HEAD as GA provided it
+  self-hosts (triple-pass) and cleared the merge queue. There is no human
+  review, soak period, or scope-completeness check between merge and GA. This
+  is a deliberate trade of release-gating rigor for delivery velocity,
+  appropriate to the high-merge-rate agentic workflow this repo runs; it is
+  recorded here so the reduced safety envelope is a conscious decision, not an
+  oversight. Tightening it later (a soak window, an N-green-nightlies timer, a
+  smoke-test gate) is a policy dial, not a redesign.
 - **Stable promotion is no longer human-confirmed.** The advisory
   human-confirmation step for `channel=stable` dispatch is removed, and
   `stable-promotion-advisor.yml` is **retired**. The weekly train *is* the

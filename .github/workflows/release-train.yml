@@ -38,9 +38,15 @@ name: Release Train (weekly stable)
 
 on:
   schedule:
-    # Every Monday 09:00 UTC — weekly cadence. A maintainer can always run
-    # off-cadence via workflow_dispatch.
+    # Every Monday 09:00 UTC — weekly cadence boundary. A maintainer can always
+    # run off-cadence via workflow_dispatch.
     - cron: "0 9 * * 1"
+  # Re-evaluate whenever a nightly self-host check finishes: a cut only fires
+  # once a GREEN nightly has verified the current `main` HEAD, so the nightly's
+  # completion is the natural "now safe to cut" signal.
+  workflow_run:
+    workflows: ["Nightly self-host check"]
+    types: [completed]
   workflow_dispatch:
     inputs:
       dry_run:
@@ -88,6 +94,7 @@ jobs:
             const dryRun = process.env.DRY_RUN === 'true';
             const confirmDispatch = process.env.CONFIRM_DISPATCH === 'true';
             const isSchedule = context.eventName === 'schedule';
+            const isNightlyDone = context.eventName === 'workflow_run';
             const summary = [];
             const note = (s) => { core.info(s); summary.push(s); };
             async function postSlack(text) {
@@ -141,36 +148,30 @@ jobs:
             }
             const trackerTitle = `Release: ${target}`;
 
-            // --- 2. Cut gate: health of main (NOT open scope) -----------------
+            // --- 2. Cut gate: current main HEAD self-hosts (NOT open scope) ---
             // The train is time-boxed: open scope rolls forward and never gates
-            // the cut. The only thing that holds a cut is a broken main — we do
-            // not ship a broken stable train. Per-commit CI health is guaranteed
-            // by construction: the merge queue (`ci.yml` on `merge_group`) lands
-            // only commits that passed the full gate, so `main` is always
-            // CI-green. The remaining signal the queue does NOT cover is the
-            // triple-pass self-host, so the gate is the latest scheduled Nightly
-            // self-host check (`make check`) on the default branch.
+            // the cut. The gate is that the EXACT commit we would tag — current
+            // `main` HEAD — has a GREEN Nightly self-host run (triple-pass
+            // `make check`). Binding to `head_sha` (not merely "latest scheduled
+            // nightly = success") closes the window where a self-host-breaking
+            // commit lands after the last nightly and gets cut as stable on a
+            // stale-green signal. Per-commit single-pass CI is guaranteed by the
+            // merge queue; the nightly adds the triple-pass seedcheck.
             const defaultBranch = context.payload.repository?.default_branch || 'main';
-            async function latestConclusion(workflowFile, event) {
-              try {
-                const params = {
-                  owner, repo, workflow_id: workflowFile,
-                  branch: defaultBranch, per_page: 1,
-                };
-                if (event) params.event = event;
-                const runs = await github.rest.actions.listWorkflowRuns(params);
-                const r = runs.data.workflow_runs[0];
-                return r ? { conclusion: r.conclusion, url: r.html_url } : null;
-              } catch (e) {
-                core.warning(`Could not read runs for ${workflowFile}: ${e.message}`);
-                return null;
-              }
-            }
-            const nightly = await latestConclusion('nightly-selfhost.yml', 'schedule');
-            const cutGateClear = !!nightly && nightly.conclusion === 'success';
-            note(nightly
-              ? `Cut gate — nightly self-host on ${defaultBranch} = ${nightly.conclusion} (${nightly.url}).`
-              : `Cut gate — no scheduled nightly self-host run found on ${defaultBranch}; treating as NOT clear.`);
+            const headSha = (await github.rest.repos.getBranch({
+              owner, repo, branch: defaultBranch,
+            })).data.commit.sha;
+            const nightlyRuns = (await github.rest.actions.listWorkflowRuns({
+              owner, repo, workflow_id: 'nightly-selfhost.yml',
+              branch: defaultBranch, per_page: 30,
+            })).data.workflow_runs;
+            const headNightly = nightlyRuns.find(r => r.head_sha === headSha && r.status === 'completed');
+            const cutGateClear = !!headNightly && headNightly.conclusion === 'success';
+            const nightlyInFlight = nightlyRuns.some(r => r.status === 'queued' || r.status === 'in_progress');
+            note(`Current ${defaultBranch} HEAD ${headSha.slice(0, 8)}.`);
+            note(headNightly
+              ? `Cut gate — nightly for HEAD = ${headNightly.conclusion} (${headNightly.html_url}).`
+              : `Cut gate — no completed nightly self-host run for HEAD yet (in-flight: ${nightlyInFlight}).`);
 
             // --- 3. Roll-forward visibility: open release:next-minor items -----
             const openNextMinor = (await github.paginate(github.rest.issues.listForRepo, {
@@ -252,8 +253,8 @@ jobs:
                 ? openNextMinor.map(i => `#${i.number}`).join(', ')
                 : '_none_';
               const gateLine = cutGateClear
-                ? `✅ Cut gate clear — nightly self-host on \`${defaultBranch}\` is green.`
-                : `⛔ Cut gate NOT clear — nightly self-host is ${nightly ? nightly.conclusion : 'missing'}; hold the cut until main is green.`;
+                ? `✅ Cut gate clear — a green nightly self-host verified HEAD \`${headSha.slice(0, 8)}\`.`
+                : `⛔ Cut gate NOT clear — no green nightly for HEAD \`${headSha.slice(0, 8)}\` yet; hold the cut.`;
               const dispatchLine = cutGateClear
                 ? (isSchedule
                     ? `**Auto-dispatching.** This scheduled train run will cut the stable release (\`channel=stable bump=${bump}\` → \`${target}\`).`
@@ -276,29 +277,62 @@ jobs:
               }
             }
 
-            // --- 6. Dispatch release.yml --------------------------------------
-            // Scheduled cadence runs are the public release train: if the gate is
-            // green, they dispatch automatically. Manual runs require explicit
-            // confirmation so repair/off-clock cuts stay deliberate.
-            const shouldDispatch = isSchedule || confirmDispatch;
-            if (shouldDispatch) {
-              if (dryRun) {
-                note(`[dry-run] would ${isSchedule ? 'auto-dispatch' : 'dispatch'} release.yml (channel=stable bump=${bump}) for ${target}.`);
-              } else if (!cutGateClear) {
-                note(`${isSchedule ? 'Scheduled train' : 'confirm_dispatch'} requested a cut, but cut gate is NOT clear — refusing to dispatch release.yml on a red main.`);
-                await postSlack(`:warning: Sailfin release train blocked for ${target}. Nightly self-host on main is ${nightly ? nightly.conclusion : 'missing'}.\nTracker: ${tracker ? tracker.html_url : trackerTitle}\nRun: https://github.com/${owner}/${repo}/actions/runs/${context.runId}`);
-              } else if (await tagExists(target)) {
-                note(`Release tag ${target} already exists — skipping dispatch.`);
-              } else {
-                await github.rest.actions.createWorkflowDispatch({
-                  owner, repo, workflow_id: 'release.yml', ref: defaultBranch,
-                  inputs: { channel: 'stable', bump, dry_run: 'false' },
-                });
-                note(`Dispatched release.yml (channel=stable bump=${bump}) → ${target}.`);
-                await postSlack(`:rocket: Sailfin release train dispatched ${target} (channel=stable bump=${bump}).\nTracker: ${tracker ? tracker.html_url : trackerTitle}\nRun: https://github.com/${owner}/${repo}/actions/runs/${context.runId}`);
+            // --- 6. Cut decision ----------------------------------------------
+            // Cut only when (a) the weekly cadence boundary has elapsed since the
+            // last stable, and (b) a green nightly has verified current HEAD.
+            // Timing sources:
+            //   - schedule (Mon 09:00) — the cadence boundary itself;
+            //   - workflow_run (a nightly finished) — re-evaluate so a HEAD-
+            //     verified green nightly cuts promptly instead of waiting a week;
+            //   - workflow_dispatch + confirm_dispatch — a deliberate off-clock cut.
+            // On a scheduled/manual run whose HEAD is not yet nightly-verified we
+            // DISPATCH a fresh nightly (if none is in-flight); its completion
+            // re-triggers this workflow via workflow_run, which then cuts. The
+            // workflow_run path never re-dispatches a nightly, so there is no
+            // dispatch loop.
+            async function daysSinceLastStable() {
+              try {
+                const rel = await github.rest.repos.getLatestRelease({ owner, repo });
+                return (Date.now() - new Date(rel.data.published_at).getTime()) / 86400000;
+              } catch (e) {
+                return Infinity; // no stable release yet → cadence is due
               }
-            } else {
+            }
+            const cadenceDays = 6;
+            const age = await daysSinceLastStable();
+            const cadenceDue = confirmDispatch || age >= cadenceDays;
+            note(`Days since last stable: ${age === Infinity ? 'none' : age.toFixed(1)} (cadence due: ${cadenceDue}).`);
+
+            const shouldConsiderCut = isSchedule || isNightlyDone || confirmDispatch;
+            if (!shouldConsiderCut) {
               note('Manual run without confirm_dispatch — surfaced readiness only.');
+            } else if (!cadenceDue) {
+              note(`Cadence not yet due (< ${cadenceDays} days since last stable) — not cutting.`);
+            } else if (dryRun) {
+              note(`[dry-run] would ${cutGateClear ? 'cut' : 'dispatch a fresh nightly and hold'} for ${target}.`);
+            } else if (await tagExists(target)) {
+              note(`Release tag ${target} already exists — skipping.`);
+            } else if (cutGateClear) {
+              await github.rest.actions.createWorkflowDispatch({
+                owner, repo, workflow_id: 'release.yml', ref: defaultBranch,
+                inputs: { channel: 'stable', bump, dry_run: 'false' },
+              });
+              note(`Dispatched release.yml (channel=stable bump=${bump}) → ${target}.`);
+              await postSlack(`:rocket: Sailfin release train dispatched ${target} (channel=stable bump=${bump}) — HEAD ${headSha.slice(0, 8)} verified green.\nTracker: ${tracker ? tracker.html_url : trackerTitle}\nRun: https://github.com/${owner}/${repo}/actions/runs/${context.runId}`);
+            } else if (isNightlyDone) {
+              // A nightly just finished but HEAD is not (yet) verified green — main
+              // likely advanced past it, or it failed. Do NOT re-dispatch from the
+              // workflow_run path (loop guard); the next nightly re-evaluates.
+              note(`Nightly finished but HEAD ${headSha.slice(0, 8)} is not verified green — holding; the next nightly will re-evaluate.`);
+              await postSlack(`:warning: Sailfin release train holding ${target}. HEAD ${headSha.slice(0, 8)} has no green nightly yet.\nTracker: ${tracker ? tracker.html_url : trackerTitle}`);
+            } else if (nightlyInFlight) {
+              note(`HEAD not verified yet, but a nightly is already in-flight — holding for its completion.`);
+            } else {
+              await github.rest.actions.createWorkflowDispatch({
+                owner, repo, workflow_id: 'nightly-selfhost.yml', ref: defaultBranch,
+              });
+              note(`HEAD ${headSha.slice(0, 8)} has no nightly yet — dispatched a fresh nightly self-host; its completion will re-trigger the cut.`);
+              await postSlack(`:hourglass_flowing_sand: Sailfin release train armed for ${target}. Dispatched a fresh nightly self-host for HEAD ${headSha.slice(0, 8)}; the cut fires when it goes green.\nTracker: ${tracker ? tracker.html_url : trackerTitle}`);
             }
 
             core.summary

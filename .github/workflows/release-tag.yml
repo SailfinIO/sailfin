@@ -443,9 +443,9 @@ jobs:
           repo = os.environ["GITHUB_REPOSITORY"]
           rel_url = f"{os.environ['GITHUB_SERVER_URL']}/{repo}/releases/tag/{tag}"
           if prerelease:
-              text = f":package: Sailfin prerelease {tag} published with assets.\\nRelease: {rel_url}"
+              text = f":package: Sailfin prerelease {tag} published with assets.\nRelease: {rel_url}"
           else:
-              text = f":tada: Sailfin STABLE {tag} published with assets.\\nRelease: {rel_url}"
+              text = f":tada: Sailfin STABLE {tag} published with assets.\nRelease: {rel_url}"
           print(json.dumps({"text": text}))
           PY
           curl -fsS -X POST \
