@@ -1,0 +1,119 @@
+// Integration coverage for the process-handle stderr-streaming primitives
+// (SFEP-0050). The Sailfin-native bodies live in `runtime/sfn/process.sfn`
+// (`sfn_process_handle_stdout_fd`, `sfn_process_handle_stderr_fd`,
+// `sfn_process_handle_read_bytes_stderr`, `sfn_process_handle_stderr_at_eof`,
+// `sfn_process_handle_kill`); the `process.*` descriptor rows in
+// `compiler/src/llvm/runtime_helpers.sfn` flip the builtin surface onto
+// them, and `runtime/sfn/platform/process_windows.sfn` carries the degraded
+// stubs. These pin the raw builtins independently of any `sfn/os` wrapper,
+// mirroring `process_framed_stdio_test.sfn` and `io_poll_any_test.sfn`. All
+// assume a POSIX `sh`/`printf`/`sleep` (the same platform assumption the
+// sibling `spawn_with_env` tests rely on).
+//
+// The demux test is the load-bearing one: it drives the exact
+// stdout(user)+stderr(records) multiplex the streamed test runner will use —
+// `io.poll_any` over the two raw handle fds, a single-`read(2)` chunk from
+// the ready stream, terminating on the two `*_at_eof` predicates — proving
+// the transport before the runner (a separate seed-gated PR) depends on it.
+test "handle fd/kill/eof accessors: zero handle reports the dead-handle sentinels" ![io] {
+    // No child: the zero-handle contract must match the sibling read
+    // builtins (fds -> -1, chunk read -> "", stderr_at_eof -> true, kill -> -1).
+    assert process.handle_stdout_fd(0) == -1;
+    assert process.handle_stderr_fd(0) == -1;
+    assert process.handle_stderr_at_eof(0) == true;
+    assert process.handle_read_bytes_stderr(0, 8) == "";
+    assert process.handle_kill(0) == -1;
+}
+
+test "handle_stdout_fd/handle_stderr_fd: expose distinct live child fds" ![io] {
+    let id = process.spawn_with_env(["sh", "-c", "printf 'out'; printf 'err' 1>&2"], []);
+    assert id != 0;
+    let ofd = process.handle_stdout_fd(id);
+    let efd = process.handle_stderr_fd(id);
+    // A live child has both pipes open on real, distinct descriptors.
+    assert ofd >= 0;
+    assert efd >= 0;
+    assert ofd != efd;
+    // Drain both to EOF (whole-drain reads are proven) and reap.
+    let _o = process.handle_read_stdout(id);
+    let _e = process.handle_read_stderr(id);
+    let exit = process.handle_wait(id);
+    assert exit == 0;
+}
+
+test "handle_read_bytes_stderr: returns at most n bytes preserving the remainder" ![io] {
+    let id = process.spawn_with_env(["sh", "-c", "printf 'abcdefgh' 1>&2"], []);
+    assert id != 0;
+    // Live stderr, not yet drained.
+    assert process.handle_stderr_at_eof(id) == false;
+    // First call caps at 3 bytes; the remaining 5 stay buffered in the
+    // stderr stash (offset 40).
+    let p1 = process.handle_read_bytes_stderr(id, 3);
+    assert p1 == "abc";
+    // n exceeds what is buffered: returns the 5-byte remainder, no read(2).
+    let p2 = process.handle_read_bytes_stderr(id, 10);
+    assert p2 == "defgh";
+    // Nothing left: one read(2) hits EOF, closes the fd, yields "".
+    let p3 = process.handle_read_bytes_stderr(id, 4);
+    assert p3 == "";
+    // fd closed + stash empty -> at EOF.
+    assert process.handle_stderr_at_eof(id) == true;
+    let exit = process.handle_wait(id);
+    assert exit == 0;
+}
+
+test "poll_any demux: stdout(user) and stderr(records) separate cleanly" ![io] {
+    // The child writes distinct payloads to each stream. The loop is the
+    // streamed-runner transport in miniature: poll both raw fds, read one
+    // chunk from whichever is ready, accumulate per stream, terminate when
+    // both are at EOF. The per-stream accumulators must come out cleanly
+    // partitioned regardless of interleaving.
+    let id = process.spawn_with_env(["sh", "-c", "printf 'OUT1'; printf 'ERR1' 1>&2; printf 'OUT2'; printf 'ERR2' 1>&2"], []);
+    assert id != 0;
+    let mut out_acc: string = "";
+    let mut err_acc: string = "";
+    let mut guard: int = 0;
+    loop {
+        guard = guard + 1;
+        // Input-driven loop guard: 16 payload bytes need only a handful of
+        // iterations; 1000 is an ample runaway backstop.
+        if guard > 1000 { break; }
+        // Terminate on both-EOF BEFORE polling: `poll_any` collapses a real
+        // timeout AND the all-parked (both fds -1) case to -1, so checking
+        // EOF first keeps a -1 return unambiguous (it would be a deadline
+        // breach, not clean EOF — not reachable in this bounded fixture).
+        if process.handle_stdout_at_eof(id) && process.handle_stderr_at_eof(id) {
+            break;
+        }
+        // Re-fetch fds every iteration: the chunk readers close the fd and
+        // set it to -1 at EOF, and `poll_any` parks a -1 fd.
+        let ofd = process.handle_stdout_fd(id);
+        let efd = process.handle_stderr_fd(id);
+        let fds: int[] = [ofd, efd];
+        let ready = io.poll_any(fds, 1000);
+        if ready < 0 { break; }
+        if ready == efd {
+            let chunk = process.handle_read_bytes_stderr(id, 4096);
+            err_acc = err_acc + chunk;
+        } else {
+            let chunk = process.handle_read_bytes_stdout(id, 4096);
+            out_acc = out_acc + chunk;
+        }
+    }
+    assert out_acc == "OUT1OUT2";
+    assert err_acc == "ERR1ERR2";
+    let exit = process.handle_wait(id);
+    assert exit == 0;
+}
+
+test "handle_kill: SIGKILLs a running child; handle_wait reports signal death" ![io] {
+    // A child that would outlive the test by far; kill it through the handle
+    // (no external `timeout(1)`), then reap. `handle_wait` after SIGKILL(9)
+    // returns 128 + 9 = 137 — signal death, never a clean 0.
+    let id = process.spawn_with_env(["sh", "-c", "sleep 30"], []);
+    assert id != 0;
+    let k = process.handle_kill(id);
+    assert k == 0;
+    let exit = process.handle_wait(id);
+    assert exit == 137;
+}

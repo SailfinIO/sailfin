@@ -258,6 +258,49 @@ change → **bundle in one PR, no seed cut**. `make check`'s seedcheck runs the
 combined suite *through this very runner*, so any writer/reader skew fails the
 gate by construction.
 
+### 5.1 Transport-surface correction (supersedes the "no change" claim in §3.1 / §5)
+
+The original §3.1/§5 stated `runtime/sfn/process.sfn` needs **no change**
+because `handle_read_line_stderr`, `handle_stderr_at_eof`, and per-fd access
+for `io.poll_any` "already ship in the seed." **This is factually incorrect.**
+Verified against `runtime/sfn/process.sfn` and
+`compiler/src/llvm/runtime_helpers.sfn`: the framed-read family is
+**stdout-only** (`handle_read_line_stdout`, `handle_read_bytes_stdout`,
+`handle_stdout_at_eof`); `handle_read_stderr` only drains stderr whole-to-EOF
+via `_handle_drain_one` and cannot frame a live stream; `io.poll_any` takes
+**raw fds** but there is **no accessor** to obtain a handle's stdout/stderr fd
+(they live at `SailfinProcessHandle` offsets 8/12); and there is **no
+`handle_kill`** — the current per-file deadline is entirely the external
+`timeout(1)` wrapper.
+
+**Corrected primitive set.** The records-over-stderr transport requires five
+new process-handle builtins, added to `runtime/sfn/process.sfn` with
+descriptors in `compiler/src/llvm/runtime_helpers.sfn`:
+`process.handle_stdout_fd(h) -> int` and `process.handle_stderr_fd(h) -> int`
+(raw fds for `io.poll_any`); `process.handle_read_bytes_stderr(h, n) -> string`
+(single-`read(2)` chunk mirror of `handle_read_bytes_stdout`);
+`process.handle_stderr_at_eof(h) -> bool` (mirror of `handle_stdout_at_eof`);
+and `process.handle_kill(h) -> int` (SIGKILL via a new `kill(2)` extern) for
+runner-owned deadlines. Chunk-level stderr reads are **mandatory, not
+stylistic**: a hypothetical `read_line_stderr` inherits
+`handle_read_line_stdout`'s internal fill-loop, which blocks on `read(2)` and
+would reintroduce the cross-pipe deadlock `poll_any` exists to prevent. The
+runner accumulates chunks and frames SFTR records itself. Windows carries
+degraded-but-linking stubs for the five in
+`runtime/sfn/platform/process_windows.sfn` (fds → `-1`, chunk read → empty,
+`stderr_at_eof` → `true`, kill → `-1`), consistent with the module's
+`spawn_with_env` failure-sentinel posture.
+
+**Self-hosting / seed-cut consequence** (supersedes the "no seed cut" claim in
+§5). Because the compiler's own runner does not yet call these builtins, the
+primitives ship in a **predecessor PR** that self-hosts on the current pinned
+seed — they add only additive runtime bodies + inert descriptor data + Windows
+stubs + one predecessor test, with no `compiler/src` call site, so the seed
+never needs to know the new builtins. That PR is `seed-blocker`; a **seed cut +
+`/pin-seed`** follows. The consumer PR (SFTR writer + parser + runner rewrite)
+then self-hosts against the new seed. This is a real seed-cut gate, not a
+bundleable single-consumer capability; the owner has approved the cut.
+
 ## 6. Alternatives considered
 
 **Alt 1 — dedicated fd 3 for records (the issue's other sketch).** Give the
