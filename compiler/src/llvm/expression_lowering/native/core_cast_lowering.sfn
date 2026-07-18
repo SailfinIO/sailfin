@@ -591,7 +591,10 @@ fn try_lower_interpolated_string_literal(literal: string, bindings: ParameterBin
         current_temp = coerced.temp_index;
         collected_string_constants = merge_string_constants(collected_string_constants, coerced.string_constants);
         if coerced.operand == null {
-            diagnostics.push("llvm lowering: unable to stringify interpolated expression `"
+            // SFN-408: mark fatal so the build aborts loudly with the source
+            // expression text as the span surrogate, instead of silently
+            // dropping the enclosing `print`/`call` at exit 0.
+            diagnostics.push("llvm lowering [fatal]: unable to stringify interpolated expression `"
                 + expr_text
                 + "`");
             return ExpressionResult {

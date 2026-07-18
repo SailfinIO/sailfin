@@ -1,0 +1,13 @@
+// Fixture for the SFN-408 fatal-floor negative test
+// (compiler/tests/e2e/interp_unsupported_fatal_test.sfn).
+//
+// Interpolating an operand with no `coerce_operand_to_string` arm must fail
+// the build loudly with a `[fatal]` E0832 diagnostic, never the old silent
+// empty-output + exit 0. `float[]` is the concrete deferred case: rendering
+// it needs a `sailfin_intrinsic_pointer_read_f64` intrinsic the pinned seed
+// does not carry yet (SFN-408 follow-up), so the array arm leaves it
+// unsupported and it falls to the fatal floor.
+fn main() ![io] {
+    let xs: float[] = [1.5, 2.5];
+    print("floats: {{xs}}");
+}

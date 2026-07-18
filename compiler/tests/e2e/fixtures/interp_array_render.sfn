@@ -1,0 +1,23 @@
+// Fixture for the SFN-408 array-interpolation regression
+// (compiler/tests/e2e/array_interpolation_test.sfn).
+//
+// Interpolating a primitive-element array into a `{{ }}` string used to
+// stringify to a null operand, dropping the entire enclosing `print` (and
+// its literal prefix) at exit 0. Each `print` below exercises one supported
+// element kind plus the nested `int[][]` recursion; the driving test asserts
+// the bracketed rendering appears between `before` and `after`.
+//
+// `float[]` is covered by the negative fixture (interp_unsupported_fatal.sfn):
+// it is deferred to a seed bump and must fail loudly, not render.
+fn main() ![io] {
+    print("before");
+    let m = [[19, 22], [43, 50]];
+    print("Result: {{m}}");
+    let ns = [1, 2, 3];
+    print("ints: {{ns}}");
+    let bs: boolean[] = [true, false];
+    print("bools: {{bs}}");
+    let ss: string[] = ["a", "b"];
+    print("strs: {{ss}}");
+    print("after");
+}
