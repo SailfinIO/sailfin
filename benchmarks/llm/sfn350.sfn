@@ -2636,7 +2636,12 @@ fn _packet_path(arm: string) -> string ![io] {
     return _repo_root() + "/benchmarks/llm/packets/" + arm + "/packet.md";
 }
 
-fn _packet_version(arm: string) -> string { return arm + "/v1.0.0"; }
+fn _packet_version(arm: string) -> string {
+    // SFN-388 revised the Sailfin-B packet to teach the shipped array and
+    // sfn/strings surfaces; rill-17 is unchanged and keeps v1.0.0.
+    if arm == "sailfin-b" { return arm + "/v1.1.0"; }
+    return arm + "/v1.0.0";
+}
 
 fn _count_occurrences(text: string, needle: string) -> int {
     let mut count = 0;
@@ -2746,6 +2751,37 @@ fn _validate_packets() ![io] {
     print("Track B packet completeness and matched-budget checks passed");
 }
 
+fn _self_test_frozen_packet_examples() ![io] {
+    // SFN-388: the frozen Sailfin-B packet must teach the shipped array and
+    // sfn/strings surfaces (string[], explicitly typed empty arrays, .push,
+    // indexing, parse_int/int_to_string/ascii_uppercase) so Track B attempts
+    // stop hand-rolling them. Assert the assembled live request the harness
+    // would send for the sailfin-b arm actually carries those frozen examples,
+    // offline, before any paid batch. rill-17 is intentionally not mirrored
+    // (equivalent-arm review records the language-specific APIs).
+    let cfg = _default_config();
+    let arms = _arm_configs("b");
+    let arm = arms[0];
+    if arm.name != "sailfin-b" {
+        print.err("frozen packet self-test: expected sailfin-b as the first Track B arm");
+        process.exit(1);
+    }
+    let user = _build_user(_logic_task(), arm, cfg, "primary");
+    let required = ["sailfin-b/v1.1.0", "string[]", "let mut xs: string[] = []", "xs.push", "parse_int", "int_to_string", "ascii_uppercase", "Result.Ok", "from \"sfn/strings\""];
+    let mut i: int = 0;
+    loop {
+        if i >= required.length { break; }
+        if !contains(user, required[i]) {
+            print.err("frozen packet self-test: live request is missing \""
+                + required[i]
+                + "\"");
+            process.exit(1);
+        }
+        i += 1;
+    }
+    print("frozen Sailfin-B packet teaches arrays and sfn/strings helpers in the live request");
+}
+
 fn _packet_manifest(track: string) -> JsonValue ![io] {
     if track != "b" {
         return object_val(["enabled"], [bool_val(false)]);
@@ -2799,7 +2835,7 @@ fn _write_run_manifest(path: string, cfg: Config, arms: string[], run_valid: boo
     let repository_dirty = _repository_dirty();
     let ablation = object_val(["dimension", "assignment", "primary_pool_eligible"], [string_val(cfg.ablation), string_val("seeded parity of frozen attempt identity; paired arms receive the same treatment"), bool_val(cfg.ablation == "primary")]);
     let openai_api = cfg.adapter != "openai"? "not_applicable": (_uses_gpt5_request(cfg.model)? "responses": "chat_completions");
-    let manifest = object_val(["protocol_id", "protocol_sha256", "repository_commit", "repository_dirty", "harness_sha256", "track", "adapter", "model", "model_family", "openai_api", "openai_reasoning_effort", "max_iters", "repeats", "seed", "sampling", "anthropic_response_budget", "provider_retry_policy", "arms", "packets", "ablation", "toolchains", "execution_deadline", "commands", "human_interventions", "run_valid", "invalid_reason"], [string_val("sfn-agent-benchmark/v2.6.0"), string_val(_sha256_file(protocol_path)), string_val(repository_commit), bool_val(repository_dirty), string_val(_sha256_file(harness_path)), string_val(cfg.track), string_val(cfg.adapter), string_val(cfg.model), string_val(cfg.model_family), string_val(openai_api), string_val(manifest_effort), number_val(cfg.max_iters as float), number_val(cfg.repeats as float), number_val(cfg.seed as float), string_val(sampling), _anthropic_response_budget_policy(), _provider_retry_policy(), array_val(arm_vals), _packet_manifest(cfg.track), ablation, toolchains, deadline, commands, number_val(0.0), bool_val(run_valid), string_val(invalid_reason)]);
+    let manifest = object_val(["protocol_id", "protocol_sha256", "repository_commit", "repository_dirty", "harness_sha256", "track", "adapter", "model", "model_family", "openai_api", "openai_reasoning_effort", "max_iters", "repeats", "seed", "sampling", "anthropic_response_budget", "provider_retry_policy", "arms", "packets", "ablation", "toolchains", "execution_deadline", "commands", "human_interventions", "run_valid", "invalid_reason"], [string_val("sfn-agent-benchmark/v2.7.0"), string_val(_sha256_file(protocol_path)), string_val(repository_commit), bool_val(repository_dirty), string_val(_sha256_file(harness_path)), string_val(cfg.track), string_val(cfg.adapter), string_val(cfg.model), string_val(cfg.model_family), string_val(openai_api), string_val(manifest_effort), number_val(cfg.max_iters as float), number_val(cfg.repeats as float), number_val(cfg.seed as float), string_val(sampling), _anthropic_response_budget_policy(), _provider_retry_policy(), array_val(arm_vals), _packet_manifest(cfg.track), ablation, toolchains, deadline, commands, number_val(0.0), bool_val(run_valid), string_val(invalid_reason)]);
     fs.writeFile(path, stringify_pretty(manifest, 2));
 }
 
@@ -2873,7 +2909,7 @@ fn _write_corpus_manifest(path: string, cfg: Config, tasks: Task[], arms: ArmCon
     }
     let band_ok = min_tokens > 0 && max_tokens * 100 <= min_tokens * band_percent;
     let band_label = "maximum <= " + (band_percent as string) + "% of minimum";
-    let corpus = object_val(["corpus_id", "frozen", "template_count", "instance_count", "templates", "instances", "token_estimate_method", "quick_reference_estimated_tokens", "predeclared_band", "quick_reference_band_met", "all_scaffold_bands_met"], [string_val("sfn-agent-benchmark-corpus/v2.6.0"), bool_val(true), number_val(templates.length as float), number_val(count as float), _string_array_json(templates), array_val(instances), string_val("UTF-8 source characters divided by 4, rounded up"), object_val(cheat_keys, cheat_vals), string_val(band_label), bool_val(band_ok), bool_val(all_scaffold_bands_met)]);
+    let corpus = object_val(["corpus_id", "frozen", "template_count", "instance_count", "templates", "instances", "token_estimate_method", "quick_reference_estimated_tokens", "predeclared_band", "quick_reference_band_met", "all_scaffold_bands_met"], [string_val("sfn-agent-benchmark-corpus/v2.7.0"), bool_val(true), number_val(templates.length as float), number_val(count as float), _string_array_json(templates), array_val(instances), string_val("UTF-8 source characters divided by 4, rounded up"), object_val(cheat_keys, cheat_vals), string_val(band_label), bool_val(band_ok), bool_val(all_scaffold_bands_met)]);
     fs.writeFile(path, stringify_pretty(corpus, 2));
 }
 
@@ -3514,6 +3550,7 @@ fn main(argv: string[]) -> int ![clock, io, net] {
         _self_test_failure_taxonomy();
         _self_test_compiler_owned_classification();
         _self_test_response_invalidation();
+        _self_test_frozen_packet_examples();
         _self_test_analysis();
         return 0;
     }

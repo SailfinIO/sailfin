@@ -1,6 +1,6 @@
 # Sailfin agent benchmark protocol v2
 
-Protocol ID: `sfn-agent-benchmark/v2.6.0`
+Protocol ID: `sfn-agent-benchmark/v2.7.0`
 
 Status: **audit-only; v2.6 attempts stopped on provider quota and Anthropic
 response-budget invalidations and produced no complete valid paired output**.
@@ -12,6 +12,19 @@ returned `stop_reason=max_tokens` with 8,191 thinking tokens, no text, and an
 request schema enforces headroom, the protocol/corpus minor version is bumped,
 and a completely fresh balanced batch is frozen. No v2.6 observation is
 eligible for selection, rerun, or pooling into that successor.
+
+Version 2.7.0 revises the Sailfin-B controlled learning packet to teach the
+already-shipped array and string surfaces that v2.6 attempts repeatedly
+hand-rolled or invented (SFN-388): typed arrays (`int[]`/`string[]`), an
+explicitly typed empty array, `.push`, indexing, and the `sfn/strings` helpers
+`parse_int`, `int_to_string`, and `ascii_uppercase`. It adds no language syntax
+or runtime API — those helpers were delivered by SFN-35 and SFN-371 — and stays
+inside the frozen concise-packet budget and the 5% matched-arm band. The Rill-17
+control arm is unchanged; the equivalent-arm review records these Sailfin-specific
+library APIs as intentional. The packet advances to `sailfin-b/v1.1.0`, and this
+material change starts a fresh pilot and corpus ID
+`sfn-agent-benchmark-corpus/v2.7.0`. Every v2.6.0 observation remains audit-only
+and ineligible for selection, rerun, or pooling into this successor.
 
 Version 2.6.0 freezes symmetric transient-provider handling after the v2.5.0
 Anthropic schema probe returned `overloaded_error`. Curl failures, timeouts,
