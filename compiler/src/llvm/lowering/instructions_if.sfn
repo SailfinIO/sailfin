@@ -21,6 +21,7 @@ import {
     ParameterBinding,
     ScopeMetadata,
     StringConstant,
+    TryFrameContext,
     TypeContext
 } from "../types";
 import {
@@ -277,7 +278,7 @@ fn _restore_bindings_narrowing(bindings: ParameterBinding[], base_name: string, 
     return out;
 }
 
-fn lower_if_instruction(function: NativeFunction, start_index: int, llvm_return: string, bindings: ParameterBinding[], locals: LocalBinding[], allocas: string[], lines: string[], temp_index: int, block_counter: int, next_local_id: int, next_region_id: int, functions: NativeFunction[], loop_stack: LoopContext[], end: int, context: TypeContext, scope_id: string, scope_depth: int, current_label: string) -> BlockLoweringResult ![io] {
+fn lower_if_instruction(function: NativeFunction, start_index: int, llvm_return: string, bindings: ParameterBinding[], locals: LocalBinding[], allocas: string[], lines: string[], temp_index: int, block_counter: int, next_local_id: int, next_region_id: int, functions: NativeFunction[], loop_stack: LoopContext[], try_stack: TryFrameContext[], end: int, context: TypeContext, scope_id: string, scope_depth: int, current_label: string) -> BlockLoweringResult ![io] {
     let mut current_lines: string[] = lines;
     let base_lines_snapshot = copy_string_array(lines);
     let mut current_allocas: string[] = allocas;
@@ -444,7 +445,7 @@ fn lower_if_instruction(function: NativeFunction, start_index: int, llvm_return:
 
     current_lines.push(then_label + ":");
     let then_scope_id = make_child_scope_id(scope_id, then_label);
-    let then_result = lower_instruction_range(function, structure.then_start, structure.then_end, llvm_return, then_param_bindings, then_locals, base_allocas, [], base_temp, base_block_counter, base_local_id, current_next_region, functions, loop_stack, context, then_scope_id, scope_depth
+    let then_result = lower_instruction_range(function, structure.then_start, structure.then_end, llvm_return, then_param_bindings, then_locals, base_allocas, [], base_temp, base_block_counter, base_local_id, current_next_region, functions, loop_stack, try_stack, context, then_scope_id, scope_depth
         + 1, then_label);
     let mut _ci14: int = 0;
     loop {
@@ -498,7 +499,7 @@ fn lower_if_instruction(function: NativeFunction, start_index: int, llvm_return:
     if structure.has_else {
         current_lines.push(else_label + ":");
         let else_scope_id = make_child_scope_id(scope_id, else_label);
-        let else_result = lower_instruction_range(function, structure.else_start, structure.else_end, llvm_return, bindings, base_locals, current_allocas, [], current_temp, current_block_counter, current_next_local, current_next_region, functions, loop_stack, context, else_scope_id, scope_depth
+        let else_result = lower_instruction_range(function, structure.else_start, structure.else_end, llvm_return, bindings, base_locals, current_allocas, [], current_temp, current_block_counter, current_next_local, current_next_region, functions, loop_stack, try_stack, context, else_scope_id, scope_depth
             + 1, else_label);
         let mut _ci15: int = 0;
         loop {

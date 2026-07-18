@@ -16,9 +16,10 @@ import {
     synthesize_closure_env_struct
 } from "../closures";
 import { append_local_binding } from "../expression_lowering/native/core_scopes";
+import { emit_runtime_call, empty_runtime_call_overrides } from "../expression_lowering/native/runtime_call";
 import { lower_expression_statement, lower_return_instruction } from "../expression_lowering/native/statement";
 import { parse_inline_let_expression } from "../expression_lowering/native/statement_parsing";
-import { apply_lifetime_release_events } from "../lifetime";
+import { apply_lifetime_release_events, is_scope_descendant } from "../lifetime";
 import { trace_lowering } from "../lowering_debug_state";
 import { empty_string_constant_set, merge_string_constants } from "../strings";
 import {
@@ -31,6 +32,7 @@ import {
     LoopContext,
     ParameterBinding,
     StringConstant,
+    TryFrameContext,
     TypeContext
 } from "../types";
 import {
@@ -56,7 +58,7 @@ import { lower_throw_instruction, lower_try_instruction } from "./instructions_t
 import { get_instruction_tag } from "./lowering_native_helpers";
 import { find_last_label_in_tail } from "./phi";
 
-fn lower_instruction_range(function: NativeFunction, start_index: int, end: int, llvm_return: string, bindings: ParameterBinding[], locals: LocalBinding[], allocas: string[], lines: string[], temp_index: int, block_counter: int, next_local_id: int, next_region_id: int, functions: NativeFunction[], loop_stack: LoopContext[], context: TypeContext, scope_id: string, scope_depth: int, current_label: string) -> BlockLoweringResult ![io] {
+fn lower_instruction_range(function: NativeFunction, start_index: int, end: int, llvm_return: string, bindings: ParameterBinding[], locals: LocalBinding[], allocas: string[], lines: string[], temp_index: int, block_counter: int, next_local_id: int, next_region_id: int, functions: NativeFunction[], loop_stack: LoopContext[], try_stack: TryFrameContext[], context: TypeContext, scope_id: string, scope_depth: int, current_label: string) -> BlockLoweringResult ![io] {
     let mut diagnostics: string[] = [];
     let mut current_lines: string[] = lines;
     let mut current_allocas: string[] = allocas;
@@ -68,6 +70,7 @@ fn lower_instruction_range(function: NativeFunction, start_index: int, end: int,
     let mut current_next_region: int = next_region_id;
     let mut terminated: boolean = false;
     let mut current_loop_stack: LoopContext[] = loop_stack;
+    let mut current_try_stack: TryFrameContext[] = try_stack;
     let mut index: int = start_index;
     let mut collected_lifetime_regions: LifetimeRegionMetadata[] = [];
     let mut current_mutations: LocalMutation[] = [];
@@ -321,7 +324,7 @@ fn lower_instruction_range(function: NativeFunction, start_index: int, end: int,
         }
         if !_tag_handled {
             if _instr_tag == 0 {
-                let lowered = lower_return_instruction(function, instruction, llvm_return, current_bindings, current_locals, current_temp, current_lines, current_next_region, scope_id, scope_depth, functions, context);
+                let lowered = lower_return_instruction(function, instruction, llvm_return, current_bindings, current_locals, current_temp, current_lines, current_next_region, scope_id, scope_depth, functions, context, current_try_stack);
                 current_temp = lowered.temp_index;
                 current_next_region = lowered.next_region_id;
                 // M1.5.5 (issue #329): capture the locals back so that the
@@ -346,7 +349,7 @@ fn lower_instruction_range(function: NativeFunction, start_index: int, end: int,
         if !_tag_handled {
             if _instr_tag == 3 {
                 let _pre_len = current_lines.length;
-                let lowered = lower_if_instruction(function, index, llvm_return, current_bindings, current_locals, current_allocas, current_lines, current_temp, current_block_counter, current_next_local, current_next_region, functions, current_loop_stack, end, context, scope_id, scope_depth, active_label);
+                let lowered = lower_if_instruction(function, index, llvm_return, current_bindings, current_locals, current_allocas, current_lines, current_temp, current_block_counter, current_next_local, current_next_region, functions, current_loop_stack, current_try_stack, end, context, scope_id, scope_depth, active_label);
                 let mut _ci0: int = 0;
                 loop {
                     if _ci0 >= lowered.diagnostics.length { break; }
@@ -373,7 +376,7 @@ fn lower_instruction_range(function: NativeFunction, start_index: int, end: int,
         if !_tag_handled {
             if _instr_tag == 8 {
                 let _pre_len = current_lines.length;
-                let lowered = lower_loop_instruction(function, index, llvm_return, current_bindings, current_locals, current_allocas, current_lines, current_temp, current_block_counter, current_next_local, current_next_region, functions, current_loop_stack, end, context, scope_id, scope_depth, active_label);
+                let lowered = lower_loop_instruction(function, index, llvm_return, current_bindings, current_locals, current_allocas, current_lines, current_temp, current_block_counter, current_next_local, current_next_region, functions, current_loop_stack, current_try_stack, end, context, scope_id, scope_depth, active_label);
                 let mut _ci1: int = 0;
                 loop {
                     if _ci1 >= lowered.diagnostics.length { break; }
@@ -400,7 +403,7 @@ fn lower_instruction_range(function: NativeFunction, start_index: int, end: int,
         if !_tag_handled {
             if _instr_tag == 22 {
                 let _pre_len = current_lines.length;
-                let lowered = lower_routine_instruction(function, index, llvm_return, current_bindings, current_locals, current_allocas, current_lines, current_temp, current_block_counter, current_next_local, current_next_region, functions, current_loop_stack, end, context, scope_id, scope_depth, active_label);
+                let lowered = lower_routine_instruction(function, index, llvm_return, current_bindings, current_locals, current_allocas, current_lines, current_temp, current_block_counter, current_next_local, current_next_region, functions, current_loop_stack, current_try_stack, end, context, scope_id, scope_depth, active_label);
                 let mut _cir: int = 0;
                 loop {
                     if _cir >= lowered.diagnostics.length { break; }
@@ -427,7 +430,7 @@ fn lower_instruction_range(function: NativeFunction, start_index: int, end: int,
         if !_tag_handled {
             if _instr_tag == 12 {
                 let _pre_len = current_lines.length;
-                let lowered = lower_match_instruction(function, index, llvm_return, current_bindings, current_locals, current_allocas, current_lines, current_temp, current_block_counter, current_next_local, current_next_region, functions, current_loop_stack, end, context, scope_id, scope_depth, active_label);
+                let lowered = lower_match_instruction(function, index, llvm_return, current_bindings, current_locals, current_allocas, current_lines, current_temp, current_block_counter, current_next_local, current_next_region, functions, current_loop_stack, current_try_stack, end, context, scope_id, scope_depth, active_label);
                 let mut _ci2: int = 0;
                 loop {
                     if _ci2 >= lowered.diagnostics.length { break; }
@@ -454,7 +457,7 @@ fn lower_instruction_range(function: NativeFunction, start_index: int, end: int,
         if !_tag_handled {
             if _instr_tag == 15 {
                 let _pre_len = current_lines.length;
-                let lowered = lower_try_instruction(function, index, llvm_return, current_bindings, current_locals, current_allocas, current_lines, current_temp, current_block_counter, current_next_local, current_next_region, functions, current_loop_stack, end, context, scope_id, scope_depth, active_label);
+                let lowered = lower_try_instruction(function, index, llvm_return, current_bindings, current_locals, current_allocas, current_lines, current_temp, current_block_counter, current_next_local, current_next_region, functions, current_loop_stack, current_try_stack, end, context, scope_id, scope_depth, active_label);
                 let mut _ci3: int = 0;
                 loop {
                     if _ci3 >= lowered.diagnostics.length { break; }
@@ -499,7 +502,7 @@ fn lower_instruction_range(function: NativeFunction, start_index: int, end: int,
         if !_tag_handled {
             if _instr_tag == 6 {
                 let _pre_len = current_lines.length;
-                let lowered = lower_for_instruction(function, index, llvm_return, current_bindings, current_locals, current_allocas, current_lines, current_temp, current_block_counter, current_next_local, current_next_region, functions, current_loop_stack, end, context, scope_id, scope_depth, active_label);
+                let lowered = lower_for_instruction(function, index, llvm_return, current_bindings, current_locals, current_allocas, current_lines, current_temp, current_block_counter, current_next_local, current_next_region, functions, current_loop_stack, current_try_stack, end, context, scope_id, scope_depth, active_label);
                 let mut _ci5: int = 0;
                 loop {
                     if _ci5 >= lowered.diagnostics.length { break; }
@@ -542,6 +545,32 @@ fn lower_instruction_range(function: NativeFunction, start_index: int, end: int,
                         _bd_i += 1;
                     }
                     current_temp = _break_result.next_temp;
+                    // SFN-400: `break` may cross one or more `try` bodies
+                    // opened inside this loop; their normal-exit pop
+                    // (`instructions_try.sfn`) never fires because the
+                    // branch leaves the try body directly. Pop each frame
+                    // whose enclosing scope is a descendant of the loop's
+                    // outer scope — a try opened outside the loop must not
+                    // be popped here.
+                    let mut _tf_bi: int = current_try_stack.length - 1;
+                    loop {
+                        if _tf_bi < 0 { break; }
+                        let _tf_b = current_try_stack[_tf_bi];
+                        if is_scope_descendant(loop_context.outer_scope_id, _tf_b.scope_id) {
+                            let _pop_b = emit_runtime_call("sfn_exception_pop_frame", [_tf_b.frame_operand], empty_runtime_call_overrides(), current_temp, current_lines);
+                            let mut _pop_b_di: int = 0;
+                            loop {
+                                if _pop_b_di >= _pop_b.diagnostics.length {
+                                    break;
+                                }
+                                diagnostics.push(_pop_b.diagnostics[_pop_b_di]);
+                                _pop_b_di += 1;
+                            }
+                            current_lines = _pop_b.lines;
+                            current_temp = _pop_b.temp_index;
+                        }
+                        _tf_bi -= 1;
+                    }
                     current_lines.push("  br label %" + loop_context.break_label);
                     terminated = true;
                 }
@@ -568,6 +597,27 @@ fn lower_instruction_range(function: NativeFunction, start_index: int, end: int,
                         _cd_i += 1;
                     }
                     current_temp = _cont_result.next_temp;
+                    // SFN-400: same reasoning as `break` above — pop only
+                    // the try frames opened inside this loop.
+                    let mut _tf_ci: int = current_try_stack.length - 1;
+                    loop {
+                        if _tf_ci < 0 { break; }
+                        let _tf_c = current_try_stack[_tf_ci];
+                        if is_scope_descendant(loop_context.outer_scope_id, _tf_c.scope_id) {
+                            let _pop_c = emit_runtime_call("sfn_exception_pop_frame", [_tf_c.frame_operand], empty_runtime_call_overrides(), current_temp, current_lines);
+                            let mut _pop_c_di: int = 0;
+                            loop {
+                                if _pop_c_di >= _pop_c.diagnostics.length {
+                                    break;
+                                }
+                                diagnostics.push(_pop_c.diagnostics[_pop_c_di]);
+                                _pop_c_di += 1;
+                            }
+                            current_lines = _pop_c.lines;
+                            current_temp = _pop_c.temp_index;
+                        }
+                        _tf_ci -= 1;
+                    }
                     current_lines.push("  br label %" + loop_context.continue_label);
                     terminated = true;
                 }

@@ -25,6 +25,7 @@ import {
     ScopeMetadata,
     StringConstant,
     ThrowLoweringResult,
+    TryFrameContext,
     TryStructure,
     TypeContext
 } from "../types";
@@ -42,6 +43,21 @@ import {
     extend_lifetime_regions
 } from "./instructions_helpers";
 import { get_instruction_tag } from "./lowering_native_helpers";
+
+// SFN-400: deep-copy-push a `TryFrameContext` onto the `try_stack`,
+// mirroring `append_loop_context` (instructions_loops.sfn) so the pushed
+// entry is visible only within the try body's own lowering call.
+fn append_try_frame(values: TryFrameContext[], value: TryFrameContext) -> TryFrameContext[] {
+    let mut out: TryFrameContext[] = [];
+    let mut i: int = 0;
+    loop {
+        if i >= values.length { break; }
+        out.push(values[i]);
+        i += 1;
+    }
+    out.push(value);
+    return out;
+}
 
 fn collect_try_structure(instructions: NativeInstruction[], start_index: int, end: int, function_name: string) -> TryStructure {
     let mut diagnostics: string[] = [];
@@ -211,7 +227,7 @@ fn lower_throw_instruction(function_name: string, instruction: NativeInstruction
     };
 }
 
-fn lower_try_instruction(function: NativeFunction, start_index: int, llvm_return: string, bindings: ParameterBinding[], locals: LocalBinding[], allocas: string[], lines: string[], temp_index: int, block_counter: int, next_local_id: int, next_region_id: int, functions: NativeFunction[], loop_stack: LoopContext[], end: int, context: TypeContext, scope_id: string, scope_depth: int, current_label: string) -> BlockLoweringResult ![io] {
+fn lower_try_instruction(function: NativeFunction, start_index: int, llvm_return: string, bindings: ParameterBinding[], locals: LocalBinding[], allocas: string[], lines: string[], temp_index: int, block_counter: int, next_local_id: int, next_region_id: int, functions: NativeFunction[], loop_stack: LoopContext[], try_stack: TryFrameContext[], end: int, context: TypeContext, scope_id: string, scope_depth: int, current_label: string) -> BlockLoweringResult ![io] {
     let mut diagnostics: string[] = [];
     let structure = collect_try_structure(function.instructions, start_index, end, function.name);
     let mut _ci2: int = 0;
@@ -388,7 +404,17 @@ fn lower_try_instruction(function: NativeFunction, start_index: int, llvm_return
     // Try block
     current_lines.push(try_label + ":");
     let try_scope_id = make_child_scope_id(scope_id, try_label);
-    let try_result = lower_instruction_range(function, structure.try_start, structure.try_end, llvm_return, current_bindings, current_locals, current_allocas, [], current_temp, current_block_counter, current_next_local, current_next_region, functions, loop_stack, context, try_scope_id, scope_depth
+    // SFN-400: push this try's frame onto the stack threaded into the
+    // BODY lowering only. The catch/finally bodies run after the frame
+    // is already off the chain (either via the normal-exit pop below or
+    // via `sfn_throw`'s pop-before-longjmp), so they keep the unchanged
+    // incoming `try_stack`.
+    let try_frame_ctx: TryFrameContext = TryFrameContext {
+        frame_operand: frame_operand,
+        scope_id: scope_id
+    };
+    let body_try_stack = append_try_frame(try_stack, try_frame_ctx);
+    let try_result = lower_instruction_range(function, structure.try_start, structure.try_end, llvm_return, current_bindings, current_locals, current_allocas, [], current_temp, current_block_counter, current_next_local, current_next_region, functions, loop_stack, body_try_stack, context, try_scope_id, scope_depth
         + 1, try_label);
     let mut _ci3: int = 0;
     loop {
@@ -485,7 +511,7 @@ fn lower_try_instruction(function: NativeFunction, start_index: int, llvm_return
             }
         }
 
-        let catch_result = lower_instruction_range(function, structure.catch_start, structure.catch_end, llvm_return, current_bindings, catch_locals, current_allocas, [], current_temp, current_block_counter, current_next_local, current_next_region, functions, loop_stack, context, catch_scope_id, scope_depth
+        let catch_result = lower_instruction_range(function, structure.catch_start, structure.catch_end, llvm_return, current_bindings, catch_locals, current_allocas, [], current_temp, current_block_counter, current_next_local, current_next_region, functions, loop_stack, try_stack, context, catch_scope_id, scope_depth
             + 1, catch_active_label);
         let mut _ci4: int = 0;
         loop {
@@ -544,7 +570,7 @@ fn lower_try_instruction(function: NativeFunction, start_index: int, llvm_return
     if structure.finally_index != -1 {
         current_lines.push(finally_label + ":");
         let finally_scope_id = make_child_scope_id(scope_id, finally_label);
-        let finally_result = lower_instruction_range(function, structure.finally_start, structure.finally_end, llvm_return, current_bindings, current_locals, current_allocas, [], current_temp, current_block_counter, current_next_local, current_next_region, functions, loop_stack, context, finally_scope_id, scope_depth
+        let finally_result = lower_instruction_range(function, structure.finally_start, structure.finally_end, llvm_return, current_bindings, current_locals, current_allocas, [], current_temp, current_block_counter, current_next_local, current_next_region, functions, loop_stack, try_stack, context, finally_scope_id, scope_depth
             + 1, finally_label);
         let mut _ci5: int = 0;
         loop {

@@ -28,6 +28,7 @@ import {
     LoopStructure,
     ParameterBinding,
     StringConstant,
+    TryFrameContext,
     TypeContext
 } from "../types";
 import {
@@ -53,7 +54,7 @@ import { collect_mutation_names, find_mutation_for_name } from "./phi";
 
 // Lower a range-based for loop (e.g., `for i in 0..10`).
 // Returns null if the iterable is not a recognized range pattern.
-fn lower_for_array(function: NativeFunction, structure: LoopStructure, raw_target: string, instruction: NativeInstruction, iterable_operand: LLVMOperand, llvm_return: string, bindings: ParameterBinding[], locals: LocalBinding[], allocas: string[], lines: string[], temp_index: int, block_counter: int, next_local_id: int, next_region_id: int, functions: NativeFunction[], loop_stack: LoopContext[], context: TypeContext, scope_id: string, scope_depth: int, next_index: int) -> BlockLoweringResult ![io] {
+fn lower_for_array(function: NativeFunction, structure: LoopStructure, raw_target: string, instruction: NativeInstruction, iterable_operand: LLVMOperand, llvm_return: string, bindings: ParameterBinding[], locals: LocalBinding[], allocas: string[], lines: string[], temp_index: int, block_counter: int, next_local_id: int, next_region_id: int, functions: NativeFunction[], loop_stack: LoopContext[], try_stack: TryFrameContext[], context: TypeContext, scope_id: string, scope_depth: int, next_index: int) -> BlockLoweringResult ![io] {
     let mut diagnostics: string[] = [];
     let mut current_lines: string[] = lines;
     let mut current_allocas: string[] = allocas;
@@ -215,7 +216,7 @@ fn lower_for_array(function: NativeFunction, structure: LoopStructure, raw_targe
         narrowed_variant: ""
     };
     let body_locals = append_local_binding(current_locals, iteration_binding);
-    let body_result = lower_instruction_range(function, structure.body_start, structure.body_end, llvm_return, current_bindings, body_locals, current_allocas, [], current_temp, current_block_counter, current_next_local, current_next_region, functions, stacked, context, element_loop_scope_id, scope_depth
+    let body_result = lower_instruction_range(function, structure.body_start, structure.body_end, llvm_return, current_bindings, body_locals, current_allocas, [], current_temp, current_block_counter, current_next_local, current_next_region, functions, stacked, try_stack, context, element_loop_scope_id, scope_depth
         + 1, loop_body_label);
     let mut _ci24: int = 0;
     loop {
@@ -332,7 +333,7 @@ fn lower_for_array(function: NativeFunction, structure: LoopStructure, raw_targe
 }
 
 // Shared helper: build exit mutations for loop locals after the loop exit label.
-fn lower_for_instruction(function: NativeFunction, start_index: int, llvm_return: string, bindings: ParameterBinding[], locals: LocalBinding[], allocas: string[], lines: string[], temp_index: int, block_counter: int, next_local_id: int, next_region_id: int, functions: NativeFunction[], loop_stack: LoopContext[], end: int, context: TypeContext, scope_id: string, scope_depth: int, current_label: string) -> BlockLoweringResult ![io] {
+fn lower_for_instruction(function: NativeFunction, start_index: int, llvm_return: string, bindings: ParameterBinding[], locals: LocalBinding[], allocas: string[], lines: string[], temp_index: int, block_counter: int, next_local_id: int, next_region_id: int, functions: NativeFunction[], loop_stack: LoopContext[], try_stack: TryFrameContext[], end: int, context: TypeContext, scope_id: string, scope_depth: int, current_label: string) -> BlockLoweringResult ![io] {
     let mut diagnostics: string[] = [];
     let mut current_lines: string[] = lines;
     let mut current_allocas: string[] = allocas;
@@ -431,7 +432,7 @@ fn lower_for_instruction(function: NativeFunction, start_index: int, llvm_return
     }
 
     // Try range-based for loop first.
-    let range_result = lower_for_range(function, structure, raw_target, for_iterable_text, llvm_return, bindings, locals, allocas, lines, temp_index, block_counter, next_local_id, next_region_id, functions, loop_stack, context, scope_id, scope_depth, next_index);
+    let range_result = lower_for_range(function, structure, raw_target, for_iterable_text, llvm_return, bindings, locals, allocas, lines, temp_index, block_counter, next_local_id, next_region_id, functions, loop_stack, try_stack, context, scope_id, scope_depth, next_index);
     if range_result != null { return range_result; }
 
     // Fall through to array-based for loop.
@@ -505,5 +506,5 @@ fn lower_for_instruction(function: NativeFunction, start_index: int, llvm_return
         };
     }
 
-    return lower_for_array(function, structure, raw_target, instruction, iterable_operand, llvm_return, bindings, locals, allocas, current_lines, current_temp, current_block_counter, current_next_local, current_next_region, functions, loop_stack, context, scope_id, scope_depth, next_index);
+    return lower_for_array(function, structure, raw_target, instruction, iterable_operand, llvm_return, bindings, locals, allocas, current_lines, current_temp, current_block_counter, current_next_local, current_next_region, functions, loop_stack, try_stack, context, scope_id, scope_depth, next_index);
 }

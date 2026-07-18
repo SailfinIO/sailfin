@@ -48,6 +48,7 @@ import {
     StringConstant,
     StructFieldInfo,
     StructTypeInfo,
+    TryFrameContext,
     TypeContext
 } from "../types";
 import {
@@ -265,7 +266,7 @@ fn is_default_pattern(pattern: string) -> boolean {
     return false;
 }
 
-fn lower_match_instruction(function: NativeFunction, start_index: int, llvm_return: string, bindings: ParameterBinding[], locals: LocalBinding[], allocas: string[], lines: string[], temp_index: int, block_counter: int, next_local_id: int, next_region_id: int, functions: NativeFunction[], loop_stack: LoopContext[], end: int, context: TypeContext, scope_id: string, scope_depth: int, current_label: string) -> BlockLoweringResult ![io] {
+fn lower_match_instruction(function: NativeFunction, start_index: int, llvm_return: string, bindings: ParameterBinding[], locals: LocalBinding[], allocas: string[], lines: string[], temp_index: int, block_counter: int, next_local_id: int, next_region_id: int, functions: NativeFunction[], loop_stack: LoopContext[], try_stack: TryFrameContext[], end: int, context: TypeContext, scope_id: string, scope_depth: int, current_label: string) -> BlockLoweringResult ![io] {
     let mut diagnostics: string[] = [];
     let mut current_lines: string[] = lines;
     let base_lines_snapshot = copy_string_array(lines);
@@ -784,7 +785,7 @@ fn lower_match_instruction(function: NativeFunction, start_index: int, llvm_retu
             }
         }
 
-        let body_result = lower_instruction_range(function, case.body_start, case.body_end, llvm_return, bindings, base_locals, base_allocas, [], current_temp, current_block_counter, base_local_id, current_next_region, functions, loop_stack, context, make_child_scope_id(scope_id, body_labels[index]), scope_depth
+        let body_result = lower_instruction_range(function, case.body_start, case.body_end, llvm_return, bindings, base_locals, base_allocas, [], current_temp, current_block_counter, base_local_id, current_next_region, functions, loop_stack, try_stack, context, make_child_scope_id(scope_id, body_labels[index]), scope_depth
             + 1, body_labels[index]);
         let mut _ci3: int = 0;
         loop {
