@@ -42,7 +42,7 @@ import {
     Statement,
     TypeAnnotation
 } from "./ast";
-import { strings_equal } from "./string_utils";
+import { ends_with, strings_equal } from "./string_utils";
 
 // One scope-visible binding the walk has accumulated so far.
 // Mirrors the data the unit tests need to verify (`type_text`,
@@ -335,11 +335,26 @@ fn walk_expression(scope: LocalBinding[], expression: Expression?) -> CaptureWal
         return merge_results(target, rhs);
     }
     if expression.variant == "Call" {
+        // SFN-396: for an array/range HOF call whose callback is an
+        // un-annotated lambda (`xs.map(fn (x) -> int { ... })`), seed the
+        // callback parameters' `type_text` from the receiver's element type so
+        // a NESTED lambda that captures such a parameter lays out the real
+        // scalar env field instead of the conservative `i8*` fallback.
+        let inferred = _hof_callback_param_types(scope, expression);
         let mut result = walk_expression(scope, expression.callee);
         let mut i: int = 0;
         loop {
             if i >= expression.arguments.length { break; }
-            result = merge_results(result, walk_expression(scope, expression.arguments[i]));
+            let arg = expression.arguments[i];
+            if arg.variant == "Lambda" {
+                if inferred.length > 0 {
+                    result = merge_results(result, analyze_lambda_typed(scope, arg, inferred));
+                } else {
+                    result = merge_results(result, walk_expression(scope, arg));
+                }
+            } else {
+                result = merge_results(result, walk_expression(scope, arg));
+            }
             i += 1;
         }
         return result;
@@ -421,7 +436,16 @@ fn walk_expression(scope: LocalBinding[], expression: Expression?) -> CaptureWal
 // (issue #520), so `body.statements` is populated and we walk it
 // directly — no re-parse of `body.tokens` is needed.
 fn analyze_lambda(outer_scope: LocalBinding[], lambda: Expression) -> CaptureWalkResult {
-    let inner_scope = extend_with_parameters(outer_scope, lambda.parameters);
+    let no_types: string[] = [];
+    return analyze_lambda_typed(outer_scope, lambda, no_types);
+}
+
+// As `analyze_lambda`, but seeds un-annotated parameters with inferred
+// `type_text` (SFN-396). `inferred_param_types` is positional to the lambda's
+// parameters (empty string = no inference for that position); an explicit
+// annotation always wins over an inferred type.
+fn analyze_lambda_typed(outer_scope: LocalBinding[], lambda: Expression, inferred_param_types: string[]) -> CaptureWalkResult {
+    let inner_scope = extend_with_parameters_typed(outer_scope, lambda.parameters, inferred_param_types);
     let body_result = walk_block(inner_scope, lambda.body);
 
     let param_names = parameter_names(lambda.parameters);
@@ -505,17 +529,6 @@ fn find_binding(scope: LocalBinding[], name: string) -> LocalBinding? {
     return found;
 }
 
-fn binding_from_parameter(p: Parameter) -> LocalBinding {
-    let type_text = type_annotation_text(p.type_annotation);
-    return LocalBinding {
-        name: p.name,
-        type_text: type_text,
-        by_value: is_primitive_type(type_text),
-        mutable: p.mutable,
-        span: p.span
-    };
-}
-
 fn binding_from_let(scope: LocalBinding[], stmt: Statement) -> LocalBinding {
     let mut type_text = type_annotation_text(stmt.type_annotation);
     // #1610: an un-annotated `let base = 100` carries no `type_annotation`,
@@ -584,6 +597,15 @@ fn infer_let_initializer_type(scope: LocalBinding[], initializer: Expression?) -
         let elem = _capture_indexed_element_type(scope, initializer);
         if elem.length > 0 { return elem; }
     }
+    // SFN-396: an un-annotated `let colsA = a[0].length` captured by a nested
+    // lambda needs `int` — `.length`/`.len` on an array or string lowers to an
+    // `i64` extractvalue (`core_member_lowering.sfn`), so without this the env
+    // field falls back to `i8*` while the stored value is an `i64` (the same
+    // `store i8* %v, i8** ...` invalid-IR failure #1839 fixed for `arr[i]`).
+    if initializer.variant == "Member" {
+        let len_type = _capture_length_member_type(scope, initializer);
+        if len_type.length > 0 { return len_type; }
+    }
     // #1839: an un-annotated `let p = q` inherits `q`'s known primitive type
     // for the same reason — a scalar capture must not fall through to `i8*`.
     if initializer.variant == "Identifier" {
@@ -651,6 +673,53 @@ fn _primitive_array_element_type(type_text: string) -> string {
     return "";
 }
 
+// "int" when `member_expr` is `<array|string>.length` — an array/string
+// `.length` lowers to an `i64` extractvalue (`core_member_lowering.sfn`), so
+// the capture must lay out an `i64` env field, not the `i8*` fallback
+// (SFN-396). Restricted to array/string receivers so a user struct field
+// literally named `length` keeps the conservative fallback rather than being
+// mis-typed as `int`. Only `.length` is an array/string accessor (`.len` on a
+// struct is an ordinary field of arbitrary type, excluded by the receiver
+// gate), so it is not accepted here.
+fn _capture_length_member_type(scope: LocalBinding[], member_expr: Expression) -> string {
+    if !strings_equal(member_expr.member, "length") { return ""; }
+    let receiver_type = _capture_receiver_type_text(scope, member_expr.object);
+    if receiver_type.length == 0 { return ""; }
+    if strings_equal(receiver_type, "string") { return "int"; }
+    if ends_with(receiver_type, "[]") { return "int"; }
+    return "";
+}
+
+// Best-effort declared type text of a receiver expression, for `.length`
+// recovery (SFN-396). Handles the shapes that reach a captured length: an
+// identifier bound in scope (`xs.length`), one index level (`a[0].length`,
+// where the element type is the base type minus a trailing `[]`), and a direct
+// array literal (`[1, 2].length`). Returns "" for anything else.
+fn _capture_receiver_type_text(scope: LocalBinding[], expr: Expression?) -> string {
+    if expr == null { return ""; }
+    if expr.variant == "Identifier" {
+        let binding = find_binding(scope, expr.name);
+        if binding == null { return ""; }
+        return binding.type_text;
+    }
+    if expr.variant == "Index" {
+        let base = expr.sequence;
+        if base == null { return ""; }
+        if base.variant != "Identifier" { return ""; }
+        let binding = find_binding(scope, base.name);
+        if binding == null { return ""; }
+        let base_type = binding.type_text;
+        if ends_with(base_type, "[]") {
+            return substring(base_type, 0, base_type.length - 2);
+        }
+        return "";
+    }
+    if expr.variant == "Array" {
+        return _capture_array_literal_type(scope, expr);
+    }
+    return "";
+}
+
 // `digits` -> `int`, `digits.digits` -> `float`. The lexer emits no
 // scientific / hex / octal forms, so the presence of `.` is sufficient
 // (matches `_number_literal_kind` in `emit_native_format.sfn`).
@@ -664,7 +733,80 @@ fn number_literal_kind(value: string) -> string {
     return "int";
 }
 
+// SFN-396: infer the `type_text` of an un-annotated array/range HOF callback
+// parameter so a capture of that parameter by a NESTED lambda lays out the real
+// scalar env field instead of the `i8*` fallback. Without it,
+// `cols.map(fn (col) -> int { ks.reduce(0, fn (acc, k) -> int { ...col... }) })`
+// captures `col` (the outer callback's un-annotated param) into the inner
+// lambda with an empty `type_text`; `closure_field_llvm_type` then lays it out
+// as `i8*` while the stored value is the `i64` element, emitting
+// `store i8* %col, i8** ...` — invalid IR rejected at link.
+//
+// Mirrors the emitter's `array_builtin_expected_fn_type` / `receiver_element_type`
+// (`llvm/expression_lowering/native/lambda_param_inference.sfn`), kept local to
+// avoid a typecheck -> emit module dependency (as the #1610 literal recovery
+// does). The shipped array/range HOF mapper bodies are `int`-element only, so
+// inference is `int`-gated and agrees with the param type the emitter assigns
+// the lifted callback. Returns one entry per callback parameter position (empty
+// string = no inference); an empty result means "not an applicable HOF call".
+fn _hof_callback_param_types(scope: LocalBinding[], call: Expression) -> string[] {
+    let empty: string[] = [];
+    let callee = call.callee;
+    if callee == null { return empty; }
+    if callee.variant != "Member" { return empty; }
+    if _hof_receiver_int_element(scope, callee.object) != "int" { return empty; }
+    let method = callee.member;
+    if method == "map" {
+        let out: string[] = ["int"];
+        return out;
+    }
+    if method == "filter" {
+        let out: string[] = ["int"];
+        return out;
+    }
+    if method == "reduce" {
+        // `reduce(init, fn(acc, elem) -> acc)` — for an int-element receiver
+        // both callback params are `int` (mirrors `fn(int, int) -> int`).
+        let out: string[] = ["int", "int"];
+        return out;
+    }
+    return empty;
+}
+
+// "int" when `receiver` is an int-element array — an identifier bound to
+// `int[]`, an all-int-literal array literal, or a range (`(a..b)` materializes
+// to `int[]`) — else "". Mirrors the emitter's `receiver_element_type`,
+// restricted to the `int` element the shipped HOF mapper bodies support
+// (SFN-396).
+fn _hof_receiver_int_element(scope: LocalBinding[], receiver: Expression?) -> string {
+    if receiver == null { return ""; }
+    if receiver.variant == "Identifier" {
+        let binding = find_binding(scope, receiver.name);
+        if binding == null { return ""; }
+        if _primitive_array_element_type(binding.type_text) == "int" {
+            return "int";
+        }
+        return "";
+    }
+    if receiver.variant == "Array" {
+        if strings_equal(_capture_array_literal_type(scope, receiver), "int[]") {
+            return "int";
+        }
+        return "";
+    }
+    if receiver.variant == "Range" { return "int"; }
+    return "";
+}
+
 fn extend_with_parameters(scope: LocalBinding[], parameters: Parameter[]) -> LocalBinding[] {
+    let no_types: string[] = [];
+    return extend_with_parameters_typed(scope, parameters, no_types);
+}
+
+// As `extend_with_parameters`, but backfills each un-annotated parameter's
+// `type_text` from `inferred` (positional; empty string = leave empty). An
+// explicit annotation always wins (SFN-396).
+fn extend_with_parameters_typed(scope: LocalBinding[], parameters: Parameter[], inferred: string[]) -> LocalBinding[] {
     let mut out: LocalBinding[] = [];
     let mut i: int = 0;
     loop {
@@ -675,10 +817,26 @@ fn extend_with_parameters(scope: LocalBinding[], parameters: Parameter[]) -> Loc
     let mut j: int = 0;
     loop {
         if j >= parameters.length { break; }
-        out.push(binding_from_parameter(parameters[j]));
+        out.push(_param_binding_with_inferred(parameters[j], inferred, j));
         j += 1;
     }
     return out;
+}
+
+fn _param_binding_with_inferred(p: Parameter, inferred: string[], index: int) -> LocalBinding {
+    let mut type_text = type_annotation_text(p.type_annotation);
+    if type_text.length == 0 {
+        if index < inferred.length {
+            if inferred[index].length > 0 { type_text = inferred[index]; }
+        }
+    }
+    return LocalBinding {
+        name: p.name,
+        type_text: type_text,
+        by_value: is_primitive_type(type_text),
+        mutable: p.mutable,
+        span: p.span
+    };
 }
 
 fn extend_with_for_target(scope: LocalBinding[], target: Expression) -> LocalBinding[] {
