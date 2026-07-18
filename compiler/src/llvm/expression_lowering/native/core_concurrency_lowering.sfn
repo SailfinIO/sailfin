@@ -1117,7 +1117,7 @@ fn lower_await_expression(stripped: string, bindings: ParameterBinding[], locals
     let future_operand = lowered.operand;
     let await_symbol = await_symbol_for_future_pointer_type(future_operand.llvm_type);
     if await_symbol.length == 0 {
-        let with_issue = append_string(diagnostics, "llvm lowering: await expects a Future pointer, got `"
+        let with_issue = append_string(diagnostics, "[fatal] llvm lowering: await expects a Future pointer, got `"
             + future_operand.llvm_type
             + "`");
         return ExpressionResult {

@@ -69,6 +69,7 @@ import {
     make_nested_fn_capture_diagnostic,
     make_parse_error_diagnostic,
     make_removed_keyword_diagnostic,
+    make_spawn_handle_into_empty_array_diagnostic,
     make_spawn_unresolvable_kind_diagnostic,
     make_thread_local_requires_mut_diagnostic,
     make_try_error_type_mismatch_diagnostic,
@@ -545,6 +546,19 @@ fn check_statement(statement: Statement, ctx: TypeckCtx) -> ScopeResult {
             let resolved = channel_element_kind(statement.type_annotation.text);
             if resolved != null { elem_kind = resolved; }
         }
+        // An unannotated `let mut hs = []` bakes the array's LLVM element type
+        // as `double` (empty literal, no inference target); tag it "empty_array"
+        // so `push_spawn_handle_diagnostics` can reject a later `.push(spawn ...)`
+        // before a future pointer is stored through that double slot (E0823,
+        // SFN-386). The lambda-body twin lives in `walk_block_expressions`.
+        if elem_kind.length == 0 {
+            if statement.type_annotation == null {
+                let init = statement.initializer;
+                if init != null && strings_equal(init.variant, "Array") && init.elements.length == 0 {
+                    elem_kind = "empty_array";
+                }
+            }
+        }
         let mut decl_prim: string = "";
         if statement.type_annotation != null {
             decl_prim = classify_declared_primitive(statement.type_annotation.text);
@@ -821,6 +835,17 @@ fn check_statement(statement: Statement, ctx: TypeckCtx) -> ScopeResult {
         return ScopeResult { bindings: bindings, diagnostics: diagnostics };
     }
     if statement.variant == "BlockStatement" {
+        return ScopeResult {
+            bindings: bindings,
+            diagnostics: check_block(statement.body, ctx_with_bindings(ctx, bindings, scope_start))
+        };
+    }
+    // `routine { ... }` is a block scope like any other (LoopStatement/
+    // BlockStatement shaped, ast.sfn); descend into its body so its statements
+    // are type/effect-checked and binding-scoped — without this, a `routine`
+    // body bypassed the checker entirely and its `spawn`/handle-array defects
+    // (E0823, SFN-386) surfaced only as invalid IR at build time.
+    if statement.variant == "RoutineStatement" {
         return ScopeResult {
             bindings: bindings,
             diagnostics: check_block(statement.body, ctx_with_bindings(ctx, bindings, scope_start))
@@ -1387,6 +1412,9 @@ fn walk_expression(expression: Expression?, ctx: TypeckCtx) -> Diagnostic[] {
         // element type -> E0815 (#1942). Silent unless the mismatch is
         // certain (see `channel_send_diagnostics`).
         diagnostics = diagnostics.concat(channel_send_diagnostics(expression, bindings));
+        // `hs.push(spawn ...)` on an inferred-empty `[]`-tagged receiver ->
+        // E0823 (SFN-386). See `push_spawn_handle_diagnostics`.
+        diagnostics = diagnostics.concat(push_spawn_handle_diagnostics(expression, bindings));
         // `field.to_uppercase()` on a proven primitive receiver whose method
         // resolves to neither a primitive method descriptor nor a free callable
         // -> E0012 (SFN-385). Silent unless the receiver's primitive kind is
@@ -1926,6 +1954,9 @@ fn channel_send_diagnostics(expression: Expression, bindings: SymbolEntry[]) -> 
     let entry = find_symbol(bindings, receiver.name);
     if entry == null { return []; }
     if entry.element_kind.length == 0 { return []; }
+    // "empty_array" is the push_spawn_handle_diagnostics sentinel, not a real
+    // Channel<T> element kind — it never carries a channel here.
+    if strings_equal(entry.element_kind, "empty_array") { return []; }
     // `ptr` is the indeterminate catch-all `spawn_future_kind` assigns to every
     // non-primitive element (user type, alias, generic parameter, fn-type), so
     // a `Channel<T>` whose `T` is not one of the five determinate primitive
@@ -1938,6 +1969,27 @@ fn channel_send_diagnostics(expression: Expression, bindings: SymbolEntry[]) -> 
     let sent_kind = channel_send_value_kind(expression.arguments[0]);
     if sent_kind == null { return []; }
     return check_channel_send(entry.element_kind, sent_kind, expression.span);
+}
+
+// Element-type check for a `.push(spawn ...)` call (SFN-386 / E0823). Fires
+// only when the receiver resolves to an unannotated, inferred-empty `[]`
+// binding (the "empty_array" sentinel from `walk_block_expressions`) and the
+// pushed argument is exactly one `spawn` expression — the pattern whose
+// double-slot element type corrupts the pushed future pointer.
+fn push_spawn_handle_diagnostics(expression: Expression, bindings: SymbolEntry[]) -> Diagnostic[] {
+    let callee = expression.callee;
+    if callee == null { return []; }
+    if !strings_equal(callee.variant, "Member") { return []; }
+    if !strings_equal(callee.member, "push") { return []; }
+    let receiver = callee.object;
+    if receiver == null { return []; }
+    if !strings_equal(receiver.variant, "Identifier") { return []; }
+    let entry = find_symbol(bindings, receiver.name);
+    if entry == null { return []; }
+    if !strings_equal(entry.element_kind, "empty_array") { return []; }
+    if expression.arguments.length != 1 { return []; }
+    if !strings_equal(expression.arguments[0].variant, "Spawn") { return []; }
+    return [make_spawn_handle_into_empty_array_diagnostic(receiver.name, expression.span)];
 }
 
 // SFN-385: reject `recv.method(...)` on a primitive receiver whose method is
@@ -2131,6 +2183,20 @@ fn walk_block_expressions(block: Block, ctx: TypeckCtx) -> Diagnostic[] {
                 let awaited = await_receive_result_kind(statement.initializer, bindings);
                 if awaited != null { elem_kind = awaited; }
             }
+            // An unannotated `let mut hs = []` bakes the array's LLVM element
+            // type as `double` (empty literal, no inference target); tag it
+            // "empty_array" so `push_spawn_handle_diagnostics` can reject a
+            // later `.push(spawn ...)` before a future pointer is stored
+            // through that double slot (E0823, SFN-386).
+            if elem_kind.length == 0 {
+                if statement.type_annotation == null {
+                    let init = statement.initializer;
+                    if init != null && strings_equal(init.variant, "Array")
+                        && init.elements.length == 0 {
+                        elem_kind = "empty_array";
+                    }
+                }
+            }
             let registration = register_local_symbol(bindings, statement.name, "variable", statement.span, scope_start, false, false, elem_kind);
             bindings = registration.bindings;
         }
@@ -2213,6 +2279,11 @@ fn walk_statement_expressions(statement: Statement, ctx: TypeckCtx) -> Diagnosti
         return walk_block_expressions(statement.body, ctx);
     }
     if statement.variant == "BlockStatement" {
+        return walk_block_expressions(statement.body, ctx);
+    }
+    // A `routine { ... }` nested in a lambda body — the twin of the
+    // `check_statement` RoutineStatement arm (E0823, SFN-386).
+    if statement.variant == "RoutineStatement" {
         return walk_block_expressions(statement.body, ctx);
     }
     if statement.variant == "TryStatement" {
