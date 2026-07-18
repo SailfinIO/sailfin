@@ -85,19 +85,19 @@ test "assign: member lvalue structures with a Member target" ![io] {
 // Effect attribution: an assignment walks BOTH its target and value.
 // -------------------------------------------------------------------
 test "assign: value-side io surfaces" ![io] {
-    assert _reqs_contain(_assign_reqs("a = print.info(\"x\")"), "io");
+    assert _reqs_contain(_assign_reqs("a = print.info(\"x\")"), "io.console");
 }
 
 test "assign: value-side net surfaces" ![io] {
-    assert _reqs_contain(_assign_reqs("a = http.get(\"u\")"), "net");
+    assert _reqs_contain(_assign_reqs("a = http.get(\"u\")"), "net.http");
 }
 
 test "assign: target-side (index) io surfaces" ![io] {
-    assert _reqs_contain(_assign_reqs("arr[print.info(\"x\")] = 5"), "io");
+    assert _reqs_contain(_assign_reqs("arr[print.info(\"x\")] = 5"), "io.console");
 }
 
 test "assign: compound value-side io surfaces" ![io] {
-    assert _reqs_contain(_assign_reqs("total += print.info(\"x\")"), "io");
+    assert _reqs_contain(_assign_reqs("total += print.info(\"x\")"), "io.console");
 }
 
 // -------------------------------------------------------------------

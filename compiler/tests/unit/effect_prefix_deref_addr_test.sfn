@@ -70,15 +70,15 @@ test "prefix: address-of `&` structures into Unary" ![io] {
 
 // ── Effect attribution: the Unary arm walks the operand ──
 test "prefix: deref over an io call surfaces io" ![io] {
-    assert _reqs_contain(_prefix_reqs("*print.info(\"x\")"), "io");
+    assert _reqs_contain(_prefix_reqs("*print.info(\"x\")"), "io.console");
 }
 
 test "prefix: address-of over an io call surfaces io" ![io] {
-    assert _reqs_contain(_prefix_reqs("&print.info(\"x\")"), "io");
+    assert _reqs_contain(_prefix_reqs("&print.info(\"x\")"), "io.console");
 }
 
 test "prefix: address-of over a net call surfaces net" ![io] {
-    assert _reqs_contain(_prefix_reqs("&http.get(\"u\")"), "net");
+    assert _reqs_contain(_prefix_reqs("&http.get(\"u\")"), "net.http");
 }
 
 // ── No false positive: a prefix op over an effect-free operand ──

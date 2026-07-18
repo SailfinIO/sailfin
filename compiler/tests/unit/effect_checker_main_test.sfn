@@ -157,7 +157,7 @@ test "effect violation: fn main() without ![io] still flags print.info" {
     let mut i: int = 0;
     loop {
         if i >= v.missing_effects.length { break; }
-        if v.missing_effects[i] == "io" { found_io = true; }
+        if v.missing_effects[i] == "io.console" { found_io = true; }
         i += 1;
     }
     assert found_io;

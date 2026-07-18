@@ -303,6 +303,15 @@ here.
   to a structured `Is` AST node (not `Expression.Raw`), and the effect checker
   walks the operand — so `readFile() is T` correctly requires `![io]`. Effect
   polymorphism (`!E` variables, polymorphic HOFs) remains post-1.0.
+- **Sub-effect detection + manifest tightening** (SFEP-0017 §6, gate G7,
+  SFN-98/SFN-99): the runtime-helper registry attributes narrow sub-effects for
+  four families — `fs.*` → `io.fs`, `print.*`/`console.*` → `io.console`,
+  `http.*` → `net.http`, `websocket.*` → `net.ws` — as refinements within the
+  locked six roots (`io.fs ⊑ io`). A bare-root grant subsumes every narrow
+  requirement, so existing `![io]`/`![net]` annotations are unaffected; a
+  narrow grant (`![io.fs]`) is independently sufficient, and
+  `[capabilities] required = ["io.fs"]` tightens a capsule's authorized
+  surface (`E0403` on a sibling `![io.console]`).
 - **`websocket.*` runtime bridge** (epic #1180 Phase G): the `websocket.connect`/
   `.send`/`.close`/`.serve` registry rows in `runtime_helpers.sfn` now point at
   real `sfn_websocket_*` symbols in `runtime/sfn/adapters/websocket.sfn` — the
@@ -393,6 +402,7 @@ here.
 | Effect annotations (`![...]`) | Shipped | |
 | Effect enforcement — `io`, `net`, `clock` | **Enforced** | Build fails on undeclared use (Phase D default `error`) |
 | Effect enforcement — `model` | Reserved | Declarable; detector lands with the `sfn/ai` capsule (post-1.0) |
+| Effect enforcement — sub-effects (`io.fs`, `io.console`, `net.http`, `net.ws`) | **Enforced** | Detection attributes narrow sub-effects; bare-root grants subsume (backward compatible); narrow grants + manifest tightening (`required = ["io.fs"]`, `E0403`); SFEP-0017 §6/G7, SFN-99 |
 | Effect enforcement — `gpu` | Parsed only | Reserved in the taxonomy; no detectors yet |
 | Effect enforcement — `rand` | **Enforced** (entropy boundary) | `sfn/crypto::random_bytes` (SFEP-0048 Phase D) establishes the `![rand]` boundary end-to-end: it propagates to callers via the existing callee-effect propagation and a caller without `![rand]` fails effect-check. Scope: only `random_bytes` carries the effect — there is still no auto call-name detector for arbitrary RNG identifiers |
 | Cross-module effect propagation | **Shipped** | `E0402` (Phase E); E2 deferred |
