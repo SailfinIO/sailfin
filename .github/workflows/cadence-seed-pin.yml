@@ -1,8 +1,9 @@
 name: Cadence Seed Pin
 
-# After the release train cuts a new minor alpha, open a draft PR that adopts
-# that just-published toolchain as the compiler checkout seed. The canonical pin
-# is `bootstrap.toml [seed].version` (SFEP-0047), alongside the compiler
+# After ANY release publishes assets, open a PR that adopts that just-published
+# toolchain as the compiler checkout seed, and auto-merge it once its CI is
+# green so the seed advances without a manual step. The canonical pin is
+# `bootstrap.toml [seed].version` (SFEP-0047), alongside the compiler
 # `[toolchain].sfn` floor in `compiler/capsule.toml`.
 
 on:
@@ -12,7 +13,7 @@ on:
   workflow_dispatch:
     inputs:
       tag:
-        description: "Released cadence alpha tag to pin, e.g. v0.9.0-alpha.1"
+        description: "Released tag to pin, e.g. v0.9.0"
         required: true
 
 permissions:
@@ -74,18 +75,13 @@ jobs:
             SLACK_TEXT="$1" python3 - <<'PY' > /tmp/slack-payload.json
           import json
           import os
-          print(json.dumps({"text": os.environ["SLACK_TEXT"]}))
+          print(json.dumps({"text": os.environ["SLACK_TEXT"].replace("\\n", "\n")}))
           PY
             curl -fsS -X POST \
               -H 'Content-type: application/json' \
               --data @/tmp/slack-payload.json \
               "$SLACK_RELEASE_WEBHOOK_URL" >/dev/null || true
           }
-
-          if [[ ! "$VERSION" =~ ^[0-9]+\.[0-9]+\.0-alpha\.1$ ]]; then
-            echo "[seed-pin] $VERSION is not a cadence minor alpha (*.0-alpha.1); skipping automatic seed-pin PR."
-            exit 0
-          fi
 
           source_version="$(sed -n 's/^version *= *"\([^"]*\)"/\1/p' compiler/capsule.toml)"
           if [ "$source_version" != "$VERSION" ]; then
@@ -170,13 +166,23 @@ jobs:
           EOF
 
           pr_url="$(gh pr create \
-            --draft \
             --base main \
             --head "$branch" \
             --title "chore(seed): pin cadence seed to ${VERSION}" \
             --body-file "$body")"
           echo "$pr_url"
-          post_slack ":seedling: Sailfin cadence seed-pin PR opened for ${VERSION}.\nPR: ${pr_url}\nRelease: https://github.com/${GITHUB_REPOSITORY}/releases/tag/${TAG}"
+
+          # Auto-merge once the pin PR's own CI is green — the seed must advance
+          # without a manual merge, but pinning a seed that cannot build main is
+          # exactly what CI on this PR guards against. If the repo does not allow
+          # auto-merge the PR is left open for manual merge (never silently lost).
+          if gh pr merge "$pr_url" --auto --squash; then
+            echo "[seed-pin] auto-merge enabled for ${pr_url}."
+            post_slack ":seedling: Sailfin seed-pin PR opened for ${VERSION} (auto-merge on green CI).\nPR: ${pr_url}\nRelease: https://github.com/${GITHUB_REPOSITORY}/releases/tag/${TAG}"
+          else
+            echo "::warning::Could not enable auto-merge for ${pr_url}; leaving it open for manual merge."
+            post_slack ":seedling: Sailfin seed-pin PR opened for ${VERSION} — auto-merge unavailable, needs a manual merge.\nPR: ${pr_url}\nRelease: https://github.com/${GITHUB_REPOSITORY}/releases/tag/${TAG}"
+          fi
 
       - name: Notify Slack on seed-pin failure
         if: failure()

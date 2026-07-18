@@ -408,16 +408,29 @@ Examples are compiler-only unless marked with future-syntax comments.
   `capsule.toml` at runtime; for local dev builds it reads `build_stamp.sfn`'s
   `build/native/.build-stamp` first; installed binaries fall back to
   `__version_fallback__`.
-- **Release automation:** `.github/workflows/release.yml` (manual
-  `workflow_dispatch`, pure bash). Release notes: `.github/workflows/release-notes.md`.
-- **Seed pinning is separate from release cutting** — `bootstrap.toml [seed].version` is bumped by
-  `/pin-seed` after `release-tag.yml` uploads binaries, never by `release.yml`.
-  The `seed-blocker` label tracks "must close before next seed bump" issues.
+- **Release automation:** stable minor releases are cut **automatically** on a
+  **weekly** cadence by `.github/workflows/release-train.yml` whenever `main`
+  is green — a `nightly-selfhost.yml` run whose `head_sha` equals current
+  `main` HEAD succeeded (the gate binds to the exact commit being tagged;
+  per-commit CI is already guaranteed by the merge queue). Open release scope always rolls
+  forward and never blocks the train. `.github/workflows/release.yml` (manual
+  `workflow_dispatch`, pure bash) remains the **manual/override path** — use
+  it for an off-cadence or repair cut, or to promote a channel (`beta`/`rc`).
+  Release notes: `.github/workflows/release-notes.md`.
+- **Seed pinning auto-pins on every green release** — `bootstrap.toml
+  [seed].version` is bumped by `.github/workflows/cadence-seed-pin.yml`
+  after every green release (stable or prerelease), and the resulting pin PR
+  **auto-merges** once its own CI is green; no manual `/pin-seed` step is
+  needed on the routine path. `bootstrap.toml [seed].version` remains the
+  source of truth read by `make fetch-seed`. `/pin-seed` still exists for an
+  off-cadence or hotfix pin. The `seed-blocker` label tracks "must close
+  before next seed bump" issues.
 - **Curation:** only `channel=alpha bump=prerelease` is uncurated; every other
   combo consults the `release:*` labels and the per-cycle `Release: vX.Y.Z`
   tracking issue. See `docs/conventions/issue-naming.md`.
 
-Releases are **not** automatic on merge:
+The weekly train is the primary path; manual dispatch stays available for
+off-cadence cuts and channel promotions:
 
 ```bash
 gh workflow run release.yml -f channel=alpha -f bump=prerelease            # new alpha prerelease

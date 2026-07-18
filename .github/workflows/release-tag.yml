@@ -417,3 +417,38 @@ jobs:
             -H 'Content-type: application/json' \
             --data @/tmp/slack-payload.json \
             "$SLACK_RELEASE_WEBHOOK_URL" >/dev/null || true
+
+  notify-slack-success:
+    name: Notify Slack on release published
+    needs: [build, upload]
+    if: success()
+    runs-on: ubuntu-latest
+    permissions: {}
+    steps:
+      - name: Post Slack notification
+        shell: bash
+        env:
+          SLACK_RELEASE_WEBHOOK_URL: ${{ secrets.SLACK_RELEASE_WEBHOOK_URL }}
+          IS_PRERELEASE: ${{ contains(env.RELEASE_TAG, '-') }}
+        run: |
+          set -euo pipefail
+          if [ -z "${SLACK_RELEASE_WEBHOOK_URL:-}" ]; then
+            exit 0
+          fi
+          python3 - <<'PY' > /tmp/slack-payload.json
+          import json
+          import os
+          tag = os.environ["RELEASE_TAG"]
+          prerelease = os.environ.get("IS_PRERELEASE", "false") == "true"
+          repo = os.environ["GITHUB_REPOSITORY"]
+          rel_url = f"{os.environ['GITHUB_SERVER_URL']}/{repo}/releases/tag/{tag}"
+          if prerelease:
+              text = f":package: Sailfin prerelease {tag} published with assets.\nRelease: {rel_url}"
+          else:
+              text = f":tada: Sailfin STABLE {tag} published with assets.\nRelease: {rel_url}"
+          print(json.dumps({"text": text}))
+          PY
+          curl -fsS -X POST \
+            -H 'Content-type: application/json' \
+            --data @/tmp/slack-payload.json \
+            "$SLACK_RELEASE_WEBHOOK_URL" >/dev/null || true

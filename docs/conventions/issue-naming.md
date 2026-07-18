@@ -423,39 +423,46 @@ has the final call.
 
 ### Release cadence
 
-The public compiler train is a **2-week Monday cadence**. The scheduled
-`release-train.yml` workflow runs every Monday at 09:00 UTC and enforces the
-2-week boundary with ISO-week parity. On the cadence week, if the latest
-`nightly-selfhost.yml` run on `main` is green, the train automatically
-dispatches `release.yml` with `channel=alpha bump=minor`, producing the next
-minor alpha (`vX.Y.0-alpha.1`). Open release scope rolls forward; it is
-reported on the tracker but does not block the train.
+> **2026-07-18 amendment (SFEP-0026):** the cadence is now a **weekly,
+> fully-automated stable train**, superseding the original bi-weekly
+> curated-alpha design below where the two disagree.
 
-The train must not skip a stable release line. If `main` is already on a
-prerelease version such as `0.8.0-alpha.N` and the matching stable tag
-(`v0.8.0`) does not exist, the next minor train is held. The workflow comments
-on the pending stable tracker, posts the Slack block notification, and refuses
-to dispatch `channel=alpha bump=minor` for `v0.9.0-alpha.1` until the current
-stable line has shipped.
+The public compiler train is a **weekly cadence**. The scheduled
+`release-train.yml` workflow runs every week and dispatches when `main` is
+green — a `nightly-selfhost.yml` run whose `head_sha` equals current `main`
+HEAD succeeded, so the gate binds to the exact commit being tagged (per-commit
+CI is already guaranteed by the merge queue). If HEAD is not yet
+nightly-verified at the cadence boundary, the train dispatches a fresh nightly
+and holds; the nightly's completion re-triggers the train and the cut fires
+once HEAD is green. Open release scope always rolls forward; it is reported on
+the tracker but never blocks the train.
 
-Manual cadence workflow runs do **not** dispatch by default. Use
-`confirm_dispatch=true` only for a deliberate repair or off-clock cut, and only
-when the same nightly self-host gate is clear.
+The train cuts a **stable** minor directly — not an alpha. The version rule,
+applied against the current `compiler/capsule.toml` version:
+
+- Prerelease line `X.Y.Z-pre.N` → ships `X.Y.Z` stable
+  (`channel=stable bump=prerelease`).
+- Already stable `X.Y.0` → advances to `X.(Y+1).0`
+  (`channel=stable bump=minor`).
+
+The former "hold the next minor train until the current stable line ships"
+behavior no longer applies — there is no separate alpha-then-stable sequence
+to skip ahead of; the train ships stable every week the gate is clear.
+
+Stable promotion is **no longer human-confirmed** — the weekly train dispatch
+*is* the promotion mechanism, gated purely on `main`'s green health at cut
+time, not on a separate N-consecutive-green-days timer or an advisory
+sign-off step.
 
 Routine alphas (`channel=alpha bump=prerelease`) remain manual/off-cadence.
 They are for urgent fixes, release-critical seed needs, or maintainer-curated
 snapshots between trains; they are not the public cadence contract.
 
-Stable promotion is **not** on a timer. Promote to `channel=stable` only when
-both conditions hold: the target release tracker is clear and `main` has seven
-consecutive green nightly self-host runs. The stable dispatch stays
-human-confirmed.
-
 Release workflows post high-signal notifications to Slack when
 `SLACK_RELEASE_WEBHOOK_URL` is configured in GitHub Actions secrets. The
-intended channel is `#sailfin-notifications`; notifications are limited to
-cadence dispatch/block events, cadence seed-pin PRs or failures, stable
-promotion review prompts, and release workflow/asset failures.
+intended channel is `#sailfin-notifications`; notifications fire on a new
+stable release, a new prerelease, a seed pinned (the cadence pin PR
+auto-merging), and a cut blocked (gate not clear) or dispatched.
 
 ### Labels
 
@@ -495,18 +502,27 @@ curation, not the issue.
 
 ## Seed pinning
 
+> **2026-07-18 amendment (SFEP-0026):** the pin now **auto-pins on every
+> green release** (stable or prerelease) and the pin PR **auto-merges**,
+> superseding the batched-per-cadence design below where the two disagree.
+
 The Sailfin compiler self-hosts from a released seed binary. The canonical
 pin lives in `bootstrap.toml` as `[seed].version`.
 **Bumping the pin is a separate concern from cutting a release** —
 `release.yml` deliberately doesn't touch the seed pin because the new binary
-doesn't exist at tag-creation time and most alpha releases shouldn't be pinned.
+doesn't exist at tag-creation time.
 
-**Seeds advance on the cadence, batched.** Per SFEP-0026 WS-C, the pin is
-**not** chased reactively per-need (the `0.7.0-alpha.49` treadmill). Routine
-seed needs are collected and the pin advances **once per release cadence
-cycle**, against that cycle's alpha cut — collapsing the N reactive cuts of a
-cycle into ~1 scheduled bump. The one exception is a **release-critical** seed
-need (see below), which may break the batch.
+**Seeds auto-pin on every green release.** `cadence-seed-pin.yml` runs after
+**every** green release — stable or prerelease alike — and opens a PR
+advancing `bootstrap.toml [seed].version`; that PR **auto-merges** once its
+own CI is green, with no manual merge step. This replaces the prior
+once-per-cadence-cycle batching (trading reactive per-need cuts for a
+single scheduled bump): under the weekly auto-stable train there is no batch
+window to wait on, so the pin advances as often as releases go green. The
+`release-critical-seed` off-cadence escape hatch below is largely moot under
+this model, since there's no batch to break out of, but the underlying
+bundle-vs-split decision tree (`.claude/rules/seed-dependency.md`) still
+governs whether a capability should be bundled with its single consumer.
 
 ### `seed-blocker` label
 
@@ -527,6 +543,13 @@ Its seed advance is **batched onto the next cadence bump** (below) unless
 the need clears the release-critical bar.
 
 ### Batched-cadence seeds and the `release-critical-seed` marker
+
+> **Superseded by the 2026-07-18 amendment** (see the note atop this
+> section): the pin no longer batches onto a fixed cadence window — it
+> auto-pins, auto-merging, after every green release. The historical
+> batching design is kept below as prior art; a mid-flight `needs-seed-cut`
+> flag now effectively clears on the **next** green release rather than
+> the next cadence boundary.
 
 Mid-flight seed needs — a `needs-seed-cut` flag from the advisor, or a
 `seed-blocker` issue closing — **queue against the next scheduled cadence
@@ -631,9 +654,11 @@ the label once pinned.
 
 ### When to bump the pin
 
-The routine bump rides the cadence (one batched `/pin-seed` per cycle, above).
-Run `/pin-seed [vX.Y.Z]` off-cadence only when the need clears the
-release-critical bar:
+The routine bump is now automatic: `cadence-seed-pin.yml` auto-pins and
+auto-merges after every green release, so most seed needs are resolved by the
+next release going green without any manual step. Run `/pin-seed [vX.Y.Z]`
+manually only for an off-cadence or hotfix pin — e.g. when the need clears
+the release-critical bar before the next release ships:
 
 - A `seed-blocker` issue just closed and the fix shipped in the latest
   alpha.

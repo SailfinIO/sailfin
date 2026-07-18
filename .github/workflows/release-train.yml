@@ -1,30 +1,36 @@
-name: Release Train (cadence)
+name: Release Train (weekly stable)
 
-# Hybrid time-box + train release cadence (SFEP-0026 WS-C, execution item 11).
+# Weekly, fully-automated STABLE minor release train (SFEP-0026 WS-C, amended
+# 2026-07-18).
 #
-# A scheduled, deterministic workflow that runs on the project's 2-week
-# Monday-start cadence (docs/conventions/issue-naming.md "Release tracking").
+# A scheduled, deterministic workflow that runs every Monday and, when `main`
+# is green, cuts the next STABLE minor automatically — no human confirmation.
 # At each train boundary it:
 #
-#   1. Opens or updates the `Release: vX.Y.Z` tracker for the cadence minor,
-#      unless the current prerelease line still lacks its stable tag; in that
-#      case it holds on the pending stable tracker instead.
-#   2. Evaluates the *cut gate* — the health of `main` (the latest Nightly
-#      self-host check), NOT the open scope. Whatever scoped work is not done
-#      ROLLS FORWARD to the next train: open `release:next-minor` items are
-#      surfaced for visibility but NEVER block the train (time-box semantics).
-#   3. Dispatches the curated minor alpha automatically on scheduled cadence
-#      runs when the cut gate is green. Manual runs stay human-confirmable:
-#      re-run this workflow with `confirm_dispatch=true` to fire an off-clock
-#      or repair cut once the cadence comment looks right.
+#   1. Computes the stable target from `compiler/capsule.toml`:
+#        - a prerelease line `X.Y.Z-pre.N` ships as `X.Y.Z` stable
+#          (`channel=stable bump=prerelease` — strips the suffix), so a line
+#          already in flight is promoted rather than skipped;
+#        - an already-stable `X.Y.0` advances to `X.(Y+1).0`
+#          (`channel=stable bump=minor`).
+#      There is no `pendingStable` HOLD — the train ships the pending stable
+#      instead of waiting on a human to do it.
+#   2. Evaluates the *cut gate* — the health of `main` (latest scheduled
+#      Nightly self-host check; per-commit CI is guaranteed by the merge queue),
+#      NOT the open scope. Whatever scoped work is not done ROLLS FORWARD to the
+#      next train: open `release:next-minor` items are surfaced for visibility
+#      but NEVER block the train (time-box semantics).
+#   3. Dispatches `release.yml` (channel=stable) automatically on scheduled
+#      cadence runs when the cut gate is green. Manual runs stay
+#      human-confirmable: re-run with `confirm_dispatch=true` to fire an
+#      off-clock or repair cut once the cadence comment looks right.
 #
 # It is a PLAIN, deterministic Actions workflow in the spirit of
 # `seed-cut-advisor.yml` — NOT a gh-aw `.md` source. No compiled `.lock.yml`,
 # no LLM engine, no ANTHROPIC_API_KEY. A single pinned `actions/github-script`
 # step does the version math / tracker upsert / gate evaluation / optional
-# dispatch. Routine alpha prerelease bumps remain manual/off-cadence — this is
-# the curated minor train on the cadence, and its alpha cut doubles as the
-# scheduled seed bump (SFEP-0026 §3.3).
+# dispatch. The seed is auto-pinned on the resulting release by
+# `cadence-seed-pin.yml` (every green release, auto-merged).
 #
 # See `.github/AGENTS.md`, `docs/conventions/issue-naming.md` "Release
 # tracking" / "Seed pinning", and `.claude/commands/release-plan.md` (which
@@ -32,11 +38,15 @@ name: Release Train (cadence)
 
 on:
   schedule:
-    # Every Monday 09:00 UTC. The 2-week cadence is enforced in-script via
-    # ISO-week parity (even week == cadence week), since cron has no native
-    # "every other week" expression. A maintainer can always run off-cadence
-    # via workflow_dispatch.
+    # Every Monday 09:00 UTC — weekly cadence boundary. A maintainer can always
+    # run off-cadence via workflow_dispatch.
     - cron: "0 9 * * 1"
+  # Re-evaluate whenever a nightly self-host check finishes: a cut only fires
+  # once a GREEN nightly has verified the current `main` HEAD, so the nightly's
+  # completion is the natural "now safe to cut" signal.
+  workflow_run:
+    workflows: ["Nightly self-host check"]
+    types: [completed]
   workflow_dispatch:
     inputs:
       dry_run:
@@ -45,12 +55,7 @@ on:
         type: boolean
         default: false
       confirm_dispatch:
-        description: "Manual confirmation: dispatch release.yml for the cadence minor cut (requires a clear cut gate)"
-        required: false
-        type: boolean
-        default: false
-      force:
-        description: "Ignore the bi-weekly ISO-week parity gate (manual runs only)"
+        description: "Manual confirmation: dispatch release.yml for the cadence stable cut (requires a clear cut gate)"
         required: false
         type: boolean
         default: false
@@ -66,7 +71,7 @@ concurrency:
 
 jobs:
   train:
-    name: Cadence train
+    name: Weekly stable train
     runs-on: ubuntu-latest
     steps:
       - name: Checkout repository
@@ -75,12 +80,11 @@ jobs:
           fetch-depth: 1
           persist-credentials: false
 
-      - name: Run cadence train
+      - name: Run weekly stable train
         uses: actions/github-script@v9.0.0
         env:
           DRY_RUN: ${{ inputs.dry_run }}
           CONFIRM_DISPATCH: ${{ inputs.confirm_dispatch }}
-          FORCE: ${{ inputs.force }}
           SLACK_RELEASE_WEBHOOK_URL: ${{ secrets.SLACK_RELEASE_WEBHOOK_URL }}
         with:
           github-token: ${{ secrets.RELEASE_PAT || secrets.GITHUB_TOKEN }}
@@ -89,8 +93,8 @@ jobs:
             const { owner, repo } = context.repo;
             const dryRun = process.env.DRY_RUN === 'true';
             const confirmDispatch = process.env.CONFIRM_DISPATCH === 'true';
-            const force = process.env.FORCE === 'true';
             const isSchedule = context.eventName === 'schedule';
+            const isNightlyDone = context.eventName === 'workflow_run';
             const summary = [];
             const note = (s) => { core.info(s); summary.push(s); };
             async function postSlack(text) {
@@ -110,23 +114,7 @@ jobs:
               }
             }
 
-            // --- 0. Bi-weekly cadence gate (scheduled runs only) --------------
-            // ISO-8601 week number; even week == cadence week. Deterministic and
-            // aligned to the Monday-start 2-week iteration cadence.
-            function isoWeek(d) {
-              const t = new Date(Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate()));
-              const day = t.getUTCDay() || 7;            // Mon=1..Sun=7
-              t.setUTCDate(t.getUTCDate() + 4 - day);     // nearest Thursday
-              const yearStart = new Date(Date.UTC(t.getUTCFullYear(), 0, 1));
-              return Math.ceil(((t - yearStart) / 86400000 + 1) / 7);
-            }
-            const week = isoWeek(new Date());
-            if (isSchedule && !force && (week % 2 !== 0)) {
-              note(`ISO week ${week} is odd — off-cadence; skipping (next even week is the train).`);
-              core.summary.addRaw('## Release Train — skipped (off-cadence)\n\n' + summary.join('\n')).write();
-              return;
-            }
-            note(`Cadence week (ISO week ${week}); event=${context.eventName}, dryRun=${dryRun}.`);
+            note(`Weekly stable train; event=${context.eventName}, dryRun=${dryRun}.`);
 
             async function tagExists(tag) {
               try {
@@ -138,53 +126,52 @@ jobs:
               }
             }
 
-            // --- 1. Compute the cadence target --------------------------------
-            // Normally this is the next minor of the current capsule.toml version
-            // (0.7.0 -> v0.8.0, dispatching 0.8.0-alpha.1). If the current
-            // source version is already on a prerelease line, the stable tag for
-            // that line must ship before the train advances to the next minor.
+            // --- 1. Compute the stable target ---------------------------------
+            // A prerelease line ships its own stable (promote, don't skip);
+            // an already-stable line advances to the next minor.
             const capsule = fs.readFileSync('compiler/capsule.toml', 'utf8');
             const vm = capsule.match(/^version\s*=\s*"([^"]+)"/m);
             if (!vm) { core.setFailed('Could not read version from compiler/capsule.toml'); return; }
-            const cm = vm[1].match(/^(\d+)\.(\d+)\.(\d+)(-.+)?$/);
+            const cm = vm[1].match(/^(\d+)\.(\d+)\.(\d+)(?:-([a-z]+)\.(\d+))?$/);
             if (!cm) { core.setFailed(`Cannot parse version '${vm[1]}'`); return; }
             const [maj, min, patch] = [parseInt(cm[1], 10), parseInt(cm[2], 10), parseInt(cm[3], 10)];
             const prerelease = cm[4] || '';
-            const pendingStableTag = `v${maj}.${min}.${patch}`;
-            const stableTagExists = prerelease ? await tagExists(pendingStableTag) : true;
-            const pendingStable = !!prerelease && !stableTagExists;
-            const target = pendingStable ? pendingStableTag : `v${maj}.${min + 1}.0`;
-            const trackerTitle = `Release: ${target}`;
-            if (pendingStable) {
-              note(`Current ${vm[1]} is a prerelease line, and stable tag ${pendingStableTag} does not exist — holding the next minor train until ${pendingStableTag} is promoted.`);
+            let target, bump;
+            if (prerelease) {
+              target = `v${maj}.${min}.${patch}`;
+              bump = 'prerelease';
+              note(`Current ${vm[1]} is a prerelease line → promoting to stable ${target} (channel=stable bump=prerelease).`);
             } else {
-              note(`Current ${vm[1]} → cadence minor target ${target} (tracker "${trackerTitle}").`);
+              target = `v${maj}.${min + 1}.0`;
+              bump = 'minor';
+              note(`Current ${vm[1]} is stable → advancing to ${target} (channel=stable bump=minor).`);
             }
+            const trackerTitle = `Release: ${target}`;
 
-            // --- 2. Cut gate: health of main (NOT open scope) -----------------
+            // --- 2. Cut gate: current main HEAD self-hosts (NOT open scope) ---
             // The train is time-boxed: open scope rolls forward and never gates
-            // the cut. The only thing that holds a cut is a broken main — we do
-            // not ship a broken train. Signal = latest Nightly self-host check
-            // (the triple-pass `make check`) on the default branch.
+            // the cut. The gate is that the EXACT commit we would tag — current
+            // `main` HEAD — has a GREEN Nightly self-host run (triple-pass
+            // `make check`). Binding to `head_sha` (not merely "latest scheduled
+            // nightly = success") closes the window where a self-host-breaking
+            // commit lands after the last nightly and gets cut as stable on a
+            // stale-green signal. Per-commit single-pass CI is guaranteed by the
+            // merge queue; the nightly adds the triple-pass seedcheck.
             const defaultBranch = context.payload.repository?.default_branch || 'main';
-            async function latestConclusion(workflowFile) {
-              try {
-                const runs = await github.rest.actions.listWorkflowRuns({
-                  owner, repo, workflow_id: workflowFile,
-                  branch: defaultBranch, per_page: 1,
-                });
-                const r = runs.data.workflow_runs[0];
-                return r ? { conclusion: r.conclusion, url: r.html_url } : null;
-              } catch (e) {
-                core.warning(`Could not read runs for ${workflowFile}: ${e.message}`);
-                return null;
-              }
-            }
-            const nightly = await latestConclusion('nightly-selfhost.yml');
-            const cutGateClear = !!nightly && nightly.conclusion === 'success';
-            note(nightly
-              ? `Cut gate: latest nightly self-host on ${defaultBranch} = ${nightly.conclusion} (${nightly.url}).`
-              : `Cut gate: no nightly self-host run found on ${defaultBranch} — treating gate as NOT clear.`);
+            const headSha = (await github.rest.repos.getBranch({
+              owner, repo, branch: defaultBranch,
+            })).data.commit.sha;
+            const nightlyRuns = (await github.rest.actions.listWorkflowRuns({
+              owner, repo, workflow_id: 'nightly-selfhost.yml',
+              branch: defaultBranch, per_page: 30,
+            })).data.workflow_runs;
+            const headNightly = nightlyRuns.find(r => r.head_sha === headSha && r.status === 'completed');
+            const cutGateClear = !!headNightly && headNightly.conclusion === 'success';
+            const nightlyInFlight = nightlyRuns.some(r => r.status === 'queued' || r.status === 'in_progress');
+            note(`Current ${defaultBranch} HEAD ${headSha.slice(0, 8)}.`);
+            note(headNightly
+              ? `Cut gate — nightly for HEAD = ${headNightly.conclusion} (${headNightly.html_url}).`
+              : `Cut gate — no completed nightly self-host run for HEAD yet (in-flight: ${nightlyInFlight}).`);
 
             // --- 3. Roll-forward visibility: open release:next-minor items -----
             const openNextMinor = (await github.paginate(github.rest.issues.listForRepo, {
@@ -208,7 +195,7 @@ jobs:
               tracker = existing.sort((a, b) => a.number - b.number)[0];
             }
 
-            const cadenceMarker = `Cadence-train: ${target} (ISO week ${week})`;
+            const cadenceMarker = `Cadence-train: ${target}`;
 
             if (!tracker) {
               if (dryRun) {
@@ -216,16 +203,17 @@ jobs:
               } else {
                 const body = [
                   '## Goal', '',
-                  `Track what must close before **${target}** is cut on the release cadence.`, '',
+                  `Track what ships in **${target}**, cut on the weekly stable release train.`, '',
                   '## Scope summary', '',
-                  '_Auto-opened by the cadence release train. Run `/release-plan '
-                    + target + '` to enrich the must-close / seed-blocker sub-issues and the seed-bump section._', '',
+                  '_Auto-opened by the weekly stable train. Run `/release-plan '
+                    + target + '` to enrich the scope manifest and the seed-bump section._', '',
                   '## Cut gate', '',
-                  'This is a curated cadence cut. Scheduled train runs dispatch `release.yml` '
-                    + 'automatically when the nightly self-host gate is green; manual runs require '
+                  'This is an automated weekly stable cut. Scheduled train runs dispatch '
+                    + '`release.yml` (channel=stable) automatically when `main` is green '
+                    + '(latest scheduled nightly self-host); manual runs require '
                     + '`confirm_dispatch=true`. Open scope rolls forward — it never blocks the train.', '',
                   '## Cross-references', '',
-                  '- Cadence train: `.github/workflows/release-train.yml`',
+                  '- Weekly stable train: `.github/workflows/release-train.yml`',
                   '- Convention: `docs/conventions/issue-naming.md` "Release tracking" / "Seed pinning"',
                   '- `/release-plan` skill: `.claude/commands/release-plan.md`',
                   '- Design: SFEP-0026 (`docs/proposals/0026-delivery-process.md`) WS-C',
@@ -254,8 +242,8 @@ jobs:
             }
 
             // --- 5. Idempotent cadence comment --------------------------------
-            // One comment per (target, ISO week) window — re-runs in the same
-            // window do not double-post.
+            // One comment per target window — re-runs for the same target do not
+            // double-post.
             if (tracker) {
               const comments = await github.paginate(github.rest.issues.listComments, {
                 owner, repo, issue_number: tracker.number, per_page: 100,
@@ -265,18 +253,16 @@ jobs:
                 ? openNextMinor.map(i => `#${i.number}`).join(', ')
                 : '_none_';
               const gateLine = cutGateClear
-                ? `✅ Cut gate clear — latest nightly self-host on \`${defaultBranch}\` is green.`
-                : `⛔ Cut gate NOT clear — ${nightly ? 'nightly self-host is ' + nightly.conclusion : 'no nightly run found'}; hold the cut until main is green.`;
-              const dispatchLine = pendingStable
-                ? `**Not advancing.** The \`${pendingStableTag}\` stable tag is missing; promote the current prerelease line before the train can open the next minor alpha.`
-                : (cutGateClear
-                    ? (isSchedule
-                        ? `**Auto-dispatching.** This scheduled cadence run will dispatch the curated minor (\`channel=alpha bump=minor\` → \`${maj}.${min + 1}.0-alpha.1\`).`
-                        : `**Ready to cut.** To dispatch the curated minor (\`channel=alpha bump=minor\` → \`${maj}.${min + 1}.0-alpha.1\`), re-run the **Release Train** workflow with \`confirm_dispatch=true\`.`)
-                    : `**Not cutting.** The train rolls forward; it will re-evaluate next cadence boundary once main is green.`);
+                ? `✅ Cut gate clear — a green nightly self-host verified HEAD \`${headSha.slice(0, 8)}\`.`
+                : `⛔ Cut gate NOT clear — no green nightly for HEAD \`${headSha.slice(0, 8)}\` yet; hold the cut.`;
+              const dispatchLine = cutGateClear
+                ? (isSchedule
+                    ? `**Auto-dispatching.** This scheduled train run will cut the stable release (\`channel=stable bump=${bump}\` → \`${target}\`).`
+                    : `**Ready to cut.** To dispatch the stable release (\`channel=stable bump=${bump}\` → \`${target}\`), re-run the **Release Train** workflow with \`confirm_dispatch=true\`.`)
+                : `**Not cutting.** The train rolls forward; it will re-evaluate next cadence boundary once main is green.`;
               const cadenceBody = [
                 `${cadenceMarker}`, '',
-                `Cadence train boundary reached for **${target}**.`, '',
+                `Weekly stable train boundary reached for **${target}**.`, '',
                 gateLine, '',
                 `Rolling forward (not blocking): ${rollFwd}`, '',
                 dispatchLine,
@@ -284,42 +270,69 @@ jobs:
               if (dryRun) {
                 note(`[dry-run] would ${already ? 'SKIP (already posted)' : 'POST'} the cadence comment on #${tracker.number}.`);
               } else if (already) {
-                note(`Cadence comment for ${target} (week ${week}) already on #${tracker.number}; skipping.`);
+                note(`Cadence comment for ${target} already on #${tracker.number}; skipping.`);
               } else {
                 await github.rest.issues.createComment({ owner, repo, issue_number: tracker.number, body: cadenceBody });
                 note(`Posted cadence comment on #${tracker.number}.`);
               }
             }
 
-            // --- 6. Dispatch release.yml --------------------------------------
-            // Scheduled cadence runs are the public release train: if the gate is
-            // green, they dispatch automatically. Manual runs require explicit
-            // confirmation so repair/off-clock cuts stay deliberate.
-            const releaseTag = `v${maj}.${min + 1}.0-alpha.1`;
-            const shouldDispatch = isSchedule || confirmDispatch;
-            if (shouldDispatch) {
-              if (dryRun) {
-                note(pendingStable
-                  ? `[dry-run] would BLOCK next-minor dispatch because ${pendingStableTag} stable has not shipped.`
-                  : `[dry-run] would ${isSchedule ? 'auto-dispatch' : 'dispatch'} release.yml (channel=alpha bump=minor) for ${releaseTag}.`);
-              } else if (pendingStable) {
-                note(`${isSchedule ? 'Scheduled train' : 'confirm_dispatch'} requested a next-minor cut, but ${pendingStableTag} stable has not shipped — refusing to advance to ${releaseTag}.`);
-                await postSlack(`:warning: Sailfin release train blocked before next minor. Stable ${pendingStableTag} is still pending from ${vm[1]}.\nTracker: ${tracker ? tracker.html_url : trackerTitle}\nRun: https://github.com/${owner}/${repo}/actions/runs/${context.runId}`);
-              } else if (!cutGateClear) {
-                note(`${isSchedule ? 'Scheduled train' : 'confirm_dispatch'} requested a cut, but cut gate is NOT clear — refusing to dispatch release.yml on a red main.`);
-                await postSlack(`:warning: Sailfin release train blocked for ${target}. Latest nightly self-host is ${nightly ? nightly.conclusion : 'missing'}.\nTracker: ${tracker ? tracker.html_url : trackerTitle}\nRun: https://github.com/${owner}/${repo}/actions/runs/${context.runId}`);
-              } else if (await tagExists(releaseTag)) {
-                note(`Release tag ${releaseTag} already exists — skipping dispatch.`);
-              } else {
-                await github.rest.actions.createWorkflowDispatch({
-                  owner, repo, workflow_id: 'release.yml', ref: defaultBranch,
-                  inputs: { channel: 'alpha', bump: 'minor', dry_run: 'false' },
-                });
-                note(`Dispatched release.yml (channel=alpha bump=minor) → ${releaseTag}.`);
-                await postSlack(`:rocket: Sailfin release train dispatched ${releaseTag} (channel=alpha bump=minor).\nTracker: ${tracker ? tracker.html_url : trackerTitle}\nRun: https://github.com/${owner}/${repo}/actions/runs/${context.runId}`);
+            // --- 6. Cut decision ----------------------------------------------
+            // Cut only when (a) the weekly cadence boundary has elapsed since the
+            // last stable, and (b) a green nightly has verified current HEAD.
+            // Timing sources:
+            //   - schedule (Mon 09:00) — the cadence boundary itself;
+            //   - workflow_run (a nightly finished) — re-evaluate so a HEAD-
+            //     verified green nightly cuts promptly instead of waiting a week;
+            //   - workflow_dispatch + confirm_dispatch — a deliberate off-clock cut.
+            // On a scheduled/manual run whose HEAD is not yet nightly-verified we
+            // DISPATCH a fresh nightly (if none is in-flight); its completion
+            // re-triggers this workflow via workflow_run, which then cuts. The
+            // workflow_run path never re-dispatches a nightly, so there is no
+            // dispatch loop.
+            async function daysSinceLastStable() {
+              try {
+                const rel = await github.rest.repos.getLatestRelease({ owner, repo });
+                return (Date.now() - new Date(rel.data.published_at).getTime()) / 86400000;
+              } catch (e) {
+                return Infinity; // no stable release yet → cadence is due
               }
-            } else {
+            }
+            const cadenceDays = 6;
+            const age = await daysSinceLastStable();
+            const cadenceDue = confirmDispatch || age >= cadenceDays;
+            note(`Days since last stable: ${age === Infinity ? 'none' : age.toFixed(1)} (cadence due: ${cadenceDue}).`);
+
+            const shouldConsiderCut = isSchedule || isNightlyDone || confirmDispatch;
+            if (!shouldConsiderCut) {
               note('Manual run without confirm_dispatch — surfaced readiness only.');
+            } else if (!cadenceDue) {
+              note(`Cadence not yet due (< ${cadenceDays} days since last stable) — not cutting.`);
+            } else if (dryRun) {
+              note(`[dry-run] would ${cutGateClear ? 'cut' : 'dispatch a fresh nightly and hold'} for ${target}.`);
+            } else if (await tagExists(target)) {
+              note(`Release tag ${target} already exists — skipping.`);
+            } else if (cutGateClear) {
+              await github.rest.actions.createWorkflowDispatch({
+                owner, repo, workflow_id: 'release.yml', ref: defaultBranch,
+                inputs: { channel: 'stable', bump, dry_run: 'false' },
+              });
+              note(`Dispatched release.yml (channel=stable bump=${bump}) → ${target}.`);
+              await postSlack(`:rocket: Sailfin release train dispatched ${target} (channel=stable bump=${bump}) — HEAD ${headSha.slice(0, 8)} verified green.\nTracker: ${tracker ? tracker.html_url : trackerTitle}\nRun: https://github.com/${owner}/${repo}/actions/runs/${context.runId}`);
+            } else if (isNightlyDone) {
+              // A nightly just finished but HEAD is not (yet) verified green — main
+              // likely advanced past it, or it failed. Do NOT re-dispatch from the
+              // workflow_run path (loop guard); the next nightly re-evaluates.
+              note(`Nightly finished but HEAD ${headSha.slice(0, 8)} is not verified green — holding; the next nightly will re-evaluate.`);
+              await postSlack(`:warning: Sailfin release train holding ${target}. HEAD ${headSha.slice(0, 8)} has no green nightly yet.\nTracker: ${tracker ? tracker.html_url : trackerTitle}`);
+            } else if (nightlyInFlight) {
+              note(`HEAD not verified yet, but a nightly is already in-flight — holding for its completion.`);
+            } else {
+              await github.rest.actions.createWorkflowDispatch({
+                owner, repo, workflow_id: 'nightly-selfhost.yml', ref: defaultBranch,
+              });
+              note(`HEAD ${headSha.slice(0, 8)} has no nightly yet — dispatched a fresh nightly self-host; its completion will re-trigger the cut.`);
+              await postSlack(`:hourglass_flowing_sand: Sailfin release train armed for ${target}. Dispatched a fresh nightly self-host for HEAD ${headSha.slice(0, 8)}; the cut fires when it goes green.\nTracker: ${tracker ? tracker.html_url : trackerTitle}`);
             }
 
             core.summary
