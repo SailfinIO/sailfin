@@ -68,7 +68,7 @@ test "channel-ir: ch.receive() lowers to sfn_channel_recv (#1266)" ![io] {
 
 // channel(N) → sfn_channel_create in a producer/consumer context.
 test "channel-ir: channel(N) lowers to sfn_channel_create (#1091)" ![io] {
-    let ir = _emit_ir("create", "fn main() ![io] {\n    let ch = channel(8);\n    ch.send(1);\n    let v = ch.receive();\n}\n");
+    let ir = _emit_ir("create", "fn main() ![io] {\n    let ch = channel(8);\n    ch.send(1);\n    let v: int = ch.receive();\n}\n");
     assert ir.length > 0;
     assert contains(ir, "sfn_channel_create");
 }
