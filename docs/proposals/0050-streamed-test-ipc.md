@@ -1,7 +1,7 @@
 ---
-sfep: TBD
+sfep: 0050
 title: Streamed per-test results over a captured pipe (retiring the results.log/fail.bin side-channel)
-status: Draft
+status: Accepted
 type: tooling
 created: 2026-07-18
 updated: 2026-07-18
@@ -12,7 +12,7 @@ superseded-by:
 graduates-to:
 ---
 
-# SFEP-XXXX — Streamed per-test results over a captured pipe
+# SFEP-0050 — Streamed per-test results over a captured pipe
 
 ## 1. Summary
 
