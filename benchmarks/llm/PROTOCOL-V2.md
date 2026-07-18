@@ -1,17 +1,33 @@
 # Sailfin agent benchmark protocol v2
 
-Protocol ID: `sfn-agent-benchmark/v2.6.0`
+Protocol ID: `sfn-agent-benchmark/v2.7.0`
 
-Status: **audit-only; v2.6 attempts stopped on provider quota and Anthropic
-response-budget invalidations and produced no complete valid paired output**.
+Status: **frozen and unexecuted. Version 2.7.0 enforces the Anthropic answer
+headroom in the request schema before any paid execution. The preceding v2.6
+batch is audit-only — it stopped on provider quota and Anthropic response-budget
+invalidations and produced no complete valid paired output**.
 
 The resumed v2.6 bounded batch demonstrated that the recorded 2,048-token
 Anthropic answer headroom was descriptive rather than enforced: a repair turn
 returned `stop_reason=max_tokens` with 8,191 thinking tokens, no text, and an
-8,192-token total allowance. SFN-383 blocks further paid execution until the
-request schema enforces headroom, the protocol/corpus minor version is bumped,
-and a completely fresh balanced batch is frozen. No v2.6 observation is
-eligible for selection, rerun, or pooling into that successor.
+8,192-token total allowance. SFN-383 raises the request schema to enforce the
+headroom (section 2), bumps the protocol/corpus minor version, and freezes a
+completely fresh balanced batch under v2.7.0. No v2.6 observation is eligible
+for selection, rerun, or pooling into that successor, and no successor paid
+batch may start before v2.7.0 is frozen.
+
+Version 2.7.0 makes the Anthropic answer headroom enforced rather than
+descriptive. The request now sets `thinking.budget_tokens` to 6,144 —
+`max_tokens` (8,192) minus the 2,048-token reserved answer headroom — so
+extended thinking cannot allocate the entire output allowance and leaves room
+for answer text on both initial and repair turns. The run manifest records the
+enforced `thinking_budget_tokens` under `anthropic_response_budget`. Because
+this changes a request setting, it starts a fresh pilot and corpus ID
+`sfn-agent-benchmark-corpus/v2.7.0`; no v2.6.0 attempt, success, or failure may
+be reused, rerun, or pooled into the corrected run, which is a fresh balanced
+batch across every arm and model family. The estimands, prompts, tasks, arms,
+attempt counts, graders, thresholds, model families, and every other stopping
+rule are unchanged.
 
 Version 2.6.0 freezes symmetric transient-provider handling after the v2.5.0
 Anthropic schema probe returned `overloaded_error`. Curl failures, timeouts,
@@ -131,13 +147,17 @@ The OpenAI family uses `POST /v1/responses`, with the system prompt in
 `POST /v1/messages`.
 
 The frozen output budget leaves room for answer text after hidden reasoning.
-The Anthropic request sets `max_tokens` to 8,192 with at least 2,048 tokens of
-reserved answer headroom; the run manifest records this policy under
-`anthropic_response_budget`. If an Anthropic response still returns
-`stop_reason: max_tokens` with no answer text — extended thinking having
-consumed the entire allowance — it is a provider-response invalidation under
-section 6, not a language observation, and the paid batch stops immediately.
-Such a response never enters any language denominator.
+The Anthropic request sets `max_tokens` to 8,192 and caps
+`thinking.budget_tokens` at 6,144 — the total minus the 2,048-token reserved
+answer headroom — so extended thinking cannot consume the entire allowance; the
+run manifest records this enforced policy under `anthropic_response_budget`. The
+same cap applies to schema, contamination, unscored, initial scored, and repair
+requests, because every Anthropic request is built by the same request schema.
+If an Anthropic response still returns `stop_reason: max_tokens` with no answer
+text — extended thinking having exhausted its capped budget without emitting an
+answer — it is a provider-response invalidation under section 6, not a language
+observation, and the paid batch stops immediately. Such a response never enters
+any language denominator.
 
 The frozen provider retry policy applies identically to schema probes,
 contamination probes, unscored authorization tasks, scored tasks, all arms,

@@ -829,6 +829,14 @@ fn _anthropic_max_output_tokens() -> int { return 8192; }
 
 fn _anthropic_answer_headroom_tokens() -> int { return 2048; }
 
+// The enforced extended-thinking budget: the total output allowance minus the
+// reserved answer headroom. Capping `thinking.budget_tokens` below `max_tokens`
+// by the headroom is what actually leaves room for answer text — the recorded
+// policy alone was descriptive, not enforced (SFN-383).
+fn _anthropic_thinking_budget_tokens() -> int {
+    return _anthropic_max_output_tokens() - _anthropic_answer_headroom_tokens();
+}
+
 // Frozen Anthropic response budget (SFN-367). A 4096-token total let extended
 // thinking consume the whole response and return stop_reason=max_tokens with
 // thinking-only content and no answer text, silently spending scored attempts.
@@ -837,7 +845,7 @@ fn _anthropic_answer_headroom_tokens() -> int { return 2048; }
 // provider-response invalidation (see _completion_from_anthropic) that stops the
 // paid batch.
 fn _anthropic_response_budget_policy() -> JsonValue {
-    return object_val(["max_output_tokens", "reserved_answer_headroom_tokens", "thinking_exhaustion_policy"], [number_val(_anthropic_max_output_tokens() as float), number_val(_anthropic_answer_headroom_tokens() as float), string_val("stop_reason=max_tokens with no answer text is a provider-response invalidation; the paid batch stops and correction requires a fresh balanced batch under a new protocol version")]);
+    return object_val(["max_output_tokens", "reserved_answer_headroom_tokens", "thinking_budget_tokens", "thinking_exhaustion_policy"], [number_val(_anthropic_max_output_tokens() as float), number_val(_anthropic_answer_headroom_tokens() as float), number_val(_anthropic_thinking_budget_tokens() as float), string_val("stop_reason=max_tokens with no answer text is a provider-response invalidation; the paid batch stops and correction requires a fresh balanced batch under a new protocol version")]);
 }
 
 fn _provider_retry_max_attempts() -> int { return 3; }
@@ -852,7 +860,8 @@ fn _provider_retry_policy() -> JsonValue {
 }
 
 fn _anthropic_body(model: string, system: string, messages: JsonValue[]) -> string {
-    return stringify(object_val(["model", "max_tokens", "system", "messages"], [string_val(model), number_val(_anthropic_max_output_tokens() as float), string_val(system), _messages_json(messages)]));
+    let thinking = object_val(["type", "budget_tokens"], [string_val("enabled"), number_val(_anthropic_thinking_budget_tokens() as float)]);
+    return stringify(object_val(["model", "max_tokens", "thinking", "system", "messages"], [string_val(model), number_val(_anthropic_max_output_tokens() as float), thinking, string_val(system), _messages_json(messages)]));
 }
 
 fn _api_error(root: JsonValue) -> string {
@@ -1105,6 +1114,22 @@ fn _self_test_provider_schemas() ![io] {
         || !contains(legacy, "\"max_tokens\":4096")
         || !contains(claude, "\"max_tokens\":8192") {
         print.err("provider request schema fixtures failed");
+        process.exit(1);
+    }
+    // SFN-383: the Anthropic request must cap extended thinking below the total
+    // output allowance by the frozen answer headroom on initial and repair turns,
+    // so thinking cannot spend the whole budget and return no answer text.
+    let think_expect = "\"thinking\":{\"type\":\"enabled\",\"budget_tokens\":"
+        + (_anthropic_thinking_budget_tokens() as string)
+        + "}";
+    let repair_messages = [object_val(["role", "content"], [string_val("user"), string_val("Solve it.")]), object_val(["role", "content"], [string_val("assistant"), string_val("first attempt")]), object_val(["role", "content"], [string_val("user"), string_val("Repair: fix the failing case.")])];
+    let claude_repair = _anthropic_body("claude-sonnet-5", "system", repair_messages);
+    if _anthropic_thinking_budget_tokens() >= _anthropic_max_output_tokens()
+        || _anthropic_thinking_budget_tokens() != _anthropic_max_output_tokens() - _anthropic_answer_headroom_tokens()
+        || !contains(claude, think_expect)
+        || !contains(claude_repair, "\"max_tokens\":8192")
+        || !contains(claude_repair, think_expect) {
+        print.err("anthropic answer-headroom request schema fixtures failed");
         process.exit(1);
     }
 }
@@ -2108,6 +2133,13 @@ fn _self_test_response_invalidation() ![io] {
         print.err("thinking-only response must be excluded from both language denominators");
         process.exit(1);
     }
+    // SFN-383: a thinking-only exhaustion on a repair turn (iteration > 1) is the
+    // exact discovery signature and must invalidate identically to the initial turn.
+    let attribution_repair = _classify_failure(cfg, task, "provider_error", thinking_only.error, 2);
+    if attribution_repair.language_denominator || attribution_repair.primary != "provider_or_setup_invalidation" {
+        print.err("thinking-only repair-turn response must be excluded from the language denominator");
+        process.exit(1);
+    }
     let cats = ["provider_error", "provider_" + _provider_failure_class(thinking_only.error)];
     let rec = _record(task, "sailfin", cfg, "selftest-thinking", 1, false, 1, thinking_only.input_tokens, thinking_only.output_tokens, 0, 0, 0, cats, attribution_b, "primary");
     if _batch_invalidation_reason(rec) != "response_budget_exhausted"
@@ -2799,7 +2831,7 @@ fn _write_run_manifest(path: string, cfg: Config, arms: string[], run_valid: boo
     let repository_dirty = _repository_dirty();
     let ablation = object_val(["dimension", "assignment", "primary_pool_eligible"], [string_val(cfg.ablation), string_val("seeded parity of frozen attempt identity; paired arms receive the same treatment"), bool_val(cfg.ablation == "primary")]);
     let openai_api = cfg.adapter != "openai"? "not_applicable": (_uses_gpt5_request(cfg.model)? "responses": "chat_completions");
-    let manifest = object_val(["protocol_id", "protocol_sha256", "repository_commit", "repository_dirty", "harness_sha256", "track", "adapter", "model", "model_family", "openai_api", "openai_reasoning_effort", "max_iters", "repeats", "seed", "sampling", "anthropic_response_budget", "provider_retry_policy", "arms", "packets", "ablation", "toolchains", "execution_deadline", "commands", "human_interventions", "run_valid", "invalid_reason"], [string_val("sfn-agent-benchmark/v2.6.0"), string_val(_sha256_file(protocol_path)), string_val(repository_commit), bool_val(repository_dirty), string_val(_sha256_file(harness_path)), string_val(cfg.track), string_val(cfg.adapter), string_val(cfg.model), string_val(cfg.model_family), string_val(openai_api), string_val(manifest_effort), number_val(cfg.max_iters as float), number_val(cfg.repeats as float), number_val(cfg.seed as float), string_val(sampling), _anthropic_response_budget_policy(), _provider_retry_policy(), array_val(arm_vals), _packet_manifest(cfg.track), ablation, toolchains, deadline, commands, number_val(0.0), bool_val(run_valid), string_val(invalid_reason)]);
+    let manifest = object_val(["protocol_id", "protocol_sha256", "repository_commit", "repository_dirty", "harness_sha256", "track", "adapter", "model", "model_family", "openai_api", "openai_reasoning_effort", "max_iters", "repeats", "seed", "sampling", "anthropic_response_budget", "provider_retry_policy", "arms", "packets", "ablation", "toolchains", "execution_deadline", "commands", "human_interventions", "run_valid", "invalid_reason"], [string_val("sfn-agent-benchmark/v2.7.0"), string_val(_sha256_file(protocol_path)), string_val(repository_commit), bool_val(repository_dirty), string_val(_sha256_file(harness_path)), string_val(cfg.track), string_val(cfg.adapter), string_val(cfg.model), string_val(cfg.model_family), string_val(openai_api), string_val(manifest_effort), number_val(cfg.max_iters as float), number_val(cfg.repeats as float), number_val(cfg.seed as float), string_val(sampling), _anthropic_response_budget_policy(), _provider_retry_policy(), array_val(arm_vals), _packet_manifest(cfg.track), ablation, toolchains, deadline, commands, number_val(0.0), bool_val(run_valid), string_val(invalid_reason)]);
     fs.writeFile(path, stringify_pretty(manifest, 2));
 }
 
@@ -2873,7 +2905,7 @@ fn _write_corpus_manifest(path: string, cfg: Config, tasks: Task[], arms: ArmCon
     }
     let band_ok = min_tokens > 0 && max_tokens * 100 <= min_tokens * band_percent;
     let band_label = "maximum <= " + (band_percent as string) + "% of minimum";
-    let corpus = object_val(["corpus_id", "frozen", "template_count", "instance_count", "templates", "instances", "token_estimate_method", "quick_reference_estimated_tokens", "predeclared_band", "quick_reference_band_met", "all_scaffold_bands_met"], [string_val("sfn-agent-benchmark-corpus/v2.6.0"), bool_val(true), number_val(templates.length as float), number_val(count as float), _string_array_json(templates), array_val(instances), string_val("UTF-8 source characters divided by 4, rounded up"), object_val(cheat_keys, cheat_vals), string_val(band_label), bool_val(band_ok), bool_val(all_scaffold_bands_met)]);
+    let corpus = object_val(["corpus_id", "frozen", "template_count", "instance_count", "templates", "instances", "token_estimate_method", "quick_reference_estimated_tokens", "predeclared_band", "quick_reference_band_met", "all_scaffold_bands_met"], [string_val("sfn-agent-benchmark-corpus/v2.7.0"), bool_val(true), number_val(templates.length as float), number_val(count as float), _string_array_json(templates), array_val(instances), string_val("UTF-8 source characters divided by 4, rounded up"), object_val(cheat_keys, cheat_vals), string_val(band_label), bool_val(band_ok), bool_val(all_scaffold_bands_met)]);
     fs.writeFile(path, stringify_pretty(corpus, 2));
 }
 
