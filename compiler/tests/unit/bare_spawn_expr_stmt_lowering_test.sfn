@@ -1,0 +1,50 @@
+// Lowering-classification guard for SFN-409: the expression-statement
+// assignment/expression discriminator (`parse_assignment_expression` in
+// `compiler/src/llvm/expression_lowering/native/statement_parsing.sfn`) must
+// route markers and lvalues to the right branch.
+//
+// Two regressions live on the same discriminator, so both are pinned from a
+// single LLVM emission (`lower_to_llvm_ir_from_text` is expensive — one call
+// per test file keeps the unit suite off the arena-OOM cliff, mirroring
+// `concurrency_lowering_test.sfn`):
+//
+//   1. A bare, unbound `spawn f();` expression statement lowers to the
+//      internal marker `spawn:int <closure_pair ... lambda_id=0 ...>`. The
+//      discriminator must NOT mistake the literal `=` inside that marker for
+//      a top-level assignment (it did, dropping the spawn's entire IR, which
+//      deadlocked a following nursery join). Guard: the `sfn_spawn_int*` call
+//      is present in the lowered IR.
+//
+//   2. The angle-depth tracking added for (1) must be gated to the top level,
+//      or an index-assignment whose subscript uses the unbalanced `<<`
+//      operator (`buf[i << 2] = 9`) leaves the angle counter stuck past the
+//      closing `]` and the genuine top-level `=` is swallowed — silently
+//      dropping the store. Guard: the shifted-index store is present (`shl
+//      i64` computes the index and `store i64 9` writes the element).
+import { emit_native_text_with_module_name } from "../../src/emit_native";
+import { lower_to_llvm_ir_from_text } from "../../src/llvm/lowering/entrypoints";
+import { parse_program } from "../../src/parser/mod";
+import { index_of } from "../../src/string_utils";
+
+fn _contains(haystack: string, needle: string) -> boolean {
+    return index_of(haystack, needle) >= 0;
+}
+
+test "lowering: bare spawn stmt and <<-subscript assignment both emit IR (SFN-409)" ![io] {
+    let source = "let g_ch = channel(8);\n" + "fn main() ![io] {\n"
+        + "    let mut buf: int[] = [0, 0, 0, 0, 0];\n"
+        + "    let i: int = 1;\n"
+        + "    buf[i << 2] = 9;\n"
+        + "    routine {\n"
+        + "        spawn fn() -> int ![io] { g_ch.send(11); return 0; };\n"
+        + "    }\n"
+        + "}";
+    let program = parse_program(source);
+    let native = emit_native_text_with_module_name(program, "bare_spawn_expr_stmt_lowering_test");
+    let ir = lower_to_llvm_ir_from_text(native, "bare_spawn_expr_stmt_lowering_test");
+    // (1) the bare spawn statement was lowered, not dropped.
+    assert _contains(ir, "sfn_spawn_int");
+    // (2) the <<-subscript index-assignment still emits its store.
+    assert _contains(ir, "shl i64");
+    assert _contains(ir, "store i64 9");
+}

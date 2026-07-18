@@ -1,0 +1,103 @@
+// E2E: a `spawn` performing a channel op INSIDE a `routine { }` nursery runs
+// to completion and the nursery join returns — the deadlock fixed in SFN-409.
+//
+// Root cause (SFN-409): a bare (unbound) `spawn f();` expression statement
+// lowers to the internal native-IR marker
+// `eval spawn:int <closure_pair @sfn_lambda_0 env_alloc owned_env
+// lambda_id=0 captures=...:>`. The LLVM expression-statement lowering ran that
+// marker through `parse_assignment_expression`, which tracked `()`/`[]` depth
+// but NOT `<>` — so the literal `=` in `lambda_id=0` was mis-read as a
+// top-level assignment. The statement was routed to the assignment branch,
+// found no matching local, and was dropped with a non-fatal diagnostic: the
+// spawn emitted NO IR. Inside a `routine { }` the nursery then joined zero
+// tasks and the following `g_ch.receive()` blocked forever with no producer
+// (a hang, exit 124). A *bound* spawn (`let f = spawn ...`) took the let path
+// and was unaffected, which is why the bug hid behind the unbound form.
+//
+// This is the first end-to-end exercise of a nursery join against a REAL
+// running spawned task (the pre-existing `routine_nursery_test.sfn` test 4
+// only asserts emitted IR shape via `sfn emit`, never links or runs). If the
+// unbound-spawn drop regresses, the build succeeds but the produced binary
+// hangs — caught here by the runner's per-test timeout.
+//
+// Fixtures build observable output with string concatenation +
+// `number_to_string`, NOT `{{ }}` interpolation, so the host compiler does not
+// interpolate the fixture before it is written.
+import { contains } from "sfn/strings";
+
+fn _sfn_bin() -> string ![io] {
+    let configured = env.get("SAILFIN_BIN");
+    if configured.length > 0 { return configured; }
+    return "build/bin/sfn";
+}
+
+// `process.run_capture`'s empty array is the *empty* environment, not
+// "inherit". `sfn run` spawns a nested clang + linker, so the child needs
+// PATH (else the linker is not found). SAILFIN_TEST_SCRATCH routes the
+// program.ll build-cache per invocation so the parallel pool does not collide
+// on the fixed build/sailfin (#1333).
+fn _child_env() -> string[] ![io] {
+    let mut e: string[] = [];
+    let path = env.get("PATH");
+    if path.length > 0 { e.push("PATH=" + path); }
+    let home = env.get("HOME");
+    if home.length > 0 { e.push("HOME=" + home); }
+    let tmpdir = env.get("TMPDIR");
+    if tmpdir.length > 0 { e.push("TMPDIR=" + tmpdir); }
+    let scratch = env.get("SAILFIN_TEST_SCRATCH");
+    if scratch.length > 0 { e.push("SAILFIN_TEST_SCRATCH=" + scratch); }
+    return e;
+}
+
+// A unique per-invocation scratch root so fixture source paths never collide
+// under the parallel pool.
+fn _scratch_dir() -> string ![io] {
+    let mut base = env.get("SAILFIN_TEST_SCRATCH");
+    if base.length == 0 { base = "/tmp"; }
+    fs.createDirectory(base, true);
+    return fs.mkdtemp(base + "/sfn-routine-spawn-chan-");
+}
+
+fn _run_and_capture(label: string, source: string) -> string ![io] {
+    let dir = _scratch_dir();
+    let src = dir + "/" + label + ".sfn";
+    fs.writeFile(src, source);
+    let exit = process.run_capture([_sfn_bin(), "run", src], _child_env());
+    let out = process.capture_take_stdout();
+    let err = process.capture_take_stderr();
+    if exit != 0 { return "RUN_FAILED:" + out + err; }
+    return out + err;
+}
+
+// ── AC1: single spawn→send inside a routine, receive after ────────────────
+test "routine spawn-channel: single producer inside nursery, receive after (SFN-409)" ![io] {
+    let out = _run_and_capture("routine_spawn_one", "let g_ch = channel(8);\n"
+        + "fn main() ![io] {\n"
+        + "    routine {\n"
+        + "        spawn fn() -> int ![io] { g_ch.send(11); return 0; };\n"
+        + "    }\n"
+        + "    let a: int = g_ch.receive();\n"
+        + "    print.info(\"got: \" + number_to_string(a));\n"
+        + "}");
+    // Reachable only if the unbound spawn actually emitted its IR, ran on the
+    // pool, and the nursery join completed — a regression to the dropped-spawn
+    // path leaves `receive()` blocking forever and this hangs to the timeout.
+    assert contains(out, "got: 11");
+}
+
+// ── AC2: two spawn→send siblings in one routine, drained after ────────────
+test "routine spawn-channel: two producers inside nursery, order-independent sum (SFN-409)" ![io] {
+    let out = _run_and_capture("routine_spawn_two", "let g_ch = channel(8);\n"
+        + "fn main() ![io] {\n"
+        + "    routine {\n"
+        + "        spawn fn() -> int ![io] { g_ch.send(11); return 0; };\n"
+        + "        spawn fn() -> int ![io] { g_ch.send(31); return 0; };\n"
+        + "    }\n"
+        + "    let a: int = g_ch.receive();\n"
+        + "    let b: int = g_ch.receive();\n"
+        + "    print.info(\"sum: \" + number_to_string(a + b));\n"
+        + "}");
+    // Both producers must run and the nursery must join both before the
+    // drains; the sum is order-independent (11 + 31 = 42).
+    assert contains(out, "sum: 42");
+}
