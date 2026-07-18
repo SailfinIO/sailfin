@@ -1,0 +1,46 @@
+name: Seed Pin Merged Notify
+
+# Slack notification when a cadence seed-pin PR actually MERGES — i.e. the
+# compiler checkout seed advanced (`bootstrap.toml [seed].version`), not merely
+# that a pin PR opened. Pairs with `cadence-seed-pin.yml`, which opens the PR on
+# the `bot/cadence-seed-pin-*` branch and enables auto-merge on green CI.
+
+on:
+  pull_request:
+    types: [closed]
+
+permissions:
+  contents: read
+
+jobs:
+  notify:
+    name: Notify Slack on seed pinned
+    if: github.event.pull_request.merged == true && startsWith(github.event.pull_request.head.ref, 'bot/cadence-seed-pin-')
+    runs-on: ubuntu-latest
+    steps:
+      - name: Post Slack notification
+        shell: bash
+        env:
+          SLACK_RELEASE_WEBHOOK_URL: ${{ secrets.SLACK_RELEASE_WEBHOOK_URL }}
+          PR_URL: ${{ github.event.pull_request.html_url }}
+          HEAD_REF: ${{ github.event.pull_request.head.ref }}
+        run: |
+          set -euo pipefail
+          if [ -z "${SLACK_RELEASE_WEBHOOK_URL:-}" ]; then
+            exit 0
+          fi
+          # Branch shape: bot/cadence-seed-pin-v<version>
+          export SEED_VERSION="${HEAD_REF#bot/cadence-seed-pin-v}"
+          python3 - <<'PY' > /tmp/slack-payload.json
+          import json
+          import os
+          version = os.environ.get("SEED_VERSION", "").strip() or "(unknown)"
+          pr_url = os.environ["PR_URL"]
+          print(json.dumps({
+              "text": f":seedling: Sailfin seed pinned to {version} (PR merged).\\nPR: {pr_url}"
+          }))
+          PY
+          curl -fsS -X POST \
+            -H 'Content-type: application/json' \
+            --data @/tmp/slack-payload.json \
+            "$SLACK_RELEASE_WEBHOOK_URL" >/dev/null || true

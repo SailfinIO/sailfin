@@ -4,7 +4,7 @@ title: Delivery Process — Drift-Tolerant Issues, Seed Discovery, Release Caden
 status: Accepted
 type: process
 created: 2026-06-26
-updated: 2026-06-26
+updated: 2026-07-18
 author: "agent:compiler-architect; project owner (direction + decisions)"
 tracking:
 supersedes:
@@ -525,6 +525,67 @@ Process changes are validated by **dry-run rehearsal and simulation**, not
 Each dry-run is run twice (idempotency) to confirm no double-posting/double-
 attachment, matching the idempotency discipline `seed-cut-advisor.yml` already
 enforces.
+
+## Amendment (2026-07-18): weekly auto-stable train
+
+This amendment **supersedes §3.3 (WS-C — Release cadence)** as originally
+designed. The owner-directed shift is from "curated cadence alpha + a
+human-confirmed, quality-gated stable promotion" to a **fully automated weekly
+stable train**, gated on `main`'s health rather than on a fixed quality timer
+or a human sign-off. It does not change WS-A or WS-B.
+
+- **Cadence is now WEEKLY, not bi-weekly.** The prior 2-week/ISO-week-parity
+  interval (chosen in §3.3 to match the iteration boundary) is replaced by a
+  **weekly** train. `release-train.yml` runs every week rather than every
+  other week.
+- **The train cuts a STABLE minor directly — no more `channel=alpha
+  bump=minor`.** Version rule, applied against the current
+  `compiler/capsule.toml` version:
+  - If the current version is a prerelease line `X.Y.Z-pre.N`, the train ships
+    `X.Y.Z` **stable** (`channel=stable bump=prerelease`).
+  - If the current version is already stable `X.Y.0`, the train advances to
+    `X.(Y+1).0` (`channel=stable bump=minor`).
+  - The former **`pendingStable` HOLD** (refusing to cut the next minor alpha
+    while a prior stable line hadn't shipped) is **removed** — it no longer
+    applies once the train ships stable directly.
+- **The cut gate is the health of `main` only.** A train dispatches when
+  **both** the latest scheduled `nightly-selfhost.yml` run on `main` succeeded
+  **and** the latest `ci.yml` run on `main` succeeded. There is no longer a
+  separate N-consecutive-green-days quality timer for stable promotion — the
+  gate is "is `main` green right now," checked at cut time. Open release scope
+  (unclosed `release:*`-labeled items) **always rolls forward and never blocks
+  the train** — the time-box/roll-forward semantics from the original §3.3
+  design are retained unchanged.
+- **Stable promotion is no longer human-confirmed.** The advisory
+  human-confirmation step for `channel=stable` dispatch is removed, and
+  `stable-promotion-advisor.yml` is **retired**. The weekly train *is* the
+  stable-promotion mechanism; there is no separate advisory workflow to
+  surface "promotion eligible" for a human to confirm.
+- **The seed auto-pins on every green release, and the pin PR auto-merges.**
+  Previously the pin advanced in a *draft* PR, once per cadence cycle, against
+  only the cadence `*.0-alpha.1` cut, and required a manual merge (§3.3,
+  "Seed cuts batched onto the cadence"; `docs/conventions/issue-naming.md`
+  "Batched-cadence seeds"). That batching model is superseded: `bootstrap.toml
+  [seed].version` now auto-pins on **every** green release — stable or
+  prerelease alike — via `cadence-seed-pin.yml`, and the resulting pin PR
+  **auto-merges once its own CI is green**, with no manual merge step. This
+  decouples seed advancement from the (now weekly) release-train boundary:
+  a seed can advance as often as releases go green, not just once per cadence
+  cycle. The `release-critical-seed` off-cadence escape hatch (§3.3) becomes
+  largely moot under this model since there is no batch to break out of, but
+  the marker and the underlying bundle-vs-split decision tree
+  (`.claude/rules/seed-dependency.md`, WS-B) are unaffected.
+- **Slack notifications** fire on: a new stable release created, a new
+  prerelease created, a seed pinned (the auto-merge of the pin PR), and a cut
+  blocked (gate not clear) or a train dispatched.
+
+This amendment is recorded here rather than as a rewrite of §3.3 so the
+original design rationale (why a hybrid time-box + train, why N=7 days, why
+batched seeds) remains legible as prior art; where this amendment and §3.3
+conflict, **this amendment governs**. Implementing workflow changes
+(`release-train.yml`, `cadence-seed-pin.yml`, the retirement of
+`stable-promotion-advisor.yml`) live in `.github/workflows/*.yml` and are
+tracked separately from this documentation update.
 
 ## 9. References
 
