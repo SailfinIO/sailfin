@@ -831,18 +831,27 @@ fn parse_variable_with_storage(initial_parser: Parser, is_thread_local: boolean)
     let name_token = parser_peek_raw(parser);
     statement_tokens = append_token(statement_tokens, name_token);
     let name = identifier_text(name_token);
-    parser = parser_advance_raw(parser);
 
     // A `let`/`let mut` binding must be followed by an identifier. When it is
     // not (`let{`, `let =`, `let 3`), the declaration is malformed: abandon it
     // as a precise `E0504` parse error instead of taking the stray token as the
     // binding name and emitting a garbage `VariableDeclaration`. Advancing past
-    // the offending token above keeps the block/recovery loop making progress
-    // (SFN-384).
+    // the offending token keeps the block/recovery loop making progress
+    // (SFN-384) — but never swallow the enclosing block's own closing `}`:
+    // consuming it leaves the body unclosed, degrading this precise
+    // `let`-anchored `E0504` to a coarser `E0505` on the function (SFN-390).
+    // The leading `let` was already consumed, so leaving `}` in place still
+    // guarantees forward progress; `parse_block` then closes the body and the
+    // `E0504` survives.
     if name_token.kind.variant != "Identifier" {
+        if !symbol_matches(name_token, "}") {
+            parser = parser_advance_raw(parser);
+        }
         let stmt = _malformed_declaration(decl_tokens_ref, decl_start_index, parser.index, "E0504", "parse error: expected an identifier after `let`");
         return StatementParseResult { parser: parser, statement: stmt };
     }
+
+    parser = parser_advance_raw(parser);
 
     let mut type_annotation: TypeAnnotation? = null;
     parser = skip_trivia(parser);

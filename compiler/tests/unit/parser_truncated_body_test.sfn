@@ -29,3 +29,29 @@ test "parser truncated: closed body with nested let stays a FunctionDeclaration"
     let program = parse_program("fn foo() {\n    let x = 1;\n}\n");
     assert program.statements[0].variant == "FunctionDeclaration";
 }
+
+// SFN-390: a malformed `let` whose stray name token is the enclosing block's
+// own closing `}` must not swallow that `}`. The body stays closed, so the
+// function parses as a `FunctionDeclaration` carrying the precise
+// `let`-anchored `E0504` — never degrading to a top-level `E0505` on `fn f`.
+test "parser truncated: let taking the body's close brace keeps E0504, not E0505" ![io] {
+    let program = parse_program("fn f() { let }\n");
+    let stmt = program.statements[0];
+    assert stmt.variant == "FunctionDeclaration";
+    assert stmt.body.statements.length == 1;
+    let inner = stmt.body.statements[0];
+    assert inner.variant == "Unknown";
+    assert inner.code == "E0504";
+}
+
+// SFN-390 adjacent guard: a genuinely truncated body — `let{` opening a
+// nested block that then hits EOF with no closing `}` for `fn f` — is still
+// an unclosed body and must keep the `E0505` truncated-body diagnostic
+// (SFN-384). The `{` here is an opening delimiter, not the block's own `}`,
+// so recovery still advances past it.
+test "parser truncated: let-open-brace at EOF stays Unknown E0505" ![io] {
+    let program = parse_program("fn f() { let{\n");
+    let stmt = program.statements[0];
+    assert stmt.variant == "Unknown";
+    assert stmt.code == "E0505";
+}

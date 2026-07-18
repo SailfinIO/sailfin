@@ -161,6 +161,19 @@ test "parse truncated: top-level malformed let name surfaces E0504" ![io] {
     assert contains(r.out, "\"producer\":\"parse\"");
 }
 
+// ---- Test 5b: SFN-390 — a malformed `let` that takes the body's own `}`
+// must surface the precise `E0504` anchored at the `let`, not degrade to the
+// coarser `E0505` unclosed-body diagnostic on `fn f`. ----
+test "parse truncated: let taking the body's close brace surfaces E0504, not E0505" ![io] {
+    let root = _fixture_dir("let-eats-close-brace");
+    let path = _write(root, "let_eats_close_brace.sfn", "fn f() { let }\nfn main() { }\n");
+    let r = _check(path);
+    assert r.exit == 1;
+    assert contains(r.out, "\"code\":\"E0504\"");
+    assert contains(r.out, "expected an identifier after `let`");
+    assert ! contains(r.out, "\"code\":\"E0505\"");
+}
+
 // ---- Test 6: negative control — well-formed nested lets stay clean ----
 test "parse truncated: well-formed nested lets stay clean" ![io] {
     let root = _fixture_dir("ok-nested-let");
