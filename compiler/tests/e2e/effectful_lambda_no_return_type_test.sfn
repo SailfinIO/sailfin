@@ -1,0 +1,97 @@
+// E2E: an effectful expression-lambda with NO explicit return type —
+// `fn() ![io] { ... }` — parses, compiles, and runs to completion
+// (issue #2430 / SFN-399).
+//
+// Before the fix, `fn() ![io] { ... }` (effect annotation, no `->`/`:`
+// return type) failed to parse: the `![...]` skip ran only inside the
+// return-type branch of `parse_lambda_expression`, so the parser stayed
+// parked on `!`, degraded the lambda to `Expression.Raw`, and the `E0818`
+// fail-closed backstop rejected it. The parse fix hoists the effect skip so
+// the no-return-type form is accepted; these fixtures bind and invoke such a
+// lambda directly (a non-`spawn` use), proving it lowers and executes.
+//
+// SCOPE NOTE — the sibling `routine { spawn fn() ![io] {...}; ... }` shape
+// from the issue is intentionally NOT exercised here: a `spawn` of a
+// no-return-type lambda is a distinct, deliberate typecheck rejection
+// (`E0813`, deferred to #829), and even the annotated `spawn fn() -> void
+// ![io] {...}` producer/consumer form deadlocks at runtime under a
+// `routine {}` wrapper (a separate concurrency-runtime bug). Both are
+// downstream of this parser fix and split to follow-up issues.
+//
+// Fixtures use string concatenation + `number_to_string` (NOT `{{ }}`
+// interpolation) so the host compiler does not interpolate the fixture
+// before it is written.
+import { contains, find } from "sfn/strings";
+
+fn _sfn_bin() -> string ![io] {
+    let configured = env.get("SAILFIN_BIN");
+    if configured.length > 0 { return configured; }
+    return "build/bin/sfn";
+}
+
+// Empty `run_capture` env is the EMPTY environment, not "inherit"; a nested
+// `sailfin run` spawns clang + linker (needs PATH) and routes its
+// program.ll build-cache under SAILFIN_TEST_SCRATCH so the parallel pool
+// does not collide on the fixed build/sailfin (#1333).
+fn _child_env() -> string[] ![io] {
+    let mut e: string[] = [];
+    let path = env.get("PATH");
+    if path.length > 0 { e.push("PATH=" + path); }
+    let home = env.get("HOME");
+    if home.length > 0 { e.push("HOME=" + home); }
+    let tmpdir = env.get("TMPDIR");
+    if tmpdir.length > 0 { e.push("TMPDIR=" + tmpdir); }
+    let scratch = env.get("SAILFIN_TEST_SCRATCH");
+    if scratch.length > 0 { e.push("SAILFIN_TEST_SCRATCH=" + scratch); }
+    return e;
+}
+
+fn _scratch_dir() -> string ![io] {
+    let mut base = env.get("SAILFIN_TEST_SCRATCH");
+    if base.length == 0 { base = "/tmp"; }
+    fs.createDirectory(base, true);
+    return fs.mkdtemp(base + "/sfn-eff-lambda-noret-");
+}
+
+fn _run(label: string, source: string) -> string ![io] {
+    let dir = _scratch_dir();
+    let src = dir + "/" + label + ".sfn";
+    fs.writeFile(src, source);
+    let exit = process.run_capture([_sfn_bin(), "run", src], _child_env());
+    let out = process.capture_take_stdout();
+    let err = process.capture_take_stderr();
+    if exit != 0 { return "RUN_FAILED:" + out + err; }
+    return out + err;
+}
+
+// ── a bound no-return-type effectful lambda, invoked directly ─────────
+// The `fn() ![io] { ... }` head has no return type; before the fix the
+// binding tripped `E0818`. A clean run with the body's output proves the
+// lambda parsed, lowered, and executed.
+test "effectful lambda: no-return-type `fn() ![io] {...}` binds, compiles, runs (#2430)" ![io] {
+    let out = _run("bind_invoke", "fn main() ![io] {\n"
+        + "    let greet = fn() ![io] { print.info(\"hello-from-lambda\"); };\n"
+        + "    greet();\n"
+        + "    print.info(\"done\");\n"
+        + "}");
+    assert find(out, "RUN_FAILED:", 0) < 0;
+    assert contains(out, "hello-from-lambda");
+    assert contains(out, "done");
+}
+
+// ── a parameterized no-return-type effectful lambda, invoked twice ────
+// Mirrors the param'd parser unit case end to end: the hoisted effect skip
+// is independent of the parameter list, so `fn(x: int) ![io] { ... }` parses
+// and the arguments flow through at runtime.
+test "effectful lambda: no-return-type `fn(x: int) ![io] {...}` runs with args (#2430)" ![io] {
+    let out = _run("param_invoke", "fn main() ![io] {\n"
+        + "    let log_it = fn(x: int) ![io] { print.info(\"got: \" + number_to_string(x)); };\n"
+        + "    log_it(41);\n"
+        + "    log_it(1);\n"
+        + "    print.info(\"done\");\n"
+        + "}");
+    assert find(out, "RUN_FAILED:", 0) < 0;
+    assert contains(out, "got: 41");
+    assert contains(out, "got: 1");
+    assert contains(out, "done");
+}

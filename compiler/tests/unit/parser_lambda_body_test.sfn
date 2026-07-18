@@ -171,3 +171,34 @@ test "lambda expr form: block form `fn(x) -> int { ... }` still parses (no regre
     assert expr.body.statements.length == 1;
     assert expr.body.statements[0].variant == "ReturnStatement";
 }
+
+// -------------------------------------------------------------------
+// Effect annotation with NO return type (#2430) — `fn() ![io] { ... }`
+// must parse as a lambda even though no `->`/`:` return-type separator
+// precedes the effect marker. The `![...]` skip previously ran only
+// inside the return-type branch, so with no separator `current` stayed
+// parked on `!`; the lambda degraded to `Expression.Raw` and tripped the
+// `E0818` fail-closed backstop, blocking bare `spawn fn() ![io] {...}`
+// siblings. The return type is absent (null) and the body parses
+// structurally.
+// -------------------------------------------------------------------
+test "lambda effect: `fn() ![io] { ... }` with no return type parses as a lambda (#2430)" ![io] {
+    let expr = first_let_lambda("let f = fn() ![io] { return 0; };");
+    assert expr != null;
+    assert expr.variant == "Lambda";
+    assert expr.return_type == null;
+    assert expr.body.statements.length == 1;
+    assert expr.body.statements[0].variant == "ReturnStatement";
+}
+
+// A parameterized effectful lambda with no return type parses too — the
+// hoisted skip is independent of the parameter list.
+test "lambda effect: `fn(x: int) ![io] { ... }` with no return type parses as a lambda (#2430)" ![io] {
+    let expr = first_let_lambda("let f = fn(x: int) ![io] { return x; };");
+    assert expr != null;
+    assert expr.variant == "Lambda";
+    assert expr.return_type == null;
+    assert expr.parameters.length == 1;
+    assert expr.body.statements.length == 1;
+    assert expr.body.statements[0].variant == "ReturnStatement";
+}

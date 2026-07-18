@@ -2159,22 +2159,28 @@ fn parse_lambda_expression(state: ExpressionTokens) -> ExpressionParseResult {
                 tokens: current.tokens,
                 index: capture.parser.index
             };
-            // Consume an optional effect annotation `![...]` sitting between
-            // the return type and the body so the body dispatch below still
-            // starts at `{` or `=>`. The lambda effect set is not yet
-            // tracked on the AST node, so the tokens are discarded (status
-            // quo) — only the return-type text is corrected here.
-            if !expression_tokens_is_at_end(current) {
-                let after_type = expression_tokens_peek(current);
-                if after_type.kind.variant == "Symbol" {
-                    if strings_equal(after_type.lexeme, "!") {
-                        let effect_capture = expression_tokens_collect_until(current, ["{", "=>"]);
-                        if !effect_capture.success {
-                            return expression_parse_failure(state);
-                        }
-                        current = effect_capture.state;
-                    }
+        }
+    }
+
+    // Consume an optional effect annotation `![...]` sitting between the
+    // (optional) return type and the body so the body dispatch below starts
+    // at `{` or `=>`. This runs whether or not a return-type separator was
+    // consumed: `fn() ![io] { ... }` (no return type) is as valid a lambda as
+    // `fn() -> T ![io] { ... }`. Keeping the skip nested inside the
+    // return-type branch left `current` parked on `!` for the no-return-type
+    // form, degrading it to `Expression.Raw` and tripping `E0818` (#2430).
+    // The lambda effect set is not yet tracked on the AST node, so the tokens
+    // are discarded (status quo) — only the return-type text is corrected
+    // above.
+    if !expression_tokens_is_at_end(current) {
+        let after_type = expression_tokens_peek(current);
+        if after_type.kind.variant == "Symbol" {
+            if strings_equal(after_type.lexeme, "!") {
+                let effect_capture = expression_tokens_collect_until(current, ["{", "=>"]);
+                if !effect_capture.success {
+                    return expression_parse_failure(state);
                 }
+                current = effect_capture.state;
             }
         }
     }
