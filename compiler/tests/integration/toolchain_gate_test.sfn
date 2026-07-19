@@ -50,6 +50,78 @@ fn _make_project(tag: string, toolchain_body: string) -> string ![io] {
     return dir;
 }
 
+// Seed a workspace root carrying `workspace_toolchain_body` (the root
+// `[toolchain]` floor under test) plus one member capsule. `member_toolchain_body`
+// is the member's own `[toolchain]` stanza (pass "" for a member that inherits
+// the workspace floor). `sfn check <root>/member` drives `toolchain_decide`,
+// which discovers the workspace root above the member (floor) and the member
+// capsule.toml (per-field override). A per-`tag` path keeps concurrent children
+// from colliding under the pool.
+fn _make_workspace(tag: string, workspace_toolchain_body: string, member_toolchain_body: string) -> string ![io] {
+    let mut base = env.get("SAILFIN_TEST_SCRATCH");
+    if base.length == 0 { base = "/tmp"; }
+    let root = base + "/sfn-toolchain-ws-" + tag;
+    let member = root + "/member";
+    fs.createDirectory(member + "/src", true);
+    let workspace = "[workspace]\nmembers = [\"member\"]\n\n"
+        + workspace_toolchain_body;
+    fs.writeFile(root + "/workspace.toml", workspace);
+    let manifest = "[capsule]\nname = \"wsmember\"\nversion = \"0.1.0\"\n\n"
+        + member_toolchain_body
+        + "\n[build]\nentry = \"src/main.sfn\"\n";
+    fs.writeFile(member + "/capsule.toml", manifest);
+    fs.writeFile(member + "/src/main.sfn", "fn main() ![io] {\n    print(\"hi\");\n}\n");
+    return member;
+}
+
+test "workspace toolchain floor: an unsatisfiable workspace pin hard-errors" ![io] {
+    // The member declares no `[toolchain]`, so it inherits the workspace-root
+    // floor. `SAILFIN_TOOLCHAIN=local` selects the verify-only path (no fetch).
+    // The mismatch attributes the pin to `workspace.toml`, proving the floor
+    // flows from the workspace root rather than a member pin.
+    let member = _make_workspace("hi-floor", "[toolchain]\nsfn = \"99.0.0\"\n", "");
+    let mut e = _child_env();
+    e.push("SAILFIN_TOOLCHAIN=local");
+    let exit = process.run_capture([_sfn_bin(), "check", member], e);
+    let out = process.capture_take_stdout();
+    let err = process.capture_take_stderr();
+    assert exit != 0;
+    assert find(out + err, "toolchain mismatch", 0) >= 0;
+    assert find(out + err, "workspace.toml [toolchain]", 0) >= 0;
+}
+
+test "workspace toolchain floor: a member capsule.toml overrides the workspace pin per field" ![io] {
+    // Workspace pins an unsatisfiable `sfn`; the member overrides just `sfn`
+    // with a satisfiable floor. Per-field override means the member value wins,
+    // so the gate passes.
+    let member = _make_workspace("member-override", "[toolchain]\nsfn = \"99.0.0\"\n", "[toolchain]\nsfn = \"0.0.1\"\n");
+    let exit = process.run_capture([_sfn_bin(), "check", member], _child_env());
+    let out = process.capture_take_stdout();
+    let err = process.capture_take_stderr();
+    assert exit == 0;
+    assert find(out + err, "toolchain mismatch", 0) < 0;
+}
+
+test "workspace toolchain floor: channel = stable rejects a prerelease toolchain" ![io] {
+    // Conditioned on the running toolchain, mirroring the capsule-level channel
+    // case: a workspace `channel = "stable"` floor only rejects when the running
+    // `sfn` is itself a prerelease. The member inherits the workspace channel.
+    let _v = process.run_capture([_sfn_bin(), "--version"], _child_env());
+    let ver = process.capture_take_stdout() + process.capture_take_stderr();
+    let is_prerelease = find(ver, "-alpha", 0) >= 0 || find(ver, "-beta", 0) >= 0
+        || find(ver, "-rc", 0) >= 0;
+
+    let member = _make_workspace("chan-floor", "[toolchain]\nchannel = \"stable\"\n", "");
+    let exit = process.run_capture([_sfn_bin(), "check", member], _child_env());
+    let out = process.capture_take_stdout();
+    let err = process.capture_take_stderr();
+    if is_prerelease {
+        assert exit != 0;
+        assert find(out + err, "toolchain mismatch", 0) >= 0;
+        assert find(out + err, "workspace.toml [toolchain]", 0) >= 0;
+    } else { assert find(out + err, "toolchain mismatch", 0) < 0; }
+}
+
 test "toolchain gate: an unsatisfiable version pin hard-errors" ![io] {
     // `SAILFIN_TOOLCHAIN=local` selects the verify-only path (SFN-172): the
     // gate prints the fail-closed mismatch and never fetches. The default

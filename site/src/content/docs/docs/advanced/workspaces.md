@@ -10,7 +10,7 @@ A **workspace** is a collection of related capsules that are developed, built, a
 
 A workspace is defined by a `workspace.toml` file at the root of the repository. Each member capsule retains its own `capsule.toml` for its own metadata and dependencies.
 
-**Note:** The workspace tooling and the `[policies.*]` enforcement are designed and specified. Full CLI integration is planned for a future release. The `workspace.toml` format described here is the target design.
+**Note:** `[workspace] members` (including multi-line arrays and trailing-`/*` globs) and the `[toolchain]` floor are **shipped and enforced today** — `sfn build`/`run`/`check`/`test` gate on the toolchain floor. The `[policies.*]` capability envelope, `[shared-dependencies]` inheritance, and the `sfn workspace` subcommand are **designed and specified but not yet enforced**; the format shown for those sections is the target design.
 
 ## When to Use a Workspace
 

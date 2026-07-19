@@ -25,3 +25,19 @@
 
 [workspace]
 members = ["compiler", "runtime", "capsules/sfn/bench", "capsules/sfn/cli", "capsules/sfn/crypto", "capsules/sfn/fs", "capsules/sfn/http", "capsules/sfn/json", "capsules/sfn/layers", "capsules/sfn/log", "capsules/sfn/losses", "capsules/sfn/math", "capsules/sfn/net", "capsules/sfn/nn", "capsules/sfn/os", "capsules/sfn/path", "capsules/sfn/prelude", "capsules/sfn/strings", "capsules/sfn/sync", "capsules/sfn/tensor", "capsules/sfn/test", "capsules/sfn/time", "capsules/sfn/toml"]
+
+# Workspace-wide toolchain floor (SFEP-0051 Phase 2, SFN-414 / SFEP-0046
+# floor/override model). This is the default floor for every member: the
+# running `sfn` must be >= `sfn` and rank >= `channel` (stable > rc > beta >
+# alpha). A member `capsule.toml [toolchain]` overrides the workspace value
+# per field (compiler/capsule.toml raises `sfn` for its own self-host gate).
+# `toolchain_decide` (capsule_resolver.sfn) reads this block first, so the
+# pinned seed in bootstrap.toml already honors it — adopting it here needs no
+# seed cut. The floor stays <= the released compiler version so `make compile`
+# self-hosts; bump it only to require a newer language/runtime capability
+# workspace-wide. `channel = "alpha"` is the lowest rank (stable > rc > beta >
+# alpha), so it never rejects a running toolchain today — it documents the
+# minimum stability contract and tightens only if raised to `beta`/`rc`/`stable`.
+[toolchain]
+sfn = "0.8.0-alpha.3"
+channel = "alpha"
