@@ -576,6 +576,24 @@ fn toml_get_workspace_capabilities_grant(text: string, member: string) -> string
     return _toml_split_lines_into_array(toml_get_string_array(text, "workspace.capabilities.grants", member));
 }
 
+// SFEP-0051 Phase 5: member-selection conveniences under `[workspace]` (Cargo
+// parity). `default-members` is the subset a bare `sfn build`/`sfn test` at the
+// workspace root targets when no `-p` is given (Cargo
+// `workspace.default-members`); `exclude` drops paths from trailing-`/*` glob
+// expansion so a `capsules/sfn/*` glob can skip a scratch/vendored dir without
+// listing every sibling (Cargo `workspace.exclude`). Both are plain string
+// arrays read with the lightweight section/key helper — no struct write-back,
+// mirroring the Phase 4a getters above. The resolver consumes them
+// (`capsule_resolver.sfn`): `exclude` inside `_cr_expand_member_globs`,
+// `default-members` in `load_workspace_default_members`.
+fn toml_get_workspace_default_members(text: string) -> string[] {
+    return _toml_split_lines_into_array(toml_get_string_array(text, "workspace", "default-members"));
+}
+
+fn toml_get_workspace_exclude(text: string) -> string[] {
+    return _toml_split_lines_into_array(toml_get_string_array(text, "workspace", "exclude"));
+}
+
 // SFEP-0051 Phase 3: recognize the `{ workspace = true }` inline-table marker
 // a member uses to opt into workspace inheritance (Cargo's spelling). The
 // minimal parser stores such a value verbatim — `_toml_strip_quotes` leaves
