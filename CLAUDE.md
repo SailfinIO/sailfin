@@ -228,15 +228,19 @@ When adding features or making design choices:
   (Phase R1, epic #1209), so it may be documented as enforced for that surface;
   user-facing ownership stays previewed until Phase U.
 - **Libraries over keywords.** A keyword can never become a variable name. Only
-  add keywords for constructs that can't be library functions. AI constructs
-  (`model`, `prompt`, `tool`, `pipeline`) are migrating to the `sfn/ai` capsule;
-  the `![model]` effect stays as a language-level capability gate.
-- **Fix the foundation first.** `int`/`float` and `Result<T, E>` + `?` have
-  landed; the remaining prerequisites for everything else are **generic
-  constraints + monomorphization** (the root blocker for real collections,
-  typed higher-order fns, and `Result` `From<E>` — see
-  `docs/proposals/draft-generic-constraints.md`), hierarchical effects, and
-  effect polymorphism.
+  add keywords for constructs that can't be library functions. The AI constructs
+  (`model`, `prompt`, `tool`, `pipeline`) have been **removed** from the language
+  (parser/AST/typecheck/emitter deleted — `docs/status.md`); they will reappear as
+  ordinary library APIs in the post-1.0 `sfn/ai` capsule. The `![model]` effect
+  stays as a language-level capability gate.
+- **Fix the foundation first.** `int`/`float`, `Result<T, E>` + `?`, and **generic
+  constraints + monomorphization for pointer-width `T`** have landed (SFEP-0038,
+  `Implemented`; see `docs/proposals/0038-generic-constraints.md`). The remaining
+  prerequisites for real collections, typed higher-order fns over non-`int`
+  element types, and `Result` `From<E>` are **by-value aggregate `T` layout** and
+  **generic collections** (`docs/proposals/draft-generic-collections.md`) — not
+  the constraint/monomorphization machinery itself — plus hierarchical effects
+  (SFEP-0017, shipped) and effect polymorphism.
 - **Chase timeless problems.** Effects and capability security matter in 20 years;
   AI API wrappers change every 6 months. Language syntax is permanent; library
   APIs can iterate.
@@ -282,8 +286,9 @@ Prefer the new forms where the parser already accepts them. Full plan:
   deliberately **extensible floor** built upward from (D1 expansion mandate),
   **not** a Rust-style borrow checker. See `reference/preview/ownership.md`.
 - `PII<T>` / `Secret<T>` parsed, no runtime enforcement (post-1.0)
-- `model` / `prompt` / `tool` / `pipeline` blocks emit metadata only (migrating
-  to the `sfn/ai` capsule)
+- `model` / `prompt` / `tool` / `pipeline` blocks have been **removed** from the
+  language entirely (parser/AST/typecheck/emitter deleted); the `![model]` effect
+  is the only surviving surface, reserved for the future post-1.0 `sfn/ai` capsule
 - **Concurrency runtime — v0 works, not complete.** `routine {}` lowers to a real
   structured-concurrency nursery (join-all, no orphaned tasks); `channel()` is a
   working bounded MPMC queue; `spawn`/`await`/`parallel` route through a real
