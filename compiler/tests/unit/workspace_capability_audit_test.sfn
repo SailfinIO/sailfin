@@ -1,0 +1,141 @@
+// compiler/tests/unit/workspace_capability_audit_test.sfn
+//
+// Unit coverage for the SFEP-0051 Phase 4a workspace capability-envelope
+// drift core (`workspace_effective_drift` / `workspace_envelope_noncanonical`
+// in `compiler/src/capsule_resolver.sfn`, membership via the SFEP-0017
+// `effect_subsumes` lattice in `effect_taxonomy.sfn`).
+//
+// The pure logic under test is inline-copied verbatim below rather than
+// imported: `capsule_resolver.sfn` imports `./main`, so pulling it into a
+// unit test drags in the whole compiler and trips the seed's per-module
+// timeout (the same reason `workspace_resolver_test.sfn` inlines its
+// helpers). When the production functions change, update these copies in
+// lockstep. `substring` is the only runtime builtin used, so the char-code
+// helpers that don't resolve through the test import chain are avoided.
+// --- inline copy: effect_taxonomy.sfn::canonical_effects / is_canonical_effect ---
+fn _canonical_effects() -> string[] {
+    return ["clock", "gpu", "io", "model", "net", "rand"];
+}
+
+fn _is_canonical_effect(name: string) -> boolean {
+    let canonical = _canonical_effects();
+    let mut i: int = 0;
+    loop {
+        if i >= canonical.length { break; }
+        if canonical[i] == name { return true; }
+        i += 1;
+    }
+    return false;
+}
+
+// --- inline copy: effect_taxonomy.sfn::effect_subsumes (SFEP-0017 D2) ---
+fn _effect_subsumes(grant: string, requirement: string) -> boolean {
+    if requirement == grant { return true; }
+    if requirement.length <= grant.length { return false; }
+    if substring(requirement, 0, grant.length) != grant { return false; }
+    return requirement[grant.length] == ".";
+}
+
+// --- inline copy: capsule_resolver.sfn::_cr_effect_covered ---
+fn _effect_covered(envelope: string[], required: string) -> boolean {
+    let mut i: int = 0;
+    loop {
+        if i >= envelope.length { break; }
+        if _effect_subsumes(envelope[i], required) { return true; }
+        i += 1;
+    }
+    return false;
+}
+
+// --- inline copy: capsule_resolver.sfn::workspace_effective_drift ---
+fn _effective_drift(allow: string[], deny: string[], grant: string[], required: string[]) -> string[] {
+    let mut out: string[] = [];
+    let mut i: int = 0;
+    loop {
+        if i >= required.length { break; }
+        let r = required[i];
+        i += 1;
+        if _effect_covered(deny, r) {
+            out.push(r);
+            continue;
+        }
+        if _effect_covered(allow, r) { continue; }
+        if _effect_covered(grant, r) { continue; }
+        out.push(r);
+    }
+    return out;
+}
+
+// --- inline copy: capsule_resolver.sfn::workspace_envelope_noncanonical ---
+fn _envelope_noncanonical(effects: string[]) -> string[] {
+    let mut out: string[] = [];
+    let mut i: int = 0;
+    loop {
+        if i >= effects.length { break; }
+        if !_is_canonical_effect(effects[i]) { out.push(effects[i]); }
+        i += 1;
+    }
+    return out;
+}
+
+test "capability audit: member within envelope does not drift" {
+    let drift = _effective_drift(["clock", "io"], [], [], ["io"]);
+    assert drift.length == 0;
+}
+
+test "capability audit: effect exceeding allow without a grant drifts" {
+    let drift = _effective_drift(["io"], [], [], ["net"]);
+    assert drift.length == 1;
+    assert drift[0] == "net";
+}
+
+test "capability audit: a matching grant clears the drift" {
+    let drift = _effective_drift(["io"], [], ["net"], ["net"]);
+    assert drift.length == 0;
+}
+
+test "capability audit: deny overrides a grant" {
+    let drift = _effective_drift(["io"], ["net"], ["net"], ["net"]);
+    assert drift.length == 1;
+    assert drift[0] == "net";
+}
+
+test "capability audit: deny overrides allow" {
+    let drift = _effective_drift(["io"], ["io"], [], ["io"]);
+    assert drift.length == 1;
+    assert drift[0] == "io";
+}
+
+test "capability audit: allow of io covers a hierarchical io.fs requirement" {
+    let drift = _effective_drift(["io"], [], [], ["io.fs"]);
+    assert drift.length == 0;
+}
+
+test "capability audit: a narrow io.fs allow does not cover a broad io requirement" {
+    let drift = _effective_drift(["io.fs"], [], [], ["io"]);
+    assert drift.length == 1;
+    assert drift[0] == "io";
+}
+
+test "capability audit: deny of io denies the io.console sub-effect" {
+    let drift = _effective_drift(["io"], ["io"], [], ["io.console"]);
+    assert drift.length == 1;
+    assert drift[0] == "io.console";
+}
+
+test "capability audit: only the drifting effects are reported from a mixed set" {
+    let drift = _effective_drift(["clock", "io"], [], ["net"], ["io", "net", "model"]);
+    assert drift.length == 1;
+    assert drift[0] == "model";
+}
+
+test "capability audit: canonical envelope entries pass validation" {
+    let bad = _envelope_noncanonical(["clock", "io"]);
+    assert bad.length == 0;
+}
+
+test "capability audit: a non-canonical envelope entry is flagged" {
+    let bad = _envelope_noncanonical(["io", "disk"]);
+    assert bad.length == 1;
+    assert bad[0] == "disk";
+}

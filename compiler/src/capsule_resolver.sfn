@@ -67,6 +67,7 @@ import {
     collect_scoped_import_specs
 } from "./capsule_import_scan";
 import { _display_capsule_name_cmd } from "./capsule_names";
+import { effect_subsumes, is_canonical_effect } from "./effect_taxonomy";
 import { emit_subprocess_with_retry } from "./emit_helpers";
 import { set_import_context_root } from "./llvm/mod";
 import { _LockEntry, lock_get_versions } from "./lock";
@@ -94,14 +95,20 @@ import {
     toml_get_toolchain_channel,
     toml_get_toolchain_sfn,
     toml_get_version,
+    toml_get_workspace_capabilities_allow,
+    toml_get_workspace_capabilities_deny,
+    toml_get_workspace_capabilities_grant,
     toml_get_workspace_members
 } from "./toml_parser";
+import { Diagnostic } from "./typecheck_types";
 import { resolve_compiler_version, resolve_compiler_version_for_cache } from "./version";
 
 export {
+    CapabilityDriftReport,
     CapsuleSource,
     CheckCapsuleResolution,
     CompileCapsuleResult,
+    MemberCapabilityAudit,
     ModuleCacheEvent,
     ProjectCapsuleResult,
     ResolverConsumer,
@@ -127,6 +134,7 @@ export {
     ToolchainDecision,
     toolchain_decide,
     toolchain_print_mismatch,
+    workspace_capability_audit,
     workspace_member_for_spec
 };
 
@@ -262,6 +270,29 @@ struct WorkspaceMember {
     name: string;  // canonical name, e.g. "sfn/http"
     member_path: string;  // path relative to workspace root, e.g. "capsules/sfn/http"
     src_dir: string;  // path to the member's src/ dir (workspace-rooted)
+}
+
+// SFEP-0051 Phase 4a: one member's declared-surface audit against the
+// workspace capability envelope. `drift` is the subset of the member's
+// declared `[capabilities] required` effects that fall outside
+// `effective(member) = (allow ∪ grants[member]) \ deny`.
+struct MemberCapabilityAudit {
+    member_name: string;
+    member_path: string;
+    required: string[];  // the member's declared [capabilities] required
+    drift: string[];  // required effects outside the effective envelope
+}
+
+// SFEP-0051 Phase 4a: the workspace-tier declared-surface capability audit
+// result. `diagnostics` carries a coded `Diagnostic` per drifting effect
+// (E0405) and per malformed envelope entry (E0406); `has_drift` is true iff
+// any member drifts. Phase 4a produces the report only — wiring it into a
+// build/check failure gate is Phase 4c (SFN-419), so nothing here fails a
+// build yet.
+struct CapabilityDriftReport {
+    members: MemberCapabilityAudit[];
+    diagnostics: Diagnostic[];
+    has_drift: boolean;
 }
 
 // Result of a check-mode resolver pass: same workspace + manifest +
@@ -2531,6 +2562,250 @@ fn load_workspace_members(workspace_root: string) -> WorkspaceMember[] ![io] {
         i += 1;
     }
     return out;
+}
+
+// SFEP-0051 Phase 4a — capability-envelope audit (declared surface).
+//
+// The workspace root declares an effect envelope in `[workspace.capabilities]`
+// (allow/deny + per-member grants); the audit checks each member's declared
+// `capsule.toml [capabilities] required` against it at resolve time — no
+// compile needed. This is the workspace-tier sibling of the capsule-tier
+// capability cross-check (E0403); membership reuses the SFEP-0017 subsumption
+// lattice (`effect_subsumes`), so an `io` envelope entry covers an `io.fs`
+// requirement. Phase 4a produces the report + diagnostics only; the
+// build/check enforcement gate is Phase 4c (SFN-419).
+// True iff some entry in `envelope` subsumes `required` under the SFEP-0017
+// refinement lattice (an `io` entry covers an `io.fs` requirement). Reused
+// for both the allow/grant cover test and the deny test.
+fn _cr_effect_covered(envelope: string[], required: string) -> boolean {
+    let mut i: int = 0;
+    loop {
+        if i >= envelope.length { break; }
+        if effect_subsumes(envelope[i], required) { return true; }
+        i += 1;
+    }
+    return false;
+}
+
+// The drifting subset of `required` for a member granted `grant`, under the
+// workspace `allow`/`deny`. `effective(M) = (allow ∪ grant) \ deny`, so a
+// required effect drifts iff it is denied (deny wins — some deny entry
+// subsumes it) or it is not covered by allow ∪ grant. Pure so the unit tests
+// can inline-copy it (importing the resolver trips the seed per-module
+// timeout — mirror `workspace_resolver_test.sfn`).
+fn workspace_effective_drift(allow: string[], deny: string[], grant: string[], required: string[]) -> string[] {
+    let mut out: string[] = [];
+    let mut i: int = 0;
+    loop {
+        if i >= required.length { break; }
+        let r = required[i];
+        i += 1;
+        if _cr_effect_covered(deny, r) {
+            out.push(r);
+            continue;
+        }
+        if _cr_effect_covered(allow, r) { continue; }
+        if _cr_effect_covered(grant, r) { continue; }
+        out.push(r);
+    }
+    return out;
+}
+
+// Non-canonical entries in an envelope list. Envelope entries must be exact
+// canonical effects (io, net, … — not dotted refinements), so validation
+// uses exact `is_canonical_effect`, not root/subsumption membership. Pure.
+fn workspace_envelope_noncanonical(effects: string[]) -> string[] {
+    let mut out: string[] = [];
+    let mut i: int = 0;
+    loop {
+        if i >= effects.length { break; }
+        if !is_canonical_effect(effects[i]) { out.push(effects[i]); }
+        i += 1;
+    }
+    return out;
+}
+
+// True iff `effects` is strictly ascending (alphabetical, no duplicates) —
+// the canonical ordering effect lists must use (.claude/rules/code-style.md).
+// Pure.
+fn workspace_list_is_sorted(effects: string[]) -> boolean {
+    let mut i: int = 1;
+    loop {
+        if i >= effects.length { break; }
+        if !_cr_string_lt(effects[i - 1], effects[i]) { return false; }
+        i += 1;
+    }
+    return true;
+}
+
+fn _cr_join_effects_csv(effects: string[]) -> string {
+    let mut out: string = "";
+    let mut i: int = 0;
+    loop {
+        if i >= effects.length { break; }
+        if i > 0 { out = out + ", "; }
+        out = out + effects[i];
+        i += 1;
+    }
+    return out;
+}
+
+// E0405: a member's declared effect exceeds the workspace envelope. No source
+// `Token` exists for a TOML manifest, so `primary` is null and the member
+// path / offending effect / fix-it hint live in the message; `file_path`
+// points at the member manifest that declared the excess effect.
+fn _cr_capability_drift_diagnostic(member_name: string, member_manifest: string, effect: string, allow: string[]) -> Diagnostic {
+    let envelope = _cr_join_effects_csv(allow);
+    let message = "workspace member `" + member_name + "` requires effect `"
+        + effect
+        + "` which exceeds the workspace capability envelope !["
+        + envelope
+        + "]"
+        + "\nnote: [workspace.capabilities] allow = ["
+        + envelope
+        + "]"
+        + "\nsuggestion: add \""
+        + member_name
+        + "\" = [\""
+        + effect
+        + "\"] to [workspace.capabilities.grants], or remove !["
+        + effect
+        + "] from "
+        + member_manifest;
+    return Diagnostic {
+        code: "E0405",
+        severity: "error",
+        message: message,
+        file_path: member_manifest,
+        primary: null,
+        suggestion: null
+    };
+}
+
+// E0406: an envelope list names a non-canonical effect.
+fn _cr_envelope_noncanonical_diagnostic(list_name: string, effect: string, manifest: string) -> Diagnostic {
+    let message = "`" + effect + "` in [workspace.capabilities] " + list_name
+        + " is not a canonical effect (one of clock, gpu, io, model, net, rand)";
+    return Diagnostic {
+        code: "E0406",
+        severity: "error",
+        message: message,
+        file_path: manifest,
+        primary: null,
+        suggestion: null
+    };
+}
+
+// E0406: an envelope list is not in canonical alphabetical order.
+fn _cr_envelope_unsorted_diagnostic(list_name: string, manifest: string) -> Diagnostic {
+    let message = "[workspace.capabilities] " + list_name
+        + " must be alphabetical (canonical effects in ascending order)";
+    return Diagnostic {
+        code: "E0406",
+        severity: "error",
+        message: message,
+        file_path: manifest,
+        primary: null,
+        suggestion: null
+    };
+}
+
+// Audit every workspace member's declared effect surface against the
+// `[workspace.capabilities]` envelope. Emits E0406 for a malformed envelope
+// entry (non-canonical name or non-alphabetical list) and E0405 per drifting
+// effect. Reads only manifests (no compile), so it runs at resolve time.
+fn workspace_capability_audit(workspace_root: string) -> CapabilityDriftReport ![io] {
+    let mut members_out: MemberCapabilityAudit[] = [];
+    let mut diags: Diagnostic[] = [];
+    let mut has_drift: boolean = false;
+    if workspace_root.length == 0 {
+        return CapabilityDriftReport {
+            members: members_out,
+            diagnostics: diags,
+            has_drift: false
+        };
+    }
+    let ws_manifest = _cr_path_join(workspace_root, "workspace.toml");
+    if !fs.exists(ws_manifest) {
+        return CapabilityDriftReport {
+            members: members_out,
+            diagnostics: diags,
+            has_drift: false
+        };
+    }
+    let ws_text = fs.readFile(ws_manifest);
+    let allow = toml_get_workspace_capabilities_allow(ws_text);
+    let deny = toml_get_workspace_capabilities_deny(ws_text);
+
+    // Validate the envelope declarations themselves (E0406) before auditing.
+    let bad_allow = workspace_envelope_noncanonical(allow);
+    let mut ai: int = 0;
+    loop {
+        if ai >= bad_allow.length { break; }
+        diags.push(_cr_envelope_noncanonical_diagnostic("allow", bad_allow[ai], ws_manifest));
+        ai += 1;
+    }
+    let bad_deny = workspace_envelope_noncanonical(deny);
+    let mut ni: int = 0;
+    loop {
+        if ni >= bad_deny.length { break; }
+        diags.push(_cr_envelope_noncanonical_diagnostic("deny", bad_deny[ni], ws_manifest));
+        ni += 1;
+    }
+    if !workspace_list_is_sorted(allow) {
+        diags.push(_cr_envelope_unsorted_diagnostic("allow", ws_manifest));
+    }
+    if !workspace_list_is_sorted(deny) {
+        diags.push(_cr_envelope_unsorted_diagnostic("deny", ws_manifest));
+    }
+
+    let members = load_workspace_members(workspace_root);
+    let mut mi: int = 0;
+    loop {
+        if mi >= members.length { break; }
+        let m = members[mi];
+        mi += 1;
+        let manifest = _cr_path_join(_cr_path_join(workspace_root, m.member_path), "capsule.toml");
+        let mut required: string[] = [];
+        if fs.exists(manifest) {
+            required = toml_get_capabilities_required(fs.readFile(manifest));
+        }
+        let grant = toml_get_workspace_capabilities_grant(ws_text, m.name);
+
+        // Validate this member's grant carve-out itself (E0406) — grants are
+        // envelope entries too, so a non-canonical or unsorted grant effect is
+        // a manifest error the author should hear, not silently ineffective.
+        let grant_label = "grants.\"" + m.name + "\"";
+        let bad_grant = workspace_envelope_noncanonical(grant);
+        let mut gi: int = 0;
+        loop {
+            if gi >= bad_grant.length { break; }
+            diags.push(_cr_envelope_noncanonical_diagnostic(grant_label, bad_grant[gi], ws_manifest));
+            gi += 1;
+        }
+        if !workspace_list_is_sorted(grant) {
+            diags.push(_cr_envelope_unsorted_diagnostic(grant_label, ws_manifest));
+        }
+
+        let drift = workspace_effective_drift(allow, deny, grant, required);
+        members_out.push(MemberCapabilityAudit {
+            member_name: m.name, member_path: m.member_path, required: required, drift: drift
+        });
+        if drift.length > 0 {
+            has_drift = true;
+            let mut ki: int = 0;
+            loop {
+                if ki >= drift.length { break; }
+                diags.push(_cr_capability_drift_diagnostic(m.name, manifest, drift[ki], allow));
+                ki += 1;
+            }
+        }
+    }
+    return CapabilityDriftReport {
+        members: members_out,
+        diagnostics: diags,
+        has_drift: has_drift
+    };
 }
 
 // Look up a workspace member by canonical name (e.g. "sfn/http") and return
