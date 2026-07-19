@@ -3,7 +3,6 @@
 // Moved from compiler/tests/unit/path_test.sfn. The previous version
 // re-implemented every helper with `_`-prefixed copies; this version imports
 // the real capsule API directly via the sibling src/mod.sfn.
-
 import {
     join,
     dirname,
@@ -12,7 +11,7 @@ import {
     stem,
     is_absolute,
     is_relative,
-    normalize,
+    normalize
 } from "../src/mod";
 
 test "path: join combines two path segments" {

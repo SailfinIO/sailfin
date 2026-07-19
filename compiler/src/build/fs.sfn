@@ -99,7 +99,7 @@ fn _toml_trim_cmd(text: string) -> string {
 // flake that surfaced as "transient I/O-pressure" in
 // `scripts/run_native_test.sh`'s retry table. Reading via popen
 // avoids the tmp file entirely.
-extern fn sailfin_runtime_shell_capture(cmd: * u8) -> * u8;
+extern fn sailfin_runtime_shell_capture(cmd: *u8) -> *u8;
 
 fn _shell_read_cmd(cmd: string) -> string ![io] {
     let captured = sailfin_runtime_shell_capture(cmd);

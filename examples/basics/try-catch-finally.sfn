@@ -1,15 +1,9 @@
 // examples/basics/try-catch-finally.sfn
-
-fn performRiskyOperation() -> void {
-    throw "Simulated failure";
-}
+fn performRiskyOperation() -> void { throw "Simulated failure"; }
 
 fn main() ![io] {
-    try {
-        performRiskyOperation();
-    } catch (err) {
+    try { performRiskyOperation(); } catch (err) {
         print("Something went wrong: {{err}}");
-    } finally {
-        print("Shutting down cleanly.");
     }
+    finally { print("Shutting down cleanly."); }
 }

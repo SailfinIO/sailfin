@@ -104,15 +104,15 @@
 //   - `compiler/tests/e2e/test_runtime_exec_path.sh` (full
 //     `exe_path` round-trip via a fixture binary that prints
 //     its own path and asserts the printed path resolves)
-extern fn malloc(size: usize) -> * u8;
+extern fn malloc(size: usize) -> *u8;
 
-extern fn free(ptr: * u8) -> void;
+extern fn free(ptr: *u8) -> void;
 
-extern fn memcpy(dst: * u8, src: * u8, n: usize) -> * u8;
+extern fn memcpy(dst: *u8, src: *u8, n: usize) -> *u8;
 
-extern fn memset(dst: * u8, byte: i32, n: usize) -> * u8;
+extern fn memset(dst: *u8, byte: i32, n: usize) -> *u8;
 
-extern fn strrchr(s: * u8, c: i32) -> * u8;
+extern fn strrchr(s: *u8, c: i32) -> *u8;
 
 // `strlen` backs the Darwin leg of the `sailfin_intrinsic_exe_path`
 // sentinel: on macOS the lowering dispatcher emits a success-path
@@ -129,11 +129,11 @@ extern fn strrchr(s: * u8, c: i32) -> * u8;
 // `runtime/sfn/process.sfn` / `exception.sfn` / `adapters/*`.
 // Unused on the Linux/Windows legs — a bare `declare` for a libc
 // symbol present on every target is harmless.
-extern fn strlen(s: * u8) -> usize;
+extern fn strlen(s: *u8) -> usize;
 
-extern fn getenv(name: * u8) -> * u8;
+extern fn getenv(name: *u8) -> *u8;
 
-extern fn realpath(path: * u8, resolved: * u8) -> * u8;
+extern fn realpath(path: *u8, resolved: *u8) -> *u8;
 
 // `sfn_fs_exists` is the pure-Sailfin stat-based existence probe in
 // `runtime/sfn/adapters/filesystem.sfn` (M3.1c #926, replacing the
@@ -141,7 +141,7 @@ extern fn realpath(path: * u8, resolved: * u8) -> * u8;
 // directories alike. Declared extern here per the #306 cross-module
 // workaround used throughout this module; the definition links from
 // the filesystem adapter.
-extern fn sfn_fs_exists(path: * u8) -> bool;
+extern fn sfn_fs_exists(path: *u8) -> bool;
 
 // `memcmp` is needed for the empty-string check in
 // `resolve_runtime_root`'s `$SAILFIN_RUNTIME_ROOT` override
@@ -153,7 +153,7 @@ extern fn sfn_fs_exists(path: * u8) -> bool;
 // libc prototype lives in `runtime/sfn/platform/libc.sfn`;
 // inlining is the same #306 workaround as the rest of this
 // file's externs.
-extern fn memcmp(a: * u8, b: * u8, n: usize) -> i32;
+extern fn memcmp(a: *u8, b: *u8, n: usize) -> i32;
 
 // `binary_dir(exe)` returns the directory component of `exe` —
 // the prefix up to (but excluding) the trailing `/`. Pure
@@ -174,13 +174,13 @@ extern fn memcmp(a: * u8, b: * u8, n: usize) -> i32;
 // yet accept char literals (`'/'`), so the byte value is inlined
 // directly — same convention as the `127` / `65280` masks in
 // `runtime/sfn/process.sfn`'s wait-status decoder.
-fn binary_dir(exe: * u8) -> * u8 {
+fn binary_dir(exe: *u8) -> *u8 {
     // Going through a `string`-typed local first sidesteps the
     // seed's `<literal> as * u8` cast bug — `exe as * u8` works
     // here because `exe` is an alloca-backed parameter, not a
     // raw literal expression. See the cast-quirk note in the
     // module header.
-    let p: * u8 = exe as * u8;
+    let p: *u8 = exe as *u8;
     if p as i64 == 0 { return ""; }
     // M1.A.2: empty input passes through. Pre-flip this case was reached only
     // via a null pointer (the seed's `<literal> as * u8` cast bug turned an
@@ -196,17 +196,17 @@ fn binary_dir(exe: * u8) -> * u8 {
     // self-path resolution (#1482). `92` is the ASCII code for `\` (the
     // seed compiler does not yet accept char literals — same `47`-for-`/`
     // convention used throughout this file).
-    let fwd: * u8 = strrchr(p, 47);
-    let back: * u8 = strrchr(p, 92);
-    let mut slash: * u8 = fwd;
+    let fwd: *u8 = strrchr(p, 47);
+    let back: *u8 = strrchr(p, 92);
+    let mut slash: *u8 = fwd;
     if (back as i64) > (slash as i64) { slash = back; }
     if slash as i64 == 0 { return "."; }
     if slash as i64 == p as i64 { return "/"; }
     let len: i64 = (slash as i64) - (p as i64);
-    let buf: * u8 = malloc((len + 1) as usize);
+    let buf: *u8 = malloc((len + 1) as usize);
     if buf as i64 == 0 { return ""; }
     memcpy(buf, p, len as usize);
-    let term: * u8 = buf + len;
+    let term: *u8 = buf + len;
     memset(term, 0, 1 as usize);
     // `buf as string` lowers correctly — the seed's cast bug is
     // specific to the *literal* path; pointer-to-string casts on
@@ -243,9 +243,9 @@ fn binary_dir(exe: * u8) -> * u8 {
 // call site (program startup). The buffer is zero-initialized
 // so the returned `* u8 as string` views a properly
 // NUL-terminated byte sequence.
-fn exe_path() -> * u8 ![io] {
+fn exe_path() -> *u8 ![io] {
     let buf_size: usize = 4096 as usize;
-    let buf: * u8 = malloc(buf_size);
+    let buf: *u8 = malloc(buf_size);
     if buf as i64 == 0 { return ""; }
     memset(buf, 0, buf_size);
     // Reserve the final byte as a guaranteed NUL terminator by
@@ -280,7 +280,7 @@ fn exe_path() -> * u8 ![io] {
     // allocates and returns ownership of `canon`; we leak it at
     // this single startup call site, matching the documented
     // leak contract in `resolve_runtime_root`.
-    let canon: * u8 = realpath(buf, null);
+    let canon: *u8 = realpath(buf, null);
     if canon as i64 != 0 {
         free(buf);
         return canon as string;
@@ -324,20 +324,20 @@ fn exe_path() -> * u8 ![io] {
 // `_canonicalize_existing_path` behavior). If `realpath`
 // fails, the un-canonicalized concat is returned — the caller
 // gets a valid string either way.
-fn resolve_runtime_root(exe_path: * u8) -> * u8 ![io] {
+fn resolve_runtime_root(exe_path: *u8) -> *u8 ![io] {
     // Per the cast-quirk note in the module header, route every
     // string literal through a `string`-typed local first so the
     // `as * u8` cast picks up the alloca-backed slot rather than
     // the broken literal-cast path.
     let s_env: string = "SAILFIN_RUNTIME_ROOT";
-    let override_val: * u8 = getenv(s_env as * u8);
+    let override_val: *u8 = getenv(s_env as *u8);
     if override_val as i64 != 0 {
         // Mirror the C original (`override && override[0] != '\0'`):
         // empty env value is treated as "not set" and falls through
         // to the dir-walk. `memcmp(override, "", 1)` compares the
         // first byte against NUL — non-zero means a real string.
         let s_empty: string = "";
-        if memcmp(override_val, s_empty as * u8, 1 as usize) != 0 {
+        if memcmp(override_val, s_empty as *u8, 1 as usize) != 0 {
             return override_val as string;
         }
     }
@@ -353,9 +353,9 @@ fn resolve_runtime_root(exe_path: * u8) -> * u8 ![io] {
         // slot-load path, not the literal-cast quirk.
         let suffix: string = _candidate_suffix(idx);
         let candidate_str: string = exe_dir_str + suffix;
-        let candidate: * u8 = candidate_str as * u8;
+        let candidate: *u8 = candidate_str as *u8;
         if sfn_fs_exists(candidate) {
-            let canon: * u8 = realpath(candidate, null);
+            let canon: *u8 = realpath(candidate, null);
             if canon as i64 != 0 { return canon as string; }
             return candidate as string;
         }

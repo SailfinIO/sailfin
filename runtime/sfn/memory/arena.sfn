@@ -104,11 +104,11 @@
 // → reset → re-alloc → destroy and asserts the destroy free-count
 // equals the page-chain length (2 pages × header+data + arena
 // handle = 5 frees).
-extern fn malloc(size: usize) -> * u8;
+extern fn malloc(size: usize) -> *u8;
 
-extern fn free(ptr: * u8) -> void;
+extern fn free(ptr: *u8) -> void;
 
-extern fn memcpy(dst: * u8, src: * u8, n: usize) -> * u8;
+extern fn memcpy(dst: *u8, src: *u8, n: usize) -> *u8;
 
 // libc helpers backing the process-global handle + arena-mode probe
 // ported from `sailfin_arena.c` in #1309. `getenv`/`strcmp` reproduce
@@ -116,9 +116,9 @@ extern fn memcpy(dst: * u8, src: * u8, n: usize) -> * u8;
 // reproduces `_init_global_arena`'s fatal-on-OOM termination. Inlined
 // for the same cross-module extern-resolution reason as `malloc`/`free`
 // above.
-extern fn getenv(name: * u8) -> * u8;
+extern fn getenv(name: *u8) -> *u8;
 
-extern fn strcmp(a: * u8, b: * u8) -> i32;
+extern fn strcmp(a: *u8, b: *u8) -> i32;
 
 extern fn abort() -> void;
 
@@ -133,9 +133,9 @@ extern fn abort() -> void;
 // `test_runtime_memory_arena.sh`, so it must depend on nothing beyond
 // libc + the symbols that harness stubs — a cross-module
 // `sfn_int_to_str` reference would fail that link.
-extern fn strlen(s: * u8) -> usize;
+extern fn strlen(s: *u8) -> usize;
 
-extern fn write(fd: i32, buf: * u8, count: usize) -> i64;
+extern fn write(fd: i32, buf: *u8, count: usize) -> i64;
 
 // `ArenaPage` is the per-page bookkeeping header (32 bytes, four
 // i64 slots). `data_addr` points at the page's backing byte buffer
@@ -190,15 +190,15 @@ fn _sfn_arena_align_up(value: i64, align: i64) -> i64 {
 // On OOM either step bails — when the header allocation succeeds but
 // the buffer alloc fails the header is freed before returning null so
 // no orphaned allocation leaks into the chain.
-fn _sfn_arena_page_create(capacity: i64) -> * u8 {
-    let header_ptr: * u8 = malloc(32 as usize);
+fn _sfn_arena_page_create(capacity: i64) -> *u8 {
+    let header_ptr: *u8 = malloc(32 as usize);
     if header_ptr as i64 == 0 { return header_ptr; }
-    let data_ptr: * u8 = malloc(capacity as usize);
+    let data_ptr: *u8 = malloc(capacity as usize);
     if data_ptr as i64 == 0 {
         free(header_ptr);
         return data_ptr;
     }
-    let page: * ArenaPage = header_ptr as * ArenaPage;
+    let page: *ArenaPage = header_ptr as *ArenaPage;
     page.data_addr = data_ptr as i64;
     page.capacity = capacity;
     page.used = 0;
@@ -212,10 +212,10 @@ fn _sfn_arena_page_create(capacity: i64) -> * u8 {
 // `sailfin_arena.c:44` in the retired C runtime.
 fn _sfn_arena_page_destroy(page_addr: i64) -> void {
     if page_addr == 0 { return; }
-    let page: * ArenaPage = page_addr as * ArenaPage;
+    let page: *ArenaPage = page_addr as *ArenaPage;
     let data_addr: i64 = page.data_addr;
-    if data_addr != 0 { free(data_addr as * u8); }
-    free(page_addr as * u8);
+    if data_addr != 0 { free(data_addr as *u8); }
+    free(page_addr as *u8);
 }
 
 // `sfn_arena_sfn_create(default_page_size)` allocates an arena
@@ -225,20 +225,20 @@ fn _sfn_arena_page_destroy(page_addr: i64) -> void {
 // the partial allocation is freed before returning so no leak
 // escapes. Returns the arena handle as `* u8` — callers re-cast to
 // `* Arena` only inside this module.
-fn sfn_arena_sfn_create(default_page_size: usize) -> * u8 {
+fn sfn_arena_sfn_create(default_page_size: usize) -> *u8 {
     let mut page_size: i64 = default_page_size as i64;
     if page_size == 0 { page_size = 1048576; }
 
-    let arena_ptr: * u8 = malloc(24 as usize);
+    let arena_ptr: *u8 = malloc(24 as usize);
     if arena_ptr as i64 == 0 { return arena_ptr; }
 
-    let first_ptr: * u8 = _sfn_arena_page_create(page_size);
+    let first_ptr: *u8 = _sfn_arena_page_create(page_size);
     if first_ptr as i64 == 0 {
         free(arena_ptr);
         return first_ptr;
     }
 
-    let arena: * Arena = arena_ptr as * Arena;
+    let arena: *Arena = arena_ptr as *Arena;
     arena.current_addr = first_ptr as i64;
     arena.first_addr = first_ptr as i64;
     arena.default_page_size = page_size;
@@ -253,17 +253,17 @@ fn sfn_arena_sfn_create(default_page_size: usize) -> * u8 {
 // sized `max(default_page_size, size + align)` spliced in after the
 // current page. Null arena, zero size, or OOM on the fresh-page path
 // returns null.
-fn sfn_arena_sfn_alloc(arena: * u8, size: usize, align: usize) -> * u8 {
+fn sfn_arena_sfn_alloc(arena: *u8, size: usize, align: usize) -> *u8 {
     if arena as i64 == 0 { return null; }
     let size_i: i64 = size as i64;
     if size_i == 0 { return null; }
     let mut align_i: i64 = align as i64;
     if align_i == 0 { align_i = 8; }
 
-    let a: * Arena = arena as * Arena;
+    let a: *Arena = arena as *Arena;
     let cur_addr: i64 = a.current_addr;
     if cur_addr == 0 { return null; }
-    let page: * ArenaPage = cur_addr as * ArenaPage;
+    let page: *ArenaPage = cur_addr as *ArenaPage;
 
     let offset: i64 = _sfn_arena_align_up(page.used, align_i);
     let cap: i64 = page.capacity;
@@ -272,7 +272,7 @@ fn sfn_arena_sfn_alloc(arena: * u8, size: usize, align: usize) -> * u8 {
         if size_i <= space {
             page.used = offset + size_i;
             let result_addr: i64 = page.data_addr + offset;
-            return result_addr as * u8;
+            return result_addr as *u8;
         }
     }
 
@@ -285,7 +285,7 @@ fn sfn_arena_sfn_alloc(arena: * u8, size: usize, align: usize) -> * u8 {
     let mut candidate_addr: i64 = page.next_addr;
     loop {
         if candidate_addr == 0 { break; }
-        let candidate: * ArenaPage = candidate_addr as * ArenaPage;
+        let candidate: *ArenaPage = candidate_addr as *ArenaPage;
         let cand_cap: i64 = candidate.capacity;
         let cand_offset: i64 = _sfn_arena_align_up(candidate.used, align_i);
         if cand_offset <= cand_cap {
@@ -294,7 +294,7 @@ fn sfn_arena_sfn_alloc(arena: * u8, size: usize, align: usize) -> * u8 {
                 candidate.used = cand_offset + size_i;
                 a.current_addr = candidate_addr;
                 let cand_result_addr: i64 = candidate.data_addr + cand_offset;
-                return cand_result_addr as * u8;
+                return cand_result_addr as *u8;
             }
         }
         candidate_addr = candidate.next_addr;
@@ -306,13 +306,13 @@ fn sfn_arena_sfn_alloc(arena: * u8, size: usize, align: usize) -> * u8 {
     let needed: i64 = size_i + align_i;
     if needed > new_page_size { new_page_size = needed; }
 
-    let new_page_ptr: * u8 = _sfn_arena_page_create(new_page_size);
+    let new_page_ptr: *u8 = _sfn_arena_page_create(new_page_size);
     if new_page_ptr as i64 == 0 { return new_page_ptr; }
 
     // Splice the new page in after the current page so any pages
     // already downstream of `current` (carried over from a prior
     // reset) remain reachable for the next burst.
-    let new_page: * ArenaPage = new_page_ptr as * ArenaPage;
+    let new_page: *ArenaPage = new_page_ptr as *ArenaPage;
     new_page.next_addr = page.next_addr;
     page.next_addr = new_page_ptr as i64;
     a.current_addr = new_page_ptr as i64;
@@ -320,7 +320,7 @@ fn sfn_arena_sfn_alloc(arena: * u8, size: usize, align: usize) -> * u8 {
     let new_offset: i64 = _sfn_arena_align_up(new_page.used, align_i);
     new_page.used = new_offset + size_i;
     let new_result_addr: i64 = new_page.data_addr + new_offset;
-    return new_result_addr as * u8;
+    return new_result_addr as *u8;
 }
 
 // ====================================================================
@@ -342,14 +342,14 @@ fn sfn_arena_sfn_alloc(arena: * u8, size: usize, align: usize) -> * u8 {
 // `sfn_arena_create(default_page_size)` — bare-named entry point.
 // Forwards to `sfn_arena_sfn_create`, which allocates the 24-byte
 // handle.
-fn sfn_arena_create(default_page_size: usize) -> * u8 {
+fn sfn_arena_create(default_page_size: usize) -> *u8 {
     return sfn_arena_sfn_create(default_page_size);
 }
 
 // `sfn_arena_alloc(arena, size, align)` — bare-named entry point, the
 // hot-path bump allocator `mem.sfn`'s `sfn_alloc_struct` and the other
 // runtime call sites route through. Forwards to `sfn_arena_sfn_alloc`.
-fn sfn_arena_alloc(arena: * u8, size: usize, align: usize) -> * u8 {
+fn sfn_arena_alloc(arena: *u8, size: usize, align: usize) -> *u8 {
     return sfn_arena_sfn_alloc(arena, size, align);
 }
 
@@ -412,7 +412,7 @@ fn sfn_arena_enabled() -> bool {
         // routes it through the libc fallback) and the cast extracts its
         // data pointer correctly.
         let name: string = "SAILFIN_USE_ARENA";
-        let env: * u8 = getenv(name as * u8);
+        let env: *u8 = getenv(name as *u8);
         if env as i64 == 0 {
             // Unset: take the default (arena on).
             _sfn_arena_enabled_state = 1;
@@ -420,9 +420,9 @@ fn sfn_arena_enabled() -> bool {
             let empty: string = "";
             let zero: string = "0";
             let f: string = "false";
-            if strcmp(env, empty as * u8) == 0 { _sfn_arena_enabled_state = 0; } else if strcmp(env, zero as * u8) == 0 {
+            if strcmp(env, empty as *u8) == 0 { _sfn_arena_enabled_state = 0; } else if strcmp(env, zero as *u8) == 0 {
                 _sfn_arena_enabled_state = 0;
-            } else if strcmp(env, f as * u8) == 0 {
+            } else if strcmp(env, f as *u8) == 0 {
                 _sfn_arena_enabled_state = 0;
             } else { _sfn_arena_enabled_state = 1; }
         }
@@ -443,15 +443,15 @@ fn sfn_arena_enabled() -> bool {
 // `sfn_arena_global` with `_sfn_arena_global_addr` still 0 and recurses
 // until the stack overflows — turning a clean OOM abort into a crash.
 // The bare `abort()` (SIGABRT) is the faithful, recursion-free signal.
-fn sfn_arena_global() -> * u8 {
+fn sfn_arena_global() -> *u8 {
     if _sfn_arena_global_addr == 0 {
-        let created: * u8 = sfn_arena_sfn_create(4194304 as usize);
+        let created: *u8 = sfn_arena_sfn_create(4194304 as usize);
         if created as i64 == 0 {
             unsafe { abort(); }
         }
         _sfn_arena_global_addr = created as i64;
     }
-    return _sfn_arena_global_addr as * u8;
+    return _sfn_arena_global_addr as *u8;
 }
 
 // `sfn_arena_sfn_reset(arena)` zeroes the `used` cursor on every
@@ -459,14 +459,14 @@ fn sfn_arena_global() -> * u8 {
 // Pages keep their backing buffers — the chain stays intact so the
 // next burst reuses memory rather than re-malloc'ing pages. Null
 // arena is a no-op.
-fn sfn_arena_sfn_reset(arena: * u8) -> void {
+fn sfn_arena_sfn_reset(arena: *u8) -> void {
     if arena as i64 == 0 { return; }
-    let a: * Arena = arena as * Arena;
+    let a: *Arena = arena as *Arena;
     let first_addr: i64 = a.first_addr;
     let mut walker: i64 = first_addr;
     loop {
         if walker == 0 { break; }
-        let p: * ArenaPage = walker as * ArenaPage;
+        let p: *ArenaPage = walker as *ArenaPage;
         p.used = 0;
         walker = p.next_addr;
     }
@@ -478,13 +478,13 @@ fn sfn_arena_sfn_reset(arena: * u8) -> void {
 // `sfn_arena_sfn_destroy(arena)` frees every page in the chain and
 // the arena handle itself. Null arena is a no-op so cleanup paths
 // can call destroy unconditionally.
-fn sfn_arena_sfn_destroy(arena: * u8) -> void {
+fn sfn_arena_sfn_destroy(arena: *u8) -> void {
     if arena as i64 == 0 { return; }
-    let a: * Arena = arena as * Arena;
+    let a: *Arena = arena as *Arena;
     let mut walker: i64 = a.first_addr;
     loop {
         if walker == 0 { break; }
-        let page: * ArenaPage = walker as * ArenaPage;
+        let page: *ArenaPage = walker as *ArenaPage;
         let next_addr: i64 = page.next_addr;
         _sfn_arena_page_destroy(walker);
         walker = next_addr;
@@ -502,7 +502,7 @@ fn sfn_arena_sfn_destroy(arena: * u8) -> void {
 // Special cases: null arena returns null; null `ptr` forwards to
 // `sfn_arena_sfn_alloc`; `new_size <= old_size` returns `ptr`
 // unchanged.
-fn sfn_arena_sfn_realloc(arena: * u8, ptr: * u8, old_size: usize, new_size: usize, align: usize) -> * u8 {
+fn sfn_arena_sfn_realloc(arena: *u8, ptr: *u8, old_size: usize, new_size: usize, align: usize) -> *u8 {
     if arena as i64 == 0 { return null; }
     if ptr as i64 == 0 {
         return sfn_arena_sfn_alloc(arena, new_size, align);
@@ -512,10 +512,10 @@ fn sfn_arena_sfn_realloc(arena: * u8, ptr: * u8, old_size: usize, new_size: usiz
     let new_size_i: i64 = new_size as i64;
     if new_size_i <= old_size_i { return ptr; }
 
-    let a: * Arena = arena as * Arena;
+    let a: *Arena = arena as *Arena;
     let cur_addr: i64 = a.current_addr;
     if cur_addr == 0 { return null; }
-    let page: * ArenaPage = cur_addr as * ArenaPage;
+    let page: *ArenaPage = cur_addr as *ArenaPage;
 
     let data_addr: i64 = page.data_addr;
     let used: i64 = page.used;
@@ -541,7 +541,7 @@ fn sfn_arena_sfn_realloc(arena: * u8, ptr: * u8, old_size: usize, new_size: usiz
 
         // Otherwise: fresh allocation + memcpy. The old buffer stays
         // resident in the arena (reclaimed at reset/destroy).
-        let new_ptr: * u8 = sfn_arena_sfn_alloc(arena, new_size, align);
+        let new_ptr: *u8 = sfn_arena_sfn_alloc(arena, new_size, align);
         if new_ptr as i64 == 0 { return new_ptr; }
         memcpy(new_ptr, ptr, old_size_i as usize);
         return new_ptr;
@@ -555,7 +555,7 @@ fn sfn_arena_sfn_realloc(arena: * u8, ptr: * u8, old_size: usize, new_size: usiz
 // target for both the `string.sfn` concat/append path and the C-internal
 // `sailfin_runtime.c` callers (which bind to it through the surviving
 // `sailfin_arena.h` prototype). Faithful to `sailfin_arena.c:113`.
-fn sfn_arena_realloc(arena: * u8, ptr: * u8, old_size: usize, new_size: usize, align: usize) -> * u8 {
+fn sfn_arena_realloc(arena: *u8, ptr: *u8, old_size: usize, new_size: usize, align: usize) -> *u8 {
     return sfn_arena_sfn_realloc(arena, ptr, old_size, new_size, align);
 }
 
@@ -620,15 +620,15 @@ fn sfn_arena_realloc(arena: * u8, ptr: * u8, old_size: usize, new_size: usize, a
 fn sfn_arena_sfn_mark() -> number {
     if !sfn_arena_enabled() { return 0.0; }
 
-    let arena_ptr: * u8 = sfn_arena_global();
+    let arena_ptr: *u8 = sfn_arena_global();
     if arena_ptr as i64 == 0 { return 0.0; }
 
-    let arena: * Arena = arena_ptr as * Arena;
+    let arena: *Arena = arena_ptr as *Arena;
     let current_addr: i64 = arena.current_addr;
     if current_addr == 0 { return 0.0; }
 
     // Snapshot the current page's used offset.
-    let current_page: * ArenaPage = current_addr as * ArenaPage;
+    let current_page: *ArenaPage = current_addr as *ArenaPage;
     let used: i64 = current_page.used;
 
     // Index of the current page within the first→next chain.
@@ -637,7 +637,7 @@ fn sfn_arena_sfn_mark() -> number {
     loop {
         if walker == 0 { break; }
         if walker == current_addr { break; }
-        let p: * ArenaPage = walker as * ArenaPage;
+        let p: *ArenaPage = walker as *ArenaPage;
         walker = p.next_addr;
         page_index = page_index + 1;
     }
@@ -656,9 +656,9 @@ fn sfn_arena_sfn_mark() -> number {
 fn sfn_arena_sfn_rewind(encoded_mark: number) -> void {
     if !sfn_arena_enabled() { return; }
 
-    let arena_ptr: * u8 = sfn_arena_global();
+    let arena_ptr: *u8 = sfn_arena_global();
     if arena_ptr as i64 == 0 { return; }
-    let arena: * Arena = arena_ptr as * Arena;
+    let arena: *Arena = arena_ptr as *Arena;
     if arena.first_addr == 0 { return; }
 
     let encoded: i64 = encoded_mark as i64;
@@ -672,20 +672,20 @@ fn sfn_arena_sfn_rewind(encoded_mark: number) -> void {
     loop {
         if walker == 0 { break; }
         if i >= page_index { break; }
-        let p: * ArenaPage = walker as * ArenaPage;
+        let p: *ArenaPage = walker as *ArenaPage;
         walker = p.next_addr;
         i = i + 1;
     }
     if walker == 0 { return; }
 
-    let mark_page: * ArenaPage = walker as * ArenaPage;
+    let mark_page: *ArenaPage = walker as *ArenaPage;
 
     // Zero `used` on every page strictly after the marked page so the
     // next burst reuses their capacity instead of growing the chain.
     let mut after_addr: i64 = mark_page.next_addr;
     loop {
         if after_addr == 0 { break; }
-        let after_page: * ArenaPage = after_addr as * ArenaPage;
+        let after_page: *ArenaPage = after_addr as *ArenaPage;
         after_page.used = 0;
         after_addr = after_page.next_addr;
     }
@@ -722,7 +722,7 @@ fn sfn_arena_sfn_rewind(encoded_mark: number) -> void {
 fn _arena_put_byte(addr: i64, value: i64) -> void {
     let word_addr: i64 = (addr / 8) * 8;
     let shift: i64 = (addr - word_addr) * 8;
-    let slot: * i64 = word_addr as * i64;
+    let slot: *i64 = word_addr as *i64;
     let word: i64 = atomic_load(slot);
     let mask: i64 = 255 << shift;
     let current: i64 = word & mask;
@@ -732,7 +732,7 @@ fn _arena_put_byte(addr: i64, value: i64) -> void {
 
 // `_arena_write_lit(s)` writes a NUL-terminated string literal to fd 2
 // using its `strlen`. Used for the fixed label tokens.
-fn _arena_write_lit(s: * u8) -> void ![io] {
+fn _arena_write_lit(s: *u8) -> void ![io] {
     if s as i64 == 0 { return; }
     let _ = write(2, s, strlen(s));
 }
@@ -742,7 +742,7 @@ fn _arena_write_lit(s: * u8) -> void ![io] {
 // (page count, byte sums, percent) are all non-negative, so no sign
 // handling is needed; a 20-byte buffer holds any i64's decimal digits.
 fn _arena_write_i64(value: i64) -> void ![io] {
-    let buf: * u8 = malloc(24 as usize);
+    let buf: *u8 = malloc(24 as usize);
     if buf as i64 == 0 { return; }
     let base: i64 = buf as i64;
 
@@ -789,9 +789,9 @@ fn _arena_write_i64(value: i64) -> void ![io] {
 // bytes, derived from the page walk) is the surviving consumption
 // metric. Telemetry precision is non-contractual (#1432); only the
 // `pages=`/`used=` tokens are pinned by tests.
-fn sfn_arena_sfn_print_stats(arena: * u8) -> void ![io] {
+fn sfn_arena_sfn_print_stats(arena: *u8) -> void ![io] {
     if arena as i64 == 0 { return; }
-    let a: * Arena = arena as * Arena;
+    let a: *Arena = arena as *Arena;
 
     // Snapshot pass: walk first→next summing capacity/used and counting
     // pages before any rendering happens.
@@ -801,7 +801,7 @@ fn sfn_arena_sfn_print_stats(arena: * u8) -> void ![io] {
     let mut walker: i64 = a.first_addr;
     loop {
         if walker == 0 { break; }
-        let p: * ArenaPage = walker as * ArenaPage;
+        let p: *ArenaPage = walker as *ArenaPage;
         total_capacity = total_capacity + p.capacity;
         total_used = total_used + p.used;
         page_count = page_count + 1;
@@ -821,15 +821,15 @@ fn sfn_arena_sfn_print_stats(arena: * u8) -> void ![io] {
     let sep_util: string = " utilization=";
     let suffix: string = "%\n";
 
-    _arena_write_lit(prefix as * u8);
+    _arena_write_lit(prefix as *u8);
     _arena_write_i64(page_count);
-    _arena_write_lit(sep_capacity as * u8);
+    _arena_write_lit(sep_capacity as *u8);
     _arena_write_i64(total_capacity);
-    _arena_write_lit(sep_used as * u8);
+    _arena_write_lit(sep_used as *u8);
     _arena_write_i64(total_used);
-    _arena_write_lit(sep_util as * u8);
+    _arena_write_lit(sep_util as *u8);
     _arena_write_i64(utilization);
-    _arena_write_lit(suffix as * u8);
+    _arena_write_lit(suffix as *u8);
 }
 
 // `sfn_arena_print_stats(arena)` — bare-named entry point. Forwards to
@@ -837,7 +837,7 @@ fn sfn_arena_sfn_print_stats(arena: * u8) -> void ![io] {
 // (#1309): the C `sfn_arena_print_stats` body retires, this becomes the
 // link target the C-runtime atexit telemetry path
 // (`sailfin_runtime.c:713`) binds to by name.
-fn sfn_arena_print_stats(arena: * u8) -> void ![io] {
+fn sfn_arena_print_stats(arena: *u8) -> void ![io] {
     sfn_arena_sfn_print_stats(arena);
 }
 
@@ -865,9 +865,9 @@ fn sfn_arena_print_stats(arena: * u8) -> void ![io] {
 // already relies on it). Each literal is bound to a `string` local before
 // the `as * u8` cast — the proven env-read pattern (`getenv("…" as * u8)`
 // miscompiles inline under the seed; see `sfn_arena_enabled` above).
-fn sfn_arena_telemetry_dump(label: * u8) -> void ![io] {
+fn sfn_arena_telemetry_dump(label: *u8) -> void ![io] {
     let dump_name: string = "SAILFIN_DUMP_ARENA_STATS";
-    let flag: * u8 = getenv(dump_name as * u8);
+    let flag: *u8 = getenv(dump_name as *u8);
     if flag as i64 == 0 { return; }
     let b0: i64 = load_byte(flag as i64);
     if b0 == 0 { return; }
@@ -875,19 +875,19 @@ fn sfn_arena_telemetry_dump(label: * u8) -> void ![io] {
 
     let prefix: string = "[sailfin-arena] label=";
     let sep: string = " ";
-    _arena_write_lit(prefix as * u8);
+    _arena_write_lit(prefix as *u8);
     _arena_write_lit(label);
-    _arena_write_lit(sep as * u8);
+    _arena_write_lit(sep as *u8);
 
     if sfn_arena_enabled() {
         sfn_arena_sfn_print_stats(sfn_arena_global());
     } else {
         let use_name: string = "SAILFIN_USE_ARENA";
-        let optout: * u8 = getenv(use_name as * u8);
+        let optout: *u8 = getenv(use_name as *u8);
         let head: string = "stats=disabled (SAILFIN_USE_ARENA=\"";
         let tail: string = "\" opt-out)\n";
-        _arena_write_lit(head as * u8);
+        _arena_write_lit(head as *u8);
         if optout as i64 != 0 { _arena_write_lit(optout); }
-        _arena_write_lit(tail as * u8);
+        _arena_write_lit(tail as *u8);
     }
 }

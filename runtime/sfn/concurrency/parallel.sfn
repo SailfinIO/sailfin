@@ -52,13 +52,13 @@
 // `scheduler.sfn:559-563`). Scratch/result slots are read and written
 // through the `atomic_load` / `atomic_store` builtins (#323), matching
 // the ring-buffer slot accesses in `scheduler.sfn`.
-extern fn malloc(size: usize) -> * u8;
+extern fn malloc(size: usize) -> *u8;
 
-extern fn free(ptr: * u8) -> void;
+extern fn free(ptr: *u8) -> void;
 
-extern fn sfn_spawn(fn_ptr: i64, ctx: i64, result_size: i64) -> * u8;
+extern fn sfn_spawn(fn_ptr: i64, ctx: i64, result_size: i64) -> *u8;
 
-extern fn sfn_await(future: * u8) -> * u8;
+extern fn sfn_await(future: *u8) -> *u8;
 
 // #1475 (epic #1466): the `_sfn_trampoline_ptr_ctx` address. A parallel
 // task lambda with a captured heap env (`ctx != 0`) is routed through the
@@ -78,8 +78,8 @@ fn _sfn_parallel_drain(futures_base: i64, count: i64) -> void {
     let mut k: i64 = 0;
     loop {
         if k >= count { break; }
-        let slot: * i64 = (futures_base + k * 8) as * i64;
-        let future: * u8 = atomic_load(slot) as * u8;
+        let slot: *i64 = (futures_base + k * 8) as *i64;
+        let future: *u8 = atomic_load(slot) as *u8;
         sfn_await(future);
         k = k + 1;
     }
@@ -89,7 +89,7 @@ fn _sfn_parallel_drain(futures_base: i64, count: i64) -> void {
 // them, and return their results in input order. See the file header for
 // the full contract. Empty input returns null; allocation failure
 // returns null (after draining any spawned tasks and releasing scratch).
-fn sfn_parallel(fn_ptrs: * u8, ctxs: * u8, count: i64) -> * u8 {
+fn sfn_parallel(fn_ptrs: *u8, ctxs: *u8, count: i64) -> *u8 {
     // Empty (or negative) input → empty output. Nothing is allocated.
     if count <= 0 { return null; }
 
@@ -114,7 +114,7 @@ fn sfn_parallel(fn_ptrs: * u8, ctxs: * u8, count: i64) -> * u8 {
     // Scratch array of futures (one i64 task handle per task). Spawning
     // ALL tasks before awaiting any is what makes this parallel: the
     // pool drains the queue while the producer is still enqueuing.
-    let futures: * u8 = malloc((count * 8) as usize);
+    let futures: *u8 = malloc((count * 8) as usize);
     if futures as i64 == 0 { return null; }
     let futures_base: i64 = futures as i64;
 
@@ -128,13 +128,13 @@ fn sfn_parallel(fn_ptrs: * u8, ctxs: * u8, count: i64) -> * u8 {
     loop {
         if i >= count { break; }
 
-        let fn_slot: * i64 = (fns_base + i * 8) as * i64;
+        let fn_slot: *i64 = (fns_base + i * 8) as *i64;
         let fn_addr: i64 = atomic_load(fn_slot);
 
         // A null `ctxs` array means "no per-task ctx" → pass zero.
         let mut ctx_val: i64 = 0;
         if ctxs_base != 0 {
-            let ctx_slot: * i64 = (ctxs_base + i * 8) as * i64;
+            let ctx_slot: *i64 = (ctxs_base + i * 8) as *i64;
             ctx_val = atomic_load(ctx_slot);
         }
 
@@ -150,10 +150,10 @@ fn sfn_parallel(fn_ptrs: * u8, ctxs: * u8, count: i64) -> * u8 {
         let mut spawn_fn: i64 = fn_addr;
         let mut spawn_ctx: i64 = ctx_val;
         if ctx_val != 0 {
-            let pair: * u8 = malloc(16 as usize);
+            let pair: *u8 = malloc(16 as usize);
             if pair as i64 != 0 {
-                let p0: * i64 = pair as * i64;
-                let p1: * i64 = (pair as i64 + 8) as * i64;
+                let p0: *i64 = pair as *i64;
+                let p1: *i64 = (pair as i64 + 8) as *i64;
                 atomic_store(p0, fn_addr);
                 atomic_store(p1, ctx_val);
                 spawn_fn = sfn_trampoline_ptr_owned_ctx_addr();
@@ -161,16 +161,16 @@ fn sfn_parallel(fn_ptrs: * u8, ctxs: * u8, count: i64) -> * u8 {
             }
         }
 
-        let future: * u8 = sfn_spawn(spawn_fn, spawn_ctx, 8);
+        let future: *u8 = sfn_spawn(spawn_fn, spawn_ctx, 8);
 
-        let out_slot: * i64 = (futures_base + i * 8) as * i64;
+        let out_slot: *i64 = (futures_base + i * 8) as *i64;
         atomic_store(out_slot, future as i64);
 
         i = i + 1;
     }
 
     // Results array, returned to the caller (it owns and frees it).
-    let results: * u8 = malloc((count * 8) as usize);
+    let results: *u8 = malloc((count * 8) as usize);
     if results as i64 == 0 {
         // Structured-concurrency contract: spawned tasks must not outlive
         // this call (a running task may still read caller `ctx`). Drain
@@ -187,12 +187,12 @@ fn sfn_parallel(fn_ptrs: * u8, ctxs: * u8, count: i64) -> * u8 {
     loop {
         if j >= count { break; }
 
-        let fut_slot: * i64 = (futures_base + j * 8) as * i64;
-        let future: * u8 = atomic_load(fut_slot) as * u8;
+        let fut_slot: *i64 = (futures_base + j * 8) as *i64;
+        let future: *u8 = atomic_load(fut_slot) as *u8;
 
-        let result: * u8 = sfn_await(future);
+        let result: *u8 = sfn_await(future);
 
-        let res_slot: * i64 = (results_base + j * 8) as * i64;
+        let res_slot: *i64 = (results_base + j * 8) as *i64;
         atomic_store(res_slot, result as i64);
 
         j = j + 1;

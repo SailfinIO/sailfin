@@ -1,16 +1,15 @@
 // examples/types/tagged-unions.sfn
-
 enum Shape {
     Circle { radius: float },
     Square { side: float },
-    Rectangle { width: float, height: float },
+    Rectangle { width: float, height: float }
 }
 
 fn area(shape: Shape) -> float {
     match shape {
         Shape.Circle { radius } => return 3.14 * radius * radius,
         Shape.Square { side } => return side * side,
-        Shape.Rectangle { width, height } => return width * height,
+        Shape.Rectangle { width, height } => return width * height
     }
 }
 

@@ -702,7 +702,7 @@ fn find_char(text: string, character: string, start: int = 0) -> int {
     if target.length == 1 {
         let code = char_code(target);
         if code >= 0 && code < 128 {
-            let addr = (text as * u8) as i64;
+            let addr = (text as *u8) as i64;
             let mut bi = normalized_start;
             loop {
                 if bi >= length { break; }
@@ -761,10 +761,10 @@ fn char_code(character: string) -> int {
 // entrypoint inline is the same #306 workaround `exec.sfn` / `process.sfn`
 // use; the `runtime/sfn/string.sfn` wrapper remains the migration unit that
 // absorbs the body once M1.A.2 lets it consume the aggregate directly.
-extern fn sfn_str_from_byte(byte_value: i64) -> * u8;
+extern fn sfn_str_from_byte(byte_value: i64) -> *u8;
 
 fn char_from_code(code: int) -> string {
-    let bytes: * u8 = sfn_str_from_byte(code);
+    let bytes: *u8 = sfn_str_from_byte(code);
     return bytes as string;
 }
 

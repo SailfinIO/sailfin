@@ -1,15 +1,10 @@
 // examples/basics/functions.sfn
+fn add(x: int, y: int) -> int { return x + y; }
 
-fn add(x: int, y: int) -> int {
-  return x + y;
-}
-
-fn greet(name: string = "Sailfin") -> string {
-  return "Hello, {{name}}!";
-}
+fn greet(name: string = "Sailfin") -> string { return "Hello, {{name}}!"; }
 
 fn main() ![io] {
-  print(add(3, 5)); // Outputs: 8
-  print(greet());   // Outputs: Hello, Sail!
-  print(greet("Alice")); // Outputs: Hello, Alice!
+    print(add(3, 5));  // Outputs: 8
+    print(greet());  // Outputs: Hello, Sail!
+    print(greet("Alice"));  // Outputs: Hello, Alice!
 }

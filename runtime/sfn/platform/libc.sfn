@@ -37,15 +37,15 @@
 // pointer types with a space after `*`; the comments throughout
 // this file match that spelling so anything copy-pasted lands in
 // canonical-formatted form.)
-extern fn malloc(size: usize) -> * u8;
+extern fn malloc(size: usize) -> *u8;
 
-extern fn free(ptr: * u8) -> void;
+extern fn free(ptr: *u8) -> void;
 
-extern fn realloc(ptr: * u8, new_size: usize) -> * u8;
+extern fn realloc(ptr: *u8, new_size: usize) -> *u8;
 
-extern fn memcpy(dst: * u8, src: * u8, n: usize) -> * u8;
+extern fn memcpy(dst: *u8, src: *u8, n: usize) -> *u8;
 
-extern fn memcmp(a: * u8, b: * u8, n: usize) -> i32;
+extern fn memcmp(a: *u8, b: *u8, n: usize) -> i32;
 
 // `memchr(s, c, n)` scans the first `n` bytes of `s` for the byte
 // `c`, returning a pointer to the match or `* u8` null when not
@@ -57,7 +57,7 @@ extern fn memcmp(a: * u8, b: * u8, n: usize) -> i32;
 // proof-of-life identity wrapper and does not yet call this. The
 // libc prototype is `void *memchr(const void *s, int c, size_t n)`
 // — the `c` arg is `int` so callers pass `0..255` as `i32`.
-extern fn memchr(s: * u8, c: i32, n: usize) -> * u8;
+extern fn memchr(s: *u8, c: i32, n: usize) -> *u8;
 
 // `memset(dst, byte, n)` writes the low 8 bits of `byte` into the
 // first `n` bytes of `dst`, returning `dst`. Used by adapters that
@@ -67,7 +67,7 @@ extern fn memchr(s: * u8, c: i32, n: usize) -> * u8;
 // dirname computation). The libc prototype is `void *memset(void
 // *s, int c, size_t n)` — the `c` arg is `int` so callers pass
 // `0..255` as `i32`.
-extern fn memset(dst: * u8, byte: i32, n: usize) -> * u8;
+extern fn memset(dst: *u8, byte: i32, n: usize) -> *u8;
 
 // `strlen(s)` returns the byte length of the NUL-terminated string
 // `s` (libc prototype `size_t strlen(const char *s)`). Canonical home
@@ -79,7 +79,7 @@ extern fn memset(dst: * u8, byte: i32, n: usize) -> * u8;
 // (which imports this module) carries the matching `declare`. `strlen`
 // is a pure POSIX symbol present on every target, so declaring/calling
 // it never triggers the cross-platform unresolved-symbol link problem.
-extern fn strlen(s: * u8) -> usize;
+extern fn strlen(s: *u8) -> usize;
 
 // `strrchr(s, c)` scans the NUL-terminated string `s` for the
 // last occurrence of the byte `c` (passed as i32 per the libc
@@ -87,7 +87,7 @@ extern fn strlen(s: * u8) -> usize;
 // pointer into `s` at the match or `* u8` null when not found.
 // `runtime/sfn/platform/exec.sfn::binary_dir` uses this to locate
 // the trailing path separator without writing a manual scan loop.
-extern fn strrchr(s: * u8, c: i32) -> * u8;
+extern fn strrchr(s: *u8, c: i32) -> *u8;
 
 // `strtod(nptr, endptr)` parses a decimal floating-point literal
 // from the NUL-terminated `nptr` and returns the parsed value as
@@ -102,16 +102,16 @@ extern fn strrchr(s: * u8, c: i32) -> * u8;
 // `string.sfn` calls `strtod` directly against the already-
 // NUL-terminated `* u8` payload, demonstrating the migration unit
 // at the Sailfin layer.
-extern fn strtod(nptr: * u8, endptr: * * u8) -> f64;
+extern fn strtod(nptr: *u8, endptr: **u8) -> f64;
 
 // ── Raw I/O (file-descriptor based) ───────────────────────────
 // `write`/`read` are POSIX, returning ssize_t (i64 on every
 // platform Sailfin currently targets). Negative returns signal
 // errno; adapters translate to `Result<T, IoError>` when that
 // type ships.
-extern fn write(fd: i32, buf: * u8, count: usize) -> i64;
+extern fn write(fd: i32, buf: *u8, count: usize) -> i64;
 
-extern fn read(fd: i32, buf: * u8, count: usize) -> i64;
+extern fn read(fd: i32, buf: *u8, count: usize) -> i64;
 
 // ── Stdio filesystem ──────────────────────────────────────────
 // `* File` is an opaque platform handle. The opaque-pointee rule
@@ -120,13 +120,13 @@ extern fn read(fd: i32, buf: * u8, count: usize) -> i64;
 // struct definition — `* File` lowers to `i8*` in LLVM IR. The
 // Sailfin-native filesystem adapter (M3) wraps these into
 // `runtime/sfn/adapters/filesystem.sfn` calls.
-extern fn fopen(path: * u8, mode: * u8) -> * File;
+extern fn fopen(path: *u8, mode: *u8) -> *File;
 
-extern fn fclose(f: * File) -> i32;
+extern fn fclose(f: *File) -> i32;
 
-extern fn fread(buf: * u8, size: usize, nmemb: usize, f: * File) -> usize;
+extern fn fread(buf: *u8, size: usize, nmemb: usize, f: *File) -> usize;
 
-extern fn fwrite(buf: * u8, size: usize, nmemb: usize, f: * File) -> usize;
+extern fn fwrite(buf: *u8, size: usize, nmemb: usize, f: *File) -> usize;
 
 // `readlink(path, buf, bufsize)` reads the contents of the
 // symbolic link `path` into `buf` (up to `bufsize` bytes,
@@ -138,7 +138,7 @@ extern fn fwrite(buf: * u8, size: usize, nmemb: usize, f: * File) -> usize;
 // `"/proc/self/exe"` to recover the running binary's absolute
 // path on Linux without consulting `argv[0]` (which is
 // `$PATH`-relative when the user typed a bare command name).
-extern fn readlink(path: * u8, buf: * u8, bufsize: usize) -> i64;
+extern fn readlink(path: *u8, buf: *u8, bufsize: usize) -> i64;
 
 // `realpath(path, resolved)` returns the canonical absolute form
 // of `path`. When `resolved` is non-null, the result is written
@@ -150,13 +150,13 @@ extern fn readlink(path: * u8, buf: * u8, bufsize: usize) -> i64;
 // `runtime/sfn/platform/exec.sfn` uses this to canonicalize the
 // runtime-root candidates the dir-walk produces so dev-tree and
 // installed-bin layouts both surface the same path string.
-extern fn realpath(path: * u8, resolved: * u8) -> * u8;
+extern fn realpath(path: *u8, resolved: *u8) -> *u8;
 
 // ── Environment ───────────────────────────────────────────────
 // Returns a NUL-terminated C string owned by the libc environ
 // table — adapters must copy before storing. Adapters are gated
 // by `![io]` per the §3.6 effect-on-wrapper rule.
-extern fn getenv(name: * u8) -> * u8;
+extern fn getenv(name: *u8) -> *u8;
 
 // ── Exception unwinding ───────────────────────────────────────
 // `setjmp` saves the current stack/CPU state into the buffer and
@@ -192,9 +192,9 @@ extern fn getenv(name: * u8) -> * u8;
 // struct definition; lowers to `i8*`). Adapters that allocate
 // the buffer use `runtime/sfn/exception.sfn`'s allocator helpers
 // rather than malloc-with-magic-number directly.
-extern fn setjmp(env: * JmpBuf) -> i32;
+extern fn setjmp(env: *JmpBuf) -> i32;
 
-extern fn longjmp(env: * JmpBuf, val: i32) -> void;
+extern fn longjmp(env: *JmpBuf, val: i32) -> void;
 
 // ── Platform-specific executable-path APIs ────────────────────
 // The next two declarations live in libc.sfn for discoverability
@@ -232,9 +232,9 @@ extern fn longjmp(env: * JmpBuf, val: i32) -> void;
 //     would also work via `* HMODULE`, but using `* u8` keeps the
 //     declaration self-contained — exec.sfn callers pass `null`
 //     to mean "the current process" per the Win32 docs).
-extern fn _NSGetExecutablePath(buf: * u8, bufsize: * i32) -> i32;
+extern fn _NSGetExecutablePath(buf: *u8, bufsize: *i32) -> i32;
 
-extern fn GetModuleFileNameA(handle: * u8, buf: * u8, size: i32) -> i32;
+extern fn GetModuleFileNameA(handle: *u8, buf: *u8, size: i32) -> i32;
 
 // ── Directory + stat APIs ─────────────────────────────────────
 // POSIX directory-traversal and metadata primitives the M3.1a
@@ -271,19 +271,19 @@ extern fn GetModuleFileNameA(handle: * u8, buf: * u8, size: i32) -> i32;
 //     opaque pointee. Callers that need the name field will
 //     reach for a platform-specific offset accessor in a
 //     follow-up wave (same layout caveat as `struct stat`).
-extern fn stat(path: * u8, statbuf: * Stat) -> i32;
+extern fn stat(path: *u8, statbuf: *Stat) -> i32;
 
-extern fn opendir(path: * u8) -> * DIR;
+extern fn opendir(path: *u8) -> *DIR;
 
-extern fn readdir(dirp: * DIR) -> * DirEnt;
+extern fn readdir(dirp: *DIR) -> *DirEnt;
 
-extern fn closedir(dirp: * DIR) -> i32;
+extern fn closedir(dirp: *DIR) -> i32;
 
-extern fn unlink(path: * u8) -> i32;
+extern fn unlink(path: *u8) -> i32;
 
-extern fn mkdir(path: * u8, mode: i32) -> i32;
+extern fn mkdir(path: *u8, mode: i32) -> i32;
 
-extern fn rmdir(path: * u8) -> i32;
+extern fn rmdir(path: *u8) -> i32;
 
 // ── Extended POSIX filesystem primitives (#926, M3.1c) ────────
 // Canonical declarations for the `chmod(2)` / `access(2)` /
@@ -305,10 +305,10 @@ extern fn rmdir(path: * u8) -> i32;
 //   - `mkdtemp` mutates and returns its `char *template` argument
 //     in place (the `XXXXXX` suffix is overwritten); both the
 //     argument and result are `* u8`.
-extern fn chmod(path: * u8, mode: i32) -> i32;
+extern fn chmod(path: *u8, mode: i32) -> i32;
 
-extern fn access(path: * u8, mode: i32) -> i32;
+extern fn access(path: *u8, mode: i32) -> i32;
 
-extern fn symlink(target: * u8, linkpath: * u8) -> i32;
+extern fn symlink(target: *u8, linkpath: *u8) -> i32;
 
-extern fn mkdtemp(template: * u8) -> * u8;
+extern fn mkdtemp(template: *u8) -> *u8;

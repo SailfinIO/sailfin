@@ -5,13 +5,13 @@
 // libc allocation primitives for `handle_read_bytes_stdout`'s owned
 // buffer. Redeclared per-module (the #306 cross-module-extern limit),
 // matching the `sfn/http` capsule's inlined declarations.
-extern fn malloc(size: usize) -> * u8;
+extern fn malloc(size: usize) -> *u8;
 
-extern fn memcpy(dst: * u8, src: * u8, n: usize) -> * u8;
+extern fn memcpy(dst: *u8, src: *u8, n: usize) -> *u8;
 
-extern fn memset(dst: * u8, byte: i32, n: usize) -> * u8;
+extern fn memset(dst: *u8, byte: i32, n: usize) -> *u8;
 
-extern fn free(ptr: * u8) -> void;
+extern fn free(ptr: *u8) -> void;
 
 fn env(name: string) -> string ![io] {
     // Read an environment variable. Returns an empty string if not set.
@@ -283,8 +283,8 @@ fn _owned_from_str(s: string) -> OwnedBuf {
             arena_addr: 0
         };
     }
-    let src: * u8 = s as * u8;
-    let copy: * u8 = malloc((n + 1) as usize);
+    let src: *u8 = s as *u8;
+    let copy: *u8 = malloc((n + 1) as usize);
     if copy as i64 == 0 {
         return OwnedBuf {
             ptr_addr: 0,
@@ -294,7 +294,7 @@ fn _owned_from_str(s: string) -> OwnedBuf {
         };
     }
     memcpy(copy, src, n as usize);
-    memset(((copy as i64) + n) as * u8, 0, 1 as usize);
+    memset(((copy as i64) + n) as *u8, 0, 1 as usize);
     return OwnedBuf {
         ptr_addr: copy as i64,
         len: n,
@@ -335,7 +335,7 @@ fn handle_read_bytes_stdout(h: ProcessHandle, n: int) -> OwnedBuf ![io] {
 // read. A canonical empty buffer (`ptr_addr == 0`, e.g. an EOF read) owns
 // no allocation, so freeing it is a no-op and is always safe.
 fn owned_buf_free(buf: OwnedBuf) -> void {
-    if buf.ptr_addr != 0 { free(buf.ptr_addr as * u8); }
+    if buf.ptr_addr != 0 { free(buf.ptr_addr as *u8); }
 }
 
 // Wait for the child to exit. Closes any still-open fds, reaps the

@@ -62,9 +62,9 @@
 // (E0805). Inlining the two declarations we need keeps this
 // module self-contained for every seed, regardless of the
 // libc.sfn declaration surface.
-extern fn malloc(size: usize) -> * u8;
+extern fn malloc(size: usize) -> *u8;
 
-extern fn free(ptr: * u8) -> void;
+extern fn free(ptr: *u8) -> void;
 
 // `RcHeader` lays out the 16-byte bookkeeping prefix. The
 // architecture spec's `drop_fn: fn(*u8) -> void` field appears
@@ -73,7 +73,7 @@ extern fn free(ptr: * u8) -> void;
 // header stays 16 bytes with refcount @0 and drop_fn @8.
 struct RcHeader {
     refcount: i64;
-    drop_fn: * u8;
+    drop_fn: *u8;
 }
 
 // `sfn_rc_sfn_alloc(size, drop_fn)` allocates a 16-byte header
@@ -86,7 +86,7 @@ struct RcHeader {
 // (callers check the return) holds until `Result<T, E>` + `?`
 // ship (Phase 1 of the runtime prereqs in CLAUDE.md). Architect
 // spec: `docs/proposals/0025-native-runtime-architecture.md` `#322-reference-counting`.
-fn sfn_rc_sfn_alloc(size: i64, drop_fn: * u8) -> * u8 {
+fn sfn_rc_sfn_alloc(size: i64, drop_fn: *u8) -> *u8 {
     // Raw allocation + header-init interior (#1218 / E9, proposal §5.1):
     // the libc `malloc`, the raw-pointer header field stores, and the
     // payload pointer arithmetic are the author-asserted unsafe region.
@@ -98,7 +98,7 @@ fn sfn_rc_sfn_alloc(size: i64, drop_fn: * u8) -> * u8 {
     unsafe {
         let header_ptr = malloc((size + 16) as usize);
         if header_ptr as i64 == 0 { return header_ptr; }
-        let header = header_ptr as * RcHeader;
+        let header = header_ptr as *RcHeader;
         header.refcount = 1;
         header.drop_fn = drop_fn;
         return header_ptr + 16;
@@ -113,8 +113,8 @@ fn sfn_rc_sfn_alloc(size: i64, drop_fn: * u8) -> * u8 {
 // i64 1 seq_cst, align 8`. The previous-value return from
 // `atomic_add` is intentionally discarded — retains do not need
 // to observe the old count.
-fn sfn_rc_sfn_retain(payload: * u8) -> void {
-    let slots = payload as * i64;
+fn sfn_rc_sfn_retain(payload: *u8) -> void {
+    let slots = payload as *i64;
     let refcount_ptr = slots - 2;
     atomic_add(refcount_ptr, 1);
 }
@@ -127,8 +127,8 @@ fn sfn_rc_sfn_retain(payload: * u8) -> void {
 // scope; the released allocation is freed directly via libc
 // `free` once SfnString / SfnArray drop synthesis ships, this
 // body inserts a `drop_fn(payload)` call ahead of the `free`.
-fn sfn_rc_sfn_release(payload: * u8) -> void {
-    let slots = payload as * i64;
+fn sfn_rc_sfn_release(payload: *u8) -> void {
+    let slots = payload as *i64;
     let refcount_ptr = slots - 2;
     let prev = atomic_sub(refcount_ptr, 1);
     // Release-to-zero disposal (#1218 / E9, proposal §5.1): the `prev ==
@@ -139,6 +139,6 @@ fn sfn_rc_sfn_release(payload: * u8) -> void {
     // raw-pointer free is the author-asserted unsafe region, and the
     // atomic refcount reaching zero is the uniqueness proof.
     if prev == 1 {
-        unsafe { free(refcount_ptr as * u8); }
+        unsafe { free(refcount_ptr as *u8); }
     }
 }

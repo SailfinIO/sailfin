@@ -22,17 +22,17 @@
 // `runtime/sfn/platform/rand.sfn` and linked into every binary; it fills `buf`
 // with `n` secure random bytes and returns 1 on success, 0 on failure. Externs
 // carry no effect (E0804); the `![rand]` gate is on `random_bytes` below.
-extern fn sfn_rand_fill(buf: * u8, n: i64) -> i32;
+extern fn sfn_rand_fill(buf: *u8, n: i64) -> i32;
 
-extern fn malloc(size: usize) -> * u8;
+extern fn malloc(size: usize) -> *u8;
 
-extern fn free(ptr: * u8) -> void;
+extern fn free(ptr: *u8) -> void;
 
 // `_rand_ptr_off(p, off)` — byte-stride pointer arithmetic (copy of the
 // ed25519.sfn helper).
-fn _rand_ptr_off(p: * u8, off: i64) -> * u8 {
+fn _rand_ptr_off(p: *u8, off: i64) -> *u8 {
     let addr: i64 = (p as i64) + off;
-    return addr as * u8;
+    return addr as *u8;
 }
 
 // random_bytes(n) — return exactly `n` cryptographically secure random bytes,
@@ -43,7 +43,7 @@ fn random_bytes(n: int) -> int[] ![rand] {
     // reads a 4-byte word at `buf[n-1]`) stays in-bounds — the same
     // over-allocation invariant websocket.sfn's mask buffer holds for
     // `_ws_byte_at`. Only the first `n` bytes are filled with entropy.
-    let buf: * u8 = malloc((n + 4) as usize);
+    let buf: *u8 = malloc((n + 4) as usize);
     if buf as i64 == 0 { return []; }
     if sfn_rand_fill(buf, n as i64) != 1 {
         free(buf);

@@ -1,23 +1,18 @@
 // examples/basics/conditionals.sfn
-
 fn checkNumber(value: int) ![io] {
-  if value > 0 {
-    print("{{ value }} is positive");
-  } else if value < 0 {
-    print("{{ value }} is negative");
-  } else {
-    print("{{ value }} is zero");
-  }
+    if value > 0 { print("{{ value }} is positive"); } else if value < 0 {
+        print("{{ value }} is negative");
+    } else { print("{{ value }} is zero"); }
 
-  match value {
-    42: print("The answer to life, the universe, and everything!"),
-    -1: print("A special negative number!"),
-    _: print("Just another number."),
-  }
+    match value {
+        42: print("The answer to life, the universe, and everything!"),
+        -1: print("A special negative number!"),
+        _: print("Just another number.")
+    }
 }
 
 fn main() ![io] {
-  checkNumber(42);
-  checkNumber(-5);
-  checkNumber(0);
+    checkNumber(42);
+    checkNumber(-5);
+    checkNumber(0);
 }

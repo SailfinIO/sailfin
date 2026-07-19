@@ -1,19 +1,16 @@
 // examples/basics/interfaces.sfn
-
 interface Greeter {
-  fn greet(self) -> string;
+    fn greet(self) -> string;
 }
 
 struct User implements Greeter {
-  id: int;
-  name: string;
+    id: int;
+    name: string;
 
-  fn greet(self) -> string {
-    return "Hello, {{self.name}}!";
-  }
+    fn greet(self) -> string { return "Hello, {{self.name}}!"; }
 }
 
 fn main() ![io] {
-  let greeter: Greeter = User { id: 1, name: "Alice" };
-  print(greeter.greet());
+    let greeter: Greeter = User { id: 1, name: "Alice" };
+    print(greeter.greet());
 }

@@ -1,12 +1,9 @@
 // examples/web/fetch-data.sfn
-
 import { http } from "http";
 
 async fn fetchData(url: string) -> string ![net] {
     let response = await http.get(url);
-    if response.status == 200 {
-        return response.body;
-    } else {
+    if response.status == 200 { return response.body; } else {
         return "Error: {{response.status}}";
     }
 }

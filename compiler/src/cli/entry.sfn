@@ -33,11 +33,11 @@ import { sailfin_cli_main_v2, sailfin_cli_main_with_paths } from "./main";
 // `![io]` for `exe_path` / `resolve_runtime_root` and pure for
 // `binary_dir`; the transitive caller (`fn main`) declares the
 // envelope explicitly.
-extern fn exe_path() -> * u8;
+extern fn exe_path() -> *u8;
 
-extern fn binary_dir(exe: * u8) -> * u8;
+extern fn binary_dir(exe: *u8) -> *u8;
 
-extern fn resolve_runtime_root(exe: * u8) -> * u8;
+extern fn resolve_runtime_root(exe: *u8) -> *u8;
 
 // `realpath(path, null)` — libc allocates the resolved buffer; used
 // by `fn main` to canonicalize argv[0] on platforms where
@@ -47,7 +47,7 @@ extern fn resolve_runtime_root(exe: * u8) -> * u8;
 // the runtime-root walk follows symlinks to the real binary
 // directory, matching `compiler/tests/e2e/test_runtime_sfn_sources_link_consumer.sh`'s
 // "self-path resolution works through binary symlink" pin.
-extern fn realpath(path: * u8, resolved: * u8) -> * u8;
+extern fn realpath(path: *u8, resolved: *u8) -> *u8;
 
 // Arena-stats telemetry dump (#822 / #1308). The former C atexit hook
 // `sailfin_runtime_install_arena_telemetry` is retired — installing a
@@ -56,7 +56,7 @@ extern fn realpath(path: * u8, resolved: * u8) -> * u8;
 // single exit funnel of `fn main` below (the runtime body lives in
 // `runtime/sfn/memory/arena.sfn`). A no-op unless `SAILFIN_DUMP_ARENA_STATS`
 // is truthy. Pinned by `compiler/tests/e2e/arena_default_on_test.sfn`.
-extern fn sfn_arena_telemetry_dump(label: * u8);
+extern fn sfn_arena_telemetry_dump(label: *u8);
 
 // Self-applied compiler memory budget (`runtime/sfn/platform/rlimit.sfn`).
 // `fn main` calls this before any compilation work so every `sfn`
@@ -207,7 +207,7 @@ fn main(argv: string[]) -> int ![clock, io, net] {
     // `$PATH` name fails the walk on its own), but `_runtime_bundle_exists`
     // in `sailfin_cli_main_v2`'s bare-file dispatch provides the final
     // CWD-relative `runtime` fallback either way.
-    let exe_raw: * u8 = exe_path();
+    let exe_raw: *u8 = exe_path();
     let mut exe_str: string = exe_raw as string;
     if exe_str.length == 0 {
         if argv.length > 0 {
@@ -221,14 +221,14 @@ fn main(argv: string[]) -> int ![clock, io, net] {
             // case, which on macOS would otherwise see argv[0] =
             // the symlinked path and walk parent dirs that have no
             // `runtime/` sibling.
-            let canon: * u8 = realpath(argv[0] as * u8, null);
+            let canon: *u8 = realpath(argv[0] as *u8, null);
             if canon as i64 != 0 { exe_str = canon as string; } else {
                 exe_str = argv[0];
             }
         }
     }
-    let bin_dir: * u8 = binary_dir(exe_str as * u8);
-    let runtime_root: * u8 = resolve_runtime_root(exe_str as * u8);
+    let bin_dir: *u8 = binary_dir(exe_str as *u8);
+    let runtime_root: *u8 = resolve_runtime_root(exe_str as *u8);
     // `sailfin_runtime_argv_to_string_array(argc, argv)` (the @main
     // wrapper synthesized by emission.sfn) preserves argv[0] — the
     // binary path — at index 0. The CLI dispatch reads positional
@@ -247,6 +247,6 @@ fn main(argv: string[]) -> int ![clock, io, net] {
     // (replaces the retired C atexit hook). `main` has a single return,
     // so this fires for `sfn run`/`check`/`build`/… alike — the dispatch
     // returns its exit code up through here rather than calling `exit()`.
-    sfn_arena_telemetry_dump(label as * u8);
+    sfn_arena_telemetry_dump(label as *u8);
     return exit_code;
 }

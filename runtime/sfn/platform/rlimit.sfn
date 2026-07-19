@@ -67,21 +67,21 @@ struct RLimit {
 // `getrlimit` / `setrlimit` take `struct rlimit *`; declared here
 // with a `* u8` surface and cast at the call site, mirroring how
 // `process.sfn` passes its `PollSlot` buffer to `pipe(2)`.
-extern fn getrlimit(resource: i32, rlim: * u8) -> i32;
+extern fn getrlimit(resource: i32, rlim: *u8) -> i32;
 
-extern fn setrlimit(resource: i32, rlim: * u8) -> i32;
+extern fn setrlimit(resource: i32, rlim: *u8) -> i32;
 
-extern fn malloc(size: usize) -> * u8;
+extern fn malloc(size: usize) -> *u8;
 
-extern fn free(ptr: * u8) -> void;
+extern fn free(ptr: *u8) -> void;
 
-extern fn getenv(name: * u8) -> * u8;
+extern fn getenv(name: *u8) -> *u8;
 
-extern fn strlen(s: * u8) -> usize;
+extern fn strlen(s: *u8) -> usize;
 
-extern fn write(fd: i32, buf: * u8, count: usize) -> i64;
+extern fn write(fd: i32, buf: *u8, count: usize) -> i64;
 
-extern fn memcmp(a: * u8, b: * u8, n: usize) -> i32;
+extern fn memcmp(a: *u8, b: *u8, n: usize) -> i32;
 
 // C runtime's NUL-terminated string equality (also wrapped by
 // `sfn_str_sfn_eq` in `runtime/sfn/string.sfn`).
@@ -90,26 +90,26 @@ extern fn memcmp(a: * u8, b: * u8, n: usize) -> i32;
 // ABI, prelude `strings_equal(left: string, right: string)` lowers to
 // `@strings_equal({i8*,i64}, {i8*,i64})`, so a `(* u8, * u8)` extern call
 // into it reads garbage length fields. `sfn_str_eq` is genuinely `(i8*, i8*)`.
-extern fn sfn_str_eq(a: * u8, b: * u8) -> bool;
+extern fn sfn_str_eq(a: *u8, b: *u8) -> bool;
 
 // `strtoll(s, NULL, 10)` — the `end` out-parameter is always passed
 // `null`, so the `* u8` surface (vs. the true `char **`) never
 // carries a write.
-extern fn strtoll(s: * u8, end: * u8, base: i32) -> i64;
+extern fn strtoll(s: *u8, end: *u8, base: i32) -> i64;
 
 // Pure-Sailfin stat-based existence probe
 // (`runtime/sfn/adapters/filesystem.sfn`).
-extern fn sfn_fs_exists(path: * u8) -> bool;
+extern fn sfn_fs_exists(path: *u8) -> bool;
 
 // `SAILFIN_TRACE_MEM_LIMIT` gate: non-empty and not `"0"`.
 fn _mem_limit_trace_enabled() -> bool {
     let s_env: string = "SAILFIN_TRACE_MEM_LIMIT";
-    let v: * u8 = getenv(s_env as * u8);
+    let v: *u8 = getenv(s_env as *u8);
     if v as i64 == 0 { return false; }
     let s_empty: string = "";
-    if memcmp(v, s_empty as * u8, 1 as usize) == 0 { return false; }
+    if memcmp(v, s_empty as *u8, 1 as usize) == 0 { return false; }
     let s_zero: string = "0";
-    if sfn_str_eq(v, s_zero as * u8) { return false; }
+    if sfn_str_eq(v, s_zero as *u8) { return false; }
     return true;
 }
 
@@ -117,7 +117,7 @@ fn _mem_limit_trace_enabled() -> bool {
 // module-header convention).
 fn _mem_limit_trace(msg: string) ![io] {
     if !_mem_limit_trace_enabled() { return; }
-    let p: * u8 = msg as * u8;
+    let p: *u8 = msg as *u8;
     write(2, p, strlen(p));
 }
 
@@ -140,15 +140,15 @@ fn apply_default_mem_limit() -> i32 ![io] {
     let mut explicit: bool = false;
 
     let s_env: string = "SAILFIN_MEM_LIMIT";
-    let env_val: * u8 = getenv(s_env as * u8);
+    let env_val: *u8 = getenv(s_env as *u8);
     if env_val as i64 != 0 {
         let s_empty: string = "";
-        if memcmp(env_val, s_empty as * u8, 1 as usize) != 0 {
+        if memcmp(env_val, s_empty as *u8, 1 as usize) != 0 {
             let s_unlimited: string = "unlimited";
             let s_off: string = "off";
             let s_zero: string = "0";
-            if sfn_str_eq(env_val, s_unlimited as * u8) || sfn_str_eq(env_val, s_off as * u8)
-                || sfn_str_eq(env_val, s_zero as * u8) {
+            if sfn_str_eq(env_val, s_unlimited as *u8) || sfn_str_eq(env_val, s_off as *u8)
+                || sfn_str_eq(env_val, s_zero as *u8) {
                 let m_off: string = "[mem-limit] self-cap disabled via SAILFIN_MEM_LIMIT\n";
                 _mem_limit_trace(m_off);
                 return 0;
@@ -176,7 +176,7 @@ fn apply_default_mem_limit() -> i32 ![io] {
     // but 5 on Darwin — calling resource 9 there would silently target
     // RLIMIT_NPROC).
     let s_proc: string = "/proc/self/status";
-    if sfn_fs_exists(s_proc as * u8) {
+    if sfn_fs_exists(s_proc as *u8) {
         return _apply_linux_rlimit_as(target, explicit);
     }
 
@@ -191,7 +191,7 @@ fn apply_default_mem_limit() -> i32 ![io] {
     // enforcement. `/System/Library/CoreServices` is a Darwin marker
     // (always present on macOS, absent on Linux) needing no new extern.
     let s_darwin: string = "/System/Library/CoreServices";
-    if sfn_fs_exists(s_darwin as * u8) {
+    if sfn_fs_exists(s_darwin as *u8) {
         let m_dwn: string = "[mem-limit] darwin: no RLIMIT_AS; fan-out governor is the floor (in-process monitor pending)\n";
         _mem_limit_trace(m_dwn);
         return 0;
@@ -211,9 +211,9 @@ fn apply_default_mem_limit() -> i32 ![io] {
 // already governs, -1 on an unexpected getrlimit/setrlimit/malloc
 // failure (advisory only — a missing budget never blocks a build).
 fn _apply_linux_rlimit_as(target: i64, explicit: bool) -> i32 ![io] {
-    let buf: * u8 = malloc(16 as usize);
+    let buf: *u8 = malloc(16 as usize);
     if buf as i64 == 0 { return -1; }
-    let rl: * RLimit = buf as * RLimit;
+    let rl: *RLimit = buf as *RLimit;
     if getrlimit(9, buf) != 0 {
         free(buf);
         return -1;

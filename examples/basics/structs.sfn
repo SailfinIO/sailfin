@@ -1,12 +1,9 @@
 // examples/basics/structs.sfn
-
 struct User {
     id: int;
     name: string;
 
-    fn greet(self) -> string {
-        return "Hello, {{self.name}}!";
-    }
+    fn greet(self) -> string { return "Hello, {{self.name}}!"; }
 }
 
 fn main() ![io] {

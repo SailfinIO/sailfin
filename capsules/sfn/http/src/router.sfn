@@ -94,7 +94,7 @@ fn router() -> Router {
 // address-taken (the address is retained as `i64`). Returns a new `Router`
 // so callers reassign (`ROUTER = route(ROUTER, ...)`) — no reliance on
 // struct-field aliasing.
-fn route(r: Router, method: string, pattern: string, handler: * fn (Request, Params) -> Response) -> Router {
+fn route(r: Router, method: string, pattern: string, handler: *fn (Request, Params) -> Response) -> Router {
     let mut routes = r.routes;
     let parsed = _parse_pattern(pattern);
     routes.push(Route {
@@ -244,7 +244,7 @@ fn dispatch(r: Router, req: Request) -> Response {
                 if rt.handler == 0 {
                     return response_with_status(500, "Internal Server Error");
                 }
-                let h: * fn (Request, Params) -> Response = rt.handler as * fn (Request, Params) -> Response;
+                let h: *fn (Request, Params) -> Response = rt.handler as *fn (Request, Params) -> Response;
                 let params = _capture_params(rt.capture_indices, rt.capture_names, path_segments);
                 return h(req, params);
             }

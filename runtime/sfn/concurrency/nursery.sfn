@@ -79,25 +79,25 @@ struct Nursery {
 // resolves imported *defined* functions unreliably, so runtime modules
 // re-declare the extern surface they call). `realloc(null, n)` behaves
 // as `malloc(n)`, so the growable list seeds from a null buffer.
-extern fn malloc(size: usize) -> * u8;
+extern fn malloc(size: usize) -> *u8;
 
-extern fn free(ptr: * u8) -> void;
+extern fn free(ptr: *u8) -> void;
 
-extern fn realloc(ptr: * u8, new_size: usize) -> * u8;
+extern fn realloc(ptr: *u8, new_size: usize) -> *u8;
 
-extern fn pthread_mutex_init(m: * PthreadMutex, attr: * PthreadMutexAttr) -> i32;
+extern fn pthread_mutex_init(m: *PthreadMutex, attr: *PthreadMutexAttr) -> i32;
 
-extern fn pthread_mutex_lock(m: * PthreadMutex) -> i32;
+extern fn pthread_mutex_lock(m: *PthreadMutex) -> i32;
 
-extern fn pthread_mutex_unlock(m: * PthreadMutex) -> i32;
+extern fn pthread_mutex_unlock(m: *PthreadMutex) -> i32;
 
-extern fn pthread_mutex_destroy(m: * PthreadMutex) -> i32;
+extern fn pthread_mutex_destroy(m: *PthreadMutex) -> i32;
 
 // The single-task join surface from the scheduler (#1089). The nursery
 // blocks on each registered task here; the result pointer is discarded
 // (the nursery owns completion ordering, not result aggregation — a
 // user `await` reads the result separately).
-extern fn sfn_task_join(task: * u8) -> * u8;
+extern fn sfn_task_join(task: *u8) -> *u8;
 
 // ── Per-thread current nursery ────────────────────────────────
 // Top-of-stack `Nursery*` for the executing thread (0 = none). Lowered
@@ -128,10 +128,10 @@ fn _sfn_nursery_initial_capacity() -> i64 { return 8; }
 // known corner is that a top-level routine whose `enter` OOMs runs its
 // body with no nursery, so its spawns escape (documented, post-v0).
 fn sfn_nursery_enter() -> i64 {
-    let nursery_ptr: * u8 = malloc(_sfn_nursery_struct_size() as usize);
+    let nursery_ptr: *u8 = malloc(_sfn_nursery_struct_size() as usize);
     if nursery_ptr as i64 == 0 { return 0; }
 
-    let nursery: * Nursery = nursery_ptr as * Nursery;
+    let nursery: *Nursery = nursery_ptr as *Nursery;
     let mutex_rc: i32 = pthread_mutex_init(nursery.mutex, null);
     if mutex_rc != 0 {
         free(nursery_ptr);
@@ -160,7 +160,7 @@ fn sfn_nursery_enter() -> i64 {
 fn sfn_nursery_register(n: i64, task: i64) -> i64 {
     if n == 0 { return 1; }
 
-    let nursery: * Nursery = n as * Nursery;
+    let nursery: *Nursery = n as *Nursery;
     pthread_mutex_lock(nursery.mutex);
 
     if nursery.count >= nursery.capacity {
@@ -168,8 +168,8 @@ fn sfn_nursery_register(n: i64, task: i64) -> i64 {
         if new_cap < _sfn_nursery_initial_capacity() {
             new_cap = _sfn_nursery_initial_capacity();
         }
-        let old_buf: * u8 = nursery.tasks_addr as * u8;
-        let new_buf: * u8 = realloc(old_buf, (new_cap * 8) as usize);
+        let old_buf: *u8 = nursery.tasks_addr as *u8;
+        let new_buf: *u8 = realloc(old_buf, (new_cap * 8) as usize);
         if new_buf as i64 == 0 {
             nursery.faulted = 1;
             pthread_mutex_unlock(nursery.mutex);
@@ -184,7 +184,7 @@ fn sfn_nursery_register(n: i64, task: i64) -> i64 {
     // cast-of-pointer-arithmetic miscompile.
     let base: i64 = nursery.tasks_addr;
     let slot_addr: i64 = base + nursery.count * 8;
-    let slot: * i64 = slot_addr as * i64;
+    let slot: *i64 = slot_addr as *i64;
     atomic_store(slot, task);
     nursery.count = nursery.count + 1;
 
@@ -206,16 +206,16 @@ fn sfn_nursery_register(n: i64, task: i64) -> i64 {
 fn sfn_nursery_exit(n: i64) -> i64 {
     if n == 0 { return 0; }
 
-    let nursery: * Nursery = n as * Nursery;
+    let nursery: *Nursery = n as *Nursery;
 
     let mut i: i64 = 0;
     loop {
         if i >= nursery.count { break; }
         let base: i64 = nursery.tasks_addr;
         let slot_addr: i64 = base + i * 8;
-        let slot: * i64 = slot_addr as * i64;
+        let slot: *i64 = slot_addr as *i64;
         let task_addr: i64 = atomic_load(slot);
-        if task_addr != 0 { sfn_task_join(task_addr as * u8); }
+        if task_addr != 0 { sfn_task_join(task_addr as *u8); }
         i = i + 1;
     }
 
@@ -224,9 +224,9 @@ fn sfn_nursery_exit(n: i64) -> i64 {
     // Pop: restore the enclosing nursery as current before tearing down.
     _sfn_g_current_nursery = nursery.parent;
 
-    if nursery.tasks_addr != 0 { free(nursery.tasks_addr as * u8); }
+    if nursery.tasks_addr != 0 { free(nursery.tasks_addr as *u8); }
     pthread_mutex_destroy(nursery.mutex);
-    free(n as * u8);
+    free(n as *u8);
 
     return fault;
 }

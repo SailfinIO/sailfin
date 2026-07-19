@@ -21,25 +21,25 @@
 // staged into each other's build context during `sfn build -p compiler`,
 // so main.sfn can import these as ordinary Sailfin functions without a
 // seed-cut. runtime/prelude is NOT staged into main.sfn's build context.
-extern fn calloc(n: usize, sz: usize) -> * u8;
+extern fn calloc(n: usize, sz: usize) -> *u8;
 
-extern fn memcpy(dst: * u8, src: * u8, n: usize) -> * u8;
+extern fn memcpy(dst: *u8, src: *u8, n: usize) -> *u8;
 
-extern fn free(ptr: * u8) -> void;
+extern fn free(ptr: *u8) -> void;
 
 // Copy `src` into a fresh zeroed heap buffer that survives an arena rewind.
 fn relocate_string_to_heap(src: string) -> string {
     let n: i64 = src.length as i64;
     if n <= 0 { return ""; }
     let cap: i64 = ((n + 1 + 7) / 8) * 8;
-    let buf: * u8 = calloc(cap as usize, 1 as usize);
-    memcpy(buf, src as * u8, n as usize);
+    let buf: *u8 = calloc(cap as usize, 1 as usize);
+    memcpy(buf, src as *u8, n as usize);
     return buf;
 }
 
 // Free a heap string allocated by `relocate_string_to_heap`.
 fn free_heap_string(s: string) -> void {
-    let p: * u8 = s as * u8;
+    let p: *u8 = s as *u8;
     if (p as i64) != 0 { free(p); }
 }
 

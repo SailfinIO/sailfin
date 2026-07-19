@@ -296,6 +296,29 @@ fn strip_and_classify(tokens: Token[]) -> FmtToken[] {
 // open delimiter, keyword, separator, colon, arrow, or semicolon, the token is
 // a unary prefix operator, not binary.  This changes the role from "operator"
 // to "unary_op" so the emit phase omits the space after it.
+// A prefix (unary) operator sits in one of these contexts, keyed on the
+// previous token's role: statement/expression start, after another operator,
+// an opener (`(`/`[`/`{`), a separator, a keyword, `:`/`->`/`;`, or another
+// unary. This covers the `!`/`-` arms' set below plus `block_open` (a deref
+// statement `{ *ptr = x; }` opens with `*` right after `{`); `_reclassify_unary_ops`
+// uses it for the prefix `*` case (pointer type / dereference). A binary `*`
+// (multiply) never sits in any of these positions, so it is left untouched.
+fn _is_prefix_context(prev_role: string) -> boolean {
+    if strings_equal(prev_role, "") { return true; }
+    if strings_equal(prev_role, "assign") { return true; }
+    if strings_equal(prev_role, "operator") { return true; }
+    if strings_equal(prev_role, "paren_open") { return true; }
+    if strings_equal(prev_role, "bracket_open") { return true; }
+    if strings_equal(prev_role, "block_open") { return true; }
+    if strings_equal(prev_role, "separator") { return true; }
+    if strings_equal(prev_role, "keyword") { return true; }
+    if strings_equal(prev_role, "colon") { return true; }
+    if strings_equal(prev_role, "arrow") { return true; }
+    if strings_equal(prev_role, "semicolon") { return true; }
+    if strings_equal(prev_role, "unary_op") { return true; }
+    return false;
+}
+
 fn _reclassify_unary_ops(fmt_tokens: FmtToken[]) -> FmtToken[] {
     let mut i = 0;
     loop {
@@ -500,6 +523,25 @@ fn _reclassify_unary_ops(fmt_tokens: FmtToken[]) -> FmtToken[] {
                     };
                 }
                 if strings_equal(prev_role, "unary_op") {
+                    fmt_tokens[i] = FmtToken {
+                        token: ft.token,
+                        leading_comments: ft.leading_comments,
+                        trailing_comment: ft.trailing_comment,
+                        blank_lines_before: ft.blank_lines_before,
+                        role: "unary_op"
+                    };
+                }
+            }
+            // Prefix `*` (pointer type `*u8`, dereference `*ptr`) is the same
+            // token as binary multiply, disambiguated here by the previous
+            // token's role: in a prefix context it carries no trailing space,
+            // matching the parser's verbatim intent (parser/expressions.sfn).
+            // Binary multiply (prev_role "value"/"paren_close"/…) falls through
+            // unchanged, so `a * b` keeps its spaces.
+            if strings_equal(lex, "*") {
+                let prev_role = "";
+                if i > 0 { prev_role = fmt_tokens[i - 1].role; }
+                if _is_prefix_context(prev_role) {
                     fmt_tokens[i] = FmtToken {
                         token: ft.token,
                         leading_comments: ft.leading_comments,
@@ -957,6 +999,12 @@ fn _needs_space_before(role: string, prev_role: string, lexeme: string, prev_lex
 
     // Decorator @: no space after
     if strings_equal(prev_role, "decorator") { return false; }
+
+    // Range `..`: tight on both sides (`0..4`, not `0 .. 4`). Keyed on the
+    // literal lexeme, not the shared "operator" role, so binary `+`/`-`/`*`/…
+    // spacing is untouched.
+    if strings_equal(lexeme, "..") { return false; }
+    if strings_equal(prev_lexeme, "..") { return false; }
 
     return true;
 }

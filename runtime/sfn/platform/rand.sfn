@@ -21,13 +21,13 @@
 // partially filled or zeroed buffer trusted as entropy. Callers MUST check the
 // return before using the buffer.
 // getentropy(buf, len) -> 0 on success, -1 on error. `len` must be <= 256.
-extern fn getentropy(buf: * u8, len: usize) -> i32;
+extern fn getentropy(buf: *u8, len: usize) -> i32;
 
 // `/dev/urandom` fallback (POSIX). C `open` is variadic; the 2-arg form is
 // ABI-safe for O_RDONLY, which needs no mode argument.
-extern fn open(path: * u8, flags: i32) -> i32;
+extern fn open(path: *u8, flags: i32) -> i32;
 
-extern fn read(fd: i32, buf: * u8, count: usize) -> i64;
+extern fn read(fd: i32, buf: *u8, count: usize) -> i64;
 
 extern fn close(fd: i32) -> i32;
 
@@ -35,14 +35,14 @@ extern fn close(fd: i32) -> i32;
 // net.sfn / http.sfn helper). The `_rand_` prefix gives this file-local runtime
 // helper a unique external symbol, since the native backend gives file-local
 // runtime helpers external linkage.
-fn _rand_ptr_off(p: * u8, off: i64) -> * u8 {
+fn _rand_ptr_off(p: *u8, off: i64) -> *u8 {
     let addr: i64 = (p as i64) + off;
-    return addr as * u8;
+    return addr as *u8;
 }
 
 // getentropy path: fill `n` bytes into `buf`, 256 at a time (the syscall's
 // per-call ceiling). Returns true iff every chunk succeeded.
-fn _rand_fill_getentropy(buf: * u8, n: i64) -> bool ![rand] {
+fn _rand_fill_getentropy(buf: *u8, n: i64) -> bool ![rand] {
     let mut off: i64 = 0;
     loop {
         if off >= n { break; }
@@ -58,9 +58,9 @@ fn _rand_fill_getentropy(buf: * u8, n: i64) -> bool ![rand] {
 // `/dev/urandom` path: read exactly `n` bytes, looping over short reads.
 // O_RDONLY = 0. Fail-closed on any open/read error. The guard bounds the loop
 // against a pathological zero-progress source.
-fn _rand_fill_urandom(buf: * u8, n: i64) -> bool ![rand] {
+fn _rand_fill_urandom(buf: *u8, n: i64) -> bool ![rand] {
     let path: string = "/dev/urandom";
-    let fd: i32 = open(path as * u8, 0);
+    let fd: i32 = open(path as *u8, 0);
     if fd < 0 { return false; }
     let mut off: i64 = 0;
     let mut guard: i64 = 0;
@@ -88,7 +88,7 @@ fn _rand_fill_urandom(buf: * u8, n: i64) -> bool ![rand] {
 // `n <= 0` is a no-op success. Consumers (`websocket.sfn`, the `sfn/crypto`
 // capsule) declare it inline as a bare extern; the `![rand]` gate lives on the
 // public Sailfin wrappers those consumers expose, per SFEP-0048 §4.
-fn sfn_rand_fill(buf: * u8, n: i64) -> i32 ![rand] {
+fn sfn_rand_fill(buf: *u8, n: i64) -> i32 ![rand] {
     if n <= 0 { return 1; }
     if buf as i64 == 0 { return 0; }
     if _rand_fill_getentropy(buf, n) { return 1; }

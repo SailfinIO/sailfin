@@ -25,7 +25,7 @@ fn _many_route_router(count: int) -> Router {
     loop {
         if i >= count { break; }
         let pattern = "/api/resources/" + (i as string) + "/{id}";
-        r = route(r, "GET", pattern, _handler as * fn (Request, Params) -> Response);
+        r = route(r, "GET", pattern, _handler as *fn (Request, Params) -> Response);
         i = i + 1;
     }
     return r;

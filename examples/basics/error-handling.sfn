@@ -1,5 +1,4 @@
 // examples/basics/error-handling.sfn
-
 struct DivisionError {
     message: string;
 }
@@ -15,7 +14,8 @@ fn main() ![io] {
     let result = safeDivide(10, 0);
 
     match result {
-        DivisionError { message }: print("Error: {{message}}"),
-        _: print("Result: {{result}}"),
+        DivisionError { message }
+        : print("Error: {{message}}"),
+        _: print("Result: {{result}}")
     }
 }

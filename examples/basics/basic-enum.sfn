@@ -1,15 +1,12 @@
 // examples/basics/basic-enum.sfn
-
 enum Color {
     Red,
     Green,
-    Blue,
+    Blue
 }
 
 fn main() ![io] {
     let favorite: Color = Color.Red;
 
-    if favorite == Color.Red {
-        print("Your favorite color is red!");
-    }
+    if favorite == Color.Red { print("Your favorite color is red!"); }
 }
