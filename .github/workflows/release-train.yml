@@ -15,9 +15,11 @@ name: Release Train (weekly stable)
 #          (`channel=stable bump=minor`).
 #      There is no `pendingStable` HOLD — the train ships the pending stable
 #      instead of waiting on a human to do it.
-#   2. Evaluates the *cut gate* — the health of `main` (latest scheduled
-#      Nightly self-host check; per-commit CI is guaranteed by the merge queue),
-#      NOT the open scope. Whatever scoped work is not done ROLLS FORWARD to the
+#   2. Evaluates the *cut gate* — the health of `main` (a green Nightly
+#      self-host check covering HEAD's compiler; per-commit CI is guaranteed by
+#      the merge queue), NOT the open scope. A green nightly whose commit is an
+#      ancestor of HEAD with no self-host-relevant change since counts as
+#      covering HEAD (#1956). Whatever scoped work is not done ROLLS FORWARD to the
 #      next train: open `release:next-minor` items are surfaced for visibility
 #      but NEVER block the train (time-box semantics).
 #   3. Dispatches `release.yml` (channel=stable) automatically on scheduled
@@ -42,7 +44,8 @@ on:
     # run off-cadence via workflow_dispatch.
     - cron: "0 9 * * 1"
   # Re-evaluate whenever a nightly self-host check finishes: a cut only fires
-  # once a GREEN nightly has verified the current `main` HEAD, so the nightly's
+  # once a GREEN nightly covers the current `main` HEAD (its commit is an
+  # ancestor of HEAD with no self-host-relevant change since), so the nightly's
   # completion is the natural "now safe to cut" signal.
   workflow_run:
     workflows: ["Nightly self-host check"]
@@ -148,15 +151,26 @@ jobs:
             }
             const trackerTitle = `Release: ${target}`;
 
-            // --- 2. Cut gate: current main HEAD self-hosts (NOT open scope) ---
+            // --- 2. Cut gate: HEAD's compiler is triple-pass verified ---------
             // The train is time-boxed: open scope rolls forward and never gates
-            // the cut. The gate is that the EXACT commit we would tag — current
-            // `main` HEAD — has a GREEN Nightly self-host run (triple-pass
-            // `make check`). Binding to `head_sha` (not merely "latest scheduled
-            // nightly = success") closes the window where a self-host-breaking
-            // commit lands after the last nightly and gets cut as stable on a
-            // stale-green signal. Per-commit single-pass CI is guaranteed by the
-            // merge queue; the nightly adds the triple-pass seedcheck.
+            // the cut. The gate is that the EXACT compiler we would tag has
+            // passed a GREEN Nightly self-host (triple-pass `make check`).
+            //
+            // We do NOT require a nightly whose head_sha == live HEAD. On an
+            // actively-merged trunk HEAD advances several times an hour while the
+            // nightly runs once daily and takes up to ~3h, so an exact match is
+            // essentially never true and the train could never cut (#1956).
+            // Instead we accept the most recent GREEN nightly whose commit is an
+            // ANCESTOR of HEAD, provided nothing self-host-relevant (compiler/src,
+            // runtime, bootstrap.toml — the inputs to the triple-pass build)
+            // changed between that commit and HEAD. That preserves the safety
+            // property the exact-head binding reached for — a self-host-breaking
+            // commit landing after the last green nightly makes the diff DIRTY and
+            // holds the cut — while staying satisfiable: docs / test / CI / capsule
+            // churn no longer blocks the train. release.yml re-checks the same
+            // predicate against origin/main at tag time (verified_sha input),
+            // closing the eval→tag race. Per-commit single-pass CI is guaranteed
+            // by the merge queue; the nightly adds the triple-pass seedcheck.
             const defaultBranch = context.payload.repository?.default_branch || 'main';
             const headSha = (await github.rest.repos.getBranch({
               owner, repo, branch: defaultBranch,
@@ -165,13 +179,60 @@ jobs:
               owner, repo, workflow_id: 'nightly-selfhost.yml',
               branch: defaultBranch, per_page: 30,
             })).data.workflow_runs;
-            const headNightly = nightlyRuns.find(r => r.head_sha === headSha && r.status === 'completed');
-            const cutGateClear = !!headNightly && headNightly.conclusion === 'success';
+            // A changed path is "self-host-relevant" if it feeds the triple-pass
+            // build: the compiler source, the runtime, or the pinned seed. Note
+            // this deliberately excludes compiler/tests/ (test churn does not
+            // change the compiler binary) and the version-string files the
+            // release bump itself rewrites (compiler/capsule.toml,
+            // compiler/src/version.sfn's fallback) — release.yml diffs a base that
+            // predates its own bump commit, so those never trip the re-check.
+            const SELFHOST_PREFIXES = ['compiler/src/', 'runtime/'];
+            const SELFHOST_FILES = ['bootstrap.toml'];
+            const isSelfhostRelevant = (f) =>
+              SELFHOST_PREFIXES.some(p => f.startsWith(p)) || SELFHOST_FILES.includes(f);
+            // Walk green nightlies newest-first; take the first whose commit is an
+            // ancestor of HEAD (compare status 'identical' or 'ahead'), then judge
+            // its diff to HEAD. Older ancestors only have MORE changes, so the
+            // newest ancestor is decisive — no need to scan past it. Bounded scan
+            // caps API calls.
+            let verifiedSha = null, verifiedRun = null, aheadBy = 0, dirtyFiles = null;
+            const greenNightlies = nightlyRuns
+              .filter(r => r.status === 'completed' && r.conclusion === 'success')
+              .slice(0, 10);
+            for (const r of greenNightlies) {
+              let cmp;
+              try {
+                cmp = (await github.rest.repos.compareCommitsWithBasehead({
+                  owner, repo, basehead: `${r.head_sha}...${headSha}`,
+                })).data;
+              } catch (e) {
+                core.warning(`compare ${r.head_sha.slice(0, 8)}...${headSha.slice(0, 8)} failed: ${e.message}`);
+                continue;
+              }
+              if (cmp.status !== 'identical' && cmp.status !== 'ahead') continue; // not on HEAD's history
+              verifiedRun = r;
+              aheadBy = cmp.ahead_by || 0;
+              const files = cmp.files || [];
+              // The compare API caps `files` at 300; a diff that large is beyond
+              // routine cadence churn, so treat it as unverifiable (hold).
+              dirtyFiles = files.length >= 300
+                ? ['<diff too large to verify>']
+                : files.map(f => f.filename).filter(isSelfhostRelevant);
+              if (dirtyFiles.length === 0) verifiedSha = r.head_sha;
+              break;
+            }
+            const cutGateClear = !!verifiedSha;
             const nightlyInFlight = nightlyRuns.some(r => r.status === 'queued' || r.status === 'in_progress');
             note(`Current ${defaultBranch} HEAD ${headSha.slice(0, 8)}.`);
-            note(headNightly
-              ? `Cut gate — nightly for HEAD = ${headNightly.conclusion} (${headNightly.html_url}).`
-              : `Cut gate — no completed nightly self-host run for HEAD yet (in-flight: ${nightlyInFlight}).`);
+            if (cutGateClear) {
+              note(`Cut gate — green nightly ${verifiedSha.slice(0, 8)} is an ancestor of HEAD `
+                + `(${aheadBy} commit(s) since, no self-host-relevant changes) → ${verifiedRun.html_url}.`);
+            } else if (verifiedRun) {
+              note(`Cut gate — latest green nightly ${verifiedRun.head_sha.slice(0, 8)} is an ancestor of HEAD, `
+                + `but self-host-relevant files changed since (${dirtyFiles.join(', ')}); holding for a fresh nightly.`);
+            } else {
+              note(`Cut gate — no green nightly on HEAD's history yet (in-flight: ${nightlyInFlight}).`);
+            }
 
             // --- 3. Roll-forward visibility: open release:next-minor items -----
             const openNextMinor = (await github.paginate(github.rest.issues.listForRepo, {
@@ -209,9 +270,10 @@ jobs:
                     + target + '` to enrich the scope manifest and the seed-bump section._', '',
                   '## Cut gate', '',
                   'This is an automated weekly stable cut. Scheduled train runs dispatch '
-                    + '`release.yml` (channel=stable) automatically when `main` is green '
-                    + '(latest scheduled nightly self-host); manual runs require '
-                    + '`confirm_dispatch=true`. Open scope rolls forward — it never blocks the train.', '',
+                    + '`release.yml` (channel=stable) automatically when a green nightly '
+                    + 'self-host covers HEAD\'s compiler (no self-host-relevant change since); '
+                    + 'manual runs require `confirm_dispatch=true`. Open scope rolls forward — '
+                    + 'it never blocks the train.', '',
                   '## Cross-references', '',
                   '- Weekly stable train: `.github/workflows/release-train.yml`',
                   '- Convention: `docs/conventions/issue-naming.md` "Release tracking" / "Seed pinning"',
@@ -253,8 +315,10 @@ jobs:
                 ? openNextMinor.map(i => `#${i.number}`).join(', ')
                 : '_none_';
               const gateLine = cutGateClear
-                ? `✅ Cut gate clear — a green nightly self-host verified HEAD \`${headSha.slice(0, 8)}\`.`
-                : `⛔ Cut gate NOT clear — no green nightly for HEAD \`${headSha.slice(0, 8)}\` yet; hold the cut.`;
+                ? `✅ Cut gate clear — green nightly \`${verifiedSha.slice(0, 8)}\` covers HEAD \`${headSha.slice(0, 8)}\` (no self-host-relevant changes since).`
+                : (verifiedRun
+                    ? `⛔ Cut gate NOT clear — compiler/runtime changed since the last green nightly \`${verifiedRun.head_sha.slice(0, 8)}\`; holding HEAD \`${headSha.slice(0, 8)}\` for a fresh nightly.`
+                    : `⛔ Cut gate NOT clear — no green nightly covers HEAD \`${headSha.slice(0, 8)}\` yet; hold the cut.`);
               const dispatchLine = cutGateClear
                 ? (isSchedule
                     ? `**Auto-dispatching.** This scheduled train run will cut the stable release (\`channel=stable bump=${bump}\` → \`${target}\`).`
@@ -315,16 +379,22 @@ jobs:
             } else if (cutGateClear) {
               await github.rest.actions.createWorkflowDispatch({
                 owner, repo, workflow_id: 'release.yml', ref: defaultBranch,
-                inputs: { channel: 'stable', bump, dry_run: 'false' },
+                inputs: { channel: 'stable', bump, dry_run: 'false', verified_sha: verifiedSha },
               });
-              note(`Dispatched release.yml (channel=stable bump=${bump}) → ${target}.`);
-              await postSlack(`:rocket: Sailfin release train dispatched ${target} (channel=stable bump=${bump}) — HEAD ${headSha.slice(0, 8)} verified green.\nTracker: ${tracker ? tracker.html_url : trackerTitle}\nRun: https://github.com/${owner}/${repo}/actions/runs/${context.runId}`);
+              note(`Dispatched release.yml (channel=stable bump=${bump}, verified_sha=${verifiedSha.slice(0, 8)}) → ${target}.`);
+              await postSlack(`:rocket: Sailfin release train dispatched ${target} (channel=stable bump=${bump}) — compiler verified green by nightly ${verifiedSha.slice(0, 8)} (HEAD ${headSha.slice(0, 8)}).\nTracker: ${tracker ? tracker.html_url : trackerTitle}\nRun: https://github.com/${owner}/${repo}/actions/runs/${context.runId}`);
             } else if (isNightlyDone) {
               // A nightly just finished but HEAD is not (yet) verified green — main
-              // likely advanced past it, or it failed. Do NOT re-dispatch from the
-              // workflow_run path (loop guard); the next nightly re-evaluates.
-              note(`Nightly finished but HEAD ${headSha.slice(0, 8)} is not verified green — holding; the next nightly will re-evaluate.`);
-              await postSlack(`:warning: Sailfin release train holding ${target}. HEAD ${headSha.slice(0, 8)} has no green nightly yet.\nTracker: ${tracker ? tracker.html_url : trackerTitle}`);
+              // advanced past it onto compiler/runtime changes, or it failed. Do
+              // NOT re-dispatch from the workflow_run path (loop guard); the next
+              // scheduled train or nightly re-evaluates.
+              //
+              // Deliberately NO Slack ping here: "HEAD is newer than the last green
+              // nightly" is the normal rolling-forward state on an actively-merged
+              // trunk, not an alarm — pinging on every nightly completion trained
+              // maintainers to ignore the channel (#1956). Slack fires only on an
+              // actual cut (:rocket:) or when a fresh nightly is armed (:hourglass:).
+              note(`Nightly finished but HEAD ${headSha.slice(0, 8)} is not verified green — holding; the next scheduled train or nightly re-evaluates.`);
             } else if (nightlyInFlight) {
               note(`HEAD not verified yet, but a nightly is already in-flight — holding for its completion.`);
             } else {
