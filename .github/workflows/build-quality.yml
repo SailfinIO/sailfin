@@ -61,15 +61,27 @@ on:
   workflow_dispatch:
     inputs: {}
 
-concurrency:
-  group: build-quality-${{ github.ref }}
-  cancel-in-progress: true
+# Concurrency is scoped per-job (below), not workflow-wide, so the two jobs
+# get different supersede semantics (SFN-395). On `main`, `github.ref` is
+# constant (`refs/heads/main`), so a single workflow-level group with
+# `cancel-in-progress: true` cancelled the previous still-running run on every
+# back-to-back merge. That is fine for the determinism/hit-rate gate (only the
+# latest main matters for that signal) but wrong for the `test-bin-baseline`
+# warmer, which must run to completion so its `Save test-bin cache` step lands
+# — a mid-warm cancel wastes ~40-50 min and leaves the default-branch test-bin
+# cache stale for PRs to consume. Each job therefore declares its own
+# `concurrency:` block.
 
 jobs:
   build-quality:
     name: Build quality (linux-x86_64)
     runs-on: ubuntu-24.04
     timeout-minutes: 60
+    # Determinism + cache-hit-rate gate: only the latest main commit's signal
+    # matters, so a newer run may supersede an in-flight one (SFN-395).
+    concurrency:
+      group: build-quality-gate-${{ github.ref }}
+      cancel-in-progress: true
     # `gate_name` is the stable suffix consumed by `notify-failure` to
     # dedup regression issues. The `Identify failed gate` step always
     # writes one of `determinism`, `cache-hit-rate`, or `build-setup`
@@ -313,6 +325,16 @@ jobs:
   test-bin-baseline:
     name: Warm test-bin cache (linux-x86_64)
     runs-on: ubuntu-24.04
+    # Cache producer: never cancel in-progress (SFN-395). A mid-warm cancel
+    # skips `Save test-bin cache`, so back-to-back merges could otherwise leave
+    # the default-branch test-bin cache stale for PRs. A distinct group from the
+    # gate job keeps the gate's supersede-latest semantics from reaching here.
+    # Runs keyed by `github.ref` serialize (one warmer at a time on main) and
+    # each completes its save; if sources are unchanged the save is a no-op
+    # (the content-addressed key already exists).
+    concurrency:
+      group: build-quality-testbin-${{ github.ref }}
+      cancel-in-progress: false
     # The warm step runs the whole `.sfn` suite with a COLD test-bin cache
     # (this job is that cache's producer, so it restores module-IR but never
     # test-bin), compiling every test binary from scratch — the cache it then
