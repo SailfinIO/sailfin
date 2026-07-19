@@ -147,3 +147,73 @@ test "fmt generic: bounded fn header is idempotent" ![io] {
     let twice = format_source(once);
     assert once == twice;
 }
+
+// ── Expression-position type arguments (SFN-405) ─────────────────────
+// The generic-recognition pass only fired in type-annotation/declaration
+// positions, so a type-argument-bearing struct literal in return/expression
+// position (`return List<T> { … }`) fell through to comparison spacing and
+// re-emitted as `List < T > { … }`. Expression-position candidacy now covers
+// a value after `return`/`=`/`(`/`[`/`,`/`{`/`;`, confirmed by a `{` or `(`
+// after the balanced close (parser-aligned with `parse_type_argument_postfix`).
+// The angle brackets must stay tight (`List<int>`); the struct-literal body
+// wrapping onto its own line is the formatter's separate block behavior and is
+// not what SFN-405 concerns.
+test "fmt generic: struct literal type args in return position stay tight" ![io] {
+    let src = "fn make() -> List<int> {\n    return List<int> { items: [] };\n}\n";
+    let out = format_source(src);
+    assert _contains(out, "return List<int> {");
+    assert _contains(out, "List < int >") == false;
+}
+
+test "fmt generic: struct literal type args in return position is idempotent" ![io] {
+    let src = "fn make() -> List<int> {\n    return List<int> { items: [] };\n}\n";
+    let once = format_source(src);
+    let twice = format_source(once);
+    assert once == twice;
+}
+
+test "fmt generic: struct literal type args in let position stay tight" ![io] {
+    let src = "fn make() -> int {\n    let l = List<int> { items: [] };\n    return 0;\n}\n";
+    let out = format_source(src);
+    assert _contains(out, "let l = List<int> {");
+    assert _contains(out, "List < int >") == false;
+}
+
+test "fmt generic: turbofish call type args in expression position stay tight" ![io] {
+    let src = "fn use() -> int {\n    let x = id<int>(41);\n    return x;\n}\n";
+    let out = format_source(src);
+    assert _contains(out, "let x = id<int>(41);");
+    assert _contains(out, "id < int >") == false;
+}
+
+// ── Genuine comparisons in expression position are NOT struct literals ─
+test "fmt generic: chained comparison in return position keeps spaces" ![io] {
+    let src = "fn cmp() -> boolean {\n    let a = 1;\n    let b = 2;\n    let c = 3;\n    return a < b > c;\n}\n";
+    let out = format_source(src);
+    assert _contains(out, "a < b > c");
+    assert _contains(out, "a<b>c") == false;
+}
+
+test "fmt generic: comparison as call argument keeps spaces" ![io] {
+    let src = "fn cmp(a: int, b: int) -> boolean {\n    return check(a < b);\n}\n";
+    let out = format_source(src);
+    assert _contains(out, "check(a < b)");
+    assert _contains(out, "check(a<b)") == false;
+}
+
+// Nested type args expose the glued `>>` close in expression position.
+test "fmt generic: nested type args in return position stay tight" ![io] {
+    let src = "fn make() -> int {\n    return List<Map<int, string>> { items: [] };\n}\n";
+    let out = format_source(src);
+    assert _contains(out, "List<Map<int, string>> {");
+    assert _contains(out, "Map < int") == false;
+    assert _contains(out, "> >") == false;
+}
+
+// Turbofish after a `,` exercises the separator-position candidacy branch.
+test "fmt generic: turbofish call as later call argument stays tight" ![io] {
+    let src = "fn use() -> int {\n    return pick(0, id<int>(41));\n}\n";
+    let out = format_source(src);
+    assert _contains(out, "id<int>(41)");
+    assert _contains(out, "id < int >") == false;
+}

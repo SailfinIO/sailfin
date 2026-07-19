@@ -3,7 +3,7 @@ struct List<T> {
     items: T[];
 
     fn new() -> List<T> {
-        return List < T > {
+        return List<T> {
             items: []
         };
     }

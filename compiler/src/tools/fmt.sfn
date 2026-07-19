@@ -680,6 +680,44 @@ fn _is_decl_site_generic_open(fmt_tokens: FmtToken[], i: int) -> boolean {
     return false;
 }
 
+// Is the `<` at index `i` an outer generic open in *expression* position —
+// a typed struct literal (`List<T> { … }`) or a turbofish call
+// (`id<int>(…)`)? Unlike a type-annotation site, the `<` here follows a value
+// that sits at the start of a fresh expression: after `return`, `=`, `(`,
+// `[`, `,`, `{`, or `;`. The candidacy is confirmed only when the balanced
+// close is followed by `{` or `(` (see `_expr_generic_has_call_suffix`), so a
+// genuine comparison (`a < b > c`, `f(a<b>, c)`) is never mistaken for a type
+// argument list — mirroring the parser's `parse_type_argument_postfix`, which
+// forms these generics only before a `{` or `(`.
+fn _is_expr_generic_open_candidate(fmt_tokens: FmtToken[], i: int) -> boolean {
+    if i < 2 { return false; }
+    if !strings_equal(fmt_tokens[i].role, "operator") { return false; }
+    if !strings_equal(fmt_tokens[i].token.lexeme, "<") { return false; }
+    if !strings_equal(fmt_tokens[i - 1].role, "value") { return false; }
+    let prev2 = fmt_tokens[i - 2];
+    if strings_equal(prev2.role, "assign") { return true; }
+    if strings_equal(prev2.role, "paren_open") { return true; }
+    if strings_equal(prev2.role, "bracket_open") { return true; }
+    if strings_equal(prev2.role, "separator") { return true; }
+    if strings_equal(prev2.role, "block_open") { return true; }
+    if strings_equal(prev2.role, "semicolon") { return true; }
+    if strings_equal(prev2.token.lexeme, "return") { return true; }
+    return false;
+}
+
+// An expression-position generic open is only a type-argument list when the
+// matching close is immediately followed by `{` (struct literal) or `(`
+// (turbofish call). Any other successor signals a comparison the scan happened
+// to balance, so it must stay an operator.
+fn _expr_generic_has_call_suffix(fmt_tokens: FmtToken[], close_idx: int) -> boolean {
+    let next_idx = close_idx + 1;
+    if next_idx >= fmt_tokens.length { return false; }
+    let role = fmt_tokens[next_idx].role;
+    if strings_equal(role, "block_open") { return true; }
+    if strings_equal(role, "paren_open") { return true; }
+    return false;
+}
+
 fn _reclassify_generics(fmt_tokens: FmtToken[]) -> FmtToken[] {
     let mut toks = fmt_tokens;
     let mut i = 0;
@@ -692,6 +730,16 @@ fn _reclassify_generics(fmt_tokens: FmtToken[]) -> FmtToken[] {
                 toks = _apply_generic_roles(toks, i, match_end);
                 i = match_end + 1;
                 continue;
+            }
+        }
+        if _is_expr_generic_open_candidate(toks, i) {
+            let match_end = _scan_generic(toks, i, false);
+            if match_end > i {
+                if _expr_generic_has_call_suffix(toks, match_end) {
+                    toks = _apply_generic_roles(toks, i, match_end);
+                    i = match_end + 1;
+                    continue;
+                }
             }
         }
         i += 1;
