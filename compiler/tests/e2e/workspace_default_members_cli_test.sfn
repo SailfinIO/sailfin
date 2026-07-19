@@ -1,0 +1,155 @@
+// End-to-end coverage for SFEP-0051 Phase 5 workspace default targets.
+// Bare `sfn build` and `sfn test` invocations run with the fixture workspace
+// as their child cwd, selecting `[workspace].default-members` without passing
+// a positional path or `-p`.
+import { find, split } from "sfn/strings";
+import { clean_runner_env, nested_runner_scratch, with_tmp_dir } from "sfn/test";
+
+fn _sfn_bin() -> string ![io] {
+    let configured = env.get("SAILFIN_BIN");
+    if configured.length > 0 { return configured; }
+    return "build/bin/sfn";
+}
+
+fn _first_line(text: string) -> string {
+    let lines = split(text, "\n");
+    if lines.length == 0 { return text; }
+    return lines[0];
+}
+
+fn _sfn_bin_abs() -> string ![io] {
+    let bin = _sfn_bin();
+    if bin.length > 0 && bin[0] == "/" { return bin; }
+    let exit = process.run_capture(["pwd"], clean_runner_env(nested_runner_scratch("workspace-default-pwd")));
+    let out = process.capture_take_stdout();
+    let _err = process.capture_take_stderr();
+    if exit != 0 { return bin; }
+    return _first_line(out) + "/" + bin;
+}
+
+fn _member(root: string, dir: string, name: string, main_source: string, test_source: string) -> void ![io] {
+    fs.createDirectory(root + "/" + dir + "/src", true);
+    fs.createDirectory(root + "/" + dir + "/tests", true);
+    fs.writeFile(root + "/" + dir + "/capsule.toml", "[capsule]\n"
+        + "name = \"fixture/"
+        + name
+        + "\"\n"
+        + "version = \"0.1.0\"\n"
+        + "kind = \"binary\"\n\n"
+        + "[build]\nentry = \"src/main.sfn\"\n");
+    fs.writeFile(root + "/" + dir + "/src/main.sfn", main_source);
+    fs.writeFile(root + "/" + dir + "/tests/" + name + "_test.sfn", test_source);
+}
+
+fn _write_workspace(root: string, defaults: string) -> void ![io] {
+    let mut text = "[workspace]\n"
+        + "members = [\"bad-test\", \"good\", \"bad-build\", \"late\", \"omitted\"]\n";
+    if defaults.length > 0 {
+        text = text + "default-members = " + defaults + "\n";
+    }
+    fs.writeFile(root + "/workspace.toml", text);
+}
+
+fn _make_fixture(root: string, defaults: string) -> void ![io] {
+    _write_workspace(root, defaults);
+    let good_main = "fn main() -> int { return 0; }\n";
+    let good_test = "test \"passes\" { assert true; }\n";
+    _member(root, "bad-test", "bad-test", good_main, "test \"fails\" { assert false; }\n");
+    _member(root, "good", "good", good_main, good_test);
+    _member(root, "bad-build", "bad-build", "fn main( {\n", good_test);
+    _member(root, "late", "late", good_main, good_test);
+    _member(root, "omitted", "omitted", "fn main( {\n", "test \"omitted failure\" { assert false; }\n");
+}
+
+fn _runner_env(label: string) -> string[] ![io] {
+    return clean_runner_env(nested_runner_scratch(label));
+}
+
+test "workspace defaults: bare build and test select only default members" ![io] {
+    let sfn = _sfn_bin_abs();
+    let exit = with_tmp_dir(fn (dir: string) -> int {
+        _make_fixture(dir, "[\"good\"]");
+        let build_rc = process.run_capture_cwd([sfn, "build"], _runner_env("workspace-default-build"), dir);
+        let build_out = process.capture_take_stdout();
+        let build_err = process.capture_take_stderr();
+        assert build_rc == 0;
+        assert find(build_out + build_err, "sfn build: member fixture/good (good)", 0) >= 0;
+        assert find(build_out + build_err, "fixture/omitted", 0) < 0;
+        assert fs.exists(dir + "/build/capsules/fixture/good/bin/good");
+
+        let test_rc = process.run_capture_cwd([sfn, "test", "--jobs", "1", "--no-test-cache"], _runner_env("workspace-default-test"), dir);
+        let test_out = process.capture_take_stdout();
+        let test_err = process.capture_take_stderr();
+        assert test_rc == 0;
+        assert find(test_out + test_err, "fixture/good", 0) >= 0;
+        assert find(test_out + test_err, "fixture/omitted", 0) < 0;
+        return 0;
+    });
+    assert exit == 0;
+}
+
+test "workspace defaults: build and test aggregate failures and continue" ![io] {
+    let sfn = _sfn_bin_abs();
+    let exit = with_tmp_dir(fn (dir: string) -> int {
+        _make_fixture(dir, "[\"bad-build\", \"late\"]");
+        let build_rc = process.run_capture_cwd([sfn, "build"], _runner_env("workspace-aggregate-build"), dir);
+        let build_out = process.capture_take_stdout();
+        let build_err = process.capture_take_stderr();
+        assert build_rc != 0;
+        assert find(build_out + build_err, "fixture/bad-build", 0) >= 0;
+        assert find(build_out + build_err, "fixture/late", 0) >= 0;
+        assert fs.exists(dir + "/build/capsules/fixture/late/bin/late");
+
+        _write_workspace(dir, "[\"bad-test\", \"good\"]");
+        let test_rc = process.run_capture_cwd([sfn, "test", "--jobs", "1", "--no-test-cache"], _runner_env("workspace-aggregate-test"), dir);
+        let test_out = process.capture_take_stdout();
+        let test_err = process.capture_take_stderr();
+        assert test_rc != 0;
+        assert find(test_out + test_err, "fixture/bad-test", 0) >= 0;
+        assert find(test_out + test_err, "fixture/good", 0) >= 0;
+        return 0;
+    });
+    assert exit == 0;
+}
+
+test "workspace defaults: undeclared selects all and empty glob stays empty" ![io] {
+    let sfn = _sfn_bin_abs();
+    let exit = with_tmp_dir(fn (dir: string) -> int {
+        _make_fixture(dir, "");
+        let all_rc = process.run_capture_cwd([sfn, "test", "--jobs", "1", "--no-test-cache"], _runner_env("workspace-all-test"), dir);
+        let all_out = process.capture_take_stdout();
+        let all_err = process.capture_take_stderr();
+        assert all_rc != 0;
+        assert find(all_out + all_err, "fixture/omitted", 0) >= 0;
+
+        _write_workspace(dir, "[\"missing/*\"]");
+        let empty_build_rc = process.run_capture_cwd([sfn, "build"], _runner_env("workspace-empty-build"), dir);
+        let empty_build_out = process.capture_take_stdout();
+        let empty_build_err = process.capture_take_stderr();
+        assert empty_build_rc == 0;
+        assert find(empty_build_out + empty_build_err, "matched no workspace member", 0) >= 0;
+        let empty_test_rc = process.run_capture_cwd([sfn, "test", "--jobs", "1"], _runner_env("workspace-empty-test"), dir);
+        let empty_test_out = process.capture_take_stdout();
+        let empty_test_err = process.capture_take_stderr();
+        assert empty_test_rc == 0;
+        assert find(empty_test_out + empty_test_err, "matched no workspace member", 0) >= 0;
+        return 0;
+    });
+    assert exit == 0;
+}
+
+test "workspace defaults: build and test help describe bare-root selection" ![io] {
+    let sfn = _sfn_bin_abs();
+    let build_rc = process.run_capture([sfn, "build", "--help"], _runner_env("workspace-help-build"));
+    let build_out = process.capture_take_stdout();
+    let build_err = process.capture_take_stderr();
+    assert build_rc == 2;
+    assert find(build_out + build_err, "workspace root", 0) >= 0;
+    assert find(build_out + build_err, "default-members", 0) >= 0;
+    let test_rc = process.run_capture([sfn, "test", "--help"], _runner_env("workspace-help-test"));
+    let test_out = process.capture_take_stdout();
+    let test_err = process.capture_take_stderr();
+    assert test_rc == 2;
+    assert find(test_out + test_err, "workspace root", 0) >= 0;
+    assert find(test_out + test_err, "default-members", 0) >= 0;
+}

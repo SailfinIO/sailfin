@@ -62,6 +62,7 @@ import {
 import {
     ResolverConsumer,
     discover_workspace_root,
+    load_workspace_default_members,
     prepare_project_capsules,
     workspace_capability_gate
 } from "../../capsule_resolver";
@@ -78,7 +79,7 @@ import { toolchain_gate_or_dispatch } from "./toolchain";
 // that accepts zero tokens (because `-p <capsule>` is the alternative to
 // a positional source file).
 fn command_def() -> Command {
-    let mut cmd: Command = command("build", "Compile a Sailfin source file or capsule to a native binary");
+    let mut cmd: Command = command("build", "Compile a source, capsule, or workspace default members to native binaries");
     cmd = with_flag(cmd, flag_value_short("o", "o", "Write the output binary to this path"));
     cmd = with_flag(cmd, flag_value_short("p", "p", "Build the capsule rooted at this path"));
     cmd = with_flag(cmd, flag("no-cache", "Disable the build cache for this invocation"));
@@ -88,8 +89,13 @@ fn command_def() -> Command {
     cmd = with_flag(cmd, flag_value("work-dir", "Virtualize intermediate build artifacts under this directory"));
     cmd = with_flag(cmd, flag("check-determinism", "Build twice and compare cache keys + binary sha256"));
     cmd = with_flag(cmd, flag("skip-toolchain-check", "Bypass the [toolchain] pin check for this invocation"));
-    cmd = with_arg(cmd, arg_variadic("path", "Sailfin source file to build (omit when using -p)"));
+    cmd = with_arg(cmd, arg_variadic("path", "Source file to build (omit at a workspace root to build default members)"));
     return cmd;
+}
+
+fn _print_build_usage() ![io] {
+    print("usage: sfn build [-o OUTPUT] [-p PATH] [--no-cache] [--clean] [--cache-trace] [--json] [--work-dir DIR] [--check-determinism] [<file.sfn> | -p <capsule-path>]");
+    print("       with no target at a workspace root, builds [workspace].default-members (or all members)");
 }
 
 // Reproduce the legacy `_legacy_dispatch_build` body against typed matches.
@@ -97,7 +103,7 @@ fn command_def() -> Command {
 // The `runtime_root` empty→"runtime" fallback is applied here (not in
 // `parse_driver_prefix`) because it is a filesystem probe, not argv parsing.
 fn run(matches: Matches, ctx: CliContext) -> int ![clock, io, net] {
-    let mut out_path: string = get_or(matches, "o", "");
+    let out_path: string = get_or(matches, "o", "");
     let capsule_path: string = get_or(matches, "p", "");
     let no_cache_flag: boolean = has_flag(matches, "no-cache");
     let clean_flag: boolean = has_flag(matches, "clean");
@@ -108,15 +114,47 @@ fn run(matches: Matches, ctx: CliContext) -> int ![clock, io, net] {
     let _build_positionals: string[] = positionals(matches, "path");
     let mut input_path: string = "";
     if _build_positionals.length > 1 {
-        print("usage: sfn build [-o OUTPUT] [-p PATH] [--no-cache] [--clean] [--cache-trace] [--json] [--work-dir DIR] [--check-determinism] (<file.sfn> | -p <capsule-path>)");
+        _print_build_usage();
         return 2;
     }
     if _build_positionals.length == 1 { input_path = _build_positionals[0]; }
 
     let mut _tc_hint: string = capsule_path;
     if _tc_hint.length == 0 { _tc_hint = input_path; }
+    if _tc_hint.length == 0 { _tc_hint = "."; }
     let _tc = toolchain_gate_or_dispatch(_tc_hint, ctx, has_flag(matches, "skip-toolchain-check"));
     if _tc != 0 { return _tc; }
+
+    if capsule_path.length == 0 && input_path.length == 0 {
+        let workspace_root = discover_workspace_root(".");
+        if workspace_root.length == 0 {
+            _print_build_usage();
+            return 2;
+        }
+        let members = load_workspace_default_members(workspace_root);
+        let mut aggregate_rc: int = 0;
+        let mut mi: int = 0;
+        loop {
+            if mi >= members.length { break; }
+            let member = members[mi];
+            print("sfn build: member " + member.name + " (" + member.member_path
+                + ")");
+            let member_rc = _run_single_build(workspace_root + "/" + member.member_path, "", out_path, no_cache_flag, clean_flag, cache_trace_flag, json_flag, work_dir, check_determinism_flag, ctx);
+            if member_rc != 0 && aggregate_rc == 0 { aggregate_rc = member_rc; }
+            mi += 1;
+        }
+        return aggregate_rc;
+    }
+
+    return _run_single_build(capsule_path, input_path, out_path, no_cache_flag, clean_flag, cache_trace_flag, json_flag, work_dir, check_determinism_flag, ctx);
+}
+
+// Run the established single-file / single-capsule build pipeline once. Bare
+// workspace builds call this for each selected default member, while explicit
+// `-p` and positional invocations retain their one-call path.
+fn _run_single_build(capsule_path: string, input_path_arg: string, out_path_arg: string, no_cache_flag: boolean, clean_flag: boolean, cache_trace_flag: boolean, json_flag: boolean, work_dir: string, check_determinism_flag: boolean, ctx: CliContext) -> int ![clock, io, net] {
+    let mut input_path: string = input_path_arg;
+    let mut out_path: string = out_path_arg;
 
     let binary_dir: string = ctx.binary_dir;
     let mut runtime_root: string = ctx.runtime_root;
@@ -173,7 +211,7 @@ fn run(matches: Matches, ctx: CliContext) -> int ![clock, io, net] {
     // for a positional build → global default root.
     cache_config.capsule_name = cap_capsule_name;
     if input_path.length == 0 {
-        print("usage: sfn build [-o OUTPUT] [-p PATH] [--no-cache] [--clean] [--cache-trace] [--json] [--work-dir DIR] [--check-determinism] (<file.sfn> | -p <capsule-path>)");
+        _print_build_usage();
         return 2;
     }
 

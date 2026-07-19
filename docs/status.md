@@ -140,6 +140,10 @@ here.
   while unresolved specs still fall back to the user capsule cache. By-name
   and relative imports of a workspace capsule converge to one mangled symbol
   (#873).
+- **Workspace default targets.** At a workspace root, bare `sfn build` and
+  `sfn test` fan out over `[workspace].default-members`; when the field is
+  absent they target every member. Each member has distinguishable output and
+  the command fails if any selected member fails (SFEP-0051 Phase 5, SFN-422).
 - **Build cache.** Content-addressed cache defaulting to a shared per-user root
   (`$XDG_CACHE_HOME/sailfin/v2` or `$HOME/.cache/sailfin/v2`, schema-suffixed;
   `$SAILFIN_BUILD_CACHE_DIR` override; in-tree `build/cache/v2` fallback when
