@@ -47,6 +47,7 @@ import {
     check_struct_methods,
     check_type_parameters,
     check_unanalyzable_raw,
+    check_uninferable_generic_constructor,
     classify_declared_primitive,
     classify_fn_cast,
     clone_bindings,
@@ -204,9 +205,10 @@ fn typecheck_diagnostics_full(program: Program, imported_interfaces: Statement[]
     // duplicate-symbol diagnostics already came from `collect_top_level_-
     // symbols` above; this scope is resolution-only.
     let resolution_scope = top_level.symbols.concat(_collect_imported_call_symbols(program)).concat(_symbols_from_global_names(prelude_globals));
-    let scoped_diagnostics = check_program_scopes(program, combined_interfaces, local_imports, resolution_scope);
-
     let local_structs = collect_struct_definitions(program);
+    let generic_struct_names = _generic_struct_names(local_structs);
+    let scoped_diagnostics = check_program_scopes(program, combined_interfaces, local_imports, resolution_scope, generic_struct_names);
+
     let instantiation_diagnostics = check_generic_instantiation_sites(program, combined_interfaces, local_structs);
 
     // Merge diagnostics using concat (avoids loop-with-if-break pattern that
@@ -226,6 +228,19 @@ fn collect_struct_definitions(program: Program) -> Statement[] {
         }
     }
     return structs;
+}
+
+// The names of every top-level generic struct (`type_parameters.length > 0`),
+// threaded through the walk so `check_uninferable_generic_constructor` (E0833,
+// SFN-404) can tell a generic-struct static call from an enum/namespace access.
+fn _generic_struct_names(structs: Statement[]) -> string[] {
+    let mut names: string[] = [];
+    for statement in structs {
+        if statement.type_parameters.length > 0 {
+            names.push(statement.name);
+        }
+    }
+    return names;
 }
 
 // E0820 enforcement at generic instantiation sites (SFEP-0038 §3.2b,
@@ -442,10 +457,15 @@ struct TypeckCtx {
     scope_start: int;
     enclosing_return_type: TypeAnnotation?;
     expected_type: TypeAnnotation?;
+    // Names of every top-level generic struct (`type_parameters.length > 0`),
+    // so `check_uninferable_generic_constructor` (E0833, SFN-404) can tell a
+    // generic-struct static call from an enum/namespace access at any body
+    // depth. Resolution-only; never mutated during the walk.
+    generic_struct_names: string[];
 }
 
 // Root context for a walk: top-level scope, no enclosing return type.
-fn make_typeck_ctx(bindings: SymbolEntry[], imports: ImportSymbolTable, interfaces: Statement[], top_level: SymbolEntry[], is_top_level: boolean) -> TypeckCtx {
+fn make_typeck_ctx(bindings: SymbolEntry[], imports: ImportSymbolTable, interfaces: Statement[], top_level: SymbolEntry[], is_top_level: boolean, generic_struct_names: string[]) -> TypeckCtx {
     return TypeckCtx {
         bindings: bindings,
         imports: imports,
@@ -455,7 +475,8 @@ fn make_typeck_ctx(bindings: SymbolEntry[], imports: ImportSymbolTable, interfac
         in_function_body: false,
         scope_start: 0,
         enclosing_return_type: null,
-        expected_type: null
+        expected_type: null,
+        generic_struct_names: generic_struct_names
     };
 }
 
@@ -474,7 +495,8 @@ fn ctx_with_bindings(ctx: TypeckCtx, bindings: SymbolEntry[], scope_start: int) 
         in_function_body: ctx.in_function_body,
         scope_start: scope_start,
         enclosing_return_type: ctx.enclosing_return_type,
-        expected_type: null
+        expected_type: null,
+        generic_struct_names: ctx.generic_struct_names
     };
 }
 
@@ -491,16 +513,17 @@ fn ctx_enter_body(ctx: TypeckCtx, bindings: SymbolEntry[], return_type: TypeAnno
         in_function_body: true,
         scope_start: 0,
         enclosing_return_type: return_type,
-        expected_type: null
+        expected_type: null,
+        generic_struct_names: ctx.generic_struct_names
     };
 }
 
-fn check_program_scopes(program: Program, interfaces: Statement[], imports: ImportSymbolTable, top_level: SymbolEntry[]) -> Diagnostic[] {
+fn check_program_scopes(program: Program, interfaces: Statement[], imports: ImportSymbolTable, top_level: SymbolEntry[], generic_struct_names: string[]) -> Diagnostic[] {
     let mut bindings: SymbolEntry[] = [];
     let mut diagnostics: Diagnostic[] = [];
 
     for statement in program.statements {
-        let result = check_statement(statement, make_typeck_ctx(bindings, imports, interfaces, top_level, true));
+        let result = check_statement(statement, make_typeck_ctx(bindings, imports, interfaces, top_level, true, generic_struct_names));
         bindings = result.bindings;
         let mut _ci: int = 0;
         loop {
@@ -569,9 +592,10 @@ fn check_statement(statement: Statement, ctx: TypeckCtx) -> ScopeResult {
         let array_diags = check_malformed_array_annotation(statement.type_annotation, statement.name, statement.span);
         let intersection_diags = check_intersection_value_type_annotation(statement.type_annotation, statement.name, statement.span);
         let object_literal_diags = check_object_literal_target(statement.initializer, statement.type_annotation, statement.name, statement.span, top_level);
+        let uninferable_ctor_diags = check_uninferable_generic_constructor(statement, ctx.generic_struct_names);
         return ScopeResult {
             bindings: registration.bindings,
-            diagnostics: registration.diagnostics.concat(walk_diags).concat(annotation_diags).concat(array_diags).concat(intersection_diags).concat(object_literal_diags)
+            diagnostics: registration.diagnostics.concat(walk_diags).concat(annotation_diags).concat(array_diags).concat(intersection_diags).concat(object_literal_diags).concat(uninferable_ctor_diags)
         };
     }
     if statement.variant == "FunctionDeclaration" {
@@ -2229,7 +2253,8 @@ fn walk_statement_expressions(statement: Statement, ctx: TypeckCtx) -> Diagnosti
         // The lambda-body `let` twin of the primary let-site E0828 (#1905):
         // classify a bare object-literal initializer against its annotation.
         let object_literal_diags = check_object_literal_target(statement.initializer, statement.type_annotation, statement.name, statement.span, ctx.top_level);
-        return init_diags.concat(annotation_diags).concat(array_diags2).concat(intersection_diags).concat(object_literal_diags);
+        let uninferable_ctor_diags = check_uninferable_generic_constructor(statement, ctx.generic_struct_names);
+        return init_diags.concat(annotation_diags).concat(array_diags2).concat(intersection_diags).concat(object_literal_diags).concat(uninferable_ctor_diags);
     }
     if statement.variant == "IfStatement" {
         let mut diagnostics = walk_expression(statement.condition, ctx);

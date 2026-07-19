@@ -38,7 +38,8 @@ fn _no_bindings() -> SymbolEntry[] {
 // `ctx.bindings`/`ctx.imports` — both empty here.
 fn _walk_ctx() -> TypeckCtx {
     let no_interfaces: Statement[] = [];
-    return make_typeck_ctx(_no_bindings(), empty_import_symbols(), no_interfaces, _no_bindings(), false);
+    let no_generic_structs: string[] = [];
+    return make_typeck_ctx(_no_bindings(), empty_import_symbols(), no_interfaces, _no_bindings(), false, no_generic_structs);
 }
 
 fn _has_code(diags: Diagnostic[], code: string) -> boolean {

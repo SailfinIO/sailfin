@@ -11,6 +11,8 @@
 //
 // Mirrors check_build_agree_module_global_test.sfn's process/env/scratch
 // hygiene for the parallel test pool (`.claude/rules/no-bash-e2e.md`).
+import { find } from "sfn/strings";
+
 fn _sfn_bin() -> string ![io] {
     let configured = env.get("SAILFIN_BIN");
     if configured.length > 0 { return configured; }
@@ -75,4 +77,27 @@ test "check/build agree: int+float arithmetic mix is rejected by check (E0306, S
 
     // Frontend now rejects — previously this checked green (E0306 gap).
     assert check_exit != 0;
+}
+
+test "check/build agree: uninferable generic static constructor is rejected by check (E0833, SFN-404)" ![io] {
+    // `let n = List.new()` with no binding annotation and no argument to infer
+    // `T` from previously checked green and only died at LLVM lowering with a
+    // raw "cannot resolve return type for call to `List.new`" fatal. `sfn
+    // check` alone now rejects it (E0833), so the raw lowering fatal is no
+    // longer reachable for this case.
+    let source = "struct List<T> { items: T[]; } "
+        + "fn main() -> int { let n = List.new(); return 0; }";
+    let srcpath = _write_scratch("sfn-404-e0833.sfn", source);
+
+    let check_exit = process.run_capture([_sfn_bin(), "check", srcpath], _child_env());
+    let out = process.capture_take_stdout();
+    let err = process.capture_take_stderr();
+
+    if fs.exists(srcpath) { fs.deleteFile(srcpath); }
+
+    // Frontend now rejects — previously this checked green (E0833 gap).
+    assert check_exit != 0;
+    // The clean diagnostic, not the raw lowering fatal, is what surfaces.
+    assert find(out + err, "E0833", 0) >= 0;
+    assert find(out + err, "cannot resolve return type", 0) < 0;
 }
