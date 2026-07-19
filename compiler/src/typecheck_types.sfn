@@ -1232,6 +1232,77 @@ fn make_spawn_handle_into_empty_array_diagnostic(name: string, span: SourceSpan?
     };
 }
 
+// SFN-404: reject a generic-struct static constructor whose instantiation is
+// provably uninferable (`let n = List.new()`) at check time. The backend
+// monomorphizer mangles a static-call receiver (`List.new()` -> `List$int.new()`)
+// only when a same-line `List<..>` binding annotation names the instantiation;
+// with none it leaves `List` unmangled and stage-6 lowering dies with a raw
+// "cannot resolve return type for call to `List.new`" fatal (the #1389
+// check-green-not-equal-build-green class). Mirror that non-firing condition as
+// a silent-unless-certain frontend rejection: fire only when the receiver is a
+// known local generic struct, the call has zero arguments (any argument might
+// bind `T`, and the checker has no expression-type inferencer, #829, to prove
+// otherwise), and the binding annotation does not spell `Struct<..>`.
+fn check_uninferable_generic_constructor(statement: Statement, generic_struct_names: string[]) -> Diagnostic[] {
+    if !strings_equal(statement.variant, "VariableDeclaration") { return []; }
+    let init = statement.initializer;
+    if init == null { return []; }
+    if !strings_equal(init.variant, "Call") { return []; }
+    if init.arguments.length > 0 { return []; }
+    // Turbofish `List.new<int>()` (SFN-329) expresses instantiation intent; it
+    // is inert in lowering but out of scope here, so do not misdirect on it.
+    if init.type_arguments.length > 0 { return []; }
+    let callee = init.callee;
+    if !strings_equal(callee.variant, "Member") { return []; }
+    let object = callee.object;
+    if !strings_equal(object.variant, "Identifier") { return []; }
+    let struct_name = object.name;
+    if !contains_string(generic_struct_names, struct_name) { return []; }
+    if _annotation_instantiates_struct(statement.type_annotation, struct_name) {
+        return [];
+    }
+    return [make_uninferable_generic_constructor_diagnostic(struct_name, callee.member, callee.span)];
+}
+
+// True when `annotation` spells a generic instantiation `Struct<..>` of
+// `struct_name` in its text, mirroring the monomorphizer's same-line textual
+// match so the frontend stays silent exactly when the backend would mangle the
+// receiver. A false negative (a contrived `OtherStruct<..>` whose name ends in
+// `struct_name`) is safer than a false positive under the silent-unless-certain
+// rule.
+fn _annotation_instantiates_struct(annotation: TypeAnnotation?, struct_name: string) -> boolean {
+    if annotation == null { return false; }
+    let needle = struct_name + "<";
+    let at = index_of(annotation.text, needle);
+    if at < 0 { return false; }
+    // Require a closing `>` after the `<` so a malformed spelling never counts.
+    let rest = slice_text(annotation.text, at + needle.length, annotation.text.length);
+    return index_of(rest, ">") >= 0;
+}
+
+fn make_uninferable_generic_constructor_diagnostic(struct_name: string, member: string, span: SourceSpan?) -> Diagnostic {
+    let message = "cannot infer the generic instantiation of `" + struct_name
+        + "` for the static call `"
+        + struct_name
+        + "."
+        + member
+        + "()`: there is no binding type annotation and no argument to infer the type parameter from. Annotate the binding type, e.g. `let n: "
+        + struct_name
+        + "<int> = "
+        + struct_name
+        + "."
+        + member
+        + "()`.";
+    return Diagnostic {
+        code: "E0833",
+        severity: "error",
+        message: message,
+        file_path: "",
+        primary: token_from_name(member, span),
+        suggestion: null
+    };
+}
+
 fn extract_generic_argument_block(annotation_text: string) -> string? {
     let trimmed = trim_text(annotation_text);
     let mut index: int = 0;

@@ -1,0 +1,96 @@
+// Unit tests for SFN-404: a generic-struct static constructor whose
+// instantiation type is unknowable (`let n = List.new()` — no binding
+// annotation, no argument to infer `T` from) must be rejected at `sfn check`
+// with a clean `E0833` diagnostic instead of sailing through check and dying
+// at LLVM lowering with a raw "cannot resolve return type" fatal (the #1389
+// check-green-not-equal-build-green class). The check is silent-unless-certain:
+// it fires only when the instantiation is provably uninferable, mirroring the
+// backend monomorphizer's non-firing condition. Sibling of
+// typecheck_frontend_rejection_test.sfn (SFN-385).
+import { parse_program } from "../../src/parser/mod";
+import { typecheck_diagnostics } from "../../src/typecheck";
+import { Diagnostic } from "../../src/typecheck_types";
+
+fn _has_code(diagnostics: Diagnostic[], code: string) -> boolean {
+    let mut i: int = 0;
+    loop {
+        if i >= diagnostics.length { break; }
+        if strings_equal(diagnostics[i].code, code) { return true; }
+        i += 1;
+    }
+    return false;
+}
+
+// -------------------------------------------------------------------
+// Fires: provably uninferable instantiation.
+// -------------------------------------------------------------------
+test "uninferable-ctor: rejects unannotated generic static constructor (E0833)" ![io] {
+    let source = "struct List<T> { items: T[]; } "
+        + "fn main() -> int { let n = List.new(); return 0; }";
+    let program = parse_program(source);
+    let diagnostics = typecheck_diagnostics(program);
+    assert _has_code(diagnostics, "E0833");
+}
+
+// The check must fire inside a lambda body too — that path routes through
+// `walk_statement_expressions`, the twin of the primary `check_statement` site.
+test "uninferable-ctor: rejects unannotated generic static constructor in a lambda body (E0833)" ![io] {
+    let source = "struct List<T> { items: T[]; } "
+        + "fn main() -> int { let f = fn() -> int { let n = List.new(); return 0; }; return 0; }";
+    let program = parse_program(source);
+    let diagnostics = typecheck_diagnostics(program);
+    assert _has_code(diagnostics, "E0833");
+}
+
+// -------------------------------------------------------------------
+// Stays silent: the binding annotation names the instantiation.
+// -------------------------------------------------------------------
+test "uninferable-ctor: accepts annotated generic static constructor" ![io] {
+    let source = "struct List<T> { items: T[]; } "
+        + "fn main() -> int { let n: List<int> = List.new(); return 0; }";
+    let program = parse_program(source);
+    let diagnostics = typecheck_diagnostics(program);
+    assert ! _has_code(diagnostics, "E0833");
+}
+
+// A union annotation still spells `List<int>`, so the backend mangles the
+// receiver — stay silent.
+test "uninferable-ctor: accepts union annotation that spells the instantiation" ![io] {
+    let source = "struct List<T> { items: T[]; } "
+        + "fn main() -> int { let n: List<int> | null = List.new(); return 0; }";
+    let program = parse_program(source);
+    let diagnostics = typecheck_diagnostics(program);
+    assert ! _has_code(diagnostics, "E0833");
+}
+
+// -------------------------------------------------------------------
+// Stays silent (fail-open): the receiver is not a known generic struct.
+// -------------------------------------------------------------------
+test "uninferable-ctor: non-generic struct static call stays silent" ![io] {
+    let source = "struct Plain { x: int; } "
+        + "fn main() -> int { let n = Plain.make(); return 0; }";
+    let program = parse_program(source);
+    let diagnostics = typecheck_diagnostics(program);
+    assert ! _has_code(diagnostics, "E0833");
+}
+
+// An enum/namespace-style access (`Color.Red`, `env.get(...)`) whose receiver
+// is not a declared generic struct must never trip the check.
+test "uninferable-ctor: unknown receiver static call stays silent (fail-open)" ![io] {
+    let source = "fn main() -> int { let n = Color.Red(); return 0; }";
+    let program = parse_program(source);
+    let diagnostics = typecheck_diagnostics(program);
+    assert ! _has_code(diagnostics, "E0833");
+}
+
+// -------------------------------------------------------------------
+// Stays silent: an argument might bind `T` (no expression-type inferencer,
+// #829, to prove otherwise), so the check does not fire.
+// -------------------------------------------------------------------
+test "uninferable-ctor: argument-bearing generic static call stays silent" ![io] {
+    let source = "struct List<T> { items: T[]; } "
+        + "fn main() -> int { let n = List.of(1); return 0; }";
+    let program = parse_program(source);
+    let diagnostics = typecheck_diagnostics(program);
+    assert ! _has_code(diagnostics, "E0833");
+}
