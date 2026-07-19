@@ -75,11 +75,11 @@ fn _rh_descriptors_00(descriptors_in: RuntimeHelperDescriptor[]) -> RuntimeHelpe
     // aggregate ABI. The C trampoline in sailfin_runtime.c unpacks the
     // aggregate and forwards to sailfin_runtime_print_raw.
     descriptors = append_runtime_helper(descriptors, RuntimeHelperDescriptor {
-        target: "print", symbol: "sfn_print", return_type: "void", parameter_types: ["{i8*, i64}"], effects: ["io"], native_signature: "sfn_print", c_abi_return_type: null
+        target: "print", symbol: "sfn_print", return_type: "void", parameter_types: ["{i8*, i64}"], effects: ["io.console"], native_signature: "sfn_print", c_abi_return_type: null
     });
     // Raw stderr print: writes to stderr with no prefix, no decoration.
     descriptors = append_runtime_helper(descriptors, RuntimeHelperDescriptor {
-        target: "print.err", symbol: "sfn_print_err", return_type: "void", parameter_types: ["{i8*, i64}"], effects: ["io"], native_signature: "sfn_print_err", c_abi_return_type: null
+        target: "print.err", symbol: "sfn_print_err", return_type: "void", parameter_types: ["{i8*, i64}"], effects: ["io.console"], native_signature: "sfn_print_err", c_abi_return_type: null
     });
 
     // Prefixed print variants — print.err/print.warn/print.error write to
@@ -87,22 +87,22 @@ fn _rh_descriptors_00(descriptors_in: RuntimeHelperDescriptor[]) -> RuntimeHelpe
     // Compiler diagnostics should use print.err() so they do not pollute
     // stdout (LLVM IR output, program output, etc.).
     descriptors = append_runtime_helper(descriptors, RuntimeHelperDescriptor {
-        target: "print.info", symbol: "sfn_print_info", return_type: "void", parameter_types: ["{i8*, i64}"], effects: ["io"], native_signature: "sfn_print_info", c_abi_return_type: null
+        target: "print.info", symbol: "sfn_print_info", return_type: "void", parameter_types: ["{i8*, i64}"], effects: ["io.console"], native_signature: "sfn_print_info", c_abi_return_type: null
     });
     descriptors = append_runtime_helper(descriptors, RuntimeHelperDescriptor {
-        target: "print.error", symbol: "sfn_print_error", return_type: "void", parameter_types: ["{i8*, i64}"], effects: ["io"], native_signature: "sfn_print_error", c_abi_return_type: null
+        target: "print.error", symbol: "sfn_print_error", return_type: "void", parameter_types: ["{i8*, i64}"], effects: ["io.console"], native_signature: "sfn_print_error", c_abi_return_type: null
     });
     descriptors = append_runtime_helper(descriptors, RuntimeHelperDescriptor {
-        target: "print.warn", symbol: "sfn_print_warn", return_type: "void", parameter_types: ["{i8*, i64}"], effects: ["io"], native_signature: "sfn_print_warn", c_abi_return_type: null
+        target: "print.warn", symbol: "sfn_print_warn", return_type: "void", parameter_types: ["{i8*, i64}"], effects: ["io.console"], native_signature: "sfn_print_warn", c_abi_return_type: null
     });
     descriptors = append_runtime_helper(descriptors, RuntimeHelperDescriptor {
-        target: "console.info", symbol: "sfn_print", return_type: "void", parameter_types: ["{i8*, i64}"], effects: ["io"], native_signature: "sfn_print", c_abi_return_type: null
+        target: "console.info", symbol: "sfn_print", return_type: "void", parameter_types: ["{i8*, i64}"], effects: ["io.console"], native_signature: "sfn_print", c_abi_return_type: null
     });
     descriptors = append_runtime_helper(descriptors, RuntimeHelperDescriptor {
-        target: "console.log", symbol: "sfn_print", return_type: "void", parameter_types: ["{i8*, i64}"], effects: ["io"], native_signature: "sfn_print", c_abi_return_type: null
+        target: "console.log", symbol: "sfn_print", return_type: "void", parameter_types: ["{i8*, i64}"], effects: ["io.console"], native_signature: "sfn_print", c_abi_return_type: null
     });
     descriptors = append_runtime_helper(descriptors, RuntimeHelperDescriptor {
-        target: "console.error", symbol: "sfn_print_error", return_type: "void", parameter_types: ["{i8*, i64}"], effects: ["io"], native_signature: "sfn_print_error", c_abi_return_type: null
+        target: "console.error", symbol: "sfn_print_error", return_type: "void", parameter_types: ["{i8*, i64}"], effects: ["io.console"], native_signature: "sfn_print_error", c_abi_return_type: null
     });
 
     // Filesystem intrinsics
@@ -116,7 +116,7 @@ fn _rh_descriptors_00(descriptors_in: RuntimeHelperDescriptor[]) -> RuntimeHelpe
     // through `native_signature` per the `effective_symbol`
     // resolution in `rendering.sfn`.
     descriptors = append_runtime_helper(descriptors, RuntimeHelperDescriptor {
-        target: "fs.exists", symbol: "sfn_fs_exists", return_type: "i1", parameter_types: ["i8*"], effects: ["io"], native_signature: "sfn_fs_exists", c_abi_return_type: null
+        target: "fs.exists", symbol: "sfn_fs_exists", return_type: "i1", parameter_types: ["i8*"], effects: ["io.fs"], native_signature: "sfn_fs_exists", c_abi_return_type: null
     });
 
     // Arena mark / rewind. Phase 5a (`docs/proposals/archive/phase-5a-arena-reset.md`)
@@ -388,10 +388,10 @@ fn _rh_descriptors_01(descriptors_in: RuntimeHelperDescriptor[]) -> RuntimeHelpe
     // `(url, body)` POST wrapper matching this row's arity). ABI-verified,
     // link-time resolved against the already-shipped bodies.
     descriptors = append_runtime_helper(descriptors, RuntimeHelperDescriptor {
-        target: "http.get", symbol: "sfn_http_get", return_type: "i8*", parameter_types: ["i8*"], effects: ["net"], native_signature: "sfn_http_get", c_abi_return_type: null
+        target: "http.get", symbol: "sfn_http_get", return_type: "i8*", parameter_types: ["i8*"], effects: ["net.http"], native_signature: "sfn_http_get", c_abi_return_type: null
     });
     descriptors = append_runtime_helper(descriptors, RuntimeHelperDescriptor {
-        target: "http.post", symbol: "sfn_http_post2", return_type: "i8*", parameter_types: ["i8*", "i8*"], effects: ["net"], native_signature: "sfn_http_post2", c_abi_return_type: null
+        target: "http.post", symbol: "sfn_http_post2", return_type: "i8*", parameter_types: ["i8*", "i8*"], effects: ["net.http"], native_signature: "sfn_http_post2", c_abi_return_type: null
     });
 
     // Concurrency intrinsics. Sleep call sites route through the
@@ -999,37 +999,37 @@ fn _rh_descriptors_06(descriptors_in: RuntimeHelperDescriptor[]) -> RuntimeHelpe
     // `is_executable` / `symlink` rows to `sfn_fs_*` too (along with
     // `fs.exists` above), completing the fs adapter wave.
     descriptors = append_runtime_helper(descriptors, RuntimeHelperDescriptor {
-        target: "fs_read_file", symbol: "sfn_fs_read_file", return_type: "i8*", parameter_types: ["i8*"], effects: ["io"], native_signature: "sfn_fs_read_file", c_abi_return_type: null
+        target: "fs_read_file", symbol: "sfn_fs_read_file", return_type: "i8*", parameter_types: ["i8*"], effects: ["io.fs"], native_signature: "sfn_fs_read_file", c_abi_return_type: null
     });
     descriptors = append_runtime_helper(descriptors, RuntimeHelperDescriptor {
-        target: "fs.readFile", symbol: "sfn_fs_read_file", return_type: "i8*", parameter_types: ["i8*"], effects: ["io"], native_signature: "sfn_fs_read_file", c_abi_return_type: null
+        target: "fs.readFile", symbol: "sfn_fs_read_file", return_type: "i8*", parameter_types: ["i8*"], effects: ["io.fs"], native_signature: "sfn_fs_read_file", c_abi_return_type: null
     });
     descriptors = append_runtime_helper(descriptors, RuntimeHelperDescriptor {
-        target: "fs_write_file", symbol: "sfn_fs_write_file", return_type: "void", parameter_types: ["i8*", "i8*"], effects: ["io"], native_signature: "sfn_fs_write_file", c_abi_return_type: null
+        target: "fs_write_file", symbol: "sfn_fs_write_file", return_type: "void", parameter_types: ["i8*", "i8*"], effects: ["io.fs"], native_signature: "sfn_fs_write_file", c_abi_return_type: null
     });
     descriptors = append_runtime_helper(descriptors, RuntimeHelperDescriptor {
-        target: "fs.writeFile", symbol: "sfn_fs_write_file", return_type: "void", parameter_types: ["i8*", "i8*"], effects: ["io"], native_signature: "sfn_fs_write_file", c_abi_return_type: null
+        target: "fs.writeFile", symbol: "sfn_fs_write_file", return_type: "void", parameter_types: ["i8*", "i8*"], effects: ["io.fs"], native_signature: "sfn_fs_write_file", c_abi_return_type: null
     });
     descriptors = append_runtime_helper(descriptors, RuntimeHelperDescriptor {
-        target: "fs_append_file", symbol: "sfn_fs_append_file", return_type: "void", parameter_types: ["i8*", "i8*"], effects: ["io"], native_signature: "sfn_fs_append_file", c_abi_return_type: null
+        target: "fs_append_file", symbol: "sfn_fs_append_file", return_type: "void", parameter_types: ["i8*", "i8*"], effects: ["io.fs"], native_signature: "sfn_fs_append_file", c_abi_return_type: null
     });
     descriptors = append_runtime_helper(descriptors, RuntimeHelperDescriptor {
-        target: "fs.appendFile", symbol: "sfn_fs_append_file", return_type: "void", parameter_types: ["i8*", "i8*"], effects: ["io"], native_signature: "sfn_fs_append_file", c_abi_return_type: null
+        target: "fs.appendFile", symbol: "sfn_fs_append_file", return_type: "void", parameter_types: ["i8*", "i8*"], effects: ["io.fs"], native_signature: "sfn_fs_append_file", c_abi_return_type: null
     });
     descriptors = append_runtime_helper(descriptors, RuntimeHelperDescriptor {
-        target: "fs_write_lines", symbol: "sfn_fs_write_lines", return_type: "void", parameter_types: ["i8*", "{ i8**, i64, i64 }*"], effects: ["io"], native_signature: "sfn_fs_write_lines", c_abi_return_type: null
+        target: "fs_write_lines", symbol: "sfn_fs_write_lines", return_type: "void", parameter_types: ["i8*", "{ i8**, i64, i64 }*"], effects: ["io.fs"], native_signature: "sfn_fs_write_lines", c_abi_return_type: null
     });
     descriptors = append_runtime_helper(descriptors, RuntimeHelperDescriptor {
-        target: "fs.writeLines", symbol: "sfn_fs_write_lines", return_type: "void", parameter_types: ["i8*", "{ i8**, i64, i64 }*"], effects: ["io"], native_signature: "sfn_fs_write_lines", c_abi_return_type: null
+        target: "fs.writeLines", symbol: "sfn_fs_write_lines", return_type: "void", parameter_types: ["i8*", "{ i8**, i64, i64 }*"], effects: ["io.fs"], native_signature: "sfn_fs_write_lines", c_abi_return_type: null
     });
     descriptors = append_runtime_helper(descriptors, RuntimeHelperDescriptor {
-        target: "fs_list_directory", symbol: "sfn_fs_list_dir", return_type: "{ i8**, i64, i64 }*", parameter_types: ["i8*"], effects: ["io"], native_signature: "sfn_fs_list_dir", c_abi_return_type: null
+        target: "fs_list_directory", symbol: "sfn_fs_list_dir", return_type: "{ i8**, i64, i64 }*", parameter_types: ["i8*"], effects: ["io.fs"], native_signature: "sfn_fs_list_dir", c_abi_return_type: null
     });
     descriptors = append_runtime_helper(descriptors, RuntimeHelperDescriptor {
-        target: "fs.listDirectory", symbol: "sfn_fs_list_dir", return_type: "{ i8**, i64, i64 }*", parameter_types: ["i8*"], effects: ["io"], native_signature: "sfn_fs_list_dir", c_abi_return_type: null
+        target: "fs.listDirectory", symbol: "sfn_fs_list_dir", return_type: "{ i8**, i64, i64 }*", parameter_types: ["i8*"], effects: ["io.fs"], native_signature: "sfn_fs_list_dir", c_abi_return_type: null
     });
     descriptors = append_runtime_helper(descriptors, RuntimeHelperDescriptor {
-        target: "fs_delete_file", symbol: "sfn_fs_delete", return_type: "i1", parameter_types: ["i8*"], effects: ["io"], native_signature: "sfn_fs_delete", c_abi_return_type: null
+        target: "fs_delete_file", symbol: "sfn_fs_delete", return_type: "i1", parameter_types: ["i8*"], effects: ["io.fs"], native_signature: "sfn_fs_delete", c_abi_return_type: null
     });
     return descriptors;
 }
@@ -1037,19 +1037,19 @@ fn _rh_descriptors_06(descriptors_in: RuntimeHelperDescriptor[]) -> RuntimeHelpe
 fn _rh_descriptors_07(descriptors_in: RuntimeHelperDescriptor[]) -> RuntimeHelperDescriptor[] {
     let mut descriptors = descriptors_in;
     descriptors = append_runtime_helper(descriptors, RuntimeHelperDescriptor {
-        target: "fs.deleteFile", symbol: "sfn_fs_delete", return_type: "i1", parameter_types: ["i8*"], effects: ["io"], native_signature: "sfn_fs_delete", c_abi_return_type: null
+        target: "fs.deleteFile", symbol: "sfn_fs_delete", return_type: "i1", parameter_types: ["i8*"], effects: ["io.fs"], native_signature: "sfn_fs_delete", c_abi_return_type: null
     });
     descriptors = append_runtime_helper(descriptors, RuntimeHelperDescriptor {
-        target: "fs_create_directory", symbol: "sfn_fs_mkdir", return_type: "i1", parameter_types: ["i8*", "i1"], effects: ["io"], native_signature: "sfn_fs_mkdir", c_abi_return_type: null
+        target: "fs_create_directory", symbol: "sfn_fs_mkdir", return_type: "i1", parameter_types: ["i8*", "i1"], effects: ["io.fs"], native_signature: "sfn_fs_mkdir", c_abi_return_type: null
     });
     descriptors = append_runtime_helper(descriptors, RuntimeHelperDescriptor {
-        target: "fs.createDirectory", symbol: "sfn_fs_mkdir", return_type: "i1", parameter_types: ["i8*", "i1"], effects: ["io"], native_signature: "sfn_fs_mkdir", c_abi_return_type: null
+        target: "fs.createDirectory", symbol: "sfn_fs_mkdir", return_type: "i1", parameter_types: ["i8*", "i1"], effects: ["io.fs"], native_signature: "sfn_fs_mkdir", c_abi_return_type: null
     });
     descriptors = append_runtime_helper(descriptors, RuntimeHelperDescriptor {
-        target: "fs_remove_directory", symbol: "sfn_fs_rmdir", return_type: "i1", parameter_types: ["i8*"], effects: ["io"], native_signature: "sfn_fs_rmdir", c_abi_return_type: null
+        target: "fs_remove_directory", symbol: "sfn_fs_rmdir", return_type: "i1", parameter_types: ["i8*"], effects: ["io.fs"], native_signature: "sfn_fs_rmdir", c_abi_return_type: null
     });
     descriptors = append_runtime_helper(descriptors, RuntimeHelperDescriptor {
-        target: "fs.removeDirectory", symbol: "sfn_fs_rmdir", return_type: "i1", parameter_types: ["i8*"], effects: ["io"], native_signature: "sfn_fs_rmdir", c_abi_return_type: null
+        target: "fs.removeDirectory", symbol: "sfn_fs_rmdir", return_type: "i1", parameter_types: ["i8*"], effects: ["io.fs"], native_signature: "sfn_fs_rmdir", c_abi_return_type: null
     });
 
     // P5 (#366): filesystem stdlib gap-fill. Permission ops, temp-dir
@@ -1064,19 +1064,19 @@ fn _rh_descriptors_07(descriptors_in: RuntimeHelperDescriptor[]) -> RuntimeHelpe
     // symbols stay exported through the M3 window for seed-link
     // compat; fresh emission routes through `native_signature`.
     descriptors = append_runtime_helper(descriptors, RuntimeHelperDescriptor {
-        target: "fs.set_perms", symbol: "sfn_fs_set_perms", return_type: "i1", parameter_types: ["i8*", "i64"], effects: ["io"], native_signature: "sfn_fs_set_perms", c_abi_return_type: null
+        target: "fs.set_perms", symbol: "sfn_fs_set_perms", return_type: "i1", parameter_types: ["i8*", "i64"], effects: ["io.fs"], native_signature: "sfn_fs_set_perms", c_abi_return_type: null
     });
     descriptors = append_runtime_helper(descriptors, RuntimeHelperDescriptor {
-        target: "fs.get_perms", symbol: "sfn_fs_get_perms", return_type: "i64", parameter_types: ["i8*"], effects: ["io"], native_signature: "sfn_fs_get_perms", c_abi_return_type: null
+        target: "fs.get_perms", symbol: "sfn_fs_get_perms", return_type: "i64", parameter_types: ["i8*"], effects: ["io.fs"], native_signature: "sfn_fs_get_perms", c_abi_return_type: null
     });
     descriptors = append_runtime_helper(descriptors, RuntimeHelperDescriptor {
-        target: "fs.mkdtemp", symbol: "sfn_fs_mkdtemp", return_type: "i8*", parameter_types: ["i8*"], effects: ["io"], native_signature: "sfn_fs_mkdtemp", c_abi_return_type: null
+        target: "fs.mkdtemp", symbol: "sfn_fs_mkdtemp", return_type: "i8*", parameter_types: ["i8*"], effects: ["io.fs"], native_signature: "sfn_fs_mkdtemp", c_abi_return_type: null
     });
     descriptors = append_runtime_helper(descriptors, RuntimeHelperDescriptor {
-        target: "fs.is_executable", symbol: "sfn_fs_is_executable", return_type: "i1", parameter_types: ["i8*"], effects: ["io"], native_signature: "sfn_fs_is_executable", c_abi_return_type: null
+        target: "fs.is_executable", symbol: "sfn_fs_is_executable", return_type: "i1", parameter_types: ["i8*"], effects: ["io.fs"], native_signature: "sfn_fs_is_executable", c_abi_return_type: null
     });
     descriptors = append_runtime_helper(descriptors, RuntimeHelperDescriptor {
-        target: "fs.symlink", symbol: "sfn_fs_symlink", return_type: "i1", parameter_types: ["i8*", "i8*"], effects: ["io"], native_signature: "sfn_fs_symlink", c_abi_return_type: null
+        target: "fs.symlink", symbol: "sfn_fs_symlink", return_type: "i1", parameter_types: ["i8*", "i8*"], effects: ["io.fs"], native_signature: "sfn_fs_symlink", c_abi_return_type: null
     });
 
     // HTTP adapters (distinct from intrinsics for adapter infrastructure).
@@ -1086,10 +1086,10 @@ fn _rh_descriptors_07(descriptors_in: RuntimeHelperDescriptor[]) -> RuntimeHelpe
     // `native_signature` override routes calls to `sfn_http_get` /
     // `sfn_http_post2` (the 2-arg POST wrapper matching this row's arity).
     descriptors = append_runtime_helper(descriptors, RuntimeHelperDescriptor {
-        target: "http_get", symbol: "sfn_http_get", return_type: "i8*", parameter_types: ["i8*"], effects: ["net"], native_signature: "sfn_http_get", c_abi_return_type: null
+        target: "http_get", symbol: "sfn_http_get", return_type: "i8*", parameter_types: ["i8*"], effects: ["net.http"], native_signature: "sfn_http_get", c_abi_return_type: null
     });
     descriptors = append_runtime_helper(descriptors, RuntimeHelperDescriptor {
-        target: "http_post", symbol: "sfn_http_post2", return_type: "i8*", parameter_types: ["i8*", "i8*"], effects: ["net"], native_signature: "sfn_http_post2", c_abi_return_type: null
+        target: "http_post", symbol: "sfn_http_post2", return_type: "i8*", parameter_types: ["i8*", "i8*"], effects: ["net.http"], native_signature: "sfn_http_post2", c_abi_return_type: null
     });
 
     // Serve adapters — flipped to the Sailfin-native server in
@@ -1142,16 +1142,16 @@ fn _rh_descriptors_07(descriptors_in: RuntimeHelperDescriptor[]) -> RuntimeHelpe
     // `serve_start`/`serve_handler_dispatch` rows above — the honest set,
     // tighter than #1183's retained `net`-only check.
     descriptors = append_runtime_helper(descriptors, RuntimeHelperDescriptor {
-        target: "websocket.serve", symbol: "sfn_websocket_serve", return_type: "void", parameter_types: ["i32"], effects: ["net"], native_signature: "sfn_websocket_serve", c_abi_return_type: null
+        target: "websocket.serve", symbol: "sfn_websocket_serve", return_type: "void", parameter_types: ["i32"], effects: ["net.ws"], native_signature: "sfn_websocket_serve", c_abi_return_type: null
     });
     descriptors = append_runtime_helper(descriptors, RuntimeHelperDescriptor {
-        target: "websocket.serve_tls", symbol: "sfn_websocket_serve_tls", return_type: "void", parameter_types: ["i32", "i8*", "i8*"], effects: ["net"], native_signature: "sfn_websocket_serve_tls", c_abi_return_type: null
+        target: "websocket.serve_tls", symbol: "sfn_websocket_serve_tls", return_type: "void", parameter_types: ["i32", "i8*", "i8*"], effects: ["net.ws"], native_signature: "sfn_websocket_serve_tls", c_abi_return_type: null
     });
     descriptors = append_runtime_helper(descriptors, RuntimeHelperDescriptor {
-        target: "websocket.send", symbol: "sfn_websocket_send", return_type: "i8*", parameter_types: ["i8*", "i8*"], effects: ["net"], native_signature: "sfn_websocket_send", c_abi_return_type: null
+        target: "websocket.send", symbol: "sfn_websocket_send", return_type: "i8*", parameter_types: ["i8*", "i8*"], effects: ["net.ws"], native_signature: "sfn_websocket_send", c_abi_return_type: null
     });
     descriptors = append_runtime_helper(descriptors, RuntimeHelperDescriptor {
-        target: "websocket.close", symbol: "sfn_websocket_close", return_type: "i8*", parameter_types: ["i8*"], effects: ["net"], native_signature: "sfn_websocket_close", c_abi_return_type: null
+        target: "websocket.close", symbol: "sfn_websocket_close", return_type: "i8*", parameter_types: ["i8*"], effects: ["net.ws"], native_signature: "sfn_websocket_close", c_abi_return_type: null
     });
     return descriptors;
 }
@@ -1159,7 +1159,7 @@ fn _rh_descriptors_07(descriptors_in: RuntimeHelperDescriptor[]) -> RuntimeHelpe
 fn _rh_descriptors_08(descriptors_in: RuntimeHelperDescriptor[]) -> RuntimeHelperDescriptor[] {
     let mut descriptors = descriptors_in;
     descriptors = append_runtime_helper(descriptors, RuntimeHelperDescriptor {
-        target: "websocket.connect", symbol: "sfn_websocket_connect", return_type: "i8*", parameter_types: ["i8*"], effects: ["net"], native_signature: "sfn_websocket_connect", c_abi_return_type: null
+        target: "websocket.connect", symbol: "sfn_websocket_connect", return_type: "i8*", parameter_types: ["i8*"], effects: ["net.ws"], native_signature: "sfn_websocket_connect", c_abi_return_type: null
     });
     descriptors = append_runtime_helper(descriptors, RuntimeHelperDescriptor {
         target: "serve", symbol: "sfn_serve_unbridged", return_type: "void", parameter_types: [], effects: ["io", "net"], native_signature: null, c_abi_return_type: null
@@ -1618,13 +1618,13 @@ fn _rh_descriptors_11(descriptors_in: RuntimeHelperDescriptor[]) -> RuntimeHelpe
     // `http.post_json` / `http.download` to `sfn_http_get` /
     // `sfn_http_post` (url, body, auth_header) / `sfn_http_download`.
     descriptors = append_runtime_helper(descriptors, RuntimeHelperDescriptor {
-        target: "http.get_body", symbol: "sfn_http_get", return_type: "i8*", parameter_types: ["i8*"], effects: ["net"], native_signature: "sfn_http_get", c_abi_return_type: null
+        target: "http.get_body", symbol: "sfn_http_get", return_type: "i8*", parameter_types: ["i8*"], effects: ["net.http"], native_signature: "sfn_http_get", c_abi_return_type: null
     });
     descriptors = append_runtime_helper(descriptors, RuntimeHelperDescriptor {
-        target: "http.post_json", symbol: "sfn_http_post", return_type: "i8*", parameter_types: ["i8*", "i8*", "i8*"], effects: ["net"], native_signature: "sfn_http_post", c_abi_return_type: null
+        target: "http.post_json", symbol: "sfn_http_post", return_type: "i8*", parameter_types: ["i8*", "i8*", "i8*"], effects: ["net.http"], native_signature: "sfn_http_post", c_abi_return_type: null
     });
     descriptors = append_runtime_helper(descriptors, RuntimeHelperDescriptor {
-        target: "http.download", symbol: "sfn_http_download", return_type: "i8*", parameter_types: ["i8*", "i8*"], effects: ["net", "io"], native_signature: "sfn_http_download", c_abi_return_type: null
+        target: "http.download", symbol: "sfn_http_download", return_type: "i8*", parameter_types: ["i8*", "i8*"], effects: ["net.http", "io"], native_signature: "sfn_http_download", c_abi_return_type: null
     });
 
     // Environment & path helpers
@@ -1644,7 +1644,7 @@ fn _rh_descriptors_11(descriptors_in: RuntimeHelperDescriptor[]) -> RuntimeHelpe
         target: "env.home", symbol: "sfn_home_dir", return_type: "{i8*, i64}", parameter_types: ["ptr"], effects: ["io"], native_signature: "sfn_home_dir", c_abi_return_type: null
     });
     descriptors = append_runtime_helper(descriptors, RuntimeHelperDescriptor {
-        target: "fs.read_bytes", symbol: "sfn_fs_read_bytes", return_type: "i8*", parameter_types: ["i8*", "i8*"], effects: ["io"], native_signature: "sfn_fs_read_bytes", c_abi_return_type: null
+        target: "fs.read_bytes", symbol: "sfn_fs_read_bytes", return_type: "i8*", parameter_types: ["i8*", "i8*"], effects: ["io.fs"], native_signature: "sfn_fs_read_bytes", c_abi_return_type: null
     });
 
     // #1780 (SFEP-0035 §3.2): the hand-typed `find_char` / `string_starts_with`

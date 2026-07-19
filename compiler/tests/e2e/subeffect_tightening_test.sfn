@@ -1,0 +1,155 @@
+// End-to-end coverage for sub-effect DETECTION and manifest sub-effect
+// tightening (SFN-99 / SFEP-0017 §6 G7).
+//
+// SFN-98 narrowed the effect-subsumption/parsing primitives
+// (`effect_root`, `is_recognized_effect`, `effect_subsumes`,
+// `compiler/src/effect_taxonomy.sfn`) and wired the effect checker to use
+// them. SFN-99 narrows the runtime helper descriptors themselves
+// (`compiler/src/llvm/runtime_helpers.sfn`) so `fs.*`/`print.*`/
+// `console.*`/`http.*`/`websocket.*` calls are DETECTED as the narrow
+// sub-effect (`io.fs`, `io.console`, `net.http`, `net.ws`) rather than the
+// bare root. This test proves the end-to-end effect: a narrow function
+// annotation (`![io.fs]`) is now sufficient where only the bare root used
+// to satisfy the detector, a sibling sub-effect (`io.console`) does not
+// satisfy an `io.fs` requirement, and the capsule-manifest cross-check
+// (E0403) honors sub-tree containment (`io.fs` grants `io.fs.read`, a
+// bare-root grant like `io` still authorizes every `io.*`).
+//
+// Modeled on `capability_cross_check_test.sfn`: each test stages its own
+// isolated capsule (separate scratch dir keyed by tag) holding a single
+// fixture, so the parallel pool never collides and no fixture can
+// contaminate another's diagnostic.
+//
+// NOTE: assert on captured stdout+stderr with `sfn/strings` predicates —
+// the `sfn/test` `expect_*` matchers are `![pure]` and cannot be called
+// from an `![io]` test. (#842.)
+import { find } from "sfn/strings";
+
+// The compiler-under-test: $SAILFIN_BIN if set, else the self-hosted
+// binary relative to the repo root the runner starts from.
+fn _sfn_bin() -> string ![io] {
+    let configured = env.get("SAILFIN_BIN");
+    if configured.length > 0 { return configured; }
+    return "build/bin/sfn";
+}
+
+// Child env for the spawned `sfn check`: `run_capture`'s `[]` is the
+// EMPTY environment (not "inherit"), so thread through the variables the
+// frontend check may consult. `SAILFIN_TEST_SCRATCH` keeps any
+// per-invocation staging under the runner's scratch in the parallel pool.
+fn _child_env() -> string[] ![io] {
+    let mut e: string[] = [];
+    let path = env.get("PATH");
+    if path.length > 0 { e.push("PATH=" + path); }
+    let home = env.get("HOME");
+    if home.length > 0 { e.push("HOME=" + home); }
+    let tmpdir = env.get("TMPDIR");
+    if tmpdir.length > 0 { e.push("TMPDIR=" + tmpdir); }
+    let scratch = env.get("SAILFIN_TEST_SCRATCH");
+    if scratch.length > 0 { e.push("SAILFIN_TEST_SCRATCH=" + scratch); }
+    return e;
+}
+
+// A private capsule dir under the runner's scratch (or /tmp), keyed by
+// `tag` so concurrent tests in the parallel pool never collide.
+fn _scratch(tag: string) -> string ![io] {
+    let mut base = env.get("SAILFIN_TEST_SCRATCH");
+    if base.length == 0 { base = "/tmp"; }
+    let dir = base + "/sfn-subeffect-tightening-" + tag;
+    fs.createDirectory(dir + "/src", true);
+    return dir;
+}
+
+// Stage a one-fixture capsule with a caller-supplied
+// `[capabilities] required = <required_toml>` surface (e.g. `"[\"io\"]"`
+// or `"[\"io.fs\"]"`). Returns the absolute path to the staged fixture for
+// `sfn check`.
+fn _stage_capsule_req(tag: string, required_toml: string, fixture_name: string, fixture_body: string) -> string ![io] {
+    let dir = _scratch(tag);
+    fs.writeFile(dir + "/capsule.toml", "[capsule]\n"
+        + "name = \"subeffect_fixture\"\n"
+        + "version = \"0.0.0\"\n\n"
+        + "[capabilities]\n"
+        + "required = "
+        + required_toml
+        + "\n");
+    let fixture_path = dir + "/src/" + fixture_name;
+    fs.writeFile(fixture_path, fixture_body);
+    return fixture_path;
+}
+
+struct CheckRun {
+    exit: int,
+    out: string
+}
+
+// Drive `sfn check <path>` and fold captured stdout+stderr together; the
+// frontend check stops before codegen/link, so no clang/linker is spawned.
+fn _check(path: string) -> CheckRun ![io] {
+    let exit = process.run_capture([_sfn_bin(), "check", path], _child_env());
+    let out = process.capture_take_stdout();
+    let err = process.capture_take_stderr();
+    return CheckRun { exit: exit, out: out + err };
+}
+
+// ---- Detection + subsumption (in-module path; manifest kept broad
+// ["io"] so only detection is under test) ----
+// A broad ![io] annotation still subsumes the narrow io.fs detected for
+// fs.writeFile — backward compat with the pre-SFN-99 bare-root behavior.
+test "subeffect detection: broad ![io] annotation subsumes detected io.fs" ![io] {
+    let fixture = _stage_capsule_req("detect-broad-ok", "[\"io\"]", "w.sfn", "fn w() ![io] {\n"
+        + "    fs.writeFile(\"p\", \"x\");\n"
+        + "}\n");
+    let r = _check(fixture);
+    assert r.exit == 0;
+    assert find(r.out, "E0403", 0) < 0;
+}
+
+// The new capability: a narrow ![io.fs] annotation is now sufficient
+// because fs.writeFile is detected as io.fs, not the bare root.
+test "subeffect detection: narrow ![io.fs] annotation satisfies detected io.fs" ![io] {
+    let fixture = _stage_capsule_req("detect-narrow-ok", "[\"io\"]", "w.sfn", "fn w() ![io.fs] {\n"
+        + "    fs.writeFile(\"p\", \"x\");\n"
+        + "}\n");
+    let r = _check(fixture);
+    assert r.exit == 0;
+}
+
+// A sibling sub-effect (io.console) does not subsume io.fs — the missing
+// narrow effect must be named in the diagnostic.
+test "subeffect detection: sibling ![io.console] does not satisfy detected io.fs" ![io] {
+    let fixture = _stage_capsule_req("detect-sibling-miss", "[\"io\"]", "w.sfn", "fn w() ![io.console] {\n"
+        + "    fs.writeFile(\"p\", \"x\");\n"
+        + "}\n");
+    let r = _check(fixture);
+    assert r.exit != 0;
+    assert find(r.out, "io.fs", 0) >= 0;
+}
+
+// ---- Manifest tightening (E0403 path; pure bodies with declared
+// effects — a pure body declaring an effect produces no unused-effect
+// error) ----
+// A deeper refinement (io.fs.read) inside the granted sub-tree (io.fs) is
+// authorized.
+test "subeffect manifest: deeper refinement inside granted sub-tree is authorized" ![io] {
+    let fixture = _stage_capsule_req("manifest-refine-ok", "[\"io.fs\"]", "f.sfn", "fn f() ![io.fs.read] { }\n");
+    let r = _check(fixture);
+    assert r.exit == 0;
+    assert find(r.out, "E0403", 0) < 0;
+}
+
+// A sibling sub-effect (io.console) outside the granted sub-tree (io.fs)
+// is rejected with E0403.
+test "subeffect manifest: sibling outside granted sub-tree is rejected with E0403" ![io] {
+    let fixture = _stage_capsule_req("manifest-sibling-reject", "[\"io.fs\"]", "f.sfn", "fn f() ![io.console] { }\n");
+    let r = _check(fixture);
+    assert r.exit != 0;
+    assert find(r.out, "E0403", 0) >= 0;
+}
+
+// A broad manifest grant (io) authorizes every io.* sub-effect.
+test "subeffect manifest: broad grant authorizes every sub-effect" ![io] {
+    let fixture = _stage_capsule_req("manifest-broad-ok", "[\"io\"]", "f.sfn", "fn f() ![io.fs] { }\n");
+    let r = _check(fixture);
+    assert r.exit == 0;
+}

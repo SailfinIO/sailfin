@@ -1,10 +1,10 @@
 ---
 sfep: 17
 title: Hierarchical Sub-Effects as Subsumption
-status: Accepted
+status: Implemented
 type: language
 created: 2026-06-07
-updated: 2026-06-07
+updated: 2026-07-18
 author: "agent:compiler-architect"
 tracking: "#1180, #1182"
 supersedes:
@@ -15,6 +15,7 @@ graduates-to: reference/preview/hierarchical-effects.md
 # Proposal: Hierarchical Sub-Effects as Subsumption Within the Locked Six
 
 Status: Approved for implementation (gating decisions §D1–D5 locked 2026-06-07 by repo owner)
+G6/G7 shipped: subsumption (SFN-98) and detection + manifest tightening (SFN-99).
 Date: June 7, 2026 (drafted) · 2026-06-07 (gating decisions locked)
 Authors: compiler-architect (drafted via `/pickup #1182`)
 Parent: [docs/proposals/0008-effect-validation.md](./0008-effect-validation.md)

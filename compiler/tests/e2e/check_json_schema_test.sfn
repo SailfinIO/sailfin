@@ -215,7 +215,7 @@ test "check json: E0400 carries structured FixSuggestion" ![io] {
     let root = _fixture_dir("b3shape");
     let r = _check(root + "/src/leak.sfn");
     // suggestion.message mentions the missing effect.
-    assert contains(r.out, "add ![io] to the function signature");
+    assert contains(r.out, "add ![io.console] to the function signature");
     // suggestion.edits[0] field set.
     assert contains(r.out, "\"start_line\":");
     assert contains(r.out, "\"start_column\":");
@@ -223,7 +223,7 @@ test "check json: E0400 carries structured FixSuggestion" ![io] {
     assert contains(r.out, "\"end_column\":");
     assert contains(r.out, "\"replacement\":");
     // replacement contains the effect name.
-    assert contains(r.out, "\"replacement\":\"![io] \"");
+    assert contains(r.out, "\"replacement\":\"![io.console] \"");
 }
 
 // ---- Test 14 (B3): suggestion edit anchored at the function body's '{' ----

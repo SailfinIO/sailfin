@@ -127,19 +127,19 @@ test "ternary: try operator inside the then-branch stays a TryOperator" ![io] {
 // Effect attribution: the requirement is the union of all three children.
 // -------------------------------------------------------------------
 test "ternary: effectful then-branch surfaces io" ![io] {
-    assert _reqs_contain(_cond_reqs("c ? print.info(\"X\") : y"), "io");
+    assert _reqs_contain(_cond_reqs("c ? print.info(\"X\") : y"), "io.console");
 }
 
 test "ternary: effectful else-branch surfaces io" ![io] {
-    assert _reqs_contain(_cond_reqs("c ? y : print.info(\"X\")"), "io");
+    assert _reqs_contain(_cond_reqs("c ? y : print.info(\"X\")"), "io.console");
 }
 
 test "ternary: effectful condition surfaces io" ![io] {
-    assert _reqs_contain(_cond_reqs("print.info(\"X\") ? a : b"), "io");
+    assert _reqs_contain(_cond_reqs("print.info(\"X\") ? a : b"), "io.console");
 }
 
 test "ternary: effectful branch surfaces net" ![io] {
-    assert _reqs_contain(_cond_reqs("c ? http.get(\"u\") : y"), "net");
+    assert _reqs_contain(_cond_reqs("c ? http.get(\"u\") : y"), "net.http");
 }
 
 // -------------------------------------------------------------------

@@ -98,15 +98,15 @@ test "cast: bare-identifier fn-pointer cast structures into Cast (#1627)" ![io] 
 // Effect attribution: a cast walks its operand.
 // -------------------------------------------------------------------
 test "cast: identifier-typed cast surfaces operand io" ![io] {
-    assert _reqs_contain(_cast_reqs("print.info(\"x\") as int"), "io");
+    assert _reqs_contain(_cast_reqs("print.info(\"x\") as int"), "io.console");
 }
 
 test "cast: pointer-typed cast surfaces operand io" ![io] {
-    assert _reqs_contain(_cast_reqs("fs.read(p) as * u8"), "io");
+    assert _reqs_contain(_cast_reqs("fs.read(p) as * u8"), "io.fs");
 }
 
 test "cast: pointer-typed cast surfaces operand net" ![io] {
-    assert _reqs_contain(_cast_reqs("http.get(\"u\") as * u8"), "net");
+    assert _reqs_contain(_cast_reqs("http.get(\"u\") as * u8"), "net.http");
 }
 
 // -------------------------------------------------------------------

@@ -581,7 +581,7 @@ test "effect violation: http.<x> Member call carets at http" {
     let mut i: int = 0;
     loop {
         if i >= v.missing_effects.length { break; }
-        if v.missing_effects[i] == "net" { found_net = true; }
+        if v.missing_effects[i] == "net.http" { found_net = true; }
         i += 1;
     }
     assert found_net;
@@ -641,7 +641,7 @@ test "effect violation: TryOperator operand still surfaces fs io effect" {
     let mut i: int = 0;
     loop {
         if i >= v.missing_effects.length { break; }
-        if v.missing_effects[i] == "io" { found_io = true; }
+        if v.missing_effects[i] == "io.fs" { found_io = true; }
         i += 1;
     }
     assert found_io;
@@ -712,7 +712,7 @@ test "effect violation: bare print() Call carets at the callee for io effect" {
     let mut i: int = 0;
     loop {
         if i >= v.missing_effects.length { break; }
-        if v.missing_effects[i] == "io" { found_io = true; }
+        if v.missing_effects[i] == "io.console" { found_io = true; }
         i += 1;
     }
     assert found_io;
@@ -733,7 +733,7 @@ test "effect violation: bare console() Call carets at the callee for io effect" 
     let mut i: int = 0;
     loop {
         if i >= v.missing_effects.length { break; }
-        if v.missing_effects[i] == "io" { found_io = true; }
+        if v.missing_effects[i] == "io.console" { found_io = true; }
         i += 1;
     }
     assert found_io;
@@ -744,16 +744,16 @@ test "effect violation: bare console() Call carets at the callee for io effect" 
 
 test "effect (#1183): http.download Member call requires net AND io from the registry" {
     // Registry-driven proof. The descriptor for `http.download` carries
-    // `effects: ["net", "io"]`, while `http.get` carries `["net"]`. A
-    // hardcoded `root == "http" -> net` chain could never produce the
-    // `io` requirement here — it can only come from
+    // `effects: ["net.http", "io"]`, while `http.get` carries
+    // `["net.http"]`. A hardcoded `root == "http" -> net` chain could
+    // never produce the `io` requirement here — it can only come from
     // `effects_for_callee_target` reading the descriptor's effects.
     let stmt = _routine_with_member_call("save_remote", [], 1, "http", "download", 9, 5);
     let program = Program { statements: [stmt] };
     let violations = validate_effects(program);
     assert violations.length == 1;
     let v = violations[0];
-    assert _effects_contains(v.missing_effects, "net");
+    assert _effects_contains(v.missing_effects, "net.http");
     assert _effects_contains(v.missing_effects, "io");
 }
 
@@ -771,7 +771,7 @@ test "effect (#1183): fs.read_bytes Member call requires io from the registry" {
     let program = Program { statements: [stmt] };
     let violations = validate_effects(program);
     assert violations.length == 1;
-    assert _effects_contains(violations[0].missing_effects, "io");
+    assert _effects_contains(violations[0].missing_effects, "io.fs");
 }
 
 test "effect (#1183): fs.read Member call (no exact row) still requires io via namespace union" {
@@ -783,7 +783,7 @@ test "effect (#1183): fs.read Member call (no exact row) still requires io via n
     let program = Program { statements: [stmt] };
     let violations = validate_effects(program);
     assert violations.length == 1;
-    assert _effects_contains(violations[0].missing_effects, "io");
+    assert _effects_contains(violations[0].missing_effects, "io.fs");
 }
 
 test "effect (#1183): console.log Member call requires io from the registry" {
@@ -791,7 +791,7 @@ test "effect (#1183): console.log Member call requires io from the registry" {
     let program = Program { statements: [stmt] };
     let violations = validate_effects(program);
     assert violations.length == 1;
-    assert _effects_contains(violations[0].missing_effects, "io");
+    assert _effects_contains(violations[0].missing_effects, "io.console");
 }
 
 test "effect (#1601): websocket.send Member call requires net from the registry" {
@@ -804,7 +804,7 @@ test "effect (#1601): websocket.send Member call requires net from the registry"
     let program = Program { statements: [stmt] };
     let violations = validate_effects(program);
     assert violations.length == 1;
-    assert _effects_contains(violations[0].missing_effects, "net");
+    assert _effects_contains(violations[0].missing_effects, "net.ws");
 }
 
 test "effect (#1601): websocket.serve Member call requires net from the registry" {
@@ -814,7 +814,7 @@ test "effect (#1601): websocket.serve Member call requires net from the registry
     let program = Program { statements: [stmt] };
     let violations = validate_effects(program);
     assert violations.length == 1;
-    assert _effects_contains(violations[0].missing_effects, "net");
+    assert _effects_contains(violations[0].missing_effects, "net.ws");
 }
 
 test "effect (#1601): websocket.broadcast (no exact row) requires net via namespace union" {
@@ -826,7 +826,7 @@ test "effect (#1601): websocket.broadcast (no exact row) requires net via namesp
     let program = Program { statements: [stmt] };
     let violations = validate_effects(program);
     assert violations.length == 1;
-    assert _effects_contains(violations[0].missing_effects, "net");
+    assert _effects_contains(violations[0].missing_effects, "net.ws");
 }
 
 test "effect (#1601): websocket.close declaring ![net] is clean" {
@@ -870,12 +870,12 @@ test "effect (#1601): Call-form serve declaring ![io, net] is clean" {
 test "registry (#1601): effects_for_callee_target(\"websocket.\") returns net" {
     let effects = effects_for_callee_target("websocket.");
     assert effects.length == 1;
-    assert _effects_contains(effects, "net");
+    assert _effects_contains(effects, "net.ws");
 }
 
 test "registry (#1601): effects_for_callee_target(\"websocket.send\") contains net" {
     let effects = effects_for_callee_target("websocket.send");
-    assert _effects_contains(effects, "net");
+    assert _effects_contains(effects, "net.ws");
 }
 
 test "registry (#1601): effects_for_callee_target(\"serve\") contains io and net" {

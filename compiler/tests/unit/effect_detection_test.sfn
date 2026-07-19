@@ -15,23 +15,23 @@
 // — the exact frontend path enforcement relies on — not from a hand-built
 // AST that could drift from what the parser actually produces.
 //
-//   construct          effect   resolution-path node
-//   ---------          ------   --------------------
-//   fs.exists / fs.read  io     Member  (descriptor + namespace union)
-//   print("…")           io     Call    (bare builtin)
-//   print.info("…")      io     Member  (descriptor)
-//   console.log("…")     io     Member  (descriptor)
-//   http.get("…")        net    Member  (descriptor + namespace union)
-//   websocket.send("…")  net    Member  (explicit net, #1601)
-//   spawn(task)          none   Spawn   (parser → Spawn node; effect-transparent, SFEP-0049)
-//   spawn(io body)        io    Spawn   (effect inherited from the spawned body)
-//   parallel [task]      none   Parallel(parser → Parallel node; effect-transparent, SFEP-0049)
-//   parallel [io task]    io    Parallel(effect inherited from the task body)
-//   ch.send(v)           none   Member  (effect-transparent, SFEP-0049)
-//   ch.send(io arg)       io    Member  (effect inherited from the argument walk)
-//   ch.receive()          none  Member  (effect-transparent, SFEP-0049)
-//   serve(handler)       net    Serve   (parser → Serve node; Call arm also covered)
-//   sleep(1.0)           clock  Call    (descriptor)
+//   construct             effect      resolution-path node
+//   ---------             ------      --------------------
+//   fs.exists / fs.read   io.fs       Member  (descriptor + namespace union)
+//   print("…")            io.console  Call    (bare builtin)
+//   print.info("…")       io.console  Member  (descriptor)
+//   console.log("…")      io.console  Member  (descriptor)
+//   http.get("…")         net.http    Member  (descriptor + namespace union)
+//   websocket.send("…")   net.ws      Member  (explicit net.ws, #1601)
+//   spawn(task)           none        Spawn   (parser → Spawn node; effect-transparent, SFEP-0049)
+//   spawn(io body)        io.console  Spawn   (effect inherited from the spawned body)
+//   parallel [task]       none        Parallel(parser → Parallel node; effect-transparent, SFEP-0049)
+//   parallel [io task]    io.console  Parallel(effect inherited from the task body)
+//   ch.send(v)            none        Member  (effect-transparent, SFEP-0049)
+//   ch.send(io arg)       io.fs       Member  (effect inherited from the argument walk)
+//   ch.receive()          none        Member  (effect-transparent, SFEP-0049)
+//   serve(handler)        net         Serve   (parser → Serve node; Call arm also covered)
+//   sleep(1.0)            clock       Call    (descriptor)
 //
 // NOTE on spawn/serve: the parser intercepts `spawn(...)`/`serve(...)` into
 // dedicated `Spawn`/`Serve` AST nodes (concurrency frontend), NOT generic
@@ -118,35 +118,47 @@ fn _assert_no_detect(snippet: string) ![io] {
 // -------------------------------------------------------------------
 // Per-family coverage cases (one per effectful builtin/concurrency family)
 // -------------------------------------------------------------------
-test "detect: fs.* filesystem helper -> io (exact descriptor)" ![io] {
-    _assert_detects("fs.exists(p)", "io");
+test "detect: fs.* filesystem helper -> io.fs (exact descriptor)" ![io] {
+    _assert_detects("fs.exists(p)", "io.fs");
 }
 
-test "detect: fs.* non-exact member -> io (namespace union)" ![io] {
+test "detect: fs.* non-exact member -> io.fs (namespace union)" ![io] {
     // No `fs.read` descriptor row exists; the resolution path must still
-    // attribute `io` via the namespace-union fallback in
+    // attribute `io.fs` via the namespace-union fallback in
     // `effects_for_callee_target`.
-    _assert_detects("fs.read(p)", "io");
+    _assert_detects("fs.read(p)", "io.fs");
 }
 
-test "detect: print(...) bare call -> io" ![io] {
-    _assert_detects("print(\"x\")", "io");
+test "detect: print(...) bare call -> io.console" ![io] {
+    _assert_detects("print(\"x\")", "io.console");
 }
 
-test "detect: print.info(...) member -> io" ![io] {
-    _assert_detects("print.info(\"x\")", "io");
+test "detect: print.info(...) member -> io.console" ![io] {
+    _assert_detects("print.info(\"x\")", "io.console");
 }
 
-test "detect: console.* member -> io" ![io] {
-    _assert_detects("console.log(\"x\")", "io");
+test "detect: console.* member -> io.console" ![io] {
+    _assert_detects("console.log(\"x\")", "io.console");
 }
 
-test "detect: http.* member -> net" ![io] {
-    _assert_detects("http.get(\"u\")", "net");
+test "detect: http.* member -> net.http" ![io] {
+    _assert_detects("http.get(\"u\")", "net.http");
 }
 
-test "detect: websocket.* member -> net" ![io] {
-    _assert_detects("websocket.send(\"m\")", "net");
+test "detect: websocket.* member -> net.ws" ![io] {
+    _assert_detects("websocket.send(\"m\")", "net.ws");
+}
+
+test "detect: env.* io helper keeps the bare root (never guessed as a sub-effect)" ![io] {
+    // env.get is io but NOT a filesystem/console op — narrowing must not
+    // over-reach and guess io.fs/io.console. It stays the bare root.
+    _assert_detects("env.get(\"HOME\")", "io");
+}
+
+test "detect: unresolved namespace member requires nothing (no guessed sub-effect)" ![io] {
+    // An unknown namespace resolves to no descriptor and no namespace
+    // union — the detector emits no requirement, never a guessed sub-effect.
+    _assert_no_detect("obj.method(x)");
 }
 
 test "detect: spawn(...) requires nothing over a pure body (Spawn node, real source)" ![io] {
@@ -163,7 +175,7 @@ test "detect: spawn(...) requires nothing over a pure body (Spawn node, real sou
 test "detect: spawn(...) attributes io from an io body (Spawn node)" ![io] {
     // The primitive stays transparent; the caller inherits exactly the
     // effects of the spawned body.
-    _assert_detects("spawn(fn () { print.info(\"x\"); })", "io");
+    _assert_detects("spawn(fn () { print.info(\"x\"); })", "io.console");
 }
 
 test "detect: spawn(...) requires nothing over no argument (defensive Call+Identifier arm)" ![io] {
@@ -183,7 +195,7 @@ test "detect: parallel [...] requires nothing over a pure task (Parallel node)" 
 }
 
 test "detect: parallel [...] attributes io from an io task (Parallel node)" ![io] {
-    _assert_detects("parallel [fn () { print.info(\"x\"); }]", "io");
+    _assert_detects("parallel [fn () { print.info(\"x\"); }]", "io.console");
 }
 
 test "detect: channel .send(...) requires nothing over a pure value (Member arm)" ![io] {
@@ -195,7 +207,7 @@ test "detect: channel .send(...) requires nothing over a pure value (Member arm)
 
 test "detect: channel .send(...) attributes io from an io argument (Member arm)" ![io] {
     // The effect is inherited via the argument walk, not the `send` op.
-    _assert_detects("ch.send(fs.read(p))", "io");
+    _assert_detects("ch.send(fs.read(p))", "io.fs");
 }
 
 test "detect: channel .receive() requires nothing (Member arm)" ![io] {
