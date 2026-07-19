@@ -552,6 +552,30 @@ fn toml_get_capabilities_required(text: string) -> string[] {
     return _toml_split_lines_into_array(toml_get_string_array(text, "capabilities", "required"));
 }
 
+// SFEP-0051 Phase 4a: workspace capability-envelope getters. Read the
+// `[workspace.capabilities]` effect lists from a workspace.toml. Parsing
+// only — envelope validation (canonical-effect membership, alphabetical
+// order) and diagnostics live in the resolver's `workspace_capability_audit`
+// (capsule_resolver.sfn), because this module is deliberately
+// Diagnostic-free: every getter returns a bare value with an empty-list
+// absent sentinel.
+fn toml_get_workspace_capabilities_allow(text: string) -> string[] {
+    return _toml_split_lines_into_array(toml_get_string_array(text, "workspace.capabilities", "allow"));
+}
+
+fn toml_get_workspace_capabilities_deny(text: string) -> string[] {
+    return _toml_split_lines_into_array(toml_get_string_array(text, "workspace.capabilities", "deny"));
+}
+
+// Per-member grant lookup: the effects granted to `member` above the base
+// envelope, from `[workspace.capabilities.grants]` (whose keys are member
+// names, e.g. `"sfn/net" = ["net"]`). Absent member → empty list. Member
+// keys are quoted in TOML; `toml_get_string_array` strips key quotes, so the
+// raw member name (e.g. "sfn/net") is the correct lookup key.
+fn toml_get_workspace_capabilities_grant(text: string, member: string) -> string[] {
+    return _toml_split_lines_into_array(toml_get_string_array(text, "workspace.capabilities.grants", member));
+}
+
 // Read a string value at `[section] key = "value"`. Returns "" if absent.
 // Lets callers read ad-hoc config (e.g. ~/.sfn/config.toml) without the
 // manifest-shaped SailToml struct.

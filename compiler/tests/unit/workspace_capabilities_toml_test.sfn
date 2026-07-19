@@ -1,0 +1,49 @@
+// Regression tests for the workspace capability-envelope getters
+// (toml_get_workspace_capabilities_allow/deny/grant) added in SFEP-0051
+// Phase 4a.
+import {
+    toml_get_workspace_capabilities_allow,
+    toml_get_workspace_capabilities_deny,
+    toml_get_workspace_capabilities_grant
+} from "../../src/toml_parser";
+
+test "workspace caps: allow list parses" {
+    let toml = "[workspace]\nmembers = [\"compiler\"]\n\n[workspace.capabilities]\nallow = [\"clock\", \"io\"]\ndeny = [\"model\"]\n";
+    let allow = toml_get_workspace_capabilities_allow(toml);
+    assert allow.length == 2;
+    assert allow[0] == "clock";
+    assert allow[1] == "io";
+}
+
+test "workspace caps: deny list parses" {
+    let toml = "[workspace]\nmembers = [\"compiler\"]\n\n[workspace.capabilities]\nallow = [\"clock\", \"io\"]\ndeny = [\"model\"]\n";
+    let deny = toml_get_workspace_capabilities_deny(toml);
+    assert deny.length == 1;
+    assert deny[0] == "model";
+}
+
+test "workspace caps: grant lookup by member name" {
+    let toml = "[workspace.capabilities]\nallow = [\"io\"]\n\n[workspace.capabilities.grants]\n\"sfn/net\" = [\"net\"]\n\"sfn/http\" = [\"net\"]\n";
+    let net_grant = toml_get_workspace_capabilities_grant(toml, "sfn/net");
+    assert net_grant.length == 1;
+    assert net_grant[0] == "net";
+    assert toml_get_workspace_capabilities_grant(toml, "sfn/http")[0] == "net";
+}
+
+test "workspace caps: absent grant member yields empty" {
+    let toml = "[workspace.capabilities]\nallow = [\"io\"]\n\n[workspace.capabilities.grants]\n\"sfn/net\" = [\"net\"]\n\"sfn/http\" = [\"net\"]\n";
+    assert toml_get_workspace_capabilities_grant(toml, "sfn/db").length == 0;
+}
+
+test "workspace caps: absent section yields empty lists" {
+    let toml = "[workspace]\nmembers = [\"compiler\"]\n";
+    assert toml_get_workspace_capabilities_allow(toml).length == 0;
+    assert toml_get_workspace_capabilities_deny(toml).length == 0;
+}
+
+test "workspace caps: multi-line allow array parses" {
+    let toml = "[workspace.capabilities]\nallow = [\n  \"clock\",\n  \"io\",\n  \"net\",\n]\n";
+    let allow = toml_get_workspace_capabilities_allow(toml);
+    assert allow.length == 3;
+    assert allow[2] == "net";
+}
