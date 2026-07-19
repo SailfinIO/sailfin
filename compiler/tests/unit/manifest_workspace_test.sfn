@@ -16,7 +16,12 @@ import {
     toml_get_name,
     toml_get_entry,
     toml_get_dependencies,
-    toml_add_dependency
+    toml_add_dependency,
+    toml_value_is_workspace_inherit,
+    toml_get_workspace_package_version,
+    toml_get_workspace_package_license,
+    toml_get_workspace_dependencies,
+    toml_get_version
 } from "../../src/toml_parser";
 
 fn _str_eq(a: string, b: string) -> boolean { return strings_equal(a, b); }
@@ -226,6 +231,79 @@ test "manifest: toml_add_dependency preserves exports" {
     let exports = toml_get_exports(updated);
     assert _contains(exports, "client");
     assert _contains(exports, "server");
+}
+
+// ---- SFEP-0051 Phase 3: `{ workspace = true }` inline-table marker ----
+test "manifest: workspace-inherit marker recognized (spaced)" {
+    assert toml_value_is_workspace_inherit("{ workspace = true }") == true;
+}
+
+test "manifest: workspace-inherit marker recognized (compact)" {
+    assert toml_value_is_workspace_inherit("{workspace=true}") == true;
+}
+
+test "manifest: workspace-inherit marker recognized (quoted key)" {
+    assert toml_value_is_workspace_inherit("{ \"workspace\" = true }") == true;
+}
+
+test "manifest: plain version string is not an inherit marker" {
+    assert toml_value_is_workspace_inherit("0.5.9") == false;
+}
+
+test "manifest: unrelated inline table is not an inherit marker" {
+    assert toml_value_is_workspace_inherit("{ workspace = false }") == false;
+    assert toml_value_is_workspace_inherit("{ path = \"../x\" }") == false;
+}
+
+test "manifest: member version = { workspace = true } round-trips to marker via toml_get_version" {
+    let toml = "[capsule]\nname = \"sfn/http\"\nversion = { workspace = true }\n";
+    assert toml_value_is_workspace_inherit(toml_get_version(toml)) == true;
+}
+
+test "manifest: member version = concrete round-trips as itself (no marker)" {
+    let toml = "[capsule]\nname = \"sfn/http\"\nversion = \"0.5.9\"\n";
+    assert _str_eq(toml_get_version(toml), "0.5.9");
+    assert toml_value_is_workspace_inherit(toml_get_version(toml)) == false;
+}
+
+// ---- SFEP-0051 Phase 3: [workspace.package] getters ----
+test "manifest: workspace.package version getter round-trips" {
+    let toml = "[workspace.package]\nversion = \"0.5.9\"\nlicense = \"Apache-2.0\"\n";
+    assert _str_eq(toml_get_workspace_package_version(toml), "0.5.9");
+}
+
+test "manifest: workspace.package license getter round-trips" {
+    let toml = "[workspace.package]\nversion = \"0.5.9\"\nlicense = \"Apache-2.0\"\n";
+    assert _str_eq(toml_get_workspace_package_license(toml), "Apache-2.0");
+}
+
+test "manifest: workspace.package getters absent return empty" {
+    let toml = "[workspace]\nmembers = [\"compiler\"]\n";
+    assert _str_eq(toml_get_workspace_package_version(toml), "");
+    assert _str_eq(toml_get_workspace_package_license(toml), "");
+}
+
+// ---- SFEP-0051 Phase 3: [workspace.dependencies] getter ----
+test "manifest: workspace.dependencies getter round-trips newline-separated" {
+    let toml = "[workspace.dependencies]\n\"sfn/strings\" = \"0.3.0\"\n\"sfn/test\" = \"0.4.0\"\n";
+    let deps = toml_get_workspace_dependencies(toml);
+    assert _contains(deps, "sfn/strings=0.3.0");
+    assert _contains(deps, "sfn/test=0.4.0");
+    assert _contains(deps, "\n");
+}
+
+test "manifest: workspace.dependencies absent returns empty" {
+    let toml = "[workspace]\nmembers = [\"compiler\"]\n";
+    assert _str_eq(toml_get_workspace_dependencies(toml), "");
+}
+
+test "manifest: workspace.dependencies does not leak into [dependencies]" {
+    let toml = "[dependencies]\n\"http\" = \"0.2.0\"\n\n[workspace.dependencies]\n\"sfn/strings\" = \"0.3.0\"\n";
+    let deps = toml_get_dependencies(toml);
+    assert _contains(deps, "http=0.2.0");
+    let mut leaked: boolean = false;
+    if _contains(deps, "sfn/strings=0.3.0") { leaked = true; }
+    assert leaked == false;
 }
 
 // ---- Existing fields still parse after extension ----

@@ -15,7 +15,13 @@
 //
 // Each test uses its own `/tmp` namespace so parallel runs don't collide and
 // cleans up on exit.
-import { toml_get_name, toml_get_version, toml_get_workspace_members } from "../../src/toml_parser";
+import {
+    toml_get_name,
+    toml_get_version,
+    toml_get_workspace_members,
+    toml_get_workspace_package_version,
+    toml_value_is_workspace_inherit
+} from "../../src/toml_parser";
 
 // -- inline copy of lock.sfn:_LockEntry --
 struct _LockEntry {
@@ -146,10 +152,25 @@ fn _load_workspace_members(workspace_root: string) -> WorkspaceMember[] ![io] {
     return out;
 }
 
+// -- inline copy of capsule_resolver.sfn:resolve_inherited_version (SFEP-0051 Phase 3) --
+fn _resolve_inherited_version(member_version: string, workspace_version: string) -> string {
+    if toml_value_is_workspace_inherit(member_version) {
+        return workspace_version;
+    }
+    return member_version;
+}
+
 // -- inline copy of capsule_resolver.sfn:resolve_workspace_lock_entries --
 fn _resolve_workspace_lock_entries(workspace_root: string) -> _LockEntry[] ![io] {
     let mut out: _LockEntry[] = [];
     let members = _load_workspace_members(workspace_root);
+    // Root `[workspace.package]` inheritance resolution (SFEP-0051 Phase 3): a
+    // member with `version = { workspace = true }` resolves to the root version.
+    let ws_manifest = _cr_path_join(workspace_root, "workspace.toml");
+    let mut ws_package_version: string = "";
+    if fs.exists(ws_manifest) {
+        ws_package_version = toml_get_workspace_package_version(fs.readFile(ws_manifest));
+    }
     let mut i: int = 0;
     loop {
         if i >= members.length { break; }
@@ -157,7 +178,7 @@ fn _resolve_workspace_lock_entries(workspace_root: string) -> _LockEntry[] ![io]
         let manifest = _cr_path_join(_cr_path_join(workspace_root, member.member_path), "capsule.toml");
         let mut version: string = "";
         if fs.exists(manifest) {
-            version = toml_get_version(fs.readFile(manifest));
+            version = _resolve_inherited_version(toml_get_version(fs.readFile(manifest)), ws_package_version);
         }
         out.push(_LockEntry {
             capsule: member.name, version: version, hash: ""
@@ -190,6 +211,17 @@ fn _wl_member(root: string, member: string, name: string, version: string) ![io]
     let mut body: string = "[capsule]\n";
     if name.length > 0 { body = body + "name = \"" + name + "\"\n"; }
     body = body + "version = \"" + version + "\"\n";
+    fs.writeFile(_cr_path_join(dir, "capsule.toml"), body);
+}
+
+// Create `<root>/<member>/capsule.toml` that opts into workspace version
+// inheritance via the `version = { workspace = true }` inline-table marker
+// (unquoted — the raw TOML form a member author writes).
+fn _wl_member_inherit(root: string, member: string, name: string) ![io] {
+    let dir = _cr_path_join(root, member);
+    process.run(["mkdir", "-p", dir]);
+    let body = "[capsule]\nname = \"" + name
+        + "\"\nversion = { workspace = true }\n";
     fs.writeFile(_cr_path_join(dir, "capsule.toml"), body);
 }
 
@@ -272,6 +304,43 @@ test "workspace-lock: no workspace.toml yields no entries" ![io] {
 
     let entries = _resolve_workspace_lock_entries(root);
     assert entries.length == 0;
+
+    _wl_cleanup(root);
+}
+
+// SFEP-0051 Phase 3: end-to-end inheritance through resolve_workspace_lock_entries.
+test "workspace-lock: inheriting member resolves to root [workspace.package] version" ![io] {
+    let root = _wl_tmp_root("inherit");
+    // Root declares the inheritable version; one member inherits it, the other
+    // pins its own — the override must win.
+    fs.writeFile(_cr_path_join(root, "workspace.toml"), "[workspace]\nmembers = [\"a\", \"b\"]\n\n[workspace.package]\nversion = \"0.5.9\"\nlicense = \"Apache-2.0\"\n");
+    _wl_member_inherit(root, "a", "alpha");
+    _wl_member(root, "b", "beta", "2.1.0");
+
+    let entries = _resolve_workspace_lock_entries(root);
+    assert entries.length == 2;
+    // The inheriting member is written to the lock with the resolved concrete
+    // version, never the `{ workspace = true }` marker.
+    let a = _wl_find(entries, "alpha");
+    assert _str_eq(a.version, "0.5.9");
+    // The overriding member keeps its own version.
+    let b = _wl_find(entries, "beta");
+    assert _str_eq(b.version, "2.1.0");
+
+    _wl_cleanup(root);
+}
+
+test "workspace-lock: inheriting member with no [workspace.package] resolves to empty" ![io] {
+    let root = _wl_tmp_root("inherit_empty");
+    // No `[workspace.package] version` at the root → the resolver substitutes
+    // the empty getter sentinel rather than the raw marker.
+    fs.writeFile(_cr_path_join(root, "workspace.toml"), "[workspace]\nmembers = [\"a\"]\n");
+    _wl_member_inherit(root, "a", "alpha");
+
+    let entries = _resolve_workspace_lock_entries(root);
+    assert entries.length == 1;
+    let a = _wl_find(entries, "alpha");
+    assert _str_eq(a.version, "");
 
     _wl_cleanup(root);
 }
