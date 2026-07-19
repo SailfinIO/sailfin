@@ -98,6 +98,8 @@ import {
     toml_get_workspace_capabilities_allow,
     toml_get_workspace_capabilities_deny,
     toml_get_workspace_capabilities_grant,
+    toml_get_workspace_default_members,
+    toml_get_workspace_exclude,
     toml_get_workspace_members,
     toml_get_workspace_package_version,
     toml_value_is_workspace_inherit
@@ -2483,6 +2485,45 @@ fn _cr_str_in(arr: string[], s: string) -> boolean {
     return false;
 }
 
+// SFEP-0051 Phase 5: drop members whose path appears in the workspace
+// `exclude` list (Cargo `workspace.exclude`). Pure over an already-expanded
+// path list, so a `capsules/sfn/*` glob can skip a scratch/vendored subdir
+// without enumerating its siblings. Applied only to glob-expanded members in
+// `_cr_expand_member_globs`; explicit literal members are never excluded,
+// matching Cargo. Order-preserving.
+fn _cr_filter_excluded(paths: string[], exclude: string[]) -> string[] {
+    if exclude.length == 0 { return paths; }
+    let mut out: string[] = [];
+    let mut i: int = 0;
+    loop {
+        if i >= paths.length { break; }
+        let p = paths[i];
+        i += 1;
+        if !_cr_str_in(exclude, p) { out.push(p); }
+    }
+    return out;
+}
+
+// SFEP-0051 Phase 5: select the member paths a bare root build/test targets
+// (Cargo `workspace.default-members`). `defaults` is the glob-expanded,
+// exclude-filtered `default-members` set; keep every entry of `all_paths`
+// present in it, preserving `all_paths` order. An empty `defaults` means the
+// manifest declares no `default-members`, so every member is a default target
+// (Cargo's fallback). Pure over path lists; the IO wrapper that reads the
+// manifest is `load_workspace_default_members`.
+fn _cr_select_default_member_paths(all_paths: string[], defaults: string[]) -> string[] {
+    if defaults.length == 0 { return all_paths; }
+    let mut out: string[] = [];
+    let mut i: int = 0;
+    loop {
+        if i >= all_paths.length { break; }
+        let p = all_paths[i];
+        i += 1;
+        if _cr_str_in(defaults, p) { out.push(p); }
+    }
+    return out;
+}
+
 // Expand `[workspace].members` glob entries against the workspace tree
 // (SFEP-0006 §4.2). Only a trailing `/*` is supported — Cargo-style implicit
 // members: every immediate subdirectory of the prefix that carries a
@@ -2493,7 +2534,13 @@ fn _cr_str_in(arr: string[], s: string) -> boolean {
 // two overlapping globs) is emitted once — otherwise the duplicate would reach
 // `workspace.lock` as a repeated entry (`resolve_workspace_lock_entries` maps
 // members 1:1 and the lock writer does not dedup).
-fn _cr_expand_member_globs(workspace_root: string, paths: string[]) -> string[] ![io] {
+//
+// SFEP-0051 Phase 5: `exclude` (Cargo `workspace.exclude`) drops matching
+// subdirs from each glob's expansion before they join the member set, so a
+// `capsules/sfn/*` glob can skip a scratch/vendored dir without listing every
+// sibling. It filters glob-expanded members only; explicit literal entries are
+// never excluded, matching Cargo. Pass `[]` for no exclusions.
+fn _cr_expand_member_globs(workspace_root: string, paths: string[], exclude: string[]) -> string[] ![io] {
     let mut out: string[] = [];
     let mut i: int = 0;
     loop {
@@ -2513,6 +2560,7 @@ fn _cr_expand_member_globs(workspace_root: string, paths: string[]) -> string[] 
         let base = _cr_path_join(workspace_root, prefix);
         if !fs.exists(base) { continue; }
         let names = _cr_sort_strings(fs.listDirectory(base));
+        let mut expanded: string[] = [];
         let mut j: int = 0;
         loop {
             if j >= names.length { break; }
@@ -2520,9 +2568,15 @@ fn _cr_expand_member_globs(workspace_root: string, paths: string[]) -> string[] 
             j += 1;
             let member_path = prefix + "/" + name;
             let cap = _cr_path_join(_cr_path_join(workspace_root, member_path), "capsule.toml");
-            if fs.exists(cap) {
-                if !_cr_str_in(out, member_path) { out.push(member_path); }
-            }
+            if fs.exists(cap) { expanded.push(member_path); }
+        }
+        let kept = _cr_filter_excluded(expanded, exclude);
+        let mut ki: int = 0;
+        loop {
+            if ki >= kept.length { break; }
+            let member_path = kept[ki];
+            ki += 1;
+            if !_cr_str_in(out, member_path) { out.push(member_path); }
         }
     }
     return out;
@@ -2539,7 +2593,8 @@ fn load_workspace_members(workspace_root: string) -> WorkspaceMember[] ![io] {
     if !fs.exists(manifest) { return out; }
     let text = fs.readFile(manifest);
     let members_text = toml_get_workspace_members(text);
-    let paths = _cr_expand_member_globs(workspace_root, parse_workspace_member_paths(members_text));
+    let exclude = toml_get_workspace_exclude(text);
+    let paths = _cr_expand_member_globs(workspace_root, parse_workspace_member_paths(members_text), exclude);
     let mut i: int = 0;
     loop {
         if i >= paths.length { break; }
@@ -2562,6 +2617,57 @@ fn load_workspace_members(workspace_root: string) -> WorkspaceMember[] ![io] {
             name: name, member_path: path, src_dir: src
         });
         i += 1;
+    }
+    return out;
+}
+
+// SFEP-0051 Phase 5: the workspace members a bare `sfn build`/`sfn test` at the
+// workspace root targets when no `-p` is given (Cargo
+// `workspace.default-members`). Returns the `default-members` subset when the
+// manifest declares one, else every member (`load_workspace_members`, already
+// glob-expanded and `exclude`-filtered) — Cargo's fallback. `default-members`
+// entries may themselves be trailing-`/*` globs, expanded here against the same
+// `exclude` list; an entry that does not resolve to a real member is ignored
+// (the intersection with `load_workspace_members` is the source of truth for
+// which members exist). The CLI fan-out that consumes this — bare-root
+// build/test target selection in `cli/commands/{build,test}.sfn` — is a
+// follow-up; this provides the resolver-tier selection primitive it will call.
+fn load_workspace_default_members(workspace_root: string) -> WorkspaceMember[] ![io] {
+    let all = load_workspace_members(workspace_root);
+    if workspace_root.length == 0 { return all; }
+    let manifest = _cr_path_join(workspace_root, "workspace.toml");
+    if !fs.exists(manifest) { return all; }
+    let text = fs.readFile(manifest);
+    let defaults_raw = toml_get_workspace_default_members(text);
+    if defaults_raw.length == 0 { return all; }
+    let exclude = toml_get_workspace_exclude(text);
+    let defaults = _cr_expand_member_globs(workspace_root, defaults_raw, exclude);
+    // A declared `default-members` that resolves to nothing (a typo'd glob
+    // prefix, or every entry excluded) is an empty default target set — NOT the
+    // undeclared→all fallback above. Guard here so the pure selector's
+    // empty-means-all contract never fires on a declared-but-unresolved set,
+    // which would silently widen a narrowed bare-root build to the whole
+    // workspace. Warn so a typo is diagnosable rather than silent.
+    if defaults.length == 0 {
+        print.err("workspace: [workspace].default-members matched no workspace member"
+            + " — bare-root build/test has no default target");
+        return [];
+    }
+    let mut all_paths: string[] = [];
+    let mut i: int = 0;
+    loop {
+        if i >= all.length { break; }
+        all_paths.push(all[i].member_path);
+        i += 1;
+    }
+    let selected = _cr_select_default_member_paths(all_paths, defaults);
+    let mut out: WorkspaceMember[] = [];
+    let mut k: int = 0;
+    loop {
+        if k >= all.length { break; }
+        let m = all[k];
+        k += 1;
+        if _cr_str_in(selected, m.member_path) { out.push(m); }
     }
     return out;
 }

@@ -21,6 +21,8 @@ import {
     toml_get_workspace_package_version,
     toml_get_workspace_package_license,
     toml_get_workspace_dependencies,
+    toml_get_workspace_default_members,
+    toml_get_workspace_exclude,
     toml_get_version
 } from "../../src/toml_parser";
 
@@ -304,6 +306,74 @@ test "manifest: workspace.dependencies does not leak into [dependencies]" {
     let mut leaked: boolean = false;
     if _contains(deps, "sfn/strings=0.3.0") { leaked = true; }
     assert leaked == false;
+}
+
+// ---- SFEP-0051 Phase 5: [workspace] default-members / exclude ----
+test "manifest: workspace.default-members absent returns empty array" {
+    let toml = "[workspace]\nmembers = [\"compiler\"]\n";
+    assert toml_get_workspace_default_members(toml).length == 0;
+}
+
+test "manifest: workspace.default-members single entry parses" {
+    let toml = "[workspace]\nmembers = [\"compiler\", \"runtime\"]\ndefault-members = [\"compiler\"]\n";
+    let defaults = toml_get_workspace_default_members(toml);
+    assert defaults.length == 1;
+    assert _str_eq(defaults[0], "compiler");
+}
+
+test "manifest: workspace.default-members multiple entries parse" {
+    let toml = "[workspace]\nmembers = [\"compiler\", \"runtime\", \"capsules/sfn/http\"]\ndefault-members = [\"compiler\", \"capsules/sfn/http\"]\n";
+    let defaults = toml_get_workspace_default_members(toml);
+    assert defaults.length == 2;
+    assert _str_eq(defaults[0], "compiler");
+    assert _str_eq(defaults[1], "capsules/sfn/http");
+}
+
+test "manifest: workspace.default-members multi-line array parses" {
+    let toml = "[workspace]\nmembers = [\"compiler\", \"runtime\"]\ndefault-members = [\n    \"compiler\",\n    \"runtime\",\n]\n";
+    let defaults = toml_get_workspace_default_members(toml);
+    assert defaults.length == 2;
+    assert _str_eq(defaults[0], "compiler");
+    assert _str_eq(defaults[1], "runtime");
+}
+
+test "manifest: workspace.default-members reads past a multi-line members array" {
+    // The generic section/key reader must find `default-members` even when the
+    // preceding `members` value spans several physical lines.
+    let toml = "[workspace]\nmembers = [\n    \"compiler\",\n    \"runtime\",\n]\ndefault-members = [\"compiler\"]\n";
+    let defaults = toml_get_workspace_default_members(toml);
+    assert defaults.length == 1;
+    assert _str_eq(defaults[0], "compiler");
+}
+
+test "manifest: workspace.exclude absent returns empty array" {
+    let toml = "[workspace]\nmembers = [\"capsules/sfn/*\"]\n";
+    assert toml_get_workspace_exclude(toml).length == 0;
+}
+
+test "manifest: workspace.exclude single entry parses" {
+    let toml = "[workspace]\nmembers = [\"capsules/sfn/*\"]\nexclude = [\"capsules/sfn/scratch\"]\n";
+    let excluded = toml_get_workspace_exclude(toml);
+    assert excluded.length == 1;
+    assert _str_eq(excluded[0], "capsules/sfn/scratch");
+}
+
+test "manifest: workspace.exclude multiple entries parse" {
+    let toml = "[workspace]\nmembers = [\"capsules/sfn/*\"]\nexclude = [\"capsules/sfn/scratch\", \"capsules/sfn/vendored\"]\n";
+    let excluded = toml_get_workspace_exclude(toml);
+    assert excluded.length == 2;
+    assert _str_eq(excluded[0], "capsules/sfn/scratch");
+    assert _str_eq(excluded[1], "capsules/sfn/vendored");
+}
+
+test "manifest: default-members and exclude coexist under [workspace]" {
+    let toml = "[workspace]\nmembers = [\"capsules/sfn/*\"]\ndefault-members = [\"capsules/sfn/http\"]\nexclude = [\"capsules/sfn/scratch\"]\n";
+    let defaults = toml_get_workspace_default_members(toml);
+    let excluded = toml_get_workspace_exclude(toml);
+    assert defaults.length == 1;
+    assert _str_eq(defaults[0], "capsules/sfn/http");
+    assert excluded.length == 1;
+    assert _str_eq(excluded[0], "capsules/sfn/scratch");
 }
 
 // ---- Existing fields still parse after extension ----

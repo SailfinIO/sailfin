@@ -109,6 +109,46 @@ fn _resolve_inherited_version(member_version: string, workspace_version: string)
     return member_version;
 }
 
+// -- Inline copies of the SFEP-0051 Phase 5 pure member-selection helpers
+//    (from capsule_resolver.sfn: `_cr_str_in`, `_cr_filter_excluded`,
+//    `_cr_select_default_member_paths`). Inlined for the same reason as the
+//    rest of this file — importing them pulls in the whole compiler. --
+fn _str_in(arr: string[], s: string) -> boolean {
+    let mut i: int = 0;
+    loop {
+        if i >= arr.length { break; }
+        if strings_equal(arr[i], s) { return true; }
+        i += 1;
+    }
+    return false;
+}
+
+fn _filter_excluded(paths: string[], exclude: string[]) -> string[] {
+    if exclude.length == 0 { return paths; }
+    let mut out: string[] = [];
+    let mut i: int = 0;
+    loop {
+        if i >= paths.length { break; }
+        let p = paths[i];
+        i += 1;
+        if !_str_in(exclude, p) { out.push(p); }
+    }
+    return out;
+}
+
+fn _select_default_member_paths(all_paths: string[], defaults: string[]) -> string[] {
+    if defaults.length == 0 { return all_paths; }
+    let mut out: string[] = [];
+    let mut i: int = 0;
+    loop {
+        if i >= all_paths.length { break; }
+        let p = all_paths[i];
+        i += 1;
+        if _str_in(defaults, p) { out.push(p); }
+    }
+    return out;
+}
+
 // ---- parse_workspace_member_paths ----
 test "workspace: empty member list parses to empty array" {
     let parsed = _parse_workspace_member_paths("");
@@ -234,4 +274,84 @@ test "workspace: non-marker inline table is treated as a literal version" {
     // Only `{ workspace = true }` triggers inheritance; any other value is the
     // member's own version verbatim.
     assert _str_eq(_resolve_inherited_version("{ workspace = false }", "0.5.9"), "{ workspace = false }");
+}
+
+// ---- SFEP-0051 Phase 5: exclude filtering (glob expansion) ----
+test "workspace: empty exclude leaves the expanded set unchanged" {
+    let paths = ["capsules/sfn/http", "capsules/sfn/net", "capsules/sfn/test"];
+    let kept = _filter_excluded(paths, []);
+    assert kept.length == 3;
+    assert _str_eq(kept[0], "capsules/sfn/http");
+    assert _str_eq(kept[2], "capsules/sfn/test");
+}
+
+test "workspace: exclude removes a matching subdir from the expansion" {
+    let paths = ["capsules/sfn/http", "capsules/sfn/scratch", "capsules/sfn/net"];
+    let kept = _filter_excluded(paths, ["capsules/sfn/scratch"]);
+    assert kept.length == 2;
+    assert _str_eq(kept[0], "capsules/sfn/http");
+    assert _str_eq(kept[1], "capsules/sfn/net");
+}
+
+test "workspace: exclude removes multiple matching subdirs" {
+    let paths = ["capsules/sfn/http", "capsules/sfn/scratch", "capsules/sfn/vendored", "capsules/sfn/net"];
+    let kept = _filter_excluded(paths, ["capsules/sfn/scratch", "capsules/sfn/vendored"]);
+    assert kept.length == 2;
+    assert _str_eq(kept[0], "capsules/sfn/http");
+    assert _str_eq(kept[1], "capsules/sfn/net");
+}
+
+test "workspace: exclude entry that matches nothing is a no-op" {
+    let paths = ["capsules/sfn/http", "capsules/sfn/net"];
+    let kept = _filter_excluded(paths, ["capsules/sfn/absent"]);
+    assert kept.length == 2;
+    assert _str_eq(kept[0], "capsules/sfn/http");
+    assert _str_eq(kept[1], "capsules/sfn/net");
+}
+
+test "workspace: exclude preserves order of the surviving members" {
+    let paths = ["a/one", "a/two", "a/three", "a/four"];
+    let kept = _filter_excluded(paths, ["a/two"]);
+    assert kept.length == 3;
+    assert _str_eq(kept[0], "a/one");
+    assert _str_eq(kept[1], "a/three");
+    assert _str_eq(kept[2], "a/four");
+}
+
+// ---- SFEP-0051 Phase 5: default-members selection ----
+test "workspace: empty default-members selects every member (Cargo fallback)" {
+    let all = ["compiler", "runtime", "capsules/sfn/http"];
+    let selected = _select_default_member_paths(all, []);
+    assert selected.length == 3;
+    assert _str_eq(selected[0], "compiler");
+    assert _str_eq(selected[2], "capsules/sfn/http");
+}
+
+test "workspace: default-members scopes the selection to the listed subset" {
+    let all = ["compiler", "runtime", "capsules/sfn/http", "capsules/sfn/net"];
+    let selected = _select_default_member_paths(all, ["compiler", "capsules/sfn/net"]);
+    assert selected.length == 2;
+    assert _str_eq(selected[0], "compiler");
+    assert _str_eq(selected[1], "capsules/sfn/net");
+}
+
+test "workspace: default-members preserves member (not manifest) order" {
+    // The selection walks `all` in its resolved order, not the order the
+    // default-members list happens to use — so a bare root build is
+    // deterministic regardless of how the manifest lists defaults.
+    let all = ["compiler", "runtime", "capsules/sfn/http"];
+    let selected = _select_default_member_paths(all, ["capsules/sfn/http", "compiler"]);
+    assert selected.length == 2;
+    assert _str_eq(selected[0], "compiler");
+    assert _str_eq(selected[1], "capsules/sfn/http");
+}
+
+test "workspace: default-members entry that is not a member is ignored" {
+    // A default-members path that does not resolve to a real member (e.g. a
+    // typo or an excluded dir) simply drops out — the intersection with the
+    // actual member set is the source of truth.
+    let all = ["compiler", "runtime"];
+    let selected = _select_default_member_paths(all, ["compiler", "capsules/sfn/absent"]);
+    assert selected.length == 1;
+    assert _str_eq(selected[0], "compiler");
 }
