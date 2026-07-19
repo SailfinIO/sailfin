@@ -412,7 +412,7 @@ fn sailfin_cli_main_v2(argv: string[]) -> int ![clock, io, net] {
     }
 
     // `sfn test [--json] [-k NAME] [--tag TAG] [--update-snapshots]
-    // [--no-test-cache] [--jobs N] <suite...>` — the registered subcommand
+    // [--no-test-cache] [--jobs N] [suite...]` — the registered subcommand
     // matched. The variadic `<suite...>` accepts zero tokens, so a bare
     // `sfn test` (and every flag combination) parses ok and dispatches to
     // `test.run`, which defaults an empty suite list to "." and owns its
@@ -426,7 +426,8 @@ fn sailfin_cli_main_v2(argv: string[]) -> int ![clock, io, net] {
     if strings_equal(subcommand(matches), "test") {
         if ctx.trace_argv { _v2_trace_argv(argv); }
         if parse_ok { return test_run(matches, ctx); }
-        print("usage: sfn test [--json] [-k NAME] [--tag TAG] [--update-snapshots] [--no-test-cache] [--jobs N] <suite...>");
+        print("usage: sfn test [--json] [-k NAME] [--tag TAG] [--update-snapshots] [--no-test-cache] [--jobs N] [suite...]");
+        print("       with no suite at a workspace root, tests [workspace].default-members (or all members)");
         return 2;
     }
 
@@ -572,7 +573,7 @@ fn sailfin_cli_main_v2(argv: string[]) -> int ![clock, io, net] {
     }
 
     // `sfn build [-o OUTPUT] [-p PATH] [--no-cache] [--clean] [--cache-trace]
-    // [--json] [--work-dir DIR] [--check-determinism] (<file.sfn> | -p <capsule-path>)`
+    // [--json] [--work-dir DIR] [--check-determinism] [<file.sfn> | -p <capsule-path>]`
     // — the registered subcommand matched. A clean parse dispatches to
     // `build.run`, which reproduces the legacy `_legacy_dispatch_build` body
     // against typed matches. A non-ok parse that still descended into `build`
@@ -581,7 +582,8 @@ fn sailfin_cli_main_v2(argv: string[]) -> int ![clock, io, net] {
     if strings_equal(subcommand(matches), "build") {
         if ctx.trace_argv { _v2_trace_argv(argv); }
         if parse_ok { return build_run(matches, ctx); }
-        print("usage: sfn build [-o OUTPUT] [-p PATH] [--no-cache] [--clean] [--cache-trace] [--json] [--work-dir DIR] [--check-determinism] (<file.sfn> | -p <capsule-path>)");
+        print("usage: sfn build [-o OUTPUT] [-p PATH] [--no-cache] [--clean] [--cache-trace] [--json] [--work-dir DIR] [--check-determinism] [<file.sfn> | -p <capsule-path>]");
+        print("       with no target at a workspace root, builds [workspace].default-members (or all members)");
         return 2;
     }
 

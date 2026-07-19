@@ -85,6 +85,7 @@ import {
     TestCapsuleResolution,
     discover_project_root,
     discover_workspace_root,
+    load_workspace_default_members,
     prepare_project_capsules_for_test
 } from "../../capsule_resolver";
 import { ImportSymbolTable, empty_import_symbols } from "../../effect_imports";
@@ -394,7 +395,7 @@ fn _shard_keeps_index(item_index: int, shard_index: int, shard_total: int) -> bo
 // `--tag`, `--shard`), one int flag (`--jobs`), and a variadic `suite`
 // positional.
 fn command_def() -> Command {
-    return with_arg(with_flag(with_flag(with_flag(with_flag(with_flag(with_flag(with_flag(with_flag(command("test", "Run Sailfin tests"), flag("json", "Emit a JSONL event stream")), flag("update-snapshots", "Re-baseline snapshot golden files this run")), flag("no-test-cache", "Bypass the per-test linked-binary cache")), flag_value_short("k", "k", "Only run tests whose name contains this substring")), flag_value("tag", "Only run tests carrying @tag(\"<value>\")")), flag_int("jobs", "Run up to N per-file children concurrently")), flag_value("shard", "Run only the I-th of N file-count-balanced shards (e.g. 1/3)")), flag("skip-toolchain-check", "Bypass the [toolchain] pin check for this invocation")), arg_variadic("suite", "One or more suite paths (default: .)"));
+    return with_arg(with_flag(with_flag(with_flag(with_flag(with_flag(with_flag(with_flag(with_flag(command("test", "Run tests or workspace default members"), flag("json", "Emit a JSONL event stream")), flag("update-snapshots", "Re-baseline snapshot golden files this run")), flag("no-test-cache", "Bypass the per-test linked-binary cache")), flag_value_short("k", "k", "Only run tests whose name contains this substring")), flag_value("tag", "Only run tests carrying @tag(\"<value>\")")), flag_int("jobs", "Run up to N per-file children concurrently")), flag_value("shard", "Run only the I-th of N file-count-balanced shards (e.g. 1/3)")), flag("skip-toolchain-check", "Bypass the [toolchain] pin check for this invocation")), arg_variadic("suite", "Suite paths (omit at a workspace root to test default members)"));
 }
 
 fn run(matches: Matches, ctx: CliContext) -> int ![clock, io, net] {
@@ -460,15 +461,31 @@ fn run(matches: Matches, ctx: CliContext) -> int ![clock, io, net] {
     let positional: string[] = positionals(matches, "suite");
     set_test_filters(name_filter, tag_filter);
 
-    // Build the suite list. Zero positional args defaults to a
-    // single "." suite (matches pre-#848 behaviour). One or more
-    // positionals become one suite each, named by their basename.
+    // Build the suite list. At a workspace root, zero positional args select
+    // `[workspace].default-members` (or every member when undeclared). Outside
+    // a workspace the historical single "." suite remains the fallback.
+    // One or more positionals are unchanged.
     let mut suites: TestSuite[] = [];
     if positional.length == 0 {
-        let empty_failed: string[] = [];
-        suites.push(TestSuite {
-            name: ".", path: ".", pass_count: 0, fail_count: 0, failed_files: empty_failed
-        });
+        let workspace_root = discover_workspace_root(".");
+        if workspace_root.length > 0 {
+            let members = load_workspace_default_members(workspace_root);
+            let mut wmi: int = 0;
+            loop {
+                if wmi >= members.length { break; }
+                let member = members[wmi];
+                let empty_failed: string[] = [];
+                suites.push(TestSuite {
+                    name: member.name, path: workspace_root + "/" + member.member_path, pass_count: 0, fail_count: 0, failed_files: empty_failed
+                });
+                wmi += 1;
+            }
+        } else {
+            let empty_failed: string[] = [];
+            suites.push(TestSuite {
+                name: ".", path: ".", pass_count: 0, fail_count: 0, failed_files: empty_failed
+            });
+        }
     } else {
         let mut spi: int = 0;
         loop {
