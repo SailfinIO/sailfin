@@ -343,10 +343,16 @@ jobs:
     # old serial-shard `for` loop whose ~53-min cold floor (shards run
     # one-at-a-time, files serial within each) kept tipping past the cap and
     # leaving the cache unsaved, so the next run paid the cold cost again
-    # (SFN-394). The cap is now a backstop, not a budget: the parallel pass
-    # plus a cold module-IR self-host and the retry-once flake path (#892)
-    # clears it with comfortable margin. See docs/proposals/0011-ci-test-speed.md.
-    timeout-minutes: 60
+    # (SFN-394). Parallelizing helped but did NOT clear a 60-min cap: on the
+    # 4-core `ubuntu-24.04` runner the cold full suite still needs >60 min
+    # (the warm step observed running 56-58 min and killed mid-e2e before the
+    # `Save test-bin cache` step could land, so the cache stayed unsaved and
+    # the whole run reported `cancelled`). The cap is a backstop for a hung
+    # pool, not the suite's wall-time budget, so it is set above the cold
+    # ceiling with headroom for the retry-once flake path (#892) and the
+    # commit-to-commit growth of the suite. See
+    # docs/proposals/0011-ci-test-speed.md.
+    timeout-minutes: 90
     steps:
       - name: Checkout repository
         uses: actions/checkout@v7
