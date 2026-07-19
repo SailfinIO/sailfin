@@ -67,6 +67,7 @@ import {
     collect_scoped_import_specs
 } from "./capsule_import_scan";
 import { _display_capsule_name_cmd } from "./capsule_names";
+import { render_diagnostic } from "./diagnostics_render";
 import { effect_subsumes, is_canonical_effect } from "./effect_taxonomy";
 import { emit_subprocess_with_retry } from "./emit_helpers";
 import { set_import_context_root } from "./llvm/mod";
@@ -98,6 +99,7 @@ import {
     toml_get_workspace_capabilities_allow,
     toml_get_workspace_capabilities_deny,
     toml_get_workspace_capabilities_grant,
+    toml_get_workspace_capabilities_mode,
     toml_get_workspace_default_members,
     toml_get_workspace_exclude,
     toml_get_workspace_members,
@@ -139,6 +141,10 @@ export {
     toolchain_decide,
     toolchain_print_mismatch,
     workspace_capability_audit,
+    workspace_capability_envelope_active,
+    workspace_capability_gate,
+    workspace_capability_mode,
+    workspace_effective_envelope,
     workspace_member_for_spec
 };
 
@@ -2914,6 +2920,90 @@ fn workspace_capability_audit(workspace_root: string) -> CapabilityDriftReport !
         diagnostics: diags,
         has_drift: has_drift
     };
+}
+
+// SFEP-0051 Phase 4c: the capability envelope is opt-in. Enforcement is active
+// only when the workspace declares a non-empty `allow` ceiling — that list is
+// the ceiling `effective(M) = (allow ∪ grant) \ deny` is carved from, so with
+// no `allow` there is nothing to audit against. A workspace with no
+// `[workspace.capabilities]` block (the common case, including this repo) is
+// therefore never retroactively broken by the gate: it opts in by declaring an
+// `allow` list. Returns false for a missing manifest or an empty/absent allow.
+fn workspace_capability_envelope_active(workspace_root: string) -> boolean ![io] {
+    if workspace_root.length == 0 { return false; }
+    let ws_manifest = _cr_path_join(workspace_root, "workspace.toml");
+    if !fs.exists(ws_manifest) { return false; }
+    let allow = toml_get_workspace_capabilities_allow(fs.readFile(ws_manifest));
+    return allow.length > 0;
+}
+
+// SFEP-0051 Phase 4c: read the `[workspace.capabilities] mode` enforcement
+// knob. "warn" reports drift without failing (a migration aid only); every
+// other value — absent, empty, or a typo — resolves to the fail-closed
+// "enforce" default so a misspelled mode can never silently disable the gate.
+fn workspace_capability_mode(workspace_root: string) -> string ![io] {
+    if workspace_root.length == 0 { return "enforce"; }
+    let ws_manifest = _cr_path_join(workspace_root, "workspace.toml");
+    if !fs.exists(ws_manifest) { return "enforce"; }
+    let raw = toml_get_workspace_capabilities_mode(fs.readFile(ws_manifest));
+    if strings_equal(raw, "warn") { return "warn"; }
+    return "enforce";
+}
+
+// The effective capability envelope for a member: `(allow ∪ grant) \ deny`,
+// deduplicated and sorted into canonical (alphabetical) order. Pure — the
+// `sfn capabilities audit` command uses it for the per-member "effective"
+// column. Deny wins via `_cr_effect_covered`, so a denied `io` masks an
+// allowed or granted `io` (or `io.*`).
+fn workspace_effective_envelope(allow: string[], deny: string[], grant: string[]) -> string[] {
+    let mut merged: string[] = [];
+    let mut ai: int = 0;
+    loop {
+        if ai >= allow.length { break; }
+        let ea = allow[ai];
+        ai += 1;
+        if _cr_effect_covered(deny, ea) { continue; }
+        if !_cr_string_array_contains(merged, ea) { merged.push(ea); }
+    }
+    let mut gi: int = 0;
+    loop {
+        if gi >= grant.length { break; }
+        let eg = grant[gi];
+        gi += 1;
+        if _cr_effect_covered(deny, eg) { continue; }
+        if !_cr_string_array_contains(merged, eg) { merged.push(eg); }
+    }
+    return _cr_sort_strings(merged);
+}
+
+// SFEP-0051 Phase 4c: the workspace capability-envelope enforcement gate
+// shared by `sfn check` and `sfn build`. Runs the declared-surface audit and
+// renders every E0405 (drift) / E0406 (malformed envelope) diagnostic to
+// stderr. In `enforce` mode (default) a non-empty report fails the build
+// (returns 1); in `warn` mode the same diagnostics are reported but the gate
+// returns 0 — a migration bridge, not the marketed state. A non-workspace
+// input (`workspace_root == ""`, or no `workspace.toml`) is a silent no-op,
+// so single-capsule and single-file builds are unaffected.
+fn workspace_capability_gate(workspace_root: string) -> int ![io] {
+    if workspace_root.length == 0 { return 0; }
+    // Opt-in: no declared `allow` ceiling ⇒ no envelope ⇒ no-op. Without this
+    // an envelope-free workspace would report every member's declared effect as
+    // drift (empty `allow` covers nothing), breaking every `sfn check`/`build`.
+    if !workspace_capability_envelope_active(workspace_root) { return 0; }
+    let report = workspace_capability_audit(workspace_root);
+    if report.diagnostics.length == 0 { return 0; }
+    let empty_lines: string[] = [];
+    let mut i: int = 0;
+    loop {
+        if i >= report.diagnostics.length { break; }
+        print.err(render_diagnostic(report.diagnostics[i], empty_lines, "capability"));
+        i += 1;
+    }
+    if strings_equal(workspace_capability_mode(workspace_root), "warn") {
+        print.err("[workspace.capabilities] mode = \"warn\": capability drift reported, not enforced");
+        return 0;
+    }
+    return 1;
 }
 
 // Look up a workspace member by canonical name (e.g. "sfn/http") and return

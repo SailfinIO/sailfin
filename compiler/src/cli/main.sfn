@@ -49,6 +49,7 @@ import { command_def as add_command_def, run as add_run } from "./commands/add";
 import { command_def as bench_command_def, run as bench_run } from "./commands/bench";
 import { command_def as build_command_def, run as build_run } from "./commands/build";
 import { command_def as cache_command_def, run as cache_run } from "./commands/cache";
+import { command_def as capabilities_command_def, run as capabilities_run } from "./commands/capabilities";
 import { command_def as check_command_def, run as check_run } from "./commands/check";
 import { command_def as completion_command_def, run as completion_run } from "./commands/completion";
 import { command_def as config_command_def, run as config_run } from "./commands/config";
@@ -89,6 +90,7 @@ fn _usage() -> string {
     out = out + "  sfn check [--quiet] [path...]\n";
     out = out + "  sfn fmt   [--check] [--write] <path...>\n";
     out = out + "  sfn test  [--update-snapshots] [--jobs N] [path...]\n";
+    out = out + "  sfn capabilities audit\n";
     out = out + "\n";
     out = out + "packages:\n";
     out = out + "  sfn add     [--dev] [--update] <capsule>\n";
@@ -227,6 +229,7 @@ fn sailfin_cli_main_v2(argv: string[]) -> int ![clock, io, net] {
     root = with_subcommand(root, toolchain_command_def());
     root = with_subcommand(root, dev_command_def());
     root = with_subcommand(root, cache_command_def());
+    root = with_subcommand(root, capabilities_command_def());
     root = with_subcommand(root, lock_command_def());
     root = with_subcommand(root, package_command_def());
     root = with_subcommand(root, emit_command_def());
@@ -506,6 +509,23 @@ fn sailfin_cli_main_v2(argv: string[]) -> int ![clock, io, net] {
             if parse_ok { return toolchain_run(matches, ctx); }
             if parse_err.message.length > 0 { print(parse_err.message); } else {
                 print("usage: sfn toolchain install <version>");
+            }
+            return 2;
+        }
+    }
+
+    // `sfn capabilities audit` — SFEP-0051 Phase 4c workspace capability
+    // envelope reporting surface, a nested subcommand gated on the descent
+    // path's root exactly like `toolchain`/`cache`. A clean parse dispatches
+    // to `capabilities.run`; a non-ok parse that descended into `capabilities`
+    // (unknown leaf, `--help`) is a usage error (exit 2).
+    let capabilities_path: string[] = subcommand_path(matches);
+    if capabilities_path.length > 0 {
+        if strings_equal(capabilities_path[0], "capabilities") {
+            if ctx.trace_argv { _v2_trace_argv(argv); }
+            if parse_ok { return capabilities_run(matches, ctx); }
+            if parse_err.message.length > 0 { print(parse_err.message); } else {
+                print("usage: sfn capabilities audit");
             }
             return 2;
         }

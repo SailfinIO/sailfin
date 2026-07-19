@@ -1,0 +1,146 @@
+// compiler/src/cli/commands/capabilities.sfn
+//
+// `sfn capabilities audit` — the reporting + CI-dashboard surface of the
+// SFEP-0051 Phase 4 workspace capability envelope. It runs the same
+// declared-surface audit that gates `sfn check` / `sfn build`
+// (`workspace_capability_audit`, capsule_resolver.sfn) and prints a
+// per-member required-vs-effective table plus any E0405 (drift) / E0406
+// (malformed envelope) diagnostic. The exit code follows the envelope's
+// enforcement mode: non-zero on any finding under `enforce` (the default),
+// zero under `mode = "warn"` (a migration aid) and when there is no drift.
+import {
+    Command,
+    Matches,
+    command,
+    subcommand,
+    with_subcommand
+} from "sfn/cli";
+
+import { _path_join_cmd } from "../../build/fs";
+import {
+    discover_workspace_root,
+    workspace_capability_audit,
+    workspace_capability_envelope_active,
+    workspace_capability_mode,
+    workspace_effective_envelope
+} from "../../capsule_resolver";
+import { render_diagnostic } from "../../diagnostics_render";
+import {
+    toml_get_workspace_capabilities_allow,
+    toml_get_workspace_capabilities_deny,
+    toml_get_workspace_capabilities_grant
+} from "../../toml_parser";
+import { CliContext } from "../context";
+
+// Join an effect list for table display: comma-separated, or "-" when empty
+// (an empty cell reads as a formatting glitch; "-" reads as "none").
+fn _cap_join(effects: string[]) -> string {
+    if effects.length == 0 { return "-"; }
+    let mut out: string = "";
+    let mut i: int = 0;
+    loop {
+        if i >= effects.length { break; }
+        if i > 0 { out = out + ", "; }
+        out = out + effects[i];
+        i += 1;
+    }
+    return out;
+}
+
+// Right-pad `s` to at least `width` columns so the table stays aligned.
+fn _cap_pad(s: string, width: int) -> string {
+    let mut out: string = s;
+    loop {
+        if out.length >= width { break; }
+        out = out + " ";
+    }
+    return out;
+}
+
+// The `sfn/cli` definition for `capabilities`, registered on the v2 root via
+// `with_subcommand`. One nested leaf today: `audit`.
+fn command_def() -> Command {
+    let audit_cmd: Command = command("audit", "Audit workspace members against the [workspace.capabilities] envelope");
+    return with_subcommand(command("capabilities", "Inspect the workspace capability envelope"), audit_cmd);
+}
+
+// Dispatch `sfn capabilities audit`. Discovers the workspace root from the
+// current directory; a non-workspace invocation reports and exits 0 (nothing
+// to audit). Prints the per-member table, then any coded diagnostic, then a
+// status line whose exit code honours the enforcement mode.
+fn run(matches: Matches, ctx: CliContext) -> int ![io] {
+    let sub: string = subcommand(matches);
+    if !strings_equal(sub, "audit") {
+        print("usage: sfn capabilities audit");
+        return 2;
+    }
+
+    let ws_root = discover_workspace_root(".");
+    if ws_root.length == 0 {
+        print.err("sfn capabilities audit: no workspace.toml found (run from a workspace root)");
+        return 0;
+    }
+
+    // The envelope is opt-in: with no declared `allow` ceiling there is nothing
+    // to audit against, so report that rather than flagging every member's
+    // declared effect as drift against an empty envelope.
+    if !workspace_capability_envelope_active(ws_root) {
+        print("workspace: " + ws_root);
+        print("no capability envelope declared ([workspace.capabilities] allow is absent or empty); nothing to audit.");
+        return 0;
+    }
+
+    let ws_manifest = _path_join_cmd(ws_root, "workspace.toml");
+    let ws_text = fs.readFile(ws_manifest);
+    let allow = toml_get_workspace_capabilities_allow(ws_text);
+    let deny = toml_get_workspace_capabilities_deny(ws_text);
+    let mode = workspace_capability_mode(ws_root);
+    let report = workspace_capability_audit(ws_root);
+
+    print("workspace: " + ws_root);
+    print("mode: " + mode);
+    print("envelope: allow=[" + _cap_join(allow) + "] deny=[" + _cap_join(deny)
+        + "]");
+    print("");
+    print(_cap_pad("MEMBER", 24) + _cap_pad("REQUIRED", 20) + _cap_pad("EFFECTIVE", 20)
+        + "DRIFT");
+
+    let mut mi: int = 0;
+    loop {
+        if mi >= report.members.length { break; }
+        let m = report.members[mi];
+        mi += 1;
+        let grant = toml_get_workspace_capabilities_grant(ws_text, m.member_name);
+        let effective = workspace_effective_envelope(allow, deny, grant);
+        print(_cap_pad(m.member_name, 24) + _cap_pad(_cap_join(m.required), 20)
+            + _cap_pad(_cap_join(effective), 20)
+            + _cap_join(m.drift));
+    }
+
+    // E0405/E0406 diagnostics carry the member path + fix-it hint; render them
+    // to stderr (no source `Token`, so an empty source-line set) beneath the
+    // table so a CI log has both the overview and the actionable detail.
+    if report.diagnostics.length > 0 {
+        let empty_lines: string[] = [];
+        let mut di: int = 0;
+        loop {
+            if di >= report.diagnostics.length { break; }
+            print.err(render_diagnostic(report.diagnostics[di], empty_lines, "capability"));
+            di += 1;
+        }
+    }
+
+    print("");
+    if report.diagnostics.length == 0 {
+        print("no capability drift.");
+        return 0;
+    }
+    if strings_equal(mode, "warn") {
+        print("capability drift reported (mode = \"warn\": not enforced).");
+        return 0;
+    }
+    print("capability drift detected (mode = \"enforce\").");
+    return 1;
+}
+
+export { command_def, run };
