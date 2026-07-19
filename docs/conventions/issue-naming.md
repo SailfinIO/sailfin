@@ -429,13 +429,21 @@ has the final call.
 
 The public compiler train is a **weekly cadence**. The scheduled
 `release-train.yml` workflow runs every week and dispatches when `main` is
-green — a `nightly-selfhost.yml` run whose `head_sha` equals current `main`
-HEAD succeeded, so the gate binds to the exact commit being tagged (per-commit
-CI is already guaranteed by the merge queue). If HEAD is not yet
-nightly-verified at the cadence boundary, the train dispatches a fresh nightly
-and holds; the nightly's completion re-triggers the train and the cut fires
-once HEAD is green. Open release scope always rolls forward; it is reported on
-the tracker but never blocks the train.
+green — a green `nightly-selfhost.yml` run **covers** current `main` HEAD's
+compiler. Coverage does not require an exact `head_sha` match (on an
+actively-merged trunk HEAD advances faster than the daily nightly, so exact
+match is essentially never true — #1956): the gate accepts the most recent
+green nightly whose commit is an **ancestor** of HEAD as long as nothing
+self-host-relevant (`compiler/src`, `runtime`, `bootstrap.toml`) changed
+between it and HEAD, so routine docs/test/CI churn never blocks the cut while a
+compiler/runtime change since the last green nightly still holds it. `release.yml`
+re-checks the same predicate against `origin/main` at tag time (`verified_sha`
+input), closing the eval→tag race (per-commit CI is already guaranteed by the
+merge queue). If HEAD's compiler is not yet nightly-covered at the cadence
+boundary, the train dispatches a fresh nightly and holds; the nightly's
+completion re-triggers the train and the cut fires once HEAD is covered. Open
+release scope always rolls forward; it is reported on the tracker but never
+blocks the train.
 
 The train cuts a **stable** minor directly — not an alpha. The version rule,
 applied against the current `compiler/capsule.toml` version:

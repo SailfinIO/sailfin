@@ -45,6 +45,11 @@ on:
         required: false
         type: boolean
         default: false
+      verified_sha:
+        description: "Commit whose compiler a green nightly self-host verified (release-train gate). Blank on manual cuts skips the re-check."
+        required: false
+        type: string
+        default: ""
 
 concurrency:
   group: release
@@ -269,6 +274,7 @@ jobs:
         if: inputs.dry_run != true
         env:
           TAG: ${{ steps.bump.outputs.tag }}
+          VERIFIED_SHA: ${{ inputs.verified_sha }}
         run: |
           set -euo pipefail
           # main is written to concurrently (e.g. capsule-release.yml auto-commits
@@ -278,6 +284,24 @@ jobs:
           # so the rebase replays without conflicts; abort defensively if one occurs.
           for attempt in 1 2 3 4 5; do
             git fetch origin main
+            # Self-host safety gate (#1956): the release-train passes the SHA of the
+            # green nightly whose triple-pass `make check` verified HEAD's compiler.
+            # We tag origin/main's tip (so the version bump fast-forwards main), which
+            # is safe ONLY while its compiler is byte-behaviour-identical to that
+            # verified commit. Re-check here — origin/main may have advanced since the
+            # train evaluated — and refuse to tag if it moved onto a compiler /
+            # runtime / seed change the nightly never saw; the next nightly must
+            # re-verify first. Diffed BEFORE our own bump commit, so the bump's
+            # version.sfn/capsule.toml edits never trip it. Empty on manual/override
+            # cuts (the operator owns the risk).
+            if [ -n "$VERIFIED_SHA" ]; then
+              unverified="$(git diff --name-only "${VERIFIED_SHA}..origin/main" -- compiler/src runtime bootstrap.toml)"
+              if [ -n "$unverified" ]; then
+                echo "::error::origin/main advanced onto self-host-relevant changes not covered by verified nightly ${VERIFIED_SHA}; refusing to cut an unverified compiler. Re-run after the next green nightly. Files:"
+                echo "$unverified"
+                exit 1
+              fi
+            fi
             if ! git rebase origin/main; then
               git rebase --abort || true
               echo "::error::Rebase onto origin/main hit a conflict (attempt ${attempt})."
