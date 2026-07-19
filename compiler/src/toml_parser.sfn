@@ -576,6 +576,14 @@ fn toml_get_workspace_capabilities_grant(text: string, member: string) -> string
     return _toml_split_lines_into_array(toml_get_string_array(text, "workspace.capabilities.grants", member));
 }
 
+// SFEP-0051 Phase 4c: the envelope enforcement mode. `[workspace.capabilities]
+// mode` is "enforce" (default) or "warn"; absent → "". Parse-only, like the
+// getters above — the resolver (`workspace_capability_mode`) maps an absent or
+// unrecognized value to the fail-closed "enforce" default.
+fn toml_get_workspace_capabilities_mode(text: string) -> string {
+    return toml_get_string(text, "workspace.capabilities", "mode");
+}
+
 // SFEP-0051 Phase 5: member-selection conveniences under `[workspace]` (Cargo
 // parity). `default-members` is the subset a bare `sfn build`/`sfn test` at the
 // workspace root targets when no `-p` is given (Cargo
