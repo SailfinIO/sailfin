@@ -9,12 +9,21 @@ on every `push` to `main` and every nightly cron at 05:00 UTC:
 2. **Cache hit rate** — the warm second pass must keep
    `cache.hit_rate >= 0.95`.
 
-When either gate fails, the `notify-failure` job (issue #782) opens a
-deduplicated regression issue labeled `area:architecture` and
-`build-quality-regression` (build-quality regressions are inherently
-release-critical; priority is set on the Linear mirror at triage — it is no
-longer a GitHub label). If the failing event is `push: main`, the merging PR
-also gets a comment linking the regression issue and the failing job.
+It also runs a third, non-gate job, `test-bin-baseline` (the **test-bin
+cache warmer**), which builds the default-branch per-test-binary cache PR
+CI restores. It is not a correctness gate, but a warmer that stops
+producing its cache is a trackable regression in its own right — so a
+warmer failure or timeout is reported through the same path (SFN-430).
+
+When any of these fails — either gate, or the warmer — the `notify-failure`
+job (issue #782) opens a deduplicated regression issue labeled
+`area:architecture` and `build-quality-regression` (build-quality
+regressions are inherently release-critical; priority is set on the Linear
+mirror at triage — it is no longer a GitHub label). The issue title suffix
+identifies the failing path: `determinism`, `cache-hit-rate`,
+`build-setup`, or `test-bin-warmer`. If the failing event is `push: main`,
+the merging PR also gets a comment linking the regression issue and the
+failing job.
 
 This page is the triage runbook for those regressions.
 
@@ -130,3 +139,35 @@ retention). When the regression issue's diff excerpt is truncated
 (the embedded JSON is capped at ~50 lines by scope of #782), the full
 diff is in those artifacts. The regression-issue body always links
 the failing run, and the run page links the artifact.
+
+---
+
+## 5. test-bin warmer timeout
+
+A regression issue with the `test-bin-warmer` title suffix is **not** a
+determinism or cache-hit-rate gate failure. It means the
+`test-bin-baseline` job — `Warm test-bin cache (linux-x86_64)` — either
+failed the full suite twice (attempt + retry) or hit its `timeout-minutes`
+cap. There is no `pass1.json` / `pass2.json` artifact for this path; triage
+from the `Warm test-bin cache` job log in the failing run.
+
+- **`cancelled` conclusion → timeout.** The warmer runs
+  `concurrency: cancel-in-progress: false`, so it is never
+  supersede-cancelled (SFN-395); a `cancelled` conclusion is always a
+  `timeout-minutes` expiry, not a superseded run. The cold full suite on
+  the 4-core `ubuntu-24.04` runner has repeatedly crept toward the cap
+  (run-1010 overran the old 60-min cap; PR #2492 raised it to 90 min). If
+  the warm step is still running when the job is killed, the
+  `Save test-bin cache` step never lands and PRs keep paying the cold cost.
+  Confirm the wall-time trend and, if the suite has genuinely outgrown the
+  cap, raise `timeout-minutes` or split the warmer (the incremental-restore
+  follow-up); do **not** just re-run and hope.
+- **`failure` conclusion → suite failure.** The suite failed twice (the
+  retry-once #892 flake mitigation did not clear it). Treat it as a real
+  test regression: reproduce with `make test` locally, bisect the offending
+  commit, and file a `type:bug` fix issue that `Closes` the
+  `build-quality regression: test-bin-warmer` dedup anchor.
+
+A warmer regression does not by itself block a seed cut, but a persistently
+stale test-bin cache slows every PR — treat it with the same urgency as a
+gate failure until the warmer is green again.
