@@ -1,7 +1,7 @@
 ---
-sfep: TBD
+sfep: 0052
 title: Accelerated ML — Substrate Interop and Capability-Typed Accelerator Programming
-status: Draft
+status: Accepted
 type: informational          # strategy umbrella; child SFEPs will be runtime | language | tooling
 created: 2026-07-19
 updated: 2026-07-19
@@ -12,7 +12,7 @@ superseded-by:
 graduates-to:
 ---
 
-# SFEP-XXXX — Accelerated ML: Substrate Interop and Capability-Typed Accelerator Programming
+# SFEP-0052 — Accelerated ML: Substrate Interop and Capability-Typed Accelerator Programming
 
 > Strategy umbrella. This SFEP fixes a *direction* and an *architecture spine*;
 > each numbered track below graduates into its own runtime/language/tooling SFEP
@@ -91,10 +91,14 @@ architecture-first so the compressible work stays compressible.**
 `CLAUDE.md` warns against diluting the three pillars with half-finished AI
 features and against chasing 6-month-half-life API wrappers. Track B honors that
 warning by construction: it is not an AI-syntax land-grab, it is the **existing
-pillars pointed at ML**. And a key foundation just landed — **SFEP-0038 (generic
-constraints + monomorphization) is `Implemented`** — which was the prerequisite
-for a *typed* `Tensor<T, [dims]>` surface. The root blocker is already cleared;
-this is the moment the rest becomes buildable.
+pillars pointed at ML**. And a key foundation is in place — **SFEP-0038 (generic
+constraints + monomorphization) is `Implemented` for pointer-width `T`**
+(int/float/bool/string/ptr and boxed struct references), which is enough to begin
+a *typed* `Tensor<T, [dims]>` surface over existing scalar dtypes. Two generics
+follow-ons remain and are on the critical path here — **by-value aggregate `T`
+layout** and **generic collections** (`draft-generic-collections`) — but the
+constraint/monomorphization machinery itself is no longer the blocker. This is the
+moment the rest becomes buildable.
 
 ## 3. Design
 
