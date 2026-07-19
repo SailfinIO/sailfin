@@ -98,7 +98,9 @@ import {
     toml_get_workspace_capabilities_allow,
     toml_get_workspace_capabilities_deny,
     toml_get_workspace_capabilities_grant,
-    toml_get_workspace_members
+    toml_get_workspace_members,
+    toml_get_workspace_package_version,
+    toml_value_is_workspace_inherit
 } from "./toml_parser";
 import { Diagnostic } from "./typecheck_types";
 import { resolve_compiler_version, resolve_compiler_version_for_cache } from "./version";
@@ -2824,6 +2826,20 @@ fn workspace_member_for_spec(members: WorkspaceMember[], spec: string) -> string
     return "";
 }
 
+// SFEP-0051 Phase 3: resolve a member's inherited `[capsule] version`. A member
+// opts into workspace inheritance with `version = { workspace = true }` (parsed
+// verbatim as the inline-table marker string by `toml_get_version`). When it
+// does, the resolved version is the workspace root's `[workspace.package]
+// version`; otherwise the member's own concrete version wins. Pure so the unit
+// tests can inline-copy it (importing the resolver trips the seed per-module
+// timeout — mirror `workspace_resolver_test.sfn`).
+fn resolve_inherited_version(member_version: string, workspace_version: string) -> string {
+    if toml_value_is_workspace_inherit(member_version) {
+        return workspace_version;
+    }
+    return member_version;
+}
+
 // Resolve the whole workspace member graph into the flat lock-entry set a
 // writer (`workspace_lock_write`) can serialize. Returns one `_LockEntry`
 // per resolved `[workspace].members` entry — after `load_workspace_members`
@@ -2844,6 +2860,15 @@ fn workspace_member_for_spec(members: WorkspaceMember[], spec: string) -> string
 fn resolve_workspace_lock_entries(workspace_root: string) -> _LockEntry[] ![io] {
     let mut out: _LockEntry[] = [];
     let members = load_workspace_members(workspace_root);
+    // Read the workspace root's `[workspace.package]` once so members that
+    // inherit (`version = { workspace = true }`, SFEP-0051 Phase 3) resolve to a
+    // concrete version before the lock entry is written — the resolver never
+    // carries an un-inherited manifest past resolution (SFEP-0006 §4.12).
+    let ws_manifest = _cr_path_join(workspace_root, "workspace.toml");
+    let mut ws_package_version: string = "";
+    if fs.exists(ws_manifest) {
+        ws_package_version = toml_get_workspace_package_version(fs.readFile(ws_manifest));
+    }
     let mut i: int = 0;
     loop {
         if i >= members.length { break; }
@@ -2851,7 +2876,7 @@ fn resolve_workspace_lock_entries(workspace_root: string) -> _LockEntry[] ![io] 
         let manifest = _cr_path_join(_cr_path_join(workspace_root, member.member_path), "capsule.toml");
         let mut version: string = "";
         if fs.exists(manifest) {
-            version = toml_get_version(fs.readFile(manifest));
+            version = resolve_inherited_version(toml_get_version(fs.readFile(manifest)), ws_package_version);
         }
         out.push(_LockEntry {
             capsule: member.name, version: version, hash: ""

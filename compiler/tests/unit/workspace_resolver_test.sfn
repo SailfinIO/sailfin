@@ -15,6 +15,12 @@
 // — until the unified resolver actually lands and replaces text-level
 // inlining (Stage B itself), inlining the whole compiler into a unit
 // test trips the seed's per-module timeout.
+//
+// `toml_parser.sfn` does NOT import `main.sfn`, so its helpers are
+// import-safe in a unit test (see `manifest_workspace_test.sfn`); only
+// `capsule_resolver.sfn`'s own helpers need the inline-copy treatment.
+import { toml_value_is_workspace_inherit } from "../../src/toml_parser";
+
 // -- Inline copy of WorkspaceMember (from capsule_resolver.sfn) --
 struct WorkspaceMember {
     name: string;
@@ -93,6 +99,15 @@ fn _is_safe_member_path(path: string) -> boolean {
 }
 
 fn _str_eq(a: string, b: string) -> boolean { return strings_equal(a, b); }
+
+// -- Inline copy of resolve_inherited_version (from capsule_resolver.sfn,
+//    SFEP-0051 Phase 3). Calls the import-safe toml_parser predicate. --
+fn _resolve_inherited_version(member_version: string, workspace_version: string) -> string {
+    if toml_value_is_workspace_inherit(member_version) {
+        return workspace_version;
+    }
+    return member_version;
+}
 
 // ---- parse_workspace_member_paths ----
 test "workspace: empty member list parses to empty array" {
@@ -194,4 +209,29 @@ test "workspace: current-dir segment is unsafe" {
 test "workspace: backslash is unsafe" {
     assert ! _is_safe_member_path("windows\\path");
     assert ! _is_safe_member_path("trailing\\");
+}
+
+// ---- SFEP-0051 Phase 3: resolve_inherited_version ----
+test "workspace: member inheriting version resolves to workspace root version" {
+    // `version = { workspace = true }` reaches the resolver as the verbatim
+    // marker string; it resolves to the [workspace.package] version.
+    assert _str_eq(_resolve_inherited_version("{ workspace = true }", "0.5.9"), "0.5.9");
+}
+
+test "workspace: member overriding version wins over workspace root" {
+    // A concrete member version is never an inherit marker — it passes through
+    // unchanged even when the workspace root declares a different version.
+    assert _str_eq(_resolve_inherited_version("0.9.1", "0.5.9"), "0.9.1");
+}
+
+test "workspace: inheriting version with empty workspace root resolves to empty" {
+    // No `[workspace.package] version` at the root → the inherited value is the
+    // empty getter sentinel; the resolver does not invent a version.
+    assert _str_eq(_resolve_inherited_version("{ workspace = true }", ""), "");
+}
+
+test "workspace: non-marker inline table is treated as a literal version" {
+    // Only `{ workspace = true }` triggers inheritance; any other value is the
+    // member's own version verbatim.
+    assert _str_eq(_resolve_inherited_version("{ workspace = false }", "0.5.9"), "{ workspace = false }");
 }

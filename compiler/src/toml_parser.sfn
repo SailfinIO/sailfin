@@ -576,6 +576,80 @@ fn toml_get_workspace_capabilities_grant(text: string, member: string) -> string
     return _toml_split_lines_into_array(toml_get_string_array(text, "workspace.capabilities.grants", member));
 }
 
+// SFEP-0051 Phase 3: recognize the `{ workspace = true }` inline-table marker
+// a member uses to opt into workspace inheritance (Cargo's spelling). The
+// minimal parser stores such a value verbatim — `_toml_strip_quotes` leaves
+// braces untouched and it never opens an array — so inheritance detection is a
+// predicate on the raw value string a getter returns (e.g. `toml_get_version`).
+// Accepts only the single-key `workspace = true` form; any other inline-table
+// content is not an inherit marker. Diagnostic-free like the rest of this
+// module; the resolver performs the substitution.
+fn toml_value_is_workspace_inherit(value: string) -> boolean {
+    let trimmed = _toml_trim(value);
+    if trimmed.length < 2 { return false; }
+    if trimmed[0] != "{" { return false; }
+    if trimmed[trimmed.length - 1] != "}" { return false; }
+    let inner = _toml_trim(substring(trimmed, 1, trimmed.length - 1));
+    let eq_pos = find_char_local(inner, "=", 0);
+    if eq_pos < 0 { return false; }
+    let k = _toml_strip_quotes(_toml_trim(substring(inner, 0, eq_pos)));
+    let v = _toml_strip_quotes(_toml_trim(substring(inner, eq_pos + 1, inner.length)));
+    if !strings_equal(k, "workspace") { return false; }
+    return strings_equal(v, "true");
+}
+
+// SFEP-0051 Phase 3: inheritable defaults a member picks up from the workspace
+// root's `[workspace.package]` block when it opts in with `= { workspace = true }`.
+// Parse-only round-trip getters — the resolver (`resolve_inherited_version`)
+// performs the substitution against the member's own value. Absent → "".
+fn toml_get_workspace_package_version(text: string) -> string {
+    return toml_get_string(text, "workspace.package", "version");
+}
+
+fn toml_get_workspace_package_license(text: string) -> string {
+    return toml_get_string(text, "workspace.package", "license");
+}
+
+// SFEP-0051 Phase 3: read `[workspace.dependencies]` — the canonical version
+// each member resolves against when it opts in with `= { workspace = true }`.
+// Returns "capsule=version" pairs newline-separated, matching the shape of
+// `toml_get_dependencies` so callers recover entries by splitting on "\n"/"="
+// without the SailToml struct crossing a module boundary. Inheritance sets the
+// range; the root lockfile still records the exact pin (SFEP-0006 §4.12).
+fn toml_get_workspace_dependencies(text: string) -> string {
+    let lines = _toml_split_lines(text);
+    let mut current_section: string = "";
+    let mut out: string = "";
+    let mut found: int = 0;
+    let mut i: int = 0;
+    loop {
+        if i >= lines.length { break; }
+        let line = _toml_trim(lines[i]);
+        i += 1;
+        if line.length == 0 { continue; }
+        if line[0] == "#" { continue; }
+        if line[0] == "[" {
+            let close = find_char_local(line, "]", 0);
+            if close > 0 {
+                current_section = _toml_trim(substring(line, 1, close));
+            }
+            continue;
+        }
+        if !strings_equal(current_section, "workspace.dependencies") {
+            continue;
+        }
+        let eq_pos = find_char_local(line, "=", 0);
+        if eq_pos < 0 { continue; }
+        let dep_key = _toml_strip_quotes(_toml_trim(substring(line, 0, eq_pos)));
+        let dep_val = _toml_strip_quotes(_toml_trim(substring(line, eq_pos + 1, line.length)));
+        if dep_key.length == 0 { continue; }
+        if found > 0 { out = out + "\n"; }
+        out = out + dep_key + "=" + dep_val;
+        found += 1;
+    }
+    return out;
+}
+
 // Read a string value at `[section] key = "value"`. Returns "" if absent.
 // Lets callers read ad-hoc config (e.g. ~/.sfn/config.toml) without the
 // manifest-shaped SailToml struct.
