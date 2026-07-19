@@ -492,8 +492,29 @@ jobs:
   # Triage runbook lives at `docs/runbooks/build-quality.md`.
   notify-failure:
     name: Open regression issue + PR comment on failure
-    needs: build-quality
-    if: failure() && needs.build-quality.result == 'failure'
+    needs: [build-quality, test-bin-baseline]
+    # Fire on a genuine gate failure OR a warmer failure/timeout.
+    #
+    # `always()` (not `!cancelled()`) is required: a `test-bin-baseline`
+    # `timeout-minutes` expiry surfaces as a `cancelled` job conclusion and
+    # rolls the whole run up to `cancelled` (the run-1010 symptom, fixed by
+    # raising the cap in PR #2492). `!cancelled()` would suppress exactly the
+    # signal this job exists to report, which is how the warmer timeout went
+    # untracked in the first place. On a green run every result is `success`
+    # so the parenthesised test is false and this job is skipped.
+    #
+    # Concurrency-supersede does NOT spam (SFN-395), distinguished purely by
+    # the per-job `concurrency:` semantics already in this file:
+    #   - The gate job runs `cancel-in-progress: true`, so a superseded gate
+    #     lands as `cancelled` — and this `if:` only acts on the gate for
+    #     `== 'failure'`, so a supersede is ignored.
+    #   - The warmer job runs `cancel-in-progress: false`, so it is never
+    #     supersede-cancelled; any `cancelled` there is a real timeout.
+    if: >-
+      always() &&
+      (needs.build-quality.result == 'failure' ||
+       needs.test-bin-baseline.result == 'failure' ||
+       needs.test-bin-baseline.result == 'cancelled')
     runs-on: ubuntu-24.04
     timeout-minutes: 10
     permissions:
@@ -501,7 +522,16 @@ jobs:
       issues: write
       pull-requests: write
     env:
-      GATE_NAME: ${{ needs.build-quality.outputs.gate_name }}
+      # When the gate failed, use its per-gate suffix (`determinism` /
+      # `cache-hit-rate` / `build-setup`); otherwise this run fired for the
+      # warmer path, so use the stable `test-bin-warmer` suffix. The gate's
+      # `Identify failed gate` step always writes a non-empty name whenever
+      # `build-quality.result == 'failure'`, so this select never falls
+      # through to the warmer suffix on a real gate failure. The suffix is
+      # resolved here rather than as a warmer-job output because a warmer
+      # timeout cancels the job before an `if: failure()` output step could
+      # run, and a cancelled job's outputs are not reliably propagated.
+      GATE_NAME: ${{ needs.build-quality.result == 'failure' && needs.build-quality.outputs.gate_name || 'test-bin-warmer' }}
       FAIL_SHA: ${{ github.sha }}
       RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
       EVENT_NAME: ${{ github.event_name }}
@@ -559,6 +589,14 @@ jobs:
                 echo "(pass2.json artifact missing — see job log)" >> "$excerpt_file"
               fi
               echo '```' >> "$excerpt_file"
+              ;;
+            test-bin-warmer)
+              # The warmer job produces no pass1/pass2 artifact, so there is
+              # no determinism/hit-rate diff to embed. Point triage at the
+              # `Warm test-bin cache` job log instead (suite failure or
+              # `timeout-minutes` expiry).
+              echo "<!-- gate:test-bin-warmer -->" >> "$excerpt_file"
+              echo "_The \`test-bin-baseline\` cache-warmer job failed or timed out (a \`cancelled\` job conclusion is a \`timeout-minutes\` expiry — the warmer never supersede-cancels). No determinism/hit-rate diff applies. Inspect the \`Warm test-bin cache\` job log in the failing run and follow \`docs/runbooks/build-quality.md\` → \"test-bin warmer timeout\"._" >> "$excerpt_file"
               ;;
             *)
               echo "<!-- gate:build-setup -->" >> "$excerpt_file"
