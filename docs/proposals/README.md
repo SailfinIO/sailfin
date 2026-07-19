@@ -76,6 +76,7 @@ The next number is `max + 1`. Add a row in the same PR that introduces an SFEP.
 | [0051](./0051-workspace-manifest.md) | Workspace Manifest — Multi-Capsule Policy and the Capability Envelope | Accepted | tooling |
 | [0052](./0052-ml-acceleration-strategy.md) | Accelerated ML — Substrate Interop and Capability-Typed Accelerator Programming | Accepted | informational |
 | [0053](./0053-shape-typed-tensor-ir.md) | Shape-Typed Tensor IR and Fusion | Accepted | tooling |
+| [0054](./0054-low-precision-numerics.md) | Low-Precision Numeric Substrate | Accepted | language |
 
 ## Drafts under review (numbers assigned at merge)
 
