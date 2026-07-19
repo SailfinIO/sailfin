@@ -1,14 +1,16 @@
 // End-to-end test for the pointer-read intrinsics (#875, epic #763).
 //
-// `sailfin_intrinsic_pointer_read_i32` / `_i64` are registry sentinels that
-// lower directly to an LLVM `load` of the matching width — there is no C
+// `sailfin_intrinsic_pointer_read_i32` / `_i64` / `_f64` are registry sentinels
+// that lower directly to an LLVM `load` of the matching width — there is no C
 // symbol behind them. This test pins that shape:
 //
 //   1. typecheck   — `sfn check <fixture>` exits 0 (the intrinsics are bare
 //                    calls; no accept-list change).
 //   2. load i32    — emitted IR contains `load i32, i32* %…` for the i32 read.
 //   3. load i64    — emitted IR contains `load i64, i64* %…` for the i64 read.
-//   4. no call     — no `call` instruction targets either sentinel symbol.
+//   3b. load double — emitted IR contains `load double, double* %…` for the
+//                    f64 read (parity with `_i64`; seeds `float[]` stringify).
+//   4. no call     — no `call` instruction targets any sentinel symbol.
 //   5. no declare  — no `declare …@sailfin_intrinsic_pointer_read_*` line, so
 //                    the sentinel never links to a nonexistent symbol.
 //   6. bitcast     — an `i8*` operand is bitcast to the matching pointer type
@@ -66,7 +68,7 @@ fn _any_line_with(text: string, a: string, b: string) -> bool {
 // fallback resolves it against the runtime-helper registry and the
 // load-not-call branch fires.
 fn _fixture_source() -> string {
-    return "extern fn malloc(size: usize) -> * u8;\n\nfn read_i32(p: * u8) -> i32 {\n    return sailfin_intrinsic_pointer_read_i32(p);\n}\n\nfn read_i64(p: * u8) -> i64 {\n    return sailfin_intrinsic_pointer_read_i64(p);\n}\n\nfn main() -> void {\n    let p: * u8 = malloc(8 as usize);\n    let a: i32 = read_i32(p);\n    let b: i64 = read_i64(p);\n}\n";
+    return "extern fn malloc(size: usize) -> * u8;\n\nfn read_i32(p: * u8) -> i32 {\n    return sailfin_intrinsic_pointer_read_i32(p);\n}\n\nfn read_i64(p: * u8) -> i64 {\n    return sailfin_intrinsic_pointer_read_i64(p);\n}\n\nfn read_f64(p: * u8) -> float {\n    return sailfin_intrinsic_pointer_read_f64(p);\n}\n\nfn main() -> void {\n    let p: * u8 = malloc(8 as usize);\n    let a: i32 = read_i32(p);\n    let b: i64 = read_i64(p);\n    let c: float = read_f64(p);\n}\n";
 }
 
 fn _fixture_path() -> string ![io] {
@@ -108,6 +110,14 @@ test "pointer-read: i32 read lowers to 'load i32', i64 to 'load i64'" ![io] {
     assert contains(ir, "load i64, i64* %");
 }
 
+test "pointer-read: f64 read lowers to 'load double'" ![io] {
+    let src = _fixture_path();
+    let ir = _emit_llvm(src);
+    fs.deleteFile(src);
+    assert ir.length > 0;
+    assert contains(ir, "load double, double* %");
+}
+
 test "pointer-read: sentinels are not emitted as 'call' or 'declare'" ![io] {
     let src = _fixture_path();
     let ir = _emit_llvm(src);
@@ -116,9 +126,11 @@ test "pointer-read: sentinels are not emitted as 'call' or 'declare'" ![io] {
     // No `call …@sailfin_intrinsic_pointer_read_*` (lowers to a load, not a call).
     assert ! _any_line_with(ir, "call ", "@sailfin_intrinsic_pointer_read_i32");
     assert ! _any_line_with(ir, "call ", "@sailfin_intrinsic_pointer_read_i64");
+    assert ! _any_line_with(ir, "call ", "@sailfin_intrinsic_pointer_read_f64");
     // No `declare …@sailfin_intrinsic_pointer_read_*` (sentinel has no symbol).
     assert ! _any_line_with(ir, "declare ", "@sailfin_intrinsic_pointer_read_i32");
     assert ! _any_line_with(ir, "declare ", "@sailfin_intrinsic_pointer_read_i64");
+    assert ! _any_line_with(ir, "declare ", "@sailfin_intrinsic_pointer_read_f64");
 }
 
 test "pointer-read: i8* operand is bitcast to the matching pointer type" ![io] {
@@ -128,4 +140,5 @@ test "pointer-read: i8* operand is bitcast to the matching pointer type" ![io] {
     assert ir.length > 0;
     assert _any_line_with(ir, "bitcast i8* ", "to i32*");
     assert _any_line_with(ir, "bitcast i8* ", "to i64*");
+    assert _any_line_with(ir, "bitcast i8* ", "to double*");
 }
