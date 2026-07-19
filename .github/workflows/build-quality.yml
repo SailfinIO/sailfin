@@ -315,14 +315,16 @@ jobs:
     runs-on: ubuntu-24.04
     # The warm step runs the whole `.sfn` suite with a COLD test-bin cache
     # (this job is that cache's producer, so it restores module-IR but never
-    # test-bin), compiling every test binary from scratch. That cold pass is
-    # inherently ~53 min, leaving no headroom under a 60 min cap: a cold
-    # module-IR cache (any compiler/runtime edit rolls the key) or the
-    # retry-once flake path (#892) pushes total past 60 and the job is
-    # cancelled before `Save test-bin cache` runs — which then leaves the
-    # cache unsaved, so the next run pays the cold cost again. Provision for
-    # the real cost plus the retry path. See docs/proposals/0011-ci-test-speed.md.
-    timeout-minutes: 90
+    # test-bin), compiling every test binary from scratch — the cache it then
+    # saves. That work now runs in ONE parallel pool (`make test` sizes its
+    # `--jobs` budget to the runner via scripts/detect_test_jobs.sh), not the
+    # old serial-shard `for` loop whose ~53-min cold floor (shards run
+    # one-at-a-time, files serial within each) kept tipping past the cap and
+    # leaving the cache unsaved, so the next run paid the cold cost again
+    # (SFN-394). The cap is now a backstop, not a budget: the parallel pass
+    # plus a cold module-IR self-host and the retry-once flake path (#892)
+    # clears it with comfortable margin. See docs/proposals/0011-ci-test-speed.md.
+    timeout-minutes: 60
     steps:
       - name: Checkout repository
         uses: actions/checkout@v7
@@ -398,26 +400,31 @@ jobs:
             SEED_NATIVE="build/toolchains/seed/bin/sfn"
           build/bin/sfn version
 
-      # Run the full `.sfn` suite with the test-bin cache ENABLED (no
-      # `--no-test-cache`), populating `build/cache/test-bin/v<schema>`.
-      # Loop the shard names from `sfn dev shard names` (the native single
-      # source of truth, SFN-200; `build/bin/sfn` exists after the compile
-      # above). Retry-once mirrors the PR action's #892 flake mitigation so
-      # one non-deterministic codegen flake doesn't skip the save (a
-      # persistent failure still fails → no save).
-      - name: Warm test-bin cache (run .sfn shards, cache enabled)
+      # Run the full `.sfn` suite in ONE parallel pool with the test-bin
+      # cache ENABLED (no `--no-test-cache`), populating
+      # `build/cache/test-bin/v<schema>`. `make test` walks the same
+      # unit+integration+e2e+capsules union the old serial-shard `for` loop
+      # covered (shard-cover parity, `sfn dev shard cover`), so no coverage
+      # is lost, and it sizes its `--jobs` budget to the runner's CPU/RAM
+      # (scripts/detect_test_jobs.sh) instead of running shards one-at-a-time
+      # with serial files inside each — the ~53-min cold floor this job kept
+      # hitting (SFN-394). The saved cache is content-addressed by the
+      # commit-stable capsule version (#1233), so entries this pass produces
+      # are byte-identical to what a PR's `sfn test` / `sfn dev shard run`
+      # looks up. Retry-once mirrors the PR action's #892 flake mitigation so
+      # one non-deterministic codegen flake doesn't skip the save; the retry
+      # reruns against the now-warm test-bin cache, so it is cheap. A
+      # persistent failure still fails → no save.
+      - name: Warm test-bin cache (full suite, parallel, cache enabled)
         shell: bash
         run: |
           set -euo pipefail
-          run_shard() { make test-shard SHARD="$1"; }
-          for shard in $(build/bin/sfn dev shard names); do
-            echo "[warm] shard $shard"
-            if ! run_shard "$shard"; then
-              echo "::warning title=test flake (likely #892)::shard $shard failed on attempt 1; retrying once."
-              echo "[warm] retrying shard $shard once (attempt 2/2) — see #892"
-              run_shard "$shard"
-            fi
-          done
+          run_suite() { make test; }
+          if ! run_suite; then
+            echo "::warning title=test flake (likely #892)::suite failed on attempt 1; retrying once."
+            echo "[warm] retrying suite once (attempt 2/2) — see #892"
+            run_suite
+          fi
 
       # Save the warmed test-bin cache for PR CI to restore. Save-only (no
       # `if:`) so it runs only when every prior step — including the suite
