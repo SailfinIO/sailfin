@@ -293,9 +293,16 @@ populates `test-bin`). Two options:
   PR's second push reuses its first push's test binaries — the
   incremental-PR win.
 - Optionally have a nightly/push:main job populate a baseline
-  `test-bin` cache (cold, full suite) that PRs restore from, so even a
+  `test-bin` cache (full suite) that PRs restore from, so even a
   PR's *first* push gets hits for unchanged tests. Best ROI but more
-  plumbing; defer to Phase 3.
+  plumbing; defer to Phase 3. **Refinement (SFN-431):** this baseline
+  warmer (`test-bin-baseline` in `build-quality.yml`) restores its *own*
+  prior test-bin cache and builds incrementally rather than cold — the
+  cold-producer choice was hygiene, not soundness (only the `build-quality`
+  determinism gate has a cold-build invariant, and it reads no test
+  binaries). Cross-commit correctness holds because each entry is
+  content-addressed by the commit-stable capsule version + source (#1233),
+  so a changed test misses and recompiles.
 
 **Risk:** medium. Correctness rests on the dep-hash set being *complete*
 (miss a dep → false hit → stale test passes). Mitigation: derive the dep
