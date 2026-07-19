@@ -92,6 +92,7 @@ language gaps surfaced by the 2026-07 grammar/object-model audit:
 | [`draft-string-interpolation-dollar`](./draft-string-interpolation-dollar.md) | String Interpolation with `${ }` (migrating off `{{ }}`) | language |
 | [`draft-nullable-access-operators`](./draft-nullable-access-operators.md) | Nullable Access Operators (`?.` and `??`) | language |
 | [`draft-import-surface-compaction`](./draft-import-surface-compaction.md) | Import-surface compaction across the phase rewind to cut emit peak RSS | runtime |
+| [`draft-ml-acceleration-strategy`](./draft-ml-acceleration-strategy.md) | Accelerated ML — Substrate Interop and Capability-Typed Accelerator Programming | informational |
 
 SFEP-0038 (`0038-generic-constraints.md`, Implemented) is the root foundation:
 `draft-generic-collections`, `draft-derive`, and SFEP-0028 all depend on it. Draft diagnostic codes are
