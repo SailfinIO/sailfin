@@ -9,10 +9,11 @@
 //   2. fmt         — the module is fmt-canonical.
 //   3. emit shape  — the module emits a `define` for every sfn_websocket_*
 //                    client export and `declare`s the BSD-sockets libc
-//                    surface (socket/connect/send/recv/close) plus the
-//                    handshake crypto surface it links (EVP_EncodeBlock, still
-//                    OpenSSL, and the native `sfn_rand_fill` entropy primitive
-//                    that retired the OpenSSL `RAND_bytes` extern).
+//                    surface (socket/connect/send/recv/close). The handshake
+//                    crypto is now native: the module declares NO libcrypto
+//                    extern (`SHA1`/`EVP_EncodeBlock`/`RAND_bytes` all retired),
+//                    computing the accept-value via file-local SHA-1 + base64
+//                    and sourcing entropy from `sfn_rand_fill`.
 //   4. routing     — `websocket.connect/.send/.close` member calls lower to
 //                    real `@sfn_websocket_*` calls and NOT the unbridged
 //                    `@sfn_websocket_unbridged` sentinel.
@@ -168,17 +169,20 @@ test "websocket emit: declares the BSD-sockets libc surface" ![io] {
     assert _has_declare(ir, "close");
 }
 
-test "websocket emit: declares the handshake crypto surface it links" ![io] {
+test "websocket emit: retires the OpenSSL handshake crypto externs" ![io] {
     let ir = _emit_module("websocket", "runtime/sfn/adapters/websocket.sfn");
     assert ir != "EMIT_FAILED";
-    // The RFC 6455 client base64-encodes the Sec-WebSocket-Key
-    // (EVP_EncodeBlock, still libcrypto, linked repo-wide via `-lssl -lcrypto`)
-    // and now sources the masking key + handshake key from the native entropy
-    // primitive (`sfn_rand_fill`, runtime/sfn/platform/rand.sfn), which retired
-    // the OpenSSL `RAND_bytes` extern (SFEP-0048 Phase D, SFN-123).
-    assert _has_declare(ir, "EVP_EncodeBlock");
-    assert _has_declare(ir, "sfn_rand_fill");
+    // The RFC 6455 handshake accept-value (SHA-1 ∘ base64) and the client
+    // `Sec-WebSocket-Key` base64 are now computed by file-local native helpers
+    // (`_ws_sha1` / `_ws_base64`), retiring the OpenSSL `SHA1` and
+    // `EVP_EncodeBlock` externs; the masking key + handshake key source the
+    // native entropy primitive (`sfn_rand_fill`, runtime/sfn/platform/rand.sfn),
+    // which retired `RAND_bytes` (SFEP-0048 Phase D, SFN-338 / SFN-123). No
+    // libcrypto symbol is declared for the handshake path.
+    assert ! _has_declare(ir, "SHA1");
+    assert ! _has_declare(ir, "EVP_EncodeBlock");
     assert ! _has_declare(ir, "RAND_bytes");
+    assert _has_declare(ir, "sfn_rand_fill");
 }
 
 test "websocket.connect/.send/.close lower to @sfn_websocket_*, not the unbridged sentinel" ![io] {

@@ -93,12 +93,11 @@ extern fn getaddrinfo(node: * u8, service: * u8, hints: * u8, res: * * u8) -> i3
 
 extern fn freeaddrinfo(res: * u8) -> void;
 
-// ── OpenSSL (handshake crypto only — linked repo-wide, see
-// `runtime/capsule.toml` `link-libs`) ──────────────────────────
-extern fn SHA1(d: * u8, n: usize, md: * u8) -> * u8;
-
-extern fn EVP_EncodeBlock(dst: * u8, src: * u8, srclen: i32) -> i32;
-
+// The RFC 6455 handshake accept-value (`SHA1(key ‖ GUID)` then base64) and the
+// client `Sec-WebSocket-Key` base64 are computed by the file-local native
+// SHA-1 + base64 helpers below (`_ws_sha1` / `_ws_base64`) — no libcrypto
+// extern. The `-lcrypto` link stays only for the TLS externs until the Phase D
+// swap (SFEP-0048, SFN-341).
 // ── Native entropy (platform/rand.sfn) ────────────────────────
 // `sfn_rand_fill(buf, n)` fills `n` cryptographically secure random bytes and
 // returns 1 on success, 0 on failure (fail-closed). Replaces OpenSSL
@@ -523,16 +522,218 @@ fn _ws_find(haystack: * u8, needle: * u8) -> * u8 {
     return null;
 }
 
-// `_ws_base64_16(src, dst24)` — base64-encode exactly 16 raw bytes
-// into `dst24` (24-char NUL-terminated buffer, per RFC 4648 padding)
-// via OpenSSL `EVP_EncodeBlock`.
+// ── Native handshake crypto (SFEP-0048 Phase D, SFN-338) ───────
+// SHA-1 + base64 in pure Sailfin over `* u8` buffers, retiring the OpenSSL
+// `SHA1` / `EVP_EncodeBlock` externs. The algorithms mirror the shipped
+// `sfn/crypto` primitives (`sha1.sfn` / `mod.sfn::base64_encode`); they are
+// re-expressed here in the module's pointer idiom rather than imported,
+// because `runtime/sfn/*.sfn` stays self-contained per the #306 rationale in
+// this file's header.
+// `_ws_rotl32(x, n)` — rotate the low 32 bits of `x` left by `n` (0 < n < 32).
+fn _ws_rotl32(x: i64, n: i64) -> i64 {
+    let v: i64 = x & 4294967295;
+    return ((v << n) | (v >> (32 - n))) & 4294967295;
+}
+
+// `_ws_sha_getw(sched, t)` / `_ws_sha_setw(sched, t, v)` — read/write the
+// 32-bit message-schedule word `t`, stored little-endian in a 4-byte slot.
+// The store/load pair is internally consistent, so the slot endianness is a
+// private detail; the digest itself is emitted big-endian by `_ws_sha1`.
+fn _ws_sha_getw(sched: * u8, t: i64) -> i64 {
+    let o: i64 = t * 4;
+    return (_ws_byte_at(sched, o) | (_ws_byte_at(sched, o + 1) << 8) | (_ws_byte_at(sched, o
+        + 2) << 16) | (_ws_byte_at(sched, o
+        + 3) << 24)) & 4294967295;
+}
+
+fn _ws_sha_setw(sched: * u8, t: i64, v: i64) -> void {
+    let o: i64 = t * 4;
+    memset(_ws_ptr_off(sched, o), (v & 255) as i32, 1 as usize);
+    memset(_ws_ptr_off(sched, o + 1), ((v >> 8) & 255) as i32, 1 as usize);
+    memset(_ws_ptr_off(sched, o + 2), ((v >> 16) & 255) as i32, 1 as usize);
+    memset(_ws_ptr_off(sched, o + 3), ((v >> 24) & 255) as i32, 1 as usize);
+}
+
+// `_ws_put_be32(dst, off, w)` — store the low 32 bits of `w` big-endian at
+// `dst + off`. Used to serialize the five SHA-1 state words into the digest.
+fn _ws_put_be32(dst: * u8, off: i64, w: i64) -> void {
+    memset(_ws_ptr_off(dst, off), ((w >> 24) & 255) as i32, 1 as usize);
+    memset(_ws_ptr_off(dst, off + 1), ((w >> 16) & 255) as i32, 1 as usize);
+    memset(_ws_ptr_off(dst, off + 2), ((w >> 8) & 255) as i32, 1 as usize);
+    memset(_ws_ptr_off(dst, off + 3), (w & 255) as i32, 1 as usize);
+}
+
+// `_ws_sha1(msg, len, out20)` — SHA-1 (RFC 3174) of the first `len` bytes of
+// `msg`, writing the 20-byte raw digest to `out20`. Returns false on OOM
+// (leaving `out20` untouched). `out20` must have >= 4 bytes of tail slack
+// beyond byte 20, since a later `_ws_byte_at` on it does a 4-byte load.
+fn _ws_sha1(msg: * u8, len: i64, out20: * u8) -> bool {
+    let mask: i64 = 4294967295;
+    let bitlen: i64 = len * 8;
+    // Pad: 0x80, then zeros until the byte length is 56 (mod 64), then the
+    // 64-bit big-endian bit length — leaving a whole number of 64-byte blocks.
+    let mut plen: i64 = len + 1;
+    loop {
+        if (plen % 64) == 56 { break; }
+        plen = plen + 1;
+    }
+    let total: i64 = plen + 8;
+    // +4 tail slack keeps `_ws_byte_at`'s 4-byte load at the final block byte
+    // in-bounds (the same over-allocation invariant the recv/mask buffers hold).
+    let padded: * u8 = malloc((total + 4) as usize);
+    if padded as i64 == 0 { return false; }
+    memset(padded, 0, (total + 4) as usize);
+    memcpy(padded, msg, len as usize);
+    memset(_ws_ptr_off(padded, len), 128, 1 as usize);
+    let hi: i64 = (bitlen >> 32) & mask;
+    let lo: i64 = bitlen & mask;
+    _ws_put_be32(padded, total - 8, hi);
+    _ws_put_be32(padded, total - 4, lo);
+    // 80-word schedule scratch (80 * 4 bytes) + 4 tail slack for `_ws_byte_at`.
+    let sched: * u8 = malloc((320 + 4) as usize);
+    if sched as i64 == 0 {
+        free(padded);
+        return false;
+    }
+    let mut h0: i64 = 1732584193;
+    let mut h1: i64 = 4023233417;
+    let mut h2: i64 = 2562383102;
+    let mut h3: i64 = 271733878;
+    let mut h4: i64 = 3285377520;
+    let num_blocks: i64 = total / 64;
+    let mut block: i64 = 0;
+    loop {
+        if block >= num_blocks { break; }
+        let base: i64 = block * 64;
+        let mut t: i64 = 0;
+        loop {
+            if t >= 16 { break; }
+            let o: i64 = base + t * 4;
+            let wt: i64 = (_ws_byte_at(padded, o) << 24) | (_ws_byte_at(padded, o
+                + 1) << 16) | (_ws_byte_at(padded, o
+                + 2) << 8) | _ws_byte_at(padded, o
+                + 3);
+            _ws_sha_setw(sched, t, wt & mask);
+            t = t + 1;
+        }
+        t = 16;
+        loop {
+            if t >= 80 { break; }
+            let x: i64 = _ws_sha_getw(sched, t - 3) ^ _ws_sha_getw(sched, t - 8) ^ _ws_sha_getw(sched, t - 14) ^ _ws_sha_getw(sched, t - 16);
+            _ws_sha_setw(sched, t, _ws_rotl32(x & mask, 1));
+            t = t + 1;
+        }
+        let mut a: i64 = h0;
+        let mut b: i64 = h1;
+        let mut c: i64 = h2;
+        let mut d: i64 = h3;
+        let mut e: i64 = h4;
+        let mut r: i64 = 0;
+        loop {
+            if r >= 80 { break; }
+            let mut f: i64 = 0;
+            let mut k: i64 = 0;
+            if r < 20 {
+                let notb: i64 = b ^ mask;
+                f = ((b & c) | (notb & d)) & mask;
+                k = 1518500249;
+            } else if r < 40 {
+                f = (b ^ c ^ d) & mask;
+                k = 1859775393;
+            } else if r < 60 {
+                f = ((b & c) | (b & d) | (c & d)) & mask;
+                k = 2400959708;
+            } else {
+                f = (b ^ c ^ d) & mask;
+                k = 3395469782;
+            }
+            let temp: i64 = (_ws_rotl32(a, 5) + f + e + k + _ws_sha_getw(sched, r)) & mask;
+            e = d;
+            d = c;
+            c = _ws_rotl32(b, 30);
+            b = a;
+            a = temp;
+            r = r + 1;
+        }
+        h0 = (h0 + a) & mask;
+        h1 = (h1 + b) & mask;
+        h2 = (h2 + c) & mask;
+        h3 = (h3 + d) & mask;
+        h4 = (h4 + e) & mask;
+        block = block + 1;
+    }
+    free(sched);
+    free(padded);
+    _ws_put_be32(out20, 0, h0);
+    _ws_put_be32(out20, 4, h1);
+    _ws_put_be32(out20, 8, h2);
+    _ws_put_be32(out20, 12, h3);
+    _ws_put_be32(out20, 16, h4);
+    return true;
+}
+
+// `_ws_b64_char(v)` — ASCII code for the 6-bit standard-alphabet value `v`.
+fn _ws_b64_char(v: i64) -> i64 {
+    if v < 26 {
+        return 65 + v;
+    }  // 'A'..'Z'
+    if v < 52 {
+        return 97 + (v - 26);
+    }  // 'a'..'z'
+    if v < 62 {
+        return 48 + (v - 52);
+    }  // '0'..'9'
+    if v == 62 {
+        return 43;
+    }  // '+'
+    return 47;  // '/'
+}
+
+// `_ws_base64(src, srclen, dst)` — standard RFC 4648 base64 (with `=`
+// padding) of the first `srclen` bytes of `src` into `dst`, NUL-terminated.
+// Returns the encoded length. `src` must have >= 4 bytes of tail slack beyond
+// `srclen` (the trailing `_ws_byte_at` does a 4-byte load).
+fn _ws_base64(src: * u8, srclen: i64, dst: * u8) -> i64 {
+    let mut si: i64 = 0;
+    let mut di: i64 = 0;
+    // Full 3-byte groups → 4 base64 chars.
+    loop {
+        if si + 3 > srclen { break; }
+        let v: i64 = (_ws_byte_at(src, si) << 16) | (_ws_byte_at(src, si + 1) << 8) | _ws_byte_at(src, si
+            + 2);
+        memset(_ws_ptr_off(dst, di), _ws_b64_char((v >> 18) & 63) as i32, 1 as usize);
+        memset(_ws_ptr_off(dst, di + 1), _ws_b64_char((v >> 12) & 63) as i32, 1 as usize);
+        memset(_ws_ptr_off(dst, di + 2), _ws_b64_char((v >> 6) & 63) as i32, 1 as usize);
+        memset(_ws_ptr_off(dst, di + 3), _ws_b64_char(v & 63) as i32, 1 as usize);
+        di = di + 4;
+        si = si + 3;
+    }
+    let rem: i64 = srclen - si;
+    if rem == 1 {
+        let v: i64 = _ws_byte_at(src, si) << 16;
+        memset(_ws_ptr_off(dst, di), _ws_b64_char((v >> 18) & 63) as i32, 1 as usize);
+        memset(_ws_ptr_off(dst, di + 1), _ws_b64_char((v >> 12) & 63) as i32, 1 as usize);
+        memset(_ws_ptr_off(dst, di + 2), 61, 1 as usize);  // '='
+        memset(_ws_ptr_off(dst, di + 3), 61, 1 as usize);  // '='
+        di = di + 4;
+    } else if rem == 2 {
+        let v: i64 = (_ws_byte_at(src, si) << 16) | (_ws_byte_at(src, si + 1) << 8);
+        memset(_ws_ptr_off(dst, di), _ws_b64_char((v >> 18) & 63) as i32, 1 as usize);
+        memset(_ws_ptr_off(dst, di + 1), _ws_b64_char((v >> 12) & 63) as i32, 1 as usize);
+        memset(_ws_ptr_off(dst, di + 2), _ws_b64_char((v >> 6) & 63) as i32, 1 as usize);
+        memset(_ws_ptr_off(dst, di + 3), 61, 1 as usize);  // '='
+        di = di + 4;
+    }
+    memset(_ws_ptr_off(dst, di), 0, 1 as usize);  // NUL-terminate
+    return di;
+}
+
+// `_ws_base64_16(src, dst24)` — base64-encode exactly 16 raw bytes into
+// `dst24` (24-char NUL-terminated result, per RFC 4648 padding) via the
+// native `_ws_base64`. `src` must carry the 4-byte tail slack `_ws_base64`
+// requires (the client key buffer over-allocates for exactly this).
 fn _ws_base64_16(src: * u8, dst24: * u8) -> void {
-    // EVP_EncodeBlock already NUL-terminates and returns the encoded length
-    // (24 for 16 input bytes); re-assert the terminator at that length so
-    // `strlen(dst24)` is well-defined regardless of the libcrypto build. The
-    // 25-byte buffer holds 24 chars + NUL.
-    let enc_len: i32 = EVP_EncodeBlock(dst24, src, 16);
-    memset(_ws_ptr_off(dst24, enc_len as i64), 0, 1 as usize);
+    let _ = _ws_base64(src, 16, dst24);
 }
 
 // `_ws_sec_accept(key_b64, out28)` — compute the expected
@@ -550,18 +751,22 @@ fn _ws_sec_accept(key_b64: * u8, out28: * u8) -> void {
     off = _ws_append(concat, off, key_b64);
     off = _ws_append(concat, off, guid as * u8);
     memset(_ws_ptr_off(concat, off), 0, 1 as usize);
-    let digest: * u8 = malloc(20 as usize);
+    // malloc(24), not 20: `_ws_base64` reads the digest through `_ws_byte_at`,
+    // whose 4-byte load at digest[16..19] touches digest[16..22]. The 4-byte
+    // tail slack keeps that final load in-bounds; only bytes 0..19 are the
+    // SHA-1 digest.
+    let digest: * u8 = malloc(24 as usize);
     if digest as i64 == 0 {
         free(concat);
         return;
     }
-    SHA1(concat, total as usize, digest);
+    if !_ws_sha1(concat, total, digest) {
+        free(concat);
+        free(digest);
+        return;
+    }
     free(concat);
-    // Defensive NUL-terminate at the encoded length (28 for a 20-byte
-    // digest) so `strlen(out28)` is well-defined; the 29-byte buffer holds
-    // 28 chars + NUL.
-    let enc_len: i32 = EVP_EncodeBlock(out28, digest, 20);
-    memset(_ws_ptr_off(out28, enc_len as i64), 0, 1 as usize);
+    let _ = _ws_base64(digest, 20, out28);
     free(digest);
 }
 
@@ -666,7 +871,10 @@ fn sfn_websocket_connect(url: * u8) -> * u8 ![net] {
         return null;
     }
 
-    let keybuf: * u8 = malloc(16 as usize);
+    // malloc(20), not 16: `_ws_base64_16` reads the key through `_ws_byte_at`,
+    // whose 4-byte load at key[12..15] touches key[12..18]. The 4-byte tail
+    // slack keeps that final load in-bounds; only bytes 0..15 are the key.
+    let keybuf: * u8 = malloc(20 as usize);
     if keybuf as i64 == 0 {
         free(host);
         free(path);
