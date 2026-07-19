@@ -263,6 +263,9 @@ fn render_runtime_helper_declarations(used_targets: string[], local_functions: N
             if descriptor.target == "sailfin_intrinsic_pointer_read_i64" {
                 _preamble_inlined = true;
             }
+            if descriptor.target == "sailfin_intrinsic_pointer_read_f64" {
+                _preamble_inlined = true;
+            }
             // #877: the errno-location sentinel never appears as a real
             // `call @sailfin_intrinsic_errno_location(` — the lowering
             // branch emits the concrete `__errno_location`/`__error`

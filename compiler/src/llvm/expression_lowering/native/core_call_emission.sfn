@@ -1694,13 +1694,14 @@ fn coerce_and_emit_call(trimmed_target: string, operands: LLVMOperand[], expecte
 
     // Pointer-read intrinsics (#875, epic #763): lower directly to an LLVM
     // `load` of the descriptor's width instead of a `call`. The load element
-    // type is driven by `return_type` ("i32"/"i64"), not by parsing the
-    // operand's pointee. An `i8*` (or otherwise mismatched) operand gets a
+    // type is driven by `return_type` ("i32"/"i64"/"double"), not by parsing
+    // the operand's pointee. An `i8*` (or otherwise mismatched) operand gets a
     // leading `bitcast` to the matching pointer type; an already-typed
-    // `i32*`/`i64*` operand loads directly with no redundant bitcast.
+    // `i32*`/`i64*`/`double*` operand loads directly with no redundant bitcast.
     if helper_descriptor != null {
         let _pr_symbol = helper_descriptor.symbol;
-        if _pr_symbol == "sailfin_intrinsic_pointer_read_i32" || _pr_symbol == "sailfin_intrinsic_pointer_read_i64" {
+        if _pr_symbol == "sailfin_intrinsic_pointer_read_i32" || _pr_symbol == "sailfin_intrinsic_pointer_read_i64"
+            || _pr_symbol == "sailfin_intrinsic_pointer_read_f64" {
             if final_operands.length < 1 {
                 result_diagnostics.push("llvm lowering: " + _pr_symbol
                     + " requires one pointer operand");

@@ -151,8 +151,9 @@ fn _rh_descriptors_00(descriptors_in: RuntimeHelperDescriptor[]) -> RuntimeHelpe
     // LLVM `load` of the given width — there is no C symbol behind them. The
     // call-emission dispatcher (`coerce_and_emit_call` in
     // `core_call_emission.sfn`) special-cases these symbols before normal
-    // symbol resolution and emits `load i32`/`load i64` (with a leading
-    // `bitcast` when the operand isn't already the matching pointer type).
+    // symbol resolution and emits `load i32`/`load i64`/`load double` (with a
+    // leading `bitcast` when the operand isn't already the matching pointer
+    // type).
     // Empty effects is intentional: a raw load is not a capability — the
     // effect lives on the upstream syscall that produced the pointer. The
     // declare loop in `rendering.sfn` skips them so no bogus
@@ -162,6 +163,9 @@ fn _rh_descriptors_00(descriptors_in: RuntimeHelperDescriptor[]) -> RuntimeHelpe
     });
     descriptors = append_runtime_helper(descriptors, RuntimeHelperDescriptor {
         target: "sailfin_intrinsic_pointer_read_i64", symbol: "sailfin_intrinsic_pointer_read_i64", return_type: "i64", parameter_types: ["i8*"], effects: [], native_signature: null, c_abi_return_type: null
+    });
+    descriptors = append_runtime_helper(descriptors, RuntimeHelperDescriptor {
+        target: "sailfin_intrinsic_pointer_read_f64", symbol: "sailfin_intrinsic_pointer_read_f64", return_type: "double", parameter_types: ["i8*"], effects: [], native_signature: null, c_abi_return_type: null
     });
 
     // errno-location sentinel (#877, epic #763). Resolves the
