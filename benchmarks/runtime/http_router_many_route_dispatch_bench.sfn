@@ -1,0 +1,49 @@
+// Many-route dispatch benchmark for sfn/http's ordered router (SFN-157).
+//
+// The request matches the final route, forcing dispatch to scan every
+// registered pattern. Route construction is setup work outside the timed
+// window; each operation measures only dispatch and handler invocation.
+import { benchmark_fixed, keep } from "sfn/bench";
+
+import {
+    Params,
+    Router,
+    dispatch,
+    route,
+    router
+} from "../../capsules/sfn/http/src/router";
+import { Request, Response } from "../../capsules/sfn/http/src/types";
+import { response } from "../../capsules/sfn/http/src/wire";
+
+fn _handler(req: Request, params: Params) -> Response {
+    return response("ok");
+}
+
+fn _many_route_router(count: int) -> Router {
+    let mut r = router();
+    let mut i = 0;
+    loop {
+        if i >= count { break; }
+        let pattern = "/api/resources/" + (i as string) + "/{id}";
+        r = route(r, "GET", pattern, _handler as * fn (Request, Params) -> Response);
+        i = i + 1;
+    }
+    return r;
+}
+
+fn main() ![clock, io] {
+    let route_count = 64;
+    let r = _many_route_router(route_count);
+    let req = Request {
+        method: "GET",
+        path: "/api/resources/63/42",
+        query: "",
+        headers: [],
+        body: ""
+    };
+
+    let _ = benchmark_fixed("http_router_many_route_dispatch", 2000, fn () -> int {
+        let resp = dispatch(r, req);
+        return keep(resp.status + resp.body.length);
+    });
+}

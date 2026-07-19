@@ -85,6 +85,7 @@ not a leak.
 | `exception_throw` | exception frames (`runtime/sfn/exception.sfn`) | 150,000 batches of 4 `risky` calls | Per-iteration `try`/`catch`; ~1 in 4 calls throws and is caught. |
 | `io_throughput` | filesystem adapter (`runtime/sfn/adapters/filesystem.sfn`) | 20,000 | Appends N lines to a temp file (`$TMPDIR`, fallback `/tmp`) via `fs.appendFile`, then reads the file back once. |
 | `http_proxy_hotpath` | MCP-proxy request hot path (parse + `StrMap` + forward) | 12,000 | Per iteration: parse an HTTP/1.1 request (representative inline wire parse) → policy lookup in the real prelude `StrMap` (`runtime/sfn/collections.sfn`) → serialize the forwarded outbound request. CPU-only (no network). Documented **150 ms** budget, gated via `--filter http_proxy_hotpath --budget-time 150`. |
+| `http_router_many_route_dispatch` | `sfn/http` ordered router dispatch | 2,000 | Dispatches a request matching the last of 64 registered routes, exercising precomputed pattern matching and one request-path split per dispatch. |
 
 ### Hot-path budget gate (`http_proxy_hotpath`, #1712)
 

@@ -70,6 +70,9 @@ fn param(params: Params, name: string) -> string? {
 struct Route {
     method: string;
     pattern: string;
+    segments: string[];
+    capture_indices: boolean[];
+    capture_names: string[];
     handler: i64;
 }
 
@@ -93,8 +96,9 @@ fn router() -> Router {
 // struct-field aliasing.
 fn route(r: Router, method: string, pattern: string, handler: * fn (Request, Params) -> Response) -> Router {
     let mut routes = r.routes;
+    let parsed = _parse_pattern(pattern);
     routes.push(Route {
-        method: method, pattern: pattern, handler: handler as i64
+        method: method, pattern: pattern, segments: parsed.segments, capture_indices: parsed.capture_indices, capture_names: parsed.capture_names, handler: handler as i64
     });
     return Router { routes: routes };
 }
@@ -135,36 +139,85 @@ fn _is_param_seg(seg: string) -> boolean {
     return strings_equal(grapheme_at(seg, 0), "{") && strings_equal(grapheme_at(seg, n - 1), "}");
 }
 
+// A route pattern parsed once at registration. `capture_indices` and
+// `capture_names` are aligned with `segments`; literal positions carry false
+// and an empty name. Keeping the arrays aligned makes dispatch an indexed scan
+// without re-splitting the pattern or slicing capture names.
+struct ParsedPattern {
+    segments: string[];
+    capture_indices: boolean[];
+    capture_names: string[];
+}
+
+fn _parse_pattern(pattern: string) -> ParsedPattern {
+    let segments = _split_segments(pattern);
+    let mut capture_indices: boolean[] = [];
+    let mut capture_names: string[] = [];
+    let mut i = 0;
+    loop {
+        if i >= segments.length { break; }
+        let segment = segments[i];
+        let captured = _is_param_seg(segment);
+        capture_indices.push(captured);
+        if captured {
+            capture_names.push(substring(segment, 1, segment.length - 1));
+        } else { capture_names.push(""); }
+        i = i + 1;
+    }
+    return ParsedPattern {
+        segments: segments,
+        capture_indices: capture_indices,
+        capture_names: capture_names
+    };
+}
+
+// Match pre-split path segments against a registered pattern. Dispatch uses
+// this boolean-only pass so failed route scans stay to length checks and
+// string comparisons without allocating empty Params.
+fn _segments_match(segments: string[], capture_indices: boolean[], path_segments: string[]) -> boolean {
+    if segments.length != path_segments.length { return false; }
+    let mut i = 0;
+    loop {
+        if i >= segments.length { break; }
+        if !capture_indices[i] {
+            if !strings_equal(segments[i], path_segments[i]) { return false; }
+        }
+        i = i + 1;
+    }
+    return true;
+}
+
+fn _capture_params(capture_indices: boolean[], capture_names: string[], path_segments: string[]) -> Params {
+    let mut names: string[] = [];
+    let mut values: string[] = [];
+    let mut i = 0;
+    loop {
+        if i >= path_segments.length { break; }
+        if capture_indices[i] {
+            names.push(capture_names[i]);
+            values.push(path_segments[i]);
+        }
+        i = i + 1;
+    }
+    return Params { names: names, values: values };
+}
+
 // `match_pattern(pattern, path)` — does `pattern` match `path`, capturing
 // `{param}` segments? Segment counts must be equal (no wildcard/splat in
 // v0); literal segments compare exactly (case-sensitive); a "{name}" segment
 // captures the corresponding path segment under `name`.
 fn match_pattern(pattern: string, path: string) -> MatchResult {
-    let pat = _split_segments(pattern);
-    let seg = _split_segments(path);
-    let empty = Params { names: [], values: [] };
-    if pat.length != seg.length {
-        return MatchResult { matched: false, params: empty };
-    }
-    let mut names: string[] = [];
-    let mut values: string[] = [];
-    let mut i = 0;
-    loop {
-        if i >= pat.length { break; }
-        let p = pat[i];
-        if _is_param_seg(p) {
-            names.push(substring(p, 1, p.length - 1));
-            values.push(seg[i]);
-        } else {
-            if !strings_equal(p, seg[i]) {
-                return MatchResult { matched: false, params: empty };
-            }
-        }
-        i = i + 1;
+    let parsed = _parse_pattern(pattern);
+    let path_segments = _split_segments(path);
+    if !_segments_match(parsed.segments, parsed.capture_indices, path_segments) {
+        return MatchResult {
+            matched: false,
+            params: Params { names: [], values: [] }
+        };
     }
     return MatchResult {
         matched: true,
-        params: Params { names: names, values: values }
+        params: _capture_params(parsed.capture_indices, parsed.capture_names, path_segments)
     };
 }
 
@@ -178,11 +231,11 @@ fn match_pattern(pattern: string, path: string) -> MatchResult {
 fn dispatch(r: Router, req: Request) -> Response {
     let mut i = 0;
     let mut path_matched = false;
+    let path_segments = _split_segments(req.path);
     loop {
         if i >= r.routes.length { break; }
         let rt = r.routes[i];
-        let m = match_pattern(rt.pattern, req.path);
-        if m.matched {
+        if _segments_match(rt.segments, rt.capture_indices, path_segments) {
             if strings_equal(rt.method, req.method) {
                 // A well-formed route always carries a real handler address
                 // (`route` takes a `* fn`), but guard the sentinel `0` so an
@@ -192,7 +245,8 @@ fn dispatch(r: Router, req: Request) -> Response {
                     return response_with_status(500, "Internal Server Error");
                 }
                 let h: * fn (Request, Params) -> Response = rt.handler as * fn (Request, Params) -> Response;
-                return h(req, m.params);
+                let params = _capture_params(rt.capture_indices, rt.capture_names, path_segments);
+                return h(req, params);
             }
             path_matched = true;
         }
