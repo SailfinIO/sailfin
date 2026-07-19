@@ -1,18 +1,18 @@
 ---
-sfep: TBD
+sfep: 0051
 title: Workspace Manifest — Multi-Capsule Policy and the Capability Envelope
-status: Draft
+status: Accepted
 type: tooling
 created: 2026-07-19
 updated: 2026-07-19
 author: "agent:compiler-architect"
-tracking: "SFN-413 (Phase 1 member-declaration slice — multi-line arrays + glob), SFN-412 (workspace.toml reflow after seed pin), SFN-TBD (Phase 2 root [toolchain] default consumer), SFN-TBD (Phase 3 [workspace.dependencies] inheritance), SFN-TBD (Phase 4 capability envelope + drift audit)"
+tracking: "SFN-413 (Phase 1 member declaration — multi-line arrays + glob, Done), SFN-412 (workspace.toml reflow after seed pin), SFN-414 (Phase 2 root [toolchain] default), SFN-415 (Phase 3 [workspace.package]/[workspace.dependencies] inheritance), SFN-416 (Phase 4a declared-surface capability audit), SFN-418 (Phase 4b inferred-surface audit), SFN-419 (Phase 4c sfn capabilities audit + enforce/warn gate), SFN-417 (Phase 5 default-members + exclude). Epic: Linear project 'Workspace Manifest & Multi-Capsule Policy'"
 supersedes:
 superseded-by:
 graduates-to:
 ---
 
-# SFEP-XXXX — Workspace Manifest — Multi-Capsule Policy and the Capability Envelope
+# SFEP-0051 — Workspace Manifest — Multi-Capsule Policy and the Capability Envelope
 
 ## 1. Summary
 
