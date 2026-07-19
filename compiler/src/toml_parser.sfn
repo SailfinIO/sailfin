@@ -163,6 +163,26 @@ fn display_capsule_name(name: string) -> string {
     return name;
 }
 
+// True when a `key =` value begins an array (`[`) whose closing `]` is not on
+// the same physical line, so the caller must fold in continuation lines.
+fn _toml_opens_unclosed_array(value: string) -> boolean {
+    if value.length == 0 { return false; }
+    if value[0] != "[" { return false; }
+    return find_char_local(value, "]", 0) < 0;
+}
+
+// Drop a `#` line comment from a continuation line inside a multi-line array.
+// Cutting at the first `#` is safe for the values we fold — member paths,
+// source lists, and capability names, none of which contain `#`. The known
+// unsupported case is a quoted array element that itself contains `#` split
+// across lines (`"a#b"`): it would truncate. Single-line arrays never reach
+// this stripper, so they parse such an element correctly.
+fn _toml_strip_line_comment(line: string) -> string {
+    let hash = find_char_local(line, "#", 0);
+    if hash < 0 { return line; }
+    return _toml_trim(substring(line, 0, hash));
+}
+
 // ---- Internal parse ----
 fn _parse_toml_internal(text: string) -> SailToml {
     let mut toml = SailToml {
@@ -200,7 +220,21 @@ fn _parse_toml_internal(text: string) -> SailToml {
         let eq_pos = find_char_local(line, "=", 0);
         if eq_pos < 0 { continue; }
         let key = _toml_trim(substring(line, 0, eq_pos));
-        let value = _toml_trim(substring(line, eq_pos + 1, line.length));
+        let mut value = _toml_trim(substring(line, eq_pos + 1, line.length));
+        // A `key = [` whose `]` closer is on a later physical line: fold the
+        // continuation lines into one logical value so multi-line arrays parse
+        // the same as single-line ones (`_toml_parse_string_array` splits on
+        // commas). Without this the reader saw only `[` and returned an empty
+        // array — the reason `[workspace].members` had to be one long line.
+        if _toml_opens_unclosed_array(value) {
+            loop {
+                if i >= lines.length { break; }
+                let cont = _toml_strip_line_comment(_toml_trim(lines[i]));
+                i += 1;
+                if cont.length > 0 { value = value + " " + cont; }
+                if find_char_local(cont, "]", 0) >= 0 { break; }
+            }
+        }
         let stripped_key = _toml_strip_quotes(key);
         let stripped_value = _toml_strip_quotes(value);
         if strings_equal(section, "capsule") {
@@ -475,7 +509,16 @@ fn toml_get_string_array(text: string, section: string, key: string) -> string {
         let line_key = _toml_trim(substring(line, 0, eq_pos));
         let stripped_key = _toml_strip_quotes(line_key);
         if !strings_equal(stripped_key, key) { continue; }
-        let value = _toml_trim(substring(line, eq_pos + 1, line.length));
+        let mut value = _toml_trim(substring(line, eq_pos + 1, line.length));
+        if _toml_opens_unclosed_array(value) {
+            loop {
+                if i >= lines.length { break; }
+                let cont = _toml_strip_line_comment(_toml_trim(lines[i]));
+                i += 1;
+                if cont.length > 0 { value = value + " " + cont; }
+                if find_char_local(cont, "]", 0) >= 0 { break; }
+            }
+        }
         let arr = _toml_parse_string_array(value);
         let mut out: string = "";
         let mut ai: int = 0;
