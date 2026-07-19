@@ -7,26 +7,21 @@
 // struct as opaque when imported into other modules, which makes indexing
 // `Decorator[]` invalid in LLVM (requires a sized element type). Keep this
 // module free of `Decorator` indexing so self-host-from-release-seed remains
-// reliable.
+// reliable. `ast.sfn` and `decorator_resolver.sfn` reference this note.
+//
+// Decorator-implied effect inference moved out of the parser into the
+// effect-checking stage (SFEP-0023 §4.3), where the import table and each
+// `ResolvedDecorator`'s declared effects exist. `infer_effects` no longer
+// special-cases decorator names — a decorator's effects are unioned into the
+// decorated routine's required-effect set by `effect_checker.analyze_routine`
+// (via `decorator_resolver.resolve_routine_decorators`), and the built-in
+// `@logExecution`/`@trace` migration fallback lives in `decorator_resolver`.
+// `infer_effects` is retained as an inert passthrough with no remaining callers;
+// delete it (and this module) together with the built-in decorator seam
+// (`decorator_resolver._is_builtin_decorator`) once the `@logExecution`/`@trace`
+// deprecation completes (SFEP-0023 §4.5, epic #1557).
 fn infer_effects(existing: string[], decorator_names: string[]) -> string[] {
-    let mut effects = clone_effects(existing);
-    let mut requires_io: boolean = contains_effect(effects, "io");
-
-    let mut index: int = 0;
-    loop {
-        if index >= decorator_names.length { break; }
-        let name = decorator_names[index];
-        if name == "trace" { requires_io = true; }
-        if name == "logExecution" { requires_io = true; }
-        if name == "logexecution" { requires_io = true; }
-        index += 1;
-    }
-
-    if requires_io {
-        if !contains_effect(effects, "io") { effects.push("io"); }
-    }
-
-    return effects;
+    return clone_effects(existing);
 }
 
 fn append_string(collection: string[], item: string) -> string[] {
@@ -43,14 +38,4 @@ fn clone_effects(effects: string[]) -> string[] {
         index += 1;
     }
     return clone;
-}
-
-fn contains_effect(effects: string[], effect: string) -> boolean {
-    let mut index: int = 0;
-    loop {
-        if index >= effects.length { break; }
-        if effects[index] == effect { return true; }
-        index += 1;
-    }
-    return false;
 }
