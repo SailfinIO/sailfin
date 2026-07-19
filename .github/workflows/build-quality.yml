@@ -312,11 +312,14 @@ jobs:
   # commit warms a PR built at another.
   #
   # Independent of the determinism + cache.hit_rate gates above (those are
-  # untouched): this job has no cold-build requirement, so it restores the
-  # warm module-IR cache for a fast compile. The save is gated on a green
-  # suite (save-only step, no `if:`, runs only when every prior step
-  # succeeded) so a failing baseline can never poison the cache PRs
-  # consume — the previous good cache stays in place.
+  # untouched): this job has no cold-build requirement, so it restores both
+  # the warm module-IR cache AND its own prior test-bin cache (SFN-431) and
+  # builds INCREMENTALLY — recompiling only test binaries whose source
+  # changed and hitting the rest, instead of recompiling the whole suite
+  # cold on every merge. The save is gated on a green suite (save-only step,
+  # no `if:`, runs only when every prior step succeeded) so a failing
+  # baseline can never poison the cache PRs consume — the previous good
+  # cache stays in place.
   #
   # Linux x86_64 only for now (mirrors the gate job); macOS cache tuning
   # is deferred (#1233 Out:). The full-suite `make check` / determinism
@@ -335,22 +338,28 @@ jobs:
     concurrency:
       group: build-quality-testbin-${{ github.ref }}
       cancel-in-progress: false
-    # The warm step runs the whole `.sfn` suite with a COLD test-bin cache
-    # (this job is that cache's producer, so it restores module-IR but never
-    # test-bin), compiling every test binary from scratch — the cache it then
-    # saves. That work now runs in ONE parallel pool (`make test` sizes its
-    # `--jobs` budget to the runner via scripts/detect_test_jobs.sh), not the
-    # old serial-shard `for` loop whose ~53-min cold floor (shards run
-    # one-at-a-time, files serial within each) kept tipping past the cap and
-    # leaving the cache unsaved, so the next run paid the cold cost again
-    # (SFN-394). Parallelizing helped but did NOT clear a 60-min cap: on the
-    # 4-core `ubuntu-24.04` runner the cold full suite still needs >60 min
-    # (the warm step observed running 56-58 min and killed mid-e2e before the
-    # `Save test-bin cache` step could land, so the cache stayed unsaved and
-    # the whole run reported `cancelled`). The cap is a backstop for a hung
-    # pool, not the suite's wall-time budget, so it is set above the cold
-    # ceiling with headroom for the retry-once flake path (#892) and the
-    # commit-to-commit growth of the suite. See
+    # The warm step runs the whole `.sfn` suite INCREMENTALLY: the
+    # `Restore test-bin cache` step above restores this job's own prior
+    # test-bin cache, so `make test` recompiles only the test binaries whose
+    # source changed and hits the rest, then saves a fresh, complete cache
+    # (SFN-431 — this reverses the earlier cold-producer choice; the cold
+    # build was producer hygiene, never a soundness requirement, which
+    # belongs only to the `build-quality` determinism gate). The suite runs
+    # in ONE parallel pool (`make test` sizes its `--jobs` budget to the
+    # runner via scripts/detect_test_jobs.sh), not the old serial-shard `for`
+    # loop whose ~53-min cold floor (shards run one-at-a-time, files serial
+    # within each) kept tipping past the cap and leaving the cache unsaved,
+    # so the next run paid the cold cost again (SFN-394).
+    #
+    # `timeout-minutes` stays at 90 as a hung-pool backstop, NOT the suite's
+    # wall-time budget. The incremental warmer should finish in minutes on a
+    # typical merge, but the first warm after a compiler-source change (which
+    # rolls the content-addressed test-bin key and forces a broader recompile)
+    # still approaches the historical cold ceiling — the 4-core `ubuntu-24.04`
+    # cold full suite was observed at 56-58 min (killed mid-e2e under the old
+    # 60-min cap before PR #2492 raised it to 90). Keep the headroom for that
+    # path plus the retry-once flake path (#892); revisit lowering it once a
+    # warm run has been measured in the run logs (SFN-431 Scope). See
     # docs/proposals/0011-ci-test-speed.md.
     timeout-minutes: 90
     steps:
@@ -416,6 +425,35 @@ jobs:
           restore-keys: |
             sailfin-buildcache-linux-x86_64-${{ steps.seed.outputs.seed_version }}-
             sailfin-buildcache-linux-x86_64-
+
+      # Restore this job's OWN prior test-bin cache so the warm step below
+      # recompiles only test binaries whose source changed and hits the rest
+      # (SFN-431). The warmer is this cache's producer, but it has no
+      # cold-build correctness requirement — that invariant belongs only to
+      # the determinism gate in the `build-quality` job above, which builds
+      # the *compiler* cold (`--check-determinism`) and reads test binaries
+      # never (docs/proposals/0011-ci-test-speed.md: the test-bin cache is
+      # "read only by the runner" and the full-suite gate cold-builds test
+      # binaries via `--no-test-cache`). A cross-commit restore can never
+      # produce a *wrong* binary: each per-test entry is content-addressed by
+      # the commit-stable capsule version + source content (#1233), so a
+      # changed test file rolls its own entry's identity and misses → recompile.
+      # RESTORE-ONLY (`actions/cache/restore`, not `actions/cache`): the sole
+      # save is the explicit `Save test-bin cache for PR CI` step below, which
+      # is gated on a green suite so a failed baseline can't poison the cache.
+      # A combined `actions/cache` would add a post-job save that runs on
+      # failure too, defeating that guard. Keys mirror the module-IR restore
+      # above and the PR action's `sailfin-testbin-...` key exactly, so the
+      # exact-key hit lands on an unchanged tree and the prefix `restore-keys`
+      # fall back to the most recent prior baseline after a source change.
+      - name: Restore test-bin cache (per-test linked binaries)
+        uses: actions/cache/restore@v6
+        with:
+          path: build/cache/test-bin
+          key: sailfin-testbin-linux-x86_64-${{ steps.seed.outputs.seed_version }}-${{ hashFiles('compiler/src/**/*.sfn', 'runtime/**/*.sfn', 'runtime/capsule.toml', 'runtime/ir/**', 'compiler/capsule.toml', 'bootstrap.toml') }}
+          restore-keys: |
+            sailfin-testbin-linux-x86_64-${{ steps.seed.outputs.seed_version }}-
+            sailfin-testbin-linux-x86_64-
 
       - name: Self-host the compiler (make compile)
         shell: bash
