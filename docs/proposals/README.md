@@ -73,6 +73,7 @@ The next number is `max + 1`. Add a row in the same PR that introduces an SFEP.
 | [0048](./0048-native-crypto.md) | Native Crypto + TLS Stack — Removing the OpenSSL Dependency | Accepted | runtime |
 | [0049](./0049-concurrency-effect-transparency.md) | Effect-transparency for concurrency-primitive leaves (spawn / parallel / channel send·receive) | Implemented | language |
 | [0050](./0050-streamed-test-ipc.md) | Streamed per-test results over a captured pipe (retiring results.log/fail.bin) | Accepted | tooling |
+| [0051](./draft-workspace-manifest.md) | Workspace Manifest — Multi-Capsule Policy and the Capability Envelope | Draft | tooling |
 
 ## Drafts under review (numbers assigned at merge)
 

@@ -1,11 +1,27 @@
-# Sailfin workspace manifest
+# Sailfin workspace manifest — the workspace root for the self-hosted compiler.
 #
-# Stage A of the unified-build proposal
-# (docs/proposals/0006-build-architecture.md). Parse-only — Stage A ships the
-# schema; Stage B is when the resolver starts consuming this file.
+# Design: SFEP-0006 (docs/proposals/0006-build-architecture.md) §4.2. This file
+# declares the members that `sfn build -p compiler` resolves against, so an
+# intra-workspace edge (compiler → runtime, compiler → sfn/strings, …) links
+# from local source instead of the capsule cache or registry.
 #
-# Glob expansion of "capsules/sfn/*" is a Stage B concern; today the
-# parser surfaces the literal entries via toml_get_workspace_members().
+# The resolver consumes this manifest directly: `load_workspace_members`
+# (compiler/src/capsule_resolver.sfn) reads `[workspace].members`, and
+# `toolchain_decide` reads an optional `[toolchain]` pin here as the
+# workspace-wide default (a member capsule.toml overrides it per field).
+#
+# `members` MUST stay a single-physical-line literal list until a seed that
+# understands multi-line arrays + trailing-`/*` glob expansion is pinned in
+# bootstrap.toml: `make compile` self-hosts with the *pinned seed*, which reads
+# this file with its own baked-in TOML parser. The compiler now supports both
+# forms (multi-line arrays in toml_parser.sfn; `capsules/sfn/*` glob expansion
+# in capsule_resolver.sfn::_cr_expand_member_globs), so once a seed carrying
+# that parser is pinned this collapses to:
+#   members = [
+#       "compiler",
+#       "runtime",
+#       "capsules/sfn/*",
+#   ]
 
 [workspace]
 members = ["compiler", "runtime", "capsules/sfn/bench", "capsules/sfn/cli", "capsules/sfn/crypto", "capsules/sfn/fs", "capsules/sfn/http", "capsules/sfn/json", "capsules/sfn/layers", "capsules/sfn/log", "capsules/sfn/losses", "capsules/sfn/math", "capsules/sfn/net", "capsules/sfn/nn", "capsules/sfn/os", "capsules/sfn/path", "capsules/sfn/prelude", "capsules/sfn/strings", "capsules/sfn/sync", "capsules/sfn/tensor", "capsules/sfn/test", "capsules/sfn/time", "capsules/sfn/toml"]

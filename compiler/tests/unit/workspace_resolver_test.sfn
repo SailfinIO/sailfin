@@ -37,18 +37,10 @@ fn _parse_workspace_member_paths(members_text: string) -> string[] {
             end += 1;
         }
         if end > start {
-            let entry = substring(members_text, start, end);
-            let mut has_glob: boolean = false;
-            let mut gi: int = 0;
-            loop {
-                if gi >= entry.length { break; }
-                if substring(entry, gi, gi + 1) == "*" {
-                    has_glob = true;
-                    break;
-                }
-                gi += 1;
-            }
-            if !has_glob { out.push(entry); }
+            // Entries pass through verbatim, globs included;
+            // `_cr_expand_member_globs` expands trailing-`/*` entries in
+            // `load_workspace_members` (where the filesystem is in scope).
+            out.push(substring(members_text, start, end));
         }
         start = end + 1;
     }
@@ -122,14 +114,15 @@ test "workspace: multiple members parse newline-separated" {
     assert _str_eq(parsed[2], "capsules/sfn/test");
 }
 
-test "workspace: glob entries are skipped" {
-    // Globs (e.g. "capsules/sfn/*") aren't supported yet; the parser
-    // must drop them silently rather than treat the literal "*" as a
-    // directory name.
+test "workspace: glob entries pass through the splitter verbatim" {
+    // The splitter no longer drops globs — `_cr_expand_member_globs`
+    // expands a trailing "capsules/sfn/*" against the workspace tree in
+    // `load_workspace_members`. Here it must survive splitting intact.
     let parsed = _parse_workspace_member_paths("compiler\ncapsules/sfn/*\ncapsules/sfn/http");
-    assert parsed.length == 2;
+    assert parsed.length == 3;
     assert _str_eq(parsed[0], "compiler");
-    assert _str_eq(parsed[1], "capsules/sfn/http");
+    assert _str_eq(parsed[1], "capsules/sfn/*");
+    assert _str_eq(parsed[2], "capsules/sfn/http");
 }
 
 test "workspace: trailing newline does not add empty entry" {

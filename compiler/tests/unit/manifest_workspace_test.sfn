@@ -99,6 +99,33 @@ test "manifest: workspace.members multiple entries parse newline-separated" {
     assert _contains(members, "\n");
 }
 
+test "manifest: workspace.members multi-line array parses" {
+    let toml = "[workspace]\nmembers = [\n    \"compiler\",\n    \"runtime\",\n    \"capsules/sfn/*\",\n]\n";
+    let members = toml_get_workspace_members(toml);
+    assert _str_eq(members, "compiler\nruntime\ncapsules/sfn/*");
+}
+
+test "manifest: workspace.members multi-line array tolerates comments and trailing comma" {
+    let toml = "[workspace]\nmembers = [\n    \"compiler\",  # the compiler itself\n    # the runtime capsule\n    \"runtime\",\n]\n";
+    let members = toml_get_workspace_members(toml);
+    assert _str_eq(members, "compiler\nruntime");
+}
+
+test "manifest: multi-line array does not bleed past its closing bracket" {
+    let toml = "[workspace]\nmembers = [\n    \"compiler\",\n]\n\n[build]\nkind = \"binary\"\n";
+    let members = toml_get_workspace_members(toml);
+    assert _str_eq(members, "compiler");
+    assert _str_eq(toml_get_build_kind(toml), "binary");
+}
+
+test "manifest: capabilities.required multi-line array parses via toml_get_string_array" {
+    let toml = "[capabilities]\nrequired = [\n    \"clock\",\n    \"io\",\n    \"net\",\n]\n";
+    let caps = toml_get_string_array(toml, "capabilities", "required");
+    assert _contains(caps, "clock");
+    assert _contains(caps, "io");
+    assert _contains(caps, "net");
+}
+
 test "manifest: workspace-only file (no [capsule]) parses" {
     let toml = "[workspace]\nmembers = [\"compiler\", \"capsules/sfn/*\"]\n";
     assert _str_eq(toml_get_name(toml), "");

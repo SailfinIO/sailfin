@@ -85,7 +85,7 @@ import {
     semver_parse,
     semver_satisfies_floor
 } from "./semver";
-import { contains_string, substring } from "./string_utils";
+import { char_code_at_text, contains_string, substring } from "./string_utils";
 import { test_runner_scratch_root } from "./test_runner_state";
 import {
     toml_get_capabilities_required,
@@ -2328,21 +2328,11 @@ fn parse_workspace_member_paths(members_text: string) -> string[] {
             end += 1;
         }
         if end > start {
-            let entry = substring(members_text, start, end);
-            // Globs (e.g. "capsules/sfn/*") are deferred to a later stage —
-            // workspace.toml today must list members literally. Skip glob
-            // entries so an accidental wildcard never silently expands here.
-            let mut has_glob: boolean = false;
-            let mut gi: int = 0;
-            loop {
-                if gi >= entry.length { break; }
-                if substring(entry, gi, gi + 1) == "*" {
-                    has_glob = true;
-                    break;
-                }
-                gi += 1;
-            }
-            if !has_glob { out.push(entry); }
+            // Entries are returned verbatim, including trailing-`/*` globs
+            // (e.g. "capsules/sfn/*"). `_cr_expand_member_globs` expands those
+            // against the workspace tree in `load_workspace_members`, where the
+            // filesystem is in scope; this pure splitter stays IO-free.
+            out.push(substring(members_text, start, end));
         }
         start = end + 1;
     }
@@ -2407,6 +2397,104 @@ fn _cr_is_safe_member_path(path: string) -> boolean {
     return true;
 }
 
+// Lexicographic string comparison over character codes (mirrors
+// `build_cache::_string_lt`), so member expansion is deterministic regardless
+// of `fs.listDirectory` return order.
+fn _cr_string_lt(a: string, b: string) -> boolean {
+    let mut i: int = 0;
+    loop {
+        if i >= a.length || i >= b.length { break; }
+        let ca = char_code_at_text(a, i);
+        let cb = char_code_at_text(b, i);
+        if ca < cb { return true; }
+        if ca > cb { return false; }
+        i += 1;
+    }
+    return a.length < b.length;
+}
+
+// Insertion sort — member counts per glob are small (tens of capsules).
+fn _cr_sort_strings(input: string[]) -> string[] {
+    let mut out: string[] = [];
+    let mut ci: int = 0;
+    loop {
+        if ci >= input.length { break; }
+        out.push(input[ci]);
+        ci += 1;
+    }
+    let mut k: int = 1;
+    loop {
+        if k >= out.length { break; }
+        let cur = out[k];
+        let mut j: int = k - 1;
+        loop {
+            if j < 0 { break; }
+            if !_cr_string_lt(cur, out[j]) { break; }
+            out[j + 1] = out[j];
+            j -= 1;
+        }
+        out[j + 1] = cur;
+        k += 1;
+    }
+    return out;
+}
+
+// Array membership test — used to keep member expansion duplicate-free.
+fn _cr_str_in(arr: string[], s: string) -> boolean {
+    let mut i: int = 0;
+    loop {
+        if i >= arr.length { break; }
+        if strings_equal(arr[i], s) { return true; }
+        i += 1;
+    }
+    return false;
+}
+
+// Expand `[workspace].members` glob entries against the workspace tree
+// (SFEP-0006 §4.2). Only a trailing `/*` is supported — Cargo-style implicit
+// members: every immediate subdirectory of the prefix that carries a
+// `capsule.toml` becomes a member, in deterministic (sorted) order. Literal
+// entries pass through untouched. A `*` anywhere but a trailing `/*` is left
+// verbatim for the literal path checks downstream to reject. Output is
+// de-duplicated so a member covered by both a literal entry and a glob (or by
+// two overlapping globs) is emitted once — otherwise the duplicate would reach
+// `workspace.lock` as a repeated entry (`resolve_workspace_lock_entries` maps
+// members 1:1 and the lock writer does not dedup).
+fn _cr_expand_member_globs(workspace_root: string, paths: string[]) -> string[] ![io] {
+    let mut out: string[] = [];
+    let mut i: int = 0;
+    loop {
+        if i >= paths.length { break; }
+        let entry = paths[i];
+        i += 1;
+        if !_cr_ends_with(entry, "/*") {
+            if !_cr_str_in(out, entry) { out.push(entry); }
+            continue;
+        }
+        let prefix = substring(entry, 0, entry.length - 2);
+        if !_cr_is_safe_member_path(prefix) {
+            print.err("workspace: skipping unsafe glob member \"" + entry
+                + "\" (prefix must be relative, no `..`, no backslashes)");
+            continue;
+        }
+        let base = _cr_path_join(workspace_root, prefix);
+        if !fs.exists(base) { continue; }
+        let names = _cr_sort_strings(fs.listDirectory(base));
+        let mut j: int = 0;
+        loop {
+            if j >= names.length { break; }
+            let name = names[j];
+            j += 1;
+            let member_path = prefix + "/" + name;
+            let cap = _cr_path_join(_cr_path_join(workspace_root, member_path), "capsule.toml");
+            if fs.exists(cap) {
+                if !_cr_str_in(out, member_path) { out.push(member_path); }
+            }
+        }
+    }
+    return out;
+}
+
 // Load every workspace member listed in `<workspace_root>/workspace.toml`
 // into a WorkspaceMember[] with each member's canonical name pre-resolved.
 // Unsafe paths and members whose capsule.toml is missing or unnamed are
@@ -2418,7 +2506,7 @@ fn load_workspace_members(workspace_root: string) -> WorkspaceMember[] ![io] {
     if !fs.exists(manifest) { return out; }
     let text = fs.readFile(manifest);
     let members_text = toml_get_workspace_members(text);
-    let paths = parse_workspace_member_paths(members_text);
+    let paths = _cr_expand_member_globs(workspace_root, parse_workspace_member_paths(members_text));
     let mut i: int = 0;
     loop {
         if i >= paths.length { break; }
@@ -2463,8 +2551,9 @@ fn workspace_member_for_spec(members: WorkspaceMember[], spec: string) -> string
 
 // Resolve the whole workspace member graph into the flat lock-entry set a
 // writer (`workspace_lock_write`) can serialize. Returns one `_LockEntry`
-// per literal `[workspace].members` entry, carrying the member's canonical
-// name and version read from its own capsule.toml.
+// per resolved `[workspace].members` entry — after `load_workspace_members`
+// has expanded any `/*` glob and de-duplicated — carrying the member's
+// canonical name and version read from its own capsule.toml.
 //
 // Member selection mirrors `load_workspace_members`: unsafe paths and
 // members whose capsule.toml is missing or has no [capsule].name are
