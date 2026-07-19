@@ -22,6 +22,7 @@
 // (so the localized table exists) and before effect-inference finalization
 // (which will, in issue #2, consume `ResolvedDecorator.effects`).
 import {
+    Decorator,
     DecoratorArgument,
     Program,
     Statement,
@@ -219,6 +220,44 @@ fn resolve_decorators(program: Program, localized: ImportSymbolTable) -> Decorat
     };
 }
 
+// Resolve the decorators applied to a single routine — function, method,
+// test, or nested fn — against `localized`, returning the resolved records so
+// the effect checker (SFEP-0023 §4.3, SFN-71) can union their effects into the
+// routine's required-effect set. This per-routine entry exists because the
+// program-wide `resolve_decorators` walks only top-level function declarations
+// (see its scope note), so a method / test / nested-fn decorator would
+// otherwise contribute nothing to effect inference. Only effect-bearing
+// resolutions are returned; the resolution diagnostics (E0701/E0702) stay the
+// province of `resolve_decorators` and the lowering consumer (SFN-72), so an
+// imported-but-unmarked `@foo`, or an unknown non-built-in `@foo`, simply
+// contributes no effects here rather than erroring on this path.
+fn resolve_routine_decorators(decorators: Decorator[], localized: ImportSymbolTable) -> ResolvedDecorator[] {
+    let mut resolved: ResolvedDecorator[] = [];
+    let mut d: int = 0;
+    loop {
+        if d >= decorators.length { break; }
+        let decorator = decorators[d];
+        let name = decorator.name;
+        if name == decorator_marker_name() {
+            d += 1;
+            continue;
+        }
+        let entry_opt = lookup_imported_function(localized, name);
+        if entry_opt != null {
+            let entry: ImportedFunctionSignature? = entry_opt;
+            if entry.is_decorator {
+                resolved.push(_make_resolved(name, "", entry.effects, decorator.arguments));
+            }
+        } else {
+            if _is_builtin_decorator(name) {
+                resolved.push(_make_resolved(name, "", _builtin_decorator_effects(), decorator.arguments));
+            }
+        }
+        d += 1;
+    }
+    return resolved;
+}
+
 // Look up the resolved decorators recorded for a given function name.
 // Returns an empty list when the function carried no resolvable decorators.
 fn resolved_decorators_for_function(resolution: DecoratorResolution, function_name: string) -> ResolvedDecorator[] {
@@ -239,5 +278,6 @@ export {
     ResolvedFunctionDecorators,
     DecoratorResolution,
     resolve_decorators,
+    resolve_routine_decorators,
     resolved_decorators_for_function
 };

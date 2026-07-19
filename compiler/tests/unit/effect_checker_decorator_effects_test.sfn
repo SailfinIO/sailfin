@@ -1,0 +1,216 @@
+// Unit tests for decorator-implied effect inference in the effect checker
+// (SFN-71, SFEP-0023 §4.3): a decorator contributes its own declared effects
+// to the decorated routine's required-effect set, enforced through the same
+// declared-vs-required reconciliation as an imported callee. A missing
+// decorator effect renders `E0402` (the `imported `<name>`` description prefix
+// `diagnostics_render.code_for_missing_effect` keys on), replacing the former
+// name-hardcoded `io` injection for `@logExecution`/`@trace`.
+//
+// Tests construct AST values via small flat helper functions to stay shallow —
+// some seed compilers segfault on deeply nested struct-literal initialisers in
+// test bodies (see `effect_imports_test.sfn` / `decorator_resolver_test.sfn`
+// preambles for the same workaround).
+import {
+    Block,
+    Decorator,
+    DecoratorArgument,
+    FieldDeclaration,
+    FunctionSignature,
+    ImportSpecifier,
+    MethodDeclaration,
+    Parameter,
+    Program,
+    Statement,
+    TypeAnnotation,
+    TypeParameter
+} from "../../src/ast";
+import { EffectViolation, validate_effects_with_imports } from "../../src/effect_checker";
+import { append_import_decorator_function, empty_import_symbols } from "../../src/effect_imports";
+
+// -------------------------------------------------------------------
+// Builder helpers
+// -------------------------------------------------------------------
+fn _empty_block() -> Block {
+    return Block { tokens: [], text: "", statements: [] };
+}
+
+fn _signature(name: string, effects: string[]) -> FunctionSignature {
+    let mut empty_params: Parameter[] = [];
+    let mut empty_type_params: TypeParameter[] = [];
+    return FunctionSignature {
+        name: name,
+        is_async: false,
+        parameters: empty_params,
+        return_type: null,
+        effects: effects,
+        type_parameters: empty_type_params,
+        name_span: null
+    };
+}
+
+fn _decorator(name: string) -> Decorator {
+    let mut empty_arguments: DecoratorArgument[] = [];
+    return Decorator { name: name, arguments: empty_arguments };
+}
+
+fn _import_decl(name: string, source: string) -> Statement {
+    let spec = ImportSpecifier { name: name, alias: null };
+    return Statement.ImportDeclaration {
+        import_specifiers: [spec],
+        source: source
+    };
+}
+
+// A routine with an empty body, so the only effect requirements it produces
+// come from its applied decorators — isolating decorator-implied inference.
+fn _routine_with_decorators(name: string, effects: string[], decorators: Decorator[]) -> Statement {
+    return Statement.FunctionDeclaration {
+        signature: _signature(name, effects),
+        body: _empty_block(),
+        decorators: decorators,
+        is_unsafe: false
+    };
+}
+
+fn _program(statements: Statement[]) -> Program {
+    return Program { statements: statements };
+}
+
+fn _method_with_decorators(name: string, effects: string[], decorators: Decorator[]) -> MethodDeclaration {
+    return MethodDeclaration {
+        signature: _signature(name, effects),
+        body: _empty_block(),
+        decorators: decorators
+    };
+}
+
+fn _struct_with_method(struct_name: string, method: MethodDeclaration) -> Statement {
+    let mut empty_type_params: TypeParameter[] = [];
+    let mut empty_impls: TypeAnnotation[] = [];
+    let mut empty_fields: FieldDeclaration[] = [];
+    let mut empty_decorators: Decorator[] = [];
+    return Statement.StructDeclaration {
+        name: struct_name,
+        name_span: null,
+        type_parameters: empty_type_params,
+        implements_types: empty_impls,
+        fields: empty_fields,
+        methods: [method],
+        decorators: empty_decorators
+    };
+}
+
+// Assert `description` begins with the cross-module `imported `` prefix that
+// `diagnostics_render.code_for_missing_effect` promotes to E0402. Spelled out
+// by hand because the prefix is the cross-module diagnostic contract (mirrors
+// the check in `effect_imports_test.sfn`).
+fn _starts_with_imported(description: string) -> boolean {
+    let prefix = "imported `";
+    if description.length < prefix.length { return false; }
+    let mut i: int = 0;
+    loop {
+        if i >= prefix.length { break; }
+        if description[i] != prefix[i] { return false; }
+        i += 1;
+    }
+    return true;
+}
+
+// -------------------------------------------------------------------
+// Tests
+// -------------------------------------------------------------------
+test "effect_checker: capsule decorator [clock] propagates clock to the target" {
+    // AC: a decorator declaring `[clock]` forces its target to satisfy `clock`;
+    // a target lacking it fails with E0402 (imported-effect family).
+    let mut global = empty_import_symbols();
+    global = append_import_decorator_function(global, "audit", ["clock"], true);
+    let import_stmt = _import_decl("audit", "sfn/log");
+    let handler = _routine_with_decorators("handler", [], [_decorator("audit")]);
+    let program = _program([import_stmt, handler]);
+
+    let violations = validate_effects_with_imports(program, global);
+    assert violations.length == 1;
+    let v = violations[0];
+    assert v.routine_name == "handler";
+    assert v.missing_effects.length == 1;
+    assert v.missing_effects[0] == "clock";
+    assert v.requirements.length == 1;
+    let req = v.requirements[0];
+    assert req.effect == "clock";
+    assert _starts_with_imported(req.description);
+}
+
+test "effect_checker: capsule decorator [io] forces the target to satisfy io" {
+    // AC: a decorator declaring `[io]` forces its target to satisfy `io`.
+    let mut global = empty_import_symbols();
+    global = append_import_decorator_function(global, "logExecution", ["io"], true);
+    let import_stmt = _import_decl("logExecution", "sfn/log");
+    let handler = _routine_with_decorators("handler", [], [_decorator("logExecution")]);
+    let program = _program([import_stmt, handler]);
+
+    let violations = validate_effects_with_imports(program, global);
+    assert violations.length == 1;
+    assert violations[0].missing_effects.length == 1;
+    assert violations[0].missing_effects[0] == "io";
+    assert _starts_with_imported(violations[0].requirements[0].description);
+}
+
+test "effect_checker: decorator effect satisfied by the declared signature is not a violation" {
+    // AC: removing the hardcoded injection does not regress the case where the
+    // target already declares the decorator's effect (the signature path).
+    let mut global = empty_import_symbols();
+    global = append_import_decorator_function(global, "logExecution", ["io"], true);
+    let import_stmt = _import_decl("logExecution", "sfn/log");
+    let handler = _routine_with_decorators("handler", ["io"], [_decorator("logExecution")]);
+    let program = _program([import_stmt, handler]);
+
+    let violations = validate_effects_with_imports(program, global);
+    assert violations.length == 0;
+}
+
+test "effect_checker: built-in @logExecution fallback requires io during migration" {
+    // Migration fallback: an un-imported built-in `@logExecution` still
+    // contributes `io` (via `resolve_routine_decorators`'s built-in registry),
+    // satisfied here by the declared `![io]`.
+    let global = empty_import_symbols();
+    let handler = _routine_with_decorators("handler", ["io"], [_decorator("logExecution")]);
+    let program = _program([handler]);
+
+    let violations = validate_effects_with_imports(program, global);
+    assert violations.length == 0;
+}
+
+test "effect_checker: capsule decorator on a method propagates to the method (E0402)" {
+    // `resolve_routine_decorators` covers non-top-level routines that the
+    // program-wide `resolve_decorators` does not walk (methods, tests, nested
+    // fns). A method decorated with an imported `[clock]` decorator must itself
+    // satisfy `clock`.
+    let mut global = empty_import_symbols();
+    global = append_import_decorator_function(global, "audit", ["clock"], true);
+    let import_stmt = _import_decl("audit", "sfn/log");
+    let method = _method_with_decorators("run", [], [_decorator("audit")]);
+    let worker = _struct_with_method("Worker", method);
+    let program = _program([import_stmt, worker]);
+
+    let violations = validate_effects_with_imports(program, global);
+    assert violations.length == 1;
+    assert violations[0].routine_name == "Worker.run";
+    assert violations[0].missing_effects.length == 1;
+    assert violations[0].missing_effects[0] == "clock";
+    assert _starts_with_imported(violations[0].requirements[0].description);
+}
+
+test "effect_checker: imported non-@decorator symbol contributes no decorator effect" {
+    // The legacy prelude pattern: `logExecution` is imported but not marked
+    // `@decorator`. The effect gate contributes no effect for it (E0701
+    // surfacing is the resolver/lowering concern, SFN-72), so an empty-bodied
+    // target neither gains a spurious requirement nor errors here.
+    let mut global = empty_import_symbols();
+    global = append_import_decorator_function(global, "logExecution", ["io"], false);
+    let import_stmt = _import_decl("logExecution", "runtime/prelude");
+    let handler = _routine_with_decorators("handler", [], [_decorator("logExecution")]);
+    let program = _program([import_stmt, handler]);
+
+    let violations = validate_effects_with_imports(program, global);
+    assert violations.length == 0;
+}

@@ -37,9 +37,9 @@ import {
     Parameter,
     Program,
     SourceSpan,
-    Statement,
-    decorator_names
+    Statement
 } from "./ast";
+import { ResolvedDecorator, resolve_routine_decorators } from "./decorator_resolver";
 import {
     ImportSymbolTable,
     ImportedFunctionSignature,
@@ -843,8 +843,45 @@ fn is_program_entry_point(signature: FunctionSignature) -> boolean {
     return signature.name == "main";
 }
 
+// Turn each resolved decorator on a routine into one requirement per declared
+// effect (SFEP-0023 §4.3). The `imported \`<name>\`` description prefix routes a
+// missing one through the cross-module `E0402` path in
+// `diagnostics_render.code_for_missing_effect` — a decorator is just an implicit
+// call, so it reuses the imported-effect diagnostic family rather than inventing
+// one. Decorator applications carry no source span (`Decorator` has no span
+// field), so `trigger` stays null and the violation falls back to the signature
+// token (`analyze_routine`). `pure` is skipped: it never satisfies a real
+// requirement (`effect_taxonomy.sfn`), so it must never be required either —
+// mirroring `_propagate_imported_callee_effects`. The built-in-fallback path
+// (`@logExecution`/`@trace` used un-imported) also renders as `imported
+// \`<name>\`` here so it routes through E0402; the wording is a migration-only
+// artifact that retires with the built-in seam (SFEP-0023 §4.5).
+fn _append_decorator_requirements(base: EffectRequirement[], decorators: ResolvedDecorator[]) -> EffectRequirement[] {
+    let mut required = base;
+    let mut d: int = 0;
+    loop {
+        if d >= decorators.length { break; }
+        let decorator = decorators[d];
+        let prefix = "imported `" + decorator.local_name + "` declares ![";
+        let mut e: int = 0;
+        loop {
+            if e >= decorator.effects.length { break; }
+            let effect = decorator.effects[e];
+            if is_universally_allowed_effect(effect) {
+                e += 1;
+                continue;
+            }
+            required = append_requirement(required, EffectRequirement {
+                effect: effect, description: prefix + effect + "]", trigger: null
+            });
+            e += 1;
+        }
+        d += 1;
+    }
+    return required;
+}
+
 fn analyze_routine(signature: FunctionSignature, body: Block, decorators: Decorator[], name: string, imports: ImportSymbolTable) -> EffectViolation[] {
-    let names = decorator_names(decorators);
     let mut declared: string[] = [];
     let mut declared_index: int = 0;
     loop {
@@ -852,27 +889,18 @@ fn analyze_routine(signature: FunctionSignature, body: Block, decorators: Decora
         declared = append_unique_effect(declared, signature.effects[declared_index]);
         declared_index += 1;
     }
-    let mut requires_io_from_decorators: boolean = false;
-    let mut decorator_index: int = 0;
-    loop {
-        if decorator_index >= names.length { break; }
-        let decorator_name = names[decorator_index];
-        let mut _if15: boolean = false;
-        if decorator_name == "trace" { _if15 = true; }
-        if decorator_name == "logExecution" { _if15 = true; }
-        if decorator_name == "logexecution" { _if15 = true; }
-        if _if15 {
-            requires_io_from_decorators = true;
-            break;
-        }
-        decorator_index += 1;
-    }
-    if requires_io_from_decorators {
-        declared = append_unique_effect(declared, "io");
-    }
     // Suppress any fn-table row shadowed by a same-named parameter of this
     // routine (SFEP-0042 §3.4 gap (b), #1950) before walking the body.
-    let required = required_effects(body, _suppress_shadowing_params(imports, signature.parameters));
+    let mut required = required_effects(body, _suppress_shadowing_params(imports, signature.parameters));
+    // A decorator applied to this routine is an implicit call to the decorator
+    // function at entry (SFEP-0023 §4.3), so its declared effects become
+    // requirements this routine must itself satisfy — reconciled against
+    // `declared` by the same loop that gates imported-callee effects, and
+    // rendered `E0402` via the `imported \`<name>\`` description prefix. This
+    // replaces the former hardcoded `io` injection for `@trace`/`@logExecution`;
+    // the built-in-name fallback now lives in `resolve_routine_decorators`
+    // (migration seam, SFEP-0023 §4.2).
+    required = _append_decorator_requirements(required, resolve_routine_decorators(decorators, imports));
     let mut missing: string[] = [];
     let mut missing_requirements: EffectRequirement[] = [];
     let mut index: int = 0;
@@ -880,12 +908,6 @@ fn analyze_routine(signature: FunctionSignature, body: Block, decorators: Decora
         if index >= required.length { break; }
         let requirement = required[index];
         let effect = requirement.effect;
-        if effect == "io" {
-            if requires_io_from_decorators {
-                index += 1;
-                continue;
-            }
-        }
         if _any_subsumes(declared, effect) {
             index += 1;
             continue;

@@ -17,10 +17,8 @@ import {
     Parameter,
     Statement,
     TypeAnnotation,
-    TypeParameter,
-    decorator_names
+    TypeParameter
 } from "../ast";
-import { infer_effects } from "../decorator_semantics";
 import {
     char_at,
     char_code,
@@ -1009,7 +1007,7 @@ fn parse_function(initial_parser: Parser, starts_with_async: boolean, decorators
     let effect_result = parse_effect_list(parser);
     parser = effect_result.parser;
     let parsed_effects = effect_result.effects;
-    let inferred_effects = infer_effects(parsed_effects, decorator_names(decorators));
+    let inferred_effects = parsed_effects;
 
     // Allow `fn foo() ![effects] -> T {}` ordering.
     if return_type == null {
@@ -1108,7 +1106,7 @@ fn parse_extern_function(initial_parser: Parser, starts_with_unsafe: boolean, de
     let effect_result = parse_effect_list(parser);
     parser = effect_result.parser;
     let parsed_effects = effect_result.effects;
-    let inferred_effects = infer_effects(parsed_effects, decorator_names(decorators));
+    let inferred_effects = parsed_effects;
 
     // Allow `extern fn foo() ![effects] -> T;` ordering.
     if return_type == null {
@@ -1459,7 +1457,7 @@ fn parse_struct_method(parser: Parser, decorators: Decorator[]) -> MethodParseRe
     let effect_result = parse_effect_list(current);
     current = effect_result.parser;
     let parsed_effects = effect_result.effects;
-    let inferred_effects = infer_effects(parsed_effects, decorator_names(decorators));
+    let inferred_effects = parsed_effects;
 
     let block_result = parse_block(current);
     current = block_result.parser;
@@ -1844,7 +1842,7 @@ fn parse_interface_member(parser: Parser, decorators: Decorator[]) -> InterfaceM
     let effect_result = parse_effect_list(current);
     current = effect_result.parser;
     let parsed_effects = effect_result.effects;
-    let inferred_effects = infer_effects(parsed_effects, decorator_names(decorators));
+    let inferred_effects = parsed_effects;
 
     current = skip_trivia(current);
     if current.index < current.tokens.length {
@@ -1939,7 +1937,7 @@ fn parse_test(initial_parser: Parser, decorators: Decorator[]) -> StatementParse
     let effect_result = parse_effect_list(parser);
     parser = effect_result.parser;
     let parsed_effects = effect_result.effects;
-    let inferred_effects = infer_effects(parsed_effects, decorator_names(decorators));
+    let inferred_effects = parsed_effects;
 
     let block_result = parse_block(parser);
     parser = block_result.parser;
@@ -1977,7 +1975,7 @@ fn parse_lifecycle_hook(initial_parser: Parser, decorators: Decorator[], kind: s
     let effect_result = parse_effect_list(parser);
     parser = effect_result.parser;
     let parsed_effects = effect_result.effects;
-    let inferred_effects = infer_effects(parsed_effects, decorator_names(decorators));
+    let inferred_effects = parsed_effects;
 
     let block_result = parse_block(parser);
     parser = block_result.parser;
