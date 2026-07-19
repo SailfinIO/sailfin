@@ -22,7 +22,8 @@ import {
     discover_project_root,
     discover_workspace_root,
     empty_resolver_consumer,
-    prepare_project_capsules_for_check
+    prepare_project_capsules_for_check,
+    workspace_capability_gate
 } from "../capsule_resolver";
 import {
     CheckJsonEvent,
@@ -184,6 +185,18 @@ fn _find_group(groups: CheckGroup[], key: string) -> int {
     return -1;
 }
 
+// True iff `needle` already appears in `items` — used to audit each distinct
+// workspace root at most once across the check's resolution groups.
+fn _check_contains_str(items: string[], needle: string) -> boolean {
+    let mut i: int = 0;
+    loop {
+        if i >= items.length { break; }
+        if strings_equal(items[i], needle) { return true; }
+        i += 1;
+    }
+    return false;
+}
+
 fn handle_check_command(args: string[], binary_dir: string) -> int ![io] {
     let mut quiet: boolean = false;
     let mut json: boolean = false;
@@ -279,6 +292,30 @@ fn handle_check_command(args: string[], binary_dir: string) -> int ![io] {
         file_group_index.push(idx);
         gpi += 1;
     }
+
+    // SFEP-0051 Phase 4c: workspace capability-envelope gate. Audit each
+    // distinct workspace root once before per-file analysis; under `enforce`
+    // (the default) declared-surface drift fails the check, under `warn` it is
+    // reported only. Groups partition by `(project_root, workspace_root)`, so
+    // each group's representative file yields the group's workspace root; the
+    // `cap_audited_roots` set keeps a root shared across groups audited once.
+    // A non-workspace check (`ws_root == ""`) is a no-op — single-capsule and
+    // single-file runs are unaffected. Running ahead of the resolver loop
+    // surfaces a workspace-policy violation without a full typecheck pass,
+    // mirroring the `staging_failed` early return below.
+    let mut cap_audited_roots: string[] = [];
+    let mut cap_gate_failed: boolean = false;
+    let mut cwi: int = 0;
+    loop {
+        if cwi >= groups.length { break; }
+        let ws_root = discover_workspace_root(_dirname_cmd(groups[cwi].entry_paths[0]));
+        cwi += 1;
+        if ws_root.length == 0 { continue; }
+        if _check_contains_str(cap_audited_roots, ws_root) { continue; }
+        cap_audited_roots.push(ws_root);
+        if workspace_capability_gate(ws_root) != 0 { cap_gate_failed = true; }
+    }
+    if cap_gate_failed { return 1; }
 
     // #1246: resolve the self-executable once for every group's
     // resolver pass. Non-empty ⇒ the resolver stages each cache-miss

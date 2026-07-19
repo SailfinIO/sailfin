@@ -1,0 +1,247 @@
+// End-to-end tests for the SFEP-0051 Phase 4c workspace capability-envelope
+// enforcement gate and the `sfn capabilities audit` reporting command.
+//
+// Each test builds a throwaway fixture workspace under a fresh `with_tmp_dir`
+// (the repo tree is untouched) with two members: `clean` (declares only `io`,
+// within the `allow = ["clock", "io"]` envelope) and `drifter` (declares
+// `["io", "net"]`, so `net` drifts). The gate is exercised through three
+// surfaces:
+//
+//   * `sfn check <path>` and `sfn build <file>` take a path, so the workspace
+//     root is discovered from it — no `cd` needed, and the enforce-mode gate
+//     fails before any emit/link so an empty child env (no PATH/clang) suffices.
+//   * `sfn capabilities audit` discovers the workspace from the current
+//     directory, so it runs through a `cd <root> && <sfn> ...` bash vehicle
+//     with an absolute compiler path (`run_capture` cannot chdir — see
+//     `.claude/rules/no-bash-e2e.md`).
+//
+// `mode = "warn"` turns the same drift into a report that does not fail.
+import { find, split } from "sfn/strings";
+import { with_tmp_dir } from "sfn/test";
+
+// The compiler-under-test: `$SAILFIN_BIN` if set, else the self-hosted binary
+// relative to the repo root the runner starts from (mirrors `sfn/test`'s
+// `_resolve_sfn_bin`).
+fn _sfn_bin() -> string ![io] {
+    let configured = env.get("SAILFIN_BIN");
+    if configured.length > 0 { return configured; }
+    return "build/bin/sfn";
+}
+
+// First line of a captured stdout, trailing newline dropped.
+fn _first_line(text: string) -> string {
+    let lines = split(text, "\n");
+    if lines.length == 0 { return text; }
+    return lines[0];
+}
+
+// Minimal env carrying PATH so the OS can resolve `bash` for the cd vehicle.
+// The audit does not compile, so no clang toolchain env is needed.
+fn _child_env() -> string[] ![io] {
+    let mut e: string[] = [];
+    let path = env.get("PATH");
+    if path.length > 0 { e.push("PATH=" + path); }
+    let home = env.get("HOME");
+    if home.length > 0 { e.push("HOME=" + home); }
+    return e;
+}
+
+// Absolute path to the compiler binary, for the `cd <root> && <sfn>` vehicle.
+// If `_sfn_bin()` is already absolute, return it; else join onto cwd via `pwd`.
+fn _sfn_bin_abs() -> string ![io] {
+    let bin = _sfn_bin();
+    if bin.length > 0 && bin[0] == "/" { return bin; }
+    let exit = process.run_capture(["pwd"], _child_env());
+    let out = process.capture_take_stdout();
+    let _e = process.capture_take_stderr();
+    if exit != 0 { return bin; }
+    return _first_line(out) + "/" + bin;
+}
+
+// Build a two-member fixture workspace under `root`. `clean` stays within the
+// `allow = ["clock", "io"]` envelope; `drifter` declares `net`, which drifts.
+// When `warn` is true the envelope carries `mode = "warn"`.
+fn _make_ws(root: string, warn: boolean) -> void ![io] {
+    fs.createDirectory(root + "/clean", true);
+    fs.createDirectory(root + "/drifter", true);
+    let mut ws = "[workspace]\nmembers = [\"clean\", \"drifter\"]\n\n[workspace.capabilities]\nallow = [\"clock\", \"io\"]\n";
+    if warn { ws = ws + "mode = \"warn\"\n"; }
+    fs.writeFile(root + "/workspace.toml", ws);
+    fs.writeFile(root + "/clean/capsule.toml", "[capsule]\nname = \"fixture/clean\"\nversion = \"0.1.0\"\n\n[capabilities]\nrequired = [\"io\"]\n");
+    fs.writeFile(root + "/clean/main.sfn", "fn main() -> int {\n    return 0;\n}\n");
+    fs.writeFile(root + "/drifter/capsule.toml", "[capsule]\nname = \"fixture/drifter\"\nversion = \"0.1.0\"\n\n[capabilities]\nrequired = [\"io\", \"net\"]\n");
+    fs.writeFile(root + "/drifter/main.sfn", "fn main() -> int {\n    return 0;\n}\n");
+}
+
+// ---- Test 1: drift fails `sfn check` in enforce mode ----
+test "capability gate: declared-surface drift fails sfn check (enforce)" ![io] {
+    let out_marker = _scratch_marker("t1");
+    let exit = with_tmp_dir(fn (dir: string) -> int {
+        _make_ws(dir, false);
+        let rc = process.run_capture([_sfn_bin(), "check", dir], []);
+        let out = process.capture_take_stdout();
+        let err = process.capture_take_stderr();
+        fs.writeFile(out_marker, out + err);
+        return rc;
+    });
+    assert exit != 0;
+    let msg = fs.readFile(out_marker);
+    fs.deleteFile(out_marker);
+    assert find(msg, "E0405", 0) >= 0;
+    assert find(msg, "net", 0) >= 0;
+}
+
+// ---- Test 2: drift fails `sfn build` in enforce mode (before any link) ----
+test "capability gate: declared-surface drift fails sfn build (enforce)" ![io] {
+    let out_marker = _scratch_marker("t2");
+    let exit = with_tmp_dir(fn (dir: string) -> int {
+        _make_ws(dir, false);
+        let rc = process.run_capture([_sfn_bin(), "build", dir
+            + "/drifter/main.sfn"], []);
+        let out = process.capture_take_stdout();
+        let err = process.capture_take_stderr();
+        fs.writeFile(out_marker, out + err);
+        return rc;
+    });
+    assert exit != 0;
+    let msg = fs.readFile(out_marker);
+    fs.deleteFile(out_marker);
+    assert find(msg, "E0405", 0) >= 0;
+}
+
+// ---- Test 3: `sfn capabilities audit` prints the table + exits non-zero ----
+test "capabilities audit: prints table and exits non-zero on drift (enforce)" ![io] {
+    let out_marker = _scratch_marker("t3-out");
+    let err_marker = _scratch_marker("t3-err");
+    let sfn_abs = _sfn_bin_abs();
+    let exit = with_tmp_dir(fn (dir: string) -> int {
+        _make_ws(dir, false);
+        let rc = process.run_capture(["bash", "-c", "cd \"" + dir + "\" && \""
+            + sfn_abs
+            + "\" capabilities audit"], _child_env());
+        fs.writeFile(out_marker, process.capture_take_stdout());
+        fs.writeFile(err_marker, process.capture_take_stderr());
+        return rc;
+    });
+    assert exit != 0;
+    let out = fs.readFile(out_marker);
+    let err = fs.readFile(err_marker);
+    fs.deleteFile(out_marker);
+    fs.deleteFile(err_marker);
+    // Table header + the drifting member/effect on stdout.
+    assert find(out, "MEMBER", 0) >= 0;
+    assert find(out, "EFFECTIVE", 0) >= 0;
+    assert find(out, "DRIFT", 0) >= 0;
+    assert find(out, "fixture/drifter", 0) >= 0;
+    assert find(out, "mode: enforce", 0) >= 0;
+    // Coded diagnostic on stderr.
+    assert find(err, "E0405", 0) >= 0;
+}
+
+// ---- Test 4: `mode = "warn"` reports drift but sfn check still passes ----
+test "capability gate: mode = warn reports drift without failing sfn check" ![io] {
+    let err_marker = _scratch_marker("t4");
+    let exit = with_tmp_dir(fn (dir: string) -> int {
+        _make_ws(dir, true);
+        let rc = process.run_capture([_sfn_bin(), "check", dir], []);
+        let _out = process.capture_take_stdout();
+        fs.writeFile(err_marker, process.capture_take_stderr());
+        return rc;
+    });
+    assert exit == 0;
+    let err = fs.readFile(err_marker);
+    fs.deleteFile(err_marker);
+    // The drift is still reported (E0405) with the not-enforced note.
+    assert find(err, "E0405", 0) >= 0;
+    assert find(err, "not enforced", 0) >= 0;
+}
+
+// ---- Test 5: `sfn capabilities audit` under warn exits 0 ----
+test "capabilities audit: mode = warn reports drift and exits zero" ![io] {
+    let out_marker = _scratch_marker("t5");
+    let sfn_abs = _sfn_bin_abs();
+    let exit = with_tmp_dir(fn (dir: string) -> int {
+        _make_ws(dir, true);
+        let rc = process.run_capture(["bash", "-c", "cd \"" + dir + "\" && \""
+            + sfn_abs
+            + "\" capabilities audit"], _child_env());
+        fs.writeFile(out_marker, process.capture_take_stdout());
+        let _e = process.capture_take_stderr();
+        return rc;
+    });
+    assert exit == 0;
+    let out = fs.readFile(out_marker);
+    fs.deleteFile(out_marker);
+    assert find(out, "mode: warn", 0) >= 0;
+    assert find(out, "not enforced", 0) >= 0;
+}
+
+// ---- Test 6: no declared envelope ⇒ the gate is a no-op (opt-in) ----
+// Regression guard: the envelope is opt-in. A workspace with no
+// `[workspace.capabilities]` block must NOT flag its members' declared effects
+// as drift against an empty envelope — otherwise every effect-declaring
+// workspace (including this repo) would fail `sfn check`/`build` outright.
+test "capability gate: no [workspace.capabilities] is a no-op" ![io] {
+    let check_marker = _scratch_marker("t6-check");
+    let audit_code_marker = _scratch_marker("t6-audit-code");
+    let audit_out_marker = _scratch_marker("t6-audit-out");
+    let sfn_abs = _sfn_bin_abs();
+    let exit = with_tmp_dir(fn (dir: string) -> int {
+        _make_ws_bare(dir);
+        let check_rc = process.run_capture([_sfn_bin(), "check", dir], []);
+        let _co = process.capture_take_stdout();
+        let _ce = process.capture_take_stderr();
+        fs.writeFile(check_marker, _rc_marker(check_rc));
+        let audit_rc = process.run_capture(["bash", "-c", "cd \"" + dir
+            + "\" && \""
+            + sfn_abs
+            + "\" capabilities audit"], _child_env());
+        fs.writeFile(audit_out_marker, process.capture_take_stdout());
+        let _ae = process.capture_take_stderr();
+        fs.writeFile(audit_code_marker, _rc_marker(audit_rc));
+        return 0;
+    });
+    assert exit == 0;
+    let check_rc = fs.readFile(check_marker);
+    let audit_rc = fs.readFile(audit_code_marker);
+    let audit_out = fs.readFile(audit_out_marker);
+    fs.deleteFile(check_marker);
+    fs.deleteFile(audit_code_marker);
+    fs.deleteFile(audit_out_marker);
+    // check succeeds (drifter's declared `net` is not flagged as drift) and the
+    // audit exits 0, reporting there is nothing to audit.
+    assert check_rc == "pass";
+    assert audit_rc == "pass";
+    assert find(audit_out, "nothing to audit", 0) >= 0;
+}
+
+// Build a two-member fixture with members that declare effects but NO
+// `[workspace.capabilities]` envelope — the opt-out (unconfigured) shape.
+fn _make_ws_bare(root: string) -> void ![io] {
+    fs.createDirectory(root + "/clean", true);
+    fs.createDirectory(root + "/drifter", true);
+    fs.writeFile(root + "/workspace.toml", "[workspace]\nmembers = [\"clean\", \"drifter\"]\n");
+    fs.writeFile(root + "/clean/capsule.toml", "[capsule]\nname = \"fixture/clean\"\nversion = \"0.1.0\"\n\n[capabilities]\nrequired = [\"io\"]\n");
+    fs.writeFile(root + "/clean/main.sfn", "fn main() -> int {\n    return 0;\n}\n");
+    fs.writeFile(root + "/drifter/capsule.toml", "[capsule]\nname = \"fixture/drifter\"\nversion = \"0.1.0\"\n\n[capabilities]\nrequired = [\"io\", \"net\"]\n");
+    fs.writeFile(root + "/drifter/main.sfn", "fn main() -> int {\n    return 0;\n}\n");
+}
+
+// "pass" for exit 0, else "fail" — lets a test assert on a captured exit code
+// through a marker file without an int-to-string dependency.
+fn _rc_marker(rc: int) -> string {
+    if rc == 0 { return "pass"; }
+    return "fail";
+}
+
+// A fresh marker-file path under the runner scratch dir (or `/tmp`), with any
+// stale value removed. Lives outside the `with_tmp_dir` tree so it survives
+// teardown (the `sfn/test` idiom for asserting on closure-captured output).
+fn _scratch_marker(name: string) -> string ![io] {
+    let mut dir = env.get("SAILFIN_TEST_SCRATCH");
+    if dir.length == 0 { dir = "/tmp"; }
+    fs.createDirectory(dir, true);
+    let path = dir + "/sfn-capgate-" + name + ".out";
+    if fs.exists(path) { fs.deleteFile(path); }
+    return path;
+}

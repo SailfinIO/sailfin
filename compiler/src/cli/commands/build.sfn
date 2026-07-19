@@ -59,7 +59,12 @@ import {
     is_safe_scope_name,
     parse_scope_name
 } from "../../capsule_artifact";
-import { ResolverConsumer, prepare_project_capsules } from "../../capsule_resolver";
+import {
+    ResolverConsumer,
+    discover_workspace_root,
+    prepare_project_capsules,
+    workspace_capability_gate
+} from "../../capsule_resolver";
 import { format_backend_failure_banner } from "../../ice";
 import { compile_to_llvm_file_with_module, module_name_from_path } from "../../main";
 import { runtime_capsule_from_root } from "../../runtime_capsule_resolver";
@@ -171,6 +176,14 @@ fn run(matches: Matches, ctx: CliContext) -> int ![clock, io, net] {
         print("usage: sfn build [-o OUTPUT] [-p PATH] [--no-cache] [--clean] [--cache-trace] [--json] [--work-dir DIR] [--check-determinism] (<file.sfn> | -p <capsule-path>)");
         return 2;
     }
+
+    // SFEP-0051 Phase 4c: workspace capability-envelope gate. When the entry
+    // source resolves under a `workspace.toml`, audit its members' declared
+    // effect surface against `[workspace.capabilities]` before any emit/link;
+    // under `enforce` (default) drift fails the build, under `warn` it is
+    // reported only. A non-workspace build (`ws_root == ""`) is a no-op.
+    let _cap_ws_root = discover_workspace_root(_dirname(input_path));
+    if workspace_capability_gate(_cap_ws_root) != 0 { return 1; }
 
     let is_library_build = strings_equal(build_kind, "library");
     let is_runtime_build = strings_equal(build_kind, "runtime");
