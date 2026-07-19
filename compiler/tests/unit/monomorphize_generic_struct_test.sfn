@@ -182,6 +182,57 @@ test "monomorphize struct: unannotated static constructor call is not instantiat
     assert ! _has(out, ".struct List$");
 }
 
+test "monomorphize struct: two methods reusing a local name mangle from their own env" {
+    // Two methods of one generic struct each bind a local named `item` at a
+    // different concrete type and construct `Box { value: item }`. The env used
+    // to sweep a method body must be scoped to that method: `push_a`'s `item` is
+    // `int` (→ `Box$int`) and `push_b`'s `item` is `string` (→ `Box$string`).
+    // A single block-scoped env would flatten both `item` bindings and, first
+    // match winning, mis-infer `push_b`'s literal as `Box$int` — never emitting
+    // `Box$string`. Scoping per method (mirroring the free-fn path) fixes the
+    // cross-method name capture (SFN-406).
+    let src = ".module m\n" + ".struct Box<U>\n"
+        + ".layout struct name=Box size=8 align=8\n"
+        + ".layout field value type=U offset=0 size=8 align=8\n"
+        + "    .field value: U\n"
+        + ".endstruct\n"
+        + "\n"
+        + ".struct Holder<T>\n"
+        + ".layout struct name=Holder size=8 align=8\n"
+        + ".layout field slot type=T offset=0 size=8 align=8\n"
+        + "    .field slot: T\n"
+        + "    .method push_a(self, item: int) -> void\n"
+        + "    .meta return void\n"
+        + "    .meta effects none\n"
+        + "    .param self\n"
+        + "    .param item: int\n"
+        + "        .let bx = Box { value: item }\n"
+        + "    .endmethod\n"
+        + "    .method push_b(self, item: string) -> void\n"
+        + "    .meta return void\n"
+        + "    .meta effects none\n"
+        + "    .param self\n"
+        + "    .param item: string\n"
+        + "        .let bx = Box { value: item }\n"
+        + "    .endmethod\n"
+        + ".endstruct\n"
+        + "\n"
+        + ".fn main() -> int\n"
+        + ".meta return int\n"
+        + ".meta effects none\n"
+        + "    .let h = Holder { slot: 0 }\n"
+        + "    ret 0\n"
+        + ".endfn\n";
+    let out = monomorphize_native_text(src);
+    // `push_a`'s body infers `Box$int` from its own `item: int`.
+    assert _has(out, "Box$int { value: item }");
+    // `push_b`'s body infers `Box$string` from its own `item: string` — this is
+    // the binding a block-scoped env would have lost to `push_a`'s `int`.
+    assert _has(out, "Box$string { value: item }");
+    // Neither generic literal survives unmangled.
+    assert ! _has(out, "Box { value: item }");
+}
+
 test "monomorphize struct: module with no generic struct is a byte-for-byte no-op" {
     let src = ".module m\n" + ".struct Plain\n"
         + ".layout struct name=Plain size=8 align=8\n"
