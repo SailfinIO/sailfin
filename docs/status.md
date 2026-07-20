@@ -107,7 +107,11 @@ here.
   production PEM, raw key, and SHA-256 SPKI fingerprint at
   `site/src/content/docs/docs/getting-started/verify-download.md`, with the PEM
   also served directly from `/.well-known/sailfin-release-signing-key.pem`
-  (SFN-203). Design: SFEP-0046 §3.5.
+  (SFN-203). The bootstrap installers (`install.sh` and `install.ps1`) embed the
+  same public key and verify the signed manifest plus the selected archive's
+  digest before extraction. They warn and continue only when verification is
+  unavailable (an unsigned older release or no suitable OpenSSL), and abort on
+  an invalid signature or digest mismatch (SFN-204). Design: SFEP-0046 §3.5.
 - **CLI dispatch.** `sailfin_cli_main_v2` (`compiler/src/cli/main.sfn`) is the
   sole command router: it builds a root `Command` via the `sfn/cli` capsule
   from each subcommand's `command_def()` and dispatches to per-command

@@ -37,6 +37,14 @@ $Version    = if ($env:VERSION)    { $env:VERSION }    else { "latest" }
 $ExcludeTag = if ($env:EXCLUDE_TAG) { $env:EXCLUDE_TAG } else { "" }
 $Token      = $env:GITHUB_TOKEN
 
+# Ed25519 release-signing trust anchor. Keep in sync with the locations listed
+# in docs/release-signing.md.
+$ReleaseSigningPublicKeyPem = @"
+-----BEGIN PUBLIC KEY-----
+MCowBQYDK2VwAyEAwxcgcQHwbBCjQWVukG6V1ucZn8qoXZx5NFWwfXQKRLk=
+-----END PUBLIC KEY-----
+"@
+
 $InstallBase  = if ($env:INSTALL_BASE)   { $env:INSTALL_BASE }   else { Join-Path $env:LOCALAPPDATA "sailfin\versions" }
 $GlobalBinDir = if ($env:GLOBAL_BIN_DIR) { $env:GLOBAL_BIN_DIR } else { Join-Path $env:LOCALAPPDATA "sailfin\bin" }
 
@@ -138,6 +146,85 @@ if ($Token) {
 }
 $DownloadUrl = "https://api.github.com/repos/$Repo/releases/assets/$AssetId"
 Invoke-WebRequest -Uri $DownloadUrl -Headers $DownloadHeaders -OutFile $ArchivePath
+
+# --- Verify signed release manifest -----------------------------------------
+
+function Verify-ReleaseArchive {
+    param(
+        [string]$RepoName,
+        [string]$ReleaseTag,
+        [string]$AssetName,
+        [string]$Archive,
+        [string]$WorkDir,
+        [hashtable]$RequestHeaders
+    )
+
+    $ManifestPath = Join-Path $WorkDir "SHA256SUMS"
+    $SignatureHexPath = Join-Path $WorkDir "SHA256SUMS.sig"
+    $SignatureRawPath = Join-Path $WorkDir "SHA256SUMS.sig.raw"
+    $PublicKeyPath = Join-Path $WorkDir "ed25519-release.pub.pem"
+    $VerificationBase = "https://github.com/$RepoName/releases/download/$ReleaseTag"
+
+    try {
+        Invoke-WebRequest -Uri "$VerificationBase/SHA256SUMS" -Headers $RequestHeaders -OutFile $ManifestPath
+        Invoke-WebRequest -Uri "$VerificationBase/SHA256SUMS.sig" -Headers $RequestHeaders -OutFile $SignatureHexPath
+    } catch {
+        Log "Warning: release '$ReleaseTag' has no signed SHA256SUMS manifest; continuing without bootstrap signature verification."
+        return
+    }
+
+    $OpenSsl = Get-Command openssl -ErrorAction SilentlyContinue
+    $OpenSslVersion = if ($OpenSsl) { (& openssl version 2>$null) } else { "" }
+    if (-not $OpenSsl -or $LASTEXITCODE -ne 0 -or $OpenSslVersion -notmatch '^OpenSSL (1\.1\.1|[2-9][0-9]*\.)') {
+        Log "Warning: OpenSSL 1.1.1+ with raw Ed25519 support is unavailable; continuing without bootstrap signature verification."
+        return
+    }
+
+    $SignatureHex = ((Get-Content -Raw $SignatureHexPath) -replace '\s', '')
+    if ($SignatureHex -notmatch '^[0-9a-fA-F]{128}$') {
+        Die "Release manifest signature is malformed; refusing to install '$AssetName'."
+    }
+
+    $SignatureBytes = New-Object byte[] 64
+    for ($i = 0; $i -lt 64; $i++) {
+        $SignatureBytes[$i] = [Convert]::ToByte($SignatureHex.Substring($i * 2, 2), 16)
+    }
+    [IO.File]::WriteAllBytes($SignatureRawPath, $SignatureBytes)
+    [IO.File]::WriteAllText($PublicKeyPath, $ReleaseSigningPublicKeyPem, [Text.Encoding]::ASCII)
+
+    & openssl pkeyutl -verify -pubin -inkey $PublicKeyPath -rawin `
+        -in $ManifestPath -sigfile $SignatureRawPath 2>$null | Out-Null
+    if ($LASTEXITCODE -ne 0) {
+        Die "Release manifest signature verification failed; refusing to install '$AssetName'."
+    }
+
+    $ManifestDigests = @()
+    foreach ($Line in (Get-Content $ManifestPath)) {
+        if ($Line -match '^([0-9a-fA-F]{64})\s+\*?(.+)$' -and $Matches[2] -eq $AssetName) {
+            $ManifestDigests += $Matches[1]
+        }
+    }
+    if ($ManifestDigests.Count -ne 1) {
+        Die "Signed release manifest does not contain exactly one entry for '$AssetName'."
+    }
+
+    $Sha256 = [Security.Cryptography.SHA256]::Create()
+    try {
+        $Stream = [IO.File]::OpenRead($Archive)
+        try { $DigestBytes = $Sha256.ComputeHash($Stream) } finally { $Stream.Dispose() }
+    } finally {
+        $Sha256.Dispose()
+    }
+    $ActualDigest = ([BitConverter]::ToString($DigestBytes) -replace '-', '').ToLowerInvariant()
+    if ($ActualDigest -ne $ManifestDigests[0].ToLowerInvariant()) {
+        Die "SHA-256 digest mismatch for '$AssetName'; refusing to install it."
+    }
+}
+
+# Verification runs before extraction or creation of an install destination, so
+# detected tampering cannot leave an installed binary behind.
+Verify-ReleaseArchive -RepoName $Repo -ReleaseTag $Tag -AssetName $Asset `
+    -Archive $ArchivePath -WorkDir $TmpDir -RequestHeaders $DownloadHeaders
 
 # --- Extract archive ---------------------------------------------------------
 

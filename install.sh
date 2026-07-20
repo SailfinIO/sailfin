@@ -25,6 +25,12 @@ BINARY="${BINARY:-sailfin}"
 VERSION="${VERSION:-latest}"
 EXCLUDE_TAG="${EXCLUDE_TAG:-}"
 
+# Ed25519 release-signing trust anchor. Keep in sync with the locations listed
+# in docs/release-signing.md.
+RELEASE_SIGNING_PUBLIC_KEY_PEM='-----BEGIN PUBLIC KEY-----
+MCowBQYDK2VwAyEAwxcgcQHwbBCjQWVukG6V1ucZn8qoXZx5NFWwfXQKRLk=
+-----END PUBLIC KEY-----'
+
 # Parse CLI arguments (supports: --version <ver>)
 while [ $# -gt 0 ]; do
   case "$1" in
@@ -193,6 +199,84 @@ if ! download_via_api; then
   download_via_direct \
     || die "Could not download asset '${ASSET}' for release '${TAG}' via the GitHub API or ${DIRECT_URL}."
 fi
+
+# Verify before parsing or extracting any downloaded bytes. An unsigned older
+# release or host without suitable raw-Ed25519 support remains installable with
+# a warning; once verification can run, every failure is a tampering signal.
+verify_release_archive() {
+  local manifest_path="${TMPDIR}/SHA256SUMS"
+  local signature_hex_path="${TMPDIR}/SHA256SUMS.sig"
+  local signature_raw_path="${TMPDIR}/SHA256SUMS.sig.raw"
+  local public_key_path="${TMPDIR}/ed25519-release.pub.pem"
+  local verification_base="https://github.com/${REPO}/releases/download/${TAG}"
+  local openssl_version=""
+  local signature_hex=""
+  local expected_digest=""
+  local actual_digest=""
+
+  if ! curl --fail -sSL \
+      ${DL_AUTH_ARGS[@]+"${DL_AUTH_ARGS[@]}"} \
+      "${verification_base}/SHA256SUMS" -o "$manifest_path" ||
+     ! curl --fail -sSL \
+      ${DL_AUTH_ARGS[@]+"${DL_AUTH_ARGS[@]}"} \
+      "${verification_base}/SHA256SUMS.sig" -o "$signature_hex_path"; then
+    log "Warning: release '${TAG}' has no signed SHA256SUMS manifest; continuing without bootstrap signature verification."
+    return 0
+  fi
+
+  if command_exists openssl; then
+    openssl_version="$(openssl version 2>/dev/null || true)"
+  fi
+  if ! printf '%s' "$openssl_version" | grep -Eq '^OpenSSL (1\.1\.1|[2-9][0-9]*\.)'; then
+    log "Warning: OpenSSL 1.1.1+ with raw Ed25519 support is unavailable; continuing without bootstrap signature verification."
+    return 0
+  fi
+
+  signature_hex="$(tr -d '[:space:]' < "$signature_hex_path")"
+  if ! printf '%s' "$signature_hex" | grep -Eq '^[0-9a-fA-F]{128}$'; then
+    die "Release manifest signature is malformed; refusing to install '${ASSET}'."
+  fi
+
+  : > "$signature_raw_path"
+  local offset byte octal
+  offset=0
+  while [ "$offset" -lt 128 ]; do
+    byte="${signature_hex:$offset:2}"
+    octal="$(printf '%03o' "$((16#$byte))")"
+    printf '%b' "\\${octal}" >> "$signature_raw_path"
+    offset=$((offset + 2))
+  done
+  printf '%s\n' "$RELEASE_SIGNING_PUBLIC_KEY_PEM" > "$public_key_path"
+
+  if ! openssl pkeyutl -verify -pubin -inkey "$public_key_path" -rawin \
+      -in "$manifest_path" -sigfile "$signature_raw_path" >/dev/null 2>&1; then
+    die "Release manifest signature verification failed; refusing to install '${ASSET}'."
+  fi
+
+  if ! expected_digest="$(awk -v asset="$ASSET" '
+      NF >= 2 {
+        digest = $1
+        $1 = ""
+        sub(/^[[:space:]]*\*?/, "", $0)
+        if ($0 == asset) { count++; value = digest }
+      }
+      END { if (count == 1) print value; else exit 1 }
+    ' "$manifest_path")"; then
+    die "Signed release manifest does not contain exactly one entry for '${ASSET}'."
+  fi
+  if ! printf '%s' "$expected_digest" | grep -Eq '^[0-9a-fA-F]{64}$'; then
+    die "Signed release manifest has a malformed digest for '${ASSET}'."
+  fi
+
+  actual_digest="$(openssl dgst -sha256 -r "$ARCHIVE_PATH" | awk '{print $1}')"
+  expected_digest="$(printf '%s' "$expected_digest" | tr '[:upper:]' '[:lower:]')"
+  actual_digest="$(printf '%s' "$actual_digest" | tr '[:upper:]' '[:lower:]')"
+  if [ "$actual_digest" != "$expected_digest" ]; then
+    die "SHA-256 digest mismatch for '${ASSET}'; refusing to install it."
+  fi
+}
+
+verify_release_archive
 
 # Validate archive
 if ! tar -tzf "$ARCHIVE_PATH" >/dev/null 2>&1; then
