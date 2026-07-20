@@ -1,6 +1,6 @@
 [capsule]
 name = "sailfin"
-version = "0.9.0"
+version = "0.8.0-alpha.5"
 description = "The Sailfin compiler — self-hosted, targeting LLVM via .sfn-asm IR"
 
 # Dogfood the toolchain pin (SFEP-0046). This floor must never exceed
