@@ -51,7 +51,7 @@ let DIRENT_DNAME_OFFSET_DARWIN: i64 = 21;
 
 // Linux gate: `/proc/self/status` exists on Linux, never on Darwin — the
 // same cheap probe `runtime/sfn/platform/rlimit.sfn` uses.
-extern fn sfn_fs_exists(path: * u8) -> bool;
+extern fn sfn_fs_exists(path: *u8) -> bool;
 
 // `dirent_dname_offset()` — the canonical accessor adapters will import
 // from here once cross-module resolution of imported defined functions
@@ -61,6 +61,6 @@ extern fn sfn_fs_exists(path: * u8) -> bool;
 // type-checks as a real runtime module.
 fn dirent_dname_offset() -> i64 ![io] {
     let proc_status: string = "/proc/self/status";
-    if sfn_fs_exists(proc_status as * u8) { return DIRENT_DNAME_OFFSET_LINUX; }
+    if sfn_fs_exists(proc_status as *u8) { return DIRENT_DNAME_OFFSET_LINUX; }
     return DIRENT_DNAME_OFFSET_DARWIN;
 }

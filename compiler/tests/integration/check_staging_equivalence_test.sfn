@@ -39,7 +39,7 @@
 // routes the import-context staging under it (#1333). This test asserts on
 // the CWD-relative default (`<cwd>/build/compiler/import-context`), so it
 // must opt out of that redirection to exercise the default path.
-extern fn sailfin_runtime_shell_capture(cmd: * u8) -> * u8;
+extern fn sailfin_runtime_shell_capture(cmd: *u8) -> *u8;
 
 fn _shell_capture(cmd: string) -> string ![io] {
     return sailfin_runtime_shell_capture(cmd);

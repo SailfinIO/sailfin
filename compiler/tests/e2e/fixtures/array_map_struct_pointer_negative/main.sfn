@@ -2,11 +2,11 @@
 // pointer-width array-map element. The map gate must inspect the array element
 // itself, not the full array type text.
 struct Boxed {
-    slot: * int;
+    slot: *int;
 }
 
 fn main() -> int {
-    let item = Boxed { slot: 0 as * int };
+    let item = Boxed { slot: 0 as *int };
     let items: Boxed[] = [item];
     let mapped = items.map(fn (x: Boxed) -> int { return 1; });
     return mapped.length;

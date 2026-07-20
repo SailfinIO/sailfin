@@ -45,54 +45,54 @@
 //   SSL_ERROR_ZERO_RETURN      = 6   (clean close_notify)
 //   SSL_ERROR_SYSCALL          = 5   (peer TCP close w/o close_notify)
 // ── OpenSSL extern surface (libssl / libcrypto) ───────────────────
-extern fn TLS_client_method() -> * u8;
+extern fn TLS_client_method() -> *u8;
 
-extern fn SSL_CTX_new(method: * u8) -> * u8;
+extern fn SSL_CTX_new(method: *u8) -> *u8;
 
-extern fn SSL_CTX_free(ctx: * u8) -> void;
+extern fn SSL_CTX_free(ctx: *u8) -> void;
 
-extern fn SSL_CTX_set_verify(ctx: * u8, mode: i32, cb: * u8) -> void;
+extern fn SSL_CTX_set_verify(ctx: *u8, mode: i32, cb: *u8) -> void;
 
-extern fn SSL_CTX_set_default_verify_paths(ctx: * u8) -> i32;
+extern fn SSL_CTX_set_default_verify_paths(ctx: *u8) -> i32;
 
-extern fn SSL_CTX_load_verify_locations(ctx: * u8, cafile: * u8, capath: * u8) -> i32;
+extern fn SSL_CTX_load_verify_locations(ctx: *u8, cafile: *u8, capath: *u8) -> i32;
 
-extern fn SSL_new(ctx: * u8) -> * u8;
+extern fn SSL_new(ctx: *u8) -> *u8;
 
-extern fn SSL_free(ssl: * u8) -> void;
+extern fn SSL_free(ssl: *u8) -> void;
 
-extern fn SSL_set_fd(ssl: * u8, fd: i32) -> i32;
+extern fn SSL_set_fd(ssl: *u8, fd: i32) -> i32;
 
 // `SSL_ctrl` — the ABI symbol behind the `SSL_set_tlsext_host_name`
 // (SNI) macro. `long SSL_ctrl(SSL *, int cmd, long larg, void *parg)`.
-extern fn SSL_ctrl(ssl: * u8, cmd: i32, larg: i64, parg: * u8) -> i64;
+extern fn SSL_ctrl(ssl: *u8, cmd: i32, larg: i64, parg: *u8) -> i64;
 
 // `SSL_set1_host` — set the expected DNS hostname for OpenSSL's built-in
 // certificate hostname verification (RFC 6125). A real exported symbol
 // (not a macro), callback-free. `int SSL_set1_host(SSL *, const char *)`
 // returns 1 on success. Once set, `SSL_VERIFY_PEER` makes the handshake
 // fail on a hostname mismatch, so no Sailfin fn is address-taken.
-extern fn SSL_set1_host(ssl: * u8, host: * u8) -> i32;
+extern fn SSL_set1_host(ssl: *u8, host: *u8) -> i32;
 
-extern fn SSL_connect(ssl: * u8) -> i32;
+extern fn SSL_connect(ssl: *u8) -> i32;
 
-extern fn SSL_read(ssl: * u8, buf: * u8, num: i32) -> i32;
+extern fn SSL_read(ssl: *u8, buf: *u8, num: i32) -> i32;
 
-extern fn SSL_write(ssl: * u8, buf: * u8, num: i32) -> i32;
+extern fn SSL_write(ssl: *u8, buf: *u8, num: i32) -> i32;
 
-extern fn SSL_shutdown(ssl: * u8) -> i32;
+extern fn SSL_shutdown(ssl: *u8) -> i32;
 
-extern fn SSL_get_error(ssl: * u8, ret: i32) -> i32;
+extern fn SSL_get_error(ssl: *u8, ret: i32) -> i32;
 
-extern fn SSL_get_verify_result(ssl: * u8) -> i64;
+extern fn SSL_get_verify_result(ssl: *u8) -> i64;
 
 // ── libc helpers (optional extra CA bundle) ───────────────────────
 // Declared inline (redeclaring a C symbol across runtime modules is
 // safe — each emits its own LLVM `declare` and the linker resolves both
 // to the single libc entrypoint; see the `http.sfn` symbol note).
-extern fn getenv(name: * u8) -> * u8;
+extern fn getenv(name: *u8) -> *u8;
 
-extern fn strlen(s: * u8) -> usize;
+extern fn strlen(s: *u8) -> usize;
 
 // `tls_client_ctx()` — build a client `SSL_CTX` with the system trust
 // store loaded (`SSL_CTX_set_default_verify_paths`, e.g.
@@ -105,10 +105,10 @@ extern fn strlen(s: * u8) -> usize;
 // hostname is bound there via SSL_set1_host. Returns null on allocation
 // failure. The canonical system CA bundle is loaded as a discovery
 // fallback below (#1784); macOS/Windows CA-store paths remain #1485 M10.
-fn tls_client_ctx() -> * u8 {
-    let method: * u8 = TLS_client_method();
+fn tls_client_ctx() -> *u8 {
+    let method: *u8 = TLS_client_method();
     if method as i64 == 0 { return null; }
-    let ctx: * u8 = SSL_CTX_new(method);
+    let ctx: *u8 = SSL_CTX_new(method);
     if ctx as i64 == 0 { return null; }
     // System default trust store (OpenSSL's compiled-in dir, e.g.
     // /etc/ssl/certs). Its return tells us the lookup method was set, not
@@ -125,10 +125,10 @@ fn tls_client_ctx() -> * u8 {
     // CAFILE load below) when the file is absent. macOS/Windows CA-store
     // discovery differs and is deferred to #1485 M10.
     let ca_bundle: string = "/etc/ssl/certs/ca-certificates.crt";
-    SSL_CTX_load_verify_locations(ctx, ca_bundle as * u8, null);
+    SSL_CTX_load_verify_locations(ctx, ca_bundle as *u8, null);
     // Optional additional CA bundle (custom / test trust).
     let ca_env: string = "SAILFIN_TLS_CAFILE";
-    let ca: * u8 = getenv(ca_env as * u8);
+    let ca: *u8 = getenv(ca_env as *u8);
     if ca as i64 != 0 {
         if (strlen(ca) as i64) > 0 {
             SSL_CTX_load_verify_locations(ctx, ca, null);
@@ -141,7 +141,7 @@ fn tls_client_ctx() -> * u8 {
 }
 
 // `tls_ctx_free(ctx)` — free a client ctx (no-op on null).
-fn tls_ctx_free(ctx: * u8) -> void {
+fn tls_ctx_free(ctx: *u8) -> void {
     if ctx as i64 != 0 { SSL_CTX_free(ctx); }
 }
 
@@ -155,9 +155,9 @@ fn tls_ctx_free(ctx: * u8) -> void {
 // (SSL_set1_host); it must be the bare host (no port). An IP-literal host
 // is checked as a DNS name (IP-SAN certs are uncommon) — real hostnames
 // are the supported outbound case.
-fn tls_connect_fd(ctx: * u8, fd: i32, host: * u8) -> * u8 ![net] {
+fn tls_connect_fd(ctx: *u8, fd: i32, host: *u8) -> *u8 ![net] {
     if ctx as i64 == 0 { return null; }
-    let ssl: * u8 = SSL_new(ctx);
+    let ssl: *u8 = SSL_new(ctx);
     if ssl as i64 == 0 { return null; }
     // Attach the connected, timeout-armed socket.
     if SSL_set_fd(ssl, fd) != 1 {
@@ -201,7 +201,7 @@ fn tls_connect_fd(ctx: * u8, fd: i32, host: * u8) -> * u8 ![net] {
 // written (> 0), or <= 0 on failure. Mirrors `send`'s contract so the
 // `_send_all` retry loop treats it identically. `n` is bounded by the
 // caller's request size (< 2 GiB), so the i32 cast is safe.
-fn tls_write(ssl: * u8, buf: * u8, n: i64) -> i64 ![net] {
+fn tls_write(ssl: *u8, buf: *u8, n: i64) -> i64 ![net] {
     if ssl as i64 == 0 { return 0 - 1; }
     let r: i32 = SSL_write(ssl, buf, n as i32);
     return r as i64;
@@ -214,7 +214,7 @@ fn tls_write(ssl: * u8, buf: * u8, n: i64) -> i64 ![net] {
 // and SYSCALL-with-0 (peer TCP close without close_notify, common for
 // `Connection: close` servers and `openssl s_server`) are both EOF;
 // anything else is a real error.
-fn tls_read(ssl: * u8, buf: * u8, n: i64) -> i64 ![net] {
+fn tls_read(ssl: *u8, buf: *u8, n: i64) -> i64 ![net] {
     if ssl as i64 == 0 { return 0 - 1; }
     let r: i32 = SSL_read(ssl, buf, n as i32);
     if r > 0 { return r as i64; }
@@ -235,7 +235,7 @@ fn tls_read(ssl: * u8, buf: * u8, n: i64) -> i64 ![net] {
 // before the caller `close`s the underlying fd. Direction-agnostic: the
 // server accept loop (`../concurrency/serve.sfn`) reuses it exactly as the
 // client does, since an `SSL*` teardown is identical either way.
-fn tls_shutdown_free(ssl: * u8) -> void ![net] {
+fn tls_shutdown_free(ssl: *u8) -> void ![net] {
     if ssl as i64 == 0 { return; }
     SSL_shutdown(ssl);
     SSL_free(ssl);
@@ -253,28 +253,28 @@ fn tls_shutdown_free(ssl: * u8) -> void ![net] {
 // Reuses `SSL_CTX_new` / `SSL_CTX_free` / `SSL_new` / `SSL_free` /
 // `SSL_set_fd` and the `tls_read` / `tls_write` / `tls_shutdown_free`
 // helpers already declared above.
-extern fn TLS_server_method() -> * u8;
+extern fn TLS_server_method() -> *u8;
 
 // `int SSL_CTX_use_certificate_chain_file(SSL_CTX *, const char *file)` —
 // load the server's PEM certificate chain. Returns 1 on success.
-extern fn SSL_CTX_use_certificate_chain_file(ctx: * u8, file: * u8) -> i32;
+extern fn SSL_CTX_use_certificate_chain_file(ctx: *u8, file: *u8) -> i32;
 
 // `int SSL_CTX_use_PrivateKey_file(SSL_CTX *, const char *file, int type)`
 // — load the server's PEM private key (`type` = SSL_FILETYPE_PEM = 1).
 // Returns 1 on success; a load failure (missing / mismatched key) means we
 // cannot serve TLS.
-extern fn SSL_CTX_use_PrivateKey_file(ctx: * u8, file: * u8, ty: i32) -> i32;
+extern fn SSL_CTX_use_PrivateKey_file(ctx: *u8, file: *u8, ty: i32) -> i32;
 
 // `int SSL_accept(SSL *)` — drive the blocking server-side handshake over
 // the attached fd. Returns 1 on success. Callback-free (blocking BIO).
-extern fn SSL_accept(ssl: * u8) -> i32;
+extern fn SSL_accept(ssl: *u8) -> i32;
 
 // `int SSL_CTX_check_private_key(const SSL_CTX *)` — verify the loaded
 // private key matches the loaded certificate. `SSL_CTX_use_PrivateKey_file`
 // only validates the key's own internal consistency, not that it pairs with
 // the cert, so a mismatched keypair would otherwise pass ctx build and fail
 // every handshake at runtime. Returns 1 when the pair is consistent.
-extern fn SSL_CTX_check_private_key(ctx: * u8) -> i32;
+extern fn SSL_CTX_check_private_key(ctx: *u8) -> i32;
 
 // `tls_server_ctx(cert_path, key_path)` — build a server `SSL_CTX` with the
 // certificate chain + private key loaded (PEM) for the server's lifetime
@@ -283,12 +283,12 @@ extern fn SSL_CTX_check_private_key(ctx: * u8) -> i32;
 // failure (freeing a partially-built ctx first) so the caller fails closed
 // rather than binding a mode that cannot complete a handshake. `cert_path`
 // and `key_path` are NUL-terminated C strings (bare filesystem paths).
-fn tls_server_ctx(cert_path: * u8, key_path: * u8) -> * u8 {
+fn tls_server_ctx(cert_path: *u8, key_path: *u8) -> *u8 {
     if cert_path as i64 == 0 { return null; }
     if key_path as i64 == 0 { return null; }
-    let method: * u8 = TLS_server_method();
+    let method: *u8 = TLS_server_method();
     if method as i64 == 0 { return null; }
-    let ctx: * u8 = SSL_CTX_new(method);
+    let ctx: *u8 = SSL_CTX_new(method);
     if ctx as i64 == 0 { return null; }
     // SSL_FILETYPE_PEM = 1.
     if SSL_CTX_use_certificate_chain_file(ctx, cert_path) != 1 {
@@ -318,9 +318,9 @@ fn tls_server_ctx(cert_path: * u8, key_path: * u8) -> * u8 {
 // needed. The caller MUST arm the fd's `SO_RCVTIMEO`/`SO_SNDTIMEO` (#1581)
 // BEFORE this call so the blocking `SSL_accept` handshake is bounded — a
 // stalled/slow-loris handshake must not pin a pool worker indefinitely.
-fn tls_accept_fd(ctx: * u8, fd: i32) -> * u8 ![net] {
+fn tls_accept_fd(ctx: *u8, fd: i32) -> *u8 ![net] {
     if ctx as i64 == 0 { return null; }
-    let ssl: * u8 = SSL_new(ctx);
+    let ssl: *u8 = SSL_new(ctx);
     if ssl as i64 == 0 { return null; }
     if SSL_set_fd(ssl, fd) != 1 {
         SSL_free(ssl);

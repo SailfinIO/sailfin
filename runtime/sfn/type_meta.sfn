@@ -57,13 +57,13 @@
 // follow-up PR flips these to imports without touching the bodies.
 //
 // Pinned by `compiler/tests/e2e/test_runtime_type_meta.sh`.
-extern fn malloc(size: usize) -> * u8;
+extern fn malloc(size: usize) -> *u8;
 
-extern fn free(ptr: * u8) -> void;
+extern fn free(ptr: *u8) -> void;
 
-extern fn realloc(ptr: * u8, new_size: usize) -> * u8;
+extern fn realloc(ptr: *u8, new_size: usize) -> *u8;
 
-extern fn strcmp(a: * u8, b: * u8) -> i32;
+extern fn strcmp(a: *u8, b: *u8) -> i32;
 
 // SfnTypeDescriptor — wire layout for the compiler-emitted
 // `@__sfn_type_desc.*` globals. The compiler emits each global
@@ -133,31 +133,31 @@ fn _registry_initial_cap() -> i64 { return 16; }
 // expected `ptrtoint + add + inttoptr` chain). Hoisting the
 // arithmetic into a separate stored `let base` works around the
 // bug and keeps both call sites consistent.
-fn _registry_entries(header: * SfnTypeRegistryHeader) -> * i64 {
+fn _registry_entries(header: *SfnTypeRegistryHeader) -> *i64 {
     let base: i64 = header as i64;
-    return (base + _registry_header_size()) as * i64;
+    return (base + _registry_header_size()) as *i64;
 }
 
 // Lazy initialiser. Allocates the buffer (header + `cap` entry
 // slots), zero-fills the slots, and stashes the address in the
 // module-global head pointer. Returns the header pointer (or
 // null if libc OOM).
-fn _registry_init() -> * SfnTypeRegistryHeader {
+fn _registry_init() -> *SfnTypeRegistryHeader {
     if sfn_type_registry_addr != 0 {
-        return sfn_type_registry_addr as * SfnTypeRegistryHeader;
+        return sfn_type_registry_addr as *SfnTypeRegistryHeader;
     }
     let cap: i64 = _registry_initial_cap();
     let total: i64 = _registry_header_size() + cap * _registry_slot_size();
-    let buf: * u8 = malloc(total as usize);
-    if buf as i64 == 0 { return buf as * SfnTypeRegistryHeader; }
-    let header: * SfnTypeRegistryHeader = buf as * SfnTypeRegistryHeader;
+    let buf: *u8 = malloc(total as usize);
+    if buf as i64 == 0 { return buf as *SfnTypeRegistryHeader; }
+    let header: *SfnTypeRegistryHeader = buf as *SfnTypeRegistryHeader;
     header.length = 0;
     header.capacity = cap;
-    let entries: * i64 = _registry_entries(header);
+    let entries: *i64 = _registry_entries(header);
     let mut i: i64 = 0;
     loop {
         if i >= cap { break; }
-        let slot: * i64 = entries + i;
+        let slot: *i64 = entries + i;
         atomic_store(slot, 0);
         i = i + 1;
     }
@@ -169,29 +169,29 @@ fn _registry_init() -> * SfnTypeRegistryHeader {
 // 2x on overflow. No-op on null `desc` or libc OOM during the
 // realloc step (a failed registration leaves the prior registry
 // state intact).
-fn _registry_append(desc: * u8) -> void {
+fn _registry_append(desc: *u8) -> void {
     if desc as i64 == 0 { return; }
     let mut header = _registry_init();
     if header as i64 == 0 { return; }
     if header.length >= header.capacity {
         let new_cap: i64 = header.capacity * 2;
         let new_total: i64 = _registry_header_size() + new_cap * _registry_slot_size();
-        let new_buf: * u8 = realloc(header as * u8, new_total as usize);
+        let new_buf: *u8 = realloc(header as *u8, new_total as usize);
         if new_buf as i64 == 0 { return; }
         sfn_type_registry_addr = new_buf as i64;
-        header = new_buf as * SfnTypeRegistryHeader;
-        let new_entries: * i64 = _registry_entries(header);
+        header = new_buf as *SfnTypeRegistryHeader;
+        let new_entries: *i64 = _registry_entries(header);
         let mut zi: i64 = header.capacity;
         loop {
             if zi >= new_cap { break; }
-            let slot: * i64 = new_entries + zi;
+            let slot: *i64 = new_entries + zi;
             atomic_store(slot, 0);
             zi = zi + 1;
         }
         header.capacity = new_cap;
     }
-    let entries: * i64 = _registry_entries(header);
-    let slot: * i64 = entries + header.length;
+    let entries: *i64 = _registry_entries(header);
+    let slot: *i64 = entries + header.length;
     atomic_store(slot, desc as i64);
     header.length = header.length + 1;
 }
@@ -199,10 +199,10 @@ fn _registry_append(desc: * u8) -> void {
 // Read the name pointer out of a descriptor. The descriptor
 // layout is `{ i64 id, i64 name_ptr, i32 kind }`, so `name_ptr`
 // is the second `i64` slot.
-fn _descriptor_name(desc: * u8) -> * u8 {
+fn _descriptor_name(desc: *u8) -> *u8 {
     if desc as i64 == 0 { return null; }
-    let d: * SfnTypeDescriptor = desc as * SfnTypeDescriptor;
-    return d.name_ptr as * u8;
+    let d: *SfnTypeDescriptor = desc as *SfnTypeDescriptor;
+    return d.name_ptr as *u8;
 }
 
 // `sfn_type_register(desc)` adds the descriptor to the registry.
@@ -217,7 +217,7 @@ fn _descriptor_name(desc: * u8) -> * u8 {
 // register; v0 prefers the cheaper append and lets the linear-
 // scan resolver absorb the extra entries. Dedup moves into the
 // architect's open-addressing hash when scaling matters.
-fn sfn_type_register(desc: * u8) -> void { _registry_append(desc); }
+fn sfn_type_register(desc: *u8) -> void { _registry_append(desc); }
 
 // `sfn_resolve_type(name)` returns the descriptor whose name
 // equals `name` (byte-for-byte via libc `strcmp`), or null if
@@ -231,20 +231,20 @@ fn sfn_type_register(desc: * u8) -> void { _registry_append(desc); }
 // `runtime/prelude.sfn:check_type_descriptor`); the descriptor
 // flip in `compiler/src/llvm/runtime_helpers.sfn` routes that
 // call here.
-fn sfn_resolve_type(name: * u8) -> * u8 {
+fn sfn_resolve_type(name: *u8) -> *u8 {
     if name as i64 == 0 { return null; }
     if sfn_type_registry_addr == 0 { return null; }
-    let header: * SfnTypeRegistryHeader = sfn_type_registry_addr as * SfnTypeRegistryHeader;
-    let entries: * i64 = _registry_entries(header);
+    let header: *SfnTypeRegistryHeader = sfn_type_registry_addr as *SfnTypeRegistryHeader;
+    let entries: *i64 = _registry_entries(header);
     let length: i64 = header.length;
     let mut i: i64 = 0;
     loop {
         if i >= length { break; }
-        let slot: * i64 = entries + i;
+        let slot: *i64 = entries + i;
         let entry_addr: i64 = atomic_load(slot);
         if entry_addr != 0 {
-            let entry: * u8 = entry_addr as * u8;
-            let entry_name: * u8 = _descriptor_name(entry);
+            let entry: *u8 = entry_addr as *u8;
+            let entry_name: *u8 = _descriptor_name(entry);
             if entry_name as i64 != 0 {
                 if strcmp(entry_name, name) == 0 { return entry; }
             }
@@ -268,7 +268,7 @@ fn sfn_resolve_type(name: * u8) -> * u8 {
 // against the v0 body is strictly more useful: the matching case
 // now returns true instead of a silent false (acceptance criterion
 // #1 in issue #402).
-fn sfn_instance_of(value: * u8, desc: * u8) -> bool {
+fn sfn_instance_of(value: *u8, desc: *u8) -> bool {
     if value as i64 == 0 { return false; }
     if desc as i64 == 0 { return false; }
     return value as i64 == desc as i64;
@@ -280,7 +280,7 @@ fn sfn_instance_of(value: * u8, desc: * u8) -> bool {
 // The architect spec's static-hint variant (§2.5.2) lands in the
 // follow-up PR that adds compiler-side intercept of
 // `instance_of(value, Type)` for statically-typed `value`.
-fn sfn_type_of(value: * u8) -> * u8 { return null; }
+fn sfn_type_of(value: *u8) -> *u8 { return null; }
 
 // v0 primitive guards. Stubs returning false; value-side type
 // tagging is deferred per issue #402 `Out:`. Until tagging lands
@@ -289,15 +289,15 @@ fn sfn_type_of(value: * u8) -> * u8 { return null; }
 // `runtime/prelude.sfn:461`) expects a `bool` predicate that
 // gates against tagged values, so flipping early would produce
 // wrong answers across the existing user surface.
-fn sfn_is_string(value: * u8) -> bool { return false; }
+fn sfn_is_string(value: *u8) -> bool { return false; }
 
-fn sfn_is_number(value: * u8) -> bool { return false; }
+fn sfn_is_number(value: *u8) -> bool { return false; }
 
-fn sfn_is_boolean(value: * u8) -> bool { return false; }
+fn sfn_is_boolean(value: *u8) -> bool { return false; }
 
-fn sfn_is_callable(value: * u8) -> bool { return false; }
+fn sfn_is_callable(value: *u8) -> bool { return false; }
 
-fn sfn_is_array(value: * u8) -> bool { return false; }
+fn sfn_is_array(value: *u8) -> bool { return false; }
 
 // #925 (sub-issue of #390): `sfn_is_void(value)` — port of the C
 // `sailfin_runtime_is_void`, which is a NULL check (`value == NULL`).
@@ -306,7 +306,7 @@ fn sfn_is_array(value: * u8) -> bool { return false; }
 // (`instance_of "void"`). Descriptor ABI is `(i8*) -> i1`. The raw
 // pointer is compared via the `as i64 == 0` idiom (no null comparison
 // on raw `* u8` until `Result<T, E>` lands).
-fn sfn_is_void(value: * u8) -> bool {
+fn sfn_is_void(value: *u8) -> bool {
     let mut result: bool = false;
     if value as i64 == 0 { result = true; }
     return result;

@@ -118,11 +118,11 @@
 // referencing the new declarations during the bootstrap pass.
 // Once the seed catches up post-merge, a follow-up PR flips
 // these to a cross-module import without touching the bodies.
-extern fn malloc(size: usize) -> * u8;
+extern fn malloc(size: usize) -> *u8;
 
-extern fn free(ptr: * u8) -> void;
+extern fn free(ptr: *u8) -> void;
 
-extern fn memset(dst: * u8, byte: i32, n: usize) -> * u8;
+extern fn memset(dst: *u8, byte: i32, n: usize) -> *u8;
 
 // `setjmp` / `longjmp` declared on `* u8` rather than the
 // architect-canonical `* JmpBuf` (which lives in
@@ -133,9 +133,9 @@ extern fn memset(dst: * u8, byte: i32, n: usize) -> * u8;
 // two declarations bind to the same libc entrypoint. Using
 // `* u8` here keeps the body's pointer-arithmetic and cast-shim
 // chains uniform with the rest of this module.
-extern fn setjmp(env: * u8) -> i32;
+extern fn setjmp(env: *u8) -> i32;
 
-extern fn longjmp(env: * u8, val: i32) -> void;
+extern fn longjmp(env: *u8, val: i32) -> void;
 
 // `abort()` ends the process. Called by `sfn_throw` when the
 // chain is empty (uncaught exception) — matches the C runtime's
@@ -150,9 +150,9 @@ extern fn abort() -> void;
 // rationale as the setjmp/malloc trio above and
 // `runtime/sfn/memory/mem.sfn`'s bounds-check abort path, which
 // writes its diagnostic to fd 2 the same way.
-extern fn write(fd: i32, buf: * u8, count: usize) -> i64;
+extern fn write(fd: i32, buf: *u8, count: usize) -> i64;
 
-extern fn strlen(s: * u8) -> usize;
+extern fn strlen(s: *u8) -> usize;
 
 // `SfnExceptionFrame` lays out the per-`try` bookkeeping. Field
 // offsets are pinned by the IR-shape assertions in
@@ -170,9 +170,9 @@ extern fn strlen(s: * u8) -> usize;
 //     (set by `sfn_throw`; read by `sfn_take_exception`). Null when
 //     no exception has fired.
 struct SfnExceptionFrame {
-    prev: * SfnExceptionFrame;
-    jmp_buf: * u8;
-    message: * u8;
+    prev: *SfnExceptionFrame;
+    jmp_buf: *u8;
+    message: *u8;
 }
 
 // Chain head (per-thread `thread_local`; see the file-header TLS
@@ -196,28 +196,28 @@ thread_local let mut sfn_exception_frame_head_addr: i64 = 0;
 // allocations and the IR-shape assertion in
 // `test_runtime_exception_frames.sh` catches it via
 // `%SfnExceptionFrame = type { ... }` count.
-fn sfn_exception_alloc_frame() -> * SfnExceptionFrame {
+fn sfn_exception_alloc_frame() -> *SfnExceptionFrame {
     let raw = malloc(24 as usize);
-    if raw as i64 == 0 { return raw as * SfnExceptionFrame; }
-    let frame = raw as * SfnExceptionFrame;
-    frame.prev = 0 as * SfnExceptionFrame;
+    if raw as i64 == 0 { return raw as *SfnExceptionFrame; }
+    let frame = raw as *SfnExceptionFrame;
+    frame.prev = 0 as *SfnExceptionFrame;
     let buf = malloc(256 as usize);
     if buf as i64 == 0 {
         free(raw);
-        return buf as * SfnExceptionFrame;
+        return buf as *SfnExceptionFrame;
     }
     memset(buf, 0, 256 as usize);
     frame.jmp_buf = buf;
-    frame.message = 0 as * u8;
+    frame.message = 0 as *u8;
     return frame;
 }
 
 // `sfn_exception_free_frame(frame)` releases `frame` and its
 // owned jmp_buf. Safe to call with a null pointer (idempotent).
-fn sfn_exception_free_frame(frame: * SfnExceptionFrame) -> void {
+fn sfn_exception_free_frame(frame: *SfnExceptionFrame) -> void {
     if frame as i64 == 0 { return; }
     free(frame.jmp_buf);
-    free(frame as * u8);
+    free(frame as *u8);
 }
 
 // `sfn_exception_frame_head()` returns the current chain head
@@ -225,8 +225,8 @@ fn sfn_exception_free_frame(frame: * SfnExceptionFrame) -> void {
 // compiler emission and the cross-frame test harness reach the
 // global through a stable accessor — the underlying storage
 // becomes thread-local without touching callers.
-fn sfn_exception_frame_head() -> * SfnExceptionFrame {
-    return sfn_exception_frame_head_addr as * SfnExceptionFrame;
+fn sfn_exception_frame_head() -> *SfnExceptionFrame {
+    return sfn_exception_frame_head_addr as *SfnExceptionFrame;
 }
 
 // `sfn_exception_push_frame(frame)` links `frame` onto the head
@@ -236,8 +236,8 @@ fn sfn_exception_frame_head() -> * SfnExceptionFrame {
 // so the cross-frame unwinding test (and the eventual M2.7b
 // inline-emission path) can push a frame whose `jmp_buf` was
 // `setjmp`'d inline at the caller's frame.
-fn sfn_exception_push_frame(frame: * SfnExceptionFrame) -> void {
-    frame.prev = sfn_exception_frame_head_addr as * SfnExceptionFrame;
+fn sfn_exception_push_frame(frame: *SfnExceptionFrame) -> void {
+    frame.prev = sfn_exception_frame_head_addr as *SfnExceptionFrame;
     sfn_exception_frame_head_addr = frame as i64;
 }
 
@@ -250,7 +250,7 @@ fn sfn_exception_push_frame(frame: * SfnExceptionFrame) -> void {
 // the C `sailfin_runtime_try_leave` null-handle behavior) so
 // callers can pass through partially-initialized state without
 // a separate null check.
-fn sfn_exception_pop_frame(frame: * SfnExceptionFrame) -> void {
+fn sfn_exception_pop_frame(frame: *SfnExceptionFrame) -> void {
     let frame_addr = frame as i64;
     if frame_addr == 0 { return; }
     if sfn_exception_frame_head_addr == frame_addr {
@@ -261,12 +261,12 @@ fn sfn_exception_pop_frame(frame: * SfnExceptionFrame) -> void {
     let mut prev_addr: i64 = 0;
     loop {
         if cur_addr == 0 { return; }
-        let cur = cur_addr as * SfnExceptionFrame;
+        let cur = cur_addr as *SfnExceptionFrame;
         if cur_addr == frame_addr {
             if prev_addr == 0 {
                 sfn_exception_frame_head_addr = cur.prev as i64;
             } else {
-                let prev = prev_addr as * SfnExceptionFrame;
+                let prev = prev_addr as *SfnExceptionFrame;
                 prev.prev = cur.prev;
             }
             return;
@@ -314,7 +314,7 @@ fn sfn_exception_reset_head() -> void { sfn_exception_frame_head_addr = 0; }
 // migration lands, real cross-frame unwinding uses the inline
 // `setjmp` extern from `runtime/sfn/platform/libc.sfn` directly
 // — exercised by `test_runtime_exception_frames.sh`.
-fn sfn_try_enter(frame: * SfnExceptionFrame) -> i32 {
+fn sfn_try_enter(frame: *SfnExceptionFrame) -> i32 {
     sfn_exception_push_frame(frame);
     return setjmp(frame.jmp_buf);
 }
@@ -326,7 +326,7 @@ fn sfn_try_enter(frame: * SfnExceptionFrame) -> i32 {
 // per architect §2.4.2 to bind to. The function form is safe to
 // call across frame boundaries — it only mutates the chain
 // global, no setjmp/longjmp state involved.
-fn sfn_try_leave(frame: * SfnExceptionFrame) -> void {
+fn sfn_try_leave(frame: *SfnExceptionFrame) -> void {
     sfn_exception_pop_frame(frame);
 }
 
@@ -357,12 +357,12 @@ fn sfn_try_leave(frame: * SfnExceptionFrame) -> void {
 // (compiler-emission migration) flips the trailing block to
 // `unreachable` once the noreturn metadata propagates through
 // the extern surface.
-fn sfn_throw(message: * u8) -> void {
+fn sfn_throw(message: *u8) -> void {
     if sfn_exception_frame_head_addr == 0 {
         abort();
         return;
     }
-    let head = sfn_exception_frame_head_addr as * SfnExceptionFrame;
+    let head = sfn_exception_frame_head_addr as *SfnExceptionFrame;
     head.message = message;
     let buf = head.jmp_buf;
     sfn_exception_frame_head_addr = head.prev as i64;
@@ -386,9 +386,9 @@ fn sfn_throw(message: * u8) -> void {
 // flip lands, the return type is the raw `* u8` placeholder;
 // M2.7b retypes this to `SfnString` without touching call
 // sites.
-fn sfn_take_exception(frame: * SfnExceptionFrame) -> * u8 {
+fn sfn_take_exception(frame: *SfnExceptionFrame) -> *u8 {
     let msg = frame.message;
-    frame.message = 0 as * u8;
+    frame.message = 0 as *u8;
     return msg;
 }
 
@@ -432,20 +432,20 @@ let mut sfn_exception_empty_addr: i64 = 0;
 // pointer in a `let` binding (see the cast-quirk note in
 // `runtime/sfn/platform/exec.sfn`). If `malloc` fails the cache stays
 // `0` and the next call retries.
-fn _sfn_exception_empty() -> * u8 {
+fn _sfn_exception_empty() -> *u8 {
     if sfn_exception_empty_addr == 0 {
         let e = malloc(1 as usize);
         if e as i64 != 0 { memset(e, 0, 1 as usize); }
         sfn_exception_empty_addr = e as i64;
     }
-    return sfn_exception_empty_addr as * u8;
+    return sfn_exception_empty_addr as *u8;
 }
 
 // `sfn_set_exception(message)` records `message` in the shared slot.
 // Mirrors the C `message ? message : ""` guard: a null argument stores
 // the shared non-null empty C string (see `_sfn_exception_empty`) so
 // `sfn_has_exception()` still reports true without leaking per call.
-fn sfn_set_exception(message: * u8) -> void {
+fn sfn_set_exception(message: *u8) -> void {
     if message as i64 == 0 {
         sfn_exception_message_addr = _sfn_exception_empty() as i64;
         return;
@@ -482,7 +482,7 @@ fn sfn_has_exception() -> bool { return sfn_exception_message_addr != 0; }
 // allocator pull. The trailing `abort()` does not return, so no `ret`
 // is reachable; LLVM keeps the trailing block until noreturn metadata
 // propagates (same note as `sfn_throw`).
-fn sfn_raise_value_error(message: * u8) -> void {
+fn sfn_raise_value_error(message: *u8) -> void {
     sfn_set_exception(message);
     if message as i64 != 0 { write(2, message, strlen(message)); }
     let nl = malloc(1 as usize);

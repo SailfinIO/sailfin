@@ -15,25 +15,25 @@
 // concurrency syntax), mirroring runtime/sfn/concurrency/scheduler.sfn.
 // Linux x86_64 target: `pthread_t` is pointer-sized (`usize`), stored in a
 // malloc'd 8-byte slot so we avoid needing address-of-local.
-extern fn malloc(size: usize) -> * u8;
+extern fn malloc(size: usize) -> *u8;
 
-extern fn free(ptr: * u8) -> void;
+extern fn free(ptr: *u8) -> void;
 
-extern fn pthread_create(thread: * usize, attr: * PthreadAttr, start: * u8, arg: * u8) -> i32;
+extern fn pthread_create(thread: *usize, attr: *PthreadAttr, start: *u8, arg: *u8) -> i32;
 
-extern fn pthread_join(thread: usize, result: * * u8) -> i32;
+extern fn pthread_join(thread: usize, result: **u8) -> i32;
 
 // Referencing an `extern fn` (a real C symbol) by address must stay
 // UNMANGLED: the module mangling post-pass rewrites only defined-fn
 // `@name`s (collected from `define` lines), so an extern reaches the
 // linker by its bare name. This is the more fragile half of the
 // capability — the e2e asserts `@malloc` survives mangling unmodified.
-fn sfn_fnref_extern_addr() -> * u8 { return malloc as * u8; }
+fn sfn_fnref_extern_addr() -> *u8 { return malloc as *u8; }
 
 // Worker entry (`fn(* u8) -> * u8`, the pthread start_routine shape).
 // Writes the sentinel `42` into the `i64` slot addressed by `arg`.
-fn sfn_fnref_worker(arg: * u8) -> * u8 {
-    let slot: * i64 = arg as * i64;
+fn sfn_fnref_worker(arg: *u8) -> *u8 {
+    let slot: *i64 = arg as *i64;
     let sentinel: i64 = 42;
     atomic_store(slot, sentinel);
     return null;
@@ -42,21 +42,21 @@ fn sfn_fnref_worker(arg: * u8) -> * u8 {
 // Take the worker's address via `<fn> as * u8`, spawn a thread on it, join
 // it, and report success. Returns 0 on success; negative on a setup guard;
 // the positive `pthread_create` return code on spawn failure.
-fn sfn_fnref_spawn_join(arg: * u8) -> i32 {
+fn sfn_fnref_spawn_join(arg: *u8) -> i32 {
     // The load-bearing line: this must be a non-null code pointer.
-    let start: * u8 = sfn_fnref_worker as * u8;
+    let start: *u8 = sfn_fnref_worker as *u8;
     if start as i64 == 0 { return -1; }
 
-    let tid_buf: * u8 = malloc(8 as usize);
+    let tid_buf: *u8 = malloc(8 as usize);
     if tid_buf as i64 == 0 { return -2; }
 
-    let rc: i32 = pthread_create(tid_buf as * usize, null, start, arg);
+    let rc: i32 = pthread_create(tid_buf as *usize, null, start, arg);
     if rc != 0 {
         free(tid_buf);
         return rc;
     }
 
-    let tid: usize = atomic_load(tid_buf as * i64) as usize;
+    let tid: usize = atomic_load(tid_buf as *i64) as usize;
     pthread_join(tid, null);
     free(tid_buf);
     return 0;

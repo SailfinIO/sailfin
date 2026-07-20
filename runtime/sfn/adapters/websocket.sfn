@@ -47,51 +47,51 @@
 // AF_INET = 2, SOCK_STREAM = 1 (identical on Linux x86_64 and macOS
 // arm64, the two targets this runtime builds for).
 // ── libc memory + string helpers ──────────────────────────────
-extern fn malloc(size: usize) -> * u8;
+extern fn malloc(size: usize) -> *u8;
 
-extern fn free(ptr: * u8) -> void;
+extern fn free(ptr: *u8) -> void;
 
-extern fn memset(dst: * u8, byte: i32, n: usize) -> * u8;
+extern fn memset(dst: *u8, byte: i32, n: usize) -> *u8;
 
-extern fn memcpy(dst: * u8, src: * u8, n: usize) -> * u8;
+extern fn memcpy(dst: *u8, src: *u8, n: usize) -> *u8;
 
 // `realloc` grows the fragment-reassembly buffer in place across
 // continuation frames (`_ws_conn_worker`); returns null on failure
 // without freeing the original block (standard C semantics).
-extern fn realloc(ptr: * u8, size: usize) -> * u8;
+extern fn realloc(ptr: *u8, size: usize) -> *u8;
 
-extern fn strlen(s: * u8) -> usize;
+extern fn strlen(s: *u8) -> usize;
 
 // C `int atoi(const char *)` — parses a leading decimal integer,
 // stops at the first non-digit. Declared `-> i32` to match the C
 // 32-bit return; octet / port values fit comfortably.
-extern fn atoi(s: * u8) -> i32;
+extern fn atoi(s: *u8) -> i32;
 
 // ── BSD sockets (libc) ────────────────────────────────────────
 extern fn socket(domain: i32, ty: i32, protocol: i32) -> i32;
 
-extern fn connect(sockfd: i32, addr: * u8, addrlen: i32) -> i32;
+extern fn connect(sockfd: i32, addr: *u8, addrlen: i32) -> i32;
 
-extern fn send(sockfd: i32, buf: * u8, len: i64, flags: i32) -> i64;
+extern fn send(sockfd: i32, buf: *u8, len: i64, flags: i32) -> i64;
 
-extern fn recv(sockfd: i32, buf: * u8, len: i64, flags: i32) -> i64;
+extern fn recv(sockfd: i32, buf: *u8, len: i64, flags: i32) -> i64;
 
 extern fn close(fd: i32) -> i32;
 
-extern fn setsockopt(sockfd: i32, level: i32, optname: i32, optval: * u8, optlen: i32) -> i32;
+extern fn setsockopt(sockfd: i32, level: i32, optname: i32, optval: *u8, optlen: i32) -> i32;
 
 // The server bridge (#1877) needs the three passive-socket calls the client
 // half never uses.
-extern fn bind(sockfd: i32, addr: * u8, addrlen: i32) -> i32;
+extern fn bind(sockfd: i32, addr: *u8, addrlen: i32) -> i32;
 
 extern fn listen(sockfd: i32, backlog: i32) -> i32;
 
-extern fn accept(sockfd: i32, addr: * u8, addrlen: * i32) -> i32;
+extern fn accept(sockfd: i32, addr: *u8, addrlen: *i32) -> i32;
 
 // ── DNS resolution (libc) ─────────────────────────────────────
-extern fn getaddrinfo(node: * u8, service: * u8, hints: * u8, res: * * u8) -> i32;
+extern fn getaddrinfo(node: *u8, service: *u8, hints: *u8, res: **u8) -> i32;
 
-extern fn freeaddrinfo(res: * u8) -> void;
+extern fn freeaddrinfo(res: *u8) -> void;
 
 // The RFC 6455 handshake accept-value (`SHA1(key ‖ GUID)` then base64) and the
 // client `Sec-WebSocket-Key` base64 are computed by the file-local native
@@ -104,57 +104,57 @@ extern fn freeaddrinfo(res: * u8) -> void;
 // `RAND_bytes` for the RFC 6455 masking key and the client handshake
 // `Sec-WebSocket-Key` (SFEP-0048 Phase D, SFN-123). Declared inline per the
 // same cross-module-extern workaround (#306) as the sockets above.
-extern fn sfn_rand_fill(buf: * u8, n: i64) -> i32;
+extern fn sfn_rand_fill(buf: *u8, n: i64) -> i32;
 
 // ── TLS termination (platform/tls.sfn) ────────────────────────
-extern fn tls_server_ctx(cert_path: * u8, key_path: * u8) -> * u8;
+extern fn tls_server_ctx(cert_path: *u8, key_path: *u8) -> *u8;
 
-extern fn tls_accept_fd(ctx: * u8, fd: i32) -> * u8;
+extern fn tls_accept_fd(ctx: *u8, fd: i32) -> *u8;
 
-extern fn tls_ctx_free(ctx: * u8) -> void;
+extern fn tls_ctx_free(ctx: *u8) -> void;
 
-extern fn tls_read(ssl: * u8, buf: * u8, n: i64) -> i64;
+extern fn tls_read(ssl: *u8, buf: *u8, n: i64) -> i64;
 
-extern fn tls_write(ssl: * u8, buf: * u8, n: i64) -> i64;
+extern fn tls_write(ssl: *u8, buf: *u8, n: i64) -> i64;
 
-extern fn tls_shutdown_free(ssl: * u8) -> void;
+extern fn tls_shutdown_free(ssl: *u8) -> void;
 
 // ── Scheduler (scheduler.sfn) — the shared MPMC task queue + fixed
 // worker pool. `sfn_websocket_serve` creates one queue + pool, then
 // enqueues a detached `Task` per accepted connection (mirrors
 // `serve.sfn`, #1923). Declared inline per the same cross-module-extern
 // workaround (#306) as the sockets above.
-extern fn sfn_taskqueue_create(capacity: i64) -> * u8;
+extern fn sfn_taskqueue_create(capacity: i64) -> *u8;
 
-extern fn sfn_taskqueue_destroy(queue: * u8) -> void;
+extern fn sfn_taskqueue_destroy(queue: *u8) -> void;
 
-extern fn sfn_taskqueue_enqueue(queue: * u8, task: * u8) -> void;
+extern fn sfn_taskqueue_enqueue(queue: *u8, task: *u8) -> void;
 
 // Per-connection tasks are fire-and-forget: `sfn_websocket_serve` never
 // joins them, so they use the detached constructor (#1203). The pool
 // worker that runs a detached task reclaims its `Task` handle after
 // `sfn_task_run` returns — so the only reclaim the worker owns is its
 // ctx cell.
-extern fn sfn_task_create_detached(fn_ptr: i64, ctx: i64) -> * u8;
+extern fn sfn_task_create_detached(fn_ptr: i64, ctx: i64) -> *u8;
 
-extern fn sfn_scheduler_create(queue: * u8) -> * u8;
+extern fn sfn_scheduler_create(queue: *u8) -> *u8;
 
 // `_ws_ptr_off(p, off)` — byte-stride pointer arithmetic for a
 // variable offset. Mirrors `http.sfn`'s `_ptr_off`.
-fn _ws_ptr_off(p: * u8, off: i64) -> * u8 {
+fn _ws_ptr_off(p: *u8, off: i64) -> *u8 {
     let addr: i64 = (p as i64) + off;
-    return addr as * u8;
+    return addr as *u8;
 }
 
 // `_ws_byte_at(base, off)` — read the byte at `base + off` as 0..255.
 // Mirrors `http.sfn`'s `_byte_at`.
-fn _ws_byte_at(base: * u8, off: i64) -> i64 {
+fn _ws_byte_at(base: *u8, off: i64) -> i64 {
     return (sailfin_intrinsic_pointer_read_i32(_ws_ptr_off(base, off)) as i64) & 255;
 }
 
 // `_ws_first_is_digit(p)` — is the first byte at `p` an ASCII digit
 // (`'0'`..`'9'` = 48..57)? Mirrors `http.sfn`'s `_first_is_digit`.
-fn _ws_first_is_digit(p: * u8) -> bool {
+fn _ws_first_is_digit(p: *u8) -> bool {
     let b: i64 = (sailfin_intrinsic_pointer_read_i32(p) as i64) & 255;
     return b >= 48 && b <= 57;
 }
@@ -163,8 +163,8 @@ fn _ws_first_is_digit(p: * u8) -> bool {
 // IPv4 address, writing the four octets to `out[0..4]`. Returns false
 // on anything that is not a clean `N.N.N.N`. Mirrors `http.sfn`'s
 // `_parse_quad`.
-fn _ws_parse_quad(host: * u8, out: * u8) -> bool {
-    let mut cursor: * u8 = host;
+fn _ws_parse_quad(host: *u8, out: *u8) -> bool {
+    let mut cursor: *u8 = host;
     let mut i: i64 = 0;
     loop {
         if i >= 4 { break; }
@@ -173,7 +173,7 @@ fn _ws_parse_quad(host: * u8, out: * u8) -> bool {
         if octet < 0 || octet > 255 { return false; }
         memset(_ws_ptr_off(out, i), octet as i32, 1 as usize);
         if i < 3 {
-            let dot: * u8 = _ws_strchr(cursor, 46);
+            let dot: *u8 = _ws_strchr(cursor, 46);
             if dot as i64 == 0 { return false; }
             cursor = _ws_ptr_off(dot, 1);
         }
@@ -185,7 +185,7 @@ fn _ws_parse_quad(host: * u8, out: * u8) -> bool {
 // `_ws_strchr(s, c)` — find the first byte equal to `c` in the
 // NUL-terminated `s`, or null. Hand-rolled (no libc `strchr` extern
 // declared in this self-contained module) via `_ws_byte_at`.
-fn _ws_strchr(s: * u8, c: i64) -> * u8 {
+fn _ws_strchr(s: *u8, c: i64) -> *u8 {
     let mut i: i64 = 0;
     loop {
         let b: i64 = _ws_byte_at(s, i);
@@ -200,13 +200,13 @@ fn _ws_strchr(s: * u8, c: i64) -> * u8 {
 // (`sa`, as an i64), validate it is an AF_INET address and copy its
 // four `sin_addr` octets to `out[0..4]`. Mirrors `http.sfn`'s
 // `_sockaddr_octets`.
-fn _ws_sockaddr_octets(sa: i64, out: * u8) -> bool {
+fn _ws_sockaddr_octets(sa: i64, out: *u8) -> bool {
     if sa == 0 { return false; }
-    let head4: i64 = sailfin_intrinsic_pointer_read_i32(sa as * u8) as i64;
+    let head4: i64 = sailfin_intrinsic_pointer_read_i32(sa as *u8) as i64;
     let b0: i64 = head4 & 255;
     let b1: i64 = (head4 >> 8) & 255;
     if b0 != 2 && b1 != 2 { return false; }
-    memcpy(out, (sa + 4) as * u8, 4 as usize);
+    memcpy(out, (sa + 4) as *u8, 4 as usize);
     return true;
 }
 
@@ -214,19 +214,19 @@ fn _ws_sockaddr_octets(sa: i64, out: * u8) -> bool {
 // (A) address via libc `getaddrinfo`, writing the four octets to
 // `out[0..4]`. Mirrors `http.sfn`'s `_resolve_dns` (v0 scope: IPv4
 // only, first A record, no caching).
-fn _ws_resolve_dns(host: * u8, out: * u8) -> bool ![net] {
-    let hints: * u8 = malloc(48 as usize);
+fn _ws_resolve_dns(host: *u8, out: *u8) -> bool ![net] {
+    let hints: *u8 = malloc(48 as usize);
     if hints as i64 == 0 { return false; }
     memset(hints, 0, 48 as usize);
     memset(_ws_ptr_off(hints, 4), 2, 1 as usize);
     memset(_ws_ptr_off(hints, 8), 1, 1 as usize);
-    let res: * u8 = malloc(8 as usize);
+    let res: *u8 = malloc(8 as usize);
     if res as i64 == 0 {
         free(hints);
         return false;
     }
     memset(res, 0, 8 as usize);
-    let rc: i32 = getaddrinfo(host, null, hints, res as * * u8);
+    let rc: i32 = getaddrinfo(host, null, hints, res as **u8);
     free(hints);
     if rc != 0 {
         free(res);
@@ -235,13 +235,13 @@ fn _ws_resolve_dns(host: * u8, out: * u8) -> bool ![net] {
     let head: i64 = sailfin_intrinsic_pointer_read_i64(res);
     free(res);
     if head == 0 { return false; }
-    let cand_a: i64 = sailfin_intrinsic_pointer_read_i64((head + 24) as * u8);
-    let cand_b: i64 = sailfin_intrinsic_pointer_read_i64((head + 32) as * u8);
+    let cand_a: i64 = sailfin_intrinsic_pointer_read_i64((head + 24) as *u8);
+    let cand_b: i64 = sailfin_intrinsic_pointer_read_i64((head + 32) as *u8);
     let mut ok: bool = false;
     if _ws_sockaddr_octets(cand_a, out) { ok = true; } else {
         if _ws_sockaddr_octets(cand_b, out) { ok = true; }
     }
-    freeaddrinfo(head as * u8);
+    freeaddrinfo(head as *u8);
     return ok;
 }
 
@@ -249,9 +249,9 @@ fn _ws_resolve_dns(host: * u8, out: * u8) -> bool ![net] {
 // written to `out[0..4]`. Handles `localhost` and numeric dotted-quad
 // addresses directly; anything else falls through to DNS. Mirrors
 // `http.sfn`'s `_host_ip4`.
-fn _ws_host_ip4(host: * u8, out: * u8) -> bool ![net] {
+fn _ws_host_ip4(host: *u8, out: *u8) -> bool ![net] {
     let localhost: string = "localhost";
-    if _ws_streq(host, localhost as * u8) {
+    if _ws_streq(host, localhost as *u8) {
         memset(_ws_ptr_off(out, 0), 127, 1 as usize);
         memset(_ws_ptr_off(out, 1), 0, 1 as usize);
         memset(_ws_ptr_off(out, 2), 0, 1 as usize);
@@ -265,7 +265,7 @@ fn _ws_host_ip4(host: * u8, out: * u8) -> bool ![net] {
 // `_ws_streq(a, b)` — NUL-terminated byte-for-byte equality. Hand-rolled
 // (no libc `strcmp` extern declared in this self-contained module) via
 // `_ws_byte_at`.
-fn _ws_streq(a: * u8, b: * u8) -> bool {
+fn _ws_streq(a: *u8, b: *u8) -> bool {
     let mut i: i64 = 0;
     loop {
         let ba: i64 = _ws_byte_at(a, i);
@@ -284,7 +284,7 @@ fn _ws_io_timeout_secs() -> i64 { return 10; }
 // `_ws_set_socket_timeouts(fd)` — arm SO_RCVTIMEO + SO_SNDTIMEO on a
 // socket. Mirrors `http.sfn`'s `_set_socket_timeouts`.
 fn _ws_set_socket_timeouts(fd: i32) -> void {
-    let tv: * u8 = malloc(16 as usize);
+    let tv: *u8 = malloc(16 as usize);
     if tv as i64 == 0 { return; }
     memset(tv, 0, 16 as usize);
     memset(_ws_ptr_off(tv, 0), _ws_io_timeout_secs() as i32, 1 as usize);
@@ -300,11 +300,11 @@ fn _ws_set_socket_timeouts(fd: i32) -> void {
 // failure. Mirrors `http.sfn`'s `_connect_tcp` (dual sockaddr_in
 // layout for Linux/macOS), minus the TLS paths — `ws://` is plaintext
 // only.
-fn _ws_connect_tcp(host: * u8, port: i64) -> i32 ![net] {
+fn _ws_connect_tcp(host: *u8, port: i64) -> i32 ![net] {
     let mut attempt: i64 = 0;
     loop {
         if attempt >= 2 { break; }
-        let addr: * u8 = malloc(16 as usize);
+        let addr: *u8 = malloc(16 as usize);
         if addr as i64 == 0 { return 0 - 1; }
         memset(addr, 0, 16 as usize);
         if attempt == 0 {
@@ -338,7 +338,7 @@ fn _ws_connect_tcp(host: * u8, port: i64) -> i32 ![net] {
 // `_ws_send_all(fd, ssl, buf, total)` — write `total` bytes, retrying
 // on short sends. A null `ssl` uses the raw socket; a non-null `ssl` uses
 // `tls_write` for TLS-terminated websocket server connections.
-fn _ws_send_all(fd: i32, ssl: * u8, buf: * u8, total: i64) -> bool {
+fn _ws_send_all(fd: i32, ssl: *u8, buf: *u8, total: i64) -> bool {
     let mut sent: i64 = 0;
     loop {
         if sent >= total { break; }
@@ -361,14 +361,14 @@ fn _ws_send_all(fd: i32, ssl: * u8, buf: * u8, total: i64) -> bool {
 // server that splits the `101` status line and headers across TCP
 // segments is not handled here; the drain-until-`\r\n\r\n` receive loop
 // lands with the server bridge and behavioral loopback test (#1877).
-fn _ws_recv_some(fd: i32, buf: * u8, cap: i64) -> i64 {
+fn _ws_recv_some(fd: i32, buf: *u8, cap: i64) -> i64 {
     return recv(fd, buf, cap, 0);
 }
 
 // `_ws_append(dst, off, src)` — copy the NUL-terminated `src` into
 // `dst` at byte offset `off`, returning the new offset. Mirrors
 // `http.sfn`'s `_append`.
-fn _ws_append(dst: * u8, off: i64, src: * u8) -> i64 {
+fn _ws_append(dst: *u8, off: i64, src: *u8) -> i64 {
     let n: i64 = strlen(src) as i64;
     memcpy(_ws_ptr_off(dst, off), src, n as usize);
     return off + n;
@@ -377,7 +377,7 @@ fn _ws_append(dst: * u8, off: i64, src: * u8) -> i64 {
 // `_ws_ci_find(base, limit, needle, nlen)` — first index in
 // `[0, limit)` where the `nlen`-byte `needle` matches
 // case-insensitively, or -1. Mirrors `http.sfn`'s `_ci_find`.
-fn _ws_ci_find(base: * u8, limit: i64, needle: * u8, nlen: i64) -> i64 {
+fn _ws_ci_find(base: *u8, limit: i64, needle: *u8, nlen: i64) -> i64 {
     if nlen <= 0 { return 0 - 1; }
     let mut i: i64 = 0;
     loop {
@@ -406,7 +406,7 @@ fn _ws_lc(b: i64) -> i64 {
 
 // `_ws_handle_fd(h)` — read back the connected socket fd stored at
 // offset 0 of the handle cell (one byte at a time, little-endian).
-fn _ws_handle_fd(h: * u8) -> i32 {
+fn _ws_handle_fd(h: *u8) -> i32 {
     let b0: i64 = _ws_byte_at(h, 0);
     let b1: i64 = _ws_byte_at(h, 1);
     let b2: i64 = _ws_byte_at(h, 2);
@@ -418,8 +418,8 @@ fn _ws_handle_fd(h: * u8) -> i32 {
 // `fd` as an `i32` at offset 0 (single-byte writes, matching
 // `http.sfn`'s per-byte field idiom) and zeroing the reserved
 // offsets 4..16. Returns null on OOM.
-fn _ws_make_handle(fd: i32) -> * u8 {
-    let h: * u8 = malloc(16 as usize);
+fn _ws_make_handle(fd: i32) -> *u8 {
+    let h: *u8 = malloc(16 as usize);
     if h as i64 == 0 { return null; }
     memset(h, 0, 16 as usize);
     let fdv: i64 = fd as i64;
@@ -441,32 +441,32 @@ fn _ws_make_handle(fd: i32) -> * u8 {
 // (`atomic_store` stores only `i64`, not `i8*`; the caller casts back
 // with `as * u8`). Returns false on OOM; the caller owns both allocated
 // strings on success.
-fn _ws_parse_url(url: * u8, host_slot: * i64, path_slot: * i64, port_slot: * i64) -> bool {
+fn _ws_parse_url(url: *u8, host_slot: *i64, path_slot: *i64, port_slot: *i64) -> bool {
     let sep: string = "://";
-    let mut host_start: * u8 = url;
-    let scheme: * u8 = _ws_find(url, sep as * u8);
+    let mut host_start: *u8 = url;
+    let scheme: *u8 = _ws_find(url, sep as *u8);
     if scheme as i64 != 0 { host_start = _ws_ptr_off(scheme, 3); }
 
-    let slash: * u8 = _ws_strchr(host_start, 47);
+    let slash: *u8 = _ws_strchr(host_start, 47);
     let mut authority_len: i64 = 0;
     if slash as i64 != 0 {
         authority_len = (slash as i64) - (host_start as i64);
     } else { authority_len = strlen(host_start) as i64; }
-    let authority: * u8 = _ws_strdup_n(host_start, authority_len);
+    let authority: *u8 = _ws_strdup_n(host_start, authority_len);
     if authority as i64 == 0 { return false; }
 
     let mut port: i64 = 80;
-    let colon: * u8 = _ws_strchr(authority, 58);
+    let colon: *u8 = _ws_strchr(authority, 58);
     if colon as i64 != 0 {
         port = atoi(_ws_ptr_off(colon, 1)) as i64;
         memset(colon, 0, 1 as usize);
     }
 
     let root: string = "/";
-    let mut path: * u8 = null;
+    let mut path: *u8 = null;
     if slash as i64 != 0 {
         path = _ws_strdup_n(slash, strlen(slash) as i64);
-    } else { path = _ws_strdup_n(root as * u8, 1); }
+    } else { path = _ws_strdup_n(root as *u8, 1); }
     if path as i64 == 0 {
         free(authority);
         return false;
@@ -481,14 +481,14 @@ fn _ws_parse_url(url: * u8, host_slot: * i64, path_slot: * i64, port_slot: * i64
 // `_ws_strdup_n(src, n)` — copy `n` bytes from `src` into a fresh
 // `malloc`'d NUL-terminated buffer the caller owns. Returns null on
 // OOM. Mirrors `http.sfn`'s `_strdup_n`.
-fn _ws_strdup_n(src: * u8, n: i64) -> * u8 {
+fn _ws_strdup_n(src: *u8, n: i64) -> *u8 {
     // +4, not +1 (unlike http.sfn's `_strdup_n`): this module scans its
     // strdup'd host/path/authority buffers with `_ws_byte_at`'s 4-byte load
     // (via `_ws_strchr` / `_ws_streq` / `_ws_find`), so the terminating NUL
     // at offset `n` must have 3 bytes of slack for the tail load. http keeps
     // its `_strdup_n` at `n+1` because it never applies `_byte_at` to those
     // heap buffers (it uses libc `strchr`/`strstr` there).
-    let buf: * u8 = malloc((n + 4) as usize);
+    let buf: *u8 = malloc((n + 4) as usize);
     if buf as i64 == 0 { return null; }
     if n > 0 { memcpy(buf, src, n as usize); }
     memset(_ws_ptr_off(buf, n), 0, 1 as usize);
@@ -499,7 +499,7 @@ fn _ws_strdup_n(src: * u8, n: i64) -> * u8 {
 // NUL-terminated `needle` in the NUL-terminated `haystack`, or null.
 // Hand-rolled (no libc `strstr` extern declared in this
 // self-contained module) via `_ws_byte_at`.
-fn _ws_find(haystack: * u8, needle: * u8) -> * u8 {
+fn _ws_find(haystack: *u8, needle: *u8) -> *u8 {
     let nlen: i64 = strlen(needle) as i64;
     if nlen == 0 { return null; }
     let mut i: i64 = 0;
@@ -539,14 +539,14 @@ fn _ws_rotl32(x: i64, n: i64) -> i64 {
 // 32-bit message-schedule word `t`, stored little-endian in a 4-byte slot.
 // The store/load pair is internally consistent, so the slot endianness is a
 // private detail; the digest itself is emitted big-endian by `_ws_sha1`.
-fn _ws_sha_getw(sched: * u8, t: i64) -> i64 {
+fn _ws_sha_getw(sched: *u8, t: i64) -> i64 {
     let o: i64 = t * 4;
     return (_ws_byte_at(sched, o) | (_ws_byte_at(sched, o + 1) << 8) | (_ws_byte_at(sched, o
         + 2) << 16) | (_ws_byte_at(sched, o
         + 3) << 24)) & 4294967295;
 }
 
-fn _ws_sha_setw(sched: * u8, t: i64, v: i64) -> void {
+fn _ws_sha_setw(sched: *u8, t: i64, v: i64) -> void {
     let o: i64 = t * 4;
     memset(_ws_ptr_off(sched, o), (v & 255) as i32, 1 as usize);
     memset(_ws_ptr_off(sched, o + 1), ((v >> 8) & 255) as i32, 1 as usize);
@@ -556,7 +556,7 @@ fn _ws_sha_setw(sched: * u8, t: i64, v: i64) -> void {
 
 // `_ws_put_be32(dst, off, w)` — store the low 32 bits of `w` big-endian at
 // `dst + off`. Used to serialize the five SHA-1 state words into the digest.
-fn _ws_put_be32(dst: * u8, off: i64, w: i64) -> void {
+fn _ws_put_be32(dst: *u8, off: i64, w: i64) -> void {
     memset(_ws_ptr_off(dst, off), ((w >> 24) & 255) as i32, 1 as usize);
     memset(_ws_ptr_off(dst, off + 1), ((w >> 16) & 255) as i32, 1 as usize);
     memset(_ws_ptr_off(dst, off + 2), ((w >> 8) & 255) as i32, 1 as usize);
@@ -567,7 +567,7 @@ fn _ws_put_be32(dst: * u8, off: i64, w: i64) -> void {
 // `msg`, writing the 20-byte raw digest to `out20`. Returns false on OOM
 // (leaving `out20` untouched). `out20` must have >= 4 bytes of tail slack
 // beyond byte 20, since a later `_ws_byte_at` on it does a 4-byte load.
-fn _ws_sha1(msg: * u8, len: i64, out20: * u8) -> bool {
+fn _ws_sha1(msg: *u8, len: i64, out20: *u8) -> bool {
     let mask: i64 = 4294967295;
     let bitlen: i64 = len * 8;
     // Pad: 0x80, then zeros until the byte length is 56 (mod 64), then the
@@ -580,7 +580,7 @@ fn _ws_sha1(msg: * u8, len: i64, out20: * u8) -> bool {
     let total: i64 = plen + 8;
     // +4 tail slack keeps `_ws_byte_at`'s 4-byte load at the final block byte
     // in-bounds (the same over-allocation invariant the recv/mask buffers hold).
-    let padded: * u8 = malloc((total + 4) as usize);
+    let padded: *u8 = malloc((total + 4) as usize);
     if padded as i64 == 0 { return false; }
     memset(padded, 0, (total + 4) as usize);
     memcpy(padded, msg, len as usize);
@@ -590,7 +590,7 @@ fn _ws_sha1(msg: * u8, len: i64, out20: * u8) -> bool {
     _ws_put_be32(padded, total - 8, hi);
     _ws_put_be32(padded, total - 4, lo);
     // 80-word schedule scratch (80 * 4 bytes) + 4 tail slack for `_ws_byte_at`.
-    let sched: * u8 = malloc((320 + 4) as usize);
+    let sched: *u8 = malloc((320 + 4) as usize);
     if sched as i64 == 0 {
         free(padded);
         return false;
@@ -693,7 +693,7 @@ fn _ws_b64_char(v: i64) -> i64 {
 // padding) of the first `srclen` bytes of `src` into `dst`, NUL-terminated.
 // Returns the encoded length. `src` must have >= 4 bytes of tail slack beyond
 // `srclen` (the trailing `_ws_byte_at` does a 4-byte load).
-fn _ws_base64(src: * u8, srclen: i64, dst: * u8) -> i64 {
+fn _ws_base64(src: *u8, srclen: i64, dst: *u8) -> i64 {
     let mut si: i64 = 0;
     let mut di: i64 = 0;
     // Full 3-byte groups → 4 base64 chars.
@@ -732,7 +732,7 @@ fn _ws_base64(src: * u8, srclen: i64, dst: * u8) -> i64 {
 // `dst24` (24-char NUL-terminated result, per RFC 4648 padding) via the
 // native `_ws_base64`. `src` must carry the 4-byte tail slack `_ws_base64`
 // requires (the client key buffer over-allocates for exactly this).
-fn _ws_base64_16(src: * u8, dst24: * u8) -> void {
+fn _ws_base64_16(src: *u8, dst24: *u8) -> void {
     let _ = _ws_base64(src, 16, dst24);
 }
 
@@ -740,22 +740,22 @@ fn _ws_base64_16(src: * u8, dst24: * u8) -> void {
 // `Sec-WebSocket-Accept` value for `key_b64`: base64(SHA1(key_b64 +
 // the RFC 6455 GUID)). Writes the 28-char base64 result (NUL-terminated)
 // into `out28`.
-fn _ws_sec_accept(key_b64: * u8, out28: * u8) -> void {
+fn _ws_sec_accept(key_b64: *u8, out28: *u8) -> void {
     let guid: string = "258EAFA5-E914-47DA-95CA-C5AB0DC85B11";
     let key_len: i64 = strlen(key_b64) as i64;
-    let guid_len: i64 = strlen(guid as * u8) as i64;
+    let guid_len: i64 = strlen(guid as *u8) as i64;
     let total: i64 = key_len + guid_len;
-    let concat: * u8 = malloc((total + 1) as usize);
+    let concat: *u8 = malloc((total + 1) as usize);
     if concat as i64 == 0 { return; }
     let mut off: i64 = 0;
     off = _ws_append(concat, off, key_b64);
-    off = _ws_append(concat, off, guid as * u8);
+    off = _ws_append(concat, off, guid as *u8);
     memset(_ws_ptr_off(concat, off), 0, 1 as usize);
     // malloc(24), not 20: `_ws_base64` reads the digest through `_ws_byte_at`,
     // whose 4-byte load at digest[16..19] touches digest[16..22]. The 4-byte
     // tail slack keeps that final load in-bounds; only bytes 0..19 are the
     // SHA-1 digest.
-    let digest: * u8 = malloc(24 as usize);
+    let digest: *u8 = malloc(24 as usize);
     if digest as i64 == 0 {
         free(concat);
         return;
@@ -773,7 +773,7 @@ fn _ws_sec_accept(key_b64: * u8, out28: * u8) -> void {
 // `_ws_status_is_101(resp)` — does the response's status line contain
 // the bytes `1`,`0`,`1` (a `101 Switching Protocols` response)? Scans
 // only the first line (up to the first `\r` or `\n`).
-fn _ws_status_is_101(resp: * u8) -> bool {
+fn _ws_status_is_101(resp: *u8) -> bool {
     let mut line_end: i64 = 0;
     loop {
         let b: i64 = _ws_byte_at(resp, line_end);
@@ -794,14 +794,14 @@ fn _ws_status_is_101(resp: * u8) -> bool {
 // `_ws_frame_send(fd, opcode, payload, payload_len)` — assemble and
 // send a masked RFC 6455 client frame (FIN=1, client→server MUST
 // mask). Returns false on OOM or a send failure.
-fn _ws_frame_send(fd: i32, opcode: i64, payload: * u8, payload_len: i64) -> bool ![net] {
+fn _ws_frame_send(fd: i32, opcode: i64, payload: *u8, payload_len: i64) -> bool ![net] {
     let byte0: i64 = 128 | (opcode & 15);
     let mut header_len: i64 = 2;
     if payload_len >= 126 && payload_len <= 65535 { header_len = 4; } else {
         if payload_len > 65535 { header_len = 10; }
     }
     let total: i64 = header_len + 4 + payload_len;
-    let out: * u8 = malloc(total as usize);
+    let out: *u8 = malloc(total as usize);
     if out as i64 == 0 { return false; }
     memset(_ws_ptr_off(out, 0), byte0 as i32, 1 as usize);
     if payload_len < 126 {
@@ -827,7 +827,7 @@ fn _ws_frame_send(fd: i32, opcode: i64, payload: * u8, payload_len: i64) -> bool
     // The extra 4 bytes keep that final load in-bounds — the same
     // over-allocation invariant http.sfn's recv buffers hold for `_byte_at`.
     // Only the first 4 bytes are the RFC 6455 masking key.
-    let mask: * u8 = malloc(8 as usize);
+    let mask: *u8 = malloc(8 as usize);
     if mask as i64 == 0 {
         free(out);
         return false;
@@ -855,14 +855,14 @@ fn _ws_frame_send(fd: i32, opcode: i64, payload: * u8, payload_len: i64) -> bool
 // `sfn_websocket_connect(url)` — parse `url` ("ws://host[:port][/path]"),
 // TCP-connect, and perform the RFC 6455 client handshake. Returns a
 // malloc'd handle cell on success, null on any failure.
-fn sfn_websocket_connect(url: * u8) -> * u8 ![net] {
+fn sfn_websocket_connect(url: *u8) -> *u8 ![net] {
     if url as i64 == 0 { return null; }
     let mut host_addr: i64 = 0;
     let mut path_addr: i64 = 0;
     let mut port: i64 = 80;
     if !_ws_parse_url(url, & host_addr, & path_addr, & port) { return null; }
-    let host: * u8 = host_addr as * u8;
-    let path: * u8 = path_addr as * u8;
+    let host: *u8 = host_addr as *u8;
+    let path: *u8 = path_addr as *u8;
 
     let fd: i32 = _ws_connect_tcp(host, port);
     if fd < 0 {
@@ -874,7 +874,7 @@ fn sfn_websocket_connect(url: * u8) -> * u8 ![net] {
     // malloc(20), not 16: `_ws_base64_16` reads the key through `_ws_byte_at`,
     // whose 4-byte load at key[12..15] touches key[12..18]. The 4-byte tail
     // slack keeps that final load in-bounds; only bytes 0..15 are the key.
-    let keybuf: * u8 = malloc(20 as usize);
+    let keybuf: *u8 = malloc(20 as usize);
     if keybuf as i64 == 0 {
         free(host);
         free(path);
@@ -888,7 +888,7 @@ fn sfn_websocket_connect(url: * u8) -> * u8 ![net] {
         close(fd);
         return null;
     }
-    let key_b64: * u8 = malloc(25 as usize);
+    let key_b64: *u8 = malloc(25 as usize);
     if key_b64 as i64 == 0 {
         free(keybuf);
         free(host);
@@ -905,7 +905,7 @@ fn sfn_websocket_connect(url: * u8) -> * u8 ![net] {
     let upgrade: string = "\r\nUpgrade: websocket\r\nConnection: Upgrade\r\nSec-WebSocket-Key: ";
     let version: string = "\r\nSec-WebSocket-Version: 13\r\n\r\n";
 
-    let port_str: * u8 = _ws_uint_to_str(port);
+    let port_str: *u8 = _ws_uint_to_str(port);
     if port_str as i64 == 0 {
         free(key_b64);
         free(host);
@@ -914,14 +914,14 @@ fn sfn_websocket_connect(url: * u8) -> * u8 ![net] {
         return null;
     }
 
-    let total: i64 = (strlen(verb as * u8) as i64) + (strlen(path) as i64) + (strlen(proto as * u8) as i64)
+    let total: i64 = (strlen(verb as *u8) as i64) + (strlen(path) as i64) + (strlen(proto as *u8) as i64)
         + (strlen(host) as i64)
-        + (strlen(colon as * u8) as i64)
+        + (strlen(colon as *u8) as i64)
         + (strlen(port_str) as i64)
-        + (strlen(upgrade as * u8) as i64)
+        + (strlen(upgrade as *u8) as i64)
         + (strlen(key_b64) as i64)
-        + (strlen(version as * u8) as i64);
-    let req: * u8 = malloc((total + 1) as usize);
+        + (strlen(version as *u8) as i64);
+    let req: *u8 = malloc((total + 1) as usize);
     if req as i64 == 0 {
         free(port_str);
         free(key_b64);
@@ -931,15 +931,15 @@ fn sfn_websocket_connect(url: * u8) -> * u8 ![net] {
         return null;
     }
     let mut off: i64 = 0;
-    off = _ws_append(req, off, verb as * u8);
+    off = _ws_append(req, off, verb as *u8);
     off = _ws_append(req, off, path);
-    off = _ws_append(req, off, proto as * u8);
+    off = _ws_append(req, off, proto as *u8);
     off = _ws_append(req, off, host);
-    off = _ws_append(req, off, colon as * u8);
+    off = _ws_append(req, off, colon as *u8);
     off = _ws_append(req, off, port_str);
-    off = _ws_append(req, off, upgrade as * u8);
+    off = _ws_append(req, off, upgrade as *u8);
     off = _ws_append(req, off, key_b64);
-    off = _ws_append(req, off, version as * u8);
+    off = _ws_append(req, off, version as *u8);
     memset(_ws_ptr_off(req, off), 0, 1 as usize);
     free(port_str);
     free(host);
@@ -958,7 +958,7 @@ fn sfn_websocket_connect(url: * u8) -> * u8 ![net] {
     // `_ws_byte_at`'s 4-byte load, which at the final in-buffer offset
     // touches 3 bytes past it — match http.sfn's recv over-allocation so the
     // tail load never faults.
-    let resp: * u8 = malloc((resp_cap + 4) as usize);
+    let resp: *u8 = malloc((resp_cap + 4) as usize);
     if resp as i64 == 0 {
         free(key_b64);
         close(fd);
@@ -981,7 +981,7 @@ fn sfn_websocket_connect(url: * u8) -> * u8 ![net] {
     }
 
     // OPTIONAL but preferred: verify Sec-WebSocket-Accept.
-    let expect: * u8 = malloc(29 as usize);
+    let expect: *u8 = malloc(29 as usize);
     if expect as i64 != 0 {
         _ws_sec_accept(key_b64, expect);
         let expect_len: i64 = strlen(expect) as i64;
@@ -997,7 +997,7 @@ fn sfn_websocket_connect(url: * u8) -> * u8 ![net] {
     free(key_b64);
     free(resp);
 
-    let handle: * u8 = _ws_make_handle(fd);
+    let handle: *u8 = _ws_make_handle(fd);
     if handle as i64 == 0 {
         close(fd);
         return null;
@@ -1007,9 +1007,9 @@ fn sfn_websocket_connect(url: * u8) -> * u8 ![net] {
 
 // `_ws_uint_to_str(value)` — render a non-negative i64 as a freshly
 // allocated decimal string. Mirrors `http.sfn`'s `_uint_to_str`.
-fn _ws_uint_to_str(value: i64) -> * u8 {
+fn _ws_uint_to_str(value: i64) -> *u8 {
     if value <= 0 {
-        let zero: * u8 = malloc(2 as usize);
+        let zero: *u8 = malloc(2 as usize);
         if zero as i64 == 0 { return null; }
         memset(_ws_ptr_off(zero, 0), 48, 1 as usize);
         memset(_ws_ptr_off(zero, 1), 0, 1 as usize);
@@ -1022,7 +1022,7 @@ fn _ws_uint_to_str(value: i64) -> * u8 {
         probe = probe / 10;
         count = count + 1;
     }
-    let buf: * u8 = malloc((count + 1) as usize);
+    let buf: *u8 = malloc((count + 1) as usize);
     if buf as i64 == 0 { return null; }
     memset(_ws_ptr_off(buf, count), 0, 1 as usize);
     let mut remaining: i64 = value;
@@ -1040,7 +1040,7 @@ fn _ws_uint_to_str(value: i64) -> * u8 {
 // `sfn_websocket_send(handle, msg)` — send `msg` as a single masked
 // TEXT frame over `handle`'s socket. Returns the handle unchanged on
 // success, null on failure (a null handle, or a send error).
-fn sfn_websocket_send(handle: * u8, msg: * u8) -> * u8 ![net] {
+fn sfn_websocket_send(handle: *u8, msg: *u8) -> *u8 ![net] {
     if handle as i64 == 0 { return null; }
     if msg as i64 == 0 { return null; }
     let fd: i32 = _ws_handle_fd(handle);
@@ -1052,7 +1052,7 @@ fn sfn_websocket_send(handle: * u8, msg: * u8) -> * u8 ![net] {
 // `sfn_websocket_close(handle)` — send a masked CLOSE frame (opcode
 // 0x8, empty payload), close the socket, and free the handle cell.
 // Always returns null. Safe on a null handle.
-fn sfn_websocket_close(handle: * u8) -> * u8 ![net] {
+fn sfn_websocket_close(handle: *u8) -> *u8 ![net] {
     if handle as i64 == 0 { return null; }
     let fd: i32 = _ws_handle_fd(handle);
     _ws_frame_send(fd, 8, null, 0);
@@ -1070,7 +1070,7 @@ fn sfn_websocket_close(handle: * u8) -> * u8 ![net] {
 //   - Linux:     SOL_SOCKET = 1,     SO_REUSEADDR = 2.
 //   - macOS/BSD: SOL_SOCKET = 65535, SO_REUSEADDR = 4.
 fn _ws_srv_set_reuseaddr(fd: i32) -> void {
-    let optval: * u8 = malloc(4 as usize);
+    let optval: *u8 = malloc(4 as usize);
     if optval as i64 == 0 { return; }
     memset(optval, 0, 4 as usize);
     memset(_ws_ptr_off(optval, 0), 1, 1 as usize);
@@ -1090,7 +1090,7 @@ fn _ws_srv_bind_listen(port: i64) -> i32 {
         let fd: i32 = socket(2, 1, 0);
         if fd < 0 { return 0 - 1; }
         _ws_srv_set_reuseaddr(fd);
-        let addr: * u8 = malloc(16 as usize);
+        let addr: *u8 = malloc(16 as usize);
         if addr as i64 == 0 {
             close(fd);
             return 0 - 1;
@@ -1124,7 +1124,7 @@ fn _ws_srv_bind_listen(port: i64) -> i32 {
 // `_ws_recv_exact(fd, buf, n)` — loop `recv` until exactly `n` bytes have
 // landed in `buf`. Returns false on a short read, error, or EOF (any
 // `recv` returning <= 0) before `n` bytes are collected.
-fn _ws_recv_exact(fd: i32, ssl: * u8, buf: * u8, n: i64) -> bool {
+fn _ws_recv_exact(fd: i32, ssl: *u8, buf: *u8, n: i64) -> bool {
     let mut got: i64 = 0;
     loop {
         if got >= n { break; }
@@ -1144,14 +1144,14 @@ fn _ws_recv_exact(fd: i32, ssl: * u8, buf: * u8, n: i64) -> bool {
 // and send an UNMASKED RFC 6455 server frame (FIN=1; server→client MUST
 // NOT mask). Structurally `_ws_frame_send`'s counterpart minus the
 // masking key and XOR step. Returns false on OOM or a send failure.
-fn _ws_server_frame_send(fd: i32, ssl: * u8, opcode: i64, payload: * u8, payload_len: i64) -> bool {
+fn _ws_server_frame_send(fd: i32, ssl: *u8, opcode: i64, payload: *u8, payload_len: i64) -> bool {
     let byte0: i64 = 128 | (opcode & 15);
     let mut header_len: i64 = 2;
     if payload_len >= 126 && payload_len <= 65535 { header_len = 4; } else {
         if payload_len > 65535 { header_len = 10; }
     }
     let total: i64 = header_len + payload_len;
-    let out: * u8 = malloc(total as usize);
+    let out: *u8 = malloc(total as usize);
     if out as i64 == 0 { return false; }
     memset(_ws_ptr_off(out, 0), byte0 as i32, 1 as usize);
     if payload_len < 126 {
@@ -1201,8 +1201,8 @@ fn _ws_max_message_len() -> i64 { return 1048576; }
 // for the protocol-error (`1002`) and message-too-big (`1009`) teardown
 // paths. malloc(4), not 2: keeps the module's content+slack over-allocation
 // invariant even though only the first 2 bytes are sent.
-fn _ws_server_close_send(fd: i32, ssl: * u8, code: i64) -> bool {
-    let body: * u8 = malloc(4 as usize);
+fn _ws_server_close_send(fd: i32, ssl: *u8, code: i64) -> bool {
+    let body: *u8 = malloc(4 as usize);
     if body as i64 == 0 { return false; }
     memset(_ws_ptr_off(body, 0), ((code >> 8) & 255) as i32, 1 as usize);
     memset(_ws_ptr_off(body, 1), (code & 255) as i32, 1 as usize);
@@ -1223,13 +1223,13 @@ fn _ws_server_close_send(fd: i32, ssl: * u8, code: i64) -> bool {
 //   2 = protocol error (an unmasked "client" frame) — reply close `1002`.
 //   3 = frame length exceeds `_ws_max_frame_len()` — reply close `1009`.
 // On any non-zero status the out-params are untouched (no payload to free).
-fn _ws_frame_read(fd: i32, ssl: * u8, out_fin: * i64, out_opcode: * i64, out_payload_slot: * i64, out_len_slot: * i64) -> i64 {
+fn _ws_frame_read(fd: i32, ssl: *u8, out_fin: *i64, out_opcode: *i64, out_payload_slot: *i64, out_len_slot: *i64) -> i64 {
     // malloc(12), not 8: the `len7 == 127` path fills 8 content bytes and
     // reads them with `_ws_byte_at`, whose 4-byte load at offset 7 touches
     // bytes 7..10 — so 8 content + 4 tail-load slack, matching this module's
     // content+4 over-allocation invariant (the 2-byte header read needs less,
     // but the buffer is reused for the widest read).
-    let hdr: * u8 = malloc(12 as usize);
+    let hdr: *u8 = malloc(12 as usize);
     if hdr as i64 == 0 { return 1; }
     if !_ws_recv_exact(fd, ssl, hdr, 2) {
         free(hdr);
@@ -1281,7 +1281,7 @@ fn _ws_frame_read(fd: i32, ssl: * u8, out_fin: * i64, out_opcode: * i64, out_pay
 
     // malloc(8), not 4: `_ws_byte_at`'s 4-byte tail load at key[3] needs the
     // slack, matching `_ws_frame_send`'s identical over-allocation.
-    let key: * u8 = malloc(8 as usize);
+    let key: *u8 = malloc(8 as usize);
     if key as i64 == 0 { return 1; }
     if !_ws_recv_exact(fd, ssl, key, 4) {
         free(key);
@@ -1290,7 +1290,7 @@ fn _ws_frame_read(fd: i32, ssl: * u8, out_fin: * i64, out_opcode: * i64, out_pay
 
     // +4, not +1: the NUL terminator needs the same `_ws_byte_at` tail-load
     // slack every strdup'd buffer in this module carries.
-    let payload: * u8 = malloc((len + 4) as usize);
+    let payload: *u8 = malloc((len + 4) as usize);
     if payload as i64 == 0 {
         free(key);
         return 1;
@@ -1325,9 +1325,9 @@ fn _ws_frame_read(fd: i32, ssl: * u8, out_fin: * i64, out_opcode: * i64, out_pay
 // `_ws_recv_some` documents) and reply with the RFC 6455 `101`
 // response. Returns false on a malformed/missing
 // `Sec-WebSocket-Key` header or a recv/send failure.
-fn _ws_srv_handshake(fd: i32, ssl: * u8) -> bool {
+fn _ws_srv_handshake(fd: i32, ssl: *u8) -> bool {
     let req_cap: i64 = 2048;
-    let buf: * u8 = malloc((req_cap + 4) as usize);
+    let buf: *u8 = malloc((req_cap + 4) as usize);
     if buf as i64 == 0 { return false; }
     let mut n: i64 = 0;
     if ssl as i64 == 0 { n = _ws_recv_some(fd, buf, req_cap); } else {
@@ -1340,8 +1340,8 @@ fn _ws_srv_handshake(fd: i32, ssl: * u8) -> bool {
     memset(_ws_ptr_off(buf, n), 0, 1 as usize);
 
     let needle: string = "sec-websocket-key:";
-    let nlen: i64 = strlen(needle as * u8) as i64;
-    let hit: i64 = _ws_ci_find(buf, n, needle as * u8, nlen);
+    let nlen: i64 = strlen(needle as *u8) as i64;
+    let hit: i64 = _ws_ci_find(buf, n, needle as *u8, nlen);
     if hit < 0 {
         free(buf);
         return false;
@@ -1351,7 +1351,7 @@ fn _ws_srv_handshake(fd: i32, ssl: * u8) -> bool {
         if _ws_byte_at(buf, cursor) != 32 { break; }
         cursor = cursor + 1;
     }
-    let key: * u8 = malloc(64 as usize);
+    let key: *u8 = malloc(64 as usize);
     if key as i64 == 0 {
         free(buf);
         return false;
@@ -1367,7 +1367,7 @@ fn _ws_srv_handshake(fd: i32, ssl: * u8) -> bool {
     memset(_ws_ptr_off(key, klen), 0, 1 as usize);
     free(buf);
 
-    let accept_val: * u8 = malloc(29 as usize);
+    let accept_val: *u8 = malloc(29 as usize);
     if accept_val as i64 == 0 {
         free(key);
         return false;
@@ -1377,17 +1377,17 @@ fn _ws_srv_handshake(fd: i32, ssl: * u8) -> bool {
 
     let status: string = "HTTP/1.1 101 Switching Protocols\r\nUpgrade: websocket\r\nConnection: Upgrade\r\nSec-WebSocket-Accept: ";
     let tail: string = "\r\n\r\n";
-    let total: i64 = (strlen(status as * u8) as i64) + (strlen(accept_val) as i64)
-        + (strlen(tail as * u8) as i64);
-    let resp: * u8 = malloc((total + 1) as usize);
+    let total: i64 = (strlen(status as *u8) as i64) + (strlen(accept_val) as i64)
+        + (strlen(tail as *u8) as i64);
+    let resp: *u8 = malloc((total + 1) as usize);
     if resp as i64 == 0 {
         free(accept_val);
         return false;
     }
     let mut off: i64 = 0;
-    off = _ws_append(resp, off, status as * u8);
+    off = _ws_append(resp, off, status as *u8);
     off = _ws_append(resp, off, accept_val);
-    off = _ws_append(resp, off, tail as * u8);
+    off = _ws_append(resp, off, tail as *u8);
     memset(_ws_ptr_off(resp, off), 0, 1 as usize);
     free(accept_val);
 
@@ -1418,11 +1418,11 @@ fn _ws_srv_handshake(fd: i32, ssl: * u8) -> bool {
 // Calls only effect-free externs and effect-erased helpers, so it carries no
 // effect annotation — matching `serve.sfn::_serve_conn_worker` and
 // `future.sfn`'s trampolines.
-fn _ws_conn_worker(ctx: * u8) -> * u8 {
+fn _ws_conn_worker(ctx: *u8) -> *u8 {
     if ctx as i64 == 0 { return null; }
-    let fd_slot: * i64 = ctx as * i64;
+    let fd_slot: *i64 = ctx as *i64;
     let client_fd: i64 = atomic_load(fd_slot);
-    let ssl: * u8 = atomic_load(_ws_ptr_off(ctx, 8) as * i64) as * u8;
+    let ssl: *u8 = atomic_load(_ws_ptr_off(ctx, 8) as *i64) as *u8;
     free(ctx);
 
     let fd: i32 = client_fd as i32;
@@ -1469,9 +1469,9 @@ fn _ws_conn_worker(ctx: * u8) -> * u8 {
         // non-conforming *client* control frame).
         if opcode == 8 || opcode == 9 || opcode == 10 {
             if len > 125 || fin == 0 {
-                free(payload_addr as * u8);
+                free(payload_addr as *u8);
                 if frag_active {
-                    free(frag_buf as * u8);
+                    free(frag_buf as *u8);
                     frag_active = false;
                 }
                 _ws_server_close_send(fd, ssl, 1002);
@@ -1489,9 +1489,9 @@ fn _ws_conn_worker(ctx: * u8) -> * u8 {
             || opcode == 13
             || opcode == 14
             || opcode == 15 {
-            free(payload_addr as * u8);
+            free(payload_addr as *u8);
             if frag_active {
-                free(frag_buf as * u8);
+                free(frag_buf as *u8);
                 frag_active = false;
             }
             _ws_server_close_send(fd, ssl, 1002);
@@ -1504,9 +1504,9 @@ fn _ws_conn_worker(ctx: * u8) -> * u8 {
             // it is a malformed close — fail with `1002` rather than echoing a
             // truncated reply.
             if len == 1 {
-                free(payload_addr as * u8);
+                free(payload_addr as *u8);
                 if frag_active {
-                    free(frag_buf as * u8);
+                    free(frag_buf as *u8);
                     frag_active = false;
                 }
                 _ws_server_close_send(fd, ssl, 1002);
@@ -1518,8 +1518,8 @@ fn _ws_conn_worker(ctx: * u8) -> * u8 {
             // control frame. An empty client CLOSE round-trips as empty.
             let mut close_len: i64 = len;
             if close_len > 125 { close_len = 125; }
-            _ws_server_frame_send(fd, ssl, 8, payload_addr as * u8, close_len);
-            free(payload_addr as * u8);
+            _ws_server_frame_send(fd, ssl, 8, payload_addr as *u8, close_len);
+            free(payload_addr as *u8);
             break;
         }
         if opcode == 9 {
@@ -1527,29 +1527,29 @@ fn _ws_conn_worker(ctx: * u8) -> * u8 {
             // 125-byte control-frame limit).
             let mut ping_len: i64 = len;
             if ping_len > 125 { ping_len = 125; }
-            _ws_server_frame_send(fd, ssl, 10, payload_addr as * u8, ping_len);
-            free(payload_addr as * u8);
+            _ws_server_frame_send(fd, ssl, 10, payload_addr as *u8, ping_len);
+            free(payload_addr as *u8);
             continue;
         }
         if opcode == 10 {
             // PONG: heartbeat acknowledgement, silently absorbed.
-            free(payload_addr as * u8);
+            free(payload_addr as *u8);
             continue;
         }
         if opcode == 1 || opcode == 2 {
             if frag_active {
                 // A new data frame while a fragmented message is open is a
                 // protocol violation (RFC 6455 §5.4).
-                free(payload_addr as * u8);
-                free(frag_buf as * u8);
+                free(payload_addr as *u8);
+                free(frag_buf as *u8);
                 frag_active = false;
                 _ws_server_close_send(fd, ssl, 1002);
                 break;
             }
             if fin == 1 {
                 // Complete single-frame message: echo it unchanged.
-                _ws_server_frame_send(fd, ssl, opcode, payload_addr as * u8, len);
-                free(payload_addr as * u8);
+                _ws_server_frame_send(fd, ssl, opcode, payload_addr as *u8, len);
+                free(payload_addr as *u8);
                 continue;
             }
             // Start of a fragmented message: adopt the payload buffer as the
@@ -1563,7 +1563,7 @@ fn _ws_conn_worker(ctx: * u8) -> * u8 {
         if opcode == 0 {
             if !frag_active {
                 // Continuation with no message in progress: protocol error.
-                free(payload_addr as * u8);
+                free(payload_addr as *u8);
                 _ws_server_close_send(fd, ssl, 1002);
                 break;
             }
@@ -1571,35 +1571,35 @@ fn _ws_conn_worker(ctx: * u8) -> * u8 {
             if new_len > _ws_max_message_len() {
                 // Reassembled message exceeds the cap: refuse rather than grow
                 // the buffer without bound (#1924).
-                free(payload_addr as * u8);
-                free(frag_buf as * u8);
+                free(payload_addr as *u8);
+                free(frag_buf as *u8);
                 frag_active = false;
                 _ws_server_close_send(fd, ssl, 1009);
                 break;
             }
-            let grown: * u8 = realloc(frag_buf as * u8, (new_len + 4) as usize);
+            let grown: *u8 = realloc(frag_buf as *u8, (new_len + 4) as usize);
             if grown as i64 == 0 {
                 // realloc failed; the original block is still live. Free it and
                 // tear the connection down.
-                free(payload_addr as * u8);
-                free(frag_buf as * u8);
+                free(payload_addr as *u8);
+                free(frag_buf as *u8);
                 frag_active = false;
                 break;
             }
             frag_buf = grown as i64;
             if len > 0 {
-                memcpy(_ws_ptr_off(grown, frag_len), payload_addr as * u8, len as usize);
+                memcpy(_ws_ptr_off(grown, frag_len), payload_addr as *u8, len as usize);
             }
             // Keep the module's payload-buffer invariant: NUL-terminate at the
             // new end (the +4 slack in `new_len + 4` covers it) so the buffer
             // stays safe for any `_ws_byte_at`-style tail read.
             memset(_ws_ptr_off(grown, new_len), 0, 1 as usize);
-            free(payload_addr as * u8);
+            free(payload_addr as *u8);
             frag_len = new_len;
             if fin == 1 {
                 // Final fragment: echo the reassembled message as one frame.
-                _ws_server_frame_send(fd, ssl, frag_opcode, frag_buf as * u8, frag_len);
-                free(frag_buf as * u8);
+                _ws_server_frame_send(fd, ssl, frag_opcode, frag_buf as *u8, frag_len);
+                free(frag_buf as *u8);
                 frag_active = false;
                 frag_buf = 0;
                 frag_len = 0;
@@ -1610,25 +1610,25 @@ fn _ws_conn_worker(ctx: * u8) -> * u8 {
         // 0x3–0x7 / 0xB–0xF are rejected as reserved before reaching here. Free
         // defensively so a future opcode addition that falls through cannot
         // leak the payload buffer.
-        free(payload_addr as * u8);
+        free(payload_addr as *u8);
     }
-    if frag_active { free(frag_buf as * u8); }
+    if frag_active { free(frag_buf as *u8); }
     if ssl as i64 != 0 { tls_shutdown_free(ssl); }
     close(fd);
     return null;
 }
 
-fn _ws_enqueue_conn(queue: * u8, fd: i32, ssl: * u8) -> bool {
+fn _ws_enqueue_conn(queue: *u8, fd: i32, ssl: *u8) -> bool {
     // Pack [client_fd, ssl] into a 16-byte ctx cell for the worker. Plaintext
     // callers pass `ssl = null`; TLS callers pass the accepted `SSL*`.
-    let conn_ctx: * u8 = malloc(16 as usize);
+    let conn_ctx: *u8 = malloc(16 as usize);
     if conn_ctx as i64 == 0 { return false; }
-    let fd_slot: * i64 = conn_ctx as * i64;
+    let fd_slot: *i64 = conn_ctx as *i64;
     atomic_store(fd_slot, fd as i64);
-    atomic_store(_ws_ptr_off(conn_ctx, 8) as * i64, ssl as i64);
+    atomic_store(_ws_ptr_off(conn_ctx, 8) as *i64, ssl as i64);
 
-    let worker: * fn (* u8) -> * u8 = _ws_conn_worker as * fn (* u8) -> * u8;
-    let task: * u8 = sfn_task_create_detached(worker as i64, conn_ctx as i64);
+    let worker: *fn (*u8) -> *u8 = _ws_conn_worker as *fn (*u8) -> *u8;
+    let task: *u8 = sfn_task_create_detached(worker as i64, conn_ctx as i64);
     if task as i64 == 0 {
         free(conn_ctx);
         return false;
@@ -1657,12 +1657,12 @@ fn sfn_websocket_serve(port: i32) -> void ![net] {
     // per-connection task is enqueued on each accept (mirrors `sfn_serve`).
     // The scheduler local is never freed — its threads service the shared
     // queue for the process lifetime (the server never returns).
-    let queue: * u8 = sfn_taskqueue_create(256);
+    let queue: *u8 = sfn_taskqueue_create(256);
     if queue as i64 == 0 {
         close(listen_fd);
         return;
     }
-    let scheduler: * u8 = sfn_scheduler_create(queue);
+    let scheduler: *u8 = sfn_scheduler_create(queue);
     if scheduler as i64 == 0 {
         sfn_taskqueue_destroy(queue);
         close(listen_fd);
@@ -1686,8 +1686,8 @@ fn sfn_websocket_serve(port: i32) -> void ![net] {
 // invalid TLS configuration fails closed with no plaintext listener on the
 // requested TLS port. Each accepted fd completes its TLS handshake before the
 // websocket HTTP upgrade and frame loop run through `tls_read`/`tls_write`.
-fn sfn_websocket_serve_tls(port: i32, cert_path: * u8, key_path: * u8) -> void ![net] {
-    let server_ctx: * u8 = tls_server_ctx(cert_path, key_path);
+fn sfn_websocket_serve_tls(port: i32, cert_path: *u8, key_path: *u8) -> void ![net] {
+    let server_ctx: *u8 = tls_server_ctx(cert_path, key_path);
     if server_ctx as i64 == 0 { return; }
 
     let port_i64: i64 = port as i64;
@@ -1701,13 +1701,13 @@ fn sfn_websocket_serve_tls(port: i32, cert_path: * u8, key_path: * u8) -> void !
         return;
     }
 
-    let queue: * u8 = sfn_taskqueue_create(256);
+    let queue: *u8 = sfn_taskqueue_create(256);
     if queue as i64 == 0 {
         close(listen_fd);
         tls_ctx_free(server_ctx);
         return;
     }
-    let scheduler: * u8 = sfn_scheduler_create(queue);
+    let scheduler: *u8 = sfn_scheduler_create(queue);
     if scheduler as i64 == 0 {
         sfn_taskqueue_destroy(queue);
         close(listen_fd);
@@ -1719,7 +1719,7 @@ fn sfn_websocket_serve_tls(port: i32, cert_path: * u8, key_path: * u8) -> void !
         let fd: i32 = accept(listen_fd, null, null);
         if fd < 0 { break; }
         _ws_set_socket_timeouts(fd);
-        let ssl: * u8 = tls_accept_fd(server_ctx, fd);
+        let ssl: *u8 = tls_accept_fd(server_ctx, fd);
         if ssl as i64 == 0 {
             close(fd);
             continue;

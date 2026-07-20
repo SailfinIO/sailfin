@@ -27,29 +27,29 @@
 // the test block keeps `![io]` for `print.*`. This compiles under the
 // COMPILER capsule surface (`compiler/capsule.toml` → `["io", "clock"]`,
 // no `net`).
-extern fn malloc(size: usize) -> * u8;
+extern fn malloc(size: usize) -> *u8;
 
-extern fn free(ptr: * u8) -> void;
+extern fn free(ptr: *u8) -> void;
 
-extern fn memset(dst: * u8, byte: i32, n: usize) -> * u8;
+extern fn memset(dst: *u8, byte: i32, n: usize) -> *u8;
 
 extern fn socket(domain: i32, ty: i32, protocol: i32) -> i32;
 
-extern fn bind(sockfd: i32, addr: * u8, addrlen: i32) -> i32;
+extern fn bind(sockfd: i32, addr: *u8, addrlen: i32) -> i32;
 
 extern fn listen(sockfd: i32, backlog: i32) -> i32;
 
-extern fn accept(sockfd: i32, addr: * u8, addrlen: * i32) -> i32;
+extern fn accept(sockfd: i32, addr: *u8, addrlen: *i32) -> i32;
 
-extern fn connect(sockfd: i32, addr: * u8, addrlen: i32) -> i32;
+extern fn connect(sockfd: i32, addr: *u8, addrlen: i32) -> i32;
 
-extern fn send(sockfd: i32, buf: * u8, len: i64, flags: i32) -> i64;
+extern fn send(sockfd: i32, buf: *u8, len: i64, flags: i32) -> i64;
 
-extern fn recv(sockfd: i32, buf: * u8, len: i64, flags: i32) -> i64;
+extern fn recv(sockfd: i32, buf: *u8, len: i64, flags: i32) -> i64;
 
 extern fn close(fd: i32) -> i32;
 
-extern fn setsockopt(sockfd: i32, level: i32, optname: i32, optval: * u8, optlen: i32) -> i32;
+extern fn setsockopt(sockfd: i32, level: i32, optname: i32, optval: *u8, optlen: i32) -> i32;
 
 // Fixed loopback port for this test. High + uncommon, and — critically —
 // distinct from every other server-binding e2e test so the parallel
@@ -62,9 +62,9 @@ extern fn setsockopt(sockfd: i32, level: i32, optname: i32, optval: * u8, optlen
 // aborted (SIGABRT / exit 134, #1862). 18794 is unshared.
 fn _st_port() -> i64 { return 18794; }
 
-fn _st_ptr_off(p: * u8, off: i64) -> * u8 {
+fn _st_ptr_off(p: *u8, off: i64) -> *u8 {
     let addr: i64 = (p as i64) + off;
-    return addr as * u8;
+    return addr as *u8;
 }
 
 // Arm SO_REUSEADDR on the listening socket before `bind`, mirroring the
@@ -75,7 +75,7 @@ fn _st_ptr_off(p: * u8, off: i64) -> * u8 {
 // int optval = 1; both platforms armed (Linux SOL_SOCKET=1/SO_REUSEADDR=2,
 // macOS 65535/4), the wrong-platform call failing harmlessly.
 fn _st_set_reuseaddr(fd: i32) -> void {
-    let optval: * u8 = malloc(4 as usize);
+    let optval: *u8 = malloc(4 as usize);
     if optval as i64 == 0 { return; }
     memset(optval, 0, 4 as usize);
     memset(_st_ptr_off(optval, 0), 1, 1 as usize);
@@ -95,7 +95,7 @@ fn _st_bind_listen(port: i64) -> i32 {
         let fd: i32 = socket(2, 1, 0);
         if fd < 0 { return 0 - 1; }
         _st_set_reuseaddr(fd);
-        let addr: * u8 = malloc(16 as usize);
+        let addr: *u8 = malloc(16 as usize);
         if addr as i64 == 0 {
             close(fd);
             return 0 - 1;
@@ -129,7 +129,7 @@ fn _st_connect(port: i64) -> i32 {
     let mut attempt: i64 = 0;
     loop {
         if attempt >= 2 { break; }
-        let addr: * u8 = malloc(16 as usize);
+        let addr: *u8 = malloc(16 as usize);
         if addr as i64 == 0 { return 0 - 1; }
         memset(addr, 0, 16 as usize);
         if attempt == 0 {
@@ -164,7 +164,7 @@ fn _st_connect(port: i64) -> i32 {
 // SOL_SOCKET=0xffff / SO_RCVTIMEO=0x1006 / SO_SNDTIMEO=0x1005. The
 // wrong-platform variant returns ENOPROTOOPT (ignored).
 fn _st_set_timeouts(fd: i32, secs: i64) -> void {
-    let tv: * u8 = malloc(16 as usize);
+    let tv: *u8 = malloc(16 as usize);
     if tv as i64 == 0 { return; }
     memset(tv, 0, 16 as usize);
     memset(_st_ptr_off(tv, 0), secs as i32, 1 as usize);
@@ -175,7 +175,7 @@ fn _st_set_timeouts(fd: i32, secs: i64) -> void {
     free(tv);
 }
 
-fn _st_send_all(fd: i32, buf: * u8, total: i64) -> bool {
+fn _st_send_all(fd: i32, buf: *u8, total: i64) -> bool {
     let mut sent: i64 = 0;
     loop {
         if sent >= total { break; }
@@ -202,13 +202,13 @@ test "socket recv timeout: silent peer times out; normal recv unaffected" ![io] 
     // fix installs on real connect/accept sockets.
     _st_set_timeouts(cfd, 1);
 
-    let buf: * u8 = malloc(64 as usize);
+    let buf: *u8 = malloc(64 as usize);
     assert buf as i64 != 0;
 
     // Case B — normal recv is unaffected by the armed timeout: the server
     // sends, the client receives the bytes.
     let payload: string = "OK";
-    assert _st_send_all(sfd, payload as * u8, 2);
+    assert _st_send_all(sfd, payload as *u8, 2);
     let n1: i64 = recv(cfd, buf, 64, 0);
     print.info("[socket-timeout] normal recv n=" + (n1 as string));
     assert n1 == 2;

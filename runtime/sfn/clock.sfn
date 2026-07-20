@@ -109,7 +109,7 @@ let NANOS_PER_MILLI: i64 = 1000000;
 // set it carries the effect.)
 fn sfn_clock_monotonic_nanos() -> i64 ![clock] {
     let mut ts: Timespec = Timespec { tv_sec: 0, tv_nsec: 0 };
-    let ts_ptr: * Timespec = & ts;
+    let ts_ptr: *Timespec = & ts;
 
     // Read the monotonic clock. `CLOCK_MONOTONIC` is a steadily-advancing
     // clock unaffected by wall-clock adjustments — the correct source for
@@ -132,8 +132,8 @@ fn sfn_clock_monotonic_nanos() -> i64 ![clock] {
     // Read the fields back from the *same* allocation, after the call.
     // `tv_sec` sits at offset 0; `tv_nsec` is the next `i64` field,
     // reached by stepping one `i64` forward (the `getelementptr`).
-    let sec_ptr: * i64 = ts_ptr as * i64;
-    let nsec_ptr: * i64 = sec_ptr + 1;
+    let sec_ptr: *i64 = ts_ptr as *i64;
+    let nsec_ptr: *i64 = sec_ptr + 1;
     let sec: i64 = sailfin_intrinsic_pointer_read_i64(sec_ptr);
     let nsec: i64 = sailfin_intrinsic_pointer_read_i64(nsec_ptr);
 

@@ -259,23 +259,23 @@ test "asan: concurrent channel producer/consumer over the moved-OwnedBuf seam is
 // compiler capsule's surface is `["io", "clock"]`, no `net`); they are
 // left un-annotated while the `![io]` test keeps `io` for its
 // `process.*` / `fs.*` calls. Identical rationale to `serve_loopback_test`.
-extern fn malloc(size: usize) -> * u8;
+extern fn malloc(size: usize) -> *u8;
 
-extern fn free(ptr: * u8) -> void;
+extern fn free(ptr: *u8) -> void;
 
-extern fn realloc(ptr: * u8, new_size: usize) -> * u8;
+extern fn realloc(ptr: *u8, new_size: usize) -> *u8;
 
-extern fn memset(dst: * u8, byte: i32, n: usize) -> * u8;
+extern fn memset(dst: *u8, byte: i32, n: usize) -> *u8;
 
-extern fn strlen(s: * u8) -> usize;
+extern fn strlen(s: *u8) -> usize;
 
 extern fn socket(domain: i32, ty: i32, protocol: i32) -> i32;
 
-extern fn connect(sockfd: i32, addr: * u8, addrlen: i32) -> i32;
+extern fn connect(sockfd: i32, addr: *u8, addrlen: i32) -> i32;
 
-extern fn send(sockfd: i32, buf: * u8, len: i64, flags: i32) -> i64;
+extern fn send(sockfd: i32, buf: *u8, len: i64, flags: i32) -> i64;
 
-extern fn recv(sockfd: i32, buf: * u8, len: i64, flags: i32) -> i64;
+extern fn recv(sockfd: i32, buf: *u8, len: i64, flags: i32) -> i64;
 
 extern fn close(fd: i32) -> i32;
 
@@ -286,9 +286,9 @@ fn _sv_port() -> i64 { return 18793; }
 
 fn _sv_port_str() -> string { return "18793"; }
 
-fn _sv_ptr_off(p: * u8, off: i64) -> * u8 {
+fn _sv_ptr_off(p: *u8, off: i64) -> *u8 {
     let addr: i64 = (p as i64) + off;
-    return addr as * u8;
+    return addr as *u8;
 }
 
 // Connect a stream socket to 127.0.0.1:port; tries both sockaddr_in byte
@@ -297,7 +297,7 @@ fn _sv_connect(port: i64) -> i32 {
     let mut attempt: i64 = 0;
     loop {
         if attempt >= 2 { break; }
-        let addr: * u8 = malloc(16 as usize);
+        let addr: *u8 = malloc(16 as usize);
         if addr as i64 == 0 { return 0 - 1; }
         memset(addr, 0, 16 as usize);
         if attempt == 0 {
@@ -324,7 +324,7 @@ fn _sv_connect(port: i64) -> i32 {
     return 0 - 1;
 }
 
-fn _sv_send_all(fd: i32, buf: * u8, total: i64) -> bool {
+fn _sv_send_all(fd: i32, buf: *u8, total: i64) -> bool {
     let mut sent: i64 = 0;
     loop {
         if sent >= total { break; }
@@ -341,13 +341,13 @@ fn _sv_send_all(fd: i32, buf: * u8, total: i64) -> bool {
 fn _sv_recv_all(fd: i32) -> string {
     let mut capacity: i64 = 8192;
     let mut len: i64 = 0;
-    let mut buf: * u8 = malloc((capacity + 1) as usize);
+    let mut buf: *u8 = malloc((capacity + 1) as usize);
     if buf as i64 == 0 { return ""; }
     let chunk: i64 = 8192;
     loop {
         if len + chunk > capacity {
             let new_cap: i64 = capacity * 2;
-            let new_buf: * u8 = realloc(buf, (new_cap + 1) as usize);
+            let new_buf: *u8 = realloc(buf, (new_cap + 1) as usize);
             if new_buf as i64 == 0 {
                 free(buf);
                 return "";
@@ -372,7 +372,7 @@ fn _sv_recv_all(fd: i32) -> string {
 fn _sv_request(port: i64, request: string) -> string {
     let fd: i32 = _sv_connect(port);
     if fd < 0 { return ""; }
-    if !_sv_send_all(fd, request as * u8, strlen(request as * u8) as i64) {
+    if !_sv_send_all(fd, request as *u8, strlen(request as *u8) as i64) {
         close(fd);
         return "";
     }

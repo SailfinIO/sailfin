@@ -7,9 +7,12 @@
 // count and the per-field types.
 //
 // Expected stdout: xv42 (argument "x" + captured "v" + captured 42).
-fn apply_s(cb: fn(string) -> string, x: string) -> string { return cb(x); }
+fn apply_s(cb: fn (string) -> string, x: string) -> string { return cb(x); }
+
 fn main() ![io] {
     let s: string = "v";
     let n: int = 42;
-    print(apply_s(fn (d: string) -> string { return d + s + number_to_string(n); }, "x"));
+    print(apply_s(fn (d: string) -> string {
+        return d + s + number_to_string(n);
+    }, "x"));
 }

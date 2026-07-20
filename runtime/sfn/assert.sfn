@@ -28,25 +28,25 @@
 // Windows resolves `@runtime_assert_fail_fn` / `@sailfin_assert_fail`
 // from the abort stubs in `runtime/ir/windows_stubs.ll`. Sync
 // pinned by `compiler/tests/e2e/test_cross_windows_runtime_modules.sh`.
-extern fn malloc(size: usize) -> * u8;
+extern fn malloc(size: usize) -> *u8;
 
-extern fn memset(ptr: * u8, value: i32, n: usize) -> * u8;
+extern fn memset(ptr: *u8, value: i32, n: usize) -> *u8;
 
-extern fn strlen(s: * u8) -> usize;
+extern fn strlen(s: *u8) -> usize;
 
-extern fn getenv(name: * u8) -> * u8;
+extern fn getenv(name: *u8) -> *u8;
 
-extern fn fopen(path: * u8, mode: * u8) -> * u8;
+extern fn fopen(path: *u8, mode: *u8) -> *u8;
 
-extern fn fwrite(ptr: * u8, size: usize, nmemb: usize, fp: * u8) -> i64;
+extern fn fwrite(ptr: *u8, size: usize, nmemb: usize, fp: *u8) -> i64;
 
-extern fn fclose(fp: * u8) -> i32;
+extern fn fclose(fp: *u8) -> i32;
 
-extern fn sfn_str_to_cstr(s_data: * u8, s_len: i64, arena_slot: * u8) -> * u8;
+extern fn sfn_str_to_cstr(s_data: *u8, s_len: i64, arena_slot: *u8) -> *u8;
 
 // Raise a value error so an uncaught assertion terminates the process
 // and a `try`/`catch` can observe it. Sailfin-native (exception.sfn).
-extern fn sfn_raise_value_error(message: * u8) -> void;
+extern fn sfn_raise_value_error(message: *u8) -> void;
 
 // SFN-17: recoverable-harness support. Reach the exception chain head
 // and the throw primitive (both Sailfin-native, exception.sfn) so a
@@ -56,9 +56,9 @@ extern fn sfn_raise_value_error(message: * u8) -> void;
 // (only null-checked); the real return is `* SfnExceptionFrame` in
 // exception.sfn — pointer-compatible at link. See
 // `docs/proposals/design-notes/sfn-17-recoverable-test-harness.md`.
-extern fn sfn_exception_frame_head() -> * u8;
+extern fn sfn_exception_frame_head() -> *u8;
 
-extern fn sfn_throw(message: * u8) -> void;
+extern fn sfn_throw(message: *u8) -> void;
 
 // The SFAF record is written PIECE-BY-PIECE with `fwrite` (the proven
 // `arena.sfn` stats pattern), NOT via `string + ...` concat: in a runtime
@@ -68,8 +68,8 @@ extern fn sfn_throw(message: * u8) -> void;
 // formatted decimal. The file is opened in append mode and these writes
 // are sequential within one process, so they concatenate in order.
 // `_assert_write_lit(fp, lit)` — write a string literal's bytes to `fp`.
-fn _assert_write_lit(fp: * u8, lit: string) -> void ![io] {
-    let c: * u8 = sfn_str_to_cstr(lit as * u8, lit.length, null);
+fn _assert_write_lit(fp: *u8, lit: string) -> void ![io] {
+    let c: *u8 = sfn_str_to_cstr(lit as *u8, lit.length, null);
     if (c as i64) == 0 { return; }
     let n: i64 = strlen(c) as i64;
     if n > 0 {
@@ -82,11 +82,11 @@ fn _assert_write_lit(fp: * u8, lit: string) -> void ![io] {
 // the line-delimited SFAF record. `load_byte` reads each source byte;
 // each output byte is staged in a 1-byte `memset` buffer (a word-RMW byte
 // store could over-read past a `malloc` tail) and `fwrite`-n.
-fn _assert_write_stripped(fp: * u8, s: * u8) -> void ![io] {
+fn _assert_write_stripped(fp: *u8, s: *u8) -> void ![io] {
     if (s as i64) == 0 { return; }
     let n: i64 = strlen(s) as i64;
     if n <= 0 { return; }
-    let one: * u8 = malloc(1 as usize);
+    let one: *u8 = malloc(1 as usize);
     if (one as i64) == 0 { return; }
     let mut i: i64 = 0;
     loop {
@@ -104,7 +104,7 @@ fn _assert_write_stripped(fp: * u8, s: * u8) -> void ![io] {
 // line/col are non-negative source positions; a negative clamps to 0.
 // Digits are formed least-significant-first into a 24-byte buffer via
 // `memset` (single-byte stores), then written.
-fn _assert_write_i64(fp: * u8, value: i64) -> void ![io] {
+fn _assert_write_i64(fp: *u8, value: i64) -> void ![io] {
     let mut v: i64 = value;
     if v < 0 { v = 0; }
     if v == 0 {
@@ -112,7 +112,7 @@ fn _assert_write_i64(fp: * u8, value: i64) -> void ![io] {
         _assert_write_lit(fp, zero);
         return;
     }
-    let buf: * u8 = malloc(24 as usize);
+    let buf: *u8 = malloc(24 as usize);
     if (buf as i64) == 0 { return; }
     let base: i64 = buf as i64;
     let mut nd: i64 = 0;
@@ -127,7 +127,7 @@ fn _assert_write_i64(fp: * u8, value: i64) -> void ![io] {
     loop {
         if x == 0 { break; }
         let d: i64 = x % 10;
-        memset((base + wp) as * u8, (48 + d) as i32, 1 as usize);
+        memset((base + wp) as *u8, (48 + d) as i32, 1 as usize);
         wp = wp - 1;
         x = x / 10;
     }
@@ -163,22 +163,22 @@ fn sfn_test_failures() -> i32 { return sfn_test_fail_count as i32; }
 // Open `${SAILFIN_TEST_SCRATCH}/results.log` in append mode, or null when
 // no scratch dir is set (the binary was run outside the test runner —
 // recovery still works, only the structured log is skipped).
-fn _test_open_results() -> * u8 ![io] {
+fn _test_open_results() -> *u8 ![io] {
     let scratch_name: string = "SAILFIN_TEST_SCRATCH";
-    let scratch: * u8 = getenv(scratch_name as * u8);
+    let scratch: *u8 = getenv(scratch_name as *u8);
     if (scratch as i64) == 0 { return null; }
     let scratch_s: string = scratch as string;
     if scratch_s.length == 0 { return null; }
     let path: string = scratch_s + "/results.log";
     let mode: string = "ab";
-    return fopen(path as * u8, mode as * u8);
+    return fopen(path as *u8, mode as *u8);
 }
 
 // Append `T\tpass\t<name>` — a passing test. Fields are tab-separated and
 // every value is written through `_assert_write_stripped` so an embedded
 // tab/newline cannot break the line-delimited record.
-fn sfn_test_report_pass(name: * u8) -> void ![io] {
-    let fp: * u8 = _test_open_results();
+fn sfn_test_report_pass(name: *u8) -> void ![io] {
+    let fp: *u8 = _test_open_results();
     if (fp as i64) == 0 { return; }
     let tab: string = "\t";
     let nl: string = "\n";
@@ -196,9 +196,9 @@ fn sfn_test_report_pass(name: * u8) -> void ![io] {
 // Record a caught failure, classified by the phase slot the harness set
 // before the failing sub-call. Always increments the failure counter (so
 // the exit code reflects it) even when no scratch dir is configured.
-fn sfn_test_report_caught(name: * u8, msg: * u8) -> void ![io] {
+fn sfn_test_report_caught(name: *u8, msg: *u8) -> void ![io] {
     let phase: i64 = sfn_test_phase;
-    let fp: * u8 = _test_open_results();
+    let fp: *u8 = _test_open_results();
     if (fp as i64) != 0 {
         let tab: string = "\t";
         let nl: string = "\n";
@@ -279,8 +279,8 @@ fn sfn_test_report_caught(name: * u8, msg: * u8) -> void ![io] {
 // Record a test skipped-and-failed because its `before_all` failed (AC1
 // cascade). Emitted once per test by the harness after a caught
 // `before_all`.
-fn sfn_test_report_skipped(name: * u8) -> void ![io] {
-    let fp: * u8 = _test_open_results();
+fn sfn_test_report_skipped(name: *u8) -> void ![io] {
+    let fp: *u8 = _test_open_results();
     if (fp as i64) != 0 {
         let tab: string = "\t";
         let nl: string = "\n";
@@ -302,15 +302,15 @@ fn sfn_test_report_skipped(name: * u8) -> void ![io] {
 // `sailfin_assert_fail(file, line, col, msg)` — the assertion-failure
 // handler. Writes the SFAF record (if a test scratch dir is set) then
 // raises a value error.
-fn sailfin_assert_fail(file: * u8, line: i64, col: i64, msg: * u8) -> void ![io] {
+fn sailfin_assert_fail(file: *u8, line: i64, col: i64, msg: *u8) -> void ![io] {
     let scratch_name: string = "SAILFIN_TEST_SCRATCH";
-    let scratch: * u8 = getenv(scratch_name as * u8);
+    let scratch: *u8 = getenv(scratch_name as *u8);
     if (scratch as i64) != 0 {
         let scratch_s: string = scratch as string;
         if scratch_s.length > 0 {
             let path: string = scratch_s + "/fail.bin";
             let mode: string = "ab";
-            let fp: * u8 = fopen(path as * u8, mode as * u8);
+            let fp: *u8 = fopen(path as *u8, mode as *u8);
             if (fp as i64) != 0 {
                 let hdr: string = "SFAF\nv:1\nfile:";
                 let nl_line: string = "\nline:";
@@ -333,10 +333,10 @@ fn sailfin_assert_fail(file: * u8, line: i64, col: i64, msg: * u8) -> void ![io]
             }
         }
     }
-    let raise_msg: * u8 = msg;
+    let raise_msg: *u8 = msg;
     if (raise_msg as i64) == 0 {
         let fallback2: string = "assertion failed";
-        raise_msg = fallback2 as * u8;
+        raise_msg = fallback2 as *u8;
     }
     // SFN-17: inside a harness-pushed exception frame, unwind via
     // `sfn_throw` (setjmp/longjmp back to the synthesized `@main`, which
@@ -352,6 +352,6 @@ fn sailfin_assert_fail(file: * u8, line: i64, col: i64, msg: * u8) -> void ![io]
 // `runtime_assert_fail_fn(file, line, col, msg)` — the bare trampoline
 // the compiler emits (`runtime_helpers.sfn:599`). Line/col arrive as
 // Sailfin `number` (LLVM `double`); clamp to `i64` and forward.
-fn runtime_assert_fail_fn(file: * u8, line: float, col: float, msg: * u8) -> void ![io] {
+fn runtime_assert_fail_fn(file: *u8, line: float, col: float, msg: *u8) -> void ![io] {
     sailfin_assert_fail(file, line as i64, col as i64, msg);
 }

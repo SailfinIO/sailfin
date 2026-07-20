@@ -96,13 +96,13 @@
 // the four extern `declare`s) + a clang-linked roundtrip harness
 // (new → append → len/byte_at → grow → slice). Surface assertions
 // also live in `compiler/tests/unit/owned_buf_surface_test.sfn`.
-extern fn malloc(size: usize) -> * u8;
+extern fn malloc(size: usize) -> *u8;
 
-extern fn memcpy(dst: * u8, src: * u8, n: usize) -> * u8;
+extern fn memcpy(dst: *u8, src: *u8, n: usize) -> *u8;
 
-extern fn sfn_arena_sfn_alloc(arena: * u8, size: usize, align: usize) -> * u8;
+extern fn sfn_arena_sfn_alloc(arena: *u8, size: usize, align: usize) -> *u8;
 
-extern fn sfn_arena_sfn_realloc(arena: * u8, ptr: * u8, old_size: usize, new_size: usize, align: usize) -> * u8;
+extern fn sfn_arena_sfn_realloc(arena: *u8, ptr: *u8, old_size: usize, new_size: usize, align: usize) -> *u8;
 
 // `OwnedBuf` — unique, growable byte buffer (32 bytes, four i64
 // slots). `ptr_addr` is the address of the byte storage (unsafe
@@ -139,7 +139,7 @@ struct Slice {
 fn _owned_buf_load_byte(addr: i64) -> i64 {
     let word_addr: i64 = (addr / 8) * 8;
     let shift: i64 = (addr - word_addr) * 8;
-    let slot: * i64 = word_addr as * i64;
+    let slot: *i64 = word_addr as *i64;
     let word: i64 = atomic_load(slot);
     let shifted: i64 = word >> shift;
     return shifted & 255;
@@ -162,10 +162,10 @@ fn owned_buf_new(arena_addr: i64, initial_cap: i64) -> OwnedBuf {
         // alloc/`malloc` calls are the author-asserted unsafe region.
         unsafe {
             if arena_addr != 0 {
-                let storage: * u8 = sfn_arena_sfn_alloc(arena_addr as * u8, cap as usize, 8 as usize);
+                let storage: *u8 = sfn_arena_sfn_alloc(arena_addr as *u8, cap as usize, 8 as usize);
                 ptr_addr = storage as i64;
             } else {
-                let heap: * u8 = malloc(cap as usize);
+                let heap: *u8 = malloc(cap as usize);
                 ptr_addr = heap as i64;
             }
         }
@@ -220,15 +220,15 @@ fn owned_buf_append(self: OwnedBuf, suffix_addr: i64, suffix_len: i64) -> OwnedB
         // ownership checker proves at every call site.
         unsafe {
             if self.arena_addr != 0 {
-                let grown: * u8 = sfn_arena_sfn_realloc(self.arena_addr as * u8, ptr_addr as * u8, cap as usize, new_cap as usize, 8 as usize);
+                let grown: *u8 = sfn_arena_sfn_realloc(self.arena_addr as *u8, ptr_addr as *u8, cap as usize, new_cap as usize, 8 as usize);
                 if grown as i64 == 0 { return self; }
                 ptr_addr = grown as i64;
             } else {
-                let fresh: * u8 = malloc(new_cap as usize);
+                let fresh: *u8 = malloc(new_cap as usize);
                 if fresh as i64 == 0 { return self; }
                 if ptr_addr != 0 {
                     if self.len > 0 {
-                        memcpy(fresh, ptr_addr as * u8, self.len as usize);
+                        memcpy(fresh, ptr_addr as *u8, self.len as usize);
                     }
                 }
                 ptr_addr = fresh as i64;
@@ -241,7 +241,7 @@ fn owned_buf_append(self: OwnedBuf, suffix_addr: i64, suffix_len: i64) -> OwnedB
     // copy behind `unsafe`; the destination is uniquely owned.
     unsafe {
         let dst_addr: i64 = ptr_addr + self.len;
-        memcpy(dst_addr as * u8, suffix_addr as * u8, suffix_len as usize);
+        memcpy(dst_addr as *u8, suffix_addr as *u8, suffix_len as usize);
     }
 
     return OwnedBuf {

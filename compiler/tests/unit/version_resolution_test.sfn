@@ -4,11 +4,7 @@
 //   1. version_from_capsule_toml() correctly parses a version from TOML text
 //   2. sailfin_version() returns a valid semver-ish fallback
 //   3. resolve_compiler_version() finds capsule.toml from the repo root
-import {
-    sailfin_version,
-    version_from_capsule_toml,
-    resolve_compiler_version
-} from "../../src/version";
+import { sailfin_version, version_from_capsule_toml, resolve_compiler_version } from "../../src/version";
 
 fn _index_of(haystack: string, needle: string) -> int {
     if needle.length == 0 { return 0; }

@@ -34,9 +34,9 @@ fn multiply_range(a: int[][], b: int[][]) -> int[][] {
     let rowsA = a.length;
     let colsA = a[0].length;
     let colsB = b[0].length;
-    return (0 .. rowsA).map(fn (row) -> int[] {
-        return (0 .. colsB).map(fn (col) -> int {
-            return (0 .. colsA).reduce(0, fn (acc, k) -> int {
+    return (0..rowsA).map(fn (row) -> int[] {
+        return (0..colsB).map(fn (col) -> int {
+            return (0..colsA).reduce(0, fn (acc, k) -> int {
                 return acc + a[row][k] * b[k][col];
             });
         });

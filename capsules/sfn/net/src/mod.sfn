@@ -32,23 +32,23 @@
 // plain-pointer shape `sfn/http` uses for `sfn_http_request_raw`. Externs
 // carry no effect annotation (externs may not); enforcement rides on each
 // public function's own `![net]` / `![net, io]` annotation.
-extern fn sfn_net_connect(host: * u8, port: i64) -> i32;
+extern fn sfn_net_connect(host: *u8, port: i64) -> i32;
 
-extern fn sfn_net_write_all(fd: i32, data: * u8) -> i32;
+extern fn sfn_net_write_all(fd: i32, data: *u8) -> i32;
 
-extern fn sfn_net_read_all(fd: i32) -> * u8;
+extern fn sfn_net_read_all(fd: i32) -> *u8;
 
-extern fn sfn_net_read_bytes(fd: i32, max: i64) -> * u8;
+extern fn sfn_net_read_bytes(fd: i32, max: i64) -> *u8;
 
 extern fn sfn_net_close(fd: i32) -> void;
 
-extern fn sfn_net_listen(host: * u8, port: i64) -> i32;
+extern fn sfn_net_listen(host: *u8, port: i64) -> i32;
 
 extern fn sfn_net_listen_port(fd: i32) -> i64;
 
 extern fn sfn_net_accept(fd: i32) -> i32;
 
-extern fn sfn_net_resolve(host: * u8) -> * u8;
+extern fn sfn_net_resolve(host: *u8) -> *u8;
 
 // ---- Types ----
 struct Connection {
@@ -75,7 +75,7 @@ struct NetAddress {
 fn connect(host: string, port: int) -> Connection ![net] {
     // Open a TCP connection to host:port. `id` carries the connected
     // socket fd (>= 0 on success, -1 on failure); `is_open` reflects it.
-    let fd = sfn_net_connect(host as * u8, port as i64);
+    let fd = sfn_net_connect(host as *u8, port as i64);
     return Connection {
         id: fd as int,
         host: host,
@@ -88,7 +88,7 @@ fn connect(host: string, port: int) -> Connection ![net] {
 fn write_all(conn: Connection, data: string) -> void ![net] {
     // Write all bytes to the connection. Blocks until the full payload is
     // sent. Text v0 (length is the NUL-terminated `strlen`).
-    sfn_net_write_all(conn.id as i32, data as * u8);
+    sfn_net_write_all(conn.id as i32, data as *u8);
 }
 
 fn read_all(conn: Connection) -> string ![net] {
@@ -118,7 +118,7 @@ fn listen(host: string, port: int) -> Listener ![net, io] {
     // port 0 to request an ephemeral port; the returned Listener's `port`
     // reflects the actual bound port. `id` is the listening fd (-1 on
     // failure).
-    let fd = sfn_net_listen(host as * u8, port as i64);
+    let fd = sfn_net_listen(host as *u8, port as i64);
     let mut bound_port = port;
     if fd >= 0 { bound_port = sfn_net_listen_port(fd) as int; }
     return Listener {
@@ -180,7 +180,7 @@ fn resolve(hostname: string) -> string[] ![net] {
     // literal address; any other name is resolved via DNS. v0 returns at
     // most the first A record (no AAAA, no happy-eyeballs, no caching); an
     // unresolvable name yields an empty list rather than a hang or crash.
-    let ptr = sfn_net_resolve(hostname as * u8);
+    let ptr = sfn_net_resolve(hostname as *u8);
     if ptr as i64 == 0 { return []; }
     let addr = ptr as string;
     if addr.length == 0 { return []; }

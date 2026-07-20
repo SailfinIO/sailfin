@@ -10,6 +10,4 @@
 // Keep this file deliberately small — the CI step greps for an
 // exact summary line ("checked 1 files: 1 error"), so the input
 // must produce exactly one diagnostic.
-fn main() {
-    print.info("missing effect declaration");
-}
+fn main() { print.info("missing effect declaration"); }

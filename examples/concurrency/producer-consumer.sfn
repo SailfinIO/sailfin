@@ -15,14 +15,14 @@ fn main() ![io] {
 
     let mut n: int = 0;
     routine {
-        for _ in 1 .. 20 {
+        for _ in 1..20 {
             n = n + 1;
             print("Producing {{n}}");
             buffer.send(n);
         }
     }
 
-    for _ in 1 .. 20 {
+    for _ in 1..20 {
         let item: int = buffer.receive();
         print("Consumed {{item}}");
     }

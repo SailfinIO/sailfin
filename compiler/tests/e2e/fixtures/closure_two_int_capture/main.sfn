@@ -11,7 +11,8 @@
 // no runtime e2e, which is how the truncation slipped through.
 //
 // Expected stdout: 31 (1 argument + 10 + 20 captured).
-fn apply(cb: fn(int) -> int, x: int) -> int { return cb(x); }
+fn apply(cb: fn (int) -> int, x: int) -> int { return cb(x); }
+
 fn main() ![io] {
     let a: int = 10;
     let b: int = 20;

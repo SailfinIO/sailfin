@@ -1,5 +1,4 @@
 // examples/io/write-file.sfn
-
 import { fs } from "fs";
 
 fn main() ![io] {

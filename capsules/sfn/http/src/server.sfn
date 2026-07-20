@@ -27,20 +27,20 @@
 import { Request, Response } from "./types";
 import { keep_alive_requested, parse_request, serialize_response } from "./wire";
 
-extern fn sfn_serve_framed(handler: * u8, port: i32) -> void;
+extern fn sfn_serve_framed(handler: *u8, port: i32) -> void;
 
-extern fn sfn_serve_framed_tls(handler: * u8, port: i32, cert_path: * u8, key_path: * u8) -> void;
+extern fn sfn_serve_framed_tls(handler: *u8, port: i32, cert_path: *u8, key_path: *u8) -> void;
 
 // libc surface for marshalling the serialized response into a moved
 // `OwnedBuf` (the #1476 handler ABI). Inlined per the every-module
 // convention (mirrors `runtime/sfn/concurrency/serve.sfn`).
-extern fn malloc(size: usize) -> * u8;
+extern fn malloc(size: usize) -> *u8;
 
-extern fn memcpy(dst: * u8, src: * u8, n: usize) -> * u8;
+extern fn memcpy(dst: *u8, src: *u8, n: usize) -> *u8;
 
-extern fn memset(dst: * u8, byte: i32, n: usize) -> * u8;
+extern fn memset(dst: *u8, byte: i32, n: usize) -> *u8;
 
-extern fn strlen(s: * u8) -> usize;
+extern fn strlen(s: *u8) -> usize;
 
 // `OwnedBuf` — the runtime owned-buffer aggregate, inlined byte-identically
 // (four `i64` fields, 32 bytes, `arena_addr == 0` = libc-backed). The
@@ -62,9 +62,9 @@ struct OwnedBuf {
 // `strlen`); HTTP/1.1 text responses carry no internal NUL. Empty
 // `OwnedBuf` on OOM (the worker emits a `500`).
 fn _http_owned_from_str(s: string) -> OwnedBuf {
-    let src: * u8 = s as * u8;
+    let src: *u8 = s as *u8;
     let n: i64 = strlen(src) as i64;
-    let copy: * u8 = malloc((n + 1) as usize);
+    let copy: *u8 = malloc((n + 1) as usize);
     if copy as i64 == 0 {
         return OwnedBuf {
             ptr_addr: 0,
@@ -74,7 +74,7 @@ fn _http_owned_from_str(s: string) -> OwnedBuf {
         };
     }
     memcpy(copy, src, n as usize);
-    memset(((copy as i64) + n) as * u8, 0, 1 as usize);
+    memset(((copy as i64) + n) as *u8, 0, 1 as usize);
     return OwnedBuf {
         ptr_addr: copy as i64,
         len: n,
@@ -114,8 +114,8 @@ fn _sfn_http_trampoline(req: OwnedBuf) -> OwnedBuf {
             status: 500, headers: [], body: ""
         }));
     }
-    let entry: * fn (Request) -> Response = _sfn_http_handler_addr as * fn (Request) -> Response;
-    let parsed: Request = parse_request(req.ptr_addr as * u8 as string);
+    let entry: *fn (Request) -> Response = _sfn_http_handler_addr as *fn (Request) -> Response;
+    let parsed: Request = parse_request(req.ptr_addr as *u8 as string);
     // Keep-alive negotiation (#1711): emit a `Connection` header that agrees
     // with whether the runtime socket layer keeps the connection open. The
     // runtime worker computes the same decision from the raw request
@@ -146,9 +146,9 @@ fn _sfn_http_trampoline(req: OwnedBuf) -> OwnedBuf {
 // back-to-back requests unless the client sends `Connection: close`. v0
 // limits (matching the runtime): HTTP/1.1, blocking accept, text
 // responses only, no HTTP pipelining.
-fn serve(handler: * fn (Request) -> Response, port: int = 8080) -> void ![net, io] {
+fn serve(handler: *fn (Request) -> Response, port: int = 8080) -> void ![net, io] {
     _sfn_http_handler_addr = handler as i64;
-    sfn_serve_framed(_sfn_http_trampoline as * u8, port as i32);
+    sfn_serve_framed(_sfn_http_trampoline as *u8, port as i32);
 }
 
 // `serve_tls(handler, port, cert_path, key_path)` — HTTPS twin of `serve`.
@@ -157,7 +157,7 @@ fn serve(handler: * fn (Request) -> Response, port: int = 8080) -> void ![net, i
 // status codes + headers on the encrypted wire via `sfn_serve_framed_tls`.
 // Cert/key load failures fail closed in the runtime before bind (no plaintext
 // downgrade).
-fn serve_tls(handler: * fn (Request) -> Response, port: int = 8443, cert_path: string = "", key_path: string = "") -> void ![net, io] {
+fn serve_tls(handler: *fn (Request) -> Response, port: int = 8443, cert_path: string = "", key_path: string = "") -> void ![net, io] {
     _sfn_http_handler_addr = handler as i64;
-    sfn_serve_framed_tls(_sfn_http_trampoline as * u8, port as i32, cert_path as * u8, key_path as * u8);
+    sfn_serve_framed_tls(_sfn_http_trampoline as *u8, port as i32, cert_path as *u8, key_path as *u8);
 }

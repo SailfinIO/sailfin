@@ -15,7 +15,7 @@ import { _atomic_rename_into_place, _mktemp_sibling_cmd } from "./build/fs";
 import { number_to_string } from "./main";
 import { substring } from "./string_utils";
 
-extern fn sailfin_runtime_shell_capture(cmd: * u8) -> * u8;
+extern fn sailfin_runtime_shell_capture(cmd: *u8) -> *u8;
 
 // Private copy of capsule_resolver's `_cr_shell_read` — see header for why
 // it is duplicated rather than imported.

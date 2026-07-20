@@ -7,7 +7,8 @@
 // is first-use: a, b, c.
 //
 // Expected stdout: 16 (10 argument + 1 + 2 + 3 captured).
-fn apply(cb: fn(int) -> int, x: int) -> int { return cb(x); }
+fn apply(cb: fn (int) -> int, x: int) -> int { return cb(x); }
+
 fn main() ![io] {
     let a: int = 1;
     let b: int = 2;

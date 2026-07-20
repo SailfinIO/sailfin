@@ -31,23 +31,23 @@
 import { contains, find } from "sfn/strings";
 
 // ── libc memory + socket surface (test-local raw client) ──
-extern fn malloc(size: usize) -> * u8;
+extern fn malloc(size: usize) -> *u8;
 
-extern fn free(ptr: * u8) -> void;
+extern fn free(ptr: *u8) -> void;
 
-extern fn realloc(ptr: * u8, new_size: usize) -> * u8;
+extern fn realloc(ptr: *u8, new_size: usize) -> *u8;
 
-extern fn memset(dst: * u8, byte: i32, n: usize) -> * u8;
+extern fn memset(dst: *u8, byte: i32, n: usize) -> *u8;
 
-extern fn strlen(s: * u8) -> usize;
+extern fn strlen(s: *u8) -> usize;
 
 extern fn socket(domain: i32, ty: i32, protocol: i32) -> i32;
 
-extern fn connect(sockfd: i32, addr: * u8, addrlen: i32) -> i32;
+extern fn connect(sockfd: i32, addr: *u8, addrlen: i32) -> i32;
 
-extern fn send(sockfd: i32, buf: * u8, len: i64, flags: i32) -> i64;
+extern fn send(sockfd: i32, buf: *u8, len: i64, flags: i32) -> i64;
 
-extern fn recv(sockfd: i32, buf: * u8, len: i64, flags: i32) -> i64;
+extern fn recv(sockfd: i32, buf: *u8, len: i64, flags: i32) -> i64;
 
 extern fn close(fd: i32) -> i32;
 
@@ -83,16 +83,16 @@ fn _timeout_cmd() -> string ![io] {
 // effect checker infers no `net` requirement for these direct callers — they
 // (and the `_kp_*` request helpers) are left un-annotated, matching
 // `serve_loopback_test.sfn`. The test bodies keep `![io]` for `process.*`.
-fn _kp_ptr_off(p: * u8, off: i64) -> * u8 {
+fn _kp_ptr_off(p: *u8, off: i64) -> *u8 {
     let addr: i64 = (p as i64) + off;
-    return addr as * u8;
+    return addr as *u8;
 }
 
 fn _kp_connect(port: i64) -> i32 {
     let mut attempt: i64 = 0;
     loop {
         if attempt >= 2 { break; }
-        let addr: * u8 = malloc(16 as usize);
+        let addr: *u8 = malloc(16 as usize);
         if addr as i64 == 0 { return 0 - 1; }
         memset(addr, 0, 16 as usize);
         if attempt == 0 {
@@ -119,7 +119,7 @@ fn _kp_connect(port: i64) -> i32 {
     return 0 - 1;
 }
 
-fn _kp_send_all(fd: i32, buf: * u8, total: i64) -> bool {
+fn _kp_send_all(fd: i32, buf: *u8, total: i64) -> bool {
     let mut sent: i64 = 0;
     loop {
         if sent >= total { break; }
@@ -163,7 +163,7 @@ fn _kp_parse_content_length(s: string, header_end: i64) -> i64 {
 fn _kp_recv_one(fd: i32) -> string {
     let mut capacity: i64 = 8192;
     let mut len: i64 = 0;
-    let mut buf: * u8 = malloc((capacity + 1) as usize);
+    let mut buf: *u8 = malloc((capacity + 1) as usize);
     if buf as i64 == 0 { return ""; }
     let mut expected: i64 = 0 - 1;
     loop {
@@ -178,7 +178,7 @@ fn _kp_recv_one(fd: i32) -> string {
         }
         if len + 4096 > capacity {
             let new_cap: i64 = capacity * 2;
-            let nb: * u8 = realloc(buf, (new_cap + 1) as usize);
+            let nb: *u8 = realloc(buf, (new_cap + 1) as usize);
             if nb as i64 == 0 {
                 free(buf);
                 return "";
@@ -224,12 +224,12 @@ fn _kp_recv_one(fd: i32) -> string {
 fn _kp_recv_all(fd: i32) -> string {
     let mut capacity: i64 = 8192;
     let mut len: i64 = 0;
-    let mut buf: * u8 = malloc((capacity + 1) as usize);
+    let mut buf: *u8 = malloc((capacity + 1) as usize);
     if buf as i64 == 0 { return ""; }
     loop {
         if len + 4096 > capacity {
             let new_cap: i64 = capacity * 2;
-            let nb: * u8 = realloc(buf, (new_cap + 1) as usize);
+            let nb: *u8 = realloc(buf, (new_cap + 1) as usize);
             if nb as i64 == 0 {
                 free(buf);
                 return "";
@@ -266,7 +266,7 @@ fn _kp_recv_all(fd: i32) -> string {
 fn _kp_send_recv_one(port: i64, request: string) -> string {
     let fd: i32 = _kp_connect(port);
     if fd < 0 { return ""; }
-    if !_kp_send_all(fd, request as * u8, strlen(request as * u8) as i64) {
+    if !_kp_send_all(fd, request as *u8, strlen(request as *u8) as i64) {
         close(fd);
         return "";
     }
@@ -438,7 +438,7 @@ test "serve keep-alive: connection reuse (server loop + native client) (#1711)" 
     // still-open connection. Distinct bodies prove no cross-contamination.
     let fd = _kp_connect(port);
     assert fd >= 0;
-    assert _kp_send_all(fd, "GET /a HTTP/1.1\r\nHost: x\r\n\r\n" as * u8, strlen("GET /a HTTP/1.1\r\nHost: x\r\n\r\n" as * u8) as i64);
+    assert _kp_send_all(fd, "GET /a HTTP/1.1\r\nHost: x\r\n\r\n" as *u8, strlen("GET /a HTTP/1.1\r\nHost: x\r\n\r\n" as *u8) as i64);
     let ka1 = _kp_recv_one(fd);
     print.info("[serve-keepalive] reuse-1: " + ka1);
     assert contains(ka1, "HTTP/1.1 200");
@@ -448,7 +448,7 @@ test "serve keep-alive: connection reuse (server loop + native client) (#1711)" 
     // serializer no longer hard-codes `Connection: close`).
     assert contains(ka1, "Connection: keep-alive");
 
-    assert _kp_send_all(fd, "GET /b HTTP/1.1\r\nHost: x\r\n\r\n" as * u8, strlen("GET /b HTTP/1.1\r\nHost: x\r\n\r\n" as * u8) as i64);
+    assert _kp_send_all(fd, "GET /b HTTP/1.1\r\nHost: x\r\n\r\n" as *u8, strlen("GET /b HTTP/1.1\r\nHost: x\r\n\r\n" as *u8) as i64);
     let ka2 = _kp_recv_one(fd);
     print.info("[serve-keepalive] reuse-2: " + ka2);
     assert contains(ka2, "HTTP/1.1 200");
@@ -463,7 +463,7 @@ test "serve keep-alive: connection reuse (server loop + native client) (#1711)" 
     // connection (the drain-to-EOF read completes).
     let cfd = _kp_connect(port);
     assert cfd >= 0;
-    assert _kp_send_all(cfd, "GET /a HTTP/1.1\r\nHost: x\r\nConnection: close\r\n\r\n" as * u8, strlen("GET /a HTTP/1.1\r\nHost: x\r\nConnection: close\r\n\r\n" as * u8) as i64);
+    assert _kp_send_all(cfd, "GET /a HTTP/1.1\r\nHost: x\r\nConnection: close\r\n\r\n" as *u8, strlen("GET /a HTTP/1.1\r\nHost: x\r\nConnection: close\r\n\r\n" as *u8) as i64);
     let close_resp = _kp_recv_all(cfd);
     close(cfd);
     print.info("[serve-keepalive] close: " + close_resp);
@@ -479,9 +479,9 @@ test "serve keep-alive: connection reuse (server loop + native client) (#1711)" 
         if storm >= 40 { break; }
         let sfd = _kp_connect(port);
         if sfd >= 0 {
-            let _s1 = _kp_send_all(sfd, "GET /a HTTP/1.1\r\nHost: x\r\n\r\n" as * u8, strlen("GET /a HTTP/1.1\r\nHost: x\r\n\r\n" as * u8) as i64);
+            let _s1 = _kp_send_all(sfd, "GET /a HTTP/1.1\r\nHost: x\r\n\r\n" as *u8, strlen("GET /a HTTP/1.1\r\nHost: x\r\n\r\n" as *u8) as i64);
             let _r1 = _kp_recv_one(sfd);
-            let _s2 = _kp_send_all(sfd, "GET /b HTTP/1.1\r\nHost: x\r\n\r\n" as * u8, strlen("GET /b HTTP/1.1\r\nHost: x\r\n\r\n" as * u8) as i64);
+            let _s2 = _kp_send_all(sfd, "GET /b HTTP/1.1\r\nHost: x\r\n\r\n" as *u8, strlen("GET /b HTTP/1.1\r\nHost: x\r\n\r\n" as *u8) as i64);
             let _r2 = _kp_recv_one(sfd);
             close(sfd);
         }

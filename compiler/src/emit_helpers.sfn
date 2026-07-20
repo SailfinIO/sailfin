@@ -42,7 +42,7 @@ import { substring } from "./string_utils";
 // Same extern the resolver and `build/fs.sfn` declare; repeating
 // it here keeps this module a leaf (no new cross-module import just to
 // read one env var).
-extern fn sailfin_runtime_shell_capture(cmd: * u8) -> * u8;
+extern fn sailfin_runtime_shell_capture(cmd: *u8) -> *u8;
 
 fn _eh_shell_read(cmd: string) -> string ![io] {
     let captured = sailfin_runtime_shell_capture(cmd);

@@ -30,9 +30,9 @@
 // NUL-terminated C strings — the adapter constructs them in the
 // arena before the call. Adapters that don't customize the spawn
 // pass null `* PosixSpawnFileActions` / `* PosixSpawnAttr`.
-extern fn posix_spawnp(pid: * i32, path: * u8, file_actions: * PosixSpawnFileActions, attrp: * PosixSpawnAttr, argv: * * u8, envp: * * u8) -> i32;
+extern fn posix_spawnp(pid: *i32, path: *u8, file_actions: *PosixSpawnFileActions, attrp: *PosixSpawnAttr, argv: **u8, envp: **u8) -> i32;
 
-extern fn waitpid(pid: i32, status: * i32, options: i32) -> i32;
+extern fn waitpid(pid: i32, status: *i32, options: i32) -> i32;
 
 // ── Capture / streaming spawn surface (#928) ──────────────────
 // Stdout/stderr-capturing (`run_capture`) and the streaming
@@ -47,30 +47,30 @@ extern fn waitpid(pid: i32, status: * i32, options: i32) -> i32;
 // note in `runtime/sfn/process.sfn`). The bodies that consume these
 // live in `process.sfn` and re-declare them inline per the #306
 // cross-module-extern limitation noted in this file's header.
-extern fn pipe(fds: * i32) -> i32;
+extern fn pipe(fds: *i32) -> i32;
 
-extern fn read(fd: i32, buf: * u8, count: usize) -> i64;
+extern fn read(fd: i32, buf: *u8, count: usize) -> i64;
 
-extern fn write(fd: i32, buf: * u8, count: usize) -> i64;
+extern fn write(fd: i32, buf: *u8, count: usize) -> i64;
 
 extern fn close(fd: i32) -> i32;
 
-extern fn poll(fds: * PollFd, nfds: usize, timeout: i32) -> i32;
+extern fn poll(fds: *PollFd, nfds: usize, timeout: i32) -> i32;
 
-extern fn posix_spawn_file_actions_init(fa: * PosixSpawnFileActions) -> i32;
+extern fn posix_spawn_file_actions_init(fa: *PosixSpawnFileActions) -> i32;
 
-extern fn posix_spawn_file_actions_destroy(fa: * PosixSpawnFileActions) -> i32;
+extern fn posix_spawn_file_actions_destroy(fa: *PosixSpawnFileActions) -> i32;
 
-extern fn posix_spawn_file_actions_addclose(fa: * PosixSpawnFileActions, fd: i32) -> i32;
+extern fn posix_spawn_file_actions_addclose(fa: *PosixSpawnFileActions, fd: i32) -> i32;
 
-extern fn posix_spawn_file_actions_adddup2(fa: * PosixSpawnFileActions, fd: i32, newfd: i32) -> i32;
+extern fn posix_spawn_file_actions_adddup2(fa: *PosixSpawnFileActions, fd: i32, newfd: i32) -> i32;
 
 // Per-child working directory: the spawned child `chdir`s to `path`
 // (a NUL-terminated C string) before `exec`, with no process-global
 // `chdir` in the parent (#1167). Portability floor: glibc ≥2.29,
 // macOS ≥10.15, musl ≥1.1.24 — the `_np` (non-portable) suffix marks
 // it as a POSIX extension. Gated behind the posix-only spawn path.
-extern fn posix_spawn_file_actions_addchdir_np(fa: * PosixSpawnFileActions, path: * u8) -> i32;
+extern fn posix_spawn_file_actions_addchdir_np(fa: *PosixSpawnFileActions, path: *u8) -> i32;
 
 // ── Clock / sleep ─────────────────────────────────────────────
 // `clk_id` is one of POSIX's `CLOCK_*` constants (e.g.
@@ -79,6 +79,6 @@ extern fn posix_spawn_file_actions_addchdir_np(fa: * PosixSpawnFileActions, path
 // path. `nanosleep` writes the unconsumed remainder into `rem`
 // when the call is interrupted by a signal; adapters that don't
 // care can pass null `* Timespec`.
-extern fn clock_gettime(clk_id: i32, ts: * Timespec) -> i32;
+extern fn clock_gettime(clk_id: i32, ts: *Timespec) -> i32;
 
-extern fn nanosleep(req: * Timespec, rem: * Timespec) -> i32;
+extern fn nanosleep(req: *Timespec, rem: *Timespec) -> i32;

@@ -26,9 +26,9 @@ import { substring } from "./string_utils";
 // not hand back runtime-capsule `.sfn` signatures — see the note there).
 // Extern signatures must be C-ABI types (`* u8`, per E0801); the result
 // is cast to `string` for `fs` use exactly as `cli_main` does.
-extern fn exe_path() -> * u8;
+extern fn exe_path() -> *u8;
 
-extern fn resolve_runtime_root(exe: * u8) -> * u8;
+extern fn resolve_runtime_root(exe: *u8) -> *u8;
 
 fn _pg_join(dir: string, child: string) -> string {
     if dir.length == 0 { return child; }
@@ -82,8 +82,8 @@ fn _pg_scan_sfn_tree(runtime_dir: string, names: string[]) -> string[] ![io] {
 // cwd-relative fallbacks for in-repo invocations.
 fn _pg_find_runtime_dir() -> string ![io] {
     let mut candidates: string[] = [];
-    let exe_raw: * u8 = exe_path();
-    let root_raw: * u8 = resolve_runtime_root(exe_raw);
+    let exe_raw: *u8 = exe_path();
+    let root_raw: *u8 = resolve_runtime_root(exe_raw);
     let root: string = root_raw as string;
     if root.length > 0 {
         candidates.push(root);

@@ -1,12 +1,7 @@
 // examples/advanced/futures.sfn
+async fn computeTask1() -> int { return 21; }
 
-async fn computeTask1() -> int {
-    return 21;
-}
-
-async fn computeTask2() -> int {
-    return 21;
-}
+async fn computeTask2() -> int { return 21; }
 
 async fn main() ![io] {
     let future1 = computeTask1();

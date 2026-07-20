@@ -29,7 +29,7 @@
 // dir. Hand the child the parent's real PATH, captured via `system()`
 // (which inherits the real env). Effect knobs (`SAILFIN_EFFECT_*`)
 // stay unset, so the child still exercises shipped defaults.
-extern fn sailfin_runtime_shell_capture(cmd: * u8) -> * u8;
+extern fn sailfin_runtime_shell_capture(cmd: *u8) -> *u8;
 
 fn _host_path() -> string ![io] {
     let p = sailfin_runtime_shell_capture("printf '%s' \"$PATH\"");

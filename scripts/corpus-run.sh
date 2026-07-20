@@ -118,51 +118,22 @@ KNOWN_BUILD_RED=(
 )
 
 # Pre-existing non-canonical corpus files: not at the candidate formatter's
-# fixed point today (`sfn fmt --check` red). CI's fmt gate only covers
-# compiler/src/ and runtime/ (.github/workflows/ci.yml), so the corpus was
-# never held to the fixed point and accumulated drift (and surfaced formatter
-# quirks on design-stage pointer/range syntax — `*u8` -> `* u8`, `0..4` ->
-# `0 .. 4`). Tracked in SFN-379. The fmt leg tolerates these as XFAIL so the
-# nightly is green now; a NON-listed dirty file (a new mangle or a newly-added
-# unformatted entry) fails, and a listed file that becomes clean (XPASS) also
-# fails so the ratchet tightens as the corpus is formatted.
+# fixed point (`sfn fmt --check` red). CI's fmt gate only covers compiler/src/
+# and runtime/ (.github/workflows/ci.yml), so the corpus was never held to the
+# fixed point and accumulated drift. The whole in-tree corpus was brought to the
+# fixed point in SFN-379 — which also fixed the formatter's pointer/range
+# spacing quirk (`*u8` was emitted as `* u8`, `0..4` as `0 .. 4`) so the
+# design-stage pointer examples format canonically. The one remaining entry
+# exposes a *separate* formatter bug (SFN-434): a generic type-argument list
+# containing a function type — `Channel<fn() -> void>` — is not recognized as a
+# generic, so `sfn fmt --write` mis-spaces it and fuses the close `>` with the
+# following `=` into `>=` (the #900 miscompile class), which no longer builds.
+# The file is kept in its correct hand-written form and tolerated here until
+# SFN-434 lands; then this list empties. Any *other* dirty file (a new mangle or
+# a newly-added unformatted entry) still fails, and this entry becoming clean
+# (XPASS) also fails so the ratchet tightens when SFN-434 ships.
 KNOWN_FMT_DIRTY=(
-    "capsules/sfn/path/tests/path_test.sfn"
-    "examples/advanced/decorators.sfn"
-    "examples/advanced/effectful-interface.sfn"
-    "examples/advanced/encapsulation-struct.sfn"
-    "examples/advanced/futures.sfn"
-    "examples/advanced/interface-polymorphism.sfn"
-    "examples/advanced/lambda-closure.sfn"
-    "examples/advanced/matrix-multiplication.sfn"
-    "examples/advanced/multithreaded-task.sfn"
-    "examples/advanced/parametric-polymorphism.sfn"
-    "examples/advanced/pointer-arithmetic.sfn"
-    "examples/advanced/unsafe-extern-interop.sfn"
-    "examples/ai/effectful-model-call.sfn"
-    "examples/basics/basic-enum.sfn"
-    "examples/basics/conditionals.sfn"
-    "examples/basics/error-handling.sfn"
-    "examples/basics/functions.sfn"
-    "examples/basics/hello-world.sfn"
-    "examples/basics/if-else.sfn"
-    "examples/basics/interfaces.sfn"
-    "examples/basics/loops.sfn"
-    "examples/basics/struct-composition.sfn"
-    "examples/basics/structs.sfn"
-    "examples/basics/tagged-enum.sfn"
-    "examples/basics/tests.sfn"
-    "examples/basics/try-catch-finally.sfn"
-    "examples/basics/variables.sfn"
     "examples/concurrency/dynamic-task-scheduling.sfn"
-    "examples/concurrency/producer-consumer.sfn"
-    "examples/functional/map-reduce.sfn"
-    "examples/io/read-file.sfn"
-    "examples/io/write-file.sfn"
-    "examples/types/recursive-types.sfn"
-    "examples/types/tagged-unions.sfn"
-    "examples/web/async.sfn"
-    "examples/web/fetch-data.sfn"
 )
 
 in_list() { local n="$1"; shift; for x in "$@"; do [ "$n" = "$x" ] && return 0; done; return 1; }
@@ -302,9 +273,9 @@ has_main() { grep -qE '^[[:space:]]*(pub[[:space:]]+)?(async[[:space:]]+)?fn[[:s
 fmt_check_file() { # path
     local f="$1"
     if [ "$(verdict "$SAILFIN_BIN" fmt --check "$f")" != "0" ]; then
-        if in_list "$f" "${KNOWN_FMT_DIRTY[@]}"; then n_fmt_xfail=$((n_fmt_xfail + 1))
+        if in_list "$f" "${KNOWN_FMT_DIRTY[@]:-}"; then n_fmt_xfail=$((n_fmt_xfail + 1))
         else fmt_unstable+=("$f"); fi
-    elif in_list "$f" "${KNOWN_FMT_DIRTY[@]}"; then
+    elif in_list "$f" "${KNOWN_FMT_DIRTY[@]:-}"; then
         fmt_xpasses+=("$f")
     fi
 }

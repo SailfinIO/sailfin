@@ -6,6 +6,4 @@
 // `missing_effect.sfn` to assert the effect gate distinguishes
 // between valid and invalid inputs (rather than failing every
 // time, which would mask a regression).
-fn main() ![io] {
-    print.info("clean effect declaration");
-}
+fn main() ![io] { print.info("clean effect declaration"); }

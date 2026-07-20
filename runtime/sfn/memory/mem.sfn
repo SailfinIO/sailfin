@@ -30,16 +30,16 @@
 // limitation documented in `arena.sfn` / `rc.sfn` (#306): importing
 // from `runtime/sfn/platform/libc.sfn` trips the seed's extern
 // accept-list, so the libc symbols we need are declared inline.
-extern fn malloc(size: usize) -> * u8;
+extern fn malloc(size: usize) -> *u8;
 
-extern fn memcpy(dst: * u8, src: * u8, n: usize) -> * u8;
+extern fn memcpy(dst: *u8, src: *u8, n: usize) -> *u8;
 
-extern fn free(ptr: * u8) -> void;
+extern fn free(ptr: *u8) -> void;
 
 // libc `write(fd, buf, count)` and `abort()` back `bounds_check`'s
 // failure diagnostic + termination. Same surface `exception.sfn`
 // uses for its own abort path.
-extern fn write(fd: i32, buf: * u8, count: usize) -> i64;
+extern fn write(fd: i32, buf: *u8, count: usize) -> i64;
 
 extern fn abort() -> void;
 
@@ -53,16 +53,16 @@ extern fn sfn_arena_enabled() -> bool;
 // `sfn_alloc_struct`. `sfn_arena_alloc(arena, size, align)` returns an
 // **uninitialised** slice of the current page (see `sailfin_arena.c:144`),
 // so the port zero-fills via `memset` to match `_rt_calloc`'s contract.
-extern fn sfn_arena_global() -> * u8;
+extern fn sfn_arena_global() -> *u8;
 
-extern fn sfn_arena_alloc(arena: * u8, size: usize, align: usize) -> * u8;
+extern fn sfn_arena_alloc(arena: *u8, size: usize, align: usize) -> *u8;
 
 // `calloc(count, size)` backs the libc fallback (arena disabled).
-extern fn calloc(count: usize, size: usize) -> * u8;
+extern fn calloc(count: usize, size: usize) -> *u8;
 
 // `memset(ptr, value, n)` zero-fills the arena slice (the libc fallback
 // uses `calloc`, which zeroes for free).
-extern fn memset(ptr: * u8, value: i32, n: usize) -> * u8;
+extern fn memset(ptr: *u8, value: i32, n: usize) -> *u8;
 
 // `_get_field_safe_buf` head. The C original (`sailfin_runtime.c:373`)
 // keeps a 4096-byte static, 16-byte aligned, zero-initialised buffer
@@ -87,7 +87,7 @@ fn _sfn_mem_safe_buf_size() -> i64 { return 4096; }
 // everything else falls through to this safe default). Lazily
 // allocates + zero-fills the buffer on first use. Descriptor ABI is
 // `(i8*, i8*) -> i8*`.
-fn sfn_mem_get_field(base: * u8, field: * u8) -> * u8 {
+fn sfn_mem_get_field(base: *u8, field: *u8) -> *u8 {
     if sfn_mem_get_field_buf_addr == 0 {
         // Raw safe-buffer allocation + zero-fill interior (#1218 / E9,
         // proposal §5.1): the libc `malloc` and the raw-pointer word
@@ -96,15 +96,15 @@ fn sfn_mem_get_field(base: * u8, field: * u8) -> * u8 {
         // zero-fill is sound.
         unsafe {
             let size: i64 = _sfn_mem_safe_buf_size();
-            let buf: * u8 = malloc(size as usize);
+            let buf: *u8 = malloc(size as usize);
             if buf as i64 == 0 { return buf; }
             // Zero-fill so the buffer reads as empty/false/0 for every
             // type interpretation (matches the C static's zero-init).
             let mut i: i64 = 0;
             loop {
                 if i >= size { break; }
-                let slot: * u8 = buf + i;
-                let byte_slot: * i64 = slot as * i64;
+                let slot: *u8 = buf + i;
+                let byte_slot: *i64 = slot as *i64;
                 // Zero a full 8-byte word at a time; `size` (4096) is a
                 // multiple of 8 so the loop never writes past the buffer.
                 atomic_store(byte_slot, 0);
@@ -113,14 +113,14 @@ fn sfn_mem_get_field(base: * u8, field: * u8) -> * u8 {
             sfn_mem_get_field_buf_addr = buf as i64;
         }
     }
-    return sfn_mem_get_field_buf_addr as * u8;
+    return sfn_mem_get_field_buf_addr as *u8;
 }
 
 // `sfn_mem_copy_bytes(dest, src, length)` — faithful port of
 // `sailfin_runtime_copy_bytes`. No-op when either pointer is null or
 // `length <= 0`; otherwise `memcpy(dest, src, length)`. Descriptor
 // ABI is `(i8*, i8*, i64) -> void`.
-fn sfn_mem_copy_bytes(dest: * u8, src: * u8, length: i64) -> void {
+fn sfn_mem_copy_bytes(dest: *u8, src: *u8, length: i64) -> void {
     if dest as i64 == 0 { return; }
     if src as i64 == 0 { return; }
     if length <= 0 { return; }
@@ -162,7 +162,7 @@ fn sfn_mem_bounds_check(index: i64, length: i64) -> void {
     if out_of_range {
         // 36 bytes including the trailing newline (the literal has no
         // NUL in its byte length; `write` takes an explicit count).
-        let msg: * u8 = "[stage2-native] bounds_check failed\n" as * u8;
+        let msg: *u8 = "[stage2-native] bounds_check failed\n" as *u8;
         // Raw diagnostic + termination (#1218 / E9, proposal §5.1): the
         // libc `write` to fd 2 and `abort()` are the author-asserted
         // unsafe FFI region.
@@ -182,7 +182,7 @@ fn sfn_mem_bounds_check(index: i64, length: i64) -> void {
 // here so a `runtime.free` emitted under arena mode stays a no-op
 // rather than handing an arena pointer to libc `free` (which
 // corrupts glibc chunk metadata). Descriptor ABI is `(i8*) -> void`.
-fn sfn_mem_free(ptr: * u8) -> void {
+fn sfn_mem_free(ptr: *u8) -> void {
     if ptr as i64 == 0 { return; }
     if sfn_arena_enabled() { return; }
     // Raw disposal (#1218 / E9, proposal §5.1): the libc `free` is the
@@ -203,7 +203,7 @@ fn sfn_mem_free(ptr: * u8) -> void {
 // `_sailfin_persistent_table` insert + the dead `sailfin_runtime_string_drop`
 // reader retire with the C runtime (#822). No registry change — emission still
 // targets the bare `sailfin_runtime_mark_persistent`.
-fn sailfin_runtime_mark_persistent(ptr: * u8) -> void { }
+fn sailfin_runtime_mark_persistent(ptr: *u8) -> void { }
 
 // #1405 Bug 1: OOM-handler re-entrancy guard for `sfn_alloc_struct`.
 // The OOM diagnostic below materialises a `string` / `* u8` literal,
@@ -237,14 +237,14 @@ let mut _sfn_alloc_oom_active: i64 = 0;
 // `size_bytes <= 0` guard returns NULL, exactly as the C body does. Descriptor
 // ABI is `(i64) -> i8*` with a `noalias` return attribute preserved at the
 // call site through `RuntimeCallOverrides.return_attributes`.
-fn sfn_alloc_struct(size_bytes: i64) -> * u8 {
-    if size_bytes <= 0 { return 0 as * u8; }
+fn sfn_alloc_struct(size_bytes: i64) -> *u8 {
+    if size_bytes <= 0 { return 0 as *u8; }
     // Raw allocation + zero-fill interior (#1218 / E9, proposal §5.1):
     // the arena bump allocator, `memset`, and the libc `calloc` fallback
     // are the author-asserted unsafe region. The returned block is
     // freshly allocated and uniquely owned, so the in-place zero-fill is
     // sound.
-    let mut result: * u8 = 0 as * u8;
+    let mut result: *u8 = 0 as *u8;
     unsafe {
         if sfn_arena_enabled() {
             result = sfn_arena_alloc(sfn_arena_global(), size_bytes as usize, 8 as usize);
@@ -272,7 +272,7 @@ fn sfn_alloc_struct(size_bytes: i64) -> * u8 {
         // message so any re-entry hits the guard above.
         if _sfn_alloc_oom_active != 0 { abort(); }
         _sfn_alloc_oom_active = 1;
-        let msg: * u8 = "[sailfin-oom] sfn_alloc_struct allocation failed\n" as * u8;
+        let msg: *u8 = "[sailfin-oom] sfn_alloc_struct allocation failed\n" as *u8;
         write(2, msg, 49 as usize);
         abort();
     }
@@ -298,25 +298,25 @@ fn sfn_alloc_struct(size_bytes: i64) -> * u8 {
 // re-entrancy flag — the OOM message itself lowers to `sfn_alloc_struct`).
 // `sfn_env_free` is a null-safe libc `free` with **no arena gate** (the
 // block is never arena-routed, so the gate would be wrong here).
-fn sfn_env_alloc(size_bytes: i64) -> * u8 {
-    if size_bytes <= 0 { return 0 as * u8; }
+fn sfn_env_alloc(size_bytes: i64) -> *u8 {
+    if size_bytes <= 0 { return 0 as *u8; }
     // Raw allocation (#1218 / E9, proposal §5.1): the libc `calloc` is the
     // author-asserted unsafe region. The block is freshly allocated and
     // uniquely owned; `calloc` zero-fills for free.
-    let mut result: * u8 = 0 as * u8;
+    let mut result: *u8 = 0 as *u8;
     unsafe { result = calloc(1 as usize, size_bytes as usize); }
     if result as i64 == 0 {
         // #1405 Bug 1 discipline: break the OOM-message recursion cycle.
         if _sfn_alloc_oom_active != 0 { abort(); }
         _sfn_alloc_oom_active = 1;
-        let msg: * u8 = "[sailfin-oom] sfn_env_alloc allocation failed\n" as * u8;
+        let msg: *u8 = "[sailfin-oom] sfn_env_alloc allocation failed\n" as *u8;
         write(2, msg, 46 as usize);
         abort();
     }
     return result;
 }
 
-fn sfn_env_free(ptr: * u8) -> void {
+fn sfn_env_free(ptr: *u8) -> void {
     if ptr as i64 == 0 { return; }
     // Raw disposal (#1218 / E9, proposal §5.1): the libc `free` is the
     // author-asserted unsafe region. The null guard above and the
@@ -344,21 +344,21 @@ fn sfn_env_free(ptr: * u8) -> void {
 // i64 len@8, i64 cap@16, i64 arena_addr@24 }`.  Field addresses are computed
 // with split arithmetic (a fresh `i64` base then the field cast) — an inline
 // `(env as i64 + 24) as * i64` miscompiles under the seed.
-fn sfn_env_free_owned(env: * u8, ownedbuf_off: i64) -> void {
+fn sfn_env_free_owned(env: *u8, ownedbuf_off: i64) -> void {
     if env as i64 == 0 { return; }
     if ownedbuf_off >= 0 {
         let base: i64 = env as i64;
         let ptr_field: i64 = base + ownedbuf_off;
         let arena_field: i64 = base + ownedbuf_off + 24;
-        let ptr_slot: * i64 = ptr_field as * i64;
-        let arena_slot: * i64 = arena_field as * i64;
+        let ptr_slot: *i64 = ptr_field as *i64;
+        let arena_slot: *i64 = arena_field as *i64;
         let ptr_addr: i64 = atomic_load(ptr_slot);
         let arena_addr: i64 = atomic_load(arena_slot);
         if arena_addr == 0 {
             if ptr_addr != 0 {
                 // Raw disposal (#1218 / E9): the captured buffer is libc-backed
                 // and uniquely owned by this worker after the move (#1220).
-                unsafe { free(ptr_addr as * u8); }
+                unsafe { free(ptr_addr as *u8); }
             }
         }
     }

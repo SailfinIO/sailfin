@@ -6,6 +6,6 @@
 // SFN-114 this fataled at lowering with "cannot resolve return type for
 // call to `0..5.reduce`".
 fn main() ![io] {
-    let total = (0 .. 5).reduce(0, fn (acc, k) -> int { return acc + k; });
+    let total = (0..5).reduce(0, fn (acc, k) -> int { return acc + k; });
     print(total);
 }

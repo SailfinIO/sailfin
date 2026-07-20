@@ -86,30 +86,30 @@
 // (typecheck + fmt + LLVM `define`/`call` shape over
 // `@posix_spawnp` + `@waitpid` + the `sailfin_runtime_process_run`
 // non-reference invariant from the issue's acceptance list).
-extern fn malloc(size: usize) -> * u8;
+extern fn malloc(size: usize) -> *u8;
 
-extern fn free(ptr: * u8) -> void;
+extern fn free(ptr: *u8) -> void;
 
-extern fn posix_spawnp(pid: * i32, path: * u8, file_actions: * u8, attrp: * u8, argv: * * u8, envp: * * u8) -> i32;
+extern fn posix_spawnp(pid: *i32, path: *u8, file_actions: *u8, attrp: *u8, argv: **u8, envp: **u8) -> i32;
 
-extern fn waitpid(pid: i32, status: * i32, options: i32) -> i32;
+extern fn waitpid(pid: i32, status: *i32, options: i32) -> i32;
 
 // `execve(2)` — replace the current process image. Used by toolchain
 // dispatch (`sfn_process_exec`, SFEP-0046 §3.5); on success it never
 // returns.
-extern fn execve(path: * u8, argv: * * u8, envp: * * u8) -> i32;
+extern fn execve(path: *u8, argv: **u8, envp: **u8) -> i32;
 
-extern fn sfn_str_to_cstr(s_data: * u8, s_len: i64, arena_slot: * u8) -> * u8;
+extern fn sfn_str_to_cstr(s_data: *u8, s_len: i64, arena_slot: *u8) -> *u8;
 
 // libc `environ` (`char **`) referenced directly via `extern var`
 // (#1313) — the Sailfin-native replacement for the retired C bridge
 // `sailfin_runtime_get_environ`. The reference lowers to a `load` of
 // the `@environ` global; no C call participates.
-extern var environ: * * u8;
+extern var environ: **u8;
 
 // Sailfin port of the former C `sailfin_runtime_get_environ` accessor:
 // hand back the libc `environ` block by loading the extern global.
-fn get_environ() -> * * u8 { return environ; }
+fn get_environ() -> **u8 { return environ; }
 
 // ── Additional POSIX surface for the capture / handle variants ──
 // (#928, M3). These back `sfn_process_run_capture`,
@@ -119,32 +119,32 @@ fn get_environ() -> * * u8 { return environ; }
 // extern resolver is not yet wired for runtime sfn-sources, so the
 // surface in `runtime/sfn/platform/posix.sfn` is typecheck-only and
 // each consumer module re-declares the externs it actually calls.
-extern fn realloc(ptr: * u8, size: usize) -> * u8;
+extern fn realloc(ptr: *u8, size: usize) -> *u8;
 
-extern fn memset(ptr: * u8, value: i32, n: usize) -> * u8;
+extern fn memset(ptr: *u8, value: i32, n: usize) -> *u8;
 
-extern fn memcpy(dst: * u8, src: * u8, n: usize) -> * u8;
+extern fn memcpy(dst: *u8, src: *u8, n: usize) -> *u8;
 
-extern fn strlen(s: * u8) -> usize;
+extern fn strlen(s: *u8) -> usize;
 
 // String-array append (the retired C runtime's `sailfin_runtime.c:
 // sfn_array_push_string` → `sailfin_runtime_append_string_v2`).
 // Stores the `char*` by pointer (no copy) and returns the SfnArray,
 // or the null pointer on OOM. Consumed by `sfn_process_environ`,
 // which therefore dup's each environ entry before pushing.
-extern fn sfn_array_push_string(arr: * u8, text: * u8) -> * u8;
+extern fn sfn_array_push_string(arr: *u8, text: *u8) -> *u8;
 
 extern fn exit(code: i32) -> void;
 
-extern fn pipe(fds: * i32) -> i32;
+extern fn pipe(fds: *i32) -> i32;
 
-extern fn read(fd: i32, buf: * u8, count: usize) -> i64;
+extern fn read(fd: i32, buf: *u8, count: usize) -> i64;
 
-extern fn write(fd: i32, buf: * u8, count: usize) -> i64;
+extern fn write(fd: i32, buf: *u8, count: usize) -> i64;
 
 extern fn close(fd: i32) -> i32;
 
-extern fn poll(fds: * u8, nfds: usize, timeout: i32) -> i32;
+extern fn poll(fds: *u8, nfds: usize, timeout: i32) -> i32;
 
 // `kill(2)` — send a signal to a process. Backs `process.handle_kill`
 // (SFEP-0050): the streamed-record test runner enforces a per-file
@@ -154,20 +154,20 @@ extern fn poll(fds: * u8, nfds: usize, timeout: i32) -> i32;
 // status-mask discipline above).
 extern fn kill(pid: i32, sig: i32) -> i32;
 
-extern fn posix_spawn_file_actions_init(fa: * u8) -> i32;
+extern fn posix_spawn_file_actions_init(fa: *u8) -> i32;
 
-extern fn posix_spawn_file_actions_destroy(fa: * u8) -> i32;
+extern fn posix_spawn_file_actions_destroy(fa: *u8) -> i32;
 
-extern fn posix_spawn_file_actions_addclose(fa: * u8, fd: i32) -> i32;
+extern fn posix_spawn_file_actions_addclose(fa: *u8, fd: i32) -> i32;
 
-extern fn posix_spawn_file_actions_adddup2(fa: * u8, fd: i32, newfd: i32) -> i32;
+extern fn posix_spawn_file_actions_adddup2(fa: *u8, fd: i32, newfd: i32) -> i32;
 
 // Per-child cwd (#1167): child `chdir`s to `path` before `exec`, no
 // process-global `chdir`. Re-declared inline (typed `* u8`, not the
 // `* PosixSpawnFileActions` of `platform/posix.sfn`) per the #306
 // cross-module-extern limitation. Portability floor: glibc ≥2.29 /
 // macOS ≥10.15 / musl ≥1.1.24; called only on the posix spawn path.
-extern fn posix_spawn_file_actions_addchdir_np(fa: * u8, path: * u8) -> i32;
+extern fn posix_spawn_file_actions_addchdir_np(fa: *u8, path: *u8) -> i32;
 
 // POSIX `EINTR` (4 on Linux and macOS) — the only `read`/`write`/
 // `poll` failure that warrants a resume. Read host-portably via the
@@ -215,7 +215,7 @@ fn _poll_err_retryable(err: i32) -> bool {
 // arithmetic + the pointer-read intrinsic — the same struct-free style
 // the handle/pollfd overlays use, sidestepping a `struct rusage`
 // binding (44 fields, platform-divergent) we never need whole.
-extern fn wait4(pid: i32, status: * i32, options: i32, rusage: * u8) -> i32;
+extern fn wait4(pid: i32, status: *i32, options: i32, rusage: *u8) -> i32;
 
 // `clock_gettime` for the metered wall-clock bracket. Declared with the
 // same `* Timespec` shape `runtime/sfn/clock.sfn` uses so the emitted
@@ -228,7 +228,7 @@ struct Timespec {
     tv_nsec: i64;
 }
 
-extern fn clock_gettime(clk_id: i32, ts: * Timespec) -> i32;
+extern fn clock_gettime(clk_id: i32, ts: *Timespec) -> i32;
 
 // `struct rusage` byte offset of `ru_maxrss` (the peak resident set
 // size): two 16-byte `timeval`s (`ru_utime`, `ru_stime`) precede it on
@@ -250,11 +250,11 @@ let SFN_RUSAGE_MAXRSS_OFFSET: i64 = 32;
 // the right `CLOCK_MONOTONIC` id per target at emit time (#908).
 fn _monotonic_nanos() -> i64 ![clock] {
     let mut ts: Timespec = Timespec { tv_sec: 0, tv_nsec: 0 };
-    let ts_ptr: * Timespec = & ts;
+    let ts_ptr: *Timespec = & ts;
     let ret: i32 = clock_gettime(sailfin_intrinsic_clock_monotonic_id(), ts_ptr);
     if ret != 0 { return 0; }
-    let sec_ptr: * i64 = ts_ptr as * i64;
-    let nsec_ptr: * i64 = sec_ptr + 1;
+    let sec_ptr: *i64 = ts_ptr as *i64;
+    let nsec_ptr: *i64 = sec_ptr + 1;
     let sec: i64 = sailfin_intrinsic_pointer_read_i64(sec_ptr);
     let nsec: i64 = sailfin_intrinsic_pointer_read_i64(nsec_ptr);
     return sec * 1000000000 + nsec;
@@ -286,11 +286,11 @@ fn _monotonic_nanos() -> i64 ![clock] {
 // thread-parallel runner would need per-child scoping (a fork/exec path
 // setting the rlimit in the child) — the same process-global-mutation
 // hazard `.claude/rules/no-bash-e2e.md` flags for setenv/chdir.
-extern fn getrlimit(resource: i32, rlim: * u8) -> i32;
+extern fn getrlimit(resource: i32, rlim: *u8) -> i32;
 
-extern fn setrlimit(resource: i32, rlim: * u8) -> i32;
+extern fn setrlimit(resource: i32, rlim: *u8) -> i32;
 
-extern fn sfn_fs_exists(path: * u8) -> bool;
+extern fn sfn_fs_exists(path: *u8) -> bool;
 
 // Overlay matching the Linux x86_64 `struct rlimit`: two 8-byte slots
 // (`rlim_cur`, `rlim_max`). `RLIM_INFINITY` reads back as -1 through the
@@ -308,26 +308,26 @@ struct CapRLimit {
 // failure; the cap is advisory, exactly like the self-cap). RLIMIT_AS is
 // resource 9 on Linux x86_64 (a hex literal folds to 0 on the seed, so the
 // decimal is inlined — the same discipline the status masks use).
-fn _cap_lower_as_for_child(as_bytes: i64) -> * u8 {
-    if as_bytes <= 0 { return 0 as * u8; }
+fn _cap_lower_as_for_child(as_bytes: i64) -> *u8 {
+    if as_bytes <= 0 { return 0 as *u8; }
     let s_proc: string = "/proc/self/status";
-    if !sfn_fs_exists(s_proc as * u8) { return 0 as * u8; }
-    let saved: * u8 = malloc(16 as usize);
-    if saved as i64 == 0 { return 0 as * u8; }
+    if !sfn_fs_exists(s_proc as *u8) { return 0 as *u8; }
+    let saved: *u8 = malloc(16 as usize);
+    if saved as i64 == 0 { return 0 as *u8; }
     if getrlimit(9, saved) != 0 {
         free(saved);
-        return 0 as * u8;
+        return 0 as *u8;
     }
-    let orig: * CapRLimit = saved as * CapRLimit;
+    let orig: *CapRLimit = saved as *CapRLimit;
     // Build the lowered limit in a temp buffer so `saved` stays pristine
     // for the restore. Never lower the hard limit (`orig.max` is copied
     // through unchanged): a lowered hard cap could not be raised back.
-    let lowered: * u8 = malloc(16 as usize);
+    let lowered: *u8 = malloc(16 as usize);
     if lowered as i64 == 0 {
         free(saved);
-        return 0 as * u8;
+        return 0 as *u8;
     }
-    let lo: * CapRLimit = lowered as * CapRLimit;
+    let lo: *CapRLimit = lowered as *CapRLimit;
     let mut cur: i64 = as_bytes;
     if orig.max != -1 {
         if cur > orig.max { cur = orig.max; }
@@ -338,7 +338,7 @@ fn _cap_lower_as_for_child(as_bytes: i64) -> * u8 {
     free(lowered);
     if rc != 0 {
         free(saved);
-        return 0 as * u8;
+        return 0 as *u8;
     }
     return saved;
 }
@@ -347,7 +347,7 @@ fn _cap_lower_as_for_child(as_bytes: i64) -> * u8 {
 // returned, then free it. A null buffer (no cap applied) is a no-op.
 // Restoring the original soft limit (<= the unchanged hard limit) cannot
 // fail on the raise path.
-fn _cap_restore_as(saved: * u8) {
+fn _cap_restore_as(saved: *u8) {
     if saved as i64 == 0 { return; }
     setrlimit(9, saved);
     free(saved);
@@ -361,25 +361,25 @@ fn sfn_process_run(argv: string[]) -> float ![io] {
     // 8-byte slots. Bail on OOM with the conventional 127 exit
     // code rather than corrupting the spawn.
     let buf_size: i64 = (len + 1) * 8;
-    let buf: * u8 = malloc(buf_size as usize);
+    let buf: *u8 = malloc(buf_size as usize);
     if buf as i64 == 0 { return 127.0; }
 
     // Marshal: copy each NUL-terminated string pointer into the
     // buffer. The cast `buf as * i64` retypes the slot stride so
     // `slots + i` advances 8 bytes per element. `atomic_store`
     // is the seed-supported store primitive (see file header).
-    let slots: * i64 = buf as * i64;
+    let slots: *i64 = buf as *i64;
     let mut i: i64 = 0;
     loop {
         if i >= len { break; }
         let element: string = argv[i];
-        let s_ptr: * u8 = sfn_str_to_cstr(element as * u8, element.length, null);
-        let slot_ptr: * i64 = slots + i;
+        let s_ptr: *u8 = sfn_str_to_cstr(element as *u8, element.length, null);
+        let slot_ptr: *i64 = slots + i;
         let s_as_i64: i64 = s_ptr as i64;
         atomic_store(slot_ptr, s_as_i64);
         i = i + 1;
     }
-    let null_slot: * i64 = slots + len;
+    let null_slot: *i64 = slots + len;
     let zero: i64 = 0;
     atomic_store(null_slot, zero);
 
@@ -389,11 +389,11 @@ fn sfn_process_run(argv: string[]) -> float ![io] {
     // the file header for the inheritance contract — passing
     // NULL gave the child an empty environment on Linux glibc).
     let mut pid: i32 = 0;
-    let pid_ptr: * i32 = & pid;
+    let pid_ptr: *i32 = & pid;
     let first: string = argv[0];
-    let path: * u8 = sfn_str_to_cstr(first as * u8, first.length, null);
-    let envp: * * u8 = get_environ();
-    let buf_pp: * * u8 = buf as * * u8;
+    let path: *u8 = sfn_str_to_cstr(first as *u8, first.length, null);
+    let envp: **u8 = get_environ();
+    let buf_pp: **u8 = buf as **u8;
     let spawn_err: i32 = posix_spawnp(pid_ptr, path, null, null, buf_pp, envp);
     if spawn_err != 0 {
         free(buf);
@@ -405,7 +405,7 @@ fn sfn_process_run(argv: string[]) -> float ![io] {
     // failure (the latter is treated as the conventional 127
     // shell "could not execute" code).
     let mut status: i32 = 0;
-    let status_ptr: * i32 = & status;
+    let status_ptr: *i32 = & status;
     let wait_err: i32 = waitpid(pid, status_ptr, 0);
 
     free(buf);
@@ -528,24 +528,24 @@ struct SailfinProcessHandle {
 // array yields a single NULL slot — i.e. an empty argv/env (the
 // os-capsule env contract treats `Env { entries: [] }` as the empty
 // environment, never "inherit"). Returns the null pointer on OOM.
-fn _process_build_cstr_argv(items: string[]) -> * u8 {
+fn _process_build_cstr_argv(items: string[]) -> *u8 {
     let n: i64 = items.length;
-    if n < 0 { return 0 as * u8; }
+    if n < 0 { return 0 as *u8; }
     let buf_size: i64 = (n + 1) * 8;
-    let buf: * u8 = malloc(buf_size as usize);
+    let buf: *u8 = malloc(buf_size as usize);
     if buf as i64 == 0 { return buf; }
-    let slots: * i64 = buf as * i64;
+    let slots: *i64 = buf as *i64;
     let mut i: i64 = 0;
     loop {
         if i >= n { break; }
         let element: string = items[i];
-        let s_ptr: * u8 = sfn_str_to_cstr(element as * u8, element.length, null);
-        let slot_ptr: * i64 = slots + i;
+        let s_ptr: *u8 = sfn_str_to_cstr(element as *u8, element.length, null);
+        let slot_ptr: *i64 = slots + i;
         let s_as_i64: i64 = s_ptr as i64;
         atomic_store(slot_ptr, s_as_i64);
         i = i + 1;
     }
-    let null_slot: * i64 = slots + n;
+    let null_slot: *i64 = slots + n;
     let zero: i64 = 0;
     atomic_store(null_slot, zero);
     return buf;
@@ -569,17 +569,17 @@ fn _process_build_cstr_argv(items: string[]) -> * u8 {
 fn sfn_process_exec(argv: string[], env_flat: string[]) -> int ![io] {
     let argc: i64 = argv.length;
     if argc <= 0 { return -1; }
-    let child_argv: * u8 = _process_build_cstr_argv(argv);
+    let child_argv: *u8 = _process_build_cstr_argv(argv);
     if child_argv as i64 == 0 { return -1; }
-    let child_envp: * u8 = _process_build_cstr_argv(env_flat);
+    let child_envp: *u8 = _process_build_cstr_argv(env_flat);
     if child_envp as i64 == 0 {
         free(child_argv);
         return -1;
     }
     let first: string = argv[0];
-    let path: * u8 = sfn_str_to_cstr(first as * u8, first.length, null);
-    let argv_pp: * * u8 = child_argv as * * u8;
-    let envp_pp: * * u8 = child_envp as * * u8;
+    let path: *u8 = sfn_str_to_cstr(first as *u8, first.length, null);
+    let argv_pp: **u8 = child_argv as **u8;
+    let envp_pp: **u8 = child_envp as **u8;
     execve(path, argv_pp, envp_pp);
     // Only reached if execve failed; the image was not replaced.
     free(child_argv);
@@ -594,7 +594,7 @@ fn sfn_process_exec(argv: string[], env_flat: string[]) -> int ![io] {
 // retried in-place. On OOM returns `-1` without reading. The pre-
 // grow guarantees `gb.len + 1 <= gb.cap` after any successful read,
 // so `_growbuf_take` can always write its terminator.
-fn _growbuf_read_from(gb: * GrowBuf, fd: i32) -> i64 {
+fn _growbuf_read_from(gb: *GrowBuf, fd: i32) -> i64 {
     let chunk: i64 = 4096;
     let needed: i64 = gb.len + chunk + 1;
     if needed > gb.cap {
@@ -604,13 +604,13 @@ fn _growbuf_read_from(gb: * GrowBuf, fd: i32) -> i64 {
             if needed <= new_cap { break; }
             new_cap = new_cap * 2;
         }
-        let old: * u8 = gb.addr as * u8;
-        let r: * u8 = realloc(old, new_cap as usize);
+        let old: *u8 = gb.addr as *u8;
+        let r: *u8 = realloc(old, new_cap as usize);
         if r as i64 == 0 { return -1; }
         gb.addr = r as i64;
         gb.cap = new_cap;
     }
-    let dst: * u8 = (gb.addr + gb.len) as * u8;
+    let dst: *u8 = (gb.addr + gb.len) as *u8;
     loop {
         let n: i64 = read(fd, dst, chunk as usize);
         if n < 0 {
@@ -629,26 +629,26 @@ fn _growbuf_read_from(gb: * GrowBuf, fd: i32) -> i64 {
 // resetting `gb` to empty so the producer no longer frees it. An
 // unallocated buffer yields a fresh 1-byte empty string (mirrors the
 // C `_take` / drain helpers). Caller owns the returned pointer.
-fn _growbuf_take(gb: * GrowBuf) -> * u8 {
+fn _growbuf_take(gb: *GrowBuf) -> *u8 {
     let addr: i64 = gb.addr;
     let len: i64 = gb.len;
     if addr == 0 {
-        let e: * u8 = malloc(1 as usize);
+        let e: *u8 = malloc(1 as usize);
         if e as i64 != 0 { memset(e, 0, 1 as usize); }
         return e;
     }
-    let term: * u8 = (addr + len) as * u8;
+    let term: *u8 = (addr + len) as *u8;
     memset(term, 0, 1 as usize);
     gb.addr = 0;
     gb.len = 0;
     gb.cap = 0;
-    return addr as * u8;
+    return addr as *u8;
 }
 
 // Fresh malloc'd empty C string (`""`). Shared fallback for the take
 // helpers when nothing was captured.
-fn _process_empty_cstr() -> * u8 {
-    let e: * u8 = malloc(1 as usize);
+fn _process_empty_cstr() -> *u8 {
+    let e: *u8 = malloc(1 as usize);
     if e as i64 != 0 { memset(e, 0, 1 as usize); }
     return e;
 }
@@ -663,17 +663,17 @@ fn _process_empty_cstr() -> * u8 {
 // events_revents }` (the `events`/`revents` shorts packed into the
 // low/high halves of the second word — little-endian POSIX). Both
 // fds are closed by the time this returns.
-fn _drain_two_pipes(out_fd_in: i32, err_fd_in: i32, gb_out: * GrowBuf, gb_err: * GrowBuf) -> void {
+fn _drain_two_pipes(out_fd_in: i32, err_fd_in: i32, gb_out: *GrowBuf, gb_err: *GrowBuf) -> void {
     let mut out_fd: i32 = out_fd_in;
     let mut err_fd: i32 = err_fd_in;
-    let pbuf: * u8 = malloc(16 as usize);
+    let pbuf: *u8 = malloc(16 as usize);
     if pbuf as i64 == 0 {
         if out_fd >= 0 { close(out_fd); }
         if err_fd >= 0 { close(err_fd); }
         return;
     }
-    let p0: * PollSlot = pbuf as * PollSlot;
-    let p1: * PollSlot = ((pbuf as i64) + 8) as * PollSlot;
+    let p0: *PollSlot = pbuf as *PollSlot;
+    let p1: *PollSlot = ((pbuf as i64) + 8) as *PollSlot;
     loop {
         if out_fd < 0 {
             if err_fd < 0 { break; }
@@ -768,9 +768,9 @@ fn _clamp_poll_timeout_ms(timeout_ms: i64) -> i32 {
 // threaded through a clock, which the single-slot wait keeps simple.
 fn sfn_io_poll_readable(fd: i64, timeout_ms: i64) -> bool ![io] {
     if fd < 0 { return false; }
-    let pbuf: * u8 = malloc(8 as usize);
+    let pbuf: *u8 = malloc(8 as usize);
     if pbuf as i64 == 0 { return false; }
-    let slot: * PollSlot = pbuf as * PollSlot;
+    let slot: *PollSlot = pbuf as *PollSlot;
     let to: i32 = _clamp_poll_timeout_ms(timeout_ms);
     let mut ready: bool = false;
     loop {
@@ -832,7 +832,7 @@ fn sfn_io_poll_readable(fd: i64, timeout_ms: i64) -> bool ![io] {
 fn sfn_io_poll_any(fds: int[], timeout_ms: i64) -> i64 ![io] {
     let nfds: i64 = fds.length;
     if nfds <= 0 { return -1; }
-    let pbuf: * u8 = malloc((nfds * 8) as usize);
+    let pbuf: *u8 = malloc((nfds * 8) as usize);
     if pbuf as i64 == 0 { return -1; }
     let to: i32 = _clamp_poll_timeout_ms(timeout_ms);
     let mut result: i64 = -1;
@@ -846,7 +846,7 @@ fn sfn_io_poll_any(fds: int[], timeout_ms: i64) -> i64 ![io] {
         let mut active: i64 = 0;
         loop {
             if i >= nfds { break; }
-            let slot: * PollSlot = ((pbuf as i64) + i * 8) as * PollSlot;
+            let slot: *PollSlot = ((pbuf as i64) + i * 8) as *PollSlot;
             let fd32: i32 = fds[i] as i32;
             slot.fd = fd32;
             slot.events_revents = 1;
@@ -871,7 +871,7 @@ fn sfn_io_poll_any(fds: int[], timeout_ms: i64) -> i64 ![io] {
                 let mut j: i64 = 0;
                 loop {
                     if j >= nfds { break; }
-                    let done: * PollSlot = ((pbuf as i64) + j * 8) as * PollSlot;
+                    let done: *PollSlot = ((pbuf as i64) + j * 8) as *PollSlot;
                     let revents: i32 = (done.events_revents >> 16) & 65535;
                     if revents != 0 {
                         result = fds[j];
@@ -909,35 +909,35 @@ fn sfn_process_exit(code: float) -> void ![io] {
 // NULL makes `wait4` behave exactly like the former `waitpid` — the plain
 // `run_capture` wrapper passes NULL, so its behaviour is byte-for-byte
 // unchanged.
-fn _run_capture_impl(argv: string[], env_flat: string[], rusage_buf: * u8, cwd: * u8, as_bytes: i64) -> i64 ![io] {
+fn _run_capture_impl(argv: string[], env_flat: string[], rusage_buf: *u8, cwd: *u8, as_bytes: i64) -> i64 ![io] {
     if sfn_capture_stdout_addr != 0 {
-        free(sfn_capture_stdout_addr as * u8);
+        free(sfn_capture_stdout_addr as *u8);
         sfn_capture_stdout_addr = 0;
     }
     if sfn_capture_stderr_addr != 0 {
-        free(sfn_capture_stderr_addr as * u8);
+        free(sfn_capture_stderr_addr as *u8);
         sfn_capture_stderr_addr = 0;
     }
 
     let argc: i64 = argv.length;
     if argc <= 0 { return -1; }
 
-    let child_argv: * u8 = _process_build_cstr_argv(argv);
+    let child_argv: *u8 = _process_build_cstr_argv(argv);
     if child_argv as i64 == 0 { return -1; }
-    let child_envp: * u8 = _process_build_cstr_argv(env_flat);
+    let child_envp: *u8 = _process_build_cstr_argv(env_flat);
     if child_envp as i64 == 0 {
         free(child_argv);
         return -1;
     }
 
-    let out_pipe: * PollSlot = malloc(8 as usize) as * PollSlot;
+    let out_pipe: *PollSlot = malloc(8 as usize) as *PollSlot;
     if out_pipe as i64 == 0 {
         free(child_argv);
         free(child_envp);
         return -1;
     }
-    if pipe(out_pipe as * i32) < 0 {
-        free(out_pipe as * u8);
+    if pipe(out_pipe as *i32) < 0 {
+        free(out_pipe as *u8);
         free(child_argv);
         free(child_envp);
         return -1;
@@ -945,30 +945,30 @@ fn _run_capture_impl(argv: string[], env_flat: string[], rusage_buf: * u8, cwd: 
     let out_rd: i32 = out_pipe.fd;
     let out_wr: i32 = out_pipe.events_revents;
 
-    let err_pipe: * PollSlot = malloc(8 as usize) as * PollSlot;
+    let err_pipe: *PollSlot = malloc(8 as usize) as *PollSlot;
     if err_pipe as i64 == 0 {
         close(out_rd);
         close(out_wr);
-        free(out_pipe as * u8);
+        free(out_pipe as *u8);
         free(child_argv);
         free(child_envp);
         return -1;
     }
-    if pipe(err_pipe as * i32) < 0 {
+    if pipe(err_pipe as *i32) < 0 {
         close(out_rd);
         close(out_wr);
-        free(out_pipe as * u8);
-        free(err_pipe as * u8);
+        free(out_pipe as *u8);
+        free(err_pipe as *u8);
         free(child_argv);
         free(child_envp);
         return -1;
     }
     let err_rd: i32 = err_pipe.fd;
     let err_wr: i32 = err_pipe.events_revents;
-    free(out_pipe as * u8);
-    free(err_pipe as * u8);
+    free(out_pipe as *u8);
+    free(err_pipe as *u8);
 
-    let actions: * u8 = malloc(256 as usize);
+    let actions: *u8 = malloc(256 as usize);
     if actions as i64 == 0 {
         close(out_rd);
         close(out_wr);
@@ -1012,15 +1012,15 @@ fn _run_capture_impl(argv: string[], env_flat: string[], rusage_buf: * u8, cwd: 
     }
 
     let mut pid: i32 = 0;
-    let pid_ptr: * i32 = & pid;
+    let pid_ptr: *i32 = & pid;
     let first: string = argv[0];
-    let path: * u8 = sfn_str_to_cstr(first as * u8, first.length, null);
-    let argv_pp: * * u8 = child_argv as * * u8;
-    let envp_pp: * * u8 = child_envp as * * u8;
+    let path: *u8 = sfn_str_to_cstr(first as *u8, first.length, null);
+    let argv_pp: **u8 = child_argv as **u8;
+    let envp_pp: **u8 = child_envp as **u8;
     // Per-child RLIMIT_AS (SFN-45): lower the parent's soft cap around the
     // vforked spawn so the child inherits it, then restore immediately —
     // a null `cap_saved` (no cap requested / non-Linux) makes both no-ops.
-    let cap_saved: * u8 = _cap_lower_as_for_child(as_bytes);
+    let cap_saved: *u8 = _cap_lower_as_for_child(as_bytes);
     let spawn_err: i32 = posix_spawnp(pid_ptr, path, actions, null, argv_pp, envp_pp);
     _cap_restore_as(cap_saved);
     posix_spawn_file_actions_destroy(actions);
@@ -1041,19 +1041,19 @@ fn _run_capture_impl(argv: string[], env_flat: string[], rusage_buf: * u8, cwd: 
     free(child_argv);
     free(child_envp);
 
-    let gb_out: * GrowBuf = malloc(24 as usize) as * GrowBuf;
-    let gb_err: * GrowBuf = malloc(24 as usize) as * GrowBuf;
+    let gb_out: *GrowBuf = malloc(24 as usize) as *GrowBuf;
+    let gb_err: *GrowBuf = malloc(24 as usize) as *GrowBuf;
     if gb_out as i64 == 0 {
         close(out_rd);
         close(err_rd);
-        free(gb_err as * u8);
+        free(gb_err as *u8);
         waitpid(pid, null, 0);
         return -1;
     }
     if gb_err as i64 == 0 {
         close(out_rd);
         close(err_rd);
-        free(gb_out as * u8);
+        free(gb_out as *u8);
         waitpid(pid, null, 0);
         return -1;
     }
@@ -1067,13 +1067,13 @@ fn _run_capture_impl(argv: string[], env_flat: string[], rusage_buf: * u8, cwd: 
     _drain_two_pipes(out_rd, err_rd, gb_out, gb_err);
 
     let mut status: i32 = 0;
-    let status_ptr: * i32 = & status;
+    let status_ptr: *i32 = & status;
     let wait_err: i32 = wait4(pid, status_ptr, 0, rusage_buf);
 
-    let out_cstr: * u8 = _growbuf_take(gb_out);
-    let err_cstr: * u8 = _growbuf_take(gb_err);
-    free(gb_out as * u8);
-    free(gb_err as * u8);
+    let out_cstr: *u8 = _growbuf_take(gb_out);
+    let err_cstr: *u8 = _growbuf_take(gb_err);
+    free(gb_out as *u8);
+    free(gb_err as *u8);
 
     if wait_err < 0 {
         free(out_cstr);
@@ -1105,7 +1105,7 @@ fn _run_capture_impl(argv: string[], env_flat: string[], rusage_buf: * u8, cwd: 
 // calls to it) — the per-child cwd lives in the separate `_cwd` variant
 // below (#1167), never by widening this signature.
 fn sfn_process_run_capture(argv: string[], env_flat: string[]) -> i64 ![io] {
-    return _run_capture_impl(argv, env_flat, 0 as * u8, 0 as * u8, 0);
+    return _run_capture_impl(argv, env_flat, 0 as *u8, 0 as *u8, 0);
 }
 
 // `process.run_capture_cwd` (#1167): `run_capture` with a per-child
@@ -1116,8 +1116,8 @@ fn sfn_process_run_capture(argv: string[], env_flat: string[]) -> i64 ![io] {
 // A NEW symbol rather than a wider `run_capture` so the existing 2-arg
 // builtin keeps its arity (no seed cut): only the freshly-built
 // compiler emits this 3-arg call, exclusively from `sfn/os`.
-fn sfn_process_run_capture_cwd(argv: string[], env_flat: string[], cwd: * u8) -> i64 ![io] {
-    return _run_capture_impl(argv, env_flat, 0 as * u8, cwd, 0);
+fn sfn_process_run_capture_cwd(argv: string[], env_flat: string[], cwd: *u8) -> i64 ![io] {
+    return _run_capture_impl(argv, env_flat, 0 as *u8, cwd, 0);
 }
 
 // `process.run_capture_rlimit_as` (SFN-45): `run_capture` plus a per-child
@@ -1131,7 +1131,7 @@ fn sfn_process_run_capture_cwd(argv: string[], env_flat: string[], cwd: * u8) ->
 // emits this 3-arg call (from the mem-limit e2e test) — no seed cut. The
 // cap mechanism is documented on `_cap_lower_as_for_child`.
 fn sfn_process_run_capture_rlimit_as(argv: string[], env_flat: string[], as_bytes: i64) -> i64 ![io] {
-    return _run_capture_impl(argv, env_flat, 0 as * u8, 0 as * u8, as_bytes);
+    return _run_capture_impl(argv, env_flat, 0 as *u8, 0 as *u8, as_bytes);
 }
 
 // ── process.run_capture_metered ────────────────────────────────
@@ -1153,13 +1153,13 @@ fn sfn_process_run_capture_metered(argv: string[], env_flat: string[]) -> i64 ![
 
     // Zeroed rusage buffer (256 bytes ≫ the ~144-byte `struct rusage`
     // on both targets). A NULL buffer (OOM) simply leaves peak RSS at 0.
-    let rusage_buf: * u8 = malloc(256 as usize);
+    let rusage_buf: *u8 = malloc(256 as usize);
     if rusage_buf as i64 != 0 { memset(rusage_buf, 0, 256 as usize); }
 
     let start: i64 = _monotonic_nanos();
     // Metered capture keeps its 2-arg descriptor; the child inherits the
     // parent cwd (null cwd → no per-child `chdir`).
-    let rc: i64 = _run_capture_impl(argv, env_flat, rusage_buf, 0 as * u8, 0);
+    let rc: i64 = _run_capture_impl(argv, env_flat, rusage_buf, 0 as *u8, 0);
     let end: i64 = _monotonic_nanos();
 
     let mut elapsed: i64 = end - start;
@@ -1167,7 +1167,7 @@ fn sfn_process_run_capture_metered(argv: string[], env_flat: string[]) -> i64 ![
     sfn_capture_wall_ms = elapsed / 1000000;
 
     if rusage_buf as i64 != 0 {
-        let maxrss_ptr: * i64 = ((rusage_buf as i64) + SFN_RUSAGE_MAXRSS_OFFSET) as * i64;
+        let maxrss_ptr: *i64 = ((rusage_buf as i64) + SFN_RUSAGE_MAXRSS_OFFSET) as *i64;
         let maxrss: i64 = sailfin_intrinsic_pointer_read_i64(maxrss_ptr);
         if maxrss > 0 { sfn_capture_peak_rss_kb = maxrss; }
         free(rusage_buf);
@@ -1197,18 +1197,18 @@ fn sfn_process_capture_take_peak_rss_kb() -> i64 ![io] {
 // Hand off the captured stream stashed by the preceding
 // `run_capture`, clearing the global so a second take yields empty.
 // A fresh empty string is returned when no capture is pending.
-fn sfn_process_capture_take_stdout() -> * u8 ![io] {
+fn sfn_process_capture_take_stdout() -> *u8 ![io] {
     let addr: i64 = sfn_capture_stdout_addr;
     sfn_capture_stdout_addr = 0;
     if addr == 0 { return _process_empty_cstr(); }
-    return addr as * u8;
+    return addr as *u8;
 }
 
-fn sfn_process_capture_take_stderr() -> * u8 ![io] {
+fn sfn_process_capture_take_stderr() -> *u8 ![io] {
     let addr: i64 = sfn_capture_stderr_addr;
     sfn_capture_stderr_addr = 0;
     if addr == 0 { return _process_empty_cstr(); }
-    return addr as * u8;
+    return addr as *u8;
 }
 
 // ── process.spawn_with_env ─────────────────────────────────────
@@ -1235,26 +1235,26 @@ fn sfn_process_capture_take_stderr() -> * u8 ![io] {
 // `process.spawn_with_env_cwd` (#1167). `cwd` is a NUL-terminated C
 // string (or null): non-empty `chdir`s the child before `exec` via the
 // spawn file actions; null/empty inherits the parent cwd.
-fn _spawn_with_env_impl(argv: string[], env_flat: string[], cwd: * u8) -> i64 ![io] {
+fn _spawn_with_env_impl(argv: string[], env_flat: string[], cwd: *u8) -> i64 ![io] {
     let argc: i64 = argv.length;
     if argc <= 0 { return 0; }
 
-    let child_argv: * u8 = _process_build_cstr_argv(argv);
+    let child_argv: *u8 = _process_build_cstr_argv(argv);
     if child_argv as i64 == 0 { return 0; }
-    let child_envp: * u8 = _process_build_cstr_argv(env_flat);
+    let child_envp: *u8 = _process_build_cstr_argv(env_flat);
     if child_envp as i64 == 0 {
         free(child_argv);
         return 0;
     }
 
-    let in_pipe: * PollSlot = malloc(8 as usize) as * PollSlot;
+    let in_pipe: *PollSlot = malloc(8 as usize) as *PollSlot;
     if in_pipe as i64 == 0 {
         free(child_argv);
         free(child_envp);
         return 0;
     }
-    if pipe(in_pipe as * i32) < 0 {
-        free(in_pipe as * u8);
+    if pipe(in_pipe as *i32) < 0 {
+        free(in_pipe as *u8);
         free(child_argv);
         free(child_envp);
         return 0;
@@ -1262,20 +1262,20 @@ fn _spawn_with_env_impl(argv: string[], env_flat: string[], cwd: * u8) -> i64 ![
     let in_rd: i32 = in_pipe.fd;
     let in_wr: i32 = in_pipe.events_revents;
 
-    let out_pipe: * PollSlot = malloc(8 as usize) as * PollSlot;
+    let out_pipe: *PollSlot = malloc(8 as usize) as *PollSlot;
     if out_pipe as i64 == 0 {
         close(in_rd);
         close(in_wr);
-        free(in_pipe as * u8);
+        free(in_pipe as *u8);
         free(child_argv);
         free(child_envp);
         return 0;
     }
-    if pipe(out_pipe as * i32) < 0 {
+    if pipe(out_pipe as *i32) < 0 {
         close(in_rd);
         close(in_wr);
-        free(in_pipe as * u8);
-        free(out_pipe as * u8);
+        free(in_pipe as *u8);
+        free(out_pipe as *u8);
         free(child_argv);
         free(child_envp);
         return 0;
@@ -1283,37 +1283,37 @@ fn _spawn_with_env_impl(argv: string[], env_flat: string[], cwd: * u8) -> i64 ![
     let out_rd: i32 = out_pipe.fd;
     let out_wr: i32 = out_pipe.events_revents;
 
-    let err_pipe: * PollSlot = malloc(8 as usize) as * PollSlot;
+    let err_pipe: *PollSlot = malloc(8 as usize) as *PollSlot;
     if err_pipe as i64 == 0 {
         close(in_rd);
         close(in_wr);
         close(out_rd);
         close(out_wr);
-        free(in_pipe as * u8);
-        free(out_pipe as * u8);
+        free(in_pipe as *u8);
+        free(out_pipe as *u8);
         free(child_argv);
         free(child_envp);
         return 0;
     }
-    if pipe(err_pipe as * i32) < 0 {
+    if pipe(err_pipe as *i32) < 0 {
         close(in_rd);
         close(in_wr);
         close(out_rd);
         close(out_wr);
-        free(in_pipe as * u8);
-        free(out_pipe as * u8);
-        free(err_pipe as * u8);
+        free(in_pipe as *u8);
+        free(out_pipe as *u8);
+        free(err_pipe as *u8);
         free(child_argv);
         free(child_envp);
         return 0;
     }
     let err_rd: i32 = err_pipe.fd;
     let err_wr: i32 = err_pipe.events_revents;
-    free(in_pipe as * u8);
-    free(out_pipe as * u8);
-    free(err_pipe as * u8);
+    free(in_pipe as *u8);
+    free(out_pipe as *u8);
+    free(err_pipe as *u8);
 
-    let actions: * u8 = malloc(256 as usize);
+    let actions: *u8 = malloc(256 as usize);
     if actions as i64 == 0 {
         close(in_rd);
         close(in_wr);
@@ -1357,11 +1357,11 @@ fn _spawn_with_env_impl(argv: string[], env_flat: string[], cwd: * u8) -> i64 ![
     }
 
     let mut pid: i32 = 0;
-    let pid_ptr: * i32 = & pid;
+    let pid_ptr: *i32 = & pid;
     let first: string = argv[0];
-    let path: * u8 = sfn_str_to_cstr(first as * u8, first.length, null);
-    let argv_pp: * * u8 = child_argv as * * u8;
-    let envp_pp: * * u8 = child_envp as * * u8;
+    let path: *u8 = sfn_str_to_cstr(first as *u8, first.length, null);
+    let argv_pp: **u8 = child_argv as **u8;
+    let envp_pp: **u8 = child_envp as **u8;
     let spawn_err: i32 = posix_spawnp(pid_ptr, path, actions, null, argv_pp, envp_pp);
     posix_spawn_file_actions_destroy(actions);
     free(actions);
@@ -1385,7 +1385,7 @@ fn _spawn_with_env_impl(argv: string[], env_flat: string[], cwd: * u8) -> i64 ![
     free(child_argv);
     free(child_envp);
 
-    let h: * SailfinProcessHandle = malloc(64 as usize) as * SailfinProcessHandle;
+    let h: *SailfinProcessHandle = malloc(64 as usize) as *SailfinProcessHandle;
     if h as i64 == 0 {
         close(in_wr);
         close(out_rd);
@@ -1413,7 +1413,7 @@ fn _spawn_with_env_impl(argv: string[], env_flat: string[], cwd: * u8) -> i64 ![
 // variant below, never by widening this signature. Inherits the parent
 // cwd (null cwd → no per-child `chdir`).
 fn sfn_process_spawn_with_env(argv: string[], env_flat: string[]) -> i64 ![io] {
-    return _spawn_with_env_impl(argv, env_flat, 0 as * u8);
+    return _spawn_with_env_impl(argv, env_flat, 0 as *u8);
 }
 
 // `process.spawn_with_env_cwd` (#1167): `spawn_with_env` with a
@@ -1422,7 +1422,7 @@ fn sfn_process_spawn_with_env(argv: string[], env_flat: string[]) -> i64 ![io] {
 // existing 2-arg builtin keeps its arity (no seed cut) — only the
 // freshly-built compiler emits this 3-arg call, exclusively from
 // `sfn/os`.
-fn sfn_process_spawn_with_env_cwd(argv: string[], env_flat: string[], cwd: * u8) -> i64 ![io] {
+fn sfn_process_spawn_with_env_cwd(argv: string[], env_flat: string[], cwd: *u8) -> i64 ![io] {
     return _spawn_with_env_impl(argv, env_flat, cwd);
 }
 
@@ -1431,17 +1431,17 @@ fn sfn_process_spawn_with_env_cwd(argv: string[], env_flat: string[], cwd: * u8)
 // NUL-terminated `data` to the child's stdin, resuming short writes
 // and EINTR. Returns bytes written, or `-1` on a dead handle / closed
 // stdin / write error.
-fn sfn_process_handle_write(handle_id: i64, data: * u8) -> i64 ![io] {
+fn sfn_process_handle_write(handle_id: i64, data: *u8) -> i64 ![io] {
     if handle_id == 0 { return -1; }
     if data as i64 == 0 { return -1; }
-    let h: * SailfinProcessHandle = handle_id as * SailfinProcessHandle;
+    let h: *SailfinProcessHandle = handle_id as *SailfinProcessHandle;
     let fd: i32 = h.stdin_fd;
     if fd < 0 { return -1; }
     let total: i64 = strlen(data) as i64;
     let mut written: i64 = 0;
     loop {
         if written >= total { break; }
-        let dst: * u8 = ((data as i64) + written) as * u8;
+        let dst: *u8 = ((data as i64) + written) as *u8;
         let remaining: i64 = total - written;
         let n: i64 = write(fd, dst, remaining as usize);
         if n < 0 {
@@ -1459,7 +1459,7 @@ fn sfn_process_handle_write(handle_id: i64, data: * u8) -> i64 ![io] {
 // Persists the `-1` sentinel so `handle_wait` does not double-close.
 fn sfn_process_handle_close_stdin(handle_id: i64) -> void ![io] {
     if handle_id == 0 { return; }
-    let h: * SailfinProcessHandle = handle_id as * SailfinProcessHandle;
+    let h: *SailfinProcessHandle = handle_id as *SailfinProcessHandle;
     let fd: i32 = h.stdin_fd;
     if fd < 0 { return; }
     close(fd);
@@ -1471,13 +1471,13 @@ fn sfn_process_handle_close_stdin(handle_id: i64) -> void ![io] {
 // stream off. The non-requested stream's bytes stay stashed in the
 // handle for its matching `handle_read_*` call. Port of the C
 // `_sfn_handle_drain_one`.
-fn _handle_drain_one(h: * SailfinProcessHandle, want_stdout: bool) -> * u8 {
-    let gb_out: * GrowBuf = ((h as i64) + 16) as * GrowBuf;
-    let gb_err: * GrowBuf = ((h as i64) + 40) as * GrowBuf;
-    let pbuf: * u8 = malloc(16 as usize);
+fn _handle_drain_one(h: *SailfinProcessHandle, want_stdout: bool) -> *u8 {
+    let gb_out: *GrowBuf = ((h as i64) + 16) as *GrowBuf;
+    let gb_err: *GrowBuf = ((h as i64) + 40) as *GrowBuf;
+    let pbuf: *u8 = malloc(16 as usize);
     if pbuf as i64 != 0 {
-        let p0: * PollSlot = pbuf as * PollSlot;
-        let p1: * PollSlot = ((pbuf as i64) + 8) as * PollSlot;
+        let p0: *PollSlot = pbuf as *PollSlot;
+        let p1: *PollSlot = ((pbuf as i64) + 8) as *PollSlot;
         loop {
             let out_fd: i32 = h.stdout_fd;
             let err_fd: i32 = h.stderr_fd;
@@ -1531,15 +1531,15 @@ fn _handle_drain_one(h: * SailfinProcessHandle, want_stdout: bool) -> * u8 {
 }
 
 // ── process.handle_read_stdout / _stderr ───────────────────────
-fn sfn_process_handle_read_stdout(handle_id: i64) -> * u8 ![io] {
+fn sfn_process_handle_read_stdout(handle_id: i64) -> *u8 ![io] {
     if handle_id == 0 { return _process_empty_cstr(); }
-    let h: * SailfinProcessHandle = handle_id as * SailfinProcessHandle;
+    let h: *SailfinProcessHandle = handle_id as *SailfinProcessHandle;
     return _handle_drain_one(h, true);
 }
 
-fn sfn_process_handle_read_stderr(handle_id: i64) -> * u8 ![io] {
+fn sfn_process_handle_read_stderr(handle_id: i64) -> *u8 ![io] {
     if handle_id == 0 { return _process_empty_cstr(); }
-    let h: * SailfinProcessHandle = handle_id as * SailfinProcessHandle;
+    let h: *SailfinProcessHandle = handle_id as *SailfinProcessHandle;
     return _handle_drain_one(h, false);
 }
 
@@ -1564,7 +1564,7 @@ fn sfn_process_handle_read_stderr(handle_id: i64) -> * u8 ![io] {
 // `read(2)` result: `> 0` appended, `0` EOF, `< 0` error / OOM. EINTR
 // is retried in place. The invariant `gb.cap >= gb.len + 8` holds after
 // every successful fill and is preserved by `_framed_consume`'s compaction.
-fn _framed_fill(gb: * GrowBuf, fd: i32) -> i64 {
+fn _framed_fill(gb: *GrowBuf, fd: i32) -> i64 {
     let chunk: i64 = 4096;
     let needed: i64 = gb.len + chunk + 8;
     if needed > gb.cap {
@@ -1574,13 +1574,13 @@ fn _framed_fill(gb: * GrowBuf, fd: i32) -> i64 {
             if needed <= new_cap { break; }
             new_cap = new_cap * 2;
         }
-        let old: * u8 = gb.addr as * u8;
-        let r: * u8 = realloc(old, new_cap as usize);
+        let old: *u8 = gb.addr as *u8;
+        let r: *u8 = realloc(old, new_cap as usize);
         if r as i64 == 0 { return -1; }
         gb.addr = r as i64;
         gb.cap = new_cap;
     }
-    let dst: * u8 = (gb.addr + gb.len) as * u8;
+    let dst: *u8 = (gb.addr + gb.len) as *u8;
     loop {
         let n: i64 = read(fd, dst, chunk as usize);
         if n < 0 {
@@ -1598,14 +1598,14 @@ fn _framed_fill(gb: * GrowBuf, fd: i32) -> i64 {
 // Index of the first `'\n'` (10) in `gb.addr[0..len)`, or `-1`. Bytes
 // are read via the i32 low-byte load (no i8 load exists); the +8 fill
 // slack keeps the load in-bounds for the final bytes.
-fn _framed_find_newline(gb: * GrowBuf) -> i64 {
+fn _framed_find_newline(gb: *GrowBuf) -> i64 {
     let addr: i64 = gb.addr;
     if addr == 0 { return -1; }
     let len: i64 = gb.len;
     let mut i: i64 = 0;
     loop {
         if i >= len { break; }
-        let b: i32 = sailfin_intrinsic_pointer_read_i32((addr + i) as * u8) & 255;
+        let b: i32 = sailfin_intrinsic_pointer_read_i32((addr + i) as *u8) & 255;
         if b == 10 { return i; }
         i = i + 1;
     }
@@ -1619,19 +1619,19 @@ fn _framed_find_newline(gb: * GrowBuf) -> i64 {
 // `[consume_len..len)` is compacted to the front via a temp buffer (two
 // non-overlapping `memcpy`s — there is no `memmove`). `gb.cap` is
 // unchanged, so the +8 slack invariant is preserved (`len` only shrinks).
-fn _framed_consume(gb: * GrowBuf, ret_len: i64, consume_len: i64) -> * u8 {
+fn _framed_consume(gb: *GrowBuf, ret_len: i64, consume_len: i64) -> *u8 {
     let addr: i64 = gb.addr;
     let len: i64 = gb.len;
-    let res: * u8 = malloc((ret_len + 1) as usize);
+    let res: *u8 = malloc((ret_len + 1) as usize);
     if res as i64 == 0 { return _process_empty_cstr(); }
-    if ret_len > 0 { memcpy(res, addr as * u8, ret_len as usize); }
-    memset((res as i64 + ret_len) as * u8, 0, 1 as usize);
+    if ret_len > 0 { memcpy(res, addr as *u8, ret_len as usize); }
+    memset((res as i64 + ret_len) as *u8, 0, 1 as usize);
     let rem: i64 = len - consume_len;
     if rem > 0 {
-        let tmp: * u8 = malloc(rem as usize);
+        let tmp: *u8 = malloc(rem as usize);
         if tmp as i64 != 0 {
-            memcpy(tmp, (addr + consume_len) as * u8, rem as usize);
-            memcpy(addr as * u8, tmp, rem as usize);
+            memcpy(tmp, (addr + consume_len) as *u8, rem as usize);
+            memcpy(addr as *u8, tmp, rem as usize);
             free(tmp);
         }
         gb.len = rem;
@@ -1646,10 +1646,10 @@ fn _framed_consume(gb: * GrowBuf, ret_len: i64, consume_len: i64) -> * u8 {
 // final unterminated partial line (if any) is returned, then the empty
 // string. Reads stdout only; closes the fd on EOF/error so a subsequent
 // call returns the buffered tail without re-reading a dead pipe.
-fn sfn_process_handle_read_line_stdout(handle_id: i64) -> * u8 ![io] {
+fn sfn_process_handle_read_line_stdout(handle_id: i64) -> *u8 ![io] {
     if handle_id == 0 { return _process_empty_cstr(); }
-    let h: * SailfinProcessHandle = handle_id as * SailfinProcessHandle;
-    let gb: * GrowBuf = ((h as i64) + 16) as * GrowBuf;
+    let h: *SailfinProcessHandle = handle_id as *SailfinProcessHandle;
+    let gb: *GrowBuf = ((h as i64) + 16) as *GrowBuf;
     loop {
         let idx: i64 = _framed_find_newline(gb);
         if idx >= 0 { return _framed_consume(gb, idx, idx + 1); }
@@ -1670,11 +1670,11 @@ fn sfn_process_handle_read_line_stdout(handle_id: i64) -> * u8 ![io] {
 // is empty, one `read(2)` chunk is pulled from the live fd first; a
 // short read returns fewer than `n`. On EOF the fd is closed and the
 // empty string is returned. `n <= 0` is the empty string.
-fn sfn_process_handle_read_bytes_stdout(handle_id: i64, n: i64) -> * u8 ![io] {
+fn sfn_process_handle_read_bytes_stdout(handle_id: i64, n: i64) -> *u8 ![io] {
     if handle_id == 0 { return _process_empty_cstr(); }
     if n <= 0 { return _process_empty_cstr(); }
-    let h: * SailfinProcessHandle = handle_id as * SailfinProcessHandle;
-    let gb: * GrowBuf = ((h as i64) + 16) as * GrowBuf;
+    let h: *SailfinProcessHandle = handle_id as *SailfinProcessHandle;
+    let gb: *GrowBuf = ((h as i64) + 16) as *GrowBuf;
     if gb.len == 0 {
         let fd: i32 = h.stdout_fd;
         if fd >= 0 {
@@ -1704,8 +1704,8 @@ fn sfn_process_handle_read_bytes_stdout(handle_id: i64, n: i64) -> * u8 ![io] {
 // framing until `null` then stops rather than spinning on a dead handle.
 fn sfn_process_handle_stdout_at_eof(handle_id: i64) -> bool ![io] {
     if handle_id == 0 { return true; }
-    let h: * SailfinProcessHandle = handle_id as * SailfinProcessHandle;
-    let gb: * GrowBuf = ((h as i64) + 16) as * GrowBuf;
+    let h: *SailfinProcessHandle = handle_id as *SailfinProcessHandle;
+    let gb: *GrowBuf = ((h as i64) + 16) as *GrowBuf;
     if h.stdout_fd < 0 && gb.len == 0 { return true; }
     return false;
 }
@@ -1722,13 +1722,13 @@ fn sfn_process_handle_stdout_at_eof(handle_id: i64) -> bool ![io] {
 // Pure state read — no syscall.
 fn sfn_process_handle_stdout_fd(handle_id: i64) -> i64 ![io] {
     if handle_id == 0 { return -1; }
-    let h: * SailfinProcessHandle = handle_id as * SailfinProcessHandle;
+    let h: *SailfinProcessHandle = handle_id as *SailfinProcessHandle;
     return h.stdout_fd as i64;
 }
 
 fn sfn_process_handle_stderr_fd(handle_id: i64) -> i64 ![io] {
     if handle_id == 0 { return -1; }
-    let h: * SailfinProcessHandle = handle_id as * SailfinProcessHandle;
+    let h: *SailfinProcessHandle = handle_id as *SailfinProcessHandle;
     return h.stderr_fd as i64;
 }
 
@@ -1744,11 +1744,11 @@ fn sfn_process_handle_stderr_fd(handle_id: i64) -> i64 ![io] {
 // call only after `poll_any` reports the stderr fd ready — so the runner
 // accumulates chunks and frames the records itself, with no risk of the
 // cross-pipe deadlock a line-oriented stderr read would reintroduce.
-fn sfn_process_handle_read_bytes_stderr(handle_id: i64, n: i64) -> * u8 ![io] {
+fn sfn_process_handle_read_bytes_stderr(handle_id: i64, n: i64) -> *u8 ![io] {
     if handle_id == 0 { return _process_empty_cstr(); }
     if n <= 0 { return _process_empty_cstr(); }
-    let h: * SailfinProcessHandle = handle_id as * SailfinProcessHandle;
-    let gb: * GrowBuf = ((h as i64) + 40) as * GrowBuf;
+    let h: *SailfinProcessHandle = handle_id as *SailfinProcessHandle;
+    let gb: *GrowBuf = ((h as i64) + 40) as *GrowBuf;
     if gb.len == 0 {
         let fd: i32 = h.stderr_fd;
         if fd >= 0 {
@@ -1774,8 +1774,8 @@ fn sfn_process_handle_read_bytes_stderr(handle_id: i64, n: i64) -> * u8 ![io] {
 // records until EOF stops rather than spinning on a dead handle.
 fn sfn_process_handle_stderr_at_eof(handle_id: i64) -> bool ![io] {
     if handle_id == 0 { return true; }
-    let h: * SailfinProcessHandle = handle_id as * SailfinProcessHandle;
-    let gb: * GrowBuf = ((h as i64) + 40) as * GrowBuf;
+    let h: *SailfinProcessHandle = handle_id as *SailfinProcessHandle;
+    let gb: *GrowBuf = ((h as i64) + 40) as *GrowBuf;
     if h.stderr_fd < 0 && gb.len == 0 { return true; }
     return false;
 }
@@ -1787,17 +1787,17 @@ fn sfn_process_handle_stderr_at_eof(handle_id: i64) -> bool ![io] {
 // NULs in a binary frame are written verbatim. Returns bytes written
 // (`== len` on success), or `-1` on a dead handle / closed stdin /
 // write error. `len <= 0` writes nothing and returns 0.
-fn sfn_process_handle_write_bytes(handle_id: i64, data: * u8, len: i64) -> i64 ![io] {
+fn sfn_process_handle_write_bytes(handle_id: i64, data: *u8, len: i64) -> i64 ![io] {
     if handle_id == 0 { return -1; }
     if data as i64 == 0 { return -1; }
     if len < 0 { return -1; }
-    let h: * SailfinProcessHandle = handle_id as * SailfinProcessHandle;
+    let h: *SailfinProcessHandle = handle_id as *SailfinProcessHandle;
     let fd: i32 = h.stdin_fd;
     if fd < 0 { return -1; }
     let mut written: i64 = 0;
     loop {
         if written >= len { break; }
-        let dst: * u8 = ((data as i64) + written) as * u8;
+        let dst: *u8 = ((data as i64) + written) as *u8;
         let remaining: i64 = len - written;
         let nw: i64 = write(fd, dst, remaining as usize);
         if nw < 0 {
@@ -1817,7 +1817,7 @@ fn sfn_process_handle_write_bytes(handle_id: i64, data: * u8, len: i64) -> i64 !
 // dead / `waitpid` fails. Port of `sailfin_runtime_process_handle_wait`.
 fn sfn_process_handle_wait(handle_id: i64) -> i64 ![io] {
     if handle_id == 0 { return -1; }
-    let h: * SailfinProcessHandle = handle_id as * SailfinProcessHandle;
+    let h: *SailfinProcessHandle = handle_id as *SailfinProcessHandle;
     let in_fd: i32 = h.stdin_fd;
     if in_fd >= 0 {
         close(in_fd);
@@ -1836,7 +1836,7 @@ fn sfn_process_handle_wait(handle_id: i64) -> i64 ![io] {
 
     let pid: i32 = h.pid;
     let mut status: i32 = 0;
-    let status_ptr: * i32 = & status;
+    let status_ptr: *i32 = & status;
     let wait_err: i32 = waitpid(pid, status_ptr, 0);
     let mut result: i64 = -1;
     if wait_err >= 0 {
@@ -1853,17 +1853,17 @@ fn sfn_process_handle_wait(handle_id: i64) -> i64 ![io] {
         }
     }
 
-    let gb_out: * GrowBuf = ((h as i64) + 16) as * GrowBuf;
-    let gb_err: * GrowBuf = ((h as i64) + 40) as * GrowBuf;
+    let gb_out: *GrowBuf = ((h as i64) + 16) as *GrowBuf;
+    let gb_err: *GrowBuf = ((h as i64) + 40) as *GrowBuf;
     if gb_out.addr != 0 {
-        free(gb_out.addr as * u8);
+        free(gb_out.addr as *u8);
         gb_out.addr = 0;
     }
     if gb_err.addr != 0 {
-        free(gb_err.addr as * u8);
+        free(gb_err.addr as *u8);
         gb_err.addr = 0;
     }
-    free(h as * u8);
+    free(h as *u8);
     return result;
 }
 
@@ -1882,7 +1882,7 @@ fn sfn_process_handle_wait(handle_id: i64) -> i64 ![io] {
 // discriminator (the caller tracks a "killed on deadline" flag instead).
 fn sfn_process_handle_kill(handle_id: i64) -> i64 ![io] {
     if handle_id == 0 { return -1; }
-    let h: * SailfinProcessHandle = handle_id as * SailfinProcessHandle;
+    let h: *SailfinProcessHandle = handle_id as *SailfinProcessHandle;
     let pid: i32 = h.pid;
     if pid <= 0 { return -1; }
     let rc: i32 = kill(pid, 9);
@@ -1924,29 +1924,29 @@ fn sfn_process_handle_kill(handle_id: i64) -> i64 ![io] {
 //
 // Effect: `![io]` — reading the process environment is an
 // environment read, same gate as `env.get`.
-fn sfn_process_environ() -> * u8 ![io] {
-    let arr: * GrowBuf = malloc(24 as usize) as * GrowBuf;
-    if arr as i64 == 0 { return 0 as * u8; }
+fn sfn_process_environ() -> *u8 ![io] {
+    let arr: *GrowBuf = malloc(24 as usize) as *GrowBuf;
+    if arr as i64 == 0 { return 0 as *u8; }
     arr.addr = 0;
     arr.len = 0;
     arr.cap = 0;
-    let out: * u8 = arr as * u8;
+    let out: *u8 = arr as *u8;
 
-    let envp: * * u8 = get_environ();
+    let envp: **u8 = get_environ();
     if envp as i64 == 0 { return out; }
 
-    let slots: * i64 = envp as * i64;
+    let slots: *i64 = envp as *i64;
     let mut i: i64 = 0;
     loop {
-        let slot_ptr: * i64 = slots + i;
+        let slot_ptr: *i64 = slots + i;
         let entry_addr: i64 = sailfin_intrinsic_pointer_read_i64(slot_ptr);
         if entry_addr == 0 { break; }
-        let entry: * u8 = entry_addr as * u8;
+        let entry: *u8 = entry_addr as *u8;
         let n: i64 = strlen(entry) as i64;
-        let copy: * u8 = malloc((n + 1) as usize);
+        let copy: *u8 = malloc((n + 1) as usize);
         if copy as i64 == 0 { break; }
         memcpy(copy, entry, (n + 1) as usize);
-        let pushed: * u8 = sfn_array_push_string(out, copy);
+        let pushed: *u8 = sfn_array_push_string(out, copy);
         if pushed as i64 == 0 {
             free(copy);
             break;

@@ -16,15 +16,15 @@
 //   - E5: use-after-move (`E0901`) and second-live-binding (`E0904`)
 //     diagnostics with both spans, plus a clean move-and-consume
 //     negative case
-import { parse_program } from "../../src/parser/mod";
 import {
+    OwnershipBinding,
+    analyze_program_ownership,
     binding_state,
     check_ownership,
-    OwnershipBinding,
     mark_binding_moved,
-    run_ownership_checker,
-    analyze_program_ownership
+    run_ownership_checker
 } from "../../src/ownership_checker";
+import { parse_program } from "../../src/parser/mod";
 
 test "ownership: dormant pass emits no warnings" ![io] {
     let source = "fn main() ![io] {\n    let x = 1;\n    let y = x;\n    print.info(\"hi\");\n}\n";

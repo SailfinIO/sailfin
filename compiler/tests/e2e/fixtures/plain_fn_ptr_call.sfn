@@ -14,19 +14,19 @@
 // `ctx + 1`, so `invoke_self(41)` yields `42` and `main` forwards it as the
 // process exit code — proving the forward (#1146) and inverse (#1089)
 // directions round-trip through a real executed call.
-fn worker(ctx: * u8) -> * u8 {
+fn worker(ctx: *u8) -> *u8 {
     let v: i64 = ctx as i64;
-    return (v + 1) as * u8;
+    return (v + 1) as *u8;
 }
 
-fn invoke_self(ctx: * u8) -> * u8 {
-    let code: * u8 = worker as * u8;
+fn invoke_self(ctx: *u8) -> *u8 {
+    let code: *u8 = worker as *u8;
     let addr: i64 = code as i64;
-    let f: * fn (* u8) -> * u8 = addr as * fn (* u8) -> * u8;
+    let f: *fn (*u8) -> *u8 = addr as *fn (*u8) -> *u8;
     return f(ctx);
 }
 
 fn main() -> int {
-    let r: * u8 = invoke_self(41 as * u8);
+    let r: *u8 = invoke_self(41 as *u8);
     return r as i64 as int;
 }

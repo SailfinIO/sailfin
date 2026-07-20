@@ -13,7 +13,7 @@ struct Cell {
 
 fn main() ![io] {
     let mut results: Cell[] = [];
-    for i in 0 .. 1000 {
+    for i in 0..1000 {
         let cell = Cell { a: i, b: i + 1, c: i + 2 };
         results.push(cell);
     }

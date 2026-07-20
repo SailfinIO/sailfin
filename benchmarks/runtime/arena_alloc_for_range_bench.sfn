@@ -25,7 +25,7 @@ struct Cell {
 
 fn alloc_batch(n: int) -> int {
     let mut acc: number = 0.0;
-    for j in 0 .. n {
+    for j in 0..n {
         let cell = Cell { a: j, b: j + 1, c: j + 2 };
         acc = acc + cell.a + cell.b + cell.c;
     }

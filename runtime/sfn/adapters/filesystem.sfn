@@ -138,21 +138,21 @@
 // (typecheck + fmt + LLVM `define` shape over the three exports +
 // a `make compile`-equivalent round-trip harness that writes and
 // reads a scratch file through the flipped registry rows).
-extern fn malloc(size: usize) -> * u8;
+extern fn malloc(size: usize) -> *u8;
 
-extern fn free(ptr: * u8) -> void;
+extern fn free(ptr: *u8) -> void;
 
-extern fn realloc(ptr: * u8, new_size: usize) -> * u8;
+extern fn realloc(ptr: *u8, new_size: usize) -> *u8;
 
-extern fn memset(dst: * u8, byte: i32, n: usize) -> * u8;
+extern fn memset(dst: *u8, byte: i32, n: usize) -> *u8;
 
-extern fn fopen(path: * u8, mode: * u8) -> * File;
+extern fn fopen(path: *u8, mode: *u8) -> *File;
 
-extern fn fclose(f: * File) -> i32;
+extern fn fclose(f: *File) -> i32;
 
-extern fn fread(buf: * u8, size: usize, nmemb: usize, f: * File) -> usize;
+extern fn fread(buf: *u8, size: usize, nmemb: usize, f: *File) -> usize;
 
-extern fn fwrite(buf: * u8, size: usize, nmemb: usize, f: * File) -> usize;
+extern fn fwrite(buf: *u8, size: usize, nmemb: usize, f: *File) -> usize;
 
 // Extended POSIX filesystem primitives (#1311, epic #1308 C7). Two
 // portable libc symbols are bound directly (no C trampoline):
@@ -163,9 +163,9 @@ extern fn fwrite(buf: * u8, size: usize, nmemb: usize, f: * File) -> usize;
 // on every target. Declared in `runtime/sfn/platform/libc.sfn`
 // (inlined here per the #306 cross-module-extern workaround in the
 // file header).
-extern fn chmod(path: * u8, mode: i32) -> i32;
+extern fn chmod(path: *u8, mode: i32) -> i32;
 
-extern fn access(path: * u8, mode: i32) -> i32;
+extern fn access(path: *u8, mode: i32) -> i32;
 
 // libc symbols the per-target `sailfin_intrinsic_fs_*` sentinel
 // dispatcher emits `call`s against (epic #1308 fs-runtime flip).
@@ -178,13 +178,13 @@ extern fn access(path: * u8, mode: i32) -> i32;
 // that never `call`s it is link-safe (no relocation), so the Windows
 // cross-build (which lowers `GetFileAttributesA` for `fs_exists` and
 // stubs the rest) links cleanly too.
-extern fn symlink(target: * u8, link: * u8) -> i32;
+extern fn symlink(target: *u8, link: *u8) -> i32;
 
-extern fn mkdtemp(template: * u8) -> * u8;
+extern fn mkdtemp(template: *u8) -> *u8;
 
-extern fn stat(path: * u8, statbuf: * u8) -> i32;
+extern fn stat(path: *u8, statbuf: *u8) -> i32;
 
-extern fn GetFileAttributesA(path: * u8) -> i32;
+extern fn GetFileAttributesA(path: *u8) -> i32;
 
 // M3.1b additions. `memcpy` / `strlen` / `strchr` back the
 // recursive `sfn_fs_mkdir` component walk; `unlink` / `mkdir` are
@@ -193,24 +193,24 @@ extern fn GetFileAttributesA(path: * u8) -> i32;
 // the file header). `sfn_fs_mkdir` reports "directory exists
 // afterward" via the module-local `sfn_fs_exists` (below) without
 // an `errno` read.
-extern fn memcpy(dst: * u8, src: * u8, n: usize) -> * u8;
+extern fn memcpy(dst: *u8, src: *u8, n: usize) -> *u8;
 
-extern fn strlen(s: * u8) -> usize;
+extern fn strlen(s: *u8) -> usize;
 
-extern fn strchr(s: * u8, c: i32) -> * u8;
+extern fn strchr(s: *u8, c: i32) -> *u8;
 
-extern fn unlink(path: * u8) -> i32;
+extern fn unlink(path: *u8) -> i32;
 
-extern fn mkdir(path: * u8, mode: i32) -> i32;
+extern fn mkdir(path: *u8, mode: i32) -> i32;
 
-extern fn rmdir(path: * u8) -> i32;
+extern fn rmdir(path: *u8) -> i32;
 
 // `getenv` backs `sfn_fs_mkdtemp`'s `$TMPDIR` anchoring (epic #1308
 // fs-runtime flip): the env literal is bound to a `string` local
 // before the `* u8` cast — the proven env-read pattern (`string.sfn`
 // `_sfn_concat_limit`, `arena.sfn`); the inline `getenv("…" as * u8)`
 // form miscompiles under the seed.
-extern fn getenv(name: * u8) -> * u8;
+extern fn getenv(name: *u8) -> *u8;
 
 // `sailfin_intrinsic_fs_exists` is no longer an `extern` here: with
 // the declaration removed, the `sfn_fs_exists` body's call fires the
@@ -227,11 +227,11 @@ extern fn getenv(name: * u8) -> * u8;
 // `* u8` (opaque-pointee, identical IR lowering) to keep this module
 // self-contained — the same redeclaration pattern the `unlink` /
 // `mkdir` / `rmdir` externs above use.
-extern fn opendir(path: * u8) -> * u8;
+extern fn opendir(path: *u8) -> *u8;
 
-extern fn readdir(dirp: * u8) -> * u8;
+extern fn readdir(dirp: *u8) -> *u8;
 
-extern fn closedir(dirp: * u8) -> i32;
+extern fn closedir(dirp: *u8) -> i32;
 
 // Win32 directory-enumeration primitives for the `sailfin_intrinsic_fs_list_dir`
 // sentinel's Windows leg (SFN-51, epic #1485; `core_call_emission.sfn`). Like
@@ -241,17 +241,17 @@ extern fn closedir(dirp: * u8) -> i32;
 // `FindFirstFileA`/`FindNextFileA` fill a caller-provided `WIN32_FIND_DATAA`
 // buffer (spelled `* u8`) and return a `HANDLE` / `BOOL`; `FindClose` releases
 // the handle.
-extern fn FindFirstFileA(pattern: * u8, data: * u8) -> * u8;
+extern fn FindFirstFileA(pattern: *u8, data: *u8) -> *u8;
 
-extern fn FindNextFileA(handle: * u8, data: * u8) -> i32;
+extern fn FindNextFileA(handle: *u8, data: *u8) -> i32;
 
-extern fn FindClose(handle: * u8) -> i32;
+extern fn FindClose(handle: *u8) -> i32;
 
 // `strcmp` (ISO C — links and behaves identically on Linux / macOS /
 // Windows) backs the `.`/`..` entry filter and the name sort in
 // `sfn_fs_list_dir`. Same redeclaration pattern `type_meta.sfn` and
 // `adapters/http.sfn` already use for `strcmp`.
-extern fn strcmp(a: * u8, b: * u8) -> i32;
+extern fn strcmp(a: *u8, b: *u8) -> i32;
 
 // Runtime array core used to build `sfn_fs_list_dir`'s sorted result.
 // `sailfin_runtime_concat_v2(null, null)` materializes an empty
@@ -262,9 +262,9 @@ extern fn strcmp(a: * u8, b: * u8) -> i32;
 // declared canonically in `runtime/sfn/array.sfn` and inlined here per
 // the same #306 workaround; both lower over `{ i8**, i64, i64 }*`
 // (spelled `* u8`).
-extern fn sailfin_runtime_concat_v2(a: * u8, b: * u8) -> * u8;
+extern fn sailfin_runtime_concat_v2(a: *u8, b: *u8) -> *u8;
 
-extern fn sailfin_runtime_append_string_v2(a: * u8, text: * u8) -> * u8;
+extern fn sailfin_runtime_append_string_v2(a: *u8, text: *u8) -> *u8;
 
 // Thin portable wrappers over the runtime array core, emitted as the
 // `call` targets of the `sailfin_intrinsic_fs_list_dir` sentinel's per-leg
@@ -274,11 +274,11 @@ extern fn sailfin_runtime_append_string_v2(a: * u8, text: * u8) -> * u8;
 // `@sailfin_runtime_*` string emitted under the lowering dirs, and routing
 // the container ops through these wrappers keeps that volatile prefix out
 // of `core_call_emission.sfn`. Both are target-neutral (no `opendir`/Win32).
-fn _fs_new_str_array() -> * u8 {
+fn _fs_new_str_array() -> *u8 {
     return sailfin_runtime_concat_v2(null, null);
 }
 
-fn _fs_append_str(arr: * u8, s: * u8) -> * u8 {
+fn _fs_append_str(arr: *u8, s: *u8) -> *u8 {
     return sailfin_runtime_append_string_v2(arr, s);
 }
 
@@ -321,7 +321,7 @@ let DIRENT_DNAME_OFFSET_DARWIN: i64 = 21;
 // (`runtime/sfn/string.sfn`, #1308) used to decode an immediate-codepoint
 // `contents` into a real buffer before `fwrite`. Inlined extern per the
 // #306 cross-module-extern workaround documented in the file header.
-extern fn sfn_str_from_codepoint(cp: i64) -> * u8;
+extern fn sfn_str_from_codepoint(cp: i64) -> *u8;
 
 // `_fs_is_immediate(data)` — is `data` a legacy immediate-codepoint
 // tagged pointer rather than a real string buffer? Inlined copy of
@@ -332,7 +332,7 @@ extern fn sfn_str_from_codepoint(cp: i64) -> * u8;
 // shifted into the upper 32 bits (`cp << 32`, low 32 bits zero,
 // value non-zero) classifies as immediate; a real pointer is `> 0x7f`
 // with a non-zero low word, so it never matches.
-fn _fs_is_immediate(data: * u8) -> bool {
+fn _fs_is_immediate(data: *u8) -> bool {
     let raw: i64 = data as i64;
     if raw >= 0 && raw <= 127 { return true; }
     if raw != 0 && (raw & 4294967295) == 0 { return true; }
@@ -344,7 +344,7 @@ fn _fs_is_immediate(data: * u8) -> bool {
 // `sfn_str_from_codepoint`, mirroring `io.sfn::_sfn_decode_immediate_name`.
 // The caller has already established `data` is immediate and non-null (the
 // ASCII case is `raw`, the shifted case `raw >> 32`).
-fn _fs_decode_immediate(data: * u8) -> * u8 {
+fn _fs_decode_immediate(data: *u8) -> *u8 {
     let raw: i64 = data as i64;
     let mut cp: i64 = raw;
     if raw > 127 { cp = raw >> 32; }
@@ -382,7 +382,7 @@ struct SfnArrayView {
 // which is strictly less than the requested count at EOF. The
 // loop exits the first time `read_n < chunk`, matching the
 // architect-spec single-pass slurp semantics.
-fn sfn_fs_read_file(path: * u8) -> * u8 ![io] {
+fn sfn_fs_read_file(path: *u8) -> *u8 ![io] {
     if path as i64 == 0 { return null; }
 
     // Mode string literal lowers to a NUL-terminated `* u8`
@@ -390,13 +390,13 @@ fn sfn_fs_read_file(path: * u8) -> * u8 ![io] {
     // trailing NUL past the byte payload). Cast through `string`
     // to a raw `* u8` so fopen receives the libc-ABI shape.
     let mode_str: string = "rb";
-    let mode: * u8 = mode_str as * u8;
-    let f: * File = fopen(path, mode);
+    let mode: *u8 = mode_str as *u8;
+    let f: *File = fopen(path, mode);
     if f as i64 == 0 { return null; }
 
     let mut capacity: i64 = 4096;
     let mut len: i64 = 0;
-    let mut buf: * u8 = malloc((capacity + 1) as usize);
+    let mut buf: *u8 = malloc((capacity + 1) as usize);
     if buf as i64 == 0 {
         fclose(f);
         return null;
@@ -410,7 +410,7 @@ fn sfn_fs_read_file(path: * u8) -> * u8 ![io] {
         // reserved across every realloc.
         if len + chunk_size > capacity {
             let new_cap: i64 = capacity * 2;
-            let new_buf: * u8 = realloc(buf, (new_cap + 1) as usize);
+            let new_buf: *u8 = realloc(buf, (new_cap + 1) as usize);
             if new_buf as i64 == 0 {
                 free(buf);
                 fclose(f);
@@ -420,7 +420,7 @@ fn sfn_fs_read_file(path: * u8) -> * u8 ![io] {
             capacity = new_cap;
         }
         let dst_addr: i64 = (buf as i64) + len;
-        let dst: * u8 = dst_addr as * u8;
+        let dst: *u8 = dst_addr as *u8;
         let read_n: usize = fread(dst, 1 as usize, chunk_size as usize, f);
         let read_i: i64 = read_n as i64;
         len = len + read_i;
@@ -438,7 +438,7 @@ fn sfn_fs_read_file(path: * u8) -> * u8 ![io] {
     // a single zero byte — equivalent to `buf[len] = 0` in C.
     // The +1 capacity slack reserved above guarantees in-bounds.
     let term_addr: i64 = (buf as i64) + len;
-    let term_ptr: * u8 = term_addr as * u8;
+    let term_ptr: *u8 = term_addr as *u8;
     memset(term_ptr, 0, 1 as usize);
 
     return buf;
@@ -454,15 +454,15 @@ fn sfn_fs_read_file(path: * u8) -> * u8 ![io] {
 // address, so the whole write delegates to the C adapter, which
 // decodes the codepoint to UTF-8 (same fallback shape as `io.sfn`'s
 // print family). For a real buffer `strlen` recovers the byte length.
-fn sfn_fs_write_file(path: * u8, contents: * u8) -> void ![io] {
+fn sfn_fs_write_file(path: *u8, contents: *u8) -> void ![io] {
     if path as i64 == 0 { return; }
     if contents as i64 == 0 { return; }
 
-    let mut real: * u8 = contents;
+    let mut real: *u8 = contents;
     if _fs_is_immediate(contents) { real = _fs_decode_immediate(contents); }
 
     let mode_str: string = "wb";
-    let f: * File = fopen(path, mode_str as * u8);
+    let f: *File = fopen(path, mode_str as *u8);
     if f as i64 == 0 { return; }
 
     let len: i64 = strlen(real) as i64;
@@ -477,15 +477,15 @@ fn sfn_fs_write_file(path: * u8, contents: * u8) -> void ![io] {
 // file if absent. Same pure-Sailfin `fopen` + `fwrite` + `fclose`
 // shape, immediate-codepoint C fallback, and safety contract as
 // `sfn_fs_write_file` above.
-fn sfn_fs_append_file(path: * u8, contents: * u8) -> void ![io] {
+fn sfn_fs_append_file(path: *u8, contents: *u8) -> void ![io] {
     if path as i64 == 0 { return; }
     if contents as i64 == 0 { return; }
 
-    let mut real: * u8 = contents;
+    let mut real: *u8 = contents;
     if _fs_is_immediate(contents) { real = _fs_decode_immediate(contents); }
 
     let mode_str: string = "ab";
-    let f: * File = fopen(path, mode_str as * u8);
+    let f: *File = fopen(path, mode_str as *u8);
     if f as i64 == 0 { return; }
 
     let len: i64 = strlen(real) as i64;
@@ -502,7 +502,7 @@ fn sfn_fs_append_file(path: * u8, contents: * u8) -> void ![io] {
 // the `fs.deleteFile` surface does not expose. Mirrors the C
 // `sailfin_adapter_fs_delete_file` null-guard + `unlink == 0`
 // contract exactly.
-fn sfn_fs_delete(path: * u8) -> bool ![io] {
+fn sfn_fs_delete(path: *u8) -> bool ![io] {
     if path as i64 == 0 { return false; }
     return unlink(path) == 0;
 }
@@ -515,7 +515,7 @@ fn sfn_fs_delete(path: * u8) -> bool ![io] {
 // (`capsules/sfn/fs/src/mod.sfn`), which clears a directory's
 // children before calling this — mirroring the `sfn_fs_delete` /
 // `unlink` shape exactly (`unlink` for files, `rmdir` for dirs).
-fn sfn_fs_rmdir(path: * u8) -> bool ![io] {
+fn sfn_fs_rmdir(path: *u8) -> bool ![io] {
     if path as i64 == 0 { return false; }
     return rmdir(path) == 0;
 }
@@ -528,7 +528,7 @@ fn sfn_fs_rmdir(path: * u8) -> bool ![io] {
 // Windows — the `stat` libc `declare` comes from the inlined `extern fn`
 // above. The scattered `fs.exists` call sites across the compiler +
 // `exec.sfn` route through this canonical wrapper now.
-fn sfn_fs_exists(path: * u8) -> bool ![io] {
+fn sfn_fs_exists(path: *u8) -> bool ![io] {
     return sailfin_intrinsic_fs_exists(path);
 }
 
@@ -559,7 +559,7 @@ fn sfn_fs_exists(path: * u8) -> bool ![io] {
 // (`'/'`) nor octal literals yet — same convention as
 // `runtime/sfn/platform/exec.sfn` (`47`) and
 // `runtime/sfn/process.sfn` (`127` / `65280`).
-fn sfn_fs_mkdir(path: * u8, recursive: bool) -> bool ![io] {
+fn sfn_fs_mkdir(path: *u8, recursive: bool) -> bool ![io] {
     if path as i64 == 0 { return false; }
 
     if recursive {
@@ -569,16 +569,16 @@ fn sfn_fs_mkdir(path: * u8, recursive: bool) -> bool ![io] {
         // Duplicate `path` (including its trailing NUL) into a
         // writable buffer so the `/`-rewrite walk never touches a
         // read-only literal.
-        let scratch: * u8 = malloc((n + 1) as usize);
+        let scratch: *u8 = malloc((n + 1) as usize);
         if scratch as i64 == 0 { return false; }
         memcpy(scratch, path, (n + 1) as usize);
 
         // Start one byte in so a leading `/` (absolute paths) does
         // not produce an empty `mkdir("")` prefix; `strchr` then
         // locates each subsequent separator.
-        let mut cursor: * u8 = scratch + 1;
+        let mut cursor: *u8 = scratch + 1;
         loop {
-            let slash: * u8 = strchr(cursor, 47);
+            let slash: *u8 = strchr(cursor, 47);
             if slash as i64 == 0 { break; }
             memset(slash, 0, 1 as usize);
             mkdir(scratch, 511);
@@ -603,10 +603,10 @@ fn sfn_fs_mkdir(path: * u8, recursive: bool) -> bool ![io] {
 // is appended into the result array. Mirrors `adapters/http.sfn`'s
 // `_strdup_n` shape (`strlen` + `malloc` + `memcpy`); avoids libc
 // `strdup` (MinGW spells it `_strdup`).
-fn _fs_dup_cstr(src: * u8) -> * u8 {
+fn _fs_dup_cstr(src: *u8) -> *u8 {
     if src as i64 == 0 { return null; }
     let n: i64 = strlen(src) as i64;
-    let buf: * u8 = malloc((n + 1) as usize);
+    let buf: *u8 = malloc((n + 1) as usize);
     if buf as i64 == 0 { return null; }
     memcpy(buf, src, (n + 1) as usize);
     return buf;
@@ -615,11 +615,11 @@ fn _fs_dup_cstr(src: * u8) -> * u8 {
 // `_fs_name_is_dot(name)` — true iff `name` is the `.` or `..`
 // pseudo-entry every directory carries, which `sfn_fs_list_dir` omits
 // (matching the C `sailfin_adapter_fs_list_directory_v2` filter).
-fn _fs_name_is_dot(name: * u8) -> bool {
+fn _fs_name_is_dot(name: *u8) -> bool {
     let dot: string = ".";
-    if strcmp(name, dot as * u8) == 0 { return true; }
+    if strcmp(name, dot as *u8) == 0 { return true; }
     let dotdot: string = "..";
-    if strcmp(name, dotdot as * u8) == 0 { return true; }
+    if strcmp(name, dotdot as *u8) == 0 { return true; }
     return false;
 }
 
@@ -633,16 +633,16 @@ fn _fs_name_is_dot(name: * u8) -> bool {
 // address via `sailfin_intrinsic_pointer_read_i64` (the same overlay
 // trick `sfn_fs_write_lines` uses). A `malloc` failure for the scratch
 // leaves the array unsorted rather than corrupting it.
-fn _fs_sort_str_array(arr: * u8) -> void {
+fn _fs_sort_str_array(arr: *u8) -> void {
     if arr as i64 == 0 { return; }
-    let view: * SfnArrayView = arr as * SfnArrayView;
+    let view: *SfnArrayView = arr as *SfnArrayView;
     let n: i64 = view.len;
     if n <= 1 { return; }
     let base: i64 = view.data;
     if base == 0 { return; }
-    let slots: * i64 = base as * i64;
+    let slots: *i64 = base as *i64;
 
-    let tmp: * u8 = malloc(8 as usize);
+    let tmp: *u8 = malloc(8 as usize);
     if tmp as i64 == 0 { return; }
 
     let mut i: i64 = 0;
@@ -654,12 +654,12 @@ fn _fs_sort_str_array(arr: * u8) -> void {
             if j >= n { break; }
             let pj: i64 = sailfin_intrinsic_pointer_read_i64(slots + j);
             let pm: i64 = sailfin_intrinsic_pointer_read_i64(slots + min_idx);
-            if strcmp(pj as * u8, pm as * u8) < 0 { min_idx = j; }
+            if strcmp(pj as *u8, pm as *u8) < 0 { min_idx = j; }
             j = j + 1;
         }
         if min_idx != i {
-            let slot_i: * u8 = (base + i * 8) as * u8;
-            let slot_m: * u8 = (base + min_idx * 8) as * u8;
+            let slot_i: *u8 = (base + i * 8) as *u8;
+            let slot_m: *u8 = (base + min_idx * 8) as *u8;
             memcpy(tmp, slot_i, 8 as usize);
             memcpy(slot_i, slot_m, 8 as usize);
             memcpy(slot_m, tmp, 8 as usize);
@@ -681,7 +681,7 @@ fn _fs_sort_str_array(arr: * u8) -> void {
 // `dirent`'s name — not from any Sailfin call site here.
 fn _fs_dirent_dname_offset() -> i64 ![io] {
     let proc_status: string = "/proc/self/status";
-    if sfn_fs_exists(proc_status as * u8) { return DIRENT_DNAME_OFFSET_LINUX; }
+    if sfn_fs_exists(proc_status as *u8) { return DIRENT_DNAME_OFFSET_LINUX; }
     return DIRENT_DNAME_OFFSET_DARWIN;
 }
 
@@ -703,29 +703,29 @@ fn _fs_dirent_dname_offset() -> i64 ![io] {
 // build -p compiler` compiles it with the pinned seed, which cannot resolve
 // the new intrinsic until a seed bump carries it. The body flips to the
 // sentinel once the pinned seed ships it.
-fn sfn_fs_list_dir(path: * u8) -> * u8 ![io] {
+fn sfn_fs_list_dir(path: *u8) -> *u8 ![io] {
     // Null/empty path ⇒ current directory (C body's `path_str = "."`).
-    let mut target: * u8 = path;
+    let mut target: *u8 = path;
     if target as i64 == 0 {
         let dot: string = ".";
-        target = dot as * u8;
+        target = dot as *u8;
     }
     if (strlen(target) as i64) == 0 {
         let dot: string = ".";
-        target = dot as * u8;
+        target = dot as *u8;
     }
 
-    let dir: * u8 = opendir(target);
+    let dir: *u8 = opendir(target);
     if dir as i64 == 0 { return sailfin_runtime_concat_v2(null, null); }
 
     let dname_off: i64 = _fs_dirent_dname_offset();
-    let mut arr: * u8 = sailfin_runtime_concat_v2(null, null);
+    let mut arr: *u8 = sailfin_runtime_concat_v2(null, null);
     loop {
-        let entry: * u8 = readdir(dir);
+        let entry: *u8 = readdir(dir);
         if entry as i64 == 0 { break; }
-        let name: * u8 = ((entry as i64) + dname_off) as * u8;
+        let name: *u8 = ((entry as i64) + dname_off) as *u8;
         if _fs_name_is_dot(name) { continue; }
-        let copy: * u8 = _fs_dup_cstr(name);
+        let copy: *u8 = _fs_dup_cstr(name);
         if copy as i64 == 0 { continue; }
         arr = sailfin_runtime_append_string_v2(arr, copy);
     }
@@ -749,17 +749,17 @@ fn sfn_fs_list_dir(path: * u8) -> * u8 ![io] {
 // Sailfin has no pointer-write intrinsic; x86_64 / aarch64 / arm64 are
 // all little-endian. Returns null on a null `path` / `out_length`, on
 // `fopen` failure, or on OOM.
-fn sfn_fs_read_bytes(path: * u8, out_length: * u8) -> * u8 ![io] {
+fn sfn_fs_read_bytes(path: *u8, out_length: *u8) -> *u8 ![io] {
     if path as i64 == 0 { return null; }
     if out_length as i64 == 0 { return null; }
 
     let mode_str: string = "rb";
-    let f: * File = fopen(path, mode_str as * u8);
+    let f: *File = fopen(path, mode_str as *u8);
     if f as i64 == 0 { return null; }
 
     let mut capacity: i64 = 4096;
     let mut len: i64 = 0;
-    let mut buf: * u8 = malloc((capacity + 1) as usize);
+    let mut buf: *u8 = malloc((capacity + 1) as usize);
     if buf as i64 == 0 {
         fclose(f);
         return null;
@@ -769,7 +769,7 @@ fn sfn_fs_read_bytes(path: * u8, out_length: * u8) -> * u8 ![io] {
     loop {
         if len + chunk_size > capacity {
             let new_cap: i64 = capacity * 2;
-            let new_buf: * u8 = realloc(buf, (new_cap + 1) as usize);
+            let new_buf: *u8 = realloc(buf, (new_cap + 1) as usize);
             if new_buf as i64 == 0 {
                 free(buf);
                 fclose(f);
@@ -778,7 +778,7 @@ fn sfn_fs_read_bytes(path: * u8, out_length: * u8) -> * u8 ![io] {
             buf = new_buf;
             capacity = new_cap;
         }
-        let dst: * u8 = ((buf as i64) + len) as * u8;
+        let dst: *u8 = ((buf as i64) + len) as *u8;
         let read_n: usize = fread(dst, 1 as usize, chunk_size as usize, f);
         let read_i: i64 = read_n as i64;
         len = len + read_i;
@@ -788,7 +788,7 @@ fn sfn_fs_read_bytes(path: * u8, out_length: * u8) -> * u8 ![io] {
     fclose(f);
 
     // NUL-terminate at offset `len` (the +1 capacity slack reserves it).
-    let term_ptr: * u8 = ((buf as i64) + len) as * u8;
+    let term_ptr: *u8 = ((buf as i64) + len) as *u8;
     memset(term_ptr, 0, 1 as usize);
 
     // Store the binary length into the `int64_t *out_length` out-param,
@@ -797,7 +797,7 @@ fn sfn_fs_read_bytes(path: * u8, out_length: * u8) -> * u8 ![io] {
     loop {
         if k >= 8 { break; }
         let b: i64 = (len >> (k * 8)) & 255;
-        let slot: * u8 = ((out_length as i64) + k) as * u8;
+        let slot: *u8 = ((out_length as i64) + k) as *u8;
         memset(slot, b as i32, 1 as usize);
         k = k + 1;
     }
@@ -812,7 +812,7 @@ fn sfn_fs_read_bytes(path: * u8, out_length: * u8) -> * u8 ![io] {
 // Returns true on success, false on a null path or any `chmod`
 // error. `chmod` is portable libc (links + behaves on Linux / macOS /
 // Windows), so this stays pure Sailfin. POSIX-only (#366); #1311.
-fn sfn_fs_set_perms(path: * u8, mode: i64) -> bool ![io] {
+fn sfn_fs_set_perms(path: *u8, mode: i64) -> bool ![io] {
     if path as i64 == 0 { return false; }
     let masked: i64 = mode & 4095;
     return chmod(path, masked as i32) == 0;
@@ -826,7 +826,7 @@ fn sfn_fs_set_perms(path: * u8, mode: i64) -> bool ![io] {
 // Windows. The per-platform `struct stat` offset that made a
 // fixed-offset Sailfin read return garbage off-Linux now lives inside
 // the sentinel lowering. POSIX-only (#366).
-fn sfn_fs_get_perms(path: * u8) -> i64 ![io] {
+fn sfn_fs_get_perms(path: *u8) -> i64 ![io] {
     return sailfin_intrinsic_fs_get_perms(path);
 }
 
@@ -834,8 +834,8 @@ fn sfn_fs_get_perms(path: * u8) -> i64 ![io] {
 // matching the C `sailfin_adapter_fs_mkdtemp` error contract: the
 // caller checks length, never frees, so a malloc'd empty buffer is
 // the agreed shape.
-fn _fs_empty_string() -> * u8 {
-    let empty: * u8 = malloc(1 as usize);
+fn _fs_empty_string() -> *u8 {
+    let empty: *u8 = malloc(1 as usize);
     if (empty as i64) != 0 { memset(empty, 0, 1 as usize); }
     return empty;
 }
@@ -850,8 +850,8 @@ fn _fs_empty_string() -> * u8 {
 // the retired C body byte-for-byte: `[<dir>/]<prefix>XXXXXX\0`, where
 // `<dir>` is `$TMPDIR` (or `/tmp`) only when `prefix` has no `/`.
 // POSIX-only (#366).
-fn sfn_fs_mkdtemp(prefix: * u8) -> * u8 ![io] {
-    let mut pfx: * u8 = "" as * u8;
+fn sfn_fs_mkdtemp(prefix: *u8) -> *u8 ![io] {
+    let mut pfx: *u8 = "" as *u8;
     if (prefix as i64) != 0 { pfx = prefix; }
     let prefix_len: i64 = strlen(pfx) as i64;
 
@@ -859,14 +859,14 @@ fn sfn_fs_mkdtemp(prefix: * u8) -> * u8 ![io] {
     // anchor under `$TMPDIR` (or `/tmp`); else `prefix` is itself a
     // full template prefix.
     let has_dir: bool = (strchr(pfx, 47) as i64) != 0;
-    let mut dir: * u8 = "" as * u8;
+    let mut dir: *u8 = "" as *u8;
     let mut dir_len: i64 = 0;
     if !has_dir {
         let tmpdir_name: string = "TMPDIR";
-        let env_dir: * u8 = getenv(tmpdir_name as * u8);
+        let env_dir: *u8 = getenv(tmpdir_name as *u8);
         if (env_dir as i64) != 0 && strlen(env_dir) > (0 as usize) {
             dir = env_dir;
-        } else { dir = "/tmp" as * u8; }
+        } else { dir = "/tmp" as *u8; }
         dir_len = strlen(dir) as i64;
     }
 
@@ -875,7 +875,7 @@ fn sfn_fs_mkdtemp(prefix: * u8) -> * u8 ![io] {
     let mut sep: i64 = 0;
     if dir_len > 0 { sep = 1; }
     let needed: i64 = dir_len + sep + prefix_len + 6 + 1;
-    let buf: * u8 = malloc(needed as usize);
+    let buf: *u8 = malloc(needed as usize);
     if (buf as i64) == 0 { return _fs_empty_string(); }
 
     let mut off: i64 = 0;
@@ -883,16 +883,16 @@ fn sfn_fs_mkdtemp(prefix: * u8) -> * u8 ![io] {
         memcpy(buf, dir, dir_len as usize);
         off = dir_len;
         // Write the '/' separator (byte 47) at `off`.
-        memset(((buf as i64) + off) as * u8, 47, 1 as usize);
+        memset(((buf as i64) + off) as *u8, 47, 1 as usize);
         off = off + 1;
     }
-    memcpy(((buf as i64) + off) as * u8, pfx, prefix_len as usize);
+    memcpy(((buf as i64) + off) as *u8, pfx, prefix_len as usize);
     off = off + prefix_len;
     // Six 'X' bytes (byte 88) — the `mkdtemp` template suffix.
-    memset(((buf as i64) + off) as * u8, 88, 6 as usize);
+    memset(((buf as i64) + off) as *u8, 88, 6 as usize);
     off = off + 6;
     // Trailing NUL.
-    memset(((buf as i64) + off) as * u8, 0, 1 as usize);
+    memset(((buf as i64) + off) as *u8, 0, 1 as usize);
 
     // The sentinel mutates `buf` in place to the created dir path on
     // success.
@@ -906,7 +906,7 @@ fn sfn_fs_mkdtemp(prefix: * u8) -> * u8 ![io] {
 // null-guard contract: missing files and permission errors both
 // collapse to `false`. `access` is portable libc (Linux / macOS /
 // Windows), so this stays pure Sailfin. POSIX-only (#366); #1311.
-fn sfn_fs_is_executable(path: * u8) -> bool ![io] {
+fn sfn_fs_is_executable(path: *u8) -> bool ![io] {
     if path as i64 == 0 { return false; }
     return access(path, 1) == 0;
 }
@@ -919,7 +919,7 @@ fn sfn_fs_is_executable(path: * u8) -> bool ![io] {
 // Windows (no MinGW `symlink` symbol). The `symlink` libc `declare`
 // the sentinel lowers to comes from the inlined `extern fn` above.
 // POSIX-only (#366).
-fn sfn_fs_symlink(target: * u8, link: * u8) -> bool ![io] {
+fn sfn_fs_symlink(target: *u8, link: *u8) -> bool ![io] {
     return sailfin_intrinsic_fs_symlink(target, link);
 }
 
@@ -937,11 +937,11 @@ fn sfn_fs_symlink(target: * u8, link: * u8) -> bool ![io] {
 // absurd `len > 10000000` from a corrupted-ABI handle mirrors the C
 // refuse-and-truncate contract natively (open to truncate, then bail).
 // No C call remains.
-fn sfn_fs_write_lines(path: * u8, lines: * u8) -> void ![io] {
+fn sfn_fs_write_lines(path: *u8, lines: *u8) -> void ![io] {
     if path as i64 == 0 { return; }
     if lines as i64 == 0 { return; }
 
-    let arr: * SfnArrayView = lines as * SfnArrayView;
+    let arr: *SfnArrayView = lines as *SfnArrayView;
     let mut n: i64 = arr.len;
     if n < 0 { n = 0; }
 
@@ -950,7 +950,7 @@ fn sfn_fs_write_lines(path: * u8, lines: * u8) -> void ![io] {
     // then bail without iterating the bogus count.
     if n > 10000000 {
         let mode_trunc: string = "wb";
-        let ft: * File = fopen(path, mode_trunc as * u8);
+        let ft: *File = fopen(path, mode_trunc as *u8);
         if ft as i64 != 0 { fclose(ft); }
         return;
     }
@@ -959,7 +959,7 @@ fn sfn_fs_write_lines(path: * u8, lines: * u8) -> void ![io] {
 
     // Pure path: open (truncate) + write each line.
     let mode_str: string = "wb";
-    let f: * File = fopen(path, mode_str as * u8);
+    let f: *File = fopen(path, mode_str as *u8);
     if f as i64 == 0 { return; }
 
     // Missing data pointer with a positive count is a corrupted handle:
@@ -971,20 +971,20 @@ fn sfn_fs_write_lines(path: * u8, lines: * u8) -> void ![io] {
         }
     }
 
-    let slots: * i64 = data_addr as * i64;
+    let slots: *i64 = data_addr as *i64;
     let newline: string = "\n";
-    let nl_ptr: * u8 = newline as * u8;
+    let nl_ptr: *u8 = newline as *u8;
 
     let mut i: i64 = 0;
     loop {
         if i >= n { break; }
-        let slot_ptr: * i64 = slots + i;
+        let slot_ptr: *i64 = slots + i;
         let entry_addr: i64 = sailfin_intrinsic_pointer_read_i64(slot_ptr);
         if entry_addr == 0 {
             fwrite(nl_ptr, 1 as usize, 1 as usize, f);
         } else {
-            let entry: * u8 = entry_addr as * u8;
-            let mut line: * u8 = entry;
+            let entry: *u8 = entry_addr as *u8;
+            let mut line: *u8 = entry;
             if _fs_is_immediate(entry) { line = _fs_decode_immediate(entry); }
             let llen: i64 = strlen(line) as i64;
             if llen > 0 {

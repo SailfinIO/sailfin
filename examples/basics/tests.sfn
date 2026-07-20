@@ -1,8 +1,5 @@
 // examples/basics/tests.sfn
-
-fn add(x: int, y: int) -> int {
-    return x + y;
-}
+fn add(x: int, y: int) -> int { return x + y; }
 
 test "add function should return correct sum" ![model] {
     assert add(2, 3) == 5;

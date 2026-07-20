@@ -1,0 +1,84 @@
+// Regression coverage for `sfn fmt` spacing of prefix `*` (pointer types and
+// dereference) and the `..` range operator (`compiler/src/tools/fmt.sfn`).
+//
+// History (SFN-379): the formatter is a token re-emitter that classified `*`
+// as a binary operator in every position and `..` through the generic binary
+// path, so it inserted spaces the parser never intended: `*u8` -> `* u8`,
+// `*ptr` -> `* ptr`, and `0..4` -> `0 .. 4`. Surfaced by the nightly corpus
+// runner on the design-stage pointer examples.
+//
+// The fix reclassifies a prefix `*` (previous token in a prefix context) to
+// the existing `unary_op` role so it carries no trailing space, and adds a
+// lexeme-specific `..` no-space rule. Binary multiply (`a * b`, previous token
+// a value) is untouched, so its spacing is preserved.
+import { index_of } from "../../src/string_utils";
+import { format_source } from "../../src/tools/fmt";
+
+fn _contains(haystack: string, needle: string) -> boolean {
+    return index_of(haystack, needle) >= 0;
+}
+
+// ── Pointer type in an extern declaration: `*u8` stays tight ─────────
+test "fmt pointer: extern fn pointer return and param stay tight" ![io] {
+    let src = "unsafe extern fn malloc(size: usize) -> *u8;\n";
+    let out = format_source(src);
+    assert _contains(out, "-> *u8");
+    assert _contains(out, "* u8") == false;
+}
+
+test "fmt pointer: pointer-type parameter stays tight" ![io] {
+    let src = "unsafe extern fn free(ptr: *u8) -> void;\n";
+    let out = format_source(src);
+    assert _contains(out, "ptr: *u8");
+    assert _contains(out, "* u8") == false;
+}
+
+// ── Pointer cast: `as *i32` stays tight ──────────────────────────────
+test "fmt pointer: pointer cast stays tight" ![io] {
+    let src = "fn c() {\n    let arr = malloc(16) as *i32;\n}\n";
+    let out = format_source(src);
+    assert _contains(out, "as *i32");
+    assert _contains(out, "as * i32") == false;
+}
+
+// ── Dereference read: `*ptr` on the value side stays tight ───────────
+test "fmt deref: dereference in a let binding stays tight" ![io] {
+    let src = "fn d() {\n    let value = *element_ptr;\n}\n";
+    let out = format_source(src);
+    assert _contains(out, "= *element_ptr");
+    assert _contains(out, "= * element_ptr") == false;
+}
+
+// ── The discriminator: deref target AND binary multiply on one line ──
+// `*element_ptr = i * 10;` must keep the prefix `*` tight while the binary
+// `*` in `i * 10` keeps its surrounding spaces.
+test "fmt deref: assignment target tight, multiply keeps its spaces" ![io] {
+    let src = "fn w() {\n    *element_ptr = i * 10;\n}\n";
+    let out = format_source(src);
+    assert _contains(out, "*element_ptr = i * 10");
+    assert _contains(out, "* element_ptr") == false;
+}
+
+// ── Binary multiply in isolation is unaffected ───────────────────────
+test "fmt multiply: binary multiplication keeps surrounding spaces" ![io] {
+    let src = "fn m() -> int {\n    let a = 2;\n    let b = 3;\n    return a * b;\n}\n";
+    let out = format_source(src);
+    assert _contains(out, "a * b");
+    assert _contains(out, "a*b") == false;
+}
+
+// ── Range operator `..`: tight on both sides ─────────────────────────
+test "fmt range: for-loop range stays tight" ![io] {
+    let src = "fn r() {\n    for i in 0..4 {\n        print(i);\n    }\n}\n";
+    let out = format_source(src);
+    assert _contains(out, "0..4");
+    assert _contains(out, "0 .. 4") == false;
+}
+
+// ── Idempotency: a pointer/range sample is at the fixed point ────────
+test "fmt pointer: pointer + range sample is idempotent" ![io] {
+    let src = "fn s() {\n    let arr = malloc(16) as *i32;\n    for i in 0..4 {\n        *arr = i;\n    }\n}\n";
+    let once = format_source(src);
+    let twice = format_source(once);
+    assert once == twice;
+}

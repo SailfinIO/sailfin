@@ -398,7 +398,7 @@ fn _cr_ends_with(text: string, suffix: string) -> boolean {
 // invocations. The helper is the same one
 // `build/fs.sfn:_shell_read_cmd` calls; declaring it here
 // keeps the resolver self-contained (no new cross-module import).
-extern fn sailfin_runtime_shell_capture(cmd: * u8) -> * u8;
+extern fn sailfin_runtime_shell_capture(cmd: *u8) -> *u8;
 
 fn _cr_shell_read(cmd: string) -> string ![io] {
     let captured = sailfin_runtime_shell_capture(cmd);

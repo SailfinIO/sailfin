@@ -53,7 +53,7 @@ fn _req(method: string, path: string) -> Request {
     };
 }
 
-fn _one_route(method: string, pattern: string, handler: * fn (Request, Params) -> Response) -> Router {
+fn _one_route(method: string, pattern: string, handler: *fn (Request, Params) -> Response) -> Router {
     return route(router(), method, pattern, handler);
 }
 
@@ -124,27 +124,27 @@ test "dispatch: an empty router yields 404" {
 }
 
 test "dispatch: GET /users/{id} runs the handler with the captured id" {
-    let r = _one_route("GET", "/users/{id}", _h_user as * fn (Request, Params) -> Response);
+    let r = _one_route("GET", "/users/{id}", _h_user as *fn (Request, Params) -> Response);
     let resp = dispatch(r, _req("GET", "/users/42"));
     assert resp.status == 200;
     assert strings_equal(resp.body, "user 42");
 }
 
 test "dispatch: multi-segment capture reaches the handler" {
-    let r = _one_route("GET", "/users/{uid}/comments/{cid}", _h_comment as * fn (Request, Params) -> Response);
+    let r = _one_route("GET", "/users/{uid}/comments/{cid}", _h_comment as *fn (Request, Params) -> Response);
     let resp = dispatch(r, _req("GET", "/users/7/comments/99"));
     assert resp.status == 200;
     assert strings_equal(resp.body, "7/99");
 }
 
 test "dispatch: method mismatch on a matched path yields 405" {
-    let r = _one_route("GET", "/users/{id}", _h_user as * fn (Request, Params) -> Response);
+    let r = _one_route("GET", "/users/{id}", _h_user as *fn (Request, Params) -> Response);
     let resp = dispatch(r, _req("POST", "/users/42"));
     assert resp.status == 405;
 }
 
 test "dispatch: no matching path yields 404" {
-    let r = _one_route("GET", "/users/{id}", _h_user as * fn (Request, Params) -> Response);
+    let r = _one_route("GET", "/users/{id}", _h_user as *fn (Request, Params) -> Response);
     let resp = dispatch(r, _req("GET", "/orders/42"));
     assert resp.status == 404;
 }
@@ -152,15 +152,15 @@ test "dispatch: no matching path yields 404" {
 test "dispatch: a null handler address fails controlled with 500" {
     // A null handler is only reachable via an unsafe cast; dispatch must not
     // call a null code pointer — it returns 500 instead.
-    let r = route(router(), "GET", "/x", 0 as * fn (Request, Params) -> Response);
+    let r = route(router(), "GET", "/x", 0 as *fn (Request, Params) -> Response);
     let resp = dispatch(r, _req("GET", "/x"));
     assert resp.status == 500;
 }
 
 test "dispatch: registration order is precedence (static before {id})" {
     let mut r = router();
-    r = route(r, "GET", "/users/me", _h_user_me as * fn (Request, Params) -> Response);
-    r = route(r, "GET", "/users/{id}", _h_user as * fn (Request, Params) -> Response);
+    r = route(r, "GET", "/users/me", _h_user_me as *fn (Request, Params) -> Response);
+    r = route(r, "GET", "/users/{id}", _h_user as *fn (Request, Params) -> Response);
     let me = dispatch(r, _req("GET", "/users/me"));
     assert strings_equal(me.body, "me");
     // A non-static path still falls through to the {id} route.

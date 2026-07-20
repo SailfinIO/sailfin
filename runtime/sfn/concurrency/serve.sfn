@@ -92,28 +92,28 @@
 // lowers to `@sfn_serve` + a behavioral loopback round-trip against
 // the in-process server).
 // ── libc memory + string helpers ──────────────────────────────
-extern fn malloc(size: usize) -> * u8;
+extern fn malloc(size: usize) -> *u8;
 
-extern fn free(ptr: * u8) -> void;
+extern fn free(ptr: *u8) -> void;
 
-extern fn realloc(ptr: * u8, new_size: usize) -> * u8;
+extern fn realloc(ptr: *u8, new_size: usize) -> *u8;
 
-extern fn memset(dst: * u8, byte: i32, n: usize) -> * u8;
+extern fn memset(dst: *u8, byte: i32, n: usize) -> *u8;
 
-extern fn memcpy(dst: * u8, src: * u8, n: usize) -> * u8;
+extern fn memcpy(dst: *u8, src: *u8, n: usize) -> *u8;
 
-extern fn strlen(s: * u8) -> usize;
+extern fn strlen(s: *u8) -> usize;
 
-extern fn strstr(haystack: * u8, needle: * u8) -> * u8;
+extern fn strstr(haystack: *u8, needle: *u8) -> *u8;
 
 // `strcasestr` (GNU/BSD libc) — case-insensitive `strstr`, used to
 // locate the `Content-Length` request header regardless of casing
 // (RFC 7230 §3.2 header names are case-insensitive). Present on both
 // targets (glibc + Darwin). `strtoll` parses the decimal value (the
 // `end` out-param is always passed `null`, mirroring `rlimit.sfn`).
-extern fn strcasestr(haystack: * u8, needle: * u8) -> * u8;
+extern fn strcasestr(haystack: *u8, needle: *u8) -> *u8;
 
-extern fn strtoll(s: * u8, end: * u8, base: i32) -> i64;
+extern fn strtoll(s: *u8, end: *u8, base: i32) -> i64;
 
 // ── BSD sockets (libc) ────────────────────────────────────────
 // `addr` is spelled `* u8` (the `net.sfn` opaque-handle policy:
@@ -122,15 +122,15 @@ extern fn strtoll(s: * u8, end: * u8, base: i32) -> i64;
 // out-params — the v0 server does not inspect the client address.
 extern fn socket(domain: i32, ty: i32, protocol: i32) -> i32;
 
-extern fn bind(sockfd: i32, addr: * u8, addrlen: i32) -> i32;
+extern fn bind(sockfd: i32, addr: *u8, addrlen: i32) -> i32;
 
 extern fn listen(sockfd: i32, backlog: i32) -> i32;
 
-extern fn accept(sockfd: i32, addr: * u8, addrlen: * i32) -> i32;
+extern fn accept(sockfd: i32, addr: *u8, addrlen: *i32) -> i32;
 
-extern fn send(sockfd: i32, buf: * u8, len: i64, flags: i32) -> i64;
+extern fn send(sockfd: i32, buf: *u8, len: i64, flags: i32) -> i64;
 
-extern fn recv(sockfd: i32, buf: * u8, len: i64, flags: i32) -> i64;
+extern fn recv(sockfd: i32, buf: *u8, len: i64, flags: i32) -> i64;
 
 extern fn close(fd: i32) -> i32;
 
@@ -140,24 +140,24 @@ extern fn close(fd: i32) -> i32;
 // value at the boundary). Identical C ABI to
 // `int setsockopt(int, int, int, const void *, socklen_t)`. Declared inline
 // per the same #306 cross-module-extern workaround as the sockets above.
-extern fn setsockopt(sockfd: i32, level: i32, optname: i32, optval: * u8, optlen: i32) -> i32;
+extern fn setsockopt(sockfd: i32, level: i32, optname: i32, optval: *u8, optlen: i32) -> i32;
 
 // ── Scheduler (M4.1, scheduler.sfn) ───────────────────────────
 // The shared MPMC task queue + fixed worker pool. `sfn_serve`
 // creates one queue + pool, then enqueues a `Task` per connection.
-extern fn sfn_taskqueue_create(capacity: i64) -> * u8;
+extern fn sfn_taskqueue_create(capacity: i64) -> *u8;
 
-extern fn sfn_taskqueue_destroy(queue: * u8) -> void;
+extern fn sfn_taskqueue_destroy(queue: *u8) -> void;
 
-extern fn sfn_taskqueue_enqueue(queue: * u8, task: * u8) -> void;
+extern fn sfn_taskqueue_enqueue(queue: *u8, task: *u8) -> void;
 
 // Per-connection tasks are fire-and-forget: `sfn_serve` never joins them,
 // so they use the detached constructor (#1203). The pool worker that runs a
 // detached task reclaims its `Task` handle after `sfn_task_run` returns —
 // closing the one-`Task`-per-connection leak the v0 server documented.
-extern fn sfn_task_create_detached(fn_ptr: i64, ctx: i64) -> * u8;
+extern fn sfn_task_create_detached(fn_ptr: i64, ctx: i64) -> *u8;
 
-extern fn sfn_scheduler_create(queue: * u8) -> * u8;
+extern fn sfn_scheduler_create(queue: *u8) -> *u8;
 
 // ── TLS termination surface (SFEP-0036 §3.5, tls.sfn) ─────────────
 // Inbound TLS: `sfn_serve_tls` builds a server `SSL_CTX` once
@@ -170,15 +170,15 @@ extern fn sfn_scheduler_create(queue: * u8) -> * u8;
 // surface (declaring the runtime helper as an `extern` in the consumer).
 // Extern declarations carry no effects (E0804); enforcement rides the
 // enclosing `![net]` `sfn_serve_tls`, exactly as the socket externs do.
-extern fn tls_server_ctx(cert_path: * u8, key_path: * u8) -> * u8;
+extern fn tls_server_ctx(cert_path: *u8, key_path: *u8) -> *u8;
 
-extern fn tls_accept_fd(ctx: * u8, fd: i32) -> * u8;
+extern fn tls_accept_fd(ctx: *u8, fd: i32) -> *u8;
 
-extern fn tls_read(ssl: * u8, buf: * u8, n: i64) -> i64;
+extern fn tls_read(ssl: *u8, buf: *u8, n: i64) -> i64;
 
-extern fn tls_write(ssl: * u8, buf: * u8, n: i64) -> i64;
+extern fn tls_write(ssl: *u8, buf: *u8, n: i64) -> i64;
 
-extern fn tls_shutdown_free(ssl: * u8) -> void;
+extern fn tls_shutdown_free(ssl: *u8) -> void;
 
 // `_serve_conn_recv(fd, ssl, buf, n)` / `_serve_conn_send(fd, ssl, buf, n)`
 // — the per-connection transport seam. When `ssl` is null the bytes go
@@ -189,14 +189,14 @@ extern fn tls_shutdown_free(ssl: * u8) -> void;
 // plaintext and TLS workers from a single body: the plaintext callers pass
 // `null` and observe no behavioral change (`SSL_read`/`SSL_write` are never
 // reached), so the pinned plaintext serve e2e stays green.
-fn _serve_conn_recv(fd: i32, ssl: * u8, buf: * u8, n: i64) -> i64 {
+fn _serve_conn_recv(fd: i32, ssl: *u8, buf: *u8, n: i64) -> i64 {
     if ssl as i64 == 0 {
         return recv(fd, buf, n, 0);
     }
     return tls_read(ssl, buf, n);
 }
 
-fn _serve_conn_send(fd: i32, ssl: * u8, buf: * u8, n: i64) -> i64 {
+fn _serve_conn_send(fd: i32, ssl: *u8, buf: *u8, n: i64) -> i64 {
     if ssl as i64 == 0 {
         return send(fd, buf, n, 0);
     }
@@ -205,18 +205,18 @@ fn _serve_conn_send(fd: i32, ssl: * u8, buf: * u8, n: i64) -> i64 {
 
 // `_serve_ptr_off(p, off)` — byte-stride pointer arithmetic for a
 // variable offset (serve-local copy of `http.sfn`'s `_ptr_off`).
-fn _serve_ptr_off(p: * u8, off: i64) -> * u8 {
+fn _serve_ptr_off(p: *u8, off: i64) -> *u8 {
     let addr: i64 = (p as i64) + off;
-    return addr as * u8;
+    return addr as *u8;
 }
 
 // `_serve_uint_to_str(value)` — render a non-negative i64 as a
 // freshly allocated decimal string (used for the response
 // `Content-Length` header). Returns null on OOM. Serve-local copy of
 // `http.sfn`'s `_uint_to_str`.
-fn _serve_uint_to_str(value: i64) -> * u8 {
+fn _serve_uint_to_str(value: i64) -> *u8 {
     if value <= 0 {
-        let zero: * u8 = malloc(2 as usize);
+        let zero: *u8 = malloc(2 as usize);
         if zero as i64 == 0 { return null; }
         memset(_serve_ptr_off(zero, 0), 48, 1 as usize);
         memset(_serve_ptr_off(zero, 1), 0, 1 as usize);
@@ -229,7 +229,7 @@ fn _serve_uint_to_str(value: i64) -> * u8 {
         probe = probe / 10;
         count = count + 1;
     }
-    let buf: * u8 = malloc((count + 1) as usize);
+    let buf: *u8 = malloc((count + 1) as usize);
     if buf as i64 == 0 { return null; }
     memset(_serve_ptr_off(buf, count), 0, 1 as usize);
     let mut remaining: i64 = value;
@@ -248,7 +248,7 @@ fn _serve_uint_to_str(value: i64) -> * u8 {
 // into `dst` at byte offset `off`, returning the new offset. The
 // caller pre-sizes `dst` from the summed piece lengths. Serve-local
 // copy of `http.sfn`'s `_append`.
-fn _serve_append(dst: * u8, off: i64, src: * u8) -> i64 {
+fn _serve_append(dst: *u8, off: i64, src: *u8) -> i64 {
     let n: i64 = strlen(src) as i64;
     memcpy(_serve_ptr_off(dst, off), src, n as usize);
     return off + n;
@@ -259,7 +259,7 @@ fn _serve_append(dst: * u8, off: i64, src: * u8) -> i64 {
 // Serve-local copy of `http.sfn`'s `_send_all`. `ssl` selects the
 // transport: null → raw `send(fd)` (plaintext, unchanged); non-null →
 // `tls_write(ssl)` (TLS termination). Both go through `_serve_conn_send`.
-fn _serve_send_all(fd: i32, ssl: * u8, buf: * u8, total: i64) -> bool {
+fn _serve_send_all(fd: i32, ssl: *u8, buf: *u8, total: i64) -> bool {
     let mut sent: i64 = 0;
     loop {
         if sent >= total { break; }
@@ -286,7 +286,7 @@ fn _serve_io_timeout_secs() -> i64 { return 10; }
 // the buffer and returns null → the worker emits a clean `500`, never a
 // hang.
 fn _serve_set_socket_timeouts(fd: i32) -> void {
-    let tv: * u8 = malloc(16 as usize);
+    let tv: *u8 = malloc(16 as usize);
     if tv as i64 == 0 { return; }
     memset(tv, 0, 16 as usize);
     memset(_serve_ptr_off(tv, 0), _serve_io_timeout_secs() as i32, 1 as usize);
@@ -308,7 +308,7 @@ fn _serve_set_socket_timeouts(fd: i32) -> void {
 //   - Linux:     SOL_SOCKET = 1,     SO_REUSEADDR = 2.
 //   - macOS/BSD: SOL_SOCKET = 65535, SO_REUSEADDR = 4.
 fn _serve_set_reuseaddr(fd: i32) -> void {
-    let optval: * u8 = malloc(4 as usize);
+    let optval: *u8 = malloc(4 as usize);
     if optval as i64 == 0 { return; }
     memset(optval, 0, 4 as usize);
     memset(_serve_ptr_off(optval, 0), 1, 1 as usize);
@@ -335,16 +335,16 @@ fn _serve_set_reuseaddr(fd: i32) -> void {
 // header block: a match whose name starts at/after the blank-line
 // terminator (a body that happens to open with `content-length:`) is
 // rejected by the `off + 2 >= header_end` guard.
-fn _serve_content_length(buf: * u8, header_end: i64) -> i64 {
+fn _serve_content_length(buf: *u8, header_end: i64) -> i64 {
     let needle: string = "\r\ncontent-length:";
-    let hit: * u8 = strcasestr(buf, needle as * u8);
+    let hit: *u8 = strcasestr(buf, needle as *u8);
     if hit as i64 == 0 { return 0 - 1; }
     // `off` points at the CRLF; the header name starts at `off + 2`.
     let off: i64 = (hit as i64) - (buf as i64);
     if off + 2 >= header_end { return 0 - 1; }
     // The value starts after the 17-char "\r\ncontent-length:" token;
     // strtoll skips leading whitespace and parses the decimal length.
-    let value_ptr: * u8 = _serve_ptr_off(hit, 17);
+    let value_ptr: *u8 = _serve_ptr_off(hit, 17);
     return strtoll(value_ptr, null, 10);
 }
 
@@ -359,7 +359,7 @@ fn _serve_lc(b: i64) -> i64 {
 // the 4-byte pointer-read intrinsic masked to its low byte (both targets are
 // little-endian; the same idiom as `http.sfn::_byte_at`). The caller keeps
 // `off` in bounds.
-fn _serve_byte_at(base: * u8, off: i64) -> i64 {
+fn _serve_byte_at(base: *u8, off: i64) -> i64 {
     return (sailfin_intrinsic_pointer_read_i32(_serve_ptr_off(base, off)) as i64) & 255;
 }
 
@@ -367,7 +367,7 @@ fn _serve_byte_at(base: * u8, off: i64) -> i64 {
 // `[start, end)` where the `nlen`-byte `needle` matches case-insensitively,
 // or -1. Strictly bounded (never reads at/after `end`), so it is safe over a
 // header-line slice without relying on a NUL terminator.
-fn _serve_ci_find(base: * u8, start: i64, end: i64, needle: * u8, nlen: i64) -> i64 {
+fn _serve_ci_find(base: *u8, start: i64, end: i64, needle: *u8, nlen: i64) -> i64 {
     if nlen <= 0 { return 0 - 1; }
     let mut i: i64 = start;
     loop {
@@ -400,17 +400,17 @@ fn _serve_ci_find(base: * u8, start: i64, end: i64, needle: * u8, nlen: i64) -> 
 // computes the same decision from the parsed request to emit the matching
 // `Connection` response header — so the wire framing and the loop control
 // always agree.
-fn _serve_keep_alive(buf: * u8) -> bool {
+fn _serve_keep_alive(buf: *u8) -> bool {
     // Locate the header block end so the line-bound stays inside the head.
     let terminator: string = "\r\n\r\n";
-    let term: * u8 = strstr(buf, terminator as * u8);
+    let term: *u8 = strstr(buf, terminator as *u8);
     let mut header_end: i64 = strlen(buf) as i64;
     if term as i64 != 0 {
         header_end = ((term as i64) - (buf as i64)) + 4;
     }
 
     let needle: string = "\r\nconnection:";
-    let hit: * u8 = strcasestr(buf, needle as * u8);
+    let hit: *u8 = strcasestr(buf, needle as *u8);
     if hit as i64 == 0 { return true; }
     let off: i64 = (hit as i64) - (buf as i64);
     // The header name starts at `off + 2`; reject a match that begins at/after
@@ -427,7 +427,7 @@ fn _serve_keep_alive(buf: * u8) -> bool {
         line_end = line_end + 1;
     }
     let close_tok: string = "close";
-    let found: i64 = _serve_ci_find(buf, value_start, line_end, close_tok as * u8, 5);
+    let found: i64 = _serve_ci_find(buf, value_start, line_end, close_tok as *u8, 5);
     return found < 0;
 }
 
@@ -461,7 +461,7 @@ fn _serve_keep_alive(buf: * u8) -> bool {
 // `fd` — OpenSSL rides the same fd, so the socket timeouts bound `tls_read`
 // identically (a TLS read timeout surfaces as `tls_read -> -1`, handled the
 // same as a raw `recv -> -1`).
-fn _serve_recv_request(fd: i32, ssl: * u8) -> * u8 {
+fn _serve_recv_request(fd: i32, ssl: *u8) -> *u8 {
     // Bound recv/send so a slow-loris or dead client cannot pin this pool
     // worker forever (#1581). A recv timeout returns -1 below, which is
     // handled exactly like any recv error: free + null → the worker emits
@@ -477,7 +477,7 @@ fn _serve_recv_request(fd: i32, ssl: * u8) -> * u8 {
     // the worst read index is `len + 2`, which must stay inside the
     // allocation — exactly the +4 headroom `http.sfn::_recv_all` keeps for the
     // same idiom (#1711). One trailing NUL still serves the `strstr` scans.
-    let mut buf: * u8 = malloc((capacity + 4) as usize);
+    let mut buf: *u8 = malloc((capacity + 4) as usize);
     if buf as i64 == 0 { return null; }
     let chunk: i64 = 4096;
     let terminator: string = "\r\n\r\n";
@@ -488,7 +488,7 @@ fn _serve_recv_request(fd: i32, ssl: * u8) -> * u8 {
     loop {
         if len + chunk > capacity {
             let new_cap: i64 = capacity * 2;
-            let new_buf: * u8 = realloc(buf, (new_cap + 4) as usize);
+            let new_buf: *u8 = realloc(buf, (new_cap + 4) as usize);
             if new_buf as i64 == 0 {
                 free(buf);
                 return null;
@@ -504,7 +504,7 @@ fn _serve_recv_request(fd: i32, ssl: * u8) -> * u8 {
         if n == 0 { break; }
         len = len + n;
         memset(_serve_ptr_off(buf, len), 0, 1 as usize);
-        let term_ptr: * u8 = strstr(buf, terminator as * u8);
+        let term_ptr: *u8 = strstr(buf, terminator as *u8);
         if (term_ptr as i64) != 0 {
             header_end = ((term_ptr as i64) - (buf as i64)) + 4;
             break;
@@ -549,7 +549,7 @@ fn _serve_recv_request(fd: i32, ssl: * u8) -> * u8 {
                 if new_cap >= body_target { break; }
                 new_cap = new_cap * 2;
             }
-            let new_buf: * u8 = realloc(buf, (new_cap + 4) as usize);
+            let new_buf: *u8 = realloc(buf, (new_cap + 4) as usize);
             if new_buf as i64 == 0 {
                 free(buf);
                 return null;
@@ -581,30 +581,30 @@ fn _serve_recv_request(fd: i32, ssl: * u8) -> * u8 {
 // close` (the worker closes on the error path). Returns false on a send
 // failure. `ssl` selects the transport (null → raw `send`, non-null → TLS),
 // threaded into `_serve_send_all`.
-fn _serve_send_response(fd: i32, ssl: * u8, body: * u8, keep_alive: bool) -> bool {
+fn _serve_send_response(fd: i32, ssl: *u8, body: *u8, keep_alive: bool) -> bool {
     if body as i64 == 0 {
         let err: string = "HTTP/1.1 500 Internal Server Error\r\nContent-Length: 0\r\nConnection: close\r\n\r\n";
-        return _serve_send_all(fd, ssl, err as * u8, strlen(err as * u8) as i64);
+        return _serve_send_all(fd, ssl, err as *u8, strlen(err as *u8) as i64);
     }
 
     let status: string = "HTTP/1.1 200 OK\r\nContent-Length: ";
     let mut tail: string = "\r\nConnection: close\r\n\r\n";
     if keep_alive { tail = "\r\nConnection: keep-alive\r\n\r\n"; }
     let body_len: i64 = strlen(body) as i64;
-    let clen: * u8 = _serve_uint_to_str(body_len);
+    let clen: *u8 = _serve_uint_to_str(body_len);
     if clen as i64 == 0 { return false; }
 
-    let total: i64 = (strlen(status as * u8) as i64) + (strlen(clen) as i64) + (strlen(tail as * u8) as i64)
+    let total: i64 = (strlen(status as *u8) as i64) + (strlen(clen) as i64) + (strlen(tail as *u8) as i64)
         + body_len;
-    let resp: * u8 = malloc((total + 1) as usize);
+    let resp: *u8 = malloc((total + 1) as usize);
     if resp as i64 == 0 {
         free(clen);
         return false;
     }
     let mut off: i64 = 0;
-    off = _serve_append(resp, off, status as * u8);
+    off = _serve_append(resp, off, status as *u8);
     off = _serve_append(resp, off, clen);
-    off = _serve_append(resp, off, tail as * u8);
+    off = _serve_append(resp, off, tail as *u8);
     off = _serve_append(resp, off, body);
     memset(_serve_ptr_off(resp, off), 0, 1 as usize);
     free(clen);
@@ -622,10 +622,10 @@ fn _serve_send_response(fd: i32, ssl: * u8, body: * u8, keep_alive: bool) -> boo
 // text responses (NUL-terminated); embedded-NUL binary bodies are out of
 // scope (the `strlen` length stops at the first NUL). `ssl` selects the
 // transport (null → raw `send`, non-null → TLS).
-fn _serve_send_raw(fd: i32, ssl: * u8, resp: * u8) -> bool {
+fn _serve_send_raw(fd: i32, ssl: *u8, resp: *u8) -> bool {
     if resp as i64 == 0 {
         let err: string = "HTTP/1.1 500 Internal Server Error\r\nContent-Length: 0\r\nConnection: close\r\n\r\n";
-        return _serve_send_all(fd, ssl, err as * u8, strlen(err as * u8) as i64);
+        return _serve_send_all(fd, ssl, err as *u8, strlen(err as *u8) as i64);
     }
     return _serve_send_all(fd, ssl, resp, strlen(resp) as i64);
 }
@@ -646,7 +646,7 @@ struct OwnedBuf {
 // moved `OwnedBuf` (`arena_addr == 0`, `cap == len + 1` for the trailing
 // NUL the recv/serialize paths guarantee). The returned value carries
 // ownership of `ptr` across the handler boundary.
-fn _serve_wrap_owned(ptr: * u8, len: i64) -> OwnedBuf {
+fn _serve_wrap_owned(ptr: *u8, len: i64) -> OwnedBuf {
     return OwnedBuf {
         ptr_addr: ptr as i64,
         len: len,
@@ -676,7 +676,7 @@ fn _serve_empty_owned() -> OwnedBuf {
 // `sfn_env_free_owned`, which would also `free` a non-container address).
 fn _serve_free_owned(buf: OwnedBuf) -> void {
     if buf.arena_addr == 0 {
-        if buf.ptr_addr != 0 { free(buf.ptr_addr as * u8); }
+        if buf.ptr_addr != 0 { free(buf.ptr_addr as *u8); }
     }
 }
 
@@ -701,12 +701,12 @@ fn _serve_free_owned(buf: OwnedBuf) -> void {
 // skips the request free so the worker frees it exactly once as the
 // response. Null-safe on the handler (frees the orphaned request and
 // returns an empty `OwnedBuf` so the worker emits a `500`).
-fn sfn_serve_handler_dispatch(handler: * u8, request: OwnedBuf) -> OwnedBuf {
+fn sfn_serve_handler_dispatch(handler: *u8, request: OwnedBuf) -> OwnedBuf {
     if handler as i64 == 0 {
         _serve_free_owned(request);
         return _serve_empty_owned();
     }
-    let entry: * fn (OwnedBuf) -> OwnedBuf = (handler as i64) as * fn (OwnedBuf) -> OwnedBuf;
+    let entry: *fn (OwnedBuf) -> OwnedBuf = (handler as i64) as *fn (OwnedBuf) -> OwnedBuf;
     let req_ptr: i64 = request.ptr_addr;
     let req_arena: i64 = request.arena_addr;
     let response: OwnedBuf = entry(request);
@@ -715,7 +715,7 @@ fn sfn_serve_handler_dispatch(handler: * u8, request: OwnedBuf) -> OwnedBuf {
     // once as the response, avoiding an alias double-free).
     if req_arena == 0 {
         if req_ptr != 0 {
-            if response.ptr_addr != req_ptr { free(req_ptr as * u8); }
+            if response.ptr_addr != req_ptr { free(req_ptr as *u8); }
         }
     }
     return response;
@@ -738,11 +738,11 @@ fn sfn_serve_handler_dispatch(handler: * u8, request: OwnedBuf) -> OwnedBuf {
 // every such path, so there is nothing to reclaim here; the worker simply
 // skips dispatch and sends a `500` directly (`_serve_send_response(fd,
 // null)`).
-fn _serve_conn_worker(ctx: * u8) -> * u8 {
+fn _serve_conn_worker(ctx: *u8) -> *u8 {
     if ctx as i64 == 0 { return null; }
     let base: i64 = ctx as i64;
-    let fd_slot: * i64 = base as * i64;
-    let handler_slot: * i64 = (base + 8) as * i64;
+    let fd_slot: *i64 = base as *i64;
+    let handler_slot: *i64 = (base + 8) as *i64;
     let client_fd: i64 = atomic_load(fd_slot);
     let handler: i64 = atomic_load(handler_slot);
     free(ctx);
@@ -758,7 +758,7 @@ fn _serve_conn_worker(ctx: * u8) -> * u8 {
     // closes quietly without a spurious 500.
     let mut first: bool = true;
     loop {
-        let request: * u8 = _serve_recv_request(client_fd as i32, null);
+        let request: *u8 = _serve_recv_request(client_fd as i32, null);
         if request as i64 == 0 {
             // Bad/oversized/failed request: emit a 500 (first cycle only),
             // never call the handler with a null request pointer.
@@ -776,8 +776,8 @@ fn _serve_conn_worker(ctx: * u8) -> * u8 {
         // bounded across many reused requests). The raw `request` buffer is
         // owned by the move now — do NOT free it here (dispatch does).
         let req_box: OwnedBuf = _serve_wrap_owned(request, strlen(request) as i64);
-        let response: OwnedBuf = sfn_serve_handler_dispatch(handler as * u8, req_box);
-        let sent_ok: bool = _serve_send_response(client_fd as i32, null, response.ptr_addr as * u8, keep_alive);
+        let response: OwnedBuf = sfn_serve_handler_dispatch(handler as *u8, req_box);
+        let sent_ok: bool = _serve_send_response(client_fd as i32, null, response.ptr_addr as *u8, keep_alive);
         _serve_free_owned(response);
         if !keep_alive { break; }
         if !sent_ok { break; }
@@ -801,11 +801,11 @@ fn _serve_conn_worker(ctx: * u8) -> * u8 {
 // owner that knows the libc/arena discipline. The fire-and-forget `Task`
 // handle is now reclaimed by the pool worker via the detached path (#1203 —
 // `sfn_task_create_detached` in the accept loop below).
-fn _serve_conn_worker_framed(ctx: * u8) -> * u8 {
+fn _serve_conn_worker_framed(ctx: *u8) -> *u8 {
     if ctx as i64 == 0 { return null; }
     let base: i64 = ctx as i64;
-    let fd_slot: * i64 = base as * i64;
-    let handler_slot: * i64 = (base + 8) as * i64;
+    let fd_slot: *i64 = base as *i64;
+    let handler_slot: *i64 = (base + 8) as *i64;
     let client_fd: i64 = atomic_load(fd_slot);
     let handler: i64 = atomic_load(handler_slot);
     free(ctx);
@@ -818,7 +818,7 @@ fn _serve_conn_worker_framed(ctx: * u8) -> * u8 {
     // worker computes `keep_alive` here purely to decide whether to loop.
     let mut first: bool = true;
     loop {
-        let request: * u8 = _serve_recv_request(client_fd as i32, null);
+        let request: *u8 = _serve_recv_request(client_fd as i32, null);
         if request as i64 == 0 {
             if first { _serve_send_raw(client_fd as i32, null, null); }
             break;
@@ -826,8 +826,8 @@ fn _serve_conn_worker_framed(ctx: * u8) -> * u8 {
         first = false;
         let keep_alive: bool = _serve_keep_alive(request);
         let req_box: OwnedBuf = _serve_wrap_owned(request, strlen(request) as i64);
-        let response: OwnedBuf = sfn_serve_handler_dispatch(handler as * u8, req_box);
-        let sent_ok: bool = _serve_send_raw(client_fd as i32, null, response.ptr_addr as * u8);
+        let response: OwnedBuf = sfn_serve_handler_dispatch(handler as *u8, req_box);
+        let sent_ok: bool = _serve_send_raw(client_fd as i32, null, response.ptr_addr as *u8);
         _serve_free_owned(response);
         if !keep_alive { break; }
         if !sent_ok { break; }
@@ -855,12 +855,12 @@ fn _serve_conn_worker_framed(ctx: * u8) -> * u8 {
 // shared `server_ctx` is NOT freed here — it lives for the server's
 // lifetime and is used by every worker (OpenSSL `SSL_CTX` is refcounted and
 // thread-safe for `SSL_new`).
-fn _serve_conn_worker_tls(ctx: * u8) -> * u8 {
+fn _serve_conn_worker_tls(ctx: *u8) -> *u8 {
     if ctx as i64 == 0 { return null; }
     let base: i64 = ctx as i64;
-    let fd_slot: * i64 = base as * i64;
-    let handler_slot: * i64 = (base + 8) as * i64;
-    let ctx_slot: * i64 = (base + 16) as * i64;
+    let fd_slot: *i64 = base as *i64;
+    let handler_slot: *i64 = (base + 8) as *i64;
+    let ctx_slot: *i64 = (base + 16) as *i64;
     let client_fd: i64 = atomic_load(fd_slot);
     let handler: i64 = atomic_load(handler_slot);
     let server_ctx: i64 = atomic_load(ctx_slot);
@@ -875,7 +875,7 @@ fn _serve_conn_worker_tls(ctx: * u8) -> * u8 {
 
     // Server-side handshake. On failure, drop the connection (no plaintext
     // fallback on a TLS port).
-    let ssl: * u8 = tls_accept_fd(server_ctx as * u8, client_fd as i32);
+    let ssl: *u8 = tls_accept_fd(server_ctx as *u8, client_fd as i32);
     if ssl as i64 == 0 {
         close(client_fd as i32);
         return null;
@@ -883,7 +883,7 @@ fn _serve_conn_worker_tls(ctx: * u8) -> * u8 {
 
     let mut first: bool = true;
     loop {
-        let request: * u8 = _serve_recv_request(client_fd as i32, ssl);
+        let request: *u8 = _serve_recv_request(client_fd as i32, ssl);
         if request as i64 == 0 {
             if first {
                 _serve_send_response(client_fd as i32, ssl, null, false);
@@ -893,8 +893,8 @@ fn _serve_conn_worker_tls(ctx: * u8) -> * u8 {
         first = false;
         let keep_alive: bool = _serve_keep_alive(request);
         let req_box: OwnedBuf = _serve_wrap_owned(request, strlen(request) as i64);
-        let response: OwnedBuf = sfn_serve_handler_dispatch(handler as * u8, req_box);
-        let sent_ok: bool = _serve_send_response(client_fd as i32, ssl, response.ptr_addr as * u8, keep_alive);
+        let response: OwnedBuf = sfn_serve_handler_dispatch(handler as *u8, req_box);
+        let sent_ok: bool = _serve_send_response(client_fd as i32, ssl, response.ptr_addr as *u8, keep_alive);
         _serve_free_owned(response);
         if !keep_alive { break; }
         if !sent_ok { break; }
@@ -909,12 +909,12 @@ fn _serve_conn_worker_tls(ctx: * u8) -> * u8 {
 // TLS exactly like `_serve_conn_worker_tls`, but sends the handler's returned
 // bytes verbatim so typed capsule `Response.status` and headers are preserved
 // over HTTPS. Handshake failures drop the raw fd without plaintext fallback.
-fn _serve_conn_worker_framed_tls(ctx: * u8) -> * u8 {
+fn _serve_conn_worker_framed_tls(ctx: *u8) -> *u8 {
     if ctx as i64 == 0 { return null; }
     let base: i64 = ctx as i64;
-    let fd_slot: * i64 = base as * i64;
-    let handler_slot: * i64 = (base + 8) as * i64;
-    let ctx_slot: * i64 = (base + 16) as * i64;
+    let fd_slot: *i64 = base as *i64;
+    let handler_slot: *i64 = (base + 8) as *i64;
+    let ctx_slot: *i64 = (base + 16) as *i64;
     let client_fd: i64 = atomic_load(fd_slot);
     let handler: i64 = atomic_load(handler_slot);
     let server_ctx: i64 = atomic_load(ctx_slot);
@@ -922,7 +922,7 @@ fn _serve_conn_worker_framed_tls(ctx: * u8) -> * u8 {
 
     _serve_set_socket_timeouts(client_fd as i32);
 
-    let ssl: * u8 = tls_accept_fd(server_ctx as * u8, client_fd as i32);
+    let ssl: *u8 = tls_accept_fd(server_ctx as *u8, client_fd as i32);
     if ssl as i64 == 0 {
         close(client_fd as i32);
         return null;
@@ -930,7 +930,7 @@ fn _serve_conn_worker_framed_tls(ctx: * u8) -> * u8 {
 
     let mut first: bool = true;
     loop {
-        let request: * u8 = _serve_recv_request(client_fd as i32, ssl);
+        let request: *u8 = _serve_recv_request(client_fd as i32, ssl);
         if request as i64 == 0 {
             if first { _serve_send_raw(client_fd as i32, ssl, null); }
             break;
@@ -938,8 +938,8 @@ fn _serve_conn_worker_framed_tls(ctx: * u8) -> * u8 {
         first = false;
         let keep_alive: bool = _serve_keep_alive(request);
         let req_box: OwnedBuf = _serve_wrap_owned(request, strlen(request) as i64);
-        let response: OwnedBuf = sfn_serve_handler_dispatch(handler as * u8, req_box);
-        let sent_ok: bool = _serve_send_raw(client_fd as i32, ssl, response.ptr_addr as * u8);
+        let response: OwnedBuf = sfn_serve_handler_dispatch(handler as *u8, req_box);
+        let sent_ok: bool = _serve_send_raw(client_fd as i32, ssl, response.ptr_addr as *u8);
         _serve_free_owned(response);
         if !keep_alive { break; }
         if !sent_ok { break; }
@@ -970,7 +970,7 @@ fn _serve_bind_listen(port: i64) -> i32 {
         // Allow immediate rebind after a restart (skip TIME_WAIT
         // EADDRINUSE) — armed before `bind` (#1583).
         _serve_set_reuseaddr(fd);
-        let addr: * u8 = malloc(16 as usize);
+        let addr: *u8 = malloc(16 as usize);
         if addr as i64 == 0 {
             close(fd);
             return 0 - 1;
@@ -1006,17 +1006,17 @@ fn _serve_bind_listen(port: i64) -> i32 {
 // NOT return (the loop only exits on an `accept` error, after which
 // it closes the listening socket). `handler` is the raw `i8*` code
 // pointer the emitter passes; `port` is the listening TCP port.
-fn sfn_serve(handler: * u8, port: i32) -> void ![net, io] {
+fn sfn_serve(handler: *u8, port: i32) -> void ![net, io] {
     let listen_fd: i32 = _serve_bind_listen(port as i64);
     if listen_fd < 0 { return; }
 
     // One shared queue + fixed worker pool for the whole server.
-    let queue: * u8 = sfn_taskqueue_create(256);
+    let queue: *u8 = sfn_taskqueue_create(256);
     if queue as i64 == 0 {
         close(listen_fd);
         return;
     }
-    let scheduler: * u8 = sfn_scheduler_create(queue);
+    let scheduler: *u8 = sfn_scheduler_create(queue);
     if scheduler as i64 == 0 {
         // Tear down the already-initialized queue before bailing.
         sfn_taskqueue_destroy(queue);
@@ -1029,18 +1029,18 @@ fn sfn_serve(handler: * u8, port: i32) -> void ![net, io] {
         if client_fd < 0 { break; }
 
         // Pack [client_fd][handler] for the connection worker.
-        let conn_ctx: * u8 = malloc(16 as usize);
+        let conn_ctx: *u8 = malloc(16 as usize);
         if conn_ctx as i64 == 0 {
             close(client_fd);
             continue;
         }
-        let fd_slot: * i64 = conn_ctx as * i64;
-        let handler_slot: * i64 = (conn_ctx as i64 + 8) as * i64;
+        let fd_slot: *i64 = conn_ctx as *i64;
+        let handler_slot: *i64 = (conn_ctx as i64 + 8) as *i64;
         atomic_store(fd_slot, client_fd as i64);
         atomic_store(handler_slot, handler as i64);
 
-        let worker: * fn (* u8) -> * u8 = _serve_conn_worker as * fn (* u8) -> * u8;
-        let task: * u8 = sfn_task_create_detached(worker as i64, conn_ctx as i64);
+        let worker: *fn (*u8) -> *u8 = _serve_conn_worker as *fn (*u8) -> *u8;
+        let task: *u8 = sfn_task_create_detached(worker as i64, conn_ctx as i64);
         if task as i64 == 0 {
             free(conn_ctx);
             close(client_fd);
@@ -1060,17 +1060,17 @@ fn sfn_serve(handler: * u8, port: i32) -> void ![net, io] {
 // always frames `200 OK`). Same blocking accept loop + shared fixed pool;
 // does NOT return. New Sailfin-only symbol (migration-mechanism 3,
 // additive — no C body, no shared-struct layout).
-fn sfn_serve_framed(handler: * u8, port: i32) -> void ![net, io] {
+fn sfn_serve_framed(handler: *u8, port: i32) -> void ![net, io] {
     let listen_fd: i32 = _serve_bind_listen(port as i64);
     if listen_fd < 0 { return; }
 
     // One shared queue + fixed worker pool for the whole server.
-    let queue: * u8 = sfn_taskqueue_create(256);
+    let queue: *u8 = sfn_taskqueue_create(256);
     if queue as i64 == 0 {
         close(listen_fd);
         return;
     }
-    let scheduler: * u8 = sfn_scheduler_create(queue);
+    let scheduler: *u8 = sfn_scheduler_create(queue);
     if scheduler as i64 == 0 {
         sfn_taskqueue_destroy(queue);
         close(listen_fd);
@@ -1082,18 +1082,18 @@ fn sfn_serve_framed(handler: * u8, port: i32) -> void ![net, io] {
         if client_fd < 0 { break; }
 
         // Pack [client_fd][handler] for the connection worker.
-        let conn_ctx: * u8 = malloc(16 as usize);
+        let conn_ctx: *u8 = malloc(16 as usize);
         if conn_ctx as i64 == 0 {
             close(client_fd);
             continue;
         }
-        let fd_slot: * i64 = conn_ctx as * i64;
-        let handler_slot: * i64 = (conn_ctx as i64 + 8) as * i64;
+        let fd_slot: *i64 = conn_ctx as *i64;
+        let handler_slot: *i64 = (conn_ctx as i64 + 8) as *i64;
         atomic_store(fd_slot, client_fd as i64);
         atomic_store(handler_slot, handler as i64);
 
-        let worker: * fn (* u8) -> * u8 = _serve_conn_worker_framed as * fn (* u8) -> * u8;
-        let task: * u8 = sfn_task_create_detached(worker as i64, conn_ctx as i64);
+        let worker: *fn (*u8) -> *u8 = _serve_conn_worker_framed as *fn (*u8) -> *u8;
+        let task: *u8 = sfn_task_create_detached(worker as i64, conn_ctx as i64);
         if task as i64 == 0 {
             free(conn_ctx);
             close(client_fd);
@@ -1111,19 +1111,19 @@ fn sfn_serve_framed(handler: * u8, port: i32) -> void ![net, io] {
 // `OwnedBuf` requests, and send the handler's FULL pre-framed HTTP/1.1
 // response verbatim over TLS. This is the runtime entry used by the typed
 // `sfn/http` `serve_tls` wrapper.
-fn sfn_serve_framed_tls(handler: * u8, port: i32, cert_path: * u8, key_path: * u8) -> void ![net, io] {
-    let server_ctx: * u8 = tls_server_ctx(cert_path, key_path);
+fn sfn_serve_framed_tls(handler: *u8, port: i32, cert_path: *u8, key_path: *u8) -> void ![net, io] {
+    let server_ctx: *u8 = tls_server_ctx(cert_path, key_path);
     if server_ctx as i64 == 0 { return; }
 
     let listen_fd: i32 = _serve_bind_listen(port as i64);
     if listen_fd < 0 { return; }
 
-    let queue: * u8 = sfn_taskqueue_create(256);
+    let queue: *u8 = sfn_taskqueue_create(256);
     if queue as i64 == 0 {
         close(listen_fd);
         return;
     }
-    let scheduler: * u8 = sfn_scheduler_create(queue);
+    let scheduler: *u8 = sfn_scheduler_create(queue);
     if scheduler as i64 == 0 {
         sfn_taskqueue_destroy(queue);
         close(listen_fd);
@@ -1134,20 +1134,20 @@ fn sfn_serve_framed_tls(handler: * u8, port: i32, cert_path: * u8, key_path: * u
         let client_fd: i32 = accept(listen_fd, null, null);
         if client_fd < 0 { break; }
 
-        let conn_ctx: * u8 = malloc(24 as usize);
+        let conn_ctx: *u8 = malloc(24 as usize);
         if conn_ctx as i64 == 0 {
             close(client_fd);
             continue;
         }
-        let fd_slot: * i64 = conn_ctx as * i64;
-        let handler_slot: * i64 = (conn_ctx as i64 + 8) as * i64;
-        let ctx_slot: * i64 = (conn_ctx as i64 + 16) as * i64;
+        let fd_slot: *i64 = conn_ctx as *i64;
+        let handler_slot: *i64 = (conn_ctx as i64 + 8) as *i64;
+        let ctx_slot: *i64 = (conn_ctx as i64 + 16) as *i64;
         atomic_store(fd_slot, client_fd as i64);
         atomic_store(handler_slot, handler as i64);
         atomic_store(ctx_slot, server_ctx as i64);
 
-        let worker: * fn (* u8) -> * u8 = _serve_conn_worker_framed_tls as * fn (* u8) -> * u8;
-        let task: * u8 = sfn_task_create_detached(worker as i64, conn_ctx as i64);
+        let worker: *fn (*u8) -> *u8 = _serve_conn_worker_framed_tls as *fn (*u8) -> *u8;
+        let task: *u8 = sfn_task_create_detached(worker as i64, conn_ctx as i64);
         if task as i64 == 0 {
             free(conn_ctx);
             close(client_fd);
@@ -1173,23 +1173,23 @@ fn sfn_serve_framed_tls(handler: * u8, port: i32, cert_path: * u8, key_path: * u
 // `sfn_serve_framed` paths are untouched — TLS mode is a distinct
 // entrypoint + worker, so a build that never calls `sfn_serve_tls` links no
 // TLS accept path.
-fn sfn_serve_tls(handler: * u8, port: i32, cert_path: * u8, key_path: * u8) -> void ![net, io] {
+fn sfn_serve_tls(handler: *u8, port: i32, cert_path: *u8, key_path: *u8) -> void ![net, io] {
     // Build the server TLS context once (cert + key held for the server's
     // lifetime). A load failure means we cannot terminate TLS — return
     // without binding rather than serve plaintext on a TLS port.
-    let server_ctx: * u8 = tls_server_ctx(cert_path, key_path);
+    let server_ctx: *u8 = tls_server_ctx(cert_path, key_path);
     if server_ctx as i64 == 0 { return; }
 
     let listen_fd: i32 = _serve_bind_listen(port as i64);
     if listen_fd < 0 { return; }
 
     // One shared queue + fixed worker pool for the whole server.
-    let queue: * u8 = sfn_taskqueue_create(256);
+    let queue: *u8 = sfn_taskqueue_create(256);
     if queue as i64 == 0 {
         close(listen_fd);
         return;
     }
-    let scheduler: * u8 = sfn_scheduler_create(queue);
+    let scheduler: *u8 = sfn_scheduler_create(queue);
     if scheduler as i64 == 0 {
         sfn_taskqueue_destroy(queue);
         close(listen_fd);
@@ -1202,20 +1202,20 @@ fn sfn_serve_tls(handler: * u8, port: i32, cert_path: * u8, key_path: * u8) -> v
 
         // Pack [client_fd][handler][server_ctx] for the TLS connection
         // worker (24 bytes; the plaintext workers use a 16-byte pair).
-        let conn_ctx: * u8 = malloc(24 as usize);
+        let conn_ctx: *u8 = malloc(24 as usize);
         if conn_ctx as i64 == 0 {
             close(client_fd);
             continue;
         }
-        let fd_slot: * i64 = conn_ctx as * i64;
-        let handler_slot: * i64 = (conn_ctx as i64 + 8) as * i64;
-        let ctx_slot: * i64 = (conn_ctx as i64 + 16) as * i64;
+        let fd_slot: *i64 = conn_ctx as *i64;
+        let handler_slot: *i64 = (conn_ctx as i64 + 8) as *i64;
+        let ctx_slot: *i64 = (conn_ctx as i64 + 16) as *i64;
         atomic_store(fd_slot, client_fd as i64);
         atomic_store(handler_slot, handler as i64);
         atomic_store(ctx_slot, server_ctx as i64);
 
-        let worker: * fn (* u8) -> * u8 = _serve_conn_worker_tls as * fn (* u8) -> * u8;
-        let task: * u8 = sfn_task_create_detached(worker as i64, conn_ctx as i64);
+        let worker: *fn (*u8) -> *u8 = _serve_conn_worker_tls as *fn (*u8) -> *u8;
+        let task: *u8 = sfn_task_create_detached(worker as i64, conn_ctx as i64);
         if task as i64 == 0 {
             free(conn_ctx);
             close(client_fd);
@@ -1236,4 +1236,4 @@ fn sfn_serve_tls(handler: * u8, port: i32, cert_path: * u8, key_path: * u8) -> v
 // Sailfin no-op replaces the deleted C stub so no emitted module demands a
 // C symbol; behaviour is byte-identical (no-op -> no-op). Retiring the dead
 // prelude `serve()` fallback itself is a separate API cleanup.
-fn sailfin_runtime_serve(handler: * u8, config: * u8) -> void { }
+fn sailfin_runtime_serve(handler: *u8, config: *u8) -> void { }

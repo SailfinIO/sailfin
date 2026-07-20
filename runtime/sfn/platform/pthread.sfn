@@ -68,32 +68,32 @@
 // described in the file header: `pthread_create` writes a new
 // `pthread_t` into `* usize`; `pthread_join` consumes one by
 // value as `usize`.
-extern fn pthread_create(thread: * usize, attr: * PthreadAttr, start: * u8, arg: * u8) -> i32;
+extern fn pthread_create(thread: *usize, attr: *PthreadAttr, start: *u8, arg: *u8) -> i32;
 
-extern fn pthread_join(thread: usize, result: * * u8) -> i32;
+extern fn pthread_join(thread: usize, result: **u8) -> i32;
 
 // ── Mutex lifecycle ───────────────────────────────────────────
 // `attr` is `* PthreadMutexAttr`; adapters that want default
 // attributes pass null. v0 does not declare
 // `pthread_mutexattr_*` lifecycle helpers because the scheduler
 // design (§2.6.1) only needs default mutexes.
-extern fn pthread_mutex_init(m: * PthreadMutex, attr: * PthreadMutexAttr) -> i32;
+extern fn pthread_mutex_init(m: *PthreadMutex, attr: *PthreadMutexAttr) -> i32;
 
-extern fn pthread_mutex_lock(m: * PthreadMutex) -> i32;
+extern fn pthread_mutex_lock(m: *PthreadMutex) -> i32;
 
-extern fn pthread_mutex_unlock(m: * PthreadMutex) -> i32;
+extern fn pthread_mutex_unlock(m: *PthreadMutex) -> i32;
 
-extern fn pthread_mutex_destroy(m: * PthreadMutex) -> i32;
+extern fn pthread_mutex_destroy(m: *PthreadMutex) -> i32;
 
 // ── Condition variables ───────────────────────────────────────
 // Used by `Channel<T>` for not-empty / not-full signalling
 // (§2.6.4) and by `SfnFuture` for await blocking (§2.6.3).
-extern fn pthread_cond_init(c: * PthreadCond, attr: * PthreadCondAttr) -> i32;
+extern fn pthread_cond_init(c: *PthreadCond, attr: *PthreadCondAttr) -> i32;
 
-extern fn pthread_cond_wait(c: * PthreadCond, m: * PthreadMutex) -> i32;
+extern fn pthread_cond_wait(c: *PthreadCond, m: *PthreadMutex) -> i32;
 
-extern fn pthread_cond_signal(c: * PthreadCond) -> i32;
+extern fn pthread_cond_signal(c: *PthreadCond) -> i32;
 
-extern fn pthread_cond_broadcast(c: * PthreadCond) -> i32;
+extern fn pthread_cond_broadcast(c: *PthreadCond) -> i32;
 
-extern fn pthread_cond_destroy(c: * PthreadCond) -> i32;
+extern fn pthread_cond_destroy(c: *PthreadCond) -> i32;

@@ -61,7 +61,7 @@ import { parse_response } from "./wire";
 // then views it as a Sailfin `string` via the canonical `* u8 as string`
 // cast. The extern carries no effect (externs may not); enforcement
 // rides on `fetch`'s own `![net]` annotation.
-extern fn sfn_http_request_raw(method: * u8, url: * u8, headers: * u8, body: * u8) -> * u8;
+extern fn sfn_http_request_raw(method: *u8, url: *u8, headers: *u8, body: *u8) -> *u8;
 
 // ---- Client ----
 fn get(url: string) -> string ![net] {
@@ -93,7 +93,7 @@ fn fetch(method: string, url: string, headers: string[], body: string) -> Respon
         headers_blob = headers_blob + headers[i] + "\r\n";
         i = i + 1;
     }
-    let raw_ptr = sfn_http_request_raw(method as * u8, url as * u8, headers_blob as * u8, body as * u8);
+    let raw_ptr = sfn_http_request_raw(method as *u8, url as *u8, headers_blob as *u8, body as *u8);
     if raw_ptr as i64 == 0 {
         // Socket/connect failure — surface a status-0 Response rather
         // than dereferencing a null buffer as a string.

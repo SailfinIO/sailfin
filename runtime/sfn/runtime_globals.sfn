@@ -33,4 +33,4 @@
 // the `runtime.*` builtin namespace in any caller.
 //
 // Effects: none. This is a pure data definition below the I/O layer.
-extern var runtime: * u8 = null;
+extern var runtime: *u8 = null;

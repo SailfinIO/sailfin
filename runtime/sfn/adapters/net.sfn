@@ -47,26 +47,26 @@
 // AF_INET = 2, SOCK_STREAM = 1 (identical on Linux x86_64 and macOS
 // arm64, the two targets this runtime builds for).
 // ── libc memory + string helpers ──────────────────────────────
-extern fn malloc(size: usize) -> * u8;
+extern fn malloc(size: usize) -> *u8;
 
-extern fn free(ptr: * u8) -> void;
+extern fn free(ptr: *u8) -> void;
 
-extern fn realloc(ptr: * u8, new_size: usize) -> * u8;
+extern fn realloc(ptr: *u8, new_size: usize) -> *u8;
 
-extern fn memset(dst: * u8, byte: i32, n: usize) -> * u8;
+extern fn memset(dst: *u8, byte: i32, n: usize) -> *u8;
 
-extern fn memcpy(dst: * u8, src: * u8, n: usize) -> * u8;
+extern fn memcpy(dst: *u8, src: *u8, n: usize) -> *u8;
 
-extern fn strlen(s: * u8) -> usize;
+extern fn strlen(s: *u8) -> usize;
 
-extern fn strchr(s: * u8, c: i32) -> * u8;
+extern fn strchr(s: *u8, c: i32) -> *u8;
 
-extern fn strcmp(a: * u8, b: * u8) -> i32;
+extern fn strcmp(a: *u8, b: *u8) -> i32;
 
 // C `int atoi(const char *)` — parses a leading decimal integer, stops at
 // the first non-digit. Declared `-> i32` to match the C 32-bit return;
 // octet / port values fit comfortably.
-extern fn atoi(s: * u8) -> i32;
+extern fn atoi(s: *u8) -> i32;
 
 // ── BSD sockets (libc) ────────────────────────────────────────
 // `addr` is spelled `* u8` (the `net.sfn` opaque-handle policy: adapters
@@ -77,23 +77,23 @@ extern fn atoi(s: * u8) -> i32;
 // the linker resolves each module's `declare` to the single libc symbol.
 extern fn socket(domain: i32, ty: i32, protocol: i32) -> i32;
 
-extern fn connect(sockfd: i32, addr: * u8, addrlen: i32) -> i32;
+extern fn connect(sockfd: i32, addr: *u8, addrlen: i32) -> i32;
 
-extern fn bind(sockfd: i32, addr: * u8, addrlen: i32) -> i32;
+extern fn bind(sockfd: i32, addr: *u8, addrlen: i32) -> i32;
 
 extern fn listen(sockfd: i32, backlog: i32) -> i32;
 
-extern fn accept(sockfd: i32, addr: * u8, addrlen: * i32) -> i32;
+extern fn accept(sockfd: i32, addr: *u8, addrlen: *i32) -> i32;
 
-extern fn getsockname(sockfd: i32, addr: * u8, addrlen: * i32) -> i32;
+extern fn getsockname(sockfd: i32, addr: *u8, addrlen: *i32) -> i32;
 
-extern fn send(sockfd: i32, buf: * u8, len: i64, flags: i32) -> i64;
+extern fn send(sockfd: i32, buf: *u8, len: i64, flags: i32) -> i64;
 
-extern fn recv(sockfd: i32, buf: * u8, len: i64, flags: i32) -> i64;
+extern fn recv(sockfd: i32, buf: *u8, len: i64, flags: i32) -> i64;
 
 extern fn close(fd: i32) -> i32;
 
-extern fn setsockopt(sockfd: i32, level: i32, optname: i32, optval: * u8, optlen: i32) -> i32;
+extern fn setsockopt(sockfd: i32, level: i32, optname: i32, optval: *u8, optlen: i32) -> i32;
 
 // ── DNS resolution (libc) ─────────────────────────────────────
 // `int getaddrinfo(const char *node, const char *service,
@@ -106,15 +106,15 @@ extern fn setsockopt(sockfd: i32, level: i32, optname: i32, optval: * u8, optlen
 // and `posix_spawnp`'s argv/envp use, on the extern accept-list). Declared
 // inline per the same #306 cross-module-extern workaround as the socket
 // externs above.
-extern fn getaddrinfo(node: * u8, service: * u8, hints: * u8, res: * * u8) -> i32;
+extern fn getaddrinfo(node: *u8, service: *u8, hints: *u8, res: **u8) -> i32;
 
-extern fn freeaddrinfo(res: * u8) -> void;
+extern fn freeaddrinfo(res: *u8) -> void;
 
 // `_net_ptr_off(p, off)` — byte-stride pointer arithmetic for a variable
 // offset (net-local copy of `http.sfn`'s `_ptr_off`).
-fn _net_ptr_off(p: * u8, off: i64) -> * u8 {
+fn _net_ptr_off(p: *u8, off: i64) -> *u8 {
     let addr: i64 = (p as i64) + off;
-    return addr as * u8;
+    return addr as *u8;
 }
 
 // `_net_first_is_digit(p)` — is the first byte at `p` an ASCII digit
@@ -122,7 +122,7 @@ fn _net_ptr_off(p: * u8, off: i64) -> * u8 {
 // `atoi` (which returns 0 for `"foo"`) can smuggle a hostname through the
 // dotted-quad parser as octet 0. Reads the byte via the pointer-read
 // intrinsic and masks the low 8 bits.
-fn _net_first_is_digit(p: * u8) -> bool {
+fn _net_first_is_digit(p: *u8) -> bool {
     let b: i64 = (sailfin_intrinsic_pointer_read_i32(p) as i64) & 255;
     return b >= 48 && b <= 57;
 }
@@ -131,8 +131,8 @@ fn _net_first_is_digit(p: * u8) -> bool {
 // IPv4 address, writing the four octets to `out[0..4]`. Returns false on
 // anything that is not a clean `N.N.N.N` (each octet a leading-digit value
 // in 0..255 separated by `.`), leaving the caller to fall through to DNS.
-fn _net_parse_quad(host: * u8, out: * u8) -> bool {
-    let mut cursor: * u8 = host;
+fn _net_parse_quad(host: *u8, out: *u8) -> bool {
+    let mut cursor: *u8 = host;
     let mut i: i64 = 0;
     loop {
         if i >= 4 { break; }
@@ -147,7 +147,7 @@ fn _net_parse_quad(host: * u8, out: * u8) -> bool {
         if octet < 0 || octet > 255 { return false; }
         memset(_net_ptr_off(out, i), octet as i32, 1 as usize);
         if i < 3 {
-            let dot: * u8 = strchr(cursor, 46);
+            let dot: *u8 = strchr(cursor, 46);
             if dot as i64 == 0 { return false; }
             cursor = _net_ptr_off(dot, 1);
         }
@@ -166,13 +166,13 @@ fn _net_parse_quad(host: * u8, out: * u8) -> bool {
 // address octets sit at offset 4 on both layouts. The control byte 2 never
 // appears as the first byte of a hostname string, so this also rejects an
 // `ai_canonname` char-pointer mistaken for a sockaddr (see `_net_resolve_dns`).
-fn _net_sockaddr_octets(sa: i64, out: * u8) -> bool {
+fn _net_sockaddr_octets(sa: i64, out: *u8) -> bool {
     if sa == 0 { return false; }
-    let head4: i64 = sailfin_intrinsic_pointer_read_i32(sa as * u8) as i64;
+    let head4: i64 = sailfin_intrinsic_pointer_read_i32(sa as *u8) as i64;
     let b0: i64 = head4 & 255;
     let b1: i64 = (head4 >> 8) & 255;
     if b0 != 2 && b1 != 2 { return false; }
-    memcpy(out, (sa + 4) as * u8, 4 as usize);
+    memcpy(out, (sa + 4) as *u8, 4 as usize);
     return true;
 }
 
@@ -194,21 +194,21 @@ fn _net_sockaddr_octets(sa: i64, out: * u8) -> bool {
 // AI_CANONNAME is not requested). The platform-agnostic emitted IR cannot
 // branch on the target, so we read both candidate slots and let
 // `_net_sockaddr_octets` pick the one that validates as an AF_INET sockaddr.
-fn _net_resolve_dns(host: * u8, out: * u8) -> bool ![net] {
-    let hints: * u8 = malloc(48 as usize);
+fn _net_resolve_dns(host: *u8, out: *u8) -> bool ![net] {
+    let hints: *u8 = malloc(48 as usize);
     if hints as i64 == 0 { return false; }
     memset(hints, 0, 48 as usize);
     // ai_family = AF_INET (2) at offset 4; ai_socktype = SOCK_STREAM (1)
     // at offset 8 — identical offsets on both targets.
     memset(_net_ptr_off(hints, 4), 2, 1 as usize);
     memset(_net_ptr_off(hints, 8), 1, 1 as usize);
-    let res: * u8 = malloc(8 as usize);
+    let res: *u8 = malloc(8 as usize);
     if res as i64 == 0 {
         free(hints);
         return false;
     }
     memset(res, 0, 8 as usize);
-    let rc: i32 = getaddrinfo(host, null, hints, res as * * u8);
+    let rc: i32 = getaddrinfo(host, null, hints, res as **u8);
     free(hints);
     if rc != 0 {
         free(res);
@@ -217,13 +217,13 @@ fn _net_resolve_dns(host: * u8, out: * u8) -> bool ![net] {
     let head: i64 = sailfin_intrinsic_pointer_read_i64(res);
     free(res);
     if head == 0 { return false; }
-    let cand_a: i64 = sailfin_intrinsic_pointer_read_i64((head + 24) as * u8);
-    let cand_b: i64 = sailfin_intrinsic_pointer_read_i64((head + 32) as * u8);
+    let cand_a: i64 = sailfin_intrinsic_pointer_read_i64((head + 24) as *u8);
+    let cand_b: i64 = sailfin_intrinsic_pointer_read_i64((head + 32) as *u8);
     let mut ok: bool = false;
     if _net_sockaddr_octets(cand_a, out) { ok = true; } else {
         if _net_sockaddr_octets(cand_b, out) { ok = true; }
     }
-    freeaddrinfo(head as * u8);
+    freeaddrinfo(head as *u8);
     return ok;
 }
 
@@ -232,9 +232,9 @@ fn _net_resolve_dns(host: * u8, out: * u8) -> bool ![net] {
 // addresses directly; anything else (a real hostname) falls through to DNS
 // via `getaddrinfo` (#1540 B2). `out` must point at >= 4 writable bytes.
 // Net-local copy of `http.sfn`'s `_host_ip4`.
-fn _net_host_ip4(host: * u8, out: * u8) -> bool ![net] {
+fn _net_host_ip4(host: *u8, out: *u8) -> bool ![net] {
     let localhost: string = "localhost";
-    if strcmp(host, localhost as * u8) == 0 {
+    if strcmp(host, localhost as *u8) == 0 {
         memset(_net_ptr_off(out, 0), 127, 1 as usize);
         memset(_net_ptr_off(out, 1), 0, 1 as usize);
         memset(_net_ptr_off(out, 2), 0, 1 as usize);
@@ -260,7 +260,7 @@ fn _net_io_timeout_secs() -> i64 { return 10; }
 //   - Linux x86_64: SOL_SOCKET=1,      SO_RCVTIMEO=20,     SO_SNDTIMEO=21.
 //   - macOS arm64:  SOL_SOCKET=0xffff, SO_RCVTIMEO=0x1006, SO_SNDTIMEO=0x1005.
 fn _net_set_socket_timeouts(fd: i32) -> void {
-    let tv: * u8 = malloc(16 as usize);
+    let tv: *u8 = malloc(16 as usize);
     if tv as i64 == 0 { return; }
     memset(tv, 0, 16 as usize);
     memset(_net_ptr_off(tv, 0), _net_io_timeout_secs() as i32, 1 as usize);
@@ -280,7 +280,7 @@ fn _net_set_socket_timeouts(fd: i32) -> void {
 //   - Linux:     SOL_SOCKET = 1,     SO_REUSEADDR = 2.
 //   - macOS/BSD: SOL_SOCKET = 65535, SO_REUSEADDR = 4.
 fn _net_set_reuseaddr(fd: i32) -> void {
-    let optval: * u8 = malloc(4 as usize);
+    let optval: *u8 = malloc(4 as usize);
     if optval as i64 == 0 { return; }
     memset(optval, 0, 4 as usize);
     memset(_net_ptr_off(optval, 0), 1, 1 as usize);
@@ -294,7 +294,7 @@ fn _net_set_reuseaddr(fd: i32) -> void {
 // (0 = Linux, 1 = macOS/BSD). The four `sin_addr` octets at offset 4 are
 // left to the caller (filled by `_net_host_ip4`, or zeroed for
 // INADDR_ANY). See `http.sfn::_connect_tcp` for the dual-layout rationale.
-fn _net_fill_sockaddr(addr: * u8, attempt: i64, port: i64) -> void {
+fn _net_fill_sockaddr(addr: *u8, attempt: i64, port: i64) -> void {
     memset(addr, 0, 16 as usize);
     if attempt == 0 {
         // Linux: u16 sin_family at offset 0.
@@ -314,11 +314,11 @@ fn _net_fill_sockaddr(addr: * u8, attempt: i64, port: i64) -> void {
 // the Linux and macOS `sockaddr_in` layouts (fresh socket each time, first
 // success wins) so the platform-agnostic emitted IR connects on either
 // target. Recv/send timeouts are armed before connect (#1581).
-fn sfn_net_connect(host: * u8, port: i64) -> i32 ![net] {
+fn sfn_net_connect(host: *u8, port: i64) -> i32 ![net] {
     let mut attempt: i64 = 0;
     loop {
         if attempt >= 2 { break; }
-        let addr: * u8 = malloc(16 as usize);
+        let addr: *u8 = malloc(16 as usize);
         if addr as i64 == 0 { return 0 - 1; }
         _net_fill_sockaddr(addr, attempt, port);
         // sin_addr octets at offset 4..8.
@@ -346,7 +346,7 @@ fn sfn_net_connect(host: * u8, port: i64) -> i32 ![net] {
 // full, retrying on short sends. Returns 0 on success, -1 on any `send`
 // failure. v0 length is `strlen(data)` (text bodies); embedded-NUL binary
 // writes are a follow-up wave.
-fn sfn_net_write_all(fd: i32, data: * u8) -> i32 ![net] {
+fn sfn_net_write_all(fd: i32, data: *u8) -> i32 ![net] {
     if data as i64 == 0 { return 0 - 1; }
     let total: i64 = strlen(data) as i64;
     let mut sent: i64 = 0;
@@ -366,16 +366,16 @@ fn sfn_net_write_all(fd: i32, data: * u8) -> i32 ![net] {
 // half (`close` / shutdown). Net-local mirror of `http.sfn::_recv_all`
 // without the length out-param (text v0: the caller views the result as a
 // `* u8 as string`).
-fn sfn_net_read_all(fd: i32) -> * u8 ![net] {
+fn sfn_net_read_all(fd: i32) -> *u8 ![net] {
     let mut capacity: i64 = 8192;
     let mut len: i64 = 0;
-    let mut buf: * u8 = malloc((capacity + 1) as usize);
+    let mut buf: *u8 = malloc((capacity + 1) as usize);
     if buf as i64 == 0 { return null; }
     let chunk: i64 = 8192;
     loop {
         if len + chunk > capacity {
             let new_cap: i64 = capacity * 2;
-            let new_buf: * u8 = realloc(buf, (new_cap + 1) as usize);
+            let new_buf: *u8 = realloc(buf, (new_cap + 1) as usize);
             if new_buf as i64 == 0 {
                 free(buf);
                 return null;
@@ -402,9 +402,9 @@ fn sfn_net_read_all(fd: i32) -> * u8 ![net] {
 // EOF). The result is a fresh NUL-terminated caller-owned buffer; an empty
 // string is returned for a clean EOF (`recv == 0`). Returns null on OOM, a
 // `recv` error, or a non-positive `max`.
-fn sfn_net_read_bytes(fd: i32, max: i64) -> * u8 ![net] {
+fn sfn_net_read_bytes(fd: i32, max: i64) -> *u8 ![net] {
     if max <= 0 { return null; }
-    let buf: * u8 = malloc((max + 1) as usize);
+    let buf: *u8 = malloc((max + 1) as usize);
     if buf as i64 == 0 { return null; }
     let n: i64 = recv(fd, buf, max, 0);
     if n < 0 {
@@ -426,14 +426,14 @@ fn sfn_net_close(fd: i32) -> void {
 // `sfn_net_listen_port`). Returns the listening fd, or -1 on failure. Tries
 // both sockaddr layouts like `sfn_net_connect`; SO_REUSEADDR is armed
 // before bind and recv-timeouts (which bound a hung `accept`) after listen.
-fn sfn_net_listen(host: * u8, port: i64) -> i32 ![net] {
+fn sfn_net_listen(host: *u8, port: i64) -> i32 ![net] {
     let mut attempt: i64 = 0;
     loop {
         if attempt >= 2 { break; }
         let fd: i32 = socket(2, 1, 0);
         if fd < 0 { return 0 - 1; }
         _net_set_reuseaddr(fd);
-        let addr: * u8 = malloc(16 as usize);
+        let addr: *u8 = malloc(16 as usize);
         if addr as i64 == 0 {
             close(fd);
             return 0 - 1;
@@ -469,17 +469,17 @@ fn sfn_net_listen(host: * u8, port: i64) -> i32 ![net] {
 // offset 0 covers `sin_family` (bytes 0..2) + `sin_port` (bytes 2..4); the
 // big-endian port is `byte2 * 256 + byte3`.
 fn sfn_net_listen_port(fd: i32) -> i64 ![net] {
-    let addr: * u8 = malloc(16 as usize);
+    let addr: *u8 = malloc(16 as usize);
     if addr as i64 == 0 { return 0 - 1; }
     memset(addr, 0, 16 as usize);
-    let lenbuf: * u8 = malloc(4 as usize);
+    let lenbuf: *u8 = malloc(4 as usize);
     if lenbuf as i64 == 0 {
         free(addr);
         return 0 - 1;
     }
     memset(lenbuf, 0, 4 as usize);
     memset(lenbuf, 16, 1 as usize);
-    let rc: i32 = getsockname(fd, addr, lenbuf as * i32);
+    let rc: i32 = getsockname(fd, addr, lenbuf as *i32);
     let mut port: i64 = 0 - 1;
     if rc == 0 {
         let raw: i64 = sailfin_intrinsic_pointer_read_i64(addr);
@@ -508,7 +508,7 @@ fn sfn_net_accept(fd: i32) -> i32 ![net] {
 // into `buf` at byte offset `off`, returning the new offset. Emits the
 // minimal number of digits (no leading zeros): 1 digit for 0..9, 2 for
 // 10..99, 3 for 100..255. Used to format the dotted-quad string.
-fn _net_render_u8(value: i64, buf: * u8, off: i64) -> i64 {
+fn _net_render_u8(value: i64, buf: *u8, off: i64) -> i64 {
     let mut cur: i64 = off;
     if value >= 100 {
         memset(_net_ptr_off(buf, cur), (48 + value / 100) as i32, 1 as usize);
@@ -529,9 +529,9 @@ fn _net_render_u8(value: i64, buf: * u8, off: i64) -> i64 {
 // is resolved through `getaddrinfo` (first A record, #1540 B2). Returns
 // null (→ an empty `string[]` at the capsule boundary) on failure, never a
 // hang or crash.
-fn sfn_net_resolve(host: * u8) -> * u8 ![net] {
+fn sfn_net_resolve(host: *u8) -> *u8 ![net] {
     if host as i64 == 0 { return null; }
-    let octets: * u8 = malloc(4 as usize);
+    let octets: *u8 = malloc(4 as usize);
     if octets as i64 == 0 { return null; }
     memset(octets, 0, 4 as usize);
     if !_net_host_ip4(host, octets) {
@@ -545,7 +545,7 @@ fn sfn_net_resolve(host: * u8) -> * u8 ![net] {
     let c: i64 = (packed >> 16) & 255;
     let d: i64 = (packed >> 24) & 255;
     // Max "255.255.255.255" is 15 bytes + NUL.
-    let buf: * u8 = malloc(16 as usize);
+    let buf: *u8 = malloc(16 as usize);
     if buf as i64 == 0 { return null; }
     let mut off: i64 = 0;
     off = _net_render_u8(a, buf, off);

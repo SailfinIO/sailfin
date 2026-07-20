@@ -1,39 +1,28 @@
 // examples/advanced/encapsulation-struct.sfn
-
 struct BankAccount {
-    mut balance: float; // Mutable field
+    mut balance: float;  // Mutable field
 
     // Constructor
     fn new(initialBalance: float) -> BankAccount {
-        if initialBalance < 0 {
-            throw "Initial balance cannot be negative.";
-        }
+        if initialBalance < 0 { throw "Initial balance cannot be negative."; }
         return BankAccount { balance: initialBalance };
     }
 
     // Instance method: Deposit money
     fn deposit(self, amount: float) -> void {
-        if amount <= 0 {
-            throw "Deposit amount must be positive.";
-        }
+        if amount <= 0 { throw "Deposit amount must be positive."; }
         self.balance += amount;
     }
 
     // Instance method: Withdraw money
     fn withdraw(self, amount: float) -> void {
-        if amount <= 0 {
-            throw "Withdrawal amount must be positive.";
-        }
-        if amount > self.balance {
-            throw "Insufficient funds.";
-        }
+        if amount <= 0 { throw "Withdrawal amount must be positive."; }
+        if amount > self.balance { throw "Insufficient funds."; }
         self.balance -= amount;
     }
 
     // Instance method: Check balance
-    fn getBalance(self) -> float {
-        return self.balance;
-    }
+    fn getBalance(self) -> float { return self.balance; }
 }
 
 fn main() ![io] {
@@ -42,16 +31,16 @@ fn main() ![io] {
 
     // Deposit money
     account.deposit(50);
-    print("Balance after deposit: {{account.getBalance()}}"); // Outputs: Balance after deposit: 150
+    print("Balance after deposit: {{account.getBalance()}}");  // Outputs: Balance after deposit: 150
 
     // Withdraw money
     account.withdraw(30);
-    print("Balance after withdrawal: {{account.getBalance()}}"); // Outputs: Balance after withdrawal: 120
+    print("Balance after withdrawal: {{account.getBalance()}}");  // Outputs: Balance after withdrawal: 120
 
     // Try an invalid operation
     try {
-        account.withdraw(200); // This will throw an error
+        account.withdraw(200);  // This will throw an error
     } catch (err) {
-        print("Error: {{err}}"); // Outputs: Error: Insufficient funds.
+        print("Error: {{err}}");  // Outputs: Error: Insufficient funds.
     }
 }

@@ -47,5 +47,5 @@ test "lowering: `(ptr as i64 + N) as * T` keeps the offset (#1189)" ![io] {
 
     // Regression guard: the original bug collapsed the whole expression to
     // a single `bitcast i8* %task to i64*`, discarding ptrtoint/add/inttoptr.
-    assert !_contains(ir, "bitcast i8* %task to i64*");
+    assert ! _contains(ir, "bitcast i8* %task to i64*");
 }

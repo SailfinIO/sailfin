@@ -1,8 +1,5 @@
 // examples/advanced/parametric-polymorphism.sfn
-
-fn identity<T>(value: T) -> T {
-    return value;
-}
+fn identity<T>(value: T) -> T { return value; }
 
 fn main() ![io] {
     let num = identity(42);

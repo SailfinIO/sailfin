@@ -45,35 +45,35 @@
 //   (M1.A.2), this helper can move back to `==`. The issue
 //   spec writes the assertions as `==` for readability; the
 //   `strcmp` wrapper preserves the semantics.
-extern fn binary_dir(exe: * u8) -> * u8;
+extern fn binary_dir(exe: *u8) -> *u8;
 
-extern fn strcmp(a: * u8, b: * u8) -> i32;
+extern fn strcmp(a: *u8, b: *u8) -> i32;
 
-fn equal_cstr(a: * u8, b: * u8) -> bool { return strcmp(a, b) == 0; }
+fn equal_cstr(a: *u8, b: *u8) -> bool { return strcmp(a, b) == 0; }
 
 test "binary_dir: empty input passes through" {
-    let r: * u8 = binary_dir("" as * u8);
-    assert equal_cstr(r, "" as * u8);
+    let r: *u8 = binary_dir("" as *u8);
+    assert equal_cstr(r, "" as *u8);
 }
 
 test "binary_dir: bare filename returns dot" {
-    let r: * u8 = binary_dir("sailfin" as * u8);
-    assert equal_cstr(r, "." as * u8);
+    let r: *u8 = binary_dir("sailfin" as *u8);
+    assert equal_cstr(r, "." as *u8);
 }
 
 test "binary_dir: slashed path returns dirname" {
-    let r: * u8 = binary_dir("/foo/bar/sailfin" as * u8);
-    assert equal_cstr(r, "/foo/bar" as * u8);
+    let r: *u8 = binary_dir("/foo/bar/sailfin" as *u8);
+    assert equal_cstr(r, "/foo/bar" as *u8);
 }
 
 test "binary_dir: root-relative single segment returns slash" {
-    let r: * u8 = binary_dir("/sailfin" as * u8);
-    assert equal_cstr(r, "/" as * u8);
+    let r: *u8 = binary_dir("/sailfin" as *u8);
+    assert equal_cstr(r, "/" as *u8);
 }
 
 test "binary_dir: single-component relative path returns dot" {
-    let r: * u8 = binary_dir("hello.sfn" as * u8);
-    assert equal_cstr(r, "." as * u8);
+    let r: *u8 = binary_dir("hello.sfn" as *u8);
+    assert equal_cstr(r, "." as *u8);
 }
 
 // Windows coverage (#1482): `GetModuleFileNameA` returns a
@@ -82,11 +82,11 @@ test "binary_dir: single-component relative path returns dot" {
 // collapsed to the bare-name "." fallback, which aborted self-path
 // resolution on native Windows.
 test "binary_dir: backslash path returns dirname" {
-    let r: * u8 = binary_dir("C:\\dir\\sailfin.exe" as * u8);
-    assert equal_cstr(r, "C:\\dir" as * u8);
+    let r: *u8 = binary_dir("C:\\dir\\sailfin.exe" as *u8);
+    assert equal_cstr(r, "C:\\dir" as *u8);
 }
 
 test "binary_dir: mixed separators use the rightmost" {
-    let r: * u8 = binary_dir("C:/proj\\build\\sailfin.exe" as * u8);
-    assert equal_cstr(r, "C:/proj\\build" as * u8);
+    let r: *u8 = binary_dir("C:/proj\\build\\sailfin.exe" as *u8);
+    assert equal_cstr(r, "C:/proj\\build" as *u8);
 }

@@ -40,4 +40,4 @@ fn handle(req: Request) -> Response {
     return not_found();
 }
 
-fn main() ![net, io] { serve(handle as * fn (Request) -> Response, 8080); }
+fn main() ![net, io] { serve(handle as *fn (Request) -> Response, 8080); }

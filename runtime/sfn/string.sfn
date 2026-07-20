@@ -60,20 +60,20 @@ import { OwnedBuf, owned_buf_new } from "./memory/ownedbuf";
 // every seed, regardless of which libc declarations have shipped.
 // Once the seed catches up, a follow-up PR can flip these to a
 // cross-module import without touching the bodies.
-extern fn memcmp(a: * u8, b: * u8, n: usize) -> i32;
+extern fn memcmp(a: *u8, b: *u8, n: usize) -> i32;
 
-extern fn memchr(s: * u8, c: i32, n: usize) -> * u8;
+extern fn memchr(s: *u8, c: i32, n: usize) -> *u8;
 
 // #1318: `sfn_str_concat` / `sfn_str_append` copy the operand payloads
 // into arena storage with `memcpy`, and read the `SAILFIN_MAX_STRING_CONCAT`
 // concat-limit env var with `getenv`. Inlined for the same seed-snapshot
 // reason as the libc externs above (the `arena.sfn` / `io.sfn` discipline).
-extern fn memcpy(dst: * u8, src: * u8, n: usize) -> * u8;
+extern fn memcpy(dst: *u8, src: *u8, n: usize) -> *u8;
 
-extern fn getenv(name: * u8) -> * u8;
+extern fn getenv(name: *u8) -> *u8;
 
 // #1372: bounded length scan (16 MiB cap) for `sfn_str_len`/`sfn_str_eq`.
-extern fn strnlen(s: * u8, n: usize) -> usize;
+extern fn strnlen(s: *u8, n: usize) -> usize;
 
 // M2.5 (#403): `strtod` powers the real Sailfin `sfn_str_to_number`
 // body below (#1372) — the architect spec calls for a
@@ -82,7 +82,7 @@ extern fn strnlen(s: * u8, n: usize) -> usize;
 // NUL-terminated (literal lowering + arena-routed concat preserve
 // the +1 byte), so the wrapper passes the data pointer straight
 // through and discards the endptr by passing `null`.
-extern fn strtod(nptr: * u8, endptr: * * u8) -> f64;
+extern fn strtod(nptr: *u8, endptr: **u8) -> f64;
 
 // #1308: the legacy C `sailfin_runtime_string_concat` / `_append` externs were
 // deleted here — they had zero callers (the canonical `sfn_str_concat` /
@@ -122,11 +122,11 @@ extern fn strtod(nptr: * u8, endptr: * * u8) -> f64;
 // the C `(int64_t)(unsigned char)real[idx]`; `grapheme_byte` reuses
 // `sfn_str_from_byte` (the arena-backed single-byte producer) for the 1-byte
 // buffer the C body built with `malloc(2)`.
-fn sfn_str_read_byte(s: * u8, idx: i64) -> i64 {
+fn sfn_str_read_byte(s: *u8, idx: i64) -> i64 {
     return load_byte((s as i64) + idx);
 }
 
-fn sfn_str_grapheme_byte(real: * u8, idx: i64) -> * u8 {
+fn sfn_str_grapheme_byte(real: *u8, idx: i64) -> *u8 {
     return sfn_str_from_byte(load_byte((real as i64) + idx));
 }
 
@@ -141,27 +141,27 @@ fn sfn_str_grapheme_byte(real: * u8, idx: i64) -> * u8 {
 // the word read-modify-write in-bounds. No `_runtime_enter` (the concat-reuse
 // window is vestigial) and no owned-string tracking (the arena reclaims).
 // Decimal literals (the seed lexer has no `0x`).
-fn sfn_str_from_codepoint(cp: i64) -> * u8 {
+fn sfn_str_from_codepoint(cp: i64) -> *u8 {
     if cp < 0 {
         let empty: string = "";
-        return empty as * u8;
+        return empty as *u8;
     }
     if cp > 1114111 {
         let empty: string = "";
-        return empty as * u8;
+        return empty as *u8;
     }
     if cp >= 55296 && cp <= 57343 {
         let empty: string = "";
-        return empty as * u8;
+        return empty as *u8;
     }
 
     let n: i64 = _sfn_utf8_byte_len(cp);
-    let arena: * u8 = sfn_arena_global();
+    let arena: *u8 = sfn_arena_global();
     let cap: i64 = ((n + 1 + 7) / 8) * 8;
-    let data: * u8 = sfn_arena_alloc(arena, cap as usize, 8 as usize);
+    let data: *u8 = sfn_arena_alloc(arena, cap as usize, 8 as usize);
     if (data as i64) == 0 {
         let empty: string = "";
-        return empty as * u8;
+        return empty as *u8;
     }
 
     let mut i: i64 = 0;
@@ -181,20 +181,20 @@ fn sfn_str_from_codepoint(cp: i64) -> * u8 {
 // arena-backed NUL-terminated 1-byte buffer for 1..255; the empty string for 0
 // (unrepresentable under the NUL-terminated model) and out-of-range values.
 // Same arena-alloc + `_num_put_byte` discipline as `sfn_str_from_codepoint`.
-fn sfn_str_from_byte(byte_value: i64) -> * u8 {
+fn sfn_str_from_byte(byte_value: i64) -> *u8 {
     if byte_value < 1 {
         let empty: string = "";
-        return empty as * u8;
+        return empty as *u8;
     }
     if byte_value > 255 {
         let empty: string = "";
-        return empty as * u8;
+        return empty as *u8;
     }
-    let arena: * u8 = sfn_arena_global();
-    let data: * u8 = sfn_arena_alloc(arena, 8 as usize, 8 as usize);
+    let arena: *u8 = sfn_arena_global();
+    let data: *u8 = sfn_arena_alloc(arena, 8 as usize, 8 as usize);
     if (data as i64) == 0 {
         let empty: string = "";
-        return empty as * u8;
+        return empty as *u8;
     }
     _num_put_byte(data as i64, byte_value & 255);
     _num_put_byte(data as i64 + 1, 0);
@@ -211,7 +211,7 @@ fn sfn_str_from_byte(byte_value: i64) -> * u8 {
 // `arena_addr = 0` and `owned_buf_new` falls back to libc storage. Both
 // are C-ABI (`-> * u8` / `-> bool`), so they stay inline externs (same
 // discipline as the libc externs above).
-extern fn sfn_arena_global() -> * u8;
+extern fn sfn_arena_global() -> *u8;
 
 extern fn sfn_arena_enabled() -> bool;
 
@@ -220,9 +220,9 @@ extern fn sfn_arena_enabled() -> bool;
 // (#1309) and `sfn_arena_realloc` (#1308) are now the Sailfin exports in
 // `runtime/sfn/memory/arena.sfn`. Both are reached as C-ABI externs, the
 // same discipline `ownedbuf.sfn` follows for `sfn_arena_sfn_*`.
-extern fn sfn_arena_alloc(arena: * u8, size: usize, align: usize) -> * u8;
+extern fn sfn_arena_alloc(arena: *u8, size: usize, align: usize) -> *u8;
 
-extern fn sfn_arena_realloc(arena: * u8, ptr: * u8, old_size: usize, new_size: usize, align: usize) -> * u8;
+extern fn sfn_arena_realloc(arena: *u8, ptr: *u8, old_size: usize, new_size: usize, align: usize) -> *u8;
 
 // #1318: the concat/append limit gate raises ValueError (which aborts the
 // process) when a concatenation would exceed `SAILFIN_MAX_STRING_CONCAT`
@@ -230,7 +230,7 @@ extern fn sfn_arena_realloc(arena: * u8, ptr: * u8, old_size: usize, new_size: u
 // (`runtime/sfn/exception.sfn` — write(2) + abort, the canonical emission
 // target for `runtime_raise_value_error_fn`) instead of the legacy C
 // `sailfin_runtime_raise_value_error`, resolved as a cross-module extern.
-extern fn sfn_raise_value_error(message: * u8) -> void;
+extern fn sfn_raise_value_error(message: *u8) -> void;
 
 // #1372: UTF-8 byte length of a validated codepoint — mirrors the
 // branch widths of the C `_utf8_encode`. Used to size a codepoint's UTF-8
@@ -271,7 +271,7 @@ fn _sfn_utf8_byte(cp: i64, n: i64, i: i64) -> i64 {
 // `static`). A real pointer is bounded-scanned with libc `strnlen`
 // (16 MiB cap). Byte-identical to the retired `sailfin_runtime_string_length`
 // delegator, whose non-ASAN path is exactly `strnlen(s, 16 MiB)`.
-fn sfn_str_len(s: * u8) -> i64 {
+fn sfn_str_len(s: *u8) -> i64 {
     if (s as i64) == 0 { return 0; }
     return strnlen(s, 16777216) as i64;
 }
@@ -281,7 +281,7 @@ fn sfn_str_len(s: * u8) -> i64 {
 // `_strings_equal_fast` arm-for-arm: pointer-equal (covers both-null) is
 // equal; exactly-one-null is not; two real strings compare by length +
 // `memcmp`.
-fn sfn_str_eq(a: * u8, b: * u8) -> bool {
+fn sfn_str_eq(a: *u8, b: *u8) -> bool {
     if (a as i64) == (b as i64) { return true; }
     if (a as i64) == 0 { return false; }
     if (b as i64) == 0 { return false; }
@@ -300,7 +300,7 @@ fn sfn_str_eq(a: * u8, b: * u8) -> bool {
 // pinned seed emits during `make compile` and that `rlimit.sfn` externs;
 // freshly-emitted IR (the hardcoded `==`/`!=` site in `core_operands.sfn`)
 // targets this `_lv` symbol with both aggregate fields.
-fn sfn_str_eq_lv(a_data: * u8, a_len: i64, b_data: * u8, b_len: i64) -> bool {
+fn sfn_str_eq_lv(a_data: *u8, a_len: i64, b_data: *u8, b_len: i64) -> bool {
     if a_len != b_len { return false; }
     if (a_data as i64) == (b_data as i64) { return true; }
     if a_len == 0 { return true; }
@@ -319,7 +319,7 @@ fn sfn_str_eq_lv(a_data: * u8, a_len: i64, b_data: * u8, b_len: i64) -> bool {
 // pointer-equal (both-null) is 0; a single null sorts first (null < any real
 // string); real operands compare via `memcmp` over the common length with a
 // length tie-break.
-fn sfn_str_cmp(a: * u8, b: * u8) -> i32 {
+fn sfn_str_cmp(a: *u8, b: *u8) -> i32 {
     if (a as i64) == (b as i64) { return 0; }
     if (a as i64) == 0 { return -1; }
     if (b as i64) == 0 { return 1; }
@@ -340,7 +340,7 @@ fn sfn_str_cmp(a: * u8, b: * u8) -> i32 {
 // non-terminated interior view (#1454) orders strictly within its bounds. The
 // bare `sfn_str_cmp` is left as the old `(i8*, i8*)` ABI symbol the seed emits;
 // the hardcoded `<`/`<=`/`>`/`>=` site in `core_operands.sfn` targets this one.
-fn sfn_str_cmp_lv(a_data: * u8, a_len: i64, b_data: * u8, b_len: i64) -> i32 {
+fn sfn_str_cmp_lv(a_data: *u8, a_len: i64, b_data: *u8, b_len: i64) -> i32 {
     if (a_data as i64) == (b_data as i64) {
         if a_len == b_len { return 0; }
     }
@@ -372,10 +372,10 @@ fn sfn_str_cmp_lv(a_data: * u8, a_len: i64, b_data: * u8, b_len: i64) -> i32 {
 // `_num_put_byte` trailing NUL keeps the word read-modify-write in-bounds (the
 // seed cannot lower a single-byte `* u8` store). A non-owning `Slice` view stays
 // blocked on #1283 (the SfnString aggregate flip).
-fn _sfn_substring_unchecked(text: * u8, start: i64, end: i64) -> * u8 {
+fn _sfn_substring_unchecked(text: *u8, start: i64, end: i64) -> *u8 {
     if (text as i64) == 0 {
         let empty: string = "";
-        return empty as * u8;
+        return empty as *u8;
     }
 
     let mut rs: i64 = start;
@@ -384,14 +384,14 @@ fn _sfn_substring_unchecked(text: * u8, start: i64, end: i64) -> * u8 {
     if re < rs { re = rs; }
     let length2: i64 = re - rs;
     let cap2: i64 = ((length2 + 1 + 7) / 8) * 8;
-    let arena2: * u8 = sfn_arena_global();
-    let out2: * u8 = sfn_arena_alloc(arena2, cap2 as usize, 8 as usize);
+    let arena2: *u8 = sfn_arena_global();
+    let out2: *u8 = sfn_arena_alloc(arena2, cap2 as usize, 8 as usize);
     if (out2 as i64) == 0 {
         let empty: string = "";
-        return empty as * u8;
+        return empty as *u8;
     }
     if length2 > 0 {
-        memcpy(out2, (text as i64 + rs) as * u8, length2 as usize);
+        memcpy(out2, (text as i64 + rs) as *u8, length2 as usize);
     }
     _num_put_byte(out2 as i64 + length2, 0);
     return out2;
@@ -405,7 +405,7 @@ fn _sfn_substring_unchecked(text: * u8, start: i64, end: i64) -> * u8 {
 // clamp is inlined: NaN maps to 0 (`v != v`), in-range doubles truncate toward
 // zero; substring indices are small, so the C `_clamp_to_i64` INT64 saturation
 // arms are unnecessary.
-fn sfn_str_slice(text: * u8, start: f64, end: f64) -> * u8 {
+fn sfn_str_slice(text: *u8, start: f64, end: f64) -> *u8 {
     let mut si: i64 = 0;
     if start == start { si = start as i64; }
     let mut ei: i64 = 0;
@@ -431,19 +431,19 @@ fn sfn_str_slice(text: * u8, start: f64, end: f64) -> * u8 {
 // seed cannot lower a single-byte `* u8` store). Like `concat`, it is
 // unconditionally arena-backed (the `SAILFIN_USE_ARENA=0` opt-out routes only
 // the legacy C entrypoints), so it never gates on `sfn_arena_enabled()`.
-fn sfn_str_to_cstr(s_data: * u8, s_len: i64, arena_slot: * u8) -> * u8 {
+fn sfn_str_to_cstr(s_data: *u8, s_len: i64, arena_slot: *u8) -> *u8 {
     if (s_data as i64) == 0 {
         let empty: string = "";
-        return empty as * u8;
+        return empty as *u8;
     }
     let mut n: i64 = s_len;
     if n < 0 { n = 0; }
-    let arena: * u8 = _sfn_resolve_arena(arena_slot);
+    let arena: *u8 = _sfn_resolve_arena(arena_slot);
     let cap: i64 = ((n + 1 + 7) / 8) * 8;
-    let data: * u8 = sfn_arena_alloc(arena, cap as usize, 8 as usize);
+    let data: *u8 = sfn_arena_alloc(arena, cap as usize, 8 as usize);
     if (data as i64) == 0 {
         let oom: string = "";
-        return oom as * u8;
+        return oom as *u8;
     }
     if n > 0 { memcpy(data, s_data, n as usize); }
     _num_put_byte(data as i64 + n, 0);
@@ -453,7 +453,7 @@ fn sfn_str_to_cstr(s_data: * u8, s_len: i64, arena_slot: * u8) -> * u8 {
 // `sfn_str_sfn_to_cstr(s_data, s_len, arena_slot)` — the `_sfn_` infix alias the
 // emit contract still expects a define for; forwards to the bare body so both
 // symbols share one arena-copy implementation.
-fn sfn_str_sfn_to_cstr(s_data: * u8, s_len: i64, arena_slot: * u8) -> * u8 {
+fn sfn_str_sfn_to_cstr(s_data: *u8, s_len: i64, arena_slot: *u8) -> *u8 {
     return sfn_str_to_cstr(s_data, s_len, arena_slot);
 }
 
@@ -466,12 +466,12 @@ fn sfn_str_sfn_to_cstr(s_data: * u8, s_len: i64, arena_slot: * u8) -> * u8 {
 // NUL-terminated. The explicit `memchr` makes the recovery load-bearing (a buffer
 // with no NUL within the cap is rejected as the empty string rather than wrapped
 // into an unbounded view). No copy: the foreign buffer is adopted in place.
-fn sfn_str_sfn_from_cstr(s: * u8) -> SfnString {
+fn sfn_str_sfn_from_cstr(s: *u8) -> SfnString {
     if (s as i64) == 0 {
         let empty: string = "";
         return empty;
     }
-    let nul: * u8 = memchr(s, 0, 16777216 as usize);
+    let nul: *u8 = memchr(s, 0, 16777216 as usize);
     if (nul as i64) == 0 {
         let uncapped: string = "";
         return uncapped;
@@ -514,11 +514,11 @@ fn sfn_str_sfn_from_cstr(s: * u8) -> SfnString {
 // Concat is unconditionally arena-backed by design — the `SAILFIN_USE_ARENA=0`
 // opt-out routes only the legacy C entrypoints — so this never gates on
 // `sfn_arena_enabled()`.
-fn _sfn_resolve_arena(arena_slot: * u8) -> * u8 {
+fn _sfn_resolve_arena(arena_slot: *u8) -> *u8 {
     if (arena_slot as i64) != 0 {
-        let slot: * i64 = arena_slot as * i64;
+        let slot: *i64 = arena_slot as *i64;
         let handle: i64 = atomic_load(slot);
-        if handle != 0 { return handle as * u8; }
+        if handle != 0 { return handle as *u8; }
     }
     return sfn_arena_global();
 }
@@ -536,7 +536,7 @@ fn _sfn_concat_limit() -> i64 {
     if _sfn_concat_limit_state < 0 {
         _sfn_concat_limit_state = 20000000;
         let name: string = "SAILFIN_MAX_STRING_CONCAT";
-        let env: * u8 = getenv(name as * u8);
+        let env: *u8 = getenv(name as *u8);
         if (env as i64) != 0 {
             let parsed: i64 = strtod(env, null) as i64;
             if parsed < 0 { _sfn_concat_limit_state = 0; } else {
@@ -555,7 +555,7 @@ fn _sfn_check_concat_limit(alen: i64, blen: i64) -> void {
     if limit > 0 {
         if (alen + blen) > limit {
             let msg: string = "string concat limit exceeded";
-            sfn_raise_value_error(msg as * u8);
+            sfn_raise_value_error(msg as *u8);
         }
     }
 }
@@ -572,7 +572,7 @@ fn _sfn_check_concat_limit(alen: i64, blen: i64) -> void {
 // which must stay inside an 8-aligned allocation whose capacity is a multiple
 // of 8 (the `ownedbuf.sfn` word-load discipline) to avoid an over-read past
 // the page tip.
-fn sfn_str_concat(a_data: * u8, a_len: i64, b_data: * u8, b_len: i64, arena_slot: * u8) -> SfnString {
+fn sfn_str_concat(a_data: *u8, a_len: i64, b_data: *u8, b_len: i64, arena_slot: *u8) -> SfnString {
     let mut alen: i64 = a_len;
     if alen < 0 { alen = 0; }
     let mut blen: i64 = b_len;
@@ -585,9 +585,9 @@ fn sfn_str_concat(a_data: * u8, a_len: i64, b_data: * u8, b_len: i64, arena_slot
         return overflow;
     }
 
-    let arena: * u8 = _sfn_resolve_arena(arena_slot);
+    let arena: *u8 = _sfn_resolve_arena(arena_slot);
     let cap: i64 = ((total + 1 + 7) / 8) * 8;
-    let data: * u8 = sfn_arena_alloc(arena, cap as usize, 8 as usize);
+    let data: *u8 = sfn_arena_alloc(arena, cap as usize, 8 as usize);
     if (data as i64) == 0 {
         let empty: string = "";
         return empty;
@@ -599,7 +599,7 @@ fn sfn_str_concat(a_data: * u8, a_len: i64, b_data: * u8, b_len: i64, arena_slot
     }
     if blen > 0 {
         if (b_data as i64) != 0 {
-            memcpy((data as i64 + alen) as * u8, b_data, blen as usize);
+            memcpy((data as i64 + alen) as *u8, b_data, blen as usize);
         }
     }
     _num_put_byte(data as i64 + total, 0);
@@ -616,13 +616,13 @@ fn sfn_str_concat(a_data: * u8, a_len: i64, b_data: * u8, b_len: i64, arena_slot
 // `atomic_load` / `atomic_store` word discipline the runtime uses for `* T`
 // field access under the seed. A null `dst.data` has no real buffer to grow,
 // so the body no-ops (the C body's guard).
-fn sfn_str_append(dst: * u8, suffix_data: * u8, suffix_len: i64, arena_slot: * u8) -> void {
+fn sfn_str_append(dst: *u8, suffix_data: *u8, suffix_len: i64, arena_slot: *u8) -> void {
     if (dst as i64) == 0 { return; }
     if suffix_len <= 0 { return; }
     if (suffix_data as i64) == 0 { return; }
 
-    let data_slot: * i64 = dst as * i64;
-    let len_slot: * i64 = (dst as i64 + 8) as * i64;
+    let data_slot: *i64 = dst as *i64;
+    let len_slot: *i64 = (dst as i64 + 8) as *i64;
     let old_data: i64 = atomic_load(data_slot);
     let old_len: i64 = atomic_load(len_slot);
     if old_data == 0 { return; }
@@ -635,14 +635,14 @@ fn sfn_str_append(dst: * u8, suffix_data: * u8, suffix_len: i64, arena_slot: * u
     let new_len: i64 = olen + slen;
     if new_len < olen { return; }
 
-    let arena: * u8 = _sfn_resolve_arena(arena_slot);
+    let arena: *u8 = _sfn_resolve_arena(arena_slot);
     let new_cap: i64 = ((new_len + 1 + 7) / 8) * 8;
-    let grown: * u8 = sfn_arena_realloc(arena, old_data as * u8, (olen + 1) as usize, new_cap as usize, 8 as usize);
+    let grown: *u8 = sfn_arena_realloc(arena, old_data as *u8, (olen + 1) as usize, new_cap as usize, 8 as usize);
     if (grown as i64) == 0 { return; }
 
     if slen > 0 {
         if (suffix_data as i64) != 0 {
-            memcpy((grown as i64 + olen) as * u8, suffix_data, slen as usize);
+            memcpy((grown as i64 + olen) as *u8, suffix_data, slen as usize);
         }
     }
     _num_put_byte(grown as i64 + new_len, 0);
@@ -672,7 +672,7 @@ fn sfn_str_append(dst: * u8, suffix_data: * u8, suffix_len: i64, arena_slot: * u
 // `sfn_str_grapheme_count(s)` — grapheme count of `s`. Bootstrap
 // simplification: the UTF-8 byte length (one byte == one grapheme),
 // exactly as the legacy walker computed.
-fn sfn_str_grapheme_count(s: * u8) -> f64 {
+fn sfn_str_grapheme_count(s: *u8) -> f64 {
     let len: i64 = strnlen(s, 16777216) as i64;
     return len as f64;
 }
@@ -683,7 +683,7 @@ fn sfn_str_grapheme_count(s: * u8) -> f64 {
 // non-terminated interior view (#1454) counts only its own bytes. The bare
 // `sfn_str_grapheme_count` stays the old `(i8*)`/`double` ABI symbol the seed
 // emits; the repointed descriptor (`runtime_grapheme_count_fn`) targets this one.
-fn sfn_str_grapheme_count_lv(s_data: * u8, s_len: i64) -> f64 {
+fn sfn_str_grapheme_count_lv(s_data: *u8, s_len: i64) -> f64 {
     if s_len < 0 { return 0.0; }
     return s_len as f64;
 }
@@ -693,7 +693,7 @@ fn sfn_str_grapheme_count_lv(s_data: * u8, s_len: i64) -> f64 {
 // Out-of-range or non-integral indices yield the empty string. The
 // `string_length` guard bounds the `grapheme_byte` dereference (a corrupted
 // pointer scans to length 0).
-fn sfn_str_grapheme_at(s: * u8, idx: f64) -> * u8 {
+fn sfn_str_grapheme_at(s: *u8, idx: f64) -> *u8 {
     if (s as i64) == 0 { return sfn_str_from_byte(0); }
     let iidx: i64 = idx as i64;
     if (iidx as f64) != idx { return sfn_str_from_byte(0); }
@@ -710,7 +710,7 @@ fn sfn_str_grapheme_at(s: * u8, idx: f64) -> * u8 {
 // non-terminated interior view (#1454) cannot index past its bytes. The bare
 // `sfn_str_grapheme_at` stays the old `(i8*, double)` ABI symbol the seed emits
 // via its descriptor; the repointed descriptor targets this `_lv` symbol.
-fn sfn_str_grapheme_at_lv(s_data: * u8, s_len: i64, idx: f64) -> * u8 {
+fn sfn_str_grapheme_at_lv(s_data: *u8, s_len: i64, idx: f64) -> *u8 {
     if (s_data as i64) == 0 { return sfn_str_from_byte(0); }
     let iidx: i64 = idx as i64;
     if (iidx as f64) != idx { return sfn_str_from_byte(0); }
@@ -725,7 +725,7 @@ fn sfn_str_grapheme_at_lv(s_data: * u8, s_len: i64, idx: f64) -> * u8 {
 // `s_len` instead of NUL-scanning, then reads the byte via `sfn_str_read_byte`.
 // Runtime-internal (no descriptor, no caller today); re-signatured in place so
 // a non-terminated interior view (#1454) cannot read past its bytes.
-fn sfn_str_byte_at(s_data: * u8, s_len: i64, idx: i64) -> i64 {
+fn sfn_str_byte_at(s_data: *u8, s_len: i64, idx: i64) -> i64 {
     if (s_data as i64) == 0 { return -1; }
     if idx < 0 { return -1; }
     if idx >= s_len { return -1; }
@@ -737,7 +737,7 @@ fn sfn_str_byte_at(s_data: * u8, s_len: i64, idx: i64) -> i64 {
 // `s_len`, or -1. Length-aware forward scan (no NUL-scan); a negative `start`
 // clamps to 0. Runtime-internal (no descriptor, no caller today); re-signatured
 // in place so a non-terminated interior view (#1454) cannot scan past its bytes.
-fn sfn_str_find_byte(s_data: * u8, s_len: i64, byte_value: i64, start_index: i64) -> i64 {
+fn sfn_str_find_byte(s_data: *u8, s_len: i64, byte_value: i64, start_index: i64) -> i64 {
     if (s_data as i64) == 0 { return -1; }
     let mut start: i64 = start_index;
     if start < 0 { start = 0; }
@@ -757,7 +757,7 @@ fn sfn_str_find_byte(s_data: * u8, s_len: i64, byte_value: i64, start_index: i64
 // first byte of the string (the documented bootstrap simplification for
 // multi-byte sequences). With the immediate-codepoint encoding retired
 // (#1420/#822), `s` is always a real pointer.
-fn sfn_str_codepoint(s: * u8) -> f64 {
+fn sfn_str_codepoint(s: *u8) -> f64 {
     if (s as i64) == 0 { return -1.0; }
     let len: i64 = strnlen(s, 16777216) as i64;
     if len <= 0 { return -1.0; }
@@ -770,7 +770,7 @@ fn sfn_str_codepoint(s: * u8) -> f64 {
 // multi-byte sequences), or -1 for a null/empty view. The bare `sfn_str_codepoint`
 // stays the old `(i8*)`/`double` ABI symbol the seed emits; the repointed
 // descriptor (`runtime_char_code_fn`) targets this `_lv` symbol.
-fn sfn_str_codepoint_lv(s_data: * u8, s_len: i64) -> f64 {
+fn sfn_str_codepoint_lv(s_data: *u8, s_len: i64) -> f64 {
     if (s_data as i64) == 0 { return -1.0; }
     if s_len <= 0 { return -1.0; }
     return sfn_str_read_byte(s_data, 0) as f64;
@@ -784,7 +784,7 @@ fn sfn_str_codepoint_lv(s_data: * u8, s_len: i64) -> f64 {
 // call surface). Invalid codepoints (negative, > U+10FFFF, or
 // in the UTF-16 surrogate range) produce an empty string per
 // the C body's invariant.
-fn sfn_str_sfn_from_codepoint(cp: i64) -> * u8 {
+fn sfn_str_sfn_from_codepoint(cp: i64) -> *u8 {
     return sfn_str_from_codepoint(cp);
 }
 
@@ -797,7 +797,7 @@ fn sfn_str_sfn_from_codepoint(cp: i64) -> * u8 {
 // casts the `* u8` result to `string`. Byte 0 and out-of-range values
 // yield the empty string — see the C body for the NUL-termination
 // limitation deferred to the SfnString aggregate flip.
-fn sfn_str_sfn_from_byte(byte_value: i64) -> * u8 {
+fn sfn_str_sfn_from_byte(byte_value: i64) -> *u8 {
     return sfn_str_from_byte(byte_value);
 }
 
@@ -807,7 +807,7 @@ fn sfn_str_sfn_from_byte(byte_value: i64) -> * u8 {
 // `s` is always a real, deref-safe pointer, so `strtod` parses the
 // NUL-terminated payload directly (`endptr` discarded via `null`). Null
 // yields `0.0`.
-fn sfn_str_to_number(s: * u8) -> f64 {
+fn sfn_str_to_number(s: *u8) -> f64 {
     if (s as i64) == 0 { return 0.0; }
     return strtod(s, null);
 }
@@ -829,14 +829,14 @@ fn sfn_str_to_number(s: * u8) -> f64 {
 // trailing NUL keeps the word read-modify-write in-bounds (the seed cannot lower a
 // single-byte `* u8` store), the same discipline `sfn_str_to_cstr` / `sfn_str_concat`
 // use.
-fn sfn_str_to_number_lv(s_data: * u8, s_len: i64) -> f64 {
+fn sfn_str_to_number_lv(s_data: *u8, s_len: i64) -> f64 {
     if (s_data as i64) == 0 { return 0.0; }
     let mut n: i64 = s_len;
     if n < 0 { n = 0; }
     if n == 0 { return 0.0; }
-    let arena: * u8 = sfn_arena_global();
+    let arena: *u8 = sfn_arena_global();
     let cap: i64 = ((n + 1 + 7) / 8) * 8;
-    let data: * u8 = sfn_arena_alloc(arena, cap as usize, 8 as usize);
+    let data: *u8 = sfn_arena_alloc(arena, cap as usize, 8 as usize);
     if (data as i64) == 0 { return 0.0; }
     memcpy(data, s_data, n as usize);
     _num_put_byte(data as i64 + n, 0);
@@ -890,7 +890,7 @@ fn sfn_str_to_number_lv(s_data: * u8, s_len: i64) -> f64 {
 fn _num_put_byte(addr: i64, value: i64) -> void {
     let word_addr: i64 = (addr / 8) * 8;
     let shift: i64 = (addr - word_addr) * 8;
-    let slot: * i64 = word_addr as * i64;
+    let slot: *i64 = word_addr as *i64;
     let word: i64 = atomic_load(slot);
     let mask: i64 = 255 << shift;
     let current: i64 = word & mask;
@@ -907,9 +907,9 @@ fn _num_emit_char(base: i64, pos: i64, ch: i64) -> i64 {
 
 // `_num_finish(base, pos)` NUL-terminates and returns the buffer base
 // as a `* u8` C-string.
-fn _num_finish(base: i64, pos: i64) -> * u8 {
+fn _num_finish(base: i64, pos: i64) -> *u8 {
     _num_put_byte(base + pos, 0);
-    return base as * u8;
+    return base as *u8;
 }
 
 // `_num_pow10_i64(k)` — 10^k as i64 for k in [0, 18] (fits i64).
@@ -1008,7 +1008,7 @@ fn _num_emit_int_cstr(base: i64, value: i64) -> i64 {
         word_acc = word_acc + ((48 + d) << ((k & 7) * 8));
         k = k + 1;
         if (k & 7) == 0 {
-            let slot: * i64 = (base + word_off) as * i64;
+            let slot: *i64 = (base + word_off) as *i64;
             atomic_store(slot, word_acc);
             word_off = word_off + 8;
             word_acc = 0;
@@ -1021,7 +1021,7 @@ fn _num_emit_int_cstr(base: i64, value: i64) -> i64 {
     // The NUL at position `total` is the zero high byte already present
     // in `word_acc`; any bytes past it are zero padding inside the owned
     // scratch buffer, so a single full-word store completes the string.
-    let slot2: * i64 = (base + word_off) as * i64;
+    let slot2: *i64 = (base + word_off) as *i64;
     atomic_store(slot2, word_acc);
     return total;
 }
@@ -1040,7 +1040,7 @@ fn _num_emit_int_cstr(base: i64, value: i64) -> i64 {
 // (`number.to_string` → `["double"]`); the i64-only helpers it calls
 // (`_num_emit_*`, `_num_pow10_i64`) resolve fine. Keeping every `f64`
 // inside this one descriptor-backed body sidesteps the gap.
-fn sfn_number_to_str(value: f64) -> * u8 {
+fn sfn_number_to_str(value: f64) -> *u8 {
     let mut arena_addr: i64 = 0;
     if sfn_arena_enabled() { arena_addr = sfn_arena_global() as i64; }
     let buf: OwnedBuf = owned_buf_new(arena_addr, 64);
@@ -1089,7 +1089,7 @@ fn sfn_number_to_str(value: f64) -> * u8 {
             let mut signed_ip: i64 = ip;
             if neg { signed_ip = 0 - ip; }
             let _len: i64 = _num_emit_int_cstr(base, signed_ip);
-            return base as * u8;
+            return base as *u8;
         }
     }
 
@@ -1262,7 +1262,7 @@ fn sfn_number_to_str(value: f64) -> * u8 {
 // parameters/locals are i64, so the seed resolves the call surface
 // correctly (the `f64` mis-resolution that forced `sfn_number_to_str` to
 // inline its helpers does not apply here).
-fn sfn_int_to_str(value: i64) -> * u8 {
+fn sfn_int_to_str(value: i64) -> *u8 {
     let mut arena_addr: i64 = 0;
     if sfn_arena_enabled() { arena_addr = sfn_arena_global() as i64; }
     let buf: OwnedBuf = owned_buf_new(arena_addr, 32);
@@ -1273,7 +1273,7 @@ fn sfn_int_to_str(value: i64) -> * u8 {
     // instead of a per-digit read-modify-write. `_num_emit_int_cstr`
     // handles the zero case, the sign, and the NUL terminator.
     let _len: i64 = _num_emit_int_cstr(base, value);
-    return base as * u8;
+    return base as *u8;
 }
 
 // #925 (sub-issue of #390): Cat-C char-predicate ports. The legacy C
@@ -1319,4 +1319,4 @@ fn sfn_str_is_alpha(ch: u8) -> bool {
 // `sailfin_runtime_to_debug_string`, which returns its argument
 // unchanged (debug rendering is value-side type tagging, deferred).
 // Descriptor ABI is `(i8*) -> i8*`.
-fn sfn_to_debug_string(value: * u8) -> * u8 { return value; }
+fn sfn_to_debug_string(value: *u8) -> *u8 { return value; }

@@ -1,6 +1,5 @@
 // examples/advanced/lambda-closure.sfn
-
 fn main() ![io] {
-    let add = fn(x: int, y: int) -> int { return x + y; };
+    let add = fn (x: int, y: int) -> int { return x + y; };
     print(add(3, 4));
 }

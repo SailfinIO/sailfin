@@ -10,7 +10,7 @@ fn id<T>(x: T) -> T { return x; }
 fn pick<T>(a: T, b: T) -> T { return a; }
 
 fn main() -> int ![io] {
-    let a = id < int > (41);
-    let b = pick < int > (4, 9);
+    let a = id<int>(41);
+    let b = pick<int>(4, 9);
     return a + b;
 }

@@ -160,27 +160,27 @@ struct Scheduler {
 // (`%PthreadMutex*`) and reaches the extern with the right LLVM
 // type — no `&` operator is needed (and `& q.mutex` would not
 // compile: the borrow lowering only addresses plain locals).
-extern fn malloc(size: usize) -> * u8;
+extern fn malloc(size: usize) -> *u8;
 
-extern fn free(ptr: * u8) -> void;
+extern fn free(ptr: *u8) -> void;
 
-extern fn pthread_mutex_init(m: * PthreadMutex, attr: * PthreadMutexAttr) -> i32;
+extern fn pthread_mutex_init(m: *PthreadMutex, attr: *PthreadMutexAttr) -> i32;
 
-extern fn pthread_mutex_lock(m: * PthreadMutex) -> i32;
+extern fn pthread_mutex_lock(m: *PthreadMutex) -> i32;
 
-extern fn pthread_mutex_unlock(m: * PthreadMutex) -> i32;
+extern fn pthread_mutex_unlock(m: *PthreadMutex) -> i32;
 
-extern fn pthread_mutex_destroy(m: * PthreadMutex) -> i32;
+extern fn pthread_mutex_destroy(m: *PthreadMutex) -> i32;
 
-extern fn pthread_cond_init(c: * PthreadCond, attr: * PthreadCondAttr) -> i32;
+extern fn pthread_cond_init(c: *PthreadCond, attr: *PthreadCondAttr) -> i32;
 
-extern fn pthread_cond_wait(c: * PthreadCond, m: * PthreadMutex) -> i32;
+extern fn pthread_cond_wait(c: *PthreadCond, m: *PthreadMutex) -> i32;
 
-extern fn pthread_cond_signal(c: * PthreadCond) -> i32;
+extern fn pthread_cond_signal(c: *PthreadCond) -> i32;
 
-extern fn pthread_cond_broadcast(c: * PthreadCond) -> i32;
+extern fn pthread_cond_broadcast(c: *PthreadCond) -> i32;
 
-extern fn pthread_cond_destroy(c: * PthreadCond) -> i32;
+extern fn pthread_cond_destroy(c: *PthreadCond) -> i32;
 
 // Thread lifecycle for the worker pool. `pthread_create` writes the new
 // `pthread_t` into the `* usize` out-slot and takes the worker entry as
@@ -190,9 +190,9 @@ extern fn pthread_cond_destroy(c: * PthreadCond) -> i32;
 // value (`usize`) and discards the worker return (`null` result). These
 // mirror `runtime/sfn/platform/pthread.sfn` exactly, so the emitted
 // `declare` shape is identical if the two modules are ever linked.
-extern fn pthread_create(thread: * usize, attr: * PthreadAttr, start: * u8, arg: * u8) -> i32;
+extern fn pthread_create(thread: *usize, attr: *PthreadAttr, start: *u8, arg: *u8) -> i32;
 
-extern fn pthread_join(thread: usize, result: * * u8) -> i32;
+extern fn pthread_join(thread: usize, result: **u8) -> i32;
 
 // Process/environment surface for pool sizing. `sysconf` queries the
 // online CPU count (`_SC_NPROCESSORS_ONLN`); `getenv` + `atoi` read the
@@ -200,9 +200,9 @@ extern fn pthread_join(thread: usize, result: * * u8) -> i32;
 // discipline (E0801–E0805) as the pthread surface above.
 extern fn sysconf(name: i32) -> i64;
 
-extern fn getenv(name: * u8) -> * u8;
+extern fn getenv(name: *u8) -> *u8;
 
-extern fn atoi(s: * u8) -> i32;
+extern fn atoi(s: *u8) -> i32;
 
 // ── Shared MPMC task queue ────────────────────────────────────
 // The `sfn_taskqueue_*` surface implements the §2.6.1
@@ -244,21 +244,21 @@ fn _sfn_taskqueue_max_capacity() -> i64 { return 1152921504606846975; }
 // return — tears down what was already set up and returns null/the
 // failed pointer so no partial allocation or half-initialised handle
 // escapes.
-fn sfn_taskqueue_create(capacity: i64) -> * u8 {
+fn sfn_taskqueue_create(capacity: i64) -> *u8 {
     let mut cap: i64 = capacity;
     if cap <= 0 { cap = 1; }
     if cap > _sfn_taskqueue_max_capacity() { return null; }
 
-    let queue_ptr: * u8 = malloc(_sfn_taskqueue_struct_size() as usize);
+    let queue_ptr: *u8 = malloc(_sfn_taskqueue_struct_size() as usize);
     if queue_ptr as i64 == 0 { return queue_ptr; }
 
-    let ring_ptr: * u8 = malloc((cap * 8) as usize);
+    let ring_ptr: *u8 = malloc((cap * 8) as usize);
     if ring_ptr as i64 == 0 {
         free(queue_ptr);
         return ring_ptr;
     }
 
-    let queue: * TaskQueue = queue_ptr as * TaskQueue;
+    let queue: *TaskQueue = queue_ptr as *TaskQueue;
     queue.tasks_addr = ring_ptr as i64;
     queue.capacity = cap;
     queue.head = 0;
@@ -299,16 +299,16 @@ fn sfn_taskqueue_create(capacity: i64) -> * u8 {
 // `sfn_taskqueue_destroy(queue)` tears down the condition variables
 // and mutex (reverse init order), frees the ring buffer, then frees
 // the queue handle. Null-safe: a null queue is a no-op.
-fn sfn_taskqueue_destroy(queue: * u8) -> void {
+fn sfn_taskqueue_destroy(queue: *u8) -> void {
     if queue as i64 == 0 { return; }
-    let q: * TaskQueue = queue as * TaskQueue;
+    let q: *TaskQueue = queue as *TaskQueue;
 
     pthread_cond_destroy(q.not_full);
     pthread_cond_destroy(q.not_empty);
     pthread_mutex_destroy(q.mutex);
 
     let ring_addr: i64 = q.tasks_addr;
-    if ring_addr != 0 { free(ring_addr as * u8); }
+    if ring_addr != 0 { free(ring_addr as *u8); }
     free(queue);
 }
 
@@ -317,9 +317,9 @@ fn sfn_taskqueue_destroy(queue: * u8) -> void {
 // full, then signals `not_empty` to wake a waiting consumer. FIFO:
 // the tail cursor advances (wrapping at `capacity`) so dequeue
 // observes tasks in insertion order. Null-safe on the queue handle.
-fn sfn_taskqueue_enqueue(queue: * u8, task: * u8) -> void {
+fn sfn_taskqueue_enqueue(queue: *u8, task: *u8) -> void {
     if queue as i64 == 0 { return; }
-    let q: * TaskQueue = queue as * TaskQueue;
+    let q: *TaskQueue = queue as *TaskQueue;
 
     pthread_mutex_lock(q.mutex);
 
@@ -331,7 +331,7 @@ fn sfn_taskqueue_enqueue(queue: * u8, task: * u8) -> void {
         pthread_cond_wait(q.not_full, q.mutex);
     }
 
-    let slot: * i64 = (q.tasks_addr + q.tail * 8) as * i64;
+    let slot: *i64 = (q.tasks_addr + q.tail * 8) as *i64;
     atomic_store(slot, task as i64);
 
     let mut next_tail: i64 = q.tail + 1;
@@ -350,9 +350,9 @@ fn sfn_taskqueue_enqueue(queue: * u8, task: * u8) -> void {
 // under the mutex, blocking on `not_empty` while the ring is empty,
 // then signals `not_full` to wake a waiting producer. Returns the
 // task address as `* u8`. A null queue handle returns null.
-fn sfn_taskqueue_dequeue(queue: * u8) -> * u8 {
+fn sfn_taskqueue_dequeue(queue: *u8) -> *u8 {
     if queue as i64 == 0 { return null; }
-    let q: * TaskQueue = queue as * TaskQueue;
+    let q: *TaskQueue = queue as *TaskQueue;
 
     pthread_mutex_lock(q.mutex);
 
@@ -363,7 +363,7 @@ fn sfn_taskqueue_dequeue(queue: * u8) -> * u8 {
         pthread_cond_wait(q.not_empty, q.mutex);
     }
 
-    let slot: * i64 = (q.tasks_addr + q.head * 8) as * i64;
+    let slot: *i64 = (q.tasks_addr + q.head * 8) as *i64;
     let task_addr: i64 = atomic_load(slot);
 
     let mut next_head: i64 = q.head + 1;
@@ -374,15 +374,15 @@ fn sfn_taskqueue_dequeue(queue: * u8) -> * u8 {
     pthread_cond_signal(q.not_full);
     pthread_mutex_unlock(q.mutex);
 
-    return task_addr as * u8;
+    return task_addr as *u8;
 }
 
 // `sfn_taskqueue_count(queue)` reads the live-entry count under the
 // mutex — a consistent snapshot for tests and the worker pool's
 // drain check. Null queue handle reads as 0.
-fn sfn_taskqueue_count(queue: * u8) -> i64 {
+fn sfn_taskqueue_count(queue: *u8) -> i64 {
     if queue as i64 == 0 { return 0; }
-    let q: * TaskQueue = queue as * TaskQueue;
+    let q: *TaskQueue = queue as *TaskQueue;
     pthread_mutex_lock(q.mutex);
     let live: i64 = q.count;
     pthread_mutex_unlock(q.mutex);
@@ -460,7 +460,7 @@ fn _sfn_scheduler_max_thread_count() -> i64 { return 1024; }
 // avoid the bounded-pool deadlock (see the clamp comment below).
 fn sfn_scheduler_resolve_thread_count() -> i64 {
     let s_env: string = "SAILFIN_THREADS";
-    let raw: * u8 = getenv(s_env as * u8);
+    let raw: *u8 = getenv(s_env as *u8);
     if raw as i64 != 0 {
         let n: i32 = atoi(raw);
         if n >= 1 {
@@ -532,11 +532,11 @@ fn _sfn_task_done_offset() -> i64 { return 24; }
 // task address as `* u8` (callers re-cast to `* Task` only inside this
 // module). On a non-zero `pthread_*_init` return, tears down what was
 // initialised and returns null so no half-initialised handle escapes.
-fn sfn_task_create(fn_ptr: i64, ctx: i64) -> * u8 {
-    let task_ptr: * u8 = malloc(_sfn_task_struct_size() as usize);
+fn sfn_task_create(fn_ptr: i64, ctx: i64) -> *u8 {
+    let task_ptr: *u8 = malloc(_sfn_task_struct_size() as usize);
     if task_ptr as i64 == 0 { return task_ptr; }
 
-    let task: * Task = task_ptr as * Task;
+    let task: *Task = task_ptr as *Task;
     task.fn_ptr = fn_ptr;
     task.ctx = ctx;
     task.result = 0;
@@ -572,10 +572,10 @@ fn sfn_task_create(fn_ptr: i64, ctx: i64) -> * u8 {
 // Returns the task address as `* u8`, or null on the same OOM /
 // `pthread_*_init` failure paths as `sfn_task_create`. The `detached` write
 // happens-before the task is enqueued, so the worker observes it.
-fn sfn_task_create_detached(fn_ptr: i64, ctx: i64) -> * u8 {
-    let task_ptr: * u8 = sfn_task_create(fn_ptr, ctx);
+fn sfn_task_create_detached(fn_ptr: i64, ctx: i64) -> *u8 {
+    let task_ptr: *u8 = sfn_task_create(fn_ptr, ctx);
     if task_ptr as i64 == 0 { return task_ptr; }
-    let t: * Task = task_ptr as * Task;
+    let t: *Task = task_ptr as *Task;
     t.detached = 1;
     return task_ptr;
 }
@@ -583,9 +583,9 @@ fn sfn_task_create_detached(fn_ptr: i64, ctx: i64) -> * u8 {
 // `sfn_task_destroy(task)` tears down the cond + mutex (reverse init
 // order) and frees the task. Null-safe. The caller must ensure the task
 // has been joined (or never enqueued) so no worker still touches it.
-fn sfn_task_destroy(task: * u8) -> void {
+fn sfn_task_destroy(task: *u8) -> void {
     if task as i64 == 0 { return; }
-    let t: * Task = task as * Task;
+    let t: *Task = task as *Task;
     pthread_cond_destroy(t.cond);
     pthread_mutex_destroy(t.mutex);
     free(task);
@@ -598,14 +598,14 @@ fn sfn_task_destroy(task: * u8) -> void {
 // `sfn_task_join`. A null `fn_ptr` is treated as a no-op body (result
 // stays null) rather than dereferenced, so a malformed task cannot crash
 // the worker. Null-safe on the task handle.
-fn sfn_task_run(task: * u8) -> void {
+fn sfn_task_run(task: *u8) -> void {
     if task as i64 == 0 { return; }
-    let t: * Task = task as * Task;
+    let t: *Task = task as *Task;
 
-    let mut result: * u8 = null;
+    let mut result: *u8 = null;
     if t.fn_ptr != 0 {
-        let entry: * fn (* u8) -> * u8 = t.fn_ptr as * fn (* u8) -> * u8;
-        result = entry(t.ctx as * u8);
+        let entry: *fn (*u8) -> *u8 = t.fn_ptr as *fn (*u8) -> *u8;
+        result = entry(t.ctx as *u8);
     }
 
     // Split the address arithmetic across three statements: the inline
@@ -615,7 +615,7 @@ fn sfn_task_run(task: * u8) -> void {
     // ptrtoint → add → inttoptr split lowers correctly.
     let done_base: i64 = task as i64;
     let done_addr: i64 = done_base + _sfn_task_done_offset();
-    let done_slot: * i64 = done_addr as * i64;
+    let done_slot: *i64 = done_addr as *i64;
     pthread_mutex_lock(t.mutex);
     t.result = result as i64;
     atomic_store(done_slot, 1);
@@ -630,9 +630,9 @@ fn sfn_task_run(task: * u8) -> void {
 // transition. The result pointer is readable post-join because the
 // store-then-signal happens-before the join's wake. Null-safe (null task
 // reads as null).
-fn sfn_task_join(task: * u8) -> * u8 {
+fn sfn_task_join(task: *u8) -> *u8 {
     if task as i64 == 0 { return null; }
-    let t: * Task = task as * Task;
+    let t: *Task = task as *Task;
     // Split the address arithmetic across three statements: the inline
     // `(task as i64 + off) as * i64` form miscompiles today — the cast of
     // a parenthesised pointer-to-int + offset expression collapses to a
@@ -640,7 +640,7 @@ fn sfn_task_join(task: * u8) -> * u8 {
     // ptrtoint → add → inttoptr split lowers correctly.
     let done_base: i64 = task as i64;
     let done_addr: i64 = done_base + _sfn_task_done_offset();
-    let done_slot: * i64 = done_addr as * i64;
+    let done_slot: *i64 = done_addr as *i64;
 
     pthread_mutex_lock(t.mutex);
     loop {
@@ -649,7 +649,7 @@ fn sfn_task_join(task: * u8) -> * u8 {
     }
     let result: i64 = t.result;
     pthread_mutex_unlock(t.mutex);
-    return result as * u8;
+    return result as *u8;
 }
 
 // `sfn_scheduler_worker(arg)` is the pthread `start_routine`. `arg` is
@@ -670,12 +670,12 @@ fn sfn_task_join(task: * u8) -> * u8 {
 // then decides the reclaim without touching freed memory. Joinable tasks
 // (`detached == 0`) are left untouched — reclaimed by the joiner, exactly
 // as before.
-fn sfn_scheduler_worker(arg: * u8) -> * u8 {
-    let scheduler: * u8 = arg;
+fn sfn_scheduler_worker(arg: *u8) -> *u8 {
+    let scheduler: *u8 = arg;
     loop {
-        let task: * u8 = sfn_scheduler_next_task(scheduler);
+        let task: *u8 = sfn_scheduler_next_task(scheduler);
         if task as i64 == 0 { break; }
-        let t: * Task = task as * Task;
+        let t: *Task = task as *Task;
         let detached: i64 = t.detached;
         sfn_task_run(task);
         if detached != 0 { sfn_task_destroy(task); }
@@ -693,13 +693,13 @@ fn sfn_scheduler_worker(arg: * u8) -> * u8 {
 // observes `shutdown != 0`, or is parked in `pthread_cond_wait` when the
 // broadcast fires. Draining wins over shutdown — while `count > 0` a
 // worker keeps pulling regardless of the flag.
-fn sfn_scheduler_next_task(scheduler: * u8) -> * u8 {
+fn sfn_scheduler_next_task(scheduler: *u8) -> *u8 {
     if scheduler as i64 == 0 { return null; }
-    let sched: * Scheduler = scheduler as * Scheduler;
-    let q: * TaskQueue = sched.queue_addr as * TaskQueue;
+    let sched: *Scheduler = scheduler as *Scheduler;
+    let q: *TaskQueue = sched.queue_addr as *TaskQueue;
     // `shutdown` is the first Scheduler field, so its address is the
     // scheduler base — no offset arithmetic.
-    let shutdown_slot: * i64 = scheduler as * i64;
+    let shutdown_slot: *i64 = scheduler as *i64;
 
     pthread_mutex_lock(q.mutex);
 
@@ -712,7 +712,7 @@ fn sfn_scheduler_next_task(scheduler: * u8) -> * u8 {
         pthread_cond_wait(q.not_empty, q.mutex);
     }
 
-    let slot: * i64 = (q.tasks_addr + q.head * 8) as * i64;
+    let slot: *i64 = (q.tasks_addr + q.head * 8) as *i64;
     let task_addr: i64 = atomic_load(slot);
 
     let mut next_head: i64 = q.head + 1;
@@ -728,7 +728,7 @@ fn sfn_scheduler_next_task(scheduler: * u8) -> * u8 {
     pthread_cond_signal(q.not_full);
     pthread_mutex_unlock(q.mutex);
 
-    return task_addr as * u8;
+    return task_addr as *u8;
 }
 
 // `sfn_scheduler_create(queue)` resolves the pool size, allocates the
@@ -738,21 +738,21 @@ fn sfn_scheduler_next_task(scheduler: * u8) -> * u8 {
 // null on a null queue, OOM, or a failed `pthread_create`. On a partial
 // spin-up failure it tears down the workers already running (no leak, no
 // deadlock) before freeing and returning null.
-fn sfn_scheduler_create(queue: * u8) -> * u8 {
+fn sfn_scheduler_create(queue: *u8) -> *u8 {
     if queue as i64 == 0 { return null; }
 
     let count: i64 = sfn_scheduler_resolve_thread_count();
 
-    let sched_ptr: * u8 = malloc(_sfn_scheduler_struct_size() as usize);
+    let sched_ptr: *u8 = malloc(_sfn_scheduler_struct_size() as usize);
     if sched_ptr as i64 == 0 { return null; }
 
-    let threads_ptr: * u8 = malloc((count * 8) as usize);
+    let threads_ptr: *u8 = malloc((count * 8) as usize);
     if threads_ptr as i64 == 0 {
         free(sched_ptr);
         return null;
     }
 
-    let sched: * Scheduler = sched_ptr as * Scheduler;
+    let sched: *Scheduler = sched_ptr as *Scheduler;
     sched.shutdown = 0;
     sched.threads_addr = threads_ptr as i64;
     sched.thread_count = count;
@@ -764,7 +764,7 @@ fn sfn_scheduler_create(queue: * u8) -> * u8 {
     // before the function-reference → address lowering landed. A null
     // here would hand `pthread_create` a NULL start_routine (EINVAL /
     // crash), so guard it explicitly.
-    let start: * u8 = sfn_scheduler_worker as * u8;
+    let start: *u8 = sfn_scheduler_worker as *u8;
     if start as i64 == 0 {
         free(threads_ptr);
         free(sched_ptr);
@@ -774,7 +774,7 @@ fn sfn_scheduler_create(queue: * u8) -> * u8 {
     let mut i: i64 = 0;
     loop {
         if i >= count { break; }
-        let tid_slot: * usize = (sched.threads_addr + i * 8) as * usize;
+        let tid_slot: *usize = (sched.threads_addr + i * 8) as *usize;
         let rc: i32 = pthread_create(tid_slot, null, start, sched_ptr);
         if rc != 0 {
             // Partial spin-up: only [0, i) workers started. Shrink the
@@ -804,11 +804,11 @@ fn sfn_scheduler_create(queue: * u8) -> * u8 {
 // Call exactly once per scheduler (a second call would re-join already
 // joined threads). Null-safe; the queue is caller-owned and outlives the
 // scheduler (destroy it via `sfn_taskqueue_destroy`).
-fn sfn_scheduler_shutdown(scheduler: * u8) -> void {
+fn sfn_scheduler_shutdown(scheduler: *u8) -> void {
     if scheduler as i64 == 0 { return; }
-    let sched: * Scheduler = scheduler as * Scheduler;
-    let q: * TaskQueue = sched.queue_addr as * TaskQueue;
-    let shutdown_slot: * i64 = scheduler as * i64;
+    let sched: *Scheduler = scheduler as *Scheduler;
+    let q: *TaskQueue = sched.queue_addr as *TaskQueue;
+    let shutdown_slot: *i64 = scheduler as *i64;
 
     pthread_mutex_lock(q.mutex);
     atomic_store(shutdown_slot, 1);
@@ -819,7 +819,7 @@ fn sfn_scheduler_shutdown(scheduler: * u8) -> void {
     let mut i: i64 = 0;
     loop {
         if i >= sched.thread_count { break; }
-        let tid_slot: * i64 = (sched.threads_addr + i * 8) as * i64;
+        let tid_slot: *i64 = (sched.threads_addr + i * 8) as *i64;
         let tid: usize = atomic_load(tid_slot) as usize;
         pthread_join(tid, null);
         i = i + 1;
@@ -832,19 +832,19 @@ fn sfn_scheduler_shutdown(scheduler: * u8) -> void {
 // `sfn_scheduler_shutdown` first so no worker is still touching the
 // handle (destroying a running pool would be a use-after-free in the
 // workers). The queue is caller-owned and is NOT freed here. Null-safe.
-fn sfn_scheduler_destroy(scheduler: * u8) -> void {
+fn sfn_scheduler_destroy(scheduler: *u8) -> void {
     if scheduler as i64 == 0 { return; }
-    let sched: * Scheduler = scheduler as * Scheduler;
+    let sched: *Scheduler = scheduler as *Scheduler;
     let threads_addr: i64 = sched.threads_addr;
-    if threads_addr != 0 { free(threads_addr as * u8); }
+    if threads_addr != 0 { free(threads_addr as *u8); }
     free(scheduler);
 }
 
 // `sfn_scheduler_thread_count(scheduler)` reports the resolved pool
 // size. Null handle reads as 0.
-fn sfn_scheduler_thread_count(scheduler: * u8) -> i64 {
+fn sfn_scheduler_thread_count(scheduler: *u8) -> i64 {
     if scheduler as i64 == 0 { return 0; }
-    let sched: * Scheduler = scheduler as * Scheduler;
+    let sched: *Scheduler = scheduler as *Scheduler;
     return sched.thread_count;
 }
 
@@ -852,8 +852,8 @@ fn sfn_scheduler_thread_count(scheduler: * u8) -> i64 {
 // pulled off the queue by the pool — a drain witness for tests. Safe to
 // read after `sfn_scheduler_shutdown`'s joins establish happens-before;
 // null handle reads as 0.
-fn sfn_scheduler_processed(scheduler: * u8) -> i64 {
+fn sfn_scheduler_processed(scheduler: *u8) -> i64 {
     if scheduler as i64 == 0 { return 0; }
-    let sched: * Scheduler = scheduler as * Scheduler;
+    let sched: *Scheduler = scheduler as *Scheduler;
     return sched.processed;
 }

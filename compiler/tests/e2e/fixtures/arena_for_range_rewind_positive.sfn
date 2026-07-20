@@ -13,7 +13,7 @@ struct Cell {
 
 fn main() ![io] {
     let mut acc: number = 0.0;
-    for i in 0 .. 1000 {
+    for i in 0..1000 {
         let cell = Cell { a: i, b: i + 1, c: i + 2 };
         acc = acc + cell.a + cell.b + cell.c;
     }

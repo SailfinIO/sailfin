@@ -89,10 +89,10 @@ fn object_val(keys: string[], values: JsonValue[]) -> JsonValue {
 // (rejects surrogates / out-of-range, returning ""). The `\uXXXX` decoder
 // reuses this rather than hand-rolling UTF-8. Same `* u8 as string` cast
 // surface the prelude's `char_from_code` uses.
-extern fn sfn_str_from_codepoint(cp: i64) -> * u8;
+extern fn sfn_str_from_codepoint(cp: i64) -> *u8;
 
 fn _from_codepoint(cp: int) -> string {
-    let bytes: * u8 = sfn_str_from_codepoint(cp);
+    let bytes: *u8 = sfn_str_from_codepoint(cp);
     return bytes as string;
 }
 

@@ -68,29 +68,29 @@ struct Channel {
 }
 
 // ── Externs ───────────────────────────────────────────────────────
-extern fn malloc(size: usize) -> * u8;
+extern fn malloc(size: usize) -> *u8;
 
-extern fn free(ptr: * u8) -> void;
+extern fn free(ptr: *u8) -> void;
 
-extern fn memcpy(dst: * u8, src: * u8, n: usize) -> * u8;
+extern fn memcpy(dst: *u8, src: *u8, n: usize) -> *u8;
 
-extern fn pthread_mutex_init(m: * PthreadMutex, attr: * PthreadMutexAttr) -> i32;
+extern fn pthread_mutex_init(m: *PthreadMutex, attr: *PthreadMutexAttr) -> i32;
 
-extern fn pthread_mutex_lock(m: * PthreadMutex) -> i32;
+extern fn pthread_mutex_lock(m: *PthreadMutex) -> i32;
 
-extern fn pthread_mutex_unlock(m: * PthreadMutex) -> i32;
+extern fn pthread_mutex_unlock(m: *PthreadMutex) -> i32;
 
-extern fn pthread_mutex_destroy(m: * PthreadMutex) -> i32;
+extern fn pthread_mutex_destroy(m: *PthreadMutex) -> i32;
 
-extern fn pthread_cond_init(c: * PthreadCond, attr: * PthreadCondAttr) -> i32;
+extern fn pthread_cond_init(c: *PthreadCond, attr: *PthreadCondAttr) -> i32;
 
-extern fn pthread_cond_wait(c: * PthreadCond, m: * PthreadMutex) -> i32;
+extern fn pthread_cond_wait(c: *PthreadCond, m: *PthreadMutex) -> i32;
 
-extern fn pthread_cond_signal(c: * PthreadCond) -> i32;
+extern fn pthread_cond_signal(c: *PthreadCond) -> i32;
 
-extern fn pthread_cond_broadcast(c: * PthreadCond) -> i32;
+extern fn pthread_cond_broadcast(c: *PthreadCond) -> i32;
 
-extern fn pthread_cond_destroy(c: * PthreadCond) -> i32;
+extern fn pthread_cond_destroy(c: *PthreadCond) -> i32;
 
 // ── Layout helpers ────────────────────────────────────────────────
 // Byte offset of the `closed` field, which sits after the two conds. The
@@ -115,22 +115,22 @@ fn _sfn_channel_closed_offset() -> i64 { return 208; }
 // stored so `sfn_channel_destroy` drains and frees any libc-backed
 // buffers abandoned in the ring at close.  Returns null on OOM or a
 // failed pthread init.
-fn sfn_channel_create(capacity: i64, elem_size: i64, owned: i64) -> * u8 {
+fn sfn_channel_create(capacity: i64, elem_size: i64, owned: i64) -> *u8 {
     let mut cap: i64 = capacity;
     if cap <= 0 { cap = 1; }
     let mut esz: i64 = elem_size;
     if esz <= 0 { esz = 1; }
 
-    let ch_ptr: * u8 = malloc(_sfn_channel_struct_size_full() as usize);
+    let ch_ptr: *u8 = malloc(_sfn_channel_struct_size_full() as usize);
     if ch_ptr as i64 == 0 { return ch_ptr; }
 
-    let buf_ptr: * u8 = malloc((cap * esz) as usize);
+    let buf_ptr: *u8 = malloc((cap * esz) as usize);
     if buf_ptr as i64 == 0 {
         free(ch_ptr);
         return buf_ptr;
     }
 
-    let ch: * Channel = ch_ptr as * Channel;
+    let ch: *Channel = ch_ptr as *Channel;
     ch.buffer_addr = buf_ptr as i64;
     ch.capacity = cap;
     ch.elem_size = esz;
@@ -143,7 +143,7 @@ fn sfn_channel_create(capacity: i64, elem_size: i64, owned: i64) -> * u8 {
     // Task.done in scheduler.sfn).
     let closed_base: i64 = ch_ptr as i64;
     let closed_addr: i64 = closed_base + _sfn_channel_closed_offset();
-    let closed_slot: * i64 = closed_addr as * i64;
+    let closed_slot: *i64 = closed_addr as *i64;
     atomic_store(closed_slot, 0);
 
     let mutex_rc: i32 = pthread_mutex_init(ch.mutex, null);
@@ -176,13 +176,13 @@ fn sfn_channel_create(capacity: i64, elem_size: i64, owned: i64) -> * u8 {
 // into the channel.  Blocks on `not_full` while the buffer is full.
 // Returns 1 (true) on success; returns 0 (false) immediately if the
 // channel is closed.  Null-safe on the channel handle.
-fn sfn_channel_send(ch: * u8, elem: * u8) -> i64 {
+fn sfn_channel_send(ch: *u8, elem: *u8) -> i64 {
     if ch as i64 == 0 { return 0; }
-    let c: * Channel = ch as * Channel;
+    let c: *Channel = ch as *Channel;
 
     let closed_base: i64 = ch as i64;
     let closed_addr: i64 = closed_base + _sfn_channel_closed_offset();
-    let closed_slot: * i64 = closed_addr as * i64;
+    let closed_slot: *i64 = closed_addr as *i64;
 
     pthread_mutex_lock(c.mutex);
 
@@ -204,7 +204,7 @@ fn sfn_channel_send(ch: * u8, elem: * u8) -> i64 {
 
     // Copy elem into the tail slot.
     let slot_offset: i64 = c.tail * c.elem_size;
-    let slot_ptr: * u8 = (c.buffer_addr + slot_offset) as * u8;
+    let slot_ptr: *u8 = (c.buffer_addr + slot_offset) as *u8;
     memcpy(slot_ptr, elem, c.elem_size as usize);
 
     let mut next_tail: i64 = c.tail + 1;
@@ -222,13 +222,13 @@ fn sfn_channel_send(ch: * u8, elem: * u8) -> i64 {
 // the element (`* u8`, caller owns) on success.  Blocks on `not_empty`
 // while the buffer is empty.  Returns null when the channel is closed
 // AND empty (no more items to drain).  Null-safe on the channel handle.
-fn sfn_channel_recv(ch: * u8) -> * u8 {
+fn sfn_channel_recv(ch: *u8) -> *u8 {
     if ch as i64 == 0 { return null; }
-    let c: * Channel = ch as * Channel;
+    let c: *Channel = ch as *Channel;
 
     let closed_base: i64 = ch as i64;
     let closed_addr: i64 = closed_base + _sfn_channel_closed_offset();
-    let closed_slot: * i64 = closed_addr as * i64;
+    let closed_slot: *i64 = closed_addr as *i64;
 
     pthread_mutex_lock(c.mutex);
 
@@ -244,8 +244,8 @@ fn sfn_channel_recv(ch: * u8) -> * u8 {
 
     // Copy the head slot into a fresh allocation.
     let slot_offset: i64 = c.head * c.elem_size;
-    let slot_ptr: * u8 = (c.buffer_addr + slot_offset) as * u8;
-    let out_ptr: * u8 = malloc(c.elem_size as usize);
+    let slot_ptr: *u8 = (c.buffer_addr + slot_offset) as *u8;
+    let out_ptr: *u8 = malloc(c.elem_size as usize);
     if out_ptr as i64 != 0 {
         memcpy(out_ptr, slot_ptr, c.elem_size as usize);
     }
@@ -264,13 +264,13 @@ fn sfn_channel_recv(ch: * u8) -> * u8 {
 // Sets the closed flag atomically under the mutex and broadcasts both
 // conditions so blocked senders and receivers wake and observe the
 // closed state.  Null-safe.
-fn sfn_channel_close(ch: * u8) -> void {
+fn sfn_channel_close(ch: *u8) -> void {
     if ch as i64 == 0 { return; }
-    let c: * Channel = ch as * Channel;
+    let c: *Channel = ch as *Channel;
 
     let closed_base: i64 = ch as i64;
     let closed_addr: i64 = closed_base + _sfn_channel_closed_offset();
-    let closed_slot: * i64 = closed_addr as * i64;
+    let closed_slot: *i64 = closed_addr as *i64;
 
     pthread_mutex_lock(c.mutex);
     atomic_store(closed_slot, 1);
@@ -283,9 +283,9 @@ fn sfn_channel_close(ch: * u8) -> void {
 // Tears down the condition variables and mutex, frees the buffer and
 // the handle.  Null-safe.  The caller must `sfn_channel_close` first
 // and drain pending receivers so no thread is still touching the handle.
-fn sfn_channel_destroy(ch: * u8) -> void {
+fn sfn_channel_destroy(ch: *u8) -> void {
     if ch as i64 == 0 { return; }
-    let c: * Channel = ch as * Channel;
+    let c: *Channel = ch as *Channel;
     // Drain owned elements abandoned in the ring (#1476).  When the
     // channel carries `OwnedBuf` elements (`elem_owned == 1`), every
     // element still buffered at close owns its backing storage.  Free the
@@ -308,12 +308,12 @@ fn sfn_channel_destroy(ch: * u8) -> void {
                 if i >= live { break; }
                 let slot_index: i64 = (head + i) % cap;
                 let slot_addr: i64 = buf_base + slot_index * esz;
-                let ptr_slot: * i64 = slot_addr as * i64;
+                let ptr_slot: *i64 = slot_addr as *i64;
                 let ptr_addr: i64 = atomic_load(ptr_slot);
-                let arena_slot: * i64 = (slot_addr + 24) as * i64;
+                let arena_slot: *i64 = (slot_addr + 24) as *i64;
                 let arena_addr: i64 = atomic_load(arena_slot);
                 if arena_addr == 0 && ptr_addr != 0 {
-                    free(ptr_addr as * u8);
+                    free(ptr_addr as *u8);
                 }
                 i = i + 1;
             }
@@ -323,7 +323,7 @@ fn sfn_channel_destroy(ch: * u8) -> void {
     pthread_cond_destroy(c.not_empty);
     pthread_mutex_destroy(c.mutex);
     let buf_addr: i64 = c.buffer_addr;
-    if buf_addr != 0 { free(buf_addr as * u8); }
+    if buf_addr != 0 { free(buf_addr as *u8); }
     free(ch);
 }
 
@@ -355,9 +355,9 @@ fn sfn_channel_destroy(ch: * u8) -> void {
 // `_sfn_task_struct_size`.
 fn _sfn_task_struct_size_ch() -> i64 { return 152; }
 
-fn sfn_spawn_task(fn_ptr: * u8) -> * u8 {
+fn sfn_spawn_task(fn_ptr: *u8) -> *u8 {
     // Allocate the task via malloc.
-    let task_ptr: * u8 = malloc(_sfn_task_struct_size_ch() as usize);
+    let task_ptr: *u8 = malloc(_sfn_task_struct_size_ch() as usize);
     if task_ptr as i64 == 0 { return null; }
 
     // Zero the allocation: fn_ptr at offset 0, ctx at 8, result at 16,
@@ -367,11 +367,11 @@ fn sfn_spawn_task(fn_ptr: * u8) -> * u8 {
     // this task as joinable and never reclaims it (v0 join-without-destroy),
     // matching the scheduler's default `sfn_task_create` discipline.
     let base: i64 = task_ptr as i64;
-    let fn_slot: * i64 = base as * i64;
-    let ctx_slot: * i64 = (base + 8) as * i64;
-    let result_slot: * i64 = (base + 16) as * i64;
-    let done_slot: * i64 = (base + 24) as * i64;
-    let detached_slot: * i64 = (base + 144) as * i64;
+    let fn_slot: *i64 = base as *i64;
+    let ctx_slot: *i64 = (base + 8) as *i64;
+    let result_slot: *i64 = (base + 16) as *i64;
+    let done_slot: *i64 = (base + 24) as *i64;
+    let detached_slot: *i64 = (base + 144) as *i64;
     atomic_store(fn_slot, fn_ptr as i64);
     atomic_store(ctx_slot, 0);
     atomic_store(result_slot, 0);

@@ -12,14 +12,13 @@
 // `let x: Foo<int, int> = ...` because `sfn fmt` currently mangles a generic
 // type annotation in let-binding position (`Foo<int, int> =` -> `Foo<int,
 // int >=`). The inline form is fmt-safe and exercises the same lowering.
-enum Foo < T,
-E > {
+enum Foo<T, E> {
     Ok { value: T },
     Err { error: E }
 }
 
 // `Foo<int, int>` — by-value i64 payload in both arms.
-fn unwrap_or(f: Foo < int, int >, fallback: int) -> int {
+fn unwrap_or(f: Foo<int, int>, fallback: int) -> int {
     match f {
         Foo.Ok { value } => { return value; },
         Foo.Err { error } => { return fallback + error; }
@@ -28,7 +27,7 @@ fn unwrap_or(f: Foo < int, int >, fallback: int) -> int {
 
 // `Foo<string, int>` — a DISTINCT instantiation in the same module. The `Ok`
 // payload is a string, the `Err` payload an i64.
-fn ok_len_or(f: Foo < string, int >, fallback: int) -> int {
+fn ok_len_or(f: Foo<string, int>, fallback: int) -> int {
     match f {
         Foo.Ok { value } => { return value.length; },
         Foo.Err { error } => { return fallback + error; }
