@@ -103,7 +103,11 @@ here.
   `sfn/crypto::ed25519_verify_utf8` — no trust-on-first-use. This is the
   supply-chain root for toolchain auto-fetch (SFN-171); the consumer
   fetch+verify path is SFN-168. Trust model + key rotation:
-  `docs/release-signing.md`. Design: SFEP-0046 §3.5.
+  `docs/release-signing.md`. The user-facing verification guide publishes the
+  production PEM, raw key, and SHA-256 SPKI fingerprint at
+  `site/src/content/docs/docs/getting-started/verify-download.md`, with the PEM
+  also served directly from `/.well-known/sailfin-release-signing-key.pem`
+  (SFN-203). Design: SFEP-0046 §3.5.
 - **CLI dispatch.** `sailfin_cli_main_v2` (`compiler/src/cli/main.sfn`) is the
   sole command router: it builds a root `Command` via the `sfn/cli` capsule
   from each subcommand's `command_def()` and dispatches to per-command
