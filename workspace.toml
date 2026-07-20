@@ -39,5 +39,5 @@ members = ["compiler", "runtime", "capsules/sfn/bench", "capsules/sfn/cli", "cap
 # alpha), so it never rejects a running toolchain today — it documents the
 # minimum stability contract and tightens only if raised to `beta`/`rc`/`stable`.
 [toolchain]
-sfn = "0.8.0-alpha.3"
+sfn = "0.8.0"
 channel = "alpha"
