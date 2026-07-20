@@ -40,7 +40,7 @@ release is simply unusable by auto-fetch — never silently trusted.
 
 The signing key is an **Ed25519** keypair. The **public** half is committed and
 embedded in the `sfn` binary at build time — there is no trust-on-first-use and
-no network step in establishing trust. It lives in three places that must stay
+no network step in establishing trust. It lives in four places that must stay
 in sync:
 
 | Location | Form | Role |
@@ -48,6 +48,7 @@ in sync:
 | `.github/release-signing/ed25519-release.pub.pem` | PEM (SPKI) | Canonical committed public key; the release script self-verifies against it. |
 | `.github/release-signing/ed25519-release.pub.hex` | 64 hex chars | Raw 32-byte key, convenience/cross-check copy. |
 | `compiler/src/release_trust.sfn` | `RELEASE_SIGNING_PUBLIC_KEY_HEX` (64 hex) | The copy pinned into the `sfn` binary; read via `release_signing_public_key_hex()`. |
+| `site/public/.well-known/sailfin-release-signing-key.pem` | PEM (SPKI) | HTTPS trust anchor used by the public [verification guide](https://sailfin.dev/docs/getting-started/verify-download). |
 
 The **private** half is **never committed**. It is held only as the
 `SAILFIN_RELEASE_SIGNING_KEY` CI secret (repo/org level; `release.yml` passes
@@ -109,7 +110,9 @@ Then, in one PR:
 2. Replace `.github/release-signing/ed25519-release.pub.hex` with the new hex.
 3. Update `RELEASE_SIGNING_PUBLIC_KEY_HEX` in `compiler/src/release_trust.sfn`
    and the golden value in `compiler/tests/unit/release_trust_test.sfn`.
-4. Regenerate the test fixture in
+4. Replace `site/public/.well-known/sailfin-release-signing-key.pem` and update
+   the raw key and SHA-256 SPKI fingerprint in the public verification guide.
+5. Regenerate the test fixture in
    `capsules/sfn/crypto/tests/release_signing_key_test.sfn` — sign its `MSG`
    with the new private key and paste the new `KEY`/`SIG`:
    ```bash
@@ -117,8 +120,8 @@ Then, in one PR:
    openssl pkeyutl -sign -inkey release-priv.pem -rawin -in /tmp/msg -out /tmp/sig
    od -An -v -tx1 /tmp/sig | tr -d ' \n'; echo   # -> new SIG
    ```
-5. Store the new private key PEM as the `SAILFIN_RELEASE_SIGNING_KEY` secret.
-6. **Securely destroy** the local private key material.
+6. Store the new private key PEM as the `SAILFIN_RELEASE_SIGNING_KEY` secret.
+7. **Securely destroy** the local private key material.
 
 Because the embedded key is pinned at build time, a rotated key only takes
 effect for toolchains built from a compiler that carries it — plan rotations

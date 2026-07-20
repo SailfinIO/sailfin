@@ -55,6 +55,13 @@ The script will:
 3. Install `sailfin` and `sfn` to `~/.local/bin`
 4. Print confirmation when complete
 
+> **Bootstrap security:** The install script downloads over HTTPS but does not
+> currently verify the release signature. This first install is TLS-trust only.
+> To verify before executing any downloaded code, follow
+> [Verifying Your Download](/docs/getting-started/verify-download) and install
+> manually. Subsequent `sfn toolchain install` downloads verify both the
+> Ed25519 signature and SHA-256 digest automatically.
+
 Example output:
 
 ```
@@ -221,13 +228,29 @@ Examples:
 | `sailfin_${VERSION}_macos_arm64.tar.gz` | macOS Apple Silicon |
 | `sailfin_${VERSION}_windows_x86_64.tar.gz` | Windows x86_64 |
 
-### Step 2: Extract and place the binary
+### Step 2: Verify the download
+
+Download the tarball together with `SHA256SUMS` and `SHA256SUMS.sig`, then
+verify the manifest signature and the tarball digest before extracting it. The
+[download verification guide](/docs/getting-started/verify-download) provides
+copy-pasteable OpenSSL commands and publishes the canonical signing key and
+fingerprint.
 
 ```bash
-VERSION=0.8.0-alpha.5
+VERSION=0.8.0
 
 # Download (replace the filename with the one that matches your platform)
 curl -LO "https://github.com/SailfinIO/sailfin/releases/download/v${VERSION}/sailfin_${VERSION}_linux_x86_64.tar.gz"
+curl -LO "https://github.com/SailfinIO/sailfin/releases/download/v${VERSION}/SHA256SUMS"
+curl -LO "https://github.com/SailfinIO/sailfin/releases/download/v${VERSION}/SHA256SUMS.sig"
+```
+
+Do not extract the archive unless both verification steps succeed.
+
+### Step 3: Extract and place the binary
+
+```bash
+VERSION=0.8.0
 
 # Extract
 tar -xzf "sailfin_${VERSION}_linux_x86_64.tar.gz"
@@ -240,7 +263,7 @@ cp bin/sfn     ~/.local/bin/sfn
 chmod +x ~/.local/bin/sailfin ~/.local/bin/sfn
 ```
 
-### Step 3: Verify
+### Step 4: Verify the installed command
 
 ```bash
 sfn --version
@@ -438,6 +461,7 @@ This change only affects the current PowerShell session and does not persist.
 ## Next Steps
 
 - [Downloads](/dl) — Pre-built binaries for every platform
+- [Verifying Your Download](/docs/getting-started/verify-download) — Verify release signatures and checksums
 - [Editor Setup](/docs/getting-started/editor-setup) — Install the Sailfin VS Code extension for syntax highlighting and snippets
 - [Hello, World!](/docs/getting-started/hello-world) — Write and run your first Sailfin program
 - [Tour of Sailfin](/docs/getting-started/tour) — A guided introduction to the language
