@@ -131,13 +131,18 @@ jobs:
           brew install jq llvm
           echo "$(brew --prefix llvm)/bin" >> "$GITHUB_PATH"
 
-      # Slim release gate (#843): a prerelease tag is a mechanical
-      # version bump on a main SHA that already passed full PR CI and
-      # push:main validation, so prerelease legs build + package + smoke
-      # and delegate suite coverage to main CI and the nightly
-      # self-host. Stable (non-prerelease) tags keep the full suite —
-      # GA cuts are rare enough that the extra hour is worth the
-      # belt-and-braces. `test_jobs` only applies on that full path.
+      # Slim release gate (#843, extended to stable tags): every release
+      # tag — prerelease AND stable — is a mechanical version bump on a
+      # main SHA that already passed full PR CI + push:main validation,
+      # and a stable cut additionally clears the release-train's
+      # green-nightly self-host gate (release-train.yml). So all release
+      # legs build + package + smoke and delegate full-suite coverage to
+      # main CI and the nightly self-host, rather than re-running the whole
+      # suite here. The former stable-only `full` path re-ran the suite as
+      # a belt-and-braces GA gate, but the macOS-arm64 full-suite leg grew
+      # past the 120-minute job timeout and cancelled the cut; the coverage
+      # it added is already provided by the gates above. `test_jobs` is
+      # unused on this path (it only fed the retired full-suite run).
       - name: Build + test + package (via Makefile)
         uses: ./.github/actions/sailfin-build
         env:
@@ -147,7 +152,7 @@ jobs:
           clang: ${{ matrix.clang }}
           seed_version: ${{ steps.seed.outputs.seed_version }}
           test_jobs: ${{ matrix.test_jobs }}
-          mode: ${{ contains(env.RELEASE_TAG, '-') && 'build-package' || 'full' }}
+          mode: build-package
 
       # Smoke-test the built compiler end-to-end (compile + link + run a
       # real program). Together with the two version verifications below
