@@ -3,8 +3,10 @@ name: Cadence Seed Pin
 # After ANY release publishes assets, open a PR that adopts that just-published
 # toolchain as the compiler checkout seed, and auto-merge it once its CI is
 # green so the seed advances without a manual step. The canonical pin is
-# `bootstrap.toml [seed].version` (SFEP-0047), alongside the compiler
-# `[toolchain].sfn` floor in `compiler/capsule.toml`.
+# `bootstrap.toml [seed].version` (SFEP-0047), alongside the `[toolchain].sfn`
+# floor in `compiler/capsule.toml` (the compiler member override) and
+# `workspace.toml` (the workspace-wide default floor, SFN-414) — all kept in
+# lockstep.
 
 on:
   workflow_run:
@@ -140,7 +142,22 @@ jobs:
           ' compiler/capsule.toml > "$tmp"
           mv "$tmp" compiler/capsule.toml
 
-          git add bootstrap.toml compiler/capsule.toml
+          # Keep the workspace-wide toolchain floor in lockstep with the
+          # compiler member's floor. `workspace.toml [toolchain].sfn` (SFN-414)
+          # is the default floor every member inherits; leaving it behind drifts
+          # it from the adopted seed. Same rewrite as capsule.toml; `channel`
+          # (a sibling key in the same section) is untouched.
+          tmp="$(mktemp)"
+          awk -v v="$VERSION" '
+            /^\[[^]]+\]/ { section=$0 }
+            section == "[toolchain]" && /^sfn[[:space:]]*=/ {
+              sub(/"[^"]*"/, "\"" v "\"")
+            }
+            { print }
+          ' workspace.toml > "$tmp"
+          mv "$tmp" workspace.toml
+
+          git add bootstrap.toml compiler/capsule.toml workspace.toml
           if git diff --cached --quiet; then
             echo "[seed-pin] no changes after rewrite; skipping."
             exit 0
@@ -159,6 +176,7 @@ jobs:
 
           - Updates \`bootstrap.toml [seed].version\`, the canonical compiler-checkout seed policy.
           - Updates \`compiler/capsule.toml [toolchain].sfn\` so the public toolchain floor tracks the adopted seed.
+          - Updates \`workspace.toml [toolchain].sfn\` so the workspace-wide default floor stays in lockstep.
 
           ## Verification
 
