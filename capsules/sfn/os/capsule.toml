@@ -1,6 +1,6 @@
 [capsule]
 name = "sfn/os"
-version = "0.5.0"
+version = "0.5.1"
 description = "Environment, process, and OS interaction for Sailfin"
 
 [dependencies]
