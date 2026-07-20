@@ -974,6 +974,86 @@ fn required_effects(body: Block, imports: ImportSymbolTable) -> EffectRequiremen
     return collect_effects_from_block(body, imports);
 }
 
+// SFEP-0051 Phase 4b (SFN-418): the inferred effect surface of a module's
+// PUBLIC API, for the workspace-tier capability audit. Returns the deduped
+// union, across every function the module locally exports, of the effects the
+// checker infers its body requires (`required_effects`) together with the
+// effects its signature declares. A member whose `capsule.toml [capabilities]
+// required` under-reports this surface drifts under Phase 4b even when the
+// declared surface (Phase 4a) passed. It consumes the checker's existing
+// per-function inference rather than re-deriving effect semantics; `pure`
+// (universally allowed) is never a capability requirement, so it is excluded.
+fn inferred_public_effects(program: Program, imports: ImportSymbolTable) -> string[] {
+    let exported = _collect_local_export_names(program);
+    let local_imports = _merge_local_functions(program, localize_import_symbols_for_program(program, imports));
+    let mut effects: string[] = [];
+    let mut index: int = 0;
+    loop {
+        if index >= program.statements.length { break; }
+        let statement = program.statements[index];
+        index += 1;
+        if statement.variant != "FunctionDeclaration" { continue; }
+        if !_str_list_contains(exported, statement.signature.name) { continue; }
+        // Effects declared on the public signature.
+        let mut si: int = 0;
+        loop {
+            if si >= statement.signature.effects.length { break; }
+            let declared = statement.signature.effects[si];
+            si += 1;
+            if is_universally_allowed_effect(declared) { continue; }
+            effects = append_unique_effect(effects, declared);
+        }
+        // Effects the checker infers from the body — robust to a signature that
+        // reaches an effect through a same-module helper.
+        let requirements = required_effects(statement.body, _suppress_shadowing_params(local_imports, statement.signature.parameters));
+        let mut ri: int = 0;
+        loop {
+            if ri >= requirements.length { break; }
+            let inferred = requirements[ri].effect;
+            ri += 1;
+            if is_universally_allowed_effect(inferred) { continue; }
+            effects = append_unique_effect(effects, inferred);
+        }
+    }
+    return effects;
+}
+
+// The names a module exports from its own definitions (a local `export { … }`
+// with no `from` source) — the public surface `inferred_public_effects`
+// restricts to. Re-exports (`export { … } from "…"`) name another module's
+// surface and are skipped.
+fn _collect_local_export_names(program: Program) -> string[] {
+    let mut names: string[] = [];
+    let mut index: int = 0;
+    loop {
+        if index >= program.statements.length { break; }
+        let statement = program.statements[index];
+        index += 1;
+        if statement.variant != "ExportDeclaration" { continue; }
+        if statement.source.length != 0 { continue; }
+        let mut si: int = 0;
+        loop {
+            if si >= statement.export_specifiers.length { break; }
+            let spec = statement.export_specifiers[si];
+            si += 1;
+            if !_str_list_contains(names, spec.name) {
+                names.push(spec.name);
+            }
+        }
+    }
+    return names;
+}
+
+fn _str_list_contains(values: string[], value: string) -> boolean {
+    let mut index: int = 0;
+    loop {
+        if index >= values.length { break; }
+        if values[index] == value { return true; }
+        index += 1;
+    }
+    return false;
+}
+
 // Augment the effect table with the nested `fn`s declared DIRECTLY in this
 // block (SFEP-0042, #1940), each shadowing any same-named enclosing entry
 // (`append_local_function` is last-write-wins). This keys nested-fn effect

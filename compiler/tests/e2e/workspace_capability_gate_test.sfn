@@ -215,6 +215,41 @@ test "capability gate: no [workspace.capabilities] is a no-op" ![io] {
     assert find(audit_out, "nothing to audit", 0) >= 0;
 }
 
+// ---- Test 7: Phase 4b — inferred-surface drift caught where declared passes ----
+// SFN-418: `underdeclared` declares only `["io"]` in its capsule.toml — within
+// the `allow = ["clock", "io"]` envelope, so Phase 4a's declared-surface audit
+// is clean — but a public function in its `src/` uses `![net]`. Phase 4b unions
+// the inferred surface into the member's required set, so `net` now drifts and
+// `sfn check` fails with E0405: the exact case declared-only (4a) misses.
+test "capability gate: inferred-surface drift fails sfn check where declared passes (4b)" ![io] {
+    let out_marker = _scratch_marker("t7");
+    let exit = with_tmp_dir(fn (dir: string) -> int {
+        _make_ws_inferred(dir);
+        let rc = process.run_capture([_sfn_bin(), "check", dir], []);
+        let out = process.capture_take_stdout();
+        let err = process.capture_take_stderr();
+        fs.writeFile(out_marker, out + err);
+        return rc;
+    });
+    assert exit != 0;
+    let msg = fs.readFile(out_marker);
+    fs.deleteFile(out_marker);
+    assert find(msg, "E0405", 0) >= 0;
+    assert find(msg, "net", 0) >= 0;
+}
+
+// Build a one-member fixture whose declared surface is clean but whose source
+// under-declares: `underdeclared` lists only `["io"]` in `[capabilities]`
+// (within `allow = ["clock", "io"]`), yet a public function in its `src/` uses
+// `![net]`. Phase 4a passes on the declared surface; Phase 4b (SFN-418) catches
+// the `net` drift from the inferred surface.
+fn _make_ws_inferred(root: string) -> void ![io] {
+    fs.createDirectory(root + "/underdeclared/src", true);
+    fs.writeFile(root + "/workspace.toml", "[workspace]\nmembers = [\"underdeclared\"]\n\n[workspace.capabilities]\nallow = [\"clock\", \"io\"]\n");
+    fs.writeFile(root + "/underdeclared/capsule.toml", "[capsule]\nname = \"fixture/underdeclared\"\nversion = \"0.1.0\"\n\n[capabilities]\nrequired = [\"io\"]\n");
+    fs.writeFile(root + "/underdeclared/src/net_use.sfn", "fn reach_out() -> int ![net] {\n    let _status = http.get(\"http://example.com\");\n    return 0;\n}\n\nexport { reach_out };\n");
+}
+
 // Build a two-member fixture with members that declare effects but NO
 // `[workspace.capabilities]` envelope — the opt-out (unconfigured) shape.
 fn _make_ws_bare(root: string) -> void ![io] {

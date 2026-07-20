@@ -1,0 +1,151 @@
+// Unit tests for compiler/src/effect_checker.sfn's SFEP-0051 Phase 4b
+// (SFN-418) surfacing entry point: `inferred_public_effects(program, imports)
+// -> string[]`.
+//
+// Phase 4b strengthens the workspace capability audit (SFEP-0051 §Phase 4) by
+// upgrading a member's required set from its declared `capsule.toml
+// [capabilities] required` to the effects inferred across its PUBLIC functions.
+// `inferred_public_effects` is the reduce that surfaces that set: the deduped
+// union of the `![...]` effects on every function the module locally exports,
+// with non-exported functions and the universally-allowed `pure` excluded.
+//
+// These tests pin the export-restriction + union/dedup contract with
+// AST-direct fixtures (no parser drag, no I/O — the same builder pattern as
+// effect_capabilities_test.sfn). The body-inference half (a public function
+// whose body reaches a `net` operation) is exercised end-to-end against real
+// source in compiler/tests/e2e/workspace_capability_gate_test.sfn.
+import {
+    Block,
+    Decorator,
+    ExportSpecifier,
+    FunctionSignature,
+    Program,
+    SourceSpan,
+    Statement
+} from "../../src/ast";
+import { inferred_public_effects } from "../../src/effect_checker";
+import { empty_import_symbols } from "../../src/effect_imports";
+
+// -------------------------------------------------------------------
+// Builder helpers
+// -------------------------------------------------------------------
+fn _empty_block() -> Block {
+    return Block { tokens: [], text: "", statements: [] };
+}
+
+fn _span(line: int, column: int) -> SourceSpan {
+    return SourceSpan {
+        start_line: line,
+        start_column: column,
+        end_line: line,
+        end_column: column + 1
+    };
+}
+
+fn _signature(name: string, effects: string[]) -> FunctionSignature {
+    return FunctionSignature {
+        name: name,
+        is_async: false,
+        parameters: [],
+        return_type: null,
+        effects: effects,
+        type_parameters: [],
+        name_span: _span(1, 4)
+    };
+}
+
+// A `Statement.FunctionDeclaration` declaring the given effects on its
+// signature, with an empty body and no decorators. An empty body means only
+// the signature effects contribute here — body inference is covered e2e.
+fn _function_declaring(name: string, effects: string[]) -> Statement {
+    let mut empty_decorators: Decorator[] = [];
+    return Statement.FunctionDeclaration {
+        signature: _signature(name, effects),
+        body: _empty_block(),
+        decorators: empty_decorators,
+        is_unsafe: false
+    };
+}
+
+// A local `export { names… };` statement (no `from` source).
+fn _export(names: string[]) -> Statement {
+    let mut specs: ExportSpecifier[] = [];
+    let mut i: int = 0;
+    loop {
+        if i >= names.length { break; }
+        specs.push(ExportSpecifier { name: names[i], alias: null });
+        i += 1;
+    }
+    return Statement.ExportDeclaration {
+        export_specifiers: specs,
+        source: ""
+    };
+}
+
+fn _contains(values: string[], value: string) -> boolean {
+    let mut i: int = 0;
+    loop {
+        if i >= values.length { break; }
+        if values[i] == value { return true; }
+        i += 1;
+    }
+    return false;
+}
+
+// -------------------------------------------------------------------
+// Exported effect surfaces
+// -------------------------------------------------------------------
+test "inferred public effects: exported ![net] function surfaces net" {
+    let fn_decl = _function_declaring("reach_out", ["net"]);
+    let exp = _export(["reach_out"]);
+    let program = Program { statements: [fn_decl, exp] };
+    let effects = inferred_public_effects(program, empty_import_symbols());
+    assert effects.length == 1;
+    assert effects[0] == "net";
+}
+
+test "inferred public effects: non-exported function is excluded" {
+    // A `![net]` function that the module never exports is not part of the
+    // public surface, so it must not appear in the inferred set — the audit
+    // scopes to what other capsules can actually call.
+    let fn_decl = _function_declaring("internal_fetch", ["net"]);
+    let program = Program { statements: [fn_decl] };
+    let effects = inferred_public_effects(program, empty_import_symbols());
+    assert effects.length == 0;
+}
+
+test "inferred public effects: only the exported subset counts" {
+    // `public_reader` (![io]) is exported; `private_fetch` (![net]) is not.
+    // The surface is `io` alone — `net` stays private.
+    let public_reader = _function_declaring("public_reader", ["io"]);
+    let private_fetch = _function_declaring("private_fetch", ["net"]);
+    let exp = _export(["public_reader"]);
+    let program = Program {
+        statements: [public_reader, private_fetch, exp]
+    };
+    let effects = inferred_public_effects(program, empty_import_symbols());
+    assert effects.length == 1;
+    assert effects[0] == "io";
+    assert ! _contains(effects, "net");
+}
+
+test "inferred public effects: pure exported function surfaces nothing" {
+    let fn_decl = _function_declaring("add", []);
+    let exp = _export(["add"]);
+    let program = Program { statements: [fn_decl, exp] };
+    let effects = inferred_public_effects(program, empty_import_symbols());
+    assert effects.length == 0;
+}
+
+test "inferred public effects: dedups across public functions" {
+    // Two exported functions both requiring `io`, one also `net`. The union is
+    // {io, net} with no duplicate `io`.
+    let a = _function_declaring("log_it", ["io"]);
+    let b = _function_declaring("fetch_it", ["io", "net"]);
+    let exp = _export(["log_it", "fetch_it"]);
+    let program = Program { statements: [a, b, exp] };
+    let effects = inferred_public_effects(program, empty_import_symbols());
+    assert effects.length == 2;
+    assert _contains(effects, "io");
+    assert _contains(effects, "net");
+}

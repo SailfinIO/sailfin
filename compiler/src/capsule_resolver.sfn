@@ -34,7 +34,11 @@
 // Consumers then call `_clang_link_multi` with the main .ll and the
 // capsule .ll paths, and clang produces a linked binary with all
 // capsule symbols resolved.
-import { _atomic_rename_into_place, _mktemp_sibling_cmd } from "./build/fs";
+import {
+    _atomic_rename_into_place,
+    _collect_sfn_files_cmd,
+    _mktemp_sibling_cmd
+} from "./build/fs";
 import {
     BuildCacheConfig,
     CacheKey,
@@ -68,6 +72,8 @@ import {
 } from "./capsule_import_scan";
 import { _display_capsule_name_cmd } from "./capsule_names";
 import { render_diagnostic } from "./diagnostics_render";
+import { inferred_public_effects } from "./effect_checker";
+import { empty_import_symbols } from "./effect_imports";
 import { effect_subsumes, is_canonical_effect } from "./effect_taxonomy";
 import { emit_subprocess_with_retry } from "./emit_helpers";
 import { set_import_context_root } from "./llvm/mod";
@@ -79,6 +85,7 @@ import {
     number_to_string,
     write_native_text_file_with_module
 } from "./main";
+import { parse_program } from "./parser/mod";
 import { RuntimeCapsuleArtifacts, enumerate_runtime_capsule_artifacts } from "./runtime_capsule_resolver";
 import {
     SemVer,
@@ -282,14 +289,15 @@ struct WorkspaceMember {
     src_dir: string;  // path to the member's src/ dir (workspace-rooted)
 }
 
-// SFEP-0051 Phase 4a: one member's declared-surface audit against the
-// workspace capability envelope. `drift` is the subset of the member's
-// declared `[capabilities] required` effects that fall outside
-// `effective(member) = (allow ∪ grants[member]) \ deny`.
+// SFEP-0051 Phase 4a/4b: one member's effect surface audited against the
+// workspace capability envelope. `required` is the member's declared
+// `[capabilities] required` (Phase 4a) unioned with the effects inferred across
+// its public functions (Phase 4b, SFN-418); `drift` is the subset of `required`
+// that falls outside `effective(member) = (allow ∪ grants[member]) \ deny`.
 struct MemberCapabilityAudit {
     member_name: string;
     member_path: string;
-    required: string[];  // the member's declared [capabilities] required
+    required: string[];  // declared [capabilities] required ∪ inferred public effect surface
     drift: string[];  // required effects outside the effective envelope
 }
 
@@ -2824,10 +2832,73 @@ fn _cr_envelope_unsorted_diagnostic(list_name: string, manifest: string) -> Diag
     };
 }
 
-// Audit every workspace member's declared effect surface against the
-// `[workspace.capabilities]` envelope. Emits E0406 for a malformed envelope
-// entry (non-canonical name or non-alphabetical list) and E0405 per drifting
-// effect. Reads only manifests (no compile), so it runs at resolve time.
+// SFEP-0051 Phase 4b (SFN-418): the inferred effect surface of one workspace
+// member — the deduped union of the `![...]` effects across the public
+// functions of every `.sfn` file under the member's `src/` dir, as computed by
+// `effect_checker::inferred_public_effects`. Strengthens the declared surface
+// (Phase 4a) so a member whose `capsule.toml [capabilities] required`
+// under-reports its real effect use is still audited against the envelope.
+// Best-effort at resolve time: a member with no `src/` dir contributes nothing.
+// Uses `empty_import_symbols`, so cross-module callee propagation is not
+// resolved here — direct effectful operations and same-file local callees still
+// infer, and the public signatures' declared effects are always included.
+fn _cr_member_inferred_effects(src_dir: string) -> string[] ![io] {
+    let mut effects: string[] = [];
+    if src_dir.length == 0 { return effects; }
+    if !fs.exists(src_dir) { return effects; }
+    let files = _collect_sfn_files_cmd(src_dir, 64);
+    let mut fi: int = 0;
+    loop {
+        if fi >= files.length { break; }
+        let path = files[fi];
+        fi += 1;
+        if !fs.exists(path) { continue; }
+        let program = parse_program(fs.readFile(path));
+        let file_effects = inferred_public_effects(program, empty_import_symbols());
+        let mut ei: int = 0;
+        loop {
+            if ei >= file_effects.length { break; }
+            let effect = file_effects[ei];
+            ei += 1;
+            if !_cr_string_array_contains(effects, effect) {
+                effects.push(effect);
+            }
+        }
+    }
+    return effects;
+}
+
+// Deduped union of two effect lists, sorted into canonical (alphabetical)
+// order. Folds a member's Phase 4b inferred surface into its declared
+// `[capabilities] required` before the envelope diff, so `drift ⊆ required`
+// stays an invariant of `MemberCapabilityAudit`.
+fn _cr_union_effects(declared: string[], inferred: string[]) -> string[] {
+    let mut merged: string[] = [];
+    let mut di: int = 0;
+    loop {
+        if di >= declared.length { break; }
+        if !_cr_string_array_contains(merged, declared[di]) {
+            merged.push(declared[di]);
+        }
+        di += 1;
+    }
+    let mut ii: int = 0;
+    loop {
+        if ii >= inferred.length { break; }
+        if !_cr_string_array_contains(merged, inferred[ii]) {
+            merged.push(inferred[ii]);
+        }
+        ii += 1;
+    }
+    return _cr_sort_strings(merged);
+}
+
+// Audit every workspace member's effect surface against the
+// `[workspace.capabilities]` envelope. A member's required set is its declared
+// `[capabilities] required` (Phase 4a) unioned with the inferred `![...]`
+// surface of its public functions (Phase 4b, SFN-418, parsed from the member's
+// `src/`). Emits E0406 for a malformed envelope entry (non-canonical name or
+// non-alphabetical list) and E0405 per drifting effect.
 fn workspace_capability_audit(workspace_root: string) -> CapabilityDriftReport ![io] {
     let mut members_out: MemberCapabilityAudit[] = [];
     let mut diags: Diagnostic[] = [];
@@ -2901,9 +2972,17 @@ fn workspace_capability_audit(workspace_root: string) -> CapabilityDriftReport !
             diags.push(_cr_envelope_unsorted_diagnostic(grant_label, ws_manifest));
         }
 
-        let drift = workspace_effective_drift(allow, deny, grant, required);
+        // Phase 4b (SFN-418): strengthen the declared surface with the inferred
+        // `![...]` surface of the member's public functions, so a member that
+        // under-declares its real effect use in `[capabilities] required` is
+        // still caught. `src/` is rooted like `manifest` above for consistency.
+        let member_src = _cr_path_join(_cr_path_join(workspace_root, m.member_path), "src");
+        let inferred = _cr_member_inferred_effects(member_src);
+        let required_union = _cr_union_effects(required, inferred);
+
+        let drift = workspace_effective_drift(allow, deny, grant, required_union);
         members_out.push(MemberCapabilityAudit {
-            member_name: m.name, member_path: m.member_path, required: required, drift: drift
+            member_name: m.name, member_path: m.member_path, required: required_union, drift: drift
         });
         if drift.length > 0 {
             has_drift = true;
