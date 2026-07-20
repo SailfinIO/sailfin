@@ -15,8 +15,9 @@
 // form ed25519_verify consumes. A rotation must move every copy together: this
 // constant, both committed .pem/.hex files, the test fixtures
 // (compiler/tests/unit/release_trust_test.sfn golden and
-// capsules/sfn/crypto/tests/release_signing_key_test.sfn KEY+SIG), and the CI
-// secret. docs/release-signing.md is the authoritative in-sync list.
+// capsules/sfn/crypto/tests/release_signing_key_test.sfn KEY+SIG), the PEM
+// copies embedded in install.sh and install.ps1, and the CI secret.
+// docs/release-signing.md is the authoritative in-sync list.
 //
 // Trust model + rotation procedure: docs/release-signing.md.
 // Design: SFEP-0046 (docs/proposals/0046-toolchain-pinning.md) §3.5.
