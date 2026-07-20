@@ -20,7 +20,7 @@
 // nonzero on any host with `llvm-as` on PATH; where it is absent the cascade
 // skips validation and the fixture (valid IR) still emits cleanly, so the
 // test never flakes.
-extern fn sailfin_runtime_shell_capture(cmd: * u8) -> * u8;
+extern fn sailfin_runtime_shell_capture(cmd: *u8) -> *u8;
 
 fn _host_path() -> string ![io] {
     let p = sailfin_runtime_shell_capture("printf '%s' \"$PATH\"");

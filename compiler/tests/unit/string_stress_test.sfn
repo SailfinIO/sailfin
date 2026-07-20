@@ -98,9 +98,7 @@ test "string_stress: num to str large" {
     assert _num_to_str(12345) == "12345";
 }
 
-test "string_stress: num to str negative" {
-    assert _num_to_str(-7) == "-7";
-}
+test "string_stress: num to str negative" { assert _num_to_str(-7) == "-7"; }
 
 // ---------------------------------------------------------------------------
 // String comparison operations

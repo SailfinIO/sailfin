@@ -26,12 +26,12 @@
 //   - `alloc_struct` (no attrs) — same descriptor without the override,
 //                              pins that the empty `return_attributes`
 //                              path stays attribute-free (no stray space).
-import { LLVMOperand } from "../../src/llvm/types";
 import {
-    emit_runtime_call,
     RuntimeCallOverrides,
+    emit_runtime_call,
     empty_runtime_call_overrides
 } from "../../src/llvm/expression_lowering/native/runtime_call";
+import { LLVMOperand } from "../../src/llvm/types";
 
 // SfnString aggregate — `string.concat` parameter type per the M1.A
 // lock-in (see `runtime_helpers.sfn` lines 407-431).

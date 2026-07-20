@@ -6,6 +6,6 @@
 // reference-counting idiom (retain on `atomic_add`, release-then-
 // free on `atomic_sub == 1`) is the M2 RC use case this fixture
 // models.
-fn retain(rc: * int) -> int { return atomic_add(rc, 1); }
+fn retain(rc: *int) -> int { return atomic_add(rc, 1); }
 
-fn release(rc: * int) -> int { return atomic_sub(rc, 1); }
+fn release(rc: *int) -> int { return atomic_sub(rc, 1); }

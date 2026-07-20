@@ -7,7 +7,7 @@
 // the mapped values. Before SFN-114 this fataled at lowering with
 // "cannot resolve return type for call to `0..3.map`".
 fn main() ![io] {
-    let squares: int[] = (0 .. 3).map(fn (i) -> int { return i * i; });
+    let squares: int[] = (0..3).map(fn (i) -> int { return i * i; });
     print(squares[0]);
     print(squares[1]);
     print(squares[2]);

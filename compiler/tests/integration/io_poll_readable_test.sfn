@@ -14,18 +14,18 @@ struct PipeFds {
     wr: i32;
 }
 
-extern fn pipe(fds: * i32) -> i32;
+extern fn pipe(fds: *i32) -> i32;
 
-extern fn write(fd: i32, buf: * u8, count: usize) -> i64;
+extern fn write(fd: i32, buf: *u8, count: usize) -> i64;
 
 extern fn close(fd: i32) -> i32;
 
-extern fn malloc(size: usize) -> * u8;
+extern fn malloc(size: usize) -> *u8;
 
 test "io.poll_readable: an empty pipe is not readable" ![io] {
-    let buf: * u8 = malloc(8 as usize);
-    assert pipe(buf as * i32) == 0;
-    let fds: * PipeFds = buf as * PipeFds;
+    let buf: *u8 = malloc(8 as usize);
+    assert pipe(buf as *i32) == 0;
+    let fds: *PipeFds = buf as *PipeFds;
     let read_fd: i32 = fds.rd;
     let write_fd: i32 = fds.wr;
 
@@ -39,14 +39,14 @@ test "io.poll_readable: an empty pipe is not readable" ![io] {
 }
 
 test "io.poll_readable: a written-to pipe becomes readable" ![io] {
-    let buf: * u8 = malloc(8 as usize);
-    assert pipe(buf as * i32) == 0;
-    let fds: * PipeFds = buf as * PipeFds;
+    let buf: *u8 = malloc(8 as usize);
+    assert pipe(buf as *i32) == 0;
+    let fds: *PipeFds = buf as *PipeFds;
     let read_fd: i32 = fds.rd;
     let write_fd: i32 = fds.wr;
 
     let payload: string = "x";
-    assert write(write_fd, payload as * u8, 1 as usize) == 1;
+    assert write(write_fd, payload as *u8, 1 as usize) == 1;
 
     // The byte is buffered in the pipe, so the read end reports readable
     // even at timeout_ms == 0.
@@ -57,9 +57,9 @@ test "io.poll_readable: a written-to pipe becomes readable" ![io] {
 }
 
 test "io.poll_readable: a closed write end signals readable EOF" ![io] {
-    let buf: * u8 = malloc(8 as usize);
-    assert pipe(buf as * i32) == 0;
-    let fds: * PipeFds = buf as * PipeFds;
+    let buf: *u8 = malloc(8 as usize);
+    assert pipe(buf as *i32) == 0;
+    let fds: *PipeFds = buf as *PipeFds;
     let read_fd: i32 = fds.rd;
     let write_fd: i32 = fds.wr;
 
@@ -84,14 +84,14 @@ test "io.poll_readable: an over-i32::MAX timeout is accepted on a ready fd" ![io
     // days; an unready fd would hang), so this drives the clamp path on a
     // pre-readable pipe, where `poll` returns at once regardless: the
     // oversized timeout must be accepted and still report readable.
-    let buf: * u8 = malloc(8 as usize);
-    assert pipe(buf as * i32) == 0;
-    let fds: * PipeFds = buf as * PipeFds;
+    let buf: *u8 = malloc(8 as usize);
+    assert pipe(buf as *i32) == 0;
+    let fds: *PipeFds = buf as *PipeFds;
     let read_fd: i32 = fds.rd;
     let write_fd: i32 = fds.wr;
 
     let payload: string = "x";
-    assert write(write_fd, payload as * u8, 1 as usize) == 1;
+    assert write(write_fd, payload as *u8, 1 as usize) == 1;
 
     // 0x1_0000_0000 (narrowed to 0 pre-fix) and 0x8000_0000 (narrowed to
     // i32::MIN pre-fix) are both above i32::MAX; a large-magnitude negative

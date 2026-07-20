@@ -9,10 +9,10 @@ struct List<T> {
 }
 
 fn main() -> int ![io] {
-    let b: Box<int> = Box < int > {
+    let b: Box<int> = Box<int> {
         value: 42
     };
-    let empty: List<int> = List < int > {
+    let empty: List<int> = List<int> {
         items: []
     };
     if empty.items.length != 0 { return 1; }

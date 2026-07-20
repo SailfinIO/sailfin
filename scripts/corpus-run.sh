@@ -123,11 +123,18 @@ KNOWN_BUILD_RED=(
 # fixed point and accumulated drift. The whole in-tree corpus was brought to the
 # fixed point in SFN-379 — which also fixed the formatter's pointer/range
 # spacing quirk (`*u8` was emitted as `* u8`, `0..4` as `0 .. 4`) so the
-# design-stage pointer examples format canonically — so this allowlist is now
-# empty. The fmt leg therefore holds every corpus file to the fixed point: any
-# dirty file (a new mangle or a newly-added unformatted entry) fails. Should a
-# future entry legitimately need tolerating, add it here with a tracking issue.
-KNOWN_FMT_DIRTY=()
+# design-stage pointer examples format canonically. The one remaining entry
+# exposes a *separate* formatter bug (SFN-434): a generic type-argument list
+# containing a function type — `Channel<fn() -> void>` — is not recognized as a
+# generic, so `sfn fmt --write` mis-spaces it and fuses the close `>` with the
+# following `=` into `>=` (the #900 miscompile class), which no longer builds.
+# The file is kept in its correct hand-written form and tolerated here until
+# SFN-434 lands; then this list empties. Any *other* dirty file (a new mangle or
+# a newly-added unformatted entry) still fails, and this entry becoming clean
+# (XPASS) also fails so the ratchet tightens when SFN-434 ships.
+KNOWN_FMT_DIRTY=(
+    "examples/concurrency/dynamic-task-scheduling.sfn"
+)
 
 in_list() { local n="$1"; shift; for x in "$@"; do [ "$n" = "$x" ] && return 0; done; return 1; }
 

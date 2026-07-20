@@ -16,12 +16,12 @@
 // flipped `string` -> `{i8*, i64}` for parameters; see the
 // M1.A.2 note in `runtime/sfn/string.sfn`), so the `* u8`-typed
 // extern binds bit-for-bit to the same symbol.
-extern fn exe_path() -> * u8;
+extern fn exe_path() -> *u8;
 
-extern fn strlen(s: * u8) -> usize;
+extern fn strlen(s: *u8) -> usize;
 
 fn main() -> int ![io] {
-    let path: * u8 = exe_path();
+    let path: *u8 = exe_path();
     if path as i64 == 0 {
         print("[exec_path_probe] exe_path returned NULL");
         return 1;

@@ -39,21 +39,21 @@ import { contains } from "sfn/strings";
 // infers no `net` requirement for these direct callers — they are left
 // un-annotated (the same rationale as `serve_loopback_test.sfn`), while
 // the test body keeps `![io]` for its `process.*` / `fs.*` calls.
-extern fn malloc(size: usize) -> * u8;
+extern fn malloc(size: usize) -> *u8;
 
-extern fn free(ptr: * u8) -> void;
+extern fn free(ptr: *u8) -> void;
 
-extern fn memset(dst: * u8, byte: i32, n: usize) -> * u8;
+extern fn memset(dst: *u8, byte: i32, n: usize) -> *u8;
 
 extern fn socket(domain: i32, ty: i32, protocol: i32) -> i32;
 
-extern fn connect(sockfd: i32, addr: * u8, addrlen: i32) -> i32;
+extern fn connect(sockfd: i32, addr: *u8, addrlen: i32) -> i32;
 
 extern fn close(fd: i32) -> i32;
 
-fn _tlp_ptr_off(p: * u8, off: i64) -> * u8 {
+fn _tlp_ptr_off(p: *u8, off: i64) -> *u8 {
     let addr: i64 = (p as i64) + off;
-    return addr as * u8;
+    return addr as *u8;
 }
 
 // The listening port — fixed, high, and distinct from the other native
@@ -72,7 +72,7 @@ fn _tlp_connect(port: i64) -> i32 {
     let mut attempt: i64 = 0;
     loop {
         if attempt >= 2 { break; }
-        let addr: * u8 = malloc(16 as usize);
+        let addr: *u8 = malloc(16 as usize);
         if addr as i64 == 0 { return 0 - 1; }
         memset(addr, 0, 16 as usize);
         if attempt == 0 {

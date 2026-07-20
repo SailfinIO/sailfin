@@ -12,21 +12,21 @@ struct PipeFds {
     wr: i32;
 }
 
-extern fn pipe(fds: * i32) -> i32;
+extern fn pipe(fds: *i32) -> i32;
 
-extern fn write(fd: i32, buf: * u8, count: usize) -> i64;
+extern fn write(fd: i32, buf: *u8, count: usize) -> i64;
 
 extern fn close(fd: i32) -> i32;
 
-extern fn malloc(size: usize) -> * u8;
+extern fn malloc(size: usize) -> *u8;
 
 test "io.poll_any: all-quiet pipes report none ready (-1)" ![io] {
-    let buf_a: * u8 = malloc(8 as usize);
-    let buf_b: * u8 = malloc(8 as usize);
-    assert pipe(buf_a as * i32) == 0;
-    assert pipe(buf_b as * i32) == 0;
-    let a: * PipeFds = buf_a as * PipeFds;
-    let b: * PipeFds = buf_b as * PipeFds;
+    let buf_a: *u8 = malloc(8 as usize);
+    let buf_b: *u8 = malloc(8 as usize);
+    assert pipe(buf_a as *i32) == 0;
+    assert pipe(buf_b as *i32) == 0;
+    let a: *PipeFds = buf_a as *PipeFds;
+    let b: *PipeFds = buf_b as *PipeFds;
 
     let fds: int[] = [a.rd as i64, b.rd as i64];
     // timeout_ms == 0 returns immediately; neither pipe has data.
@@ -41,16 +41,16 @@ test "io.poll_any: all-quiet pipes report none ready (-1)" ![io] {
 }
 
 test "io.poll_any: returns the fd of the pipe that has data" ![io] {
-    let buf_a: * u8 = malloc(8 as usize);
-    let buf_b: * u8 = malloc(8 as usize);
-    assert pipe(buf_a as * i32) == 0;
-    assert pipe(buf_b as * i32) == 0;
-    let a: * PipeFds = buf_a as * PipeFds;
-    let b: * PipeFds = buf_b as * PipeFds;
+    let buf_a: *u8 = malloc(8 as usize);
+    let buf_b: *u8 = malloc(8 as usize);
+    assert pipe(buf_a as *i32) == 0;
+    assert pipe(buf_b as *i32) == 0;
+    let a: *PipeFds = buf_a as *PipeFds;
+    let b: *PipeFds = buf_b as *PipeFds;
 
     // Write only to the second pipe: poll_any must single out b's read end.
     let payload: string = "x";
-    assert write(b.wr, payload as * u8, 1 as usize) == 1;
+    assert write(b.wr, payload as *u8, 1 as usize) == 1;
 
     let fds: int[] = [a.rd as i64, b.rd as i64];
     assert io.poll_any(fds, 0) == b.rd as i64;
@@ -62,15 +62,15 @@ test "io.poll_any: returns the fd of the pipe that has data" ![io] {
 }
 
 test "io.poll_any: identifies the first fd when it is the ready one" ![io] {
-    let buf_a: * u8 = malloc(8 as usize);
-    let buf_b: * u8 = malloc(8 as usize);
-    assert pipe(buf_a as * i32) == 0;
-    assert pipe(buf_b as * i32) == 0;
-    let a: * PipeFds = buf_a as * PipeFds;
-    let b: * PipeFds = buf_b as * PipeFds;
+    let buf_a: *u8 = malloc(8 as usize);
+    let buf_b: *u8 = malloc(8 as usize);
+    assert pipe(buf_a as *i32) == 0;
+    assert pipe(buf_b as *i32) == 0;
+    let a: *PipeFds = buf_a as *PipeFds;
+    let b: *PipeFds = buf_b as *PipeFds;
 
     let payload: string = "y";
-    assert write(a.wr, payload as * u8, 1 as usize) == 1;
+    assert write(a.wr, payload as *u8, 1 as usize) == 1;
 
     let fds: int[] = [a.rd as i64, b.rd as i64];
     assert io.poll_any(fds, 0) == a.rd as i64;
@@ -82,12 +82,12 @@ test "io.poll_any: identifies the first fd when it is the ready one" ![io] {
 }
 
 test "io.poll_any: a closed write end signals readable EOF" ![io] {
-    let buf_a: * u8 = malloc(8 as usize);
-    let buf_b: * u8 = malloc(8 as usize);
-    assert pipe(buf_a as * i32) == 0;
-    assert pipe(buf_b as * i32) == 0;
-    let a: * PipeFds = buf_a as * PipeFds;
-    let b: * PipeFds = buf_b as * PipeFds;
+    let buf_a: *u8 = malloc(8 as usize);
+    let buf_b: *u8 = malloc(8 as usize);
+    assert pipe(buf_a as *i32) == 0;
+    assert pipe(buf_b as *i32) == 0;
+    let a: *PipeFds = buf_a as *PipeFds;
+    let b: *PipeFds = buf_b as *PipeFds;
 
     // Closing b's write end makes b's read end report POLLHUP — pending EOF
     // counts as ready so a follow-up `read(2)` runs and sees 0.
@@ -121,15 +121,15 @@ test "io.poll_any: an over-i32::MAX timeout is accepted on a ready fd" ![io] {
     // itself is unassertable (a clamped over-max wait is ~24.8 days), so
     // this drives the clamp on a pre-readable pipe where `poll` returns at
     // once: the oversized timeout must still single out the ready fd.
-    let buf_a: * u8 = malloc(8 as usize);
-    let buf_b: * u8 = malloc(8 as usize);
-    assert pipe(buf_a as * i32) == 0;
-    assert pipe(buf_b as * i32) == 0;
-    let a: * PipeFds = buf_a as * PipeFds;
-    let b: * PipeFds = buf_b as * PipeFds;
+    let buf_a: *u8 = malloc(8 as usize);
+    let buf_b: *u8 = malloc(8 as usize);
+    assert pipe(buf_a as *i32) == 0;
+    assert pipe(buf_b as *i32) == 0;
+    let a: *PipeFds = buf_a as *PipeFds;
+    let b: *PipeFds = buf_b as *PipeFds;
 
     let payload: string = "x";
-    assert write(b.wr, payload as * u8, 1 as usize) == 1;
+    assert write(b.wr, payload as *u8, 1 as usize) == 1;
 
     let fds: int[] = [a.rd as i64, b.rd as i64];
     assert io.poll_any(fds, 4294967296) == b.rd as i64;

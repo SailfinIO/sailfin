@@ -6,8 +6,8 @@
 // `(5..2).map` yields an empty array, and `(3..3).reduce(7, +)` returns the
 // initial accumulator unchanged (empty range = no folds).
 fn main() ![io] {
-    let desc: int[] = (5 .. 2).map(fn (i) -> int { return i; });
+    let desc: int[] = (5..2).map(fn (i) -> int { return i; });
     print(desc.length);
-    let total = (3 .. 3).reduce(7, fn (acc, k) -> int { return acc + k; });
+    let total = (3..3).reduce(7, fn (acc, k) -> int { return acc + k; });
     print(total);
 }

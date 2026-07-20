@@ -77,6 +77,6 @@ fn handle(req: Request) -> Response {
 }
 
 fn main() -> int ![io, net] {
-    serve(handle as * fn (Request) -> Response, 18882);
+    serve(handle as *fn (Request) -> Response, 18882);
     return 0;
 }

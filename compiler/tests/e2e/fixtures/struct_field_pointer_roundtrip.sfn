@@ -9,17 +9,17 @@
 // exit code (0 = all fields round-tripped). Pre-fix the pointer fields
 // were absent from `%Node`, the stores no-op'd, and the read-backs would
 // observe garbage.
-extern fn malloc(size: usize) -> * u8;
+extern fn malloc(size: usize) -> *u8;
 
 struct Node {
-    next: * Node;
+    next: *Node;
     value: i64;
-    raw: * u8;
+    raw: *u8;
 }
 
 fn main() -> i32 {
-    let a = malloc(48) as * Node;
-    let b = malloc(48) as * Node;
+    let a = malloc(48) as *Node;
+    let b = malloc(48) as *Node;
     let buf = malloc(8);
 
     b.value = 99;

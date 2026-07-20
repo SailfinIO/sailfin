@@ -191,9 +191,7 @@ fn _parse_entry(kind: string, entry: string) -> FastImport? {
                         let alias_text = _trim(_strip_prefix(remainder, "as"));
                         if alias_text.length > 0 { alias = alias_text; }
                     }
-                    specifiers.push(FastSpecifier {
-                        name: name, alias: alias
-                    });
+                    specifiers.push(FastSpecifier { name: name, alias: alias });
                 }
                 start = i + 1;
             }
@@ -201,11 +199,7 @@ fn _parse_entry(kind: string, entry: string) -> FastImport? {
         }
     }
 
-    return FastImport {
-        kind: kind,
-        module: module,
-        specifiers: specifiers
-    };
+    return FastImport { kind: kind, module: module, specifiers: specifiers };
 }
 
 // The fast scanner — byte-for-byte port of the shipping implementation

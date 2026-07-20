@@ -1,11 +1,12 @@
 // examples/concurrency/dynamic-task-scheduling.sfn
+
 import { Channel, channel } from "sync";
 
 fn main() ![io] {
-    let tasks: Channel < fn () -> void >= channel(2);
+    let tasks: Channel<fn() -> void> = channel(2);
 
-    tasks.send(fn () { print("Task 1 executed!"); });
-    tasks.send(fn () { print("Task 2 executed!"); });
+    tasks.send(fn() { print("Task 1 executed!"); });
+    tasks.send(fn() { print("Task 2 executed!"); });
 
     routine {
         for _ in 0..2 {

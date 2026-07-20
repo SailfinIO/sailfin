@@ -19,32 +19,32 @@ struct OwnedBuf {
     arena_addr: i64;
 }
 
-extern fn pipe(fds: * i32) -> i32;
+extern fn pipe(fds: *i32) -> i32;
 
-extern fn write(fd: i32, buf: * u8, count: usize) -> i64;
+extern fn write(fd: i32, buf: *u8, count: usize) -> i64;
 
 extern fn close(fd: i32) -> i32;
 
-extern fn malloc(size: usize) -> * u8;
+extern fn malloc(size: usize) -> *u8;
 
-extern fn free(ptr: * u8) -> void;
+extern fn free(ptr: *u8) -> void;
 
 // `io.read_fd(fd, n)` returns at most `n` bytes from a single `read(2)`.
 test "io.read_fd: returns up to n bytes from the read end" ![io] {
-    let buf: * u8 = malloc(8 as usize);
-    assert pipe(buf as * i32) == 0;
-    let fds: * PipeFds = buf as * PipeFds;
+    let buf: *u8 = malloc(8 as usize);
+    assert pipe(buf as *i32) == 0;
+    let fds: *PipeFds = buf as *PipeFds;
     let read_fd: i32 = fds.rd;
     let write_fd: i32 = fds.wr;
 
     let payload: string = "abcdef";
-    assert write(write_fd, payload as * u8, 6 as usize) == 6;
+    assert write(write_fd, payload as *u8, 6 as usize) == 6;
 
     // A 3-byte request returns exactly the first three bytes.
     let b: OwnedBuf = io.read_fd(read_fd as i64, 3);
     assert b.len == 3;
-    assert(b.ptr_addr as * u8 as string) == "abc";
-    free(b.ptr_addr as * u8);
+    assert(b.ptr_addr as *u8 as string) == "abc";
+    free(b.ptr_addr as *u8);
 
     let _ = close(read_fd);
     let _ = close(write_fd);
@@ -52,22 +52,22 @@ test "io.read_fd: returns up to n bytes from the read end" ![io] {
 
 // A request larger than the buffered bytes returns just those bytes.
 test "io.read_fd: a short read returns fewer than n bytes" ![io] {
-    let buf: * u8 = malloc(8 as usize);
-    assert pipe(buf as * i32) == 0;
-    let fds: * PipeFds = buf as * PipeFds;
+    let buf: *u8 = malloc(8 as usize);
+    assert pipe(buf as *i32) == 0;
+    let fds: *PipeFds = buf as *PipeFds;
     let read_fd: i32 = fds.rd;
     let write_fd: i32 = fds.wr;
 
     let payload: string = "hi";
-    assert write(write_fd, payload as * u8, 2 as usize) == 2;
+    assert write(write_fd, payload as *u8, 2 as usize) == 2;
     // Close the write end so the read sees the two bytes then EOF rather
     // than blocking for the full 16.
     let _ = close(write_fd);
 
     let b: OwnedBuf = io.read_fd(read_fd as i64, 16);
     assert b.len == 2;
-    assert(b.ptr_addr as * u8 as string) == "hi";
-    free(b.ptr_addr as * u8);
+    assert(b.ptr_addr as *u8 as string) == "hi";
+    free(b.ptr_addr as *u8);
 
     let _ = close(read_fd);
 }
@@ -77,14 +77,14 @@ test "io.read_fd: a short read returns fewer than n bytes" ![io] {
 // the following line — the byte-at-a-time loop never over-reads past the
 // newline, so successive frames stay intact.
 test "io.read_line: reads successive newline-terminated lines" ![io] {
-    let buf: * u8 = malloc(8 as usize);
-    assert pipe(buf as * i32) == 0;
-    let fds: * PipeFds = buf as * PipeFds;
+    let buf: *u8 = malloc(8 as usize);
+    assert pipe(buf as *i32) == 0;
+    let fds: *PipeFds = buf as *PipeFds;
     let read_fd: i32 = fds.rd;
     let write_fd: i32 = fds.wr;
 
     let payload: string = "hello\nworld\n";
-    assert write(write_fd, payload as * u8, 12 as usize) == 12;
+    assert write(write_fd, payload as *u8, 12 as usize) == 12;
 
     assert io.read_line(read_fd as i64) == "hello";
     assert io.read_line(read_fd as i64) == "world";
@@ -95,14 +95,14 @@ test "io.read_line: reads successive newline-terminated lines" ![io] {
 
 // A final line without a trailing newline is returned on EOF.
 test "io.read_line: an unterminated final line is returned at EOF" ![io] {
-    let buf: * u8 = malloc(8 as usize);
-    assert pipe(buf as * i32) == 0;
-    let fds: * PipeFds = buf as * PipeFds;
+    let buf: *u8 = malloc(8 as usize);
+    assert pipe(buf as *i32) == 0;
+    let fds: *PipeFds = buf as *PipeFds;
     let read_fd: i32 = fds.rd;
     let write_fd: i32 = fds.wr;
 
     let payload: string = "tail";
-    assert write(write_fd, payload as * u8, 4 as usize) == 4;
+    assert write(write_fd, payload as *u8, 4 as usize) == 4;
     // EOF (no newline) ends the line.
     let _ = close(write_fd);
 
@@ -114,9 +114,9 @@ test "io.read_line: an unterminated final line is returned at EOF" ![io] {
 // An immediate EOF (write end closed with no data written) returns `null`,
 // distinguishing "no line at all" from a blank line.
 test "io.read_line: immediate EOF returns null" ![io] {
-    let buf: * u8 = malloc(8 as usize);
-    assert pipe(buf as * i32) == 0;
-    let fds: * PipeFds = buf as * PipeFds;
+    let buf: *u8 = malloc(8 as usize);
+    assert pipe(buf as *i32) == 0;
+    let fds: *PipeFds = buf as *PipeFds;
     let read_fd: i32 = fds.rd;
     let write_fd: i32 = fds.wr;
 
@@ -129,14 +129,14 @@ test "io.read_line: immediate EOF returns null" ![io] {
 
 // A line consisting solely of a newline is a blank line, distinct from EOF.
 test "io.read_line: a blank line returns empty string not null" ![io] {
-    let buf: * u8 = malloc(8 as usize);
-    assert pipe(buf as * i32) == 0;
-    let fds: * PipeFds = buf as * PipeFds;
+    let buf: *u8 = malloc(8 as usize);
+    assert pipe(buf as *i32) == 0;
+    let fds: *PipeFds = buf as *PipeFds;
     let read_fd: i32 = fds.rd;
     let write_fd: i32 = fds.wr;
 
     let payload: string = "\n";
-    assert write(write_fd, payload as * u8, 1 as usize) == 1;
+    assert write(write_fd, payload as *u8, 1 as usize) == 1;
 
     let ln = io.read_line(read_fd as i64);
     assert ln != null;

@@ -242,9 +242,7 @@ fn _collect_relative_import_specs(source: string) -> string[] {
                         if substring(spec, 0, 2) == "./" { is_relative = true; }
                     }
                     if spec.length >= 3 {
-                        if substring(spec, 0, 3) == "../" {
-                            is_relative = true;
-                        }
+                        if substring(spec, 0, 3) == "../" { is_relative = true; }
                     }
                     if is_relative { out.push(spec); }
                 }

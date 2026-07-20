@@ -8,8 +8,8 @@
 // corrupting the binding (a multi-specifier line scrambled across the `as`
 // boundary, e.g. `command_def as run`). The fix treats `A as B` as one
 // sortable unit keyed on the imported name `A`, preserving the pairing.
-import { format_source } from "../../src/tools/fmt";
 import { index_of } from "../../src/string_utils";
+import { format_source } from "../../src/tools/fmt";
 
 fn _contains(haystack: string, needle: string) -> boolean {
     return index_of(haystack, needle) >= 0;

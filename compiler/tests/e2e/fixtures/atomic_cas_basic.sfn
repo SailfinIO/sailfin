@@ -6,11 +6,11 @@
 // expression, one in an `if` condition — match the verification
 // pattern from issue #333 ("compiles a fixture using atomic_cas in
 // a comparison expression: `if atomic_cas(p, 0, 1) { ... }`").
-fn try_set(flag: * int, expected: int, new: int) -> boolean {
+fn try_set(flag: *int, expected: int, new: int) -> boolean {
     return atomic_cas(flag, expected, new);
 }
 
-fn try_acquire(flag: * int) -> int {
+fn try_acquire(flag: *int) -> int {
     if atomic_cas(flag, 0, 1) { return 1; }
     return 0;
 }

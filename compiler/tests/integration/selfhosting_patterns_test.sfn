@@ -298,9 +298,7 @@ test "selfhost: type mapping number" {
 
 test "selfhost: type mapping string" { assert _map_type("string") == "i8*"; }
 
-test "selfhost: type mapping boolean" {
-    assert _map_type("boolean") == "i1";
-}
+test "selfhost: type mapping boolean" { assert _map_type("boolean") == "i1"; }
 
 test "selfhost: type mapping array" {
     assert _map_type("number[]") == "%struct.Array*";

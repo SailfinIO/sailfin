@@ -7,8 +7,8 @@
 // into an `IfStatement` calling `runtime_assert_fail_fn`, so the collector
 // recognizes that desugared shape. `assert` outside a `test` block is
 // never visited.
-import { parse_program } from "../../src/parser/mod";
 import { collect_bare_assert_findings } from "../../src/bare_assert_check";
+import { parse_program } from "../../src/parser/mod";
 
 test "w0210: flags a bare assert inside a test block" ![io] {
     let program = parse_program("test \"t\" { assert 1 == 1; }");
