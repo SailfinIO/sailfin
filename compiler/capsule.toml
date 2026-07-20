@@ -9,7 +9,7 @@ description = "The Sailfin compiler — self-hosted, targeting LLVM via .sfn-asm
 # of the version would fail `make check` (use SAILFIN_TOOLCHAIN=off only for a
 # deliberate seed transition — see the Makefile note).
 [toolchain]
-sfn = "0.8.0-alpha.3"
+sfn = "0.8.0"
 
 [dependencies]
 # Stage D PR2: declare the C runtime as an explicit dependency so
