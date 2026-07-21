@@ -1,0 +1,103 @@
+{
+  "issue": "SFN-437",
+  "github_issue": 2517,
+  "protocol_id": "sfn-agent-benchmark/v2.8.0",
+  "corpus_id": "sfn-agent-benchmark-corpus/v2.8.0",
+  "protocol_sha256": "c0f829c71987ad2bbbbd477771536f804c421cca49817ba7b4d4be77fceb9cd2",
+  "harness_sha256": "b946ef01e87d0e73210043f1bc91e7420282131a3c7a2dfc2879d56da3b81b99",
+  "source_commit": "461ed4439e066d6ec204bc02cc572730fa015938",
+  "source_worktree_dirty": false,
+  "release": {
+    "version": "0.8.0",
+    "tag": "v0.8.0",
+    "commit": "604f377bcc32d2217734d4d9ede49003a88cdd54",
+    "platform": "macos-arm64",
+    "archive": "sailfin_0.8.0_macos_arm64.tar.gz",
+    "archive_sha256": "91ff80b0b2119cbf0aba20b6da2f4a26e8c59d47c1092e41ae0aa627807d103d",
+    "compiler_sha256": "e963ae063c3c09ee58c64f571edb09852df3326b2ca685abc8485335254f491e",
+    "version_output": "sfn 0.8.0"
+  },
+  "environment": {
+    "operating_system": "Darwin",
+    "architecture": "arm64",
+    "python": "3.14.5",
+    "scala_cli": "1.15.0",
+    "scala": "3.10.0-RC1-bin-20260616-4733954-NIGHTLY",
+    "tacit": "0.2.1",
+    "tacit_library_sha256": "5985f69fd13437ccf43d8c8c613a4681f71c574d7b84ca239aa33385f98e5462",
+    "timeout_seconds": 60
+  },
+  "models": {
+    "openai": {
+      "id": "gpt-5.6-terra",
+      "family": "openai-terra",
+      "api": "responses",
+      "reasoning_effort": "medium"
+    },
+    "anthropic": {
+      "id": "claude-sonnet-5",
+      "family": "anthropic-sonnet",
+      "api": "messages",
+      "thinking_type": "adaptive",
+      "effort": "medium",
+      "max_tokens": 8192,
+      "strict_answer_reservation": false
+    }
+  },
+  "seed": 1040803689,
+  "frozen_schedules": {
+    "openai_track_a": {
+      "attempts": 120,
+      "sha256": "4e4ff8da2c102755e3237e9d04101ad5d0fc8dd0869bbf18fed39a513eef4a7b"
+    },
+    "openai_track_b": {
+      "attempts": 80,
+      "sha256": "de3517f6892d0334a67b85057422e5c87e1a45bf52f080e5715f7339da602505"
+    },
+    "anthropic_track_a": {
+      "attempts": 120,
+      "sha256": "c40b6091490bb38108306f003b13c84cbc4c78ce6ff5cc01cb4aeadc268ea237"
+    },
+    "anthropic_track_b": {
+      "attempts": 80,
+      "sha256": "33be8100560b0c0feb7ae2d1deed7482261c08272b1d7821a848e30d024c0efe"
+    }
+  },
+  "gates": {
+    "release_artifact_identity": "passed",
+    "runner_check_and_build": "passed",
+    "frozen_instance_validation": "passed",
+    "stub_smokes": "passed",
+    "analysis_failure_taxonomy_and_response_invalidation": "passed",
+    "timeout_fixtures": "passed",
+    "provider_auth_and_retry_fixtures": "passed",
+    "packet_budget_and_isomorphism": "passed",
+    "tacit_online_and_offline": "passed",
+    "track_a_grader_audit": {
+      "status": "passed",
+      "sha256": "2fe5664e8e6b996ab286de4ee0cd7f0949a2eae40fed224f05c05355b16f3852"
+    },
+    "track_b_grader_audit": {
+      "status": "passed",
+      "sha256": "fe865da04dd70b9aa4b7059c95e24973316bc542461cca21e2454f842478fa26"
+    },
+    "schema_probes": "passed_both_families",
+    "recognition_probes": "cleared_both_families",
+    "unscored_authorization": "passed_10_of_10",
+    "openai_track_a": "completed",
+    "anthropic_track_a": "stopped_after_transport_retry_exhaustion",
+    "track_b": "not_started"
+  },
+  "human_interventions": 0,
+  "scheduled_records_preserved": 125,
+  "language_observations_preserved": 124,
+  "track_b_scored_observations": 0,
+  "confirmation_authorized": false,
+  "invalid_reasons": [
+    "anthropic_provider_transport_retry_exhausted",
+    "openai_track_a_python_above_90_percent_useful_variance_ceiling",
+    "family_paired_track_a_incomplete",
+    "track_b_unmeasured"
+  ],
+  "successor_requirement": "task-difficulty review, new corpus/protocol version, and a completely fresh balanced batch"
+}

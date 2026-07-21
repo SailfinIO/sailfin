@@ -1,0 +1,45 @@
+{
+  "protocol_id": "sfn-agent-benchmark/v2.8.0",
+  "pricing_date": "2026-07-21",
+  "currency": "USD",
+  "prompt_cache_discount_observed": false,
+  "openai": {
+    "model": "gpt-5.6-terra",
+    "input_tokens": 122582,
+    "output_tokens": 108546,
+    "input_usd_per_million": 2.5,
+    "output_usd_per_million": 15,
+    "estimated_cost_usd": 1.934645,
+    "components": {
+      "schema": {"input_tokens": 25, "output_tokens": 5},
+      "recognition": {"input_tokens": 239, "output_tokens": 561},
+      "track_a_authorization": {"input_tokens": 2152, "output_tokens": 1256},
+      "track_b_authorization": {"input_tokens": 5061, "output_tokens": 2091},
+      "track_a_scored": {"input_tokens": 115105, "output_tokens": 104633}
+    },
+    "pricing_source": "https://developers.openai.com/api/docs/models/gpt-5.6-terra"
+  },
+  "anthropic": {
+    "model": "claude-sonnet-5",
+    "input_tokens": 21714,
+    "output_tokens": 12251,
+    "input_usd_per_million": 2,
+    "output_usd_per_million": 10,
+    "introductory_price_through": "2026-08-31",
+    "estimated_cost_usd": 0.165938,
+    "components": {
+      "schema": {"input_tokens": 31, "output_tokens": 4},
+      "recognition": {"input_tokens": 356, "output_tokens": 1279},
+      "track_a_authorization": {"input_tokens": 5295, "output_tokens": 1758},
+      "track_b_authorization": {"input_tokens": 7758, "output_tokens": 3783},
+      "track_a_scored": {"input_tokens": 8274, "output_tokens": 5427}
+    },
+    "pricing_source": "https://platform.claude.com/docs/en/about-claude/models/whats-new-sonnet-5"
+  },
+  "total_estimated_cost_usd": 2.100583,
+  "latency": {
+    "openai_track_a_cumulative_attempt_ms": 2103380,
+    "anthropic_partial_track_a_cumulative_attempt_ms": 107989,
+    "note": "Cumulative per-attempt elapsed values, not end-to-end wall-clock durations."
+  }
+}

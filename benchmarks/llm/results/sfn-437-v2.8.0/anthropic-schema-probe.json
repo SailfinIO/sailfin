@@ -1,0 +1,10 @@
+{
+  "adapter": "anthropic",
+  "model": "claude-sonnet-5",
+  "scored": false,
+  "text": "OK",
+  "input_tokens": 31,
+  "output_tokens": 4,
+  "provider_attempts": 1,
+  "error": ""
+}

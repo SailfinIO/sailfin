@@ -1,0 +1,51 @@
+{
+  "by_arm": {
+    "sailfin": {
+      "tasks_scored": 2,
+      "one_shot_success_pct": 50,
+      "solve_rate_pct": 100,
+      "mean_iters_to_green": 2,
+      "mean_tokens_to_green": 5702.5,
+      "mean_input_tokens_to_green": 3245.5,
+      "mean_output_tokens_to_green": 2457,
+      "mean_elapsed_ms_to_green": 31797,
+      "mean_source_chars_to_green": 1611.5,
+      "false_friction_tasks": 0,
+      "trap_tasks": 0,
+      "traps_effect_system_fired": 0
+    },
+    "scala": {
+      "tasks_scored": 1,
+      "one_shot_success_pct": 100,
+      "solve_rate_pct": 100,
+      "mean_iters_to_green": 1,
+      "mean_tokens_to_green": 1348,
+      "mean_input_tokens_to_green": 1006,
+      "mean_output_tokens_to_green": 342,
+      "mean_elapsed_ms_to_green": 9832,
+      "mean_source_chars_to_green": 630,
+      "false_friction_tasks": 0,
+      "trap_tasks": 0,
+      "traps_effect_system_fired": 0
+    },
+    "python": {
+      "tasks_scored": 1,
+      "one_shot_success_pct": 100,
+      "solve_rate_pct": 100,
+      "mean_iters_to_green": 1,
+      "mean_tokens_to_green": 948,
+      "mean_input_tokens_to_green": 777,
+      "mean_output_tokens_to_green": 171,
+      "mean_elapsed_ms_to_green": 2604,
+      "mean_source_chars_to_green": 420,
+      "false_friction_tasks": 0,
+      "trap_tasks": 0,
+      "traps_effect_system_fired": 0
+    }
+  },
+  "notes": [
+    "one_shot_success_pct and solve_rate_pct exclude trap tasks.",
+    "false_friction_tasks counts non-trap tasks where an effect/capability compile error appeared at least once.",
+    "traps_effect_system_fired counts trap tasks where an effect/capability compile error appeared."
+  ]
+}

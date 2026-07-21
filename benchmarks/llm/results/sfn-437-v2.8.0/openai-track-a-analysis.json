@@ -1,0 +1,45 @@
+{
+  "decision_authorized": false,
+  "run_valid": true,
+  "invalid_reason": "",
+  "primary_pool_eligible": true,
+  "by_baseline": {
+    "scala": {
+      "paired_ordinary_observations": 36,
+      "task_clusters": 36,
+      "minimum_100_met": false,
+      "one_shot_advantage_percentage_points_95ci": {
+        "estimate": -5.55555555555556,
+        "low": -27.7777777777778,
+        "high": 16.6666666666667
+      },
+      "iterations_to_green_advantage_95ci": {
+        "estimate": -0.0833333333333333,
+        "low": -0.388888888888889,
+        "high": 0.194444444444444
+      }
+    },
+    "python": {
+      "paired_ordinary_observations": 36,
+      "task_clusters": 36,
+      "minimum_100_met": false,
+      "one_shot_advantage_percentage_points_95ci": {
+        "estimate": -25,
+        "low": -41.6666666666667,
+        "high": -11.1111111111111
+      },
+      "iterations_to_green_advantage_95ci": {
+        "estimate": -0.305555555555556,
+        "low": -0.472222222222222,
+        "high": -0.138888888888889
+      }
+    }
+  },
+  "notes": [
+    "Intervals resample frozen task instances, preserving repeat clusters.",
+    "Positive advantages favor Sailfin. No GO/NO interpretation is performed by the runner.",
+    "Provider failures remain attempted observations and are never dropped from the corpus.",
+    "Setup-class provider failures invalidate GO/NO interpretation and stop additional paid observations.",
+    "Ablation runs are secondary analyses and cannot authorize the primary Track B decision."
+  ]
+}
