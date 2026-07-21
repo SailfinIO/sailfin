@@ -147,7 +147,10 @@ here.
   keep the same import closure when the caller changes cwd (SFN-352 / #2312),
   while unresolved specs still fall back to the user capsule cache. By-name
   and relative imports of a workspace capsule converge to one mangled symbol
-  (#873).
+  (#873). Test lowering retains imported free-function signatures for direct
+  and aliased calls, including struct-returning capsule APIs such as
+  `sfn/tensor`, and does not synthesize scalar helpers over imported symbols
+  (SFN-436).
 - **Workspace default targets.** At a workspace root, bare `sfn build` and
   `sfn test` fan out over `[workspace].default-members`; when the field is
   absent they target every member. Each member has distinguishable output and

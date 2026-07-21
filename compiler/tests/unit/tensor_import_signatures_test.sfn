@@ -1,0 +1,21 @@
+// Regression for SFN-436: test lowering must retain imported tensor
+// signatures for both exported names and local aliases.
+import {
+    Tensor,
+    add,
+    from_array,
+    matmul,
+    multiply,
+    ones as tensor_ones,
+    sum
+} from "../../../capsules/sfn/tensor/src/mod";
+
+test "tensor imports retain direct and aliased signatures" {
+    let left: Tensor = from_array([1, 2, 3, 4], [2, 2]);
+    let right: Tensor = tensor_ones([2, 2]);
+    let added: Tensor = add(left, right);
+    let multiplied: Tensor = multiply(added, right);
+    let product: Tensor = matmul(multiplied, right);
+
+    assert sum(product) == 28;
+}

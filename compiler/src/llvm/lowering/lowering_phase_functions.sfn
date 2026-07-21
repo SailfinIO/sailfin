@@ -45,7 +45,20 @@ import {
 fn lower_all_functions(local_functions: NativeFunction[], context_functions: NativeFunction[], aggregated_effects: FunctionEffectEntry[], type_context: TypeContext, module_name: string, safe_entry_points: string[], exported_symbols: string[], imported_functions: NativeFunction[], module_global_locals: LocalBinding[], module_init_symbol: string, module_globals_needs_init_call: boolean, module_string_constants: StringConstant[], trace: boolean, debug_lowering: boolean) -> FunctionLoweringResult ![io] {
     let mut lines: string[] = [];
     let mut index: int = 0;
+    // The scalar helper is only a fallback. Imported capsules may provide an
+    // `add` with an aggregate signature (for example `sfn/tensor`); emitting
+    // the fallback beside that declaration creates an incompatible LLVM
+    // definition before import mangling can bind the provider symbol.
     let mut has_add_function: boolean = false;
+    let mut add_index: int = 0;
+    loop {
+        if add_index >= context_functions.length { break; }
+        if get_function_name_at(context_functions, add_index) == "add" {
+            has_add_function = true;
+            break;
+        }
+        add_index += 1;
+    }
     let mut all_string_constants: StringConstant[] = module_string_constants;
     let mut function_effects: FunctionEffectEntry[] = [];
     let mut diagnostics: string[] = [];
