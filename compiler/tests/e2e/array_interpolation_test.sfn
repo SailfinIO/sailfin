@@ -5,11 +5,7 @@
 // (literal prefix included) at exit 0 with no diagnostic. This builds and
 // runs a fixture so LLVM lowering, the `coerce_operand_to_string` array arm,
 // the `array.to_string` runtime helper, and the print path all agree on the
-// int / nested-int / boolean / string element kinds.
-//
-// `float[]` is deferred to a seed bump (it needs a pointer-read-f64 intrinsic
-// the pinned seed lacks); its loud-failure behavior is covered by the sibling
-// negative test `interp_unsupported_fatal_test.sfn`.
+// int / float / boolean / string element kinds and nested arrays.
 import { find } from "sfn/strings";
 import { expect_eq_bool, expect_eq_int, with_tmp_dir } from "sfn/test";
 
@@ -51,7 +47,7 @@ fn _build_and_run(out_marker: string) -> int ![io] {
     });
 }
 
-test "array interpolation: int, nested int, boolean, and string arrays render bracketed" ![io] {
+test "array interpolation: primitive-element and nested arrays render bracketed" ![io] {
     let marker = _marker("render");
     let exit = _build_and_run(marker);
     assert expect_eq_int(exit, 0).ok;
@@ -64,5 +60,7 @@ test "array interpolation: int, nested int, boolean, and string arrays render br
     assert expect_eq_bool(find(out, "ints: [1, 2, 3]\n", 0) >= 0, true).ok;
     assert expect_eq_bool(find(out, "bools: [true, false]\n", 0) >= 0, true).ok;
     assert expect_eq_bool(find(out, "strs: [a, b]\n", 0) >= 0, true).ok;
+    assert expect_eq_bool(find(out, "floats: [1.5, 2.5]\n", 0) >= 0, true).ok;
+    assert expect_eq_bool(find(out, "nested floats: [[1.5, 2.5], [3.25, 4.75]]\n", 0) >= 0, true).ok;
     assert expect_eq_bool(find(out, "after\n", 0) >= 0, true).ok;
 }

@@ -4,11 +4,8 @@
 // Interpolating a primitive-element array into a `{{ }}` string used to
 // stringify to a null operand, dropping the entire enclosing `print` (and
 // its literal prefix) at exit 0. Each `print` below exercises one supported
-// element kind plus the nested `int[][]` recursion; the driving test asserts
-// the bracketed rendering appears between `before` and `after`.
-//
-// `float[]` is covered by the negative fixture (interp_unsupported_fatal.sfn):
-// it is deferred to a seed bump and must fail loudly, not render.
+// element kind plus nested array recursion; the driving test asserts the
+// bracketed rendering appears between `before` and `after`.
 fn main() ![io] {
     print("before");
     let m = [[19, 22], [43, 50]];
@@ -19,5 +16,9 @@ fn main() ![io] {
     print("bools: {{bs}}");
     let ss: string[] = ["a", "b"];
     print("strs: {{ss}}");
+    let fs: float[] = [1.5, 2.5];
+    print("floats: {{fs}}");
+    let fss: float[][] = [[1.5, 2.5], [3.25, 4.75]];
+    print("nested floats: {{fss}}");
     print("after");
 }
