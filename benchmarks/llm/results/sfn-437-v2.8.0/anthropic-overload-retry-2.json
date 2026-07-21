@@ -1,0 +1,7 @@
+{
+  "classification": "transport_transient",
+  "provider_attempt": 2,
+  "next_provider_attempt": 3,
+  "backoff_ms": 2000,
+  "error": "Overloaded"
+}

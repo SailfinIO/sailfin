@@ -1,0 +1,73 @@
+{
+  "protocol_id": "sfn-agent-benchmark/v2.7.0",
+  "commands": [
+    {
+      "command": "timeout 60 build/toolchains/releases/v0.8.0/install/bin/sfn check benchmarks/llm/sfn350.sfn",
+      "result": "passed"
+    },
+    {
+      "command": "timeout 60 build/toolchains/releases/v0.8.0/install/bin/sfn build -o build/sfn350 benchmarks/llm/sfn350.sfn",
+      "result": "passed"
+    },
+    {
+      "command": "SAILFIN_BIN=<released-0.8.0-sfn> ./build/sfn350 --adapter stub --arm sailfin --results-dir build/sfn437/offline-smoke-sailfin",
+      "result": "passed"
+    },
+    {
+      "command": "SAILFIN_BIN=<released-0.8.0-sfn> ./build/sfn350 --adapter stub --arm python --results-dir build/sfn437/offline-smoke-python",
+      "result": "passed"
+    },
+    {
+      "command": "./build/sfn350 --self-test-analysis",
+      "result": "passed"
+    },
+    {
+      "command": "./build/sfn350 --self-test-timeouts",
+      "result": "passed"
+    },
+    {
+      "command": "./build/sfn350 --track b --check-packets",
+      "result": "passed"
+    },
+    {
+      "command": "SAILFIN_BIN=<released-0.8.0-sfn> ./build/sfn350 --track b --adapter stub --verify-graders --results-dir build/sfn437/track-b-grader-smoke",
+      "result": "passed"
+    },
+    {
+      "command": "benchmarks/llm/tacit/fetch.sh",
+      "result": "passed"
+    },
+    {
+      "command": "benchmarks/llm/tacit/verify.sh",
+      "result": "passed"
+    },
+    {
+      "command": "SFN350_SCALA_OFFLINE=1 benchmarks/llm/tacit/verify.sh",
+      "result": "passed"
+    },
+    {
+      "command": "SAILFIN_BIN=<released-0.8.0-sfn> ./build/sfn350 --verify-graders --results-dir build/sfn437/track-a-grader-smoke",
+      "result": "passed"
+    },
+    {
+      "command": "benchmarks/llm/verify-provider-auth.sh",
+      "result": "passed"
+    },
+    {
+      "command": "SAILFIN_BIN=<released-0.8.0-sfn> ./build/sfn350 --track b --adapter openai --model gpt-5.6-terra --reasoning-effort medium --model-family openai-terra --contamination-probe --results-dir build/sfn437/contamination-openai",
+      "result": "completed_audit_only"
+    },
+    {
+      "command": "SAILFIN_BIN=<released-0.8.0-sfn> ./build/sfn350 --track b --adapter anthropic --model claude-sonnet-5 --model-family anthropic-sonnet --contamination-probe --results-dir build/sfn437/contamination-anthropic",
+      "result": "provider_setup_schema_incompatible"
+    },
+    {
+      "command": "find benchmarks/llm/results/sfn-437-v2.7.0 -name '*.json' -exec jq empty {} +",
+      "result": "passed"
+    },
+    {
+      "command": "git diff --check",
+      "result": "passed"
+    }
+  ]
+}

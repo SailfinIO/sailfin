@@ -1,0 +1,55 @@
+{
+  "protocol_id": "sfn-agent-benchmark/v2.8.0",
+  "run_valid": false,
+  "invalid_reasons": [
+    "anthropic_provider_transport_retry_exhausted",
+    "openai_track_a_python_above_90_percent_useful_variance_ceiling",
+    "family_paired_track_a_incomplete",
+    "track_b_unmeasured"
+  ],
+  "track_a": {
+    "status": "incomplete_across_model_families",
+    "conclusion": "not_decision_grade",
+    "openai_audit_only": {
+      "sailfin_one_shot_pct": 66.6,
+      "scala_one_shot_pct": 72.2,
+      "python_one_shot_pct": 91.6,
+      "solve_rate_pct_all_arms": 100,
+      "sailfin_minus_scala_one_shot_points_95ci": {
+        "estimate": -5.55555555555556,
+        "low": -27.7777777777778,
+        "high": 16.6666666666667
+      },
+      "sailfin_minus_python_one_shot_points_95ci": {
+        "estimate": -25,
+        "low": -41.6666666666667,
+        "high": -11.1111111111111
+      },
+      "useful_variance_gate": "failed_python_above_90_percent"
+    },
+    "anthropic": {
+      "language_observations_preserved": 4,
+      "stopping_attempt": "anthropic-sonnet-s1040803689-logic-runlength-002-scala-r1",
+      "classification": "transport_retry_exhausted",
+      "provider_attempts": 3,
+      "error": "Overloaded"
+    },
+    "adoption_readiness_claim_authorized": false
+  },
+  "track_b": {
+    "status": "not_started_after_track_a_stop",
+    "conclusion": "unmeasured",
+    "intrinsic_learnability_claim_authorized": false
+  },
+  "technical_investment": {
+    "new_sailfin_or_harness_defect_found": false,
+    "larger_confirmation_authorized": false,
+    "successor_benchmark_work": "requires explicit task-difficulty review and a new corpus/protocol version"
+  },
+  "external_adoption": {
+    "experiment_authorized": false,
+    "business_claim_authorized": false
+  },
+  "confirmation_authorized": false,
+  "decision": "NO-GO on confirmatory spend and external-adoption testing under v2.8.0."
+}

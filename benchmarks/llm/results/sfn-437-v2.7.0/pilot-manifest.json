@@ -1,0 +1,81 @@
+{
+  "issue": "SFN-437",
+  "github_issue": 2517,
+  "protocol_id": "sfn-agent-benchmark/v2.7.0",
+  "corpus_id": "sfn-agent-benchmark-corpus/v2.7.0",
+  "protocol_sha256": "7f98b70b8489fd57252b60ebd4ad97ac824eab3f999697a6b7f7793edcb6d6ba",
+  "harness_sha256": "66e10b82a8ef119489675ecd7d551547cdf1890750111ec0d7783cd2b645e057",
+  "source_commit": "a396f2ba54b7653fa77d92404367a941770903c1",
+  "source_worktree_dirty": false,
+  "release": {
+    "version": "0.8.0",
+    "tag": "v0.8.0",
+    "commit": "604f377bcc32d2217734d4d9ede49003a88cdd54",
+    "published_at": "2026-07-20T16:59:22Z",
+    "platform": "macos-arm64",
+    "archive": "sailfin_0.8.0_macos_arm64.tar.gz",
+    "archive_sha256": "91ff80b0b2119cbf0aba20b6da2f4a26e8c59d47c1092e41ae0aa627807d103d",
+    "compiler_sha256": "e963ae063c3c09ee58c64f571edb09852df3326b2ca685abc8485335254f491e",
+    "version_output": "sfn 0.8.0"
+  },
+  "environment": {
+    "operating_system": "Darwin",
+    "architecture": "arm64",
+    "python": "3.14.5",
+    "scala_cli": "1.15.0",
+    "scala": "3.10.0-RC1-bin-20260616-4733954-NIGHTLY",
+    "tacit": "0.2.1",
+    "tacit_library_sha256": "5985f69fd13437ccf43d8c8c613a4681f71c574d7b84ca239aa33385f98e5462",
+    "timeout_seconds": 60
+  },
+  "models": {
+    "openai": {
+      "id": "gpt-5.6-terra",
+      "family": "openai-terra",
+      "api": "responses",
+      "reasoning_effort": "medium"
+    },
+    "anthropic": {
+      "id": "claude-sonnet-5",
+      "family": "anthropic-sonnet",
+      "api": "messages",
+      "frozen_thinking_type": "enabled",
+      "frozen_thinking_budget_tokens": 6144,
+      "max_tokens": 8192
+    }
+  },
+  "gates": {
+    "release_archive_checksum": "passed",
+    "required_fix_ancestry": "passed",
+    "runner_check_and_build": "passed",
+    "frozen_instance_validation": "passed",
+    "stub_smokes": "passed",
+    "analysis_and_failure_taxonomy": "passed",
+    "timeout_fixtures": "passed",
+    "packet_and_budget_checks": "passed",
+    "tacit_online_and_offline": "passed",
+    "track_a_grader_audit": {
+      "status": "passed",
+      "sha256": "2fe5664e8e6b996ab286de4ee0cd7f0949a2eae40fed224f05c05355b16f3852"
+    },
+    "track_b_grader_audit": {
+      "status": "passed",
+      "sha256": "fe865da04dd70b9aa4b7059c95e24973316bc542461cca21e2454f842478fa26"
+    },
+    "provider_auth_and_schema_harness": "passed",
+    "openai_recognition_probe": "completed_audit_only",
+    "anthropic_recognition_probe": "failed_provider_schema",
+    "unscored_authorization": "not_started",
+    "track_a_scored": "not_started",
+    "track_b_scored": "not_started"
+  },
+  "human_interventions": 0,
+  "scored_observations": 0,
+  "confirmation_authorized": false,
+  "invalid_reason": "provider_setup_anthropic_thinking_schema_incompatible",
+  "blocker": {
+    "linear": "SFN-438",
+    "github": 2518,
+    "title": "fix(bench): support adaptive thinking for Claude Sonnet 5"
+  }
+}

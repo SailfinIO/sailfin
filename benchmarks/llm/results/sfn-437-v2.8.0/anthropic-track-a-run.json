@@ -1,0 +1,155 @@
+{
+  "protocol_id": "sfn-agent-benchmark/v2.8.0",
+  "protocol_sha256": "c0f829c71987ad2bbbbd477771536f804c421cca49817ba7b4d4be77fceb9cd2",
+  "repository_commit": "461ed4439e066d6ec204bc02cc572730fa015938",
+  "repository_dirty": false,
+  "harness_sha256": "b946ef01e87d0e73210043f1bc91e7420282131a3c7a2dfc2879d56da3b81b99",
+  "track": "a",
+  "adapter": "anthropic",
+  "model": "claude-sonnet-5",
+  "model_family": "anthropic-sonnet",
+  "openai_api": "not_applicable",
+  "openai_reasoning_effort": "not applicable",
+  "anthropic_effort": "medium",
+  "max_iters": 5,
+  "repeats": 1,
+  "seed": 1040803689,
+  "sampling": "thinking=adaptive; effort=medium; temperature omitted",
+  "anthropic_response_budget": {
+    "max_output_tokens": 8192,
+    "thinking_mode": "adaptive",
+    "effort": "medium",
+    "answer_headroom_policy": "Claude Sonnet 5 does not support a separate thinking token cap; medium effort is the frozen mitigation and max_tokens remains the hard total-output ceiling",
+    "thinking_exhaustion_policy": "stop_reason=max_tokens with no answer text is a provider-response invalidation; the paid batch stops and correction requires a fresh balanced batch under a new protocol version"
+  },
+  "provider_retry_policy": {
+    "max_attempts": 3,
+    "backoff_ms": [
+      1000,
+      2000
+    ],
+    "retryable_classification": "transport_transient",
+    "exhaustion_policy": "retry exhaustion stops the balanced batch and never enters a language denominator"
+  },
+  "arms": [
+    "sailfin",
+    "scala",
+    "python"
+  ],
+  "packets": {
+    "enabled": false
+  },
+  "ablation": {
+    "dimension": "primary",
+    "assignment": "seeded parity of frozen attempt identity; paired arms receive the same treatment",
+    "primary_pool_eligible": true
+  },
+  "toolchains": {
+    "sailfin": "sfn 0.8.0",
+    "python": "Python 3.14.5",
+    "scala_cli": "Scala CLI version: 1.15.0\nScala version (default): 3.8.4",
+    "scala": "3.10.0-RC1-bin-20260616-4733954-NIGHTLY",
+    "tacit": "0.2.1",
+    "tacit_library": "/Users/mcereal/dev/github.com/sailfin/sailfin/build/toolchains/tacit/0.2.1/TACIT-library.jar",
+    "tacit_library_sha256": "5985f69fd13437ccf43d8c8c613a4681f71c574d7b84ca239aa33385f98e5462"
+  },
+  "execution_deadline": {
+    "default_seconds": 60,
+    "effective_value": "timeout 60",
+    "effective_prefix": [
+      "timeout",
+      "60"
+    ],
+    "override_env": "SFN350_TIMEOUT_CMD",
+    "override_value": ""
+  },
+  "commands": {
+    "sailfin_compile": [
+      "timeout",
+      "60",
+      "/Users/mcereal/dev/github.com/sailfin/sailfin/build/toolchains/releases/v0.8.0/install/bin/sfn",
+      "check",
+      "{file}"
+    ],
+    "sailfin_run": [
+      "timeout",
+      "60",
+      "/Users/mcereal/dev/github.com/sailfin/sailfin/build/toolchains/releases/v0.8.0/install/bin/sfn",
+      "run",
+      "{file}"
+    ],
+    "rill17_check": [
+      "timeout",
+      "60",
+      "sh",
+      "/Users/mcereal/dev/github.com/sailfin/sailfin/benchmarks/llm/rill17.sh",
+      "/Users/mcereal/dev/github.com/sailfin/sailfin/build/toolchains/releases/v0.8.0/install/bin/sfn",
+      "check",
+      "{file}"
+    ],
+    "rill17_run": [
+      "timeout",
+      "60",
+      "sh",
+      "/Users/mcereal/dev/github.com/sailfin/sailfin/benchmarks/llm/rill17.sh",
+      "/Users/mcereal/dev/github.com/sailfin/sailfin/build/toolchains/releases/v0.8.0/install/bin/sfn",
+      "run",
+      "{file}"
+    ],
+    "scala_compile": [
+      "timeout",
+      "60",
+      "scala-cli",
+      "compile",
+      "--server=false",
+      "{file}"
+    ],
+    "scala_run": [
+      "timeout",
+      "60",
+      "scala-cli",
+      "run",
+      "--server=false",
+      "{file}"
+    ],
+    "scala_tacit_compile": [
+      "timeout",
+      "60",
+      "scala-cli",
+      "compile",
+      "--server=false",
+      "--scala",
+      "3.10.0-RC1-bin-20260616-4733954-NIGHTLY",
+      "--scalac-option",
+      "-experimental",
+      "--jar",
+      "/Users/mcereal/dev/github.com/sailfin/sailfin/build/toolchains/tacit/0.2.1/TACIT-library.jar",
+      "/Users/mcereal/dev/github.com/sailfin/sailfin/benchmarks/llm/tacit/Scaffold.scala",
+      "{file}"
+    ],
+    "scala_tacit_run": [
+      "timeout",
+      "60",
+      "scala-cli",
+      "run",
+      "--server=false",
+      "--scala",
+      "3.10.0-RC1-bin-20260616-4733954-NIGHTLY",
+      "--scalac-option",
+      "-experimental",
+      "--jar",
+      "/Users/mcereal/dev/github.com/sailfin/sailfin/build/toolchains/tacit/0.2.1/TACIT-library.jar",
+      "/Users/mcereal/dev/github.com/sailfin/sailfin/benchmarks/llm/tacit/Scaffold.scala",
+      "{file}"
+    ],
+    "python_run": [
+      "timeout",
+      "60",
+      "python3",
+      "{file}"
+    ]
+  },
+  "human_interventions": 0,
+  "run_valid": false,
+  "invalid_reason": "provider_transport_retry_exhausted"
+}

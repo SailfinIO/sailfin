@@ -1,0 +1,30 @@
+{
+  "protocol_id": "sfn-agent-benchmark/v2.7.0",
+  "run_valid": false,
+  "invalid_reason": "provider_setup_anthropic_thinking_schema_incompatible",
+  "setup_stage": "pre_packet_blinded_recognition_probe",
+  "packet_shown": false,
+  "unscored_authorization_attempts": 0,
+  "scored_observations": 0,
+  "track_a": {
+    "status": "not_started",
+    "conclusion": "unmeasured",
+    "adoption_readiness_claim_authorized": false
+  },
+  "track_b": {
+    "status": "not_started",
+    "conclusion": "unmeasured",
+    "intrinsic_learnability_claim_authorized": false
+  },
+  "technical_investment": {
+    "benchmark_transport_fix_authorized": true,
+    "broader_sailfin_investment_claim_authorized": false,
+    "reason": "The stop identifies a benchmark request-schema defect, not language performance."
+  },
+  "external_adoption": {
+    "experiment_authorized": false,
+    "business_claim_authorized": false
+  },
+  "confirmation_authorized": false,
+  "decision": "NO-GO on further v2.7 confirmatory spend; fix SFN-438 and restart under a fresh protocol/corpus minor version."
+}

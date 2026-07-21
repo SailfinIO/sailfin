@@ -1,0 +1,100 @@
+{
+  "protocol_id": "sfn-agent-benchmark/v2.8.0",
+  "commands": [
+    {
+      "command": "shasum -a 256 build/toolchains/releases/v0.8.0/install/bin/sfn && build/toolchains/releases/v0.8.0/install/bin/sfn --version && git rev-list -n 1 v0.8.0",
+      "result": "passed_exact_release_identity"
+    },
+    {
+      "command": "timeout 60 build/toolchains/releases/v0.8.0/install/bin/sfn check benchmarks/llm/sfn350.sfn",
+      "result": "passed"
+    },
+    {
+      "command": "timeout 60 build/toolchains/releases/v0.8.0/install/bin/sfn build -o build/sfn350 benchmarks/llm/sfn350.sfn",
+      "result": "passed"
+    },
+    {
+      "command": "SAILFIN_BIN=<published-0.8.0-sfn> ./build/sfn350 --adapter stub --arm sailfin --results-dir build/sfn437-v28-release-smoke-sailfin",
+      "result": "passed_post_stop_artifact_reaudit"
+    },
+    {
+      "command": "./build/sfn350 --adapter stub --arm python --results-dir build/sfn437-v28-offline-smoke-python",
+      "result": "passed"
+    },
+    {
+      "command": "./build/sfn350 --self-test-analysis",
+      "result": "passed"
+    },
+    {
+      "command": "./build/sfn350 --self-test-timeouts",
+      "result": "passed"
+    },
+    {
+      "command": "benchmarks/llm/verify-provider-auth.sh",
+      "result": "passed"
+    },
+    {
+      "command": "./build/sfn350 --track b --check-packets",
+      "result": "passed"
+    },
+    {
+      "command": "benchmarks/llm/tacit/verify.sh",
+      "result": "passed"
+    },
+    {
+      "command": "SFN350_SCALA_OFFLINE=1 benchmarks/llm/tacit/verify.sh",
+      "result": "passed"
+    },
+    {
+      "command": "SAILFIN_BIN=<published-0.8.0-sfn> ./build/sfn350 --verify-graders --results-dir build/sfn437-v28-release-track-a-grader-smoke",
+      "result": "passed_post_stop_artifact_reaudit",
+      "results_sha256": "2fe5664e8e6b996ab286de4ee0cd7f0949a2eae40fed224f05c05355b16f3852"
+    },
+    {
+      "command": "SAILFIN_BIN=<published-0.8.0-sfn> ./build/sfn350 --track b --adapter stub --verify-graders --results-dir build/sfn437-v28-release-track-b-grader-smoke",
+      "result": "passed_post_stop_artifact_reaudit",
+      "results_sha256": "fe865da04dd70b9aa4b7059c95e24973316bc542461cca21e2454f842478fa26"
+    },
+    {
+      "command": "./build/sfn350 --adapter openai --model gpt-5.6-terra --model-family openai-terra --reasoning-effort medium --schema-probe --results-dir build/sfn437-v28-openai-schema",
+      "result": "passed"
+    },
+    {
+      "command": "./build/sfn350 --adapter anthropic --model claude-sonnet-5 --model-family anthropic-sonnet --schema-probe --results-dir build/sfn437-v28-anthropic-schema",
+      "result": "passed"
+    },
+    {
+      "command": "./build/sfn350 --track b --adapter openai --model gpt-5.6-terra --model-family openai-terra --reasoning-effort medium --contamination-probe --results-dir build/sfn437-v28-openai-contamination",
+      "result": "cleared"
+    },
+    {
+      "command": "./build/sfn350 --track b --adapter anthropic --model claude-sonnet-5 --model-family anthropic-sonnet --contamination-probe --results-dir build/sfn437-v28-anthropic-contamination",
+      "result": "cleared"
+    },
+    {
+      "command": "five non-confirmatory authorization arms per model family with SAILFIN_BIN=<published-0.8.0-sfn>",
+      "result": "passed_10_of_10"
+    },
+    {
+      "command": "four complete dry-run schedules with --seed 1040803689 and only the 40 frozen confirmatory instances",
+      "result": "passed_120_120_80_80_attempts"
+    },
+    {
+      "command": "SAILFIN_BIN=<published-0.8.0-sfn> ./build/sfn350 --track a --adapter openai --model gpt-5.6-terra --model-family openai-terra --reasoning-effort medium --repeats 1 --seed 1040803689 <40 tasks> <3 arms>",
+      "result": "completed_120_of_120_run_valid"
+    },
+    {
+      "command": "SAILFIN_BIN=<published-0.8.0-sfn> ./build/sfn350 --track a --adapter anthropic --model claude-sonnet-5 --model-family anthropic-sonnet --repeats 1 --seed 1040803689 <40 tasks> <3 arms>",
+      "result": "stopped_5_of_120_provider_transport_retry_exhausted"
+    },
+    {
+      "command": "find benchmarks/llm/results/sfn-437-v2.8.0 -name '*.json' -exec jq empty {} +",
+      "result": "passed"
+    },
+    {
+      "command": "git diff --check",
+      "result": "passed"
+    }
+  ],
+  "chronology_note": "The initial fresh stub/grader audit used the repository-built 0.8.0 binary. The complete post-stop artifact reaudit used the published binary and reproduced identical grader hashes. Every authorization and scored Sailfin execution used the published binary. The reaudit does not rescue or expand claims from the invalid batch."
+}

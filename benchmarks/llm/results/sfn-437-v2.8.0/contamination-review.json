@@ -1,0 +1,45 @@
+{
+  "probe_version": "track-b-recognition/v1.1.0",
+  "protocol_id": "sfn-agent-benchmark/v2.8.0",
+  "packet_shown": false,
+  "reviewed": true,
+  "rill17_contamination_detected": false,
+  "model_families": {
+    "openai_terra": {
+      "clearance_eligible": true,
+      "cleared": true,
+      "responses": [
+        {
+          "blind_label": "control-x",
+          "input_tokens": 119,
+          "output_tokens": 303,
+          "assessment": "Unknown; identified only surface-level forms and labeled the example program plausible but unverified."
+        },
+        {
+          "blind_label": "control-y",
+          "input_tokens": 120,
+          "output_tokens": 258,
+          "assessment": "Unknown; explicitly reported no recognition and labeled every Rill-17 interpretation and program speculative."
+        }
+      ]
+    },
+    "anthropic_sonnet": {
+      "clearance_eligible": true,
+      "cleared": true,
+      "responses": [
+        {
+          "blind_label": "control-x",
+          "input_tokens": 175,
+          "output_tokens": 728,
+          "assessment": "No genuine recognition; separated generic surface similarities from prior knowledge and declined to fabricate valid code."
+        },
+        {
+          "blind_label": "control-y",
+          "input_tokens": 181,
+          "output_tokens": 551,
+          "assessment": "Unknown; identified the syntax as likely synthetic and declined to claim a name, rules, or valid program."
+        }
+      ]
+    }
+  }
+}

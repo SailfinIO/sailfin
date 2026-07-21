@@ -1,0 +1,34 @@
+[
+  {
+    "attempt_id": "anthropic-sonnet-s1040803689-logic-runlength-002-sailfin-r1",
+    "task": "logic-runlength-002",
+    "arm": "sailfin",
+    "passed": true,
+    "primary": "invented_syntax_or_api",
+    "secondary": [
+      "unhelpful_diagnostic_or_failed_repair"
+    ],
+    "track_b_attribution": "intrinsic_failure",
+    "language_denominator": true,
+    "fail_categories": [
+      "compile_error",
+      "compile_error"
+    ],
+    "artifact_dir": "build/sfn437-v28-anthropic-track-a/run-20260721-163900/attempts/anthropic-sonnet-s1040803689-logic-runlength-002-sailfin-r1"
+  },
+  {
+    "attempt_id": "anthropic-sonnet-s1040803689-logic-runlength-002-scala-r1",
+    "task": "logic-runlength-002",
+    "arm": "scala",
+    "passed": false,
+    "primary": "provider_or_setup_invalidation",
+    "secondary": [],
+    "track_b_attribution": "run_invalidation",
+    "language_denominator": false,
+    "fail_categories": [
+      "provider_error",
+      "provider_transport_transient"
+    ],
+    "artifact_dir": "build/sfn437-v28-anthropic-track-a/run-20260721-163900/attempts/anthropic-sonnet-s1040803689-logic-runlength-002-scala-r1"
+  }
+]

@@ -7,12 +7,15 @@ OpenAI quota and Anthropic response-budget stops are recorded in
 Version 2.6 freezes symmetric transient-provider retries after the v2.5 setup
 attempt exposed missing overload handling. Version 2.7 revised the Sailfin-B
 packet to teach shipped array and `sfn/strings` helpers (SFN-388), but its setup
-stopped before packet exposure or scoring when exact model `claude-sonnet-5`
-rejected the frozen manual-thinking request. SFN-438 freezes the `v2.8.0`
-successor with adaptive thinking, explicit medium effort, truthful answer-
-headroom recording, and fail-closed provider probes. No v2.1, v2.5, v2.6, or
-v2.7 observation may be selected, rerun, or pooled with a fresh balanced batch.
-In particular, v2.1 structured-concurrency
+stopped before scoring when `claude-sonnet-5` rejected manual thinking. Version
+2.8 migrated to adaptive thinking and passed every setup and authorization
+gate. OpenAI completed Track A, but Python exceeded the useful-variance ceiling;
+Anthropic then exhausted all three overload retries on its fifth Track A
+observation, so Track B was not purchased and confirmation was rejected. A
+successor requires a task-difficulty review and a new corpus/protocol version.
+No v2.1, v2.5, v2.6, v2.7, or v2.8 observation may be selected, rerun, or
+pooled with a fresh balanced batch; SFN-439 tracks that redesign. In particular,
+v2.1 structured-concurrency
 observations are ineligible because the live Sailfin guidance named nonexistent
 syntax and the grader accepted sequential output-equivalent programs. The
 SFN-350 v1 decision protocol and pilot interpretation remain preserved in

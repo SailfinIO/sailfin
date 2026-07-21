@@ -1,3 +1,210 @@
+# Sailfin agent benchmark v2.8 bounded-pilot readout
+
+Protocol: `sfn-agent-benchmark/v2.8.0`
+
+Linear: [SFN-437](https://linear.app/sailfin/issue/SFN-437/experimentbench-complete-clean-benchmark-against-sailfin-080-ga)
+
+Decision: **reject confirmation and external-adoption spend under v2.8.0**.
+
+## Frozen release and schedules
+
+The evaluated compiler is the published Sailfin 0.8.0 macOS arm64 artifact:
+tag `v0.8.0`, source commit
+`604f377bcc32d2217734d4d9ede49003a88cdd54`, archive SHA-256
+`91ff80b0b2119cbf0aba20b6da2f4a26e8c59d47c1092e41ae0aa627807d103d`,
+and compiler SHA-256
+`e963ae063c3c09ee58c64f571edb09852df3326b2ca685abc8485335254f491e`.
+The v2.8 execution commit is
+`461ed4439e066d6ec204bc02cc572730fa015938`, the protocol SHA-256 is
+`c0f829c71987ad2bbbbd477771536f804c421cca49817ba7b4d4be77fceb9cd2`,
+and the harness SHA-256 is
+`b946ef01e87d0e73210043f1bc91e7420282131a3c7a2dfc2879d56da3b81b99`.
+
+Seed `1040803689` froze all four schedules before the first scored request: 120
+Track A and 80 Track B attempts per model family. Each schedule contains only
+the 40 confirmatory instances; the three historical seed smokes are excluded.
+
+## Gates completed
+
+The released compiler checked and built the runner. All 40 independent
+instances, Sailfin and Python stub executions, analysis/failure-taxonomy and
+timeout fixtures, provider-auth fixtures, packet budgets, TACIT 0.2.1 online
+and offline oracles, and the complete Track A and Track B grader audits passed.
+Both exact-model schema probes and fresh pre-packet recognition probes passed.
+Neither model family showed substantive prior Rill-17 knowledge. All ten
+unscored authorization tasks completed without setup invalidation; nine were
+one-shot green and Anthropic's Track A Sailfin smoke solved after one repair.
+
+The initial fresh stub/grader audit inherited the repository-built 0.8.0
+binary. After the scored stop, the complete Sailfin stub and both grader audits
+were rerun explicitly against the published artifact and produced the same
+grader-result hashes. Every authorization and scored Sailfin execution had
+already used the published artifact. The post-stop audit strengthens the
+failure package but does not rescue or expand the invalid run's claims.
+
+## Track A — present-day adoption readiness
+
+OpenAI completed all 120 frozen observations with no setup invalidation or
+human intervention:
+
+| Arm | One-shot | Solve by iteration 5 | Mean iterations to green |
+| --- | ---: | ---: | ---: |
+| Sailfin | 66.6% | 100% | 1.42 |
+| Scala | 72.2% | 100% | 1.33 |
+| Python | 91.6% | 100% | 1.11 |
+
+The paired Sailfin-minus-Scala one-shot estimate is -5.6 percentage points
+(95% task-cluster bootstrap interval -27.8 to +16.7). Sailfin-minus-Python is
+-25.0 points (-41.7 to -11.1). Sailfin and Scala rejected all four capability
+traps; Python rejected none, preserving the declared static-analysis gap.
+
+These estimates are audit evidence, not a Track A decision. Python exceeded
+the preregistered 90% useful-variance ceiling, and the second model family did
+not complete. The protocol therefore requires a task-difficulty review and a
+new corpus/protocol version before another bounded batch.
+
+Anthropic preserved four successful observations, then stopped on
+`logic-runlength-002` / Scala. All three allowed provider attempts returned
+`overloaded_error: Overloaded`; the frozen 1,000 ms and 2,000 ms backoffs were
+applied, retry exhaustion was excluded from language denominators, and the
+remaining 115 Anthropic Track A attempts were not purchased. Selectively
+rerunning that failure or pooling the partial family result is prohibited.
+
+## Track B — controlled intrinsic learnability
+
+Track B scored execution was correctly not started after the Track A stop.
+Packet completeness, isomorphism, recognition clearance, authorization smokes,
+and both 80-attempt schedules are preserved as setup evidence only. Intrinsic
+learnability is unmeasured under v2.8.0.
+
+## Usage and cost
+
+Across schema, recognition, authorization, and scored requests, OpenAI used
+122,582 input and 108,546 output tokens; Anthropic used 21,714 input and 12,251
+output tokens. At the prices in effect on 2026-07-21 — OpenAI Terra $2.50/$15
+per million input/output tokens and Claude Sonnet 5 introductory $2/$10 — the
+estimated API cost is $1.934645 OpenAI plus $0.165938 Anthropic, $2.100583 in
+total. No prompt-cache discount was observed. Pricing references:
+[OpenAI Terra](https://developers.openai.com/api/docs/models/gpt-5.6-terra) and
+[Claude Sonnet 5](https://platform.claude.com/docs/en/about-claude/models/whats-new-sonnet-5).
+
+The completed OpenAI Track A records contain 2,103,380 ms of cumulative
+attempt latency. Anthropic's four language observations plus the stopped
+provider attempt contain 107,989 ms. These are summed per-attempt measurements,
+not end-to-end wall-clock durations.
+
+## Conclusions and investment decision
+
+- **Real-world adoption readiness:** not established. OpenAI-family audit data
+  places Sailfin near Scala on one-shot success and behind Python, but the
+  family-paired run is invalid and incomplete.
+- **Controlled intrinsic learnability:** unmeasured because Track B was not
+  scored.
+- **Further technical investment:** the result identifies no new Sailfin or
+  harness correctness defect. Further benchmark work is justified only after
+  an explicit task-difficulty/corpus redesign decision; larger confirmation is
+  not authorized.
+- **External adoption and business viability:** wholly unproven. No external
+  adoption experiment or business conclusion is authorized by this batch.
+
+The decision is **NO-GO on confirmatory spend and external-adoption testing**.
+Any successor must use a new corpus/protocol version and a completely fresh
+balanced batch; no v2.8 observation may be selected, rerun, or pooled. The
+task-difficulty and corpus redesign is tracked by
+[SFN-439](https://linear.app/sailfin/issue/SFN-439/specbench-redesign-v2-corpus-after-useful-variance-failure).
+
+## Published evidence
+
+The checked-in [v2.8 result set](results/sfn-437-v2.8.0/) preserves the release
+and execution manifest, hashes for all schedules and grader audits, setup and
+recognition evidence, the complete OpenAI Track A summary/analysis/failure
+index, the partial Anthropic summary/analysis/failure index, all three raw
+overload responses and retry decisions, verification commands, token/cost
+accounting, and the final decision. No credential or secret is present.
+
+---
+
+# Sailfin agent benchmark v2.7 setup rejection
+
+Protocol: `sfn-agent-benchmark/v2.7.0`
+
+Linear: [SFN-437](https://linear.app/sailfin/issue/SFN-437/experimentbench-complete-clean-benchmark-against-sailfin-080-ga)
+
+Decision: **stop at the setup gate and reject further v2.7 spend**.
+
+## Frozen 0.8.0 release
+
+The tested GA tag is `v0.8.0` at commit
+`604f377bcc32d2217734d4d9ede49003a88cdd54`. The published macOS arm64
+archive SHA-256 is
+`91ff80b0b2119cbf0aba20b6da2f4a26e8c59d47c1092e41ae0aa627807d103d`;
+the extracted `sfn` binary reports `sfn 0.8.0` and hashes to
+`e963ae063c3c09ee58c64f571edb09852df3326b2ca685abc8485335254f491e`.
+The v2.7 protocol and harness are byte-identical between the tag and the clean
+execution commit `a396f2ba54b7653fa77d92404367a941770903c1`.
+
+Every known SFN-372 validity fix was present in the GA tag before setup began:
+isolated-workdir resolution, Track A and Track B structured-concurrency
+grading, compiler-owned failure classification, symmetric provider retries,
+Anthropic answer-headroom enforcement, and the Sailfin-B array/string packet.
+
+## Gates completed
+
+The released compiler checked and built the runner. All 40 independently
+frozen instances, Sailfin and Python stub smokes, analysis/failure-taxonomy
+fixtures, timeout fixtures, packet completeness and matched budgets, TACIT
+0.2.1 online/offline oracles, and the complete known-good/known-bad Track A and
+Track B grader audits passed. The provider-auth harness and exact-model schema
+probes also completed before the blinded recognition stage.
+
+OpenAI's pre-packet recognition probe completed with nonzero token usage.
+`gpt-5.6-terra` called both blinded samples unknown and distinguished its
+surface guesses from prior knowledge. That setup evidence is audit-only because
+the paired gate stopped before clearance or packet exposure.
+
+## Immediate stop
+
+Both Anthropic recognition requests returned zero input and output tokens with
+an `invalid_request_error`:
+
+> `thinking.type.enabled` is not supported for this model. Use
+> `thinking.type.adaptive` and `output_config.effort` to control thinking
+> behavior.
+
+The error occurred before either packet was shown and before any unscored
+authorization or scored task. Continuing OpenAI alone would manufacture an
+unpaired result, while changing the request inside this run would violate the
+frozen request settings and require a new minor version. The batch therefore
+stopped immediately with zero scored Track A observations and zero scored
+Track B observations.
+
+## Track conclusions and investment decision
+
+- **Track A — real-world adoption readiness:** unmeasured under v2.7. No
+  language, tooling, or ecosystem conclusion is authorized.
+- **Track B — controlled intrinsic learnability:** unmeasured under v2.7. The
+  OpenAI recognition response is setup evidence only.
+- **Further technical investment:** narrowly justified to repair the benchmark
+  transport and fail-closed probe behavior in SFN-438; this result does not
+  justify or reject broader Sailfin implementation investment.
+- **External adoption and business viability:** wholly unproven.
+
+The decision is **NO-GO on confirmatory spend and external-adoption experiments
+under v2.7.0**. SFN-438 must freeze a model-supported Anthropic effort/headroom
+policy, make provider-error probes fail closed, bump the protocol and corpus
+minor version, and pass fresh schema and recognition probes. SFN-437 may then
+restart only with a completely fresh balanced batch; no v2.7 probe or future
+observation may be selected, rerun, or pooled.
+
+## Published failure corpus
+
+The checked-in [v2.7 result set](results/sfn-437-v2.7.0/) records immutable
+release and harness hashes, every completed gate, the raw Anthropic requests
+and error responses, the audit-only OpenAI recognition review, zero-observation
+analysis, and the blocking follow-up. No credential or secret is present.
+
+---
+
 # Sailfin agent benchmark v2.6 bounded-pilot readout
 
 Protocol: `sfn-agent-benchmark/v2.6.0`
