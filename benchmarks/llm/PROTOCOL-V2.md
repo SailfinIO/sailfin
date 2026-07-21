@@ -1,33 +1,51 @@
 # Sailfin agent benchmark protocol v2
 
-Protocol ID: `sfn-agent-benchmark/v2.7.0`
+Protocol ID: `sfn-agent-benchmark/v2.8.0`
 
-Status: **frozen and unexecuted. Version 2.7.0 enforces the Anthropic answer
-headroom in the request schema before any paid execution. The preceding v2.6
-batch is audit-only — it stopped on provider quota and Anthropic response-budget
-invalidations and produced no complete valid paired output**.
+Status: **frozen and unexecuted. Version 2.8.0 migrates exact model
+`claude-sonnet-5` to adaptive thinking with explicit medium effort and makes
+schema and recognition probes fail closed before any paid execution. Version
+2.7 setup is audit-only — Anthropic rejected its obsolete manual-thinking
+request before packet exposure or scored observations**.
+
+Version 2.8.0 replaces the unsupported
+`thinking: {type: "enabled", budget_tokens: 6144}` request with
+`thinking: {type: "adaptive"}` and `output_config: {effort: "medium"}` on
+schema probes, contamination probes, unscored authorization tasks, initial
+scored turns, and repair turns. Claude Sonnet 5 does not expose a strict
+thinking-token cap under adaptive thinking, so the manifest no longer claims
+an enforced 2,048-token answer reservation. It truthfully records adaptive
+mode, medium effort, the unchanged 8,192-token hard total-output ceiling, and
+the immediate-stop rule for a thinking-only `stop_reason=max_tokens` response.
+Medium effort is the frozen answer-headroom mitigation and also matches the
+OpenAI family's reasoning-effort setting; it is a behavioral control, not a
+separate token reservation. This follows Anthropic's
+[Sonnet 5 migration guidance](https://platform.claude.com/docs/en/about-claude/models/whats-new-sonnet-5)
+and [effort semantics](https://platform.claude.com/docs/en/build-with-claude/effort).
+
+Provider errors in schema or blinded recognition probes now return nonzero
+after preserving raw request, response, error, and report artifacts. A
+recognition report records `clearance_eligible: false` when any provider error
+occurs, and Track B requires both `clearance_eligible: true` and a reviewed
+`cleared: true`. Because the request settings and setup stopping behavior
+change, this starts a fresh pilot and corpus ID
+`sfn-agent-benchmark-corpus/v2.8.0`. No v2.7 probe or observation may be
+selected, rerun, or pooled into v2.8.
 
 The resumed v2.6 bounded batch demonstrated that the recorded 2,048-token
 Anthropic answer headroom was descriptive rather than enforced: a repair turn
 returned `stop_reason=max_tokens` with 8,191 thinking tokens, no text, and an
-8,192-token total allowance. SFN-383 raises the request schema to enforce the
-headroom (section 2), bumps the protocol/corpus minor version, and freezes a
-completely fresh balanced batch under v2.7.0. No v2.6 observation is eligible
-for selection, rerun, or pooling into that successor, and no successor paid
-batch may start before v2.7.0 is frozen.
+8,192-token total allowance. SFN-383 attempted to enforce headroom with a
+manual thinking cap under v2.7.0. No v2.6 observation was eligible for
+selection, rerun, or pooling into that successor.
 
-Version 2.7.0 makes the Anthropic answer headroom enforced rather than
-descriptive. The request now sets `thinking.budget_tokens` to 6,144 —
-`max_tokens` (8,192) minus the 2,048-token reserved answer headroom — so
-extended thinking cannot allocate the entire output allowance and leaves room
-for answer text on both initial and repair turns. The run manifest records the
-enforced `thinking_budget_tokens` under `anthropic_response_budget`. Because
-this changes a request setting, it starts a fresh pilot and corpus ID
-`sfn-agent-benchmark-corpus/v2.7.0`; no v2.6.0 attempt, success, or failure may
-be reused, rerun, or pooled into the corrected run, which is a fresh balanced
-batch across every arm and model family. The estimands, prompts, tasks, arms,
-attempt counts, graders, thresholds, model families, and every other stopping
-rule are unchanged.
+Version 2.7.0 attempted to enforce Anthropic answer headroom with
+`thinking.budget_tokens=6144` under an 8,192-token total allowance. Exact model
+`claude-sonnet-5` had removed manual thinking and rejected the request with an
+`invalid_request_error` during both blinded recognition probes. The run stopped
+before packet exposure, unscored authorization, or scored observations. Its
+OpenAI recognition response and Anthropic request errors are setup audit
+evidence only; none may be reused or pooled into v2.8.
 
 Version 2.7.0 revises the Sailfin-B controlled learning packet to teach the
 already-shipped array and string surfaces that v2.6 attempts repeatedly
@@ -99,7 +117,8 @@ unchanged.
 Linear:
 [SFN-362](https://linear.app/sailfin/issue/SFN-362/specbench-preregister-v2-adoption-and-controlled-learnability),
 [SFN-367](https://linear.app/sailfin/issue/SFN-367/fixbench-stop-sonnet-thinking-exhaustion-from-invalidating-v2-batches),
-[SFN-383](https://linear.app/sailfin/issue/SFN-383/fixbench-enforce-anthropic-answer-headroom-on-every-response)
+[SFN-383](https://linear.app/sailfin/issue/SFN-383/fixbench-enforce-anthropic-answer-headroom-on-every-response),
+[SFN-438](https://linear.app/sailfin/issue/SFN-438/fixbench-support-adaptive-thinking-for-claude-sonnet-5)
 
 This preregistration separates two questions that the v1 experiment combined:
 
@@ -159,18 +178,16 @@ The OpenAI family uses `POST /v1/responses`, with the system prompt in
 `reasoning.effort`, and no response storage. The Anthropic family uses
 `POST /v1/messages`.
 
-The frozen output budget leaves room for answer text after hidden reasoning.
-The Anthropic request sets `max_tokens` to 8,192 and caps
-`thinking.budget_tokens` at 6,144 — the total minus the 2,048-token reserved
-answer headroom — so extended thinking cannot consume the entire allowance; the
-run manifest records this enforced policy under `anthropic_response_budget`. The
-same cap applies to schema, contamination, unscored, initial scored, and repair
-requests, because every Anthropic request is built by the same request schema.
-If an Anthropic response still returns `stop_reason: max_tokens` with no answer
-text — extended thinking having exhausted its capped budget without emitting an
-answer — it is a provider-response invalidation under section 6, not a language
-observation, and the paid batch stops immediately. Such a response never enters
-any language denominator.
+The frozen Anthropic request uses adaptive thinking with explicit medium effort
+and `max_tokens=8192`. The hard ceiling covers thinking plus answer text.
+Adaptive thinking does not expose a separate strict thinking-token cap on
+Claude Sonnet 5, so this protocol does not claim an enforced answer reservation.
+Medium effort is the frozen mitigation against thinking consuming the response
+and applies to schema, contamination, unscored, initial scored, and repair
+requests through the shared request builder. If an Anthropic response returns
+`stop_reason: max_tokens` with no answer text, it is a provider-response
+invalidation under section 6, not a language observation, and the paid batch
+stops immediately. Such a response never enters any language denominator.
 
 The frozen provider retry policy applies identically to schema probes,
 contamination probes, unscored authorization tasks, scored tasks, all arms,
