@@ -27,8 +27,10 @@ for arg in "$@"; do
 done
 
 header_file=""
+body_file=""
 endpoint=""
 expect_header=0
+expect_body=0
 for arg in "$@"; do
     if [ "$expect_header" -eq 1 ]; then
         case "$arg" in
@@ -37,8 +39,16 @@ for arg in "$@"; do
         expect_header=0
         continue
     fi
+    if [ "$expect_body" -eq 1 ]; then
+        case "$arg" in
+            @*) body_file=${arg#@} ;;
+        esac
+        expect_body=0
+        continue
+    fi
     case "$arg" in
         -H) expect_header=1 ;;
+        --data-binary) expect_body=1 ;;
         https://api.openai.com/v1/responses) endpoint=openai-responses ;;
         https://api.openai.com/v1/chat/completions) endpoint=openai-chat ;;
         https://api.anthropic.com/*) endpoint=anthropic ;;
@@ -48,6 +58,10 @@ done
 if [ -z "$header_file" ] || [ ! -f "$header_file" ]; then
     echo "missing temporary header file" >&2
     exit 92
+fi
+if [ -z "$body_file" ] || [ ! -f "$body_file" ]; then
+    echo "missing provider request body" >&2
+    exit 95
 fi
 
 count=1
@@ -78,7 +92,16 @@ elif [ "$endpoint" = openai-chat ]; then
     printf '%s\n' '{"choices":[{"message":{"content":"OK"}}],"usage":{"prompt_tokens":7,"completion_tokens":1}}'
 elif [ "$endpoint" = anthropic ]; then
     grep -q '^x-api-key: sfn350-anthropic-sentinel$' "$header_file"
-    if [ "${SFN350_MOCK_MODE:-}" = overload_once ] && [ "$count" -eq 1 ]; then
+    grep -q '"thinking":{"type":"adaptive"}' "$body_file"
+    grep -q '"output_config":{"effort":"medium"}' "$body_file"
+    if grep -q 'budget_tokens' "$body_file" \
+        || grep -q '"type":"enabled"' "$body_file"; then
+        echo "obsolete Anthropic thinking schema" >&2
+        exit 96
+    fi
+    if [ "${SFN350_MOCK_MODE:-}" = anthropic_schema_error ]; then
+        printf '%s\n' '{"type":"error","error":{"type":"invalid_request_error","message":"thinking.type.enabled is not supported for this model"}}'
+    elif [ "${SFN350_MOCK_MODE:-}" = overload_once ] && [ "$count" -eq 1 ]; then
         printf '%s\n' '{"type":"error","error":{"type":"overloaded_error","message":"Overloaded"}}'
     else
         printf '%s\n' '{"content":[{"type":"text","text":"OK"}],"usage":{"input_tokens":7,"output_tokens":1}}'
@@ -107,6 +130,16 @@ PATH="$tmp/bin:$PATH" TMPDIR="$tmp/auth" \
     ANTHROPIC_API_KEY=sfn350-anthropic-sentinel \
     "$runner" --adapter anthropic --model claude-sonnet-5 \
     --schema-probe --results-dir "$tmp/results/overload-once"
+
+if PATH="$tmp/bin:$PATH" TMPDIR="$tmp/auth" \
+    SFN350_MOCK_MODE=anthropic_schema_error \
+    ANTHROPIC_API_KEY=sfn350-anthropic-sentinel \
+    "$runner" --track b --adapter anthropic --model claude-sonnet-5 \
+    --model-family anthropic-sonnet --contamination-probe \
+    --results-dir "$tmp/results/anthropic-contamination-error"; then
+    echo "provider-error contamination probe unexpectedly succeeded" >&2
+    exit 97
+fi
 
 overload_exhausted_state="$tmp/overload-exhausted-state"
 PATH="$tmp/bin:$PATH" TMPDIR="$tmp/auth" \
@@ -139,7 +172,8 @@ PATH="$tmp/bin:$PATH" TMPDIR="$tmp/auth" \
     --arm python --arm sailfin --results-dir "$tmp/results/intermittent-arm"
 
 python3 - "$tmp/results/intermittent-paid" "$tmp/results/intermittent-arm" \
-    "$tmp/results/overload-once" "$tmp/results/overload-exhausted" <<'PY'
+    "$tmp/results/overload-once" "$tmp/results/overload-exhausted" \
+    "$tmp/results/anthropic-contamination-error" <<'PY'
 import json
 import pathlib
 import sys
@@ -181,6 +215,18 @@ assert "provider_transport_transient" in records[0]["fail_categories"]
 failure = json.loads((overload_exhausted / "attempts" / records[0]["attempt_id"] / "provider-failure.json").read_text())
 assert failure["provider_attempts"] == 3
 assert failure["classification"] == "transport_transient"
+
+contamination = next(pathlib.Path(sys.argv[5]).glob("run-*")) / "contamination-probe"
+report = json.loads((contamination / "report.json").read_text())
+assert report["status"] == "provider_error"
+assert report["clearance_eligible"] is False
+assert report["cleared"] is False
+assert len(report["responses"]) == 1
+assert report["responses"][0]["provider_error"]
+probe = contamination / "control-x"
+assert next(probe.glob("request-*-try-*.json")).is_file()
+assert next(probe.glob("response-*-try-*.json")).is_file()
+assert (probe / "provider.error").is_file()
 PY
 
 if find "$tmp/auth" -type f -print -quit | grep -q .; then

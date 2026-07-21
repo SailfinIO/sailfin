@@ -827,25 +827,15 @@ fn _openai_chat_body(model: string, system: string, messages: JsonValue[]) -> st
 
 fn _anthropic_max_output_tokens() -> int { return 8192; }
 
-fn _anthropic_answer_headroom_tokens() -> int { return 2048; }
+fn _anthropic_effort() -> string { return "medium"; }
 
-// The enforced extended-thinking budget: the total output allowance minus the
-// reserved answer headroom. Capping `thinking.budget_tokens` below `max_tokens`
-// by the headroom is what actually leaves room for answer text — the recorded
-// policy alone was descriptive, not enforced (SFN-383).
-fn _anthropic_thinking_budget_tokens() -> int {
-    return _anthropic_max_output_tokens() - _anthropic_answer_headroom_tokens();
-}
-
-// Frozen Anthropic response budget (SFN-367). A 4096-token total let extended
-// thinking consume the whole response and return stop_reason=max_tokens with
-// thinking-only content and no answer text, silently spending scored attempts.
-// The total is raised and a reserved answer headroom is recorded so the budget
-// leaves room for answer text; a response that still exhausts it is a
-// provider-response invalidation (see _completion_from_anthropic) that stops the
-// paid batch.
+// Claude Sonnet 5 rejects manual thinking budgets. Adaptive thinking has no
+// separately enforceable answer reservation, so v2.8 freezes medium effort to
+// reduce thinking allocation while retaining the 8192-token hard ceiling. A
+// thinking-only max_tokens response remains a provider invalidation that stops
+// the paid batch rather than entering a language denominator (SFN-438).
 fn _anthropic_response_budget_policy() -> JsonValue {
-    return object_val(["max_output_tokens", "reserved_answer_headroom_tokens", "thinking_budget_tokens", "thinking_exhaustion_policy"], [number_val(_anthropic_max_output_tokens() as float), number_val(_anthropic_answer_headroom_tokens() as float), number_val(_anthropic_thinking_budget_tokens() as float), string_val("stop_reason=max_tokens with no answer text is a provider-response invalidation; the paid batch stops and correction requires a fresh balanced batch under a new protocol version")]);
+    return object_val(["max_output_tokens", "thinking_mode", "effort", "answer_headroom_policy", "thinking_exhaustion_policy"], [number_val(_anthropic_max_output_tokens() as float), string_val("adaptive"), string_val(_anthropic_effort()), string_val("Claude Sonnet 5 does not support a separate thinking token cap; medium effort is the frozen mitigation and max_tokens remains the hard total-output ceiling"), string_val("stop_reason=max_tokens with no answer text is a provider-response invalidation; the paid batch stops and correction requires a fresh balanced batch under a new protocol version")]);
 }
 
 fn _provider_retry_max_attempts() -> int { return 3; }
@@ -860,8 +850,9 @@ fn _provider_retry_policy() -> JsonValue {
 }
 
 fn _anthropic_body(model: string, system: string, messages: JsonValue[]) -> string {
-    let thinking = object_val(["type", "budget_tokens"], [string_val("enabled"), number_val(_anthropic_thinking_budget_tokens() as float)]);
-    return stringify(object_val(["model", "max_tokens", "thinking", "system", "messages"], [string_val(model), number_val(_anthropic_max_output_tokens() as float), thinking, string_val(system), _messages_json(messages)]));
+    let thinking = object_val(["type"], [string_val("adaptive")]);
+    let output_config = object_val(["effort"], [string_val(_anthropic_effort())]);
+    return stringify(object_val(["model", "max_tokens", "thinking", "output_config", "system", "messages"], [string_val(model), number_val(_anthropic_max_output_tokens() as float), thinking, output_config, string_val(system), _messages_json(messages)]));
 }
 
 fn _api_error(root: JsonValue) -> string {
@@ -1083,10 +1074,13 @@ fn _self_test_provider_schemas() ![io] {
     let openai = _completion_from_openai_responses("{\"output\":[{\"type\":\"message\",\"content\":[{\"type\":\"output_text\",\"text\":\"OK\"}]}],\"usage\":{\"input_tokens\":7,\"output_tokens\":1}}");
     let anthropic = _completion_from_anthropic("{\"content\":[{\"type\":\"text\",\"text\":\"OK\"}],\"usage\":{\"input_tokens\":7,\"output_tokens\":1}}");
     let empty = _completion_from_openai_responses("{\"output\":[],\"usage\":{\"input_tokens\":7,\"output_tokens\":0}}");
+    let legacy_thinking = _completion_from_anthropic("{\"type\":\"error\",\"error\":{\"type\":\"invalid_request_error\",\"message\":\"thinking.type.enabled is not supported for this model\"}}");
     if openai.text != "OK" || openai.input_tokens != 7 || openai.output_tokens != 1
         || anthropic.text != "OK"
         || anthropic.input_tokens != 7
         || anthropic.output_tokens != 1
+        || !contains(legacy_thinking.error, "thinking.type.enabled")
+        || _provider_failure_class(legacy_thinking.error) != "model_response"
         || _provider_failure_class(empty.error) != "model_response" {
         print.err("provider response/usage schema fixtures failed");
         process.exit(1);
@@ -1116,21 +1110,27 @@ fn _self_test_provider_schemas() ![io] {
         print.err("provider request schema fixtures failed");
         process.exit(1);
     }
-    // SFN-383: the Anthropic request must cap extended thinking below the total
-    // output allowance by the frozen answer headroom on initial and repair turns,
-    // so thinking cannot spend the whole budget and return no answer text.
-    let think_expect = "\"thinking\":{\"type\":\"enabled\",\"budget_tokens\":"
-        + (_anthropic_thinking_budget_tokens() as string)
-        + "}";
+    // SFN-438: Claude Sonnet 5 accepts adaptive thinking with explicit effort
+    // and rejects the former manual budget on every request path.
+    let think_expect = "\"thinking\":{\"type\":\"adaptive\"}";
+    let effort_expect = "\"output_config\":{\"effort\":\"medium\"}";
     let repair_messages = [object_val(["role", "content"], [string_val("user"), string_val("Solve it.")]), object_val(["role", "content"], [string_val("assistant"), string_val("first attempt")]), object_val(["role", "content"], [string_val("user"), string_val("Repair: fix the failing case.")])];
     let claude_repair = _anthropic_body("claude-sonnet-5", "system", repair_messages);
-    if _anthropic_thinking_budget_tokens() >= _anthropic_max_output_tokens()
-        || _anthropic_thinking_budget_tokens() < 1024
-        || _anthropic_thinking_budget_tokens() != _anthropic_max_output_tokens() - _anthropic_answer_headroom_tokens()
-        || !contains(claude, think_expect)
+    if !contains(claude, think_expect)
+        || !contains(claude, effort_expect)
+        || contains(claude, "budget_tokens")
+        || contains(claude, "\"type\":\"enabled\"")
         || !contains(claude_repair, "\"max_tokens\":8192")
-        || !contains(claude_repair, think_expect) {
-        print.err("anthropic answer-headroom request schema fixtures failed");
+        || !contains(claude_repair, think_expect)
+        || !contains(claude_repair, effort_expect)
+        || contains(claude_repair, "budget_tokens") {
+        print.err("anthropic adaptive-thinking request schema fixtures failed");
+        process.exit(1);
+    }
+    if !_contamination_clearance_ok("{\"clearance_eligible\": true, \"cleared\": true}")
+        || _contamination_clearance_ok("{\"clearance_eligible\": false, \"cleared\": true}")
+        || _contamination_clearance_ok("{\"clearance_eligible\": true, \"cleared\": false}") {
+        print.err("contamination clearance eligibility fixtures failed");
         process.exit(1);
     }
 }
@@ -1188,6 +1188,7 @@ fn _run_contamination_probe(cfg: Config, run_dir: string) ![clock, io] {
     let labels = ["control-x", "control-y"];
     let arms = ["sailfin-b", "rill-17"];
     let mut results: JsonValue[] = [];
+    let mut provider_error = false;
     let mut i = 0;
     loop {
         if i >= surfaces.length { break; }
@@ -1199,16 +1200,29 @@ fn _run_contamination_probe(cfg: Config, run_dir: string) ![clock, io] {
         fs.writeFile(dir + "/response.txt", completion.text);
         if completion.error.length > 0 {
             fs.writeFile(dir + "/provider.error", completion.error);
+            provider_error = true;
         }
         results.push(object_val(["blind_label", "response_path", "input_tokens", "output_tokens", "provider_error"], [string_val(labels[i]), string_val(dir
             + "/response.txt"), number_val(completion.input_tokens as float), number_val(completion.output_tokens as float), string_val(completion.error)]));
         i += 1;
+        if provider_error { break; }
     }
     fs.writeFile(probe_dir + "/blind-key.json", stringify_pretty(object_val(labels, [string_val(arms[0]), string_val(arms[1])]), 2));
-    let report = object_val(["probe_version", "packet_shown", "status", "cleared", "rubric", "responses"], [string_val("track-b-recognition/v1.0.0"), bool_val(false), string_val("manual_review_required"), bool_val(false), string_val("Set cleared to true only when control-y shows no exact or substantively correct Rill-17 recognition beyond surface-form guesses. Sailfin-B recognition is recorded but does not invalidate scoring."), array_val(results)]);
+    let status = provider_error? "provider_error": "manual_review_required";
+    let report = object_val(["probe_version", "packet_shown", "status", "clearance_eligible", "cleared", "rubric", "responses"], [string_val("track-b-recognition/v1.1.0"), bool_val(false), string_val(status), bool_val(!provider_error), bool_val(false), string_val("Set cleared to true only when clearance_eligible is true and control-y shows no exact or substantively correct Rill-17 recognition beyond surface-form guesses. Sailfin-B recognition is recorded but does not invalidate scoring."), array_val(results)]);
     fs.writeFile(probe_dir + "/report.json", stringify_pretty(report, 2));
+    if provider_error {
+        print.err("pre-packet recognition probe failed; see " + probe_dir
+            + "/report.json");
+        process.exit(1);
+    }
     print("pre-packet blinded recognition probe captured: " + probe_dir
         + "/report.json");
+}
+
+fn _contamination_clearance_ok(report: string) -> boolean {
+    return contains(report, "\"clearance_eligible\": true")
+        && contains(report, "\"cleared\": true");
 }
 
 fn _require_contamination_clearance() ![io] {
@@ -1218,8 +1232,8 @@ fn _require_contamination_clearance() ![io] {
         process.exit(1);
     }
     let report = fs.readFile(path);
-    if !contains(report, "\"cleared\": true") {
-        print.err("Track B contamination report is not cleared: " + path);
+    if !_contamination_clearance_ok(report) {
+        print.err("Track B contamination report is not eligible and cleared: " + path);
         process.exit(1);
     }
 }
@@ -2852,7 +2866,12 @@ fn _write_run_manifest(path: string, cfg: Config, arms: string[], run_valid: boo
     }
     let mut sampling = "temperature=0.2";
     let mut manifest_effort = "not applicable";
-    if cfg.adapter == "anthropic" { sampling = "provider default"; } else if _uses_gpt5_request(cfg.model) {
+    let mut anthropic_effort = "not applicable";
+    if cfg.adapter == "anthropic" {
+        sampling = "thinking=adaptive; effort=" + _anthropic_effort()
+            + "; temperature omitted";
+        anthropic_effort = _anthropic_effort();
+    } else if _uses_gpt5_request(cfg.model) {
         sampling = "reasoning_effort=" + cfg.reasoning_effort
             + "; temperature omitted";
         manifest_effort = cfg.reasoning_effort;
@@ -2868,7 +2887,7 @@ fn _write_run_manifest(path: string, cfg: Config, arms: string[], run_valid: boo
     let repository_dirty = _repository_dirty();
     let ablation = object_val(["dimension", "assignment", "primary_pool_eligible"], [string_val(cfg.ablation), string_val("seeded parity of frozen attempt identity; paired arms receive the same treatment"), bool_val(cfg.ablation == "primary")]);
     let openai_api = cfg.adapter != "openai"? "not_applicable": (_uses_gpt5_request(cfg.model)? "responses": "chat_completions");
-    let manifest = object_val(["protocol_id", "protocol_sha256", "repository_commit", "repository_dirty", "harness_sha256", "track", "adapter", "model", "model_family", "openai_api", "openai_reasoning_effort", "max_iters", "repeats", "seed", "sampling", "anthropic_response_budget", "provider_retry_policy", "arms", "packets", "ablation", "toolchains", "execution_deadline", "commands", "human_interventions", "run_valid", "invalid_reason"], [string_val("sfn-agent-benchmark/v2.7.0"), string_val(_sha256_file(protocol_path)), string_val(repository_commit), bool_val(repository_dirty), string_val(_sha256_file(harness_path)), string_val(cfg.track), string_val(cfg.adapter), string_val(cfg.model), string_val(cfg.model_family), string_val(openai_api), string_val(manifest_effort), number_val(cfg.max_iters as float), number_val(cfg.repeats as float), number_val(cfg.seed as float), string_val(sampling), _anthropic_response_budget_policy(), _provider_retry_policy(), array_val(arm_vals), _packet_manifest(cfg.track), ablation, toolchains, deadline, commands, number_val(0.0), bool_val(run_valid), string_val(invalid_reason)]);
+    let manifest = object_val(["protocol_id", "protocol_sha256", "repository_commit", "repository_dirty", "harness_sha256", "track", "adapter", "model", "model_family", "openai_api", "openai_reasoning_effort", "anthropic_effort", "max_iters", "repeats", "seed", "sampling", "anthropic_response_budget", "provider_retry_policy", "arms", "packets", "ablation", "toolchains", "execution_deadline", "commands", "human_interventions", "run_valid", "invalid_reason"], [string_val("sfn-agent-benchmark/v2.8.0"), string_val(_sha256_file(protocol_path)), string_val(repository_commit), bool_val(repository_dirty), string_val(_sha256_file(harness_path)), string_val(cfg.track), string_val(cfg.adapter), string_val(cfg.model), string_val(cfg.model_family), string_val(openai_api), string_val(manifest_effort), string_val(anthropic_effort), number_val(cfg.max_iters as float), number_val(cfg.repeats as float), number_val(cfg.seed as float), string_val(sampling), _anthropic_response_budget_policy(), _provider_retry_policy(), array_val(arm_vals), _packet_manifest(cfg.track), ablation, toolchains, deadline, commands, number_val(0.0), bool_val(run_valid), string_val(invalid_reason)]);
     fs.writeFile(path, stringify_pretty(manifest, 2));
 }
 
@@ -2942,7 +2961,7 @@ fn _write_corpus_manifest(path: string, cfg: Config, tasks: Task[], arms: ArmCon
     }
     let band_ok = min_tokens > 0 && max_tokens * 100 <= min_tokens * band_percent;
     let band_label = "maximum <= " + (band_percent as string) + "% of minimum";
-    let corpus = object_val(["corpus_id", "frozen", "template_count", "instance_count", "templates", "instances", "token_estimate_method", "quick_reference_estimated_tokens", "predeclared_band", "quick_reference_band_met", "all_scaffold_bands_met"], [string_val("sfn-agent-benchmark-corpus/v2.7.0"), bool_val(true), number_val(templates.length as float), number_val(count as float), _string_array_json(templates), array_val(instances), string_val("UTF-8 source characters divided by 4, rounded up"), object_val(cheat_keys, cheat_vals), string_val(band_label), bool_val(band_ok), bool_val(all_scaffold_bands_met)]);
+    let corpus = object_val(["corpus_id", "frozen", "template_count", "instance_count", "templates", "instances", "token_estimate_method", "quick_reference_estimated_tokens", "predeclared_band", "quick_reference_band_met", "all_scaffold_bands_met"], [string_val("sfn-agent-benchmark-corpus/v2.8.0"), bool_val(true), number_val(templates.length as float), number_val(count as float), _string_array_json(templates), array_val(instances), string_val("UTF-8 source characters divided by 4, rounded up"), object_val(cheat_keys, cheat_vals), string_val(band_label), bool_val(band_ok), bool_val(all_scaffold_bands_met)]);
     fs.writeFile(path, stringify_pretty(corpus, 2));
 }
 

@@ -5,12 +5,14 @@ The frozen two-track v2 preregistration lives in
 OpenAI quota and Anthropic response-budget stops are recorded in
 [`PILOT-V2.md`](PILOT-V2.md), followed by the historical v2.1.0 readout.
 Version 2.6 freezes symmetric transient-provider retries after the v2.5 setup
-attempt exposed missing overload handling. SFN-383 blocks another paid run
-until Anthropic answer headroom is enforced under the successor version. That
-successor is `v2.7.0`, which revises the Sailfin-B packet to teach the shipped
-array and `sfn/strings` helpers instead of hand-rolled ones (SFN-388). No
-v2.1, v2.5, or v2.6 observation may be selected, rerun, or pooled with a fresh
-balanced batch. In particular, v2.1 structured-concurrency
+attempt exposed missing overload handling. Version 2.7 revised the Sailfin-B
+packet to teach shipped array and `sfn/strings` helpers (SFN-388), but its setup
+stopped before packet exposure or scoring when exact model `claude-sonnet-5`
+rejected the frozen manual-thinking request. SFN-438 freezes the `v2.8.0`
+successor with adaptive thinking, explicit medium effort, truthful answer-
+headroom recording, and fail-closed provider probes. No v2.1, v2.5, v2.6, or
+v2.7 observation may be selected, rerun, or pooled with a fresh balanced batch.
+In particular, v2.1 structured-concurrency
 observations are ineligible because the live Sailfin guidance named nonexistent
 syntax and the grader accepted sequential output-equivalent programs. The
 SFN-350 v1 decision protocol and pilot interpretation remain preserved in
@@ -251,6 +253,10 @@ The OpenAI adapter defaults to `gpt-5.6-terra` with reasoning effort `medium`.
 GPT-5 requests use the Responses API with `max_output_tokens`,
 `reasoning.effort`, and no temperature; explicitly selected legacy models use
 Chat Completions with the older `max_tokens` plus temperature request shape.
+The Anthropic adapter freezes Claude Sonnet 5 adaptive thinking with
+`output_config.effort=medium`, an 8,192-token hard total-output ceiling, and no
+claimed strict answer reservation; thinking-only budget exhaustion remains an
+immediate provider-response invalidation.
 Provider credentials are written only to a temporary header file for
 the duration of each `curl` request and removed on shell exit rather than being
 expanded into the child process argument list.
