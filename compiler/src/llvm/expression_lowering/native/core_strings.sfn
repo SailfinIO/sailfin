@@ -689,18 +689,11 @@ fn coerce_operand_to_string(operand: LLVMOperand, temp_index: int, lines: string
     // renders as its bracketed source-literal form (`int[]` -> `[19, 22]`,
     // `int[][]` -> `[[19, 22], [43, 50]]`). Detect the array-pointer shape and
     // walk its nesting `depth`, then map the leaf element llvm_type to a
-    // formatter `kind` (0=i64, 2=i1, 3=i8*). The dynamic-length per-element
+    // formatter `kind` (0=i64, 1=double, 2=i1, 3=i8*). The dynamic-length per-element
     // loop can't be emitted here (this helper is straight-line SSA with no
     // block counter), so dispatch to the Sailfin-native `array.to_string`
     // runtime helper. A leaf element type outside the supported set falls
     // through to the fatal floor below.
-    //
-    // `double` (`float[]`/`number[]`) is intentionally omitted: reading a
-    // double from memory in the runtime helper needs a
-    // `sailfin_intrinsic_pointer_read_f64` intrinsic the pinned seed does
-    // not carry (the runtime is compiled by the seed), so `float[]` fails
-    // loudly at the E0832 floor until that intrinsic is seeded (SFN-408
-    // follow-up) — never the old silent empty output.
     let element_type = array_pointer_element_type(operand.llvm_type);
     if element_type.length > 0 {
         let mut base = element_type;
@@ -713,6 +706,7 @@ fn coerce_operand_to_string(operand: LLVMOperand, temp_index: int, lines: string
         }
         let mut kind = -1;
         if base == "i64" { kind = 0; }
+        if base == "double" { kind = 1; }
         if base == "i1" { kind = 2; }
         if base == "i8*" { kind = 3; }
         if kind >= 0 {

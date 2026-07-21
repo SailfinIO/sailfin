@@ -3,9 +3,8 @@
 // Before SFN-408, interpolating an operand with no `coerce_operand_to_string`
 // arm returned a null operand that silently dropped the enclosing `print` at
 // exit 0. The fix makes that path a `[fatal]` E0832 diagnostic so the build
-// fails loudly. This test builds a fixture interpolating a `float[]` (the
-// concrete deferred case — see array_interpolation_test.sfn) and asserts the
-// build is rejected with the fatal E0832 diagnostic rather than succeeding
+// fails loudly. This test builds a fixture interpolating a struct and asserts
+// the build is rejected with the fatal E0832 diagnostic rather than succeeding
 // with empty output.
 import { find } from "sfn/strings";
 import { expect_eq_bool, with_tmp_dir } from "sfn/test";
