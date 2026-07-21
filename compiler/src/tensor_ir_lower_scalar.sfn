@@ -1,0 +1,472 @@
+// compiler/src/tensor_ir_lower_scalar.sfn
+//
+// Deterministic scalar-reference exit for shape-typed tensor IR. It emits
+// ordinary native-IR loops and executes the same graph as the CPU numerical
+// oracle. See SFEP-0053 and SFN-427.
+import { number_to_string } from "./num_format";
+import {
+    TensorFunction,
+    TensorModule,
+    TensorOp,
+    TensorType,
+    tensor_shape_product,
+    tensor_shapes_equal
+} from "./tensor_ir";
+import { run_tensor_fusion_pass } from "./tensor_ir_fusion";
+import { verify_tensor_function } from "./tensor_ir_verify";
+
+struct TensorBuffer {
+    shape: int[];
+    data: float[];
+}
+
+struct TensorBinding {
+    value_id: int;
+    value: TensorBuffer;
+}
+
+struct TensorScalarLowerResult {
+    native_text: string;
+    diagnostics: string[];
+}
+
+struct TensorExecuteResult {
+    value: TensorBuffer;
+    diagnostics: string[];
+}
+
+struct TensorBindingLookup {
+    found: boolean;
+    value: TensorBuffer;
+}
+
+fn _ts_empty_buffer() -> TensorBuffer {
+    return TensorBuffer { shape: [], data: [] };
+}
+
+fn _ts_value_name(value_id: int) -> string {
+    return "v" + number_to_string(value_id);
+}
+
+fn _ts_parameter_value_id(function: TensorFunction, parameter_index: int) -> int {
+    let mut operation_index: int = 0;
+    loop {
+        if operation_index >= function.operations.length { break; }
+        let operation = function.operations[operation_index];
+        if operation.kind.variant == "Parameter" && operation.parameter_index == parameter_index {
+            return operation.result_id;
+        }
+        operation_index += 1;
+    }
+    return -1;
+}
+
+fn _ts_native_value_type(tensor_type: TensorType) -> string {
+    if tensor_type.shape.length == 0 { return "float"; }
+    return "float[]";
+}
+
+fn _ts_emit_elementwise(operation: TensorOp, symbol: string) -> string {
+    let result = _ts_value_name(operation.result_id);
+    let left = _ts_value_name(operation.operands[0]);
+    let right = _ts_value_name(operation.operands[1]);
+    let index = "i" + number_to_string(operation.result_id);
+    let size = number_to_string(tensor_shape_product(operation.result_type.shape));
+    return "    .let mut " + result + " : float[] = []\n" + "    .let mut "
+        + index
+        + " : int = 0\n"
+        + "    .loop\n"
+        + "        .if "
+        + index
+        + " >= "
+        + size
+        + "\n"
+        + "            break\n"
+        + "        .endif\n"
+        + "        eval "
+        + result
+        + ".push("
+        + left
+        + "["
+        + index
+        + "] "
+        + symbol
+        + " "
+        + right
+        + "["
+        + index
+        + "])\n"
+        + "        eval "
+        + index
+        + " += 1\n"
+        + "    .endloop\n";
+}
+
+fn _ts_emit_reduce_sum(operation: TensorOp) -> string {
+    let result = _ts_value_name(operation.result_id);
+    let operand = _ts_value_name(operation.operands[0]);
+    let index = "i" + number_to_string(operation.result_id);
+    return "    .let mut " + result + " : float = 0.0\n" + "    .let mut "
+        + index
+        + " : int = 0\n"
+        + "    .loop\n"
+        + "        .if "
+        + index
+        + " >= "
+        + operand
+        + ".length\n"
+        + "            break\n"
+        + "        .endif\n"
+        + "        eval "
+        + result
+        + " = "
+        + result
+        + " + "
+        + operand
+        + "["
+        + index
+        + "]\n"
+        + "        eval "
+        + index
+        + " += 1\n"
+        + "    .endloop\n";
+}
+
+fn _ts_matrix_offset_text(tensor_type: TensorType, row: string, column: string) -> string {
+    if tensor_type.minor_to_major[0] == 1 {
+        return row + " * " + number_to_string(tensor_type.shape[1]) + " + "
+            + column;
+    }
+    return column + " * " + number_to_string(tensor_type.shape[0]) + " + " + row;
+}
+
+fn _ts_emit_matmul(function: TensorFunction, operation: TensorOp, operation_index: int) -> string {
+    let result = _ts_value_name(operation.result_id);
+    let left = _ts_value_name(operation.operands[0]);
+    let right = _ts_value_name(operation.operands[1]);
+    let left_type = _ts_find_operation_type(function, operation.operands[0], operation_index);
+    let right_type = _ts_find_operation_type(function, operation.operands[1], operation_index);
+    let suffix = number_to_string(operation.result_id);
+    let init_index = "z" + suffix;
+    let row = "r" + suffix;
+    let column = "c" + suffix;
+    let contract = "k" + suffix;
+    let total = number_to_string(tensor_shape_product(operation.result_type.shape));
+    let rows = number_to_string(left_type.shape[0]);
+    let columns = number_to_string(right_type.shape[1]);
+    let width = number_to_string(left_type.shape[1]);
+    let left_offset = _ts_matrix_offset_text(left_type, row, contract);
+    let right_offset = _ts_matrix_offset_text(right_type, contract, column);
+    let result_offset = _ts_matrix_offset_text(operation.result_type, row, column);
+    return "    .let mut " + result + " : float[] = []\n" + "    .let mut "
+        + init_index
+        + " : int = 0\n"
+        + "    .loop\n"
+        + "        .if "
+        + init_index
+        + " >= "
+        + total
+        + "\n"
+        + "            break\n"
+        + "        .endif\n"
+        + "        eval "
+        + result
+        + ".push(0.0)\n"
+        + "        eval "
+        + init_index
+        + " += 1\n"
+        + "    .endloop\n"
+        + "    .let mut "
+        + row
+        + " : int = 0\n"
+        + "    .loop\n"
+        + "        .if "
+        + row
+        + " >= "
+        + rows
+        + "\n"
+        + "            break\n"
+        + "        .endif\n"
+        + "        .let mut "
+        + column
+        + " : int = 0\n"
+        + "        .loop\n"
+        + "            .if "
+        + column
+        + " >= "
+        + columns
+        + "\n"
+        + "                break\n"
+        + "            .endif\n"
+        + "            .let mut acc"
+        + suffix
+        + " : float = 0.0\n"
+        + "            .let mut "
+        + contract
+        + " : int = 0\n"
+        + "            .loop\n"
+        + "                .if "
+        + contract
+        + " >= "
+        + width
+        + "\n"
+        + "                    break\n"
+        + "                .endif\n"
+        + "                eval acc"
+        + suffix
+        + " = acc"
+        + suffix
+        + " + "
+        + left
+        + "["
+        + left_offset
+        + "] * "
+        + right
+        + "["
+        + right_offset
+        + "]\n"
+        + "                eval "
+        + contract
+        + " += 1\n"
+        + "            .endloop\n"
+        + "            eval "
+        + result
+        + "["
+        + result_offset
+        + "] = acc"
+        + suffix
+        + "\n"
+        + "            eval "
+        + column
+        + " += 1\n"
+        + "        .endloop\n"
+        + "        eval "
+        + row
+        + " += 1\n"
+        + "    .endloop\n";
+}
+
+fn _ts_find_operation_type(function: TensorFunction, value_id: int, limit: int) -> TensorType {
+    let mut operation_index: int = 0;
+    loop {
+        if operation_index >= function.operations.length || operation_index >= limit {
+            break;
+        }
+        if function.operations[operation_index].result_id == value_id {
+            return function.operations[operation_index].result_type;
+        }
+        operation_index += 1;
+    }
+    return function.result_type;
+}
+
+fn lower_tensor_function_to_native(function: TensorFunction) -> TensorScalarLowerResult {
+    let verified = verify_tensor_function(function);
+    if !verified.is_valid {
+        return TensorScalarLowerResult {
+            native_text: "",
+            diagnostics: verified.diagnostics
+        };
+    }
+    let mut text: string = ".fn " + function.name + "(";
+    let mut parameter_index: int = 0;
+    loop {
+        if parameter_index >= function.parameter_types.length { break; }
+        if parameter_index > 0 { text = text + ", "; }
+        let value_id = _ts_parameter_value_id(function, parameter_index);
+        text = text + _ts_value_name(value_id) + ": " + _ts_native_value_type(function.parameter_types[parameter_index]);
+        parameter_index += 1;
+    }
+    text = text + ") -> " + _ts_native_value_type(function.result_type) + "\n"
+        + ".meta return "
+        + _ts_native_value_type(function.result_type)
+        + "\n"
+        + ".meta effects none\n";
+    let mut operation_index: int = 0;
+    loop {
+        if operation_index >= function.operations.length { break; }
+        let operation = function.operations[operation_index];
+        if operation.kind.variant == "Add" {
+            text = text + _ts_emit_elementwise(operation, "+");
+        } else if operation.kind.variant == "Multiply" {
+            text = text + _ts_emit_elementwise(operation, "*");
+        } else if operation.kind.variant == "ReduceSum" {
+            text = text + _ts_emit_reduce_sum(operation);
+        } else if operation.kind.variant == "Matmul2d" {
+            text = text + _ts_emit_matmul(function, operation, operation_index);
+        }
+        operation_index += 1;
+    }
+    text = text + "    ret " + _ts_value_name(function.return_value_id)
+        + "\n.endfn\n";
+    return TensorScalarLowerResult { native_text: text, diagnostics: [] };
+}
+
+// lower_tensor_module_to_native is the fixed pass insertion point between
+// checked tensor construction and native scalar lowering.
+fn lower_tensor_module_to_native(module: TensorModule) -> TensorScalarLowerResult {
+    let passed = run_tensor_fusion_pass(module);
+    if passed.diagnostics.length > 0 {
+        return TensorScalarLowerResult {
+            native_text: "",
+            diagnostics: passed.diagnostics
+        };
+    }
+    let mut text: string = "; Sailfin tensor scalar reference\n.module "
+        + module.module_name
+        + "\n\n";
+    let mut function_index: int = 0;
+    loop {
+        if function_index >= passed.module.functions.length { break; }
+        let lowered = lower_tensor_function_to_native(passed.module.functions[function_index]);
+        if lowered.diagnostics.length > 0 { return lowered; }
+        text = text + lowered.native_text;
+        if function_index + 1 < passed.module.functions.length {
+            text = text + "\n";
+        }
+        function_index += 1;
+    }
+    return TensorScalarLowerResult { native_text: text, diagnostics: [] };
+}
+
+fn _ts_find_binding(bindings: TensorBinding[], value_id: int) -> TensorBindingLookup {
+    let mut index: int = 0;
+    loop {
+        if index >= bindings.length { break; }
+        if bindings[index].value_id == value_id {
+            return TensorBindingLookup {
+                found: true,
+                value: bindings[index].value
+            };
+        }
+        index += 1;
+    }
+    return TensorBindingLookup { found: false, value: _ts_empty_buffer() };
+}
+
+fn _ts_matrix_offset(tensor_type: TensorType, row: int, column: int) -> int {
+    if tensor_type.minor_to_major[0] == 1 {
+        return row * tensor_type.shape[1] + column;
+    }
+    return column * tensor_type.shape[0] + row;
+}
+
+fn _ts_execute_elementwise(left: TensorBuffer, right: TensorBuffer, is_add: boolean) -> TensorBuffer {
+    let mut data: float[] = [];
+    let mut index: int = 0;
+    loop {
+        if index >= left.data.length { break; }
+        if is_add {
+            data.push(left.data[index] + right.data[index]);
+        } else {
+            data.push(left.data[index] * right.data[index]);
+        }
+        index += 1;
+    }
+    return TensorBuffer { shape: left.shape, data: data };
+}
+
+fn _ts_execute_reduce_sum(operand: TensorBuffer) -> TensorBuffer {
+    let mut total: float = 0.0;
+    let mut index: int = 0;
+    loop {
+        if index >= operand.data.length { break; }
+        total = total + operand.data[index];
+        index += 1;
+    }
+    return TensorBuffer { shape: [], data: [total] };
+}
+
+fn _ts_execute_matmul(left: TensorBuffer, right: TensorBuffer, left_type: TensorType, right_type: TensorType, result_type: TensorType) -> TensorBuffer {
+    let size = tensor_shape_product(result_type.shape);
+    let mut data: float[] = [];
+    let mut zero_index: int = 0;
+    loop {
+        if zero_index >= size { break; }
+        data.push(0.0);
+        zero_index += 1;
+    }
+    let mut row: int = 0;
+    loop {
+        if row >= left_type.shape[0] { break; }
+        let mut column: int = 0;
+        loop {
+            if column >= right_type.shape[1] { break; }
+            let mut total: float = 0.0;
+            let mut contract: int = 0;
+            loop {
+                if contract >= left_type.shape[1] { break; }
+                let left_offset = _ts_matrix_offset(left_type, row, contract);
+                let right_offset = _ts_matrix_offset(right_type, contract, column);
+                total = total + left.data[left_offset] * right.data[right_offset];
+                contract += 1;
+            }
+            let result_offset = _ts_matrix_offset(result_type, row, column);
+            data[result_offset] = total;
+            column += 1;
+        }
+        row += 1;
+    }
+    return TensorBuffer { shape: result_type.shape, data: data };
+}
+
+fn execute_tensor_function_scalar(function: TensorFunction, inputs: TensorBuffer[]) -> TensorExecuteResult {
+    let verified = verify_tensor_function(function);
+    if !verified.is_valid {
+        return TensorExecuteResult {
+            value: _ts_empty_buffer(),
+            diagnostics: verified.diagnostics
+        };
+    }
+    if inputs.length != function.parameter_types.length {
+        return TensorExecuteResult {
+            value: _ts_empty_buffer(),
+            diagnostics: [function.name
+                + ": scalar oracle input count does not match signature"]
+        };
+    }
+    let mut bindings: TensorBinding[] = [];
+    let mut operation_index: int = 0;
+    loop {
+        if operation_index >= function.operations.length { break; }
+        let operation = function.operations[operation_index];
+        let mut value = _ts_empty_buffer();
+        if operation.kind.variant == "Parameter" {
+            value = inputs[operation.parameter_index];
+            if !tensor_shapes_equal(value.shape, operation.result_type.shape)
+                || value.data.length != tensor_shape_product(operation.result_type.shape) {
+                return TensorExecuteResult {
+                    value: _ts_empty_buffer(),
+                    diagnostics: [function.name
+                        + ": scalar oracle input shape or size does not match signature"]
+                };
+            }
+        } else if operation.kind.variant == "Add" || operation.kind.variant == "Multiply" {
+            let left = _ts_find_binding(bindings, operation.operands[0]);
+            let right = _ts_find_binding(bindings, operation.operands[1]);
+            value = _ts_execute_elementwise(left.value, right.value, operation.kind.variant == "Add");
+        } else if operation.kind.variant == "ReduceSum" {
+            let operand = _ts_find_binding(bindings, operation.operands[0]);
+            value = _ts_execute_reduce_sum(operand.value);
+        } else if operation.kind.variant == "Matmul2d" {
+            let left = _ts_find_binding(bindings, operation.operands[0]);
+            let right = _ts_find_binding(bindings, operation.operands[1]);
+            let left_type = _ts_find_operation_type(function, operation.operands[0], operation_index);
+            let right_type = _ts_find_operation_type(function, operation.operands[1], operation_index);
+            value = _ts_execute_matmul(left.value, right.value, left_type, right_type, operation.result_type);
+        }
+        bindings.push(TensorBinding {
+            value_id: operation.result_id, value: value
+        });
+        operation_index += 1;
+    }
+    let returned = _ts_find_binding(bindings, function.return_value_id);
+    if !returned.found {
+        return TensorExecuteResult {
+            value: _ts_empty_buffer(),
+            diagnostics: [function.name
+                + ": scalar oracle return value is missing"]
+        };
+    }
+    return TensorExecuteResult { value: returned.value, diagnostics: [] };
+}

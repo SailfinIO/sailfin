@@ -1,6 +1,6 @@
 # Status
 
-Updated: 2026-07-18. Seed pinned to `0.8.0-alpha.5` (`bootstrap.toml`
+Updated: 2026-07-21. Seed pinned to `0.8.0-alpha.5` (`bootstrap.toml`
 `[seed].version` — SFEP-0047); the compiler version source of truth is
 `compiler/capsule.toml`.
 
@@ -240,6 +240,16 @@ here.
 - `compiler/src/` is the primary toolchain; `make compile` produces
   `build/bin/sfn`. Pipeline: Lexer → Parser → Type Checker →
   Effect Checker → Native Emitter (`.sfn-asm`) → LLVM Lowering.
+- **Shape-typed tensor IR foundation** (SFEP-0053, SFN-427): the compiler has
+  an in-memory tensor tier for static dense `f64` elementwise add/multiply,
+  full reduction sum, and 2D matrix multiplication. Tensor graphs verify
+  dtype, shape, layout, SSA ordering, and operation invariants before passing
+  through the explicit fusion seam and deterministic scalar-reference exit.
+  That exit emits ordinary `.sfn-asm` loops and provides the CPU numerical
+  oracle. Checked-AST construction and automatic tensor-function selection are
+  not yet wired, so ordinary source programs continue directly to the native
+  emitter; StableHLO, dynamic shapes, autodiff, and device codegen remain
+  planned follow-ons.
 - **Backend seam** (`compiler/src/backend.sfn`, #1112; SFEP-15 Stage 0):
   every codegen/link `clang` invocation routes through a `Backend` interface
   whose sole impl is `LlvmTextBackend` (today's textual-LLVM-IR + clang path).

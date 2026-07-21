@@ -1,0 +1,267 @@
+// compiler/tests/unit/tensor_ir_test.sfn
+//
+// Shape, pass-boundary, native-loop snapshot, and CPU-oracle coverage for the
+// SFEP-0053 tensor IR foundation (SFN-427).
+import { lower_to_llvm_ir_from_text } from "../../src/llvm/lowering/entrypoints";
+import { index_of } from "../../src/string_utils";
+import {
+    TensorFunction,
+    TensorModule,
+    TensorOp,
+    TensorType,
+    dense_f64_type,
+    render_tensor_module,
+    tensor_add,
+    tensor_matmul_2d,
+    tensor_multiply,
+    tensor_parameter,
+    tensor_reduce_sum
+} from "../../src/tensor_ir";
+import { run_tensor_fusion_pass } from "../../src/tensor_ir_fusion";
+import {
+    TensorBuffer,
+    execute_tensor_function_scalar,
+    lower_tensor_module_to_native
+} from "../../src/tensor_ir_lower_scalar";
+import { verify_tensor_function } from "../../src/tensor_ir_verify";
+
+// Direct imports from sfn/tensor currently produce conflicting declarations
+// during test linking (SFN-436). These functions mirror the capsule's CPU
+// oracle exactly for the operations covered here. Replace them with direct
+// imports when SFN-436 lands.
+struct CapsuleTensor {
+    data: float[];
+    shape: int[];
+    size: int;
+}
+
+fn _capsule_from_array(data: float[], shape: int[]) -> CapsuleTensor {
+    return CapsuleTensor { data: data, shape: shape, size: data.length };
+}
+
+fn _capsule_add(left: CapsuleTensor, right: CapsuleTensor) -> CapsuleTensor {
+    let mut data: float[] = [];
+    let mut index: int = 0;
+    loop {
+        if index >= left.size { break; }
+        data.push(left.data[index] + right.data[index]);
+        index += 1;
+    }
+    return CapsuleTensor {
+        data: data,
+        shape: left.shape,
+        size: data.length
+    };
+}
+
+fn _capsule_multiply(left: CapsuleTensor, right: CapsuleTensor) -> CapsuleTensor {
+    let mut data: float[] = [];
+    let mut index: int = 0;
+    loop {
+        if index >= left.size { break; }
+        data.push(left.data[index] * right.data[index]);
+        index += 1;
+    }
+    return CapsuleTensor {
+        data: data,
+        shape: left.shape,
+        size: data.length
+    };
+}
+
+fn _capsule_sum(tensor: CapsuleTensor) -> float {
+    let mut total: float = 0.0;
+    let mut index: int = 0;
+    loop {
+        if index >= tensor.size { break; }
+        total = total + tensor.data[index];
+        index += 1;
+    }
+    return total;
+}
+
+fn _capsule_matmul(left: CapsuleTensor, right: CapsuleTensor) -> CapsuleTensor {
+    let rows = left.shape[0];
+    let width = left.shape[1];
+    let columns = right.shape[1];
+    let mut data: float[] = [];
+    let mut row: int = 0;
+    loop {
+        if row >= rows { break; }
+        let mut column: int = 0;
+        loop {
+            if column >= columns { break; }
+            let mut total: float = 0.0;
+            let mut contract: int = 0;
+            loop {
+                if contract >= width { break; }
+                total = total + left.data[row * width + contract] * right.data[contract * columns
+                    + column];
+                contract += 1;
+            }
+            data.push(total);
+            column += 1;
+        }
+        row += 1;
+    }
+    return CapsuleTensor {
+        data: data,
+        shape: [rows, columns],
+        size: data.length
+    };
+}
+
+fn _tensor_function(name: string, parameter_shapes: int[][], result_shape: int[], operations: TensorOp[], return_value_id: int) -> TensorFunction {
+    let mut parameter_types: TensorType[] = [];
+    let mut index: int = 0;
+    loop {
+        if index >= parameter_shapes.length { break; }
+        parameter_types.push(dense_f64_type(parameter_shapes[index]));
+        index += 1;
+    }
+    return TensorFunction {
+        name: name,
+        parameter_types: parameter_types,
+        result_type: dense_f64_type(result_shape),
+        operations: operations,
+        return_value_id: return_value_id
+    };
+}
+
+fn _add_function() -> TensorFunction {
+    let tensor_type = dense_f64_type([2, 2]);
+    let operations: TensorOp[] = [tensor_parameter(0, 0, tensor_type), tensor_parameter(1, 1, tensor_type), tensor_add(2, 0, 1, tensor_type)];
+    return _tensor_function("tensor_add_oracle", [[2, 2], [2, 2]], [2, 2], operations, 2);
+}
+
+fn _multiply_function() -> TensorFunction {
+    let tensor_type = dense_f64_type([2, 2]);
+    let operations: TensorOp[] = [tensor_parameter(0, 0, tensor_type), tensor_parameter(1, 1, tensor_type), tensor_multiply(2, 0, 1, tensor_type)];
+    return _tensor_function("tensor_multiply_oracle", [[2, 2], [2, 2]], [2, 2], operations, 2);
+}
+
+fn _sum_function() -> TensorFunction {
+    let input_type = dense_f64_type([2, 2]);
+    let operations: TensorOp[] = [tensor_parameter(0, 0, input_type), tensor_reduce_sum(1, 0, [0, 1], dense_f64_type([]))];
+    return _tensor_function("tensor_sum_oracle", [[2, 2]], [], operations, 1);
+}
+
+fn _matmul_function() -> TensorFunction {
+    let left_type = dense_f64_type([2, 3]);
+    let right_type = dense_f64_type([3, 2]);
+    let result_type = dense_f64_type([2, 2]);
+    let operations: TensorOp[] = [tensor_parameter(0, 0, left_type), tensor_parameter(1, 1, right_type), tensor_matmul_2d(2, 0, 1, result_type)];
+    return _tensor_function("tensor_matmul_oracle", [[2, 3], [3, 2]], [2, 2], operations, 2);
+}
+
+fn _module(function: TensorFunction) -> TensorModule {
+    let functions: TensorFunction[] = [function];
+    return TensorModule { module_name: "tensor_test", functions: functions };
+}
+
+fn _assert_buffer_matches_capsule(actual: TensorBuffer, expected: CapsuleTensor) {
+    assert actual.shape.length == expected.shape.length;
+    assert actual.data.length == expected.data.length;
+    let mut index: int = 0;
+    loop {
+        if index >= actual.shape.length { break; }
+        assert actual.shape[index] == expected.shape[index];
+        index += 1;
+    }
+    index = 0;
+    loop {
+        if index >= actual.data.length { break; }
+        assert actual.data[index] == expected.data[index];
+        index += 1;
+    }
+}
+
+test "tensor_ir: stable graph snapshot and fusion seam" {
+    let module = _module(_add_function());
+    let expected = "tensor.module @tensor_test {\n"
+        + "  tensor.func @tensor_add_oracle(tensor<f64[2x2] layout=[1,0]>, tensor<f64[2x2] layout=[1,0]>) -> tensor<f64[2x2] layout=[1,0]> {\n"
+        + "    %0 = parameter [index=0] : tensor<f64[2x2] layout=[1,0]>\n"
+        + "    %1 = parameter [index=1] : tensor<f64[2x2] layout=[1,0]>\n"
+        + "    %2 = add %0, %1 : tensor<f64[2x2] layout=[1,0]>\n"
+        + "    return %2\n"
+        + "  }\n"
+        + "}\n";
+    assert render_tensor_module(module) == expected;
+    let passed = run_tensor_fusion_pass(module);
+    assert passed.diagnostics.length == 0;
+    assert ! passed.changed;
+    assert render_tensor_module(passed.module) == expected;
+}
+
+test "tensor_ir: verifier rejects implicit shape conversion" {
+    let left_type = dense_f64_type([2, 2]);
+    let right_type = dense_f64_type([4]);
+    let operations: TensorOp[] = [tensor_parameter(0, 0, left_type), tensor_parameter(1, 1, right_type), tensor_add(2, 0, 1, left_type)];
+    let function = _tensor_function("bad_add", [[2, 2], [4]], [2, 2], operations, 2);
+    let verified = verify_tensor_function(function);
+    assert ! verified.is_valid;
+    assert verified.diagnostics.length > 0;
+}
+
+test "tensor_ir: scalar native-loop snapshot lowers through LLVM" ![io] {
+    let lowered = lower_tensor_module_to_native(_module(_add_function()));
+    assert lowered.diagnostics.length == 0;
+    let expected = "; Sailfin tensor scalar reference\n"
+        + ".module tensor_test\n\n"
+        + ".fn tensor_add_oracle(v0: float[], v1: float[]) -> float[]\n"
+        + ".meta return float[]\n"
+        + ".meta effects none\n"
+        + "    .let mut v2 : float[] = []\n"
+        + "    .let mut i2 : int = 0\n"
+        + "    .loop\n"
+        + "        .if i2 >= 4\n"
+        + "            break\n"
+        + "        .endif\n"
+        + "        eval v2.push(v0[i2] + v1[i2])\n"
+        + "        eval i2 += 1\n"
+        + "    .endloop\n"
+        + "    ret v2\n"
+        + ".endfn\n";
+    assert lowered.native_text == expected;
+    let llvm = lower_to_llvm_ir_from_text(lowered.native_text, "tensor_test");
+    assert index_of(llvm, "define") >= 0;
+    assert index_of(llvm, "@tensor_add_oracle") >= 0;
+}
+
+test "tensor_ir: add and multiply equal tensor capsule oracle" {
+    let a_data = [1.0, 2.0, 3.0, 4.0];
+    let b_data = [5.0, 6.0, 7.0, 8.0];
+    let a = TensorBuffer { shape: [2, 2], data: a_data };
+    let b = TensorBuffer { shape: [2, 2], data: b_data };
+    let added = execute_tensor_function_scalar(_add_function(), [a, b]);
+    assert added.diagnostics.length == 0;
+    let capsule_a = _capsule_from_array(a_data, [2, 2]);
+    let capsule_b = _capsule_from_array(b_data, [2, 2]);
+    _assert_buffer_matches_capsule(added.value, _capsule_add(capsule_a, capsule_b));
+    let multiplied = execute_tensor_function_scalar(_multiply_function(), [a, b]);
+    assert multiplied.diagnostics.length == 0;
+    _assert_buffer_matches_capsule(multiplied.value, _capsule_multiply(capsule_a, capsule_b));
+}
+
+test "tensor_ir: reduction sum equals tensor capsule oracle" {
+    let data = [1.0, 2.0, 3.0, 4.0];
+    let input = TensorBuffer { shape: [2, 2], data: data };
+    let executed = execute_tensor_function_scalar(_sum_function(), [input]);
+    assert executed.diagnostics.length == 0;
+    let expected = _capsule_sum(_capsule_from_array(data, [2, 2]));
+    assert executed.value.shape.length == 0;
+    assert executed.value.data.length == 1;
+    assert executed.value.data[0] == expected;
+}
+
+test "tensor_ir: 2D matmul equals tensor capsule oracle" {
+    let left_data = [1.0, 2.0, 3.0, 4.0, 5.0, 6.0];
+    let right_data = [7.0, 8.0, 9.0, 10.0, 11.0, 12.0];
+    let left = TensorBuffer { shape: [2, 3], data: left_data };
+    let right = TensorBuffer { shape: [3, 2], data: right_data };
+    let executed = execute_tensor_function_scalar(_matmul_function(), [left, right]);
+    assert executed.diagnostics.length == 0;
+    let capsule_left = _capsule_from_array(left_data, [2, 3]);
+    let capsule_right = _capsule_from_array(right_data, [3, 2]);
+    _assert_buffer_matches_capsule(executed.value, _capsule_matmul(capsule_left, capsule_right));
+}
