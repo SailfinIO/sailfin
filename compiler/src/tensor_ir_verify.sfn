@@ -1,0 +1,301 @@
+// compiler/src/tensor_ir_verify.sfn
+//
+// Structural and operation verification for shape-typed tensor IR. Invalid
+// compiler state is returned as diagnostics before any exit consumes it.
+// See SFEP-0053 and SFN-427.
+import {
+    TensorFunction,
+    TensorDType,
+    TensorModule,
+    TensorOp,
+    TensorType,
+    tensor_shape_product,
+    tensor_shapes_equal,
+    tensor_types_equal
+} from "./tensor_ir";
+
+struct TensorVerifyResult {
+    is_valid: boolean;
+    diagnostics: string[];
+}
+
+struct TensorTypeLookup {
+    found: boolean;
+    value: TensorType;
+}
+
+fn _tensor_empty_type() -> TensorType {
+    return TensorType {
+        dtype: TensorDType.F64(),
+        shape: [],
+        minor_to_major: []
+    };
+}
+
+fn _tensor_append_diagnostic(diagnostics: string[], diagnostic: string) -> string[] {
+    let mut updated = diagnostics;
+    updated.push(diagnostic);
+    return updated;
+}
+
+fn _tensor_find_type(operations: TensorOp[], value_id: int, limit: int) -> TensorTypeLookup {
+    let mut index: int = 0;
+    loop {
+        if index >= operations.length || index >= limit { break; }
+        if operations[index].result_id == value_id {
+            return TensorTypeLookup {
+                found: true,
+                value: operations[index].result_type
+            };
+        }
+        index += 1;
+    }
+    return TensorTypeLookup { found: false, value: _tensor_empty_type() };
+}
+
+fn _tensor_verify_type(tensor_type: TensorType, context: string) -> string[] {
+    let mut diagnostics: string[] = [];
+    if tensor_type.dtype.variant != "F64" {
+        diagnostics = _tensor_append_diagnostic(diagnostics, context
+            + ": scalar oracle supports only f64");
+    }
+    let mut dimension_index: int = 0;
+    loop {
+        if dimension_index >= tensor_type.shape.length { break; }
+        if tensor_type.shape[dimension_index] <= 0 {
+            diagnostics = _tensor_append_diagnostic(diagnostics, context
+                + ": dimensions must be positive and static");
+        }
+        dimension_index += 1;
+    }
+    if tensor_type.shape.length > 0 && tensor_shape_product(tensor_type.shape) <= 0 {
+        diagnostics = _tensor_append_diagnostic(diagnostics, context
+            + ": dimension product overflowed");
+    }
+    if tensor_type.minor_to_major.length != tensor_type.shape.length {
+        diagnostics = _tensor_append_diagnostic(diagnostics, context
+            + ": layout rank does not match shape rank");
+        return diagnostics;
+    }
+    let mut layout_index: int = 0;
+    loop {
+        if layout_index >= tensor_type.minor_to_major.length { break; }
+        let dimension = tensor_type.minor_to_major[layout_index];
+        if dimension < 0 || dimension >= tensor_type.shape.length {
+            diagnostics = _tensor_append_diagnostic(diagnostics, context
+                + ": layout dimension is out of range");
+        }
+        let mut prior_index: int = 0;
+        loop {
+            if prior_index >= layout_index { break; }
+            if tensor_type.minor_to_major[prior_index] == dimension {
+                diagnostics = _tensor_append_diagnostic(diagnostics, context
+                    + ": layout is not a permutation");
+            }
+            prior_index += 1;
+        }
+        layout_index += 1;
+    }
+    return diagnostics;
+}
+
+fn _tensor_verify_binary(function: TensorFunction, operation: TensorOp, operation_index: int) -> string[] {
+    let mut diagnostics: string[] = [];
+    if operation.operands.length != 2 {
+        diagnostics.push(function.name
+            + ": binary operation must have two operands");
+        return diagnostics;
+    }
+    let left = _tensor_find_type(function.operations, operation.operands[0], operation_index);
+    let right = _tensor_find_type(function.operations, operation.operands[1], operation_index);
+    if !left.found || !right.found {
+        diagnostics.push(function.name
+            + ": binary operand is not defined before use");
+        return diagnostics;
+    }
+    if !tensor_types_equal(left.value, right.value) || !tensor_types_equal(left.value, operation.result_type) {
+        diagnostics.push(function.name
+            + ": binary operands and result must have identical types");
+    }
+    return diagnostics;
+}
+
+fn _tensor_verify_reduce(function: TensorFunction, operation: TensorOp, operation_index: int) -> string[] {
+    let mut diagnostics: string[] = [];
+    if operation.operands.length != 1 {
+        diagnostics.push(function.name + ": reduce_sum must have one operand");
+        return diagnostics;
+    }
+    let operand = _tensor_find_type(function.operations, operation.operands[0], operation_index);
+    if !operand.found {
+        diagnostics.push(function.name
+            + ": reduce_sum operand is not defined before use");
+        return diagnostics;
+    }
+    if operation.axes.length != operand.value.shape.length {
+        diagnostics.push(function.name
+            + ": scalar reduce_sum must name every axis");
+    }
+    let mut axis_index: int = 0;
+    loop {
+        if axis_index >= operation.axes.length { break; }
+        let axis = operation.axes[axis_index];
+        if axis < 0 || axis >= operand.value.shape.length {
+            diagnostics.push(function.name + ": reduce_sum axis is out of range");
+        }
+        let mut prior_index: int = 0;
+        loop {
+            if prior_index >= axis_index { break; }
+            if operation.axes[prior_index] == axis {
+                diagnostics.push(function.name
+                    + ": reduce_sum axes must be unique");
+            }
+            prior_index += 1;
+        }
+        axis_index += 1;
+    }
+    if operation.result_type.shape.length != 0 || operation.result_type.dtype.variant != operand.value.dtype.variant {
+        diagnostics.push(function.name
+            + ": scalar reduce_sum must return a rank-zero tensor of the operand dtype");
+    }
+    return diagnostics;
+}
+
+fn _tensor_verify_matmul(function: TensorFunction, operation: TensorOp, operation_index: int) -> string[] {
+    let mut diagnostics: string[] = [];
+    if operation.operands.length != 2 {
+        diagnostics.push(function.name + ": matmul_2d must have two operands");
+        return diagnostics;
+    }
+    let left = _tensor_find_type(function.operations, operation.operands[0], operation_index);
+    let right = _tensor_find_type(function.operations, operation.operands[1], operation_index);
+    if !left.found || !right.found {
+        diagnostics.push(function.name
+            + ": matmul_2d operand is not defined before use");
+        return diagnostics;
+    }
+    if left.value.shape.length != 2 || right.value.shape.length != 2 {
+        diagnostics.push(function.name
+            + ": matmul_2d operands must have rank two");
+        return diagnostics;
+    }
+    if left.value.dtype.variant != right.value.dtype.variant || left.value.dtype.variant != operation.result_type.dtype.variant {
+        diagnostics.push(function.name
+            + ": matmul_2d operands and result must have identical dtypes");
+    }
+    if left.value.shape[1] != right.value.shape[0] {
+        diagnostics.push(function.name
+            + ": matmul_2d contracting dimensions must match");
+    }
+    if operation.result_type.shape.length != 2 {
+        diagnostics.push(function.name + ": matmul_2d result must have rank two");
+    } else {
+        if operation.result_type.shape[0] != left.value.shape[0] || operation.result_type.shape[1] != right.value.shape[1] {
+            diagnostics.push(function.name
+                + ": matmul_2d result shape must be [M, N]");
+        }
+    }
+    return diagnostics;
+}
+
+fn verify_tensor_function(function: TensorFunction) -> TensorVerifyResult {
+    let mut diagnostics: string[] = [];
+    let mut parameter_type_index: int = 0;
+    loop {
+        if parameter_type_index >= function.parameter_types.length { break; }
+        let type_diagnostics = _tensor_verify_type(function.parameter_types[parameter_type_index], function.name
+            + ": parameter type");
+        let mut diagnostic_index: int = 0;
+        loop {
+            if diagnostic_index >= type_diagnostics.length { break; }
+            diagnostics.push(type_diagnostics[diagnostic_index]);
+            diagnostic_index += 1;
+        }
+        parameter_type_index += 1;
+    }
+    let result_diagnostics = _tensor_verify_type(function.result_type, function.name
+        + ": result type");
+    let mut result_diagnostic_index: int = 0;
+    loop {
+        if result_diagnostic_index >= result_diagnostics.length { break; }
+        diagnostics.push(result_diagnostics[result_diagnostic_index]);
+        result_diagnostic_index += 1;
+    }
+    let mut operation_index: int = 0;
+    loop {
+        if operation_index >= function.operations.length { break; }
+        let operation = function.operations[operation_index];
+        let operation_type_diagnostics = _tensor_verify_type(operation.result_type, function.name
+            + ": operation result type");
+        let mut operation_diagnostic_index: int = 0;
+        loop {
+            if operation_diagnostic_index >= operation_type_diagnostics.length {
+                break;
+            }
+            diagnostics.push(operation_type_diagnostics[operation_diagnostic_index]);
+            operation_diagnostic_index += 1;
+        }
+        let prior = _tensor_find_type(function.operations, operation.result_id, operation_index);
+        if prior.found {
+            diagnostics.push(function.name + ": SSA result IDs must be unique");
+        }
+        let mut operation_diagnostics: string[] = [];
+        if operation.kind.variant == "Parameter" {
+            if operation.parameter_index < 0 || operation.parameter_index >= function.parameter_types.length {
+                operation_diagnostics.push(function.name
+                    + ": parameter index is out of range");
+            } else if !tensor_types_equal(operation.result_type, function.parameter_types[operation.parameter_index]) {
+                operation_diagnostics.push(function.name
+                    + ": parameter result type does not match signature");
+            }
+            if operation.operands.length != 0 {
+                operation_diagnostics.push(function.name
+                    + ": parameter operation cannot have operands");
+            }
+        } else if operation.kind.variant == "Add" || operation.kind.variant == "Multiply" {
+            operation_diagnostics = _tensor_verify_binary(function, operation, operation_index);
+        } else if operation.kind.variant == "ReduceSum" {
+            operation_diagnostics = _tensor_verify_reduce(function, operation, operation_index);
+        } else if operation.kind.variant == "Matmul2d" {
+            operation_diagnostics = _tensor_verify_matmul(function, operation, operation_index);
+        }
+        let mut append_index: int = 0;
+        loop {
+            if append_index >= operation_diagnostics.length { break; }
+            diagnostics.push(operation_diagnostics[append_index]);
+            append_index += 1;
+        }
+        operation_index += 1;
+    }
+    let returned = _tensor_find_type(function.operations, function.return_value_id, function.operations.length);
+    if !returned.found {
+        diagnostics.push(function.name + ": return value is not defined");
+    } else if !tensor_types_equal(returned.value, function.result_type) {
+        diagnostics.push(function.name
+            + ": return value type does not match signature");
+    }
+    return TensorVerifyResult {
+        is_valid: diagnostics.length == 0,
+        diagnostics: diagnostics
+    };
+}
+
+fn verify_tensor_module(module: TensorModule) -> TensorVerifyResult {
+    let mut diagnostics: string[] = [];
+    let mut function_index: int = 0;
+    loop {
+        if function_index >= module.functions.length { break; }
+        let verified = verify_tensor_function(module.functions[function_index]);
+        let mut diagnostic_index: int = 0;
+        loop {
+            if diagnostic_index >= verified.diagnostics.length { break; }
+            diagnostics.push(verified.diagnostics[diagnostic_index]);
+            diagnostic_index += 1;
+        }
+        function_index += 1;
+    }
+    return TensorVerifyResult {
+        is_valid: diagnostics.length == 0,
+        diagnostics: diagnostics
+    };
+}

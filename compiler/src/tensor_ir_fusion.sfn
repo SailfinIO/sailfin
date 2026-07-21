@@ -1,0 +1,32 @@
+// compiler/src/tensor_ir_fusion.sfn
+//
+// Deterministic fusion-pass insertion seam for shape-typed tensor IR. The
+// first implementation preserves verified graphs while later work adds the
+// SFEP-0053 producer-consumer rewrite.
+import { TensorModule } from "./tensor_ir";
+import { verify_tensor_module } from "./tensor_ir_verify";
+
+struct TensorPassResult {
+    module: TensorModule;
+    changed: boolean;
+    diagnostics: string[];
+}
+
+// run_tensor_fusion_pass verifies both sides of the pass boundary even while
+// the initial pass is identity-only, keeping later rewrites fail-closed.
+fn run_tensor_fusion_pass(module: TensorModule) -> TensorPassResult {
+    let before = verify_tensor_module(module);
+    if !before.is_valid {
+        return TensorPassResult {
+            module: module,
+            changed: false,
+            diagnostics: before.diagnostics
+        };
+    }
+    let after = verify_tensor_module(module);
+    return TensorPassResult {
+        module: module,
+        changed: false,
+        diagnostics: after.diagnostics
+    };
+}

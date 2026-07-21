@@ -1,0 +1,259 @@
+// compiler/src/tensor_ir.sfn
+//
+// Shape-typed tensor IR definitions and deterministic text rendering. This
+// tier retains tensor algebra until an explicit scalar or accelerator exit.
+// See SFEP-0053 and SFN-427.
+import { number_to_string } from "./num_format";
+
+enum TensorDType {
+    Pred,
+    I8,
+    I16,
+    I32,
+    I64,
+    U8,
+    U16,
+    U32,
+    U64,
+    F32,
+    F64
+}
+
+enum TensorOpKind {
+    Parameter,
+    Add,
+    Multiply,
+    ReduceSum,
+    Matmul2d
+}
+
+struct TensorType {
+    dtype: TensorDType;
+    shape: int[];
+    minor_to_major: int[];
+}
+
+struct TensorProvenance {
+    file_path: string;
+    start_line: int;
+    start_column: int;
+    end_line: int;
+    end_column: int;
+}
+
+struct TensorOp {
+    kind: TensorOpKind;
+    result_id: int;
+    operands: int[];
+    result_type: TensorType;
+    axes: int[];
+    parameter_index: int;
+    provenance: TensorProvenance?;
+}
+
+struct TensorFunction {
+    name: string;
+    parameter_types: TensorType[];
+    result_type: TensorType;
+    operations: TensorOp[];
+    return_value_id: int;
+}
+
+struct TensorModule {
+    module_name: string;
+    functions: TensorFunction[];
+}
+
+// dense_f64_type constructs the row-major type supported by the first scalar
+// oracle. The full dtype enum is closed now so future exits extend legality
+// without changing operation structure.
+fn dense_f64_type(shape: int[]) -> TensorType {
+    let mut layout: int[] = [];
+    let mut index: int = shape.length;
+    loop {
+        if index <= 0 { break; }
+        index -= 1;
+        layout.push(index);
+    }
+    return TensorType {
+        dtype: TensorDType.F64(),
+        shape: shape,
+        minor_to_major: layout
+    };
+}
+
+fn tensor_parameter(result_id: int, parameter_index: int, result_type: TensorType) -> TensorOp {
+    return TensorOp {
+        kind: TensorOpKind.Parameter(),
+        result_id: result_id,
+        operands: [],
+        result_type: result_type,
+        axes: [],
+        parameter_index: parameter_index,
+        provenance: null
+    };
+}
+
+fn tensor_add(result_id: int, left_id: int, right_id: int, result_type: TensorType) -> TensorOp {
+    return TensorOp {
+        kind: TensorOpKind.Add(),
+        result_id: result_id,
+        operands: [left_id, right_id],
+        result_type: result_type,
+        axes: [],
+        parameter_index: -1,
+        provenance: null
+    };
+}
+
+fn tensor_multiply(result_id: int, left_id: int, right_id: int, result_type: TensorType) -> TensorOp {
+    return TensorOp {
+        kind: TensorOpKind.Multiply(),
+        result_id: result_id,
+        operands: [left_id, right_id],
+        result_type: result_type,
+        axes: [],
+        parameter_index: -1,
+        provenance: null
+    };
+}
+
+fn tensor_reduce_sum(result_id: int, operand_id: int, axes: int[], result_type: TensorType) -> TensorOp {
+    return TensorOp {
+        kind: TensorOpKind.ReduceSum(),
+        result_id: result_id,
+        operands: [operand_id],
+        result_type: result_type,
+        axes: axes,
+        parameter_index: -1,
+        provenance: null
+    };
+}
+
+fn tensor_matmul_2d(result_id: int, left_id: int, right_id: int, result_type: TensorType) -> TensorOp {
+    return TensorOp {
+        kind: TensorOpKind.Matmul2d(),
+        result_id: result_id,
+        operands: [left_id, right_id],
+        result_type: result_type,
+        axes: [],
+        parameter_index: -1,
+        provenance: null
+    };
+}
+
+fn tensor_shape_product(shape: int[]) -> int {
+    if shape.length == 0 { return 1; }
+    let mut product: int = 1;
+    let mut index: int = 0;
+    loop {
+        if index >= shape.length { break; }
+        product = product * shape[index];
+        index += 1;
+    }
+    return product;
+}
+
+fn tensor_shapes_equal(left: int[], right: int[]) -> boolean {
+    if left.length != right.length { return false; }
+    let mut index: int = 0;
+    loop {
+        if index >= left.length { break; }
+        if left[index] != right[index] { return false; }
+        index += 1;
+    }
+    return true;
+}
+
+fn tensor_types_equal(left: TensorType, right: TensorType) -> boolean {
+    if left.dtype.variant != right.dtype.variant { return false; }
+    if !tensor_shapes_equal(left.shape, right.shape) { return false; }
+    return tensor_shapes_equal(left.minor_to_major, right.minor_to_major);
+}
+
+fn tensor_dtype_name(dtype: TensorDType) -> string {
+    if dtype.variant == "Pred" { return "pred"; }
+    if dtype.variant == "I8" { return "i8"; }
+    if dtype.variant == "I16" { return "i16"; }
+    if dtype.variant == "I32" { return "i32"; }
+    if dtype.variant == "I64" { return "i64"; }
+    if dtype.variant == "U8" { return "u8"; }
+    if dtype.variant == "U16" { return "u16"; }
+    if dtype.variant == "U32" { return "u32"; }
+    if dtype.variant == "U64" { return "u64"; }
+    if dtype.variant == "F32" { return "f32"; }
+    return "f64";
+}
+
+fn tensor_op_name(kind: TensorOpKind) -> string {
+    if kind.variant == "Parameter" { return "parameter"; }
+    if kind.variant == "Add" { return "add"; }
+    if kind.variant == "Multiply" { return "multiply"; }
+    if kind.variant == "ReduceSum" { return "reduce_sum"; }
+    return "matmul_2d";
+}
+
+fn _tensor_join_ints(values: int[], separator: string) -> string {
+    let mut text: string = "";
+    let mut index: int = 0;
+    loop {
+        if index >= values.length { break; }
+        if index > 0 { text = text + separator; }
+        text = text + number_to_string(values[index]);
+        index += 1;
+    }
+    return text;
+}
+
+fn _tensor_type_text(tensor_type: TensorType) -> string {
+    return "tensor<" + tensor_dtype_name(tensor_type.dtype) + "["
+        + _tensor_join_ints(tensor_type.shape, "x")
+        + "] layout=["
+        + _tensor_join_ints(tensor_type.minor_to_major, ",")
+        + "]>";
+}
+
+// render_tensor_module produces a stable form for verifier and pass snapshots.
+fn render_tensor_module(module: TensorModule) -> string {
+    let mut text: string = "tensor.module @" + module.module_name + " {\n";
+    let mut function_index: int = 0;
+    loop {
+        if function_index >= module.functions.length { break; }
+        let function = module.functions[function_index];
+        text = text + "  tensor.func @" + function.name + "(";
+        let mut parameter_index: int = 0;
+        loop {
+            if parameter_index >= function.parameter_types.length { break; }
+            if parameter_index > 0 { text = text + ", "; }
+            text = text + _tensor_type_text(function.parameter_types[parameter_index]);
+            parameter_index += 1;
+        }
+        text = text + ") -> " + _tensor_type_text(function.result_type) + " {\n";
+        let mut operation_index: int = 0;
+        loop {
+            if operation_index >= function.operations.length { break; }
+            let operation = function.operations[operation_index];
+            text = text + "    %" + number_to_string(operation.result_id)
+                + " = "
+                + tensor_op_name(operation.kind);
+            if operation.operands.length > 0 {
+                text = text + " %" + _tensor_join_ints(operation.operands, ", %");
+            }
+            if operation.kind.variant == "Parameter" {
+                text = text + " [index=" + number_to_string(operation.parameter_index)
+                    + "]";
+            }
+            if operation.kind.variant == "ReduceSum" {
+                text = text + " [axes=" + _tensor_join_ints(operation.axes, ",")
+                    + "]";
+            }
+            text = text + " : " + _tensor_type_text(operation.result_type)
+                + "\n";
+            operation_index += 1;
+        }
+        text = text + "    return %" + number_to_string(function.return_value_id)
+            + "\n  }\n";
+        function_index += 1;
+    }
+    return text + "}\n";
+}
