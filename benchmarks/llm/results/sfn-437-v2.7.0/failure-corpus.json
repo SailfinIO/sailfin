@@ -1,0 +1,69 @@
+{
+  "schema_version": "sfn-agent-benchmark-setup-failure/v1",
+  "protocol_id": "sfn-agent-benchmark/v2.7.0",
+  "provider": "anthropic",
+  "model": "claude-sonnet-5",
+  "stage": "pre_packet_blinded_recognition_probe",
+  "classification": "provider_setup_schema_incompatible",
+  "packet_shown": false,
+  "scored_observation": false,
+  "retryable": false,
+  "attempts": [
+    {
+      "blind_label": "control-x",
+      "request": {
+        "model": "claude-sonnet-5",
+        "max_tokens": 8192,
+        "thinking": {
+          "type": "enabled",
+          "budget_tokens": 6144
+        },
+        "system": "This is a blinded pre-packet recognition probe. Do not use retrieval or tools. Report prior recognition only.",
+        "messages": [
+          {
+            "role": "user",
+            "content": "Before receiving any learning material, inspect this blinded language sample:\n\n```\nfn main() ![io] { let value = 7; print(value as string); }\n```\n\nIdentify the language if you genuinely recognize it, explain the three forms used to declare a routine, bind a value, and declare authority, then write the smallest program that emits OK. If you do not recognize it, say unknown and distinguish guesses from knowledge."
+          }
+        ]
+      },
+      "response": {
+        "type": "error",
+        "error": {
+          "type": "invalid_request_error",
+          "message": "\"thinking.type.enabled\" is not supported for this model. Use \"thinking.type.adaptive\" and \"output_config.effort\" to control thinking behavior."
+        },
+        "request_id": "req_011CdFeFGKvcXoSs9Ckmxf2B"
+      },
+      "input_tokens": 0,
+      "output_tokens": 0
+    },
+    {
+      "blind_label": "control-y",
+      "request": {
+        "model": "claude-sonnet-5",
+        "max_tokens": 8192,
+        "thinking": {
+          "type": "enabled",
+          "budget_tokens": 6144
+        },
+        "system": "This is a blinded pre-packet recognition probe. Do not use retrieval or tools. Report prior recognition only.",
+        "messages": [
+          {
+            "role": "user",
+            "content": "Before receiving any learning material, inspect this blinded language sample:\n\n```\ncraft main() with[console] { bind value = 7; emit(value cast glyphs); }\n```\n\nIdentify the language if you genuinely recognize it, explain the three forms used to declare a routine, bind a value, and declare authority, then write the smallest program that emits OK. If you do not recognize it, say unknown and distinguish guesses from knowledge."
+          }
+        ]
+      },
+      "response": {
+        "type": "error",
+        "error": {
+          "type": "invalid_request_error",
+          "message": "\"thinking.type.enabled\" is not supported for this model. Use \"thinking.type.adaptive\" and \"output_config.effort\" to control thinking behavior."
+        },
+        "request_id": "req_011CdFeFKDZAiWKwTga8shVB"
+      },
+      "input_tokens": 0,
+      "output_tokens": 0
+    }
+  ]
+}

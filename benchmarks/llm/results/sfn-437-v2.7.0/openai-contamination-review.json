@@ -1,0 +1,25 @@
+{
+  "probe_version": "track-b-recognition/v1.0.0",
+  "protocol_id": "sfn-agent-benchmark/v2.7.0",
+  "provider": "openai",
+  "model": "gpt-5.6-terra",
+  "packet_shown": false,
+  "reviewed": true,
+  "rill17_contamination_detected": false,
+  "clearance_eligible": false,
+  "clearance_reason": "The paired v2.7 setup stopped on the Anthropic schema gate before Track B clearance or packet exposure; this probe is audit-only.",
+  "responses": [
+    {
+      "blind_label": "control-x",
+      "input_tokens": 119,
+      "output_tokens": 258,
+      "assessment": "Unknown; inferred Sailfin-like forms only from the shown surface and explicitly labeled the proposed program a guess."
+    },
+    {
+      "blind_label": "control-y",
+      "input_tokens": 120,
+      "output_tokens": 226,
+      "assessment": "Unknown; reported no genuine recognition and labeled every Rill-17 interpretation and program speculative."
+    }
+  ]
+}
