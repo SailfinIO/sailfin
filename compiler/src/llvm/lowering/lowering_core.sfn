@@ -858,7 +858,11 @@ fn lower_to_llvm_lines_with_parsed_context(native_module: NativeModule, parse_ar
             } else { print.err("emit-llvm: safe_imports[0]=<null>"); }
         }
     }
-    if is_test_module { safe_imports = []; }
+    // SFN-436: test modules still link imported capsules as separate LLVM
+    // objects, so their parsed directives must survive long enough to
+    // localize aliased signatures. The older empty-list treatment belonged
+    // to the retired textual-inlining path and made
+    // `import { ones as tensor_ones }` unresolvable.
     let mut safe_structs = sanitize_structs(parse.structs, diagnostics);
     let safe_enums = sanitize_enums(parse.enums, diagnostics, _trace_enums);
     let safe_interfaces = sanitize_interfaces(parse.interfaces, diagnostics);
