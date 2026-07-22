@@ -324,9 +324,10 @@ fn open_file(path: string, flags: i32) -> i32 | PosixError ![unsafe, io] {
 }
 ```
 
-After the wrapper, callers use idiomatic Sailfin pattern matching. Because
-`Result<T, E>` is still on the roadmap, today's wrappers return a union
-(`T | ErrorStruct`):
+After the wrapper, callers use idiomatic Sailfin pattern matching. New wrappers
+can return the shipped `Result<T, E>` type and callers can use postfix `?` for
+propagation. An explicit union (`T | ErrorStruct`) remains valid when it better
+models the native API's outcomes:
 
 ```sfn
 fn read_config(path: string) ![unsafe, io] {

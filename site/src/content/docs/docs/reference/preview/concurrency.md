@@ -1,6 +1,6 @@
 ---
 title: "Concurrency"
-description: "Design preview — Concurrency (v0). `routine`, `channel`, `spawn`/`await` on spawned tasks, and `parallel` work today. Full `async fn` semantics and typed `Channel<T>` are still planned."
+description: "Concurrency (v0) — `routine`, bounded channels, `spawn`/`await` on spawned tasks, `parallel`, and typed channel binding checks work today; full `async fn` semantics and a generic channel constructor remain planned."
 sidebar:
   order: 1
 ---
@@ -54,5 +54,8 @@ A task lambda that captures variables from the enclosing scope owns its heap env
 
 This is principled, not conservative: the v0 scheduler primitives are pure in-process pthread mutex/condvar/MPMC-queue and touch no filesystem, network, console, or clock, so under the canonical taxonomy (`io, net, model, gpu, rand, clock`) none genuinely exercises `io` — as Go treats goroutine spawn as effect-free. The **join-side** counterpart (`await` and `routine {}` nursery-exit effect propagation) is out of scope here and tracked with the concurrency-maturity work (SFN-124).
 
-**Remaining pre-1.0 work**: full `async fn` return-value `await` wired into the live typecheck walk (#1944), typed `Channel<T>` generic constructor (#1942), typed result-array collection from `parallel`, and `OwnedBuf` capture-buffer ABI across the thread boundary (#1476).
+**Remaining work**: full `async fn` return-value `await` wired into the live
+typecheck walk, a generic `channel<T>(...)` constructor, typed result-array
+collection from `parallel`, cancellation, async I/O, and the `OwnedBuf`
+capture-buffer ABI across the thread boundary (#1476).
 See the [roadmap](/roadmap).

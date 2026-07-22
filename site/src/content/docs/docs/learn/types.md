@@ -290,9 +290,11 @@ fn main() ![io] {
 }
 ```
 
-### Modelling expected errors today
+### Modelling expected errors
 
-A shipped `Result<T, E>` plus `?` operator are on the [roadmap](/roadmap). In the meantime, model expected failures with union return types and `match`:
+The prelude `Result<T, E>` type and postfix `?` operator ship today. Use them
+for expected failures that callers may propagate or inspect; explicit union
+returns remain available when they better describe the outcome set:
 
 ```sfn
 struct ParseError {
@@ -437,7 +439,11 @@ struct User implements Named, Validated, Auditable {
 
 Sailfin interfaces are **explicit**, like Rust traits, rather than **structural**, like Go interfaces. A type must declare `implements SomeInterface` to conform — the compiler will not silently satisfy an interface just because the method signatures happen to match. This makes conformance relationships visible in the source code and enables better error messages.
 
-Unlike Rust traits, Sailfin does not use `impl Trait for Type` as a separate top-level declaration — conformance is always declared inline on the struct. Interface-bounded generic constraints (e.g. `<T: Comparable>`) are on the [roadmap](/roadmap).
+Unlike Rust traits, Sailfin does not use `impl Trait for Type` as a separate
+top-level declaration — conformance is always declared inline on the struct.
+Interface-bounded generic constraints (for example, `<T: Comparable>`) ship
+for pointer-width type arguments; arbitrary-width by-value aggregates and
+general call-site inference remain incomplete.
 
 ---
 
@@ -536,11 +542,18 @@ interface Comparable<T> {
 }
 ```
 
-> **Roadmap note.** Interface-bounded generic constraints (e.g. `struct SortedList<T: Comparable<T>>`) are on the [roadmap](/roadmap). Until they ship, write the sorting logic against a concrete element type, or accept a comparator function parameter and call it directly.
+> **Current scope.** Interface-bounded generic constraints (for example,
+> `struct SortedList<T: Comparable<T>>`) ship for pointer-width type arguments.
+> Arbitrary-width by-value aggregates and general call-site inference remain
+> incomplete; add explicit annotations or type arguments where inference lacks
+> enough context.
 
 ### Generic enums
 
-Enum variants carry named fields. A shipped `Option<T>` / `Result<T, E>` pair is on the [roadmap](/roadmap); in the meantime you can roll your own generic enum or use the `T?` optional form shown in [Optional Types](#optional-types):
+Enum variants carry named fields. `Result<T, E>` ships in the prelude; a
+first-class `Option<T>` / `Some` / `None` type remains planned. For absence,
+use the `T?` optional form shown in [Optional Types](#optional-types), or define
+your own generic enum:
 
 ```sfn
 enum Maybe<T> {

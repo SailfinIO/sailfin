@@ -105,16 +105,16 @@ type AdminUser = Named & Scoped;         // E0829 — intersection at the alias 
 let x: Named & Scoped = get_admin();     // E0829 — intersection in annotation position
 ```
 
-**Generic types**: user-declared generics (`fn first<T>(items: T[]) -> T?`).
-`Result<T, E>` is on the [roadmap](/roadmap); use union return types
-(`T | MyError`) today.
+**Generic types**: user-declared generics (`fn first<T>(items: T[]) -> T?`) and
+the prelude `Result<T, E>` enum. Postfix `?` propagation also ships; see
+[§12 Result and the `?` Operator](/docs/reference/spec/12-result-and-errors/).
 
-**Wrapper types** (syntax accepted; enforcement planned for 1.0+):
+**Wrapper types**:
 
 | Type | Semantics |
 |------|-----------|
-| `Affine<T>` | May be dropped, cannot be duplicated |
-| `Linear<T>` | Must be consumed exactly once |
+| `Affine<T>` | May be dropped, cannot be duplicated; move enforcement ships for owned/affine bindings |
+| `Linear<T>` | Must be consumed exactly once; move and scope-exit consumption enforcement ship |
 | `PII<T>` | Personally identifiable information — egress guards planned |
 | `Secret<T>` | Secret value — logging/serialization guards planned |
 

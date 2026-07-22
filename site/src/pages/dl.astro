@@ -74,22 +74,29 @@ function parseAsset(asset: GHAsset): ParsedAsset | null {
 // ---------------------------------------------------------------------------
 import fs from "node:fs";
 import path from "node:path";
-import { fileURLToPath } from "node:url";
 
 function readCapsuleVersion(): string {
-  const currentDir = fileURLToPath(new URL(".", import.meta.url));
-  const tomlPath = path.resolve(currentDir, "../../../compiler/capsule.toml");
+  // Astro may be invoked from the repository root or from `site/`. Resolve
+  // both layouts instead of relying on `import.meta.url`, which points into
+  // `dist/.prerender` after Astro bundles this page.
+  const candidates = [
+    path.resolve(process.cwd(), "compiler/capsule.toml"),
+    path.resolve(process.cwd(), "../compiler/capsule.toml"),
+  ];
 
-  try {
+  for (const tomlPath of candidates) {
+    if (!fs.existsSync(tomlPath)) continue;
+
     const toml = fs.readFileSync(tomlPath, "utf-8");
     const match = toml.match(/^\s*version\s*=\s*"([^"]+)"/m);
     if (match) return match[1];
 
-    console.warn(`[dl] Failed to parse version from capsule manifest at ${tomlPath}; falling back to hardcoded version.`);
-  } catch (error) {
-    console.warn(`[dl] Failed to read capsule manifest at ${tomlPath}; falling back to hardcoded version.`, error);
+    console.warn(`[dl] Failed to parse version from capsule manifest at ${tomlPath}; trying fallback version.`);
+    break;
   }
-  return "0.5.7"; // last-resort hardcoded fallback
+
+  console.warn(`[dl] Could not find compiler/capsule.toml from ${process.cwd()}; using fallback version.`);
+  return "0.8.0"; // last-resort fallback; keep aligned with install docs
 }
 
 // Fetch releases — tolerate API failures gracefully

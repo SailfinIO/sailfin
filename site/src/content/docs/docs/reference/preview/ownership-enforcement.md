@@ -1,6 +1,6 @@
 ---
 title: "Ownership Enforcement"
-description: "Design preview — Ownership Enforcement. Planned, not yet shipped."
+description: "Ownership enforcement status — move, mutation, use-after-free, extern escape, linear consumption, and spawn-capture checks ship; borrow lifetimes remain planned."
 sidebar:
   order: 4
 ---
@@ -69,13 +69,10 @@ types:
   via the global arena (gated on `sfn_arena_enabled()`, libc-backed when the arena
   is opted out); no arena-stranded raw `*u8` return.
 
-`sfn_str_sfn_slice` is **not** migrated. A non-owning `Slice` over `text` is unsound
-while the runtime still produces immediate-codepoint tagged pseudo-pointers
-(`(byte << 32)`, `runtime/native/src/sailfin_runtime.c`): `text + start` is then not
-a real address, and the view would let it escape and be dereferenced later. So
-`slice` keeps its allocating `*u8` body until that encoding is retired (with the C
-runtime deletion, #822) and the `string` → `{i8*, i64}` aggregate flip (M1.A.2)
-lands. Both dependencies are tracked at **#1283**.
+`sfn_str_sfn_slice` is **not** migrated. It keeps its allocating `* u8` body
+because a non-owning `Slice` view is not sound until the remaining
+immediate-codepoint representation is retired and view lifetimes are tracked.
+The runtime itself is Sailfin-native; there is no C-runtime fallback.
 
 The grow-at-tip `unsafe { }` block in `sfn_arena_sfn_realloc` and the raw
 extern alloc/realloc/memcpy interiors of `owned_buf_new` / `owned_buf_append`

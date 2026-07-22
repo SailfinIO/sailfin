@@ -720,10 +720,9 @@ fn traverse(node: TreeNode?) ![io] {
 }
 ```
 
-> **Coming in 1.0:** A `Result<T, E>` type plus a `?` propagation operator are
-> on the [roadmap](/roadmap) under Syntax Reform. Until they land, prefer the
-> explicit `null` check or the tagged-union pattern shown in
-> [Error Handling](/docs/learn/error-handling).
+> The prelude `Result<T, E>` type and postfix `?` propagation operator ship
+> today. Use `T?` and an explicit `null` check for absence; use `Result` when a
+> failure carries an error value. See [Error Handling](/docs/learn/error-handling/).
 
 ---
 

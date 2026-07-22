@@ -8,14 +8,20 @@ sidebar:
 
 Every program encounters things that go wrong. A file that isn't there. An API that returns a 500. Input that doesn't parse. How you handle those situations determines whether your program behaves predictably or fails in confusing ways.
 
-Sailfin gives you two complementary tools for errors, suited to different situations:
+Sailfin gives you complementary tools for errors, suited to different situations:
 
 - **Exceptions** (`throw`, `try/catch/finally`) — for conditions that are genuinely exceptional, where the calling code can't reasonably proceed and control needs to unwind to a handler somewhere up the call stack.
-- **Union return types** — for expected failures, where the calling code should inspect the outcome and decide what to do. A function that can succeed or return an error struct declares a union return type like `number | DivisionError`, and callers use `match` to handle each variant.
+- **`Result<T, E>`** — the standard choice for expected failures. Callers can
+  inspect `Result.Ok { value }` / `Result.Err { error }` with `match`, or use
+  postfix `?` to propagate an error automatically.
+- **Union return types** — for APIs whose outcomes do not form a simple
+  success/error pair. Callers use `match` or type guards to discriminate them.
 
 Understanding which tool to reach for in a given situation makes error handling code both safer and cleaner.
 
-> **Coming in 1.0:** A built-in `Result<T, E>` type plus a `?` operator for automatic error propagation are on the [roadmap](/roadmap). Until they ship, use union return types (shown throughout this page) for expected failures.
+`Result<T, E>` and postfix `?` ship today. `?` requires the propagated error
+type to exactly match the enclosing function's `Result` error type; automatic
+`From<E>` conversion remains future work.
 
 ---
 
@@ -27,7 +33,9 @@ Before the mechanics, a useful distinction:
 
 **Exceptional conditions** are outcomes that indicate something is wrong with the program itself, or with a system the program depends on. An invariant that shouldn't be violatable was violated. A service that is always up is down. A file that must exist doesn't. These warrant unwinding to a recovery point (or exiting cleanly with an error message).
 
-Sailfin's `throw`/`try/catch` is designed for the second category. Union return types are designed for the first. In practice, many programs use both.
+Sailfin's `throw`/`try/catch` is designed for the second category. `Result` is
+the default for the first, with explicit unions available for richer outcome
+sets. In practice, many programs use all three.
 
 ---
 
@@ -233,9 +241,12 @@ Using a tagged enum for errors makes `match` exhaustiveness checking useful: if 
 
 ---
 
-## Union return types — errors as values
+## Errors as values
 
-Some functions return errors as part of their normal output rather than throwing. In Sailfin today, the idiomatic way to express this is a **union return type**: the function returns either the success value or an error struct/enum, and the caller uses `match` to discriminate.
+Some functions return errors as part of their normal output rather than
+throwing. The prelude `Result<T, E>` enum is the idiomatic two-arm form. An
+explicit union remains useful when the outcomes do not naturally map to
+`Ok`/`Err`; the examples below demonstrate that lower-level mechanism.
 
 This is the pattern used in `examples/basics/error-handling.sfn`:
 
@@ -289,17 +300,20 @@ fn main() ![io] {
 }
 ```
 
-> **Coming in 1.0:** A built-in `Result<T, E>` type and the `?` operator for automatic error propagation are on the [roadmap](/roadmap). `Result` will compose better than unions (no ambiguity when the success type is itself a struct) and the `?` operator will let you write `parse_port(s)?` instead of the explicit `match`-and-return. Until they ship, use union return types as shown above.
+The same API can return `Result<int, PortError>`. A caller may match its
+`Result.Ok { value }` and `Result.Err { error }` variants, or write
+`parse_port(s)?` inside a function returning `Result<_, PortError>`. See
+[§12 Result and the `?` Operator](/docs/reference/spec/12-result-and-errors/).
 
 ### When to use union returns vs. `throw`
 
 | Situation | Prefer |
 |-----------|--------|
-| Caller should always check the outcome | Union return type |
+| Caller should always check a success/error outcome | `Result<T, E>` |
 | Failure is a programming error or invariant violation | `throw` |
-| Multiple failure modes need to be returned with data | Union with a tagged enum |
+| Multiple failure modes need to be returned with data | `Result<T, ErrorEnum>` |
 | The error needs to propagate many layers without being inspected | `throw` |
-| Working with a library that models errors as values | Union return type |
+| Working with a library that models errors as values | `Result<T, E>` or its declared union |
 | Simple scripts or top-level orchestration | Either; `throw` is often cleaner |
 
 The two approaches are compatible. You can `throw` from inside a union-returning function on truly unexpected conditions, and you can catch exceptions and convert them to an error variant at API boundaries.
@@ -517,7 +531,10 @@ try {
 
 **Match the abstraction level of the error to its catch site.** Low-level I/O errors should typically be caught and wrapped at module boundaries, not bubbled raw to top-level application code. High-level errors (`ConfigError`, `AuthError`) are more meaningful to the code that can actually act on them.
 
-**Use union return types for library APIs.** Libraries can't control how their callers handle exceptions. Returning `T | ErrorType` from public APIs makes the failure modes explicit in the type, forces callers to handle them, and avoids surprising exception propagation.
+**Use `Result<T, E>` for expected library failures.** Libraries cannot control
+how callers handle exceptions. Returning a `Result` makes the failure type
+explicit and lets callers either inspect it or propagate it with `?`. Use an
+explicit union when the API has more than a success and an error arm.
 
 **Dispatch on error shape inside the catch.** Typed `catch` clauses are on the [roadmap](/roadmap); today, a `catch` binds the error bare. Use `match` or struct/enum pattern matching inside the block to discriminate:
 
@@ -552,12 +569,15 @@ try {
 | Tool | Use for | Type signature |
 |------|---------|----------------|
 | `throw` + `try/catch` | Exceptional conditions, deep propagation | Function may throw |
-| Union return (`T \| Err`) | Expected failures, library APIs | `-> T \| ErrorType` |
+| `Result<T, E>` + `?` | Expected failures, library APIs | `-> Result<T, ErrorType>` |
+| Union return (`T \| U`) | Multi-outcome value APIs | `-> T \| U` |
 | `assert` | Invariants and programmer errors | Panics on failure |
 
-The two main tools compose naturally. Use exceptions where propagation is the right model; use union returns where the caller should inspect the outcome. Add context at layer boundaries. Don't swallow errors.
-
-> **Coming in 1.0:** `Result<T, E>`, the `?` operator, and typed `catch` clauses are all on the [roadmap](/roadmap). They will replace the union-return pattern with a more ergonomic, non-ambiguous alternative and let you propagate errors without explicit `match`.
+These tools compose naturally. Use exceptions for exceptional unwinding,
+`Result` for expected failures, and explicit unions for richer outcome sets.
+Typed `catch` clauses remain planned; today, dispatch on a bare caught value
+inside the `catch` block. Add context at layer boundaries and do not swallow
+errors.
 
 ---
 

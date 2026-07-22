@@ -1238,9 +1238,12 @@ fn parse_token(raw: string) -> string ![io] {
 
 ## Collections — Planned
 
-> **Coming in 1.0:** Generic containers (`Map<K, V>`, `Set<T>`, and an explicit growable `Vec<T>`) depend on generic type constraints landing first. See the [roadmap](/roadmap) for sequencing.
+> **Planned:** Generic containers (`Map<K, V>`, `Set<T>`, and an explicit
+> growable `Vec<T>`) do not ship yet. Generic constraints now work for the
+> current pointer-width scope, but these container APIs and arbitrary-width
+> element lowering remain future work. See the [roadmap](/roadmap) for sequencing.
 >
-> Today, array literals (`[1, 2, 3]`) with `T[]` types, `.length`, `.push(item)`, and the `.map(closure)` / `.filter(closure)` / `.reduce(init, closure)` method forms (pointer-width `int` elements — #1507 / #1508, epic #1118) are the shipped collection surface, along with the prelude array utilities (`array_map`, `array_filter`, `array_reduce`). Generic (non-pointer-width) element types stay gated on generic type constraints (designed in SFEP-0028).
+> Today, array literals (`[1, 2, 3]`) with `T[]` types, `.length`, `.push(item)`, and the `.map(closure)` / `.filter(closure)` / `.reduce(init, closure)` method forms (pointer-width `int` elements — #1507 / #1508, epic #1118) are the shipped collection surface, along with the prelude array utilities (`array_map`, `array_filter`, `array_reduce`). Generic non-pointer-width collection lowering remains incomplete (designed in SFEP-0028).
 
 ### Arrays (available today)
 
@@ -1260,7 +1263,7 @@ let total: int = numbers.reduce(0, fn (acc: int, x: int) -> int { return acc + x
 // total == 10
 ```
 
-**`.map` / `.filter` / `.reduce` scope:** the callback ABI is `iN(i8* env, i64 …)`, so all three method forms work on `int[]` arrays today (the binding must be annotated `int[]`). They dispatch through real `runtime/sfn/array.sfn` bodies (`sfn_array_sfn_map` / `_filter` / `_reduce`) over the runtime-callable closure-apply seam (#1507 landed the seam + `map`; #1508 landed `filter` / `reduce`; epic #1118), and capturing closures work. Generic element/accumulator types (e.g. `float[]`, `string[]`, struct arrays) are gated on type-constraint generics (designed in SFEP-0028) and are rejected with a diagnostic rather than mis-mapped.
+**`.map` / `.filter` / `.reduce` scope:** the callback ABI is `iN(i8* env, i64 …)`, so all three method forms work on `int[]` arrays today (the binding must be annotated `int[]`). They dispatch through real `runtime/sfn/array.sfn` bodies (`sfn_array_sfn_map` / `_filter` / `_reduce`) over the runtime-callable closure-apply seam (#1507 landed the seam + `map`; #1508 landed `filter` / `reduce`; epic #1118), and capturing closures work. Other element/accumulator widths (e.g. `float[]`, `string[]`, struct arrays) do not yet have collection lowering and are rejected with a diagnostic rather than mis-mapped.
 
 ### Planned `Vec<T>`
 

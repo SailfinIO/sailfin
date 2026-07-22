@@ -136,8 +136,9 @@ type MaybeResponse<T> = Response | T;
 type Row = int[];
 ```
 
-> `Result<T, E>` and function type aliases are on the [roadmap](/roadmap);
-> use union return types (`T | MyError`) and plain function signatures today.
+> The prelude `Result<T, E>` type and postfix `?` operator ship today; see
+> [§12 Result and the `?` Operator](/docs/reference/spec/12-result-and-errors/).
+> Function type aliases remain planned; use plain function signatures today.
 
 #### §3.7 AI Constructs (Moved to Library)
 
