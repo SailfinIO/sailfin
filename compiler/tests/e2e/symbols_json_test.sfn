@@ -1,0 +1,82 @@
+// End-to-end coverage for `sfn symbols --json` (SFN-444).
+//
+// Drives the real binary as a subprocess (`.claude/rules/no-bash-e2e.md`)
+// and asserts on the raw stdout envelope with `sfn/strings` predicates —
+// `symbols` is pure-frontend (no clang/link), so `_child_env()` needs
+// only `PATH`/`HOME`, mirroring `check_json_schema_test.sfn`. The
+// subprocess inherits the runner's cwd (repo root), so the binary
+// resolves `runtime/` and `capsules/` cwd-relatively.
+import { contains } from "sfn/strings";
+
+fn _sfn_bin() -> string ![io] {
+    let configured = env.get("SAILFIN_BIN");
+    if configured.length > 0 { return configured; }
+    return "build/bin/sfn";
+}
+
+fn _child_env() -> string[] ![io] {
+    let mut e: string[] = [];
+    let path = env.get("PATH");
+    if path.length > 0 { e.push("PATH=" + path); }
+    let home = env.get("HOME");
+    if home.length > 0 { e.push("HOME=" + home); }
+    return e;
+}
+
+struct SymbolsRun {
+    exit: int,
+    out: string,
+    err: string
+}
+
+fn _symbols(args: string[]) -> SymbolsRun ![io] {
+    let mut argv: string[] = [_sfn_bin(), "symbols"];
+    let mut i: int = 0;
+    loop {
+        if i >= args.length { break; }
+        argv.push(args[i]);
+        i += 1;
+    }
+    let exit = process.run_capture(argv, _child_env());
+    let out = process.capture_take_stdout();
+    let err = process.capture_take_stderr();
+    return SymbolsRun { exit: exit, out: out, err: err };
+}
+
+test "symbols: emits the sailfin-symbols/1 envelope" ![io] {
+    let r = _symbols(["--json"]);
+    assert r.exit == 0;
+    assert contains(r.out, "\"schema_version\":\"sailfin-symbols/1\"");
+    assert contains(r.out, "\"compiler_version\"");
+    assert contains(r.out, "\"symbols\"");
+    assert contains(r.out, "\"parse_failures\"");
+}
+
+test "symbols: indexes sfn/strings helpers with signatures" ![io] {
+    let r = _symbols(["--json"]);
+    assert contains(r.out, "sfn/strings");
+    assert contains(r.out, "ascii_uppercase");
+    assert contains(r.out, "ascii_lowercase");
+    assert contains(r.out, "int_to_string");
+    assert contains(r.out, "parse_int");
+    assert contains(r.out, "Result<int, string>");
+}
+
+test "symbols: output is byte-stable across two runs" ![io] {
+    let a = _symbols(["--json"]);
+    let b = _symbols(["--json"]);
+    assert a.out == b.out;
+}
+
+test "symbols: unknown --capsule is a structured error with nonzero exit" ![io] {
+    let r = _symbols(["--json", "--capsule", "sfn/definitely-not-real"]);
+    assert r.exit != 0;
+    assert contains(r.out, "E_SYMBOLS_UNRESOLVED_CAPSULE");
+}
+
+test "symbols: --capsule sfn/strings restricts to that capsule" ![io] {
+    let r = _symbols(["--json", "--capsule", "sfn/strings"]);
+    assert r.exit == 0;
+    assert contains(r.out, "ascii_uppercase");
+    assert contains(r.out, "sfn/strings");
+}

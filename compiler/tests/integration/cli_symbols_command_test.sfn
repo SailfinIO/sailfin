@@ -1,0 +1,46 @@
+// Integration coverage for the `symbols` subcommand module
+// (`compiler/src/cli/commands/symbols.sfn`, SFN-444).
+//
+// Mirrors `cli_version_command_test.sfn`: exercise `command_def()` +
+// `run(matches, ctx)` directly, without standing up the full
+// `cli/main -> cli_main -> @main` binary chain (the real binary is
+// covered end-to-end by `compiler/tests/e2e/symbols_json_test.sfn`).
+import {
+    command,
+    parse,
+    parse_is_ok,
+    parse_matches,
+    subcommand,
+    with_subcommand
+} from "sfn/cli";
+
+import { command_def, run } from "../../src/cli/commands/symbols";
+import { CliContext } from "../../src/cli/context";
+
+fn _empty_ctx() -> CliContext {
+    return CliContext {
+        runtime_root: "",
+        binary_dir: "",
+        registry_url: "",
+        trace_argv: false,
+        orig_args: []
+    };
+}
+
+test "symbols: --capsule with unknown slug exits 1" ![io] {
+    let root = with_subcommand(command("sfn", "Sailfin compiler"), command_def());
+    let result = parse(root, ["sfn", "symbols", "--json", "--capsule", "sfn/definitely-not-real"]);
+    assert parse_is_ok(result);
+    let matches = parse_matches(result);
+
+    let code = run(matches, _empty_ctx());
+    assert code == 1;
+}
+
+test "symbols: command_def registers the symbols subcommand" ![io] {
+    let root = with_subcommand(command("sfn", "Sailfin compiler"), command_def());
+    let result = parse(root, ["sfn", "symbols", "--json"]);
+    assert parse_is_ok(result);
+    let matches = parse_matches(result);
+    assert strings_equal(subcommand(matches), "symbols");
+}

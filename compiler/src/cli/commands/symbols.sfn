@@ -1,0 +1,231 @@
+// compiler/src/cli/commands/symbols.sfn
+//
+// `symbols` subcommand (SFN-444): emit a versioned, deterministic JSON
+// symbol index of the public callable surface so agents/users can
+// discover builtin/prelude and installed-capsule APIs — name, signature,
+// effects, and canonical import path — without grepping sources.
+//
+// This module owns the IO side: locate the runtime source dir and the
+// in-tree `capsules/` root, read + `parse_program` each `mod.sfn`, and
+// hand the parsed `Program`s to `symbols_index` (the pure schema/encoder
+// core). Enumeration is best-effort — a source that fails to parse
+// contributes no symbols but is recorded in the envelope's
+// `parse_failures[]` (deterministic, diagnosable) rather than aborting
+// the whole index.
+//
+// `--capsule <slug>` filters to a single capsule; an unresolvable slug is
+// a structured error (`E_SYMBOLS_UNRESOLVED_CAPSULE`) with a stable
+// nonzero exit. Output is always JSON in v1; `--json` is accepted for
+// explicitness/forward-compat and is a no-op today.
+//
+// Import-path semantics: prelude symbols are auto-imported (import_path
+// null); capsule symbols carry their manifest `name` slug (e.g.
+// "sfn/strings"). v1 indexes only each capsule's `src/mod.sfn` top-level
+// free functions — a capsule that re-exports from submodules surfaces
+// only what its `mod.sfn` declares directly (documented limitation in
+// docs/reference/symbols-json-schema.md).
+import {
+    Command,
+    Matches,
+    command,
+    flag,
+    flag_value,
+    get,
+    with_flag
+} from "sfn/cli";
+
+import { parse_program } from "../../parser/mod";
+import { substring } from "../../string_utils";
+import {
+    SymbolEntry,
+    encode_symbols_error_json,
+    encode_symbols_json,
+    symbols_from_program
+} from "../../symbols_index";
+import { toml_get_name } from "../../toml_parser";
+import { resolve_compiler_version } from "../../version";
+import { CliContext } from "../context";
+
+// Exit codes: reuse the canonical CLI convention (0 ok, 1 for a
+// structured runtime error). Kept local to avoid widening the `sfn/cli`
+// import surface for two integers.
+fn _sym_exit_ok() -> int { return 0; }
+
+fn _sym_exit_error() -> int { return 1; }
+
+// The `sfn/cli` definition for `symbols`, registered on the v2 root via
+// `with_subcommand`. `--json` is a boolean (always-on in v1); `--capsule`
+// takes a slug value to restrict the index to one capsule.
+fn command_def() -> Command {
+    return with_flag(with_flag(command("symbols", "Emit a versioned JSON index of builtin/prelude and capsule symbols"), flag("json", "Emit machine-readable JSON (default)")), flag_value("capsule", "Restrict the index to a single capsule slug (e.g. sfn/strings)"));
+}
+
+fn run(matches: Matches, ctx: CliContext) -> int ![io] {
+    let capsule_filter = get(matches, "capsule");
+    let compiler_version = resolve_compiler_version(ctx.binary_dir);
+    let runtime_dir = _sym_find_runtime_dir(ctx);
+
+    let mut entries: SymbolEntry[] = [];
+    // Reserved for a future parse-error channel; always empty today (see
+    // `_sym_collect_file`). Kept in the envelope so the schema is stable.
+    let parse_failures: string[] = [];
+
+    // Prelude (auto-imported globals) — included unless a --capsule
+    // filter selects a specific capsule instead.
+    if capsule_filter.length == 0 && runtime_dir.length > 0 {
+        let prelude_path = _sym_join_path(runtime_dir, "prelude.sfn");
+        if fs.exists(prelude_path) {
+            entries = _sym_extend(entries, _sym_collect_file(prelude_path, "prelude", ""));
+        }
+    }
+
+    // Capsules — enumerate `<project_root>/capsules/*/*/src/mod.sfn`.
+    let capsules_root = _sym_capsules_root(runtime_dir);
+    let mut matched_filter: boolean = false;
+    if capsules_root.length > 0 && fs.exists(capsules_root) {
+        let capsule_dirs = _sym_collect_capsule_dirs(capsules_root);
+        let mut i: int = 0;
+        loop {
+            if i >= capsule_dirs.length { break; }
+            let capsule_dir = capsule_dirs[i];
+            i += 1;
+            let manifest_path = _sym_join_path(capsule_dir, "capsule.toml");
+            let mod_path = _sym_join_path(_sym_join_path(capsule_dir, "src"), "mod.sfn");
+            if !fs.exists(manifest_path) { continue; }
+            if !fs.exists(mod_path) { continue; }
+            let slug = toml_get_name(fs.readFile(manifest_path));
+            if slug.length == 0 { continue; }
+            if capsule_filter.length > 0 && slug != capsule_filter { continue; }
+            if capsule_filter.length > 0 { matched_filter = true; }
+            entries = _sym_extend(entries, _sym_collect_file(mod_path, "capsule", slug));
+        }
+    }
+
+    // A --capsule filter that resolved to no in-tree capsule is a
+    // structured error with a stable nonzero exit.
+    if capsule_filter.length > 0 && !matched_filter {
+        print(encode_symbols_error_json("E_SYMBOLS_UNRESOLVED_CAPSULE", "capsule not found: "
+            + capsule_filter, capsule_filter));
+        return _sym_exit_error();
+    }
+
+    print(encode_symbols_json(compiler_version, entries, parse_failures));
+    return _sym_exit_ok();
+}
+
+// -------------------------------------------------------------------
+// File collection
+// -------------------------------------------------------------------
+// Read + parse one source file and collect its public free functions.
+// `parse_program` has no error channel — it always returns a `Program`
+// (unrecognized input becomes `parse_unknown`/`Raw` statements, not a
+// failure signal) — and a zero-declaration result is a legitimate
+// comment-only or empty module (e.g. the reserved `sfn/sync` shell), not
+// a parse error. Enumeration therefore never fabricates a failure from
+// the statement count; the `parse_failures[]` envelope field stays
+// reserved for a future real parse-error channel.
+fn _sym_collect_file(path: string, origin: string, import_path: string) -> SymbolEntry[] ![io] {
+    let source = fs.readFile(path);
+    let program = parse_program(source);
+    return symbols_from_program(program, origin, import_path);
+}
+
+fn _sym_extend(into: SymbolEntry[], more: SymbolEntry[]) -> SymbolEntry[] {
+    let mut out = into;
+    let mut i: int = 0;
+    loop {
+        if i >= more.length { break; }
+        out.push(more[i]);
+        i += 1;
+    }
+    return out;
+}
+
+// -------------------------------------------------------------------
+// Directory discovery
+// -------------------------------------------------------------------
+// Locate the runtime SOURCE directory (the one holding `prelude.sfn`).
+// Seeds from the driver-parsed `ctx.runtime_root` and falls back to
+// cwd-relative candidates for in-repo invocations, mirroring
+// `prelude_globals._pg_find_runtime_dir`.
+fn _sym_find_runtime_dir(ctx: CliContext) -> string ![io] {
+    let mut candidates: string[] = [];
+    if ctx.runtime_root.length > 0 {
+        candidates.push(ctx.runtime_root);
+        candidates.push(_sym_join_path(ctx.runtime_root, "runtime"));
+    }
+    candidates.push("runtime");
+    candidates.push("../runtime");
+    candidates.push("../../runtime");
+    let mut i: int = 0;
+    loop {
+        if i >= candidates.length { break; }
+        let dir = candidates[i];
+        i += 1;
+        if dir.length == 0 { continue; }
+        if fs.exists(_sym_join_path(dir, "prelude.sfn")) { return dir; }
+    }
+    return "";
+}
+
+// The in-tree capsules root: `<parent-of-runtime-dir>/capsules`. Empty
+// when the runtime dir could not be located (installed toolchain with no
+// source tree) — the index then degrades to prelude-only.
+fn _sym_capsules_root(runtime_dir: string) -> string {
+    if runtime_dir.length == 0 { return ""; }
+    let parent = _sym_parent_dir(runtime_dir);
+    return _sym_join_path(parent, "capsules");
+}
+
+// Enumerate concrete capsule directories two levels under the capsules
+// root (`capsules/<group>/<name>/`), matching the in-tree layout. Each
+// returned path is a candidate capsule dir (validated by the caller via
+// its `capsule.toml` + `src/mod.sfn`).
+fn _sym_collect_capsule_dirs(capsules_root: string) -> string[] ![io] {
+    let mut out: string[] = [];
+    let groups = fs.listDirectory(capsules_root);
+    let mut g: int = 0;
+    let max_entries: int = 4096;
+    loop {
+        if g >= groups.length { break; }
+        if g >= max_entries { break; }
+        let group_dir = _sym_join_path(capsules_root, groups[g]);
+        g += 1;
+        let members = fs.listDirectory(group_dir);
+        if members.length == 0 { continue; }
+        let mut m: int = 0;
+        loop {
+            if m >= members.length { break; }
+            if m >= max_entries { break; }
+            out.push(_sym_join_path(group_dir, members[m]));
+            m += 1;
+        }
+    }
+    return out;
+}
+
+fn _sym_join_path(dir: string, child: string) -> string {
+    if dir.length == 0 { return child; }
+    if substring(dir, dir.length - 1, dir.length) == "/" { return dir + child; }
+    return dir + "/" + child;
+}
+
+// Parent directory: strip the trailing `/segment`. Returns "." when
+// there is no separator (a bare relative name like "runtime").
+fn _sym_parent_dir(dir: string) -> string {
+    let idx = _sym_last_slash_index(dir);
+    if idx < 0 { return "."; }
+    if idx == 0 { return "/"; }
+    return substring(dir, 0, idx);
+}
+
+fn _sym_last_slash_index(dir: string) -> int {
+    let mut i: int = 0;
+    let mut last: int = -1;
+    loop {
+        if i >= dir.length { break; }
+        if substring(dir, i, i + 1) == "/" { last = i; }
+        i += 1;
+    }
+    return last;
+}
