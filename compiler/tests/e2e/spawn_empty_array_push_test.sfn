@@ -178,17 +178,15 @@ test "seeded-handle-array: a non-empty handle array still builds and runs" ![io]
 // directions — a defect inside a routine is now caught, and a clean routine
 // body does not newly false-fire.
 test "routine body: a statement-level defect inside a routine is now caught at check" ![io] {
-    // A `while` (E0411) inside a `routine { }` previously passed silently
-    // because typecheck never descended into routine bodies; the descent added
-    // for E0831 now surfaces it — the general guarantee the SFN-386 fix relies on.
+    // An undefined call inside `routine { }` must reach the ordinary
+    // typecheck path — the general guarantee the SFN-386 fix relies on.
     let src = "fn main() -> int ![io] {\n" + "    routine {\n"
-        + "        let mut i = 0;\n"
-        + "        while i < 3 { i = i + 1; }\n"
+        + "        missing_routine_helper();\n"
         + "    }\n"
         + "    return 0;\n"
         + "}\n";
     let output = _check_output("routine-defect", src);
-    assert find(output, "E0411", 0) >= 0;
+    assert find(output, "E0420", 0) >= 0;
 }
 
 test "routine body: a clean routine body still checks without a false positive" ![io] {

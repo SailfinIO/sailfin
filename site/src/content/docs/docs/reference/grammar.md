@@ -152,6 +152,7 @@ Block              = "{" { Statement } "}" ;
 Statement          = VariableDeclaration
                    | IfStatement
                    | ForStatement
+                   | WhileStatement
                    | LoopStatement
                    | BreakStatement
                    | ContinueStatement
@@ -186,6 +187,7 @@ ReturnStatement    = "return" [ Expression ] ";" ;
 ThrowStatement     = "throw" Expression ";" ;
 WithStatement      = "with" Expression { "," Expression } Block ;
 ForStatement       = "for" Expression "in" Expression Block [ ";" ] ;
+WhileStatement     = "while" Expression Block [ ";" ] ;
 LoopStatement      = "loop" Block [ ";" ] ;
 BreakStatement     = "break" [ ";" ] ;
 ContinueStatement  = "continue" [ ";" ] ;

@@ -276,6 +276,9 @@ fn parse_block_statement(parser: Parser) -> BlockStatementParseResult {
     if identifier_matches(token, "for") {
         return parse_for_statement(after_decorators, decorators);
     }
+    if identifier_matches(token, "while") {
+        return parse_while_statement(after_decorators, decorators);
+    }
     if identifier_matches(token, "loop") {
         return parse_loop_statement(after_decorators, decorators);
     }
@@ -399,20 +402,6 @@ fn parse_block_statement(parser: Parser) -> BlockStatementParseResult {
         return parse_assert_statement(after_decorators);
     }
 
-    // Reserved but not implemented at statement position.
-    // Without this guard, `while X { ... }` would fall through to
-    // `parse_expression_statement` and be silently absorbed into a
-    // brace-balanced `eval` instruction, eating surrounding statements
-    // along with it. Routing through `parse_unknown_statement` instead
-    // lets `typecheck.sfn` emit `E0411` with a `loop`/`break` fix-it.
-    if identifier_matches(token, "while") {
-        return BlockStatementParseResult {
-            parser: original,
-            statement: null,
-            success: false
-        };
-    }
-
     let expression_result = parse_expression_statement(after_decorators, decorators);
     if expression_result.success { return expression_result; }
 
@@ -506,6 +495,84 @@ fn parse_for_statement(parser: Parser, decorators: Decorator[]) -> BlockStatemen
     return BlockStatementParseResult {
         parser: current,
         statement: statement,
+        success: true
+    };
+}
+
+// `while condition { body }` is syntax sugar for the canonical loop form:
+// `loop { if !condition { break; } body }`. Desugaring here keeps every
+// downstream pass on the established LoopStatement/IfStatement path. The
+// parsed condition remains the operand of the synthetic negation, preserving
+// its source spans for type/effect diagnostics, while the original body block
+// retains its tokens and text for source-oriented tooling.
+fn parse_while_statement(parser: Parser, decorators: Decorator[]) -> BlockStatementParseResult {
+    let original = parser;
+    let mut current = skip_trivia(parser);
+    if !identifier_matches(parser_peek_raw(current), "while") {
+        return BlockStatementParseResult {
+            parser: original,
+            statement: null,
+            success: false
+        };
+    }
+    current = consume_keyword(current, "while");
+
+    let condition_capture = collect_until(skip_trivia(current), ["{"]);
+    current = condition_capture.parser;
+    let condition_tokens = trim_token_edges(condition_capture.tokens);
+    if condition_tokens.length == 0 {
+        return BlockStatementParseResult {
+            parser: original,
+            statement: null,
+            success: false
+        };
+    }
+    let condition = expression_from_tokens(condition_tokens);
+
+    let body_result = parse_block(current);
+    if body_result.block.tokens.length == 0 {
+        return BlockStatementParseResult {
+            parser: original,
+            statement: null,
+            success: false
+        };
+    }
+    current = body_result.parser;
+
+    let guard = Statement.IfStatement {
+        condition: Expression.Unary { operator: "!", operand: condition },
+        then_block: Block {
+            tokens: [],
+            text: "{ break; }",
+            statements: [Statement.BreakStatement]
+        },
+        else_branch: null,
+        decorators: []
+    };
+    let mut statements: Statement[] = [guard];
+    let mut body_index: int = 0;
+    loop {
+        if body_index >= body_result.block.statements.length { break; }
+        statements = append_statement(statements, body_result.block.statements[body_index]);
+        body_index += 1;
+    }
+    let desugared_body = Block {
+        tokens: body_result.block.tokens,
+        text: body_result.block.text,
+        statements: statements
+    };
+
+    current = skip_trivia(current);
+    if symbol_matches(parser_peek_raw(current), ";") {
+        current = parser_advance_raw(current);
+    }
+
+    return BlockStatementParseResult {
+        parser: current,
+        statement: Statement.LoopStatement {
+            body: desugared_body,
+            decorators: decorators
+        },
         success: true
     };
 }

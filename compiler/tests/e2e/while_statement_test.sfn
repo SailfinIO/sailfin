@@ -1,0 +1,139 @@
+// SFN-443: `while condition { body }` is parser sugar for the canonical
+// loop/conditional-break path. These tests cover runtime semantics directly
+// and use child compiler invocations for diagnostics and formatter stability.
+import { contains, find } from "sfn/strings";
+
+fn _sfn_bin() -> string ![io] {
+    let configured = env.get("SAILFIN_BIN");
+    if configured.length > 0 { return configured; }
+    return "build/bin/sfn";
+}
+
+fn _fixture_dir(tag: string) -> string ![io] {
+    let mut base = env.get("SAILFIN_TEST_SCRATCH");
+    if base.length == 0 { base = "/tmp"; }
+    let root = base + "/sfn-while-443-" + tag;
+    fs.createDirectory(root + "/src", true);
+    fs.writeFile(root + "/workspace.toml", "[workspace]\nmembers = []\n");
+    fs.writeFile(root + "/capsule.toml", "[capsule]\n"
+        + "name = \"while-statement-test\"\n"
+        + "version = \"0.1.0\"\n"
+        + "description = \"while statement regression coverage\"\n\n"
+        + "[capabilities]\n"
+        + "required = [\"io\"]\n\n"
+        + "[build]\n"
+        + "entry = \"src/main.sfn\"\n");
+    return root;
+}
+
+fn _check_source(tag: string, source: string) -> string ![io] {
+    let root = _fixture_dir(tag);
+    let path = root + "/src/main.sfn";
+    fs.writeFile(path, source);
+    let _exit = process.run_capture([_sfn_bin(), "check", "--json", path], process.environ());
+    let out = process.capture_take_stdout();
+    let err = process.capture_take_stderr();
+    return out + err;
+}
+
+fn _sum_until(limit: int) -> int {
+    let mut index: int = 0;
+    let mut sum: int = 0;
+    while index < limit {
+        index += 1;
+        if index == 2 { continue; }
+        if index == 5 { break; }
+        sum += index;
+    }
+    return sum;
+}
+
+fn _nested_count() -> int {
+    let mut outer: int = 0;
+    let mut count: int = 0;
+    while outer < 3 {
+        outer += 1;
+        let mut inner: int = 0;
+        while inner < 4 {
+            inner += 1;
+            if inner == 2 { continue; }
+            if inner == 4 { break; }
+            count += 1;
+        }
+    }
+    return count;
+}
+
+fn _classify(value: int) -> Result<int, string> {
+    if value < 0 {
+        return Result.Err { error: "negative" };
+    }
+    return Result.Ok { value: value };
+}
+
+fn _while_in_match(value: int) -> int {
+    match _classify(value) {
+        Result.Err { error } => { return 0; },
+        Result.Ok { value } => {
+            let mut index: int = 0;
+            while index < value { index += 1; }
+            return index;
+        }
+    }
+}
+
+test "while: zero, multiple, break, continue, and nesting run correctly" {
+    assert _sum_until(0) == 0;
+    assert _sum_until(10) == 8;
+    assert _nested_count() == 6;
+}
+
+test "while: routine and match-arm bodies use the ordinary statement path" {
+    let mut routine_count: int = 0;
+    routine {
+        while routine_count < 3 { routine_count += 1; }
+    }
+    assert routine_count == 3;
+    assert _while_in_match(4) == 4;
+    assert _while_in_match(-1) == 0;
+}
+
+test "while: condition effects are checked consistently with if" ![io] {
+    let prelude = "fn ready() -> boolean ![io] { print.info(\"probe\"); return false; }\n";
+    let while_out = _check_source("effect-while", prelude
+        + "fn main() -> int { while ready() { break; } return 0; }\n");
+    let if_out = _check_source("effect-if", prelude
+        + "fn main() -> int { if ready() { return 1; } return 0; }\n");
+    assert contains(while_out, "\"code\":\"E0400\"");
+    assert contains(if_out, "\"code\":\"E0400\"");
+}
+
+test "while: malformed syntax anchors an E-coded diagnostic at while" ![io] {
+    let out = _check_source("malformed", "fn main() { while { } }\n");
+    assert contains(out, "\"code\":\"E0819\"");
+    assert contains(out, "near `while`");
+}
+
+test "while: formatter write/check reaches a fixed point" ![io] {
+    let root = _fixture_dir("fmt");
+    let path = root + "/src/main.sfn";
+    fs.writeFile(path, "fn main(){let mut i=0;while(i<2){i+=1;}}\n");
+
+    let first_exit = process.run_capture([_sfn_bin(), "fmt", "--write", path], process.environ());
+    let _first_out = process.capture_take_stdout();
+    let _first_err = process.capture_take_stderr();
+    assert first_exit == 0;
+    let first = fs.readFile(path);
+    assert find(first, "while", 0) >= 0;
+
+    let second_exit = process.run_capture([_sfn_bin(), "fmt", "--write", path], process.environ());
+    let _second_out = process.capture_take_stdout();
+    let _second_err = process.capture_take_stderr();
+    assert second_exit == 0;
+    assert fs.readFile(path) == first;
+
+    let check_exit = process.run_capture([_sfn_bin(), "fmt", "--check", path], process.environ());
+    let _check_out = process.capture_take_stdout();
+    let _check_err = process.capture_take_stderr();
+    assert check_exit == 0;
+}

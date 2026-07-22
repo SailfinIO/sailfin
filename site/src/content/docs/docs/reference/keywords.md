@@ -302,17 +302,15 @@ for i in 0..10 {
 
 ### `while`
 
-**Status: Planned**
+**Status: Implemented**
 
-> **Note:** `while` is reserved but **not yet implemented** in the parser. Use `loop` with an explicit `break` instead. Tracked on the [roadmap](/roadmap).
+Repeat a block while its condition is true. The parser desugars this form to
+the equivalent `loop` plus a leading conditional `break`, so `break`,
+`continue`, nesting, effects, and block scope follow the canonical loop path.
 
 ```sfn
-// Planned — not yet parsed. Use `loop { if cond { break; } ... }` today.
 let mut n: int = 1;
-loop {
-    if n >= 100 {
-        break;
-    }
+while n < 100 {
     n = n * 2;
 }
 ```

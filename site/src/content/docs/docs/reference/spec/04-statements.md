@@ -25,11 +25,8 @@ for item in items {
     process(item);
 }
 
-// Loop with break condition (Sailfin has no `while` — see Part B)
-loop {
-    if queue.length == 0 {
-        break;
-    }
+// Conditional loop (desugars to `loop` plus a conditional `break`)
+while queue.length > 0 {
     handle(queue.pop());
 }
 

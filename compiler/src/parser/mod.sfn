@@ -535,6 +535,7 @@ export {
 
     // Control flow statements
     parse_for_statement,
+    parse_while_statement,
     parse_loop_statement,
     parse_break_statement,
     parse_continue_statement,
