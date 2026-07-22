@@ -95,12 +95,14 @@ language gaps surfaced by the 2026-07 grammar/object-model audit:
 | [`draft-string-interpolation-dollar`](./draft-string-interpolation-dollar.md) | String Interpolation with `${ }` (migrating off `{{ }}`) | language |
 | [`draft-nullable-access-operators`](./draft-nullable-access-operators.md) | Nullable Access Operators (`?.` and `??`) | language |
 | [`draft-import-surface-compaction`](./draft-import-surface-compaction.md) | Import-surface compaction across the phase rewind to cut emit peak RSS | runtime |
+| [`draft-typed-task-handles`](./draft-typed-task-handles.md) | Typed task handles (`Task<T>`) and ordered multi-await (`join_all`) | language |
 
 SFEP-0038 (`0038-generic-constraints.md`, Implemented) is the root foundation:
 `draft-generic-collections`, `draft-derive`, and SFEP-0028 all depend on it. Draft diagnostic codes are
 pre-deconflicted (`E0303`; `E0711`–`E0715`; `E0820`–`E0822`; `E0823`/`W0823`;
-`E0824`–`E0825`). `E0826` is allocated (shipped) — bare function-type
-annotation rejection (#1845, SFEP-0030) — so drafts must skip it.
+`E0824`–`E0825`; `E0834`–`E0836` — typed task handles, `draft-typed-task-handles`).
+`E0826` is allocated (shipped) — bare function-type annotation rejection
+(#1845, SFEP-0030) — so drafts must skip it.
 
 ## Subdirectories
 
