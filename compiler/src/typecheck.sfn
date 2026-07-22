@@ -52,7 +52,6 @@ import {
     classify_fn_cast,
     clone_bindings,
     detect_removed_ai_keyword,
-    detect_unsupported_statement_keyword,
     find_symbol,
     future_element_kind,
     has_symbol,
@@ -79,7 +78,6 @@ import {
     make_undefined_function_diagnostic,
     make_unknown_primitive_method_diagnostic,
     make_unparseable_statement_diagnostic,
-    make_unsupported_statement_keyword_diagnostic,
     parse_type_arguments,
     primitive_has_method,
     register_local_symbol,
@@ -927,20 +925,13 @@ fn check_statement(statement: Statement, ctx: TypeckCtx) -> ScopeResult {
                 diagnostics: [make_removed_keyword_diagnostic(keyword)]
             };
         }
-        let unsupported = detect_unsupported_statement_keyword(statement.text);
-        if unsupported.length > 0 {
-            return ScopeResult {
-                bindings: bindings,
-                diagnostics: [make_unsupported_statement_keyword_diagnostic(unsupported)]
-            };
-        }
         // A nested (block-level) unparseable statement must fail closed: the
         // top-level `Unknown` walk in `tools/check.sfn` (E0500) covers only
         // `program.statements`, so a `Statement.Unknown` produced inside a
         // block by `parse_unknown_statement` would otherwise be dropped with
         // no diagnostic and zero effects (#1691). Gate on `is_top_level` so we
         // never double-fire with E0500 at top level, and reach here only after
-        // the E0410/E0411 checks above so we never double-fire with those.
+        // the E0410 check above so we never double-fire with it.
         if !is_top_level {
             let mut anchor: Token? = null;
             let mut near: string = "";

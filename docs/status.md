@@ -424,7 +424,7 @@ here.
 | Type aliases | Shipped | Including generic params. `A & B` is reserved for generic trait bounds, not a data type — `type X = A & B` is rejected at the definition (`E0829`, SFEP-0039, #1860) |
 | Module exports | **Shipped** | Block form `export { name };` / `export { x } from "./m";` and inline `export <declaration>` (`export fn`/`export struct`/`export enum`/`export interface`/`export type`/`export let`/`export extern …`/`export thread_local let mut`). Inline form added in SFEP-0031 (#1681); equivalent to `<decl> export { name };` |
 | `if`/`else`, `for` | Shipped | |
-| `loop` / `break` / `continue` | Shipped | `while` is intentionally not a keyword (`E0411` with a `loop` fix-it); the diagnostic is enforced recursively inside loop bodies |
+| `loop` / `while` / `break` / `continue` | Shipped | `while condition { body }` desugars to `loop { if !condition { break; } body }`; `break`, `continue`, nesting, and ordinary block scope reuse the canonical loop path |
 | `match` | Shipped | Literals, `_`, guards, enum-variant destructuring |
 | `x is T` type-guard operator | **Shipped** (enum operands; #1753) | Parses to a structured `Is` AST node; effect checker walks the operand (closes the `Raw`-degradation effect-blind hole in epic #1180). Lowers to the enum's discriminant tag test and narrows the operand to the matched variant in the then-branch — same flow-sensitive narrowing as `match`. v1 scope: **named `enum` operands only**; non-enum unions, primitives, and plain structs are deferred. Else-branch complement narrowing is also deferred. See `examples/advanced/type-guards.sfn` |
 | `try`/`catch`/`finally` | Shipped | Maps to runtime exceptions |

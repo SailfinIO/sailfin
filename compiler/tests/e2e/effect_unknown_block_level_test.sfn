@@ -2,24 +2,9 @@
 // a nested (block-level) `Statement.Unknown` must fail closed with a
 // diagnostic (E0819) instead of being silently dropped with zero effects.
 //
-// SCOPE NOTE (verified empirically against the self-hosted compiler):
-// the E0819 arm is a *defense-in-depth* fail-closed for a genuine nested
-// `Statement.Unknown`. In the current parser there is **no reachable
-// source input** that produces a bare nested `Statement.Unknown` outside
-// the reserved-keyword path: `parse_block_statement` absorbs every
-// unrecognized nested statement into an `ExpressionStatement{Raw}` (the
-// silent-drop the issue actually observed for `@@@ junk !!!`), which is
-// the `Expression.Raw` escape owned by #1692's E0818 backstop —
-// explicitly `Out:` of #1691. The only nested construct that reaches
-// `parse_unknown_statement` today is a reserved/unsupported keyword
-// (`while` -> E0411). So these tests pin the load-bearing, reachable
-// invariants of the fix: the gate never double-fires E0819 with the
-// top-level parse diagnostic (E0500) or the reserved-keyword diagnostic
-// (E0411), and pre-existing behavior is preserved. The E0819 emission
-// itself is exercised by review + the self-host build (it must not fire
-// over the compiler/runtime tree); when #1692 structures the Raw escapes
-// such that a bare nested `Unknown` can occur, a direct E0819 trigger
-// test belongs there.
+// Malformed committed statement forms can reach `Statement.Unknown`; a
+// condition-less `while` provides a stable source trigger. Valid `while`
+// syntax is parsed and desugared before this backstop.
 //
 // Driven through `sfn check --json` (the machine-checkable envelope) and
 // asserted with `sfn/strings` predicates, matching
@@ -96,24 +81,18 @@ test "nested unknown: top-level junk surfaces E0500 only (no E0819 double-fire)"
     assert find(r.out, "\"code\":\"E0819\"", 0) < 0;
 }
 
-// ---- Test 2: nested reserved `while` surfaces E0411, never E0819 ----
-// `while` is the one construct that reaches `parse_unknown_statement` in a
-// block today. The E0819 arm sits after the E0411 guard, so a nested
-// `while` must still produce E0411 alone — proving the dedup ordering.
-test "nested unknown: nested while surfaces E0411 only (no E0819 dedup)" ![io] {
-    let root = _fixture_dir("while");
-    let path = _write(root, "while.sfn", "fn g() {\n    while(true) { }\n}\n");
+// ---- Test 2: a malformed `while` fails closed at the source construct ----
+test "nested unknown: condition-less while surfaces E0819" ![io] {
+    let root = _fixture_dir("malformed-while");
+    let path = _write(root, "while.sfn", "fn g() {\n    while { }\n}\n");
     let r = _check(path);
     assert r.exit == 1;
-    assert contains(r.out, "\"code\":\"E0411\"");
-    assert find(r.out, "\"code\":\"E0819\"", 0) < 0;
+    assert contains(r.out, "\"code\":\"E0819\"");
+    assert contains(r.out, "near `while`");
 }
 
-// ---- Test 3: unsupported `while` remains visible through `loop` ----
-// The token-scanner shape from SFN-358 put `while` inside a supported `loop`.
-// Typecheck must recurse through that body before codegen can silently omit
-// the unsupported statement and leave the scan position unchanged forever.
-test "nested unknown: while in loop surfaces E0411" ![io] {
+// ---- Test 3: valid `while` nested in `loop` is structured and clean ----
+test "nested unknown: while in loop does not surface E0411 or E0819" ![io] {
     let root = _fixture_dir("while-in-loop");
     let source = "fn scan(line: string) -> string {\n"
         + "    let mut pos = 0;\n"
@@ -125,8 +104,8 @@ test "nested unknown: while in loop surfaces E0411" ![io] {
         + "}\n";
     let path = _write(root, "while_in_loop.sfn", source);
     let r = _check(path);
-    assert r.exit == 1;
-    assert contains(r.out, "\"code\":\"E0411\"");
+    assert r.exit == 0;
+    assert find(r.out, "\"code\":\"E0411\"", 0) < 0;
     assert find(r.out, "\"code\":\"E0819\"", 0) < 0;
 }
 

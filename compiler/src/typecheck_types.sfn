@@ -2994,7 +2994,7 @@ fn make_removed_keyword_diagnostic(keyword: string) -> Diagnostic {
 // neither an in-scope binding (parameter, local, or top-level
 // function/extern/struct/enum/…), an imported function, nor a builtin.
 // The enforcement flip for #616 (sub-issue #812). E04xx is the
-// resolution/semantic diagnostic band (E0410/E0411 already live here).
+// resolution/semantic diagnostic band (E0410 already lives here).
 // The caret points at the callee identifier via `token_from_name`;
 // member/method callees (`obj.method()`) never reach this factory — the
 // walker's Member branch only recurses into `.object`.
@@ -3057,25 +3057,6 @@ fn make_nested_fn_capture_diagnostic(name: string, span: SourceSpan?) -> Diagnos
     };
 }
 
-// Match a reserved keyword that has no statement-level implementation.
-// `parse_block_statement` routes these to `parse_unknown_statement` so the
-// diagnostic surfaces here instead of being silently absorbed by the
-// expression-statement fallthrough. Currently only `while` (Sailfin's
-// canonical loop is `loop` per `grammar.md` / `spec/04-statements.md`).
-//
-// Boundary check: the keyword must NOT be followed by an identifier-
-// continuation char, otherwise prefixes like `whilepass` / `while_count`
-// would false-positive. `is_identifier_char` covers `[A-Za-z0-9_]`, so
-// any other byte (space, tab, newline, `(`, `{`, comment-start `/`, …)
-// counts as a true keyword boundary.
-fn detect_unsupported_statement_keyword(text: string) -> string {
-    if !starts_with(text, "while") { return ""; }
-    if text.length == 5 { return "while"; }
-    let next = text[5];
-    if is_identifier_char(next) { return ""; }
-    return "while";
-}
-
 // `thread_local` is the storage-class annotation that flips a top-level
 // `let mut` from `internal global` to `internal thread_local global` at
 // LLVM lowering (#730). Immutable thread-local globals are useless — the
@@ -3097,24 +3078,6 @@ fn make_thread_local_requires_mut_diagnostic(name: string) -> Diagnostic {
     };
 }
 
-fn make_unsupported_statement_keyword_diagnostic(keyword: string) -> Diagnostic {
-    let mut message: string = "`" + keyword
-        + "` is reserved but not implemented;";
-    if strings_equal(keyword, "while") {
-        message = message + " Sailfin's only loop construct is `loop`."
-            + " Rewrite `while cond { body }` as"
-            + " `loop { if !cond { break; } body }`.";
-    }
-    return Diagnostic {
-        code: "E0411",
-        severity: "error",
-        message: message,
-        file_path: "",
-        primary: null,
-        suggestion: null
-    };
-}
-
 // E0819 — a nested (block-level) `Statement.Unknown` that no other pass
 // already diagnosed. Top-level `Unknown` statements surface E0500 from the
 // check driver (`tools/check.sfn`), whose walk covers only
@@ -3124,8 +3087,8 @@ fn make_unsupported_statement_keyword_diagnostic(keyword: string) -> Diagnostic 
 // diagnostic — contributing zero effects and being silently dropped at
 // codegen, a fail-open hole in the effects pillar (#1691, epic #1180).
 // Emitted from `check_statement` only for non-top-level statements and only
-// when neither a removed-keyword (E0410) nor an unsupported-keyword (E0411)
-// diagnostic already fired, so it never double-reports. `anchor` is the first
+// when the removed-keyword diagnostic (E0410) did not already fire, so it
+// never double-reports. `anchor` is the first
 // token of the unparseable run; `near` quotes its lexeme for the message.
 fn make_unparseable_statement_diagnostic(anchor: Token?, near: string) -> Diagnostic {
     return Diagnostic {
