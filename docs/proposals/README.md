@@ -77,6 +77,7 @@ The next number is `max + 1`. Add a row in the same PR that introduces an SFEP.
 | [0052](./0052-ml-acceleration-strategy.md) | Accelerated ML — Substrate Interop and Capability-Typed Accelerator Programming | Accepted | informational |
 | [0053](./0053-shape-typed-tensor-ir.md) | Shape-Typed Tensor IR and Fusion | Accepted | tooling |
 | [0054](./0054-low-precision-numerics.md) | Low-Precision Numeric Substrate | Accepted | language |
+| [0055](./0055-typed-task-handles.md) | Typed task handles (`Task<T>`) and ordered multi-await (`join_all`) | Accepted | language |
 
 ## Drafts under review (numbers assigned at merge)
 
@@ -99,8 +100,9 @@ language gaps surfaced by the 2026-07 grammar/object-model audit:
 SFEP-0038 (`0038-generic-constraints.md`, Implemented) is the root foundation:
 `draft-generic-collections`, `draft-derive`, and SFEP-0028 all depend on it. Draft diagnostic codes are
 pre-deconflicted (`E0303`; `E0711`–`E0715`; `E0820`–`E0822`; `E0823`/`W0823`;
-`E0824`–`E0825`). `E0826` is allocated (shipped) — bare function-type
-annotation rejection (#1845, SFEP-0030) — so drafts must skip it.
+`E0824`–`E0825`; `E0834`–`E0836` — typed task handles, SFEP-0055).
+`E0826` is allocated (shipped) — bare function-type annotation rejection
+(#1845, SFEP-0030) — so drafts must skip it.
 
 ## Subdirectories
 
