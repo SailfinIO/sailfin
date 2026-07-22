@@ -1,7 +1,7 @@
 ---
-sfep: TBD
+sfep: 0055
 title: Typed task handles (Task<T>) and ordered multi-await (join_all)
-status: Draft
+status: Accepted
 type: language
 created: 2026-07-22
 updated: 2026-07-22
@@ -12,7 +12,7 @@ superseded-by:
 graduates-to:
 ---
 
-# SFEP-XXXX — Typed task handles (`Task<T>`) and ordered multi-await (`join_all`)
+# SFEP-0055 — Typed task handles (`Task<T>`) and ordered multi-await (`join_all`)
 
 ## 1. Summary
 
@@ -42,10 +42,10 @@ under; runtime fault propagation (cancel-on-fault) stays the property of the
 concurrency-maturity SFEP (SFN-124, `draft-concurrency-cancellation.md`).
 
 This proposal is the **design record for SFN-440** and **blocks SFN-441** (the
-implementation leaf). It keeps `sfep: TBD` / the `draft-typed-task-handles.md`
-name while in review and claims `max + 1` at merge (SFEP-0001 §2). It is `Draft`
-pending the design-gate sign-off; it becomes `Accepted` at owner approval and
-`Implemented` when SFN-441 clears the Stage1 bar end-to-end.
+implementation leaf). It is **SFEP-0055** (registry maximum was 0054; SFEP-0001
+§2 assigns `max + 1` at merge) and `Accepted` at the design gate (owner sign-off,
+2026-07-22). It graduates to `Implemented` when SFN-441 clears the Stage1 bar
+end-to-end and self-hosts.
 
 ## 2. Motivation
 
