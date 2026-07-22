@@ -93,10 +93,9 @@ fn format_report(data: Record[]) -> string {
 }
 ```
 
-> **Coming in 1.0:** closures with captures are on the [roadmap](/roadmap). The
-> lambda-capture support that lets `.map(...)` read surrounding state is not
-> shipped today; treat the two examples above as illustrative of the declared
-> effect set, not as runnable code.
+> Closures with capture ship today. For `int[]`, `.map`, `.filter`, and
+> `.reduce` execute capturing callbacks end-to-end; other element widths remain
+> outside the current collection-lowering scope.
 
 ### Separate pure computation from effectful operations
 
@@ -153,9 +152,9 @@ fn handle_order_request(req: HttpRequest) -> HttpResponse ![io, net] {
 }
 ```
 
-> **Coming in 1.0:** `Result<T, E>` plus the `?` propagation operator is
-> planned — see the [roadmap](/roadmap). Today, model typed failures with a
-> union return type and use `is` type guards to discriminate, as shown above.
+> `Result<T, E>` and the postfix `?` propagation operator ship today. Prefer
+> them for new two-arm success/failure APIs; explicit unions and `is` guards
+> remain useful when an API has a broader outcome set.
 
 ---
 
@@ -293,9 +292,8 @@ if loaded is ConfigError {
 run(loaded);
 ```
 
-> **Coming in 1.0:** `Result<T, E>` plus the `?` propagation operator is
-> planned — see the [roadmap](/roadmap). Until it ships, union return types
-> give you the same compile-time exhaustiveness without the sugar.
+> `Result<T, E>` and postfix `?` propagation ship today. Union return types
+> remain valid when the alternatives are not naturally an `Ok`/`Err` pair.
 
 ### Use `try/catch` for exceptional conditions
 
@@ -476,9 +474,9 @@ match result {
 }
 ```
 
-> **Coming in 1.0:** `Result<T, E>` plus dedicated `Ok(...)`/`Err(...)`
-> patterns are on the [roadmap](/roadmap). Today, model success/failure as a
-> union return type and discriminate with `match` on the tagged variants.
+> The prelude `Result<T, E>` enum ships with named-field variants:
+> `Result.Ok { value }` and `Result.Err { error }`. Match those patterns just
+> like any other payload-carrying enum.
 
 ### Use guard conditions to narrow cases
 
@@ -600,10 +598,9 @@ passed by value; the compiler is free to share underlying storage.
 fn summarise(records: Record[]) -> string { /* ... */ }
 ```
 
-> **Coming in 1.0:** explicit borrow annotations (`&T`, `&mut T`) and
-> `Affine<T>`/`Linear<T>` ownership markers parse today but are not enforced;
-> they are tracked on the [roadmap](/roadmap). Do not rely on borrow-checker
-> semantics yet.
+> Move and consumption rules are enforced for owned, `Affine<T>`, and
+> `Linear<T>` bindings. Shared-borrow (`&T`) and mutable-borrow (`&mut T`)
+> lifetime enforcement remains planned; do not rely on borrow semantics yet.
 
 ### Batch effectful operations
 
@@ -627,10 +624,9 @@ fn write_log_lines(lines: string[], path: string) -> void ![io] {
 }
 ```
 
-> **Coming in 1.0:** closures that capture enclosing variables (needed for
-> `.map(fn(l) -> string { return l + "\n"; })` to read surrounding state)
-> are on the [roadmap](/roadmap). Until then, use explicit `for` loops when
-> the body references captured bindings.
+> Closures can capture enclosing variables today. The shipped array combinator
+> path currently supports pointer-width `int` elements; keep explicit loops for
+> string and other unsupported element widths.
 
 ### Effect minimization enables optimizer improvements
 
@@ -720,9 +716,9 @@ fn first<T>(items: T[]) -> T? { /* ... */ }
 fn first_string(items: string[]) -> string? { /* ... */ }
 ```
 
-> **Coming in 1.0:** generic type constraints (`fn sort<T: Comparable>`) and
-> a first-class `Option<T>` type are tracked on the [roadmap](/roadmap). Today,
-> use the `T?` optional-type sugar (which lowers to a `T | null` union).
+> Generic type constraints (`fn sort<T: Comparable>`) ship for the current
+> pointer-width generic scope. A first-class `Option<T>` remains planned; use
+> the `T?` optional-type sugar (which lowers to a `T | null` union) today.
 
 ---
 
@@ -804,9 +800,9 @@ fn greet(name: string) -> void ![io] {
 }
 ```
 
-> **Coming in 1.0:** explicit borrow annotations will let callers keep access
-> to `name` while `greet` merely reads it. Do not ship code today that relies
-> on borrow-checker enforcement — there is none.
+> Explicit borrow annotations are parsed but their lifetime rules are not yet
+> enforced. Move checking does ship for owned/affine/linear bindings; do not
+> rely on shared- or mutable-borrow semantics yet.
 
 ### Deeply nested match expressions
 
@@ -848,10 +844,8 @@ match request.method {
 }
 ```
 
-> **Coming in 1.0:** `Result<T, E>`, the `?` propagation operator, and a
-> first-class `Option<T>` (with `Some`/`None` patterns) are on the
-> [roadmap](/roadmap). Today, discriminate union returns with `is` and compare
-> optional values to `null`.
+> `Result<T, E>` and postfix `?` propagation ship today. A first-class
+> `Option<T>` remains planned; compare `T?` optional values to `null`.
 
 ### Using `print.info()` — it is deprecated
 

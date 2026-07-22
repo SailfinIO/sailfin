@@ -202,7 +202,10 @@ type UserId = string;
 type MaybeError<T> = T | ParseError;
 ```
 
-> **Note:** `Result<T, E>` and function type aliases (`type Handler = fn(...) -> ...`) are on the [roadmap](/roadmap); use union return types (`number | MyError`) today.
+> **Note:** The prelude `Result<T, E>` type and postfix `?` propagation operator
+> ship today; see [Result and the `?` Operator](/docs/reference/spec/12-result-and-errors/).
+> Function type aliases (`type Handler = fn(...) -> ...`) remain planned; use
+> plain function signatures for those today.
 
 ---
 

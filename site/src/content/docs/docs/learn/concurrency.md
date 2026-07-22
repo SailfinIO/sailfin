@@ -1,308 +1,177 @@
 ---
 title: Concurrency
-description: Structured concurrency in Sailfin — async functions, routines, channels, and parallel fan-out. Syntax is stable today; the runtime scheduler lands with 1.0.
+description: Structured concurrency in Sailfin — shipped v0 nurseries, spawn / await, channels, and parallel fan-out.
 section: learn
 sidebar:
   order: 7
 ---
 
-Sailfin is designed for structured, effect-safe concurrency. The design goal is to make it impossible to accidentally share mutable state across concurrent tasks, and to ensure that concurrent code carries the same capability annotations as any other code.
+Sailfin ships a v0 structured-concurrency runtime. `routine { }` nurseries,
+`spawn fn() -> T { ... }`, `await` on spawned tasks, bounded channels, and
+`parallel [ ... ]` execute end-to-end on the runtime scheduler.
 
-> **Current status:** `async fn`, `routine { }` blocks, `await`, and the `parallel [ ... ]` form are parsed by the compiler today, and channels (`Channel<T>` / `channel()` / `.send` / `.receive`) are available through the `sync` import. The underlying runtime scheduler is still being built — these constructs parse and type-check, but executable concurrency lands with the 1.0 runtime. This page shows the canonical syntax (matching `/examples/concurrency/*`) and flags anything that is not yet runnable end-to-end.
-
----
-
-## `async fn` — Parsed Today
-
-The `async` keyword on function declarations is parsed and recorded by the compiler. You can declare async functions today:
-
-```sfn
-async fn fetch_data(url: string) -> string ![net] {
-    return http.get(url);
-}
-
-async fn read_config(path: string) -> string ![io] {
-    return fs.read(path);
-}
-```
-
-The `async` flag is recorded in the function's AST node and emitted into the `.sfn-asm` IR. `await` is also parsed — see below — but full suspension/resumption lands with the 1.0 runtime scheduler.
-
-### Effect annotations still apply
-
-Async functions follow the same effect rules as synchronous ones:
-
-```sfn
-// async functions must declare their effects just like sync functions
-async fn send_notification(msg: string) -> boolean ![net, io] {
-    print("Sending: " + msg);
-    return http.post("https://notify.example.com", msg);
-}
-```
+The v0 surface is intentionally narrower than the full design. Cancellation,
+async I/O, typed result-array collection, arbitrary-width channel elements, and
+`await` on an `async fn` return value remain incomplete. Use the constructs on
+this page for code that runs today.
 
 ---
 
-## `routine { }` Blocks
+## `routine { }` — a structured nursery
 
-Routines are Sailfin's lightweight concurrent tasks. A `routine { }` block spawns a task that runs concurrently with the enclosing function. Routines can be named for diagnostics:
+A `routine { }` block creates a nursery. Work spawned inside it cannot outlive
+the block: nursery exit waits until every child completes.
 
 ```sfn
-import { sleep } from "time";
-
-fn main() ![io, clock] {
-    routine "background" {
-        print("Running in background");
-        sleep(500);
-        print("Background done");
-    }
-
+fn main() ![io] {
     routine {
-        print("Another unnamed routine");
+        let task = spawn fn () -> int { return 40 + 2; };
+        let result: int = await task;
+        print("Result: {{result}}");
     }
-
-    print("Main continues while routines run");
 }
 ```
 
-Routines are mapped to the runtime's lightweight scheduler — they are not OS threads. The scheduler is cooperative and effect-aware.
+There is no separate `scope { }` construct. `routine { }` is the shipped
+supervisor boundary. Non-local `return`, `throw`, `break`, or `continue` out of
+a routine is rejected so that control cannot bypass the join.
 
-> **Coming in 1.0:** Execution of `routine` blocks is wired into the runtime as part of the 1.0 milestone. The syntax is stable and matches `examples/concurrency/routines.sfn`; see the [roadmap](/roadmap) for scheduler progress.
+The v0 nursery joins all children but does not yet provide cancel-on-fault,
+timeouts, or cross-thread nursery inheritance.
 
-### Routines inherit parent effects
+### Effects remain visible
 
-A `routine { }` block inherits the declared effects of its enclosing function. You cannot use an effect inside a routine that the parent function has not declared:
+Concurrent work follows the ordinary effect rules. The enclosing function must
+declare every capability used by a spawned task:
 
 ```sfn
-fn process_batch(items: Item[]) ![io] {
-    for item in items {
-        routine {
-            // io is available because the parent declared ![io]
-            print("Processing: {{item.id}}");
-            save(item);
-        }
+fn write_in_background(path: string, body: string) ![io] {
+    routine {
+        spawn fn () -> int ![io] {
+            fs.write(path, body);
+            return 0;
+        };
     }
 }
 ```
+
+Concurrency constructs themselves are effect-transparent. A pure task adds no
+effect; an effectful task contributes the effects of its body.
 
 ---
 
-> **Coming in 1.0:** A structured concurrency boundary (working title `scope { }`) is on the [roadmap](/roadmap). It will guarantee that every routine spawned inside the block completes before execution continues past the closing brace, together with cancellation and timeout primitives. Today, the parent function acts as the de facto scope and the runtime waits for pending routines when it lands.
+## `spawn` and `await`
+
+`spawn` schedules a zero-argument function on the shared runtime pool and
+returns a future handle. `await` retrieves the completed value:
+
+```sfn
+fn calculate() ![io] {
+    routine {
+        let left = spawn fn () -> int { return 20; };
+        let right = spawn fn () -> int { return 22; };
+        let a: int = await left;
+        let b: int = await right;
+        print("Total: {{a + b}}");
+    }
+}
+```
+
+Spawned tasks may capture enclosing bindings. Capturing an owned value moves it
+into the task; using that binding again in the sender is a compile-time error.
+
+`async fn` is a separate, partial surface. The compiler records async
+declarations, but calling an `async fn` does not yet produce a live future for
+full suspension/resumption. Use `spawn fn() -> T { ... }` and `await` for
+executable asynchronous work today.
 
 ---
 
 ## Channels
 
-Channels are typed message-passing primitives for communication between routines. They are imported from the `sync` module. Use channels rather than sharing mutable memory between routines.
-
-### Declaring a channel
-
-```sfn
-import { Channel, channel } from "sync";
-
-let bounded: Channel<number> = channel(16);   // bounded channel, capacity 16
-let unbounded: Channel<number> = channel();   // unbounded channel
-```
-
-### Sending and receiving
+`channel(capacity)` creates a bounded MPMC channel. It is a language builtin;
+the typed `sfn/sync` capsule wrapper and generic `channel<T>(...)` constructor
+do not ship yet.
 
 ```sfn
-import { Channel, channel } from "sync";
-
-async fn main() ![io] {
-    let messages: Channel<string> = channel(4);
+fn main() ![io] {
+    let messages = channel(2);
 
     routine {
-        messages.send("hello from routine");
-        messages.send("second message");
-    }
+        spawn fn () -> int {
+            messages.send(20);
+            messages.send(22);
+            return 0;
+        };
 
-    let first: string = await messages.receive();
-    let second: string = await messages.receive();
-    print("Got: {{first}}");
-    print("Got: {{second}}");
+        let first: int = messages.receive();
+        let second: int = messages.receive();
+        print("Total: {{first + second}}");
+    }
 }
 ```
 
-`messages.send(x)` queues a value; `await messages.receive()` suspends until one is available.
+`send` blocks while the bounded buffer is full; `receive` blocks while it is
+empty; `close` closes the channel. `await ch.receive()` is accepted as channel
+receive sugar, but a synchronous `ch.receive()` is sufficient.
 
-### Typed channels
-
-Channels are typed via `Channel<T>`. Declare the type at the binding site:
-
-```sfn
-import { Channel, channel } from "sync";
-
-async fn main() ![io] {
-    let results: Channel<number> = channel(8);
-
-    routine {
-        results.send(compute_heavy_thing());
-    }
-
-    let value: number = await results.receive();
-    print("Value: {{value}}");
-}
-```
-
-### Channels and effects
-
-Channels do not carry effect permissions on their own. The routine that calls `ch.send()` or `await ch.receive()` must have the appropriate effects declared on its enclosing function:
+The v0 element ABI is pointer-sized. A bare `channel(N)` receive needs an
+`int`- or `float`-annotated target so lowering knows the element width. A
+`Channel<T>` binding annotation can enforce the element kind, but the generic
+constructor is not available yet.
 
 ```sfn
-import { Channel } from "sync";
-
-async fn pipeline_worker(input: Channel<string>, output: Channel<string>) ![io] {
-    let msg: string = await input.receive();
-    let processed = transform(msg);
-    print("Processed: {{processed}}");
-    output.send(processed);
+fn receive_one(ch: Channel<int>) -> int {
+    let value: int = ch.receive();
+    return value;
 }
 ```
 
 ---
 
-## `await`
+## `parallel [ ... ]` — fan-out and join
 
-Inside an `async fn`, use `await` to suspend until a result is ready:
-
-```sfn
-async fn fetch_and_parse(url: string) -> Document ![net] {
-    let body = await http.get(url);
-    return parse_html(body);
-}
-```
-
-`await` is only valid inside `async fn` declarations. Using `await` in a non-async function is a compile error.
-
-Launching async work from a synchronous `main` is done with `routine { }`:
+`parallel` runs an array literal of zero-argument functions concurrently and
+joins them before continuing:
 
 ```sfn
-fn main() ![net, io] {
-    routine {
-        let doc = await fetch_and_parse("https://example.com");
-        print("Title: {{doc.title}}");
-    }
-}
-```
-
----
-
-## `parallel [ ... ]` — Fan-out
-
-The `parallel` form takes an array of closures and runs them concurrently, collecting their return values into an array:
-
-```sfn
-fn computeTask1() -> number {
-    return 21;
-}
-
-fn computeTask2() -> number {
-    return 21;
-}
-
 fn main() ![io] {
     let results = parallel [
-        fn() -> number { return computeTask1(); },
-        fn() -> number { return computeTask2(); },
+        fn () -> int { return 20; },
+        fn () -> int { return 22; },
     ];
 
-    print("Results: {{results}}");
+    print("Parallel work complete");
 }
 ```
 
-The closures in the array must all return the same type.
+The runtime fans tasks out across its shared pool. Capturing task closures ship
+and their environment containers are reclaimed after the worker completes.
+Typed indexing and collection of the returned result array remain incomplete;
+use channels when the caller needs each task's value today.
 
 ---
 
-## Effect Safety in Concurrent Code
+## Current boundaries
 
-Effect enforcement is part of the concurrency design from the start. The effect system prevents several classes of concurrency bugs at compile time:
+| Surface | Current status |
+|---|---|
+| `routine { }` | Shipped v0 nursery; joins all children |
+| `spawn fn() -> T` + `await` | Shipped for runtime future kinds |
+| `channel(N)` | Shipped bounded MPMC channel; pointer-sized elements |
+| `parallel [ ... ]` | Shipped fan-out/join; typed result collection pending |
+| `async fn` return values | Parsed/recorded; live future typing and suspension pending |
+| Cancellation, timeouts, async I/O | Planned post-v0 work |
+| Pipeline operator `|>` | Planned post-1.0 |
 
-**Capability containment:** A routine cannot use a network API unless the enclosing function declared `![net]`. This means the full capability surface of a concurrent task is visible in the function signature.
-
-**No hidden IO in routines:** A background routine cannot silently write to disk or open a socket if the parent didn't declare those capabilities.
-
-```sfn
-fn handle_request(req: Request) ![net] {
-    routine {
-        let resp = http.get(req.url);   // OK: net is declared
-        // fs.write("log.txt", resp);   // ERROR: io not declared
-    }
-}
-```
-
-Effects do not change the semantics of data sharing — channels are still the right tool for passing values between routines. But the effect system ensures that the _side effects_ of concurrent code are always accounted for in the enclosing function's signature.
+See the [roadmap](/roadmap) for future sequencing and the
+[standard-library concurrency reference](/docs/reference/standard-library/#concurrency-and-async-utilities)
+for the lower-level API details.
 
 ---
 
-## Sequential Patterns
+## Next steps
 
-Until the runtime scheduler lands, many workloads are best written sequentially. These patterns compose naturally with `routine` and channels — the surrounding function signatures and effect annotations won't need to change when you move to concurrent execution.
-
-### Sequential computation with `for`
-
-```sfn
-fn process_all(items: Item[]) ![io] {
-    for item in items {
-        let result = process(item);
-        print("Done: {{item.id}}");
-        save(result);
-    }
-}
-```
-
-### Functional patterns with `map`
-
-The prelude provides `map`, `filter`, and `reduce` for collection transformations:
-
-```sfn
-fn score_all(texts: string[]) -> number[] {
-    return texts.map(fn(t: string) -> number {
-        return score(t);
-    });
-}
-```
-
-### Pipeline via intermediate bindings
-
-Without the `|>` operator (planned for 1.0), chain operations with intermediate bindings:
-
-```sfn
-fn index_corpus(docs: string[]) ![io] {
-    let chunks   = chunk(docs);
-    let embedded = embed(chunks);
-    let filtered = embedded.filter(fn(v: Vector) -> boolean { return v.norm > 0.1; });
-    upsert(filtered, "docs_idx");
-}
-```
-
-### Batched processing
-
-For workloads that logically want parallelism, process in batches and collect results:
-
-```sfn
-fn run_batch(jobs: Job[]) -> JobResult[] ![io] {
-    let mut results: JobResult[] = [];
-    for job in jobs {
-        let r = run_job(job);
-        results.push(r);
-    }
-    return results;
-}
-```
-
----
-
-## Roadmap
-
-Concurrency primitives (`async fn`, `routine`, `await`, `parallel`, channels) all parse today and match the examples under `examples/concurrency/`. The runtime scheduler that actually drives them — along with structured scopes, cancellation, and timeouts — is part of the 1.0 release milestone and is being built on top of the self-hosted LLVM backend.
-
-See the [roadmap](/roadmap) for the current timeline and sequencing.
-
----
-
-## Next Steps
-
-- [AI Integration](/docs/learn/ai-constructs) — The `![model]` effect and the `sfn/ai` capsule
-- [Testing](/docs/learn/testing) — Testing your Sailfin code
-- [The Effect System](/docs/learn/effects) — How effects govern what code is allowed to do
+- [The Effect System](/docs/learn/effects) — capability tracking in task bodies
+- [Ownership & Borrowing](/docs/learn/ownership) — moves into spawned tasks
+- [Standard Library](/docs/reference/standard-library/) — runtime utilities and current limits

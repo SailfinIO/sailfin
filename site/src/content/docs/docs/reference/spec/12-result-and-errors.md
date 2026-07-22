@@ -125,9 +125,10 @@ The type checker enforces three rules, each with a dedicated diagnostic:
 
 The type of the whole `x?` expression is `T`, the unwrapped success type.
 
-The `From<E>` coercion form and an `E: Error` bound are deferred until generic
-type constraints ship; until then, mixed error types must be converted manually
-(e.g. `match` the inner `Result` and re-wrap the error).
+The current generic-constraint scope does not yet provide the `From<E>`
+coercion form or an `E: Error` bound for `Result`. Mixed error types must be
+converted manually (for example, `match` the inner `Result` and re-wrap the
+error).
 
 ## 12.5 Disambiguating the two `?`s
 

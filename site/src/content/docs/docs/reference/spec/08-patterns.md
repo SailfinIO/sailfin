@@ -6,7 +6,9 @@ sidebar:
   label: "§8 Pattern Matching"
 ---
 
-> **Note**: `match` is parsed by the compiler and emits IR, but LLVM lowering of numeric and enum variant patterns may be unreliable in the current release. String and wildcard patterns are more stable. See the stability note in §4.
+Literal patterns, `_`, guards, and enum-variant destructuring lower
+end-to-end. Compile-time exhaustiveness checking remains partial, so emitted
+matches retain a runtime backstop for an uncovered value.
 
 ```sfn
 match value {
@@ -24,4 +26,5 @@ Pattern forms:
 - **Wildcard** — `_` matches anything, discards
 - **Enum destructuring** — `Variant { field }` extracts payload fields
 - **Guard** — `pattern if condition` adds a boolean filter
-- **Exhaustiveness** — the compiler requires all cases be covered (or a `_` wildcard)
+- **Exhaustiveness** — compile-time checking is partial; use a `_` wildcard
+  when the known variants do not cover every possible value

@@ -210,10 +210,10 @@ let c: Shape = Shape.Circle { radius: 5.0 };
 let r: Shape = Shape.Rectangle { width: 3.0, height: 4.0 };
 ```
 
-> **Current status:** Optional values today are written with the `T?` syntax
-> (for example, `TreeNode?`) and handled via `null` checks or `match`. A
-> `Result<T, E>` type with a `?` propagation operator is on the
-> [roadmap](/roadmap) and is tracked in the 1.0 readiness checklist.
+> **Current status:** Optional values are written with the `T?` syntax (for
+> example, `TreeNode?`) and handled via `null` checks or `match`. Expected
+> failures use the shipped prelude `Result<T, E>` type and postfix `?`
+> propagation operator.
 
 ---
 
@@ -398,9 +398,10 @@ fn main() ![io] {
 }
 ```
 
-> **Coming in 1.0:** A generic `Result<T, E>` type plus a `?` propagation
-> operator are on the [roadmap](/roadmap) under the Syntax Reform track. Until
-> they land, prefer the tagged-union pattern above for expected failures.
+> For new APIs, prefer the shipped `Result<T, E>` type and postfix `?` operator
+> described in [§12 Result and the `?` Operator](/docs/reference/spec/12-result-and-errors/).
+> Explicit tagged unions remain useful when a return value has more than two
+> meaningful outcomes.
 
 ### `try/catch/finally` for exceptional conditions
 

@@ -59,4 +59,7 @@ try {
 
 **Assignment operators**: `=`, `+=`, `-=`, `*=`, `/=`
 
-> **Note on `match` stability**: `match` is parsed and emits IR, but LLVM lowering of common match patterns (number literals, enum variants) may trigger crashes or incorrect codegen in the current compiler. String pattern matching (as shown above) is more reliable. Move complex match expressions to Part B patterns or use `if`/`else if` chains until lowering stabilizes.
+> **Current `match` scope:** Literal patterns, `_`, guards, and enum-variant
+> destructuring lower end-to-end. Compile-time exhaustiveness checking remains
+> partial, so emitted matches retain the `match_exhaustive_failed` runtime
+> backstop for an uncovered value.
