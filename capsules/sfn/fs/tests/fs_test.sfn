@@ -15,6 +15,7 @@ import {
     mkdtemp,
     is_executable,
     symlink,
+    read_link,
     exists,
     write,
     read,
@@ -167,6 +168,58 @@ test "fs: symlink returns false when link path already exists" ![io] {
     write(link, "occupant");
 
     assert symlink("/tmp", link) == false;
+
+    process.run(["rm", "-rf", scratch]);
+}
+
+// ── read_link ──────────────────────────────────────────────────────
+// `read_link` is a single-hop `readlink(2)` reader (SFN-46): it returns
+// the raw target text exactly as stored in the link, never canonicalized.
+test "fs: read_link returns the raw target of a symlink" ![io] {
+    let scratch = mkdtemp("sfn-fs-test-readlink-");
+    let target = scratch + "/target.txt";
+    let link = scratch + "/alias";
+    write(target, "linked-content");
+
+    assert symlink(target, link);
+    // The raw target is the absolute path we passed to `symlink`,
+    // returned verbatim — no resolution of the target's own contents.
+    assert strings_equal(read_link(link), target);
+
+    process.run(["rm", "-rf", scratch]);
+}
+
+test "fs: read_link returns a relative target uncanonicalized" ![io] {
+    // Single-hop semantics: a relative target is returned exactly as
+    // stored (`../sibling`), NOT resolved to an absolute path the way
+    // `readlink -f` would. This is the invariant the llms.txt drift
+    // guard relies on.
+    let scratch = mkdtemp("sfn-fs-test-readlink-rel-");
+    let link = scratch + "/rel-alias";
+
+    assert symlink("../sibling", link);
+    assert strings_equal(read_link(link), "../sibling");
+
+    process.run(["rm", "-rf", scratch]);
+}
+
+test "fs: read_link on a non-symlink returns empty" ![io] {
+    // A regular file is not a symlink, so `readlink(2)` fails
+    // (EINVAL) and the wrapper collapses it to "".
+    let scratch = mkdtemp("sfn-fs-test-readlink-plain-");
+    let plain = scratch + "/regular.txt";
+    write(plain, "not a link");
+
+    assert read_link(plain).length == 0;
+
+    process.run(["rm", "-rf", scratch]);
+}
+
+test "fs: read_link on a missing path returns empty" ![io] {
+    // A path that does not exist (ENOENT) also collapses to "".
+    let scratch = mkdtemp("sfn-fs-test-readlink-missing-");
+
+    assert read_link(scratch + "/never-created").length == 0;
 
     process.run(["rm", "-rf", scratch]);
 }

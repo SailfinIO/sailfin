@@ -694,6 +694,19 @@ fn pin_current_release(target: string, link: string) ![io] {
 
 ---
 
+#### `fs.read_link(path: string) -> string ![io]`
+
+Read the target of the symbolic link at `path` — the `readlink(2)` wrapper. Returns the **raw target text exactly as stored in the link**, e.g. `../../llms.txt` for a link at `site/public/llms.txt`. This is a **single-hop** read: it does not canonicalize the result, does not resolve multiple levels of symlinks, and does not check whether the target exists. It is **not** `readlink -f` or `realpath` — use `fs.symlink`'s target convention as the mental model (whatever string was written at link-creation time is what comes back). Returns an empty string if `path` is not a symlink, does not exist, or on any other error. POSIX-only; Windows returns an empty string.
+
+```sfn
+fn release_pin_target(link: string) -> string ![io] {
+    // Raw target text, not resolved — a relative target stays relative.
+    return fs.read_link(link);
+}
+```
+
+---
+
 ### Filesystem — Planned
 
 The following filesystem helpers are planned for a future release and are not available today:
