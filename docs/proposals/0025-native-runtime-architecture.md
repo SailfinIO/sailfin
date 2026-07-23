@@ -255,6 +255,16 @@ arena and update pointer — avoids arena-incompatible realloc), `sfn_str_slice`
 stack-buffered NUL copy), `sfn_number_to_str` / `sfn_int_to_str` (formatting into
 arena).
 
+**View-safety gap (SFN-42 / SFN-460).** The ABI above is the *target*: a
+`{data, len}` aggregate whose `len` is always carried, so `sfn_str_slice` can be
+a true non-owning view. The current lowering does not yet realize it — string
+values are pervasively downgraded to bare `i8*` and re-recover length via a
+`strnlen` scan (`sfn_str_len`), which **over-reads a non-NUL-terminated view**.
+Making `sfn_str_slice` a real view therefore requires carrying length end-to-end
+in lowering (no `{i8*,i64}→i8*→strnlen` round-trip), not a per-helper `_lv`
+migration. Root-cause and options in
+`docs/proposals/design-notes/sfn-460-string-view-consumer-surface.md`.
+
 **UTF-8 vs. graphemes.** Strings are UTF-8 byte sequences; `len` is byte length.
 `grapheme_at` is an O(n) walk from the start — no grapheme-indexed random access,
 the same tradeoff as Rust and Go. The prelude exposes `grapheme_at` /
