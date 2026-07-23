@@ -48,12 +48,16 @@ market positioning):** `docs/proposals/0016-capability-sealed-runtime.md`,
 
 ---
 
-## 2. Ground truth (verified against repo, June 2026)
+## 2. Ground truth (verified against repo, July 2026)
 
 - **Identity:** "A systems language with compile-time capability enforcement." This is real and shipping, not aspirational.
 - **Enforced today (compile time):** `![io]`, `![net]`, `![clock]` are real gates; cross-module effect propagation (`E0402`); capsule capability cross-check via `capsule.toml` (`E0403`); structured diagnostics + fix-its; `sfn check --json` → `sailfin-check/1` envelope for the MCP server.
-- **Codegen:** still LLVM (`compiler/src/llvm`). No native backend in-tree beyond a test fixture. LLVM independence is a documented vision with a Stage-0 branch.
-- **Runtime:** C→Sailfin migration nearly complete (`runtime/sfn` ≈ 27 Sailfin files vs ~2 remaining C files). AOT-native execution, not a VM.
+- **Codegen:** still LLVM (`compiler/src/llvm`). The Stage-0 `Backend` seam is
+  merged and `LlvmTextBackend` is the sole implementation; there is no
+  production native backend yet.
+- **Runtime:** the C→Sailfin migration is complete; `runtime/native/` is deleted.
+  AOT-native execution still lowers through LLVM and reaches the platform
+  through libc/POSIX externs.
 - **Enforcement locus today:** compile-time only. Per `capability-sealed-runtime.md`, the manifest is currently "a lint, not a cage" — erased at codegen. Runtime/syscall enforcement is the **1.0 capstone (GA blocker, epic #1639)** — repositioned from post-1.0 on 2026-06-26 — gated on owning the backend then the syscall layer. Still unenforced today.
 
 **Discipline:** distinguish *compile-time proof* (real now) from *runtime seal* (vision). Never blur them externally.
@@ -87,7 +91,9 @@ Sailfin owns its stack on purpose, because **you cannot seal a binary you don't 
 3. **Positioning essay** — the capstone thesis, market-aware, now/later split. Names WASI / Capslock / static-only effect systems as the foils your doc already identified.
 4. **This brief committed + referenced from `CLAUDE.md`** as agent context.
 
-Deferred (the fork, Section 8): the seal-sufficient backend + syscall ownership.
+Activated: prioritize the seal-sufficient backend + syscall ownership after the
+Stage-0 backend seam. LLVM performance work that deepens coupling must not
+displace these independence slices.
 
 ---
 
@@ -118,7 +124,10 @@ For untrusted code running in *other* processes/runtimes (true foreign execution
 - **Trust-substrate / influence (legacy).** Success = the seal exists end-to-end and the constructs (model-as-effect, scoped/revocable per-task capabilities) are real and reachable in the corpus. Needs only the *seal-sufficient* backend. Robust to competitors; risk is obscurity (addressed by Gaps 2–3).
 - **Competitive systems language (product).** Success = adoption *and* perf parity. Reintroduces the optimizer tail. Hard, and largely orthogonal to the seal's value.
 
-**Trigger:** the fork fires when the near-term deliverables (Section 5) are done and the next decision is whether to commit agent capacity to the seal-sufficient backend. Until then, do not let issue generation presuppose the perf-parity game.
+**Decision (2026-07-23):** commit agent capacity to the seal-sufficient backend
+now. Sequence direct-link ownership and a typed metadata-carrying SSA IR before
+native machine-code slices; continue to treat perf parity as a separate
+post-1.0 game.
 
 ---
 

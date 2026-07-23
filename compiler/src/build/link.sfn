@@ -9,6 +9,7 @@ import { LinkPlan, LlvmTextBackend } from "../backend";
 import { CacheStats, empty_cache_stats } from "../build_cache";
 import { _env_flag, _get_env_cmd } from "../build_flags";
 import { RuntimeCapsuleArtifacts } from "../runtime_capsule_resolver";
+import { assemble_link_inputs } from "./clang_argv";
 import { _shell_read_cmd, _shell_single_quote_arg } from "./fs";
 import { _ensure_dir, _find_substring_from } from "./paths";
 import { RuntimeLinkInputs, assemble_runtime_capsule_link_inputs } from "./runtime_objs";
@@ -251,6 +252,25 @@ fn _clang_link_multi_with_opt(ll_paths: string[], out_path: string, runtime_root
     runtime_objs = inputs.object_paths;
     runtime_link_libs = inputs.link_libs;
 
+    // Assemble program/capsule IR before the final link (SFN-453). Runtime
+    // inputs already arrive as objects; keeping this cache under the build
+    // work-dir makes the complete `Backend.link` boundary object-only.
+    let link_input_result = assemble_link_inputs(ll_paths, cache_dir
+        + "/link-obj", opt_flag);
+    if !link_input_result.success {
+        return LinkResult {
+            rc: 1,
+            stats: inputs.stats,
+            ran_backend: true
+        };
+    }
+    let mut lii: int = 0;
+    loop {
+        if lii >= link_input_result.object_paths.length { break; }
+        runtime_objs.push(link_input_result.object_paths[lii]);
+        lii += 1;
+    }
+
     // Driver computes the clang-driver flag interleave; `LlvmTextBackend`
     // owns the final argv + `process.run`. Flag order is load-bearing for
     // byte-identical output (#1112 zero-behaviour gate).
@@ -260,11 +280,9 @@ fn _clang_link_multi_with_opt(ll_paths: string[], out_path: string, runtime_root
     // platform default. Empty string = no `-fuse-ld=` flag (system linker).
     let linker_flag = _resolve_linker();
     if linker_flag.length > 0 { link_flags.push(linker_flag); }
-    // `.ll` inputs are compiled inline by this same clang invocation, so
-    // they need the section split here; pre-compiled runtime `.o`s already
-    // carry it from `_clang_compile_runtime_capsule_objects` /
-    // `_emit_runtime_sfn_to_obj`. The dead-strip flag then GCs every
-    // section unreferenced from the entry point (#1047).
+    // Every input is now pre-assembled with section splitting. Keep the
+    // historical driver flags for zero-diff linker behavior while the
+    // direct-link successor (SFN-455) takes ownership of the raw linker argv.
     link_flags.push("-ffunction-sections");
     link_flags.push("-fdata-sections");
     // Root the runtime provider surface, then GC unreferenced sections
@@ -301,7 +319,6 @@ fn _clang_link_multi_with_opt(ll_paths: string[], out_path: string, runtime_root
     let backend = LlvmTextBackend { };
     let plan = LinkPlan {
         objects: runtime_objs,
-        ir_inputs: ll_paths,
         out_path: out_path,
         opt_flag: opt_flag,
         link_flags: link_flags,

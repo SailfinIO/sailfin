@@ -24,6 +24,14 @@
 // Importing `./target` (a struct-free leaf over `build_flags`/`paths`) does
 // not reintroduce the `LlvmTextBackend` vtable hazard the module note above
 // warns about — `target.sfn` declares no interface-implementing struct.
+import {
+    _atomic_rename_into_place,
+    _ensure_dir_cmd,
+    _mktemp_sibling_cmd,
+    _sha256_of_text_file,
+    _shell_read_cmd
+} from "./fs";
+import { sha256_hex_of_string } from "./hash";
 import { build_target_os, target_clang_flags } from "./target";
 
 // `target_flags` (SFN-52, SFEP-0021 §4.2(A)) carries the `-target <triple>`
@@ -71,4 +79,105 @@ fn llvm_assemble(src: string, out: string, opt_flag: string, include_flags: stri
     return process.run(_llvm_text_assemble_argv(src, out, opt_flag, include_flags, target_flags));
 }
 
-export { _llvm_text_assemble_argv, llvm_assemble };
+// Result of separating LLVM assembly from the final link. `object_paths`
+// preserves the input order exactly; callers splice the returned objects
+// wherever the corresponding `.ll` inputs appeared in their historical link
+// layout.
+struct LinkObjectAssembly {
+    success: boolean;
+    object_paths: string[];
+}
+
+// Assemble a list of textual LLVM modules before the final link (SFN-453).
+//
+// The content-addressed key covers every input that changes clang's object
+// output: IR bytes, optimization level, target flags, clang identity, and the
+// section-splitting flag scheme owned by `_llvm_text_assemble_argv`. Objects
+// live under the caller's work/shared cache. If that cache is unwritable, use
+// an ephemeral object beside the `.ll` input instead of falling back to feeding
+// raw IR into the final link; the object-only backend boundary is invariant.
+fn assemble_link_inputs(ll_paths: string[], object_dir: string, opt_flag: string) -> LinkObjectAssembly ![io] {
+    _ensure_dir_cmd(object_dir);
+    let target_os = build_target_os();
+    let target_flags = target_clang_flags(target_os);
+    let clang_line = _shell_read_cmd("clang --version 2>/dev/null | head -n 1");
+    let mut target_key: string = target_os;
+    let mut ti: int = 0;
+    loop {
+        if ti >= target_flags.length { break; }
+        target_key = target_key + "\n" + target_flags[ti];
+        ti += 1;
+    }
+    let toolchain_key = clang_line + "\n" + target_key
+        + "\nlink-obj-v1-secsplit1";
+    let mut objects: string[] = [];
+    let mut i: int = 0;
+    loop {
+        if i >= ll_paths.length { break; }
+        let ll_path = ll_paths[i];
+        let content_hash = _sha256_of_text_file(ll_path);
+        if content_hash.length == 0 {
+            let fallback_key = sha256_hex_of_string(ll_path + "\n" + opt_flag
+                + "\n"
+                + toolchain_key);
+            let fallback = ll_path + ".link-" + fallback_key + ".o";
+            let no_includes: string[] = [];
+            if llvm_assemble(ll_path, fallback, opt_flag, no_includes) != 0 {
+                return LinkObjectAssembly {
+                    success: false,
+                    object_paths: []
+                };
+            }
+            objects.push(fallback);
+            i += 1;
+            continue;
+        }
+        let cache_key = content_hash + "\n" + opt_flag + "\n" + toolchain_key;
+        let key_hash = sha256_hex_of_string(cache_key);
+        let obj_path = object_dir + "/" + key_hash + ".o";
+        if fs.exists(obj_path) {
+            objects.push(obj_path);
+            i += 1;
+            continue;
+        }
+
+        let no_includes: string[] = [];
+        let tmp = _mktemp_sibling_cmd(obj_path);
+        let mut assembled_to_cache: boolean = false;
+        if tmp.length > 0 {
+            let rc = llvm_assemble(ll_path, tmp, opt_flag, no_includes);
+            if rc == 0 {
+                assembled_to_cache = _atomic_rename_into_place(tmp, obj_path);
+            } else {
+                process.run(["rm", "-f", tmp]);
+                return LinkObjectAssembly {
+                    success: false,
+                    object_paths: []
+                };
+            }
+        }
+        if assembled_to_cache {
+            objects.push(obj_path);
+            i += 1;
+            continue;
+        }
+
+        // Cache publication can fail on a read-only shared cache. The source
+        // scratch is the recoverable fallback location and is cleaned with the
+        // owning build/test invocation.
+        let fallback = ll_path + ".link-" + key_hash + ".o";
+        if llvm_assemble(ll_path, fallback, opt_flag, no_includes) != 0 {
+            return LinkObjectAssembly { success: false, object_paths: [] };
+        }
+        objects.push(fallback);
+        i += 1;
+    }
+    return LinkObjectAssembly { success: true, object_paths: objects };
+}
+
+export {
+    LinkObjectAssembly,
+    _llvm_text_assemble_argv,
+    assemble_link_inputs,
+    llvm_assemble
+};

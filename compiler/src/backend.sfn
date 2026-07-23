@@ -52,9 +52,8 @@ import { build_target_os, target_clang_flags, target_filter_link_libs } from "./
 import { _env_flag, _get_env_cmd } from "./build_flags";
 
 // Reserved opaque object-file handle for later backend stages (#347 /
-// #1640 produce these in-process). Stage 0's `LlvmTextBackend` returns
-// the clang exit code directly, so this is unused today but pins the
-// shape the semantic seam will grow into.
+// #1640 produce these in-process). The current driver still passes paths
+// directly, so this pins the shape the semantic seam will grow into.
 struct ObjectArtifact {
     path: string;
 }
@@ -64,15 +63,11 @@ struct ObjectArtifact {
 // different clang argv layouts — `-o` position, input ordering, and the
 // section/strip/linker flag set all differ — so `test_mode` selects the
 // layout `LlvmTextBackend` reproduces. A non-clang backend ignores
-// `link_flags` (clang-driver-specific) and uses `objects` / `ir_inputs`
-// / `libs` directly.
+// `link_flags` (clang-driver-specific) and uses `objects` / `libs` directly.
 struct LinkPlan {
-    // Pre-compiled `.o` inputs (runtime objects).
+    // Pre-compiled `.o` inputs. SFN-453 makes this the complete link-input
+    // boundary: textual LLVM IR is assembled before `Backend.link`.
     objects: string[];
-    // `.ll` inputs compiled inline by the clang link (program/capsule
-    // modules in build mode; the test source + dependency `.ll` in test
-    // mode).
-    ir_inputs: string[];
     out_path: string;
     opt_flag: string;
     // Clang-driver flags the program link interleaves between
@@ -179,9 +174,7 @@ fn _probe_macos_deployment_target() -> string ![io] {
 }
 
 // Build the clang link argv for the `sfn test` layout:
-// `clang -O0 -Wno-override-module <sdk_flags…> -o OUT <test.ll> [dep.ll fallback…] <runtime.o…> <dep.o…> <libs…>`.
-// On a cache hit (#2013) resolver-produced dep modules link as pre-assembled `.o` objects
-// appended after the runtime objects; on cache failure they degrade to `.ll` IR inputs.
+// `clang -O0 -Wno-override-module <sdk_flags…> -o OUT <objects…> <libs…>`.
 fn _llvm_text_link_test_argv(plan: LinkPlan, sdk_flags: string[]) -> string[] {
     let mut args: string[] = ["clang", plan.opt_flag, "-Wno-override-module"];
     let mut si: int = 0;
@@ -192,12 +185,6 @@ fn _llvm_text_link_test_argv(plan: LinkPlan, sdk_flags: string[]) -> string[] {
     }
     args.push("-o");
     args.push(plan.out_path);
-    let mut ii: int = 0;
-    loop {
-        if ii >= plan.ir_inputs.length { break; }
-        args.push(plan.ir_inputs[ii]);
-        ii += 1;
-    }
     let mut oi: int = 0;
     loop {
         if oi >= plan.objects.length { break; }
@@ -214,7 +201,7 @@ fn _llvm_text_link_test_argv(plan: LinkPlan, sdk_flags: string[]) -> string[] {
 }
 
 // Build the clang link argv for the program/build layout:
-// `clang <opt> -Wno-override-module <sdk_flags…> <link_flags…> <runtime.o…> <ir.ll…> -o OUT <libs…>`.
+// `clang <opt> -Wno-override-module <sdk_flags…> <link_flags…> <objects…> -o OUT <libs…>`.
 fn _llvm_text_link_program_argv(plan: LinkPlan, sdk_flags: string[]) -> string[] {
     let mut args: string[] = ["clang", plan.opt_flag, "-Wno-override-module"];
     let mut si: int = 0;
@@ -234,12 +221,6 @@ fn _llvm_text_link_program_argv(plan: LinkPlan, sdk_flags: string[]) -> string[]
         if roi >= plan.objects.length { break; }
         args.push(plan.objects[roi]);
         roi += 1;
-    }
-    let mut ri: int = 0;
-    loop {
-        if ri >= plan.ir_inputs.length { break; }
-        args.push(plan.ir_inputs[ri]);
-        ri += 1;
     }
     args.push("-o");
     args.push(plan.out_path);
@@ -314,7 +295,6 @@ fn _concat_driver_flags(a: string[], b: string[]) -> string[] {
 fn _target_conditioned_plan(plan: LinkPlan, target_os: string) -> LinkPlan {
     return LinkPlan {
         objects: plan.objects,
-        ir_inputs: plan.ir_inputs,
         out_path: plan.out_path,
         opt_flag: plan.opt_flag,
         link_flags: plan.link_flags,

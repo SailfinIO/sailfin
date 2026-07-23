@@ -130,8 +130,7 @@ test "target: assemble argv splices -target after the opt flag" ![pure] {
 // ---- Link argv carries the -target driver flag ----
 fn _driver_plan(test_mode: boolean) -> LinkPlan ![pure] {
     return LinkPlan {
-        objects: ["runtime.o"],
-        ir_inputs: ["main.ll"],
+        objects: ["runtime.o", "main.o"],
         out_path: "a.exe",
         opt_flag: "-O2",
         link_flags: [],
