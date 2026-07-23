@@ -202,7 +202,7 @@ fn walk_statement(scope: LocalBinding[], stmt: Statement) -> CaptureWalkResult {
     if stmt.variant == "ForStatement" {
         let mut result = walk_expression(scope, stmt.clause.iterable);
         result = merge_results(result, walk_expression(scope, stmt.clause.target));
-        let inner_scope = extend_with_for_target(scope, stmt.clause.target);
+        let inner_scope = extend_with_for_target(scope, stmt.clause.target, stmt.clause.iterable);
         result = merge_results(result, walk_block(inner_scope, stmt.body));
         // The for-target binding is local to the loop body; subtract
         // its name from the bubbled-up free set so the enclosing
@@ -839,7 +839,7 @@ fn _param_binding_with_inferred(p: Parameter, inferred: string[], index: int) ->
     };
 }
 
-fn extend_with_for_target(scope: LocalBinding[], target: Expression) -> LocalBinding[] {
+fn extend_with_for_target(scope: LocalBinding[], target: Expression, iterable: Expression) -> LocalBinding[] {
     let mut out: LocalBinding[] = [];
     let mut i: int = 0;
     loop {
@@ -849,11 +849,32 @@ fn extend_with_for_target(scope: LocalBinding[], target: Expression) -> LocalBin
     }
     let target_name = for_target_name(target);
     if target_name.length > 0 {
+        // SFN-456: a `for id in ids` iteration variable captured DIRECTLY into
+        // a `spawn`/lambda closure needs its element type, or the closure-env
+        // field falls back to the opaque `i8*` while the captured value is an
+        // `i64` — emitting `store i8* %v, i8** ...` (invalid IR that fails at
+        // link). Recover the element type from the iterable's primitive-array
+        // binding, mirroring the un-annotated `let`/index recovery (#1839).
+        // A non-identifier or non-primitive-array iterable keeps the prior
+        // conservative empty fallback.
+        let type_text = _for_target_element_type(scope, iterable);
         out.push(LocalBinding {
-            name: target_name, type_text: "", by_value: false, mutable: false, span: null
+            name: target_name, type_text: type_text, by_value: is_primitive_type(type_text), mutable: false, span: null
         });
     }
     return out;
+}
+
+// Resolve a `for … in <iterable>` target's element type when `iterable` is an
+// identifier bound to a primitive array (`T[]`) in scope. Mirrors
+// `_capture_indexed_element_type`: non-identifier bases, unknown bindings,
+// non-array or non-primitive-element types all return "" so the closure-env
+// layout keeps its existing conservative `i8*` behaviour (SFN-456).
+fn _for_target_element_type(scope: LocalBinding[], iterable: Expression) -> string {
+    if iterable.variant != "Identifier" { return ""; }
+    let binding = find_binding(scope, iterable.name);
+    if binding == null { return ""; }
+    return _primitive_array_element_type(binding.type_text);
 }
 
 fn for_target_name(target: Expression) -> string {
