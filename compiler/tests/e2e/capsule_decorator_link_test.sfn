@@ -1,0 +1,251 @@
+// End-to-end coverage for capsule-resolved decorator lowering (SFN-72,
+// SFEP-0023 §4.4–4.5 steps C+D).
+//
+// A decorator imported from a capsule lowers to an ordinary entry call into
+// the imported (mangled) symbol — no always-linked runtime helper. This
+// exercises the full path: `@decorator`-marked capsule function → import →
+// application → Tier-1 `(args, fn_name)` entry hook → mangled capsule call →
+// link → run. The un-imported built-in `@logExecution`/`@trace` still lowers
+// to the `runtime_log_execution_fn` fallback (the deprecation bridge), and
+// `sfn check` emits the W0211 `deprecated-api` lint steering users to the
+// `log` capsule.
+//
+// Fixtures live under build/ (CWD-relative = repo root) so the resolver's
+// workspace discovery finds the in-tree capsules/ tree (the crypto by-name
+// pattern, capsule_byname_import_link_test.sfn). Content is deterministic so
+// concurrent parallel runs are safe. Assert on captured output with
+// `sfn/strings` predicates — the `sfn/test` `expect_*` matchers are `![pure]`
+// and cannot be used from an `![io]` test (#842).
+import { contains } from "sfn/strings";
+
+fn _sfn_bin() -> string ![io] {
+    let configured = env.get("SAILFIN_BIN");
+    if configured.length > 0 { return configured; }
+    return "build/bin/sfn";
+}
+
+// The build spawns a nested clang + linker, so the child needs PATH.
+// SAILFIN_TEST_SCRATCH routes the program.ll build-cache per invocation so
+// the parallel pool does not collide on build/sailfin (#1333).
+fn _child_env() -> string[] ![io] {
+    let mut e: string[] = [];
+    let path = env.get("PATH");
+    if path.length > 0 { e.push("PATH=" + path); }
+    let home = env.get("HOME");
+    if home.length > 0 { e.push("HOME=" + home); }
+    let tmpdir = env.get("TMPDIR");
+    if tmpdir.length > 0 { e.push("TMPDIR=" + tmpdir); }
+    let scratch = env.get("SAILFIN_TEST_SCRATCH");
+    if scratch.length > 0 { e.push("SAILFIN_TEST_SCRATCH=" + scratch); }
+    return e;
+}
+
+// Per-test binary output: SAILFIN_TEST_SCRATCH or /tmp, keyed by tag.
+fn _bin_path(tag: string) -> string ![io] {
+    let mut base = env.get("SAILFIN_TEST_SCRATCH");
+    if base.length == 0 { base = "/tmp"; }
+    return base + "/sfn-72-decorator-" + tag + "-prog";
+}
+
+fn _write_capsule_toml(root: string, name: string, deps: string) ![io] {
+    fs.createDirectory(root + "/src", true);
+    fs.writeFile(root + "/capsule.toml", "[capsule]\n" + "name = \"" + name
+        + "\"\n"
+        + "version = \"0.1.0\"\n\n"
+        + deps
+        + "[capabilities]\n"
+        + "required = [\"io\"]\n\n"
+        + "[build]\n"
+        + "entry = \"src/main.sfn\"\n");
+}
+
+// ---- Test 1: a user-defined `@decorator` imported from a sibling module ----
+// Proves the mechanism is general (not hardcoded to the built-in names): a
+// `@decorator`-marked `audit` is imported and applied, and its entry-hook
+// body runs before the decorated function's body.
+test "capsule decorator: user @decorator entry hook runs before the fn body" ![io] {
+    let root = "build/sfn-72-decorator-user";
+    _write_capsule_toml(root, "sfn72-decorator-user", "");
+    fs.writeFile(root + "/src/dec.sfn", "@decorator\n"
+        + "fn audit(args: string[], fn_name: string) -> void ![io] {\n"
+        + "    print(\"audited \" + fn_name);\n"
+        + "}\n");
+    fs.writeFile(root + "/src/main.sfn", "import { audit } from \"./dec\";\n\n"
+        + "@audit\n"
+        + "fn work() -> void ![io] {\n"
+        + "    print(\"work body\");\n"
+        + "}\n\n"
+        + "fn main() -> int ![io] {\n"
+        + "    work();\n"
+        + "    return 0;\n"
+        + "}\n");
+
+    let out_bin = _bin_path("user");
+    let build_exit = process.run_capture([_sfn_bin(), "build", "-p", root, "-o", out_bin], _child_env());
+    let _bo = process.capture_take_stdout();
+    let _be = process.capture_take_stderr();
+    assert build_exit == 0;
+
+    let run_exit = process.run_capture([out_bin], _child_env());
+    let out = process.capture_take_stdout();
+    let _re = process.capture_take_stderr();
+    assert run_exit == 0;
+    // Entry hook fired (`audited work`) and the body still ran (`work body`).
+    assert contains(out, "audited work");
+    assert contains(out, "work body");
+}
+
+// ---- Test 2: imported `@logExecution` lowers via the sfn/log capsule ----
+// The capsule body emits the uppercase `[INFO] <fn>`; the always-linked
+// runtime helper emits lowercase `[info] <fn>`. Asserting the uppercase form
+// pins that the capsule path — not the fallback helper — was taken.
+test "capsule decorator: imported @logExecution routes through sfn/log ([INFO])" ![io] {
+    let root = "build/sfn-72-decorator-log";
+    _write_capsule_toml(root, "sfn72-decorator-log", "[dependencies]\n\"sfn/log\" = \"0.2.1\"\n\n");
+    fs.writeFile(root + "/src/main.sfn", "import { logExecution } from \"sfn/log\";\n\n"
+        + "@logExecution\n"
+        + "fn handler() -> void ![io] {\n"
+        + "    print(\"body ran\");\n"
+        + "}\n\n"
+        + "fn main() -> int ![io] {\n"
+        + "    handler();\n"
+        + "    return 0;\n"
+        + "}\n");
+
+    let out_bin = _bin_path("log");
+    let build_exit = process.run_capture([_sfn_bin(), "build", "-p", root, "-o", out_bin], _child_env());
+    let _bo = process.capture_take_stdout();
+    let _be = process.capture_take_stderr();
+    assert build_exit == 0;
+
+    let run_exit = process.run_capture([out_bin], _child_env());
+    let out = process.capture_take_stdout();
+    let _re = process.capture_take_stderr();
+    assert run_exit == 0;
+    // Capsule `info` output (uppercase), not the runtime helper (lowercase).
+    assert contains(out, "[INFO] handler");
+    assert contains(out, "body ran");
+    assert ! contains(out, "[info] handler");
+}
+
+// ---- Test 3: `@trace` has a distinct entry-hook body ----
+// `@trace` emits a trace-level line, separate from `@logExecution`'s [INFO].
+test "capsule decorator: @trace emits a distinct [TRACE] entry line" ![io] {
+    let root = "build/sfn-72-decorator-trace";
+    _write_capsule_toml(root, "sfn72-decorator-trace", "[dependencies]\n\"sfn/log\" = \"0.2.1\"\n\n");
+    fs.writeFile(root + "/src/main.sfn", "import { trace } from \"sfn/log\";\n\n"
+        + "@trace\n"
+        + "fn handler() -> void ![io] {\n"
+        + "    print(\"body ran\");\n"
+        + "}\n\n"
+        + "fn main() -> int ![io] {\n"
+        + "    handler();\n"
+        + "    return 0;\n"
+        + "}\n");
+
+    let out_bin = _bin_path("trace");
+    let build_exit = process.run_capture([_sfn_bin(), "build", "-p", root, "-o", out_bin], _child_env());
+    let _bo = process.capture_take_stdout();
+    let _be = process.capture_take_stderr();
+    assert build_exit == 0;
+
+    let run_exit = process.run_capture([out_bin], _child_env());
+    let out = process.capture_take_stdout();
+    let _re = process.capture_take_stderr();
+    assert run_exit == 0;
+    assert contains(out, "[TRACE]");
+    assert contains(out, "entered handler");
+    // Distinct from @logExecution — never the [INFO] body.
+    assert ! contains(out, "[INFO]");
+}
+
+// ---- Test 4: un-imported built-in @logExecution — deprecation lint ----
+// `sfn check` emits the W0211 `deprecated-api` warning pointing at the `log`
+// capsule import (the build/run fallback is exercised in Test 5).
+test "capsule decorator: un-imported @logExecution emits the W0211 deprecated-api lint" ![io] {
+    let dir = "build/sfn-72-decorator-deprecation";
+    fs.createDirectory(dir, true);
+    let src = dir + "/main.sfn";
+    fs.writeFile(src, "@logExecution\n" + "fn handler() -> void ![io] {\n"
+        + "    print(\"body ran\");\n"
+        + "}\n\n"
+        + "fn main() -> int ![io] {\n"
+        + "    handler();\n"
+        + "    return 0;\n"
+        + "}\n");
+
+    let check_exit = process.run_capture([_sfn_bin(), "check", src], _child_env());
+    let out = process.capture_take_stdout();
+    let err = process.capture_take_stderr();
+    // A lint warning is non-fatal — check still succeeds.
+    assert check_exit == 0;
+    assert contains(out + err, "W0211");
+    assert contains(out + err, "deprecated-api");
+}
+
+// ---- Test 5: un-imported built-in @logExecution — fallback still works ----
+// Without an import, `@logExecution` lowers to the runtime helper and prints
+// the lowercase `[info] <fn>`; the program builds and runs unchanged.
+test "capsule decorator: un-imported @logExecution still runs via the fallback helper" ![io] {
+    let dir = "build/sfn-72-decorator-fallback";
+    fs.createDirectory(dir, true);
+    let src = dir + "/main.sfn";
+    fs.writeFile(src, "@logExecution\n" + "fn handler() -> void ![io] {\n"
+        + "    print(\"body ran\");\n"
+        + "}\n\n"
+        + "fn main() -> int ![io] {\n"
+        + "    handler();\n"
+        + "    return 0;\n"
+        + "}\n");
+
+    let out_bin = _bin_path("fallback");
+    let build_exit = process.run_capture([_sfn_bin(), "build", "-o", out_bin, src], _child_env());
+    let _bo = process.capture_take_stdout();
+    let _be = process.capture_take_stderr();
+    assert build_exit == 0;
+
+    let run_exit = process.run_capture([out_bin], _child_env());
+    let out = process.capture_take_stdout();
+    let _re = process.capture_take_stderr();
+    assert run_exit == 0;
+    // Runtime-helper fallback output (lowercase), the decorated body still ran.
+    assert contains(out, "[info] handler");
+    assert contains(out, "body ran");
+}
+
+// ---- Test 6: an imported NON-decorator applied as `@name` stays inert ----
+// SFEP-0023 §4.2 / the lowering marker gate: only a genuinely `@decorator`-
+// marked import routes to the capsule-call branch. An imported ordinary
+// function applied as `@name` must NOT emit a (wrong-ABI) capsule call — it
+// stays a no-op and the program builds and runs normally. Guards the
+// discriminator against the imported-non-decorator miscompile.
+test "capsule decorator: imported non-@decorator applied as @name is inert (no miscompile)" ![io] {
+    let root = "build/sfn-72-decorator-nonmarked";
+    _write_capsule_toml(root, "sfn72-decorator-nonmarked", "");
+    // `note` is an ordinary exported function — NOT `@decorator`-marked.
+    fs.writeFile(root + "/src/util.sfn", "fn note(x: int) -> int {\n"
+        + "    return x + 1;\n"
+        + "}\n");
+    fs.writeFile(root + "/src/main.sfn", "import { note } from \"./util\";\n\n"
+        + "@note\n"
+        + "fn work() -> void ![io] {\n"
+        + "    print(\"work body\");\n"
+        + "}\n\n"
+        + "fn main() -> int ![io] {\n"
+        + "    work();\n"
+        + "    return 0;\n"
+        + "}\n");
+
+    let out_bin = _bin_path("nonmarked");
+    let build_exit = process.run_capture([_sfn_bin(), "build", "-p", root, "-o", out_bin], _child_env());
+    let _bo = process.capture_take_stdout();
+    let _be = process.capture_take_stderr();
+    assert build_exit == 0;
+
+    let run_exit = process.run_capture([out_bin], _child_env());
+    let out = process.capture_take_stdout();
+    let _re = process.capture_take_stderr();
+    // No miscompile: the program builds, runs, and the body executes.
+    assert run_exit == 0;
+    assert contains(out, "work body");
+}
