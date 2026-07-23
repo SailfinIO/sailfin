@@ -253,6 +253,22 @@ here.
   not yet wired, so ordinary source programs continue directly to the native
   emitter; StableHLO, dynamic shapes, autodiff, and device codegen remain
   planned follow-ons.
+- **Tensor-IR matmul executes end-to-end** (SFEP-0052 Track A Rung 1, SFN-447):
+  the tensor-IR scalar matmul lowering now links to a runnable native binary and
+  is numerically verified against an independent naive oracle within relative
+  error ≤ 1e-12 (identical f64 accumulation order — effectively exact). This
+  closed a latent gap where the scalar-reference exit emitted a `.fn` header with
+  no `.param` declarations, so the native-IR parser bound zero arguments and the
+  kernel lowered to a valid-looking but uncallable `define`; the prior snapshot
+  test only asserted the emitted LLVM contained `define`, never running it. The
+  emitted kernel is exposed as a swappable callable
+  (`build_tensor_matmul_kernel_binary`, `tensor_ir_link_harness.sfn`) so later
+  Rung-1 leaves (SIMD, cache-blocking, parallel) reuse the same equivalence +
+  timing harness. Single-thread scalar baseline anchor (hardware-dependent, for
+  measuring later deltas — not a CI threshold): **~1.0 GFLOP/s at 128³, ~0.6
+  GFLOP/s at 256³** (naive f64, `.push`-allocating). Cross-check: the Rung-0
+  cache-blocked `sfn/tensor` capsule oracle is ~0.64 GFLOP/s single-thread at
+  128³ (SFN-425).
 - **Backend seam** (`compiler/src/backend.sfn`, #1112; SFEP-15 Stage 0):
   every codegen/link `clang` invocation routes through a `Backend` interface
   whose sole impl is `LlvmTextBackend` (today's textual-LLVM-IR + clang path).

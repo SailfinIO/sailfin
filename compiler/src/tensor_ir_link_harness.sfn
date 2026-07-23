@@ -1,0 +1,271 @@
+// compiler/src/tensor_ir_link_harness.sfn
+//
+// Test-only bridge that turns a shape-typed tensor-IR matmul module into a
+// runnable, timeable native binary whose matmul kernel IS the tensor-IR-emitted
+// one. The scalar-reference lowering (tensor_ir_lower_scalar.sfn) produces a
+// `.fn` block of native-IR text but nothing links it; `sfn build` only ingests
+// `.sfn` source. This module closes that gap for the Rung-1 CPU matmul baseline
+// (SFEP-0052 Track A, SFN-447): it renders a self-contained driver program with
+// a placeholder `matmul_kernel`, substitutes the tensor-IR-emitted `.fn` block
+// for that placeholder in the driver's native text, lowers the spliced module,
+// and links it with the existing runtime-capsule link path.
+//
+// The swap seam is the `kernel_module` argument: later Rung-1 leaves (SFN-448
+// auto-vectorized, SFN-451 parallel) emit a differently-lowered `.fn` block for
+// the same signature and reuse this harness's equivalence + timing driver
+// unchanged. Not compiled into the shipped binary (main.sfn does not import it);
+// `--gc-sections` drops it, exactly like tensor_ir_lower_scalar.sfn.
+import { _clang_link_multi } from "./build/link";
+import { lower_to_llvm_ir_from_text } from "./llvm/lowering/entrypoints";
+import { compile_to_native_text_with_module } from "./main";
+import { number_to_string } from "./num_format";
+import { runtime_capsule_from_root } from "./runtime_capsule_resolver";
+import { index_of, substring } from "./string_utils";
+import { TensorModule } from "./tensor_ir";
+import { lower_tensor_module_to_native } from "./tensor_ir_lower_scalar";
+
+struct TensorMatmulBuildResult {
+    binary_path: string;
+    success: boolean;
+    diagnostics: string[];
+}
+
+// A `.fn <name>( … ) … .endfn` block is self-terminating: `.fn` blocks do not
+// nest, so the first "\n.endfn\n" after the header ends this function. Including
+// the trailing "(" in the header marker prevents matching a longer name that
+// shares this one as a prefix (e.g. matmul_kernel vs matmul_kernel_ref).
+fn _fn_block_bounds(native_text: string, fn_name: string) -> int[] {
+    let marker = ".fn " + fn_name + "(";
+    let start = index_of(native_text, marker);
+    if start < 0 { return []; }
+    let tail = substring(native_text, start, native_text.length);
+    let terminator = "\n.endfn\n";
+    let rel = index_of(tail, terminator);
+    if rel < 0 { return []; }
+    let end = start + rel + terminator.length;
+    return [start, end];
+}
+
+// Extracts the bare `.fn <fn_name>( … ) … .endfn\n` block from module native
+// text. Returns "" when the block is absent (caller treats as a lowering bug).
+fn _extract_fn_block(native_text: string, fn_name: string) -> string {
+    let bounds = _fn_block_bounds(native_text, fn_name);
+    if bounds.length == 0 { return ""; }
+    return substring(native_text, bounds[0], bounds[1]);
+}
+
+// Replaces the driver's placeholder `.fn <fn_name>` block with `replacement`
+// (itself a complete `.fn … .endfn\n` block). Returns "" when the placeholder
+// is missing.
+fn _splice_fn_block(driver_text: string, replacement: string, fn_name: string) -> string {
+    let bounds = _fn_block_bounds(driver_text, fn_name);
+    if bounds.length == 0 { return ""; }
+    let before = substring(driver_text, 0, bounds[0]);
+    let after = substring(driver_text, bounds[1], driver_text.length);
+    return before + replacement + after;
+}
+
+// The naive n×n×n matmul body shared by the placeholder kernel (which the splice
+// overwrites) and the independent `matmul_reference` oracle (which stays). Both
+// accumulate the K-sum in strictly ascending k, so a correct tensor-IR kernel —
+// which the scalar lowering emits with the same accumulation order — is
+// bit-identical to the reference, making the rel-err gate effectively exact.
+fn _naive_matmul_body(ns: string, n2s: string) -> string {
+    return "    let mut out: float[] = [];\n" + "    let mut z: int = 0;\n"
+        + "    loop { if z >= "
+        + n2s
+        + " { break; } out.push(0.0); z += 1; }\n"
+        + "    let mut r: int = 0;\n"
+        + "    loop {\n"
+        + "        if r >= "
+        + ns
+        + " { break; }\n"
+        + "        let mut c: int = 0;\n"
+        + "        loop {\n"
+        + "            if c >= "
+        + ns
+        + " { break; }\n"
+        + "            let mut acc: float = 0.0;\n"
+        + "            let mut k: int = 0;\n"
+        + "            loop {\n"
+        + "                if k >= "
+        + ns
+        + " { break; }\n"
+        + "                acc = acc + a[r * "
+        + ns
+        + " + k] * b[k * "
+        + ns
+        + " + c];\n"
+        + "                k += 1;\n"
+        + "            }\n"
+        + "            out[r * "
+        + ns
+        + " + c] = acc;\n"
+        + "            c += 1;\n"
+        + "        }\n"
+        + "        r += 1;\n"
+        + "    }\n"
+        + "    return out;\n";
+}
+
+// Renders the complete driver `.sfn` program: a placeholder `<kernel_fn_name>`
+// matmul (replaced by the tensor-IR block), an independent `matmul_reference`
+// oracle, deterministic mixed-sign fills, a full-matrix rel-err ≤ 1e-12 gate,
+// and a warm-up-then-timed loop printing a machine-parseable GFLOP/s record.
+// Emitted so `main` exits 0 iff the numeric gate passes, 1 otherwise — the
+// binary's exit code IS the equivalence assertion.
+fn render_matmul_driver_source(n: int, iters: int, kernel_fn_name: string) -> string {
+    let ns = number_to_string(n);
+    let n2s = number_to_string(n * n);
+    let its = number_to_string(iters);
+    let body = _naive_matmul_body(ns, n2s);
+    return "fn " + kernel_fn_name + "(a: float[], b: float[]) -> float[] {\n"
+        + body
+        + "}\n\n"
+        + "fn matmul_reference(a: float[], b: float[]) -> float[] {\n"
+        + body
+        + "}\n\n"
+        + "fn abs_f(x: float) -> float {\n"
+        + "    if x < 0.0 { return 0.0 - x; }\n"
+        + "    return x;\n"
+        + "}\n\n"
+        + "fn fill_a(i: int) -> float {\n"
+        + "    let v = ((i * 31 + 7) % 97) - 48;\n"
+        + "    return v as float;\n"
+        + "}\n\n"
+        + "fn fill_b(i: int) -> float {\n"
+        + "    let v = ((i * 17 + 5) % 89) - 44;\n"
+        + "    return v as float;\n"
+        + "}\n\n"
+        + "fn main() -> int ![clock, io] {\n"
+        + "    let n = "
+        + ns
+        + ";\n"
+        + "    let iters = "
+        + its
+        + ";\n"
+        + "    let total = "
+        + n2s
+        + ";\n"
+        + "    let mut a: float[] = [];\n"
+        + "    let mut b: float[] = [];\n"
+        + "    let mut i: int = 0;\n"
+        + "    loop { if i >= total { break; } a.push(fill_a(i)); b.push(fill_b(i)); i += 1; }\n"
+        + "    let c = "
+        + kernel_fn_name
+        + "(a, b);\n"
+        + "    let refv = matmul_reference(a, b);\n"
+        + "    let mut ok: boolean = true;\n"
+        + "    let mut j: int = 0;\n"
+        + "    loop {\n"
+        + "        if j >= total { break; }\n"
+        + "        let diff = abs_f(c[j] - refv[j]);\n"
+        + "        let tol = 0.000000000001 * (abs_f(refv[j]) + 1.0);\n"
+        + "        if diff > tol { ok = false; break; }\n"
+        + "        j += 1;\n"
+        + "    }\n"
+        + "    let warm = "
+        + kernel_fn_name
+        + "(a, b);\n"
+        + "    let mut sink: float = warm[0];\n"
+        + "    let start = monotonic_millis();\n"
+        + "    let mut it: int = 0;\n"
+        + "    loop {\n"
+        + "        if it >= iters { break; }\n"
+        + "        let cc = "
+        + kernel_fn_name
+        + "(a, b);\n"
+        + "        sink = sink + cc[0];\n"
+        + "        it += 1;\n"
+        + "    }\n"
+        + "    let ms = monotonic_millis() - start;\n"
+        + "    let sink_i = sink as int;\n"
+        + "    let flops = 2 * n * n * n * iters;\n"
+        + "    if ms <= 0 {\n"
+        + "        print(\"tensor-matmul n=\" + number_to_string(n) + \" iters=\" + number_to_string(iters) + \" inner_ms=0 mflops_per_s=unmeasured sink=\" + number_to_string(sink_i));\n"
+        + "    } else {\n"
+        + "        let mflops = flops / ms / 1000;\n"
+        + "        print(\"tensor-matmul n=\" + number_to_string(n) + \" iters=\" + number_to_string(iters) + \" inner_ms=\" + number_to_string(ms) + \" flops=\" + number_to_string(flops) + \" mflops_per_s=\" + number_to_string(mflops) + \" sink=\" + number_to_string(sink_i));\n"
+        + "    }\n"
+        + "    if ok { print(\"OK\"); return 0; }\n"
+        + "    print(\"FAIL\");\n"
+        + "    return 1;\n"
+        + "}\n";
+}
+
+// Lowers `kernel_module` (one matmul function named `kernel_fn_name`, F64
+// row-major, params [n×n], [n×n]) to native text, splices its `.fn` block into
+// a rendered driver, lowers the spliced single module to LLVM IR, writes it, and
+// links a native binary via the runtime-capsule path. `out_dir` must be a
+// caller-owned isolated dir (per-test scratch) — it holds the `.ll` and the
+// link cache, so parallel callers never collide. `binary_dir` must hold the
+// compiler binary (e.g. "build/bin"): the runtime capsules carry sfn-sources
+// that the link re-emits to objects by re-invoking `<binary_dir>/sfn`.
+fn build_tensor_matmul_kernel_binary(kernel_module: TensorModule, kernel_fn_name: string, n: int, iters: int, runtime_root: string, binary_dir: string, out_dir: string, out_binary: string) -> TensorMatmulBuildResult ![io] {
+    let lowered = lower_tensor_module_to_native(kernel_module);
+    if lowered.diagnostics.length > 0 {
+        return TensorMatmulBuildResult {
+            binary_path: "",
+            success: false,
+            diagnostics: lowered.diagnostics
+        };
+    }
+    let kernel_block = _extract_fn_block(lowered.native_text, kernel_fn_name);
+    if kernel_block.length == 0 {
+        return TensorMatmulBuildResult {
+            binary_path: "",
+            success: false,
+            diagnostics: ["tensor-ir kernel block `" + kernel_fn_name
+                + "` not found in lowered native text"]
+        };
+    }
+    let driver_src = render_matmul_driver_source(n, iters, kernel_fn_name);
+    let driver_native = compile_to_native_text_with_module(driver_src, "main");
+    if driver_native.length == 0 {
+        return TensorMatmulBuildResult {
+            binary_path: "",
+            success: false,
+            diagnostics: ["driver source failed to compile to native text (typecheck/effect error)"]
+        };
+    }
+    let spliced = _splice_fn_block(driver_native, kernel_block, kernel_fn_name);
+    if spliced.length == 0 {
+        return TensorMatmulBuildResult {
+            binary_path: "",
+            success: false,
+            diagnostics: ["driver placeholder `" + kernel_fn_name
+                + "` not found for splice"]
+        };
+    }
+    let ir = lower_to_llvm_ir_from_text(spliced, "main");
+    if ir.length == 0 {
+        return TensorMatmulBuildResult {
+            binary_path: "",
+            success: false,
+            diagnostics: ["spliced native text failed to lower to LLVM IR"]
+        };
+    }
+    let ll_path = out_dir + "/tensor_matmul.ll";
+    fs.writeFile(ll_path, ir);
+    let caps = runtime_capsule_from_root(runtime_root);
+    let link = _clang_link_multi([ll_path], out_binary, runtime_root, caps, binary_dir, out_dir, "");
+    if link.rc != 0 {
+        return TensorMatmulBuildResult {
+            binary_path: "",
+            success: false,
+            diagnostics: ["clang link failed (rc=" + number_to_string(link.rc)
+                + ")"]
+        };
+    }
+    return TensorMatmulBuildResult {
+        binary_path: out_binary,
+        success: true,
+        diagnostics: []
+    };
+}
+
+export {
+    TensorMatmulBuildResult,
+    build_tensor_matmul_kernel_binary,
+    render_matmul_driver_source
+};

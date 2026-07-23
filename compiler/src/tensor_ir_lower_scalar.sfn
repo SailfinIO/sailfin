@@ -282,6 +282,21 @@ fn lower_tensor_function_to_native(function: TensorFunction) -> TensorScalarLowe
         + _ts_native_value_type(function.result_type)
         + "\n"
         + ".meta effects none\n";
+    // Emit `.param` declarations. The native-IR parser populates a function's
+    // parameter list solely from `.param` lines — it does not read parameters
+    // out of the `.fn` header signature (native_ir_parser.sfn) — so without
+    // these the lowered kernel binds zero arguments and every parameter
+    // reference in the body resolves to an undefined value. The header
+    // signature alone lowers to a valid `define` but an uncallable one (SFN-447).
+    let mut param_decl_index: int = 0;
+    loop {
+        if param_decl_index >= function.parameter_types.length { break; }
+        let param_value_id = _ts_parameter_value_id(function, param_decl_index);
+        text = text + ".param " + _ts_value_name(param_value_id) + ": "
+            + _ts_native_value_type(function.parameter_types[param_decl_index])
+            + "\n";
+        param_decl_index += 1;
+    }
     let mut operation_index: int = 0;
     loop {
         if operation_index >= function.operations.length { break; }
