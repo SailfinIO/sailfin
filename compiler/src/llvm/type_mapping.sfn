@@ -366,6 +366,13 @@ fn layout_annotation_base_type(annotation: string) -> string {
 }
 
 fn layout_annotation_represents_user_value(annotation: string) -> boolean {
+    // A `Task<T>` handle (SFEP-0055) is pointer-represented — it maps to the
+    // opaque future pointer `%SailfinFuture<Kind>*`, never a by-value
+    // aggregate. It must not be stored inline in an array: stripping its
+    // pointer suffix (as inline user-value elements do) would leave the
+    // unsized opaque `%SailfinFuture<Kind>` element type, which LLVM rejects at
+    // the empty-array sizeof GEP. Keep it pointer-width, like any other handle.
+    if starts_with(trim_text(annotation), "Task<") { return false; }
     if layout_annotation_requires_pointer(annotation) { return false; }
     let base = layout_annotation_base_type(annotation);
     if base.length == 0 { return false; }
@@ -440,6 +447,23 @@ fn map_type_annotation(annotation: string) -> string {
     if starts_with(trimmed, "fn(") { return "{i8*, i8*}"; }
     if starts_with(trimmed, "fn (") { return "{i8*, i8*}"; }
     let normalized = unwrap_move_wrapper(trimmed);
+
+    // `Task<T>` is the user-writable typed task handle (SFEP-0055): a phantom
+    // newtype over the raw future pointer `spawn fn() -> T` already produces, so
+    // it lowers to the same `%SailfinFuture<Kind>*` pointer at zero runtime
+    // cost. Resolving it here — before the `looks_like_user_type` fallback that
+    // would mint a distinct `%Task*` boxed struct — gives an annotated
+    // `Task<T>[]` a pointer-width future-pointer element slot instead of the
+    // inferred-empty `double` default that is the E0831 corruption precondition
+    // (SFN-386). Parametric-only (`Task<`), so the internal runtime `struct
+    // Task` (`scheduler.sfn`) used bare stays a plain user type.
+    if starts_with(normalized, "Task<") {
+        if ends_with(normalized, ">") {
+            let task_open = index_of(normalized, "<");
+            let task_inner = trim_text(substring(normalized, task_open + 1, normalized.length - 1));
+            return future_pointer_type_for_return_type(task_inner);
+        }
+    }
 
     // Raw pointer types: `*T`, `*mut T`, `*opaque`.
     // Sailfin user-defined values often lower as pointers already; avoid

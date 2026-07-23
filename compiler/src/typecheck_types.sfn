@@ -1215,13 +1215,19 @@ fn make_channel_send_mismatch_diagnostic(channel_kind: string, sent_kind: string
 // E0831 — a `spawn` task handle is pushed into a local whose declared
 // element kind is the inferred-empty-`[]` sentinel. The empty literal bakes
 // the array's LLVM element type as `double`, so the pushed future pointer is
-// stored through a double slot and corrupted (SFN-386). There is no writable
-// handle type to annotate the array with, so this is rejected rather than
-// inferred — mirroring the SFN-351 fail-closed precedent for the identical
-// empty-`[]` root cause (`channel_send_diagnostics`).
+// stored through a double slot and corrupted (SFN-386). SFEP-0055 adds the
+// writable `Task<T>` handle type, so the primary remediation is now to
+// annotate the array (`let mut hs: Task<int>[] = []`); the two SFN-386
+// fallbacks (seed non-empty / await directly) follow. The un-annotated `[]`
+// still fails closed here — `Task<T>` opens the annotated path without
+// weakening this guard.
 fn make_spawn_handle_into_empty_array_diagnostic(name: string, span: SourceSpan?) -> Diagnostic {
     let message = "cannot push a `spawn` task handle into `" + name
-        + "`, an inferred-empty `[]` array: it has no element type and there is no writable handle type to annotate. Instead, `await` each handle directly at the spawn site, or seed the array non-empty with a handle (`let mut hs = [spawn ...]`) so its element type is fixed.";
+        + "`, an inferred-empty `[]` array: it has no element type. Annotate the array with the handle type (`let mut "
+        + name
+        + ": Task<int>[] = []`, matching your `spawn`'s return type), then `join_all("
+        + name
+        + ")` to await in input order. Alternatively `await` each handle directly at the spawn site, or seed the array non-empty (`let mut hs = [spawn ...]`).";
     return Diagnostic {
         code: "E0831",
         severity: "error",
@@ -1230,6 +1236,82 @@ fn make_spawn_handle_into_empty_array_diagnostic(name: string, span: SourceSpan?
         primary: token_from_name("push", span),
         suggestion: null
     };
+}
+
+// E0836 — a `spawn` task handle whose result kind differs from a
+// `Task<T>[]`'s declared element kind is pushed into it (SFEP-0055 §3.4). A
+// handle array is homogeneous: every `Task<T>` handle it holds must share one
+// `T`. This is the concurrency-specific surfacing of ordinary array element
+// homogeneity, now that the element type is a concrete `Task<T>`.
+fn make_spawn_handle_kind_mismatch_diagnostic(name: string, array_kind: string, pushed_kind: string, span: SourceSpan?) -> Diagnostic {
+    let message = "cannot push a `spawn fn() -> " + trim_text(pushed_kind)
+        + "` handle into `"
+        + name
+        + "`, a `Task<"
+        + trim_text(array_kind)
+        + ">[]`: a task-handle array is homogeneous — every handle must have result kind `"
+        + trim_text(array_kind)
+        + "`. Use a matching `spawn` return type, or a separate array per result type.";
+    return Diagnostic {
+        code: "E0836",
+        severity: "error",
+        message: message,
+        file_path: "",
+        primary: token_from_name("push", span),
+        suggestion: null
+    };
+}
+
+// The monomorphized element kind a `Task<T>[]` handle-array type annotation
+// carries (SFEP-0055), or null when `type_text` is not a `Task<...>[]` array.
+// Mirrors `channel_element_kind`: strip the trailing `[]`, match the `Task`
+// head before the first `<`, lift the `<...>` payload, and classify it with
+// the same six-kind resolver `spawn`/`channel` use — so a handle array's
+// element kind agrees with the kind its `spawn` handles resolve to. The bare
+// scalar `Task<T>` (a single handle binding) is intentionally NOT matched
+// here: only the array form drives the `.push(spawn ...)` homogeneity check.
+fn task_array_element_kind(type_text: string) -> string? {
+    let trimmed = trim_text(type_text);
+    if trimmed.length < 3 { return null; }
+    if substring(trimmed, trimmed.length - 2, trimmed.length) != "[]" {
+        return null;
+    }
+    let element = trim_text(substring(trimmed, 0, trimmed.length - 2));
+    let mut lt: int = -1;
+    let mut index: int = 0;
+    loop {
+        if index >= element.length { break; }
+        if element[index] == "<" {
+            lt = index;
+            break;
+        }
+        index += 1;
+    }
+    if lt < 0 { return null; }
+    let head = trim_text(slice_text(element, 0, lt));
+    if !strings_equal(head, "Task") { return null; }
+    let inner = extract_generic_argument_block(element);
+    if inner == null { return null; }
+    let resolved = spawn_future_kind(trim_text(inner));
+    if resolved.length == 0 { return null; }
+    return resolved;
+}
+
+// The `SymbolEntry.element_kind` marker for a `Task<T>[]` handle-array binding
+// (SFEP-0055): the resolved kind under a `taskarr:` tag, so it is distinct
+// from a `Channel<T>` element kind (a bare kind the E0815 send check reads)
+// and the `empty_array` E0831 sentinel. The tag never equals `"empty_array"`,
+// so E0831 is unaffected. `push_spawn_handle_diagnostics` reads it back to
+// enforce handle-array homogeneity (E0836).
+fn make_task_array_element_marker(kind: string) -> string {
+    return "taskarr:" + kind;
+}
+
+// The handle kind carried by a `Task<T>[]` element marker, or null when
+// `element_kind` is not one (a channel/empty/absent marker).
+fn task_array_marker_kind(element_kind: string) -> string? {
+    if !starts_with(element_kind, "taskarr:") { return null; }
+    return slice_text(element_kind, 8, element_kind.length);
 }
 
 // SFN-404: reject a generic-struct static constructor whose instantiation is
@@ -1867,6 +1949,12 @@ fn is_builtin_call_name(name: string) -> boolean {
     if strings_equal(name, "send") { _ret = true; }
     if strings_equal(name, "receive") { _ret = true; }
     if strings_equal(name, "await") { _ret = true; }
+    // `join_all(handles)` — ordered multi-await builtin (SFEP-0055). A free
+    // call, not a keyword, so it must be named here or the undefined-call
+    // walker false-positives E0420. Lowered to `sfn_join_all` in
+    // `core_concurrency_lowering.sfn`; only the builtin (no user/imported
+    // `join_all` in scope) takes that path.
+    if strings_equal(name, "join_all") { _ret = true; }
     if strings_equal(name, "atomic_load") { _ret = true; }
     if strings_equal(name, "atomic_store") { _ret = true; }
     if strings_equal(name, "atomic_add") { _ret = true; }

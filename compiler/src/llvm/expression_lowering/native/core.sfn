@@ -404,6 +404,7 @@ import {
     lower_channel_capacity_expression,
     lower_channel_typed_expression,
     lower_parallel_expression,
+    lower_join_all_expression,
     lower_serve_expression,
     lower_await_expression
 } from "./core_concurrency_lowering";
@@ -974,6 +975,16 @@ fn lower_expression(expression: string, bindings: ParameterBinding[], locals: Lo
     // unchanged, so `test_runtime_serve.sh` stays green.
     if starts_with(stripped, "serve(") && find_function_by_name_or_import(functions, "serve") == null {
         return lower_serve_expression(stripped, bindings, locals, temp_index, lines, functions, context);
+    }
+
+    // ── join_all(<handles>) ─────────────────────────────────────────────
+    // Ordered multi-await over an already-spawned `Task<T>[]` (SFEP-0055).
+    // Lowers to `sfn_join_all(i8* data, i64 count)` over the handle array's
+    // data pointer + length, returning an `SfnArray` reinterpreted as `T[]`
+    // in input order. GATE: only the *builtin* takes this path; a user or
+    // imported `join_all` in scope falls through to normal call lowering.
+    if starts_with(stripped, "join_all(") && find_function_by_name_or_import(functions, "join_all") == null {
+        return lower_join_all_expression(stripped, bindings, locals, temp_index, lines, functions, context, expected_type);
     }
 
     // Literal expressions.

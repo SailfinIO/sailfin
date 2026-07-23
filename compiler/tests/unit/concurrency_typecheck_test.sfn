@@ -22,8 +22,11 @@ import {
 import {
     SymbolEntry,
     future_element_kind,
+    make_task_array_element_marker,
     register_local_symbol,
     spawn_future_kind,
+    task_array_element_kind,
+    task_array_marker_kind,
     type_is_future
 } from "../../src/typecheck_types";
 
@@ -43,6 +46,20 @@ fn _first_let_initializer(source: string) -> Expression ![io] {
 fn _receive_kind(initializer: Expression?, bindings: SymbolEntry[]) -> string {
     let resolved = await_receive_result_kind(initializer, bindings);
     if resolved == null { return "<no-receive-kind>"; }
+    return resolved;
+}
+
+// Collapse the not-found case for the `Task<T>[]` element-kind resolver.
+fn _task_array_kind(type_text: string) -> string {
+    let resolved = task_array_element_kind(type_text);
+    if resolved == null { return "<not-task-array>"; }
+    return resolved;
+}
+
+// Collapse the not-found case for the `Task<T>[]` element marker reader.
+fn _task_marker_kind(marker: string) -> string {
+    let resolved = task_array_marker_kind(marker);
+    if resolved == null { return "<not-task-marker>"; }
     return resolved;
 }
 
@@ -190,4 +207,36 @@ test "await receive: an unbound channel identifier has no receive kind" ![io] {
     let initializer = _first_let_initializer("let task = await ch.receive();");
     let empty_bindings: SymbolEntry[] = [];
     assert strings_equal(_receive_kind(initializer, empty_bindings), "<no-receive-kind>");
+}
+
+// --- Task<T>[] handle-array element kind (SFEP-0055) ------------------------
+test "task array kind: `Task<T>[]` resolves its element kind by the six-kind resolver" {
+    assert strings_equal(_task_array_kind("Task<int>[]"), "int");
+    assert strings_equal(_task_array_kind("Task<string>[]"), "string");
+    assert strings_equal(_task_array_kind("Task<bool>[]"), "bool");
+    assert strings_equal(_task_array_kind("Task<number>[]"), "number");
+    // A user/struct handle result resolves to the ptr catch-all.
+    assert strings_equal(_task_array_kind("Task<MyStruct>[]"), "ptr");
+}
+
+test "task array kind: non-handle-array annotations do not resolve" {
+    // The scalar `Task<int>` (a single handle) is not the array form.
+    assert strings_equal(_task_array_kind("Task<int>"), "<not-task-array>");
+    // A `Channel<int>[]` is not a task-handle array.
+    assert strings_equal(_task_array_kind("Channel<int>[]"), "<not-task-array>");
+    assert strings_equal(_task_array_kind("int[]"), "<not-task-array>");
+    assert strings_equal(_task_array_kind("Task"), "<not-task-array>");
+}
+
+test "task array marker: round-trips the element kind under the taskarr tag" {
+    // The marker is distinct from a bare channel element kind and the
+    // `empty_array` E0831 sentinel, so E0815/E0831 are unaffected.
+    let marker = make_task_array_element_marker("int");
+    assert ! strings_equal(marker, "int");
+    assert ! strings_equal(marker, "empty_array");
+    assert strings_equal(_task_marker_kind(marker), "int");
+    assert strings_equal(_task_marker_kind(make_task_array_element_marker("string")), "string");
+    // A bare kind (a channel element) is not a task-array marker.
+    assert strings_equal(_task_marker_kind("int"), "<not-task-marker>");
+    assert strings_equal(_task_marker_kind("empty_array"), "<not-task-marker>");
 }
