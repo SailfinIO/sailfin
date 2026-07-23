@@ -217,6 +217,88 @@ test "join_all: a non-Task array argument fails closed at build" ![io] {
     assert find(result.output, "[fatal]", 0) >= 0;
 }
 
+// ---- SFN-456: capturing a `for … in` iteration variable DIRECTLY into a
+// spawn closure (no fresh `let` indirection) must build+run and preserve input
+// order. This shape ICE'd — the for-in target reached the closure-env layout
+// with an empty `type_text`, so its env field fell back to the opaque `i8*`
+// while the captured value was an `i64`, emitting `store i8* %v, i8** ...`
+// (invalid IR that failed at link). The pure-closure form.
+test "join_all: direct for-in-var capture (pure closure) builds and joins in input order" ![io] {
+    let src = "fn spawn_ids(ids: int[]) -> int[] ![io] {\n"
+        + "    let mut hs: Task<int>[] = [];\n"
+        + "    for id in ids { hs.push(spawn fn() -> int { return id; }); }\n"
+        + "    return join_all(hs);\n"
+        + "}\n"
+        + "fn main() -> int ![io] {\n"
+        + "    let out: int[] = spawn_ids([4, 5, 6]);\n"
+        + "    let mut ok: boolean = true;\n"
+        + "    if out.length != 3 { ok = false; }\n"
+        + "    if out[0] != 4 { ok = false; }\n"
+        + "    if out[1] != 5 { ok = false; }\n"
+        + "    if out[2] != 6 { ok = false; }\n"
+        + "    if ok { print.info(\"FORIN_OK\"); } else { print.info(\"FORIN_BAD\"); }\n"
+        + "    return 0;\n"
+        + "}\n";
+    let result = _build_and_run("forin-pure", src);
+    assert result.exit == 0;
+    assert find(result.output, "FORIN_OK", 0) >= 0;
+}
+
+// ---- SFN-456: the same direct for-in-var capture with an `![io]` closure
+// (the effect and the closure body's own io were confirmed non-factors in the
+// bisection — the sole trigger is the direct for-in-var capture). Also ICE'd.
+test "join_all: direct for-in-var capture (![io] closure) builds and joins in input order" ![io] {
+    let src = "fn spawn_ids_io(ids: int[]) -> int[] ![io] {\n"
+        + "    let mut hs: Task<int>[] = [];\n"
+        + "    for id in ids {\n"
+        + "        hs.push(spawn fn() -> int ![io] {\n"
+        + "            print.info(\"task\");\n"
+        + "            return id;\n"
+        + "        });\n"
+        + "    }\n"
+        + "    return join_all(hs);\n"
+        + "}\n"
+        + "fn main() -> int ![io] {\n"
+        + "    let out: int[] = spawn_ids_io([7, 8, 9]);\n"
+        + "    let mut ok: boolean = true;\n"
+        + "    if out.length != 3 { ok = false; }\n"
+        + "    if out[0] != 7 { ok = false; }\n"
+        + "    if out[1] != 8 { ok = false; }\n"
+        + "    if out[2] != 9 { ok = false; }\n"
+        + "    if ok { print.info(\"IO_FORIN_OK\"); } else { print.info(\"IO_FORIN_BAD\"); }\n"
+        + "    return 0;\n"
+        + "}\n";
+    let result = _build_and_run("forin-io", src);
+    assert result.exit == 0;
+    assert find(result.output, "IO_FORIN_OK", 0) >= 0;
+}
+
+// ---- SFN-456: direct for-in capture of a `string` element. A primitive
+// `string[]` element is by-value-captured too, routing this path through the
+// `i8* -> {i8*, i64}` string bridge in the closure-env layout that the old
+// empty-annotation (`i8*`) form skipped — cover it so the string bridge on the
+// for-in path is locked, not just the scalar `int` field.
+test "join_all: direct for-in-var capture of a string element builds and joins in order" ![io] {
+    let src = "fn spawn_strs(xs: string[]) -> string[] ![io] {\n"
+        + "    let mut hs: Task<string>[] = [];\n"
+        + "    for s in xs { hs.push(spawn fn() -> string { return s; }); }\n"
+        + "    return join_all(hs);\n"
+        + "}\n"
+        + "fn main() -> int ![io] {\n"
+        + "    let out: string[] = spawn_strs([\"a\", \"b\", \"c\"]);\n"
+        + "    let mut ok: boolean = true;\n"
+        + "    if out.length != 3 { ok = false; }\n"
+        + "    if out[0] != \"a\" { ok = false; }\n"
+        + "    if out[1] != \"b\" { ok = false; }\n"
+        + "    if out[2] != \"c\" { ok = false; }\n"
+        + "    if ok { print.info(\"STR_FORIN_OK\"); } else { print.info(\"STR_FORIN_BAD\"); }\n"
+        + "    return 0;\n"
+        + "}\n";
+    let result = _build_and_run("forin-string", src);
+    assert result.exit == 0;
+    assert find(result.output, "STR_FORIN_OK", 0) >= 0;
+}
+
 // ---- fail closed: `join_all` over `Task<bool>[]` / `Task<void>[]` is
 // unsupported (a bool[] needs a sub-word slot; a void[] is meaningless) and
 // must be rejected, not silently miscompiled.
