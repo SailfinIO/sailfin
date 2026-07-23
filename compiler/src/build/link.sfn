@@ -264,13 +264,6 @@ fn _clang_link_multi_with_opt(ll_paths: string[], out_path: string, runtime_root
             ran_backend: true
         };
     }
-    let mut lii: int = 0;
-    loop {
-        if lii >= link_input_result.object_paths.length { break; }
-        runtime_objs.push(link_input_result.object_paths[lii]);
-        lii += 1;
-    }
-
     // Driver computes the clang-driver flag interleave; `LlvmTextBackend`
     // owns the final argv + `process.run`. Flag order is load-bearing for
     // byte-identical output (#1112 zero-behaviour gate).
@@ -316,9 +309,26 @@ fn _clang_link_multi_with_opt(ll_paths: string[], out_path: string, runtime_root
             rfi += 1;
         }
     }
+    // Retention roots above must be derived from the runtime provider
+    // objects only. Capsule symbols contain the `sfn` mangling marker too;
+    // including program/capsule objects in `_runtime_retain_root_flags`
+    // would force-retain their entire closure and defeat dead stripping.
+    let mut link_objects: string[] = [];
+    let mut roi: int = 0;
+    loop {
+        if roi >= runtime_objs.length { break; }
+        link_objects.push(runtime_objs[roi]);
+        roi += 1;
+    }
+    let mut lii: int = 0;
+    loop {
+        if lii >= link_input_result.object_paths.length { break; }
+        link_objects.push(link_input_result.object_paths[lii]);
+        lii += 1;
+    }
     let backend = LlvmTextBackend { };
     let plan = LinkPlan {
-        objects: runtime_objs,
+        objects: link_objects,
         out_path: out_path,
         opt_flag: opt_flag,
         link_flags: link_flags,
