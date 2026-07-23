@@ -136,3 +136,12 @@ fn symlink(target: string, link: string) -> boolean ![io] {
     // TODO: switch to Result<(), IoError> once shipped.
     return fs.symlink(target, link);
 }
+
+fn read_link(path: string) -> string ![io] {
+    // Reads the raw single-hop target of the symlink at `path`
+    // (`readlink(2)`), e.g. `../../llms.txt` — the text exactly as
+    // stored in the link, never canonicalized or resolved through
+    // multiple hops. A non-symlink, missing path, or unsupported
+    // platform returns `""` (SFN-46).
+    return fs.read_link(path);
+}

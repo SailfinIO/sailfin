@@ -174,7 +174,7 @@ extern fn access(path: *u8, mode: i32) -> i32;
 // — but the libc `declare`s they lower to come from `extern fn` in
 // THIS firing module (there are no registry concrete rows for them,
 // by design, to avoid colliding with same-named capsule funcs). All
-// four are inlined unconditionally: an unused `declare` on a platform
+// five are inlined unconditionally: an unused `declare` on a platform
 // that never `call`s it is link-safe (no relocation), so the Windows
 // cross-build (which lowers `GetFileAttributesA` for `fs_exists` and
 // stubs the rest) links cleanly too.
@@ -185,6 +185,8 @@ extern fn mkdtemp(template: *u8) -> *u8;
 extern fn stat(path: *u8, statbuf: *u8) -> i32;
 
 extern fn GetFileAttributesA(path: *u8) -> i32;
+
+extern fn readlink(path: *u8, buf: *u8, bufsize: usize) -> i64;
 
 // M3.1b additions. `memcpy` / `strlen` / `strchr` back the
 // recursive `sfn_fs_mkdir` component walk; `unlink` / `mkdir` are
@@ -921,6 +923,38 @@ fn sfn_fs_is_executable(path: *u8) -> bool ![io] {
 // POSIX-only (#366).
 fn sfn_fs_symlink(target: *u8, link: *u8) -> bool ![io] {
     return sailfin_intrinsic_fs_symlink(target, link);
+}
+
+// `sfn_fs_read_link(path)` — read the raw single-hop target of the
+// symlink at `path` (`readlink(2)`) as a fresh malloc'd string. Routes
+// through the per-target `sailfin_intrinsic_fs_read_link` sentinel
+// (epic #1308 fs-runtime flip): POSIX emits `readlink(path, buf, size)`
+// returning the byte count; the Windows leg stubs to `-1` (no MinGW
+// `readlink` symbol). The `readlink` libc `declare` the sentinel lowers
+// to comes from the inlined `extern fn` above. Single-hop only — the
+// raw target text exactly as stored in the link (e.g. `../../llms.txt`),
+// never canonicalized (SFN-46). A null path, non-symlink, missing path,
+// OOM, or the Windows stub all collapse to a malloc'd `""` via
+// `_fs_empty_string()`. POSIX-only (#366).
+fn sfn_fs_read_link(path: *u8) -> *u8 ![io] {
+    if path as i64 == 0 { return _fs_empty_string(); }
+
+    let cap: i64 = 4096;
+    let buf: *u8 = malloc((cap + 1) as usize);
+    if buf as i64 == 0 { return _fs_empty_string(); }
+
+    // `readlink(2)` never NUL-terminates and returns the byte count
+    // (`<= 0` on error). The `+1` capacity slack reserves the NUL slot
+    // written at offset `n`, exactly as `sfn_fs_read_bytes` does.
+    let n: i64 = sailfin_intrinsic_fs_read_link(path, buf, cap);
+    if n <= 0 {
+        free(buf);
+        return _fs_empty_string();
+    }
+
+    let term_ptr: *u8 = ((buf as i64) + n) as *u8;
+    memset(term_ptr, 0, 1 as usize);
+    return buf;
 }
 
 // `sfn_fs_write_lines(path, lines)` — write each entry of the

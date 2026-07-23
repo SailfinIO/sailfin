@@ -12,35 +12,20 @@
 //      [capsule] version in compiler/capsule.toml, so every release bump
 //      forces an llms.txt review.
 //
-// There is no sfn-level readlink/symlink probe, so test 1 SHELLS OUT to
-// `test -L` and `readlink -f` (Linux always has both); content accuracy
-// beyond the version stamp stays a review concern (docs/status.md).
+// Test 1 inspects the symlink with the native `fs.read_link` (SFN-46),
+// reading its raw single-hop target directly instead of shelling out to
+// `readlink`/`test -L`; content accuracy beyond the version stamp stays
+// a review concern (docs/status.md).
 //
 // NOTE on matchers: `sfn/test`'s `expect_*` matchers are `![pure]` and so
-// cannot be called from an `![io]` test like this. Assert on captured
-// subprocess output and on file text via `sfn/strings` predicates and
-// `==` instead. (#842.)
+// cannot be called from an `![io]` test like this. Assert on file text
+// via `sfn/strings` predicates and `==` instead. (#842.)
 import {
     find,
-    contains,
     split,
     starts_with,
     trim
 } from "sfn/strings";
-
-// PATH/HOME/TMPDIR for the spawned `test`/`readlink` helpers. run_capture's
-// empty env is the *empty* environment (not "inherit"), so PATH must be
-// threaded explicitly or the helpers are not found.
-fn _child_env() -> string[] ![io] {
-    let mut e: string[] = [];
-    let path = env.get("PATH");
-    if path.length > 0 { e.push("PATH=" + path); }
-    let home = env.get("HOME");
-    if home.length > 0 { e.push("HOME=" + home); }
-    let tmpdir = env.get("TMPDIR");
-    if tmpdir.length > 0 { e.push("TMPDIR=" + tmpdir); }
-    return e;
-}
 
 fn _repo_root() -> string ![io] {
     let root = env.get("SAILFIN_REPO_ROOT");
@@ -48,45 +33,26 @@ fn _repo_root() -> string ![io] {
     return ".";
 }
 
-// Run `readlink -f <path>`, capture stdout, and strip a single trailing
-// newline so two canonicalized paths compare cleanly.
-fn _readlink_f(path: string, e: string[]) -> string ![io] {
-    let exit = process.run_capture(["readlink", "-f", path], e);
-    let out = process.capture_take_stdout();
-    let _err = process.capture_take_stderr();
-    if exit != 0 { return ""; }
-    return trim(out);
-}
-
-test "llms.txt: site copy is a symlink resolving to repo-root llms.txt" ![io] {
+test "llms.txt: site copy is a symlink to the repo-root llms.txt" ![io] {
     let root = _repo_root();
-    let e = _child_env();
-
-    // Probe: skip (not fail) if readlink is unavailable. On Linux it is
-    // always present, so this path is for portability only.
-    let probe = process.run_capture(["readlink", "--version"], e);
-    let _po = process.capture_take_stdout();
-    let _pe = process.capture_take_stderr();
-    if probe != 0 {
-        assert true;
-        return;
-    }
-
     let site_copy = root + "/site/public/llms.txt";
 
-    // 1a. It must be a symlink: `test -L` exits 0.
-    let is_link = process.run_capture(["test", "-L", site_copy], e);
-    let _lo = process.capture_take_stdout();
-    let _le = process.capture_take_stderr();
-    assert is_link == 0;
+    // 1a. It must be a symlink: `fs.read_link` returns the raw target
+    //     (non-empty). A non-symlink or missing path returns "".
+    let target = fs.read_link(site_copy);
+    assert target.length > 0;
 
-    // 1b. It must resolve to the repo-root llms.txt. Canonicalize both
-    // sides with `readlink -f` so relative/absolute forms match.
-    let resolved_site = _readlink_f(site_copy, e);
-    let resolved_root = _readlink_f(root + "/llms.txt", e);
-    assert resolved_site.length > 0;
-    assert resolved_root.length > 0;
-    assert resolved_site == resolved_root;
+    // 1b. Single-hop raw target must point at the repo-root llms.txt.
+    //     `site/public/` -> repo root is exactly two levels up, so the
+    //     link stores `../../llms.txt` verbatim (no canonicalization).
+    assert target == "../../llms.txt";
+
+    // 1c. Single source of truth: the file reached through the symlink
+    //     is byte-identical to the repo-root copy it resolves to.
+    let site_text = fs.readFile(site_copy);
+    let root_text = fs.readFile(root + "/llms.txt");
+    assert site_text.length > 0;
+    assert site_text == root_text;
 }
 
 // Extract the value of the first `version = "..."` line in a TOML file:

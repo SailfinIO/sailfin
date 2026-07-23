@@ -1094,6 +1094,14 @@ fn _rh_descriptors_07(descriptors_in: RuntimeHelperDescriptor[]) -> RuntimeHelpe
     descriptors = append_runtime_helper(descriptors, RuntimeHelperDescriptor {
         target: "fs.symlink", symbol: "sfn_fs_symlink", return_type: "i1", parameter_types: ["i8*", "i8*"], effects: ["io.fs"], native_signature: "sfn_fs_symlink", c_abi_return_type: null
     });
+    // `fs.read_link` (SFN-46): single-hop `readlink(2)` target reader,
+    // consuming the `sailfin_intrinsic_fs_read_link` sentinel (row above).
+    // `sfn_fs_read_link` is pure Sailfin in
+    // `runtime/sfn/adapters/filesystem.sfn`; returns a malloc'd `""` on
+    // any failure.
+    descriptors = append_runtime_helper(descriptors, RuntimeHelperDescriptor {
+        target: "fs.read_link", symbol: "sfn_fs_read_link", return_type: "i8*", parameter_types: ["i8*"], effects: ["io.fs"], native_signature: "sfn_fs_read_link", c_abi_return_type: null
+    });
 
     // HTTP adapters (distinct from intrinsics for adapter infrastructure).
     // M3 (#818): flipped to the Sailfin-native socket client in
