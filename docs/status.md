@@ -1,6 +1,6 @@
 # Status
 
-Updated: 2026-07-21. Seed pinned to `0.8.0-alpha.5` (`bootstrap.toml`
+Updated: 2026-07-22. Seed pinned to `0.8.0-alpha.5` (`bootstrap.toml`
 `[seed].version` — SFEP-0047); the compiler version source of truth is
 `compiler/capsule.toml`.
 
@@ -484,6 +484,7 @@ here.
 | `workspace.lock` (`sfn lock` write + resolver consume) | **Shipped** | Explicit `sfn lock` writes the root lockfile (#1070); `sfn lock --work-dir DIR` sets the workspace-discovery start dir so the command can run against a workspace without `cd`. Resolver prefers `workspace → workspace.lock → capsule.lock → cache → registry` for external deps, sibling-first untouched (#1071). Roots own lockfiles; library capsules don't commit them. Committing the root `workspace.lock` is #1050, gated on a seed embedding #1071 (satisfied at `v0.7.0-alpha.31`) |
 | Workspace capability envelope (`[workspace.capabilities]` allow/deny/grants + enforce/warn gate) | **Shipped (declared surface, enforced)** | SFEP-0051 Phase 4. Declared-surface audit (SFN-416, 4a): each member's `capsule.toml [capabilities] required` is checked against the workspace envelope `effective(M) = (allow ∪ grants[M]) \ deny` (reuses SFEP-0017 subsumption, so an `io` entry covers `io.*`); a drifting effect emits `E0405`, a malformed envelope entry `E0406`. Enforcement gate (SFN-419, 4c): `sfn check` and `sfn build` at workspace scope run the audit and **fail on drift** by default (`enforce`); `[workspace.capabilities] mode = "warn"` reports without failing (migration aid only, not the marketed state). The envelope is **opt-in** — the gate activates only when the workspace declares a non-empty `allow` ceiling, so envelope-free workspaces (including this repo) are never retroactively broken. `sfn capabilities audit` prints the per-member required-vs-effective table and exits non-zero on drift (CI-dashboard surface). Inferred-`![...]`-surface audit (Phase 4b, SFN-418) is still open, so the SFEP stays `Accepted`; the declared-surface gate is enforced end-to-end. |
 | `sfn cache` (`info`/`prune`/`clean`) | **Shipped** | Bounded-size GC over the content-addressed build cache (SFEP-0040 §3.2–3.4, #1893): `info` prints root/entry-count/size; `prune [--max-size <bytes>] [--max-age <days>]` evicts oldest-first by true LRU (mtime touched on cache hit), defaults ~5 GiB/30 days, opt-in only; `clean [--all-schemas]` removes the current schema tree and optionally stale sibling `v<M>` trees. `![io]` command, no eager auto-sweep on builds |
+| `sfn symbols` (`--json`/`--capsule`) | **Shipped** | Versioned, deterministic `sailfin-symbols/1` index of the public callable surface (auto-imported prelude globals + in-tree `sfn/*` capsule `src/mod.sfn` free functions) for agents/tooling (SFN-444, `docs/reference/symbols-json-schema.md`). `--capsule <slug>` filters to one capsule; an unresolvable slug is a structured `E_SYMBOLS_UNRESOLVED_CAPSULE` error, exit 1. v1: `src/mod.sfn` top-level only (no submodule re-exports), intrinsic/ABI helpers excluded |
 | Notebook support | Not started | Post-1.0 |
 
 ## Print API (Current)

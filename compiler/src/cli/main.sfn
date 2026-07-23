@@ -63,6 +63,7 @@ import { command_def as login_command_def, run as login_run } from "./commands/l
 import { command_def as package_command_def, run as package_run } from "./commands/package";
 import { command_def as publish_command_def, run as publish_run } from "./commands/publish";
 import { command_def as run_command_def, run as run_run } from "./commands/run";
+import { command_def as symbols_command_def, run as symbols_run } from "./commands/symbols";
 import { command_def as test_command_def, run as test_run } from "./commands/test";
 import { command_def as toolchain_command_def, run as toolchain_run } from "./commands/toolchain";
 import { command_def as version_command_def, run as version_run } from "./commands/version";
@@ -106,6 +107,7 @@ fn _usage() -> string {
     out = out + "  sfn version\n";
     out = out + "  sfn --version\n";
     out = out + "  sfn completion <shell>\n";
+    out = out + "  sfn symbols [--json] [--capsule SLUG]\n";
     out = out + "\n";
     out = out + "examples:\n";
     out = out + "  sfn run examples/basics/hello-world.sfn\n";
@@ -238,6 +240,7 @@ fn sailfin_cli_main_v2(argv: string[]) -> int ![clock, io, net] {
     root = with_subcommand(root, run_command_def());
     root = with_subcommand(root, bench_command_def());
     root = with_subcommand(root, completion_command_def());
+    root = with_subcommand(root, symbols_command_def());
 
     // Machine-readable top-level help for tools and agents. This bypasses
     // `parse()` intentionally: `--json` is a modifier for root help, not a
@@ -445,6 +448,18 @@ fn sailfin_cli_main_v2(argv: string[]) -> int ![clock, io, net] {
         if ctx.trace_argv { _v2_trace_argv(argv); }
         if parse_ok { return check_run(matches, ctx); }
         print("usage: sfn check [--quiet] [--json] [--allow-bare-assert] [path...]");
+        return 2;
+    }
+
+    // `sfn symbols [--json] [--capsule SLUG]` — the registered subcommand
+    // matched. A clean parse dispatches to `symbols.run` (always JSON in
+    // v1); a non-ok parse that still descended into `symbols` (e.g.
+    // `--help`) is a usage error (exit 2), matching the other migrated
+    // commands. The literal `2` mirrors the dispatches above.
+    if strings_equal(subcommand(matches), "symbols") {
+        if ctx.trace_argv { _v2_trace_argv(argv); }
+        if parse_ok { return symbols_run(matches, ctx); }
+        print("usage: sfn symbols [--json] [--capsule SLUG]");
         return 2;
     }
 
