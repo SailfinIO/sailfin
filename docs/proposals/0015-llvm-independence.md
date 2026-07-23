@@ -271,7 +271,345 @@ Each stage is independently valuable and shippable. None requires a flag day.
 
 ---
 
-## 9. Non-goals
+## 9. Typed SSA v0 contract (normative)
+
+This section fixes the Stage 1.5 handoff. In this section, **must** and **must
+not** are requirements on every producer, verifier, transformation, renderer,
+and backend that claims typed-SSA v0 support.
+
+Typed SSA sits between parsed `.sfn-asm` and backend-specific lowering:
+
+```text
+.sfn-asm -> typed-SSA producer -> verifier -> LLVM or native backend
+```
+
+The contract is deliberately smaller than either Sailfin source or LLVM IR. It
+represents scalar computation and control flow, carries the security metadata
+needed by the capability seal, and leaves target layout and machine operations
+to a backend ABI adapter. It contains no LLVM type names, opcodes, attributes,
+data-layout strings, or textual instruction fragments.
+
+### 9.1 Ownership and identities
+
+A `Module` owns, directly or through intern tables:
+
+- a module identity and source-capsule identity;
+- `Symbol`, `Type`, `EffectSet`, and `CapabilitySet` tables;
+- external declarations and defined functions; and
+- an optional module capability manifest derived from its entry points:
+  `Manifest { entry_points: FunctionId[], effects: EffectSetId,
+  capabilities: CapabilitySetId }`.
+
+The following identities are unsigned integer handles, not source names:
+
+| Identity | Scope | Meaning |
+|---|---|---|
+| `SymbolId` | module | One interned Sailfin semantic name. |
+| `TypeId` | module | One structurally interned type. |
+| `EffectSetId` | module | One canonical set of effect atoms. |
+| `CapabilitySetId` | module | One canonical set of capability atoms. |
+| `FunctionId` | module | One declaration or definition. |
+| `BlockId` | function | One basic block. |
+| `ValueId` | function | One function parameter, block parameter, instruction result, or constant result. |
+
+An identity must resolve in its owning scope and must not be reused for a
+different entity. A backend must not infer semantics from the numeric value of
+an identity. Moving an entity between modules or functions therefore requires
+remapping every identity it owns or references.
+
+Symbols are canonical UTF-8 strings interned by exact byte equality. They name
+Sailfin semantics such as effects and capability kinds; they are not mangled
+linker symbols or fragments of backend syntax.
+
+The module, function, block, and instruction containers are ordered sequences.
+Maps may accelerate lookup, but are not the semantic owner and must not decide
+rendering or traversal order.
+
+### 9.2 Target-neutral v0 types
+
+Each `TypeId` names exactly one of:
+
+```text
+Unit
+Bool
+Int { width: 8 | 16 | 32 | 64, signed: boolean }
+Float { width: 32 | 64 }
+Pointer { pointee: TypeId?, address_space: integer }
+```
+
+`Unit` has no runtime value. `Bool` is a logical truth value; its storage width
+is selected by the ABI adapter. Integer widths and signedness are semantic.
+Floating-point values use IEEE-754 binary32 or binary64 semantics. A null
+`pointee` denotes an opaque pointer. Address space zero is the ordinary Sailfin
+process address space; other address spaces are reserved until a later contract
+defines them.
+
+Types are interned structurally: equal definitions in one module must have the
+same `TypeId`, and unequal definitions must have different IDs. Source aliases
+such as `int` are resolved before typed SSA and do not create distinct types.
+Backend spellings such as `i64`, `double`, or `ptr` are not valid type
+definitions in this IR.
+
+Aggregates, slices, closures, function values, memory operations, exceptions,
+and ownership operations are outside v0. A later version may add them without
+changing the identity, block, metadata, or verifier rules defined here.
+
+### 9.3 Functions, blocks, and values
+
+A function declaration contains:
+
+```text
+Function {
+    id: FunctionId
+    symbol: SymbolId
+    parameters: TypeId[]
+    result: TypeId
+    effects: EffectSetId
+    capabilities: CapabilitySetId
+    linkage: Internal | Exported | External
+}
+```
+
+A definition adds an ordered, non-empty block sequence. Its first block is the
+entry block. The entry block parameters are the function parameters, in
+signature order; their `ValueId`s are the function's parameter values. An
+external function has a declaration and no blocks.
+
+Every non-entry block has zero or more typed block parameters. Branch operands
+supply those parameters, replacing backend-specific phi nodes. Block
+parameters are defined simultaneously at block entry. Instruction results are
+defined after their operands and each result has exactly one `TypeId`. Values
+are immutable and have exactly one definition.
+
+### 9.4 Instructions and terminators
+
+The v0 instruction set is:
+
+```text
+ConstBool(value) -> Bool
+ConstInt(value) -> Int
+ConstFloat(bits) -> Float
+Unary(op, value) -> scalar
+Binary(op, left, right) -> scalar
+Compare(predicate, left, right) -> Bool
+Call(function, arguments, effects, capabilities) -> scalar-or-Unit
+```
+
+`Unary`, `Binary`, and `Compare` use typed-SSA op and predicate enums, not
+backend strings. `UnaryOp` contains `Negate`, `BooleanNot`, and `BitwiseNot`;
+`BinaryOp` contains `Add`, `Subtract`, `Multiply`, `Divide`, `Remainder`,
+`BooleanAnd`, `BooleanOr`, `BitwiseAnd`, `BitwiseOr`, `BitwiseXor`,
+`ShiftLeft`, and `ShiftRight`; `ComparePredicate` contains `Equal`, `NotEqual`,
+`Less`, `LessEqual`, `Greater`, and `GreaterEqual`. Each case has Sailfin
+language semantics for its operand type. v0 adds neither wrapping integer nor
+relaxed floating-point operations; either requires a distinct enum case in a
+later contract. The verifier rejects an operation whose operand or result types
+are not admitted by that enum case. Overflow and floating-point behavior must
+not be inferred from a backend default.
+
+`Call` is direct in v0: `function` is a `FunctionId`. Its arguments match the
+callee signature exactly. A non-`Unit` call produces one result; a `Unit` call
+produces none. Indirect calls and variadic calls require a later IR version.
+
+Every block ends with exactly one of:
+
+```text
+Branch(target, arguments)
+CondBranch(condition, then_target, then_arguments, else_target, else_arguments)
+Return(value?)
+Unreachable
+```
+
+A terminator is not an instruction and produces no value. No instruction may
+follow it. `CondBranch.condition` has type `Bool`. Each branch argument list
+matches its target block parameters in arity and type. `Return` has no value
+for a `Unit` result and exactly one value of the declared result type otherwise.
+`Unreachable` asserts that control cannot continue; it does not excuse invalid
+instructions earlier in the block.
+
+### 9.5 Effect, capability, and provenance metadata
+
+Effects and capabilities are semantic data, not comments or backend
+attributes. Both are interned canonical sets:
+
+```text
+EffectAtom { name: SymbolId }
+CapabilityAtom { kind: SymbolId, arguments: MetadataValue[] }
+MetadataValue = Bool | Int | String | Symbol
+```
+
+Atoms and their arguments use Sailfin semantic names. They must not contain
+LLVM syntax or target instruction names. Sets contain no duplicates and are
+ordered by the canonical byte encoding of their atoms. An empty set is a valid
+interned set.
+
+Metadata attaches at these exact points:
+
+- a function declaration or definition records its transitive effect summary
+  and required capability summary;
+- every `Call` records the callee effects and required capabilities visible at
+  that call site; and
+- the optional module manifest records the union selected from designated
+  entry points.
+
+Pure scalar instructions and control-flow terminators do not carry effect or
+capability sets. Source spans and a producer-defined provenance card may attach
+to any function, block, instruction, or terminator for diagnostics, but are
+non-semantic and must not affect verification or code generation.
+
+A call's effect and capability sets must be supersets of the referenced
+callee's declared sets. A defined function's sets must be supersets of every
+call in its body. This permits a producer to carry a conservative summary while
+forbidding a backend from seeing less authority than the program requires.
+
+Transformations must preserve security metadata monotonically:
+
+- cloning or moving a call preserves its sets;
+- replacing a call preserves supersets of the original sets unless a verified
+  analysis recomputes an equal or smaller summary from the new callee;
+- merging call paths uses set union;
+- splitting a function copies the relevant call metadata and recomputes both
+  function summaries before verification; and
+- deleting unreachable code may remove its metadata only when the associated
+  call is deleted.
+
+No renderer or backend may silently drop these sets. A backend that cannot
+consume them must reject the module rather than treating it as unannotated.
+
+### 9.6 Verifier invariants
+
+The typed-SSA verifier runs before any backend and must reject a module unless
+all of the following hold:
+
+1. Every ID resolves in the correct owner, all module symbols are unique, and
+   all interned types and metadata sets are structurally canonical.
+2. Every definition has a valid type; every use refers to one definition in
+   the same function; and that definition dominates the use. Block parameters
+   dominate their block, including all instructions and its terminator.
+3. The entry parameters exactly match the function signature. Every branch
+   target exists and every branch argument matches the corresponding block
+   parameter in arity and type.
+4. Every block has exactly one final terminator and no earlier terminator.
+   Every block other than the entry is reachable from a named predecessor;
+   unreachable regions are represented with an `Unreachable` terminator, not
+   orphan blocks.
+5. Each instruction satisfies its operation-specific arity and typing rules.
+   Constants fit their declared width, calls match the callee signature, and
+   returns match the function result.
+6. Call and function effect/capability summaries satisfy the superset rules in
+   §9.5, and the module manifest, when present, covers every designated entry
+   point.
+7. The ordered containers and assigned IDs satisfy the deterministic
+   construction rules in §9.7.
+
+Verification is fail-closed and side-effect free. Diagnostics identify the
+module, function, block, offending ID, and violated invariant. A failed module
+must not reach LLVM rendering, native instruction selection, object emission,
+or linking.
+
+### 9.7 Determinism and textual rendering
+
+The producer assigns IDs in one deterministic walk:
+
+1. intern types and metadata by canonical structural encoding;
+2. visit functions in `.sfn-asm` declaration order after the existing
+   deterministic module merge;
+3. visit blocks in structured-lowering order, with the entry first and branch
+   successors in source order; and
+4. assign `ValueId`s to entry parameters, then block parameters and instruction
+   results in block order.
+
+Intern tables render in canonical structural order. Functions, blocks, and
+instructions render in their owned sequence. Hash-map iteration, filesystem
+enumeration, addresses, thread completion order, and backend-generated names
+must not affect IDs or output.
+
+Every implementation provides a canonical UTF-8 debug renderer. It is not an
+input language in v0, but identical verified modules must render byte-for-byte
+identically, including one `\n` line ending after the final line. The renderer
+uses typed-SSA names (`t0`, `v0`, `b0`) and semantic op names, never LLVM
+sigils or instruction text. For example:
+
+```text
+module demo
+type t0 = bool
+type t1 = int(signed,64)
+effects e0 = {}
+capabilities c0 = {}
+fn choose(v0:t0, v1:t1, v2:t1) -> t1 effects=e0 capabilities=c0 {
+  b0(v0:t0, v1:t1, v2:t1):
+    cond_branch v0, b1(v1), b2(v2)
+  b1(v3:t1):
+    return v3
+  b2(v4:t1):
+    return v4
+}
+```
+
+Metadata values use JSON escaping in the renderer. Floating constants render
+their exact bit pattern, not a locale-dependent decimal. Rendered IDs follow
+the deterministic assignments above and are dense from zero within their
+scope.
+
+### 9.8 Target boundary and first target
+
+Typed SSA is target-neutral. It does not contain a target triple, register
+class, calling-convention spelling, object format, relocation, or data-layout
+string. A backend combines a verified module with a separate target profile and
+the runtime ABI.
+
+The first supported native profile is **Linux x86-64, little-endian, SysV
+AMD64**. Its ABI adapter maps logical `Bool`, fixed-width scalars, pointers,
+function parameters, calls, and returns to the layouts and symbol contracts in
+`site/src/content/docs/docs/reference/runtime-abi.md`. That mapping must not
+rewrite the typed-SSA module. LLVM lowering is another adapter over the same
+contract; LLVM spellings begin only after the verified handoff.
+
+### 9.9 Implementation and differential-testing seams
+
+The next implementation leaf owns four independently testable seams:
+
+1. **Core model and renderer:** module-owned identities, intern tables, scalar
+   instructions, terminators, metadata, and canonical debug snapshots.
+2. **Verifier:** focused negative tests for every invariant in §9.6, plus
+   positive scalar branch/call/return fixtures.
+3. **Producer boundary:** a lowering pass from the existing `NativeFunction`
+   and string-expression `.sfn-asm` model into verified typed SSA. Unsupported
+   constructs fail with a diagnostic; they do not bypass typed SSA or inject
+   backend text.
+4. **Backend boundary:** LLVM and native consumers accept only a verified
+   module plus a target profile. Backend-specific operands, types, and
+   instructions are created on the consumer side of this boundary.
+
+The existing LLVM backend remains the differential oracle. Each construct
+ported to typed SSA uses the same source fixture to produce:
+
+- canonical typed-SSA output;
+- verified LLVM output and program behavior; and
+- on Linux x86-64, native output with the same exit status, stdout, stderr, and
+  externally visible state.
+
+Tests also compare normalized function and call effect/capability sets before
+backend lowering. Backend-specific object bytes, symbol ordering not fixed by
+the runtime ABI, debug addresses, timing, and optimization quality are not
+differential-equality requirements.
+
+### 9.10 v0 non-goals
+
+Typed-SSA v0 does not:
+
+- replace `.sfn-asm` as the compiler's serialized high-level artifact;
+- model aggregates, closures, memory, ownership, exceptions, concurrency,
+  indirect calls, or variadics;
+- define optimization passes, register allocation, instruction selection,
+  object emission, linking, or a textual parser;
+- expose LLVM types, attributes, intrinsics, or instruction strings; or
+- claim the native backend, capability seal, or typed-SSA implementation has
+  shipped.
+
+---
+
+## 10. Non-goals
 
 - **Not** removing LLVM. The two-backend design keeps LLVM as the release-mode
   optimizer indefinitely; "independence" means "not *dependent*," not "absent."
@@ -289,27 +627,20 @@ Each stage is independently valuable and shippable. None requires a flag day.
 
 ---
 
-## 10. Open questions / decision points
+## 11. Open questions / decision points
 
-1. **Native IR or extend `.sfn-asm`?** A new typed SSA IR (Stage 1.5) is cleaner
-   but is real work; the alternative is incrementally lowering `.sfn-asm`'s
-   string expressions. Recommendation: new IR — the string-expression model is
-   a dead end for codegen.
-2. **First native target:** x86-64 (CI host, most users) vs. aarch64 (Apple
-   silicon dev machines, and the platform where effect enforcement is currently
-   *partial* per #613). Likely x86-64 first.
-3. **Borrow Cranelift vs. build from scratch?** Cranelift is Rust; binding it
+1. **Borrow Cranelift vs. build from scratch?** Cranelift is Rust; binding it
    would trade LLVM-dependence for Cranelift-dependence (and FFI), which only
    half-serves the dogfooding goal. A from-scratch Sailfin backend is the purist
    path and the better long-term-health story, at higher cost.
-4. **How much does the M4 scheduler design need to know about Stage 3+ now?**
+2. **How much does the M4 scheduler design need to know about Stage 3+ now?**
    If concurrency ships on LLVM first and a native backend arrives later, the
    safepoint/stack-map ABI may need to be retrofitted. Worth a forward-looking
    note in #965 even though the work is far off.
 
 ---
 
-## 11. Recommended next step
+## 12. Recommended next step
 
 Run two ordered workstreams under the **Seal-Sufficient Native Backend** Linear
 Project:
