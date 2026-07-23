@@ -1,0 +1,39 @@
+// SFN-442 — end-to-end proof that the two unsupported shapes classify to their
+// dedicated diagnostics through a real `sfn check`, including when nested in
+// `loop` and `routine` bodies (not just at the top level of a function). The
+// dedicated E0834 / E0835 messages must appear; the frontend must reject the
+// source. `assert_does_not_compile` scans diagnostic *messages* (not the
+// `code` field), so the patterns match stable message substrings.
+import { assert_does_not_compile } from "sfn/test";
+
+fn _value_if_in_loop_source() -> string {
+    return "fn demo(condition: boolean, a: int, b: int) -> int {\n"
+        + "    let mut total: int = 0;\n"
+        + "    loop {\n"
+        + "        let n = if condition { a } else { b };\n"
+        + "        total = total + n;\n"
+        + "        break;\n"
+        + "    }\n"
+        + "    return total;\n"
+        + "}\n";
+}
+
+fn _char_literal_in_routine_source() -> string {
+    return "fn demo(text: string, i: int) -> boolean {\n"
+        + "    let mut hit: boolean = false;\n"
+        + "    routine {\n"
+        + "        hit = text[i] == '|';\n"
+        + "    }\n"
+        + "    return hit;\n"
+        + "}\n";
+}
+
+test "value-position if nested in a loop is rejected with the E0834 message" ![io] {
+    let result = assert_does_not_compile(_value_if_in_loop_source(), "cannot be used as a value expression");
+    assert result.ok;
+}
+
+test "character literal nested in a routine is rejected with the E0835 message" ![io] {
+    let result = assert_does_not_compile(_char_literal_in_routine_source(), "character literal");
+    assert result.ok;
+}

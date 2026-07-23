@@ -1,0 +1,113 @@
+// capsules/sfn/tensor/tests/matmul_blocked_test.sfn
+//
+// Correctness coverage for the cache-blocked `matmul` (SFN-425, SFEP-0052).
+// The tiled kernel must be numerically identical to the naive triple loop it
+// replaced — the tensor capsule is the CPU reference oracle accelerator work is
+// validated against, so "close enough" is not enough. A private naive oracle is
+// kept here (not exported from the capsule) and the blocked result is compared
+// bit-for-bit, including on dimensions that exceed the tile edge and are not
+// multiples of it so every axis exercises a remainder tile.
+import { Tensor, from_array, matmul } from "../src/mod";
+
+// Naive O(n^3) row-major reference — the oracle the blocked kernel must match.
+fn _ref_matmul(a: Tensor, b: Tensor) -> Tensor {
+    let m = a.shape[0];
+    let k = a.shape[1];
+    let n = b.shape[1];
+    let mut out: float[] = [];
+    let mut i: int = 0;
+    loop {
+        if i >= m { break; }
+        let mut j: int = 0;
+        loop {
+            if j >= n { break; }
+            let mut val: float = 0.0;
+            let mut p: int = 0;
+            loop {
+                if p >= k { break; }
+                val = val + a.data[i * k + p] * b.data[p * n + j];
+                p += 1;
+            }
+            out.push(val);
+            j += 1;
+        }
+        i += 1;
+    }
+    return Tensor {
+        data: out,
+        shape: [m, n],
+        size: m * n
+    };
+}
+
+// Deterministic, mixed-sign fill. The values are scaled by 0.1 — a factor with
+// no terminating binary representation — so the K-sums are genuinely order-
+// sensitive: a kernel that reordered the accumulation would diverge in the low
+// mantissa bits and fail the bit-exact check below. This makes the tests an
+// actual witness of the tiled kernel's summation-order invariant, not just of
+// functional correctness (integer-valued fills would sum exactly in any order).
+fn _make(rows: int, cols: int, seed: int) -> Tensor {
+    let total = rows * cols;
+    let mut data: float[] = [];
+    let mut idx: int = 0;
+    loop {
+        if idx >= total { break; }
+        let v = ((idx * 31 + seed * 7) % 17) - 8;
+        data.push((v as float) * 0.1);
+        idx += 1;
+    }
+    return from_array(data, [rows, cols]);
+}
+
+// Bit-for-bit tensor equality: shape and every element identical.
+fn _equal(x: Tensor, y: Tensor) -> bool {
+    if x.size != y.size { return false; }
+    if x.shape.length != y.shape.length { return false; }
+    let mut s: int = 0;
+    loop {
+        if s >= x.shape.length { break; }
+        if x.shape[s] != y.shape[s] { return false; }
+        s += 1;
+    }
+    let mut i: int = 0;
+    loop {
+        if i >= x.size { break; }
+        if x.data[i] != y.data[i] { return false; }
+        i += 1;
+    }
+    return true;
+}
+
+// -- Tests --
+test "tensor: blocked matmul matches naive on a small square" {
+    let a = _make(3, 3, 1);
+    let b = _make(3, 3, 2);
+    assert _equal(matmul(a, b), _ref_matmul(a, b));
+}
+
+test "tensor: blocked matmul matches naive on a rectangular product" {
+    let a = _make(4, 3, 3);  // [4, 3]
+    let b = _make(3, 5, 4);  // [3, 5] => [4, 5]
+    assert _equal(matmul(a, b), _ref_matmul(a, b));
+}
+
+test "tensor: blocked matmul matches naive across multiple tiles" {
+    // Every dimension exceeds MATMUL_BLOCK (64) and is not a multiple of it, so
+    // the kernel walks full tiles plus a remainder tile on M, K, and N.
+    let a = _make(70, 66, 5);  // [70, 66]
+    let b = _make(66, 68, 6);  // [66, 68] => [70, 68]
+    assert _equal(matmul(a, b), _ref_matmul(a, b));
+}
+
+test "tensor: blocked matmul preserves the known 2x2 product" {
+    // [[1,2],[3,4]] * [[5,6],[7,8]] = [[19,22],[43,50]]
+    let a = from_array([1, 2, 3, 4], [2, 2]);
+    let b = from_array([5, 6, 7, 8], [2, 2]);
+    let c = matmul(a, b);
+    assert c.data[0] == 19;
+    assert c.data[1] == 22;
+    assert c.data[2] == 43;
+    assert c.data[3] == 50;
+    assert c.shape[0] == 2;
+    assert c.shape[1] == 2;
+}
