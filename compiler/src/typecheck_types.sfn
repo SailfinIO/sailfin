@@ -1130,6 +1130,8 @@ fn classify_declared_primitive(annotation: string) -> string {
     if strings_equal(trimmed, "float") { return "float"; }
     if strings_equal(trimmed, "f64") { return "float"; }
     if strings_equal(trimmed, "f32") { return "float"; }
+    if strings_equal(trimmed, "f16") { return "float"; }
+    if strings_equal(trimmed, "bf16") { return "float"; }
     if strings_equal(trimmed, "number") { return "float"; }
     if strings_equal(trimmed, "boolean") { return "boolean"; }
     if strings_equal(trimmed, "bool") { return "boolean"; }
@@ -1756,6 +1758,8 @@ fn is_extern_primitive_type(text: string) -> boolean {
     if strings_equal(text, "isize") { _ret = true; }
     if strings_equal(text, "f32") { _ret = true; }
     if strings_equal(text, "f64") { _ret = true; }
+    if strings_equal(text, "f16") { _ret = true; }
+    if strings_equal(text, "bf16") { _ret = true; }
     if strings_equal(text, "bool") { _ret = true; }
     if strings_equal(text, "int") { _ret = true; }
     if strings_equal(text, "float") { _ret = true; }

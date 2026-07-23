@@ -79,6 +79,8 @@ fn map_primitive_type(context: TypeContext, annotation: string) -> string {
     if annotation == "float" { return "double"; }
     if annotation == "f64" { return "double"; }
     if annotation == "f32" { return "float"; }
+    if annotation == "f16" { return "half"; }
+    if annotation == "bf16" { return "bfloat"; }
     let mut _if149: boolean = false;
     if annotation == "boolean" { _if149 = true; }
     if annotation == "bool" { _if149 = true; }

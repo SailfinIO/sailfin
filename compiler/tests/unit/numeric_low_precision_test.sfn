@@ -1,0 +1,48 @@
+// Unit tests pinning the typecheck acceptance of `f16`/`bf16` scalar float
+// annotations (SFEP-0054 Phase 1). `f16`/`bf16` classify as the coarse
+// "float" kind (same as `f32`/`f64`), lower to LLVM `half`/`bfloat`, and
+// support explicit `as` conversions to/from `f32`/`f64` plus expected-type
+// literal binding; distinct type-kind enforcement is out of scope.
+import { parse_program } from "../../src/parser/mod";
+import { typecheck_diagnostics } from "../../src/typecheck";
+import { Diagnostic } from "../../src/typecheck_types";
+
+fn _diagnostics(source: string) -> Diagnostic[] ![io] {
+    let program = parse_program(source);
+    return typecheck_diagnostics(program);
+}
+
+test "numeric: f16 annotation typechecks with no diagnostics" ![io] {
+    let diagnostics = _diagnostics("fn f(x: f16) -> f16 { return x; }");
+    assert diagnostics.length == 0;
+}
+
+test "numeric: bf16 annotation typechecks with no diagnostics" ![io] {
+    let diagnostics = _diagnostics("fn g(x: bf16) -> bf16 { return x; }");
+    assert diagnostics.length == 0;
+}
+
+test "numeric: f16 local from a float literal typechecks with no diagnostics" ![io] {
+    let diagnostics = _diagnostics("fn main() { let a: f16 = 0.5; }");
+    assert diagnostics.length == 0;
+}
+
+test "numeric: bf16 local from a float literal typechecks with no diagnostics" ![io] {
+    let diagnostics = _diagnostics("fn main() { let b: bf16 = 0.5; }");
+    assert diagnostics.length == 0;
+}
+
+test "numeric: extern fn with f16 parameter and return typechecks" ![io] {
+    let diagnostics = _diagnostics("extern fn half_id(x: f16) -> f16;");
+    assert diagnostics.length == 0;
+}
+
+test "numeric: extern fn with bf16 parameter and return typechecks" ![io] {
+    let diagnostics = _diagnostics("extern fn bhalf_id(x: bf16) -> bf16;");
+    assert diagnostics.length == 0;
+}
+
+test "numeric: extern fn mixing f16 and bf16 typechecks" ![io] {
+    let diagnostics = _diagnostics("extern fn mix(a: f16, b: bf16) -> f16;");
+    assert diagnostics.length == 0;
+}

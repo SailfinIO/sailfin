@@ -42,6 +42,8 @@ fn ends_with_pointer_suffix(value: string) -> boolean {
     if trimmed == "i64" { _if303 = true; }
     if trimmed == "void" { _if303 = true; }
     if trimmed == "float" { _if303 = true; }
+    if trimmed == "half" { _if303 = true; }
+    if trimmed == "bfloat" { _if303 = true; }
     if _if303 { return false; }
     // Fast-path: well-known pointer types.
     let mut _if304: boolean = false;
@@ -295,6 +297,8 @@ fn is_copy_type(type_annotation: string, llvm_type: string) -> boolean {
     if trimmed == "Linear" { _if308 = true; }
     if _if308 { return false; }
     if llvm_type == "double" { return true; }
+    if llvm_type == "half" { return true; }
+    if llvm_type == "bfloat" { return true; }
     if llvm_type == "i32" { return true; }
     if llvm_type == "i64" { return true; }
     if llvm_type == "i1" { return true; }
@@ -394,6 +398,8 @@ fn layout_annotation_represents_user_value(annotation: string) -> boolean {
     if base == "int" { _if310 = true; }
     if base == "f32" { _if310 = true; }
     if base == "f64" { _if310 = true; }
+    if base == "f16" { _if310 = true; }
+    if base == "bf16" { _if310 = true; }
     if _if310 { return false; }
     if looks_like_user_type(base) { return true; }
     return false;
@@ -495,6 +501,8 @@ fn map_type_annotation(annotation: string) -> string {
     if normalized == "float" { return "double"; }
     if normalized == "f64" { return "double"; }
     if normalized == "f32" { return "float"; }
+    if normalized == "f16" { return "half"; }
+    if normalized == "bf16" { return "bfloat"; }
     let mut _if313: boolean = false;
     if normalized == "boolean" { _if313 = true; }
     if normalized == "bool" { _if313 = true; }
@@ -864,6 +872,8 @@ fn map_primitive_type(context: TypeContext, annotation: string) -> string {
     if trimmed == "float" { return "double"; }
     if trimmed == "f64" { return "double"; }
     if trimmed == "f32" { return "float"; }
+    if trimmed == "f16" { return "half"; }
+    if trimmed == "bf16" { return "bfloat"; }
     let mut _if321: boolean = false;
     if trimmed == "boolean" { _if321 = true; }
     if trimmed == "bool" { _if321 = true; }
@@ -1000,6 +1010,8 @@ fn numeric_type_kind(llvm_type: string) -> string {
     if trimmed == "i8" { return "int"; }
     if trimmed == "double" { return "float"; }
     if trimmed == "float" { return "float"; }
+    if trimmed == "half" { return "float"; }
+    if trimmed == "bfloat" { return "float"; }
     return "other";
 }
 
@@ -1009,6 +1021,8 @@ fn numeric_type_kind(llvm_type: string) -> string {
 fn default_value_for_llvm_type(llvm_type: string) -> string {
     let trimmed = trim_text(llvm_type);
     if trimmed == "double" { return "0.0"; }
+    if trimmed == "half" { return "0.0"; }
+    if trimmed == "bfloat" { return "0.0"; }
     let mut _if330: boolean = false;
     if trimmed == "i64" { _if330 = true; }
     if trimmed == "i32" { _if330 = true; }
