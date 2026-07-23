@@ -244,18 +244,16 @@ test "join_all: direct for-in-var capture (pure closure) builds and joins in inp
     assert find(result.output, "FORIN_OK", 0) >= 0;
 }
 
-// ---- SFN-456: the same direct for-in-var capture with an `![io]` closure
-// (the effect and the closure body's own io were confirmed non-factors in the
-// bisection — the sole trigger is the direct for-in-var capture). Also ICE'd.
+// ---- SFN-456: the same direct for-in-var capture with an `![io]`-signature
+// closure. The bisection confirmed the effect annotation is a non-factor for
+// the ICE — the sole trigger is the direct for-in-var capture — so this covers
+// the effectful-closure capture path without the closure writing to stdout:
+// concurrent per-task stdout would interleave across the spawned threads and
+// corrupt the marker under the parallel pool, a race orthogonal to this fix.
 test "join_all: direct for-in-var capture (![io] closure) builds and joins in input order" ![io] {
     let src = "fn spawn_ids_io(ids: int[]) -> int[] ![io] {\n"
         + "    let mut hs: Task<int>[] = [];\n"
-        + "    for id in ids {\n"
-        + "        hs.push(spawn fn() -> int ![io] {\n"
-        + "            print.info(\"task\");\n"
-        + "            return id;\n"
-        + "        });\n"
-        + "    }\n"
+        + "    for id in ids { hs.push(spawn fn() -> int ![io] { return id; }); }\n"
         + "    return join_all(hs);\n"
         + "}\n"
         + "fn main() -> int ![io] {\n"
