@@ -26,7 +26,19 @@ import { coerce_operand_to_type } from "./core_operands";
 import { emit_runtime_call, empty_runtime_call_overrides } from "./runtime_call";
 
 fn lower_index_expression(parse: IndexExpressionParse, bindings: ParameterBinding[], locals: LocalBinding[], temp_index: int, lines: string[], functions: NativeFunction[], context: TypeContext) -> ExpressionResult ![io] {
-    let base_result = lower_expression(parse.base, bindings, locals, temp_index, lines, functions, context, "");
+    // SFN-448: tensor-IR lowering can prove a static dense buffer's extent
+    // before entering its generated loop nest. `.unchecked(<base>)[index]` is
+    // an internal native-IR spelling for subsequent loads under that proof;
+    // ordinary source/native indexing keeps the runtime bounds check.
+    let mut base_text = parse.base;
+    let mut unchecked: boolean = false;
+    if starts_with(base_text, ".unchecked(") {
+        if substring(base_text, base_text.length - 1, base_text.length) == ")" {
+            base_text = trim_text(substring(base_text, 11, base_text.length - 1));
+            if base_text.length > 0 { unchecked = true; }
+        }
+    }
+    let base_result = lower_expression(base_text, bindings, locals, temp_index, lines, functions, context, "");
     let mut diagnostics: string[] = base_result.diagnostics;
     let mut collected_string_constants: StringConstant[] = base_result.string_constants;
 
@@ -254,37 +266,39 @@ fn lower_index_expression(parse: IndexExpressionParse, bindings: ParameterBindin
         current_temp += 1;
         length_value = length_temp;
 
-        let bounds_check = format_temp_name(current_temp);
-        current_lines.push("  " + bounds_check + " = icmp uge i64 "
-            + coerced_index.value
-            + ", "
-            + length_value);
-        current_temp += 1;
-        current_lines.push("  ; bounds check: " + bounds_check
-            + " (if true, out of bounds)");
-        // M1.7.2c (#498): runtime.bounds_check routes through
-        // descriptor-driven dispatch. The descriptor pins
-        // parameter_types=["i64", "i64"] and return_type="void", so the
-        // rendered call is byte-identical to the prior hand-spelled
-        // emission.
-        let bc_index_operand = LLVMOperand {
-            llvm_type: "i64",
-            value: coerced_index.value
-        };
-        let bc_length_operand = LLVMOperand {
-            llvm_type: "i64",
-            value: length_value
-        };
-        let bc_operands: LLVMOperand[] = [bc_index_operand, bc_length_operand];
-        let bc_result = emit_runtime_call("runtime.bounds_check", bc_operands, empty_runtime_call_overrides(), current_temp, current_lines);
-        let mut _bc_di: int = 0;
-        loop {
-            if _bc_di >= bc_result.diagnostics.length { break; }
-            diagnostics.push(bc_result.diagnostics[_bc_di]);
-            _bc_di += 1;
+        if !unchecked {
+            let bounds_check = format_temp_name(current_temp);
+            current_lines.push("  " + bounds_check + " = icmp uge i64 "
+                + coerced_index.value
+                + ", "
+                + length_value);
+            current_temp += 1;
+            current_lines.push("  ; bounds check: " + bounds_check
+                + " (if true, out of bounds)");
+            // M1.7.2c (#498): runtime.bounds_check routes through
+            // descriptor-driven dispatch. The descriptor pins
+            // parameter_types=["i64", "i64"] and return_type="void", so the
+            // rendered call is byte-identical to the prior hand-spelled
+            // emission.
+            let bc_index_operand = LLVMOperand {
+                llvm_type: "i64",
+                value: coerced_index.value
+            };
+            let bc_length_operand = LLVMOperand {
+                llvm_type: "i64",
+                value: length_value
+            };
+            let bc_operands: LLVMOperand[] = [bc_index_operand, bc_length_operand];
+            let bc_result = emit_runtime_call("runtime.bounds_check", bc_operands, empty_runtime_call_overrides(), current_temp, current_lines);
+            let mut _bc_di: int = 0;
+            loop {
+                if _bc_di >= bc_result.diagnostics.length { break; }
+                diagnostics.push(bc_result.diagnostics[_bc_di]);
+                _bc_di += 1;
+            }
+            current_lines = bc_result.lines;
+            current_temp = bc_result.temp_index;
         }
-        current_lines = bc_result.lines;
-        current_temp = bc_result.temp_index;
 
         let element_ptr = format_temp_name(current_temp);
         current_lines.push("  " + element_ptr + " = getelementptr "

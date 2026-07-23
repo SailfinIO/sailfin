@@ -32,6 +32,7 @@ enum NativeInstruction {
     },
     EndFor,
     Loop,
+    LoopVectorize,
     EndLoop,
     Break,
     Continue,

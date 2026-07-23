@@ -269,6 +269,22 @@ here.
   GFLOP/s at 256³** (naive f64, `.push`-allocating). Cross-check: the Rung-0
   cache-blocked `sfn/tensor` capsule oracle is ~0.64 GFLOP/s single-thread at
   128³ (SFN-425).
+- **Tensor-IR scalar matmul auto-vectorization probe** (SFEP-0052 Track A
+  Rung 1, SFN-448): row-major matmul lowers as row → K → column so the
+  innermost loop walks the right operand and output contiguously while
+  preserving each result element's ascending-K accumulation order. The tensor
+  lowering proves the static buffer extents once, uses unchecked loads only
+  inside that verified extent, and marks the contiguous loop with
+  `llvm.loop.vectorize.enable` through a dedicated `.loop vectorize` native-IR
+  hint. On the same Apple-silicon host and 20-iteration 128³ harness, this
+  measured **3.65 GFLOP/s versus 1.27 GFLOP/s for SFN-447 (2.87×)** while
+  retaining the numerical oracle gate. Clang 18 still reports the forced loop
+  as not vectorized because it cannot identify array bounds for the
+  heap-backed `float[]` result, and the optimized IR contains no vector body.
+  The positive gain therefore comes from contiguous scalar traversal plus
+  removing repeated proven bounds checks; explicit vector IR remains justified
+  for the SFN-449 chain. These figures are local decision-gate measurements,
+  not CI thresholds.
 - **Backend seam** (`compiler/src/backend.sfn`, #1112; SFEP-15 Stage 0):
   every codegen/link `clang` invocation routes through a `Backend` interface
   whose sole impl is `LlvmTextBackend` (today's textual-LLVM-IR + clang path).

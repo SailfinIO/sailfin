@@ -1338,6 +1338,24 @@ fn lower_to_llvm_lines_with_parsed_context(native_module: NativeModule, parse_ar
     // module that already spells the full `%Name = type { ... }` body is skipped,
     // so no LLVM redefinition.
     lines = _append_missing_opaque_forward_decls(lines);
+    let mut has_vectorize_loop: boolean = false;
+    let mut _vl_idx: int = 0;
+    loop {
+        if _vl_idx >= lines.length { break; }
+        if index_of(lines[_vl_idx], "!llvm.loop !0") >= 0 {
+            has_vectorize_loop = true;
+            break;
+        }
+        _vl_idx += 1;
+    }
+    if has_vectorize_loop {
+        // SFN-448: vectorized native loops share the module's one enable-only
+        // loop policy. LLVM requires the loop ID to be a self-referential
+        // metadata node attached to the latch backedge.
+        lines.push("");
+        lines.push("!0 = distinct !{!0, !1}");
+        lines.push("!1 = !{!\"llvm.loop.vectorize.enable\", i1 true}");
+    }
     if debug_lowering { print.err("emit-llvm: phase=mangle"); }
     if trace { print.err("test llvm: mangling stage done"); }
     if timing {

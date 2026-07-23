@@ -151,10 +151,15 @@ fn _ts_emit_matmul(function: TensorFunction, operation: TensorOp, operation_inde
     let row = "r" + suffix;
     let column = "c" + suffix;
     let contract = "k" + suffix;
+    let scale = "a" + suffix;
+    let left_extent = "left_extent" + suffix;
+    let right_extent = "right_extent" + suffix;
     let total = number_to_string(tensor_shape_product(operation.result_type.shape));
     let rows = number_to_string(left_type.shape[0]);
     let columns = number_to_string(right_type.shape[1]);
     let width = number_to_string(left_type.shape[1]);
+    let left_last = number_to_string(tensor_shape_product(left_type.shape) - 1);
+    let right_last = number_to_string(tensor_shape_product(right_type.shape) - 1);
     let left_offset = _ts_matrix_offset_text(left_type, row, contract);
     let right_offset = _ts_matrix_offset_text(right_type, contract, column);
     let result_offset = _ts_matrix_offset_text(operation.result_type, row, column);
@@ -176,6 +181,20 @@ fn _ts_emit_matmul(function: TensorFunction, operation: TensorOp, operation_inde
         + init_index
         + " += 1\n"
         + "    .endloop\n"
+        + "    .let "
+        + left_extent
+        + " : float = "
+        + left
+        + "["
+        + left_last
+        + "]\n"
+        + "    .let "
+        + right_extent
+        + " : float = "
+        + right
+        + "["
+        + right_last
+        + "]\n"
         + "    .let mut "
         + row
         + " : int = 0\n"
@@ -188,56 +207,55 @@ fn _ts_emit_matmul(function: TensorFunction, operation: TensorOp, operation_inde
         + "            break\n"
         + "        .endif\n"
         + "        .let mut "
-        + column
+        + contract
         + " : int = 0\n"
         + "        .loop\n"
         + "            .if "
-        + column
-        + " >= "
-        + columns
-        + "\n"
-        + "                break\n"
-        + "            .endif\n"
-        + "            .let mut acc"
-        + suffix
-        + " : float = 0.0\n"
-        + "            .let mut "
-        + contract
-        + " : int = 0\n"
-        + "            .loop\n"
-        + "                .if "
         + contract
         + " >= "
         + width
         + "\n"
+        + "                break\n"
+        + "            .endif\n"
+        + "            .let "
+        + scale
+        + " : float = .unchecked("
+        + left
+        + ")["
+        + left_offset
+        + "]\n"
+        + "            .let mut "
+        + column
+        + " : int = 0\n"
+        + "            .loop vectorize\n"
+        + "                .if "
+        + column
+        + " >= "
+        + columns
+        + "\n"
         + "                    break\n"
         + "                .endif\n"
-        + "                eval acc"
-        + suffix
-        + " = acc"
-        + suffix
-        + " + "
-        + left
-        + "["
-        + left_offset
-        + "] * "
-        + right
-        + "["
-        + right_offset
-        + "]\n"
         + "                eval "
-        + contract
-        + " += 1\n"
-        + "            .endloop\n"
-        + "            eval "
         + result
         + "["
         + result_offset
-        + "] = acc"
-        + suffix
-        + "\n"
-        + "            eval "
+        + "] = .unchecked("
+        + result
+        + ")["
+        + result_offset
+        + "] + "
+        + scale
+        + " * .unchecked("
+        + right
+        + ")["
+        + right_offset
+        + "]\n"
+        + "                eval "
         + column
+        + " += 1\n"
+        + "            .endloop\n"
+        + "            eval "
+        + contract
         + " += 1\n"
         + "        .endloop\n"
         + "        eval "

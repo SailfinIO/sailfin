@@ -285,6 +285,13 @@ fn parse_instruction(line: string, span: NativeSourceSpan?, value_span: NativeSo
             value_span_consumed: false
         };
     }
+    if line == ".loop vectorize" {
+        return InstructionParseResult {
+            instructions: [NativeInstruction.LoopVectorize()],
+            span_consumed: false,
+            value_span_consumed: false
+        };
+    }
     if line == ".endloop" {
         return InstructionParseResult {
             instructions: [NativeInstruction.EndLoop()],
