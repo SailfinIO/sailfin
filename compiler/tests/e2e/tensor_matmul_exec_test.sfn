@@ -1,0 +1,97 @@
+// compiler/tests/e2e/tensor_matmul_exec_test.sfn
+//
+// End-to-end proof that a tensor-IR-lowered scalar matmul is executable,
+// numerically correct, and benchmarkable — the Rung-1 CPU baseline every later
+// ML-acceleration leaf measures against (SFEP-0052 Track A, SFN-447).
+//
+// Each test builds a shape-typed matmul TensorModule, hands it to
+// `build_tensor_matmul_kernel_binary` (which lowers the tensor-IR kernel to
+// native text, splices it into a driver, lowers+links a native binary), runs
+// the binary, and asserts: (1) it exits 0 — the driver returns 1 unless the
+// compiled tensor-IR kernel matches an independent naive oracle within rel err
+// ≤ 1e-12 — and (2) it prints a machine-parseable GFLOP/s record.
+//
+// The build+link runs in-process; `with_tmp_dir` gives each test an isolated
+// scratch dir (the harness routes both the emitted `.ll` and the link cache
+// there), so the parallel int-e2e-caps pool never collides (no-bash-e2e.md).
+import { find } from "sfn/strings";
+import { with_tmp_dir } from "sfn/test";
+
+import { _dirname } from "../../src/build/paths";
+import {
+    TensorFunction,
+    TensorModule,
+    TensorOp,
+    TensorType,
+    dense_f64_type,
+    tensor_matmul_2d,
+    tensor_parameter
+} from "../../src/tensor_ir";
+import { build_tensor_matmul_kernel_binary } from "../../src/tensor_ir_link_harness";
+
+// Full inherited environment for the spawned matmul binary. `process.environ()`
+// carries PATH/HOME/TMPDIR so the statically-linked binary starts cleanly; the
+// in-process link inherits the same env for its clang/linker discovery.
+fn _child_env() -> string[] ![io] { return process.environ(); }
+
+// Directory holding the compiler binary. The in-process link re-emits the
+// runtime capsules' sfn-sources by re-invoking `<binary_dir>/sfn`, so the
+// harness needs the real dir (SAILFIN_BIN's dir if set, else build/bin) — not
+// the running test binary's own dir.
+fn _binary_dir() -> string ![io] {
+    let configured = env.get("SAILFIN_BIN");
+    if configured.length > 0 { return _dirname(configured); }
+    return "build/bin";
+}
+
+// A single-function F64 row-major matmul module: params [n,n], [n,n] -> [n,n],
+// the function named "matmul_kernel" so its emitted `.fn` block replaces the
+// driver's placeholder of the same name.
+fn _matmul_module(n: int) -> TensorModule {
+    let left_type = dense_f64_type([n, n]);
+    let right_type = dense_f64_type([n, n]);
+    let result_type = dense_f64_type([n, n]);
+    let operations: TensorOp[] = [tensor_parameter(0, 0, left_type), tensor_parameter(1, 1, right_type), tensor_matmul_2d(2, 0, 1, result_type)];
+    let function = TensorFunction {
+        name: "matmul_kernel",
+        parameter_types: [left_type, right_type],
+        result_type: result_type,
+        operations: operations,
+        return_value_id: 2
+    };
+    return TensorModule {
+        module_name: "tensor_matmul",
+        functions: [function]
+    };
+}
+
+// Builds, runs, and asserts one matmul size; returns the binary's exit code
+// (0 == numeric gate passed). Isolated scratch per invocation.
+fn _run_matmul_size(n: int, iters: int) -> int ![io] {
+    return with_tmp_dir(fn (dir: string) -> int {
+        let module = _matmul_module(n);
+        let binpath = dir + "/tensor_matmul_bin";
+        let built = build_tensor_matmul_kernel_binary(module, "matmul_kernel", n, iters, "runtime", _binary_dir(), dir, binpath);
+        assert built.success;
+        let exit = process.run_capture([binpath], _child_env());
+        let out = process.capture_take_stdout();
+        let _err = process.capture_take_stderr();
+        // Exit 0 iff the compiled tensor-IR kernel matched the naive oracle
+        // within rel err ≤ 1e-12 (the driver's in-binary equivalence gate).
+        assert exit == 0;
+        // The single-thread GFLOP/s baseline record is printed and parseable.
+        assert find(out, "mflops_per_s=", 0) >= 0;
+        assert find(out, "OK", 0) >= 0;
+        return exit;
+    });
+}
+
+test "tensor_ir_exec: 128x128 tensor-IR matmul runs, matches oracle, reports GFLOP/s" ![io] {
+    let exit = _run_matmul_size(128, 20);
+    assert exit == 0;
+}
+
+test "tensor_ir_exec: 256x256 tensor-IR matmul runs and matches oracle" ![io] {
+    let exit = _run_matmul_size(256, 5);
+    assert exit == 0;
+}

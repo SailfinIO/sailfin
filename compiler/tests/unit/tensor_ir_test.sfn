@@ -211,6 +211,8 @@ test "tensor_ir: scalar native-loop snapshot lowers through LLVM" ![io] {
         + ".fn tensor_add_oracle(v0: float[], v1: float[]) -> float[]\n"
         + ".meta return float[]\n"
         + ".meta effects none\n"
+        + ".param v0: float[]\n"
+        + ".param v1: float[]\n"
         + "    .let mut v2 : float[] = []\n"
         + "    .let mut i2 : int = 0\n"
         + "    .loop\n"
@@ -263,5 +265,32 @@ test "tensor_ir: 2D matmul equals tensor capsule oracle" {
     assert executed.diagnostics.length == 0;
     let capsule_left = _capsule_from_array(left_data, [2, 3]);
     let capsule_right = _capsule_from_array(right_data, [3, 2]);
+    _assert_buffer_matches_capsule(executed.value, _capsule_matmul(capsule_left, capsule_right));
+}
+
+test "tensor_ir: square matmul oracle matches naive reference (64x64)" {
+    let n = 64;
+    let mut left_data: float[] = [];
+    let mut right_data: float[] = [];
+    let mut i: int = 0;
+    loop {
+        if i >= n * n { break; }
+        let left_v = ((i * 31 + 7) % 97) - 48;
+        left_data.push(left_v as float);
+        let right_v = ((i * 17 + 5) % 89) - 44;
+        right_data.push(right_v as float);
+        i += 1;
+    }
+    let left_type = dense_f64_type([n, n]);
+    let right_type = dense_f64_type([n, n]);
+    let result_type = dense_f64_type([n, n]);
+    let operations: TensorOp[] = [tensor_parameter(0, 0, left_type), tensor_parameter(1, 1, right_type), tensor_matmul_2d(2, 0, 1, result_type)];
+    let function = _tensor_function("tensor_matmul_square", [[n, n], [n, n]], [n, n], operations, 2);
+    let left = TensorBuffer { shape: [n, n], data: left_data };
+    let right = TensorBuffer { shape: [n, n], data: right_data };
+    let executed = execute_tensor_function_scalar(function, [left, right]);
+    assert executed.diagnostics.length == 0;
+    let capsule_left = _capsule_from_array(left_data, [n, n]);
+    let capsule_right = _capsule_from_array(right_data, [n, n]);
     _assert_buffer_matches_capsule(executed.value, _capsule_matmul(capsule_left, capsule_right));
 }
