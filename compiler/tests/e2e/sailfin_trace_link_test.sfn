@@ -64,10 +64,15 @@ test "trace-link: SAILFIN_TRACE_LINK=1 echoes the resolved link argv" ![io] {
     let dir = _scratch_dir();
     let main_path = _write_fixture(dir);
     let err = _build_stderr(main_path, dir + "/traced-bin", true);
-    // The greppable marker plus the `clang` invoker it prefixes.
+    // The greppable marker plus the invoker it prefixes. On Linux x86-64
+    // the final link is a direct `ld.lld` invocation (SFEP-0015 §8), on
+    // macOS/Windows (or a direct-link fallback) it is `clang` — assert on
+    // either so the pin stays platform-independent.
     assert contains(err, "[trace-link]");
-    assert contains(err, "clang");
-    assert ! contains(err, ".ll");
+    assert contains(err, "clang") || contains(err, "ld.lld");
+    // Object-only inputs (SFN-453): match `.ll ` so the direct linker's
+    // own name `ld.lld` (which contains `.ll`) is not read as a `.ll` input.
+    assert ! contains(err, ".ll ");
 }
 
 test "trace-link: unset leaves the link path silent" ![io] {
@@ -101,6 +106,9 @@ test "trace-link: SAILFIN_TRACE_LINK=1 echoes the test-layout link argv" ![io] {
     let _out = process.capture_take_stdout();
     let err = process.capture_take_stderr();
     assert contains(err, "[trace-link]");
-    assert contains(err, "clang");
-    assert ! contains(err, ".ll");
+    // Direct `ld.lld` on Linux x86-64, else `clang` (see the program-build
+    // case above) — the test-layout link goes through the same seam.
+    assert contains(err, "clang") || contains(err, "ld.lld");
+    // `.ll ` so the `ld.lld` binary name is not read as a `.ll` input.
+    assert ! contains(err, ".ll ");
 }

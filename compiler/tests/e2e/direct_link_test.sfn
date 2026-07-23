@@ -1,0 +1,141 @@
+// compiler/tests/e2e/direct_link_test.sfn
+//
+// End-to-end guard for the direct `ld.lld` Linux x86-64 link path
+// (SFEP-0015 §8 Stage 1, `compiler/src/build/direct_link.sfn`; mirror
+// #2550). Two contracts are pinned by building a real hello-world with
+// `SAILFIN_TRACE_LINK=1`:
+//
+//   1. Direct path (supported Linux x86-64 host): the final link trace
+//      names `ld.lld` and contains NO `clang` driver invocation, consumes
+//      objects only (no `.ll`), and the produced binary runs.
+//   2. Controlled fallback (`SAILFIN_LINKER=ld` defers to the clang
+//      driver): the trace emits an explicit "direct linker unavailable"
+//      reason and the clang path — never a silent ABI change — and the
+//      binary still runs.
+//
+// The direct-path leg is skipped on any host that is not Linux x86-64 with
+// `ld.lld` installed (macOS/Windows keep the clang path). See
+// `.claude/rules/no-bash-e2e.md`.
+import { contains, find } from "sfn/strings";
+import { clean_runner_env, nested_runner_scratch, report_child_failure } from "sfn/test";
+
+fn _sfn_bin() -> string ![io] {
+    let configured = env.get("SAILFIN_BIN");
+    if configured.length > 0 { return configured; }
+    return "build/bin/sfn";
+}
+
+fn _scratch_dir() -> string ![io] {
+    let mut dir = env.get("SAILFIN_TEST_SCRATCH");
+    if dir.length == 0 { dir = "/tmp"; }
+    dir = dir + "/sfn-direct-link-e2e";
+    fs.createDirectory(dir, true);
+    return dir;
+}
+
+// A clean nested-build env (PATH/HOME/TMPDIR for the linker, isolated
+// scratch), minus any ambient SAILFIN_TRACE_LINK / SAILFIN_LINKER so this
+// test alone decides the child's values.
+fn _child_env(linker: string) -> string[] ![io] {
+    let base = clean_runner_env(nested_runner_scratch("direct-link"));
+    let mut e: string[] = [];
+    let mut i: int = 0;
+    loop {
+        if i >= base.length { break; }
+        let keep_trace = find(base[i], "SAILFIN_TRACE_LINK=", 0) != 0;
+        let keep_linker = find(base[i], "SAILFIN_LINKER=", 0) != 0;
+        if keep_trace && keep_linker { e.push(base[i]); }
+        i += 1;
+    }
+    e.push("SAILFIN_TRACE_LINK=1");
+    if linker.length > 0 { e.push("SAILFIN_LINKER=" + linker); }
+    return e;
+}
+
+// Whether this host takes the direct ld.lld path: Linux, x86_64, ld.lld
+// installed. Mirrors `resolve_direct_ld_lld`'s gates so the direct-path
+// assertions only run where the path is actually selected.
+fn _direct_eligible() -> boolean ![io] {
+    let os = process.run_capture(["uname", "-s"], []);
+    let _ = os;
+    let uname_s = process.capture_take_stdout();
+    let _e0 = process.capture_take_stderr();
+    if find(uname_s, "Linux", 0) < 0 { return false; }
+    let _arch_rc = process.run_capture(["uname", "-m"], []);
+    let arch = process.capture_take_stdout();
+    let _e1 = process.capture_take_stderr();
+    if find(arch, "x86_64", 0) < 0 { return false; }
+    let lld = process.run_capture(["sh", "-c", "command -v ld.lld"], []);
+    let lld_out = process.capture_take_stdout();
+    let _e2 = process.capture_take_stderr();
+    if lld != 0 { return false; }
+    return lld_out.length > 0;
+}
+
+fn _write_fixture(dir: string) -> string ![io] {
+    let path = dir + "/main.sfn";
+    fs.writeFile(path, "fn main() ![io] {\n    print(\"DIRECT_OK\");\n}\n");
+    return path;
+}
+
+fn _build(main_path: string, bin: string, linker: string) -> int ![io] {
+    let rc = process.run_capture([_sfn_bin(), "build", "-o", bin, main_path], _child_env(linker));
+    let out = process.capture_take_stdout();
+    let err = process.capture_take_stderr();
+    fs.writeFile(bin + ".out", out);
+    fs.writeFile(bin + ".err", err);
+    report_child_failure("direct-link build", rc, out, err);
+    return rc;
+}
+
+test "direct-link: Linux x86-64 links via ld.lld with no clang driver" ![io] {
+    if !_direct_eligible() {
+        // Not a supported direct-link host — the clang path is covered by
+        // sailfin_trace_link_test.sfn. Nothing to assert here.
+        assert true;
+        return;
+    }
+    let dir = _scratch_dir();
+    let main_path = _write_fixture(dir);
+    let bin = dir + "/direct-bin";
+    let rc = _build(main_path, bin, "");
+    assert rc == 0;
+    let err = fs.readFile(bin + ".err");
+    // The final-link trace names ld.lld directly...
+    assert contains(err, "[trace-link]");
+    assert contains(err, "ld.lld");
+    // ...and contains no clang driver invocation (acceptance criterion 1)...
+    assert ! contains(err, "clang");
+    // ...over object-only inputs (SFN-453 boundary). Check `.ll ` (a `.ll`
+    // file input is always followed by a separator) so the linker binary
+    // name `ld.lld` — which contains the substring `.ll` — does not read as
+    // a textual-IR input.
+    assert ! contains(err, ".ll ");
+    // The produced binary runs and prints its marker.
+    let run_rc = process.run_capture([bin], []);
+    let run_out = process.capture_take_stdout();
+    let run_err = process.capture_take_stderr();
+    report_child_failure("direct-link run", run_rc, run_out, run_err);
+    assert run_rc == 0;
+    assert find(run_out, "DIRECT_OK", 0) >= 0;
+}
+
+test "direct-link: SAILFIN_LINKER=ld falls back to clang with a traced reason" ![io] {
+    let dir = _scratch_dir();
+    let main_path = _write_fixture(dir);
+    let bin = dir + "/fallback-bin";
+    let rc = _build(main_path, bin, "ld");
+    assert rc == 0;
+    let err = fs.readFile(bin + ".err");
+    // The fallback is explicit — a trace-visible reason, then the clang
+    // driver path (never a silent ABI change).
+    assert contains(err, "direct linker unavailable");
+    assert contains(err, "clang");
+    // The binary still links and runs.
+    let run_rc = process.run_capture([bin], []);
+    let run_out = process.capture_take_stdout();
+    let run_err = process.capture_take_stderr();
+    report_child_failure("direct-link fallback run", run_rc, run_out, run_err);
+    assert run_rc == 0;
+    assert find(run_out, "DIRECT_OK", 0) >= 0;
+}
