@@ -69,6 +69,12 @@ extern fn sfn_await(future: *u8) -> *u8;
 // file's discipline.
 extern fn sfn_trampoline_ptr_owned_ctx_addr() -> i64;
 
+// SFEP-0055 (SFN-441): `sfn_join_all` builds its ordered result array through
+// this pointer-width array constructor. Defined in `runtime/sfn/array.sfn`;
+// re-declared extern here (this file's defined-function discipline) and
+// resolved at link — array.sfn is a linked runtime source in every binary.
+extern fn sfn_array_new_pointer_width(count: i64) -> *u8;
+
 // Await (and discard) every spawned future in a `count`-element futures
 // array based at `futures_base`. The failure paths use this to honor the
 // structured contract — no spawned task may outlive the `sfn_parallel`
@@ -200,4 +206,71 @@ fn sfn_parallel(fn_ptrs: *u8, ctxs: *u8, count: i64) -> *u8 {
 
     free(futures);
     return results;
+}
+
+// `sfn_join_all(handles, count)` — ordered multi-await over an *already
+// spawned* collection of task handles (SFEP-0055 / SFN-441). Unlike
+// `sfn_parallel`, there is NO fan-out phase: the tasks were spawned at their
+// `spawn` sites and are already running on the pool. This walks the handle
+// buffer in index order, `sfn_await`-s each, and stores the result into the
+// same index of a freshly built `SfnArray` — so results come back in INPUT
+// order regardless of completion order (the crux `join_all` contract).
+//
+// ── Public surface ────────────────────────────────────────────
+//   sfn_join_all(handles: * u8, count: i64) -> * u8
+//     handles: field-0 data pointer of the caller's `Task<T>[]` — the base
+//              of a `count`-element i64 array whose slot i is the raw future
+//              pointer (`* u8` as i64) `spawn` produced.
+//     count:   number of handles (the array's len). `count <= 0` returns an
+//              empty `SfnArray` (len 0), allocating only the 24-byte header.
+//     Returns: a Sailfin `SfnArray` (`{ data, len, cap }`) of `count`
+//              pointer-width result slots, slot i = `sfn_await(handles[i])`
+//              in input order. Null on allocation failure.
+//
+// Result packing mirrors `sfn_parallel`/`sfn_await`: each slot holds the raw
+// `* u8` the task returned, stored as i64; the caller reinterprets per element
+// kind (i64 / f64 bits / `char*` / pointer). Pointer-width element kinds only
+// (int/number/string/ptr) — the frontend excludes `void`/`bool` from
+// `join_all` (a `void[]` is meaningless; a `bool[]` needs a sub-word slot the
+// pointer-width buffer does not model). `sfn_await` is null-safe, so a null
+// handle slot drains to a null result rather than faulting.
+fn sfn_join_all(handles: *u8, count: i64) -> *u8 {
+    // Build the ordered result array up front (len == count). An empty or
+    // negative count yields the valid empty array — the zero case that makes a
+    // loop spawning zero-or-more tasks well-defined.
+    let arr: *u8 = sfn_array_new_pointer_width(count);
+    // On result-array OOM, return null WITHOUT draining the handles — unlike
+    // `sfn_parallel`, which drains on OOM because it OWNS the spawns it just
+    // fanned out. `join_all` does NOT own its handles: they were spawned at
+    // their `spawn` sites and are joined by the ambient scope / `routine {}`
+    // nursery, so draining here would double-join. The structured contract is
+    // the caller's, not this combinator's.
+    if arr as i64 == 0 { return null; }
+    if count <= 0 { return arr; }
+    // A null handle buffer with a positive count is a caller bug; the array is
+    // already len-published, so return it (slots stay zero) rather than
+    // dereference near-null.
+    if handles as i64 == 0 { return arr; }
+
+    let handles_base: i64 = handles as i64;
+    let buf: i64 = atomic_load(arr as *i64);
+    if buf == 0 { return arr; }
+
+    // ── Join: await each handle in input order. ───────────────────
+    let mut i: i64 = 0;
+    loop {
+        if i >= count { break; }
+
+        let h_slot: *i64 = (handles_base + i * 8) as *i64;
+        let future: *u8 = atomic_load(h_slot) as *u8;
+
+        let result: *u8 = sfn_await(future);
+
+        let r_slot: *i64 = (buf + i * 8) as *i64;
+        atomic_store(r_slot, result as i64);
+
+        i = i + 1;
+    }
+
+    return arr;
 }

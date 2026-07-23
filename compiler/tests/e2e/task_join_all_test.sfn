@@ -1,0 +1,233 @@
+// End-to-end coverage for SFEP-0055 / SFN-441: user-writable typed task
+// handles (`Task<T>`) and the ordered multi-await builtin `join_all`.
+//
+// The crux the SFEP closes: a program can annotate a handle collection
+// (`let mut hs: Task<int>[] = []`), populate it with `spawn` handles in a
+// loop, and `join_all(hs)` to await results IN INPUT ORDER — the natural
+// "spawn many, await in order" shape that inferred-empty `[]` rejected with
+// E0831 (SFN-386, retained here for the un-annotated case).
+//
+// no-bash-e2e (`.claude/rules/no-bash-e2e.md`): fixtures are written to a
+// scratch dir and driven through `sfn build` / `sfn check` subprocesses; the
+// `![io]` tests assert on captured stdout+stderr with `sfn/strings::find`.
+import { find } from "sfn/strings";
+
+fn _sfn_bin() -> string ![io] {
+    let configured = env.get("SAILFIN_BIN");
+    if configured.length > 0 { return configured; }
+    return "build/bin/sfn";
+}
+
+// `process.run_capture`'s empty array is the *empty* environment; thread the
+// variables a nested `sfn build` (clang + linker via PATH) needs, and route
+// its build cache under SAILFIN_TEST_SCRATCH so a parallel run does not
+// collide on the fixed build/sailfin (#1333).
+fn _child_env() -> string[] ![io] {
+    let mut e: string[] = [];
+    let path = env.get("PATH");
+    if path.length > 0 { e.push("PATH=" + path); }
+    let home = env.get("HOME");
+    if home.length > 0 { e.push("HOME=" + home); }
+    let tmpdir = env.get("TMPDIR");
+    if tmpdir.length > 0 { e.push("TMPDIR=" + tmpdir); }
+    let scratch = env.get("SAILFIN_TEST_SCRATCH");
+    if scratch.length > 0 { e.push("SAILFIN_TEST_SCRATCH=" + scratch); }
+    return e;
+}
+
+fn _scratch_dir() -> string ![io] {
+    let mut base = env.get("SAILFIN_TEST_SCRATCH");
+    if base.length == 0 { base = "/tmp"; }
+    fs.createDirectory(base, true);
+    return fs.mkdtemp(base + "/sfn-join-all-");
+}
+
+fn _write_fixture(tag: string, src: string) -> string ![io] {
+    let dir = _scratch_dir();
+    let path = dir + "/" + tag + ".sfn";
+    fs.writeFile(path, src);
+    return path;
+}
+
+struct BuildRun {
+    exit: int;
+    output: string;
+}
+
+// Build `src` to a binary and run it; return the run's exit code + stdout.
+fn _build_and_run(tag: string, src: string) -> BuildRun ![io] {
+    let path = _write_fixture(tag, src);
+    let dir = _scratch_dir();
+    let bin = dir + "/" + tag + ".bin";
+    let build_exit = process.run_capture([_sfn_bin(), "build", "-o", bin, path], _child_env());
+    let build_out = process.capture_take_stdout();
+    let build_err = process.capture_take_stderr();
+    if build_exit != 0 {
+        return BuildRun { exit: build_exit, output: build_out + build_err };
+    }
+    let run_exit = process.run_capture([bin], _child_env());
+    let run_out = process.capture_take_stdout();
+    let run_err = process.capture_take_stderr();
+    return BuildRun { exit: run_exit, output: run_out + run_err };
+}
+
+fn _check_output(tag: string, src: string) -> string ![io] {
+    let path = _write_fixture(tag, src);
+    let _exit = process.run_capture([_sfn_bin(), "check", path], _child_env());
+    let out = process.capture_take_stdout();
+    let err = process.capture_take_stderr();
+    return out + err;
+}
+
+// ---- crux: annotated empty handle array + push + ordered join builds & runs.
+test "join_all: annotated Task<int>[] init-empty, pushed, joined in input order" ![io] {
+    // Task 0 busy-loops so it completes LAST; input-order results must still
+    // put its value at index 0 — proving join_all orders by input, not by
+    // completion.
+    let src = "fn main() -> int ![io] {\n"
+        + "    let mut hs: Task<int>[] = [];\n"
+        + "    hs.push(spawn fn() -> int {\n"
+        + "        let mut k: int = 0;\n"
+        + "        let mut acc: int = 0;\n"
+        + "        loop { if k >= 4000000 { break; } acc = acc + 1; k = k + 1; }\n"
+        + "        return 10 + acc - acc;\n"
+        + "    });\n"
+        + "    hs.push(spawn fn() -> int { return 20; });\n"
+        + "    hs.push(spawn fn() -> int { return 30; });\n"
+        + "    let results: int[] = join_all(hs);\n"
+        + "    let mut ok: boolean = true;\n"
+        + "    if results.length != 3 { ok = false; }\n"
+        + "    if results[0] != 10 { ok = false; }\n"
+        + "    if results[1] != 20 { ok = false; }\n"
+        + "    if results[2] != 30 { ok = false; }\n"
+        + "    if ok { print.info(\"ORDER_OK\"); } else { print.info(\"ORDER_BAD\"); }\n"
+        + "    return 0;\n"
+        + "}\n";
+    let result = _build_and_run("ordered", src);
+    assert result.exit == 0;
+    assert find(result.output, "ORDER_OK", 0) >= 0;
+}
+
+// ---- empty input → empty result (the zero case for spawn-zero-or-more).
+test "join_all: empty input returns an empty array" ![io] {
+    let src = "fn main() -> int ![io] {\n"
+        + "    let empty: Task<int>[] = [];\n"
+        + "    let r: int[] = join_all(empty);\n"
+        + "    if r.length == 0 { print.info(\"EMPTY_OK\"); } else { print.info(\"EMPTY_BAD\"); }\n"
+        + "    return 0;\n"
+        + "}\n";
+    let result = _build_and_run("empty", src);
+    assert result.exit == 0;
+    assert find(result.output, "EMPTY_OK", 0) >= 0;
+}
+
+// ---- singleton input → one-element result.
+test "join_all: singleton input returns a one-element array" ![io] {
+    let src = "fn main() -> int ![io] {\n"
+        + "    let r: int[] = join_all([spawn fn() -> int { return 42; }]);\n"
+        + "    let mut ok: boolean = true;\n"
+        + "    if r.length != 1 { ok = false; }\n"
+        + "    if r[0] != 42 { ok = false; }\n"
+        + "    if ok { print.info(\"SINGLE_OK\"); } else { print.info(\"SINGLE_BAD\"); }\n"
+        + "    return 0;\n"
+        + "}\n";
+    let result = _build_and_run("single", src);
+    assert result.exit == 0;
+    assert find(result.output, "SINGLE_OK", 0) >= 0;
+}
+
+// ---- the motivating dynamic loop (SFEP §2.1): spawn N in a loop, join in
+// order. Each iteration captures a fresh `let` value into its task.
+test "join_all: a dynamic spawn loop joins in input order" ![io] {
+    let src = "fn double_all(ids: int[]) -> int[] ![io] {\n"
+        + "    let mut hs: Task<int>[] = [];\n"
+        + "    let mut i: int = 0;\n"
+        + "    loop {\n"
+        + "        if i >= ids.length { break; }\n"
+        + "        let v: int = ids[i];\n"
+        + "        hs.push(spawn fn() -> int { return v * 2; });\n"
+        + "        i = i + 1;\n"
+        + "    }\n"
+        + "    return join_all(hs);\n"
+        + "}\n"
+        + "fn main() -> int ![io] {\n"
+        + "    let ids: int[] = [3, 5, 7];\n"
+        + "    let out: int[] = double_all(ids);\n"
+        + "    let mut ok: boolean = true;\n"
+        + "    if out.length != 3 { ok = false; }\n"
+        + "    if out[0] != 6 { ok = false; }\n"
+        + "    if out[1] != 10 { ok = false; }\n"
+        + "    if out[2] != 14 { ok = false; }\n"
+        + "    if ok { print.info(\"LOOP_OK\"); } else { print.info(\"LOOP_BAD\"); }\n"
+        + "    return 0;\n"
+        + "}\n";
+    let result = _build_and_run("loop", src);
+    assert result.exit == 0;
+    assert find(result.output, "LOOP_OK", 0) >= 0;
+}
+
+// ---- E0831 migration: the annotated push path no longer fails closed. The
+// un-annotated `[]` push still does (retained guard) — and E0831's message now
+// points at the `Task<T>` annotation as the primary remediation.
+test "join_all: un-annotated empty-handle push still fails closed with E0831" ![io] {
+    let src = "fn main() -> int ![io] {\n" + "    let mut handles = [];\n"
+        + "    handles.push(spawn fn() -> int { return 1; });\n"
+        + "    return 0;\n"
+        + "}\n";
+    let output = _check_output("e0831-retained", src);
+    assert find(output, "E0831", 0) >= 0;
+    // The refined message names the writable handle type.
+    assert find(output, "Task<int>[]", 0) >= 0;
+}
+
+// ---- E0836: a heterogeneous handle array (a string handle pushed into a
+// Task<int>[]) fails during checking.
+test "join_all: heterogeneous handle push fails checking with E0836" ![io] {
+    let src = "fn main() -> int ![io] {\n"
+        + "    let mut hs: Task<int>[] = [];\n"
+        + "    hs.push(spawn fn() -> string { return \"x\"; });\n"
+        + "    return 0;\n"
+        + "}\n";
+    let output = _check_output("e0836", src);
+    assert find(output, "E0836", 0) >= 0;
+}
+
+// ---- a matching-kind push into an annotated Task<int>[] checks clean (no
+// false E0836 / E0831).
+test "join_all: a matching-kind push into Task<int>[] checks clean" ![io] {
+    let src = "fn main() -> int ![io] {\n"
+        + "    let mut hs: Task<int>[] = [];\n"
+        + "    hs.push(spawn fn() -> int { return 1; });\n"
+        + "    return 0;\n"
+        + "}\n";
+    let output = _check_output("clean", src);
+    assert find(output, "checked 1 files: ok", 0) >= 0;
+}
+
+// ---- fail closed: `join_all` over an ordinary (non-Task) array must not
+// compile to an await-of-integer-as-pointer crash. The lowering backstop
+// rejects it (`[fatal]`) rather than emitting a program that SIGSEGVs.
+test "join_all: a non-Task array argument fails closed at build" ![io] {
+    let src = "fn main() -> int ![io] {\n" + "    let ids: int[] = [1, 2, 3];\n"
+        + "    let r: int[] = join_all(ids);\n"
+        + "    return 0;\n"
+        + "}\n";
+    let result = _build_and_run("nontask", src);
+    assert result.exit != 0;
+    assert find(result.output, "[fatal]", 0) >= 0;
+}
+
+// ---- fail closed: `join_all` over `Task<bool>[]` / `Task<void>[]` is
+// unsupported (a bool[] needs a sub-word slot; a void[] is meaningless) and
+// must be rejected, not silently miscompiled.
+test "join_all: a Task<bool>[] argument fails closed at build" ![io] {
+    let src = "fn main() -> int ![io] {\n"
+        + "    let mut hs: Task<bool>[] = [];\n"
+        + "    hs.push(spawn fn() -> bool { return true; });\n"
+        + "    let r: bool[] = join_all(hs);\n"
+        + "    return 0;\n"
+        + "}\n";
+    let result = _build_and_run("boolkind", src);
+    assert result.exit != 0;
+    assert find(result.output, "[fatal]", 0) >= 0;
+}

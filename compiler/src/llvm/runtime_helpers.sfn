@@ -641,6 +641,18 @@ fn _rh_descriptors_04(descriptors_in: RuntimeHelperDescriptor[]) -> RuntimeHelpe
         target: "parallel_join", symbol: "sfn_parallel", return_type: "i8*", parameter_types: ["i8*", "i8*", "i64"], effects: [], native_signature: null, c_abi_return_type: null
     });
 
+    // Ordered multi-await over already-spawned handles (SFEP-0055 / SFN-441).
+    // `join_all(handles)` lowers to a single `sfn_join_all(data, count)` call —
+    // the join-only sibling of `sfn_parallel` (no fan-out; the tasks are
+    // already running) defined in runtime/sfn/concurrency/parallel.sfn. It
+    // returns a Sailfin `SfnArray` (`{data,len,cap}*`) of results in input
+    // order, which the lowering bitcasts to the concrete `T[]`. Registered so
+    // its forward `declare` is emitted into calling modules and skipped in the
+    // defining module.
+    descriptors = append_runtime_helper(descriptors, RuntimeHelperDescriptor {
+        target: "join_all", symbol: "sfn_join_all", return_type: "i8*", parameter_types: ["i8*", "i64"], effects: [], native_signature: null, c_abi_return_type: null
+    });
+
     descriptors = append_runtime_helper(descriptors, RuntimeHelperDescriptor {
         target: "runtime_log_execution_fn", symbol: "sfn_log_execution", return_type: "i8*", parameter_types: ["i8*"], effects: ["io"], native_signature: "sfn_log_execution", c_abi_return_type: null
     });

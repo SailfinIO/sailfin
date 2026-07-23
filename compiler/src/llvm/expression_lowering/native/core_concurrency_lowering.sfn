@@ -1028,6 +1028,213 @@ fn lower_parallel_expression(stripped: string, bindings: ParameterBinding[], loc
     };
 }
 
+// The result element slot type (`T` of the returned `T[]`) for a `join_all`
+// over a `Task<T>[]` whose element slot is `handle_slot` (the future-pointer
+// LLVM type). Pointer-width kinds only — the six-future ceiling minus the two
+// the frontend excludes from `join_all`: `%SailfinFutureVoid*` (a `void[]` is
+// meaningless) and `%SailfinFutureBool*` (a `bool[]` needs a sub-word `i1`
+// slot the pointer-width result buffer does not model). "" means "not a
+// recognised future array" → the caller falls back (empty-literal path).
+fn _join_all_result_element_type(handle_slot: string) -> string {
+    if handle_slot == "%SailfinFutureInt*" { return "i64"; }
+    if handle_slot == "%SailfinFutureNumber*" { return "double"; }
+    if handle_slot == "%SailfinFutureString*" { return "i8*"; }
+    if handle_slot == "%SailfinFuturePtr*" { return "i8*"; }
+    return "";
+}
+
+// The future kind an array element slot names (int/number/string/ptr/bool/
+// void), or "" when the slot is not one of the six future pointers. Unlike
+// `_join_all_result_element_type` this also names `bool`/`void` so the caller
+// can fail those two closed (they have no pointer-width result-array form)
+// rather than silently miscompiling them through the `i8*` fallback.
+fn _join_all_future_kind(handle_slot: string) -> string {
+    if handle_slot == "%SailfinFutureInt*" { return "int"; }
+    if handle_slot == "%SailfinFutureNumber*" { return "number"; }
+    if handle_slot == "%SailfinFutureString*" { return "string"; }
+    if handle_slot == "%SailfinFuturePtr*" { return "ptr"; }
+    if handle_slot == "%SailfinFutureBool*" { return "bool"; }
+    if handle_slot == "%SailfinFutureVoid*" { return "void"; }
+    return "";
+}
+
+// The first-field element slot type of an array-struct-pointer LLVM type
+// `{ E*, i64, i64 }*` (returns `E`, no trailing `*`), or "" when `llvm_type`
+// is not that shape. Used to read the handle slot off the lowered `Task<T>[]`
+// operand and to derive the fallback result element from an expected `T[]`.
+fn _join_all_array_element_slot(llvm_type: string) -> string {
+    let trimmed = trim_text(llvm_type);
+    if trimmed.length < 4 { return ""; }
+    if substring(trimmed, trimmed.length - 1, trimmed.length) != "*" {
+        return "";
+    }
+    let inner = trim_text(substring(trimmed, 0, trimmed.length - 1));
+    if substring(inner, 0, 1) != "{" { return ""; }
+    let comma = index_of(inner, ",");
+    if comma < 0 { return ""; }
+    let first_segment = trim_text(substring(inner, 1, comma));
+    if first_segment.length < 2 { return ""; }
+    if substring(first_segment, first_segment.length - 1, first_segment.length) != "*" {
+        return "";
+    }
+    return trim_text(substring(first_segment, 0, first_segment.length - 1));
+}
+
+// `join_all(<handles>)` — ordered multi-await over an already-spawned
+// `Task<T>[]` (SFEP-0055 / SFN-441). Lowers to a single
+// `sfn_join_all(i8* data, i64 count)` call — the join-only sibling of
+// `sfn_parallel` — over the handle array's data pointer + length, then
+// bitcasts the returned `SfnArray` to the concrete `T[]`. Runs concurrently
+// under the pool since the tasks were already spawned; the result array's
+// slot i is `await handles[i]`, in input order.
+fn lower_join_all_expression(stripped: string, bindings: ParameterBinding[], locals: LocalBinding[], temp_index: int, lines: string[], functions: NativeFunction[], context: TypeContext, expected_type: string) -> ExpressionResult ![io] {
+    let empty_constants: StringConstant[] = [];
+    // Extract the single argument between `join_all(` and the final `)`.
+    let open = index_of(stripped, "(");
+    let close = find_last_index_of_char(stripped, ")");
+    let mut arg_text: string = "";
+    if open >= 0 {
+        if close > open {
+            arg_text = trim_text(substring(stripped, open + 1, close));
+        }
+    }
+    // Empty call text (`join_all()`) is a malformed builtin; treat as empty.
+    let mut ja_lines: string[] = lines;
+    let mut ja_temp: int = temp_index;
+    let mut ja_diag: string[] = [];
+
+    // Lower the handles argument to its `Task<T>[]` = `{ Future*, i64, i64 }*`
+    // operand. An empty `[]` literal lowers to `{ double*, i64, i64 }*` (len 0).
+    let handles = lower_expression(arg_text, bindings, locals, ja_temp, ja_lines, functions, context, "");
+    ja_lines = handles.lines;
+    ja_temp = handles.temp_index;
+    ja_diag = extend_string_array(ja_diag, handles.diagnostics);
+
+    let mut handles_type: string = "i8*";
+    let mut handles_value: string = "null";
+    if handles.operand != null {
+        let hop = handles.operand;
+        handles_type = hop.llvm_type;
+        handles_value = hop.value;
+    }
+
+    let struct_type = trim_text(substring(handles_type, 0, handles_type.length - 1));
+    let handle_slot = _join_all_array_element_slot(handles_type);
+    let future_kind = _join_all_future_kind(handle_slot);
+    let is_empty_literal = strings_equal(arg_text, "[]");
+
+    // Fail closed on the two future kinds `join_all` cannot model in a
+    // pointer-width result array (SFEP-0055 §3.4): `Task<void>[]` (a `void[]`
+    // is meaningless) and `Task<bool>[]` (a `bool[]` needs a sub-word `i1`
+    // slot). Reject at lowering rather than silently miscompile the result.
+    // The guard lives here, not as a frontend E-code, because the argument's
+    // element kind is not statically inferable for every binding — a `Task<T>[]`
+    // parameter carries no element-kind marker (#829) — so only the lowered IR
+    // type reliably classifies it; this mirrors the E0831 `[fatal]` backstop.
+    if strings_equal(future_kind, "bool") || strings_equal(future_kind, "void") {
+        ja_diag.push("[fatal] llvm lowering: `join_all` does not support `Task<"
+            + future_kind
+            + ">[]` — results are collected in a pointer-width array (supported result kinds: int, number, string, ptr).");
+        let bad = LLVMOperand {
+            llvm_type: "{ i8**, i64, i64 }*",
+            value: "null"
+        };
+        return ExpressionResult {
+            lines: ja_lines,
+            temp_index: ja_temp,
+            operand: bad,
+            diagnostics: ja_diag,
+            string_constants: empty_constants
+        };
+    }
+
+    // Not a task-handle-array element, and not the empty `[]` literal (whose
+    // inferred `double` slot is a legitimate zero-length join). Fail closed: an
+    // ordinary array (`int[]`) passed here would otherwise `sfn_await` its
+    // integers as future pointers and crash at runtime. `[]` is the only valid
+    // non-future arg — every other handle collection carries a `Task<T>`
+    // (future-pointer) element slot.
+    if future_kind.length == 0 {
+        if !is_empty_literal {
+            ja_diag.push("[fatal] llvm lowering: `join_all` argument is not a task-handle array (`Task<T>[]`); its lowered type was `"
+                + handles_type
+                + "`. Build the array from `spawn` handles (`let mut hs: Task<int>[] = []; hs.push(spawn ...)`), or pass `[]` for an empty join.");
+            let bad = LLVMOperand {
+                llvm_type: "{ i8**, i64, i64 }*",
+                value: "null"
+            };
+            return ExpressionResult {
+                lines: ja_lines,
+                temp_index: ja_temp,
+                operand: bad,
+                diagnostics: ja_diag,
+                string_constants: empty_constants
+            };
+        }
+    }
+
+    // Resolve the result element slot type `T`. Prefer the handle kind; fall
+    // back to the expected `T[]`'s element (the empty-literal path, where the
+    // input slot is the inferred `double`), else a pointer-width default.
+    let mut result_elem = _join_all_result_element_type(handle_slot);
+    if result_elem.length == 0 {
+        let expected_elem = _join_all_array_element_slot(trim_text(expected_type));
+        if expected_elem.length > 0 { result_elem = expected_elem; }
+    }
+    if result_elem.length == 0 { result_elem = "i8*"; }
+
+    // data pointer: field 0 lives at offset 0 and is pointer-width for every
+    // element type, so bitcast the array pointer to i8** and load the first
+    // word directly (avoids threading the element-slot pointer depth).
+    let arr_as_pp = format_temp_name(ja_temp);
+    ja_temp += 1;
+    ja_lines.push("  " + arr_as_pp + " = bitcast " + handles_type + " "
+        + handles_value
+        + " to i8**");
+    let data_i8 = format_temp_name(ja_temp);
+    ja_temp += 1;
+    ja_lines.push("  " + data_i8 + " = load i8*, i8** " + arr_as_pp);
+
+    // length: field 1 → load i64.
+    let len_ptr = format_temp_name(ja_temp);
+    ja_temp += 1;
+    ja_lines.push("  " + len_ptr + " = getelementptr " + struct_type + ", "
+        + handles_type
+        + " "
+        + handles_value
+        + ", i32 0, i32 1");
+    let len_val = format_temp_name(ja_temp);
+    ja_temp += 1;
+    ja_lines.push("  " + len_val + " = load i64, i64* " + len_ptr);
+
+    // Ordered multi-await → SfnArray of results.
+    let res_i8 = format_temp_name(ja_temp);
+    ja_temp += 1;
+    ja_lines.push("  " + res_i8 + " = call i8* @sfn_join_all(i8* " + data_i8
+        + ", i64 "
+        + len_val
+        + ")");
+
+    // Reinterpret the result SfnArray as the concrete `T[]`.
+    let result_ptr_type = "{ " + result_elem + "*, i64, i64 }*";
+    let res_arr = format_temp_name(ja_temp);
+    ja_temp += 1;
+    ja_lines.push("  " + res_arr + " = bitcast i8* " + res_i8 + " to "
+        + result_ptr_type);
+
+    let ja_operand = LLVMOperand {
+        llvm_type: result_ptr_type,
+        value: res_arr
+    };
+    return ExpressionResult {
+        lines: ja_lines,
+        temp_index: ja_temp,
+        operand: ja_operand,
+        diagnostics: ja_diag,
+        string_constants: empty_constants
+    };
+}
+
 // Builtin server accept loop: `serve(<handler>[, <port>])` (#1092).
 // Extracted sibling of `lower_expression`. The call-site guard ensures
 // only the *builtin* `serve` (no user/imported `serve` in scope) reaches

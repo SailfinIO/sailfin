@@ -70,7 +70,9 @@ import {
     make_parse_error_diagnostic,
     make_removed_keyword_diagnostic,
     make_spawn_handle_into_empty_array_diagnostic,
+    make_spawn_handle_kind_mismatch_diagnostic,
     make_spawn_unresolvable_kind_diagnostic,
+    make_task_array_element_marker,
     make_thread_local_requires_mut_diagnostic,
     make_try_error_type_mismatch_diagnostic,
     make_try_non_result_fn_diagnostic,
@@ -87,6 +89,8 @@ import {
     signature_is_c_abi,
     signature_is_generic,
     spawn_future_kind,
+    task_array_element_kind,
+    task_array_marker_kind,
     token_from_name,
     type_is_future,
     type_is_result
@@ -566,6 +570,15 @@ fn check_statement(statement: Statement, ctx: TypeckCtx) -> ScopeResult {
         if statement.type_annotation != null {
             let resolved = channel_element_kind(statement.type_annotation.text);
             if resolved != null { elem_kind = resolved; }
+            // A `Task<T>[]` handle array records its element kind under a
+            // `taskarr:` marker so `push_spawn_handle_diagnostics` can enforce
+            // homogeneity (E0836) on a later `.push(spawn ...)` (SFEP-0055).
+            if elem_kind.length == 0 {
+                let task_kind = task_array_element_kind(statement.type_annotation.text);
+                if task_kind != null {
+                    elem_kind = make_task_array_element_marker(task_kind);
+                }
+            }
         }
         // An unannotated `let mut hs = []` bakes the array's LLVM element type
         // as `double` (empty literal, no inference target); tag it "empty_array"
@@ -1972,6 +1985,10 @@ fn channel_send_diagnostics(expression: Expression, bindings: SymbolEntry[]) -> 
     // "empty_array" is the push_spawn_handle_diagnostics sentinel, not a real
     // Channel<T> element kind — it never carries a channel here.
     if strings_equal(entry.element_kind, "empty_array") { return []; }
+    // A `taskarr:` marker is a `Task<T>[]` handle array (SFEP-0055), not a
+    // channel; a `.send` on it is not a channel-send mismatch (arrays have no
+    // `send`). Skip so it doesn't false-fire E0815.
+    if task_array_marker_kind(entry.element_kind) != null { return []; }
     // `ptr` is the indeterminate catch-all `spawn_future_kind` assigns to every
     // non-primitive element (user type, alias, generic parameter, fn-type), so
     // a `Channel<T>` whose `T` is not one of the five determinate primitive
@@ -2001,10 +2018,40 @@ fn push_spawn_handle_diagnostics(expression: Expression, bindings: SymbolEntry[]
     if !strings_equal(receiver.variant, "Identifier") { return []; }
     let entry = find_symbol(bindings, receiver.name);
     if entry == null { return []; }
-    if !strings_equal(entry.element_kind, "empty_array") { return []; }
     if expression.arguments.length != 1 { return []; }
-    if !strings_equal(expression.arguments[0].variant, "Spawn") { return []; }
-    return [make_spawn_handle_into_empty_array_diagnostic(receiver.name, expression.span)];
+    let pushed = expression.arguments[0];
+    if !strings_equal(pushed.variant, "Spawn") { return []; }
+    // E0831: un-annotated inferred-empty `[]` handle array — no element type,
+    // fails closed (SFN-386). `Task<T>` opens the annotated path; this guard
+    // is unchanged for the still-ambiguous un-annotated case.
+    if strings_equal(entry.element_kind, "empty_array") {
+        return [make_spawn_handle_into_empty_array_diagnostic(receiver.name, expression.span)];
+    }
+    // E0836: an annotated `Task<K1>[]` receiving a `spawn fn() -> K2` whose
+    // result kind differs — a heterogeneous handle array (SFEP-0055 §3.4).
+    let array_kind = task_array_marker_kind(entry.element_kind);
+    if array_kind != null {
+        let pushed_kind = _pushed_spawn_result_kind(pushed);
+        if pushed_kind.length > 0 {
+            if !strings_equal(pushed_kind, array_kind) {
+                return [make_spawn_handle_kind_mismatch_diagnostic(receiver.name, array_kind, pushed_kind, expression.span)];
+            }
+        }
+    }
+    return [];
+}
+
+// The future result kind of a `spawn fn() -> T { ... }` expression, resolved
+// from the spawned lambda's declared return type via the six-kind resolver, or
+// "" when it cannot be determined (no lambda / no return type). Drives the
+// E0836 handle-array homogeneity check.
+fn _pushed_spawn_result_kind(spawn_expr: Expression) -> string {
+    let operand = spawn_expr.operand;
+    if operand == null { return ""; }
+    if !strings_equal(operand.variant, "Lambda") { return ""; }
+    let return_type = operand.return_type;
+    if return_type == null { return ""; }
+    return spawn_future_kind(return_type.text);
 }
 
 // SFN-385: reject `recv.method(...)` on a primitive receiver whose method is
@@ -2193,6 +2240,14 @@ fn walk_block_expressions(block: Block, ctx: TypeckCtx) -> Diagnostic[] {
             if statement.type_annotation != null {
                 let resolved = channel_element_kind(statement.type_annotation.text);
                 if resolved != null { elem_kind = resolved; }
+                // `Task<T>[]` handle-array marker (SFEP-0055) — see the primary
+                // `check_statement` path for the rationale.
+                if elem_kind.length == 0 {
+                    let task_kind = task_array_element_kind(statement.type_annotation.text);
+                    if task_kind != null {
+                        elem_kind = make_task_array_element_marker(task_kind);
+                    }
+                }
             }
             if elem_kind.length == 0 {
                 let awaited = await_receive_result_kind(statement.initializer, bindings);

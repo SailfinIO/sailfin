@@ -164,6 +164,29 @@ fn _sfn_array_alloc_v2(initial_cap: i64, elem_size: i64) -> *u8 {
     }
 }
 
+// `sfn_array_new_pointer_width(count)` — allocate an `SfnArray` of `count`
+// zeroed 8-byte (pointer-width) slots with `len == cap == count`. The
+// arena-consistent container/buffer allocation reuses `_sfn_array_alloc_v2`
+// so the result frees/pushes uniformly with a literal-built array. The
+// element interpretation is the caller's (raw i64 / f64 bits / `char*` / raw
+// pointer) — the same type-agnostic pointer-width slot convention `concat_v2`
+// and `argv_to_string_array` use. `sfn_join_all`
+// (`runtime/sfn/concurrency/parallel.sfn`, SFEP-0055) builds its ordered
+// result array through this so the join half owns no array-layout knowledge.
+fn sfn_array_new_pointer_width(count: i64) -> *u8 {
+    unsafe {
+        let mut n: i64 = count;
+        if n < 0 { n = 0; }
+        let out: *u8 = _sfn_array_alloc_v2(n, 8);
+        if (out as i64) == 0 { return null; }
+        // `_sfn_array_alloc_v2` set cap = n (for n > 0); publish len = n so the
+        // array reads back as fully populated. n == 0 yields the valid empty
+        // container (data null, len 0, cap 0).
+        atomic_store((out as i64 + 8) as *i64, n);
+        return out;
+    }
+}
+
 // `sailfin_runtime_concat_v2(a, b)` — allocate a fresh `SfnArray` of
 // `char*` elements holding both inputs' element spans (shallow pointer
 // copy). Bare-defined here (link-ownership flip, #1308 residual); the C
