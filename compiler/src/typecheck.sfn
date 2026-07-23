@@ -31,6 +31,7 @@ import {
     append_symbol,
     channel_element_kind,
     check_bare_fn_type_annotation,
+    check_char_literal_raw,
     check_enum_variants,
     check_extern_signature,
     check_extern_var,
@@ -48,6 +49,7 @@ import {
     check_type_parameters,
     check_unanalyzable_raw,
     check_uninferable_generic_constructor,
+    check_value_if_raw,
     classify_declared_primitive,
     classify_fn_cast,
     clone_bindings,
@@ -1716,6 +1718,14 @@ fn walk_expression(expression: Expression?, ctx: TypeckCtx) -> Diagnostic[] {
     if expression.variant == "Raw" {
         let fn_diags = check_fn_reference_raw(expression.text, bindings, expression.span);
         if fn_diags.length > 0 { return fn_diags; }
+        // SFN-442: classify two familiar-but-unsupported shapes (a value-position
+        // `if`, a character literal) with dedicated E-codes before the generic
+        // E0818 backstop, so they carry an actionable rewrite instead of the
+        // opaque "unstructured expression" message.
+        let if_diags = check_value_if_raw(expression.text, expression.span);
+        if if_diags.length > 0 { return if_diags; }
+        let char_diags = check_char_literal_raw(expression.text, expression.span);
+        if char_diags.length > 0 { return char_diags; }
         return check_unanalyzable_raw(expression.text, expression.span);
     }
     return [];

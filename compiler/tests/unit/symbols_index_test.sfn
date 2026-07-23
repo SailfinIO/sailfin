@@ -1,0 +1,53 @@
+// compiler/tests/unit/symbols_index_test.sfn
+// Pure schema/encoder coverage for compiler/src/symbols_index.sfn
+// (`sfn symbols --json`, SFN-444).
+import { expect_contains_str, expect_eq_str } from "sfn/test";
+
+import {
+    SymbolEntry,
+    SymbolParameter,
+    encode_symbols_error_json,
+    encode_symbols_json,
+    sort_symbols
+} from "../../src/symbols_index";
+
+fn _entry(name: string, origin: string, import_path: string) -> SymbolEntry {
+    return SymbolEntry {
+        name: name,
+        kind: "function",
+        origin: origin,
+        import_path: import_path,
+        form: "free",
+        signature: name + "()",
+        parameters: [],
+        return_type: "",
+        effects: []
+    };
+}
+
+test "symbols index: encode_symbols_json includes schema, version, and entry names" ![pure] {
+    let entries: SymbolEntry[] = [_entry("ascii_uppercase", "capsule", "sfn/strings"), _entry("parse_int", "capsule", "sfn/strings")];
+    let out = encode_symbols_json("0.0.0-test", entries, []);
+    assert expect_contains_str(out, "\"schema_version\":\"sailfin-symbols/1\"").ok;
+    assert expect_contains_str(out, "\"compiler_version\":\"0.0.0-test\"").ok;
+    assert expect_contains_str(out, "\"ascii_uppercase\"").ok;
+}
+
+test "symbols index: encode_symbols_json is deterministic for the same input" ![pure] {
+    let entries: SymbolEntry[] = [_entry("beta", "capsule", "sfn/strings"), _entry("alpha", "capsule", "sfn/strings")];
+    let a = encode_symbols_json("0.0.0-test", entries, []);
+    let b = encode_symbols_json("0.0.0-test", entries, []);
+    assert expect_eq_str(a, b).ok;
+}
+
+test "symbols index: sort_symbols orders entries lexicographically" ![pure] {
+    let entries: SymbolEntry[] = [_entry("zebra", "capsule", "sfn/strings"), _entry("alpha", "capsule", "sfn/strings")];
+    let sorted = sort_symbols(entries);
+    assert expect_eq_str(sorted[0].name, "alpha").ok;
+}
+
+test "symbols index: encode_symbols_error_json carries code and capsule" ![pure] {
+    let out = encode_symbols_error_json("E_SYMBOLS_UNRESOLVED_CAPSULE", "capsule not found: sfn/nope", "sfn/nope");
+    assert expect_contains_str(out, "\"code\":\"E_SYMBOLS_UNRESOLVED_CAPSULE\"").ok;
+    assert expect_contains_str(out, "\"capsule\":\"sfn/nope\"").ok;
+}

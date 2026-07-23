@@ -1,0 +1,159 @@
+// SFN-442 — two familiar-but-unsupported shapes that degrade to
+// `Expression.Raw` must classify to dedicated, actionable E-codes ahead of the
+// generic E0818 backstop:
+//   * a value-position `if` (`let n = if c { a } else { b };`) → E0834, with a
+//     `?:` conditional-expression rewrite;
+//   * a character literal (`text[i] == '|'`) → E0835, with the byte value and
+//     the integer-comparison rewrite.
+// Genuinely unstructured Raw text (and an identifier merely beginning with the
+// letters "if") still falls through to E0818 — the fail-closed backstop is
+// preserved. These tests drive `walk_expression` directly with the exact text
+// the parser produces on degradation, so they pin classification without a
+// full compile.
+import { Expression, SourceSpan, Statement } from "../../src/ast";
+import { empty_import_symbols } from "../../src/effect_imports";
+import { TypeckCtx, make_typeck_ctx, walk_expression } from "../../src/typecheck";
+import { Diagnostic, SymbolEntry } from "../../src/typecheck_types";
+
+fn _no_bindings() -> SymbolEntry[] {
+    let empty: SymbolEntry[] = [];
+    return empty;
+}
+
+fn _walk_ctx() -> TypeckCtx {
+    let no_interfaces: Statement[] = [];
+    let no_generic_structs: string[] = [];
+    return make_typeck_ctx(_no_bindings(), empty_import_symbols(), no_interfaces, _no_bindings(), false, no_generic_structs);
+}
+
+fn _raw_diags(text: string) -> Diagnostic[] ![io] {
+    let raw = Expression.Raw { text: text, span: null };
+    return walk_expression(raw, _walk_ctx());
+}
+
+fn _raw_diags_spanned(text: string, span: SourceSpan) -> Diagnostic[] ![io] {
+    let raw = Expression.Raw { text: text, span: span };
+    return walk_expression(raw, _walk_ctx());
+}
+
+fn _has_code(diags: Diagnostic[], code: string) -> boolean {
+    let mut i: int = 0;
+    loop {
+        if i >= diags.length { break; }
+        if strings_equal(diags[i].code, code) { return true; }
+        i += 1;
+    }
+    return false;
+}
+
+fn _fix_message(diags: Diagnostic[], code: string) -> string {
+    let mut i: int = 0;
+    loop {
+        if i >= diags.length { break; }
+        if strings_equal(diags[i].code, code) {
+            let suggestion = diags[i].suggestion;
+            if suggestion == null { return ""; }
+            return suggestion.message;
+        }
+        i += 1;
+    }
+    return "";
+}
+
+fn _contains(haystack: string, needle: string) -> boolean {
+    if needle.length == 0 { return true; }
+    if needle.length > haystack.length { return false; }
+    let mut i: int = 0;
+    loop {
+        if i + needle.length > haystack.length { break; }
+        let mut j: int = 0;
+        let mut matched: boolean = true;
+        loop {
+            if j >= needle.length { break; }
+            if haystack[i + j] != needle[j] {
+                matched = false;
+                break;
+            }
+            j += 1;
+        }
+        if matched { return true; }
+        i += 1;
+    }
+    return false;
+}
+
+// ── value-position `if` → E0834, never E0818 ──
+test "raw: value-position if classifies to E0834 not E0818" ![io] {
+    let diags = _raw_diags("if condition { a } else { b }");
+    assert _has_code(diags, "E0834");
+    assert ! _has_code(diags, "E0818");
+}
+
+test "raw: value-position if fix-it carries the conditional-expression rewrite" ![io] {
+    let msg = _fix_message(_raw_diags("if condition { a } else { b }"), "E0834");
+    assert _contains(msg, "condition ? a : b");
+}
+
+test "raw: value-position else-if chain still fires E0834 without a misleading rewrite" ![io] {
+    let diags = _raw_diags("if c { a } else if d { b } else { e }");
+    assert _has_code(diags, "E0834");
+    let msg = _fix_message(diags, "E0834");
+    // A single ternary cannot represent an else-if chain — the concrete rewrite
+    // must be withheld in favor of the generic branch-assignment guidance.
+    assert ! _contains(msg, "rewrite as a conditional expression");
+}
+
+// ── character literal → E0835, never E0818 ──
+test "raw: character literal classifies to E0835 not E0818" ![io] {
+    let diags = _raw_diags("text[i] == '|'");
+    assert _has_code(diags, "E0835");
+    assert ! _has_code(diags, "E0818");
+}
+
+test "raw: character literal fix-it carries the byte-value rewrite" ![io] {
+    let msg = _fix_message(_raw_diags("text[i] == '|'"), "E0835");
+    assert _contains(msg, "text[i] == 124");
+}
+
+test "raw: character literal E0835 span is narrowed to the literal column" ![io] {
+    // `text[i] == '|'` — the opening quote sits at offset 11, so a Raw span
+    // starting at column 10 must narrow the caret to column 21.
+    let span = SourceSpan {
+        start_line: 5,
+        start_column: 10,
+        end_line: 5,
+        end_column: 24
+    };
+    let diags = _raw_diags_spanned("text[i] == '|'", span);
+    assert _has_code(diags, "E0835");
+    let mut line: int = -1;
+    let mut col: int = -1;
+    let mut i: int = 0;
+    loop {
+        if i >= diags.length { break; }
+        if strings_equal(diags[i].code, "E0835") {
+            let primary = diags[i].primary;
+            if primary != null {
+                line = primary.line;
+                col = primary.column;
+            }
+        }
+        i += 1;
+    }
+    assert line == 5;
+    assert col == 21;
+}
+
+// ── the E0818 fail-closed backstop is preserved for unclassified text ──
+test "raw: unclassified text still fails closed with E0818" ![io] {
+    let diags = _raw_diags("foo bar baz");
+    assert _has_code(diags, "E0818");
+    assert ! _has_code(diags, "E0834");
+    assert ! _has_code(diags, "E0835");
+}
+
+test "raw: identifier merely starting with if is not misclassified" ![io] {
+    let diags = _raw_diags("iffy bar baz");
+    assert ! _has_code(diags, "E0834");
+    assert _has_code(diags, "E0818");
+}

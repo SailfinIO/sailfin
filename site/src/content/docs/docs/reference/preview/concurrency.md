@@ -99,7 +99,7 @@ The ownership/lifetime side of `Task<T>` — rejecting a double-await
 
 **Remaining work**: full `async fn` return-value `await` wired into the live
 typecheck walk, a generic `channel<T>(...)` constructor, `Task<T>`'s
-ownership/lifetime diagnostics (`E0834` double-await, `E0835` nursery escape,
+ownership/lifetime diagnostics (`E0837` double-await, `E0838` nursery escape,
 SFN-446), `parallel`'s own raw result handle staying untyped, cancellation,
 async I/O, and the `OwnedBuf` capture-buffer ABI across the thread boundary
 (#1476).

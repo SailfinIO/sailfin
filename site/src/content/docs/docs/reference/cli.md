@@ -238,6 +238,45 @@ Typecheck codes (`E0001`, `E0301`, `E0302`) are shared with the regular compilat
 
 ---
 
+### `sfn symbols [--json] [--capsule SLUG]`
+
+Emit a versioned, deterministic JSON index of Sailfin's public callable
+surface — the auto-imported prelude globals plus the free functions declared
+in each in-tree `sfn/*` capsule's `src/mod.sfn`. Intended for agents and
+external tooling that need a machine-readable symbol table without parsing
+`sfn check` diagnostics or grepping source.
+
+**Usage:**
+
+```bash
+sfn symbols --json                        # index the full prelude + capsules surface
+sfn symbols --json --capsule sfn/strings  # restrict to one capsule
+```
+
+**Options:**
+
+| Flag | Description |
+|---|---|
+| `--json` | Emit the JSON envelope. The default and, in v1, the only output mode. |
+| `--capsule SLUG` | Restrict the index to one capsule (e.g. `sfn/strings`). An unresolvable slug produces a structured error. |
+
+**Exit codes:**
+
+| Code | Meaning |
+|---|---|
+| `0` | Success — the JSON envelope was written to stdout. |
+| `1` | `--capsule` named a slug that could not be resolved. |
+
+**Example output** (trimmed):
+
+```json
+{"schema_version":"sailfin-symbols/1","compiler_version":"0.8.0","symbols":[{"name":"parse_int","kind":"function","origin":"capsule","import_path":"sfn/strings","form":"free","signature":"parse_int(text: string) -> Result<int, string>","parameters":[{"name":"text","type":"string"}],"return_type":"Result<int, string>","effects":[]}],"parse_failures":[]}
+```
+
+See [`sfn symbols --json` Schema](https://github.com/SailfinIO/sailfin/blob/main/docs/reference/symbols-json-schema.md) for the full field-by-field reference, the error envelope shape, and the determinism/versioning contract.
+
+---
+
 ### `sfn build <file>`
 
 Compile a Sailfin source file without running it. Writes an executable to the output path (default: the source filename without `.sfn` in the current directory).
