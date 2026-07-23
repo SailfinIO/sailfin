@@ -1,0 +1,130 @@
+// compiler/tests/unit/direct_link_argv_test.sfn
+//
+// Unit guard for the direct `ld.lld` argv builder (SFEP-0015 §8 Stage 1,
+// `compiler/src/build/direct_link.sfn`; mirror #2550). Pins the argv
+// contract that replaces clang as the Linux x86-64 final linker: the
+// startup-object wrap, the dynamic-linker/target-identity flags, the
+// object/library ordering, and — critically — the translation of the
+// LinkPlan's clang-driver `link_flags` into raw linker flags. A drift here
+// is a silent ABI change, exactly what the acceptance criteria forbid.
+import { expect_eq_bool } from "sfn/test";
+
+import { DirectLinkContract, direct_ld_lld_argv } from "../../src/build/direct_link";
+
+fn _argv_contains(argv: string[], needle: string) -> boolean ![pure] {
+    let mut i: int = 0;
+    loop {
+        if i >= argv.length { break; }
+        if argv[i] == needle { return true; }
+        i += 1;
+    }
+    return false;
+}
+
+// Index of the first `needle` in `argv`, or -1 when absent.
+fn _index_of(argv: string[], needle: string) -> int ![pure] {
+    let mut i: int = 0;
+    loop {
+        if i >= argv.length { break; }
+        if argv[i] == needle { return i; }
+        i += 1;
+    }
+    return -1;
+}
+
+// A representative resolved contract with recognizable path shapes.
+fn _contract() -> DirectLinkContract ![pure] {
+    return DirectLinkContract {
+        ok: true,
+        reason: "",
+        dynamic_linker: "/lib64/ld-linux-x86-64.so.2",
+        crt1: "/usr/lib/x86_64-linux-gnu/Scrt1.o",
+        crti: "/usr/lib/x86_64-linux-gnu/crti.o",
+        crtn: "/usr/lib/x86_64-linux-gnu/crtn.o",
+        crtbegin: "/usr/lib/gcc/x86_64-linux-gnu/13/crtbeginS.o",
+        crtend: "/usr/lib/gcc/x86_64-linux-gnu/13/crtendS.o",
+        search_dirs: ["/usr/lib/gcc/x86_64-linux-gnu/13", "/usr/lib/x86_64-linux-gnu"]
+    };
+}
+
+// Program layout: `link_flags` carries the clang-driver flags the driver
+// interleaves (linker selection, section flags, dead-strip, retain roots).
+fn _program_argv() -> string[] ![pure] {
+    let c = _contract();
+    return direct_ld_lld_argv(c, ["runtime.o", "main.o"], "a.out", ["-lssl", "-lcrypto", "-lm", "-lpthread"], ["-fuse-ld=lld", "-ffunction-sections", "-fdata-sections", "-Wl,--gc-sections", "-Wl,-u,sfn_provider_init"]);
+}
+
+test "direct-link: invokes ld.lld with PIE target-identity flags" ![pure] {
+    let argv = _program_argv();
+    assert expect_eq_bool(argv.length > 0, true).ok;
+    assert expect_eq_bool(argv[0] == "ld.lld", true).ok;
+    assert expect_eq_bool(_argv_contains(argv, "-pie"), true).ok;
+    assert expect_eq_bool(_argv_contains(argv, "-m"), true).ok;
+    assert expect_eq_bool(_argv_contains(argv, "elf_x86_64"), true).ok;
+    assert expect_eq_bool(_argv_contains(argv, "-dynamic-linker"), true).ok;
+    assert expect_eq_bool(_argv_contains(argv, "/lib64/ld-linux-x86-64.so.2"), true).ok;
+    // Output path is present and introduced by `-o`.
+    assert expect_eq_bool(_argv_contains(argv, "-o"), true).ok;
+    assert expect_eq_bool(_argv_contains(argv, "a.out"), true).ok;
+    // The final link never re-invokes clang.
+    assert expect_eq_bool(_argv_contains(argv, "clang"), false).ok;
+}
+
+test "direct-link: wraps objects in CRT startup objects and search dirs" ![pure] {
+    let argv = _program_argv();
+    assert expect_eq_bool(_argv_contains(argv, "/usr/lib/x86_64-linux-gnu/Scrt1.o"), true).ok;
+    assert expect_eq_bool(_argv_contains(argv, "/usr/lib/gcc/x86_64-linux-gnu/13/crtbeginS.o"), true).ok;
+    assert expect_eq_bool(_argv_contains(argv, "/usr/lib/gcc/x86_64-linux-gnu/13/crtendS.o"), true).ok;
+    assert expect_eq_bool(_argv_contains(argv, "/usr/lib/x86_64-linux-gnu/crtn.o"), true).ok;
+    // `-L` search dirs are prefixed.
+    assert expect_eq_bool(_argv_contains(argv, "-L/usr/lib/gcc/x86_64-linux-gnu/13"), true).ok;
+    assert expect_eq_bool(_argv_contains(argv, "-L/usr/lib/x86_64-linux-gnu"), true).ok;
+    // The end-CRT objects must follow the user objects (linker order).
+    assert expect_eq_bool(_index_of(argv, "main.o") < _index_of(argv, "/usr/lib/gcc/x86_64-linux-gnu/13/crtendS.o"), true).ok;
+    assert expect_eq_bool(_index_of(argv, "/usr/lib/gcc/x86_64-linux-gnu/13/crtendS.o") < _index_of(argv, "/usr/lib/x86_64-linux-gnu/crtn.o"), true).ok;
+}
+
+test "direct-link: consumes objects and libs, never .ll inputs" ![pure] {
+    let argv = _program_argv();
+    assert expect_eq_bool(_argv_contains(argv, "runtime.o"), true).ok;
+    assert expect_eq_bool(_argv_contains(argv, "main.o"), true).ok;
+    assert expect_eq_bool(_argv_contains(argv, "-lssl"), true).ok;
+    assert expect_eq_bool(_argv_contains(argv, "-lcrypto"), true).ok;
+    assert expect_eq_bool(_argv_contains(argv, "-lm"), true).ok;
+    assert expect_eq_bool(_argv_contains(argv, "-lpthread"), true).ok;
+    assert expect_eq_bool(_argv_contains(argv, "main.ll"), false).ok;
+    // libc/libgcc tail is present.
+    assert expect_eq_bool(_argv_contains(argv, "-lc"), true).ok;
+    assert expect_eq_bool(_argv_contains(argv, "-lgcc"), true).ok;
+}
+
+test "direct-link: translates -Wl passthrough and drops clang-driver flags" ![pure] {
+    let argv = _program_argv();
+    // `-Wl,--gc-sections` becomes the bare linker flag.
+    assert expect_eq_bool(_argv_contains(argv, "--gc-sections"), true).ok;
+    assert expect_eq_bool(_argv_contains(argv, "-Wl,--gc-sections"), false).ok;
+    // `-Wl,-u,<sym>` becomes `-u <sym>` (two args) — a retain root.
+    assert expect_eq_bool(_argv_contains(argv, "-u"), true).ok;
+    assert expect_eq_bool(_argv_contains(argv, "sfn_provider_init"), true).ok;
+    assert expect_eq_bool(_argv_contains(argv, "-Wl,-u,sfn_provider_init"), false).ok;
+    // Clang-driver-only flags are dropped (meaningless to ld.lld).
+    assert expect_eq_bool(_argv_contains(argv, "-fuse-ld=lld"), false).ok;
+    assert expect_eq_bool(_argv_contains(argv, "-ffunction-sections"), false).ok;
+    assert expect_eq_bool(_argv_contains(argv, "-fdata-sections"), false).ok;
+}
+
+test "direct-link: test layout (empty link_flags) still links objects and libs" ![pure] {
+    let c = _contract();
+    // The `sfn test` layout carries empty `link_flags` and the `-pthread`
+    // compile-driver lib spelling; the same builder must serve it.
+    let argv = direct_ld_lld_argv(c, ["probe_test.o", "runtime.o"], "test.bin", ["-lm", "-pthread"], []);
+    assert expect_eq_bool(argv[0] == "ld.lld", true).ok;
+    assert expect_eq_bool(_argv_contains(argv, "probe_test.o"), true).ok;
+    assert expect_eq_bool(_argv_contains(argv, "-lm"), true).ok;
+    // `-pthread` is normalized to the linker `-lpthread` spelling.
+    assert expect_eq_bool(_argv_contains(argv, "-lpthread"), true).ok;
+    assert expect_eq_bool(_argv_contains(argv, "-pthread"), false).ok;
+    // No retain-root / gc flags when link_flags is empty, and no clang.
+    assert expect_eq_bool(_argv_contains(argv, "--gc-sections"), false).ok;
+    assert expect_eq_bool(_argv_contains(argv, "clang"), false).ok;
+}

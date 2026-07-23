@@ -1,0 +1,318 @@
+// compiler/src/build/direct_link.sfn
+//
+// Stage 1 of the toolchain-independence arc (SFEP-0015 §8 "Own the link",
+// `docs/proposals/0015-llvm-independence.md`; mirror #2550). SFN-453 made
+// `Backend.link` object-only; this leaf owns the Linux x86-64 final-link
+// contract directly instead of delegating it to clang's driver: it resolves
+// the startup objects, dynamic linker, library search paths, and runtime
+// libraries the SysV AMD64 ABI needs, then constructs a bare `ld.lld` argv.
+//
+// The clang driver historically supplied all of this implicitly (CRT
+// objects, `-dynamic-linker`, `-L` search dirs, libc/libgcc). None of it
+// lived in the tree — this module makes it explicit and probes the host so
+// the final link no longer needs clang on PATH. Every prerequisite is
+// checked before the direct path is chosen; a missing one yields a
+// controlled fallback (`ok=false` + `reason`) to the clang driver rather
+// than a silent ABI change.
+//
+// Scope is deliberately Linux x86-64 (the tier-1 target and CI host).
+// macOS, Windows, musl, and other arches resolve `ok=false` and keep the
+// clang link path. Self-host note: every argv builder is a free function
+// calling the array builtin `.push`, matching `backend.sfn`'s shape (the
+// struct-method `.push` lowering the self-hosting compiler does not
+// resolve, #1389).
+import { _env_flag, _get_env_cmd } from "../build_flags";
+import { starts_with, substring } from "../string_utils";
+import { _shell_read_cmd } from "./fs";
+
+// The resolved Linux x86-64 link contract. `ok` gates the direct path;
+// when false, `reason` names why the driver falls back to clang. Every
+// path field is absolute and verified to exist during resolution.
+struct DirectLinkContract {
+    ok: boolean;
+    reason: string;
+    // /lib64/ld-linux-x86-64.so.2 (the ELF interpreter for -pie).
+    dynamic_linker: string;
+    // PIE startup objects: Scrt1.o/crti.o/crtn.o (multiarch libdir) wrap
+    // crtbeginS.o/crtendS.o (gcc install dir).
+    crt1: string;
+    crti: string;
+    crtn: string;
+    crtbegin: string;
+    crtend: string;
+    // -L search directories (gcc dir first, then the multiarch/system dirs)
+    // that resolve libc/libgcc/-l runtime libraries.
+    search_dirs: string[];
+}
+
+fn _direct_fail(reason: string) -> DirectLinkContract {
+    return DirectLinkContract {
+        ok: false,
+        reason: reason,
+        dynamic_linker: "",
+        crt1: "",
+        crti: "",
+        crtn: "",
+        crtbegin: "",
+        crtend: "",
+        search_dirs: []
+    };
+}
+
+// Candidate multiarch/system directories that hold Scrt1.o/crti.o/crtn.o,
+// in Debian/Ubuntu-then-RHEL/Arch preference order.
+fn _multiarch_libdirs() -> string[] {
+    return ["/usr/lib/x86_64-linux-gnu", "/lib/x86_64-linux-gnu", "/usr/lib64", "/lib64", "/usr/lib", "/lib"];
+}
+
+// First candidate directory that contains `filename`, or "" if none do.
+fn _first_libdir_with(dirs: string[], filename: string) -> string ![io] {
+    let mut i: int = 0;
+    loop {
+        if i >= dirs.length { break; }
+        let candidate = dirs[i] + "/" + filename;
+        if fs.exists(candidate) { return dirs[i]; }
+        i += 1;
+    }
+    return "";
+}
+
+// Resolve the gcc install directory that holds crtbeginS.o/crtendS.o
+// (e.g. /usr/lib/gcc/x86_64-linux-gnu/13). gcc's minor version varies by
+// distro, so probe the filesystem and pick the highest version present.
+// Returns "" when no native x86_64 gcc crtbeginS.o is found.
+//
+// The `grep -Ev` denylist excludes non-native x86_64 gcc toolchains that
+// may co-exist on a dev machine (the x32 ABI `-gnux32`, `-musl`/`-uclibc`
+// libc variants, Windows `mingw`/`w64` and bare-metal `-none-`/`-elf`/
+// `-eabi` cross-compilers). Without it, `sort -V | tail -1` can pick e.g.
+// `x86_64-linux-gnux32` over the native `x86_64-linux-gnu` (the `/` path
+// separator sorts before `x`), wrapping a `-m elf_x86_64` glibc link with
+// a mismatched-ABI crtbeginS.o + `-lgcc` — a direct-link failure where the
+// clang driver, which resolves its GCC install by the native triple, would
+// have succeeded. Native glibc triples (`x86_64-linux-gnu`,
+// `x86_64-pc-linux-gnu`, `x86_64-redhat-linux`, …) all survive the filter.
+fn _gcc_crt_dir() -> string ![io] {
+    let found = _shell_read_cmd("find /usr/lib/gcc /usr/lib64/gcc -maxdepth 3 -name crtbeginS.o 2>/dev/null | grep x86_64 | grep -Ev 'gnux32|musl|uclibc|mingw|w64|-none-|-elf|-eabi|android' | sort -V | tail -1");
+    if found.length == 0 { return ""; }
+    // Strip the trailing "/crtbeginS.o" (12 chars) to get the directory.
+    let suffix_len: int = 12;
+    if found.length <= suffix_len { return ""; }
+    return substring(found, 0, found.length - suffix_len);
+}
+
+// Append `dir` to `dirs` when it exists on disk and is not already present.
+fn _push_dir_if_new(dirs: string[], dir: string) -> string[] ![io] {
+    let mut out: string[] = dirs;
+    if dir.length == 0 { return out; }
+    if !fs.exists(dir) { return out; }
+    let mut i: int = 0;
+    loop {
+        if i >= out.length { break; }
+        if out[i] == dir { return out; }
+        i += 1;
+    }
+    out.push(dir);
+    return out;
+}
+
+// Resolve `command -v <name>`, or "" when not on PATH.
+fn _which(name: string) -> string ![io] {
+    return _shell_read_cmd("command -v " + name + " 2>/dev/null");
+}
+
+// Resolve the direct Linux x86-64 `ld.lld` link contract, or a
+// fallback (`ok=false`) with a reason. Gates, in order: target OS is
+// Linux; host arch is x86_64; `SAILFIN_LINKER` is unset or `lld`/`ld.lld`
+// (any other value defers to the clang path so mold/system overrides are
+// honored); `ld.lld` is on PATH; the dynamic linker, multiarch CRT
+// objects, and gcc CRT objects all exist. Re-probed per link (cheap shell
+// calls dwarfed by the link itself); env is stable per process.
+fn resolve_direct_ld_lld(target_os: string) -> DirectLinkContract ![io] {
+    if target_os != "Linux" {
+        return _direct_fail("target is not Linux (" + target_os + ")");
+    }
+    let arch = _shell_read_cmd("uname -m");
+    if arch != "x86_64" {
+        return _direct_fail("host arch is not x86_64 (" + arch + ")");
+    }
+    let forced = _get_env_cmd("SAILFIN_LINKER");
+    if forced.length > 0 {
+        if forced != "lld" && forced != "ld.lld" {
+            return _direct_fail("SAILFIN_LINKER=" + forced + " defers to clang");
+        }
+    }
+    if _which("ld.lld").length == 0 {
+        return _direct_fail("ld.lld not on PATH");
+    }
+    let dyn = "/lib64/ld-linux-x86-64.so.2";
+    if !fs.exists(dyn) {
+        return _direct_fail("dynamic linker missing (" + dyn + ")");
+    }
+    let libdir = _first_libdir_with(_multiarch_libdirs(), "Scrt1.o");
+    if libdir.length == 0 {
+        return _direct_fail("Scrt1.o not found in standard libdirs");
+    }
+    if !fs.exists(libdir + "/crti.o") || !fs.exists(libdir + "/crtn.o") {
+        return _direct_fail("crti.o/crtn.o not found in " + libdir);
+    }
+    let gccdir = _gcc_crt_dir();
+    if gccdir.length == 0 {
+        return _direct_fail("crtbeginS.o not found in a gcc libdir");
+    }
+    if !fs.exists(gccdir + "/crtendS.o") {
+        return _direct_fail("crtendS.o not found in " + gccdir);
+    }
+    let mut dirs: string[] = [];
+    dirs = _push_dir_if_new(dirs, gccdir);
+    dirs = _push_dir_if_new(dirs, libdir);
+    dirs = _push_dir_if_new(dirs, "/usr/lib/x86_64-linux-gnu");
+    dirs = _push_dir_if_new(dirs, "/lib/x86_64-linux-gnu");
+    dirs = _push_dir_if_new(dirs, "/usr/lib64");
+    dirs = _push_dir_if_new(dirs, "/lib64");
+    dirs = _push_dir_if_new(dirs, "/usr/lib");
+    dirs = _push_dir_if_new(dirs, "/lib");
+    return DirectLinkContract {
+        ok: true,
+        reason: "",
+        dynamic_linker: dyn,
+        crt1: libdir + "/Scrt1.o",
+        crti: libdir + "/crti.o",
+        crtn: libdir + "/crtn.o",
+        crtbegin: gccdir + "/crtbeginS.o",
+        crtend: gccdir + "/crtendS.o",
+        search_dirs: dirs
+    };
+}
+
+// Split `s` on ',' into its comma-separated pieces (empty pieces kept).
+fn _split_on_comma(s: string) -> string[] {
+    let mut out: string[] = [];
+    let mut start: int = 0;
+    let mut i: int = 0;
+    loop {
+        if i >= s.length { break; }
+        if substring(s, i, i + 1) == "," {
+            out.push(substring(s, start, i));
+            start = i + 1;
+        }
+        i += 1;
+    }
+    out.push(substring(s, start, s.length));
+    return out;
+}
+
+// Translate the LinkPlan's clang-driver `link_flags` into raw linker
+// arguments. `-Wl,x,y` passthrough (`--gc-sections`, `-u <sym>`) becomes
+// bare `x y`; clang-only compile/driver flags (`-fuse-ld=…`,
+// `-ffunction-sections`, `-fdata-sections`) are dropped — they mean
+// nothing to `ld.lld`, which *is* the linker and links already-compiled
+// objects.
+fn _translate_link_flags(link_flags: string[]) -> string[] {
+    let mut out: string[] = [];
+    let mut i: int = 0;
+    loop {
+        if i >= link_flags.length { break; }
+        let f = link_flags[i];
+        if starts_with(f, "-Wl,") {
+            let rest = substring(f, 4, f.length);
+            let parts = _split_on_comma(rest);
+            let mut j: int = 0;
+            loop {
+                if j >= parts.length { break; }
+                if parts[j].length > 0 { out.push(parts[j]); }
+                j += 1;
+            }
+        }
+        // else: a clang-driver-only flag — dropped for the direct link.
+        i += 1;
+    }
+    return out;
+}
+
+// Sanitize the LinkPlan's `libs` for a bare `ld.lld` invocation: the
+// compile-driver `-pthread` spelling becomes `-lpthread`; `-l…`/`-L…`
+// pass through unchanged.
+fn _sanitize_direct_libs(libs: string[]) -> string[] {
+    let mut out: string[] = [];
+    let mut i: int = 0;
+    loop {
+        if i >= libs.length { break; }
+        let l = libs[i];
+        if l == "-pthread" { out.push("-lpthread"); } else { out.push(l); }
+        i += 1;
+    }
+    return out;
+}
+
+// Build the bare `ld.lld` argv for a Linux x86-64 PIE link. The flag set
+// and object/library ordering mirror what clang's driver passes to the
+// linker (hardening defaults, `-m elf_x86_64`, `-dynamic-linker`, the
+// Scrt1/crti/crtbegin … crtend/crtn wrap, and the libc/libgcc tail) so
+// target identity and provider-symbol retention match the previous
+// clang-driven behavior. `link_flags` is empty for the `sfn test` layout,
+// so the same builder serves both program and test links.
+fn direct_ld_lld_argv(contract: DirectLinkContract, objects: string[], out_path: string, libs: string[], link_flags: string[]) -> string[] {
+    let mut a: string[] = ["ld.lld", "-pie", "--eh-frame-hdr", "-z", "relro", "--hash-style=gnu", "--build-id", "-m", "elf_x86_64", "-dynamic-linker", contract.dynamic_linker, "-o", out_path];
+    a.push(contract.crt1);
+    a.push(contract.crti);
+    a.push(contract.crtbegin);
+    let mut di: int = 0;
+    loop {
+        if di >= contract.search_dirs.length { break; }
+        a.push("-L" + contract.search_dirs[di]);
+        di += 1;
+    }
+    let raw_flags = _translate_link_flags(link_flags);
+    let mut ri: int = 0;
+    loop {
+        if ri >= raw_flags.length { break; }
+        a.push(raw_flags[ri]);
+        ri += 1;
+    }
+    let mut oi: int = 0;
+    loop {
+        if oi >= objects.length { break; }
+        a.push(objects[oi]);
+        oi += 1;
+    }
+    let sanitized = _sanitize_direct_libs(libs);
+    let mut li: int = 0;
+    loop {
+        if li >= sanitized.length { break; }
+        a.push(sanitized[li]);
+        li += 1;
+    }
+    // libc/libgcc tail (mirrors clang's SysV AMD64 link line): the
+    // --as-needed toggle keeps libgcc_s out of the DT_NEEDED set unless a
+    // symbol actually pulls it in, matching the driver's behavior.
+    a.push("-lgcc");
+    a.push("--as-needed");
+    a.push("-lgcc_s");
+    a.push("--no-as-needed");
+    a.push("-lc");
+    a.push("-lgcc");
+    a.push("--as-needed");
+    a.push("-lgcc_s");
+    a.push("--no-as-needed");
+    a.push(contract.crtend);
+    a.push(contract.crtn);
+    return a;
+}
+
+// Env-gated (`SAILFIN_TRACE_LINK`) stderr note that the direct link path
+// was unavailable and the clang driver is used instead — so a fallback is
+// never a silent ABI change. Matches the `_llvm_text_trace_link` toggle
+// semantics; string work is skipped when the flag is unset.
+fn trace_direct_link_fallback(reason: string) ![io] {
+    if !_env_flag("SAILFIN_TRACE_LINK") { return; }
+    print.err("[trace-link] direct linker unavailable: " + reason
+        + "; using clang driver");
+}
+
+export {
+    DirectLinkContract,
+    resolve_direct_ld_lld,
+    direct_ld_lld_argv,
+    trace_direct_link_fallback
+};

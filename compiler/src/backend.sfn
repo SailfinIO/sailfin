@@ -39,6 +39,15 @@
 // importing this module (and emitting the `LlvmTextBackend` vtable). See
 // that file's header for the seed-lowering reason (#1730).
 import { _llvm_text_assemble_argv } from "./build/clang_argv";
+// Stage 1 of toolchain independence (SFEP-0015 §8, `direct_link.sfn`): own
+// the Linux x86-64 final link with a direct `ld.lld` invocation instead of
+// clang. Resolves `ok=false` (a controlled fallback to the clang path) on
+// any non-Linux target or missing prerequisite.
+import {
+    direct_ld_lld_argv,
+    resolve_direct_ld_lld,
+    trace_direct_link_fallback
+} from "./build/direct_link";
 // `_shell_read_cmd` runs a command and trims its stdout — used by the
 // macOS SDK probe (`uname -s`, `xcrun --show-sdk-path`).
 import { _shell_read_cmd } from "./build/fs";
@@ -319,6 +328,19 @@ struct LlvmTextBackend {
         let target_os = build_target_os();
         let driver_flags = _concat_driver_flags(target_clang_flags(target_os), _macos_sdk_link_flags());
         let eff_plan = _target_conditioned_plan(plan, target_os);
+        // Stage 1 (SFEP-0015 §8): take the direct `ld.lld` path when the
+        // Linux x86-64 link contract resolves, for both the program and
+        // test layouts (test mode carries empty `link_flags`, so the same
+        // builder serves both). Any non-Linux target or missing
+        // prerequisite falls back to the clang driver below with a
+        // trace-visible reason — never a silent ABI change.
+        let direct = resolve_direct_ld_lld(target_os);
+        if direct.ok {
+            let direct_argv = direct_ld_lld_argv(direct, eff_plan.objects, eff_plan.out_path, eff_plan.libs, eff_plan.link_flags);
+            _llvm_text_trace_link(direct_argv);
+            return process.run(direct_argv);
+        }
+        trace_direct_link_fallback(direct.reason);
         if eff_plan.test_mode {
             let test_argv = _llvm_text_link_test_argv(eff_plan, driver_flags);
             _llvm_text_trace_link(test_argv);
