@@ -1,0 +1,346 @@
+// compiler/src/typed_ssa_render.sfn
+//
+// Deterministic text renderer for the typed SSA v0 IR (compiler/src/
+// typed_ssa.sfn). The output is a canonical, human-readable debug dump used
+// by tests and diagnostics; it is not a parseable surface. Format is
+// normative in SFEP-0015 §9.7 (docs/proposals/0015-llvm-independence.md).
+import { number_to_string } from "./num_format";
+import {
+    BinaryOp,
+    CapabilityAtom,
+    CapabilitySet,
+    ComparePredicate,
+    EffectSet,
+    Instr,
+    MetadataValue,
+    Module,
+    SsaBlock,
+    SsaFunction,
+    Terminator,
+    TssaType,
+    UnaryOp,
+    symbol_name
+} from "./typed_ssa";
+import { char_at } from "runtime/prelude";
+
+fn _tssa_render_json_escape(s: string) -> string {
+    let mut out: string = "";
+    let mut i: int = 0;
+    loop {
+        if i >= s.length { break; }
+        let ch: string = char_at(s, i);
+        if ch == "\"" { out = out + "\\\""; } else if ch == "\\" {
+            out = out + "\\\\";
+        } else if ch == "\n" { out = out + "\\n"; } else if ch == "\r" {
+            out = out + "\\r";
+        } else if ch == "\t" { out = out + "\\t"; } else { out = out + ch; }
+        i += 1;
+    }
+    return out;
+}
+
+fn _render_type(t: TssaType) -> string {
+    if t.kind.variant == "Unit" { return "unit"; }
+    if t.kind.variant == "Bool" { return "bool"; }
+    if t.kind.variant == "Int" {
+        let mut signedness: string = "unsigned";
+        if t.int_signed { signedness = "signed"; }
+        return "int(" + signedness + "," + number_to_string(t.int_width) + ")";
+    }
+    if t.kind.variant == "Float" {
+        return "float(" + number_to_string(t.float_width) + ")";
+    }
+    // Pointer
+    if t.pointee == -1 {
+        return "ptr(opaque,as" + number_to_string(t.address_space) + ")";
+    }
+    return "ptr(t" + number_to_string(t.pointee) + ",as" + number_to_string(t.address_space)
+        + ")";
+}
+
+fn _render_metadata_value(module: Module, v: MetadataValue) -> string {
+    if v.kind == "Bool" {
+        if v.bool_value { return "true"; }
+        return "false";
+    }
+    if v.kind == "Int" { return number_to_string(v.int_value); }
+    if v.kind == "String" {
+        return "\"" + _tssa_render_json_escape(v.string_value) + "\"";
+    }
+    // Symbol
+    return symbol_name(module, v.symbol_value);
+}
+
+fn _render_effect_set(module: Module, index: int) -> string {
+    let set: EffectSet = module.effect_sets[index];
+    let mut out: string = "";
+    let mut i: int = 0;
+    loop {
+        if i >= set.atoms.length { break; }
+        if i > 0 { out = out + ", "; }
+        out = out + symbol_name(module, set.atoms[i].name);
+        i += 1;
+    }
+    return out;
+}
+
+fn _render_capability_atom(module: Module, atom: CapabilityAtom) -> string {
+    let mut out: string = symbol_name(module, atom.kind);
+    if atom.arguments.length > 0 {
+        out = out + "(";
+        let mut i: int = 0;
+        loop {
+            if i >= atom.arguments.length { break; }
+            if i > 0 { out = out + ", "; }
+            out = out + _render_metadata_value(module, atom.arguments[i]);
+            i += 1;
+        }
+        out = out + ")";
+    }
+    return out;
+}
+
+fn _render_capability_set(module: Module, index: int) -> string {
+    let set: CapabilitySet = module.capability_sets[index];
+    let mut out: string = "";
+    let mut i: int = 0;
+    loop {
+        if i >= set.atoms.length { break; }
+        if i > 0 { out = out + ", "; }
+        out = out + _render_capability_atom(module, set.atoms[i]);
+        i += 1;
+    }
+    return out;
+}
+
+fn _render_unary_op_name(op: UnaryOp) -> string {
+    if op.variant == "Negate" { return "negate"; }
+    if op.variant == "BooleanNot" { return "boolean_not"; }
+    return "bitwise_not";
+}
+
+fn _render_binary_op_name(op: BinaryOp) -> string {
+    if op.variant == "Add" { return "add"; }
+    if op.variant == "Subtract" { return "subtract"; }
+    if op.variant == "Multiply" { return "multiply"; }
+    if op.variant == "Divide" { return "divide"; }
+    if op.variant == "Remainder" { return "remainder"; }
+    if op.variant == "BooleanAnd" { return "boolean_and"; }
+    if op.variant == "BooleanOr" { return "boolean_or"; }
+    if op.variant == "BitwiseAnd" { return "bitwise_and"; }
+    if op.variant == "BitwiseOr" { return "bitwise_or"; }
+    if op.variant == "BitwiseXor" { return "bitwise_xor"; }
+    if op.variant == "ShiftLeft" { return "shift_left"; }
+    return "shift_right";
+}
+
+fn _render_compare_pred_name(pred: ComparePredicate) -> string {
+    if pred.variant == "Equal" { return "equal"; }
+    if pred.variant == "NotEqual" { return "not_equal"; }
+    if pred.variant == "Less" { return "less"; }
+    if pred.variant == "LessEqual" { return "less_equal"; }
+    if pred.variant == "Greater" { return "greater"; }
+    return "greater_equal";
+}
+
+fn _render_instr(module: Module, instr: Instr) -> string {
+    let mut prefix: string = "";
+    if instr.result != -1 {
+        prefix = "v" + number_to_string(instr.result) + " = ";
+    }
+    if instr.kind.variant == "ConstBool" {
+        let mut value: string = "false";
+        if instr.bool_value { value = "true"; }
+        return prefix + "const_bool " + value;
+    }
+    if instr.kind.variant == "ConstInt" {
+        return prefix + "const_int " + number_to_string(instr.int_value);
+    }
+    if instr.kind.variant == "ConstFloat" {
+        return prefix + "const_float " + number_to_string(instr.float_bits);
+    }
+    if instr.kind.variant == "Unary" {
+        return prefix + _render_unary_op_name(instr.unary_op) + " v"
+            + number_to_string(instr.operand_a);
+    }
+    if instr.kind.variant == "Binary" {
+        return prefix + _render_binary_op_name(instr.binary_op) + " v"
+            + number_to_string(instr.operand_a)
+            + ", v"
+            + number_to_string(instr.operand_b);
+    }
+    if instr.kind.variant == "Compare" {
+        return prefix + _render_compare_pred_name(instr.compare_pred) + " v"
+            + number_to_string(instr.operand_a)
+            + ", v"
+            + number_to_string(instr.operand_b);
+    }
+    // Call
+    let mut args: string = "";
+    let mut i: int = 0;
+    loop {
+        if i >= instr.call_args.length { break; }
+        if i > 0 { args = args + ", "; }
+        args = args + "v" + number_to_string(instr.call_args[i]);
+        i += 1;
+    }
+    return prefix + "call f" + number_to_string(instr.call_function) + "("
+        + args
+        + ") effects=e"
+        + number_to_string(instr.call_effects)
+        + " capabilities=c"
+        + number_to_string(instr.call_capabilities);
+}
+
+fn _render_value_list(ids: int[]) -> string {
+    let mut out: string = "";
+    let mut i: int = 0;
+    loop {
+        if i >= ids.length { break; }
+        if i > 0 { out = out + ", "; }
+        out = out + "v" + number_to_string(ids[i]);
+        i += 1;
+    }
+    return out;
+}
+
+fn _render_terminator(term: Terminator) -> string {
+    if term.kind.variant == "Branch" {
+        return "branch b" + number_to_string(term.target) + "("
+            + _render_value_list(term.args)
+            + ")";
+    }
+    if term.kind.variant == "CondBranch" {
+        return "cond_branch v" + number_to_string(term.condition) + ", b"
+            + number_to_string(term.target)
+            + "("
+            + _render_value_list(term.args)
+            + "), b"
+            + number_to_string(term.else_target)
+            + "("
+            + _render_value_list(term.else_args)
+            + ")";
+    }
+    if term.kind.variant == "Return" {
+        if term.has_value {
+            return "return v" + number_to_string(term.value);
+        }
+        return "return";
+    }
+    // Unreachable
+    return "unreachable";
+}
+
+fn _render_block_params(ids: int[], types: int[]) -> string {
+    let mut out: string = "";
+    let mut i: int = 0;
+    loop {
+        if i >= ids.length { break; }
+        if i > 0 { out = out + ", "; }
+        out = out + "v" + number_to_string(ids[i]) + ":t" + number_to_string(types[i]);
+        i += 1;
+    }
+    return out;
+}
+
+fn _render_block(module: Module, block: SsaBlock) -> string {
+    let mut out: string = "  b" + number_to_string(block.id) + "("
+        + _render_block_params(block.params, block.param_types)
+        + "):\n";
+    let mut i: int = 0;
+    loop {
+        if i >= block.instrs.length { break; }
+        out = out + "    " + _render_instr(module, block.instrs[i]) + "\n";
+        i += 1;
+    }
+    out = out + "    " + _render_terminator(block.terminator) + "\n";
+    return out;
+}
+
+fn _render_function_params(func: SsaFunction) -> string {
+    let mut out: string = "";
+    if func.is_defined {
+        let entry: SsaBlock = func.blocks[0];
+        let mut i: int = 0;
+        loop {
+            if i >= entry.params.length { break; }
+            if i > 0 { out = out + ", "; }
+            out = out + "v" + number_to_string(entry.params[i]) + ":t"
+                + number_to_string(entry.param_types[i]);
+            i += 1;
+        }
+        return out;
+    }
+    let mut i: int = 0;
+    loop {
+        if i >= func.parameters.length { break; }
+        if i > 0 { out = out + ", "; }
+        out = out + "t" + number_to_string(func.parameters[i]);
+        i += 1;
+    }
+    return out;
+}
+
+fn _render_linkage_prefix(func: SsaFunction) -> string {
+    if func.linkage.variant == "Exported" { return "exported "; }
+    if func.linkage.variant == "External" { return "external "; }
+    return "";
+}
+
+fn _render_function(module: Module, func: SsaFunction) -> string {
+    let name: string = symbol_name(module, func.symbol);
+    let mut out: string = _render_linkage_prefix(func) + "fn " + name + "("
+        + _render_function_params(func)
+        + ") -> t"
+        + number_to_string(func.result)
+        + " effects=e"
+        + number_to_string(func.effects)
+        + " capabilities=c"
+        + number_to_string(func.capabilities);
+    if func.is_defined {
+        out = out + " {\n";
+        let mut i: int = 0;
+        loop {
+            if i >= func.blocks.length { break; }
+            out = out + _render_block(module, func.blocks[i]);
+            i += 1;
+        }
+        out = out + "}\n";
+        return out;
+    }
+    return out + "\n";
+}
+
+fn render_module(module: Module) -> string {
+    let mut out: string = "module " + module.module_name + "\n";
+    let mut i: int = 0;
+    loop {
+        if i >= module.types.length { break; }
+        out = out + "type t" + number_to_string(i) + " = " + _render_type(module.types[i])
+            + "\n";
+        i += 1;
+    }
+    i = 0;
+    loop {
+        if i >= module.effect_sets.length { break; }
+        out = out + "effects e" + number_to_string(i) + " = {"
+            + _render_effect_set(module, i)
+            + "}\n";
+        i += 1;
+    }
+    i = 0;
+    loop {
+        if i >= module.capability_sets.length { break; }
+        out = out + "capabilities c" + number_to_string(i) + " = {"
+            + _render_capability_set(module, i)
+            + "}\n";
+        i += 1;
+    }
+    i = 0;
+    loop {
+        if i >= module.functions.length { break; }
+        out = out + _render_function(module, module.functions[i]);
+        i += 1;
+    }
+    return out;
+}

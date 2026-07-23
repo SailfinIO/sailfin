@@ -1,0 +1,101 @@
+// compiler/tests/unit/typed_ssa_render_test.sfn
+//
+// Unit coverage for the typed SSA v0 debug renderer (compiler/src/
+// typed_ssa_render.sfn) against the §9.7 golden module and determinism of
+// construction order.
+import {
+    Linkage,
+    Module,
+    begin_block,
+    begin_function,
+    declare_function,
+    emit_call,
+    end_block,
+    finish_function,
+    intern_bool,
+    intern_capability_set,
+    intern_effect_set,
+    intern_int,
+    intern_symbol,
+    new_module,
+    term_cond_branch,
+    term_return_value
+} from "../../src/typed_ssa";
+import { render_module } from "../../src/typed_ssa_render";
+
+fn _build_choose_module() -> Module {
+    let mut m: Module = new_module("demo", "demo");
+    let rb = intern_bool(m);
+    m = rb.module;
+    let t_bool: int = rb.id;
+    let ri = intern_int(m, 64, true);
+    m = ri.module;
+    let t_int: int = ri.id;
+    let re = intern_effect_set(m, []);
+    m = re.module;
+    let e_empty: int = re.id;
+    let rc = intern_capability_set(m, []);
+    m = rc.module;
+    let c_empty: int = rc.id;
+    let sym = intern_symbol(m, "choose");
+    m = sym.module;
+    let mut b = begin_function(sym.id, [t_bool, t_int, t_int], t_int, e_empty, c_empty, Linkage.Internal());
+    b = end_block(b, term_cond_branch(0, 1, [1], 2, [2]));
+    let ba1 = begin_block(b, [t_int]);
+    b = ba1.builder;
+    b = end_block(b, term_return_value(ba1.param_values[0]));
+    let ba2 = begin_block(b, [t_int]);
+    b = ba2.builder;
+    b = end_block(b, term_return_value(ba2.param_values[0]));
+    let fin = finish_function(m, b);
+    m = fin.module;
+    return m;
+}
+
+test "typed_ssa: renders the choose example byte-for-byte" {
+    let module: Module = _build_choose_module();
+    let expected: string = "module demo\ntype t0 = bool\ntype t1 = int(signed,64)\neffects e0 = {}\ncapabilities c0 = {}\nfn choose(v0:t0, v1:t1, v2:t1) -> t1 effects=e0 capabilities=c0 {\n  b0(v0:t0, v1:t1, v2:t1):\n    cond_branch v0, b1(v1), b2(v2)\n  b1(v3:t1):\n    return v3\n  b2(v4:t1):\n    return v4\n}\n";
+    assert render_module(module) == expected;
+}
+
+test "typed_ssa: equivalent construction renders byte-identically" {
+    let module_a: Module = _build_choose_module();
+    let module_b: Module = _build_choose_module();
+    assert render_module(module_a) == render_module(module_b);
+}
+
+test "typed_ssa: renders a call instruction with effect and capability sets" {
+    let mut m: Module = new_module("demo2", "demo2");
+    let ri = intern_int(m, 64, true);
+    m = ri.module;
+    let t_int: int = ri.id;
+    let re = intern_effect_set(m, []);
+    m = re.module;
+    let e_empty: int = re.id;
+    let rc = intern_capability_set(m, []);
+    m = rc.module;
+    let c_empty: int = rc.id;
+    let callee_sym = intern_symbol(m, "callee");
+    m = callee_sym.module;
+    let decl = declare_function(m, callee_sym.id, [t_int], t_int, e_empty, c_empty, Linkage.External());
+    m = decl.module;
+    let caller_sym = intern_symbol(m, "caller");
+    m = caller_sym.module;
+    let mut b = begin_function(caller_sym.id, [t_int], t_int, e_empty, c_empty, Linkage.Internal());
+    let call_result = emit_call(b, decl.id, [0], e_empty, c_empty, t_int, true);
+    b = call_result.builder;
+    b = end_block(b, term_return_value(call_result.value_id));
+    let fin = finish_function(m, b);
+    m = fin.module;
+
+    let expected: string = "module demo2\n" + "type t0 = int(signed,64)\n"
+        + "effects e0 = {}\n"
+        + "capabilities c0 = {}\n"
+        + "external fn callee(t0) -> t0 effects=e0 capabilities=c0\n"
+        + "fn caller(v0:t0) -> t0 effects=e0 capabilities=c0 {\n"
+        + "  b0(v0:t0):\n"
+        + "    v1 = call f0(v0) effects=e0 capabilities=c0\n"
+        + "    return v1\n"
+        + "}\n";
+    assert render_module(m) == expected;
+}
