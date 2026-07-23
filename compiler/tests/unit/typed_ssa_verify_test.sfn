@@ -1,0 +1,316 @@
+// Verifier regression coverage for the typed SSA v0 IR (SFEP-0015 §9.6).
+// A positive scalar CFG with a conditional branch, a call, and returns must
+// verify; each acceptance-named invariant class (invalid value use, block
+// target, terminator placement, type edge, metadata attachment) must fail with
+// a stable diagnostic code. Fixtures are built through the permissive builder,
+// which accepts raw operand ids, so malformed modules are constructed directly.
+import {
+    BinaryOp,
+    CapabilityAtom,
+    EffectAtom,
+    Linkage,
+    begin_block,
+    begin_function,
+    declare_function,
+    emit_binary,
+    emit_call,
+    emit_const_int,
+    end_block,
+    finish_function,
+    intern_bool,
+    intern_capability_set,
+    intern_effect_set,
+    intern_int,
+    intern_symbol,
+    intern_unit,
+    new_module,
+    term_branch,
+    term_cond_branch,
+    term_return_value,
+    term_return_void
+} from "../../src/typed_ssa";
+import { TssaDiagnostic, VerifyResult, verify_module } from "../../src/typed_ssa_verify";
+
+fn _has_code(result: VerifyResult, code: string) -> boolean {
+    let mut i: int = 0;
+    loop {
+        if i >= result.diagnostics.length { break; }
+        if result.diagnostics[i].code == code { return true; }
+        i += 1;
+    }
+    return false;
+}
+
+test "typed_ssa: valid scalar function with cond branch, call, and return verifies" {
+    let mut m = new_module("demo", "demo");
+    let rb = intern_bool(m);
+    m = rb.module;
+    let ri = intern_int(m, 64, true);
+    m = ri.module;
+    let re = intern_effect_set(m, []);
+    m = re.module;
+    let rc = intern_capability_set(m, []);
+    m = rc.module;
+    let sh = intern_symbol(m, "helper");
+    m = sh.module;
+    let dh = declare_function(m, sh.id, [ri.id], ri.id, re.id, rc.id, Linkage.External());
+    m = dh.module;
+    let sc = intern_symbol(m, "choose");
+    m = sc.module;
+    let mut b = begin_function(sc.id, [rb.id, ri.id, ri.id], ri.id, re.id, rc.id, Linkage.Internal());
+    // entry b0(v0:bool, v1:int, v2:int): cond_branch v0, b1(v1), b2(v2)
+    b = end_block(b, term_cond_branch(0, 1, [1], 2, [2]));
+    // b1(v3:int): v4 = call helper(v3); return v4
+    let ba1 = begin_block(b, [ri.id]);
+    b = ba1.builder;
+    let vc = emit_call(b, dh.id, [ba1.param_values[0]], re.id, rc.id, ri.id, true);
+    b = vc.builder;
+    b = end_block(b, term_return_value(vc.value_id));
+    // b2(v5:int): return v5
+    let ba2 = begin_block(b, [ri.id]);
+    b = ba2.builder;
+    b = end_block(b, term_return_value(ba2.param_values[0]));
+    let fin = finish_function(m, b);
+    m = fin.module;
+    let result = verify_module(m);
+    assert result.ok;
+    assert result.diagnostics.length == 0;
+}
+
+test "typed_ssa: branch to a nonexistent block fails verification" {
+    let mut m = new_module("demo", "demo");
+    let ru = intern_unit(m);
+    m = ru.module;
+    let re = intern_effect_set(m, []);
+    m = re.module;
+    let rc = intern_capability_set(m, []);
+    m = rc.module;
+    let s = intern_symbol(m, "f");
+    m = s.module;
+    let mut b = begin_function(s.id, [], ru.id, re.id, rc.id, Linkage.Internal());
+    b = end_block(b, term_branch(99, []));
+    let fin = finish_function(m, b);
+    m = fin.module;
+    let result = verify_module(m);
+    assert ! result.ok;
+    assert _has_code(result, "TSSA031");
+}
+
+test "typed_ssa: return of an undefined value fails verification" {
+    let mut m = new_module("demo", "demo");
+    let ri = intern_int(m, 64, true);
+    m = ri.module;
+    let re = intern_effect_set(m, []);
+    m = re.module;
+    let rc = intern_capability_set(m, []);
+    m = rc.module;
+    let s = intern_symbol(m, "f");
+    m = s.module;
+    let mut b = begin_function(s.id, [], ri.id, re.id, rc.id, Linkage.Internal());
+    b = end_block(b, term_return_value(999));
+    let fin = finish_function(m, b);
+    m = fin.module;
+    let result = verify_module(m);
+    assert ! result.ok;
+    assert _has_code(result, "TSSA020");
+}
+
+test "typed_ssa: use of a value that does not dominate the use fails verification" {
+    let mut m = new_module("demo", "demo");
+    let rb = intern_bool(m);
+    m = rb.module;
+    let ri = intern_int(m, 64, true);
+    m = ri.module;
+    let re = intern_effect_set(m, []);
+    m = re.module;
+    let rc = intern_capability_set(m, []);
+    m = rc.module;
+    let s = intern_symbol(m, "f");
+    m = s.module;
+    let mut b = begin_function(s.id, [rb.id], ri.id, re.id, rc.id, Linkage.Internal());
+    // entry b0(v0:bool): cond_branch v0, b1(), b2()
+    b = end_block(b, term_cond_branch(0, 1, [], 2, []));
+    // b1(): v1 = const_int 1; return v1
+    let ba1 = begin_block(b, []);
+    b = ba1.builder;
+    let vi = emit_const_int(b, 1, ri.id);
+    b = vi.builder;
+    b = end_block(b, term_return_value(vi.value_id));
+    // b2(): return v1  -- v1 is defined in b1 and does not dominate b2
+    let ba2 = begin_block(b, []);
+    b = ba2.builder;
+    b = end_block(b, term_return_value(vi.value_id));
+    let fin = finish_function(m, b);
+    m = fin.module;
+    let result = verify_module(m);
+    assert ! result.ok;
+    assert _has_code(result, "TSSA021");
+}
+
+test "typed_ssa: branch argument type mismatch fails verification" {
+    let mut m = new_module("demo", "demo");
+    let rb = intern_bool(m);
+    m = rb.module;
+    let ri = intern_int(m, 64, true);
+    m = ri.module;
+    let re = intern_effect_set(m, []);
+    m = re.module;
+    let rc = intern_capability_set(m, []);
+    m = rc.module;
+    let s = intern_symbol(m, "f");
+    m = s.module;
+    // entry b0(v0:bool, v1:int): branch b1(v0)  -- b1 expects int, v0 is bool
+    let mut b = begin_function(s.id, [rb.id, ri.id], ri.id, re.id, rc.id, Linkage.Internal());
+    b = end_block(b, term_branch(1, [0]));
+    let ba1 = begin_block(b, [ri.id]);
+    b = ba1.builder;
+    b = end_block(b, term_return_value(ba1.param_values[0]));
+    let fin = finish_function(m, b);
+    m = fin.module;
+    let result = verify_module(m);
+    assert ! result.ok;
+    assert _has_code(result, "TSSA033");
+}
+
+test "typed_ssa: arithmetic on mismatched operand types fails verification" {
+    let mut m = new_module("demo", "demo");
+    let rb = intern_bool(m);
+    m = rb.module;
+    let ri = intern_int(m, 64, true);
+    m = ri.module;
+    let re = intern_effect_set(m, []);
+    m = re.module;
+    let rc = intern_capability_set(m, []);
+    m = rc.module;
+    let s = intern_symbol(m, "g");
+    m = s.module;
+    // entry b0(v0:bool, v1:int): v2 = add v0, v1; return v2
+    let mut b = begin_function(s.id, [rb.id, ri.id], ri.id, re.id, rc.id, Linkage.Internal());
+    let va = emit_binary(b, BinaryOp.Add(), 0, 1, ri.id);
+    b = va.builder;
+    b = end_block(b, term_return_value(va.value_id));
+    let fin = finish_function(m, b);
+    m = fin.module;
+    let result = verify_module(m);
+    assert ! result.ok;
+    assert _has_code(result, "TSSA050");
+}
+
+test "typed_ssa: call effect set not a superset of callee effects fails verification" {
+    let mut m = new_module("demo", "demo");
+    let ru = intern_unit(m);
+    m = ru.module;
+    let rc0 = intern_capability_set(m, []);
+    m = rc0.module;
+    let re_empty = intern_effect_set(m, []);
+    m = re_empty.module;
+    let sio = intern_symbol(m, "io");
+    m = sio.module;
+    let re_io = intern_effect_set(m, [EffectAtom { name: sio.id }]);
+    m = re_io.module;
+    let ss = intern_symbol(m, "sink");
+    m = ss.module;
+    // callee sink() -> unit requires effect {io}
+    let ds = declare_function(m, ss.id, [], ru.id, re_io.id, rc0.id, Linkage.External());
+    m = ds.module;
+    let sc = intern_symbol(m, "caller");
+    m = sc.module;
+    // caller() -> unit declares {io} but calls sink with an empty effect set
+    let mut b = begin_function(sc.id, [], ru.id, re_io.id, rc0.id, Linkage.Internal());
+    let vc = emit_call(b, ds.id, [], re_empty.id, rc0.id, ru.id, false);
+    b = vc.builder;
+    b = end_block(b, term_return_void());
+    let fin = finish_function(m, b);
+    m = fin.module;
+    let result = verify_module(m);
+    assert ! result.ok;
+    assert _has_code(result, "TSSA060");
+}
+
+test "typed_ssa: call effects exceeding the function summary fail verification" {
+    let mut m = new_module("demo", "demo");
+    let ru = intern_unit(m);
+    m = ru.module;
+    let rc0 = intern_capability_set(m, []);
+    m = rc0.module;
+    let re_empty = intern_effect_set(m, []);
+    m = re_empty.module;
+    let sio = intern_symbol(m, "io");
+    m = sio.module;
+    let re_io = intern_effect_set(m, [EffectAtom { name: sio.id }]);
+    m = re_io.module;
+    let ss = intern_symbol(m, "sink");
+    m = ss.module;
+    // callee sink() -> unit requires effect {io}
+    let ds = declare_function(m, ss.id, [], ru.id, re_io.id, rc0.id, Linkage.External());
+    m = ds.module;
+    let sc = intern_symbol(m, "caller");
+    m = sc.module;
+    // caller declares NO effects, yet its call carries {io}: the call site
+    // effects exceed the function's declared summary (§9.5).
+    let mut b = begin_function(sc.id, [], ru.id, re_empty.id, rc0.id, Linkage.Internal());
+    let vc = emit_call(b, ds.id, [], re_io.id, rc0.id, ru.id, false);
+    b = vc.builder;
+    b = end_block(b, term_return_void());
+    let fin = finish_function(m, b);
+    m = fin.module;
+    let result = verify_module(m);
+    assert ! result.ok;
+    assert _has_code(result, "TSSA062");
+}
+
+test "typed_ssa: call capabilities exceeding the function summary fail verification" {
+    let mut m = new_module("demo", "demo");
+    let ru = intern_unit(m);
+    m = ru.module;
+    let re_empty = intern_effect_set(m, []);
+    m = re_empty.module;
+    let rc_empty = intern_capability_set(m, []);
+    m = rc_empty.module;
+    let snet = intern_symbol(m, "net");
+    m = snet.module;
+    let rc_net = intern_capability_set(m, [CapabilityAtom {
+        kind: snet.id, arguments: []
+    }]);
+    m = rc_net.module;
+    let ss = intern_symbol(m, "sink");
+    m = ss.module;
+    // callee sink() -> unit requires capability {net}
+    let ds = declare_function(m, ss.id, [], ru.id, re_empty.id, rc_net.id, Linkage.External());
+    m = ds.module;
+    let sc = intern_symbol(m, "caller");
+    m = sc.module;
+    // caller declares NO capabilities, yet its call carries {net}.
+    let mut b = begin_function(sc.id, [], ru.id, re_empty.id, rc_empty.id, Linkage.Internal());
+    let vc = emit_call(b, ds.id, [], re_empty.id, rc_net.id, ru.id, false);
+    b = vc.builder;
+    b = end_block(b, term_return_void());
+    let fin = finish_function(m, b);
+    m = fin.module;
+    let result = verify_module(m);
+    assert ! result.ok;
+    assert _has_code(result, "TSSA063");
+}
+
+test "typed_ssa: an unreachable block fails verification" {
+    let mut m = new_module("demo", "demo");
+    let ru = intern_unit(m);
+    m = ru.module;
+    let re = intern_effect_set(m, []);
+    m = re.module;
+    let rc = intern_capability_set(m, []);
+    m = rc.module;
+    let s = intern_symbol(m, "k");
+    m = s.module;
+    let mut b = begin_function(s.id, [], ru.id, re.id, rc.id, Linkage.Internal());
+    b = end_block(b, term_return_void());
+    // b1 is never targeted by any branch -> unreachable
+    let ba1 = begin_block(b, []);
+    b = ba1.builder;
+    b = end_block(b, term_return_void());
+    let fin = finish_function(m, b);
+    m = fin.module;
+    let result = verify_module(m);
+    assert ! result.ok;
+    assert _has_code(result, "TSSA042");
+}

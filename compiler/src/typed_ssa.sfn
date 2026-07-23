@@ -1,0 +1,1108 @@
+// compiler/src/typed_ssa.sfn
+//
+// Target-neutral typed SSA v0 data model, structural interning, and a
+// deterministic construction builder. This is the semantic IR that sits
+// between parsed `.sfn-asm` and backend-specific lowering (LLVM or a native
+// backend), carrying effect/capability metadata without any LLVM spelling.
+//
+// The contract is normative in SFEP-0015 §9 (see docs/proposals/
+// 0015-llvm-independence.md) and was locked by SFN-452. Identities are
+// unsigned integer handles represented as `int`; -1 is the "none" sentinel.
+// The rendering and verifier passes live in typed_ssa_render.sfn and
+// typed_ssa_verify.sfn. This module is intentionally not imported from
+// main.sfn: it is checked and self-hostable but not yet selected by ordinary
+// builds (SFN-454).
+import { number_to_string } from "./num_format";
+import { char_at, char_code } from "runtime/prelude";
+
+// ---------------------------------------------------------------------------
+// §9.2 Target-neutral v0 types
+// ---------------------------------------------------------------------------
+enum TypeKind {
+    Unit,
+    Bool,
+    Int,
+    Float,
+    Pointer
+}
+
+// A TssaType is a wide record whose active fields are selected by `kind`. This
+// mirrors the tensor_ir.sfn discipline (payload-less discriminant enum plus a
+// struct holding the field union) so field access never depends on positional
+// enum-payload GEP. Unused fields carry canonical defaults.
+struct TssaType {
+    kind: TypeKind;
+    int_width: int;  // Int: 8 | 16 | 32 | 64; else 0
+    int_signed: boolean;  // Int: signedness; else false
+    float_width: int;  // Float: 32 | 64; else 0
+    pointee: int;  // Pointer: TypeId, -1 = opaque; else -1
+    address_space: int;  // Pointer: address space; else 0
+}
+
+// ---------------------------------------------------------------------------
+// §9.4 Instruction / terminator operation enums
+// ---------------------------------------------------------------------------
+enum UnaryOp {
+    Negate,
+    BooleanNot,
+    BitwiseNot
+}
+
+enum BinaryOp {
+    Add,
+    Subtract,
+    Multiply,
+    Divide,
+    Remainder,
+    BooleanAnd,
+    BooleanOr,
+    BitwiseAnd,
+    BitwiseOr,
+    BitwiseXor,
+    ShiftLeft,
+    ShiftRight
+}
+
+enum ComparePredicate {
+    Equal,
+    NotEqual,
+    Less,
+    LessEqual,
+    Greater,
+    GreaterEqual
+}
+
+enum InstrKind {
+    ConstBool,
+    ConstInt,
+    ConstFloat,
+    Unary,
+    Binary,
+    Compare,
+    Call
+}
+
+enum TermKind {
+    Branch,
+    CondBranch,
+    Return,
+    Unreachable
+}
+
+enum Linkage {
+    Internal,
+    Exported,
+    External
+}
+
+// ---------------------------------------------------------------------------
+// §9.5 Effect / capability / metadata model
+// ---------------------------------------------------------------------------
+// MetadataValue is a scalar tag union: Bool | Int | String | Symbol.
+struct MetadataValue {
+    kind: string;  // "Bool" | "Int" | "String" | "Symbol"
+    bool_value: boolean;
+    int_value: int;
+    string_value: string;
+    symbol_value: int;  // SymbolId when kind == "Symbol"
+}
+
+struct EffectAtom {
+    name: int;  // SymbolId
+}
+
+struct CapabilityAtom {
+    kind: int;  // SymbolId
+    arguments: MetadataValue[];
+}
+
+// Interned canonical sets: atoms are deduped and ordered by canonical byte
+// encoding (§9.5). An empty set is a valid interned set.
+struct EffectSet {
+    atoms: EffectAtom[];
+}
+
+struct CapabilitySet {
+    atoms: CapabilityAtom[];
+}
+
+// ---------------------------------------------------------------------------
+// §9.4 Instructions and terminators (wide-struct form)
+// ---------------------------------------------------------------------------
+struct Instr {
+    kind: InstrKind;
+    result: int;  // ValueId of the result; -1 for a Unit Call
+    result_type: int;  // TypeId of the result; -1 for a Unit Call
+    bool_value: boolean;  // ConstBool
+    int_value: int;  // ConstInt
+    float_bits: int;  // ConstFloat: raw IEEE-754 bit pattern
+    unary_op: UnaryOp;  // Unary
+    binary_op: BinaryOp;  // Binary
+    compare_pred: ComparePredicate;  // Compare
+    operand_a: int;  // Unary.value / Binary.left / Compare.left; else -1
+    operand_b: int;  // Binary.right / Compare.right; else -1
+    call_function: int;  // Call: FunctionId; else -1
+    call_args: int[];  // Call: ValueId[]
+    call_effects: int;  // Call: EffectSetId; else -1
+    call_capabilities: int;  // Call: CapabilitySetId; else -1
+}
+
+struct Terminator {
+    kind: TermKind;
+    target: int;  // Branch.target / CondBranch.then_target; else -1
+    args: int[];  // Branch.arguments / CondBranch.then_arguments
+    condition: int;  // CondBranch.condition (ValueId, Bool); else -1
+    else_target: int;  // CondBranch.else_target; else -1
+    else_args: int[];  // CondBranch.else_arguments
+    has_value: boolean;  // Return with a value
+    value: int;  // Return value ValueId; else -1
+}
+
+// ---------------------------------------------------------------------------
+// §9.3 Functions, blocks, and values
+// ---------------------------------------------------------------------------
+struct SsaBlock {
+    id: int;  // BlockId (per-function, dense from 0; entry = 0)
+    params: int[];  // ValueId[] of block parameters
+    param_types: int[];  // TypeId[] parallel to params
+    instrs: Instr[];
+    terminator: Terminator;
+    has_terminator: boolean;
+}
+
+struct SsaFunction {
+    id: int;  // FunctionId
+    symbol: int;  // SymbolId
+    parameters: int[];  // TypeId[]
+    result: int;  // TypeId
+    effects: int;  // EffectSetId
+    capabilities: int;  // CapabilitySetId
+    linkage: Linkage;
+    is_defined: boolean;  // false = external declaration (no blocks)
+    blocks: SsaBlock[];  // first is the entry block when defined
+    value_types: int[];  // ValueId -> TypeId, dense from 0
+}
+
+// §9.1 Optional module capability manifest derived from entry points.
+struct SsaManifest {
+    present: boolean;
+    entry_points: int[];  // FunctionId[]
+    effects: int;  // EffectSetId
+    capabilities: int;  // CapabilitySetId
+}
+
+struct Module {
+    module_name: string;
+    capsule_name: string;
+    symbols: string[];  // SymbolId -> UTF-8 name
+    types: TssaType[];  // TypeId -> type
+    effect_sets: EffectSet[];  // EffectSetId -> set
+    capability_sets: CapabilitySet[];  // CapabilitySetId -> set
+    functions: SsaFunction[];  // FunctionId -> declaration/definition
+    manifest: SsaManifest;
+}
+
+// ---------------------------------------------------------------------------
+// Value-struct threading results
+// ---------------------------------------------------------------------------
+struct InternResult {
+    module: Module;
+    id: int;
+}
+
+struct FunctionAddResult {
+    module: Module;
+    id: int;
+}
+
+// ---------------------------------------------------------------------------
+// Module construction
+// ---------------------------------------------------------------------------
+fn new_module(module_name: string, capsule_name: string) -> Module {
+    return Module {
+        module_name: module_name,
+        capsule_name: capsule_name,
+        symbols: [],
+        types: [],
+        effect_sets: [],
+        capability_sets: [],
+        functions: [],
+        manifest: SsaManifest {
+            present: false,
+            entry_points: [],
+            effects: -1,
+            capabilities: -1
+        }
+    };
+}
+
+// ---------------------------------------------------------------------------
+// Symbol interning (exact byte equality)
+// ---------------------------------------------------------------------------
+fn intern_symbol(module: Module, name: string) -> InternResult {
+    let mut index: int = 0;
+    loop {
+        if index >= module.symbols.length { break; }
+        if module.symbols[index] == name {
+            return InternResult { module: module, id: index };
+        }
+        index += 1;
+    }
+    let mut updated: Module = module;
+    let new_id: int = updated.symbols.length;
+    let mut syms: string[] = updated.symbols;
+    syms.push(name);
+    updated.symbols = syms;
+    return InternResult { module: updated, id: new_id };
+}
+
+fn symbol_name(module: Module, id: int) -> string {
+    if id < 0 { return "?"; }
+    if id >= module.symbols.length { return "?"; }
+    return module.symbols[id];
+}
+
+// ---------------------------------------------------------------------------
+// Type interning (structural equality)
+// ---------------------------------------------------------------------------
+fn types_structurally_equal(left: TssaType, right: TssaType) -> boolean {
+    if left.kind.variant != right.kind.variant { return false; }
+    if left.kind.variant == "Int" {
+        if left.int_width != right.int_width { return false; }
+        return left.int_signed == right.int_signed;
+    }
+    if left.kind.variant == "Float" {
+        return left.float_width == right.float_width;
+    }
+    if left.kind.variant == "Pointer" {
+        if left.pointee != right.pointee { return false; }
+        return left.address_space == right.address_space;
+    }
+    // Unit and Bool have no distinguishing fields.
+    return true;
+}
+
+fn intern_type(module: Module, t: TssaType) -> InternResult {
+    let mut index: int = 0;
+    loop {
+        if index >= module.types.length { break; }
+        if types_structurally_equal(module.types[index], t) {
+            return InternResult { module: module, id: index };
+        }
+        index += 1;
+    }
+    let mut updated: Module = module;
+    let new_id: int = updated.types.length;
+    let mut list: TssaType[] = updated.types;
+    list.push(t);
+    updated.types = list;
+    return InternResult { module: updated, id: new_id };
+}
+
+fn make_unit_type() -> TssaType {
+    return TssaType {
+        kind: TypeKind.Unit(),
+        int_width: 0,
+        int_signed: false,
+        float_width: 0,
+        pointee: -1,
+        address_space: 0
+    };
+}
+
+fn make_bool_type() -> TssaType {
+    return TssaType {
+        kind: TypeKind.Bool(),
+        int_width: 0,
+        int_signed: false,
+        float_width: 0,
+        pointee: -1,
+        address_space: 0
+    };
+}
+
+fn make_int_type(width: int, signed: boolean) -> TssaType {
+    return TssaType {
+        kind: TypeKind.Int(),
+        int_width: width,
+        int_signed: signed,
+        float_width: 0,
+        pointee: -1,
+        address_space: 0
+    };
+}
+
+fn make_float_type(width: int) -> TssaType {
+    return TssaType {
+        kind: TypeKind.Float(),
+        int_width: 0,
+        int_signed: false,
+        float_width: width,
+        pointee: -1,
+        address_space: 0
+    };
+}
+
+fn make_pointer_type(pointee: int, address_space: int) -> TssaType {
+    return TssaType {
+        kind: TypeKind.Pointer(),
+        int_width: 0,
+        int_signed: false,
+        float_width: 0,
+        pointee: pointee,
+        address_space: address_space
+    };
+}
+
+fn intern_unit(module: Module) -> InternResult {
+    return intern_type(module, make_unit_type());
+}
+
+fn intern_bool(module: Module) -> InternResult {
+    return intern_type(module, make_bool_type());
+}
+
+fn intern_int(module: Module, width: int, signed: boolean) -> InternResult {
+    return intern_type(module, make_int_type(width, signed));
+}
+
+fn intern_float(module: Module, width: int) -> InternResult {
+    return intern_type(module, make_float_type(width));
+}
+
+fn intern_pointer(module: Module, pointee: int, address_space: int) -> InternResult {
+    return intern_type(module, make_pointer_type(pointee, address_space));
+}
+
+// ---------------------------------------------------------------------------
+// Canonical byte encoding of metadata (drives set ordering and interning)
+// ---------------------------------------------------------------------------
+fn _tssa_str_less(a: string, b: string) -> boolean {
+    let mut i: int = 0;
+    loop {
+        if i >= a.length { return b.length > a.length; }
+        if i >= b.length { return false; }
+        let ca: int = char_code(char_at(a, i));
+        let cb: int = char_code(char_at(b, i));
+        if ca < cb { return true; }
+        if ca > cb { return false; }
+        i += 1;
+    }
+    return false;
+}
+
+// JSON-escaping per RFC 8259, duplicated locally per the compiler-source
+// convention (the compiler proper does not import its own stdlib capsules).
+fn _tssa_json_escape(s: string) -> string {
+    let mut out: string = "";
+    let mut i: int = 0;
+    loop {
+        if i >= s.length { break; }
+        let ch: string = char_at(s, i);
+        if ch == "\"" { out = out + "\\\""; } else if ch == "\\" {
+            out = out + "\\\\";
+        } else if ch == "\n" { out = out + "\\n"; } else if ch == "\r" {
+            out = out + "\\r";
+        } else if ch == "\t" { out = out + "\\t"; } else { out = out + ch; }
+        i += 1;
+    }
+    return out;
+}
+
+fn metadata_value_key(module: Module, v: MetadataValue) -> string {
+    if v.kind == "Bool" {
+        if v.bool_value { return "b:true"; }
+        return "b:false";
+    }
+    if v.kind == "Int" { return "i:" + number_to_string(v.int_value); }
+    if v.kind == "String" {
+        return "s:\"" + _tssa_json_escape(v.string_value) + "\"";
+    }
+    // Symbol
+    return "y:" + symbol_name(module, v.symbol_value);
+}
+
+fn effect_atom_key(module: Module, atom: EffectAtom) -> string {
+    return symbol_name(module, atom.name);
+}
+
+fn capability_atom_key(module: Module, atom: CapabilityAtom) -> string {
+    let mut text: string = symbol_name(module, atom.kind) + "(";
+    let mut i: int = 0;
+    loop {
+        if i >= atom.arguments.length { break; }
+        if i > 0 { text = text + ","; }
+        text = text + metadata_value_key(module, atom.arguments[i]);
+        i += 1;
+    }
+    return text + ")";
+}
+
+// ---------------------------------------------------------------------------
+// Effect set interning (canonicalize: sort by key, drop duplicates)
+// ---------------------------------------------------------------------------
+fn _canonical_effect_atoms(module: Module, atoms: EffectAtom[]) -> EffectAtom[] {
+    // Insertion sort on a copy, ordered by canonical key; skip duplicates.
+    let mut sorted: EffectAtom[] = [];
+    let mut keys: string[] = [];
+    let mut i: int = 0;
+    loop {
+        if i >= atoms.length { break; }
+        let atom: EffectAtom = atoms[i];
+        let key: string = effect_atom_key(module, atom);
+        // Find insertion position.
+        let mut pos: int = 0;
+        let mut duplicate: boolean = false;
+        loop {
+            if pos >= sorted.length { break; }
+            if keys[pos] == key {
+                duplicate = true;
+                break;
+            }
+            if _tssa_str_less(key, keys[pos]) { break; }
+            pos += 1;
+        }
+        if !duplicate {
+            sorted = _effect_insert_at(sorted, pos, atom);
+            keys = _string_insert_at(keys, pos, key);
+        }
+        i += 1;
+    }
+    return sorted;
+}
+
+fn _effect_insert_at(items: EffectAtom[], pos: int, item: EffectAtom) -> EffectAtom[] {
+    let mut out: EffectAtom[] = [];
+    let mut i: int = 0;
+    loop {
+        if i >= items.length { break; }
+        if i == pos { out.push(item); }
+        out.push(items[i]);
+        i += 1;
+    }
+    if pos >= items.length { out.push(item); }
+    return out;
+}
+
+fn _cap_insert_at(items: CapabilityAtom[], pos: int, item: CapabilityAtom) -> CapabilityAtom[] {
+    let mut out: CapabilityAtom[] = [];
+    let mut i: int = 0;
+    loop {
+        if i >= items.length { break; }
+        if i == pos { out.push(item); }
+        out.push(items[i]);
+        i += 1;
+    }
+    if pos >= items.length { out.push(item); }
+    return out;
+}
+
+fn _string_insert_at(items: string[], pos: int, item: string) -> string[] {
+    let mut out: string[] = [];
+    let mut i: int = 0;
+    loop {
+        if i >= items.length { break; }
+        if i == pos { out.push(item); }
+        out.push(items[i]);
+        i += 1;
+    }
+    if pos >= items.length { out.push(item); }
+    return out;
+}
+
+fn _effect_sets_equal(module: Module, left: EffectSet, right: EffectSet) -> boolean {
+    if left.atoms.length != right.atoms.length { return false; }
+    let mut i: int = 0;
+    loop {
+        if i >= left.atoms.length { break; }
+        if effect_atom_key(module, left.atoms[i]) != effect_atom_key(module, right.atoms[i]) {
+            return false;
+        }
+        i += 1;
+    }
+    return true;
+}
+
+fn intern_effect_set(module: Module, atoms: EffectAtom[]) -> InternResult {
+    let canonical: EffectAtom[] = _canonical_effect_atoms(module, atoms);
+    let candidate: EffectSet = EffectSet { atoms: canonical };
+    let mut index: int = 0;
+    loop {
+        if index >= module.effect_sets.length { break; }
+        if _effect_sets_equal(module, module.effect_sets[index], candidate) {
+            return InternResult { module: module, id: index };
+        }
+        index += 1;
+    }
+    let mut updated: Module = module;
+    let new_id: int = updated.effect_sets.length;
+    let mut list: EffectSet[] = updated.effect_sets;
+    list.push(candidate);
+    updated.effect_sets = list;
+    return InternResult { module: updated, id: new_id };
+}
+
+// ---------------------------------------------------------------------------
+// Capability set interning (canonicalize: sort by key, drop duplicates)
+// ---------------------------------------------------------------------------
+fn _canonical_capability_atoms(module: Module, atoms: CapabilityAtom[]) -> CapabilityAtom[] {
+    let mut sorted: CapabilityAtom[] = [];
+    let mut keys: string[] = [];
+    let mut i: int = 0;
+    loop {
+        if i >= atoms.length { break; }
+        let atom: CapabilityAtom = atoms[i];
+        let key: string = capability_atom_key(module, atom);
+        let mut pos: int = 0;
+        let mut duplicate: boolean = false;
+        loop {
+            if pos >= sorted.length { break; }
+            if keys[pos] == key {
+                duplicate = true;
+                break;
+            }
+            if _tssa_str_less(key, keys[pos]) { break; }
+            pos += 1;
+        }
+        if !duplicate {
+            sorted = _cap_insert_at(sorted, pos, atom);
+            keys = _string_insert_at(keys, pos, key);
+        }
+        i += 1;
+    }
+    return sorted;
+}
+
+fn _capability_sets_equal(module: Module, left: CapabilitySet, right: CapabilitySet) -> boolean {
+    if left.atoms.length != right.atoms.length { return false; }
+    let mut i: int = 0;
+    loop {
+        if i >= left.atoms.length { break; }
+        if capability_atom_key(module, left.atoms[i]) != capability_atom_key(module, right.atoms[i]) {
+            return false;
+        }
+        i += 1;
+    }
+    return true;
+}
+
+fn intern_capability_set(module: Module, atoms: CapabilityAtom[]) -> InternResult {
+    let canonical: CapabilityAtom[] = _canonical_capability_atoms(module, atoms);
+    let candidate: CapabilitySet = CapabilitySet { atoms: canonical };
+    let mut index: int = 0;
+    loop {
+        if index >= module.capability_sets.length { break; }
+        if _capability_sets_equal(module, module.capability_sets[index], candidate) {
+            return InternResult { module: module, id: index };
+        }
+        index += 1;
+    }
+    let mut updated: Module = module;
+    let new_id: int = updated.capability_sets.length;
+    let mut list: CapabilitySet[] = updated.capability_sets;
+    list.push(candidate);
+    updated.capability_sets = list;
+    return InternResult { module: updated, id: new_id };
+}
+
+// effect_set_is_subset returns true when every atom of `sub` is present in
+// `sup` (by canonical key). Used by the verifier's superset checks (§9.5).
+fn effect_set_is_subset(module: Module, sub_id: int, sup_id: int) -> boolean {
+    if sub_id < 0 || sub_id >= module.effect_sets.length { return false; }
+    if sup_id < 0 || sup_id >= module.effect_sets.length { return false; }
+    let sub: EffectSet = module.effect_sets[sub_id];
+    let sup: EffectSet = module.effect_sets[sup_id];
+    let mut i: int = 0;
+    loop {
+        if i >= sub.atoms.length { break; }
+        let key: string = effect_atom_key(module, sub.atoms[i]);
+        let mut found: boolean = false;
+        let mut j: int = 0;
+        loop {
+            if j >= sup.atoms.length { break; }
+            if effect_atom_key(module, sup.atoms[j]) == key {
+                found = true;
+                break;
+            }
+            j += 1;
+        }
+        if !found { return false; }
+        i += 1;
+    }
+    return true;
+}
+
+fn capability_set_is_subset(module: Module, sub_id: int, sup_id: int) -> boolean {
+    if sub_id < 0 || sub_id >= module.capability_sets.length { return false; }
+    if sup_id < 0 || sup_id >= module.capability_sets.length { return false; }
+    let sub: CapabilitySet = module.capability_sets[sub_id];
+    let sup: CapabilitySet = module.capability_sets[sup_id];
+    let mut i: int = 0;
+    loop {
+        if i >= sub.atoms.length { break; }
+        let key: string = capability_atom_key(module, sub.atoms[i]);
+        let mut found: boolean = false;
+        let mut j: int = 0;
+        loop {
+            if j >= sup.atoms.length { break; }
+            if capability_atom_key(module, sup.atoms[j]) == key {
+                found = true;
+                break;
+            }
+            j += 1;
+        }
+        if !found { return false; }
+        i += 1;
+    }
+    return true;
+}
+
+// ---------------------------------------------------------------------------
+// Pure terminator constructors
+// ---------------------------------------------------------------------------
+fn term_branch(target: int, args: int[]) -> Terminator {
+    return Terminator {
+        kind: TermKind.Branch(),
+        target: target,
+        args: args,
+        condition: -1,
+        else_target: -1,
+        else_args: [],
+        has_value: false,
+        value: -1
+    };
+}
+
+fn term_cond_branch(condition: int, then_target: int, then_args: int[], else_target: int, else_args: int[]) -> Terminator {
+    return Terminator {
+        kind: TermKind.CondBranch(),
+        target: then_target,
+        args: then_args,
+        condition: condition,
+        else_target: else_target,
+        else_args: else_args,
+        has_value: false,
+        value: -1
+    };
+}
+
+fn term_return_value(value: int) -> Terminator {
+    return Terminator {
+        kind: TermKind.Return(),
+        target: -1,
+        args: [],
+        condition: -1,
+        else_target: -1,
+        else_args: [],
+        has_value: true,
+        value: value
+    };
+}
+
+fn term_return_void() -> Terminator {
+    return Terminator {
+        kind: TermKind.Return(),
+        target: -1,
+        args: [],
+        condition: -1,
+        else_target: -1,
+        else_args: [],
+        has_value: false,
+        value: -1
+    };
+}
+
+fn term_unreachable() -> Terminator {
+    return Terminator {
+        kind: TermKind.Unreachable(),
+        target: -1,
+        args: [],
+        condition: -1,
+        else_target: -1,
+        else_args: [],
+        has_value: false,
+        value: -1
+    };
+}
+
+// ---------------------------------------------------------------------------
+// Deterministic function builder (§9.7 ID assignment in construction order)
+//
+// Construct in canonical order: begin_function opens the entry block (id 0)
+// whose parameters are the function parameters (ValueIds 0..n-1). Emit
+// instructions, then end_block with a terminator. begin_block mints the next
+// block id and its parameter ValueIds. finish_function assembles the
+// SsaFunction and appends it to the module. IDs are dense within their scope.
+// ---------------------------------------------------------------------------
+struct FnBuilder {
+    symbol: int;
+    parameters: int[];
+    result: int;
+    effects: int;
+    capabilities: int;
+    linkage: Linkage;
+    blocks: SsaBlock[];
+    value_types: int[];
+    next_block_id: int;
+    next_value_id: int;
+    cur_active: boolean;
+    cur_id: int;
+    cur_params: int[];
+    cur_param_types: int[];
+    cur_instrs: Instr[];
+}
+
+struct BlockAddResult {
+    builder: FnBuilder;
+    block_id: int;
+    param_values: int[];
+}
+
+struct ValueAddResult {
+    builder: FnBuilder;
+    value_id: int;
+}
+
+fn begin_function(symbol: int, parameters: int[], result: int, effects: int, capabilities: int, linkage: Linkage) -> FnBuilder {
+    // Entry block parameter values are the function parameters, ValueIds 0..n-1.
+    let mut entry_params: int[] = [];
+    let mut value_types: int[] = [];
+    let mut i: int = 0;
+    loop {
+        if i >= parameters.length { break; }
+        entry_params.push(i);
+        value_types.push(parameters[i]);
+        i += 1;
+    }
+    return FnBuilder {
+        symbol: symbol,
+        parameters: parameters,
+        result: result,
+        effects: effects,
+        capabilities: capabilities,
+        linkage: linkage,
+        blocks: [],
+        value_types: value_types,
+        next_block_id: 1,
+        next_value_id: parameters.length,
+        cur_active: true,
+        cur_id: 0,
+        cur_params: entry_params,
+        cur_param_types: parameters,
+        cur_instrs: []
+    };
+}
+
+// The LLVM lowerer cannot resolve `.push()` invoked directly on a struct-field
+// array (it mis-resolves the receiver, the #1389 build-only class). All builder
+// mutation therefore copies the field into a local, pushes, and writes it back
+// — the same value-struct discipline tensor_ir.sfn follows.
+fn _push_instr(builder: FnBuilder, instr: Instr) -> FnBuilder {
+    let mut updated: FnBuilder = builder;
+    let mut list: Instr[] = updated.cur_instrs;
+    list.push(instr);
+    updated.cur_instrs = list;
+    return updated;
+}
+
+fn _push_value_type(builder: FnBuilder, tid: int) -> FnBuilder {
+    let mut updated: FnBuilder = builder;
+    let mut list: int[] = updated.value_types;
+    list.push(tid);
+    updated.value_types = list;
+    return updated;
+}
+
+fn emit_const_bool(builder: FnBuilder, value: boolean, bool_type: int) -> ValueAddResult {
+    let mut updated: FnBuilder = builder;
+    let vid: int = updated.next_value_id;
+    updated.next_value_id = vid + 1;
+    updated = _push_value_type(updated, bool_type);
+    let instr: Instr = Instr {
+        kind: InstrKind.ConstBool(),
+        result: vid,
+        result_type: bool_type,
+        bool_value: value,
+        int_value: 0,
+        float_bits: 0,
+        unary_op: UnaryOp.Negate(),
+        binary_op: BinaryOp.Add(),
+        compare_pred: ComparePredicate.Equal(),
+        operand_a: -1,
+        operand_b: -1,
+        call_function: -1,
+        call_args: [],
+        call_effects: -1,
+        call_capabilities: -1
+    };
+    updated = _push_instr(updated, instr);
+    return ValueAddResult { builder: updated, value_id: vid };
+}
+
+fn emit_const_int(builder: FnBuilder, value: int, int_type: int) -> ValueAddResult {
+    let mut updated: FnBuilder = builder;
+    let vid: int = updated.next_value_id;
+    updated.next_value_id = vid + 1;
+    updated = _push_value_type(updated, int_type);
+    let instr: Instr = Instr {
+        kind: InstrKind.ConstInt(),
+        result: vid,
+        result_type: int_type,
+        bool_value: false,
+        int_value: value,
+        float_bits: 0,
+        unary_op: UnaryOp.Negate(),
+        binary_op: BinaryOp.Add(),
+        compare_pred: ComparePredicate.Equal(),
+        operand_a: -1,
+        operand_b: -1,
+        call_function: -1,
+        call_args: [],
+        call_effects: -1,
+        call_capabilities: -1
+    };
+    updated = _push_instr(updated, instr);
+    return ValueAddResult { builder: updated, value_id: vid };
+}
+
+fn emit_const_float(builder: FnBuilder, bits: int, float_type: int) -> ValueAddResult {
+    let mut updated: FnBuilder = builder;
+    let vid: int = updated.next_value_id;
+    updated.next_value_id = vid + 1;
+    updated = _push_value_type(updated, float_type);
+    let instr: Instr = Instr {
+        kind: InstrKind.ConstFloat(),
+        result: vid,
+        result_type: float_type,
+        bool_value: false,
+        int_value: 0,
+        float_bits: bits,
+        unary_op: UnaryOp.Negate(),
+        binary_op: BinaryOp.Add(),
+        compare_pred: ComparePredicate.Equal(),
+        operand_a: -1,
+        operand_b: -1,
+        call_function: -1,
+        call_args: [],
+        call_effects: -1,
+        call_capabilities: -1
+    };
+    updated = _push_instr(updated, instr);
+    return ValueAddResult { builder: updated, value_id: vid };
+}
+
+fn emit_unary(builder: FnBuilder, op: UnaryOp, operand: int, result_type: int) -> ValueAddResult {
+    let mut updated: FnBuilder = builder;
+    let vid: int = updated.next_value_id;
+    updated.next_value_id = vid + 1;
+    updated = _push_value_type(updated, result_type);
+    let instr: Instr = Instr {
+        kind: InstrKind.Unary(),
+        result: vid,
+        result_type: result_type,
+        bool_value: false,
+        int_value: 0,
+        float_bits: 0,
+        unary_op: op,
+        binary_op: BinaryOp.Add(),
+        compare_pred: ComparePredicate.Equal(),
+        operand_a: operand,
+        operand_b: -1,
+        call_function: -1,
+        call_args: [],
+        call_effects: -1,
+        call_capabilities: -1
+    };
+    updated = _push_instr(updated, instr);
+    return ValueAddResult { builder: updated, value_id: vid };
+}
+
+fn emit_binary(builder: FnBuilder, op: BinaryOp, left: int, right: int, result_type: int) -> ValueAddResult {
+    let mut updated: FnBuilder = builder;
+    let vid: int = updated.next_value_id;
+    updated.next_value_id = vid + 1;
+    updated = _push_value_type(updated, result_type);
+    let instr: Instr = Instr {
+        kind: InstrKind.Binary(),
+        result: vid,
+        result_type: result_type,
+        bool_value: false,
+        int_value: 0,
+        float_bits: 0,
+        unary_op: UnaryOp.Negate(),
+        binary_op: op,
+        compare_pred: ComparePredicate.Equal(),
+        operand_a: left,
+        operand_b: right,
+        call_function: -1,
+        call_args: [],
+        call_effects: -1,
+        call_capabilities: -1
+    };
+    updated = _push_instr(updated, instr);
+    return ValueAddResult { builder: updated, value_id: vid };
+}
+
+fn emit_compare(builder: FnBuilder, pred: ComparePredicate, left: int, right: int, bool_type: int) -> ValueAddResult {
+    let mut updated: FnBuilder = builder;
+    let vid: int = updated.next_value_id;
+    updated.next_value_id = vid + 1;
+    updated = _push_value_type(updated, bool_type);
+    let instr: Instr = Instr {
+        kind: InstrKind.Compare(),
+        result: vid,
+        result_type: bool_type,
+        bool_value: false,
+        int_value: 0,
+        float_bits: 0,
+        unary_op: UnaryOp.Negate(),
+        binary_op: BinaryOp.Add(),
+        compare_pred: pred,
+        operand_a: left,
+        operand_b: right,
+        call_function: -1,
+        call_args: [],
+        call_effects: -1,
+        call_capabilities: -1
+    };
+    updated = _push_instr(updated, instr);
+    return ValueAddResult { builder: updated, value_id: vid };
+}
+
+// emit_call produces one result for a non-Unit callee (produces_value=true)
+// or none for a Unit callee (produces_value=false, value_id=-1).
+fn emit_call(builder: FnBuilder, function: int, args: int[], effects: int, capabilities: int, result_type: int, produces_value: boolean) -> ValueAddResult {
+    let mut updated: FnBuilder = builder;
+    let mut vid: int = -1;
+    let mut rtype: int = -1;
+    if produces_value {
+        vid = updated.next_value_id;
+        updated.next_value_id = vid + 1;
+        rtype = result_type;
+        updated = _push_value_type(updated, result_type);
+    }
+    let instr: Instr = Instr {
+        kind: InstrKind.Call(),
+        result: vid,
+        result_type: rtype,
+        bool_value: false,
+        int_value: 0,
+        float_bits: 0,
+        unary_op: UnaryOp.Negate(),
+        binary_op: BinaryOp.Add(),
+        compare_pred: ComparePredicate.Equal(),
+        operand_a: -1,
+        operand_b: -1,
+        call_function: function,
+        call_args: args,
+        call_effects: effects,
+        call_capabilities: capabilities
+    };
+    updated = _push_instr(updated, instr);
+    return ValueAddResult { builder: updated, value_id: vid };
+}
+
+// end_block finalizes the current block with its terminator and appends it to
+// the completed block sequence.
+fn end_block(builder: FnBuilder, terminator: Terminator) -> FnBuilder {
+    let mut updated: FnBuilder = builder;
+    let block: SsaBlock = SsaBlock {
+        id: updated.cur_id,
+        params: updated.cur_params,
+        param_types: updated.cur_param_types,
+        instrs: updated.cur_instrs,
+        terminator: terminator,
+        has_terminator: true
+    };
+    let mut list: SsaBlock[] = updated.blocks;
+    list.push(block);
+    updated.blocks = list;
+    updated.cur_active = false;
+    updated.cur_instrs = [];
+    updated.cur_params = [];
+    updated.cur_param_types = [];
+    return updated;
+}
+
+// begin_block opens the next block, minting its id and parameter ValueIds.
+fn begin_block(builder: FnBuilder, param_types: int[]) -> BlockAddResult {
+    let mut updated: FnBuilder = builder;
+    let bid: int = updated.next_block_id;
+    updated.next_block_id = bid + 1;
+    let mut params: int[] = [];
+    let mut i: int = 0;
+    loop {
+        if i >= param_types.length { break; }
+        let vid: int = updated.next_value_id;
+        updated.next_value_id = vid + 1;
+        updated = _push_value_type(updated, param_types[i]);
+        params.push(vid);
+        i += 1;
+    }
+    updated.cur_active = true;
+    updated.cur_id = bid;
+    updated.cur_params = params;
+    updated.cur_param_types = param_types;
+    updated.cur_instrs = [];
+    return BlockAddResult {
+        builder: updated,
+        block_id: bid,
+        param_values: params
+    };
+}
+
+// finish_function assembles the built function and appends it to the module.
+fn finish_function(module: Module, builder: FnBuilder) -> FunctionAddResult {
+    let mut updated: Module = module;
+    let fid: int = updated.functions.length;
+    let func: SsaFunction = SsaFunction {
+        id: fid,
+        symbol: builder.symbol,
+        parameters: builder.parameters,
+        result: builder.result,
+        effects: builder.effects,
+        capabilities: builder.capabilities,
+        linkage: builder.linkage,
+        is_defined: true,
+        blocks: builder.blocks,
+        value_types: builder.value_types
+    };
+    let mut list: SsaFunction[] = updated.functions;
+    list.push(func);
+    updated.functions = list;
+    return FunctionAddResult { module: updated, id: fid };
+}
+
+// declare_function appends an external declaration (no body).
+fn declare_function(module: Module, symbol: int, parameters: int[], result: int, effects: int, capabilities: int, linkage: Linkage) -> FunctionAddResult {
+    let mut updated: Module = module;
+    let fid: int = updated.functions.length;
+    let func: SsaFunction = SsaFunction {
+        id: fid,
+        symbol: symbol,
+        parameters: parameters,
+        result: result,
+        effects: effects,
+        capabilities: capabilities,
+        linkage: linkage,
+        is_defined: false,
+        blocks: [],
+        value_types: []
+    };
+    let mut list: SsaFunction[] = updated.functions;
+    list.push(func);
+    updated.functions = list;
+    return FunctionAddResult { module: updated, id: fid };
+}
+
+// set_manifest records the optional module capability manifest (§9.1).
+fn set_manifest(module: Module, entry_points: int[], effects: int, capabilities: int) -> Module {
+    let mut updated: Module = module;
+    updated.manifest = SsaManifest {
+        present: true,
+        entry_points: entry_points,
+        effects: effects,
+        capabilities: capabilities
+    };
+    return updated;
+}
