@@ -14,6 +14,16 @@ import {
 } from "./core_text";
 import { emit_runtime_call, empty_runtime_call_overrides } from "./runtime_call";
 
+// SFN-42: the `(data, len)` tokens recovered from a string operand for a
+// length-aware (`_lv`) call, threaded with the running temp index and emitted
+// lines (Sailfin has no multi-value return, so these ride on a struct).
+struct StringDataLen {
+    data: string;
+    len: string;
+    temp_index: int;
+    lines: string[];
+}
+
 fn lower_string_literal(literal: string, temp_index: int, lines: string[]) -> ExpressionResult ![io] {
     // M1.A — String literal lowering to {i8*, i64} aggregate.
     //
@@ -200,6 +210,212 @@ fn coerce_string_operand_to_aggregate(operand: LLVMOperand, temp_index: int, lin
         temp_index: coerced.temp_index,
         operand: coerced.operand,
         diagnostics: coerced.diagnostics,
+        string_constants: empty_string_constant_set()
+    };
+}
+
+// SFN-42 (SFEP-0025 §3.3): emit a non-owning `{data+start, end-start}` view over
+// the source string aggregate for `substring` / `substring_unchecked`, replacing
+// the allocating `sfn_str_slice` runtime call. The view aliases the source bytes
+// (no copy, no arena alloc, no `strnlen` NUL-scan). Both indices are clamped to
+// `[0, srclen]` (and `end >= start`), recovering `srclen` from the source's
+// carried length — this bounds-clamps the historically "unchecked" entrypoint so
+// the view can never over-read past the source tail (the trailing NUL previously
+// masked that over-read). A non-NUL-terminated view is sound because every
+// downstream consumer reads the carried length (#1704 query helpers, #1705 cstr
+// boundary, #1722 to_number). `start`/`end` arrive as `double` (the registry
+// param shape); an already-`i64` operand is used directly.
+fn emit_substring_view(source: LLVMOperand, start_op: LLVMOperand, end_op: LLVMOperand, temp_index: int, lines: string[], diagnostics: string[]) -> ExpressionResult ![io] {
+    let src = coerce_operand_to_type(source, "{i8*, i64}", temp_index, lines, true, null);
+    let mut out_lines = src.lines;
+    let mut diags = diagnostics;
+    let mut _sdi: int = 0;
+    loop {
+        if _sdi >= src.diagnostics.length { break; }
+        diags.push(src.diagnostics[_sdi]);
+        _sdi += 1;
+    }
+    if src.operand == null {
+        return ExpressionResult {
+            lines: out_lines,
+            temp_index: src.temp_index,
+            operand: null,
+            diagnostics: diags,
+            string_constants: empty_string_constant_set()
+        };
+    }
+    let src_val = src.operand.value;
+    let mut t = src.temp_index;
+
+    let data_name = format_temp_name(t);
+    out_lines.push("  " + data_name + " = extractvalue {i8*, i64} " + src_val
+        + ", 0");
+    t += 1;
+    let srclen_name = format_temp_name(t);
+    out_lines.push("  " + srclen_name + " = extractvalue {i8*, i64} " + src_val
+        + ", 1");
+    t += 1;
+
+    let mut start_i64: string = start_op.value;
+    if start_op.llvm_type != "i64" {
+        let s_conv = format_temp_name(t);
+        out_lines.push("  " + s_conv + " = fptosi double " + start_op.value
+            + " to i64");
+        t += 1;
+        start_i64 = s_conv;
+    }
+    let mut end_i64: string = end_op.value;
+    if end_op.llvm_type != "i64" {
+        let e_conv = format_temp_name(t);
+        out_lines.push("  " + e_conv + " = fptosi double " + end_op.value
+            + " to i64");
+        t += 1;
+        end_i64 = e_conv;
+    }
+
+    // Clamp the start index into `[0, srclen]`.
+    let si_lt0 = format_temp_name(t);
+    out_lines.push("  " + si_lt0 + " = icmp slt i64 " + start_i64 + ", 0");
+    t += 1;
+    let si_pos = format_temp_name(t);
+    out_lines.push("  " + si_pos + " = select i1 " + si_lt0 + ", i64 0, i64 "
+        + start_i64);
+    t += 1;
+    let si_gt = format_temp_name(t);
+    out_lines.push("  " + si_gt + " = icmp sgt i64 " + si_pos + ", "
+        + srclen_name);
+    t += 1;
+    let si = format_temp_name(t);
+    out_lines.push("  " + si + " = select i1 " + si_gt + ", i64 " + srclen_name
+        + ", i64 "
+        + si_pos);
+    t += 1;
+
+    // Clamp the end index into `[0, srclen]`, then floor it at `start`.
+    let ei_lt0 = format_temp_name(t);
+    out_lines.push("  " + ei_lt0 + " = icmp slt i64 " + end_i64 + ", 0");
+    t += 1;
+    let ei_pos = format_temp_name(t);
+    out_lines.push("  " + ei_pos + " = select i1 " + ei_lt0 + ", i64 0, i64 "
+        + end_i64);
+    t += 1;
+    let ei_gt = format_temp_name(t);
+    out_lines.push("  " + ei_gt + " = icmp sgt i64 " + ei_pos + ", "
+        + srclen_name);
+    t += 1;
+    let ei_cap = format_temp_name(t);
+    out_lines.push("  " + ei_cap + " = select i1 " + ei_gt + ", i64 "
+        + srclen_name
+        + ", i64 "
+        + ei_pos);
+    t += 1;
+    let ei_ltsi = format_temp_name(t);
+    out_lines.push("  " + ei_ltsi + " = icmp slt i64 " + ei_cap + ", " + si);
+    t += 1;
+    let ei = format_temp_name(t);
+    out_lines.push("  " + ei + " = select i1 " + ei_ltsi + ", i64 " + si
+        + ", i64 "
+        + ei_cap);
+    t += 1;
+
+    let newlen = format_temp_name(t);
+    out_lines.push("  " + newlen + " = sub i64 " + ei + ", " + si);
+    t += 1;
+    let newdata = format_temp_name(t);
+    out_lines.push("  " + newdata + " = getelementptr i8, i8* " + data_name
+        + ", i64 "
+        + si);
+    t += 1;
+
+    let agg0 = format_temp_name(t);
+    out_lines.push("  " + agg0 + " = insertvalue {i8*, i64} undef, i8* "
+        + newdata
+        + ", 0");
+    t += 1;
+    let view = format_temp_name(t);
+    out_lines.push("  " + view + " = insertvalue {i8*, i64} " + agg0 + ", i64 "
+        + newlen
+        + ", 1");
+    t += 1;
+
+    return ExpressionResult {
+        lines: out_lines,
+        temp_index: t,
+        operand: LLVMOperand { llvm_type: "{i8*, i64}", value: view },
+        diagnostics: diags,
+        string_constants: empty_string_constant_set()
+    };
+}
+
+// SFN-42: recover a string operand's `(data, len)` pair for a length-aware
+// (`_lv`) call — `extractvalue` for a `{i8*, i64}` aggregate (the carried
+// length, correct for a non-terminated view), or a `@sfn_str_len` NUL-scan for
+// a bare `i8*` (only genuinely NUL-terminated pointers reach that arm). Mirrors
+// the `==` / `<` operator recovery in `core_operands.sfn` (#1704). The data and
+// len tokens, the next temp index, and the emitted lines ride back on the
+// returned `StringDataLen` struct (Sailfin has no multi-value return).
+fn _emit_str_data_len(operand: LLVMOperand, temp_index: int, lines: string[]) -> StringDataLen ![io] {
+    let mut out = lines;
+    let mut t = temp_index;
+    if operand.llvm_type == "{i8*, i64}" {
+        let data_temp = format_temp_name(t);
+        out.push("  " + data_temp + " = extractvalue {i8*, i64} " + operand.value
+            + ", 0");
+        t += 1;
+        let len_temp = format_temp_name(t);
+        out.push("  " + len_temp + " = extractvalue {i8*, i64} " + operand.value
+            + ", 1");
+        t += 1;
+        return StringDataLen {
+            data: data_temp,
+            len: len_temp,
+            temp_index: t,
+            lines: out
+        };
+    }
+    let len_temp = format_temp_name(t);
+    out.push("  " + len_temp + " = call i64 @sfn_str_len(i8* " + operand.value
+        + ")");
+    t += 1;
+    return StringDataLen {
+        data: operand.value,
+        len: len_temp,
+        temp_index: t,
+        lines: out
+    };
+}
+
+// SFN-42: emit a length-aware string binary op — the `_lv` symbol called with
+// each operand's `(data, len)` recovered by `_emit_str_data_len`. This is the
+// by-NAME (`strings_equal` / `string.compare`) counterpart to the `==` / `<`
+// operator paths in `core_operands.sfn`: a by-name call would otherwise route
+// through the bare `sfn_str_eq` / `sfn_str_cmp` descriptor, which NUL-scans and
+// so over-reads a non-NUL-terminated `substring` view. The bare descriptors are
+// retained for the seed's `make compile` transition; freshly-emitted IR uses
+// the `_lv` form here, whose declare is synthesized by the post-lowering line
+// scan (the `string.eq_lv` / `string.cmp_lv` declare-only rows).
+fn emit_string_lv_binop(left: LLVMOperand, right: LLVMOperand, lv_symbol: string, return_type: string, temp_index: int, lines: string[]) -> ExpressionResult ![io] {
+    let l = _emit_str_data_len(left, temp_index, lines);
+    let r = _emit_str_data_len(right, l.temp_index, l.lines);
+    let mut out = r.lines;
+    let mut t = r.temp_index;
+    let result_temp = format_temp_name(t);
+    out.push("  " + result_temp + " = call " + return_type + " @" + lv_symbol
+        + "(i8* "
+        + l.data
+        + ", i64 "
+        + l.len
+        + ", i8* "
+        + r.data
+        + ", i64 "
+        + r.len
+        + ")");
+    t += 1;
+    return ExpressionResult {
+        lines: out,
+        temp_index: t,
+        operand: LLVMOperand { llvm_type: return_type, value: result_temp },
+        diagnostics: [],
         string_constants: empty_string_constant_set()
     };
 }

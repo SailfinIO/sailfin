@@ -370,8 +370,16 @@ fn sfn_str_cmp_lv(a_data: *u8, a_len: i64, b_data: *u8, b_len: i64) -> i32 {
 // tracking: the arena reclaims on rewind, the discipline the rest of the ported
 // string surface already follows. The `roundup8(length + 1)` 8-aligned alloc +
 // `_num_put_byte` trailing NUL keeps the word read-modify-write in-bounds (the
-// seed cannot lower a single-byte `* u8` store). A non-owning `Slice` view stays
-// blocked on #1283 (the SfnString aggregate flip).
+// seed cannot lower a single-byte `* u8` store).
+//
+// SFN-42: this allocating body is now a LINK FALLBACK only. Freshly-emitted IR
+// no longer calls `sfn_str_slice`/`substring_unchecked` — the emitter lowers
+// `substring` to an inline non-owning `{data+start, end-start}` view
+// (`emit_substring_view`, SFEP-0025 §3.3). This body is retained solely so the
+// pinned seed's already-emitted `@sfn_str_slice` calls still link during
+// `make compile`. Removal condition: delete this body, `sfn_str_slice`, and the
+// `substring`/`substring_unchecked` registry rows once the pinned seed emits the
+// inline view (queued follow-up, next cadence seed bump).
 fn _sfn_substring_unchecked(text: *u8, start: i64, end: i64) -> *u8 {
     if (text as i64) == 0 {
         let empty: string = "";

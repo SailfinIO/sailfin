@@ -1267,6 +1267,13 @@ fn _rh_descriptors_08(descriptors_in: RuntimeHelperDescriptor[]) -> RuntimeHelpe
     // freshly-emitted IR reaches the new exports while seed-built
     // IR (which still carries the legacy `symbol` names) keeps
     // linking through the legacy bodies during the cutover.
+    // SFN-42: these two rows are now vestigial for fresh emission — call
+    // lowering (`core_call_lowering.sfn`) intercepts `substring` /
+    // `substring_unchecked` and emits an inline non-owning `{data+start,
+    // end-start}` view (`emit_substring_view`, SFEP-0025 §3.3) instead of
+    // dispatching to `sfn_str_slice`. The rows (and the allocating runtime body)
+    // stay only so the pinned seed's already-emitted `@sfn_str_slice` calls link
+    // during `make compile`; remove them at the next cadence seed bump.
     descriptors = append_runtime_helper(descriptors, RuntimeHelperDescriptor {
         target: "substring", symbol: "substring", return_type: "i8*", parameter_types: ["i8*", "double", "double"], effects: [], native_signature: "sfn_str_slice", c_abi_return_type: null
     });
@@ -1374,6 +1381,12 @@ fn _rh_descriptors_09(descriptors_in: RuntimeHelperDescriptor[]) -> RuntimeHelpe
     // `declare` — exactly the auto-declare path `sfn_str_cmp` above relies on.
     // The bare `strings_equal` / `string.compare` rows stay for the old
     // `(i8*, i8*)` ABI the pinned seed still emits during `make compile`.
+    // SFN-42: freshly-emitted IR no longer routes the by-NAME `strings_equal` /
+    // `string.compare` calls through these bare rows either — call lowering
+    // (`core_call_lowering.sfn`) now emits the length-aware `_lv` form for them
+    // (mirroring the `==` / `<` operators), because a bare NUL-scan over-reads a
+    // non-terminated `substring` view. These bare rows remain only for the seed
+    // transition; remove them with the substring rows at the next seed bump.
     descriptors = append_runtime_helper(descriptors, RuntimeHelperDescriptor {
         target: "string.eq_lv", symbol: "sfn_str_eq_lv", return_type: "i1", parameter_types: ["i8*", "i64", "i8*", "i64"], effects: [], native_signature: null, c_abi_return_type: null
     });

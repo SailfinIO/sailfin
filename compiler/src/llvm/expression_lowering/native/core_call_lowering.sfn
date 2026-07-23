@@ -43,6 +43,7 @@ import { lower_enum_literal } from "./core_literals_lowering";
 import { coerce_operand_to_type, load_local_operand } from "./core_operands";
 import { parse_member_access } from "./core_parse";
 import { find_local_binding, find_parameter_binding, replace_llvm_operand } from "./core_scopes";
+import { emit_string_lv_binop, emit_substring_view } from "./core_strings";
 
 // Helper to access a string array element.
 // The seed compiler (v0.1.1) has a bug where `arr[idx]` inside complex loops
@@ -367,6 +368,53 @@ fn lower_call_expression(target: string, arguments: string[], bindings: Paramete
         }
     }
 
+    // SFN-42 (SFEP-0025 §3.3): `substring` / `substring_unchecked` (both registry
+    // rows carry `native_signature "sfn_str_slice"`) lower to an inline non-owning
+    // `{data+start, end-start}` view instead of the allocating runtime call. Force
+    // the source argument to the `{i8*, i64}` aggregate so a view-of-a-view source
+    // keeps its carried length rather than being stripped to a bare `i8*` (which
+    // would force a `strnlen` NUL-scan over the non-terminated view). The inline
+    // emission happens after Phase 3 below.
+    let mut is_substring_view: boolean = false;
+    if helper_descriptor != null {
+        if helper_descriptor.native_signature != null {
+            if helper_descriptor.native_signature == "sfn_str_slice" {
+                is_substring_view = true;
+                expected_params = ["{i8*, i64}", "double", "double"];
+            }
+        }
+    }
+
+    // SFN-42: the by-name `strings_equal` / `string.compare` helpers otherwise
+    // route through the bare `sfn_str_eq` / `sfn_str_cmp` `(i8*, i8*)` descriptor,
+    // which NUL-scans and so over-reads a non-NUL-terminated `substring` view.
+    // Emit the length-aware `_lv` form instead (mirroring the `==` / `<` operator
+    // paths in `core_operands.sfn`), forcing both operands to the `{i8*, i64}`
+    // aggregate so the carried length is used. The bare descriptors are retained
+    // for the `(i8*, i8*)` ABI the pinned seed still emits during `make compile`.
+    //
+    // Gated on the RESOLVED descriptor's `native_signature` (not the bare target
+    // name), exactly like the substring path above: when a user function or the
+    // prelude `strings_equal` body resolves as a `function_entry`, signature
+    // resolution drops `helper_descriptor` (`helper_overridden`), so this does
+    // not fire and the safe user/prelude call stands — no silent hijack.
+    let mut lv_binop_symbol: string = "";
+    let mut lv_binop_return: string = "";
+    if helper_descriptor != null {
+        if helper_descriptor.native_signature != null {
+            if helper_descriptor.native_signature == "sfn_str_eq" {
+                lv_binop_symbol = "sfn_str_eq_lv";
+                lv_binop_return = "i1";
+                expected_params = ["{i8*, i64}", "{i8*, i64}"];
+            }
+            if helper_descriptor.native_signature == "sfn_str_cmp" {
+                lv_binop_symbol = "sfn_str_cmp_lv";
+                lv_binop_return = "i32";
+                expected_params = ["{i8*, i64}", "{i8*, i64}"];
+            }
+        }
+    }
+
     // Re-derive helper_descriptor for concat after signature resolution
     if trimmed_target == "concat" {
         if method_operand != null {
@@ -443,6 +491,44 @@ fn lower_call_expression(target: string, arguments: string[], bindings: Paramete
             diagnostics: diagnostics,
             string_constants: collected_string_constants
         };
+    }
+
+    // SFN-42: emit the inline non-owning view and return before the allocating
+    // `sfn_str_slice` runtime-call path. Operands are `[source, start, end]`
+    // (any method receiver was prepended above).
+    if is_substring_view {
+        if operands.length == 3 {
+            let view_result = emit_substring_view(operands[0], operands[1], operands[2], current_temp, current_lines, diagnostics);
+            return ExpressionResult {
+                lines: view_result.lines,
+                temp_index: view_result.temp_index,
+                operand: view_result.operand,
+                diagnostics: view_result.diagnostics,
+                string_constants: collected_string_constants
+            };
+        }
+    }
+
+    // SFN-42: emit the length-aware `strings_equal` / `string.compare` and return
+    // before the bare NUL-scanning descriptor path. Operands are `[left, right]`.
+    if lv_binop_symbol.length > 0 {
+        if operands.length == 2 {
+            let lv_result = emit_string_lv_binop(operands[0], operands[1], lv_binop_symbol, lv_binop_return, current_temp, current_lines);
+            let mut lv_diags = diagnostics;
+            let mut _lv_di: int = 0;
+            loop {
+                if _lv_di >= lv_result.diagnostics.length { break; }
+                lv_diags.push(lv_result.diagnostics[_lv_di]);
+                _lv_di += 1;
+            }
+            return ExpressionResult {
+                lines: lv_result.lines,
+                temp_index: lv_result.temp_index,
+                operand: lv_result.operand,
+                diagnostics: lv_diags,
+                string_constants: collected_string_constants
+            };
+        }
     }
 
     // Re-check concat element type from actual operands

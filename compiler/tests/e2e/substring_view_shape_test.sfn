@@ -1,0 +1,108 @@
+// End-to-end test for the SFN-42 non-owning `substring` view (SFEP-0025 §3.3).
+//
+// Pins the emitted LLVM IR contract for `substring` / `substring_unchecked`:
+//   - The slice lowers to an INLINE non-owning `{data+start, end-start}` view
+//     (a `getelementptr i8, i8*` data-offset + two `insertvalue {i8*, i64}`
+//     ops) — NOT an allocating runtime call.
+//   - No `call ... @sfn_str_slice(...)` appears in fresh emission: the view
+//     aliases the source bytes, so there is no allocation / memcpy / NUL-scan.
+//     (The `declare i8* @sfn_str_slice` line may remain — the runtime body is
+//     retained as the pinned-seed link fallback until the next seed bump — so
+//     this asserts on the `call`, not the `declare`.)
+//   - The carried length is computed (`sub i64`) from the clamped indices, not
+//     recovered by a `strnlen` NUL-scan.
+//
+// Driven through `sfn emit llvm` as a subprocess and asserted on the captured
+// `.ll` text. Mirrors `string_aggregate_shape_test.sfn`. NOTE: the `sfn/test`
+// `expect_*` matchers are `![pure]` and cannot be called from an `![io]` test;
+// assert on the IR text with `sfn/strings` predicates instead (#842).
+import { contains, split } from "sfn/strings";
+
+fn _sfn_bin() -> string ![io] {
+    let configured = env.get("SAILFIN_BIN");
+    if configured.length > 0 { return configured; }
+    return "build/bin/sfn";
+}
+
+fn _child_env() -> string[] ![io] {
+    let mut e: string[] = [];
+    let path = env.get("PATH");
+    if path.length > 0 { e.push("PATH=" + path); }
+    let home = env.get("HOME");
+    if home.length > 0 { e.push("HOME=" + home); }
+    let tmpdir = env.get("TMPDIR");
+    if tmpdir.length > 0 { e.push("TMPDIR=" + tmpdir); }
+    let scratch = env.get("SAILFIN_TEST_SCRATCH");
+    if scratch.length > 0 { e.push("SAILFIN_TEST_SCRATCH=" + scratch); }
+    return e;
+}
+
+fn _scratch_dir() -> string ![io] {
+    let mut dir = env.get("SAILFIN_TEST_SCRATCH");
+    if dir.length == 0 { dir = "/tmp"; }
+    fs.createDirectory(dir, true);
+    return dir;
+}
+
+// Emit the fixture's LLVM IR and return its text (or "" on failure). The
+// `tag` keeps the per-invocation `.ll` path unique so concurrent tests in
+// the parallel pool never share an output file.
+fn _emit_ir(tag: string) -> string ![io] {
+    let dir = _scratch_dir();
+    let ll = dir + "/sfn-substrview-" + tag + ".ll";
+    if fs.exists(ll) { fs.deleteFile(ll); }
+    let exit = process.run_capture([_sfn_bin(), "emit", "-o", ll, "llvm", "compiler/tests/e2e/fixtures/substring_view_shape.sfn"], _child_env());
+    let _o = process.capture_take_stdout();
+    let _e = process.capture_take_stderr();
+    if exit != 0 { return ""; }
+    if !fs.exists(ll) { return ""; }
+    let ir = fs.readFile(ll);
+    fs.deleteFile(ll);
+    return ir;
+}
+
+// Count lines that contain `a`, and also contain `b` when non-empty — the
+// faithful stand-in for a per-line `grep -cE` over the emitted IR.
+fn _count_match(text: string, a: string, b: string) -> int {
+    let lines = split(text, "\n");
+    let mut n = 0;
+    let mut i = 0;
+    loop {
+        if i >= lines.length { break; }
+        let l = lines[i];
+        let mut ok = contains(l, a);
+        if ok && b.length > 0 { ok = contains(l, b); }
+        if ok { n += 1; }
+        i += 1;
+    }
+    return n;
+}
+
+fn _count(text: string, needle: string) -> int {
+    return _count_match(text, needle, "");
+}
+
+// One emit, all assertions — the three fixture slices lower to inline views.
+// A single `_emit_ir` avoids the parallel-pool build-cache collision that
+// concurrent emit subprocesses would hit on the shared `SAILFIN_TEST_SCRATCH`
+// (see `.claude/rules/no-bash-e2e.md`, "build-and-run tests must isolate the
+// build").
+test "substring-view: slice lowers to an inline non-owning view, no allocation" ![io] {
+    let ir = _emit_ir("v");
+    assert ir.length > 0;
+
+    // Non-allocation: no `call ... @sfn_str_slice` in fresh emission (the
+    // `declare` may remain — the runtime body is the pinned-seed link fallback —
+    // so match the `call`, not the `declare`).
+    assert _count_match(ir, "call", "@sfn_str_slice(") == 0;
+
+    // Inline aliasing view: a `getelementptr i8, i8*` data-offset per slice
+    // (fixture has 3 slices: interior + 2 nested).
+    assert _count(ir, "getelementptr i8, i8*") >= 3;
+
+    // The view aggregate is assembled via `insertvalue {i8*, i64}` and its
+    // length is computed with `sub i64` (clamped end - clamped start), never a
+    // `strnlen` NUL-scan.
+    assert _count(ir, "insertvalue {i8*, i64}") >= 3;
+    assert _count(ir, "= sub i64") >= 3;
+}

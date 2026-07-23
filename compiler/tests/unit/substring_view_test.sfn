@@ -1,0 +1,81 @@
+// SFN-42 (SFEP-0025 §3.3): regression coverage for the non-owning
+// `substring` / `substring_unchecked` view. The builtin now lowers to an
+// inline `{data+start, end-start}` aggregate that aliases the source bytes
+// (no copy, no arena alloc, no `strnlen` NUL-scan) instead of the allocating
+// `sfn_str_slice` runtime call. These tests pin the properties that make a
+// non-NUL-terminated interior view sound: the carried length is exactly
+// `end-start`, and every downstream consumer (`==`, `.length`, concat) reads
+// that carried length rather than scanning to the next NUL — so a view can
+// never bleed into the source tail. See also `substring_unchecked_test.sfn`
+// for the index-clamp parity cases.
+// The core soundness proof: slice out of the *interior* of a longer string.
+// A naive `{data, end-start}` view that trusted a NUL terminator would carry
+// the wrong length (the distance to the source's real NUL) and read into the
+// trailing "def". Equality (`sfn_str_eq_lv`) compares the carried length
+// first, so `== "XYZ"` fails unless the view carries exactly 3 bytes.
+test "string: interior substring view carries the exact length, no tail bleed" {
+    let s = "abcXYZdef";
+    let v = substring_unchecked(s, 3, 6);
+    assert v == "XYZ";
+    assert v.length == 3;
+}
+
+// Concat reads the carried `a_len` (#1704). If the interior view over-read the
+// source tail, this would produce "XYZdef!" instead of "XYZ!".
+test "string: concatenating an interior view uses its carried length" {
+    let s = "abcXYZdef";
+    let v = substring_unchecked(s, 3, 6);
+    assert v + "!" == "XYZ!";
+}
+
+// SFN-42: the by-NAME `strings_equal` helper must be length-aware over a view
+// (it lowers to `sfn_str_eq_lv`, not the bare NUL-scanning `sfn_str_eq`). If it
+// routed to the bare path, the interior view `{data+3, 3}` ("XYZ") would scan to
+// the source's terminating NUL and compare equal to the tail-inclusive
+// "XYZdef" — so the negative assertion is the load-bearing one.
+test "string: strings_equal over an interior view uses the carried length" {
+    let s = "abcXYZdef";
+    let v = substring_unchecked(s, 3, 6);
+    assert strings_equal(v, "XYZ");
+    assert ! strings_equal(v, "XYZdef");
+}
+
+// A view-of-a-view: the inner view `{data+3, 3}` ("XYZ") is genuinely NOT
+// NUL-terminated — byte `data+6` is 'd', not a NUL. Slicing it again with an
+// end (5) that exceeds its carried length (3) must clamp to the inner view's
+// carried length, yielding "XYZ". A `strnlen` over the inner data pointer
+// would instead see length 6 ("XYZdef") and bleed "XYZde" — this asserts the
+// carried-length source path (the `{i8*, i64}` source coercion), not a scan.
+test "string: nested substring view clamps to the inner view's carried length" {
+    let s = "abcXYZdef";
+    let inner = substring_unchecked(s, 3, 6);
+    assert substring_unchecked(inner, 0, 5) == "XYZ";
+    assert substring_unchecked(inner, 1, 2) == "Y";
+    assert substring_unchecked(inner, 0, 3) == "XYZ";
+}
+
+// Bounds: an out-of-order span (start > end) is an empty view.
+test "string: substring view with start past end is empty" {
+    let s = "abcXYZdef";
+    assert substring_unchecked(s, 6, 3) == "";
+}
+
+// Bounds: an end past the source width clamps to the width.
+test "string: substring view clamps an end past the source width" {
+    let s = "abc";
+    assert substring_unchecked(s, 1, 99) == "bc";
+}
+
+// Bounds: a start at/after the source width is an empty view.
+test "string: substring view with start at the source width is empty" {
+    let s = "abc";
+    assert substring_unchecked(s, 3, 5) == "";
+    assert substring_unchecked(s, 5, 9) == "";
+}
+
+// The full-range view aliases the whole source and compares equal to it.
+test "string: full-range substring view equals the source" {
+    let s = "abcXYZdef";
+    assert substring_unchecked(s, 0, 9) == "abcXYZdef";
+    assert substring_unchecked(s, 0, 9).length == 9;
+}

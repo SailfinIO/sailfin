@@ -4,9 +4,9 @@ title: Native Runtime Architecture
 status: Accepted
 type: runtime
 created: 2026-06-26
-updated: 2026-06-26
+updated: 2026-07-23
 author: "agent:compiler-architect"
-tracking: "#321, #322, #451, #822, #1089, #1118, #1181, #1203, #1209"
+tracking: "#321, #322, #451, #822, #1089, #1118, #1181, #1203, #1209, SFN-42"
 supersedes:
 superseded-by:
 graduates-to: reference/runtime-abi.md
@@ -273,6 +273,19 @@ need NUL-terminated buffers: `sfn_str_to_cstr(SfnString, *Arena) -> *u8` copies 
 the arena with a trailing NUL (used internally by adapters, never exposed), and
 `sfn_str_from_cstr(*u8) -> SfnString` wraps a NUL-terminated buffer by scanning for
 NUL.
+
+**Landed: the `sfn_str_slice` view (SFN-42, 2026-07-23).** `substring` /
+`substring_unchecked` now emit the non-allocating `{data+start, end-start}` view
+described above directly (`emit_substring_view`, `core_strings.sfn`) instead of
+calling the allocating `sfn_str_slice`/`sailfin_runtime_substring_unchecked` path.
+Both indices are clamped to `[0, srclen]`, so the previously-"unchecked" entrypoint
+can no longer over-read the source tail. This is the first non-NUL-terminated
+string surface in the runtime; it is sound only because the length-aware
+consumers landed first (#1704 query helpers, #1705 cstr-boundary copy-out, #1722
+`to_number`), and SFN-42 itself moves the by-name `strings_equal`/`string.compare`
+helpers onto the length-aware `_lv` form. See `docs/status.md`'s Runtime Migration
+table for the row. No lifetime/borrow checking over the returned view — that
+remains Phase U, same as the rest of user-facing ownership.
 
 ### 3.4 Array / slice subsystem
 

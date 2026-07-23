@@ -1,0 +1,16 @@
+// Fixture for `substring_view_shape_test.sfn` (SFN-42, SFEP-0025 §3.3).
+// Exercises the non-owning `substring_unchecked` view emission so the e2e
+// can assert the lowering builds an inline `{data+start, end-start}` aggregate
+// (getelementptr + insertvalue) and emits NO allocating `@sfn_str_slice`
+// runtime call. `nested` slices a view of a view (the inner view is not
+// NUL-terminated), covering the carried-length source path.
+fn interior() -> string {
+    let s = "abcXYZdef";
+    return substring_unchecked(s, 3, 6);
+}
+
+fn nested() -> string {
+    let s = "abcXYZdef";
+    let inner = substring_unchecked(s, 3, 6);
+    return substring_unchecked(inner, 0, 2);
+}
