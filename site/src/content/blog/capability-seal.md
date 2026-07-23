@@ -49,7 +49,9 @@ Those effects are not comments. The compiler rejects undeclared effectful calls,
 propagates effects across module boundaries, and cross-checks a capsule's code
 against the capability surface declared in `capsule.toml`. This is useful today:
 you can audit a capsule and see whether it reaches for `io`, `net`, or `clock`,
-and the compiler fails closed when code exceeds its declared surface.
+and the compiler rejects declarations that exceed a non-empty manifest surface.
+An absent or empty surface skips that compatibility check; it is not a runtime
+deny-all policy.
 
 The compiler is self-hosted. The runtime source is now Sailfin, with externs used
 to call into platform facilities such as libc while the project finishes the

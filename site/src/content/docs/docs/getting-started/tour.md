@@ -85,7 +85,7 @@ fn add(a: number, b: number) -> number {
 }
 ```
 
-`add` is a **pure function** — it has no effect annotation because it does not perform any side effects. Pure functions are deterministic, easy to test, and can be optimized aggressively.
+`add` is conventionally called **pure**: it has no effect annotation and uses no operation recognized by the 0.8 effect checker. That makes it easy to test; the annotation is a compile-time effect guarantee, not runtime confinement.
 
 Add an effect when the function needs one:
 
@@ -264,15 +264,15 @@ fn describe(user: User?) ![io] {
 
 ## The Effect System
 
-The effect system is Sailfin's defining feature. Every function that reaches outside of pure computation must declare what capabilities it uses. The six canonical effects are:
+The effect system is Sailfin's defining feature. Registered effectful operations and effects inherited through resolved calls must be declared. Sailfin has six canonical **root** effects; shipped dotted names refine those roots rather than adding more:
 
 | Effect | Grants access to |
 |--------|-----------------|
 | `io` | Filesystem, console, print, logging |
 | `net` | HTTP, WebSocket, network operations |
-| `model` | AI model invocation |
-| `gpu` | GPU and accelerator access |
-| `rand` | Random number generation |
+| `model` | Reserved for the post-1.0 `sfn/ai` API (no shipped runtime API) |
+| `gpu` | Reserved for accelerator access (no detector yet) |
+| `rand` | OS entropy through `sfn/crypto::random_bytes`; no general RNG detector |
 | `clock` | Timers, sleep, wall-clock time |
 
 A function can declare multiple effects:
@@ -285,7 +285,7 @@ fn fetch_and_log(url: string) -> string ![io, net] {
 }
 ```
 
-**Effects are transitive.** If `A` calls `B`, then `A` must declare everything `B` declares. The compiler checks this at every call site.
+**Resolved calls propagate effects.** If `A` statically resolves a call to `B`, then `A` must declare grants covering `B`'s effects. Imported free functions and aliases are checked; unresolved or dynamic calls do not receive a guessed effect.
 
 ```sfn
 fn helper() ![io, net] {
@@ -305,15 +305,15 @@ effects.missing: function `caller` calls `helper` which requires ![net],
   = help: add `net` to the effect list: `fn caller() ![io, net]`
 ```
 
-**Pure functions have no annotation at all.** They cannot call effectful code and they cannot produce side effects. This is a guarantee you can rely on.
+**Functions with no annotation are effect-free within the 0.8 checker's coverage.** Recognized direct operations and effects from resolved callees are rejected, but this is not a proof about FFI/native escape hatches or a runtime syscall sandbox.
 
 ```sfn
 fn square(n: number) -> number {
-    return n * n;    // pure — no effects possible
+    return n * n;    // no recognized effects
 }
 ```
 
-This design means you can look at any function signature and know immediately what it is capable of. A function that declares only `![rand]` cannot touch the filesystem. A function with no effects cannot do anything observable outside of returning a value.
+Signatures therefore expose the effects the compiler recognizes along resolved paths. They are useful for compile-time auditing, but the 0.8 binary does not yet enforce grants at the syscall boundary; that runtime seal is a 1.0 target.
 
 ---
 
@@ -572,11 +572,11 @@ let token: Linear<AuthToken> = auth.mint_token(user_id);
 
 ## AI Integration (Future — Library-Based)
 
-Sailfin gates AI operations through the effect system using the `![model]` effect, but AI constructs are being migrated from language-level syntax to the `sfn/ai` library capsule. This keeps the language grammar stable while letting AI integration iterate as a library.
+Sailfin reserves `![model]` for future AI operations in the post-1.0 `sfn/ai` library capsule. This keeps the language grammar stable while letting AI integration iterate as a library.
 
 ### The `![model]` effect
 
-Any function that interacts with an AI model must declare the `![model]` effect. This is enforced at compile time today:
+A future `sfn/ai` function will declare `![model]`, and that declared effect already propagates through resolved callers. The following is **preview pseudocode** because no model runtime API ships in 0.8:
 
 ```sfn
 fn summarize(text: string) -> string ![model, io] {
@@ -588,7 +588,7 @@ fn summarize(text: string) -> string ![model, io] {
 
 ### Current status
 
-> **Important**: The compiler currently parses `model`, `prompt`, `pipeline`, and `tool` blocks as language syntax and emits them to `.sfn-asm` IR, but **no runtime execution exists**. These constructs are being migrated to the `sfn/ai` capsule for post-1.0 delivery. The `![model]` effect annotation — the capability gate — remains a language-level feature and is enforced today.
+> **Important**: The former `model`, `prompt`, `pipeline`, and `tool` block keywords have been removed from the language. The `![model]` token remains declarable, but 0.8 has no detector or runtime API; `sfn/ai` is planned post-1.0.
 >
 > See the [roadmap](/roadmap) for the timeline on `sfn/ai` capsule delivery.
 

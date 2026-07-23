@@ -66,9 +66,10 @@ structs, enums with payloads, interfaces, type aliases, arrays, generics with
 partial inference, closures with capture, pattern matching, `Result<T, E>` and
 `?`, `unsafe` / `extern fn`, atomic intrinsics, and explicit numeric casts.
 
-The effect system is enforced for `io`, `net`, and `clock`, including
-cross-module propagation and capsule capability checks. Ownership enforcement
-is active for the owned-buffer family and affine / linear bindings, with
+The effect system enforces registered `io`, `net`, `clock`, and `rand` entropy
+boundaries, including resolved cross-module propagation, dotted sub-effects, and
+capsule capability checks. The runtime syscall seal remains a 1.0 target.
+Ownership enforcement is active for the owned-buffer family and affine / linear bindings, with
 broader borrow checking still in development.
 
 The tooling includes:

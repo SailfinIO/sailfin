@@ -8,7 +8,7 @@ sidebar:
 
 ## Overview
 
-The effect system is a compile-time capability mechanism. Every function declares what side effects it may perform via `![effect, ...]` annotations on its signature, and the compiler currently enforces these declarations based on direct usage of effectful operations (e.g., filesystem, printing, HTTP). A function that directly performs any operation requiring effect `E` must declare `E`; failing to do so is a compile error, not a warning. Call-graph–transitive enforcement based on callee signatures is planned but not yet implemented. This makes direct side effects explicit, auditable, and verifiable without runtime overhead.
+The 0.8 effect system is a compile-time capability mechanism. It checks direct use of registered effectful operations and propagates declared effects through statically resolved callees, including imported free functions and aliased imports. Missing declarations are compile errors by default. Unresolved or dynamic callees yield no guessed effect, and the emitted binary is not yet confined by a runtime syscall seal.
 
 ---
 
@@ -18,10 +18,10 @@ The effect system is a compile-time capability mechanism. Every function declare
 |--------|-------|-----------------|----------------|---------|
 | IO | `io` | Filesystem, console output, logging, decorators like `@logExecution` | Yes | `print()`, `print.err()`, `fs.readFile()`, `fs.writeFile()`, `console.*` |
 | Network | `net` | HTTP, WebSocket, serve | Yes | `http.get()`, `http.post()`, `websocket.*`, `serve` |
-| Model | `model` | AI library invocation (`sfn/ai`, post-1.0) | No (planned) | Intended for `sfn/ai`; callee-signature/transitive enforcement is not implemented today |
-| GPU | `gpu` | Tensor and accelerator operations | No (parsed only) | Tensor ops, `@gpu` blocks, GPU memory |
-| Random | `rand` | Random number generation | No (parsed only) | `rand.*` |
-| Clock | `clock` | Time operations | Partial | `sleep()`, `runtime.sleep()` |
+| Model | `model` | Future AI library invocation (`sfn/ai`, post-1.0) | Reserved | Declarable and propagated from signatures; no shipped detector/runtime API |
+| GPU | `gpu` | Future accelerator operations | Parsed/reserved | No effect-gated GPU runtime API or detector |
+| Random | `rand` | OS entropy | Enforced at the shipped entropy boundary | `sfn/crypto::random_bytes`; no general RNG-name detector |
+| Clock | `clock` | Sleep and registered clock operations | Yes for registered operations | `sleep()`, `runtime.sleep()`, clock helpers |
 
 The tokens `unsafe`, `read`, and `mut` are also recognized by the parser for FFI and ownership annotations but are not part of the capability-surface set enforced by the effect checker today.
 
@@ -32,7 +32,7 @@ The tokens `unsafe`, `read`, and `mut` are also recognized by the parser for FFI
 Effect annotations appear after the parameter list and optional return type, before the function body.
 
 ```sfn
-// No effects declared — guaranteed pure
+// No recognized effects declared
 fn pure_fn(x: int) -> int {
     return x * 2;
 }
@@ -61,12 +61,15 @@ Effect tokens are comma-separated within `![...]`. Order within the list is not 
 
 ## Enforcement Rules
 
-1. A function that directly calls an operation requiring effect `E` must declare `E`.
-2. Call-graph–transitive enforcement (where calling function `A` must declare every effect that callee `B` declares) is **planned** but not yet implemented. The current checker enforces direct-usage rules only.
-3. Test blocks follow the same rules as functions — a test that performs IO must declare `![io]`.
-4. Closures inherit the effect scope of their enclosing function; a closure defined inside an `![io]` function may call IO operations without redeclaring the effect.
-5. Missing effects are a **compile error**, not a warning. The build will not proceed.
-6. The compiler emits missing-effect diagnostics with textual hints describing how to update the function signature; automatic signature rewrite fix-its are planned tooling.
+1. A direct call to an operation registered with requirement `E` must be covered by the enclosing function's declared grants (`E0400`).
+2. A call to a statically resolved function inherits that function's declared effects. Imported free functions, aliases, statically resolved member callees, and imported decorator effects are covered (`E0402`); unresolved or dynamic callees yield no guessed effect.
+3. Tests follow the same effect rules as functions.
+4. Immediately used closures are checked in their enclosing effect scope; general effect polymorphism is not shipped.
+5. A function's declared effects must fit a non-empty capsule `[capabilities] required` surface (`E0403`). An absent or empty surface skips this compatibility cross-check rather than acting as deny-all.
+6. Workspace capability envelopes enforce member manifests' **declared** surfaces. Inferring and auditing the complete source effect surface at workspace level is still planned.
+7. Missing effects are errors by default and carry source spans and structured fix suggestions. `SAILFIN_EFFECT_ENFORCE=warning|off` is a transitional build-path escape hatch; `sfn check` still validates.
+
+These rules prove only what the 0.8 compiler recognizes and resolves. They do not confine FFI/native code at runtime. A syscall-gating capability seal is a 1.0 target.
 
 ---
 
@@ -115,11 +118,9 @@ which adds `io` on top of the registry's `net` requirement for
 
 ### `model` effect
 
-Required for any function that calls a library function (such as one from the
-planned `sfn/ai` capsule) whose signature declares `![model]`. Today `![model]`
-acts as a capability gate for direct use of model-capable APIs; full
-call-graph–transitive enforcement based on callee signatures is planned but
-not yet implemented. The `model`, `prompt`, `tool`, and `pipeline` block
+Reserved for library functions such as those planned for the post-1.0 `sfn/ai`
+capsule. A declared `![model]` effect propagates through resolved calls like any
+other declared effect, but 0.8 has no shipped model detector or runtime API. The `model`, `prompt`, `tool`, and `pipeline` block
 keywords have been removed from the language; the `![model]` effect remains
 as the capability gate.
 
@@ -143,13 +144,13 @@ fn summarize(text: string) -> string ![model] {
 
 ### `clock` effect
 
-Partially enforced. Time-based suspension is enforced today; wall-clock reads are planned.
+Registered sleep and clock operations are enforced today.
 
 | API | Notes |
 |-----|-------|
 | `sleep(ms)` | Suspend for `ms` milliseconds — enforced |
 | `runtime.sleep(ms)` | Alias for `sleep` — enforced |
-| Wall-clock access | Planned — not yet enforced |
+| Registered clock helpers | Enforced; consult the standard-library reference for the shipped API |
 
 ### `gpu` effect (parsed, not yet enforced)
 
@@ -161,16 +162,14 @@ Declared in signatures and parsed by the compiler but not yet checked at call si
 | `@gpu` accelerator blocks | Blocks targeting GPU execution |
 | GPU memory operations | Allocation and transfer |
 
-### `rand` effect (parsed, not yet enforced)
+### `rand` effect
 
-Declared in signatures and parsed by the compiler but not yet checked at call sites.
+The shipped entropy boundary is enforced; arbitrary RNG-like call names are not auto-detected.
 
 | API | Notes |
 |-----|-------|
-| `rand.int()` | Random integer |
-| `rand.float()` | Random float in `[0, 1)` |
-| `rand.choice(list)` | Random element from a list |
-| `rand.shuffle(list)` | Shuffle a list in place |
+| `sfn/crypto::random_bytes(n)` | Shipped OS-entropy API; carries and propagates `![rand]` |
+| General `rand.*` helpers | No shipped general-purpose runtime surface or name detector |
 
 ---
 
@@ -223,23 +222,20 @@ Pure functions with no effect annotations:
 
 ---
 
-## Future: Hierarchical Effects
+## Dotted Sub-effects
 
-**This feature is planned and not yet active.**
+Four refinements ship in 0.8:
 
-In a future release, effects will compose hierarchically. The top-level tokens (`io`, `net`, etc.) will become namespaces for fine-grained sub-effects:
+| Sub-effect | Parent | Detected operations |
+|------------|--------|---------------------|
+| `io.fs` | `io` | `fs.*` |
+| `io.console` | `io` | `print.*`, `console.*` |
+| `net.http` | `net` | `http.*` |
+| `net.ws` | `net` | `websocket.*` |
 
-| Planned Sub-effect | Parent | Meaning |
-|-------------------|--------|---------|
-| `io.fs.read` | `io` | Read-only filesystem access |
-| `io.fs.write` | `io` | Write filesystem access |
-| `io.console` | `io` | Console and terminal output |
-| `net.http` | `net` | HTTP client and server |
-| `net.ws` | `net` | WebSocket |
-| `model.infer` | `model` | Model inference |
-| `model.embed` | `model` | Embedding generation |
+A parent grant subsumes its children: `![io]` satisfies an `io.fs` requirement. A narrow grant such as `![io.fs]` does not satisfy sibling `io.console`. Capsule manifests apply the same rule, so `required = ["io.fs"]` is a real compile-time tightening, while `required = ["io"]` permits both shipped `io` refinements.
 
-Until hierarchical effects ship, all sub-effects collapse to their parent token. A function requiring `io.fs.read` today must declare `io`. The syntax `![io.fs.read]` is reserved for the future and will be rejected by the current compiler.
+Deeper refinements such as `io.fs.read` and additional detected families remain preview work. Unrecognized roots are rejected; dotted refinements never increase the locked count of six canonical root effects.
 
 ---
 

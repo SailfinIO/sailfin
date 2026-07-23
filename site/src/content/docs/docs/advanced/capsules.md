@@ -15,7 +15,7 @@ Capsules are directories. The presence of a `capsule.toml` manifest file at the 
 A capsule has two responsibilities:
 
 1. **It defines a unit of compilation.** The Sailfin compiler resolves imports at capsule boundaries and uses the manifest to locate dependencies.
-2. **It defines a unit of trust.** The `[capabilities]` section of `capsule.toml` declares which effects the capsule uses. Today the compiler enforces this declaration **at compile time** — a capsule whose code uses an effect outside its declared surface fails the build (`E0403`), and workspaces audit it. *Runtime* capability enforcement (gating effects at the syscall boundary in the running binary) is a pre-1.0 goal, not yet shipped.
+2. **It defines a unit of trust.** The `[capabilities]` section of `capsule.toml` declares which effects the capsule uses. Today the compiler enforces this declaration **at compile time** — a capsule whose functions declare an effect outside a non-empty surface fails the build (`E0403`), and workspaces audit it. *Runtime* capability enforcement (gating effects at the syscall boundary in the running binary) is a 1.0 target, not yet shipped.
 
 A capsule can be one of two things:
 
@@ -105,7 +105,7 @@ Declares which effects this capsule uses. See the [Capability Declarations](#cap
 
 | Field | Type | Default | Description |
 |---|---|---|---|
-| `required` | array of strings | `[]` | Effects this capsule requires. Valid values: `"io"`, `"net"`, `"model"`, `"gpu"`, `"rand"`, `"clock"`, `"unsafe"`. |
+| `required` | array of strings | `[]` | Canonical effects or recognized dotted refinements this capsule requires. Roots: `"io"`, `"net"`, `"model"`, `"gpu"`, `"rand"`, `"clock"`; `"unsafe"` is a separate parsed annotation. |
 
 #### `[build]`
 
@@ -126,9 +126,9 @@ Pins the `sfn` toolchain this capsule requires. See [Toolchain Pinning](#toolcha
 
 The `[capabilities]` section of `capsule.toml` lists the effects the capsule's code is permitted to use. This declaration has two purposes.
 
-**For the compiler:** When a function in your capsule uses `print()` or reads from the filesystem, the compiler checks that `"io"` is in your `required` list. If it is not, you get a diagnostic with a suggested fix. Without the declaration, effect-annotated functions cannot compile in capsule context.
+**For the compiler:** When a function in your capsule uses `print()` or reads from the filesystem, the compiler checks that `"io"` is in your `required` list. If it is not, you get a diagnostic with a suggested fix. When the surface is non-empty, an out-of-surface declaration fails with `E0403`. An absent or empty surface skips this compatibility cross-check; it is not deny-all.
 
-**For workspaces and audits:** A workspace can inspect the declared capabilities of every member capsule and enforce policies — for example, preventing any capsule other than a designated networking capsule from declaring `"net"`, or requiring that all `"unsafe"` capsules have passed a security review.
+**For workspaces and audits:** An opt-in workspace capability envelope enforces each member manifest's declared surface. It does not yet infer the complete source effect surface across the workspace.
 
 ```toml
 [capabilities]
@@ -141,13 +141,13 @@ Valid capability values:
 |---|---|
 | `io` | `print()`, `print.err()`, `fs.*`, `console.*`, `@logExecution` |
 | `net` | `http.*`, `websocket.*`, `serve` |
-| `model` | `prompt` blocks, model inference |
-| `gpu` | GPU compute kernels |
-| `rand` | random number generation |
+| `model` | Reserved for the post-1.0 `sfn/ai` API; no shipped runtime API |
+| `gpu` | Reserved for future accelerator APIs; no detector yet |
+| `rand` | `sfn/crypto::random_bytes`; no general RNG detector |
 | `clock` | `sleep`, `runtime.sleep`, wall-clock reads |
 | `unsafe` | `unsafe` blocks, `unsafe extern fn` calls |
 
-**Current status:** The capability manifest format is designed and the field is parsed. Compile-time enforcement against the manifest (rejecting capsule builds that use effects not listed in `required`) is planned for the native compiler.
+**Current status:** Compile-time manifest enforcement is shipped. Declared function effects must fit a non-empty `required` surface (`E0403`), using sub-effect subsumption: `"io"` covers `io.*`, while `"io.fs"` excludes sibling `io.console`. Runtime syscall enforcement remains a 1.0 target.
 
 ## Toolchain Pinning
 

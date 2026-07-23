@@ -35,4 +35,4 @@ Time literals (`1s`, `150ms`) are **not yet parsed** — use numeric millisecond
 fn fetch(url: string) -> string ![io, net] { ... }
 ```
 
-Canonical effects: `io`, `net`, `model`, `gpu`, `rand`, `clock`, plus `unsafe`, `read`, `mut`.
+Canonical capability roots: `io`, `net`, `model`, `gpu`, `rand`, `clock`. Dotted names refine those roots. `unsafe`, `read`, and `mut` are separately parsed annotations, not additional canonical capability effects.
