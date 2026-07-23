@@ -114,6 +114,7 @@ fn recover_native_functions_light(native_text: string) -> NativeFunction[] {
         let is_endif_kw = line == ".endif";
         let is_if_kw = starts_with_local(line, ".if ");
         let is_loop_kw = line == ".loop";
+        let is_loop_vectorize_kw = line == ".loop vectorize";
         let is_endloop_kw = line == ".endloop";
         let is_for_kw = starts_with_local(line, ".for ");
         let is_endfor_kw = line == ".endfor";
@@ -449,6 +450,9 @@ fn recover_native_functions_light(native_text: string) -> NativeFunction[] {
             };
         }
         if is_loop_kw { next_instruction = NativeInstruction.Loop(); }
+        if is_loop_vectorize_kw {
+            next_instruction = NativeInstruction.LoopVectorize();
+        }
         if is_endloop_kw { next_instruction = NativeInstruction.EndLoop(); }
         if is_for_kw {
             if for_in_idx >= 0 {

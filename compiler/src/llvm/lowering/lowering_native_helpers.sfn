@@ -264,6 +264,7 @@ fn get_instruction_tag(instructions: NativeInstruction[], idx: int) -> int {
         NativeInstruction.For { target, iterable } => return 6,
         NativeInstruction.EndFor => return 7,
         NativeInstruction.Loop => return 8,
+        NativeInstruction.LoopVectorize => return 8,
         NativeInstruction.EndLoop => return 9,
         NativeInstruction.Break => return 10,
         NativeInstruction.Continue => return 11,

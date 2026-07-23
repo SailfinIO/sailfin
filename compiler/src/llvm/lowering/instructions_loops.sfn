@@ -136,6 +136,7 @@ fn lower_loop_instruction(function: NativeFunction, start_index: int, llvm_retur
     let mut current_next_region: int = next_region_id;
     let mut collected_mutations: LocalMutation[] = [];
     let mut collected_string_constants: StringConstant[] = empty_string_constant_set();
+    let vectorize_enabled = function.instructions[start_index].variant == "LoopVectorize";
 
     let debug_loop = trace_lowering();
     if debug_loop {
@@ -438,7 +439,9 @@ fn lower_loop_instruction(function: NativeFunction, start_index: int, llvm_retur
         load_idx += 1;
     }
 
-    current_lines.push("  br label %" + header_label);
+    if vectorize_enabled {
+        current_lines.push("  br label %" + header_label + ", !llvm.loop !0");
+    } else { current_lines.push("  br label %" + header_label); }
 
     // Generate phi nodes using the latch load values.
     let mut name_idx: int = 0;

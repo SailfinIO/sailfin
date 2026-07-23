@@ -230,6 +230,21 @@ test "tensor_ir: scalar native-loop snapshot lowers through LLVM" ![io] {
     assert index_of(llvm, "@tensor_add_oracle") >= 0;
 }
 
+test "tensor_ir: matmul emits a contiguous vectorized loop with proved unchecked loads" ![io] {
+    let lowered = lower_tensor_module_to_native(_module(_matmul_function()));
+    assert lowered.diagnostics.length == 0;
+    assert index_of(lowered.native_text, ".let left_extent2 : float = v0[5]") >= 0;
+    assert index_of(lowered.native_text, ".let right_extent2 : float = v1[5]") >= 0;
+    assert index_of(lowered.native_text, ".loop vectorize") >= 0;
+    assert index_of(lowered.native_text, ".unchecked(v0)[r2 * 3 + k2]") >= 0;
+    assert index_of(lowered.native_text, ".unchecked(v1)[k2 * 2 + c2]") >= 0;
+    assert index_of(lowered.native_text, ".unchecked(v2)[r2 * 2 + c2]") >= 0;
+    let llvm = lower_to_llvm_ir_from_text(lowered.native_text, "tensor_test");
+    assert index_of(llvm, "!llvm.loop !0") >= 0;
+    assert index_of(llvm, "!0 = distinct !{!0, !1}") >= 0;
+    assert index_of(llvm, "!1 = !{!\"llvm.loop.vectorize.enable\", i1 true}") >= 0;
+}
+
 test "tensor_ir: add and multiply equal tensor capsule oracle" {
     let a_data = [1.0, 2.0, 3.0, 4.0];
     let b_data = [5.0, 6.0, 7.0, 8.0];
