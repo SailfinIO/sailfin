@@ -274,7 +274,7 @@ fn prepare_parameters_from_function(function: NativeFunction, context: TypeConte
     };
 }
 
-fn emit_llvm_function(function: NativeFunction, functions: NativeFunction[], effects: string[], context: TypeContext, module_name: string, entry_points: string[], exported_symbols: string[], imported_functions: NativeFunction[], module_globals: LocalBinding[], module_init_symbol: string, needs_module_init_call: boolean) -> LoweredLLVMFunction ![io] {
+fn emit_llvm_function(function: NativeFunction, functions: NativeFunction[], effects: string[], context: TypeContext, module_name: string, entry_points: string[], exported_symbols: string[], imported_functions: NativeFunction[], module_globals: LocalBinding[], module_init_symbol: string, needs_module_init_call: boolean, imported_decorator_names: string[]) -> LoweredLLVMFunction ![io] {
     let mut diagnostics: string[] = [];
     let debug_lowering = trace_lowering();
 
@@ -290,7 +290,7 @@ fn emit_llvm_function(function: NativeFunction, functions: NativeFunction[], eff
     if fn_is_async {
         if !fn_is_extern {
             if fn_name != "main" {
-                return emit_async_function(function, functions, effects, context, module_name, entry_points, exported_symbols, imported_functions, module_globals, module_init_symbol, needs_module_init_call);
+                return emit_async_function(function, functions, effects, context, module_name, entry_points, exported_symbols, imported_functions, module_globals, module_init_symbol, needs_module_init_call, imported_decorator_names);
             }
         }
     }
@@ -469,41 +469,89 @@ fn emit_llvm_function(function: NativeFunction, functions: NativeFunction[], eff
     loop {
         if decorator_index >= fn_decorator_count { break; }
         let decorator_name = decorators[decorator_index];
-        let mut _if199: boolean = false;
+        // SFEP-0023 §4.4: a capsule-resolved decorator (one imported into
+        // this module) lowers to an ordinary entry call into the imported
+        // symbol; only the un-imported built-in `@logExecution`/`@trace`
+        // falls back to the always-linked runtime helper (deprecation bridge
+        // until the seed re-cut). Any other decorator carries no entry hook.
+        let is_capsule_decorator = string_array_contains(imported_decorator_names, decorator_name);
+        let mut is_builtin_decorator: boolean = false;
         if matches_case_insensitive(decorator_name, "logExecution") {
-            _if199 = true;
+            is_builtin_decorator = true;
         }
         if matches_case_insensitive(decorator_name, "logexecution") {
-            _if199 = true;
+            is_builtin_decorator = true;
         }
-        if matches_case_insensitive(decorator_name, "trace") { _if199 = true; }
-        if _if199 {
-            let content = fn_name;
-            let constant_name = make_string_constant_name_for_module(module_name, content);
-            let constant = StringConstant {
-                name: constant_name,
-                content: content,
-                byte_count: content.length
-            };
-            decorator_string_constants = append_string_constant(decorator_string_constants, constant);
-            let array_length = content.length + 1;
-            let array_type = "[" + number_to_string(array_length) + " x i8]";
-            // M1.7.2c (#498): log_execution routes through descriptor-
+        if matches_case_insensitive(decorator_name, "trace") {
+            is_builtin_decorator = true;
+        }
+        if !is_capsule_decorator {
+            if !is_builtin_decorator {
+                decorator_index += 1;
+                continue;
+            }
+        }
+        // Shared Tier-1 descriptor: the decorated function's name as an i8*
+        // into a module string constant. Both lowering paths pass it; the
+        // capsule path also wraps it in a length-aware `{i8*, i64}` string.
+        let content = fn_name;
+        let constant_name = make_string_constant_name_for_module(module_name, content);
+        let constant = StringConstant {
+            name: constant_name,
+            content: content,
+            byte_count: content.length
+        };
+        decorator_string_constants = append_string_constant(decorator_string_constants, constant);
+        let array_length = content.length + 1;
+        let array_type = "[" + number_to_string(array_length) + " x i8]";
+        let fn_name_ptr = "getelementptr inbounds (" + array_type + ", "
+            + array_type
+            + "* "
+            + constant_name
+            + ", i32 0, i32 0)";
+        if is_capsule_decorator {
+            // Tier-1 entry hook `decorator(args: string[], fn_name: string)`.
+            // `args` is an empty `string[]` header (Tier 1 forwards no
+            // literal decorator arguments yet); `fn_name` is the descriptor
+            // above as a length-aware string value. The bare `@<name>` call
+            // is rewritten to the mangled capsule symbol by the module
+            // symbol-mangling pass, exactly like any imported call site.
+            let args_ptr_temp = "%t" + number_to_string(decorator_temp_index);
+            lines = append_string(lines, "  " + args_ptr_temp
+                + " = alloca { i8**, i64, i64 }");
+            lines = append_string(lines, "  store { i8**, i64, i64 } zeroinitializer, { i8**, i64, i64 }* "
+                + args_ptr_temp);
+            let name_partial_temp = "%t" + number_to_string(decorator_temp_index
+                + 1);
+            lines = append_string(lines, "  " + name_partial_temp
+                + " = insertvalue {i8*, i64} undef, i8* "
+                + fn_name_ptr
+                + ", 0");
+            let name_value_temp = "%t" + number_to_string(decorator_temp_index
+                + 2);
+            lines = append_string(lines, "  " + name_value_temp
+                + " = insertvalue {i8*, i64} "
+                + name_partial_temp
+                + ", i64 "
+                + number_to_string(content.length)
+                + ", 1");
+            lines = append_string(lines, "  call void @" + decorator_name
+                + "({ i8**, i64, i64 }* "
+                + args_ptr_temp
+                + ", {i8*, i64} "
+                + name_value_temp
+                + ")");
+            decorator_temp_index += 3;
+        } else {
+            // M1.7.2c (#498): the built-in fallback routes through descriptor-
             // driven dispatch. The argument is an inline `getelementptr
-            // inbounds` constant expression; we wrap it in an `i8*`
-            // operand so `format_typed_operand` renders the existing
-            // `i8* getelementptr inbounds (...)` shape unchanged. The
-            // dispatch return value is discarded via a fresh temp slot
-            // (the prior emission used `call i8*` without an LHS); the
+            // inbounds` constant expression wrapped in an `i8*` operand so
+            // `format_typed_operand` renders the existing shape unchanged. The
+            // dispatch return value is discarded via a fresh temp slot; the
             // body lowering picks up at the post-decorator counter.
-            let log_arg_value = "getelementptr inbounds (" + array_type + ", "
-                + array_type
-                + "* "
-                + constant_name
-                + ", i32 0, i32 0)";
             let log_arg_operand = LLVMOperand {
                 llvm_type: "i8*",
-                value: log_arg_value
+                value: fn_name_ptr
             };
             let log_operands: LLVMOperand[] = [log_arg_operand];
             let log_result = emit_runtime_call("runtime_log_execution_fn", log_operands, empty_runtime_call_overrides(), decorator_temp_index, lines);

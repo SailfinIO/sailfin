@@ -228,6 +228,64 @@ fn _harness_print_marker(gvar: string, arr_len: string, byte_len: string, tp: st
         + ".agg1)"];
 }
 
+// True when an imported function of the given (export) name carries the
+// `@decorator` marker (ast.sfn::decorator_marker_name() == "decorator").
+// The import parser preserves top-level `.decorator` directives into
+// `NativeFunction.decorators` even for signature-only import parses
+// (native_ir_api::parse_native_artifact_for_import_with_bindings).
+fn _imported_function_is_decorator(imported_functions: NativeFunction[], name: string) -> boolean {
+    if imported_functions.length > 100000 { return false; }
+    let mut i: int = 0;
+    loop {
+        if i >= imported_functions.length { break; }
+        let entry = imported_functions[i];
+        if entry.name == name {
+            if string_array_contains(entry.decorators, "decorator") {
+                return true;
+            }
+        }
+        i += 1;
+    }
+    return false;
+}
+
+// SFN-72: local (post-alias) names of imported `@decorator`-marked functions,
+// so lowering can tell a capsule-resolved decorator from the built-in
+// runtime-helper fallback (effects.sfn::collect_function_runtime_helper_targets).
+// Gated on the `@decorator` marker (SFEP-0023 §4.2): an imported *non*-
+// decorator symbol applied as `@name` must NOT route to the capsule-call
+// branch — that would emit a wrong-ABI call to a non-Tier-1 symbol. Only a
+// genuinely marked import is a decorator; anything else stays inert.
+fn _decorator_import_local_names(imports: NativeImport[], imported_functions: NativeFunction[]) -> string[] {
+    let mut names: string[] = [];
+    if imports.length > 100000 { return names; }
+    let mut i: int = 0;
+    loop {
+        if i >= imports.length { break; }
+        let specs = imports[i].specifiers;
+        let mut j: int = 0;
+        loop {
+            if j >= specs.length { break; }
+            let spec = specs[j];
+            // The imported symbol's own (export) name carries the marker; the
+            // local name (alias if present) is what the decorator is applied as.
+            let export_name = spec.name;
+            let mut local: string = spec.name;
+            if spec.alias != null {
+                if spec.alias.length > 0 { local = spec.alias; }
+            }
+            if _imported_function_is_decorator(imported_functions, export_name) {
+                if !string_array_contains(names, local) {
+                    names.push(local);
+                }
+            }
+            j += 1;
+        }
+        i += 1;
+    }
+    return names;
+}
+
 fn lower_to_llvm_lines_with_parsed_context_for_tests(native_module: NativeModule, parse: ParseNativeResult, imported_manifests: LayoutManifest[], imported_native_texts: string[], imported_diagnostics: string[]) -> LoweredLLVMLinesResult ![io] {
     let mut native_text_for_recovery: string = "";
     if native_module.artifacts != null {
@@ -932,6 +990,9 @@ fn lower_to_llvm_lines_with_parsed_context(native_module: NativeModule, parse_ar
     let imported_functions = imported_syms.functions;
     let imported_struct_methods = imported_syms.struct_methods;
     let imported_bindings = imported_syms.bindings;
+    // Computed here (not at `safe_imports`) because the `@decorator` marker
+    // check needs the parsed imported functions (SFN-72).
+    let decorator_import_names = _decorator_import_local_names(safe_imports, imported_functions);
 
     if debug_lowering { print.err("emit-llvm: phase=imports"); }
 
@@ -1095,7 +1156,7 @@ fn lower_to_llvm_lines_with_parsed_context(native_module: NativeModule, parse_ar
     }
     if _if255 {
         if debug_lowering { print.err("emit-llvm: phase=helpers_start"); }
-        runtime_helpers = collect_runtime_helper_targets(local_functions);
+        runtime_helpers = collect_runtime_helper_targets(local_functions, decorator_import_names);
         if debug_lowering { print.err("emit-llvm: phase=helpers_done"); }
     } else if trace {
         print.err("test llvm: skipping runtime helper collection for test module");
@@ -1190,7 +1251,7 @@ fn lower_to_llvm_lines_with_parsed_context(native_module: NativeModule, parse_ar
     // post-lowering `collect_runtime_helper_targets_from_lines` scan via
     // `module_init_lines`; its string constants are merged so they render.
     if module_init_function != null {
-        let init_lowered = emit_llvm_function(module_init_function, context_functions, [], type_context, native_module.module_name, safe_entry_points, exported_symbols, imported_functions, module_global_locals, module_init_symbol, false);
+        let init_lowered = emit_llvm_function(module_init_function, context_functions, [], type_context, native_module.module_name, safe_entry_points, exported_symbols, imported_functions, module_global_locals, module_init_symbol, false, decorator_import_names);
         module_init_lines = init_lowered.lines;
         if init_lowered.diagnostics.length > 0 {
             diagnostics = extend_string_lines_checked(diagnostics, init_lowered.diagnostics, "module init");
@@ -1207,7 +1268,7 @@ fn lower_to_llvm_lines_with_parsed_context(native_module: NativeModule, parse_ar
     // ── Lower all functions (also pre-preamble; the emitted call
     // lines feed the post-lowering helper scan that closes the gap
     // for `emit_runtime_call` and panic-wrapper inline calls).
-    let function_result = lower_all_functions(local_functions, context_functions, aggregated_effects, type_context, native_module.module_name, safe_entry_points, exported_symbols, imported_functions, module_global_locals, module_init_symbol, module_globals_needs_init_call, module_string_constants, trace, debug_lowering);
+    let function_result = lower_all_functions(local_functions, context_functions, aggregated_effects, type_context, native_module.module_name, safe_entry_points, exported_symbols, imported_functions, module_global_locals, module_init_symbol, module_globals_needs_init_call, module_string_constants, trace, debug_lowering, decorator_import_names);
     diagnostics = extend_string_lines_checked(diagnostics, function_result.diagnostics, "function lowering");
 
     // ── M2.10 (#402): type-metadata descriptors. Emitted before

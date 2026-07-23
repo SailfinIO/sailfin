@@ -92,11 +92,22 @@ fn timed(log: Logger, label: string) -> int ![io, clock] {
     //   timed_end(log, "fetch_users", t);
     //   // → [INFO] db: fetch_users completed ms=42
     //
-    let start = runtime.monotonic_millis();
+    let start = monotonic_millis();
     return start;
 }
 
 fn timed_end(log: Logger, label: string, start_millis: int) -> void ![io, clock] {
-    let elapsed = runtime.monotonic_millis() - start_millis;
+    let elapsed = monotonic_millis() - start_millis;
     log_info(log, label + " completed", ["ms", number_to_string(elapsed)]);
+}
+
+// SFEP-0023 §4.5: capsule-resolved decorator entry hooks. Tier-1 contract
+// is `(args, fn_name)`; args is unused at this tier (no literal forwarding yet).
+@decorator fn logExecution(args: string[], fn_name: string) -> void ![io] {
+    info(fn_name);
+}
+
+@decorator fn trace(args: string[], fn_name: string) -> void ![io] {
+    let root = Logger { name: "" };
+    print(_format_message("TRACE", root, "→ entered " + fn_name, []));
 }

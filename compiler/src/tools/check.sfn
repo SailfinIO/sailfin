@@ -44,7 +44,10 @@ import { load_prelude_global_names } from "../prelude_globals";
 import { collect_reexport_violations } from "../reexport_check";
 import { substring } from "../string_utils";
 import { Token, TokenKind } from "../token";
-import { typecheck_diagnostics_with_import_symbols_prelude } from "../typecheck";
+import {
+    collect_decorator_deprecation_findings,
+    typecheck_diagnostics_with_import_symbols_prelude
+} from "../typecheck";
 import { ClosureSymbolSet } from "../typecheck_import_loader";
 import { Diagnostic, FixSuggestion } from "../typecheck_types";
 
@@ -287,6 +290,41 @@ fn check_source_with_imports(source: string, file_path: string, imported_interfa
             warnings += 1;
             bai += 1;
         }
+    }
+
+    // W0211 (SFEP-0023 §4.5): soft-deprecate the built-in `@logExecution`/
+    // `@trace` applied without importing them from `log`. The capsule-
+    // resolved import is the supported path; the built-in still works via
+    // the runtime-helper fallback until the seed re-cut deletes it (step F).
+    // Always a `warning`. `function_effects` is the resolved import table, so
+    // the finding fires only on the genuinely un-imported use — matching the
+    // lowering fallback's discriminator. Code family W02xx = lint.
+    let decorator_deprecations = collect_decorator_deprecation_findings(program, function_effects);
+    let mut ddi: int = 0;
+    loop {
+        if ddi >= decorator_deprecations.length { break; }
+        let dname = decorator_deprecations[ddi];
+        let ddfix = FixSuggestion {
+            message: "import the decorator from `log`, e.g. `import { " + dname
+                + " } from \"log\";`",
+            edits: []
+        };
+        let dddiag = Diagnostic {
+            code: "W0211",
+            severity: "warning",
+            message: "deprecated-api: the built-in `@" + dname
+                + "` decorator is deprecated; import it from `log` (`import { "
+                + dname
+                + " } from \"log\";`)",
+            file_path: file_path,
+            primary: null,
+            suggestion: ddfix
+        };
+        combined.push(dddiag);
+        producers.push("lint");
+        rendered.push(render_diagnostic(dddiag, source_lines, "lint"));
+        warnings += 1;
+        ddi += 1;
     }
 
     // Stamp the originating module path onto each typecheck diagnostic
