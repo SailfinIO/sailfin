@@ -3,8 +3,6 @@
 // Unit coverage for the typed SSA v0 debug renderer (compiler/src/
 // typed_ssa_render.sfn) against the §9.7 golden module and determinism of
 // construction order.
-import { find } from "sfn/strings";
-
 import {
     Linkage,
     Module,
@@ -90,7 +88,14 @@ test "typed_ssa: renders a call instruction with effect and capability sets" {
     let fin = finish_function(m, b);
     m = fin.module;
 
-    let rendered: string = render_module(m);
-    assert find(rendered, "call f0(") >= 0;
-    assert find(rendered, "effects=e") >= 0;
+    let expected: string = "module demo2\n" + "type t0 = int(signed,64)\n"
+        + "effects e0 = {}\n"
+        + "capabilities c0 = {}\n"
+        + "external fn callee(t0) -> t0 effects=e0 capabilities=c0\n"
+        + "fn caller(v0:t0) -> t0 effects=e0 capabilities=c0 {\n"
+        + "  b0(v0:t0):\n"
+        + "    v1 = call f0(v0) effects=e0 capabilities=c0\n"
+        + "    return v1\n"
+        + "}\n";
+    assert render_module(m) == expected;
 }
