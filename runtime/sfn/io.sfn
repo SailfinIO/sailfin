@@ -28,22 +28,16 @@
 //      need an SfnString-typed Sailfin parameter; the bytes arrive as
 //      the data pointer + length.)
 //
-//      Immediate-codepoint handling (pre-M1.A.2). A real `{i8*, i64}`
-//      aggregate carries a real pointer + byte length, so the
-//      length-aware `write(2)` body is correct for it. But pre-M1.A.2 a
-//      single grapheme can still arrive as a legacy tagged-pointer
-//      "immediate codepoint" — `.data` smuggling the codepoint as
-//      `cp << 32` or a near-null ASCII byte, with no real buffer to
-//      read. The native bodies guard for that shape (`_sfn_is_immediate`,
-//      mirroring the C `_is_immediate_codepoint_string` classification)
-//      and route only those tagged/NULL pointers to the immediate-
-//      decoding C `sailfin_runtime_print_*` entrypoints; every real
-//      string takes the native `write(2)` hot path. This keeps output
-//      byte-identical to the retired C `_print_line` across both shapes.
-//      The C printers stay until #822 / #1136 retire the encoding; the
-//      guard retires with them. The length-free cstring consumers
-//      (`sfn_log_execution`, `sfn_print_sfn`) likewise stay on the C
-//      entrypoints (their `* u8` arg has no length to drive `write`).
+//      String printing. A real `{i8*, i64}` aggregate carries a real
+//      pointer + byte length, so the length-aware `write(2)` body is
+//      correct for it, and that is the only shape codegen emits: the
+//      legacy tagged-pointer "immediate codepoint" encoding (`cp << 32`)
+//      was retired with #822, so no producer smuggles a codepoint in a
+//      pseudo-pointer anymore. `_sfn_is_immediate` therefore only still
+//      special-cases a NULL/near-null pointer (a no-op print); its former
+//      `cp << 32` clause was unsound against 4 GiB-aligned real pointers
+//      and has been removed. Every string takes the native `write(2)` hot
+//      path via `_sfn_print_line`.
 //
 //   2. The bare `sfn_getenv` / `sfn_home_dir` env readers — the canonical
 //      symbols the compiler emits `call`s against for `env.get` / `env.home`
@@ -269,20 +263,21 @@ fn sfn_read_line(fd: i64) -> *u8 ![io] {
 }
 
 // Is `data` a legacy immediate-codepoint tagged pointer rather than a
-// real string buffer? Pre-M1.A.2 a single grapheme can arrive with no
-// backing buffer: either a near-null ASCII byte (`1..=0x7f`, and NULL
-// `0` which the C printers no-op) or the codepoint shifted into the
-// upper 32 bits (`cp << 32`, so the low 32 bits are zero and the value
-// is non-zero). Mirrors the C `_is_immediate_codepoint_string`
-// classification (the retired C runtime). A real
-// string pointer is `> 0x7f` with a non-zero low word, so it never
-// matches. Pointer math only — no syscall, no `errno` (which keeps this
-// module free of the glibc-only `__errno_location` that does not link
-// on the Windows cross-compile).
+// real string buffer? The immediate encoding is retired (#822): codegen
+// always emits a real `{ptr, len}` string, even for a single grapheme, so
+// the only surviving case a printer must still no-op is a NULL/near-null
+// pointer. The former `(raw & 0xFFFFFFFF) == 0` "codepoint in the upper 32
+// bits" clause was unsound — a real heap pointer can be 4 GiB-aligned
+// (low 32 bits zero), and under concurrent-compile load the arena page base
+// occasionally lands on such a boundary (ASLR/VM churn), so that clause
+// misclassified a valid string pointer and printed its high 32 bits as a
+// lone codepoint (the roaming `[info] \x04` runtime corruption). It is
+// removed. Pointer math only — no syscall, no `errno` (which keeps this
+// module free of the glibc-only `__errno_location` that does not link on
+// the Windows cross-compile).
 fn _sfn_is_immediate(data: *u8) -> bool {
     let raw: i64 = data as i64;
     if raw >= 0 && raw <= 127 { return true; }
-    if raw != 0 && (raw & 4294967295) == 0 { return true; }
     return false;
 }
 
