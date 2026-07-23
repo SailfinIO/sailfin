@@ -39,8 +39,7 @@ fn _argv_contains(argv: string[], needle: string) -> boolean ![pure] {
 // layout builder ignores it by design (the intentional asymmetry).
 fn _representative_plan() -> LinkPlan ![pure] {
     return LinkPlan {
-        objects: ["runtime.o"],
-        ir_inputs: ["main.ll"],
+        objects: ["runtime.o", "main.o"],
         out_path: "a.out",
         opt_flag: "-O0",
         link_flags: ["-fuse-ld=mold", "-ffunction-sections"],
@@ -71,6 +70,17 @@ test "backend: program-layout builder reproduces every plan.libs entry" ![pure] 
         assert expect_eq_bool(_argv_contains(argv, plan.libs[i]), true).ok;
         i += 1;
     }
+}
+
+test "backend: final link layouts consume objects only" ![pure] {
+    let plan = _representative_plan();
+    let no_sdk: string[] = [];
+    let test_argv = _llvm_text_link_test_argv(plan, no_sdk);
+    let program_argv = _llvm_text_link_program_argv(plan, no_sdk);
+    assert expect_eq_bool(_argv_contains(test_argv, "main.o"), true).ok;
+    assert expect_eq_bool(_argv_contains(program_argv, "main.o"), true).ok;
+    assert expect_eq_bool(_argv_contains(test_argv, "main.ll"), false).ok;
+    assert expect_eq_bool(_argv_contains(program_argv, "main.ll"), false).ok;
 }
 
 // Sanity: the membership helper is not trivially true — a lib that is

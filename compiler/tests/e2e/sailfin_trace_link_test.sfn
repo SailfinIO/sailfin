@@ -67,6 +67,7 @@ test "trace-link: SAILFIN_TRACE_LINK=1 echoes the resolved link argv" ![io] {
     // The greppable marker plus the `clang` invoker it prefixes.
     assert contains(err, "[trace-link]");
     assert contains(err, "clang");
+    assert ! contains(err, ".ll");
 }
 
 test "trace-link: unset leaves the link path silent" ![io] {
@@ -101,4 +102,5 @@ test "trace-link: SAILFIN_TRACE_LINK=1 echoes the test-layout link argv" ![io] {
     let err = process.capture_take_stderr();
     assert contains(err, "[trace-link]");
     assert contains(err, "clang");
+    assert ! contains(err, ".ll");
 }

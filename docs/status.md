@@ -282,6 +282,16 @@ here.
   are trace-gated too. On Darwin, the backend self-supplies the SDK and host
   deployment target so outdated Homebrew LLVM does not infer stale macOS
   versions during links. The trace path has no behavior change when unset.
+  **Object-only link boundary (SFN-453):** program, capsule-dependency, and test
+  LLVM inputs are content-addressed and assembled before `Backend.link`;
+  `LinkPlan` contains only object paths, so clang's assembler and linker-driver
+  roles no longer share one invocation. A read-only shared object cache falls
+  back to ephemeral objects beside the IR, never to raw `.ll` at final link.
+  **Independence status:** Stage 0 and this first Stage-1 isolation slice are
+  complete; direct linker ownership, typed metadata-carrying SSA IR, native
+  object/code emission, gated call sites, and native-backend self-hosting are
+  not shipped. #343's mold/lld selection still runs behind clang and is a
+  Stage-1 precursor, not an owned link path.
 - **Build-host OpenSSL dependency** (SFEP-0036, #1782/#1821). The native
   runtime links `-lssl -lcrypto` (TLS; `runtime/sfn/platform/tls.sfn`), so
   **every** Sailfin binary — including the compiler and each per-test binary

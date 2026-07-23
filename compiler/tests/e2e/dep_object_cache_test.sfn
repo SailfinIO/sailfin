@@ -1,14 +1,15 @@
 // compiler/tests/e2e/dep_object_cache_test.sfn
 //
-// End-to-end regression coverage for the dep-object cache (#2013).
+// End-to-end regression coverage for the object-only test link cache
+// (#2013, SFN-453).
 //
 // Verifies two contracts:
-//   A. When a nested `sfn test` run uses a shared SAILFIN_TEST_RUNTIME_OBJDIR,
-//      the dep-object cache populates `dep-obj/<sha256>-O0-<clang_id>.o`
-//      entries in that dir.
-//   B. When `dep-obj` is unwritable (chmod 555), the nested `sfn test` run
-//      still exits 0 — every dep degrades to a raw `.ll` IR input, and the
-//      suite passes (fallback contract, #2013).
+//   A. When a nested `sfn test` run uses a shared
+//      SAILFIN_TEST_RUNTIME_OBJDIR, the link-object cache contains `.o`
+//      entries for the test source and dependency LLVM modules.
+//   B. When `link-obj` is unwritable (chmod 555), the nested `sfn test` run
+//      still exits 0 by assembling ephemeral objects beside the `.ll` inputs;
+//      raw IR never crosses the final-link boundary.
 //
 // Follows the `guillermo_test.sfn` shape: `_sfn_bin()` honours `SAILFIN_BIN`,
 // `_child_env()` threads PATH/HOME/TMPDIR/SAILFIN_TEST_SCRATCH and the
@@ -56,39 +57,37 @@ test "test link: dep objects cached content-addressed in the shared objdir" ![io
     let d = fs.mkdtemp(base + "/sfn-dep-obj-cache-a-");
     let env_args = _child_env(d, d);
     // `--no-test-cache` bypasses the test-binary artifact cache so the
-    // cold compile+link path always runs and populates `dep-obj/`; without
+    // cold compile+link path always runs and populates `link-obj/`; without
     // it a warm test-bin cache hit skips `_clang_link_test_cmd_with_deps`
-    // entirely and the dep-obj dir is never created.
+    // entirely and the link-obj dir is never created.
     let exit = process.run_capture([_sfn_bin(), "test", "--no-test-cache", "compiler/tests/unit/string_utils_test.sfn"], env_args);
     let _out = process.capture_take_stdout();
     let _err = process.capture_take_stderr();
     assert exit == 0;
-    // Verify dep-obj dir was created and contains at least one cached object
-    // with the expected naming pattern: <64-hex>-O0-<12-hex>.o
+    // Verify link-obj was created and contains at least one cached object.
     let ls_exit = process.run_capture(["sh", "-c", "ls '" + d
-        + "/dep-obj' 2>/dev/null"], []);
+        + "/link-obj' 2>/dev/null"], []);
     let ls_out = process.capture_take_stdout();
     let _ls_err = process.capture_take_stderr();
     assert ls_exit == 0;
-    // Confirm at least one entry carries the `-O0-` infix (content + clang-id key, #2013)
-    assert find(ls_out, "-O0-", 0) >= 0;
+    assert find(ls_out, ".o", 0) >= 0;
 }
 
-test "test link: unwritable dep-obj dir falls back to raw IR inputs" ![io] {
+test "test link: unwritable link-obj dir uses ephemeral objects" ![io] {
     let base = _scratch_base();
     let d2 = fs.mkdtemp(base + "/sfn-dep-obj-cache-b-");
-    // Pre-create dep-obj and make it unwritable so every cache write fails.
-    let dep_obj_dir = d2 + "/dep-obj";
-    fs.createDirectory(dep_obj_dir, true);
-    let chmod_rc = process.run(["chmod", "555", dep_obj_dir]);
+    // Pre-create link-obj and make it unwritable so cache publication fails.
+    let link_obj_dir = d2 + "/link-obj";
+    fs.createDirectory(link_obj_dir, true);
+    let chmod_rc = process.run(["chmod", "555", link_obj_dir]);
     assert chmod_rc == 0;
     let env_args = _child_env(d2, d2);
     let exit = process.run_capture([_sfn_bin(), "test", "--no-test-cache", "compiler/tests/unit/string_utils_test.sfn"], env_args);
     let _out = process.capture_take_stdout();
     let _err = process.capture_take_stderr();
     // Restore before any early-return so tmp cleanup works.
-    let _chmod_back = process.run(["chmod", "755", dep_obj_dir]);
-    // The suite must pass even when the dep-obj cache is unavailable —
-    // every dep falls back to a raw `.ll` IR input (#2013 fallback contract).
+    let _chmod_back = process.run(["chmod", "755", link_obj_dir]);
+    // The suite must pass even when the shared object cache is unavailable;
+    // the final link still receives objects only.
     assert exit == 0;
 }

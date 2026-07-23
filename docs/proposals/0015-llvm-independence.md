@@ -4,7 +4,7 @@ title: "Toolchain Independence — Sailfin-Native Backend"
 status: Accepted
 type: runtime
 created: 2026-06-05
-updated: 2026-06-26
+updated: 2026-07-23
 author: "agent:compiler-architect"
 tracking: "#1640, #1641"
 supersedes:
@@ -14,14 +14,16 @@ graduates-to: reference/runtime-abi.md
 
 # Proposal: Toolchain Independence — A Sailfin-Native Backend
 
-**Date:** 2026-06-05 (status updated 2026-06-26)
+**Date:** 2026-06-05 (status updated 2026-07-23)
 **Author:** Compiler architect (design)
 **Status:** **Split status.** The *seal-sufficient* backend (Axis 2 — correct +
 metadata-carrying + syscall-gating) is now on the **1.0 critical path** as a
 prerequisite of the capability seal (epic #1640, child of #1639); the owned
 syscall layer (Axis 3) likewise (epic #1641). The *perf-parity* backend (matching
-LLVM's optimizer) remains a **post-1.0 long tail** — see §5. Nothing here is built
-yet.
+LLVM's optimizer) remains a **post-1.0 long tail** — see §5. Stage 0 is shipped:
+the compiler has a `Backend` seam, but `LlvmTextBackend` remains its sole
+implementation. The seal-sufficient implementation work is prioritized in the
+Linear project **Seal-Sufficient Native Backend**.
 **Companion docs:** `docs/proposals/0016-capability-sealed-runtime.md` (the *why* —
 what this independence is ultimately for), `docs/proposals/0006-build-architecture.md` (perf
 analysis + Track registry, #339), `docs/proposals/0025-native-runtime-architecture.md`
@@ -33,10 +35,11 @@ analysis + Track registry, #339), `docs/proposals/0025-native-runtime-architectu
 > turn it into a binary. This proposal explores what it would take to own the
 > last mile — codegen, assembly, and linking — so the toolchain is no longer
 > dependent on LLVM/clang, the way Go owns its backend. It is a **long-term
-> health and performance** bet, deliberately separate from the in-flight
-> runtime rewrite (which eliminates C *source* but keeps LLVM and libc). It is
-> filed as a vision, not a plan: the actionable kernel (Stage 0) is small. The
-> rest is *not* the single decade-scale arc the pre-LLM tooling literature
+> health and performance** bet, deliberately separate from the completed
+> C-source runtime rewrite (which kept LLVM and libc). The accepted design is
+> now an active planning direction: Stage 0 has shipped, while the remaining
+> seal-sufficient work is tracked as a Linear Project. The rest is *not* the
+> single decade-scale arc the pre-LLM tooling literature
 > assumed — see §5, which splits a **seal-sufficient backend** (correct +
 > metadata-carrying + syscall-gating, plausibly compressible to quarters with
 > agent-assisted work and a differential-testing oracle) from a **perf-parity
@@ -47,14 +50,12 @@ analysis + Track registry, #339), `docs/proposals/0025-native-runtime-architectu
 
 ## 1. TL;DR
 
-- The LLVM/clang dependency is **centralized in `compiler/src/cli_main.sfn`**
-  but spread across several `process.run(["clang", …])` call sites (runtime
-  `c-sources` compilation, per-module `.ll` → `.o`, the final link, plus the
-  `sfn test` link path in `compiler/src/cli_commands.sfn`). Across those sites
-  clang wears four hats — compile the C runtime, assemble `.ll` → `.o`, link the
-  final binary, and (implicitly) pull in libc. The surface is small and
-  co-located, not a single call.
-- What Sailfin *owns* today is an LLVM-IR **printer** (the ~48k-line
+- The LLVM/clang process boundary is centralized behind
+  `compiler/src/backend.sfn`: `LlvmTextBackend` assembles textual `.ll` with
+  `clang -c` and invokes `clang` as the final linker driver for both programs
+  and tests. Stage 0 removed direct driver coupling, but it did not remove a
+  toolchain dependency.
+- What Sailfin *owns* today is an LLVM-IR **printer** (the ~61k-line
   `compiler/src/llvm/` subtree), not a code generator. Instruction selection,
   register allocation, and optimization are all LLVM's. The hard 80% of a
   backend is the part we have never written.
@@ -112,11 +113,11 @@ Two clarifications that matter for alignment:
 | Layer | What it is today | Surface |
 |---|---|---|
 | **`.sfn-asm` native IR** | Structured *high-level* IR — `If/Else/For/Match/Try`, expressions stored as **opaque strings**. No SSA, no basic blocks, no registers. Closer to a serialized mid-level AST than a compiler IR. | `compiler/src/native_ir.sfn` (~310 lines) |
-| **LLVM lowering** | The real backend: ~85 files translating `.sfn-asm` → genuine **SSA LLVM IR text** (`phi`, `alloca`/`load`/`store`). LLVM types (`i8*`, `i64`, `{i8*, i64}`) and instructions are hardcoded **string templates** throughout. | `compiler/src/llvm/` (~48k lines) |
-| **clang** | Four hats: compile C runtime, assemble `.ll`→`.o` (`clang -c`), link final binary (`clang … -o`, as linker driver), pull in libc. | `process.run(["clang", …])` in `cli_main.sfn` (`_clang_link_multi_with_opt`, ~L1217) |
-| **C runtime** | `sailfin_runtime.c` (~9k) + `sailfin_arena.c` (358). All OS access via libc/POSIX — **zero raw syscalls**. | `runtime/native/src/` (migrating, Axis 1) |
-| **IR validation** | `llvm-as` / `clang -c -emit-llvm` cascade as a `.ll` sanity check. | `emit_helpers.sfn` ~L146, `capsule_resolver.sfn` ~L697 |
-| **Target awareness** | Essentially nil. **No `target triple` emitted** (inherited from the seed's IR provenance, warning suppressed by `-Wno-override-module`). LP64 hardcoded in `emit_native_layout.sfn`. Only 3 OS-specific intrinsics (errno symbol, monotonic-clock id, exe-path). | `lowering_debug_state.sfn` ~L177 |
+| **LLVM lowering** | The real backend: 99 files translating `.sfn-asm` → genuine **SSA LLVM IR text** (`phi`, `alloca`/`load`/`store`). LLVM types (`i8*`, `i64`, `{i8*, i64}`) and instructions are hardcoded **string templates** throughout. | `compiler/src/llvm/` (~61k lines) |
+| **clang** | Two remaining hats: assemble `.ll`→`.o` (`clang -c`) and drive the final link (`clang … -o`), implicitly selecting platform startup objects and libraries. | `compiler/src/backend.sfn`, `compiler/src/build/clang_argv.sfn` |
+| **Runtime** | Runtime implementation is Sailfin-native; the former C runtime is deleted. Platform access still crosses `extern fn` into libc/POSIX, so Axis 1 is complete while Axis 3 remains open. | `runtime/prelude.sfn`, `runtime/sfn/` |
+| **IR validation** | `llvm-as` / `clang -c -emit-llvm` cascade as a `.ll` sanity check. | `compiler/src/emit_helpers.sfn` |
+| **Target awareness** | Build-target conditioning now threads target OS/triple and linker flags through the backend, including the MSVC Windows path. The LLVM-text lowering remains strongly coupled to LLVM data-layout and ABI spellings. | `compiler/src/build/target.sfn`, `compiler/src/backend.sfn`, `compiler/src/llvm/` |
 
 **The architecturally significant finding:** there is no clean seam to slot a
 native backend into. `.sfn-asm` is too high-level (opaque string expressions),
@@ -226,12 +227,9 @@ it doesn't re-hardcode LLVM assumptions across the driver.**
 | **#513 — Makefile slim-down** (Track 3) | Orthogonal but a useful precursor — it centralizes toolchain invocation into `sfn` subcommands, which is exactly the surface a native backend must own (esp. Phase 2, `sfn build --target=`). |
 | **#347 — LLVM C-API binding** (Track 6) | Direct tension; reconciled in §6 via the `Backend` interface. |
 
-**Track placement:** Tracks 1–7 are claimed under the #339 stocktake (1 memory,
-2 determinism, 3 linker/build-driver, 4 runtime rewrite, 5 long-lived process,
-6 LLVM C-API binding, 7 compiler decomposition). This proposal is a **new
-long-horizon track** (provisionally **Track 8 — Native Backend**), to be slotted
-into #339. It is explicitly *post-1.0* and must not compete with the 1.0
-critical path.
+**Track placement:** This is **Track 8 — Native Backend**. The seal-sufficient
+slice is a 1.0 critical-path Project under the **Capability-Sealed Runtime**
+Initiative; only optimizer/performance parity remains post-1.0.
 
 ---
 
@@ -239,14 +237,18 @@ critical path.
 
 Each stage is independently valuable and shippable. None requires a flag day.
 
-- **Stage 0 — Decouple (small, do-now-able).** Hide `process.run(["clang", …])`
+- **Stage 0 — Decouple — shipped (#1112 / PR #1687).** Hide `process.run(["clang", …])`
   behind a `Backend` interface with `LlvmTextBackend` as the sole impl. Zero
-  behavior change, but the driver stops hard-coding clang. *This is the
-  actionable kernel and the natural first issue on the
-  `sailfin-llvm-independence` branch.* Also unblocks #347 landing cleanly.
+  behavior change, but the driver stops hard-coding clang. This seam is live in
+  `compiler/src/backend.sfn` and unblocks later backends from re-coupling the
+  driver.
 - **Stage 1 — Own the link.** Replace clang-as-linker with a direct `ld`/`lld`/
-  `mold` invocation (subsumes #343). Combined with Axis 1 finishing, removes the
-  "needs a C compiler on the box" requirement. clang loses two of its four hats.
+  `mold` invocation. #343/PR #1128 shipped linker auto-selection *behind clang*
+  and is only a precursor; clang still supplies startup objects, platform
+  libraries, and argument translation. SFN-453 isolates the two remaining
+  clang roles by preassembling every textual-LLVM input and making
+  `Backend.link` object-only. A direct Linux x86-64 link is the next production
+  slice.
 - **Stage 1.5 — Introduce a real mid-level SSA IR.** Typed values, basic blocks,
   virtual registers, between `native_ir` and codegen. **The foundational
   prerequisite that pays off regardless** — it also de-strings the LLVM path and
@@ -309,8 +311,17 @@ Each stage is independently valuable and shippable. None requires a flag day.
 
 ## 11. Recommended next step
 
-Nothing here is scheduled. If/when this graduates from vision to work, the first
-concrete, low-risk, independently-valuable issue is **Stage 0**: introduce the
-`Backend` interface with the current clang path as its sole impl. It is a
-mechanical refactor, it changes no behavior, and it makes both #347 and every
-later stage land cleanly instead of re-hardcoding LLVM across the driver.
+Run two ordered workstreams under the **Seal-Sufficient Native Backend** Linear
+Project:
+
+1. **Remove clang as the Linux x86-64 linker driver.** First pin the exact
+   object/startup/library contract, then invoke the selected linker directly
+   behind the existing `Backend` seam. Keep macOS and Windows on the current
+   path until their contracts have dedicated leaves.
+2. **Build the typed SSA foundation.** Land a small, verified IR core with
+   capability/effect metadata before porting source constructs or attempting
+   machine code. Follow with differential lowering slices against
+   `LlvmTextBackend`.
+
+Do not prioritize the LLVM C-API backend ahead of these slices: it improves
+compile latency but deepens the dependency this Project exists to remove.

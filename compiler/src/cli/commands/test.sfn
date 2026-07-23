@@ -48,20 +48,17 @@ import {
 import { AssertFailure, _empty_assert_failure, _parse_assert_failure_record } from "../../assert_failure";
 import { Program, Statement } from "../../ast";
 import { LinkPlan, LlvmTextBackend } from "../../backend";
-import { llvm_assemble } from "../../build/clang_argv";
+import { assemble_link_inputs } from "../../build/clang_argv";
 import {
-    _atomic_rename_into_place,
     _dirname_cmd,
     _ends_with_cmd,
     _ensure_dir_cmd,
-    _mktemp_sibling_cmd,
     _path_join_cmd,
     _sanitize_filename_cmd,
     _shell_read_cmd,
     _strip_trailing_slashes_cmd,
     _write_text_cmd
 } from "../../build/fs";
-import { sha256_hex_of_string } from "../../build/hash";
 import {
     assemble_runtime_capsule_link_inputs,
     runtime_stamp_identity,
@@ -74,7 +71,6 @@ import {
     cache_store_artifact,
     canonicalize_flags,
     runtime_link_inputs_identity,
-    sha256_of_file,
     test_bin_cache_key,
     test_bin_cache_root
 } from "../../build_cache";
@@ -1588,37 +1584,6 @@ fn run(matches: Matches, ctx: CliContext) -> int ![clock, io, net] {
     return overall_rc;
 }
 
-// Content-addressed dep-object cache for the test link (#2013). A test
-// child's dependency `.ll` files are byte-identical across the pool's
-// children (same compiler, same sources), yet each child's clang link
-// re-codegens all of them — ~8.3 s per heavy-closure child (#2010).
-// Assemble each dep module to a `.o` once, keyed by the `.ll` content
-// hash plus a 12-hex prefix of the assembling clang's version string
-// (mirrors the toolchain-identity fold in `runtime_objs.sfn`, #1197/#632,
-// so a clang upgrade on the persistent leaf path (`build/sailfin/dep-obj`)
-// invalidates cached objects rather than relinking stale code), and hand
-// clang the object instead. The cache dir lives in the parent's
-// invocation-scoped warm objdir, so the existing scratch cleanup removes
-// it. Racing children produce byte-identical objects;
-// `_atomic_rename_into_place` makes last-writer-wins safe. Returns "" on
-// any hash/assemble failure so the caller falls back to the raw `.ll` IR
-// input (behaviour byte-identical to the pre-cache path).
-fn _dep_object_for_ll(ll_path: string, dep_obj_dir: string, clang_id: string) -> string ![io] {
-    let hash = sha256_of_file(ll_path);
-    if hash.length == 0 { return ""; }
-    let obj_path = dep_obj_dir + "/" + hash + "-O0-" + clang_id + ".o";
-    if fs.exists(obj_path) { return obj_path; }
-    let tmp = _mktemp_sibling_cmd(obj_path);
-    if tmp.length == 0 { return ""; }
-    let no_includes: string[] = [];
-    if llvm_assemble(ll_path, tmp, "-O0", no_includes) != 0 {
-        process.run(["rm", "-f", tmp]);
-        return "";
-    }
-    if !_atomic_rename_into_place(tmp, obj_path) { return ""; }
-    return obj_path;
-}
-
 // Resolver-driven test linker. Takes a list of dependency `.ll` paths
 // produced by `prepare_project_capsules_for_test` and adds them to
 // the link line alongside the runtime sources + globals + prelude.
@@ -1665,10 +1630,8 @@ fn _clang_link_test_cmd_with_deps(ll_path: string, out_path: string, runtime_roo
     // the lone source of `[-Woverride-module]` noise.
     //
     // Link order (head → tail):
-    //   1. Test source `.ll` (strong, IR input)
-    //   2. Resolver-produced dep modules: cached `.o` objects (assembled
-    //      once per invocation via `_dep_object_for_ll`, #2013), falling
-    //      back to `.ll` IR inputs on cache failure
+    //   1. Test source object (strong)
+    //   2. Resolver-produced dep module objects (strong)
     //   3. Runtime sources + globals + prelude (strong, objects)
     //
     // Issue #940: resolve the implicit runtime capsule
@@ -1691,26 +1654,15 @@ fn _clang_link_test_cmd_with_deps(ll_path: string, out_path: string, runtime_roo
     let mut rt_cache_dir = cache_dir;
     let shared_objdir = _get_env_cmd("SAILFIN_TEST_RUNTIME_OBJDIR");
     if shared_objdir.length > 0 { rt_cache_dir = shared_objdir; }
-    let dep_obj_dir = rt_cache_dir + "/dep-obj";
-    _ensure_dir_cmd(dep_obj_dir);
-    // #2013: fold the assembling clang's identity into the dep-object
-    // name so the persistent leaf-path cache (`build/sailfin/dep-obj`)
-    // cannot relink a stale object after a toolchain upgrade — the same
-    // stale-object class the runtime objects' identity fold closes
-    // (#1197). First `clang --version` line is stable per install and
-    // one popen per link is noise next to the assembly it deduplicates.
-    let clang_line = _shell_read_cmd("clang --version 2>/dev/null | head -n 1");
-    let clang_id = substring(sha256_hex_of_string(clang_line), 0, 12);
-    let mut ir_inputs: string[] = [ll_path];
-    let mut dep_objects: string[] = [];
-    let mut di: int = 0;
-    loop {
-        if di >= dep_ll_paths.length { break; }
-        let dep_obj = _dep_object_for_ll(dep_ll_paths[di], dep_obj_dir, clang_id);
-        if dep_obj.length > 0 { dep_objects.push(dep_obj); } else {
-            ir_inputs.push(dep_ll_paths[di]);
-        }
-        di += 1;
+    let link_obj_dir = rt_cache_dir + "/link-obj";
+    let test_inputs: string[] = [ll_path];
+    let test_objects = assemble_link_inputs(test_inputs, link_obj_dir, "-O0");
+    if !test_objects.success {
+        return TestLinkResult { rc: 1, ran_backend: true };
+    }
+    let dep_objects = assemble_link_inputs(dep_ll_paths, link_obj_dir, "-O0");
+    if !dep_objects.success {
+        return TestLinkResult { rc: 1, ran_backend: true };
     }
     let runtime_caps = runtime_capsule_from_root(runtime_root);
     if runtime_caps.length == 0 {
@@ -1766,6 +1718,12 @@ fn _clang_link_test_cmd_with_deps(ll_path: string, out_path: string, runtime_roo
     let backend = LlvmTextBackend { };
     let no_link_flags: string[] = [];
     let mut link_objects: string[] = [];
+    let mut toi: int = 0;
+    loop {
+        if toi >= test_objects.object_paths.length { break; }
+        link_objects.push(test_objects.object_paths[toi]);
+        toi += 1;
+    }
     let mut oi: int = 0;
     loop {
         if oi >= rt.object_paths.length { break; }
@@ -1774,13 +1732,12 @@ fn _clang_link_test_cmd_with_deps(ll_path: string, out_path: string, runtime_roo
     }
     let mut doi: int = 0;
     loop {
-        if doi >= dep_objects.length { break; }
-        link_objects.push(dep_objects[doi]);
+        if doi >= dep_objects.object_paths.length { break; }
+        link_objects.push(dep_objects.object_paths[doi]);
         doi += 1;
     }
     let plan = LinkPlan {
         objects: link_objects,
-        ir_inputs: ir_inputs,
         out_path: out_path,
         opt_flag: "-O0",
         link_flags: no_link_flags,
