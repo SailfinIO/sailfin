@@ -1,6 +1,12 @@
 // examples/advanced/decorators.sfn
-import { logExecution } from "runtime/prelude";
-
+//
+// `@logExecution` logs the decorated function's name at entry. It is a
+// built-in bridge (SFEP-0023 §4.5): importing it from the `log` capsule
+// (`import { logExecution } from "log";`) is the supported path and lowers
+// to a normal call into that capsule; the un-imported built-in used here
+// still works via the runtime fallback and `sfn check` nudges toward the
+// import. A capsule import needs a manifest, so this single-file example
+// keeps the built-in form.
 @logExecution fn compute(x: int) -> int ![io] { return x * x; }
 
 fn main() ![io] {

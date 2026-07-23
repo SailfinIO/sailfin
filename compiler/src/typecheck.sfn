@@ -221,6 +221,55 @@ fn typecheck_diagnostics_full(program: Program, imported_interfaces: Statement[]
     return diagnostics_with_scopes;
 }
 
+// A built-in decorator name that still lowers via the runtime-helper
+// fallback when it is not imported from `log` (SFEP-0023 §4.5). Matches the
+// canonical spellings the lowering fallback recognizes (`@logExecution`/
+// `@trace`). The fallback additionally accepts other casings via
+// `matches_case_insensitive`, but those are not real decorator names, so the
+// lint deliberately does not warn on them.
+fn _is_builtin_decorator_name(name: string) -> boolean {
+    if name == "logExecution" { return true; }
+    if name == "logexecution" { return true; }
+    if name == "trace" { return true; }
+    return false;
+}
+
+// SFEP-0023 §4.5: the names of built-in decorators (`@logExecution`/
+// `@trace`) applied to a top-level function without importing them from
+// `log`. The `sfn check` path (tools/check.sfn) renders one W0211
+// `deprecated-api` warning per name. Deliberately NOT folded into
+// `typecheck_diagnostics_full`: that function's result is length-counted as
+// the error total by the native-emit gate (`typecheck_error_count_with_-
+// prelude`), which has no import table and would both mis-count a warning
+// as an error and false-positive on a genuinely imported decorator. Here the
+// resolved import table lets the lint fire only on the truly un-imported
+// use, matching the lowering fallback's discriminator.
+fn collect_decorator_deprecation_findings(program: Program, imported_function_effects: ImportSymbolTable) -> string[] {
+    let local_imports = localize_import_symbols_for_program(program, imported_function_effects);
+    let mut findings: string[] = [];
+    let mut index: int = 0;
+    loop {
+        if index >= program.statements.length { break; }
+        let statement = program.statements[index];
+        if statement.variant == "FunctionDeclaration" {
+            let decorators = statement.decorators;
+            let mut di: int = 0;
+            loop {
+                if di >= decorators.length { break; }
+                let name = decorators[di].name;
+                if _is_builtin_decorator_name(name) {
+                    if lookup_imported_function(local_imports, name) == null {
+                        findings.push(name);
+                    }
+                }
+                di += 1;
+            }
+        }
+        index += 1;
+    }
+    return findings;
+}
+
 // Every top-level struct declaration, for resolving a concrete type
 // argument to its declaration when checking generic bound satisfaction
 // (SFEP-0038 §3.2b, #1870). Mirrors `collect_interface_definitions`.

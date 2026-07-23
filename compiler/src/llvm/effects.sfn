@@ -445,20 +445,20 @@ fn extract_all_call_targets(expression: string) -> string[] {
 // =============================================================================
 // Runtime Helper Target Collection
 // =============================================================================
-fn collect_runtime_helper_targets(functions: NativeFunction[]) -> string[] {
+fn collect_runtime_helper_targets(functions: NativeFunction[], imported_decorator_names: string[]) -> string[] {
     if functions.length > 100000 { return []; }
     let mut used: string[] = [];
     let mut index: int = 0;
     loop {
         if index >= functions.length { break; }
-        let helpers = collect_function_runtime_helper_targets(functions[index]);
+        let helpers = collect_function_runtime_helper_targets(functions[index], imported_decorator_names);
         used = merge_effect_lists(used, helpers);
         index += 1;
     }
     return used;
 }
 
-fn collect_function_runtime_helper_targets(function: NativeFunction) -> string[] {
+fn collect_function_runtime_helper_targets(function: NativeFunction, imported_decorator_names: string[]) -> string[] {
     let mut used: string[] = [];
 
     // Decorator-driven runtime hooks.
@@ -469,6 +469,10 @@ fn collect_function_runtime_helper_targets(function: NativeFunction) -> string[]
     loop {
         if decorator_index >= decorators.length { break; }
         let decorator_name = decorators[decorator_index];
+        if string_array_contains(imported_decorator_names, decorator_name) {
+            decorator_index += 1;
+            continue;
+        }
         let mut _if47: boolean = false;
         if matches_case_insensitive(decorator_name, "logExecution") {
             _if47 = true;
