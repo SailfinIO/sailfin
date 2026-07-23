@@ -1,0 +1,376 @@
+// SFN-445 — a deterministic, NON-SCORED developer-experience gate. It holds a
+// public corpus of minimal, independently authored "transfer" patterns (the
+// shapes a developer arriving from another language naively writes) across the
+// five surfaces the SFN-437 v2.8 batch found weakest: control flow, conditional
+// values, character/string comparison, canonical symbol discovery, and
+// spawn-many/join-in-order. For each surface the corpus pairs an intentionally
+// unsupported source — which must be rejected at `check` with a STABLE E-code
+// (and a span where the diagnostic carries one) — with a canonical corrected
+// source that must check, build, and run in agreement.
+//
+// This is a compiler/tooling expectations gate, NOT a model benchmark: it holds
+// no model scores, executes no provider, and is deliberately independent of the
+// SFN-439 hidden/scored corpus under `benchmarks/llm/`. Fixtures live inline (no
+// broken `.sfn` committed to the tree, mirroring `assert_does_not_compile`) and
+// the summary excludes wall-clock so two runs compare byte-for-byte.
+//
+// Adding a new transfer pattern: append one `TransferCase` to `_corpus()` with
+// (1) an unsupported source, (2) the observed stable code from
+// `sfn check --json <src>`, (3) that code's span fragment (or "" when the
+// diagnostic has a null `primary`), and (4) a canonical corrected source that
+// check/build/runs. Do NOT consult the hidden benchmark fixtures — author the
+// pattern from first principles. See `compiler/tests/README.md`.
+//
+// no-bash-e2e (`.claude/rules/no-bash-e2e.md`): each source is written to a
+// scratch dir and driven through real `sfn check` / `sfn build` subprocesses;
+// the `![io]` tests assert on captured stdout+stderr with `sfn/strings`.
+import { contains, find } from "sfn/strings";
+
+fn _sfn_bin() -> string ![io] {
+    let configured = env.get("SAILFIN_BIN");
+    if configured.length > 0 { return configured; }
+    return "build/bin/sfn";
+}
+
+// `process.run_capture`'s empty array is the *empty* environment; thread the
+// variables a nested `sfn build` (clang + linker via PATH) needs, and route its
+// build cache under SAILFIN_TEST_SCRATCH so a parallel pool run does not collide
+// on the fixed build/sailfin (#1333).
+fn _child_env() -> string[] ![io] {
+    let mut e: string[] = [];
+    let path = env.get("PATH");
+    if path.length > 0 { e.push("PATH=" + path); }
+    let home = env.get("HOME");
+    if home.length > 0 { e.push("HOME=" + home); }
+    let tmpdir = env.get("TMPDIR");
+    if tmpdir.length > 0 { e.push("TMPDIR=" + tmpdir); }
+    let scratch = env.get("SAILFIN_TEST_SCRATCH");
+    if scratch.length > 0 { e.push("SAILFIN_TEST_SCRATCH=" + scratch); }
+    return e;
+}
+
+fn _scratch_dir() -> string ![io] {
+    let mut base = env.get("SAILFIN_TEST_SCRATCH");
+    if base.length == 0 { base = "/tmp"; }
+    fs.createDirectory(base, true);
+    return fs.mkdtemp(base + "/sfn-dx-gate-");
+}
+
+fn _write_fixture(tag: string, src: string) -> string ![io] {
+    let dir = _scratch_dir();
+    let path = dir + "/" + tag + ".sfn";
+    fs.writeFile(path, src);
+    return path;
+}
+
+// One transfer pattern: an unsupported naive form and its canonical rewrite.
+// `expected_code` is the stable diagnostic the unsupported form must produce at
+// `check`. `expected_span` is the raw JSON span fragment the diagnostic carries
+// (empty when the code has a null `primary`); `span_label` is its human token
+// for the summary.
+struct TransferCase {
+    surface: string;
+    unsupported: string;
+    expected_code: string;
+    expected_span: string;
+    span_label: string;
+    corrected: string;
+}
+
+// Outcome of driving a corrected source through check -> build -> run. A
+// divergence names the first stage that disagreed with its predecessor, so a
+// check/build split reads differently from a build/run split.
+struct Pipeline {
+    check_ok: boolean;
+    build_ok: boolean;
+    run_ok: boolean;
+    divergence: string;
+    detail: string;
+}
+
+fn _corpus() -> TransferCase[] {
+    let mut cases: TransferCase[] = [];
+
+    // (a) Control flow: a C-style three-clause `for (init; cond; incr)` is not a
+    // Sailfin statement; the canonical count loop is `while`.
+    cases.push(TransferCase {
+        surface: "control-flow", unsupported: "fn sum(n: int) -> int {\n"
+            + "    let mut total: int = 0;\n"
+            + "    for (let mut i = 0; i < n; i = i + 1) {\n"
+            + "        total = total + i;\n"
+            + "    }\n"
+            + "    return total;\n"
+            + "}\n", expected_code: "E0819", expected_span: "\"line\":3,\"column\":5", span_label: "line3col5", corrected: "fn sum(n: int) -> int {\n"
+            + "    let mut total: int = 0;\n"
+            + "    let mut i: int = 0;\n"
+            + "    while i < n {\n"
+            + "        total = total + i;\n"
+            + "        i = i + 1;\n"
+            + "    }\n"
+            + "    return total;\n"
+            + "}\n"
+            + "fn main() ![io] {\n"
+            + "    print.info(\"sum=\" + number_to_string(sum(4)));\n"
+            + "}\n"
+    });
+
+    // (b) Conditional values: a value-position block `if` is a statement, not an
+    // expression; the canonical value form is the `? :` conditional.
+    cases.push(TransferCase {
+        surface: "conditional-value", unsupported: "fn pick(condition: boolean, a: int, b: int) -> int {\n"
+            + "    let n = if condition { a } else { b };\n"
+            + "    return n;\n"
+            + "}\n", expected_code: "E0834", expected_span: "\"line\":2,\"column\":13", span_label: "line2col13", corrected: "fn pick(condition: boolean, a: int, b: int) -> int {\n"
+            + "    return condition ? a : b;\n"
+            + "}\n"
+            + "fn main() ![io] {\n"
+            + "    print.info(\"pick=\" + number_to_string(pick(true, 10, 20)));\n"
+            + "}\n"
+    });
+
+    // (c) Character/string comparison: Sailfin has no character literal; string
+    // indexing yields an integer byte, so compare against the byte value.
+    cases.push(TransferCase {
+        surface: "string-byte-compare", unsupported: "fn is_pipe(text: string, i: int) -> boolean {\n"
+            + "    return text[i] == '|';\n"
+            + "}\n", expected_code: "E0835", expected_span: "\"line\":2,\"column\":23", span_label: "line2col23", corrected: "fn is_pipe(text: string, i: int) -> boolean {\n"
+            + "    return text[i] == 124;\n"
+            + "}\n"
+            + "fn main() ![io] {\n"
+            + "    print.info(is_pipe(\"a|b\", 1) ? \"hit\" : \"miss\");\n"
+            + "}\n"
+    });
+
+    // (d) Canonical symbol discovery: guessing a local relative module path for a
+    // standard symbol fails to resolve; the canonical form imports the capsule.
+    // E0430 carries a null primary, so no span is asserted.
+    cases.push(TransferCase {
+        surface: "symbol-discovery", unsupported: "import { find } from \"./strings\";\n"
+            + "fn use_find() -> int {\n"
+            + "    return find(\"abc\", \"b\", 0);\n"
+            + "}\n", expected_code: "E0430", expected_span: "", span_label: "none", corrected: "import { find } from \"sfn/strings\";\n"
+            + "fn main() ![io] {\n"
+            + "    print.info(\"idx=\" + number_to_string(find(\"abc\", \"b\", 0)));\n"
+            + "}\n"
+    });
+
+    // (e) Spawn-many / join-in-order: pushing a `spawn` handle into an
+    // inferred-empty `[]` has no element type to bind the future; the canonical
+    // form annotates `Task<int>[]` and awaits in input order with `join_all`
+    // (SFEP-0055 / SFN-441). E0831 carries a null primary, so no span is asserted.
+    cases.push(TransferCase {
+        surface: "spawn-join-order", unsupported: "fn spawn_many(ids: int[]) -> int ![io] {\n"
+            + "    let mut handles = [];\n"
+            + "    for id in ids {\n"
+            + "        handles.push(spawn fn() -> int { return id; });\n"
+            + "    }\n"
+            + "    return handles.length;\n"
+            + "}\n", expected_code: "E0831", expected_span: "", span_label: "none", corrected: "fn double_all(ids: int[]) -> int[] ![io] {\n"
+            + "    let mut hs: Task<int>[] = [];\n"
+            + "    let mut i: int = 0;\n"
+            + "    loop {\n"
+            + "        if i >= ids.length { break; }\n"
+            + "        let v: int = ids[i];\n"
+            + "        hs.push(spawn fn() -> int { return v * 2; });\n"
+            + "        i = i + 1;\n"
+            + "    }\n"
+            + "    return join_all(hs);\n"
+            + "}\n"
+            + "fn main() ![io] {\n"
+            + "    let out = double_all([1, 2, 3]);\n"
+            + "    print.info(\"n=\" + number_to_string(out.length));\n"
+            + "}\n"
+    });
+
+    return cases;
+}
+
+// A `sfn check` result: the process exit status plus combined stdout+stderr.
+// Keeping the exit is load-bearing — a crash that emits a diagnostic and then
+// aborts (signal/abort exit != 1) would slip past a text-only ICE guard, so the
+// unsupported leg asserts the normal coded-rejection exit of 1.
+struct CheckResult {
+    exit: int;
+    output: string;
+}
+
+// Run `sfn check --json` on `src`. Errors and the schema envelope land in
+// `output`; a crash surfaces either as an ICE banner or as a non-1 exit.
+fn _check_json(tag: string, src: string) -> CheckResult ![io] {
+    let path = _write_fixture(tag, src);
+    let exit = process.run_capture([_sfn_bin(), "check", "--json", path], _child_env());
+    let out = process.capture_take_stdout();
+    let err = process.capture_take_stderr();
+    return CheckResult { exit: exit, output: out + err };
+}
+
+// Extract the first `"code":"…"` value from a check-json envelope; "NONE" when
+// the output carries no coded diagnostic (e.g. an ICE or uncoded fatal).
+fn _first_code(json: string) -> string {
+    let key = "\"code\":\"";
+    let at = find(json, key, 0);
+    if at < 0 { return "NONE"; }
+    let start = at + key.length;
+    let end = find(json, "\"", start);
+    if end < 0 { return "NONE"; }
+    return substring(json, start, end);
+}
+
+// Assert `span` appears inside the SAME event as `code` — i.e. between that
+// code's marker and the next `"code":"` (or end of envelope). A whole-envelope
+// substring match would let a second diagnostic's position (the E0819 case also
+// emits E0818, both near line 3) mask a regression in the primary span.
+fn _span_in_event(json: string, code: string, span: string) -> boolean {
+    let key = "\"code\":\"" + code + "\"";
+    let at = find(json, key, 0);
+    if at < 0 { return false; }
+    let after = at + key.length;
+    let next = find(json, "\"code\":\"", after);
+    let window_end = next < 0? json.length: next;
+    let span_at = find(json, span, after);
+    return span_at >= 0 && span_at < window_end;
+}
+
+// Drive a corrected source through check -> build -> run, stopping at the first
+// stage that fails and naming the divergence.
+fn _run_corrected(tag: string, src: string) -> Pipeline ![io] {
+    let path = _write_fixture(tag, src);
+    let cexit = process.run_capture([_sfn_bin(), "check", "--json", path], _child_env());
+    let cout = process.capture_take_stdout();
+    let cerr = process.capture_take_stderr();
+    if cexit != 0 {
+        return Pipeline {
+            check_ok: false,
+            build_ok: false,
+            run_ok: false,
+            divergence: "check-failed",
+            detail: cout + cerr
+        };
+    }
+    let dir = _scratch_dir();
+    let bin = dir + "/" + tag + ".bin";
+    let bexit = process.run_capture([_sfn_bin(), "build", "-o", bin, path], _child_env());
+    let bout = process.capture_take_stdout();
+    let berr = process.capture_take_stderr();
+    if bexit != 0 {
+        return Pipeline {
+            check_ok: true,
+            build_ok: false,
+            run_ok: false,
+            divergence: "check-ok-build-failed",
+            detail: bout + berr
+        };
+    }
+    let rexit = process.run_capture([bin], _child_env());
+    let rout = process.capture_take_stdout();
+    let rerr = process.capture_take_stderr();
+    if rexit != 0 {
+        return Pipeline {
+            check_ok: true,
+            build_ok: true,
+            run_ok: false,
+            divergence: "build-ok-run-failed",
+            detail: rout + rerr
+        };
+    }
+    return Pipeline {
+        check_ok: true,
+        build_ok: true,
+        run_ok: true,
+        divergence: "none",
+        detail: rout
+    };
+}
+
+fn _summary_header() -> string {
+    return "# transfer-ergonomics gate — deterministic, non-scored (SFN-445)\n"
+        + "# surface | reject_code | span\n";
+}
+
+// A wall-clock-free summary of only the diagnostic (unsupported) legs, built
+// from the OBSERVED code of each `sfn check --json` run. Two calls compare
+// byte-for-byte, which is what makes the gate CI-diffable.
+fn _diagnostic_summary() -> string ![io] {
+    let cases = _corpus();
+    let mut out = _summary_header();
+    let mut i = 0;
+    loop {
+        if i >= cases.length { break; }
+        let c = cases[i];
+        let r = _check_json("sum_" + number_to_string(i), c.unsupported);
+        let code = _first_code(r.output);
+        out = out + c.surface + " | " + code + " | " + c.span_label + "\n";
+        i = i + 1;
+    }
+    return out;
+}
+
+test "dx transfer: unsupported forms reject with stable codes and corrected forms recover with no check/build/run divergence" ![io] {
+    let cases = _corpus();
+    let mut i = 0;
+    let mut rejected = 0;
+    let mut recovered = 0;
+    let mut divergences = 0;
+    let mut report = _summary_header();
+    loop {
+        if i >= cases.length { break; }
+        let c = cases[i];
+
+        // Unsupported leg: rejected by a *coded* diagnostic, never an ICE or an
+        // uncoded fatal. Exit 1 is the normal coded-rejection status; a crash
+        // (signal/abort) exits non-1 and fails here even if it printed a code
+        // before dying. Assert the exact stable code, and the span fragment —
+        // scoped to that code's own event — when the diagnostic carries one.
+        let ur = _check_json("unsup_" + number_to_string(i), c.unsupported);
+        let ujson = ur.output;
+        assert ur.exit == 1;
+        assert ! contains(ujson, "internal compiler error");
+        assert contains(ujson, "\"code\":\"" + c.expected_code + "\"");
+        let observed = _first_code(ujson);
+        assert observed == c.expected_code;
+        if c.expected_span.length > 0 {
+            assert _span_in_event(ujson, c.expected_code, c.expected_span);
+        }
+        rejected = rejected + 1;
+
+        // Corrected leg: check, build, and run must agree.
+        let p = _run_corrected("corr_" + number_to_string(i), c.corrected);
+        if p.divergence != "none" { divergences = divergences + 1; }
+        assert p.divergence == "none";
+        recovered = recovered + 1;
+
+        report = report + c.surface + " | " + observed + " | " + c.span_label
+            + " | check+build+run\n";
+        i = i + 1;
+    }
+    report = report + "totals: cases=" + number_to_string(cases.length)
+        + " rejected="
+        + number_to_string(rejected)
+        + " recovered="
+        + number_to_string(recovered)
+        + " divergences="
+        + number_to_string(divergences)
+        + "\n";
+    print.info(report);
+
+    assert rejected == 5;
+    assert recovered == 5;
+    assert divergences == 0;
+}
+
+test "dx transfer: the non-scored diagnostic summary is deterministic across repeated runs" ![io] {
+    let first = _diagnostic_summary();
+    let second = _diagnostic_summary();
+    assert first == second;
+
+    // The summary is explicitly a compiler/tooling gate, not a model score.
+    assert contains(first, "non-scored");
+
+    // The five evidenced surfaces and their stable codes are pinned, so any
+    // drift in code assignment fails the gate.
+    assert contains(first, "control-flow | E0819");
+    assert contains(first, "conditional-value | E0834");
+    assert contains(first, "string-byte-compare | E0835");
+    assert contains(first, "symbol-discovery | E0430");
+    assert contains(first, "spawn-join-order | E0831");
+}
