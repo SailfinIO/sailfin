@@ -1,0 +1,70 @@
+// benchmarks/runtime/tensor_matmul_bench.sfn
+//
+// Runtime-execution benchmark: the cache-blocked `sfn/tensor::matmul`
+// (SFN-425, SFEP-0052). Establishes the CPU reference baseline the accelerator
+// path will be measured against — a single square DIM x DIM float matmul is one
+// unit of work; the `sfn/bench` harness runs BATCHES of them and reports the
+// inner-loop time in the machine-parseable `bench-record/1` line.
+//
+// The harness record carries invocations + inner_ms; a matmul's FLOP count is
+// not something the generic harness knows, so `main` additionally brackets a
+// fixed run with the monotonic clock and prints an explicit MFLOP/s baseline
+// line (a matmul is 2*M*K*N FLOPs: one multiply + one add per inner product
+// term). `keep` defeats dead-code elimination on the otherwise-unused product.
+import { benchmark_fixed, keep } from "sfn/bench";
+import { Tensor, from_array, matmul } from "sfn/tensor";
+
+// Deterministic mixed-sign fill (matches the correctness test's oracle input).
+fn _make(rows: int, cols: int, seed: int) -> Tensor {
+    let total = rows * cols;
+    let mut data: float[] = [];
+    let mut idx: int = 0;
+    loop {
+        if idx >= total { break; }
+        let v = ((idx * 31 + seed * 7) % 17) - 8;
+        data.push(v as float);
+        idx += 1;
+    }
+    return from_array(data, [rows, cols]);
+}
+
+fn main() ![clock, io] {
+    let dim = 128;
+    let a = _make(dim, dim, 1);
+    let b = _make(dim, dim, 2);
+
+    // Machine-parseable record for `make bench-runtime` aggregation.
+    let batches = 40;
+    let _ = benchmark_fixed("tensor_matmul_128", batches, fn () -> int {
+        let c = matmul(a, b);
+        return keep(c.data[0] as int);
+    });
+
+    // Explicit GFLOP/s baseline: bracket a fixed run and derive the rate.
+    let iters = 40;
+    let start = monotonic_millis();
+    let mut acc: float = 0.0;
+    let mut it: int = 0;
+    loop {
+        if it >= iters { break; }
+        let c = matmul(a, b);
+        acc = acc + c.data[0];
+        it += 1;
+    }
+    let ms = monotonic_millis() - start;
+    let _sink = keep(acc as int);
+
+    // 2 FLOPs (mul + add) per inner-product term, M*K*N terms per matmul.
+    let flops = 2 * dim * dim * dim * iters;
+    if ms <= 0 {
+        // Built with `{{ }}` interpolation — the harness's proven-safe path to
+        // stdout on this compiler (benchmarks/runtime/README.md).
+        let line = "tensor-matmul-baseline dim={{dim}} iters={{iters}} inner_ms=0 mflops_per_s=unmeasured";
+        print(line);
+    } else {
+        // MFLOP/s = flops / ms / 1000  (flops/ms -> *1000 for /s, /1e6 for mega).
+        let mflops = flops / ms / 1000;
+        let line = "tensor-matmul-baseline dim={{dim}} iters={{iters}} inner_ms={{ms}} flops={{flops}} mflops_per_s={{mflops}}";
+        print(line);
+    }
+}

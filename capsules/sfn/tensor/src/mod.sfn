@@ -209,6 +209,12 @@ fn rank(t: Tensor) -> int {
 }
 
 // ---- Linear algebra (2D) ----
+// Tile edge for the cache-blocked `matmul`. Chosen so an a/b/out tile trio of
+// f64s stays comfortably within a typical L1/L2 working set; a future SIMD or
+// autotuning pass (SFEP-0052) can revisit it without changing the kernel's
+// numerics.
+let MATMUL_BLOCK: int = 64;
+
 fn dot(a: Tensor, b: Tensor) -> float {
     // Dot product of two 1D tensors (vectors).
     let mut total: float = 0.0;
@@ -222,37 +228,74 @@ fn dot(a: Tensor, b: Tensor) -> float {
 }
 
 fn matmul(a: Tensor, b: Tensor) -> Tensor {
-    // Matrix multiplication for 2D tensors.
+    // Cache-blocked (tiled) matrix multiplication for 2D tensors.
     // a: [M, K], b: [K, N] => result: [M, N]
     // Both tensors must be rank-2 with matching inner dimensions.
+    //
+    // Tiling into MATMUL_BLOCK-sized submatrices keeps the working set in cache
+    // and reuses each loaded a[i][p] across a row of b, beating the naive triple
+    // loop on larger matrices. The inner i-p-j order accumulates every output
+    // element's K-sum in strictly increasing p (each tile contributes its p
+    // range once, in order), so the float additions happen in the same sequence
+    // as the naive row-major kernel — the result is bit-identical, which is what
+    // lets this stay the CPU reference oracle (SFEP-0052).
     if a.shape.length != 2 || b.shape.length != 2 { return zeros([0]); }
     if a.shape[1] != b.shape[0] { return zeros([0]); }
     let m = a.shape[0];
     let k = a.shape[1];
     let n = b.shape[1];
+    let count = m * n;
     let mut out: float[] = [];
-    let mut i: int = 0;
+    let mut z: int = 0;
     loop {
-        if i >= m { break; }
-        let mut j: int = 0;
+        if z >= count { break; }
+        out.push(0.0);
+        z += 1;
+    }
+    let bs = MATMUL_BLOCK;
+    let mut ii: int = 0;
+    loop {
+        if ii >= m { break; }
+        let i_max = _min_size(ii + bs, m);
+        let mut kk: int = 0;
         loop {
-            if j >= n { break; }
-            let mut val: float = 0.0;
-            let mut p: int = 0;
+            if kk >= k { break; }
+            let p_max = _min_size(kk + bs, k);
+            let mut jj: int = 0;
             loop {
-                if p >= k { break; }
-                val = val + a.data[i * k + p] * b.data[p * n + j];
-                p += 1;
+                if jj >= n { break; }
+                let j_max = _min_size(jj + bs, n);
+                let mut i: int = ii;
+                loop {
+                    if i >= i_max { break; }
+                    let row_out = i * n;
+                    let row_a = i * k;
+                    let mut p: int = kk;
+                    loop {
+                        if p >= p_max { break; }
+                        let aip = a.data[row_a + p];
+                        let row_b = p * n;
+                        let mut j: int = jj;
+                        loop {
+                            if j >= j_max { break; }
+                            out[row_out + j] = out[row_out + j] + aip * b.data[row_b
+                                + j];
+                            j += 1;
+                        }
+                        p += 1;
+                    }
+                    i += 1;
+                }
+                jj += bs;
             }
-            out.push(val);
-            j += 1;
+            kk += bs;
         }
-        i += 1;
+        ii += bs;
     }
     return Tensor {
         data: out,
         shape: [m, n],
-        size: m * n
+        size: count
     };
 }
 
