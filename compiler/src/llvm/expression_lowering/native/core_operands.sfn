@@ -467,6 +467,8 @@ fn is_integer_llvm_type(value: string) -> boolean {
 fn is_float_llvm_type(value: string) -> boolean {
     if value == "double" { return true; }
     if value == "float" { return true; }
+    if value == "half" { return true; }
+    if value == "bfloat" { return true; }
     return false;
 }
 
@@ -606,6 +608,41 @@ fn coerce_numeric_primitive(operand: LLVMOperand, operand_type: string, target: 
             current_lines.push("  " + temp_name + " = fptrunc double " + operand.value
                 + " to float");
             let coerced = LLVMOperand { llvm_type: "float", value: temp_name };
+            return CoercionResult {
+                lines: current_lines,
+                temp_index: temp_index + 1,
+                operand: coerced,
+                diagnostics: diagnostics
+            };
+        }
+    }
+    if target == "half" {
+        if operand_type == "double" {
+            // Expected-type literal binding: a fractional literal lowers as a
+            // `double` constant (core.sfn number-literal path), so
+            // `let x: f16 = 0.001` narrows into the `half` slot here. Mirrors
+            // the `double -> float` arm above (SFEP-0054 §3.3).
+            let temp_name = format_temp_name(temp_index);
+            current_lines.push("  " + temp_name + " = fptrunc double " + operand.value
+                + " to half");
+            let coerced = LLVMOperand { llvm_type: "half", value: temp_name };
+            return CoercionResult {
+                lines: current_lines,
+                temp_index: temp_index + 1,
+                operand: coerced,
+                diagnostics: diagnostics
+            };
+        }
+    }
+    if target == "bfloat" {
+        if operand_type == "double" {
+            let temp_name = format_temp_name(temp_index);
+            current_lines.push("  " + temp_name + " = fptrunc double " + operand.value
+                + " to bfloat");
+            let coerced = LLVMOperand {
+                llvm_type: "bfloat",
+                value: temp_name
+            };
             return CoercionResult {
                 lines: current_lines,
                 temp_index: temp_index + 1,

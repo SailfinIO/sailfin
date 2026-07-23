@@ -59,6 +59,8 @@ fn map_primitive_type(context: TypeContext, annotation: string) -> string {
     // canonical float mapping so every copy agrees.
     if annotation == "f64" { return "double"; }
     if annotation == "f32" { return "float"; }
+    if annotation == "f16" { return "half"; }
+    if annotation == "bf16" { return "bfloat"; }
     let mut _if130: boolean = false;
     if annotation == "boolean" { _if130 = true; }
     if annotation == "bool" { _if130 = true; }
@@ -679,6 +681,7 @@ fn is_heap_type(llvm_type: string) -> boolean {
     if trimmed == "i64" { return false; }
     if trimmed == "i128" { return false; }
     if trimmed == "half" { return false; }
+    if trimmed == "bfloat" { return false; }
     if trimmed == "float" { return false; }
     if trimmed == "double" { return false; }
     if trimmed == "fp128" { return false; }

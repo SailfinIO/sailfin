@@ -483,9 +483,21 @@ fn lower_cast_expression(parse: CastParseResult, bindings: ParameterBinding[], l
         if target_is_float {
             if operand.llvm_type == "float" {
                 if target_type == "double" { numeric_op_name = "fpext"; }
+                if target_type == "half" { numeric_op_name = "fptrunc"; }
+                if target_type == "bfloat" { numeric_op_name = "fptrunc"; }
             }
             if operand.llvm_type == "double" {
                 if target_type == "float" { numeric_op_name = "fptrunc"; }
+                if target_type == "half" { numeric_op_name = "fptrunc"; }
+                if target_type == "bfloat" { numeric_op_name = "fptrunc"; }
+            }
+            if operand.llvm_type == "half" {
+                if target_type == "float" { numeric_op_name = "fpext"; }
+                if target_type == "double" { numeric_op_name = "fpext"; }
+            }
+            if operand.llvm_type == "bfloat" {
+                if target_type == "float" { numeric_op_name = "fpext"; }
+                if target_type == "double" { numeric_op_name = "fpext"; }
             }
         }
     }

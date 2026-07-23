@@ -83,6 +83,8 @@ fn _is_primitive_receiver_type(name: string) -> boolean {
     if name == "u64" { return true; }
     if name == "f32" { return true; }
     if name == "f64" { return true; }
+    if name == "f16" { return true; }
+    if name == "bf16" { return true; }
     return false;
 }
 

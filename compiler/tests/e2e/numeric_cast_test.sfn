@@ -259,3 +259,48 @@ test "numeric-cast: ptr → bool is rejected (not ptrtoint)" ![io] {
     assert ! contains(body, "ptrtoint i8* %x to i1");
     assert contains(body, "ret i1 false");
 }
+
+// ---- f16 / bf16 (SFEP-0054 Phase 1) ----
+test "numeric-cast: f16 → f32 widening lowers as fpext" ![io] {
+    let body = _emit_body("fn widen(x: f16) -> f32 { return x as f32; }", "define float @widen", "f16_to_f32");
+    assert body.length > 0;
+    assert contains(body, "fpext half %x to float");
+}
+
+test "numeric-cast: bf16 → f32 widening lowers as fpext" ![io] {
+    let body = _emit_body("fn widen(x: bf16) -> f32 { return x as f32; }", "define float @widen", "bf16_to_f32");
+    assert body.length > 0;
+    assert contains(body, "fpext bfloat %x to float");
+}
+
+test "numeric-cast: f32 → f16 narrowing lowers as fptrunc" ![io] {
+    let body = _emit_body("fn narrow(x: f32) -> f16 { return x as f16; }", "define half @narrow", "f32_to_f16");
+    assert body.length > 0;
+    assert contains(body, "fptrunc float %x to half");
+}
+
+test "numeric-cast: f32 → bf16 narrowing lowers as fptrunc" ![io] {
+    let body = _emit_body("fn narrow(x: f32) -> bf16 { return x as bf16; }", "define bfloat @narrow", "f32_to_bf16");
+    assert body.length > 0;
+    assert contains(body, "fptrunc float %x to bfloat");
+}
+
+test "numeric-cast: f16 round-trips through f32 (fptrunc back to half)" ![io] {
+    let body = _emit_body("fn roundtrip(x: f16) -> f16 { let w: f32 = x as f32; return w as f16; }", "define half @roundtrip", "f16_roundtrip");
+    assert body.length > 0;
+    assert contains(body, "fpext half %x to float");
+    assert contains(body, "fptrunc float");
+}
+
+test "numeric-cast: f16 local from double literal narrows via fptrunc" ![io] {
+    let body = _emit_body("fn mk() -> f16 { let x: f16 = 0.5; return x; }", "define half @mk", "f16_local_fptrunc");
+    assert body.length > 0;
+    assert contains(body, "fptrunc double");
+    assert ! contains(body, "store half zeroinitializer");
+}
+
+test "numeric-cast: bf16 local from double literal narrows via fptrunc" ![io] {
+    let body = _emit_body("fn mk() -> bf16 { let x: bf16 = 0.5; return x; }", "define bfloat @mk", "bf16_local_fptrunc");
+    assert body.length > 0;
+    assert contains(body, "fptrunc double");
+}
