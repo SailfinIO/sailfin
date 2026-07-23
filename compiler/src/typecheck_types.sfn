@@ -3133,6 +3133,168 @@ fn check_unanalyzable_raw(text: string, span: SourceSpan?) -> Diagnostic[] {
     return [make_unanalyzable_raw_diagnostic(text, span)];
 }
 
+// E0834 — a value-position `if` (SFN-442). Sailfin `if` is a statement, not an
+// expression, so `let n = if c { a } else { b };` degrades the whole
+// initializer to `Raw`. Classify it ahead of the E0818 backstop and steer to
+// the `?:` conditional expression (`Expression.Conditional`, #1690) or a
+// statement `if` that assigns in each branch. `span` is the enclosing `Raw`
+// span, which already begins at the `if` keyword.
+fn make_value_if_diagnostic(rewrite: string, span: SourceSpan?) -> Diagnostic {
+    let mut fix_message: string = "Sailfin `if` is a statement, not an"
+        + " expression; use a `?:` conditional expression, or assign in each"
+        + " branch of a statement `if`";
+    if rewrite.length > 0 {
+        fix_message = "rewrite as a conditional expression `" + rewrite + "`";
+    }
+    let fix = FixSuggestion { message: fix_message, edits: [] };
+    return Diagnostic {
+        code: "E0834",
+        severity: "error",
+        message: "`if` cannot be used as a value expression here; Sailfin `if`"
+            + " is a statement, not an expression",
+        file_path: "",
+        primary: token_from_name("if", span),
+        suggestion: fix
+    };
+}
+
+// True when `trimmed` opens with the `if` keyword as a token (`if ` / `if(`),
+// not merely an identifier that starts with the letters "if".
+fn _leading_if_token(trimmed: string) -> boolean {
+    if starts_with(trimmed, "if ") { return true; }
+    if starts_with(trimmed, "if(") { return true; }
+    return false;
+}
+
+// Index of the `}` matching the `{` at `open` (depth-balanced), or -1.
+fn _match_close_brace(text: string, open: int) -> int {
+    let mut depth: int = 0;
+    let mut i: int = open;
+    loop {
+        if i >= text.length { break; }
+        let ch = text[i];
+        if ch == "{" { depth += 1; }
+        if ch == "}" {
+            depth -= 1;
+            if depth == 0 { return i; }
+        }
+        i += 1;
+    }
+    return -1;
+}
+
+// Reconstruct a `cond ? then : else` ternary from a block-form value `if`.
+// Returns "" when the shape is not a clean `if <cond> { <then> } else
+// { <else> }` (a partial `if`, missing `else`, or unbalanced braces) — the
+// caller then falls back to a generic-but-valid fix message.
+fn _extract_value_if_ternary(trimmed: string) -> string {
+    let brace1 = index_of(trimmed, "{");
+    if brace1 < 0 { return ""; }
+    let cond = trim_text(substring(trimmed, 2, brace1));
+    if cond.length == 0 { return ""; }
+    let close1 = _match_close_brace(trimmed, brace1);
+    if close1 < 0 { return ""; }
+    let then_body = trim_text(substring(trimmed, brace1 + 1, close1));
+    if then_body.length == 0 { return ""; }
+    let after = trim_text(substring(trimmed, close1 + 1, trimmed.length));
+    if !starts_with(after, "else") { return ""; }
+    let brace2 = index_of(after, "{");
+    if brace2 < 0 { return ""; }
+    let close2 = _match_close_brace(after, brace2);
+    if close2 < 0 { return ""; }
+    // Residual text after the matched `else` block means an `else if` chain (or
+    // other trailing structure) a single ternary cannot faithfully represent —
+    // fall back to the generic fix message rather than emit a misleading rewrite.
+    let tail = trim_text(substring(after, close2 + 1, after.length));
+    if tail.length > 0 { return ""; }
+    let else_body = trim_text(substring(after, brace2 + 1, close2));
+    if else_body.length == 0 { return ""; }
+    return cond + " ? " + then_body + " : " + else_body;
+}
+
+// Classify a `Raw` whose text is a value-position `if`, ahead of the E0818
+// backstop. Fires only for a block-form `if` (leading `if` token + a `{`), so
+// it cannot flag arbitrary unstructured text.
+fn check_value_if_raw(text: string, span: SourceSpan?) -> Diagnostic[] {
+    let trimmed = trim_text(text);
+    if !_leading_if_token(trimmed) { return []; }
+    if index_of(trimmed, "{") < 0 { return []; }
+    let rewrite = _extract_value_if_ternary(trimmed);
+    return [make_value_if_diagnostic(rewrite, span)];
+}
+
+// E0835 — an unsupported character literal (`'x'`) (SFN-442). Sailfin has no
+// character type; string indexing yields the integer byte, so a comparison
+// must use the byte value. State the literal's byte value and the integer
+// rewrite. `span` is narrowed to the literal itself by the caller.
+fn make_char_literal_diagnostic(literal: string, byte: int, rewrite: string, span: SourceSpan?) -> Diagnostic {
+    let byte_str = number_to_string(byte);
+    let mut fix_message: string = "replace `" + literal + "` with its byte"
+        + " value `"
+        + byte_str
+        + "`";
+    if rewrite.length > 0 {
+        fix_message = "compare against the byte value, e.g. `" + rewrite + "`";
+    }
+    let fix = FixSuggestion { message: fix_message, edits: [] };
+    return Diagnostic {
+        code: "E0835",
+        severity: "error",
+        message: "character literal `" + literal + "` is not supported; it is"
+            + " byte value "
+            + byte_str
+            + " — Sailfin string indexing yields an integer byte",
+        file_path: "",
+        primary: token_from_name(literal, span),
+        suggestion: fix
+    };
+}
+
+// Narrow `span` to a `[start, start + width)` sub-range at character offset
+// `off` within the ORIGINAL (untrimmed) Raw text — `off` must be measured
+// against the same text `span.start_column` anchors, not the trimmed copy, so
+// the caret stays correct when the Raw text carries leading whitespace.
+// Returns the span unchanged for a null or multi-line span (the column offset
+// only holds within a single line).
+fn _narrow_span(span: SourceSpan?, off: int, width: int) -> SourceSpan? {
+    if span == null { return span; }
+    if span.start_line != span.end_line { return span; }
+    let col = span.start_column + off;
+    return SourceSpan {
+        start_line: span.start_line,
+        start_column: col,
+        end_line: span.start_line,
+        end_column: col + width
+    };
+}
+
+// Classify a `Raw` containing an unsupported single-character literal (`'x'`),
+// ahead of the E0818 backstop. Matches only a `'`,<char>,`'` triple, so it
+// cannot flag arbitrary unstructured text (valid Sailfin source has no `'`
+// outside string literals, which never degrade to this arm).
+fn check_char_literal_raw(text: string, span: SourceSpan?) -> Diagnostic[] {
+    let trimmed = trim_text(text);
+    let open = index_of(trimmed, "'");
+    if open < 0 { return []; }
+    let close = open + 2;
+    if close >= trimmed.length { return []; }
+    if trimmed[close] != "'" { return []; }
+    let inner = substring(trimmed, open + 1, close);
+    if inner.length == 0 { return []; }
+    let byte = char_code(inner);
+    if byte < 0 { return []; }
+    let literal = substring(trimmed, open, close + 1);
+    let rewrite = substring(trimmed, 0, open) + number_to_string(byte)
+        + substring(trimmed, close
+        + 1, trimmed.length);
+    // Narrow against the original `text`: `open` indexes `trimmed`, but the span
+    // anchors the untrimmed text, so locate the same opening quote in `text`
+    // (there is a single quote-region) for a caret aligned to the span origin.
+    let text_open = index_of(text, "'");
+    let narrowed = _narrow_span(span, text_open, 3);
+    return [make_char_literal_diagnostic(literal, byte, rewrite, narrowed)];
+}
+
 fn make_missing_interface_member_diagnostic(struct_name: string, interface_name: string, member_name: string) -> Diagnostic {
     return Diagnostic {
         code: "E0301",
