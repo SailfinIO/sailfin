@@ -328,7 +328,15 @@ here.
   exempt via `walk_match_pattern`. Diagnostic factory:
   `make_unanalyzable_raw_diagnostic` (`typecheck_types.sfn`). Regression test:
   `compiler/tests/unit/effect_raw_failclosed_test.sfn`. E0818 fires on node
-  shape, not text content. E0819 (nested `Unknown` fail-closed) shipped separately
+  shape, not text content. Ahead of the backstop, two familiar-but-unsupported
+  shapes are classified to dedicated, actionable diagnostics (SFN-442):
+  a value-position `if` (`let n = if c { a } else { b };`) → **E0834** with a
+  `?:` conditional-expression rewrite, and a character literal
+  (`text[i] == '|'`) → **E0835** stating the byte value and integer-comparison
+  rewrite. Classifiers `check_value_if_raw` / `check_char_literal_raw` run before
+  `check_unanalyzable_raw`; regression coverage in
+  `compiler/tests/unit/parser_value_if_char_literal_diag_test.sfn` and
+  `compiler/tests/e2e/value_if_char_literal_diag_test.sfn`. E0819 (nested `Unknown` fail-closed) shipped separately
   in #1755; E0817 was reassigned to enum-field conflicts (#1746).
   The `is` type-guard hole is **closed in #1753**: `<operand> is T` now parses
   to a structured `Is` AST node (not `Expression.Raw`), and the effect checker
