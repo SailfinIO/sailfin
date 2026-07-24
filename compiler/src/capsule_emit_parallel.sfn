@@ -354,6 +354,15 @@ fn _cr_run_parallel_emit(tasks: ParallelEmitTask[], mode: string, sailfin_exe: s
     // `validate_llvm_ir` MUST be mirrored here (and vice versa). A
     // follow-up could unify via `sfn emit --attempts 1 --validate` if
     // the per-task overhead proves acceptable.
+    //
+    // The mirror is now shape-divergent, deliberately (SFN-487):
+    // `validate_llvm_ir` runs plain argv spawns with a `--version`
+    // probe (no `sh`, `command -v`, or `/dev/null`) so a Windows host
+    // can validate its own output, while this worker keeps the shell
+    // cascade. That is sound because the worker is unreachable on a
+    // Windows host — `_cr_resolve_jobs()` returns 1 there and the
+    // worker only engages at jobs > 1. The *tool-discovery order* is
+    // still the mirrored contract; only the spawn mechanism differs.
     let mut worker_import_arg = "";
     if use_import_context {
         worker_import_arg = "--import-context \"$SAILFIN_PE_IMPORT_CTX\" ";
