@@ -6,6 +6,7 @@
   "scripts": {
     "dev": "astro dev",
     "check:hero": "bash scripts/verify-hero-example.sh",
+    "sync:roadmap": "node scripts/sync-roadmap.mjs",
     "build": "astro build",
     "preview": "npm run build && astro preview",
     "astro": "astro"
