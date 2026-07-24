@@ -45,7 +45,7 @@ import {
     with_flag
 } from "sfn/cli";
 
-import { AssertFailure, _empty_assert_failure, _parse_assert_failure_record } from "../../assert_failure";
+import { AssertFailure, _empty_assert_failure } from "../../assert_failure";
 import { Program, Statement } from "../../ast";
 import { LinkPlan, LlvmTextBackend } from "../../backend";
 import { assemble_link_inputs } from "../../build/clang_argv";
@@ -98,7 +98,7 @@ import {
     index_of,
     substring
 } from "../../string_utils";
-import { TestResultRecord, parse_test_results_log } from "../../test_results";
+import { TestResultRecord, parse_test_record_line } from "../../test_results";
 import {
     TestEntry,
     collect_test_entries,
@@ -521,13 +521,16 @@ fn run(matches: Matches, ctx: CliContext) -> int ![clock, io, net] {
     let scratch_owned = scratch_choice.owned;
     _ensure_dir_cmd(scratch_root);
     _ensure_dir_cmd(scratch_root + "/test-o0");
-    // Sub-frame mode (#1121): set by the multi-file parent on each child
-    // via SAILFIN_TEST_JSON_SUBFRAME=1. In this mode a `--json` child
-    // suppresses its own start/summary on stdout (it still emits per-test
-    // events, which the parent forwards through inherited stdout) and
-    // writes its counts to `<scratch>/_subframe_summary.json` so the
-    // parent can aggregate them into one run-level summary. The result is
-    // a single coherent jsonl document per `sfn test` invocation.
+    // Sub-frame mode (#1121 / SFEP-0050): set by the multi-file parent on
+    // each child via SAILFIN_TEST_JSON_SUBFRAME=1. In this mode a `--json`
+    // child suppresses its own start on stdout (it still emits per-test
+    // events, which the parent forwards from the child's stdout) and
+    // routes its `summary` line to its own STDERR — the parent skims the
+    // counts off the reap demux and does not forward it, aggregating them
+    // into one run-level summary. The result is a single coherent jsonl
+    // document per `sfn test` invocation. (The pre-SFEP-0050 transport
+    // wrote the counts to `<scratch>/_subframe_summary.json`; the stream
+    // replaces that side-channel file.)
     let json_subframe = json_output && _env_flag("SAILFIN_TEST_JSON_SUBFRAME");
 
     // Resolve the trace toggle once (popen-cost is fine on the
@@ -631,7 +634,7 @@ fn run(matches: Matches, ctx: CliContext) -> int ![clock, io, net] {
         // with no `tests/` dir) doesn't fail the build.
         if json_output {
             if json_subframe {
-                fs.writeFile(scratch_root + "/_subframe_summary.json", render_summary_event(0, 0, 0, 0, 0, 0));
+                print.err(render_summary_event(0, 0, 0, 0, 0, 0));
             } else {
                 print(render_start_event(0));
                 print(render_summary_event(0, 0, 0, 0, 0, 0));
@@ -677,9 +680,10 @@ fn run(matches: Matches, ctx: CliContext) -> int ![clock, io, net] {
     // Output stays a SINGLE coherent jsonl document per invocation: the
     // parent emits one aggregate `start`, runs each child in sub-frame
     // mode (children forward only per-test events on the shared stdout
-    // and hand their counts back via `_subframe_summary.json`), then
-    // emits one aggregate `summary`. Human banners and the RETRY line are
-    // suppressed in JSON mode so the stream stays pure jsonl.
+    // and route their counts back over their own stderr `summary` line,
+    // which the parent skims — SFEP-0050), then emits one aggregate
+    // `summary`. Human banners and the RETRY line are suppressed in JSON
+    // mode so the stream stays pure jsonl.
     if test_files.length > 1 {
         let self_exe = _resolve_test_self_path(binary_dir);
         // Ephemeral scratch root + cleanup, ported from the retired
@@ -690,13 +694,20 @@ fn run(matches: Matches, ctx: CliContext) -> int ![clock, io, net] {
         // caller-pinned `SAILFIN_TEST_SCRATCH` roots are preserved, and
         // unpinned roots are cleaned after success.
         let sub_root = scratch_root;
-        // Per-test wall-clock cap, also ported from the wrapper. Wraps
-        // each `<self> test <file>` child — the exact shape the script
-        // used to `timeout`. A child killed by the cap exits 124 and
+        // Per-file wall-clock cap (SFEP-0050). Each `<self> test <file>`
+        // sub-frame child is bounded by a handle-owned deadline enforced
+        // via `handle_kill` inside `_reap_test_child`, retiring the outer
+        // `timeout(1)` wrapper. A deadline kill is remapped to 124 and
         // falls through the signal-kill retry gate (which only retries
-        // 137/139), matching the script.
-        let timeout_cmd = _resolve_timeout_cmd();
-        let timeout_secs = _test_timeout_secs();
+        // 137/139), matching the old wrapper's exit code.
+        let deadline_ms = _test_deadline_ms();
+        // Snapshot the passthrough environment ONCE for every spawned
+        // child. Both the pool and the serial multi-file path now spawn
+        // via `spawn_with_env` (the child routes its summary to its own
+        // captured stderr, so it must be reaped, not inherited). Each
+        // `_get_env_cmd` read shells out via popen, so resolving it per
+        // spawn would add dozens of subprocesses per test file.
+        let pool_base_env = _pool_env_snapshot();
         // Same signal-kill retry gate the in-process path uses: a
         // child killed by SIGKILL/SIGSEGV (137/139) under transient
         // CI memory pressure is retried once before being counted as
@@ -745,8 +756,9 @@ fn run(matches: Matches, ctx: CliContext) -> int ![clock, io, net] {
             }
         }
         // Single-frame `--json` aggregation (#1121). The parent owns the
-        // run's `start`/`summary`; children run in sub-frame mode (see
-        // `_run_test_child`) and forward only per-test events. Pre-parse
+        // run's `start`/`summary`; children run in sub-frame mode
+        // (`SAILFIN_TEST_JSON_SUBFRAME`) and forward only per-test events.
+        // Pre-parse
         // each file to compute the aggregate `total` (parse-only, no
         // codegen) and keep per-file test counts so a child that dies
         // before writing its summary file can still be attributed.
@@ -786,11 +798,11 @@ fn run(matches: Matches, ctx: CliContext) -> int ![clock, io, net] {
             // #1236: bounded worker pool. A sliding window keeps at
             // most `jobs` children live: the launch loop tops the
             // window up via `process.spawn_with_env`, then the parent
-            // reaps the OLDEST child (`_reap_test_child`: drain
-            // stdout, drain stderr, `handle_wait`). In-order reaping
-            // keeps every downstream consumer identical to the serial
-            // loop — suite attribution, the signal-kill retry gate,
-            // and the `--json` sub-frame aggregation all index by
+            // reaps the OLDEST child (`_reap_test_child`: poll-demux
+            // stdout+stderr, skim the summary, `handle_wait`). In-order
+            // reaping keeps every downstream consumer identical to the
+            // serial loop — suite attribution, the signal-kill retry
+            // gate, and the `--json` sub-frame aggregation all index by
             // `ti` exactly as before — and re-emits each child's
             // captured output grouped per file, so pooled output is
             // never interleaved mid-file. The loop has no early
@@ -802,11 +814,6 @@ fn run(matches: Matches, ctx: CliContext) -> int ![clock, io, net] {
             // (137/139) is re-spawned and reaped synchronously at
             // reap time; the window stays ≤ `jobs` live children
             // throughout.
-            // Snapshot the passthrough environment ONCE — each
-            // `_get_env_cmd` read shells out via popen, so resolving
-            // it per spawn would add dozens of subprocesses per test
-            // file and eat the parallelism win.
-            let pool_base_env = _pool_env_snapshot();
             let mut handles: int[] = [];
             // #1303: indices (and their original exit codes) of children
             // that hit a signal-kill (137/139) retry. Their retry is
@@ -831,13 +838,13 @@ fn run(matches: Matches, ctx: CliContext) -> int ![clock, io, net] {
                     if launched - ti >= jobs { break; }
                     let spawn_scratch = sub_root + "/sub-" + number_to_string(launched);
                     _ensure_dir_cmd(spawn_scratch);
-                    handles.push(process.spawn_with_env(_pool_child_argv(timeout_cmd, timeout_secs, self_exe, test_files[launched], name_filter, tag_filter, json_output, no_test_cache), _pool_child_env(pool_base_env, spawn_scratch, sub_root, stamp_nonce, update_snapshots, json_output)));
+                    handles.push(process.spawn_with_env(_pool_child_argv(self_exe, test_files[launched], name_filter, tag_filter, json_output, no_test_cache), _pool_child_env(pool_base_env, spawn_scratch, sub_root, stamp_nonce, update_snapshots, json_output)));
                     launched += 1;
                 }
                 let path = test_files[ti];
                 let suite_idx = file_suite_index[ti];
-                let child_scratch = sub_root + "/sub-" + number_to_string(ti);
-                let rc = _reap_test_child(handles[ti]);
+                let reap = _reap_test_child(handles[ti], deadline_ms, json_output);
+                let rc = reap.rc;
                 if _should_retry_test(rc, sub_retries_disabled) {
                     // #1303: defer signal-kill (137/139) retries to the
                     // isolated serial tail after the pool drains.
@@ -871,19 +878,17 @@ fn run(matches: Matches, ctx: CliContext) -> int ![clock, io, net] {
                     if overall_rc == 0 { overall_rc = rc; }
                 }
                 if json_output {
-                    // Identical aggregation to the serial loop: the
-                    // file-based sub-frame handoff is already
-                    // race-free under concurrency because each child
-                    // writes `_subframe_summary.json` into its own
-                    // `sub-<i>` scratch.
-                    let sf_file = child_scratch + "/_subframe_summary.json";
-                    if fs.exists(sf_file) {
-                        let sf_raw = fs.readFile(sf_file);
-                        sf_passed += _extract_json_uint_after(sf_raw, "\"passed\":");
-                        sf_failed += _extract_json_uint_after(sf_raw, "\"failed\":");
-                        sf_skipped += _extract_json_uint_after(sf_raw, "\"skipped\":");
-                        sf_tb_hits += _extract_json_uint_after(sf_raw, "\"test_bin_hits\":");
-                        sf_tb_misses += _extract_json_uint_after(sf_raw, "\"test_bin_misses\":");
+                    // Aggregate the child's counts skimmed from the
+                    // `summary` line it routed to its stderr during the
+                    // reap demux (SFEP-0050). A child that died before
+                    // emitting a summary counts its whole file as failed,
+                    // matching the old missing-summary-file fallback.
+                    if reap.summary_seen {
+                        sf_passed += reap.passed;
+                        sf_failed += reap.failed;
+                        sf_skipped += reap.skipped;
+                        sf_tb_hits += reap.tb_hits;
+                        sf_tb_misses += reap.tb_misses;
                     } else { sf_failed += sf_counts[ti]; }
                 }
                 ti += 1;
@@ -910,18 +915,13 @@ fn run(matches: Matches, ctx: CliContext) -> int ![clock, io, net] {
                         + number_to_string(retry_rc[ri])
                         + ", retrying once)");
                 }
-                // Drop any partial `_subframe_summary.json` the crashed
-                // first attempt may have left in this reused scratch dir.
-                // Otherwise, if the retry also crashes before writing its
-                // own summary, the `fs.exists` aggregation below would
-                // read the stale partial and undercount failures (a
-                // `--json`-only, double-crash edge — never affects the
-                // exit code). Unlinking first makes the fallback to
-                // `sf_counts[rti]` fire on a double crash.
-                let stale_sf = rchild_scratch + "/_subframe_summary.json";
-                if fs.exists(stale_sf) { fs.deleteFile(stale_sf); }
-                let retry_handle = process.spawn_with_env(_pool_child_argv(timeout_cmd, timeout_secs, self_exe, rpath, name_filter, tag_filter, json_output, no_test_cache), _pool_child_env(pool_base_env, rchild_scratch, sub_root, stamp_nonce, update_snapshots, json_output));
-                let rc = _reap_test_child(retry_handle);
+                // The retry's records live on its own fresh pipe — no
+                // stale side-channel file to unlink; a double crash that
+                // never emits a summary falls back to `sf_counts[rti]` via
+                // `reap.summary_seen` below.
+                let retry_handle = process.spawn_with_env(_pool_child_argv(self_exe, rpath, name_filter, tag_filter, json_output, no_test_cache), _pool_child_env(pool_base_env, rchild_scratch, sub_root, stamp_nonce, update_snapshots, json_output));
+                let reap = _reap_test_child(retry_handle, deadline_ms, json_output);
+                let rc = reap.rc;
                 if rc == 0 { suites[rsuite_idx].pass_count += 1; } else {
                     // #1303: the isolated retry also died. The RETRY
                     // banner above already named the file; add the
@@ -938,14 +938,12 @@ fn run(matches: Matches, ctx: CliContext) -> int ![clock, io, net] {
                     if overall_rc == 0 { overall_rc = rc; }
                 }
                 if json_output {
-                    let sf_file = rchild_scratch + "/_subframe_summary.json";
-                    if fs.exists(sf_file) {
-                        let sf_raw = fs.readFile(sf_file);
-                        sf_passed += _extract_json_uint_after(sf_raw, "\"passed\":");
-                        sf_failed += _extract_json_uint_after(sf_raw, "\"failed\":");
-                        sf_skipped += _extract_json_uint_after(sf_raw, "\"skipped\":");
-                        sf_tb_hits += _extract_json_uint_after(sf_raw, "\"test_bin_hits\":");
-                        sf_tb_misses += _extract_json_uint_after(sf_raw, "\"test_bin_misses\":");
+                    if reap.summary_seen {
+                        sf_passed += reap.passed;
+                        sf_failed += reap.failed;
+                        sf_skipped += reap.skipped;
+                        sf_tb_hits += reap.tb_hits;
+                        sf_tb_misses += reap.tb_misses;
                     } else { sf_failed += sf_counts[rti]; }
                 }
                 ri += 1;
@@ -956,27 +954,31 @@ fn run(matches: Matches, ctx: CliContext) -> int ![clock, io, net] {
                 if ti >= test_files.length { break; }
                 let path = test_files[ti];
                 let suite_idx = file_suite_index[ti];
-                // Per-test scratch so concurrent or sequential children
-                // never clobber each other's `.ll` / `test` / `fail.bin`
-                // (mirrors the wrapper's `mktemp -d`). The child re-reads
-                // `SAILFIN_TEST_SCRATCH` via `_test_scratch_root`. Runtime
-                // objects live in the shared `sub_root` (warmed above), not
-                // this per-file dir — see `SAILFIN_TEST_RUNTIME_OBJDIR`.
+                // Per-test scratch (build cache + `sfn/test` fixture temp
+                // dirs) so sequential children never clobber each other's
+                // `.ll` / `test` tree. Runtime objects live in the shared
+                // `sub_root` (warmed above) — see `SAILFIN_TEST_RUNTIME_OBJDIR`.
+                // SFEP-0050: spawn via `spawn_with_env` + reap so the child's
+                // `summary` (now on its captured stderr) is skimmed, not lost
+                // to inherited stdio, exactly like the pool path.
                 let child_scratch = sub_root + "/sub-" + number_to_string(ti);
                 _ensure_dir_cmd(child_scratch);
-                let mut rc = _run_test_child(timeout_cmd, timeout_secs, child_scratch, sub_root, stamp_nonce, self_exe, path, name_filter, tag_filter, update_snapshots, json_output, no_test_cache);
-                if _should_retry_test(rc, sub_retries_disabled) {
+                let child_env = _pool_child_env(pool_base_env, child_scratch, sub_root, stamp_nonce, update_snapshots, json_output);
+                let child_argv = _pool_child_argv(self_exe, path, name_filter, tag_filter, json_output, no_test_cache);
+                let mut reap = _reap_test_child(process.spawn_with_env(child_argv, child_env), deadline_ms, json_output);
+                if _should_retry_test(reap.rc, sub_retries_disabled) {
                     // RETRY banner is a human-mode artifact; suppress it in
                     // JSON mode so the jsonl stream stays pure (mirrors the
                     // in-process path's `if !json_output` retry-print gate).
                     if !json_output {
                         print("[test] RETRY: " + _package_basename(path)
                             + " (exit code "
-                            + number_to_string(rc)
+                            + number_to_string(reap.rc)
                             + ", retrying once)");
                     }
-                    rc = _run_test_child(timeout_cmd, timeout_secs, child_scratch, sub_root, stamp_nonce, self_exe, path, name_filter, tag_filter, update_snapshots, json_output, no_test_cache);
+                    reap = _reap_test_child(process.spawn_with_env(child_argv, child_env), deadline_ms, json_output);
                 }
+                let rc = reap.rc;
                 if rc == 0 { suites[suite_idx].pass_count += 1; } else {
                     // #1303: serial path — a signal-kill (after the
                     // inline retry, if any) lost its own output to the
@@ -991,19 +993,18 @@ fn run(matches: Matches, ctx: CliContext) -> int ![clock, io, net] {
                     if overall_rc == 0 { overall_rc = rc; }
                 }
                 if json_output {
-                    // Aggregate the child's per-test counts from the
-                    // sub-frame summary it wrote. A missing file means the
-                    // child died before writing it (segfault/timeout); count
-                    // that file's tests as failed so the aggregate stays
-                    // consistent with the non-zero run exit code.
-                    let sf_file = child_scratch + "/_subframe_summary.json";
-                    if fs.exists(sf_file) {
-                        let sf_raw = fs.readFile(sf_file);
-                        sf_passed += _extract_json_uint_after(sf_raw, "\"passed\":");
-                        sf_failed += _extract_json_uint_after(sf_raw, "\"failed\":");
-                        sf_skipped += _extract_json_uint_after(sf_raw, "\"skipped\":");
-                        sf_tb_hits += _extract_json_uint_after(sf_raw, "\"test_bin_hits\":");
-                        sf_tb_misses += _extract_json_uint_after(sf_raw, "\"test_bin_misses\":");
+                    // Aggregate the child's per-test counts skimmed from
+                    // the `summary` line it routed to its stderr (SFEP-0050).
+                    // No summary means the child died before emitting one
+                    // (segfault/timeout); count that file's tests as failed
+                    // so the aggregate stays consistent with the non-zero
+                    // run exit code.
+                    if reap.summary_seen {
+                        sf_passed += reap.passed;
+                        sf_failed += reap.failed;
+                        sf_skipped += reap.skipped;
+                        sf_tb_hits += reap.tb_hits;
+                        sf_tb_misses += reap.tb_misses;
                     } else { sf_failed += sf_counts[ti]; }
                 }
                 ti += 1;
@@ -1395,32 +1396,24 @@ fn run(matches: Matches, ctx: CliContext) -> int ![clock, io, net] {
                 cache_store_artifact(tb_cache_root, tb_key, "test-bin", exe_path);
             }
         }
-        // Issue #364: clear any leftover assert-fail record from the
-        // previous iteration before spawning. The record is keyed
-        // off SAILFIN_TEST_SCRATCH on the C-runtime side, so we
-        // wire scratch_root through `env` rather than `process.run`
-        // directly — this works whether or not a parent process
-        // (e.g. the multi-file runner) already exported the env var.
-        let fail_record_path = scratch_root + "/fail.bin";
-        if fs.exists(fail_record_path) { fs.deleteFile(fail_record_path); }
-        // SFN-17: the recoverable harness appends to results.log ("ab"),
-        // so clear any leftover from a prior iteration/retry before exec —
-        // otherwise stale records would double-count into this file's
-        // classification.
-        let results_log_path = scratch_root + "/results.log";
-        if fs.exists(results_log_path) { fs.deleteFile(results_log_path); }
-
+        // SFEP-0050 (SFN-393): run the compiled binary under the streamed
+        // record transport — spawn with captured stdout+stderr, frame the
+        // harness's `SFTR` records off the child's stderr, and classify
+        // inline. No pre-exec unlink (no `results.log`/`fail.bin` files
+        // exist), no scratch-keyed side channel — the pipe is owned by
+        // this parent, so no nesting/concurrency collision is possible.
         if trace_runner { print.err("test runner: exec start"); }
-        let mut run_rc = process.run(_test_exec_argv(scratch_root, exe_path, update_snapshots, json_output));
+        let deadline_ms = _test_deadline_ms();
+        let mut br = _run_test_binary(exe_path, scratch_root, update_snapshots, json_output, deadline_ms);
         // Signal-kill retry (ported from `scripts/run_native_test.sh`
         // by issue #845). 137 (OOM-SIGKILL) / 139 (SIGSEGV) are
         // transient under sustained CI memory pressure on the
         // seedcheck phase of `make check`; retry once before
-        // declaring failure. Other classes — including timeouts
-        // (124), normal asserts (1), and unrelated signals — fall
-        // through immediately. `SAILFIN_TEST_RETRY=0` opts out for
-        // flake-vs-real-failure investigations.
-        if _should_retry_test(run_rc, retries_disabled) {
+        // declaring failure. A deadline kill is remapped to 124 in
+        // `_run_test_binary`, so `_should_retry_test` never retries a
+        // timeout; normal asserts (1) and unrelated signals also fall
+        // through. `SAILFIN_TEST_RETRY=0` opts out.
+        if _should_retry_test(br.rc, retries_disabled) {
             // Banner is a human-mode artifact — the `--json` stream
             // must stay pure jsonl so consumers don't have to filter
             // out interleaved decoration. The retry itself still
@@ -1428,33 +1421,26 @@ fn run(matches: Matches, ctx: CliContext) -> int ![clock, io, net] {
             if !json_output {
                 let test_basename = _package_basename(path);
                 print("[test] RETRY: " + test_basename + " (exit code "
-                    + number_to_string(run_rc)
+                    + number_to_string(br.rc)
                     + ", retrying once)");
             }
-            // Clear any record the first attempt may have written so
-            // the post-retry `_consume_assert_failure_record` only
-            // sees what the retry produced. A 137/139 process usually
-            // dies before `sailfin_assert_fail` writes a record, but
-            // a test that asserts and *then* segfaults during teardown
-            // would otherwise leave a stale record that gets
-            // misattributed to the retry attempt's outcome.
-            if fs.exists(fail_record_path) {
-                fs.deleteFile(fail_record_path);
-            }
-            if fs.exists(results_log_path) {
-                fs.deleteFile(results_log_path);
-            }
-            run_rc = process.run(_test_exec_argv(scratch_root, exe_path, update_snapshots, json_output));
+            // The streamed records live on the child's own pipe, so a
+            // retry starts from a clean channel with no stale-record
+            // carryover to unlink — the collision the file side-channel
+            // needed guarding against is structurally gone.
+            br = _run_test_binary(exe_path, scratch_root, update_snapshots, json_output, deadline_ms);
         }
+        let run_rc = br.rc;
         if trace_runner {
             print.err("test runner: exec done (exit=" + number_to_string(run_rc)
                 + ")");
         }
-        // Always consume the record (deletes fail.bin if present)
-        // so a stale record from a previous iteration can't leak
-        // into the next pass. `present=false` is the pass case.
-        let failure = _consume_assert_failure_record(scratch_root);
-        let results = _consume_test_results_log(scratch_root);
+        // Split the streamed records: `failure` is the first assert-location
+        // record (the `fail.bin` SFAF analog), `results` the `test`/`hook`
+        // classification records (the `results.log` analog). `_emit_results_events`
+        // and the crash fall-through consume these exactly as before.
+        let failure = br.failure;
+        let results = br.records;
         let file_elapsed_ms = monotonic_millis() - file_start_ms;
         // SFN-17: classify from the harness's per-test records (source of
         // truth) instead of the fail.bin index-inference — but only when
@@ -1566,11 +1552,12 @@ fn run(matches: Matches, ctx: CliContext) -> int ![clock, io, net] {
     if json_output {
         let runner_elapsed_ms = monotonic_millis() - runner_start_ms;
         let summary_line = render_summary_event(total_passed, total_failed, total_skipped, runner_elapsed_ms, test_bin_hits, test_bin_misses);
-        // Sub-frame children hand their counts to the parent via a file
-        // instead of printing a per-file summary onto the shared stream.
-        if json_subframe {
-            fs.writeFile(scratch_root + "/_subframe_summary.json", summary_line);
-        } else { print(summary_line); }
+        // Sub-frame children route their summary to their own stderr
+        // (skimmed by the parent's reap demux) instead of printing a
+        // per-file summary onto the shared stdout stream (SFEP-0050).
+        if json_subframe { print.err(summary_line); } else {
+            print(summary_line);
+        }
     } else if emit_banners {
         // Per-suite banners. Suppressed in `--json` mode (the
         // structured summary event is the source of truth there)
@@ -1877,50 +1864,6 @@ fn _clean_lowering_state(dir: string) -> int ![io] {
         fs.deleteFile(full);
     }
     return 0;
-}
-
-// Issue #364: typed assertion-failure record. Replaces the
-// stdout-grep heuristic the retired `scripts/run_native_test.sh`
-// once used.
-//
-// `sailfin_assert_fail` (runtime/native/src/sailfin_runtime.c)
-// writes a newline-delimited key:value record (magic "SFAF",
-// version, file, line, col, msg) to ${SAILFIN_TEST_SCRATCH}/fail.bin
-// when an `assert e;` failure fires inside a test process. The
-// runner reads the file after the child exits, parses it into
-// AssertFailure (the pure shape + parser live in
-// `compiler/src/assert_failure.sfn`), and surfaces typed
-// file:line:col attribution to the caller — no regex, no false
-// positives from the literal word "panic" landing in test stdout.
-//
-// `present` is the source-of-truth gate: a missing or unparseable
-// file leaves it false and the runner falls back to the previous
-// "exit code != 0 means failed" path. The struct is intentionally
-// shared with P3 / 1.1 / 1.5 (per issue #364's notes); keep its
-// shape stable.
-// Read + clear the per-test fail.bin record. Always called after
-// `process.run` returns; deletes the file so the next iteration
-// starts from a clean slate (multiple tests share one scratch_root
-// across the loop). Returns an empty failure when the file is
-// missing — the common pass case.
-fn _consume_assert_failure_record(scratch_root: string) -> AssertFailure ![io] {
-    let path = scratch_root + "/fail.bin";
-    if !fs.exists(path) { return _empty_assert_failure(); }
-    let bytes = fs.readFile(path);
-    fs.deleteFile(path);
-    return _parse_assert_failure_record(bytes);
-}
-
-// SFN-17: read + clear `results.log`, the per-test/hook result log the
-// recoverable harness appends. Returns an empty list when absent (old
-// harness, or a crash before any record was written) — the caller then
-// falls back to the fail.bin index-inference path.
-fn _consume_test_results_log(scratch_root: string) -> TestResultRecord[] ![io] {
-    let path = scratch_root + "/results.log";
-    if !fs.exists(path) { return []; }
-    let bytes = fs.readFile(path);
-    fs.deleteFile(path);
-    return parse_test_results_log(bytes);
 }
 
 // SFN-17: collect the `T` (per-test) records in emission order. The
@@ -2615,21 +2558,6 @@ fn _test_timeout_secs() -> string ![io] {
     return "300";
 }
 
-// Resolve the timeout command, mirroring the wrapper's
-// `command -v timeout` / `gtimeout` probe. macOS ships neither on
-// the bare runner image, so an empty result means "no wall-clock
-// cap" — the per-phase cap inside the compiler still bounds runaway
-// compiles, exactly as under the old script.
-fn _resolve_timeout_cmd() -> string ![io] {
-    if _shell_read_cmd("command -v timeout 2>/dev/null").length > 0 {
-        return "timeout";
-    }
-    if _shell_read_cmd("command -v gtimeout 2>/dev/null").length > 0 {
-        return "gtimeout";
-    }
-    return "";
-}
-
 // Spawn one `<self> test <file>` child under its own scratch dir,
 // wrapped in the resolved timeout command when one is available.
 // In-runner port of the script's
@@ -2687,63 +2615,15 @@ fn _append_test_filter_args(argv: string[], name_filter: string, tag_filter: str
     return out;
 }
 
-fn _run_test_child(timeout_cmd: string, timeout_secs: string, child_scratch: string, runtime_objdir: string, stamp_nonce: string, self_exe: string, path: string, name_filter: string, tag_filter: string, update_snapshots: boolean, json_output: boolean, no_test_cache: boolean) -> int ![io] {
-    // #940: `SAILFIN_TEST_RUNTIME_OBJDIR` points the child's runtime
-    // link at the shared, invocation-stable object dir the parent
-    // warmed once, so the runtime isn't recompiled per test file.
-    // #1996: `SAILFIN_TEST_RUNTIME_STAMP` carries the invocation nonce
-    // that lets the child trust the parent's runtime-identity stamp
-    // (omitted entirely when the parent wrote no stamp, keeping the
-    // argv byte-identical to the pre-stamp shape).
-    // #977: when `--update-snapshots` is active, prepend
-    // `SAILFIN_UPDATE_SNAPSHOTS=1` to the child's `env` so the child —
-    // and the test binary it execs (which inherits the child's
-    // environment through its own `env` prefix) — re-baseline golden
-    // files. When false the argv is byte-identical to the pre-#977 shape.
-    if timeout_cmd.length > 0 {
-        let mut base = [timeout_cmd, timeout_secs, "env", "SAILFIN_TEST_SCRATCH="
-            + child_scratch, "SAILFIN_TEST_RUNTIME_OBJDIR="
-            + runtime_objdir];
-        if stamp_nonce.length > 0 {
-            base.push("SAILFIN_TEST_RUNTIME_STAMP=" + stamp_nonce);
-        }
-        if update_snapshots { base.push("SAILFIN_UPDATE_SNAPSHOTS=1"); }
-        if json_output { base.push("SAILFIN_TEST_JSON_SUBFRAME=1"); }
-        base.push(self_exe);
-        base.push("test");
-        base.push(path);
-        if json_output { base.push("--json"); }
-        if no_test_cache { base.push("--no-test-cache"); }
-        return process.run(_append_test_filter_args(base, name_filter, tag_filter));
-    }
-    let mut base = ["env", "SAILFIN_TEST_SCRATCH=" + child_scratch, "SAILFIN_TEST_RUNTIME_OBJDIR="
-        + runtime_objdir];
-    if stamp_nonce.length > 0 {
-        base.push("SAILFIN_TEST_RUNTIME_STAMP=" + stamp_nonce);
-    }
-    if update_snapshots { base.push("SAILFIN_UPDATE_SNAPSHOTS=1"); }
-    if json_output { base.push("SAILFIN_TEST_JSON_SUBFRAME=1"); }
-    base.push(self_exe);
-    base.push("test");
-    base.push(path);
-    if json_output { base.push("--json"); }
-    if no_test_cache { base.push("--no-test-cache"); }
-    return process.run(_append_test_filter_args(base, name_filter, tag_filter));
-}
-
-// #1236: argv for a pooled `<self> test <file>` child. Mirrors
-// `_run_test_child`'s argv shape minus the `env KEY=VALUE` prefix —
-// a pooled child receives its per-child variables through
-// `process.spawn_with_env`'s explicit environment (see
-// `_pool_child_env`) instead of an `env(1)` wrapper, so the executed
-// command line is
-// `[<timeout> <secs>] <self> test <file> [--json] [--no-test-cache] [filters]`.
-fn _pool_child_argv(timeout_cmd: string, timeout_secs: string, self_exe: string, path: string, name_filter: string, tag_filter: string, json_output: boolean, no_test_cache: boolean) -> string[] {
+// #1236 / SFEP-0050: argv for a `<self> test <file>` sub-frame child.
+// A child receives its per-child variables through
+// `process.spawn_with_env`'s explicit environment (see `_pool_child_env`)
+// instead of an `env(1)` wrapper, so the executed command line is
+// `<self> test <file> [--json] [--no-test-cache] [filters]`. The per-file
+// deadline is enforced by the parent via `handle_kill` (SFEP-0050), so
+// there is no `timeout(1)` wrapper prefix.
+fn _pool_child_argv(self_exe: string, path: string, name_filter: string, tag_filter: string, json_output: boolean, no_test_cache: boolean) -> string[] {
     let mut base: string[] = [];
-    if timeout_cmd.length > 0 {
-        base.push(timeout_cmd);
-        base.push(timeout_secs);
-    }
     base.push(self_exe);
     base.push("test");
     base.push(path);
@@ -2843,56 +2723,348 @@ fn _emit_captured_stream(text: string, to_stderr: boolean) -> void ![io] {
     if to_stderr { print.err(out); } else { print(out); }
 }
 
-// #1236: drain + reap one pooled child. The drain MUST precede the
-// wait: `process.handle_wait` closes the pipe fds before reaping, so
-// waiting first would discard the child's output — and a child
-// blocked writing into a full pipe buffer would take SIGPIPE when
-// the read end closed, corrupting its exit code to 141.
-// `handle_read_stdout` polls BOTH streams until stdout EOF (stashing
-// stderr bytes in the handle), so the stdout-then-stderr read pair
-// drains everything without deadlock. stdout is re-emitted before
-// stderr so the `--json` per-test event stream (and human-mode test
-// output) lands on the parent's stdout grouped per file, in file
-// order — pooled output is never interleaved mid-file. A `0` handle
-// (spawn failure) reports 127, mirroring `process.run`'s
-// missing-command convention.
-fn _reap_test_child(handle: int) -> int ![io] {
-    if handle == 0 { return 127; }
-    let child_stdout = process.handle_read_stdout(handle);
-    let child_stderr = process.handle_read_stderr(handle);
-    let rc = process.handle_wait(handle);
-    _emit_captured_stream(child_stdout, false);
-    _emit_captured_stream(child_stderr, true);
-    return rc;
+// The aggregate of reaping one `<self> test <file>` sub-frame child:
+// its exit code plus the counts skimmed from the `summary` line it routes
+// to its own stderr (SFEP-0050). `summary_seen` is false when the child
+// died before emitting a summary — the caller then counts the whole file
+// as failed, as the missing-`_subframe_summary.json` fallback did.
+struct ReapResult {
+    rc: int;
+    passed: int;
+    failed: int;
+    skipped: int;
+    tb_hits: int;
+    tb_misses: int;
+    summary_seen: boolean;
+    deadline_killed: boolean;
 }
 
-// Build the argv that execs a compiled test binary. Always pins
-// `SAILFIN_TEST_SCRATCH` (the C-runtime assert-record key); #977 adds
-// `SAILFIN_UPDATE_SNAPSHOTS=1` when `--update-snapshots` is active so
-// `sfn/test::expect_snapshot` re-baselines. When `update_snapshots` is
-// false the argv is byte-identical to the pre-#977 shape.
-fn _test_exec_argv(scratch_root: string, exe_path: string, update_snapshots: boolean, json_output: boolean) -> string[] {
-    let mut argv = ["env", "SAILFIN_TEST_SCRATCH=" + scratch_root];
-    if update_snapshots { argv.push("SAILFIN_UPDATE_SNAPSHOTS=1"); }
-    if json_output {
-        // #1121: in `--json` mode the test binary's OWN stdout — user
-        // `print(...)` output from inside a test body — must not pollute
-        // the pure jsonl event stream the runner emits on the same fd.
-        // Exec the binary through `sh -c` with stdout redirected to
-        // /dev/null. stderr (the harness `RUN`/`PASS` lines + compiler
-        // diagnostics) and the `fail.bin` assert-record (a file, not a
-        // stream) are untouched, so failure attribution is unaffected.
-        // `exec "$0"` makes the shell hand its pid + exit/signal status
-        // straight to the binary, so `process.run`'s 0..255 / `128+sig`
-        // decoding is identical to the un-wrapped exec.
-        argv.push("sh");
-        argv.push("-c");
-        argv.push("exec \"$0\" >/dev/null");
-        argv.push(exe_path);
-        return argv;
+// True when `line` is a sub-frame child's `summary` jsonl line — the
+// parent consumes it (for counts) instead of forwarding it, so exactly
+// one aggregate `summary` closes the run-level document.
+fn _is_subframe_summary_line(line: string) -> boolean {
+    return index_of(line, "{\"event\":\"summary\"") == 0;
+}
+
+// Demux + reap one `<self> test <file>` sub-frame child (SFEP-0050),
+// replacing the blocking `handle_read_stdout`/`handle_read_stderr` drain.
+// Poll the child's stdout+stderr concurrently over the raw fds (reading
+// ONLY the fd `poll_any` reports ready — a not-ready blocking read would
+// deadlock; the fds go to -1 at EOF, so re-fetch each iteration). The
+// child forwards per-test `--json` events (and human output) on stdout,
+// which the parent re-emits grouped per file; it routes its `summary` line
+// and any diagnostics to stderr — the parent skims the summary for counts
+// and forwards the rest. Both streams are buffered and re-emitted once at
+// the end, so pooled output is never interleaved mid-file (stdout before
+// stderr, matching the pre-SFEP-0050 order). The per-file deadline is
+// enforced by `handle_kill`, remapped 137→124 so a timeout is never
+// confused with an OOM/crash 137. `handle_wait` is the sole reaper/free
+// path. A `0` handle (spawn failure) reports 127.
+fn _reap_test_child(handle: int, deadline_ms: int, json_output: boolean) -> ReapResult ![io] {
+    if handle == 0 {
+        return ReapResult {
+            rc: 127,
+            passed: 0,
+            failed: 0,
+            skipped: 0,
+            tb_hits: 0,
+            tb_misses: 0,
+            summary_seen: false,
+            deadline_killed: false
+        };
     }
-    argv.push(exe_path);
-    return argv;
+    let mut out_buf: string = "";
+    let mut err_fwd: string = "";
+    let mut err_buf: string = "";
+    let mut passed: int = 0;
+    let mut failed: int = 0;
+    let mut skipped: int = 0;
+    let mut tb_hits: int = 0;
+    let mut tb_misses: int = 0;
+    let mut summary_seen: boolean = false;
+    let mut deadline_killed: boolean = false;
+    let start_ms = monotonic_millis();
+    loop {
+        if process.handle_stdout_at_eof(handle) && process.handle_stderr_at_eof(handle) {
+            break;
+        }
+        let mut poll_to: int = -1;
+        if deadline_ms > 0 {
+            let remaining: int = deadline_ms - ((monotonic_millis() - start_ms) as int);
+            if remaining <= 0 {
+                process.handle_kill(handle);
+                deadline_killed = true;
+                break;
+            }
+            poll_to = remaining;
+        }
+        let out_fd = process.handle_stdout_fd(handle);
+        let err_fd = process.handle_stderr_fd(handle);
+        let mut fds: int[] = [];
+        if out_fd >= 0 { fds.push(out_fd); }
+        if err_fd >= 0 { fds.push(err_fd); }
+        if fds.length == 0 { break; }
+        let ready = io.poll_any(fds, poll_to);
+        if ready < 0 {
+            if deadline_ms > 0 && ((monotonic_millis() - start_ms) as int) >= deadline_ms {
+                process.handle_kill(handle);
+                deadline_killed = true;
+                break;
+            }
+            continue;
+        }
+        if ready == out_fd {
+            let chunk = process.handle_read_bytes_stdout(handle, 65536);
+            if chunk.length > 0 { out_buf = out_buf + chunk; }
+        } else if ready == err_fd {
+            let chunk = process.handle_read_bytes_stderr(handle, 65536);
+            if chunk.length > 0 {
+                err_buf = err_buf + chunk;
+                loop {
+                    let nl = index_of(err_buf, "\n");
+                    if nl < 0 { break; }
+                    let line = substring(err_buf, 0, nl);
+                    err_buf = substring(err_buf, nl + 1, err_buf.length);
+                    if json_output && _is_subframe_summary_line(line) {
+                        passed += _extract_json_uint_after(line, "\"passed\":");
+                        failed += _extract_json_uint_after(line, "\"failed\":");
+                        skipped += _extract_json_uint_after(line, "\"skipped\":");
+                        tb_hits += _extract_json_uint_after(line, "\"test_bin_hits\":");
+                        tb_misses += _extract_json_uint_after(line, "\"test_bin_misses\":");
+                        summary_seen = true;
+                    } else { err_fwd = err_fwd + line + "\n"; }
+                }
+            }
+        }
+    }
+    // Trailing partial stderr line (mid-crash): never a complete summary
+    // (a summary line ends with \n); forward it as a diagnostic.
+    if err_buf.length > 0 { err_fwd = err_fwd + err_buf; }
+    let rc0 = process.handle_wait(handle);
+    let mut rc = rc0;
+    if deadline_killed { rc = 124; }
+    // Emit grouped per file, stdout then stderr (never interleaved mid-file).
+    _emit_captured_stream(out_buf, false);
+    _emit_captured_stream(err_fwd, true);
+    return ReapResult {
+        rc: rc,
+        passed: passed,
+        failed: failed,
+        skipped: skipped,
+        tb_hits: tb_hits,
+        tb_misses: tb_misses,
+        summary_seen: summary_seen,
+        deadline_killed: deadline_killed
+    };
+}
+
+// SFEP-0050 (SFN-393): the parser's normalized kind tag for an
+// assert-location record. MUST equal the tag `test_results.sfn` emits for
+// an `assert` SFTR record (the runner splits on it to reconstruct the
+// `AssertFailure` the classifier consumes).
+let _STREAM_ASSERT_KIND: string = "A";
+
+// Result of running one compiled test binary under the streamed-record
+// transport (SFEP-0050). `records` holds only the `test`/`hook`
+// classification records (the assert-location records are split out into
+// `failure`); `rc` is the child's exit code, remapped to 124 when the
+// runner SIGKILLed it on the per-file deadline (so a deadline timeout is
+// never confused with an OOM/crash 137 — see `_run_test_binary`).
+struct TestBinResult {
+    rc: int;
+    records: TestResultRecord[];
+    failure: AssertFailure;
+    deadline_killed: boolean;
+}
+
+// Build the compiled test binary's ENTIRE environment for
+// `spawn_with_env` (empty means empty, never inherit). Snapshot the
+// parent env and override the two keys the binary reads at runtime:
+// `SAILFIN_TEST_SCRATCH` (the streamed-record enable gate + the `sfn/test`
+// fixtures' temp-dir root — `with_tmp_dir`/`nested_runner_scratch`) and
+// `SAILFIN_UPDATE_SNAPSHOTS` (snapshot rebaseline). Inherited copies are
+// dropped first so POSIX `getenv` (first match wins) returns the override.
+fn _test_exec_env(scratch_root: string, update_snapshots: boolean) -> string[] ![io] {
+    let base = process.environ();
+    let mut env_flat: string[] = [];
+    let mut i: int = 0;
+    loop {
+        if i >= base.length { break; }
+        let e = base[i];
+        if !_env_entry_has_key(e, "SAILFIN_TEST_SCRATCH") && !_env_entry_has_key(e, "SAILFIN_UPDATE_SNAPSHOTS") {
+            env_flat.push(e);
+        }
+        i += 1;
+    }
+    env_flat.push("SAILFIN_TEST_SCRATCH=" + scratch_root);
+    if update_snapshots { env_flat.push("SAILFIN_UPDATE_SNAPSHOTS=1"); }
+    return env_flat;
+}
+
+fn _assert_failure_from_record(r: TestResultRecord) -> AssertFailure {
+    return AssertFailure {
+        present: true,
+        file: r.file,
+        line: r.line,
+        col: r.col,
+        message: r.message
+    };
+}
+
+// The first `assert`-kind record in stream order → the `AssertFailure`
+// the classifier consumes (the exact analog of "first SFAF record from
+// `fail.bin`"), or an empty failure when the child emitted none.
+fn _first_assert_failure(all: TestResultRecord[]) -> AssertFailure {
+    let mut i: int = 0;
+    loop {
+        if i >= all.length { break; }
+        if strings_equal(all[i].kind, _STREAM_ASSERT_KIND) {
+            return _assert_failure_from_record(all[i]);
+        }
+        i += 1;
+    }
+    return _empty_assert_failure();
+}
+
+// The `test`/`hook` classification records, assert-location records split
+// out — the analog of `results.log`'s `T`/`H` records.
+fn _test_hook_records(all: TestResultRecord[]) -> TestResultRecord[] {
+    let mut out: TestResultRecord[] = [];
+    let mut i: int = 0;
+    loop {
+        if i >= all.length { break; }
+        if !strings_equal(all[i].kind, _STREAM_ASSERT_KIND) {
+            out.push(all[i]);
+        }
+        i += 1;
+    }
+    return out;
+}
+
+// One complete line off the child's stderr → a parsed SFTR record pushed
+// onto `all`, or a non-record diagnostic forwarded to the runner's stderr
+// (compiler errors, crash spew, harness breadcrumbs — exactly what
+// inherited stdio surfaced before).
+fn _ingest_child_stderr_line(line: string, all: TestResultRecord[]) -> void ![io] {
+    let rec = parse_test_record_line(line);
+    if rec != null {
+        let r: TestResultRecord = rec;
+        all.push(r);
+    } else { print.err(line); }
+}
+
+// Per-file wall-clock budget in milliseconds, from `_test_timeout_secs()`
+// (default 300s). `<= 0` means no deadline — `poll_any` blocks. The
+// streamed transport enforces this handle-owned deadline via
+// `handle_kill`, retiring the outer `timeout(1)` wrapper.
+fn _test_deadline_ms() -> int ![io] {
+    let secs_text = _test_timeout_secs();
+    let mut secs: int = 0;
+    let mut i: int = 0;
+    loop {
+        if i >= secs_text.length { break; }
+        let c = char_code_at_text(secs_text, i);
+        if c < 48 { break; }
+        if c > 57 { break; }
+        secs = secs * 10 + (c - 48);
+        i += 1;
+    }
+    if secs <= 0 { return 0; }
+    return secs * 1000;
+}
+
+// Run one compiled test binary under the streamed-record transport
+// (SFEP-0050), replacing the `process.run` exec + `results.log`/`fail.bin`
+// read-back. Spawn with a captured stdout+stderr pair; the harness frames
+// `SFTR` records onto the child's stderr, so demux the two pipes with
+// `io.poll_any` over the raw fds (reading ONLY the fd poll reports ready —
+// the chunk reads are blocking `read(2)` mirrors, so reading a not-ready
+// fd would deadlock; the fds go to -1 at EOF, so re-fetch each iteration).
+// stderr is chunk-accumulated and split into complete lines, each framed
+// into a record or forwarded as a diagnostic. stdout is user output:
+// dropped in `--json` mode (retiring the `sh -c 'exec "$0" >/dev/null'`
+// swallow), buffered and re-emitted once at end in human mode (byte-
+// faithful, mirroring the old per-child single re-emit). The per-file
+// deadline is enforced by `handle_kill`; a deadline kill is remapped from
+// 137 to 124 so it is never confused with an OOM/crash 137 (see §f of the
+// SFN-393 runner-transport design note). `handle_wait` is the sole
+// reaper/free path and is always called.
+fn _run_test_binary(exe_path: string, scratch_root: string, update_snapshots: boolean, json_output: boolean, deadline_ms: int) -> TestBinResult ![io] {
+    let env = _test_exec_env(scratch_root, update_snapshots);
+    let h = process.spawn_with_env([exe_path], env);
+    if h == 0 {
+        // Spawn failure — mirror `process.run`'s 127 missing-command code.
+        return TestBinResult {
+            rc: 127,
+            records: [],
+            failure: _empty_assert_failure(),
+            deadline_killed: false
+        };
+    }
+    let mut all: TestResultRecord[] = [];
+    let mut out_buf: string = "";
+    let mut err_buf: string = "";
+    let mut deadline_killed: boolean = false;
+    let start_ms = monotonic_millis();
+    loop {
+        if process.handle_stdout_at_eof(h) && process.handle_stderr_at_eof(h) {
+            break;
+        }
+        let mut poll_to: int = -1;
+        if deadline_ms > 0 {
+            let remaining: int = deadline_ms - ((monotonic_millis() - start_ms) as int);
+            if remaining <= 0 {
+                process.handle_kill(h);
+                deadline_killed = true;
+                break;
+            }
+            poll_to = remaining;
+        }
+        let out_fd = process.handle_stdout_fd(h);
+        let err_fd = process.handle_stderr_fd(h);
+        let mut fds: int[] = [];
+        if out_fd >= 0 { fds.push(out_fd); }
+        if err_fd >= 0 { fds.push(err_fd); }
+        if fds.length == 0 { break; }
+        let ready = io.poll_any(fds, poll_to);
+        if ready < 0 {
+            if deadline_ms > 0 && ((monotonic_millis() - start_ms) as int) >= deadline_ms {
+                process.handle_kill(h);
+                deadline_killed = true;
+                break;
+            }
+            continue;
+        }
+        if ready == out_fd {
+            let chunk = process.handle_read_bytes_stdout(h, 65536);
+            if chunk.length > 0 && !json_output { out_buf = out_buf + chunk; }
+        } else if ready == err_fd {
+            let chunk = process.handle_read_bytes_stderr(h, 65536);
+            if chunk.length > 0 {
+                err_buf = err_buf + chunk;
+                loop {
+                    let nl = index_of(err_buf, "\n");
+                    if nl < 0 { break; }
+                    let line = substring(err_buf, 0, nl);
+                    err_buf = substring(err_buf, nl + 1, err_buf.length);
+                    _ingest_child_stderr_line(line, all);
+                }
+            }
+        }
+    }
+    // Trailing partial line (mid-crash): try to frame it, else forward.
+    if err_buf.length > 0 { _ingest_child_stderr_line(err_buf, all); }
+    // Human-mode user output, emitted once (byte-faithful single re-emit).
+    if out_buf.length > 0 { _emit_captured_stream(out_buf, false); }
+    let rc0 = process.handle_wait(h);
+    let mut rc = rc0;
+    if deadline_killed { rc = 124; }
+    return TestBinResult {
+        rc: rc,
+        records: _test_hook_records(all),
+        failure: _first_assert_failure(all),
+        deadline_killed: deadline_killed
+    };
 }
 
 // Tear down a runner-owned ephemeral scratch tree, mirroring the
@@ -2917,11 +3089,12 @@ fn _cleanup_test_scratch(owned: boolean, scratch_root: string, success: boolean)
 
 // Extract the unsigned integer that follows `key` in `text` (a small,
 // allocation-free reader over a known-shape jsonl line). Used by the
-// multi-file `--json` parent to aggregate each child's
-// `_subframe_summary.json` counts (`"passed":N` / `"failed":N` /
-// `"skipped":N`). Returns 0 when the key is absent or not followed by a
-// digit. Deliberately tiny rather than a full JSON parse: the input is
-// the runner's own `render_summary_event` output, whose shape is pinned.
+// multi-file `--json` parent to aggregate each sub-frame child's counts
+// from the `summary` line it routes to its stderr (`"passed":N` /
+// `"failed":N` / `"skipped":N` / `"test_bin_hits":N` — SFEP-0050).
+// Returns 0 when the key is absent or not followed by a digit.
+// Deliberately tiny rather than a full JSON parse: the input is the
+// runner's own `render_summary_event` output, whose shape is pinned.
 fn _extract_json_uint_after(text: string, key: string) -> int {
     let idx = index_of(text, key);
     if idx < 0 { return 0; }
