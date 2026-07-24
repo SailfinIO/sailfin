@@ -78,6 +78,7 @@ The next number is `max + 1`. Add a row in the same PR that introduces an SFEP.
 | [0053](./0053-shape-typed-tensor-ir.md) | Shape-Typed Tensor IR and Fusion | Accepted | tooling |
 | [0054](./0054-low-precision-numerics.md) | Low-Precision Numeric Substrate | Accepted | language |
 | [0055](./0055-typed-task-handles.md) | Typed task handles (`Task<T>`) and ordered multi-await (`join_all`) | Accepted | language |
+| [0056](./0056-aarch64-linux-target.md) | aarch64-Linux Target Support (Raspberry Pi Install + On-Device Self-Host) | Accepted | runtime |
 
 ## Drafts under review (numbers assigned at merge)
 

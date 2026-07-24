@@ -1,7 +1,7 @@
 ---
-sfep: TBD
+sfep: 0056
 title: aarch64-Linux Target Support (Raspberry Pi Install + On-Device Self-Host)
-status: Draft
+status: Accepted
 type: runtime
 created: 2026-07-24
 updated: 2026-07-24
@@ -12,7 +12,7 @@ superseded-by:
 graduates-to:
 ---
 
-# SFEP-XXXX — aarch64-Linux Target Support (Raspberry Pi Install + On-Device Self-Host)
+# SFEP-0056 — aarch64-Linux Target Support (Raspberry Pi Install + On-Device Self-Host)
 
 > Design deliverable for the **aarch64-Linux target support** epic (Build &
 > Toolchain initiative, sibling of Native Windows Self-Host / SFEP-0021). No
