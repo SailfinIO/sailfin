@@ -79,6 +79,7 @@ The next number is `max + 1`. Add a row in the same PR that introduces an SFEP.
 | [0054](./0054-low-precision-numerics.md) | Low-Precision Numeric Substrate | Accepted | language |
 | [0055](./0055-typed-task-handles.md) | Typed task handles (`Task<T>`) and ordered multi-await (`join_all`) | Accepted | language |
 | [0056](./0056-aarch64-linux-target.md) | aarch64-Linux Target Support (Raspberry Pi Install + On-Device Self-Host) | Accepted | runtime |
+| [0057](./0057-string-interpolation-dollar.md) | String Interpolation with `${ }` (migrating off `{{ }}`) | Accepted | language |
 
 ## Drafts under review (numbers assigned at merge)
 
@@ -94,7 +95,6 @@ language gaps surfaced by the 2026-07 grammar/object-model audit:
 | [`draft-interface-signature-conformance`](./draft-interface-signature-conformance.md) | Signature-Checked Interface Conformance | language |
 | [`draft-exhaustive-match`](./draft-exhaustive-match.md) | Compile-Time Match Exhaustiveness Checking | language |
 | [`draft-derive`](./draft-derive.md) | Derivable Interface Implementations (`@derive`) | language |
-| [`draft-string-interpolation-dollar`](./draft-string-interpolation-dollar.md) | String Interpolation with `${ }` (migrating off `{{ }}`) | language |
 | [`draft-nullable-access-operators`](./draft-nullable-access-operators.md) | Nullable Access Operators (`?.` and `??`) | language |
 | [`draft-import-surface-compaction`](./draft-import-surface-compaction.md) | Import-surface compaction across the phase rewind to cut emit peak RSS | runtime |
 | [`draft-concurrency-cancellation`](./draft-concurrency-cancellation.md) | Concurrency runtime maturity — cancel-on-fault and async I/O | runtime |

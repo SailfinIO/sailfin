@@ -698,9 +698,11 @@ Tracked in the [roadmap](https://sailfin.dev/roadmap) and
 
 - **Type annotations (`:` vs `->`)** — **migrated.** `:` for params, vars,
   fields; `->` for return types only. Parser enforces both positions.
-- **String interpolation (`{{ }}` vs `${ }`)** — open. `{{ }}` means the
-  opposite of its meaning in every mainstream template language; LLMs
-  systematically generate wrong code. `${ }` migration is planned pre-1.0.
+- **String interpolation (`{{ }}` vs `${ }`)** — open; migration designed and
+  scheduled. `{{ }}` means the opposite of its meaning in every mainstream
+  template language; LLMs systematically generate wrong code. The `${ }`
+  migration plan (dual-accept → deprecate → migrate → drop `{{ }}`) is
+  SFEP-0057 (`docs/proposals/0057-string-interpolation-dollar.md`, Accepted).
 - **Error handling** — largely closed. `Result<T, E>` + `?` ship end-to-end
   (#832–#834, spec §12). Remaining: `From<E>` coercion and the `E: Error`
   bound, both gated on generic constraints. `try`/`catch` remains for
