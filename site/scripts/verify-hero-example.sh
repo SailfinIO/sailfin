@@ -19,15 +19,18 @@ if [[ "$version" != "sfn 0.8.0" ]]; then
   exit 1
 fi
 
-timeout 60 "$compiler" check "$fixture_dir/hello.sfn"
-timeout 60 "$compiler" build -o "$scratch/hello" "$fixture_dir/hello.sfn"
+(
+  cd "$scratch"
+  timeout 60 "$compiler" check "$fixture_dir/hello.sfn"
+  timeout 60 "$compiler" build -o "$scratch/hello" "$fixture_dir/hello.sfn"
+)
 actual_output="$($scratch/hello)"
 [[ "$actual_output" == "Hello, Sailfin!" ]] || {
   printf 'unexpected hero output: %q\n' "$actual_output" >&2
   exit 1
 }
 
-if timeout 60 "$compiler" check "$fixture_dir/hello_missing_effect.sfn" >"$scratch/negative.log" 2>&1; then
+if (cd "$scratch" && timeout 60 "$compiler" check "$fixture_dir/hello_missing_effect.sfn") >"$scratch/negative.log" 2>&1; then
   echo "missing-effect fixture unexpectedly passed" >&2
   exit 1
 fi

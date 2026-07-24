@@ -54,6 +54,7 @@ jobs:
     timeout-minutes: 5
     outputs:
       source: ${{ steps.scope.outputs.source }}
+      site_hero: ${{ steps.scope.outputs.site_hero }}
     steps:
       - name: Checkout repository
         uses: actions/checkout@v7
@@ -67,11 +68,15 @@ jobs:
           set -euo pipefail
 
           source=true
+          site_hero=true
           reason="full compiler CI for ${GITHUB_EVENT_NAME}"
+          site_hero_reason="hero verification for ${GITHUB_EVENT_NAME}"
 
           if [ "${GITHUB_EVENT_NAME}" = "pull_request" ]; then
             source=false
+            site_hero=false
             reason="no compiler/runtime/build-system paths changed"
+            site_hero_reason="no homepage hero contract paths changed"
             base="${{ github.event.pull_request.base.sha }}"
             head="${{ github.event.pull_request.head.sha }}"
 
@@ -82,20 +87,49 @@ jobs:
                 compiler/*|runtime/*|capsules/*|scripts/*|Makefile|bootstrap.toml|.github/workflows/ci.yml|.github/actions/*)
                   source=true
                   reason="compiler/runtime/build-system path changed: $path"
-                  break
+                  ;;
+              esac
+              case "$path" in
+                site/examples/hero-effects/*|site/scripts/verify-hero-example.sh|site/src/components/Hero.astro|site/package.json|bootstrap.toml|.github/workflows/ci.yml)
+                  site_hero=true
+                  site_hero_reason="homepage hero contract path changed: $path"
                   ;;
               esac
             done < changed-files.txt
           fi
 
           echo "source=$source" >> "$GITHUB_OUTPUT"
+          echo "site_hero=$site_hero" >> "$GITHUB_OUTPUT"
           echo "[ci-scope] source=$source ($reason)"
+          echo "[ci-scope] site_hero=$site_hero ($site_hero_reason)"
           {
             echo "### CI scope"
             echo ""
             echo "- compiler CI in scope: \`$source\`"
             echo "- reason: $reason"
+            echo "- homepage hero verification in scope: \`$site_hero\`"
+            echo "- reason: $site_hero_reason"
           } >> "$GITHUB_STEP_SUMMARY"
+
+  check-site-hero:
+    name: Verify homepage Sailfin example
+    needs: ci-scope
+    if: ${{ needs.ci-scope.outputs.site_hero == 'true' }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v7
+
+      - name: Fetch released seed compiler
+        shell: bash
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: make fetch-seed
+
+      - name: Verify checked hero fixtures
+        working-directory: site
+        run: npm run check:hero
 
   # Assert the native shard map (`sfn dev shard`, SFN-200) still covers every
   # test file `make test` runs — no gaps, no overlaps. The whole point of
@@ -1317,6 +1351,7 @@ jobs:
     name: Required CI gate
     needs:
       - ci-scope
+      - check-site-hero
       - check-fast
       - build-compiler-linux
       - build-compiler-macos
@@ -1330,6 +1365,8 @@ jobs:
     env:
       CI_SCOPE_RESULT: ${{ needs.ci-scope.result }}
       SOURCE_CI: ${{ needs.ci-scope.outputs.source }}
+      SITE_HERO_CI: ${{ needs.ci-scope.outputs.site_hero }}
+      CHECK_SITE_HERO: ${{ needs.check-site-hero.result }}
       CHECK_FAST: ${{ needs.check-fast.result }}
       BUILD_COMPILER_LINUX: ${{ needs.build-compiler-linux.result }}
       BUILD_COMPILER_MACOS: ${{ needs.build-compiler-macos.result }}
@@ -1350,6 +1387,7 @@ jobs:
             echo "| --- | --- |"
             echo "| CI scope job | ${CI_SCOPE_RESULT:-unset} |"
             echo "| CI scope output | ${SOURCE_CI:-unset} |"
+            echo "| Homepage hero scope output | ${SITE_HERO_CI:-unset} |"
           } >> "$GITHUB_STEP_SUMMARY"
 
           if [ "${CI_SCOPE_RESULT:-}" != "success" ]; then
@@ -1357,14 +1395,13 @@ jobs:
             exit 1
           fi
 
-          if [ "${SOURCE_CI:-}" = "false" ]; then
-            echo "[required-ci] compiler CI is out of scope for this PR; required gate passes."
-            echo "| Compiler CI | skipped by path scope |" >> "$GITHUB_STEP_SUMMARY"
-            exit 0
+          if [ "${SOURCE_CI:-}" != "true" ] && [ "${SOURCE_CI:-}" != "false" ]; then
+            echo "[required-ci] CI scope emitted unexpected source value: ${SOURCE_CI:-unset}" >&2
+            exit 1
           fi
 
-          if [ "${SOURCE_CI:-}" != "true" ]; then
-            echo "[required-ci] CI scope emitted unexpected source value: ${SOURCE_CI:-unset}" >&2
+          if [ "${SITE_HERO_CI:-}" != "true" ] && [ "${SITE_HERO_CI:-}" != "false" ]; then
+            echo "[required-ci] CI scope emitted unexpected homepage hero value: ${SITE_HERO_CI:-unset}" >&2
             exit 1
           fi
 
@@ -1379,17 +1416,29 @@ jobs:
             fi
           }
 
-          check "Fast static check (sfn check compiler/src/)" "$CHECK_FAST"
-          check "Build compiler [linux-x86_64]" "$BUILD_COMPILER_LINUX"
-          check "Build compiler [macos-arm64]" "$BUILD_COMPILER_MACOS"
-          check "Shard-cover lint" "$SHARD_COVER"
-          check "Build + Test [linux-x86_64]" "$BUILD_LINUX"
-          check "Build + Test [macos-arm64]" "$BUILD_MACOS"
-          check "Smoke test [windows-x86_64]" "$SMOKE_WINDOWS"
+          if [ "${SOURCE_CI:-}" = "true" ]; then
+            check "Fast static check (sfn check compiler/src/)" "$CHECK_FAST"
+            check "Build compiler [linux-x86_64]" "$BUILD_COMPILER_LINUX"
+            check "Build compiler [macos-arm64]" "$BUILD_COMPILER_MACOS"
+            check "Shard-cover lint" "$SHARD_COVER"
+            check "Build + Test [linux-x86_64]" "$BUILD_LINUX"
+            check "Build + Test [macos-arm64]" "$BUILD_MACOS"
+            check "Smoke test [windows-x86_64]" "$SMOKE_WINDOWS"
+          else
+            echo "[required-ci] compiler CI is out of scope for this PR."
+            echo "| Compiler CI | skipped by path scope |" >> "$GITHUB_STEP_SUMMARY"
+          fi
+
+          if [ "${SITE_HERO_CI:-}" = "true" ]; then
+            check "Verify homepage Sailfin example" "$CHECK_SITE_HERO"
+          else
+            echo "[required-ci] homepage hero verification is out of scope for this PR."
+            echo "| Homepage hero verification | skipped by path scope |" >> "$GITHUB_STEP_SUMMARY"
+          fi
 
           if [ "$fail" -gt 0 ]; then
-            echo "[required-ci] $fail required compiler CI job(s) did not succeed." >&2
+            echo "[required-ci] $fail required CI job(s) did not succeed." >&2
             exit 1
           fi
 
-          echo "[required-ci] all required compiler CI jobs passed."
+          echo "[required-ci] all in-scope required CI jobs passed."

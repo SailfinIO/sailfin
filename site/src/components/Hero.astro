@@ -22,7 +22,7 @@ const installCmd = "curl -fsSL https://raw.githubusercontent.com/SailfinIO/sailf
         A systems language where every function declares its capabilities — IO, network, clock, and more — with compile-time effect checking.
       </p>
       <div class="hero-actions">
-        <a href="/docs/getting-started/install" class="btn btn-primary">Get Started in Ten Minutes</a>
+        <a href="/docs/getting-started/install" class="btn btn-primary">Get Started</a>
         <a href="/docs/getting-started/tour" class="btn btn-secondary">Take the Tour</a>
       </div>
       <div class="hero-install" role="group" aria-label="Install command">
@@ -44,15 +44,9 @@ const installCmd = "curl -fsSL https://raw.githubusercontent.com/SailfinIO/sailf
           <span class="dot red"></span>
           <span class="dot yellow"></span>
           <span class="dot green"></span>
-          <span class="code-filename">hello.sfn · verified with 0.8.0</span>
+          <span class="code-filename">hello.sfn</span>
         </div>
         <pre><code>{exampleCode}</code></pre>
-        <div class="effect-proof">
-          Remove <code>![io]</code> from <code>main</code> and the compiler reports{" "}
-          <strong>E0400: missing required effect io.console</strong>. Restore it and the program prints{" "}
-          <samp>Hello, Sailfin!</samp>.
-        </div>
-        <p class="example-contract">Built-in <code>print</code> needs no import; a standalone file needs no capsule manifest.</p>
       </div>
     </div>
   </div>
@@ -288,32 +282,6 @@ const installCmd = "curl -fsSL https://raw.githubusercontent.com/SailfinIO/sailf
     font-size: 0.825rem;
     background: none;
     padding: 0;
-  }
-
-  .effect-proof {
-    padding: 1rem 1.5rem 0.75rem;
-    border-top: 1px solid var(--color-border);
-    color: var(--color-text-secondary);
-    font-size: 0.8rem;
-    line-height: 1.55;
-  }
-
-  .effect-proof code,
-  .effect-proof samp,
-  .example-contract code {
-    color: var(--color-text);
-    font-family: var(--font-mono);
-  }
-
-  .effect-proof strong {
-    color: var(--color-text);
-  }
-
-  .example-contract {
-    margin: 0;
-    padding: 0 1.5rem 1rem;
-    color: var(--color-text-secondary);
-    font-size: 0.72rem;
   }
 
   @media (max-width: 900px) {
