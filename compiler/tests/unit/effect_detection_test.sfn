@@ -33,6 +33,11 @@
 //   serve(handler)        net         Serve   (parser → Serve node; Call arm also covered)
 //   sleep(1.0)            clock       Call    (descriptor)
 //
+// `gpu` is gated at the capsule declaration boundary (`sfn/device`),
+// following the `rand`/`random_bytes` model; it therefore has no entry in
+// this table by design. Its coverage lives in
+// `compiler/tests/e2e/gpu_effect_gate_test.sfn`.
+//
 // NOTE on spawn/serve: the parser intercepts `spawn(...)`/`serve(...)` into
 // dedicated `Spawn`/`Serve` AST nodes (concurrency frontend), NOT generic
 // `Call` expressions — so real source is covered by the `Spawn`/`Serve`

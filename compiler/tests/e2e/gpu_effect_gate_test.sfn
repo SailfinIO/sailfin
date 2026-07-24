@@ -1,0 +1,133 @@
+// End-to-end test for the `![gpu]` effect gate on `sfn/device::matmul_f64` /
+// `synchronize` (SFEP-0052 §3.2, SFN-428).
+//
+// Pins the acceptance criterion "the effect gate is real": a caller that
+// omits `![gpu]` must fail `sfn check` when it calls a public `sfn/device`
+// wrapper, while a caller that declares `![gpu]` passes — directly or
+// transitively. The enforcement rides on the existing callee-effect
+// propagation (`effect_imports.sfn`), not on any call-name detector —
+// `matmul_f64`/`synchronize` carry `![gpu]` on their declaration and
+// propagation does the rest.
+//
+// Modeled on `rand_effect_gate_test.sfn`: write a fixture, run the
+// frontend-only `sfn check`, and assert on the combined stdout+stderr with
+// `sfn/strings` predicates (the `sfn/test` `expect_*` matchers are `![pure]`
+// and cannot be called from an `![io]` test). `sfn check` links nothing, so
+// the child runs with an empty environment; `sfn/device` resolves against
+// the capsule search path rooted at the runner's cwd (the repo root), the
+// same way this test's own `import ... from "sfn/strings"` resolves.
+//
+// Assertions target the effect NAME and the `E040` prefix, never an exact
+// full code — E0400 (in-module) vs E0402 (cross-module import) depends on
+// how propagation attributes the imported callee.
+import { find } from "sfn/strings";
+
+fn _sfn_bin() -> string ![io] {
+    let configured = env.get("SAILFIN_BIN");
+    if configured.length > 0 { return configured; }
+    return "build/bin/sfn";
+}
+
+fn _ok_source() -> string {
+    return "import { matmul_f64 } from \"sfn/device\";\n"
+        + "fn run() -> int ![gpu] {\n"
+        + "    return matmul_f64([1.0,2.0,3.0,4.0], 2, 2, [1.0,0.0,0.0,1.0], 2).length;\n"
+        + "}\n"
+        + "export { run };\n";
+}
+
+fn _missing_source() -> string {
+    return "import { matmul_f64 } from \"sfn/device\";\n"
+        + "fn run() -> int {\n"
+        + "    return matmul_f64([1.0,2.0,3.0,4.0], 2, 2, [1.0,0.0,0.0,1.0], 2).length;\n"
+        + "}\n"
+        + "export { run };\n";
+}
+
+fn _synchronize_missing_source() -> string {
+    return "import { synchronize } from \"sfn/device\";\n" + "fn run() {\n"
+        + "    synchronize();\n"
+        + "}\n"
+        + "export { run };\n";
+}
+
+fn _transitive_missing_source() -> string {
+    return "import { matmul_f64 } from \"sfn/device\";\n"
+        + "fn inner() -> int ![gpu] {\n"
+        + "    return matmul_f64([1.0,2.0,3.0,4.0], 2, 2, [1.0,0.0,0.0,1.0], 2).length;\n"
+        + "}\n"
+        + "fn outer() -> int {\n"
+        + "    return inner();\n"
+        + "}\n"
+        + "export { outer };\n";
+}
+
+fn _transitive_ok_source() -> string {
+    return "import { matmul_f64 } from \"sfn/device\";\n"
+        + "fn inner() -> int ![gpu] {\n"
+        + "    return matmul_f64([1.0,2.0,3.0,4.0], 2, 2, [1.0,0.0,0.0,1.0], 2).length;\n"
+        + "}\n"
+        + "fn outer() -> int ![gpu] {\n"
+        + "    return inner();\n"
+        + "}\n"
+        + "export { outer };\n";
+}
+
+struct _CheckRun {
+    exit: int;
+    output: string;
+    path: string;
+}
+
+fn _run_check(source: string) -> _CheckRun ![io] {
+    let dir = fs.mkdtemp("sfn-gpu-effect-");
+    let path = dir + "/fixture.sfn";
+    fs.writeFile(path, source);
+    let exit = process.run_capture([_sfn_bin(), "check", path], []);
+    let out = process.capture_take_stdout();
+    let err = process.capture_take_stderr();
+    fs.deleteFile(path);
+    fs.removeDirectory(dir);
+    return _CheckRun { exit: exit, output: out + err, path: path };
+}
+
+test "gpu effect gate: a ![gpu] caller of matmul_f64 checks clean" ![io] {
+    let r = _run_check(_ok_source());
+    assert r.exit == 0;
+}
+
+test "gpu effect gate: a caller missing ![gpu] fails effect-check" ![io] {
+    let r = _run_check(_missing_source());
+    assert r.exit != 0;
+    assert find(r.output, "gpu", 0) >= 0;
+    assert find(r.output, "E040", 0) >= 0;
+}
+
+test "gpu effect gate: the missing-effect diagnostic carries a fix-it" ![io] {
+    let r = _run_check(_missing_source());
+    assert find(r.output, "add ![gpu]", 0) >= 0;
+}
+
+test "gpu effect gate: the diagnostic is spanned at the call site" ![io] {
+    let r = _run_check(_missing_source());
+    assert find(r.output, r.path, 0) >= 0;
+    assert find(r.output, "matmul_f64", 0) >= 0;
+}
+
+test "gpu effect gate: synchronize is gated too" ![io] {
+    let r = _run_check(_synchronize_missing_source());
+    assert r.exit != 0;
+    assert find(r.output, "gpu", 0) >= 0;
+}
+
+test "gpu effect gate: a transitive caller must declare ![gpu]" ![io] {
+    let r = _run_check(_transitive_missing_source());
+    assert r.exit != 0;
+    assert find(r.output, "gpu", 0) >= 0;
+    assert find(r.output, "outer", 0) >= 0;
+}
+
+test "gpu effect gate: a transitive caller declaring ![gpu] checks clean" ![io] {
+    let r = _run_check(_transitive_ok_source());
+    assert r.exit == 0;
+}

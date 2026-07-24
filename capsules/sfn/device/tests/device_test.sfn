@@ -1,0 +1,43 @@
+import {
+    active_backend,
+    backends,
+    has_accelerator,
+    matmul_f64,
+    synchronize
+} from "../src/mod";
+
+test "device: only the cpu reference backend is registered" {
+    let list = backends();
+    assert list.length == 1;
+    assert list[0] == "cpu";
+    assert active_backend() == "cpu";
+    assert has_accelerator() == false;
+}
+
+test "device: matmul_f64 matches the reference product" ![gpu] {
+    let identity = matmul_f64([1.0, 0.0, 0.0, 1.0], 2, 2, [1.0, 0.0, 0.0, 1.0], 2);
+    assert identity.length == 4;
+    assert identity[0] == 1.0;
+    assert identity[1] == 0.0;
+    assert identity[2] == 0.0;
+    assert identity[3] == 1.0;
+
+    // a: 2x3, b: 3x2 => 2x2
+    let a = [1.0, 2.0, 3.0, 4.0, 5.0, 6.0];
+    let b = [7.0, 8.0, 9.0, 10.0, 11.0, 12.0];
+    let product = matmul_f64(a, 2, 3, b, 2);
+    assert product.length == 4;
+    assert product[0] == 58.0;
+    assert product[1] == 64.0;
+    assert product[2] == 139.0;
+    assert product[3] == 154.0;
+}
+
+test "device: matmul_f64 returns [] on a shape mismatch" ![gpu] {
+    assert matmul_f64([1.0], 2, 2, [1.0], 2).length == 0;
+}
+
+test "device: synchronize is callable on the cpu backend" ![gpu] {
+    synchronize();
+    assert true;
+}
