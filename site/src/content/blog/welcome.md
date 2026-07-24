@@ -7,6 +7,8 @@ author: "The Sailfin Team"
 
 We're excited to launch **sailfin.dev** — the official home for the Sailfin programming language.
 
+> **Update (July 24, 2026):** Dated posts preserve the status at publication. Since this post appeared, structured concurrency v0 has shipped in Sailfin 0.8, and the runtime migration to Sailfin has finished; no C runtime remains.
+
 ## What You'll Find Here
 
 - **Getting Started** guides to install Sailfin and write your first program
@@ -22,11 +24,11 @@ Sailfin is a compiled systems language with compile-time capability enforcement.
 - **Capability-based security** — capsules declare required capabilities; undeclared effects are compile-time errors
 - **A self-hosted native compiler** targeting LLVM with single-binary output
 - **Pragmatic ergonomics** — conventional TypeScript/Rust-like syntax, good error messages with fix-it hints
-- **Structured concurrency** (planned) — routines, channels, and scoped parallelism as first-class constructs
+- **Structured concurrency** (planned at publication; shipped in 0.8) — routines, channels, and scoped parallelism as first-class constructs
 
 ## Current Status
 
-Sailfin is pre-1.0, with active development toward a pure Sailfin toolchain. The self-hosted compiler can compile itself, and we're working on migrating the runtime from C to Sailfin.
+At publication, Sailfin was pre-1.0, with active development toward a pure Sailfin toolchain. The self-hosted compiler could compile itself, and the runtime migration from C to Sailfin was still underway. That migration is now complete.
 
 Check out the [roadmap](/roadmap) to see what's planned.
 
