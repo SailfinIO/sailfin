@@ -394,7 +394,7 @@ fn ai_fn(input: string) -> string ![model] { ... }
 
 ## Next Steps
 
-- [Ownership & Borrowing](/docs/learn/ownership) — Move semantics and `Affine<T>`/`Linear<T>` (syntax parsed today; enforcement on the [roadmap](/roadmap))
+- [Ownership & Borrowing](/docs/learn/ownership) — Enforced move and single-use semantics for owned, `Affine<T>`, and `Linear<T>` bindings
 - [Testing](/docs/learn/testing) — Writing pure and effectful tests
 - [AI Integration](/docs/learn/ai-constructs) — The `![model]` effect and the `sfn/ai` capsule
 - [Effect System Reference](/docs/reference/effects) — Complete specification and enforcement rules

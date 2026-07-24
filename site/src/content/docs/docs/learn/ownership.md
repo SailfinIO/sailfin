@@ -12,7 +12,12 @@ Languages have tackled this problem in different ways. Garbage-collected languag
 
 Sailfin takes the same third path. The ownership system is central to the language, not bolted on. Once you understand it, code that seemed strange starts to read naturally, and a class of bugs you'd otherwise spend hours debugging simply doesn't compile.
 
-> **Implementation status:** The ownership syntax in this guide — `&T`, `&mut T`, `borrow(...)`, `Affine<T>`, `Linear<T>` — is parsed by the compiler today and flows through to the IR, but **no enforcement runs yet**. Use-after-move, exclusivity, and must-consume violations all compile without error. Full enforcement is deferred to post-1.0; see the [roadmap](/roadmap). Treat the rules in this guide as the design intent, not as behavior you can rely on today.
+> **Implementation status:** Single-use checking ships today. Owned and
+> `Affine<T>` bindings reject use-after-move and a second live binding
+> (`E0901`/`E0904`), while `Linear<T>` additionally rejects values left
+> unconsumed at scope exit (`E0907`). The compiler parses `&T`, `&mut T`, and
+> `borrow(...)`, but borrow lifetime and shared/exclusive alias checking remain
+> deferred. `PII<T>`/`Secret<T>` taint enforcement is also not yet live.
 
 ---
 
@@ -278,7 +283,9 @@ Typical uses for `Affine<T>`:
 
 `Affine<T>` is also the right choice when you want the compiler to enforce that a destructor runs — i.e., you want a guarantee that cleanup code fires before the value is abandoned.
 
-> **Current enforcement:** `Affine<T>` syntax is accepted and the compiler records annotations. The rule "cannot be copied" is **not yet enforced at compile time**. See the [roadmap](/roadmap) for enforcement sequencing. Treat your code as if the restriction is active.
+> **Current enforcement:** The compiler move-checks affine bindings. Reading,
+> passing, or returning a moved value raises `E0901`; creating a second live
+> binding from an already moved value raises `E0904`.
 
 ---
 
@@ -345,11 +352,13 @@ fn update_balance(conn: &mut DbConn, user_id: number, delta: number) ![io] {
 
     conn.execute_update(user_id, balance + delta);
     txn.commit();            // consume txn on the success path
-    // Once must-consume is enforced, failing to call either rollback or commit is a compile error
+    // Failing to call either rollback or commit is a compile error (E0907).
 }
 ```
 
-> **Current enforcement:** `Linear<T>` syntax is accepted and the compiler records annotations. The "must be consumed" rule is **not yet enforced at compile time**. See the [roadmap](/roadmap). Write consume-patterns now so your code is correct by construction.
+> **Current enforcement:** Linear bindings have the same move checks as affine
+> bindings, and leaving a `Linear<T>` value unconsumed at scope exit raises
+> `E0907`.
 
 ---
 
@@ -535,13 +544,15 @@ The intersection of ownership and effects is where Sailfin's safety story comes 
 
 | Concept | Syntax | Meaning | Enforced today? |
 |---------|--------|---------|----------------|
-| Move | `let b = a` | Ownership transfers; `a` is no longer valid | Syntax only |
+| Move | `let b = a` | Ownership transfers; `a` is no longer valid | Enforced for owned/affine bindings (`E0901`/`E0904`) |
 | Shared borrow | `&T` | Read-only reference; many can coexist | Syntax only |
 | Exclusive borrow | `&mut T` | Read-write reference; must be sole borrow | Syntax only |
-| Affine type | `Affine<T>` | Can be dropped, cannot be duplicated | Syntax only |
-| Linear type | `Linear<T>` | Must be consumed exactly once | Syntax only |
+| Affine type | `Affine<T>` | Can be dropped, cannot be duplicated | Single-use enforced (`E0901`/`E0904`) |
+| Linear type | `Linear<T>` | Must be consumed exactly once | Single-use and scope-exit consumption enforced (`E0901`/`E0904`/`E0907`) |
 
-Full ownership enforcement — move tracking, exclusivity checking, must-consume verification — is deferred to post-1.0. The syntax is stable and recorded in the IR; code you write today using these annotations will work correctly once enforcement lands. See the [roadmap](/roadmap) for sequencing.
+Move tracking and linear must-consume verification ship today. Borrow lifetime
+and shared/exclusive alias checking remain deferred, so `&T`/`&mut T` should be
+treated as syntax and design intent rather than a complete borrow-safety proof.
 
 ---
 

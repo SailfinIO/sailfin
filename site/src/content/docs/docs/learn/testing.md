@@ -93,7 +93,10 @@ test "normalise_email lowercases and trims" {
 
 When there are multiple assertions, execution stops at the first failure. If you want to verify several independent properties, consider separate tests — each will give a clear, isolated failure message.
 
-> **Coming in 1.0:** Richer assertion helpers such as `assert_eq`, `assert_ne`, `assert_contains`, and `assert_throws` are on the [roadmap](/roadmap). For now, express these as boolean expressions following `assert`.
+The `sfn/test` capsule also ships legacy `assert_*` helpers, pure
+`pure_assert_*` helpers, and free-function `expect_*` matchers. Bare `assert`
+is the simplest choice for ordinary boolean checks. The fluent
+`expect(value).to_be(expected)` builder remains deferred.
 
 ## Pure Computation Tests
 
@@ -233,8 +236,12 @@ sfn test tests/unit/
 # suite with its own `═══ <name>: N/M passed, K failed ═══` banner at end-of-run
 sfn test tests/unit tests/integration tests/e2e
 
-# Note: --filter is not yet supported; run a specific file to narrow scope
-sfn test src/math_test.sfn
+# Filter test names (the short `-k` form is shipped)
+sfn test src/math_test.sfn -k factorial
+
+# Run test files in parallel and re-baseline snapshot files
+sfn test tests/ --jobs 4
+sfn test tests/ --update-snapshots
 ```
 
 ### With Make targets
@@ -387,26 +394,29 @@ Keep fixtures small and purpose-built. A fixture that exists to test one behavio
 
 ### Setup and teardown
 
-Sailfin does not have `beforeEach`/`afterEach` hooks. Instead, extract setup into a helper function and call it at the top of each test that needs it. Use `try/finally` for teardown:
+Sailfin ships file-scoped lifecycle hooks using snake_case block syntax:
+`before_all`, `before_each`, `after_each`, and `after_all`. Hooks run in that
+order around the tests in the file, and the recoverable harness attributes hook
+failures without aborting the rest of the file.
 
 ```sfn
-fn create_temp_dir() -> string ![io, rand] {
-    let path = "tests/temp/{{rand.uuid()}}";
-    fs.mkdir(path);
-    return path;
+let mut dir = "";
+
+before_each ![io, rand] {
+    dir = "tests/temp/{{rand.uuid()}}";
+    fs.mkdir(dir);
+}
+
+after_each ![io] {
+    fs.remove_all(dir);
 }
 
 test "compiler emits expected IR" ![io, rand] {
-    let dir = create_temp_dir();
-    try {
-        let source = "fn main() ![io] { print(\"hi\"); }";
-        let out_path = "{{dir}}/out.sfn-asm";
-        compile_to_file(source, out_path);
-        let ir = fs.read(out_path);
-        assert ir.contains("define void @main");
-    } finally {
-        fs.remove_all(dir);
-    }
+    let source = "fn main() ![io] { print(\"hi\"); }";
+    let out_path = "{{dir}}/out.sfn-asm";
+    compile_to_file(source, out_path);
+    let ir = fs.read(out_path);
+    assert ir.contains("define void @main");
 }
 ```
 
@@ -469,12 +479,16 @@ test "parse_int returns error for non-numeric input" {
 
 ## Testing AI Code
 
-> **Current status**: `model` and `prompt` blocks parse correctly today but do not execute. Model invocation is planned for after the 1.0 release. This section describes the intended testing story.
+> **Current status:** The former language-level `model` and `prompt` blocks
+> were removed and do not parse. AI integrations use the `sfn/ai` capsule and
+> the `![model]` capability instead.
 
-When model execution lands, prompt-based functions will require `![model]` effects and will be testable using a `seed` parameter for reproducibility:
+Tests of capsule-based AI calls declare the `![model]` effect just like the
+code under test. Deterministic seed and generation-card workflows remain a
+future testing surface:
 
 ```sfn
-// Planned execution — parses today; model invocation lands post-1.0
+// Capsule-based call; deterministic model-test controls remain planned.
 test "summarize returns a short string" ![model] {
     let result = summarize("A very long article about the history of programming languages...");
     assert result.length < 200;

@@ -24,7 +24,9 @@ fn add(a: number, b: number) -> number {
 - The return type follows `->` after the parameter list.
 - `return` exits the function with a value.
 
-> `number` is Sailfin's single numeric type today. Separate `int` (i64) and `float` (f64) types are on the [roadmap](/roadmap).
+> Sailfin ships distinct `int` (i64) and `float` (f64) types. Integer literals
+> default to `int`, decimal literals default to `float`, and `number` remains an
+> alias for `float`.
 
 ### Explicit Returns
 
@@ -301,7 +303,9 @@ fn main() ![io] {
 
 Methods are functions associated with a struct type. They are defined **inline inside the struct body** — Sailfin has no separate `impl` block today. Methods access the struct instance through a bare `self` first parameter.
 
-> Ownership receivers (`&self`, `&mut self`, `Affine<T>`, `Linear<T>`) are parsed but not enforced. The borrow/ownership story is deferred to post-1.0 and is on the [roadmap](/roadmap). Until then, all methods take `self` by value.
+> Methods currently take `self` by value. Single-use checking is enforced for
+> owned, `Affine<T>`, and `Linear<T>` bindings, while shared/exclusive borrow
+> checking for `&T` and `&mut T` remains deferred.
 
 ```sfn
 struct Counter {
@@ -428,10 +432,10 @@ let result = apply_twice(double, 3);    // double(double(3)) = 12
 
 ### Returning Functions
 
-> Closures that capture values from the enclosing scope are on the [roadmap](/roadmap). Today a lambda can reference values that are already in scope, but capturing mutable state across calls is not yet guaranteed. When closure capture ships, a curried adder looks like this:
+Closures can capture values from their enclosing scope. That makes returned
+closures such as a curried adder work today:
 
 ```sfn
-// PLANNED — depends on closure capture
 fn make_adder(n: number) -> (number) -> number {
     return fn(x: number) -> number { return x + n; };
 }
@@ -479,7 +483,8 @@ let sum     = numbers.reduce(0, fn(acc, n) -> number { return acc + n; });
 
 ### Capturing from Outer Scope
 
-> Closures that capture enclosing variables are on the [roadmap](/roadmap). Today a lambda can reference values that are already in scope during a single synchronous call (for example, inside `map`/`filter`/`reduce`), but storing a closure that keeps mutable state across calls is not yet guaranteed.
+Closures can capture enclosing variables, including when they are stored or
+returned. The shipped array combinators also accept capturing callbacks.
 
 For mutation across iterations, use an explicit loop rather than a closure:
 
@@ -527,9 +532,9 @@ fn factorial(n: number) -> number {
 
 fn fibonacci(n: number) -> number {
     match n {
-        0: return 0,
-        1: return 1,
-        _: return fibonacci(n - 1) + fibonacci(n - 2),
+        0 => return 0,
+        1 => return 1,
+        _ => return fibonacci(n - 1) + fibonacci(n - 2),
     }
 }
 ```
@@ -611,7 +616,8 @@ Custom decorators are planned for a future release as part of the macro system.
 
 ## Async Functions
 
-Declare an async function with `async fn`. Async functions return a `Future<T>` — a value that represents a computation that will complete later.
+`async fn` declarations are parsed, but their return values are structural only:
+awaiting an `async fn` return is not wired into the live type checker yet.
 
 ```sfn
 async fn fetch_user(id: string) -> User ![net] {
@@ -620,22 +626,28 @@ async fn fetch_user(id: string) -> User ![net] {
 }
 ```
 
-`async fn` and `await` are both shipped. Awaiting a future unwraps its value:
+For working asynchronous code, spawn a task. `spawn fn() -> T { ... }` returns
+a `Task<T>`, and `await` joins that task and unwraps its result:
 
 ```sfn
-async fn load_dashboard(user_id: string) -> Dashboard ![net] {
-    let user_future   = fetch_user(user_id);
-    let orders_future = fetch_orders(user_id);
+fn load_dashboard(user_id: string) -> Dashboard ![net] {
+    let user_task = spawn fn() -> User ![net] {
+        let resp = http.get("https://api.example.com/users/{{user_id}}");
+        return User.from_json(resp.body);
+    };
+    let orders_task = spawn fn() -> Orders ![net] {
+        return fetch_orders(user_id);
+    };
 
-    let user   = await user_future;
-    let orders = await orders_future;
+    let user = await user_task;
+    let orders = await orders_task;
     return Dashboard { user: user, orders: orders };
 }
 ```
 
-Structured concurrency primitives such as `routine`, `spawn`, and `channel`
-are on the [roadmap](/roadmap). See the [Concurrency](/docs/learn/concurrency)
-page for the current state and the `routine` keyword preview.
+`routine`, `spawn`, `await`, and `channel` all ship in v0. Use `routine { ... }`
+to give spawned work a nursery scope; see [Concurrency](/docs/learn/concurrency)
+for task handles, channels, and structured-concurrency patterns.
 
 ---
 
@@ -755,4 +767,4 @@ fn main() ![io] {
 - [The Effect System](/docs/learn/effects) — Deep dive into capability-based security and effect inference
 - [Error Handling](/docs/learn/error-handling) — `try/catch`, result types, and propagation
 - [Testing](/docs/learn/testing) — Writing unit and integration tests
-- [Ownership & Borrowing](/docs/learn/ownership) — Move semantics, borrows, `Affine<T>`, and `Linear<T>` (parsed today, enforcement on the [roadmap](/roadmap))
+- [Ownership & Borrowing](/docs/learn/ownership) — Enforced single-use semantics for owned, `Affine<T>`, and `Linear<T>` bindings, plus the borrow-checking roadmap

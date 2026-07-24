@@ -14,12 +14,14 @@ These are the building blocks. You have seen them already; the table below adds 
 
 | Type | Description | Literal examples | Notes |
 |------|-------------|-----------------|-------|
-| `number` | Single numeric type | `0`, `42`, `-7`, `3.14`, `1.0e9` | Covers integers and floats today; a split into `int` / `float` is on the [roadmap](/roadmap) |
+| `int` | 64-bit integer | `0`, `42`, `-7` | Default type for integer literals |
+| `float` | 64-bit floating point | `3.14`, `1.0e9` | Default type for decimal literals |
+| `number` | Alias for `float` | `3.14`, `1.0e9` | Legacy-compatible spelling |
 | `boolean` | Boolean | `true`, `false` | No implicit coercion from `number` |
 | `string` | UTF-8 text | `"hello"` | Immutable; supports `{{ }}` interpolation |
 | `void` | — | — | Return type for functions with no return value |
 
-Sized numeric types (`i8`, `i16`, `i32`, `i64`, `u8`, `u16`, `u32`, `u64`, `f32`, `f64`, `usize`) exist for FFI interop. In day-to-day Sailfin code, reach for `number`.
+Sized numeric types (`i8`, `i16`, `i32`, `i64`, `u8`, `u16`, `u32`, `u64`, `f32`, `f64`, `usize`) exist for FFI interop. In day-to-day Sailfin code, use `int` for integral values and `float` for decimal values.
 
 ```sfn
 let count: number = 100;
@@ -28,7 +30,7 @@ let active: boolean = true;
 let label: string = "pending";
 ```
 
-Numeric literals are untyped until they are bound to a variable or parameter. The compiler infers `number` for both integer and decimal literals.
+Integer literals default to `int`; decimal literals default to `float`.
 
 ---
 
@@ -738,9 +740,14 @@ fn stringify(value: number | boolean | string) -> string {
 
 ## Wrapper Types (Design Preview)
 
-Sailfin has four special wrapper types for safety-critical code. The syntax is accepted by the compiler today; enforcement of the ownership and taint rules is coming in a future release.
+Sailfin has four special wrapper types for safety-critical code. Single-use
+rules ship for `Affine<T>` and `Linear<T>`; taint-flow rules for `PII<T>` and
+`Secret<T>` remain deferred.
 
-> **Status: syntax accepted today; enforcement coming in a future release.** The compiler parses `Affine<T>`, `Linear<T>`, `PII<T>`, and `Secret<T>` as nominal generic types. The move, consume, and taint rules described below are the *intended* semantics — they are tracked as metadata today and will be enforced as the ownership system matures.
+> **Status:** Owned and affine bindings are move-checked (`E0901`/`E0904`),
+> and an unconsumed `Linear<T>` value is rejected at scope exit (`E0907`).
+> `PII<T>` and `Secret<T>` are parsed, but their taint-flow policies are not
+> enforced yet.
 
 ### `Affine<T>` — may be dropped, not copied
 
@@ -757,7 +764,7 @@ fn process(handle: Affine<FileHandle>) ![io] {
     print.info("Read {{data.length}} bytes");
 }
 
-// This would be a compile error once enforcement is active:
+// These are compile errors today:
 // fn bad(handle: Affine<FileHandle>) {
 //     let copy = handle;   // ERROR: affine values cannot be copied
 //     process(handle);     // ERROR: already moved
@@ -778,7 +785,7 @@ fn use_token(token: Linear<AuthToken>) ![net] {
     api.authenticate(token);
 }
 
-// Intended compile error once enforcement is active:
+// Compile error today:
 // fn forget_token(user_id: number) ![net] {
 //     let token = mint_auth_token(user_id);
 //     // ERROR: linear value `token` must be consumed before scope exits
@@ -954,15 +961,15 @@ Sailfin infers types from context where possible. The rules are straightforward:
 
 ### Where inference works
 
-- **Variable initializers**: `let x = 42` infers `number`.
+- **Variable initializers**: `let x = 42` infers `int`; `let x = 4.2` infers `float`.
 - **Return types**: if all `return` statements return the same type, the compiler can infer the return type (annotation still recommended for public APIs).
-- **Array literals**: `let nums = [1, 2, 3]` infers `number[]`.
+- **Array literals**: `let nums = [1, 2, 3]` infers `int[]`.
 - **Struct literal fields**: field types are checked against the struct declaration.
-- **Closure parameters**: `items.map(|x| x * 2)` infers `x: number` from the element type of `items`.
+- **Closure parameters**: `items.map(fn(x) => x * 2)` infers `x: int` from the element type of `items`.
 
 ```sfn
-let score = 95;                                      // number
-let ratio = score / 100.0;                           // number
+let score = 95;                                      // int
+let ratio = score as float / 100.0;                  // float
 let passing = score >= 60;                           // boolean
 let label = if passing { "pass" } else { "fail" };   // string
 ```
