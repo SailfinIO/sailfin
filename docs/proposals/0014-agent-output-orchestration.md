@@ -1,10 +1,10 @@
 ---
 sfep: 14
 title: Agent-Legible Build/Test Output
-status: Draft
+status: Accepted
 type: tooling
 created: 2026-06-05
-updated: 2026-06-05
+updated: 2026-07-24
 author: "agent:compiler-architect"
 tracking:
 supersedes:

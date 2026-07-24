@@ -1,10 +1,10 @@
 ---
 sfep: 19
 title: "sfn/http — Typed HTTP Surface"
-status: Accepted
+status: Implemented
 type: tooling
 created: 2026-06-13
-updated: 2026-06-29
+updated: 2026-07-24
 author: "agent:compiler-architect"
 tracking: "#1321"
 supersedes:

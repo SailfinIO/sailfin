@@ -1,10 +1,10 @@
 ---
 sfep: 22
 title: Darwin (macOS arm64) Memory Governor
-status: Draft
+status: Accepted
 type: runtime
 created: 2026-06-20
-updated: 2026-06-20
+updated: 2026-07-24
 author: "agent:compiler-architect"
 tracking:
 supersedes:
