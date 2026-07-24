@@ -540,7 +540,7 @@ guide, see
 | `make rebuild` | Force a rebuild from a released seed regardless of timestamps. Routes through `<seed> build -p compiler`. |
 | `make install` | Install the built compiler binary into `$(BINDIR)` (default: `~/.local/bin`). Requires `make compile` to have run first. |
 | `make check` | Compile (if needed), build a `sailfin-seedcheck` binary, verify it can run `hello-world.sfn`, then run the full test suite against it. This is the authoritative CI gate. |
-| `make check-strict` | Same as `make check`, but a stage2/stage3 fixed-point mismatch is fatal. |
+| `make check-strict` | Same as `make check`, but a seedcheck/fixed-point rebuild mismatch is fatal. |
 | `make check-fast` | Run `sfn check` over `compiler/src/` and `runtime/` without codegen or clang. |
 | `make test` | Run the full Sailfin-native test suite (unit + integration + e2e + capsule tests). Builds first if `build/bin/sfn` is missing. |
 | `make test-unit` | Run unit tests from `compiler/tests/unit/*_test.sfn`. |
@@ -572,7 +572,7 @@ bisects or memory-constrained hosts.
 The Makefile compatibility layer forwards its `TEST_JOBS` budget, while
 `make check` uses `CHECK_TEST_JOBS` for its cold seedcheck suite and
 `CHECK_TEST_TIMEOUT` for the per-test timeout. Use
-`SELFHOST_STRICT=1` or `make check-strict` when a stage2/stage3 fixed-point
+`SELFHOST_STRICT=1` or `make check-strict` when a seedcheck/fixed-point rebuild
 mismatch must fail the run.
 
 ---
@@ -612,7 +612,7 @@ These environment variables influence the behavior of `sfn` and the Makefile bui
 | `CHECK_TEST_JOBS` | Makefile | Parallelism for `make check` test legs. Defaults to `TEST_JOBS`. |
 | `CHECK_TEST_TIMEOUT` | Makefile | Per-test timeout for `make check`'s cold full-suite leg. Defaults to `1800`. |
 | `CHECK_FULL_PASS1` | Makefile | Set to `1` to restore the older full first-pass suite before seedcheck. |
-| `SELFHOST_STRICT` | Makefile | Set to `1` to make stage2/stage3 fixed-point mismatch fatal. |
+| `SELFHOST_STRICT` | Makefile | Set to `1` to make a seedcheck/fixed-point rebuild mismatch fatal. |
 | `JSON=1` | Makefile | Enable structured agent reports for agent-facing targets. |
 | `KEEP_SEED` | `make clean-build` | Set to `0` to also delete `build/toolchains/` during `make clean-build`. Defaults to `1` (the seed toolchain is preserved). |
 

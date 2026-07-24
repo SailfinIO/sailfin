@@ -1,4 +1,4 @@
-# bootstrap.toml — the compiler checkout's exact stage0 seed policy.
+# bootstrap.toml — the compiler checkout's exact bootstrap-seed policy.
 #
 # This is compiler-repo bootstrap policy, NOT the public capsule/workspace
 # `[toolchain]` compatibility floor (that lives in compiler/capsule.toml and

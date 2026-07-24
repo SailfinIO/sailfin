@@ -674,9 +674,8 @@ print("sum of squares: {{total}}");
 ```
 
 > **Coming in 1.0:** A richer standard-library surface — `Map<K, V>`,
-> iterator adapters, sort helpers — lands alongside the runtime migration
-> tracked on the [roadmap](/roadmap). Today the array type with built-in
-> helpers is the primary collection.
+> iterator adapters, and sort helpers — remains on the [roadmap](/roadmap).
+> Today the array type with built-in helpers is the primary collection.
 
 ---
 

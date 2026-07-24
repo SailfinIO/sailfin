@@ -7,7 +7,12 @@ author: "The Sailfin Team"
 
 We're excited to launch **sailfin.dev** — the official home for the Sailfin programming language.
 
-> **Update (July 24, 2026):** Dated posts preserve the status at publication. Since this post appeared, structured concurrency v0 has shipped in Sailfin 0.8, and the runtime migration to Sailfin has finished; no C runtime remains.
+> **Update (July 24, 2026):** Dated posts preserve the status at publication.
+> Since this post appeared, structured concurrency v0 has shipped in Sailfin
+> 0.8, and the runtime migration to Sailfin has finished; no C runtime remains.
+> Runtime source is Sailfin-native, with platform services reached through
+> `extern fn`; native builds still lower through LLVM and link via clang plus
+> the platform linker.
 
 ## What You'll Find Here
 
