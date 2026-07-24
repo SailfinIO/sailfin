@@ -153,6 +153,15 @@ pillar that is currently inert for ML:
   `![gpu]`, and any model-engine call requires `![model]` — with spans and
   fix-its, exactly like the shipped `io`/`net` detectors. "Reserved string" → real
   capability gate.
+
+  > **Implementation note (SFN-428).** `![gpu]` shipped enforced without an
+  > `effect_checker.sfn` detector: the effect rides on the `sfn/device` capsule
+  > declarations and existing cross-module propagation enforces it, the same
+  > construction that shipped `![rand]`. A builtin `device.*` namespace was
+  > rejected because bare/member roots are not scope-resolved (#1184), so it
+  > would demand `![gpu]` of any code with a `device` variable. `![model]`
+  > remains reserved pending `sfn/ai`. See
+  > `docs/proposals/design-notes/sfn-428-gpu-effect-gate.md`.
 - **Taint that reaches through the graph.** `PII<T>`/`Secret<T>` (today
   parsed-only) become enforced *along tensor dataflow*: a kernel or collective
   that would move tainted data off-device, into a log, or across a `![net]`

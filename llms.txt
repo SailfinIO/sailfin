@@ -56,8 +56,8 @@ Canonical effects: io, net, model, clock, gpu, rand
 - net   -- HTTP, WebSocket, TCP, serve
 - model -- capability gate for AI backend calls; required on any fn that invokes the `sfn/ai` library capsule (post-1.0)
 - clock -- sleep, timers, monotonic time
-- gpu   -- tensor dispatch, GPU compute (planned)
-- rand  -- random number generation (planned)
+- gpu   -- capability gate for device dispatch; required on any fn calling the `sfn/device` dispatch surface (`matmul_f64`, `synchronize`). Enforced. NOT a claim an accelerator exists: the only backend is a CPU reference kernel and `has_accelerator()` is false. `sfn/tensor`/`sfn/nn`/`sfn/layers` are CPU-only and do NOT require it
+- rand  -- random number generation; required on `sfn/crypto::random_bytes`. Enforced at that boundary (no general RNG-name detector)
 
 A function with no effect list performs no side effects.
 
@@ -304,9 +304,10 @@ typecheck (E0808/E0809).
 | sfn/test  | "test"      | Partial       | None / io     | Assertions (`expect_*` pure tier, `assert_*` io tier), snapshots |
 | sfn/sync  | "sync"      | Stubbed       | io            | channel/parallel/spawn API — pending concurrency runtime; DO NOT USE yet |
 | sfn/net   | "net"       | Stubbed       | net, io       | TCP/UDP sockets — pending runtime intrinsics; DO NOT USE yet |
-| sfn/tensor| "tensor"    | Shipped (CPU) | gpu (planned) | Tensor ops, matmul, transpose            |
-| sfn/layers| "layers"    | Shipped (CPU) | gpu (planned) | Linear layers, ReLU, sequential models   |
-| sfn/nn    | "nn"        | Shipped (CPU) | gpu (planned) | Activations, normalization, argmax, one_hot |
+| sfn/tensor| "tensor"    | Shipped (CPU) | gpu (ceiling, unused) | Tensor ops, matmul, transpose. CPU-only, effect-free: does NOT require ![gpu] |
+| sfn/layers| "layers"    | Shipped (CPU) | gpu (ceiling, unused) | Linear layers, ReLU, sequential models. CPU-only, effect-free |
+| sfn/nn    | "nn"        | Shipped (CPU) | gpu (ceiling, unused) | Activations, normalization, argmax, one_hot. CPU-only, effect-free |
+| sfn/device| "sfn/device"| Shipped (v0)  | gpu           | Device-dispatch boundary. `matmul_f64`/`synchronize` carry ![gpu]; `backends`/`active_backend`/`has_accelerator` are effect-free. CPU reference backend only |
 | sfn/losses| "losses"    | Shipped       | None          | MSE, MAE, Huber, hinge loss functions    |
 
 ## Numeric Types

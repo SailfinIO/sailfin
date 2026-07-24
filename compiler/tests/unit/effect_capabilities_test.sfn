@@ -315,3 +315,20 @@ test "capabilities: a coarse net grant authorizes net.http" {
     let violations = validate_capsule_capabilities(program, ["net"]);
     assert violations.length == 0;
 }
+
+// -------------------------------------------------------------------
+// gpu (SFN-428, SFEP-0052 §3.2)
+// -------------------------------------------------------------------
+test "effect capabilities: a ![gpu] function outside a gpu manifest violates E0403" {
+    let stmt = _function_declaring("matmul_f64", ["gpu"], 5);
+    let program = Program { statements: [stmt] };
+    let violations = validate_capsule_capabilities(program, ["io"]);
+    assert violations.length == 1;
+}
+
+test "effect capabilities: a ![gpu] function inside a gpu manifest is clean" {
+    let stmt = _function_declaring("matmul_f64", ["gpu"], 5);
+    let program = Program { statements: [stmt] };
+    let violations = validate_capsule_capabilities(program, ["gpu"]);
+    assert violations.length == 0;
+}
