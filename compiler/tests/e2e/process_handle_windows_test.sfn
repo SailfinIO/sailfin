@@ -1,0 +1,238 @@
+// End-to-end test for the native Windows process-handle family
+// (`runtime/sfn/platform/process_windows.sfn`, SFN-497) — `spawn_with_env`,
+// `handle_wait`, `handle_kill`, `handle_write`, `handle_close_stdin`,
+// `handle_read_stdout`/`_stderr`, `handle_read_bytes_stdout`/`_stderr`,
+// `handle_stdout_at_eof`/`handle_stderr_at_eof`, and
+// `handle_stdout_fd`/`handle_stderr_fd`.
+//
+// PLATFORM GATE. The handle symbols this exercises live ONLY in the Windows
+// runtime module (`process_windows.sfn`, in the cross-windows RUNTIME_MODS,
+// NOT in `runtime/capsule.toml`). On Linux/macOS the test binary instead
+// links the POSIX `process.sfn`, so these assertions would be testing the
+// POSIX path. The test therefore SKIPS (asserts trivially) off Windows and
+// only does real work when the runner is a Windows binary built with
+// `process_windows.sfn`. Detection is by the `OS` / `SYSTEMROOT` / `windir`
+// environment variables Windows always sets.
+//
+// NOTE on matchers: the `sfn/test` `expect_*` matchers are `![pure]` and
+// unusable from an `![io]` test (#842); assert on captured output with
+// `sfn/strings::find` / `.length` instead.
+import { find } from "sfn/strings";
+
+// The compiler-under-test: `$SAILFIN_BIN` if set, else the self-hosted
+// binary relative to the repo root the runner starts from. Mirrors
+// `sfn/test`'s `_resolve_sfn_bin` (compile_assert.sfn).
+fn _sfn_bin() -> string ![io] {
+    let configured = env.get("SAILFIN_BIN");
+    if configured.length > 0 { return configured; }
+    return "build/bin/sfn";
+}
+
+// True when the test runner is a Windows binary (the only platform whose
+// process-handle family comes from `process_windows.sfn`).
+fn _is_windows() -> bool ![io] {
+    let os = env.get("OS");
+    if find(os, "Windows", 0) >= 0 { return true; }
+    if env.get("SYSTEMROOT").length > 0 { return true; }
+    if env.get("windir").length > 0 { return true; }
+    return false;
+}
+
+// Per-child environment: thread the parent's Windows essentials so the
+// spawned compiler resolves its runtime. `spawn_with_env`'s `env` is the
+// child's whole environment (empty array == empty environment, never
+// "inherit"), so the vars the child needs must be passed explicitly.
+fn _child_env() -> string[] ![io] {
+    let mut e: string[] = [];
+    let sysroot = env.get("SYSTEMROOT");
+    if sysroot.length > 0 { e.push("SYSTEMROOT=" + sysroot); }
+    let windir = env.get("windir");
+    if windir.length > 0 { e.push("windir=" + windir); }
+    let path = env.get("PATH");
+    if path.length > 0 { e.push("PATH=" + path); }
+    let temp = env.get("TEMP");
+    if temp.length > 0 { e.push("TEMP=" + temp); }
+    let scratch = env.get("SAILFIN_TEST_SCRATCH");
+    if scratch.length > 0 { e.push("SAILFIN_TEST_SCRATCH=" + scratch); }
+    return e;
+}
+
+// Per-invocation scratch directory for the malformed-source fixture.
+fn _scratch_dir() -> string ![io] {
+    let scratch = env.get("SAILFIN_TEST_SCRATCH");
+    if scratch.length > 0 { return scratch; }
+    let temp = env.get("TEMP");
+    if temp.length > 0 { return temp; }
+    return ".";
+}
+
+// ── Acceptance: zero-handle sentinels ─────────────────────────────────
+test "process handle (windows): zero handle reports the dead-handle sentinels" ![io] {
+    if _is_windows() {
+        assert process.handle_wait(0) == -1;
+        assert process.handle_kill(0) == -1;
+        assert process.handle_write(0, "x") == -1;
+        assert process.handle_stdout_at_eof(0) == true;
+        assert process.handle_stderr_at_eof(0) == true;
+        assert process.handle_read_stdout(0) == "";
+        assert process.handle_stdout_fd(0) == -1;
+        assert process.handle_stderr_fd(0) == -1;
+    } else {
+        // Off Windows the binary links the POSIX `process.sfn`, not the
+        // module under test — skip (covered by the POSIX handle tests).
+        assert true;
+    }
+}
+
+// ── Acceptance: spawn failure is distinguishable by a zero handle ────
+test "process handle (windows): spawn failure returns a zero handle" ![io] {
+    if _is_windows() {
+        let id = process.spawn_with_env([], _child_env());
+        assert id == 0;
+    } else { assert true; }
+}
+
+// ── Acceptance: spawn, read both streams, clean exit ──────────────────
+test "process handle (windows): spawn drains stdout/stderr and waits clean" ![io] {
+    if _is_windows() {
+        let id = process.spawn_with_env([_sfn_bin(), "guillermo"], _child_env());
+        assert id != 0;
+        let out = process.handle_read_stdout(id);
+        let err = process.handle_read_stderr(id);
+        assert find(out + err, "Guillermo", 0) >= 0;
+        // Only true after the full drain above.
+        assert process.handle_stdout_at_eof(id) == true;
+        let exit = process.handle_wait(id);
+        assert exit == 0;
+    } else { assert true; }
+}
+
+// ── Acceptance: non-zero exit distinguishable from spawn failure ─────
+test "process handle (windows): a live handle with non-zero wait differs from a zero handle" ![io] {
+    if _is_windows() {
+        let src = _scratch_dir() + "/pw_handle_bad.sfn";
+        fs.writeFile(src, "fn broken( {\n");
+        let id = process.spawn_with_env([_sfn_bin(), "check", src], _child_env());
+        // Spawn itself succeeds — the child process starts even though its
+        // own exit will be non-zero. That is the distinction under test:
+        // a live (non-zero) handle whose wait fails, versus a zero handle
+        // meaning spawn never started the child at all.
+        assert id != 0;
+        let _out = process.handle_read_stdout(id);
+        let _err = process.handle_read_stderr(id);
+        let exit = process.handle_wait(id);
+        assert exit != 0;
+        if fs.exists(src) { fs.deleteFile(src); }
+    } else { assert true; }
+}
+
+// ── Acceptance: stdin pipe is live, not the old -1 stub ───────────────
+test "process handle (windows): write to child stdin succeeds on a live pipe" ![io] {
+    if _is_windows() {
+        let id = process.spawn_with_env([_sfn_bin(), "guillermo"], _child_env());
+        assert id != 0;
+        // The child ignores stdin entirely; what matters is that the pipe
+        // is real (a positive byte count) rather than the degraded -1 stub.
+        // Not racy despite the child being short-lived: `CreateProcessA`
+        // returns once the process object exists, long before the child is
+        // scheduled through PE load, CRT init and `main`, and the parent
+        // still holds its timeslice here. So the write always lands while
+        // the read end is open — a broken-pipe -1 would be a real defect,
+        // not a lost race.
+        let written = process.handle_write(id, "ignored input\n");
+        assert written > 0;
+        process.handle_close_stdin(id);
+        let _out = process.handle_read_stdout(id);
+        let _err = process.handle_read_stderr(id);
+        let exit = process.handle_wait(id);
+        assert exit == 0;
+    } else { assert true; }
+}
+
+// ── Acceptance: framed reads assemble the full stream ──────────────────
+test "process handle (windows): framed reads accumulate to a full stdout drain" ![io] {
+    if _is_windows() {
+        let id = process.spawn_with_env([_sfn_bin(), "guillermo"], _child_env());
+        assert id != 0;
+        let mut acc: string = "";
+        let mut guard: int = 0;
+        loop {
+            guard = guard + 1;
+            // Input-driven loop guard: the greeting is tiny, so this needs
+            // only a handful of 4-byte frames; 4096 is an ample backstop.
+            if guard > 4096 { break; }
+            if process.handle_stdout_at_eof(id) { break; }
+            let chunk = process.handle_read_bytes_stdout(id, 4);
+            acc = acc + chunk;
+        }
+        assert process.handle_stdout_at_eof(id) == true;
+        assert acc.length > 0;
+        let _err = process.handle_read_stderr(id);
+        let exit = process.handle_wait(id);
+        assert exit == 0;
+    } else { assert true; }
+}
+
+// ── Acceptance: independent concurrent children ─────────────────────
+test "process handle (windows): several children run concurrently before any wait" ![io] {
+    if _is_windows() {
+        // Spawn all three before waiting on any — this is the acceptance
+        // criterion that the handle family supports independent concurrent
+        // children rather than serializing them.
+        let id1 = process.spawn_with_env([_sfn_bin(), "guillermo"], _child_env());
+        let id2 = process.spawn_with_env([_sfn_bin(), "guillermo"], _child_env());
+        let id3 = process.spawn_with_env([_sfn_bin(), "guillermo"], _child_env());
+        assert id1 != 0;
+        assert id2 != 0;
+        assert id3 != 0;
+        assert id1 != id2;
+        assert id1 != id3;
+        assert id2 != id3;
+
+        let out1 = process.handle_read_stdout(id1);
+        let err1 = process.handle_read_stderr(id1);
+        let out2 = process.handle_read_stdout(id2);
+        let err2 = process.handle_read_stderr(id2);
+        let out3 = process.handle_read_stdout(id3);
+        let err3 = process.handle_read_stderr(id3);
+        assert find(out1 + err1, "Guillermo", 0) >= 0;
+        assert find(out2 + err2, "Guillermo", 0) >= 0;
+        assert find(out3 + err3, "Guillermo", 0) >= 0;
+
+        assert process.handle_wait(id1) == 0;
+        assert process.handle_wait(id2) == 0;
+        assert process.handle_wait(id3) == 0;
+    } else { assert true; }
+}
+
+// ── Acceptance: kill terminates a live child ──────────────────────────
+test "process handle (windows): kill terminates a live child" ![io] {
+    if _is_windows() {
+        let id = process.spawn_with_env([_sfn_bin(), "guillermo"], _child_env());
+        assert id != 0;
+        let killed = process.handle_kill(id);
+        assert killed == 0;
+        // No specific exit code assertion: the child may have already
+        // exited normally before the kill landed, which is a legitimate
+        // race — `wait` reaping the handle without hanging is the point.
+        let _exit = process.handle_wait(id);
+        assert true;
+    } else { assert true; }
+}
+
+// ── Acceptance: Windows fds deliberately stay -1, not a stub ─────────
+test "process handle (windows): stdout/stderr fd accessors stay -1 by design" ![io] {
+    if _is_windows() {
+        let id = process.spawn_with_env([_sfn_bin(), "guillermo"], _child_env());
+        assert id != 0;
+        // Windows HANDLEs are not POSIX fds; the fd accessors are
+        // documented to stay -1 forever on this platform, not a stub
+        // awaiting an implementation.
+        assert process.handle_stdout_fd(id) == -1;
+        assert process.handle_stderr_fd(id) == -1;
+        let _out = process.handle_read_stdout(id);
+        let _err = process.handle_read_stderr(id);
+        let exit = process.handle_wait(id);
+        assert exit == 0;
+    } else { assert true; }
+}
