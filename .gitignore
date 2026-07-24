@@ -8,53 +8,22 @@ ehthumbs.db
 Desktop.ini
 .vscode/
 .idea/
+
+# Local agent state
 .claude/settings.local.json
 .claude/scheduled_tasks.lock
+.claude/worktrees/
+.codex/environments/
+
 *.swp
 *.swo
 
-# Python
+# Python bytecode
 __pycache__/
 *.py[cod]
-*$py.class
-.pytest_cache/
-.pytest-stage1/
-.tox/
-.nox/
-.mypy_cache/
-.dmypy.json
-dmypy.json
-.pylint.d/
-.pyre/
-.hypothesis/
 
-# Poetry
-.poetry
-bootstrap/poetry.lock
-
-# Packaging
+# Release packaging
 dist/
-.eggs/
-.eggs/**
-*.egg-info/
-*.egg
-wheels/
-pip-wheel-metadata/
-share/python-wheels/
-
-# Virtualenvs (keep per-dir ignores as well)
-.venv/
-venv/
-env/
-ENV/
-.virtualenv/
-
-# Coverage
-/htmlcov/
-.coverage
-.coverage.*
-coverage.xml
-*.cover
 
 # Logs / temp
 logs/
@@ -81,14 +50,3 @@ scratch/
 # the orphan bench-data branch. Neither belongs on main.
 /bench-out/
 /bench-data/
-
-# Compiled runtime object files (generated during build)
-runtime/native/obj/
-
-# Stage1 bootstrap compiler (checked-in Python).
-# We want CI to have the stage1 llvm support modules, but we do NOT want to
-# commit bytecode caches.
-!compiler/build/llvm/
-!compiler/build/llvm/**/*.py
-compiler/build/llvm/**/__pycache__/
-compiler/build/llvm/**/*.pyc
