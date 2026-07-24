@@ -88,11 +88,11 @@ print(x);                     // prints 1 — outer x is back
 
 ### Value vs Reference Semantics
 
-Sailfin's ownership story is part of the pre-1.0 roadmap — the borrow syntax
-below is **parsed but not yet enforced**. Today, values behave similarly to
-other modern systems languages: primitives are copied, and structs and
-collections are passed by reference at the implementation level. Treat this
-section as the direction of travel.
+Sailfin enforces moves and single use for owned, `Affine<T>`, and `Linear<T>`
+bindings. Borrow syntax is also accepted, but lifetime and shared/exclusive
+alias checking for `&T` and `&mut T` are not enforced yet. Primitives are
+copied, while structs and collections use owned/reference-backed
+representations.
 
 ```sfn
 // Primitives are copied
@@ -101,7 +101,7 @@ let b = a;
 print(a);
 print(b);
 
-// Borrow syntax (parsed today; enforcement post-1.0)
+// Borrow syntax is accepted; exclusivity checking remains deferred.
 fn count(v: &number[]) -> number {
     return v.length;
 }
@@ -118,20 +118,21 @@ See [Ownership & Borrowing](/docs/learn/ownership) and the
 
 | Type | Description | Literal examples |
 |------|-------------|-----------------|
-| `number` | 64-bit numeric (the single numeric type today) | `0`, `42`, `-7`, `3.14` |
+| `int` | 64-bit integer | `0`, `42`, `-7` |
+| `float` | 64-bit floating point | `3.14`, `-0.5` |
+| `number` | Alias for `float` | `3.14`, `1.0` |
 | `boolean` | Boolean | `true`, `false` |
 | `string` | UTF-8 text | `"hello"`, `""` |
 | `void` | No value (return type only) | — |
 | `null` | Absence of a value | `null` |
 
-`number` is Sailfin's single numeric type today and covers both integer and
-floating-point values. A forthcoming split into distinct `int` (i64) and
-`float` (f64) types is tracked on the [roadmap](/roadmap); until that lands,
-use `number` for both counts and measurements.
+Use `int` for counts and integral arithmetic and `float` for measurements and
+decimal arithmetic. Integer literals default to `int`, decimal literals default
+to `float`, and the legacy `number` spelling is an alias for `float`.
 
 ```sfn
-let count: number = 100;
-let ratio: number = 0.75;
+let count: int = 100;
+let ratio: float = 0.75;
 let name: string = "Sailfin";
 let active: boolean = true;
 ```
