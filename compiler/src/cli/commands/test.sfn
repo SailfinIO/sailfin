@@ -2544,18 +2544,25 @@ fn _resolve_test_self_path(binary_dir: string) -> string ![io] {
     return "";
 }
 
-// Per-test wall-clock budget, ported from the retired
-// `scripts/run_native_test.sh` (issue #850, parent epic #840 phase
-// 1.7). `SAILFIN_TEST_TIMEOUT` overrides the 300s default — five
-// minutes is wide enough to absorb cold-cache CI I/O variance
-// without masking a hung process, since the per-phase cap inside
-// `compiler/src/main.sfn` trips long before then for a genuine
-// infinite loop. An empty value falls back to the default, matching
-// the script's `${SAILFIN_TEST_TIMEOUT:-300}`.
+// Per-file wall-clock budget for the handle-owned deadline (SFEP-0050),
+// originally ported from the retired `scripts/run_native_test.sh` (issue
+// #850, parent epic #840 phase 1.7). `SAILFIN_TEST_TIMEOUT` overrides the
+// default. The historical 300s value was the `timeout(1)` budget — but
+// that wrapper was Linux-only (macOS has no `timeout(1)`, only the rarely
+// installed `gtimeout`), so the streamed runner's unconditional
+// `handle_kill` deadline is the FIRST time the budget is enforced on
+// macOS. 300s is too tight there for a build-orchestrating test whose
+// body legitimately spawns nested full compiler builds — `work_dir_parity`
+// runs `sfn build -p compiler` twice (~300s+ of run on a slow macOS
+// runner), which the per-phase compile cap in `compiler/src/main.sfn`
+// does NOT bound because the time is in the nested RUN, not a single
+// compile phase. 900s gives that headroom while still tripping a genuine
+// infinite loop well within the CI job budget. An empty value falls back
+// to the default.
 fn _test_timeout_secs() -> string ![io] {
     let v = _get_env_cmd("SAILFIN_TEST_TIMEOUT");
     if v.length > 0 { return v; }
-    return "300";
+    return "900";
 }
 
 // Spawn one `<self> test <file>` child under its own scratch dir,
