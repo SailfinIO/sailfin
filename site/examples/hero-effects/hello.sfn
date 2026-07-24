@@ -1,3 +1,4 @@
 fn main() ![io] {
-    print("Hello, Sailfin!");
+    let greeting = "Hello, Sailfin!";
+    print(greeting);
 }
