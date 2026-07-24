@@ -1,18 +1,18 @@
 ---
-sfep: TBD
+sfep: 0057
 title: String Interpolation with ${ } (migrating off {{ }})
-status: Draft
+status: Accepted
 type: language
 created: 2026-07-01
-updated: 2026-07-01
+updated: 2026-07-24
 author: "agent:compiler-architect; human review"
-tracking:
+tracking: SFN-482 (Phases 1–3), SFN-483 (Phase 4)
 supersedes:
 superseded-by:
 graduates-to: reference/spec/09-strings.md
 ---
 
-# SFEP-XXXX — String Interpolation with `${ }` (migrating off `{{ }}`)
+# SFEP-0057 — String Interpolation with `${ }` (migrating off `{{ }}`)
 
 ## 1. Summary
 
@@ -35,8 +35,8 @@ let name = "Sailfin";
 let greeting = "Hello, {{ name }}!";         // "Hello, Sailfin!"
 ```
 
-`docs/status.md:176` lists this as **Shipped**, with the note "`${ }`
-migration planned pre-1.0 (see Known Design Issues)". `docs/status.md:347-349`
+`docs/status.md:496` lists this as **Shipped**, with the note "`${ }`
+migration planned pre-1.0 (see Known Design Issues)". `docs/status.md:688-690`
 records the problem explicitly, under "Known Design Issues (Pre-1.0 Syntax
 Reform)":
 
@@ -66,7 +66,7 @@ Two independent forces make this load-bearing rather than cosmetic:
    training distribution — overwhelmingly `${ }` — when asked to write a
    Sailfin string literal with interpolation. This is not a hypothetical: the
    Design Decision Framework calls out `${ }` vs `{{ }}` by name as a
-   systematic LLM-generation failure mode, and `docs/status.md:347-349` uses
+   systematic LLM-generation failure mode, and `docs/status.md:688-690` uses
    the same "LLMs systematically generate wrong code" language for this exact
    item. Every LLM-authored `.sfn` file that reaches for `${name}` compiles
    silently to a *literal* string containing `${name}` today — no parse
@@ -146,8 +146,8 @@ is no interpolation awareness anywhere in the lexer, the parser
 (`compiler/src/parser/`), the AST (`compiler/src/ast.sfn` — confirmed no
 `Interpolat*` node exists), or the type checker. Interpolation is recognized
 **only** during LLVM lowering, in
-`compiler/src/llvm/expression_lowering/native/core_literals_lowering.sfn`
-(`try_lower_interpolated_string_literal`, line 1917) and
+`compiler/src/llvm/expression_lowering/native/core_cast_lowering.sfn`
+(`try_lower_interpolated_string_literal`, line 535) and
 `.../native/core_text.sfn` (`parse_interpolated_template`, line 487): the
 already-unescaped literal text is re-scanned with a `find_substring_from`
 search for the literal substrings `"{{"`/`"}}"`, split into a `parts[]` /
@@ -166,16 +166,17 @@ handling) — for three concrete reasons:
    ~35-line self-contained scanner; the change is `find_substring_from(...,
    "{{", ...)` / `"}}"` → the `${`/`}` scan described below, plus the
    `try_lower_interpolated_string_literal` guard at
-   `core_literals_lowering.sfn:1919-1920` (`find_substring_from(content,
+   `core_cast_lowering.sfn` (`find_substring_from(content,
    "{{", 0)` / `"}}"`). Type checking, effect checking, and native-IR
    emission (`emit_native.sfn`) are already fully agnostic to interpolation
    today — they see one opaque `StringLiteral` — and stay that way.
 2. **The re-scan-at-lowering design is exactly why the dual-accept migration
    in §5 is cheap.** Because recognition is late and localized to two
-   functions in one file, supporting both delimiters simultaneously is a
-   matter of trying `${`/`}` first, then falling back to `{{`/`}}`, in that
-   single scanner — not threading a new token kind through the lexer, parser,
-   and every AST consumer.
+   functions (the `parse_interpolated_template` scanner in `core_text.sfn`
+   and the detection guard in `core_cast_lowering.sfn`), supporting both
+   delimiters simultaneously is a matter of trying `${`/`}` first, then
+   falling back to `{{`/`}}`, in that one scanner — not threading a new token
+   kind through the lexer, parser, and every AST consumer.
 3. **Promoting to an AST node would be strictly more invasive for equal
    benefit.** An `InterpolatedStringLiteral` AST node would require lexer
    changes (recognizing `${` inside a string scan and emitting segment
@@ -224,12 +225,24 @@ let b = "Hello, ${ name }!";    // accepted; no warning
   expression *before* IR emission, per §3.3); this proposal introduces no new
   IR shape, matching how SFEP-0005 needed no IR change for the annotation
   separator.
+- **The operand-stringify surface is preserved verbatim.** Since this SFEP
+  was drafted, the *interior* of an interpolation segment grew richer:
+  `int | null` union payloads stringify in direct/narrowed/match-bound
+  positions (SFN-343), primitive-element and nested arrays render bracketed
+  (`[1, 2, 3]`, `[[19, 22], [43, 50]]`, SFN-408/SFN-410), and an operand with
+  no stringify arm now fails the build loudly with `E0832 [fatal]` rather than
+  emitting silent empty output (`docs/status.md:496`). All of that logic lives
+  *downstream* of the delimiter scan — it operates on the already-extracted
+  `expressions[]` text, not on which characters opened the segment — so this
+  delimiter-only change neither touches nor is touched by it. The migration
+  must leave every one of these behaviors intact; the regression suite in §8
+  is the guard, and Phase 3's `make check` gate re-proves them end-to-end.
 
 ## 4. Effect & capability impact
 
 None. String interpolation lowers to the same segment-concatenation +
 `lower_expression` calls it does today (`try_lower_interpolated_string_literal`
-in `core_literals_lowering.sfn`); the effect checker already treats an
+in `core_cast_lowering.sfn`); the effect checker already treats an
 interpolated literal exactly as it treats the desugared expression sequence
 it becomes (a `+`-chain of string coercions and the embedded expression's own
 effects, e.g. `"${io.read_line()}"` requires `![io]` because the embedded
@@ -240,11 +253,11 @@ language are unaffected.
 
 ## 5. Self-hosting impact
 
-**Which passes change:** exactly two functions in one file,
+**Which passes change:** exactly two functions across two files,
 `compiler/src/llvm/expression_lowering/native/core_text.sfn`
 (`parse_interpolated_template`) and the interpolation-detection guard in
-`compiler/src/llvm/expression_lowering/native/core_literals_lowering.sfn`
-(`try_lower_interpolated_string_literal`, lines 1919-1920). No changes to
+`compiler/src/llvm/expression_lowering/native/core_cast_lowering.sfn`
+(`try_lower_interpolated_string_literal`, line 535). No changes to
 `compiler/src/lexer.sfn`, `compiler/src/parser/`, `compiler/src/ast.sfn`,
 `compiler/src/typecheck.sfn`, or `compiler/src/effect_checker.sfn` — all of
 which already treat string literals as opaque and stay that way (§3.3).
@@ -253,13 +266,16 @@ which already treat string literals as opaque and stay that way (§3.3).
 `.claude/rules/selfhost-invariant.md` and the `CLAUDE.md` self-hosting
 constraints): the compiler's own sources use `{{ }}` today. A grep-verified
 example: `examples/basics/structs.sfn:8` —
-`return "Hello, {{self.name}}!";` — and 64 files across
-`compiler/src/`, `runtime/`, `examples/`, and `capsules/` contain at least
-one `{{ ... }}` interpolation literal as of this writing. If `${`/`}` were
-made the *only* accepted form in one step, every one of those 64 files would
+`return "Hello, {{self.name}}!";` — and, as of 2026-07-24, ~121 `{{ … }}`
+interpolation occurrences across ~73 files under `compiler/src/`, `runtime/`,
+`examples/`, `capsules/`, and `compiler/tests/` (the exact count to be
+re-derived mechanically at Phase 3 time — it has grown since drafting and
+will keep drifting). If `${`/`}` were
+made the *only* accepted form in one step, every one of those files would
 need to be migrated **atomically with** the scanner change, in the same
 commit that changes `parse_interpolated_template` — and the *pinned seed*
-(the released binary `make compile` bootstraps from, per `.seed-version`)
+(the released binary `make compile` bootstraps from, per
+`bootstrap.toml [seed].version`)
 would need to already accept `${ }` before that commit could self-host,
 which it does not. This is exactly the bootstrapping hazard
 `CLAUDE.md`'s Self-Hosting Constraints section describes: "you can't change
@@ -292,10 +308,10 @@ the same shape:
    non-fatal deprecation diagnostic when the scanner falls back to the
    `{{ }}` branch, analogous to how a deprecated construct is flagged
    elsewhere in the checker (informational severity — this must not fail
-   `sfn check`/`make check` yet, only surface a warning, since 64 in-tree
-   files still use the old form at this point).
+   `sfn check`/`make check` yet, only surface a warning, since scores of
+   in-tree files still use the old form at this point).
 3. **Phase 3 — migrate compiler source, tests, runtime, examples, capsules.**
-   Rewrite all 64 in-tree occurrences from `{{ expr }}` to `${ expr }`
+   Rewrite all in-tree `{{ expr }}` occurrences to `${ expr }`
    (a one-time mechanical script in the spirit of SFEP-0005's now-deleted
    `scripts/migrate_colon_annotations.py` — a fresh single-use script per
    SFEP-0005's own "Lessons Learned" note that such scripts are not kept in
@@ -306,7 +322,13 @@ the same shape:
    rare in prose/log-message literals — the script must still skip
    already-escaped or non-literal occurrences, e.g. `{{` appearing in a
    *comment* rather than a string literal, the same category of care
-   SFEP-0005's script took for `->` inside comments/strings). Run
+   SFEP-0005's script took for `->` inside comments/strings). **Exception —
+   hold back the bootstrap-compiled runtime interpolation literals**
+   (`runtime/prelude.sfn:727` and any peer the old seed compiles into the
+   build): leave them on `{{ }}` here and migrate them with the Phase 4 seed
+   advance, per the bootstrap carve-out in §5 — migrating them now would make
+   the current seed render those runtime strings as literal `${ … }` text for
+   one bootstrap generation. Run
    `make compile && make test` after the rewrite. `sfn fmt --write` on every
    touched file per the standard change-discipline gate.
 4. **Phase 4 — narrow the scanner to `${ }` only; drop `{{ }}` and its
@@ -314,7 +336,10 @@ the same shape:
    and the ecosystem has had a deprecation window to migrate (tracked via the
    roadmap/issue, not blocking this SFEP), remove the `{{`/`}}` fallback
    branch from `parse_interpolated_template` and the deprecation-diagnostic
-   code from Phase 2. `{{ }}` becomes a plain (non-interpolated) literal
+   code from Phase 2. This PR also migrates the bootstrap-compiled runtime
+   interpolation literals held back in Phase 3 (§5 carve-out) — safe here
+   because a `${ }`-aware seed is pinned by this point, so no source the seed
+   compiles renders `${ … }` as literal text. `{{ }}` becomes a plain (non-interpolated) literal
    string again — i.e. a stray `{{name}}` in a string literal is no longer
    special-cased and passes through as literal text, matching how an
    unmatched `${` with no `${` present behaves today. This is the "drop the
@@ -335,7 +360,29 @@ having been built from the Phase 1/2 source. Phases 1-3 should land as a
 single PR (capability + its migration are one cohesive change with one
 "consumer" — the compiler's own tree) rather than split across multiple
 seed cuts, consistent with the default in `.claude/rules/seed-dependency.md`
-("bundle a capability with its single consumer"). Only Phase 4 (dropping
+("bundle a capability with its single consumer").
+
+**Bootstrap-compiled runtime carve-out (verified 2026-07-24).** One subtlety
+the "bundle everything in Phase 3" framing must respect: the *old, pinned*
+seed that runs `make compile` understands **only** `{{ }}`. It therefore
+miscompiles any `${ }` literal it is asked to lower — treating it as *literal
+text*, not an interpolation — for exactly the sources it compiles during
+bootstrap. The compiler's own tree is safe here: a grep confirms **every**
+`{{ }}` in `compiler/src/` is inside a *comment*, not a live interpolation
+literal, so migrating `compiler/src/` is a no-op for the bootstrap. The
+exposure is the **runtime linked into every build**: `runtime/prelude.sfn`
+has one live interpolation (`"Non-exhaustive match for value {{ value }}"`,
+line 727), and it *is* compiled by the old seed. If it is migrated to
+`${ value }` in the bundle PR, the first-pass binary built by the current
+seed renders that panic message as the literal text `${ value }` until a
+`${ }`-capable seed is pinned (it self-heals on the next seed and never
+breaks self-hosting — the invariant holds throughout, only the message text
+degrades for one bootstrap generation). Phase 3 therefore **holds the
+bootstrap-compiled runtime interpolation literals on `{{ }}`** (they keep
+working via dual-accept) and migrates them alongside the Phase 4 seed
+advance, when a `${ }`-aware seed is already pinned — everything else
+(examples, tests, capsules not linked into the compiler self-host such as
+`capsules/sfn/bench`) migrates freely in Phase 3 with no cosmetic exposure. Only Phase 4 (dropping
 `{{ }}` entirely) is a candidate for a later, separate PR, since its
 correctness depends on an external fact (no remaining `{{ }}` usage anywhere
 that will be built against this compiler) rather than on anything internal
@@ -405,8 +452,8 @@ release/deprecation-window boundary, not against a seed cut per se.
 - [ ] Self-hosts — Phase 3 (compiler's own `{{ }}` occurrences migrated;
       `make compile` gate)
 - [ ] `sfn fmt --check` clean — run on every file touched in Phase 3
-- [ ] Documented in `docs/status.md` + spec — flip `docs/status.md:176`/
-      `:347-349` and rewrite `site/src/content/docs/docs/reference/spec/09-strings.md`
+- [ ] Documented in `docs/status.md` + spec — flip `docs/status.md:496`/
+      `:688-690` and rewrite `site/src/content/docs/docs/reference/spec/09-strings.md`
       once Phase 3 lands; Phase 4 removes the "migration planned" language
       entirely
 
@@ -458,9 +505,9 @@ scaffolding, since the feature stays a lowering-time concern per §3.3):
 
 ## 9. References
 
-- `docs/status.md:176` — current "Shipped" status row for `{{ }}` with the
+- `docs/status.md:496` — current "Shipped" status row for `{{ }}` with the
   `${ }` migration note.
-- `docs/status.md:347-349` — "Known Design Issues (Pre-1.0 Syntax Reform)",
+- `docs/status.md:688-690` — "Known Design Issues (Pre-1.0 Syntax Reform)",
   the `{{ }}` vs `${ }` problem statement this SFEP formalizes into a plan.
 - `CLAUDE.md`, "Pre-1.0 Syntax Reform (Active)" item 2 — the standing
   intent this SFEP is the design record for.
@@ -477,8 +524,8 @@ scaffolding, since the feature stays a lowering-time concern per §3.3):
   awareness at the lexer stage.
 - `compiler/src/llvm/expression_lowering/native/core_text.sfn`
   (`parse_interpolated_template`, line 487) and
-  `compiler/src/llvm/expression_lowering/native/core_literals_lowering.sfn`
-  (`try_lower_interpolated_string_literal`, line 1917) — the two functions
+  `compiler/src/llvm/expression_lowering/native/core_cast_lowering.sfn`
+  (`try_lower_interpolated_string_literal`, line 535) — the two functions
   this proposal's Phase 1 changes.
 - `examples/basics/structs.sfn:8` — a representative in-tree `{{ }}`
   occurrence requiring Phase 3 migration.
