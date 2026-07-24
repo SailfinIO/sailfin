@@ -1,14 +1,14 @@
 ---
 title: The Effect System
-description: A comprehensive guide to Sailfin's capability-based effect system — declaring effects, transitive enforcement, pure functions, diagnostics, and design patterns.
+description: A guide to Sailfin 0.8's shipped effect checks, propagation, sub-effects, capsule contracts, and purity boundary.
 section: learn
 sidebar:
   order: 4
 ---
 
-Every function in Sailfin tells you — and the compiler — exactly what it is allowed to do. A function that reads a file must declare `![io]`. A function that makes an HTTP request must declare `![net]`. A function with no effect annotation is **guaranteed pure**: it cannot touch the filesystem, the network, a random number generator, or the clock. This guarantee is enforced at compile time based on direct usage of effectful operations.
+Sailfin 0.8 makes supported side effects visible in function signatures. A filesystem operation requires an `io` grant, an HTTP operation requires `net`, and the checker propagates declared effects through resolved calls, including imported free functions. A function with no effect annotation is **effect-free with respect to the operations the 0.8 checker recognizes**. That is a compile-time statement, not yet a runtime sandbox or a proof about untracked FFI and reserved APIs.
 
-This is Sailfin's effect system: a lightweight, compile-time capability mechanism that makes side effects explicit, auditable, and composable.
+The examples on this page that use undeclared application types or placeholder APIs are illustrative pseudocode. Snippets described as runnable use shipped APIs and syntax.
 
 ---
 
@@ -22,26 +22,26 @@ fn read_config(path: string) -> string ![io] {
 }
 ```
 
-The `![io]` declares that `read_config` may perform I/O. The compiler enforces that any function which directly calls an effectful operation must declare the corresponding effect. Call-graph–transitive enforcement (where every caller of `read_config` must also declare `![io]`) is planned for a future release.
+The `![io]` declares that `read_config` may perform I/O. The compiler checks direct calls to recognized effectful operations and propagates effects through statically resolved callees. Cross-module free-function calls and aliased imports are covered; unresolved or dynamic callees yield no guessed effect.
 
 ### Why this matters
 
-- **Auditability**: You can look at any function signature and know immediately what capabilities it uses. No hidden side effects.
-- **Testability**: Pure functions (no effects) are trivially testable — they have no setup or teardown, no mocking needed, and always return the same output for the same input.
-- **Security**: Capability-based reasoning lets you audit data flows. If a function does not declare `![net]`, you know for certain it cannot exfiltrate data over the network.
-- **Composability**: Effects compose via union. A function that calls both `![io]` and `![net]` helpers declares `![io, net]`. No surprises.
+- **Auditability**: Signatures expose the recognized capabilities used directly or inherited through resolved calls.
+- **Testability**: An effect-free core avoids the recognized I/O, network, clock, and entropy boundaries and is easier to test in isolation. Determinism still depends on ordinary program inputs and on avoiding untracked escape hatches.
+- **Security**: Missing `![net]` rules out recognized network operations along paths the checker can resolve. It does **not** yet prove that native/FFI code cannot exfiltrate data; the runtime syscall seal is a 1.0 target.
+- **Composability**: Effects compose by union. A caller of resolved `![io]` and `![net]` callees declares `![io, net]`.
 
 ### How Sailfin compares to other languages
 
 | Language | Mechanism | Compile-time? | Transitive? |
 |----------|-----------|:---:|:---:|
-| Sailfin | `![effect]` annotations | Yes | Planned (direct usage today) |
+| Sailfin 0.8 | `![effect]` annotations | Yes | Yes for statically resolved calls; unresolved/dynamic calls are not guessed |
 | Java | Checked exceptions | Yes | Yes (but fragile) |
 | Rust | `unsafe`, `Send`/`Sync` | Partial | Partial |
 | Haskell | `IO` monad | Yes | Yes (explicit) |
 | Go, Python, JS | None | No | No |
 
-Sailfin's system is closest to Haskell's `IO` monad in intent, but uses a flat list of named capabilities rather than monadic types — which means you write ordinary-looking functions and add `![io]` annotations, rather than wrapping everything in `IO<T>`.
+Sailfin's system is closest to Haskell's `IO` monad in intent, but uses a list of six canonical roots plus shipped dotted refinements rather than monadic types — which means you write ordinary-looking functions and add `![io]` annotations, rather than wrapping everything in `IO<T>`.
 
 Java's checked exceptions are also transitive, but they are limited to exception types and have well-known composability problems (checked exceptions on interfaces are painful). Sailfin effects are composable by union and do not require interface methods to list throws clauses.
 
@@ -53,12 +53,12 @@ Java's checked exceptions are also transitive, but they are limited to exception
 |--------|-----------------|-------------------|:--------------:|
 | `io` | Filesystem, console, logging | `fs.read`, `fs.write`, `print()`, `print.err()`, `console.*`, `@logExecution` | Yes |
 | `net` | Network I/O | `http.get`, `http.post`, `websocket.*`, `serve` | Yes |
-| `model` | AI library invocation (`sfn/ai`, post-1.0) | Library functions carrying `![model]` (e.g., from `sfn/ai`) | Yes — required for any callee that declares `![model]` |
-| `clock` | Wall-clock and sleep | `sleep(ms)`, `runtime.sleep(ms)` | Partial — `sleep`/`runtime.sleep` checked; hierarchical names not yet enforced |
-| `gpu` | GPU and accelerator access | Tensor operations, `@gpu` blocks | Parsed only — not validated |
-| `rand` | Random number generation | `rand.int()`, `rand.float()`, `rand.shuffle()` | Parsed only — not validated |
+| `model` | Future AI library invocation | No shipped `sfn/ai` runtime API | Reserved — declaration/propagation works, but no detector or runtime API |
+| `clock` | Sleep and clock reads | `sleep(ms)`, shipped clock helpers | Yes for registered operations |
+| `gpu` | Future accelerator access | No effect-gated GPU runtime API | Parsed/reserved — no detector |
+| `rand` | OS entropy boundary | `sfn/crypto::random_bytes` | Yes for `random_bytes`; no general call-name detector |
 
-"Parsed only" means the compiler accepts the annotation in the source without error but does not (yet) verify that every call to a rand or GPU operation is properly guarded by an `![rand]` or `![gpu]` declaration. Full enforcement for these effects is planned before 1.0.
+The taxonomy has exactly six canonical **root** effects. `io.fs`, `io.console`, `net.http`, and `net.ws` are shipped refinements within those roots, not additional canonical effects. `model` and `gpu` remain declarable so signatures and manifests can reserve their authority, but declaring a token does not imply that a corresponding runtime API exists.
 
 ---
 
@@ -109,7 +109,7 @@ fn full_pipeline(input: string) -> Report ![io, net, model, clock, gpu, rand] {
 
 ## Pure Functions
 
-A function with no `![]` annotation is **pure**. The compiler enforces this: calling any effectful function from a pure function is a compile-time error.
+A function with no `![]` annotation is conventionally called **pure**. In 0.8, the precise guarantee is narrower: the compiler rejects recognized direct effectful operations and effects inherited through resolved calls. The guarantee does not cover untracked FFI/native code, unresolved or dynamic calls, or runtime syscall confinement.
 
 ```sfn
 // Pure — no effects declared, no effects allowed
@@ -128,7 +128,7 @@ fn format_currency(amount: number) -> string {
 }
 ```
 
-Pure functions are the best kind of function. They are easy to test, easy to reason about, and safe to call from any context — effectful or not. The effect system gives you a compile-time guarantee that `add` will never do anything except add two numbers.
+Effect-free functions are easy to test and reason about and may be called from effectful contexts. For `add`, the body and resolved callees contain no operation recognized by the 0.8 checker; this is not a general runtime non-interference proof.
 
 ### Separating pure logic from effects
 
@@ -136,71 +136,23 @@ A key design pattern in Sailfin is to push side effects to the edges of your pro
 
 ---
 
-## Transitive Enforcement
+## Caller and Cross-Module Propagation
 
-> **Status**: Call-graph–transitive enforcement (where a caller must declare every effect that a callee declares) is **planned** but not yet implemented. Today the compiler checks that functions which directly call effectful operations (filesystem, print, HTTP, `prompt`, etc.) declare the appropriate effect. The examples below show the intended behavior once transitive enforcement ships.
-
-Effects are designed to propagate through the call graph. If function `A` calls function `B`, and `B` declares `![io]`, then `A` should also declare at least `![io]`.
-
-### Example: missing effect (future behavior)
+Caller propagation is shipped. When a statically resolved function declares an effect, its caller must declare a grant that covers it. This includes imported free functions and aliased imports (`E0402`), and propagation continues through resolved call chains.
 
 ```sfn
 fn fetch_data(url: string) -> string ![net] {
     return http.get(url);
 }
 
-// Planned: fetch_data requires ![net], but process only declares ![io]
-fn process(url: string) -> string ![io] {
-    let raw = fetch_data(url);   // will be a compile error once transitive checking is enforced
-    return raw.trim();
+fn process(url: string) -> string ![net] {
+    return fetch_data(url);
 }
 ```
 
-Expected compiler output (once transitive enforcement is implemented):
+Removing `![net]` from `process` is a compile-time error because the resolved `fetch_data` signature requires it. The same rule applies when `fetch_data` is imported from another module.
 
-```
-error[effects.missing]: function `process` uses `![net]` operation but does not declare net
-  --> src/main.sfn:8:15
-   |
-   = hint: add `net` to the effect list of `process`
-```
-
-### Example: the fix
-
-```sfn
-fn process(url: string) -> string ![io, net] {
-    let raw = fetch_data(url);
-    print("Processing response...");
-    return raw.trim();
-}
-```
-
-### Multi-level propagation
-
-Effects propagate across as many call levels as needed:
-
-```sfn
-fn read_file(path: string) -> string ![io] {
-    return fs.read(path);
-}
-
-fn parse_config(path: string) -> Config ![io] {
-    let text = read_file(path);         // OK: both declare ![io]
-    return Config.parse(text);
-}
-
-fn init_app(config_path: string) -> App ![io] {
-    let config = parse_config(config_path);  // OK: both declare ![io]
-    return App.new(config);
-}
-
-fn main() ![io] {
-    let app = init_app("app.toml");
-    app.run();
-}
-```
-
-Every function in the chain declares `![io]`. If you remove the annotation from any intermediate function, the compiler catches it immediately.
+Propagation is not yet universal dynamic whole-program analysis. In 0.8, unresolved or dynamic callees cannot contribute a guessed effect. Direct registered operations inside a function are still checked independently.
 
 ---
 
@@ -247,15 +199,13 @@ fn process_files(paths: string[]) ![io] {
 }
 ```
 
-If a closure escapes its declaring scope and is stored for later invocation in a different effect context, the compiler will verify that the closure's effects are compatible with the use site. In practice, most closures are used immediately (passed to `map`, `filter`, etc.) and inherit the surrounding effect context naturally.
+Immediately invoked closures are checked in their enclosing effect scope. Do not infer a general effect-polymorphic closure guarantee from this rule: effect polymorphism and broader escaped-closure analysis remain post-1.0 work.
 
 ---
 
 ## Compiler Diagnostics
 
-The effect checker produces diagnostics when a required effect is missing. Diagnostics use the code `effects.missing` and include a fix-it hint showing what to add to the function signature.
-
-> **Note:** Effect diagnostics are currently spanless — they report the function name and missing effect but do not yet include a precise source line/column pointer. Source span support is planned.
+The effect checker produces source-spanned diagnostics with per-call-site carets and structured fix suggestions. Direct missing effects use `E0400`, imported-callee propagation uses `E0402`, and capsule-manifest violations use `E0403`.
 
 ### Missing effect on a direct call
 
@@ -396,33 +346,25 @@ The pure `validate_registration` can be tested with dozens of cases in milliseco
 
 ---
 
-## Future: Hierarchical Effects
+## Shipped Dotted Sub-effects
 
-> **This section describes planned (not yet active) functionality.**
-
-The current system uses flat effect names: `io`, `net`, `model`, etc. A future release will support hierarchical sub-effects to give finer-grained capability control:
+Sailfin 0.8 detects four dotted refinements: `io.fs`, `io.console`, `net.http`, and `net.ws`. A broad root grant subsumes its refinements, so `![io]` authorizes both filesystem and console operations. A narrow grant authorizes only that detected family:
 
 ```sfn
-// Planned syntax — not active today
-fn read_only_op(path: string) -> string ![io.fs.read] {
-    return fs.read(path);
-}
-
-fn http_only(url: string) -> string ![net.http] {
-    return http.get(url);
-}
-```
-
-Hierarchical effects will allow you to require read-only filesystem access without granting write access, or restrict a function to HTTP without granting WebSocket or server capabilities. The flat names (`io`, `net`, etc.) will remain valid as "all sub-effects granted" shorthands.
-
-Until hierarchical effects ship, use comments and code organisation to document intent when only a sub-capability is used:
-
-```sfn
-// Uses only fs.read — write capability not needed despite declaring ![io]
-fn load_template(path: string) -> string ![io] {
+fn read_only_op(path: string) -> string ![io.fs] {
     return fs.read(path);
 }
 ```
+
+Here `![io.fs]` satisfies the registered filesystem operation but would not satisfy `print`, which requires the sibling `io.console`. Capsule manifests use the same subsumption rule: `required = ["io"]` permits all `io.*` declarations, while `required = ["io.fs"]` rejects a function declaring `![io.console]` with `E0403`.
+
+Detection is deliberately conservative. Other registered operations may still require a bare root, and deeper names such as `io.fs.read` are preview design rather than a shipped detector. See [Hierarchical Effects](/docs/reference/preview/hierarchical-effects) for the exact readiness boundary.
+
+## Capsule Contracts and the 1.0 Runtime Seal
+
+Inside a capsule with a non-empty `[capabilities] required` surface, every function's declared effects must fit that manifest (`E0403`). An absent or empty surface skips this cross-check for compatibility; it is **not** an implicit deny-all sandbox. Workspace envelopes can enforce member **declared surfaces**, but inferred source-surface auditing across a workspace remains planned.
+
+All of these are compile-time checks. The emitted 0.8 binary does not carry a capability context that gates every syscall, so effects do not yet confine FFI or arbitrary native objects at runtime. That runtime capability seal is explicitly a **1.0 target**.
 
 ---
 

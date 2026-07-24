@@ -11,7 +11,7 @@ const features = [
   },
   {
     title: "Capability Security",
-    description: "Capsules declare required capabilities in their manifest. Direct use of effectful operations is checked at compile time, with full dependency-tree auditing on the roadmap.",
+    description: "Capsules declare required capabilities in their manifest. Registered operations and resolved callees are checked at compile time; opt-in workspace envelopes enforce member manifests' declared surfaces.",
     icon: "key",
     href: "/docs/reference/effects",
   },
@@ -44,7 +44,7 @@ const features = [
 const useCases = [
   {
     title: "Capability-Controlled Services",
-    description: "The effect system guarantees that IO, network, and other capabilities are declared at compile time. Audit your entire service's capability surface before it reaches production.",
+    description: "The compiler checks registered IO, network, clock, and entropy boundaries plus resolved callees. Audit declared capsule surfaces before production; runtime syscall sealing targets 1.0.",
   },
   {
     title: "Systems Programming",

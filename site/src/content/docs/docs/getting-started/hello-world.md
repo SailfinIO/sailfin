@@ -160,10 +160,10 @@ Hello, World!
   `print`. The `io` effect is declared on `main`, which is the function actually
   calling `print`, so the effect check passes.
 
-> **Effect transitivity:** `greet` does not need `![io]` because it never calls
-> `print`. Only the function that directly invokes an effectful operation — or
-> calls another function that does — needs to declare the effect. The compiler
-> traces the call graph and enforces this.
+> **Effect propagation:** `greet` needs no effect because it only constructs a
+> string. `main` directly calls `print`, so it declares `![io]`. Effects also
+> propagate through statically resolved callees, including imported free
+> functions; unresolved or dynamic calls do not receive a guessed effect.
 
 ---
 
@@ -265,9 +265,9 @@ running 2 tests in hello.sfn
 - `sfn test hello.sfn` — runs all test blocks in the specified file. Run
   `sfn test` (no arguments) to run all `*_test.sfn` files in the project.
 
-> **Note:** Test blocks do not need an effect annotation even if they call
-> effectful functions through the code under test. Effect requirements are on
-> function declarations, not on test blocks.
+> **Note:** Test blocks follow the same effect rules as functions. A test that
+> directly performs an effectful operation or calls a resolved effectful helper
+> must declare a covering effect annotation.
 
 ---
 
@@ -282,8 +282,9 @@ fn main() ![io] {
 }
 ```
 
-Both `print()` and `print.err()` require the `io` effect. There is no separate
-`io` vs `io.err` distinction — both are covered by `![io]`.
+Both `print()` and `print.err()` are detected as the `io.console` sub-effect.
+The broad `![io]` declaration used here subsumes `io.console`, so no separate
+annotation is needed.
 
 ---
 

@@ -6,10 +6,10 @@ sidebar:
   label: "§7 Effect System"
 ---
 
-Every function that performs side effects must declare them with `![...]`:
+Every function must declare the effects recognized directly in its body and inherited through statically resolved callees with `![...]`:
 
 ```sfn
-fn pure(x: int) -> int { return x * 2; } // no effects — guaranteed pure
+fn pure(x: int) -> int { return x * 2; } // no recognized effects
 fn read_file(path: string) ![io] { ... }       // requires io capability
 fn fetch(url: string) ![net] { ... }           // requires net capability
 fn analyze(text: string) ![io, model] { }      // multiple effects
@@ -48,3 +48,7 @@ sibling `![io.console]` function with `E0403`; `required = ["io"]` continues to
 authorize every `io.*` sub-effect.
 
 See [Effect System Reference](/docs/reference/effects) for the complete API surface per effect.
+
+## 7.1 Guarantee boundary
+
+An absent effect annotation proves only that the 0.8 checker found no registered direct operation or effect inherited through a resolved call. Unresolved or dynamic callees yield no guessed effect, and FFI/native code is not confined by the emitted binary. Capsule and workspace checks are compile-time declaration contracts; the runtime syscall seal is a 1.0 target.
