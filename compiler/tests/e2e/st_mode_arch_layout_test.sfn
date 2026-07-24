@@ -1,0 +1,143 @@
+// E2E coverage for the host-architecture lowering seam (SFN-471,
+// SFEP-0056 §3.2–3.3).
+//
+// `sailfin_intrinsic_fs_get_perms` reads `struct stat.st_mode` at an
+// emit-time offset selected from `(SAILFIN_TARGET_OS,
+// SAILFIN_TARGET_ARCH)`: Linux+x86_64 keeps 24, Linux+aarch64 uses 16,
+// and Darwin remains 4. The forced aarch64 case also pins that the three
+// glibc-common locators audited by SFEP-0056 remain arch-invariant:
+// `__errno_location`, `CLOCK_MONOTONIC == 1`, and
+// `_SC_NPROCESSORS_ONLN == 84`.
+import { contains, find } from "sfn/strings";
+
+fn _sfn_bin() -> string ![io] {
+    let configured = env.get("SAILFIN_BIN");
+    if configured.length > 0 { return configured; }
+    return "build/bin/sfn";
+}
+
+fn _scratch_dir() -> string ![io] {
+    let mut dir = env.get("SAILFIN_TEST_SCRATCH");
+    if dir.length == 0 { dir = "/tmp"; }
+    dir = dir + "/sfn-st-mode-arch";
+    fs.createDirectory(dir, true);
+    return dir;
+}
+
+fn _base_env() -> string[] ![io] {
+    let mut e: string[] = [];
+    let path = env.get("PATH");
+    if path.length > 0 { e.push("PATH=" + path); }
+    let home = env.get("HOME");
+    if home.length > 0 { e.push("HOME=" + home); }
+    let tmpdir = env.get("TMPDIR");
+    if tmpdir.length > 0 { e.push("TMPDIR=" + tmpdir); }
+    let scratch = env.get("SAILFIN_TEST_SCRATCH");
+    if scratch.length > 0 { e.push("SAILFIN_TEST_SCRATCH=" + scratch); }
+    return e;
+}
+
+fn _target_env(os: string, arch: string) -> string[] ![io] {
+    let mut e = _base_env();
+    e.push("SAILFIN_TARGET_OS=" + os);
+    e.push("SAILFIN_TARGET_ARCH=" + arch);
+    return e;
+}
+
+fn _fixture_source() -> string {
+    return "struct Timespec {\n" + "    tv_sec: i64,\n" + "    tv_nsec: i64\n"
+        + "}\n\n"
+        + "extern fn clock_gettime(clk_id: i32, ts: * Timespec) -> i32;\n"
+        + "extern fn sysconf(name: i32) -> i64;\n\n"
+        + "fn read_perms(path: * u8) -> i64 ![io] {\n"
+        + "    return sailfin_intrinsic_fs_get_perms(path);\n"
+        + "}\n\n"
+        + "fn read_errno() -> i32 {\n"
+        + "    return sailfin_intrinsic_pointer_read_i32(sailfin_intrinsic_errno_location());\n"
+        + "}\n\n"
+        + "fn read_clock() -> i32 {\n"
+        + "    let mut ts = Timespec { tv_sec: 0, tv_nsec: 0 };\n"
+        + "    return clock_gettime(sailfin_intrinsic_clock_monotonic_id(), & ts);\n"
+        + "}\n\n"
+        + "fn read_ncpu() -> i64 {\n"
+        + "    return sysconf(sailfin_intrinsic_sc_nprocessors_onln());\n"
+        + "}\n\n"
+        + "fn main() -> void {}\n";
+}
+
+fn _fixture_path() -> string ![io] {
+    let src = _scratch_dir() + "/fixture.sfn";
+    fs.writeFile(src, _fixture_source());
+    return src;
+}
+
+fn _emit(os: string, arch: string, tag: string) -> string ![io] {
+    let src = _fixture_path();
+    let ll = _scratch_dir() + "/" + tag + ".ll";
+    if fs.exists(ll) { fs.deleteFile(ll); }
+    let exit = process.run_capture([_sfn_bin(), "emit", "-o", ll, "llvm", src], _target_env(os, arch));
+    let _out = process.capture_take_stdout();
+    let _err = process.capture_take_stderr();
+    if exit != 0 || !fs.exists(ll) { return ""; }
+    return fs.readFile(ll);
+}
+
+fn _fn_body(ir: string, anchor: string) -> string {
+    let mut start = find(ir, "define ", 0);
+    loop {
+        if start < 0 { return ""; }
+        let line_end = find(ir, "\n", start);
+        let mut end = line_end;
+        if end < 0 { end = ir.length; }
+        if contains(substring(ir, start, end), anchor) {
+            let close = find(ir, "\n}", end);
+            if close < 0 { return substring(ir, start, ir.length); }
+            return substring(ir, start, close + 2);
+        }
+        start = find(ir, "define ", start + 1);
+    }
+    return "";
+}
+
+test "st_mode fixture typechecks" ![io] {
+    let src = _fixture_path();
+    let exit = process.run_capture([_sfn_bin(), "check", src], _base_env());
+    let _out = process.capture_take_stdout();
+    let _err = process.capture_take_stderr();
+    assert exit == 0;
+}
+
+test "st_mode Linux x86_64 preserves offset 24" ![io] {
+    let ir = _emit("Linux", "x86_64", "linux-x86_64");
+    assert ir.length > 0;
+    let body = _fn_body(ir, "@read_perms");
+    assert contains(body, "getelementptr i8, i8* ");
+    assert contains(body, ", i64 24");
+    assert ! contains(body, ", i64 16");
+}
+
+test "st_mode Linux aarch64 uses offset 16" ![io] {
+    let ir = _emit("Linux", "aarch64", "linux-aarch64");
+    assert ir.length > 0;
+    let body = _fn_body(ir, "@read_perms");
+    assert contains(body, "getelementptr i8, i8* ");
+    assert contains(body, ", i64 16");
+    assert ! contains(body, ", i64 24");
+}
+
+test "st_mode Darwin remains offset 4 under aarch64 override" ![io] {
+    let ir = _emit("Darwin", "aarch64", "darwin-aarch64");
+    assert ir.length > 0;
+    let body = _fn_body(ir, "@read_perms");
+    assert contains(body, "getelementptr i8, i8* ");
+    assert contains(body, ", i64 4");
+    assert ! contains(body, ", i64 16");
+}
+
+test "st_mode aarch64 override leaves glibc-common locators unchanged" ![io] {
+    let ir = _emit("Linux", "aarch64", "glibc-common");
+    assert ir.length > 0;
+    assert contains(_fn_body(ir, "@read_errno"), "call i32* @__errno_location()");
+    assert contains(_fn_body(ir, "@read_clock"), "call i32 @clock_gettime(i32 1,");
+    assert contains(_fn_body(ir, "@read_ncpu"), "call i64 @sysconf(i32 84)");
+}
