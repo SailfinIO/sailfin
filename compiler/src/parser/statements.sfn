@@ -1486,12 +1486,13 @@ fn parse_assert_statement(parser: Parser) -> BlockStatementParseResult {
 
     let condition = expression_from_tokens(trimmed);
 
-    // Issue #364: route through the structured-failure helper so the
-    // test runner can read a typed AssertFailure record instead of
-    // grep'ping stdout. The runtime function clamps double→i64,
-    // writes a record to fd 3 / `${SAILFIN_TEST_SCRATCH}/fail.bin`,
-    // then takes the same abort path as the legacy raise helper —
-    // so non-test callers see no behavior change.
+    // Issue #364 / SFEP-0050: route through the structured-failure
+    // helper so the test runner can read a typed AssertFailure record
+    // instead of grep'ping stdout. The runtime function clamps
+    // double→i64, frames an `assert` SFTR record (file/line/col/message)
+    // onto the streamed stderr record channel, then takes the same abort
+    // path as the legacy raise helper — so non-test callers see no
+    // behavior change.
     let fail_call = Expression.Call {
         callee: Expression.Identifier {
             name: "runtime_assert_fail_fn",

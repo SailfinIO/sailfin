@@ -222,7 +222,18 @@ fn _sftr_write(kind: string, status: string, name: *u8, hook: string, file: *u8,
     cur = _sftr_put_cstr(base, cur, prefix_c);
     cur = _sftr_put_cstr(base, cur, msg);
     cur = _sftr_put_byte(base, cur, _SFTR_NL);
-    let _ = write(2, buf, cur as usize);
+    // One flush per record. A record is normally well under PIPE_BUF, so a
+    // single blocking `write(2)` to the pipe is atomic; resume from the
+    // returned offset only for the rare oversized record (a huge assert
+    // message) that the pipe can short-write when near-full, so a record is
+    // never truncated into a line the parser would drop as a non-record.
+    let mut off: i64 = 0;
+    loop {
+        if off >= cur { break; }
+        let nw: i64 = write(2, (base + off) as *u8, (cur - off) as usize);
+        if nw <= 0 { break; }
+        off = off + nw;
+    }
     free(buf);
 }
 

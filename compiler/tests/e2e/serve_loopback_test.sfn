@@ -98,9 +98,10 @@ fn _sfn_bin() -> string ![io] {
 // under the parallel pool (`.claude/rules/no-bash-e2e.md`).
 fn _child_env() -> string[] ![io] { return process.environ(); }
 
-// Resolve a wall-clock timeout command, mirroring
-// `cli_commands.sfn::_resolve_timeout_cmd`. Empty string => none found;
-// the caller then spawns the never-returning server unwrapped.
+// Resolve a wall-clock timeout command via a `command -v` probe. Empty
+// string => none found; the caller then spawns the never-returning
+// server unwrapped. (Local to this test — the runner's own per-file
+// deadline moved to a handle-owned `handle_kill` under SFEP-0050.)
 fn _timeout_cmd() -> string ![io] {
     let probe = process.run(["sh", "-c", "command -v timeout >/dev/null 2>&1"]);
     if probe == 0 { return "timeout"; }

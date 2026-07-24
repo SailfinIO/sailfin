@@ -1,15 +1,15 @@
 ---
 sfep: 0050
 title: Streamed per-test results over a captured pipe (retiring the results.log/fail.bin side-channel)
-status: Accepted
+status: Implemented
 type: tooling
 created: 2026-07-18
-updated: 2026-07-18
+updated: 2026-07-24
 author: "agent:compiler-architect; human review"
 tracking: "SFN-393"
 supersedes:
 superseded-by:
-graduates-to:
+graduates-to: site/src/content/docs/docs/reference/spec/11-testing.md
 ---
 
 # SFEP-0050 — Streamed per-test results over a captured pipe
@@ -345,18 +345,18 @@ owns the JSON translation; keep the child's job minimal.
 
 Tooling/runtime-driver change; no user-facing language surface.
 
-- [ ] Parses — N/A (no new syntax; record framing is a byte format)
-- [ ] Type-checks / effect-checks — `assert.sfn`, `test.sfn`, `test_results.sfn`
+- [x] Parses — N/A (no new syntax; record framing is a byte format)
+- [x] Type-checks / effect-checks — `assert.sfn`, `test.sfn`, `test_results.sfn`
       pass `sfn check`
-- [ ] Emits valid `.sfn-asm` — exercised by `make compile` (harness emission
+- [x] Emits valid `.sfn-asm` — exercised by `make compile` (harness emission
       unchanged in structure)
-- [ ] Lowers to LLVM IR — exercised by `make compile`
-- [ ] Regression coverage — see §8
-- [ ] Self-hosts — `make compile`, then **`make check`** over the combined
+- [x] Lowers to LLVM IR — exercised by `make compile`
+- [x] Regression coverage — see §8
+- [x] Self-hosts — `make compile`, then **`make check`** over the combined
       suite (unit+integration+e2e+capsules in one invocation — the seedcheck
       runs through this runner, so a writer/reader skew fails here)
-- [ ] `sfn fmt --check` clean — on every touched `.sfn`
-- [ ] Documented in `docs/status.md` — the test-runner IPC change; this SFEP is
+- [x] `sfn fmt --check` clean — on every touched `.sfn`
+- [x] Documented in `docs/status.md` — the test-runner IPC change; this SFEP is
       the design record; `reference/spec/11-testing.md` notes the transport if it
       documents IPC at all (the `--json` schema is unchanged)
 
