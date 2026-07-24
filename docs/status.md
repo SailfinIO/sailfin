@@ -72,7 +72,7 @@ here.
   remaining tracked issues.
 - **Compiler bootstrap manifest — `bootstrap.toml` + `sfn dev bootstrap`**
   (SFEP-0047, SFN-197). A root `bootstrap.toml` is the compiler checkout's
-  exact stage0 seed policy — `[seed].version/source/repo/asset_prefix/policy`,
+  exact bootstrap-seed policy — `[seed].version/source/repo/asset_prefix/policy`,
   `[store].install_base/bin_dir`, `[verify]` — distinct from the
   capsule/workspace `[toolchain]` *floor* (SFEP-0046): it answers "which exact
   released compiler bootstraps this checkout?", not "can this toolchain build
@@ -127,10 +127,11 @@ here.
   (SFEP-0027 §2.1); a line-budget sentinel
   (`compiler/tests/unit/cli_main_line_budget_test.sfn`) guards against
   re-ballooning.
-- **Deterministic self-hosting.** The compiler is a verified fixed point —
-  stage2 and stage3 produce byte-identical LLVM IR across all modules;
-  `make check` enforces this. The triple-pass validation (stage2 + stage3
-  builds with per-stage `.ll` scratch isolation, hello-world smoke gate,
+- **Deterministic self-hosting.** The compiler is a verified fixed point — the
+  seedcheck generation and the generation it rebuilds produce byte-identical
+  LLVM IR across all modules; `make check` enforces this. The triple-pass
+  validation (seedcheck + fixed-point rebuild with per-generation `.ll`
+  scratch isolation, hello-world smoke gate,
   fixed-point IR diff, and seedcheck→canonical promotion) is owned by the
   compiler as the internal `sfn selfhost` command (`compiler/src/cli_selfhost.sfn`,
   #1502, epic #513 Phase 1) — `make check`'s `check-impl` is now a one-line

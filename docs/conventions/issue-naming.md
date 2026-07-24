@@ -710,10 +710,10 @@ context.
 |-----------|-----------|----------|
 | `M1: Compiler Stabilization` | `M0`, `M1`, `T1` | Phase 1 systems primitives, build pipeline correctness, compiler perf |
 | `M1.5: Drop Emission` | `M1.5` | Deterministic scope-exit drops; hard prereq for M2 |
-| `M2: Runtime in Sailfin` | `M2` | Replace C runtime with pure Sailfin (arena, string, array, io, exception, …) |
-| `M3: Structured Concurrency` | `M3` | `routine`/`await`/`channel`/`spawn` plus atomic intrinsics |
+| `M2: Runtime in Sailfin` | `M2` | Historical delivery track for the now-shipped Sailfin-native runtime |
+| `M3: Structured Concurrency` | `M3` | Shipped v0 `routine`/`await`/`channel`/`spawn` surface plus follow-on maturity |
 | `Effect System Hardening` | `EFF` | Compile-gate enforcement, hierarchical effects, transitive call-graph checking — runs in parallel with runtime work |
-| `1.0 — General Availability` | `T7` | Pure Sailfin toolchain (M5 retired `native_driver.c`; remaining C helpers retire pre-1.0), all enforcement gates active |
+| `1.0 — General Availability` | `T7` | Sailfin-native compiler/runtime, all enforcement gates active, and the tracked path beyond today's LLVM/clang last mile |
 
 ---
 

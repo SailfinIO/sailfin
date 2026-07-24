@@ -190,7 +190,8 @@ sfn fmt --check compiler/src/ runtime/
 - The current backend emits Sailfin native IR (`.sfn-asm`), lowers to LLVM IR,
   and links with the platform toolchain.
 - The compiler has deterministic self-hosting coverage: the full verification
-  gate checks that successive compiler stages produce byte-identical LLVM IR.
+  gate checks that the seedcheck generation and its rebuild produce
+  byte-identical LLVM IR.
 - `docs/status.md` is the source of truth for shipped, partial, and planned
   behavior.
 - User-facing docs live in `site/src/content/docs/` and are published at

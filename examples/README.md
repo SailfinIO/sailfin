@@ -1,6 +1,9 @@
 # Sailfin Examples
 
-This directory showcases the evolving Sailfin language surface implemented by the bootstrap compiler. Each subfolder groups small, focused programs illustrating syntax, type constructs, effects, and concurrency primitives described in the [language specification](https://sailfin.dev/docs/reference/spec/).
+This directory showcases the evolving Sailfin language surface implemented by
+the self-hosted native compiler. Each subfolder groups small, focused programs
+illustrating syntax, type constructs, effects, and concurrency primitives
+described in the [language specification](https://sailfin.dev/docs/reference/spec/).
 
 > **Syntax reform notice:** These examples use pre-reform syntax (`->` for type
 > annotations, `{{ }}` for string interpolation). A pre-1.0 syntax reform is
@@ -12,7 +15,12 @@ Always check `docs/status.md` before relying on an example in production code. E
 
 > **Undefined function calls are a compile error.** Calling a bare function name that resolves to no in-scope binding, builtin, runtime global, or imported function fails typecheck with `error[E0420]: undefined function \`name\`` — define or import the function before calling it. See [§5 Expressions](https://sailfin.dev/docs/reference/spec/05-expressions/) for the full resolution order.
 
-Where you see effect lists (e.g. `![io, model]`), remember the runtime backing is partially stubbed: capability enforcement will harden through the self-hosted toolchain. Richer AI functionality (model declarations, prompt composition, tool dispatch) is being delivered as a post-1.0 `sfn/ai` library capsule rather than language syntax; the `![model]` effect is the only AI-specific construct that stays in the language.
+Where you see effect lists (for example `![io, model]`), distinguish shipped
+runtime capabilities from reserved effects. Registered `io`, `net`, `clock`,
+and entropy operations are checked today. Richer AI functionality (model
+invocation, prompt composition, and tool dispatch) is planned as a post-1.0
+`sfn/ai` library capsule rather than language syntax; `![model]` is declarable
+and propagates, but no shipped operation triggers it.
 
 ## Categories
 
@@ -23,7 +31,7 @@ Where you see effect lists (e.g. `![io, model]`), remember the runtime backing i
 - [AI](./ai/) – The `![model]` effect gating functions that perform model work.
 - [Algorithms](./algorithms/) – Classic algorithms expressed in Sailfin (currently `quicksort`).
 - [Functional](./functional/) – Higher‑order functions, map/reduce, immutable style data transforms.
-- [I/O](./io/) – File system read/write helpers (stubbed in bootstrap runtime).
+- [I/O](./io/) – File system read/write examples backed by the Sailfin-native runtime.
 - [Types](./types/) – Recursive types, tagged unions, ADTs & pattern matching examples.
 
 ## Capability Index
@@ -126,7 +134,8 @@ Effect annotations (`![...]`) flag the runtime capabilities you need to declare 
 
 ## Runtime Notes
 
-- **Bootstrap-friendly (legacy name: stage1)**: `basics`, `functional`, `types`, and `algorithms` only rely on console I/O and pure language constructs covered by the bootstrap pipeline.
+- **Frontend-friendly**: `basics`, `functional`, `types`, and `algorithms` rely
+  primarily on console I/O and core language constructs.
 - **Effect-sensitive**: `advanced`, `concurrency`, `io`, and `web` exercise **real** native-runtime capabilities (`print.*`, `fs.*`, `http.*`, `serve`, `sleep`, `channel`) gated behind effects — these are shipped runtime implementations under `runtime/sfn/`, not mocks (see the Runtime Migration table in `docs/status.md`). Declare the exact effects listed above before running them through the compiler. The exception is `ai/`: the `![model]` effect is declarable and propagates through resolved callers, but it is **not detector-enforced** — no operation triggers it and the model backend is metadata-only pending the post-1.0 `sfn/ai` capsule, so those samples annotate a reserved capability that does not yet execute.
 - **Design-stage examples**: Some examples demonstrate planned features that parse but aren't fully enforced yet. These are marked with **Design-stage** in the notes column. Examples include:
   - `unsafe-extern-interop.sfn` — FFI interop with raw pointers and `unsafe` blocks. Parser accepts the syntax but unsafe semantics are not yet enforced. See [spec §6 Type System](https://sailfin.dev/docs/reference/spec/06-types/).

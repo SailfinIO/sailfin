@@ -1412,4 +1412,7 @@ fn classify(text: string) -> string ![model] {
 
 ---
 
-*The standard library is actively expanding as the runtime migrates from C to Sailfin. See [Runtime ABI](/docs/reference/runtime-abi) for migration status.*
+*The standard library is actively expanding on the Sailfin-native runtime.
+Platform services remain behind `extern fn` adapters, while LLVM/clang provide
+the native-code last mile. See [Runtime ABI](/docs/reference/runtime-abi) for
+the current boundary and migration history.*

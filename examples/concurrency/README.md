@@ -1,6 +1,10 @@
 # Concurrency Examples
 
-Illustrates Sailfin's structured concurrency surface: routines (lightweight tasks), channels for message passing, dynamic scheduling, and parallel evaluation. See the [Concurrency design preview](https://sailfin.dev/docs/reference/preview/concurrency/) for the planned surface.
+Illustrates Sailfin's shipped v0 structured concurrency surface: routine
+nurseries, channels for message passing, spawn / await, dynamic scheduling, and
+parallel evaluation. See the
+[Concurrency status reference](https://sailfin.dev/docs/reference/preview/concurrency/)
+for shipped behavior and current limitations.
 
 ## Files
 
@@ -12,6 +16,9 @@ Illustrates Sailfin's structured concurrency surface: routines (lightweight task
 
 ## Notes
 
-- Effect declarations (`![io]`, `![net]`, etc.) are omitted here; concurrency primitives will later require explicit capability tokens for timing / randomness where applicable.
-- `parallel [ ... ]` is a convenience construct; the bootstrap maps this to concurrent execution and collects results.
-- Future work: cancellation scopes, deadlines (`scope.with_timeout`), deterministic seeds, structured error propagation.
+- Effect declarations cover the operations performed inside each task; the
+  concurrency constructs themselves do not introduce a separate effect.
+- `parallel [ ... ]` runs its entries concurrently on the v0 worker pool and
+  collects results in source order.
+- Future work includes cancellation scopes, deadlines, structured error
+  propagation, and a non-blocking reactor/async-I/O runtime.
