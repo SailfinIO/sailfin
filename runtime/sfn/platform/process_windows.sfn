@@ -737,6 +737,21 @@ fn sfn_process_handle_stderr_at_eof(handle_id: i64) -> bool ![io] {
     return true;
 }
 
+// Framed-stdout twins (SFN-153). The stderr counterparts above are the
+// SFEP-0050 additions; these stdout ones predate it but had no
+// Windows-linked caller until the streamed-record runner
+// (`cli/commands/test.sfn`) began demuxing stdout via
+// `handle_read_bytes_stdout` / `handle_stdout_at_eof` in the compiler
+// binary, so their stubs are required here to keep the cross-windows link
+// resolved. Same degraded posture: chunk → empty, at_eof → true.
+fn sfn_process_handle_read_bytes_stdout(handle_id: i64, n: i64) -> *u8 ![io] {
+    return _pw_empty_cstr();
+}
+
+fn sfn_process_handle_stdout_at_eof(handle_id: i64) -> bool ![io] {
+    return true;
+}
+
 fn sfn_process_handle_kill(handle_id: i64) -> i64 ![io] { return -1; }
 
 // `sfn_io_poll_readable(fd, timeout_ms)` — Windows stub for the
