@@ -1,0 +1,109 @@
+// End-to-end coverage for the tensor IR → StableHLO substrate exit (SFN-429,
+// SFEP-0052 §3.1(3)). Two guarantees:
+//
+//   1. Golden emit — the SFN-427 op set (elementwise add/mul, reduction sum,
+//      2D matmul) renders to a stable StableHLO text snapshot. Refresh with
+//      `SAILFIN_UPDATE_SNAPSHOTS=1` (threaded by `sfn test --update-snapshots`).
+//   2. Round-trip — when a StableHLO tool (`stablehlo-opt`) is on PATH, the
+//      emitted text parses and verifies (exit 0). CI carries no such tool, so
+//      the leg skips cleanly when absent, mirroring the ASAN-skip pattern in
+//      `.claude/rules/compiler-safety.md`.
+//
+// This is a pure text emitter — no `sfn build`/link — so the round-trip leg
+// only needs PATH to locate the tool, not the nested-compile isolation the
+// build-and-run e2e tests thread. See `.claude/rules/no-bash-e2e.md`.
+import { expect_snapshot, with_tmp_dir } from "sfn/test";
+
+import {
+    TensorFunction,
+    TensorModule,
+    TensorOp,
+    dense_f64_type,
+    tensor_add,
+    tensor_matmul_2d,
+    tensor_multiply,
+    tensor_parameter,
+    tensor_reduce_sum
+} from "../../src/tensor_ir";
+import { emit_stablehlo_module } from "../../src/tensor_ir_emit_stablehlo";
+
+// A minimal child environment for the tool probe / invocation: only PATH is
+// load-bearing (locating `stablehlo-opt`), with HOME/TMPDIR carried for the
+// tool's own scratch. `run_capture`'s empty `env` is the *empty* environment,
+// not an inherited one, so PATH must be threaded explicitly.
+fn _child_env() -> string[] ![io] {
+    let mut e: string[] = [];
+    let path = env.get("PATH");
+    if path.length > 0 { e.push("PATH=" + path); }
+    let home = env.get("HOME");
+    if home.length > 0 { e.push("HOME=" + home); }
+    let tmpdir = env.get("TMPDIR");
+    if tmpdir.length > 0 { e.push("TMPDIR=" + tmpdir); }
+    return e;
+}
+
+// The spike module: one function exercising every op in the set. Shapes chain
+// so the IR is well-formed — add/multiply over 2x3, matmul 2x3·3x4 -> 2x4,
+// reduce-sum across the trailing axis -> 2.
+fn _spike_module() -> TensorModule {
+    let ab_type = dense_f64_type([2, 3]);
+    let c_type = dense_f64_type([3, 4]);
+    let mm_type = dense_f64_type([2, 4]);
+    let red_type = dense_f64_type([2]);
+
+    let mut ops: TensorOp[] = [];
+    ops.push(tensor_parameter(0, 0, ab_type));
+    ops.push(tensor_parameter(1, 1, ab_type));
+    ops.push(tensor_parameter(2, 2, c_type));
+    ops.push(tensor_add(3, 0, 1, ab_type));
+    ops.push(tensor_multiply(4, 3, 1, ab_type));
+    ops.push(tensor_matmul_2d(5, 4, 2, mm_type));
+    ops.push(tensor_reduce_sum(6, 5, [1], red_type));
+
+    let function = TensorFunction {
+        name: "spike_kernel",
+        parameter_types: [ab_type, ab_type, c_type],
+        result_type: red_type,
+        operations: ops,
+        return_value_id: 6
+    };
+    return TensorModule {
+        module_name: "sfn_stablehlo_spike",
+        functions: [function]
+    };
+}
+
+// Return "stablehlo-opt" when it is on PATH (a `--version` probe succeeds),
+// else the empty string to signal the round-trip leg should skip.
+fn _stablehlo_opt() -> string ![io] {
+    let exit = process.run_capture(["stablehlo-opt", "--version"], _child_env());
+    let _o = process.capture_take_stdout();
+    let _e = process.capture_take_stderr();
+    if exit == 0 { return "stablehlo-opt"; }
+    return "";
+}
+
+test "stablehlo emit: op-set golden snapshot" ![io] {
+    let text = emit_stablehlo_module(_spike_module());
+    assert expect_snapshot(text, "tensor_ir_stablehlo_spike").ok;
+}
+
+test "stablehlo emit: emitted text round-trips through stablehlo-opt when present" ![io] {
+    let tool = _stablehlo_opt();
+    if tool.length == 0 {
+        // No StableHLO tool on PATH (the CI default) — skip, the golden test
+        // still pins deterministic emit.
+        assert true;
+        return;
+    }
+    let text = emit_stablehlo_module(_spike_module());
+    let exit = with_tmp_dir(fn (dir: string) -> int {
+        let path = dir + "/spike.mlir";
+        fs.writeFile(path, text);
+        let rc = process.run_capture([tool, path], _child_env());
+        let _o = process.capture_take_stdout();
+        let _e = process.capture_take_stderr();
+        return rc;
+    });
+    assert exit == 0;
+}
