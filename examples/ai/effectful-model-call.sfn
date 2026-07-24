@@ -1,6 +1,6 @@
 // examples/ai/effectful-model-call.sfn
 fn call_model(name: string, input: string) -> string ![model] {
-    return "{{name}}::{{input}}";
+    return "${name}::${input}";
 }
 
 fn redact(text: string) -> string { return "[redacted] " + text; }

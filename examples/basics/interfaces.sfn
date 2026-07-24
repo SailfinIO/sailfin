@@ -7,7 +7,7 @@ struct User implements Greeter {
     id: int;
     name: string;
 
-    fn greet(self) -> string { return "Hello, {{self.name}}!"; }
+    fn greet(self) -> string { return "Hello, ${self.name}!"; }
 }
 
 fn main() ![io] {

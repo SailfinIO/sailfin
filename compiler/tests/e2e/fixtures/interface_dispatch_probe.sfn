@@ -13,13 +13,13 @@ interface Greeter {
 struct English {
     name: string;
 
-    fn greet(self) -> string { return "Hello, {{self.name}}!"; }
+    fn greet(self) -> string { return "Hello, ${self.name}!"; }
 }
 
 struct Spanish {
     name: string;
 
-    fn greet(self) -> string { return "Hola, {{self.name}}!"; }
+    fn greet(self) -> string { return "Hola, ${self.name}!"; }
 }
 
 fn main() ![io] {

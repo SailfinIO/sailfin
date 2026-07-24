@@ -47,7 +47,7 @@ fn main() ![io] {
     let m0 = shapes_tag_match(shapes, 0);
     let m1 = shapes_tag_match(shapes, 1);
     let m2 = shapes_tag_match(shapes, 2);
-    print("direct {{ d0 }} {{ d1 }} {{ d2 }}");
-    print("indexed {{ i0 }} {{ i1 }} {{ i2 }}");
-    print("match {{ m0 }} {{ m1 }} {{ m2 }}");
+    print("direct ${ d0 } ${ d1 } ${ d2 }");
+    print("indexed ${ i0 } ${ i1 } ${ i2 }");
+    print("match ${ m0 } ${ m1 } ${ m2 }");
 }

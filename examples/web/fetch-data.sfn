@@ -4,12 +4,12 @@ import { http } from "http";
 async fn fetchData(url: string) -> string ![net] {
     let response = await http.get(url);
     if response.status == 200 { return response.body; } else {
-        return "Error: {{response.status}}";
+        return "Error: ${response.status}";
     }
 }
 
 async fn main() ![io, net] {
     let url: string = "https://jsonplaceholder.typicode.com/posts/1";
     let data = await fetchData(url);
-    print("Fetched data: {{data}}");
+    print("Fetched data: ${data}");
 }

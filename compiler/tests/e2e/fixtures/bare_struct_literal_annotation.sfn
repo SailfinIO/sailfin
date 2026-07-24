@@ -8,5 +8,5 @@ fn main() ![io] {
     let p: Person = {
         name: "Bob"
     };
-    print("Person: {{p.name}}");
+    print("Person: ${p.name}");
 }

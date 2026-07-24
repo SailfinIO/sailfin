@@ -8,7 +8,7 @@ struct TreeNode {
 fn traverse(node: TreeNode?) ![io] {
     if node == null { return; }
     traverse(node.left);
-    print("{{node.value}}");
+    print("${node.value}");
     traverse(node.right);
 }
 

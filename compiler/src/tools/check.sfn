@@ -37,6 +37,7 @@ import {
 import { read_effect_enforcement_env, resolve_effect_enforcement } from "../effect_gate";
 import { ImportSymbolTable, empty_import_symbols } from "../effect_imports";
 import { collect_import_resolution_findings } from "../import_resolution_check";
+import { collect_interpolation_deprecation_findings } from "../interpolation_deprecation_check";
 import { runtime_helper_call_names } from "../llvm/runtime_helpers";
 import { number_to_string } from "../num_format";
 import { parse_program } from "../parser/mod";
@@ -325,6 +326,39 @@ fn check_source_with_imports(source: string, file_path: string, imported_interfa
         rendered.push(render_diagnostic(dddiag, source_lines, "lint"));
         warnings += 1;
         ddi += 1;
+    }
+
+    // W0212 (SFEP-0057): soft-deprecate `{{ }}` string interpolation in favor
+    // of `${ }`. Always a `warning`, never an error, so files still on the old
+    // form (and the held-back bootstrap runtime literal) do not fail check.
+    // Code family W02xx = lint.
+    let interp_deprecations = collect_interpolation_deprecation_findings(program);
+    let mut idi: int = 0;
+    loop {
+        if idi >= interp_deprecations.length { break; }
+        let finding = interp_deprecations[idi];
+        let idfix = FixSuggestion {
+            // Message text intentionally avoids a literal double-brace pair
+            // (would self-trip this very lint) and a non-empty `${ ... }`
+            // (would itself interpolate — SFEP-0057 activates `${ }`; the
+            // `\${` literal-escape is deferred to SFN-483). The empty `${ }`
+            // renders verbatim.
+            message: "switch to the `${ }` string-interpolation form (SFEP-0057)",
+            edits: []
+        };
+        let iddiag = Diagnostic {
+            code: "W0212",
+            severity: "warning",
+            message: "deprecated string-interpolation syntax: `{{ }}` is deprecated, use `${ }` (SFEP-0057)",
+            file_path: file_path,
+            primary: null,
+            suggestion: idfix
+        };
+        combined.push(iddiag);
+        producers.push("lint");
+        rendered.push(render_diagnostic(iddiag, source_lines, "lint"));
+        warnings += 1;
+        idi += 1;
     }
 
     // Stamp the originating module path onto each typecheck diagnostic

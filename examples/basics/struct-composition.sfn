@@ -10,7 +10,7 @@ struct Car {
         return Car { brand: brand };
     }
 
-    fn drive(self) -> string { return "Driving a {{self.brand}} car."; }
+    fn drive(self) -> string { return "Driving a ${self.brand} car."; }
 }
 
 struct Bike {
@@ -20,7 +20,7 @@ struct Bike {
         return Bike { brand: brand };
     }
 
-    fn drive(self) -> string { return "Riding a {{self.brand}} bike."; }
+    fn drive(self) -> string { return "Riding a ${self.brand} bike."; }
 }
 
 fn main() ![io] {

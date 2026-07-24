@@ -493,7 +493,7 @@ here.
 | `match` | Shipped | Literals, `_`, guards, enum-variant destructuring |
 | `x is T` type-guard operator | **Shipped** (enum operands; #1753) | Parses to a structured `Is` AST node; effect checker walks the operand (closes the `Raw`-degradation effect-blind hole in epic #1180). Lowers to the enum's discriminant tag test and narrows the operand to the matched variant in the then-branch — same flow-sensitive narrowing as `match`. v1 scope: **named `enum` operands only**; non-enum unions, primitives, and plain structs are deferred. Else-branch complement narrowing is also deferred. See `examples/advanced/type-guards.sfn` |
 | `try`/`catch`/`finally` | Shipped | Maps to runtime exceptions |
-| String interpolation (`{{ }}`) | Shipped | Primitive values and `int \| null` union payloads stringify in direct, narrowed, and match-bound positions (SFN-343); primitive-element arrays (`int[]`/`float[]`/`number[]`/`boolean[]`/`string[]`) and nested arrays render bracketed (`[1, 2, 3]`, `[1.5, 2.5]`, `[[19, 22], [43, 50]]`) (SFN-408, SFN-410). Any interpolation operand with no stringify arm — e.g. a struct — fails the build loudly (`E0832 [fatal]`), never the old silent empty output. `${ }` migration planned pre-1.0 (see Known Design Issues) |
+| String interpolation (`${ }`) | Shipped | Primitive values and `int \| null` union payloads stringify in direct, narrowed, and match-bound positions (SFN-343); primitive-element arrays (`int[]`/`float[]`/`number[]`/`boolean[]`/`string[]`) and nested arrays render bracketed (`[1, 2, 3]`, `[1.5, 2.5]`, `[[19, 22], [43, 50]]`) (SFN-408, SFN-410). Any interpolation operand with no stringify arm — e.g. a struct — fails the build loudly (`E0832 [fatal]`), never the old silent empty output. `${ }` is the recognized form (SFEP-0057, SFN-482); the legacy `{{ }}` form still works during the dual-accept window but emits a non-fatal `W0212` deprecation warning at `sfn check`. Dropping `{{ }}` and adding the `\${` literal-escape are Phase 4 (SFN-483). |
 | Pattern-match exhaustiveness | Partial | Runtime backstop (`match_exhaustive_failed`) |
 | Effect annotations (`![...]`) | Shipped | |
 | Effect enforcement — `io`, `net`, `clock` | **Enforced** | Build fails on undeclared use (Phase D default `error`) |
@@ -698,11 +698,16 @@ Tracked in the [roadmap](https://sailfin.dev/roadmap) and
 
 - **Type annotations (`:` vs `->`)** — **migrated.** `:` for params, vars,
   fields; `->` for return types only. Parser enforces both positions.
-- **String interpolation (`{{ }}` vs `${ }`)** — open; migration designed and
-  scheduled. `{{ }}` means the opposite of its meaning in every mainstream
-  template language; LLMs systematically generate wrong code. The `${ }`
-  migration plan (dual-accept → deprecate → migrate → drop `{{ }}`) is
-  SFEP-0057 (`docs/proposals/0057-string-interpolation-dollar.md`, Accepted).
+- **String interpolation (`{{ }}` vs `${ }`)** — in progress; Phase 4
+  remaining. `{{ }}` means the opposite of its meaning in every mainstream
+  template language; LLMs systematically generate wrong code. Phases 1-3 of
+  the `${ }` migration plan (dual-accept, `{{ }}` deprecation warning
+  `W0212`, and in-tree migration of compiler source/tests/runtime/examples/
+  capsules) have **shipped** (SFN-482); only Phase 4 (drop `{{ }}` and its
+  deprecation path, migrate the bootstrap-compiled runtime literal held back
+  in Phase 3, add the `\${` literal-escape) remains, gated on a `${
+  }`-aware seed pin (SFN-483). SFEP-0057
+  (`docs/proposals/0057-string-interpolation-dollar.md`, Accepted).
 - **Error handling** — largely closed. `Result<T, E>` + `?` ship end-to-end
   (#832–#834, spec §12). Remaining: `From<E>` coercion and the `E: Error`
   bound, both gated on generic constraints. `try`/`catch` remains for

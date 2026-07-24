@@ -11,8 +11,8 @@ enum Input {
 // against it — the same flow-sensitive narrowing `match` uses, reached through
 // an ordinary `if`/`else`.
 fn process(input: Input) ![io] {
-    if input is Text { print("It's a string: {{input.value}}"); } else {
-        print("It's a number: {{input.amount}}");
+    if input is Text { print("It's a string: ${input.value}"); } else {
+        print("It's a number: ${input.amount}");
     }
 }
 

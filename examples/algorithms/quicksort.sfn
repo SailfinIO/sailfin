@@ -16,6 +16,6 @@ fn main() ![io] {
     // Render element-wise: whole-array interpolation is not yet supported
     // (tracked separately under epic #549's string-formatting category).
     let mut line = "Sorted:";
-    for x in sorted { line = line + " {{x}}"; }
+    for x in sorted { line = line + " ${x}"; }
     print(line);
 }

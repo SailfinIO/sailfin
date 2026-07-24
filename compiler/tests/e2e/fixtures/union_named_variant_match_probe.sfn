@@ -36,8 +36,8 @@ struct AdminUser implements Named {
 
 fn print_value(value: StringValue | IntValue) ![io] {
     match value {
-        StringValue { value } => print("string:{{value}}"),
-        IntValue { value } => print("number:{{value}}")
+        StringValue { value } => print("string:${value}"),
+        IntValue { value } => print("number:${value}")
     }
 }
 
@@ -48,5 +48,5 @@ fn main() ![io] {
         name: "Alice",
         isAdmin: true
     };
-    print("admin:{{admin.name}}");
+    print("admin:${admin.name}");
 }

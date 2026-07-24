@@ -10,5 +10,5 @@ fn main() ![io] {
     routine { messages.send(42); }
 
     let result: int = messages.receive();
-    print("Received: {{result}}");
+    print("Received: ${result}");
 }

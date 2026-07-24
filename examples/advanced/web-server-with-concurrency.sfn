@@ -6,7 +6,7 @@ fn handleRequest(req, res) ![clock, io] {
     if req.path == "/compute" {
         routine {
             let result = computeHeavyTask();
-            res.send("Computed result: {{result}}");
+            res.send("Computed result: ${result}");
         }
     } else { res.send("Welcome to Sailfin!", 200); }
 }
