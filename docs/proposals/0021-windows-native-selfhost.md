@@ -4,9 +4,9 @@ title: Native Windows Self-Host (MSVC ABI)
 status: Accepted
 type: runtime
 created: 2026-06-22
-updated: 2026-07-06
+updated: 2026-07-24
 author: "agent:compiler-architect"
-tracking: "#1485"
+tracking: "SFN-53, SFN-54, SFN-55, SFN-56, SFN-57, SFN-58"
 supersedes:
 superseded-by:
 graduates-to:
@@ -315,7 +315,8 @@ Sizes are XS/S/M (never L per issue contract). "Blocked by" gives the DAG.
 | **M5** | fs enumeration (blocker 1) | `sailfin_intrinsic_fs_list_dir` sentinel + Win32 `FindFirstFile` leg; fix the dirent-offset enumeration on Windows. **Landed (seed-gated split):** sentinel capability SFN-51 / PR #2355 (in the pinned seed since `v0.8.0`); runtime consumer flip SFN-374. | M | M1 |
 | **M6** | driver target conditioning | `_target_triple`/`_target_link_libs`/no-`static`/lld for MSVC; add `windows_stubs.ll` + `process_windows.sfn` to the native Windows link/runtime set. | M | M0, M1 |
 | **M7** | **first native MSVC build (booting)** | On `windows-latest`, cross-seed → `<seed> build -p compiler` MSVC → a booting native exe (`--version`, `check`). **Smallest first natively-built booting binary.** | S | M2, M4, M5, M6 |
-| **M8** | native self-host fixed point | pass-1 → pass-2 == fixed point; hello-world runs. | S | M7 |
+| **M7.5** | host-side POSIX-shell removal | De-shell the `sfn build -p compiler` **host** path so a Windows host can run it: staging degrade + `mkdir`/`rm` retarget (SFN-486), the IR-validation cascade (SFN-487), the link-time host probe + build stamp (SFN-488), the `sfn selfhost` validator (SFN-489), `mv`/`cp` → libc `rename`/copy (SFN-490), and a Windows-host regression leg (SFN-491). Surfaced by the M7 harness: M0/M1 de-shelled the env-flag and host-detection paths, but the build-cache / temp-file / hash / probe surface only fires during an actual build. | M (6 leaves) | M6 |
+| **M8** | native self-host fixed point | pass-1 → pass-2 == fixed point; hello-world runs. | S | M7, M7.5 |
 | **M9** | CI `build-compiler-windows` + `build-test-windows` | Mirror macOS jobs; suite + triple-pass selfhost verify. | M | M8 |
 | **M10** | native TLS (drop `-femulated-tls`) | Verify native MSVC PE TLS for the one `thread_local`; drop the flag. | S | M7 |
 | **M11** | native Windows seed + release | `release-tag.yml` native leg, `install.sh`/`fetch-seed` `.exe`, `/pin-seed`. | M | M9 |
@@ -340,6 +341,26 @@ runtime body + M4's consumer — but M4 also depends on M0, so they are honestly
 separable. M0+M1+M2 are independent small wins that could
 ship as one "de-shell the compiler" PR if grooming prefers, but M0 alone is the
 load-bearing one and is worth landing first to de-risk everything else.
+
+**Which FFI shapes force a seed cut (probed against seed `0.8.0`, SFN-490).** M5's
+split above is often over-generalised into "any new FFI needs a seed cut." It does
+not. The discriminator is *whether the pinned seed has to resolve a new name*:
+
+- **Needs a seed cut:** a compiler-emitted **intrinsic sentinel** plus its registry
+  row (M5's `sailfin_intrinsic_fs_list_dir` surfaced as `fs.listDirectory`). The
+  seed compiling `runtime/sfn/**` cannot resolve a brand-new sentinel (`E0420`), so
+  the capability must ship in the seed before its consumer. Adding an
+  `fs.rename` / `fs.copyFile` builtin would fall in this bucket.
+- **Needs no seed cut:** a plain `extern fn` over a libc symbol declared **in the
+  compiler module that uses it**. Probing `extern fn rename(oldpath: *u8, newpath:
+  *u8) -> i32;` under seed `0.8.0` emits a real `call i32 @rename(i8* %t0, i8* %t1)`;
+  `fopen`/`fread`/`fwrite`/`fclose`/`malloc`/`free` likewise. Compiler source already
+  does this (`arena_relocate.sfn` declares `calloc`/`memcpy`/`free`; `cli/entry.sfn`
+  declares `realpath`), and the `string`→`*u8` coercion at the call site is the same
+  one `_shell_read_cmd` relies on.
+
+So prefer a module-local libc `extern fn` over a new builtin whenever the symbol
+already exists on every target platform — it keeps the work bundled in one PR.
 
 ---
 
