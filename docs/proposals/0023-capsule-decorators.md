@@ -1,10 +1,10 @@
 ---
 sfep: 23
 title: Capsule-Defined Decorators
-status: Draft
+status: Accepted
 type: language
 created: 2026-06-15
-updated: 2026-07-06
+updated: 2026-07-24
 author: "agent:compiler-architect"
 tracking: "#1557"
 supersedes:

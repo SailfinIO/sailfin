@@ -1,10 +1,10 @@
 ---
 sfep: 0025
 title: Native Runtime Architecture
-status: Accepted
+status: Implemented
 type: runtime
 created: 2026-06-26
-updated: 2026-06-26
+updated: 2026-07-24
 author: "agent:compiler-architect"
 tracking: "#321, #322, #451, #822, #1089, #1118, #1181, #1203, #1209"
 supersedes:

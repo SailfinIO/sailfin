@@ -35,16 +35,18 @@
 //     in Sailfin) by treating "directory exists afterward" as the
 //     success signal — equivalent outcome, no platform errno
 //     coupling.
-//   - **`sfn_fs_list_dir`**: pure Sailfin (#1317, epic #1308 C8) —
-//     walks `opendir`/`readdir`/`closedir`, reads each `dirent`'s
-//     `d_name` at the platform byte offset (19 on Linux glibc, 21 on
-//     macOS arm64 — canonical home `platform/sizes_linux.sfn`, inlined
-//     here per the #306 workaround), filters `.`/`..`, `strdup`s each
-//     name, and builds a sorted `SfnArray` (`{ i8**, i64, i64 }*`)
-//     through the runtime array core (`concat_v2(null,null)` for the
-//     empty container + `append_string_v2` per entry, `strcmp`-sorted
-//     in place). The slot store rides `append_string_v2` and `memcpy`
-//     because Sailfin exposes no pointer-write intrinsic.
+//   - **`sfn_fs_list_dir`**: delegates the per-target directory walk
+//     to the `sailfin_intrinsic_fs_list_dir` sentinel (SFN-51, epic
+//     #1485; `core_call_emission.sfn`) — POSIX `opendir`/`readdir`/
+//     `closedir` (`d_name` at the runtime-selected offset via
+//     `_fs_dirent_dname_offset()`) vs. Windows `FindFirstFileA`/
+//     `FindNextFileA`/`FindClose` (`cFileName`), fixing the 4096
+//     source-enumeration cap on native Windows. The wrapper normalizes
+//     an empty/null path to `"."` and `strcmp`-sorts the sentinel's
+//     unsorted `SfnArray` (`{ i8**, i64, i64 }*`) result in place. The
+//     iteration primitives + `_fs_*` per-entry helpers below are the
+//     `call` targets the sentinel's legs emit against (declare-only on
+//     the non-host leg).
 //   - **`sfn_fs_read_bytes`**: pure Sailfin (#1317) — the same chunked
 //     `fread`-until-short-read slurp as `sfn_fs_read_file`, whose
 //     running byte count *is* the true binary length (embedded NULs
@@ -118,9 +120,11 @@
 //     the inlined `extern fn`s below. `get_perms`'s per-platform
 //     `st_mode` offset and `mkdtemp`'s `#if _WIN32` stub now live
 //     inside the sentinel lowering, not a fixed-offset Sailfin read.
-//   `list_dir` / `read_bytes` are pure Sailfin (#1317, epic #1308
-//   C8 — Linux-first; macOS `dirent` offset 21 is the documented
-//   follow-up in `platform/sizes_linux.sfn`).
+//   `read_bytes` is pure Sailfin (#1317, epic #1308 C8). `list_dir`
+//   routes through the `sailfin_intrinsic_fs_list_dir` sentinel (SFN-51,
+//   epic #1485); its `dirent` offset is runtime-selected per platform
+//   (Linux 19 / macOS arm64 21) via `_fs_dirent_dname_offset()`, not a
+//   fixed Linux-first read.
 //
 // Why inline the externs rather than `import { fopen, ... }
 // from "../platform/libc"`? Same rationale as every other
@@ -220,15 +224,18 @@ extern fn getenv(name: *u8) -> *u8;
 // instead of binding to the C symbol — `stat(path)==0` on POSIX,
 // `GetFileAttributesA` on Windows. `sfn_fs_mkdir` / `sfn_fs_exists`
 // route through the sentinel.
-// Directory-enumeration primitives for the pure-Sailfin
-// `sfn_fs_list_dir` body (#1317, epic #1308 C8). `opendir` / `readdir`
-// / `closedir` are declared canonically in `runtime/sfn/platform/
-// libc.sfn` (~lines 276-280) and inlined here per the #306
-// cross-module-extern workaround documented in the file header.
-// `opendir`'s `DIR *` and `readdir`'s `struct dirent *` are spelled
-// `* u8` (opaque-pointee, identical IR lowering) to keep this module
-// self-contained — the same redeclaration pattern the `unlink` /
-// `mkdir` / `rmdir` externs above use.
+// POSIX directory-enumeration primitives for the
+// `sailfin_intrinsic_fs_list_dir` sentinel's POSIX leg (SFN-51, epic #1485;
+// `core_call_emission.sfn`). Like the Win32 `Find*` externs below they are
+// inlined `extern fn` here so the sentinel's emitted `call`s bind to a
+// `declare`; never *called* from a Sailfin call site in this module — the
+// sentinel lowers them directly. `opendir` / `readdir` / `closedir` are
+// declared canonically in `runtime/sfn/platform/libc.sfn` (~lines 276-280)
+// and inlined here per the #306 cross-module-extern workaround documented in
+// the file header. `opendir`'s `DIR *` and `readdir`'s `struct dirent *` are
+// spelled `* u8` (opaque-pointee, identical IR lowering) to keep this module
+// self-contained — the same redeclaration pattern the `unlink` / `mkdir` /
+// `rmdir` externs above use.
 extern fn opendir(path: *u8) -> *u8;
 
 extern fn readdir(dirp: *u8) -> *u8;
@@ -687,24 +694,20 @@ fn _fs_dirent_dname_offset() -> i64 ![io] {
     return DIRENT_DNAME_OFFSET_DARWIN;
 }
 
-// `sfn_fs_list_dir(path)` — enumerate the entries of `path`, returning
-// a sorted `SfnArray` (`{ i8**, i64, i64 }*`, spelled `* u8`) that omits
-// `.` and `..`. Pure Sailfin (#1317, epic #1308 C8): walk
-// `opendir`/`readdir`/`closedir`, read each entry's name at
-// `dirent + _fs_dirent_dname_offset()`, `strdup` it (the `dirent` buffer is
-// reused across `readdir` calls), append it through the runtime array core,
-// then `strcmp`-sort in place. A null or empty `path` lists the current
-// directory; an `opendir` failure returns an empty array (never null) so
-// callers can iterate unconditionally.
-//
-// The native-Windows-correct replacement — the `sailfin_intrinsic_fs_list_dir`
-// sentinel (SFN-51, epic #1485; `core_call_emission.sfn`), whose Windows leg
-// lowers `FindFirstFileA`/`FindNextFileA`/`FindClose` reading
-// `WIN32_FIND_DATAA.cFileName` — is staged in the compiler but not yet
-// consumed here: because this module is the compiler's own runtime, `sfn
-// build -p compiler` compiles it with the pinned seed, which cannot resolve
-// the new intrinsic until a seed bump carries it. The body flips to the
-// sentinel once the pinned seed ships it.
+// `sfn_fs_list_dir(path)` — enumerate the entries of `path`, returning a
+// sorted `SfnArray` (`{ i8**, i64, i64 }*`, spelled `* u8`) that omits `.`
+// and `..`. Normalizes a null/empty `path` to `"."` before enumerating —
+// POSIX `opendir("")` and Windows `FindFirstFileA("\\*")` diverge otherwise —
+// then delegates the per-target walk to the `sailfin_intrinsic_fs_list_dir`
+// sentinel (SFN-51, epic #1485; `core_call_emission.sfn`): its POSIX leg
+// walks `opendir`/`readdir`/`closedir` reading each name at
+// `dirent + _fs_dirent_dname_offset()`, its Windows leg walks
+// `FindFirstFileA`/`FindNextFileA`/`FindClose` reading
+// `WIN32_FIND_DATAA.cFileName` — the native-Windows-correct enumeration that
+// fixes the 4096 source-enumeration cap in `enumerate_binary_capsule_sources`.
+// The sentinel returns an *unsorted* array (an enumeration failure yields an
+// empty array, never null, so callers iterate unconditionally); the wrapper
+// `strcmp`-sorts it in place via `_fs_sort_str_array` before returning.
 fn sfn_fs_list_dir(path: *u8) -> *u8 ![io] {
     // Null/empty path ⇒ current directory (C body's `path_str = "."`).
     let mut target: *u8 = path;
@@ -717,22 +720,7 @@ fn sfn_fs_list_dir(path: *u8) -> *u8 ![io] {
         target = dot as *u8;
     }
 
-    let dir: *u8 = opendir(target);
-    if dir as i64 == 0 { return sailfin_runtime_concat_v2(null, null); }
-
-    let dname_off: i64 = _fs_dirent_dname_offset();
-    let mut arr: *u8 = sailfin_runtime_concat_v2(null, null);
-    loop {
-        let entry: *u8 = readdir(dir);
-        if entry as i64 == 0 { break; }
-        let name: *u8 = ((entry as i64) + dname_off) as *u8;
-        if _fs_name_is_dot(name) { continue; }
-        let copy: *u8 = _fs_dup_cstr(name);
-        if copy as i64 == 0 { continue; }
-        arr = sailfin_runtime_append_string_v2(arr, copy);
-    }
-    closedir(dir);
-
+    let arr: *u8 = sailfin_intrinsic_fs_list_dir(target);
     _fs_sort_str_array(arr);
     return arr;
 }

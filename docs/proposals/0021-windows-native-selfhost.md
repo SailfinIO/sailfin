@@ -312,7 +312,7 @@ Sizes are XS/S/M (never L per issue contract). "Blocked by" gives the DAG.
 | **M2** | self-path `.exe` (#1482) | Thread `exe_path()` full path into `_resolve_self_path`; handle `.exe`. | XS | M0 |
 | **M3** | Windows `run_capture` | Real `sfn_process_run_capture` (CreatePipe + CreateProcessA + ReadFile) in `process_windows.sfn`; un-stub the capture family. | M | — |
 | **M4** | child-spawn de-shell | Replace the `sh -c "..."` env-clearing child-emit wrapper (`cli_main.sfn:1064-1066`) with `run_capture` per-child env. | S | M0, M3 |
-| **M5** | fs enumeration (blocker 1) | `sailfin_intrinsic_fs_list_dir` sentinel + Win32 `FindFirstFile` leg; fix the dirent-offset enumeration on Windows. | M | M1 |
+| **M5** | fs enumeration (blocker 1) | `sailfin_intrinsic_fs_list_dir` sentinel + Win32 `FindFirstFile` leg; fix the dirent-offset enumeration on Windows. **Landed (seed-gated split):** sentinel capability SFN-51 / PR #2355 (in the pinned seed since `v0.8.0`); runtime consumer flip SFN-374. | M | M1 |
 | **M6** | driver target conditioning | `_target_triple`/`_target_link_libs`/no-`static`/lld for MSVC; add `windows_stubs.ll` + `process_windows.sfn` to the native Windows link/runtime set. | M | M0, M1 |
 | **M7** | **first native MSVC build (booting)** | On `windows-latest`, cross-seed → `<seed> build -p compiler` MSVC → a booting native exe (`--version`, `check`). **Smallest first natively-built booting binary.** | S | M2, M4, M5, M6 |
 | **M8** | native self-host fixed point | pass-1 → pass-2 == fixed point; hello-world runs. | S | M7 |
@@ -330,10 +330,14 @@ true unblocker — almost everything depends on de-shelling.
 M7–M12 (build/toolchains/seed/CI).
 
 **Bundling note (decomposition discipline):** M5's fs-enum *capability* (the
-`fs_list_dir` sentinel) and its sole consumer (the Windows leg) land in **one
-PR** — splitting would force a seed cut between the sentinel and its use. Same
-for M3's `run_capture` runtime body + M4's consumer — but M4 also depends on M0,
-so they are honestly separable. M0+M1+M2 are independent small wins that could
+`fs_list_dir` sentinel) and its runtime consumer were **split**, not bundled:
+`runtime/sfn/adapters/filesystem.sfn` is the compiler's own runtime, so `sfn
+build -p compiler` compiles it with the *pinned seed*, which cannot resolve a
+brand-new intrinsic (`E0420`) — the sentinel must ship in the seed first. So the
+capability landed alone (SFN-51 / PR #2355, `seed-blocker`) and the consumer flip
+followed after a seed bump carried it (SFN-374). Same for M3's `run_capture`
+runtime body + M4's consumer — but M4 also depends on M0, so they are honestly
+separable. M0+M1+M2 are independent small wins that could
 ship as one "de-shell the compiler" PR if grooming prefers, but M0 alone is the
 load-bearing one and is worth landing first to de-risk everything else.
 
