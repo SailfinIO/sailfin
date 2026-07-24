@@ -26,7 +26,7 @@ the first time a non-terminated value flows through the broader consumer set.
 Every comparison here was run with **isolated, freshly-cleaned build caches per
 compiler**. This matters: the compiler routes each compile's IR through a shared
 `build/sailfin/program.ll` + `build/cache` (the `--jobs`/shared-`program.ll`
-collision documented in `.claude/rules/no-bash-e2e.md`). Rapidly switching a
+collision documented in `docs/conventions/e2e-tests.md`). Rapidly switching a
 single `build/bin/sfn` between the seed, main, and the view compiler leaves
 **cross-contaminated cache entries** that produce corrupted test binaries — an
 exit-139 that is a cache artifact, not a real crash.

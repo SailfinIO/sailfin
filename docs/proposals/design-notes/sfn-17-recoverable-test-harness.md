@@ -217,7 +217,7 @@ Docs: `docs/status.md` test-runner row + spec §11 (`sfn test --json` schema v2)
    "status":"fail"}` line and `schema_version:2`.
 
 Extend `lifecycle_hook_ordering_test.sfn` / add peers; env-thread per
-`.claude/rules/no-bash-e2e.md`.
+`docs/conventions/e2e-tests.md`.
 
 ## Risks
 

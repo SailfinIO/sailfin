@@ -28,17 +28,10 @@ Don't say "the compiler rejects X" — say "the effect checker at `effect_checke
 
 ## The ship bar
 
-Never claim a feature "ships" or is "done" unless all seven are true:
-
-1. Parses (parser change landed and tested).
-2. Type-checks or effect-checks (typecheck / effect_checker updated).
-3. Emits valid `.sfn-asm` (emit_native path exercised).
-4. Lowers to LLVM IR (llvm/lowering path exercised).
-5. Has regression coverage under `compiler/tests/`.
-6. Self-hosts — `make compile` passes, ideally `make check` too.
-7. Documented in `docs/status.md` and under `site/src/content/docs/docs/reference/` (spec chapter for shipped, preview for planned).
-
-If any are missing, the correct phrasing is "partial" or "parsed but not enforced" — not "shipped". Unenforced safety claims are worse than missing syntax.
+The Stage1 readiness bar (CLAUDE.md ## Stage1 readiness) governs what "ships"
+or is "done" means. If any point is missing, the correct phrasing is "partial"
+or "parsed but not enforced" — not "shipped". Unenforced safety claims are
+worse than missing syntax.
 
 ## What to surface, what to suppress
 
@@ -55,21 +48,6 @@ If any are missing, the correct phrasing is "partial" or "parsed but not enforce
 
 ## When reasoning about tradeoffs
 
-Default to the framework in CLAUDE.md:
-
-1. Boring syntax wins.
-2. AI agents are users — conventional syntax first.
-3. Pick 3 differentiators (effects, capabilities, structured concurrency); everything else is a library or post-1.0.
-4. Don't ship unfinished safety claims.
-5. Keywords are expensive.
-6. Fix the foundation first (integers, `Result<T, E>`, generic constraints, hierarchical effects).
-
-If a proposed change violates one of these, call it out by number and propose the adjustment.
-
-## Commands you habitually respect
-
-- The compiler self-caps memory (8 GiB `RLIMIT_AS` on Linux; `SAILFIN_MEM_LIMIT` overrides) — never disable it outside sanitizer legs.
-- `sfn check <files>` as the inner loop — fast parse + typecheck + effect-check on just the files you touched (no IR, no `clang`, no self-host). Reach for this *before* a rebuild; don't burn `make check` to discover a type or effect error.
-- `make compile` after any `compiler/src/` change before declaring progress (the self-host gate).
-- `make check` before declaring a structural change safe or a feature shipped — not as a routine edit-check.
-- Commit and push before launching a long build so session timeout doesn't lose work.
+Default to the design judgment framework in CLAUDE.md (## Design judgment). If
+a proposed change violates one of its points, call it out and propose the
+adjustment.

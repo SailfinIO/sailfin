@@ -1,68 +1,26 @@
-The compiler manages its own memory budget — no caller-side prefix is needed.
+The compiler manages its own memory budget — **no caller-side prefix is needed.**
 
-On Linux, every `sfn` invocation self-applies an **8 GiB `RLIMIT_AS`** at
-startup (`runtime/sfn/platform/rlimit.sfn`, called from `fn main` in
-`compiler/src/cli_main.sfn`) so a runaway compile cannot exhaust the host.
-The limit is inherited by child processes (per-module emit subprocesses,
-`clang`, `llvm-link`). Compiled user programs are not capped — only the
-toolchain self-caps. The historical `ulimit -v 8388608` prefix ritual and
-the PreToolUse hook that enforced it are retired.
+Every `sfn` invocation self-applies an **8 GiB `RLIMIT_AS`** at startup on Linux
+(`runtime/sfn/platform/rlimit.sfn`, from `fn main` in `cli/entry.sfn`), inherited
+by child processes (per-module emit, `clang`, `llvm-link`). Compiled user
+programs are not capped — only the toolchain self-caps. The historical
+`ulimit -v` prefix ritual and its enforcing hook are retired.
 
-The contract:
-
-- `SAILFIN_MEM_LIMIT=<bytes>` overrides the default (bytes only, no K/M/G
-  suffixes; values < 1 MiB are rejected as misconfiguration and the
-  default is kept).
-- `SAILFIN_MEM_LIMIT=unlimited` (or `off` / `0`) disables the self-cap.
-  Never disable it for ordinary builds or tests — it exists because
-  uncapped memory regressions have killed CI runners and WSL instances
-  outright (issue #1245).
-- An inherited external cap (`ulimit -v` in a CI step or user shell)
-  always wins — the compiler never loosens it.
+- `SAILFIN_MEM_LIMIT=<bytes>` overrides the default (bytes only, no K/M/G;
+  values under 1 MiB are rejected as misconfiguration).
+- `SAILFIN_MEM_LIMIT=unlimited` (or `off`/`0`) disables the cap. **Never disable
+  it for ordinary builds or tests** — uncapped memory regressions have killed CI
+  runners and WSL instances outright (#1245).
+- An inherited external cap always wins; the compiler never loosens it.
 - `SAILFIN_TRACE_MEM_LIMIT=1` prints the decision to stderr.
-- **macOS:** Darwin does not honor `RLIMIT_AS`, so the self-cap is a
-  no-op there (gated on a `/proc` probe) — the same platform scope the
-  old `ulimit -v` rule had. The budget is load-bearing on Linux/WSL only.
+- **macOS:** Darwin ignores `RLIMIT_AS`, so the cap is a no-op there. The budget
+  is load-bearing on Linux/WSL only.
 
-**Timeouts still apply.** Wrap single-file compiler invocations with
-`timeout 60` (e.g. `timeout 60 build/bin/sfn run file.sfn`) — the
-memory budget does not guard against hangs. `make` targets handle their
-own timeouts.
+**Timeouts still apply** — the memory budget does not guard against hangs. Wrap
+single-file invocations with `timeout 60`; `make` targets handle their own.
 
-**Sanitizers (ASAN/TSAN) are incompatible with any finite address-space
-cap.** AddressSanitizer reserves ~16 TB of *virtual* address space for its
-shadow memory at startup (ThreadSanitizer uses the same shadow-reservation
-model). Under the self-cap or any external `ulimit -v`, that reservation
-aborts before `main()` runs, with `ReserveShadowMemoryRange failed ...
-Perhaps you're using ulimit -v`. Sanitizer-instrumented runs therefore
-need **both** `SAILFIN_MEM_LIMIT=unlimited` **and** an uncapped shell.
-This is not a use-after-free or a sanitizer finding — it is the cap
-killing the process at startup (it burned a CI cycle on PR #1262,
-e2e-sh-1, before being diagnosed).
-
-Tests that want a sanitizer leg must therefore:
-
-- **Skip the sanitizer leg unless ASAN actually starts** — the plain,
-  uninstrumented run still provides coverage. The native e2e tests are
-  `*_test.sfn` and cannot read `ulimit -v`, so the pattern (see
-  `compiler/tests/e2e/runtime_memory_arena_test.sfn` and
-  `escape_promotion_channel_send_test.sfn`) is: build with
-  `-fsanitize=address`; if the build fails → skip; run with
-  `SAILFIN_MEM_LIMIT=unlimited` and `ASAN_OPTIONS=detect_leaks=0` in the
-  child env; if the run exits non-zero **with** an `ERROR: AddressSanitizer:`
-  line → fail; any other non-zero exit (the shadow reservation aborting at
-  startup under a vmem cap, or a missing compiler-rt runtime) → skip.
-
-  ```sfn
-  let exit = process.run_capture([asan_bin], _asan_env());  // SAILFIN_MEM_LIMIT=unlimited
-  let out = process.capture_take_stdout();
-  let err = process.capture_take_stderr();
-  if exit != 0 && contains(out + err, "ERROR: AddressSanitizer:") {
-      assert false;  // a genuine sanitizer finding
-  }
-  // otherwise: clean run or a startup/abort skip — both pass.
-  ```
-
-- **Only a genuine `ERROR: AddressSanitizer:` report may fail the test.**
-  A failure to start the sanitizer runtime (missing compiler-rt archives,
-  or a vmem cap) is a skip, not a failure.
+**Sanitizers are incompatible with any finite address-space cap** — ASAN reserves
+~16 TB of virtual address space and aborts before `main()` under the cap. A
+sanitizer leg needs both `SAILFIN_MEM_LIMIT=unlimited` and an uncapped shell, and
+must *skip* (not fail) when the runtime won't start. Full procedure:
+`docs/conventions/sanitizer-tests.md`.

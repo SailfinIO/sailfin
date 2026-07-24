@@ -330,7 +330,7 @@ effect tracking (the SFEP-0029 §4 future slot) is untouched.
   preserved verbatim — the no-regression pin).
 
 **e2e (`compiler/tests/e2e/untyped_lambda_callback_test.sfn`, new — build &
-run, isolated per `.claude/rules/no-bash-e2e.md`):**
+run, isolated per `docs/conventions/e2e-tests.md`):**
 
 - `.map(fn(x) => x * x)` on an `int[]` **executes** and prints the squared
   array (was exit 139). The proof the headline case is fixed.

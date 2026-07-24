@@ -40,10 +40,3 @@ echo "- branch: $branch"
 version_pin=$(grep -E '^version' compiler/capsule.toml 2>/dev/null | head -n1 | tr -d '"' || true)
 [[ -n "$version_pin" ]] && echo "- capsule: $version_pin"
 
-cat <<'MSG'
-
-Reminders:
-- The compiler self-caps memory at 8 GiB on Linux (`SAILFIN_MEM_LIMIT` to override); still wrap single-file compiles with `timeout 60`.
-- Work lives on `claude/*` branches (`/pickup` uses `claude/sfn-<N>-…`); PRs cite `Fixes SFN-<N>` so Linear closes the issue on merge.
-- Roadmap: site/src/pages/roadmap.astro. Status: docs/status.md.
-MSG

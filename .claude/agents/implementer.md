@@ -29,10 +29,8 @@ orchestrator's job, not yours.
    the work.
 2. Make the change with `Edit`/`Write`, one pipeline stage at a time when the
    spec spans stages (lexer → parser → ast → typecheck → effects → emit → llvm).
-3. After touching any `.sfn` file, run `sfn fmt --write` then `sfn fmt --check`
-   on it (`build/bin/sfn fmt ...` if `sfn` isn't on PATH), and
-   `sfn check <files>` for fast static validation. Wrap single-file compiles with
-   `timeout 60`. (`.claude/rules/formatting.md`, `.claude/rules/compiler-safety.md`.)
+3. After touching any `.sfn` file, follow `.claude/rules/formatting.md` and
+   `.claude/rules/compiler-safety.md` (fmt, `sfn check`, timeouts).
 4. Report a tight diff summary: files touched, what changed, `fmt --check` and
    `sfn check` results, and anything that surprised you.
 
@@ -48,9 +46,9 @@ orchestrator's job, not yours.
 - **Never declare the work done, shipped, or self-hosting.** You do not run
   `make compile`/`make check`, you do not commit, and you do not open PRs. The
   orchestrator runs the self-host gate and the Opus `code-reviewer` adjudicates
-  correctness. `sfn check` green is *not* a build guarantee (#1389) — say "ready
-  for review", never "done".
-- **Never touch the build driver to make something work** (`cli_main.sfn`,
+  correctness — `sfn check` green is not a build guarantee (CLAUDE.md
+  ## The validation ladder) — say "ready for review", never "done".
+- **Never touch the build driver to make something work** (`compiler/src/cli/`,
   `capsule_resolver.sfn` are pure orchestration). Fix the compiler source the
   spec points at. No fixups (`.claude/rules/selfhost-invariant.md`).
 - **Never invent a design or pick between approaches.** That's the architect's
