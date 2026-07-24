@@ -23,15 +23,17 @@ import BaseLayout from "../layouts/BaseLayout.astro";
           <code>![io]</code>. A function that calls an API declares <code>![net]</code>. A function
           that does neither declares nothing.
         </p>
-        <pre><code>// Missing ![net] — once effect enforcement ships, this will be a compile error
+        <pre><code>// Missing ![net] — the effect checker rejects this at compile time
 fn main() ![io] {"{"}
     let data = http.get("https://api.example.com").body;  // needs ![net]
 {"}"}</code></pre>
         <p>
           No other mainstream systems language offers this. Go, Rust, and Zig all rely on convention
-          and documentation to track side effects. Sailfin's effect checker can detect these violations
-          today; wiring it into the compilation gate so violations block the build is the next milestone
-          on the <a href="/roadmap">roadmap</a>, followed by transitive call-graph enforcement.
+          and documentation to track side effects. Sailfin's effect checker enforces this as a build
+          gate today: an undeclared <code>![io]</code>, <code>![net]</code>, or <code>![clock]</code>
+          operation fails the build, and cross-module propagation means a caller inherits its callees'
+          declared effects. The next milestone on the <a href="/roadmap">roadmap</a> is the runtime
+          capability seal that enforces those grants at the syscall boundary.
         </p>
       </section>
 
@@ -45,9 +47,8 @@ fn main() ![io] {"{"}
         <p>
           In most languages, you can't — not without reading every line. In Sailfin, the effect system
           makes the answer visible in the function signature. An agent that generates a Sailfin function
-          declaring <code>![io]</code> but calling <code>http.get</code> will have that mismatch
-          caught by the effect checker — and once enforcement ships as a compilation gate, it becomes
-          a build error rather than a production incident.
+          declaring <code>![io]</code> but calling <code>http.get</code> has that mismatch caught by the
+          effect checker at compile time — a build error rather than a production incident.
         </p>
         <p>
           This makes Sailfin a natural target for agentic workflows: generate code, compile to verify
@@ -100,8 +101,9 @@ fn main() ![io] {"{"}
         <h2>Security by Design</h2>
         <p>
           Sailfin makes security properties visible in function signatures. Effects are explicit and
-          compiler-checked, so code that needs network, file system, or model access must declare
-          those capabilities up front. Dependency-tree capability auditing is on the roadmap.
+          compiler-checked, so code that needs network, file system, or clock access must declare
+          those capabilities up front. Full transitive dependency-tree capability auditing and the
+          runtime syscall seal are on the roadmap.
         </p>
       </section>
 

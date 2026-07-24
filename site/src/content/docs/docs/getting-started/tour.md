@@ -519,9 +519,11 @@ See the [Testing guide](/docs/learn/testing) for patterns, organization, and int
 ## Type Safety Wrappers
 
 Sailfin parses four special wrapper types that express stronger safety
-guarantees. They are recognised by the parser today but **enforcement is
-deferred to post-1.0** — treat them as documentation for the roadmap, not as
-shipped safety features.
+guarantees. Their maturity differs: `Affine<T>` and `Linear<T>` single-use is
+**enforced today** on owned/affine bindings, while `PII<T>` and `Secret<T>` are
+recognised by the parser but **not yet enforced** (taint tracking is post-1.0).
+Full borrow checking (`&T`/`&mut T` exclusivity, shared borrows, lifetimes) is
+also post-1.0.
 
 ### `PII<T>` — Personally Identifiable Information
 
@@ -562,11 +564,13 @@ A linear type is stronger: it must be consumed.
 let token: Linear<AuthToken> = auth.mint_token(user_id);
 ```
 
-> **Current status**: `Affine<T>`, `Linear<T>`, `PII<T>`, and `Secret<T>` all
-> parse and type-check, but none of the additional guarantees are enforced yet.
-> See the [roadmap](/roadmap) for the post-1.0 sequencing. Sailfin's shipped
-> safety story today is the effect system and capability-based capsules, not
-> ownership or taint tracking.
+> **Current status**: all four parse and type-check. `Affine<T>` /
+> `Linear<T>` single-use is enforced today on owned/affine bindings
+> (`E0901`/`E0904`/`E0907`), part of the bounded ownership floor. `PII<T>` and
+> `Secret<T>` taint enforcement is deferred to post-1.0, as is full borrow
+> checking. See the [roadmap](/roadmap) for the post-1.0 sequencing. Sailfin's
+> headline safety story remains the effect system and capability-based capsules;
+> the ownership floor is a soundness requirement, not a marketed fourth pillar.
 
 ---
 

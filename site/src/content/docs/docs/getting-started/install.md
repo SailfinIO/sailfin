@@ -55,12 +55,15 @@ The script will:
 3. Install `sailfin` and `sfn` to `~/.local/bin`
 4. Print confirmation when complete
 
-> **Bootstrap security:** The install script downloads over HTTPS but does not
-> currently verify the release signature. This first install is TLS-trust only.
-> To verify before executing any downloaded code, follow
-> [Verifying Your Download](/docs/getting-started/verify-download) and install
-> manually. Subsequent `sfn toolchain install` downloads verify both the
-> Ed25519 signature and SHA-256 digest automatically.
+> **Bootstrap security:** The install script embeds the Sailfin release-signing
+> public key and verifies the release before extracting anything: it downloads
+> `SHA256SUMS` and `SHA256SUMS.sig`, checks the Ed25519 manifest signature and
+> the archive's SHA-256 digest, and aborts on any mismatch. It warns and
+> continues only when verification is unavailable (an older unsigned release, or
+> no OpenSSL with raw-Ed25519 support). To verify manually instead, follow
+> [Verifying Your Download](/docs/getting-started/verify-download). Subsequent
+> `sfn toolchain install` downloads verify both the Ed25519 signature and SHA-256
+> digest automatically (fail-closed).
 
 Example output:
 

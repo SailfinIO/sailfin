@@ -142,9 +142,12 @@ and install the archive.
 
 ## Bootstrap trust boundary
 
-The one-line `curl ... install.sh | bash` and PowerShell bootstrap commands
-download over HTTPS, but the scripts do **not** currently verify
-`SHA256SUMS.sig`. That first bootstrap is therefore TLS-trust only. Manual
-verification avoids that limitation; after a trusted `sfn` is installed,
-`sfn toolchain install` and automatic toolchain dispatch verify signatures and
-digests as described above.
+The one-line `curl ... install.sh | bash` and PowerShell bootstrap scripts embed
+the release-signing public key and verify the signed `SHA256SUMS` manifest plus
+the selected archive's SHA-256 digest **before extracting**, aborting on an
+invalid signature or a digest mismatch. They fall back to TLS-trust only when
+verification cannot run — an older release with no signed manifest, or a host
+without OpenSSL 1.1.1+ raw-Ed25519 support — and print a warning when they do.
+The manual steps above are the way to verify explicitly when you want to. After
+a trusted `sfn` is installed, `sfn toolchain install` and automatic toolchain
+dispatch verify signatures and digests fail-closed.
