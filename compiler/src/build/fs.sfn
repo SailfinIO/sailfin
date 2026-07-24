@@ -106,7 +106,22 @@ fn _toml_trim_cmd(text: string) -> string {
 // avoids the tmp file entirely.
 extern fn sailfin_runtime_shell_capture(cmd: *u8) -> *u8;
 
+// Every command string handed to this helper is POSIX shell syntax
+// (`command -v`, `||`, `2>/dev/null`, pipelines). On a Windows host
+// `popen` shells through `cmd.exe /c`, which parses none of it: each
+// call emits `The system cannot find the path specified.` (cmd.exe's
+// ERROR_PATH_NOT_FOUND for an unresolvable `/dev/null`) and returns a
+// meaningless result. Worse than the noise, cmd.exe may execute a
+// *prefix* of the command with the wrong semantics, so mis-parsing is
+// a correctness hazard, not only an ergonomic one. A host with no
+// POSIX shell therefore refuses to run the command at all and returns
+// the empty string — the same "probe unavailable" contract
+// `_mktemp_sibling_cmd` and `_sha256_of_file_cmd` already degrade to.
+// Callers must treat "" as "unknown" (SFN-486 made the build-path
+// staging sites non-fatal); as each probe grows a native Windows
+// implementation the guard shrinks to that probe.
 fn _shell_read_cmd(cmd: string) -> string ![io] {
+    if host_is_windows() { return ""; }
     let captured = sailfin_runtime_shell_capture(cmd);
     return _toml_trim_cmd(captured);
 }

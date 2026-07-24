@@ -21,6 +21,12 @@ extern fn sailfin_runtime_shell_capture(cmd: *u8) -> *u8;
 // Private copy of capsule_resolver's `_cr_shell_read` — see header for why
 // it is duplicated rather than imported.
 fn _cr_shell_read(cmd: string) -> string ![io] {
+    // No POSIX shell on a Windows host — see the rationale on
+    // `build/fs.sfn::_shell_read_cmd`. Returning "" keeps
+    // `_cr_resolve_jobs` on its serial default without routing POSIX
+    // syntax through `cmd.exe`, which is what made that function's own
+    // "Windows emits serially" premise self-contradictory.
+    if host_is_windows() { return ""; }
     let captured = sailfin_runtime_shell_capture(cmd);
     if captured.length == 0 { return ""; }
     let mut start: int = 0;

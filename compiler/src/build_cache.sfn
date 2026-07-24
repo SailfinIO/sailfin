@@ -81,6 +81,7 @@ import {
     _write_text_cmd
 } from "./build/fs";
 import { sha256_hex_of_string } from "./build/hash";
+import { host_is_windows } from "./build/target";
 import { _get_env_cmd } from "./build_flags";
 import { char_code_at_text, find_last_index_of_char, substring } from "./string_utils";
 
@@ -729,6 +730,17 @@ fn cache_lookup_complete(root: string, key: CacheKey) -> boolean ![io] {
 // `mktemp` fails the helper falls back to a direct in-place `cp` —
 // atomicity is lost but the build still produces the artifact.
 fn _cache_atomic_copy(src: string, dst: string) -> boolean ![io] {
+    // A Windows host has neither `mktemp` nor `cp`/`mv`/`rm`, so every
+    // branch below already fails there — but only after spawning a
+    // doomed process for each of the ~170 artifacts a cold self-host
+    // publishes. Report the cache-write miss up front instead: the
+    // outcome is byte-identical (`false` → the caller treats it as a
+    // non-fatal cache miss and keeps the in-tree artifact), minus the
+    // spawns. This disables the build cache on Windows rather than
+    // corrupting it. Remove this guard when the build cache grows a
+    // native binary-safe file copy (SFN-490) — `.o` artifacts rule out
+    // the NUL-truncating `fs.readFile`/`fs.writeFile` pair.
+    if host_is_windows() { return false; }
     let dst_dir = _dirname_cmd(dst);
     // Shell-quote the template: `dst_dir` can derive from
     // `$SAILFIN_BUILD_CACHE_DIR`, so a path containing `'` (or other

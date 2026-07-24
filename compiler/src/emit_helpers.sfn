@@ -32,6 +32,7 @@
 // explicit parameter (`emit_llvm_with_retry_injected`) for unit tests
 // that can't mutate their own environment.
 import { _atomic_rename_into_place, _mktemp_sibling_cmd } from "./build/fs";
+import { host_is_windows } from "./build/target";
 import {
     compile_to_llvm_file_with_module,
     compile_to_llvm_file_with_module_imports,
@@ -45,6 +46,11 @@ import { substring } from "./string_utils";
 extern fn sailfin_runtime_shell_capture(cmd: *u8) -> *u8;
 
 fn _eh_shell_read(cmd: string) -> string ![io] {
+    // No POSIX shell on a Windows host — see the rationale on
+    // `build/fs.sfn::_shell_read_cmd`. This one runs once per module
+    // emit, so leaving it unguarded floods a native Windows build with
+    // one `cmd.exe` parse failure per module.
+    if host_is_windows() { return ""; }
     let captured = sailfin_runtime_shell_capture(cmd);
     if captured.length == 0 { return ""; }
     return captured;
