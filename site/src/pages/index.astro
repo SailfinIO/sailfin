@@ -134,17 +134,31 @@ const useCases = [
   }
 
   .feature-card {
+    position: relative;
+    overflow: hidden;
     padding: 1.75rem;
     border: 1px solid var(--color-border);
     border-radius: 10px;
+    background: var(--color-surface);
+    box-shadow: var(--shadow-card);
     text-decoration: none;
     color: inherit;
-    transition: border-color 0.15s, box-shadow 0.15s;
+    transition: border-color 0.15s, box-shadow 0.15s, transform 0.15s;
+  }
+
+  .feature-card::before {
+    content: "";
+    position: absolute;
+    inset: 0 0 auto;
+    height: 2px;
+    background: var(--sfn-gradient-action);
+    opacity: 0.42;
   }
 
   .feature-card:hover {
     border-color: var(--color-primary);
-    box-shadow: 0 2px 12px rgba(161, 0, 255, 0.12);
+    box-shadow: var(--shadow-card-hover);
+    transform: translateY(-2px);
     text-decoration: none;
   }
 
@@ -174,9 +188,10 @@ const useCases = [
 
   .use-case-card {
     padding: 2rem;
-    background: var(--color-bg);
+    background: var(--color-surface);
     border-radius: 10px;
     border: 1px solid var(--color-border);
+    box-shadow: var(--shadow-card);
   }
 
   .use-case-card h3 {
@@ -225,7 +240,7 @@ const useCases = [
   }
 
   .btn-primary {
-    background: var(--color-primary);
+    background: var(--sfn-gradient-action);
     color: #fff;
   }
 
@@ -235,7 +250,7 @@ const useCases = [
   }
 
   .btn-secondary {
-    background: var(--color-bg);
+    background: var(--color-surface);
     color: var(--color-text);
     border: 1px solid var(--color-border);
   }

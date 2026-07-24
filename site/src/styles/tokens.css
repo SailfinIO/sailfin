@@ -48,6 +48,14 @@
     color-mix(in srgb, var(--sfn-violet-core) 14%, transparent),
     color-mix(in srgb, var(--sfn-magenta-hot) 14%, transparent)
   );
+  /* Darker than the logo gradient so white button labels remain readable
+     across the full fill in light mode. */
+  --sfn-gradient-action: linear-gradient(
+    135deg,
+    var(--sfn-violet-deep) 0%,
+    #7900c2 48%,
+    #b3137f 100%
+  );
 
   /* Tints/shades used by the docs accent scale (Starlight's low/high slots).
      These pair with --sfn-violet / --sfn-magenta-hot as the accent core. */
