@@ -117,4 +117,4 @@ jobs:
           npm run build
       - name: Check generated internal links
         working-directory: site
-        run: node scripts/check-internal-links.mjs
+        run: npm run check:internal-links

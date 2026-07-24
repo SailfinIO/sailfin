@@ -54,7 +54,7 @@ jobs:
     timeout-minutes: 5
     outputs:
       source: ${{ steps.scope.outputs.source }}
-      site_hero: ${{ steps.scope.outputs.site_hero }}
+      public_claims: ${{ steps.scope.outputs.public_claims }}
     steps:
       - name: Checkout repository
         uses: actions/checkout@v7
@@ -68,15 +68,15 @@ jobs:
           set -euo pipefail
 
           source=true
-          site_hero=true
+          public_claims=true
           reason="full compiler CI for ${GITHUB_EVENT_NAME}"
-          site_hero_reason="hero verification for ${GITHUB_EVENT_NAME}"
+          public_claims_reason="public-claim verification for ${GITHUB_EVENT_NAME}"
 
           if [ "${GITHUB_EVENT_NAME}" = "pull_request" ]; then
             source=false
-            site_hero=false
+            public_claims=false
             reason="no compiler/runtime/build-system paths changed"
-            site_hero_reason="no homepage hero contract paths changed"
+            public_claims_reason="no public-claim contract paths changed"
             base="${{ github.event.pull_request.base.sha }}"
             head="${{ github.event.pull_request.head.sha }}"
 
@@ -85,7 +85,7 @@ jobs:
             # `main` moved since the branch point. `base` is the base-branch
             # *tip*, so a two-dot `git diff "$base" "$head"` also reports
             # files `main` changed that the branch merely lacks, flipping
-            # `source`/`site_hero` to true and running the full matrix on a
+            # `source`/`public_claims` to true and running the full matrix on a
             # docs-only PR (SFN-484). `fetch-depth: 0` above makes the
             # merge-base reachable.
             git diff --name-only "$base"..."$head" | tee changed-files.txt
@@ -98,36 +98,41 @@ jobs:
                   ;;
               esac
               case "$path" in
-                site/examples/hero-effects/*|site/scripts/verify-hero-example.sh|site/src/components/Hero.astro|site/package.json|bootstrap.toml|.github/workflows/ci.yml)
-                  site_hero=true
-                  site_hero_reason="homepage hero contract path changed: $path"
+                README.md|examples/README.md|site/src/*|site/examples/*|site/scripts/*|site/package.json|bootstrap.toml|install.sh|install.ps1|.github/workflows/release-tag.yml|.github/workflows/ci.yml)
+                  public_claims=true
+                  public_claims_reason="public-claim contract path changed: $path"
                   ;;
               esac
             done < changed-files.txt
           fi
 
           echo "source=$source" >> "$GITHUB_OUTPUT"
-          echo "site_hero=$site_hero" >> "$GITHUB_OUTPUT"
+          echo "public_claims=$public_claims" >> "$GITHUB_OUTPUT"
           echo "[ci-scope] source=$source ($reason)"
-          echo "[ci-scope] site_hero=$site_hero ($site_hero_reason)"
+          echo "[ci-scope] public_claims=$public_claims ($public_claims_reason)"
           {
             echo "### CI scope"
             echo ""
             echo "- compiler CI in scope: \`$source\`"
             echo "- reason: $reason"
-            echo "- homepage hero verification in scope: \`$site_hero\`"
-            echo "- reason: $site_hero_reason"
+            echo "- public-claim verification in scope: \`$public_claims\`"
+            echo "- reason: $public_claims_reason"
           } >> "$GITHUB_STEP_SUMMARY"
 
-  check-site-hero:
-    name: Verify homepage Sailfin example
+  check-public-claims:
+    name: Verify public claims and examples
     needs: ci-scope
-    if: ${{ needs.ci-scope.outputs.site_hero == 'true' }}
+    if: ${{ needs.ci-scope.outputs.public_claims == 'true' }}
     runs-on: ubuntu-24.04
-    timeout-minutes: 10
+    timeout-minutes: 15
     steps:
       - name: Checkout repository
         uses: actions/checkout@v7
+
+      - name: Set up Node
+        uses: actions/setup-node@v6
+        with:
+          node-version: 24
 
       - name: Fetch released seed compiler
         shell: bash
@@ -135,9 +140,9 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: make fetch-seed
 
-      - name: Verify checked hero fixtures
+      - name: Verify guarded public claims
         working-directory: site
-        run: npm run check:hero
+        run: npm run check:public-claims
 
   # Assert the native shard map (`sfn dev shard`, SFN-200) still covers every
   # test file `make test` runs — no gaps, no overlaps. The whole point of
@@ -1359,7 +1364,7 @@ jobs:
     name: Required CI gate
     needs:
       - ci-scope
-      - check-site-hero
+      - check-public-claims
       - check-fast
       - build-compiler-linux
       - build-compiler-macos
@@ -1373,8 +1378,8 @@ jobs:
     env:
       CI_SCOPE_RESULT: ${{ needs.ci-scope.result }}
       SOURCE_CI: ${{ needs.ci-scope.outputs.source }}
-      SITE_HERO_CI: ${{ needs.ci-scope.outputs.site_hero }}
-      CHECK_SITE_HERO: ${{ needs.check-site-hero.result }}
+      PUBLIC_CLAIMS_CI: ${{ needs.ci-scope.outputs.public_claims }}
+      CHECK_PUBLIC_CLAIMS: ${{ needs.check-public-claims.result }}
       CHECK_FAST: ${{ needs.check-fast.result }}
       BUILD_COMPILER_LINUX: ${{ needs.build-compiler-linux.result }}
       BUILD_COMPILER_MACOS: ${{ needs.build-compiler-macos.result }}
@@ -1395,7 +1400,7 @@ jobs:
             echo "| --- | --- |"
             echo "| CI scope job | ${CI_SCOPE_RESULT:-unset} |"
             echo "| CI scope output | ${SOURCE_CI:-unset} |"
-            echo "| Homepage hero scope output | ${SITE_HERO_CI:-unset} |"
+            echo "| Public-claim scope output | ${PUBLIC_CLAIMS_CI:-unset} |"
           } >> "$GITHUB_STEP_SUMMARY"
 
           if [ "${CI_SCOPE_RESULT:-}" != "success" ]; then
@@ -1408,8 +1413,8 @@ jobs:
             exit 1
           fi
 
-          if [ "${SITE_HERO_CI:-}" != "true" ] && [ "${SITE_HERO_CI:-}" != "false" ]; then
-            echo "[required-ci] CI scope emitted unexpected homepage hero value: ${SITE_HERO_CI:-unset}" >&2
+          if [ "${PUBLIC_CLAIMS_CI:-}" != "true" ] && [ "${PUBLIC_CLAIMS_CI:-}" != "false" ]; then
+            echo "[required-ci] CI scope emitted unexpected public-claim value: ${PUBLIC_CLAIMS_CI:-unset}" >&2
             exit 1
           fi
 
@@ -1437,11 +1442,11 @@ jobs:
             echo "| Compiler CI | skipped by path scope |" >> "$GITHUB_STEP_SUMMARY"
           fi
 
-          if [ "${SITE_HERO_CI:-}" = "true" ]; then
-            check "Verify homepage Sailfin example" "$CHECK_SITE_HERO"
+          if [ "${PUBLIC_CLAIMS_CI:-}" = "true" ]; then
+            check "Verify public claims and examples" "$CHECK_PUBLIC_CLAIMS"
           else
-            echo "[required-ci] homepage hero verification is out of scope for this PR."
-            echo "| Homepage hero verification | skipped by path scope |" >> "$GITHUB_STEP_SUMMARY"
+            echo "[required-ci] public-claim verification is out of scope for this PR."
+            echo "| Public-claim verification | skipped by path scope |" >> "$GITHUB_STEP_SUMMARY"
           fi
 
           if [ "$fail" -gt 0 ]; then

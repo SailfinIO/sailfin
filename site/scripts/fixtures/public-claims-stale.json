@@ -1,0 +1,6 @@
+{
+  "canonicalExample": "fn main() {\n    print(\"Stale example\");\n}\n",
+  "retiredWording": "The compiler links runtime/native/src/sailfin_runtime.c as its live C runtime.",
+  "criticalLink": "/docs/getting-started/instal",
+  "releaseAssetTemplate": "sailfin_${VERSION}_linux_amd64.tar.gz"
+}
