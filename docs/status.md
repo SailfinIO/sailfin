@@ -673,7 +673,7 @@ unit; history in the linked issues.
 
 - Release tarballs follow `sailfin_<version>_<os>_<arch>.tar.gz`; the
   installer defaults to `~/.local/bin` (`GLOBAL_BIN_DIR` override).
-- Current release: `v0.7.0-alpha.39` (see `bootstrap.toml` `[seed].version`
+- Current release: `v0.8.0` (see `bootstrap.toml` `[seed].version`
   for the pinned self-host seed, which may trail the latest release).
 
 ## Known Design Issues (Pre-1.0 Syntax Reform)
