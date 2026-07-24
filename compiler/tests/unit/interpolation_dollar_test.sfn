@@ -1,0 +1,47 @@
+// Unit coverage for SFEP-0057 `${ }` string interpolation (SFN-482 Phase 1).
+// Black-box (compile + evaluate), mirroring string_append_test.sfn — the
+// scanner (`parse_dollar_interpolated_template`) is a lowering-time concern
+// with no directly callable front-end entry point, so behavior is asserted
+// through compiled program output.
+struct Boxed {
+    a: int;
+}
+
+test "interpolation: ${ } basic identifier" {
+    let name = "world";
+    let result = "Hello, ${name}!";
+    assert result == "Hello, world!";
+}
+
+test "interpolation: ${ } whitespace at the edges is insignificant" {
+    let name = "world";
+    assert "a${name}b" == "aworldb";
+    assert "a${ name }b" == "aworldb";
+}
+
+test "interpolation: ${ } multiple segments" {
+    let a = "x";
+    let b = "y";
+    assert "${a}-${b}-${a}" == "x-y-x";
+}
+
+test "interpolation: ${ } with an int expression" {
+    let n = 42;
+    assert "n=${n}" == "n=42";
+}
+
+test "interpolation: bare $ not followed by a brace stays literal" {
+    let name = "world";
+    assert "Total: $5 for ${name}" == "Total: $5 for world";
+}
+
+test "interpolation: nested braces are matched by depth, not the first }" {
+    let boxed = Boxed { a: 7 };
+    assert "v=${ (Boxed { a: 7 }).a }" == "v=7";
+    assert boxed.a == 7;
+}
+
+test "interpolation: deprecated {{ }} still interpolates during dual-accept" {
+    let name = "world";
+    assert "Hello, {{name}}!" == "Hello, world!";
+}

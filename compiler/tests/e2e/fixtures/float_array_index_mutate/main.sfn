@@ -8,5 +8,5 @@ fn main() ![io] {
     let a = xs[0];
     xs[1] = 9.9;
     let b = xs[1];
-    print("a={{a}} b={{b}}");
+    print("a=${a} b=${b}");
 }

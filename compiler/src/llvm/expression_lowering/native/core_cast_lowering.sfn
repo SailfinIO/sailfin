@@ -28,12 +28,7 @@ import {
     is_integer_llvm_type
 } from "./core_operands";
 import { coerce_operand_to_string, emit_string_concat, lower_string_literal } from "./core_strings";
-import {
-    encode_string_literal_for_sailfin,
-    find_substring_from,
-    parse_interpolated_template,
-    unescape_string_literal
-} from "./core_text";
+import { encode_string_literal_for_sailfin, resolve_interpolation_template } from "./core_text";
 
 // Lower an `is` type-guard (#1753) to a boolean `i1`. v1 supports a named
 // `enum` operand: extract the operand's discriminant tag and `icmp eq` it
@@ -533,11 +528,11 @@ fn lower_cast_expression(parse: CastParseResult, bindings: ParameterBinding[], l
 }
 
 fn try_lower_interpolated_string_literal(literal: string, bindings: ParameterBinding[], locals: LocalBinding[], temp_index: int, lines: string[], functions: NativeFunction[], context: TypeContext) -> ExpressionResult? ![io] {
-    let content = unescape_string_literal(literal);
-    if find_substring_from(content, "{{", 0) < 0 { return null; }
-    if find_substring_from(content, "}}", 0) < 0 { return null; }
-
-    let parsed = parse_interpolated_template(content);
+    // SFEP-0057: `${ }` is the recognized interpolation form; `{{ }}` is the
+    // deprecated fallback, still accepted during the migration window. The
+    // dispatch (which delimiter, raw-vs-unescaped scan) lives in core_text so
+    // the `{{ }}` path stays byte-identical to before this change.
+    let parsed = resolve_interpolation_template(literal);
     if !parsed.success { return null; }
     if parsed.expressions.length == 0 { return null; }
     if parsed.parts.length != parsed.expressions.length + 1 { return null; }

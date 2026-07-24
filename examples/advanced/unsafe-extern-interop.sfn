@@ -13,7 +13,7 @@ fn allocate_and_free(size: usize) ![io] -> void {
             return;
         }
 
-        print("Allocated {{ size }} bytes");
+        print("Allocated ${ size } bytes");
         free(ptr);
         print("Memory freed");
     }

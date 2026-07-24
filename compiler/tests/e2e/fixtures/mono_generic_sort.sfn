@@ -49,7 +49,7 @@ fn main() -> int ![io] {
     let mut line = "sorted:";
     for w in sorted {
         let r = w.rank;
-        line = line + " {{ r }}";
+        line = line + " ${ r }";
     }
     print(line);
     return sorted[0].rank * 100 + sorted[1].rank * 10 + sorted[2].rank;

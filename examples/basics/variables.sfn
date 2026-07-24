@@ -6,5 +6,5 @@ fn increment() -> void { age += 1; }
 
 fn main() ![io] {
     increment();
-    print("{{name}} is now {{age}}");
+    print("${name} is now ${age}");
 }

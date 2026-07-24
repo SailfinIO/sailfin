@@ -11,5 +11,5 @@ struct Unsupported {
 
 fn main() ![io] {
     let value = Unsupported { value: 7 };
-    print("unsupported: {{value}}");
+    print("unsupported: ${value}");
 }

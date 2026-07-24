@@ -4,5 +4,5 @@ fn identity<T>(value: T) -> T { return value; }
 fn main() ![io] {
     let num = identity(42);
     let text = identity("Sailfin");
-    print("Values: {{num}}, {{text}}");
+    print("Values: ${num}, ${text}");
 }
