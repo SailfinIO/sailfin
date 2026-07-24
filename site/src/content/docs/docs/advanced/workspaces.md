@@ -162,7 +162,7 @@ channel = "alpha"
 ```toml
 # api/capsule.toml — overrides only `sfn`; inherits `channel = "alpha"` from the workspace
 [toolchain]
-sfn = "0.8.0-alpha.5"
+sfn = "0.8.0"
 ```
 
 `sfn build`/`run`/`check`/`test` resolve both the project root and the workspace root and apply this precedence before comparing against the running toolchain; see [Toolchain Pinning](./capsules#toolchain-pinning) for the gate behavior and escape hatches.

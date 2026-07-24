@@ -16,12 +16,14 @@ Sailfin runs on the following platforms:
 
 | Platform | Architectures |
 |---|---|
-| Linux | x86_64, arm64 |
-| macOS | x86_64, arm64 (Apple Silicon) |
+| Linux | x86_64 |
+| macOS | arm64 (Apple Silicon) |
 | Windows | x86_64 |
 
-WSL (Windows Subsystem for Linux) and Git Bash on Windows are also supported and
-use the Linux install path.
+These are the platform assets published by v0.8.0. The scripts can detect
+additional architectures, but installation stops when the selected release
+does not contain a matching archive. WSL on an x86_64 Windows host uses the
+Linux x86_64 asset; Git Bash installs the Windows x86_64 asset.
 
 ### Compiler and linker tools
 
@@ -58,9 +60,11 @@ The script will:
 > **Bootstrap security:** The install script embeds the Sailfin release-signing
 > public key and verifies the release before extracting anything: it downloads
 > `SHA256SUMS` and `SHA256SUMS.sig`, checks the Ed25519 manifest signature and
-> the archive's SHA-256 digest, and aborts on any mismatch. It warns and
-> continues only when verification is unavailable (an older unsigned release, or
-> no OpenSSL with raw-Ed25519 support). To verify manually instead, follow
+> the archive's SHA-256 digest. A missing manifest/signature (as with an older
+> unsigned release) or unavailable OpenSSL 1.1.1+ raw-Ed25519 support produces
+> a warning and continues. Once verification can run, malformed or invalid
+> signed metadata, a missing/duplicate archive entry, and digest mismatch all
+> abort before extraction. To verify manually instead, follow
 > [Verifying Your Download](/docs/getting-started/verify-download). Subsequent
 > `sfn toolchain install` downloads verify both the Ed25519 signature and SHA-256
 > digest automatically (fail-closed).
@@ -134,14 +138,14 @@ not a hard-coded docs-page version.
 Replace the example version with the release you want to pin:
 
 ```bash
-VERSION=0.8.0-alpha.5
+VERSION=0.8.0
 curl -fsSL https://raw.githubusercontent.com/SailfinIO/sailfin/main/install.sh | VERSION="$VERSION" bash
 ```
 
 You can also pass the version as an install-script argument:
 
 ```bash
-VERSION=0.8.0-alpha.5
+VERSION=0.8.0
 curl -fsSL https://raw.githubusercontent.com/SailfinIO/sailfin/main/install.sh | bash -s -- --version "$VERSION"
 ```
 
@@ -150,7 +154,7 @@ curl -fsSL https://raw.githubusercontent.com/SailfinIO/sailfin/main/install.sh |
 Replace the example version with the release you want to pin:
 
 ```powershell
-$env:VERSION = "0.8.0-alpha.5"
+$env:VERSION = "0.8.0"
 irm https://raw.githubusercontent.com/SailfinIO/sailfin/main/install.ps1 | iex
 ```
 
@@ -338,7 +342,7 @@ existing binaries in-place:
 curl -fsSL https://raw.githubusercontent.com/SailfinIO/sailfin/main/install.sh | bash
 
 # Linux / macOS: update to a specific version
-VERSION=0.8.0-alpha.5
+VERSION=0.8.0
 curl -fsSL https://raw.githubusercontent.com/SailfinIO/sailfin/main/install.sh | VERSION="$VERSION" bash
 ```
 

@@ -145,9 +145,12 @@ and install the archive.
 The one-line `curl ... install.sh | bash` and PowerShell bootstrap scripts embed
 the release-signing public key and verify the signed `SHA256SUMS` manifest plus
 the selected archive's SHA-256 digest **before extracting**, aborting on an
-invalid signature or a digest mismatch. They fall back to TLS-trust only when
-verification cannot run — an older release with no signed manifest, or a host
-without OpenSSL 1.1.1+ raw-Ed25519 support — and print a warning when they do.
+invalid signature or a digest mismatch. They warn and fall back to TLS trust
+only when verification cannot start: either `SHA256SUMS` or
+`SHA256SUMS.sig` is unavailable (as with an older unsigned release), or the host
+lacks OpenSSL 1.1.1+ raw-Ed25519 support. Once both files and suitable OpenSSL
+are available, a malformed signature, failed signature check, malformed or
+missing/duplicate asset entry, or archive digest mismatch is fatal.
 The manual steps above are the way to verify explicitly when you want to. After
 a trusted `sfn` is installed, `sfn toolchain install` and automatic toolchain
 dispatch verify signatures and digests fail-closed.
