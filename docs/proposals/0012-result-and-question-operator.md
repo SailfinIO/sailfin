@@ -1,10 +1,10 @@
 ---
 sfep: 12
 title: "Result<T, E> and the ? Operator"
-status: Accepted
+status: Implemented
 type: language
 created: 2026-05-27
-updated: 2026-05-27
+updated: 2026-07-24
 author: "agent:compiler-architect"
 tracking: "#321, #323"
 supersedes:

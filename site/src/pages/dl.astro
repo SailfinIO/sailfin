@@ -159,7 +159,12 @@ const featured = allAssets;
   <section class="dl-quick">
     <div class="container">
       <h2>Quick Install</h2>
-      <p class="section-desc">The fastest way to get started. Detects your platform and installs automatically.</p>
+      <p class="section-desc">
+        Installs the latest matching release and verifies its signed manifest
+        and SHA-256 digest when OpenSSL 1.1.1+ is available. Compiling Sailfin
+        programs still requires LLVM tools 17+ or 18+, clang, and the platform
+        linker.
+      </p>
       <div class="quick-grid">
         <div class="quick-card">
           <h3>Linux &amp; macOS</h3>
@@ -226,7 +231,10 @@ const featured = allAssets;
         </table>
       </div>
       <p class="gh-link">
-        Looking for older releases or checksums? See <a href="https://github.com/SailfinIO/sailfin/releases">all releases on GitHub</a>.
+        Verify downloads with the signed manifest by following the
+        <a href="/docs/getting-started/verify-download">verification guide</a>.
+        Looking for older releases? See
+        <a href="https://github.com/SailfinIO/sailfin/releases">all releases on GitHub</a>.
       </p>
     </div>
   </section>

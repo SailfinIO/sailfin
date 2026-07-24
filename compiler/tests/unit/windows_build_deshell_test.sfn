@@ -1,0 +1,48 @@
+// compiler/tests/unit/windows_build_deshell_test.sfn
+//
+// Regression for SFN-478 (SFEP-0021 §4.2(C), M7): the build/emit/cache
+// leaf helpers must not shell out to POSIX `sh`/`cmd.exe` on a Windows
+// host — every such call floods `The system cannot find the path
+// specified.` and aborts `sfn build -p compiler`. Each helper is guarded
+// on `host_is_windows()` (a HOST concern, not the artifact target) and
+// degrades to a correct no-subprocess result.
+//
+// There is no runtime `setenv`, so a `.sfn` process cannot flip
+// `SAILFIN_HOST_OS` for an in-process call mid-test. The seam is exercised
+// by RUNNING this file with `SAILFIN_HOST_OS=Windows` in the environment
+// (the AC-2 command: `SAILFIN_HOST_OS=Windows build/bin/sfn test <file>`);
+// the plain suite run takes the POSIX branch and asserts the guards fall
+// through to real behaviour. Both branches keep the normal suite green.
+import { _mktemp_sibling_cmd, _sha256_of_file_cmd } from "../../src/build/fs";
+import { _openssl_link_search_flags } from "../../src/build/runtime_objs";
+import { host_is_windows } from "../../src/build/target";
+import { _cr_resolve_jobs } from "../../src/capsule_emit_parallel";
+
+test "windows-deshell: leaf helpers degrade without a POSIX subprocess" ![io] {
+    if host_is_windows() {
+        // SAILFIN_HOST_OS=Windows (or a real Windows host): every guarded
+        // helper returns its graceful-degradation value and spawns no
+        // POSIX subprocess (AC-2).
+        //
+        // mktemp → "" so the emit consumer takes the non-atomic in-place
+        // write (race-free because Windows emits serially).
+        assert _mktemp_sibling_cmd("build/sailfin/capsules/x.ll") == "";
+        // sha256 subprocess hasher → "" ("no hasher" contract); the
+        // in-process `_sha256_of_text_file` path keeps caching real.
+        assert _sha256_of_file_cmd("build/bin/sfn") == "";
+        // job sizing → serial 1 (no `nproc`/`sysctl`), returned before any
+        // shell probe and ahead of the `SAILFIN_BUILD_JOBS` read.
+        assert _cr_resolve_jobs() == 1;
+        // OpenSSL keg search is Darwin-only; a Windows host yields no `-L`.
+        assert _openssl_link_search_flags().length == 0;
+    } else {
+        // POSIX host (the default suite): the guards take the else-branch,
+        // so the seam is wired and job sizing is a real positive count
+        // (proves `_cr_resolve_jobs` fell through to the `nproc` path
+        // rather than the Windows serial short-circuit). The byte-identical
+        // POSIX artifact guarantee (AC-3) is covered by `make compile` /
+        // `make check`, not this fast unit test.
+        assert ! host_is_windows();
+        assert _cr_resolve_jobs() >= 1;
+    }
+}

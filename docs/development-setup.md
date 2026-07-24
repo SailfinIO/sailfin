@@ -193,7 +193,7 @@ invocation; the explicit flag wins, and `--jobs 1` selects the serial path.
 | `CHECK_TEST_JOBS` | `make check` | `TEST_JOBS` | Parallelism for the full cold seedcheck suite. |
 | `CHECK_TEST_TIMEOUT` | `make check` | `1800` | Per-test timeout for the cold full-suite leg. |
 | `CHECK_FULL_PASS1=1` | `make check` | off | Restores the older full first-pass suite before seedcheck; useful for bisects. |
-| `SELFHOST_STRICT=1` | `make check` | off locally | Makes stage2/stage3 fixed-point mismatch fatal. `make check-strict` sets it. |
+| `SELFHOST_STRICT=1` | `make check` | off locally | Makes a seedcheck/fixed-point rebuild mismatch fatal. `make check-strict` sets it. |
 | `TEST_BIN_CACHE_FLAGS` | `make test` | empty | Extra flags for `sfn test`; `make check` sets `--no-test-cache`. |
 | `PREFIX`, `BINDIR`, `INSTALL_NAME`, `DESTDIR` | `make install` | `~/.local`, `$(PREFIX)/bin`, `sfn`, empty | Installation path/name controls. |
 | `BENCH_ARGS` | `make bench` | empty | Extra args for compiler compile-time benchmarks. |

@@ -45,6 +45,7 @@ import {
 // `windows_stubs.ll` to the link inputs for a Windows target. Identity /
 // skipped off Windows, so Linux/macOS link inputs are byte-identical.
 import {
+    build_host_os,
     build_target_os,
     target_condition_runtime_sfn_sources,
     target_os_is_windows
@@ -1188,11 +1189,13 @@ fn _compile_runtime_sfn_sources(runtime_capsules: RuntimeCapsuleArtifacts[], out
 // then the standard arm64 / Intel keg dirs, then `brew --prefix
 // openssl@3`, and finally a `pkg-config --libs-only-L openssl` fallback
 // for a non-Homebrew / system-registered OpenSSL (SFEP-0036 §3.1, #1821).
-// Emits nothing on Linux (default path). Darwin-gated via the same
-// `uname -s` probe `_dead_strip_link_flag` uses, so Linux argv stays
-// byte-identical (#1112).
+// Emits nothing on Linux (default path). Darwin-gated via the non-shelling
+// `build_host_os()` host probe (this is a host concern — where the linking
+// host's OpenSSL keg lives — so it honors `SAILFIN_HOST_OS`, not the target
+// override), so Linux argv stays byte-identical (#1112) and a Windows host
+// returns [] with no subprocess.
 fn _openssl_link_search_flags() -> string[] ![io] {
-    let os = _shell_read_cmd("uname -s");
+    let os = build_host_os();
     if !strings_equal(os, "Darwin") { return []; }
     // Try the instant `[ -d ]` checks (env override, then the standard
     // arm64 / Intel keg dirs) FIRST, and only shell out to `brew --prefix`
@@ -1443,5 +1446,6 @@ export {
     clean_runtime_object_cache,
     runtime_stamp_identity,
     write_runtime_identity_stamp,
-    _runtime_bundle_exists
+    _runtime_bundle_exists,
+    _openssl_link_search_flags
 };

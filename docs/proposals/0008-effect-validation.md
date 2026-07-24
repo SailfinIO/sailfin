@@ -1,10 +1,10 @@
 ---
 sfep: 8
 title: Effect Validation as Build Gate
-status: Accepted
+status: Implemented
 type: language
 created: 2026-04-26
-updated: 2026-04-26
+updated: 2026-07-24
 author: "agent:compiler-architect"
 tracking:
 supersedes:

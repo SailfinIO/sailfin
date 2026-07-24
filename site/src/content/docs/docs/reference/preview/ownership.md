@@ -20,7 +20,9 @@ fourth pillar.** Sailfin's three differentiators are unchanged:
 
 1. **Effect types** — compile-time capability enforcement.
 2. **Capability-based security** — capsule manifests + dependency auditing.
-3. **Structured concurrency** — planned (M4).
+3. **Structured concurrency** — a shipped v0 surface (`routine`, channels,
+   `spawn` / `await`, and `parallel`), with cancellation and non-blocking async
+   I/O still planned.
 
 We never describe Sailfin as "a borrow-checked language like Rust." We describe
 it as "a language whose runtime is memory-safe by construction." The analysis is

@@ -443,9 +443,7 @@ fn _cr_shell_read(cmd: string) -> string ![io] {
     return substring(captured, start, end);
 }
 
-fn _cr_get_home() -> string ![io] {
-    return _cr_shell_read("printf '%s' \"$HOME\"");
-}
+fn _cr_get_home() -> string ![io] { return env.get("HOME"); }
 
 fn _cr_ensure_dir(path: string) -> void ![io] {
     if !fs.exists(path) { process.run(["mkdir", "-p", path]); }
@@ -518,16 +516,16 @@ fn mangle_slug(slug: string) -> string {
 // and hands it to each child via `env`. Single-file `sfn test` runs set
 // the same root in process-local `test_runner_state`, because their
 // resolver work runs in the current process and cannot mutate its own
-// environment. The env var is read once via the shell printf trick the
-// resolver already uses for
-// `SAILFIN_BUILD_JOBS`; an empty value falls through to the default
-// so that `unset SAILFIN_TEST_SCRATCH` and `SAILFIN_TEST_SCRATCH=`
-// behave identically (no surprise paths on a stripped env).
+// environment. The env var is read once via `env.get` (the same
+// non-shelling read `_cr_resolve_jobs` uses for `SAILFIN_BUILD_JOBS`);
+// an empty value falls through to the default so that
+// `unset SAILFIN_TEST_SCRATCH` and `SAILFIN_TEST_SCRATCH=` behave
+// identically (no surprise paths on a stripped env).
 fn _cr_scratch_root() -> string ![io] {
     let active_test_root = test_runner_scratch_root();
     if active_test_root.length > 0 { return active_test_root; }
-    let env = _cr_shell_read("printf '%s' \"$SAILFIN_TEST_SCRATCH\"");
-    if env.length > 0 { return env; }
+    let scratch = env.get("SAILFIN_TEST_SCRATCH");
+    if scratch.length > 0 { return scratch; }
     return "build/sailfin";
 }
 

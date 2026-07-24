@@ -9,47 +9,34 @@ per-target alias `declare` path that was retired in M1.7.5b (#502).
 
 ## Descriptor-only contract
 
-New runtime helpers populate `native_signature` only. ABI shims (C
-trampolines) remain only for legitimate parameter-shape bridging —
-never as the migration vehicle.
+New runtime helpers populate `native_signature` only. Sailfin adapters may call
+platform `extern fn` declarations when a service lives in libc, pthreads,
+OpenSSL, or another linked platform library; there is no C runtime or C
+trampoline layer.
 
 In practice this means:
 
 - **`native_signature` is the canonical name.** Set it to a
   `sfn_<domain>_<op>` symbol (e.g. `sfn_str_concat`,
   `sfn_array_push_slot`). The LLVM lowering emits the `call` against
-  that symbol; the linker resolves it to the helper's body, whether
-  that body lives in `runtime/sfn/...` (Sailfin-native) or
-  `runtime/native/src/...` (C, as a temporary bridge).
-- **`symbol` records the legacy C entrypoint** (typically
-  `sailfin_runtime_*`) for archeology. Once `native_signature` is
-  populated the alias declare for `symbol` is no longer emitted —
-  call sites flow through `native_signature` exclusively.
+  that symbol; the linker resolves it to the Sailfin-native body under
+  `runtime/sfn/...`.
+- **`symbol` is the fallback symbol field** for descriptor rows that bind
+  directly to an external platform function. For Sailfin-native helpers,
+  `native_signature` owns the emitted call target.
 - **`target`** is the lookup key used by `emit_runtime_call`. It
   matches what the lowering writes as `runtime.<op>` in the
   `.sfn-asm` IR; the dispatch maps it back to a descriptor at
   emit time.
 
-## C trampolines are not the migration vehicle
+## Platform externs are the native boundary
 
-A C trampoline (`runtime/native/src/sailfin_runtime.c`) is justified
-only when the calling convention or parameter shape genuinely cannot
-be expressed in the source language we are migrating to. Examples
-that qualify:
-
-- A helper that needs to bridge a Sailfin `String` slot to a C
-  `const char *` while the Sailfin-side allocator is still in the
-  legacy ABI.
-- An intrinsic that calls into a libc surface (`memcpy`, `setjmp`)
-  with a fixed register class that the Sailfin source cannot yet
-  produce directly.
-
-A trampoline is **not** justified merely because the Sailfin body
-"is not written yet." That is the migration itself — write the
-Sailfin body, register it under `native_signature`, and route the
-call sites through `emit_runtime_call`. Adding a C trampoline as a
-permanent stand-in re-introduces exactly the legacy surface
-M1.7.5a / M1.7.5b worked to retire.
+Platform services are declared with `extern fn` in `runtime/sfn/platform/` and
+wrapped by Sailfin-native helpers. Direct external descriptors are appropriate
+only for genuine linked-library symbols such as `memcpy`, `setjmp`, or OpenSSL
+entry points. Do not add a C trampoline or recreate `runtime/native/` to bridge
+a parameter shape: extend Sailfin's extern/lowering support or add a
+Sailfin-native adapter instead.
 
 ## Call-site dispatch
 

@@ -1,10 +1,10 @@
 ---
 sfep: 0040
 title: Global Artifact Cache Store and Garbage Collection
-status: Accepted
+status: Implemented
 type: tooling
 created: 2026-07-04
-updated: 2026-07-04
+updated: 2026-07-24
 author: "agent:compiler-architect; human review"
 tracking: "#1892, #1893"
 supersedes:

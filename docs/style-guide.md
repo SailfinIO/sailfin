@@ -141,8 +141,8 @@ that satisfies the condition **must delete both the workaround and the
 comment**:
 
 ```sfn
-// Seed workaround (#998): 0.5.7 folds this allocation away. Remove when
-// bootstrap.toml [seed].version reaches >= 0.5.8.
+// Seed workaround (#998): the pinned seed folds this allocation away.
+// Remove when bootstrap.toml [seed].version contains #998's compiler fix.
 ```
 
 If you bump the seed or complete a migration, grep for comments citing the
@@ -265,7 +265,10 @@ sailfin/
 └─ tools/
 ```
 
-The toolchain is pure Sailfin: there is no C runtime and no Python bootstrap.
+The compiler, build driver, and runtime source are Sailfin-native: there is no
+C runtime and no Python bootstrap. Platform services remain behind `extern fn`
+adapters, and native binaries still lower through LLVM and link via clang plus
+the platform linker.
 If a subsystem grows large, give it its own folder under `compiler/src/` with
 a `mod.sfn` and keep cross-module imports going through that `mod.sfn`.
 

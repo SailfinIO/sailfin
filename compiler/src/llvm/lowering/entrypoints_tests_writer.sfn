@@ -154,6 +154,17 @@ fn write_llvm_ir_for_tests_from_text_with_context(native_text: string, module_na
         print.err("test llvm: empty IR after join from native text");
         return false;
     }
-    fs.writeFile(out_path, ir + "\n");
+    let payload = ir + "\n";
+    fs.writeFile(out_path, payload);
+    // Verify the write landed in full. A truncated `.ll` (e.g. from a
+    // pressure-induced short `fwrite`) drops its trailing `define @main`
+    // and links as `undefined main`; reading back and comparing length
+    // converts that into a clean, retriable compile-fail here instead of a
+    // downstream link ICE on IR the compiler itself corrupted.
+    let readback = fs.readFile(out_path);
+    if readback.length != payload.length {
+        print.err("test llvm: wrote truncated IR to " + out_path);
+        return false;
+    }
     return true;
 }

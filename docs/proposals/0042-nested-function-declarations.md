@@ -1,10 +1,10 @@
 ---
 sfep: 0042
 title: Nested / Local Function Declarations (non-capturing static `fn` items)
-status: Accepted
+status: Implemented
 type: language
 created: 2026-07-05
-updated: 2026-07-06
+updated: 2026-07-24
 author: "agent:compiler-architect; human review"
 tracking: "#1609, #1922, #1935, #1940, #1950"
 supersedes:

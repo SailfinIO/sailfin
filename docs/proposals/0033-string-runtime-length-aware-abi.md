@@ -1,10 +1,10 @@
 ---
 sfep: 0033
 title: Length-aware ({i8*, i64}) ABI for query-side string runtime helpers
-status: Accepted
+status: Implemented
 author: "agent:compiler-architect"
 created: 2026-06-26
-updated: 2026-06-26
+updated: 2026-07-24
 tracking: [1704]
 graduates-to: TBD
 ---

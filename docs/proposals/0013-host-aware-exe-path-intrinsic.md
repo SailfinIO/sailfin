@@ -1,10 +1,10 @@
 ---
 sfep: 13
 title: "Host-Aware exe_path Intrinsic"
-status: Accepted
+status: Implemented
 type: runtime
 created: 2026-06-02
-updated: 2026-06-02
+updated: 2026-07-24
 author: "agent:compiler-architect"
 tracking:
 supersedes:

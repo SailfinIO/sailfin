@@ -1,10 +1,10 @@
 ---
 sfep: 0047
 title: Compiler Bootstrap Manifest
-status: Accepted
+status: Implemented
 type: tooling
 created: 2026-07-10
-updated: 2026-07-11
+updated: 2026-07-24
 author: "agent:codex; human review: Michael Curtis"
 tracking: SFN-197
 supersedes:

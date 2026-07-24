@@ -1,6 +1,6 @@
 # Status
 
-Updated: 2026-07-24. Seed pinned to `0.8.0-alpha.5` (`bootstrap.toml`
+Updated: 2026-07-24. Seed pinned to `0.8.0` (`bootstrap.toml`
 `[seed].version` — SFEP-0047); the compiler version source of truth is
 `compiler/capsule.toml`.
 
@@ -72,7 +72,7 @@ here.
   remaining tracked issues.
 - **Compiler bootstrap manifest — `bootstrap.toml` + `sfn dev bootstrap`**
   (SFEP-0047, SFN-197). A root `bootstrap.toml` is the compiler checkout's
-  exact stage0 seed policy — `[seed].version/source/repo/asset_prefix/policy`,
+  exact bootstrap-seed policy — `[seed].version/source/repo/asset_prefix/policy`,
   `[store].install_base/bin_dir`, `[verify]` — distinct from the
   capsule/workspace `[toolchain]` *floor* (SFEP-0046): it answers "which exact
   released compiler bootstraps this checkout?", not "can this toolchain build
@@ -127,10 +127,11 @@ here.
   (SFEP-0027 §2.1); a line-budget sentinel
   (`compiler/tests/unit/cli_main_line_budget_test.sfn`) guards against
   re-ballooning.
-- **Deterministic self-hosting.** The compiler is a verified fixed point —
-  stage2 and stage3 produce byte-identical LLVM IR across all modules;
-  `make check` enforces this. The triple-pass validation (stage2 + stage3
-  builds with per-stage `.ll` scratch isolation, hello-world smoke gate,
+- **Deterministic self-hosting.** The compiler is a verified fixed point — the
+  seedcheck generation and the generation it rebuilds produce byte-identical
+  LLVM IR across all modules; `make check` enforces this. The triple-pass
+  validation (seedcheck + fixed-point rebuild with per-generation `.ll`
+  scratch isolation, hello-world smoke gate,
   fixed-point IR diff, and seedcheck→canonical promotion) is owned by the
   compiler as the internal `sfn selfhost` command (`compiler/src/cli_selfhost.sfn`,
   #1502, epic #513 Phase 1) — `make check`'s `check-impl` is now a one-line
@@ -672,8 +673,21 @@ unit; history in the linked issues.
 
 ## Installer (Current)
 
-- Release tarballs follow `sailfin_<version>_<os>_<arch>.tar.gz`; the
-  installer defaults to `~/.local/bin` (`GLOBAL_BIN_DIR` override).
+- Release tarballs follow `sailfin_<version>_<os>_<arch>.tar.gz`. The v0.8.0
+  release ships Linux x86_64, macOS arm64 (Apple Silicon), and Windows x86_64
+  installer assets. Other OS/architecture pairs detected by the bootstrap
+  scripts are not supported until a matching release asset is published.
+- The bootstrap installers verify the signed `SHA256SUMS` manifest and selected
+  archive digest before extraction when OpenSSL 1.1.1+ raw-Ed25519 support is
+  available. A missing manifest/signature (for an older unsigned release) or
+  unsuitable OpenSSL produces an explicit warning and continues; malformed or
+  invalid signed metadata, a missing/duplicate asset entry, or a digest
+  mismatch aborts installation.
+- Linux/macOS installs versioned files under
+  `~/.local/share/sailfin/versions/<version>` and exposes `sailfin` plus `sfn`
+  in `~/.local/bin` (`INSTALL_BASE` / `GLOBAL_BIN_DIR` overrides). Windows uses
+  `%LOCALAPPDATA%\sailfin\versions\<version>` and
+  `%LOCALAPPDATA%\sailfin\bin`, adding the bin directory to the user `PATH`.
 - Current release: `v0.8.0` (see `bootstrap.toml` `[seed].version`
   for the pinned self-host seed, which may trail the latest release).
 
@@ -685,9 +699,11 @@ Tracked in the [roadmap](https://sailfin.dev/roadmap) and
 
 - **Type annotations (`:` vs `->`)** — **migrated.** `:` for params, vars,
   fields; `->` for return types only. Parser enforces both positions.
-- **String interpolation (`{{ }}` vs `${ }`)** — open. `{{ }}` means the
-  opposite of its meaning in every mainstream template language; LLMs
-  systematically generate wrong code. `${ }` migration is planned pre-1.0.
+- **String interpolation (`{{ }}` vs `${ }`)** — open; migration designed and
+  scheduled. `{{ }}` means the opposite of its meaning in every mainstream
+  template language; LLMs systematically generate wrong code. The `${ }`
+  migration plan (dual-accept → deprecate → migrate → drop `{{ }}`) is
+  SFEP-0057 (`docs/proposals/0057-string-interpolation-dollar.md`, Accepted).
 - **Error handling** — largely closed. `Result<T, E>` + `?` ship end-to-end
   (#832–#834, spec §12). Remaining: `From<E>` coercion and the `E: Error`
   bound, both gated on generic constraints. `try`/`catch` remains for

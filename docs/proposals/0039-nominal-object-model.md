@@ -1,10 +1,10 @@
 ---
 sfep: 0039
 title: Nominal Object Model — Honest Rejection of TypeScript-Shaped Data Syntax
-status: Accepted
+status: Implemented
 type: language
 created: 2026-07-04
-updated: 2026-07-04
+updated: 2026-07-24
 author: "agent:compiler-architect; human review"
 tracking: "#1860, #1887, #1888, #1838, #1855, #1900, #1904, #1905"
 supersedes:
@@ -379,16 +379,16 @@ the decomposition). Required-in-pinned-seed: none.
 ## 7. Stage1 readiness mapping
 
 - [x] Parses — no new syntax; the grammar is unchanged (`A & B` stays parseable).
-- [ ] Type-checks / effect-checks — `E0827` (parser) and `E0828`/`E0829`
+- [x] Type-checks / effect-checks — `E0827` (parser) and `E0828`/`E0829`
       (typecheck) are the deliverable; no effect-check change.
-- [ ] Emits valid `.sfn-asm` — N/A for rejected cases; the sanctioned
+- [x] Emits valid `.sfn-asm` — N/A for rejected cases; the sanctioned
       concrete-struct path already emits correctly (#1855).
-- [ ] Lowers to LLVM IR — N/A for rejected cases; unchanged for structs.
-- [ ] Regression coverage — `assert_does_not_compile` tests per code +
+- [x] Lowers to LLVM IR — N/A for rejected cases; unchanged for structs.
+- [x] Regression coverage — `assert_does_not_compile` tests per code +
       migrated #1838 e2e asserting `admin:Alice`.
-- [ ] Self-hosts — pre-flight audit + `make compile`/seedcheck (see §5).
-- [ ] `sfn fmt --check` clean — on every touched `.sfn`.
-- [ ] Documented — `docs/status.md` (interfaces method-only; object literals
+- [x] Self-hosts — pre-flight audit + `make compile`/seedcheck (see §5).
+- [x] `sfn fmt --check` clean — on every touched `.sfn`.
+- [x] Documented — `docs/status.md` (interfaces method-only; object literals
       require a concrete struct; `A & B` reserved for generic bounds) + spec
       §06-types.
 

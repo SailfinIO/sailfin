@@ -5,6 +5,7 @@
   "private": true,
   "scripts": {
     "dev": "astro dev",
+    "check:hero": "bash scripts/verify-hero-example.sh",
     "build": "astro build",
     "preview": "npm run build && astro preview",
     "astro": "astro"

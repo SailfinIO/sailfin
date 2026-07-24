@@ -18,7 +18,7 @@ Source (.sfn)
   → Effect Checker (effect_checker.sfn) → Effect-safe AST
   → Native Emitter (emit_native.sfn) → .sfn-asm IR (native_ir.sfn)
   → LLVM Lowering (llvm/lowering/) → LLVM IR
-  → LLVM → Native Binary
+  → clang + platform linker → Native Binary
 ```
 
 ## Key Files
@@ -37,20 +37,29 @@ Source (.sfn)
 
 ## Runtime
 
-The binary's entry point is the Sailfin-emitted `@main` (M5, #451; shipped 2026-05-25) — no C code participates in startup. Supporting helpers under `runtime/native/src/` remain in C until M3 ports them into Sailfin.
+The binary's entry point is the Sailfin-emitted `@main` (M5, #451; shipped
+2026-05-25), and no C runtime participates in startup. Runtime source is
+Sailfin-native; platform services are declared with `extern fn` and resolved
+from linked libraries such as libc, pthreads, and OpenSSL. The backend still
+lowers through LLVM, and clang plus the platform linker provide the native
+last mile.
 
 - `runtime/prelude.sfn` — Sailfin-native prelude (collections, strings, type checks)
 - `runtime/sfn/` — Sailfin-native runtime modules (`clock.sfn`, `memory/arena.sfn`, `memory/rc.sfn`, `process.sfn`, `type_meta.sfn`, …)
-- `runtime/native/` — Supporting C helpers pending M3 (strings, arrays, exceptions, the C arena, crypto)
+- `runtime/capsule.toml` — Runtime capsule manifest, including platform link libraries
+- `runtime/ir/` — Narrow target-specific LLVM IR support; not a C runtime
 
 ## Self-Hosting
 
-The compiler compiles itself. The build process:
+The Sailfin-native build driver self-hosts the compiler from the exact released
+seed pinned in `bootstrap.toml`:
 
-1. A **seed binary** (a previously compiled version) bootstraps the build
-2. The seed compiles the current source into a **first-pass binary**
-3. The first-pass binary compiles the source again into the **seedcheck binary**
-4. `make check` validates the seedcheck can run programs and pass tests
+1. The pinned **seed binary** compiles current source into a **first-pass binary**.
+2. The first-pass binary compiles the same source into a **seedcheck binary**.
+3. The seedcheck binary rebuilds the compiler once more; `make check` compares
+   the two generated LLVM IR sets to prove a fixed point.
+4. The gate runs a program smoke test and the Sailfin-native test suites against
+   the validated seedcheck binary.
 
 ## Intermediate Representation
 
