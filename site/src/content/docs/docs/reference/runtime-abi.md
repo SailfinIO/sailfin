@@ -36,7 +36,7 @@ runtime's startup check.
 
 **Ownership.** `data` is owned by whichever side allocated it.
 String-literal materialization routes through
-[`sailfin_runtime_alloc_struct`](#allocation-helpers); the arena-
+[`sfn_alloc_struct`](#allocation-helpers); the arena-
 aware helpers (`sfn_str_concat_arena`, `sfn_str_append_arena`) are
 **unconditionally** arena-backed by design — the `SAILFIN_USE_ARENA`
 opt-out applies only to the legacy `_rt_*` allocation paths and the
@@ -73,7 +73,7 @@ runtime bodies never index into elements directly.
 fitting `capacity` mutate in place, overflows allocate a fresh page
 through the arena (or libc `realloc` off-arena) and copy existing
 slots. The arena's grow-if-at-tip realloc
-([`sfn_arena_realloc`](https://github.com/SailfinIO/sailfin/blob/main/runtime/native/src/sailfin_arena.c))
+([`sfn_arena_realloc`](https://github.com/SailfinIO/sailfin/blob/main/runtime/sfn/memory/arena.sfn))
 preserves the in-place fast path for typical append loops. Doubling
 is not part of the ABI — it is an implementation detail of the
 array helpers — but no helper may shrink `capacity` below `length`
@@ -157,52 +157,29 @@ changes the hash. The FNV-1a routine lives in pure Sailfin (no
 `extern fn`) and carries its state as four 16-bit limbs so earlier
 seeds, which compiled `int` as f64, still produced exact results.
 
-**Link-time behavior.** The runtime's C side provides weak fallback
-definitions at
-[`sailfin_runtime.c:120-121`](https://github.com/SailfinIO/sailfin/blob/main/runtime/native/src/sailfin_runtime.c)
-(`__attribute__((weak))`) because Mach-O's static linker errors on
-unresolved weak references — a runtime-only build with no Sailfin
-LLVM module would otherwise fail to link. When the LLVM IR defines
-the symbols, `linkonce_odr` (lowered to `weak_def_can_be_hidden`
-on Mach-O) outranks the C `weak` fallback, so layout drift in the
-IR-emitted hash trips the diagnostic. Compiler and runtime share an
-address space, so the `i64` symbol is read as `uint64_t` directly —
-no endianness handling. Cross-architecture precompiled artifacts
-would need to re-encode the hash as a byte sequence.
-
-**Startup check.** A `__attribute__((constructor))` in
-[`_runtime_init`](https://github.com/SailfinIO/sailfin/blob/main/runtime/native/src/sailfin_runtime.c)
-compares the linked module's symbols to the runtime's expected
-constants and `_exit(70)` with a diagnostic on mismatch — version
-first, then hash. The unit-test harness can drive the failure path
-without rebuilding the runtime via `SAILFIN_ABI_FORCE_MISMATCH`:
-`hash` forces the observed hash to `expected ^ 0xDEADBEEFCAFEBABE`;
-any other non-empty / non-`0` value forces the observed version to
-`expected + 1`; unset or `0` is the production path.
+**Link-time behavior.** The compiler emits `@sfn_abi_version` and
+`@sfn_abi_hash` as `linkonce_odr` constants in each Sailfin LLVM module. The
+runtime is entirely Sailfin-native under `runtime/sfn/`; the former weak C
+fallbacks and C constructor were deleted with `runtime/native/` in #822. A
+runtime-only C link mode is therefore no longer part of the supported ABI.
 
 ## Allocation Helpers
 
 The compiler emits calls to two arena-aware helpers for boxed
-allocations that the bump-allocator arena
-([`sailfin_arena.c`](https://github.com/SailfinIO/sailfin/blob/main/runtime/native/src/sailfin_arena.c))
-reclaims in bulk via `sfn_arena_mark` / `sfn_arena_rewind`. Both
+allocations that the Sailfin-native bump allocator in
+`runtime/sfn/memory/arena.sfn` reclaims in bulk via `sfn_arena_mark` /
+`sfn_arena_rewind`. Both
 fall through to libc `calloc` / `free` when the arena is disabled
 (`SAILFIN_USE_ARENA=0`), so off-arena callers retain the original
 malloc-based lifetime contract.
 
 | Symbol | Signature | When emitted | Pairs with | Arena | Off-arena |
 | --- | --- | --- | --- | --- | --- |
-| `sailfin_runtime_alloc_struct` | `i8* (i64 size_bytes)` | string-literal materialization, struct/array literal boxing, scalar→`i8*` coercion | `sfn_mem_free` (or arena bulk reclaim) | `_rt_calloc` → arena | `calloc(1, size)` |
-| `sfn_mem_free` | `void (i8*)` | await-unboxing of a boxed-struct future return; scope-exit drop of a boxed local | `sailfin_runtime_alloc_struct` | no-op (arena reclaims at rewind / exit) | `free(ptr)` |
+| `sfn_alloc_struct` | `i8* (i64 size_bytes)` | string-literal materialization, struct/array literal boxing, scalar→`i8*` coercion | `sfn_mem_free` (or arena bulk reclaim) | arena allocation | `calloc(1, size)` |
+| `sfn_mem_free` | `void (i8*)` | await-unboxing of a boxed-struct future return; scope-exit drop of a boxed local | `sfn_alloc_struct` | no-op (arena reclaims at rewind / exit) | `free(ptr)` |
 
-> **#927:** `runtime.free` now lowers to the Sailfin-native
-> `@sfn_mem_free` (`runtime/sfn/memory/mem.sfn`), not the legacy C
-> `sailfin_runtime_free`. `sfn_mem_free` is the canonical emitted
-> symbol for fresh IR; it preserves the arena-mode no-op guard
-> (`sfn_arena_enabled`) and the libc-`free` off-arena fallback. The
-> C `sailfin_runtime_free` body stays exported for seed-built IR
-> that predates the flip, and retires at M3. (`alloc_struct` keeps
-> its legacy C symbol — that primitive's port is a separate issue.)
+Both helpers are implemented in `runtime/sfn/memory/mem.sfn` and preserve the
+arena-mode no-op guard plus the libc allocation/free fallback.
 
 **Alignment.** Both helpers guarantee 8-byte alignment — the arena
 path passes `align=8` to `sfn_arena_alloc`, and `calloc` aligns to
@@ -244,13 +221,10 @@ covers generic `loop`, `for x in arr`, and `for i in a..b`;
 reclamation, never a dangling pointer). Scalar-replacement
 (strategy B) and nested-loop mark stacking are post-1.0.
 
-**Default arena global.** Arena-aware string helpers take a pointer
-to the arena slot — the C signature is `SfnArena **arena_slot` and
-the body dereferences once. Every emitted module declares the slot
-(`@sfn_default_arena = external global ptr`); a constructor in
-`sailfin_runtime.c` primes it from `sfn_arena_global()` at module
-load, and call sites pass `ptr @sfn_default_arena` (the address of
-the global pointer) as the arena operand.
+**Default arena global.** The Sailfin-native arena module lazily initializes
+the process-global arena through `sfn_arena_global()`. Arena-aware helpers
+resolve that global when no explicit arena is supplied; no C constructor or
+runtime-global fallback participates in startup.
 
 ## Native Signature Registry
 
@@ -327,7 +301,7 @@ present, so the call shape is uniform.
 struct in first-use order (deterministic across runs). The helper
 API in [`closures.sfn`](https://github.com/SailfinIO/sailfin/blob/main/compiler/src/llvm/closures.sfn)
 synthesizes the type (`%sfn_closure_env_<id>`), allocates it via
-[`sailfin_runtime_alloc_struct`](#allocation-helpers), and emits the
+[`sfn_alloc_struct`](#allocation-helpers), and emits the
 GEP+load prologue inside the lifted body. Non-capturing closures
 materialize with `env_ptr = i8* null`.
 
@@ -349,7 +323,7 @@ either the lifted lambda's internal `__closure__@sfn_lambda_<N>`
 sentinel or a user-written `fn(<param_tys>) -> <ret_ty>` annotation.
 
 **Lifetime stance.** The env struct routes through
-`sailfin_runtime_alloc_struct`; the compiler does **not** emit a
+`sfn_alloc_struct`; the compiler does **not** emit a
 paired free on closure-pair drop because the pair has no
 deterministic owner (it can be copied into spawn handlers, channels,
 or returned upward). Arena reclaim covers the arena case; the off-
@@ -361,27 +335,22 @@ for the design rationale.
 ## Exception / Unwind ABI
 
 Sailfin's exception model is **structured frames with deterministic
-unwind**. Today's implementation is `setjmp`/`longjmp`-based,
-exposed through four C runtime entrypoints in
-[`sailfin_runtime.c`](https://github.com/SailfinIO/sailfin/blob/main/runtime/native/src/sailfin_runtime.c).
-The M2.7 migration
-([issue #404](https://github.com/SailfinIO/sailfin/issues/404))
-replaces the TLS-polling path with stack-allocated frames; both
-phases share the IR-level ABI (`i32` returns + explicit
-`take_exception` calls).
+unwind**. Today's implementation is `setjmp`/`longjmp`-based and lives in
+`runtime/sfn/exception.sfn`. Compiler-emitted try blocks use stack-allocated
+frames and call the Sailfin-native exception primitives directly.
 
 | Symbol | Signature | Role |
 | --- | --- | --- |
-| `sailfin_runtime_try_enter` | `i32 (i8**)` | Push a `SailfinTryContext` onto the TLS try stack; return `setjmp(ctx->env)` — 0 on first entry, 1 on `longjmp` rewind. Out-param receives the frame handle. |
-| `sailfin_runtime_try_leave` | `void (i8*)` | Pop and free the matching context. Tolerates mismatched leaves. |
-| `sailfin_runtime_throw` | `void (i8*)` | Store `message` in a `_Thread_local` slot and `longjmp` to the top-of-stack context; abort if no context. |
-| `sailfin_runtime_take_exception` | `i8* (void)` | Read and clear the TLS message at catch entry. |
+| `sfn_exception_push_frame` | `void (i8*)` | Push a compiler-allocated frame onto the thread-local frame chain. |
+| `sfn_exception_pop_frame` | `void (i8*)` | Pop the matching frame from the chain. |
+| `sfn_throw` | `void (i8*)` | Store the message on the current frame and `longjmp`; abort if no frame exists. |
+| `sfn_take_exception` | `i8* (i8*)` | Read and clear the message from the caught frame. |
 
 **Landingpad shape.** The compiler-emitted IR follows a `call`+`br`
 shape rather than LLVM's native `invoke`/`landingpad`:
 
 ```llvm
-%status = call i32 @sailfin_runtime_try_enter(i8** %frame_slot)
+%status = call i32 @setjmp(i8* %jmp_buf)
 %caught = icmp ne i32 %status, 0
 br i1 %caught, label %catch.entry, label %try.body
 ```
@@ -394,24 +363,18 @@ and is set at each declaration site by
 [`instructions_let.sfn`](https://github.com/SailfinIO/sailfin/blob/main/compiler/src/llvm/lowering/instructions_let.sfn).
 
 **Unwind tables.** The setjmp/longjmp path does **not** require
-DWARF unwind tables (`.eh_frame`) — rewind happens through TLS
-state, not the C++ Itanium ABI. This sidesteps the macOS arm64 /
+DWARF unwind tables (`.eh_frame`) — rewind happens through the thread-local Sailfin frame chain, not the C++
+Itanium ABI. This sidesteps the macOS arm64 /
 Linux x86_64 unwinder fragmentation that has historically broken
 cross-platform release builds. The trade-off is that intermediate
 frames between `throw` and the catching `try` cannot run cleanup
 automatically — the compiler emits explicit scope-boundary drops
 instead.
 
-**Frame-based catches (M2.7 trajectory).**
-[Issue #404](https://github.com/SailfinIO/sailfin/issues/404)
-migrates `instructions_try.sfn` from TLS polling to stack-allocated
-`SfnExceptionFrame` records and renames the entrypoints to
-`sfn_try_enter` / `sfn_try_leave` / `sfn_take_exception`. Frames
-allocate in the function prologue (no per-try malloc); a follow-up
-M2.7c PR removes the per-call-site `has_exception` polling the
-legacy TLS path relies on. The IR shape stays `call i32` + `br` —
-a rename plus a frame-allocation move, not a switch to native
-landingpads (deferred to post-1.0).
+**Frame-based catches.** Compiler lowering allocates an
+`SfnExceptionFrame` in the function frame, pushes it before `setjmp`, and pops
+it on normal exit. A throw records the message on that frame and jumps back to
+the saved point; the catch path reads it with `sfn_take_exception`.
 
 **Out of scope today.** Exception propagation across `routine` /
 `spawn` boundaries is gated on the M4 concurrency ABI; concurrent

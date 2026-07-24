@@ -615,13 +615,16 @@ fn find_user(id: string) -> User? {
 
 ## Ownership and Safety Keywords
 
-These keywords are parsed and recorded in the AST. Semantic enforcement is in progress.
+Ownership enforcement is shipped for `Affine<T>` and `Linear<T>`; the other
+wrappers in this section remain syntax-only.
 
 ### `Affine<T>`
 
-**Status: Parsed only**
+**Status: Single-use enforced**
 
-An affine type wrapper: the value may be dropped without being consumed, but cannot be duplicated. Move semantics apply. Enforcement is not yet active.
+An affine type wrapper: the value may be dropped without being consumed, but
+cannot be duplicated. Move and use-after-move violations are rejected with
+`E0901` or `E0904`.
 
 ```sfn
 fn ingest(batch: Affine<DataChunk>) ![gpu] {
@@ -634,9 +637,11 @@ fn ingest(batch: Affine<DataChunk>) ![gpu] {
 
 ### `Linear<T>`
 
-**Status: Parsed only**
+**Status: Exactly-once enforced**
 
-A linear type wrapper: the value must be consumed exactly once. Neither duplication nor silent dropping is permitted. Enforcement is not yet active.
+A linear type wrapper: the value must be consumed exactly once. Move and
+use-after-move violations are rejected with `E0901` or `E0904`; leaving scope
+without consuming the value is rejected with `E0907`.
 
 ```sfn
 fn send_message(msg: Linear<Message>) ![net] {
@@ -695,9 +700,11 @@ unsafe fn write_ptr(ptr: *mut u8, offset: usize, value: u8) -> void {
 
 ### `extern`
 
-**Status: Parsed**
+**Status: Implemented**
 
-Declare a symbol that is provided by the native linker or runtime. Enforcement is not yet active.
+Declare a symbol that is provided by the native linker or runtime. Declaration
+validation and native lowering are shipped; locally declared extern calls also
+participate in the ownership check at the `unsafe` boundary.
 
 ```sfn
 unsafe extern fn platform_clock() -> i64;

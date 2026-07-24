@@ -15,14 +15,14 @@ Sailfin's AI story is two layers:
 
 | Layer | Status | Notes |
 |---|---|---|
-| `![model]` effect | **Enforced today** | A language-level capability gate. Any function that calls library code carrying `![model]` must declare `![model]` in its own effect list; the effect checker rejects the code otherwise. |
+| `![model]` effect | **Reserved** | Declarable and propagated from function signatures, but 0.8 has no shipped model detector or runtime API. |
 | `model` / `prompt` / `tool` / `pipeline` block keywords | **Removed** | These keywords have been removed from the language parser and compiler. AI functionality is being delivered as the `sfn/ai` library capsule, planned post-1.0. |
 
-## The `![model]` Effect (Enforced)
+## The `![model]` Effect (Reserved)
 
-The `![model]` effect is a real, enforced capability. Any function that calls
-library functions carrying `![model]` must declare it, and the effect propagates
-transitively to callers:
+The `![model]` effect can be declared today and propagates through resolved
+calls like other declared effects. It is reserved for the future `sfn/ai`
+capsule, however: 0.8 ships no model-specific detector or runtime API.
 
 ```sfn
 fn ai_call(model_name: string, input: string) -> string ![model] {
@@ -38,8 +38,9 @@ fn summarize_invoice(invoice: string) -> string ![model, io] {
 }
 ```
 
-Removing `![model]` from `summarize_invoice` is a compile-time error — this is
-the safety property Sailfin ships today.
+In this example the declared effect on `ai_call` propagates to
+`summarize_invoice`; that generic signature propagation should not be confused
+with a shipped model invocation boundary.
 
 ## The `sfn/ai` Capsule (Planned Post-1.0)
 
