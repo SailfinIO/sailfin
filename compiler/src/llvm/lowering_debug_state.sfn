@@ -113,9 +113,10 @@ let mut _exe_path_locator_value: string = "";
 // platform-divergent C fs symbols via the emit-time sentinel seam, same
 // pattern as `exe_path_locator` above). `_fs_platform_leg_value` holds the
 // leg tag (`linux`/`darwin`/`mingw`); `_stat_st_mode_offset_value` holds
-// the byte offset of `st_mode` in `struct stat` (24 on Linux x86_64, 4 on
-// macOS arm64); `_stat_buf_size_value` is a safe over-allocation for a
-// stack `struct stat` buffer. Each lazily resolved + cached once.
+// the byte offset of `st_mode` in `struct stat` (24 on Linux x86_64, 16 on
+// Linux aarch64, 4 on macOS arm64); `_stat_buf_size_value` is a safe
+// over-allocation for a stack `struct stat` buffer. Each lazily resolved +
+// cached once.
 let mut _fs_platform_leg_initialized: boolean = false;
 let mut _fs_platform_leg_value: string = "";
 let mut _stat_st_mode_offset_initialized: boolean = false;
@@ -148,6 +149,17 @@ fn _host_os() -> string ![io] {
     if fs.exists("/System/Library/CoreServices") { return "Darwin"; }
     if _get_env_cmd("SystemRoot").length > 0 { return "Windows"; }
     return "Linux";
+}
+
+// Non-shelling host-architecture probe (SFN-471, SFEP-0056 §3.2). The target
+// override is the cross-emit and e2e seam; native builds otherwise identify
+// aarch64 from its well-known glibc loader path. x86_64 is the dominant
+// default, preserving every existing Tier-1 host when the marker is absent.
+fn _host_arch() -> string ![io] {
+    let arch = _get_env_cmd("SAILFIN_TARGET_ARCH");
+    if arch.length > 0 { return arch; }
+    if fs.exists("/lib/ld-linux-aarch64.so.1") { return "aarch64"; }
+    return "x86_64";
 }
 
 // True when the user requested LLVM-lowering stderr trace via
@@ -340,17 +352,20 @@ fn fs_platform_leg() -> string ![io] {
 }
 
 // Byte offset of `st_mode` within `struct stat`, baked per target for the
-// `sailfin_intrinsic_fs_get_perms` sentinel (#1308). macOS arm64 places
-// `st_mode` at offset 4; Linux x86_64 at offset 24. Windows falls through
-// to the Linux value harmlessly — its `get_perms` leg is a bare stub that
-// never reads the buffer. Same resolution order + lazy cache as the
-// resolvers above.
+// `sailfin_intrinsic_fs_get_perms` sentinel (#1308, SFN-471). macOS arm64
+// places `st_mode` at offset 4; Linux aarch64 at 16; Linux x86_64 at 24.
+// Windows falls through to 24 harmlessly — its `get_perms` leg is a bare
+// stub that never reads the buffer. The target OS override wins over the
+// host-OS probe; `_host_arch` applies the corresponding target-arch override
+// before its loader-marker probe.
 fn stat_st_mode_offset_value() -> int ![io] {
     if !_stat_st_mode_offset_initialized {
         let mut os: string = _get_env_cmd("SAILFIN_TARGET_OS");
         if os.length == 0 { os = _host_os(); }
         if os == "Darwin" { _stat_st_mode_offset_value = 4; } else {
-            _stat_st_mode_offset_value = 24;
+            if os == "Linux" && _host_arch() == "aarch64" {
+                _stat_st_mode_offset_value = 16;
+            } else { _stat_st_mode_offset_value = 24; }
         }
         _stat_st_mode_offset_initialized = true;
     }
