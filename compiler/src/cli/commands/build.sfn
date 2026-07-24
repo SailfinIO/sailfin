@@ -47,7 +47,7 @@ import {
 } from "../../build/cache";
 import { _do_determinism_check } from "../../build/determinism";
 import { _clang_link_multi } from "../../build/link";
-import { _dirname, _ensure_dir } from "../../build/paths";
+import { _dirname, _ensure_dir, _resolve_self_path } from "../../build/paths";
 import { _runtime_bundle_exists, clean_runtime_object_cache } from "../../build/runtime_objs";
 import { cache_root, merge_cache_stats, resolve_build_cache_config } from "../../build_cache";
 import { emit_compiler_build_stamp_if_applicable } from "../../build_stamp";
@@ -375,10 +375,17 @@ fn _run_single_build(capsule_path: string, input_path_arg: string, out_path_arg:
     // upgrade it to subprocess isolation *only* when the resolved
     // closure crosses the size threshold (binary_dir is threaded
     // below for that decision). Small closures stay in-process.
+    // Resolve the self-invocation binary the same way every other
+    // self-host call site does (`_resolve_self_path`, `build/paths.sfn`):
+    // probe `sailfin`/`sailfin.exe`/`sfn`/`sfn.exe` under `binary_dir`
+    // and join with the platform separator. The prior hand-built
+    // `binary_dir + "/sfn"` missed the `.exe` suffix and forced a `/`
+    // separator, so on native Windows the per-module emit child spawned
+    // a non-existent path (epic #1485 M7). `_resolve_self_path` returns
+    // "" for an empty `binary_dir`, preserving the small-closure
+    // in-process path below.
     let mut sailfin_exe: string = "";
-    if walk_src {
-        if binary_dir.length > 0 { sailfin_exe = binary_dir + "/sfn"; }
-    }
+    if walk_src { sailfin_exe = _resolve_self_path(binary_dir); }
     let capsule_result = prepare_project_capsules(input_path, cache_config, consumer, sailfin_exe, work_dir, binary_dir);
     // Issue #991: a per-module emit failure (e.g. an effect-gate
     // `E0402` on an unimported sibling) leaves `ll_paths` empty and
