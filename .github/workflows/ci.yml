@@ -80,7 +80,15 @@ jobs:
             base="${{ github.event.pull_request.base.sha }}"
             head="${{ github.event.pull_request.head.sha }}"
 
-            git diff --name-only "$base" "$head" | tee changed-files.txt
+            # Three-dot: diff from the merge-base of base..head, so the
+            # changed set is exactly what THIS PR added — not everything
+            # `main` moved since the branch point. `base` is the base-branch
+            # *tip*, so a two-dot `git diff "$base" "$head"` also reports
+            # files `main` changed that the branch merely lacks, flipping
+            # `source`/`site_hero` to true and running the full matrix on a
+            # docs-only PR (SFN-484). `fetch-depth: 0` above makes the
+            # merge-base reachable.
+            git diff --name-only "$base"..."$head" | tee changed-files.txt
 
             while IFS= read -r path; do
               case "$path" in
