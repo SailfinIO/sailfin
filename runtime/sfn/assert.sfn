@@ -1,34 +1,50 @@
 // runtime/sfn/assert.sfn
 //
-// Assertion-failure handler (#822 / #1308). Ports `sailfin_assert_fail`
-// and the `runtime_assert_fail_fn` trampoline out of the retired
-// C runtime (formerly `sailfin_runtime.c`).
+// Assertion-failure handler (#822 / #1308) + the recoverable-harness
+// per-test result writer (SFN-17). Ports `sailfin_assert_fail` and the
+// `runtime_assert_fail_fn` trampoline out of the retired C runtime
+// (formerly `sailfin_runtime.c`).
 //
 // The compiler emits `call @runtime_assert_fail_fn(file, line, col, msg)`
 // for every `assert` it cannot prove true at compile time
 // (`runtime_helpers.sfn:599`, `native_signature: null` — a bare runtime
-// symbol). Every user program and EVERY `*_test.sfn` links against it via
-// the runtime capsule, so this is on the critical path for the whole test
-// suite — not just the compiler self-host (which folds its own asserts and
-// therefore never exercised this symbol, which is why the relink
-// experiment did not surface it).
+// symbol), and `call @sfn_test_report_*` / `@sfn_test_set_phase` from the
+// synthesized recoverable-harness `@main`. Every user program and EVERY
+// `*_test.sfn` links against these via the runtime capsule, so this is on
+// the critical path for the whole test suite.
 //
-// On a failed assertion it writes a structured SFAF record to
-// `${SAILFIN_TEST_SCRATCH}/fail.bin` (the format parsed by
-// `compiler/src/assert_failure.sfn`: six `\n`-joined lines —
-// `SFAF` / `v:1` / `file:<path>` / `line:<dec>` / `col:<dec>` / `msg:<text>`,
-// file/msg newline-stripped) so the test runner can surface typed
-// file:line:col attribution, then raises a value error so the assertion
-// propagates (catchable, and fatal if uncaught). The legacy
-// `SAILFIN_TEST_FAIL_FD` borrowed-fd path the C body also supported is
-// dropped: nothing sets that env (only the C handler ever read it).
+// Streamed record channel (SFEP-0050 / SFN-393). The harness reports each
+// test / hook / assertion by writing one framed `SFTR` record to its own
+// **stderr (fd 2)** — the runner owns the child's stderr pipe, reads the
+// records off it, and classifies inline. This replaces the file
+// side-channel (`${SAILFIN_TEST_SCRATCH}/results.log` +
+// `${SAILFIN_TEST_SCRATCH}/fail.bin`) SFN-17 used: a shared, env-keyed
+// filesystem path that collided the moment a runner nested or ran
+// concurrently. A pipe is bound to one parent/child pair, so that
+// collision is structurally impossible. The wire format is documented in
+// `compiler/src/test_results.sfn` (the parser). Records are emitted only
+// when `SAILFIN_TEST_SCRATCH` is set (i.e. running under the runner), so a
+// test binary run standalone does not spray control bytes at a terminal —
+// the same gate the file writers used, now a plain "under the runner"
+// boolean rather than a path.
 //
-// Excluded from the cross-windows RUNTIME_MODS (its `fopen`/`fwrite`
-// sink + the SFAF protocol are Linux/macOS test-harness plumbing);
-// Windows resolves `@runtime_assert_fail_fn` / `@sailfin_assert_fail`
-// from the abort stubs in `runtime/ir/windows_stubs.ll`. Sync
-// pinned by `compiler/tests/e2e/test_cross_windows_runtime_modules.sh`.
+// Each record is assembled into one heap buffer and emitted with a
+// SINGLE `write(2, buf, len)` (records are one line, well under PIPE_BUF,
+// so the write is atomic): a longjmp-uncatchable `abort()`/SIGSEGV loses
+// at most the one in-flight record — the same crash-durability the old
+// per-record `fopen`+append+`fclose` gave, without the per-record file
+// churn. As before, `string + i64` is NOT used to stringify integers (it
+// does not reliably format in a runtime module); digits are formatted
+// manually into the buffer.
+//
+// Excluded from the cross-windows RUNTIME_MODS (its `write(2)` record
+// sink is Linux/macOS test-harness plumbing); Windows resolves
+// `@runtime_assert_fail_fn` / `@sailfin_assert_fail` from the abort stubs
+// in `runtime/ir/windows_stubs.ll`. Sync pinned by
+// `compiler/tests/e2e/test_cross_windows_runtime_modules.sh`.
 extern fn malloc(size: usize) -> *u8;
+
+extern fn free(ptr: *u8) -> void;
 
 extern fn memset(ptr: *u8, value: i32, n: usize) -> *u8;
 
@@ -36,11 +52,10 @@ extern fn strlen(s: *u8) -> usize;
 
 extern fn getenv(name: *u8) -> *u8;
 
-extern fn fopen(path: *u8, mode: *u8) -> *u8;
-
-extern fn fwrite(ptr: *u8, size: usize, nmemb: usize, fp: *u8) -> i64;
-
-extern fn fclose(fp: *u8) -> i32;
+// Write `count` bytes of `buf` to file descriptor `fd`. The records-over-
+// stderr sink (fd 2). Same declaration re-used across `runtime/sfn/*`
+// (io.sfn, process.sfn, exception.sfn, …).
+extern fn write(fd: i32, buf: *u8, count: usize) -> i64;
 
 extern fn sfn_str_to_cstr(s_data: *u8, s_len: i64, arena_slot: *u8) -> *u8;
 
@@ -60,69 +75,79 @@ extern fn sfn_exception_frame_head() -> *u8;
 
 extern fn sfn_throw(message: *u8) -> void;
 
-// The SFAF record is written PIECE-BY-PIECE with `fwrite` (the proven
-// `arena.sfn` stats pattern), NOT via `string + ...` concat: in a runtime
-// module `string + i64` does not reliably stringify the integer (it
-// produced empty `line:`/`col:` fields and corrupted the literal prefix
-// in testing). Each piece is a literal, a stripped string, or a manually
-// formatted decimal. The file is opened in append mode and these writes
-// are sequential within one process, so they concatenate in order.
-// `_assert_write_lit(fp, lit)` — write a string literal's bytes to `fp`.
-fn _assert_write_lit(fp: *u8, lit: string) -> void ![io] {
-    let c: *u8 = sfn_str_to_cstr(lit as *u8, lit.length, null);
-    if (c as i64) == 0 { return; }
-    let n: i64 = strlen(c) as i64;
-    if n > 0 {
-        let _ = fwrite(c, 1 as usize, n as usize, fp);
-    }
+// ASCII control bytes used to frame a record: Unit Separator (0x1F)
+// sentinel, tab field separator, newline terminator.
+let _SFTR_US: i64 = 31;
+
+let _SFTR_TAB: i64 = 9;
+
+let _SFTR_NL: i64 = 10;
+
+// Byte length of a NUL-terminated cstr (0 for a null pointer). `\n`/`\r`
+// stripping replaces bytes in place, so it never changes the length.
+fn _sftr_clen(c: *u8) -> i64 {
+    if (c as i64) == 0 { return 0; }
+    return strlen(c) as i64;
 }
 
-// `_assert_write_stripped(fp, s)` — write `s`'s bytes to `fp` with every
-// `\n` (10) / `\r` (13) replaced by a space, so the value cannot break
-// the line-delimited SFAF record. `load_byte` reads each source byte;
-// each output byte is staged in a 1-byte `memset` buffer (a word-RMW byte
-// store could over-read past a `malloc` tail) and `fwrite`-n.
-fn _assert_write_stripped(fp: *u8, s: *u8) -> void ![io] {
-    if (s as i64) == 0 { return; }
-    let n: i64 = strlen(s) as i64;
-    if n <= 0 { return; }
-    let one: *u8 = malloc(1 as usize);
-    if (one as i64) == 0 { return; }
+// Decimal-digit count of `value` (a non-negative source position; a
+// negative clamps to 0). Zero is one digit.
+fn _sftr_dlen(value: i64) -> i64 {
+    let mut v: i64 = value;
+    if v < 0 { v = 0; }
+    if v == 0 { return 1; }
+    let mut n: i64 = 0;
+    loop {
+        if v == 0 { break; }
+        v = v / 10;
+        n = n + 1;
+    }
+    return n;
+}
+
+// Store one byte at `base + cur`; return the advanced cursor. `base` is a
+// raw address (the record buffer) threaded as an i64 so the fill helpers
+// compose without repeated `*u8` casts.
+fn _sftr_put_byte(base: i64, cur: i64, b: i64) -> i64 {
+    memset((base + cur) as *u8, b as i32, 1 as usize);
+    return cur + 1;
+}
+
+// Copy `strlen(c)` bytes from cstr `c` into `base + cur`, replacing `\n`
+// (10) / `\r` (13) with a space so the value cannot break the
+// line-delimited record. A tab inside a message is preserved: the parser
+// reassembles the trailing message field from any extra tab-split pieces.
+// Each output byte is a single `memset` store (a word-RMW store could
+// over-read a `malloc` tail). Returns the advanced cursor.
+fn _sftr_put_cstr(base: i64, cur: i64, c: *u8) -> i64 {
+    if (c as i64) == 0 { return cur; }
+    let n: i64 = strlen(c) as i64;
     let mut i: i64 = 0;
+    let mut cursor: i64 = cur;
     loop {
         if i >= n { break; }
-        let c: i64 = load_byte((s as i64) + i);
-        let mut outc: i64 = c;
-        if c == 10 || c == 13 { outc = 32; }
-        memset(one, outc as i32, 1 as usize);
-        let _ = fwrite(one, 1 as usize, 1 as usize, fp);
+        let ch: i64 = load_byte((c as i64) + i);
+        let mut outc: i64 = ch;
+        if ch == 10 || ch == 13 { outc = 32; }
+        memset((base + cursor) as *u8, outc as i32, 1 as usize);
+        cursor = cursor + 1;
         i = i + 1;
     }
+    return cursor;
 }
 
-// `_assert_write_i64(fp, value)` — write `value` as decimal to `fp`.
-// line/col are non-negative source positions; a negative clamps to 0.
-// Digits are formed least-significant-first into a 24-byte buffer via
-// `memset` (single-byte stores), then written.
-fn _assert_write_i64(fp: *u8, value: i64) -> void ![io] {
+// Format `value` as decimal into `base + cur` (least-significant-first
+// into the reserved span), returning the advanced cursor. Mirrors the
+// digit count from `_sftr_dlen`, so the caller reserves the exact width.
+fn _sftr_put_i64(base: i64, cur: i64, value: i64) -> i64 {
     let mut v: i64 = value;
     if v < 0 { v = 0; }
     if v == 0 {
-        let zero: string = "0";
-        _assert_write_lit(fp, zero);
-        return;
+        memset((base + cur) as *u8, 48 as i32, 1 as usize);
+        return cur + 1;
     }
-    let buf: *u8 = malloc(24 as usize);
-    if (buf as i64) == 0 { return; }
-    let base: i64 = buf as i64;
-    let mut nd: i64 = 0;
-    let mut t: i64 = v;
-    loop {
-        if t == 0 { break; }
-        t = t / 10;
-        nd = nd + 1;
-    }
-    let mut wp: i64 = nd - 1;
+    let nd: i64 = _sftr_dlen(v);
+    let mut wp: i64 = cur + nd - 1;
     let mut x: i64 = v;
     loop {
         if x == 0 { break; }
@@ -131,18 +156,84 @@ fn _assert_write_i64(fp: *u8, value: i64) -> void ![io] {
         wp = wp - 1;
         x = x / 10;
     }
-    let _ = fwrite(buf, 1 as usize, nd as usize, fp);
+    return cur + nd;
+}
+
+// Assemble one framed `SFTR` record and emit it with a single `write(2)`.
+// `kind`/`status`/`hook`/`msg_prefix` are trusted ASCII literals; `name`,
+// `file`, `msg` are cstrs (nullable) carrying user/source text. The
+// message field is `msg_prefix` followed by `msg` (the harness needs a
+// prefixed message — e.g. "hook before_each failed: …" — without runtime
+// string concatenation). Layout:
+//
+//   <US>SFTR \t 1 \t kind \t status \t name \t hook \t file \t line \t col \t msg
+//
+// Caller must have confirmed the records channel is enabled.
+fn _sftr_write(kind: string, status: string, name: *u8, hook: string, file: *u8, line: i64, col: i64, msg_prefix: string, msg: *u8) -> void ![io] {
+    let magic_c: *u8 = sfn_str_to_cstr(("SFTR") as *u8, 4, null);
+    let schema_c: *u8 = sfn_str_to_cstr(("1") as *u8, 1, null);
+    let kind_c: *u8 = sfn_str_to_cstr(kind as *u8, kind.length, null);
+    let status_c: *u8 = sfn_str_to_cstr(status as *u8, status.length, null);
+    let hook_c: *u8 = sfn_str_to_cstr(hook as *u8, hook.length, null);
+    let prefix_c: *u8 = sfn_str_to_cstr(msg_prefix as *u8, msg_prefix.length, null);
+    // Exact record length: sentinel + magic, then each of the 9 fields as
+    // a tab plus its bytes, then the newline.
+    let total: i64 = 1 + _sftr_clen(magic_c) + 1 + _sftr_clen(schema_c) + 1
+        + _sftr_clen(kind_c)
+        + 1
+        + _sftr_clen(status_c)
+        + 1
+        + _sftr_clen(name)
+        + 1
+        + _sftr_clen(hook_c)
+        + 1
+        + _sftr_clen(file)
+        + 1
+        + _sftr_dlen(line)
+        + 1
+        + _sftr_dlen(col)
+        + 1
+        + _sftr_clen(prefix_c)
+        + _sftr_clen(msg)
+        + 1;
+    let buf: *u8 = malloc(total as usize);
+    if (buf as i64) == 0 { return; }
+    let base: i64 = buf as i64;
+    let mut cur: i64 = 0;
+    cur = _sftr_put_byte(base, cur, _SFTR_US);
+    cur = _sftr_put_cstr(base, cur, magic_c);
+    cur = _sftr_put_byte(base, cur, _SFTR_TAB);
+    cur = _sftr_put_cstr(base, cur, schema_c);
+    cur = _sftr_put_byte(base, cur, _SFTR_TAB);
+    cur = _sftr_put_cstr(base, cur, kind_c);
+    cur = _sftr_put_byte(base, cur, _SFTR_TAB);
+    cur = _sftr_put_cstr(base, cur, status_c);
+    cur = _sftr_put_byte(base, cur, _SFTR_TAB);
+    cur = _sftr_put_cstr(base, cur, name);
+    cur = _sftr_put_byte(base, cur, _SFTR_TAB);
+    cur = _sftr_put_cstr(base, cur, hook_c);
+    cur = _sftr_put_byte(base, cur, _SFTR_TAB);
+    cur = _sftr_put_cstr(base, cur, file);
+    cur = _sftr_put_byte(base, cur, _SFTR_TAB);
+    cur = _sftr_put_i64(base, cur, line);
+    cur = _sftr_put_byte(base, cur, _SFTR_TAB);
+    cur = _sftr_put_i64(base, cur, col);
+    cur = _sftr_put_byte(base, cur, _SFTR_TAB);
+    cur = _sftr_put_cstr(base, cur, prefix_c);
+    cur = _sftr_put_cstr(base, cur, msg);
+    cur = _sftr_put_byte(base, cur, _SFTR_NL);
+    let _ = write(2, buf, cur as usize);
+    free(buf);
 }
 
 // SFN-17: recoverable test harness. The synthesized `@main`
 // (`compiler/src/llvm/lowering/lowering_core.sfn`) wraps every hook/test
-// call in an inline `setjmp` frame and records a per-test/hook result to
-// `${SAILFIN_TEST_SCRATCH}/results.log` so the runner reports
-// pass/fail/error per test even after a failure — instead of the first
-// failed assert aborting the whole file's suite process. The harness sets
-// the phase slot before each sub-call so `sfn_test_report_caught` can
-// classify the failing region. Design record:
-// `docs/proposals/design-notes/sfn-17-recoverable-test-harness.md`.
+// call in an inline `setjmp` frame and records a per-test/hook result as
+// each completes so the runner reports pass/fail/error per test even
+// after a failure — instead of the first failed assert aborting the whole
+// file's suite process. The harness sets the phase slot before each
+// sub-call so `sfn_test_report_caught` can classify the failing region.
+// Design record: `docs/proposals/design-notes/sfn-17-recoverable-test-harness.md`.
 //
 // Phase encoding: 0=before_all, 1=before_each, 2=test, 3=after_each,
 // 4=after_all. Single-threaded per test process (parallel `--jobs N` runs
@@ -160,183 +251,82 @@ fn sfn_test_set_phase(phase: i32) -> void { sfn_test_phase = phase as i64; }
 // failure as exit 0).
 fn sfn_test_failures() -> i32 { return sfn_test_fail_count as i32; }
 
-// Open `${SAILFIN_TEST_SCRATCH}/results.log` in append mode, or null when
-// no scratch dir is set (the binary was run outside the test runner —
-// recovery still works, only the structured log is skipped).
-fn _test_open_results() -> *u8 ![io] {
+// True when the streamed record channel is active — i.e. the binary was
+// spawned by the test runner, which sets `SAILFIN_TEST_SCRATCH`. Standalone
+// runs (no scratch) skip record emission; recovery still works.
+fn _test_records_enabled() -> boolean ![io] {
     let scratch_name: string = "SAILFIN_TEST_SCRATCH";
     let scratch: *u8 = getenv(scratch_name as *u8);
-    if (scratch as i64) == 0 { return null; }
+    if (scratch as i64) == 0 { return false; }
     let scratch_s: string = scratch as string;
-    if scratch_s.length == 0 { return null; }
-    let path: string = scratch_s + "/results.log";
-    let mode: string = "ab";
-    return fopen(path as *u8, mode as *u8);
+    return scratch_s.length > 0;
 }
 
-// Append `T\tpass\t<name>` — a passing test. Fields are tab-separated and
-// every value is written through `_assert_write_stripped` so an embedded
-// tab/newline cannot break the line-delimited record.
+// Emit a `test pass` record — a passing test.
 fn sfn_test_report_pass(name: *u8) -> void ![io] {
-    let fp: *u8 = _test_open_results();
-    if (fp as i64) == 0 { return; }
-    let tab: string = "\t";
-    let nl: string = "\n";
-    let kind: string = "T";
-    let status: string = "pass";
-    _assert_write_lit(fp, kind);
-    _assert_write_lit(fp, tab);
-    _assert_write_lit(fp, status);
-    _assert_write_lit(fp, tab);
-    _assert_write_stripped(fp, name);
-    _assert_write_lit(fp, nl);
-    let _ = fclose(fp);
+    if !_test_records_enabled() { return; }
+    _sftr_write("test", "pass", name, "", null, 0, 0, "", null);
 }
 
 // Record a caught failure, classified by the phase slot the harness set
 // before the failing sub-call. Always increments the failure counter (so
-// the exit code reflects it) even when no scratch dir is configured.
+// the exit code reflects it) even when the record channel is off. The
+// assertion location (file/line/col) rides its own `assert` record,
+// emitted by `sailfin_assert_fail` just before the throw that landed
+// here — so these classification records carry no location, exactly as
+// the SFN-17 `results.log` records did.
 fn sfn_test_report_caught(name: *u8, msg: *u8) -> void ![io] {
     let phase: i64 = sfn_test_phase;
-    let fp: *u8 = _test_open_results();
-    if (fp as i64) != 0 {
-        let tab: string = "\t";
-        let nl: string = "\n";
-        let fail: string = "fail";
-        let t_kind: string = "T";
-        let h_kind: string = "H";
-        let empty: string = "";
+    if _test_records_enabled() {
         if phase == 1 {
             // before_each failed → mark THIS test failed (AC1), naming the
             // hook in the message.
-            let pfx: string = "hook before_each failed: ";
-            _assert_write_lit(fp, t_kind);
-            _assert_write_lit(fp, tab);
-            _assert_write_lit(fp, fail);
-            _assert_write_lit(fp, tab);
-            _assert_write_stripped(fp, name);
-            _assert_write_lit(fp, tab);
-            _assert_write_lit(fp, pfx);
-            _assert_write_stripped(fp, msg);
-            _assert_write_lit(fp, nl);
+            _sftr_write("test", "fail", name, "", null, 0, 0, "hook before_each failed: ", msg);
         } else if phase == 3 {
-            // after_each failed → attribute to the hook, carrying the test
-            // whose teardown failed (AC3).
-            let hk: string = "after_each";
-            _assert_write_lit(fp, h_kind);
-            _assert_write_lit(fp, tab);
-            _assert_write_lit(fp, fail);
-            _assert_write_lit(fp, tab);
-            _assert_write_lit(fp, hk);
-            _assert_write_lit(fp, tab);
-            _assert_write_stripped(fp, name);
-            _assert_write_lit(fp, tab);
-            _assert_write_stripped(fp, msg);
-            _assert_write_lit(fp, nl);
+            // after_each failed → hook record carrying the test whose
+            // teardown failed (AC3).
+            _sftr_write("hook", "fail", name, "after_each", null, 0, 0, "", msg);
         } else if phase == 0 {
             // before_all failed → hook record; the harness additionally
             // cascades a per-test skip via `sfn_test_report_skipped`.
-            let hk0: string = "before_all";
-            _assert_write_lit(fp, h_kind);
-            _assert_write_lit(fp, tab);
-            _assert_write_lit(fp, fail);
-            _assert_write_lit(fp, tab);
-            _assert_write_lit(fp, hk0);
-            _assert_write_lit(fp, tab);
-            _assert_write_lit(fp, empty);
-            _assert_write_lit(fp, tab);
-            _assert_write_stripped(fp, msg);
-            _assert_write_lit(fp, nl);
+            _sftr_write("hook", "fail", null, "before_all", null, 0, 0, "", msg);
         } else if phase == 4 {
             // after_all failed → hook record (AC3).
-            let hk4: string = "after_all";
-            _assert_write_lit(fp, h_kind);
-            _assert_write_lit(fp, tab);
-            _assert_write_lit(fp, fail);
-            _assert_write_lit(fp, tab);
-            _assert_write_lit(fp, hk4);
-            _assert_write_lit(fp, tab);
-            _assert_write_lit(fp, empty);
-            _assert_write_lit(fp, tab);
-            _assert_write_stripped(fp, msg);
-            _assert_write_lit(fp, nl);
+            _sftr_write("hook", "fail", null, "after_all", null, 0, 0, "", msg);
         } else {
-            // phase 2 (test body) failed → T fail <name> <msg>.
-            _assert_write_lit(fp, t_kind);
-            _assert_write_lit(fp, tab);
-            _assert_write_lit(fp, fail);
-            _assert_write_lit(fp, tab);
-            _assert_write_stripped(fp, name);
-            _assert_write_lit(fp, tab);
-            _assert_write_stripped(fp, msg);
-            _assert_write_lit(fp, nl);
+            // phase 2 (test body) failed → test fail record.
+            _sftr_write("test", "fail", name, "", null, 0, 0, "", msg);
         }
-        let _ = fclose(fp);
     }
     sfn_test_fail_count = sfn_test_fail_count + 1;
 }
 
 // Record a test skipped-and-failed because its `before_all` failed (AC1
 // cascade). Emitted once per test by the harness after a caught
-// `before_all`.
+// `before_all`. Kept as a `fail` status (not `skip`) so the runner counts
+// and exit-code semantics are byte-identical to the SFN-17 behavior.
 fn sfn_test_report_skipped(name: *u8) -> void ![io] {
-    let fp: *u8 = _test_open_results();
-    if (fp as i64) != 0 {
-        let tab: string = "\t";
-        let nl: string = "\n";
-        let kind: string = "T";
-        let fail: string = "fail";
-        let reason: string = "hook before_all failed";
-        _assert_write_lit(fp, kind);
-        _assert_write_lit(fp, tab);
-        _assert_write_lit(fp, fail);
-        _assert_write_lit(fp, tab);
-        _assert_write_stripped(fp, name);
-        _assert_write_lit(fp, tab);
-        _assert_write_lit(fp, reason);
-        _assert_write_lit(fp, nl);
+    if _test_records_enabled() {
+        _sftr_write("test", "fail", name, "", null, 0, 0, "hook before_all failed", null);
     }
     sfn_test_fail_count = sfn_test_fail_count + 1;
 }
 
 // `sailfin_assert_fail(file, line, col, msg)` — the assertion-failure
-// handler. Writes the SFAF record (if a test scratch dir is set) then
-// raises a value error.
+// handler. Emits an `assert` record carrying the location + message (the
+// retired `fail.bin` `SFAF` shape, now folded onto the SFTR stream) so
+// the runner can surface typed file:line:col attribution, then raises a
+// value error so the assertion propagates (catchable via the harness
+// frame, fatal if uncaught). The legacy `SAILFIN_TEST_FAIL_FD` borrowed-fd
+// path the C body supported is dropped: nothing sets that env.
 fn sailfin_assert_fail(file: *u8, line: i64, col: i64, msg: *u8) -> void ![io] {
-    let scratch_name: string = "SAILFIN_TEST_SCRATCH";
-    let scratch: *u8 = getenv(scratch_name as *u8);
-    if (scratch as i64) != 0 {
-        let scratch_s: string = scratch as string;
-        if scratch_s.length > 0 {
-            let path: string = scratch_s + "/fail.bin";
-            let mode: string = "ab";
-            let fp: *u8 = fopen(path as *u8, mode as *u8);
-            if (fp as i64) != 0 {
-                let hdr: string = "SFAF\nv:1\nfile:";
-                let nl_line: string = "\nline:";
-                let nl_col: string = "\ncol:";
-                let nl_msg: string = "\nmsg:";
-                let nl: string = "\n";
-                let fallback: string = "assertion failed";
-                _assert_write_lit(fp, hdr);
-                _assert_write_stripped(fp, file);
-                _assert_write_lit(fp, nl_line);
-                _assert_write_i64(fp, line);
-                _assert_write_lit(fp, nl_col);
-                _assert_write_i64(fp, col);
-                _assert_write_lit(fp, nl_msg);
-                if (msg as i64) != 0 { _assert_write_stripped(fp, msg); } else {
-                    _assert_write_lit(fp, fallback);
-                }
-                _assert_write_lit(fp, nl);
-                let _ = fclose(fp);
-            }
-        }
+    if _test_records_enabled() {
+        _sftr_write("assert", "fail", null, "", file, line, col, "", msg);
     }
     let raise_msg: *u8 = msg;
     if (raise_msg as i64) == 0 {
-        let fallback2: string = "assertion failed";
-        raise_msg = fallback2 as *u8;
+        let fallback: string = "assertion failed";
+        raise_msg = fallback as *u8;
     }
     // SFN-17: inside a harness-pushed exception frame, unwind via
     // `sfn_throw` (setjmp/longjmp back to the synthesized `@main`, which

@@ -1,0 +1,144 @@
+// Regression coverage for the streamed test-record parser (SFEP-0050 /
+// SFN-393), `compiler/src/test_results.sfn`. The compiled harness
+// (`runtime/sfn/assert.sfn`) frames one `SFTR` record per test / hook /
+// assertion onto its stderr; the runner reads them off the child's
+// captured pipe and classifies inline. This pins the wire-format contract
+// the harness writer and the runner reader must agree on:
+//
+//   <US>SFTR\t1\t<kind>\t<status>\t<name>\t<hook>\t<file>\t<line>\t<col>\t<message>
+//
+// where <US> is the ASCII Unit Separator (0x1F). The `\x`/`\u` escape
+// forms are not lexed, so the sentinel byte is built with the prelude's
+// `char_from_code(31)`.
+import { parse_test_record_line, parse_test_results_log, TestResultRecord } from "../../src/test_results";
+
+// Assemble one framed record line (no trailing newline — the parser
+// operates on already-split lines).
+fn _line(kind: string, status: string, name: string, hook: string, file: string, line_s: string, col_s: string, msg: string) -> string {
+    let us = char_from_code(31);
+    return us + "SFTR\t1\t" + kind + "\t" + status + "\t" + name + "\t" + hook
+        + "\t"
+        + file
+        + "\t"
+        + line_s
+        + "\t"
+        + col_s
+        + "\t"
+        + msg;
+}
+
+test "test record: well-formed test pass parses with empty optionals" {
+    let parsed = parse_test_record_line(_line("test", "pass", "adds two numbers", "", "", "0", "0", ""));
+    assert parsed != null;
+    let r: TestResultRecord = parsed;
+    assert r.kind == "T";
+    assert r.status == "pass";
+    assert r.name == "adds two numbers";
+    assert r.hook == "";
+    assert r.file == "";
+    assert r.line == 0;
+    assert r.col == 0;
+    assert r.message == "";
+}
+
+test "test record: test fail carries its message" {
+    let parsed = parse_test_record_line(_line("test", "fail", "widget", "", "", "0", "0", "expected 1 got 2"));
+    assert parsed != null;
+    let r: TestResultRecord = parsed;
+    assert r.kind == "T";
+    assert r.status == "fail";
+    assert r.name == "widget";
+    assert r.message == "expected 1 got 2";
+}
+
+test "test record: skip status parses" {
+    let parsed = parse_test_record_line(_line("test", "skip", "flaky", "", "", "0", "0", "pending fix"));
+    assert parsed != null;
+    let r: TestResultRecord = parsed;
+    assert r.status == "skip";
+    assert r.name == "flaky";
+}
+
+test "test record: hook fail maps to H with hook kind and name" {
+    let parsed = parse_test_record_line(_line("hook", "fail", "teardown target", "after_each", "", "0", "0", "cleanup boom"));
+    assert parsed != null;
+    let r: TestResultRecord = parsed;
+    assert r.kind == "H";
+    assert r.status == "fail";
+    assert r.hook == "after_each";
+    assert r.name == "teardown target";
+    assert r.message == "cleanup boom";
+}
+
+test "test record: assert record folds file line col in" {
+    let parsed = parse_test_record_line(_line("assert", "fail", "", "", "foo.sfn", "42", "7", "bang"));
+    assert parsed != null;
+    let r: TestResultRecord = parsed;
+    assert r.kind == "A";
+    assert r.file == "foo.sfn";
+    assert r.line == 42;
+    assert r.col == 7;
+    assert r.message == "bang";
+}
+
+test "test record: a tab inside the message is preserved" {
+    // The message field carries a literal tab; the parser reassembles
+    // the trailing field so the tab round-trips (framing forbids only
+    // \n/\r, never \t inside the final field).
+    let parsed = parse_test_record_line(_line("test", "fail", "t", "", "", "0", "0", "left\tright"));
+    assert parsed != null;
+    let r: TestResultRecord = parsed;
+    assert r.message == "left\tright";
+}
+
+test "test record: an unknown hook kind is passthrough (null)" {
+    let parsed = parse_test_record_line(_line("hook", "fail", "t", "not_a_hook", "", "0", "0", "x"));
+    assert parsed == null;
+}
+
+test "test record: an unknown schema is passthrough (null)" {
+    let us = char_from_code(31);
+    let parsed = parse_test_record_line(us
+        + "SFTR\t9\ttest\tpass\tt\t\t\t0\t0\t");
+    assert parsed == null;
+}
+
+test "test record: an invalid status is passthrough (null)" {
+    let parsed = parse_test_record_line(_line("test", "bogus", "t", "", "", "0", "0", ""));
+    assert parsed == null;
+}
+
+test "test record: a truncated final line is dropped (null)" {
+    let us = char_from_code(31);
+    let parsed = parse_test_record_line(us + "SFTR\t1\ttest\tpass");
+    assert parsed == null;
+}
+
+test "test record: a non-record diagnostic line is ignored (null)" {
+    let parsed = parse_test_record_line("clang: warning: something happened");
+    assert parsed == null;
+}
+
+test "test record: the SFTR magic without the sentinel byte is not a record" {
+    let parsed = parse_test_record_line("SFTR\t1\ttest\tpass\tt\t\t\t0\t0\t");
+    assert parsed == null;
+}
+
+test "test record: bulk parse keeps well-formed records and skips the rest" {
+    let us = char_from_code(31);
+    let bytes = _line("test", "pass", "a", "", "", "0", "0", "") + "\n"
+        + "some clang diagnostic\n"
+        + _line("assert", "fail", "", "", "b.sfn", "3", "9", "nope")
+        + "\n"
+        + us
+        + "SFTR\t1\ttest\tpass";
+    // three lines: pass record, diagnostic (skip), assert record, then a
+    // truncated tail (skip) → exactly two records survive.
+    let records = parse_test_results_log(bytes);
+    assert records.length == 2;
+    assert records[0].kind == "T";
+    assert records[0].name == "a";
+    assert records[1].kind == "A";
+    assert records[1].file == "b.sfn";
+    assert records[1].line == 3;
+}
