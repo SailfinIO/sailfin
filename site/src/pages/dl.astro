@@ -100,8 +100,8 @@ function readCapsuleVersion(): string {
 }
 
 // Fetch releases — tolerate API failures gracefully
-let stableVersion = readCapsuleVersion();
-let stableTag = `v${stableVersion}`;
+let releaseVersion = readCapsuleVersion();
+let releaseTag = `v${releaseVersion}`;
 let allAssets: ParsedAsset[] = [];
 
 try {
@@ -113,14 +113,14 @@ try {
   if (!res.ok) throw new Error(`GitHub API ${res.status}`);
 
   const releases: GHRelease[] = await res.json();
-  const stable = releases.find((r) => !r.prerelease && !r.draft);
+  const currentRelease = releases.find((r) => !r.prerelease && !r.draft);
 
-  if (stable) {
-    stableTag = stable.tag_name;
-    stableVersion = stableTag.replace(/^v/, "");
+  if (currentRelease) {
+    releaseTag = currentRelease.tag_name;
+    releaseVersion = releaseTag.replace(/^v/, "");
 
     // Filter to installer tarballs (sailfin_VERSION_OS_ARCH.tar.gz), skip .sha256 / .manifest.json / native build assets
-    const installerAssets = stable.assets.filter((a) =>
+    const installerAssets = currentRelease.assets.filter((a) =>
       /^sailfin_[\d.]/.test(a.name) &&
       a.name.endsWith(".tar.gz") &&
       !a.name.endsWith(".sha256") &&
@@ -130,17 +130,17 @@ try {
     allAssets = installerAssets.map(parseAsset).filter((a): a is ParsedAsset => a !== null);
   }
 } catch (e) {
-  console.warn(`[dl] Failed to fetch releases from GitHub API, using fallback v${stableVersion}: ${e}`);
+  console.warn(`[dl] Failed to fetch releases from GitHub API, using fallback v${releaseVersion}: ${e}`);
   console.warn(`[dl] Set GITHUB_TOKEN in your Cloudflare Pages environment to avoid rate limits.`);
 }
 
 // Fallback if API returned nothing
 if (allAssets.length === 0) {
-  const ghBase = `https://github.com/SailfinIO/sailfin/releases/download/${stableTag}`;
+  const ghBase = `https://github.com/SailfinIO/sailfin/releases/download/${releaseTag}`;
   allAssets = [
-    { file: `sailfin_${stableVersion}_linux_x86_64.tar.gz`, url: `${ghBase}/sailfin_${stableVersion}_linux_x86_64.tar.gz`, os: "Linux", arch: "x86_64", friendlyArch: "x86_64", icon: "linux", size: "", sha256: "" },
-    { file: `sailfin_${stableVersion}_macos_arm64.tar.gz`, url: `${ghBase}/sailfin_${stableVersion}_macos_arm64.tar.gz`, os: "macOS", arch: "ARM64", friendlyArch: "Apple Silicon", icon: "apple", size: "", sha256: "" },
-    { file: `sailfin_${stableVersion}_windows_x86_64.tar.gz`, url: `${ghBase}/sailfin_${stableVersion}_windows_x86_64.tar.gz`, os: "Windows", arch: "x86_64", friendlyArch: "x86_64", icon: "windows", size: "", sha256: "" },
+    { file: `sailfin_${releaseVersion}_linux_x86_64.tar.gz`, url: `${ghBase}/sailfin_${releaseVersion}_linux_x86_64.tar.gz`, os: "Linux", arch: "x86_64", friendlyArch: "x86_64", icon: "linux", size: "", sha256: "" },
+    { file: `sailfin_${releaseVersion}_macos_arm64.tar.gz`, url: `${ghBase}/sailfin_${releaseVersion}_macos_arm64.tar.gz`, os: "macOS", arch: "ARM64", friendlyArch: "Apple Silicon", icon: "apple", size: "", sha256: "" },
+    { file: `sailfin_${releaseVersion}_windows_x86_64.tar.gz`, url: `${ghBase}/sailfin_${releaseVersion}_windows_x86_64.tar.gz`, os: "Windows", arch: "x86_64", friendlyArch: "x86_64", icon: "windows", size: "", sha256: "" },
   ];
 }
 
@@ -152,7 +152,7 @@ const featured = allAssets;
     <div class="container">
       <h1>Download Sailfin</h1>
       <p class="dl-subtitle">Get the Sailfin compiler and toolchain for your platform.</p>
-      <span class="version-badge">Stable: {stableTag}</span>
+      <span class="version-badge">Technical preview: {releaseTag}</span>
     </div>
   </section>
 
@@ -204,8 +204,8 @@ const featured = allAssets;
 
   <section class="dl-table-section">
     <div class="container">
-      <h2>All Downloads — {stableTag}</h2>
-      <p class="section-desc">Every asset for the current stable release.</p>
+      <h2>All Downloads — {releaseTag}</h2>
+      <p class="section-desc">Every installer asset for the current technical preview release.</p>
       <div class="table-wrapper">
         <table>
           <thead>

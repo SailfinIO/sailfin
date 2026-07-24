@@ -81,8 +81,24 @@ Both directions; several learn pages also contradict each other.
 
 ### SFN-470 — positioning + external verification
 
-- **SOFT/POSITIONING** `dl.astro:155,202` "Stable: v0.8.0" — GitHub flags `v0.8.0` non-prerelease, so the label is technically sourced, but "Stable" for a 0.x technical preview overstates maturity. Product decision. (The `0.8.0` command examples target a real tag — valid.)
-- **UNVERIFIABLE** example `model`-effect tags (`examples/README.md:48,88,108`); official VS Code Marketplace extension existence (`editor-setup.md:11-15`); canonical docs domain `sailfin.dev` vs `sfn.dev` for the signing-key well-known URL.
+- **RESOLVED/POSITIONING** `dl.astro` now labels the current release
+  "Technical preview" rather than "Stable." GitHub flags `v0.8.0`
+  non-prerelease and publishes the documented Linux, macOS, and Windows
+  installer archives plus `SHA256SUMS` and `SHA256SUMS.sig`, so the release and
+  `0.8.0` command examples remain valid.
+- **RESOLVED/EXAMPLES** `examples/basics/tests.sfn` is a pure arithmetic test,
+  so its unrelated `![model]` annotation was removed. The advanced interface
+  and AI examples intentionally retain `![model]` to demonstrate propagation
+  of the reserved annotation; their index entries now state that no detector
+  or model backend executes.
+- **VERIFIED/EXTERNAL** The Visual Studio Marketplace public package endpoint
+  serves extension `SailfinIO.sfn` (public package metadata: Sailfin, publisher
+  SailfinIO), confirming the editor-setup installation instructions.
+- **RESOLVED/CANONICAL HOST** `site/astro.config.mjs` and generated canonical
+  links select `https://sailfin.dev`. Both `sailfin.dev` and the `sfn.dev` alias
+  serve the same signing key and expected fingerprint, but public documentation
+  links in the README and signing-key guide now use the canonical
+  `sailfin.dev` host.
 
 ## C. Soft over-claims noted, not fixed (marketing-owner call)
 
@@ -142,7 +158,7 @@ Each is shipped and enforced per `status.md` (2026-07-24), verified against sour
 | learn/ feature-status drift | **SFN-467** (Ready) |
 | reference/ + advanced/ status drift | **SFN-468** (Ready) |
 | Dated blog posts (welcome.md) | **SFN-469** (Ready) |
-| "Stable" download positioning + external verifications (VS Code ext, docs domain, example effect tags) | **SFN-470** (Ready) |
+| "Stable" download positioning + external verifications (VS Code ext, docs domain, example effect tags) | **SFN-470** (resolved) |
 | Soft marketing over-claims (index.astro §C) | Noted for marketing owner; no code change |
 
 No high-impact contradiction remains untracked: every item is either corrected in this PR or carried by a Ready follow-up above.
