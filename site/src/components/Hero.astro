@@ -2,36 +2,11 @@
 /*
  * Hero.astro — Sailfin marketing hero.
  *
- * Cosmetic changes vs. upstream:
- *   - Headline highlight word uses the brand gradient (violet→magenta)
- *   - Install box gets a `$` prompt and copy-to-clipboard button
- *   - Code window swaps placeholder file title for `server.sfn` monospace
- *   - Subtle radial spotlight behind the headline on dark mode
- *
- * Structural / semantic markup is unchanged from the previous Hero.astro,
- * so routing, SEO and a11y behavior are preserved.
+ * The displayed program is imported verbatim from the compiler-verified
+ * fixture. Keep verification details in site/scripts/verify-hero-example.sh.
  */
 
-const exampleCode = `struct Config {
-    host: string;
-    port: int;
-    verbose: boolean;
-}
-
-fn load_config(path: string) -> Config ![io] {
-    let raw = fs.read(path);
-    return Config.parse(raw);
-}
-
-fn handle(req, res) ![net] {
-    res.send("Sailfin is running");
-}
-
-fn main() ![io, net] {
-    let config = load_config("app.toml");
-    print("Listening on {{config.host}}");
-    serve(handle, { port: config.port });
-}`;
+import exampleCode from "../../examples/hero-effects/hello.sfn?raw";
 
 const installCmd = "curl -fsSL https://raw.githubusercontent.com/SailfinIO/sailfin/main/install.sh | bash";
 ---
@@ -40,7 +15,7 @@ const installCmd = "curl -fsSL https://raw.githubusercontent.com/SailfinIO/sailf
   <div class="hero-inner">
     <div class="hero-text">
       <h1>
-        Know what your code can do
+        Know what your code can do<br />
         <span class="highlight">before it runs</span>
       </h1>
       <p class="hero-subtitle">
@@ -69,7 +44,7 @@ const installCmd = "curl -fsSL https://raw.githubusercontent.com/SailfinIO/sailf
           <span class="dot red"></span>
           <span class="dot yellow"></span>
           <span class="dot green"></span>
-          <span class="code-filename">server.sfn</span>
+          <span class="code-filename">hello.sfn</span>
         </div>
         <pre><code>{exampleCode}</code></pre>
       </div>
@@ -303,7 +278,7 @@ const installCmd = "curl -fsSL https://raw.githubusercontent.com/SailfinIO/sailf
   }
 
   .code-window code {
-    color: #cfc4e0;
+    color: var(--color-text);
     font-size: 0.825rem;
     background: none;
     padding: 0;

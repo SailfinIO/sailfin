@@ -1,0 +1,4 @@
+fn main() ![io] {
+    let greeting = "Hello, Sailfin!";
+    print(greeting);
+}
