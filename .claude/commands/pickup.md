@@ -137,28 +137,11 @@ brief — don't redo design the architect already produced at grooming.
 | `type:perf` | Follow `/perf` phases — profile baseline, implement, bench after, verify. |
 | `type:refactor` | Implement one self-hosting step at a time, spawn `code-reviewer`, run `test-runner`. |
 
-### Model allocation: spend Opus on judgment, push labor to Sonnet
+### Model allocation
 
-You (the orchestrator) run on Opus. Reserve yourself for decisions a wrong call
-makes expensive — scope, sequencing, the review gate, genuine diagnosis — and
-route the rest to Sonnet specialists per `.claude/rules/model-allocation.md`:
-
-- **Surface mapping → `compiler-explorer` (sonnet).** Don't grep the tree
-  yourself on Opus to re-derive each `In:` unit's surface; dispatch the explorer
-  and apply the In/Out boundary to its map.
-- **Routine implementation → `implementer` (sonnet), under your spec.** For
-  mechanical edits, clear-cut bug fixes (known repro), localized refactors, and
-  regression-test additions, author a precise spec and hand it off. Keep
-  implementation on yourself only when the change is **novel, cross-cutting, or
-  entangled with design**.
-- **Review gate stays Opus.** Run the cheap mechanical checks first
-  (`sfn fmt --check`, `sfn check <files>`), then spawn the Opus `code-reviewer`.
-- **Failures triage on Sonnet first.** A failing `make compile` or targeted test
-  goes to `test-runner` (sonnet) to classify: trivial (fmt, missing import,
-  typo, stale test) → fix via `implementer`; genuine (miscompile, IR rejection,
-  self-host break, perf/memory regression) → escalate to the Opus
-  `seed-stabilizer`. Treat `make test`/`make check` as full-gate requests, not
-  the default pickup path.
+Route work per **`.claude/rules/model-allocation.md`** — Opus (yourself) keeps
+scope, sequencing, the review gate, and genuine diagnosis; Sonnet specialists
+take surface mapping, routine implementation, and first-pass failure triage.
 
 ### Reconcile the advisory map, then check for real scope growth
 
@@ -197,18 +180,9 @@ Do not silently expand the *semantic* scope.
 Sometimes the issue depends on a capability that does not exist yet (e.g. a
 runtime issue needing a frontend primitive the compiler can't emit — the #1088
 failure mode). Apply the shared **`.claude/rules/seed-dependency.md`** decision
-tree (the same rule `/groom` uses):
-
-- **Single consumer + tightly coupled → BUNDLE:** propose ONE cohesive PR that
-  lands the prerequisite *and* the original issue together — no seed cut.
-  (Default; usually faster than a multi-issue chain.)
-- **Multiple consumers / independent / large blast radius → SPLIT:** file the
-  predecessor as a standalone `seed-blocker` Linear issue; the consumer carries
-  `## Required in pinned seed: #<predecessor-PR>` and queues against the next
-  cadence seed bump.
-
-Either way, **pause and present the bundle-vs-split choice to the user,
-defaulting to bundle.**
+tree (the same rule `/groom` uses); **pause and present the bundle-vs-split
+choice to the user, defaulting to bundle** rather than silently fanning out
+into a predecessor-issue chain.
 
 ---
 
@@ -316,7 +290,6 @@ Surface any deferral or mid-flight scope adjustment explicitly.
   drift is not scope growth — reconcile and proceed, recording it in the PR.
 - **Never declare done with unchecked acceptance criteria.**
 - **Never push to `main`.** Work on `claude/sfn-<N>-<slug>` and open a PR.
-- The compiler self-caps memory (8 GiB on Linux); see `.claude/rules/compiler-safety.md`.
 - **Never skip Phase 1.5** when the issue lists `## Required in pinned seed`.
 - **One issue per session.** Issues were sized to be standalone; don't bundle
   (except a genuine seed prerequisite per the bundle rule above).

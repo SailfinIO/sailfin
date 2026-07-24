@@ -1,22 +1,23 @@
 # Pin the Seed Version
 
-Open a PR bumping `bootstrap.toml [seed].version` (the repo-root seed
-pin consumed by `make fetch-seed`, `ci.yml`, `nightly-selfhost.yml`, and
+Bump `bootstrap.toml [seed].version` (the repo-root seed pin consumed by
+`make fetch-seed`, `ci.yml`, `nightly-selfhost.yml`, and
 `release-branches.yml`) — and the compiler `[toolchain].sfn` floor — to a
 newer Sailfin release.
 
-This is the **manual half** of the release loop. `/release` cuts a new
-alpha; `/pin-seed` adopts it as the build seed once the binary is
-uploaded. The two are deliberately separate — auto-pinning every
-release would force unnecessary CI recompiles. See
-`docs/conventions/issue-naming.md` "Seed pinning" for the convention.
+Seed pinning is **automatic** on the routine path: `cadence-seed-pin.yml`
+bumps the pin after every green release and auto-merges once its own CI is
+green. `/pin-seed` exists only for an **off-cadence or hotfix pin** — e.g. a
+just-closed `seed-blocker` that downstream work needs before the next cadence
+bump lands it. See `docs/conventions/issue-naming.md` "Seed pinning" for the
+convention.
 
 ## Target: $ARGUMENTS
 
 Parse `$ARGUMENTS` as an optional target version (with or without
 leading `v`) plus optional flags:
 
-- `--dry-run` — print intended actions but don't write or push.
+- `--dry-run` — print intended actions but don't write or commit.
 
 If no version arg is given, pick the **most recently published release
 tag** (this is the most recent prerelease for the project; not the
@@ -63,22 +64,25 @@ Examples:
 
 ## Phase 2: VERIFY THE SEED FETCHES
 
-Before opening the PR, confirm the target binary actually downloads:
+Before committing, confirm the target binary actually downloads and
+smoke-verify it:
 
 ```bash
 SEED_VERSION="<target>" make fetch-seed
+build/toolchains/seed/bin/sfn version
 ```
 
-This is non-destructive — it installs into `build/toolchains/seed/versions/` and
-doesn't touch `bootstrap.toml`. If the fetch fails (404, checksum,
-network), abort. If it succeeds, the binary is on disk and we know the
-pin is valid.
+`make fetch-seed` is non-destructive — it installs into
+`build/toolchains/seed/versions/` and doesn't touch `bootstrap.toml`. If the
+fetch fails (404, checksum, network), abort. If the smoke-verify mismatches
+the expected version string, abort — don't trust a fetch that downloaded the
+wrong binary.
 
 If `--dry-run`, skip this phase.
 
 ---
 
-## Phase 3: GATHER CONTEXT FOR THE PR BODY
+## Phase 3: GATHER CONTEXT FOR THE COMMIT MESSAGE
 
 1. **Closed `seed-blocker` issues since the last pin.** Use the
    commit timestamp of the last `bootstrap.toml` change as the
@@ -101,24 +105,28 @@ If `--dry-run`, skip this phase.
 
 ---
 
-## Phase 4: BRANCH AND COMMIT
+## Phase 4: COMMIT DIRECTLY
 
-The pin commit lives off `main`, not the user's current `claude/*`
-working branch — pinning is its own concern, not piggybacked on a
-feature.
-
-```bash
-git fetch origin main
-git checkout -b chore/pin-seed-v<TARGET> origin/main
-```
-
-If the branch already exists locally, switch to it instead and rebase
-on origin/main.
+No branch, no PR — pin directly on the current branch, mirroring
+`.claude/skills/pin-seed/SKILL.md`.
 
 ```bash
 .claude/skills/pin-seed/scripts/pin.sh <TARGET>
 git add bootstrap.toml compiler/capsule.toml
-git commit -m "chore: bump seed to v<TARGET>"
+git commit -m "$(cat <<'EOF'
+chore: bump seed to v<TARGET>
+
+Closed seed-blocker issues since the last pin:
+- #<N> — <title>
+(or "None")
+
+Still open after this pin:
+- #<N> — <title> (intentional / will be addressed in a later seed)
+(or "None")
+
+Comparison: https://github.com/SailfinIO/sailfin/compare/v<current>...v<target>
+EOF
+)"
 ```
 
 `pin.sh` rewrites `bootstrap.toml [seed].version` and the compiler
@@ -127,101 +135,41 @@ git commit -m "chore: bump seed to v<TARGET>"
 
 If `--dry-run`, stop here without committing.
 
----
-
-## Phase 5: PUSH AND OPEN PR
-
-```bash
-git push -u origin chore/pin-seed-v<TARGET>
-```
-
-Open the PR (draft):
-
-```
-mcp__github__create_pull_request
-  owner=SailfinIO repo=sailfin
-  head=chore/pin-seed-v<TARGET> base=main
-  title='chore: bump seed to v<TARGET>'
-  draft=true
-  body=<see template below>
-```
-
-PR body template:
-
-```markdown
-## Summary
-
-Bumps `bootstrap.toml [seed].version` (and the compiler `[toolchain].sfn`
-floor) from `<current>` → `<target>`.
-
-`make fetch-seed` was run locally against the target and succeeded —
-the binary downloads cleanly.
-
-## Closed `seed-blocker` issues since the last pin
-
-- #<N> — <title>
-- ...
-
-(or "None" if the search returned empty)
-
-## Still open after this pin
-
-- #<N> — <title> (`seed-blocker` open; intentional / will be addressed in a later seed)
-- ...
-
-## Comparison
-
-https://github.com/SailfinIO/sailfin/compare/v<current>...v<target>
-
-## Verification
-
-- [ ] `make fetch-seed` succeeded locally
-- [ ] CI green on this PR
-- [ ] (optional) `make compile` succeeds against the new seed locally
-```
-
----
-
-## Phase 6: SWITCH BACK
-
-After pushing, switch back to the user's prior branch so the rest of
-their session isn't on `chore/pin-seed-*`:
-
-```bash
-git checkout -
-```
-
 Report:
-- The PR URL
-- "Merge once CI is green; rebase your working branch onto `main`
-  afterwards to pick up the new seed."
+- The current → target version bump and the commit hash.
+- Any closed/open `seed-blocker` issues surfaced in Phase 3.
+- A reminder to run `make compile` locally before pushing, per the
+  failure-handling table below.
+
+---
+
+## Failure handling
+
+| Failure | Action |
+|---|---|
+| No version argument | Abort with usage message |
+| GitHub release not found / 0 assets | Abort, don't pin |
+| Fetch failure (404, checksum, network) | Restore old `bootstrap.toml` / `compiler/capsule.toml`, surface error |
+| Binary version mismatch on smoke-verify | Restore old `bootstrap.toml` / `compiler/capsule.toml`, surface error |
+| `make compile` failure after pin | Leave pin in place, surface error for investigation |
 
 ---
 
 ## Constraints
 
-- **Never amend or force-push the pin commit.** If review feedback
-  comes in, add a follow-up commit on the branch.
 - **Never bump the pin to a version whose binary hasn't uploaded.**
   This breaks `make fetch-seed` for everyone. Phase 1 step 3 enforces
   this.
-- **Never auto-merge.** A human must review the pin — even a one-line
-  change to `bootstrap.toml [seed].version` cascades through CI, nightly
-  self-host, and the release-branches workflow.
-- **Don't bundle other changes.** The pin is its own PR. If the user
-  wants to drag in other fixes, they can rebase their feature branch
-  on top after merge.
-- **In `--dry-run`, make zero writes.** Print intended actions only;
-  no branch creation, no commits, no pushes, no PR.
-- **Don't pin from a `claude/*` branch onto itself.** Always branch
-  off `main`. The current branch is unaffected.
+- **Don't bundle other changes.** The pin is its own commit. If the
+  user wants to drag in other fixes, they do so separately.
+- **In `--dry-run`, make zero writes.**
 
 ---
 
 ## When NOT to run /pin-seed
 
 - The new release is a routine alpha that fixes nothing the working
-  set needs.
+  set needs — the cadence auto-pin will pick it up on schedule.
 - A `seed-blocker` issue is still open and the pin would skip past it
   without resolving (unless the user explicitly wants to defer).
 - `release-tag.yml` is still running for the target release — wait
@@ -231,8 +179,8 @@ Report:
 
 ## When to run /pin-seed
 
-- A `seed-blocker` issue just closed and the fix shipped in the latest
-  alpha.
+- A `seed-blocker` issue just closed and downstream work needs it
+  before the next scheduled cadence bump lands it.
 - Downstream work needs a feature/fix that landed in a recent alpha.
 - A `bump=patch` was just cut (almost always implies a hotfix-pin).
 - The pin is far enough behind `main` that nightly self-host shows
