@@ -1,0 +1,119 @@
+name: Installer and install docs
+
+on:
+  pull_request:
+    paths:
+      - "install.sh"
+      - "install.ps1"
+      - "README.md"
+      - "docs/status.md"
+      - "site/**"
+      - ".github/workflows/installer-smoke.yml"
+  workflow_dispatch:
+    inputs: {}
+
+permissions:
+  contents: read
+
+concurrency:
+  group: installer-smoke-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  unix-installer:
+    name: v0.8.0 install (${{ matrix.os }})
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-24.04
+            asset: sailfin_0.8.0_linux_x86_64.tar.gz
+          - os: macos-26
+            asset: sailfin_0.8.0_macos_arm64.tar.gz
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Check installer syntax and release asset
+        shell: bash
+        run: |
+          set -euo pipefail
+          bash -n install.sh
+          curl --fail --silent --show-error --location --head \
+            "https://github.com/SailfinIO/sailfin/releases/download/v0.8.0/${{ matrix.asset }}"
+
+      - name: Install pinned v0.8.0 into an empty prefix
+        shell: bash
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          export VERSION=0.8.0
+          export INSTALL_BASE="${RUNNER_TEMP}/sailfin/versions"
+          export GLOBAL_BIN_DIR="${RUNNER_TEMP}/sailfin/bin"
+          ./install.sh
+          test -x "${GLOBAL_BIN_DIR}/sailfin"
+          test -x "${GLOBAL_BIN_DIR}/sfn"
+          "${GLOBAL_BIN_DIR}/sfn" --version
+
+  windows-installer:
+    name: v0.8.0 install (windows-latest)
+    runs-on: windows-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Check PowerShell syntax and release asset
+        shell: pwsh
+        run: |
+          $errors = $null
+          [void][System.Management.Automation.Language.Parser]::ParseFile(
+            (Resolve-Path ./install.ps1),
+            [ref]$null,
+            [ref]$errors
+          )
+          if ($errors.Count -ne 0) {
+            $errors | Format-List
+            exit 1
+          }
+          Invoke-WebRequest `
+            -Method Head `
+            -Uri "https://github.com/SailfinIO/sailfin/releases/download/v0.8.0/sailfin_0.8.0_windows_x86_64.tar.gz" `
+            -UseBasicParsing
+
+      - name: Install pinned v0.8.0 into an empty prefix
+        shell: pwsh
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          $env:VERSION = "0.8.0"
+          $env:INSTALL_BASE = Join-Path $env:RUNNER_TEMP "sailfin\versions"
+          $env:GLOBAL_BIN_DIR = Join-Path $env:RUNNER_TEMP "sailfin\bin"
+          & ./install.ps1
+          $sfn = Join-Path $env:GLOBAL_BIN_DIR "sfn.exe"
+          $sailfin = Join-Path $env:GLOBAL_BIN_DIR "sailfin.exe"
+          if (-not (Test-Path $sfn) -or -not (Test-Path $sailfin)) {
+            throw "Expected sfn.exe and sailfin.exe in $env:GLOBAL_BIN_DIR"
+          }
+          & $sfn --version
+
+  site:
+    name: Astro build and internal links
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 24
+          cache: npm
+          cache-dependency-path: site/package-lock.json
+      - name: Build site
+        working-directory: site
+        run: |
+          npm ci
+          npm run build
+      - name: Check generated internal links
+        working-directory: site
+        run: node scripts/check-internal-links.mjs

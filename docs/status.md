@@ -1,6 +1,6 @@
 # Status
 
-Updated: 2026-07-24. Seed pinned to `0.8.0-alpha.5` (`bootstrap.toml`
+Updated: 2026-07-24. Seed pinned to `0.8.0` (`bootstrap.toml`
 `[seed].version` — SFEP-0047); the compiler version source of truth is
 `compiler/capsule.toml`.
 
@@ -672,8 +672,21 @@ unit; history in the linked issues.
 
 ## Installer (Current)
 
-- Release tarballs follow `sailfin_<version>_<os>_<arch>.tar.gz`; the
-  installer defaults to `~/.local/bin` (`GLOBAL_BIN_DIR` override).
+- Release tarballs follow `sailfin_<version>_<os>_<arch>.tar.gz`. The v0.8.0
+  release ships Linux x86_64, macOS arm64 (Apple Silicon), and Windows x86_64
+  installer assets. Other OS/architecture pairs detected by the bootstrap
+  scripts are not supported until a matching release asset is published.
+- The bootstrap installers verify the signed `SHA256SUMS` manifest and selected
+  archive digest before extraction when OpenSSL 1.1.1+ raw-Ed25519 support is
+  available. A missing manifest/signature (for an older unsigned release) or
+  unsuitable OpenSSL produces an explicit warning and continues; malformed or
+  invalid signed metadata, a missing/duplicate asset entry, or a digest
+  mismatch aborts installation.
+- Linux/macOS installs versioned files under
+  `~/.local/share/sailfin/versions/<version>` and exposes `sailfin` plus `sfn`
+  in `~/.local/bin` (`INSTALL_BASE` / `GLOBAL_BIN_DIR` overrides). Windows uses
+  `%LOCALAPPDATA%\sailfin\versions\<version>` and
+  `%LOCALAPPDATA%\sailfin\bin`, adding the bin directory to the user `PATH`.
 - Current release: `v0.8.0` (see `bootstrap.toml` `[seed].version`
   for the pinned self-host seed, which may trail the latest release).
 

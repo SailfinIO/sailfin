@@ -25,6 +25,11 @@ const installCmd = "curl -fsSL https://raw.githubusercontent.com/SailfinIO/sailf
         <a href="/docs/getting-started/install" class="btn btn-primary">Get Started</a>
         <a href="/docs/getting-started/tour" class="btn btn-secondary">Take the Tour</a>
       </div>
+      <p class="hero-install-note">
+        v0.8.0: Linux x86_64, macOS Apple Silicon, and Windows x86_64.
+        Building programs also requires LLVM 17+ or 18+, clang, and a platform linker.
+        <a href="/docs/getting-started/install">Installation requirements</a>
+      </p>
       <div class="hero-install" role="group" aria-label="Install command">
         <span class="prompt" aria-hidden="true">$</span>
         <code>{installCmd}</code>
@@ -188,6 +193,14 @@ const installCmd = "curl -fsSL https://raw.githubusercontent.com/SailfinIO/sailf
     padding: 0.6rem 0.85rem;
     font-family: var(--font-mono);
     font-size: 0.825rem;
+  }
+
+  .hero-install-note {
+    color: var(--color-text-secondary);
+    font-size: 0.8rem;
+    line-height: 1.45;
+    margin: 0.75rem 0 0;
+    max-width: 42rem;
   }
 
   .hero-install .prompt {
