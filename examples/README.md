@@ -53,7 +53,7 @@ Effect annotations (`![...]`) flag the runtime capabilities you need to declare 
 | `struct-composition.sfn` | `io`          | Interface composition exercised with `print.info`.                                                                                         |
 | `structs.sfn`            | `io`          | Struct constructors and method calls with logging.                                                                                         |
 | `tagged-enum.sfn`        | `io`          | Tagged union match executed inside `main`.                                                                                                 |
-| `tests.sfn`              | `model`       | Bootstrap `test` block; effect mirrors the current harness expectations.                                                                   |
+| `tests.sfn`              | None          | Pure bootstrap `test` block; no runtime capability is required.                                                                            |
 | `try-catch-finally.sfn`  | `io`          | Structured error handling with explicit failure stubs.                                                                                     |
 | `variables.sfn`          | `io`          | Mutable vs. immutable bindings with console output.                                                                                        |
 
@@ -93,7 +93,7 @@ Effect annotations (`![...]`) flag the runtime capabilities you need to declare 
 | Example                           | Effects              | Notes                                                              |
 | --------------------------------- | -------------------- | ------------------------------------------------------------------ |
 | `decorators.sfn`                  | `io`                 | `@logExecution` decorator enforcing `io`.                          |
-| `effectful-interface.sfn`         | `io`, `model`        | Interfaces with model-bound methods and console output.            |
+| `effectful-interface.sfn`         | `io`, `model`        | Reserved `model` signatures plus console output.                  |
 | `encapsulation-struct.sfn`        | `io`                 | Mutable struct state with logging and error handling.              |
 | `futures.sfn`                     | `io`                 | `async`/`await` fan-out joined with console logging.               |
 | `generic-structures.sfn`          | `io`                 | Generic struct methods manipulating collections.                   |
@@ -113,7 +113,7 @@ Effect annotations (`![...]`) flag the runtime capabilities you need to declare 
 
 | Example                    | Effects       | Notes                                                                                |
 | -------------------------- | ------------- | ------------------------------------------------------------------------------------ |
-| `effectful-model-call.sfn` | `io`, `model` | Demonstrates the `![model]` effect gating helper functions that perform model calls. |
+| `effectful-model-call.sfn` | `io`, `model` | Reserved `model` propagation through local stubs; no model backend executes. |
 
 ### `io/`
 

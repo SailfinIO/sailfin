@@ -374,10 +374,10 @@ classification (for contributor intake) plus the release axis (`release:*`,
 Linear Projects, releases are Linear Cycles; the one surviving `tracking` use is
 the `Release: vX.Y.Z` cadence tracker. The former *Sailfin Tracker* GitHub board
 (org project SailfinIO/4) and its `sync-project.yml` label→board workflow are
-**retired**; there is no derived board to sync. The public roadmap
-(`site/src/pages/roadmap.astro`) builds from Linear initiatives/projects at deploy
-time (needs a `LINEAR_API_KEY` build secret; it degrades to a "data unavailable"
-state without one).
+**retired**; there is no derived board to sync. The public roadmap is a reviewed,
+sanitized projection of explicitly approved Linear Projects. Its publication
+contract is `docs/conventions/public-roadmap.md`; the site renders the checked-in
+`site/src/data/roadmap.json` snapshot and never exposes Linear URLs.
 
 **Anti-patterns:** don't pick up an ungroomed issue (`Triage`/`Backlog` — groom
 first); don't expand scope mid-session (comment and pause); don't bundle issues
@@ -392,7 +392,9 @@ When uncertain about feature status or semantics:
 2. **Language spec** — `site/src/content/docs/docs/reference/spec/` (§1–§11) and
    `.../reference/preview/` (design previews); rendered at
    [sailfin.dev/docs/reference/spec/](https://sailfin.dev/docs/reference/spec/)
-3. **[sailfin.dev/roadmap](https://sailfin.dev/roadmap)** — active workstreams (`site/src/pages/roadmap.astro`)
+3. **Linear Initiatives/Projects/Cycles** — maintainer planning source of truth;
+   [sailfin.dev/roadmap](https://sailfin.dev/roadmap) is the reviewed public
+   projection (`docs/conventions/public-roadmap.md`)
 4. **`docs/status.md` (Runtime Migration table)** — C→Sailfin runtime migration tracker
 5. **`docs/proposals/0006-build-architecture.md`** — build architecture and perf baseline
 6. **`docs/strategy/decision-brief.md`** — strategic overlay binding the internal

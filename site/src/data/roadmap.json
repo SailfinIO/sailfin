@@ -1,0 +1,426 @@
+{
+  "schemaVersion": 1,
+  "syncedAt": "2026-07-24T18:48:10.782Z",
+  "projects": [
+    {
+      "name": "Autodiff & Training Graphs",
+      "summary": "Add differentiation and training-graph semantics on top of the typed tensor IR and numeric substrate.",
+      "initiative": "Accelerated ML",
+      "horizon": "1.0",
+      "status": "planned"
+    },
+    {
+      "name": "Capability-Sealed Model Artifacts",
+      "summary": "Package models with verifiable provenance, declared authority, compatibility metadata, and enforceable execution boundaries.",
+      "initiative": "Accelerated ML",
+      "horizon": "1.0",
+      "status": "planned"
+    },
+    {
+      "name": "Distributed Accelerator Concurrency",
+      "summary": "Coordinate accelerator work and collectives through Sailfin’s structured-concurrency and capability model.",
+      "initiative": "Accelerated ML",
+      "horizon": "1.0",
+      "status": "planned"
+    },
+    {
+      "name": "ML Acceleration — Foundations",
+      "summary": "Track-A foundations for SFEP-0052: low-precision numeric substrate, a shape-typed tensor IR + fusion, a first substrate exit, and the first enforced ![gpu]/![model] checks.",
+      "initiative": "Accelerated ML",
+      "horizon": "1.0",
+      "status": "planned"
+    },
+    {
+      "name": "sfn/ai Model Engines & Adapters",
+      "summary": "Define native model-engine interfaces and adapters with explicit model effects, capabilities, and tensor boundaries.",
+      "initiative": "Accelerated ML",
+      "horizon": "1.0",
+      "status": "planned"
+    },
+    {
+      "name": "Build Performance & Production-Readiness",
+      "summary": "Make self-hosted builds faster, more deterministic, and production-ready across supported development and release workflows.",
+      "initiative": "Build & Toolchain",
+      "horizon": "1.0",
+      "status": "planned"
+    },
+    {
+      "name": "CLI Follow-Ups — Phase D",
+      "summary": "Complete the remaining CLI behavior and diagnostics needed for a coherent native Sailfin toolchain.",
+      "initiative": "Build & Toolchain",
+      "horizon": "1.0",
+      "status": "completed"
+    },
+    {
+      "name": "CLI Modularization",
+      "summary": "Keep compiler command orchestration modular, testable, and separate from compilation policy.",
+      "initiative": "Build & Toolchain",
+      "horizon": "1.0",
+      "status": "completed"
+    },
+    {
+      "name": "Compiler Frontend/Backend Capsule Boundary",
+      "summary": "Split the compiler into stable frontend and backend capsule boundaries without prematurely fragmenting every compiler pass.",
+      "initiative": "Build & Toolchain",
+      "horizon": "1.0",
+      "status": "planned"
+    },
+    {
+      "name": "Compiler Hardening",
+      "summary": "Harden parsing, type checking, captures, and diagnostics so the self-hosted compiler fails predictably on real programs.",
+      "initiative": "Build & Toolchain",
+      "horizon": "1.0",
+      "status": "in-progress"
+    },
+    {
+      "name": "Native sfn bench Command & sfn/bench Harness",
+      "summary": "Provide a native sfn bench command and Sailfin benchmark harness for repeatable compiler and runtime measurements.",
+      "initiative": "Build & Toolchain",
+      "horizon": "1.0",
+      "status": "completed"
+    },
+    {
+      "name": "Native Toolchain Pinning & Dispatch",
+      "summary": "Let a project declare its required sfn toolchain version natively in capsule.toml ([toolchain]) and, in phase 2, auto-fetch/dispatch to it — retiring .seed-version/Makefile plumbing for downstream projects.",
+      "initiative": "Build & Toolchain",
+      "horizon": "1.0",
+      "status": "completed"
+    },
+    {
+      "name": "Per-Module Compile-Time Peak RSS",
+      "summary": "Measure and reduce peak compiler memory per module so production builds stay within a predictable resource envelope.",
+      "initiative": "Build & Toolchain",
+      "horizon": "1.0",
+      "status": "planned"
+    },
+    {
+      "name": "Production-Grade Self-Host Determinism Enforcement",
+      "summary": "Guarantee deterministic compiler output and reproducible builds across supported hosts and repeated self-hosting runs.",
+      "initiative": "Build & Toolchain",
+      "horizon": "1.0",
+      "status": "planned"
+    },
+    {
+      "name": "sfn LSP & IDE Integration",
+      "summary": "Provide a compiler-backed language server for diagnostics, navigation, completion, formatting, and editor integration.",
+      "initiative": "Build & Toolchain",
+      "horizon": "1.0",
+      "status": "planned"
+    },
+    {
+      "name": "Workspace Manifest & Multi-Capsule Policy",
+      "summary": "Grow workspace.toml into a production-grade multi-capsule manifest (Cargo/Go/Zig parity) plus the workspace-tier capability envelope no peer has. Design: SFEP-0051.",
+      "initiative": "Build & Toolchain",
+      "horizon": "1.0",
+      "status": "planned"
+    },
+    {
+      "name": "End-to-End Capability Seal",
+      "summary": "Seal executable capability declarations end to end so runtime authority matches compiler-checked effects.",
+      "initiative": "Capability-Sealed Runtime",
+      "horizon": "1.0",
+      "status": "planned"
+    },
+    {
+      "name": "Native Crypto + TLS Stack — Zero OpenSSL",
+      "summary": "Remove the OpenSSL (-lssl/-lcrypto) dependency by building a pure-Sailfin crypto + TLS 1.3 stack — a prerequisite for the capability seal (SFEP-0016).",
+      "initiative": "Capability-Sealed Runtime",
+      "horizon": "1.0",
+      "status": "planned"
+    },
+    {
+      "name": "Native Runtime Ownership & Deterministic Destruction",
+      "summary": "Complete deterministic destruction and ownership-aware runtime primitives needed for a memory-safe self-hosted runtime.",
+      "initiative": "Capability-Sealed Runtime",
+      "horizon": "1.0",
+      "status": "planned"
+    },
+    {
+      "name": "Owned Syscall Layer",
+      "summary": "Route operating-system access through owned, capability-aware syscall boundaries implemented in Sailfin.",
+      "initiative": "Capability-Sealed Runtime",
+      "horizon": "1.0",
+      "status": "planned"
+    },
+    {
+      "name": "Per-Task Capability Context",
+      "summary": "Carry capability and runtime context per task so concurrent work cannot silently inherit ambient authority.",
+      "initiative": "Capability-Sealed Runtime",
+      "horizon": "1.0",
+      "status": "planned"
+    },
+    {
+      "name": "Runtime Strings & Memory Safety",
+      "summary": "Make string operations efficient and memory-safe across slices, concatenation, aggregate reads, and ownership-sensitive cleanup.",
+      "initiative": "Capability-Sealed Runtime",
+      "horizon": "1.0",
+      "status": "in-progress"
+    },
+    {
+      "name": "Seal-Sufficient Native Backend",
+      "summary": "Complete the backend and syscall layer needed for capability sealing without hidden native-runtime escape hatches.",
+      "initiative": "Capability-Sealed Runtime",
+      "horizon": "1.0",
+      "status": "in-progress"
+    },
+    {
+      "name": "sfn/capability — Runtime Object-Capability Model",
+      "summary": "Ship reusable runtime object capabilities that make authority explicit, bounded, and testable in Sailfin programs.",
+      "initiative": "Capability-Sealed Runtime",
+      "horizon": "1.0",
+      "status": "planned"
+    },
+    {
+      "name": "Capsule-Defined Decorators",
+      "summary": "Let capsules define statically resolved decorators with explicit typing, expansion, and effect behavior.",
+      "initiative": "Effect System & Language Core",
+      "horizon": "1.0",
+      "status": "in-progress"
+    },
+    {
+      "name": "Effect Enforcement Foundations",
+      "summary": "Deliver hierarchical effects, conservative detection, cross-capsule enforcement, and effect-transparent concurrency foundations.",
+      "initiative": "Effect System & Language Core",
+      "horizon": "1.0",
+      "status": "completed"
+    },
+    {
+      "name": "First-Class Function Values",
+      "summary": "Make functions first-class typed values that can be stored, passed, returned, and called without losing effect information.",
+      "initiative": "Effect System & Language Core",
+      "horizon": "1.0",
+      "status": "planned"
+    },
+    {
+      "name": "Generics & Higher-Order Functions",
+      "summary": "Provide generics and higher-order collection operations with monomorphized, statically checked behavior.",
+      "initiative": "Effect System & Language Core",
+      "horizon": "1.0",
+      "status": "completed"
+    },
+    {
+      "name": "Information-Flow & Taint Enforcement",
+      "summary": "Track sensitive data through model and capability boundaries so policy checks can prevent unintended disclosure.",
+      "initiative": "Effect System & Language Core",
+      "horizon": "1.0",
+      "status": "planned"
+    },
+    {
+      "name": "Model Effect Enforcement",
+      "summary": "Enforce ![model] declarations and call boundaries as part of Sailfin’s explicit effect system.",
+      "initiative": "Effect System & Language Core",
+      "horizon": "1.0",
+      "status": "planned"
+    },
+    {
+      "name": "String Interpolation Syntax",
+      "summary": "Add typed string interpolation with clear evaluation, formatting, allocation, and diagnostic semantics.",
+      "initiative": "Effect System & Language Core",
+      "horizon": "1.0",
+      "status": "planned"
+    },
+    {
+      "name": "Concurrency Frontend Typing",
+      "summary": "Complete frontend typing for await results, typed channels, task bodies, and structured-concurrency call sites.",
+      "initiative": "Structured Concurrency",
+      "horizon": "1.0",
+      "status": "planned"
+    },
+    {
+      "name": "Concurrency Maturity Phase 1 — Cancel-on-Fault Nursery",
+      "summary": "Cancel sibling tasks when a nursery child fails, with bounded shutdown and deterministic error propagation.",
+      "initiative": "Structured Concurrency",
+      "horizon": "1.0",
+      "status": "planned"
+    },
+    {
+      "name": "Sailfin-Native Test Framework",
+      "summary": "Provide the native sfn test framework, discovery model, assertions, fixtures, and compiler-owned execution contract.",
+      "initiative": "Test Infrastructure",
+      "horizon": "1.0",
+      "status": "planned"
+    },
+    {
+      "name": "Test Runner Performance & Reliability",
+      "summary": "Harden test-runner reliability and improve measured performance before introducing parallel scheduling.",
+      "initiative": "Test Infrastructure",
+      "horizon": "1.0",
+      "status": "planned"
+    },
+    {
+      "name": "Notebook & Interactive Tooling",
+      "summary": "Explore interactive execution, notebooks, and REPL-like workflows once compiler APIs and incremental behavior can support them honestly.",
+      "initiative": "Build & Toolchain",
+      "horizon": "exploration",
+      "status": "planned"
+    },
+    {
+      "name": "Algebraic Effect Handlers",
+      "summary": "Explore whether algebraic handlers complement Sailfin’s explicit capability effects without weakening predictability.",
+      "initiative": "Effect System & Language Core",
+      "horizon": "exploration",
+      "status": "planned"
+    },
+    {
+      "name": "aarch64-Linux Target Support",
+      "summary": "Bring the self-hosted compiler and installer to 64-bit ARM Linux, including ABI support, release artifacts, and on-device self-host verification.",
+      "initiative": "Build & Toolchain",
+      "horizon": "later",
+      "status": "planned"
+    },
+    {
+      "name": "Fine-Grained Compiler Sub-Capsules",
+      "summary": "After the frontend/backend boundary is stable, split compiler passes into smaller internal capsules where evidence shows a maintenance or performance benefit.",
+      "initiative": "Build & Toolchain",
+      "horizon": "later",
+      "status": "planned"
+    },
+    {
+      "name": "Makefile Retirement — sfn Owns Build/Check/Bootstrap",
+      "summary": "Retire the root Makefile by moving bootstrap, build, test, bench, and check orchestration into native `sfn` commands.",
+      "initiative": "Build & Toolchain",
+      "horizon": "later",
+      "status": "planned"
+    },
+    {
+      "name": "Native Windows Self-Host (MSVC ABI)",
+      "summary": "Self-host Sailfin natively on Windows with the MSVC ABI, including bootstrap, linking, tests, and release packaging.",
+      "initiative": "Build & Toolchain",
+      "horizon": "later",
+      "status": "in-progress"
+    },
+    {
+      "name": "Runtime Diagnostics & Allocation Telemetry",
+      "summary": "Add opt-in runtime diagnostics for allocation, ownership, and task behavior without changing release semantics.",
+      "initiative": "Build & Toolchain",
+      "horizon": "later",
+      "status": "planned"
+    },
+    {
+      "name": "WebAssembly Target",
+      "summary": "Add a WebAssembly compilation target with an explicit runtime, capability, and packaging contract.",
+      "initiative": "Build & Toolchain",
+      "horizon": "later",
+      "status": "planned"
+    },
+    {
+      "name": "Full Unsafe Capability Enforcement",
+      "summary": "Extend unsafe enforcement across the full call graph and runtime boundary after the current local checks are dependable.",
+      "initiative": "Capability-Sealed Runtime",
+      "horizon": "later",
+      "status": "planned"
+    },
+    {
+      "name": "Perf-Parity Native Backend",
+      "summary": "Close measured performance gaps in the fully native backend after correctness and capability sealing are established.",
+      "initiative": "Capability-Sealed Runtime",
+      "horizon": "later",
+      "status": "planned"
+    },
+    {
+      "name": "Transitive Capability Audit & SBOM",
+      "summary": "Audit transitive capsule authority and produce machine-readable capability provenance for builds and dependencies.",
+      "initiative": "Capability-Sealed Runtime",
+      "horizon": "later",
+      "status": "planned"
+    },
+    {
+      "name": "Currency & Time Literals",
+      "summary": "Design exact currency and time literal syntax with explicit units, precision, overflow, and interoperability rules.",
+      "initiative": "Effect System & Language Core",
+      "horizon": "later",
+      "status": "planned"
+    },
+    {
+      "name": "Effect Polymorphism & Effect-Aware HOFs",
+      "summary": "Let generic and higher-order code express, propagate, and constrain caller effects without erasing safety.",
+      "initiative": "Effect System & Language Core",
+      "horizon": "later",
+      "status": "planned"
+    },
+    {
+      "name": "Pipeline Operator",
+      "summary": "Design a pipeline operator that composes cleanly with function calls, generics, effects, and diagnostics.",
+      "initiative": "Effect System & Language Core",
+      "horizon": "later",
+      "status": "planned"
+    },
+    {
+      "name": "User-Facing Ownership & Borrow Checking",
+      "summary": "Expose ownership and borrowing rules in the language after deterministic runtime ownership is stable.",
+      "initiative": "Effect System & Language Core",
+      "horizon": "later",
+      "status": "planned"
+    },
+    {
+      "name": "Benchmark v2 — Adoption Readiness and Controlled Learnability",
+      "summary": "Separate real-world adoption readiness from controlled learnability, then test external pull only after a credible technical signal.",
+      "initiative": "Product & Adoption",
+      "horizon": "later",
+      "status": "in-progress"
+    },
+    {
+      "name": "External Credibility — Evidence Before Promotion",
+      "summary": "Build trust through truthful claims, reproducible evidence, and one time-boxed outreach test before deciding whether to promote Sailfin more broadly.",
+      "initiative": "Product & Adoption",
+      "horizon": "later",
+      "status": "planned"
+    },
+    {
+      "name": "MCP-Proxy Enablement",
+      "summary": "Runtime and stdlib gaps blocking a pure-Sailfin MCP proxy. Track A (stdio, 4 pure-Sailfin wrappers) is the critical path; Tracks B and C4 serve the deferred HTTP/control-plane work.",
+      "initiative": "Product & Adoption",
+      "horizon": "later",
+      "status": "planned"
+    },
+    {
+      "name": "REST-Server Dogfooding Gaps",
+      "summary": "Close the language, runtime, and standard-library gaps needed to build and operate a basic REST server entirely in Sailfin.",
+      "initiative": "Product & Adoption",
+      "horizon": "later",
+      "status": "planned"
+    },
+    {
+      "name": "Bridge the WebSocket Runtime",
+      "summary": "Connect WebSocket operations to the native runtime and structured-concurrency model without hidden blocking behavior.",
+      "initiative": "Structured Concurrency",
+      "horizon": "later",
+      "status": "planned"
+    },
+    {
+      "name": "Concurrency Maturity Phase 2 — Async-I/O Reactor",
+      "summary": "Replace thread-per-task blocking I/O with a portable reactor while preserving structured cancellation semantics.",
+      "initiative": "Structured Concurrency",
+      "horizon": "later",
+      "status": "planned"
+    },
+    {
+      "name": "Rich Synchronization & Atomics",
+      "summary": "Add the synchronization and atomic primitives justified by measured concurrent workloads after core task semantics stabilize.",
+      "initiative": "Structured Concurrency",
+      "horizon": "later",
+      "status": "planned"
+    },
+    {
+      "name": "Advanced Test Modes",
+      "summary": "Add opt-in property, fuzz, snapshot, and other advanced modes once the core native runner contract is stable.",
+      "initiative": "Test Infrastructure",
+      "horizon": "later",
+      "status": "planned"
+    },
+    {
+      "name": "Parallel Test Execution",
+      "summary": "Execute independent tests concurrently with deterministic reporting, isolation, and configurable resource bounds.",
+      "initiative": "Test Infrastructure",
+      "horizon": "later",
+      "status": "planned"
+    },
+    {
+      "name": "Test Runner Ergonomics",
+      "summary": "Improve test discovery, filtering, output, failure reporting, and day-to-day command ergonomics.",
+      "initiative": "Test Infrastructure",
+      "horizon": "later",
+      "status": "planned"
+    }
+  ]
+}

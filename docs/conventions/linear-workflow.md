@@ -61,6 +61,18 @@ Project (see below).
    gating issues to a Linear Cycle. (`Release:` is the **one** GitHub tracking
    title that survives — release automation owns it.)
 
+### Public roadmap
+
+Linear planning is private by default. Initiative membership does not mean a
+Project is committed to 1.0, approved for public discussion, or safe to publish.
+The public site includes only Projects carrying the owner-approved
+`roadmap:public` label and exactly one `horizon:*` publication label. The site
+renders a reviewed, sanitized snapshot and never exposes Linear URLs.
+
+See [`public-roadmap.md`](./public-roadmap.md) for the approval contract and
+publication flow. Agents must not add or change public-roadmap labels without
+explicit owner direction.
+
 ### Sub-issues — allowed, but bounded
 
 Sub-issues are fine for **splitting one session-sized leaf** into smaller

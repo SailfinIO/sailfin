@@ -76,15 +76,15 @@ const criticalLinks = [
 const releaseAssetTemplates = [
   {
     source: "site/src/pages/dl.astro",
-    fragment: "sailfin_${stableVersion}_linux_x86_64.tar.gz",
+    fragment: "sailfin_${releaseVersion}_linux_x86_64.tar.gz",
   },
   {
     source: "site/src/pages/dl.astro",
-    fragment: "sailfin_${stableVersion}_macos_arm64.tar.gz",
+    fragment: "sailfin_${releaseVersion}_macos_arm64.tar.gz",
   },
   {
     source: "site/src/pages/dl.astro",
-    fragment: "sailfin_${stableVersion}_windows_x86_64.tar.gz",
+    fragment: "sailfin_${releaseVersion}_windows_x86_64.tar.gz",
   },
   {
     source: "site/src/content/docs/docs/getting-started/install.md",

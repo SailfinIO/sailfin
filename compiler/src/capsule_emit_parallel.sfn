@@ -12,6 +12,7 @@
 // THIS module, so importing back would form a cycle. The original copy stays
 // in capsule_resolver for its own `_cr_get_home`/`_cr_scratch_root` callers.
 import { _atomic_rename_into_place, _mktemp_sibling_cmd } from "./build/fs";
+import { host_is_windows } from "./build/target";
 import { number_to_string } from "./main";
 import { substring } from "./string_utils";
 
@@ -82,7 +83,12 @@ fn _cr_shell_quote(value: string) -> string {
 // `BUILD_JOBS=1` knob the prior `scripts/build.sh` historically
 // exposed; the script was retired in Stage E PR7 / #383).
 fn _cr_resolve_jobs() -> int ![io] {
-    let env_jobs = _cr_shell_read("printf '%s' \"$SAILFIN_BUILD_JOBS\"");
+    // Serial is the only viable Windows-host emit path (no POSIX
+    // `nproc`/`sysctl`, and it makes the non-atomic in-place staging
+    // `_mktemp_sibling_cmd` degrades to on Windows race-free). Return
+    // before any shell probe.
+    if host_is_windows() { return 1; }
+    let env_jobs = env.get("SAILFIN_BUILD_JOBS");
     if env_jobs.length > 0 {
         let parsed = _cr_parse_positive_int(env_jobs);
         if parsed > 0 {

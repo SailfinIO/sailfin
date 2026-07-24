@@ -46,7 +46,10 @@ The `docs` folder is a critical part of the Sailfin project. It contains the pro
 
 Key documents include:
 
-- [sailfin.dev/roadmap](https://sailfin.dev/roadmap): The project's roadmap, which tracks tasks and future development (source: `site/src/pages/roadmap.astro`).
+- [sailfin.dev/roadmap](https://sailfin.dev/roadmap): The reviewed public
+  projection of Linear planning
+  (`docs/conventions/public-roadmap.md`, snapshot:
+  `site/src/data/roadmap.json`).
 - [docs/status.md](docs/status.md): The source of truth for what ships today (native compiler primary; legacy name stage2) versus what is still in progress.
 - [sailfin.dev/docs/reference/spec/](https://sailfin.dev/docs/reference/spec/): The language reference split by chapter. Source under `site/src/content/docs/docs/reference/spec/` (current language, §1–§11) and `.../reference/preview/` (design previews).
 

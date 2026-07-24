@@ -387,9 +387,11 @@ unset values, so an interactively-set priority/estimate always wins.
 
 ## Release tracking
 
-Milestones group long-lived **themes** (and feed `site/src/pages/roadmap.astro`).
-They span many releases. To answer "what ships in version X" we use a separate
-axis: the **`release:*` label namespace** plus a **per-cycle tracking issue**.
+Linear Initiatives group durable themes and Projects are the roadmap units.
+They span many releases. The public site is a reviewed projection governed by
+`docs/conventions/public-roadmap.md`; Initiative membership alone never assigns
+a public horizon. To answer "what ships in version X" we use a separate axis:
+the **`release:*` label namespace** plus a **per-cycle tracking issue**.
 
 **In Linear, a release is a Cycle, never a Project.** A release is a time-boxed
 cut *across* many epics, and a Linear issue belongs to exactly one Project (its
