@@ -1,3 +1,10 @@
+// capsules/sfn/device/tests/device_test.sfn
+//
+// Proves the `sfn/device` dispatch primitive is real rather than a bare
+// effect carrier: the CPU reference kernel computes correct products, and
+// the backend queries report honestly that no accelerator is present.
+// The `![gpu]` gate itself is pinned by
+// `compiler/tests/e2e/gpu_effect_gate_test.sfn`.
 import {
     active_backend,
     backends,
