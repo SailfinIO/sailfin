@@ -19,7 +19,7 @@
 // This mirrors the retired `sailfin_runtime.c` `#if defined(_WIN32)`
 // branch (the `CreateProcessA` body at :5564 and the `@sfn_process_*`
 // forwarders at :8163). Sync of the RUNTIME_MODS membership is pinned by
-// `compiler/tests/e2e/test_cross_windows_runtime_modules.sh`.
+// `compiler/tests/e2e/cross_windows_runtime_modules_test.sfn`.
 //
 // CONTRACT. `run`, `exit`, and `run_capture` (+ its `capture_take_*`)
 // are REAL: the shipped Windows installer must spawn clang/linker, and
@@ -27,12 +27,20 @@
 // epic #1485). `run_capture` uses CreatePipe + CreateProcessA with
 // redirected stdout/stderr + a deadlock-free two-pipe drain
 // (PeekNamedPipe/ReadFile). The async streaming-handle family
-// (`spawn_with_env` / `handle_*`) is ALSO real (SFN-497): it is the
-// enabling primitive for native parallel emit, `sfn test`'s job pool,
-// and the SFEP-0050 streamed-record transport, none of which are
-// expressible without a non-blocking spawn. `environ` remains
-// degraded-but-linking (empty result), preserving the retired C
-// `_WIN32` shim behaviour — GetEnvironmentStringsA is follow-up work.
+// (`spawn_with_env` / `handle_*`) is ALSO real (SFN-497) — the enabling
+// primitive none of the concurrent-child consumers can be built without.
+// `environ` remains degraded-but-linking (empty result), preserving the
+// retired C `_WIN32` shim behaviour — GetEnvironmentStringsA is
+// follow-up work.
+//
+// CONSUMERS ARE NOT YET PORTED. A real spawn family is necessary but not
+// sufficient: the existing in-tree consumers select on raw fds, which do
+// not exist here (see the `handle_stdout_fd` note below). Concretely,
+// `cli/commands/test.sfn`'s runner loop builds an fd list, finds it empty
+// on Windows, and breaks before reading a byte. Porting each consumer to
+// the fd-free framed-read path is deliberately separate work (SFN-499) —
+// so do NOT read "the family is real" as "`sfn test` / parallel emit work
+// on Windows". They do not yet.
 //
 // SINGLE-THREADED SPAWN. `CreateProcessA` with `bInheritHandles=TRUE`
 // grants the child EVERY inheritable handle open in the process, not
@@ -802,9 +810,32 @@ fn _pw_h_pump_once(h: *PwProcHandle, buf: *u8, cap: i64) -> i64 ![io] {
 // child that simply has not written yet, or a caller framing until
 // `*_at_eof` would spin at 100% CPU instead of parking.
 fn _pw_h_pump(h: *PwProcHandle, want_err: i64, to_eof: i64) -> void ![io] {
+    // Already at EOF: nothing to pump. Checked before the buffer alloc so the
+    // common already-drained call costs nothing.
+    if want_err != 0 {
+        if h.h_stderr_rd == 0 { return; }
+    } else {
+        if h.h_stdout_rd == 0 { return; }
+    }
     let cap: i64 = 65536;
     let buf: *u8 = malloc(cap as usize);
-    if buf as i64 == 0 { return; }
+    if buf as i64 == 0 {
+        // Out of memory. Returning with state untouched would livelock the
+        // caller: the stash stays empty so a framed read yields "", while the
+        // stream handle stays open so `*_at_eof` stays false — and the
+        // canonical `loop { if at_eof break; read_bytes() }` would spin
+        // forever without draining the child. Close the requested stream so
+        // EOF is reported instead. The POSIX peer reaches the same end by
+        // returning -1 from `_framed_fill`, whose caller closes the fd.
+        if want_err != 0 {
+            let _ce: i32 = CloseHandle(h.h_stderr_rd);
+            h.h_stderr_rd = 0;
+        } else {
+            let _co: i32 = CloseHandle(h.h_stdout_rd);
+            h.h_stdout_rd = 0;
+        }
+        return;
+    }
     let ogb: *PwGrowBuf = _pw_h_out_gb(h);
     let egb: *PwGrowBuf = _pw_h_err_gb(h);
     loop {

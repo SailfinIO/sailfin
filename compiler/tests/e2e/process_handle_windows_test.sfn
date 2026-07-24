@@ -205,6 +205,61 @@ test "process handle (windows): several children run concurrently before any wai
     } else { assert true; }
 }
 
+// A Sailfin source whose emitted LLVM IR is comfortably larger than the
+// 64 KiB pipe buffer: a ~256 KiB string literal the emitter materialises as
+// a global constant. Mirrors the `run_capture` Windows test's fixture.
+fn _big_source() -> string {
+    let mut a = "AAAAAAAAAAAAAAAA";
+    let mut i = 0;
+    loop {
+        if i >= 14 { break; }
+        a = a + a;
+        i = i + 1;
+    }
+    return "fn payload() -> int {\n    let s = \"" + a
+        + "\";\n    return s.length;\n}\n";
+}
+
+// ── Acceptance: > 64 KiB on one pipe does not wedge the other ─────────
+test "process handle (windows): drains > 64KiB stdout without wedging stderr" ![io] {
+    if _is_windows() {
+        let src = _scratch_dir() + "/pw_handle_big.sfn";
+        fs.writeFile(src, _big_source());
+        let id = process.spawn_with_env([_sfn_bin(), "emit", "llvm", src], _child_env());
+        assert id != 0;
+        // The child writes far more than the 64 KiB default pipe buffer to
+        // stdout. A reader that pumped only the requested pipe would let the
+        // child block in its own write and deadlock the parent; the handle
+        // family pumps BOTH pipes on every pass precisely to prevent that.
+        // This is the case that exercises it — the other tests' children
+        // produce a few dozen bytes and would pass either way.
+        let out = process.handle_read_stdout(id);
+        let _err = process.handle_read_stderr(id);
+        if fs.exists(src) { fs.deleteFile(src); }
+        assert out.length > 65536;
+        assert process.handle_stdout_at_eof(id) == true;
+        let exit = process.handle_wait(id);
+        assert exit == 0;
+    } else { assert true; }
+}
+
+// ── Acceptance: stdin write after close is refused ────────────────────
+test "process handle (windows): write after close_stdin reports the dead-pipe sentinel" ![io] {
+    if _is_windows() {
+        let id = process.spawn_with_env([_sfn_bin(), "guillermo"], _child_env());
+        assert id != 0;
+        process.handle_close_stdin(id);
+        // The zeroed stdin slot is what stops `handle_wait` from
+        // double-closing the same HANDLE, so a -1 here is load-bearing
+        // rather than cosmetic.
+        assert process.handle_write(id, "after close") == -1;
+        let _out = process.handle_read_stdout(id);
+        let _err = process.handle_read_stderr(id);
+        let exit = process.handle_wait(id);
+        assert exit == 0;
+    } else { assert true; }
+}
+
 // ── Acceptance: kill terminates a live child ──────────────────────────
 test "process handle (windows): kill terminates a live child" ![io] {
     if _is_windows() {
