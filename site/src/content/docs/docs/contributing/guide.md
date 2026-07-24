@@ -48,7 +48,31 @@ git checkout -b feature/my-feature main
 3. Update the emitter (`compiler/src/emit_native.sfn`)
 4. Extend LLVM lowering (`compiler/src/llvm/lowering/`)
 5. Add regression tests (`compiler/tests/`)
-6. Update the language spec (`site/src/content/docs/docs/reference/spec/NN-*.md` or `.../reference/preview/*.md`) and `docs/status.md`
+6. Update `docs/status.md`, the source of truth for shipped behavior
+7. Update the language spec (`site/src/content/docs/docs/reference/spec/NN-*.md`
+   or `.../reference/preview/*.md`) and then adjust roadmap and public claims
+
+### Guarding public claims
+
+Behavior-changing work updates `docs/status.md` first. Public examples and
+claims are adjusted only after that source of truth is current. Before
+submitting changes to the homepage, onboarding docs, README, installer copy, or
+release templates, run:
+
+```bash
+make fetch-seed
+cd site
+npm run check:public-claims
+npm run build
+npm run check:internal-links
+```
+
+The public-claim guard compiler-checks the canonical homepage and first-run
+examples, asserts the missing-effect diagnostic by code and bounded message
+fragment, rejects curated retired wording, and checks critical link and release
+asset contracts. Its deliberately stale fixtures live under
+`site/scripts/fixtures/`; add a focused case there when extending a guard
+category. Failures identify the category, source file, and expected contract.
 
 ### Self-Hosting Invariant
 

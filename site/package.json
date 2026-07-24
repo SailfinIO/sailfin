@@ -5,7 +5,9 @@
   "private": true,
   "scripts": {
     "dev": "astro dev",
-    "check:hero": "bash scripts/verify-hero-example.sh",
+    "check:hero": "bash scripts/verify-public-examples.sh",
+    "check:public-claims": "node --test scripts/check-public-claims.test.mjs && node scripts/check-public-claims.mjs && bash scripts/verify-public-examples.sh",
+    "check:internal-links": "node scripts/check-internal-links.mjs",
     "build": "astro build",
     "preview": "npm run build && astro preview",
     "astro": "astro"
