@@ -112,11 +112,11 @@ fn _shell_read_cmd(cmd: string) -> string ![io] {
 }
 
 fn _ensure_dir_cmd(path: string) ![io] {
-    if !fs.exists(path) { process.run(["mkdir", "-p", path]); }
+    if !fs.exists(path) { fs.createDirectory(path, true); }
 }
 
 fn _ensure_dir_recursive_cmd(path: string) -> void ![io] {
-    if !fs.exists(path) { process.run(["mkdir", "-p", path]); }
+    if !fs.exists(path) { fs.createDirectory(path, true); }
 }
 
 fn _sanitize_filename_cmd(value: string) -> string {

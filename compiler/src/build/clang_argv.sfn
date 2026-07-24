@@ -149,7 +149,7 @@ fn assemble_link_inputs(ll_paths: string[], object_dir: string, opt_flag: string
             if rc == 0 {
                 assembled_to_cache = _atomic_rename_into_place(tmp, obj_path);
             } else {
-                process.run(["rm", "-f", tmp]);
+                fs.deleteFile(tmp);
                 return LinkObjectAssembly {
                     success: false,
                     object_paths: []
