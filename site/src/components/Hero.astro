@@ -2,36 +2,11 @@
 /*
  * Hero.astro — Sailfin marketing hero.
  *
- * Cosmetic changes vs. upstream:
- *   - Headline highlight word uses the brand gradient (violet→magenta)
- *   - Install box gets a `$` prompt and copy-to-clipboard button
- *   - Code window swaps placeholder file title for `server.sfn` monospace
- *   - Subtle radial spotlight behind the headline on dark mode
- *
- * Structural / semantic markup is unchanged from the previous Hero.astro,
- * so routing, SEO and a11y behavior are preserved.
+ * The displayed program is imported verbatim from the compiler-verified
+ * fixture. Keep verification details in site/scripts/verify-hero-example.sh.
  */
 
-const exampleCode = `struct Config {
-    host: string;
-    port: int;
-    verbose: boolean;
-}
-
-fn load_config(path: string) -> Config ![io] {
-    let raw = fs.read(path);
-    return Config.parse(raw);
-}
-
-fn handle(req, res) ![net] {
-    res.send("Sailfin is running");
-}
-
-fn main() ![io, net] {
-    let config = load_config("app.toml");
-    print("Listening on {{config.host}}");
-    serve(handle, { port: config.port });
-}`;
+import exampleCode from "../../examples/hero-effects/hello.sfn?raw";
 
 const installCmd = "curl -fsSL https://raw.githubusercontent.com/SailfinIO/sailfin/main/install.sh | bash";
 ---
@@ -40,14 +15,14 @@ const installCmd = "curl -fsSL https://raw.githubusercontent.com/SailfinIO/sailf
   <div class="hero-inner">
     <div class="hero-text">
       <h1>
-        Know what your code can do
+        Know what your code can do<br />
         <span class="highlight">before it runs</span>
       </h1>
       <p class="hero-subtitle">
         A systems language where every function declares its capabilities — IO, network, clock, and more — with compile-time effect checking.
       </p>
       <div class="hero-actions">
-        <a href="/docs/getting-started/install" class="btn btn-primary">Get Started</a>
+        <a href="/docs/getting-started/install" class="btn btn-primary">Get Started in Ten Minutes</a>
         <a href="/docs/getting-started/tour" class="btn btn-secondary">Take the Tour</a>
       </div>
       <div class="hero-install" role="group" aria-label="Install command">
@@ -69,9 +44,15 @@ const installCmd = "curl -fsSL https://raw.githubusercontent.com/SailfinIO/sailf
           <span class="dot red"></span>
           <span class="dot yellow"></span>
           <span class="dot green"></span>
-          <span class="code-filename">server.sfn</span>
+          <span class="code-filename">hello.sfn · verified with 0.8.0</span>
         </div>
         <pre><code>{exampleCode}</code></pre>
+        <div class="effect-proof">
+          Remove <code>![io]</code> from <code>main</code> and the compiler reports{" "}
+          <strong>E0400: missing required effect io.console</strong>. Restore it and the program prints{" "}
+          <samp>Hello, Sailfin!</samp>.
+        </div>
+        <p class="example-contract">Built-in <code>print</code> needs no import; a standalone file needs no capsule manifest.</p>
       </div>
     </div>
   </div>
@@ -303,10 +284,36 @@ const installCmd = "curl -fsSL https://raw.githubusercontent.com/SailfinIO/sailf
   }
 
   .code-window code {
-    color: #cfc4e0;
+    color: var(--color-text);
     font-size: 0.825rem;
     background: none;
     padding: 0;
+  }
+
+  .effect-proof {
+    padding: 1rem 1.5rem 0.75rem;
+    border-top: 1px solid var(--color-border);
+    color: var(--color-text-secondary);
+    font-size: 0.8rem;
+    line-height: 1.55;
+  }
+
+  .effect-proof code,
+  .effect-proof samp,
+  .example-contract code {
+    color: var(--color-text);
+    font-family: var(--font-mono);
+  }
+
+  .effect-proof strong {
+    color: var(--color-text);
+  }
+
+  .example-contract {
+    margin: 0;
+    padding: 0 1.5rem 1rem;
+    color: var(--color-text-secondary);
+    font-size: 0.72rem;
   }
 
   @media (max-width: 900px) {

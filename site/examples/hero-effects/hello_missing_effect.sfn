@@ -1,0 +1,3 @@
+fn greet(name: string) -> string { return "Hello, " + name + "!"; }
+
+fn main() -> void { print(greet("Sailfin")); }

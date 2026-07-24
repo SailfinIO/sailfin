@@ -17,13 +17,13 @@ const features = [
   },
   {
     title: "Self-Hosted Compiler",
-    description: "Sailfin compiles itself via LLVM. A real native toolchain producing single-binary output — not an interpreter wrapper.",
+    description: "Sailfin's self-hosted compiler emits textual LLVM IR and uses LLVM/clang to produce native binaries. It is a compiler, not an interpreter wrapper.",
     icon: "terminal",
     href: "/docs/contributing/architecture",
   },
   {
     title: "Pragmatic Ergonomics",
-    description: "Conventional TypeScript/Rust-like syntax, fast compilation, and clear error messages with fix-it hints. Easy for humans and LLMs alike.",
+    description: "Conventional TypeScript/Rust-like syntax and clear, source-spanned diagnostics with fix-it hints. Designed to be readable by humans and coding agents alike.",
     icon: "zap",
     href: "/docs/getting-started/tour",
   },
@@ -35,7 +35,7 @@ const features = [
   },
   {
     title: "Structured Concurrency",
-    description: "Routines, channels, spawn / await, and parallel execution ship as a v0 structured-concurrency surface with deterministic nursery lifetimes.",
+    description: "Routine nurseries, channels, spawn / await, and parallel execution ship as a v0 surface. Nursery exit joins every child; current limitations are documented.",
     icon: "layers",
     href: "/docs/reference/concurrency",
   },
@@ -48,11 +48,11 @@ const useCases = [
   },
   {
     title: "Systems Programming",
-    description: "Native compilation via LLVM, single-binary output, and a self-hosted toolchain make Sailfin suitable for performance-critical infrastructure.",
+    description: "The self-hosted compiler lowers through textual LLVM IR and LLVM/clang to native binaries, with a backend seam for future code generators.",
   },
   {
     title: "CLI Tools & Automation",
-    description: "Concise syntax, fast compilation, and single-binary output make Sailfin ideal for developer tooling and build systems.",
+    description: "Concise syntax, explicit effects, and native binary output support auditable developer tooling and automation.",
   },
   {
     title: "Supply-Chain Security",
@@ -99,7 +99,7 @@ const useCases = [
   <section class="cta">
     <div class="container">
       <h2>Ready to dive in?</h2>
-      <p>Install Sailfin and build your first program in minutes.</p>
+      <p>Follow the ten-minute onboarding path and build your first program.</p>
       <div class="cta-actions">
         <a href="/docs/getting-started/install" class="btn btn-primary">Get Started</a>
         <a href="/dl" class="btn btn-secondary">Downloads</a>
