@@ -5,6 +5,7 @@
 // `compiler-common` boundary to #345.
 import { substring } from "../string_utils";
 import { sha256_hex_of_string } from "./hash";
+import { host_is_windows } from "./target";
 
 fn _ends_with_cmd(value: string, suffix: string) -> boolean {
     if suffix.length == 0 { return true; }
@@ -35,6 +36,10 @@ fn _dirname_cmd(path: string) -> string {
 // can derive from `$SAILFIN_BUILD_CACHE_DIR` or a capsule path
 // containing shell metacharacters.
 fn _mktemp_sibling_cmd(dst_path: string) -> string ![io] {
+    // A Windows host has no POSIX `mktemp`; return "" so the caller
+    // degrades to a direct, non-atomic in-place write. Race-free there
+    // because a Windows host emits serially (`_cr_resolve_jobs` → 1).
+    if host_is_windows() { return ""; }
     let dst_dir = _dirname_cmd(dst_path);
     let template = _shell_single_quote_arg(dst_dir + "/.sfn_stage.XXXXXX");
     return _shell_read_cmd("mktemp " + template + " 2>/dev/null");
@@ -231,6 +236,11 @@ fn _shell_single_quote_arg(value: string) -> string {
 // `file_path` is properly shell-quoted so paths containing `'` or
 // other shell metacharacters can't break the command.
 fn _sha256_of_file_cmd(file_path: string) -> string ![io] {
+    // A Windows host has neither `sha256sum` nor `shasum`; return "" (the
+    // existing "no hasher" contract) so the digest falls back to the
+    // version stamp. `_sha256_of_text_file` uses the in-process hasher
+    // for NUL-free artifacts on Windows, keeping content-addressed caching.
+    if host_is_windows() { return ""; }
     let q = _shell_single_quote_arg(file_path);
     let cmd = "(command -v sha256sum >/dev/null 2>&1 && sha256sum " + q
         + " || shasum -a 256 "
@@ -268,6 +278,11 @@ fn _sha256_of_text_file(file_path: string) -> string ![io] {
     let contents = fs.readFile(file_path);
     let inprocess_max = 65536;
     if contents.length > inprocess_max {
+        // On a Windows host the subprocess hasher returns "" (no
+        // `sha256sum`), so hash in-process to keep the >64 KiB artifacts
+        // content-addressable. The POSIX host keeps the popen fast path
+        // (the -O0 CI-shard cost the threshold exists to avoid).
+        if host_is_windows() { return sha256_hex_of_string(contents); }
         return _sha256_of_file_cmd(file_path);
     }
     if contents.length == 0 {
