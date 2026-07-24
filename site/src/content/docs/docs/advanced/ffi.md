@@ -10,7 +10,11 @@ Sailfin's safety system — effect tracking, ownership, borrow checking — oper
 
 This page documents Sailfin's FFI system as specified in §6.1.5 of the language specification.
 
-**Current status:** The parser accepts `unsafe`, `extern`, and raw pointer syntax (`*T`, `*mut T`). The compiler does not yet enforce unsafe semantics at runtime. Full enforcement of all rules described on this page is actively being implemented and will land before the 1.0 release. Code using these constructs should be written to the specification now.
+**Current status:** `extern fn` declarations, native lowering, and declaration
+validation (`E0801`–`E0805`) are shipped. `unsafe` blocks mark author-asserted
+raw-pointer regions. The ownership checker also rejects a bare owned value
+passed to a locally declared extern outside `unsafe` (`E0906`). This is a
+bounded boundary check, not full enforcement of every rule described below.
 
 ## Overview
 
@@ -25,7 +29,10 @@ The trade-off is clear: inside an `unsafe` block, the compiler cannot verify mem
 
 ## `unsafe` Blocks
 
-An `unsafe { ... }` block is a lexical scope inside which raw pointer operations and calls to foreign functions are permitted. Outside this scope, none of those operations are legal — the compiler rejects them.
+An `unsafe { ... }` block is a lexical scope marking raw pointer operations and
+foreign calls as author-asserted. Today the compiler uses that boundary for
+ownership checking of locally declared externs; the broader restrictions in
+this section describe the intended complete FFI model.
 
 ```sfn
 fn allocate_buffer(bytes: usize) -> *u8 ![unsafe] {
@@ -39,7 +46,10 @@ fn allocate_buffer(bytes: usize) -> *u8 ![unsafe] {
 
 The `![unsafe]` effect on the function signature is the designed annotation for functions that contain unsafe blocks. Once fully enforced, the effect will propagate upward — callers of `allocate_buffer` must also declare `![unsafe]` unless they wrap the call in a safe abstraction that handles all unsafe invariants internally and returns a safe type.
 
-> **Current enforcement status:** `unsafe` blocks are parsed by the compiler today. Full runtime enforcement of `![unsafe]` propagation — preventing calls to unsafe functions from safe contexts — is **planned for 1.0**. Write code to the specification now; enforcement will be activated as part of the 1.0 compiler hardening work.
+> **Current enforcement status:** `unsafe` blocks are meaningful to the
+> ownership checker: their interiors are author-asserted, while a raw-pointer
+> escape into a locally declared extern outside one is rejected with `E0906`.
+> General `![unsafe]` effect propagation is not shipped.
 
 The design goal is that `![unsafe]` in a call graph visibly marks every function that directly or indirectly performs unsafe operations. Auditors can grep for `![unsafe]` to find the full unsafe surface of a codebase.
 
@@ -76,7 +86,9 @@ parameters. The return type uses `->`.
 Key properties of `unsafe extern fn` declarations:
 
 - **C ABI by default.** Parameters are passed using the platform C calling convention.
-- **Cannot be called outside an `unsafe` block.** The compiler will enforce this once unsafe enforcement is fully active (planned for 1.0).
+- **Ownership boundary for local declarations.** Passing a bare owned value to
+  a locally declared extern outside an `unsafe` block is rejected with `E0906`.
+  General extern-call gating is not yet enforced.
 - **Raw pointer types are permitted.** The `*T`, `*mut T`, and `*opaque` types are only valid in extern declarations and unsafe blocks.
 - **Must be linked.** The native library providing these functions must be linked into the final binary. Use `[build]` or linker flags to specify the library.
 - **No safety guarantees.** The compiler trusts extern declarations. An incorrect declaration — wrong parameter types, wrong return type — is undefined behavior.
@@ -257,7 +269,7 @@ struct AllocError {
 }
 
 // Safe allocation: wraps malloc, zero-initializes, returns a buffer or an error.
-// `Linear<T>` is parsed but not yet enforced; see the roadmap.
+// Linear<T> is exactly-once enforced.
 export fn allocate_buffer(size: usize) -> Linear<ManagedBuffer> | AllocError ![unsafe] {
     unsafe {
         let ptr = malloc(size);
@@ -282,15 +294,13 @@ export fn free_buffer(buffer: Linear<ManagedBuffer>) -> void ![unsafe] {
 }
 ```
 
-The `Linear<ManagedBuffer>` return type is the intended safety mechanism: once
-enforcement ships, a `Linear<T>` value must be consumed exactly once — it
-cannot be dropped silently. Until that lands, treat the wrapper as
-documentation for the intended ownership discipline.
+The `Linear<ManagedBuffer>` return type is an enforced safety mechanism: a
+`Linear<T>` value must be consumed exactly once and cannot be dropped silently.
 
 > **Current status**: `Linear<T>`, `Affine<T>`, and related borrow-checker
-> enforcement are **parsed but not yet enforced**. See the
-> [roadmap](/roadmap) for the post-1.0 sequencing. Do not rely on the
-> compiler rejecting double-free or forget-to-free today.
+> single-use rules are enforced. Use-after-move/second binding raises
+> `E0901`/`E0904`; an unconsumed `Linear<T>` at scope exit raises `E0907`.
+> Shared-borrow and view-lifetime checking remain in progress.
 
 ## Error Handling Across FFI
 
@@ -420,4 +430,4 @@ These examples require `![unsafe]` and the `"unsafe"` capability in their capsul
 | Raw address of value | `&raw value` |
 | Capsule manifest | `[capabilities] required = ["unsafe"]` |
 | Workspace policy | `[policies.unsafe] allowed_capsules = [...]` |
-| Status | Syntax parsed; enforcement planned in native compiler |
+| Status | Extern declarations shipped; bounded ownership boundary enforced (`E0906`) |

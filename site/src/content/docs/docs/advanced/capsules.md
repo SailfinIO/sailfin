@@ -520,20 +520,10 @@ sfn publish path/to/capsule     # or package a capsule from a specific path
 
 `sfn publish` bundles the capsule source (`capsule.toml` + `src/**/*.sfn`) into a SFNPKG payload, computes a SHA-256 digest, and POSTs it to `<registry>/api/publish` using the bearer token from `SFN_TOKEN` or `~/.sfn/credentials`. The registry URL is resolved through the same precedence as `sfn add` (`SFN_REGISTRY` → `~/.sfn/config.toml` → default). Capability auditing and signed provenance are in progress on the [roadmap](https://sailfin.dev/roadmap).
 
-The planned publication flow:
-
-```bash
-# Planned — not yet implemented
-sfn publish
-```
-
-Before publishing, the toolchain will:
-
-1. Run `sfn test` and fail if any tests fail.
-2. Verify `capsule.toml` has `name`, `version`, `description`, and `license`.
-3. Check that declared `[capabilities]` match the effects used in source.
-4. Package the source (excluding `tests/`, build artifacts, and `.gitignore`d files).
-5. Upload to the registry under your authenticated account.
+The registry and `sfn publish` upload path are shipped. The current command
+validates the manifest, packages `capsule.toml` and `src/**/*.sfn`, and uploads
+the payload. Automatic pre-publish tests, inferred capability auditing, broader
+ignore-file packaging rules, and signed provenance remain future hardening.
 
 Capsule versions are immutable once published. To update a capsule, increment the version in `capsule.toml` and publish again.
 
@@ -552,4 +542,4 @@ Capsule versions are immutable once published. To update a capsule, increment th
 | Import (workspace) | `import { X } from "core"` |
 | Run | `sfn run src/main.sfn` |
 | Test | `sfn test` |
-| Publish | `sfn publish` (planned) |
+| Publish | `sfn publish [path]` |
