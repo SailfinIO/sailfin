@@ -1,0 +1,88 @@
+// compiler/tests/unit/fs_write_full_payload_test.sfn
+//
+// Regression guard for the file writer's short-`fwrite` completeness
+// contract. `sfn_fs_write_file` / `sfn_fs_append_file` must write the whole
+// payload even when the underlying `fwrite` returns a short count under IO
+// pressure — a partial write silently drops the payload tail, and for a
+// compiler `.ll` that tail is the trailing `define @main`, which links as
+// `undefined main`. We can't force a short write in-process, so
+// this asserts the round-trip completeness invariant the fix guarantees:
+// a large payload survives write→read byte-for-byte, tail included.
+import { find } from "sfn/strings";
+import { with_tmp_dir } from "sfn/test";
+
+// Build a payload comfortably larger than a typical stdio buffer (~4-8 KiB)
+// by doubling, so any single-`fwrite` truncation would lose the tail.
+fn _large_payload() -> string {
+    let mut body = "sailfin-fs-writer-regression-chunk-0123456789ABCDEF\n";
+    let mut i: int = 0;
+    loop {
+        if i >= 10 { break; }
+        body = body + body;
+        i += 1;
+    }
+    // Distinctive terminal marker standing in for the `define @main` tail.
+    return body + ";; TAIL-MARKER-END";
+}
+
+test "fs writer: large payload round-trips without tail truncation" ![io] {
+    let payload = _large_payload();
+    let outcome = with_tmp_dir(fn (dir: string) -> int {
+        let path = dir + "/writer_payload.bin";
+        fs.writeFile(path, payload);
+        let readback = fs.readFile(path);
+        // Exact length proves no bytes were dropped mid-write.
+        assert readback.length == payload.length;
+        // The terminal marker (written last) must survive — the exact
+        // failure mode when a short write truncates the tail.
+        assert find(readback, ";; TAIL-MARKER-END", 0) >= 0;
+        return 0;
+    });
+    assert outcome == 0;
+}
+
+test "fs writer: append accumulates full payload across two writes" ![io] {
+    let payload = _large_payload();
+    let outcome = with_tmp_dir(fn (dir: string) -> int {
+        let path = dir + "/writer_append.bin";
+        fs.writeFile(path, payload);
+        fs.appendFile(path, payload);
+        let readback = fs.readFile(path);
+        assert readback.length == payload.length * 2;
+        return 0;
+    });
+    assert outcome == 0;
+}
+
+// `fs.writeLines` is the primary self-host IR emit path
+// (`emit_native.sfn` → `write_llvm_lines_chunked`); a long final line must
+// survive intact, since the module's trailing `define @main` is emitted as
+// the last line.
+test "fs writer: writeLines preserves a long final line" ![io] {
+    let big = _large_payload();
+    let mut lines: string[] = [];
+    lines.push("define i32 @main(i32 %argc, i8** %argv) {");
+    lines.push("entry:");
+    lines.push(big);
+    lines.push("  ret i32 0");
+    lines.push("}");
+    let outcome = with_tmp_dir(fn (dir: string) -> int {
+        let path = dir + "/writer_lines.ll";
+        fs.writeLines(path, lines);
+        let readback = fs.readFile(path);
+        // Every line body plus its one newline must land — computed from the
+        // array itself so the assert proves "no line truncated" without
+        // brittle hand-counted literal lengths.
+        let mut expected: int = 0;
+        let mut k: int = 0;
+        loop {
+            if k >= lines.length { break; }
+            expected = expected + lines[k].length + 1;
+            k += 1;
+        }
+        assert readback.length == expected;
+        assert find(readback, ";; TAIL-MARKER-END", 0) >= 0;
+        return 0;
+    });
+    assert outcome == 0;
+}

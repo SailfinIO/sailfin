@@ -444,6 +444,26 @@ fn sfn_fs_read_file(path: *u8) -> *u8 ![io] {
     return buf;
 }
 
+// Write the full `len`-byte payload at `buf` to the open stream `f`,
+// looping over short `fwrite` counts. A single `fwrite` can return fewer
+// members than requested when an internal buffer flush hits IO/memory
+// pressure; an unchecked call therefore silently truncates the file,
+// dropping the payload tail — for a compiler `.ll` that tail is the
+// trailing `define @main`, which then links as `undefined main`.
+// Returns the number of bytes actually written; a return `< len` means a
+// hard write error stalled progress (the stream is left where it stopped).
+fn _fs_fwrite_all(buf: *u8, len: i64, f: *File) -> i64 {
+    let mut written: i64 = 0;
+    loop {
+        if written >= len { break; }
+        let chunk_ptr: *u8 = ((buf as i64) + written) as *u8;
+        let n: i64 = fwrite(chunk_ptr, 1 as usize, (len - written) as usize, f) as i64;
+        if n <= 0 { break; }
+        written += n;
+    }
+    return written;
+}
+
 // `sfn_fs_write_file(path, contents)` — write the full payload of
 // `contents` to `path` in binary mode (`"wb"`), truncating any
 // prior contents. Pure Sailfin for the common case: `fopen` +
@@ -466,9 +486,7 @@ fn sfn_fs_write_file(path: *u8, contents: *u8) -> void ![io] {
     if f as i64 == 0 { return; }
 
     let len: i64 = strlen(real) as i64;
-    if len > 0 {
-        fwrite(real, 1 as usize, len as usize, f);
-    }
+    let _ = _fs_fwrite_all(real, len, f);
     fclose(f);
 }
 
@@ -489,9 +507,7 @@ fn sfn_fs_append_file(path: *u8, contents: *u8) -> void ![io] {
     if f as i64 == 0 { return; }
 
     let len: i64 = strlen(real) as i64;
-    if len > 0 {
-        fwrite(real, 1 as usize, len as usize, f);
-    }
+    let _ = _fs_fwrite_all(real, len, f);
     fclose(f);
 }
 
@@ -980,17 +996,17 @@ fn sfn_fs_write_lines(path: *u8, lines: *u8) -> void ![io] {
         if i >= n { break; }
         let slot_ptr: *i64 = slots + i;
         let entry_addr: i64 = sailfin_intrinsic_pointer_read_i64(slot_ptr);
-        if entry_addr == 0 {
-            fwrite(nl_ptr, 1 as usize, 1 as usize, f);
-        } else {
+        if entry_addr == 0 { let _ = _fs_fwrite_all(nl_ptr, 1, f); } else {
             let entry: *u8 = entry_addr as *u8;
             let mut line: *u8 = entry;
             if _fs_is_immediate(entry) { line = _fs_decode_immediate(entry); }
             let llen: i64 = strlen(line) as i64;
-            if llen > 0 {
-                fwrite(line, 1 as usize, llen as usize, f);
-            }
-            fwrite(nl_ptr, 1 as usize, 1 as usize, f);
+            // Loop over short `fwrite` counts so a large line body is never
+            // truncated mid-emit — this is the primary self-host IR emit
+            // path (`fs.writeLines`), so a dropped tail here mirrors the
+            // `undefined main` link failure `_fs_fwrite_all` guards.
+            let _ = _fs_fwrite_all(line, llen, f);
+            let _ = _fs_fwrite_all(nl_ptr, 1, f);
         }
         i = i + 1;
     }
