@@ -1,0 +1,106 @@
+// End-to-end regression for SFN-393 / SFEP-0050: a pooled/multi-file
+// `--json` run aggregates each child's counts from the streamed
+// `summary` line it routes to its own stderr, never from a
+// `_subframe_summary.json` side-channel file (the transport the stream
+// replaced). This is the multi-file analog of
+// `harness_stream_records_test.sfn`'s single-file file-absence check,
+// modeled on `runner_json_multifile_test.sfn`'s single-frame contract.
+//
+// Native e2e per `.claude/rules/no-bash-e2e.md`.
+import { find } from "sfn/strings";
+import { clean_runner_env, nested_runner_scratch, with_tmp_dir } from "sfn/test";
+
+fn _sfn_bin() -> string ![io] {
+    let configured = env.get("SAILFIN_BIN");
+    if configured.length > 0 { return configured; }
+    return "build/bin/sfn";
+}
+
+// alpha: 2 passing tests. beta: 1 passing, 1 failing. Aggregate over
+// both files: total 4, passed 3, failed 1.
+fn _write_fixtures(dir: string) -> void ![io] {
+    fs.writeFile(dir + "/alpha_test.sfn", "test \"alpha: one\" { assert 1 + 1 == 2; }\n"
+        + "test \"alpha: two\" { assert 2 * 3 == 6; }\n");
+    fs.writeFile(dir + "/beta_test.sfn", "test \"beta: one\" { assert 4 - 1 == 3; }\n"
+        + "test \"beta: two\" { assert 1 == 2; }\n");
+}
+
+fn _count_occurrences(haystack: string, needle: string) -> int {
+    let mut count = 0;
+    let mut start = 0;
+    loop {
+        let pos = find(haystack, needle, start);
+        if pos < 0 { break; }
+        count += 1;
+        start = pos + 1;
+    }
+    return count;
+}
+
+test "subframe aggregation: multi-file --json aggregates from the stream, single frame" ![io] {
+    let code = with_tmp_dir(fn (dir: string) -> int {
+        _write_fixtures(dir);
+        let scratch = nested_runner_scratch("subframe");
+        let exit = process.run_capture([_sfn_bin(), "test", dir, "--json"], clean_runner_env(scratch));
+        let out = process.capture_take_stdout();
+        let _ = process.capture_take_stderr();
+
+        // A failing test propagates a non-zero exit.
+        assert exit != 0;
+        // Single-frame contract: exactly one start and one summary for
+        // the whole run, not one pair per file.
+        assert _count_occurrences(out, "\"event\":\"start\"") == 1;
+        assert _count_occurrences(out, "\"event\":\"summary\"") == 1;
+        // Aggregate totals across both files: 4 tests, 3 pass, 1 fail.
+        assert find(out, "\"total\":4", 0) >= 0;
+        assert find(out, "\"passed\":3", 0) >= 0;
+        assert find(out, "\"failed\":1", 0) >= 0;
+        // Every non-blank stdout line is a well-formed JSON object.
+        let mut line_start: int = 0;
+        loop {
+            let nl = find(out, "\n", line_start);
+            let mut line_end: int = out.length as int;
+            if nl >= 0 { line_end = nl; }
+            let line_len: int = line_end - line_start;
+            if line_len > 0 {
+                let line = out.substring(line_start, line_end);
+                assert find(line, "{", 0) == 0;
+            }
+            if nl < 0 { break; }
+            line_start = nl + 1;
+        }
+
+        // No retired sub-frame side-channel file was written anywhere
+        // under the run's scratch root — the parent aggregates purely
+        // from the streamed per-child summary lines it skims off each
+        // reaped child's stderr.
+        assert ! fs.exists(scratch + "/_subframe_summary.json");
+        return 0;
+    });
+    assert code == 0;
+}
+
+test "subframe aggregation: --jobs 2 aggregates match the serial totals, no side-channel file" ![io] {
+    let code = with_tmp_dir(fn (dir: string) -> int {
+        _write_fixtures(dir);
+        let scratch = nested_runner_scratch("subframe-jobs2");
+        let exit = process.run_capture([_sfn_bin(), "test", dir, "--jobs", "2", "--json"], clean_runner_env(scratch));
+        let out = process.capture_take_stdout();
+        let _ = process.capture_take_stderr();
+
+        assert exit != 0;
+        assert _count_occurrences(out, "\"event\":\"start\"") == 1;
+        assert _count_occurrences(out, "\"event\":\"summary\"") == 1;
+        assert find(out, "\"total\":4", 0) >= 0;
+        assert find(out, "\"passed\":3", 0) >= 0;
+        assert find(out, "\"failed\":1", 0) >= 0;
+
+        assert ! fs.exists(scratch + "/_subframe_summary.json");
+        // The pooled path shards per-file scratch under `sub-<i>` — check
+        // there too since a stray side-channel write would land per-child.
+        assert ! fs.exists(scratch + "/sub-0/_subframe_summary.json");
+        assert ! fs.exists(scratch + "/sub-1/_subframe_summary.json");
+        return 0;
+    });
+    assert code == 0;
+}

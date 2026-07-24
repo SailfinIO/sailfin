@@ -1,0 +1,86 @@
+// End-to-end regression for SFN-393 / SFEP-0050: a hard crash mid-suite
+// must not mask an earlier pass as an all-clean run (#1206 gate) under
+// the streamed record transport.
+//
+// A test file that passes one test then SIGSEGVs in a later test writes
+// its passing test's `SFTR` record to the child's stderr pipe before the
+// crash (per-record flush, `runtime/sfn/assert.sfn`); the parent
+// (`_run_test_binary`) demuxes that record inline as it arrives, so it
+// survives the crash regardless of how the process died. The crux this
+// test pins: the run must never report `"failed":0` (an apparent clean
+// pass) when a crash happened — it must exit non-zero and surface at
+// least one failure in the aggregate summary.
+//
+// Crash mechanism mirrors `crash_attribution_test.sfn` (#1206): non-tail
+// recursion (work after the recursive call defeats TCO) faults with
+// SIGSEGV (exit 139) rather than looping into a timeout, so the crash is
+// deterministic. `SAILFIN_TEST_RETRY=0` disables the signal-kill retry
+// (137/139 are retried once by default under transient CI memory
+// pressure) so the crash is observed exactly once.
+//
+// Native e2e per `.claude/rules/no-bash-e2e.md`.
+import { find } from "sfn/strings";
+import { clean_runner_env, nested_runner_scratch, with_tmp_dir } from "sfn/test";
+
+fn _sfn_bin() -> string ![io] {
+    let configured = env.get("SAILFIN_BIN");
+    if configured.length > 0 { return configured; }
+    return "build/bin/sfn";
+}
+
+fn _crash_fixture_src() -> string {
+    return "fn _deep(n: int) -> int {\n" + "    let x = _deep(n + 1);\n"
+        + "    return x + 1;\n"
+        + "}\n\n"
+        + "test \"a: passes first\" {\n"
+        + "    assert 1 + 1 == 2;\n"
+        + "}\n\n"
+        + "test \"b: crashes\" {\n"
+        + "    let r = _deep(1);\n"
+        + "    assert r == 0;\n"
+        + "}\n";
+}
+
+// Clean top-level child env plus a disabled signal-kill retry so the
+// crash is observed once, deterministically (no doubled wall-clock, no
+// nondeterministic pass-on-retry — the recursion crashes identically on
+// a retry, but skipping it keeps the run single-shot and fast).
+fn _child_env() -> string[] ![io] {
+    let raw = clean_runner_env(nested_runner_scratch("crash-durability"));
+    let mut e: string[] = [];
+    let mut i: int = 0;
+    loop {
+        if i >= raw.length { break; }
+        let entry = raw[i];
+        if find(entry, "SAILFIN_TEST_RETRY=", 0) != 0 { e.push(entry); }
+        i += 1;
+    }
+    e.push("SAILFIN_TEST_RETRY=0");
+    return e;
+}
+
+test "harness crash durability: a crash mid-suite is never reported as an all-pass run (#1206)" ![io] {
+    let code = with_tmp_dir(fn (dir: string) -> int {
+        let fixture = dir + "/crash_durability_test.sfn";
+        fs.writeFile(fixture, _crash_fixture_src());
+        let exit = process.run_capture([_sfn_bin(), "test", fixture, "--json"], _child_env());
+        let out = process.capture_take_stdout();
+        let err = process.capture_take_stderr();
+        let combined = out + err;
+
+        // A fault is a non-zero exit (139 = SIGSEGV), never masked as clean.
+        assert exit != 0;
+        // The crux: the aggregate summary must never claim zero failures —
+        // that would mean the crash was silently swallowed as a pass.
+        assert find(combined, "\"failed\":0", 0) < 0;
+        // The run still emitted a well-formed summary event rather than
+        // dying with no jsonl at all.
+        assert find(combined, "\"event\":\"summary\"", 0) >= 0;
+        // At least one failure is recorded in the stream (the crashed
+        // file's attribution, since the harness cannot resume mid-crash
+        // to emit a normal per-test failure record for "b: crashes").
+        assert find(combined, "\"status\":\"fail\"", 0) >= 0;
+        return 0;
+    });
+    assert code == 0;
+}
