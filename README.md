@@ -117,9 +117,18 @@ uses `io`, its `capsule.toml` must include `io` in `[capabilities].required`.
 
 ## Installing
 
-Releases are published as per-OS/arch tarballs containing `bin/sailfin` (or
-`bin/sailfin.exe` on Windows). The installer defaults to the latest release
-and installs to `~/.local/bin` on Linux/macOS, or
+The v0.8.0 release provides pre-built archives for Linux x86_64, macOS arm64
+(Apple Silicon), and Windows x86_64. The archive installs the compiler as both
+`sailfin` and `sfn`.
+
+Installing the compiler is only the first prerequisite: compiling, running, or
+testing Sailfin programs still requires LLVM tools 17+ or 18+, `clang`, and the
+platform linker. The Linux/macOS bootstrap script additionally needs `curl`,
+`tar`, `uname`, `mktemp`, and `jq`; signature verification needs OpenSSL 1.1.1+
+with raw-Ed25519 support.
+
+The installer defaults to the latest matching release and exposes the commands
+in `~/.local/bin` on Linux/macOS or
 `%LOCALAPPDATA%\sailfin\bin` on Windows.
 
 ### Linux / macOS
@@ -131,7 +140,7 @@ curl -fsSL https://raw.githubusercontent.com/SailfinIO/sailfin/main/install.sh |
 To pin a specific release:
 
 ```sh
-VERSION=0.8.0-alpha.5
+VERSION=0.8.0
 curl -fsSL https://raw.githubusercontent.com/SailfinIO/sailfin/main/install.sh | VERSION="$VERSION" bash
 ```
 
@@ -144,13 +153,20 @@ irm https://raw.githubusercontent.com/SailfinIO/sailfin/main/install.ps1 | iex
 To pin a specific release:
 
 ```powershell
-$env:VERSION = "<version>"
+$env:VERSION = "0.8.0"
 irm https://raw.githubusercontent.com/SailfinIO/sailfin/main/install.ps1 | iex
 ```
 
 Release assets follow the pattern `sailfin_<version>_<os>_<arch>.tar.gz`.
 Set `GITHUB_TOKEN` to raise the GitHub API rate limit if release lookup is
 throttled.
+
+Both bootstrap scripts try to verify the signed `SHA256SUMS` manifest and the
+selected archive's SHA-256 digest before extraction. They warn and continue
+only when the signed manifest is absent or suitable OpenSSL is unavailable;
+once verification can run, malformed or invalid signed metadata and digest
+mismatches abort. See the
+[manual verification guide](https://sailfin.dev/docs/getting-started/verify-download/).
 
 ## Building From Source
 
