@@ -23,25 +23,39 @@
 import { _get_env_cmd } from "../build_flags";
 import { _dirname, _path_basename, _path_join } from "./paths";
 
-// Non-shelling host-OS probe. Deliberately mirrors
+// The resolved build HOST OS — the OS the compile is running on, as
+// opposed to the artifact target (`build_target_os`). Host-parallelism
+// helpers (`_mktemp_sibling_cmd`, `_cr_resolve_jobs`) and the host link
+// probes (`_openssl_link_search_flags`) gate on this so a
+// Linux-host→Windows-target cross-build keeps host behaviour.
+//
+// The `SAILFIN_HOST_OS` override wins (a test seam mirroring
+// `SAILFIN_TARGET_OS`, so every Windows-host leg is unit-testable on a
+// Linux runner). Otherwise a non-shelling probe mirroring
 // `llvm/lowering_debug_state.sfn::_host_os` (the SFN-49 de-shell): a
 // `/proc/self/status` probe for Linux, a `/System/Library/CoreServices`
 // probe for Darwin, then the `SystemRoot` env var for Windows, defaulting
 // to Linux. No `uname`/`sh` subprocess — native Windows has neither.
-fn _build_host_os() -> string ![io] {
+fn build_host_os() -> string ![io] {
+    let host_override = _get_env_cmd("SAILFIN_HOST_OS");
+    if host_override.length > 0 { return host_override; }
     if fs.exists("/proc/self/status") { return "Linux"; }
     if fs.exists("/System/Library/CoreServices") { return "Darwin"; }
     if _get_env_cmd("SystemRoot").length > 0 { return "Windows"; }
     return "Linux";
 }
 
+// True when the compile is running on a Windows host. Gates the
+// host-parallelism / host-probe leaf helpers off the POSIX shell path.
+fn host_is_windows() -> boolean ![io] { return build_host_os() == "Windows"; }
+
 // The resolved build target OS: the `SAILFIN_TARGET_OS` override wins (the
 // cross-compile + e2e-test hook the emit-time locators already honor),
-// else the host probe.
+// else the host OS.
 fn build_target_os() -> string ![io] {
     let target_override = _get_env_cmd("SAILFIN_TARGET_OS");
     if target_override.length > 0 { return target_override; }
-    return _build_host_os();
+    return build_host_os();
 }
 
 fn target_os_is_windows(target_os: string) -> boolean {
@@ -139,6 +153,8 @@ fn target_condition_runtime_sfn_sources(sources: string[], target_os: string) ->
 }
 
 export {
+    build_host_os,
+    host_is_windows,
     build_target_os,
     target_os_is_windows,
     target_clang_triple,
