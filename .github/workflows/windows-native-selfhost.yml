@@ -1,0 +1,193 @@
+# Windows Native Self-Host (M7) — exploratory bootstrap harness.
+#
+# Executes SFEP-0021 milestone M7 (SFN-53): produce the first *native
+# MSVC-ABI* Sailfin compiler on a `windows-latest` runner and prove it
+# boots. There is no released native Windows seed yet (that is M11), so
+# per SFEP-0021 §4.3 the bootstrap seed is the mingw-cross exe, which can
+# only be produced on Linux — hence two jobs:
+#
+#   cross-seed   (ubuntu)  — self-host main + `make ci-cross-windows` →
+#                            the mingw-cross sailfin.exe (bootstrap seed).
+#   native-build (windows) — run `<cross-exe> build -p compiler` with
+#                            SAILFIN_TARGET_OS=Windows (the target seam
+#                            SFN-52 already wired), then --version / check
+#                            / R1 (try-throw) / R3 (struct-channel) gates.
+#
+# This is a manual/dispatch harness, not the permanent CI job (that is
+# M9/SFN-55). It is expected to iterate: the deepest unknowns are R1
+# (`setjmp` symbol binding under MSVC UCRT) and R3 (struct-by-value ABI),
+# plus the UCRT/stub link surface — all of which only a real native link
+# surfaces. Keep it dispatchable until M7 is green, then fold into M9.
+name: Windows Native Self-Host (M7)
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - claude/sfn-53-windows-native-runner
+
+permissions:
+  contents: read
+
+jobs:
+  cross-seed:
+    name: Build mingw-cross bootstrap seed [linux]
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v7
+
+      - name: Resolve seed version from bootstrap.toml
+        id: seed
+        shell: bash
+        run: |
+          set -euo pipefail
+          pin="$(awk '
+            /^\[[^]]+\]/ { section=$0 }
+            section == "[seed]" && /^version[[:space:]]*=/ { gsub(/"/, "", $3); print $3; exit }
+          ' bootstrap.toml)"
+          [ -n "$pin" ] || { echo "[seed] bootstrap.toml [seed].version empty" >&2; exit 1; }
+          echo "seed_version=$pin" >> "$GITHUB_OUTPUT"
+
+      - name: Install clang + llvm (Linux)
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y clang-18 llvm-18 jq
+          echo "CLANG=clang-18" >> "$GITHUB_ENV"
+
+      - name: Build native compiler (self-host main)
+        uses: ./.github/actions/sailfin-build
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          mode: build-only
+          target: linux-x86_64
+          clang: clang-18
+          seed_version: ${{ steps.seed.outputs.seed_version }}
+          package: 'false'
+
+      - name: Install MinGW-w64 cross-compiler (Linux)
+        run: |
+          set -euo pipefail
+          sudo apt-get install -y --no-install-recommends gcc-mingw-w64-x86-64
+          x86_64-w64-mingw32-gcc --version | head -1
+
+      - name: Cross-compile the bootstrap seed (Linux)
+        shell: bash
+        run: make ci-cross-windows
+
+      - name: Upload mingw-cross bootstrap seed
+        uses: actions/upload-artifact@v7
+        with:
+          name: windows-cross-seed
+          path: dist/installer-windows-x86_64.tar.gz
+          if-no-files-found: error
+          retention-days: 1
+
+  native-build:
+    name: Native MSVC build from cross seed [windows-latest]
+    needs: cross-seed
+    runs-on: windows-latest
+    timeout-minutes: 90
+    # The whole job runs with the Windows target seam active. SFN-52's
+    # build_target_os() would also probe %SystemRoot% natively, but the
+    # explicit override is the reliable selector (child processes may see
+    # an empty env), and it documents intent.
+    env:
+      SAILFIN_TARGET_OS: Windows
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v7
+
+      - name: Download mingw-cross bootstrap seed
+        uses: actions/download-artifact@v8
+        with:
+          name: windows-cross-seed
+          path: seed-dl
+
+      - name: Stage the bootstrap seed
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p seed
+          tar -xzf seed-dl/installer-windows-x86_64.tar.gz -C seed
+          EXE="$(find "$PWD/seed" -name sailfin.exe | head -1)"
+          [ -n "$EXE" ] || { echo "sailfin.exe not found in bootstrap seed" >&2; exit 1; }
+          echo "SEED_EXE=$EXE" >> "$GITHUB_ENV"
+          echo "staged seed: $EXE"
+          "$EXE" --version || true
+
+      - name: Set up MSVC developer environment (UCRT + libs on PATH/LIB/INCLUDE)
+        uses: ilammy/msvc-dev-cmd@v1
+        with:
+          arch: x64
+
+      - name: Ensure LLVM (clang + lld-link) present
+        shell: bash
+        run: |
+          set -euo pipefail
+          # windows-latest ships LLVM; surface the versions the native link
+          # will use so a toolchain mismatch is visible in the log.
+          clang --version | head -1
+          lld-link --version || true
+          echo "clang: $(command -v clang)"
+
+      - name: Native MSVC build of the compiler (Stage 2)
+        shell: bash
+        run: |
+          set -euo pipefail
+          # Call the seed directly rather than `make rebuild` — the
+          # GnuWin32 make on windows-latest is too old (SFEP-0021 §4.4),
+          # and `build -p compiler` is exactly what `make rebuild` shells
+          # (Makefile rebuild-impl). SAILFIN_TARGET_OS=Windows drives the
+          # SFN-52 target seam (MSVC triple, lld-link, POSIX-lib drop,
+          # process_windows.sfn swap).
+          "$SEED_EXE" build -p compiler
+          echo "--- locating native-built compiler ---"
+          OUT=""
+          for c in build/sailfin/program.exe build/sailfin/program build/bin/sfn.exe build/bin/sfn; do
+            if [ -f "$c" ]; then OUT="$PWD/$c"; break; fi
+          done
+          [ -n "$OUT" ] || { echo "native-built compiler not found under build/" >&2; ls -R build | head -50; exit 1; }
+          echo "NATIVE_SFN=$OUT" >> "$GITHUB_ENV"
+          echo "native compiler: $OUT"
+
+      - name: Gate — boots and prints version
+        shell: bash
+        run: |
+          set -euo pipefail
+          out="$("$NATIVE_SFN" --version)"
+          echo "version: $out"
+          case "$out" in
+            "sfn "*) echo "ok: native MSVC compiler boots" ;;
+            *) echo "FAIL: unexpected --version output: $out" >&2; exit 1 ;;
+          esac
+
+      - name: Gate — frontend check (hello-world)
+        shell: bash
+        run: |
+          set -euo pipefail
+          "$NATIVE_SFN" check examples/basics/hello-world.sfn
+          echo "ok: check passed"
+
+      - name: Gate — end-to-end run (hello-world)
+        shell: bash
+        run: |
+          set -euo pipefail
+          "$NATIVE_SFN" run examples/basics/hello-world.sfn
+          echo "ok: hello-world ran"
+
+      - name: Gate R1 — try/throw (setjmp/longjmp under MSVC UCRT)
+        shell: bash
+        run: |
+          set -euo pipefail
+          "$NATIVE_SFN" run examples/basics/try-catch-finally.sfn
+          echo "ok: R1 try/throw ran"
+
+      - name: Gate R3 — struct-channel round-trip (Microsoft x64 struct ABI)
+        shell: bash
+        run: |
+          set -euo pipefail
+          "$NATIVE_SFN" run examples/concurrency/channels.sfn
+          echo "ok: R3 struct-channel ran"
