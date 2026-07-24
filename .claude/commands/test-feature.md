@@ -17,7 +17,8 @@ Run targeted tests for a specific compiler feature or area.
    ```
 
 3. If tests pass and the issue explicitly asks for broader coverage, or the
-   change is structural/high-risk, run the relevant broader gate:
+   change is structural/high-risk, run the relevant broader gate per
+   CLAUDE.md's `## The validation ladder`:
    ```
    make test
    ```
@@ -28,5 +29,4 @@ Run targeted tests for a specific compiler feature or area.
 
 ## Important
 
-- The compiler self-caps memory (8 GiB on Linux); see `.claude/rules/compiler-safety.md`.
 - If you can't find tests for the feature, say so — don't skip this step silently.

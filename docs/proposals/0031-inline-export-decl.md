@@ -380,7 +380,7 @@ consumer imports all three, calls them, and **builds + runs** to a binary that
 prints a value derived from the `int[]` and the struct fields. This is the direct
 #1681 regression — it must fail on today's compiler (the lowering fatal) and pass
 after the change. Thread `PATH` + `SAILFIN_TEST_SCRATCH` into the nested build per
-`.claude/rules/no-bash-e2e.md`.
+`docs/conventions/e2e-tests.md`.
 
 **Self-host gate:** `make compile` then `make check`.
 

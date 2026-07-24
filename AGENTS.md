@@ -26,7 +26,7 @@
 - Timeouts still matter: wrap direct single-file compiler invocations with `timeout 60`; `make` targets manage their own timeouts.
 - Before committing changes to `compiler/src/*.sfn`, run `make compile` (or `make check`) before test-only validation so targeted tests do not run against a stale compiler binary.
 - If a change is structural (file splits, module graph changes, renamed exports), run `make clean-build` before rebuilding.
-- Fix compiler failures in `compiler/src/*.sfn`; the build driver (`compiler/src/cli_main.sfn` + `compiler/src/capsule_resolver.sfn`) is pure orchestration and must not grow fixups.
+- Fix compiler failures in `compiler/src/*.sfn`; the build driver (`compiler/src/cli/` + `compiler/src/capsule_resolver.sfn`) is pure orchestration and must not grow fixups.
 
 ## Style, Tests, and Documentation
 

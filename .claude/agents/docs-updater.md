@@ -24,7 +24,7 @@ Always update in this order: status → spec → roadmap.
 
 ## When to Update
 
-- **New feature implemented**: Add to status.md, document in the appropriate `spec/NN-*.md` chapter, update `site/src/pages/roadmap.astro` progress. If the feature was previously a preview, remove its `preview/*.md` page. **If the feature has an SFEP** (`docs/proposals/NNNN-*.md`), flip its front-matter `status:` to `Implemented`, bump `updated:`, point `graduates-to:` at the shipped chapter, and update its row in the `docs/proposals/README.md` registry — but only once it clears the full Stage1 bar (don't mark Implemented for "parsed but not enforced"). See `.claude/rules/proposals.md`.
+- **New feature implemented**: Add to status.md, document in the appropriate `spec/NN-*.md` chapter, update `site/src/pages/roadmap.astro` progress. If the feature was previously a preview, remove its `preview/*.md` page. If the feature has an SFEP, graduate it per `.claude/rules/proposals.md` — but only once it clears the Stage1 readiness bar (CLAUDE.md ## Stage1 readiness).
 - **Feature partially implemented**: Update status.md with current stage, keep or add a page under `reference/preview/`.
 - **Bug fixed**: Update status.md if it changes feature status, no spec/roadmap change needed.
 - **Feature removed or deferred**: Remove from status.md, remove from the spec chapter and (if still planned) add a `preview/*.md` page, update `site/src/pages/roadmap.astro`.
@@ -35,7 +35,7 @@ Always update in this order: status → spec → roadmap.
 - **Flip the row, link the PR.** status.md is a current-state matrix, not a
   changelog: update the status cell, rewrite the note to ≤1–2 sentences, and
   cite the issue/PR numbers. Never append narrative paragraphs — the merged
-  PR description, the linked issue, and `CHANGELOG.md` are the history.
+  PR description, the linked issue, and the release notes are the history.
 - If a detail must survive long-term (an ABI shape, a design constraint, a
   caveat), it belongs in the spec, `docs/proposals/*`, or
   `docs/proposals/0025-native-runtime-architecture.md` — link it from the row instead of inlining.
@@ -66,6 +66,6 @@ After updating docs:
 ## What NOT to Do
 
 - Don't update docs for changes that haven't been implemented yet.
-- Don't claim features are "shipped" unless they pass the full checklist (parsed, type-checked, effect-checked, emitted, lowered, tested, self-hosted).
+- Don't claim features are "shipped" short of the Stage1 readiness bar (CLAUDE.md ## Stage1 readiness).
 - Don't add speculative content to `spec/NN-*.md` chapters — speculative features go under `preview/`.
 - Don't create parallel spec files outside the chapter scheme — update the existing structure.

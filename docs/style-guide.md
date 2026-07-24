@@ -333,7 +333,7 @@ export { parse_expression } from "./expressions";
   drags in ~130 modules. See
   [`docs/conventions/unit-test-import-envelope.md`](conventions/unit-test-import-envelope.md).
 - E2E tests are Sailfin (`*_test.sfn`), never bash — the pattern catalog
-  (subprocess driving, shims, env threading) is `.claude/rules/no-bash-e2e.md`.
+  (subprocess driving, shims, env threading) is `docs/conventions/e2e-tests.md`.
 - Bare `assert <expr>;` is the house style inside tests; the `expect_*`
   matchers from `sfn/test` are for `![pure]` tests only.
 - Keep large fixtures under `compiler/tests/**/data` or `fixtures/`; keep test
@@ -368,7 +368,7 @@ The active reforms, for code you write today (rationale:
 
 - **Numeric types**: `int` (i64) and `float` (f64) are shipped; `number` is an
   alias for `float`. Use `int`/`float` in new code.
-- **String interpolation** is currently `{{ expr }}`; it will become
-  `${ expr }` before 1.0 — keep `{{ }}` until the parser change lands.
+- **String interpolation**: the parser dual-accepts `${ expr }` and the legacy
+  `{{ expr }}` (SFEP-0057). Use `${ }` in new code.
 - **Lambda short form** `fn(x) => expr` is shipped (SFEP-0029) alongside the
   block form `fn(x) -> T { ... }`.

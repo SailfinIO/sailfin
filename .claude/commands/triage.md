@@ -150,15 +150,9 @@ mcp__Linear__save_comment issueId="SFN-<N>" body="Auto-triage intake: classified
 
 ### UNBLOCK — clear a resolved blocker (hard-vs-prose rule, shared with `/sweep`)
 
-Read blocked-by relations (`get_issue includeRelations=true`) and any
-`## Blocked by` prose in the body. Classify each:
-- **Hard reference** (a Linear blocked-by relation, or a `SFN-N`/`#N`) — closed
-  = resolved; open = still blocking.
-- **Prose reference** ("Slice E", "the M4 runtime port", "a fresh seed cut") — an
-  agent can't decide when prose is satisfied; its **presence** blocks the flip.
-
-Flip to `Ready` **only** when every hard reference is closed AND no prose gate
-remains. Remove the resolved relations and set status:
+Apply the hard-vs-prose rule in `docs/conventions/blocker-classification.md`
+(shared with `/sweep` Phase 2). Flip to `Ready` only when it clears the bar,
+removing the resolved relations in the same call:
 
 ```
 mcp__Linear__save_issue id="SFN-<N>" state="Ready" removeBlockedBy=["SFN-<resolved>"]

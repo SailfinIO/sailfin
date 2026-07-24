@@ -72,7 +72,7 @@ See `docs/proposals/0006-build-architecture.md` for the full root cause analysis
 
 | File | Role |
 |---|---|
-| `compiler/src/cli_main.sfn`, `compiler/src/capsule_resolver.sfn` | Sailfin-native build driver (orchestration only, no fixups; replaces the prior — now retired — `scripts/build.sh`) |
+| `compiler/src/cli/`, `compiler/src/capsule_resolver.sfn` | Sailfin-native build driver (orchestration only, no fixups) |
 | `compiler/src/emit_native.sfn` | `.sfn-asm` IR emitter |
 | `compiler/src/llvm/lowering/entrypoints.sfn` | LLVM lowering entry point |
 | `compiler/src/llvm/lowering/emission.sfn` | Function/module emission |
@@ -84,27 +84,18 @@ See `docs/proposals/0006-build-architecture.md` for the full root cause analysis
 | `compiler/src/llvm/lowering/lowering_io.sfn` | IR line accumulation helpers |
 | `docs/proposals/0006-build-architecture.md` | Full build performance root cause analysis |
 
-## Safety Rules
-
-- **The compiler self-caps memory** (8 GiB `RLIMIT_AS` on Linux at startup; `SAILFIN_MEM_LIMIT` overrides — see `.claude/rules/compiler-safety.md`). Never disable it outside sanitizer legs.
-- **Always use `timeout 60`** for single-file compilations (hang guard)
-- **Always verify with `make compile`** after proposing a change — the compiler must self-host
-
 ## Principles
 
-- **Fix the compiler, not the build script.** Every fix goes into `compiler/src/*.sfn`. `build.sh` is pure orchestration.
-- **No fixup passes.** The build script (`build.sh`) is pure orchestration — no post-processing of compiler output.
-- **Verify with `make compile` and `make check`** after every change — the compiler must always self-host and produce a working seedcheck binary.
-- **Minimize blast radius.** Prefer targeted fixes in one file over sweeping refactors across many.
-- **Performance fixes must be measurable.** Use `make bench` before and after.
+- **Minimize blast radius.** Prefer a targeted fix in one file over a sweeping
+  refactor across many.
+- **Performance fixes must be measurable.** `make bench` before and after.
+
+Invariants (memory cap, `timeout 60`, the `make compile` self-host gate, and
+"every fix lands in `compiler/src/*.sfn` — the driver is pure orchestration")
+are in `CLAUDE.md` and `.claude/rules/`.
 
 ## Output Format
 
-For each bug analyzed, report:
-
-1. **Bug description** — What fails or regresses, in plain language
-2. **Reproduction** — How to trigger the bug (module name, input, command)
-3. **Root cause** — Which compiler source file and code path produces the incorrect behavior
-4. **Proposed fix** — Specific changes to `compiler/src/*.sfn` with file and line references
-5. **Risk assessment** — What else might break, and how to verify
-6. **Verification steps** — Exact commands to confirm the fix works
+Report: what fails, how to reproduce it, the root cause (file and code path),
+the proposed fix with file/line references, what else might break, and the exact
+commands that confirm it.

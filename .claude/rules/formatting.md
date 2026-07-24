@@ -1,19 +1,11 @@
 CI runs `sfn fmt --check` on every `.sfn` file under `compiler/src/` and
-`runtime/`, and fails the build if any file would be reformatted. Agents
-routinely forget this step and discover it via a red CI run after pushing.
+`runtime/` and fails the build if any file would be reformatted.
 
-Before committing changes that touch any `.sfn` file:
+Before committing any `.sfn` change: `sfn fmt --write` the touched files, then
+`sfn fmt --check` them to confirm a clean round-trip. If `--check` still flags a
+file, re-run `--write` and read the diff — `fmt` may have collapsed or expanded
+a construct in a way worth knowing about.
 
-1. Run `sfn fmt --write <files>` (or `build/bin/sfn fmt --write
-   compiler/src/ runtime/`) on every modified file. The formatter is
-   zero-configuration — there is no formatting decision to make.
-2. Then run `sfn fmt --check` on the same paths to confirm a clean
-   round-trip. If `--check` still flags a file, re-run `--write` and read
-   the diff before committing — `fmt` may have collapsed or expanded a
-   construct in a way that's worth knowing about.
-3. Timeouts still apply: wrap with `timeout 30` per file. (The compiler
-   self-applies its memory budget — see `compiler-safety.md`.)
-
-Formatting is canonical — never hand-tune indentation, brace placement,
-or import ordering after `fmt` has run. If the formatter produces output
-you disagree with, that's a bug in `sfn fmt`, not a license to deviate.
+Formatting is canonical. Never hand-tune indentation, brace placement, or import
+ordering after `fmt` has run; output you disagree with is a bug in `sfn fmt`, not
+a license to deviate.

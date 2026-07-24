@@ -6,7 +6,7 @@ allowed-tools: Bash, Read, Grep, Glob
 
 # Debug a compilation failure
 
-Diagnose, fix, and verify a Sailfin compilation failure without chasing symptoms. Always fix the compiler, never the build script.
+Diagnose, fix, and verify a Sailfin compilation failure without chasing symptoms.
 
 ## Phase 1 — ISOLATE
 
@@ -16,7 +16,7 @@ Diagnose, fix, and verify a Sailfin compilation failure without chasing symptoms
 .claude/skills/debug-compile/scripts/isolate.sh path/to/file.sfn
 ```
 
-This emits both `.sfn-asm` and LLVM IR under `build/debug/<basename>.{asm,ll,stderr}` with `timeout 60` applied (on Linux the compiler self-caps memory at 8 GiB). Read the stderr for the diagnostic span.
+This emits both `.sfn-asm` and LLVM IR under `build/debug/<basename>.{asm,ll,stderr}` with `timeout 60` applied. Read the stderr for the diagnostic span.
 
 ### If the target is a self-hosting build
 
@@ -48,7 +48,7 @@ If the proposed fix touches multiple passes or requires a migration, spawn `comp
 
 ## Phase 4 — FIX
 
-Edit the canonical source file under `compiler/src/*.sfn`. Keep the diff minimal; don't refactor surrounding code. After the fix:
+Edit the canonical source file under `compiler/src/*.sfn`. After the fix:
 
 ```bash
 make compile
@@ -59,16 +59,9 @@ If the bug represents a pattern that could recur, add a regression test under `c
 
 ## Phase 5 — VERIFY
 
-Spawn `test-runner` for the full suite. Confirm:
-
-1. Original failure resolved.
-2. No regressions.
-3. Self-hosting still works (`make compile`).
-4. For structural fixes, also run the `check` skill.
+Spawn `test-runner` for the full suite, including `make compile`. For
+structural fixes, also run the `check` skill.
 
 ## Constraints
 
-- The compiler self-caps memory (8 GiB on Linux; `SAILFIN_MEM_LIMIT` overrides — see `.claude/rules/compiler-safety.md`).
-- Fix the compiler, never the build driver. (The prior `scripts/build.sh` was retired in Stage E PR7 / #383; the same rule applies to the driver in `compiler/src/cli_main.sfn` + `compiler/src/capsule_resolver.sfn`.)
-- Do not add workarounds — find and fix the root cause.
 - If the fix is structural, run `make clean-build` before rebuilding.

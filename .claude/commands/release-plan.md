@@ -13,7 +13,7 @@ hand-maintained checkboxes (SFEP-0026 WS-C; `docs/proposals/0026-delivery-proces
 
 This is the open / curate phase of release management. The cut phase
 lives in `/release`, and the cadence train (`.github/workflows/release-train.yml`)
-opens the tracker on the 2-week boundary and defers enrichment here. See
+opens the tracker on the weekly boundary and defers enrichment here. See
 `docs/conventions/issue-naming.md` "Release tracking" for the convention.
 
 Two responsibilities:

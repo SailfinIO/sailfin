@@ -19,16 +19,8 @@ For every change, verify:
 - Are there circular dependencies introduced between modules?
 
 ### 2. Pipeline Completeness
-New features must flow through the full pipeline:
-- Parser (`compiler/src/parser/`) — syntax recognized
-- AST (`compiler/src/ast.sfn`) — node defined
-- Type Checker (`compiler/src/typecheck.sfn`) — type rules added
-- Effect Checker (`compiler/src/effect_checker.sfn`) — effects validated
-- Emitter (`compiler/src/emit_native.sfn`) — `.sfn-asm` generated
-- LLVM Lowering (`compiler/src/llvm/`) — LLVM IR produced
-- Tests (`compiler/tests/`) — regression coverage added
-
-Flag any stage that's missing for a new feature.
+The pipeline and critical-file map are in CLAUDE.md (## Pipeline and critical files).
+New features must flow through every stage — flag any stage that's missing.
 
 ### 3. Effect System Correctness
 - Are effects propagated through call chains?
@@ -49,10 +41,9 @@ For changes to `compiler/src/llvm/`:
 - No double-encoding of pointers (ptrtoint→sitofp)
 
 ### 6. Coding Conventions
-- `CamelCase` for types/models/capsules, `snake_case` for functions/locals
-- Effects declared minimally and ordered by impact
-- No pipeline operator (`|>`) — use function calls
-- No changes to the build driver (formerly the now-retired prior `scripts/build.sh`; today the same rule applies to `compiler/src/cli_main.sfn` + `compiler/src/capsule_resolver.sfn`) to work around compiler bugs — fix the compiler source
+Naming and effect-ordering conventions are in `docs/style-guide.md` (`PascalCase`
+for types and enum variants, `snake_case` for functions/locals; effects declared
+minimally and alphabetically) — check the diff against it.
 - No unnecessary refactoring of surrounding code
 
 ### 7. Test Coverage
@@ -60,20 +51,3 @@ For changes to `compiler/src/llvm/`:
 - Integration tests if the change crosses module boundaries
 - E2e tests if user-facing behavior changed
 
-## Review Process
-
-1. Read all changed files to understand the full scope
-2. For each file, check against the relevant items above
-3. Cross-reference with existing code to verify consistency
-4. Check that documentation updates are included where needed
-
-## Output Format
-
-Structure your review as:
-
-1. **Summary** — What the change does in one sentence
-2. **Correctness** — Are the semantics right? Any logic errors?
-3. **Safety** — Self-hosting impact, effect system, ownership concerns
-4. **Coverage** — Are tests adequate? Any gaps?
-5. **Style** — Convention violations or unnecessary changes
-6. **Verdict** — Approve / Request changes, with specific items to address

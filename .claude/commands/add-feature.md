@@ -95,7 +95,5 @@ Spawn the **docs-updater** agent to update documentation in this order:
 ## Constraints
 
 - The compiler must self-host after every stage (`make compile` must pass)
-- Keep changes minimal and focused — do not refactor surrounding code
-- The compiler self-caps memory (8 GiB on Linux); see `.claude/rules/compiler-safety.md`
 - Never proceed past the design gate without user approval
 - If the feature requires a self-hosting migration (new syntax used by the compiler itself), the architect's plan must include the seed transition strategy

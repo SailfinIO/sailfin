@@ -22,7 +22,7 @@ Map the symptom to the canonical pipeline stage:
 3. Native IR/emitter: `compiler/src/native_ir.sfn`, `compiler/src/emit_native.sfn`
 4. LLVM lowering: `compiler/src/llvm/lowering/`
 5. Runtime/prelude: `runtime/prelude.sfn`, `runtime/sfn/`
-6. Build orchestration: `compiler/src/cli_main.sfn`, `compiler/src/capsule_resolver.sfn` (orchestration only; no fixups)
+6. Build orchestration: `compiler/src/cli/`, `compiler/src/capsule_resolver.sfn` (orchestration only; no fixups)
 
 If a similar construct works elsewhere, compare emitted `.sfn-asm` or `.ll` and look for the first divergence.
 
