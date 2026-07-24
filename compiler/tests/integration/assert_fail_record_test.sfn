@@ -14,10 +14,10 @@
 //   2. Smoke-test that the new lowering still type-checks and
 //      executes for an `assert true;` no-op call. The structured
 //      record path (sailfin_assert_fail) only fires when the
-//      condition is false; the typed sink (fd 3 / fail.bin) stays
-//      empty for passing asserts, which is exactly what the test
-//      runner's _consume_assert_failure_record relies on for the
-//      pass case.
+//      condition is false; under SFEP-0050 a passing assert emits no
+//      `assert` SFTR record onto the streamed stderr channel, which is
+//      exactly what the runner's inline classification relies on for
+//      the pass case.
 //
 // The negative path (a deliberately-failing test that *does*
 // produce a fail.bin record) is exercised by the smoke command

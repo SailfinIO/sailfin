@@ -72,7 +72,7 @@ The next number is `max + 1`. Add a row in the same PR that introduces an SFEP.
 | [0047](./0047-compiler-bootstrap-manifest.md) | Compiler Bootstrap Manifest | Accepted | tooling |
 | [0048](./0048-native-crypto.md) | Native Crypto + TLS Stack — Removing the OpenSSL Dependency | Accepted | runtime |
 | [0049](./0049-concurrency-effect-transparency.md) | Effect-transparency for concurrency-primitive leaves (spawn / parallel / channel send·receive) | Implemented | language |
-| [0050](./0050-streamed-test-ipc.md) | Streamed per-test results over a captured pipe (retiring results.log/fail.bin) | Accepted | tooling |
+| [0050](./0050-streamed-test-ipc.md) | Streamed per-test results over a captured pipe (retiring results.log/fail.bin) | Implemented | tooling |
 | [0051](./0051-workspace-manifest.md) | Workspace Manifest — Multi-Capsule Policy and the Capability Envelope | Accepted | tooling |
 | [0052](./0052-ml-acceleration-strategy.md) | Accelerated ML — Substrate Interop and Capability-Typed Accelerator Programming | Accepted | informational |
 | [0053](./0053-shape-typed-tensor-ir.md) | Shape-Typed Tensor IR and Fusion | Accepted | tooling |

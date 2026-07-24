@@ -1,0 +1,72 @@
+// End-to-end regression for the streamed test-harness IPC transport
+// (SFN-393 / SFEP-0050).
+//
+// The harness reports every test/hook/assert-location record over a
+// per-process pipe framed onto the child's stderr (`SFTR` records,
+// `runtime/sfn/assert.sfn`), demuxed inline by the parent
+// (`_run_test_binary`, `compiler/src/cli/commands/test.sfn`). This
+// retires the file-based IPC the streamed transport replaced:
+// `results.log` (per-test/hook classification), `fail.bin` (the first
+// assertion failure), and the multi-file sub-frame `_subframe_summary.json`
+// side-channel are never written under `SAILFIN_TEST_SCRATCH` — the
+// stream is the only channel. This test pins both halves: the stream
+// carries the pass/fail records, and the side-channel files genuinely
+// do not exist afterward.
+//
+// Native e2e per `.claude/rules/no-bash-e2e.md`: drives the compiler
+// under test via `process.run_capture` and asserts on captured output
+// with `sfn/strings`. The `sfn/test` `expect_*` matchers are `![pure]`
+// and cannot be called from this `![io]` test.
+import { find } from "sfn/strings";
+import { clean_runner_env, nested_runner_scratch, with_tmp_dir } from "sfn/test";
+
+fn _sfn_bin() -> string ![io] {
+    let configured = env.get("SAILFIN_BIN");
+    if configured.length > 0 { return configured; }
+    return "build/bin/sfn";
+}
+
+// One passing test, one failing test, and all four lifecycle hooks
+// (all passing) so the harness exercises both `test` and `hook` SFTR
+// records, not just the bare `test` case.
+fn _fixture_src() -> string {
+    return "before_all ![io] {\n    print.info(\"BEFORE_ALL\");\n}\n\n"
+        + "before_each ![io] {\n    print.info(\"BEFORE_EACH\");\n}\n\n"
+        + "after_each ![io] {\n    print.info(\"AFTER_EACH\");\n}\n\n"
+        + "after_all ![io] {\n    print.info(\"AFTER_ALL\");\n}\n\n"
+        + "test \"a: passes\" {\n    assert 1 == 1;\n}\n\n"
+        + "test \"b: fails\" {\n    assert 1 == 2;\n}\n";
+}
+
+test "harness stream: pass/fail records reach the jsonl stream" ![io] {
+    let code = with_tmp_dir(fn (dir: string) -> int {
+        let fixture = dir + "/stream_records_test.sfn";
+        fs.writeFile(fixture, _fixture_src());
+        let scratch = nested_runner_scratch("stream-records");
+        let exit = process.run_capture([_sfn_bin(), "test", fixture, "--json"], clean_runner_env(scratch));
+        let out = process.capture_take_stdout();
+        let err = process.capture_take_stderr();
+        let combined = out + err;
+
+        // A failing test propagates a non-zero exit.
+        assert exit != 0;
+        // Both outcomes reached the stream.
+        assert find(combined, "\"status\":\"pass\"", 0) >= 0;
+        assert find(combined, "\"status\":\"fail\"", 0) >= 0;
+        // Single-frame contract: one start, one summary.
+        assert find(combined, "\"event\":\"start\"", 0) >= 0;
+        assert find(combined, "\"event\":\"summary\"", 0) >= 0;
+        // Two tests total: one pass, one fail, none skipped. The four
+        // hooks all pass and are not counted in the test tally.
+        assert find(combined, "\"passed\":1", 0) >= 0;
+        assert find(combined, "\"failed\":1", 0) >= 0;
+
+        // No retired side-channel files were written anywhere under the
+        // child's scratch root — the stream is the only transport.
+        assert ! fs.exists(scratch + "/results.log");
+        assert ! fs.exists(scratch + "/fail.bin");
+        assert ! fs.exists(scratch + "/_subframe_summary.json");
+        return 0;
+    });
+    assert code == 0;
+}
