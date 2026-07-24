@@ -1,729 +1,579 @@
 ---
 import BaseLayout from "../layouts/BaseLayout.astro";
+import roadmapSnapshot from "../data/roadmap.json";
 
-type Status = "done" | "in-progress" | "planned";
+type Horizon = "1.0" | "later" | "exploration";
+type ProjectStatus = "completed" | "in-progress" | "planned" | "paused";
 
-interface RoadmapItem {
-  label: string;
-  status: Status;
-  url?: string;
+interface PublicRoadmapProject {
+  name: string;
+  summary: string;
+  initiative: string;
+  horizon: Horizon;
+  status: ProjectStatus;
 }
 
-interface RoadmapCategory {
+interface HorizonConfig {
   title: string;
-  description?: string;
-  items: RoadmapItem[];
-  url?: string;
-  open?: number;
-  closed?: number;
-  epicsLoadFailed?: boolean;
-  state?: "open" | "closed";
+  description: string;
 }
 
-// Linear API types
-interface LinearProject {
-  id: string;
+interface InitiativeGroup {
   name: string;
-  url: string;
-  state: string | null;
+  projects: PublicRoadmapProject[];
 }
 
-interface LinearInitiative {
-  id: string;
-  name: string;
-  description: string | null;
-  url: string;
-  projects: { nodes: LinearProject[] };
+const horizonConfig: Record<Horizon, HorizonConfig> = {
+  "1.0": {
+    title: "Toward 1.0",
+    description:
+      "Work that currently defines Sailfin's stable 1.0 maturity boundary. This is direction, not a launch deadline or an immutable checklist.",
+  },
+  later: {
+    title: "Later",
+    description:
+      "Important approved directions that are not currently inside the 1.0 boundary. Later does not mean rejected, and work may move as the language evolves.",
+  },
+  exploration: {
+    title: "Exploration",
+    description:
+      "Concepts worth preserving while their design, sequencing, or fit remains open. These are not delivery promises.",
+  },
+};
+
+function isHorizon(value: unknown): value is Horizon {
+  return (
+    value === "1.0" || value === "later" || value === "exploration"
+  );
 }
 
-interface LinearInitiativesResponse {
-  data?: {
-    initiatives?: { nodes: LinearInitiative[] };
-  };
-  errors?: unknown[];
+function isProjectStatus(value: unknown): value is ProjectStatus {
+  return (
+    value === "completed" ||
+    value === "in-progress" ||
+    value === "planned" ||
+    value === "paused"
+  );
 }
 
-const REPO = "SailfinIO/sailfin";
-
-function mapStatus(type: string | undefined): Status {
-  if (type === "completed") return "done";
-  if (type === "started") return "in-progress";
-  return "planned";
+function isPublicProject(value: unknown): value is PublicRoadmapProject {
+  if (!value || typeof value !== "object") return false;
+  const project = value as Record<string, unknown>;
+  return (
+    typeof project.name === "string" &&
+    project.name.trim().length > 0 &&
+    typeof project.summary === "string" &&
+    project.summary.trim().length > 0 &&
+    typeof project.initiative === "string" &&
+    project.initiative.trim().length > 0 &&
+    isHorizon(project.horizon) &&
+    isProjectStatus(project.status)
+  );
 }
 
-// Records why the Linear fetch fell back, logged to the build output so a
-// failed roadmap load is diagnosable from the Cloudflare build log.
-let loadDiagnostic: string | null = null;
+if (roadmapSnapshot.schemaVersion !== 1) {
+  throw new Error(
+    `[roadmap] unsupported snapshot schema ${roadmapSnapshot.schemaVersion}`,
+  );
+}
 
-async function fetchInitiatives(): Promise<LinearInitiative[] | null> {
-  // Cloudflare Pages injects build secrets into process.env; Astro/Vite only
-  // exposes PUBLIC_-prefixed vars on import.meta.env, so read process.env for
-  // this non-public key.
-  const apiKey = import.meta.env.LINEAR_API_KEY || process.env.LINEAR_API_KEY;
-  if (!apiKey) {
-    loadDiagnostic = "LINEAR_API_KEY not found in the build environment";
-    return null;
+if (!roadmapSnapshot.projects.every(isPublicProject)) {
+  throw new Error("[roadmap] snapshot contains an invalid public project");
+}
+
+const projects = roadmapSnapshot.projects as PublicRoadmapProject[];
+
+function groupByInitiative(
+  horizonProjects: PublicRoadmapProject[],
+): InitiativeGroup[] {
+  const groups = new Map<string, PublicRoadmapProject[]>();
+
+  for (const project of horizonProjects) {
+    const group = groups.get(project.initiative) ?? [];
+    group.push(project);
+    groups.set(project.initiative, group);
   }
-  try {
-    const res = await fetch("https://api.linear.app/graphql", {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        Authorization: apiKey,
-      },
-      body: JSON.stringify({
-        query: `query { initiatives(first: 50) { nodes { id name description url projects(first: 100) { nodes { id name url state } } } } }`,
-      }),
-    });
-    if (!res.ok) {
-      let body = "";
-      try {
-        body = (await res.text()).slice(0, 300);
-      } catch {}
-      loadDiagnostic = `Linear API returned HTTP ${res.status} ${res.statusText}${body ? ` — ${body}` : ""}`;
-      return null;
-    }
-    const json = (await res.json()) as LinearInitiativesResponse;
-    if (json.errors && json.errors.length > 0) {
-      const msgs = json.errors
-        .map((e) => (e as { message?: string })?.message ?? String(e))
-        .join("; ");
-      loadDiagnostic = `Linear GraphQL error: ${msgs}`;
-      return null;
-    }
-    if (!json.data?.initiatives) {
-      loadDiagnostic = "Linear response contained no initiatives field";
-      return null;
-    }
-    return json.data.initiatives.nodes;
-  } catch (err) {
-    loadDiagnostic = `Linear fetch threw: ${err instanceof Error ? err.message : String(err)}`;
-    return null;
-  }
+
+  return [...groups.entries()]
+    .sort(([a], [b]) => a.localeCompare(b))
+    .map(([name, groupedProjects]) => ({
+      name,
+      projects: groupedProjects.sort((a, b) => a.name.localeCompare(b.name)),
+    }));
 }
 
-const initiatives = await fetchInitiatives();
-const apiAvailable = initiatives !== null;
-if (!apiAvailable && loadDiagnostic) {
-  console.warn("[roadmap] Linear fetch failed:", loadDiagnostic);
-}
+const sections = [
+  {
+    key: "delivered",
+    title: "Delivered Foundations",
+    description:
+      "Completed projects that the rest of the roadmap builds on. Shipped behavior remains documented in the language reference and status matrix.",
+    projects: projects.filter((project) => project.status === "completed"),
+  },
+  ...(["1.0", "later", "exploration"] as const).map((horizon) => ({
+    key: horizon,
+    ...horizonConfig[horizon],
+    projects: projects.filter(
+      (project) =>
+        project.horizon === horizon && project.status !== "completed",
+    ),
+  })),
+]
+  .map(({ projects: sectionProjects, ...section }) => ({
+    ...section,
+    groups: groupByInitiative(sectionProjects),
+  }))
+  .filter((section) => section.groups.length > 0);
 
-// Hide initiatives with no projects at all — these contribute no signal.
-const populatedInitiatives = (initiatives ?? []).filter(
-  (i) => i.projects.nodes.length > 0,
-);
+const statusLabel: Record<ProjectStatus, string> = {
+  completed: "Completed",
+  "in-progress": "In progress",
+  planned: "Planned",
+  paused: "Paused",
+};
 
-const v1Categories: RoadmapCategory[] = apiAvailable
-  ? populatedInitiatives.map((initiative) => {
-      const projects = initiative.projects.nodes;
-      const items: RoadmapItem[] = projects.map((p) => ({
-        label: p.name,
-        status: mapStatus(p.state ?? undefined),
-        url: p.url,
-      }));
-      const closed = projects.filter((p) => p.state === "completed").length;
-      const open = projects.length - closed;
-      return {
-        title: initiative.name,
-        description: initiative.description ?? undefined,
-        items,
-        url: initiative.url,
-        open,
-        closed,
-        state: open > 0 ? "open" : "closed",
-      };
+const reviewedAt = roadmapSnapshot.syncedAt
+  ? new Date(roadmapSnapshot.syncedAt).toLocaleDateString("en-US", {
+      year: "numeric",
+      month: "long",
+      day: "numeric",
     })
-  : [];
-
-// Aggregate progress across all v1 initiatives.
-const v1ItemsOpen = v1Categories.reduce((s, c) => s + (c.open ?? 0), 0);
-const v1ItemsClosed = v1Categories.reduce((s, c) => s + (c.closed ?? 0), 0);
-const v1ItemsTotal = v1ItemsOpen + v1ItemsClosed;
-
-const postV1Ai: RoadmapCategory = {
-  title: "Enterprise Hardening & AI Integration",
-  description: "Library-level AI support, taint tracking, and advanced safety features — delivered as capsules, not language syntax.",
-  items: [
-    { label: "sfn/ai capsule — model invocation, prompt templating, generation provenance (replaces the removed model/prompt/tool/pipeline keywords)", status: "planned" },
-    { label: "Secret<T> / PII<T> taint tracking integrated with the effect system", status: "planned" },
-    { label: "sfn lsp — language server for IDE integration", status: "planned" },
-    { label: "sfn audit enhancements — transitive capability analysis, SBOM generation", status: "planned" },
-    { label: "User-facing ownership & full borrow checking (&T, &mut T, shared borrows, lifetimes) — Phase U, widening the 1.0 runtime memory-safety floor (epic #1209) to user code.", status: "planned" },
-  ],
-};
-
-const postV1Platform: RoadmapCategory = {
-  title: "Platform & Ecosystem",
-  description: "Runtime, tooling, and ecosystem infrastructure for post-1.0 growth.",
-  items: [
-    { label: "Async runtime — Sailfin-native event loop and async I/O (the v0 task scheduler, channels, spawn/await, and parallel shipped pre-1.0; post-1.0 scope is the non-blocking event loop and TLS/keep-alive network integration)", status: "planned" },
-    { label: "Runtime diagnostics — structured tracing and allocation telemetry", status: "planned" },
-    { label: "WebAssembly emission target", status: "planned" },
-    { label: "Native test framework — golden, adversarial, and replay test types", status: "planned" },
-    { label: "|> pipeline operator with async and lazy semantics", status: "planned" },
-    { label: "GPU effect enforcement and tensor dispatch", status: "planned" },
-  ],
-};
-
-const exploration: RoadmapItem[] = [
-  { label: "Perf-parity native backend — the post-1.0 long tail beyond the seal-sufficient backend (#1640): full optimization and codegen maturity after the 1.0 capability seal lands", status: "planned" },
-  { label: "Structured concurrency (v0 shipped) — routine, channel, spawn/await, parallel, scheduler work today; atomics beyond channel-send and richer sync primitives are post-1.0", status: "in-progress" },
-  { label: "Effect system hardening — validate_effects() is a build gate (shipped); Raw-degradation holes closed for cast (#1627), ternary (#1690), and is type-guard (#1753); remaining: prefix */& and assignment-as-expression (#1180-c); hierarchical sub-effects (detection + manifest tightening) shipped (SFEP-0017); effect polymorphism post-1.0", status: "in-progress" },
-  { label: "Phase 2 containers — closures with capture, generic constraints, drop emission", status: "planned" },
-  { label: "Documentation expansion — production-quality site coverage and recurring public-claims audits", status: "in-progress" },
-  { label: "LLM adoption levers — llms.txt, sfn check --json, MCP server, Rosetta Code corpus", status: "planned" },
-  { label: "Release pipeline hardening — installer CI and self-hosted-only artifacts (signed Ed25519 checksums + verifying installers already shipped)", status: "in-progress" },
-  { label: "unsafe capability enforcement", status: "planned" },
-  { label: "Currency literals ($0.05) and time literals (1s, 150ms)", status: "planned" },
-  { label: "Notebook and interactive tooling", status: "planned" },
-  { label: "Effect handlers (algebraic effect semantics)", status: "planned" },
-];
-
-function percent(done: number, total: number) {
-  return total === 0 ? 0 : Math.round((done / total) * 100);
-}
-
-const v1Percent = percent(v1ItemsClosed, v1ItemsTotal);
-
-const statusLabel = (s: Status) =>
-  s === "done" ? "Done" : s === "in-progress" ? "In progress" : "Planned";
-
-const lastUpdated = new Date().toLocaleDateString("en-US", {
-  year: "numeric",
-  month: "long",
-  day: "numeric",
-});
+  : null;
 ---
 
-<BaseLayout title="Roadmap" description="Sailfin's development roadmap toward 1.0 and beyond.">
+<BaseLayout
+  title="Roadmap"
+  description="Sailfin's reviewed public roadmap and current maturity horizons."
+>
   <div class="page">
-    <div class="container">
-
-      <!-- Header -->
+    <div class="container roadmap-container">
       <header class="roadmap-header">
-        <h1>Roadmap</h1>
+        <p class="eyebrow">Public roadmap</p>
+        <h1>Where Sailfin is heading</h1>
         <p class="lead">
-          Sailfin's path from alpha to a stable 1.0 release and beyond.
+          Sailfin is young, moving quickly, and not being driven toward an
+          arbitrary launch date. This is a reviewed view of the work and ideas
+          that matter—not a promise that every item will land in a fixed order.
         </p>
-        <p class="meta">
-          Built {lastUpdated} from the <a href="https://linear.app">Linear roadmap</a> at deploy time.
-        </p>
+        {
+          reviewedAt && (
+            <p class="meta">Public roadmap last synchronized {reviewedAt}.</p>
+          )
+        }
       </header>
 
-      <!-- Legend -->
-      <div class="legend">
-        <span class="legend-item"><span class="status-dot done" aria-hidden="true"></span> Done</span>
-        <span class="legend-item"><span class="status-dot in-progress" aria-hidden="true"></span> In progress</span>
-        <span class="legend-item"><span class="status-dot planned" aria-hidden="true"></span> Planned</span>
-      </div>
-
-      {!apiAvailable && (
-        <div class="api-warning">
-          Could not load roadmap data from Linear at build time.
-        </div>
-      )}
-
-      <!-- 1.0 Overview -->
-      {apiAvailable && (
-        <section class="v1-overview">
-          <div class="v1-overview-header">
-            <h2>Release 1.0</h2>
-            <span class="v1-stat">{v1ItemsClosed} of {v1ItemsTotal} items closed across {v1Categories.length} milestones</span>
-          </div>
-          <div
-            class="progress-bar-track"
-            role="progressbar"
-            aria-valuenow={v1ItemsClosed}
-            aria-valuemin={0}
-            aria-valuemax={v1ItemsTotal}
-            aria-label={`Release 1.0 progress: ${v1ItemsClosed} of ${v1ItemsTotal} items closed`}
-          >
-            <div class="progress-bar-fill" style={`width: ${v1Percent}%`}></div>
-          </div>
-        </section>
-      )}
-
-      <!-- 1.0 Categories -->
-      <div class="categories">
-        {v1Categories.map((cat) => {
-          const total = (cat.open ?? 0) + (cat.closed ?? 0);
-          const closed = cat.closed ?? 0;
-          const pct = percent(closed, total);
-          return (
-            <section class="category-card">
-              <div class="category-header">
-                <div>
-                  <h3>
-                    {cat.url ? <a href={cat.url} class="category-link">{cat.title}</a> : cat.title}
-                  </h3>
-                  {cat.description && <p class="category-desc">{cat.description}</p>}
-                </div>
-                <span class="category-count">{closed}/{total}</span>
+      {
+        projects.length === 0 ? (
+          <section class="review-state" aria-labelledby="scope-review-heading">
+            <div class="review-marker" aria-hidden="true">01</div>
+            <div>
+              <p class="section-kicker">Scope review</p>
+              <h2 id="scope-review-heading">
+                The public roadmap is being reviewed
+              </h2>
+              <p>
+                We are reviewing the boundary between work toward 1.0, later
+                directions, and open-ended exploration. Until that review is
+                signed off, we would rather publish no list than invent
+                priorities from internal planning data.
+              </p>
+              <p>
+                Shipped behavior remains documented in the language reference,
+                while accepted and draft designs remain visible in the SFEP
+                registry.
+              </p>
+              <div class="review-actions">
+                <a class="btn btn-primary" href="/docs/reference/">
+                  Language reference
+                </a>
+                <a class="btn btn-secondary" href="/sfep/">
+                  Browse SFEPs
+                </a>
               </div>
-              <div
-                class="progress-bar-track small"
-                role="progressbar"
-                aria-valuenow={closed}
-                aria-valuemin={0}
-                aria-valuemax={total}
-                aria-label={`${cat.title} progress: ${closed} of ${total} items closed`}
-              >
-                <div
-                  class:list={["progress-bar-fill", { empty: pct === 0 }]}
-                  style={`width: ${Math.max(pct, 0)}%`}
-                ></div>
-              </div>
-              {cat.epicsLoadFailed ? (
-                <p class="empty-note epics-error">
-                  Could not load projects for this initiative. {cat.url && <a href={cat.url}>View initiative</a>}
-                </p>
-              ) : cat.items.length > 0 ? (
-                <ul class="item-list">
-                  {cat.items.map((item) => (
-                    <li class:list={["item", item.status]}>
-                      <span class={`status-dot ${item.status}`} aria-label={statusLabel(item.status)}></span>
-                      {item.url
-                        ? <a class="item-label item-link" href={item.url}>{item.label}</a>
-                        : <span class="item-label">{item.label}</span>}
-                    </li>
-                  ))}
-                </ul>
-              ) : (
-                <p class="empty-note">
-                  No projects yet in this initiative. {cat.url && <a href={cat.url}>View initiative</a>}
-                </p>
+            </div>
+          </section>
+        ) : (
+          <>
+            <div class="legend" aria-label="Project status legend">
+              {(["completed", "in-progress", "planned", "paused"] as const).map(
+                (status) => (
+                  <span class="legend-item">
+                    <span
+                      class:list={["status-dot", status]}
+                      aria-hidden="true"
+                    />
+                    {statusLabel[status]}
+                  </span>
+                ),
               )}
-            </section>
-          );
-        })}
-      </div>
+            </div>
 
-      <!-- Post-1.0 -->
-      <div class="post-v1">
-        <h2>Post-1.0</h2>
-        <p class="section-desc">These workstreams begin after a stable self-hosted toolchain ships.</p>
-
-        <div class="post-v1-grid">
-          {[postV1Ai, postV1Platform].map((cat) => (
-            <section class="category-card future">
-              <div class="category-header">
-                <div>
-                  <h3>{cat.title}</h3>
-                  {cat.description && <p class="category-desc">{cat.description}</p>}
+            {sections.map((section, index) => (
+              <section
+                class:list={["roadmap-section", `horizon-${section.key}`]}
+                aria-labelledby={`horizon-${section.key}`}
+              >
+                <div class="section-heading">
+                  <span class="section-number" aria-hidden="true">
+                    {String(index + 1).padStart(2, "0")}
+                  </span>
+                  <div>
+                    <h2 id={`horizon-${section.key}`}>{section.title}</h2>
+                    <p>{section.description}</p>
+                  </div>
                 </div>
-                <span class="category-count">{cat.items.length} items</span>
-              </div>
-              <ul class="item-list">
-                {cat.items.map((item) => (
-                  <li class:list={["item", item.status]}>
-                    <span class={`status-dot ${item.status}`} aria-label={statusLabel(item.status)}></span>
-                    <span class="item-label">{item.label}</span>
-                  </li>
-                ))}
-              </ul>
-            </section>
-          ))}
-        </div>
-      </div>
 
-      <!-- Exploration Backlog -->
-      <section class="exploration">
-        <h2>Backlog & Exploration</h2>
-        <p class="section-desc">
-          Workstreams without an architected Linear initiative yet. Some will graduate into initiatives once design work lands; others stay exploratory.
-        </p>
-        <ul class="item-list exploration-list">
-          {exploration.map((item) => (
-            <li class:list={["item", item.status]}>
-              <span class={`status-dot ${item.status}`} aria-label={statusLabel(item.status)}></span>
-              <span class="item-label">{item.label}</span>
-            </li>
-          ))}
-        </ul>
-      </section>
+                <div class="initiative-grid">
+                  {section.groups.map((group) => (
+                    <article class="initiative-card">
+                      <header>
+                        <p class="section-kicker">Initiative</p>
+                        <h3>{group.name}</h3>
+                      </header>
+                      <ul class="project-list">
+                        {group.projects.map((project) => (
+                          <li class="project">
+                            <span
+                              class:list={["status-dot", project.status]}
+                              aria-label={statusLabel[project.status]}
+                            />
+                            <div>
+                              <h4>{project.name}</h4>
+                              <p>{project.summary}</p>
+                            </div>
+                          </li>
+                        ))}
+                      </ul>
+                    </article>
+                  ))}
+                </div>
+              </section>
+            ))}
+          </>
+        )
+      }
 
-      <!-- Contribute -->
-      <section class="contribute">
-        <h2>Contributing</h2>
+      <section class="publication-note" aria-labelledby="publication-heading">
+        <p class="section-kicker">How this page works</p>
+        <h2 id="publication-heading">Linear plans the work; this page explains the direction</h2>
         <p>
-          Open an issue or start a discussion in a pull request. Tag it with the appropriate milestone
-          label so it can be triaged against the 1.0 scope. Major design changes that affect the language
-          or ABI should reference a written proposal in <code>docs/proposals/</code> before implementation begins.
+          Maintainers plan Initiatives and Projects in Linear. A Project appears
+          here only after it has been deliberately marked for public publication
+          and assigned a reviewed horizon. Horizons can change as designs mature,
+          dependencies move, or development accelerates. Linear links and private
+          planning context are never exposed on this page.
         </p>
-        <div class="contribute-actions">
-          <a href={`https://github.com/${REPO}/issues`} class="btn btn-primary">Open an Issue</a>
-          <a href="/docs/contributing/guide" class="btn btn-secondary">Contributor Guide</a>
-        </div>
       </section>
 
+      <section class="contribute" aria-labelledby="contribute-heading">
+        <div>
+          <p class="section-kicker">Contributing</p>
+          <h2 id="contribute-heading">Help improve Sailfin</h2>
+          <p>
+            Public GitHub issues are the right place for bug reports and concrete
+            proposals. Significant language, runtime, ABI, or toolchain changes
+            should be grounded in an SFEP before implementation.
+          </p>
+        </div>
+        <a
+          href="https://github.com/SailfinIO/sailfin/issues"
+          class="btn btn-primary">Open an issue</a
+        >
+      </section>
     </div>
   </div>
 </BaseLayout>
 
 <style>
   .page {
-    padding: 3rem 0 5rem;
+    padding: 4rem 0 5rem;
   }
 
-  /* Header */
+  .roadmap-container {
+    max-width: 72rem;
+  }
+
   .roadmap-header {
-    margin-bottom: 2rem;
+    max-width: 51rem;
+    margin-bottom: 3rem;
+  }
+
+  .eyebrow,
+  .section-kicker {
+    margin: 0 0 0.6rem;
+    color: var(--color-primary);
+    font-size: 0.75rem;
+    font-weight: 700;
+    letter-spacing: 0.11em;
+    text-transform: uppercase;
   }
 
   .roadmap-header h1 {
-    font-size: 2.5rem;
-    margin-bottom: 0.75rem;
+    max-width: 46rem;
+    margin: 0 0 1rem;
+    font-size: clamp(2.5rem, 7vw, 4.75rem);
+    line-height: 0.98;
+    letter-spacing: -0.055em;
   }
 
   .lead {
-    font-size: 1.2rem;
+    max-width: 45rem;
+    margin: 0;
     color: var(--color-text-secondary);
-    line-height: 1.6;
-    max-width: 40rem;
-    margin-bottom: 0.5rem;
+    font-size: clamp(1.05rem, 2vw, 1.3rem);
+    line-height: 1.65;
   }
 
   .meta {
-    font-size: 0.85rem;
+    margin-top: 1rem;
     color: var(--color-text-tertiary);
+    font-size: 0.85rem;
   }
 
-  .meta code {
-    font-size: 0.8rem;
+  .review-state {
+    display: grid;
+    grid-template-columns: auto minmax(0, 1fr);
+    gap: clamp(1.5rem, 5vw, 4rem);
+    padding: clamp(2rem, 6vw, 4rem);
+    border: 1px solid var(--color-border);
+    border-radius: 1rem;
+    background:
+      linear-gradient(
+        135deg,
+        color-mix(in srgb, var(--color-primary) 8%, transparent),
+        transparent 48%
+      ),
+      var(--color-bg-alt);
   }
 
-  /* Legend */
+  .review-marker,
+  .section-number {
+    color: var(--color-primary);
+    font-family: var(--font-mono);
+    font-size: 0.85rem;
+    font-weight: 700;
+  }
+
+  .review-state h2,
+  .publication-note h2,
+  .contribute h2,
+  .section-heading h2 {
+    margin: 0;
+    letter-spacing: -0.025em;
+  }
+
+  .review-state h2 {
+    max-width: 40rem;
+    font-size: clamp(1.8rem, 4vw, 2.8rem);
+  }
+
+  .review-state p:not(.section-kicker) {
+    max-width: 43rem;
+    color: var(--color-text-secondary);
+    line-height: 1.7;
+  }
+
+  .review-actions {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.75rem;
+    margin-top: 1.5rem;
+  }
+
   .legend {
     display: flex;
-    gap: 1.5rem;
-    padding: 0.75rem 0;
-    margin-bottom: 2rem;
-    border-bottom: 1px solid var(--color-border);
+    flex-wrap: wrap;
+    gap: 1.25rem;
+    margin: 0 0 3rem;
+    padding: 1rem 0;
+    border-block: 1px solid var(--color-border);
   }
 
   .legend-item {
-    display: flex;
+    display: inline-flex;
     align-items: center;
-    gap: 0.4rem;
+    gap: 0.45rem;
+    color: var(--color-text-secondary);
     font-size: 0.85rem;
-    color: var(--color-text-secondary);
   }
 
-  /* API warning */
-  .api-warning {
-    padding: 0.75rem 1rem;
-    margin-bottom: 1.5rem;
-    border: 1px solid var(--color-border);
-    border-left: 3px solid var(--color-primary);
-    border-radius: 4px;
-    background: var(--color-bg-alt);
-    color: var(--color-text-secondary);
-    font-size: 0.9rem;
+  .roadmap-section {
+    padding: 3.5rem 0;
+    border-top: 1px solid var(--color-border);
   }
 
-  /* Status dots */
-  .status-dot {
-    display: inline-block;
-    width: 8px;
-    height: 8px;
-    border-radius: 50%;
-    flex-shrink: 0;
-  }
-
-  .status-dot.done {
-    background: #16a34a;
-  }
-
-  .status-dot.in-progress {
-    background: var(--color-primary);
-  }
-
-  .status-dot.planned {
-    background: var(--color-text-tertiary);
-  }
-
-  /* 1.0 Overview */
-  .v1-overview {
+  .section-heading {
+    display: grid;
+    grid-template-columns: 2rem minmax(0, 1fr);
+    gap: 1rem;
+    max-width: 50rem;
     margin-bottom: 2rem;
   }
 
-  .v1-overview-header {
-    display: flex;
-    align-items: baseline;
-    justify-content: space-between;
-    margin-bottom: 0.75rem;
-    flex-wrap: wrap;
-    gap: 0.5rem;
+  .section-heading h2 {
+    font-size: clamp(1.8rem, 4vw, 2.6rem);
   }
 
-  .v1-overview-header h2 {
-    font-size: 1.5rem;
-    margin: 0;
-  }
-
-  .v1-stat {
-    font-size: 0.875rem;
-    color: var(--color-text-secondary);
-    font-weight: 500;
-  }
-
-  /* Progress bars */
-  .progress-bar-track {
-    width: 100%;
-    height: 8px;
-    background: var(--color-muted-surface);
-    border-radius: 4px;
-    overflow: hidden;
-  }
-
-  .progress-bar-track.small {
-    height: 4px;
-    margin-bottom: 1rem;
-  }
-
-  .progress-bar-fill {
-    height: 100%;
-    background: var(--color-primary);
-    border-radius: 4px;
-    transition: width 0.4s ease;
-    min-width: 0;
-  }
-
-  .progress-bar-fill.empty {
-    width: 0 !important;
-  }
-
-  /* Category cards */
-  .categories {
-    display: grid;
-    grid-template-columns: repeat(2, 1fr);
-    gap: 1.25rem;
-    margin-bottom: 3.5rem;
-  }
-
-  .category-card {
-    border: 1px solid var(--color-border);
-    border-radius: 8px;
-    padding: 1.5rem;
-    background: var(--color-bg);
-  }
-
-  .category-card.future {
-    background: var(--color-bg-alt);
-  }
-
-  .category-header {
-    display: flex;
-    justify-content: space-between;
-    align-items: flex-start;
-    gap: 1rem;
-    margin-bottom: 0.75rem;
-  }
-
-  .category-header h3 {
-    font-size: 1.05rem;
-    margin: 0;
-    color: var(--color-text);
-  }
-
-  .category-link {
-    color: inherit;
-    text-decoration: none;
-  }
-
-  .category-link:hover {
-    color: var(--color-primary);
-    text-decoration: underline;
-  }
-
-  .category-desc {
-    font-size: 0.825rem;
-    color: var(--color-text-tertiary);
-    line-height: 1.5;
-    margin-top: 0.25rem;
-  }
-
-  .category-count {
-    font-size: 0.8rem;
-    font-weight: 600;
-    color: var(--color-text-secondary);
-    background: var(--color-bg-alt);
-    padding: 0.2rem 0.6rem;
-    border-radius: 10px;
-    white-space: nowrap;
-    flex-shrink: 0;
-  }
-
-  .empty-note {
-    font-size: 0.85rem;
-    color: var(--color-text-tertiary);
-    margin: 0;
-    padding: 0.4rem 0;
-  }
-
-  .empty-note.epics-error {
-    color: var(--color-text-secondary);
-    border-left: 2px solid var(--color-primary);
-    padding-left: 0.6rem;
-  }
-
-  /* Item lists */
-  .item-list {
-    list-style: none;
-    padding: 0;
-    margin: 0;
-  }
-
-  .item {
-    display: flex;
-    align-items: flex-start;
-    gap: 0.5rem;
-    padding: 0.4rem 0;
-    font-size: 0.875rem;
-    line-height: 1.5;
-    color: var(--color-text);
-  }
-
-  .item .status-dot {
-    margin-top: 0.35rem;
-  }
-
-  .item.done .item-label {
-    color: var(--color-text-secondary);
-  }
-
-  .item.planned .item-label {
-    color: var(--color-text-secondary);
-  }
-
-  .item-link {
-    color: inherit;
-    text-decoration: none;
-  }
-
-  .item-link:hover {
-    color: var(--color-primary);
-    text-decoration: underline;
-  }
-
-  /* Post-1.0 */
-  .post-v1 {
-    margin-bottom: 3.5rem;
-  }
-
-  .post-v1 > h2 {
-    font-size: 1.5rem;
-    margin-bottom: 0.25rem;
-  }
-
-  .section-desc {
-    font-size: 0.925rem;
-    color: var(--color-text-secondary);
-    margin-bottom: 1.5rem;
-  }
-
-  .post-v1-grid {
-    display: grid;
-    grid-template-columns: repeat(2, 1fr);
-    gap: 1.25rem;
-  }
-
-  /* Exploration */
-  .exploration {
-    margin-bottom: 3.5rem;
-  }
-
-  .exploration > h2 {
-    font-size: 1.5rem;
-    margin-bottom: 0.25rem;
-  }
-
-  .exploration-list {
-    max-width: 36rem;
-  }
-
-  /* Contribute */
-  .contribute {
-    border-top: 1px solid var(--color-border);
-    padding-top: 2.5rem;
-  }
-
-  .contribute h2 {
-    font-size: 1.5rem;
-    margin-bottom: 0.5rem;
-  }
-
-  .contribute p {
+  .section-heading p {
+    margin: 0.5rem 0 0;
     color: var(--color-text-secondary);
     line-height: 1.6;
-    max-width: 40rem;
-    margin-bottom: 1.5rem;
   }
 
-  .contribute-actions {
+  .initiative-grid {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 1rem;
+  }
+
+  .initiative-card {
+    overflow: hidden;
+    border: 1px solid var(--color-border);
+    border-radius: 0.75rem;
+    background: var(--color-bg-alt);
+  }
+
+  .initiative-card > header {
+    padding: 1.5rem;
+    border-bottom: 1px solid var(--color-border);
+  }
+
+  .initiative-card h3 {
+    margin: 0;
+    font-size: 1.15rem;
+  }
+
+  .project-list {
+    margin: 0;
+    padding: 0;
+    list-style: none;
+  }
+
+  .project {
+    display: grid;
+    grid-template-columns: auto minmax(0, 1fr);
+    gap: 0.8rem;
+    padding: 1.3rem 1.5rem;
+  }
+
+  .project + .project {
+    border-top: 1px solid var(--color-border);
+  }
+
+  .project h4 {
+    margin: 0 0 0.35rem;
+    font-size: 0.98rem;
+  }
+
+  .project p {
+    margin: 0;
+    color: var(--color-text-secondary);
+    font-size: 0.88rem;
+    line-height: 1.55;
+  }
+
+  .status-dot {
+    display: inline-block;
+    flex: 0 0 auto;
+    width: 0.58rem;
+    height: 0.58rem;
+    margin-top: 0.34rem;
+    border: 1.5px solid var(--color-text-tertiary);
+    border-radius: 50%;
+  }
+
+  .status-dot.completed {
+    border-color: var(--color-primary);
+    background: var(--color-primary);
+  }
+
+  .status-dot.in-progress {
+    border-color: var(--color-primary);
+    box-shadow: inset 0.22rem 0 0 var(--color-primary);
+  }
+
+  .status-dot.paused {
+    border-color: var(--color-text-tertiary);
+    background: color-mix(in srgb, var(--color-text-tertiary) 28%, transparent);
+  }
+
+  .publication-note,
+  .contribute {
+    margin-top: 3rem;
+    padding: clamp(1.5rem, 4vw, 2.5rem);
+    border: 1px solid var(--color-border);
+    border-radius: 0.75rem;
+  }
+
+  .publication-note p:not(.section-kicker),
+  .contribute p:not(.section-kicker) {
+    max-width: 48rem;
+    margin-bottom: 0;
+    color: var(--color-text-secondary);
+    line-height: 1.65;
+  }
+
+  .contribute {
     display: flex;
-    gap: 0.75rem;
+    align-items: center;
+    justify-content: space-between;
+    gap: 2rem;
+  }
+
+  .contribute .btn {
+    flex: 0 0 auto;
   }
 
   .btn {
     display: inline-flex;
     align-items: center;
-    padding: 0.6rem 1.25rem;
+    justify-content: center;
+    min-height: 2.75rem;
+    padding: 0.65rem 1rem;
+    border: 1px solid var(--color-border);
+    border-radius: 0.4rem;
     font-size: 0.9rem;
-    font-weight: 600;
-    border-radius: 8px;
-    text-decoration: none;
-    transition: all 0.15s;
-  }
-
-  .btn:hover {
+    font-weight: 650;
     text-decoration: none;
   }
 
   .btn-primary {
+    border-color: var(--color-primary);
     background: var(--color-primary);
-    color: #fff;
+    color: var(--color-bg);
   }
 
   .btn-primary:hover {
-    background: var(--color-primary-dark);
+    filter: brightness(1.08);
+    color: var(--color-bg);
   }
 
   .btn-secondary {
     background: var(--color-bg);
     color: var(--color-text);
-    border: 1px solid var(--color-border);
   }
 
   .btn-secondary:hover {
-    background: var(--color-bg-alt);
+    border-color: var(--color-primary);
+    color: var(--color-primary);
   }
 
-  /* Responsive */
-  @media (max-width: 768px) {
-    .categories {
+  @media (max-width: 700px) {
+    .page {
+      padding-top: 2.5rem;
+    }
+
+    .review-state {
       grid-template-columns: 1fr;
     }
 
-    .post-v1-grid {
+    .initiative-grid {
       grid-template-columns: 1fr;
     }
 
-    .roadmap-header h1 {
-      font-size: 2rem;
-    }
-
-    .v1-overview-header {
+    .contribute {
+      align-items: flex-start;
       flex-direction: column;
-    }
-
-    .contribute-actions {
-      flex-direction: column;
-    }
-
-    .btn {
-      text-align: center;
-      justify-content: center;
     }
   }
 </style>

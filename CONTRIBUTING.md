@@ -68,7 +68,9 @@ When behaviour, coverage, or roadmap status changes:
 2. Sync the language spec at `site/src/content/docs/docs/reference/spec/`
    (update the relevant §N chapter) and add/amend design notes under
    `.../reference/preview/` if the feature is not yet shipped.
-3. Adjust the [roadmap](https://sfn.dev/roadmap) (source: `site/src/pages/roadmap.astro`) for sequencing changes.
+3. Adjust planning in Linear for sequencing changes. Update the reviewed public
+   roadmap snapshot only when the Project meets
+   `docs/conventions/public-roadmap.md`.
 4. Touch the relevant folder README (e.g., `compiler/README.md`,
    `runtime/README.md`, `examples/README.md`) so local guidance stays accurate.
 5. For a forward-looking design decision, record it as an **SFEP** (see below).

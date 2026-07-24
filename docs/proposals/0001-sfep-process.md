@@ -264,8 +264,10 @@ docs/proposals/
 
 ## 10. Relationship to the roadmap and issues
 
-- The **roadmap** (`site/src/pages/roadmap.astro`) is strategic — epics, not
-  proposals. An epic may spawn an SFEP for its design.
+- The **planning roadmap** lives in Linear Initiatives and Projects; the public
+  roadmap is its reviewed projection under
+  `docs/conventions/public-roadmap.md`. It is strategic — epics, not proposals.
+  An epic may spawn an SFEP for its design.
 - **GitHub issues** are session-sized work. An SFEP's `tracking` field links the
   issue(s)/epic(s) implementing it; issues link back to the SFEP for the *why*.
 - An SFEP is the **durable design record**; issues and PRs are the **execution**.

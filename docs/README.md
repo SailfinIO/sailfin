@@ -13,7 +13,9 @@ documentation lives on the docs site.**
 - **Grammar (EBNF)** → [sailfin.dev/docs/reference/grammar](https://sailfin.dev/docs/reference/grammar)
 - **Keywords** → [sailfin.dev/docs/reference/keywords](https://sailfin.dev/docs/reference/keywords)
 - **Runtime ABI** → [sailfin.dev/docs/reference/runtime-abi](https://sailfin.dev/docs/reference/runtime-abi)
-- **Roadmap** → [sailfin.dev/roadmap](https://sailfin.dev/roadmap) (source: `site/src/pages/roadmap.astro`)
+- **Roadmap** → [sailfin.dev/roadmap](https://sailfin.dev/roadmap) (publication
+  contract: `docs/conventions/public-roadmap.md`; reviewed snapshot:
+  `site/src/data/roadmap.json`)
 - **Runtime architecture and migration history** → `docs/status.md` (Runtime
   Migration table)
 - **Native runtime architecture** → `docs/proposals/0025-native-runtime-architecture.md` (SFEP-0025)
