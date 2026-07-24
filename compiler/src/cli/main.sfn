@@ -69,46 +69,58 @@ import { command_def as toolchain_command_def, run as toolchain_run } from "./co
 import { command_def as version_command_def, run as version_run } from "./commands/version";
 import { CliContext, driver_prefix_length, parse_driver_prefix } from "./context";
 
+// Render one command row for `_usage()`: the invocation `sig` padded to a
+// fixed column so the one-line `desc` aligns across every group. The
+// top-level listing intentionally shows only the command shape — the full
+// per-command flag surface lives under `sfn <command> --help`, so long flag
+// lists no longer wrap the terminal (the two `sfn bench` modes collapse to
+// one row here for the same reason).
+fn _cmd_row(sig: string, desc: string) -> string {
+    let col: int = 31;
+    let mut out = "  " + sig;
+    let mut pad = col - sig.length;
+    if pad < 1 { pad = 1; }
+    let mut i = 0;
+    loop {
+        if i >= pad { break; }
+        out = out + " ";
+        i += 1;
+    }
+    return out + desc + "\n";
+}
+
 fn _usage() -> string {
-    let mut out: string = "usage: sfn <command> [options]\n";
-    out = out + "\n";
+    let mut out: string = "usage: sfn <command> [options]\n\n";
     out = out + "build & run:\n";
-    out = out
-        + "  sfn build [-o OUTPUT] [--no-cache] [--clean] [--cache-trace] [--json] [--work-dir DIR] [--check-determinism] (<file.sfn> | -p <capsule-path>)\n";
-    out = out
-        + "  sfn run   [--no-cache] [--clean] [--cache-trace] (<file.sfn> | <exe>)\n";
-    out = out
-        + "  sfn emit  [--timing] [-o OUTPUT] [--module-name SLUG] [--import-context DIR] llvm|sailfin|native <file.sfn>\n";
-    out = out
-        + "  sfn cache <info|prune|clean> [--max-size N] [--max-age N] [--all-schemas]\n";
-    out = out
-        + "  sfn bench [<path>...] [--iterations K] [--warmup W] [--filter GLOB] [--top N] [--csv PATH] [--budget-time MS] [--budget-mem KB] [--work-dir DIR]\n";
-    out = out
-        + "  sfn bench --compiler [--module M]... [--top N] [--csv PATH] [--budget-time S] [--budget-mem KB] [--import-context DIR] [--work-dir DIR]\n";
+    out = out + _cmd_row("sfn build <file|-p path>", "compile a file or capsule");
+    out = out + _cmd_row("sfn run <file|exe>", "build and run");
+    out = out + _cmd_row("sfn emit <fmt> <file>", "emit LLVM / sailfin / native IR");
+    out = out + _cmd_row("sfn cache <info|prune|clean>", "manage the build cache");
+    out = out + _cmd_row("sfn bench [path...]", "benchmark runtime (or --compiler)");
     out = out + "\n";
     out = out + "project:\n";
-    out = out + "  sfn init\n";
-    out = out + "  sfn check [--quiet] [path...]\n";
-    out = out + "  sfn fmt   [--check] [--write] <path...>\n";
-    out = out + "  sfn test  [--update-snapshots] [--jobs N] [path...]\n";
-    out = out + "  sfn capabilities audit\n";
+    out = out + _cmd_row("sfn init", "scaffold a project");
+    out = out + _cmd_row("sfn check [path...]", "fast static analysis");
+    out = out + _cmd_row("sfn fmt [path...]", "format sources (--check / --write)");
+    out = out + _cmd_row("sfn test [path...]", "run tests");
+    out = out + _cmd_row("sfn capabilities audit", "audit capability usage");
     out = out + "\n";
     out = out + "packages:\n";
-    out = out + "  sfn add     [--dev] [--update] <capsule>\n";
-    out = out + "  sfn lock    [--work-dir DIR]\n";
-    out = out + "  sfn publish [path]\n";
-    out = out
-        + "  sfn package [--target T] [--out DIR] [--compiler-bin PATH] [--installer] [-p <capsule-path>]\n";
-    out = out + "  sfn login   [token]\n";
-    out = out + "  sfn config  <get|set|unset|list> [key] [value]\n";
-    out = out + "  sfn toolchain install <version>\n";
+    out = out + _cmd_row("sfn add <capsule>", "add a dependency");
+    out = out + _cmd_row("sfn lock", "refresh the lockfile");
+    out = out + _cmd_row("sfn publish [path]", "publish a capsule");
+    out = out + _cmd_row("sfn package", "build a distributable");
+    out = out + _cmd_row("sfn login [token]", "authenticate to a registry");
+    out = out + _cmd_row("sfn config <action>", "get / set / unset / list config");
+    out = out + _cmd_row("sfn toolchain install <ver>", "install a toolchain version");
     out = out + "\n";
     out = out + "meta:\n";
-    out = out + "  sfn version\n";
-    out = out + "  sfn --version\n";
-    out = out + "  sfn completion <shell>\n";
-    out = out + "  sfn symbols [--json] [--capsule SLUG]\n";
+    out = out + _cmd_row("sfn version", "show version (also --version)");
+    out = out + _cmd_row("sfn completion <shell>", "generate shell completions");
+    out = out + _cmd_row("sfn symbols", "dump the symbol table (--json)");
     out = out + "\n";
+    out = out
+        + "Run `sfn <command> --help` for the full flags on any command.\n\n";
     out = out + "examples:\n";
     out = out + "  sfn run examples/basics/hello-world.sfn\n";
     out = out
