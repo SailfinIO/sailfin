@@ -285,6 +285,20 @@ here.
   removing repeated proven bounds checks; explicit vector IR remains justified
   for the SFN-449 chain. These figures are local decision-gate measurements,
   not CI thresholds.
+- **StableHLO substrate-exit spike** (SFEP-0052 §3.1(3), SFN-429): the tensor
+  IR's SFN-427 op set (elementwise add/multiply, reduction sum, 2D matmul) emits
+  portable StableHLO text (`emit_stablehlo_module`,
+  `compiler/src/tensor_ir_emit_stablehlo.sfn`) — the first Track-A substrate
+  exit, so an external accelerator middle-end (XLA) supplies fusion/tiling/layout
+  instead of hand-authored codegen. Elementwise ops render `stablehlo.add`/
+  `stablehlo.multiply`, matmul `stablehlo.dot`, and reduction the compact
+  `stablehlo.reduce(... init: ...) applies stablehlo.add` form over a scalar zero
+  constant; the emitter deliberately does not fuse before the exit (the substrate
+  does that). Coverage is a golden-emit snapshot plus a round-trip leg that
+  parses/verifies through `stablehlo-opt` when present and skips cleanly when the
+  tool is absent (`compiler/tests/e2e/tensor_ir_stablehlo_emit_test.sfn`). A spike
+  — full op coverage, autodiff lowering, the vendor-FFI exit, collectives, and
+  dynamic shapes are out of scope.
 - **Backend seam** (`compiler/src/backend.sfn`, #1112; SFEP-15 Stage 0):
   every codegen/link `clang` invocation routes through a `Backend` interface
   whose sole impl is `LlvmTextBackend` (today's textual-LLVM-IR + clang path).

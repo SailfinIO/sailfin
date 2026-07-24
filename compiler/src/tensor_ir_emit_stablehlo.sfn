@@ -1,0 +1,204 @@
+// compiler/src/tensor_ir_emit_stablehlo.sfn
+//
+// StableHLO text emission for the shape-typed tensor IR — the first substrate
+// exit (Track A). The tensor IR's small op set is lowered to portable,
+// versioned StableHLO text so an external accelerator middle-end (XLA) can
+// supply fusion/tiling/layout and its CPU/GPU/TPU backends instead of
+// hand-authored codegen. This is a spike: it covers the SFN-427 op set
+// (elementwise add/mul, reduction sum, 2D matmul), not the full op surface,
+// and deliberately does not fuse before the exit — the substrate does that.
+// See SFEP-0052 §3.1(3) and SFN-429.
+import { number_to_string } from "./num_format";
+import {
+    TensorDType,
+    TensorFunction,
+    TensorModule,
+    TensorOp,
+    TensorType
+} from "./tensor_ir";
+
+// StableHLO element-type spelling. This diverges from the tensor IR's own
+// `tensor_dtype_name` in two places the MLIR grammar requires: predicates are
+// `i1`, and unsigned integers carry the `ui` prefix.
+fn _hlo_dtype_name(dtype: TensorDType) -> string {
+    if dtype.variant == "Pred" { return "i1"; }
+    if dtype.variant == "I8" { return "i8"; }
+    if dtype.variant == "I16" { return "i16"; }
+    if dtype.variant == "I32" { return "i32"; }
+    if dtype.variant == "I64" { return "i64"; }
+    if dtype.variant == "U8" { return "ui8"; }
+    if dtype.variant == "U16" { return "ui16"; }
+    if dtype.variant == "U32" { return "ui32"; }
+    if dtype.variant == "U64" { return "ui64"; }
+    if dtype.variant == "F32" { return "f32"; }
+    return "f64";
+}
+
+// Ranked-tensor type text, e.g. `tensor<2x3xf64>`; a rank-0 shape renders as
+// the scalar `tensor<f64>`.
+fn _hlo_type_text(tensor_type: TensorType) -> string {
+    let mut text: string = "tensor<";
+    let mut index: int = 0;
+    loop {
+        if index >= tensor_type.shape.length { break; }
+        text = text + number_to_string(tensor_type.shape[index]) + "x";
+        index += 1;
+    }
+    return text + _hlo_dtype_name(tensor_type.dtype) + ">";
+}
+
+// The rank-0 scalar type for a dtype, used for reduction init constants.
+fn _hlo_scalar_type_text(dtype: TensorDType) -> string {
+    return "tensor<" + _hlo_dtype_name(dtype) + ">";
+}
+
+fn _hlo_join_ints(values: int[], separator: string) -> string {
+    let mut text: string = "";
+    let mut index: int = 0;
+    loop {
+        if index >= values.length { break; }
+        if index > 0 { text = text + separator; }
+        text = text + number_to_string(values[index]);
+        index += 1;
+    }
+    return text;
+}
+
+// Resolve a value id to its StableHLO SSA name. Parameters become the block
+// argument `%arg<parameter_index>`; every other op result becomes the named
+// value `%v<result_id>`. Named (non-numeric) SSA identifiers sidestep MLIR's
+// sequential-numbering rules for bare `%N` ids, so emitted names are always
+// legal regardless of op ordering.
+fn _hlo_value_name(function: TensorFunction, value_id: int) -> string {
+    let mut index: int = 0;
+    loop {
+        if index >= function.operations.length { break; }
+        let operation = function.operations[index];
+        if operation.result_id == value_id {
+            if operation.kind.variant == "Parameter" {
+                return "%arg" + number_to_string(operation.parameter_index);
+            }
+            return "%v" + number_to_string(value_id);
+        }
+        index += 1;
+    }
+    return "%v" + number_to_string(value_id);
+}
+
+// The declared type of the value an id refers to. Every op (parameters
+// included) carries its `result_type`, so a linear scan over operations
+// resolves any operand's type; the function result type is the fallback.
+fn _hlo_operand_type(function: TensorFunction, value_id: int) -> TensorType {
+    let mut index: int = 0;
+    loop {
+        if index >= function.operations.length { break; }
+        if function.operations[index].result_id == value_id {
+            return function.operations[index].result_type;
+        }
+        index += 1;
+    }
+    return function.result_type;
+}
+
+// Elementwise binary op (`stablehlo.add` / `stablehlo.multiply`). StableHLO
+// prints these with a single result type since operands and result share it.
+fn _hlo_emit_binary(function: TensorFunction, operation: TensorOp, op_name: string) -> string {
+    let result = _hlo_value_name(function, operation.result_id);
+    let lhs = _hlo_value_name(function, operation.operands[0]);
+    let rhs = _hlo_value_name(function, operation.operands[1]);
+    return "    " + result + " = stablehlo." + op_name + " " + lhs + ", " + rhs
+        + " : "
+        + _hlo_type_text(operation.result_type)
+        + "\n";
+}
+
+// Reduction sum, emitted via the compact `reduce ... applies` printing: a
+// scalar zero init constant followed by a single-op reduction body summing
+// across the given dimensions.
+fn _hlo_emit_reduce_sum(function: TensorFunction, operation: TensorOp) -> string {
+    let result = _hlo_value_name(function, operation.result_id);
+    let operand = _hlo_value_name(function, operation.operands[0]);
+    let operand_type = _hlo_operand_type(function, operation.operands[0]);
+    let init = "%init" + number_to_string(operation.result_id);
+    let scalar_type = _hlo_scalar_type_text(operation.result_type.dtype);
+    let mut text: string = "    " + init + " = stablehlo.constant dense<0.0> : "
+        + scalar_type
+        + "\n";
+    text = text + "    " + result + " = stablehlo.reduce(" + operand + " init: "
+        + init
+        + ") applies stablehlo.add across dimensions = ["
+        + _hlo_join_ints(operation.axes, ", ")
+        + "] : ("
+        + _hlo_type_text(operand_type)
+        + ", "
+        + scalar_type
+        + ") -> "
+        + _hlo_type_text(operation.result_type)
+        + "\n";
+    return text;
+}
+
+// 2D matmul via `stablehlo.dot` over the two operand matrices.
+fn _hlo_emit_matmul(function: TensorFunction, operation: TensorOp) -> string {
+    let result = _hlo_value_name(function, operation.result_id);
+    let lhs = _hlo_value_name(function, operation.operands[0]);
+    let rhs = _hlo_value_name(function, operation.operands[1]);
+    let lhs_type = _hlo_operand_type(function, operation.operands[0]);
+    let rhs_type = _hlo_operand_type(function, operation.operands[1]);
+    return "    " + result + " = stablehlo.dot " + lhs + ", " + rhs + " : ("
+        + _hlo_type_text(lhs_type)
+        + ", "
+        + _hlo_type_text(rhs_type)
+        + ") -> "
+        + _hlo_type_text(operation.result_type)
+        + "\n";
+}
+
+// Emit one tensor function as a StableHLO `func.func`. Parameter ops carry no
+// body text — they are the block arguments named in the signature.
+fn emit_stablehlo_function(function: TensorFunction) -> string {
+    let mut text: string = "  func.func @" + function.name + "(";
+    let mut param_index: int = 0;
+    loop {
+        if param_index >= function.parameter_types.length { break; }
+        if param_index > 0 { text = text + ", "; }
+        text = text + "%arg" + number_to_string(param_index) + ": "
+            + _hlo_type_text(function.parameter_types[param_index]);
+        param_index += 1;
+    }
+    text = text + ") -> " + _hlo_type_text(function.result_type) + " {\n";
+    let mut op_index: int = 0;
+    loop {
+        if op_index >= function.operations.length { break; }
+        let operation = function.operations[op_index];
+        if operation.kind.variant == "Add" {
+            text = text + _hlo_emit_binary(function, operation, "add");
+        } else if operation.kind.variant == "Multiply" {
+            text = text + _hlo_emit_binary(function, operation, "multiply");
+        } else if operation.kind.variant == "ReduceSum" {
+            text = text + _hlo_emit_reduce_sum(function, operation);
+        } else if operation.kind.variant == "Matmul2d" {
+            text = text + _hlo_emit_matmul(function, operation);
+        }
+        op_index += 1;
+    }
+    text = text + "    return " + _hlo_value_name(function, function.return_value_id)
+        + " : "
+        + _hlo_type_text(function.result_type)
+        + "\n";
+    return text + "  }\n";
+}
+
+// emit_stablehlo_module renders a whole tensor module as a StableHLO module.
+// This is the substrate-exit entry point mirroring `render_tensor_module`'s
+// deterministic text form, but targeting portable StableHLO.
+fn emit_stablehlo_module(module: TensorModule) -> string {
+    let mut text: string = "module @" + module.module_name + " {\n";
+    let mut function_index: int = 0;
+    loop {
+        if function_index >= module.functions.length { break; }
+        text = text + emit_stablehlo_function(module.functions[function_index]);
+        function_index += 1;
+    }
+    return text + "}\n";
+}

@@ -1,0 +1,10 @@
+module @sfn_stablehlo_spike {
+  func.func @spike_kernel(%arg0: tensor<2x3xf64>, %arg1: tensor<2x3xf64>, %arg2: tensor<3x4xf64>) -> tensor<2xf64> {
+    %v3 = stablehlo.add %arg0, %arg1 : tensor<2x3xf64>
+    %v4 = stablehlo.multiply %v3, %arg1 : tensor<2x3xf64>
+    %v5 = stablehlo.dot %v4, %arg2 : (tensor<2x3xf64>, tensor<3x4xf64>) -> tensor<2x4xf64>
+    %init6 = stablehlo.constant dense<0.0> : tensor<f64>
+    %v6 = stablehlo.reduce(%v5 init: %init6) applies stablehlo.add across dimensions = [1] : (tensor<2x4xf64>, tensor<f64>) -> tensor<2xf64>
+    return %v6 : tensor<2xf64>
+  }
+}
