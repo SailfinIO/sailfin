@@ -26,6 +26,15 @@ on:
     branches:
       - claude/sfn-53-windows-native-runner
 
+# One run per ref. The native leg carries a 90-minute timeout on a
+# `windows-latest` runner (billed at 2x), so without this a burst of
+# pushes leaves every superseded run grinding to its own timeout in
+# parallel — three concurrent runs of a harness whose whole purpose is to
+# report on the newest commit.
+concurrency:
+  group: windows-native-selfhost-${{ github.ref }}
+  cancel-in-progress: true
+
 permissions:
   contents: read
 
