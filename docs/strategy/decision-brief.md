@@ -1,6 +1,6 @@
 # Sailfin — Strategic Decision Brief
 
-**Date:** 2026-06-14 (status update 2026-06-26)
+**Date:** 2026-06-14 (status update 2026-06-26; §8 oracle-availability extension 2026-07-25)
 **Status:** Strategic overlay — agent context. Binds the internal vision (the
 proposal docs) to the external market. Referenced from `CLAUDE.md`.
 
@@ -128,6 +128,52 @@ For untrusted code running in *other* processes/runtimes (true foreign execution
 now. Sequence direct-link ownership and a typed metadata-carrying SSA IR before
 native machine-code slices; continue to treat perf parity as a separate
 post-1.0 game.
+
+**Extension (2026-07-25): oracle availability is the general rule.** The
+2026-07-23 decision is one instance of a broader principle worth stating
+directly: **agentic leverage is proportional to oracle availability.** Agents
+collapse work where an automated check says correct/not-correct, because that
+converts judgment into iteration, and iteration is now cheap. Sorted by that
+test: the native CPU backend compresses (oracle = the existing LLVM backend,
+differential testing); the owned syscall layer compresses (oracle = libc's
+observable behaviour); crypto/TLS compresses best of all (oracle = RFC test
+vectors + OpenSSL interop); GPU kernel correctness compresses (oracle = the
+XLA/CPU reference). Language and ABI design judgment does not — there is no
+automated check for "is this the right surface."
+
+The important refinement cuts against the intuition the rest of this section
+might otherwise suggest: **performance work has an oracle when the unit is
+small and independently measurable, and lacks one when the objective is
+diffuse.** A GPU kernel is a small measurable unit — a tile schedule timed
+against a reference — so autotuning is an oracle-driven search loop, and GPU
+kernel performance is tractable. Matching LLVM's `-O2` is a whole-program pass
+pipeline whose wins are interaction effects, with no per-unit oracle. Same
+word — "performance" — different problem shape. This is why the perf-parity
+backend stays off the critical path per the fork above while GPU kernel
+performance, when Track B (SFEP-0052) reaches it, is treated as reachable
+rather than deferred to the same open-ended long tail.
+
+**A wording rule follows, and it binds.** "post-1.0" and "deferred" name a
+*when* with no unblocking condition attached, and agents read a status as a
+standing instruction — work parked under those labels is never re-evaluated,
+including after the thing that made it expensive stopped being true. The
+2026-07-23 decision above ("a separate post-1.0 game") should be read through
+this rule, not as licence to reproduce the phrasing. Where something genuinely
+is not now, name *why*: `gated on: <concrete predecessor>` for a dependency,
+which re-surfaces the moment that predecessor lands, or the reason it resists
+compression (`long tail: no per-unit perf oracle`) for genuine tail work.
+**1.0 is a maturity boundary, not a schedule.** Throughput is no longer bounded
+by human typing speed, so the cost estimate behind any parked item has a short
+shelf life — every one deserves re-evaluation when its named gate clears, and
+an item with no named gate is a planning defect.
+
+**Base support vs. sealed support is the same distinction applied to
+platforms.** Base support — builds, runs, tests green, installer ships —
+targets macOS/Windows/Linux. Sealed support — owned codegen, owned syscalls, no
+un-gated syscall path — is tier-1 Linux x86-64 only, per SFEP-0015 §10. Adding
+a base platform does not multiply seal work; the seal is scoped to one target
+by design. Shipping a platform is never a claim that the seal holds on it. See
+`docs/status.md` Support Tiers for the live per-platform table.
 
 ---
 
