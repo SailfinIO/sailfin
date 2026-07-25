@@ -7,6 +7,50 @@ import { substring } from "../string_utils";
 import { sha256_hex_of_string } from "./hash";
 import { host_is_windows } from "./target";
 
+// libc primitives backing the staging path's temp-mint, atomic
+// publish, and file copy. Declared module-locally rather than added
+// as `fs.*` builtins: a plain `extern fn` over a libc symbol resolves
+// against the pinned seed and needs no seed cut, whereas a new
+// builtin is a compiler-emitted intrinsic sentinel + registry row the
+// seed cannot resolve (`E0420`) and would force one (SFEP-0021 §5).
+// The same reason `arena_relocate.sfn` declares `calloc`/`memcpy` and
+// `cli/entry.sfn` declares `realpath` inline.
+//
+// Pass `string` arguments through an `as *u8` cast, never a `.ptr`
+// field access — the latter typechecks green and then lowers to
+// nothing, silently dropping the call. Drop this note when SFN-492
+// makes that spelling either compile or fail loudly.
+//
+// `mkstemp` and `close` are POSIX spellings absent from the MSVC UCRT
+// (which exports `_close`). The `host_is_windows()` guard below stops
+// them being *called* there, but the `call` is still emitted and must
+// resolve at link, so the native MSVC leg (SFEP-0021 M7) needs a
+// `runtime/ir/windows_stubs.ll` entry for each — the same treatment
+// `@realpath` already has there.
+extern fn rename(oldpath: *u8, newpath: *u8) -> i32;
+
+extern fn mkstemp(template: *u8) -> i32;
+
+extern fn close(fd: i32) -> i32;
+
+extern fn ferror(f: *File) -> i32;
+
+extern fn fopen(path: *u8, mode: *u8) -> *File;
+
+extern fn fclose(f: *File) -> i32;
+
+extern fn fread(buf: *u8, size: usize, nmemb: usize, f: *File) -> usize;
+
+extern fn fwrite(buf: *u8, size: usize, nmemb: usize, f: *File) -> usize;
+
+extern fn malloc(size: usize) -> *u8;
+
+extern fn free(ptr: *u8) -> void;
+
+extern fn calloc(n: usize, sz: usize) -> *u8;
+
+extern fn memcpy(dst: *u8, src: *u8, n: usize) -> *u8;
+
 fn _ends_with_cmd(value: string, suffix: string) -> boolean {
     if suffix.length == 0 { return true; }
     if value.length < suffix.length { return false; }
@@ -28,38 +72,137 @@ fn _dirname_cmd(path: string) -> string {
 }
 
 // Mint a unique temp path in the SAME directory as `dst_path`, so a
-// subsequent `mv` onto `dst_path` is an atomic same-filesystem rename
-// (a `/tmp` temp would force a non-atomic cross-device copy). The
-// destination's directory must already exist. Returns the temp path,
-// or "" when `mktemp` is unavailable (callers fall back to a direct,
-// non-atomic write). The template is shell-quoted because `dst_path`
-// can derive from `$SAILFIN_BUILD_CACHE_DIR` or a capsule path
-// containing shell metacharacters.
+// subsequent `rename` onto `dst_path` is an atomic same-filesystem
+// operation (a `/tmp` temp would force a non-atomic cross-device
+// copy). The destination's directory must already exist. Returns the
+// temp path, or "" when a temp cannot be minted (callers fall back to
+// a direct, non-atomic write).
+//
+// `mkstemp` creates the file `O_EXCL` and rewrites the trailing
+// `XXXXXX` of its argument in place, so the buffer must be writable
+// heap, not a string literal: `calloc` zeroes it (supplying the
+// trailing NUL) and `memcpy` fills the template. The resulting
+// NUL-terminated buffer is returned directly as a `string`, the same
+// `*u8`→`string` shape `arena_relocate.sfn::relocate_string_to_heap`
+// relies on. The descriptor is closed immediately — the name is
+// already exclusively ours, so the caller reopening it by path is not
+// a TOCTOU window.
+//
+// No shell is involved, so `dst_path` deriving from
+// `$SAILFIN_BUILD_CACHE_DIR` or a capsule path with shell
+// metacharacters is no longer a quoting or injection concern.
 fn _mktemp_sibling_cmd(dst_path: string) -> string ![io] {
-    // A Windows host has no POSIX `mktemp`; return "" so the caller
+    // A Windows host has no POSIX `mkstemp`; return "" so the caller
     // degrades to a direct, non-atomic in-place write. Race-free there
     // because a Windows host emits serially (`_cr_resolve_jobs` → 1).
     if host_is_windows() { return ""; }
     let dst_dir = _dirname_cmd(dst_path);
-    let template = _shell_single_quote_arg(dst_dir + "/.sfn_stage.XXXXXX");
-    return _shell_read_cmd("mktemp " + template + " 2>/dev/null");
+    let template = dst_dir + "/.sfn_stage.XXXXXX";
+    let n: i64 = template.length as i64;
+    let buf: *u8 = calloc((n + 1) as usize, 1 as usize);
+    if buf as i64 == 0 { return ""; }
+    memcpy(buf, template as *u8, n as usize);
+    let fd: i32 = mkstemp(buf);
+    if fd < 0 {
+        free(buf);
+        return "";
+    }
+    close(fd);
+    return buf;
 }
 
 // Atomically publish an already-written temp file as `dst_path` via
-// `mv -f`. The rename is atomic only when `tmp_path` and `dst_path`
-// share a filesystem — pair this with `_mktemp_sibling_cmd(dst_path)`
-// so the temp lives beside the destination. A concurrent reader then
-// observes `dst_path` as either the prior complete file or the new
-// complete file, never a partial write — the invariant that fixes the
-// parallel-emit staging race (#1011) and the cache race (#1034).
-// On failure the temp is removed and false returned; `mv`/`rm` go
-// through `process.run` (no shell), so no quoting is required.
+// libc `rename(2)`. The rename is atomic only when `tmp_path` and
+// `dst_path` share a filesystem — pair this with
+// `_mktemp_sibling_cmd(dst_path)` so the temp lives beside the
+// destination. A concurrent reader then observes `dst_path` as either
+// the prior complete file or the new complete file, never a partial
+// write — the invariant that fixes the parallel-emit staging race
+// (#1011) and the cache race (#1034). On failure the temp is removed
+// and false returned.
 fn _atomic_rename_into_place(tmp_path: string, dst_path: string) -> boolean ![io] {
-    if process.run(["mv", "-f", tmp_path, dst_path]) != 0 {
-        process.run(["rm", "-f", tmp_path]);
+    if rename(tmp_path as *u8, dst_path as *u8) != 0 {
+        fs.deleteFile(tmp_path);
         return false;
     }
     return true;
+}
+
+// Copy `src` to `dst` byte-for-byte through libc stdio, replacing any
+// existing `dst`. Returns false on any open, short-write, or close
+// failure, leaving `dst` in whatever state the partial write reached
+// — callers publish through `_atomic_rename_into_place` so a failed
+// copy never becomes the visible artifact.
+//
+// Chunked rather than a single sized read: the cache stores multi-
+// megabyte `.o` and `.ll` artifacts, and a whole-file buffer would
+// scale the compiler's peak RSS with the largest object under the
+// 8 GiB self-cap. `guard` bounds the loop so a pathological stream
+// that never reports EOF terminates instead of spinning forever.
+fn _copy_file(src: string, dst: string) -> boolean ![io] {
+    let read_mode: string = "rb";
+    let fin: *File = fopen(src as *u8, read_mode as *u8);
+    if fin as i64 == 0 { return false; }
+    let write_mode: string = "wb";
+    let fout: *File = fopen(dst as *u8, write_mode as *u8);
+    if fout as i64 == 0 {
+        fclose(fin);
+        return false;
+    }
+
+    let chunk: i64 = 65536;
+    let buf: *u8 = malloc(chunk as usize);
+    if buf as i64 == 0 {
+        fclose(fin);
+        fclose(fout);
+        return false;
+    }
+
+    let mut ok: boolean = true;
+    let mut guard: i64 = 0;
+    // At 64 KiB a chunk this bounds the copy at ~61 GiB, far above any
+    // plausible object file.
+    let max_chunks: i64 = 1000000;
+    loop {
+        guard += 1;
+        if guard > max_chunks {
+            ok = false;
+            break;
+        }
+        let got: i64 = fread(buf, 1 as usize, chunk as usize, fin) as i64;
+        // A short read is EOF *or* a hard read error — `fread` alone
+        // cannot tell them apart, so the `ferror` check after the loop
+        // is what distinguishes them.
+        if got <= 0 { break; }
+        let mut written: i64 = 0;
+        loop {
+            if written >= got { break; }
+            let part: *u8 = ((buf as i64) + written) as *u8;
+            let w: i64 = fwrite(part, 1 as usize, (got - written) as usize, fout) as i64;
+            if w <= 0 { break; }
+            written += w;
+        }
+        if written < got {
+            ok = false;
+            break;
+        }
+    }
+
+    // Interrogate the read stream before closing it: an EIO, or a
+    // source truncated by a concurrent writer, otherwise looks exactly
+    // like EOF and would publish a complete-looking partial artifact —
+    // the #1011 corruption this path exists to prevent. The displaced
+    // `cp` reported that failure through its exit status, so without
+    // this the de-shelling would quietly lose error detection.
+    if ferror(fin) != 0 { ok = false; }
+    free(buf);
+    fclose(fin);
+    // Fold the destination's close into the result: buffered bytes are
+    // only handed to the kernel once `fclose` flushes, so a failure
+    // here means the copy is incomplete even though every `fwrite`
+    // reported success.
+    if fclose(fout) != 0 { ok = false; }
+    return ok;
 }
 
 fn _toml_trim_cmd(text: string) -> string {
@@ -305,6 +448,7 @@ export {
     _sanitize_filename_cmd,
     _mktemp_sibling_cmd,
     _atomic_rename_into_place,
+    _copy_file,
     _ensure_dir_cmd,
     _ensure_dir_recursive_cmd,
     _write_text_cmd,

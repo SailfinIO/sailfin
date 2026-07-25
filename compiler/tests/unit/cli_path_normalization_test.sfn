@@ -10,8 +10,10 @@
 // e2e test now runs the canonical scenario exactly once.
 import {
     _atomic_rename_into_place,
+    _copy_file,
     _dirname_cmd,
     _mktemp_sibling_cmd,
+    _sha256_of_file_cmd,
     _strip_trailing_slashes_cmd
 } from "../../src/build/fs";
 import { _collect_test_files_cmd, _suite_name_from_path } from "../../src/cli/commands/test";
@@ -170,6 +172,102 @@ test "atomic-publish: temp lives in dest dir and rename round-trips" ![io] {
     // The rename consumed the temp — it must not linger as a partial
     // sibling a concurrent reader could pick up.
     assert ! fs.exists(tmp);
+
+    process.run(["rm", "-rf", scratch]);
+}
+
+// `_mktemp_sibling_cmd` mints its name into a `calloc(n + 1)` buffer
+// that libc rewrites in place, then hands the raw pointer back as a
+// `string` whose length is recovered by scanning for the NUL. An
+// off-by-one in the sizing, or a lost terminator, would still satisfy
+// the `length > 0` and dirname checks above, so pin the exact length
+// and the `O_EXCL` uniqueness contract directly (SFN-490).
+test "atomic-publish: temp name is template-length and unique per call" ![io] {
+    let scratch = "/tmp/sfn_mktemp_sibling_test";
+    process.run(["rm", "-rf", scratch]);
+    process.run(["mkdir", "-p", scratch]);
+    let dst = scratch + "/artifact.ll";
+
+    let first = _mktemp_sibling_cmd(dst);
+    let second = _mktemp_sibling_cmd(dst);
+    assert first.length == (scratch + "/.sfn_stage.XXXXXX").length;
+    assert second.length == first.length;
+    // `mkstemp` creates with `O_EXCL`, so two calls cannot collide.
+    assert first != second;
+    assert fs.exists(first);
+    assert fs.exists(second);
+
+    process.run(["rm", "-rf", scratch]);
+}
+
+// --------------------------------------------------------------
+// `_copy_file` (SFN-490) — chunked libc copy underpinning artifact
+// publish. The digest comparison is the load-bearing assertion: a
+// truncated or duplicated chunk would still leave `dst` present but
+// with a different SHA-256 than `src`.
+// --------------------------------------------------------------
+test "copy-file: multi-chunk payload round-trips byte-for-byte" ![io] {
+    let scratch = "/tmp/sfn_copy_file_test";
+    process.run(["rm", "-rf", scratch]);
+    process.run(["mkdir", "-p", scratch]);
+    let src = scratch + "/src.bin";
+    let dst = scratch + "/dst.bin";
+
+    // Double a seed string past 3 chunk boundaries (196608 bytes) so
+    // the copy loop runs several full iterations and ends on a
+    // partial chunk.
+    let mut payload = "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcd";
+    let mut guard = 0;
+    loop {
+        if payload.length > 200000 { break; }
+        guard += 1;
+        if guard > 20 { break; }
+        payload = payload + payload;
+    }
+
+    fs.writeFile(src, payload);
+    assert _copy_file(src, dst);
+    assert fs.exists(dst);
+
+    let src_digest = _sha256_of_file_cmd(src);
+    let dst_digest = _sha256_of_file_cmd(dst);
+    // Guard against a vacuous pass: `_sha256_of_file_cmd` returns ""
+    // on a read failure, so two empty strings would satisfy a bare
+    // equality without proving anything.
+    assert src_digest.length > 0;
+    assert dst_digest.length > 0;
+    assert src_digest == dst_digest;
+
+    process.run(["rm", "-rf", scratch]);
+}
+
+test "copy-file: missing source returns false" ![io] {
+    let scratch = "/tmp/sfn_copy_file_test";
+    process.run(["rm", "-rf", scratch]);
+    process.run(["mkdir", "-p", scratch]);
+    let src = scratch + "/does-not-exist.bin";
+    let dst = scratch + "/dst.bin";
+
+    assert ! _copy_file(src, dst);
+    assert ! fs.exists(dst);
+
+    process.run(["rm", "-rf", scratch]);
+}
+
+test "copy-file: overwrites an existing destination" ![io] {
+    let scratch = "/tmp/sfn_copy_file_test";
+    process.run(["rm", "-rf", scratch]);
+    process.run(["mkdir", "-p", scratch]);
+    let src = scratch + "/src.bin";
+    let dst = scratch + "/dst.bin";
+
+    fs.writeFile(src, "short");
+    fs.writeFile(dst, "this pre-existing destination content is much longer");
+
+    // A wrong "ab" mode would append rather than truncate, leaving
+    // stale bytes from the pre-existing longer content behind.
+    assert _copy_file(src, dst);
+    assert fs.readFile(dst) == "short";
 
     process.run(["rm", "-rf", scratch]);
 }
