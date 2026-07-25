@@ -41,6 +41,25 @@ import { lines_end_with_terminator, strip_enclosing_parentheses } from "./core_o
 import { is_number_literal } from "./core_text";
 import { emit_runtime_call, empty_runtime_call_overrides } from "./runtime_call";
 
+// SFN-548: operand types `coerce_operand_to_type` can stringify straight
+// into the `{i8*, i64}` aggregate, mirroring the arms in
+// `core_operands.sfn::coerce_pointer_or_struct`. Concatenating one of
+// these against a string is defined as sugar for `+ (x as string)`, so
+// the two paths must stay in step.
+//
+// `i8` is deliberately excluded: it is byte-shaped, and the concat path
+// stringifies it through `i8*` so it renders as its character rather
+// than its numeric value.
+fn _is_stringifiable_numeric(llvm_type: string) -> boolean {
+    if llvm_type == "i64" { return true; }
+    if llvm_type == "i32" { return true; }
+    if llvm_type == "i16" { return true; }
+    if llvm_type == "i1" { return true; }
+    if llvm_type == "double" { return true; }
+    if llvm_type == "float" { return true; }
+    return false;
+}
+
 fn lower_logical_not_with_operand(operand: LLVMOperand, temp_index: int, lines: string[], diagnostics: string[], string_constants: StringConstant[]) -> ExpressionResult ![io] {
     let coerced = coerce_operand_to_type(operand, "i1", temp_index, lines, true, null);
     let mut current_diagnostics: string[] = diagnostics;
@@ -424,12 +443,23 @@ fn lower_binary_operation(expression: string, match: OperatorMatch, bindings: Pa
         if rhs_type == "i8*" { rhs_is_string_shape = true; }
         if rhs_type == "{i8*, i64}" { rhs_is_string_shape = true; }
 
+        // SFN-548: a numeric/bool operand opposite a string-shaped one is
+        // stringified rather than dropped. Before this, `should_concat`
+        // stayed false for `"n=" + n`, the pair fell through to
+        // `harmonise_operands`, and `dominant_type` picked `i64` over the
+        // string aggregate — an unsatisfiable coercion whose non-fatal
+        // diagnostic silently removed the enclosing call from the IR.
+        let lhs_is_stringifiable = _is_stringifiable_numeric(lhs_type);
+        let rhs_is_stringifiable = _is_stringifiable_numeric(rhs_type);
+
         let mut should_concat: boolean = false;
         if lhs_is_string_shape {
             if rhs_is_string_or_byte { should_concat = true; }
+            if rhs_is_stringifiable { should_concat = true; }
         }
         if rhs_is_string_shape {
             if lhs_is_string_or_byte { should_concat = true; }
+            if lhs_is_stringifiable { should_concat = true; }
         }
         if lhs_type == "i8" {
             if rhs_type == "i8" { should_concat = true; }
@@ -444,8 +474,17 @@ fn lower_binary_operation(expression: string, match: OperatorMatch, bindings: Pa
             // (i8) operands it routes through the existing numeric-to-
             // string path. Skip the i8* round-trip for already-aggregate
             // operands so we don't pay the unnecessary extract.
+            // Only pointer- and byte-shaped operands take the `i8*` hop.
+            // `coerce_operand_to_type` stringifies numerics into the
+            // aggregate directly but has no `i64 -> i8*` arm, so routing
+            // them through step 1 would fail the coercion. `i8` keeps the
+            // hop deliberately: as a byte it must concatenate as its
+            // character (`'c'` -> `c`), not its numeric value (`99`).
+            let mut lhs_needs_pointer_hop: boolean = false;
+            if lhs_type == "i8*" { lhs_needs_pointer_hop = true; }
+            if lhs_type == "i8" { lhs_needs_pointer_hop = true; }
             let mut lhs_at_string = lhs;
-            if lhs_type != "{i8*, i64}" {
+            if lhs_needs_pointer_hop {
                 let lhs_coerced = coerce_operand_to_type(lhs, "i8*", current_temp, current_lines, true, null);
                 diagnostics = extend_string_array(diagnostics, lhs_coerced.diagnostics);
                 current_lines = lhs_coerced.lines;
@@ -461,8 +500,11 @@ fn lower_binary_operation(expression: string, match: OperatorMatch, bindings: Pa
                 }
                 lhs_at_string = lhs_coerced.operand;
             }
+            let mut rhs_needs_pointer_hop: boolean = false;
+            if rhs_type == "i8*" { rhs_needs_pointer_hop = true; }
+            if rhs_type == "i8" { rhs_needs_pointer_hop = true; }
             let mut rhs_at_string = rhs;
-            if rhs_type != "{i8*, i64}" {
+            if rhs_needs_pointer_hop {
                 let rhs_coerced = coerce_operand_to_type(rhs, "i8*", current_temp, current_lines, true, null);
                 diagnostics = extend_string_array(diagnostics, rhs_coerced.diagnostics);
                 current_lines = rhs_coerced.lines;

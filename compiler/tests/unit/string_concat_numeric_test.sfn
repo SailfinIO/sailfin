@@ -1,0 +1,56 @@
+// Regression coverage for SFN-548: `print("n=" + n)` where `n: int` compiled
+// and exited 0 but silently dropped the call from the IR. The fix defines
+// `string + <numeric/bool>` as sugar for `string + (<numeric/bool> as string)`,
+// so these tests pin the resulting text against the existing `as string` cast
+// semantics (booleans render as "1"/"0", not "true"/"false") and guard the
+// pre-existing char/byte concat shape the fix must not disturb.
+test "string concat: string + int yields concatenated text" {
+    let n = 42;
+    let out = "n=" + n;
+    assert out == "n=42";
+}
+
+test "string concat: string + float yields concatenated text" {
+    let f = 1.5;
+    let out = "f=" + f;
+    assert out == "f=1.5";
+}
+
+test "string concat: string + bool renders as 1/0, not true/false" {
+    let t = true;
+    let f = false;
+    let out_true = "t=" + t;
+    let out_false = "f=" + f;
+    assert out_true == "t=1";
+    assert out_false == "f=0";
+}
+
+test "string concat: string + s.length concatenates the int shape" {
+    let s = "ab";
+    let out = "len=" + s.length;
+    assert out == "len=2";
+}
+
+test "string concat: char operand still concatenates as its character" {
+    // Pre-existing: indexing a string yields a single-character string, not a
+    // numeric code point. The numeric-stringification fix must not reinterpret
+    // this already-string operand as anything other than its character.
+    let s = "abc";
+    let c = s[1];
+    let out = "char=" + c;
+    assert out == "char=b";
+}
+
+test "string concat: numeric on the left stringifies too" {
+    let n = 3;
+    let out = n + " items";
+    assert out == "3 items";
+}
+
+test "string concat: result bound to a variable before use" {
+    // Previously the specific shape that produced wrong output: assigning the
+    // concat result to a variable, rather than passing it inline to a call.
+    let n = 7;
+    let m = "n=" + n;
+    assert m == "n=7";
+}
