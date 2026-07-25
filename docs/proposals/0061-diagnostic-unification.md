@@ -1,11 +1,11 @@
 ---
 sfep: 61
 title: Diagnostic Unification — One Coded, Spanned, Severity-Bearing Diagnostic
-status: Draft
+status: Accepted
 type: tooling
 created: 2026-07-25
 updated: 2026-07-25
-author: "agent:compiler-architect; agent:Sailbot (orchestrator)"
+author: "agent:compiler-architect; agent:Sailbot (orchestrator); project owner (design gate 2026-07-25)"
 tracking: "SFN-534, SFN-535, SFN-536, SFN-537, SFN-538, SFN-539, SFN-540, SFN-541"
 supersedes:
 superseded-by:
@@ -248,8 +248,10 @@ always the same binary within one build — no cross-version artifact exchange.
 **SFEP-0059 (typed SSA activation) — run alongside; do not block.** SFN-508 is
 `Ready`/Urgent; gating it on a diagnostics refactor is the wrong trade.
 `TssaDiagnostic` is two fields with one constructor, ~1 point to convert later.
-*Recommended constraint on SFN-508: do not add fields to `TssaDiagnostic`; it is
-scheduled for replacement.*
+**Constraint on SFN-508, adopted at the design gate: do not add fields to
+`TssaDiagnostic`.** It is scheduled for replacement by SFN-537, so a field added
+now is a field to migrate twice. Recorded on SFN-508 itself; if that issue has
+already extended the type, SFN-537 reconciles rather than reverts.
 
 **Typed SSA is not the natural carrier.** `Instr`/`SsaBlock`/`SsaFunction`
 (`typed_ssa.sfn:132-186`) carry **no source locations at all**, and SFEP-0015 §9
@@ -263,8 +265,11 @@ natural carrier is the **sink**, which every channel already reaches.
 **SFEP-0015 (native backend) — precede.** Instruction selection, register
 allocation, and object emission will mint a new diagnostic surface. Settling
 `Diag` first means that surface is born with codes, spans, and severity.
-*Recommended: S1+S2 as a prerequisite of the native-backend work* (not of
-SFN-508, which is a producer).
+**Adopted at the design gate: SFN-534 and SFN-535 are a prerequisite of the
+native-backend *emission* work** — not of SFN-508, which is a producer and is
+explicitly unblocked. The bar is deliberately narrow: only the two issues that
+establish the type and prove it through one real backend producer. Everything
+after them can land while the native backend proceeds.
 
 ## 8. Performance
 
@@ -285,22 +290,54 @@ and then discarded (`instructions.sfn:659` does four concatenations for a messag
 nobody reads). Deferring construction at `note` severity is an unconditional
 gain.
 
-## 9. Open questions
+## 9. Decisions taken at the design gate
 
-1. **Build-cache keying for S4.** Does `compiler/src/build_cache.sfn` reuse
-   `.sfn-asm` across compiler versions? Degradation is fail-soft, but the key
-   should probably include the compiler version. **Verify before S4.**
-2. **SFEP-0043 arena rewind.** `compile_to_llvm_file_with_module_imports`
+Owner approval 2026-07-25 deferred the three judgement calls below to the
+proposal. They are decisions, not open questions.
+
+**D1 — `.sfn-asm` keeps the module slug; no `.source` directive.** The v1 header
+stays `.module runtime/sfn/clock`, with the path reconstructed by
+`module_source_filename` (`llvm/lowering/lowering_io.sfn:146-153`). Rationale:
+the slug already backs the `.ll` `source_filename`, so a second path notion
+would be a divergence to keep in sync; the reconstructed path is correct for
+every in-tree module, and the failure mode (a user compiling a file whose
+on-disk path differs from its module slug) is cosmetic — a header line, with the
+line and column still exact. Revisit only if a real report shows the slug
+misleading someone. Adding a directive is cheap and additive later; removing one
+is not.
+
+**D2 — no class-(b) site is promoted to `warning` by this epic.** Everything
+currently untagged migrates to `note` and stays there. The nine sites in
+SFN-526 §4 (`core_ownership.sfn:74/102`, `lifetime.sfn:608-639`,
+`statement_suspension.sfn:128/150`, and siblings) describe checks the language
+**does not claim to enforce** — borrow exclusivity is "Parsed only"
+(`docs/status.md`), and use-after-move is enforced by `ownership_checker.sfn`
+(`E0901`), so the lowering copies are vestigial. Surfacing them as warnings
+would advertise guarantees that do not hold, which is the "parsed but not
+enforced is not shipped" rule in its most consequential form: a warning users
+learn to trust is worse than silence when the check behind it is partial.
+
+The correct trigger for promotion is the **enforcement shipping**, not this
+refactor. Each promotion belongs to the issue that implements the corresponding
+check, and inherits that issue's evidence.
+
+**D3 — `Diagnostic` is not retired; `Diag` converges the sink only.** Both types
+stay indefinitely. `Diagnostic` remains the frontend's producer-side type and
+converts at the boundary (§3.1). Retiring it would touch hundreds of typecheck
+factory sites to delete a converter — a large diff whose only benefit is
+uniformity, against a type that already carries everything `Diag` does. If S5
+shows the duplication costing real maintenance, reopen it as its own proposal
+with that evidence.
+
+### 9.1 Verification items (empirical, not judgement)
+
+These are unverified facts that gate specific issues, carried on those issues:
+
+1. **Build-cache keying for S4** (SFN-536). Does `compiler/src/build_cache.sfn`
+   reuse `.sfn-asm` across compiler versions? Degradation is fail-soft, but the
+   key should probably include the compiler version.
+2. **SFEP-0043 arena rewind** (SFN-535). `compile_to_llvm_file_with_module_imports`
    rewinds an arena; any `Diag[]` outliving it must be materialized first.
-   **Verify before S2.**
-3. **`.source` directive.** Should `.sfn-asm` carry the real on-disk path, or is
-   the `module_source_filename` slug (`lowering_io.sfn:146-153`) acceptable for
-   v1? Recommended: the slug. User-facing quality call, flagged not decided.
-4. **Which class-(b) sites eventually become `warning`?** SFN-526 §4 lists nine.
-   Each is a *product* decision about what the language claims to enforce —
-   deliberately excluded from this epic.
-5. **Does `Diag` retire `Diagnostic`?** S1 leaves both alive indefinitely, which
-   is defensible. Deferred until S5 shows the real duplication cost.
 
 *Resolved during drafting:* `llvm/` has no `Diagnostic` import (comments only),
 and the schema-lock guard exists as `compiler/tests/e2e/check_json_schema_test.sfn`
@@ -308,7 +345,7 @@ and the schema-lock guard exists as `compiler/tests/e2e/check_json_schema_test.s
 `.sh` test is stale.
 
 *Unmeasured:* the compile-time cost of `diagnostic.sfn` reaching lowering, and
-any #1389-class hazards on first lowering. S1 should carry the same risk budget
+any #1389-class hazards on first lowering. SFN-534 carries the same risk budget
 SFN-508 does.
 
 ## 10. Decomposition
