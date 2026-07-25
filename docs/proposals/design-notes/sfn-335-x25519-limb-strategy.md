@@ -37,7 +37,7 @@ demonstrates the technique. Halving the limb width from 25.5 to 16 bits costs
 margin problem is not a fixed property of Curve25519; it is a function of a
 freely-chosen parameter, and §6.4 chose it badly.
 
-**Consequences.** SFN-335 loses its dependency on `draft-sized-integer-types`
+**Consequences.** SFN-335 loses its dependency on SFEP-0058
 and on a widening-multiply intrinsic. It unblocks SFN-337 → SFN-340 → SFN-341,
 the last of which clears the SFEP-0016 capability-seal blocker. Per
 `.claude/rules/seed-dependency.md` there is **no seed-cut gate**: X25519 lands in
@@ -525,7 +525,7 @@ SFEP-0048 §3.2 put it — the Phase D vendoring of capsule primitives into
 extern deletion into one PR.
 
 **Downstream unblocking.** SFN-335 moves `Blocked → Ready` with its "Depends on
-upstream: `draft-sized-integer-types`" paragraph deleted. SFN-337, SFN-340, and
+upstream: SFEP-0058" paragraph deleted. SFN-337, SFN-340, and
 SFN-341 lose the same transitive dependency, and SFN-341's "Bump the
 `[toolchain]` pin once the seed carries the needed capability" line becomes moot.
 SFEP-0048 §6.4 and §7 need an amendment recording that the X25519 blocker is
@@ -553,7 +553,7 @@ the iterated test to a smaller published-checkpoint count rather than dropping
 the coverage or weakening the primitive.
 
 **A later widening multiply is an optimization, not a correctness fix.** If
-`draft-sized-integer-types` or a `64×64 → 128` intrinsic ever lands, the same
+SFEP-0058 or a `64×64 → 128` intrinsic ever lands, the same
 module can be re-parameterized to 51-bit limbs for a ~25× speedup. That is a
 performance follow-on with its own issue, and it does **not** belong in
 SFN-335's scope. This note deliberately removes X25519 from the justification
@@ -603,7 +603,7 @@ model — P-256, RSA, X448 — should run that search before being declared bloc
 - Integer-model ground truth: `compiler/src/llvm/expression_lowering/native/
   core_helpers.sfn:60-70` (`>>` → `ashr`, no `lshr` form); no `nsw`/`nuw` flags
   anywhere under `compiler/src/llvm/`.
-- `docs/proposals/draft-sized-integer-types.md` — the language work this note
+- `docs/proposals/0058-sized-integer-types.md` — the language work this note
   removes X25519 from the justification for.
 - RFC 7748 §5 (X25519 function), §5.2 (test vectors), §6.1 (ECDH vectors);
   RFC 8446 §7.4.2 (all-zero shared-secret abort).
