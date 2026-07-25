@@ -142,8 +142,68 @@ jobs:
           lld-link --version || true
           echo "clang: $(command -v clang)"
 
+      # ── Staircase (SFN-53) ────────────────────────────────────────
+      # Four cheap rungs before the 281-module self-host, each proving
+      # one capability and each bounded by its own `timeout`.
+      #
+      # Why: four consecutive runs reached the 90-minute job timeout in
+      # the self-host step having emitted ZERO bytes, so every attempt
+      # cost 90 minutes and distinguished nothing — not a hang from a
+      # slow build, not a broken seed from a broken fan-out. Jumping
+      # straight to the hardest possible task made every failure
+      # maximally expensive and minimally informative.
+      #
+      # Each rung isolates one layer, so the first one that fails names
+      # the culprit directly:
+      #   1 boots        — the mingw-cross exe runs under UCRT at all
+      #   2 frontend     — parse/typecheck/effects, fully in-process
+      #   3 one module   — emit -> clang -> lld-link, ONE child spawn
+      #   4 the artifact — the binary it produced actually executes
+      # Rung 3 is the sharp one: it is the smallest possible exercise of
+      # the child-spawn path, which is where the self-host hang is
+      # localized (runtime/sfn/platform/process_windows.sfn). If rung 3
+      # hangs on one module, the 281-module build was never the issue.
+      #
+      # `continue-on-error` so a failed rung still lets later rungs run
+      # and report — one run then yields the whole ladder's shape
+      # instead of only its first break.
+      - name: "Rung 1 — seed boots (--version)"
+        shell: bash
+        continue-on-error: true
+        run: |
+          set -uo pipefail
+          timeout 60 "$SEED_EXE" --version; echo "rung1 exit=$?"
+
+      - name: "Rung 2 — seed frontend check (hello-world)"
+        shell: bash
+        continue-on-error: true
+        run: |
+          set -uo pipefail
+          timeout 120 "$SEED_EXE" check examples/basics/hello-world.sfn; echo "rung2 exit=$?"
+
+      - name: "Rung 3 — seed builds ONE module (emit -> clang -> lld-link)"
+        shell: bash
+        continue-on-error: true
+        run: |
+          set -uo pipefail
+          # The single most diagnostic step in the workflow: one child
+          # spawn, one link. SAILFIN_BUILD_JOBS=1 pins the serial path so
+          # a failure here is not confounded by the parallel pool.
+          SAILFIN_BUILD_JOBS=1 timeout 600 "$SEED_EXE" build examples/basics/hello-world.sfn -o hello.exe
+          echo "rung3 exit=$?"
+          ls -la hello.exe || true
+
+      - name: "Rung 4 — run the produced binary"
+        shell: bash
+        continue-on-error: true
+        run: |
+          set -uo pipefail
+          if [ -f hello.exe ]; then timeout 60 ./hello.exe; echo "rung4 exit=$?";
+          else echo "rung4 skipped — rung 3 produced no binary"; fi
+
       - name: Native MSVC build of the compiler (Stage 2)
         shell: bash
+        timeout-minutes: 30
         run: |
           set -euo pipefail
           # Call the seed directly rather than `make rebuild` — the
