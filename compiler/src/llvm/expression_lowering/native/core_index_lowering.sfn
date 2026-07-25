@@ -106,24 +106,23 @@ fn lower_index_expression(parse: IndexExpressionParse, bindings: ParameterBindin
     let mut is_heap_array: boolean = false;
     let mut is_string: boolean = false;
     // M1.A: SfnString aggregate operands route through the same string
-    // index path as legacy `i8*` operands. Extract the data pointer up
-    // front so the existing grapheme_at call site below sees the
-    // pre-aggregate `i8*` shape unchanged.
-    let mut effective_base_operand = base_operand;
+    // index path as legacy `i8*` operands.
+    let effective_base_operand = base_operand;
 
     if array_type == "i8*" {
+        // A bare pointer carries no length, so the `{i8*, i64}` coercion
+        // in `core_operands.sfn` must recover one via `sfn_str_len`.
         element_type = "i8";
         is_string = true;
     } else if array_type == "{i8*, i64}" {
-        let extract_temp = format_temp_name(current_temp);
-        current_lines.push("  " + extract_temp + " = extractvalue {i8*, i64} "
-            + base_operand.value
-            + ", 0");
-        current_temp += 1;
-        effective_base_operand = LLVMOperand {
-            llvm_type: "i8*",
-            value: extract_temp
-        };
+        // Pass the aggregate through unchanged: field 1 already holds the
+        // length, and `grapheme_at` declares `{i8*, i64}` parameters
+        // (`llvm/runtime_helpers.sfn`), so `emit_runtime_call`'s argument
+        // coercion is a no-op. Demoting to `i8*` here instead discarded a
+        // length that was already in hand and made that coercion recover
+        // it with a full `sfn_str_len` NUL-scan of the whole string — once
+        // per index, i.e. quadratic in the length of any text walked
+        // character by character.
         element_type = "i8";
         is_string = true;
     } else if ends_with_pointer_suffix(array_type) {
@@ -213,9 +212,9 @@ fn lower_index_expression(parse: IndexExpressionParse, bindings: ParameterBindin
         }
 
         // M1.7.2c (#498): grapheme_at routes through descriptor-driven
-        // dispatch. The descriptor pins parameter_types=["i8*", "double"]
-        // and return_type="i8*", so the rendered call is byte-identical to
-        // the prior hand-spelled emission.
+        // dispatch. The descriptor pins parameter_types=["{i8*, i64}",
+        // "double"] (#1704 repointed it at the length-aware `_lv` symbol)
+        // and return_type="i8*".
         let grapheme_operands: LLVMOperand[] = [effective_base_operand, index_as_double.operand];
         let grapheme_result = emit_runtime_call("grapheme_at", grapheme_operands, empty_runtime_call_overrides(), current_temp, current_lines);
         let mut _grapheme_di: int = 0;

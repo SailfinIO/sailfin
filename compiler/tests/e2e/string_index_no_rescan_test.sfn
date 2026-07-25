@@ -1,0 +1,93 @@
+// End-to-end guard: indexing an SfnString aggregate must not re-derive the
+// string's length at runtime.
+//
+// `s[i]` lowers through the `grapheme_at` descriptor, which pins
+// `parameter_types: ["{i8*, i64}", "double"]` at
+// `compiler/src/llvm/runtime_helpers.sfn` and resolves to the length-aware
+// `sfn_str_grapheme_at_lv` symbol (#1704). The aggregate already carries its
+// length in field 1, so the lowering must pass it through untouched.
+//
+// The regression this pins: the lowering used to `extractvalue ..., 0` the
+// aggregate down to a bare `i8*` before the call. The argument-coercion walk
+// in `core_operands.sfn` then had to recover the length it had just discarded
+// by calling `sfn_str_len` — a `strnlen` over the WHOLE string — once per
+// indexed character. That is quadratic in string length: character-walking a
+// 143 KB text blob scanned ~2.06e10 bytes, and one compiler-module emit
+// issued 47 million `strnlen` calls totalling 243 GB.
+//
+// This is a PERFORMANCE contract, which is why it needs its own IR-level
+// assertion: reintroducing the demotion produces byte-identical program
+// output, so every correctness suite stays green while the compiler runs
+// ~20x slower on hosts without a SIMD `strnlen` (mingw/Windows) and ~3x
+// slower on those with one.
+import { contains } from "sfn/strings";
+
+fn _sfn_bin() -> string ![io] {
+    let configured = env.get("SAILFIN_BIN");
+    if configured.length > 0 { return configured; }
+    return "build/bin/sfn";
+}
+
+fn _scratch(tag: string) -> string ![io] {
+    let mut base = env.get("SAILFIN_TEST_SCRATCH");
+    if base.length == 0 { base = "/tmp"; }
+    let dir = base + "/sfn-str-index-" + tag;
+    fs.createDirectory(dir, true);
+    return dir;
+}
+
+fn _env() -> string[] ![io] {
+    let mut e: string[] = [];
+    let path = env.get("PATH");
+    if path.length > 0 { e.push("PATH=" + path); }
+    let home = env.get("HOME");
+    if home.length > 0 { e.push("HOME=" + home); }
+    let tmpdir = env.get("TMPDIR");
+    if tmpdir.length > 0 { e.push("TMPDIR=" + tmpdir); }
+    let scratch = env.get("SAILFIN_TEST_SCRATCH");
+    if scratch.length > 0 { e.push("SAILFIN_TEST_SCRATCH=" + scratch); }
+    return e;
+}
+
+// A module whose only string operations are `.length` and `s[i]` on an
+// aggregate-typed `string` parameter. Both must lower to `extractvalue` —
+// `.length` to field 1 directly, `s[i]` by passing the aggregate through —
+// so a correct build emits NO `sfn_str_len` call anywhere in this module.
+//
+// Deliberately no string comparison: `==` still routes an operand whose
+// length is already known through the same discard-then-rescan shape
+// (`core_operands.sfn`), so comparing the indexed character would leave a
+// `sfn_str_len` call here for an unrelated reason and mask the regression
+// this test exists to catch.
+fn _fixture_source() -> string {
+    return "fn walk(s: string) -> int {\n" + "    let mut i: int = 0;\n"
+        + "    loop {\n"
+        + "        if i >= s.length { break; }\n"
+        + "        let _ch = s[i];\n"
+        + "        i += 1;\n"
+        + "    }\n"
+        + "    return i;\n"
+        + "}\n";
+}
+
+test "lowering: indexing an SfnString aggregate emits no sfn_str_len rescan" ![io] {
+    let dir = _scratch("norescan");
+    let src = dir + "/index_fixture.sfn";
+    let out_ll = dir + "/index_fixture.ll";
+    fs.writeFile(src, _fixture_source());
+
+    let exit = process.run_capture([_sfn_bin(), "emit", "-o", out_ll, "llvm", src], _env());
+    let _out = process.capture_take_stdout();
+    let _err = process.capture_take_stderr();
+    assert exit == 0;
+
+    let ir = fs.readFile(out_ll);
+
+    // The index must reach the length-aware symbol.
+    assert contains(ir, "@sfn_str_grapheme_at");
+
+    // The load-bearing assertion. A `declare` for the symbol is harmless, so
+    // this pins the CALL specifically: no runtime length recovery may appear
+    // in a module that only indexes and reads `.length`.
+    assert ! contains(ir, "call i64 @sfn_str_len(");
+}
