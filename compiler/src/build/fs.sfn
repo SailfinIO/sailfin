@@ -7,8 +7,8 @@ import { substring } from "../string_utils";
 import { sha256_hex_of_string } from "./hash";
 import { host_is_windows } from "./target";
 
-// libc primitives backing the staging path's temp-mint, atomic
-// publish, and file copy. Declared module-locally rather than added
+// libc primitives backing the staging path's atomic publish and file
+// copy. Declared module-locally rather than added
 // as `fs.*` builtins: a plain `extern fn` over a libc symbol resolves
 // against the pinned seed and needs no seed cut, whereas a new
 // builtin is a compiler-emitted intrinsic sentinel + registry row the
@@ -20,18 +20,7 @@ import { host_is_windows } from "./target";
 // field access — the latter typechecks green and then lowers to
 // nothing, silently dropping the call. Drop this note when SFN-492
 // makes that spelling either compile or fail loudly.
-//
-// `mkstemp` and `close` are POSIX spellings absent from the MSVC UCRT
-// (which exports `_close`). The `host_is_windows()` guard below stops
-// them being *called* there, but the `call` is still emitted and must
-// resolve at link, so the native MSVC leg (SFEP-0021 M7) needs a
-// `runtime/ir/windows_stubs.ll` entry for each — the same treatment
-// `@realpath` already has there.
 extern fn rename(oldpath: *u8, newpath: *u8) -> i32;
-
-extern fn mkstemp(template: *u8) -> i32;
-
-extern fn close(fd: i32) -> i32;
 
 extern fn ferror(f: *File) -> i32;
 
@@ -46,10 +35,6 @@ extern fn fwrite(buf: *u8, size: usize, nmemb: usize, f: *File) -> usize;
 extern fn malloc(size: usize) -> *u8;
 
 extern fn free(ptr: *u8) -> void;
-
-extern fn calloc(n: usize, sz: usize) -> *u8;
-
-extern fn memcpy(dst: *u8, src: *u8, n: usize) -> *u8;
 
 fn _ends_with_cmd(value: string, suffix: string) -> boolean {
     if suffix.length == 0 { return true; }
@@ -78,37 +63,29 @@ fn _dirname_cmd(path: string) -> string {
 // temp path, or "" when a temp cannot be minted (callers fall back to
 // a direct, non-atomic write).
 //
-// `mkstemp` creates the file `O_EXCL` and rewrites the trailing
-// `XXXXXX` of its argument in place, so the buffer must be writable
-// heap, not a string literal: `calloc` zeroes it (supplying the
-// trailing NUL) and `memcpy` fills the template. The resulting
-// NUL-terminated buffer is returned directly as a `string`, the same
-// `*u8`→`string` shape `arena_relocate.sfn::relocate_string_to_heap`
-// relies on. The descriptor is closed immediately — the name is
-// already exclusively ours, so the caller reopening it by path is not
-// a TOCTOU window.
+// The template is shell-quoted because `dst_path` can derive from
+// `$SAILFIN_BUILD_CACHE_DIR` or a capsule path containing shell
+// metacharacters.
 //
-// No shell is involved, so `dst_path` deriving from
-// `$SAILFIN_BUILD_CACHE_DIR` or a capsule path with shell
-// metacharacters is no longer a quoting or injection concern.
+// This helper deliberately still shells `mktemp` while its siblings on
+// this path use libc directly. A libc `mkstemp` version — which minted
+// the name into a `calloc`'d buffer and returned that raw pointer as a
+// `string` — self-hosted and passed every Linux shard, but regressed
+// the macOS-arm64 `int-caps` shard into capsule-resolution failures
+// (`could not locate source for "sfn/strings"` → undefined
+// `_trim__sfn__strings__mod` at link). Signature erasure, symbol
+// resolution, `EXDEV`, and the `*u8`→`string` length coercion were all
+// eliminated as causes, so the mechanism is still unknown and is not
+// worth blocking the `mv`/`cp` removal on. Restore the libc version
+// with SFN-506, which owns reproducing it on a macOS host.
 fn _mktemp_sibling_cmd(dst_path: string) -> string ![io] {
-    // A Windows host has no POSIX `mkstemp`; return "" so the caller
+    // A Windows host has no POSIX `mktemp`; return "" so the caller
     // degrades to a direct, non-atomic in-place write. Race-free there
     // because a Windows host emits serially (`_cr_resolve_jobs` → 1).
     if host_is_windows() { return ""; }
     let dst_dir = _dirname_cmd(dst_path);
-    let template = dst_dir + "/.sfn_stage.XXXXXX";
-    let n: i64 = template.length as i64;
-    let buf: *u8 = calloc((n + 1) as usize, 1 as usize);
-    if buf as i64 == 0 { return ""; }
-    memcpy(buf, template as *u8, n as usize);
-    let fd: i32 = mkstemp(buf);
-    if fd < 0 {
-        free(buf);
-        return "";
-    }
-    close(fd);
-    return buf;
+    let template = _shell_single_quote_arg(dst_dir + "/.sfn_stage.XXXXXX");
+    return _shell_read_cmd("mktemp " + template + " 2>/dev/null");
 }
 
 // Atomically publish an already-written temp file as `dst_path` via
