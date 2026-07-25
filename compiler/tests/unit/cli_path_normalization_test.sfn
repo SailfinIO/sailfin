@@ -12,6 +12,7 @@ import {
     _atomic_rename_into_place,
     _copy_file,
     _dirname_cmd,
+    _mktemp_from_template_cmd,
     _mktemp_sibling_cmd,
     _sha256_of_file_cmd,
     _strip_trailing_slashes_cmd
@@ -198,6 +199,49 @@ test "atomic-publish: temp name is template-length and unique per call" ![io] {
     assert fs.exists(second);
 
     process.run(["rm", "-rf", scratch]);
+}
+
+// `_mktemp_from_template_cmd` is the libc `mkstemp` primitive the
+// staging mint is built on: `_mktemp_sibling_cmd` wraps it for the
+// sibling case every emit publish uses (SFN-506). The assertions above
+// hold for a shell `mktemp` too, so they cannot tell the two
+// implementations apart — these pin the libc contract itself.
+test "temp-mint: explicit template yields an exact-length unique file" ![io] {
+    let scratch = "/tmp/sfn_mktemp_template_test";
+    process.run(["rm", "-rf", scratch]);
+    process.run(["mkdir", "-p", scratch]);
+
+    let template = scratch + "/probe.XXXXXX";
+    let first = _mktemp_from_template_cmd(template);
+    let second = _mktemp_from_template_cmd(template);
+
+    // `mkstemp` rewrites the six trailing `X`s in place, so the minted
+    // name is exactly as long as the template — an off-by-one in the
+    // `calloc(n + 1)` sizing or a lost NUL terminator would show here.
+    assert first.length == template.length;
+    assert second.length == template.length;
+    // Created `O_EXCL`, so two calls can never collide.
+    assert first != second;
+    assert fs.exists(first);
+    assert fs.exists(second);
+
+    process.run(["rm", "-rf", scratch]);
+}
+
+// There is deliberately no test pinning what a template lacking the
+// trailing `XXXXXX` does: it is not portable. glibc rejects it with
+// EINVAL, while BSD/Darwin's `_gettemp` finds no `X`s to substitute
+// and creates the literal path verbatim — a predictable, non-unique
+// name. Every caller supplies a six-`X` template, so the divergence is
+// unreachable; asserting either behaviour would pin a libc quirk
+// rather than this helper's contract.
+// A mint into a directory that does not exist must degrade rather than
+// fabricate a path — this is the branch `_cr_run_parallel_emit` relies
+// on to fall back to a non-atomic in-place write, and the branch that
+// would silently disable atomic publishing for an entire build if it
+// ever returned a non-empty path.
+test "temp-mint: missing directory degrades to empty" ![io] {
+    assert _mktemp_from_template_cmd("/tmp/sfn_mktemp_absent_dir/probe.XXXXXX") == "";
 }
 
 // --------------------------------------------------------------
