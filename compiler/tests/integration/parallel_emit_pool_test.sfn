@@ -1,0 +1,100 @@
+// compiler/tests/integration/parallel_emit_pool_test.sfn
+//
+// Regression coverage for SFN-498 (native parallel emit fan-out):
+// `_cr_run_parallel_emit`'s bounded native worker pool
+// (`compiler/src/capsule_emit_parallel.sfn`). Drives the exported entry
+// point directly against the *shipped* `build/bin/sfn` binary — the same
+// "spawn the real binary" rationale `emit_retry_test.sfn` documents — so
+// each task fans out to a real `sfn emit` subprocess rather than
+// re-entering the in-process emitter.
+//
+// `_cr_run_parallel_emit` sources each emit child's environment itself
+// (`_cr_emit_child_env` = `process.environ()`, i.e. this test process's
+// own environment), not a caller-supplied array, so there is no
+// `process.run_capture(argv, env)` call here for `clean_runner_env` to
+// feed. Isolation instead comes from `nested_runner_scratch`: every task's
+// output path lives under a scratch directory rooted at the parent
+// runner's `SAILFIN_TEST_SCRATCH` (or a fresh `mkdtemp` when unset), so
+// concurrent pool workers never share an output path (`.claude/rules/
+// no-bash-e2e.md`).
+import { nested_runner_scratch } from "sfn/test";
+
+import { ParallelEmitTask, _cr_run_parallel_emit } from "../../src/capsule_emit_parallel";
+import { number_to_string } from "../../src/main";
+
+fn _valid_source(n: int) -> string {
+    return "fn add" + number_to_string(n)
+        + "(a: int, b: int) -> int {\n    return a + b;\n}\n";
+}
+
+fn _write_task(dir: string, slug: string, source: string) -> ParallelEmitTask ![io] {
+    let src_path = dir + "/" + slug + ".sfn";
+    fs.writeFile(src_path, source);
+    return ParallelEmitTask {
+        slug: slug,
+        output_path: dir + "/" + slug + ".sfn-asm",
+        source_path: src_path
+    };
+}
+
+test "parallel emit: fan-out emits and publishes every task" ![io] {
+    let dir = nested_runner_scratch("parallel-emit-pool-fanout");
+    fs.createDirectory(dir, true);
+
+    let tasks: ParallelEmitTask[] = [_write_task(dir, "task0", _valid_source(0)), _write_task(dir, "task1", _valid_source(1)), _write_task(dir, "task2", _valid_source(2))];
+
+    let ok = _cr_run_parallel_emit(tasks, "native", "build/bin/sfn", 3, "");
+    assert ok;
+
+    let mut i = 0;
+    loop {
+        if i >= tasks.length { break; }
+        let out = tasks[i].output_path;
+        assert fs.exists(out);
+        assert fs.readFile(out).length > 0;
+        i += 1;
+    }
+
+    fs.removeDirectory(dir, true);
+}
+
+test "parallel emit: a failing child fails the round" ![io] {
+    let dir = nested_runner_scratch("parallel-emit-pool-fail");
+    fs.createDirectory(dir, true);
+
+    let tasks: ParallelEmitTask[] = [_write_task(dir, "good0", _valid_source(0)),
+    // Syntactically invalid: `sfn emit` for this task exits non-zero.
+    _write_task(dir, "broken", "fn broken( {\n"), _write_task(dir, "good1", _valid_source(1))];
+
+    let ok = _cr_run_parallel_emit(tasks, "native", "build/bin/sfn", 3, "");
+    assert ! ok;
+
+    // The pool drains the whole queue and reports failure rather than
+    // aborting mid-flight, so the two good tasks still publish even
+    // though the round overall fails.
+    assert fs.exists(tasks[0].output_path);
+    assert fs.readFile(tasks[0].output_path).length > 0;
+    assert fs.exists(tasks[2].output_path);
+    assert fs.readFile(tasks[2].output_path).length > 0;
+
+    fs.removeDirectory(dir, true);
+}
+
+test "parallel emit: jobs above task count still completes" ![io] {
+    let dir = nested_runner_scratch("parallel-emit-pool-overjobs");
+    fs.createDirectory(dir, true);
+
+    let tasks: ParallelEmitTask[] = [_write_task(dir, "solo0", _valid_source(0)), _write_task(dir, "solo1", _valid_source(1))];
+
+    // jobs (8) exceeds tasks.length (2): the top-up loop's
+    // `launched >= tasks.length` guard must still hold and complete.
+    let ok = _cr_run_parallel_emit(tasks, "native", "build/bin/sfn", 8, "");
+    assert ok;
+
+    assert fs.exists(tasks[0].output_path);
+    assert fs.readFile(tasks[0].output_path).length > 0;
+    assert fs.exists(tasks[1].output_path);
+    assert fs.readFile(tasks[1].output_path).length > 0;
+
+    fs.removeDirectory(dir, true);
+}

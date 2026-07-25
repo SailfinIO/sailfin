@@ -80,8 +80,15 @@ fn _dirname_cmd(path: string) -> string {
 // with SFN-506, which owns reproducing it on a macOS host.
 fn _mktemp_sibling_cmd(dst_path: string) -> string ![io] {
     // A Windows host has no POSIX `mktemp`; return "" so the caller
-    // degrades to a direct, non-atomic in-place write. Race-free there
-    // because a Windows host emits serially (`_cr_resolve_jobs` → 1).
+    // degrades to a direct, non-atomic in-place write. Safe under the
+    // concurrent emit fan-out because each emit task owns a distinct output
+    // path and no peer child reads another's in-flight output — the
+    // `native` round passes no `--import-context`, and the `llvm` round's
+    // context root is the already-complete `native` stage output. What the
+    // degrade gives up is crash atomicity: a build killed mid-emit leaves a
+    // truncated artifact, which the next build treats as a cache miss (the
+    // source-hash sidecar / cache key is written only after a successful
+    // emit). SFN-506 restores the atomic publish.
     if host_is_windows() { return ""; }
     let dst_dir = _dirname_cmd(dst_path);
     let template = _shell_single_quote_arg(dst_dir + "/.sfn_stage.XXXXXX");
