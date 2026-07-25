@@ -86,8 +86,9 @@ The next number is `max + 1`. Add a row in the same PR that introduces an SFEP.
 
 Per SFEP-0001 §2, a draft keeps its `draft-<slug>.md` name and `sfep: TBD`
 front-matter until it merges, at which point it claims `max + 1` and gets an
-Index row. The following drafts are in review — a cohesive slate closing the
-language gaps surfaced by the 2026-07 grammar/object-model audit:
+Index row. Two slates are in review.
+
+**Language gaps surfaced by the 2026-07 grammar/object-model audit:**
 
 | Draft | Title | Type |
 |---|---|---|
@@ -98,6 +99,21 @@ language gaps surfaced by the 2026-07 grammar/object-model audit:
 | [`draft-nullable-access-operators`](./draft-nullable-access-operators.md) | Nullable Access Operators (`?.` and `??`) | language |
 | [`draft-import-surface-compaction`](./draft-import-surface-compaction.md) | Import-surface compaction across the phase rewind to cut emit peak RSS | runtime |
 | [`draft-concurrency-cancellation`](./draft-concurrency-cancellation.md) | Concurrency runtime maturity — cancel-on-fault and async I/O | runtime |
+
+**Capability-seal critical path** — implementation designs under SFEP-0015
+(*what*) and SFEP-0016 (*why*), each answering a *how* neither parent specifies:
+
+| Draft | Title | Type |
+|---|---|---|
+| [`draft-typed-ssa-activation`](./draft-typed-ssa-activation.md) | Typed SSA Activation — Making the Metadata IR Load-Bearing | tooling |
+| [`draft-owned-syscall-layer`](./draft-owned-syscall-layer.md) | The Owned Syscall Layer (Axis 3, tier-1 Linux x86-64) | runtime |
+
+Both propose amendments to their parents rather than standing alone:
+`draft-typed-ssa-activation` §3.3–3.4 names two gaps in the normative SFEP-0015
+§9 contract (no conversion instruction; no producer input for capability
+atoms), and `draft-owned-syscall-layer` §2.2 names three holes SFEP-0016 §8's
+threat model does not currently cover (`getaddrinfo`, `popen`, and OpenSSL's
+own syscall paths). Review the parent amendments alongside each draft.
 
 SFEP-0038 (`0038-generic-constraints.md`, Implemented) is the root foundation:
 `draft-generic-collections`, `draft-derive`, and SFEP-0028 all depend on it. Draft diagnostic codes are
