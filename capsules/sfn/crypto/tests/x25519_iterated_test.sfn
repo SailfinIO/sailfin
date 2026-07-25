@@ -1,0 +1,62 @@
+// capsules/sfn/crypto/tests/x25519_iterated_test.sfn
+//
+// The RFC 7748 §5.2 iterated x25519 vector lives in its own file, separate
+// from x25519_test.sfn, because it drives 1,000 scalar multiplications and
+// its wall time is the one number the design note could not predict — see
+// docs/proposals/design-notes/sfn-335-x25519-limb-strategy.md §5.4 and §7.
+// The 1,000,000-iteration vector is out of scope for regression coverage.
+import { x25519 } from "../src/x25519";
+
+fn hexb(s: string) -> int[] {
+    let mut out: int[] = [];
+    let mut i: int = 0;
+    loop {
+        if i >= s.length { break; }
+        let hi: int = _hexval(s[i]);
+        let lo: int = _hexval(s[i + 1]);
+        out.push(((hi << 4) | lo) & 255);
+        i += 2;
+    }
+    return out;
+}
+
+fn _hexval(c: string) -> int {
+    let code: int = char_code(c) & 255;
+    if code >= 48 && code <= 57 {
+        return code - 48;
+    }  // '0'-'9'
+    if code >= 97 && code <= 102 {
+        return code - 97 + 10;
+    }  // 'a'-'f'
+    return 0;
+}
+
+fn eq_bytes(a: int[], b: int[]) -> bool {
+    if a.length != b.length { return false; }
+    let mut i: int = 0;
+    loop {
+        if i >= a.length { break; }
+        if a[i] != b[i] { return false; }
+        i += 1;
+    }
+    return true;
+}
+
+test "x25519: RFC 7748 §5.2 iterated vector (1 and 1,000 iterations)" {
+    let after_1: int[] = hexb("422c8e7a6227d7bca1350b3e2bb7279f7897b87bb6854b783c60e80311ae3079");
+    let after_1000: int[] = hexb("684cf59ba83309552800ef566f2f4d3c1c3887c49360e3875f2eb94d99532c51");
+
+    let mut k: int[] = hexb("0900000000000000000000000000000000000000000000000000000000000000");
+    let mut u: int[] = hexb("0900000000000000000000000000000000000000000000000000000000000000");
+
+    let mut i: int = 0;
+    loop {
+        if i >= 1000 { break; }
+        let next_k: int[] = x25519(k, u);
+        u = k;
+        k = next_k;
+        i += 1;
+        if i == 1 { assert eq_bytes(k, after_1); }
+    }
+    assert eq_bytes(k, after_1000);
+}

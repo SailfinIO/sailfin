@@ -1,0 +1,126 @@
+// capsules/sfn/crypto/tests/x25519_test.sfn
+//
+// Regression coverage for the sfn/crypto x25519 module: RFC 7748 §5.2
+// single-scalar-multiplication vectors, the RFC 7748 §6.1 Diffie-Hellman
+// round trip (both base-point derivations and both shared-secret
+// directions), fail-closed length checks, and x25519_is_zero behavior.
+import { x25519, x25519_base, x25519_is_zero } from "../src/x25519";
+
+fn hexb(s: string) -> int[] {
+    let mut out: int[] = [];
+    let mut i: int = 0;
+    loop {
+        if i >= s.length { break; }
+        let hi: int = _hexval(s[i]);
+        let lo: int = _hexval(s[i + 1]);
+        out.push(((hi << 4) | lo) & 255);
+        i += 2;
+    }
+    return out;
+}
+
+fn _hexval(c: string) -> int {
+    let code: int = char_code(c) & 255;
+    if code >= 48 && code <= 57 {
+        return code - 48;
+    }  // '0'-'9'
+    if code >= 97 && code <= 102 {
+        return code - 97 + 10;
+    }  // 'a'-'f'
+    return 0;
+}
+
+fn eq_bytes(a: int[], b: int[]) -> bool {
+    if a.length != b.length { return false; }
+    let mut i: int = 0;
+    loop {
+        if i >= a.length { break; }
+        if a[i] != b[i] { return false; }
+        i += 1;
+    }
+    return true;
+}
+
+test "x25519: RFC 7748 §5.2 vector 1" {
+    let scalar: int[] = hexb("a546e36bf0527c9d3b16154b82465edd62144c0ac1fc5a18506a2244ba449ac4");
+    let u: int[] = hexb("e6db6867583030db3594c1a424b15f7c726624ec26b3353b10a903a6d0ab1c4c");
+    let expected: int[] = hexb("c3da55379de9c6908e94ea4df28d084f32eccf03491c71f754b4075577a28552");
+    assert eq_bytes(x25519(scalar, u), expected);
+}
+
+test "x25519: RFC 7748 §5.2 vector 2" {
+    let scalar: int[] = hexb("4b66e9d4d1b4673c5ad22691957d6af5c11b6421e0ea01d42ca4169e7918ba0d");
+    let u: int[] = hexb("e5210f12786811d3f4b7959d0538ae2c31dbe7106fc03c3efc4cd549c715a493");
+    let expected: int[] = hexb("95cbde9476e8907d7aade45cb4b873f88b595a68799fa152e6f8f7647aac7957");
+    assert eq_bytes(x25519(scalar, u), expected);
+}
+
+test "x25519: RFC 7748 §6.1 Diffie-Hellman round trip" {
+    let alice_priv: int[] = hexb("77076d0a7318a57d3c16c17251b26645df4c2f87ebc0992ab177fba51db92c2a");
+    let alice_pub: int[] = hexb("8520f0098930a754748b7ddcb43ef75a0dbf3a0d26381af4eba4a98eaa9b4e6a");
+    let bob_priv: int[] = hexb("5dab087e624a8a4b79e17f8b83800ee66f3bb1292618b6fd1c2f8b27ff88e0eb");
+    let bob_pub: int[] = hexb("de9edb7d7b7dc1b4d35b61c2ece435373f8343c85b78674dadfc7e146f882b4f");
+    let shared: int[] = hexb("4a5d9d5ba4ce2de1728e3bf480350f25e07e21c947d19e3376f09b3c1e161742");
+
+    assert eq_bytes(x25519_base(alice_priv), alice_pub);
+    assert eq_bytes(x25519_base(bob_priv), bob_pub);
+    assert eq_bytes(x25519(alice_priv, bob_pub), shared);
+    assert eq_bytes(x25519(bob_priv, alice_pub), shared);
+}
+
+test "x25519: u-coordinate at or above p is reduced" {
+    // The RFC vectors never feed a u-coordinate >= p, so they do not exercise
+    // `_pack25519`'s two-round conditional subtraction or `_unpack25519`'s
+    // high-bit mask. An all-ones u masks to 2^255 - 1 = p + 18, which is
+    // congruent to 18 and must reduce; a single subtraction round would leave
+    // a representative in [p, 2p) and serialize the wrong bytes.
+    let scalar: int[] = hexb("a546e36bf0527c9d3b16154b82465edd62144c0ac1fc5a18506a2244ba449ac4");
+    let u: int[] = hexb("ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff");
+    let expected: int[] = hexb("76b00406ce7e87774c0038dd8d89b188047977f8828ca1dcb8f98bb5d5d0cf48");
+    assert eq_bytes(x25519(scalar, u), expected);
+}
+
+test "x25519: low-order u-coordinates yield an all-zero shared secret" {
+    // RFC 7748 §6.1 / RFC 8446 §7.4.2: a low-order input point drives the
+    // shared secret to zero, which a TLS 1.3 handshake must detect and abort
+    // on. u = 0, u = 1, and u = p all take this path.
+    let scalar: int[] = hexb("a546e36bf0527c9d3b16154b82465edd62144c0ac1fc5a18506a2244ba449ac4");
+    let zero: int[] = hexb("0000000000000000000000000000000000000000000000000000000000000000");
+    let one: int[] = hexb("0100000000000000000000000000000000000000000000000000000000000000");
+    let p: int[] = hexb("edffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff7f");
+
+    assert eq_bytes(x25519(scalar, zero), zero);
+    assert eq_bytes(x25519(scalar, one), zero);
+    assert eq_bytes(x25519(scalar, p), zero);
+    assert x25519_is_zero(x25519(scalar, p)) == true;
+}
+
+test "x25519: fail-closed on 31-byte scalar" {
+    let scalar: int[] = hexb("a546e36bf0527c9d3b16154b82465edd62144c0ac1fc5a18506a2244ba449a");
+    let u: int[] = hexb("e6db6867583030db3594c1a424b15f7c726624ec26b3353b10a903a6d0ab1c4c");
+    assert x25519(scalar, u).length == 0;
+}
+
+test "x25519: fail-closed on 31-byte u" {
+    let scalar: int[] = hexb("a546e36bf0527c9d3b16154b82465edd62144c0ac1fc5a18506a2244ba449ac4");
+    let u: int[] = hexb("e6db6867583030db3594c1a424b15f7c726624ec26b3353b10a903a6d0ab1c");
+    assert x25519(scalar, u).length == 0;
+}
+
+test "x25519_is_zero: all-zero 32-byte shared secret" {
+    let zero: int[] = hexb("0000000000000000000000000000000000000000000000000000000000000000");
+    assert x25519_is_zero(zero) == true;
+}
+
+test "x25519_is_zero: nonzero §6.1 shared secret" {
+    let shared: int[] = hexb("4a5d9d5ba4ce2de1728e3bf480350f25e07e21c947d19e3376f09b3c1e161742");
+    assert x25519_is_zero(shared) == false;
+}
+
+test "x25519_is_zero: fail-closed on wrong-length input reads as zero" {
+    // A rejected x25519() call yields [], and per RFC 8446 §7.4.2 an
+    // all-zero (or otherwise malformed) shared secret must abort the
+    // handshake rather than proceed — so wrong length must read as "zero".
+    let empty: int[] = [];
+    assert x25519_is_zero(empty) == true;
+}

@@ -44,6 +44,11 @@ export {
 
 export { chacha20_block, chacha20_xor } from "./chacha20";
 
+// X25519 (Curve25519 ECDH, RFC 7748) — the TLS 1.3 key-exchange primitive,
+// over 16 x 16-bit limbs (SFEP-0048 §6.4 as amended by the SFN-335 design
+// note, docs/proposals/design-notes/sfn-335-x25519-limb-strategy.md).
+export { x25519, x25519_base, x25519_is_zero } from "./x25519";
+
 // CSPRNG — secure random bytes from the host OS entropy source. The capsule's
 // one effectful primitive: `random_bytes` carries `![rand]` (SFEP-0048 Phase D).
 export { random_bytes } from "./rand";

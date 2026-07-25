@@ -92,7 +92,7 @@ gates Phase B.
 | Phase | Deliverable | External-dep effect | Ships when |
 |---|---|---|---|
 | **A** | Extend `capsules/sfn/crypto/`: SHA-1, SHA-384, HKDF, ChaCha20, Poly1305, a `bits` constant-time/masking helper module (SHA-256, base64, HMAC-SHA-256, Ed25519-verify already ship) | none removed yet; primitives exist natively | this workflow |
-| **B** | TLS 1.3 record layer (AEAD via ChaCha20-Poly1305) + client handshake, then server handshake | still linked (fallback); native path selectable | after X25519 unblocks (§6.4) |
+| **B** | TLS 1.3 record layer (AEAD via ChaCha20-Poly1305) + client handshake, then server handshake | still linked (fallback); native path selectable | X25519 unblocked (§6.4 amendment, SFN-335) |
 | **C** | X.509 cert parse + chain verification + system trust-store loading + RFC 6125 hostname check | still linked | after Phase B |
 | **D** | Swap `tls_*` wrapper **bodies** to the native stack; replace `websocket.sfn`'s `SHA1`/`EVP_EncodeBlock`/`RAND_bytes` with the native primitives; replace the `sfn/crypto` HMAC/Ed25519 externs with pure-Sailfin ports; delete all OpenSSL externs; drop `-lssl`/`-lcrypto`; remove `_openssl_link_search_flags()` | **`-lssl`/`-lcrypto` gone from every binary** | after Phase C |
 
@@ -316,6 +316,20 @@ as a blocker; it gates Phase B (TLS 1.3 key exchange is impossible without it).
 It is the canonical use case for SFEP-0058 and a future
 `64×64 → 128` widening-multiply intrinsic.
 
+**Amendment (2026-07-25) — WITHDRAWN.** This rejection evaluated exactly two
+limb widths (51-bit and 25.5-bit) and stopped at the first one that fit "in
+principle," without going narrower — even though §3.3 item 5 mandates exactly
+that search. At **16 limbs × 16 bits** (the TweetNaCl `gf` layout,
+`2^256 ≡ 38 mod p`), the worst-case intermediate across the entire scalar
+multiplication is `2^45.80`, leaving 16.2 bits of headroom below `2^62`, and it
+needs **no new compiler capability** — no sized integers, no unsigned
+semantics, no `lshr`, no `64×64 → 128` widening multiply. The full margin
+analysis and ladder operand audit are in
+`docs/proposals/design-notes/sfn-335-x25519-limb-strategy.md` §§1–3. X25519
+shipped in pure Sailfin as `capsules/sfn/crypto/src/x25519.sfn` (SFN-335); see
+the §7 amendment for the blocker-record disposition. The original rejection
+above is preserved as the historical record of what was actually evaluated.
+
 ### 6.5 Put the new primitives in `runtime/sfn/crypto/` instead of the capsule
 Rejected for Phase A. The existing crypto surface already lives in the
 `capsules/sfn/crypto/` library capsule, which is where user-facing crypto and
@@ -327,16 +341,17 @@ already uses — not by relocating the tested source of truth out of the capsule
 
 ## 7. Blockers
 
-- **X25519 (Curve25519 ECDH) — not buildable in Phase A.** Requires either a
-  `64×64 → 128` widening multiply (does not exist; no wide-multiply intrinsic)
-  or a 10-limb 25.5-bit schoolbook field-multiply whose carry chain and ×19
-  reduction leave a thin i64 margin with **no** compiler-enforced overflow
-  check, plus a constant-time `cswap` whose branch-free guarantee is undermined
-  by `>>`-is-`ashr` and collapsed-unsigned semantics. **Missing capability:**
-  sized/unsigned integer semantics with defined wrapping
-  (SFEP-0058) and/or a widening-multiply intrinsic. **Gates:**
-  Phase B (TLS 1.3 key exchange). Until then, Phase B either stays
-  OpenSSL-backed for the key exchange only or waits.
+- **X25519 (Curve25519 ECDH) — WITHDRAWN (2026-07-25), no longer a blocker.**
+  Previously recorded as not buildable in Phase A pending sized/unsigned integer
+  semantics (SFEP-0058) or a widening-multiply intrinsic. That evaluation
+  stopped at 51-bit and 25.5-bit limb widths; at 16 limbs × 16 bits (TweetNaCl's
+  `gf` layout) the worst-case intermediate is `2^45.80`, 16.2 bits below `2^62`,
+  with no new compiler capability required. Full analysis:
+  `docs/proposals/design-notes/sfn-335-x25519-limb-strategy.md`. Shipped in pure
+  Sailfin as `capsules/sfn/crypto/src/x25519.sfn` (SFN-335), self-hosted, and
+  regression-covered by the RFC 7748 §5.2/§6.1 vectors. Phase B's key exchange
+  is unblocked; Ed25519-verify remains a separate follow-on (§8 of the design
+  note) still gated on the same field-arithmetic port plus SHA-512.
 
 - **AES-GCM AEAD — deliberately deferred (not a hard blocker for the chosen
   cut).** Constant-time software AES needs either bitsliced AES (very large,
@@ -400,8 +415,10 @@ re-pointed at the native stack.
   replaces; its `tls_*` wrapper contracts are the Phase D swap target.
 - SFEP-0015 (`0015-llvm-independence.md`) — backend/syscall ownership; the seal's
   other prerequisite.
-- `0058-sized-integer-types.md` — the missing capability behind the X25519 /
-  Ed25519 blocker (§7).
+- `0058-sized-integer-types.md` — was cited as the missing capability behind the
+  X25519 / Ed25519 blocker (§7); X25519 no longer depends on it (§6.4
+  amendment, `docs/proposals/design-notes/sfn-335-x25519-limb-strategy.md`).
+  Ed25519-verify remains a separate follow-on.
 - Prior art: `capsules/sfn/crypto/src/mod.sfn` (SHA-256, base64, HMAC-SHA-256),
   `capsules/sfn/crypto/src/ed25519.sfn` (OpenSSL-EVP wrapper pattern),
   `compiler/src/build/hash.sfn` (vendored SHA-256 — the runtime-vendoring
@@ -411,4 +428,4 @@ re-pointed at the native stack.
   `compiler/src/build/runtime_objs.sfn:904-937`, `runtime/capsule.toml:49,59`.
 - RFCs: 4648 (base64, shipped), 3174/6234 (SHA-1), FIPS 180-4 / RFC 6234
   (SHA-384), 2104/4231 (HMAC), 5869 (HKDF), 8439 (ChaCha20 + Poly1305), 7748
-  (X25519 — blocked).
+  (X25519, shipped — SFN-335).
