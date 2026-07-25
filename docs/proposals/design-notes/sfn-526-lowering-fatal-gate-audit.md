@@ -222,7 +222,7 @@ These are untagged and should stay untagged.
 | Site | Why continuing is correct |
 |---|---|
 | `runtime_call.sfn:209` | falls back to the **original uncoerced operand** — a real value, not a fabrication; degraded but not invented |
-| `core_call_lowering.sfn:396, 411` | non-terminal; the arity backstop at `:436` fail-closes on the resulting drift |
+| `core_call_lowering.sfn:396, 411` | non-terminal; the arity backstop at `:436` fail-closes on the resulting drift — **but only since SFN-548; see the correction below** |
 | `core_concurrency_lowering.sfn:1410` (non-`double` await) | deliberate accepted gap for the still-untyped `i8*`/ptr await path, documented in-source (#829); the `double` shape *is* escalated |
 | `lowering_core.sfn:329` | informational: test module defines its own `main`, harness skipped |
 | `emission.sfn:249` | parameter missing a type annotation defaults to `i8*` — pre-existing ABI policy, not a lowering failure |
@@ -234,6 +234,25 @@ The last two matter: read in isolation they look like severe unenforced
 memory-safety checks. They are not. Enforcement either lives in a different
 pass, or the feature is documented as not yet shipped. Tagging them `[fatal]`
 would fail-close a check the language does not yet claim to make.
+
+### Correction (SFN-548): the `core_call_lowering.sfn` backstop was not fail-closed
+
+This audit classified `core_call_lowering.sfn:396, 411` as class (b) on the
+reasoning that the arity backstop at `:436` fail-closes on the resulting drift.
+That reasoning was sound but the premise was false: `:436` pushed an **untagged**
+diagnostic, so it never tripped the gate. A call whose argument failed to lower
+was dropped from the emitted IR and the build succeeded — the program linked,
+ran, and exited 0 with the statement simply absent. SFN-548 is the confirmed
+instance (`print("n=" + n)` with an `int` operand produced no output at all).
+
+SFN-548 tags `:436` `[fatal]`, which makes the premise true and the class (b)
+classification correct going forward.
+
+The methodological lesson generalizes: a site is only class (b) if its claimed
+backstop is *verified* to fail-close, not merely present. Every other class (b)
+row here that defers to a downstream guard deserves the same check — this audit
+established the classification by reading the control flow, which is exactly how
+an untagged backstop passes for a tagged one.
 
 ---
 
