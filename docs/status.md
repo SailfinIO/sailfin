@@ -1,6 +1,6 @@
 # Status
 
-Updated: 2026-07-24. Seed pinned to `0.8.0` (`bootstrap.toml`
+Updated: 2026-07-25. Seed pinned to `0.8.0` (`bootstrap.toml`
 `[seed].version` — SFEP-0047); the compiler version source of truth is
 `compiler/capsule.toml`.
 
@@ -151,7 +151,10 @@ here.
   (#873). Test lowering retains imported free-function signatures for direct
   and aliased calls, including struct-returning capsule APIs such as
   `sfn/tensor`, and does not synthesize scalar helpers over imported symbols
-  (SFN-436).
+  (SFN-436). Lowering fails closed with `E1001` when an imported local name
+  collides with a function defined in the importing module, or when the import
+  set exceeds the mangling safety bound, rather than dropping the affected
+  rewrite and emitting a binary with the wrong symbol (SFN-530).
 - **Workspace default targets.** At a workspace root, bare `sfn build` and
   `sfn test` fan out over `[workspace].default-members`; when the field is
   absent they target every member. Each member has distinguishable output and
@@ -494,13 +497,13 @@ here.
 | `match` | Shipped | Literals, `_`, guards, enum-variant destructuring |
 | `x is T` type-guard operator | **Shipped** (enum operands; #1753) | Parses to a structured `Is` AST node; effect checker walks the operand (closes the `Raw`-degradation effect-blind hole in epic #1180). Lowers to the enum's discriminant tag test and narrows the operand to the matched variant in the then-branch — same flow-sensitive narrowing as `match`. v1 scope: **named `enum` operands only**; non-enum unions, primitives, and plain structs are deferred. Else-branch complement narrowing is also deferred. See `examples/advanced/type-guards.sfn` |
 | `try`/`catch`/`finally` | Shipped | Maps to runtime exceptions |
-| String interpolation (`{{ }}`) | Shipped | Primitive values and `int \| null` union payloads stringify in direct, narrowed, and match-bound positions (SFN-343); primitive-element arrays (`int[]`/`float[]`/`number[]`/`boolean[]`/`string[]`) and nested arrays render bracketed (`[1, 2, 3]`, `[1.5, 2.5]`, `[[19, 22], [43, 50]]`) (SFN-408, SFN-410). Any interpolation operand with no stringify arm — e.g. a struct — fails the build loudly (`E0832 [fatal]`), never the old silent empty output. `${ }` migration planned pre-1.0 (see Known Design Issues) |
+| String interpolation (`${ }`) | Shipped | Primitive values and `int \| null` union payloads stringify in direct, narrowed, and match-bound positions (SFN-343); primitive-element arrays (`int[]`/`float[]`/`number[]`/`boolean[]`/`string[]`) and nested arrays render bracketed (`[1, 2, 3]`, `[1.5, 2.5]`, `[[19, 22], [43, 50]]`) (SFN-408, SFN-410). Any interpolation operand with no stringify arm — e.g. a struct — fails the build loudly (`E0832 [fatal]`), never the old silent empty output. `${ }` is the recognized form (SFEP-0057, SFN-482); the legacy `{{ }}` form still works during the dual-accept window but emits a non-fatal `W0212` deprecation warning at `sfn check`. Dropping `{{ }}` and adding the `\${` literal-escape are Phase 4 (SFN-483). |
 | Pattern-match exhaustiveness | Partial | Runtime backstop (`match_exhaustive_failed`) |
 | Effect annotations (`![...]`) | Shipped | |
 | Effect enforcement — `io`, `net`, `clock` | **Enforced** | Build fails on undeclared use (Phase D default `error`) |
 | Effect enforcement — `model` | Reserved | Declarable; detector lands with the `sfn/ai` capsule (post-1.0) |
 | Effect enforcement — sub-effects (`io.fs`, `io.console`, `net.http`, `net.ws`) | **Enforced** | Detection attributes narrow sub-effects; bare-root grants subsume (backward compatible); narrow grants + manifest tightening (`required = ["io.fs"]`, `E0403`); SFEP-0017 §6/G7, SFN-99 |
-| Effect enforcement — `gpu` | Parsed only | Reserved in the taxonomy; no detectors yet |
+| Effect enforcement — `gpu` | **Enforced** (device-dispatch boundary) | `sfn/device::matmul_f64` / `::synchronize` (SFN-428, SFEP-0052 §3.2) establish the `![gpu]` boundary end-to-end: they carry `![gpu]` on their declarations, it propagates to callers via the existing callee-effect propagation, and a caller without `![gpu]` fails effect-check with a spanned diagnostic + fix-it. **`![gpu]` is the capability to dispatch work to a device backend — not a claim that an accelerator exists.** The only registered backend in any current build is the CPU reference kernel (`sfn/device::has_accelerator()` returns `false`; there is no NVPTX/AMDGPU/SPIR-V backend in tree). The gate ships ahead of a real backend so programs written against this surface need no annotation migration when one lands. Scope: only the `sfn/device` dispatch entry points carry the effect — there is no auto call-name detector, and a raw `extern` to a vendor API bypasses the gate (externs carry no effect, `E0804`), the same limitation `rand` has |
 | Effect enforcement — `rand` | **Enforced** (entropy boundary) | `sfn/crypto::random_bytes` (SFEP-0048 Phase D) establishes the `![rand]` boundary end-to-end: it propagates to callers via the existing callee-effect propagation and a caller without `![rand]` fails effect-check. Scope: only `random_bytes` carries the effect — there is still no auto call-name detector for arbitrary RNG identifiers |
 | Cross-module effect propagation | **Shipped** | `E0402` (Phases E/E2); free functions, aliases, statically resolved members, and imported decorator effects |
 | Capsule capability cross-check | **Shipped** | `E0403` (Phase F) |
@@ -574,7 +577,7 @@ Capsules ship under `capsules/sfn/` and are imported by bare name
 |---------|--------|--------|---------|-------------|
 | `sfn/strings` | `"strings"` | Shipped | None | Trim, explicit ASCII-only `ascii_uppercase` / `ascii_lowercase` conversion (non-ASCII bytes unchanged), split/join, find/replace |
 | `sfn/json` | `"json"` | Shipped | None | JSON parsing, serialization, pretty-print; `parse_with_limits(text, ParseLimits)` enforces caller-configurable nesting-depth and input-size caps (defaults via `default_limits()`: depth 1000, length 10M) and returns a `ParseOutcome { ok, error, value }` that cleanly reports a guard breach instead of crashing on adversarial input (SFN-156) |
-| `sfn/crypto` | `"crypto"` | Shipped | `![rand]` (`random_bytes` only) | Pure Sailfin SHA-256/SHA-1/SHA-384 + base64, HMAC-SHA-256, HKDF-SHA-256, ChaCha20, Poly1305, and bit/constant-time helpers (SFEP-0048 Phase A + Phase D prep); OpenSSL-backed Ed25519 verify; `random_bytes(n: int) -> int[] ![rand]` (`capsules/sfn/crypto/src/rand.sfn`) — the capsule's sole effectful function, returning `n` cryptographically secure bytes from the OS entropy source (`getentropy`/`getrandom`, `/dev/urandom` read-loop fallback) via the runtime primitive `sfn_rand_fill` (`runtime/sfn/platform/rand.sfn`); fails closed to `[]` on non-positive `n` or an entropy-source error (never zeroed/partial output). Backs the WebSocket adapter's masking key and handshake key generation, retiring its OpenSSL `RAND_bytes` extern (SHA-1/`EVP_EncodeBlock` OpenSSL externs remain, so `-lssl -lcrypto` is still linked) |
+| `sfn/crypto` | `"crypto"` | Shipped | `![rand]` (`random_bytes` only) | Pure Sailfin SHA-256/SHA-1/SHA-384 + base64, HMAC-SHA-256, HKDF-SHA-256, ChaCha20, Poly1305, and bit/constant-time helpers (SFEP-0048 Phase A + Phase D prep); pure Sailfin X25519 (Curve25519 ECDH, RFC 7748) — `x25519(scalar: int[], u: int[]) -> int[]`, `x25519_base(scalar: int[]) -> int[]`, `x25519_is_zero(shared: int[]) -> bool` (`capsules/sfn/crypto/src/x25519.sfn`, SFN-335), no effects, 16×16-bit limb representation, constant-time Montgomery ladder with no secret-dependent branch or array index, fails closed to `[]` on a non-32-byte scalar or u-coordinate; `x25519_is_zero` exists because RFC 8446 §7.4.2 requires a TLS 1.3 handshake to abort on an all-zero shared secret; design gate: `docs/proposals/design-notes/sfn-335-x25519-limb-strategy.md`; OpenSSL-backed Ed25519 verify; `random_bytes(n: int) -> int[] ![rand]` (`capsules/sfn/crypto/src/rand.sfn`) — the capsule's sole effectful function, returning `n` cryptographically secure bytes from the OS entropy source (`getentropy`/`getrandom`, `/dev/urandom` read-loop fallback) via the runtime primitive `sfn_rand_fill` (`runtime/sfn/platform/rand.sfn`); fails closed to `[]` on non-positive `n` or an entropy-source error (never zeroed/partial output). Backs the WebSocket adapter's masking key and handshake key generation, retiring its OpenSSL `RAND_bytes` extern (SHA-1/`EVP_EncodeBlock` OpenSSL externs remain, so `-lssl -lcrypto` is still linked) |
 | `sfn/math` | `"math"` | Shipped | None | abs, min/max, clamp, floor/ceil/round, pow, sum/mean |
 | `sfn/path` | `"path"` | Shipped | None | Path join, dirname, basename, ext, normalize |
 | `sfn/toml` | `"toml"` | Shipped | None | TOML v1.0 parsing, serialization, dotted-path access |
@@ -588,9 +591,10 @@ Capsules ship under `capsules/sfn/` and are imported by bare name
 | `sfn/http` | `"sfn/http"` | Partial (Waves 1–4 shipped) | `net`, `io` | GET/POST client wrappers; typed `fetch(method, url, headers, body) -> Response` client surfacing status + headers (`sfn_http_request_raw`); pure-Sailfin wire layer (parse/serialize/accessors, request + response parsers); typed HTTP/1.1 `serve` on the M4 runtime (`sfn_serve_framed`); POST/PUT bodies drained via `Content-Length` (1 MiB cap). real DNS host resolution via `getaddrinfo` (#1707, shared with `sfn/net`). client decodes `Transfer-Encoding: chunked` responses on the get/post/download path, length-tracked (#1708). HTTP/1.1 keep-alive connection reuse on the server loop + a native single-connection-reuse client (`sfn_http_conn_open`/`_send`/`_close`) (#1711). runtime TLS ships end-to-end (SFEP-0036 Implemented, epic #1540 B1; `runtime/sfn/platform/tls.sfn`): outbound client `https://` on `http.*`/capsule `get`/`post`, typed `fetch`, and keep-alive client connections with peer-chain + hostname verification against the system CA trust store (default verify paths + `/etc/ssl/certs/ca-certificates.crt` fallback, `SAILFIN_TLS_CAFILE` override), verify-on by default and fail-closed on a bad/untrusted cert (#1784); inbound TLS termination in the `serve` accept loop via the low-level `sfn_serve_tls(handler, port, cert, key)` runtime entry (#1783) and the typed `sfn/http` `serve_tls(handler: fn(Request) -> Response, port, cert, key)` wrapper backed by `sfn_serve_framed_tls` (#1933). e2e coverage: `runtime_tls_https_client_test.sfn`, `runtime_tls_verify_failure_test.sfn`, `serve_tls_loopback_test.sfn`, `tls_loopback_test.sfn`. TLS-scoped limits: mTLS/client-cert request, OCSP/CRL, and macOS/Windows CA-store discovery are post-1.0. Other v0 limits: blocking/single-process, no chunked *request* decode on `serve`; routing pending. (#1321; #1324 Content-Length drain; #1325 typed client; #1707 DNS; #1708 chunked client decode; #1711 keep-alive; #1540 B1 client TLS) |
 | `sfn/net` | `"net"` | Partial (TCP client + server) | `net`, `io` | Real TCP socket I/O via `runtime/sfn/adapters/net.sfn`: client `connect`/`write_all`/`read_all`/`read_bytes`/`close`, server `listen`/`accept`/`close_listener` (loopback round-trip tested in-process), and DNS `resolve` via libc `getaddrinfo` (first IPv4/A record). Host resolution across the client is `localhost`, numeric dotted-quad IPv4, and real DNS. v0 limits: text bodies (NUL-terminated), no TLS at the raw-socket layer (TLS lives one layer up in `sfn/http` via `runtime/sfn/platform/tls.sfn`, SFEP-0036), IPv4-only DNS (no AAAA/caching/happy-eyeballs). UDP (`udp_bind`/`send_to`/`recv_from`) still stubbed (#1582; DNS #1707; epic #1540 B6/B2) |
 | `sfn/sync` | `"sync"` | Stubbed | `io` | channel/parallel/spawn API (capsule API not yet built; use language constructs `channel`, `spawn`, `parallel`, `routine`, `join_all` directly — the runtime ships, the typed capsule wrapper does not) |
-| `sfn/tensor` | `"tensor"` | Shipped (CPU) | `gpu` (planned) | Tensor ops, matmul, transpose; no GPU dispatch yet |
-| `sfn/layers` | `"layers"` | Shipped (CPU) | `gpu` (planned) | Linear layers, ReLU, sequential models |
-| `sfn/nn` | `"nn"` | Shipped (CPU) | `gpu` (planned) | Activations, normalization, argmax, one_hot |
+| `sfn/tensor` | `"tensor"` | Shipped (CPU) | `gpu` (manifest ceiling; unused by code) | Tensor ops, matmul, transpose. CPU-only and effect-free by design — no function carries `![gpu]`, and it does not depend on `sfn/device`. Device dispatch is the separate, capability-gated `sfn/device` surface (SFN-428). The manifest's `required = ["gpu"]` is a permission ceiling, not a requirement |
+| `sfn/layers` | `"layers"` | Shipped (CPU) | `gpu` (manifest ceiling; unused by code) | Linear layers, ReLU, sequential models. CPU-only and effect-free; see the `sfn/tensor` note |
+| `sfn/nn` | `"nn"` | Shipped (CPU) | `gpu` (manifest ceiling; unused by code) | Activations, normalization, argmax, one_hot. CPU-only and effect-free; see the `sfn/tensor` note |
+| `sfn/device` | `"sfn/device"` | Shipped (v0, CPU reference backend) | `gpu` | The capability-gated device-dispatch boundary (SFN-428, SFEP-0052 §3.2). `backends()` / `active_backend()` / `has_accelerator()` are effect-free queries; `matmul_f64` and `synchronize` carry `![gpu]`. v0 scope: one dense f64 matmul entry point and a barrier, executed by a CPU reference kernel. `has_accelerator()` is `false` in every current build — there is no GPU backend in tree |
 | `sfn/losses` | `"losses"` | Shipped | None | MSE, MAE, Huber, hinge |
 
 ## Runtime (Current)
@@ -657,6 +661,7 @@ unit; history in the linked issues.
 | Prelude facade flipped to `sfn_*` symbols | **M2 closed** (M2.12, #407/#408) | Every M2-replaced call lands on the canonical `sfn_*` symbol; M3 lifts the remaining C trampolines |
 | Filesystem adapter wave 1a (`adapters/filesystem.sfn`) | **Shipped** (M3.1a #814) | read/write/append; wave 1b (dir ops, #815) next; bulk C deletion at M3.9 after a seed cut |
 | `sfn_fs_list_dir` host-aware enumeration (`adapters/filesystem.sfn`) | **Shipped** (SFN-374, epic #1485 M5) | `sfn_fs_list_dir` delegates directory enumeration to the `sailfin_intrinsic_fs_list_dir` sentinel instead of a hardcoded POSIX `opendir`/`readdir` loop: the POSIX leg keeps `opendir`/`readdir`/`closedir` (name at `dirent + _fs_dirent_dname_offset()`), the Windows leg walks `FindFirstFileA`/`FindNextFileA`/`FindClose` reading `WIN32_FIND_DATAA.cFileName` — fixing the 4096 source-enumeration cap in `enumerate_binary_capsule_sources` on native Windows. The sentinel returns unsorted; the wrapper preserves the empty-path → `"."` normalization and `strcmp`-sorts via `_fs_sort_str_array`. Consumer half of the SFN-51 seed-gated split (sentinel capability: SFN-51 / PR #2355, in the pinned seed since `v0.8.0`); POSIX `list_dir` behavior unchanged. Pinned by `compiler/tests/e2e/fs_list_dir_intrinsic_test.sfn` |
+| aarch64-Linux host layout constants | **Shipped** (SFN-471, SFEP-0056 §3.2–3.3) | LLVM lowering now resolves a non-shelling host-arch dimension via `SAILFIN_TARGET_ARCH` or the `/lib/ld-linux-aarch64.so.1` marker, defaulting to `x86_64`. The `sailfin_intrinsic_fs_get_perms` sentinel bakes `struct stat.st_mode` offset 16 for Linux+aarch64 while preserving 24 on Linux+x86_64 and 4 on Darwin. The exception frame's heap-backed `jmp_buf` reserve is 512 bytes, covering glibc aarch64 while leaving try/throw behavior unchanged. The glibc-common errno locator, `CLOCK_MONOTONIC`, `_SC_NPROCESSORS_ONLN`, and 160-byte `struct stat` reserve remain arch-invariant. Pinned by `compiler/tests/e2e/st_mode_arch_layout_test.sfn` and `runtime_exception_frames_test.sfn` |
 | `char_from_code` byte-write primitive | **Shipped** (#874) | Byte 0 unrepresentable until the `SfnString` aggregate flip (M1.A.2); macOS arm64 `char_code` immediate-decode caveat tracked at #1136 |
 | Pointer-typed struct fields | **Shipped** (#713) | Layout + stores emit; retires the `i64`-slot workarounds after the next seed cut (`seed-blocker`) |
 | Extern return-type defaulting hardened | **Shipped** (#306 Phase A) | Unresolvable callee signatures fail loud instead of emitting malformed IR; Phases B/C deferred |
@@ -691,6 +696,31 @@ unit; history in the linked issues.
 - Current release: `v0.8.0` (see `bootstrap.toml` `[seed].version`
   for the pinned self-host seed, which may trail the latest release).
 
+### Support Tiers
+
+Two independent axes, easy to conflate: **base support** (the toolchain
+builds, the suite passes, CI runs the platform, an installer asset is
+published) and **sealed support** (owned codegen, owned syscalls, no
+un-gated syscall path — the SFEP-0016 capability seal). A platform can carry
+the former with zero work toward the latter.
+
+| Platform | Base support | Sealed support |
+|---|---|---|
+| Linux x86-64 | Shipped; primary CI host (`ci.yml`); release asset published | In progress — direct `ld.lld` link path exists (`build/direct_link.sfn::resolve_direct_ld_lld`, hard-gated to `x86_64`); owned syscall layer not started (SFEP-0015 Axis 3, #1641) |
+| macOS arm64 (Apple Silicon) | Shipped; CI host; release asset published; effect enforcement partial (#613) | Not a target — mediated vendor-library shim (SFEP-0015 §10; no stable raw-syscall ABI) |
+| Windows x86-64 | Cross-compiled from Linux (`ci-cross-windows`); release asset published; native MSVC self-host in progress (SFEP-0021, tracking SFN-53–58) | Not a target — mediated vendor-library shim (SFEP-0015 §10) |
+| Linux aarch64 | Host-layout constants only (`_host_arch()`, `st_mode` offset; SFN-471); no CI leg, no published installer asset | Not a target |
+
+**Base support is never a claim that the seal holds on that platform** — the
+same discipline as the `![gpu]` row above ("not a claim that an accelerator
+exists"): a build/test/CI/installer green light says nothing about owned
+codegen or a gated syscall path. SFEP-0056 records the live precedent for
+conflating the two: `install.sh` maps `aarch64|arm64` to a
+`sailfin_<ver>_linux_arm64.tar.gz` asset name that has never been published —
+the script detects the architecture and then dies — and the install docs
+briefly advertised "Linux | arm64" as supported before that claim was
+corrected to match the three assets actually shipped.
+
 ## Known Design Issues (Pre-1.0 Syntax Reform)
 
 Tracked in the [roadmap](https://sailfin.dev/roadmap) and
@@ -699,11 +729,16 @@ Tracked in the [roadmap](https://sailfin.dev/roadmap) and
 
 - **Type annotations (`:` vs `->`)** — **migrated.** `:` for params, vars,
   fields; `->` for return types only. Parser enforces both positions.
-- **String interpolation (`{{ }}` vs `${ }`)** — open; migration designed and
-  scheduled. `{{ }}` means the opposite of its meaning in every mainstream
-  template language; LLMs systematically generate wrong code. The `${ }`
-  migration plan (dual-accept → deprecate → migrate → drop `{{ }}`) is
-  SFEP-0057 (`docs/proposals/0057-string-interpolation-dollar.md`, Accepted).
+- **String interpolation (`{{ }}` vs `${ }`)** — in progress; Phase 4
+  remaining. `{{ }}` means the opposite of its meaning in every mainstream
+  template language; LLMs systematically generate wrong code. Phases 1-3 of
+  the `${ }` migration plan (dual-accept, `{{ }}` deprecation warning
+  `W0212`, and in-tree migration of compiler source/tests/runtime/examples/
+  capsules) have **shipped** (SFN-482); only Phase 4 (drop `{{ }}` and its
+  deprecation path, migrate the bootstrap-compiled runtime literal held back
+  in Phase 3, add the `\${` literal-escape) remains, gated on a `${
+  }`-aware seed pin (SFN-483). SFEP-0057
+  (`docs/proposals/0057-string-interpolation-dollar.md`, Accepted).
 - **Error handling** — largely closed. `Result<T, E>` + `?` ship end-to-end
   (#832–#834, spec §12). Remaining: `From<E>` coercion and the `E: Error`
   bound, both gated on generic constraints. `try`/`catch` remains for

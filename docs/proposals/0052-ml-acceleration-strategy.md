@@ -4,7 +4,7 @@ title: Accelerated ML — Substrate Interop and Capability-Typed Accelerator Pro
 status: Accepted
 type: informational          # strategy umbrella; child SFEPs will be runtime | language | tooling
 created: 2026-07-19
-updated: 2026-07-19
+updated: 2026-07-25
 author: "agent:orchestrator (Sailbot); human review"
 tracking:                    # child epics allocated when this is Accepted
 supersedes:
@@ -17,6 +17,27 @@ graduates-to:
 > Strategy umbrella. This SFEP fixes a *direction* and an *architecture spine*;
 > each numbered track below graduates into its own runtime/language/tooling SFEP
 > before implementation. It is deliberately not a single-PR design.
+
+## Amendment (2026-07-25): Track A reclassified — oracle and fallback, not product
+
+§5's carve-out **stands**: the XLA/StableHLO dependency is a runtime dependency
+of compiled ML programs, never of the bootstrap, so self-hosting and the
+SFEP-0015 trajectory are untouched by anything below.
+
+What changes is Track A's **role**. The external substrate is reclassified as
+**oracle and fallback, not product**: it is how tensor programs stay fast
+today, and how Sailfin-generated kernels are differentially tested — exactly
+the role LLVM plays for the CPU backend per SFEP-0015 ("we never surrender
+LLVM's optimizer, we stop paying for it during iteration"). Track B is the
+product.
+
+The reason is not purity, it is the seal. StableHLO carries no effect or
+capability sets, so a tensor program handed to XLA loses its metadata at
+exactly the boundary where the interesting work happens — the same shape of
+hole SFEP-0048 already classifies as a seal blocker for OpenSSL. `![gpu]`
+today gates the *door*; Track B puts enforcement *inside the room*. **You
+cannot seal a kernel you don't own.** Track B is therefore the SFEP-0016
+thesis extended to the device, not a competing ambition.
 
 ## 1. Summary
 
@@ -153,6 +174,15 @@ pillar that is currently inert for ML:
   `![gpu]`, and any model-engine call requires `![model]` — with spans and
   fix-its, exactly like the shipped `io`/`net` detectors. "Reserved string" → real
   capability gate.
+
+  > **Implementation note (SFN-428).** `![gpu]` shipped enforced without an
+  > `effect_checker.sfn` detector: the effect rides on the `sfn/device` capsule
+  > declarations and existing cross-module propagation enforces it, the same
+  > construction that shipped `![rand]`. A builtin `device.*` namespace was
+  > rejected because bare/member roots are not scope-resolved (#1184), so it
+  > would demand `![gpu]` of any code with a `device` variable. `![model]`
+  > remains reserved pending `sfn/ai`. See
+  > `docs/proposals/design-notes/sfn-428-gpu-effect-gate.md`.
 - **Taint that reaches through the graph.** `PII<T>`/`Secret<T>` (today
   parsed-only) become enforced *along tensor dataflow*: a kernel or collective
   that would move tainted data off-device, into a log, or across a `![net]`

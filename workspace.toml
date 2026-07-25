@@ -24,7 +24,7 @@
 #   ]
 
 [workspace]
-members = ["compiler", "runtime", "capsules/sfn/bench", "capsules/sfn/cli", "capsules/sfn/crypto", "capsules/sfn/fs", "capsules/sfn/http", "capsules/sfn/json", "capsules/sfn/layers", "capsules/sfn/log", "capsules/sfn/losses", "capsules/sfn/math", "capsules/sfn/net", "capsules/sfn/nn", "capsules/sfn/os", "capsules/sfn/path", "capsules/sfn/prelude", "capsules/sfn/strings", "capsules/sfn/sync", "capsules/sfn/tensor", "capsules/sfn/test", "capsules/sfn/time", "capsules/sfn/toml"]
+members = ["compiler", "runtime", "capsules/sfn/bench", "capsules/sfn/cli", "capsules/sfn/crypto", "capsules/sfn/device", "capsules/sfn/fs", "capsules/sfn/http", "capsules/sfn/json", "capsules/sfn/layers", "capsules/sfn/log", "capsules/sfn/losses", "capsules/sfn/math", "capsules/sfn/net", "capsules/sfn/nn", "capsules/sfn/os", "capsules/sfn/path", "capsules/sfn/prelude", "capsules/sfn/strings", "capsules/sfn/sync", "capsules/sfn/tensor", "capsules/sfn/test", "capsules/sfn/time", "capsules/sfn/toml"]
 
 # Workspace-wide toolchain floor (SFEP-0051 Phase 2, SFN-414 / SFEP-0046
 # floor/override model). This is the default floor for every member: the

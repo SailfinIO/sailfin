@@ -207,7 +207,7 @@ Three tiers, by audience:
    guard + diagnostic over an assertion; the compiler must degrade to an
    error message, not a crash.
 
-**Error codes** are `E0xxx` strings with range ownership (Home paths are
+**Error codes** are `Exxxx` strings with range ownership (Home paths are
 relative to `compiler/src/`):
 
 | Range | Domain | Home |
@@ -219,6 +219,7 @@ relative to `compiler/src/`):
 | `E07xx` | Decorator resolution (SFEP-0023): `E0701` (imported symbol is not a decorator), `E0702` (unknown decorator — not imported, not a built-in) | `decorator_resolver.sfn` |
 | `E08xx` | `Result` / `?` operator; extern C-ABI (`E0801`–`E0805`); bare function-type annotation reject (`E0826`); malformed array type spelling reject (`E0830`, SFN-385); interpolation operand not stringifiable (`E0832`, lowering-stage `[fatal]`, SFN-408); uninferable generic-struct static constructor reject (`E0833`, SFN-404); value-position `if` reject (`E0834`, SFN-442); character-literal reject (`E0835`, SFN-442); `Task<T>[]` heterogeneous handle push reject (`E0836`, SFN-441 / SFEP-0055); `Task<T>` double-await / use-after-move (`E0837`, reserved, planned SFN-446) and nursery-escape (`E0838`, reserved, planned SFN-446) | `typecheck_types.sfn`, `llvm/expression_lowering/native/core_strings.sfn` |
 | `E09xx` | Ownership / affine types | `ownership_checker.sfn` |
+| `E10xx` | Lowering / backend (`E1001` unsafe import-symbol mangling, SFN-530) | `llvm/` |
 
 New codes go in the matching range at the next free number; grep the range
 before allocating. Do not reuse a retired code.
@@ -333,7 +334,7 @@ export { parse_expression } from "./expressions";
   drags in ~130 modules. See
   [`docs/conventions/unit-test-import-envelope.md`](conventions/unit-test-import-envelope.md).
 - E2E tests are Sailfin (`*_test.sfn`), never bash — the pattern catalog
-  (subprocess driving, shims, env threading) is `.claude/rules/no-bash-e2e.md`.
+  (subprocess driving, shims, env threading) is `docs/conventions/e2e-tests.md`.
 - Bare `assert <expr>;` is the house style inside tests; the `expect_*`
   matchers from `sfn/test` are for `![pure]` tests only.
 - Keep large fixtures under `compiler/tests/**/data` or `fixtures/`; keep test
@@ -368,7 +369,7 @@ The active reforms, for code you write today (rationale:
 
 - **Numeric types**: `int` (i64) and `float` (f64) are shipped; `number` is an
   alias for `float`. Use `int`/`float` in new code.
-- **String interpolation** is currently `{{ expr }}`; it will become
-  `${ expr }` before 1.0 — keep `{{ }}` until the parser change lands.
+- **String interpolation**: the parser dual-accepts `${ expr }` and the legacy
+  `{{ expr }}` (SFEP-0057). Use `${ }` in new code.
 - **Lambda short form** `fn(x) => expr` is shipped (SFEP-0029) alongside the
   block form `fn(x) -> T { ... }`.

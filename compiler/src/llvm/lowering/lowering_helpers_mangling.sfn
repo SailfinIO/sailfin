@@ -134,7 +134,9 @@ fn apply_module_symbol_mangling(lines: string[], imports: NativeImport[], curren
     let mut safe_imports = imports;
     if safe_imports == null { safe_imports = []; }
     if safe_imports.length > 100000 {
-        diagnostics.push("llvm lowering: import list too large for mangling; dropping");
+        diagnostics.push("llvm lowering [fatal] [E1001]: import list too large for mangling in module `"
+            + current_module_slug
+            + "`; refusing to emit incomplete symbol rewrites");
         safe_imports = [];
         if debug_lowering {
             print.err("emit-llvm: mangle import list too large; dropping");
@@ -287,7 +289,8 @@ fn apply_module_symbol_mangling(lines: string[], imports: NativeImport[], curren
                 let original_symbol = sanitize_symbol(original_name);
                 if should_keep_unmangled_abi_symbol(local_symbol) { continue; }
                 if string_array_contains(defined, local_symbol) {
-                    diagnostics.push("llvm lowering: import `" + local_symbol
+                    diagnostics.push("llvm lowering [fatal] [E1001]: import `"
+                        + local_symbol
                         + "` shadows local function in module `"
                         + current_module_slug
                         + "`");

@@ -23,8 +23,8 @@ fn analyze(text: string) ![io, model] { }      // multiple effects
 | Network | `net` | HTTP, WebSocket, serve (sub-effects `net.http`, `net.ws` — see below) | Yes |
 | Clock | `clock` | `sleep`, wall-clock | Yes |
 | Model | `model` | AI library invocation via `sfn/ai` (post-1.0) | Reserved (no detector yet) |
-| GPU | `gpu` | Tensor operations | Reserved (no detector yet) |
-| Random | `rand` | Random generation | Reserved (no detector yet) |
+| GPU | `gpu` | Device dispatch via `sfn/device` (CPU reference backend today; no accelerator in tree) | Yes, at the `sfn/device` boundary |
+| Random | `rand` | Random generation | Yes, at the `sfn/crypto::random_bytes` boundary |
 
 **Enforcement rules**:
 1. Any function calling an effectful operation directly must declare that effect — violations produce diagnostics with fix-it hints and are errors by default

@@ -22,7 +22,7 @@ fn main() ![io] {
         if char_from_code(n).length != 1 { len_failures += 1; }
         n += 1;
     }
-    print("LEN_FAILURES={{len_failures}}");
+    print("LEN_FAILURES=${len_failures}");
 
     // (2) Read round-trip for the full byte range 1..255 via char_code.
     // #1136 retired the ASLR-dependent immediate-codepoint fast-path on
@@ -36,7 +36,7 @@ fn main() ![io] {
         if char_code(char_from_code(h)) != h { rt_failures += 1; }
         h += 1;
     }
-    print("ROUNDTRIP_FAILURES={{rt_failures}}");
+    print("ROUNDTRIP_FAILURES=${rt_failures}");
 
     // (3) ASCII correctness via literal equality (no char_code dependency
     // on the result). Covers low/mid/high printable ASCII.
@@ -46,21 +46,21 @@ fn main() ![io] {
             if char_from_code(122) == "z" { ascii_ok = 1; }
         }
     }
-    print("ASCII_OK={{ascii_ok}}");
+    print("ASCII_OK=${ascii_ok}");
 
     // (4) Raw high byte: a single byte (length 1), not a 2-byte UTF-8
     // encode.
     let hi = char_from_code(200);
-    print("HI_LEN={{hi.length}}");
-    print("HI_CODE={{char_code(hi)}}");
+    print("HI_LEN=${hi.length}");
+    print("HI_CODE=${char_code(hi)}");
 
     // (5) Already-shipped multibyte read path still holds.
     let e = "é";
-    print("EACUTE_LEN={{e.length}}");
-    print("EACUTE_B0={{char_code(e[0])}}");
-    print("EACUTE_B1={{char_code(e[1])}}");
+    print("EACUTE_LEN=${e.length}");
+    print("EACUTE_B0=${char_code(e[0])}");
+    print("EACUTE_B1=${char_code(e[1])}");
 
     // (6) Documented byte-0 limitation: unrepresentable -> empty string.
     let zero = char_from_code(0);
-    print("ZERO_LEN={{zero.length}}");
+    print("ZERO_LEN=${zero.length}");
 }

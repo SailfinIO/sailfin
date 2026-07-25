@@ -19,7 +19,7 @@ The 0.8 effect system is a compile-time capability mechanism. It checks direct u
 | IO | `io` | Filesystem, console output, logging, decorators like `@logExecution` | Yes | `print()`, `print.err()`, `fs.readFile()`, `fs.writeFile()`, `console.*` |
 | Network | `net` | HTTP, WebSocket, serve | Yes | `http.get()`, `http.post()`, `websocket.*`, `serve` |
 | Model | `model` | Future AI library invocation (`sfn/ai`, post-1.0) | Reserved | Declarable and propagated from signatures; no shipped detector/runtime API |
-| GPU | `gpu` | Future accelerator operations | Parsed/reserved | No effect-gated GPU runtime API or detector |
+| GPU | `gpu` | Device dispatch via `sfn/device` | Enforced at the shipped device-dispatch boundary | `sfn/device::matmul_f64`, `::synchronize`; CPU reference backend only — no accelerator in tree; no general name detector |
 | Random | `rand` | OS entropy | Enforced at the shipped entropy boundary | `sfn/crypto::random_bytes`; no general RNG-name detector |
 | Clock | `clock` | Sleep and registered clock operations | Yes for registered operations | `sleep()`, `runtime.sleep()`, clock helpers |
 
@@ -152,15 +152,21 @@ Registered sleep and clock operations are enforced today.
 | `runtime.sleep(ms)` | Alias for `sleep` — enforced |
 | Registered clock helpers | Enforced; consult the standard-library reference for the shipped API |
 
-### `gpu` effect (parsed, not yet enforced)
+### `gpu` effect
 
-Declared in signatures and parsed by the compiler but not yet checked at call sites.
+The shipped device-dispatch boundary is enforced; arbitrary tensor or accelerator-like
+call names are not auto-detected.
+
+`![gpu]` is the capability to dispatch work to a device backend — it is not a claim that
+an accelerator exists. The only registered backend in any current build is the CPU
+reference kernel, and `sfn/device::has_accelerator()` returns `false`.
 
 | API | Notes |
 |-----|-------|
-| Tensor operations | Element-wise ops, matmul, reductions |
-| `@gpu` accelerator blocks | Blocks targeting GPU execution |
-| GPU memory operations | Allocation and transfer |
+| `sfn/device::matmul_f64(a, m, k, b, n)` | Dense f64 matmul dispatch entry point; carries and propagates `![gpu]` |
+| `sfn/device::synchronize()` | Device barrier; carries and propagates `![gpu]`. A no-op on the CPU reference backend |
+| Vendor `extern` calls | Not detected — externs carry no effect (`E0804`) |
+| `sfn/tensor`, `sfn/nn`, `sfn/layers` | CPU-only and effect-free; they do **not** require `![gpu]` |
 
 ### `rand` effect
 

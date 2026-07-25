@@ -92,12 +92,14 @@ fn _make_curl_shim_capture_body(dir: string) -> void ![io] {
     let shim = "#!/usr/bin/env bash\n" + "body_file=\"\"\n"
         + "for arg in \"$@\"; do\n"
         + "    if [[ \"$arg\" == @* ]]; then\n"
-        + "        body_file=\"${arg#@}\"\n"
+        + "        body_file=\"$"
+        + "{arg#@}\"\n"
         + "        break\n"
         + "    fi\n"
         + "done\n"
         + "if [ -n \"$body_file\" ] && [ -f \"$body_file\" ]; then\n"
-        + "    cp \"$body_file\" \"${CAPTURE_BODY_TO}\"\n"
+        + "    cp \"$body_file\" \"$"
+        + "{CAPTURE_BODY_TO}\"\n"
         + "fi\n"
         + "exit 1\n";
     fs.writeFile(dir + "/curl", shim);
@@ -131,7 +133,8 @@ fn _make_curl_shim_capture_url(dir: string) -> void ![io] {
     fs.createDirectory(dir, true);
     let shim = "#!/usr/bin/env bash\n" + "last=\"\"\n"
         + "for arg in \"$@\"; do last=\"$arg\"; done\n"
-        + "echo \"$last\" > \"${CAPTURE_URL_TO}\"\n"
+        + "echo \"$last\" > \"$"
+        + "{CAPTURE_URL_TO}\"\n"
         + "exit 1\n";
     fs.writeFile(dir + "/curl", shim);
     _chmod_x(dir + "/curl");

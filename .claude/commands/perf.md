@@ -142,4 +142,3 @@ Closes #<N>
 - **Keep the change minimal.** Don't bundle refactoring with a perf fix.
 - **Self-hosting wins.** If a faster compiler can't compile itself, it isn't faster.
 - **Watch RSS, not just time.** Memory pressure cascades — a fix that halves time but doubles RSS often regresses overall.
-- The compiler self-caps memory (8 GiB on Linux); see `.claude/rules/compiler-safety.md`.

@@ -5,7 +5,7 @@ interface ReportGenerator {
 
 struct EchoSummarizer {
     fn summarize(self, text: string) -> string ![model] {
-        return "Summary: {{text}}";
+        return "Summary: ${text}";
     }
 }
 

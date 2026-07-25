@@ -1,0 +1,8 @@
+// Fixture for interpolation_deprecation_test.sfn (SFEP-0057 Phase 2): still
+// uses the deprecated `{{ }}` interpolation form, so `sfn check` must emit a
+// non-fatal W0212 deprecation warning without failing the build.
+fn main() -> int ![io] {
+    let name = "world";
+    print.info("Hello, {{ name }}!");
+    return 0;
+}

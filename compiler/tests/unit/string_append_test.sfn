@@ -54,7 +54,7 @@ test "string_append: chain preserves newlines" {
 
 test "string_append: chain with interpolation" {
     let name = "world";
-    let result = "hello " + "{{name}}" + "!";
+    let result = "hello " + "${name}" + "!";
     assert result == "hello world!";
 }
 

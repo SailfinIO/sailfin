@@ -4,7 +4,7 @@ title: The Capability-Sealed Runtime
 status: Accepted
 type: runtime
 created: 2026-06-07
-updated: 2026-07-06
+updated: 2026-07-25
 author: "agent:compiler-architect; project owner (repositioning)"
 tracking: "#1639, #934, #1642, #1643"
 supersedes:
@@ -234,6 +234,61 @@ this is implemented**). For the dream to be honest when it ships, it must state:
   (likely: no raw `syscall` instructions in linked objects; enforced at the
   assembler/linker Sailfin owns).
 - **Kernel/hardware compromise** — out of any language's scope.
+
+### 8.1 Named un-gated paths in the current tree (added 2026-07-25)
+
+The "direct syscall instructions" bullet above is abstract. Surveying the ~170
+`extern fn` runtime surface (SFEP-0060 §2.2) turned up three
+*concrete* paths in the tree today, each of which defeats the seal by a
+different mechanism. They are recorded here because each bounds what the seal
+may honestly claim, and none was previously named.
+
+1. **`getaddrinfo` resolves DNS inside libc.** It opens its own UDP socket and
+   talks to port 53 without passing any Sailfin stub. Routing `connect(2)`
+   through an owned gate while resolution stays in libc means a `![net]`-free
+   capsule that resolves a hostname has *already made a network syscall the gate
+   never saw*. **`![net]` is not enforceable to the syscall until DNS is Sailfin
+   source** — this is a bound on the claim, not merely a task.
+2. **`popen` forks `/bin/sh`.** `runtime/sfn/io.sfn::sailfin_runtime_shell_capture`
+   spawns a shell with full ambient authority, and the compiler's own build
+   driver uses it (`compiler/src/emit_helpers.sfn`, `compiler/src/build/fs.sfn`).
+   A sealed process that can spawn a shell has no seal, and the toolchain that
+   must *produce* sealed binaries currently relies on the path it must forbid.
+3. **OpenSSL is linked native code with its own syscall paths.**
+   `runtime/capsule.toml` links `-lssl -lcrypto` into every Sailfin binary
+   (SFEP-0048). This makes open question 4 concrete rather than hypothetical: a
+   byte-level "no raw `syscall` opcode in linked objects" rule **rejects
+   OpenSSL**, and any rule permissive enough to admit OpenSSL admits everything.
+   The link-time rule and the OpenSSL removal are therefore the same decision,
+   not two independent ones.
+
+Holes 1 and 2 are removable by owning the corresponding surface; hole 3 is the
+one that forces the link-time rule to be *specified* rather than deferred, since
+no rule can be written while an exception the size of a TLS stack is linked into
+every binary.
+
+### 8.2 The in-scope claim is currently stronger than anything reachable
+
+The first "in scope" bullet above claims a sealed process cannot perform a
+syscall class outside its manifest **"even via FFI or dynamically loaded native
+code."** That is not decidable in the tree as it stands, and it will not become
+decidable merely by owning the syscall layer:
+
+- libc remains **dynamically linked** after every conversion in the owned-syscall
+  work, so `connect(2)` stays one PLT entry away until a `-nostdlib` static link
+  exists — itself gated on the whole Class C list (allocator, unwind, `environ`,
+  threads).
+- A byte-level `0f 05` scan of linked objects is **neither sound nor complete**:
+  false positives from immediates that happen to encode the opcode, false
+  negatives from instructions constructed at runtime. It is a tripwire, and this
+  section must say which of the two it is claiming.
+
+The honest enforced boundary at the end of the owned-syscall work is therefore
+**"Sailfin-authored code cannot make an un-gated syscall."** That is real,
+testable, and worth claiming. It is *not* the FFI-and-loaded-code claim above.
+Until open question 4 is answered and a `-nostdlib` link exists, the stronger
+sentence must not be marketed, quoted, or repeated in external material — the
+same discipline that keeps `![gpu]` from implying an accelerator exists.
 
 The discipline line (`CLAUDE.md`: *"don't ship unfinished safety claims"*)
 applies with full force here: this must never be marketed as enforced until it is

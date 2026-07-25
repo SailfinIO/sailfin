@@ -15,7 +15,7 @@ fn main() ![io] {
 
     match result {
         DivisionError { message }
-        : print("Error: {{message}}"),
-        _: print("Result: {{result}}")
+        : print("Error: ${message}"),
+        _: print("Result: ${result}")
     }
 }

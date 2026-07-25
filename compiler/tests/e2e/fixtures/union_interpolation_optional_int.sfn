@@ -1,16 +1,16 @@
 fn main() ![io] {
     print("before");
     let g: int | null = 5;
-    print("mid {{g}} end");
-    if g != null { print("narrow {{g}}"); }
+    print("mid ${g} end");
+    if g != null { print("narrow ${g}"); }
     match g {
         null: print("match null");
-        _: print("match {{g}}");
+        _: print("match ${g}");
     }
     let h: int | null = null;
-    print("null {{h}}");
+    print("null ${h}");
     let raw: any | null = null;
     let label: string | null = "ready";
-    print("label {{label}}");
+    print("label ${label}");
     print("after");
 }

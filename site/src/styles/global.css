@@ -28,18 +28,33 @@
   --gray-900: #212529;
 
   /* Semantic — light (default) */
-  --color-primary:       var(--sfn-violet-core);
-  --color-primary-dark:  var(--sfn-violet);
-  --color-accent:        var(--sfn-magenta-hot);
-  --color-bg:            #ffffff;
-  --color-bg-alt:        var(--gray-50);
-  --color-bg-code:       #f5f2fa;       /* faint violet tint so inline code reads */
-  --color-text:          var(--gray-900);
-  --color-text-secondary:var(--gray-600);
-  --color-text-tertiary: var(--gray-500);
-  --color-border:        var(--gray-200);
-  --color-border-strong: var(--gray-300);
-  --color-muted-surface: var(--gray-200);
+  --color-primary:       #7200b8;
+  --color-primary-dark:  var(--sfn-violet-deep);
+  --color-accent:        #b3137f;
+  --color-bg:            #fbfaff;
+  --color-bg-alt:        #f3eff8;
+  --color-bg-code:       #f0eaf6;
+  --color-surface:       #ffffff;
+  --color-surface-soft:  #f8f5fc;
+  --color-text:          #201828;
+  --color-text-secondary:#62586d;
+  --color-text-tertiary: #81758d;
+  --color-border:        #e3dce9;
+  --color-border-strong: #cfc3da;
+  --color-muted-surface: #e9e2ef;
+  --color-code-window:   var(--sfn-ink-raised);
+  --color-code-titlebar: var(--sfn-ink-sunken);
+  --color-code-text:     #f4eefb;
+  --color-code-muted:    #b9adc9;
+  --shadow-card:
+    0 1px 2px rgba(43, 0, 63, 0.05),
+    0 12px 32px -22px rgba(90, 0, 144, 0.32);
+  --shadow-card-hover:
+    0 1px 2px rgba(43, 0, 63, 0.06),
+    0 18px 42px -20px rgba(90, 0, 144, 0.38);
+  --shadow-code:
+    0 22px 54px -28px rgba(43, 0, 63, 0.55),
+    0 8px 24px -14px rgba(14, 11, 20, 0.28);
 
   /* Layout */
   --max-width: 1200px;
@@ -61,12 +76,21 @@ html[data-theme="dark"] {
   --color-bg:            var(--sfn-ink);
   --color-bg-alt:        var(--sfn-ink-raised);
   --color-bg-code:       #1b1326;
+  --color-surface:       var(--sfn-ink-raised);
+  --color-surface-soft:  #181121;
   --color-text:          #f4eefb;
   --color-text-secondary:#cfc4e0;
   --color-text-tertiary: #8f85a3;
   --color-border:        rgba(255, 255, 255, 0.08);
   --color-border-strong: rgba(255, 255, 255, 0.16);
   --color-muted-surface: #1b1326;
+  --color-code-window:   #171120;
+  --color-code-titlebar: #100c17;
+  --color-code-text:     #f4eefb;
+  --color-code-muted:    #b9adc9;
+  --shadow-card: var(--shadow-1);
+  --shadow-card-hover: var(--shadow-2);
+  --shadow-code: var(--shadow-3);
 }
 
 *,
@@ -90,6 +114,7 @@ body {
   min-height: 100vh;
   display: flex;
   flex-direction: column;
+  background: var(--color-bg);
 }
 
 a {

@@ -17,9 +17,14 @@
 //
 // Three entry points:
 //   - `validate_llvm_ir(path)`          — the cascade; the ONE place
-//     the `llvm-as`/`clang` discovery order lives. Every other caller
-//     (the resolver loops, the in-process retry, the parallel worker's
-//     shell mirror) must agree with it.
+//     the `llvm-as`/`clang` discovery order lives. Every caller now CALLS
+//     it rather than re-implementing it: the resolver loops, the
+//     in-process retry, and the parallel emit fan-out
+//     (`capsule_emit_parallel::_cr_emit_pool_round`, which validates each
+//     reaped child's staged output in the parent before publishing it).
+//     The hand-mirrored shell cascade the `xargs` worker carried was
+//     deleted along with the worker (SFN-498), so there is no mirror left
+//     to keep in sync.
 //   - `emit_llvm_with_retry(...)`       — in-process emit + empty-file
 //     probe + validate + up-to-`max_attempts` retries.
 //   - `emit_subprocess_with_retry(...)` — subprocess emit (fresh arena

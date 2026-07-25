@@ -10,7 +10,7 @@ every merge.  The canonical version lives in `compiler/capsule.toml` and is
 mirrored in `compiler/src/version.sfn`.
 
 The public minor-alpha train is automated separately by
-`.github/workflows/release-train.yml`: on the 2-week Monday cadence, a scheduled
+`.github/workflows/release-train.yml`: on the weekly Monday cadence, a scheduled
 train run dispatches `release.yml` with `channel=alpha bump=minor` when the
 latest nightly self-host check on `main` is green. Manual `/release` remains the
 path for routine alpha prereleases, hotfix/off-cadence cuts, and stable

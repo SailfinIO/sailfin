@@ -49,12 +49,11 @@
 //   globals at the foot of this module still ride as `i64` (see
 //   the "TLS" note below) and retire under their own follow-ups.
 //
-// JMPBUF_SIZE. The module allocates a 256-byte buffer per
-// frame, oversizing Linux x86_64 (200) and macOS arm64 (192).
-// 256 is a power of two that admits an Aarch64-32-byte
-// alignment cushion. A future per-platform constants module
-// (`runtime/sfn/platform/sizes_*.sfn` per arch doc Q5)
-// tightens this once a third platform appears.
+// JMPBUF_SIZE. The module allocates a 512-byte buffer per
+// frame, oversizing Linux x86_64 (200), macOS arm64 (192), and
+// glibc aarch64 (~312). A fixed power-of-two over-allocation is
+// harmless for this heap-backed buffer and avoids making the
+// runtime frame layout arch-conditional (SFN-471, SFEP-0056 §3.3).
 //
 // Naming. No `_sfn_` infix on the architect's canonical
 // `sfn_try_enter / sfn_try_leave / sfn_throw / sfn_take_exception`
@@ -201,12 +200,12 @@ fn sfn_exception_alloc_frame() -> *SfnExceptionFrame {
     if raw as i64 == 0 { return raw as *SfnExceptionFrame; }
     let frame = raw as *SfnExceptionFrame;
     frame.prev = 0 as *SfnExceptionFrame;
-    let buf = malloc(256 as usize);
+    let buf = malloc(512 as usize);
     if buf as i64 == 0 {
         free(raw);
         return buf as *SfnExceptionFrame;
     }
-    memset(buf, 0, 256 as usize);
+    memset(buf, 0, 512 as usize);
     frame.jmp_buf = buf;
     frame.message = 0 as *u8;
     return frame;

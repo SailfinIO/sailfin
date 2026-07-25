@@ -1211,7 +1211,10 @@ fn _openssl_link_search_flags() -> string[] ![io] {
     // generally off the default `pkg-config` path — this fallback targets
     // system/registered OpenSSL, not the Homebrew case the keg/brew
     // candidates already cover.
-    let probe = "d=\"\"; P=\"${SAILFIN_OPENSSL_PREFIX:-}\"; [ -n \"$P\" ] && [ -d \"$P/lib\" ] && d=\"$P/lib\"; [ -z \"$d\" ] && { for c in /opt/homebrew/opt/openssl@3/lib /usr/local/opt/openssl@3/lib; do [ -d \"$c\" ] && { d=\"$c\"; break; }; done; }; [ -z \"$d\" ] && { p=\"$(brew --prefix openssl@3 2>/dev/null)\"; [ -n \"$p\" ] && [ -d \"$p/lib\" ] && d=\"$p/lib\"; }; [ -z \"$d\" ] && command -v pkg-config >/dev/null 2>&1 && { L=\"$(pkg-config --libs-only-L openssl 2>/dev/null)\"; L=\"${L%% *}\"; c=\"${L#-L}\"; [ -n \"$c\" ] && [ -d \"$c\" ] && d=\"$c\"; }; printf %s \"$d\"";
+    let probe = "d=\"\"; P=\"$"
+        + "{SAILFIN_OPENSSL_PREFIX:-}\"; [ -n \"$P\" ] && [ -d \"$P/lib\" ] && d=\"$P/lib\"; [ -z \"$d\" ] && { for c in /opt/homebrew/opt/openssl@3/lib /usr/local/opt/openssl@3/lib; do [ -d \"$c\" ] && { d=\"$c\"; break; }; done; }; [ -z \"$d\" ] && { p=\"$(brew --prefix openssl@3 2>/dev/null)\"; [ -n \"$p\" ] && [ -d \"$p/lib\" ] && d=\"$p/lib\"; }; [ -z \"$d\" ] && command -v pkg-config >/dev/null 2>&1 && { L=\"$(pkg-config --libs-only-L openssl 2>/dev/null)\"; L=\"$"
+        + "{L%% *}\"; c=\"$"
+        + "{L#-L}\"; [ -n \"$c\" ] && [ -d \"$c\" ] && d=\"$c\"; }; printf %s \"$d\"";
     let dir = _shell_read_cmd(probe);
     if dir.length == 0 { return []; }
     return ["-L" + dir];

@@ -594,7 +594,7 @@ Regression coverage under `compiler/tests/{unit,integration,e2e}/`:
   supplying the fallback and passing through the non-null; a receiver evaluated
   **exactly once** (effectful receiver, assert single side effect); `?.[]` and
   `?.(  )`. Thread `PATH` / `SAILFIN_TEST_SCRATCH` per
-  `.claude/rules/no-bash-e2e.md`.
+  `docs/conventions/e2e-tests.md`.
 - **`compiler/tests/e2e/nullable_desugar_snapshot_test.sfn`** (optional) —
   snapshot the desugared native IR for `a?.b ?? c` to lock the hoist/temp shape.
 - **Self-host** — `make compile` + the full suite; a converted example

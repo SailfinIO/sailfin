@@ -11,8 +11,8 @@ struct IntValue {
 // runtime type-refinement surface (the `i32` union tag selects the arm).
 fn printValue(value: StringValue | IntValue) ![io] {
     match value {
-        StringValue { value } => print("It's a string: {{value}}"),
-        IntValue { value } => print("It's a number: {{value}}")
+        StringValue { value } => print("It's a string: ${value}"),
+        IntValue { value } => print("It's a number: ${value}")
     }
 }
 
@@ -51,5 +51,5 @@ fn main() ![io] {
         name: "Alice",
         isAdmin: true
     };
-    print("Admin: {{admin.name}}");
+    print("Admin: ${admin.name}");
 }

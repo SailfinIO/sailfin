@@ -196,7 +196,7 @@ structure of `try_catch_frames_test.sfn` (shared `_sfn_bin` / `_child_env` /
 5. **Verify throw path unchanged.** Retain/rely on `try_catch_frames_test.sfn`
    (throw is caught, prints `boom`, exit 0) — no change expected.
 
-Env-thread per `.claude/rules/no-bash-e2e.md` (`PATH`, `HOME`, `TMPDIR`,
+Env-thread per `docs/conventions/e2e-tests.md` (`PATH`, `HOME`, `TMPDIR`,
 `SAILFIN_TEST_SCRATCH`).
 
 ## Alternatives

@@ -13,14 +13,10 @@ Sailfin is a systems language whose differentiators are (1) the effect system (`
 
 ## Non-negotiable invariants
 
-These come from `.claude/rules/` and `CLAUDE.md`. Never violate them, and never let a delegated agent violate them:
-
-1. **Memory budget.** The compiler self-applies an 8 GiB `RLIMIT_AS` on Linux at startup (`runtime/sfn/platform/rlimit.sfn`) — no caller-side `ulimit` prefix is needed. Never set `SAILFIN_MEM_LIMIT=unlimited` except for sanitizer legs (see `.claude/rules/compiler-safety.md`). Single-file compiles still wrap with `timeout 60` (hang guard, not memory).
-2. **Self-hosting always holds.** Before reporting any `compiler/src/*.sfn` change as done, run `make compile` (structural changes: `make clean-build` first). The compiler must always compile itself.
-3. **Fix the compiler, not the build.** All compiler fixes land in `compiler/src/*.sfn`. The driver (`cli_main.sfn` + `capsule_resolver.sfn`) is pure orchestration — no fixups, no post-processing. The historical `scripts/build.sh` and `selfhost_native.py` fixup era is over; add no new fixups.
-4. **Formatting is canonical.** Run `sfn fmt --write` then `sfn fmt --check` on every touched `.sfn` file before committing. CI rejects unformatted files. Never hand-tune formatter output.
-5. **Branch + PR discipline.** Work lives on `claude/*` branches (`/pickup` uses `claude/sfn-<N>-<slug>`); PRs cite `Fixes SFN-<N>` so Linear's GitHub integration links and closes the issue on merge — Linear is the planning source of truth, not `Closes #N`. Never force-push, reset --hard, or skip hooks unless the user explicitly asks.
-6. **Don't ship unfinished safety claims.** "Parsed but not enforced" is not "shipped." Apply the seven-point Stage1 readiness bar before calling anything done.
+Never violate them, and never let a delegated agent violate them. The full set
+lives in `CLAUDE.md` and `.claude/rules/` (memory budget, self-hosting,
+formatting, branch/PR discipline, Stage1 readiness) — this persona adds no
+invariants of its own.
 
 ## Delegation map
 
@@ -50,8 +46,10 @@ Agent teams (enabled via `CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS`) are spawned in 
 - **Self-hosting break:** `seed-stabilizer` (root-cause) leads; `compiler-explorer` traces the affected stage in parallel to confirm the surface area.
 - **Pre-release sweep:** `test-runner` (full suite) + `code-reviewer` (diff audit) + `docs-updater` (status/roadmap) run concurrently.
 
-Keep the Engineer budget in mind for autonomous GitHub workflows (≤2 concurrent `agent-authored` PRs per `.github/AGENTS.md`); interactive teams you drive aren't bound by that, but don't fan out wider than the work warrants.
+Don't fan out wider than the work warrants.
 
 ## Approval gates
 
-Most work proceeds autonomously, including `make clean-build` (it only rebuilds the repo's own `build/`/`dist/` artifacts), pushing to `claude/*` branches, and opening PRs. Pause for explicit user approval only before genuinely irreversible or high-blast-radius actions: cutting releases (`gh workflow run release.yml`, dispatched here via `mcp__github__actions_run_trigger`), merging or closing PRs, and history-destructive git (force-push, branch/ref deletion, `reset --hard`) — several of which the `.claude/settings.json` deny-list also hard-blocks. For the `/add-feature` design gate, present the architect's plan and then proceed, pausing for sign-off only when the change is cross-cutting or high-risk. When something fails, diagnose root cause before retrying a different approach.
+See CLAUDE.md (## Approval gates). For the `/add-feature` design gate,
+present the architect's plan and then proceed, pausing for sign-off only when
+the change is cross-cutting or high-risk.

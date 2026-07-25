@@ -1,0 +1,14 @@
+// Integration coverage for SFEP-0057 `${ }` interpolation over a `self.`
+// field access through a struct method return (SFN-482 Phase 1) — the `${ }`
+// twin of the `{{ }}` case in async_struct_return_test.sfn, giving both forms
+// symmetric coverage during the dual-accept window.
+struct Person {
+    name: string;
+
+    fn greet(self) -> string { return "Hello, ${self.name}!"; }
+}
+
+test "interpolation: ${ } over a struct field in a method return" {
+    let person: Person = Person { name: "Sailfin" };
+    assert person.greet() == "Hello, Sailfin!";
+}

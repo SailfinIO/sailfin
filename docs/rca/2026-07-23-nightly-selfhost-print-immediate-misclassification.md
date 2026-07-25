@@ -146,7 +146,7 @@ SAILFIN_TEST_RETRY=0 build/bin/sfn test \
   because it touches the self-host-critical print hot path.
 - **Test-isolation hygiene (orthogonal):** convert the e2e tests that feed raw
   `process.environ()` into a nested `sfn` runner over to
-  `clean_runner_env(nested_runner_scratch(...))` per `.claude/rules/no-bash-e2e.md`.
+  `clean_runner_env(nested_runner_scratch(...))` per `docs/conventions/e2e-tests.md`.
   Not a cause of this incident, but a standing rule violation worth closing.
 
 ## Links

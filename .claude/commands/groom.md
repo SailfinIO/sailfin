@@ -90,16 +90,9 @@ not a surprise (the gap that broke the original #1088 pickup).
 
 ### Don't over-decompose: bundle a capability with its single consumer (default)
 
-**Bundling is the groom-time default.** When a compiler capability is tightly
-coupled to exactly one consumer worked in the same session, **produce one
-issue** (one PR), not two. Split only when the capability has **multiple
-consumers** or is **genuinely independent**. Any split that creates a seed-cut
-gate for a single consumer must be **explicitly justified** in the issue body.
-
-The full decision tree and seed-cut-tax rationale live in
-**`.claude/rules/seed-dependency.md`** (cited by `/pickup` too — SFEP-0026 WS-B).
-Apply that rule here rather than re-deriving it. When a split is justified,
-follow "Seed dependencies" below.
+The bundle-vs-split decision tree lives in **`.claude/rules/seed-dependency.md`**
+(cited by `/pickup` too — SFEP-0026 WS-B); apply it here rather than
+re-deriving it. When a split is justified, follow "Seed dependencies" below.
 
 ---
 

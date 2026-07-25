@@ -6,7 +6,7 @@ allowed-tools: Bash, Read
 
 # Full compiler validation
 
-This skill runs the same validation pipeline as CI: clean build, first-pass test suite, seedcheck build, hello-world smoke test, full test suite under seedcheck.
+This skill runs `make check` — see CLAUDE.md `## The validation ladder` for what that pipeline covers and when to reach for it instead of a cheaper rung.
 
 ## Invoke
 
@@ -18,7 +18,7 @@ The script writes a timestamped log to `build/logs/check-<ts>.log`, and exits no
 
 ## Interpreting failures
 
-If the script exits non-zero, the compiler itself has a bug — do NOT patch the build driver (or — historically — the now-retired prior `scripts/build.sh`) to work around it. Read the log, identify the failing pipeline stage, and either:
+If the script exits non-zero, read the log, identify the failing pipeline stage, and either:
 
 - fix the compiler source (`compiler/src/*.sfn`), or
 - spawn the `seed-stabilizer` agent if the root cause isn't obvious.
@@ -34,11 +34,8 @@ The four failure surfaces, in order of likelihood:
 
 ## When NOT to use
 
-This skill is the heavyweight self-host gate (~15–20 min). Most edit-cycle validation should *not* reach for it:
-
-- **To catch type / effect / parse errors while iterating**, run `sfn check <the-files-you-touched>` (or `build/bin/sfn check <path>` if `sfn` is not on `PATH`). It runs parse + typecheck + effect-check with no IR, no `clang`, and no self-host — seconds for a few files, ~5 min for the whole `compiler/src/` tree. It does **not** prove self-hosting, so it complements rather than replaces `make compile`.
-- **For a single-pass self-host check after a small edit**, `make compile` is faster than the full triple-pass.
-- **For focused test runs**, spawn the `test-runner` agent instead.
+See CLAUDE.md `## The validation ladder` — this skill is the top rung; use the
+cheapest rung that catches the error instead.
 
 ## Budget
 

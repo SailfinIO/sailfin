@@ -11,5 +11,5 @@
 
 fn main() ![io] {
     let value = compute(5);
-    print("compute(5) = {{value}}");
+    print("compute(5) = ${value}");
 }

@@ -4,7 +4,7 @@ title: "Toolchain Independence — Sailfin-Native Backend"
 status: Accepted
 type: runtime
 created: 2026-06-05
-updated: 2026-07-23
+updated: 2026-07-25
 author: "agent:compiler-architect"
 tracking: "#1640, #1641"
 supersedes:
@@ -254,9 +254,31 @@ Each stage is independently valuable and shippable. None requires a flag day.
   prerequisite that pays off regardless** — it also de-strings the LLVM path and
   gives the effect/ownership analyses a proper substrate. Likely the single most
   valuable piece of work in this whole arc even if Stage 3 never ships.
-- **Stage 2 — Own object emission.** An ELF writer first (CI is Linux x86-64);
-  LLVM still does instruction selection. Establishes the assembler/object-format
-  muscle without the regalloc/isel risk.
+  **Activation design: SFEP-0059**, which resolves how a deliberately partial IR
+  becomes load-bearing without destabilising self-hosting, and amends §9.4
+  (no conversion operation) and §9.5 (capability atoms had no producer input).
+- **Stage 2 — Own the assembler and object emission.** An x86-64 encoder plus an
+  ELF writer, consuming **textual assembly** that LLVM's instruction selection
+  produces (CI is Linux x86-64). Establishes the assembler/object-format muscle
+  without the regalloc/isel risk.
+
+  *Clarified 2026-07-25.* The earlier wording — "an ELF writer first; LLVM still
+  does instruction selection" — named the right muscle ("assembler/object-format")
+  but left the seam unspecified, and as written it is not implementable: LLVM's MC
+  layer performs encoding *and* object writing, so an ELF writer cannot slot under
+  LLVM's isel with nothing in between. Since Sailfin's backend is a **textual** IR
+  printer, the only seam that exists without linking LLVM as a library is textual
+  assembly. Owning the assembler is therefore not an optional embellishment of
+  this stage — it *is* this stage, and everything downstream of isel belongs to
+  Sailfin from here.
+
+  This also reconciles §8 with SFEP-0016 §8, which already presupposes the
+  outcome: the seal's link-time rule is "no raw `syscall` instructions in linked
+  objects; enforced at **the assembler/linker Sailfin owns**." The threat model
+  assumes an owned assembler; before this clarification no stage scheduled one.
+  Note the alternative reading — replacing LLVM's `MCObjectWriter` in-process —
+  requires the LLVM C-API binding (#347), which §12 explicitly declines to
+  prioritize because it deepens the dependency this proposal exists to remove.
 - **Stage 3 — Native fast dev backend.** `mid-IR → naive-but-fast machine code →
   ELF`, **debug builds only**. Highest ROI, lowest risk: Go-speed `sfn run`
   without surrendering release perf. Steal Cranelift's philosophy (fast, simple,
@@ -264,7 +286,9 @@ Each stage is independently valuable and shippable. None requires a flag day.
   on LLVM.
 - **Stage 4 — Syscall layer + perf tail.** Two threads, now split by priority:
   (a) the **owned syscall layer (Axis 3)** to drop libc on tier-1 — **1.0-critical**
-  for the capability seal (#1641), not optional; (b) growing the native optimizer
+  for the capability seal (#1641), not optional. **Design: SFEP-0060**, which
+  establishes that only ~30 of the ~170 `extern fn` symbols are effect-bearing
+  kernel entries, so the chokepoint does not require reimplementing libc; (b) growing the native optimizer
   for the cases that matter, co-designed with the concurrency runtime (safepoints,
   stack maps, escape analysis feeding the arena allocator) — the **post-1.0** perf
   tail. LLVM becomes optional, then legacy.

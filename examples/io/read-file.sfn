@@ -3,5 +3,5 @@ import { fs } from "fs";
 
 fn main() ![io] {
     let content = fs.readFile("example.txt");
-    print("File content: {{content}}");
+    print("File content: ${content}");
 }

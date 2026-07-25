@@ -1,0 +1,53 @@
+// capsules/sfn/device/src/mod.sfn
+//
+// Capability-gated accelerator device dispatch for Sailfin. `![gpu]` is the
+// capability to dispatch work to a device backend — it is NOT a claim that an
+// accelerator exists. The only registered backend today is the CPU reference
+// kernel, so `has_accelerator()` returns `false` in every current build.
+//
+// See SFEP-0052 §3.2 and SFN-428.
+fn backends() -> string[] { return ["cpu"]; }
+
+fn active_backend() -> string { return "cpu"; }
+
+fn has_accelerator() -> boolean { return false; }
+
+// matmul_f64(a, m, k, b, n) — row-major matrix product. `a` is `m x k`, `b` is
+// `k x n`, and the result is `m x n`. Returns `[]` on a shape mismatch.
+fn matmul_f64(a: float[], m: int, k: int, b: float[], n: int) -> float[] ![gpu] {
+    if m <= 0 || k <= 0 || n <= 0 || a.length < m * k || b.length < k * n {
+        return [];
+    }
+    let mut out: float[] = [];
+    let mut i: int = 0;
+    loop {
+        if i >= m { break; }
+        let mut j: int = 0;
+        loop {
+            if j >= n { break; }
+            let mut total: float = 0.0;
+            let mut p: int = 0;
+            loop {
+                if p >= k { break; }
+                total = total + a[i * k + p] * b[p * n + j];
+                p += 1;
+            }
+            out.push(total);
+            j += 1;
+        }
+        i += 1;
+    }
+    return out;
+}
+
+// synchronize() — barrier every accelerator API needs; on the CPU reference
+// backend dispatch is synchronous, so this is a no-op today.
+fn synchronize() ![gpu] { }
+
+export {
+    backends,
+    active_backend,
+    has_accelerator,
+    matmul_f64,
+    synchronize
+};

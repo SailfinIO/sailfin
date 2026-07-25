@@ -14,7 +14,6 @@
       "Bash(mv *)",
       "Bash(touch *)",
       "Bash(chmod *)",
-      "Bash(ulimit *)",
       "Bash(build/bin/sfn *)",
       "Bash(timeout * build/bin/sfn *)",
       "Bash(build/bin/sfn-seedcheck *)",

@@ -1,0 +1,13 @@
+[capsule]
+name = "sfn/device"
+version = "0.2.0"
+description = "Capability-gated accelerator device dispatch for Sailfin"
+
+[dependencies]
+
+[capabilities]
+required = ["gpu"]
+
+[build]
+entry = "src/mod.sfn"
+kind = "library"

@@ -313,7 +313,7 @@ are out of this slice.)
   body with `![io]` compiles.
 - **`compiler/tests/e2e/is_type_guard_test.sfn`** — build and run an enum `is`
   program; assert the then-branch narrowing + member access output (`T:hi` / `N`),
-  threading `PATH` / `SAILFIN_TEST_SCRATCH` per `.claude/rules/no-bash-e2e.md`.
+  threading `PATH` / `SAILFIN_TEST_SCRATCH` per `docs/conventions/e2e-tests.md`.
 - **Self-host** — `make compile` + the full suite; the converted example
   participates in the seedcheck corpus.
 

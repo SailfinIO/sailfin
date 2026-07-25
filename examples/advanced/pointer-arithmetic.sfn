@@ -17,7 +17,7 @@ fn main() ![io] {
         for i in 0..4 {
             let element_ptr = arr + i;
             let value = *element_ptr;
-            print("arr[{{ i }}] = {{ value }}");
+            print("arr[${ i }] = ${ value }");
         }
 
         free(arr as *u8);

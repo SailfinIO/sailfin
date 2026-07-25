@@ -13,6 +13,8 @@
 //                    for the inlined libc primitives.
 //   4. layout      — `%SfnExceptionFrame = type { %SfnExceptionFrame*,
 //                    i8*, i8* }` pins the pointer-typed struct shape (#1116).
+//                    Its heap-backed jmp_buf reserve is 512 bytes, covering
+//                    glibc aarch64's larger buffer (SFN-471).
 //   5. setjmp pin  — `sfn_try_enter` carries exactly one `call i32
 //                    @setjmp`, after `sfn_exception_push_frame`.
 //   6. longjmp pin — `sfn_throw` carries exactly one `call void @longjmp`
@@ -191,6 +193,16 @@ test "emit: pins the SfnExceptionFrame pointer-typed layout" ![io] {
     assert ir.length > 0;
     let layout = _line_starting_with(ir, "%SfnExceptionFrame = type");
     assert layout == "%SfnExceptionFrame = type { %SfnExceptionFrame*, i8*, i8* }";
+}
+
+test "emit: exception frame reserves a 512-byte jmp_buf" ![io] {
+    let ir = _emit_exception();
+    assert ir.length > 0;
+    let body = _fn_body(ir, "@sfn_exception_alloc_frame(");
+    assert body.length > 0;
+    assert contains(body, "call i8* @malloc(i64 512)");
+    assert contains(body, "call i8* @memset(i8* ");
+    assert contains(body, ", i32 0, i64 512)");
 }
 
 test "emit: sfn_try_enter calls setjmp once, after push_frame" ![io] {

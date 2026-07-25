@@ -551,7 +551,7 @@ firstpass→seedcheck build, exactly like #957.
 - IR-diff canaries (Stages B, D): drive from `![io]` `*_test.sfn` via
   `process.run_capture` building a fixture with `sfn build` (thread `PATH` +
   `SAILFIN_TEST_SCRATCH`), capture the `.ll`, `diff` against the pre-change
-  golden — per `.claude/rules/no-bash-e2e.md`.
+  golden — per `docs/conventions/e2e-tests.md`.
 - `make check` (triple-pass) before declaring shipped.
 - `sfn fmt --check` on every touched `.sfn`.
 
@@ -787,7 +787,7 @@ Stages A+B+D+E are the recommended #1627 scope; **C (ternary) defers to #1180-a 
 
 ## Verification (commands)
 
-- IR-diff harness (Stage A/B): for a sampling of in-source cast/prefix sites (e.g. `runtime/sfn/array.sfn`, `concurrency/scheduler.sfn`), capture `sfn build --emit-llvm` (or the `.ll` under the build cache) **before** and **after** the parser change and assert byte-identical IR for the affected functions. Drive from an `![io]` `*_test.sfn` via `process.run_capture` + `clang`/`diff`, per `.claude/rules/no-bash-e2e.md`.
+- IR-diff harness (Stage A/B): for a sampling of in-source cast/prefix sites (e.g. `runtime/sfn/array.sfn`, `concurrency/scheduler.sfn`), capture `sfn build --emit-llvm` (or the `.ll` under the build cache) **before** and **after** the parser change and assert byte-identical IR for the affected functions. Drive from an `![io]` `*_test.sfn` via `process.run_capture` + `clang`/`diff`, per `docs/conventions/e2e-tests.md`.
 - `make compile` after each stage; `make check` before declaring shipped.
 - Effect probes (the measured table above) as e2e assertions.
 

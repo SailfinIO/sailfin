@@ -20,7 +20,7 @@ merge while coordinating multiple `/pickup` sessions.
 **Flags:**
 - `--greedy` (bare) — raise the concurrency budget from `2` to `4`
 - `--greedy=N` — set the budget to `N`
-- `--dry-run` — preview status flips and recommendations; make no writes
+- `--dry-run` — preview status flips and recommendations (see Constraints)
 
 **Bare numbers** — treat each as a PR number that just merged; the command
 resolves PR → linked Linear issue (`SFN-<N>` from branch/body).
@@ -61,24 +61,15 @@ Linear issues. De-dupe by SFN number.
 
 ## Phase 2: SWEEP BLOCKERS
 
-> **Shared logic.** The hard-vs-prose blocker rule below is the one mechanic
-> `/sweep` and `/triage` share (`/triage` Phase 3 → UNBLOCK). If you change it
-> here, mirror it there.
-
-For each `Blocked` issue:
-
-1. Read its blocked-by relations (`get_issue includeRelations=true`) and any
-   `## Blocked by` prose in the body.
-2. Classify each blocker: **hard** (a Linear relation, or a `SFN-N`/`#N` ref) —
-   closed = resolved; **prose** ("Slice E", "M3 runtime deletion") — never
-   auto-flip on prose alone.
-3. If every hard blocker is closed AND no prose gate remains, flip to `Ready`
-   and drop the resolved relations:
+For each `Blocked` issue, apply the hard-vs-prose rule in
+`docs/conventions/blocker-classification.md` (shared with `/triage` Phase 3 →
+UNBLOCK). When it clears the bar, flip to `Ready` and drop the resolved
+relations:
    ```
    mcp__Linear__save_issue id="SFN-<N>" state="Ready" removeBlockedBy=["SFN-<resolved>"]
    mcp__Linear__save_comment issueId="SFN-<N>" body="Auto-sweep: blocker(s) resolved — <list>. Marking Ready."
    ```
-4. Under `--dry-run`, record the intended flip; make no writes.
+4. Under `--dry-run`, only record the intended flip (see Constraints).
 
 ---
 
@@ -212,8 +203,8 @@ Dry run: changes <previewed | applied>
 - **Comment whenever you flip a status.** Audit trail.
 - **Native fields only** — status/priority/estimate/blockers are Linear-native.
 - **In `--dry-run`, make zero writes.** Print intended actions only.
-- **Read `.github/AGENTS.md` for cap context.** Default budget 2 matches the
-  autonomous-pipeline cap; `--greedy` raises it for human-coordinated sessions.
+- **Default concurrency budget is 2** for autonomous sessions; `--greedy` raises
+  it for human-coordinated sessions.
 
 ---
 

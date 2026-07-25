@@ -1,0 +1,72 @@
+// SFN-498: unit coverage for the pure job-sizing ladder — the CPU-count
+// clamp (`_cr_jobs_from_probe`) and its host-agnostic parse helpers
+// (`_cr_parse_cpu_online`, `_cr_parse_meminfo_bytes`,
+// `_cr_count_cpuinfo_processors`). Kept separate from
+// `cr_ram_budget_jobs_test.sfn`, which owns the RAM-clamp arithmetic
+// (`_cr_ram_budget_jobs`) in isolation.
+import {
+    _cr_count_cpuinfo_processors,
+    _cr_jobs_from_probe,
+    _cr_parse_cpu_online,
+    _cr_parse_meminfo_bytes
+} from "../../src/capsule_emit_parallel";
+
+test "job sizing: zero or negative nproc floors at 1" {
+    assert _cr_jobs_from_probe(0, 0) == 1;
+    assert _cr_jobs_from_probe(-3, 0) == 1;
+}
+
+test "job sizing: raw nproc above 8 clamps to the ceiling" {
+    assert _cr_jobs_from_probe(16, 0) == 8;
+}
+
+// An unmeasurable RAM figure (0) fails open: the clamp returns the core
+// count unchanged rather than starving a host it cannot size. This is the
+// contract every probe degrades to, so it is asserted independently of any
+// one host.
+test "job sizing: an unprobed RAM figure fails open to the core count" {
+    assert _cr_jobs_from_probe(4, 0) == 4;
+}
+
+// AC4 (SFN-498): a multi-core Windows host fans out rather than running
+// serial. Windows has no Win32-free RAM probe, so `_cr_host_memsize_bytes`
+// reports a conservative assumed 16 GiB — enough to budget 3 concurrent
+// emits on 4 cores, which is `> 1` as AC4 requires while still bounding
+// fan-out on the one host with no `RLIMIT_AS` backstop.
+test "job sizing: a 4-core Windows host budgets a fanned-out job count" {
+    assert _cr_jobs_from_probe(4, 17179869184) == 3;
+}
+
+// The #1532 Darwin RAM clamp composes with the CPU-count ladder: 7 GiB
+// usable at 66% (~4.96 GiB) fits only one ~3 GiB worker.
+test "job sizing: the RAM clamp still composes with the CPU ceiling" {
+    assert _cr_jobs_from_probe(8, 7516192768) == 1;
+}
+
+test "job sizing: cpu_online parses a single contiguous range" {
+    assert _cr_parse_cpu_online("0-7\n") == 8;
+}
+
+test "job sizing: cpu_online parses a single CPU" {
+    assert _cr_parse_cpu_online("0\n") == 1;
+}
+
+test "job sizing: cpu_online parses multiple ranges" {
+    assert _cr_parse_cpu_online("0-3,8-11\n") == 8;
+}
+
+test "job sizing: cpu_online on empty input yields zero" {
+    assert _cr_parse_cpu_online("") == 0;
+}
+
+test "job sizing: meminfo_bytes parses the MemTotal kB line into bytes" {
+    assert _cr_parse_meminfo_bytes("MemTotal:       16326664 kB\nMemFree: 1 kB\n") == 16718503936;
+}
+
+test "job sizing: meminfo_bytes without a leading MemTotal line yields zero" {
+    assert _cr_parse_meminfo_bytes("MemFree: 1 kB\n") == 0;
+}
+
+test "job sizing: cpuinfo_processors counts processor lines only" {
+    assert _cr_count_cpuinfo_processors("processor\t: 0\nvendor\nprocessor\t: 1\n") == 2;
+}

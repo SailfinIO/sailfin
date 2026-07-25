@@ -77,6 +77,42 @@ test "handle_read_bytes_stdout: returns at most n bytes preserving the remainder
     assert exit == 0;
 }
 
+test "framed drain: an fd-free loop over both streams terminates at EOF" ![io] {
+    // The runner fallback in `compiler/src/cli/commands/test.sfn` drains a
+    // child with no fd and no `io.poll_any` — the only path available on
+    // Windows — and terminates on both-streams-at-EOF rather than on an fd
+    // list. Pin that loop shape here on POSIX, where the same framed
+    // builtins back it, so a regression in the termination predicate is
+    // caught without a Windows host. The guard counter is the no-busy-spin
+    // assertion: a loop that fails to observe EOF trips it.
+    let id = process.spawn_with_env(["sh", "-c", "printf 'out1out2'; printf 'errA\\nerrB\\n' 1>&2"], []);
+    assert id != 0;
+    let mut out_buf: string = "";
+    let mut err_buf: string = "";
+    let mut spins: int = 0;
+    loop {
+        if process.handle_stdout_at_eof(id) && process.handle_stderr_at_eof(id) {
+            break;
+        }
+        spins += 1;
+        assert spins < 1000;
+        if !process.handle_stdout_at_eof(id) {
+            let o = process.handle_read_bytes_stdout(id, 65536);
+            if o.length > 0 { out_buf = out_buf + o; }
+        }
+        if !process.handle_stderr_at_eof(id) {
+            let e = process.handle_read_bytes_stderr(id, 65536);
+            if e.length > 0 { err_buf = err_buf + e; }
+        }
+    }
+    assert out_buf == "out1out2";
+    assert err_buf == "errA\nerrB\n";
+    // Both write ends reached EOF before the reaper ran, so the child never
+    // raced a closed read end.
+    let exit = process.handle_wait(id);
+    assert exit == 0;
+}
+
 test "handle_write_bytes: writes exactly len bytes rather than strlen" ![io] {
     let id = process.spawn_with_env(["cat"], []);
     assert id != 0;
