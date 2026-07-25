@@ -29,9 +29,10 @@
 // (PeekNamedPipe/ReadFile). The async streaming-handle family
 // (`spawn_with_env` / `handle_*`) is ALSO real (SFN-497) — the enabling
 // primitive none of the concurrent-child consumers can be built without.
-// `environ` remains degraded-but-linking (empty result), preserving the
-// retired C `_WIN32` shim behaviour — GetEnvironmentStringsA is
-// follow-up work.
+// `environ` is ALSO real (SFN-498): `GetEnvironmentStringsA` parsed into
+// a real `SfnArray`, needed so `process.spawn_with_env`'s callers can
+// reproduce environment inheritance explicitly (an empty array means the
+// EMPTY environment, never "inherit").
 //
 // CONSUMERS ARE NOT YET PORTED. A real spawn family is necessary but not
 // sufficient: the existing in-tree consumers select on raw fds, which do
@@ -104,6 +105,22 @@ extern fn Sleep(ms: i32) -> void;
 extern fn WriteFile(handle: i64, buffer: *u8, to_write: i32, written: *i32, overlapped: *u8) -> i32;
 
 extern fn TerminateProcess(handle: i64, code: i32) -> i32;
+
+// ── Win32 environment-block family (SFN-498). `GetEnvironmentStringsA`
+// hands back a contiguous "KEY=VALUE\0...\0\0" ANSI block; the caller
+// owns freeing it via `FreeEnvironmentStringsA`. Both implicitly linked
+// by mingw.
+extern fn GetEnvironmentStringsA() -> *u8;
+
+extern fn FreeEnvironmentStringsA(block: *u8) -> i32;
+
+// `sfn_array_push_string` is the same linked runtime symbol
+// `runtime/sfn/process.sfn` externs for its POSIX `sfn_process_environ`
+// (defined in `runtime/sfn/array.sfn`, target-independent). Declared here
+// too rather than imported, per the #306 / file-header self-containment
+// note above `PwGrowBuf` — this extern is a link contract, not a Sailfin
+// import of the POSIX module.
+extern fn sfn_array_push_string(arr: *u8, text: *u8) -> *u8;
 
 // First field of `STARTUPINFOA` (104 bytes on x86_64). `CreateProcessA`
 // requires `.cb = sizeof(STARTUPINFOA)`; every other field is zero. The
@@ -1335,13 +1352,64 @@ fn sfn_process_exec(argv: string[], env_flat: string[]) -> int ![io] {
     return -1;
 }
 
-// `sfn_process_environ()` — empty `SfnArray` (`{ data@0, len@8, cap@16 }`
-// = 24 bytes, all zero). Must be a valid header (not null) so callers'
-// `.length` reads do not crash. Matches the C `_WIN32` empty-array shim
-// (`sailfin_runtime.c:8231`).
+// `sfn_process_environ()` — parses `GetEnvironmentStringsA`'s ANSI block
+// into a real `SfnArray` of `"KEY=VALUE"` strings (SFN-498). Needed
+// because `process.spawn_with_env(argv, env_flat)` takes an EXPLICIT
+// environment — an empty array means the EMPTY environment, never
+// "inherit" — so a caller reproducing inheritance passes
+// `process.environ()` through verbatim. A perpetually-empty Windows
+// result would silently drop `SystemRoot`, the only Windows leg of
+// `build_host_os()` (`compiler/src/build/target.sfn:44`), making a child
+// misdetect its host as Linux and emit the wrong platform legs.
+//
+// Header layout mirrors the POSIX `sfn_process_environ`
+// (`runtime/sfn/process.sfn`): a malloc'd 24-byte `{ data@0, len@8,
+// cap@16 }` SfnArray header, filled via the shared `sfn_array_push_string`
+// helper, which copies each string into its own storage — so entries
+// copied out of the Win32 block stay valid after the block is freed.
+//
+// The block is a run of NUL-terminated `"KEY=VALUE"` entries, terminated
+// by one extra NUL (two consecutive NUL bytes end the block). Entries
+// starting with `=` (Windows per-drive cwd variables like `=C:`) are
+// copied verbatim like any other entry — they are legitimate environment
+// entries, and round-tripping them through `spawn_with_env` ->
+// `_pw_build_env_block` -> `CreateProcess` keeps per-drive cwd semantics
+// intact.
+//
+// Never returns null: if `GetEnvironmentStringsA` fails, or a mid-block
+// allocation fails, the (possibly empty or partially filled) header built
+// so far is returned so callers' `.length` reads do not crash — same
+// contract as the prior stub.
 fn sfn_process_environ() -> *u8 ![io] {
     let arr: *u8 = malloc(24 as usize);
     if arr as i64 == 0 { return arr; }
     memset(arr, 0, 24 as usize);
-    return arr;
+    let out: *u8 = arr;
+
+    let block: *u8 = GetEnvironmentStringsA();
+    if block as i64 == 0 { return out; }
+
+    let base: i64 = block as i64;
+    let mut off: i64 = 0;
+    let mut guard: i64 = 0;
+    loop {
+        guard = guard + 1;
+        if guard > 65536 { break; }
+        let entry: *u8 = (base + off) as *u8;
+        let n: i64 = strlen(entry) as i64;
+        // A zero-length entry is the block's second (double-NUL) terminator.
+        if n == 0 { break; }
+        let copy: *u8 = malloc((n + 1) as usize);
+        if copy as i64 == 0 { break; }
+        memcpy(copy, entry, (n + 1) as usize);
+        let pushed: *u8 = sfn_array_push_string(out, copy);
+        if pushed as i64 == 0 {
+            free(copy);
+            break;
+        }
+        off = off + n + 1;
+    }
+
+    let _freed: i32 = FreeEnvironmentStringsA(block);
+    return out;
 }
