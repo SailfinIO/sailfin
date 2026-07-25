@@ -2810,20 +2810,42 @@ fn _reap_test_child(handle: int, deadline_ms: int, json_output: boolean) -> Reap
         let mut fds: int[] = [];
         if out_fd >= 0 { fds.push(out_fd); }
         if err_fd >= 0 { fds.push(err_fd); }
-        if fds.length == 0 { break; }
-        let ready = io.poll_any(fds, poll_to);
-        if ready < 0 {
-            if deadline_ms > 0 && ((monotonic_millis() - start_ms) as int) >= deadline_ms {
-                process.handle_kill(handle);
-                deadline_killed = true;
-                break;
+        let mut read_out: boolean = false;
+        let mut read_err: boolean = false;
+        if fds.length == 0 {
+            // No fd to select on. That is Windows: the accessors are `-1`
+            // by design there and `io.poll_any` is a `-1` stub (#1540).
+            // POSIX cannot reach this branch — a read only clears an fd to
+            // `-1` when it drained nothing, so both fds are `-1` only once
+            // both stashes are empty, which the check above already broke
+            // on. Drive the Windows framed reads directly, as
+            // `process_windows.sfn` prescribes: each pumps both pipes, so
+            // neither stream can wedge the other, and each blocks until a
+            // byte or EOF, which is what keeps this from spinning.
+            // Termination stays the both-at-EOF check above. The deadline
+            // is therefore only observed between reads — an untimed framed
+            // read cannot be interrupted, so a wholly silent hung child is
+            // not killed here, as it was not before.
+            read_out = !process.handle_stdout_at_eof(handle);
+            read_err = !process.handle_stderr_at_eof(handle);
+        } else {
+            let ready = io.poll_any(fds, poll_to);
+            if ready < 0 {
+                if deadline_ms > 0 && ((monotonic_millis() - start_ms) as int) >= deadline_ms {
+                    process.handle_kill(handle);
+                    deadline_killed = true;
+                    break;
+                }
+                continue;
             }
-            continue;
+            read_out = ready == out_fd;
+            read_err = ready == err_fd;
         }
-        if ready == out_fd {
+        if read_out {
             let chunk = process.handle_read_bytes_stdout(handle, 65536);
             if chunk.length > 0 { out_buf = out_buf + chunk; }
-        } else if ready == err_fd {
+        }
+        if read_err {
             let chunk = process.handle_read_bytes_stderr(handle, 65536);
             if chunk.length > 0 {
                 err_buf = err_buf + chunk;
@@ -3032,20 +3054,42 @@ fn _run_test_binary(exe_path: string, scratch_root: string, update_snapshots: bo
         let mut fds: int[] = [];
         if out_fd >= 0 { fds.push(out_fd); }
         if err_fd >= 0 { fds.push(err_fd); }
-        if fds.length == 0 { break; }
-        let ready = io.poll_any(fds, poll_to);
-        if ready < 0 {
-            if deadline_ms > 0 && ((monotonic_millis() - start_ms) as int) >= deadline_ms {
-                process.handle_kill(h);
-                deadline_killed = true;
-                break;
+        let mut read_out: boolean = false;
+        let mut read_err: boolean = false;
+        if fds.length == 0 {
+            // No fd to select on. That is Windows: the accessors are `-1`
+            // by design there and `io.poll_any` is a `-1` stub (#1540).
+            // POSIX cannot reach this branch — a read only clears an fd to
+            // `-1` when it drained nothing, so both fds are `-1` only once
+            // both stashes are empty, which the check above already broke
+            // on. Drive the Windows framed reads directly, as
+            // `process_windows.sfn` prescribes: each pumps both pipes, so
+            // neither stream can wedge the other, and each blocks until a
+            // byte or EOF, which is what keeps this from spinning.
+            // Termination stays the both-at-EOF check above. The deadline
+            // is therefore only observed between reads — an untimed framed
+            // read cannot be interrupted, so a wholly silent hung child is
+            // not killed here, as it was not before.
+            read_out = !process.handle_stdout_at_eof(h);
+            read_err = !process.handle_stderr_at_eof(h);
+        } else {
+            let ready = io.poll_any(fds, poll_to);
+            if ready < 0 {
+                if deadline_ms > 0 && ((monotonic_millis() - start_ms) as int) >= deadline_ms {
+                    process.handle_kill(h);
+                    deadline_killed = true;
+                    break;
+                }
+                continue;
             }
-            continue;
+            read_out = ready == out_fd;
+            read_err = ready == err_fd;
         }
-        if ready == out_fd {
+        if read_out {
             let chunk = process.handle_read_bytes_stdout(h, 65536);
             if chunk.length > 0 && !json_output { out_buf = out_buf + chunk; }
-        } else if ready == err_fd {
+        }
+        if read_err {
             let chunk = process.handle_read_bytes_stderr(h, 65536);
             if chunk.length > 0 {
                 err_buf = err_buf + chunk;
