@@ -4,6 +4,45 @@
 // so these tests pin the resulting text against the existing `as string` cast
 // semantics (booleans render as "1"/"0", not "true"/"false") and guard the
 // pre-existing char/byte concat shape the fix must not disturb.
+//
+// The first attempt at this fix keyed the gate off "string-shaped" operands,
+// which at the LLVM level includes bare `i8*` — but `*u8`, `*opaque`, and
+// unresolved types ALL lower to `i8*` too, so `buf + n` on a raw byte buffer
+// silently stopped emitting `getelementptr` and instead called `strlen` on a
+// non-NUL-terminated buffer and concatenated: an out-of-bounds read replacing
+// pointer arithmetic. The fix narrowed the gate to the `{i8*, i64}` string
+// aggregate specifically. The test below pins the behavioral contract that
+// narrowing protects.
+extern fn malloc(size: usize) -> *u8;
+
+test "string concat: *u8 pointer arithmetic still GEPs offsets, not string-concats" {
+    // If the string-concat gate ever widens back to bare `i8*`, `buf + n`
+    // would stop offsetting and instead treat `buf` as a NUL-terminated
+    // string operand, corrupting these writes/reads (or reading out of
+    // bounds via `strlen` on unterminated malloc'd memory).
+    let buf: *u8 = malloc(4 as usize);
+
+    let p0 = buf + 0;
+    let p1 = buf + 1;
+    let p2 = buf + 2;
+    let p3 = buf + 3;
+
+    *p0 = 11 as u8;
+    *p1 = 22 as u8;
+    *p2 = 33 as u8;
+    *p3 = 44 as u8;
+
+    let v0 = *p0;
+    let v1 = *p1;
+    let v2 = *p2;
+    let v3 = *p3;
+
+    assert(v0 as i64) == 11;
+    assert(v1 as i64) == 22;
+    assert(v2 as i64) == 33;
+    assert(v3 as i64) == 44;
+}
+
 test "string concat: string + int yields concatenated text" {
     let n = 42;
     let out = "n=" + n;
