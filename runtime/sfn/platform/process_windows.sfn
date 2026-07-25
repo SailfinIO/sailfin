@@ -19,18 +19,44 @@
 // This mirrors the retired `sailfin_runtime.c` `#if defined(_WIN32)`
 // branch (the `CreateProcessA` body at :5564 and the `@sfn_process_*`
 // forwarders at :8163). Sync of the RUNTIME_MODS membership is pinned by
-// `compiler/tests/e2e/test_cross_windows_runtime_modules.sh`.
+// `compiler/tests/e2e/cross_windows_runtime_modules_test.sfn`.
 //
 // CONTRACT. `run`, `exit`, and `run_capture` (+ its `capture_take_*`)
 // are REAL: the shipped Windows installer must spawn clang/linker, and
 // the self-host build captures the child compiler's output (#1487 /
 // epic #1485). `run_capture` uses CreatePipe + CreateProcessA with
 // redirected stdout/stderr + a deadlock-free two-pipe drain
-// (PeekNamedPipe/ReadFile). The streaming-handle family
-// (`spawn_with_env` / `handle_*`) and `environ` remain degraded-but-
-// linking (failure sentinels / empty results), preserving the retired C
-// `_WIN32` shim behaviour — their real Windows implementations are
-// follow-up work (M4 child-spawn consumer; GetEnvironmentStringsA).
+// (PeekNamedPipe/ReadFile). The async streaming-handle family
+// (`spawn_with_env` / `handle_*`) is ALSO real (SFN-497) — the enabling
+// primitive none of the concurrent-child consumers can be built without.
+// `environ` remains degraded-but-linking (empty result), preserving the
+// retired C `_WIN32` shim behaviour — GetEnvironmentStringsA is
+// follow-up work.
+//
+// CONSUMERS ARE NOT YET PORTED. A real spawn family is necessary but not
+// sufficient: the existing in-tree consumers select on raw fds, which do
+// not exist here (see the `handle_stdout_fd` note below). Concretely,
+// `cli/commands/test.sfn`'s runner loop builds an fd list, finds it empty
+// on Windows, and breaks before reading a byte. Porting each consumer to
+// the fd-free framed-read path is deliberately separate work (SFN-499) —
+// so do NOT read "the family is real" as "`sfn test` / parallel emit work
+// on Windows". They do not yet.
+//
+// SINGLE-THREADED SPAWN. `CreateProcessA` with `bInheritHandles=TRUE`
+// grants the child EVERY inheritable handle open in the process, not
+// just the three named in `STARTUPINFOA`. `_pw_spawn_impl` therefore
+// closes its child-side pipe ends immediately after the spawn returns,
+// which makes the leak window exactly the CreatePipe→CloseHandle span
+// of ONE spawn call. Two spawns overlapping IN DIFFERENT THREADS would
+// cross-inherit each other's write ends and the victim's read end would
+// never see EOF (its pipe would still have a live writer). That race
+// cannot arise today: the concurrency modules are excluded from the
+// cross-windows RUNTIME_MODS, so every Windows spawn is single-threaded,
+// and the async family exists precisely so ONE thread can drive many
+// children by polling. Should a Windows thread pool ever link this
+// module, replace the inherit-everything spawn with an explicit
+// `PROC_THREAD_ATTRIBUTE_HANDLE_LIST` (STARTUPINFOEXA +
+// EXTENDED_STARTUPINFO_PRESENT) and delete this paragraph.
 extern fn malloc(size: usize) -> *u8;
 
 extern fn free(ptr: *u8) -> void;
@@ -72,6 +98,13 @@ extern fn GetStdHandle(which: i32) -> i64;
 
 extern fn Sleep(ms: i32) -> void;
 
+// ── Win32 async-handle family (SFN-497). `WriteFile` feeds the child's
+// stdin pipe; `TerminateProcess` is the `handle_kill` primitive (Windows
+// has no signals). Both implicitly linked by mingw.
+extern fn WriteFile(handle: i64, buffer: *u8, to_write: i32, written: *i32, overlapped: *u8) -> i32;
+
+extern fn TerminateProcess(handle: i64, code: i32) -> i32;
+
 // First field of `STARTUPINFOA` (104 bytes on x86_64). `CreateProcessA`
 // requires `.cb = sizeof(STARTUPINFOA)`; every other field is zero. The
 // buffer is `malloc(104)` + `memset 0`, then `.cb` is written through
@@ -97,6 +130,46 @@ struct PwGrowBuf {
     addr: i64;
     len: i64;
     cap: i64;
+}
+
+// One live child of the async `spawn_with_env` family (SFN-497). The
+// `handle_id` an `sfn_process_handle_*` builtin receives is the ADDRESS of
+// one of these, cast to `i64` — never an index into a table. That mirrors
+// the POSIX side, where the id is a `SailfinProcessHandle*`
+// (`runtime/sfn/process.sfn`), and is what makes `0` a safe universal
+// failure sentinel: `malloc` never hands back address 0 for a live
+// allocation, so no valid handle can collide with it.
+//
+// The POSIX layout is NOT reused. There the three stream slots are `i32`
+// fds sentinelled with `-1`; a Windows HANDLE is a 64-bit kernel value
+// with `0` (never `-1`, which is INVALID_HANDLE_VALUE) as its natural
+// "closed" marker, so the slots here are `i64` zeroed on close. Layout
+// parity is unnecessary because the two modules never link together —
+// exactly one of them is in a given binary (file header).
+//
+// The two `{ addr, len, cap }` triples are read through the `PwGrowBuf`
+// overlay at the byte offsets noted below, the same address-arithmetic
+// trick `process.sfn` uses for its stashes. `_pw_h_out_gb` / `_pw_h_err_gb`
+// are the only places those offsets are spelled out.
+struct PwProcHandle {
+    // @0  child process HANDLE; 0 once reaped by `handle_wait`.
+    h_process: i64;
+    // @8  child primary thread HANDLE; closed alongside `h_process`.
+    h_thread: i64;
+    // @16 parent's WRITE end of the child's stdin; 0 once closed.
+    h_stdin_wr: i64;
+    // @24 parent's READ end of the child's stdout; 0 once drained to EOF.
+    h_stdout_rd: i64;
+    // @32 parent's READ end of the child's stderr; 0 once drained to EOF.
+    h_stderr_rd: i64;
+    // @40 stdout read-ahead stash (PwGrowBuf overlay).
+    out_addr: i64;
+    out_len: i64;
+    out_cap: i64;
+    // @64 stderr read-ahead stash (PwGrowBuf overlay).
+    err_addr: i64;
+    err_len: i64;
+    err_cap: i64;
 }
 
 // `run_capture` stashes the malloc'd, NUL-terminated stdout/stderr here
@@ -683,76 +756,553 @@ fn sfn_process_capture_take_peak_rss_kb() -> i64 ![io] {
     return v;
 }
 
-// `0` is the spawn-handle failure sentinel (not -1) — matches the C
-// `_WIN32` contract (`sailfin_runtime.c:8195`).
+// ── Async process-handle family (SFN-497) ───────────────────────────
+// The two stash overlays. These are the only places the `PwProcHandle`
+// byte offsets are spelled out; everything else goes through them.
+fn _pw_h_out_gb(h: *PwProcHandle) -> *PwGrowBuf {
+    return ((h as i64) + 40) as *PwGrowBuf;
+}
+
+fn _pw_h_err_gb(h: *PwProcHandle) -> *PwGrowBuf {
+    return ((h as i64) + 64) as *PwGrowBuf;
+}
+
+// `_pw_h_pump_once(h, buf, cap)` — one non-blocking read pass over BOTH
+// still-open pipes, appending whatever each has buffered to its own stash.
+// A pipe reporting EOF/broken (`_pw_read_chunk` → -1) is closed and its
+// slot zeroed, which is what later makes `*_at_eof` true. Returns the
+// total bytes appended this pass (0 = both pipes open but idle).
+//
+// Both pipes are always pumped, never just the one a caller asked for: a
+// child that fills the other pipe's 64 KiB buffer blocks in its own write
+// and never reaches the write the caller is waiting on. That is the same
+// deadlock `_pw_drain` avoids for `run_capture`, and the reason the POSIX
+// peer polls both fds together.
+fn _pw_h_pump_once(h: *PwProcHandle, buf: *u8, cap: i64) -> i64 ![io] {
+    let mut got: i64 = 0;
+    if h.h_stdout_rd != 0 {
+        let r: i64 = _pw_read_chunk(h.h_stdout_rd, buf, cap, _pw_h_out_gb(h));
+        if r < 0 {
+            let _c: i32 = CloseHandle(h.h_stdout_rd);
+            h.h_stdout_rd = 0;
+        } else { got = got + r; }
+    }
+    if h.h_stderr_rd != 0 {
+        let r: i64 = _pw_read_chunk(h.h_stderr_rd, buf, cap, _pw_h_err_gb(h));
+        if r < 0 {
+            let _c: i32 = CloseHandle(h.h_stderr_rd);
+            h.h_stderr_rd = 0;
+        } else { got = got + r; }
+    }
+    return got;
+}
+
+// `_pw_h_pump(h, want_err, to_eof)` — pump both pipes until the requested
+// stream (`want_err` 0 = stdout, 1 = stderr) is satisfied: to EOF when
+// `to_eof` is 1 (the full-drain reads), or until its stash holds at least
+// one byte when `to_eof` is 0 (the framed reads).
+//
+// This is where the POSIX blocking `read(2)` is reconstructed. Win32 has
+// no blocking-with-EOF pipe read that is also safe to interleave, so the
+// non-blocking `PeekNamedPipe` probe is looped with a `Sleep(1)` on an
+// idle pass. Sleeping (rather than returning empty) is what keeps the
+// POSIX contract: a framed read must not report "no bytes" for a live
+// child that simply has not written yet, or a caller framing until
+// `*_at_eof` would spin at 100% CPU instead of parking.
+fn _pw_h_pump(h: *PwProcHandle, want_err: i64, to_eof: i64) -> void ![io] {
+    // Already at EOF: nothing to pump. Checked before the buffer alloc so the
+    // common already-drained call costs nothing.
+    if want_err != 0 {
+        if h.h_stderr_rd == 0 { return; }
+    } else {
+        if h.h_stdout_rd == 0 { return; }
+    }
+    let cap: i64 = 65536;
+    let buf: *u8 = malloc(cap as usize);
+    if buf as i64 == 0 {
+        // Out of memory. Returning with state untouched would livelock the
+        // caller: the stash stays empty so a framed read yields "", while the
+        // stream handle stays open so `*_at_eof` stays false — and the
+        // canonical `loop { if at_eof break; read_bytes() }` would spin
+        // forever without draining the child. Close the requested stream so
+        // EOF is reported instead. The POSIX peer reaches the same end by
+        // returning -1 from `_framed_fill`, whose caller closes the fd.
+        if want_err != 0 {
+            let _ce: i32 = CloseHandle(h.h_stderr_rd);
+            h.h_stderr_rd = 0;
+        } else {
+            let _co: i32 = CloseHandle(h.h_stdout_rd);
+            h.h_stdout_rd = 0;
+        }
+        return;
+    }
+    let ogb: *PwGrowBuf = _pw_h_out_gb(h);
+    let egb: *PwGrowBuf = _pw_h_err_gb(h);
+    loop {
+        let mut open: i64 = 0;
+        let mut have: i64 = 0;
+        if want_err != 0 {
+            open = h.h_stderr_rd;
+            have = egb.len;
+        } else {
+            open = h.h_stdout_rd;
+            have = ogb.len;
+        }
+        // EOF on the requested stream ends every mode.
+        if open == 0 { break; }
+        if to_eof == 0 {
+            if have > 0 { break; }
+        }
+        let n: i64 = _pw_h_pump_once(h, buf, cap);
+        if n == 0 { Sleep(1); }
+    }
+    free(buf);
+}
+
+// `_pw_framed_consume(gb, ret_len, consume_len)` — hand `ret_len` bytes
+// from the front of the stash to the caller as a fresh NUL-terminated
+// buffer, then drop `consume_len` from the front. The unconsumed
+// remainder is compacted with two NON-OVERLAPPING `memcpy`s through a
+// temp buffer: there is no `memmove` available here, and a single
+// overlapping `memcpy` would be undefined. Mirrors the POSIX
+// `_framed_consume` (`runtime/sfn/process.sfn`) exactly. `gb.cap` is
+// untouched, so the append-side headroom invariant survives (`len` only
+// ever shrinks here).
+fn _pw_framed_consume(gb: *PwGrowBuf, ret_len: i64, consume_len: i64) -> *u8 {
+    let addr: i64 = gb.addr;
+    let len: i64 = gb.len;
+    let res: *u8 = malloc((ret_len + 1) as usize);
+    if res as i64 == 0 { return _pw_empty_cstr(); }
+    if ret_len > 0 { memcpy(res, addr as *u8, ret_len as usize); }
+    memset((res as i64 + ret_len) as *u8, 0, 1 as usize);
+    let rem: i64 = len - consume_len;
+    if rem > 0 {
+        let tmp: *u8 = malloc(rem as usize);
+        if tmp as i64 != 0 {
+            memcpy(tmp, (addr + consume_len) as *u8, rem as usize);
+            memcpy(addr as *u8, tmp, rem as usize);
+            free(tmp);
+        }
+        gb.len = rem;
+    } else { gb.len = 0; }
+    return res;
+}
+
+// `_pw_spawn_impl(argv, env_flat)` — real Windows non-blocking spawn. Three
+// anonymous pipes (stdin/stdout/stderr) are wired to the child through
+// `STARTUPINFOA`, the child is launched, and a live `PwProcHandle` address
+// is returned as the id. Unlike `run_capture` this does NOT wait: the
+// caller drives the child through the `handle_*` surface, which is what
+// makes many children in flight at once expressible.
+//
+// Returns `0` on ANY failure (empty argv, OOM, CreatePipe, CreateProcessA)
+// — the family's universal failure sentinel, `0` rather than `-1` to match
+// the POSIX peer and the retired C `_WIN32` contract
+// (`sailfin_runtime.c:8195`).
+fn _pw_spawn_impl(argv: string[], env_flat: string[]) -> i64 ![io] {
+    let len: i64 = argv.length;
+    if len <= 0 { return 0; }
+
+    let cmdline: *u8 = _pw_build_cmdline(argv);
+    if cmdline as i64 == 0 { return 0; }
+    let env_block: *u8 = _pw_build_env_block(env_flat);
+    if env_block as i64 == 0 {
+        free(cmdline);
+        return 0;
+    }
+
+    // Inheritable SECURITY_ATTRIBUTES (24 bytes): `{ nLength@0,
+    // lpSecurityDescriptor@8, bInheritHandle@16 }`, as `run_capture` builds.
+    let sa: *u8 = malloc(24 as usize);
+    if sa as i64 == 0 {
+        free(cmdline);
+        free(env_block);
+        return 0;
+    }
+    memset(sa, 0, 24 as usize);
+    atomic_store(sa as *i64, 24);
+    atomic_store((sa as i64 + 16) as *i64, 1);
+
+    // Three anonymous pipes packed into one 48-byte buffer:
+    // stdin (rd@0, wr@8), stdout (rd@16, wr@24), stderr (rd@32, wr@40).
+    let hbuf: *u8 = malloc(48 as usize);
+    if hbuf as i64 == 0 {
+        free(cmdline);
+        free(env_block);
+        free(sa);
+        return 0;
+    }
+    memset(hbuf, 0, 48 as usize);
+    let hbase: i64 = hbuf as i64;
+
+    if CreatePipe(hbase as *i64, (hbase + 8) as *i64, sa, 0) == 0 {
+        free(cmdline);
+        free(env_block);
+        free(sa);
+        free(hbuf);
+        return 0;
+    }
+    if CreatePipe((hbase + 16) as *i64, (hbase + 24) as *i64, sa, 0) == 0 {
+        let _c1: i32 = CloseHandle(atomic_load(hbase as *i64));
+        let _c2: i32 = CloseHandle(atomic_load((hbase + 8) as *i64));
+        free(cmdline);
+        free(env_block);
+        free(sa);
+        free(hbuf);
+        return 0;
+    }
+    if CreatePipe((hbase + 32) as *i64, (hbase + 40) as *i64, sa, 0) == 0 {
+        let _c1: i32 = CloseHandle(atomic_load(hbase as *i64));
+        let _c2: i32 = CloseHandle(atomic_load((hbase + 8) as *i64));
+        let _c3: i32 = CloseHandle(atomic_load((hbase + 16) as *i64));
+        let _c4: i32 = CloseHandle(atomic_load((hbase + 24) as *i64));
+        free(cmdline);
+        free(env_block);
+        free(sa);
+        free(hbuf);
+        return 0;
+    }
+    let in_rd: i64 = atomic_load(hbase as *i64);
+    let in_wr: i64 = atomic_load((hbase + 8) as *i64);
+    let out_rd: i64 = atomic_load((hbase + 16) as *i64);
+    let out_wr: i64 = atomic_load((hbase + 24) as *i64);
+    let err_rd: i64 = atomic_load((hbase + 32) as *i64);
+    let err_wr: i64 = atomic_load((hbase + 40) as *i64);
+    free(hbuf);
+
+    // The parent-side ends are parent-only: clear HANDLE_FLAG_INHERIT (1)
+    // so the child neither inherits nor leaks them. Leaving `in_wr`
+    // inheritable would be the subtle one — the child would hold a writer
+    // on its OWN stdin and never see EOF from `handle_close_stdin`.
+    let _s1: i32 = SetHandleInformation(in_wr, 1, 0);
+    let _s2: i32 = SetHandleInformation(out_rd, 1, 0);
+    let _s3: i32 = SetHandleInformation(err_rd, 1, 0);
+
+    // STARTUPINFOA (104 bytes): cb@0=104, dwFlags@60=STARTF_USESTDHANDLES
+    // (0x100=256), hStdInput@80, hStdOutput@88, hStdError@96. cb/dwFlags are
+    // 4-aligned DWORDs written through the `PwDword` overlay; the three
+    // HANDLEs are 8-aligned and written with `atomic_store`.
+    let si: *u8 = malloc(104 as usize);
+    if si as i64 == 0 {
+        let _c1: i32 = CloseHandle(in_rd);
+        let _c2: i32 = CloseHandle(in_wr);
+        let _c3: i32 = CloseHandle(out_rd);
+        let _c4: i32 = CloseHandle(out_wr);
+        let _c5: i32 = CloseHandle(err_rd);
+        let _c6: i32 = CloseHandle(err_wr);
+        free(cmdline);
+        free(env_block);
+        free(sa);
+        return 0;
+    }
+    memset(si, 0, 104 as usize);
+    let cb_view: *PwDword = si as *PwDword;
+    cb_view.v = 104;
+    let flags_view: *PwDword = (si as i64 + 60) as *PwDword;
+    flags_view.v = 256;
+    atomic_store((si as i64 + 80) as *i64, in_rd);
+    atomic_store((si as i64 + 88) as *i64, out_wr);
+    atomic_store((si as i64 + 96) as *i64, err_wr);
+
+    // PROCESS_INFORMATION (24 bytes): `{ hProcess@0, hThread@8, ... }`.
+    let pi: *u8 = malloc(24 as usize);
+    if pi as i64 == 0 {
+        let _c1: i32 = CloseHandle(in_rd);
+        let _c2: i32 = CloseHandle(in_wr);
+        let _c3: i32 = CloseHandle(out_rd);
+        let _c4: i32 = CloseHandle(out_wr);
+        let _c5: i32 = CloseHandle(err_rd);
+        let _c6: i32 = CloseHandle(err_wr);
+        free(cmdline);
+        free(env_block);
+        free(sa);
+        free(si);
+        return 0;
+    }
+    memset(pi, 0, 24 as usize);
+
+    // The handle record is allocated BEFORE the spawn: a post-spawn OOM
+    // would leave a running child with no way to reap it.
+    let h: *PwProcHandle = malloc(88 as usize) as *PwProcHandle;
+    if h as i64 == 0 {
+        let _c1: i32 = CloseHandle(in_rd);
+        let _c2: i32 = CloseHandle(in_wr);
+        let _c3: i32 = CloseHandle(out_rd);
+        let _c4: i32 = CloseHandle(out_wr);
+        let _c5: i32 = CloseHandle(err_rd);
+        let _c6: i32 = CloseHandle(err_wr);
+        free(cmdline);
+        free(env_block);
+        free(sa);
+        free(si);
+        free(pi);
+        return 0;
+    }
+    memset(h as *u8, 0, 88 as usize);
+
+    // bInheritHandles=TRUE(1) so the child inherits the three redirected
+    // ends; flags=0 (ANSI environment block). See the file header on why
+    // this is safe only while Windows spawns stay single-threaded.
+    let ok: i32 = CreateProcessA(null, cmdline, null, null, 1, 0, env_block, null, si, pi);
+    free(cmdline);
+    free(env_block);
+    free(sa);
+    if ok == 0 {
+        let _c1: i32 = CloseHandle(in_rd);
+        let _c2: i32 = CloseHandle(in_wr);
+        let _c3: i32 = CloseHandle(out_rd);
+        let _c4: i32 = CloseHandle(out_wr);
+        let _c5: i32 = CloseHandle(err_rd);
+        let _c6: i32 = CloseHandle(err_wr);
+        free(h as *u8);
+        free(si);
+        free(pi);
+        return 0;
+    }
+
+    h.h_process = atomic_load(pi as *i64);
+    h.h_thread = atomic_load((pi as i64 + 8) as *i64);
+    free(si);
+    free(pi);
+
+    // The parent drops the child's own ends immediately. Closing the two
+    // write ends is what lets the read ends report EOF once the child (now
+    // their only writer) exits — without it every drain would hang.
+    let _cc1: i32 = CloseHandle(in_rd);
+    let _cc2: i32 = CloseHandle(out_wr);
+    let _cc3: i32 = CloseHandle(err_wr);
+
+    h.h_stdin_wr = in_wr;
+    h.h_stdout_rd = out_rd;
+    h.h_stderr_rd = err_rd;
+    // Both stashes start empty (the `memset` above zeroed them).
+    return h as i64;
+}
+
 fn sfn_process_spawn_with_env(argv: string[], env_flat: string[]) -> i64 ![io] {
-    return 0;
+    return _pw_spawn_impl(argv, env_flat);
 }
 
-// `process.spawn_with_env_cwd` (#1167): `cwd` accepted for ABI parity
-// but ignored (per-child cwd is posix-only); delegates to the 2-arg
-// stub, which returns the `0` failure sentinel on this platform.
+// `process.spawn_with_env_cwd` (#1167): `cwd` is accepted for ABI parity
+// with the posix runtime but ignored, exactly as `run_capture_cwd` ignores
+// it — per-child cwd stays a posix-only feature (SFN-497 scopes Windows cwd
+// support Out). The spawn itself is real; the child inherits the parent's
+// working directory.
 fn sfn_process_spawn_with_env_cwd(argv: string[], env_flat: string[], cwd: *u8) -> i64 ![io] {
-    return sfn_process_spawn_with_env(argv, env_flat);
+    return _pw_spawn_impl(argv, env_flat);
 }
 
+// Write the whole NUL-terminated `data` to the child's stdin, resuming on
+// a short `WriteFile`. Returns bytes written, or `-1` on a zero handle,
+// null `data`, an already-closed stdin, or a write error.
 fn sfn_process_handle_write(handle_id: i64, data: *u8) -> i64 ![io] {
-    return -1;
+    if handle_id == 0 { return -1; }
+    if data as i64 == 0 { return -1; }
+    let h: *PwProcHandle = handle_id as *PwProcHandle;
+    let hw: i64 = h.h_stdin_wr;
+    if hw == 0 { return -1; }
+    let total: i64 = strlen(data) as i64;
+    if total <= 0 { return 0; }
+    let base: i64 = data as i64;
+    let mut off: i64 = 0;
+    loop {
+        if off >= total { break; }
+        let mut wrote: i32 = 0;
+        let wrote_ptr: *i32 = & wrote;
+        let ok: i32 = WriteFile(hw, (base + off) as *u8, (total - off) as i32, wrote_ptr, null);
+        if ok == 0 { return -1; }
+        if wrote <= 0 { return -1; }
+        off = off + (wrote as i64);
+    }
+    return off;
 }
 
-fn sfn_process_handle_close_stdin(handle_id: i64) -> void ![io] { return; }
+// Close the parent's write end so the child sees EOF on stdin. The slot is
+// zeroed so `handle_wait`'s cleanup does not double-close it (the POSIX
+// peer persists `-1` into `stdin_fd` for the same reason).
+fn sfn_process_handle_close_stdin(handle_id: i64) -> void ![io] {
+    if handle_id == 0 { return; }
+    let h: *PwProcHandle = handle_id as *PwProcHandle;
+    if h.h_stdin_wr == 0 { return; }
+    let _c: i32 = CloseHandle(h.h_stdin_wr);
+    h.h_stdin_wr = 0;
+    return;
+}
 
+// Full-drain reads: pump to EOF, then hand the whole stash over. The
+// returned pointer is a fresh NUL-terminated buffer the CALLER owns.
 fn sfn_process_handle_read_stdout(handle_id: i64) -> *u8 ![io] {
-    return _pw_empty_cstr();
+    if handle_id == 0 { return _pw_empty_cstr(); }
+    let h: *PwProcHandle = handle_id as *PwProcHandle;
+    _pw_h_pump(h, 0, 1);
+    return _pw_gb_take(_pw_h_out_gb(h));
 }
 
 fn sfn_process_handle_read_stderr(handle_id: i64) -> *u8 ![io] {
-    return _pw_empty_cstr();
+    if handle_id == 0 { return _pw_empty_cstr(); }
+    let h: *PwProcHandle = handle_id as *PwProcHandle;
+    _pw_h_pump(h, 1, 1);
+    return _pw_gb_take(_pw_h_err_gb(h));
 }
 
-fn sfn_process_handle_wait(handle_id: i64) -> i64 ![io] { return -1; }
+// Reap the child and destroy the handle. Mirrors the POSIX peer: this is
+// the SOLE free path, so a handle never waited leaks its record, both
+// stash buffers, and the kernel process/thread handles. Any still-open
+// pipe end is closed first — undrained output is discarded, exactly as the
+// POSIX peer discards it.
+//
+// Returns the child's raw Win32 exit code, or `-1` on a zero handle, an
+// already-reaped handle, or a failed `GetExitCodeProcess`. A Windows exit
+// code is a full DWORD, so unlike POSIX it is not confined to 0..255 and a
+// child exiting with 0xFFFFFFFF is indistinguishable from the failure
+// sentinel — the same aliasing `sfn_process_run` and `run_capture` already
+// carry on this platform.
+fn sfn_process_handle_wait(handle_id: i64) -> i64 ![io] {
+    if handle_id == 0 { return -1; }
+    let h: *PwProcHandle = handle_id as *PwProcHandle;
 
-// SFEP-0050 process-handle stderr-streaming primitives — degraded-but-
-// linking Windows stubs, mirroring the `handle_read_stdout`→empty /
-// `handle_wait`→-1 posture above. The spawn family already returns the
-// `0` failure sentinel here (`sfn_process_spawn_with_env`), so the
-// streamed-record test runner degrades to non-streaming on Windows;
-// these keep the cross-windows link resolved once the runner (in the
-// Windows compiler binary) references them, and honor the file header's
-// POSIX/Windows lockstep contract. The fd accessors report `-1` (no fd),
-// `read_bytes_stderr` the empty string, `stderr_at_eof` `true` (so a
-// caller framing until EOF stops immediately instead of spinning), and
-// `handle_kill` `-1` (no child to signal). The SFEP-0050 streamed-record
-// transport is POSIX-only until the M4 child-spawn consumer (file header)
-// makes `spawn_with_env` real on Windows.
+    if h.h_stdin_wr != 0 {
+        let _c: i32 = CloseHandle(h.h_stdin_wr);
+        h.h_stdin_wr = 0;
+    }
+    if h.h_stdout_rd != 0 {
+        let _c: i32 = CloseHandle(h.h_stdout_rd);
+        h.h_stdout_rd = 0;
+    }
+    if h.h_stderr_rd != 0 {
+        let _c: i32 = CloseHandle(h.h_stderr_rd);
+        h.h_stderr_rd = 0;
+    }
+    let ogb: *PwGrowBuf = _pw_h_out_gb(h);
+    if ogb.addr != 0 {
+        free(ogb.addr as *u8);
+        ogb.addr = 0;
+        ogb.len = 0;
+        ogb.cap = 0;
+    }
+    let egb: *PwGrowBuf = _pw_h_err_gb(h);
+    if egb.addr != 0 {
+        free(egb.addr as *u8);
+        egb.addr = 0;
+        egb.len = 0;
+        egb.cap = 0;
+    }
+
+    let hp: i64 = h.h_process;
+    if hp == 0 {
+        free(h as *u8);
+        return -1;
+    }
+
+    // INFINITE = 0xFFFFFFFF, passed as i32 -1 (same bit pattern; a hex
+    // literal folds to 0 on the seed — see `sfn_process_run`).
+    let _w: i32 = WaitForSingleObject(hp, -1);
+    let mut code: i32 = 0;
+    let code_ptr: *i32 = & code;
+    let got: i32 = GetExitCodeProcess(hp, code_ptr);
+    let _cp: i32 = CloseHandle(hp);
+    if h.h_thread != 0 {
+        let _ct: i32 = CloseHandle(h.h_thread);
+    }
+    free(h as *u8);
+    if got == 0 { return -1; }
+    return code as i64;
+}
+
+// The fd accessors stay `-1` on Windows BY DESIGN, not as a leftover stub
+// (SFN-497 scopes them Out): a Windows HANDLE is not a file descriptor, and
+// there is no numbering space to project one onto. Their only consumer is
+// `io.poll_any`, which is itself unavailable here (`poll(2)` does not cover
+// pipe handles under mingw, and `WSAPoll` is sockets-only), and which
+// already treats a negative fd as parked. A caller needing deadlock-free
+// stdout/stderr demux on Windows uses the framed reads below instead: they
+// pump BOTH pipes on every call, so neither stream can wedge the other —
+// which is the property `poll_any` buys on POSIX.
 fn sfn_process_handle_stdout_fd(handle_id: i64) -> i64 ![io] { return -1; }
 
 fn sfn_process_handle_stderr_fd(handle_id: i64) -> i64 ![io] { return -1; }
 
+// Framed reads (SFN-153 stdout twins, SFEP-0050 stderr twins): return AT
+// MOST `n` bytes, stashing the remainder for the next call. When the stash
+// is empty the pipes are pumped until the requested stream yields a byte or
+// hits EOF, so a short return is possible but an empty return means genuine
+// EOF — the distinction `*_at_eof` reports.
+fn sfn_process_handle_read_bytes_stdout(handle_id: i64, n: i64) -> *u8 ![io] {
+    if handle_id == 0 { return _pw_empty_cstr(); }
+    if n <= 0 { return _pw_empty_cstr(); }
+    let h: *PwProcHandle = handle_id as *PwProcHandle;
+    let gb: *PwGrowBuf = _pw_h_out_gb(h);
+    if gb.len == 0 { _pw_h_pump(h, 0, 0); }
+    let mut take: i64 = n;
+    if take > gb.len { take = gb.len; }
+    if take <= 0 { return _pw_empty_cstr(); }
+    return _pw_framed_consume(gb, take, take);
+}
+
 fn sfn_process_handle_read_bytes_stderr(handle_id: i64, n: i64) -> *u8 ![io] {
-    return _pw_empty_cstr();
+    if handle_id == 0 { return _pw_empty_cstr(); }
+    if n <= 0 { return _pw_empty_cstr(); }
+    let h: *PwProcHandle = handle_id as *PwProcHandle;
+    let gb: *PwGrowBuf = _pw_h_err_gb(h);
+    if gb.len == 0 { _pw_h_pump(h, 1, 0); }
+    let mut take: i64 = n;
+    if take > gb.len { take = gb.len; }
+    if take <= 0 { return _pw_empty_cstr(); }
+    return _pw_framed_consume(gb, take, take);
+}
+
+// True once the stream is genuinely exhausted: its pipe was closed on a
+// prior EOF read AND no read-ahead bytes remain. A pure state read — no
+// Win32 call, so it never blocks. A zero handle reports `true`, matching
+// the POSIX peer's dead-handle-is-EOF convention so a caller framing until
+// EOF stops rather than spinning.
+//
+// Note this is `false` while the child is alive but silent: EOF is only
+// observed by a read that finds the pipe broken, so a caller polls
+// `handle_read_bytes_*` until this flips, it does not consult this first.
+fn sfn_process_handle_stdout_at_eof(handle_id: i64) -> bool ![io] {
+    if handle_id == 0 { return true; }
+    let h: *PwProcHandle = handle_id as *PwProcHandle;
+    let gb: *PwGrowBuf = _pw_h_out_gb(h);
+    if h.h_stdout_rd == 0 && gb.len == 0 { return true; }
+    return false;
 }
 
 fn sfn_process_handle_stderr_at_eof(handle_id: i64) -> bool ![io] {
-    return true;
+    if handle_id == 0 { return true; }
+    let h: *PwProcHandle = handle_id as *PwProcHandle;
+    let gb: *PwGrowBuf = _pw_h_err_gb(h);
+    if h.h_stderr_rd == 0 && gb.len == 0 { return true; }
+    return false;
 }
 
-// Framed-stdout twins (SFN-153). The stderr counterparts above are the
-// SFEP-0050 additions; these stdout ones predate it but had no
-// Windows-linked caller until the streamed-record runner
-// (`cli/commands/test.sfn`) began demuxing stdout via
-// `handle_read_bytes_stdout` / `handle_stdout_at_eof` in the compiler
-// binary, so their stubs are required here to keep the cross-windows link
-// resolved. Same degraded posture: chunk → empty, at_eof → true.
-fn sfn_process_handle_read_bytes_stdout(handle_id: i64, n: i64) -> *u8 ![io] {
-    return _pw_empty_cstr();
+// Kill the child. Windows has no signals, so `TerminateProcess` stands in
+// for the POSIX peer's SIGKILL. The exit code is forced to 137 so a later
+// `handle_wait` reports the same value the POSIX peer synthesises for a
+// SIGKILLed child (128 + 9) and a cross-platform caller sees one number;
+// as there, 137 is therefore ambiguous with a child that genuinely exited
+// 137, and a caller that must know tracks its own killed-on-deadline flag.
+//
+// Returns `0` on success, `-1` on a zero/invalid handle or a genuine
+// failure. A child that already exited is reported as success:
+// `TerminateProcess` fails with ERROR_ACCESS_DENIED on an exited process,
+// whereas POSIX `kill(2)` on a not-yet-reaped zombie succeeds, so the
+// exit-code probe below restores parity. Like POSIX, this does NOT reap —
+// `handle_wait` is still required.
+fn sfn_process_handle_kill(handle_id: i64) -> i64 ![io] {
+    if handle_id == 0 { return -1; }
+    let h: *PwProcHandle = handle_id as *PwProcHandle;
+    let hp: i64 = h.h_process;
+    if hp == 0 { return -1; }
+    if TerminateProcess(hp, 137) != 0 { return 0; }
+    let mut code: i32 = 0;
+    let code_ptr: *i32 = & code;
+    let got: i32 = GetExitCodeProcess(hp, code_ptr);
+    // STILL_ACTIVE = 259. Anything else means the child is already gone,
+    // which is the zombie case POSIX reports as a successful kill.
+    if got != 0 && code != 259 { return 0; }
+    return -1;
 }
-
-fn sfn_process_handle_stdout_at_eof(handle_id: i64) -> bool ![io] {
-    return true;
-}
-
-fn sfn_process_handle_kill(handle_id: i64) -> i64 ![io] { return -1; }
 
 // `sfn_io_poll_readable(fd, timeout_ms)` — Windows stub for the
 // `io.poll_readable` builtin (#1580). The POSIX body

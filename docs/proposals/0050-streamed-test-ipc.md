@@ -285,11 +285,16 @@ runner-owned deadlines. Chunk-level stderr reads are **mandatory, not
 stylistic**: a hypothetical `read_line_stderr` inherits
 `handle_read_line_stdout`'s internal fill-loop, which blocks on `read(2)` and
 would reintroduce the cross-pipe deadlock `poll_any` exists to prevent. The
-runner accumulates chunks and frames SFTR records itself. Windows carries
-degraded-but-linking stubs for the five in
-`runtime/sfn/platform/process_windows.sfn` (fds → `-1`, chunk read → empty,
-`stderr_at_eof` → `true`, kill → `-1`), consistent with the module's
-`spawn_with_env` failure-sentinel posture.
+runner accumulates chunks and frames SFTR records itself. On Windows, three of
+these five became real when the async process-handle family landed (SFN-497):
+`handle_read_bytes_stderr` performs a genuine chunk read, `stderr_at_eof`
+reports true only after a real drain, and `handle_kill` terminates the child.
+The two fd accessors remain `-1` permanently — a Windows HANDLE is not a file
+descriptor — and `io.poll_any` is still unavailable there, so the
+`poll_any`-driven demux this section describes is POSIX-only. The Windows
+equivalent is to call the framed reads directly: they pump both pipes on every
+call, which is the deadlock-avoidance property `poll_any` buys on POSIX.
+Porting the runner to that path is tracked as SFN-499.
 
 **Self-hosting / seed-cut consequence** (supersedes the "no seed cut" claim in
 §5). Because the compiler's own runner does not yet call these builtins, the
