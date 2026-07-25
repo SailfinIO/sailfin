@@ -13,21 +13,20 @@ import { number_to_string } from "./main";
 import { substring } from "./string_utils";
 
 // Resolve the per-build job count for parallel subprocess emits.
-// Reads `SAILFIN_BUILD_JOBS` first; falls back to `nproc` (clamped
-// to [1, 8] for system-memory safety — each worker subprocess
-// holds its own arena + parser state, so 8 workers × ~500 MB ≈
-// 4 GB peak total memory across the parent + worker processes,
-// keeping us under the compiler's self-applied 8 GiB memory budget
-// even when the parent's own resolver state is at peak; each worker
-// inherits that RLIMIT_AS). Returns 1 on any read failure or
-// when nproc isn't on PATH, which keeps the legacy serial
-// behavior as the safe default.
+// Reads `SAILFIN_BUILD_JOBS` first, then a per-host probe ladder
+// (`_cr_host_cpu_count` / `_cr_host_memsize_bytes`), clamped to [1, 8]
+// for system-memory safety — each worker subprocess holds its own
+// arena + parser state, so 8 workers × ~500 MB ≈ 4 GB peak total
+// memory across the parent + worker processes, keeping us under the
+// compiler's self-applied 8 GiB memory budget even when the parent's
+// own resolver state is at peak; each worker inherits that RLIMIT_AS.
+// Every probe degrades to 0, which `_cr_jobs_from_probe` floors to 1,
+// so an unmeasurable host keeps the legacy serial behavior.
 //
-// Stage E PR3: `_cr_run_parallel_emit` honours this. The architect's
-// plan is to default to `nproc`, with `SAILFIN_BUILD_JOBS=1`
-// available as a regression-bisect escape hatch (mirrors the
-// `BUILD_JOBS=1` knob the prior `scripts/build.sh` historically
-// exposed; the script was retired in Stage E PR7 / #383).
+// `SAILFIN_BUILD_JOBS=1` is the regression-bisect escape hatch and is
+// honoured on every host (mirrors the `BUILD_JOBS=1` knob the prior
+// `scripts/build.sh` historically exposed; the script was retired in
+// Stage E PR7 / #383).
 fn _cr_resolve_jobs() -> int ![io] {
     // SAILFIN_BUILD_JOBS is read FIRST on every host, before any host
     // branch, so `=1` forces serial even on Windows (SFN-498) — the
@@ -53,19 +52,34 @@ fn _cr_jobs_from_probe(raw_nproc: int, memsize_bytes: int) -> int {
     return _cr_ram_budget_jobs(memsize_bytes, nproc);
 }
 
-// Per-host CPU-count probe ladder. Windows has no `nproc`/`sysctl`, so
-// it reads `NUMBER_OF_PROCESSORS` directly; Darwin has no
-// `/proc`, so it shells `sysctl -n hw.ncpu`; Linux prefers the
-// `/sys/devices/system/cpu/online` range (accounts for offline/hotplugged
-// CPUs, which a bare `/proc/cpuinfo` count does not) and falls back to
-// counting `processor` lines in `/proc/cpuinfo` when the sysfs path is
-// unavailable (e.g. some containers).
+// Per-host CPU-count probe ladder, all argv or file reads — no shell.
+// Windows has no `nproc`/`sysctl`, so it reads `NUMBER_OF_PROCESSORS`;
+// Darwin has no `/proc`, so it execs `sysctl -n hw.ncpu` by absolute
+// path (argv, empty environment — no PATH lookup and no `sh`).
+//
+// Linux tries `nproc` first because it is the only rung that honours
+// the process's CPU affinity mask (`sched_getaffinity`): the sysfs and
+// `/proc/cpuinfo` rungs below report the HOST's CPUs, so on a runner
+// pinned to a subset they would over-report and over-fan. That parity
+// with the pre-SFN-498 `nproc` probe is the reason to pay one
+// subprocess per build. The remaining rungs cover images without
+// coreutils: `/sys/devices/system/cpu/online` accounts for
+// offline/hotplugged CPUs, which a bare `/proc/cpuinfo` count does not.
+//
+// A cgroup CPU *quota* (`cpu.max`, i.e. `docker --cpus`) is still not
+// reflected by any rung; the RAM clamp in `_cr_host_memsize_bytes` is
+// what bounds fan-out under a container limit.
 fn _cr_host_cpu_count(host: string) -> int ![io] {
     if host == "Windows" {
         return _cr_parse_positive_int(env.get("NUMBER_OF_PROCESSORS"));
     }
     if host == "Darwin" {
         return _cr_capture_int(["/usr/sbin/sysctl", "-n", "hw.ncpu"]);
+    }
+    let nproc_bin = "/usr/bin/nproc";
+    if fs.exists(nproc_bin) {
+        let affinity_aware = _cr_capture_int([nproc_bin]);
+        if affinity_aware > 0 { return affinity_aware; }
     }
     let online = "/sys/devices/system/cpu/online";
     if fs.exists(online) {
@@ -79,20 +93,52 @@ fn _cr_host_cpu_count(host: string) -> int ![io] {
     return 0;
 }
 
-// Per-host RAM-size probe ladder feeding `_cr_ram_budget_jobs`. Windows
-// returns 0 — a deliberate fail-open, since `_cr_ram_budget_jobs(0, n)`
-// returns `n` unchanged (Windows is serial-only regardless via
-// `_mktemp_sibling_cmd`'s Windows degrade, so the RAM clamp is moot
-// there). Darwin shells `sysctl -n hw.memsize`; Linux reads
-// `/proc/meminfo`.
+// Per-host RAM-size probe ladder feeding `_cr_ram_budget_jobs`.
+//
+// Windows reports a conservative ASSUMED figure rather than a probed
+// one. There is no Win32-free way to read physical RAM
+// (`GlobalMemoryStatusEx` needs a runtime extern), and Windows is the
+// one host with no other backpressure at all: `RLIMIT_AS` is a Linux-only
+// no-op elsewhere (`runtime/sfn/platform/rlimit.sfn`), so an unclamped
+// fan-out there would be ~3.23 GiB per emit child against nothing. A
+// fail-open 0 would hand an 8-core box 8 concurrent children (~26 GiB).
+// 16 GiB matches the `windows-latest` runner and yields 3 jobs on a
+// 4-core host — the same count a comparably-sized Linux box resolves to.
+// It under-fans a large Windows workstation; `SAILFIN_BUILD_JOBS` is the
+// lever, and a real probe retires the assumption.
+//
+// Darwin execs `sysctl -n hw.memsize` by argv (no shell). This is the
+// ONLY emit backpressure on Darwin, since `RLIMIT_AS` is a no-op there:
+// 8 uncapped concurrent emits OOM a ~7 GiB CI runner (#1532).
+//
+// Linux reads `/proc/meminfo`, but takes the cgroup v2 `memory.max`
+// limit when it is lower — `/proc/meminfo` reports the HOST's memory, so
+// inside a memory-limited container it over-reports and the clamp would
+// not bind, which is the #1245 OOM class.
 fn _cr_host_memsize_bytes(host: string) -> int ![io] {
-    if host == "Windows" { return 0; }
+    if host == "Windows" { return 17179869184; }
     if host == "Darwin" {
         return _cr_capture_int(["/usr/sbin/sysctl", "-n", "hw.memsize"]);
     }
     let meminfo = "/proc/meminfo";
     if !fs.exists(meminfo) { return 0; }
-    return _cr_parse_meminfo_bytes(fs.readFile(meminfo));
+    let host_bytes = _cr_parse_meminfo_bytes(fs.readFile(meminfo));
+    let cgroup_bytes = _cr_cgroup_memory_limit();
+    if cgroup_bytes > 0 {
+        if host_bytes <= 0 { return cgroup_bytes; }
+        if cgroup_bytes < host_bytes { return cgroup_bytes; }
+    }
+    return host_bytes;
+}
+
+// The cgroup v2 memory ceiling in bytes, or 0 when unlimited/absent.
+// `/sys/fs/cgroup/memory.max` holds either a decimal byte count or the
+// literal `max`; the v1 path is deliberately not read, since every
+// runner this targets is v2-unified.
+fn _cr_cgroup_memory_limit() -> int ![io] {
+    let limit_path = "/sys/fs/cgroup/memory.max";
+    if !fs.exists(limit_path) { return 0; }
+    return _cr_parse_positive_int(fs.readFile(limit_path));
 }
 
 // Run `argv` with an empty environment and parse its captured stdout as
@@ -354,10 +400,20 @@ fn _cr_reap_emit_child(handle: int) -> int ![io] {
             let ready = io.poll_any(fds, -1);
             if ready < 0 {
                 // EINTR is transient, but a permanently failing poll must
-                // not busy-spin: bail to the reap after a bounded run of
-                // consecutive failures.
+                // not busy-spin: kill the child, then bail to the reap
+                // after a bounded run of consecutive failures. Killing
+                // first makes the escape deterministic — `handle_wait`
+                // closes the read ends before `waitpid`, so abandoning a
+                // still-live child here would instead have it die of
+                // SIGPIPE and report 141 for what may have been a healthy
+                // emit, or block `waitpid` behind output nothing will
+                // drain. `cli/commands/test.sfn`'s pool escapes its own
+                // deadline the same way.
                 poll_failures += 1;
-                if poll_failures > 64 { break; }
+                if poll_failures > 64 {
+                    process.handle_kill(handle);
+                    break;
+                }
                 continue;
             }
             poll_failures = 0;
@@ -455,7 +511,11 @@ fn _cr_emit_pool_round(tasks: ParallelEmitTask[], mode: string, sailfin_exe: str
         }
         if !ok {
             // Drop a failed attempt's temp so retry rounds do not
-            // accumulate `.sfn_stage.*` litter beside the output.
+            // accumulate `.sfn_stage.*` litter beside the output. This
+            // covers the failures that never reached the publish step; a
+            // failed `_atomic_rename_into_place` has already unlinked the
+            // temp itself (`build/fs.sfn`), so that path lands here as a
+            // harmless second unlink of an absent file.
             if tmp.length > 0 { fs.deleteFile(tmp); }
             failed.push(t);
         }

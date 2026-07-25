@@ -1365,8 +1365,14 @@ fn sfn_process_exec(argv: string[], env_flat: string[]) -> int ![io] {
 // Header layout mirrors the POSIX `sfn_process_environ`
 // (`runtime/sfn/process.sfn`): a malloc'd 24-byte `{ data@0, len@8,
 // cap@16 }` SfnArray header, filled via the shared `sfn_array_push_string`
-// helper, which copies each string into its own storage — so entries
-// copied out of the Win32 block stay valid after the block is freed.
+// helper. That helper stores the `char*` BY POINTER and does not copy
+// (`runtime/sfn/process.sfn:130`), so each entry must be duplicated into
+// its own allocation before it is pushed — exactly as the POSIX peer
+// does. The `malloc` + `memcpy` below is therefore load-bearing, not
+// redundant: dropping it would leave the returned array holding pointers
+// into the block that `FreeEnvironmentStringsA` releases, turning every
+// `process.environ()` call into a use-after-free of the whole
+// environment.
 //
 // The block is a run of NUL-terminated `"KEY=VALUE"` entries, terminated
 // by one extra NUL (two consecutive NUL bytes end the block). Entries
