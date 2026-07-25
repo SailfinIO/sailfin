@@ -47,6 +47,23 @@ test "string concat: numeric on the left stringifies too" {
     assert out == "3 items";
 }
 
+test "string concat: string local and parameter operands stringify" {
+    // Literals, locals and parameters all reach lowering as the `{i8*, i64}`
+    // aggregate, which is the shape the numeric-concat clause keys off.
+    let s = "n=";
+    let n = 42;
+    let out = s + n;
+    assert out == "n=42";
+}
+
+test "string concat: concatenated result is a usable string downstream" {
+    // Guards the produced aggregate's length field, not just its bytes: a
+    // malformed shape still compares equal byte-wise but reports a bad length.
+    let n = 42;
+    let out = "n=" + n;
+    assert out.length == 4;
+}
+
 test "string concat: result bound to a variable before use" {
     // Previously the specific shape that produced wrong output: assigning the
     // concat result to a variable, rather than passing it inline to a call.

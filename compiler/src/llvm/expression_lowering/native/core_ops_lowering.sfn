@@ -443,22 +443,37 @@ fn lower_binary_operation(expression: string, match: OperatorMatch, bindings: Pa
         if rhs_type == "i8*" { rhs_is_string_shape = true; }
         if rhs_type == "{i8*, i64}" { rhs_is_string_shape = true; }
 
-        // SFN-548: a numeric/bool operand opposite a string-shaped one is
-        // stringified rather than dropped. Before this, `should_concat`
-        // stayed false for `"n=" + n`, the pair fell through to
-        // `harmonise_operands`, and `dominant_type` picked `i64` over the
-        // string aggregate — an unsatisfiable coercion whose non-fatal
-        // diagnostic silently removed the enclosing call from the IR.
+        // SFN-548: a numeric/bool operand opposite a string is stringified
+        // rather than dropped. Before this, `should_concat` stayed false for
+        // `"n=" + n`, the pair fell through to `harmonise_operands`, and
+        // `dominant_type` picked `i64` over the string aggregate — an
+        // unsatisfiable coercion whose non-fatal diagnostic silently removed
+        // the enclosing call from the IR.
+        //
+        // This clause keys off the `{i8*, i64}` aggregate rather than the
+        // wider "string shape", which also covers bare `i8*`. That
+        // distinction is load-bearing: `i8*` is what `*u8`, `*opaque`, and
+        // unresolved types all lower to, so admitting it here would turn
+        // `buf + n` pointer arithmetic into a string concat that calls
+        // `strlen` on a raw, non-NUL-terminated buffer. Strings reach this
+        // path as the aggregate — literals, locals, and parameters alike —
+        // so keying off it costs no real concat shape.
+        let lhs_is_string_aggregate = lhs_type == "{i8*, i64}";
+        let rhs_is_string_aggregate = rhs_type == "{i8*, i64}";
         let lhs_is_stringifiable = _is_stringifiable_numeric(lhs_type);
         let rhs_is_stringifiable = _is_stringifiable_numeric(rhs_type);
 
         let mut should_concat: boolean = false;
         if lhs_is_string_shape {
             if rhs_is_string_or_byte { should_concat = true; }
-            if rhs_is_stringifiable { should_concat = true; }
         }
         if rhs_is_string_shape {
             if lhs_is_string_or_byte { should_concat = true; }
+        }
+        if lhs_is_string_aggregate {
+            if rhs_is_stringifiable { should_concat = true; }
+        }
+        if rhs_is_string_aggregate {
             if lhs_is_stringifiable { should_concat = true; }
         }
         if lhs_type == "i8" {
@@ -469,12 +484,10 @@ fn lower_binary_operation(expression: string, match: OperatorMatch, bindings: Pa
             let mut current_lines = right_result.lines;
             let mut current_temp = right_result.temp_index;
 
-            // Step 1: ensure both sides are at least `i8*`. For aggregate
-            // operands this is a no-op shim (extract data ptr); for byte
-            // (i8) operands it routes through the existing numeric-to-
-            // string path. Skip the i8* round-trip for already-aggregate
-            // operands so we don't pay the unnecessary extract.
-            // Only pointer- and byte-shaped operands take the `i8*` hop.
+            // Step 1: bring pointer- and byte-shaped operands up to `i8*`
+            // before the aggregate lift below. Byte (i8) operands go
+            // through the char-boxing arm in `core_operands.sfn`, not the
+            // numeric-stringify path.
             // `coerce_operand_to_type` stringifies numerics into the
             // aggregate directly but has no `i64 -> i8*` arm, so routing
             // them through step 1 would fail the coercion. `i8` keeps the
