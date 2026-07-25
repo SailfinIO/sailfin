@@ -254,6 +254,9 @@ Each stage is independently valuable and shippable. None requires a flag day.
   prerequisite that pays off regardless** — it also de-strings the LLVM path and
   gives the effect/ownership analyses a proper substrate. Likely the single most
   valuable piece of work in this whole arc even if Stage 3 never ships.
+  **Activation design: SFEP-0059**, which resolves how a deliberately partial IR
+  becomes load-bearing without destabilising self-hosting, and amends §9.4
+  (no conversion operation) and §9.5 (capability atoms had no producer input).
 - **Stage 2 — Own the assembler and object emission.** An x86-64 encoder plus an
   ELF writer, consuming **textual assembly** that LLVM's instruction selection
   produces (CI is Linux x86-64). Establishes the assembler/object-format muscle
@@ -283,7 +286,9 @@ Each stage is independently valuable and shippable. None requires a flag day.
   on LLVM.
 - **Stage 4 — Syscall layer + perf tail.** Two threads, now split by priority:
   (a) the **owned syscall layer (Axis 3)** to drop libc on tier-1 — **1.0-critical**
-  for the capability seal (#1641), not optional; (b) growing the native optimizer
+  for the capability seal (#1641), not optional. **Design: SFEP-0060**, which
+  establishes that only ~30 of the ~170 `extern fn` symbols are effect-bearing
+  kernel entries, so the chokepoint does not require reimplementing libc; (b) growing the native optimizer
   for the cases that matter, co-designed with the concurrency runtime (safepoints,
   stack maps, escape analysis feeding the arena allocator) — the **post-1.0** perf
   tail. LLVM becomes optional, then legacy.

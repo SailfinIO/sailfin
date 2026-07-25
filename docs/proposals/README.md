@@ -81,6 +81,8 @@ The next number is `max + 1`. Add a row in the same PR that introduces an SFEP.
 | [0056](./0056-aarch64-linux-target.md) | aarch64-Linux Target Support (Raspberry Pi Install + On-Device Self-Host) | Accepted | runtime |
 | [0057](./0057-string-interpolation-dollar.md) | String Interpolation with `${ }` (migrating off `{{ }}`) | Accepted | language |
 | [0058](./0058-sized-integer-types.md) | Sized Integer Types and Overflow Semantics | Accepted | language |
+| [0059](./0059-typed-ssa-activation.md) | Typed SSA Activation — Making the Metadata IR Load-Bearing | Accepted | tooling |
+| [0060](./0060-owned-syscall-layer.md) | The Owned Syscall Layer (Axis 3, tier-1 Linux x86-64) | Accepted | runtime |
 
 ## Drafts under review (numbers assigned at merge)
 
@@ -100,20 +102,14 @@ Index row. Two slates are in review.
 | [`draft-import-surface-compaction`](./draft-import-surface-compaction.md) | Import-surface compaction across the phase rewind to cut emit peak RSS | runtime |
 | [`draft-concurrency-cancellation`](./draft-concurrency-cancellation.md) | Concurrency runtime maturity — cancel-on-fault and async I/O | runtime |
 
-**Capability-seal critical path** — implementation designs under SFEP-0015
-(*what*) and SFEP-0016 (*why*), each answering a *how* neither parent specifies:
-
-| Draft | Title | Type |
-|---|---|---|
-| [`draft-typed-ssa-activation`](./draft-typed-ssa-activation.md) | Typed SSA Activation — Making the Metadata IR Load-Bearing | tooling |
-| [`draft-owned-syscall-layer`](./draft-owned-syscall-layer.md) | The Owned Syscall Layer (Axis 3, tier-1 Linux x86-64) | runtime |
-
-Both propose amendments to their parents rather than standing alone:
-`draft-typed-ssa-activation` §3.3–3.4 names two gaps in the normative SFEP-0015
-§9 contract (no conversion instruction; no producer input for capability
-atoms), and `draft-owned-syscall-layer` §2.2 names three holes SFEP-0016 §8's
-threat model does not currently cover (`getaddrinfo`, `popen`, and OpenSSL's
-own syscall paths). Review the parent amendments alongside each draft.
+The **capability-seal critical path** designs graduated out of this slate on
+2026-07-25 and now hold Index rows: SFEP-0059 (typed SSA activation) and
+SFEP-0060 (the owned syscall layer). Both are implementation designs under
+SFEP-0015 (*what*) and SFEP-0016 (*why*), and both amended their parents rather
+than standing alone — SFEP-0059 §3.3–3.4 closed two gaps in the normative
+SFEP-0015 §9 contract (no conversion instruction; no producer input for
+capability atoms), and SFEP-0060 §2.2 named three holes now recorded as
+SFEP-0016 §8.1 (`getaddrinfo`, `popen`, and OpenSSL's own syscall paths).
 
 SFEP-0038 (`0038-generic-constraints.md`, Implemented) is the root foundation:
 `draft-generic-collections`, `draft-derive`, and SFEP-0028 all depend on it. Draft diagnostic codes are

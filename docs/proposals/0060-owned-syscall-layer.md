@@ -1,18 +1,18 @@
 ---
-sfep: TBD
+sfep: 60
 title: The Owned Syscall Layer (Axis 3, tier-1 Linux x86-64)
-status: Draft
+status: Accepted
 type: runtime
 created: 2026-07-25
 updated: 2026-07-25
-author: "agent:compiler-architect; human review"
-tracking:
+author: "agent:compiler-architect; project owner (design gate 2026-07-25)"
+tracking: "SFN-510, SFN-513, SFN-515, SFN-516, SFN-518, SFN-520, SFN-521, SFN-522, SFN-523, SFN-524, SFN-525"
 supersedes:
 superseded-by:
 graduates-to: reference/runtime-abi.md
 ---
 
-# SFEP-XXXX — The Owned Syscall Layer (Axis 3, tier-1 Linux x86-64)
+# SFEP-0060 — The Owned Syscall Layer (Axis 3, tier-1 Linux x86-64)
 
 > Implementation design for SFEP-0015 §8 Stage 4(a) / Axis 3, and the
 > enforcement chokepoint SFEP-0016 §3 depends on. SFEP-0015 says *what*

@@ -238,7 +238,7 @@ this is implemented**). For the dream to be honest when it ships, it must state:
 ### 8.1 Named un-gated paths in the current tree (added 2026-07-25)
 
 The "direct syscall instructions" bullet above is abstract. Surveying the ~170
-`extern fn` runtime surface (`draft-owned-syscall-layer` §2.2) turned up three
+`extern fn` runtime surface (SFEP-0060 §2.2) turned up three
 *concrete* paths in the tree today, each of which defeats the seal by a
 different mechanism. They are recorded here because each bounds what the seal
 may honestly claim, and none was previously named.

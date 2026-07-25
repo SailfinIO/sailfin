@@ -1,18 +1,18 @@
 ---
-sfep: TBD
+sfep: 59
 title: Typed SSA Activation — Making the Metadata IR Load-Bearing
-status: Draft
+status: Accepted
 type: tooling
 created: 2026-07-25
 updated: 2026-07-25
-author: "agent:compiler-architect; human review"
-tracking:
+author: "agent:compiler-architect; project owner (design gate 2026-07-25)"
+tracking: "SFN-508, SFN-509, SFN-511, SFN-512, SFN-514, SFN-517, SFN-519"
 supersedes:
 superseded-by:
 graduates-to:
 ---
 
-# SFEP-XXXX — Typed SSA Activation
+# SFEP-0059 — Typed SSA Activation
 
 ## 1. Summary
 
