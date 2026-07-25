@@ -1,0 +1,365 @@
+// capsules/sfn/crypto/src/x25519.sfn
+//
+// X25519 (Curve25519 ECDH, RFC 7748) — the TLS 1.3 key-exchange primitive.
+// Implemented over a 16-limb x 16-bit field representation (the TweetNaCl `gf`
+// layout, 2^256 = 38 mod p) so that every intermediate of the schoolbook
+// multiply stays far inside signed i64 without a native widening multiply,
+// unsigned semantics, or a logical right shift. The worst-case intermediate
+// across the whole scalar multiplication is 2^45.80 — 16.2 bits of headroom
+// below 2^62. Margin arithmetic, the ashr audit, and the constant-time
+// argument are in docs/proposals/design-notes/sfn-335-x25519-limb-strategy.md.
+//
+// Every constant is decimal: hex literals are unavailable in Sailfin source
+// (SFEP-0048 §3.3 item 7).
+// The 16-bit limb mask, 2^16 - 1. Named apart from poly1305's `_limb_mask`
+// (2^26 - 1): the two modules are co-linked into every binary that depends on
+// this capsule, and while module-slug mangling keeps them distinct symbols, a
+// shared name for two different constants is a hazard when reading across the
+// capsule.
+fn _gf_limb_mask() -> int { return 65535; }
+
+// 2^256 = 38 mod (2^255 - 19). Folds the high half of a schoolbook product
+// back into the low 16 limbs.
+fn _reduce_mul() -> int { return 38; }
+
+fn _gf_zero() -> int[] {
+    return [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+}
+
+fn _gf_one() -> int[] {
+    return [1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+}
+
+// The Montgomery ladder's (A - 2) / 4 constant, 121665 = 1 * 65536 + 56129.
+fn _gf_121665() -> int[] {
+    return [56129, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+}
+
+// 4p limbwise, for p = 2^255 - 19 whose limbs are [65517, 65535 x14, 32767].
+// Limbwise doubling is exact without carrying, so the represented value is
+// exactly 4p, which is 0 mod p. `_fsub` adds this bias so every output limb is
+// provably non-negative unconditionally: o_i >= 131068 - 65535 = 65533 > 0,
+// with no sign test and no branch. 2p does not work — its limb 15 is 65534,
+// one short of the largest possible subtrahend limb (design note §3.1).
+fn _four_p() -> int[] {
+    return [262068, 262140, 262140, 262140, 262140, 262140, 262140, 262140, 262140, 262140, 262140, 262140, 262140, 262140, 262140, 131068];
+}
+
+fn _gf_copy(a: int[]) -> int[] {
+    let mut o: int[] = [];
+    let mut i: int = 0;
+    loop {
+        if i >= 16 { break; }
+        o.push(a[i]);
+        i += 1;
+    }
+    return o;
+}
+
+// C-form x C-form -> L-form. Componentwise, so `o` may alias `a` or `b`.
+fn _fadd(o: int[], a: int[], b: int[]) -> void {
+    let mut i: int = 0;
+    loop {
+        if i >= 16 { break; }
+        o[i] = a[i] + b[i];
+        i += 1;
+    }
+}
+
+// C-form x C-form -> L-form. Componentwise, so `o` may alias `a` or `b`.
+fn _fsub(o: int[], a: int[], b: int[]) -> void {
+    let bias: int[] = _four_p();
+    let mut i: int = 0;
+    loop {
+        if i >= 16 { break; }
+        o[i] = a[i] + bias[i] - b[i];
+        i += 1;
+    }
+}
+
+// One carry pass, wrapping the top limb's carry into limb 0 scaled by 38.
+// Precondition: every limb entering the pass is non-negative. That is the
+// caller's contract — it holds in `_fmul`, where the limbs are products and
+// 38x products of non-negative limbs, and in `_pack25519`, where the input is
+// a C-form field element. It is what makes `>> 16` a shift of a non-negative
+// value, so `ashr` behaves as the logical shift the algorithm needs.
+// Non-negativity is preserved across the pass by induction (design note §3.4).
+fn _carry(o: int[]) -> void {
+    let mut i: int = 0;
+    loop {
+        if i >= 16 { break; }
+        let c: int = o[i] >> 16;
+        o[i] = o[i] & _gf_limb_mask();
+        if i == 15 { o[0] = o[0] + _reduce_mul() * c; } else {
+            o[i + 1] = o[i + 1] + c;
+        }
+        i += 1;
+    }
+}
+
+// L-form x L-form -> C-form.
+fn _fmul(o: int[], a: int[], b: int[]) -> void {
+    // Accumulate into a fresh local `t`, never into `o`, and write `o` once at
+    // the very end. The ladder relies on this: it calls `_fmul(a, c, a)` and
+    // `_fsqr(c, c)`, where the output aliases an input. Accumulating directly
+    // into `o` would corrupt the operand mid-multiply. Do not "optimize" this.
+    let mut t: int[] = [];
+    let mut z: int = 0;
+    loop {
+        if z >= 31 { break; }
+        t.push(0);
+        z += 1;
+    }
+
+    let mut i: int = 0;
+    loop {
+        if i >= 16 { break; }
+        let mut j: int = 0;
+        loop {
+            if j >= 16 { break; }
+            t[i + j] = t[i + j] + a[i] * b[j];
+            j += 1;
+        }
+        i += 1;
+    }
+
+    // Fold the high 15 columns down: 2^256 = 38 mod p.
+    let mut f: int = 0;
+    loop {
+        if f >= 15 { break; }
+        t[f] = t[f] + _reduce_mul() * t[f + 16];
+        f += 1;
+    }
+
+    let mut w: int = 0;
+    loop {
+        if w >= 16 { break; }
+        o[w] = t[w];
+        w += 1;
+    }
+
+    // Three passes provably yield C-form (every limb strictly below 2^16).
+    // TweetNaCl runs two and lives with limb 0 up to 2^16 + 37, which violates
+    // the hard `< 2^16` bound `_fsub`'s bias argument is stated in terms of.
+    // That argument's conclusion still survives at 2^16 + 37 — the bias leaves
+    // limb 0 at 262068 - 65573 = 196495 > 0, comfortably in L-form — so the
+    // third pass is a margin, not a soundness fix: it keeps the precondition
+    // true as written rather than as re-derived (design note §3.4).
+    _carry(o);
+    _carry(o);
+    _carry(o);
+}
+
+fn _fsqr(o: int[], a: int[]) -> void { _fmul(o, a, a); }
+
+// Constant-time conditional exchange for a secret bit `b` in {0, 1}.
+fn _cswap(p: int[], q: int[], b: int) -> void {
+    // `0 - b` is 0 or -1 (all ones) — the branch-free masked-select idiom
+    // SFN-331 shipped in poly1305 finalize, and the reason no `~` operator is
+    // needed. `c` is negative when b == 1, but it is only ever an operand of
+    // `&`, never of a shift, so its sign is irrelevant. Both arrays are written
+    // on every iteration regardless of `b`, so there is no data-dependent
+    // memory-write pattern.
+    let c: int = 0 - b;
+    let mut i: int = 0;
+    loop {
+        if i >= 16 { break; }
+        let t: int = c & (p[i] ^ q[i]);
+        p[i] = p[i] ^ t;
+        q[i] = q[i] ^ t;
+        i += 1;
+    }
+}
+
+// o = z^(p - 2) = z^(2^255 - 21), the multiplicative inverse mod p.
+fn _finv(o: int[], z: int[]) -> void {
+    // The fixed TweetNaCl addition chain: 254 squarings, multiplying by `z` on
+    // every step except a == 2 and a == 4. The exponent p - 2 is a public
+    // constant and the test is on the loop counter, not on data, so the
+    // iteration count and timing are input-independent (design note §3.6).
+    let mut c: int[] = _gf_copy(z);
+    let mut a: int = 253;
+    loop {
+        if a < 0 { break; }
+        _fsqr(c, c);
+        if a != 2 && a != 4 { _fmul(c, c, z); }
+        a -= 1;
+    }
+    let mut i: int = 0;
+    loop {
+        if i >= 16 { break; }
+        o[i] = c[i];
+        i += 1;
+    }
+}
+
+// 32 little-endian bytes -> C-form field element.
+fn _unpack25519(n: int[]) -> int[] {
+    let mut o: int[] = [];
+    let mut i: int = 0;
+    loop {
+        if i >= 16 { break; }
+        o.push((n[2 * i] & 255) + ((n[2 * i + 1] & 255) << 8));
+        i += 1;
+    }
+    // RFC 7748 §5 requires receivers to mask off the most significant bit of
+    // the final byte of the u-coordinate.
+    o[15] = o[15] & 32767;
+    return o;
+}
+
+// C-form field element -> 32 little-endian bytes, fully reduced mod p.
+fn _pack25519(n: int[]) -> int[] {
+    let mut t: int[] = _gf_copy(n);
+    _carry(t);
+    _carry(t);
+    _carry(t);
+
+    // Two rounds of the conditional subtraction of p. One round is not enough:
+    // a carried input can be as large as 2^256 = 2p + 38, so a single
+    // conditional subtraction can leave a value in [p, 2p) unreduced.
+    let mut round: int = 0;
+    loop {
+        if round >= 2 { break; }
+        let mut m: int[] = _gf_zero();
+        m[0] = t[0] - 65517;
+        let mut i: int = 1;
+        loop {
+            if i >= 15 { break; }
+            // `(m[i - 1] >> 16) & 1` is the borrow out of the previous limb.
+            // This is the one sign-bearing shift in the module: the operand is
+            // in [-2^16, 2^16], where `>> 16` is -1 when negative and 0
+            // otherwise, and the `& 1` makes the extraction correct under
+            // `ashr` and under a logical shift alike (design note §3.7).
+            m[i] = t[i] - 65535 - ((m[i - 1] >> 16) & 1);
+            m[i - 1] = m[i - 1] & _gf_limb_mask();
+            i += 1;
+        }
+        m[15] = t[15] - 32767 - ((m[14] >> 16) & 1);
+        let b: int = (m[15] >> 16) & 1;
+        m[14] = m[14] & _gf_limb_mask();
+        // b == 1 means the subtraction borrowed, so t was already below p and
+        // must be kept; b == 0 means t >= p, so take the reduced m. The select
+        // is the same masked exchange as the ladder's, so the reduction is
+        // branch-free even though it is value-dependent.
+        _cswap(t, m, 1 - b);
+        round += 1;
+    }
+
+    let mut o: int[] = [];
+    let mut j: int = 0;
+    loop {
+        if j >= 16 { break; }
+        o.push(t[j] & 255);
+        o.push((t[j] >> 8) & 255);
+        j += 1;
+    }
+    return o;
+}
+
+fn x25519(scalar: int[], u: int[]) -> int[] {
+    // Compute the RFC 7748 §5 X25519 function: the u-coordinate of the scalar
+    // multiple of the point with u-coordinate `u`. Both inputs are 32 little-
+    // endian bytes and the result is 32 little-endian bytes; a wrong-length
+    // input yields [] (the fail-closed sentinel `poly1305_mac` also uses).
+    //
+    // Usage:
+    //   let shared = x25519(my_private_key, their_public_key);
+    //   if x25519_is_zero(shared) { /* abort the handshake */ }
+    let empty: int[] = [];
+    if scalar.length != 32 { return empty; }
+    if u.length != 32 { return empty; }
+
+    // Clamp per RFC 7748 §5 on a copy — never mutate the caller's scalar.
+    let mut z: int[] = [];
+    let mut ci: int = 0;
+    loop {
+        if ci >= 32 { break; }
+        z.push(scalar[ci] & 255);
+        ci += 1;
+    }
+    z[0] = z[0] & 248;
+    z[31] = (z[31] & 127) | 64;
+
+    let x: int[] = _unpack25519(u);
+    let mut a: int[] = _gf_one();
+    let mut b: int[] = _gf_copy(x);
+    let mut c: int[] = _gf_zero();
+    let mut d: int[] = _gf_one();
+    let mut e: int[] = _gf_zero();
+    let mut f: int[] = _gf_zero();
+
+    let mut i: int = 254;
+    loop {
+        if i < 0 { break; }
+        // The scalar bit index `i >> 3` and shift amount `i & 7` are functions
+        // of the public loop counter alone. Only the resulting value `r` is
+        // secret, and it reaches control flow solely through the masked
+        // `_cswap`. The body below is the identical straight-line sequence on
+        // every one of the 255 iterations — no secret-dependent branch and no
+        // secret-dependent array index (design note §4).
+        let r: int = (z[i >> 3] >> (i & 7)) & 1;
+        _cswap(a, b, r);
+        _cswap(c, d, r);
+        _fadd(e, a, c);
+        _fsub(a, a, c);
+        _fadd(c, b, d);
+        _fsub(b, b, d);
+        _fsqr(d, e);
+        _fsqr(f, a);
+        _fmul(a, c, a);
+        _fmul(c, b, e);
+        _fadd(e, a, c);
+        _fsub(a, a, c);
+        _fsqr(b, a);
+        _fsub(c, d, f);
+        _fmul(a, c, _gf_121665());
+        _fadd(a, a, d);
+        _fmul(c, c, a);
+        _fmul(a, d, f);
+        _fmul(d, b, x);
+        _fsqr(b, e);
+        _cswap(a, b, r);
+        _cswap(c, d, r);
+        i -= 1;
+    }
+
+    let mut zinv: int[] = _gf_zero();
+    _finv(zinv, c);
+    _fmul(a, a, zinv);
+    return _pack25519(a);
+}
+
+fn x25519_base(scalar: int[]) -> int[] {
+    // The RFC 7748 §5 key-generation path: the scalar multiple of the
+    // basepoint, whose u-coordinate is 9.
+    let mut u: int[] = [];
+    u.push(9);
+    let mut i: int = 1;
+    loop {
+        if i >= 32 { break; }
+        u.push(0);
+        i += 1;
+    }
+    return x25519(scalar, u);
+}
+
+fn x25519_is_zero(shared: int[]) -> bool {
+    // RFC 8446 §7.4.2 requires a TLS 1.3 handshake to abort when the X25519
+    // shared secret is all zero, which is what a low-order input point yields.
+    // Constant-time: the accumulator is OR-folded over all 32 bytes with no
+    // early exit. A wrong-length input reads as zero — the fail-closed
+    // direction, so the [] returned by a rejected `x25519` call also aborts the
+    // handshake rather than passing the check.
+    if shared.length != 32 { return true; }
+    let mut acc: int = 0;
+    let mut i: int = 0;
+    loop {
+        if i >= 32 { break; }
+        acc = acc | (shared[i] & 255);
+        i += 1;
+    }
+    return acc == 0;
+}
+
+export { x25519, x25519_base, x25519_is_zero };
