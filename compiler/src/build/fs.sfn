@@ -91,8 +91,16 @@ fn _dirname_cmd(path: string) -> string {
 // metacharacters is no longer a quoting or injection concern.
 fn _mktemp_from_template_cmd(template: string) -> string ![io] {
     // A Windows host has no POSIX `mkstemp`; return "" so the caller
-    // degrades. Race-free there because a Windows host emits serially
-    // (`_cr_resolve_jobs` → 1).
+    // degrades to a direct, non-atomic in-place write. Safe under the
+    // concurrent emit fan-out — which SFN-498 made real on Windows too
+    // — because each emit task owns a distinct output path and no peer
+    // child reads another's in-flight output: the `native` round passes
+    // no `--import-context`, and the `llvm` round's context root is the
+    // already-complete `native` stage output. What the degrade gives up
+    // is crash atomicity: a build killed mid-emit leaves a truncated
+    // artifact, which the next build treats as a cache miss (the
+    // source-hash sidecar / cache key is written only after a
+    // successful emit).
     if host_is_windows() { return ""; }
     let n: i64 = template.length as i64;
     let buf: *u8 = calloc((n + 1) as usize, 1 as usize);

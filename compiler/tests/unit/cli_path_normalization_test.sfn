@@ -201,12 +201,11 @@ test "atomic-publish: temp name is template-length and unique per call" ![io] {
     process.run(["rm", "-rf", scratch]);
 }
 
-// `_mktemp_from_template_cmd` is the libc `mkstemp` primitive both
-// staging mints now share: `_mktemp_sibling_cmd` wraps it for the
-// sibling case, and the parallel emit path calls it directly for its
-// `/tmp` scratch files (SFN-506). The assertions above hold for a
-// shell `mktemp` too, so they cannot tell the two implementations
-// apart — these pin the libc contract itself.
+// `_mktemp_from_template_cmd` is the libc `mkstemp` primitive the
+// staging mint is built on: `_mktemp_sibling_cmd` wraps it for the
+// sibling case every emit publish uses (SFN-506). The assertions above
+// hold for a shell `mktemp` too, so they cannot tell the two
+// implementations apart — these pin the libc contract itself.
 test "temp-mint: explicit template yields an exact-length unique file" ![io] {
     let scratch = "/tmp/sfn_mktemp_template_test";
     process.run(["rm", "-rf", scratch]);

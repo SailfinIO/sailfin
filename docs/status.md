@@ -151,7 +151,10 @@ here.
   (#873). Test lowering retains imported free-function signatures for direct
   and aliased calls, including struct-returning capsule APIs such as
   `sfn/tensor`, and does not synthesize scalar helpers over imported symbols
-  (SFN-436).
+  (SFN-436). Lowering fails closed with `E1001` when an imported local name
+  collides with a function defined in the importing module, or when the import
+  set exceeds the mangling safety bound, rather than dropping the affected
+  rewrite and emitting a binary with the wrong symbol (SFN-530).
 - **Workspace default targets.** At a workspace root, bare `sfn build` and
   `sfn test` fan out over `[workspace].default-members`; when the field is
   absent they target every member. Each member has distinguishable output and
