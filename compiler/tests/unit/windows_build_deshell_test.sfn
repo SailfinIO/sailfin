@@ -17,33 +17,72 @@ import { _mktemp_sibling_cmd, _sha256_of_file_cmd } from "../../src/build/fs";
 import { _openssl_link_search_flags } from "../../src/build/runtime_objs";
 import { host_is_windows } from "../../src/build/target";
 import { CacheKey, cache_touch_entry } from "../../src/build_cache";
-import { _cr_resolve_jobs } from "../../src/capsule_emit_parallel";
+import { _cr_jobs_from_probe, _cr_resolve_jobs } from "../../src/capsule_emit_parallel";
 
+// SFN-498 adds a second env seam to the same file: `SAILFIN_BUILD_JOBS` is
+// now read ahead of every host branch, so `=1` forces the serial emit path
+// on Windows too. Run with `SAILFIN_BUILD_JOBS=1` (with and without
+// `SAILFIN_HOST_OS=Windows`) to exercise it.
 test "windows-deshell: leaf helpers degrade without a POSIX subprocess" ![io] {
     if host_is_windows() {
         // SAILFIN_HOST_OS=Windows (or a real Windows host): every guarded
         // helper returns its graceful-degradation value and spawns no
         // POSIX subprocess (AC-2).
         //
-        // mktemp → "" so the emit consumer takes the non-atomic in-place
-        // write (race-free because Windows emits serially).
+        // mktemp -> "" so the emit consumer takes the non-atomic in-place
+        // write. Safe under the concurrent fan-out (SFN-498): each emit
+        // task owns a distinct output path and no peer child reads
+        // another's in-flight output.
         assert _mktemp_sibling_cmd("build/sailfin/capsules/x.ll") == "";
         // sha256 subprocess hasher → "" ("no hasher" contract); the
         // in-process `_sha256_of_text_file` path keeps caching real.
         assert _sha256_of_file_cmd("build/bin/sfn") == "";
-        // job sizing → serial 1 (no `nproc`/`sysctl`), returned before any
-        // shell probe and ahead of the `SAILFIN_BUILD_JOBS` read.
-        assert _cr_resolve_jobs() == 1;
+        // Job sizing now returns a real core-derived count on a Windows
+        // host (SFN-498): `NUMBER_OF_PROCESSORS` replaces the POSIX
+        // `nproc`/`sysctl` probe, so the fan-out is native and shell-free
+        // rather than forced serial. The concrete count depends on the
+        // runner (and is 1 when the var is absent, as it is on a Linux box
+        // running this with SAILFIN_HOST_OS=Windows), so the host-probing
+        // entry point can only be asserted in range.
+        let win_jobs = _cr_resolve_jobs();
+        assert win_jobs >= 1;
+        assert win_jobs <= 8;
+        // AC4 proper — "> 1 on a multi-core Windows host" — is a claim about
+        // the ladder's POLICY, which is deterministic and host-independent,
+        // so it is asserted against the pure clamp rather than the live
+        // probe. A Windows host reports the assumed 16 GiB
+        // `_cr_host_memsize_bytes` returns (no Win32-free RAM probe
+        // exists), which on 4 cores budgets 3 concurrent emits — fanned
+        // out, not serial, and clamped rather than unbounded.
+        assert _cr_jobs_from_probe(4, 17179869184) == 3;
         // OpenSSL keg search is Darwin-only; a Windows host yields no `-L`.
         assert _openssl_link_search_flags().length == 0;
     } else {
         // POSIX host (the default suite): the guards take the else-branch,
-        // so the seam is wired and job sizing is a real positive count
-        // (proves `_cr_resolve_jobs` fell through to the `nproc` path
-        // rather than the Windows serial short-circuit). The byte-identical
-        // POSIX artifact guarantee (AC-3) is covered by `make compile` /
-        // `make check`, not this fast unit test.
+        // so the seam is wired and job sizing is a real positive count —
+        // proof that the shell-free probe ladder (`/sys/devices/system/cpu/
+        // online` or argv `sysctl -n hw.ncpu`) yielded a usable value. The
+        // byte-identical POSIX artifact guarantee (AC-3) is covered by
+        // `make compile` / `make check`, not this fast unit test.
         assert ! host_is_windows();
+        let posix_jobs = _cr_resolve_jobs();
+        assert posix_jobs >= 1;
+        assert posix_jobs <= 8;
+    }
+}
+
+// AC4 (SFN-498): the `SAILFIN_BUILD_JOBS` override is read BEFORE any host
+// branch, so `=1` forces the serial emit path on every host, Windows
+// included. Inverting the pre-SFN-498 order matters: the Windows leg used
+// to short-circuit to 1 ahead of this read, which made the override
+// unobservable there. There is no runtime `setenv`, so this is exercised by
+// running the file with the var set:
+//   SAILFIN_BUILD_JOBS=1 build/bin/sfn test <file>
+//   SAILFIN_HOST_OS=Windows SAILFIN_BUILD_JOBS=1 build/bin/sfn test <file>
+// Unset (the plain suite run) the assertion degrades to the range check.
+test "windows-deshell: SAILFIN_BUILD_JOBS=1 forces serial on every host" ![io] {
+    let override_value = env.get("SAILFIN_BUILD_JOBS");
+    if override_value == "1" { assert _cr_resolve_jobs() == 1; } else {
         assert _cr_resolve_jobs() >= 1;
     }
 }

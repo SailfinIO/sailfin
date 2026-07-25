@@ -31,7 +31,8 @@ test "ram budget: never raises above nproc" {
 }
 
 // Unknown / unprobed RAM (memsize <= 0) is fail-open: return nproc
-// unchanged so an undetectable host is never starved.
+// unchanged so an undetectable host is never starved. SFN-498 makes this
+// the NORMAL path on a Windows host, which has no Win32-free RAM probe.
 test "ram budget: zero memsize falls open to nproc" {
     assert _cr_ram_budget_jobs(0, 8) == 8;
 }
