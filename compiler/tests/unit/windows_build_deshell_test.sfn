@@ -16,6 +16,7 @@
 import { _mktemp_sibling_cmd, _sha256_of_file_cmd } from "../../src/build/fs";
 import { _openssl_link_search_flags } from "../../src/build/runtime_objs";
 import { host_is_windows } from "../../src/build/target";
+import { CacheKey, cache_touch_entry } from "../../src/build_cache";
 import { _cr_resolve_jobs } from "../../src/capsule_emit_parallel";
 
 test "windows-deshell: leaf helpers degrade without a POSIX subprocess" ![io] {
@@ -45,4 +46,32 @@ test "windows-deshell: leaf helpers degrade without a POSIX subprocess" ![io] {
         assert ! host_is_windows();
         assert _cr_resolve_jobs() >= 1;
     }
+}
+
+// The cache's LRU touch is the one shell-out SFN-490 gated rather than
+// replaced: a Windows host has no `touch`, and `_entry_mtime_epoch` —
+// the only reader of the mtime it maintains — is itself still
+// shell-bound, so no local consumer can observe the difference. Both
+// sides lift together with the deferred cache-GC de-shelling (SFN-494).
+// Host-agnostic by construction: POSIX takes the real `touch` and
+// Windows the gate, and both must report the same thing.
+test "windows-deshell: cache LRU touch succeeds on either host" ![io] {
+    let scratch = "/tmp/sfn_win_cache_touch_test";
+    process.run(["rm", "-rf", scratch]);
+    let root = scratch + "/cache/v1";
+    // `_is_valid_digest` demands exactly 64 lowercase hex chars, and it
+    // is checked ahead of everything else — a short digest never
+    // reaches the host gate at all.
+    let digest = "abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789";
+    let key = CacheKey { digest: digest };
+    process.run(["mkdir", "-p", root + "/ab/" + digest]);
+
+    assert cache_touch_entry(root, key);
+    // The Windows gate sits *after* the entry-existence check, so a
+    // missing entry stays a miss on both hosts rather than being
+    // masked into a success.
+    let absent = "0000000000000000000000000000000000000000000000000000000000000000";
+    assert ! cache_touch_entry(root, CacheKey { digest: absent });
+
+    process.run(["rm", "-rf", scratch]);
 }

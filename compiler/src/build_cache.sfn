@@ -71,8 +71,11 @@
 // environment; the pure `cache_root_from` underneath it takes every
 // input explicitly so the precedence order is unit-testable.
 import {
+    _atomic_rename_into_place,
+    _copy_file,
     _dirname_cmd,
     _ensure_dir_recursive_cmd,
+    _mktemp_sibling_cmd,
     _sanitize_filename_cmd,
     _sha256_of_file_cmd,
     _sha256_of_text_file,
@@ -81,6 +84,7 @@ import {
     _write_text_cmd
 } from "./build/fs";
 import { sha256_hex_of_string } from "./build/hash";
+import { host_is_windows } from "./build/target";
 import { _get_env_cmd } from "./build_flags";
 import { char_code_at_text, find_last_index_of_char, substring } from "./string_utils";
 
@@ -272,6 +276,13 @@ fn cache_touch_entry(root: string, key: CacheKey) -> boolean ![io] {
     if !_is_valid_digest(key.digest) { return false; }
     let dir = _cache_entry_dir(root, key);
     if !fs.exists(dir) { return false; }
+    // A Windows host has no `touch`. LRU freshness is advisory and the
+    // GC that *reads* this mtime (`cache_prune`) is itself still shell-
+    // bound, so it cannot run there either — report success rather than
+    // failing a restore over a recency hint no local reader consumes.
+    // Both sides lift together with the deferred cache-GC de-shelling
+    // (SFN-494); a `utimes` extern here alone would buy nothing.
+    if host_is_windows() { return true; }
     return process.run(["touch", dir]) == 0;
 }
 
@@ -705,10 +716,10 @@ fn cache_lookup_complete(root: string, key: CacheKey) -> boolean ![io] {
 // Atomic publish
 // ----------------------------------------------------------------
 // Copy `src` to a unique temp file in the *same directory* as
-// `dst`, then `mv` it into place. A rename within one filesystem is
-// atomic, so a concurrent reader (another parallel emit worker, or
-// the linker) observes `dst` as either absent or the complete file
-// — never a half-written artifact.
+// `dst`, then rename it into place. A rename within one filesystem
+// is atomic, so a concurrent reader (another parallel emit worker,
+// or the linker) observes `dst` as either absent or the complete
+// file — never a half-written artifact.
 //
 // Without this, the prior in-place `cp <src> <final-path>` let a
 // reader observe a truncated `mod.ll` / `ir.sfn-asm` while a peer
@@ -723,33 +734,24 @@ fn cache_lookup_complete(root: string, key: CacheKey) -> boolean ![io] {
 // `make test`.
 //
 // The temp lives beside `dst` (not `/tmp`) so the rename stays on
-// one filesystem; a cross-device `mv` would silently degrade to a
-// non-atomic copy. `mktemp PATTERN` with 6 trailing `X`s is
-// portable across GNU and BSD (matching `capsule_resolver.sfn`). If
-// `mktemp` fails the helper falls back to a direct in-place `cp` —
-// atomicity is lost but the build still produces the artifact.
+// one filesystem; a cross-device rename would fail outright. Both
+// the temp mint and the publish now share `build/fs.sfn`'s helpers
+// rather than the duplicate inline `mktemp`/`cp`/`mv` sequence this
+// once carried (SFN-490) — that duplicate was a distinct code path
+// that SFN-478's Windows-host work never reached. When no temp can
+// be minted the helper degrades to a direct in-place copy: atomicity
+// is lost but the build still produces the artifact.
 fn _cache_atomic_copy(src: string, dst: string) -> boolean ![io] {
-    let dst_dir = _dirname_cmd(dst);
-    // Shell-quote the template: `dst_dir` can derive from
-    // `$SAILFIN_BUILD_CACHE_DIR`, so a path containing `'` (or other
-    // shell metacharacters) would otherwise break quoting and create
-    // a command-injection surface. `cp`/`mv`/`rm` go through
-    // `process.run` (no shell) and need no quoting.
-    let template = _shell_single_quote_arg(dst_dir + "/.sfn_pub.XXXXXX");
-    let tmp = _shell_read_cmd("mktemp " + template + " 2>/dev/null");
+    let tmp = _mktemp_sibling_cmd(dst);
     if tmp.length == 0 {
-        // mktemp unavailable — degrade to a non-atomic direct copy.
-        return process.run(["cp", src, dst]) == 0;
+        // No temp available — degrade to a non-atomic direct copy.
+        return _copy_file(src, dst);
     }
-    if process.run(["cp", src, tmp]) != 0 {
-        process.run(["rm", "-f", tmp]);
+    if !_copy_file(src, tmp) {
+        fs.deleteFile(tmp);
         return false;
     }
-    if process.run(["mv", "-f", tmp, dst]) != 0 {
-        process.run(["rm", "-f", tmp]);
-        return false;
-    }
-    return true;
+    return _atomic_rename_into_place(tmp, dst);
 }
 
 // ----------------------------------------------------------------

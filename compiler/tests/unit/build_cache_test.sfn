@@ -655,13 +655,17 @@ test "build_cache: cache_copy_artifact_to creates dst dir on demand" ![io] {
 // Atomic publish (#1011 — cold-cache parallel-worker race)
 // --------------------------------------------------------------
 // `cache_store_artifact` / `cache_store` / `cache_copy_artifact_to`
-// publish via a temp file in the destination dir + `mv` (atomic
-// rename), so a concurrent reader never observes a half-written
-// artifact. The two guarantees a unit test can lock without a real
-// race are: (1) the published file is complete, and (2) no
-// `.sfn_pub.*` temp survives in the directory — a leftover temp
-// would be a partial sibling a reader could mistake for the real
-// artifact, which is exactly the corruption the rename prevents.
+// publish via a temp file in the destination dir + libc `rename(2)`,
+// so a concurrent reader never observes a half-written artifact. The
+// two guarantees a unit test can lock without a real race are: (1) the
+// published file is complete, and (2) no `.sfn_stage.*` temp survives
+// in the directory — a leftover temp would be a partial sibling a
+// reader could mistake for the real artifact, which is exactly the
+// corruption the rename prevents.
+//
+// The temp prefix is `_mktemp_sibling_cmd`'s and must stay in sync with
+// it: these greps went vacuously green once before, when SFN-490 moved
+// the cache off its own `.sfn_pub.*` template onto the shared helper.
 test "build_cache: cache_store_artifact publishes atomically, no temp residue" ![io] {
     let scratch = _test_tmp_root("artifact_atomic");
     let cache_root = scratch + "/cache/v1";
@@ -685,7 +689,7 @@ test "build_cache: cache_store_artifact publishes atomically, no temp residue" !
     // temp was renamed into place rather than left behind.
     let entry_dir = cache_root + "/66/" + key.digest;
     let residue = process.run(["sh", "-c", "ls -a '" + entry_dir
-        + "' | grep -q sfn_pub"]);
+        + "' | grep -q sfn_stage"]);
     assert residue != 0;
 
     _cleanup(scratch);
@@ -713,7 +717,7 @@ test "build_cache: cache_store publishes four artifacts with no temp residue" ![
 
     let entry_dir = cache_root + "/77/" + key.digest;
     let residue = process.run(["sh", "-c", "ls -a '" + entry_dir
-        + "' | grep -q sfn_pub"]);
+        + "' | grep -q sfn_stage"]);
     assert residue != 0;
 
     _cleanup(scratch);
