@@ -307,22 +307,23 @@ fn _clang_compile_runtime_capsule_objects(runtime_capsules: RuntimeCapsuleArtifa
                 // for the same `obj` concurrently. An in-place write let
                 // a torn `.o` reach `_runtime_obj_cache_record`'s `.key`
                 // sidecar as if it were complete.
+                // An empty temp is the documented no-shell degrade
+                // (SFN-478): write in place instead of aborting. Race-free
+                // on that path because such a host emits serially
+                // (`_cr_resolve_jobs` returns 1).
                 let obj_tmp = _mktemp_sibling_cmd(obj);
-                if obj_tmp.length == 0 {
-                    print("sfn build: failed to stage runtime c-source object "
-                        + obj);
-                    return _failed_runtime_link_inputs();
-                }
+                let mut obj_target = obj;
+                if obj_tmp.length > 0 { obj_target = obj_tmp; }
                 // Per-function/per-datum sections (in `assemble`) so the
                 // final link's dead-strip (`--gc-sections` / `-dead_strip`)
                 // can drop functions no consumer references (#1047).
-                let rc = llvm_assemble(src, obj_tmp, opt_flag, include_flags);
+                let rc = llvm_assemble(src, obj_target, opt_flag, include_flags);
                 if rc != 0 {
-                    process.run(["rm", "-f", obj_tmp]);
+                    if obj_tmp.length > 0 { fs.deleteFile(obj_tmp); }
                     print("sfn build: failed to compile runtime c-source " + src);
                     return _failed_runtime_link_inputs();
                 }
-                if !_atomic_rename_into_place(obj_tmp, obj) {
+                if obj_tmp.length > 0 && !_atomic_rename_into_place(obj_tmp, obj) {
                     print("sfn build: failed to stage runtime c-source object "
                         + obj);
                     return _failed_runtime_link_inputs();
@@ -360,19 +361,16 @@ fn _clang_compile_runtime_capsule_objects(runtime_capsules: RuntimeCapsuleArtifa
                 // matching c-source branch above for why the shared,
                 // best-effort prewarmed objdir needs this.
                 let obj_tmp = _mktemp_sibling_cmd(obj);
-                if obj_tmp.length == 0 {
-                    print("sfn build: failed to stage runtime ll-source object "
-                        + obj);
-                    return _failed_runtime_link_inputs();
-                }
-                let rc = llvm_assemble(src, obj_tmp, opt_flag, no_includes);
+                let mut obj_target = obj;
+                if obj_tmp.length > 0 { obj_target = obj_tmp; }
+                let rc = llvm_assemble(src, obj_target, opt_flag, no_includes);
                 if rc != 0 {
-                    process.run(["rm", "-f", obj_tmp]);
+                    if obj_tmp.length > 0 { fs.deleteFile(obj_tmp); }
                     print("sfn build: failed to assemble runtime ll-source "
                         + src);
                     return _failed_runtime_link_inputs();
                 }
-                if !_atomic_rename_into_place(obj_tmp, obj) {
+                if obj_tmp.length > 0 && !_atomic_rename_into_place(obj_tmp, obj) {
                     print("sfn build: failed to stage runtime ll-source object "
                         + obj);
                     return _failed_runtime_link_inputs();
@@ -720,41 +718,39 @@ fn _emit_runtime_sfn_to_obj(self_path: string, cap_prefix: string, src: string, 
     // two pool children in this cache-miss branch for the same source
     // concurrently. Emitting/assembling in place let a torn `.ll`/`.o`
     // reach `_runtime_obj_cache_record`'s `.key` sidecar as if complete.
+    // An empty temp is the documented no-shell degrade (SFN-478): emit
+    // and assemble directly into the destination rather than aborting.
     let ll_tmp = _mktemp_sibling_cmd(ll_path);
-    if ll_tmp.length == 0 {
-        print("sfn build: failed to stage runtime sfn-source ir " + ll_path);
-        return RuntimeEmitResult { obj_path: "", stats: stats };
-    }
-    let emit_argv: string[] = [self_path, "emit", "--module-name", slug, "--import-context", ctx_root, "-o", ll_tmp, "llvm", src];
+    let mut ll_target = ll_path;
+    if ll_tmp.length > 0 { ll_target = ll_tmp; }
+    let emit_argv: string[] = [self_path, "emit", "--module-name", slug, "--import-context", ctx_root, "-o", ll_target, "llvm", src];
     let rc = process.run_capture(emit_argv, _runtime_emit_child_env());
     _runtime_emit_captured_stream(process.capture_take_stdout(), false);
     _runtime_emit_captured_stream(process.capture_take_stderr(), true);
     if rc != 0 {
-        process.run(["rm", "-f", ll_tmp]);
+        if ll_tmp.length > 0 { fs.deleteFile(ll_tmp); }
         print("sfn build: failed to emit runtime sfn-source " + src
             + " (child exit="
             + number_to_string(rc)
             + ")");
         return RuntimeEmitResult { obj_path: "", stats: stats };
     }
-    if !_atomic_rename_into_place(ll_tmp, ll_path) {
+    if ll_tmp.length > 0 && !_atomic_rename_into_place(ll_tmp, ll_path) {
         print("sfn build: failed to stage runtime sfn-source ir " + ll_path);
         return RuntimeEmitResult { obj_path: "", stats: stats };
     }
     let no_includes: string[] = [];
     let obj_tmp = _mktemp_sibling_cmd(obj_path);
-    if obj_tmp.length == 0 {
-        print("sfn build: failed to stage runtime sfn-source object " + obj_path);
-        return RuntimeEmitResult { obj_path: "", stats: stats };
-    }
-    let rc2 = llvm_assemble(ll_path, obj_tmp, opt_flag, no_includes);
+    let mut obj_target = obj_path;
+    if obj_tmp.length > 0 { obj_target = obj_tmp; }
+    let rc2 = llvm_assemble(ll_path, obj_target, opt_flag, no_includes);
     if rc2 != 0 {
-        process.run(["rm", "-f", obj_tmp]);
+        if obj_tmp.length > 0 { fs.deleteFile(obj_tmp); }
         print("sfn build: failed to compile runtime sfn-source object "
             + obj_path);
         return RuntimeEmitResult { obj_path: "", stats: stats };
     }
-    if !_atomic_rename_into_place(obj_tmp, obj_path) {
+    if obj_tmp.length > 0 && !_atomic_rename_into_place(obj_tmp, obj_path) {
         print("sfn build: failed to stage runtime sfn-source object " + obj_path);
         return RuntimeEmitResult { obj_path: "", stats: stats };
     }
@@ -846,7 +842,7 @@ fn _stage_one_runtime_sfn_import_context(self_path: string, src: string, slug: s
             + " (child exit="
             + number_to_string(rc)
             + ")");
-        if staged.length > 0 { process.run(["rm", "-f", staged]); }
+        if staged.length > 0 { fs.deleteFile(staged); }
         return false;
     }
     // Empty-output probe, mirroring the Makefile #812 staging's
@@ -855,14 +851,14 @@ fn _stage_one_runtime_sfn_import_context(self_path: string, src: string, slug: s
     if probe.length == 0 {
         print("sfn build: staged runtime sfn-source import-context is empty for "
             + src);
-        if staged.length > 0 { process.run(["rm", "-f", staged]); }
+        if staged.length > 0 { fs.deleteFile(staged); }
         return false;
     }
     if staged.length > 0 {
         if !_atomic_rename_into_place(staged, asm_path) {
             print("sfn build: failed to publish runtime sfn-source import-context for "
                 + src);
-            process.run(["rm", "-f", staged]);
+            fs.deleteFile(staged);
             return false;
         }
     }
@@ -921,7 +917,7 @@ fn _write_runtime_sfn_import_deps(asm_path: string, slug: string, ctx_root: stri
     if !_atomic_rename_into_place(tmp, deps_path) {
         print("sfn build: failed to publish runtime sfn-source import-deps for "
             + slug);
-        process.run(["rm", "-f", tmp]);
+        fs.deleteFile(tmp);
     }
 }
 
@@ -1343,21 +1339,21 @@ fn assemble_runtime_capsule_link_inputs(runtime_capsules: RuntimeCapsuleArtifact
     if target_os_is_windows(target_os) && capsules.length > 0 {
         let stub_src = _path_join(capsules[0].manifest_dir, "ir/windows_stubs.ll");
         let stub_obj = _path_join(out_dir, "windows_stubs.ll" + opt_flag + ".o");
+        // This object exists to serve the Windows target, so the no-shell
+        // degrade (SFN-478, empty temp) must assemble in place rather than
+        // abort — otherwise the Windows build fails on its own stub object.
         let stub_tmp = _mktemp_sibling_cmd(stub_obj);
-        if stub_tmp.length == 0 {
-            print("sfn build: failed to stage windows_stubs.ll object "
-                + stub_obj);
-            return _failed_runtime_link_inputs();
-        }
+        let mut stub_target = stub_obj;
+        if stub_tmp.length > 0 { stub_target = stub_tmp; }
         let no_includes: string[] = [];
-        let rc = llvm_assemble(stub_src, stub_tmp, opt_flag, no_includes);
+        let rc = llvm_assemble(stub_src, stub_target, opt_flag, no_includes);
         if rc != 0 {
-            process.run(["rm", "-f", stub_tmp]);
+            if stub_tmp.length > 0 { fs.deleteFile(stub_tmp); }
             print("sfn build: failed to assemble windows_stubs.ll (" + stub_src
                 + ")");
             return _failed_runtime_link_inputs();
         }
-        if !_atomic_rename_into_place(stub_tmp, stub_obj) {
+        if stub_tmp.length > 0 && !_atomic_rename_into_place(stub_tmp, stub_obj) {
             print("sfn build: failed to stage windows_stubs.ll object "
                 + stub_obj);
             return _failed_runtime_link_inputs();
