@@ -160,9 +160,18 @@ jobs:
       #   3 one module   — emit -> clang -> lld-link, ONE child spawn
       #   4 the artifact — the binary it produced actually executes
       # Rung 3 is the sharp one: it is the smallest possible exercise of
-      # the child-spawn path, which is where the self-host hang is
-      # localized (runtime/sfn/platform/process_windows.sfn). If rung 3
-      # hangs on one module, the 281-module build was never the issue.
+      # emit -> compile -> link for a single module.
+      #
+      # The rungs were written against a "the self-host hangs on Windows"
+      # hypothesis. That hypothesis was wrong: measurement on a native
+      # Windows host found no hang at all. Every `s[i]` re-derived the
+      # string's length with a full `strnlen`, which made lowering
+      # quadratic — 47M scans totalling 243 GB for ONE module — and
+      # Windows merely lacked the SIMD `strnlen` that hides the same cost
+      # on Linux. The self-host was running correctly the whole time, just
+      # ~20x slower than the job timeout allowed, and printing nothing.
+      # The ladder is kept because bounded rungs beat one 90-minute
+      # all-or-nothing step regardless of what is being diagnosed.
       #
       # `continue-on-error` so a failed rung still lets later rungs run
       # and report — one run then yields the whole ladder's shape
@@ -212,6 +221,39 @@ jobs:
           # (Makefile rebuild-impl). SAILFIN_TARGET_OS=Windows drives the
           # SFN-52 target seam (MSVC triple, lld-link, POSIX-lib drop,
           # process_windows.sfn swap).
+          #
+          # The build driver emits no progress output: a full self-host
+          # prints under 1 KB, all of it at exit (measured on both Linux
+          # and Windows). A working build and a hung one are therefore
+          # byte-identical to a watcher, and a timeout kill leaves no
+          # diagnostic whatsoever — run 30166490718 logged ZERO bytes
+          # between this step opening and its cancellation 90 minutes
+          # later, which is what made the native leg so expensive to
+          # iterate on remotely. Count emitted artifacts on an interval
+          # so a slow build reads as slow and a stuck one as stuck. Drop
+          # this once the driver reports progress natively.
+          (
+            # `set +e` is load-bearing: the subshell inherits `set -e` from
+            # the step, so any single failing command inside the loop would
+            # kill the heartbeat silently and restore the exact zero-output
+            # condition it exists to prevent.
+            set +e
+            while :; do
+              sleep 30
+              printf '[heartbeat] %s sfn-asm=%s ll=%s o=%s\n' \
+                "$(date -u +%H:%M:%S)" \
+                "$(find build -name '*.sfn-asm' 2>/dev/null | wc -l)" \
+                "$(find build -name '*.ll' 2>/dev/null | wc -l)" \
+                "$(find build -name '*.o' 2>/dev/null | wc -l)"
+            done
+          ) &
+          heartbeat_pid=$!
+          # Kill the subshell, and its in-flight `sleep` where the tooling
+          # allows: a survivor inherits this step's stdout and can hold the
+          # step open. `pkill` is absent from Git for Windows' bundled msys
+          # set, so the child reap is best-effort — killing the subshell
+          # alone still bounds any delay at one sleep interval.
+          trap 'pkill -P "$heartbeat_pid" 2>/dev/null || true; kill "$heartbeat_pid" 2>/dev/null || true' EXIT
           "$SEED_EXE" build -p compiler
           echo "--- locating native-built compiler ---"
           OUT=""
