@@ -22,6 +22,25 @@ discovered mid-flight is a **pause-and-present** moment, not a silent fan-out
 into a predecessor → groom → separate-PR → seed-cut → re-pickup chain (the #1088
 failure mode).
 
+**The one carve-out: a capability consumed by *runtime* source.** Bundling works
+because `make compile` builds the new compiler from the old seed, and that fresh
+compiler then compiles the consumer. That chain breaks when the consumer is
+runtime source: the **pinned seed** compiles the working-tree runtime
+(`runtime/capsule.toml` `sfn-sources`, via `_compile_runtime_sfn_sources` in
+`compiler/src/build/runtime_objs.sfn`), so a compiler capability that runtime
+source *calls* — a new builtin or intrinsic — must exist in the **seed**, not
+merely in the freshly built compiler. Bundling does not help; the old seed is the
+one doing the work. Precedent, recorded verbatim in `runtime/sfn/string.sfn`:
+"seed 0.7.0-alpha.41 carries the `load_byte` builtin."
+
+Such a capability lands **alone**, `seed-blocker`, with consumers carrying
+`## Required in pinned seed: #<predecessor>`. Since the gate is unavoidable,
+cross it **once**: land the complete capability family in that single PR rather
+than trickling it per consumer and paying a seed cut each time. This is a
+structural exception, not a judgement call — cite it rather than re-deriving it,
+and note it does **not** extend to runtime source that merely *changes*; only to
+runtime source that calls a compiler capability the seed lacks.
+
 **Split-forced seed cuts queue; they do not trigger a reactive cut.** The advance
 batches onto the next scheduled cadence seed bump (SFEP-0026 WS-C); the
 `needs-seed-cut` label means "queued," not "cut now." The only thing that breaks

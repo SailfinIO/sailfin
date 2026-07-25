@@ -232,6 +232,31 @@ metadata the capability seal exists to carry.
   produces empty capability sets — an explicitly valid interned set per §9.5,
   not a silent gap.
 
+**This derivation is a v0 approximation and must be labelled as one.** Deriving
+capabilities as the image of the effect set makes them a pure *function* of
+effects, which collapses the distinction SFEP-0016 §5 rests on — *effects say
+what, capabilities say how much*. Under this rule capabilities carry no
+information effects do not already carry, and the seal's novel claim degrades to
+"effects, renamed." That is an acceptable v0 (it beats every `CapabilitySetId`
+being empty, and it populates the §9.1 manifest so the carrier is exercised) but
+it is **not** the end state, and nothing downstream may treat a derived
+capability set as evidence that capability attenuation works.
+
+*gated on: per-task capability context (SFEP-0016 §5) supplying scoped grants
+that are not recoverable from the effect set.* When that lands, the derivation
+becomes the default for functions with no explicit grant, not the rule for all
+of them.
+
+**Grant mismatch is a diagnostic, not an intersection.** The rule above says
+"intersected with the capsule manifest's declared grants," which silently drops
+an effect-implied capability the manifest does not grant. That is inconsistent
+with this proposal's own fail-closed discipline (§3.1) and it discards exactly
+the signal the seal exists to raise: a function whose effects require an
+authority its capsule was never granted is an error, not an empty set. The
+producer must emit a diagnostic and reject the module. The intersection stands
+only where the manifest *narrows* a grant it does in fact make — scoping a
+granted `io` to a path prefix, say — never where it is absent altogether.
+
 ## 4. Effect & capability impact
 
 This is the mechanism by which effect and capability metadata first survives

@@ -4,7 +4,7 @@ title: "Toolchain Independence — Sailfin-Native Backend"
 status: Accepted
 type: runtime
 created: 2026-06-05
-updated: 2026-07-23
+updated: 2026-07-25
 author: "agent:compiler-architect"
 tracking: "#1640, #1641"
 supersedes:
@@ -254,9 +254,28 @@ Each stage is independently valuable and shippable. None requires a flag day.
   prerequisite that pays off regardless** — it also de-strings the LLVM path and
   gives the effect/ownership analyses a proper substrate. Likely the single most
   valuable piece of work in this whole arc even if Stage 3 never ships.
-- **Stage 2 — Own object emission.** An ELF writer first (CI is Linux x86-64);
-  LLVM still does instruction selection. Establishes the assembler/object-format
-  muscle without the regalloc/isel risk.
+- **Stage 2 — Own the assembler and object emission.** An x86-64 encoder plus an
+  ELF writer, consuming **textual assembly** that LLVM's instruction selection
+  produces (CI is Linux x86-64). Establishes the assembler/object-format muscle
+  without the regalloc/isel risk.
+
+  *Clarified 2026-07-25.* The earlier wording — "an ELF writer first; LLVM still
+  does instruction selection" — named the right muscle ("assembler/object-format")
+  but left the seam unspecified, and as written it is not implementable: LLVM's MC
+  layer performs encoding *and* object writing, so an ELF writer cannot slot under
+  LLVM's isel with nothing in between. Since Sailfin's backend is a **textual** IR
+  printer, the only seam that exists without linking LLVM as a library is textual
+  assembly. Owning the assembler is therefore not an optional embellishment of
+  this stage — it *is* this stage, and everything downstream of isel belongs to
+  Sailfin from here.
+
+  This also reconciles §8 with SFEP-0016 §8, which already presupposes the
+  outcome: the seal's link-time rule is "no raw `syscall` instructions in linked
+  objects; enforced at **the assembler/linker Sailfin owns**." The threat model
+  assumes an owned assembler; before this clarification no stage scheduled one.
+  Note the alternative reading — replacing LLVM's `MCObjectWriter` in-process —
+  requires the LLVM C-API binding (#347), which §12 explicitly declines to
+  prioritize because it deepens the dependency this proposal exists to remove.
 - **Stage 3 — Native fast dev backend.** `mid-IR → naive-but-fast machine code →
   ELF`, **debug builds only**. Highest ROI, lowest risk: Go-speed `sfn run`
   without surrendering release perf. Steal Cranelift's philosophy (fast, simple,
