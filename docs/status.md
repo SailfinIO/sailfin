@@ -1,6 +1,6 @@
 # Status
 
-Updated: 2026-07-24. Seed pinned to `0.8.0` (`bootstrap.toml`
+Updated: 2026-07-25. Seed pinned to `0.8.0` (`bootstrap.toml`
 `[seed].version` — SFEP-0047); the compiler version source of truth is
 `compiler/capsule.toml`.
 
@@ -692,6 +692,31 @@ unit; history in the linked issues.
   `%LOCALAPPDATA%\sailfin\bin`, adding the bin directory to the user `PATH`.
 - Current release: `v0.8.0` (see `bootstrap.toml` `[seed].version`
   for the pinned self-host seed, which may trail the latest release).
+
+### Support Tiers
+
+Two independent axes, easy to conflate: **base support** (the toolchain
+builds, the suite passes, CI runs the platform, an installer asset is
+published) and **sealed support** (owned codegen, owned syscalls, no
+un-gated syscall path — the SFEP-0016 capability seal). A platform can carry
+the former with zero work toward the latter.
+
+| Platform | Base support | Sealed support |
+|---|---|---|
+| Linux x86-64 | Shipped; primary CI host (`ci.yml`); release asset published | In progress — direct `ld.lld` link path exists (`build/direct_link.sfn::resolve_direct_ld_lld`, hard-gated to `x86_64`); owned syscall layer not started (SFEP-0015 Axis 3, #1641) |
+| macOS arm64 (Apple Silicon) | Shipped; CI host; release asset published; effect enforcement partial (#613) | Not a target — mediated vendor-library shim (SFEP-0015 §10; no stable raw-syscall ABI) |
+| Windows x86-64 | Cross-compiled from Linux (`ci-cross-windows`); release asset published; native MSVC self-host in progress (SFEP-0021, tracking SFN-53–58) | Not a target — mediated vendor-library shim (SFEP-0015 §10) |
+| Linux aarch64 | Host-layout constants only (`_host_arch()`, `st_mode` offset; SFN-471); no CI leg, no published installer asset | Not a target |
+
+**Base support is never a claim that the seal holds on that platform** — the
+same discipline as the `![gpu]` row above ("not a claim that an accelerator
+exists"): a build/test/CI/installer green light says nothing about owned
+codegen or a gated syscall path. SFEP-0056 records the live precedent for
+conflating the two: `install.sh` maps `aarch64|arm64` to a
+`sailfin_<ver>_linux_arm64.tar.gz` asset name that has never been published —
+the script detects the architecture and then dies — and the install docs
+briefly advertised "Linux | arm64" as supported before that claim was
+corrected to match the three assets actually shipped.
 
 ## Known Design Issues (Pre-1.0 Syntax Reform)
 
