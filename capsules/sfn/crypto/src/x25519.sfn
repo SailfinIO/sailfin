@@ -11,8 +11,12 @@
 //
 // Every constant is decimal: hex literals are unavailable in Sailfin source
 // (SFEP-0048 §3.3 item 7).
-// The 16-bit limb mask, 2^16 - 1.
-fn _limb_mask() -> int { return 65535; }
+// The 16-bit limb mask, 2^16 - 1. Named apart from poly1305's `_limb_mask`
+// (2^26 - 1): the two modules are co-linked into every binary that depends on
+// this capsule, and while module-slug mangling keeps them distinct symbols, a
+// shared name for two different constants is a hazard when reading across the
+// capsule.
+fn _gf_limb_mask() -> int { return 65535; }
 
 // 2^256 = 38 mod (2^255 - 19). Folds the high half of a schoolbook product
 // back into the low 16 limbs.
@@ -74,16 +78,18 @@ fn _fsub(o: int[], a: int[], b: int[]) -> void {
 }
 
 // One carry pass, wrapping the top limb's carry into limb 0 scaled by 38.
-// Every limb entering the pass is non-negative — the operands are products and
-// 38x products of non-negative limbs — so `>> 16` is a shift of a non-negative
-// value and `ashr` behaves as the logical shift the algorithm needs.
+// Precondition: every limb entering the pass is non-negative. That is the
+// caller's contract — it holds in `_fmul`, where the limbs are products and
+// 38x products of non-negative limbs, and in `_pack25519`, where the input is
+// a C-form field element. It is what makes `>> 16` a shift of a non-negative
+// value, so `ashr` behaves as the logical shift the algorithm needs.
 // Non-negativity is preserved across the pass by induction (design note §3.4).
 fn _carry(o: int[]) -> void {
     let mut i: int = 0;
     loop {
         if i >= 16 { break; }
         let c: int = o[i] >> 16;
-        o[i] = o[i] & _limb_mask();
+        o[i] = o[i] & _gf_limb_mask();
         if i == 15 { o[0] = o[0] + _reduce_mul() * c; } else {
             o[i + 1] = o[i + 1] + c;
         }
@@ -133,9 +139,12 @@ fn _fmul(o: int[], a: int[], b: int[]) -> void {
     }
 
     // Three passes provably yield C-form (every limb strictly below 2^16).
-    // TweetNaCl runs two and lives with limb 0 up to 2^16 + 37, which would
-    // break the hard `< 2^16` subtrahend bound `_fsub`'s bias argument assumes
-    // (design note §3.4). The third pass is one extra 16-step loop.
+    // TweetNaCl runs two and lives with limb 0 up to 2^16 + 37, which violates
+    // the hard `< 2^16` bound `_fsub`'s bias argument is stated in terms of.
+    // That argument's conclusion still survives at 2^16 + 37 — the bias leaves
+    // limb 0 at 262068 - 65573 = 196495 > 0, comfortably in L-form — so the
+    // third pass is a margin, not a soundness fix: it keeps the precondition
+    // true as written rather than as re-derived (design note §3.4).
     _carry(o);
     _carry(o);
     _carry(o);
@@ -223,12 +232,12 @@ fn _pack25519(n: int[]) -> int[] {
             // otherwise, and the `& 1` makes the extraction correct under
             // `ashr` and under a logical shift alike (design note §3.7).
             m[i] = t[i] - 65535 - ((m[i - 1] >> 16) & 1);
-            m[i - 1] = m[i - 1] & _limb_mask();
+            m[i - 1] = m[i - 1] & _gf_limb_mask();
             i += 1;
         }
         m[15] = t[15] - 32767 - ((m[14] >> 16) & 1);
         let b: int = (m[15] >> 16) & 1;
-        m[14] = m[14] & _limb_mask();
+        m[14] = m[14] & _gf_limb_mask();
         // b == 1 means the subtraction borrowed, so t was already below p and
         // must be kept; b == 0 means t >= p, so take the reduced m. The select
         // is the same masked exchange as the ladder's, so the reduction is

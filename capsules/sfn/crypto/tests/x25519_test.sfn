@@ -95,6 +95,25 @@ test "x25519: low-order u-coordinates yield an all-zero shared secret" {
     assert x25519_is_zero(x25519(scalar, p)) == true;
 }
 
+test "x25519: inputs are never mutated" {
+    // Sailfin arrays are reference-semantics, so clamping in place instead of
+    // on a copy would corrupt a caller's long-lived private key on its second
+    // use while still reproducing every RFC vector on the first. The same
+    // applies to the u-coordinate, whose high bit `_unpack25519` masks.
+    let scalar: int[] = hexb("77076d0a7318a57d3c16c17251b26645df4c2f87ebc0992ab177fba51db92c2a");
+    let scalar_before: int[] = hexb("77076d0a7318a57d3c16c17251b26645df4c2f87ebc0992ab177fba51db92c2a");
+    let u: int[] = hexb("ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff");
+    let u_before: int[] = hexb("ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff");
+
+    let first: int[] = x25519(scalar, u);
+    assert eq_bytes(scalar, scalar_before);
+    assert eq_bytes(u, u_before);
+
+    // A second call on the same arrays must agree with the first.
+    assert eq_bytes(x25519(scalar, u), first);
+    assert eq_bytes(x25519_base(scalar), hexb("8520f0098930a754748b7ddcb43ef75a0dbf3a0d26381af4eba4a98eaa9b4e6a"));
+}
+
 test "x25519: fail-closed on 31-byte scalar" {
     let scalar: int[] = hexb("a546e36bf0527c9d3b16154b82465edd62144c0ac1fc5a18506a2244ba449a");
     let u: int[] = hexb("e6db6867583030db3594c1a424b15f7c726624ec26b3353b10a903a6d0ab1c4c");

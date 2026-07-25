@@ -502,10 +502,29 @@ build/bin/sfn test         capsules/sfn/crypto/tests/x25519_test.sfn
 build/bin/sfn test         capsules/sfn/crypto/tests/x25519_iterated_test.sfn
 ```
 
-`make compile` is **not** a gate: no `compiler/src/*.sfn` file is touched
-(validation-ladder rung 2 applies to compiler sources). A `make check` before
-merge is cheap insurance that the new capsule module did not disturb the capsule
-resolver's dependency closure, but it is not the correctness gate.
+**Correction (SFN-335 implementation).** This section originally claimed
+`make compile` was not a gate because no `compiler/src/*.sfn` file is touched.
+That is wrong. `compiler/capsule.toml:59` declares `"sfn/crypto" = "*"` as a
+compiler dependency (for `ed25519_verify_utf8` in
+`compiler/src/cli/commands/toolchain.sfn`), and `enumerate_capsule_sources`
+(`compiler/src/capsule_resolver.sfn:1007-1024`) stages **every** `.sfn` under a
+dependency capsule's `src/`, not just the ones reachable from the import graph.
+Adding `x25519.sfn` therefore puts it in the compiler's own self-host closure —
+confirmed by `build/compiler/import-context/sfn/crypto/x25519.sfn-asm`.
+
+Two consequences. Adding a module to this capsule is a **structural** change, so
+`.claude/rules/selfhost-invariant.md` step 2 applies: `make clean-build` then
+`make compile`, because the incremental staleness check does not notice a newly
+added dependency-capsule file. And the **pinned seed must be able to compile the
+new module** — bundling the module and its consumer in one PR satisfies
+`.claude/rules/seed-dependency.md` regardless, so no seed cut is needed, but that
+is the reason, not "the compiler does not resolve the capsule."
+
+```
+make clean-build && make compile
+build/bin/sfn fmt --check  capsules/sfn/crypto/src/x25519.sfn capsules/sfn/crypto/tests/x25519_test.sfn capsules/sfn/crypto/tests/x25519_iterated_test.sfn
+build/bin/sfn test         capsules/sfn/crypto/tests/
+```
 
 ## 6. Scope and decomposition
 
@@ -516,10 +535,13 @@ other than "the RFC 7748 vectors reproduce," which requires the ladder. Splittin
 would manufacture two PRs, two review cycles, and a half-tested intermediate
 state, for no benefit. Per `.claude/rules/seed-dependency.md`, bundle.
 
-**No seed-cut gate.** `capsules/sfn/crypto/` is `kind = "library"`; the
-compiler's own build does not resolve it (SFEP-0048 §5). X25519 introduces no
-new compiler binary behaviour, so `make compile` is unaffected and no
-`/pin-seed` is required. The seed-coupled step in this chain remains where
+**No seed-cut gate** — but not for the reason originally given here. The
+original text claimed the compiler's own build does not resolve
+`capsules/sfn/crypto/`; §5.5's correction shows it does. The bundle rule is what
+actually removes the gate: the new module and its only consumer land in one PR,
+so `make compile` builds them together against the existing pinned seed and no
+`/pin-seed` is required (`.claude/rules/seed-dependency.md`). The seed-coupled
+step in this chain remains where
 SFEP-0048 §3.2 put it — the Phase D vendoring of capsule primitives into
 `runtime/`, tracked by SFN-341, which already bundles the body swap and the
 extern deletion into one PR.
