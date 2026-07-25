@@ -92,10 +92,13 @@ was a draft:
 
 1. **Widening multiply is out of scope.** A `64 × 64 → 128` operation is a
    separate capability, not part of completing the `{i,u}{8,16,32,64}` family.
-   SFN-502 owns that scope decision. This proposal neither introduces `i128` /
-   `u128` nor promises a widening-multiply intrinsic. The viable 16 × 16-bit
-   limb strategy recorded by SFN-500 also means sized integers are no longer a
-   dependency of the 1.0 native-crypto path.
+   SFN-502 resolved that capability as not currently needed: it is neither
+   absorbed here nor advanced as a standalone SFEP. This proposal introduces
+   neither `i128` / `u128` nor a widening-multiply intrinsic. The viable 16 ×
+   16-bit limb strategy recorded by SFN-500 also means sized integers are no
+   longer a dependency of the 1.0 native-crypto path. The decision and
+   reopening criteria are recorded in
+   [`design-notes/sfn-502-widening-multiply-scope.md`](./design-notes/sfn-502-widening-multiply-scope.md).
 2. **Debug trap / release wrap is accepted.** The default in §3.4 is the
    normative policy. The alternatives in §6 remain deliberately rejected;
    callers that require build-mode-independent wrapping use `wrapping_*`.

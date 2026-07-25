@@ -327,8 +327,12 @@ semantics, no `lshr`, no `64×64 → 128` widening multiply. The full margin
 analysis and ladder operand audit are in
 `docs/proposals/design-notes/sfn-335-x25519-limb-strategy.md` §§1–3. X25519
 shipped in pure Sailfin as `capsules/sfn/crypto/src/x25519.sfn` (SFN-335); see
-the §7 amendment for the blocker-record disposition. The original rejection
-above is preserved as the historical record of what was actually evaluated.
+the §7 amendment for the blocker-record disposition. SFN-502 consequently
+records widening multiply as not needed and files no proposal; its scope
+decision is in
+`docs/proposals/design-notes/sfn-502-widening-multiply-scope.md`. The original
+rejection above is preserved as the historical record of what was actually
+evaluated.
 
 ### 6.5 Put the new primitives in `runtime/sfn/crypto/` instead of the capsule
 Rejected for Phase A. The existing crypto surface already lives in the
@@ -350,8 +354,11 @@ already uses — not by relocating the tested source of truth out of the capsule
   `docs/proposals/design-notes/sfn-335-x25519-limb-strategy.md`. Shipped in pure
   Sailfin as `capsules/sfn/crypto/src/x25519.sfn` (SFN-335), self-hosted, and
   regression-covered by the RFC 7748 §5.2/§6.1 vectors. Phase B's key exchange
-  is unblocked; Ed25519-verify remains a separate follow-on (§8 of the design
-  note) still gated on the same field-arithmetic port plus SHA-512.
+  is unblocked. SFN-502 therefore records no current need for widening multiply
+  and files no proposal; see
+  `docs/proposals/design-notes/sfn-502-widening-multiply-scope.md`.
+  Ed25519-verify remains a separate follow-on (§8 of the limb-strategy note)
+  still gated on the same field-arithmetic port plus SHA-512.
 
 - **AES-GCM AEAD — deliberately deferred (not a hard blocker for the chosen
   cut).** Constant-time software AES needs either bitsliced AES (very large,
