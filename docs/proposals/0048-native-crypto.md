@@ -140,7 +140,7 @@ correct, tested primitives — not their runtime wiring.
 ### 3.3 The integer-idiom standard (honest about sized ints)
 
 Sailfin's sized-integer family is **half-real** today
-(`draft-sized-integer-types.md`, still `Draft`): unsigned widths collapse to
+(SFEP-0058, `Accepted`): unsigned widths collapse to
 signed LLVM twins (`compiler/src/llvm/type_mapping.sfn:877-895`); `u8 as u64`
 mis-lowers as `sext` (255 → -1) (`core_cast_lowering.sfn:443-449`); `>>` always
 lowers to `ashr`, never `lshr` (`core_helpers.sfn:60-70`); no overflow/wrapping
@@ -313,7 +313,7 @@ swap** (`cswap`) whose branch-free correctness is the exact thing the current
 instruction is explicit: do not spec workarounds not trusted to be
 constant-correct. X25519 is therefore excluded from the Phase A waves and filed
 as a blocker; it gates Phase B (TLS 1.3 key exchange is impossible without it).
-It is the canonical use case for `draft-sized-integer-types` and a future
+It is the canonical use case for SFEP-0058 and a future
 `64×64 → 128` widening-multiply intrinsic.
 
 ### 6.5 Put the new primitives in `runtime/sfn/crypto/` instead of the capsule
@@ -334,7 +334,7 @@ already uses — not by relocating the tested source of truth out of the capsule
   check, plus a constant-time `cswap` whose branch-free guarantee is undermined
   by `>>`-is-`ashr` and collapsed-unsigned semantics. **Missing capability:**
   sized/unsigned integer semantics with defined wrapping
-  (`draft-sized-integer-types`) and/or a widening-multiply intrinsic. **Gates:**
+  (SFEP-0058) and/or a widening-multiply intrinsic. **Gates:**
   Phase B (TLS 1.3 key exchange). Until then, Phase B either stays
   OpenSSL-backed for the key exchange only or waits.
 
@@ -400,7 +400,7 @@ re-pointed at the native stack.
   replaces; its `tls_*` wrapper contracts are the Phase D swap target.
 - SFEP-0015 (`0015-llvm-independence.md`) — backend/syscall ownership; the seal's
   other prerequisite.
-- `draft-sized-integer-types.md` — the missing capability behind the X25519 /
+- `0058-sized-integer-types.md` — the missing capability behind the X25519 /
   Ed25519 blocker (§7).
 - Prior art: `capsules/sfn/crypto/src/mod.sfn` (SHA-256, base64, HMAC-SHA-256),
   `capsules/sfn/crypto/src/ed25519.sfn` (OpenSSL-EVP wrapper pattern),

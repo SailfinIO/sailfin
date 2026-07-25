@@ -58,7 +58,8 @@ AI agents are users" framework, a positional wart is a systematic error source
 for LLM-generated Sailfin. Documenting it institutionalizes a surprise that the
 narrow fix removes outright.
 
-**Reconciliation with the tighter trajectory.** `draft-sized-integer-types.md`
+**Reconciliation with the tighter trajectory.** SFEP-0058
+(`../0058-sized-integer-types.md`)
 argues against implicit widening of *typed* operands ("explicit `as`-cast"). This
 note stays inside that boundary: it does not widen typed operands, only fixes the
 direction of the pre-existing literal-context mechanism.
@@ -89,4 +90,4 @@ change.
   (`lower_binary_operation`, `lower_comparison_operation`),
   `core_operands.sfn` (`dominant_type` / `harmonise_operands`).
 - spec §06-types "Scalar coercion rules"; `docs/status.md` (strict refusal — Shipped).
-- `docs/proposals/draft-sized-integer-types.md` (coercion trajectory).
+- `docs/proposals/0058-sized-integer-types.md` (coercion trajectory).

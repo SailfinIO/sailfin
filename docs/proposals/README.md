@@ -80,6 +80,7 @@ The next number is `max + 1`. Add a row in the same PR that introduces an SFEP.
 | [0055](./0055-typed-task-handles.md) | Typed task handles (`Task<T>`) and ordered multi-await (`join_all`) | Accepted | language |
 | [0056](./0056-aarch64-linux-target.md) | aarch64-Linux Target Support (Raspberry Pi Install + On-Device Self-Host) | Accepted | runtime |
 | [0057](./0057-string-interpolation-dollar.md) | String Interpolation with `${ }` (migrating off `{{ }}`) | Accepted | language |
+| [0058](./0058-sized-integer-types.md) | Sized Integer Types and Overflow Semantics | Accepted | language |
 
 ## Drafts under review (numbers assigned at merge)
 
@@ -91,7 +92,6 @@ language gaps surfaced by the 2026-07 grammar/object-model audit:
 | Draft | Title | Type |
 |---|---|---|
 | [`draft-generic-collections`](./draft-generic-collections.md) | Generic Collections — Map, Set, and Tuple | language |
-| [`draft-sized-integer-types`](./draft-sized-integer-types.md) | Sized Integer Types and Overflow Semantics | language |
 | [`draft-interface-signature-conformance`](./draft-interface-signature-conformance.md) | Signature-Checked Interface Conformance | language |
 | [`draft-exhaustive-match`](./draft-exhaustive-match.md) | Compile-Time Match Exhaustiveness Checking | language |
 | [`draft-derive`](./draft-derive.md) | Derivable Interface Implementations (`@derive`) | language |

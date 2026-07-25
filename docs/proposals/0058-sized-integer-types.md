@@ -1,18 +1,18 @@
 ---
-sfep: TBD
+sfep: 58
 title: Sized Integer Types and Overflow Semantics
-status: Draft
+status: Accepted
 type: language
 created: 2026-07-01
-updated: 2026-07-01
+updated: 2026-07-25
 author: "agent:compiler-architect; human review"
-tracking:
+tracking: "SFN-501, SFN-502, SFN-503"
 supersedes:
 superseded-by:
 graduates-to: reference/spec/06-types.md
 ---
 
-# SFEP-XXXX — Sized Integer Types and Overflow Semantics
+# SFEP-0058 — Sized Integer Types and Overflow Semantics
 
 ## 1. Summary
 
@@ -84,6 +84,38 @@ so the safety claim is being made without the enforcement behind it — precisel
 the "parsed but not enforced" anti-pattern.
 
 ## 3. Design
+
+### Accepted design decisions
+
+The design gate resolved the four questions that were open while this proposal
+was a draft:
+
+1. **Widening multiply is out of scope.** A `64 × 64 → 128` operation is a
+   separate capability, not part of completing the `{i,u}{8,16,32,64}` family.
+   SFN-502 owns that scope decision. This proposal neither introduces `i128` /
+   `u128` nor promises a widening-multiply intrinsic. The viable 16 × 16-bit
+   limb strategy recorded by SFN-500 also means sized integers are no longer a
+   dependency of the 1.0 native-crypto path.
+2. **Debug trap / release wrap is accepted.** The default in §3.4 is the
+   normative policy. The alternatives in §6 remain deliberately rejected;
+   callers that require build-mode-independent wrapping use `wrapping_*`.
+3. **Implicit integer widening is retracted.** The explicit-conversion rule in
+   §3.3 is accepted for typed integer operands. An audit of `compiler/src`
+   found the coercion concentrated in `dominant_type`; compiler-source uses of
+   `i8`/`i16`/`i32` are otherwise LLVM representation strings and ABI metadata,
+   not mixed source-level integer arithmetic. The landing therefore removes
+   that coercion without migrating compiler consumers. Literal contextual typing
+   remains compatible with the SFN-132 design note: an untyped literal may be
+   checked against its expected integer type, but two already-typed operands do
+   not silently change type.
+4. **The no-consumer self-host staging is accepted.** The capability lands in
+   pipeline order without adopting its new surface in `compiler/src`. Consumer
+   migration waits until a normal-cadence seed contains the capability, as
+   specified in §5; the capability PR does not trigger a reactive seed cut.
+
+These decisions are owner-approved by the transition of this proposal to
+`Accepted`. They are constraints on the implementation slices, not questions
+for those slices to reopen.
 
 ### 3.0 Scope split (1.0 vs. deferred)
 
@@ -337,6 +369,24 @@ backstops), not an effect — it needs no capability, exactly as
 effects and the taxonomy lock (SFEP-0017) are untouched.
 
 ## 5. Self-hosting impact
+
+Implementation is groomed as five independently reviewable slices. SFN-501 is
+the accepted-design parent for the additive lexer/parser, typecheck, overflow,
+and runtime-prelude children; SFN-503 is already filed for the narrow
+sign-aware-cast lowering correction. Each child must preserve the ordering and
+the no-consumer rule below:
+
+| Slice | Tracking seam | Deliverable |
+|---|---|---|
+| Lexer + parser | SFN-501 lexer/parser child | Suffixed-number tokenisation, parsed fixed type, formatter coverage |
+| Typecheck | SFN-501 typecheck child | Sign/width metadata, `E0824`, `E0825`, mixed-typed-operand rejection |
+| Cast lowering | SFN-503 | Correct `sext`/`zext`, integer/float conversion opcodes, regression for `255u8 as u64` |
+| Arithmetic lowering | SFN-501 overflow child | Sign-aware operations and debug-trap/release-wrap build-mode plumbing |
+| Runtime prelude | SFN-501 runtime child | `wrapping_*` surface and the integer-overflow panic helper |
+
+The parent/child split is intentional: it keeps the already-filed correctness
+bug independently shippable while preventing any implementation child from
+silently absorbing widening multiply (SFN-502).
 
 Passes that change, in pipeline order:
 
