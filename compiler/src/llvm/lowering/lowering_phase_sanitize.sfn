@@ -92,11 +92,17 @@ fn sanitize_imported_native_texts(imported_native_texts: string[], debug_lowerin
 // of `lower_to_llvm_lines_with_parsed_context`, read by the `[fatal]` gate
 // downstream, so clearing it would turn a failing build into a passing one
 // (SFN-529).
+//
+// `sanitize_collection_length` doubles as the scan bound, which keeps the
+// two trip reasons apart: it returns 0 for a negative length — the corrupt
+// cross-module struct return this file exists to catch, where indexing the
+// buffer at all is unsafe — and the cap for a merely oversized one, where
+// the entries are real and worth filtering.
 fn sanitize_diagnostics(diagnostics_in: string[]) -> string[] {
     let mut safe = diagnostics_in;
     if safe == null { safe = []; }
     if safe.length != sanitize_collection_length(safe.length, 1000000) {
-        safe = retain_fatal_diagnostics(safe);
+        safe = retain_fatal_diagnostics(safe, sanitize_collection_length(safe.length, 1000000));
     }
     return safe;
 }

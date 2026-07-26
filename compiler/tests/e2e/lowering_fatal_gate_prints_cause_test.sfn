@@ -1,0 +1,69 @@
+// compiler/tests/e2e/lowering_fatal_gate_prints_cause_test.sfn
+//
+// Regression for SFN-529: `write_llvm_ir_for_tests_from_text_with_context`
+// (the entrypoint behind `sfn test`, `entrypoints_tests_writer.sfn`) used to
+// refuse a build tripping a `[fatal]` lowering diagnostic with a bare
+// `return false` — printing nothing — so `sfn test` on such a source
+// reported only "compile failed" with no reason. It now prints each
+// `[fatal]` line to stderr before refusing. This test drives a nested
+// `sfn test` against a fixture that trips the `E1002` unhandled-return
+// fatal and asserts the `llvm lowering [fatal] [E1002]:` line reaches
+// stderr — it fails if the print loop is removed and only the bare
+// "compile failed" refusal marker remains.
+import { find } from "sfn/strings";
+import { clean_runner_env, nested_runner_scratch } from "sfn/test";
+
+fn _sfn_bin() -> string ![io] {
+    let configured = env.get("SAILFIN_BIN");
+    if configured.length > 0 { return configured; }
+    return "build/bin/sfn";
+}
+
+// A clean top-level child environment for the nested `sfn test` (SFN-401):
+// the ambient PATH/HOME/TMPDIR/toolchain vars minus the parallel pool's
+// per-child keys, with SAILFIN_TEST_SCRATCH re-pointed at an isolated
+// nested scratch so a parallel run does not collide on `build/sailfin`.
+fn _child_env() -> string[] ![io] {
+    return clean_runner_env(nested_runner_scratch("lowering-fatal-gate"));
+}
+
+fn _scratch_dir() -> string ![io] {
+    let mut dir = env.get("SAILFIN_TEST_SCRATCH");
+    if dir.length == 0 { dir = "/tmp"; }
+    fs.createDirectory(dir, true);
+    return dir;
+}
+
+// Returns `t.nope` in a `return` position: `nope` is not a field of `T`, so
+// lowering cannot resolve the return expression and refuses with the
+// `E1002` unhandled-return-expression fatal rather than fabricating a
+// default `i32`.
+fn _fixture_source() -> string {
+    return "struct T { a: i32; }\n" + "\n"
+        + "fn in_return(t: T) -> i32 { return t.nope; }\n"
+        + "\n"
+        + "test \"probe: unknown field in return\" ![io] {\n"
+        + "    let t = T { a: 1 };\n"
+        + "    assert in_return(t) == 1;\n"
+        + "}\n";
+}
+
+test "lowering fatal gate: sfn test prints the [fatal] cause to stderr (SFN-529)" ![io] {
+    let src = _scratch_dir() + "/lowering_fatal_gate_529.sfn";
+    if fs.exists(src) { fs.deleteFile(src); }
+    fs.writeFile(src, _fixture_source());
+
+    let exit = process.run_capture([_sfn_bin(), "test", src], _child_env());
+    let out = process.capture_take_stdout();
+    let err = process.capture_take_stderr();
+
+    if fs.exists(src) { fs.deleteFile(src); }
+
+    // The unresolved return refuses the build, so the nested `sfn test`
+    // exits non-zero...
+    assert exit != 0;
+    // ...and the [fatal] diagnostic's own prefix reaches stderr — the
+    // regression this test pins. Match only the stable prefix, not the
+    // trailing prose (it carries backticks/an em dash and may be reworded).
+    assert find(err, "llvm lowering [fatal] [E1002]:", 0) >= 0;
+}
