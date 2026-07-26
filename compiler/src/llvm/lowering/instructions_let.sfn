@@ -444,6 +444,12 @@ fn lower_let_instruction(function: NativeFunction, instruction: NativeInstructio
     let mut _if230: boolean = false;
     if instruction.value == null { _if230 = true; }
     if instruction.value.length == 0 { _if230 = true; }
+    // SFN-527: an absent initializer is a legal uninitialized binding
+    // (`let x: i32;`) whose default-value store is the documented semantics
+    // (spec 03-declarations: "Uninitialized bindings default to `null`"), not
+    // a fabrication. Remember which case produced the null operand so the
+    // fail-closed gate below fires only on a real lowering failure.
+    let _initializer_absent: boolean = _if230;
     if _if230 {
         diagnostics.push("llvm lowering: let `" + instruction.name
             + "` missing initializer in `"
@@ -755,17 +761,21 @@ fn lower_let_instruction(function: NativeFunction, instruction: NativeInstructio
             }
         }
     } else {
-        // SFN-527: the initializer did not lower at all, so the store below
-        // invents the binding's value and every later read of it is wrong.
-        // This branch pushed no diagnostic whatsoever before — `let x: i32 =
-        // t.unknown_field;` compiled to `store i32 0` in silence.
-        diagnostics.push("llvm lowering [fatal] [E1002]: failed to lower initializer for `"
-            + instruction.name
-            + "` in `"
-            + function.name
-            + "` — refusing to fabricate a default `"
-            + llvm_type
-            + "`");
+        // SFN-527: an initializer was written but produced no operand, so the
+        // store below invents the binding's value and every later read of it
+        // is wrong. This branch pushed no diagnostic whatsoever before —
+        // `let x: i32 = t.unknown_field;` compiled to `store i32 0` in
+        // silence. `_initializer_absent` excludes the legal uninitialized
+        // binding, whose identical store is the documented default instead.
+        if !_initializer_absent {
+            diagnostics.push("llvm lowering [fatal] [E1002]: initializer for `"
+                + instruction.name
+                + "` in `"
+                + function.name
+                + "` did not lower — refusing to fabricate a default `"
+                + llvm_type
+                + "`");
+        }
         current_lines.push("  store " + llvm_type + " " + default_return_literal(llvm_type)
             + ", "
             + llvm_type

@@ -37,7 +37,8 @@ fn _make_binding(name: string, slot: string, llvm_type: string, kind: string, co
         scope_id: scope_id,
         scope_depth: 0,
         allocation_kind: kind,
-        init_sentinel: sentinel
+        init_sentinel: sentinel,
+        narrowed_variant: ""
     };
 }
 

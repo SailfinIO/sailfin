@@ -77,7 +77,8 @@ fn _local_with_annotation(annotation: string) -> LocalBinding {
         scope_id: "",
         scope_depth: 0,
         allocation_kind: "arena",
-        init_sentinel: ""
+        init_sentinel: "",
+        narrowed_variant: ""
     };
 }
 

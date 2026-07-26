@@ -824,19 +824,13 @@ fn lower_struct_literal(parse: StructLiteralParse, bindings: ParameterBinding[],
                 current_lines = coerced.lines;
                 current_temp = coerced.temp_index;
                 if coerced.operand == null {
-                    let mut _abi_match: boolean = false;
-                    let mut _abi_idx: int = 0;
-                    loop {
-                        if _abi_idx >= coerced.diagnostics.length { break; }
-                        if find_substring_from(coerced.diagnostics[_abi_idx], "ABI primitive mismatch", 0) >= 0 {
-                            _abi_match = true;
-                        }
-                        _abi_idx += 1;
-                    }
-                    let mut _lit_diag_prefix: string = "llvm lowering: ";
-                    if _abi_match {
-                        _lit_diag_prefix = "llvm lowering [fatal]: ";
-                    }
+                    // SFN-527: this used to escalate to `[fatal]` only when
+                    // the underlying message mentioned an ABI primitive
+                    // mismatch; every other coercion failure fabricated a
+                    // default field value untagged. The `insertvalue` below
+                    // is a fabrication either way, so the severity does not
+                    // depend on which coercion rule rejected the value.
+                    let _lit_diag_prefix: string = "llvm lowering [fatal] [E1002]: ";
                     // Note: not stderr-flushed because `lower_struct_literal`
                     // doesn't carry `![io]` and propagating it would touch
                     // every caller. The detail (caller/callee types + kinds)
@@ -863,6 +857,25 @@ fn lower_struct_literal(parse: StructLiteralParse, bindings: ParameterBinding[],
                     diagnostics.push(_lit_diag);
                 }
                 if coerced.operand != null { value_operand = coerced.operand; }
+            } else {
+                // SFN-527: the field is present in the literal but its value
+                // did not lower, so the `insertvalue` below substitutes
+                // `default_return_literal` — the same fabrication as an
+                // omitted field, reached through a different branch. This is
+                // the shape an unresolvable field access takes inside a
+                // struct literal (`S { a: t.unknown, ... }`).
+                let mut _unlowered_diag = "llvm lowering [fatal] [E1002]: unable to lower value for struct literal field `"
+                    + info.name
+                    + "."
+                    + expected.name
+                    + "` — refusing to fabricate a default `"
+                    + expected.llvm_type
+                    + "`";
+                if span != null {
+                    _unlowered_diag = _unlowered_diag + " at "
+                        + _format_literal_span(span);
+                }
+                diagnostics.push(_unlowered_diag);
             }
             if !string_array_contains(used_names, expected.name) {
                 used_names.push(expected.name);

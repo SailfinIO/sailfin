@@ -43,7 +43,8 @@ fn _make_parameter(name: string, llvm_type: string, type_annotation: string) -> 
         llvm_type: llvm_type,
         type_annotation: type_annotation,
         consumed: false,
-        span: null
+        span: null,
+        narrowed_variant: ""
     };
 }
 
@@ -58,7 +59,8 @@ fn _make_binding(name: string, llvm_type: string, type_annotation: string, owner
         scope_id: "fn:test",
         scope_depth: 0,
         allocation_kind: "arena",
-        init_sentinel: ""
+        init_sentinel: "",
+        narrowed_variant: ""
     };
 }
 
@@ -227,7 +229,8 @@ test "drop emission: sent value emits no release at the sender's scope exit" {
         scope_id: rc_binding.scope_id,
         scope_depth: rc_binding.scope_depth,
         allocation_kind: "rc",
-        init_sentinel: ""
+        init_sentinel: "",
+        narrowed_variant: ""
     };
     owned = append_local_binding(owned, rc_binding);
     let owned_drops = emit_scope_drops(owned, "fn:test", 0);
@@ -264,7 +267,8 @@ test "shadowing: only the innermost matching binding is promoted AND consumed" {
         scope_id: "fn:test",
         scope_depth: 0,
         allocation_kind: "arena",
-        init_sentinel: ""
+        init_sentinel: "",
+        narrowed_variant: ""
     };
     let inner = LocalBinding {
         name: "msg",
@@ -276,7 +280,8 @@ test "shadowing: only the innermost matching binding is promoted AND consumed" {
         scope_id: "fn:test__inner",
         scope_depth: 1,
         allocation_kind: "arena",
-        init_sentinel: ""
+        init_sentinel: "",
+        narrowed_variant: ""
     };
     let mut locals: LocalBinding[] = [];
     locals = append_local_binding(locals, _make_binding("ch", "i8*", "channel", null));

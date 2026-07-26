@@ -28,7 +28,8 @@ fn _make_binding(name: string, kind: string) -> LocalBinding {
         scope_id: "fn:test",
         scope_depth: 0,
         allocation_kind: kind,
-        init_sentinel: ""
+        init_sentinel: "",
+        narrowed_variant: ""
     };
 }
 

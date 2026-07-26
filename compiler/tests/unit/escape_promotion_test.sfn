@@ -39,7 +39,8 @@ fn _make_binding(name: string, llvm_type: string, kind: string, ownership: Owner
         scope_id: "fn:test",
         scope_depth: 0,
         allocation_kind: kind,
-        init_sentinel: ""
+        init_sentinel: "",
+        narrowed_variant: ""
     };
 }
 
@@ -221,7 +222,8 @@ fn _make_binding_with_pointer(name: string, llvm_type: string, kind: string, poi
         scope_id: "fn:test",
         scope_depth: 0,
         allocation_kind: kind,
-        init_sentinel: ""
+        init_sentinel: "",
+        narrowed_variant: ""
     };
 }
 
