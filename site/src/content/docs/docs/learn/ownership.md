@@ -1,6 +1,6 @@
 ---
 title: Ownership & Borrowing
-description: How Sailfin manages memory and resources through move semantics, borrowing rules, and linear types — without a garbage collector.
+description: How Sailfin manages memory and resources through move semantics and linear types — without a garbage collector.
 section: learn
 sidebar:
   order: 5
@@ -16,8 +16,10 @@ Sailfin is designed around the same third path, and part of that design is enfor
 > `Affine<T>` bindings reject use-after-move and a second live binding
 > (`E0901`/`E0904`), while `Linear<T>` additionally rejects values left
 > unconsumed at scope exit (`E0907`). The compiler parses `&T`, `&mut T`, and
-> `borrow(...)`, but borrow lifetime and shared/exclusive alias checking remain
-> deferred. `PII<T>`/`Secret<T>` taint enforcement is also not yet live.
+> `borrow(...)`, but borrow lifetime and shared/exclusive alias checking are
+> not implemented today — the design is specified in SFEP-0018, and
+> enforcement is a prioritization call rather than a blocked dependency.
+> `PII<T>`/`Secret<T>` taint enforcement is also not yet live.
 
 ---
 
@@ -236,7 +238,7 @@ Stated precisely:
 
 Together, these three rules are what would eliminate dangling pointers and data races. They describe the intended model; the enforcement note below says how much of it the compiler checks today.
 
-> **Current enforcement:** The compiler parses `&T` and `&mut T` syntax and threads borrow metadata through the IR, but full exclusivity checking is deferred to post-1.0. Violations compile without error today. See the [roadmap](/roadmap) for when enforcement lands.
+> **Current enforcement:** The compiler parses `&T` and `&mut T` syntax and threads borrow metadata through the IR, but full exclusivity checking is not implemented today — SFEP-0018 specifies the design, and whether/when it lands is a prioritization call. Violations compile without error today.
 
 The examples throughout this guide show what the rules will require. Building correct habits now means your code will pass the strict checker without changes.
 
@@ -517,12 +519,12 @@ fn main() ![io] {
 
 ## Ownership and effects
 
-The effect system and the ownership system compose naturally. Borrowing carries implicit effect semantics:
+The effect system and the ownership system are designed to compose. The intent is for borrowing to carry implicit effect semantics:
 
-- Reading a value through `&T` implies a `read` capability on that value.
-- Mutating through `&mut T` implies a `mut` capability.
+- Reading a value through `&T` would imply a `read` capability on that value.
+- Mutating through `&mut T` would imply a `mut` capability.
 
-The `examples/basics/borrowing.sfn` example shows this in action, with functions annotated `![read]` and `![mut]`:
+The `examples/basics/borrowing.sfn` example shows the intended pattern, with functions annotated `![read]` and `![mut]`:
 
 ```sfn
 fn read_counter(counter: &Counter) ![read] -> number {
@@ -534,9 +536,7 @@ fn increment_counter(counter: &mut Counter) ![mut] {
 }
 ```
 
-In the current compiler, `read` and `mut` are accepted as effect annotations. Future releases will integrate borrow effects more tightly with the capability system — for example, requiring that a function that takes `&mut T` to a shared resource declares the appropriate capability, or that `PII<T>` fields cannot be read without a `redact` or `policy` effect.
-
-The intersection of ownership and effects is where Sailfin's safety story comes together: the checked ownership rules narrow how a value can be used, and the effect system statically bounds what a function holding it is allowed to do.
+In the current compiler, `read` and `mut` are accepted as effect annotations, but they are not part of the capability set the effect checker enforces today — annotating a function `![read]` or `![mut]` does not yet connect to a borrow of `&T` or `&mut T`. Whether that integration lands — for example, requiring that a function taking `&mut T` to a shared resource declares the appropriate capability, or that `PII<T>` fields cannot be read without a `redact` or `policy` effect — is a prioritization call rather than a scheduled milestone.
 
 ---
 
@@ -551,8 +551,9 @@ The intersection of ownership and effects is where Sailfin's safety story comes 
 | Linear type | `Linear<T>` | Must be consumed exactly once | Single-use and scope-exit consumption enforced (`E0901`/`E0904`/`E0907`) |
 
 Move tracking and linear must-consume verification ship today. Borrow lifetime
-and shared/exclusive alias checking remain deferred, so `&T`/`&mut T` should be
-treated as syntax and design intent rather than a complete borrow-safety proof.
+and shared/exclusive alias checking are not implemented today — SFEP-0018
+specifies the design — so `&T`/`&mut T` should be treated as syntax and design
+intent rather than a complete borrow-safety proof.
 
 ---
 

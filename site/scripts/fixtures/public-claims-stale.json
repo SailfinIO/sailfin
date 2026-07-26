@@ -8,6 +8,21 @@
     "unbenchmarked-speed-claim": "Blazing fast compilation and fast startup make it ideal for production.",
     "unfalsifiable-superlative": "No other mainstream systems language offers this revolutionary capability.",
     "review-free-generated-code": "Generate, compile, and iterate without human review of the implementation.",
-    "model-effect-overclaim": "Calling an inference API without ![model] is a compile error today."
+    "model-effect-overclaim": "Calling an inference API without ![model] is a compile error today.",
+    "quantified-speed-claim": "Sailfin builds 3x faster than Go with near-zero startup overhead.",
+    "deferral-without-gate": "Full exclusivity checking is deferred to post-1.0."
+  },
+  "honestCopyMustPass": [
+    "Rust's borrow checker gives compile-time memory safety without a garbage collector. Sailfin does not match that today.",
+    "Raises a `ValueError` with a message including the unmatched value.",
+    "Sailfin is not the first language to check effects; Koka, Flix, and Effekt came earlier.",
+    "Never merge agent output without human review.",
+    "The analysis is specified in SFEP-0018 and is not currently prioritized.",
+    "Compile times are tracked for regressions in docs/perf; we publish no cross-language comparison."
+  ],
+  "evasions": {
+    "model-effect-overclaim": "Any function that reaches an AI backend must declare it.",
+    "unfalsifiable-superlative": "A guarantee no other production systems language offers.",
+    "quantified-speed-claim": "Roughly 12x faster than the reference implementation."
   }
 }

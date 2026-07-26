@@ -589,9 +589,10 @@ import { validate_order } from "./validation";
 
 When a function only needs to read a value, shape your API so callers can pass
 the value by reference without surrendering it. The plan is to expose this via
-explicit borrow syntax (`&T`), but ownership and borrowing are deferred until
-after 1.0 — see the [roadmap](/roadmap). Today, prefer small structs and arrays
-passed by value; the compiler is free to share underlying storage.
+explicit borrow syntax (`&T`), but borrowing is not checked today — `&T`/`&mut T`
+parse and SFEP-0018 specifies the enforcement design, but exclusivity checking
+is not implemented yet. Today, prefer small structs and arrays passed by value;
+the compiler is free to share underlying storage.
 
 ```sfn
 // Today: pass-by-value, compiler shares storage where it can
@@ -787,11 +788,12 @@ The fix: add the missing effect to the function signature.
 
 ### Anticipating borrow semantics
 
-Ownership and borrow annotations (`&T`, `&mut T`, `Affine<T>`, `Linear<T>`)
-are parsed today but not enforced — they are scheduled for the post-1.0
-ownership milestone (see the [roadmap](/roadmap)). Until then, write signatures
-in terms of plain types and design for reference semantics in your head. When
-borrows ship, reserve `&T` for read-only access and `&mut T` for mutation:
+`Affine<T>` and `Linear<T>` single-use rules are enforced today. Borrow
+annotations (`&T`, `&mut T`) are parsed but not yet enforced — SFEP-0018
+specifies the design, and whether/when exclusivity checking lands is a
+prioritization call. Until then, write signatures in terms of plain types and
+design for reference semantics in your head. When borrows are enforced,
+reserve `&T` for read-only access and `&mut T` for mutation:
 
 ```sfn
 // Today: plain pass-by-value signature

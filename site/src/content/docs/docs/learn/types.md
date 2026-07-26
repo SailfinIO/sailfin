@@ -742,7 +742,7 @@ fn stringify(value: number | boolean | string) -> string {
 
 Sailfin has four special wrapper types for safety-critical code. Single-use
 rules ship for `Affine<T>` and `Linear<T>`; taint-flow rules for `PII<T>` and
-`Secret<T>` remain deferred.
+`Secret<T>` are not implemented today.
 
 > **Status:** Owned and affine bindings are move-checked (`E0901`/`E0904`),
 > and an unconsumed `Linear<T>` value is rejected at scope exit (`E0907`).

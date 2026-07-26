@@ -83,8 +83,9 @@ fn main() ![io] {"{"}
           <h3>Capability-Controlled Services</h3>
           <p>
             Build backend services where every module's capability surface is visible in the type
-            signature. Code review becomes capability review — a handler that should only read the
-            database can't silently make network calls.
+            signature. Code review becomes capability review: a handler declaring only
+            <code>![io]</code> cannot reach the network, and widening it to <code>![io, net]</code>
+            is a signature change that shows up in the diff rather than a line buried in the body.
           </p>
         </div>
 
@@ -147,13 +148,12 @@ fn main() ![io] {"{"}
           <h3>vs. Rust</h3>
           <p>
             Rust's borrow checker gives compile-time memory safety without a garbage collector.
-            Sailfin does not match that, and is not attempting to at 1.0 — Rust-style borrow checking
-            was deliberately scoped out
-            (<a href="/sfep/0018-borrow-checking-1.0">SFEP-0018</a>). Sailfin enforces moves,
-            use-after-move, and aliased mutation on owned buffers as a correctness floor, but
-            <code>&amp;T</code> / <code>&amp;mut T</code> exclusivity is parsed and not yet checked.
-            Effects and capabilities are what Sailfin offers that Rust does not; memory safety is
-            not on that list.
+            Sailfin does not match that today. It enforces moves, use-after-move, and aliased
+            mutation on owned buffers as a correctness floor, but <code>&amp;T</code> /
+            <code>&amp;mut T</code> exclusivity is parsed and not checked — the analysis is written
+            up in <a href="/sfep/0018-borrow-checking-1.0">SFEP-0018</a> and not currently
+            prioritized. Effects and capabilities are what Sailfin offers that Rust does not;
+            memory safety is not on that list.
           </p>
         </div>
         <div class="card">

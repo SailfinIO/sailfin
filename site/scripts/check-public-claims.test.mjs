@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
+import { dirname, relative, resolve } from "node:path";
 import test from "node:test";
 import { fileURLToPath } from "node:url";
 
@@ -7,7 +8,10 @@ import {
   findCanonicalExampleFailures,
   findRequiredFragmentFailures,
   findRetiredClaimFailures,
+  sourceFiles,
 } from "./check-public-claims.mjs";
+
+const repoRoot = resolve(dirname(fileURLToPath(import.meta.url)), "../..");
 
 const stale = JSON.parse(
   readFileSync(
@@ -49,27 +53,39 @@ for (const [id, content] of Object.entries(stale.marketingOverclaims)) {
   });
 }
 
-test("pattern-matching vocabulary is not mistaken for a superlative", () => {
-  const failures = findRetiredClaimFailures([
-    {
-      path: "standard-library.md",
-      content: "Raises a `ValueError` with a message including the unmatched value.",
-    },
-  ]);
-  assert.deepEqual(failures, []);
-});
+// The guard exists to push copy toward candour, so it must never fire on candid
+// copy. Each of these is a sentence we actively want someone to be able to write.
+for (const content of stale.honestCopyMustPass) {
+  test(`honest copy is not flagged: ${content.slice(0, 45)}...`, () => {
+    const failures = findRetiredClaimFailures([{ path: "why.astro", content }]);
+    assert.deepEqual(
+      failures,
+      [],
+      `guard fired on honest copy: ${JSON.stringify(content)}`,
+    );
+  });
+}
 
-test("accurate comparison copy is not flagged", () => {
-  // The guard must not punish honestly describing what Rust does better than Sailfin.
-  const failures = findRetiredClaimFailures([
-    {
-      path: "why.astro",
-      content:
-        "Rust's borrow checker gives compile-time memory safety without a garbage collector. " +
-        "Sailfin does not match that, and is not attempting to at 1.0.",
-    },
-  ]);
-  assert.deepEqual(failures, []);
+// Rewordings of a claim the guard already rejects in another phrasing. Each of
+// these walked past the first version of its pattern.
+for (const [id, content] of Object.entries(stale.evasions)) {
+  test(`reworded evasion of ${id} is still rejected`, () => {
+    const failures = findRetiredClaimFailures([{ path: "stale.md", content }]);
+    assert.ok(
+      failures.some((failure) => failure.message.includes(id)),
+      `evasion slipped past ${id}: ${JSON.stringify(content)}`,
+    );
+  });
+}
+
+test("llms.txt is inside the scanned set", () => {
+  // Without this, a clean guard run is equally consistent with llms.txt being
+  // scanned and with it being silently skipped -- the state it was in before.
+  const files = sourceFiles(repoRoot).map((path) => relative(repoRoot, path));
+  assert.ok(
+    files.includes("llms.txt"),
+    `llms.txt missing from scanned set (${files.length} files scanned)`,
+  );
 });
 
 test("deliberately broken critical link is rejected", () => {

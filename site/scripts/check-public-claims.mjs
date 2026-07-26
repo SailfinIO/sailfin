@@ -15,6 +15,13 @@ const currentFacingRoots = [
   "site/src/content/blog",
   "site/src/content/docs",
   "site/src/pages",
+  // Deliberately NOT scanned: docs/proposals. SFEPs render publicly at
+  // /sfep/<slug> via the `sfep` content collection, so they are public prose,
+  // but they are dated design records rather than current-facing copy -- an
+  // Accepted SFEP describes the decision as argued at the time, and rewriting
+  // that argument to satisfy a marketing guard would falsify the record. Claims
+  // that need to hold *today* belong in the roots above. Revisit if SFEP prose
+  // starts being cited as product copy.
 ];
 
 const retiredClaims = [
@@ -59,24 +66,57 @@ const retiredClaims = [
   },
   {
     id: "unfalsifiable-superlative",
+    // Several alternatives are deliberately narrowed rather than bare, because the
+    // honest register we want trips the bare form: "the unmatched value" is
+    // pattern-matching vocabulary, and "Sailfin is not the first language to check
+    // effects" is exactly the concession this guard exists to encourage.
     pattern:
-      // "unmatched" is qualified deliberately: bare use is legitimate pattern-matching
-      // vocabulary ("the unmatched value" in standard-library.md), not a superlative.
-      /\bno other (?:mainstream |systems |modern )*language\b|\bthe first language to\b|\brevolutionary\b|\bparadigm shift\b|\bunmatched (?:performance|speed|safety|security)\b/giu,
+      /\bno other (?:\w+ ){0,3}language\b|\b(?<!not )(?:is|are|was|were) the first language to\b|\brevolutionary\b|\bparadigm shift\b|\bunmatched (?:performance|speed|safety|security)\b/giu,
     guidance:
       "Name the real comparison (WASI, Capslock, Koka/Flix/Effekt) and the specific axis instead of an unfalsifiable superlative.",
   },
   {
     id: "review-free-generated-code",
-    pattern: /\b(?:without|no) human review\b/giu,
+    // Requires a positive assertion frame. "Never merge agent output without human
+    // review" is correct and desirable copy and must not fail the build.
+    pattern:
+      /\b(?<!never )(?<!not )(?:ship|merge|deploy|iterate|generate|land)[a-z]*\b[^.\n]{0,40}\bwithout human review\b/giu,
     guidance:
       "Effect checking proves a function's declared capability surface, not that its logic is correct; it narrows review rather than replacing it.",
   },
   {
     id: "model-effect-overclaim",
-    pattern: /!\[model\][^.\n]{0,60}\b(?:is enforced|are enforced|is a compile error|fails the build)\b/giu,
+    // Both orders, because the claim is written both ways: "![model] is enforced"
+    // and "any function that reaches an AI backend must declare it".
+    pattern:
+      // Every "must declare" alternative is anchored to model/AI context. An
+      // unanchored \bmust declare it\b false-fires on correct sentences about
+      // other effects ("greet requires ![io], so this function must declare it
+      // too") and about `unsafe` in capsule.toml.
+      /!\[model\][^.\n]{0,60}\b(?:is|are) (?:enforced|checked|required)\b|!\[model\][^.\n]{0,60}\b(?:is a compile error|fails the build|will fail)\b|\b(?:must|has to) declare (?:the )?!?\[?model\]?[\]\s]|\b(?:AI backend|model-capable API|inference (?:API|backend))[^.\n]{0,45}\b(?:must|has to) declare\b/giu,
     guidance:
       "![model] is reserved: declarable and propagated, but no detector or runtime API ships (docs/status.md).",
+  },
+  {
+    id: "quantified-speed-claim",
+    // A fabricated number reads as measured and is worse than a fabricated adjective.
+    pattern:
+      /\b\d+(?:\.\d+)?\s*(?:x|×)\s+(?:faster|quicker|slower)\b|\bsub-second builds\b|\bnear-zero (?:startup|runtime) overhead\b/giu,
+    guidance:
+      "The repo publishes no cross-language benchmarks; docs/perf/ is same-host regression instrumentation. Cite a measurement or drop the number.",
+  },
+  {
+    id: "deferral-without-gate",
+    // decision-brief.md §156, and it binds: "post-1.0" and "deferred" name a *when*
+    // with no unblocking condition, and agents read a status as a standing
+    // instruction, so parked work is never re-evaluated. 1.0 is a maturity boundary,
+    // not a schedule. Name the gate or the reason instead. The sfn/ai capsule is the
+    // one sanctioned exception (a locked CLAUDE.md decision), so bare "post-1.0"
+    // is not matched -- only the deferral phrasings that assert a schedule.
+    pattern:
+      /\bdeferred to post[- ]1\.0\b|\bdeferred (?:until|to) after 1\.0\b|\bscoped out of 1\.0\b|\bpush(?:ed)? (?:this )?(?:off )?(?:to|until) post[- ]1\.0\b/giu,
+    guidance:
+      "decision-brief.md §156: name the gate (`gated on: <predecessor>`) or the reason it is not prioritized. 1.0 is a maturity boundary, not a schedule.",
   },
 ];
 
@@ -142,7 +182,11 @@ const publicUrls = [
   "https://pkg.sfn.dev",
 ];
 
-function sourceFiles(repoRoot) {
+// Exported so a test can assert llms.txt is actually in the scanned set. It is a
+// `.txt` in the repo root, so it survives only via the `extname(path)` branch
+// below; renaming it extensionless or moving it under a scanned directory would
+// silently drop it from the guard, which is how it drifted in the first place.
+export function sourceFiles(repoRoot) {
   const files = [];
 
   function visit(path) {
