@@ -41,6 +41,30 @@ fn append_string_lines(values: string[], extras: string[]) -> string[] {
     return out;
 }
 
+// Reduce a diagnostic batch to just its `[fatal]` entries.
+//
+// The size guards below bound memory by dropping an oversized batch, but
+// dropping it wholesale also drops any `[fatal]` in it — and `[fatal]` is
+// the only thing that fails the build, so a guard trip would silently
+// disarm the gate it is feeding (SFN-529; audited in
+// `docs/proposals/design-notes/sfn-526-lowering-fatal-gate-audit.md` §3
+// A3). Keeping the fatal subset preserves the memory bound: `[fatal]`
+// entries are rare, so the retained array is small even when the input is
+// not. The substring match mirrors `has_fatal_lowering_diagnostic`
+// (`lowering_core.sfn`), which is the gate this feeds.
+fn retain_fatal_diagnostics(diagnostics: string[]) -> string[] {
+    let mut out: string[] = [];
+    if diagnostics == null { return out; }
+    let mut index: int = 0;
+    loop {
+        if index >= diagnostics.length { break; }
+        let entry = diagnostics[index];
+        if index_of(entry, "[fatal]") >= 0 { out.push(entry); }
+        index += 1;
+    }
+    return out;
+}
+
 fn extend_string_lines_checked(values: string[], extras: string[], label: string) -> string[] {
     let mut safe_values = values;
     if safe_values == null { safe_values = []; }
@@ -53,7 +77,7 @@ fn extend_string_lines_checked(values: string[], extras: string[], label: string
             + " diagnostics (len="
             + number_to_string(extras.length)
             + ")");
-        return out;
+        return extend_string_lines(out, retain_fatal_diagnostics(safe_extras));
     }
     return extend_string_lines(safe_values, safe_extras);
 }

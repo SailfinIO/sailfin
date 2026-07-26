@@ -332,7 +332,19 @@ fn write_llvm_ir(native_module: NativeModule, out_path: string) -> boolean ![io]
     // side-effecting call could have been silently dropped at the
     // unresolved-callee gate; writing the file would lie about
     // success.
-    if has_fatal_lowering_diagnostic(lowered_lines.diagnostics) { return false; }
+    // Print the cause before refusing: a bare `return false` here made a
+    // fatal lowering failure indistinguishable from an ordinary one at the
+    // CLI (SFN-529).
+    if has_fatal_lowering_diagnostic(lowered_lines.diagnostics) {
+        let mut _fpi: int = 0;
+        loop {
+            if _fpi >= lowered_lines.diagnostics.length { break; }
+            let _pdiag = lowered_lines.diagnostics[_fpi];
+            if index_of(_pdiag, "[fatal]") >= 0 { print.err(_pdiag); }
+            _fpi += 1;
+        }
+        return false;
+    }
     return write_llvm_lines_chunked(out_path, lines);
 }
 

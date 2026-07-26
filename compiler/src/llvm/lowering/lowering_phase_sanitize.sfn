@@ -19,7 +19,7 @@ import {
 import { parse_native_bindings_from_text, parse_native_functions_from_text } from "../../native_ir_api";
 import { number_to_string } from "../utils";
 import { is_test_module_slug, sanitize_collection_length } from "./lowering_helpers";
-import { extend_string_lines_checked } from "./lowering_io";
+import { extend_string_lines_checked, retain_fatal_diagnostics } from "./lowering_io";
 import { get_struct_fields_at, get_struct_name_at } from "./lowering_native_helpers";
 import {
     recover_functions_for_lowering,
@@ -86,11 +86,17 @@ fn sanitize_imported_native_texts(imported_native_texts: string[], debug_lowerin
 }
 
 // Sanitize diagnostics array: null-check + length guard.
+//
+// Unlike the sibling guards above, an over-length trip keeps the `[fatal]`
+// entries instead of clearing the array. This is the inbound diagnostics
+// of `lower_to_llvm_lines_with_parsed_context`, read by the `[fatal]` gate
+// downstream, so clearing it would turn a failing build into a passing one
+// (SFN-529).
 fn sanitize_diagnostics(diagnostics_in: string[]) -> string[] {
     let mut safe = diagnostics_in;
     if safe == null { safe = []; }
     if safe.length != sanitize_collection_length(safe.length, 1000000) {
-        safe = [];
+        safe = retain_fatal_diagnostics(safe);
     }
     return safe;
 }
