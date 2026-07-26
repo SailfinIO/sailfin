@@ -38,7 +38,7 @@ The next number is `max + 1`. Add a row in the same PR that introduces an SFEP.
 | [0013](./0013-host-aware-exe-path-intrinsic.md) | Host-Aware `exe_path` Intrinsic | Implemented | runtime |
 | [0014](./0014-agent-output-orchestration.md) | Agent-Legible Build/Test Output | Accepted | tooling |
 | [0015](./0015-llvm-independence.md) | Toolchain Independence — Sailfin-Native Backend | Accepted | runtime |
-| [0016](./0016-capability-sealed-runtime.md) | The Capability-Sealed Runtime | Accepted | runtime |
+| [0016](./0016-capability-sealed-runtime.md) | The Capability-Sealed Runtime — Effects Enforced to the Syscall | Accepted | runtime |
 | [0017](./0017-hierarchical-effects.md) | Hierarchical Sub-Effects as Subsumption | Implemented | language |
 | [0018](./0018-borrow-checking-1.0.md) | Borrow / Ownership Checking for the Native Runtime | Accepted | runtime |
 | [0019](./0019-sfn-http-capsule.md) | `sfn/http` — Typed HTTP Surface | Implemented | tooling |
