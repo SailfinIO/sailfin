@@ -466,15 +466,20 @@ fn make_unknown_type_diagnostic(name: string, anchor: Token?) -> Diagnostic {
 // Reject a type annotation naming a type that resolves to no primitive, no
 // declared struct/enum/interface/alias, no imported symbol, no prelude
 // declaration, and no in-scope type parameter. `known` carries the latter
-// four; primitives are built in. Anchors at the annotation's own span when
-// the parser captured one, falling back to the declared name's span.
+// four; primitives are built in.
+//
+// `TypeAnnotation` carries no span of its own, so the caret lands on the
+// declared name (`anchor_name`/`anchor_span`) — the same anchoring E0826 and
+// E0830 use for annotation diagnostics. Giving the annotation its own span
+// would mean adding a field to `TypeAnnotation`, whose size is pinned at one
+// pointer in `emit_native_layout.canonical_type_layouts()`; that table is
+// consulted ahead of the real struct definition (emit_native_layout.sfn:418),
+// so a second field is written outside the allocation.
 fn check_unknown_type_annotation(annotation: TypeAnnotation?, anchor_name: string, anchor_span: SourceSpan?, known: string[], type_params: string[]) -> Diagnostic[] {
     if annotation == null { return []; }
     let unknown = _first_unknown_type_name(annotation.text, known, type_params);
     if unknown.length == 0 { return []; }
-    let mut anchor = token_from_name(unknown, annotation.span);
-    if anchor == null { anchor = token_from_name(anchor_name, anchor_span); }
-    return [make_unknown_type_diagnostic(unknown, anchor)];
+    return [make_unknown_type_diagnostic(unknown, token_from_name(anchor_name, anchor_span))];
 }
 
 // SFN-385: the closed set of genuine method-call forms per primitive receiver —

@@ -1732,7 +1732,7 @@ fn walk_expression(expression: Expression?, ctx: TypeckCtx) -> Diagnostic[] {
         // SFN-555: the cast target is the position where an unknown type used
         // to reach lowering as a bare `i8*` (lowercase) or an undeclared
         // `%Name*` that only `clang` rejected (capitalized).
-        let cast_target_diags = check_unknown_type_annotation(expression.target_type, expression.target_type.text, null, ctx.known_types, ctx.type_params);
+        let cast_target_diags = check_unknown_type_annotation(expression.target_type, expression.target_type.text, expression.span, ctx.known_types, ctx.type_params);
         if expression.operand.variant == "Identifier" {
             let fn_entry = find_symbol(bindings, expression.operand.name);
             if fn_entry != null {
@@ -1750,7 +1750,7 @@ fn walk_expression(expression: Expression?, ctx: TypeckCtx) -> Diagnostic[] {
         // expression, so there is nothing to walk there. Flow-sensitive
         // narrowing is applied at lowering via the `narrowed_variant`
         // machinery (the typecheck pass tracks names only — no type field).
-        let is_target_diags = check_unknown_type_annotation(expression.target_type, expression.target_type.text, null, ctx.known_types, ctx.type_params);
+        let is_target_diags = check_unknown_type_annotation(expression.target_type, expression.target_type.text, expression.span, ctx.known_types, ctx.type_params);
         return is_target_diags.concat(walk_expression(expression.operand, ctx));
     }
     if expression.variant == "TryOperator" {

@@ -429,10 +429,7 @@ fn parse_type_parameter_clause(parser: Parser) -> TypeParameterParseResult {
                 let bound_text = trim_text(tokens_to_text(bound_tokens));
                 if bound_tokens.length > 0 {
                     if bound_text.length > 0 {
-                        bound = TypeAnnotation {
-                            text: bound_text,
-                            span: source_span_from_tokens(bound_tokens)
-                        };
+                        bound = TypeAnnotation { text: bound_text };
                     }
                 }
                 let name_span = source_span_from_tokens(name_tokens);
@@ -480,7 +477,7 @@ fn parse_implements_clause(parser: Parser) -> ImplementsParseResult {
         let text = trim_text(entries[index]);
         if text.length > 0 {
             implements_types = append_type_annotation(implements_types, TypeAnnotation {
-                text: text, span: null
+                text: text
             });
         }
         index += 1;
@@ -583,10 +580,7 @@ fn parse_single_parameter(initial_parser: Parser) -> ParameterParseResult {
         parser = capture.parser;
         let text = trim_text(tokens_to_text(capture.tokens));
         if text.length > 0 {
-            type_annotation = TypeAnnotation {
-                text: text,
-                span: source_span_from_tokens(capture.tokens)
-            };
+            type_annotation = TypeAnnotation { text: text };
         }
     }
 
@@ -874,10 +868,7 @@ fn parse_variable_with_storage(initial_parser: Parser, is_thread_local: boolean)
         parser = capture.parser;
         let text = trim_text(tokens_to_text(capture.tokens));
         if text.length > 0 {
-            type_annotation = TypeAnnotation {
-                text: text,
-                span: source_span_from_tokens(capture.tokens)
-            };
+            type_annotation = TypeAnnotation { text: text };
         }
     }
 
@@ -1009,10 +1000,7 @@ fn parse_function(initial_parser: Parser, starts_with_async: boolean, decorators
         parser = capture.parser;
         let text = trim_text(tokens_to_text(capture.tokens));
         if text.length > 0 {
-            return_type = TypeAnnotation {
-                text: text,
-                span: source_span_from_tokens(capture.tokens)
-            };
+            return_type = TypeAnnotation { text: text };
         }
     }
 
@@ -1031,10 +1019,7 @@ fn parse_function(initial_parser: Parser, starts_with_async: boolean, decorators
             parser = capture.parser;
             let text = trim_text(tokens_to_text(capture.tokens));
             if text.length > 0 {
-                return_type = TypeAnnotation {
-                    text: text,
-                    span: source_span_from_tokens(capture.tokens)
-                };
+                return_type = TypeAnnotation { text: text };
             }
         }
     }
@@ -1114,10 +1099,7 @@ fn parse_extern_function(initial_parser: Parser, starts_with_unsafe: boolean, de
         parser = capture.parser;
         let text = trim_text(tokens_to_text(capture.tokens));
         if text.length > 0 {
-            return_type = TypeAnnotation {
-                text: text,
-                span: source_span_from_tokens(capture.tokens)
-            };
+            return_type = TypeAnnotation { text: text };
         }
     }
 
@@ -1136,10 +1118,7 @@ fn parse_extern_function(initial_parser: Parser, starts_with_unsafe: boolean, de
             parser = capture.parser;
             let text = trim_text(tokens_to_text(capture.tokens));
             if text.length > 0 {
-                return_type = TypeAnnotation {
-                    text: text,
-                    span: source_span_from_tokens(capture.tokens)
-                };
+                return_type = TypeAnnotation { text: text };
             }
         }
     }
@@ -1218,10 +1197,7 @@ fn parse_extern_var(initial_parser: Parser, starts_with_unsafe: boolean, decorat
 
     let statement = Statement.ExternVarDeclaration {
         name: name,
-        type_annotation: TypeAnnotation {
-            text: type_text,
-            span: source_span_from_tokens(capture.tokens)
-        },
+        type_annotation: TypeAnnotation { text: type_text },
         name_span: name_span,
         decorators: decorators,
         init_value: initializer
@@ -1406,10 +1382,7 @@ fn parse_struct_field(parser: Parser) -> StructFieldParseResult {
 
     let field = FieldDeclaration {
         name: name,
-        type_annotation: TypeAnnotation {
-            text: type_text,
-            span: source_span_from_tokens(capture.tokens)
-        },
+        type_annotation: TypeAnnotation { text: type_text },
         mutable: is_mutable,
         name_span: name_span
     };
@@ -1477,10 +1450,7 @@ fn parse_struct_method(parser: Parser, decorators: Decorator[]) -> MethodParseRe
         current = capture.parser;
         let text = trim_text(tokens_to_text(capture.tokens));
         if text.length > 0 {
-            return_type = TypeAnnotation {
-                text: text,
-                span: source_span_from_tokens(capture.tokens)
-            };
+            return_type = TypeAnnotation { text: text };
         }
     }
 
@@ -1712,10 +1682,7 @@ fn parse_enum_variant_field(parser: Parser) -> StructFieldParseResult {
 
     let field = FieldDeclaration {
         name: name,
-        type_annotation: TypeAnnotation {
-            text: type_text,
-            span: source_span_from_tokens(capture.tokens)
-        },
+        type_annotation: TypeAnnotation { text: type_text },
         mutable: is_mutable,
         name_span: name_span
     };
@@ -1868,10 +1835,7 @@ fn parse_interface_member(parser: Parser, decorators: Decorator[]) -> InterfaceM
         current = capture.parser;
         let text = trim_text(tokens_to_text(capture.tokens));
         if text.length > 0 {
-            return_type = TypeAnnotation {
-                text: text,
-                span: source_span_from_tokens(capture.tokens)
-            };
+            return_type = TypeAnnotation { text: text };
         }
     }
 
@@ -1936,10 +1900,7 @@ fn parse_type_alias(initial_parser: Parser, decorators: Decorator[]) -> Statemen
     parser = capture.parser;
     let aliased_text = trim_text(tokens_to_text(capture.tokens));
     if aliased_text.length == 0 { return parse_unknown(original); }
-    let aliased_type = TypeAnnotation {
-        text: aliased_text,
-        span: source_span_from_tokens(capture.tokens)
-    };
+    let aliased_type = TypeAnnotation { text: aliased_text };
 
     parser = skip_trivia(parser);
     let alias_terminator = parser_peek_raw(parser);

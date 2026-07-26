@@ -11,7 +11,6 @@ struct Program {
 
 struct TypeAnnotation {
     text: string;
-    span: SourceSpan?;
 }
 
 struct TypeParameter {

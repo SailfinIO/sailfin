@@ -513,9 +513,7 @@ fn _reparse_lambda_body(body: Block) -> Block {
 fn _synthesize_lifted_function_rewritten(ctx: LiftContext, lambda: Expression, lambda_id: int, captures: Capture[]) -> _LiftedFnResult {
     let mut parameters: Parameter[] = [];
     parameters.push(Parameter {
-        name: "__env", type_annotation: TypeAnnotation {
-            text: "i8*", span: null
-        }, default_value: null, mutable: false, span: null
+        name: "__env", type_annotation: TypeAnnotation { text: "i8*" }, default_value: null, mutable: false, span: null
     });
     let mut original_index: int = 0;
     loop {
@@ -1359,8 +1357,7 @@ fn _rewrite_variable(ctx: LiftContext, statement: Statement) -> StatementRewrite
         // its caller-supplied annotation untouched.
         if _is_closure_pair_marker_text(result.expression.text) {
             new_annotation = TypeAnnotation {
-                text: closure_sentinel_type_text(),
-                span: null
+                text: closure_sentinel_type_text()
             };
         }
     }
