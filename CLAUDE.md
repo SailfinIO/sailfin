@@ -1,13 +1,29 @@
 # CLAUDE.md
 
-Sailfin is a systems language whose differentiator is **compile-time capability
-enforcement**. This repo is the **self-hosted native compiler**, marching toward
-1.0 on a pure Sailfin toolchain — no Python, no C runtime, no fixup scripts. The
-compiler self-hosts from a released seed via `<seed> build -p compiler`; the
-runtime is pure Sailfin (`runtime/sfn/` + `runtime/prelude.sfn`).
+Sailfin is a systems language that **emits proof, not just binaries**: every build
+produces a machine-checked contract about the code — what it can reach, what
+numbers it produces, what it costs to run — verifiable by someone who does not use
+Sailfin. This repo is the **self-hosted native compiler**, marching toward 1.0 on a
+pure Sailfin toolchain — no Python, no C runtime, no fixup scripts. The compiler
+self-hosts from a released seed via `<seed> build -p compiler`; the runtime is pure
+Sailfin (`runtime/sfn/` + `runtime/prelude.sfn`).
 
-**Three pillars — don't dilute them:** effect types (`![io, net, …]`),
-capability-based security (capsule manifests), structured concurrency.
+**Three pillars — don't dilute them.** Each is a *proof*, not a prohibition:
+
+| Pillar | Claim | Mechanism |
+|---|---|---|
+| **Reach** | the compiler derives a capability manifest and proves it **complete** | effect types (`![io, net, …]`), capsule manifests, `E0402`/`E0403`, the seal (SFEP-0016) as runtime enforcement |
+| **Result** | the same program yields the same bits, and mixed precision cannot compile | numerics contract (SFEP-0054): exact dtype identity, no implicit promotion, ≥f32 accumulators, no reassociation, bit-exact oracle |
+| **Cost** | this schedule, on this target, hits these numerics at this measured throughput — and finishes or is cancelled | schedule-as-contract; structured concurrency (nurseries, cancel-on-fault, deadlines) as the liveness half |
+
+**The restriction-vs-power test — apply it before committing capacity.** A feature
+that only *forbids* something needs a power attached or it does not ship as a
+headline. "Declare `![net]` so reviewers can see reach" fails (payer ≠
+beneficiary); "the compiler derives a complete manifest you can ship and attest"
+passes. Governance is a feature of a language people already chose, never a reason
+to choose one. Full reasoning and the retraction list:
+`docs/strategy/decision-brief.md`.
+
 AI integration is a post-1.0 library concern (`sfn/ai`), gated by `![model]`,
 never language syntax.
 
@@ -143,8 +159,11 @@ When something fails, diagnose root cause before trying a different approach.
 3. **Linear** Initiatives/Projects/Cycles — planning; `sailfin.dev/roadmap` is
    the reviewed public projection (`docs/conventions/public-roadmap.md`)
 4. **`docs/proposals/`** — SFEPs; `0006-build-architecture.md` for build perf
-5. **`docs/strategy/decision-brief.md`** — positioning. Proposals win on
-   architecture; the brief wins on positioning.
+5. **`docs/strategy/decision-brief.md`** — positioning, the three pillars, and the
+   retraction list. Proposals win on architecture; the brief wins on positioning.
+   Its evidence base is `docs/strategy/market-evidence-2026-07.md` — cite that
+   file rather than re-deriving market analysis, and don't cite anything it marks
+   `UNVERIFIED`.
 6. **`docs/style-guide.md`** — coding conventions in full
 
 Examples are compiler-only unless marked with future-syntax comments.
