@@ -397,16 +397,16 @@ fn _first_unknown_type_name(text: string, known: string[], type_params: string[]
     let trimmed = trim_text(text);
     if trimmed.length == 0 { return ""; }
 
-    // Ownership and pointer wrappers: judge the pointee.
+    // Ownership wrapper: judge the owned type.
     if starts_with(trimmed, "move ") {
         return _first_unknown_type_name(slice_text(trimmed, 5, trimmed.length), known, type_params);
     }
-    if starts_with(trimmed, "*mut ") {
-        return _first_unknown_type_name(slice_text(trimmed, 5, trimmed.length), known, type_params);
-    }
-    if starts_with(trimmed, "*") {
-        return _first_unknown_type_name(slice_text(trimmed, 1, trimmed.length), known, type_params);
-    }
+
+    // A raw pointer's pointee is not judged. `*T` is the FFI boundary, where
+    // an opaque C handle that no Sailfin declaration describes is the normal
+    // case — `*File` from `fopen` (runtime/sfn/adapters/filesystem.sfn:494) is
+    // the motivating example.
+    if starts_with(trimmed, "*") { return ""; }
 
     // Optional and array suffixes: judge the element.
     if ends_with(trimmed, "?") {
