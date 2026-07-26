@@ -1,0 +1,51 @@
+// End-to-end regression for `as`-cast signedness (SFN-503, SFEP-0058 §3.3).
+//
+// `map_primitive_type` collapses every unsigned width onto its signed LLVM
+// twin (`u8`→`i8`, `u32`→`i32`), so before this test the cast matrix had no
+// sign to branch on and emitted `sext` for every widening conversion:
+// `255u8 as u64` evaluated to -1 rather than 255, silently, in a shipped
+// and documented feature. The opcode is now selected from the operand's
+// source-level annotation, recovered from its binding.
+//
+// Asserts runtime output rather than IR text so a regression in either the
+// opcode choice or its lowering is caught; `numeric_cast_test.sfn` covers
+// the emitted-IR spelling.
+import { trim_right } from "sfn/strings";
+import { clean_runner_env, nested_runner_scratch } from "sfn/test";
+
+// The compiler-under-test: `$SAILFIN_BIN` if set, else the self-hosted
+// binary relative to the repo root the runner starts from. Mirrors
+// `sfn/test`'s `_resolve_sfn_bin` so CI can point the test at any compiler.
+fn _sfn_bin() -> string ![io] {
+    let configured = env.get("SAILFIN_BIN");
+    if configured.length > 0 { return configured; }
+    return "build/bin/sfn";
+}
+
+struct RunOut {
+    exit: int;
+    out: string;
+}
+
+// `sfn run` compiles+links+executes the fixture, so this spawns a nested
+// runner: its env must have the parent pool's orchestration keys stripped
+// and its own scratch dir, or the nested build binds to the parent's
+// private state (`.claude/rules/no-bash-e2e.md`, SFN-401).
+fn _run_fixture(path: string) -> RunOut ![io] {
+    let child_env = clean_runner_env(nested_runner_scratch("int_cast_sign"));
+    let exit = process.run_capture([_sfn_bin(), "run", path], child_env);
+    let out = process.capture_take_stdout();
+    let _err = process.capture_take_stderr();
+    return RunOut { exit: exit, out: trim_right(out) };
+}
+
+test "int cast sign: unsigned sources zero-extend and signed sources sign-extend" ![io] {
+    let r = _run_fixture("compiler/tests/e2e/fixtures/int_cast_sign.sfn");
+    assert r.exit == 0;
+    let expected = "u8_max_to_u64=255\n" + "i8_neg1_to_i64=-1\n"
+        + "u32_hibit_to_u64=4000000000\n"
+        + "u16_300_to_u8=44\n"
+        + "f64_to_u32=3\n"
+        + "u32_hibit_to_f64=positive";
+    assert r.out == expected;
+}

@@ -75,12 +75,15 @@ A lambda's parameter and return types may be **omitted** when it is passed direc
 
 | Source → Target | LLVM op | Notes |
 |---|---|---|
-| `int` (any width) → wider int | `sext` | Sign-extends |
+| `i8`/`i16`/`i32`/`i64` (signed) → wider int | `sext` | Sign-extends |
+| `u8`/`u16`/`u32`/`u64`/`usize` (unsigned) → wider int | `zext` | Zero-extends |
 | `bool` → wider int | `zext` | `true` → 1, not -1 |
-| `int` (any width) → narrower int | `trunc` | Truncates high bits |
-| `int` (any width) → `float`/`double` | `sitofp` | Signed integer to FP |
+| `int` (any width) → narrower int | `trunc` | Truncates high bits, sign-independent |
+| Signed int → `float`/`double` | `sitofp` | Signed integer to FP |
+| Unsigned int → `float`/`double` | `uitofp` | Unsigned integer to FP |
 | `bool` → `float`/`double` | `uitofp` | `true` → 1.0, not -1.0 |
-| `float`/`double` → `int` (any width) | `fptosi` | Truncates toward zero |
+| `float`/`double` → signed int | `fptosi` | Truncates toward zero |
+| `float`/`double` → unsigned int | `fptoui` | Truncates toward zero |
 | `f32` → `float` (`double`) | `fpext` | FP widening |
 | `float` (`double`) → `f32` | `fptrunc` | FP narrowing |
 | `*T` → `*U` | `bitcast` | Pointer reinterpret |
@@ -94,7 +97,7 @@ A lambda's parameter and return types may be **omitted** when it is passed direc
 
 ### Known limitations (Slice D, 2026-05-03)
 
-- **Source-level signedness is not tracked through casts.** Sailfin's `i8`/`u8`/`i16`/`u16`/`i32`/`u32` annotations all collapse to LLVM `i8`/`i16`/`i32`, so `255_u8 as u64` lowers as `sext` and produces `-1` instead of `255`. Tracked in [issue #295](https://github.com/SailfinIO/sailfin/issues/295)/[#296](https://github.com/SailfinIO/sailfin/issues/296) follow-ups.
+- **Source-level signedness is recovered only for a plain identifier or parameter operand.** Sailfin's `i8`/`u8`/`i16`/`u16`/`i32`/`u32`/`i64`/`u64`/`usize` annotations all collapse to LLVM's signless `i8`/`i16`/`i32`/`i64`, so the cast lowering recovers sign from the operand's source-level annotation via its local/parameter binding: `255u8 as u64` now lowers as `zext` and produces `255` (SFN-503). A **compound operand** — `s.field as u64`, `xs[i] as u64`, `f() as u64`, `(a + b) as u64` — carries no source annotation available to the lowering pass and still selects the signed forms (`sext`/`sitofp`/`fptosi`), so an unsigned compound expression can still produce a sign-extended result. Closing that gap needs the checker's inferred type threaded through expression lowering, scoped to the typecheck slice of SFEP-0058 §3.3 (SFN-501).
 - **Mixed `int` + `float` in a binary op (without an explicit cast) still silently widens to `double`** — the architect-planned `dominant_type` tightening that would reject this rides on Slice E (`number` retirement). Workaround today: spell the cast (`x as float + y` or `x + y as int`). Tracked in [issue #296](https://github.com/SailfinIO/sailfin/issues/296).
 
 ## Type-guard operator (`is`)
