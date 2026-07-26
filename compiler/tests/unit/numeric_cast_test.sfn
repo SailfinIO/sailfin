@@ -18,18 +18,23 @@
 //     test_emit assertions below pin the parens-wrapped form (we
 //     check the native-IR rendering).
 //   * `lower_cast_expression` in
-//     `llvm/expression_lowering/native/core_literals_lowering.sfn`
+//     `llvm/expression_lowering/native/core_cast_lowering.sfn`
 //     adds the numeric-pair matrix on top of the existing
-//     pointer↔pointer / int↔pointer branches:
-//        i1  → int  (wider)  → zext
-//        i*  → i*   (wider)  → sext
-//        i*  → i*   (narrower)→ trunc
-//        i1  → double/float  → uitofp
-//        i*  → double/float  → sitofp
-//        double/float → i*   → fptosi
-//        float → double      → fpext
-//        double → float      → fptrunc
-//        any  → i1 via `as`  → diagnostic ("use `x != 0`")
+//     pointer↔pointer / int↔pointer branches. Extension and int↔float
+//     select on sign, which SFN-503 recovers from the operand's
+//     source-level annotation (identifier operands only):
+//        i1  → int  (wider)         → zext
+//        unsigned → int (wider)     → zext
+//        signed   → int (wider)     → sext
+//        i*  → i*   (narrower)      → trunc
+//        i1  → double/float         → uitofp
+//        unsigned → double/float    → uitofp
+//        signed   → double/float    → sitofp
+//        double/float → unsigned    → fptoui
+//        double/float → signed      → fptosi
+//        float → double             → fpext
+//        double → float             → fptrunc
+//        any  → i1 via `as`         → diagnostic ("use `x != 0`")
 //
 // L2/L3 silent-widening rejection (the architect's `dominant_type`
 // tightening) is **deferred to Slice E** — it can't ship before
