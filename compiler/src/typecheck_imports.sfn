@@ -54,7 +54,7 @@ import { NativeInterface, NativeInterfaceSignature, NativeParameter } from "./na
 fn _type_annotation_or_null_from_text(text: string) -> TypeAnnotation? {
     if text.length == 0 { return null; }
     if strings_equal(text, "void") { return null; }
-    return TypeAnnotation { text: text };
+    return TypeAnnotation { text: text, span: null };
 }
 
 fn parameter_from_native(native: NativeParameter) -> Parameter {

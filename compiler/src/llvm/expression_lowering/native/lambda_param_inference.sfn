@@ -174,7 +174,7 @@ fn backfill_lambda_from_fn_type(lambda: Expression, expected_fn_type: string) ->
         if annotation == null {
             let type_text = _param_type_only(parts.param_types[i]);
             if type_text.length > 0 {
-                annotation = TypeAnnotation { text: type_text };
+                annotation = TypeAnnotation { text: type_text, span: null };
             }
         }
         new_params.push(Parameter {
@@ -186,7 +186,10 @@ fn backfill_lambda_from_fn_type(lambda: Expression, expected_fn_type: string) ->
     let mut new_return: TypeAnnotation? = lambda.return_type;
     if new_return == null {
         if parts.return_type.length > 0 {
-            new_return = TypeAnnotation { text: parts.return_type };
+            new_return = TypeAnnotation {
+                text: parts.return_type,
+                span: null
+            };
         }
     }
 
@@ -231,7 +234,7 @@ fn backfill_lambda_return_from_body(lambda: Expression) -> Expression {
     return Expression.Lambda {
         parameters: lambda.parameters,
         body: lambda.body,
-        return_type: TypeAnnotation { text: inferred },
+        return_type: TypeAnnotation { text: inferred, span: null },
         captures: lambda.captures
     };
 }

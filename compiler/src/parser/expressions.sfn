@@ -1221,10 +1221,14 @@ fn parse_postfix_chain(state: ExpressionTokens, expression: Expression) -> Expre
             if !cast_result.success {
                 return expression_parse_failure(state);
             }
+            let cast_target_token = expression_tokens_peek(after_as);
             current_state = cast_result.state;
             current_expression = Expression.Cast {
                 operand: current_expression,
-                target_type: TypeAnnotation { text: cast_result.text }
+                target_type: TypeAnnotation {
+                    text: cast_result.text,
+                    span: source_span_from_tokens([cast_target_token])
+                }
             };
             continue;
         }
@@ -1244,10 +1248,14 @@ fn parse_postfix_chain(state: ExpressionTokens, expression: Expression) -> Expre
             }
             let is_result = read_is_target(after_is);
             if !is_result.success { return expression_parse_failure(state); }
+            let is_target_token = expression_tokens_peek(after_is);
             current_state = is_result.state;
             current_expression = Expression.Is {
                 operand: current_expression,
-                target_type: TypeAnnotation { text: is_result.text }
+                target_type: TypeAnnotation {
+                    text: is_result.text,
+                    span: source_span_from_tokens([is_target_token])
+                }
             };
             continue;
         }
@@ -1548,7 +1556,9 @@ fn scan_type_argument_list(state: ExpressionTokens) -> TypeArgumentListScanResul
             let top_level = angle_depth == 1 && paren_depth == 0 && brace_depth == 0
                 && bracket_depth == 0;
             if top_level {
-                type_arguments.push(TypeAnnotation { text: current_text });
+                type_arguments.push(TypeAnnotation {
+                    text: current_text, span: null
+                });
                 current_text = "";
                 cursor = expression_tokens_advance(cursor);
             } else {
@@ -1565,7 +1575,7 @@ fn scan_type_argument_list(state: ExpressionTokens) -> TypeArgumentListScanResul
     // comma (`<int,>`) is tolerated; a fully empty list (`<>`) yields no type
     // arguments and is not a turbofish — fall back to comparison parsing.
     if current_text.length > 0 {
-        type_arguments.push(TypeAnnotation { text: current_text });
+        type_arguments.push(TypeAnnotation { text: current_text, span: null });
     }
     if type_arguments.length == 0 {
         return TypeArgumentListScanResult {
@@ -1635,7 +1645,10 @@ fn parse_channel_expression(state: ExpressionTokens) -> ExpressionParseResult {
             return expression_parse_failure(state);
         }
         channel_kind = identifier_text(type_token);
-        element_type = TypeAnnotation { text: channel_kind };
+        element_type = TypeAnnotation {
+            text: channel_kind,
+            span: source_span_from_tokens([type_token])
+        };
         cursor = expression_tokens_advance(after_colon);
     }
     if expression_tokens_is_at_end(cursor) {
@@ -2153,7 +2166,10 @@ fn parse_lambda_expression(state: ExpressionTokens) -> ExpressionParseResult {
             let capture = collect_type_annotation_until(type_parser, ["!", "{", "=>"]);
             let type_text = trim_text(tokens_to_text(capture.tokens));
             if type_text.length > 0 {
-                return_type = TypeAnnotation { text: type_text };
+                return_type = TypeAnnotation {
+                    text: type_text,
+                    span: source_span_from_tokens(capture.tokens)
+                };
             }
             current = ExpressionTokens {
                 tokens: current.tokens,
@@ -2313,7 +2329,10 @@ fn parse_lambda_parameter(state: ExpressionTokens) -> LambdaParameterParseResult
             }
             let type_text = trim_text(tokens_to_text(capture.tokens));
             if type_text.length > 0 {
-                type_annotation = TypeAnnotation { text: type_text };
+                type_annotation = TypeAnnotation {
+                    text: type_text,
+                    span: source_span_from_tokens(capture.tokens)
+                };
             }
             current = capture.state;
         }
