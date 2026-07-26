@@ -28,6 +28,15 @@
 // NOTE on matchers: the `sfn/test` `expect_*` matchers are `![pure]` and so
 // cannot be called from an `![io]` test like these. Assert on the captured
 // `.ll` text with `sfn/strings` predicates instead. (#842.)
+//
+// ---- SFN-573: operator-signedness matrix ----
+// Beyond `as` casts, the *operators* below also branch on operand
+// signedness: `>>` (`lshr`/`ashr`), `/` (`udiv`/`sdiv`), `%` (`urem`/`srem`),
+// and the ordered comparisons `<`/`<=`/`>`/`>=` (`icmp u*`/`icmp s*`). Sign
+// is recovered from the operand's declared binding annotation, so it only
+// resolves for a plain-identifier operand (a local or parameter); a
+// compound operand falls back to the signed form (SFEP-0058 §3.3, SFN-501).
+// `==`/`!=`, `<<`, `&`, `|`, `^` are sign-independent and unchanged.
 import { contains, split, starts_with } from "sfn/strings";
 
 fn _sfn_bin() -> string ![io] {
@@ -352,4 +361,122 @@ test "numeric-cast: bf16 local from double literal narrows via fptrunc" ![io] {
     let body = _emit_body("fn mk() -> bf16 { let x: bf16 = 0.5; return x; }", "define bfloat @mk", "bf16_local_fptrunc");
     assert body.length > 0;
     assert contains(body, "fptrunc double");
+}
+
+// ---- SFN-573: `>>` selects lshr for unsigned, ashr for signed ----
+test "operator-sign: u32 >> lowers as lshr (not ashr)" ![io] {
+    let body = _emit_body("fn f(x: u32, y: u32) -> u32 { return x >> y; }", "define i32 @f", "u32_shr");
+    assert body.length > 0;
+    assert contains(body, "lshr i32");
+    assert ! contains(body, "ashr");
+}
+
+test "operator-sign: i32 >> lowers as ashr" ![io] {
+    let body = _emit_body("fn f(x: i32, y: i32) -> i32 { return x >> y; }", "define i32 @f", "i32_shr");
+    assert body.length > 0;
+    assert contains(body, "ashr i32");
+}
+
+test "operator-sign: u64 >> lowers as lshr" ![io] {
+    let body = _emit_body("fn f(x: u64, y: u64) -> u64 { return x >> y; }", "define i64 @f", "u64_shr");
+    assert body.length > 0;
+    assert contains(body, "lshr i64");
+    assert ! contains(body, "ashr");
+}
+
+// ---- SFN-573: `/` selects udiv for unsigned, sdiv for signed ----
+test "operator-sign: u32 / lowers as udiv (not sdiv)" ![io] {
+    let body = _emit_body("fn f(x: u32, y: u32) -> u32 { return x / y; }", "define i32 @f", "u32_div");
+    assert body.length > 0;
+    assert contains(body, "udiv i32");
+    assert ! contains(body, "sdiv");
+}
+
+test "operator-sign: i32 / lowers as sdiv" ![io] {
+    let body = _emit_body("fn f(x: i32, y: i32) -> i32 { return x / y; }", "define i32 @f", "i32_div");
+    assert body.length > 0;
+    assert contains(body, "sdiv i32");
+}
+
+test "operator-sign: u64 / lowers as udiv" ![io] {
+    let body = _emit_body("fn f(x: u64, y: u64) -> u64 { return x / y; }", "define i64 @f", "u64_div");
+    assert body.length > 0;
+    assert contains(body, "udiv i64");
+    assert ! contains(body, "sdiv");
+}
+
+// ---- SFN-573: `%` selects urem for unsigned, srem for signed ----
+test "operator-sign: u32 % lowers as urem (not srem)" ![io] {
+    let body = _emit_body("fn f(x: u32, y: u32) -> u32 { return x % y; }", "define i32 @f", "u32_rem");
+    assert body.length > 0;
+    assert contains(body, "urem i32");
+    assert ! contains(body, "srem");
+}
+
+test "operator-sign: i32 % lowers as srem" ![io] {
+    let body = _emit_body("fn f(x: i32, y: i32) -> i32 { return x % y; }", "define i32 @f", "i32_rem");
+    assert body.length > 0;
+    assert contains(body, "srem i32");
+}
+
+test "operator-sign: u64 % lowers as urem" ![io] {
+    let body = _emit_body("fn f(x: u64, y: u64) -> u64 { return x % y; }", "define i64 @f", "u64_rem");
+    assert body.length > 0;
+    assert contains(body, "urem i64");
+    assert ! contains(body, "srem");
+}
+
+// ---- SFN-573: ordered comparisons select `icmp u*` for unsigned, `icmp s*` for signed ----
+test "operator-sign: u32 < lowers as icmp ult (not slt)" ![io] {
+    let body = _emit_body("fn f(x: u32, y: u32) -> boolean { return x < y; }", "define i1 @f", "u32_lt");
+    assert body.length > 0;
+    assert contains(body, "icmp ult i32");
+    assert ! contains(body, "icmp slt");
+}
+
+test "operator-sign: u32 <= lowers as icmp ule (not sle)" ![io] {
+    let body = _emit_body("fn f(x: u32, y: u32) -> boolean { return x <= y; }", "define i1 @f", "u32_le");
+    assert body.length > 0;
+    assert contains(body, "icmp ule i32");
+    assert ! contains(body, "icmp sle");
+}
+
+test "operator-sign: u32 > lowers as icmp ugt (not sgt)" ![io] {
+    let body = _emit_body("fn f(x: u32, y: u32) -> boolean { return x > y; }", "define i1 @f", "u32_gt");
+    assert body.length > 0;
+    assert contains(body, "icmp ugt i32");
+    assert ! contains(body, "icmp sgt");
+}
+
+test "operator-sign: u32 >= lowers as icmp uge (not sge)" ![io] {
+    let body = _emit_body("fn f(x: u32, y: u32) -> boolean { return x >= y; }", "define i1 @f", "u32_ge");
+    assert body.length > 0;
+    assert contains(body, "icmp uge i32");
+    assert ! contains(body, "icmp sge");
+}
+
+test "operator-sign: u64 < lowers as icmp ult" ![io] {
+    let body = _emit_body("fn f(x: u64, y: u64) -> boolean { return x < y; }", "define i1 @f", "u64_lt");
+    assert body.length > 0;
+    assert contains(body, "icmp ult i64");
+    assert ! contains(body, "icmp slt");
+}
+
+test "operator-sign: i32 < lowers as icmp slt (unchanged)" ![io] {
+    let body = _emit_body("fn f(x: i32, y: i32) -> boolean { return x < y; }", "define i1 @f", "i32_lt");
+    assert body.length > 0;
+    assert contains(body, "icmp slt i32");
+}
+
+// ---- SFN-573: sign-independent operators are unaffected ----
+test "operator-sign: u32 == stays icmp eq regardless of sign" ![io] {
+    let body = _emit_body("fn f(x: u32, y: u32) -> boolean { return x == y; }", "define i1 @f", "u32_eq");
+    assert body.length > 0;
+    assert contains(body, "icmp eq i32");
+}
+
+test "operator-sign: u32 << stays shl regardless of sign" ![io] {
+    let body = _emit_body("fn f(x: u32, y: u32) -> u32 { return x << y; }", "define i32 @f", "u32_shl");
+    assert body.length > 0;
+    assert contains(body, "shl i32");
 }

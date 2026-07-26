@@ -38,6 +38,7 @@ import {
     harmonise_operands
 } from "./core_operands";
 import { lines_end_with_terminator, strip_enclosing_parentheses } from "./core_operators";
+import { binary_operands_are_unsigned } from "./core_scopes";
 import { is_number_literal } from "./core_text";
 import { emit_runtime_call, empty_runtime_call_overrides } from "./runtime_call";
 
@@ -639,7 +640,9 @@ fn lower_binary_operation(expression: string, match: OperatorMatch, bindings: Pa
                     };
                 }
 
-                let operation = operation_name_for_symbol(match.symbol, "double");
+                // String operands coerced to `double`: the float opcodes
+                // carry no integer sign.
+                let operation = operation_name_for_symbol(match.symbol, "double", false);
                 let temp_name = format_temp_name(current_temp);
                 current_lines.push("  " + temp_name + " = " + operation
                     + " double "
@@ -821,7 +824,8 @@ fn lower_binary_operation(expression: string, match: OperatorMatch, bindings: Pa
             };
         }
     }
-    let operation = operation_name_for_symbol(match.symbol, result_type);
+    let operands_unsigned = binary_operands_are_unsigned(left_text, right_text, bindings, locals, result_type);
+    let operation = operation_name_for_symbol(match.symbol, result_type, operands_unsigned);
     if operation.length == 0 {
         // Slice B (2026-05-02): `operation_name_for_symbol` returns
         // empty when a bitwise/shift operator is applied to a
@@ -1249,7 +1253,8 @@ fn lower_comparison_operation(expression: string, match: OperatorMatch, bindings
         };
     }
 
-    let comparison = emit_comparison_instruction(match.symbol, harmonised.left, harmonised.right, harmonised.temp_index, harmonised.lines);
+    let comparison_unsigned = binary_operands_are_unsigned(left_text, right_text, bindings, locals, harmonised.left.llvm_type);
+    let comparison = emit_comparison_instruction(match.symbol, harmonised.left, harmonised.right, harmonised.temp_index, harmonised.lines, comparison_unsigned);
     diagnostics = extend_string_array(diagnostics, comparison.diagnostics);
     if comparison.operand == null {
         return ExpressionResult {

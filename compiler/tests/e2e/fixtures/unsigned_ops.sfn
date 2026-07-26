@@ -1,0 +1,66 @@
+// Fixture for `unsigned_ops_test.sfn` (SFN-573): runtime values for the
+// operator-signedness matrix — `>>`, `/`, `%`, and ordered comparisons must
+// select the unsigned LLVM opcode (`lshr`/`udiv`/`urem`/`icmp u*`) when the
+// operand's declared type is unsigned, and keep the signed opcode
+// (`ashr`/`sdiv`/`srem`/`icmp s*`) when it is signed.
+//
+// Every case here uses a local, never a narrow-int parameter — narrow-int
+// parameter passing delivers garbage independently of this change (SFN-571),
+// exactly as `int_cast_sign.sfn` documents.
+fn main() -> int ![io] {
+    // u32 with the high bit set: a signed `ashr`/`sdiv`/`srem` treating this
+    // as negative would produce wildly different results from the unsigned
+    // opcode.
+    let a: u32 = 4000000000;
+    let s: u32 = a >> 4;
+    let sv: int = s as int;
+    print("shr4=" + sv);
+    let d: u32 = a / 2;
+    let dv: int = d as int;
+    print("div2=" + dv);
+    let m: u32 = a % 7;
+    let mv: int = m as int;
+    print("mod7=" + mv);
+    let c: u32 = 100;
+    let lt: boolean = a < c;
+    print("lt100=" + lt);
+
+    // u64 with bit 63 set. Built by doubling 2^62 rather than an
+    // out-of-range unsuffixed literal (unsuffixed literals are `i64` and
+    // 2^63 does not fit — literal-bounds checking is SFEP-0058 future work).
+    let hb: u64 = 4611686018427387904;
+    let big: u64 = hb * 2;
+    // The two large results are asserted by comparison rather than printed:
+    // concatenating an `i64` above ~2^53 renders it through the double
+    // stringify path (`5.76460752303424e+17`), which would pin an unrelated
+    // formatting artifact into this test. `==` lowers to `icmp eq` on the
+    // full 64-bit value, so the check stays exact.
+    let bs: u64 = big >> 4;
+    let bs_ok: boolean = bs == 576460752303423488;
+    print("u64_shr4_ok=" + bs_ok);
+    let bd: u64 = big / 2;
+    let bd_ok: boolean = bd == hb;
+    print("u64_div2_ok=" + bd_ok);
+    let bm: u64 = big % 7;
+    let bmv: int = bm as int;
+    print("u64_mod7=" + bmv);
+    let bc: u64 = 100;
+    let blt: boolean = big < bc;
+    print("u64_lt100=" + blt);
+
+    // Signed operands keep the signed opcode: unchanged behaviour.
+    let n: i32 = -16;
+    let ns: i32 = n >> 2;
+    let nsv: int = ns as int;
+    print("i32_shr2=" + nsv);
+    let q: i32 = -9;
+    let qd: i32 = q / 2;
+    let qdv: int = qd as int;
+    print("i32_div2=" + qdv);
+    let z: i32 = 0;
+    let neg: i32 = -1;
+    let slt: boolean = neg < z;
+    print("i32_lt0=" + slt);
+
+    return 0;
+}
