@@ -4,7 +4,7 @@ title: The Capability-Sealed Runtime
 status: Accepted
 type: runtime
 created: 2026-06-07
-updated: 2026-07-25
+updated: 2026-07-26
 author: "agent:compiler-architect; project owner (repositioning)"
 tracking: "#1639, #934, #1642, #1643"
 supersedes:
@@ -218,9 +218,15 @@ A capability seal is a security claim, so be explicit (and note again: **none of
 this is implemented**). For the dream to be honest when it ships, it must state:
 
 **In scope (what the seal aims to guarantee):**
-- A sealed process cannot perform a *syscall class* outside its manifest, even
-  via FFI or dynamically loaded native code, because those calls resolve to the
-  runtime's gated stubs.
+- A **fully sealed** process cannot perform a *syscall class* outside its
+  manifest. This claim applies only when every executable input is
+  Sailfin-produced or part of the owned runtime, the final link is `-nostdlib`,
+  and runtime loading of undeclared executable code is disabled. The linker
+  admission rule in §8.3 makes that boundary decidable.
+- A **provenance-sealed** process may include explicitly vetted foreign code.
+  Sailfin-authored call paths still reach only gated stubs, but the foreign code
+  is part of the trusted computing base (TCB) and may issue un-gated syscalls.
+  This is the only claim available while libc or OpenSSL remains linked.
 - Capability grants are scoped/attenuated/revocable per task.
 
 **Explicitly out of scope (do not over-promise):**
@@ -228,11 +234,8 @@ this is implemented**). For the dream to be honest when it ships, it must state:
   microarchitectural defense.
 - **The runtime itself is TCB.** The syscall layer that enforces the gate is
   trusted; a bug there is a full bypass. This is the cost of owning the boundary.
-- **Direct syscall instructions** in hand-rolled assembly / malicious object code
-  that bypass the stubs entirely. Sealing requires controlling the link such that
-  no un-gated syscall path is present — a real constraint on what can be linked
-  (likely: no raw `syscall` instructions in linked objects; enforced at the
-  assembler/linker Sailfin owns).
+- **Vetted foreign code in a provenance-sealed binary.** Its review and digest
+  establish identity, not confinement; it remains TCB and may bypass the gate.
 - **Kernel/hardware compromise** — out of any language's scope.
 
 ### 8.1 Named un-gated paths in the current tree (added 2026-07-25)
@@ -284,11 +287,81 @@ decidable merely by owning the syscall layer:
   section must say which of the two it is claiming.
 
 The honest enforced boundary at the end of the owned-syscall work is therefore
-**"Sailfin-authored code cannot make an un-gated syscall."** That is real,
-testable, and worth claiming. It is *not* the FFI-and-loaded-code claim above.
-Until open question 4 is answered and a `-nostdlib` link exists, the stronger
-sentence must not be marketed, quoted, or repeated in external material — the
-same discipline that keeps `![gpu]` from implying an accelerator exists.
+**"In a provenance-sealed binary, Sailfin-authored code cannot make an un-gated
+syscall; declared foreign code, including libc and OpenSSL, is trusted and is
+not confined by the seal."** That is real, testable, and suitable for
+`docs/status.md`. It is *not* a process-wide FFI-and-loaded-code claim. Until a
+`-nostdlib` link exists and every executable input meets the fully sealed rule,
+the stronger sentence must not be marketed, quoted, or repeated in external
+material — the same discipline that keeps `![gpu]` from implying an
+accelerator exists.
+
+### 8.3 Link-time admission rule (decision, 2026-07-26)
+
+The owned Linux x86-64 link accepts an executable input only when it falls into
+one of these provenance classes:
+
+1. an object emitted during this build by the Sailfin backend from a source in
+   the resolved capsule graph;
+2. an object emitted during this build from the owned Sailfin runtime sources;
+3. the single compiler-owned syscall-stub object, whose raw syscall instructions
+   are expected and whose entry points enforce the sealed capability mask; or
+4. a foreign object, archive member, shared library, CRT object, interpreter, or
+   transitive shared-library dependency whose exact bytes match an explicit
+   digest in the resolved capsule manifest.
+
+Everything else is rejected before `ld.lld` runs. In particular, a path,
+`-lfoo` name, SONAME, signature, or successful symbol resolution is not
+provenance: the driver must resolve archives to selected members and shared
+libraries through their transitive `DT_NEEDED` closure, hash the exact files it
+will pass to the linker or record for the loader, and reject a missing or
+mismatched declaration. An arbitrary `.o` fixture added to the link without a
+matching declaration must therefore fail regardless of its instruction bytes.
+The same rule applies to executable code requested at runtime: a fully sealed
+binary rejects dynamic loading, while a provenance-sealed loader may map only a
+digest-declared object and must verify it before execution.
+
+Capsule manifests gain a single-line `[build]` string array named
+`vetted-link-inputs`. Each entry has the canonical form
+`"<kind>:<logical-name>:sha256:<64-lowercase-hex>"`, where `<kind>` is `object`,
+`archive`, `shared-library`, `crt`, or `interpreter`. The logical name is for
+diagnostics; the digest is the authority. Dependency manifests contribute their
+entries to the resolved link plan, provenance cards record the resolved path
+and digest, and duplicate logical names with different digests are an error.
+Wildcards, bare linker flags, directories, SONAME-only entries, and an
+"all system libraries" escape hatch are invalid.
+
+OpenSSL's disposition is consequently explicit: while `-lssl -lcrypto` remain
+in the default runtime link, the runtime manifest must declare the exact
+resolved OpenSSL shared libraries and every executable member of their
+transitive dependency closure. Such a binary is **provenance-sealed**, not fully
+sealed, and OpenSSL remains TCB. SFEP-0048's native TLS implementation removes
+that exception; silently treating the current `link-libs` entries as vetted is
+forbidden. Dynamic libc, its CRT/loader, and its transitive dependencies receive
+the same treatment until the `-nostdlib` milestone.
+
+An instruction-aware scan of executable sections may ship as defense in depth,
+but it is a **tripwire, not proof**. The scan reports decoded raw syscall
+instructions outside the compiler-owned stub. For Sailfin-produced objects such
+an instruction is a hard internal-error rejection because the backend should
+not emit it. For digest-vetted foreign inputs it is a prominent diagnostic and
+provenance-card finding, not a hard rejection: false positives or an expected
+vendor implementation must not tempt the linker to replace the decidable
+provenance rule with opcode policy. Undecodable executable bytes are diagnosed
+the same way. The scan cannot detect runtime instruction construction or other
+ways foreign code reaches libc, which is why it never upgrades a
+provenance-sealed artifact to fully sealed.
+
+**What this does not cover:**
+
+- implementing admission or scanning in `compiler/src/build/direct_link.sfn`;
+- proving that digest-vetted foreign code obeys the capability manifest;
+- detecting self-modifying, generated, or otherwise runtime-constructed syscall
+  instructions;
+- a process-wide no-un-gated-syscall claim while libc, OpenSSL, another foreign
+  executable input, or an unrestricted dynamic loader remains;
+- macOS or Windows sealing; their vendor-shim rules follow this tier-1 rule
+  after the Linux implementation is reviewed.
 
 The discipline line (`CLAUDE.md`: *"don't ship unfinished safety claims"*)
 applies with full force here: this must never be marketed as enforced until it is
@@ -307,9 +380,13 @@ is a vision, labeled as one.
    lever; the more it proves, the closer to zero-overhead.
 3. **FFI boundary semantics.** Does an `extern fn` call inherit the caller's
    capability context automatically, or must FFI be explicitly capability-typed?
-4. **Link-time sealing.** What exactly must the owned linker reject to guarantee
-   no un-gated syscall path (raw `syscall` opcodes, un-vetted objects)? This is
-   where Axis 3 and the seal meet concretely.
+4. **Link-time sealing — resolved.** The linker uses the provenance admission
+   rule in §8.3: build-produced Sailfin/owned-runtime objects and the designated
+   syscall stub are admitted; every other executable input and transitive
+   dependency requires an exact manifest digest. Undeclared or mismatched input
+   is rejected. Vetted foreign code remains TCB, so only a `-nostdlib` artifact
+   with no foreign executable input earns the process-wide fully sealed claim.
+   Opcode inspection is defense-in-depth and cannot establish that claim.
 5. **Relationship to #934.** Is #934 (runtime object-capability model) the
    policy-enforcement half of this dream, to be re-scoped as its keystone? Likely
    yes — worth a forward note on #934 if/when this graduates.
