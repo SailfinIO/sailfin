@@ -6,7 +6,7 @@ type: language
 created: 2026-07-01
 updated: 2026-07-26
 author: "agent:compiler-architect; human review"
-tracking: "SFN-501, SFN-502, SFN-503, SFN-573"
+tracking: "SFN-501, SFN-502, SFN-503, SFN-570, SFN-573"
 supersedes:
 superseded-by:
 graduates-to: reference/spec/06-types.md
@@ -46,13 +46,20 @@ on:
 1. **Signedness is silently lost.** `map_primitive_type` maps `u32`→`i32`,
    `u16`→`i16`, `u8`→`i8`, `u64`→`i64`
    ([`type_mapping.sfn:877-895`](../../compiler/src/llvm/type_mapping.sfn#L877-L895)).
-   The cast-lowering matrix documents the resulting footgun in a standing
-   "KNOWN LIMITATION" comment
-   ([`core_literals_lowering.sfn:1837-1845`](../../compiler/src/llvm/expression_lowering/native/core_literals_lowering.sfn#L1837-L1845)):
+   The cast-lowering matrix carried the resulting footgun in a standing
+   "KNOWN LIMITATION" comment:
 
    > "source-level unsigned widths (`u8`/`u16`/`u32`) collapse to `i8`/`i16`/`i32`
    > … `255_u8 as u64` therefore lowers as `sext` and becomes `-1` (sign-
    > extended) rather than `255` (zero-extended)."
+
+   SFN-503 closed this for an operand spelled as a plain identifier or
+   parameter, whose source annotation survives on its binding
+   ([`core_cast_lowering.sfn:479-492`](../../compiler/src/llvm/expression_lowering/native/core_cast_lowering.sfn#L479-L492)).
+   It remains open for a compound operand — `s.field as u64`, `xs[i] as u64`,
+   `f() as u64`, and most commonly arithmetic such as `(a + b) as u64` — which
+   carries no annotation on its `LLVMOperand`. Closing that is the
+   inferred-type threading described in §3.3.
 
    Every `u*`→wider conversion is wrong today. `u8` value `255` widened to `u64`
    yields `-1`. This is a miscompile, not a missing feature.
@@ -253,8 +260,9 @@ and no branches for `i16`/the whole `u*` family (they fall through to the
 walks the operand
 ([`effect_checker.sfn:888-897`](../../compiler/src/effect_checker.sfn#L888-L897),
 #1627). The lowering matrix
-([`core_literals_lowering.sfn:1823-1888`](../../compiler/src/llvm/expression_lowering/native/core_literals_lowering.sfn#L1823-L1888))
-is extended to choose the extend/truncate opcode from the **source type's
+([`core_cast_lowering.sfn:458-563`](../../compiler/src/llvm/expression_lowering/native/core_cast_lowering.sfn#L458-L563)
+— extracted from `core_literals_lowering.sfn` to bound per-module emit working
+set) is extended to choose the extend/truncate opcode from the **source type's
 signedness**, closing the standing KNOWN LIMITATION:
 
 | From → To | Rule | LLVM op |
@@ -264,7 +272,7 @@ signedness**, closing the standing KNOWN LIMITATION:
 | wider → narrower (any sign) | truncate | `trunc` |
 | same width, sign flip (`i32`↔`u32`) | bit-reinterpret, no instruction | (identity) |
 | int → float | signed → `sitofp`, unsigned → `uitofp` | |
-| float → int | signed target → `fptosi`, unsigned target → `fptoui` | |
+| float → int | signed target → `fptosi`, unsigned target → `fptoui` (out-of-range operand is poison — see below) | |
 | `f32`↔`f64` | `fpext` / `fptrunc` | |
 | `bool` (i1) → int | `zext` (true→1) | (unchanged) |
 | any → `bool` via `as` | rejected; use a comparison | (unchanged, `E0537`-style) |
@@ -283,8 +291,20 @@ kind-tag threading `spawn_future_kind` already relies on
 
 Truncation is defined as keeping the low N bits (two's-complement wrap);
 `300u16 as u8 == 44`. Sign/zero extension is defined by the **source** sign.
-These are the standard C/Rust `as` semantics and are documented normatively in
-the spec chapter.
+These two are the standard C/Rust `as` semantics and are documented normatively
+in the spec chapter.
+
+**That appeal does not extend to the float → int row, and this table's choice
+there is not yet settled.** C leaves an out-of-range float → int conversion
+undefined, and Rust's `as` has been *saturating* since 1.45 (`-1.5f64 as u32`
+is `0`), so there is no single "standard C/Rust" behaviour to inherit. The bare
+`fptoui`/`fptosi` specified above is *poison* in LLVM whenever the operand is
+outside the target's range — for an unsigned target that includes every
+negative operand, which the previously-unconditional `fptosi` had rendered
+defined. SFN-503 shipped this row as written; **SFN-570 owns the decision**
+between saturating lowering (`llvm.fptoui.sat` / `llvm.fptosi.sat`, matching
+Rust) and a diagnostic on statically-known out-of-range operands, and will
+amend this row and the spec chapter with whichever is chosen.
 
 ### 3.4 Overflow: default = trap in debug / wrap in release; `wrapping_*` escape
 
@@ -404,7 +424,7 @@ Passes that change, in pipeline order:
    (`E0824`); implicit-integer-conversion rejection (`E0825`); the new
    mixed-integer arithmetic rejection.
 4. **Emit / lowering** (`llvm/type_mapping.sfn`,
-   `llvm/expression_lowering/native/core_literals_lowering.sfn`,
+   `llvm/expression_lowering/native/core_cast_lowering.sfn`,
    `.../core_operands.sfn`) — sign-aware `as` opcodes (closes the KNOWN
    LIMITATION), sign-aware `sdiv`/`udiv` and `icmp slt`/`ult`, and the
    debug-mode overflow-intrinsic path with the release wrap fallback.
@@ -536,9 +556,11 @@ opcode selection.
 ## 9. References
 
 - **Code (the gap):**
-  `compiler/src/llvm/type_mapping.sfn:859-897` (the u*→signed collapse),
-  `compiler/src/llvm/expression_lowering/native/core_literals_lowering.sfn:1837-1845`
-  (the standing "KNOWN LIMITATION" comment),
+  `compiler/src/llvm/type_mapping.sfn:899-939` (the u*→signed collapse) and
+  `:954-962` (`integer_type_is_signed`, the sign source of truth),
+  `compiler/src/llvm/expression_lowering/native/core_cast_lowering.sfn:458-563`
+  (the cast matrix; the KNOWN LIMITATION it carried is now narrowed to
+  compound operands at `:479-492`),
   `compiler/src/llvm/expression_lowering/native/core_operands.sfn:2495-2557`
   (`dominant_type` — i8/i32/i64-only branches, silent same-kind widening),
   `compiler/src/lexer.sfn:190-280` (no suffix support),
