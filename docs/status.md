@@ -1,6 +1,6 @@
 # Status
 
-Updated: 2026-07-25. Seed pinned to `0.8.0` (`bootstrap.toml`
+Updated: 2026-07-26. Seed pinned to `0.8.2` (`bootstrap.toml`
 `[seed].version` — SFEP-0047); the compiler version source of truth is
 `compiler/capsule.toml`.
 
@@ -478,6 +478,30 @@ here.
   dropping the member. Interface *signature conformance* (checking that an
   implementing struct's method signatures match the interface) remains a
   separate, still-draft effort (`draft-interface-signature-conformance`).
+- **LLVM lowering fails closed on sub-lowering failure** (`E1002`, SFN-527):
+  the eight lowering consumers that previously fell back to a fabricated
+  `default_return_literal` when a sub-lowering failed — bare `return;` in a
+  value-returning function, a `return`/assignment/`let`-initializer whose
+  operand didn't lower or couldn't coerce to its target type, and a struct
+  literal omitting a declared field (the SFN-392 zero-fill gap) — now emit a
+  tagged `llvm lowering [fatal] [E1002]` diagnostic (naming the enclosing
+  function, or a source span for the struct-literal site) and fail the build
+  non-zero, instead of silently emitting `ret 0`/`store 0`/
+  `insertvalue <default>` at exit 0. The placeholder value is still emitted so
+  the rest of the pass sees structurally valid IR. Lowering-stage gate only —
+  `sfn check` still passes on these programs; closing the typecheck half for
+  unresolvable field accesses is separate (SFN-543). The structural
+  block-terminator fallback in `emit_llvm_function` deliberately stays
+  untagged: it also fires on *correct* code the pass cannot prove reachable
+  (e.g. a `loop { if ... { return ...; } }` body) absent real reachability
+  analysis. Design note:
+  `docs/proposals/design-notes/sfn-526-lowering-fatal-gate-audit.md`. The gate
+  unmasked a live shipped miscompile in
+  `runtime/sfn/adapters/websocket.sfn::_ws_handle_fd` — a cast over a
+  parenthesized `<<` expression didn't lower, so fd reassembly returned `0`
+  and every websocket send/close operated on fd 0 (stdin) — fixed by binding
+  the value before the cast; the underlying cast-lowering bug is tracked
+  separately (SFN-560).
 
 ## Feature Matrix
 
