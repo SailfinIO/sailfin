@@ -191,7 +191,14 @@ test "atomic-publish: temp name is template-length and unique per call" ![io] {
 
     let first = _mktemp_sibling_cmd(dst);
     let second = _mktemp_sibling_cmd(dst);
-    assert first.length == (scratch + "/.sfn_stage.XXXXXX").length;
+    // Bound to a local rather than measured inline: `(a + b).length` binds
+    // `.length` to the right operand instead of the parenthesized
+    // concatenation (SFN-556). Inline, this compared against
+    // `scratch + "18"` rather than the template's length — and because that
+    // mis-parse produced an operand pair lowering refused to coerce, the
+    // whole assertion was dropped from the IR and never ran (SFN-548).
+    let template = scratch + "/.sfn_stage.XXXXXX";
+    assert first.length == template.length;
     assert second.length == first.length;
     // `mkstemp` creates with `O_EXCL`, so two calls cannot collide.
     assert first != second;

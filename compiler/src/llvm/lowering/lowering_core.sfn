@@ -538,8 +538,14 @@ fn lower_to_llvm_lines_with_parsed_context_for_tests(native_module: NativeModule
         if rj < total_regions - 1 {
             next_lbl = "region" + number_to_string(rj + 1);
         }
-        let run_arr = number_to_string(("  RUN  " + test_labels[_ri]).length + 1);
-        let run_blen = number_to_string(("  RUN  " + test_labels[_ri]).length);
+        // Bound to a local rather than measured inline: `(a + b).length`
+        // binds `.length` to the right operand instead of the parenthesized
+        // concatenation (SFN-556), so the inline form sized this marker from
+        // the label's length alone and emitted a blank line in place of the
+        // RUN marker.
+        let run_line = "  RUN  " + test_labels[_ri];
+        let run_arr = number_to_string(run_line.length + 1);
+        let run_blen = number_to_string(run_line.length);
         let nm_arr = number_to_string(test_labels[_ri].length + 1);
         // Region entry: RUN marker, then frame setup.
         harness = extend_string_lines(harness, ["region" + rj_s + ":",]);
