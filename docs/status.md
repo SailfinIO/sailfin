@@ -434,8 +434,11 @@ here.
   Follow-ups tracked under epic #1180: `wss://`/TLS (#1925), a per-client
   handler API — `server.clients()`/`onMessage`/per-client send (#1926), typed
   message channels/backpressure (#1927), and client-side receive.
-- **Undefined free-function rejection** (`E0420`, #616/#812): unresolvable
-  bare-identifier callees fail typecheck.
+- **Undefined free-function rejection** (`E0420`, #616/#812, SFN-544):
+  unresolvable bare-identifier callees fail typecheck at their use-site span;
+  when the staged workspace exports the name, the diagnostic also identifies
+  the module to import. These user errors stop before backend linking and are
+  not presented as ICEs.
 - **Function references**: a bare fn name in value position lowers to the
   function's address (#1146); unsupported reference forms are rejected at
   typecheck (`E0808`/`E0809`, #1147); `* fn (A) -> R` values call through an

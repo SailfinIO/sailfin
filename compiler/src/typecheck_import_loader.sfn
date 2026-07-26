@@ -31,6 +31,7 @@ import { Statement } from "./ast";
 import {
     ImportSymbolTable,
     append_import_decorator_function,
+    append_import_function_from_module,
     empty_import_symbols
 } from "./effect_imports";
 import { NativeFunction } from "./native_ir";
@@ -330,7 +331,7 @@ fn load_imported_interfaces_from_paths(paths: string[]) -> ImportedInterfaceLoad
             // per-batch merge — a plain `append_import_function` would reset
             // it to false, defeating the metadata channel before it reaches
             // `localize_import_symbols_for_program`.
-            function_effects = append_import_decorator_function(function_effects, entry.name, entry.effects, entry.is_decorator);
+            function_effects = append_import_function_from_module(function_effects, entry.name, entry.effects, entry.is_decorator, _provider_module_from_artifact_path(path));
             k += 1;
         }
         if parsed.interfaces.length == 0 { skipped.push(path); } else {
@@ -352,6 +353,35 @@ fn load_imported_interfaces_from_paths(paths: string[]) -> ImportedInterfaceLoad
         skipped_paths: skipped,
         native_texts: native_texts
     };
+}
+
+// Import-context paths end in `<logical-module>.sfn-asm`; preserving that
+// suffix-free tail gives unresolved-call diagnostics an actionable import
+// target without coupling semantic analysis to the resolver's source graph.
+fn _provider_module_from_artifact_path(path: string) -> string {
+    let marker = "/import-context/";
+    let mut start: int = 0;
+    let marker_at = _find_text(path, marker);
+    if marker_at >= 0 { start = marker_at + marker.length; }
+    let mut end = path.length;
+    let suffix = ".sfn-asm";
+    if end >= suffix.length {
+        if substring(path, end - suffix.length, end) == suffix {
+            end -= suffix.length;
+        }
+    }
+    return substring(path, start, end);
+}
+
+fn _find_text(text: string, needle: string) -> int {
+    if needle.length == 0 { return 0; }
+    let mut i: int = 0;
+    loop {
+        if i + needle.length > text.length { break; }
+        if substring(text, i, i + needle.length) == needle { return i; }
+        i += 1;
+    }
+    return -1;
 }
 
 // Backwards-compat shim. `load_imported_interfaces_from_paths` now

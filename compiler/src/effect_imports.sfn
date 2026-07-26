@@ -65,6 +65,9 @@ struct ImportedFunctionSignature {
     // stable — the same trailing-field discipline `origin` itself and
     // `Diagnostic.suggestion` follow.
     is_decorator: boolean;
+    // Logical provider module, populated by the import-context loader from
+    // the staged artifact path. Empty for synthetic/unit-test tables.
+    provider_module: string;
 }
 
 // Aggregate of imported callable signatures exposed to a single
@@ -96,7 +99,7 @@ fn empty_import_symbols() -> ImportSymbolTable {
 // re-export carries identical effect annotations); a future
 // diagnostic for divergent effect lists can land in Phase G.
 fn append_import_function(table: ImportSymbolTable, name: string, effects: string[]) -> ImportSymbolTable {
-    return _append_function_with_origin(table, name, effects, "import", false);
+    return _append_function_with_origin(table, name, effects, "import", false, "");
 }
 
 // SFEP-0023 §4.2: record an imported function together with whether it is
@@ -106,7 +109,11 @@ fn append_import_function(table: ImportSymbolTable, name: string, effects: strin
 // it rewrites the global table to per-program local names — a plain
 // `append_import_function` there would silently drop the marker.
 fn append_import_decorator_function(table: ImportSymbolTable, name: string, effects: string[], is_decorator: boolean) -> ImportSymbolTable {
-    return _append_function_with_origin(table, name, effects, "import", is_decorator);
+    return _append_function_with_origin(table, name, effects, "import", is_decorator, "");
+}
+
+fn append_import_function_from_module(table: ImportSymbolTable, name: string, effects: string[], is_decorator: boolean, provider_module: string) -> ImportSymbolTable {
+    return _append_function_with_origin(table, name, effects, "import", is_decorator, provider_module);
 }
 
 // G1b (#1184): record a same-module top-level `fn` (name, effects) in the
@@ -116,10 +123,10 @@ fn append_import_decorator_function(table: ImportSymbolTable, name: string, effe
 // into the localized import table after `localize_import_symbols_for_program`
 // so a single threaded `ImportSymbolTable` carries both kinds.
 fn append_local_function(table: ImportSymbolTable, name: string, effects: string[]) -> ImportSymbolTable {
-    return _append_function_with_origin(table, name, effects, "local", false);
+    return _append_function_with_origin(table, name, effects, "local", false, "");
 }
 
-fn _append_function_with_origin(table: ImportSymbolTable, name: string, effects: string[], origin: string, is_decorator: boolean) -> ImportSymbolTable {
+fn _append_function_with_origin(table: ImportSymbolTable, name: string, effects: string[], origin: string, is_decorator: boolean, provider_module: string) -> ImportSymbolTable {
     if name.length == 0 { return table; }
     let mut updated = table;
     let mut existing_index: int = -1;
@@ -143,7 +150,8 @@ fn _append_function_with_origin(table: ImportSymbolTable, name: string, effects:
         name: name,
         effects: effects_copy,
         origin: origin,
-        is_decorator: is_decorator
+        is_decorator: is_decorator,
+        provider_module: provider_module
     };
     if existing_index >= 0 {
         updated.functions[existing_index] = entry;
@@ -209,7 +217,7 @@ fn localize_import_symbols_for_program(program: Program, table: ImportSymbolTabl
                         let alias_str: string? = alias;
                         if alias_str.length > 0 { local_name = alias_str; }
                     }
-                    local = append_import_decorator_function(local, local_name, entry.effects, entry.is_decorator);
+                    local = append_import_function_from_module(local, local_name, entry.effects, entry.is_decorator, entry.provider_module);
                 }
                 s += 1;
             }
@@ -224,6 +232,7 @@ export {
     ImportedFunctionSignature,
     append_import_function,
     append_import_decorator_function,
+    append_import_function_from_module,
     append_local_function,
     empty_import_symbols,
     localize_import_symbols_for_program,

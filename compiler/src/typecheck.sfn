@@ -216,7 +216,7 @@ fn typecheck_diagnostics_full(program: Program, imported_interfaces: Statement[]
     // SFN-555: the same resolution scope answers "is this a known type name?".
     // Flattened once here so the E0013 check never rebuilds it per annotation.
     let known_types = _names_from_symbols(resolution_scope);
-    let scoped_diagnostics = check_program_scopes(program, combined_interfaces, local_imports, resolution_scope, generic_struct_names, known_types);
+    let scoped_diagnostics = check_program_scopes(program, combined_interfaces, local_imports, imported_function_effects, resolution_scope, generic_struct_names, known_types);
 
     let instantiation_diagnostics = check_generic_instantiation_sites(program, combined_interfaces, local_structs);
 
@@ -531,6 +531,9 @@ fn register_top_level_symbol(statement: Statement, existing: SymbolEntry[]) -> S
 struct TypeckCtx {
     bindings: SymbolEntry[];
     imports: ImportSymbolTable;
+    // All workspace-visible exports, before per-program import localization.
+    // Resolution never consults this table; it is hint-only for E0420.
+    available_imports: ImportSymbolTable;
     interfaces: Statement[];
     top_level: SymbolEntry[];
     is_top_level: boolean;
@@ -555,10 +558,11 @@ struct TypeckCtx {
 }
 
 // Root context for a walk: top-level scope, no enclosing return type.
-fn make_typeck_ctx(bindings: SymbolEntry[], imports: ImportSymbolTable, interfaces: Statement[], top_level: SymbolEntry[], is_top_level: boolean, generic_struct_names: string[], known_types: string[]) -> TypeckCtx {
+fn make_typeck_ctx(bindings: SymbolEntry[], imports: ImportSymbolTable, available_imports: ImportSymbolTable, interfaces: Statement[], top_level: SymbolEntry[], is_top_level: boolean, generic_struct_names: string[], known_types: string[]) -> TypeckCtx {
     return TypeckCtx {
         bindings: bindings,
         imports: imports,
+        available_imports: available_imports,
         interfaces: interfaces,
         top_level: top_level,
         is_top_level: is_top_level,
@@ -581,6 +585,7 @@ fn ctx_with_type_params(ctx: TypeckCtx, names: string[]) -> TypeckCtx {
     return TypeckCtx {
         bindings: ctx.bindings,
         imports: ctx.imports,
+        available_imports: ctx.available_imports,
         interfaces: ctx.interfaces,
         top_level: ctx.top_level,
         is_top_level: ctx.is_top_level,
@@ -603,6 +608,7 @@ fn ctx_with_bindings(ctx: TypeckCtx, bindings: SymbolEntry[], scope_start: int) 
     return TypeckCtx {
         bindings: bindings,
         imports: ctx.imports,
+        available_imports: ctx.available_imports,
         interfaces: ctx.interfaces,
         top_level: ctx.top_level,
         is_top_level: false,
@@ -623,6 +629,7 @@ fn ctx_enter_body(ctx: TypeckCtx, bindings: SymbolEntry[], return_type: TypeAnno
     return TypeckCtx {
         bindings: bindings,
         imports: ctx.imports,
+        available_imports: ctx.available_imports,
         interfaces: ctx.interfaces,
         top_level: ctx.top_level,
         is_top_level: false,
@@ -636,12 +643,12 @@ fn ctx_enter_body(ctx: TypeckCtx, bindings: SymbolEntry[], return_type: TypeAnno
     };
 }
 
-fn check_program_scopes(program: Program, interfaces: Statement[], imports: ImportSymbolTable, top_level: SymbolEntry[], generic_struct_names: string[], known_types: string[]) -> Diagnostic[] {
+fn check_program_scopes(program: Program, interfaces: Statement[], imports: ImportSymbolTable, available_imports: ImportSymbolTable, top_level: SymbolEntry[], generic_struct_names: string[], known_types: string[]) -> Diagnostic[] {
     let mut bindings: SymbolEntry[] = [];
     let mut diagnostics: Diagnostic[] = [];
 
     for statement in program.statements {
-        let result = check_statement(statement, make_typeck_ctx(bindings, imports, interfaces, top_level, true, generic_struct_names, known_types));
+        let result = check_statement(statement, make_typeck_ctx(bindings, imports, available_imports, interfaces, top_level, true, generic_struct_names, known_types));
         bindings = result.bindings;
         let mut _ci: int = 0;
         loop {
@@ -1544,7 +1551,12 @@ fn walk_expression(expression: Expression?, ctx: TypeckCtx) -> Diagnostic[] {
                 } else {
                     if !is_builtin_call_name(callee_name) {
                         if lookup_imported_function(imports, callee_name) == null {
-                            diagnostics.push(make_undefined_function_diagnostic(callee_name, expression.callee.span));
+                            let available = lookup_imported_function(ctx.available_imports, callee_name);
+                            let mut provider: string = "";
+                            if available != null {
+                                provider = available.provider_module;
+                            }
+                            diagnostics.push(make_undefined_function_diagnostic(callee_name, expression.callee.span, provider));
                         }
                     }
                 }
