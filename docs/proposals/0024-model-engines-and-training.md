@@ -1,16 +1,27 @@
 ---
 sfep: 24
 title: Model Engines, Adapters, Tensors, Training
-status: Draft
+status: Superseded
 type: informational
 created: 2025-12-01
-updated: 2026-06-15
+updated: 2026-07-26
 author: "agent:compiler-architect"
 tracking:
 supersedes:
-superseded-by:
+superseded-by: "SFEP-0052, SFEP-0053, SFEP-0054, SFEP-0062"
 graduates-to: reference/preview/model-execution.md
 ---
+
+> **Superseded (2026-07-26)** by [SFEP-0052](./0052-ml-acceleration-strategy.md)
+> (strategy), [SFEP-0053](./0053-shape-typed-tensor-ir.md) (tensor IR),
+> [SFEP-0054](./0054-low-precision-numerics.md) (numerics), and
+> [SFEP-0062](./0062-numerical-contracts.md) (contracts). This draft's `![train]`
+> effect is **not** part of the canonical six (`clock`, `gpu`, `io`, `model`,
+> `net`, `rand` — `effect_taxonomy.sfn::canonical_effects()`), and its
+> `Tensor<Shape, DType>` type-parameter order is reversed relative to
+> SFEP-0052's `Tensor<T, [dims]>`. §11's open questions below were answered by
+> SFEP-0052 roughly a year later. The body is retained as the historical
+> record, not as current direction — read the four SFEPs above instead.
 
 # Sailfin Proposal: Model Engines, Adapters, Tensors, and Training
 
