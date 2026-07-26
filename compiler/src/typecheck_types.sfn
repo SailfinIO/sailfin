@@ -419,10 +419,10 @@ fn _first_unknown_type_name(text: string, known: string[], type_params: string[]
     // Function types, intersections, module-qualified names, and any spaced
     // spelling are not modelled — E0826 owns the bare `(...) -> R` reject, and
     // a qualified name resolves through an import this checker cannot see.
-    if contains_string(trimmed, "(") { return ""; }
-    if contains_string(trimmed, "&") { return ""; }
-    if contains_string(trimmed, ".") { return ""; }
-    if contains_string(trimmed, " ") { return ""; }
+    if index_of(trimmed, "(") >= 0 { return ""; }
+    if index_of(trimmed, "&") >= 0 { return ""; }
+    if index_of(trimmed, ".") >= 0 { return ""; }
+    if index_of(trimmed, " ") >= 0 { return ""; }
 
     // Generic instantiation `Base<Args>`: judge the base, then each argument.
     if ends_with(trimmed, ">") {
