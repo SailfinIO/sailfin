@@ -1,8 +1,10 @@
 // End-to-end lockstep guard for SFN-546: `process.run` must leave the child
 // attached to the parent's stdout/stderr on BOTH POSIX and Windows (the
 // contract stated in the header of `runtime/sfn/platform/process_windows.sfn`).
-// On POSIX this already holds (`posix_spawnp` with `file_actions = null`,
-// `runtime/sfn/process.sfn`); on Windows it is fixed in a companion change.
+// On POSIX this holds via `posix_spawnp` with `file_actions = null`
+// (`runtime/sfn/process.sfn`); on Windows it holds via the inheritable
+// std-handle duplication in `sfn_process_run`
+// (`runtime/sfn/platform/process_windows.sfn`).
 //
 // `process.run` has no capture surface by design, so the only way to observe
 // "the child's output reached the parent's stdout" is from OUTSIDE a parent
@@ -13,10 +15,15 @@
 // buffers if the inner `process.run` passed the grandchild's output through
 // to the nested `sfn run` process's own streams.
 //
-// This test must pass unchanged on Linux today (pinning the POSIX contract
-// against regression) and is the assertion the in-flight Windows fix makes
-// pass there too — it is not expected to flip red-to-green on this platform.
-import { find } from "sfn/strings";
+// The POSIX leg is genuine coverage on every Linux run; the Windows leg only
+// executes on a Windows host, so this file does not go red-to-green on Linux.
+// The third test below is the Linux-runnable half of the SFN-546 guard.
+//
+// The property is proved TRANSITIVELY: `sfn run` itself passes its child's
+// output through with `process.run` (`compiler/src/cli/commands/run.sfn`), so
+// on Windows this exercises `sfn_process_run` at two levels and a failure
+// does not localize to one of them on its own.
+import { contains, find } from "sfn/strings";
 import { clean_runner_env, nested_runner_scratch } from "sfn/test";
 
 // The compiler-under-test: `$SAILFIN_BIN` if set, else the self-hosted
@@ -97,10 +104,50 @@ test "process.run: passes a nested child's stdout/stderr through to the caller (
 // `process.capture_take_stdout()` rather than leaking onto this test's own
 // stdout.
 test "process.run_capture: still captures rather than passing through (SFN-546)" ![io] {
+    // `[]` is a deliberate EMPTY child environment, not "inherit" — `echo`
+    // needs none, and `posix_spawnp` resolves a bare name from the caller's
+    // `PATH` rather than from `envp`.
     let exit = process.run_capture(["echo", "SFN546_CAPTURE_SENTINEL_7ab1"], []);
     let out = process.capture_take_stdout();
     let _err = process.capture_take_stderr();
 
     assert exit == 0;
     assert find(out, "SFN546_CAPTURE_SENTINEL_7ab1", 0) >= 0;
+}
+
+// ── The Linux-runnable half of the SFN-546 guard ──────────────────────
+// `runtime/sfn/platform/process_windows.sfn` is deliberately absent from
+// `runtime/capsule.toml`'s `sfn-sources` and enters only the Makefile's
+// cross-windows RUNTIME_MODS, so nothing on a Linux run compiles it and the
+// two tests above exercise only their POSIX leg here. Without a static check,
+// the Windows fix could be reverted and every Linux check would stay green.
+//
+// Same source-consistency form as `cross_windows_runtime_modules_test.sfn`:
+// whole-file `contains` against tokens unique to `sfn_process_run`, with no
+// string slicing or in-loop array growth (both miscompile from an `![io]`
+// test in this repo — see that file's IMPLEMENTATION NOTE, #842).
+test "process.run: the Windows spawn keeps its inheritable-stdio wiring (SFN-546)" ![io] {
+    let src = fs.readFile("runtime/sfn/platform/process_windows.sfn");
+
+    // `bInheritHandles` is a computed flag, not the literal `0` that
+    // discarded the child's output. This exact argument list occurs only in
+    // `sfn_process_run` — `run_capture` and `_pw_spawn_impl` pass a literal
+    // `1` and an `env_block`.
+    assert contains(src, "CreateProcessA(null, cmdline, null, null, inherit,");
+
+    // The parent's stdout/stderr are the handles being passed down.
+    // `GetStdHandle(-11)` / `(-12)` (STD_OUTPUT_HANDLE / STD_ERROR_HANDLE)
+    // appear nowhere else in the module.
+    assert contains(src, "GetStdHandle(-11)");
+    assert contains(src, "GetStdHandle(-12)");
+
+    // They are handed down as inheritable duplicates, and released after the
+    // spawn rather than leaked.
+    assert contains(src, "fn _pw_dup_inheritable(");
+    assert contains(src, "fn _pw_close_dup(");
+    assert contains(src, "_pw_close_dup(h_out)");
+
+    // STARTF_USESTDHANDLES (0x100) must be set, or the named handles are
+    // ignored and the wiring above is dead code.
+    assert contains(src, "flags_view.v = 256");
 }
