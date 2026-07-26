@@ -1,0 +1,41 @@
+// Unit tests for `integer_type_is_signed` (SFEP-0058 §3.1,
+// compiler/src/llvm/type_mapping.sfn), the sole source-of-truth
+// signedness predicate consumed by SFN-503's unsigned-widening-cast
+// lowering (zext/uitofp/fptoui). Pins the closed unsigned set, the
+// signed set, whitespace tolerance, and the load-bearing fallback:
+// an unrecognised or non-integer name answers signed so an unresolved
+// name degrades to the pre-existing opcode rather than a wrong one.
+import { expect_eq_bool } from "sfn/test";
+
+import { integer_type_is_signed } from "../../src/llvm/type_mapping";
+
+test "sign helpers: unsigned integer type names answer false" ![pure] {
+    assert expect_eq_bool(integer_type_is_signed("u8"), false).ok;
+    assert expect_eq_bool(integer_type_is_signed("u16"), false).ok;
+    assert expect_eq_bool(integer_type_is_signed("u32"), false).ok;
+    assert expect_eq_bool(integer_type_is_signed("u64"), false).ok;
+    assert expect_eq_bool(integer_type_is_signed("usize"), false).ok;
+}
+
+test "sign helpers: signed integer type names answer true" ![pure] {
+    assert expect_eq_bool(integer_type_is_signed("i8"), true).ok;
+    assert expect_eq_bool(integer_type_is_signed("i16"), true).ok;
+    assert expect_eq_bool(integer_type_is_signed("i32"), true).ok;
+    assert expect_eq_bool(integer_type_is_signed("i64"), true).ok;
+    assert expect_eq_bool(integer_type_is_signed("isize"), true).ok;
+    assert expect_eq_bool(integer_type_is_signed("int"), true).ok;
+}
+
+test "sign helpers: unrecognised or non-integer names fall back to signed" ![pure] {
+    // The pre-existing lowering treated every name as signed; a caller
+    // that has not established `name` is an integer type must degrade
+    // to that status quo rather than to a wrong opcode.
+    assert expect_eq_bool(integer_type_is_signed("string"), true).ok;
+    assert expect_eq_bool(integer_type_is_signed("boolean"), true).ok;
+    assert expect_eq_bool(integer_type_is_signed(""), true).ok;
+    assert expect_eq_bool(integer_type_is_signed("Foo"), true).ok;
+}
+
+test "sign helpers: whitespace is trimmed before matching" ![pure] {
+    assert expect_eq_bool(integer_type_is_signed(" u8 "), false).ok;
+}

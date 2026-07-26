@@ -187,18 +187,12 @@ fn lower_is_expression(parse: CastParseResult, bindings: ParameterBinding[], loc
 // is anything else; the caller treats that as "sign unknown".
 fn _cast_operand_source_type(value: string, bindings: ParameterBinding[], locals: LocalBinding[]) -> string {
     // The native IR always renders a cast operand parenthesized — `.sfn-asm`
-    // carries `(x) as u64`, not `x as u64` (emit_native_format.sfn) — and
-    // `format_expression` can nest those layers, so peel them before the
-    // identifier test the way `lower_expression` does.
-    let mut name = trim_text(value);
-    let mut _paren_guard: int = 0;
-    loop {
-        if _paren_guard >= 16 { break; }
-        let stripped = strip_enclosing_parentheses(name);
-        if stripped == name { break; }
-        name = stripped;
-        _paren_guard += 1;
-    }
+    // carries `(x) as u64`, not `x as u64` (emit_native_format.sfn) — so peel
+    // before the identifier test. `strip_enclosing_parentheses` self-recurses,
+    // so one call handles nesting, and it only strips when the paren opened at
+    // index 0 closes at the last one: `(a + b)` peels to `a + b`, which
+    // `is_simple_identifier` then rejects.
+    let name = strip_enclosing_parentheses(trim_text(value));
     if !is_simple_identifier(name) { return ""; }
     let local = find_local_binding(locals, name);
     if local != null { return local.type_annotation; }
@@ -483,16 +477,19 @@ fn lower_cast_expression(parse: CastParseResult, bindings: ParameterBinding[], l
     let target_is_float = is_float_llvm_type(target_type);
 
     // Sign is erased by `map_primitive_type`, so recover the operand's
-    // source annotation and only trust it when it maps back onto this
-    // operand's own LLVM type — a mismatch means the name resolved to
-    // something other than the value actually being cast.
+    // source annotation. The width check below guards against the two
+    // mappers disagreeing — `map_type_annotation` here versus whatever
+    // computed the binding's `llvm_type` (`map_local_type` for locals,
+    // `_binding_llvm_type` for module globals) — and falls back to the
+    // signed forms when they do.
     //
     // That reaches an operand spelled as a plain identifier or parameter.
-    // A compound operand (`s.field as u64`, `xs[i] as u64`, `f() as u64`)
-    // carries no source annotation on its `LLVMOperand`, so it still
-    // selects the signed forms; closing that needs the checker's
-    // inferred-type tag threaded through expression lowering, which
-    // SFEP-0058 §3.3 scopes to the typecheck slice (SFN-501).
+    // A compound operand carries no source annotation on its `LLVMOperand`
+    // and still selects the signed forms: aggregates (`s.field as u64`,
+    // `xs[i] as u64`, `f() as u64`) and, most commonly, arithmetic
+    // (`(a + b) as u64`, `(x << 8) as u32`). Closing that needs the
+    // checker's inferred-type tag threaded through expression lowering,
+    // which SFEP-0058 §3.3 scopes to the typecheck slice (SFN-501).
     let operand_source_type = _cast_operand_source_type(parse.value, bindings, locals);
     let mut operand_is_unsigned: boolean = false;
     if operand_source_type.length > 0 {

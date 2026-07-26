@@ -4,6 +4,12 @@
 // `u8`-typed values are printed after widening to `int` because string
 // concat renders a byte-width value as a character, not a number — the
 // widening is itself one of the conversions under test.
+//
+// Every case here casts a local. The parameter-binding half of
+// `_cast_operand_source_type` is covered at the IR level instead, by
+// `numeric_cast_test.sfn` — a narrow-int parameter cannot be exercised at
+// runtime because argument passing for `i8`/`i16`/`u8`/`u16` parameters
+// delivers garbage independently of any cast (SFN-571).
 fn main() -> int ![io] {
     // Widening from an unsigned source must zero-extend: `sext i8 -1` would
     // make this -1 instead of 255.

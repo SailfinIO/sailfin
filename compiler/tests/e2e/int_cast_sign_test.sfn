@@ -10,8 +10,8 @@
 // Asserts runtime output rather than IR text so a regression in either the
 // opcode choice or its lowering is caught; `numeric_cast_test.sfn` covers
 // the emitted-IR spelling.
-import { clean_runner_env, nested_runner_scratch } from "sfn/test";
 import { trim_right } from "sfn/strings";
+import { clean_runner_env, nested_runner_scratch } from "sfn/test";
 
 // The compiler-under-test: `$SAILFIN_BIN` if set, else the self-hosted
 // binary relative to the repo root the runner starts from. Mirrors
@@ -42,8 +42,7 @@ fn _run_fixture(path: string) -> RunOut ![io] {
 test "int cast sign: unsigned sources zero-extend and signed sources sign-extend" ![io] {
     let r = _run_fixture("compiler/tests/e2e/fixtures/int_cast_sign.sfn");
     assert r.exit == 0;
-    let expected = "u8_max_to_u64=255\n"
-        + "i8_neg1_to_i64=-1\n"
+    let expected = "u8_max_to_u64=255\n" + "i8_neg1_to_i64=-1\n"
         + "u32_hibit_to_u64=4000000000\n"
         + "u16_300_to_u8=44\n"
         + "f64_to_u32=3\n"
