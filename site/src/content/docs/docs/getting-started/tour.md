@@ -521,9 +521,10 @@ See the [Testing guide](/docs/learn/testing) for patterns, organization, and int
 Sailfin parses four special wrapper types that express stronger safety
 guarantees. Their maturity differs: `Affine<T>` and `Linear<T>` single-use is
 **enforced today** on owned/affine bindings, while `PII<T>` and `Secret<T>` are
-recognised by the parser but **not yet enforced** (taint tracking is post-1.0).
+recognised by the parser but **not yet enforced** — taint tracking is not
+implemented today, and there is no committed timeline for it.
 Full borrow checking (`&T`/`&mut T` exclusivity, shared borrows, lifetimes) is
-also post-1.0.
+specified in SFEP-0018 but not yet implemented either.
 
 ### `PII<T>` — Personally Identifiable Information
 
@@ -567,8 +568,9 @@ let token: Linear<AuthToken> = auth.mint_token(user_id);
 > **Current status**: all four parse and type-check. `Affine<T>` /
 > `Linear<T>` single-use is enforced today on owned/affine bindings
 > (`E0901`/`E0904`/`E0907`), part of the bounded ownership floor. `PII<T>` and
-> `Secret<T>` taint enforcement is deferred to post-1.0, as is full borrow
-> checking. See the [roadmap](/roadmap) for the post-1.0 sequencing. Sailfin's
+> `Secret<T>` taint enforcement, and full borrow checking, are not implemented
+> today; borrow checking is specified in SFEP-0018 and whether/when either
+> lands is a prioritization call, not a scheduled milestone. Sailfin's
 > headline safety story remains the effect system and capability-based capsules;
 > the ownership floor is a soundness requirement, not a marketed fourth pillar.
 
@@ -583,7 +585,7 @@ Sailfin reserves `![model]` for future AI operations in the post-1.0 `sfn/ai` li
 A future `sfn/ai` function will declare `![model]`, and that declared effect already propagates through resolved callers. The following is **preview pseudocode** because no model runtime API ships in 0.8:
 
 ```sfn
-fn summarize(text: string) -> string ![model, io] {
+fn summarize(text: string) -> string ![io, model] {
     let result = ai.complete("Summarize: " + text);
     print(result);
     return result;
@@ -600,13 +602,13 @@ fn summarize(text: string) -> string ![model, io] {
 
 ## Where to Go Next
 
-You have seen every major feature of the language. Here is where to go deeper:
+You have seen the core language surface. Here is where to go deeper:
 
 - **[Language Basics](/docs/learn/basics)** — Variables, control flow, loops, and collections in detail
 - **[Functions & Methods](/docs/learn/functions)** — Closures, methods, and effect propagation
 - **[Types & Structs](/docs/learn/types)** — Structs, enums, generics, and type aliases
 - **[The Effect System](/docs/learn/effects)** — The complete capability model
-- **[Ownership & Borrowing](/docs/learn/ownership)** — Memory safety without a garbage collector
+- **[Ownership & Borrowing](/docs/learn/ownership)** — Move semantics, linear types, and the design for memory safety without a garbage collector
 - **[Error Handling](/docs/learn/error-handling)** — Result types, try/catch, and error design
 - **[AI Integration](/docs/learn/ai-constructs)** — The `![model]` effect and the `sfn/ai` capsule (post-1.0)
 - **[Testing](/docs/learn/testing)** — Built-in testing, test organization, and patterns

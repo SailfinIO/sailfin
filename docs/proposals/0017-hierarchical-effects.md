@@ -4,7 +4,7 @@ title: Hierarchical Sub-Effects as Subsumption
 status: Implemented
 type: language
 created: 2026-06-07
-updated: 2026-07-18
+updated: 2026-07-26
 author: "agent:compiler-architect"
 tracking: "#1180, #1182"
 supersedes:
@@ -339,8 +339,9 @@ two are orthogonal:
 The scheduling note in §4.2/Phase G that hierarchy work is "post-1.0" is
 **amended** by the owner's D5 decision: intra-atom refinements are pulled into
 the 1.0 surface as G6/G7, since they add no atom and break no lock. Effect
-*polymorphism* (effect-validation Phase G, `!E` variables) remains post-1.0 and
-is unaffected by this RFC.
+*polymorphism* (effect-validation Phase G, `!E` variables) is long tail —
+typechecker substitution work with a typeclass/type-parameter-level bug
+surface (SFEP-0008) — and is unaffected by this RFC.
 
 ## Part 8 — Out of scope
 
@@ -401,4 +402,4 @@ The repo owner reviewed this proposal (via `/pickup #1182`) and signed off on:
 
 This RFC is the sign-off gate referenced by gates G6 and G7. With these
 decisions locked, G6/G7 implementation is unblocked. Effect polymorphism
-(effect-validation Phase G) remains post-1.0 and is out of scope here.
+(effect-validation Phase G) is long tail (SFEP-0008) and is out of scope here.

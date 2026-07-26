@@ -1,6 +1,6 @@
 ---
 title: Ownership & Borrowing
-description: How Sailfin manages memory and resources through move semantics, borrowing rules, and linear types — without a garbage collector.
+description: How Sailfin manages memory and resources through move semantics and linear types — without a garbage collector.
 section: learn
 sidebar:
   order: 5
@@ -10,14 +10,16 @@ Every running program needs to manage memory: allocate it when you need a value,
 
 Languages have tackled this problem in different ways. Garbage-collected languages like Go and Python track which values are still reachable and periodically reclaim the rest — simple to program but with runtime overhead and unpredictable pauses. C and C++ hand control entirely to the programmer — maximum efficiency but a rich source of security vulnerabilities. Rust pioneered a third path: enforce memory safety at compile time through ownership rules, with zero runtime cost.
 
-Sailfin takes the same third path. The ownership system is central to the language, not bolted on. Once you understand it, code that seemed strange starts to read naturally, and a class of bugs you'd otherwise spend hours debugging simply doesn't compile.
+Sailfin is designed around the same third path, and part of that design is enforced today: the compiler checks move semantics and single-use, rejecting use-after-move and unconsumed linear values at compile time. The borrow-exclusivity half of the model — what the `&T`/`&mut T` syntax below describes — is designed but not yet checked. The status callout that follows says exactly which rules are live.
 
 > **Implementation status:** Single-use checking ships today. Owned and
 > `Affine<T>` bindings reject use-after-move and a second live binding
 > (`E0901`/`E0904`), while `Linear<T>` additionally rejects values left
 > unconsumed at scope exit (`E0907`). The compiler parses `&T`, `&mut T`, and
-> `borrow(...)`, but borrow lifetime and shared/exclusive alias checking remain
-> deferred. `PII<T>`/`Secret<T>` taint enforcement is also not yet live.
+> `borrow(...)`, but borrow lifetime and shared/exclusive alias checking are
+> not implemented today — the design is specified in SFEP-0018, and
+> enforcement is a prioritization call rather than a blocked dependency.
+> `PII<T>`/`Secret<T>` taint enforcement is also not yet live.
 
 ---
 
@@ -41,13 +43,13 @@ Data races are the concurrent equivalent: two threads read and write the same me
 
 Garbage collectors solve some of these (no dangling pointers, no double-free) by ensuring a value isn't freed until no references to it remain. But a GC can't solve data races, and it introduces runtime pauses and memory overhead that matter in latency-sensitive or resource-constrained contexts.
 
-Sailfin's ownership model solves all three at compile time:
+Sailfin's ownership model is designed to address all three, and the compiler enforces the move-based half of it today:
 
-- **Dangling pointers**: borrows cannot outlive the value they reference.
-- **Double-free**: each value has exactly one owner; when that owner goes out of scope, the value is freed — once.
-- **Data races**: at any moment you have either many read-only borrows or exactly one mutable borrow, never both.
+- **Double-free**: each value has exactly one owner; when that owner goes out of scope, the value is freed — once. Use-after-move on an owned or `Affine<T>` binding is a compile error (`E0901`/`E0904`), and an unconsumed `Linear<T>` value is rejected at scope exit (`E0907`).
+- **Use-after-free / aliased mutation**: in-place mutation of a possibly-aliased buffer and raw-pointer FFI escapes are rejected for the memory/string runtime core (`E0902`/`E0903`/`E0906`).
+- **Dangling pointers and data races**: the design calls for borrows that cannot outlive the value they reference, and for either many read-only borrows or exactly one mutable borrow at a time, never both. `&T` and `&mut T` parse today, but the compiler does not yet check borrow lifetimes or exclusivity — see [Current enforcement](#the-borrow-rules) below.
 
-The key insight: the compiler tracks who owns what. It knows when ownership transfers, when a borrow is active, and when a value is freed. If you break the rules, it's a compile error, not a runtime crash.
+The key insight: the compiler tracks who owns what and knows when ownership transfers. For the rules above that are checked, breaking them is a compile error, not a runtime crash.
 
 ---
 
@@ -234,9 +236,9 @@ Stated precisely:
 
 3. You cannot move a value while it is borrowed. Moving ends the owner; the outstanding reference would dangle.
 
-These three rules together eliminate dangling pointers, data races, and use-after-free.
+Together, these three rules are what would eliminate dangling pointers and data races. They describe the intended model; the enforcement note below says how much of it the compiler checks today.
 
-> **Current enforcement:** The compiler parses `&T` and `&mut T` syntax and threads borrow metadata through the IR, but full exclusivity checking is deferred to post-1.0. Violations compile without error today. See the [roadmap](/roadmap) for when enforcement lands.
+> **Current enforcement:** The compiler parses `&T` and `&mut T` syntax and threads borrow metadata through the IR, but full exclusivity checking is not implemented today — SFEP-0018 specifies the design, and whether/when it lands is a prioritization call. Violations compile without error today.
 
 The examples throughout this guide show what the rules will require. Building correct habits now means your code will pass the strict checker without changes.
 
@@ -517,12 +519,12 @@ fn main() ![io] {
 
 ## Ownership and effects
 
-The effect system and the ownership system compose naturally. Borrowing carries implicit effect semantics:
+The effect system and the ownership system are designed to compose. The intent is for borrowing to carry implicit effect semantics:
 
-- Reading a value through `&T` implies a `read` capability on that value.
-- Mutating through `&mut T` implies a `mut` capability.
+- Reading a value through `&T` would imply a `read` capability on that value.
+- Mutating through `&mut T` would imply a `mut` capability.
 
-The `examples/basics/borrowing.sfn` example shows this in action, with functions annotated `![read]` and `![mut]`:
+The `examples/basics/borrowing.sfn` example shows the intended pattern, with functions annotated `![read]` and `![mut]`:
 
 ```sfn
 fn read_counter(counter: &Counter) ![read] -> number {
@@ -534,9 +536,7 @@ fn increment_counter(counter: &mut Counter) ![mut] {
 }
 ```
 
-In the current compiler, `read` and `mut` are accepted as effect annotations. Future releases will integrate borrow effects more tightly with the capability system — for example, requiring that a function that takes `&mut T` to a shared resource declares the appropriate capability, or that `PII<T>` fields cannot be read without a `redact` or `policy` effect.
-
-The intersection of ownership and effects is where Sailfin's safety story comes together: not only is memory safe, but *what you can do* with a value is statically bounded by the declared capabilities of the function holding it.
+In the current compiler, `read` and `mut` are accepted as effect annotations, but they are not part of the capability set the effect checker enforces today — annotating a function `![read]` or `![mut]` does not yet connect to a borrow of `&T` or `&mut T`. Whether that integration lands — for example, requiring that a function taking `&mut T` to a shared resource declares the appropriate capability, or that `PII<T>` fields cannot be read without a `redact` or `policy` effect — is a prioritization call rather than a scheduled milestone.
 
 ---
 
@@ -551,8 +551,9 @@ The intersection of ownership and effects is where Sailfin's safety story comes 
 | Linear type | `Linear<T>` | Must be consumed exactly once | Single-use and scope-exit consumption enforced (`E0901`/`E0904`/`E0907`) |
 
 Move tracking and linear must-consume verification ship today. Borrow lifetime
-and shared/exclusive alias checking remain deferred, so `&T`/`&mut T` should be
-treated as syntax and design intent rather than a complete borrow-safety proof.
+and shared/exclusive alias checking are not implemented today — SFEP-0018
+specifies the design — so `&T`/`&mut T` should be treated as syntax and design
+intent rather than a complete borrow-safety proof.
 
 ---
 

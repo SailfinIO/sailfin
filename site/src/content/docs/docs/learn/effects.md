@@ -55,10 +55,10 @@ Java's checked exceptions are also transitive, but they are limited to exception
 | `net` | Network I/O | `http.get`, `http.post`, `websocket.*`, `serve` | Yes |
 | `model` | Future AI library invocation | No shipped `sfn/ai` runtime API | Reserved — declaration/propagation works, but no detector or runtime API |
 | `clock` | Sleep and clock reads | `sleep(ms)`, shipped clock helpers | Yes for registered operations |
-| `gpu` | Future accelerator access | No effect-gated GPU runtime API | Parsed/reserved — no detector |
+| `gpu` | Device dispatch via `sfn/device` | `sfn/device::matmul_f64`, `::synchronize` | Yes, at the shipped device-dispatch boundary |
 | `rand` | OS entropy boundary | `sfn/crypto::random_bytes` | Yes for `random_bytes`; no general call-name detector |
 
-The taxonomy has exactly six canonical **root** effects. `io.fs`, `io.console`, `net.http`, and `net.ws` are shipped refinements within those roots, not additional canonical effects. `model` and `gpu` remain declarable so signatures and manifests can reserve their authority, but declaring a token does not imply that a corresponding runtime API exists.
+The taxonomy has exactly six canonical **root** effects. `io.fs`, `io.console`, `net.http`, and `net.ws` are shipped refinements within those roots, not additional canonical effects. `gpu` is enforced narrowly, at the `sfn/device::matmul_f64` and `::synchronize` boundary only — there is no general call-name detector, and a raw `extern` to a vendor API bypasses it. `model` remains declarable so signatures and manifests can reserve its authority, but declaring the token does not imply that a corresponding runtime API exists.
 
 ---
 
@@ -199,7 +199,7 @@ fn process_files(paths: string[]) ![io] {
 }
 ```
 
-Immediately invoked closures are checked in their enclosing effect scope. Do not infer a general effect-polymorphic closure guarantee from this rule: effect polymorphism and broader escaped-closure analysis remain post-1.0 work.
+Immediately invoked closures are checked in their enclosing effect scope. Do not infer a general effect-polymorphic closure guarantee from this rule: effect polymorphism and broader escaped-closure analysis are not implemented today.
 
 ---
 

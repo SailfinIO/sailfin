@@ -20,8 +20,8 @@ bypass; `sfn check` still validates per proposal §4.7).
 Cross-module call-graph propagation is enforced: if A imports B and
 calls it, A must declare every effect B declares (diagnostic code
 `E0402`). Aliased imports (`import { foo as bar }`) resolve under the
-local name. `Member`-callee resolution (`mod.fn()`) is a follow-up
-(Phase E2 in `docs/proposals/0008-effect-validation.md`).
+local name. Statically resolved member callees (`mod.fn()`) and imported
+decorator effects also resolve.
 
 Capsule manifests are a compile-time contract: every function's
 declared effects must be a subset of the capsule's
@@ -54,7 +54,7 @@ Canonical effects: io, net, model, clock, gpu, rand
 
 - io    -- file system, printing, process execution
 - net   -- HTTP, WebSocket, TCP, serve
-- model -- capability gate for AI backend calls; required on any fn that invokes the `sfn/ai` library capsule (post-1.0)
+- model -- capability gate for AI backend calls. RESERVED, not enforced: it is declarable and propagates to callers like any other declared effect, but no detector inspects a function body to require it, and no model runtime API ships. The detector lands with the `sfn/ai` capsule (post-1.0)
 - clock -- sleep, timers, monotonic time
 - gpu   -- capability gate for device dispatch; required on any fn calling the `sfn/device` dispatch surface (`matmul_f64`, `synchronize`). Enforced. NOT a claim an accelerator exists: the only backend is a CPU reference kernel and `has_accelerator()` is false. `sfn/tensor`/`sfn/nn`/`sfn/layers` are CPU-only and do NOT require it
 - rand  -- random number generation; required on `sfn/crypto::random_bytes`. Enforced at that boundary (no general RNG-name detector)
@@ -291,7 +291,7 @@ typecheck (E0808/E0809).
 |-----------|-------------|---------------|---------------|------------------------------------------|
 | sfn/strings | "strings" | Shipped       | None          | Trim, case, split/join, find/replace     |
 | sfn/json  | "json"      | Shipped       | None          | JSON parse, serialize, pretty-print      |
-| sfn/crypto| "crypto"    | Shipped       | None          | SHA-256, base64, Ed25519 verify, HMAC-SHA-256 |
+| sfn/crypto| "crypto"    | Shipped       | rand (`random_bytes` only) | SHA-256, base64, Ed25519 verify, HMAC-SHA-256, random_bytes |
 | sfn/math  | "math"      | Shipped       | None          | abs, min, max, clamp, pow, floor, ceil   |
 | sfn/path  | "path"      | Shipped       | None          | join, dirname, basename, ext, normalize  |
 | sfn/toml  | "toml"      | Shipped       | None          | TOML parsing and serialization           |
@@ -299,11 +299,11 @@ typecheck (E0808/E0809).
 | sfn/os    | "os"        | Shipped       | io            | Env vars, home dir, exec, exit           |
 | sfn/log   | "log"       | Shipped       | io, clock     | Structured leveled logging               |
 | sfn/time  | "time"      | Shipped       | clock         | Sleep, monotonic timing, elapsed         |
-| sfn/http  | "http"      | Partial       | net, io       | HTTP GET/POST client; server stubbed     |
+| sfn/http  | "http"      | Shipped       | net, io       | HTTP/1.1 client plus typed `serve` with keep-alive and TLS termination (`serve_tls`) |
 | sfn/cli   | "cli"       | Shipped       | io            | CLI arg parsing, subcommands, styling    |
 | sfn/test  | "test"      | Partial       | None / io     | Assertions (`expect_*` pure tier, `assert_*` io tier), snapshots |
-| sfn/sync  | "sync"      | Stubbed       | io            | channel/parallel/spawn API — pending concurrency runtime; DO NOT USE yet |
-| sfn/net   | "net"       | Stubbed       | net, io       | TCP/UDP sockets — pending runtime intrinsics; DO NOT USE yet |
+| sfn/sync  | "sync"      | Stubbed       | io            | Typed channel/parallel/spawn wrapper not built. The concurrency RUNTIME ships — use the `channel`/`spawn`/`await` builtins directly |
+| sfn/net   | "net"       | Partial       | net, io       | TCP client and server plus DNS via getaddrinfo ship; UDP is stubbed |
 | sfn/tensor| "tensor"    | Shipped (CPU) | gpu (ceiling, unused) | Tensor ops, matmul, transpose. CPU-only, effect-free: does NOT require ![gpu] |
 | sfn/layers| "layers"    | Shipped (CPU) | gpu (ceiling, unused) | Linear layers, ReLU, sequential models. CPU-only, effect-free |
 | sfn/nn    | "nn"        | Shipped (CPU) | gpu (ceiling, unused) | Activations, normalization, argmax, one_hot. CPU-only, effect-free |
@@ -354,7 +354,19 @@ These features parse, type-check, emit to .sfn-asm IR, and lower to LLVM:
 - Explicit numeric `as` casts (typed lowering matrix)
 - Atomic intrinsics: atomic_load/store/add/sub/cas/fence (seq_cst)
 - thread_local let mut globals (top-level only)
-- String interpolation (via runtime)
+- String interpolation (via runtime). `${ expr }` is the recognized form.
+  Legacy `{{ expr }}` still parses but emits a `W0212` deprecation
+  warning -- prefer `${ }` in generated code
+- Structured concurrency v0: `routine { }` nurseries (exit joins every
+  child), bounded MPMC `channel()`, `spawn`/`await` with typed results,
+  `parallel [...]`, `Task<T>`/`join_all`. Limits: no cancel-on-fault, no
+  cross-thread nursery inheritance, pointer-width result kinds only, and
+  the pool floors at two workers (a producer/consumer pair needs both on
+  separate threads or it deadlocks)
+- Ownership move and single-use checking: use-after-move on owned and
+  `Affine<T>` bindings (`E0901`/`E0904`), unconsumed `Linear<T>` at scope
+  exit (`E0907`), and aliased-mutation / use-after-free / raw-pointer FFI
+  escape for the memory/string runtime core (`E0902`/`E0903`/`E0906`)
 - Lambdas and closures with capture (multi-variable capture included)
 - Test declarations (plus -k/--tag filtering, lifecycle hooks, snapshots)
 - Import/export across modules
@@ -368,20 +380,19 @@ These features parse, type-check, emit to .sfn-asm IR, and lower to LLVM:
 DO NOT use these in generated code unless explicitly asked — they parse
 (and some typecheck) but do not yet compile to working programs:
 
-- Concurrency constructs: `routine { }`, `await`, `channel()`, `spawn`
-  -- parsed with partial typecheck diagnostics (E0813–E0815); LLVM
-  lowering and the scheduler runtime are pending. `async fn` is
-  structural only.
-- Member-callee cross-module effect propagation (`mod.fetch()`) -- direct `Identifier` callee resolution ships in Phase E1; member callees and decorator-implied transitives are deferred to Phase E2
 - Generic constraints (<T: Bound>) -- parsed as text, not enforced
-- Affine<T> / Linear<T> ownership, &T / &mut T borrows -- parsed, transparent (no enforcement)
+- &T / &mut T borrows -- parsed; borrow lifetime and shared/exclusive
+  alias checking are not implemented (SFEP-0018 specifies the analysis;
+  it is not currently prioritized). Move and single-use checking DO ship
+  -- see below.
 - PII<T> / Secret<T> taint types -- parsed as nominal types, no enforcement
 - Union types -- parse but match destructuring is unstable
+- `async fn` -- structural only; awaiting an `async fn` return value is
+  not wired into the live typecheck. Use `spawn fn() -> T { }` + `await`.
 
 ## What Is Not Yet in the Parser
 
-- ${ } string interpolation (currently uses {{ }}; migration planned pre-1.0)
-- |> pipeline operator (planned post-1.0)
+- |> pipeline operator -- not implemented; no design accepted yet
 - while loops (intentional — use loop { } with break)
 
 ## AI Constructs (Moved to Library)
@@ -389,8 +400,9 @@ DO NOT use these in generated code unless explicitly asked — they parse
 Earlier drafts had `model`, `prompt`, `tool`, and `pipeline` block keywords.
 These were removed from the language; richer AI functionality ships as the
 post-1.0 `sfn/ai` library capsule. The `![model]` effect stays in the language
-as the capability gate — any function that reaches an AI backend must declare
-it. Don't emit `model { ... }` / `prompt system { ... }` / `tool ... { ... }` /
+as the capability gate, but it is reserved rather than enforced: it propagates
+to callers once declared, and nothing yet requires a function to declare it.
+Don't emit `model { ... }` / `prompt system { ... }` / `tool ... { ... }` /
 `pipeline ... { ... }` forms — they are not valid Sailfin.
 
 ## Compiler Architecture
@@ -533,15 +545,20 @@ capsule for leveled logging.
 vs. TypeScript: Sailfin compiles to native code via LLVM. Effect types are
     checked at compile time, not documented by convention.
 
-vs. Rust: Sailfin trades borrow checking for effect tracking. No lifetime
-    annotations. Capability safety instead of memory safety (ownership is
-    parsed but deferred to post-1.0).
+vs. Rust: Rust's borrow checker provides compile-time memory safety. Sailfin
+    does not match it today. Moves, use-after-move, and aliased mutation on
+    owned buffers are enforced as a correctness floor; `&T` / `&mut T`
+    exclusivity is parsed but not checked -- the analysis is written up in
+    SFEP-0018 and is not currently prioritized. What Sailfin adds over Rust
+    is effect and capability typing -- not memory safety.
 
 vs. Go: Sailfin adds compile-time capability enforcement and algebraic data
-    types with pattern matching. Same single-binary ergonomics.
+    types with pattern matching. Same single-binary ergonomics. Go's runtime,
+    scheduler, and ecosystem are substantially more mature.
 
-vs. Zig: Sailfin is more opinionated. Effect types control capabilities
-    instead of memory layout. Both target LLVM.
+vs. Zig: Zig's comptime and explicit allocator model give more direct control
+    over memory than Sailfin offers. Both target LLVM. Sailfin's addition is
+    the type-level effect system.
 
 ## File Extension
 

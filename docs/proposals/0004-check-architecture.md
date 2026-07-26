@@ -4,7 +4,7 @@ title: "sfn check — Fast Analysis Without Codegen"
 status: Implemented
 type: tooling
 created: 2026-04-15
-updated: 2026-04-26
+updated: 2026-07-26
 author: "agent:compiler-architect"
 tracking:
 supersedes:
@@ -79,8 +79,8 @@ sub-PRs:
   (including seven new tests guarding severity prefix invariance,
   file_path on the location-only branch, and W01xx code distinctness).
   Phase 2 features (`secondary` source locations,
-  `FixSuggestion`/`TextEdit`) remain deferred — they land alongside
-  `sfn fix` / `sfn lsp`.
+  `FixSuggestion`/`TextEdit`) are gated on `sfn fix` / `sfn lsp` —
+  they land alongside those.
 - **A4 — delete legacy helpers (shipped April 26, 2026).** Removed
   `inline_imports_for_source`, `_inline_relative_imports_cmd`, and
   the entire textual-inliner support cast
@@ -1051,7 +1051,7 @@ considered and rejected for v1.
 | B4 | Renderer harmonization: `report_typecheck_errors` → `render_diagnostic` | S | B1 | One-source-of-truth for diagnostic shape | All `compile_to_*` paths use `diagnostics_render.render_diagnostic`; legacy `format_typecheck_diagnostic` deleted |
 | B5 | `secondary: SourceLocation[]` on `Diagnostic` | S | B3 | "first defined here" pointers; cross-module attribution | Duplicate-symbol diagnostics carry secondary span; renderer draws second caret |
 | B6 | `make check-fast` + CI pre-build wiring | S | B2 | Faster PR feedback (~5s vs ~13min) | New target documented; CI gate fails fast; pre-commit hook documented |
-| B7 | Parallel multi-file checking — pre-mortem | XS (doc only) | none | Track C scoping | Explicitly deferred to post-1.0; rationale documented; alternative listed |
+| B7 | Parallel multi-file checking — pre-mortem | XS (doc only) | none | Track C scoping | Gated on a thread-safe arena (SFN-558); the original concurrency-runtime gate cleared, see §Q4; rationale documented; alternative listed |
 
 **Track B v1 = B1 + B2 + B3 + B4 + B6.** B5 ships when a consumer needs it
 (LSP cross-file rename is the natural forcing function). B7 is a doc-only PR
@@ -1163,13 +1163,47 @@ enforced as one.**
 
 Targets land in B6.
 
-#### Q4 — Parallel multi-file checking: deferred to post-1.0
+#### Q4 — Parallel multi-file checking: gated on a thread-safe arena (SFN-558)
 
-Sailfin has no concurrency runtime. `routine`/`spawn`/`channel`/`await`
-are not in the parser (`docs/status.md`); Phase 4 of the runtime
-enablement plan in `CLAUDE.md` is what lights them up.
+> **Revisited 2026-07-26 — the original gate cleared, and a different one was
+> found underneath it.** This section was written in April 2026, before the SFEP
+> process existed, and parked B7 on "Sailfin has no concurrency runtime". That is
+> no longer true, so the section has been re-analysed rather than left to read as
+> a standing instruction.
+>
+> **What changed in B7's favour.** Structured concurrency ships as a v0 surface —
+> `routine`/`channel`/`spawn`/`await`/`parallel`/`Task<T>`/`join_all` all work
+> end-to-end (`docs/status.md`). And the fork-based objection below is retired
+> for *in-process* concurrency specifically: `prepare_project_capsules_for_check`
+> already runs once per resolver group rather than once per file
+> (`compiler/src/check/engine.sfn`), and its `CheckCapsuleResolution` result is
+> plain immutable data, so workers could share one resolver pass read-only
+> instead of each repeating it. The amortization argument was an argument against
+> *forking*, not against parallelism.
+>
+> **What blocks it now.** The process-global arena is not thread-safe. The bump
+> pointer is an unsynchronised read-modify-write (`runtime/sfn/memory/arena.sfn`),
+> and the arena's own comment scopes its safety to "compilation is
+> single-threaded". `sfn check` depends on that discipline today: the per-file
+> loop takes an arena mark and rewinds after each file, and
+> `compiler/tests/e2e/check_compiler_src_test.sfn` records that before that
+> mark/rewind fix, checking the compiler tree SIGSEGVed at ~120 s on exactly the
+> ~132-file workload B7 targets. Parallel workers over one shared arena would
+> both race the bump pointer and lose the sequential rewind discipline that keeps
+> the current tool alive.
+>
+> **So B7 is `gated on: SFN-558`** (thread-safe arena — per-thread or
+> synchronised), which is a runtime-capability item, not a language-surface one.
+> It re-surfaces when that lands. Two further caveats for whoever picks it up:
+> B7 would be the **first consumer of the concurrency surface inside the
+> self-hosted compiler** — nothing in `compiler/src/` uses it today, so it
+> carries first-adopter risk; and the worker pool floors at two workers with a
+> documented producer/consumer deadlock (#1474), so a design with N file-checkers
+> feeding one collector over a bounded channel must guarantee the collector its
+> own thread slot.
 
-`process.run`-fork workaround analysis: a 121-file `sfn check` run forking
+The fork-overhead analysis below stands as originally written, and is why
+`process.run`-based parallelism was rejected. A 121-file `sfn check` run forking
 N compiler processes incurs
 
 - **Resolution overhead per fork.** Each forked `sfn check` re-runs
@@ -1184,9 +1218,22 @@ N compiler processes incurs
 - **Diagnostic ordering.** Sequential output matches file enumeration
   order; parallel output interleaves across processes.
 
-Net: the workaround is **not faster**. The real fix is structured
-concurrency in the language. **B7 ships as a doc-only PR** recording
+Net: the workaround is **not faster**. **B7 ships as a doc-only PR** recording
 this so a future contributor knows the analysis was done.
+
+The April conclusion was "the real fix is structured concurrency in the
+language." That turned out to be necessary but not sufficient — the language
+surface shipped and B7 remained blocked, on the arena rather than on the
+concurrency primitives (see the 2026-07-26 note above). Two of the three
+objections above are also specific to forking and dissolve in-process: resolver
+re-amortization disappears with a shared read-only resolution, and diagnostic
+interleaving is avoidable by dispatching per file index and flushing completed
+results in ascending index order. Worth knowing if that is attempted: current
+output order is whatever `_collect_sfn_files_cmd`'s directory walk returns, not
+a lexical sort, and no test currently pins *cross-file* diagnostic ordering — so
+determinism there is coverage a parallel implementation would need to add, not
+an existing guarantee it would need to preserve. Process startup cost is the one
+objection that was never about forking mechanics and simply goes away.
 
 #### Q5 — Renderer harmonization
 

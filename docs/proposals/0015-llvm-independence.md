@@ -4,7 +4,7 @@ title: "Toolchain Independence — Sailfin-Native Backend"
 status: Accepted
 type: runtime
 created: 2026-06-05
-updated: 2026-07-25
+updated: 2026-07-26
 author: "agent:compiler-architect"
 tracking: "#1640, #1641"
 supersedes:
@@ -147,8 +147,10 @@ target. But the durable reasons tie to Sailfin's three differentiators:
    Today the differentiators are reasoned about in Sailfin and then handed to an
    opaque C++ toolchain. Owning the backend lets effect/capability metadata
    survive into the object file — effect-tagged binaries, capability-aware
-   linking. LLVM structurally cannot give you this; it would be a genuine
-   differentiator no other systems language has.
+   linking. LLVM structurally cannot give you this. It would be a genuine
+   differentiator against the closest prior art: the static effect systems
+   (Koka, Flix, Effekt) stop at the type level and are defeated by FFI, and
+   WASI enforces at a coarse VM boundary rather than in the object file.
 3. **Hermeticity & reproducibility.** Shelling out to whatever `clang` lives on
    `$PATH` is a reproducibility and distribution liability (and a determinism
    hazard — see Track 2). One self-contained binary plus `GOOS/GOARCH`-style
@@ -229,7 +231,11 @@ it doesn't re-hardcode LLVM assumptions across the driver.**
 
 **Track placement:** This is **Track 8 — Native Backend**. The seal-sufficient
 slice is a 1.0 critical-path Project under the **Capability-Sealed Runtime**
-Initiative; only optimizer/performance parity remains post-1.0.
+Initiative. Optimizer/performance parity is the genuine long tail — matching
+LLVM's `-O2` is a whole-program pass pipeline whose wins are interaction
+effects, so it has no per-unit correctness oracle to iterate against
+(`docs/strategy/decision-brief.md` §8) — and it is off the seal's critical path
+rather than scheduled.
 
 ---
 

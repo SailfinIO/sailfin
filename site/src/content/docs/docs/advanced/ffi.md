@@ -6,7 +6,7 @@ sidebar:
   order: 4
 ---
 
-Sailfin's safety system — effect tracking, ownership, borrow checking — operates entirely within the language. When you need to call a C library, interact with OS APIs, or drop down to raw memory operations, you step outside those guarantees through the **FFI** (Foreign Function Interface). Sailfin makes this boundary explicit: you declare what you are doing, mark it unsafe, and the rest of your codebase remains provably clean.
+Sailfin's safety system — effect tracking and ownership checking — operates entirely within the language. When you need to call a C library, interact with OS APIs, or drop down to raw memory operations, you step outside those guarantees through the **FFI** (Foreign Function Interface). Sailfin makes this boundary explicit: you declare what you are doing and mark it unsafe, so the unsafe surface stays a small, auditable subset of the codebase rather than spreading silently.
 
 This page documents Sailfin's FFI system as specified in §6.1.5 of the language specification.
 

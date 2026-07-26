@@ -4,7 +4,7 @@ title: Deriving prelude-mirror registry signatures from the prelude (kill latent
 status: Implemented
 type: runtime
 created: 2026-06-29
-updated: 2026-07-13
+updated: 2026-07-26
 author: "agent:compiler-architect; human review"
 tracking: "#572, #1779, #1780"
 supersedes:
@@ -478,8 +478,9 @@ until `make compile` is green (per the validation ladder in `CLAUDE.md`).
 - **SFEP-0025** (`docs/proposals/0025-native-runtime-architecture.md`),
   **SFEP-0015** (`docs/proposals/0015-llvm-independence.md`) — runtime/backend
   framing.
-- **SFEP-0006** (`docs/proposals/0006-build-architecture.md`) — build graph,
-  relevant to why Option A's artifact approach is deferred.
+- **SFEP-0006** (`docs/proposals/0006-build-architecture.md`) — build graph;
+  Option A's artifact approach is gated on the build-architecture work it
+  covers (a staged checked-in artifact or two-phase prelude compile).
 - `compiler/src/llvm/runtime_helpers.sfn:1315-1317, 1331-1333, 1343-1345,
   1629-1637` (the 6 mirror rows); `:415-445` (filesystem sentinel prior art);
   `:1642` (`runtime_helper_descriptors()`).

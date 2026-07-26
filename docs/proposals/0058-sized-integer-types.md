@@ -328,7 +328,7 @@ receiver-method dispatch the runtime already uses. They lower to plain wrapping
 LLVM ops regardless of build mode. Being ordinary functions, they add no
 keyword and can never shadow a variable name.
 
-**Deferred to post-1.0 (designed, not built):** `checked_add` → `Result`/
+**Designed, not built — gated on the generic-constraints foundation:** `checked_add` → `Result`/
 `Option` (needs generic returns, gated on the generic-constraints foundation),
 and `saturating_add` → clamp to the type's min/max. Both are pure library
 additions requiring no further language change once generic returns exist.

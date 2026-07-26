@@ -69,8 +69,9 @@ partial inference, closures with capture, pattern matching, `Result<T, E>` and
 The effect system enforces registered `io`, `net`, `clock`, and `rand` entropy
 boundaries, including resolved cross-module propagation, dotted sub-effects, and
 capsule capability checks. The runtime syscall seal remains a 1.0 target.
-Ownership enforcement is active for the owned-buffer family and affine / linear bindings, with
-broader borrow checking still in development.
+Ownership enforcement is active for the owned-buffer family and affine / linear bindings.
+`&T` / `&mut T` exclusivity is parsed and not checked; SFEP-0018 specifies the analysis, which
+is not currently prioritized.
 
 The tooling includes:
 

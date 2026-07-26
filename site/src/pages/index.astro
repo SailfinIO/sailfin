@@ -5,7 +5,7 @@ import Hero from "../components/Hero.astro";
 const features = [
   {
     title: "Effect Types",
-    description: "Every function declares what it can do — IO, network, clock, and more. The compiler checks effectful operations and catches capability violations before runtime.",
+    description: "Every function declares what it can do. Undeclared IO, network, and clock operations fail the build, and effects propagate to callers across module boundaries.",
     icon: "shield",
     href: "/docs/learn/effects",
   },
@@ -29,7 +29,7 @@ const features = [
   },
   {
     title: "Package Registry",
-    description: "Capsules — Sailfin's packages — are published to pkg.sfn.dev with full dependency resolution and capability auditing. Point `sfn` at a private registry with `sfn config set registry <url>`.",
+    description: "Capsules — Sailfin's packages — are published to pkg.sfn.dev with dependency resolution and declared-capability auditing. Point `sfn` at a private registry with `sfn config set registry <url>`.",
     icon: "package",
     href: "https://pkg.sfn.dev",
   },
@@ -56,7 +56,7 @@ const useCases = [
   },
   {
     title: "Supply-Chain Security",
-    description: "Every capsule declares its capability requirements. Know exactly what your dependencies can do — no hidden network calls, no surprise file access.",
+    description: "Every capsule declares its required capabilities, and the compiler cross-checks that declaration against the effects the capsule actually uses. Auditing inferred effect surfaces across a full transitive dependency tree is still in progress.",
   },
 ];
 ---
@@ -68,7 +68,7 @@ const useCases = [
   <section class="features">
     <div class="container">
       <h2 class="section-title">Why Sailfin?</h2>
-      <p class="section-subtitle">A language designed from the ground up for compile-time capability enforcement.</p>
+      <p class="section-subtitle">A language built around compile-time capability enforcement.</p>
       <div class="features-grid">
         {features.map((f) => (
           <a href={f.href} class="feature-card">

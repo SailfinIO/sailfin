@@ -6,7 +6,7 @@ sidebar:
   order: 3
 ---
 
-Sailfin has a rich, statically-checked type system designed to make incorrect programs hard to write. This guide covers everything from the primitive types you saw in [Language Basics](/docs/learn/basics) through algebraic data types, interfaces, generics, and the wrapper types that power Sailfin's safety guarantees.
+Sailfin has a rich, statically-checked type system designed to make incorrect programs hard to write. This guide covers everything from the primitive types you saw in [Language Basics](/docs/learn/basics) through algebraic data types, interfaces, generics, and the wrapper types designed for safety-critical code, two of which are enforced today and two of which are still design previews (see the [Wrapper Types](#wrapper-types-design-preview) section below).
 
 ## Primitive Types
 
@@ -742,7 +742,7 @@ fn stringify(value: number | boolean | string) -> string {
 
 Sailfin has four special wrapper types for safety-critical code. Single-use
 rules ship for `Affine<T>` and `Linear<T>`; taint-flow rules for `PII<T>` and
-`Secret<T>` remain deferred.
+`Secret<T>` are not implemented today.
 
 > **Status:** Owned and affine bindings are move-checked (`E0901`/`E0904`),
 > and an unconsumed `Linear<T>` value is rejected at scope exit (`E0907`).
