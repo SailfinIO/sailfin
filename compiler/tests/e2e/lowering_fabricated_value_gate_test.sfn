@@ -1,0 +1,127 @@
+// End-to-end regression for the LLVM-lowering fail-closed value gate
+// (SFN-527).
+//
+// Several lowering consumers used to substitute `default_return_literal` —
+// a fabricated placeholder value — whenever a sub-lowering failed, so a
+// `return`/assignment/`let`/struct-literal that could not be lowered still
+// produced *some* LLVM value and the emit exited 0 with wrong-but-plausible
+// IR. SFN-527 removed every fabricated-default substitution: each of these
+// sites now reports `[E1002]` and fails the emit closed instead of silently
+// emitting a placeholder. This test pins that fail-closed behavior at each
+// consumer site plus the combined `sfn build` repro from the issue.
+//
+// `sfn check` still passes on every fixture below — these are all lowering
+// failures, not typecheck failures. Making the typecheck pass reject them
+// earlier is SFN-543, a separate unit of work.
+//
+// Case `loop_fallthrough_still_builds` is a *control*, not a gap: the
+// structural block-terminator fallback in `emission.sfn` (used when a
+// loop's fallthrough path is statically unreachable but not proven so by
+// the lowering pass) was deliberately left untagged by SFN-527 — tagging it
+// would turn `E1002` into the majority outcome for ordinary loop-terminated
+// functions, which is explicitly out of scope.
+//
+// Drives the compiler-under-test as a subprocess per `.claude/rules/no-bash-e2e.md`.
+import { find } from "sfn/strings";
+import { clean_runner_env, nested_runner_scratch } from "sfn/test";
+
+fn _sfn_bin() -> string ![io] {
+    let configured = env.get("SAILFIN_BIN");
+    if configured.length > 0 { return configured; }
+    return "build/bin/sfn";
+}
+
+fn _scratch_dir() -> string ![io] {
+    let mut dir = env.get("SAILFIN_TEST_SCRATCH");
+    if dir.length == 0 { dir = "/tmp"; }
+    fs.createDirectory(dir, true);
+    return dir;
+}
+
+// Write `source` to `<scratch>/<name>` and return the path.
+fn _write_source(name: string, source: string) -> string ![io] {
+    let path = _scratch_dir() + "/" + name;
+    if fs.exists(path) { fs.deleteFile(path); }
+    fs.writeFile(path, source);
+    return path;
+}
+
+// Run `sfn emit llvm <src>` and assert it fails closed with `[E1002]` and
+// the given site-specific substring.
+fn _assert_emit_fails_closed(name: string, source: string, substring: string) ![io] {
+    let src = _write_source(name, source);
+    let exit = process.run_capture([_sfn_bin(), "emit", "llvm", src], process.environ());
+    let sout = process.capture_take_stdout();
+    let serr = process.capture_take_stderr();
+    let combined = sout + serr;
+    assert exit != 0;
+    assert find(combined, "[E1002]", 0) >= 0;
+    assert find(combined, substring, 0) >= 0;
+}
+
+test "lowering fail-closed gate: bare return in value-returning fn" ![io] {
+    _assert_emit_fails_closed("sfn527_empty_return.sfn", "fn f() -> i32 { return; }\nfn main() -> i32 { return 0; }\n", "missing return value in `f`");
+}
+
+test "lowering fail-closed gate: unknown field in return position" ![io] {
+    _assert_emit_fails_closed("sfn527_return_null_operand.sfn", "struct T { a: i32; }\nfn in_return(t: T) -> i32 { return t.nope; }\nfn main() -> i32 { return 0; }\n", "unhandled return expression in `in_return`");
+}
+
+test "lowering fail-closed gate: return operand uncoercible to declared type" ![io] {
+    _assert_emit_fails_closed("sfn527_return_coerce.sfn", "fn r_str(s: string) -> i32 { return s; }\nfn main() -> i32 { return 0; }\n", "unable to coerce return expression to `i32` in `r_str`");
+}
+
+test "lowering fail-closed gate: assignment RHS fails to lower" ![io] {
+    _assert_emit_fails_closed("sfn527_assign_null_operand.sfn", "struct T { a: i32; }\nfn in_assign(t: T) -> i32 { let mut x: i32 = 41; x = t.nope; return x; }\nfn main() -> i32 { return 0; }\n", "failed to lower assignment expression for `x` in `in_assign`");
+}
+
+test "lowering fail-closed gate: assignment RHS uncoercible" ![io] {
+    _assert_emit_fails_closed("sfn527_assign_coerce.sfn", "fn a_str(s: string) -> i32 { let mut x: i32 = 1; x = s; return x; }\nfn main() -> i32 { return 0; }\n", "unable to coerce assignment value for `x` in `a_str`");
+}
+
+test "lowering fail-closed gate: let initializer uncoercible" ![io] {
+    _assert_emit_fails_closed("sfn527_let_coerce.sfn", "fn l_str(s: string) -> i32 { let y: i32 = s; return y; }\nfn main() -> i32 { return 0; }\n", "unable to coerce initializer for `y` to `i32` in `l_str`");
+}
+
+test "lowering fail-closed gate: let initializer fails to lower" ![io] {
+    _assert_emit_fails_closed("sfn527_let_null_operand.sfn", "struct T { a: i32; }\nfn in_let(t: T) -> i32 { let x: i32 = t.nope; return x; }\nfn main() -> i32 { return 0; }\n", "failed to lower initializer for `x` in `in_let`");
+}
+
+test "lowering fail-closed gate: struct literal missing field" ![io] {
+    _assert_emit_fails_closed("sfn527_struct_literal_missing_field.sfn", "struct S { a: string; flag: boolean; b: string; }\nfn make(computed: boolean) -> S { return S { a: \"x\", b: \"y\" }; }\nfn main() -> i32 { let r = make(true); return 0; }\n", "struct literal for `S` missing field `flag`");
+}
+
+test "lowering fail-closed gate: combined repro fails `sfn build` and produces no binary" ![io] {
+    let src = _write_source("sfn527_build_gate.sfn", "struct T { a: i32; }\nfn f() -> i32 { return; }\nfn g(t: T) -> i32 { let x: i32 = t.nope; return x; }\nfn in_return(t: T) -> i32 { return t.nope; }\nfn main() -> i32 { return 0; }\n");
+    let binpath = _scratch_dir() + "/sfn527_build_gate_bin";
+    if fs.exists(binpath) { fs.deleteFile(binpath); }
+    let env_vars = clean_runner_env(nested_runner_scratch("sfn527-build"));
+    let exit = process.run_capture([_sfn_bin(), "build", "-o", binpath, src], env_vars);
+    let sout = process.capture_take_stdout();
+    let serr = process.capture_take_stderr();
+    assert exit != 0;
+    assert find(sout + serr, "[E1002]", 0) >= 0;
+    assert ! fs.exists(binpath);
+}
+
+test "lowering fail-closed gate: loop fallthrough control still builds untagged" ![io] {
+    let src = _write_source("sfn527_loop_fallthrough.sfn", "fn spin(n: i32) -> i32 { loop { if n > 0 { return n; } } }\nfn main() -> i32 { return 0; }\n");
+    let exit = process.run_capture([_sfn_bin(), "emit", "llvm", src], process.environ());
+    let sout = process.capture_take_stdout();
+    let serr = process.capture_take_stderr();
+    assert exit == 0;
+    assert find(sout + serr, "[E1002]", 0) < 0;
+}
+
+test "lowering fail-closed gate: valid source still emits" ![io] {
+    let src = _write_source("sfn527_valid_source.sfn", "fn add(a: i32, b: i32) -> i32 { return a + b; }\nfn main() -> i32 { return add(1, 2); }\n");
+    let out = _scratch_dir() + "/sfn527_valid_source.ll";
+    if fs.exists(out) { fs.deleteFile(out); }
+    let exit = process.run_capture([_sfn_bin(), "emit", "-o", out, "llvm", src], process.environ());
+    let _sout = process.capture_take_stdout();
+    let _serr = process.capture_take_stderr();
+    assert exit == 0;
+    assert fs.exists(out);
+    let ir = fs.readFile(out);
+    assert ir.length > 0;
+}

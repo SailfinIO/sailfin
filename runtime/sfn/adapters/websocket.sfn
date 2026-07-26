@@ -411,7 +411,14 @@ fn _ws_handle_fd(h: *u8) -> i32 {
     let b1: i64 = _ws_byte_at(h, 1);
     let b2: i64 = _ws_byte_at(h, 2);
     let b3: i64 = _ws_byte_at(h, 3);
-    return (b0 | (b1 << 8) | (b2 << 16) | (b3 << 24)) as i32;
+    // The reassembled value is bound before the cast because a cast applied
+    // directly to a parenthesized expression containing `<<` does not lower
+    // (SFN-560) — it produced a null operand, and the old fail-open lowering
+    // turned this whole function into `ret i32 0`, so every caller operated
+    // on fd 0 (stdin) instead of the socket. Inline the cast again once
+    // SFN-560 lands.
+    let fd: i64 = b0 | (b1 << 8) | (b2 << 16) | (b3 << 24);
+    return fd as i32;
 }
 
 // `_ws_make_handle(fd)` — allocate the 16-byte handle cell, storing

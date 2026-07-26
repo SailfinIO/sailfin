@@ -227,9 +227,14 @@ fn lower_expression_statement(function_name: string, instruction: NativeInstruct
             current_temp = lowered.temp_index;
             current_temp = recover_temp_from_lines(current_lines, current_temp);
             if lowered.operand == null {
-                diagnostics.push("llvm lowering: failed to lower assignment expression for `"
+                // SFN-527: the assignment is dropped entirely from the emitted
+                // IR, so the local silently keeps its previous value. Fail
+                // closed rather than shipping the stale read.
+                diagnostics.push("llvm lowering [fatal] [E1002]: failed to lower assignment expression for `"
                     + trimmed_assign_target
-                    + "`");
+                    + "` in `"
+                    + function_name
+                    + "` — the assignment would be dropped");
             } else {
                 let coerced = coerce_operand_to_type(lowered.operand, binding.llvm_type, current_temp, current_lines, true, null);
                 let mut _ci13: int = 0;
@@ -242,8 +247,16 @@ fn lower_expression_statement(function_name: string, instruction: NativeInstruct
                 current_temp = coerced.temp_index;
                 current_temp = recover_temp_from_lines(current_lines, current_temp);
                 if coerced.operand == null {
-                    diagnostics.push("llvm lowering: unable to coerce assignment value for `"
+                    // SFN-527: the store below fabricates a default. Keep
+                    // emitting it so the rest of the pass sees structurally
+                    // valid IR, but fail the build — the binary would
+                    // otherwise carry an invented value.
+                    diagnostics.push("llvm lowering [fatal] [E1002]: unable to coerce assignment value for `"
                         + trimmed_assign_target
+                        + "` in `"
+                        + function_name
+                        + "` — refusing to fabricate a default `"
+                        + binding.llvm_type
                         + "`");
                     current_lines.push("  store " + binding.llvm_type + " "
                         + default_return_literal(binding.llvm_type)
@@ -492,8 +505,14 @@ fn lower_return_instruction(function: NativeFunction, instruction: NativeInstruc
             _tf_i0 -= 1;
         }
         if safe_llvm_return == "void" { current_lines.push("  ret void"); } else {
-            diagnostics.push("llvm lowering: missing return value in `"
+            // SFN-527: a bare `return` in a value-returning function. The
+            // `ret <default>` below is a fabrication, so fail closed; the
+            // line still goes out to keep the block terminated for the rest
+            // of the pass.
+            diagnostics.push("llvm lowering [fatal] [E1002]: missing return value in `"
                 + fn_name
+                + "` — refusing to fabricate a default `"
+                + safe_llvm_return
                 + "`");
             current_lines.push("  ret " + safe_llvm_return + " "
                 + default_return_literal(safe_llvm_return));
@@ -592,8 +611,13 @@ fn lower_return_instruction(function: NativeFunction, instruction: NativeInstruc
             + has_operand);
     }
     if lowered.operand == null {
-        diagnostics.push("llvm lowering: unhandled return expression in `"
+        // SFN-527: the returned expression did not lower, so the
+        // `ret <default>` recovery below invents the function's result. Fail
+        // closed; the terminator still goes out so later passes see valid IR.
+        diagnostics.push("llvm lowering [fatal] [E1002]: unhandled return expression in `"
             + fn_name
+            + "` — refusing to fabricate a default `"
+            + safe_llvm_return
             + "`");
         // M1.5.3: emit chain drops even on the recovery path so a
         // miscompiled return doesn't leak owned RC locals.
@@ -676,11 +700,14 @@ fn lower_return_instruction(function: NativeFunction, instruction: NativeInstruc
     current_temp = coerced.temp_index;
     current_temp = recover_temp_from_lines(current_lines, current_temp);
     if coerced.operand == null {
-        diagnostics.push("llvm lowering: unable to coerce return expression to `"
+        // SFN-527: same fabrication as the null-operand branch above, reached
+        // when the operand lowered but could not be coerced to the declared
+        // return type.
+        diagnostics.push("llvm lowering [fatal] [E1002]: unable to coerce return expression to `"
             + safe_llvm_return
             + "` in `"
             + fn_name
-            + "`");
+            + "` — refusing to fabricate a default");
         // M1.5.3: emit chain drops even when the coercion failed, so the
         // recovery `ret <default>` still releases owned locals.
         let _coerce_result = emit_drops_for_scope_chain(current_locals, scope_id, _fn_root_scope, true, current_temp);

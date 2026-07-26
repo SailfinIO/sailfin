@@ -868,10 +868,21 @@ fn lower_struct_literal(parse: StructLiteralParse, bindings: ParameterBinding[],
                 used_names.push(expected.name);
             }
         } else {
-            diagnostics.push("llvm lowering: struct literal for `" + info.name
+            // SFN-527 (SFN-392): the `insertvalue` below fills the omitted
+            // field with `default_return_literal`, so the constructed struct
+            // silently carries `0`/`false`/`null` where the author's value
+            // belongs. No language feature grants partial literals.
+            let mut _missing_diag = "llvm lowering [fatal] [E1002]: struct literal for `"
+                + info.name
                 + "` missing field `"
                 + expected.name
-                + "`");
+                + "` — refusing to fabricate a default `"
+                + expected.llvm_type
+                + "`";
+            if span != null {
+                _missing_diag = _missing_diag + " at " + _format_literal_span(span);
+            }
+            diagnostics.push(_missing_diag);
         }
 
         let mut value_text: string = default_return_literal(expected.llvm_type);
