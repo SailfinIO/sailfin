@@ -86,6 +86,75 @@ fn _format_binary_operand_into(operand: Expression, out: string[]) -> string[] {
     return out;
 }
 
+// Variants that render as an atom or an already-tight postfix chain, and so
+// need no parens in receiver position (SFN-556, the Linear issue — not the
+// unrelated `#556` cited above).
+//
+// `Array`, `Object`, and `Struct` are deliberately absent even though they are
+// self-delimiting. Their rendering collides with a recognizer that runs before
+// member/index dispatch: `["p", "q"][1]` starts `[` and ends `]`, so
+// `lower_expression` takes the array-literal arm and strips the outer
+// characters into `"p", "q"][1`, and `Point { x: 1 }.x` is claimed by
+// `parse_struct_literal`, which then rejects the `.x` as trailing content.
+// A leading paren makes both recognizers decline and fall through correctly.
+//
+// `Range` is the opposite case, and is bare for a reason that has nothing to do
+// with being postfix-tight: the range-HOF lowering matches a `<start>..<end>`
+// receiver in the rendered text, and does not strip a wrapping paren, so
+// parenthesizing it breaks `(0..n).map(...)` outright. That leaves `(a..b).x`
+// and `(a..b)[i]` still mis-binding — pre-existing, untested, and out of scope
+// here (SFN-556 scopes the lowering scanners out); fixing it belongs with the
+// range-HOF probe, not this renderer.
+fn _is_postfix_tight(variant: string) -> boolean {
+    if variant == "Identifier" { return true; }
+    if variant == "Range" { return true; }
+    if variant == "NumberLiteral" { return true; }
+    if variant == "BooleanLiteral" { return true; }
+    if variant == "NullLiteral" { return true; }
+    if variant == "StringLiteral" { return true; }
+    if variant == "Member" { return true; }
+    if variant == "Call" { return true; }
+    if variant == "Index" { return true; }
+    return false;
+}
+
+// Append the rendering of a postfix receiver — a `Member` object or an `Index`
+// sequence — parenthesizing anything that is not already postfix-tight.
+// Without this, `Member{object: Binary{s + "cde"}, member: "length"}` renders as
+// the text `s + "cde".length`; the lowering re-parser tries its additive scan
+// long before member access, splits on the `+`, and binds `.length` to the
+// right operand, producing a pointer-derived value (SFN-556).
+//
+// Deny-by-default: only atoms and postfix chains render bare, so a variant
+// added later is parenthesized rather than silently mis-binding — this same
+// omission had already recurred across sibling arms once.
+//
+// The parens are free here because both receiver positions unconditionally
+// re-enter `lower_expression`, which strips a fully-enclosing pair before
+// dispatch (llvm/expression_lowering/native/core.sfn). Keeping `Identifier`
+// bare is load-bearing, though, and not just tidiness: a parenthesized
+// identifier no longer satisfies the `is_simple_identifier` fast paths in
+// member and call resolution.
+//
+// `Call` callees are deliberately NOT routed here. Nothing re-feeds a callee
+// through `lower_expression` — call resolution matches it as a literal name
+// string — so wrapping would drive every bare call into "callee signature is
+// not known". It would also break the IIFE path: an immediately-invoked lambda
+// renders its callee as the `<closure_pair ...>` marker, which lowering
+// recognizes by leading prefix, and a wrapping paren defeats that match
+// without being strippable. `(a + b).trim()` is `Call{callee: Member{...}}`
+// and is corrected by the `Member` arm instead.
+fn _format_postfix_receiver_into(receiver: Expression, out: string[]) -> string[] {
+    if _is_postfix_tight(receiver.variant) {
+        format_expression_into(receiver, out);
+        return out;
+    }
+    out.push("(");
+    format_expression_into(receiver, out);
+    out.push(")");
+    return out;
+}
+
 fn format_expression(expression: Expression) -> string {
     let mut out: string[] = [];
     format_expression_into(expression, out);
@@ -133,7 +202,7 @@ fn format_expression_into(expression: Expression, out: string[]) -> string[] {
         return out;
     }
     if expression.variant == "Member" {
-        format_expression_into(expression.object, out);
+        _format_postfix_receiver_into(expression.object, out);
         out.push(".");
         out.push(expression.member);
         return out;
@@ -152,7 +221,7 @@ fn format_expression_into(expression: Expression, out: string[]) -> string[] {
         return out;
     }
     if expression.variant == "Index" {
-        format_expression_into(expression.sequence, out);
+        _format_postfix_receiver_into(expression.sequence, out);
         out.push("[");
         format_expression_into(expression.index, out);
         out.push("]");

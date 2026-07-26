@@ -538,11 +538,16 @@ fn lower_to_llvm_lines_with_parsed_context_for_tests(native_module: NativeModule
         if rj < total_regions - 1 {
             next_lbl = "region" + number_to_string(rj + 1);
         }
-        // Bound to a local rather than measured inline: `(a + b).length`
-        // binds `.length` to the right operand instead of the parenthesized
-        // concatenation (SFN-556), so the inline form sized this marker from
-        // the label's length alone and emitted a blank line in place of the
-        // RUN marker.
+        // Bound to a local rather than measured inline. The renderer fix for
+        // `(a + b).length` (SFN-556) is in this checkout, but the *pinned
+        // seed* compiles this file, so until the seed carries that fix the
+        // inline form still mis-binds `.length` to the right operand here and
+        // sizes the marker from a pointer-derived value — the harness then
+        // reads far out of bounds and prints raw memory in place of every RUN
+        // marker. Remove this binding, restoring the inline
+        // `("  RUN  " + test_labels[_ri]).length`, in the first change that
+        // lands after `bootstrap.toml [seed].version` advances to a release
+        // containing SFN-556.
         let run_line = "  RUN  " + test_labels[_ri];
         let run_arr = number_to_string(run_line.length + 1);
         let run_blen = number_to_string(run_line.length);

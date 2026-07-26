@@ -1,0 +1,141 @@
+// Regression coverage for SFN-556: `(a + b).length` bound `.length` to the
+// right operand instead of the parenthesized expression, yielding a
+// pointer-derived value (`(s + "cde").length` returned 3367521, not 5).
+//
+// The defect was in the AST->text renderer, not the parser or the lowering
+// scanners. `format_expression_into` (compiler/src/emit_native_format.sfn)
+// flattens the AST to `.sfn-asm` text that the LLVM stage re-parses; the
+// `Member` object and `Index` sequence recursed without parenthesizing, so
+// `Member{object: Binary{s + "cde"}, member: "length"}` rendered as the text
+// `s + "cde".length`. The re-parser runs its additive scan long before member
+// access, split on the `+`, and measured only the right operand.
+//
+// The fix routes both receiver positions through `_format_postfix_receiver_into`,
+// which parenthesizes anything that is not already an atom or a postfix chain.
+// That is deny-by-default on purpose: the same omission had already recurred
+// across sibling arms, so these tests pin the whole receiver family — Binary,
+// Cast, and Conditional — rather than just the reported `+` case.
+//
+// `Call` callees are deliberately NOT parenthesized: nothing re-feeds a callee
+// through `lower_expression`, so `(f)(x)` would fail to resolve. The
+// method-call form `(a + b).trim()` is `Call{callee: Member{...}}` and is
+// corrected through its `Member` callee, so the `Member` cases below cover it.
+// It has no direct test here because no method is callable on the result of a
+// binary operator today: string concat is the only such operator, and strings
+// expose `.length` plus free functions (`char_at`, `substring`), not methods.
+import { emit_native_text_with_module_name } from "../../src/emit_native";
+import { parse_program } from "../../src/parser/mod";
+import { index_of } from "../../src/string_utils";
+
+struct Point {
+    x: int,
+    y: int
+}
+
+// Return position on purpose: the function-body parser preserves `let` lines
+// as `Expression.Raw` text wholesale, so only return-position expressions
+// reach `parse_postfix_chain` and exercise the receiver rendering.
+fn _emit(source: string) -> string ![io] {
+    let program = parse_program(source);
+    return emit_native_text_with_module_name(program, "paren_receiver_binding_test");
+}
+
+// Pin the defect at the layer it actually lives in. The runtime-value tests
+// below would also pass if some later lowering change happened to recover the
+// right answer by another route; this one fails the moment the renderer stops
+// emitting the group.
+test "paren receiver: renderer keeps the parens around a binary object" ![io] {
+    let asm = _emit("fn measure(s: string) -> int { return (s + \"cde\").length; }");
+    assert index_of(asm, "(s + \"cde\").length") >= 0;
+}
+
+test "paren receiver: binary object measures the group, not the right operand" {
+    let s: string = "ab";
+    let joined: string = s + "cde";
+
+    // The local-bound form always worked; it is the control.
+    assert joined.length == 5;
+
+    // The inline forms are the regression. Pre-fix these produced values
+    // derived from an `i8*`, not lengths.
+    let via_paren: int = (s + "cde").length;
+    assert via_paren == 5;
+
+    let literal: int = ("xy" + "z").length;
+    assert literal == 3;
+}
+
+test "paren receiver: binary object holds in assert position" {
+    let scratch: string = "/tmp/sfn";
+    // The shape that silently dropped an assertion from the IR in
+    // cli_path_normalization_test.sfn — the mis-parse produced an operand pair
+    // lowering refused to coerce, so the whole assert vanished and the test
+    // passed without ever running it.
+    assert(scratch + "/artifact.ll").length == 20;
+    assert("xy" + "z").length == 3;
+}
+
+// The reported case used `+` because string concat is the only binary operator
+// whose result carries a member. Other operators reach receiver position
+// through a cast, which the same renderer arm governs — pre-fix, the `Cast`
+// rendering `(3 * 4) as string` lost its grouping to the trailing `.length`
+// exactly as the bare binary did.
+test "paren receiver: cast object survives for non-additive operators" {
+    let mul: int = ((3 * 4) as string).length;
+    assert mul == 2;
+
+    let sub: int = ((5 - 2) as string).length;
+    assert sub == 1;
+
+    // `as string` renders booleans as "1"/"0" (SFN-548).
+    let eq: int = ((1 == 1) as string).length;
+    assert eq == 1;
+}
+
+test "paren receiver: conditional object and index sequence keep their group" {
+    let flag: boolean = true;
+    let s: string = "abcd";
+    let t: string = "xy";
+
+    // Pre-fix this measured 0: the ternary rendering `(c) ? (t) : (e)` is not
+    // one group, so the trailing `.length` bound to the else-branch.
+    let cond_member: int = (flag? s: t).length;
+    assert cond_member == 4;
+
+    // The `Index` sequence is an independent trigger of the same defect, and
+    // pre-fix this yielded an empty string.
+    let xs: string[] = ["p", "q"];
+    let ys: string[] = ["r", "s"];
+    let cond_index: string = (flag? xs: ys)[1];
+    assert cond_index == "q";
+}
+
+// Array/Object/Struct receivers look self-delimiting, so it is tempting to
+// render them bare. They must not be: each collides with a recognizer that
+// runs before member/index dispatch. Pre-fix, both of these produced a wrong
+// value rather than an error — the array index yielded an empty string and the
+// struct field yielded 0.
+test "paren receiver: self-delimiting objects still need the group" {
+    // `["p", "q"][1]` both starts `[` and ends `]`, so the array-literal
+    // recognizer claimed it and stripped the outer characters, leaving the
+    // index text fused onto the elements.
+    let picked: string = ["p", "q"][1];
+    assert picked == "q";
+
+    // `Point { x: 7, y: 9 }.x` was claimed by the struct-literal recognizer,
+    // which then rejected the trailing `.x` instead of treating it as a member
+    // access on the literal.
+    let field: int = Point { x: 7, y: 9 }.x;
+    assert field == 7;
+}
+
+// The counter-example to deny-by-default, pinned so a future widening cannot
+// re-break it silently. A `Range` receiver must stay bare: the range-HOF
+// lowering matches `<start>..<end>` in the rendered text and does not strip a
+// wrapping paren, so parenthesizing it breaks range HOFs outright rather than
+// fixing anything.
+test "paren receiver: range receiver stays bare for the range-HOF path" ![io] {
+    let asm = _emit("fn squares(n: int) -> int[] { return (0..n).map(fn (i) -> int { return i * i; }); }");
+    assert index_of(asm, "(0..n).map") < 0;
+    assert index_of(asm, "0..n.map") >= 0;
+}
