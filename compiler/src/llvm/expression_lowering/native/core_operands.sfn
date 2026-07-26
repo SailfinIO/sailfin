@@ -411,6 +411,13 @@ fn comparison_predicate_for_symbol(symbol: string, llvm_type: string, operands_u
     if llvm_type == "i8" {
         if symbol == "==" { return "icmp eq"; }
         if symbol == "!=" { return "icmp ne"; }
+        if operands_unsigned {
+            if symbol == "<" { return "icmp ult"; }
+            if symbol == "<=" { return "icmp ule"; }
+            if symbol == ">" { return "icmp ugt"; }
+            if symbol == ">=" { return "icmp uge"; }
+            return "";
+        }
         if symbol == "<" { return "icmp slt"; }
         if symbol == "<=" { return "icmp sle"; }
         if symbol == ">" { return "icmp sgt"; }

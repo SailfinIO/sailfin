@@ -740,6 +740,17 @@ fn lower_binary_operation(expression: string, match: OperatorMatch, bindings: Pa
         }
     }
 
+    // Captured before harmonising: `binary_operands_are_unsigned` rejects a
+    // pair whose operand types did not already agree, so a sign-extended
+    // operand cannot select an unsigned opcode.
+    let mut left_pre_type: string = "";
+    let mut right_pre_type: string = "";
+    if left_result.operand != null {
+        left_pre_type = left_result.operand.llvm_type;
+    }
+    if right_result.operand != null {
+        right_pre_type = right_result.operand.llvm_type;
+    }
     let harmonised = harmonise_operands(left_result.operand, right_result.operand, right_result.temp_index, right_result.lines);
     diagnostics = extend_string_array(diagnostics, harmonised.diagnostics);
     let mut _if99: boolean = false;
@@ -824,7 +835,7 @@ fn lower_binary_operation(expression: string, match: OperatorMatch, bindings: Pa
             };
         }
     }
-    let operands_unsigned = binary_operands_are_unsigned(left_text, right_text, bindings, locals, result_type);
+    let operands_unsigned = binary_operands_are_unsigned(match.symbol, left_text, right_text, bindings, locals, result_type, left_pre_type, right_pre_type);
     let operation = operation_name_for_symbol(match.symbol, result_type, operands_unsigned);
     if operation.length == 0 {
         // Slice B (2026-05-02): `operation_name_for_symbol` returns
@@ -1238,6 +1249,12 @@ fn lower_comparison_operation(expression: string, match: OperatorMatch, bindings
         }
     }
 
+    // See the matching capture in `lower_binary_operation`: an operand the
+    // harmoniser widened must not select an unsigned comparison.
+    let mut left_cmp_pre_type: string = "";
+    let mut right_cmp_pre_type: string = "";
+    if left_operand != null { left_cmp_pre_type = left_operand.llvm_type; }
+    if right_operand != null { right_cmp_pre_type = right_operand.llvm_type; }
     let harmonised = harmonise_operands(left_operand, right_operand, alignment_temp, alignment_lines);
     diagnostics = extend_string_array(diagnostics, harmonised.diagnostics);
     let mut _if105: boolean = false;
@@ -1253,7 +1270,7 @@ fn lower_comparison_operation(expression: string, match: OperatorMatch, bindings
         };
     }
 
-    let comparison_unsigned = binary_operands_are_unsigned(left_text, right_text, bindings, locals, harmonised.left.llvm_type);
+    let comparison_unsigned = binary_operands_are_unsigned(match.symbol, left_text, right_text, bindings, locals, harmonised.left.llvm_type, left_cmp_pre_type, right_cmp_pre_type);
     let comparison = emit_comparison_instruction(match.symbol, harmonised.left, harmonised.right, harmonised.temp_index, harmonised.lines, comparison_unsigned);
     diagnostics = extend_string_array(diagnostics, comparison.diagnostics);
     if comparison.operand == null {

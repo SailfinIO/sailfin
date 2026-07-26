@@ -48,6 +48,17 @@ fn main() -> int ![io] {
     let blt: boolean = big < bc;
     print("u64_lt100=" + blt);
 
+    // A shift count is a bit count, not a signed number, so a *signed*
+    // count must not drag the unsigned value back onto the sign-filling
+    // `ashr`. The count is `i32` rather than `int` to keep both operands
+    // the same width: an `int` (i64) count would make this a mixed-width
+    // pair, which harmonises by sign-extending the u32 value and is wrong
+    // under either shift opcode — that gap is SFN-501's, not this one's.
+    let shift_count: i32 = 4;
+    let vs: u32 = a >> shift_count;
+    let vsv: int = vs as int;
+    print("shr_signed_count=" + vsv);
+
     // Signed operands keep the signed opcode: unchanged behaviour.
     let n: i32 = -16;
     let ns: i32 = n >> 2;

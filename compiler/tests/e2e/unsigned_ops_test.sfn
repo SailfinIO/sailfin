@@ -54,6 +54,7 @@ test "unsigned ops: unsigned operands select unsigned opcodes and signed operand
         + "u64_div2_ok=1\n"
         + "u64_mod7=1\n"
         + "u64_lt100=0\n"
+        + "shr_signed_count=250000000\n"
         + "i32_shr2=-4\n"
         + "i32_div2=-4\n"
         + "i32_lt0=1";

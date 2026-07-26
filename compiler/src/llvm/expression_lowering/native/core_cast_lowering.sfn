@@ -22,12 +22,7 @@ import {
     StringConstant,
     TypeContext
 } from "../../types";
-import {
-    is_simple_identifier,
-    number_to_string,
-    starts_with,
-    trim_text
-} from "../../utils";
+import { number_to_string, starts_with, trim_text } from "../../utils";
 import { lower_expression } from "./core";
 import { pick_agg_cast_shim_target } from "./core_literals_lowering";
 import {
@@ -37,8 +32,7 @@ import {
     is_float_llvm_type,
     is_integer_llvm_type
 } from "./core_operands";
-import { strip_enclosing_parentheses } from "./core_operators";
-import { find_local_binding, find_parameter_binding, operand_source_type } from "./core_scopes";
+import { operand_source_type } from "./core_scopes";
 import { coerce_operand_to_string, emit_string_concat, lower_string_literal } from "./core_strings";
 import { encode_string_literal_for_sailfin, resolve_interpolation_template } from "./core_text";
 

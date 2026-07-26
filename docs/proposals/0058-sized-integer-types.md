@@ -4,9 +4,9 @@ title: Sized Integer Types and Overflow Semantics
 status: Accepted
 type: language
 created: 2026-07-01
-updated: 2026-07-25
+updated: 2026-07-26
 author: "agent:compiler-architect; human review"
-tracking: "SFN-501, SFN-502, SFN-503"
+tracking: "SFN-501, SFN-502, SFN-503, SFN-573"
 supersedes:
 superseded-by:
 graduates-to: reference/spec/06-types.md

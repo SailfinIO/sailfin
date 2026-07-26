@@ -85,15 +85,23 @@ fn operand_sign_class(value: string, bindings: ParameterBinding[], locals: Local
     return "unsigned";
 }
 
-// Whether a binary operator's two operands are unsigned, for the opcode
+// Whether a binary operator's operands are unsigned, for the opcode
 // selections that differ by sign (`lshr`/`udiv`/`urem`, `icmp ult` and
 // friends — SFN-573, SFEP-0058 §3.3).
 //
-// Unsigned only when at least one side is *established* unsigned and
-// neither side is established signed. A mixed pair therefore keeps the
-// signed forms: rejecting mixed signedness outright is SFN-501's
-// implicit-conversion work, and until it lands the conservative answer is
-// the behaviour the lowering already had.
+// `left_llvm_type`/`right_llvm_type` are the operand types *before*
+// `harmonise_operands` ran, and both must already equal the operation's
+// type. Widening is the trap: in `a < b` with `a: u32` and `b: u64`,
+// harmonising sign-extends `a` to i64, and classifying only the surviving
+// annotations would answer "unsigned" and compare a sign-extended value
+// with `icmp ult` — a wrong answer where the signed form merely gave the
+// old one. Rejecting any operand whose type changed keeps a mixed-width
+// pair on the status-quo opcode; tightening mixed widths into a
+// diagnostic is SFN-501's implicit-conversion work.
+//
+// Unsigned then requires at least one side *established* unsigned and
+// neither established signed, so a mixed signed/unsigned pair also keeps
+// the signed forms.
 //
 // This reaches an operand spelled as a plain identifier or parameter. A
 // compound operand carries no source annotation on its `LLVMOperand` and
@@ -101,8 +109,24 @@ fn operand_sign_class(value: string, bindings: ParameterBinding[], locals: Local
 // and, most commonly, arithmetic (`(a + b) >> 4`). Closing that needs the
 // checker's inferred-type tag threaded through expression lowering, which
 // SFEP-0058 §3.3 scopes to the typecheck slice (SFN-501).
-fn binary_operands_are_unsigned(left_text: string, right_text: string, bindings: ParameterBinding[], locals: LocalBinding[], llvm_type: string) -> boolean {
+fn binary_operands_are_unsigned(symbol: string, left_text: string, right_text: string, bindings: ParameterBinding[], locals: LocalBinding[], llvm_type: string, left_llvm_type: string, right_llvm_type: string) -> boolean {
+    if left_llvm_type != llvm_type { return false; }
     let left_class = operand_sign_class(left_text, bindings, locals, llvm_type);
+
+    // A shift reads its right operand as a bit count, not as a number with
+    // a sign — `shl`/`lshr`/`ashr` all take it unsigned — so only the value
+    // being shifted selects the opcode. Consulting the count too would send
+    // the common `x >> n` with an `int` count back to `ashr`, which is the
+    // sign-filling bug this exists to fix.
+    let mut shift_like: boolean = false;
+    if symbol == "<<" { shift_like = true; }
+    if symbol == ">>" { shift_like = true; }
+    if shift_like {
+        if left_class == "unsigned" { return true; }
+        return false;
+    }
+
+    if right_llvm_type != llvm_type { return false; }
     let right_class = operand_sign_class(right_text, bindings, locals, llvm_type);
     if left_class == "signed" { return false; }
     if right_class == "signed" { return false; }

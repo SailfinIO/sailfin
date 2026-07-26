@@ -480,3 +480,40 @@ test "operator-sign: u32 << stays shl regardless of sign" ![io] {
     assert body.length > 0;
     assert contains(body, "shl i32");
 }
+
+// ---- SFN-573: a shift's count operand carries no sign relevance ----
+// `shl`/`lshr`/`ashr` all read the count as an unsigned bit count, so a
+// signed count must not drag the shifted value back onto `ashr`.
+test "operator-sign: u64 >> a signed count still lowers as lshr" ![io] {
+    let body = _emit_body("fn f(x: u64, n: i64) -> u64 { return x >> n; }", "define i64 @f", "u64_shr_signed_count");
+    assert body.length > 0;
+    assert contains(body, "lshr i64");
+    assert ! contains(body, "ashr");
+}
+
+// ---- SFN-573: a widened operand must not select an unsigned opcode ----
+// `harmonise_operands` sign-extends the narrower side, so classifying only
+// the surviving annotations would compare a sign-extended value with
+// `icmp ult`. A mixed-width pair keeps the status-quo signed predicate
+// until SFN-501 rejects the mix outright.
+test "operator-sign: mixed-width u32/u64 comparison stays signed" ![io] {
+    let body = _emit_body("fn f(x: u32, y: u64) -> boolean { return x < y; }", "define i1 @f", "u32_u64_lt_mixed");
+    assert body.length > 0;
+    assert ! contains(body, "icmp ult");
+}
+
+// ---- SFN-573: u8 ordered comparisons honour the operand sign ----
+// `u8` maps onto `i8`, so without the flag the i8 arm compared 200u8 as
+// -56 and answered `200 < 100` with `true`.
+test "operator-sign: u8 < lowers as icmp ult (not slt)" ![io] {
+    let body = _emit_body("fn f(x: u8, y: u8) -> boolean { return x < y; }", "define i1 @f", "u8_lt");
+    assert body.length > 0;
+    assert contains(body, "icmp ult i8");
+    assert ! contains(body, "icmp slt");
+}
+
+test "operator-sign: i8 < lowers as icmp slt (unchanged)" ![io] {
+    let body = _emit_body("fn f(x: i8, y: i8) -> boolean { return x < y; }", "define i1 @f", "i8_lt");
+    assert body.length > 0;
+    assert contains(body, "icmp slt i8");
+}
