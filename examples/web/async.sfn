@@ -1,12 +1,18 @@
 // examples/web/async.sfn
-import { http } from "http";
+//
+// Simple async fetch pattern encapsulating `await`.
+//
+// The HTTP client is synchronous today, so the `async` boundary is drawn at
+// `fetchData`: it is the awaitable unit, and callers reach it with `await`.
+// `fetch` returns a typed `Response`, whose `body` is the payload.
+import { fetch } from "sfn/http";
 
 async fn fetchData(url: string) -> string ![net] {
-    let response = await http.get(url);
+    let response = fetch("GET", url, [], "");
     return response.body;
 }
 
 async fn main() -> void ![io, net] {
-    let data = await fetchData("https://example.com");
+    let data = await fetchData("http://localhost:8080/");
     print("Data: ${data}");
 }

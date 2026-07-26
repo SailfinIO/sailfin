@@ -225,7 +225,7 @@ test "closure_env: single-capture alloc emits size-via-GEP-null + alloc + popula
     let captures: Capture[] = [_capture_int("x")];
     let layout = synthesize_closure_env_struct(captures, 0);
     let operands: ClosureCaptureOperand[] = [ClosureCaptureOperand {
-        name: "x", llvm_value: "%x_local"
+        name: "x", llvm_value: "%x_local", llvm_type: ""
     }];
     let result = emit_closure_env_alloc(layout, operands, 0);
     assert result.lines.length == 6;
@@ -244,8 +244,10 @@ test "closure_env: multi-capture alloc populates each field in capture-set order
     let captures: Capture[] = [_capture_int("a"), _capture_bool("flag")];
     let layout = synthesize_closure_env_struct(captures, 4);
     let operands: ClosureCaptureOperand[] = [ClosureCaptureOperand {
-        name: "a", llvm_value: "%a"
-    }, ClosureCaptureOperand { name: "flag", llvm_value: "%flag" }];
+        name: "a", llvm_value: "%a", llvm_type: ""
+    }, ClosureCaptureOperand {
+        name: "flag", llvm_value: "%flag", llvm_type: ""
+    }];
     let result = emit_closure_env_alloc(layout, operands, 10);
     // Walk produces: size_ptr, size_i64, env_raw, env_typed, then
     // (gep, store) per field. With two fields that is 4 + 2 * 2 = 8

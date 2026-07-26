@@ -29,7 +29,8 @@ test "abi_version: descriptor accepts native_signature: null (default)" {
         return_type: "void",
         parameter_types: ["i8*"],
         effects: [],
-        native_signature: null
+        native_signature: null,
+        c_abi_return_type: null
     };
     assert descriptor.target == "test_target";
     assert descriptor.symbol == "sailfin_runtime_test_target";
@@ -46,7 +47,8 @@ test "abi_version: descriptor accepts native_signature: <string> (M2 flip)" {
         return_type: "void",
         parameter_types: ["i8*"],
         effects: [],
-        native_signature: "sfn_test_target"
+        native_signature: "sfn_test_target",
+        c_abi_return_type: null
     };
     assert descriptor.native_signature != null;
     assert descriptor.native_signature == "sfn_test_target";
@@ -115,7 +117,8 @@ test "abi_version: predicate picks symbol when native_signature is null" {
         return_type: "void",
         parameter_types: ["double"],
         effects: ["clock"],
-        native_signature: null
+        native_signature: null,
+        c_abi_return_type: null
     };
     assert helper.native_signature == null;
     assert helper.symbol == "sailfin_runtime_sleep";
@@ -128,7 +131,8 @@ test "abi_version: predicate picks native_signature when set" {
         return_type: "void",
         parameter_types: ["double"],
         effects: ["clock"],
-        native_signature: "sfn_sleep"
+        native_signature: "sfn_sleep",
+        c_abi_return_type: null
     };
     // Direct field reads first — these are how
     // `core_call_emission.sfn` consumes the descriptor (it never
@@ -151,7 +155,8 @@ test "abi_version: predicate rejects empty-string native_signature" {
         return_type: "void",
         parameter_types: ["double"],
         effects: ["clock"],
-        native_signature: ""
+        native_signature: "",
+        c_abi_return_type: null
     };
     // Empty string is non-null but length 0 — the predicate must
     // distinguish it from a real override.

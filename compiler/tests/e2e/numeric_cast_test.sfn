@@ -251,13 +251,30 @@ test "numeric-cast: f32 local from double literal narrows via fptrunc (#1587)" !
 // Without the early `as bool` check, `ptr as bool` would lower to
 // `ptrtoint ptr to i1`, a low-bit reinterpretation rather than the
 // documented "is non-null" comparison. The rejection runs before the
-// pointer→int branch, the cast bails with a null operand, and `lower_return`
-// falls back to the default literal `false` for i1.
+// pointer→int branch and the cast bails with a null operand.
+//
+// Until SFN-527 the story ended there: `lower_return` substituted the
+// default literal and emitted `ret i1 false`, so a rejected cast still
+// produced a binary that answered "not set" for every pointer. This test
+// asserted that fabricated `ret i1 false` as if it were the contract. It is
+// now a fail-closed assertion: the rejection reaches the user as
+// `[fatal] [E1002]` and no IR is written.
 test "numeric-cast: ptr → bool is rejected (not ptrtoint)" ![io] {
-    let body = _emit_body("fn isset(x: *u8) -> bool { return x as bool; }", "define i1 @isset", "ptr_to_bool");
-    assert body.length > 0;
-    assert ! contains(body, "ptrtoint i8* %x to i1");
-    assert contains(body, "ret i1 false");
+    let dir = _scratch_dir();
+    let src = dir + "/sfn-cast-ptr_to_bool.sfn";
+    let ll = dir + "/sfn-cast-ptr_to_bool.ll";
+    fs.writeFile(src, "fn isset(x: *u8) -> bool { return x as bool; }");
+    if fs.exists(ll) { fs.deleteFile(ll); }
+    let exit = process.run_capture([_sfn_bin(), "emit", "-o", ll, "llvm", src], _child_env());
+    let out = process.capture_take_stdout();
+    let err = process.capture_take_stderr();
+    fs.deleteFile(src);
+    assert exit != 0;
+    assert contains(out + err, "llvm lowering [fatal] [E1002]:");
+    // The rejected cast must not have been reinterpreted bitwise, and no
+    // partial IR may survive for downstream tooling to pick up.
+    assert ! contains(out + err, "ptrtoint");
+    assert ! fs.exists(ll);
 }
 
 // ---- f16 / bf16 (SFEP-0054 Phase 1) ----

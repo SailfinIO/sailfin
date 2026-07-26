@@ -1,15 +1,22 @@
 // examples/web/fetch-data.sfn
-import { http } from "http";
+//
+// External HTTP GET with lightweight status handling.
+//
+// `fetch` returns a typed `Response` (`status`, `headers`, `body`), which is
+// what makes the status check below meaningful. The bare `http.get` builtin
+// returns the body as a plain string and carries no status, so it cannot
+// express this pattern.
+import { fetch } from "sfn/http";
 
-async fn fetchData(url: string) -> string ![net] {
-    let response = await http.get(url);
+fn fetchData(url: string) -> string ![net] {
+    let response = fetch("GET", url, [], "");
     if response.status == 200 { return response.body; } else {
         return "Error: ${response.status}";
     }
 }
 
-async fn main() ![io, net] {
-    let url: string = "https://jsonplaceholder.typicode.com/posts/1";
-    let data = await fetchData(url);
+fn main() ![io, net] {
+    let url: string = "http://localhost:8080/posts/1";
+    let data = fetchData(url);
     print("Fetched data: ${data}");
 }
