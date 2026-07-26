@@ -1094,7 +1094,8 @@ fn check_statement(statement: Statement, ctx: TypeckCtx) -> ScopeResult {
 
 fn check_function_body(signature: FunctionSignature, body: Block, ctx: TypeckCtx) -> Diagnostic[] {
     let parameter_scope = seed_parameter_scope(signature, ctx.top_level);
-    let body_ctx = ctx_enter_body(ctx, parameter_scope.bindings, signature.return_type);
+    let generic_ctx = ctx_with_type_params(ctx, type_parameter_names(signature.type_parameters));
+    let body_ctx = ctx_enter_body(generic_ctx, parameter_scope.bindings, signature.return_type);
     let body_diagnostics = check_block(body, body_ctx);
     let mut _result = parameter_scope.diagnostics;
     let mut _ci: int = 0;
@@ -1241,7 +1242,8 @@ fn _build_nested_fn_scope(signature: FunctionSignature, ctx: TypeckCtx) -> Scope
 // re-scopes the body so a capture surfaces as E0421 (via `walk_expression`).
 fn check_nested_function_body(signature: FunctionSignature, body: Block, ctx: TypeckCtx) -> Diagnostic[] {
     let scoped = _build_nested_fn_scope(signature, ctx);
-    let body_ctx = ctx_enter_body(ctx, scoped.bindings, signature.return_type);
+    let generic_ctx = ctx_with_type_params(ctx, type_parameter_names(signature.type_parameters));
+    let body_ctx = ctx_enter_body(generic_ctx, scoped.bindings, signature.return_type);
     let body_diagnostics = check_block(body, body_ctx);
     let mut _result = scoped.diagnostics;
     let mut _ci: int = 0;
@@ -1750,8 +1752,12 @@ fn walk_expression(expression: Expression?, ctx: TypeckCtx) -> Diagnostic[] {
         // expression, so there is nothing to walk there. Flow-sensitive
         // narrowing is applied at lowering via the `narrowed_variant`
         // machinery (the typecheck pass tracks names only — no type field).
-        let is_target_diags = check_unknown_type_annotation(expression.target_type, expression.target_type.text, expression.span, ctx.known_types, ctx.type_params);
-        return is_target_diags.concat(walk_expression(expression.operand, ctx));
+        //
+        // The target is deliberately NOT run through the unknown-type check
+        // (E0013, SFN-555): `x is Text` names an enum VARIANT as often as a
+        // type, and variant names are not in the type registry. Judging it
+        // rejects the valid narrowing form.
+        return walk_expression(expression.operand, ctx);
     }
     if expression.variant == "TryOperator" {
         return walk_expression(expression.operand, ctx);
@@ -2508,7 +2514,8 @@ fn walk_statement_expressions(statement: Statement, ctx: TypeckCtx) -> Diagnosti
         // reference to an enclosing local (including a lambda parameter) trips
         // E0421. Without this arm the body was never resolution-walked.
         let scoped = _build_nested_fn_scope(statement.signature, ctx);
-        let body_ctx = ctx_enter_body(ctx, scoped.bindings, statement.signature.return_type);
+        let generic_ctx = ctx_with_type_params(ctx, type_parameter_names(statement.signature.type_parameters));
+        let body_ctx = ctx_enter_body(generic_ctx, scoped.bindings, statement.signature.return_type);
         return scoped.diagnostics.concat(walk_block_expressions(statement.body, body_ctx));
     }
     return [];
