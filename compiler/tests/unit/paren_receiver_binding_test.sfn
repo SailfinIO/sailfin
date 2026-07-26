@@ -129,13 +129,41 @@ test "paren receiver: self-delimiting objects still need the group" {
     assert field == 7;
 }
 
-// The counter-example to deny-by-default, pinned so a future widening cannot
-// re-break it silently. A `Range` receiver must stay bare: the range-HOF
-// lowering matches `<start>..<end>` in the rendered text and does not strip a
-// wrapping paren, so parenthesizing it breaks range HOFs outright rather than
-// fixing anything.
-test "paren receiver: range receiver stays bare for the range-HOF path" ![io] {
+// `Range` was the one exclusion from deny-by-default, and it rendered bare not
+// because it is postfix-tight but because the range-HOF probe matched
+// `<start>..<end>` in the rendered text and could not see past a wrapping
+// paren. SFN-563 moved that tolerance into the probe — it now strips a fully
+// enclosing pair before scanning (`core_call_resolution.sfn`) — so the group is
+// rendered for every range receiver and these tests pin the widened contract.
+test "paren receiver: range receiver keeps its group" ![io] {
     let asm = _emit("fn squares(n: int) -> int[] { return (0..n).map(fn (i) -> int { return i * i; }); }");
-    assert index_of(asm, "(0..n).map") < 0;
-    assert index_of(asm, "0..n.map") >= 0;
+    assert index_of(asm, "(0..n).map") >= 0;
+}
+
+// The two shapes the exclusion left mis-binding. Pre-fix these rendered
+// `a..b.x` and `a..b[1]`, so the trailing access bound to the end operand
+// instead of the range — the same silent-wrong-value class as SFN-556.
+test "paren receiver: non-HOF range member and index keep their group" ![io] {
+    let member = _emit("fn pick(a: int, b: int) -> int { return (a..b).x; }");
+    assert index_of(member, "(a..b).x") >= 0;
+    assert index_of(member, "a..b.x") < 0;
+
+    let indexed = _emit("fn pick(a: int, b: int) -> int { return (a..b)[1]; }");
+    assert index_of(indexed, "(a..b)[1]") >= 0;
+    assert index_of(indexed, "a..b[1]") < 0;
+}
+
+// The renderer assertions above only prove the group reaches the text. The
+// probe has to accept it as well: a parenthesized receiver failed
+// `find_top_level_range_separator`'s top-level scan (the `..` sat at paren
+// depth 1) and fell through to "callee signature is not known to the
+// compiler". Pinning it here means a probe regression fails a targeted unit
+// run, not just the e2e suite that first caught it.
+test "paren receiver: range HOFs still lower through a parenthesized receiver" {
+    let squares: int[] = (0..4).map(fn (i) -> int { return i * i; });
+    assert squares.length == 4;
+    assert squares[3] == 9;
+
+    let total = (0..5).reduce(0, fn (acc, k) -> int { return acc + k; });
+    assert total == 10;
 }
