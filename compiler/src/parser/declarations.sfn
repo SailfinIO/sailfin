@@ -15,6 +15,7 @@ import {
     InterfaceFieldMember,
     MethodDeclaration,
     Parameter,
+    SourceSpan,
     Statement,
     TypeAnnotation,
     TypeParameter
