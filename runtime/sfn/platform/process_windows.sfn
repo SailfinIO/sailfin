@@ -97,6 +97,15 @@ extern fn PeekNamedPipe(handle: i64, buffer: *u8, buf_size: i32, read_count: *i3
 
 extern fn GetStdHandle(which: i32) -> i64;
 
+// `DuplicateHandle` / `GetCurrentProcess` — the `run` passthrough path
+// hands the child inheritable copies of the parent's standard handles
+// rather than flipping `HANDLE_FLAG_INHERIT` on the parent's own
+// (SFN-546). Both are implicitly linked by mingw like the rest of this
+// family.
+extern fn DuplicateHandle(src_proc: i64, src: i64, dst_proc: i64, dst: *i64, access: i32, inherit: i32, options: i32) -> i32;
+
+extern fn GetCurrentProcess() -> i64;
+
 extern fn Sleep(ms: i32) -> void;
 
 // ── Win32 async-handle family (SFN-497). `WriteFile` feeds the child's
@@ -207,11 +216,42 @@ let mut pw_capture_wall_ms: i64 = 0;
 
 let mut pw_capture_peak_rss_kb: i64 = 0;
 
+// `_pw_dup_inheritable(proc, h)` — an inheritable duplicate of one of the
+// parent's standard handles, or `0` when there is none to duplicate.
+// `GetStdHandle` reports "no such handle" as either `0` or `-1`
+// (INVALID_HANDLE_VALUE) and neither may be handed to `DuplicateHandle`,
+// so both map to the `0` "nothing duplicated" sentinel. Options argument
+// is DUPLICATE_SAME_ACCESS (2), which makes the requested-access argument
+// ignored; `inherit` is TRUE (1) — that is the whole point of the call.
+fn _pw_dup_inheritable(proc: i64, h: i64) -> i64 ![io] {
+    if h == 0 { return 0; }
+    if h == -1 { return 0; }
+    let mut dup: i64 = 0;
+    let dup_ptr: *i64 = & dup;
+    let ok: i32 = DuplicateHandle(proc, h, proc, dup_ptr, 0, 1, 2);
+    if ok == 0 { return 0; }
+    return dup;
+}
+
+// `_pw_close_dup(h)` — release a handle from `_pw_dup_inheritable`,
+// tolerating its `0` sentinel. `CreateProcessA` copies the handles named by
+// `STARTUPINFOA` into the child, so the parent's duplicates are dead the
+// moment the spawn call returns, success or failure.
+fn _pw_close_dup(h: i64) -> void ![io] {
+    if h == 0 { return; }
+    let _c: i32 = CloseHandle(h);
+}
+
 // `sfn_process_run(argv)` — real Windows spawn. Mirrors the retired
 // `sailfin_runtime.c:5564` `CreateProcessA` body: build a single quoted
 // command line (`"arg0" "arg1" ...`), spawn, block until exit, return
 // the child's exit code as a float. 127 on any setup/spawn failure (the
 // conventional shell "could not execute" code, matching the POSIX body).
+//
+// The child runs on the parent's own stdout/stderr, matching POSIX
+// `posix_spawnp` with no file actions (`runtime/sfn/process.sfn`) — this is
+// the passthrough path, as against `sfn_process_run_capture` below, which
+// redirects through pipes and must keep doing so.
 fn sfn_process_run(argv: string[]) -> float ![io] {
     let len: i64 = argv.length;
     if len <= 0 { return 127.0; }
@@ -282,8 +322,45 @@ fn sfn_process_run(argv: string[]) -> float ![io] {
     }
     memset(pi, 0, 24 as usize);
 
-    let ok: i32 = CreateProcessA(null, cmdline, null, null, 0, 0, null, null, si, pi);
+    // Win32 has no POSIX-style "the child keeps the parent's fds" default:
+    // with `bInheritHandles = 0` and no `STARTF_USESTDHANDLES` the child
+    // gets no standard handles at all and everything it writes is discarded
+    // (SFN-546). Naming handles in `STARTUPINFOA` only works if they are
+    // actually inheritable, so duplicate each one inheritable rather than
+    // setting `HANDLE_FLAG_INHERIT` on the parent's own — a process-wide
+    // flip would also leak the std handles into every concurrently spawned
+    // `run_capture` / `_pw_spawn_impl` child, whose pipe discipline assumes
+    // it controls exactly which handles its child inherits.
+    //
+    // Duplicated after `pi` so that no early return sits between the
+    // duplicates and the `_pw_close_dup` calls below.
+    let self_proc: i64 = GetCurrentProcess();
+    let h_in: i64 = _pw_dup_inheritable(self_proc, GetStdHandle(-10));
+    let h_out: i64 = _pw_dup_inheritable(self_proc, GetStdHandle(-11));
+    let h_err: i64 = _pw_dup_inheritable(self_proc, GetStdHandle(-12));
+
+    // With no usable standard handle there is nothing to pass through and
+    // nothing worth inheriting, so fall back to the un-redirected spawn.
+    let mut inherit: i32 = 0;
+    if h_in != 0 || h_out != 0 || h_err != 0 {
+        // dwFlags@60 = STARTF_USESTDHANDLES (0x100 = 256), hStdInput@80,
+        // hStdOutput@88, hStdError@96 — the offsets and `PwDword` overlay
+        // discipline `sfn_process_run_capture` already uses. A slot left `0`
+        // gives the child no handle for that one stream, which is no worse
+        // than what it had.
+        let flags_view: *PwDword = (si as i64 + 60) as *PwDword;
+        flags_view.v = 256;
+        atomic_store((si as i64 + 80) as *i64, h_in);
+        atomic_store((si as i64 + 88) as *i64, h_out);
+        atomic_store((si as i64 + 96) as *i64, h_err);
+        inherit = 1;
+    }
+
+    let ok: i32 = CreateProcessA(null, cmdline, null, null, inherit, 0, null, null, si, pi);
     free(cmdline);
+    _pw_close_dup(h_in);
+    _pw_close_dup(h_out);
+    _pw_close_dup(h_err);
     if ok == 0 {
         free(si);
         free(pi);

@@ -1,0 +1,106 @@
+// End-to-end lockstep guard for SFN-546: `process.run` must leave the child
+// attached to the parent's stdout/stderr on BOTH POSIX and Windows (the
+// contract stated in the header of `runtime/sfn/platform/process_windows.sfn`).
+// On POSIX this already holds (`posix_spawnp` with `file_actions = null`,
+// `runtime/sfn/process.sfn`); on Windows it is fixed in a companion change.
+//
+// `process.run` has no capture surface by design, so the only way to observe
+// "the child's output reached the parent's stdout" is from OUTSIDE a parent
+// process. This test therefore spawns a generated Sailfin program via a
+// nested `sfn run` (whose stdout/stderr this test captures through pipes with
+// `process.run_capture`); the generated program itself calls `process.run` on
+// a command that prints a sentinel. The sentinel can only reach the captured
+// buffers if the inner `process.run` passed the grandchild's output through
+// to the nested `sfn run` process's own streams.
+//
+// This test must pass unchanged on Linux today (pinning the POSIX contract
+// against regression) and is the assertion the in-flight Windows fix makes
+// pass there too — it is not expected to flip red-to-green on this platform.
+import { find } from "sfn/strings";
+import { clean_runner_env, nested_runner_scratch } from "sfn/test";
+
+// The compiler-under-test: `$SAILFIN_BIN` if set, else the self-hosted
+// binary relative to the repo root the runner starts from. Mirrors
+// `sfn/test`'s `_resolve_sfn_bin` (compile_assert.sfn); see `guillermo_test.sfn`.
+fn _sfn_bin() -> string ![io] {
+    let configured = env.get("SAILFIN_BIN");
+    if configured.length > 0 { return configured; }
+    return "build/bin/sfn";
+}
+
+// Sentinels distinct enough not to collide with ordinary build chatter
+// (diagnostics, clang/linker noise) that might also land on the nested
+// process's stdout/stderr.
+fn _stdout_sentinel() -> string { return "SFN546_STDOUT_PASSTHROUGH_9f2c"; }
+
+fn _stderr_sentinel() -> string { return "SFN546_STDERR_PASSTHROUGH_9f2c"; }
+
+// Source for the generated program: it picks a working echo-to-stdout and
+// echo-to-stderr command per host (Windows has no `echo.exe` — `echo` is a
+// `cmd` builtin, and stderr redirection syntax differs from POSIX `sh`) and
+// calls `process.run` on each, uninterposed (no capture args). If `run`
+// leaves the grandchild attached to this generated program's own inherited
+// stdout/stderr, the sentinels flow straight through to whatever the
+// generated program itself is attached to — the nested `sfn run` process,
+// whose stdout/stderr THIS test captures.
+fn _generated_program_src() -> string {
+    return "import { find } from \"sfn/strings\";\n\n"
+        + "fn _is_windows() -> bool ![io] {\n"
+        + "    let os = env.get(\"OS\");\n"
+        + "    if find(os, \"Windows\", 0) >= 0 { return true; }\n"
+        + "    if env.get(\"SYSTEMROOT\").length > 0 { return true; }\n"
+        + "    if env.get(\"windir\").length > 0 { return true; }\n"
+        + "    return false;\n"
+        + "}\n\n"
+        + "fn main() ![io] {\n"
+        + "    if _is_windows() {\n"
+        + "        process.run([\"cmd\", \"/c\", \"echo "
+        + _stdout_sentinel()
+        + "\"]);\n"
+        + "        process.run([\"cmd\", \"/c\", \"echo "
+        + _stderr_sentinel()
+        + " 1>&2\"]);\n"
+        + "    } else {\n"
+        + "        process.run([\"echo\", \""
+        + _stdout_sentinel()
+        + "\"]);\n"
+        + "        process.run([\"sh\", \"-c\", \"echo "
+        + _stderr_sentinel()
+        + " 1>&2\"]);\n"
+        + "    }\n"
+        + "}\n";
+}
+
+test "process.run: passes a nested child's stdout/stderr through to the caller (POSIX/Windows lockstep, SFN-546)" ![io] {
+    let scratch = nested_runner_scratch("sfn546_run_stdio");
+    fs.createDirectory(scratch, true);
+    let src = scratch + "/passthrough_fixture.sfn";
+    fs.writeFile(src, _generated_program_src());
+
+    let exit = process.run_capture([_sfn_bin(), "run", src], clean_runner_env(scratch));
+    let out = process.capture_take_stdout();
+    let err = process.capture_take_stderr();
+
+    assert exit == 0;
+    // The nested `sfn run` process's own captured stdout/stderr must contain
+    // the sentinels the generated program's grandchild wrote — proof that
+    // `process.run` did not swallow or capture the grandchild's output, but
+    // left it attached to the nested process's inherited streams.
+    assert find(out, _stdout_sentinel(), 0) >= 0;
+    assert find(err, _stderr_sentinel(), 0) >= 0;
+}
+
+// ── Acceptance 3: run_capture still CAPTURES rather than passing through ──
+// The two spawn paths must not be conflated: unlike `process.run` above,
+// `process.run_capture` redirects the child's stdout through a pipe this
+// test drains explicitly, so the sentinel shows up in
+// `process.capture_take_stdout()` rather than leaking onto this test's own
+// stdout.
+test "process.run_capture: still captures rather than passing through (SFN-546)" ![io] {
+    let exit = process.run_capture(["echo", "SFN546_CAPTURE_SENTINEL_7ab1"], []);
+    let out = process.capture_take_stdout();
+    let _err = process.capture_take_stderr();
+
+    assert exit == 0;
+    assert find(out, "SFN546_CAPTURE_SENTINEL_7ab1", 0) >= 0;
+}
