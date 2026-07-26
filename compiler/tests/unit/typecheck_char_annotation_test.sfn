@@ -1,0 +1,118 @@
+// Regression coverage for `char` as a type annotation (SFN-550).
+//
+// `char` is not a Sailfin type. It has no literal syntax, no entry in the
+// primitive table (`classify_declared_primitive`, typecheck_types.sfn), and no
+// lowering of its own — yet it used to be *accepted* wherever a type annotation
+// was legal, because `map_type_annotation` (llvm/type_mapping.sfn) defaulted an
+// unrecognized name to `i8*`. `99 as char` therefore lowered to
+// `inttoptr i64 99 to i8*` and the result was handed to `sfn_str_len`, an
+// unguarded read of address 99. It returned 0 rather than faulting only by
+// luck of the address space.
+//
+// SFN-555 closed the hole generically: an annotation naming a type that
+// resolves to nothing is now rejected in typecheck with E0013, before lowering
+// ever runs. `char` is one instance of that class and needs no arm of its own —
+// adding one would re-split a representation the fix just unified.
+//
+// What was missing is the pin. Nothing exercised `char` as a type, so a future
+// entry in the primitive table or the E0013 known-name set could silently
+// restore the opaque-pointer path with no test objecting. These tests are that
+// pin, and they are deliberately about `char` specifically rather than unknown
+// types in general (typecheck_unknown_type_annotation_test.sfn owns the latter).
+import { parse_program } from "../../src/parser/mod";
+import { typecheck_diagnostics } from "../../src/typecheck";
+import { Diagnostic } from "../../src/typecheck_types";
+
+fn _count_code(diagnostics: Diagnostic[], code: string) -> int {
+    let mut count: int = 0;
+    let mut i: int = 0;
+    loop {
+        if i >= diagnostics.length { break; }
+        if strings_equal(diagnostics[i].code, code) { count += 1; }
+        i += 1;
+    }
+    return count;
+}
+
+fn _e0013_for(source: string) -> int ![io] {
+    let program = parse_program(source);
+    let diagnostics = typecheck_diagnostics(program);
+    return _count_code(diagnostics, "E0013");
+}
+
+// -------------------------------------------------------------------
+// The reported defect
+// -------------------------------------------------------------------
+test "char annotation: the SFN-550 repro is rejected before lowering" ![io] {
+    // Two annotation positions, so two diagnostics: the `let` and the cast
+    // target. The cast target is the one that produced the wild `inttoptr`.
+    assert _e0013_for("fn main() { let c: char = 99 as char; }") == 2;
+}
+
+test "char annotation: an integer-to-char cast target is rejected" ![io] {
+    assert _e0013_for("fn main() { let c = 99 as char; }") == 1;
+}
+
+// -------------------------------------------------------------------
+// Every other position that accepts an annotation
+// -------------------------------------------------------------------
+test "char annotation: a let binding is rejected" ![io] {
+    assert _e0013_for("fn main() { let c: char = 1; }") == 1;
+}
+
+test "char annotation: a parameter is rejected" ![io] {
+    assert _e0013_for("fn take(c: char) {}") == 1;
+}
+
+test "char annotation: a return type is rejected" ![io] {
+    assert _e0013_for("fn give() -> char { return 1; }") == 1;
+}
+
+test "char annotation: a struct field is rejected" ![io] {
+    assert _e0013_for("struct S { c: char; }") == 1;
+}
+
+test "char annotation: an array element type is rejected" ![io] {
+    assert _e0013_for("fn main() { let cs: char[] = []; }") == 1;
+}
+
+// -------------------------------------------------------------------
+// Diagnostic shape — the criterion is a coded diagnostic carrying a span
+// -------------------------------------------------------------------
+test "char annotation: E0013 names char and anchors to a span" ![io] {
+    let program = parse_program("fn main() { let c: char = 1; }");
+    let diagnostics = typecheck_diagnostics(program);
+    let mut found: boolean = false;
+    let mut i: int = 0;
+    loop {
+        if i >= diagnostics.length { break; }
+        let d = diagnostics[i];
+        if strings_equal(d.code, "E0013") {
+            assert strings_equal(d.severity, "error");
+            assert strings_equal(d.message, "unknown type `char`");
+            assert d.primary != null;
+            found = true;
+        }
+        i += 1;
+    }
+    assert found;
+}
+
+// -------------------------------------------------------------------
+// Coherence with E0835, which states outright that Sailfin has no
+// character type. Rejecting the literal while accepting the annotation
+// was the contradiction SFN-550 asked to settle; both now reject.
+// -------------------------------------------------------------------
+test "char annotation: the byte type that does exist still resolves" ![io] {
+    // `i8`/`u8` are the real byte spellings and must stay accepted — the fix
+    // is that `char` names nothing, not that byte-width types are suspect.
+    assert _e0013_for("fn main() { let b: i8 = 1; }") == 0;
+    assert _e0013_for("fn main() { let b: u8 = 1; }") == 0;
+    assert _e0013_for("fn take(b: i8) -> u8 { return b; }") == 0;
+}
+
+test "char annotation: a user type named Char is unaffected when declared" ![io] {
+    // Nothing here is a reserved word — the rejection is resolution failure,
+    // so a genuinely declared type of a similar name must still resolve.
+    assert _e0013_for("struct Char { value: i8; } fn f(c: Char) -> Char { return c; }") == 0;
+}
