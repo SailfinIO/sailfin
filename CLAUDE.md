@@ -136,11 +136,17 @@ up. **Work with no backing issue takes a prefix with no `sfn-<N>` segment**
 (`claude/<topic>-<slug>`). CI's `Linear branch claim` gate enforces this: an
 `sfn-<N>` branch whose PR body does not close `SFN-<N>` fails.
 
-Referencing *other* issues has a lesser version of the same effect: a
-`Refs SFN-<N>` trailer links them without closing (`Fixes`/`Closes`/`Resolves`/
-`Implements`/`Completes` close), but linking alone still moves a non-terminal
-issue to `In Progress`. Cite background issues in PR prose, and keep magic-word
-trailers to the issue the PR actually delivers.
+Referencing *other* issues has a lesser version of the same effect. **Any
+`SFN-<N>` occurrence in a branch name, commit message, or PR body links that
+issue — trailer or plain prose, magic word or none** — and linking alone moves a
+non-terminal issue to `In Progress`. Only the closing words
+(`Fixes`/`Closes`/`Resolves`/`Implements`/`Completes`) additionally resolve it on
+merge; `Refs` and a bare mention link without closing.
+
+So naming a background issue is never free: expect it to start, and re-check its
+status after opening the PR. When starting it is not acceptable — it belongs to
+someone else, or sits in `Triage` — describe it without the identifier ("the
+Windows `run_capture` issue") and link by URL instead.
 
 **Anti-patterns:** picking up an ungroomed issue; expanding scope mid-session
 (comment and pause instead); bundling issues into one PR; picking up from the
