@@ -7,6 +7,8 @@ const defaultRepoRoot = resolve(dirname(scriptPath), "../..");
 
 const currentFacingRoots = [
   "README.md",
+  "CLAUDE.md",
+  "docs/strategy",
   "examples/README.md",
   // Agent-facing framing file, symlinked as site/public/llms.txt. It drifted out of
   // sync with README for exactly as long as it sat outside this guard.
@@ -29,7 +31,12 @@ const currentFacingRoots = [
 // Several SFEPs were migrated from pre-SFEP-process architect documents and carried
 // that era's deferral phrasing in with them, which is how "post-1.0" leaked back
 // into the site copy in the first place -- hence guarding them at all.
-const historicalRoots = ["docs/proposals"];
+const historicalRoots = [
+  "docs/proposals",
+  // This dated evidence review records attributed third-party benchmark claims;
+  // it is not current Sailfin product copy.
+  "docs/strategy/market-evidence-2026-07.md",
+];
 
 const retiredClaims = [
   {
@@ -204,7 +211,7 @@ const publicUrls = [
 // below; renaming it extensionless or moving it under a scanned directory would
 // silently drop it from the guard, which is how it drifted in the first place.
 export function sourceFiles(repoRoot) {
-  const files = [];
+  const files = new Map();
 
   function collect(roots, historical) {
     function visit(path) {
@@ -214,7 +221,7 @@ export function sourceFiles(repoRoot) {
         const child = join(path, entry.name);
         if (entry.isDirectory()) visit(child);
         else if ([".astro", ".md", ".mdx"].includes(extname(entry.name))) {
-          files.push({ path: child, historical });
+          files.set(child, { path: child, historical });
         }
       }
     }
@@ -222,14 +229,14 @@ export function sourceFiles(repoRoot) {
     for (const root of roots) {
       const path = join(repoRoot, root);
       if (!existsSync(path)) continue;
-      if (extname(path)) files.push({ path, historical });
+      if (extname(path)) files.set(path, { path, historical });
       else visit(path);
     }
   }
 
   collect(currentFacingRoots, false);
   collect(historicalRoots, true);
-  return files;
+  return [...files.values()];
 }
 
 function lineNumber(content, index) {

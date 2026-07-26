@@ -98,7 +98,7 @@ jobs:
                   ;;
               esac
               case "$path" in
-                README.md|examples/README.md|site/src/*|site/examples/*|site/scripts/*|site/package.json|bootstrap.toml|install.sh|install.ps1|.github/workflows/release-tag.yml|.github/workflows/ci.yml)
+                README.md|CLAUDE.md|docs/proposals/*|docs/strategy/*|examples/README.md|llms.txt|site/src/*|site/examples/*|site/scripts/*|site/package.json|bootstrap.toml|install.sh|install.ps1|.github/workflows/release-tag.yml|.github/workflows/ci.yml)
                   public_claims=true
                   public_claims_reason="public-claim contract path changed: $path"
                   ;;

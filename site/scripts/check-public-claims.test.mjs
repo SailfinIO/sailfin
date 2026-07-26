@@ -118,6 +118,30 @@ test("llms.txt is inside the scanned set", () => {
   );
 });
 
+test("CI scope covers every public-claim source", () => {
+  const workflow = readFileSync(resolve(repoRoot, ".github/workflows/ci.yml"), "utf8");
+  const arm = workflow.match(
+    /case "\$path" in\s+([^\n]+)\)\s+public_claims=true/,
+  );
+  assert.ok(arm, "public_claims case arm not found in ci.yml");
+
+  const patterns = arm[1].trim().split("|");
+  const covered = (path) =>
+    patterns.some((pattern) => {
+      const escaped = pattern.replace(/[.+?^${}()|[\]\\]/g, "\\$&");
+      return new RegExp(`^${escaped.replaceAll("*", ".*")}$`).test(path);
+    });
+  const uncovered = sourceFiles(repoRoot)
+    .map(({ path }) => relative(repoRoot, path))
+    .filter((path) => !covered(path));
+
+  assert.deepEqual(
+    uncovered,
+    [],
+    `public-claim sources missing from CI scope: ${uncovered.join(", ")}`,
+  );
+});
+
 test("deliberately broken critical link is rejected", () => {
   const failures = findRequiredFragmentFailures(
     [{ path: "stale.md", content: `href="${stale.criticalLink}"` }],
