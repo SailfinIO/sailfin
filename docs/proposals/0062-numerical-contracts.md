@@ -1,7 +1,7 @@
 ---
 sfep: 0062
 title: Numerical and Behavioural Contracts (the Result Pillar)
-status: Draft
+status: Accepted
 type: language
 created: 2026-07-26
 updated: 2026-07-26

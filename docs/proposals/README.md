@@ -84,7 +84,7 @@ The next number is `max + 1`. Add a row in the same PR that introduces an SFEP.
 | [0059](./0059-typed-ssa-activation.md) | Typed SSA Activation — Making the Metadata IR Load-Bearing | Accepted | tooling |
 | [0060](./0060-owned-syscall-layer.md) | The Owned Syscall Layer (Axis 3, tier-1 Linux x86-64) | Accepted | runtime |
 | [0061](./0061-diagnostic-unification.md) | Diagnostic Unification — One Coded, Spanned, Severity-Bearing Diagnostic | Accepted | tooling |
-| [0062](./0062-numerical-contracts.md) | Numerical and Behavioural Contracts (the Result Pillar) | Draft | language |
+| [0062](./0062-numerical-contracts.md) | Numerical and Behavioural Contracts (the Result Pillar) | Accepted | language |
 
 ## Drafts under review (numbers assigned at merge)
 
