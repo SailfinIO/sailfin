@@ -49,6 +49,7 @@ import {
     check_type_parameters,
     check_unanalyzable_raw,
     check_uninferable_generic_constructor,
+    check_unknown_type_annotation,
     check_value_if_raw,
     classify_declared_primitive,
     classify_fn_cast,
@@ -95,7 +96,8 @@ import {
     task_array_marker_kind,
     token_from_name,
     type_is_future,
-    type_is_result
+    type_is_result,
+    type_parameter_names
 } from "./typecheck_types";
 
 fn typecheck_diagnostics(program: Program) -> Diagnostic[] {
@@ -211,7 +213,10 @@ fn typecheck_diagnostics_full(program: Program, imported_interfaces: Statement[]
     let resolution_scope = top_level.symbols.concat(_collect_imported_call_symbols(program)).concat(_symbols_from_global_names(prelude_globals));
     let local_structs = collect_struct_definitions(program);
     let generic_struct_names = _generic_struct_names(local_structs);
-    let scoped_diagnostics = check_program_scopes(program, combined_interfaces, local_imports, resolution_scope, generic_struct_names);
+    // SFN-555: the same resolution scope answers "is this a known type name?".
+    // Flattened once here so the E0013 check never rebuilds it per annotation.
+    let known_types = _names_from_symbols(resolution_scope);
+    let scoped_diagnostics = check_program_scopes(program, combined_interfaces, local_imports, resolution_scope, generic_struct_names, known_types);
 
     let instantiation_diagnostics = check_generic_instantiation_sites(program, combined_interfaces, local_structs);
 
@@ -445,6 +450,29 @@ fn _collect_imported_call_symbols(program: Program) -> SymbolEntry[] {
     return symbols;
 }
 
+// SFN-555: flatten a resolution scope to bare names for the E0013 known-type
+// lookup. The scope mixes kinds (functions, types, imports, prelude globals);
+// keeping every name is deliberate — see the fail-open note on
+// `_first_unknown_type_name`.
+// SFN-555: a declaration's own type parameters, layered onto whatever the
+// walk already had in scope.
+fn _decl_type_params(ctx: TypeckCtx, parameters: TypeParameter[]) -> string[] {
+    let names = type_parameter_names(parameters);
+    if names.length == 0 { return ctx.type_params; }
+    return ctx.type_params.concat(names);
+}
+
+fn _names_from_symbols(symbols: SymbolEntry[]) -> string[] {
+    let mut names: string[] = [];
+    let mut i: int = 0;
+    loop {
+        if i >= symbols.length { break; }
+        names.push(symbols[i].name);
+        i += 1;
+    }
+    return names;
+}
+
 fn register_top_level_symbol(statement: Statement, existing: SymbolEntry[]) -> SymbolCollectionResult {
     if statement.variant == "FunctionDeclaration" {
         return register_symbol(statement.signature.name, "function", statement.signature.name_span, existing, signature_is_generic(statement.signature), signature_is_c_abi(statement.signature));
@@ -515,10 +543,19 @@ struct TypeckCtx {
     // generic-struct static call from an enum/namespace access at any body
     // depth. Resolution-only; never mutated during the walk.
     generic_struct_names: string[];
+    // SFN-555: every name a type annotation may resolve to — the resolution
+    // scope's declarations, import specifiers, and prelude/runtime types —
+    // flattened once per program so `check_unknown_type_annotation` (E0013)
+    // does not rebuild it per annotation. Resolution-only.
+    known_types: string[];
+    // SFN-555: the type parameters in scope at this point (`fn f<T>`, and the
+    // struct/enum/interface/alias heads). Unlike `known_types` this varies by
+    // declaration, so it is pushed on entry via `ctx_with_type_params`.
+    type_params: string[];
 }
 
 // Root context for a walk: top-level scope, no enclosing return type.
-fn make_typeck_ctx(bindings: SymbolEntry[], imports: ImportSymbolTable, interfaces: Statement[], top_level: SymbolEntry[], is_top_level: boolean, generic_struct_names: string[]) -> TypeckCtx {
+fn make_typeck_ctx(bindings: SymbolEntry[], imports: ImportSymbolTable, interfaces: Statement[], top_level: SymbolEntry[], is_top_level: boolean, generic_struct_names: string[], known_types: string[]) -> TypeckCtx {
     return TypeckCtx {
         bindings: bindings,
         imports: imports,
@@ -529,7 +566,31 @@ fn make_typeck_ctx(bindings: SymbolEntry[], imports: ImportSymbolTable, interfac
         scope_start: 0,
         enclosing_return_type: null,
         expected_type: null,
-        generic_struct_names: generic_struct_names
+        generic_struct_names: generic_struct_names,
+        known_types: known_types,
+        type_params: []
+    };
+}
+
+// SFN-555: bring a declaration's own type parameters into scope for the walk
+// of its signature and body, so `fn identity<T>(value: T)` does not report `T`
+// as an unknown type. Appends rather than replaces so a method inside a
+// generic struct sees both heads.
+fn ctx_with_type_params(ctx: TypeckCtx, names: string[]) -> TypeckCtx {
+    if names.length == 0 { return ctx; }
+    return TypeckCtx {
+        bindings: ctx.bindings,
+        imports: ctx.imports,
+        interfaces: ctx.interfaces,
+        top_level: ctx.top_level,
+        is_top_level: ctx.is_top_level,
+        in_function_body: ctx.in_function_body,
+        scope_start: ctx.scope_start,
+        enclosing_return_type: ctx.enclosing_return_type,
+        expected_type: ctx.expected_type,
+        generic_struct_names: ctx.generic_struct_names,
+        known_types: ctx.known_types,
+        type_params: ctx.type_params.concat(names)
     };
 }
 
@@ -549,7 +610,9 @@ fn ctx_with_bindings(ctx: TypeckCtx, bindings: SymbolEntry[], scope_start: int) 
         scope_start: scope_start,
         enclosing_return_type: ctx.enclosing_return_type,
         expected_type: null,
-        generic_struct_names: ctx.generic_struct_names
+        generic_struct_names: ctx.generic_struct_names,
+        known_types: ctx.known_types,
+        type_params: ctx.type_params
     };
 }
 
@@ -567,16 +630,18 @@ fn ctx_enter_body(ctx: TypeckCtx, bindings: SymbolEntry[], return_type: TypeAnno
         scope_start: 0,
         enclosing_return_type: return_type,
         expected_type: null,
-        generic_struct_names: ctx.generic_struct_names
+        generic_struct_names: ctx.generic_struct_names,
+        known_types: ctx.known_types,
+        type_params: ctx.type_params
     };
 }
 
-fn check_program_scopes(program: Program, interfaces: Statement[], imports: ImportSymbolTable, top_level: SymbolEntry[], generic_struct_names: string[]) -> Diagnostic[] {
+fn check_program_scopes(program: Program, interfaces: Statement[], imports: ImportSymbolTable, top_level: SymbolEntry[], generic_struct_names: string[], known_types: string[]) -> Diagnostic[] {
     let mut bindings: SymbolEntry[] = [];
     let mut diagnostics: Diagnostic[] = [];
 
     for statement in program.statements {
-        let result = check_statement(statement, make_typeck_ctx(bindings, imports, interfaces, top_level, true, generic_struct_names));
+        let result = check_statement(statement, make_typeck_ctx(bindings, imports, interfaces, top_level, true, generic_struct_names, known_types));
         bindings = result.bindings;
         let mut _ci: int = 0;
         loop {
@@ -652,12 +717,13 @@ fn check_statement(statement: Statement, ctx: TypeckCtx) -> ScopeResult {
         let walk_diags = walk_expression(statement.initializer, ctx);
         let annotation_diags = check_bare_fn_type_annotation(statement.type_annotation, statement.name, statement.span);
         let array_diags = check_malformed_array_annotation(statement.type_annotation, statement.name, statement.span);
+        let unknown_diags = check_unknown_type_annotation(statement.type_annotation, statement.name, statement.span, ctx.known_types, ctx.type_params);
         let intersection_diags = check_intersection_value_type_annotation(statement.type_annotation, statement.name, statement.span);
         let object_literal_diags = check_object_literal_target(statement.initializer, statement.type_annotation, statement.name, statement.span, top_level);
         let uninferable_ctor_diags = check_uninferable_generic_constructor(statement, ctx.generic_struct_names);
         return ScopeResult {
             bindings: registration.bindings,
-            diagnostics: registration.diagnostics.concat(walk_diags).concat(annotation_diags).concat(array_diags).concat(intersection_diags).concat(object_literal_diags).concat(uninferable_ctor_diags)
+            diagnostics: registration.diagnostics.concat(walk_diags).concat(annotation_diags).concat(array_diags).concat(unknown_diags).concat(intersection_diags).concat(object_literal_diags).concat(uninferable_ctor_diags)
         };
     }
     if statement.variant == "FunctionDeclaration" {
@@ -667,7 +733,7 @@ fn check_statement(statement: Statement, ctx: TypeckCtx) -> ScopeResult {
         // and its body under the non-capturing nested scope so a reference to
         // an enclosing local surfaces as `E0421`.
         if in_function_body {
-            let mut nested_diags = check_function_signature(statement.signature, interfaces, top_level);
+            let mut nested_diags = check_function_signature(statement.signature, interfaces, top_level, ctx.known_types, ctx.type_params);
             let nested_body_diags = check_nested_function_body(statement.signature, statement.body, ctx);
             let mut _cin: int = 0;
             loop {
@@ -682,7 +748,7 @@ fn check_statement(statement: Statement, ctx: TypeckCtx) -> ScopeResult {
         }
         let registration = register_local_symbol(bindings, statement.signature.name, "function", statement.signature.name_span, scope_start, signature_is_generic(statement.signature), signature_is_c_abi(statement.signature));
         let mut diagnostics = registration.diagnostics;
-        let _sig_diags = check_function_signature(statement.signature, interfaces, top_level);
+        let _sig_diags = check_function_signature(statement.signature, interfaces, top_level, ctx.known_types, ctx.type_params);
         let mut _ci: int = 0;
         loop {
             if _ci >= _sig_diags.length { break; }
@@ -748,14 +814,14 @@ fn check_statement(statement: Statement, ctx: TypeckCtx) -> ScopeResult {
             diagnostics.push(_tp_diags[_ci]);
             _ci += 1;
         }
-        let _sf_diags = check_struct_fields(statement.fields);
+        let _sf_diags = check_struct_fields(statement.fields, ctx.known_types, _decl_type_params(ctx, statement.type_parameters));
         let mut _ci2: int = 0;
         loop {
             if _ci2 >= _sf_diags.length { break; }
             diagnostics.push(_sf_diags[_ci2]);
             _ci2 += 1;
         }
-        let _sm_diags = check_struct_methods(statement.methods, interfaces, top_level);
+        let _sm_diags = check_struct_methods(statement.methods, interfaces, top_level, ctx.known_types, _decl_type_params(ctx, statement.type_parameters));
         let mut _ci3: int = 0;
         loop {
             if _ci3 >= _sm_diags.length { break; }
@@ -797,7 +863,7 @@ fn check_statement(statement: Statement, ctx: TypeckCtx) -> ScopeResult {
             diagnostics.push(_tp_diags[_ci]);
             _ci += 1;
         }
-        let _ev_diags = check_enum_variants(statement.variants);
+        let _ev_diags = check_enum_variants(statement.variants, ctx.known_types, _decl_type_params(ctx, statement.type_parameters));
         let mut _ci2: int = 0;
         loop {
             if _ci2 >= _ev_diags.length { break; }
@@ -819,7 +885,7 @@ fn check_statement(statement: Statement, ctx: TypeckCtx) -> ScopeResult {
             diagnostics.push(_tp_diags[_ci]);
             _ci += 1;
         }
-        let _im_diags = check_interface_members(statement.members, interfaces, top_level);
+        let _im_diags = check_interface_members(statement.members, interfaces, top_level, ctx.known_types, _decl_type_params(ctx, statement.type_parameters));
         let mut _ci2: int = 0;
         loop {
             if _ci2 >= _im_diags.length { break; }
@@ -949,6 +1015,7 @@ fn check_statement(statement: Statement, ctx: TypeckCtx) -> ScopeResult {
         }
         diagnostics = diagnostics.concat(check_bare_fn_type_annotation(statement.aliased_type, statement.name, statement.name_span));
         diagnostics = diagnostics.concat(check_malformed_array_annotation(statement.aliased_type, statement.name, statement.name_span));
+        diagnostics = diagnostics.concat(check_unknown_type_annotation(statement.aliased_type, statement.name, statement.name_span, ctx.known_types, _decl_type_params(ctx, statement.type_parameters)));
         diagnostics = diagnostics.concat(check_intersection_value_type_annotation(statement.aliased_type, statement.name, statement.name_span));
         return ScopeResult {
             bindings: registration.bindings,
@@ -1027,7 +1094,8 @@ fn check_statement(statement: Statement, ctx: TypeckCtx) -> ScopeResult {
 
 fn check_function_body(signature: FunctionSignature, body: Block, ctx: TypeckCtx) -> Diagnostic[] {
     let parameter_scope = seed_parameter_scope(signature, ctx.top_level);
-    let body_ctx = ctx_enter_body(ctx, parameter_scope.bindings, signature.return_type);
+    let generic_ctx = ctx_with_type_params(ctx, type_parameter_names(signature.type_parameters));
+    let body_ctx = ctx_enter_body(generic_ctx, parameter_scope.bindings, signature.return_type);
     let body_diagnostics = check_block(body, body_ctx);
     let mut _result = parameter_scope.diagnostics;
     let mut _ci: int = 0;
@@ -1174,7 +1242,8 @@ fn _build_nested_fn_scope(signature: FunctionSignature, ctx: TypeckCtx) -> Scope
 // re-scopes the body so a capture surfaces as E0421 (via `walk_expression`).
 fn check_nested_function_body(signature: FunctionSignature, body: Block, ctx: TypeckCtx) -> Diagnostic[] {
     let scoped = _build_nested_fn_scope(signature, ctx);
-    let body_ctx = ctx_enter_body(ctx, scoped.bindings, signature.return_type);
+    let generic_ctx = ctx_with_type_params(ctx, type_parameter_names(signature.type_parameters));
+    let body_ctx = ctx_enter_body(generic_ctx, scoped.bindings, signature.return_type);
     let body_diagnostics = check_block(body, body_ctx);
     let mut _result = scoped.diagnostics;
     let mut _ci: int = 0;
@@ -1598,6 +1667,7 @@ fn walk_expression(expression: Expression?, ctx: TypeckCtx) -> Diagnostic[] {
             if lambda_span == null { lambda_span = parameter.span; }
             diagnostics = diagnostics.concat(check_bare_fn_type_annotation(parameter.type_annotation, parameter.name, parameter.span));
             diagnostics = diagnostics.concat(check_malformed_array_annotation(parameter.type_annotation, parameter.name, parameter.span));
+            diagnostics = diagnostics.concat(check_unknown_type_annotation(parameter.type_annotation, parameter.name, parameter.span, ctx.known_types, ctx.type_params));
             diagnostics = diagnostics.concat(check_intersection_value_type_annotation(parameter.type_annotation, parameter.name, parameter.span));
             _lp += 1;
         }
@@ -1617,6 +1687,7 @@ fn walk_expression(expression: Expression?, ctx: TypeckCtx) -> Diagnostic[] {
         }
         diagnostics = diagnostics.concat(check_bare_fn_type_annotation(expression.return_type, "lambda", lambda_span));
         diagnostics = diagnostics.concat(check_malformed_array_annotation(expression.return_type, "lambda", lambda_span));
+        diagnostics = diagnostics.concat(check_unknown_type_annotation(expression.return_type, "lambda", lambda_span, ctx.known_types, ctx.type_params));
         diagnostics = diagnostics.concat(check_intersection_value_type_annotation(expression.return_type, "lambda", lambda_span));
         return diagnostics;
     }
@@ -1660,15 +1731,19 @@ fn walk_expression(expression: Expression?, ctx: TypeckCtx) -> Diagnostic[] {
         // `check_fn_reference_raw` cast path. Classification is
         // position-independent — it fires the same whether the cast is
         // top-level or buried in a call argument.
+        // SFN-555: the cast target is the position where an unknown type used
+        // to reach lowering as a bare `i8*` (lowercase) or an undeclared
+        // `%Name*` that only `clang` rejected (capitalized).
+        let cast_target_diags = check_unknown_type_annotation(expression.target_type, expression.target_type.text, expression.span, ctx.known_types, ctx.type_params);
         if expression.operand.variant == "Identifier" {
             let fn_entry = find_symbol(bindings, expression.operand.name);
             if fn_entry != null {
                 if is_function_kind(fn_entry.kind) {
-                    return classify_fn_cast(expression.operand.name, expression.target_type.text, fn_entry, expression.span);
+                    return cast_target_diags.concat(classify_fn_cast(expression.operand.name, expression.target_type.text, fn_entry, expression.span));
                 }
             }
         }
-        return walk_expression(expression.operand, ctx);
+        return cast_target_diags.concat(walk_expression(expression.operand, ctx));
     }
     if expression.variant == "Is" {
         // Type-guard `x is T` (#1753) — recurse into the operand so inner
@@ -1677,6 +1752,11 @@ fn walk_expression(expression: Expression?, ctx: TypeckCtx) -> Diagnostic[] {
         // expression, so there is nothing to walk there. Flow-sensitive
         // narrowing is applied at lowering via the `narrowed_variant`
         // machinery (the typecheck pass tracks names only — no type field).
+        //
+        // The target is deliberately NOT run through the unknown-type check
+        // (E0013, SFN-555): `x is Text` names an enum VARIANT as often as a
+        // type, and variant names are not in the type registry. Judging it
+        // rejects the valid narrowing form.
         return walk_expression(expression.operand, ctx);
     }
     if expression.variant == "TryOperator" {
@@ -2354,12 +2434,13 @@ fn walk_statement_expressions(statement: Statement, ctx: TypeckCtx) -> Diagnosti
         let init_diags = walk_expression(statement.initializer, ctx);
         let annotation_diags = check_bare_fn_type_annotation(statement.type_annotation, statement.name, statement.span);
         let array_diags2 = check_malformed_array_annotation(statement.type_annotation, statement.name, statement.span);
+        let unknown_diags2 = check_unknown_type_annotation(statement.type_annotation, statement.name, statement.span, ctx.known_types, ctx.type_params);
         let intersection_diags = check_intersection_value_type_annotation(statement.type_annotation, statement.name, statement.span);
         // The lambda-body `let` twin of the primary let-site E0828 (#1905):
         // classify a bare object-literal initializer against its annotation.
         let object_literal_diags = check_object_literal_target(statement.initializer, statement.type_annotation, statement.name, statement.span, ctx.top_level);
         let uninferable_ctor_diags = check_uninferable_generic_constructor(statement, ctx.generic_struct_names);
-        return init_diags.concat(annotation_diags).concat(array_diags2).concat(intersection_diags).concat(object_literal_diags).concat(uninferable_ctor_diags);
+        return init_diags.concat(annotation_diags).concat(array_diags2).concat(unknown_diags2).concat(intersection_diags).concat(object_literal_diags).concat(uninferable_ctor_diags);
     }
     if statement.variant == "IfStatement" {
         let mut diagnostics = walk_expression(statement.condition, ctx);
@@ -2433,7 +2514,8 @@ fn walk_statement_expressions(statement: Statement, ctx: TypeckCtx) -> Diagnosti
         // reference to an enclosing local (including a lambda parameter) trips
         // E0421. Without this arm the body was never resolution-walked.
         let scoped = _build_nested_fn_scope(statement.signature, ctx);
-        let body_ctx = ctx_enter_body(ctx, scoped.bindings, statement.signature.return_type);
+        let generic_ctx = ctx_with_type_params(ctx, type_parameter_names(statement.signature.type_parameters));
+        let body_ctx = ctx_enter_body(generic_ctx, scoped.bindings, statement.signature.return_type);
         return scoped.diagnostics.concat(walk_block_expressions(statement.body, body_ctx));
     }
     return [];

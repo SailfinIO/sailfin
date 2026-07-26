@@ -56,6 +56,7 @@ import {
     typecheck_has_errors_with_prelude
 } from "./typecheck";
 import { load_imported_interfaces_from_paths } from "./typecheck_import_loader";
+import { Diagnostic } from "./typecheck_types";
 
 // Phase-scoped arena reclamation (SFEP-0043). The arena mark/rewind pair
 // snapshots and restores the arena bump pointer so the AST/typecheck/emit

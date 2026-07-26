@@ -1,0 +1,154 @@
+// Unit tests for the unresolved-type-annotation diagnostic E0013 (SFN-555).
+//
+// A type annotation naming a type that resolves to no primitive, struct,
+// enum, interface, type alias, generic parameter, or imported symbol now
+// produces `error[E0013]: unknown type \`name\``.
+//
+// Before this check, `map_type_annotation` (llvm/type_mapping.sfn) split on
+// capitalization: an uppercase unknown (`Bogus`) became `%Bogus*` and died
+// later as a raw `clang` "use of undefined type" ICE, while a lowercase
+// unknown (`itn`) fell through to `i8*` and compiled and ran clean. Both
+// paths are now rejected in typecheck, so `sfn check` catches them.
+//
+// These tests pin both halves: the positives (lowercase primitive typos and
+// undefined capitalized user types, in `let` and cast position) and the
+// negatives (every genuinely resolvable annotation stays silent).
+import { parse_program } from "../../src/parser/mod";
+import { typecheck_diagnostics } from "../../src/typecheck";
+import { Diagnostic } from "../../src/typecheck_types";
+
+fn _count_code(diagnostics: Diagnostic[], code: string) -> int {
+    let mut count: int = 0;
+    let mut i: int = 0;
+    loop {
+        if i >= diagnostics.length { break; }
+        if strings_equal(diagnostics[i].code, code) { count += 1; }
+        i += 1;
+    }
+    return count;
+}
+
+fn _e0013_for(source: string) -> int ![io] {
+    let program = parse_program(source);
+    let diagnostics = typecheck_diagnostics(program);
+    return _count_code(diagnostics, "E0013");
+}
+
+// -------------------------------------------------------------------
+// Positive: lowercase primitive typos (the silent `i8*` path)
+// -------------------------------------------------------------------
+test "E0013: typo'd lowercase primitive in a let annotation is flagged" ![io] {
+    assert _e0013_for("fn main() { let c: itn = 1; }") == 1;
+}
+
+test "E0013: typo'd lowercase primitive in a cast target is flagged" ![io] {
+    assert _e0013_for("fn main() { let c = 99 as itn; }") == 1;
+}
+
+test "E0013: other lowercase primitive misspellings are flagged" ![io] {
+    assert _e0013_for("fn main() { let a: flaot = 1; }") == 1;
+    assert _e0013_for("fn main() { let b: strng = 1; }") == 1;
+}
+
+// -------------------------------------------------------------------
+// Positive: undefined capitalized user types (the clang-ICE path)
+// -------------------------------------------------------------------
+test "E0013: undefined capitalized type in a let annotation is flagged" ![io] {
+    assert _e0013_for("fn main() { let b: Bogus = 1; }") == 1;
+}
+
+test "E0013: undefined capitalized type in a cast target is flagged" ![io] {
+    assert _e0013_for("fn main() { let b = 99 as Bogus; }") == 1;
+}
+
+// -------------------------------------------------------------------
+// Positive: the remaining annotation positions
+// -------------------------------------------------------------------
+test "E0013: unknown parameter annotation is flagged" ![io] {
+    assert _e0013_for("fn take(x: itn) {}") == 1;
+}
+
+test "E0013: unknown return type annotation is flagged" ![io] {
+    assert _e0013_for("fn give() -> itn { return 1; }") == 1;
+}
+
+test "E0013: unknown struct field annotation is flagged" ![io] {
+    assert _e0013_for("struct S { value: itn; }") == 1;
+}
+
+// -------------------------------------------------------------------
+// Diagnostic shape: code, severity, message, and an anchoring span
+// -------------------------------------------------------------------
+test "E0013: carries the unknown-type message, severity, and a span" ![io] {
+    let program = parse_program("fn main() { let c: itn = 1; }");
+    let diagnostics = typecheck_diagnostics(program);
+    let mut found: boolean = false;
+    let mut i: int = 0;
+    loop {
+        if i >= diagnostics.length { break; }
+        let d = diagnostics[i];
+        if strings_equal(d.code, "E0013") {
+            assert strings_equal(d.severity, "error");
+            assert strings_equal(d.message, "unknown type `itn`");
+            assert d.primary != null;
+            found = true;
+        }
+        i += 1;
+    }
+    assert found;
+}
+
+// -------------------------------------------------------------------
+// Negatives: every resolvable annotation stays silent
+// -------------------------------------------------------------------
+test "E0013: primitive annotations resolve" ![io] {
+    assert _e0013_for("fn main() { let a: int = 1; }") == 0;
+    assert _e0013_for("fn main() { let b: string = \"x\"; }") == 0;
+    assert _e0013_for("fn main() { let c: boolean = true; }") == 0;
+    assert _e0013_for("fn main() { let d: float = 1.0; }") == 0;
+}
+
+test "E0013: a declared struct resolves in every position" ![io] {
+    let source = "struct Point { x: int; } fn shift(p: Point) -> Point { return p; }";
+    assert _e0013_for(source) == 0;
+}
+
+test "E0013: a struct declared after its use resolves" ![io] {
+    // Forward reference: the type registry is collected up-front, so source
+    // order must be irrelevant — the case naive enforcement would break.
+    assert _e0013_for("fn main() { let p: Point = zero(); } struct Point { x: int; }") == 0;
+}
+
+test "E0013: a declared enum resolves" ![io] {
+    assert _e0013_for("enum Color { Red, Green } fn main() { let c: Color = Color.Red; }") == 0;
+}
+
+test "E0013: a declared interface resolves" ![io] {
+    assert _e0013_for("interface Shape { fn area() -> int; } fn use(s: Shape) {}") == 0;
+}
+
+test "E0013: a type alias resolves" ![io] {
+    assert _e0013_for("type Meters = int; fn main() { let d: Meters = 1; }") == 0;
+}
+
+test "E0013: array and optional spellings resolve through to the element type" ![io] {
+    assert _e0013_for("fn main() { let xs: int[] = []; }") == 0;
+    assert _e0013_for("struct S { name: string; } fn f(items: S[]) {}") == 0;
+}
+
+test "E0013: a generic type parameter resolves inside its own signature" ![io] {
+    // `T` is bound by the function's own type-parameter list; it must not be
+    // treated as an undeclared type name.
+    assert _e0013_for("fn identity<T>(value: T) -> T { return value; }") == 0;
+}
+
+test "E0013: an imported type name resolves via its import specifier" ![io] {
+    let source = "import { Widget } from \"./widget\";\nfn main() { let w: Widget = build(); }";
+    assert _e0013_for(source) == 0;
+}
+
+test "E0013: an unknown element type inside an array spelling is still flagged" ![io] {
+    // Structural forms must be decomposed, not waved through: the `[]` suffix
+    // is valid but `itn` is not.
+    assert _e0013_for("fn main() { let xs: itn[] = []; }") == 1;
+}
