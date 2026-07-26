@@ -182,24 +182,35 @@ test "numeric-bitwise: (flags & mask) == mask — AND inside, comparison outside
     assert contains(body, "icmp eq i64");
 }
 
-// ---- bitwise on float emits no malformed IR ----
+// ---- bitwise on float is rejected, and emits no malformed IR ----
 // Pre-fix, `operation_name_for_symbol` returned empty for bitwise/shift on
 // `double`, but `lower_binary_operation` concatenated that empty string
 // into the LLVM line, producing malformed IR like `%t0 =  double <a>, <b>`.
-// Now the lowering detects the empty op-name, registers a diagnostic, and
-// returns a null operand so the function body falls through cleanly. The
-// malformed shape is a `%reg = <type>` line with no opcode between `=` and
-// the type; valid IR always has an opcode (`= alloca double`, `= load i64`).
-// The malformed line carries a DOUBLE space (`=  double`) where the empty
-// opcode was spliced in, so normalize space runs first — otherwise a
-// single-space check would slip right past the very shape it guards.
-test "numeric-bitwise: bitwise on float emits no malformed LLVM IR" ![io] {
-    let ir = _emit_llvm("fn bad(x: float, y: float) -> float {\n    return x & y;\n}\n", "bitwise_float");
-    // Emission must not crash; a clean fall-through still produces IR.
-    assert ir.length > 0;
-    let norm = _collapse_spaces(ir);
+// The lowering now detects the empty op-name, registers a diagnostic, and
+// returns a null operand.
+//
+// Until SFN-527 that null operand was swallowed: `lower_return` substituted
+// the default literal, so `x & y` on floats emitted a complete function
+// returning 0 and the emit exited 0. This test asserted that IR was produced
+// (`ir.length > 0`) — i.e. it pinned the fabrication as the contract. The
+// rejection is now fatal, so the check is that no IR survives at all, which
+// subsumes the original malformed-shape guard.
+test "numeric-bitwise: bitwise on float is rejected and writes no IR" ![io] {
+    let dir = _scratch_dir();
+    let src = dir + "/sfn-bitwise-bitwise_float.sfn";
+    let ll = dir + "/sfn-bitwise-bitwise_float.ll";
+    fs.writeFile(src, "fn bad(x: float, y: float) -> float {\n    return x & y;\n}\n");
+    if fs.exists(ll) { fs.deleteFile(ll); }
+    let exit = process.run_capture([_sfn_bin(), "emit", "-o", ll, "llvm", src], _child_env());
+    let out = process.capture_take_stdout();
+    let err = process.capture_take_stderr();
+    fs.deleteFile(src);
+    assert exit != 0;
+    assert contains(out + err, "llvm lowering [fatal] [E1002]:");
+    assert ! fs.exists(ll);
+    // The malformed shape the original guard watched for is a `%reg = <type>`
+    // line with no opcode between `=` and the type. It must not appear in the
+    // diagnostic stream either.
+    let norm = _collapse_spaces(out + err);
     assert ! contains(norm, " = double ");
-    assert ! contains(norm, " = i64 ");
-    assert ! contains(norm, " = i32 ");
-    assert ! contains(norm, " = i8 ");
 }
