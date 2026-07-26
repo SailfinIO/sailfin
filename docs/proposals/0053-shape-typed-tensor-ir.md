@@ -4,7 +4,7 @@ title: Shape-Typed Tensor IR and Fusion
 status: Accepted
 type: tooling
 created: 2026-07-19
-updated: 2026-07-19
+updated: 2026-07-26
 author: "agent:compiler-architect; project owner direction"
 tracking: "#2485, SFN-424, SFN-427, SFN-429"
 supersedes:
@@ -297,6 +297,32 @@ autodiff, dynamic-shape execution, GPU code generation, device scheduling,
 collectives, sharding, vendor kernels, or a user-facing tensor API. Those
 features may build on this IR only through their own accepted designs and may
 not weaken its verification or bootstrap boundaries implicitly.
+
+### 3.9 Amendment (2026-07-26) — gaps found while designing SFEP-0062
+
+1. **`accumulator_dtype` is absent from the in-tree tensor IR.** §3.2 implies it
+   and SFEP-0054 §3.6 requires it, but `TensorOp` carries only
+   `kind`/`result_id`/`operands`/`result_type`/`axes`/`parameter_index`/
+   `provenance`. Tolerance derivation cannot proceed without it; SFEP-0062
+   folds adding it into its Phase 2.
+2. **`tensor_ir_build.sfn` does not exist.** §3.1 names it; the folder has no
+   such file, and `docs/status.md` confirms checked-AST construction and
+   automatic tensor-function selection are not wired. **No user program can
+   reach the tensor tier**, which is why SFEP-0062 Phase 1 is a whole-function
+   determinism class rather than a tensor contract.
+3. **Static-shapes-only needs a symbolic/unknown-dimension story before this
+   tier is built out.** Dynamic shapes are load-bearing in production — Relax
+   (ASPLOS 2025) exists to abandon static shapes, continuous batching makes
+   batch composition unknowable pre-request, and MoE routing / `nonzero` / NMS /
+   top-k are data-dependent. Every dead static-shape effort shared this design
+   (Tensor Comprehensions, Dex, DeepMind `tensor_annotations`, PyTorch named
+   tensors, `dfdx`). **Shape typing is not a differentiator**
+   (`decision-brief.md` §7.5) **but it is load-bearing for Result**: static
+   shapes make the op count a compile-time constant, which is what makes a
+   derived tolerance a closed form. Under dynamic shapes the bound goes
+   symbolic and must be conservatively bounded or evaluated at runtime — an
+   unpriced cost this SFEP should price before Phase 2 of SFEP-0062 depends
+   on it.
 
 ## 4. Effect & capability impact
 

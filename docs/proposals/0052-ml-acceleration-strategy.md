@@ -4,7 +4,7 @@ title: Accelerated ML — Substrate Interop and Capability-Typed Accelerator Pro
 status: Accepted
 type: informational          # strategy umbrella; child SFEPs will be runtime | language | tooling
 created: 2026-07-19
-updated: 2026-07-25
+updated: 2026-07-26
 author: "agent:orchestrator (Sailbot); human review"
 tracking:                    # child epics allocated when this is Accepted
 supersedes:
@@ -38,6 +38,20 @@ hole SFEP-0048 already classifies as a seal blocker for OpenSSL. `![gpu]`
 today gates the *door*; Track B puts enforcement *inside the room*. **You
 cannot seal a kernel you don't own.** Track B is therefore the SFEP-0016
 thesis extended to the device, not a competing ambition.
+
+## Amendment (2026-07-26) — Track B's taint strand is demoted
+
+Typing `PII<T>`/`Secret<T>` through kernels and collectives is a
+**restriction**, and per `docs/strategy/decision-brief.md` §3 restrictions do
+not drive adoption — it is the product three adversarial market reviews found
+*admired and not purchased*, relocated to a device. It is also defeated in
+practice today: `E0804` forbids effect annotations on `extern`, and a raw
+`extern` to a vendor API bypasses `![gpu]` (`docs/status.md`), so the taint
+guarantee is defeated by the same door Track A's performance path walks
+through — a collision no document in the slate previously addressed. If
+revived, it should be a **Reach** consequence after the `extern` gate
+(SFEP-0016 §9 Q3) resolves, not a headline. The rest of Track B — effects and
+capabilities reaching the device — is unaffected.
 
 ## 1. Summary
 

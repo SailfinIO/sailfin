@@ -42,6 +42,17 @@ positioning):** `docs/proposals/0016-capability-sealed-runtime.md`,
 > reach, what numbers it produces, what it costs to run — and that contract is
 > verifiable by someone who does not use Sailfin.
 
+**Calibration — the headline is the target, and the reachable claim today is
+weaker by one step.** A stranger can *grade* a kernel against an emitted contract:
+the preconditions, postconditions, tolerance, oracle, measurement protocol and
+violation signature fully determine a pass/fail run that a non-Sailfin harness can
+execute. What a stranger cannot yet do is **re-derive the tolerance** — they must
+trust Sailfin's arithmetic or reimplement the derivation formula. So until the
+schema and its derivation test vectors ship as a standalone spec (SFEP-0062 Phase
+5), the honest external phrasing is **"gradeable by a stranger, trusting our
+arithmetic,"** not "verifiable." The safety-claim discipline in §8 binds this
+brief's own headline, not only the code.
+
 Three properties make this the right headline where the previous one failed:
 
 - **It is additive.** It grants a capability rather than withdrawing one.
@@ -130,6 +141,10 @@ which also matches what buyers actually procure (audit trails, kill switches,
 attestations; all runtime artifacts). Lead with the complement.
 
 ### Pillar 2 — Result: what numbers it produces
+
+> **Naming constraint, and it binds.** "Result" collides with `Result<T, E>`
+> (SFEP-0012). It stays a **positioning word only** — never a module, type,
+> field, CLI noun, or diagnostic name. Code and artifacts use `contract`.
 
 **Mechanism:** SFEP-0054's numerics contract — exact dtype identity, no implicit
 promotion, mandatory ≥f32 accumulators, an explicit ban on reassociation and
@@ -236,8 +251,17 @@ Ordered. Each item is a consequence of §2–§5, not a preference.
    one architectural defect — the compiler detects a problem, pushes a
    diagnostic, then emits code anyway and exits 0 — with the individual silent
    miscompiles as its regression suite. This precedes every pillar.
-2. **SFEP-0054 becomes the flagship**, and its unimplemented half is the
-   differentiator. Fix the coarse-`"float"` collapse first.
+2. **SFEP-0054's unimplemented half is the flagship claim** — exact dtype
+   identity, `E0910`–`E0915`. **Owner decision 2026-07-26: it does not ship
+   first.** SFEP-0062 phases a whole-function determinism class ahead of it,
+   because that class is statically discharged from the effect row and is
+   therefore reachable on the current stack with no predecessors at all — no
+   tensor tier, no 0054, no 0058, no seal. Shipping it first proves the contract
+   machinery and the emitted artifact before the hard numerics work begins. The
+   coarse-`"float"` fix runs as its own parallel track and converges at SFEP-0062
+   Phase 4. **Consequence for messaging:** until Phase 4, the external claim is
+   about *determinism*, not precision. Do not describe the precision contract as
+   shipped before then.
 3. **Read *Kernel Contracts* (arXiv 2604.22032) and either adopt its vocabulary
    or supersede it in an SFEP.** Being the language that implements the
    specification the field just published is positioning leverage with a
@@ -245,9 +269,15 @@ Ordered. Each item is a consequence of §2–§5, not a preference.
 4. **SFEP-0052 Track A stays capped at oracle-and-fallback duty.** Its category
    has no production survivors; the demotion already recorded on 2026-07-25 was
    correct and should not be reversed. Do not grow it.
-5. **Shape typing demotes from differentiator to ergonomics**, and needs a
-   first-class symbolic/unknown-dimension story *before* it is built. SFEP-0053's
-   "static shapes only" is the design every corpse in that category shared.
+5. **Shape typing demotes from differentiator to ergonomics — but it is
+   load-bearing for Result, which is not the same thing.** Static shapes make the
+   op count a compile-time constant, which is what makes a derived tolerance a
+   closed form; under dynamic shapes the bound goes symbolic and must be
+   conservatively bounded or evaluated at runtime, a real and currently unpriced
+   design cost (SFEP-0062 pushback §1). Never market it, never skip it. It still
+   needs a first-class symbolic/unknown-dimension story *before* it is built —
+   SFEP-0053's "static shapes only" is the design every corpse in that category
+   shared.
 6. **`extern` is the one design gate blocking all three pillars simultaneously.**
    `E0804` forbids effect annotations on externs, so enforcement depends on
    voluntary wrapping; that hole defeats Reach's completeness claim, defeats the

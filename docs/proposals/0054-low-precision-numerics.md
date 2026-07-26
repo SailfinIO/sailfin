@@ -4,7 +4,7 @@ title: Low-Precision Numeric Substrate
 status: Accepted
 type: language
 created: 2026-07-19
-updated: 2026-07-19
+updated: 2026-07-26
 author: "agent:compiler-architect; project owner sign-off"
 tracking: "#2484, SFN-423, SFN-426"
 supersedes:
@@ -310,6 +310,18 @@ reported as shipped until its CPU oracle and lowering path are complete.
 Vectorization, tensor-core instruction selection, StableHLO precision
 configuration, and vendor-library mapping are later backend work. Their absence
 does not change the scalar or tensor dtype semantics fixed here.
+
+### 3.10 Scope accuracy
+
+**Scope note (2026-07-26).** Phase 1's `Shipped` status covers the **storage
+carriers** — `f16`/`bf16` annotations lowering to `half`/`bfloat`, `as`
+conversions, expected-type literal narrowing, extern accept-list, array/param/
+return carriers. It does **not** cover §3.2's exact type identity:
+`typecheck_types.sfn:1130-1135` still returns the coarse shared `"float"` kind,
+so `f16 + bf16` typechecks and `E0910`–`E0915` are unallocated. **The
+unimplemented half is the differentiating half** — it is the Result pillar's
+headline claim per `docs/strategy/decision-brief.md` §4, and it gates
+SFEP-0062 Phase 4. Do not read `Shipped` as "the numerics contract holds."
 
 ## 4. Effect & capability impact
 

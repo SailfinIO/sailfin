@@ -46,7 +46,7 @@ The next number is `max + 1`. Add a row in the same PR that introduces an SFEP.
 | [0021](./0021-windows-native-selfhost.md) | Native Windows Self-Host (MSVC ABI) | Accepted | runtime |
 | [0022](./0022-darwin-memory-governor.md) | Darwin (macOS arm64) Memory Governor | Accepted | runtime |
 | [0023](./0023-capsule-decorators.md) | Capsule-Defined Decorators | Accepted | language |
-| [0024](./0024-model-engines-and-training.md) | Model Engines, Adapters, Tensors, Training | Draft | informational |
+| [0024](./0024-model-engines-and-training.md) | Model Engines, Adapters, Tensors, Training | Superseded | informational |
 | [0025](./0025-native-runtime-architecture.md) | Native Runtime Architecture | Implemented | runtime |
 | [0026](./0026-delivery-process.md) | Delivery Process — Drift-Tolerant Issues, Seed Discovery, Release Cadence | Accepted | process |
 | [0027](./0027-cli-rss-modularization.md) | CLI Modularization — Per-Worker RSS Relief First, Then Migration | Implemented | tooling |
@@ -84,6 +84,7 @@ The next number is `max + 1`. Add a row in the same PR that introduces an SFEP.
 | [0059](./0059-typed-ssa-activation.md) | Typed SSA Activation — Making the Metadata IR Load-Bearing | Accepted | tooling |
 | [0060](./0060-owned-syscall-layer.md) | The Owned Syscall Layer (Axis 3, tier-1 Linux x86-64) | Accepted | runtime |
 | [0061](./0061-diagnostic-unification.md) | Diagnostic Unification — One Coded, Spanned, Severity-Bearing Diagnostic | Accepted | tooling |
+| [0062](./0062-numerical-contracts.md) | Numerical and Behavioural Contracts (the Result Pillar) | Draft | language |
 
 ## Drafts under review (numbers assigned at merge)
 
@@ -118,6 +119,15 @@ pre-deconflicted (`E0303`; `E0711`–`E0715`; `E0820`–`E0822`; `E0823`/`W0823`
 `E0824`–`E0825`; `E0834`–`E0836` — typed task handles, SFEP-0055).
 `E0826` is allocated (shipped) — bare function-type annotation rejection
 (#1845, SFEP-0030) — so drafts must skip it.
+
+SFEP-0062 (numerical contracts) opens a **new `E11xx` range** —
+`E1100`–`E1114` — rather than extending `E09xx`. `E09xx` is owned by
+ownership/affine types with `E0910`–`E0915` already reserved by SFEP-0054, and
+`E08xx` is nearly exhausted (`E0801`–`E0838`). A repo-wide
+`rg -o --no-filename '[EW][0-9]{4}' compiler runtime docs site | sort -u` found
+`E1001` and `E1003` as the only `E1xxx` codes in use, so `E11xx` is entirely
+free and gets its own home, `compiler/src/contract/`. Drafts must skip
+`E1100`–`E1114`.
 
 ## Subdirectories
 
