@@ -4,7 +4,7 @@ title: Effect Validation as Build Gate
 status: Implemented
 type: language
 created: 2026-04-26
-updated: 2026-07-24
+updated: 2026-07-26
 author: "agent:compiler-architect"
 tracking:
 supersedes:
@@ -1157,7 +1157,9 @@ Add effect polymorphism for HOFs.
 > (#1186) deleted `collect_effects_from_text` and the `Raw`/`Unknown`
 > text-scan fallback** — name resolution is now the only detection path.
 > The *effect-polymorphism* sub-track (`!E` variables, polymorphic stdlib
-> HOFs) remains post-1.0 and is sketched below for forward-compatibility.
+> HOFs) is long tail: it has the bug-surface of typeclass / type-parameter
+> substitution work (4-8 weeks stabilization once started) and is sketched
+> below for forward-compatibility.
 
 **Sub-phases.**
 
@@ -1467,8 +1469,9 @@ follow-up workstreams.
   Post-1.0, opt-in only.
 - **Effect polymorphism implementation.** Phase G. Sketched but not
   implemented in this workstream.
-- **`Affine<T>` / `Linear<T>` ownership effects.** Separate workstream
-  per CLAUDE.md (deferred to post-1.0).
+- **`Affine<T>` / `Linear<T>` ownership effects.** Separate workstream;
+  not currently prioritized per CLAUDE.md's ownership-is-a-floor judgment
+  (user-facing ownership stays post-1.0).
 - **Runtime capability enforcement.** This proposal is compile-time only.
   Runtime sandboxing is a separate post-1.0 layer.
 - **PII / Secret taint tracking.** Separate workstream. Not modeled as

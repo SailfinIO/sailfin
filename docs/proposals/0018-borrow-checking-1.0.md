@@ -4,7 +4,7 @@ title: Borrow / Ownership Checking for the Native Runtime
 status: Accepted
 type: runtime
 created: 2026-06-09
-updated: 2026-06-09
+updated: 2026-07-26
 author: "agent:compiler-architect"
 tracking: "#1207, #1209"
 supersedes:
@@ -54,8 +54,10 @@ expected to *grow over time* as a modern, agentic-development-era exploration of
 memory safety. **Sailfin does not have to be Rust**, and the 1.0 subset is a
 floor we build *upward* from, not a terminal design.
 
-Concretely, this reclassifies what the rest of this document calls "post-1.0
-maybe" into a **named, intended forward path**:
+Concretely, the path beyond the 1.0 subset is a **named, intended forward
+path**, not a speculative aside. The body wording was brought in line with this
+on 2026-07-26 — where this document originally said "post-1.0" it now names the
+gate, per `docs/strategy/decision-brief.md` §156:
 
 - The `Borrowed` lattice state (§3.2) and shared-borrow semantics are the
   **planned next widening**, not a speculative aside.
@@ -317,7 +319,7 @@ sound and to eliminate the #1205 hazard class, and **no more**.
 | Smallest model that actually fixes #1205 (proves unique ownership → grow-at-tip is sound) | Still a new analysis pass to build and maintain |
 | Scoped rollout (runtime-first, then opt-in) bounds blast radius and lets the runtime migrate incrementally | "No shared borrow" means read-only sharing of an owned buffer needs an explicit copy-to-view or a (later) slice type |
 | Builds on `Affine`/`Linear` parse surface (Option B) for the ownership half | Requires the escape-hatch/FFI boundary (§4) to be designed carefully so raw runtime code can still call libc |
-| Stays out of user code by default → does not dilute pillars, does not break existing `.sfn` | Defers full borrow checking (shared `&`/unique `&mut` for arbitrary user types) to post-1.0 — acceptable, because that is a *feature*, not a *soundness floor* |
+| Stays out of user code by default → does not dilute pillars, does not break existing `.sfn` | Leaves full borrow checking (shared `&`/unique `&mut` for arbitrary user types) outside this proposal's scope — acceptable, because that is a *feature*, not a *soundness floor* |
 | Composes cleanly with the effect checker (both are post-typecheck dataflow passes over the same IR) | |
 
 **Recommendation: Option C, with Option B's affine types as its ownership
@@ -370,7 +372,7 @@ Per owned binding, the pass tracks an **ownership state** through the CFG:
   legal here.
 - `Moved` — ownership transferred out (by assignment, by passing to a consuming
   parameter, by `return`); **any subsequent use is an error.**
-- `Borrowed(shared)` — (post-1.0 extension point) a read-only view exists; no
+- `Borrowed(shared)` — (the planned next widening, per §0) a read-only view exists; no
   mutation or move until the borrow ends.
 
 For the 1.0 runtime-soundness subset, only `Owned` / `Moved` are required. The
@@ -520,7 +522,7 @@ a non-owning `SfnSlice { data, len }`), a `Slice<T>` / `BufView` type provides a
 read-only from an `OwnedBuf` whose owner outlives the view. In the 1.0 subset,
 view lifetimes are kept trivial (function-local, no escape) — `E0905` rejects a
 view that outlives its backing buffer. Full borrowed-view lifetimes are the
-post-1.0 extension point (§3.2 `Borrowed` state).
+planned widening (§3.2 `Borrowed` state, and §0).
 
 ---
 
@@ -556,9 +558,11 @@ it (§6, §7).
    The #1205 determinism regression is the acceptance gate.
 3. **Phase R2** — extend enforcement to the rest of `runtime/sfn/**`
    (array, then concurrency with M4).
-4. **Phase U (post-1.0)** — opt-in for user code (`Affine<T>`/`Linear<T>` become
+4. **Phase U** — opt-in for user code (`Affine<T>`/`Linear<T>` become
    enforced when used; ordinary code is unaffected unless it opts in). Whole-
-   language enforcement, shared borrows, and lifetime syntax are all post-1.0.
+   language enforcement, shared borrows, and lifetime syntax land here. Per §0
+   this is a committed direction gated on sequencing after R2, not on whether we
+   want it.
 
 ### 5.3 Back-compat for existing `.sfn` and capsules
 
@@ -622,8 +626,8 @@ demonstrated structural fix is proving uniqueness (or forcing the copy).
 The argument that keeps it *scoped*: the blocker is satisfied by **Phase R1**
 (enforced ownership on `runtime/sfn/memory/**` + `string.sfn`, #1205 determinism
 regression green), **not** by whole-language borrow checking. Everything beyond
-R1 — user-code opt-in, shared borrows, lifetimes — is explicitly post-1.0. So the
-1.0 gate is narrow and achievable, not "ship a borrow checker."
+R1 — user-code opt-in, shared borrows, lifetimes — is explicitly outside the 1.0
+gate's scope. So the gate is narrow and achievable, not "ship a borrow checker."
 
 ### 7.2 Relationship to M4.7 / #822 (C deletion) — fix the contract first
 
@@ -653,7 +657,7 @@ M4.7 / #822 (delete C runtime bodies)   ← now safe: Sailfin replacements are s
 Phase R2 (rest of runtime/sfn/**, concurrency with M4 #965)
         │
         ▼
-Phase U (post-1.0: user-code opt-in, shared borrows, lifetimes)
+Phase U (user-code opt-in, shared borrows, lifetimes; gated on sequencing)
 ```
 
 ### 7.3 Phasing recommendation (summary)
@@ -664,7 +668,8 @@ Phase U (post-1.0: user-code opt-in, shared borrows, lifetimes)
   memory/string core. Land before #822.
 - **1.0, M4-coupled (R2):** concurrency modules migrate with M4 #965, consuming
   the same ownership substrate.
-- **Post-1.0 (Phase U):** user-facing ownership, shared borrows, lifetimes.
+- **Phase U (after R2, gated on sequencing):** user-facing ownership, shared
+  borrows, lifetimes.
 
 ---
 
@@ -693,7 +698,7 @@ Phase U (post-1.0: user-code opt-in, shared borrows, lifetimes)
 8. **D8 — M4 coupling.** Confirm M4 #965 consumes this ownership substrate for
    safe sharing (vs. M4 owning its own mechanism)?
 9. **D9 — Doc surface.** Ship the user-facing description as a **preview** chapter
-   (`reference/preview/`) at 1.0 since user enforcement is Phase U / post-1.0,
+   (`reference/preview/`) at 1.0 since user enforcement is Phase U,
    keeping the runtime-internal enforcement out of the marketed spec until it is
    user-facing? *(See §4 reconciliation below.)*
 
@@ -710,8 +715,8 @@ implementation*, in the same category as type checking — not a marketed
 differentiator. The pillars (effects, capabilities, concurrency) are unchanged.
 We never describe Sailfin as "a borrow-checked language"; we describe it as "a
 language whose runtime is memory-safe by construction." The analysis stays
-runtime-scoped at 1.0 (Phase R1–R2); user-facing ownership is post-1.0 and
-clearly a *library/feature* concern, not a fourth pillar.
+runtime-scoped at 1.0 (Phase R1–R2); user-facing ownership is Phase U, gated on
+sequencing, and clearly a *library/feature* concern, not a fourth pillar.
 
 **Required documentation edits (made by the implementing epic, not this issue):**
 
@@ -721,7 +726,8 @@ clearly a *library/feature* concern, not a fourth pillar.
     capabilities, **not** borrow checking"* to a statement that a **bounded
     ownership/aliasing analysis is enforced on the native runtime for 1.0**
     (memory safety floor), while *user-facing* ownership and full borrow checking
-    remain post-1.0. Keep the "not a fourth pillar" line explicit.
+    are Phase U, gated on sequencing. Keep the "not a fourth pillar" line
+    explicit.
   - "Design Decision Framework" → "Don't ship unfinished safety claims": note
     that runtime ownership enforcement is the exception that *is* shipped
     end-to-end (Phase R1), so it may be documented as enforced once it is.

@@ -78,10 +78,40 @@ for (const [id, content] of Object.entries(stale.evasions)) {
   });
 }
 
+test("ships-today claims do not fire on dated design records", () => {
+  // A migration SFEP has to be able to name the C runtime it deleted, and a
+  // CI-speed SFEP has to be able to cite "2x slower on macOS".
+  const content =
+    "The former runtime/native/src/sailfin_runtime.c is deleted. " +
+    "The suite is the pain; macOS is ~2x slower per-test than Linux.";
+  assert.deepEqual(
+    findRetiredClaimFailures([{ path: "docs/proposals/0025.md", content, historical: true }]),
+    [],
+  );
+  // The same text in product copy must still fail.
+  assert.ok(
+    findRetiredClaimFailures([{ path: "README.md", content }]).length >= 2,
+    "current-facing copy should still be held to the ships-today rules",
+  );
+});
+
+test("the wording rule applies to design records too", () => {
+  // This is the whole reason SFEPs are scanned: the deferral phrasing leaked from
+  // pre-SFEP-process architect docs into the site copy.
+  const failures = findRetiredClaimFailures([
+    {
+      path: "docs/proposals/0018.md",
+      content: "Full exclusivity checking is deferred to post-1.0.",
+      historical: true,
+    },
+  ]);
+  assert.ok(failures.some((f) => f.message.includes("deferral-without-gate")));
+});
+
 test("llms.txt is inside the scanned set", () => {
   // Without this, a clean guard run is equally consistent with llms.txt being
   // scanned and with it being silently skipped -- the state it was in before.
-  const files = sourceFiles(repoRoot).map((path) => relative(repoRoot, path));
+  const files = sourceFiles(repoRoot).map(({ path }) => relative(repoRoot, path));
   assert.ok(
     files.includes("llms.txt"),
     `llms.txt missing from scanned set (${files.length} files scanned)`,

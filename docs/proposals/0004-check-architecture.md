@@ -4,7 +4,7 @@ title: "sfn check — Fast Analysis Without Codegen"
 status: Implemented
 type: tooling
 created: 2026-04-15
-updated: 2026-04-26
+updated: 2026-07-26
 author: "agent:compiler-architect"
 tracking:
 supersedes:
@@ -79,8 +79,8 @@ sub-PRs:
   (including seven new tests guarding severity prefix invariance,
   file_path on the location-only branch, and W01xx code distinctness).
   Phase 2 features (`secondary` source locations,
-  `FixSuggestion`/`TextEdit`) remain deferred — they land alongside
-  `sfn fix` / `sfn lsp`.
+  `FixSuggestion`/`TextEdit`) are gated on `sfn fix` / `sfn lsp` —
+  they land alongside those.
 - **A4 — delete legacy helpers (shipped April 26, 2026).** Removed
   `inline_imports_for_source`, `_inline_relative_imports_cmd`, and
   the entire textual-inliner support cast
@@ -1051,7 +1051,7 @@ considered and rejected for v1.
 | B4 | Renderer harmonization: `report_typecheck_errors` → `render_diagnostic` | S | B1 | One-source-of-truth for diagnostic shape | All `compile_to_*` paths use `diagnostics_render.render_diagnostic`; legacy `format_typecheck_diagnostic` deleted |
 | B5 | `secondary: SourceLocation[]` on `Diagnostic` | S | B3 | "first defined here" pointers; cross-module attribution | Duplicate-symbol diagnostics carry secondary span; renderer draws second caret |
 | B6 | `make check-fast` + CI pre-build wiring | S | B2 | Faster PR feedback (~5s vs ~13min) | New target documented; CI gate fails fast; pre-commit hook documented |
-| B7 | Parallel multi-file checking — pre-mortem | XS (doc only) | none | Track C scoping | Explicitly deferred to post-1.0; rationale documented; alternative listed |
+| B7 | Parallel multi-file checking — pre-mortem | XS (doc only) | none | Track C scoping | Gated on concurrency runtime (`routine`/`spawn`/`channel`/`await` landing); rationale documented; alternative listed |
 
 **Track B v1 = B1 + B2 + B3 + B4 + B6.** B5 ships when a consumer needs it
 (LSP cross-file rename is the natural forcing function). B7 is a doc-only PR
@@ -1163,11 +1163,19 @@ enforced as one.**
 
 Targets land in B6.
 
-#### Q4 — Parallel multi-file checking: deferred to post-1.0
+#### Q4 — Parallel multi-file checking: gated on concurrency runtime
 
-Sailfin has no concurrency runtime. `routine`/`spawn`/`channel`/`await`
-are not in the parser (`docs/status.md`); Phase 4 of the runtime
-enablement plan in `CLAUDE.md` is what lights them up.
+> **Gate cleared (noted 2026-07-26).** The blocker below has since been
+> removed: structured concurrency ships as a v0 surface — `routine`/`channel`/
+> `spawn`/`await`/`parallel` work end-to-end (`docs/status.md`). The pre-mortem's
+> *analysis* still stands on its own merits (see the fork-overhead numbers and
+> the determinism argument), but "no concurrency runtime" is no longer the reason
+> B7 is unscheduled. Whether to pick it up is now an open prioritization call
+> rather than a blocked dependency.
+
+At the time of writing, Sailfin had no concurrency runtime: `routine`/`spawn`/
+`channel`/`await` were not in the parser, and Phase 4 of the runtime enablement
+plan was what would light them up.
 
 `process.run`-fork workaround analysis: a 121-file `sfn check` run forking
 N compiler processes incurs

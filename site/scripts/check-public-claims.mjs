@@ -15,50 +15,64 @@ const currentFacingRoots = [
   "site/src/content/blog",
   "site/src/content/docs",
   "site/src/pages",
-  // Deliberately NOT scanned: docs/proposals. SFEPs render publicly at
-  // /sfep/<slug> via the `sfep` content collection, so they are public prose,
-  // but they are dated design records rather than current-facing copy -- an
-  // Accepted SFEP describes the decision as argued at the time, and rewriting
-  // that argument to satisfy a marketing guard would falsify the record. Claims
-  // that need to hold *today* belong in the roots above. Revisit if SFEP prose
-  // starts being cited as product copy.
 ];
+
+// SFEPs render publicly at /sfep/<slug>, so their prose is public -- but they are a
+// different genre from product copy: dated design records that legitimately discuss
+// deleted subsystems, historical measurements, and prospective architecture in the
+// present tense. Scanning them with the full rule set produces noise (a migration
+// SFEP *must* name the C runtime it deleted; a CI-speed SFEP *must* cite "2x slower
+// on macOS"), so only the genre-independent rules apply here: the wording rule and
+// unfalsifiable superlatives. Claims that assert what ships *today* are scoped to
+// `currentFacingRoots` via `scope: "current-facing"` below.
+//
+// Several SFEPs were migrated from pre-SFEP-process architect documents and carried
+// that era's deferral phrasing in with them, which is how "post-1.0" leaked back
+// into the site copy in the first place -- hence guarding them at all.
+const historicalRoots = ["docs/proposals"];
 
 const retiredClaims = [
   {
     id: "deleted-c-runtime-source",
+    scope: "current-facing",
     pattern: /runtime\/native\/src\/sailfin_(?:runtime|arena)\.c/giu,
     guidance: "The runtime is Sailfin-native; describe deleted C sources only in historical engineering records.",
   },
   {
     id: "live-c-runtime",
+    scope: "current-facing",
     pattern: /\b(?:uses|links|includes|requires) (?:a |the )?C runtime\b/giu,
     guidance: "Current-facing copy must not present the deleted C runtime as live.",
   },
   {
     id: "legacy-build-driver",
+    scope: "current-facing",
     pattern: /\b(?:run|use|invoke) (?:the )?(?:prior )?`?scripts\/build\.sh`?/giu,
     guidance: "The legacy build script was deleted; direct users to make compile or sfn build.",
   },
   {
     id: "obsolete-installer-trust",
+    scope: "current-facing",
     pattern: /\b(?:TLS-trust only|does not currently verify (?:the )?release signature|do not currently verify `?SHA256SUMS\.sig`?)\b/giu,
     guidance: "Installers verify the signed checksum manifest before extraction.",
   },
   {
     id: "effect-gate-underclaim",
+    scope: "current-facing",
     pattern: /\b(?:once (?:effect )?enforcement ships|wiring it into the compilation gate)\b/giu,
     guidance: "io/net/clock effect enforcement is already a compile-time build gate.",
   },
   {
     id: "borrow-checking-tradeoff",
+    scope: "current-facing",
     pattern:
       /\btrades? borrow checking for\b|\bcapability safety instead of memory safety\b|\b(?:don't|do not|doesn't|does not) need lifetime annotations\b/giu,
     guidance:
-      "Effects do not substitute for memory safety. SFEP-0018 scoped Rust-style borrow checking out of 1.0; moves/aliasing ship as a correctness floor and &T / &mut T exclusivity is parsed but unchecked.",
+      "Effects do not substitute for memory safety. Moves/aliasing ship as a correctness floor; &T / &mut T exclusivity is parsed but unchecked, specified in SFEP-0018 and not currently prioritized.",
   },
   {
     id: "unbenchmarked-speed-claim",
+    scope: "current-facing",
     pattern:
       /\b(?:blazing(?:ly)?[ -]fast|lightning[ -]fast|screaming[ -]fast|fast startup|fast compilation)\b/giu,
     guidance:
@@ -77,6 +91,7 @@ const retiredClaims = [
   },
   {
     id: "review-free-generated-code",
+    scope: "current-facing",
     // Requires a positive assertion frame. "Never merge agent output without human
     // review" is correct and desirable copy and must not fail the build.
     pattern:
@@ -86,6 +101,7 @@ const retiredClaims = [
   },
   {
     id: "model-effect-overclaim",
+    scope: "current-facing",
     // Both orders, because the claim is written both ways: "![model] is enforced"
     // and "any function that reaches an AI backend must declare it".
     pattern:
@@ -99,6 +115,7 @@ const retiredClaims = [
   },
   {
     id: "quantified-speed-claim",
+    scope: "current-facing",
     // A fabricated number reads as measured and is worse than a fabricated adjective.
     pattern:
       /\b\d+(?:\.\d+)?\s*(?:x|×)\s+(?:faster|quicker|slower)\b|\bsub-second builds\b|\bnear-zero (?:startup|runtime) overhead\b/giu,
@@ -189,22 +206,29 @@ const publicUrls = [
 export function sourceFiles(repoRoot) {
   const files = [];
 
-  function visit(path) {
-    if (!existsSync(path)) return;
-    const entries = readdirSync(path, { withFileTypes: true });
-    for (const entry of entries) {
-      const child = join(path, entry.name);
-      if (entry.isDirectory()) visit(child);
-      else if ([".astro", ".md", ".mdx"].includes(extname(entry.name))) files.push(child);
+  function collect(roots, historical) {
+    function visit(path) {
+      if (!existsSync(path)) return;
+      const entries = readdirSync(path, { withFileTypes: true });
+      for (const entry of entries) {
+        const child = join(path, entry.name);
+        if (entry.isDirectory()) visit(child);
+        else if ([".astro", ".md", ".mdx"].includes(extname(entry.name))) {
+          files.push({ path: child, historical });
+        }
+      }
+    }
+
+    for (const root of roots) {
+      const path = join(repoRoot, root);
+      if (!existsSync(path)) continue;
+      if (extname(path)) files.push({ path, historical });
+      else visit(path);
     }
   }
 
-  for (const root of currentFacingRoots) {
-    const path = join(repoRoot, root);
-    if (!existsSync(path)) continue;
-    if (extname(path)) files.push(path);
-    else visit(path);
-  }
+  collect(currentFacingRoots, false);
+  collect(historicalRoots, true);
   return files;
 }
 
@@ -214,8 +238,11 @@ function lineNumber(content, index) {
 
 export function findRetiredClaimFailures(files) {
   const failures = [];
-  for (const { path, content } of files) {
+  for (const { path, content, historical = false } of files) {
     for (const claim of retiredClaims) {
+      // Claims asserting what ships today don't apply to dated design records --
+      // a migration SFEP has to be able to name the subsystem it deleted.
+      if (historical && claim.scope === "current-facing") continue;
       claim.pattern.lastIndex = 0;
       for (const match of content.matchAll(claim.pattern)) {
         failures.push({
@@ -268,9 +295,10 @@ export function findCanonicalExampleFailures(markdown, expectedExamples) {
 
 export function runChecks(repoRoot = defaultRepoRoot) {
   const failures = [];
-  const files = sourceFiles(repoRoot).map((path) => ({
+  const files = sourceFiles(repoRoot).map(({ path, historical }) => ({
     path: relative(repoRoot, path),
     content: readFileSync(path, "utf8"),
+    historical,
   }));
 
   failures.push(...findRetiredClaimFailures(files));

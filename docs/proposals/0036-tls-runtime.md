@@ -4,7 +4,7 @@ title: "TLS termination + upstream TLS for the native runtime (OpenSSL)"
 status: Implemented
 type: runtime
 created: 2026-06-29
-updated: 2026-07-05
+updated: 2026-07-26
 author: "agent:compiler-architect; human review"
 tracking: "#1540, #1820, #1821, #1822"
 supersedes:
@@ -234,7 +234,7 @@ and SFEP-0019's framed serve stay green.
 - **CA bundle discovery.** Default verify paths first (OpenSSL's compiled-in
   dir); `SSL_CTX_load_verify_locations` with `/etc/ssl/certs/ca-certificates.crt`
   as a documented fallback when default paths are empty. macOS/Windows CA-store
-  discovery is deferred to the #1485 M10 / Darwin coordination (the `tls.sfn`
+  discovery is gated on the #1485 M10 / Darwin coordination (the `tls.sfn`
   body is unchanged; only the bundle path differs).
 - **Inbound (server): cert+key from files** via
   `SSL_CTX_use_certificate_chain_file` / `SSL_CTX_use_PrivateKey_file`. Client
