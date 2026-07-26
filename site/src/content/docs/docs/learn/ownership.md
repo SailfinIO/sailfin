@@ -10,7 +10,7 @@ Every running program needs to manage memory: allocate it when you need a value,
 
 Languages have tackled this problem in different ways. Garbage-collected languages like Go and Python track which values are still reachable and periodically reclaim the rest — simple to program but with runtime overhead and unpredictable pauses. C and C++ hand control entirely to the programmer — maximum efficiency but a rich source of security vulnerabilities. Rust pioneered a third path: enforce memory safety at compile time through ownership rules, with zero runtime cost.
 
-Sailfin takes the same third path. The ownership system is central to the language, not bolted on. Once you understand it, code that seemed strange starts to read naturally, and a class of bugs you'd otherwise spend hours debugging simply doesn't compile.
+Sailfin is designed around the same third path, and part of that design is enforced today: the compiler checks move semantics and single-use, rejecting use-after-move and unconsumed linear values at compile time. The borrow-exclusivity half of the model — what the `&T`/`&mut T` syntax below describes — is designed but not yet checked. The status callout that follows says exactly which rules are live.
 
 > **Implementation status:** Single-use checking ships today. Owned and
 > `Affine<T>` bindings reject use-after-move and a second live binding
@@ -41,13 +41,13 @@ Data races are the concurrent equivalent: two threads read and write the same me
 
 Garbage collectors solve some of these (no dangling pointers, no double-free) by ensuring a value isn't freed until no references to it remain. But a GC can't solve data races, and it introduces runtime pauses and memory overhead that matter in latency-sensitive or resource-constrained contexts.
 
-Sailfin's ownership model solves all three at compile time:
+Sailfin's ownership model is designed to address all three, and the compiler enforces the move-based half of it today:
 
-- **Dangling pointers**: borrows cannot outlive the value they reference.
-- **Double-free**: each value has exactly one owner; when that owner goes out of scope, the value is freed — once.
-- **Data races**: at any moment you have either many read-only borrows or exactly one mutable borrow, never both.
+- **Double-free**: each value has exactly one owner; when that owner goes out of scope, the value is freed — once. Use-after-move on an owned or `Affine<T>` binding is a compile error (`E0901`/`E0904`), and an unconsumed `Linear<T>` value is rejected at scope exit (`E0907`).
+- **Use-after-free / aliased mutation**: in-place mutation of a possibly-aliased buffer and raw-pointer FFI escapes are rejected for the memory/string runtime core (`E0902`/`E0903`/`E0906`).
+- **Dangling pointers and data races**: the design calls for borrows that cannot outlive the value they reference, and for either many read-only borrows or exactly one mutable borrow at a time, never both. `&T` and `&mut T` parse today, but the compiler does not yet check borrow lifetimes or exclusivity — see [Current enforcement](#the-borrow-rules) below.
 
-The key insight: the compiler tracks who owns what. It knows when ownership transfers, when a borrow is active, and when a value is freed. If you break the rules, it's a compile error, not a runtime crash.
+The key insight: the compiler tracks who owns what and knows when ownership transfers. For the rules above that are checked, breaking them is a compile error, not a runtime crash.
 
 ---
 
@@ -234,7 +234,7 @@ Stated precisely:
 
 3. You cannot move a value while it is borrowed. Moving ends the owner; the outstanding reference would dangle.
 
-These three rules together eliminate dangling pointers, data races, and use-after-free.
+Together, these three rules are what would eliminate dangling pointers and data races. They describe the intended model; the enforcement note below says how much of it the compiler checks today.
 
 > **Current enforcement:** The compiler parses `&T` and `&mut T` syntax and threads borrow metadata through the IR, but full exclusivity checking is deferred to post-1.0. Violations compile without error today. See the [roadmap](/roadmap) for when enforcement lands.
 
@@ -536,7 +536,7 @@ fn increment_counter(counter: &mut Counter) ![mut] {
 
 In the current compiler, `read` and `mut` are accepted as effect annotations. Future releases will integrate borrow effects more tightly with the capability system — for example, requiring that a function that takes `&mut T` to a shared resource declares the appropriate capability, or that `PII<T>` fields cannot be read without a `redact` or `policy` effect.
 
-The intersection of ownership and effects is where Sailfin's safety story comes together: not only is memory safe, but *what you can do* with a value is statically bounded by the declared capabilities of the function holding it.
+The intersection of ownership and effects is where Sailfin's safety story comes together: the checked ownership rules narrow how a value can be used, and the effect system statically bounds what a function holding it is allowed to do.
 
 ---
 

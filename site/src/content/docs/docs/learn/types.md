@@ -6,7 +6,7 @@ sidebar:
   order: 3
 ---
 
-Sailfin has a rich, statically-checked type system designed to make incorrect programs hard to write. This guide covers everything from the primitive types you saw in [Language Basics](/docs/learn/basics) through algebraic data types, interfaces, generics, and the wrapper types that power Sailfin's safety guarantees.
+Sailfin has a rich, statically-checked type system designed to make incorrect programs hard to write. This guide covers everything from the primitive types you saw in [Language Basics](/docs/learn/basics) through algebraic data types, interfaces, generics, and the wrapper types designed for safety-critical code, two of which are enforced today and two of which are still design previews (see the [Wrapper Types](#wrapper-types-design-preview) section below).
 
 ## Primitive Types
 

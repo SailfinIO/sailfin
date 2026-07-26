@@ -533,15 +533,20 @@ capsule for leveled logging.
 vs. TypeScript: Sailfin compiles to native code via LLVM. Effect types are
     checked at compile time, not documented by convention.
 
-vs. Rust: Sailfin trades borrow checking for effect tracking. No lifetime
-    annotations. Capability safety instead of memory safety (ownership is
-    parsed but deferred to post-1.0).
+vs. Rust: Rust's borrow checker provides compile-time memory safety. Sailfin
+    does not match it, and Rust-style borrow checking was deliberately scoped
+    out of 1.0 (SFEP-0018). Sailfin enforces moves, use-after-move, and
+    aliased mutation on owned buffers as a correctness floor; `&T` / `&mut T`
+    exclusivity is parsed but not checked. What Sailfin adds over Rust is
+    effect and capability typing -- not memory safety.
 
 vs. Go: Sailfin adds compile-time capability enforcement and algebraic data
-    types with pattern matching. Same single-binary ergonomics.
+    types with pattern matching. Same single-binary ergonomics. Go's runtime,
+    scheduler, and ecosystem are substantially more mature.
 
-vs. Zig: Sailfin is more opinionated. Effect types control capabilities
-    instead of memory layout. Both target LLVM.
+vs. Zig: Zig's comptime and explicit allocator model give more direct control
+    over memory than Sailfin offers. Both target LLVM. Sailfin's addition is
+    the type-level effect system.
 
 ## File Extension
 

@@ -79,7 +79,7 @@ The effect system is Sailfin's most distinctive feature. Used well, it makes the
 
 ### Declare the narrowest effects possible
 
-Only list the effects a function actually needs. This is not just style — it is safety. A function that declares `![io, net, model]` but only needs `![io]` has been granted capabilities it doesn't use, which makes it harder to reason about.
+Only list the effects a function actually needs. A function that declares `![io, net, model]` but only needs `![io]` has been granted capabilities it doesn't use, which makes it harder to reason about and widens what a bug or a compromised dependency in that function could reach.
 
 ```sfn
 // Too broad

@@ -39,6 +39,39 @@ test("deliberately retired wording is rejected", () => {
   assert.ok(failures.some(({ category }) => category === "retired wording"));
 });
 
+for (const [id, content] of Object.entries(stale.marketingOverclaims)) {
+  test(`marketing overclaim ${id} is rejected`, () => {
+    const failures = findRetiredClaimFailures([{ path: "stale.md", content }]);
+    assert.ok(
+      failures.some((failure) => failure.message.includes(id)),
+      `expected ${id} to fire on ${JSON.stringify(content)}, got ${JSON.stringify(failures)}`,
+    );
+  });
+}
+
+test("pattern-matching vocabulary is not mistaken for a superlative", () => {
+  const failures = findRetiredClaimFailures([
+    {
+      path: "standard-library.md",
+      content: "Raises a `ValueError` with a message including the unmatched value.",
+    },
+  ]);
+  assert.deepEqual(failures, []);
+});
+
+test("accurate comparison copy is not flagged", () => {
+  // The guard must not punish honestly describing what Rust does better than Sailfin.
+  const failures = findRetiredClaimFailures([
+    {
+      path: "why.astro",
+      content:
+        "Rust's borrow checker gives compile-time memory safety without a garbage collector. " +
+        "Sailfin does not match that, and is not attempting to at 1.0.",
+    },
+  ]);
+  assert.deepEqual(failures, []);
+});
+
 test("deliberately broken critical link is rejected", () => {
   const failures = findRequiredFragmentFailures(
     [{ path: "stale.md", content: `href="${stale.criticalLink}"` }],

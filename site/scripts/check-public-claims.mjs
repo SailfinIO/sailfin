@@ -8,6 +8,9 @@ const defaultRepoRoot = resolve(dirname(scriptPath), "../..");
 const currentFacingRoots = [
   "README.md",
   "examples/README.md",
+  // Agent-facing framing file, symlinked as site/public/llms.txt. It drifted out of
+  // sync with README for exactly as long as it sat outside this guard.
+  "llms.txt",
   "site/src/components",
   "site/src/content/blog",
   "site/src/content/docs",
@@ -39,6 +42,41 @@ const retiredClaims = [
     id: "effect-gate-underclaim",
     pattern: /\b(?:once (?:effect )?enforcement ships|wiring it into the compilation gate)\b/giu,
     guidance: "io/net/clock effect enforcement is already a compile-time build gate.",
+  },
+  {
+    id: "borrow-checking-tradeoff",
+    pattern:
+      /\btrades? borrow checking for\b|\bcapability safety instead of memory safety\b|\b(?:don't|do not|doesn't|does not) need lifetime annotations\b/giu,
+    guidance:
+      "Effects do not substitute for memory safety. SFEP-0018 scoped Rust-style borrow checking out of 1.0; moves/aliasing ship as a correctness floor and &T / &mut T exclusivity is parsed but unchecked.",
+  },
+  {
+    id: "unbenchmarked-speed-claim",
+    pattern:
+      /\b(?:blazing(?:ly)?[ -]fast|lightning[ -]fast|screaming[ -]fast|fast startup|fast compilation)\b/giu,
+    guidance:
+      "No published cross-language benchmark backs a speed claim; cite a docs/perf/ measurement or drop the adjective.",
+  },
+  {
+    id: "unfalsifiable-superlative",
+    pattern:
+      // "unmatched" is qualified deliberately: bare use is legitimate pattern-matching
+      // vocabulary ("the unmatched value" in standard-library.md), not a superlative.
+      /\bno other (?:mainstream |systems |modern )*language\b|\bthe first language to\b|\brevolutionary\b|\bparadigm shift\b|\bunmatched (?:performance|speed|safety|security)\b/giu,
+    guidance:
+      "Name the real comparison (WASI, Capslock, Koka/Flix/Effekt) and the specific axis instead of an unfalsifiable superlative.",
+  },
+  {
+    id: "review-free-generated-code",
+    pattern: /\b(?:without|no) human review\b/giu,
+    guidance:
+      "Effect checking proves a function's declared capability surface, not that its logic is correct; it narrows review rather than replacing it.",
+  },
+  {
+    id: "model-effect-overclaim",
+    pattern: /!\[model\][^.\n]{0,60}\b(?:is enforced|are enforced|is a compile error|fails the build)\b/giu,
+    guidance:
+      "![model] is reserved: declarable and propagated, but no detector or runtime API ships (docs/status.md).",
   },
 ];
 

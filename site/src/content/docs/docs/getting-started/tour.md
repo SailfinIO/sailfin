@@ -606,7 +606,7 @@ You have seen every major feature of the language. Here is where to go deeper:
 - **[Functions & Methods](/docs/learn/functions)** — Closures, methods, and effect propagation
 - **[Types & Structs](/docs/learn/types)** — Structs, enums, generics, and type aliases
 - **[The Effect System](/docs/learn/effects)** — The complete capability model
-- **[Ownership & Borrowing](/docs/learn/ownership)** — Memory safety without a garbage collector
+- **[Ownership & Borrowing](/docs/learn/ownership)** — Move semantics, linear types, and the design for memory safety without a garbage collector
 - **[Error Handling](/docs/learn/error-handling)** — Result types, try/catch, and error design
 - **[AI Integration](/docs/learn/ai-constructs)** — The `![model]` effect and the `sfn/ai` capsule (post-1.0)
 - **[Testing](/docs/learn/testing)** — Built-in testing, test organization, and patterns
