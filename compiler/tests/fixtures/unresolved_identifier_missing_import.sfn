@@ -1,0 +1,3 @@
+import { ParallelEmitTask } from "../../src/capsule_emit_parallel";
+
+fn unresolved_identifier_repro() -> string { return compile_to_sailfin("x"); }

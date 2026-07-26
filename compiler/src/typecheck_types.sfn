@@ -3313,11 +3313,17 @@ fn make_removed_keyword_diagnostic(keyword: string) -> Diagnostic {
 // The caret points at the callee identifier via `token_from_name`;
 // member/method callees (`obj.method()`) never reach this factory — the
 // walker's Member branch only recurses into `.object`.
-fn make_undefined_function_diagnostic(name: string, span: SourceSpan?) -> Diagnostic {
+fn make_undefined_function_diagnostic(name: string, span: SourceSpan?, provider_module: string) -> Diagnostic {
+    let mut detail = "undefined function `" + name + "`";
+    if provider_module.length > 0 {
+        detail = detail + "; consider `import { " + name + " } from \""
+            + provider_module
+            + "\"`";
+    }
     return Diagnostic {
         code: "E0420",
         severity: "error",
-        message: "undefined function `" + name + "`",
+        message: detail,
         file_path: "",
         primary: token_from_name(name, span),
         suggestion: null

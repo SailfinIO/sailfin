@@ -95,3 +95,18 @@ test "E0420: locally-defined callee checks clean (envelope negative case)" ![io]
 
     fs.deleteFile(fixture);
 }
+
+test "SFN-544: workspace export missing from imports reports span and provider" ![io] {
+    let fixture = "compiler/tests/fixtures/unresolved_identifier_missing_import.sfn";
+    let rc = _check_exit(fixture);
+    assert rc != 0;
+
+    let combined = _check_output(fixture);
+    assert _contains(combined, "error[E0420]: undefined function `compile_to_sailfin`");
+    assert _contains(combined, "3 | fn unresolved_identifier_repro() -> string { return compile_to_sailfin(\"x\"); }");
+    assert _contains(combined, "^^^^^^^^^^^^^^^^^^");
+    assert _contains(combined, "import { compile_to_sailfin }");
+    assert _contains(combined, "from \"main\"");
+    assert ! _contains(combined, "internal compiler error");
+    assert ! _contains(combined, "ice.md");
+}
