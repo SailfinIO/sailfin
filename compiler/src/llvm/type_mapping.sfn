@@ -938,6 +938,29 @@ fn map_primitive_type(context: TypeContext, annotation: string) -> string {
     return "";
 }
 
+// Source-of-truth signedness predicate for Sailfin integer type names
+// (SFEP-0058 §3.1). `map_primitive_type` above collapses each unsigned
+// width onto its signed LLVM twin (`u8`→`i8`, `u32`→`i32`, …), so sign is
+// a frontend concept that survives only in the source-level annotation.
+// Every sign-sensitive lowering decision reads it from here rather than
+// trying to recover it from an already-mapped `LLVMOperand.llvm_type`.
+//
+// Unsigned is the closed set; every other name answers signed. An
+// unrecognised or non-integer name therefore selects the signed forms —
+// the behaviour the lowering already had — so a caller that has not
+// established `name` is an integer type degrades to the status quo rather
+// than to a wrong opcode. `lower_cast_expression` establishes it by
+// requiring the annotation to map onto the operand's own LLVM type.
+fn integer_type_is_signed(name: string) -> boolean {
+    let trimmed = trim_text(name);
+    if trimmed == "u8" { return false; }
+    if trimmed == "u16" { return false; }
+    if trimmed == "u32" { return false; }
+    if trimmed == "u64" { return false; }
+    if trimmed == "usize" { return false; }
+    return true;
+}
+
 // =============================================================================
 // Future/Async Type Mapping
 // =============================================================================

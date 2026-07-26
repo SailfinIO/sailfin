@@ -7,7 +7,12 @@ import { NativeFunction } from "../../../native_ir";
 import { format_temp_name } from "../../expressions_helpers";
 import { empty_string_constant_set, merge_string_constants } from "../../strings";
 import { find_enum_info_by_llvm_type, resolve_enum_variant_info } from "../../type_context_queries";
-import { ends_with_pointer_suffix, map_type_annotation, strip_pointer_suffix } from "../../type_mapping";
+import {
+    ends_with_pointer_suffix,
+    integer_type_is_signed,
+    map_type_annotation,
+    strip_pointer_suffix
+} from "../../type_mapping";
 import {
     CastParseResult,
     ExpressionResult,
@@ -17,7 +22,12 @@ import {
     StringConstant,
     TypeContext
 } from "../../types";
-import { number_to_string, starts_with, trim_text } from "../../utils";
+import {
+    is_simple_identifier,
+    number_to_string,
+    starts_with,
+    trim_text
+} from "../../utils";
 import { lower_expression } from "./core";
 import { pick_agg_cast_shim_target } from "./core_literals_lowering";
 import {
@@ -27,6 +37,8 @@ import {
     is_float_llvm_type,
     is_integer_llvm_type
 } from "./core_operands";
+import { strip_enclosing_parentheses } from "./core_operators";
+import { find_local_binding, find_parameter_binding } from "./core_scopes";
 import { coerce_operand_to_string, emit_string_concat, lower_string_literal } from "./core_strings";
 import { encode_string_literal_for_sailfin, resolve_interpolation_template } from "./core_text";
 
@@ -165,6 +177,34 @@ fn lower_is_expression(parse: CastParseResult, bindings: ParameterBinding[], loc
         diagnostics: diagnostics,
         string_constants: lowered.string_constants
     };
+}
+
+// Recover the *source-level* Sailfin type of a cast operand — the sign
+// information `map_primitive_type` erases. `CastParseResult.value` is the
+// raw source text left of ` as `, so an operand spelled as a plain name
+// resolves through the binding tables, which keep the un-collapsed
+// annotation alongside the mapped `llvm_type`. Returns "" when the operand
+// is anything else; the caller treats that as "sign unknown".
+fn _cast_operand_source_type(value: string, bindings: ParameterBinding[], locals: LocalBinding[]) -> string {
+    // The native IR always renders a cast operand parenthesized — `.sfn-asm`
+    // carries `(x) as u64`, not `x as u64` (emit_native_format.sfn) — and
+    // `format_expression` can nest those layers, so peel them before the
+    // identifier test the way `lower_expression` does.
+    let mut name = trim_text(value);
+    let mut _paren_guard: int = 0;
+    loop {
+        if _paren_guard >= 16 { break; }
+        let stripped = strip_enclosing_parentheses(name);
+        if stripped == name { break; }
+        name = stripped;
+        _paren_guard += 1;
+    }
+    if !is_simple_identifier(name) { return ""; }
+    let local = find_local_binding(locals, name);
+    if local != null { return local.type_annotation; }
+    let parameter = find_parameter_binding(bindings, name);
+    if parameter != null { return parameter.type_annotation; }
+    return "";
 }
 
 fn lower_cast_expression(parse: CastParseResult, bindings: ParameterBinding[], locals: LocalBinding[], temp_index: int, lines: string[], functions: NativeFunction[], context: TypeContext) -> ExpressionResult ![io] {
@@ -427,49 +467,76 @@ fn lower_cast_expression(parse: CastParseResult, bindings: ParameterBinding[], l
     // identity case was filtered earlier.
     //   i1  → int (wider)      → zext      (true → 1, not -1)
     //   i1  → double/float     → uitofp    (true → 1.0, not -1.0)
+    //   u*  → int (wider)      → zext
     //   i*  → int (wider)      → sext
-    //   i*  → int (narrower)   → trunc
+    //   i*  → int (narrower)   → trunc     (sign-independent)
+    //   u*  → double/float     → uitofp
     //   i*  → double/float     → sitofp
-    //   double/float → int     → fptosi
+    //   double/float → u*      → fptoui
+    //   double/float → i*      → fptosi
     //   float → double         → fpext
     //   double → float         → fptrunc
     //   any  → i1 via `as`     → diagnostic (handled above)
-    //
-    // KNOWN LIMITATION: source-level unsigned widths (`u8`/`u16`/
-    // `u32`) collapse to `i8`/`i16`/`i32` in `map_primitive_type`,
-    // so this matrix can't tell signed from unsigned for non-i1
-    // sources. `255_u8 as u64` therefore lowers as `sext` and
-    // becomes `-1` (sign-extended) rather than `255` (zero-
-    // extended). Distinguishing requires source-level type tracking
-    // through the cast lowering — deferred to a Slice D follow-up.
-    // The architect's brief explicitly accepted "all integer casts
-    // emit signed forms" for this slice.
     let operand_is_int = is_integer_llvm_type(operand.llvm_type);
     let operand_is_float = is_float_llvm_type(operand.llvm_type);
     let target_is_int = is_integer_llvm_type(target_type);
     let target_is_float = is_float_llvm_type(target_type);
 
+    // Sign is erased by `map_primitive_type`, so recover the operand's
+    // source annotation and only trust it when it maps back onto this
+    // operand's own LLVM type — a mismatch means the name resolved to
+    // something other than the value actually being cast.
+    //
+    // That reaches an operand spelled as a plain identifier or parameter.
+    // A compound operand (`s.field as u64`, `xs[i] as u64`, `f() as u64`)
+    // carries no source annotation on its `LLVMOperand`, so it still
+    // selects the signed forms; closing that needs the checker's
+    // inferred-type tag threaded through expression lowering, which
+    // SFEP-0058 §3.3 scopes to the typecheck slice (SFN-501).
+    let operand_source_type = _cast_operand_source_type(parse.value, bindings, locals);
+    let mut operand_is_unsigned: boolean = false;
+    if operand_source_type.length > 0 {
+        if map_type_annotation(operand_source_type) == operand.llvm_type {
+            if !integer_type_is_signed(operand_source_type) {
+                operand_is_unsigned = true;
+            }
+        }
+    }
+    // `i1` is unsigned for conversion purposes: LLVM reads `true` as -1
+    // under the signed forms, so `bool as int` must be 1 and `bool as
+    // float` must be 1.0.
+    if operand.llvm_type == "i1" { operand_is_unsigned = true; }
+
+    // The cast *target* never loses its sign — `parse.type_annotation` is
+    // the source text right of ` as ` — so float→int needs no recovery.
+    let mut target_is_unsigned: boolean = false;
+    if target_is_int {
+        if !integer_type_is_signed(parse.type_annotation) {
+            target_is_unsigned = true;
+        }
+    }
+
     let mut numeric_op_name: string = "";
 
     if operand_is_int {
         if target_is_float {
-            // `sitofp i1 1` would produce -1.0 (LLVM treats `i1` as
-            // signed where `true` = -1). For `bool as float` we want
-            // `true` → 1.0, so use `uitofp` for the i1 source.
-            if operand.llvm_type == "i1" { numeric_op_name = "uitofp"; }
-            if operand.llvm_type != "i1" { numeric_op_name = "sitofp"; }
+            if operand_is_unsigned { numeric_op_name = "uitofp"; }
+            if !operand_is_unsigned { numeric_op_name = "sitofp"; }
         }
     }
     if operand_is_float {
-        if target_is_int { numeric_op_name = "fptosi"; }
+        if target_is_int {
+            if target_is_unsigned { numeric_op_name = "fptoui"; }
+            if !target_is_unsigned { numeric_op_name = "fptosi"; }
+        }
     }
     if operand_is_int {
         if target_is_int {
             let src_width = integer_llvm_width(operand.llvm_type);
             let dst_width = integer_llvm_width(target_type);
             if dst_width > src_width {
-                if operand.llvm_type == "i1" { numeric_op_name = "zext"; }
-                if operand.llvm_type != "i1" { numeric_op_name = "sext"; }
+                if operand_is_unsigned { numeric_op_name = "zext"; }
+                if !operand_is_unsigned { numeric_op_name = "sext"; }
             }
             if dst_width < src_width { numeric_op_name = "trunc"; }
         }
