@@ -297,6 +297,10 @@ fn _is_primitive_type_name(name: string) -> boolean {
     if strings_equal(name, "void") { return true; }
     if strings_equal(name, "any") { return true; }
     if strings_equal(name, "opaque") { return true; }
+    // `Self` is bound implicitly inside an interface body (`fn eq(self, other:
+    // Self)`, runtime/prelude.sfn:103) rather than declared anywhere, so no
+    // registry carries it.
+    if strings_equal(name, "Self") { return true; }
     return false;
 }
 
