@@ -41,6 +41,50 @@ fn append_string_lines(values: string[], extras: string[]) -> string[] {
     return out;
 }
 
+// Upper bound on how many `[fatal]` entries a guard trip retains. The gate
+// downstream fails the build on the *first* `[fatal]` it sees, so a bounded
+// handful carries the same verdict as the whole set while keeping the size
+// guards' memory bound a construction rather than an assumption about how
+// many entries happen to be tagged.
+fn max_retained_fatal_diagnostics() -> int { return 64; }
+
+// Reduce a diagnostic batch to its `[fatal]` entries, scanning at most
+// `scan_limit` of them and retaining at most `max_retained_fatal_diagnostics()`.
+//
+// The size guards below bound memory by dropping an oversized batch, but
+// dropping it wholesale also drops any `[fatal]` in it — and `[fatal]` is
+// the only thing that fails the build, so a guard trip would silently
+// disarm the gate it is feeding (SFN-529; audited in
+// `docs/proposals/design-notes/sfn-526-lowering-fatal-gate-audit.md` §3
+// A3). The substring match mirrors `has_fatal_lowering_diagnostic`
+// (`lowering_core.sfn`), which is the gate this feeds.
+//
+// `scan_limit` is the caller's, not this function's: a guard that tripped
+// because the length is *invalid* rather than merely large must not have
+// its buffer indexed at all, so it passes 0. Overflow past either bound is
+// reported rather than dropped silently, and the note is itself tagged so
+// it keeps tripping the gate on its own.
+fn retain_fatal_diagnostics(diagnostics: string[], scan_limit: int) -> string[] {
+    let mut out: string[] = [];
+    if diagnostics == null { return out; }
+    let keep_limit = max_retained_fatal_diagnostics();
+    let mut elided: int = 0;
+    let mut index: int = 0;
+    loop {
+        if index >= scan_limit { break; }
+        let entry = diagnostics[index];
+        if index_of(entry, "[fatal]") >= 0 {
+            if out.length < keep_limit { out.push(entry); } else { elided += 1; }
+        }
+        index += 1;
+    }
+    if elided > 0 {
+        out.push("llvm lowering [fatal]: elided " + number_to_string(elided)
+            + " further fatal diagnostics past the retention cap");
+    }
+    return out;
+}
+
 fn extend_string_lines_checked(values: string[], extras: string[], label: string) -> string[] {
     let mut safe_values = values;
     if safe_values == null { safe_values = []; }
@@ -49,11 +93,15 @@ fn extend_string_lines_checked(values: string[], extras: string[], label: string
     if safe_extras.length == 0 { return safe_values; }
     if safe_extras.length > 1000000 {
         let mut out = safe_values;
-        out.push("llvm lowering: skipped oversized " + label
+        // Deliberately avoids the literal `[fatal]`: the gate is a substring
+        // match, so putting the tag in this always-emitted summary would fail
+        // every oversized batch, tagged or not.
+        out.push("llvm lowering: kept only fatal-tagged entries from oversized "
+            + label
             + " diagnostics (len="
             + number_to_string(extras.length)
             + ")");
-        return out;
+        return extend_string_lines(out, retain_fatal_diagnostics(safe_extras, safe_extras.length));
     }
     return extend_string_lines(safe_values, safe_extras);
 }

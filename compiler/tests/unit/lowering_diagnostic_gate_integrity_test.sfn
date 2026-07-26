@@ -1,0 +1,184 @@
+// Regression coverage for SFN-529: the `[fatal]` gate must survive its own
+// size guards.
+//
+// `has_fatal_lowering_diagnostic` (`compiler/src/llvm/lowering/lowering_core.sfn`)
+// is the only thing that turns a lowering diagnostic into a build failure, and
+// two guards upstream of it used to discard the entire diagnostic array once it
+// exceeded 1,000,000 entries — `[fatal]` included. A tripped guard therefore
+// converted a failing build into a silently-passing one, which is the exact
+// failure mode the gate exists to prevent (audited in
+// `docs/proposals/design-notes/sfn-526-lowering-fatal-gate-audit.md` §3 A3).
+//
+// The thresholds are not reachable through the CLI, so this is a unit test that
+// drives the two guard helpers directly. Building an over-threshold array is
+// the expensive part, so the two guards share one.
+import {
+    extend_string_lines_checked,
+    max_retained_fatal_diagnostics,
+    retain_fatal_diagnostics
+} from "../../src/llvm/lowering/lowering_io";
+import { sanitize_diagnostics } from "../../src/llvm/lowering/lowering_phase_sanitize";
+import { index_of } from "../../src/string_utils";
+
+// The sentinel this test tracks through the guards. It carries no E-code:
+// E-code ranges are owned (`docs/style-guide.md`), and salting a live code
+// into synthetic test text pollutes greps for real emission sites.
+fn _fatal_entry() -> string {
+    return "llvm lowering [fatal]: sfn-529 gate integrity sentinel";
+}
+
+// Kept to one character — the guards only care about the entry *count*, and
+// `index_of` allocates per scan position, so a long filler dominates the
+// runtime of a 1,000,000-entry scan for no added coverage.
+fn _filler() -> string { return "x"; }
+
+fn _contains(text: string, needle: string) -> boolean {
+    return index_of(text, needle) >= 0;
+}
+
+fn _array_contains(values: string[], needle: string) -> boolean {
+    if values == null { return false; }
+    let mut index: int = 0;
+    loop {
+        if index >= values.length { break; }
+        if values[index] == needle { return true; }
+        index += 1;
+    }
+    return false;
+}
+
+fn _count_matching(values: string[], needle: string) -> int {
+    let mut total: int = 0;
+    let mut index: int = 0;
+    loop {
+        if index >= values.length { break; }
+        if _contains(values[index], needle) { total += 1; }
+        index += 1;
+    }
+    return total;
+}
+
+// 1,000,002 entries — one past the guards' 1,000,000 threshold — with the
+// sentinel buried in the middle so a guard that kept only a prefix would still
+// fail this test.
+fn _oversized_batch_with_fatal() -> string[] {
+    let mut out: string[] = [];
+    let mut index: int = 0;
+    loop {
+        if index >= 500000 { break; }
+        out.push(_filler());
+        index += 1;
+    }
+    out.push(_fatal_entry());
+    index = 0;
+    loop {
+        if index >= 500001 { break; }
+        out.push(_filler());
+        index += 1;
+    }
+    return out;
+}
+
+// -------------------------------------------------------------------
+// The size guards: over-threshold input keeps every `[fatal]`
+// -------------------------------------------------------------------
+test "lowering diagnostics: size guards preserve fatal entries past the threshold" {
+    let oversized = _oversized_batch_with_fatal();
+    assert oversized.length > 1000000;
+
+    // `sanitize_diagnostics` guards the inbound diagnostics of
+    // `lower_to_llvm_lines_with_parsed_context`, which the gate reads directly.
+    // It used to return `[]` here, disarming the gate outright.
+    let sanitized = sanitize_diagnostics(oversized);
+    assert _array_contains(sanitized, _fatal_entry());
+    // The guard still bounds memory: only the fatal subset survives.
+    assert sanitized.length <= max_retained_fatal_diagnostics() + 1;
+    assert _count_matching(sanitized, _filler()) == 0;
+
+    // `extend_string_lines_checked` folds a sub-pass's diagnostics into the
+    // running list. An oversized batch is still summarized rather than copied
+    // wholesale, but the `[fatal]` entries now ride along with the summary.
+    let extended = extend_string_lines_checked(["llvm lowering: pre-existing entry"], oversized, "unit");
+    assert _array_contains(extended, "llvm lowering: pre-existing entry");
+    assert _array_contains(extended, _fatal_entry());
+    assert _count_matching(extended, "kept only fatal-tagged entries from oversized unit") == 1;
+}
+
+// -------------------------------------------------------------------
+// Under-threshold input is untouched by the change
+// -------------------------------------------------------------------
+test "lowering diagnostics: under-threshold batches pass through unchanged" {
+    let batch = ["llvm lowering: advisory one", _fatal_entry(), "llvm lowering: advisory two"];
+    let sanitized = sanitize_diagnostics(batch);
+    assert sanitized.length == 3;
+    assert _array_contains(sanitized, _fatal_entry());
+    assert _array_contains(sanitized, "llvm lowering: advisory one");
+
+    let extended = extend_string_lines_checked(["llvm lowering: head"], batch, "unit");
+    assert extended.length == 4;
+    assert _array_contains(extended, "llvm lowering: head");
+    assert _array_contains(extended, _fatal_entry());
+    assert _array_contains(extended, "llvm lowering: advisory two");
+    assert _count_matching(extended, "oversized") == 0;
+}
+
+// -------------------------------------------------------------------
+// The oversized-summary line must not itself trip the gate
+// -------------------------------------------------------------------
+test "lowering diagnostics: oversized summary carries no fatal tag of its own" {
+    // The gate is a substring match, so a summary containing the literal
+    // `[fatal]` would fail every oversized batch whether or not one was
+    // tagged. Guard the wording, not just the filtering.
+    let mut untagged: string[] = [];
+    let mut index: int = 0;
+    loop {
+        if index >= 1000001 { break; }
+        untagged.push(_filler());
+        index += 1;
+    }
+    let extended = extend_string_lines_checked([], untagged, "unit");
+    assert extended.length == 1;
+    assert _count_matching(extended, "[fatal]") == 0;
+}
+
+// -------------------------------------------------------------------
+// The shared filter itself
+// -------------------------------------------------------------------
+test "lowering diagnostics: retain_fatal_diagnostics keeps only tagged entries" {
+    let batch = ["llvm lowering: advisory", _fatal_entry(), "llvm lowering: another advisory", "[fatal] llvm lowering: bare-prefix spelling"];
+    let retained = retain_fatal_diagnostics(batch, batch.length);
+    // Both `[fatal]` spellings in the tree are substring matches, so both are
+    // kept (`lowering_core.sfn`'s gate contract, point 4).
+    assert retained.length == 2;
+    assert _array_contains(retained, _fatal_entry());
+    assert _array_contains(retained, "[fatal] llvm lowering: bare-prefix spelling");
+
+    assert retain_fatal_diagnostics([], 0).length == 0;
+    assert retain_fatal_diagnostics(["llvm lowering: advisory only"], 1).length == 0;
+
+    // A zero scan limit reads nothing. `sanitize_diagnostics` passes 0 when the
+    // guard tripped on an *invalid* length rather than an oversized one, where
+    // indexing the buffer at all is unsafe.
+    assert retain_fatal_diagnostics(batch, 0).length == 0;
+}
+
+// -------------------------------------------------------------------
+// Retention cap: overflow is reported, never silently dropped
+// -------------------------------------------------------------------
+test "lowering diagnostics: retention cap reports the entries it elides" {
+    let keep_limit = max_retained_fatal_diagnostics();
+    let mut many: string[] = [];
+    let mut index: int = 0;
+    loop {
+        if index >= keep_limit + 10 { break; }
+        many.push(_fatal_entry());
+        index += 1;
+    }
+    let retained = retain_fatal_diagnostics(many, many.length);
+    // Capped entries, plus one note accounting for the remainder.
+    assert retained.length == keep_limit + 1;
+    assert _count_matching(retained, "elided 10 further fatal diagnostics") == 1;
+    // The note is itself tagged, so a batch that overflows the cap still trips
+    // the gate even in the pathological case where every kept entry is lost.
+    assert _contains(retained[retained.length - 1], "[fatal]");
+}
