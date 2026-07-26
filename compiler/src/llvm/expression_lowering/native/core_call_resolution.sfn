@@ -41,6 +41,7 @@ import { array_pointer_element_type } from "../arrays";
 import { lower_closure_pair_marker, lower_expression } from "./core";
 import { collect_parameter_types } from "./core_helpers";
 import { load_local_operand } from "./core_operands";
+import { strip_enclosing_parentheses } from "./core_operators";
 import {
     find_member_access_separator,
     find_top_level_range_separator,
@@ -478,14 +479,25 @@ fn resolve_call_method_target(trimmed_target: string, arguments: string[], bindi
     // and route the result through the existing array-HOF descriptors — the
     // element is always pointer-width `i64`, so no new width machinery is needed.
     // Eager sugar over array HOFs; the lazy iterator protocol is the post-1.0
-    // successor (SFEP-0028 (D)). Single-level only: the base must be a bare
+    // successor (SFEP-0028 (D)). Single-level only: the base must be a
     // `start..end` range receiver — a chained `(a..b).map(f).filter(g)` is out
     // of scope (its inner receiver lowers to a temp before this point).
+    //
+    // The base is paren-stripped before the range scan (SFN-563). The renderer
+    // parenthesizes every postfix receiver that is not an atom or a postfix
+    // chain (SFN-556), and `Range` was excluded from that solely because this
+    // probe read the rendered text literally: `find_top_level_range_separator`
+    // only accepts a `..` at paren depth 0, so a rendered `(0..n)` scanned to
+    // -1 and the whole HOF branch went dark. Stripping here is what lets the
+    // renderer emit the group, which is what stops `(a..b).x` and `(a..b)[i]`
+    // binding their trailing access to the end operand. Mirrors the strip
+    // `lower_expression` already does at entry (`core.sfn`); it only removes a
+    // fully-enclosing pair, so a non-range base is passed through untouched.
     if method_operand == null {
         if injected_argument_count == 0 {
             let _rng_sep = find_member_access_separator(result_target);
             if _rng_sep > 0 {
-                let _rng_base = trim_text(substring(result_target, 0, _rng_sep));
+                let _rng_base = strip_enclosing_parentheses(substring(result_target, 0, _rng_sep));
                 let _rng_field = trim_text(substring(result_target, _rng_sep + 1, result_target.length));
                 let mut _rng_is_hof: boolean = false;
                 if _rng_field == "map" { _rng_is_hof = true; }

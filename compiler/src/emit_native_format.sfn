@@ -98,16 +98,17 @@ fn _format_binary_operand_into(operand: Expression, out: string[]) -> string[] {
 // `parse_struct_literal`, which then rejects the `.x` as trailing content.
 // A leading paren makes both recognizers decline and fall through correctly.
 //
-// `Range` is the opposite case, and is bare for a reason that has nothing to do
-// with being postfix-tight: the range-HOF lowering matches a `<start>..<end>`
-// receiver in the rendered text, and does not strip a wrapping paren, so
-// parenthesizing it breaks `(0..n).map(...)` outright. That leaves `(a..b).x`
-// and `(a..b)[i]` still mis-binding — pre-existing, untested, and out of scope
-// here (SFN-556 scopes the lowering scanners out); fixing it belongs with the
-// range-HOF probe, not this renderer.
+// `Range` is absent too, and was the one variant listed here for a reason that
+// had nothing to do with being postfix-tight: the range-HOF probe matched a
+// `<start>..<end>` receiver in the rendered text and could not see a `..` that
+// a wrapping paren had pushed off paren depth 0, so parenthesizing a range
+// broke `(0..n).map(...)` outright. The probe now strips a fully-enclosing pair
+// before that scan (SFN-563,
+// `llvm/expression_lowering/native/core_call_resolution.sfn`), so ranges are
+// governed by the same deny-by-default rule as every other receiver and
+// `(a..b).x` / `(a..b)[i]` keep their group.
 fn _is_postfix_tight(variant: string) -> boolean {
     if variant == "Identifier" { return true; }
-    if variant == "Range" { return true; }
     if variant == "NumberLiteral" { return true; }
     if variant == "BooleanLiteral" { return true; }
     if variant == "NullLiteral" { return true; }
