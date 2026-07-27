@@ -654,7 +654,7 @@ jobs:
           EOF
           sudo apt-get update
           sudo apt-get install -y --no-install-recommends \
-            binutils clang-18 curl jq lld llvm-18 \
+            binfmt-support binutils clang-18 curl jq lld llvm-18 \
             qemu-user qemu-user-binfmt \
             libc6-dev:amd64 libssl-dev libssl-dev:amd64
           echo "CLANG=clang-18" >> "$GITHUB_ENV"
