@@ -1,0 +1,296 @@
+// E2E: concurrent allocation out of the arena must never hand two threads
+// the same address (SFN-558).
+//
+// The allocator's bump path is a plain read-modify-write with no atomic or
+// lock — `page.used = offset + size_i` (`arena.sfn:273`), the
+// `current_addr` retarget, the two-word page splice, and `realloc`'s
+// grow-if-at-tip. Soundness rests entirely on each thread privately owning
+// its own `Arena` via the `thread_local` handle, so this test is the guard
+// on that ownership: if the arena handle ever becomes shared across threads
+// again, two workers race the same bump and are handed one address.
+//
+// The fixture spawns 8 real workers on the runtime thread pool (`join_all`,
+// proven end-to-end by #1474/#1546/SFEP-0055) and gives each a tight
+// per-iteration `sfn_alloc_struct` loop with a tag unique to
+// (worker, index). Aliasing is therefore unambiguous rather than
+// probabilistic in its signature: two live `Cell`s at one address means the
+// second writer overwrites the first, and the first worker's own re-read
+// observes a tag it never wrote. A second, smaller phase repeats the shape
+// over `sfn_arena_realloc`'s grow-if-at-tip path via string concatenation.
+//
+// All 8 workers begin allocating at once, so this also covers concurrent
+// first-touch of the lazily-created per-thread arena and the
+// `SAILFIN_USE_ARENA` probe — the lazy-init half of SFN-558.
+//
+// This test fails against the pre-fix shared arena; that is what makes it a
+// regression test rather than a smoke test.
+//
+// no-bash-e2e (`.claude/rules/no-bash-e2e.md`): a fixture is written to a
+// scratch dir and driven through `sfn build` / the compiled binary as
+// subprocesses; `SAILFIN_TEST_SCRATCH` isolates the nested build's cache
+// under the parallel pool (`docs/conventions/e2e-tests.md`).
+import { contains, find } from "sfn/strings";
+
+fn _sfn_bin() -> string ![io] {
+    let configured = env.get("SAILFIN_BIN");
+    if configured.length > 0 { return configured; }
+    return "build/bin/sfn";
+}
+
+// Empty `run_capture` env is the EMPTY environment, not "inherit"; a
+// nested `sfn build` spawns clang + linker (needs PATH) and routes its
+// program.ll build-cache under SAILFIN_TEST_SCRATCH so the parallel pool
+// does not collide on the fixed build/sailfin (#1333).
+fn _child_env() -> string[] ![io] {
+    let mut e: string[] = [];
+    let path = env.get("PATH");
+    if path.length > 0 { e.push("PATH=" + path); }
+    let home = env.get("HOME");
+    if home.length > 0 { e.push("HOME=" + home); }
+    let tmpdir = env.get("TMPDIR");
+    if tmpdir.length > 0 { e.push("TMPDIR=" + tmpdir); }
+    let scratch = env.get("SAILFIN_TEST_SCRATCH");
+    if scratch.length > 0 { e.push("SAILFIN_TEST_SCRATCH=" + scratch); }
+    return e;
+}
+
+fn _scratch_dir() -> string ![io] {
+    let mut base = env.get("SAILFIN_TEST_SCRATCH");
+    if base.length == 0 { base = "/tmp"; }
+    fs.createDirectory(base, true);
+    return fs.mkdtemp(base + "/sfn-arena-conc-");
+}
+
+// Pin the pool to real parallelism regardless of host core count: drop any
+// inherited `SAILFIN_THREADS=` entry first (`getenv` returns the first
+// match) then push ours — precedent
+// `websocket_serve_loopback_test.sfn:461-479`.
+fn _thread_pinned(base: string[]) -> string[] {
+    let mut e: string[] = [];
+    let mut i = 0;
+    loop {
+        if i >= base.length { break; }
+        let entry = base[i];
+        if find(entry, "SAILFIN_THREADS=", 0) != 0 { e.push(entry); }
+        i = i + 1;
+    }
+    e.push("SAILFIN_THREADS=8");
+    return e;
+}
+
+// The fixture program: 8 workers each hammer a tight struct-alloc loop
+// with a tag unique to (worker, index), then re-walk their own array to
+// check every field still carries the tag they wrote — any mismatch means
+// another worker's write landed in the same slot (an aliased arena bump).
+// A second, smaller phase repeats the shape over `string +` concatenation
+// (`sfn_arena_realloc`'s grow-if-at-tip path).
+fn _fixture_source() -> string {
+    return "struct Cell {\n" + "    a: int;\n" + "    b: int;\n"
+        + "    c: int;\n"
+        + "    d: int;\n"
+        + "}\n"
+        + "\n"
+        + "fn main() ![io] {\n"
+        + "    let ids: int[] = [0, 1, 2, 3, 4, 5, 6, 7];\n"
+        + "\n"
+        + "    let mut cell_tasks: Task<int>[] = [];\n"
+        + "    for w in ids {\n"
+        + "        cell_tasks.push(spawn fn() -> int {\n"
+        + "            let mut cells: Cell[] = [];\n"
+        + "            let mut i: int = 0;\n"
+        + "            loop {\n"
+        + "                if i >= 2000 { break; }\n"
+        + "                let tag: int = w * 100000 + i;\n"
+        + "                cells.push(Cell { a: tag, b: tag, c: tag, d: tag });\n"
+        + "                i = i + 1;\n"
+        + "            }\n"
+        + "            let mut mismatches: int = 0;\n"
+        + "            let mut j: int = 0;\n"
+        + "            loop {\n"
+        + "                if j >= 2000 { break; }\n"
+        + "                let expected: int = w * 100000 + j;\n"
+        + "                if cells[j].a != expected { mismatches = mismatches + 1; }\n"
+        + "                if cells[j].b != expected { mismatches = mismatches + 1; }\n"
+        + "                if cells[j].c != expected { mismatches = mismatches + 1; }\n"
+        + "                if cells[j].d != expected { mismatches = mismatches + 1; }\n"
+        + "                j = j + 1;\n"
+        + "            }\n"
+        + "            return mismatches;\n"
+        + "        });\n"
+        + "    }\n"
+        + "    let cell_results: int[] = join_all(cell_tasks);\n"
+        + "    let mut alias_mismatches: int = 0;\n"
+        + "    let mut k: int = 0;\n"
+        + "    loop {\n"
+        + "        if k >= cell_results.length { break; }\n"
+        + "        alias_mismatches = alias_mismatches + cell_results[k];\n"
+        + "        k = k + 1;\n"
+        + "    }\n"
+        + "\n"
+        + "    let mut str_tasks: Task<int>[] = [];\n"
+        + "    for w in ids {\n"
+        + "        str_tasks.push(spawn fn() -> int {\n"
+        + "            let mut s: string = \"\";\n"
+        + "            let mut i: int = 0;\n"
+        + "            loop {\n"
+        + "                if i >= 500 { break; }\n"
+        + "                s = s + \"x\";\n"
+        + "                i = i + 1;\n"
+        + "            }\n"
+        + "            if s.length == 500 { return 0; }\n"
+        + "            return 1;\n"
+        + "        });\n"
+        + "    }\n"
+        + "    let str_results: int[] = join_all(str_tasks);\n"
+        + "    let mut string_len_mismatches: int = 0;\n"
+        + "    let mut m: int = 0;\n"
+        + "    loop {\n"
+        + "        if m >= str_results.length { break; }\n"
+        + "        string_len_mismatches = string_len_mismatches + str_results[m];\n"
+        + "        m = m + 1;\n"
+        + "    }\n"
+        + "\n"
+        + "    print.info(\"ALIAS_MISMATCHES: \" + number_to_string(alias_mismatches));\n"
+        + "    print.info(\"STRING_LEN_MISMATCHES: \" + number_to_string(string_len_mismatches));\n"
+        + "}\n";
+}
+
+struct BuildRun {
+    exit: int;
+    output: string;
+}
+
+// Build the fixture to a real binary (not `sfn run`) so the ASAN leg below
+// can relink the same `--work-dir` object set, then run it under a pinned
+// 8-thread pool.
+fn _build(work_dir: string, bin: string) -> BuildRun ![io] {
+    let dir = _scratch_dir();
+    let src = dir + "/arena_conc.sfn";
+    fs.writeFile(src, _fixture_source());
+    let build_exit = process.run_capture([_sfn_bin(), "build", "--work-dir", work_dir, "-o", bin, src], _child_env());
+    let build_out = process.capture_take_stdout();
+    let build_err = process.capture_take_stderr();
+    if build_exit != 0 {
+        return BuildRun { exit: build_exit, output: build_out + build_err };
+    }
+    return BuildRun { exit: 0, output: "" };
+}
+
+fn _run(bin: string) -> BuildRun ![io] {
+    let run_exit = process.run_capture([bin], _thread_pinned(_child_env()));
+    let run_out = process.capture_take_stdout();
+    let run_err = process.capture_take_stderr();
+    return BuildRun { exit: run_exit, output: run_out + run_err };
+}
+
+// ---- crux: 8 concurrent workers allocating out of the arena must never
+// observe a foreign tag, and the string grow-at-tip path must never
+// miscompute a final length.
+test "arena: concurrent struct-alloc workers on the pool never alias a bump slot (SFN-558)" ![io] {
+    let dir = _scratch_dir();
+    let work_dir = dir + "/wd";
+    let bin = dir + "/arena_conc_bin";
+    let built = _build(work_dir, bin);
+    assert built.exit == 0;
+
+    let result = _run(bin);
+    assert result.exit == 0;
+    assert contains(result.output, "ALIAS_MISMATCHES: 0");
+    assert contains(result.output, "STRING_LEN_MISMATCHES: 0");
+}
+
+// ASAN child env: `SAILFIN_MEM_LIMIT=unlimited` so the instrumented
+// binary's ~16 TB shadow reservation is not aborted by the toolchain
+// self-cap; `detect_leaks=0` because the corruption gate here is
+// cross-thread aliasing / heap corruption from the racing bump, not leaks.
+fn _asan_env() -> string[] ![io] {
+    let mut e = _child_env();
+    e.push("SAILFIN_MEM_LIMIT=unlimited");
+    e.push("ASAN_OPTIONS=detect_leaks=0");
+    return e;
+}
+
+// True iff ASAN reported a genuine finding — the only verdict that fails
+// an ASAN leg; any other non-zero exit is a startup/environment skip.
+fn _asan_reported(out: string, err: string) -> boolean {
+    return find(out + err, "ERROR: AddressSanitizer:", 0) >= 0;
+}
+
+// Relink a `sfn build --work-dir` object set under `-fsanitize=address`
+// (precedent: `concurrency_ownedbuf_asan_interleave_test.sfn::_asan_relink`
+// — the whole-program relink strategy applicable here since the fixture
+// depends on no external capsule, only the runtime's own persisted
+// `sailfin/*.o` set). Returns the binary path, or "" when the
+// compile/link cannot complete (→ skip the ASAN leg).
+fn _asan_relink(work_dir: string, bin: string) -> string ![io] {
+    let saildir = work_dir + "/sailfin";
+    let prog_ll = saildir + "/program.ll";
+    if !fs.exists(prog_ll) { return ""; }
+
+    let prog_o = saildir + "/program.o";
+    let cexit = process.run_capture(["clang", "-c", "-Wno-override-module", prog_ll, "-o", prog_o], _child_env());
+    let _co = process.capture_take_stdout();
+    let _ce = process.capture_take_stderr();
+    if cexit != 0 { return ""; }
+
+    let link_clang = "clang -fsanitize=address -Wno-override-module " + saildir
+        + "/*.o -lpthread -lm -o "
+        + bin;
+    let lexit = process.run_capture(["bash", "-c", link_clang], _child_env());
+    let _lo = process.capture_take_stdout();
+    let _le = process.capture_take_stderr();
+    if lexit == 0 { return bin; }
+
+    let link_gcc = "gcc -fsanitize=address " + saildir
+        + "/*.o -lpthread -lm -o "
+        + bin;
+    let gexit = process.run_capture(["bash", "-c", link_gcc], _child_env());
+    let _go = process.capture_take_stdout();
+    let _ge = process.capture_take_stderr();
+    if gexit == 0 { return bin; }
+    return "";
+}
+
+// ---- ASAN leg (best-effort, skip-not-fail): relink the fixture's
+// `--work-dir` object set under `-fsanitize=address` and run it pinned to
+// 8 threads. Only a genuine `ERROR: AddressSanitizer:` report fails; any
+// other non-zero exit (no sanitizer runtime, shadow-reservation abort
+// under a vmem cap) is a skip.
+test "arena ASAN: concurrent struct-alloc workers are corruption-clean under sanitizer (best-effort) (SFN-558)" ![io] {
+    let dir = _scratch_dir();
+    let work_dir = dir + "/asanwd";
+    let plain_bin = dir + "/arena_conc_plain";
+    let built = _build(work_dir, plain_bin);
+    if built.exit != 0 {
+        print.err("[arena-conc-asan] SKIP: nested `sfn build` failed\n" + built.output);
+        assert true;
+        return;
+    }
+
+    let asan_bin = dir + "/arena_conc_asan";
+    let relinked = _asan_relink(work_dir, asan_bin);
+    if relinked.length == 0 {
+        print.err("[arena-conc-asan] SKIP: neither clang compiler-rt nor gcc libasan relinked");
+        assert true;
+        return;
+    }
+
+    let run_exit = process.run_capture([asan_bin], _thread_pinned(_asan_env()));
+    let out = process.capture_take_stdout();
+    let err = process.capture_take_stderr();
+    if _asan_reported(out, err) {
+        print.err("[arena-conc-asan] AddressSanitizer report (concurrent arena corruption):\nstdout:\n"
+            + out
+            + "\nstderr:\n"
+            + err);
+        assert false;
+    } else if run_exit == 0 { assert true; } else {
+        print.err("[arena-conc-asan] SKIP: sanitizer child exited "
+            + number_to_string(run_exit)
+            + " without an `ERROR: AddressSanitizer:` report\nstdout:\n"
+            + out
+            + "\nstderr:\n"
+            + err);
+        assert true;
+    }
+}
