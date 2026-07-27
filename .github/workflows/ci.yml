@@ -675,7 +675,7 @@ jobs:
           EOF
           chmod +x build/aarch64-cross/bin/clang-aarch64
           SAILFIN_CC="$PWD/build/aarch64-cross/bin/clang-aarch64" \
-            SAILFIN_LINKER=clang \
+            SAILFIN_LINKER=lld \
             SAILFIN_TARGET_ARCH=aarch64 \
             build/bin/sfn build --no-cache -p compiler \
               --work-dir build/aarch64-cross/pass-1 \
