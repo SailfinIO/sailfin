@@ -29,7 +29,7 @@ interface ParsedAsset {
   os: string;
   arch: string;
   friendlyArch: string;
-  icon: string;
+  platform: string;
   size: string;
   sha256: string;
 }
@@ -53,8 +53,8 @@ function parseAsset(asset: GHAsset): ParsedAsset | null {
   const friendlyArch = osRaw === "macos" && archRaw === "arm64" ? "Apple Silicon"
                      : osRaw === "darwin" && archRaw === "arm64" ? "Apple Silicon"
                      : arch;
-  const icons: Record<string, string> = { linux: "linux", macos: "apple", darwin: "apple", windows: "windows" };
-  const icon = icons[osRaw] ?? "linux";
+  const platforms: Record<string, string> = { linux: "linux", macos: "macos", darwin: "macos", windows: "windows" };
+  const platform = platforms[osRaw] ?? "linux";
 
   return {
     file: asset.name,
@@ -62,7 +62,7 @@ function parseAsset(asset: GHAsset): ParsedAsset | null {
     os,
     arch,
     friendlyArch,
-    icon,
+    platform,
     size: formatBytes(asset.size),
     sha256: asset.digest?.replace(/^sha256:/, "") ?? "",
   };
@@ -138,9 +138,9 @@ try {
 if (allAssets.length === 0) {
   const ghBase = `https://github.com/SailfinIO/sailfin/releases/download/${releaseTag}`;
   allAssets = [
-    { file: `sailfin_${releaseVersion}_linux_x86_64.tar.gz`, url: `${ghBase}/sailfin_${releaseVersion}_linux_x86_64.tar.gz`, os: "Linux", arch: "x86_64", friendlyArch: "x86_64", icon: "linux", size: "", sha256: "" },
-    { file: `sailfin_${releaseVersion}_macos_arm64.tar.gz`, url: `${ghBase}/sailfin_${releaseVersion}_macos_arm64.tar.gz`, os: "macOS", arch: "ARM64", friendlyArch: "Apple Silicon", icon: "apple", size: "", sha256: "" },
-    { file: `sailfin_${releaseVersion}_windows_x86_64.tar.gz`, url: `${ghBase}/sailfin_${releaseVersion}_windows_x86_64.tar.gz`, os: "Windows", arch: "x86_64", friendlyArch: "x86_64", icon: "windows", size: "", sha256: "" },
+    { file: `sailfin_${releaseVersion}_linux_x86_64.tar.gz`, url: `${ghBase}/sailfin_${releaseVersion}_linux_x86_64.tar.gz`, os: "Linux", arch: "x86_64", friendlyArch: "x86_64", platform: "linux", size: "", sha256: "" },
+    { file: `sailfin_${releaseVersion}_macos_arm64.tar.gz`, url: `${ghBase}/sailfin_${releaseVersion}_macos_arm64.tar.gz`, os: "macOS", arch: "ARM64", friendlyArch: "Apple Silicon", platform: "macos", size: "", sha256: "" },
+    { file: `sailfin_${releaseVersion}_windows_x86_64.tar.gz`, url: `${ghBase}/sailfin_${releaseVersion}_windows_x86_64.tar.gz`, os: "Windows", arch: "x86_64", friendlyArch: "x86_64", platform: "windows", size: "", sha256: "" },
   ];
 }
 
@@ -189,7 +189,9 @@ const featured = allAssets;
       <div class="featured-grid">
         {featured.map((d) => (
           <a href={d.url} class="featured-card">
-            <div class="featured-icon" aria-hidden="true">{d.icon === "linux" ? "\u{1F427}" : d.icon === "apple" ? "\u{1F34E}" : "\u{1FA9F}"}</div>
+            <div class="platform-mark" aria-hidden="true">
+              <span>{d.platform === "linux" ? "LIN" : d.platform === "macos" ? "MAC" : "WIN"}</span>
+            </div>
             <div class="featured-info">
               <strong>{d.os}</strong>
               <span class="featured-arch">{d.friendlyArch}</span>
@@ -352,7 +354,33 @@ const featured = allAssets;
     box-shadow: 0 2px 12px rgba(161, 0, 255, 0.12);
     text-decoration: none;
   }
-  .featured-icon { font-size: 2rem; margin-bottom: 0.5rem; }
+  .platform-mark {
+    position: relative;
+    display: grid;
+    place-items: center;
+    width: 3rem;
+    height: 3rem;
+    margin-bottom: 0.75rem;
+    overflow: hidden;
+    border: 1px solid var(--color-border-strong);
+    border-radius: 10px;
+    background: var(--color-surface-soft);
+    color: var(--color-text-secondary);
+    box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.4);
+  }
+  .platform-mark::before {
+    content: "";
+    position: absolute;
+    inset: 0 0 auto;
+    height: 2px;
+    background: var(--sfn-gradient-action);
+  }
+  .platform-mark span {
+    font-family: var(--font-mono);
+    font-size: 0.7rem;
+    font-weight: 700;
+    letter-spacing: 0.08em;
+  }
   .featured-info strong { display: block; font-size: 1rem; }
   .featured-arch { font-size: 0.85rem; color: var(--color-text-secondary); display: block; }
   .featured-size { font-size: 0.8rem; color: var(--color-text-tertiary); display: block; margin-top: 0.15rem; }
