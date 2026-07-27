@@ -1,0 +1,61 @@
+// Regression coverage for SFN-564. `make compile` used the output binary's
+// mtime as its freshness predicate, which can miss an edit when timestamps are
+// preserved or have coarse resolution. The Makefile now delegates freshness to
+// this content fingerprint.
+import { contains } from "sfn/strings";
+
+fn _fingerprint(root: string) -> string ![io] {
+    let mut repo = env.get("SAILFIN_REPO_ROOT");
+    if repo.length == 0 { repo = "."; }
+    let script = repo + "/scripts/compiler_source_fingerprint.sh";
+    let _exit = process.run_capture(["bash", script, root], []);
+    let output = process.capture_take_stdout();
+    let _error = process.capture_take_stderr();
+    return output;
+}
+
+test "compiler source fingerprint changes with bytes despite restored mtime" ![io] {
+    let scratch = env.get("SAILFIN_TEST_SCRATCH")
+        + "/source-fingerprint-content";
+    process.run(["rm", "-rf", scratch]);
+    fs.createDirectory(scratch, true);
+    let source = scratch + "/main.sfn";
+    fs.writeFile(source, "fn value() -> int { return 1; }\n");
+    let first = _fingerprint(scratch);
+
+    // Change the bytes, then force the old timestamp. This is the state the
+    // former `find -newer build/bin/sfn` predicate silently classified as
+    // up-to-date.
+    fs.writeFile(source, "fn value() -> int { return 2; }\n");
+    process.run(["touch", "-t", "200001010000", source]);
+    let second = _fingerprint(scratch);
+
+    assert first.length > 0;
+    assert second.length > 0;
+    assert first != second;
+    process.run(["rm", "-rf", scratch]);
+}
+
+test "compiler source fingerprint includes source paths" ![io] {
+    let scratch = env.get("SAILFIN_TEST_SCRATCH") + "/source-fingerprint-path";
+    process.run(["rm", "-rf", scratch]);
+    fs.createDirectory(scratch, true);
+    fs.writeFile(scratch + "/first.sfn", "fn value() -> int { return 1; }\n");
+    let first = _fingerprint(scratch);
+
+    process.run(["mv", scratch + "/first.sfn", scratch + "/renamed.sfn"]);
+    let renamed = _fingerprint(scratch);
+
+    assert first != renamed;
+    process.run(["rm", "-rf", scratch]);
+}
+
+test "make compile delegates freshness to the content fingerprint" ![io] {
+    let mut repo = env.get("SAILFIN_REPO_ROOT");
+    if repo.length == 0 { repo = "."; }
+    let makefile = fs.readFile(repo + "/Makefile");
+
+    assert contains(makefile, "COMPILER_SOURCE_FINGERPRINT_CMD := bash scripts/compiler_source_fingerprint.sh");
+    assert contains(makefile, "current_fingerprint=\"$$($(COMPILER_SOURCE_FINGERPRINT_CMD))\"");
+    assert ! contains(makefile, "-newer \"$(NATIVE_BIN)\"");
+}
