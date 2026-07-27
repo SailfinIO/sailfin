@@ -332,7 +332,7 @@ fn lower_cast_expression(parse: CastParseResult, bindings: ParameterBinding[], l
     }
 
     // #1505: an `as string` cast must stringify its operand — the same
-    // int/float→string lowering the `{{ }}` interpolation path uses — rather
+    // int/float→string lowering the `${ }` interpolation path uses — rather
     // than fall through to the numeric/pointer matrices below, which have no
     // `i64 → {i8*, i64}` arm and previously emitted a non-fatal
     // "unsupported cast" diagnostic. The null operand that left behind made
@@ -564,10 +564,8 @@ fn lower_cast_expression(parse: CastParseResult, bindings: ParameterBinding[], l
 }
 
 fn try_lower_interpolated_string_literal(literal: string, bindings: ParameterBinding[], locals: LocalBinding[], temp_index: int, lines: string[], functions: NativeFunction[], context: TypeContext) -> ExpressionResult? ![io] {
-    // SFEP-0057: `${ }` is the recognized interpolation form; `{{ }}` is the
-    // deprecated fallback, still accepted during the migration window. The
-    // dispatch (which delimiter, raw-vs-unescaped scan) lives in core_text so
-    // the `{{ }}` path stays byte-identical to before this change.
+    // SFEP-0057: `${ }` is the sole interpolation form. The dispatch (opener
+    // detection, raw-inner scan) lives in core_text.
     let parsed = resolve_interpolation_template(literal);
     if !parsed.success { return null; }
     if parsed.expressions.length == 0 { return null; }

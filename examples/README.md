@@ -5,10 +5,12 @@ the self-hosted native compiler. Each subfolder groups small, focused programs
 illustrating syntax, type constructs, effects, and concurrency primitives
 described in the [language specification](https://sailfin.dev/docs/reference/spec/).
 
-> **Syntax reform notice:** These examples use pre-reform syntax (`->` for type
-> annotations, `{{ }}` for string interpolation). A pre-1.0 syntax reform is
-> underway that will migrate to `:` for type annotations and `${ }` for
-> interpolation. The parser already accepts `:` — see the [roadmap](https://sailfin.dev/roadmap) for
+> **Syntax reform notice:** String interpolation has migrated to `${ expr }`
+> (SFEP-0057); `{{ }}` is no longer interpolation and appears verbatim in
+> output. Some examples still use pre-reform syntax (`->` for type
+> annotations), and a few carry `{{ }}` inside commented-out code — those
+> comments are stale, not live interpolation. The parser already accepts `:`
+> for type annotations — see the [roadmap](https://sailfin.dev/roadmap) for
 > the full plan. Examples will be migrated as each reform item lands.
 
 Always check `docs/status.md` before relying on an example in production code. Examples stay limited to the bootstrap feature set unless noted; future-facing snippets include inline comments.

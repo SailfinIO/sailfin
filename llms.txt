@@ -268,7 +268,7 @@ Tests are first-class declarations and can declare effects:
     let name = "world";
     print("Hello, {{name}}!");
 
-Uses `{{ }}` syntax (migration to `${ }` is planned pre-1.0).
+Uses `${ }` syntax — the sole interpolation form; `{{ }}` is not interpolation.
 
 ### Extern Functions (FFI)
 
@@ -354,9 +354,8 @@ These features parse, type-check, emit to .sfn-asm IR, and lower to LLVM:
 - Explicit numeric `as` casts (typed lowering matrix)
 - Atomic intrinsics: atomic_load/store/add/sub/cas/fence (seq_cst)
 - thread_local let mut globals (top-level only)
-- String interpolation (via runtime). `${ expr }` is the recognized form.
-  Legacy `{{ expr }}` still parses but emits a `W0212` deprecation
-  warning -- prefer `${ }` in generated code
+- String interpolation (via runtime). `${ expr }` is the only interpolation
+  form. `{{ expr }}` has no special meaning -- it is literal text
 - Structured concurrency v0: `routine { }` nurseries (exit joins every
   child), bounded MPMC `channel()`, `spawn`/`await` with typed results,
   `parallel [...]`, `Task<T>`/`join_all`. Limits: no cancel-on-fault, no

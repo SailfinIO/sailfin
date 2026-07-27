@@ -345,13 +345,13 @@ Guards attach to any match case: `Pattern [ "if" Expression ] "=>" ...`
 ```ebnf
 NumberLiteral      = Digit { Digit } [ "." Digit { Digit } ] ;
 StringLiteral      = '"' { Character | Escape | Interpolation } '"' ;
-Interpolation      = "{{" Expression "}}" ;
+Interpolation      = "${" Expression "}" ;
 BooleanLiteral     = "true" | "false" ;
 Identifier         = Letter { Letter | Digit | '_' } ;
 ```
 
-String literals support `{{ expression }}` interpolation. Whitespace inside the
-braces is ignored — `{{name}}` and `{{ name }}` are equivalent.
+String literals support `${ expression }` interpolation. Whitespace inside the
+braces is ignored — `${name}` and `${ name }` are equivalent.
 
 ## Named Arguments
 

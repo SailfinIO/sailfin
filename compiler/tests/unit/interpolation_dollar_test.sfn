@@ -41,7 +41,22 @@ test "interpolation: nested braces are matched by depth, not the first }" {
     assert boxed.a == 7;
 }
 
-test "interpolation: deprecated {{ }} still interpolates during dual-accept" {
+// SFEP-0057 Phase 4 removal gate: `{{ }}` carries no special meaning and is
+// no longer scanned, so a brace pair survives into the string as literal text.
+test "interpolation: {{ }} is literal text, not an interpolation" {
     let name = "world";
-    assert "Hello, {{name}}!" == "Hello, world!";
+    // The expected value is assembled from fragments that never contain an
+    // adjacent `{{` pair, so it stays literal under any scanner — comparing
+    // against a `{{name}}` literal would pass even if the form still
+    // interpolated (both sides would expand alike).
+    let expected = "Hello, " + "{" + "{name}" + "}" + "!";
+    assert "Hello, {{name}}!" == expected;
+    assert "Hello, {{name}}!".length == 16;
+    // Keeps `name` live now that no literal above references it.
+    assert name == "world";
+}
+
+test "interpolation: {{ }} and ${ } in one literal only expands ${ }" {
+    let name = "world";
+    assert "{{name}}=${name}" == "{{name}}=world";
 }

@@ -144,7 +144,6 @@ import {
     make_string_constant_name,
     make_string_constant_name_for_module,
     compute_string_constant_hash,
-    parse_interpolated_template,
     encode_string_literal_for_sailfin,
     escape_string_for_sailfin_literal,
     unescape_string_literal,

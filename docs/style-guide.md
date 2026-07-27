@@ -221,6 +221,7 @@ relative to `compiler/src/`):
 | `E09xx` | Ownership / affine types | `ownership_checker.sfn` |
 | `E10xx` | Lowering / backend (`E1001` unsafe import-symbol mangling, SFN-530; `E1002` fabricated default value for an expression that failed to lower, SFN-527) | `llvm/` |
 | `E11xx` | Numerical / behavioural contracts; `E1100`–`E1114` allocated (SFEP-0062) | `contract/` |
+| `W02xx` | Lint (warning severity, never fails a build): `W0210` (bare assert), `W0211` (decorator deprecation). `W0212` is **retired** — it flagged deprecated `{{ }}` interpolation, removed with the syntax itself (SFEP-0057, SFN-483); do not reuse it | `tools/check.sfn` |
 
 New codes go in the matching range at the next free number; grep the range
 before allocating. Do not reuse a retired code.
@@ -370,7 +371,7 @@ The active reforms, for code you write today (rationale:
 
 - **Numeric types**: `int` (i64) and `float` (f64) are shipped; `number` is an
   alias for `float`. Use `int`/`float` in new code.
-- **String interpolation**: the parser dual-accepts `${ expr }` and the legacy
-  `{{ expr }}` (SFEP-0057). Use `${ }` in new code.
+- **String interpolation**: `${ expr }` is the only interpolation form
+  (SFEP-0057); `{{ }}` is literal text, not interpolation.
 - **Lambda short form** `fn(x) => expr` is shipped (SFEP-0029) alongside the
   block form `fn(x) -> T { ... }`.

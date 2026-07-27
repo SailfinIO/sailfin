@@ -173,7 +173,7 @@ regressions):
 
 A third issue surfaced while authoring the workloads: the `int as string` cast
 silently produced `0` (e.g. `let s = "x" + (n as string)` yields `0`, not `x42`),
-while `{{ }}` interpolation lowered correctly — so the workloads used
+while `{{ }}` interpolation (the form in use at the time; since replaced by `${ }`, SFEP-0057) lowered correctly — so the workloads used
 interpolation throughout. This is now **fixed** (#1505, with narrow-width
 follow-ups #1587/#1605); its performance half is #1511 (see the post-fix section
 above).

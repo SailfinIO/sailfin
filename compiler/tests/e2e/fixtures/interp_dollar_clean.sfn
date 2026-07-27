@@ -1,8 +1,0 @@
-// Fixture for interpolation_deprecation_test.sfn (SFEP-0057 Phase 2): uses the
-// recognized `${ }` interpolation form, so `sfn check` must NOT emit a W0212
-// deprecation warning.
-fn main() -> int ![io] {
-    let name = "world";
-    print.info("Hello, ${ name }!");
-    return 0;
-}
