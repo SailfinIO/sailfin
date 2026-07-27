@@ -604,7 +604,7 @@ jobs:
   # every parallel frontend worker a TCG-emulated process (~17 minutes without
   # completing compiler A on the first live run); the cross vehicle documented
   # in SFEP-0056 §3.4 keeps compiler work native while preserving the decisive
-  # pass-1 -> pass-2 -> pass-3 proof on the arm host.
+  # compiler A -> pass-1 -> pass-2 proof on the arm host.
   build-aarch64-cross-vehicle:
     name: Cross-emit compiler [linux-arm64 / advisory]
     needs: [ci-scope, build-compiler-linux]
@@ -748,23 +748,19 @@ jobs:
           build/aarch64-bootstrap/pass-1/sfn version
           build/aarch64-bootstrap/pass-1/sfn check examples/basics/hello-world.sfn
 
-      - name: Build native pass-2 and pass-3 fixed point
+      - name: Build native pass-2 fixed point
         shell: bash
         run: |
           set -euo pipefail
-          mkdir -p build/aarch64-bootstrap/pass-2 build/aarch64-bootstrap/pass-3
-          SAILFIN_CC=clang-18 SAILFIN_TARGET_ARCH=aarch64 \
+          mkdir -p build/aarch64-bootstrap/pass-2
+          SAILFIN_TARGET_ARCH=aarch64 \
             "$PWD/build/aarch64-bootstrap/pass-1/sfn" build --no-cache -p compiler \
               --work-dir build/aarch64-bootstrap/pass-2 \
               -o build/aarch64-bootstrap/pass-2/sfn
-          SAILFIN_CC=clang-18 SAILFIN_TARGET_ARCH=aarch64 \
-            "$PWD/build/aarch64-bootstrap/pass-2/sfn" build --no-cache -p compiler \
-              --work-dir build/aarch64-bootstrap/pass-3 \
-              -o build/aarch64-bootstrap/pass-3/sfn
-          cmp build/aarch64-bootstrap/pass-2/sfn build/aarch64-bootstrap/pass-3/sfn
-          build/aarch64-bootstrap/pass-3/sfn run examples/basics/hello-world.sfn
+          cmp build/aarch64-bootstrap/pass-1/sfn build/aarch64-bootstrap/pass-2/sfn
+          build/aarch64-bootstrap/pass-2/sfn run examples/basics/hello-world.sfn
           SAILFIN_BOOTSTRAP_PROBE_PATH=build/aarch64-bootstrap/aarch64-probe \
-            build/aarch64-bootstrap/pass-3/sfn run \
+            build/aarch64-bootstrap/pass-2/sfn run \
               compiler/tests/e2e/fixtures/aarch64_bootstrap_probe.sfn
 
       - name: Bundle native compiler passes
@@ -772,13 +768,11 @@ jobs:
         run: |
           set -euo pipefail
           file build/aarch64-bootstrap/pass-1/sfn \
-            build/aarch64-bootstrap/pass-2/sfn \
-            build/aarch64-bootstrap/pass-3/sfn
+            build/aarch64-bootstrap/pass-2/sfn
           sha256sum build/aarch64-bootstrap/pass-1/sfn \
-            build/aarch64-bootstrap/pass-2/sfn \
-            build/aarch64-bootstrap/pass-3/sfn
+            build/aarch64-bootstrap/pass-2/sfn
           tar -czf aarch64-bootstrap-compilers.tar.gz \
-            -C build/aarch64-bootstrap pass-1/sfn pass-2/sfn pass-3/sfn
+            -C build/aarch64-bootstrap pass-1/sfn pass-2/sfn
 
       - name: Upload native compiler passes
         uses: actions/upload-artifact@v7
@@ -827,8 +821,8 @@ jobs:
           mkdir -p build/aarch64-bootstrap build/bin
           tar -xzf aarch64-bootstrap-compilers.tar.gz -C build/aarch64-bootstrap
           rm -f aarch64-bootstrap-compilers.tar.gz
-          cmp build/aarch64-bootstrap/pass-2/sfn build/aarch64-bootstrap/pass-3/sfn
-          install -m 755 build/aarch64-bootstrap/pass-3/sfn build/bin/sfn
+          cmp build/aarch64-bootstrap/pass-1/sfn build/aarch64-bootstrap/pass-2/sfn
+          install -m 755 build/aarch64-bootstrap/pass-2/sfn build/bin/sfn
           file build/bin/sfn
           build/bin/sfn version
 
