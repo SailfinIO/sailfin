@@ -648,7 +648,7 @@ jobs:
           EOF
           sudo apt-get update
           sudo apt-get install -y --no-install-recommends \
-            binutils-aarch64-linux-gnu clang-18 gcc-aarch64-linux-gnu \
+            binutils-aarch64-linux-gnu clang-18 gcc-14-aarch64-linux-gnu \
             libc6-dev:arm64 libssl-dev:arm64 lld llvm-18
           # The direct-link probe deliberately ignores /usr/lib/gcc-cross.
           # Expose the matching target CRT under the native multiarch layout
