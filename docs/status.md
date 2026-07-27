@@ -322,10 +322,14 @@ here.
   roles no longer share one invocation. A read-only shared object cache falls
   back to ephemeral objects beside the IR, never to raw `.ll` at final link.
   **Independence status:** Stage 0 and this first Stage-1 isolation slice are
-  complete; direct linker ownership, typed metadata-carrying SSA IR, native
-  object/code emission, gated call sites, and native-backend self-hosting are
-  not shipped. #343's mold/lld selection still runs behind clang and is a
-  Stage-1 precursor, not an owned link path.
+  complete. Typed SSA's L1 declaration producer is also reachable through
+  `sfn emit typed-ssa`: scalar signatures, linkage, and canonical effect sets
+  are parsed from `.sfn-asm`, verified, and rendered deterministically; an
+  unsupported signature rejects the whole module. Function bodies, capability
+  derivation/manifests, direct linker ownership, native object/code emission,
+  gated call sites, and native-backend self-hosting are not shipped. #343's
+  mold/lld selection still runs behind clang and is a Stage-1 precursor, not an
+  owned link path.
 - **Build-host OpenSSL dependency** (SFEP-0036, #1782/#1821). The native
   runtime links `-lssl -lcrypto` (TLS; `runtime/sfn/platform/tls.sfn`), so
   **every** Sailfin binary — including the compiler and each per-test binary
