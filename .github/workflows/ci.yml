@@ -669,12 +669,12 @@ jobs:
         run: |
           set -euo pipefail
           mkdir -p build/aarch64-cross/bin build/aarch64-cross/pass-1
-          cat >build/aarch64-cross/bin/clang-aarch64 <<'EOF'
+          cat >build/aarch64-cross/bin/clang <<'EOF'
           #!/usr/bin/env bash
           exec clang-18 --target=aarch64-linux-gnu "$@"
           EOF
-          chmod +x build/aarch64-cross/bin/clang-aarch64
-          SAILFIN_CC="$PWD/build/aarch64-cross/bin/clang-aarch64" \
+          chmod +x build/aarch64-cross/bin/clang
+          PATH="$PWD/build/aarch64-cross/bin:$PATH" \
             SAILFIN_LINKER=lld \
             SAILFIN_TARGET_ARCH=aarch64 \
             build/bin/sfn build --no-cache -p compiler \
