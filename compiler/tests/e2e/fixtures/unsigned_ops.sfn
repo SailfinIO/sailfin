@@ -4,9 +4,9 @@
 // operand's declared type is unsigned, and keep the signed opcode
 // (`ashr`/`sdiv`/`srem`/`icmp s*`) when it is signed.
 //
-// Every case here uses a local, never a narrow-int parameter — narrow-int
-// parameter passing delivers garbage independently of this change (SFN-571),
-// exactly as `int_cast_sign.sfn` documents.
+// Every case here uses a local rather than a narrow-int parameter, keeping
+// the operator matrix independent of the call boundary; that boundary is
+// covered separately by `narrow_int_params_test.sfn` (SFN-571).
 fn main() -> int ![io] {
     // u32 with the high bit set: a signed `ashr`/`sdiv`/`srem` treating this
     // as negative would produce wildly different results from the unsigned
