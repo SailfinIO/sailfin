@@ -414,6 +414,11 @@ fn parse_struct_definition(lines: string[], start_index: int, include_instructio
                             struct_layout_reported_missing_header = true;
                         }
                     }
+                } else {
+                    diagnostics.push("llvm lowering [fatal] [E1005]: malformed layout field in struct "
+                        + struct_name
+                        + ": "
+                        + raw_line);
                 }
                 index += 1;
                 continue;
@@ -668,6 +673,11 @@ fn parse_enum_definition(lines: string[], start_index: int) -> EnumParseResult {
                             enum_layout_reported_missing_header = true;
                         }
                     }
+                } else {
+                    diagnostics.push("llvm lowering [fatal] [E1005]: malformed layout variant in enum "
+                        + enum_name
+                        + ": "
+                        + raw_line);
                 }
                 index += 1;
                 continue;
@@ -697,6 +707,11 @@ fn parse_enum_definition(lines: string[], start_index: int) -> EnumParseResult {
                             enum_layout_reported_missing_header = true;
                         }
                     }
+                } else {
+                    diagnostics.push("llvm lowering [fatal] [E1005]: malformed layout payload in enum "
+                        + enum_name
+                        + ": "
+                        + raw_line);
                 }
                 index += 1;
                 continue;

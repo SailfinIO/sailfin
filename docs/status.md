@@ -528,6 +528,14 @@ here.
   through to array-iteration lowering. Non-zero literal strides, computed
   strides, and array iterables are unchanged. Design note:
   `docs/proposals/design-notes/sfn-526-lowering-fatal-gate-audit.md`.
+- **Native-IR layout parsing fails closed instead of truncating layouts**
+  (`E1005`, SFN-532): malformed `.layout` field, enum-variant, and enum-payload
+  lines now emit a tagged `llvm lowering [fatal] [E1005]` diagnostic that names
+  the enclosing struct or enum and includes the offending line. The parser
+  previously forwarded only untagged leaf diagnostics, dropped the malformed
+  entry, and allowed lowering to continue with wrong field offsets. Well-formed
+  `.sfn-asm` parsing is unchanged. Design note:
+  `docs/proposals/design-notes/sfn-526-lowering-fatal-gate-audit.md`.
 
 ## Feature Matrix
 
