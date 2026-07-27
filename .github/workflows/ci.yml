@@ -604,6 +604,8 @@ jobs:
     continue-on-error: true
     runs-on: ubuntu-24.04-arm
     timeout-minutes: 180
+    outputs:
+      artifact_ready: ${{ steps.artifact_ready.outputs.ready }}
     steps:
       - name: Checkout repository
         uses: actions/checkout@v7
@@ -629,6 +631,27 @@ jobs:
         run: |
           set -euo pipefail
           sudo dpkg --add-architecture amd64
+          # The arm runner's Ubuntu source points at ports.ubuntu.com, which
+          # has no amd64 indices. Keep that source arm64-only and add the
+          # canonical amd64 archive explicitly for the emulated seed sysroot.
+          sudo sed -i \
+            '/^Architectures:/d; /^Components:/a Architectures: arm64' \
+            /etc/apt/sources.list.d/ubuntu.sources
+          sudo tee /etc/apt/sources.list.d/ubuntu-amd64.sources >/dev/null <<'EOF'
+          Types: deb
+          URIs: http://archive.ubuntu.com/ubuntu
+          Suites: noble noble-updates noble-backports
+          Components: main universe restricted multiverse
+          Architectures: amd64
+          Signed-By: /usr/share/keyrings/ubuntu-archive-keyring.gpg
+
+          Types: deb
+          URIs: http://security.ubuntu.com/ubuntu
+          Suites: noble-security
+          Components: main universe restricted multiverse
+          Architectures: amd64
+          Signed-By: /usr/share/keyrings/ubuntu-archive-keyring.gpg
+          EOF
           sudo apt-get update
           sudo apt-get install -y --no-install-recommends \
             binutils clang-18 curl jq lld llvm-18 \
@@ -698,13 +721,18 @@ jobs:
           if-no-files-found: error
           retention-days: 1
 
+      - name: Mark compiler artifact ready
+        id: artifact_ready
+        shell: bash
+        run: echo "ready=true" >> "$GITHUB_OUTPUT"
+
   build-aarch64-linux:
     name: Build + Test [linux-arm64 / advisory]
     needs: [ci-scope, build-compiler-aarch64-linux]
     if: >-
       (github.event_name == 'schedule' ||
        needs.ci-scope.outputs.source == 'true') &&
-      needs.build-compiler-aarch64-linux.result == 'success'
+      needs.build-compiler-aarch64-linux.outputs.artifact_ready == 'true'
     continue-on-error: true
     runs-on: ubuntu-24.04-arm
     timeout-minutes: 180
