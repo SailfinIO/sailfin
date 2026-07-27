@@ -111,6 +111,13 @@ NATIVE_LINK_EXTRA ?=
 # Preferred local path for the native compiler binary.
 NATIVE_BIN ?= build/bin/sfn$(EXE_EXT)
 
+# Content stamp for the complete Sailfin source set consumed by the self-host.
+# An mtime comparison is not sound here: checkout/editor operations can preserve
+# timestamps, and coarse filesystems can give an edit and the output the same
+# timestamp. The fingerprint includes sorted paths and bytes (SFN-564).
+COMPILER_SOURCE_FINGERPRINT := build/.compiler-source-fingerprint
+COMPILER_SOURCE_FINGERPRINT_CMD := bash scripts/compiler_source_fingerprint.sh compiler/src runtime
+
 # Which compiler binary to use for running Sailfin-native tests.
 # Default: the native compiler alias produced by `make compile`.
 
@@ -566,8 +573,10 @@ compile:
 	@$(AGENT_REPORT) --target compile -- $(MAKE) compile-impl
 
 compile-impl:
-	@if [ "$${FORCE:-0}" = "0" ] && [ -x "$(NATIVE_BIN)" ] && \
-		[ -z "$$(find compiler/src runtime -type f -name '*.sfn' -newer "$(NATIVE_BIN)" -print -quit 2>/dev/null)" ]; then \
+	@current_fingerprint="$$($(COMPILER_SOURCE_FINGERPRINT_CMD))"; \
+	stored_fingerprint="$$(cat "$(COMPILER_SOURCE_FINGERPRINT)" 2>/dev/null || true)"; \
+	if [ "$${FORCE:-0}" = "0" ] && [ -x "$(NATIVE_BIN)" ] && \
+		[ -n "$$stored_fingerprint" ] && [ "$$current_fingerprint" = "$$stored_fingerprint" ]; then \
 		echo "[compile] $(NATIVE_BIN) up-to-date"; \
 	else \
 		: "#1192: chain rebuild -> echo with && (not ;) so a failed cold"; \
@@ -812,6 +821,7 @@ rebuild:
 
 rebuild-impl:
 	@mkdir -p build
+	@$(COMPILER_SOURCE_FINGERPRINT_CMD) > "$(COMPILER_SOURCE_FINGERPRINT).pending"
 	@seed="$${SEED_NATIVE:-$(SEED)}"; \
 	resolved_seed="$$seed"; \
 	if command -v "$$seed" >/dev/null 2>&1; then \
@@ -885,8 +895,17 @@ rebuild-impl:
 		exit 1; \
 	fi
 	@mkdir -p build/native $(dir $(NATIVE_OUT))
-	@cp -f build/sailfin/program $(NATIVE_OUT)
-	@chmod +x $(NATIVE_OUT)
+	@post_fingerprint="$$($(COMPILER_SOURCE_FINGERPRINT_CMD))"; \
+	pre_fingerprint="$$(cat "$(COMPILER_SOURCE_FINGERPRINT).pending")"; \
+	if [ "$$pre_fingerprint" != "$$post_fingerprint" ]; then \
+		rm -f "$(COMPILER_SOURCE_FINGERPRINT).pending"; \
+		echo "[rebuild][error] compiler sources changed during the build; refusing to publish a stale binary" >&2; \
+		exit 1; \
+	fi; \
+	cp -f build/sailfin/program "$(NATIVE_OUT).tmp"; \
+	chmod +x "$(NATIVE_OUT).tmp"; \
+	mv -f "$(NATIVE_OUT).tmp" "$(NATIVE_OUT)"; \
+	mv -f "$(COMPILER_SOURCE_FINGERPRINT).pending" "$(COMPILER_SOURCE_FINGERPRINT)"
 	@# Save .ll files to a location `make test` won't clobber. Each
 	@# integration / e2e test's own `sfn build` overwrites
 	@# `build/sailfin/capsules/*.ll` and `build/sailfin/program.ll`
