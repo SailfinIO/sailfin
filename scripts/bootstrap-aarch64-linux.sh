@@ -40,7 +40,10 @@ SEED_VERSION="$(awk '/^\[[^]]+\]/ { section=$0 } section == "[seed]" && /^versio
 # compiler A are x86_64 executables, so binfmt_misc must cover those child
 # invocations even though the top-level commands below name qemu explicitly.
 [ -d /proc/sys/fs/binfmt_misc ] || fail "binfmt_misc is not mounted"
-if ! find /proc/sys/fs/binfmt_misc -maxdepth 1 -type f -exec grep -l 'x86_64\|x86-64' {} + 2>/dev/null | grep -q .; then
+binfmt_runs_seed() {
+	"$SEED_X86_64" --version >/dev/null 2>&1
+}
+if ! binfmt_runs_seed; then
 	printf '[bootstrap-aarch64] enabling qemu-x86_64 binfmt registration\n'
 	if [ "$(id -u)" -eq 0 ] && command -v update-binfmts >/dev/null 2>&1; then
 		update-binfmts --enable qemu-x86_64
@@ -50,7 +53,7 @@ if ! find /proc/sys/fs/binfmt_misc -maxdepth 1 -type f -exec grep -l 'x86_64\|x8
 		fail "cannot register x86_64 binfmt non-interactively; install qemu-user-binfmt and run: sudo update-binfmts --enable qemu-x86_64"
 	fi
 fi
-if ! find /proc/sys/fs/binfmt_misc -maxdepth 1 -type f -exec grep -l 'x86_64\|x86-64' {} + 2>/dev/null | grep -q .; then
+if ! binfmt_runs_seed; then
 	fail "x86_64 binfmt registration is still unavailable after update-binfmts"
 fi
 
