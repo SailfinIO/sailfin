@@ -10,14 +10,35 @@ import { format_temp_name } from "../expressions_helpers";
 import { strip_pointer_suffix } from "../type_mapping";
 import { array_struct_type_for_element } from "../type_mapping";
 import { ExpressionResult, LLVMOperand } from "../types";
-import { append_string, ends_with, trim_text } from "../utils";
+import {
+    append_string,
+    ends_with,
+    index_of,
+    trim_text
+} from "../utils";
 import {
     RuntimeCallOverrides,
     emit_runtime_call,
     empty_runtime_call_overrides
 } from "./native/runtime_call";
 
+fn _has_fatal_runtime_call_diagnostic(diagnostics: string[]) -> boolean {
+    let mut index: int = 0;
+    loop {
+        if index >= diagnostics.length { break; }
+        if index_of(diagnostics[index], "[fatal]") >= 0 { return true; }
+        index += 1;
+    }
+    return false;
+}
+
 fn lower_struct_array_concat(lhs: LLVMOperand, rhs: LLVMOperand, element_type: string, lines: string[], temp_index: int) -> ExpressionResult ![io] {
+    return lower_struct_array_concat_with_alloc_target(lhs, rhs, element_type, lines, temp_index, "alloc_struct");
+}
+
+// The explicit target is a narrow test seam for exercising dispatch failure;
+// production concat lowering always enters through `lower_struct_array_concat`.
+fn lower_struct_array_concat_with_alloc_target(lhs: LLVMOperand, rhs: LLVMOperand, element_type: string, lines: string[], temp_index: int, alloc_target: string) -> ExpressionResult ![io] {
     let mut current_lines = lines;
     let mut current_temp = temp_index;
     let mut diagnostics: string[] = [];
@@ -136,7 +157,6 @@ fn lower_struct_array_concat(lhs: LLVMOperand, rhs: LLVMOperand, element_type: s
     // descriptor dispatch. The `noalias` return attribute is preserved
     // because the buffer is freshly allocated and known not to alias
     // its inputs (which are then memcpy'd into it).
-    let new_raw_buffer = format_temp_name(current_temp);
     let buffer_size_operand = LLVMOperand {
         llvm_type: "i64",
         value: total_bytes
@@ -149,7 +169,7 @@ fn lower_struct_array_concat(lhs: LLVMOperand, rhs: LLVMOperand, element_type: s
         c_abi_return_type: ""
     };
     let buffer_operands: LLVMOperand[] = [buffer_size_operand];
-    let buffer_result = emit_runtime_call("alloc_struct", buffer_operands, buffer_overrides, current_temp, current_lines);
+    let buffer_result = emit_runtime_call(alloc_target, buffer_operands, buffer_overrides, current_temp, current_lines);
     let mut _buffer_di: int = 0;
     loop {
         if _buffer_di >= buffer_result.diagnostics.length { break; }
@@ -157,7 +177,18 @@ fn lower_struct_array_concat(lhs: LLVMOperand, rhs: LLVMOperand, element_type: s
         _buffer_di += 1;
     }
     current_lines = buffer_result.lines;
-    current_temp += 1;
+    current_temp = buffer_result.temp_index;
+    if buffer_result.operand == null {
+        diagnostics.push("llvm lowering [fatal]: struct-array concat buffer allocation produced no operand");
+        return ExpressionResult {
+            lines: current_lines,
+            temp_index: current_temp,
+            operand: null,
+            diagnostics: diagnostics,
+            string_constants: []
+        };
+    }
+    let new_raw_buffer = buffer_result.operand.value;
     let new_data_ptr = format_temp_name(current_temp);
     current_temp += 1;
     current_lines.push("  " + new_data_ptr + " = bitcast i8* " + new_raw_buffer
@@ -197,6 +228,15 @@ fn lower_struct_array_concat(lhs: LLVMOperand, rhs: LLVMOperand, element_type: s
     }
     current_lines = lhs_copy_result.lines;
     current_temp = lhs_copy_result.temp_index;
+    if _has_fatal_runtime_call_diagnostic(lhs_copy_result.diagnostics) {
+        return ExpressionResult {
+            lines: current_lines,
+            temp_index: current_temp,
+            operand: null,
+            diagnostics: diagnostics,
+            string_constants: []
+        };
+    }
 
     let rhs_bytes = format_temp_name(current_temp);
     current_temp += 1;
@@ -239,6 +279,15 @@ fn lower_struct_array_concat(lhs: LLVMOperand, rhs: LLVMOperand, element_type: s
     }
     current_lines = rhs_copy_result.lines;
     current_temp = rhs_copy_result.temp_index;
+    if _has_fatal_runtime_call_diagnostic(rhs_copy_result.diagnostics) {
+        return ExpressionResult {
+            lines: current_lines,
+            temp_index: current_temp,
+            operand: null,
+            diagnostics: diagnostics,
+            string_constants: []
+        };
+    }
 
     let struct_size_ptr = format_temp_name(current_temp);
     current_temp += 1;
@@ -259,13 +308,12 @@ fn lower_struct_array_concat(lhs: LLVMOperand, rhs: LLVMOperand, element_type: s
     // descriptor dispatch. No `noalias` here today — the original
     // emission omitted the attribute and the IR diff is the
     // correctness gate.
-    let new_struct_raw = format_temp_name(current_temp);
     let struct_concat_size_operand = LLVMOperand {
         llvm_type: "i64",
         value: struct_size_value
     };
     let struct_concat_operands: LLVMOperand[] = [struct_concat_size_operand];
-    let struct_concat_result = emit_runtime_call("alloc_struct", struct_concat_operands, empty_runtime_call_overrides(), current_temp, current_lines);
+    let struct_concat_result = emit_runtime_call(alloc_target, struct_concat_operands, empty_runtime_call_overrides(), current_temp, current_lines);
     let mut _struct_concat_di: int = 0;
     loop {
         if _struct_concat_di >= struct_concat_result.diagnostics.length {
@@ -275,7 +323,18 @@ fn lower_struct_array_concat(lhs: LLVMOperand, rhs: LLVMOperand, element_type: s
         _struct_concat_di += 1;
     }
     current_lines = struct_concat_result.lines;
-    current_temp += 1;
+    current_temp = struct_concat_result.temp_index;
+    if struct_concat_result.operand == null {
+        diagnostics.push("llvm lowering [fatal]: struct-array concat result allocation produced no operand");
+        return ExpressionResult {
+            lines: current_lines,
+            temp_index: current_temp,
+            operand: null,
+            diagnostics: diagnostics,
+            string_constants: []
+        };
+    }
+    let new_struct_raw = struct_concat_result.operand.value;
     let new_struct_ptr = format_temp_name(current_temp);
     current_temp += 1;
     current_lines.push("  " + new_struct_ptr + " = bitcast i8* "
