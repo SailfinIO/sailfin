@@ -764,6 +764,9 @@ jobs:
           exec clang-18 --target=aarch64-linux-gnu "$@"
           EOF
           chmod +x build/aarch64-bootstrap/bin/clang
+          echo "$PWD/build/aarch64-bootstrap/bin" >> "$GITHUB_PATH"
+          echo "SAILFIN_LINKER=lld" >> "$GITHUB_ENV"
+          echo "SAILFIN_TARGET_ARCH=aarch64" >> "$GITHUB_ENV"
           PATH="$PWD/build/aarch64-bootstrap/bin:$PATH" \
             SAILFIN_LINKER=lld \
             SAILFIN_TARGET_ARCH=aarch64 \
@@ -825,7 +828,15 @@ jobs:
           set -euo pipefail
           sudo apt-get update
           sudo apt-get install -y --no-install-recommends clang-18 lld llvm-18 libssl-dev
-          echo "CLANG=clang-18" >> "$GITHUB_ENV"
+          mkdir -p build/aarch64-test-bin
+          cat >build/aarch64-test-bin/clang <<'EOF'
+          #!/usr/bin/env bash
+          exec clang-18 --target=aarch64-linux-gnu "$@"
+          EOF
+          chmod +x build/aarch64-test-bin/clang
+          echo "$PWD/build/aarch64-test-bin" >> "$GITHUB_PATH"
+          echo "SAILFIN_LINKER=lld" >> "$GITHUB_ENV"
+          echo "SAILFIN_TARGET_ARCH=aarch64" >> "$GITHUB_ENV"
 
       - name: Download native compiler passes
         uses: actions/download-artifact@v8
