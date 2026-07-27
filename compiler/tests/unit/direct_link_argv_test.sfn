@@ -2,7 +2,7 @@
 //
 // Unit guard for the direct `ld.lld` argv builder (SFEP-0015 §8 Stage 1,
 // `compiler/src/build/direct_link.sfn`; mirror #2550). Pins the argv
-// contract that replaces clang as the Linux x86-64 final linker: the
+// contract that replaces clang as the Linux x86-64/aarch64 final linker: the
 // startup-object wrap, the dynamic-linker/target-identity flags, the
 // object/library ordering, and — critically — the translation of the
 // LinkPlan's clang-driver `link_flags` into raw linker flags. A drift here
@@ -37,6 +37,7 @@ fn _contract() -> DirectLinkContract ![pure] {
     return DirectLinkContract {
         ok: true,
         reason: "",
+        linker_emulation: "elf_x86_64",
         dynamic_linker: "/lib64/ld-linux-x86-64.so.2",
         crt1: "/usr/lib/x86_64-linux-gnu/Scrt1.o",
         crti: "/usr/lib/x86_64-linux-gnu/crti.o",
@@ -44,6 +45,21 @@ fn _contract() -> DirectLinkContract ![pure] {
         crtbegin: "/usr/lib/gcc/x86_64-linux-gnu/13/crtbeginS.o",
         crtend: "/usr/lib/gcc/x86_64-linux-gnu/13/crtendS.o",
         search_dirs: ["/usr/lib/gcc/x86_64-linux-gnu/13", "/usr/lib/x86_64-linux-gnu"]
+    };
+}
+
+fn _aarch64_contract() -> DirectLinkContract ![pure] {
+    return DirectLinkContract {
+        ok: true,
+        reason: "",
+        linker_emulation: "aarch64linux",
+        dynamic_linker: "/lib/ld-linux-aarch64.so.1",
+        crt1: "/usr/lib/aarch64-linux-gnu/Scrt1.o",
+        crti: "/usr/lib/aarch64-linux-gnu/crti.o",
+        crtn: "/usr/lib/aarch64-linux-gnu/crtn.o",
+        crtbegin: "/usr/lib/gcc/aarch64-linux-gnu/13/crtbeginS.o",
+        crtend: "/usr/lib/gcc/aarch64-linux-gnu/13/crtendS.o",
+        search_dirs: ["/usr/lib/gcc/aarch64-linux-gnu/13", "/usr/lib/aarch64-linux-gnu"]
     };
 }
 
@@ -68,6 +84,17 @@ test "direct-link: invokes ld.lld with PIE target-identity flags" ![pure] {
     assert expect_eq_bool(_argv_contains(argv, "a.out"), true).ok;
     // The final link never re-invokes clang.
     assert expect_eq_bool(_argv_contains(argv, "clang"), false).ok;
+}
+
+test "direct-link: aarch64 contract selects its linker emulation and loader" ![pure] {
+    let c = _aarch64_contract();
+    let argv = direct_ld_lld_argv(c, ["runtime.o", "main.o"], "a.out", ["-lm", "-lpthread"], []);
+    assert expect_eq_bool(_argv_contains(argv, "aarch64linux"), true).ok;
+    assert expect_eq_bool(_argv_contains(argv, "/lib/ld-linux-aarch64.so.1"), true).ok;
+    assert expect_eq_bool(_argv_contains(argv, "-L/usr/lib/gcc/aarch64-linux-gnu/13"), true).ok;
+    assert expect_eq_bool(_argv_contains(argv, "-L/usr/lib/aarch64-linux-gnu"), true).ok;
+    assert expect_eq_bool(_argv_contains(argv, "elf_x86_64"), false).ok;
+    assert expect_eq_bool(_argv_contains(argv, "/lib64/ld-linux-x86-64.so.2"), false).ok;
 }
 
 test "direct-link: wraps objects in CRT startup objects and search dirs" ![pure] {
