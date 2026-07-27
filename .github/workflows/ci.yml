@@ -754,11 +754,11 @@ jobs:
           set -euo pipefail
           mkdir -p build/aarch64-bootstrap/pass-2 build/aarch64-bootstrap/pass-3
           SAILFIN_CC=clang-18 SAILFIN_TARGET_ARCH=aarch64 \
-            build/aarch64-bootstrap/pass-1/sfn build --no-cache -p compiler \
+            "$PWD/build/aarch64-bootstrap/pass-1/sfn" build --no-cache -p compiler \
               --work-dir build/aarch64-bootstrap/pass-2 \
               -o build/aarch64-bootstrap/pass-2/sfn
           SAILFIN_CC=clang-18 SAILFIN_TARGET_ARCH=aarch64 \
-            build/aarch64-bootstrap/pass-2/sfn build --no-cache -p compiler \
+            "$PWD/build/aarch64-bootstrap/pass-2/sfn" build --no-cache -p compiler \
               --work-dir build/aarch64-bootstrap/pass-3 \
               -o build/aarch64-bootstrap/pass-3/sfn
           cmp build/aarch64-bootstrap/pass-2/sfn build/aarch64-bootstrap/pass-3/sfn
