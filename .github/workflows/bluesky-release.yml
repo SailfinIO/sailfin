@@ -1,0 +1,19 @@
+name: Announce published release on Bluesky
+
+on:
+  release:
+    types: [published]
+
+permissions:
+  contents: read
+
+jobs:
+  announce:
+    uses: ./.github/workflows/bluesky-post.yml
+    with:
+      kind: release
+      title: ${{ github.event.release.name || github.event.release.tag_name }}
+      canonical_url: ${{ github.event.release.html_url }}
+      summary: ${{ github.event.release.body || format('Release notes and downloads for {0}.', github.event.release.tag_name) }}
+      dry_run: false
+    secrets: inherit
