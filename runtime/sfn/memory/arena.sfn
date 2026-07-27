@@ -358,30 +358,66 @@ fn sfn_arena_alloc(arena: *u8, size: usize, align: usize) -> *u8 {
 // disabled, `1` = enabled; the address `0` for the global handle
 // doubles as "not yet created".
 //
-// **Thread-safety (known regression vs the C arena — deliberate).** The
-// C original guarded both lazy globals with `pthread_once`
-// (`sailfin_arena.c:253-254,306,323`). This port replaces that with an
-// unsynchronised check-and-set, matching every other lazy global in the
-// `runtime/sfn` layer (`mem.sfn:sfn_mem_get_field_buf_addr`,
-// `type_meta.sfn`'s registry, `future.sfn`'s scheduler globals) and the
-// single-threaded assumption `sfn_alloc_struct` already bakes in. That
-// holds for the compiler toolchain itself (compilation is
-// single-threaded) but NOT for emitted user binaries that spawn
-// `routine`/future threads: two threads racing the first allocation can
-// double-create the global arena or observe the provisional `0` mid-
-// probe. This is acceptable pre-1.0 — the structured-concurrency runtime
-// is not yet shipped (see CLAUDE.md "Deferred / Not Yet Shipped") — and
-// is the same exposure the rest of the `runtime/sfn` alloc path carries.
-// Re-introducing a `pthread_once`-equivalent is a concurrency-runtime
-// concern, tracked there, not part of this M2→M3 arena port.
-let mut _sfn_arena_enabled_state: i64 = -1;
+// **Thread-safety: one arena per thread, not one arena per process.**
+// Both globals are `thread_local`, so each thread lazily creates and
+// privately owns its own `Arena`. Nothing about the bump path is shared,
+// which is what makes it sound: `page.used`, `a.current_addr` and the
+// `next_addr` splice are all plain read-modify-writes with no atomic or
+// lock, and they stay correct only because exactly one thread can reach
+// any given handle. The C original instead guarded a single shared arena
+// with `pthread_once` (`sailfin_arena.c:253-254,306,323`), which fixed
+// only lazy init and left the bump itself racing (SFN-558).
+//
+// Why per-thread and not a lock or a CAS. A lock on `alloc` serialises
+// the hottest path in the runtime — every struct literal, string concat
+// and array growth — negating the arena's whole rationale. A CAS on
+// `page.used` fixes only the in-page bump; the fresh-page path splices a
+// linked list (`new_page.next_addr` then `page.next_addr`, plus
+// `a.current_addr`), a multi-word update no single CAS covers, so it
+// would still need a lock underneath. Per-thread ownership removes both
+// races by construction and keeps the fast path lock-free. Full option
+// weighing: `docs/proposals/design-notes/sfn-558-arena-thread-safety.md`.
+//
+// **A thread's arena is never destroyed — this is load-bearing, not an
+// oversight.** Arena memory has no per-object free, so a `Cell` a worker
+// allocates and hands back through `parallel`/`await`, or sends over a
+// `channel`, stays live only as long as the allocating thread's arena
+// does. Freeing at thread exit would convert this file's data race into
+// a use-after-free. There is deliberately no TLS destructor: a
+// `thread_local` lowers to an `internal thread_local global`
+// (`llvm/lowering/module_globals.sfn:253-259`) with no cleanup hook, so
+// leak-until-process-exit falls out for free — and matches the lifetime
+// the single shared arena already had (nothing ever destroyed it either;
+// `sfn_arena_sfn_destroy` has no production caller).
+//
+// Consequences worth knowing. (1) Each allocating thread costs one 4 MiB
+// initial page of address space; pages are demand-faulted, so RSS still
+// tracks real use. The pool is capped at 32 workers
+// (`concurrency/scheduler.sfn:446`), bounding this at ~128 MiB of VA
+// against the 8 GiB `RLIMIT_AS`. (2) `mark`/`rewind` bind to the calling
+// thread's arena, which is what makes them safe to use concurrently —
+// and is the gate SFEP-0004 B7 (parallel `sfn check`) was waiting on.
+// (3) `sfn_arena_telemetry_dump` reports only the calling thread's
+// arena; worker arenas are not aggregated.
+thread_local let mut _sfn_arena_enabled_state: i64 = -1;
 
-let mut _sfn_arena_global_addr: i64 = 0;
+thread_local let mut _sfn_arena_global_addr: i64 = 0;
 
 // `sfn_arena_enabled()` — `SAILFIN_USE_ARENA` probe, faithful port of
 // `_init_arena_enabled` + `sfn_arena_enabled` (`sailfin_arena.c:256,
 // 304`). Unset → on (the default). Empty / `0` / `false` → off.
-// Anything else → on. Cached after the first probe. The empty-string
+// Anything else → on. Cached after the first probe *per thread*: the
+// probe reads one immutable env var, so every thread independently
+// computes the same answer, at the cost of one `getenv` per thread that
+// allocates. Making the cache `thread_local` is not just tidiness — it
+// closes a second hazard the shared version carried (SFN-558). The
+// provisional-`0` re-entrancy guard below was observable by *other*
+// threads mid-probe, and `sfn_mem_free` (`mem.sfn:187`) no-ops only
+// while `sfn_arena_enabled()` is true, so a thread freeing an arena
+// pointer during another thread's probe window would pass it to libc
+// `free` and corrupt glibc chunk metadata. Per-thread state makes the
+// window private to the one thread inside it, where it is straight-line
+// code that frees nothing. The empty-string
 // case uses `strcmp(env, "")` rather than a single-byte load — the
 // seed compiler's `* u8` byte-load gap (see the file header) makes the
 // `env[0] == '\0'` form unavailable here.
@@ -430,9 +466,15 @@ fn sfn_arena_enabled() -> bool {
     return _sfn_arena_enabled_state == 1;
 }
 
-// `sfn_arena_global()` — lazy process-global arena (4 MiB pages for the
-// compiler), faithful port of `_init_global_arena` + `sfn_arena_global`
-// (`sailfin_arena.c:310,321`). Creates the handle on first call;
+// `sfn_arena_global()` — the calling thread's lazily-created arena
+// (4 MiB pages for the compiler), faithful port of `_init_global_arena`
+// + `sfn_arena_global` (`sailfin_arena.c:310,321`). "Global" is retained
+// as the linker-visible symbol name and now means *per-thread* storage:
+// `_sfn_arena_global_addr` is `thread_local`, so the first call on each
+// thread creates that thread's private handle and no two threads ever
+// share one (SFN-558). The single-threaded compiler driver therefore
+// behaves exactly as before — one thread, one arena.
+// Creates the handle on first call;
 // `abort()`s if creation fails (the lowered call sites GEP+store into
 // the returned base with no null-check, so a silent NULL would surface
 // as a bare SIGSEGV — `abort` turns OOM into a clean SIGABRT).
@@ -560,8 +602,17 @@ fn sfn_arena_realloc(arena: *u8, ptr: *u8, old_size: usize, new_size: usize, ali
 }
 
 // ====================================================================
-// Mark / rewind over the process-global arena (#927, sub-issue of
-// #390). Port of the double-encoding wrappers
+// Mark / rewind over the calling thread's arena (#927, sub-issue of
+// #390). Both resolve the handle through `sfn_arena_global()`, so since
+// SFN-558 they operate on per-thread storage: a mark taken on one thread
+// can only be rewound by that same thread, and one thread's rewind can
+// never truncate memory another thread is still bumping into. The
+// encoded mark's `page_index` is meaningful only against the chain it was
+// taken from, so this per-thread binding is what makes the encoding safe
+// under concurrency rather than merely unobserved. Every production
+// caller (`check/engine.sfn:426`, `cli/commands/test.sfn:1166`,
+// `cli/commands/fmt.sfn:112`, `main.sfn:790`) is single-threaded driver
+// code and is unaffected. Port of the double-encoding wrappers
 // `sailfin_intrinsic_runtime_arena_mark` /
 // `sailfin_intrinsic_runtime_arena_rewind`
 // (the retired C runtime, formerly `sailfin_runtime.c:7811,7834`), NOT the
