@@ -502,9 +502,10 @@ here.
   unmasked a live shipped miscompile in
   `runtime/sfn/adapters/websocket.sfn::_ws_handle_fd` — a cast over a
   parenthesized `<<` expression didn't lower, so fd reassembly returned `0`
-  and every websocket send/close operated on fd 0 (stdin) — fixed by binding
-  the value before the cast; the underlying cast-lowering bug is tracked
-  separately (SFN-560).
+  and every websocket send/close operated on fd 0 (stdin). SFN-560 fixed the
+  cast-separator scanner by limiting generic angle-depth tracking to top-level
+  type syntax, restored `_ws_handle_fd`'s inline cast, and pins both emitted IR
+  and the computed result beside the neighbouring `>>`/`&`/`*` spellings.
 - **LLVM instruction lowering fails closed instead of dropping instructions**
   (`E1003`, SFN-528): `break` and `continue` outside a loop, plus any
   instruction tag not handled by `lower_instruction_range`, now emit a tagged
