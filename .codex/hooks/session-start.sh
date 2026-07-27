@@ -1,7 +1,6 @@
 #!/usr/bin/env bash
-# Codex SessionStart hook: emit a compact project snapshot that keeps Sailfin's
-# self-hosted compiler, Sailfin-native runtime, and proposal process visible at
-# the start of every session.
+# Codex SessionStart hook: emit dynamic build state. Durable project guidance
+# belongs in AGENTS.md and task-specific skills.
 
 set -euo pipefail
 
@@ -52,13 +51,3 @@ if [[ -f bootstrap.toml ]]; then
   ' bootstrap.toml)
   [[ -n "$seed_pin" ]] && printf -- '- pinned seed: v%s\n' "$seed_pin"
 fi
-
-cat <<'MSG'
-
-Reminders:
-- The compiler self-caps memory at 8 GiB on Linux (`SAILFIN_MEM_LIMIT` to override); wrap single-file compiles with `timeout 60`.
-- The runtime is Sailfin-native (`runtime/prelude.sfn`, `runtime/sfn/`); do not add C runtime fixups.
-- Use `sfn check <files>` for the parse/type/effect inner loop, then `make compile` for compiler-source changes.
-- Status source of truth: docs/status.md. SFEP process: docs/proposals/0001-sfep-process.md. Roadmap: site/src/pages/roadmap.astro.
-- Prefer feature branches named `codex/<issue-or-topic>-<slug>`.
-MSG

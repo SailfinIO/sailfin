@@ -3,118 +3,69 @@ name: sailfin-pickup
 description: Pick up a ready Sailfin Linear or GitHub issue and drive it through branch, implementation, verification, and PR handoff.
 ---
 
-# Sailfin Pickup Skill
+# Sailfin Pickup
 
-Use this skill when the user asks Codex to pick up an issue, work the next item,
-or emulate Claude's `/pickup` flow.
+Use this skill when the user asks Codex to pick up an issue, work the next
+item, or emulate Claude's `/pickup` flow. Work autonomously from selection
+through a draft pull request unless a stop condition below applies.
 
-## Issue selection
+## Select and claim
 
-Issue identifiers are accepted in two forms:
+- `SFN-123` selects that Linear issue. A bare number selects that GitHub issue
+  and its Linear mirror when one exists. With no identifier, choose the
+  highest-priority pickable Sailfin issue in Linear's native `Ready` state.
+- A pickable issue is unassigned or assigned to the current user and has no
+  unresolved blocker. Rank candidates by Linear priority, then `type:bug`,
+  `type:perf`, smallest estimate, and lowest identifier.
+- Linear owns workflow state. If Linear is unreachable, do not infer state from
+  retired GitHub workflow labels.
+- Before editing, set the Linear issue to `In Progress`, assign it to the
+  current user, and create `codex/SFN-123-<slug>` (or
+  `codex/<N>-<slug>` for a GitHub-only issue).
 
-- `SFN-123` selects the Linear issue directly.
-- `123` selects GitHub issue `#123`, then looks up the Linear mirror when the
-  Linear tools are reachable.
+Read the complete issue and any cited SFEP or design note. Treat its goal,
+semantic scope, acceptance criteria, and verification commands as the contract;
+the listed files are an advisory map that may have drifted.
 
-With no explicit issue, prefer Linear. Query Sailfin (`SFN`) Linear issues in
-the native `Ready` status, then filter out any issue that is assigned to someone
-else, canceled, completed, or externally blocked. Workflow state is
-Linear-native — there is no GitHub `claude-ready` label to fall back to (it is
-retired). If the Linear tools are unreachable, stop and report that rather than
-guessing a pick from a GitHub label.
+## Execute
 
-Rank remaining issues by:
+Implement the smallest cohesive change that satisfies the contract. Follow
+`AGENTS.md`, update tests and documentation when behavior changes, and use the
+`sailfin-check` skill for the appropriate formatting, self-hosting, and
+verification gates.
 
-   - Linear-native priority Urgent, then High
-   - `type:bug`
-   - `type:perf`
-   - smallest `size:*` (`XS` before `S` before `M`)
-   - lowest Linear identifier, then lowest GitHub issue number when tied
+Apply the seed-dependency policy in `.claude/rules/seed-dependency.md`. Verify
+any predecessor explicitly listed under `## Required in pinned seed` before
+claiming compiler or runtime work. Stop without claiming when the prerequisite
+is absent from the pinned seed.
 
-For a supplied `SFN-123`, resolve it with Linear first and validate the same
-pickability rules. For a supplied GitHub issue number, fetch it directly with
-`gh issue view <N> --json number,title,labels,assignees,body,state,url` and then
-try to resolve the Linear mirror by querying the issue number or URL.
+Pause only when the issue is blocked, its semantic scope must expand, an
+acceptance criterion is impossible or materially wrong, or the seed policy
+requires a genuine bundle-versus-split decision. File-path drift within the
+stated semantic scope is not a reason to pause.
 
-## Seed dependency policy
+## Record discoveries
 
-`make compile` self-hosts against the binary pinned by `bootstrap.toml [seed].version`, so a compiler-source capability that a consumer needs in the pinned seed can force a seed cut. Apply the project seed-dependency rule:
+This workflow authorizes creating Linear follow-up issues for concrete bugs,
+missing behavior, or trackable gaps discovered outside the claimed scope.
+Search Linear first to avoid duplicates; do not expand the current change
+silently.
 
-- Bundle a capability with its single tightly-coupled consumer by default; this avoids manufacturing a seed cut.
-- Split only when the capability has multiple consumers, is genuinely independent, or has a large blast radius.
-- When split, the predecessor should be labeled `seed-blocker`, the consumer should list it under `## Required in pinned seed`, and the seed bump queues against the normal cadence unless release-critical.
+Use `docs/conventions/linear-templates.md` for fields and description content.
+Relate the follow-up to the source issue, preserve its Project when appropriate,
+and mark it blocked by the current issue only when it truly cannot start before
+the current pull request lands. Leave uncertain or oversized discoveries in
+`Triage` rather than over-specifying them.
 
-Before claiming compiler/runtime work, read the Linear description or GitHub
-issue body. If `## Required in pinned seed` lists predecessors, verify at least
-one closing/merge commit (or an explicit content expectation from the issue
-body) is present in the pinned seed tag. If not, comment on the Linear issue or
-GitHub issue and stop without claiming it.
+## Finish
 
-## Claim and branch
-
-For Linear-native pickup, claim Linear first:
-
-- set state to `In Progress`;
-- assign to `me` when the Linear tools support it;
-- do not add GitHub workflow-state labels such as `blocked`, `in-progress`, or
-  `claude-ready` (all retired) — Linear's native status is the single source of
-  truth.
-
-A GitHub mirror (external-intake issue) needs no status-label sync: its state is
-derived from the Linear issue you have already advanced.
-
-Create the branch as `codex/SFN-123-<slug>` for Linear-native pickup, or
-`codex/<N>-<slug>` for GitHub-only fallback.
-
-## Implementation rules
-
-- Restate the issue goal, scope, acceptance criteria, files affected, design/SFEP references, and verification plan before editing.
-- For multi-pass compiler changes, implement in pipeline order: lexer, parser, AST, type checker, effect checker, native emitter, LLVM lowering, runtime/prelude if needed, tests.
-- Keep changes focused and update `docs/status.md` first when behavior changes.
-- Add or update Sailfin-native tests beside related coverage under `compiler/tests/`.
-- Use the Sailfin check skill for formatting and verification.
-
-## Follow-up issue filing
-
-During pickup, do not silently expand the current issue when you discover a
-real bug, missing acceptance criterion, or obvious gap outside the claimed
-scope. Search Linear first to avoid duplicates, then file a Sailfin (`SFN`)
-Linear issue when the work is concrete enough to track.
-
-Create follow-ups with Linear-native fields:
-
-- Team: `Sailfin` (`SFN`).
-- Status: `Triage` when the gap needs human shaping, `Backlog` when scoped but
-  not yet ready, `Blocked` when it depends on the current issue/PR or another
-  unresolved blocker, and `Ready` only when it is fully groomed, unblocked, and
-  pickable.
-- Project: reuse the current issue's Project when the follow-up belongs to the
-  same epic; otherwise leave it unprojected only when genuinely cross-cutting
-  and say why in the description.
-- Priority: inherit the current issue or Project priority unless the discovery
-  is a release, self-hosting, seed, or correctness blocker. Use Urgent only for
-  drop-everything blockers, High for critical-path work, Medium for enabling
-  current-milestone work, and Low for polish or post-milestone work.
-- Estimate: use the Sailfin Linear scale (`1` = XS, `2` = S, `3` = M). If the
-  work is larger than M, leave it in `Triage` or create a Project/design note
-  instead of filing an oversized leaf.
-- Labels: use only canonical `type:*` and `area:*` labels. Do not add Linear
-  labels for status, priority, estimate, release, blockers, assignee, or
-  project membership.
-- Relations: mark the follow-up `related to` the current issue; mark it
-  `blocked by` the current issue only when it cannot start before the current
-  PR lands.
-
-Use the repository template in `docs/conventions/linear-templates.md` for the
-issue description. The description must include the discovery source, expected
-acceptance criteria, verification commands or test expectations, and links to
-the current issue/PR or GitHub mirror when available.
-
-## PR handoff
-
-- Run the verification commands from the issue body plus the Sailfin check ladder. Do not expand to `make test` or `make check` unless the issue asks for a full gate or the implementation is structural/high-risk.
-- Commit atomically with a Conventional Commit style message, for example `fix(compiler): handle ...`.
-- Open a PR whose body includes scope, issue links, SFEP/design link when
-  applicable, verification commands, and residual concerns. Use `Closes #N`
-  when a GitHub mirror exists; always include the Linear issue link
-  (`Linear: SFN-123`).
+- Check every acceptance criterion and run the issue's verification commands
+  plus the `sailfin-check` ladder. Prefer targeted tests; use full gates only
+  when requested or warranted by structural/high-risk work.
+- Commit the focused change and open a draft PR with the issue and design links,
+  acceptance status, exact verification commands, and residual concerns.
+- Include `Fixes SFN-123` for Linear integration and `Closes #N` when a GitHub
+  mirror exists. Move the Linear issue to `In Review`; merging, not this skill,
+  completes it.
+- Report the issue, branch, PR, verification results, follow-ups, and anything
+  surprising enough to improve future grooming.

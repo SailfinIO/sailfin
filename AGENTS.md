@@ -30,7 +30,7 @@
 
 ## Style, Tests, and Documentation
 
-- `docs/style-guide.md` is the single source of truth for coding conventions (naming, comments, effect-annotation style, error handling, file size budgets); `.claude/rules/code-style.md` is the always-loaded summary. Headline rules: effects spelled explicitly and listed alphabetically (`fn foo() -> Bar ![io, model]`); `snake_case` functions/locals, `PascalCase` types, `_underscore` private helpers; comments explain *why* and cite issues/SFEPs — never `TODO`s, commented-out code, or "this PR" language.
+- `docs/style-guide.md` is the single source of truth for coding conventions (naming, comments, effect-annotation style, error handling, file size budgets). Headline rules: effects spelled explicitly and listed alphabetically (`fn foo() -> Bar ![io, model]`); `snake_case` functions/locals, `PascalCase` types, `_underscore` private helpers; comments explain *why* and cite issues/SFEPs — never `TODO`s, commented-out code, or "this PR" language.
 - Align terminology with the language spec at `site/src/content/docs/docs/reference/spec/` (capsule, fleet, provenance card) and note currency or latency literals as comments until syntax support arrives.
 - Before committing touched `.sfn` files under `compiler/src/` or `runtime/`, run `sfn fmt --write <files>` and then `sfn fmt --check <files>` (or the equivalent `build/bin/sfn` commands).
 - Stage regression tests beside related coverage in `compiler/tests/`; prefer Sailfin-native tests and slim fixtures over recorded generated output. For issue verification, list the narrowest relevant `build/bin/sfn test <path>` / `-k <name>` command rather than a full-suite target unless the issue is explicitly a full-gate, release, determinism, or structural-change task.
@@ -46,6 +46,6 @@
 ## Codex Workflow Notes
 
 - Codex-specific setup lives under `.codex/`: `config.toml` enables hooks/skills, `hooks/` mirrors the provider-neutral session safeguards, `skills/` holds reusable Sailfin workflows, and `prompts/` contains web/CLI prompt templates.
-- For autonomous issue pickup in Codex web or CLI, use `.codex/prompts/pickup.md`; it mirrors the Claude `/pickup` flow but branches as `codex/<issue>-<slug>`.
+- For autonomous issue pickup, invoke the `sailfin-pickup` skill; `.codex/prompts/pickup.md` is the minimal web/CLI entry point.
 - For SFEP work in Codex, use `.codex/prompts/sfep.md` and the proposal process in `docs/proposals/0001-sfep-process.md`.
 - If Codex does not auto-load repo-local skills/hooks in a given environment, explicitly mention the relevant `.codex/skills/*/SKILL.md` file or paste the matching `.codex/prompts/*.md` template.
