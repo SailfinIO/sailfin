@@ -990,6 +990,11 @@ fn sfn_fs_write_lines(path: *u8, lines: *u8) -> void ![io] {
         let mode_trunc: string = "wb";
         let ft: *File = fopen(path, mode_trunc as *u8);
         if ft as i64 != 0 { fclose(ft); }
+        // The truncation above leaves a zero-length file, which `fs.exists`
+        // reports as a successful emit — the same main-less-IR failure a
+        // short write produces. Remove it so the caller's completeness
+        // check fails (SFN-542).
+        let _ = unlink(path);
         return;
     }
 
@@ -1005,6 +1010,9 @@ fn sfn_fs_write_lines(path: *u8, lines: *u8) -> void ![io] {
     if data_addr == 0 {
         if n > 0 {
             fclose(f);
+            // Same reasoning as the absurd-count arm above: an empty file
+            // left behind reads as a complete emit (SFN-542).
+            let _ = unlink(path);
             return;
         }
     }
@@ -1013,12 +1021,15 @@ fn sfn_fs_write_lines(path: *u8, lines: *u8) -> void ![io] {
     let newline: string = "\n";
     let nl_ptr: *u8 = newline as *u8;
 
+    let mut short_write: bool = false;
     let mut i: i64 = 0;
     loop {
         if i >= n { break; }
         let slot_ptr: *i64 = slots + i;
         let entry_addr: i64 = sailfin_intrinsic_pointer_read_i64(slot_ptr);
-        if entry_addr == 0 { let _ = _fs_fwrite_all(nl_ptr, 1, f); } else {
+        if entry_addr == 0 {
+            if _fs_fwrite_all(nl_ptr, 1, f) != 1 { short_write = true; }
+        } else {
             let entry: *u8 = entry_addr as *u8;
             let mut line: *u8 = entry;
             if _fs_is_immediate(entry) { line = _fs_decode_immediate(entry); }
@@ -1027,11 +1038,32 @@ fn sfn_fs_write_lines(path: *u8, lines: *u8) -> void ![io] {
             // truncated mid-emit — this is the primary self-host IR emit
             // path (`fs.writeLines`), so a dropped tail here mirrors the
             // `undefined main` link failure `_fs_fwrite_all` guards.
-            let _ = _fs_fwrite_all(line, llen, f);
-            let _ = _fs_fwrite_all(nl_ptr, 1, f);
+            if _fs_fwrite_all(line, llen, f) != llen { short_write = true; }
+            if _fs_fwrite_all(nl_ptr, 1, f) != 1 { short_write = true; }
         }
         i = i + 1;
     }
 
-    fclose(f);
+    let close_rc: i32 = fclose(f);
+    // Discarding these counts is what let a truncated `.ll` reach the
+    // linker: the tail of the emitted module is `define @main`, so a
+    // dropped tail links as `undefined reference to 'main'`. Remove the
+    // partial file so `fs.exists` reports the failure to the caller
+    // (SFN-542).
+    //
+    // Removal is confined to this function on purpose. Both `fs.writeLines`
+    // call sites are compiler-internal, write a fresh build artifact into a
+    // path they just deleted, and already consume `fs.exists` as their
+    // completeness check. `sfn_fs_write_file` is deliberately NOT given the
+    // same treatment: its callers include `fmt --write` over user sources
+    // and arbitrary `-o` / `--csv` paths, where `fopen` follows a symlink
+    // but `unlink` would remove the link itself — losing the node on top of
+    // the content `"wb"` already truncated.
+    //
+    // When `unlink` itself fails (read-only parent, sticky-bit directory)
+    // the truncated file survives and the caller is back to the unguarded
+    // behaviour; a `void` signature cannot report that. The structurally
+    // complete answer is tmp-file + atomic rename, as
+    // `compiler/src/build/fs.sfn:138-166` already does.
+    if short_write || close_rc != 0 { let _ = unlink(path); }
 }
