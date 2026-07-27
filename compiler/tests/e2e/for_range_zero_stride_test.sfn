@@ -1,0 +1,124 @@
+// End-to-end regression for invalid range-`for` lowering (SFN-533).
+//
+// A literal zero stride used to produce an untagged diagnostic, then continue
+// lowering a loop whose positive- and negative-stride guards were both false.
+// The build therefore exited 0 with a loop body that could never execute.
+// Malformed numeric ranges also fell through to array iteration after their
+// precise range-parser diagnostics were discarded. Both paths now fail closed
+// with E1004. The success controls pin the unaffected literal and computed
+// stride paths.
+import { find } from "sfn/strings";
+import { expect_contains_str, expect_eq_bool } from "sfn/test";
+
+import { parse_range_iterable } from "../../src/llvm/expression_lowering/native/core_parse";
+import { print_llvm_ir_from_text } from "../../src/llvm/lowering/entrypoints";
+
+fn _sfn_bin() -> string ![io] {
+    let configured = env.get("SAILFIN_BIN");
+    if configured.length > 0 { return configured; }
+    return "build/bin/sfn";
+}
+
+fn _scratch_dir() -> string ![io] {
+    let mut dir = env.get("SAILFIN_TEST_SCRATCH");
+    if dir.length == 0 { dir = "/tmp"; }
+    fs.createDirectory(dir, true);
+    return dir;
+}
+
+fn _write_source(name: string, source: string) -> string ![io] {
+    let path = _scratch_dir() + "/" + name;
+    if fs.exists(path) { fs.deleteFile(path); }
+    fs.writeFile(path, source);
+    return path;
+}
+
+fn _assert_emit_fails(name: string, source: string, diagnostic: string) ![io] {
+    let src = _write_source(name, source);
+    let exit = process.run_capture([_sfn_bin(), "emit", "llvm", src], process.environ());
+    let out = process.capture_take_stdout();
+    let err = process.capture_take_stderr();
+    if fs.exists(src) { fs.deleteFile(src); }
+
+    assert exit != 0;
+    assert find(out + err, "llvm lowering [fatal] [E1004]:", 0) >= 0;
+    assert find(out + err, diagnostic, 0) >= 0;
+}
+
+fn _assert_emit_succeeds(name: string, source: string) ![io] {
+    let src = _write_source(name, source);
+    let exit = process.run_capture([_sfn_bin(), "emit", "llvm", src], process.environ());
+    let out = process.capture_take_stdout();
+    let err = process.capture_take_stderr();
+    if fs.exists(src) { fs.deleteFile(src); }
+
+    assert exit == 0;
+    assert out.length > 0;
+    assert find(out + err, "[E1004]", 0) < 0;
+}
+
+test "range for: literal zero stride fails closed and names the function" ![io] {
+    _assert_emit_fails("sfn533_zero_stride.sfn", "fn zero_stride_probe() -> int {\n"
+        + "    let mut n: int = 0;\n"
+        + "    for i in 0..10..0 { n += 1; }\n"
+        + "    return n;\n"
+        + "}\n", "`.for` stride must not be zero in `zero_stride_probe`");
+}
+
+test "range for: missing start surfaces the range parse diagnostic" ![io] {
+    let parsed = parse_range_iterable("..10");
+    let parse_result = expect_eq_bool(parsed.success, false);
+    if !parse_result.ok { throw parse_result.message; }
+    let diagnostic_result = expect_contains_str(parsed.diagnostics[0], "`.for` range missing start expression");
+    if !diagnostic_result.ok { throw diagnostic_result.message; }
+
+    let native = "; Sailfin Native Prototype\n"
+        + ".module sfn533_missing_start\n\n"
+        + ".fn missing_start_probe() -> int\n"
+        + ".meta return int\n"
+        + ".meta effects none\n"
+        + "    .for i in ..10\n"
+        + "        ret 1\n"
+        + "    .endfor\n"
+        + "    ret 0\n"
+        + ".endfn\n";
+    let lowering_result = expect_eq_bool(print_llvm_ir_from_text(native, "sfn533_missing_start"), false);
+    if !lowering_result.ok { throw lowering_result.message; }
+}
+
+test "range for: missing end surfaces the range parse diagnostic" ![io] {
+    let parsed = parse_range_iterable("0..");
+    let parse_result = expect_eq_bool(parsed.success, false);
+    if !parse_result.ok { throw parse_result.message; }
+    let diagnostic_result = expect_contains_str(parsed.diagnostics[0], "`.for` range missing end expression");
+    if !diagnostic_result.ok { throw diagnostic_result.message; }
+
+    let native = "; Sailfin Native Prototype\n"
+        + ".module sfn533_missing_end\n\n"
+        + ".fn missing_end_probe() -> int\n"
+        + ".meta return int\n"
+        + ".meta effects none\n"
+        + "    .for i in 0..\n"
+        + "        ret 1\n"
+        + "    .endfor\n"
+        + "    ret 0\n"
+        + ".endfn\n";
+    let lowering_result = expect_eq_bool(print_llvm_ir_from_text(native, "sfn533_missing_end"), false);
+    if !lowering_result.ok { throw lowering_result.message; }
+}
+
+test "range for: non-zero literal stride still emits" ![io] {
+    _assert_emit_succeeds("sfn533_nonzero_literal.sfn", "fn literal_stride_probe() -> int {\n"
+        + "    let mut n: int = 0;\n"
+        + "    for i in 0..10..2 { n += 1; }\n"
+        + "    return n;\n"
+        + "}\n");
+}
+
+test "range for: computed stride still emits" ![io] {
+    _assert_emit_succeeds("sfn533_computed_stride.sfn", "fn computed_stride_probe(stride: int) -> int {\n"
+        + "    let mut n: int = 0;\n"
+        + "    for i in 0..10..stride { n += 1; }\n"
+        + "    return n;\n"
+        + "}\n");
+}
