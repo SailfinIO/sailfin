@@ -59,17 +59,17 @@ test "native IR layout gate: malformed enum payload is fatal" {
         + malformed_line), true).ok;
 }
 
-test "native IR layout gate: well-formed layouts remain diagnostic-free" {
+test "native IR layout gate: well-formed spaced types remain diagnostic-free" {
     let artifact = ".module demo\n" + ".struct Box\n"
         + ".layout struct name=Box size=8 align=8\n"
-        + ".layout field value type=int offset=0 size=8 align=8\n"
-        + ".field value: int\n"
+        + ".layout field value type=Result<string, int> offset=0 size=8 align=8\n"
+        + ".field value: Result<string, int>\n"
         + ".endstruct\n"
         + ".enum Option\n"
         + ".layout enum name=Option size=16 align=8 tag_type=i64 tag_size=8 tag_align=8\n"
         + ".layout variant Some tag=1 offset=8 size=8 align=8\n"
-        + ".layout payload Some.value type=int offset=8 size=8 align=8\n"
-        + ".variant Some(value: int)\n"
+        + ".layout payload Some.value type=Map<string, Result<int, Error>> offset=8 size=8 align=8\n"
+        + ".variant Some(value: Map<string, Result<int, Error>>)\n"
         + ".endenum\n";
     let result = parse_native_artifact(artifact);
 

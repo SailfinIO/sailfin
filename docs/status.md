@@ -534,7 +534,9 @@ here.
   the enclosing struct or enum and includes the offending line. The parser
   previously forwarded only untagged leaf diagnostics, dropped the malformed
   entry, and allowed lowering to continue with wrong field offsets. Well-formed
-  `.sfn-asm` parsing is unchanged. Design note:
+  whitespace-bearing generic field and payload types remain valid: their
+  `type=` value ends at the first keyed layout attribute. Well-formed
+  `.sfn-asm` emission is byte-identical. Design note:
   `docs/proposals/design-notes/sfn-526-lowering-fatal-gate-audit.md`.
 
 ## Feature Matrix
