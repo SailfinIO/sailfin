@@ -717,12 +717,26 @@ fn parse_cast_expression(text: string) -> CastParseResult {
             continue;
         }
         if ch == "<" {
-            angle_depth += 1;
+            // Only top-level angle brackets can belong to the cast target's
+            // generic type syntax. Counting `<` inside the operand's grouping
+            // makes `(x << 8) as i32` leave angle_depth at 2 after `)`, hiding
+            // the outer ` as ` separator (SFN-560).
+            if paren_depth == 0 {
+                if bracket_depth == 0 {
+                    if brace_depth == 0 { angle_depth += 1; }
+                }
+            }
             index += 1;
             continue;
         }
         if ch == ">" {
-            if angle_depth > 0 { angle_depth -= 1; }
+            if paren_depth == 0 {
+                if bracket_depth == 0 {
+                    if brace_depth == 0 {
+                        if angle_depth > 0 { angle_depth -= 1; }
+                    }
+                }
+            }
             index += 1;
             continue;
         }
