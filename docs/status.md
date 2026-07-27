@@ -505,6 +505,15 @@ here.
   and every websocket send/close operated on fd 0 (stdin) — fixed by binding
   the value before the cast; the underlying cast-lowering bug is tracked
   separately (SFN-560).
+- **LLVM instruction lowering fails closed instead of dropping instructions**
+  (`E1003`, SFN-528): `break` and `continue` outside a loop, plus any
+  instruction tag not handled by `lower_instruction_range`, now emit a tagged
+  `llvm lowering [fatal] [E1003]` diagnostic and fail the build non-zero.
+  Unsupported-tag diagnostics include both the numeric tag and enclosing
+  function name. These conditions previously emitted only an untagged
+  diagnostic, so the instruction and any side effect it carried vanished from
+  the LLVM function while the build exited 0. Design note:
+  `docs/proposals/design-notes/sfn-526-lowering-fatal-gate-audit.md`.
 
 ## Feature Matrix
 

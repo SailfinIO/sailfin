@@ -1,0 +1,46 @@
+// End-to-end regression for the LLVM instruction-drop fail-closed gate
+// (SFN-528).
+//
+// `lower_instruction_range` used to diagnose `break` and `continue` outside a
+// loop without tagging either diagnostic `[fatal]`. LLVM lowering then omitted
+// the instruction, so an invalid control-flow side effect became a no-op and
+// `sfn emit llvm` exited 0. These subprocess tests pin the non-zero exit and
+// stderr diagnostic at both reachable consumption sites.
+import { find } from "sfn/strings";
+
+fn _sfn_bin() -> string ![io] {
+    let configured = env.get("SAILFIN_BIN");
+    if configured.length > 0 { return configured; }
+    return "build/bin/sfn";
+}
+
+fn _scratch_dir() -> string ![io] {
+    let mut dir = env.get("SAILFIN_TEST_SCRATCH");
+    if dir.length == 0 { dir = "/tmp"; }
+    fs.createDirectory(dir, true);
+    return dir;
+}
+
+fn _assert_emit_fails_closed(name: string, source: string, diagnostic: string) ![io] {
+    let path = _scratch_dir() + "/" + name;
+    if fs.exists(path) { fs.deleteFile(path); }
+    fs.writeFile(path, source);
+
+    let exit = process.run_capture([_sfn_bin(), "emit", "llvm", path], process.environ());
+    let _out = process.capture_take_stdout();
+    let err = process.capture_take_stderr();
+
+    if fs.exists(path) { fs.deleteFile(path); }
+
+    assert exit != 0;
+    assert find(err, "llvm lowering [fatal] [E1003]:", 0) >= 0;
+    assert find(err, diagnostic, 0) >= 0;
+}
+
+test "lowering instruction gate: break outside loop fails closed" ![io] {
+    _assert_emit_fails_closed("sfn528_break_outside_loop.sfn", "fn main() -> i32 {\n    let mut n: int = 1;\n    if n > 0 { break; }\n    return n;\n}\n", "`break` outside loop in `main`");
+}
+
+test "lowering instruction gate: continue outside loop fails closed" ![io] {
+    _assert_emit_fails_closed("sfn528_continue_outside_loop.sfn", "fn main() -> i32 {\n    let mut n: int = 1;\n    if n > 0 { continue; }\n    return n;\n}\n", "`continue` outside loop in `main`");
+}
