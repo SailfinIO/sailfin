@@ -144,6 +144,63 @@ jobs:
         working-directory: site
         run: npm run check:public-claims
 
+  # A `claude/sfn-<N>-…` branch name is not cosmetic. Linear's GitHub
+  # integration binds the branch to `SFN-<N>` and moves that issue on branch,
+  # commit, and merge events — with no magic word and no mention of the issue
+  # anywhere in the PR text. So a branch that names an issue number it is not
+  # actually working silently hijacks someone else's issue: it starts the issue
+  # on push and can resolve it on merge.
+  #
+  # This is not hypothetical. PR #2648 picked `sfn-572` as a free-looking slug
+  # for docs work with no backing issue; SFN-572 was a real Windows
+  # `run_capture` bug filed minutes earlier, and the branch pulled it out of
+  # `Triage` into `In Progress`.
+  #
+  # The rule enforced here: if the branch claims an issue number, the PR must
+  # actually close that issue. Work with no backing Linear issue must use a
+  # branch prefix containing no `sfn-<N>` segment. Deliberately *not* gated on
+  # `ci-scope.outputs.source` — the incident above was a docs-only PR, which is
+  # exactly where the path-scoped jobs do not run.
+  linear-branch-claim:
+    name: Linear branch claim
+    if: ${{ github.event_name == 'pull_request' }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - name: Assert an sfn-<N> branch claims the issue it names
+        shell: bash
+        # Passed through env, never interpolated into the script body: a PR
+        # title/body is attacker-controlled text on a public repo.
+        env:
+          HEAD_REF: ${{ github.event.pull_request.head.ref }}
+          PR_BODY: ${{ github.event.pull_request.body }}
+        run: |
+          set -euo pipefail
+
+          if [[ ! "${HEAD_REF}" =~ ^claude/sfn-([0-9]+)- ]]; then
+            echo "[linear-branch-claim] '${HEAD_REF}' names no SFN issue — nothing to claim."
+            exit 0
+          fi
+          issue="SFN-${BASH_REMATCH[1]}"
+
+          # Linear's closing magic words (docs/conventions/linear-workflow.md).
+          if grep -Eiq "(fixes|closes|resolves|implements|completes)[[:space:]]+${issue}([^0-9]|$)" <<<"${PR_BODY:-}"; then
+            echo "[linear-branch-claim] ok: branch claims ${issue} and the body closes it."
+            exit 0
+          fi
+
+          echo "[linear-branch-claim] branch '${HEAD_REF}' claims ${issue}, but the PR body never closes it." >&2
+          echo "" >&2
+          echo "Linear binds the branch to ${issue} on name alone, so this PR will move" >&2
+          echo "${issue} even though it never mentions it. Either:" >&2
+          echo "" >&2
+          echo "  * this PR really does resolve ${issue} -> add 'Fixes ${issue}' to the body; or" >&2
+          echo "  * it does not -> rename the branch. Work with no backing Linear issue" >&2
+          echo "    takes a prefix with no sfn-<N> segment, e.g. 'claude/<topic>-<slug>'." >&2
+          echo "" >&2
+          echo "Never pick an sfn-<N> number without confirming you claimed that issue." >&2
+          exit 1
+
   # Assert the native shard map (`sfn dev shard`, SFN-200) still covers every
   # test file `make test` runs — no gaps, no overlaps. The whole point of
   # sharding is parallelism; this is the only thing standing between
@@ -1364,6 +1421,7 @@ jobs:
     name: Required CI gate
     needs:
       - ci-scope
+      - linear-branch-claim
       - check-public-claims
       - check-fast
       - build-compiler-linux
@@ -1377,6 +1435,8 @@ jobs:
     timeout-minutes: 5
     env:
       CI_SCOPE_RESULT: ${{ needs.ci-scope.result }}
+      EVENT_NAME: ${{ github.event_name }}
+      LINEAR_BRANCH_CLAIM: ${{ needs.linear-branch-claim.result }}
       SOURCE_CI: ${{ needs.ci-scope.outputs.source }}
       PUBLIC_CLAIMS_CI: ${{ needs.ci-scope.outputs.public_claims }}
       CHECK_PUBLIC_CLAIMS: ${{ needs.check-public-claims.result }}
@@ -1428,6 +1488,16 @@ jobs:
               fail=$((fail + 1))
             fi
           }
+
+          # Checked outside the path scope: a branch that claims someone
+          # else's SFN number does damage regardless of which files it touches,
+          # and the incident that motivated it was a docs-only PR.
+          if [ "${EVENT_NAME:-}" = "pull_request" ]; then
+            check "Linear branch claim" "$LINEAR_BRANCH_CLAIM"
+          else
+            echo "[required-ci] Linear branch claim applies to pull_request events only."
+            echo "| Linear branch claim | n/a outside pull_request |" >> "$GITHUB_STEP_SUMMARY"
+          fi
 
           if [ "${SOURCE_CI:-}" = "true" ]; then
             check "Fast static check (sfn check compiler/src/)" "$CHECK_FAST"

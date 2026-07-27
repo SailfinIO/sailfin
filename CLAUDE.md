@@ -128,6 +128,26 @@ classification plus the release axis (`release:*`, `seed-blocker`).
 Work lands on `claude/sfn-<N>-<slug>`; the PR cites **`Fixes SFN-<N>`** so Linear
 closes the issue on merge. The `sfn-<N>` branch prefix is load-bearing.
 
+**Never invent that number.** Linear binds a branch to `SFN-<N>` on the *name
+alone* — no magic word, no mention in the PR text — and then starts that issue
+on push and can resolve it on merge. Naming a number you did not claim hijacks
+someone else's issue silently. It must come from an issue you actually picked
+up. **Work with no backing issue takes a prefix with no `sfn-<N>` segment**
+(`claude/<topic>-<slug>`). CI's `Linear branch claim` gate enforces this: an
+`sfn-<N>` branch whose PR body does not close `SFN-<N>` fails.
+
+Referencing *other* issues has a lesser version of the same effect. **Any
+`SFN-<N>` occurrence in a branch name, commit message, or PR body links that
+issue — trailer or plain prose, magic word or none** — and linking alone moves a
+non-terminal issue to `In Progress`. Only the closing words
+(`Fixes`/`Closes`/`Resolves`/`Implements`/`Completes`) additionally resolve it on
+merge; `Refs` and a bare mention link without closing.
+
+So naming a background issue is never free: expect it to start, and re-check its
+status after opening the PR. When starting it is not acceptable — it belongs to
+someone else, or sits in `Triage` — describe it without the identifier ("the
+Windows `run_capture` issue") and link by URL instead.
+
 **Anti-patterns:** picking up an ungroomed issue; expanding scope mid-session
 (comment and pause instead); bundling issues into one PR; picking up from the
 roadmap (it isn't pickable — Linear `Ready` is).
