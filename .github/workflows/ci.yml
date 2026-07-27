@@ -770,11 +770,6 @@ jobs:
             "$PWD/build/aarch64-bootstrap/pass-1/sfn" build --no-cache -p compiler \
               --work-dir build/aarch64-bootstrap/pass-2 \
               -o build/aarch64-bootstrap/pass-2/sfn
-          cmp build/aarch64-bootstrap/pass-1/sfn build/aarch64-bootstrap/pass-2/sfn
-          build/aarch64-bootstrap/pass-2/sfn run examples/basics/hello-world.sfn
-          SAILFIN_BOOTSTRAP_PROBE_PATH=build/aarch64-bootstrap/aarch64-probe \
-            build/aarch64-bootstrap/pass-2/sfn run \
-              compiler/tests/e2e/fixtures/aarch64_bootstrap_probe.sfn
 
       - name: Bundle native compiler passes
         shell: bash
@@ -794,6 +789,16 @@ jobs:
           path: aarch64-bootstrap-compilers.tar.gz
           if-no-files-found: error
           retention-days: 1
+
+      - name: Verify native fixed point
+        shell: bash
+        run: |
+          set -euo pipefail
+          cmp build/aarch64-bootstrap/pass-1/sfn build/aarch64-bootstrap/pass-2/sfn
+          build/aarch64-bootstrap/pass-2/sfn run examples/basics/hello-world.sfn
+          SAILFIN_BOOTSTRAP_PROBE_PATH=build/aarch64-bootstrap/aarch64-probe \
+            build/aarch64-bootstrap/pass-2/sfn run \
+              compiler/tests/e2e/fixtures/aarch64_bootstrap_probe.sfn
 
       - name: Mark compiler artifact ready
         id: artifact_ready
