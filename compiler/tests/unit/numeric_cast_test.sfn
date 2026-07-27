@@ -30,8 +30,8 @@
 //        i1  → double/float         → uitofp
 //        unsigned → double/float    → uitofp
 //        signed   → double/float    → sitofp
-//        double/float → unsigned    → fptoui
-//        double/float → signed      → fptosi
+//        double/float → unsigned    → llvm.fptoui.sat.*
+//        double/float → signed      → llvm.fptosi.sat.*
 //        float → double             → fpext
 //        double → float             → fptrunc
 //        any  → i1 via `as`         → diagnostic ("use `x != 0`")

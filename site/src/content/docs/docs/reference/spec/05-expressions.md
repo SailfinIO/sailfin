@@ -82,8 +82,8 @@ A lambda's parameter and return types may be **omitted** when it is passed direc
 | Signed int → `float`/`double` | `sitofp` | Signed integer to FP |
 | Unsigned int → `float`/`double` | `uitofp` | Unsigned integer to FP |
 | `bool` → `float`/`double` | `uitofp` | `true` → 1.0, not -1.0 |
-| `float`/`double` → signed int | `fptosi` | Truncates toward zero |
-| `float`/`double` → unsigned int | `fptoui` | Truncates toward zero |
+| `float`/`double` → signed int | `llvm.fptosi.sat.*` | Truncates toward zero in range; clamps to the target bounds; NaN → 0 |
+| `float`/`double` → unsigned int | `llvm.fptoui.sat.*` | Truncates toward zero in range; clamps to the target bounds; NaN → 0 |
 | `f32` → `float` (`double`) | `fpext` | FP widening |
 | `float` (`double`) → `f32` | `fptrunc` | FP narrowing |
 | `*T` → `*U` | `bitcast` | Pointer reinterpret |
@@ -91,13 +91,19 @@ A lambda's parameter and return types may be **omitted** when it is passed direc
 | `*T` → `int` | `ptrtoint` | Address-as-integer |
 | same → same | identity | No-op |
 
+Float-to-integer `as` casts are saturating, matching Rust: finite values are
+truncated toward zero and clamped to the target integer range, infinities clamp
+to the corresponding bound, and NaN converts to zero. The lowering uses LLVM's
+`llvm.fptosi.sat.*` / `llvm.fptoui.sat.*` intrinsics rather than the bare
+conversion instructions, whose out-of-range result is poison.
+
 ### Rejected casts
 
 `expr as bool` is rejected at the LLVM lowering level for any operand type — pointers, integers, and floats alike. The compiler emits a fix-it suggesting an explicit comparison: `x != null` for pointers, `x != 0` for integers, `x != 0.0` for floats. Reinterpreting bit patterns into `i1` is almost always a bug; the comparison is the operation users actually want.
 
 ### Known limitations (Slice D, 2026-05-03)
 
-- **Source-level signedness is recovered only for a plain identifier or parameter operand.** Sailfin's `i8`/`u8`/`i16`/`u16`/`i32`/`u32`/`i64`/`u64`/`usize` annotations all collapse to LLVM's signless `i8`/`i16`/`i32`/`i64`, so the cast lowering recovers sign from the operand's source-level annotation via its local/parameter binding: `255u8 as u64` now lowers as `zext` and produces `255` (SFN-503). A **compound operand** — `s.field as u64`, `xs[i] as u64`, `f() as u64`, `(a + b) as u64` — carries no source annotation available to the lowering pass and still selects the signed forms (`sext`/`sitofp`/`fptosi`), so an unsigned compound expression can still produce a sign-extended result. Closing that gap needs the checker's inferred type threaded through expression lowering, scoped to the typecheck slice of SFEP-0058 §3.3 (SFN-501).
+- **Integer-source signedness is recovered only for a plain identifier or parameter operand.** Sailfin's `i8`/`u8`/`i16`/`u16`/`i32`/`u32`/`i64`/`u64`/`usize` annotations all collapse to LLVM's signless `i8`/`i16`/`i32`/`i64`, so the cast lowering recovers sign from the operand's source-level annotation via its local/parameter binding: `255u8 as u64` now lowers as `zext` and produces `255` (SFN-503). A **compound integer operand** — `s.field as u64`, `xs[i] as u64`, `f() as u64`, `(a + b) as u64` — carries no source annotation available to the lowering pass and still selects the signed forms (`sext`/`sitofp`), so an unsigned compound expression can still produce a sign-extended result. Float-to-integer casts do not share this limitation because the target annotation preserves its sign. Closing the integer-source gap needs the checker's inferred type threaded through expression lowering, scoped to the typecheck slice of SFEP-0058 §3.3 (SFN-501).
 - **Mixed `int` + `float` in a binary op (without an explicit cast) still silently widens to `double`** — the architect-planned `dominant_type` tightening that would reject this rides on Slice E (`number` retirement). Workaround today: spell the cast (`x as float + y` or `x + y as int`). Tracked in [issue #296](https://github.com/SailfinIO/sailfin/issues/296).
 
 ## Sign-sensitive binary operators

@@ -14,8 +14,8 @@
 //   i1  → double/float            → uitofp
 //   unsigned int → double/float   → uitofp (SFN-503; identifier operands only)
 //   signed int   → double/float   → sitofp
-//   double/float → unsigned int   → fptoui (SFN-503; identifier operands only)
-//   double/float → signed int     → fptosi
+//   double/float → unsigned int   → llvm.fptoui.sat.* (SFN-570)
+//   double/float → signed int     → llvm.fptosi.sat.* (SFN-570)
 //   float → double                → fpext
 //   double → float                → fptrunc
 //   any  → i1 via `as`            → diagnostic ("use `x != 0`")
@@ -127,11 +127,12 @@ test "numeric-cast: int → float lowers as sitofp i64 to double" ![io] {
     assert contains(body, "sitofp i64 %x to double");
 }
 
-// ---- float → int lowers as fptosi ----
-test "numeric-cast: float → int lowers as fptosi double to i64" ![io] {
+// ---- float → int lowers through the saturating intrinsic ----
+test "numeric-cast: float → int lowers as llvm.fptosi.sat" ![io] {
     let body = _emit_body("fn back(x: float) -> int { return x as int; }", "define i64 @back", "float_to_int");
     assert body.length > 0;
-    assert contains(body, "fptosi double %x to i64");
+    assert contains(body, "call i64 @llvm.fptosi.sat.i64.f64(double %x)");
+    assert ! contains(body, " = fptosi ");
 }
 
 // ---- i32 → i64 lowers as sext ----
@@ -170,11 +171,12 @@ test "numeric-cast: u32 → double lowers as uitofp" ![io] {
     assert contains(body, "uitofp i32 %x to double");
 }
 
-// ---- f64 → u32 lowers as fptoui (SFN-503) ----
-test "numeric-cast: double → u32 lowers as fptoui" ![io] {
+// ---- f64 → u32 lowers through the saturating intrinsic (SFN-570) ----
+test "numeric-cast: double → u32 lowers as llvm.fptoui.sat" ![io] {
     let body = _emit_body("fn narrow(x: float) -> u32 { return x as u32; }", "define i32 @narrow", "double_to_u32");
     assert body.length > 0;
-    assert contains(body, "fptoui double %x to i32");
+    assert contains(body, "call i32 @llvm.fptoui.sat.i32.f64(double %x)");
+    assert ! contains(body, " = fptoui ");
 }
 
 // ---- i64 → i32 lowers as trunc ----

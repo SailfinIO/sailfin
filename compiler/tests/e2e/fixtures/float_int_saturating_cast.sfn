@@ -1,0 +1,23 @@
+// Fixture for `float_int_saturating_cast_test.sfn` (SFN-570): float→integer
+// `as` casts truncate in range, clamp out of range, and map NaN to zero.
+fn main() -> int ![io] {
+    let negative: f64 = -1.5;
+    let negative_u32: u32 = negative as u32;
+    print("negative_u32=" + (negative_u32 as u64));
+
+    let high: f64 = 1e30;
+    let high_u32: u32 = high as u32;
+    print("high_u32=" + (high_u32 as u64));
+
+    let zero: f64 = 0.0;
+    let nan: f64 = zero / zero;
+    let nan_u32: u32 = nan as u32;
+    print("nan_u32=" + (nan_u32 as u64));
+
+    let low_i32: i32 = (-1e30) as i32;
+    print("low_i32=" + (low_i32 as i64));
+
+    let high_i32: i32 = high as i32;
+    print("high_i32=" + (high_i32 as i64));
+    return 0;
+}

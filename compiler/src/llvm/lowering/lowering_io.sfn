@@ -219,14 +219,58 @@ fn ensure_intrinsic_declarations(lines: string[]) -> string[] {
         index += 1;
     }
 
-    let mut _if258: boolean = false;
-    if !uses_round { _if258 = true; }
-    if has_round_decl { _if258 = true; }
-    if has_round_define { _if258 = true; }
-    if _if258 { return lines; }
-
     let mut out = lines;
-    out.push("");
-    out.push("declare double @round(double)");
+    if uses_round && !has_round_decl && !has_round_define {
+        out.push("");
+        out.push("declare double @round(double)");
+    }
+
+    let int_types = ["i8", "i16", "i32", "i64"];
+    let float_types = ["half", "bfloat", "float", "double"];
+    let float_suffixes = ["f16", "bf16", "f32", "f64"];
+    let operations = ["fptosi", "fptoui"];
+    let mut operation_index: int = 0;
+    loop {
+        if operation_index >= operations.length { break; }
+        let mut int_index: int = 0;
+        loop {
+            if int_index >= int_types.length { break; }
+            let mut float_index: int = 0;
+            loop {
+                if float_index >= float_types.length { break; }
+                let symbol = "llvm." + operations[operation_index] + ".sat."
+                    + int_types[int_index]
+                    + "."
+                    + float_suffixes[float_index];
+                let call_prefix = "call " + int_types[int_index] + " @" + symbol
+                    + "(";
+                let declaration = "declare " + int_types[int_index] + " @"
+                    + symbol
+                    + "("
+                    + float_types[float_index]
+                    + ")";
+                let mut used: boolean = false;
+                let mut declared: boolean = false;
+                let mut line_index: int = 0;
+                loop {
+                    if line_index >= out.length { break; }
+                    if index_of(out[line_index], call_prefix) >= 0 {
+                        used = true;
+                    }
+                    if trim_text(out[line_index]) == declaration {
+                        declared = true;
+                    }
+                    line_index += 1;
+                }
+                if used && !declared {
+                    out.push("");
+                    out.push(declaration);
+                }
+                float_index += 1;
+            }
+            int_index += 1;
+        }
+        operation_index += 1;
+    }
     return out;
 }  // make_native_module_for_emit lives in lowering_core.sfn (used by compile_native_text_to_llvm_file)
