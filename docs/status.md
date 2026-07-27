@@ -519,6 +519,15 @@ here.
   diagnostic, so the instruction and any side effect it carried vanished from
   the LLVM function while the build exited 0. Design note:
   `docs/proposals/design-notes/sfn-526-lowering-fatal-gate-audit.md`.
+- **Range-`for` lowering fails closed on invalid ranges** (`E1004`, SFN-533):
+  a literal zero stride now emits a tagged diagnostic naming the enclosing
+  function and stops lowering the loop, instead of emitting a guard whose two
+  stride-direction arms were both false and silently compiling a loop that
+  never executed. A malformed numeric range with a missing start or end now
+  surfaces its range-parser diagnostic and fails the build, instead of falling
+  through to array-iteration lowering. Non-zero literal strides, computed
+  strides, and array iterables are unchanged. Design note:
+  `docs/proposals/design-notes/sfn-526-lowering-fatal-gate-audit.md`.
 
 ## Feature Matrix
 

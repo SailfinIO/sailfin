@@ -202,11 +202,12 @@ from the constructed layout (`native_ir_parser_defs.sfn:408-409` only pushes on
 `success`), or emits the struct with `layout: null`. A truncated layout yields
 a struct with fewer fields than the source declares, and the build succeeds.
 
-### A7 — Zero stride compiles an infinite loop
+### A7 — Zero stride compiles a loop that never executes
 
 `instructions_for_range.sfn:269` — a literal stride normalising to `0.0` pushes
 an untagged diagnostic and **does not return early**; lowering proceeds to build
-the loop with the zero stride. A guaranteed infinite loop is compiled as-is.
+the loop with the zero stride. The emitted positive- and negative-stride guards
+are both false, so the loop body never executes and the build still exits 0.
 
 Related shape at `instructions_for_range.sfn` generally: `lower_for_range`
 returns `null` on failure, and `instructions_for.sfn:436` then falls through to
@@ -324,7 +325,7 @@ Documented at the definition site (`lowering_core.sfn`, above
 | A4 import-shadow mangling | SFN-530 |
 | A5 `arrays.sfn` unchecked dispatch | SFN-531 |
 | A6 layout-parse truncation | SFN-532 |
-| A7 zero-stride infinite loop | SFN-533 |
+| A7 zero-stride loop never executes | SFN-533 |
 
 SFN-492 and SFN-392 are the two already-tracked instances of A1 and remain
 valid as written; A1 is their shared generalization.
