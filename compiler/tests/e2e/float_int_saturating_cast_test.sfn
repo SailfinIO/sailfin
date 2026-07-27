@@ -1,0 +1,25 @@
+// End-to-end regression for saturating float→integer `as` casts (SFN-570).
+//
+// LLVM's bare `fptoui` / `fptosi` instructions produce poison for
+// out-of-range inputs. The Sailfin cast contract instead follows Rust:
+// truncate toward zero in range, clamp at both bounds, and map NaN to zero.
+import { trim_right } from "sfn/strings";
+import { clean_runner_env, nested_runner_scratch } from "sfn/test";
+
+fn _sfn_bin() -> string ![io] {
+    let configured = env.get("SAILFIN_BIN");
+    if configured.length > 0 { return configured; }
+    return "build/bin/sfn";
+}
+
+test "float int cast: out-of-range values and NaN saturate without poison" ![io] {
+    let child_env = clean_runner_env(nested_runner_scratch("float_int_saturating_cast"));
+    let exit = process.run_capture([_sfn_bin(), "run", "compiler/tests/e2e/fixtures/float_int_saturating_cast.sfn"], child_env);
+    let out = trim_right(process.capture_take_stdout());
+    let _err = process.capture_take_stderr();
+    assert exit == 0;
+    let expected = "negative_u32=0\n" + "high_u32=4294967295\n" + "nan_u32=0\n"
+        + "low_i32=-2147483648\n"
+        + "high_i32=2147483647";
+    assert out == expected;
+}

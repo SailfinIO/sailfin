@@ -272,14 +272,14 @@ signedness**, closing the standing KNOWN LIMITATION:
 | wider → narrower (any sign) | truncate | `trunc` |
 | same width, sign flip (`i32`↔`u32`) | bit-reinterpret, no instruction | (identity) |
 | int → float | signed → `sitofp`, unsigned → `uitofp` | |
-| float → int | signed target → `fptosi`, unsigned target → `fptoui` (out-of-range operand is poison — see below) | |
+| float → int | signed target → `llvm.fptosi.sat.*`, unsigned target → `llvm.fptoui.sat.*` | Truncate toward zero in range; clamp to the target bounds; NaN → 0 |
 | `f32`↔`f64` | `fpext` / `fptrunc` | |
 | `bool` (i1) → int | `zext` (true→1) | (unchanged) |
 | any → `bool` via `as` | rejected; use a comparison | (unchanged, `E0537`-style) |
 
-The lowering already emits `sext`/`trunc`/`sitofp`/`fptosi`/`fpext`/`fptrunc`
-correctly *by width* — the only change is selecting `zext` vs `sext` and `uitofp`/
-`fptoui` vs the signed forms by consulting `integer_type_is_signed` on the
+The lowering already emits `sext`/`trunc`/`sitofp`/`fpext`/`fptrunc`
+correctly *by width* — the integer-source change is selecting `zext` vs `sext`
+and `uitofp` vs the signed forms by consulting `integer_type_is_signed` on the
 **source** (for extension) and **target** (for float↔int). Because sign is
 tracked in the frontend, the lowering needs the source *Sailfin* type, not just
 the `LLVMOperand.llvm_type` (which is sign-agnostic). This is threaded via the
@@ -294,17 +294,13 @@ Truncation is defined as keeping the low N bits (two's-complement wrap);
 These two are the standard C/Rust `as` semantics and are documented normatively
 in the spec chapter.
 
-**That appeal does not extend to the float → int row, and this table's choice
-there is not yet settled.** C leaves an out-of-range float → int conversion
-undefined, and Rust's `as` has been *saturating* since 1.45 (`-1.5f64 as u32`
-is `0`), so there is no single "standard C/Rust" behaviour to inherit. The bare
-`fptoui`/`fptosi` specified above is *poison* in LLVM whenever the operand is
-outside the target's range — for an unsigned target that includes every
-negative operand, which the previously-unconditional `fptosi` had rendered
-defined. SFN-503 shipped this row as written; **SFN-570 owns the decision**
-between saturating lowering (`llvm.fptoui.sat` / `llvm.fptosi.sat`, matching
-Rust) and a diagnostic on statically-known out-of-range operands, and will
-amend this row and the spec chapter with whichever is chosen.
+The float → int row deliberately follows Rust's saturating `as` semantics,
+rather than claiming a shared C/Rust rule: C leaves an out-of-range conversion
+undefined, while Rust has saturated since 1.45. Sailfin truncates finite
+in-range values toward zero, clamps values and infinities at the target bounds,
+and maps NaN to zero. The `llvm.fptoui.sat.*` / `llvm.fptosi.sat.*` intrinsics
+implement that contract without exposing the poison produced by LLVM's bare
+`fptoui` / `fptosi` instructions. SFN-570 records this decision.
 
 ### 3.4 Overflow: default = trap in debug / wrap in release; `wrapping_*` escape
 
@@ -501,7 +497,7 @@ byte-identical for the release build.
       `Cast` operands (no change needed).
 - [ ] **Emits valid `.sfn-asm`** — type strings ride the existing string channel;
       no wire-format change.
-- [ ] **Lowers to LLVM IR** — sign-aware `sext`/`zext`/`uitofp`/`fptoui`,
+- [ ] **Lowers to LLVM IR** — sign-aware `sext`/`zext`/`uitofp`, saturating float→int intrinsics,
       sign-aware `sdiv`/`udiv`/`icmp`, debug overflow-intrinsic path + release
       wrap; `wrapping_*` runtime helpers.
 - [ ] **Regression coverage** — see §8.

@@ -36,6 +36,14 @@ import { operand_source_type } from "./core_scopes";
 import { coerce_operand_to_string, emit_string_concat, lower_string_literal } from "./core_strings";
 import { encode_string_literal_for_sailfin, resolve_interpolation_template } from "./core_text";
 
+fn float_intrinsic_suffix(llvm_type: string) -> string {
+    if llvm_type == "half" { return "f16"; }
+    if llvm_type == "bfloat" { return "bf16"; }
+    if llvm_type == "float" { return "f32"; }
+    if llvm_type == "double" { return "f64"; }
+    return "";
+}
+
 // Lower an `is` type-guard (#1753) to a boolean `i1`. v1 supports a named
 // `enum` operand: extract the operand's discriminant tag and `icmp eq` it
 // against the target variant's tag — the same discriminant test `match`
@@ -438,8 +446,8 @@ fn lower_cast_expression(parse: CastParseResult, bindings: ParameterBinding[], l
     //   i*  → int (narrower)   → trunc     (sign-independent)
     //   u*  → double/float     → uitofp
     //   i*  → double/float     → sitofp
-    //   double/float → u*      → fptoui
-    //   double/float → i*      → fptosi
+    //   double/float → u*      → llvm.fptoui.sat.*
+    //   double/float → i*      → llvm.fptosi.sat.*
     //   float → double         → fpext
     //   double → float         → fptrunc
     //   any  → i1 via `as`     → diagnostic (handled above)
@@ -495,8 +503,32 @@ fn lower_cast_expression(parse: CastParseResult, bindings: ParameterBinding[], l
     }
     if operand_is_float {
         if target_is_int {
-            if target_is_unsigned { numeric_op_name = "fptoui"; }
-            if !target_is_unsigned { numeric_op_name = "fptosi"; }
+            let mut sat_op = "fptosi";
+            if target_is_unsigned { sat_op = "fptoui"; }
+            let float_suffix = float_intrinsic_suffix(operand.llvm_type);
+            if float_suffix.length > 0 {
+                let intrinsic = "llvm." + sat_op + ".sat." + target_type + "."
+                    + float_suffix;
+                current_lines.push("  " + cast_name + " = call " + target_type
+                    + " @"
+                    + intrinsic
+                    + "("
+                    + operand.llvm_type
+                    + " "
+                    + operand.value
+                    + ")");
+                let casted = LLVMOperand {
+                    llvm_type: target_type,
+                    value: cast_name
+                };
+                return ExpressionResult {
+                    lines: current_lines,
+                    temp_index: current_temp,
+                    operand: casted,
+                    diagnostics: diagnostics,
+                    string_constants: lowered.string_constants
+                };
+            }
         }
     }
     if operand_is_int {
