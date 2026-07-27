@@ -1,0 +1,67 @@
+name: Publish Bluesky announcement
+
+on:
+  workflow_call:
+    inputs:
+      kind: { description: "Announcement type (release or blog)", required: true, type: string }
+      title: { description: "Published release or article title", required: true, type: string }
+      canonical_url: { description: "Canonical GitHub release or sailfin.dev article URL", required: true, type: string }
+      summary: { description: "Short factual summary from the release notes or article", required: true, type: string }
+      dry_run: { description: "Render without authenticating or publishing", required: false, default: false, type: boolean }
+    secrets:
+      BLUESKY_APP_PASSWORD: { required: false }
+  workflow_dispatch:
+    inputs:
+      kind:
+        description: Announcement type
+        required: true
+        type: choice
+        options: [blog, release]
+      title: { description: "Published release or article title", required: true, type: string }
+      canonical_url: { description: "Canonical GitHub release or sailfin.dev article URL", required: true, type: string }
+      summary: { description: "Short factual summary from the release notes or article", required: true, type: string }
+      dry_run: { description: "Render without authenticating or publishing", required: true, default: true, type: boolean }
+
+permissions:
+  contents: read
+
+jobs:
+  publish:
+    name: Render and publish
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v7
+      - name: Set up Node.js
+        uses: actions/setup-node@v6
+        with:
+          node-version: 24
+      - name: Test publisher
+        run: npm test
+        working-directory: tools/bluesky
+      - name: Validate publishing configuration
+        if: inputs.dry_run != true
+        env:
+          BLUESKY_HANDLE: ${{ vars.BLUESKY_HANDLE }}
+          BLUESKY_APP_PASSWORD: ${{ secrets.BLUESKY_APP_PASSWORD }}
+        run: |
+          if [ -z "$BLUESKY_HANDLE" ]; then
+            echo "::error::BLUESKY_HANDLE repository variable is required (expected sfn.dev)."
+            exit 1
+          fi
+          if [ -z "$BLUESKY_APP_PASSWORD" ]; then
+            echo "::error::BLUESKY_APP_PASSWORD repository secret is required. Configure a dedicated app password."
+            exit 1
+          fi
+      - name: Render or publish announcement
+        env:
+          ANNOUNCEMENT_KIND: ${{ inputs.kind }}
+          ANNOUNCEMENT_TITLE: ${{ inputs.title }}
+          ANNOUNCEMENT_URL: ${{ inputs.canonical_url }}
+          ANNOUNCEMENT_SUMMARY: ${{ inputs.summary }}
+          BLUESKY_HANDLE: ${{ vars.BLUESKY_HANDLE }}
+          BLUESKY_APP_PASSWORD: ${{ secrets.BLUESKY_APP_PASSWORD }}
+        run: |
+          args=(--kind "$ANNOUNCEMENT_KIND" --title "$ANNOUNCEMENT_TITLE" --url "$ANNOUNCEMENT_URL" --summary "$ANNOUNCEMENT_SUMMARY")
+          if [ "${{ inputs.dry_run }}" = "true" ]; then args+=(--dry-run); fi
+          node tools/bluesky/post.mjs "${args[@]}"

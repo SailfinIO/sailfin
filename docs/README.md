@@ -29,6 +29,8 @@ documentation lives on the docs site.**
   index + process in [`docs/proposals/README.md`](proposals/README.md) and
   [SFEP-0001](proposals/0001-sfep-process.md)
 - **Root-cause analyses** → `docs/rca/`
+- **Bluesky announcement operations** →
+  [`docs/runbooks/bluesky-announcements.md`](runbooks/bluesky-announcements.md)
 - **Perf notes** → `docs/perf/`
 - **Examples** → `examples/` (category index in `examples/README.md`)
 
