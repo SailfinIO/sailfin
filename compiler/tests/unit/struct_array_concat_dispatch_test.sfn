@@ -1,0 +1,37 @@
+// Regression coverage for SFN-531: concat must consume runtime-call results
+// rather than guessing their SSA name, and must stop when allocation dispatch
+// does not return an operand.
+import {
+    lower_struct_array_concat,
+    lower_struct_array_concat_with_alloc_target
+} from "../../src/llvm/expression_lowering/arrays";
+import { LLVMOperand } from "../../src/llvm/types";
+
+fn _array_operand(value: string) -> LLVMOperand {
+    return LLVMOperand { llvm_type: "{ i32*, i64, i64 }*", value: value };
+}
+
+test "struct-array concat: successful dispatch preserves canonical IR" ![io] {
+    let result = lower_struct_array_concat(_array_operand("%lhs"), _array_operand("%rhs"), "i32", [], 0);
+    let expected: string[] = ["  %t0 = getelementptr { i32*, i64, i64 }, { i32*, i64, i64 }* %lhs, i32 0, i32 0", "  %t1 = load i32*, i32** %t0", "  %t2 = getelementptr { i32*, i64, i64 }, { i32*, i64, i64 }* %lhs, i32 0, i32 1", "  %t3 = load i64, i64* %t2", "  %t4 = getelementptr { i32*, i64, i64 }, { i32*, i64, i64 }* %rhs, i32 0, i32 0", "  %t5 = load i32*, i32** %t4", "  %t6 = getelementptr { i32*, i64, i64 }, { i32*, i64, i64 }* %rhs, i32 0, i32 1", "  %t7 = load i64, i64* %t6", "  %t8 = getelementptr [1 x i32], [1 x i32]* null, i32 0, i32 1", "  %t9 = ptrtoint i32* %t8 to i64", "  %t10 = add i64 %t3, %t7", "  %t11 = mul i64 %t9, %t10", "  %t12 = call noalias i8* @sfn_alloc_struct(i64 %t11)", "  %t13 = bitcast i8* %t12 to i32*", "  %t14 = bitcast i32* %t13 to i8*", "  %t15 = mul i64 %t9, %t3", "  %t16 = bitcast i32* %t1 to i8*", "  call void @sfn_mem_copy_bytes(i8* %t14, i8* %t16, i64 %t15)", "  %t17 = mul i64 %t9, %t7", "  %t18 = bitcast i32* %t5 to i8*", "  %t19 = getelementptr i32, i32* %t13, i64 %t3", "  %t20 = bitcast i32* %t19 to i8*", "  call void @sfn_mem_copy_bytes(i8* %t20, i8* %t18, i64 %t17)", "  %t21 = getelementptr { i32*, i64, i64 }, { i32*, i64, i64 }* null, i32 1", "  %t22 = ptrtoint { i32*, i64, i64 }* %t21 to i64", "  %t23 = call i8* @sfn_alloc_struct(i64 %t22)", "  %t24 = bitcast i8* %t23 to { i32*, i64, i64 }*", "  %t25 = getelementptr { i32*, i64, i64 }, { i32*, i64, i64 }* %t24, i32 0, i32 0", "  store i32* %t13, i32** %t25", "  %t26 = getelementptr { i32*, i64, i64 }, { i32*, i64, i64 }* %t24, i32 0, i32 1", "  store i64 %t10, i64* %t26", "  %t27 = getelementptr { i32*, i64, i64 }, { i32*, i64, i64 }* %t24, i32 0, i32 2", "  store i64 %t10, i64* %t27"];
+    assert result.lines.length == expected.length;
+    let mut line_index: int = 0;
+    loop {
+        if line_index >= expected.length { break; }
+        assert result.lines[line_index] == expected[line_index];
+        line_index += 1;
+    }
+    assert result.temp_index == 28;
+    assert result.operand != null;
+    assert result.operand.value == "%t24";
+    assert result.diagnostics.length == 0;
+}
+
+test "struct-array concat: null allocation dispatch fails closed" ![io] {
+    let result = lower_struct_array_concat_with_alloc_target(_array_operand("%lhs"), _array_operand("%rhs"), "i32", [], 0, "__missing_concat_allocator");
+    assert result.operand == null;
+    assert result.temp_index == 12;
+    assert result.lines.length == 12;
+    assert result.diagnostics.length == 2;
+    assert result.diagnostics[1] == "llvm lowering [fatal]: struct-array concat buffer allocation produced no operand";
+}
