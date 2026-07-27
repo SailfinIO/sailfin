@@ -1,0 +1,128 @@
+// compiler/tests/e2e/short_write_truncated_ir_test.sfn
+//
+// Regression guard for SFN-542: a write that cannot complete must never
+// leave a truncated `.ll` on disk.
+//
+// `sfn_fs_write_lines` / `sfn_fs_write_file`
+// (`runtime/sfn/adapters/filesystem.sfn`) used to discard the byte count
+// returned by `_fs_fwrite_all` and the status of `fclose`, so a short
+// `fwrite` under IO/memory pressure silently truncated the emitted module
+// while reporting success. `define i32 @main` is emitted last in the
+// module wrapper, so the dropped tail was always exactly `@main` and the
+// link failed `undefined reference to 'main'` — the intermittent nightly
+// self-host failure. Concurrency was only the trigger; the mechanism is
+// the unchecked partial write, which is why this reproduces serially.
+//
+// The short write is forced with `ulimit -f` rather than a full
+// filesystem so the test needs no root and no mount. `trap '' XFSZ` is
+// required: without it the shell is killed by SIGXFSZ instead of seeing a
+// short write. Driving the capped build through `process.run_capture` is
+// the sanctioned pattern for `ulimit` control (`.claude/rules/no-bash-e2e.md`).
+import { contains } from "sfn/strings";
+import { clean_runner_env, nested_runner_scratch, report_child_failure } from "sfn/test";
+
+fn _sfn_bin() -> string ![io] {
+    let configured = env.get("SAILFIN_BIN");
+    if configured.length > 0 { return configured; }
+    return "build/bin/sfn";
+}
+
+fn _scratch_dir() -> string ![io] {
+    let mut dir = env.get("SAILFIN_TEST_SCRATCH");
+    if dir.length == 0 { dir = "/tmp"; }
+    dir = dir + "/sfn-short-write-e2e";
+    fs.createDirectory(dir, true);
+    return dir;
+}
+
+// `--work-dir` below already pins the cache dir for the nested build, but
+// the child still gets an isolated scratch so nothing lands in a shared
+// `build/sailfin` under the pool (`.claude/rules/no-bash-e2e.md`).
+fn _child_env() -> string[] ![io] {
+    return clean_runner_env(nested_runner_scratch("short-write"));
+}
+
+fn _run_shell(script: string) -> int ![io] {
+    let rc = process.run_capture(["bash", "-c", script], _child_env());
+    let _out = process.capture_take_stdout();
+    let _err = process.capture_take_stderr();
+    return rc;
+}
+
+fn _file_len(path: string) -> int ![io] {
+    if !fs.exists(path) { return 0; }
+    return fs.readFile(path).length;
+}
+
+test "build: a short write never leaves main-less IR on disk" ![io] {
+    let dir = _scratch_dir();
+    let work = dir + "/work";
+    let main_path = dir + "/main.sfn";
+    let out_bin = dir + "/out.bin";
+    let ll_path = work + "/sailfin/program.ll";
+    fs.createDirectory(work, true);
+    fs.writeFile(main_path, "fn main() ![io] {\n    print(\"SHORT_WRITE_OK\");\n}\n");
+
+    // Control: an uncapped build populates the work dir and cache, and
+    // pins that the fixture emits a complete module in the first place.
+    let rc = process.run_capture([_sfn_bin(), "build", main_path, "--work-dir", work, "-o", out_bin], _child_env());
+    let out = process.capture_take_stdout();
+    let err = process.capture_take_stderr();
+    report_child_failure("short-write control build", rc, out, err);
+    assert rc == 0;
+    assert fs.exists(ll_path);
+    let full_len = _file_len(ll_path);
+    assert contains(fs.readFile(ll_path), "define i32 @main");
+
+    // Calibrate the cap: `ulimit -f` counts blocks whose size varies by
+    // platform (512 vs 1024 bytes), so measure the effective byte cap
+    // instead of assuming it.
+    let sentinel = dir + "/sentinel";
+    let _ = fs.deleteFile(sentinel);
+    // Printable filler, never `/dev/zero`: the sentinel is measured by
+    // reading it back as a string, and embedded NULs would terminate that
+    // read early and understate the cap.
+    let _srv = _run_shell("ulimit -f 8; trap '' XFSZ; yes AAAAAAAA | head -c 65536 > \""
+        + sentinel
+        + "\"; true");
+    let cap = _file_len(sentinel);
+
+    // A host that does not enforce `ulimit -f` cannot exercise the short
+    // write at all; a cap at or above the module size would emit it in
+    // full. Either way there is nothing to assert rather than a failure.
+    if cap == 0 || cap >= full_len {
+        assert true;
+        return;
+    }
+
+    // Re-emit `program.ll` under the cap. Before the fix this left the
+    // module truncated at `cap` bytes with its trailing `@main` gone,
+    // while the build reported the write as successful (SFN-542).
+    let _ = fs.deleteFile(ll_path);
+    let _brc = _run_shell("ulimit -f 8; trap '' XFSZ; \"" + _sfn_bin()
+        + "\" build \""
+        + main_path
+        + "\" --work-dir \""
+        + work
+        + "\" -o \""
+        + out_bin
+        + "\"");
+
+    // The invariant: never present-but-main-less. An absent module is the
+    // fixed behaviour (the partial write is removed, so the caller's
+    // `fs.exists` completeness check fails cleanly); a present module must
+    // be complete. The build's own exit code is deliberately not asserted
+    // — under a file cap unrelated artifacts may fail too, and the
+    // contract under test is only what is left on disk.
+    if fs.exists(ll_path) {
+        let body = fs.readFile(ll_path);
+        if !contains(body, "define i32 @main") {
+            print.err("short-write: program.ll left truncated at "
+                + number_to_string(body.length)
+                + " bytes of "
+                + number_to_string(full_len)
+                + " with no `define i32 @main` (SFN-542)");
+        }
+        assert contains(body, "define i32 @main");
+    }
+}
