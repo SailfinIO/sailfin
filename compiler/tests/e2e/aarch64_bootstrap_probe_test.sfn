@@ -1,0 +1,24 @@
+// compiler/tests/e2e/aarch64_bootstrap_probe_test.sfn
+//
+// Runs the SFN-472 native bring-up probe on every supported host so its
+// aggregate-return, try/throw, and permission checks cannot silently rot.
+import { contains } from "sfn/strings";
+
+fn _sfn_bin() -> string ![io] {
+    let configured = env.get("SAILFIN_BIN");
+    if configured.length > 0 { return configured; }
+    return "build/bin/sfn";
+}
+
+test "aarch64 bootstrap: native hazard probe round-trips" ![io] {
+    let mut scratch = env.get("SAILFIN_TEST_SCRATCH");
+    if scratch.length == 0 { scratch = "/tmp"; }
+    let path = scratch + "/aarch64-bootstrap-mode-probe";
+    let mut child_env = process.environ();
+    child_env.push("SAILFIN_BOOTSTRAP_PROBE_PATH=" + path);
+    let exit = process.run_capture([_sfn_bin(), "run", "compiler/tests/e2e/fixtures/aarch64_bootstrap_probe.sfn"], child_env);
+    let stdout = process.capture_take_stdout();
+    let stderr = process.capture_take_stderr();
+    assert exit == 0;
+    assert contains(stdout + stderr, "aarch64 bootstrap probe ok");
+}

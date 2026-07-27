@@ -1,0 +1,30 @@
+// compiler/tests/e2e/fixtures/aarch64_bootstrap_probe.sfn
+//
+// Native target probe for SFN-472. It combines a user-struct return with an
+// exception round-trip and an on-device `struct stat.st_mode` read.
+struct Pair {
+    left: int,
+    right: int
+}
+
+fn _roundtrip(value: Pair) -> Pair { return value; }
+
+fn main() -> void ![io] {
+    let value = _roundtrip(Pair { left: 21, right: 21 });
+    assert value.left + value.right == 42;
+
+    let mut caught = false;
+    try { throw "aarch64-roundtrip"; } catch (message) {
+        assert message == "aarch64-roundtrip";
+        caught = true;
+    }
+    assert caught;
+
+    let mut path = env.get("SAILFIN_BOOTSTRAP_PROBE_PATH");
+    if path.length == 0 { path = "/tmp/sfn-aarch64-bootstrap-probe"; }
+    fs.writeFile(path, "probe");
+    assert fs.set_perms(path, 384);
+    assert fs.get_perms(path) == 384;
+    fs.deleteFile(path);
+    print("aarch64 bootstrap probe ok");
+}

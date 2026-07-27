@@ -565,6 +565,10 @@ clean-all: clean clean-build
 compile:
 	@$(AGENT_REPORT) --target compile -- $(MAKE) compile-impl
 
+.PHONY: bootstrap-aarch64-linux
+bootstrap-aarch64-linux:
+	@SEED_X86_64="$(SEED_X86_64)" scripts/bootstrap-aarch64-linux.sh
+
 compile-impl:
 	@if [ "$${FORCE:-0}" = "0" ] && [ -x "$(NATIVE_BIN)" ] && \
 		[ -z "$$(find compiler/src runtime -type f -name '*.sfn' -newer "$(NATIVE_BIN)" -print -quit 2>/dev/null)" ]; then \
