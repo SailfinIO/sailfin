@@ -529,7 +529,7 @@ fn lower_instruction_range(function: NativeFunction, start_index: int, end: int,
         if !_tag_handled {
             if _instr_tag == 10 {
                 if current_loop_stack.length == 0 {
-                    diagnostics.push("llvm lowering: `break` outside loop in `"
+                    diagnostics.push("llvm lowering [fatal] [E1003]: `break` outside loop in `"
                         + function.name
                         + "`");
                 } else {
@@ -581,7 +581,7 @@ fn lower_instruction_range(function: NativeFunction, start_index: int, end: int,
         if !_tag_handled {
             if _instr_tag == 11 {
                 if current_loop_stack.length == 0 {
-                    diagnostics.push("llvm lowering: `continue` outside loop in `"
+                    diagnostics.push("llvm lowering [fatal] [E1003]: `continue` outside loop in `"
                         + function.name
                         + "`");
                 } else {
@@ -656,11 +656,7 @@ fn lower_instruction_range(function: NativeFunction, start_index: int, end: int,
         }
         if !_tag_handled {
             if _instr_tag != 20 {
-                diagnostics.push("llvm lowering: unsupported instruction tag="
-                    + number_to_string(_instr_tag)
-                    + " in `"
-                    + function.name
-                    + "`");
+                diagnostics.push(_unsupported_instruction_diagnostic(_instr_tag, function.name));
             }
         }
         // For terminated instructions (return, throw, break, continue), exit loop.
@@ -836,4 +832,12 @@ fn _parse_prologue_string(text: string, key: string) -> string {
         cursor += 1;
     }
     return value;
+}
+
+fn _unsupported_instruction_diagnostic(instruction_tag: int, function_name: string) -> string {
+    return "llvm lowering [fatal] [E1003]: unsupported instruction tag="
+        + number_to_string(instruction_tag)
+        + " in `"
+        + function_name
+        + "`";
 }
