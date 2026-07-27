@@ -382,8 +382,8 @@ fn lower_expression_statement(function_name: string, instruction: NativeInstruct
     current_temp = _lowered.temp_index;
     // Issue #1838: propagate the expression's string constants (e.g. the
     // `@.runtime.field.*` field-name globals a dynamic member access emits
-    // for an interpolated `{{admin.name}}`). A bare call statement like
-    // `print("{{admin.name}}")` references the getelementptr into the
+    // for an interpolated `${admin.name}`). A bare call statement like
+    // `print("${admin.name}")` references the getelementptr into the
     // global but, without this, the constant was dropped — the assignment
     // and return paths already capture it (see the simple-assignment branch
     // and `lower_return_instruction`).

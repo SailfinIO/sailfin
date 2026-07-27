@@ -22,10 +22,10 @@
 // deterministic and cannot deadlock.
 //
 // NOTE on the fixtures: the verifiable output is built with string
-// concatenation + `number_to_string`, NOT `{{ }}` interpolation. A `{{ }}`
+// concatenation + `number_to_string`, NOT `${ }` interpolation. A `${ }`
 // in a fixture string literal would be interpolated by *this* test's own
-// compiler (the host interpolation syntax is still `{{ }}`), corrupting the
-// fixture before it is written. Concatenation produces the identical
+// compiler, corrupting the fixture before it is written. Concatenation
+// produces the identical
 // observable stdout while staying inert in the host source.
 //
 // NOTE on matchers: the `sfn/test` `expect_*` matchers are `![pure]` and so

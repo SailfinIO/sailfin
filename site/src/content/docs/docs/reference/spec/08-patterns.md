@@ -15,7 +15,7 @@ match value {
     0               => print("zero"),
     n if n < 0      => print("negative"),
     Response.Ok { value } => process(value),
-    Response.Error { code, message } => print.err("{{ code }}: {{ message }}"),
+    Response.Error { code, message } => print.err("${ code }: ${ message }"),
     _               => print("other"),
 }
 ```

@@ -484,44 +484,6 @@ fn compute_string_constant_hash(content: string) -> int {
     return hash;
 }
 
-fn parse_interpolated_template(content: string) -> InterpolatedTemplateParse {
-    let mut parts: string[] = [];
-    let mut expressions: string[] = [];
-    let mut index: int = 0;
-    loop {
-        if index > content.length { break; }
-        let start = find_substring_from(content, "{{", index);
-        if start < 0 {
-            parts.push(substring(content, index, content.length));
-            break;
-        }
-        parts.push(substring(content, index, start));
-        let end = find_substring_from(content, "}}", start + 2);
-        if end < 0 {
-            return InterpolatedTemplateParse {
-                parts: [],
-                expressions: [],
-                success: false
-            };
-        }
-        let expr_text = trim_text(substring(content, start + 2, end));
-        if expr_text.length == 0 {
-            return InterpolatedTemplateParse {
-                parts: [],
-                expressions: [],
-                success: false
-            };
-        }
-        expressions.push(expr_text);
-        index = end + 2;
-    }
-    return InterpolatedTemplateParse {
-        parts: parts,
-        expressions: expressions,
-        success: true
-    };
-}
-
 fn encode_string_literal_for_sailfin(content: string) -> string {
     let escaped = escape_string_for_sailfin_literal(content);
     return "\"" + escaped + "\"";
@@ -633,11 +595,15 @@ fn unescape_literal_fragment(fragment: string) -> string {
 }
 
 // SFEP-0057: does the raw literal inner text contain a real, unescaped `${`
-// interpolation opener? A `\${` is skipped (the backslash escapes it), so a
-// fully-escaped literal returns false and the caller falls back to the
-// deprecated `{{ }}` scanner. Runs on the raw text — the shared unescaper
-// collapses `\$` to `$`, which would otherwise erase the escaped/real
-// distinction this predicate depends on.
+// interpolation opener? A `\${` is skipped here, so a fully-escaped literal
+// returns false and the caller reports a failed parse (the value lowers as a
+// plain string literal).
+//
+// The `\${` skip does not currently take effect: the parser resolves escapes
+// at AST-construction time and drops the backslash of an unrecognized escape,
+// so `\$` has already collapsed to `$` before this runs (SFN-576). The skip is
+// kept because it is correct against the raw text this function is specified
+// to take, and becomes live once SFN-576 preserves the backslash.
 fn has_unescaped_dollar_brace(value: string) -> boolean {
     let mut index: int = 0;
     loop {
@@ -657,14 +623,14 @@ fn has_unescaped_dollar_brace(value: string) -> boolean {
     return false;
 }
 
-// SFEP-0057: scanner for the `${ expr }` interpolation form. Operates on the
-// RAW literal inner (escapes intact) rather than the pre-unescaped content the
-// `{{ }}` scanner takes, because `\${` must survive here to be recognized as an
-// escape (the shared unescaper collapses `\$` to `$`). Literal parts are
-// unescaped as they are emitted (so `\${` resolves to a literal `${`, `\n` to a
-// newline, etc.); embedded expression text is kept raw for re-parse by
-// lower_expression. The matching `}` is found by brace-depth tracking so
-// `${ f({a: 1}) }` closes on the outer brace, not the first inner one.
+// SFEP-0057: scanner for the `${ expr }` interpolation form, the sole
+// interpolation syntax. Operates on the RAW literal inner (escapes intact) so
+// a `\${` can be told apart from a real opener; that distinction is not yet
+// observable because the parser collapses `\$` to `$` upstream (SFN-576).
+// Literal parts are unescaped as they are emitted (`\n` to a newline, etc.);
+// embedded expression text is kept raw for re-parse by lower_expression. The
+// matching `}` is found by brace-depth tracking so `${ f({a: 1}) }` closes on
+// the outer brace, not the first inner one.
 fn parse_dollar_interpolated_template(inner: string) -> InterpolatedTemplateParse {
     let mut parts: string[] = [];
     let mut expressions: string[] = [];
@@ -732,32 +698,20 @@ fn parse_dollar_interpolated_template(inner: string) -> InterpolatedTemplatePars
     };
 }
 
-// SFEP-0057: dispatch a string-literal lexeme to the right interpolation
-// scanner. `${ }` (the recognized form) is tried first on the raw inner; the
-// deprecated `{{ }}` form is the fallback, scanned on the fully-unescaped
-// content exactly as before. Returns a failed parse when neither delimiter is
-// present so the caller lowers the value as a plain string literal.
+// SFEP-0057: dispatch a string-literal lexeme to the interpolation scanner.
+// `${ }` is the sole interpolation form; a literal with no unescaped `${`
+// returns a failed parse so the caller lowers it as a plain string literal.
+// `{{ }}` carries no special meaning and passes through as literal text.
 fn resolve_interpolation_template(literal: string) -> InterpolatedTemplateParse {
     let inner_raw = string_literal_inner(literal);
-    if has_unescaped_dollar_brace(inner_raw) {
-        return parse_dollar_interpolated_template(inner_raw);
-    }
-    let content = unescape_string_literal(literal);
-    if find_substring_from(content, "{{", 0) < 0 {
+    if !has_unescaped_dollar_brace(inner_raw) {
         return InterpolatedTemplateParse {
             parts: [],
             expressions: [],
             success: false
         };
     }
-    if find_substring_from(content, "}}", 0) < 0 {
-        return InterpolatedTemplateParse {
-            parts: [],
-            expressions: [],
-            success: false
-        };
-    }
-    return parse_interpolated_template(content);
+    return parse_dollar_interpolated_template(inner_raw);
 }
 
 // Duplicated from string_utils to avoid cross-module function call issues in Stage2

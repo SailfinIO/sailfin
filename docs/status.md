@@ -1,6 +1,6 @@
 # Status
 
-Updated: 2026-07-26. Seed pinned to `0.8.2` (`bootstrap.toml`
+Updated: 2026-07-27. Seed pinned to `0.8.2` (`bootstrap.toml`
 `[seed].version` — SFEP-0047); the compiler version source of truth is
 `compiler/capsule.toml`.
 
@@ -524,7 +524,7 @@ here.
 | `match` | Shipped | Literals, `_`, guards, enum-variant destructuring |
 | `x is T` type-guard operator | **Shipped** (enum operands; #1753) | Parses to a structured `Is` AST node; effect checker walks the operand (closes the `Raw`-degradation effect-blind hole in epic #1180). Lowers to the enum's discriminant tag test and narrows the operand to the matched variant in the then-branch — same flow-sensitive narrowing as `match`. v1 scope: **named `enum` operands only**; non-enum unions, primitives, and plain structs are deferred. Else-branch complement narrowing is also deferred. See `examples/advanced/type-guards.sfn` |
 | `try`/`catch`/`finally` | Shipped | Maps to runtime exceptions |
-| String interpolation (`${ }`) | Shipped | Primitive values and `int \| null` union payloads stringify in direct, narrowed, and match-bound positions (SFN-343); primitive-element arrays (`int[]`/`float[]`/`number[]`/`boolean[]`/`string[]`) and nested arrays render bracketed (`[1, 2, 3]`, `[1.5, 2.5]`, `[[19, 22], [43, 50]]`) (SFN-408, SFN-410). Any interpolation operand with no stringify arm — e.g. a struct — fails the build loudly (`E0832 [fatal]`), never the old silent empty output. `${ }` is the recognized form (SFEP-0057, SFN-482); the legacy `{{ }}` form still works during the dual-accept window but emits a non-fatal `W0212` deprecation warning at `sfn check`. Dropping `{{ }}` and adding the `\${` literal-escape are Phase 4 (SFN-483). |
+| String interpolation (`${ }`) | Shipped | Primitive values and `int \| null` union payloads stringify in direct, narrowed, and match-bound positions (SFN-343); primitive-element arrays (`int[]`/`float[]`/`number[]`/`boolean[]`/`string[]`) and nested arrays render bracketed (`[1, 2, 3]`, `[1.5, 2.5]`, `[[19, 22], [43, 50]]`) (SFN-408, SFN-410). Any interpolation operand with no stringify arm — e.g. a struct — fails the build loudly (`E0832 [fatal]`), never the old silent empty output. `${ }` is the sole interpolation form (SFEP-0057, SFN-482/SFN-483); `{{ }}` has been removed and now passes through as ordinary literal text with no diagnostic. A `\${` literal escape is not yet supported — the backslash is currently dropped and the interpolation still expands — tracked by SFN-576. |
 | `string + <numeric \| bool>` concatenation | **Shipped** (SFN-548) | `string + n` (either operand order) is sugar for `string + (n as string)`, reusing the `as string` cast's `number.to_string` path — booleans render `"1"`/`"0"`, not `"true"`/`"false"`, matching the cast rather than interpolation's `"true"`/`"false"`. Keyed off the `{i8*, i64}` string aggregate specifically, so raw-pointer arithmetic (`*u8 + int`) is unaffected and still lowers as pointer offsetting. No expression-type inferencer exists (#829), so `sfn check` does not flag a mismatched concat operand — this is a lowering-time sugar, not a typecheck-level guarantee. Pinned by `compiler/tests/unit/string_concat_numeric_test.sfn` |
 | Pattern-match exhaustiveness | Partial | Runtime backstop (`match_exhaustive_failed`) |
 | Effect annotations (`![...]`) | Shipped | |
@@ -759,16 +759,16 @@ Tracked in the [roadmap](https://sailfin.dev/roadmap) and
 
 - **Type annotations (`:` vs `->`)** — **migrated.** `:` for params, vars,
   fields; `->` for return types only. Parser enforces both positions.
-- **String interpolation (`{{ }}` vs `${ }`)** — in progress; Phase 4
-  remaining. `{{ }}` means the opposite of its meaning in every mainstream
-  template language; LLMs systematically generate wrong code. Phases 1-3 of
-  the `${ }` migration plan (dual-accept, `{{ }}` deprecation warning
-  `W0212`, and in-tree migration of compiler source/tests/runtime/examples/
-  capsules) have **shipped** (SFN-482); only Phase 4 (drop `{{ }}` and its
-  deprecation path, migrate the bootstrap-compiled runtime literal held back
-  in Phase 3, add the `\${` literal-escape) remains, gated on a `${
-  }`-aware seed pin (SFN-483). SFEP-0057
-  (`docs/proposals/0057-string-interpolation-dollar.md`, Accepted).
+- **String interpolation (`{{ }}` vs `${ }`)** — **migrated.** `{{ }}` meant
+  the opposite of its meaning in every mainstream template language; LLMs
+  systematically generated wrong code. `${ }` is now the sole interpolation
+  form; `{{ }}` has been removed entirely and a `{{ name }}` in a string
+  literal is plain literal text with no special-casing and no diagnostic
+  (SFN-482/SFN-483). One gap remains: the `\${` literal escape is not yet
+  supported (the backslash is currently dropped and the interpolation still
+  expands), tracked by SFN-576. SFEP-0057
+  (`docs/proposals/0057-string-interpolation-dollar.md`) stays **Accepted**,
+  not Implemented, pending that escape.
 - **Error handling** — largely closed. `Result<T, E>` + `?` ship end-to-end
   (#832–#834, spec §12). Remaining: `From<E>` coercion and the `E: Error`
   bound, both gated on generic constraints. `try`/`catch` remains for

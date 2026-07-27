@@ -42,7 +42,7 @@ let result = loop {
 match status {
     "active"  => activate(),
     "paused"  => pause(),
-    _         => print.err("Unknown: {{ status }}"),
+    _         => print.err("Unknown: ${ status }"),
 }
 
 // Try / catch / finally (err is bare, no type annotation)
@@ -50,7 +50,7 @@ try {
     let data = fs.read(path);
     process(data);
 } catch (err) {
-    print.err("Read failed: {{ err }}");
+    print.err("Read failed: ${ err }");
     throw err;
 } finally {
     cleanup();

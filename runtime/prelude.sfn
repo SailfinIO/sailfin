@@ -724,7 +724,7 @@ fn find_char(text: string, character: string, start: int = 0) -> int {
 }
 
 fn match_exhaustive_failed(value: any) -> void {
-    let message = "Non-exhaustive match for value {{ value }}";
+    let message = "Non-exhaustive match for value ${ value }";
     runtime_raise_value_error_fn(message);
 }
 

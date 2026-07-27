@@ -17,7 +17,7 @@ Identifiers are case-sensitive. Reserved keywords may not be used as identifiers
 |------|----------|-------|
 | Integer | `42`, `0`, `1_000_000` | Underscores allowed as separators |
 | Float | `3.14`, `0.5`, `1.0e6` | 64-bit IEEE 754 |
-| String | `"hello"`, `"line\n"` | UTF-8, escape sequences, `{{ }}` interpolation |
+| String | `"hello"`, `"line\n"` | UTF-8, escape sequences, `${ }` interpolation |
 | Boolean | `true`, `false` | |
 | Null | `null` | Explicit absence of a value |
 

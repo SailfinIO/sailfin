@@ -46,7 +46,7 @@ fn add(x: int, y: int) -> int {
 }
 
 fn greet(name: string) -> string {
-    return "Hello, {{ name }}!";   // implicit return also works
+    return "Hello, ${ name }!";   // implicit return also works
 }
 
 fn save(path: string, data: string) ![io] {
@@ -79,7 +79,7 @@ struct User implements Greeter {
     name: string;
 
     fn greet(self) -> string {
-        return "Hi, {{ self.name }}!";
+        return "Hi, ${ self.name }!";
     }
 
     fn rename(self, new_name: string) {

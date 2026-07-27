@@ -132,9 +132,9 @@ enum Input {
 
 fn process(input: Input) ![io] {
     if input is Text {
-        print("It's a string: {{input.value}}");
+        print("It's a string: ${input.value}");
     } else {
-        print("It's a number: {{input.amount}}");
+        print("It's a number: ${input.amount}");
     }
 }
 ```
