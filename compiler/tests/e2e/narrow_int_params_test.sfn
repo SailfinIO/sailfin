@@ -1,0 +1,57 @@
+// End-to-end regression for sized-integer call boundaries (SFN-571).
+//
+// The callee's emitted signature was always correct; the *call site* resolved
+// parameter and return types through a diverged second copy of
+// `map_primitive_type` that listed only `i32`/`u8`. Every other sized width
+// fell through to the `i8*` default, so a call to `fn f(b: i8)` marshalled its
+// argument through `number.to_string` and passed a string pointer to an `i8`
+// parameter (`f(100)` returned 24), and a `u64` return was bitcast to `i64*`
+// and loaded, dereferencing the returned integer as an address (SIGSEGV).
+//
+// Asserts runtime output rather than IR text: the callee-side IR was already
+// correct, so only running the program catches a call-boundary mismatch.
+// `numeric_cast_test.sfn` covers the emitted-IR spelling of the casts.
+import { trim_right } from "sfn/strings";
+import { clean_runner_env, nested_runner_scratch } from "sfn/test";
+
+// The compiler-under-test: `$SAILFIN_BIN` if set, else the self-hosted
+// binary relative to the repo root the runner starts from. Mirrors
+// `sfn/test`'s `_resolve_sfn_bin` so CI can point the test at any compiler.
+fn _sfn_bin() -> string ![io] {
+    let configured = env.get("SAILFIN_BIN");
+    if configured.length > 0 { return configured; }
+    return "build/bin/sfn";
+}
+
+struct RunOut {
+    exit: int;
+    out: string;
+}
+
+// `sfn run` compiles+links+executes the fixture, so this spawns a nested
+// runner: its env must have the parent pool's orchestration keys stripped
+// and its own scratch dir, or the nested build binds to the parent's
+// private state (`.claude/rules/no-bash-e2e.md`, SFN-401).
+fn _run_fixture(path: string) -> RunOut ![io] {
+    let child_env = clean_runner_env(nested_runner_scratch("narrow_int_params"));
+    let exit = process.run_capture([_sfn_bin(), "run", path], child_env);
+    let out = process.capture_take_stdout();
+    let _err = process.capture_take_stderr();
+    return RunOut { exit: exit, out: trim_right(out) };
+}
+
+test "narrow int params: sized-integer arguments and returns cross the call boundary intact" ![io] {
+    let r = _run_fixture("compiler/tests/e2e/fixtures/narrow_int_params.sfn");
+    // A `u64` return typed as `i8*` at the call site exited 139 (SIGSEGV);
+    // assert the exit code separately so that shape is not masked by an
+    // output mismatch.
+    assert r.exit == 0;
+    let expected = "i8_100=100\n" + "i8_1=1\n" + "i8_min=-128\n"
+        + "i16_1000=1000\n" + "i16_min=-32768\n"
+        + "i32_100000=100000\n"
+        + "u8_255=255\n" + "u16_65535=65535\n"
+        + "u32_hibit=4000000000\n"
+        + "ret_u64=255\n"
+        + "unused_param=7";
+    assert r.out == expected;
+}

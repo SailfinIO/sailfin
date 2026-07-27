@@ -1,0 +1,60 @@
+// Fixture for `narrow_int_params_test.sfn` (SFN-571): passing an argument to
+// a sized-integer parameter, and reading back a sized-integer return, across
+// every width in the family.
+//
+// The call site resolves the callee's parameter and return types through a
+// second copy of `map_primitive_type`
+// (`llvm/expression_lowering/native/core_type_mapping.sfn`) that listed only
+// `i32`/`u8`. Every other width fell through to the `i8*` default, so an
+// argument was marshalled via `number.to_string` and a pointer was handed to
+// an integer parameter — garbage on read, and SIGSEGV when a `u64` return was
+// dereferenced as a pointer.
+//
+// `u8`/`u16`-typed values are widened before printing because string concat
+// renders a byte-width value as a character, not a number (same reason as
+// `int_cast_sign.sfn`).
+fn take_i8(b: i8) -> int { return b as int; }
+fn take_i16(b: i16) -> int { return b as int; }
+fn take_i32(b: i32) -> int { return b as int; }
+fn take_u8(b: u8) -> u64 { return b as u64; }
+fn take_u16(b: u16) -> u64 { return b as u64; }
+fn take_u32(b: u32) -> u64 { return b as u64; }
+
+// The return half of the same defect: a sized return typed as `i8*` at the
+// call site was bitcast to `i64*` and loaded, dereferencing the returned
+// integer as an address.
+//
+// Only widths that need no widening to print are asserted here. A narrow
+// *unsigned* return (`-> u16`) still reads back sign-extended, because the
+// call-site temporary carries no binding for `_cast_operand_source_type` to
+// recover the source-level unsignedness from — the SFN-503 cast-sign matrix
+// at a call boundary. Tracked as SFN-575, which adds the `-> u16` case here
+// and deletes this note.
+fn ret_u64(b: int) -> u64 { return b as u64; }
+
+// A narrow parameter that is never read stayed correct even while broken, so
+// it pins that the fix did not regress the unused-parameter path.
+fn unused_param(b: u8) -> int { let x: int = 7; return x; }
+
+fn main() -> int ![io] {
+    // Signed narrow parameters: the values the original report saw as 24, 32
+    // and -3576 (low bytes of heap pointers, sign-extended).
+    print("i8_100=" + take_i8(100));
+    print("i8_1=" + take_i8(1));
+    print("i8_min=" + take_i8(-128));
+    print("i16_1000=" + take_i16(1000));
+    print("i16_min=" + take_i16(-32768));
+    print("i32_100000=" + take_i32(100000));
+
+    // Unsigned narrow parameters must round-trip their full range with no
+    // sign contamination.
+    print("u8_255=" + take_u8(255));
+    print("u16_65535=" + take_u16(65535));
+    print("u32_hibit=" + take_u32(4000000000));
+
+    // Sized returns read back through the call site.
+    print("ret_u64=" + ret_u64(255));
+
+    print("unused_param=" + unused_param(5));
+    return 0;
+}

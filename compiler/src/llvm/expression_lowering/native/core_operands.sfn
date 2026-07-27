@@ -885,6 +885,133 @@ fn coerce_numeric_primitive(operand: LLVMOperand, operand_type: string, target: 
             };
         }
     }
+    // SFN-571: `i16` had no arm in either direction, so once the call-site
+    // mapper resolved an `i16`/`u16` parameter correctly the coercion still
+    // failed and `core_call_emission.sfn` fell back to pushing the original
+    // uncoerced operand. Mirror the `i8` arms above; widening uses `sext` to
+    // match the existing narrow-int convention here (the unsigned widening
+    // matrix is SFN-503's `as`-cast territory, not the call boundary).
+    if target == "i8" {
+        if operand_type == "i16" {
+            let temp_name = format_temp_name(temp_index);
+            current_lines.push("  " + temp_name + " = trunc i16 " + operand.value
+                + " to i8");
+            let coerced = LLVMOperand { llvm_type: "i8", value: temp_name };
+            return CoercionResult {
+                lines: current_lines,
+                temp_index: temp_index + 1,
+                operand: coerced,
+                diagnostics: diagnostics
+            };
+        }
+    }
+    if target == "i64" {
+        if operand_type == "i16" {
+            let temp_name = format_temp_name(temp_index);
+            current_lines.push("  " + temp_name + " = sext i16 " + operand.value
+                + " to i64");
+            let coerced = LLVMOperand { llvm_type: "i64", value: temp_name };
+            return CoercionResult {
+                lines: current_lines,
+                temp_index: temp_index + 1,
+                operand: coerced,
+                diagnostics: diagnostics
+            };
+        }
+    }
+    if target == "i32" {
+        if operand_type == "i16" {
+            let temp_name = format_temp_name(temp_index);
+            current_lines.push("  " + temp_name + " = sext i16 " + operand.value
+                + " to i32");
+            let coerced = LLVMOperand { llvm_type: "i32", value: temp_name };
+            return CoercionResult {
+                lines: current_lines,
+                temp_index: temp_index + 1,
+                operand: coerced,
+                diagnostics: diagnostics
+            };
+        }
+    }
+    if target == "i16" {
+        if operand_type == "i64" {
+            let temp_name = format_temp_name(temp_index);
+            current_lines.push("  " + temp_name + " = trunc i64 " + operand.value
+                + " to i16");
+            let coerced = LLVMOperand { llvm_type: "i16", value: temp_name };
+            return CoercionResult {
+                lines: current_lines,
+                temp_index: temp_index + 1,
+                operand: coerced,
+                diagnostics: diagnostics
+            };
+        }
+    }
+    if target == "i16" {
+        if operand_type == "i32" {
+            let temp_name = format_temp_name(temp_index);
+            current_lines.push("  " + temp_name + " = trunc i32 " + operand.value
+                + " to i16");
+            let coerced = LLVMOperand { llvm_type: "i16", value: temp_name };
+            return CoercionResult {
+                lines: current_lines,
+                temp_index: temp_index + 1,
+                operand: coerced,
+                diagnostics: diagnostics
+            };
+        }
+    }
+    if target == "i16" {
+        if operand_type == "i8" {
+            let temp_name = format_temp_name(temp_index);
+            current_lines.push("  " + temp_name + " = sext i8 " + operand.value
+                + " to i16");
+            let coerced = LLVMOperand { llvm_type: "i16", value: temp_name };
+            return CoercionResult {
+                lines: current_lines,
+                temp_index: temp_index + 1,
+                operand: coerced,
+                diagnostics: diagnostics
+            };
+        }
+    }
+    if target == "i16" {
+        if operand_type == "i1" {
+            let temp_name = format_temp_name(temp_index);
+            current_lines.push("  " + temp_name + " = zext i1 " + operand.value
+                + " to i16");
+            let coerced = LLVMOperand { llvm_type: "i16", value: temp_name };
+            return CoercionResult {
+                lines: current_lines,
+                temp_index: temp_index + 1,
+                operand: coerced,
+                diagnostics: diagnostics
+            };
+        }
+    }
+    if target == "i16" {
+        if operand_type == "double" {
+            let round_temp = format_temp_name(temp_index);
+            let convert_temp = format_temp_name(temp_index + 1);
+            current_lines.push("  " + round_temp
+                + " = call double @round(double "
+                + operand.value
+                + ")");
+            current_lines.push("  " + convert_temp + " = fptosi double "
+                + round_temp
+                + " to i16");
+            let coerced = LLVMOperand {
+                llvm_type: "i16",
+                value: convert_temp
+            };
+            return CoercionResult {
+                lines: current_lines,
+                temp_index: temp_index + 2,
+                operand: coerced,
+                diagnostics: diagnostics
+            };
+        }
+    }
     if target == "i1" {
         if operand_type == "double" {
             let temp_name = format_temp_name(temp_index);

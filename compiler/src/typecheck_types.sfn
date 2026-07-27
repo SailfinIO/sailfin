@@ -1959,11 +1959,15 @@ fn classify_extern_return_type(text: string) -> string {
 //                         c-abi *parameter* type and C is a c-abi
 //                         *return* type.
 //
-// Intentionally NOT yet on the accept-list (the LLVM type mapper
-// has no entries for them today; accepting them would silently
-// produce broken IR):
-//   - i16, u16, u32, u64, isize, f32, f64 — extend
-//     `map_primitive_type` first, then add here.
+// Intentionally NOT yet on the accept-list:
+//   - i16, u16, u32, u64, isize, f32, f64.
+//
+// The original blocker — no entries in the LLVM type mapper — is gone:
+// every copy of `map_primitive_type` maps all of these (floats since
+// #1372, the integer widths since SFN-571). What remains is the extern
+// C-ABI decision itself, which is a separate call from what the mapper
+// can lower; widening this accept-list is a deliberate change to the
+// extern surface, not a mechanical follow-on.
 //
 // Notably rejected:
 //   - `number` (legacy f64 alias) — externs must commit to i64 today.
