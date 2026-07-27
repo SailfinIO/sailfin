@@ -158,7 +158,7 @@ fn lower_match_case_condition(function_name: string, subject_operand: LLVMOperan
                         value: variant_tag_value
                     };
 
-                    let comparison = emit_comparison_instruction("==", tag_operand, variant_tag_operand, current_temp, current_lines);
+                    let comparison = emit_comparison_instruction("==", tag_operand, variant_tag_operand, current_temp, current_lines, false);
                     let mut _ci4: int = 0;
                     loop {
                         if _ci4 >= comparison.diagnostics.length { break; }
@@ -292,7 +292,7 @@ fn lower_match_case_condition(function_name: string, subject_operand: LLVMOperan
                             llvm_type: "i32",
                             value: number_to_string(null_index)
                         };
-                        let comparison = emit_comparison_instruction("==", tag_operand, expected_tag, current_temp, current_lines);
+                        let comparison = emit_comparison_instruction("==", tag_operand, expected_tag, current_temp, current_lines, false);
                         let mut _cin: int = 0;
                         loop {
                             if _cin >= comparison.diagnostics.length { break; }
@@ -347,7 +347,7 @@ fn lower_match_case_condition(function_name: string, subject_operand: LLVMOperan
                                         llvm_type: "i32",
                                         value: expected_tag_value
                                     };
-                                    let comparison = emit_comparison_instruction("==", tag_operand, expected_tag, current_temp, current_lines);
+                                    let comparison = emit_comparison_instruction("==", tag_operand, expected_tag, current_temp, current_lines, false);
                                     let mut _ci5: int = 0;
                                     loop {
                                         if _ci5 >= comparison.diagnostics.length {
@@ -447,7 +447,7 @@ fn lower_match_case_condition(function_name: string, subject_operand: LLVMOperan
                     if _if231 {
                         current_lines = harmonised.lines;
                         current_temp = harmonised.temp_index;
-                        let comparison = emit_comparison_instruction("==", harmonised.left, harmonised.right, current_temp, current_lines);
+                        let comparison = emit_comparison_instruction("==", harmonised.left, harmonised.right, current_temp, current_lines, false);
                         let mut _ci8: int = 0;
                         loop {
                             if _ci8 >= comparison.diagnostics.length { break; }

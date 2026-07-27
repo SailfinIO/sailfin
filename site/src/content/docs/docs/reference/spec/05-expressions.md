@@ -100,6 +100,26 @@ A lambda's parameter and return types may be **omitted** when it is passed direc
 - **Source-level signedness is recovered only for a plain identifier or parameter operand.** Sailfin's `i8`/`u8`/`i16`/`u16`/`i32`/`u32`/`i64`/`u64`/`usize` annotations all collapse to LLVM's signless `i8`/`i16`/`i32`/`i64`, so the cast lowering recovers sign from the operand's source-level annotation via its local/parameter binding: `255u8 as u64` now lowers as `zext` and produces `255` (SFN-503). A **compound operand** — `s.field as u64`, `xs[i] as u64`, `f() as u64`, `(a + b) as u64` — carries no source annotation available to the lowering pass and still selects the signed forms (`sext`/`sitofp`/`fptosi`), so an unsigned compound expression can still produce a sign-extended result. Closing that gap needs the checker's inferred type threaded through expression lowering, scoped to the typecheck slice of SFEP-0058 §3.3 (SFN-501).
 - **Mixed `int` + `float` in a binary op (without an explicit cast) still silently widens to `double`** — the architect-planned `dominant_type` tightening that would reject this rides on Slice E (`number` retirement). Workaround today: spell the cast (`x as float + y` or `x + y as int`). Tracked in [issue #296](https://github.com/SailfinIO/sailfin/issues/296).
 
+## Sign-sensitive binary operators
+
+`>>`, `/`, `%`, and the ordered comparisons (`<`, `<=`, `>`, `>=`) select their LLVM opcode from the operand's declared signedness, recovered the same way as the cast lowering above — from the operand's source-level `i8`/`u8`/…/`usize` annotation via its local or parameter binding:
+
+| Sailfin | unsigned operands | signed operands |
+|---|---|---|
+| `a >> b` | `lshr` | `ashr` |
+| `a / b` | `udiv` | `sdiv` |
+| `a % b` | `urem` | `srem` |
+| `a < b`, `<=`, `>`, `>=` | `icmp ult`/`ule`/`ugt`/`uge` | `icmp slt`/`sle`/`sgt`/`sge` |
+
+`==`/`!=`, `<<`, `&`, `|`, `^` are sign-independent and lower the same way regardless of operand signedness. A shift's *count* operand never affects opcode selection — `shl`/`lshr`/`ashr` all read it as an unsigned bit count; only the shifted value's sign selects the opcode.
+
+### Known limitations (SFN-573)
+
+- **Source-level signedness is recovered only for a plain identifier or parameter operand**, the same scope as the cast lowering above — a compound operand (`(a + b) >> 4`, `xs[i] / 2`, `f() % 3`) still selects the signed form. Closing that gap is the same inferred-type threading scoped to SFEP-0058 §3.3 (SFN-501).
+- **A mixed-width pair (e.g. `u32` compared against `u64`) keeps the signed form.** The harmoniser sign-extends the narrower operand before the comparison runs, so the lowering deliberately falls back to the signed predicate rather than compare a sign-extended value as unsigned. Rejecting the width mix outright is SFN-501's implicit-conversion work.
+- **A mixed signed/unsigned pair keeps the signed form**, for the same reason.
+- **Widths covered: `i8`/`u8`, `i32`/`u32`, `i64`/`u64`.** `i16`/`u16` ordered comparisons still produce a pre-existing "unsupported comparison operator" diagnostic, unrelated to this fix.
+
 ## Type-guard operator (`is`)
 
 `expr is Variant` tests whether a named `enum` value is a specific variant. It is an infix binary operator with the same precedence as comparison operators, and it returns `bool`.

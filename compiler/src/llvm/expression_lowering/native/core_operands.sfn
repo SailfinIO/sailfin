@@ -47,7 +47,7 @@ fn format_coerce_span_location(span: NativeSourceSpan) -> string {
     return start + "-" + end;
 }
 
-fn emit_comparison_instruction(symbol: string, left_operand: LLVMOperand, right_operand: LLVMOperand, temp_index: int, lines: string[]) -> ComparisonEmission {
+fn emit_comparison_instruction(symbol: string, left_operand: LLVMOperand, right_operand: LLVMOperand, temp_index: int, lines: string[], operands_unsigned: boolean) -> ComparisonEmission {
     let mut diagnostics: string[] = [];
     let mut current_lines: string[] = lines;
     let mut symbol_is_equality: boolean = false;
@@ -311,7 +311,7 @@ fn emit_comparison_instruction(symbol: string, left_operand: LLVMOperand, right_
         }
     }
     let llvm_type = left_operand.llvm_type;
-    let predicate = comparison_predicate_for_symbol(symbol, llvm_type);
+    let predicate = comparison_predicate_for_symbol(symbol, llvm_type, operands_unsigned);
     if predicate.length == 0 {
         diagnostics.push("llvm lowering: unsupported comparison operator `"
             + symbol
@@ -366,7 +366,13 @@ fn emit_boolean_and(left_operand: LLVMOperand, right_operand: LLVMOperand, temp_
     };
 }
 
-fn comparison_predicate_for_symbol(symbol: string, llvm_type: string) -> string {
+// `operands_unsigned` selects `icmp ult/ule/ugt/uge` over the signed
+// predicates for the four *ordered* comparisons. `==`/`!=` are
+// sign-independent (`icmp eq`/`ne` compare bit patterns) and float
+// comparisons carry no integer sign, so both ignore the flag. Sign is
+// recovered from the operands' source annotations by the caller
+// (`binary_operands_are_unsigned` in ./core_scopes) — SFEP-0058 §3.1.
+fn comparison_predicate_for_symbol(symbol: string, llvm_type: string, operands_unsigned: boolean) -> string {
     // Use direct string == comparisons instead of char_code_at_text which is
     // broken in older seeds.
     if llvm_type == "double" {
@@ -384,6 +390,13 @@ fn comparison_predicate_for_symbol(symbol: string, llvm_type: string) -> string 
     if _if74 {
         if symbol == "==" { return "icmp eq"; }
         if symbol == "!=" { return "icmp ne"; }
+        if operands_unsigned {
+            if symbol == "<" { return "icmp ult"; }
+            if symbol == "<=" { return "icmp ule"; }
+            if symbol == ">" { return "icmp ugt"; }
+            if symbol == ">=" { return "icmp uge"; }
+            return "";
+        }
         if symbol == "<" { return "icmp slt"; }
         if symbol == "<=" { return "icmp sle"; }
         if symbol == ">" { return "icmp sgt"; }
@@ -398,6 +411,13 @@ fn comparison_predicate_for_symbol(symbol: string, llvm_type: string) -> string 
     if llvm_type == "i8" {
         if symbol == "==" { return "icmp eq"; }
         if symbol == "!=" { return "icmp ne"; }
+        if operands_unsigned {
+            if symbol == "<" { return "icmp ult"; }
+            if symbol == "<=" { return "icmp ule"; }
+            if symbol == ">" { return "icmp ugt"; }
+            if symbol == ">=" { return "icmp uge"; }
+            return "";
+        }
         if symbol == "<" { return "icmp slt"; }
         if symbol == "<=" { return "icmp sle"; }
         if symbol == ">" { return "icmp sgt"; }

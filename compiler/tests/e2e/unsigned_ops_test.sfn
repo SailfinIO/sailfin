@@ -1,0 +1,62 @@
+// End-to-end regression for operator-signedness lowering (SFN-573,
+// SFEP-0058 §3.3).
+//
+// `>>`, `/`, `%`, and the ordered comparisons (`<`/`<=`/`>`/`>=`) previously
+// always lowered to their signed LLVM opcode (`ashr`/`sdiv`/`srem`/
+// `icmp s*`) regardless of the operand's source-level type, so an unsigned
+// value with its high bit set (e.g. a `u32` above 2^31) silently produced
+// negative-style results: a right shift sign-extended instead of
+// zero-filling, division and remainder used the two's-complement rule, and
+// comparisons treated the high bit as a sign bit. The opcode is now
+// selected from the operand's source-level annotation, recovered from its
+// binding (identifier operands only; a compound operand falls back to the
+// signed form).
+//
+// Asserts runtime output rather than IR text so a regression in either the
+// opcode choice or its lowering is caught; `numeric_cast_test.sfn` covers
+// the emitted-IR spelling.
+import { trim_right } from "sfn/strings";
+import { clean_runner_env, nested_runner_scratch } from "sfn/test";
+
+// The compiler-under-test: `$SAILFIN_BIN` if set, else the self-hosted
+// binary relative to the repo root the runner starts from. Mirrors
+// `sfn/test`'s `_resolve_sfn_bin` so CI can point the test at any compiler.
+fn _sfn_bin() -> string ![io] {
+    let configured = env.get("SAILFIN_BIN");
+    if configured.length > 0 { return configured; }
+    return "build/bin/sfn";
+}
+
+struct RunOut {
+    exit: int;
+    out: string;
+}
+
+// `sfn run` compiles+links+executes the fixture, so this spawns a nested
+// runner: its env must have the parent pool's orchestration keys stripped
+// and its own scratch dir, or the nested build binds to the parent's
+// private state (`.claude/rules/no-bash-e2e.md`, SFN-401).
+fn _run_fixture(path: string) -> RunOut ![io] {
+    let child_env = clean_runner_env(nested_runner_scratch("unsigned_ops"));
+    let exit = process.run_capture([_sfn_bin(), "run", path], child_env);
+    let out = process.capture_take_stdout();
+    let _err = process.capture_take_stderr();
+    return RunOut { exit: exit, out: trim_right(out) };
+}
+
+test "unsigned ops: unsigned operands select unsigned opcodes and signed operands are unchanged" ![io] {
+    let r = _run_fixture("compiler/tests/e2e/fixtures/unsigned_ops.sfn");
+    assert r.exit == 0;
+    // `boolean` renders as `1`/`0` through string concat, not `true`/`false`.
+    let expected = "shr4=250000000\n" + "div2=2000000000\n" + "mod7=3\n"
+        + "lt100=0\n"
+        + "u64_shr4_ok=1\n"
+        + "u64_div2_ok=1\n"
+        + "u64_mod7=1\n"
+        + "u64_lt100=0\n"
+        + "shr_signed_count=250000000\n"
+        + "i32_shr2=-4\n"
+        + "i32_div2=-4\n"
+        + "i32_lt0=1";
+    assert r.out == expected;
+}

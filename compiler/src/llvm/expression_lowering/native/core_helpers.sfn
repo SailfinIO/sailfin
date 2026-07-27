@@ -33,7 +33,13 @@ fn collect_parameter_types(context: TypeContext, parameters: NativeParameter[], 
     return types;
 }
 
-fn operation_name_for_symbol(symbol: string, llvm_type: string) -> string {
+// `operands_unsigned` selects the unsigned opcode for the three integer
+// operators whose LLVM spelling differs by sign. LLVM integers are
+// sign-agnostic, so sign is a frontend concept the caller recovers from the
+// operands' source annotations (`binary_operands_are_unsigned` in
+// ./core_scopes) and passes down here — SFEP-0058 §3.1. `+ - * & | ^ <<`
+// are sign-independent and have one spelling each.
+fn operation_name_for_symbol(symbol: string, llvm_type: string, operands_unsigned: boolean) -> string {
     if llvm_type == "double" {
         if symbol == "+" { return "fadd"; }
         if symbol == "-" { return "fsub"; }
@@ -55,19 +61,25 @@ fn operation_name_for_symbol(symbol: string, llvm_type: string) -> string {
     if symbol == "+" { return "add"; }
     if symbol == "-" { return "sub"; }
     if symbol == "*" { return "mul"; }
-    if symbol == "/" { return "sdiv"; }
-    if symbol == "%" { return "srem"; }
-    // Slice B (2026-05-02): bitwise + shift on integer operands.
-    // `>>` lowers to `ashr` (arithmetic right shift) by default —
-    // preserves the sign of the value, matching what `signed`
-    // numeric types want. Logical right shift (`lshr`, zero-fill)
-    // waits on Slice D's `as` casts so unsigned-typed values get
-    // an explicit type the lowering can branch on.
+    if symbol == "/" {
+        if operands_unsigned { return "udiv"; }
+        return "sdiv";
+    }
+    if symbol == "%" {
+        if operands_unsigned { return "urem"; }
+        return "srem";
+    }
     if symbol == "&" { return "and"; }
     if symbol == "|" { return "or"; }
     if symbol == "^" { return "xor"; }
     if symbol == "<<" { return "shl"; }
-    if symbol == ">>" { return "ashr"; }
+    // `>>` is arithmetic (sign-filling) on signed operands and logical
+    // (zero-filling) on unsigned ones. Sailfin has one `>>` spelling, so
+    // the operand sign picks the opcode.
+    if symbol == ">>" {
+        if operands_unsigned { return "lshr"; }
+        return "ashr";
+    }
     return "add";
 }
 

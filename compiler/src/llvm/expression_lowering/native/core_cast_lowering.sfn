@@ -22,12 +22,7 @@ import {
     StringConstant,
     TypeContext
 } from "../../types";
-import {
-    is_simple_identifier,
-    number_to_string,
-    starts_with,
-    trim_text
-} from "../../utils";
+import { number_to_string, starts_with, trim_text } from "../../utils";
 import { lower_expression } from "./core";
 import { pick_agg_cast_shim_target } from "./core_literals_lowering";
 import {
@@ -37,8 +32,7 @@ import {
     is_float_llvm_type,
     is_integer_llvm_type
 } from "./core_operands";
-import { strip_enclosing_parentheses } from "./core_operators";
-import { find_local_binding, find_parameter_binding } from "./core_scopes";
+import { operand_source_type } from "./core_scopes";
 import { coerce_operand_to_string, emit_string_concat, lower_string_literal } from "./core_strings";
 import { encode_string_literal_for_sailfin, resolve_interpolation_template } from "./core_text";
 
@@ -163,7 +157,7 @@ fn lower_is_expression(parse: CastParseResult, bindings: ParameterBinding[], loc
         llvm_type: tag_llvm_type,
         value: number_to_string(variant_info.tag)
     };
-    let comparison = emit_comparison_instruction("==", tag_operand, variant_tag_operand, current_temp, current_lines);
+    let comparison = emit_comparison_instruction("==", tag_operand, variant_tag_operand, current_temp, current_lines, false);
     let mut _cc_is: int = 0;
     loop {
         if _cc_is >= comparison.diagnostics.length { break; }
@@ -177,28 +171,6 @@ fn lower_is_expression(parse: CastParseResult, bindings: ParameterBinding[], loc
         diagnostics: diagnostics,
         string_constants: lowered.string_constants
     };
-}
-
-// Recover the *source-level* Sailfin type of a cast operand — the sign
-// information `map_primitive_type` erases. `CastParseResult.value` is the
-// raw source text left of ` as `, so an operand spelled as a plain name
-// resolves through the binding tables, which keep the un-collapsed
-// annotation alongside the mapped `llvm_type`. Returns "" when the operand
-// is anything else; the caller treats that as "sign unknown".
-fn _cast_operand_source_type(value: string, bindings: ParameterBinding[], locals: LocalBinding[]) -> string {
-    // The native IR always renders a cast operand parenthesized — `.sfn-asm`
-    // carries `(x) as u64`, not `x as u64` (emit_native_format.sfn) — so peel
-    // before the identifier test. `strip_enclosing_parentheses` self-recurses,
-    // so one call handles nesting, and it only strips when the paren opened at
-    // index 0 closes at the last one: `(a + b)` peels to `a + b`, which
-    // `is_simple_identifier` then rejects.
-    let name = strip_enclosing_parentheses(trim_text(value));
-    if !is_simple_identifier(name) { return ""; }
-    let local = find_local_binding(locals, name);
-    if local != null { return local.type_annotation; }
-    let parameter = find_parameter_binding(bindings, name);
-    if parameter != null { return parameter.type_annotation; }
-    return "";
 }
 
 fn lower_cast_expression(parse: CastParseResult, bindings: ParameterBinding[], locals: LocalBinding[], temp_index: int, lines: string[], functions: NativeFunction[], context: TypeContext) -> ExpressionResult ![io] {
@@ -490,11 +462,11 @@ fn lower_cast_expression(parse: CastParseResult, bindings: ParameterBinding[], l
     // (`(a + b) as u64`, `(x << 8) as u32`). Closing that needs the
     // checker's inferred-type tag threaded through expression lowering,
     // which SFEP-0058 §3.3 scopes to the typecheck slice (SFN-501).
-    let operand_source_type = _cast_operand_source_type(parse.value, bindings, locals);
+    let cast_operand_source_type = operand_source_type(parse.value, bindings, locals);
     let mut operand_is_unsigned: boolean = false;
-    if operand_source_type.length > 0 {
-        if map_type_annotation(operand_source_type) == operand.llvm_type {
-            if !integer_type_is_signed(operand_source_type) {
+    if cast_operand_source_type.length > 0 {
+        if map_type_annotation(cast_operand_source_type) == operand.llvm_type {
+            if !integer_type_is_signed(cast_operand_source_type) {
                 operand_is_unsigned = true;
             }
         }
