@@ -650,6 +650,12 @@ jobs:
           sudo apt-get install -y --no-install-recommends \
             binutils-aarch64-linux-gnu clang-18 gcc-aarch64-linux-gnu \
             libc6-dev:arm64 libssl-dev:arm64 lld llvm-18
+          # The direct-link probe deliberately ignores /usr/lib/gcc-cross.
+          # Expose the matching target CRT under the native multiarch layout
+          # so pass-1 and the native rebuild use the same ld.lld contract.
+          sudo mkdir -p /usr/lib/gcc
+          sudo ln -s /usr/lib/gcc-cross/aarch64-linux-gnu \
+            /usr/lib/gcc/aarch64-linux-gnu
 
       - name: Download arch-aware x86_64 compiler
         uses: actions/download-artifact@v8
@@ -752,8 +758,15 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          mkdir -p build/aarch64-bootstrap/pass-2
-          SAILFIN_TARGET_ARCH=aarch64 \
+          mkdir -p build/aarch64-bootstrap/bin build/aarch64-bootstrap/pass-2
+          cat >build/aarch64-bootstrap/bin/clang <<'EOF'
+          #!/usr/bin/env bash
+          exec clang-18 --target=aarch64-linux-gnu "$@"
+          EOF
+          chmod +x build/aarch64-bootstrap/bin/clang
+          PATH="$PWD/build/aarch64-bootstrap/bin:$PATH" \
+            SAILFIN_LINKER=lld \
+            SAILFIN_TARGET_ARCH=aarch64 \
             "$PWD/build/aarch64-bootstrap/pass-1/sfn" build --no-cache -p compiler \
               --work-dir build/aarch64-bootstrap/pass-2 \
               -o build/aarch64-bootstrap/pass-2/sfn
