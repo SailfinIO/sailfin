@@ -1,0 +1,284 @@
+// compiler/src/typed_ssa_produce.sfn
+//
+// Fail-closed L1 producer from parsed `.sfn-asm` to verified typed-SSA
+// declarations. SFEP-0059 §3.2 deliberately excludes bodies from this slice:
+// every NativeFunction becomes a declaration carrying only its signature,
+// linkage, and effect summary.
+import { NativeFunction, NativeImport, ParseNativeResult } from "./native_ir";
+import { starts_with, strip_prefix, trim_text } from "./native_ir_utils_text";
+import {
+    EffectAtom,
+    Linkage,
+    Module,
+    declare_function,
+    intern_bool,
+    intern_capability_set,
+    intern_effect_set,
+    intern_float,
+    intern_int,
+    intern_pointer,
+    intern_symbol,
+    intern_unit,
+    new_module
+} from "./typed_ssa";
+import { TssaDiagnostic, verify_module } from "./typed_ssa_verify";
+
+struct TypedSsaProduceResult {
+    ok: boolean;
+    module: Module?;
+    diagnostics: TssaDiagnostic[];
+}
+
+struct TssaTypeMapResult {
+    ok: boolean;
+    module: Module;
+    id: int;
+}
+
+fn _produce_diag(code: string, message: string) -> TssaDiagnostic {
+    return TssaDiagnostic { code: code, message: message };
+}
+
+fn _failed_type(module: Module) -> TssaTypeMapResult {
+    return TssaTypeMapResult { ok: false, module: module, id: -1 };
+}
+
+fn _map_scalar_type(module: Module, spelling: string) -> TssaTypeMapResult {
+    let type_name: string = trim_text(spelling);
+    if type_name == "void" || type_name == "unit" {
+        let r = intern_unit(module);
+        return TssaTypeMapResult {
+            ok: true,
+            module: r.module,
+            id: r.id
+        };
+    }
+    if type_name == "bool" || type_name == "boolean" {
+        let r = intern_bool(module);
+        return TssaTypeMapResult {
+            ok: true,
+            module: r.module,
+            id: r.id
+        };
+    }
+    if type_name == "i8" {
+        let r = intern_int(module, 8, true);
+        return TssaTypeMapResult {
+            ok: true,
+            module: r.module,
+            id: r.id
+        };
+    }
+    if type_name == "i16" {
+        let r = intern_int(module, 16, true);
+        return TssaTypeMapResult {
+            ok: true,
+            module: r.module,
+            id: r.id
+        };
+    }
+    if type_name == "i32" {
+        let r = intern_int(module, 32, true);
+        return TssaTypeMapResult {
+            ok: true,
+            module: r.module,
+            id: r.id
+        };
+    }
+    if type_name == "i64" || type_name == "int" || type_name == "isize" {
+        let r = intern_int(module, 64, true);
+        return TssaTypeMapResult {
+            ok: true,
+            module: r.module,
+            id: r.id
+        };
+    }
+    if type_name == "u8" {
+        let r = intern_int(module, 8, false);
+        return TssaTypeMapResult {
+            ok: true,
+            module: r.module,
+            id: r.id
+        };
+    }
+    if type_name == "u16" {
+        let r = intern_int(module, 16, false);
+        return TssaTypeMapResult {
+            ok: true,
+            module: r.module,
+            id: r.id
+        };
+    }
+    if type_name == "u32" {
+        let r = intern_int(module, 32, false);
+        return TssaTypeMapResult {
+            ok: true,
+            module: r.module,
+            id: r.id
+        };
+    }
+    if type_name == "u64" || type_name == "usize" {
+        let r = intern_int(module, 64, false);
+        return TssaTypeMapResult {
+            ok: true,
+            module: r.module,
+            id: r.id
+        };
+    }
+    if type_name == "f32" {
+        let r = intern_float(module, 32);
+        return TssaTypeMapResult {
+            ok: true,
+            module: r.module,
+            id: r.id
+        };
+    }
+    if type_name == "f64" || type_name == "float" || type_name == "number" {
+        let r = intern_float(module, 64);
+        return TssaTypeMapResult {
+            ok: true,
+            module: r.module,
+            id: r.id
+        };
+    }
+    if starts_with(type_name, "*") {
+        let pointee_name = trim_text(strip_prefix(type_name, "*"));
+        if pointee_name.length == 0 { return _failed_type(module); }
+        let pointee = _map_scalar_type(module, pointee_name);
+        if !pointee.ok { return _failed_type(module); }
+        let r = intern_pointer(pointee.module, pointee.id, 0);
+        return TssaTypeMapResult {
+            ok: true,
+            module: r.module,
+            id: r.id
+        };
+    }
+    return _failed_type(module);
+}
+
+fn _is_exported(imports: NativeImport[], function_name: string) -> boolean {
+    let mut i: int = 0;
+    loop {
+        if i >= imports.length { break; }
+        let entry = imports[i];
+        if entry.kind == "export" {
+            let mut j: int = 0;
+            loop {
+                if j >= entry.specifiers.length { break; }
+                if entry.specifiers[j].name == function_name { return true; }
+                j += 1;
+            }
+        }
+        i += 1;
+    }
+    return false;
+}
+
+fn _function_linkage(function: NativeFunction, imports: NativeImport[]) -> Linkage {
+    if function.is_extern { return Linkage.External(); }
+    if _is_exported(imports, function.name) { return Linkage.Exported(); }
+    return Linkage.Internal();
+}
+
+fn _intern_effects(module: Module, effects: string[]) -> TssaTypeMapResult {
+    let mut updated = module;
+    let mut atoms: EffectAtom[] = [];
+    let mut i: int = 0;
+    loop {
+        if i >= effects.length { break; }
+        let symbol = intern_symbol(updated, trim_text(effects[i]));
+        updated = symbol.module;
+        atoms.push(EffectAtom { name: symbol.id });
+        i += 1;
+    }
+    let set = intern_effect_set(updated, atoms);
+    return TssaTypeMapResult {
+        ok: true,
+        module: set.module,
+        id: set.id
+    };
+}
+
+fn produce_typed_ssa_declarations(parsed: ParseNativeResult, module_name: string, capsule_name: string) -> TypedSsaProduceResult {
+    let mut diagnostics: TssaDiagnostic[] = [];
+    let mut parse_index: int = 0;
+    loop {
+        if parse_index >= parsed.diagnostics.length { break; }
+        diagnostics.push(_produce_diag("TSSA100", "module " + module_name
+            + ": invalid .sfn-asm: "
+            + parsed.diagnostics[parse_index]));
+        parse_index += 1;
+    }
+    if diagnostics.length > 0 {
+        return TypedSsaProduceResult {
+            ok: false,
+            module: null,
+            diagnostics: diagnostics
+        };
+    }
+
+    let mut module = new_module(module_name, capsule_name);
+    let empty_capabilities = intern_capability_set(module, []);
+    module = empty_capabilities.module;
+    let mut function_index: int = 0;
+    loop {
+        if function_index >= parsed.functions.length { break; }
+        let function = parsed.functions[function_index];
+        let diagnostic_count_before = diagnostics.length;
+        let mut parameter_types: int[] = [];
+        let mut parameter_index: int = 0;
+        loop {
+            if parameter_index >= function.parameters.length { break; }
+            let spelling = function.parameters[parameter_index].type_annotation;
+            let mapped = _map_scalar_type(module, spelling);
+            if !mapped.ok {
+                diagnostics.push(_produce_diag("TSSA101", "function " + function.name
+                    + ": unsupported typed-SSA parameter type `"
+                    + spelling
+                    + "`"));
+            } else {
+                module = mapped.module;
+                parameter_types.push(mapped.id);
+            }
+            parameter_index += 1;
+        }
+        let result_type = _map_scalar_type(module, function.return_type);
+        if !result_type.ok {
+            diagnostics.push(_produce_diag("TSSA101", "function " + function.name
+                + ": unsupported typed-SSA result type `"
+                + function.return_type
+                + "`"));
+        } else { module = result_type.module; }
+        if diagnostics.length > diagnostic_count_before {
+            function_index += 1;
+            continue;
+        }
+        let effects = _intern_effects(module, function.effects);
+        module = effects.module;
+        let symbol = intern_symbol(module, function.name);
+        module = symbol.module;
+        let declared = declare_function(module, symbol.id, parameter_types, result_type.id, effects.id, empty_capabilities.id, _function_linkage(function, parsed.imports));
+        module = declared.module;
+        function_index += 1;
+    }
+    if diagnostics.length > 0 {
+        return TypedSsaProduceResult {
+            ok: false,
+            module: null,
+            diagnostics: diagnostics
+        };
+    }
+    let verified = verify_module(module);
+    if !verified.ok {
+        return TypedSsaProduceResult {
+            ok: false,
+            module: null,
+            diagnostics: verified.diagnostics
+        };
+    }
+    return TypedSsaProduceResult {
+        ok: true,
+        module: module,
+        diagnostics: []
+    };
+}

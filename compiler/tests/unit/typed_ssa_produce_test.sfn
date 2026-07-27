@@ -1,0 +1,86 @@
+// Declaration-producer coverage for SFEP-0059 L1 (SFN-508).
+import { expect_eq_bool, expect_eq_int, expect_eq_str } from "sfn/test";
+
+import { parse_native_artifact } from "../../src/native_ir_api";
+import { TypedSsaProduceResult, produce_typed_ssa_declarations } from "../../src/typed_ssa_produce";
+import { render_module } from "../../src/typed_ssa_render";
+import { verify_module } from "../../src/typed_ssa_verify";
+
+fn _produce(text: string) -> TypedSsaProduceResult {
+    return produce_typed_ssa_declarations(parse_native_artifact(text), "demo", "demo");
+}
+
+test "typed_ssa producer: maps scalar declarations, linkage, and canonical effects" {
+    let text = ".module demo\n" + ".export \"\" { api }\n"
+        + ".fn api(value: i32, ptr: *u8) -> f64\n"
+        + ".meta return f64\n"
+        + ".meta effects model, io, io\n"
+        + ".param value: i32\n"
+        + ".param ptr: *u8\n"
+        + ".endfn\n"
+        + ".fn helper(flag: bool) -> usize\n"
+        + ".meta return usize\n"
+        + ".meta effects none\n"
+        + ".param flag: bool\n"
+        + ".endfn\n"
+        + ".fn host(value: u16) -> void\n"
+        + ".meta extern\n"
+        + ".meta return void\n"
+        + ".meta effects io\n"
+        + ".param value: u16\n"
+        + ".endfn\n";
+    let result = _produce(text);
+    assert expect_eq_bool(result.ok, true).ok;
+    assert expect_eq_bool(result.module != null, true).ok;
+    let verified = verify_module(result.module);
+    assert expect_eq_bool(verified.ok, true).ok;
+    let rendered = render_module(result.module);
+    assert expect_eq_str(rendered, "module demo\n"
+        + "type t0 = int(signed,32)\n"
+        + "type t1 = int(unsigned,8)\n"
+        + "type t2 = ptr(t1,as0)\n"
+        + "type t3 = float(64)\n"
+        + "type t4 = bool\n"
+        + "type t5 = int(unsigned,64)\n"
+        + "type t6 = int(unsigned,16)\n"
+        + "type t7 = unit\n"
+        + "effects e0 = {io, model}\n"
+        + "effects e1 = {}\n"
+        + "effects e2 = {io}\n"
+        + "capabilities c0 = {}\n"
+        + "exported fn api(t0, t2) -> t3 effects=e0 capabilities=c0\n"
+        + "fn helper(t4) -> t5 effects=e1 capabilities=c0\n"
+        + "external fn host(t6) -> t7 effects=e2 capabilities=c0\n").ok;
+}
+
+test "typed_ssa producer: identical input renders byte-identically" {
+    let text = ".module demo\n" + ".fn f(value: i64) -> i64\n"
+        + ".meta return i64\n"
+        + ".meta effects io\n"
+        + ".param value: i64\n"
+        + ".endfn\n";
+    let first = _produce(text);
+    let second = _produce(text);
+    assert expect_eq_bool(first.ok, true).ok;
+    assert expect_eq_bool(second.ok, true).ok;
+    assert expect_eq_str(render_module(first.module), render_module(second.module)).ok;
+}
+
+test "typed_ssa producer: unsupported signature rejects the whole module" {
+    let text = ".module demo\n" + ".fn supported(value: i64) -> i64\n"
+        + ".meta return i64\n"
+        + ".meta effects none\n"
+        + ".param value: i64\n"
+        + ".endfn\n"
+        + ".fn rejected(values: string[]) -> i64\n"
+        + ".meta return i64\n"
+        + ".meta effects none\n"
+        + ".param values: string[]\n"
+        + ".endfn\n";
+    let result = _produce(text);
+    assert expect_eq_bool(result.ok, false).ok;
+    assert expect_eq_bool(result.module == null, true).ok;
+    assert expect_eq_int(result.diagnostics.length, 1).ok;
+    assert expect_eq_str(result.diagnostics[0].code, "TSSA101").ok;
+    assert expect_eq_str(result.diagnostics[0].message, "function rejected: unsupported typed-SSA parameter type `string[]`").ok;
+}
