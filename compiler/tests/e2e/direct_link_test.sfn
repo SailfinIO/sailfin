@@ -1,11 +1,11 @@
 // compiler/tests/e2e/direct_link_test.sfn
 //
-// End-to-end guard for the direct `ld.lld` Linux x86-64 link path
+// End-to-end guard for the direct `ld.lld` Linux x86-64/aarch64 link path
 // (SFEP-0015 §8 Stage 1, `compiler/src/build/direct_link.sfn`; mirror
 // #2550). Two contracts are pinned by building a real hello-world with
 // `SAILFIN_TRACE_LINK=1`:
 //
-//   1. Direct path (supported Linux x86-64 host): the final link trace
+//   1. Direct path (supported glibc Linux host): the final link trace
 //      names `ld.lld` and contains NO `clang` driver invocation, consumes
 //      objects only (no `.ll`), and the produced binary runs.
 //   2. Controlled fallback (`SAILFIN_LINKER=ld` defers to the clang
@@ -13,7 +13,7 @@
 //      reason and the clang path — never a silent ABI change — and the
 //      binary still runs.
 //
-// The direct-path leg is skipped on any host that is not Linux x86-64 with
+// The direct-path leg is skipped on any host that is not Linux x86-64/aarch64 with
 // `ld.lld` installed (macOS/Windows keep the clang path). See
 // `.claude/rules/no-bash-e2e.md`.
 import { contains, find } from "sfn/strings";
@@ -52,7 +52,7 @@ fn _child_env(linker: string) -> string[] ![io] {
     return e;
 }
 
-// Whether this host takes the direct ld.lld path: Linux, x86_64, ld.lld
+// Whether this host takes the direct ld.lld path: Linux, x86_64/aarch64, ld.lld
 // installed. Mirrors `resolve_direct_ld_lld`'s gates so the direct-path
 // assertions only run where the path is actually selected.
 fn _direct_eligible() -> boolean ![io] {
@@ -64,7 +64,9 @@ fn _direct_eligible() -> boolean ![io] {
     let _arch_rc = process.run_capture(["uname", "-m"], []);
     let arch = process.capture_take_stdout();
     let _e1 = process.capture_take_stderr();
-    if find(arch, "x86_64", 0) < 0 { return false; }
+    if find(arch, "x86_64", 0) < 0 && find(arch, "aarch64", 0) < 0 {
+        return false;
+    }
     let lld = process.run_capture(["sh", "-c", "command -v ld.lld"], []);
     let lld_out = process.capture_take_stdout();
     let _e2 = process.capture_take_stderr();
@@ -88,7 +90,7 @@ fn _build(main_path: string, bin: string, linker: string) -> int ![io] {
     return rc;
 }
 
-test "direct-link: Linux x86-64 links via ld.lld with no clang driver" ![io] {
+test "direct-link: supported Linux arch links via ld.lld with no clang driver" ![io] {
     if !_direct_eligible() {
         // Not a supported direct-link host — the clang path is covered by
         // sailfin_trace_link_test.sfn. Nothing to assert here.
