@@ -221,10 +221,21 @@ covers generic `loop`, `for x in arr`, and `for i in a..b`;
 reclamation, never a dangling pointer). Scalar-replacement
 (strategy B) and nested-loop mark stacking are post-1.0.
 
-**Default arena global.** The Sailfin-native arena module lazily initializes
-the process-global arena through `sfn_arena_global()`. Arena-aware helpers
-resolve that global when no explicit arena is supplied; no C constructor or
-runtime-global fallback participates in startup.
+**Default arena global — per-thread (SFN-558).** The Sailfin-native arena
+module lazily initializes a default arena through `sfn_arena_global()`; that
+symbol resolves `thread_local` storage, so each thread lazily creates and
+privately owns its own `Arena` rather than every thread sharing one
+process-wide instance. This closes a data race reachable from
+`routine`/`spawn`/`parallel` (concurrent allocations could otherwise alias the
+same address). Arena-aware helpers resolve the calling thread's arena when no
+explicit arena is supplied; no C constructor or runtime-global fallback
+participates in startup. A thread's arena is never destroyed — it leaks until
+process exit, matching the prior single-arena lifetime, since a value a
+worker returns across `parallel`/`await`/a `channel` must outlive the worker
+and arena memory has no per-object free. `mark`/`rewind` and the
+`SAILFIN_DUMP_ARENA_STATS` telemetry dump likewise bind to the calling
+thread's arena only. Full rationale:
+[`docs/proposals/design-notes/sfn-558-arena-thread-safety.md`](https://github.com/SailfinIO/sailfin/blob/main/docs/proposals/design-notes/sfn-558-arena-thread-safety.md).
 
 ## Native Signature Registry
 

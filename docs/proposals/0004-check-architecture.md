@@ -4,7 +4,7 @@ title: "sfn check — Fast Analysis Without Codegen"
 status: Implemented
 type: tooling
 created: 2026-04-15
-updated: 2026-07-26
+updated: 2026-07-27
 author: "agent:compiler-architect"
 tracking:
 supersedes:
@@ -1051,7 +1051,7 @@ considered and rejected for v1.
 | B4 | Renderer harmonization: `report_typecheck_errors` → `render_diagnostic` | S | B1 | One-source-of-truth for diagnostic shape | All `compile_to_*` paths use `diagnostics_render.render_diagnostic`; legacy `format_typecheck_diagnostic` deleted |
 | B5 | `secondary: SourceLocation[]` on `Diagnostic` | S | B3 | "first defined here" pointers; cross-module attribution | Duplicate-symbol diagnostics carry secondary span; renderer draws second caret |
 | B6 | `make check-fast` + CI pre-build wiring | S | B2 | Faster PR feedback (~5s vs ~13min) | New target documented; CI gate fails fast; pre-commit hook documented |
-| B7 | Parallel multi-file checking — pre-mortem | XS (doc only) | none | Track C scoping | Gated on a thread-safe arena (SFN-558); the original concurrency-runtime gate cleared, see §Q4; rationale documented; alternative listed |
+| B7 | Parallel multi-file checking — pre-mortem | XS (doc only) | none | Track C scoping | Was gated on a thread-safe arena (SFN-558); that prerequisite landed 2026-07-27, see §Q4 — B7 itself remains unstarted; rationale documented; alternative listed |
 
 **Track B v1 = B1 + B2 + B3 + B4 + B6.** B5 ships when a consumer needs it
 (LSP cross-file rename is the natural forcing function). B7 is a doc-only PR
@@ -1163,7 +1163,19 @@ enforced as one.**
 
 Targets land in B6.
 
-#### Q4 — Parallel multi-file checking: gated on a thread-safe arena (SFN-558)
+#### Q4 — Parallel multi-file checking: was gated on a thread-safe arena (SFN-558, cleared 2026-07-27)
+
+> **Revisited 2026-07-27 — the SFN-558 prerequisite landed; B7 itself is still
+> unstarted.** The arena that `sfn check`'s allocations resolve to is now
+> `thread_local` — each thread lazily owns a private `Arena` instead of every
+> allocation racing one process-global instance (design note:
+> `docs/proposals/design-notes/sfn-558-arena-thread-safety.md`). That clears
+> the blocker recorded below: parallel workers no longer share an unsynchronized
+> bump pointer. This is the removal of B7's blocking prerequisite, not
+> B7 itself — no parallel-checking implementation work has started, the
+> worker-pool deadlock caveat and first-adopter risk noted below still apply
+> unchanged, and B7 remains scoped as a doc-only PR until someone picks it up
+> through Track C.
 
 > **Revisited 2026-07-26 — the original gate cleared, and a different one was
 > found underneath it.** This section was written in April 2026, before the SFEP

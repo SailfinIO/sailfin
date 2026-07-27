@@ -4,9 +4,9 @@ title: Native Runtime Architecture
 status: Implemented
 type: runtime
 created: 2026-06-26
-updated: 2026-07-24
+updated: 2026-07-27
 author: "agent:compiler-architect"
-tracking: "#321, #322, #451, #822, #1089, #1118, #1181, #1203, #1209"
+tracking: "#321, #322, #451, #822, #1089, #1118, #1181, #1203, #1209, SFN-558"
 supersedes:
 superseded-by:
 graduates-to: reference/runtime-abi.md
@@ -174,13 +174,27 @@ optimization is ~15-20 lines that eliminates copies in the common chained-append
 loop.
 
 **Compiler arena vs. user-program arena.** The compiler runs as a batch process
-with a single process-level arena created at startup and destroyed at exit; all
-compiler-internal allocations (AST nodes, IR strings, lowering intermediates) route
-through it. (When a long-lived compiler process lands — build-performance Phase 5 —
-the arena resets between modules.) User programs may create explicit arenas via
+with a single-threaded driver, so its arena usage is effectively one arena
+created at startup and destroyed at exit; all compiler-internal allocations
+(AST nodes, IR strings, lowering intermediates) route through it. (When a
+long-lived compiler process lands — build-performance Phase 5 — the arena
+resets between modules.) User programs may create explicit arenas via
 `Arena.create()` for request- or batch-scoped allocation; the prelude does not
 expose arenas implicitly — they are an opt-in performance tool. Allocations not
 using an explicit arena go through the default RC path.
+
+**Thread-safety (SFN-558).** The default arena the compiler and every unadorned
+allocation resolve to (`sfn_arena_global()`, `runtime/sfn/memory/arena.sfn`) is
+**not** a single process-wide instance at the implementation level — it is
+`thread_local`, so each thread lazily creates and privately owns its own
+`Arena`. This closes a data race reachable from `routine`/`spawn`/`parallel`
+user code once structured concurrency shipped as v0 (the bump pointer, page
+splice, and `realloc` grow-if-at-tip were unsynchronized read-modify-writes
+under a shared arena). No lock or atomic was introduced; per-thread ownership
+removes the race by construction, and the single-threaded compiler driver
+behaves exactly as before. A thread's arena is never destroyed (leak-until-
+process-exit), matching the shared arena's prior lifetime. Full rationale:
+`docs/proposals/design-notes/sfn-558-arena-thread-safety.md`.
 
 #### 3.2.2 Reference counting
 
