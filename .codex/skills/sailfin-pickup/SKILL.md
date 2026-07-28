@@ -1,13 +1,13 @@
 ---
 name: sailfin-pickup
-description: Pick up a ready Sailfin Linear or GitHub issue and drive it through branch, implementation, verification, and PR handoff.
+description: Pick up a ready Sailfin Linear or GitHub issue and drive it through branch, implementation, verification, independent review, and a ready-for-review PR handoff.
 ---
 
 # Sailfin Pickup
 
 Use this skill when the user asks Codex to pick up an issue, work the next
 item, or emulate Claude's `/pickup` flow. Work autonomously from selection
-through a draft pull request unless a stop condition below applies.
+through a ready-for-review pull request unless a stop condition below applies.
 
 ## Select and claim
 
@@ -34,6 +34,13 @@ Implement the smallest cohesive change that satisfies the contract. Follow
 `sailfin-check` skill for the appropriate formatting, self-hosting, and
 verification gates.
 
+Use Codex subagents when a bounded slice can proceed independently, such as
+read-only surface mapping, a mechanical implementation slice, or first-pass
+test-failure classification. Give each helper the issue contract and an exact
+scope, keep ownership of sequencing and scope decisions in the main agent, and
+inspect helper results before incorporating them. Helper delegation is optional;
+the independent review gate below is mandatory.
+
 Apply the seed-dependency policy in `.claude/rules/seed-dependency.md`. Verify
 any predecessor explicitly listed under `## Required in pinned seed` before
 claiming compiler or runtime work. Stop without claiming when the prerequisite
@@ -57,15 +64,37 @@ and mark it blocked by the current issue only when it truly cannot start before
 the current pull request lands. Leave uncertain or oversized discoveries in
 `Triage` rather than over-specifying them.
 
+## Review
+
+Before review, check every acceptance criterion and run the issue's verification
+commands plus the `sailfin-check` ladder. Prefer targeted tests; use full gates
+only when requested or warranted by structural/high-risk work.
+
+Then spawn a fresh review subagent before committing or opening the PR. Keep the
+reviewer independent: provide the issue contract, cited design, repository
+instructions, verification results, `git status`, and the complete intended
+change including untracked files, but do not provide the main agent's
+conclusions or coach it toward approval.
+
+Ask the reviewer to inspect correctness, self-hosting and pipeline completeness,
+effect and ownership semantics, LLVM safety when relevant, scope discipline,
+test coverage, documentation, and project conventions. Require findings to cite
+files and lines and to distinguish blocking correctness issues from optional
+improvements.
+
+Resolve every blocking finding, rerun the affected verification, and request
+another independent review when the fix materially changes behavior. Do not
+commit or publish the PR until the review has no blocking findings. If subagents
+are unavailable, stop and report that the required independent review could not
+be run rather than silently replacing it with a self-review.
+
 ## Finish
 
-- Check every acceptance criterion and run the issue's verification commands
-  plus the `sailfin-check` ladder. Prefer targeted tests; use full gates only
-  when requested or warranted by structural/high-risk work.
-- Commit the focused change and open a draft PR with the issue and design links,
-  acceptance status, exact verification commands, and residual concerns.
+- Commit the reviewed, focused change and open a ready-for-review PR (not a
+  draft) with the issue and design links, acceptance status, exact verification
+  commands, review outcome, and residual concerns.
 - Include `Fixes SFN-123` for Linear integration and `Closes #N` when a GitHub
   mirror exists. Move the Linear issue to `In Review`; merging, not this skill,
   completes it.
-- Report the issue, branch, PR, verification results, follow-ups, and anything
-  surprising enough to improve future grooming.
+- Report the issue, branch, PR, verification and independent-review results,
+  follow-ups, and anything surprising enough to improve future grooming.
