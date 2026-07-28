@@ -76,6 +76,12 @@ Use `prompts/pickup.md` for autonomous issue work. It instructs Codex to:
 2. Verify pinned-seed freshness only when a compiler-source capability must already be present in the pinned seed.
 3. Claim the Linear issue, best-effort sync any GitHub mirror, and branch as `codex/SFN-123-<slug>` for Linear pickup.
 4. File out-of-scope bugs or obvious gaps as Sailfin Linear follow-ups using the templates in `docs/conventions/linear-templates.md`.
-5. Implement, verify, commit, and open a PR with the Linear issue link plus `Closes #<issue>` when a GitHub mirror exists.
+5. Implement and verify the change, then run a fresh independent review subagent and resolve all blocking findings.
+6. Commit the reviewed change and open a ready-for-review PR (not a draft) with the Linear issue link plus `Closes #<issue>` when a GitHub mirror exists.
+
+Codex has native subagent delegation, so the pickup skill does not duplicate
+Claude-specific agent profiles. It may delegate bounded exploration,
+implementation, or test-triage slices when useful, while the independent review
+subagent is a mandatory pre-PR gate.
 
 The GitHub/project scripts remain in `.claude/scripts/` for now because they are repository automation rather than Claude-only logic.

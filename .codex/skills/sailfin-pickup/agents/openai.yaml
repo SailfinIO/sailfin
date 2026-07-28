@@ -1,0 +1,4 @@
+interface:
+  display_name: "Sailfin Pickup"
+  short_description: "Drive a Sailfin issue through reviewed PR"
+  default_prompt: "Use $sailfin-pickup to claim a ready Sailfin issue, implement and verify it, run an independent review, and open a ready-for-review PR."
