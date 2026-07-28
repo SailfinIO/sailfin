@@ -14,6 +14,10 @@ cache warmer**), which builds the default-branch per-test-binary cache PR
 CI restores. It is not a correctness gate, but a warmer that stops
 producing its cache is a trackable regression in its own right — so a
 warmer failure or timeout is reported through the same path (SFN-430).
+Closely spaced pushes may replace an older queued warmer with the latest
+one; this expected coalescing is not reported because an active warmer is
+left running and the latest-main warmer remains queued to refresh the cache
+(SFN-583).
 
 When any of these fails — either gate, or the warmer — the `notify-failure`
 job (issue #782) opens a deduplicated regression issue labeled
@@ -142,19 +146,25 @@ the failing run, and the run page links the artifact.
 
 ---
 
-## 5. test-bin warmer timeout
+## 5. test-bin warmer failure or timeout
 
 A regression issue with the `test-bin-warmer` title suffix is **not** a
 determinism or cache-hit-rate gate failure. It means the
 `test-bin-baseline` job — `Warm test-bin cache (linux-x86_64)` — either
-failed the full suite twice (attempt + retry) or hit its `timeout-minutes`
-cap. There is no `pass1.json` / `pass2.json` artifact for this path; triage
-from the `Warm test-bin cache` job log in the failing run.
+failed the full suite twice (attempt + retry) or was cancelled after it
+started, normally because it hit its `timeout-minutes` cap. There is no
+`pass1.json` / `pass2.json` artifact for this path; triage from the
+`Warm test-bin cache` job log in the failing run.
 
-- **`cancelled` conclusion → timeout.** The warmer runs
-  `concurrency: cancel-in-progress: false`, so it is never
-  supersede-cancelled (SFN-395); a `cancelled` conclusion is always a
-  `timeout-minutes` expiry, not a superseded run. The cold full suite on
+- **`cancelled` after steps started → reportable cancellation/timeout.** The warmer runs
+  `concurrency: cancel-in-progress: false`, so GitHub never cancels the
+  active job to start a newer one (SFN-395). A burst of pushes can still
+  replace an older **queued** job before it starts; `notify-failure`
+  recognizes the empty step list and skips that expected coalescing, while
+  the active warmer finishes and the latest queued warmer runs next
+  (SFN-583). A cancellation after steps have started remains reportable;
+  when it occurs at the job's wall-time cap, it is a `timeout-minutes`
+  expiry. The cold full suite on
   the 4-core `ubuntu-24.04` runner has repeatedly crept toward the cap
   (run-1010 overran the old 60-min cap; PR #2492 raised it to 90 min). If
   the warm step is still running when the job is killed, the
