@@ -47,11 +47,19 @@ test "narrow int params: sized-integer arguments and returns cross the call boun
     // output mismatch.
     assert r.exit == 0;
     let expected = "i8_100=100\n" + "i8_1=1\n" + "i8_min=-128\n"
-        + "i16_1000=1000\n" + "i16_min=-32768\n"
+        + "i16_1000=1000\n"
+        + "i16_min=-32768\n"
         + "i32_100000=100000\n"
-        + "u8_255=255\n" + "u16_65535=65535\n"
+        + "u8_255=255\n"
+        + "u16_65535=65535\n"
         + "u32_hibit=4000000000\n"
+        + "ret_u8=255\n"
+        + "ret_u16=65535\n"
+        + "ret_u32=4000000000\n"
         + "ret_u64=255\n"
+        + "ret_i8=-1\n"
+        + "arg_u16=65535\n"
+        + "arg_i8=-1\n"
         + "unused_param=7";
     assert r.out == expected;
 }

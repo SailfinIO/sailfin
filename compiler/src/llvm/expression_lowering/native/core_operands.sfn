@@ -10,7 +10,13 @@ import { NativeSourceSpan } from "../../../native_ir";
 import { char_code } from "../../../string_utils";
 import { default_return_literal, format_temp_name } from "../../expressions_helpers";
 import { trace_lowering } from "../../lowering_debug_state";
-import { ends_with_pointer_suffix, numeric_type_kind, strip_pointer_suffix } from "../../type_mapping";
+import {
+    ends_with_pointer_suffix,
+    integer_type_is_signed,
+    map_type_annotation,
+    numeric_type_kind,
+    strip_pointer_suffix
+} from "../../type_mapping";
 import {
     BinaryAlignmentResult,
     CoercionResult,
@@ -2796,6 +2802,65 @@ fn coerce_operand_to_type(operand: LLVMOperand, target_type: string, temp_index:
         operand: null,
         diagnostics: diagnostics
     };
+}
+
+// Preserve source-level integer signedness at boundaries where LLVM has
+// collapsed `uN` and `iN` onto the same `iN` type (SFN-575). Most coercion
+// sites have no authoritative source annotation and keep using
+// `coerce_operand_to_type`; call arguments and call results use this seam
+// when resolution can prove the operand's source type.
+fn coerce_operand_to_type_with_source(operand: LLVMOperand, source_type: string, target_type: string, temp_index: int, lines: string[], allow_widen: boolean, span: NativeSourceSpan?) -> CoercionResult ![io] {
+    if source_type.length == 0 {
+        return coerce_operand_to_type(operand, target_type, temp_index, lines, allow_widen, span);
+    }
+    let source = trim_text(source_type);
+    if source.length == 0 {
+        return coerce_operand_to_type(operand, target_type, temp_index, lines, allow_widen, span);
+    }
+    let operand_type = collapse_type_spaces(trim_text(operand.llvm_type));
+    if map_type_annotation(source) != operand_type {
+        return coerce_operand_to_type(operand, target_type, temp_index, lines, allow_widen, span);
+    }
+    if integer_type_is_signed(source) {
+        return coerce_operand_to_type(operand, target_type, temp_index, lines, allow_widen, span);
+    }
+
+    let target = collapse_type_spaces(trim_text(target_type));
+    let source_width = integer_llvm_width(operand_type);
+    let target_width = integer_llvm_width(target);
+    if source_width > 0 {
+        if target_width > source_width {
+            let widened = format_temp_name(temp_index);
+            let mut current_lines = lines;
+            current_lines.push("  " + widened + " = zext " + operand_type + " "
+                + operand.value
+                + " to "
+                + target);
+            return CoercionResult {
+                lines: current_lines,
+                temp_index: temp_index + 1,
+                operand: LLVMOperand { llvm_type: target, value: widened },
+                diagnostics: []
+            };
+        }
+        if target == "{i8*, i64}" {
+            if source_width < 64 {
+                let mut current_lines = lines;
+                let widened = format_temp_name(temp_index);
+                current_lines.push("  " + widened + " = zext " + operand_type
+                    + " "
+                    + operand.value
+                    + " to i64");
+                let display_operand = LLVMOperand {
+                    llvm_type: "i64",
+                    value: widened
+                };
+                return coerce_operand_to_type(display_operand, target, temp_index
+                    + 1, current_lines, allow_widen, span);
+            }
+        }
+    }
+    return coerce_operand_to_type(operand, target_type, temp_index, lines, allow_widen, span);
 }
 
 // Slice E.3b (#556 — reapplies #296): when one operand is integer

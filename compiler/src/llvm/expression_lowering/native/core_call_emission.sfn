@@ -44,7 +44,7 @@ import {
     lower_array_push_in_place,
     lower_struct_array_concat
 } from "../arrays";
-import { coerce_operand_to_type } from "./core_operands";
+import { coerce_operand_to_type, coerce_operand_to_type_with_source } from "./core_operands";
 import { parse_member_access } from "./core_parse";
 import { find_local_binding } from "./core_scopes";
 import { find_substring_from, sanitize_symbol } from "./core_text";
@@ -70,7 +70,7 @@ fn _abi_mismatch_diagnostic_prefix(diagnostics: string[]) -> string {
 
 // Coerce operands to expected types and emit the final call instruction.
 // Handles array concat/push, trait dispatch, closure dispatch, and normal function calls.
-fn coerce_and_emit_call(trimmed_target: string, operands: LLVMOperand[], expected_params: string[], llvm_return: string, is_trait_dispatch: boolean, is_closure_dispatch: boolean, is_array_concat: boolean, array_concat_element_type: string, is_array_push: boolean, array_push_element_type: string, method_operand: LLVMOperand?, helper_descriptor: RuntimeHelperDescriptor?, function_entry: NativeFunction?, current_temp: int, current_lines: string[], diagnostics: string[], collected_string_constants: StringConstant[], bindings: ParameterBinding[], locals: LocalBinding[], context: TypeContext) -> ExpressionResult ![io] {
+fn coerce_and_emit_call(trimmed_target: string, operands: LLVMOperand[], operand_source_types: string[], expected_params: string[], llvm_return: string, is_trait_dispatch: boolean, is_closure_dispatch: boolean, is_array_concat: boolean, array_concat_element_type: string, is_array_push: boolean, array_push_element_type: string, method_operand: LLVMOperand?, helper_descriptor: RuntimeHelperDescriptor?, function_entry: NativeFunction?, current_temp: int, current_lines: string[], diagnostics: string[], collected_string_constants: StringConstant[], bindings: ParameterBinding[], locals: LocalBinding[], context: TypeContext) -> ExpressionResult ![io] {
     let mut result_lines = current_lines;
     let mut result_temp: int = current_temp;
     let mut result_diagnostics = diagnostics;
@@ -121,7 +121,11 @@ fn coerce_and_emit_call(trimmed_target: string, operands: LLVMOperand[], expecte
             // (still emitting `round + fptosi`) — the original `[fatal]`
             // refusal was downgraded in #550. The fatal re-promotes
             // symmetrically in #490 once E.2 completes.
-            let coerced = coerce_operand_to_type(operand, target_type, result_temp, result_lines, false, null);
+            let mut source_type: string = "";
+            if operand_source_types.length > index {
+                source_type = operand_source_types[index];
+            }
+            let coerced = coerce_operand_to_type_with_source(operand, source_type, target_type, result_temp, result_lines, false, null);
             result_diagnostics = extend_string_array(result_diagnostics, coerced.diagnostics);
             result_lines = coerced.lines;
             result_temp = coerced.temp_index;
