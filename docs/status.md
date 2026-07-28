@@ -772,7 +772,7 @@ the former with zero work toward the latter.
 | Linux x86-64 | Shipped; primary CI host (`ci.yml`); release asset published | In progress — direct `ld.lld` link path exists (`build/direct_link.sfn::resolve_direct_ld_lld`); owned syscall layer not started (SFEP-0015 Axis 3, #1641) |
 | macOS arm64 (Apple Silicon) | Shipped; CI host; release asset published; effect enforcement partial (#613) | Not a target — mediated vendor-library shim (SFEP-0015 §10; no stable raw-syscall ABI) |
 | Windows x86-64 | Cross-compiled from Linux (`ci-cross-windows`); release asset published; native MSVC self-host in progress (SFEP-0021, tracking SFN-53–58) | Not a target — mediated vendor-library shim (SFEP-0015 §10) |
-| Linux aarch64 | Native compiler bootstrap and byte-identical two-pass self-host procedure shipped (SFN-472, SFEP-0056 §3.4); host-layout probe and direct `ld.lld` fast path included (SFN-473, §3.6); no CI leg or published installer asset | Not a target |
+| Linux aarch64 | Tier-3 advisory CI cross-emits pass-1 with an arch-aware x86_64 compiler, then builds native pass-2, verifies the pass-1/pass-2 fixed point, and runs the full suite on `ubuntu-24.04-arm` for source PRs and a nightly soak (SFN-474, SFEP-0056 §3.4–3.5); host-layout probe and direct `ld.lld` fast path included (SFN-473, §3.6); no published installer asset | Not a target |
 
 **Base support is never a claim that the seal holds on that platform** — the
 same discipline as the `![gpu]` row above ("not a claim that an accelerator

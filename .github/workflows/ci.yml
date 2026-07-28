@@ -40,6 +40,10 @@ on:
   # merge_group (and the default); stated explicitly for clarity.
   merge_group:
     types: [checks_requested]
+  # Tier-3 aarch64-Linux soak. Scheduled runs are scoped below so they run
+  # only the advisory arm lane rather than duplicating the blocking PR matrix.
+  schedule:
+    - cron: "0 11 * * *"
   workflow_dispatch:
     inputs: {}
 
@@ -72,7 +76,12 @@ jobs:
           reason="full compiler CI for ${GITHUB_EVENT_NAME}"
           public_claims_reason="public-claim verification for ${GITHUB_EVENT_NAME}"
 
-          if [ "${GITHUB_EVENT_NAME}" = "pull_request" ]; then
+          if [ "${GITHUB_EVENT_NAME}" = "schedule" ]; then
+            source=false
+            public_claims=false
+            reason="scheduled run reserved for the advisory aarch64-Linux lane"
+            public_claims_reason="scheduled advisory run has no public-claim scope"
+          elif [ "${GITHUB_EVENT_NAME}" = "pull_request" ]; then
             source=false
             public_claims=false
             reason="no compiler/runtime/build-system paths changed"
@@ -336,7 +345,10 @@ jobs:
   build-compiler-linux:
     name: Build compiler [linux-x86_64]
     needs: ci-scope
-    if: ${{ needs.ci-scope.outputs.source == 'true' }}
+    if: >-
+      github.event_name == 'schedule' ||
+      needs.ci-scope.outputs.source == 'true'
+    continue-on-error: ${{ github.event_name == 'schedule' }}
     runs-on: ubuntu-24.04
     timeout-minutes: 120
     steps:
@@ -388,12 +400,14 @@ jobs:
       # fresh from the `make rebuild` above. Keeping them out of the
       # shard artifact keeps it bounded (#1234 risk note).
       - name: Cache MinGW-w64 apt packages
+        if: ${{ github.event_name != 'schedule' }}
         uses: actions/cache@v6
         with:
           path: ~/.cache/mingw-debs
           key: apt-mingw-w64-x86-64-${{ runner.os }}-v1
 
       - name: Install MinGW-w64 cross-compiler (Linux)
+        if: ${{ github.event_name != 'schedule' }}
         run: |
           set -euo pipefail
           # `make ci-cross-windows` only uses the x86-64 C cross toolchain
@@ -438,12 +452,14 @@ jobs:
           x86_64-w64-mingw32-gcc --version | head -1
 
       - name: Cross-compile for Windows (Linux)
+        if: ${{ github.event_name != 'schedule' }}
         shell: bash {0}
         run: |
           set -euo pipefail
           make ci-cross-windows
 
       - name: Upload Windows installer archive
+        if: ${{ github.event_name != 'schedule' }}
         uses: actions/upload-artifact@v7
         with:
           name: ci-installer-windows-x86_64
@@ -582,6 +598,296 @@ jobs:
           path: build-tree-macos-arm64.tar.gz
           if-no-files-found: error
           retention-days: 1
+
+  # Build the arch-aware vehicle natively on x86_64, then cross-emit the first
+  # aarch64 compiler. Running either full compiler build under qemu-user makes
+  # every parallel frontend worker a TCG-emulated process (~17 minutes without
+  # completing compiler A on the first live run); the cross vehicle documented
+  # in SFEP-0056 §3.4 keeps compiler work native while preserving the decisive
+  # compiler A -> pass-1 -> pass-2 proof on the arm host.
+  build-aarch64-cross-vehicle:
+    name: Cross-emit compiler [linux-arm64 / advisory]
+    needs: [ci-scope, build-compiler-linux]
+    if: >-
+      (github.event_name == 'schedule' ||
+       needs.ci-scope.outputs.source == 'true') &&
+      needs.build-compiler-linux.result == 'success'
+    continue-on-error: true
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    outputs:
+      artifact_ready: ${{ steps.artifact_ready.outputs.ready }}
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v7
+
+      - name: Provision aarch64 cross sysroot
+        shell: bash
+        run: |
+          set -euo pipefail
+          sudo dpkg --add-architecture arm64
+          # The x86 runner's Ubuntu source points at archive.ubuntu.com, which
+          # has no arm64 indices. Keep it amd64-only and add ports explicitly.
+          sudo sed -i \
+            '/^Architectures:/d; /^Components:/a Architectures: amd64' \
+            /etc/apt/sources.list.d/ubuntu.sources
+          sudo tee /etc/apt/sources.list.d/ubuntu-arm64.sources >/dev/null <<'EOF'
+          Types: deb
+          URIs: http://ports.ubuntu.com/ubuntu-ports
+          Suites: noble noble-updates noble-backports
+          Components: main universe restricted multiverse
+          Architectures: arm64
+          Signed-By: /usr/share/keyrings/ubuntu-archive-keyring.gpg
+
+          Types: deb
+          URIs: http://ports.ubuntu.com/ubuntu-ports
+          Suites: noble-security
+          Components: main universe restricted multiverse
+          Architectures: arm64
+          Signed-By: /usr/share/keyrings/ubuntu-archive-keyring.gpg
+          EOF
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            binutils-aarch64-linux-gnu clang-18 gcc-14-aarch64-linux-gnu \
+            libc6-dev:arm64 libssl-dev:arm64 lld llvm-18
+          # The direct-link probe deliberately ignores /usr/lib/gcc-cross.
+          # Expose the matching target CRT under the native multiarch layout
+          # so pass-1 and the native rebuild use the same ld.lld contract.
+          sudo mkdir -p /usr/lib/gcc
+          sudo ln -s /usr/lib/gcc-cross/aarch64-linux-gnu \
+            /usr/lib/gcc/aarch64-linux-gnu
+
+      - name: Download arch-aware x86_64 compiler
+        uses: actions/download-artifact@v8
+        with:
+          name: ci-build-tree-linux-x86_64
+
+      - name: Extract arch-aware x86_64 compiler
+        shell: bash
+        run: |
+          set -euo pipefail
+          tar -xzf build-tree-linux-x86_64.tar.gz
+          rm -f build-tree-linux-x86_64.tar.gz
+          build/bin/sfn version
+
+      - name: Cross-emit first native aarch64 compiler
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p build/aarch64-cross/bin build/aarch64-cross/pass-1
+          cat >build/aarch64-cross/bin/clang <<'EOF'
+          #!/usr/bin/env bash
+          exec clang-18 --target=aarch64-linux-gnu "$@"
+          EOF
+          chmod +x build/aarch64-cross/bin/clang
+          PATH="$PWD/build/aarch64-cross/bin:$PATH" \
+            SAILFIN_LINKER=lld \
+            SAILFIN_TARGET_ARCH=aarch64 \
+            build/bin/sfn build --no-cache -p compiler \
+              --work-dir build/aarch64-cross/pass-1 \
+              -o build/aarch64-cross/pass-1/sfn
+          readelf -h build/aarch64-cross/pass-1/sfn \
+            | grep -Eq 'Machine:[[:space:]]+AArch64'
+
+      - name: Bundle cross-emitted compiler
+        shell: bash
+        run: |
+          set -euo pipefail
+          file build/aarch64-cross/pass-1/sfn
+          tar -czf aarch64-pass-1.tar.gz -C build/aarch64-cross pass-1/sfn
+
+      - name: Upload cross-emitted compiler
+        uses: actions/upload-artifact@v7
+        with:
+          name: ci-aarch64-pass-1
+          path: aarch64-pass-1.tar.gz
+          if-no-files-found: error
+          retention-days: 1
+
+      - name: Mark pass-1 artifact ready
+        id: artifact_ready
+        shell: bash
+        run: echo "ready=true" >> "$GITHUB_OUTPUT"
+
+  # aarch64-Linux enters as Tier 3 (SFEP-0056 §3.5). Both arm jobs are
+  # intentionally advisory and intentionally absent from `required-ci`: a
+  # failure stays visible on the PR/nightly run without red-gating main.
+  build-compiler-aarch64-linux:
+    name: Self-host compiler [linux-arm64 / advisory]
+    needs: [ci-scope, build-aarch64-cross-vehicle]
+    if: >-
+      (github.event_name == 'schedule' ||
+       needs.ci-scope.outputs.source == 'true') &&
+      needs.build-aarch64-cross-vehicle.outputs.artifact_ready == 'true'
+    continue-on-error: true
+    runs-on: ubuntu-24.04-arm
+    timeout-minutes: 60
+    outputs:
+      artifact_ready: ${{ steps.artifact_ready.outputs.ready }}
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v7
+
+      - name: Install native LLVM toolchain
+        shell: bash
+        run: |
+          set -euo pipefail
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            binutils clang-18 lld llvm-18 libssl-dev
+
+      - name: Download cross-emitted compiler
+        uses: actions/download-artifact@v8
+        with:
+          name: ci-aarch64-pass-1
+
+      - name: Extract cross-emitted compiler
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p build/aarch64-bootstrap
+          tar -xzf aarch64-pass-1.tar.gz -C build/aarch64-bootstrap
+          rm -f aarch64-pass-1.tar.gz
+          readelf -h build/aarch64-bootstrap/pass-1/sfn \
+            | grep -Eq 'Machine:[[:space:]]+AArch64'
+          chmod +x build/aarch64-bootstrap/pass-1/sfn
+          build/aarch64-bootstrap/pass-1/sfn version
+          build/aarch64-bootstrap/pass-1/sfn check examples/basics/hello-world.sfn
+
+      - name: Build native pass-2 fixed point
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p build/aarch64-bootstrap/bin build/aarch64-bootstrap/pass-2
+          cat >build/aarch64-bootstrap/bin/clang <<'EOF'
+          #!/usr/bin/env bash
+          exec clang-18 --target=aarch64-linux-gnu "$@"
+          EOF
+          chmod +x build/aarch64-bootstrap/bin/clang
+          echo "$PWD/build/aarch64-bootstrap/bin" >> "$GITHUB_PATH"
+          echo "SAILFIN_LINKER=lld" >> "$GITHUB_ENV"
+          echo "SAILFIN_TARGET_ARCH=aarch64" >> "$GITHUB_ENV"
+          PATH="$PWD/build/aarch64-bootstrap/bin:$PATH" \
+            SAILFIN_LINKER=lld \
+            SAILFIN_TARGET_ARCH=aarch64 \
+            "$PWD/build/aarch64-bootstrap/pass-1/sfn" build --no-cache -p compiler \
+              --work-dir build/aarch64-bootstrap/pass-2 \
+              -o build/aarch64-bootstrap/pass-2/sfn
+
+      # Match Makefile rebuild's post-build shared context: standalone runtime
+      # emits in the e2e suite need OwnedBuf and POSIX signatures/layouts.
+      - name: Stage standalone runtime import context
+        shell: bash
+        run: |
+          set -euo pipefail
+          compiler="$PWD/build/aarch64-bootstrap/pass-2/sfn"
+          context="$PWD/build/aarch64-bootstrap/pass-2/compiler/import-context"
+          mkdir -p \
+            "$context/runtime/sfn/memory" \
+            "$context/runtime/sfn/platform"
+          "$compiler" emit \
+            --module-name runtime/sfn/memory/ownedbuf \
+            -o "$context/runtime/sfn/memory/ownedbuf.sfn-asm" \
+            native runtime/sfn/memory/ownedbuf.sfn
+          grep '^\.layout' \
+            "$context/runtime/sfn/memory/ownedbuf.sfn-asm" \
+            > "$context/runtime/sfn/memory/ownedbuf.layout-manifest"
+          "$compiler" emit \
+            --module-name runtime/sfn/platform/posix \
+            -o "$context/runtime/sfn/platform/posix.sfn-asm" \
+            native runtime/sfn/platform/posix.sfn
+          grep '^\.layout' \
+            "$context/runtime/sfn/platform/posix.sfn-asm" \
+            > "$context/runtime/sfn/platform/posix.layout-manifest" || true
+
+      - name: Bundle native compiler passes
+        shell: bash
+        run: |
+          set -euo pipefail
+          file build/aarch64-bootstrap/pass-1/sfn \
+            build/aarch64-bootstrap/pass-2/sfn
+          test -d build/aarch64-bootstrap/pass-2/compiler/import-context
+          sha256sum build/aarch64-bootstrap/pass-1/sfn \
+            build/aarch64-bootstrap/pass-2/sfn
+          tar -czf aarch64-bootstrap-compilers.tar.gz \
+            -C build/aarch64-bootstrap \
+            pass-1/sfn pass-2/sfn pass-2/compiler/import-context
+
+      - name: Upload native compiler passes
+        uses: actions/upload-artifact@v7
+        with:
+          name: ci-aarch64-bootstrap-compilers
+          path: aarch64-bootstrap-compilers.tar.gz
+          if-no-files-found: error
+          retention-days: 1
+
+      - name: Verify native fixed point
+        shell: bash
+        run: |
+          set -euo pipefail
+          cmp build/aarch64-bootstrap/pass-1/sfn build/aarch64-bootstrap/pass-2/sfn
+          build/aarch64-bootstrap/pass-2/sfn run examples/basics/hello-world.sfn
+          SAILFIN_BOOTSTRAP_PROBE_PATH=build/aarch64-bootstrap/aarch64-probe \
+            build/aarch64-bootstrap/pass-2/sfn run \
+              compiler/tests/e2e/fixtures/aarch64_bootstrap_probe.sfn
+
+      - name: Mark compiler artifact ready
+        id: artifact_ready
+        shell: bash
+        run: echo "ready=true" >> "$GITHUB_OUTPUT"
+
+  build-aarch64-linux:
+    name: Build + Test [linux-arm64 / advisory]
+    needs: [ci-scope, build-compiler-aarch64-linux]
+    if: >-
+      (github.event_name == 'schedule' ||
+       needs.ci-scope.outputs.source == 'true') &&
+      needs.build-compiler-aarch64-linux.outputs.artifact_ready == 'true'
+    continue-on-error: true
+    runs-on: ubuntu-24.04-arm
+    timeout-minutes: 180
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v7
+
+      - name: Install native LLVM toolchain
+        shell: bash
+        run: |
+          set -euo pipefail
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends clang-18 lld llvm-18 libssl-dev
+
+      - name: Download native compiler passes
+        uses: actions/download-artifact@v8
+        with:
+          name: ci-aarch64-bootstrap-compilers
+
+      - name: Extract native compiler passes
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p build/aarch64-bootstrap build/bin
+          tar -xzf aarch64-bootstrap-compilers.tar.gz -C build/aarch64-bootstrap
+          rm -f aarch64-bootstrap-compilers.tar.gz
+          cmp build/aarch64-bootstrap/pass-1/sfn build/aarch64-bootstrap/pass-2/sfn
+          install -m 755 build/aarch64-bootstrap/pass-2/sfn build/bin/sfn
+          mkdir -p build/compiler
+          cp -R build/aarch64-bootstrap/pass-2/compiler/import-context \
+            build/compiler/import-context
+          bash scripts/compiler_source_fingerprint.sh compiler/src runtime \
+            > build/.compiler-source-fingerprint
+          file build/bin/sfn
+          build/bin/sfn version
+
+      - name: Run full Sailfin test suite
+        shell: bash
+        run: |
+          set -euo pipefail
+          make test \
+            NATIVE_BIN=build/bin/sfn \
+            SAILFIN_CC=/usr/bin/clang-18 \
+            TEST_BIN_CACHE_FLAGS=--no-test-cache \
+            TEST_JOBS=4
 
   # The PR test suite is ~90% of CI wall time and runs serially, so we
   # fan it across per-OS shard legs that run concurrently (Phase 1 of
