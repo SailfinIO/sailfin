@@ -826,7 +826,7 @@ fn lower_expression(expression: string, bindings: ParameterBinding[], locals: Lo
             if ends_with(marker_only, ">") {
                 let args_text = substring(stripped, call_at + 1, stripped.length - 1);
                 let arg_entries = split_call_arguments(args_text);
-                return lower_call_expression(marker_only, arg_entries, bindings, locals, temp_index, lines, functions, context);
+                return lower_call_expression(marker_only, arg_entries, bindings, locals, temp_index, lines, functions, context, expected_type);
             }
         }
         let pair_result = lower_closure_pair_marker(stripped, functions, context, bindings, locals, temp_index, lines);
@@ -1333,7 +1333,7 @@ fn lower_expression(expression: string, bindings: ParameterBinding[], locals: Lo
                                     rewritten_args.push(argument_entries[arg_index]);
                                     arg_index += 1;
                                 }
-                                return lower_call_expression("concat", rewritten_args, bindings, locals, temp_index, lines, functions, context);
+                                return lower_call_expression("concat", rewritten_args, bindings, locals, temp_index, lines, functions, context, expected_type);
                             }
                         } else {
                             let param = find_parameter_binding(bindings, receiver_name);
@@ -1349,14 +1349,14 @@ fn lower_expression(expression: string, bindings: ParameterBinding[], locals: Lo
                                         rewritten_args.push(argument_entries[arg_index]);
                                         arg_index += 1;
                                     }
-                                    return lower_call_expression("concat", rewritten_args, bindings, locals, temp_index, lines, functions, context);
+                                    return lower_call_expression("concat", rewritten_args, bindings, locals, temp_index, lines, functions, context, expected_type);
                                 }
                             }
                         }
                     }
                 }
             }
-            return lower_call_expression(target, argument_entries, bindings, locals, temp_index, lines, functions, context);
+            return lower_call_expression(target, argument_entries, bindings, locals, temp_index, lines, functions, context, expected_type);
         }
     }
 

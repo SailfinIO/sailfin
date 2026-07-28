@@ -14,27 +14,42 @@
 // renders a byte-width value as a character, not a number (same reason as
 // `int_cast_sign.sfn`).
 fn take_i8(b: i8) -> int { return b as int; }
+
 fn take_i16(b: i16) -> int { return b as int; }
+
 fn take_i32(b: i32) -> int { return b as int; }
+
 fn take_u8(b: u8) -> u64 { return b as u64; }
+
 fn take_u16(b: u16) -> u64 { return b as u64; }
+
 fn take_u32(b: u32) -> u64 { return b as u64; }
 
 // The return half of the same defect: a sized return typed as `i8*` at the
 // call site was bitcast to `i64*` and loaded, dereferencing the returned
 // integer as an address.
 //
-// Only widths that need no widening to print are asserted here. A narrow
-// *unsigned* return (`-> u16`) still reads back sign-extended, because the
-// call-site temporary carries no binding for `_cast_operand_source_type` to
-// recover the source-level unsignedness from — the SFN-503 cast-sign matrix
-// at a call boundary. Tracked as SFN-575, which adds the `-> u16` case here
-// and deletes this note.
+// Return values exercise the call-result half of SFN-575: source-level
+// signedness must survive long enough for the caller's widening/string
+// conversion to select `zext` for unsigned values and `sext` for signed ones.
+fn ret_u8(b: int) -> u8 { return b as u8; }
+
+fn ret_u16(b: int) -> u16 { return b as u16; }
+
+fn ret_u32(b: int) -> u32 { return b as u32; }
+
 fn ret_u64(b: int) -> u64 { return b as u64; }
+
+fn ret_i8(b: int) -> i8 { return b as i8; }
+
+fn takes_int(value: int) -> int { return value; }
 
 // A narrow parameter that is never read stayed correct even while broken, so
 // it pins that the fix did not regress the unused-parameter path.
-fn unused_param(b: u8) -> int { let x: int = 7; return x; }
+fn unused_param(b: u8) -> int {
+    let x: int = 7;
+    return x;
+}
 
 fn main() -> int ![io] {
     // Signed narrow parameters: the values the original report saw as 24, 32
@@ -53,7 +68,18 @@ fn main() -> int ![io] {
     print("u32_hibit=" + take_u32(4000000000));
 
     // Sized returns read back through the call site.
+    print("ret_u8=" + ret_u8(255));
+    print("ret_u16=" + ret_u16(65535));
+    print("ret_u32=" + ret_u32(4000000000));
     print("ret_u64=" + ret_u64(255));
+    print("ret_i8=" + ret_i8(-1));
+
+    // A bound narrow value widened for an `int` parameter uses its binding
+    // annotation to select the correct extension opcode.
+    let unsigned_arg: u16 = 65535;
+    let signed_arg: i8 = -1;
+    print("arg_u16=" + takes_int(unsigned_arg));
+    print("arg_i8=" + takes_int(signed_arg));
 
     print("unused_param=" + unused_param(5));
     return 0;
