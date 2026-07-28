@@ -565,6 +565,21 @@ fn make_mixed_arithmetic_diagnostic(left_kind: string, right_kind: string, op: s
     };
 }
 
+// E0307: array arithmetic has no language-defined meaning. Array
+// concatenation remains available explicitly through `.concat`; rejecting the
+// operator here keeps aggregate values out of scalar LLVM arithmetic.
+fn make_array_arithmetic_diagnostic(op: string, span: SourceSpan?) -> Diagnostic {
+    return Diagnostic {
+        code: "E0307",
+        severity: "error",
+        message: "operator `" + op
+            + "` is not defined for array operands; use `.concat(...)` for array concatenation",
+        file_path: "",
+        primary: token_from_name(op, span),
+        suggestion: null
+    };
+}
+
 // -------------------------------------------------------------------
 // SFEP-0039 (#1860): nominal object model — honest rejection of the
 // TypeScript-shaped data constructs the nominal backend never
@@ -1345,6 +1360,23 @@ fn classify_declared_primitive(annotation: string) -> string {
     if strings_equal(trimmed, "boolean") { return "boolean"; }
     if strings_equal(trimmed, "bool") { return "boolean"; }
     return "";
+}
+
+// A compact marker for an explicitly-declared array type. SymbolEntry already
+// carries collection element metadata for Channel<T>, Task<T>[], and inferred
+// empty arrays; using the same fail-open slot avoids widening the scope record
+// solely to prove that both operands of a binary expression are arrays.
+fn declared_array_marker(annotation: string) -> string {
+    let trimmed = trim_text(annotation);
+    if trimmed.length < 3 { return ""; }
+    if ends_with(trimmed, "[]") { return "array"; }
+    return "";
+}
+
+fn element_kind_marks_array(element_kind: string) -> boolean {
+    if strings_equal(element_kind, "array") { return true; }
+    if strings_equal(element_kind, "empty_array") { return true; }
+    return starts_with(element_kind, "taskarr:");
 }
 
 // True when `type_text` names one of the six future types.

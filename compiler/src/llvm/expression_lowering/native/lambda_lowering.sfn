@@ -732,7 +732,8 @@ fn _rewrite_expression(ctx: LiftContext, expression: Expression) -> ExpressionRe
             expression: Expression.Binary {
                 operator: expression.operator,
                 left: left.expression,
-                right: right.expression
+                right: right.expression,
+                span: expression.span
             }
         };
     }

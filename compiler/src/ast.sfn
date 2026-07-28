@@ -67,7 +67,15 @@ enum Expression {
     BooleanLiteral { value: string },
     NullLiteral,
     Unary { operator: string, operand: Expression },
-    Binary { operator: string, left: Expression, right: Expression },
+    // The operator span is appended last so existing payload-field offsets
+    // remain stable for the pinned seed. It lets frontend diagnostics anchor
+    // on the operator itself instead of borrowing an operand span (SFN-562).
+    Binary {
+        operator: string,
+        left: Expression,
+        right: Expression,
+        span: SourceSpan?
+    },
     Member { object: Expression, member: string, span: SourceSpan? },
     Call {
         callee: Expression,

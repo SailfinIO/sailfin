@@ -276,7 +276,8 @@ fn replace_first_try(expression: Expression, bind_name: string) -> TryReplace {
                 expression: Expression.Binary {
                     operator: expression.operator,
                     left: left.expression,
-                    right: expression.right
+                    right: expression.right,
+                    span: expression.span
                 },
                 operand: left.operand,
                 found: true
@@ -288,7 +289,8 @@ fn replace_first_try(expression: Expression, bind_name: string) -> TryReplace {
                 expression: Expression.Binary {
                     operator: expression.operator,
                     left: expression.left,
-                    right: right.expression
+                    right: right.expression,
+                    span: expression.span
                 },
                 operand: right.operand,
                 found: true

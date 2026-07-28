@@ -837,6 +837,19 @@ fn lower_binary_operation(expression: string, match: OperatorMatch, bindings: Pa
             };
         }
     }
+    if numeric_type_kind(result_type) == "other" {
+        diagnostics.push("llvm lowering [fatal] [E0307]: operator `" + match.symbol
+            + "` is not supported on aggregate operands of LLVM type `"
+            + result_type
+            + "`");
+        return ExpressionResult {
+            lines: harmonised.lines,
+            temp_index: harmonised.temp_index,
+            operand: null,
+            diagnostics: diagnostics,
+            string_constants: string_constants
+        };
+    }
     let operands_unsigned = binary_operands_are_unsigned(match.symbol, left_text, right_text, bindings, locals, result_type, left_pre_type, right_pre_type);
     let operation = operation_name_for_symbol(match.symbol, result_type, operands_unsigned);
     if operation.length == 0 {
