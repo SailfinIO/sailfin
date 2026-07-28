@@ -780,10 +780,12 @@ jobs:
           set -euo pipefail
           file build/aarch64-bootstrap/pass-1/sfn \
             build/aarch64-bootstrap/pass-2/sfn
+          test -d build/aarch64-bootstrap/pass-2/compiler/import-context
           sha256sum build/aarch64-bootstrap/pass-1/sfn \
             build/aarch64-bootstrap/pass-2/sfn
           tar -czf aarch64-bootstrap-compilers.tar.gz \
-            -C build/aarch64-bootstrap pass-1/sfn pass-2/sfn
+            -C build/aarch64-bootstrap \
+            pass-1/sfn pass-2/sfn pass-2/compiler/import-context
 
       - name: Upload native compiler passes
         uses: actions/upload-artifact@v7
@@ -843,6 +845,9 @@ jobs:
           rm -f aarch64-bootstrap-compilers.tar.gz
           cmp build/aarch64-bootstrap/pass-1/sfn build/aarch64-bootstrap/pass-2/sfn
           install -m 755 build/aarch64-bootstrap/pass-2/sfn build/bin/sfn
+          mkdir -p build/compiler
+          cp -R build/aarch64-bootstrap/pass-2/compiler/import-context \
+            build/compiler/import-context
           bash scripts/compiler_source_fingerprint.sh compiler/src runtime \
             > build/.compiler-source-fingerprint
           file build/bin/sfn
@@ -852,13 +857,11 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          # Two test children preserve parallel coverage without letting
-          # nested compiler-build e2e cases overcommit the 16 GiB arm runner.
           make test \
             NATIVE_BIN=build/bin/sfn \
             SAILFIN_CC=/usr/bin/clang-18 \
             TEST_BIN_CACHE_FLAGS=--no-test-cache \
-            TEST_JOBS=2
+            TEST_JOBS=4
 
   # The PR test suite is ~90% of CI wall time and runs serially, so we
   # fan it across per-OS shard legs that run concurrently (Phase 1 of
