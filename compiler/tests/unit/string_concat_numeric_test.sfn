@@ -55,6 +55,18 @@ test "string concat: string + float yields concatenated text" {
     assert out == "f=1.5";
 }
 
+test "string concat: string + f16 yields concatenated text" {
+    let h: f16 = 1.5;
+    let out = "h=" + h;
+    assert out == "h=1.5";
+}
+
+test "string concat: string + bf16 yields concatenated text" {
+    let h: bf16 = 1.5;
+    let out = "h=" + h;
+    assert out == "h=1.5";
+}
+
 test "string concat: string + bool renders as 1/0, not true/false" {
     let t = true;
     let f = false;
