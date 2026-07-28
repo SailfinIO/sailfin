@@ -168,6 +168,12 @@ fn lower_match_case_condition(function_name: string, subject_operand: LLVMOperan
                     current_lines = comparison.lines;
                     current_temp = comparison.temp_index;
                     condition_operand = comparison.operand;
+                    // Exhaustiveness tracking needs enum identity for unit
+                    // variants too. Keeping these assignments inside the
+                    // payload-field branch meant an all-unit enum match could
+                    // never prove that every tag was covered (SFN-565).
+                    matched_enum_info = enum_info;
+                    matched_variant_info = variant_info;
 
                     // For variants with payload fields, collect binding information
                     if variant_info.fields.length > 0 {
@@ -255,10 +261,6 @@ fn lower_match_case_condition(function_name: string, subject_operand: LLVMOperan
 
                             field_idx += 1;
                         }
-
-                        // Store enum/variant info for field extraction later
-                        matched_enum_info = enum_info;
-                        matched_variant_info = variant_info;
                     }
                 }
             }

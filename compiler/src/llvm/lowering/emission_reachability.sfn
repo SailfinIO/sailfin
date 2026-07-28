@@ -1,0 +1,134 @@
+// Reachability for the final unterminated block in `emit_llvm_function`.
+//
+// Lowering emits canonical LLVM branch operands as `label %<name>`. Walking
+// those edges answers whether the block receiving the mandatory fallback
+// return is reachable without duplicating source-level control-flow semantics.
+import { substring } from "../../string_utils";
+import {
+    index_of,
+    starts_with,
+    string_array_contains,
+    trim_text
+} from "../utils";
+
+fn _block_label(line: string) -> string {
+    let trimmed = trim_text(line);
+    if trimmed.length < 2 { return ""; }
+    if substring(trimmed, trimmed.length - 1, trimmed.length) != ":" {
+        return "";
+    }
+    if index_of(trimmed, " ") >= 0 { return ""; }
+    return substring(trimmed, 0, trimmed.length - 1);
+}
+
+fn _is_label_name_char(ch: string) -> boolean {
+    if ch.length == 0 { return false; }
+    if ch == "," { return false; }
+    if ch == "]" { return false; }
+    if ch == " " { return false; }
+    if ch == "\t" { return false; }
+    return true;
+}
+
+fn _constant_true_conditions(lines: string[]) -> string[] {
+    let mut values: string[] = [];
+    let marker = " = icmp sgt i64 1, 0";
+    let mut index: int = 0;
+    loop {
+        if index >= lines.length { break; }
+        let line = trim_text(lines[index]);
+        let marker_index = index_of(line, marker);
+        if marker_index > 0 {
+            let name = trim_text(substring(line, 0, marker_index));
+            if name.length > 0 {
+                if !string_array_contains(values, name) {
+                    values.push(name);
+                }
+            }
+        }
+        index += 1;
+    }
+    return values;
+}
+
+fn _append_branch_targets(values: string[], line: string, constant_true: string[]) -> string[] {
+    let mut out = values;
+    let marker = "label %";
+    let mut rest = line;
+    let mut target_count: int = 0;
+    let mut true_branch_only: boolean = false;
+    if starts_with(line, "br i1 ") {
+        let condition_end = index_of(line, ",");
+        if condition_end > 6 {
+            let condition = trim_text(substring(line, 6, condition_end));
+            true_branch_only = string_array_contains(constant_true, condition);
+        }
+    }
+    loop {
+        if true_branch_only {
+            if target_count > 0 { break; }
+        }
+        let marker_index = index_of(rest, marker);
+        if marker_index < 0 { break; }
+        let target_start = marker_index + marker.length;
+        let mut target_end = target_start;
+        loop {
+            if target_end >= rest.length { break; }
+            let ch = substring(rest, target_end, target_end + 1);
+            if !_is_label_name_char(ch) { break; }
+            target_end += 1;
+        }
+        if target_end > target_start {
+            let target = substring(rest, target_start, target_end);
+            if !string_array_contains(out, target) { out.push(target); }
+            target_count += 1;
+        }
+        if target_end >= rest.length { break; }
+        rest = substring(rest, target_end + 1, rest.length);
+    }
+    return out;
+}
+
+fn fallthrough_block_is_reachable(lines: string[]) -> boolean {
+    let mut candidate: string = "";
+    let mut label_count: int = 0;
+    let mut index: int = 0;
+    loop {
+        if index >= lines.length { break; }
+        let label = _block_label(lines[index]);
+        if label.length > 0 {
+            candidate = label;
+            label_count += 1;
+        }
+        index += 1;
+    }
+    if candidate.length == 0 { return false; }
+
+    let mut reachable: string[] = ["block.entry"];
+    let constant_true = _constant_true_conditions(lines);
+    let mut changed: boolean = true;
+    let mut passes: int = 0;
+    loop {
+        if !changed { break; }
+        if passes > label_count { break; }
+        changed = false;
+        let before = reachable.length;
+        let mut active_label: string = "";
+        index = 0;
+        loop {
+            if index >= lines.length { break; }
+            let line = lines[index];
+            let label = _block_label(line);
+            if label.length > 0 { active_label = label; }
+            if active_label.length > 0 {
+                if string_array_contains(reachable, active_label) {
+                    reachable = _append_branch_targets(reachable, trim_text(line), constant_true);
+                }
+            }
+            index += 1;
+        }
+        if reachable.length > before { changed = true; }
+        passes += 1;
+    }
+    return string_array_contains(reachable, candidate);
+}

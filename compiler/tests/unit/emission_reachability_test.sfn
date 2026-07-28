@@ -1,0 +1,28 @@
+import { expect_eq_bool } from "sfn/test";
+
+import { fallthrough_block_is_reachable } from "../../src/llvm/lowering/emission_reachability";
+
+test "straight-line final block is reachable" {
+    let lines = ["define i32 @f() {", "block.entry:", "  %x = add i32 1, 2"];
+    assert expect_eq_bool(fallthrough_block_is_reachable(lines), true).ok;
+}
+
+test "conditional merge final block is reachable" {
+    let lines = ["define i32 @f(i1 %cond) {", "block.entry:", "  br i1 %cond, label %then0, label %merge1", "then0:", "  ret i32 1", "merge1:"];
+    assert expect_eq_bool(fallthrough_block_is_reachable(lines), true).ok;
+}
+
+test "disconnected infinite-loop exit block is unreachable" {
+    let lines = ["define i32 @f() {", "block.entry:", "  br label %loop.header0", "loop.header0:", "  br label %loop.body1", "loop.body1:", "  br label %loop.latch2", "loop.latch2:", "  br label %loop.header0", "afterloop3:"];
+    assert expect_eq_bool(fallthrough_block_is_reachable(lines), false).ok;
+}
+
+test "loop break makes the final exit block reachable" {
+    let lines = ["define i32 @f(i1 %done) {", "block.entry:", "  br label %loop.header0", "loop.header0:", "  br label %loop.body1", "loop.body1:", "  br i1 %done, label %afterloop3, label %loop.latch2", "loop.latch2:", "  br label %loop.header0, !llvm.loop !0", "afterloop3:"];
+    assert expect_eq_bool(fallthrough_block_is_reachable(lines), true).ok;
+}
+
+test "constant true unsafe wrapper leaves its merge unreachable" {
+    let lines = ["define i8* @f() {", "block.entry:", "  %t0 = icmp sgt i64 1, 0", "  br i1 %t0, label %unsafe.body, label %unsafe.merge", "unsafe.body:", "  ret i8* null", "unsafe.merge:"];
+    assert expect_eq_bool(fallthrough_block_is_reachable(lines), false).ok;
+}

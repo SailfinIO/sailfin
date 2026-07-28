@@ -18,9 +18,9 @@ import { is_scope_descendant, make_child_scope_id } from "../lifetime";
 import { find_function_by_name_or_import } from "../rendering_helpers";
 import { empty_string_constant_set, merge_string_constants } from "../strings";
 import {
-    find_enum_info_by_llvm_type,
     find_struct_info_by_name,
     resolve_enum_info_for_literal,
+    resolve_enum_info_from_llvm_type,
     resolve_enum_variant_info
 } from "../type_context_queries";
 import {
@@ -341,7 +341,22 @@ fn lower_match_instruction(function: NativeFunction, start_index: int, llvm_retu
 
     let union_payload_types = parse_union_payload_types(subject_operand.llvm_type);
     let mut matched_union_variants: int[] = [];
-    let subject_enum_info = find_enum_info_by_llvm_type(context, subject_operand.llvm_type);
+    let mut subject_enum_info = resolve_enum_info_from_llvm_type(context, subject_operand.llvm_type);
+    // SFN-565: boxed generic enums such as `Result<T, E>` lower as `i8*`,
+    // so LLVM-type lookup cannot prove an otherwise exhaustive match. Recover
+    // the enum identity from the source annotation already carried for payload
+    // substitution; this lets the existing exhaustiveness logic mark the merge
+    // block `unreachable` instead of leaving a fabricated function fallback.
+    if subject_enum_info == null {
+        let mut enum_name = trim_text(subject_type_annotation);
+        let generic_start = index_of(enum_name, "<");
+        if generic_start > 0 {
+            enum_name = trim_text(substring(enum_name, 0, generic_start));
+        }
+        if enum_name.length > 0 {
+            subject_enum_info = resolve_enum_info_for_literal(context, enum_name);
+        }
+    }
     let mut matched_enum_tags: int[] = [];
 
     if structure.cases.length == 0 {

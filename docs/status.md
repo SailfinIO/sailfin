@@ -495,7 +495,8 @@ here.
   dropping the member. Interface *signature conformance* (checking that an
   implementing struct's method signatures match the interface) remains a
   separate, still-draft effort (`draft-interface-signature-conformance`).
-- **LLVM lowering fails closed on sub-lowering failure** (`E1002`, SFN-527):
+- **LLVM lowering fails closed on fabricated fallback values** (`E1002`,
+  SFN-527, SFN-565):
   the eight lowering consumers that previously fell back to a fabricated
   `default_return_literal` when a sub-lowering failed — bare `return;` in a
   value-returning function, a `return`/assignment/`let`-initializer whose
@@ -507,12 +508,23 @@ here.
   `insertvalue <default>` at exit 0. The placeholder value is still emitted so
   the rest of the pass sees structurally valid IR. Lowering-stage gate only —
   `sfn check` still passes on these programs; closing the typecheck half for
-  unresolvable field accesses is separate (SFN-543). The structural
-  block-terminator fallback in `emit_llvm_function` deliberately stays
-  untagged: it also fires on *correct* code the pass cannot prove reachable
-  (e.g. a `loop { if ... { return ...; } }` body) absent real reachability
-  analysis. Design note:
-  `docs/proposals/design-notes/sfn-526-lowering-fatal-gate-audit.md`. The gate
+  unresolvable field accesses is separate (SFN-543). SFN-565 closes the
+  remaining function-body fallback: `emit_llvm_function` walks the emitted
+  LLVM basic-block graph and tags a value-returning body's implicit
+  `ret <default>` only when the final block is reachable from `block.entry`.
+  A genuine fall-off-the-end now fails closed and names the function, while
+  the structurally required terminator in a disconnected block (for example,
+  an infinite `loop` exit with no `break`) remains untagged. Enum matches use
+  pointer-tolerant LLVM-type lookup and recover opaque generic boxes from the
+  subject's source annotation, so exhaustive monomorphic or `Result<T, E>`
+  matches whose arms all return are likewise recognized as terminating rather
+  than mistaken for a reachable merge, including all-unit enums whose variants
+  carry no payload fields. The
+  lowering-generated constant-true wrapper for `unsafe { ... }` is also
+  recognized, so its synthetic false merge does not create a spurious
+  fallthrough. Design notes:
+  `docs/proposals/design-notes/sfn-526-lowering-fatal-gate-audit.md` and
+  `docs/proposals/design-notes/sfn-565-fallthrough-reachability.md`. The gate
   unmasked a live shipped miscompile in
   `runtime/sfn/adapters/websocket.sfn::_ws_handle_fd` — a cast over a
   parenthesized `<<` expression didn't lower, so fd reassembly returned `0`
