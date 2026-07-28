@@ -120,6 +120,8 @@
   "outputStyle": "Compiler Engineer",
   "includeCoAuthoredBy": false,
   "attribution": {
+    "commit": "",
+    "pr": "",
     "sessionUrl": false
   },
   "hooks": {
