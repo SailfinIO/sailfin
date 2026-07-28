@@ -113,7 +113,6 @@ NO_RUN=(
 # the ratchet flags it). Keep it in sync with scripts/check-examples.sh.
 KNOWN_BUILD_RED=(
     "examples/advanced/web-server-with-concurrency.sfn"  # net response method lowering — epic #1883
-    "examples/concurrency/dynamic-task-scheduling.sfn"   # typed channel then live await — #1942/#1944
     "examples/web/rest-api.sfn"                          # `res.send` return-type lowering — epic #1883
 )
 

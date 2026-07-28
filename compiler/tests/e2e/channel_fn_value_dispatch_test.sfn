@@ -59,3 +59,18 @@ test "channel: fn value elements dispatch after await receive (#1944)" ![io] {
     assert contains(out, "Task A executed!");
     assert contains(out, "Task B executed!");
 }
+
+test "channel: formatter-canonical fn value elements dispatch after await receive (SFN-434)" ![io] {
+    let out = _run_and_capture("chan_fnval_fmt", "import { Channel, channel } from \"sync\";\n"
+        + "fn main() ![io] {\n"
+        + "    let tasks: Channel<fn () -> void> = channel(2);\n"
+        + "    tasks.send(fn () { print(\"Task A executed!\"); });\n"
+        + "    tasks.send(fn () { print(\"Task B executed!\"); });\n"
+        + "    let first = await tasks.receive();\n"
+        + "    first();\n"
+        + "    let second = await tasks.receive();\n"
+        + "    second();\n"
+        + "}");
+    assert contains(out, "Task A executed!");
+    assert contains(out, "Task B executed!");
+}
