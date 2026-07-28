@@ -724,10 +724,13 @@ checking the role of the preceding token.
 - `x < y` — comparison
 
 The formatter treats `<` and `>` as operators (spaces around them) by
-default. When preceded by an identifier and followed by an identifier/type
-with no space in the original source, treat as generics (no spaces). This
-heuristic works because the lexer preserves original spacing context through
-adjacent token positions.
+default. A balanced recognition pass reclassifies them as tight generic
+delimiters in type positions and in expression positions with a type-argument
+suffix (`{` or `(`). The scanner accepts nested generic arguments, bounded
+declaration parameters, and function types such as `Channel<fn() -> void>`;
+function-type arrows are admitted only when their balanced parameter list
+belongs to an in-list `fn` (SFN-434). This structural check prevents a generic
+close followed by assignment from being fused into the `>=` comparison token.
 
 ### 3. Effect Annotation `![`
 
