@@ -11,6 +11,7 @@
 // by the schema-lock e2e test (which runs `jq` over the actual
 // envelope). Keeping the unit-side string-literal volume tight
 // avoids the seed compiler's globals-phase memory ceiling.
+import { FixSuggestion, TextEdit } from "../../src/diagnostic";
 import {
     CheckJsonEvent,
     CheckJsonSummary,
@@ -19,7 +20,7 @@ import {
 } from "../../src/diagnostics_json";
 import { index_of } from "../../src/string_utils";
 import { Token, TokenKind } from "../../src/token";
-import { Diagnostic, FixSuggestion, TextEdit } from "../../src/typecheck_types";
+import { Diagnostic, diagnostic_to_diag } from "../../src/typecheck_types";
 
 // -------------------------------------------------------------------
 // Builder helpers
@@ -178,7 +179,7 @@ fn _diag_with_suggestion(suggestion: FixSuggestion?) -> Diagnostic {
 fn _wrap_event(d: Diagnostic) -> CheckJsonEvent[] {
     let mut events: CheckJsonEvent[] = [];
     events.push(CheckJsonEvent {
-        kind: "diagnostic", producer: "effect", diagnostic: d
+        kind: "diagnostic", diagnostic: diagnostic_to_diag(d, "effect"), primary_lexeme: "x"
     });
     return events;
 }

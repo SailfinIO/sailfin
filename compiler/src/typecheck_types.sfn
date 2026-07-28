@@ -14,6 +14,7 @@ import {
     TypeAnnotation,
     TypeParameter
 } from "./ast";
+import { Diag, FixSuggestion, diag_from_typecheck } from "./diagnostic";
 import {
     char_code_at_text,
     contains_string,
@@ -25,33 +26,6 @@ import {
     substring
 } from "./string_utils";
 import { Token, TokenKind } from "./token";
-
-// One concrete edit to apply to a source file. `start_*` and `end_*`
-// are inclusive 1-based line/column coordinates the renderer and
-// `sfn fix` consume; for an insertion (no replaced range) `end_line ==
-// start_line` and `end_column == start_column`. `replacement` is the
-// literal text to splice in. The shape mirrors LSP's `TextEdit` so
-// `sfn lsp` Phase 2 (B5+ workstream) can convert it 1:1.
-struct TextEdit {
-    start_line: int;
-    start_column: int;
-    end_line: int;
-    end_column: int;
-    replacement: string;
-}
-
-// Machine-applicable fix-it suggestion attached to a `Diagnostic`.
-// `message` is the user-facing summary ("add `![io]` to the function
-// signature"); `edits` is the structured set of `TextEdit`s a tool
-// like `sfn fix` or an LSP code-action handler can apply atomically.
-// One `FixSuggestion` represents one cohesive fix; a diagnostic with
-// multiple alternative fixes (e.g. capability-cross-check's "widen
-// the manifest" vs "narrow the function") attaches the recommended
-// option here and documents the alternative in `message`.
-struct FixSuggestion {
-    message: string;
-    edits: TextEdit[];
-}
 
 struct Diagnostic {
     code: string;
@@ -68,6 +42,24 @@ struct Diagnostic {
     // struct hard once already; the `_reject_reexport_violations`
     // gate now backstops it but we still respect the discipline.
     suggestion: FixSuggestion?;
+}
+
+// Frontend-only typed wrapper around the leaf module's primitive converter.
+// Token → Span uses the historical renderer width: end column is the start
+// column plus the token lexeme length.
+fn diagnostic_to_diag(diagnostic: Diagnostic, stage: string) -> Diag {
+    let mut primary_line: int = 0;
+    let mut primary_column: int = 0;
+    let mut primary_lexeme_length: int = 0;
+    let mut has_primary: boolean = false;
+    if diagnostic.primary != null {
+        let primary: Token? = diagnostic.primary;
+        primary_line = primary.line;
+        primary_column = primary.column;
+        primary_lexeme_length = primary.lexeme.length;
+        has_primary = true;
+    }
+    return diag_from_typecheck(diagnostic.code, diagnostic.severity, diagnostic.message, diagnostic.file_path, primary_line, primary_column, primary_lexeme_length, has_primary, stage, diagnostic.suggestion);
 }
 
 struct SymbolEntry {

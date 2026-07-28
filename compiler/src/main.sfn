@@ -57,7 +57,7 @@ import {
     typecheck_has_errors_with_prelude
 } from "./typecheck";
 import { load_imported_interfaces_from_paths } from "./typecheck_import_loader";
-import { Diagnostic } from "./typecheck_types";
+import { Diagnostic, diagnostic_to_diag } from "./typecheck_types";
 import { TypedSsaProduceResult, produce_typed_ssa_declarations } from "./typed_ssa_produce";
 import { render_module } from "./typed_ssa_render";
 
@@ -938,7 +938,7 @@ fn _emit_typecheck_diagnostics(entries: Diagnostic[], source: string, file_path:
         // with empty file_path; this is the single point on the build
         // path that knows which module is currently being analyzed.
         entries[index].file_path = file_path;
-        let rendered = render_diagnostic(entries[index], lines, "typecheck");
+        let rendered = render_diagnostic(diagnostic_to_diag(entries[index], "typecheck"), lines, "typecheck");
         print.err(rendered);
         index += 1;
     }

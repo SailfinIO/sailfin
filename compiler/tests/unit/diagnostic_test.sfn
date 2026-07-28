@@ -1,0 +1,72 @@
+// Unit coverage for the unified diagnostic leaf module (SFN-534).
+import {
+    Diag,
+    Span,
+    diag_from_typecheck,
+    diag_is_error,
+    diag_to_legacy_string,
+    stamp_spans
+} from "../../src/diagnostic";
+
+fn _diag(severity: string, span: Span?) -> Diag {
+    return Diag {
+        code: "E1003",
+        severity: severity,
+        message: "unable to lower expression",
+        file_path: "sample.sfn",
+        span: span,
+        stage: "lowering",
+        suggestion: null
+    };
+}
+
+test "diag_from_typecheck converts token coordinates to a span" {
+    let diag = diag_from_typecheck("E0001", "error", "unknown name", "sample.sfn", 3, 7, 4, true, "typecheck", null);
+    assert diag.span != null;
+    let span: Span? = diag.span;
+    assert span.start_line == 3;
+    assert span.start_column == 7;
+    assert span.end_line == 3;
+    assert span.end_column == 11;
+}
+
+test "diag_from_typecheck preserves an unknown location" {
+    let diag = diag_from_typecheck("E0001", "error", "unknown name", "sample.sfn", 0, 0, 0, false, "typecheck", null);
+    assert diag.span == null;
+}
+
+test "diag_is_error checks structured severity" {
+    assert diag_is_error(_diag("error", null));
+    assert ! diag_is_error(_diag("warning", null));
+    assert ! diag_is_error(_diag("note", null));
+}
+
+test "stamp_spans fills only missing spans" {
+    let existing = Span {
+        start_line: 1,
+        start_column: 2,
+        end_line: 1,
+        end_column: 3
+    };
+    let fallback = Span {
+        start_line: 8,
+        start_column: 4,
+        end_line: 8,
+        end_column: 9
+    };
+    let mut diags: Diag[] = [];
+    diags.push(_diag("note", null));
+    diags.push(_diag("error", existing));
+    let stamped = stamp_spans(diags, fallback);
+    let first: Span? = stamped[0].span;
+    let second: Span? = stamped[1].span;
+    assert first.start_line == 8;
+    assert first.end_column == 9;
+    assert second.start_line == 1;
+    assert second.end_column == 3;
+}
+
+test "diag_to_legacy_string preserves lowering spelling" {
+    assert diag_to_legacy_string(_diag("error", null)) == "llvm lowering [fatal] [E1003]: unable to lower expression";
+    assert diag_to_legacy_string(_diag("note", null)) == "llvm lowering: unable to lower expression";
+}

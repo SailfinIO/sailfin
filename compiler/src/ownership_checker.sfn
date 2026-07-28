@@ -97,6 +97,7 @@ import { Token, TokenKind } from "./token";
 import { LocalBinding, analyze_lambda } from "./typecheck_captures";
 import {
     Diagnostic,
+    diagnostic_to_diag,
     is_identifier_char,
     is_linear_type,
     is_owned_type
@@ -1269,7 +1270,7 @@ fn run_ownership_checker(program: Program) -> int ![io] {
                 primary: finding.trigger,
                 suggestion: null
             };
-            print.err(render_diagnostic(diagnostic, empty_lines, "ownership"));
+            print.err(render_diagnostic(diagnostic_to_diag(diagnostic, "ownership"), empty_lines, "ownership"));
         }
         index += 1;
     }

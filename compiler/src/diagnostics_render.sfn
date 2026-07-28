@@ -17,7 +17,7 @@
 //     renderer consumes.
 //   - `render_diagnostic(diag, source_lines, kind) -> string` —
 //     returns the multi-line rendered text (caret diagram included
-//     when `diag.primary` is non-null and the line index is in
+//     when `diag.span` is non-null and the line index is in
 //     range; location-only `--> file_path` line otherwise).
 //   - `split_source_lines(source) -> string[]` — splits source on
 //     CR/LF/CRLF the same way `main.sfn`'s
@@ -32,6 +32,12 @@
 // duplication is small (~50 lines, four pure string helpers) and
 // changes here are decoupled from changes to `main.sfn`'s own copies.
 import {
+    Diag,
+    FixSuggestion,
+    Span,
+    TextEdit
+} from "./diagnostic";
+import {
     CapabilityViolation,
     EffectRequirement,
     EffectViolation,
@@ -40,7 +46,7 @@ import {
 import { canonical_effects } from "./effect_taxonomy";
 import { substring } from "./string_utils";
 import { Token } from "./token";
-import { Diagnostic, FixSuggestion, TextEdit } from "./typecheck_types";
+import { Diagnostic } from "./typecheck_types";
 
 // -------------------------------------------------------------------
 // Effect-violation → Diagnostic
@@ -401,8 +407,8 @@ fn _dr_build_pointer_prefix(column: int, line_text: string) -> string {
     return prefix;
 }
 
-fn _dr_build_caret(lexeme: string, line_text: string, column: int) -> string {
-    let mut highlight: int = lexeme.length;
+fn _dr_build_caret(span_width: int, line_text: string, column: int) -> string {
+    let mut highlight: int = span_width;
     if highlight <= 0 { highlight = 1; }
     let mut remaining: int = line_text.length - (column - 1);
     if remaining <= 0 { remaining = 1; }
@@ -417,7 +423,7 @@ fn _dr_build_caret(lexeme: string, line_text: string, column: int) -> string {
     return out;
 }
 
-fn render_diagnostic(d: Diagnostic, source_lines: string[], kind: string) -> string {
+fn render_diagnostic(d: Diag, source_lines: string[], kind: string) -> string {
     let mut parts: string[] = [];
     let msg_lines = _dr_render_message_lines(d.message);
     let mut header: string = d.severity + "[" + d.code + "]: ";
@@ -432,12 +438,14 @@ fn render_diagnostic(d: Diagnostic, source_lines: string[], kind: string) -> str
     let mut has_location: boolean = false;
     let mut line_number: int = 0;
     let mut column_number: int = 1;
-    let mut lexeme: string = "";
-    if d.primary != null {
-        let token: Token? = d.primary;
-        line_number = token.line;
-        column_number = token.column;
-        lexeme = token.lexeme;
+    let mut span_width: int = 0;
+    if d.span != null {
+        let span: Span? = d.span;
+        line_number = span.start_line;
+        column_number = span.start_column;
+        if span.end_line == span.start_line {
+            span_width = span.end_column - span.start_column;
+        }
         if line_number >= 1 {
             if line_number <= source_lines.length { has_location = true; }
         }
@@ -454,7 +462,7 @@ fn render_diagnostic(d: Diagnostic, source_lines: string[], kind: string) -> str
         let line_label = _dr_pad_number_string(_dr_number_to_string(line_number), padding_width);
         parts.push(" " + line_label + " | " + line_text);
         let pointer_prefix = _dr_build_pointer_prefix(column_number, line_text);
-        let caret = _dr_build_caret(lexeme, line_text, column_number);
+        let caret = _dr_build_caret(span_width, line_text, column_number);
         parts.push(" " + gutter + " | " + pointer_prefix + caret);
     } else if d.file_path.length > 0 {
         parts.push("  --> " + d.file_path);
