@@ -331,9 +331,12 @@ jobs:
     # skips `Save test-bin cache`, so back-to-back merges could otherwise leave
     # the default-branch test-bin cache stale for PRs. A distinct group from the
     # gate job keeps the gate's supersede-latest semantics from reaching here.
-    # Runs keyed by `github.ref` serialize (one warmer at a time on main) and
-    # each completes its save; if sources are unchanged the save is a no-op
-    # (the content-addressed key already exists).
+    # Runs keyed by `github.ref` serialize one active warmer plus the latest
+    # queued warmer. GitHub may coalesce an older queued job when another push
+    # arrives; the active warmer still completes its save, then the latest-main
+    # job runs and refreshes the cache. `notify-failure` distinguishes that
+    # expected never-started cancellation from a reportable post-start
+    # cancellation or timeout.
     concurrency:
       group: build-quality-testbin-${{ github.ref }}
       cancel-in-progress: false
@@ -530,7 +533,13 @@ jobs:
   notify-failure:
     name: Open regression issue + PR comment on failure
     needs: [build-quality, test-bin-baseline]
-    # Fire on a genuine gate failure OR a warmer failure/timeout.
+    # Start on a genuine gate failure OR a warmer failure/cancellation. The
+    # first step classifies a cancelled warmer: GitHub may replace a queued,
+    # never-started job when a newer main push joins this concurrency group.
+    # That expected coalescing is not a regression, so all notification side
+    # effects are skipped. A cancelled warmer with executed steps is a
+    # post-start cancellation (normally a `timeout-minutes` expiry) and remains
+    # reportable.
     #
     # `always()` (not `!cancelled()`) is required: a `test-bin-baseline`
     # `timeout-minutes` expiry surfaces as a `cancelled` job conclusion and
@@ -540,13 +549,13 @@ jobs:
     # untracked in the first place. On a green run every result is `success`
     # so the parenthesised test is false and this job is skipped.
     #
-    # Concurrency-supersede does NOT spam (SFN-395), distinguished purely by
-    # the per-job `concurrency:` semantics already in this file:
+    # Concurrency-supersede does NOT spam (SFN-395/SFN-583):
     #   - The gate job runs `cancel-in-progress: true`, so a superseded gate
     #     lands as `cancelled` — and this `if:` only acts on the gate for
     #     `== 'failure'`, so a supersede is ignored.
-    #   - The warmer job runs `cancel-in-progress: false`, so it is never
-    #     supersede-cancelled; any `cancelled` there is a real timeout.
+    #   - The warmer job runs `cancel-in-progress: false`, so an active warmer
+    #     is never superseded. GitHub may still replace an older queued warmer;
+    #     the classification step recognizes it by its empty step list.
     if: >-
       always() &&
       (needs.build-quality.result == 'failure' ||
@@ -555,6 +564,7 @@ jobs:
     runs-on: ubuntu-24.04
     timeout-minutes: 10
     permissions:
+      actions: read
       contents: read
       issues: write
       pull-requests: write
@@ -574,12 +584,43 @@ jobs:
       EVENT_NAME: ${{ github.event_name }}
       REF: ${{ github.ref }}
       REPO: ${{ github.repository }}
+      RUN_ID: ${{ github.run_id }}
       GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
     steps:
+      - name: Classify warmer cancellation
+        id: classify
+        shell: bash
+        run: |
+          set -euo pipefail
+          report=true
+          if [ "${{ needs.build-quality.result }}" != "failure" ] &&
+             [ "${{ needs.test-bin-baseline.result }}" = "cancelled" ]; then
+            steps_count="$(
+              gh api \
+                "/repos/${REPO}/actions/runs/${RUN_ID}/jobs?filter=all&per_page=100" \
+                --jq '
+                  [.jobs[] | select(.name == "Warm test-bin cache (linux-x86_64)")]
+                  | if length == 0
+                    then error("expected at least one test-bin warmer job")
+                    else max_by(.run_attempt).steps | length
+                    end
+                '
+            )"
+            if [ "$steps_count" -eq 0 ]; then
+              report=false
+              echo "[notify] warmer was replaced while queued; no regression notification"
+            else
+              echo "[notify] warmer executed ${steps_count} steps before cancellation; reporting post-start cancellation/timeout"
+            fi
+          fi
+          echo "report=${report}" >> "$GITHUB_OUTPUT"
+
       - name: Checkout repository
+        if: steps.classify.outputs.report == 'true'
         uses: actions/checkout@v7
 
       - name: Download pass artifacts (best-effort)
+        if: steps.classify.outputs.report == 'true'
         uses: actions/download-artifact@v8
         with:
           name: build-quality-passes
@@ -588,6 +629,7 @@ jobs:
 
       - name: Build diff excerpt
         id: excerpt
+        if: steps.classify.outputs.report == 'true'
         shell: bash
         run: |
           set -euo pipefail
@@ -630,10 +672,10 @@ jobs:
             test-bin-warmer)
               # The warmer job produces no pass1/pass2 artifact, so there is
               # no determinism/hit-rate diff to embed. Point triage at the
-              # `Warm test-bin cache` job log instead (suite failure or
-              # `timeout-minutes` expiry).
+              # `Warm test-bin cache` job log instead (suite failure or a
+              # post-start cancellation/timeout).
               echo "<!-- gate:test-bin-warmer -->" >> "$excerpt_file"
-              echo "_The \`test-bin-baseline\` cache-warmer job failed or timed out (a \`cancelled\` job conclusion is a \`timeout-minutes\` expiry — the warmer never supersede-cancels). No determinism/hit-rate diff applies. Inspect the \`Warm test-bin cache\` job log in the failing run and follow \`docs/runbooks/build-quality.md\` → \"test-bin warmer timeout\"._" >> "$excerpt_file"
+              echo "_The \`test-bin-baseline\` cache-warmer job failed or was cancelled after execution began (normally a \`timeout-minutes\` expiry). Expected queued-run coalescing is filtered before notification. No determinism/hit-rate diff applies. Inspect the \`Warm test-bin cache\` job log in the failing run and follow \`docs/runbooks/build-quality.md\` → \"test-bin warmer failure or timeout\"._" >> "$excerpt_file"
               ;;
             *)
               echo "<!-- gate:build-setup -->" >> "$excerpt_file"
@@ -645,6 +687,7 @@ jobs:
 
       - name: Open or append regression issue
         id: regression_issue
+        if: steps.classify.outputs.report == 'true'
         shell: bash
         run: |
           set -euo pipefail
@@ -706,7 +749,10 @@ jobs:
       # Per scope: PR comment only on `push: main` events. Schedule and
       # manual dispatches aren't tied to a single merging PR.
       - name: Comment on merging PR
-        if: ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' }}
+        if: >-
+          steps.classify.outputs.report == 'true' &&
+          github.event_name == 'push' &&
+          github.ref == 'refs/heads/main'
         shell: bash
         run: |
           set -euo pipefail
