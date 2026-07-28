@@ -18,12 +18,10 @@
 // failures, not typecheck failures. Making the typecheck pass reject them
 // earlier is SFN-543, a separate unit of work.
 //
-// Case `loop_fallthrough_still_builds` is a *control*, not a gap: the
-// structural block-terminator fallback in `emission.sfn` (used when a
-// loop's fallthrough path is statically unreachable but not proven so by
-// the lowering pass) was deliberately left untagged by SFN-527 — tagging it
-// would turn `E1002` into the majority outcome for ordinary loop-terminated
-// functions, which is explicitly out of scope.
+// SFN-565 splits the structural function-body fallback by reachability over
+// the emitted LLVM block graph. The infinite-loop exit block remains
+// disconnected and untagged, while a genuine fall-off-the-end reaches its
+// merge block and fails closed with `E1002`.
 //
 // Drives the compiler-under-test as a subprocess per `.claude/rules/no-bash-e2e.md`.
 import { find } from "sfn/strings";
@@ -114,8 +112,21 @@ test "lowering fail-closed gate: combined repro fails `sfn build` and produces n
     assert ! fs.exists(binpath);
 }
 
-test "lowering fail-closed gate: loop fallthrough control still builds untagged" ![io] {
+test "lowering fail-closed gate: unreachable loop fallthrough still builds untagged" ![io] {
     let src = _write_source("sfn527_loop_fallthrough.sfn", "fn spin(n: i32) -> i32 { loop { if n > 0 { return n; } } }\nfn main() -> i32 { return 0; }\n");
+    let exit = process.run_capture([_sfn_bin(), "emit", "llvm", src], process.environ());
+    let sout = process.capture_take_stdout();
+    let serr = process.capture_take_stderr();
+    assert exit == 0;
+    assert find(sout + serr, "[E1002]", 0) < 0;
+}
+
+test "lowering fail-closed gate: reachable function fallthrough fails closed" ![io] {
+    _assert_emit_fails_closed("sfn565_reachable_fallthrough.sfn", "fn oops(n: i32) -> i32 { if n > 0 { return n; } }\nfn main() -> i32 { return 0; }\n", "function `oops` can reach the end without returning");
+}
+
+test "lowering fail-closed gate: exhaustive boxed enum match is unreachable" ![io] {
+    let src = _write_source("sfn565_exhaustive_result.sfn", "fn classify(n: i32) -> Result<i32, string> { if n > 0 { return Result.Ok { value: n }; } return Result.Err { error: \"no\" }; }\nfn unwrap(n: i32) -> i32 { let result = classify(n); match result { Result.Ok { value } => { return value; }, Result.Err { error } => { return 0; } } }\nfn main() -> i32 { return 0; }\n");
     let exit = process.run_capture([_sfn_bin(), "emit", "llvm", src], process.environ());
     let sout = process.capture_take_stdout();
     let serr = process.capture_take_stderr();

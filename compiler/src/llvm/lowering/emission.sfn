@@ -50,6 +50,7 @@ import {
 } from "../utils";
 import { emit_async_function } from "./emission_async";
 import { build_define_header_line } from "./emission_header";
+import { fallthrough_block_is_reachable } from "./emission_reachability";
 import { lower_instruction_range } from "./instructions";
 import { emit_scope_drops } from "./instructions_helpers";
 
@@ -630,9 +631,14 @@ fn emit_llvm_function(function: NativeFunction, functions: NativeFunction[], eff
         if llvm_return == "void" {
             lines = append_string(lines, "  ret void");
         } else {
-            let missing_ret_diag = "llvm lowering: missing return in function `"
+            let mut missing_ret_diag = "llvm lowering: missing return in function `"
                 + fn_name
                 + "`";
+            if fallthrough_block_is_reachable(lines) {
+                missing_ret_diag = "llvm lowering [fatal] [E1002]: function `"
+                    + fn_name
+                    + "` can reach the end without returning";
+            }
             diagnostics = append_string(diagnostics, missing_ret_diag);
             let ret_line = "  ret " + llvm_return + " " + default_return_literal(llvm_return);
             lines = append_string(lines, ret_line);
