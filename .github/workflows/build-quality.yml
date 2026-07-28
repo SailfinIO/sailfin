@@ -306,10 +306,9 @@ jobs:
   # `make check` runs with `--no-test-cache`. This job runs the full
   # `.sfn` suite with the test-bin cache ENABLED and saves
   # `build/cache/test-bin` into the default-branch cache scope, so a PR's
-  # first run hits for every unchanged test. Cross-commit hits work
-  # because the per-test binary cache identity is the commit-stable
-  # capsule version (#1233 compiler change), so a baseline cut at one
-  # commit warms a PR built at another.
+  # first run hits for every unchanged test. Cross-commit hits work when
+  # the compiler binary is byte-identical: each entry combines the
+  # commit-stable capsule version with the binary SHA-256 (SFN-545).
   #
   # Independent of the determinism + cache.hit_rate gates above (those are
   # untouched): this job has no cold-build requirement, so it restores both
@@ -436,8 +435,8 @@ jobs:
       # "read only by the runner" and the full-suite gate cold-builds test
       # binaries via `--no-test-cache`). A cross-commit restore can never
       # produce a *wrong* binary: each per-test entry is content-addressed by
-      # the commit-stable capsule version + source content (#1233), so a
-      # changed test file rolls its own entry's identity and misses → recompile.
+      # compiler binary SHA-256 + source content (SFN-545), so a different
+      # compiler or changed test rolls the entry identity and misses → recompile.
       # RESTORE-ONLY (`actions/cache/restore`, not `actions/cache`): the sole
       # save is the explicit `Save test-bin cache for PR CI` step below, which
       # is gated on a green suite so a failed baseline can't poison the cache.
@@ -475,9 +474,9 @@ jobs:
       # (scripts/detect_test_jobs.sh) instead of running shards one-at-a-time
       # with serial files inside each — the ~53-min cold floor this job kept
       # hitting (SFN-394). The saved cache is content-addressed by the
-      # commit-stable capsule version (#1233), so entries this pass produces
-      # are byte-identical to what a PR's `sfn test` / `sfn dev shard run`
-      # looks up. Retry-once mirrors the PR action's #892 flake mitigation so
+      # compiler binary SHA-256 (SFN-545), so entries this pass produces
+      # are addressable only by the same compiler bytes in `sfn test` /
+      # `sfn dev shard run`. Retry-once mirrors the PR action's #892 flake mitigation so
       # one non-deterministic codegen flake doesn't skip the save; the retry
       # reruns against the now-warm test-bin cache, so it is cheap. A
       # persistent failure still fails → no save.

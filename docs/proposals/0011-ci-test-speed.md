@@ -301,7 +301,7 @@ populates `test-bin`). Two options:
   cold-producer choice was hygiene, not soundness (only the `build-quality`
   determinism gate has a cold-build invariant, and it reads no test
   binaries). Cross-commit correctness holds because each entry is
-  content-addressed by the commit-stable capsule version + source (#1233),
+  content-addressed by compiler binary SHA-256 + source (SFN-545),
   so a changed test misses and recompiles.
 
 **Risk:** medium. Correctness rests on the dep-hash set being *complete*

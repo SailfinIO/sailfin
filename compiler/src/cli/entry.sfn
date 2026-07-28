@@ -94,11 +94,11 @@ fn native_cli_main(argv: string[]) -> int ![clock, io, net] {
 // The body mirrors what the retired C driver used to do, in pure
 // Sailfin: resolve the binary's path, derive the binary directory,
 // walk upward for a runtime bundle, then hand control to
-// `sailfin_cli_main_with_paths`. The `--runtime-root` /
-// `--binary-dir` argv-flag injection is preserved through that
-// helper so `cli/context.sfn::parse_driver_prefix` — consumed by
-// `sailfin_cli_main_v2` — stays the single source of truth for the
-// driver prefix.
+// `sailfin_cli_main_with_paths`. The `--runtime-root` / `--binary-dir` /
+// `--compiler-path` argv-flag injection is preserved through that helper
+// so `cli/context.sfn::parse_driver_prefix` — consumed by
+// `sailfin_cli_main_v2` — stays the single source of truth for the driver
+// prefix.
 //
 // Platform coverage tracks `runtime/sfn/platform/exec.sfn`:
 //   - Linux x86_64: full coverage (readlink /proc/self/exe).
@@ -242,7 +242,7 @@ fn main(argv: string[]) -> int ![clock, io, net] {
         tail.push(argv[i]);
         i += 1;
     }
-    let exit_code = sailfin_cli_main_with_paths(tail, runtime_root as string, bin_dir as string);
+    let exit_code = sailfin_cli_main_with_paths(tail, runtime_root as string, bin_dir as string, exe_str);
     // Exit funnel: dump arena telemetry on every normal completion
     // (replaces the retired C atexit hook). `main` has a single return,
     // so this fires for `sfn run`/`check`/`build`/… alike — the dispatch

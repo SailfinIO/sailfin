@@ -136,8 +136,9 @@ runs:
     # PR's first run restores main's baseline. This step runs AFTER the
     # module-IR restore so the populated test-bin subtree overlays the
     # (empty) test-bin the module-IR save carries. Cross-commit hits work
-    # because the test-bin cache identity is the commit-STABLE capsule
-    # version (#1233): a baseline at one commit warms a PR at another.
+    # only for byte-identical compilers: each entry identity combines the
+    # commit-stable capsule version with the compiler binary SHA-256
+    # (SFN-545), so a foreign compiler's restored entries cannot match.
     # The hashFiles set includes the runtime capsule manifest
     # (`runtime/capsule.toml`) and `runtime/ir/**` (the cross-windows
     # link stub) on top of the `.sfn` trees, because those inputs change

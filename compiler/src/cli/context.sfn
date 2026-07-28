@@ -5,13 +5,13 @@
 // retired C driver (and today's `sailfin_cli_main_with_paths`)
 // prepends to user argv, in the fixed order:
 //
-//     --runtime-root <path> --binary-dir <path>
+//     --runtime-root <path> --binary-dir <path> --compiler-path <path>
 //
-// Both flags are optional, but `--binary-dir` is only recognised
-// after `--runtime-root` has been consumed (or was absent) — the
-// walk is positional, mirroring the historical inline parsing in
-// `sailfin_cli_main` byte-for-byte. A flag with no following value
-// is left unconsumed, exactly like the inline walk it replaces.
+// All flags are optional, but each is only recognised after its
+// predecessor has been consumed (or was absent). The walk is positional,
+// mirroring the historical inline parsing in `sailfin_cli_main`
+// byte-for-byte. A flag with no following value is left unconsumed,
+// exactly like the inline walk it replaces.
 //
 // `registry_url` is part of the canonical CliContext contract
 // (proposal §4.2) but has no driver-prefix source today: registry
@@ -24,6 +24,11 @@ import { _env_flag, _legacy_flag_file } from "../build_flags";
 struct CliContext {
     runtime_root: string;
     binary_dir: string;
+    // Exact canonical path of the running compiler executable. This is
+    // distinct from `binary_dir`: selecting a preferred sibling name
+    // can identify different bytes when multiple compiler binaries
+    // coexist in one directory (SFN-545).
+    compiler_path: string;
     registry_url: string;
     trace_argv: boolean;
     // The user-visible argv (driver prefix stripped) the toolchain-dispatch
@@ -40,6 +45,7 @@ struct CliContext {
 struct _DriverPrefix {
     runtime_root: string;
     binary_dir: string;
+    compiler_path: string;
     length: int;
 }
 
@@ -47,6 +53,7 @@ fn _walk_driver_prefix(argv: string[]) -> _DriverPrefix {
     let mut prefix = _DriverPrefix {
         runtime_root: "",
         binary_dir: "",
+        compiler_path: "",
         length: 0
     };
     let mut start_index: int = 0;
@@ -62,6 +69,14 @@ fn _walk_driver_prefix(argv: string[]) -> _DriverPrefix {
         if argv[start_index] == "--binary-dir" {
             if start_index + 1 < argv.length {
                 prefix.binary_dir = argv[start_index + 1];
+                start_index += 2;
+            }
+        }
+    }
+    if start_index < argv.length {
+        if argv[start_index] == "--compiler-path" {
+            if start_index + 1 < argv.length {
+                prefix.compiler_path = argv[start_index + 1];
                 start_index += 2;
             }
         }
@@ -93,6 +108,7 @@ fn parse_driver_prefix(argv: string[]) -> CliContext ![io] {
     let mut ctx = CliContext {
         runtime_root: prefix.runtime_root,
         binary_dir: prefix.binary_dir,
+        compiler_path: prefix.compiler_path,
         registry_url: "",
         trace_argv: false,
         orig_args: []
