@@ -774,6 +774,32 @@ jobs:
               --work-dir build/aarch64-bootstrap/pass-2 \
               -o build/aarch64-bootstrap/pass-2/sfn
 
+      # Match Makefile rebuild's post-build shared context: standalone runtime
+      # emits in the e2e suite need OwnedBuf and POSIX signatures/layouts.
+      - name: Stage standalone runtime import context
+        shell: bash
+        run: |
+          set -euo pipefail
+          compiler="$PWD/build/aarch64-bootstrap/pass-2/sfn"
+          context="$PWD/build/aarch64-bootstrap/pass-2/compiler/import-context"
+          mkdir -p \
+            "$context/runtime/sfn/memory" \
+            "$context/runtime/sfn/platform"
+          "$compiler" emit \
+            --module-name runtime/sfn/memory/ownedbuf \
+            -o "$context/runtime/sfn/memory/ownedbuf.sfn-asm" \
+            native runtime/sfn/memory/ownedbuf.sfn
+          grep '^\.layout' \
+            "$context/runtime/sfn/memory/ownedbuf.sfn-asm" \
+            > "$context/runtime/sfn/memory/ownedbuf.layout-manifest"
+          "$compiler" emit \
+            --module-name runtime/sfn/platform/posix \
+            -o "$context/runtime/sfn/platform/posix.sfn-asm" \
+            native runtime/sfn/platform/posix.sfn
+          grep '^\.layout' \
+            "$context/runtime/sfn/platform/posix.sfn-asm" \
+            > "$context/runtime/sfn/platform/posix.layout-manifest" || true
+
       - name: Bundle native compiler passes
         shell: bash
         run: |
