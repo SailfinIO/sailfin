@@ -1180,6 +1180,26 @@ fn cache_compiler_identity(compiler_version: string, compiler_binary_path: strin
     return compiler_version + "+bin." + bin_hash;
 }
 
+// Content identity for the compiler binary that emits and links per-test
+// executables. Unlike `cache_compiler_identity`, this ALWAYS folds the
+// binary hash: the test-bin version component deliberately strips the
+// per-commit `+dev.<hash>` metadata so unchanged compiler binaries can
+// share entries across commits, but two different binaries at the same
+// capsule version must never address the same cached executable.
+//
+// The hash is binary-safe (`_sha256_of_file_cmd`, not the text-file hash)
+// and is resolved once per `sfn test` invocation by the caller. Failure
+// returns an empty identity so the runner can disable cache reads and
+// writes; falling back to the bare capsule version would recreate the
+// stale cross-compiler hit this identity prevents.
+fn test_bin_compiler_identity(compiler_version: string, compiler_binary_path: string) -> string ![io] {
+    if compiler_version.length == 0 { return ""; }
+    if compiler_binary_path.length == 0 { return ""; }
+    let bin_hash = _sha256_of_file_cmd(compiler_binary_path);
+    if bin_hash.length == 0 { return ""; }
+    return compiler_version + "+bin." + bin_hash;
+}
+
 // ----------------------------------------------------------------
 // Per-test binary cache (#1230)
 // ----------------------------------------------------------------
@@ -1211,7 +1231,12 @@ fn cache_compiler_identity(compiler_version: string, compiler_binary_path: strin
 // capsule version (`resolve_test_bin_identity_for_cache`). Both change
 // the folded key bytes, so the schema bump re-roots the on-disk tree to
 // `build/cache/test-bin/v2` and old v1 entries can never false-hit.
-fn test_bin_cache_schema_version() -> string { return "v2"; }
+//
+// v2 -> v3 (SFN-545): `compiler_identity` gained the emitting compiler
+// binary's SHA-256. The schema bump makes every v2 entry unreachable
+// once; afterward broad CI prefix restores may unpack foreign v3 entries,
+// but their compiler-specific key digests cannot match this binary's lookup.
+fn test_bin_cache_schema_version() -> string { return "v3"; }
 
 // Root for the per-test binary cache: `<base>/test-bin/<schema>`,
 // where `<base>` is `$SAILFIN_BUILD_CACHE_DIR` (when set) or the
@@ -1245,15 +1270,16 @@ fn test_bin_cache_root() -> string ![io] {
 // content hashed by the caller), so a runtime edit busts the key
 // directly by content. This replaced the former reliance on a
 // per-commit `compiler_identity` busting every entry on every commit
-// (#1233): `compiler_identity` is now the commit-stable capsule version
-// (`resolve_test_bin_identity_for_cache`), so genuinely-unchanged tests
-// hit across commits. `--no-test-cache` on the `make check` /
+// (#1233): `compiler_identity` is now the bare capsule version plus the
+// emitting compiler binary's content hash (`test_bin_compiler_identity`).
+// Identical compiler bytes therefore hit across commits while different
+// compiler binaries always miss. `--no-test-cache` on the `make check` /
 // full-suite gate remains the final cold-build backstop.
 //
 //   key = sha256(
 //       sha256(test_source_bytes)
 //       || sha256(sorted(dep hashes))   // dep_ll files + native_texts
-//       || compiler_identity            // commit-stable capsule version
+//       || compiler_identity            // capsule version + binary SHA-256
 //       || runtime_identity             // runtime_link_inputs_identity(...)
 //       || canonical(clang_flags)
 //       || test_bin_cache_schema_version()
@@ -1372,6 +1398,7 @@ export {
     canonicalize_flags,
     cache_key_for,
     cache_compiler_identity,
+    test_bin_compiler_identity,
     sha256_of_file,
     runtime_object_cache_key,
     runtime_object_cache_key_with_identity,

@@ -174,7 +174,10 @@ here.
   [--all-schemas]` removes the current schema tree, optionally sweeping stale
   sibling `v<M>` schema trees too. Runtime C/LL/sfn objects share the same
   cache across work-dirs (#915, #1096). `sfn test` content-addresses each
-  linked test binary, cross-commit-stable (#1230, #1233); `make check` passes
+  linked test binary by the compiler binary's SHA-256 as well as its source,
+  dependency, runtime, and flag inputs; byte-identical compilers share entries
+  across commits, while different compiler binaries always miss (SFN-545,
+  #1230, #1233). `make check` passes
   `--no-test-cache` so the full gate always cold-builds. **Runtime object
   invalidation (#1197):** with the C runtime retired (#822/#823) the entire
   runtime is now `sfn-sources` (`runtime/capsule.toml`) emitted by the Sailfin

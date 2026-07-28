@@ -135,13 +135,13 @@ fn _usage() -> string {
 
 // Direct-params facade over `sailfin_cli_main_v2` (M5.3 / #471). This
 // is the route from the synthesized `@main(argc, argv)` prologue
-// (`fn main` below) into the CLI dispatch: `runtime_root` and
-// `binary_dir` are resolved as Sailfin strings via
+// (`fn main` below) into the CLI dispatch: `runtime_root`, `binary_dir`,
+// and the exact `compiler_path` are resolved as Sailfin strings via
 // `runtime/sfn/platform/exec.sfn`, then re-encoded as the
-// `--runtime-root` / `--binary-dir` driver prefix that
+// `--runtime-root` / `--binary-dir` / `--compiler-path` driver prefix that
 // `cli/context.sfn::parse_driver_prefix` consumes — the shape the
 // retired C driver injected as argv flags.
-fn sailfin_cli_main_with_paths(argv: string[], runtime_root: string, binary_dir: string) -> int ![clock, io, net] {
+fn sailfin_cli_main_with_paths(argv: string[], runtime_root: string, binary_dir: string, compiler_path: string) -> int ![clock, io, net] {
     let mut composed: string[] = [];
     if runtime_root.length > 0 {
         composed.push("--runtime-root");
@@ -150,6 +150,10 @@ fn sailfin_cli_main_with_paths(argv: string[], runtime_root: string, binary_dir:
     if binary_dir.length > 0 {
         composed.push("--binary-dir");
         composed.push(binary_dir);
+    }
+    if compiler_path.length > 0 {
+        composed.push("--compiler-path");
+        composed.push(compiler_path);
     }
     let mut i: int = 0;
     loop {
@@ -712,7 +716,7 @@ fn sailfin_cli_main_v2(argv: string[]) -> int ![clock, io, net] {
         if runtime_root.length == 0 {
             if _runtime_bundle_exists("runtime") { runtime_root = "runtime"; }
         }
-        return sailfin_cli_main_with_paths(["run", cmd], runtime_root, ctx.binary_dir);
+        return sailfin_cli_main_with_paths(["run", cmd], runtime_root, ctx.binary_dir, ctx.compiler_path);
     }
 
     print("unknown command: " + cmd);

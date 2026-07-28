@@ -34,6 +34,7 @@ fn _empty_ctx() -> CliContext {
     return CliContext {
         runtime_root: "",
         binary_dir: "",
+        compiler_path: "",
         registry_url: "",
         trace_argv: false,
         orig_args: []

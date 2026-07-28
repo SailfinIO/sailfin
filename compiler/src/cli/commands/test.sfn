@@ -72,7 +72,8 @@ import {
     canonicalize_flags,
     runtime_link_inputs_identity,
     test_bin_cache_key,
-    test_bin_cache_root
+    test_bin_cache_root,
+    test_bin_compiler_identity
 } from "../../build_cache";
 import { _env_flag, _get_env_cmd, _legacy_flag_file } from "../../build_flags";
 import { is_safe_scope_name, parse_scope_name } from "../../capsule_artifact";
@@ -1217,10 +1218,10 @@ fn run(matches: Matches, ctx: CliContext) -> int ![clock, io, net] {
     let mut overall_rc: int = 0;
 
     // #1230/#1233: per-test linked-binary cache. Resolve the
-    // invocation-stable key inputs once: the commit-stable compiler
-    // identity (`resolve_test_bin_identity_for_cache` — the bare capsule
-    // version, `+dev.<hash>` stripped, so a baseline at one commit warms a
-    // PR at another), the runtime link-input content identity (so a
+    // invocation-stable key inputs once: the compiler identity (bare
+    // capsule version plus the running binary's SHA-256, so identical
+    // binaries can share across commits but different binaries always
+    // miss), the runtime link-input content identity (so a
     // runtime/header/include-root change busts every entry), and the
     // canonical clang flag set (`-O0`, matching
     // `_clang_link_test_cmd_with_deps`). Per-test the key additionally
@@ -1229,12 +1230,24 @@ fn run(matches: Matches, ctx: CliContext) -> int ![clock, io, net] {
     // the read and the write so `make check` always cold-builds — so the
     // runtime identity (the one expensive input: it hashes the runtime
     // sources + headers) is only computed when the cache is enabled.
-    let test_cache_enabled = !no_test_cache;
+    let mut test_cache_enabled = !no_test_cache;
     let tb_cache_root = test_bin_cache_root();
-    let tb_compiler_identity = resolve_test_bin_identity_for_cache(binary_dir);
+    let mut tb_compiler_identity: string = "";
     let mut tb_runtime_identity: string = "";
     if test_cache_enabled {
-        tb_runtime_identity = _test_bin_runtime_identity(runtime_root, _sanitize_filename_cmd(scratch_root));
+        let tb_compiler_version = resolve_test_bin_identity_for_cache(binary_dir);
+        // `compiler_path` is the exact canonical executable resolved at
+        // the native entrypoint. Do not reconstruct it from `binary_dir`:
+        // a preferred sibling such as `sfn` may contain different bytes
+        // when the running compiler is named `sailfin` or `sfn-selfhost2`.
+        let tb_compiler_path = ctx.compiler_path;
+        tb_compiler_identity = test_bin_compiler_identity(tb_compiler_version, tb_compiler_path);
+        // Identity failure must fail cold. Falling back to the bare
+        // capsule version would let a different compiler binary address
+        // this invocation's restored test-bin entries (SFN-545).
+        if tb_compiler_identity.length == 0 { test_cache_enabled = false; } else {
+            tb_runtime_identity = _test_bin_runtime_identity(runtime_root, _sanitize_filename_cmd(scratch_root));
+        }
     }
     let mut tb_flags: string[] = ["-O0"];
     let tb_flags_canonical = canonicalize_flags(tb_flags);
@@ -1265,7 +1278,7 @@ fn run(matches: Matches, ctx: CliContext) -> int ![clock, io, net] {
         // source + the resolver's dep closure (the test-source-specific
         // link inputs) plus the invocation-stable `tb_runtime_identity`
         // (the runtime link inputs — sources, headers, include roots, link
-        // libs — folded by content above) and the commit-stable compiler
+        // libs — folded by content above) and the compiler-binary content
         // identity, see `test_bin_cache_key`. Then try to serve the linked
         // binary from cache. On a hit we copy it into `exe_path` and skip
         // both LLVM

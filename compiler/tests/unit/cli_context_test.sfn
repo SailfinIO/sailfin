@@ -1,0 +1,21 @@
+// Unit coverage for the driver-injected CLI context prefix.
+import { expect_eq_int, expect_eq_str } from "sfn/test";
+
+import { driver_prefix_length, parse_driver_prefix } from "../../src/cli/context";
+
+test "cli context: preserves exact compiler path beside another binary name" ![io] {
+    let args: string[] = ["--runtime-root", "/tmp/toolchain/runtime", "--binary-dir", "/tmp/toolchain/bin", "--compiler-path", "/tmp/toolchain/bin/sfn-selfhost2", "test", "fixture_test.sfn"];
+    let ctx = parse_driver_prefix(args);
+    assert expect_eq_str(ctx.runtime_root, "/tmp/toolchain/runtime").ok;
+    assert expect_eq_str(ctx.binary_dir, "/tmp/toolchain/bin").ok;
+    assert expect_eq_str(ctx.compiler_path, "/tmp/toolchain/bin/sfn-selfhost2").ok;
+    assert expect_eq_int(driver_prefix_length(args), 6).ok;
+}
+
+test "cli context: missing compiler path fails closed as empty" ![io] {
+    let args: string[] = ["--binary-dir", "/tmp/toolchain/bin", "test"];
+    let ctx = parse_driver_prefix(args);
+    assert expect_eq_str(ctx.binary_dir, "/tmp/toolchain/bin").ok;
+    assert expect_eq_str(ctx.compiler_path, "").ok;
+    assert expect_eq_int(driver_prefix_length(args), 2).ok;
+}

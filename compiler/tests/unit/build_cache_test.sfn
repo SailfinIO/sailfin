@@ -50,7 +50,8 @@ import {
     runtime_object_entry_key_from_str,
     test_bin_cache_key,
     test_bin_cache_root_with_override,
-    test_bin_cache_schema_version
+    test_bin_cache_schema_version,
+    test_bin_compiler_identity
 } from "../../src/build_cache";
 import { _strip_build_metadata } from "../../src/version";
 
@@ -238,11 +239,11 @@ test "build_cache: cache_key_for changes when dep manifest changes" ![io] {
 // Per-test binary cache (#1230)
 // --------------------------------------------------------------
 test "build_cache: test_bin cache schema + root layout" ![io] {
-    assert test_bin_cache_schema_version() == "v2";
+    assert test_bin_cache_schema_version() == "v3";
     // In-tree default sits beside (not under) the module cache's
     // `<base>/v<N>` tree so the two schema lines age out independently.
-    assert test_bin_cache_root_with_override("") == "build/cache/test-bin/v2";
-    assert test_bin_cache_root_with_override("/shared/cache") == "/shared/cache/test-bin/v2";
+    assert test_bin_cache_root_with_override("") == "build/cache/test-bin/v3";
+    assert test_bin_cache_root_with_override("/shared/cache") == "/shared/cache/test-bin/v3";
 }
 
 test "build_cache: test_bin_cache_key same inputs -> same digest" ![io] {
@@ -327,20 +328,36 @@ test "build_cache: test_bin_cache_key changes when compiler identity changes" ![
     _write_file(test_src, "test \"x\" { assert 1 == 1; }");
     _write_file(dep_ll, "; ModuleID = 'dep'");
     let nt: string[] = [];
-    // A real capsule-version bump (the commit-stable identity, #1233)
-    // still busts every cached binary.
-    let key1 = test_bin_cache_key(test_src, [dep_ll], nt, "0.7.0", "rt0", "[\"-O0\"]", "tbk_id_1");
-    let key2 = test_bin_cache_key(test_src, [dep_ll], nt, "0.8.0", "rt0", "[\"-O0\"]", "tbk_id_2");
+    let bin_a = _identity_tmp("test_bin_a", "fake-compiler-bytes-A\n");
+    let bin_b = _identity_tmp("test_bin_b", "fake-compiler-bytes-B\n");
+    let identity_a = test_bin_compiler_identity("0.7.0", bin_a);
+    let identity_b = test_bin_compiler_identity("0.7.0", bin_b);
+    // Same capsule version, different compiler bytes: the exact
+    // cross-compiler poisoning shape from SFN-545 must miss.
+    assert identity_a != identity_b;
+    let key1 = test_bin_cache_key(test_src, [dep_ll], nt, identity_a, "rt0", "[\"-O0\"]", "tbk_id_1");
+    let key2 = test_bin_cache_key(test_src, [dep_ll], nt, identity_b, "rt0", "[\"-O0\"]", "tbk_id_2");
     assert key1.digest != key2.digest;
+    process.run(["rm", "-rf", bin_a]);
+    process.run(["rm", "-rf", bin_b]);
     _cleanup(scratch);
 }
 
-// #1233 headline: two compiler stamps that differ ONLY in their
-// `+dev.<hash>` build metadata (i.e. two commits at the same capsule
-// version) must collapse to the SAME identity, so a push:main baseline
-// warms a PR and a second push reuses the first's binaries. This is the
-// unit-level proof of the cross-stamp e2e (test_test_bin_cache.sh Test
-// 5); the per-commit hash used to bust every entry on every commit.
+test "build_cache: test-bin compiler identity is content-addressed" ![io] {
+    let bin_a = _identity_tmp("test_bin_stable_a", "same-compiler-bytes\n");
+    let bin_b = _identity_tmp("test_bin_stable_b", "same-compiler-bytes\n");
+    assert test_bin_compiler_identity("0.7.0", bin_a) == test_bin_compiler_identity("0.7.0", bin_b);
+    process.run(["rm", "-rf", bin_a]);
+    process.run(["rm", "-rf", bin_b]);
+}
+
+test "build_cache: test-bin compiler identity fails closed" ![io] {
+    assert test_bin_compiler_identity("", "/tmp/sfn_unused_test_bin_compiler") == "";
+    assert test_bin_compiler_identity("0.7.0", "") == "";
+}
+
+// The version component stays commit-stable; the full identity adds the
+// compiler binary hash in `test_bin_compiler_identity` (SFN-545).
 test "version: _strip_build_metadata collapses +dev.<hash> stamps" {
     assert _strip_build_metadata("0.7.0-alpha.28+dev.f944726") == "0.7.0-alpha.28";
     assert _strip_build_metadata("0.7.0-alpha.28+dev.f944726.dirty") == "0.7.0-alpha.28";

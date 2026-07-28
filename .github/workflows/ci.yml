@@ -993,9 +993,10 @@ jobs:
       # the same OS+shard (restore-keys prefix) and saves under this
       # run's sha at job end. Safety is in the entry keys themselves:
       # test_bin_cache_key folds test-source hash + dep closure +
-      # compiler identity + runtime identity (#1233), so a restored
-      # stale entry self-invalidates and a compiler-changing PR misses
-      # everything (correct cold start). The merge/seedcheck gate and
+      # compiler identity + runtime identity (#1233). The compiler
+      # identity includes the running binary's SHA-256 (SFN-545), so a
+      # stale cross-compiler entry self-invalidates and a compiler-changing
+      # PR misses everything (correct cold start). The merge/seedcheck gate and
       # nightly `make check` keep --no-test-cache — the cold backstop
       # never consumes this cache.
       - name: Restore per-shard test-binary cache
@@ -1371,8 +1372,9 @@ jobs:
 
       # Per-shard test-binary cache restore (#2008, SFEP-0044) — same
       # contract as the Linux leg: prefix-restore from the latest prior
-      # run of this OS+shard, save under this run's sha; entry keys
-      # self-validate (#1233) so stale restores are safe by construction.
+      # run of this OS+shard, save under this run's sha; entry keys include
+      # the compiler binary SHA-256 (SFN-545) so stale restores are safe
+      # by construction.
       - name: Restore per-shard test-binary cache
         uses: actions/cache@v6
         with:

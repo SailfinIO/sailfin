@@ -279,7 +279,7 @@ per-test cost — and just re-runs the cached executable. The cache key is
 sha256(
   sha256(test_source_bytes)
   || sha256(sorted(hash of each transitive dep the link consumes))
-  || compiler_identity        // commit-stable capsule version
+  || compiler_identity        // capsule version + compiler binary SHA-256
   || runtime_identity         // content hash of the runtime link inputs
   || canonical(clang_flags)
   || schema_version
@@ -292,15 +292,13 @@ dependency changes the key and misses the cache. On a hit the cached
 binary is still **run** (never a cached pass/fail result), so a
 flaky-at-runtime test always surfaces.
 
-`compiler_identity` is the **commit-stable** capsule version: the build
-stamp's `+dev.<hash>` build metadata is stripped, so two commits at the
-same version produce the same identity. This is what lets a `push:main`
-baseline cache warm a PR's first run and a PR's second push reuse the
-first's binaries — without it, the per-commit git hash busted every
-entry on every commit. The test's own dep closure (hashed by content)
-still captures any compiler codegen change that affects that test, so a
-codegen-affecting change still misses; only commits that change nothing
-in the test's closure hit across commits.
+`compiler_identity` combines the **commit-stable** capsule version with
+the running compiler binary's SHA-256. The build stamp's
+`+dev.<hash>` metadata is stripped, so byte-identical compilers built at
+different commits can share entries, while different compiler binaries
+at the same capsule version always miss. If the running binary cannot be
+resolved or hashed, the runner disables test-bin cache reads and writes
+for that invocation rather than falling back to a weaker identity.
 
 `runtime_identity` folds the assembled runtime capsule's link inputs
 into the key by **content**: the runtime `.c`/`.ll`/`.sfn` sources, the
