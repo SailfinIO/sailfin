@@ -585,6 +585,35 @@ fn _valid_post_generic(fmt_tokens: FmtToken[], close_idx: int) -> boolean {
     return true;
 }
 
+// A function-type arrow is the one operator admitted inside a use-site
+// generic. Require the arrow's immediately preceding balanced parameter list
+// to belong to an in-list `fn`; accepting arrows by role alone would let an
+// invalid comparison-like span masquerade as a generic.
+fn _is_function_type_arrow(fmt_tokens: FmtToken[], start: int, arrow_idx: int) -> boolean {
+    if arrow_idx <= start + 2 { return false; }
+    if !strings_equal(fmt_tokens[arrow_idx - 1].role, "paren_close") {
+        return false;
+    }
+
+    let mut paren_depth = 0;
+    let mut j = arrow_idx - 1;
+    loop {
+        if j <= start { return false; }
+        let role = fmt_tokens[j].role;
+        if strings_equal(role, "paren_close") { paren_depth += 1; } else {
+            if strings_equal(role, "paren_open") {
+                paren_depth -= 1;
+                if paren_depth == 0 {
+                    if j <= start + 1 { return false; }
+                    return strings_equal(fmt_tokens[j - 1].token.lexeme, "fn");
+                }
+            }
+        }
+        j -= 1;
+    }
+    return false;
+}
+
 // Scan a balanced generic starting at `start` (a `<`). Returns the index
 // of the matching outermost close (`>` or `>>`) on success, or -1 if the
 // span is not a generic (a comparison/shift expression instead).
@@ -636,7 +665,9 @@ fn _scan_generic(fmt_tokens: FmtToken[], start: int, allow_bounds: boolean) -> i
         if strings_equal(role, "block_open") { return -1; }
         if strings_equal(role, "block_close") { return -1; }
         if strings_equal(role, "assign") { return -1; }
-        if strings_equal(role, "arrow") { return -1; }
+        if strings_equal(role, "arrow") {
+            if !_is_function_type_arrow(fmt_tokens, start, j) { return -1; }
+        }
         // A `:` is a type-parameter bound in a declaration-site clause
         // (`T: Bound`); anywhere else it proves the `<` was a comparison.
         if strings_equal(role, "colon") {

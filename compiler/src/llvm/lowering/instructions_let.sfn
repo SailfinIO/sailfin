@@ -12,6 +12,7 @@ import {
     promote_escaping_locals_for_boundaries
 } from "../expression_lowering/native/core_scopes";
 import { is_heap_type, map_array_pointer_type } from "../expression_lowering/native/core_type_mapping";
+import { parse_fn_type_text } from "../expression_lowering/native/lambda_param_inference";
 import { detect_suspension_conflicts } from "../expression_lowering/native/statement_suspension";
 import { is_union_annotation, map_local_type, split_union_annotations } from "../expression_lowering/native/statement_type_mapping";
 import { find_local_binding, find_parameter_binding, mark_parameter_consumed } from "../expressions_bindings";
@@ -202,13 +203,15 @@ fn _base_array_element_type(base: string, locals: LocalBinding[], bindings: Para
     return elem;
 }
 
-// Extract the `fn(...)` element text from a `Channel<fn() -> void>` source
+// Extract the function-type element text from a `Channel<fn() -> void>` source
 // annotation, or "" for any non-fn element (#1944). Only a function-typed
 // element is recovered — every other `Channel<T>` keeps the bare `channel`
 // binding annotation, so this widens no existing channel behaviour. The outer
 // `>` is always the last character (the `>` inside a `->` return arrow is
 // interior), so stripping the `Channel<` prefix and the final `>` isolates the
-// element even for `fn() -> void`.
+// element even for `fn() -> void`. Parse the element through the shared
+// balanced function-type parser so formatter-canonical whitespace and nested
+// types cannot change lowering semantics (SFN-434).
 fn _channel_annotation_fn_element(annotation: string) -> string {
     let trimmed = trim_text(annotation);
     if !starts_with(trimmed, "Channel<") { return ""; }
@@ -217,7 +220,8 @@ fn _channel_annotation_fn_element(annotation: string) -> string {
         return "";
     }
     let inner = trim_text(substring(trimmed, 8, trimmed.length - 1));
-    if !starts_with(inner, "fn(") { return ""; }
+    let parsed = parse_fn_type_text(inner);
+    if !parsed.ok { return ""; }
     return inner;
 }
 
@@ -250,14 +254,16 @@ fn _channel_annotation_int_element(annotation: string) -> string {
     return "";
 }
 
-// Recover the `fn(...)` element text carried by a `channel:fn() -> void`
+// Recover the function-type element text carried by a
+// `channel:fn() -> void` / `channel:fn () -> void`
 // binding annotation (#1944), or "" when the binding is a bare `channel` or a
 // non-fn `channel:<kind>`. The mirror of `_channel_annotation_fn_element` on
 // the lowered-binding side.
 fn _channel_binding_fn_element(annotation: string) -> string {
     if !starts_with(annotation, "channel:") { return ""; }
     let elem = trim_text(substring(annotation, 8, annotation.length));
-    if !starts_with(elem, "fn(") { return ""; }
+    let parsed = parse_fn_type_text(elem);
+    if !parsed.ok { return ""; }
     return elem;
 }
 

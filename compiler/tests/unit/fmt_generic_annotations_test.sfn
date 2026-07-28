@@ -40,6 +40,25 @@ test "fmt generic: let-binding type is idempotent" ![io] {
     assert once == twice;
 }
 
+// ── Function types are valid generic arguments (SFN-434) ────────────
+test "fmt generic: function type argument stays tight and does not fuse assign" ![io] {
+    let src = "fn make() -> int {\n    let tasks: Channel<fn() -> void> = channel(2);\n    return 0;\n}\n";
+    let out = format_source(src);
+    assert _contains(out, "let tasks: Channel<fn () -> void> = channel(2);");
+    assert _contains(out, "Channel < fn") == false;
+    assert _contains(out, "void >=") == false;
+    assert out == format_source(out);
+}
+
+test "fmt generic: nested function type arguments stay tight" ![io] {
+    let src = "fn make() -> int {\n    let callback: Wrapper<fn(fn() -> int) -> fn() -> void> = value;\n    return 0;\n}\n";
+    let out = format_source(src);
+    assert _contains(out, "Wrapper<fn (fn () -> int) -> fn () -> void> = value;");
+    assert _contains(out, "Wrapper < fn") == false;
+    assert _contains(out, "void >=") == false;
+    assert out == format_source(out);
+}
+
 // ── Two-argument generic in let position (the #832 Result case) ──────
 test "fmt generic: Result<int, string> let-binding round-trips" ![io] {
     let src = "fn g() -> int {\n    let r: Result<int, string> = parse();\n    return 0;\n}\n";

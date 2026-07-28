@@ -113,28 +113,13 @@ NO_RUN=(
 # the ratchet flags it). Keep it in sync with scripts/check-examples.sh.
 KNOWN_BUILD_RED=(
     "examples/advanced/web-server-with-concurrency.sfn"  # net response method lowering — epic #1883
-    "examples/concurrency/dynamic-task-scheduling.sfn"   # typed channel then live await — #1942/#1944
     "examples/web/rest-api.sfn"                          # `res.send` return-type lowering — epic #1883
 )
 
-# Pre-existing non-canonical corpus files: not at the candidate formatter's
-# fixed point (`sfn fmt --check` red). CI's fmt gate only covers compiler/src/
-# and runtime/ (.github/workflows/ci.yml), so the corpus was never held to the
-# fixed point and accumulated drift. The whole in-tree corpus was brought to the
-# fixed point in SFN-379 — which also fixed the formatter's pointer/range
-# spacing quirk (`*u8` was emitted as `* u8`, `0..4` as `0 .. 4`) so the
-# design-stage pointer examples format canonically. The one remaining entry
-# exposes a *separate* formatter bug (SFN-434): a generic type-argument list
-# containing a function type — `Channel<fn() -> void>` — is not recognized as a
-# generic, so `sfn fmt --write` mis-spaces it and fuses the close `>` with the
-# following `=` into `>=` (the #900 miscompile class), which no longer builds.
-# The file is kept in its correct hand-written form and tolerated here until
-# SFN-434 lands; then this list empties. Any *other* dirty file (a new mangle or
-# a newly-added unformatted entry) still fails, and this entry becoming clean
-# (XPASS) also fails so the ratchet tightens when SFN-434 ships.
-KNOWN_FMT_DIRTY=(
-    "examples/concurrency/dynamic-task-scheduling.sfn"
-)
+# Pre-existing non-canonical corpus files that are tolerated by the formatter
+# fixed-point ratchet. SFN-379 brought the corpus to the fixed point, and
+# SFN-434 removed its final exception.
+KNOWN_FMT_DIRTY=()
 
 in_list() { local n="$1"; shift; for x in "$@"; do [ "$n" = "$x" ] && return 0; done; return 1; }
 
