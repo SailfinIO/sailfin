@@ -58,6 +58,8 @@ fn _is_stringifiable_numeric(llvm_type: string) -> boolean {
     if llvm_type == "i1" { return true; }
     if llvm_type == "double" { return true; }
     if llvm_type == "float" { return true; }
+    if llvm_type == "half" { return true; }
+    if llvm_type == "bfloat" { return true; }
     return false;
 }
 
