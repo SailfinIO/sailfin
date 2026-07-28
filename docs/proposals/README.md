@@ -79,7 +79,7 @@ The next number is `max + 1`. Add a row in the same PR that introduces an SFEP.
 | [0054](./0054-low-precision-numerics.md) | Low-Precision Numeric Substrate | Accepted | language |
 | [0055](./0055-typed-task-handles.md) | Typed task handles (`Task<T>`) and ordered multi-await (`join_all`) | Accepted | language |
 | [0056](./0056-aarch64-linux-target.md) | aarch64-Linux Target Support (Raspberry Pi Install + On-Device Self-Host) | Accepted | runtime |
-| [0057](./0057-string-interpolation-dollar.md) | String Interpolation with `${ }` (migrating off `{{ }}`) | Accepted | language |
+| [0057](./0057-string-interpolation-dollar.md) | String Interpolation with `${ }` (migrating off `{{ }}`) | Implemented | language |
 | [0058](./0058-sized-integer-types.md) | Sized Integer Types and Overflow Semantics | Accepted | language |
 | [0059](./0059-typed-ssa-activation.md) | Typed SSA Activation — Making the Metadata IR Load-Bearing | Accepted | tooling |
 | [0060](./0060-owned-syscall-layer.md) | The Owned Syscall Layer (Axis 3, tier-1 Linux x86-64) | Accepted | runtime |

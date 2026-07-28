@@ -298,7 +298,8 @@ fn expression_from_single_token(token: Token) -> Expression? {
     }
     if token.kind.variant == "StringLiteral" {
         return Expression.StringLiteral {
-            value: string_literal_value(token)
+            value: string_literal_value(token),
+            lexeme: token.lexeme
         };
     }
     if token.kind.variant == "Identifier" {
@@ -803,7 +804,8 @@ fn parse_primary_expression(state: ExpressionTokens) -> ExpressionParseResult {
         return ExpressionParseResult {
             state: expression_tokens_advance(state),
             expression: Expression.StringLiteral {
-                value: string_literal_value(token)
+                value: string_literal_value(token),
+                lexeme: token.lexeme
             },
             success: true
         };
@@ -2488,7 +2490,8 @@ fn normalize_expression(tokens: Token[], expr: Expression) -> Expression {
             let token = filtered[0];
             if token.kind.variant == "StringLiteral" {
                 return Expression.StringLiteral {
-                    value: string_literal_value(token)
+                    value: string_literal_value(token),
+                    lexeme: token.lexeme
                 };
             }
             if token.kind.variant == "BooleanLiteral" {
@@ -2505,7 +2508,10 @@ fn normalize_expression(tokens: Token[], expr: Expression) -> Expression {
             if char_at(raw_text, 0) == "\"" {
                 if char_at(raw_text, raw_text.length - 1) == "\"" {
                     let literal = strip_surrounding_quotes_expr(raw_text);
-                    return Expression.StringLiteral { value: literal };
+                    return Expression.StringLiteral {
+                        value: literal,
+                        lexeme: raw_text
+                    };
                 }
             }
         }

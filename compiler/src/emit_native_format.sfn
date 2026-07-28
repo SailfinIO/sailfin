@@ -183,6 +183,10 @@ fn format_expression_into(expression: Expression, out: string[]) -> string[] {
         return out;
     }
     if expression.variant == "StringLiteral" {
+        if expression.lexeme != null {
+            out.push(expression.lexeme);
+            return out;
+        }
         out.push(quote_string(expression.value));
         return out;
     }

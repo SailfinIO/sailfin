@@ -1498,11 +1498,13 @@ fn parse_assert_statement(parser: Parser) -> BlockStatementParseResult {
             name: "runtime_assert_fail_fn",
             span: null
         },
-        arguments: [Expression.StringLiteral { value: "" }, Expression.NumberLiteral {
+        arguments: [Expression.StringLiteral { value: "", lexeme: null }, Expression.NumberLiteral {
             value: _assert_int_to_string(assert_line)
         }, Expression.NumberLiteral {
             value: _assert_int_to_string(assert_col)
-        }, Expression.StringLiteral { value: "assertion failed" }],
+        }, Expression.StringLiteral {
+            value: "assertion failed", lexeme: null
+        }],
         span: null,
         type_arguments: []
     };

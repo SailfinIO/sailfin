@@ -599,11 +599,8 @@ fn unescape_literal_fragment(fragment: string) -> string {
 // returns false and the caller reports a failed parse (the value lowers as a
 // plain string literal).
 //
-// The `\${` skip does not currently take effect: the parser resolves escapes
-// at AST-construction time and drops the backslash of an unrecognized escape,
-// so `\$` has already collapsed to `$` before this runs (SFN-576). The skip is
-// kept because it is correct against the raw text this function is specified
-// to take, and becomes live once SFN-576 preserves the backslash.
+// Expression.StringLiteral retains the original lexeme alongside its decoded
+// value so AST-to-source emission preserves this distinction (SFN-576).
 fn has_unescaped_dollar_brace(value: string) -> boolean {
     let mut index: int = 0;
     loop {
@@ -625,8 +622,8 @@ fn has_unescaped_dollar_brace(value: string) -> boolean {
 
 // SFEP-0057: scanner for the `${ expr }` interpolation form, the sole
 // interpolation syntax. Operates on the RAW literal inner (escapes intact) so
-// a `\${` can be told apart from a real opener; that distinction is not yet
-// observable because the parser collapses `\$` to `$` upstream (SFN-576).
+// a `\${` can be told apart from a real opener. The parser carries the original
+// lexeme through AST-to-source emission for this scan (SFN-576).
 // Literal parts are unescaped as they are emitted (`\n` to a newline, etc.);
 // embedded expression text is kept raw for re-parse by lower_expression. The
 // matching `}` is found by brace-depth tracking so `${ f({a: 1}) }` closes on
