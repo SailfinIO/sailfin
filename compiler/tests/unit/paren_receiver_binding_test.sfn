@@ -87,9 +87,9 @@ test "paren receiver: cast object survives for non-additive operators" {
     let sub: int = ((5 - 2) as string).length;
     assert sub == 1;
 
-    // `as string` renders booleans as "1"/"0" (SFN-548).
+    // `as string` renders booleans as "true"/"false" (SFN-554).
     let eq: int = ((1 == 1) as string).length;
-    assert eq == 1;
+    assert eq == 4;
 }
 
 test "paren receiver: conditional object and index sequence keep their group" {

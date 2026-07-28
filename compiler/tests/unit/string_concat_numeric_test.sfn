@@ -2,8 +2,8 @@
 // and exited 0 but silently dropped the call from the IR. The fix defines
 // `string + <numeric/bool>` as sugar for `string + (<numeric/bool> as string)`,
 // so these tests pin the resulting text against the existing `as string` cast
-// semantics (booleans render as "1"/"0", not "true"/"false") and guard the
-// pre-existing char/byte concat shape the fix must not disturb.
+// semantics and guard the pre-existing char/byte concat shape the fix must not
+// disturb.
 //
 // The first attempt at this fix keyed the gate off "string-shaped" operands,
 // which at the LLVM level includes bare `i8*` — but `*u8`, `*opaque`, and
@@ -67,13 +67,18 @@ test "string concat: string + bf16 yields concatenated text" {
     assert out == "h=1.5";
 }
 
-test "string concat: string + bool renders as 1/0, not true/false" {
+test "bool display agrees across concat, cast, and interpolation" {
     let t = true;
     let f = false;
-    let out_true = "t=" + t;
-    let out_false = "f=" + f;
-    assert out_true == "t=1";
-    assert out_false == "f=0";
+
+    assert "b=" + t == "b=true";
+    assert "b=" + f == "b=false";
+    assert t + "=b" == "true=b";
+    assert f + "=b" == "false=b";
+    assert "b=" + (t as string) == "b=true";
+    assert "b=" + (f as string) == "b=false";
+    assert "b=${t}" == "b=true";
+    assert "b=${f}" == "b=false";
 }
 
 test "string concat: string + s.length concatenates the int shape" {

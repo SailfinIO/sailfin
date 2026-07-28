@@ -47,16 +47,16 @@ fn _run_fixture(path: string) -> RunOut ![io] {
 test "unsigned ops: unsigned operands select unsigned opcodes and signed operands are unchanged" ![io] {
     let r = _run_fixture("compiler/tests/e2e/fixtures/unsigned_ops.sfn");
     assert r.exit == 0;
-    // `boolean` renders as `1`/`0` through string concat, not `true`/`false`.
+    // Boolean display uses the same `true`/`false` text as interpolation.
     let expected = "shr4=250000000\n" + "div2=2000000000\n" + "mod7=3\n"
-        + "lt100=0\n"
-        + "u64_shr4_ok=1\n"
-        + "u64_div2_ok=1\n"
+        + "lt100=false\n"
+        + "u64_shr4_ok=true\n"
+        + "u64_div2_ok=true\n"
         + "u64_mod7=1\n"
-        + "u64_lt100=0\n"
+        + "u64_lt100=false\n"
         + "shr_signed_count=250000000\n"
         + "i32_shr2=-4\n"
         + "i32_div2=-4\n"
-        + "i32_lt0=1";
+        + "i32_lt0=true";
     assert r.out == expected;
 }
