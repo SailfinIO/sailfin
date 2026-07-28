@@ -202,7 +202,12 @@ here.
   envelope (`docs/reference/check-json-schema.md`), consumed by the MCP
   server.
 - **Diagnostics.** One renderer (`diagnostics_render.sfn`) serves check and
-  build paths; diagnostics carry `severity` + `file_path`. Effect diagnostics
+  build paths. Its sink model is the unified `Diag`/`Span` type from
+  `diagnostic.sfn`, including code, string severity, file path, producing
+  stage, optional span, and structured fix-it. Frontend producers still mint
+  the legacy token-backed `Diagnostic` and convert at the sink boundary, so
+  `sailfin-check/1` and human output remain byte-compatible while backend
+  producers migrate independently (SFEP-0061 S1, SFN-534). Effect diagnostics
   carry structured `FixSuggestion`/`TextEdit` for `sfn fix` / LSP (Track B).
   `sfn check` surfaces parse errors (`E0500`, #974) and implicit re-export
   bans (`E0600`) via the shared `reexport_check.sfn`. Malformed-but-dispatched

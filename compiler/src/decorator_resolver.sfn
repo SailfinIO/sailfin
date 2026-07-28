@@ -29,12 +29,13 @@ import {
     decorator_marker_name,
     has_decorator_marker
 } from "./ast";
+import { FixSuggestion } from "./diagnostic";
 import {
     ImportSymbolTable,
     ImportedFunctionSignature,
     lookup_imported_function
 } from "./effect_imports";
-import { Diagnostic, FixSuggestion } from "./typecheck_types";
+import { Diagnostic } from "./typecheck_types";
 
 // One resolved decorator application. `local_name` is the name written at
 // the use site (`@logExecution`); `export_name` is the exporting-module

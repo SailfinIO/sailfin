@@ -30,6 +30,7 @@ import {
     toml_get_workspace_capabilities_deny,
     toml_get_workspace_capabilities_grant
 } from "../../toml_parser";
+import { diagnostic_to_diag } from "../../typecheck_types";
 import { CliContext } from "../context";
 
 // Join an effect list for table display: comma-separated, or "-" when empty
@@ -125,7 +126,7 @@ fn run(matches: Matches, ctx: CliContext) -> int ![io] {
         let mut di: int = 0;
         loop {
             if di >= report.diagnostics.length { break; }
-            print.err(render_diagnostic(report.diagnostics[di], empty_lines, "capability"));
+            print.err(render_diagnostic(diagnostic_to_diag(report.diagnostics[di], "capability"), empty_lines, "capability"));
             di += 1;
         }
     }

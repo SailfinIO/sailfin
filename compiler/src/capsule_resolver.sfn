@@ -113,7 +113,7 @@ import {
     toml_get_workspace_package_version,
     toml_value_is_workspace_inherit
 } from "./toml_parser";
-import { Diagnostic } from "./typecheck_types";
+import { Diagnostic, diagnostic_to_diag } from "./typecheck_types";
 import { resolve_compiler_version, resolve_compiler_version_for_cache } from "./version";
 
 export {
@@ -3073,7 +3073,7 @@ fn workspace_capability_gate(workspace_root: string) -> int ![io] {
     let mut i: int = 0;
     loop {
         if i >= report.diagnostics.length { break; }
-        print.err(render_diagnostic(report.diagnostics[i], empty_lines, "capability"));
+        print.err(render_diagnostic(diagnostic_to_diag(report.diagnostics[i], "capability"), empty_lines, "capability"));
         i += 1;
     }
     if strings_equal(workspace_capability_mode(workspace_root), "warn") {

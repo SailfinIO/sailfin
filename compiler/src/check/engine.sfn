@@ -33,6 +33,7 @@ import {
 } from "../diagnostics_json";
 import { render_diagnostic } from "../diagnostics_render";
 import { ImportSymbolTable, empty_import_symbols } from "../effect_imports";
+import { Token } from "../token";
 import {
     CheckResult,
     CheckSummary,
@@ -46,7 +47,7 @@ import {
     build_closure_symbol_set,
     load_imported_interfaces_from_paths
 } from "../typecheck_import_loader";
-import { Diagnostic } from "../typecheck_types";
+import { Diagnostic, diagnostic_to_diag } from "../typecheck_types";
 
 // One distinct `(project_root, workspace_root)` resolution group. Every
 // file in `entry_paths` shares those roots, so `prepare_project_capsules_for_check`
@@ -121,7 +122,7 @@ fn _emit_load_warnings(load_result: ImportedInterfaceLoadResult, quiet: boolean)
             primary: null,
             suggestion: null
         };
-        print.err(render_diagnostic(diag, empty_lines, "load"));
+        print.err(render_diagnostic(diagnostic_to_diag(diag, "load"), empty_lines, "load"));
         i += 1;
     }
     let mut p: int = 0;
@@ -135,7 +136,7 @@ fn _emit_load_warnings(load_result: ImportedInterfaceLoadResult, quiet: boolean)
             primary: null,
             suggestion: null
         };
-        print.err(render_diagnostic(diag, empty_lines, "load"));
+        print.err(render_diagnostic(diagnostic_to_diag(diag, "load"), empty_lines, "load"));
         p += 1;
     }
 }
@@ -508,8 +509,9 @@ fn _build_json_envelope(results: CheckResult[], load: ImportedInterfaceLoadResul
         loop {
             if di >= result.diagnostics.length { break; }
             let producer = result.producers[di];
+            let diagnostic = result.diagnostics[di];
             events.push(CheckJsonEvent {
-                kind: "diagnostic", producer: producer, diagnostic: result.diagnostics[di]
+                kind: "diagnostic", diagnostic: diagnostic_to_diag(diagnostic, producer), primary_lexeme: _diagnostic_primary_lexeme(diagnostic)
             });
             di += 1;
         }
@@ -532,7 +534,7 @@ fn _build_json_envelope(results: CheckResult[], load: ImportedInterfaceLoadResul
             suggestion: null
         };
         events.push(CheckJsonEvent {
-            kind: "load_warning", producer: classify_producer("W0001"), diagnostic: warn
+            kind: "load_warning", diagnostic: diagnostic_to_diag(warn, classify_producer("W0001")), primary_lexeme: ""
         });
         mi += 1;
     }
@@ -548,7 +550,7 @@ fn _build_json_envelope(results: CheckResult[], load: ImportedInterfaceLoadResul
             suggestion: null
         };
         events.push(CheckJsonEvent {
-            kind: "load_warning", producer: classify_producer("W0002"), diagnostic: warn
+            kind: "load_warning", diagnostic: diagnostic_to_diag(warn, classify_producer("W0002")), primary_lexeme: ""
         });
         pi += 1;
     }
@@ -564,6 +566,12 @@ fn _build_json_envelope(results: CheckResult[], load: ImportedInterfaceLoadResul
         duration_ms: 0
     };
     return render_check_json_envelope(events, json_summary, exit_code);
+}
+
+fn _diagnostic_primary_lexeme(diagnostic: Diagnostic) -> string {
+    if diagnostic.primary == null { return ""; }
+    let primary: Token? = diagnostic.primary;
+    return primary.lexeme;
 }
 
 export { handle_check_command };

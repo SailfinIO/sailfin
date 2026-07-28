@@ -1,8 +1,8 @@
 // compiler/src/diagnostics_json.sfn
 //
 // JSON envelope encoder for `sfn check --json`. Pure module: no I/O,
-// no global state. Takes the per-file `Diagnostic[]` plus producer
-// tags + load warnings + top-level summary, returns one stable
+// no global state. Takes per-file `Diag` values plus load warnings
+// and the top-level summary, returning one stable
 // schema-versioned JSON string.
 //
 // The schema is documented and locked in
@@ -21,18 +21,24 @@
 // and the seed compiler doesn't handle the resulting import cycle
 // cleanly. The duplication is small (one numeric formatter) and
 // keeps this module self-contained for unit testing.
+import {
+    Diag,
+    FixSuggestion,
+    Span,
+    TextEdit
+} from "./diagnostic";
 import { substring } from "./string_utils";
-import { Token } from "./token";
-import { Diagnostic, FixSuggestion, TextEdit } from "./typecheck_types";
 
 // Per-file/per-producer event in the envelope. `kind` discriminates
 // "diagnostic" (typecheck/effect/capability findings) from
 // "load_warning" (W01xx import-context loader output) — both ride the
-// same `Diagnostic` shape so consumers can write a single decoder.
+// same `Diag` shape so consumers can write a single decoder.
 struct CheckJsonEvent {
     kind: string;
-    producer: string;
-    diagnostic: Diagnostic;
+    diagnostic: Diag;
+    // `Span` intentionally stores coordinates only. Preserve the legacy
+    // token text beside the event so sailfin-check/1 remains byte-identical.
+    primary_lexeme: string;
 }
 
 // Top-level rollup over the entire run. Always emitted, even when
@@ -123,44 +129,44 @@ fn _dj_number_to_string(value: int) -> string {
 // -------------------------------------------------------------------
 // Domain encoders
 // -------------------------------------------------------------------
-// Render a `Token?` as either `null` or a JSON object with
+// Render a `Span?` as either `null` or a JSON object with
 // `line`, `column`, `lexeme`, and a reserved `label` slot. The
 // `label` field is null today and will be populated once Phase 2
 // diagnostic infra (B5) lands secondary source locations — keeping
 // the field present (with an explicit null) means consumers can
 // write `event.primary.label` today without a schema bump later.
-fn _json_render_token(t: Token?) -> string {
-    if t == null { return "null"; }
-    let tok: Token? = t;
+fn _json_render_span(span_value: Span?, lexeme: string) -> string {
+    if span_value == null { return "null"; }
+    let span: Span? = span_value;
     let mut parts: string[] = [];
-    parts.push(_json_number_field("line", tok.line));
-    parts.push(_json_number_field("column", tok.column));
-    parts.push(_json_string_field("lexeme", tok.lexeme));
+    parts.push(_json_number_field("line", span.start_line));
+    parts.push(_json_number_field("column", span.start_column));
+    parts.push(_json_string_field("lexeme", lexeme));
     parts.push(_json_field("label", "null"));
     return "{" + _join(parts, ",") + "}";
 }
 
-// Render one `Diagnostic` as a JSON event object. `producer`
-// distinguishes the source pass (typecheck, effect, parse, load) so
+// Render one `Diag` as a JSON event object. `Diag.stage` distinguishes
+// the source pass (typecheck, effect, parse, load) so
 // downstream consumers can filter on the producing layer without
 // inspecting the `code` range. `kind` rides on the wrapping event so
 // load warnings (no AST anchor) and analysis diagnostics (with
 // `primary` token) share one decoder.
-fn _json_render_diagnostic_inner(d: Diagnostic, producer: string, kind: string) -> string {
+fn _json_render_diagnostic_inner(d: Diag, kind: string, primary_lexeme: string) -> string {
     let mut parts: string[] = [];
     parts.push(_json_string_field("kind", kind));
     parts.push(_json_string_field("code", d.code));
     parts.push(_json_string_field("severity", d.severity));
-    parts.push(_json_string_field("producer", producer));
+    parts.push(_json_string_field("producer", d.stage));
     parts.push(_json_string_field("file_path", d.file_path));
     parts.push(_json_string_field("message", d.message));
-    parts.push(_json_field("primary", _json_render_token(d.primary)));
+    parts.push(_json_field("primary", _json_render_span(d.span, primary_lexeme)));
     parts.push(_json_field("secondary", "[]"));
     parts.push(_json_field("suggestion", _json_render_suggestion(d.suggestion)));
     return "{" + _join(parts, ",") + "}";
 }
 
-// Render `Diagnostic.suggestion` as either the JSON literal `null`
+// Render `Diag.suggestion` as either the JSON literal `null`
 // or a `{ message, edits[] }` object. The edits array carries the
 // 1-based line/column inserts; `sfn fix` (planned) and the LSP
 // code-action handler (also planned) consume this directly.
@@ -196,7 +202,7 @@ fn _json_render_edit(e: TextEdit) -> string {
 }
 
 fn _json_render_event(event: CheckJsonEvent) -> string {
-    return _json_render_diagnostic_inner(event.diagnostic, event.producer, event.kind);
+    return _json_render_diagnostic_inner(event.diagnostic, event.kind, event.primary_lexeme);
 }
 
 fn _json_render_events(events: CheckJsonEvent[]) -> string {

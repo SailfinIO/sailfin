@@ -22,6 +22,7 @@
 // See docs/proposals/0004-check-architecture.md for the broader design.
 import { Statement } from "../ast";
 import { collect_bare_assert_findings } from "../bare_assert_check";
+import { FixSuggestion } from "../diagnostic";
 import {
     capability_violation_to_diagnostic,
     effect_violation_to_diagnostic,
@@ -49,7 +50,7 @@ import {
     typecheck_diagnostics_with_import_symbols_prelude
 } from "../typecheck";
 import { ClosureSymbolSet } from "../typecheck_import_loader";
-import { Diagnostic, FixSuggestion } from "../typecheck_types";
+import { Diagnostic, diagnostic_to_diag } from "../typecheck_types";
 
 // -------------------------------------------------------------------
 // Result types
@@ -191,7 +192,7 @@ fn check_source_with_imports(source: string, file_path: string, imported_interfa
             let pdiag = _parse_diagnostic_for_unknown(stmt, file_path);
             combined.push(pdiag);
             producers.push("parse");
-            rendered.push(render_diagnostic(pdiag, source_lines, "parse"));
+            rendered.push(render_diagnostic(diagnostic_to_diag(pdiag, "parse"), source_lines, "parse"));
             errors += 1;
         }
         ui += 1;
@@ -224,7 +225,7 @@ fn check_source_with_imports(source: string, file_path: string, imported_interfa
         };
         combined.push(rxdiag);
         producers.push("reexport");
-        rendered.push(render_diagnostic(rxdiag, source_lines, "reexport"));
+        rendered.push(render_diagnostic(diagnostic_to_diag(rxdiag, "reexport"), source_lines, "reexport"));
         errors += 1;
         rxi += 1;
     }
@@ -245,7 +246,7 @@ fn check_source_with_imports(source: string, file_path: string, imported_interfa
         let idiag = import_findings[ifi];
         combined.push(idiag);
         producers.push("import");
-        rendered.push(render_diagnostic(idiag, source_lines, "import"));
+        rendered.push(render_diagnostic(diagnostic_to_diag(idiag, "import"), source_lines, "import"));
         errors += 1;
         ifi += 1;
     }
@@ -286,7 +287,7 @@ fn check_source_with_imports(source: string, file_path: string, imported_interfa
             };
             combined.push(badiag);
             producers.push("lint");
-            rendered.push(render_diagnostic(badiag, source_lines, "lint"));
+            rendered.push(render_diagnostic(diagnostic_to_diag(badiag, "lint"), source_lines, "lint"));
             warnings += 1;
             bai += 1;
         }
@@ -322,7 +323,7 @@ fn check_source_with_imports(source: string, file_path: string, imported_interfa
         };
         combined.push(dddiag);
         producers.push("lint");
-        rendered.push(render_diagnostic(dddiag, source_lines, "lint"));
+        rendered.push(render_diagnostic(diagnostic_to_diag(dddiag, "lint"), source_lines, "lint"));
         warnings += 1;
         ddi += 1;
     }
@@ -338,7 +339,7 @@ fn check_source_with_imports(source: string, file_path: string, imported_interfa
         let diag = type_diags[ti];
         combined.push(diag);
         producers.push("typecheck");
-        rendered.push(render_diagnostic(diag, source_lines, "typecheck"));
+        rendered.push(render_diagnostic(diagnostic_to_diag(diag, "typecheck"), source_lines, "typecheck"));
         if strings_equal(diag.severity, "error") { errors += 1; }
         if strings_equal(diag.severity, "warning") { warnings += 1; }
         ti += 1;
@@ -374,7 +375,7 @@ fn check_source_with_imports(source: string, file_path: string, imported_interfa
         diag.file_path = file_path;
         combined.push(diag);
         producers.push("effect");
-        rendered.push(render_diagnostic(diag, source_lines, "effect"));
+        rendered.push(render_diagnostic(diagnostic_to_diag(diag, "effect"), source_lines, "effect"));
         if strings_equal(diag.severity, "error") { errors += 1; }
         if strings_equal(diag.severity, "warning") { warnings += 1; }
         ei += 1;
@@ -393,7 +394,7 @@ fn check_source_with_imports(source: string, file_path: string, imported_interfa
         cdiag.file_path = file_path;
         combined.push(cdiag);
         producers.push("effect");
-        rendered.push(render_diagnostic(cdiag, source_lines, "effect"));
+        rendered.push(render_diagnostic(diagnostic_to_diag(cdiag, "effect"), source_lines, "effect"));
         if strings_equal(cdiag.severity, "error") { errors += 1; }
         if strings_equal(cdiag.severity, "warning") { warnings += 1; }
         ci += 1;
@@ -411,7 +412,7 @@ fn check_source_with_imports(source: string, file_path: string, imported_interfa
         udiag.file_path = file_path;
         combined.push(udiag);
         producers.push("effect");
-        rendered.push(render_diagnostic(udiag, source_lines, "effect"));
+        rendered.push(render_diagnostic(diagnostic_to_diag(udiag, "effect"), source_lines, "effect"));
         if strings_equal(udiag.severity, "error") { errors += 1; }
         if strings_equal(udiag.severity, "warning") { warnings += 1; }
         ui2 += 1;
