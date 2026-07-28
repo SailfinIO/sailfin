@@ -9,7 +9,12 @@ import { trace_call_lowering } from "../../lowering_debug_state";
 import { find_runtime_helper, make_concat_descriptor } from "../../runtime_helpers";
 import { empty_string_constant_set, merge_string_constants } from "../../strings";
 import { resolve_enum_info_for_literal, resolve_enum_variant_info } from "../../type_context_queries";
-import { ends_with_pointer_suffix, strip_pointer_suffix } from "../../type_mapping";
+import {
+    ends_with_pointer_suffix,
+    integer_type_is_signed,
+    map_type_annotation,
+    strip_pointer_suffix
+} from "../../type_mapping";
 import {
     EnumLiteralParse,
     ExpressionResult,
@@ -43,6 +48,7 @@ import { lower_enum_literal } from "./core_literals_lowering";
 import {
     coerce_operand_to_type,
     coerce_operand_to_type_with_source,
+    integer_llvm_width,
     load_local_operand
 } from "./core_operands";
 import { parse_member_access } from "./core_parse";
@@ -654,12 +660,33 @@ fn lower_call_expression(target: string, arguments: string[], bindings: Paramete
     let emitted = coerce_and_emit_call(trimmed_target, operands, operand_source_types, expected_params, llvm_return, is_trait_dispatch, is_closure_dispatch, is_array_concat, array_concat_element_type, is_array_push, array_push_element_type, method_operand, helper_descriptor, function_entry, current_temp, current_lines, diagnostics, collected_string_constants, bindings, locals, context);
     if emitted.operand == null { return emitted; }
     if expected_type.length == 0 { return emitted; }
-    let mut return_source_type: string = "";
-    if function_entry != null {
-        if !function_entry.is_async {
-            return_source_type = function_entry.return_type;
+    if function_entry == null { return emitted; }
+    if function_entry.is_async { return emitted; }
+    let return_source_type = function_entry.return_type;
+    // Expected-type propagation reaches every call expression, including
+    // aggregate, generic, async, and signed numeric results. Only consume it
+    // at the SFN-575 boundary: a proven narrow unsigned result widening to a
+    // larger integer, or any proven narrow integer entering the numeric-string
+    // display aggregate (where unsigned chooses `zext` and signed keeps
+    // `sext`). All other call results keep the pre-existing representation and
+    // let their enclosing lowering path handle them.
+    let return_llvm_type = map_type_annotation(return_source_type);
+    let return_width = integer_llvm_width(return_llvm_type);
+    let expected_width = integer_llvm_width(expected_type);
+    let mut should_coerce_narrow_result: boolean = false;
+    if return_width > 0 {
+        if return_width < 64 {
+            if expected_type == "{i8*, i64}" {
+                should_coerce_narrow_result = true;
+            }
+            if !integer_type_is_signed(return_source_type) {
+                if expected_width > return_width {
+                    should_coerce_narrow_result = true;
+                }
+            }
         }
     }
+    if !should_coerce_narrow_result { return emitted; }
     let coerced_result = coerce_operand_to_type_with_source(emitted.operand, return_source_type, expected_type, emitted.temp_index, emitted.lines, true, null);
     let result_diagnostics = extend_string_array(emitted.diagnostics, coerced_result.diagnostics);
     if coerced_result.operand == null {

@@ -90,7 +90,7 @@ test "method base with unresolved bare struct type emits a fatal diagnostic" ![i
     let context = _empty_context();
     let mut lines: string[] = [];
     let locals: LocalBinding[] = [_local_with_annotation("Missing")];
-    let result = lower_call_expression("acct.get_balance", [], [], locals, 0, lines, [], context);
+    let result = lower_call_expression("acct.get_balance", [], [], locals, 0, lines, [], context, "");
     // Without the guard the call would lower `self` with a default/garbage
     // shape; the `[fatal]` diagnostic makes the emit/build gate refuse to
     // write IR instead of producing a miscompile.
@@ -106,7 +106,7 @@ test "method base with generic-instantiation type does not fail closed" ![io] {
     let context = _empty_context();
     let mut lines: string[] = [];
     let locals: LocalBinding[] = [_local_with_annotation("Result<int, Error>")];
-    let result = lower_call_expression("acct.unwrap", [], [], locals, 0, lines, [], context);
+    let result = lower_call_expression("acct.unwrap", [], [], locals, 0, lines, [], context, "");
     assert ! _has_fatal_unresolved_base(result.diagnostics);
 }
 
@@ -118,7 +118,7 @@ test "method base with empty (opacified) annotation does not fail closed" ![io] 
     let context = _empty_context();
     let mut lines: string[] = [];
     let locals: LocalBinding[] = [_local_with_annotation("")];
-    let result = lower_call_expression("acct.compute", [], [], locals, 0, lines, [], context);
+    let result = lower_call_expression("acct.compute", [], [], locals, 0, lines, [], context, "");
     assert ! _has_fatal_unresolved_base(result.diagnostics);
 }
 
@@ -133,7 +133,7 @@ test "method base with interface-typed annotation does not fail closed" ![io] {
     let context = _interface_only_context();
     let mut lines: string[] = [];
     let locals: LocalBinding[] = [_local_with_annotation("Meter")];
-    let result = lower_call_expression("acct.total", [], [], locals, 0, lines, [], context);
+    let result = lower_call_expression("acct.total", [], [], locals, 0, lines, [], context, "");
     assert ! _has_fatal_unresolved_base(result.diagnostics);
 }
 
@@ -150,6 +150,6 @@ test "method base with primitive (string) annotation does not fail closed" ![io]
     let context = _empty_context();
     let mut lines: string[] = [];
     let locals: LocalBinding[] = [_local_with_annotation("string")];
-    let result = lower_call_expression("acct.substring", [], [], locals, 0, lines, [], context);
+    let result = lower_call_expression("acct.substring", [], [], locals, 0, lines, [], context, "");
     assert ! _has_fatal_unresolved_base(result.diagnostics);
 }
