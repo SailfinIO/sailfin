@@ -13,6 +13,9 @@
 #            vs that median, plus a whole-build wall-time budget breach). Cold
 #            start (fewer than N prior runs, or a module lacking N baseline
 #            samples) no-ops cleanly rather than alerting on thin history.
+#            Rows are kind,module,metric,current,comparison,pct; kind is
+#            "rolling-median" or "budget" so reporting preserves which
+#            comparison produced the regression.
 #
 # The accumulating files on the bench-data orphan branch:
 #   compile.csv  run_sha,run_date,module,time_s,peak_kb,ir_lines,status,seed_version
@@ -212,9 +215,9 @@ cmd_compare() {
                 mt = median(wt, N); mp = median(wp, N)
                 ct = tval[ck]; cp = pval[ck]
                 if (mt > 0 && ct > mt * (1 + TH / 100))
-                    printf("%s\ttime_s\t%.4f\t%.4f\t%.1f\n", module, ct, mt, (ct / mt - 1) * 100)
+                    printf("rolling-median\t%s\ttime_s\t%.4f\t%.4f\t%.1f\n", module, ct, mt, (ct / mt - 1) * 100)
                 if (mp > 0 && cp > mp * (1 + TH / 100))
-                    printf("%s\tpeak_kb\t%.0f\t%.0f\t%.1f\n", module, cp, mp, (cp / mp - 1) * 100)
+                    printf("rolling-median\t%s\tpeak_kb\t%.0f\t%.0f\t%.1f\n", module, cp, mp, (cp / mp - 1) * 100)
                 delete tsamp; delete psamp; delete wt; delete wp
             }
         }
@@ -229,7 +232,7 @@ cmd_compare() {
             NR > 1 && $1 == CUR {
                 wall = $3 + 0
                 if (BUD > 0 && wall > BUD)
-                    printf("<whole-build>\tbuild_wall_s\t%.1f\t%.1f\t%.1f\n", wall, BUD, (wall / BUD - 1) * 100)
+                    printf("budget\t<whole-build>\tbuild_wall_s\t%.1f\t%.1f\t%.1f\n", wall, BUD, (wall / BUD - 1) * 100)
             }
         ' "$build_csv" >> "$out"
     fi

@@ -247,7 +247,7 @@ jobs:
             --budget "$BUILD_BUDGET_S" \
             --out regressions.tsv
           count=0
-          [ -s regressions.tsv ] && count=$(cut -f1 regressions.tsv | sort -u | wc -l | tr -d ' ')
+          [ -s regressions.tsv ] && count=$(cut -f2 regressions.tsv | sort -u | wc -l | tr -d ' ')
           echo "modules=$count" >> "$GITHUB_OUTPUT"
           {
             echo "## Perf history — ${{ github.sha }}"
@@ -255,12 +255,12 @@ jobs:
             echo "Clean build wall: ${{ steps.build.outputs.wall_s }}s (budget ${BUILD_BUDGET_S}s)"
             echo ""
             if [ -s regressions.tsv ]; then
-              echo "Regressions (module / metric / current / rolling-median / +%):"
+              echo "Regressions (comparison / module / metric / current / comparison value / +%):"
               echo '```'
               cat regressions.tsv
               echo '```'
             else
-              echo "_No regressions vs the rolling median of the last ${PERF_MIN_RUNS} runs._"
+              echo "_No module regressions or whole-build budget breaches._"
             fi
           } >> "$GITHUB_STEP_SUMMARY"
 
@@ -290,9 +290,9 @@ jobs:
           # any other broad shift (runner class, toolchain, a cross-cutting
           # change).
           modules_file="$(mktemp)"
-          cut -f1 regressions.tsv | grep -vFx '<whole-build>' | sort -u > "$modules_file" || true
+          awk -F'\t' '$1 == "rolling-median" { print $2 }' regressions.tsv | sort -u > "$modules_file"
           module_count="$(grep -c . "$modules_file" || true)"
-          has_wholebuild="$(cut -f1 regressions.tsv | grep -cFx '<whole-build>' || true)"
+          has_wholebuild="$(awk -F'\t' '$1 == "budget" { count++ } END { print count + 0 }' regressions.tsv)"
 
           remaining_file="$(mktemp)"
           if [ "${module_count:-0}" -gt "${PERF_SYSTEMIC_MODULES}" ]; then
@@ -309,7 +309,7 @@ jobs:
               echo ""
               echo "## Regressed modules (${module_count})"
               echo ""
-              awk -F'\t' '$1 != "<whole-build>" { printf "- **%s** / %s: current `%s` vs median `%s` (**+%s%%**)\n", $1, $2, $3, $4, $5 }' regressions.tsv
+              awk -F'\t' '$1 == "rolling-median" { printf "- **%s** / %s: current `%s` vs median `%s` (**+%s%%**)\n", $2, $3, $4, $5, $6 }' regressions.tsv
             } > perf-systemic-body.md
             new_number="$(gh issue create --repo "$REPO" \
               --title "$syn_title" \
@@ -329,8 +329,10 @@ jobs:
           while IFS= read -r module; do
             [ -n "$module" ] || continue
             title="perf regression: ${module}"
+            row_kind="$(awk -F'\t' -v m="$module" '$2 == m { print $1; exit }' regressions.tsv)"
             metrics="$(awk -F'\t' -v m="$module" \
-              '$1==m { printf "- **%s**: current `%s` vs rolling median `%s` (**+%s%%**)\n", $2, $3, $4, $5 }' \
+              '$1 == "rolling-median" && $2 == m { printf "- **%s**: current `%s` vs rolling median `%s` (**+%s%%**)\n", $3, $4, $5, $6 }
+               $1 == "budget" && $2 == m { printf "- **%s**: current `%s s` vs budget `%s s` (**+%s%%**)\n", $3, $4, $5, $6 }' \
               regressions.tsv)"
 
             # Dedup anchor: the `perf-regression` label plus exact title
@@ -344,7 +346,12 @@ jobs:
             {
               echo "**Run:** ${RUN_URL}"
               echo "**Commit:** \`${SHA}\`"
-              echo "**Baseline:** rolling median of the last ${PERF_MIN_RUNS} same-seed runs on \`${DATA_BRANCH}\` (threshold +${PERF_THRESHOLD_PCT}%)"
+              if [ "$row_kind" = "budget" ]; then
+                budget_value="$(awk -F'\t' -v m="$module" '$1 == "budget" && $2 == m { print $5; exit }' regressions.tsv)"
+                echo "**Budget:** SFEP-0006 whole-build budget \`${budget_value} s\`"
+              else
+                echo "**Baseline:** rolling median of the last ${PERF_MIN_RUNS} same-seed runs on \`${DATA_BRANCH}\` (threshold +${PERF_THRESHOLD_PCT}%)"
+              fi
               echo "**Data:** ${data_url}"
               echo ""
               echo "${metrics}"
@@ -357,7 +364,11 @@ jobs:
               {
                 echo "# perf regression: ${module}"
                 echo ""
-                echo "Auto-filed by \`perf-history.yml\` (SFEP-0037 §3.3). \`${module}\` regressed beyond the +${PERF_THRESHOLD_PCT}% threshold vs the rolling median of the last ${PERF_MIN_RUNS} nightly runs. Further regressions for this module aggregate here as comments; see \`docs/perf/bench-history.md\` for how to read \`${DATA_BRANCH}\` and reproduce locally (\`make bench\` / \`make bench-runtime\`)."
+                if [ "$row_kind" = "budget" ]; then
+                  echo "Auto-filed by \`perf-history.yml\` (SFEP-0037 §3.3). The whole-build wall time crossed the SFEP-0006 budget. Further budget breaches aggregate here as comments; see \`docs/perf/bench-history.md\` for how to read \`${DATA_BRANCH}\` and reproduce locally (\`make bench\`)."
+                else
+                  echo "Auto-filed by \`perf-history.yml\` (SFEP-0037 §3.3). \`${module}\` regressed beyond the +${PERF_THRESHOLD_PCT}% threshold vs the rolling median of the last ${PERF_MIN_RUNS} nightly runs. Further regressions for this module aggregate here as comments; see \`docs/perf/bench-history.md\` for how to read \`${DATA_BRANCH}\` and reproduce locally (\`make bench\` / \`make bench-runtime\`)."
+                fi
                 echo ""
                 echo "## Latest measurement"
                 echo ""
