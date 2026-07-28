@@ -528,6 +528,16 @@ here.
   through to array-iteration lowering. Non-zero literal strides, computed
   strides, and array iterables are unchanged. Design note:
   `docs/proposals/design-notes/sfn-526-lowering-fatal-gate-audit.md`.
+- **Native-IR layout parsing fails closed instead of truncating layouts**
+  (`E1005`, SFN-532): malformed `.layout` field, enum-variant, and enum-payload
+  lines now emit a tagged `llvm lowering [fatal] [E1005]` diagnostic that names
+  the enclosing struct or enum and includes the offending line. The parser
+  previously forwarded only untagged leaf diagnostics, dropped the malformed
+  entry, and allowed lowering to continue with wrong field offsets. Well-formed
+  whitespace-bearing generic field and payload types remain valid: their
+  `type=` value ends at the first keyed layout attribute. Well-formed
+  `.sfn-asm` emission is byte-identical. Design note:
+  `docs/proposals/design-notes/sfn-526-lowering-fatal-gate-audit.md`.
 
 ## Feature Matrix
 
@@ -709,7 +719,7 @@ unit; history in the linked issues.
 | Phase-scoped arena reclamation (`compiler/src/arena_relocate.sfn`) | **Shipped** (SFEP-0043, branch `claude/reduce-peak-rss-arena-phase-rewind`) | Takes an arena mark before `parse_program`; after emit produces `native_lines`, joins them to a single flat string via `lines_to_native_text`, relocates that string's data buffer to malloc'd memory via `relocate_string_to_heap` (`compiler/src/arena_relocate.sfn`), rewinds the arena to reclaim the entire AST/typecheck/emit region, lowers via the flat-text entry `write_llvm_ir_from_native_text[_with_context]`, then frees the heap buffer. `import_asm_paths` is allocated below the mark and survives natively. Gated by `SAILFIN_ARENA_PHASE_REWIND` (default ON). Byte-identical `.ll` output confirmed by `compiler/tests/e2e/arena_phase_rewind_ll_identity_test.sfn`; self-hosts clean, no seed cut. **Measured (199 modules, rewind OFF vs ON):** peak RSS 1,211 MB → 1,009 MB (−16.7%); sum of per-module peak RSS 72.4 GB → 56.1 GB (−22.5%); mean 364 MB → 282 MB; wall time neutral (−0.5%). Global win across all pipeline stages (typecheck −26%, parser −28%, effect_checker −27%, lowering −17–23%). Known regressions: `capsule_resolver` +18%, `core_literals_lowering` +8% — front-half modules where copy exceeds reclaimed garbage; neither sets the new peak. |
 | Atomic refcounting (`memory/rc.sfn`) | **Shipped** (M2.3 #395) | drop_fn invocation deferred to destructor synthesis (M2.4/M2.6) |
 | Memory primitives (`memory/mem.sfn`) | **Shipped** (#927) | `get_field`/`copy_bytes`/`bounds_check`/`free`; carries `seed-blocker` |
-| Process spawning (`process.sfn`) | **Shipped** (M2.9 #405) | `posix_spawnp` + `waitpid`; Windows impl is a follow-up |
+| Process spawning (`process.sfn`) | **Shipped** (M2.9 #405) | `posix_spawnp` + `waitpid`; same-generation compiler resolution requires an executable candidate so a sibling `sailfin` cache directory cannot be passed to `run_capture` on native Linux (SFN-579); Windows impl is a follow-up |
 | Type-metadata registry (`type_meta.sfn`) | **Shipped** (M2.10 #402) | Descriptor globals + module-init ctors; value-side tagging deferred |
 | Prelude facade flipped to `sfn_*` symbols | **M2 closed** (M2.12, #407/#408) | Every M2-replaced call lands on the canonical `sfn_*` symbol; M3 lifts the remaining C trampolines |
 | Filesystem adapter wave 1a (`adapters/filesystem.sfn`) | **Shipped** (M3.1a #814) | read/write/append; wave 1b (dir ops, #815) next; bulk C deletion at M3.9 after a seed cut |

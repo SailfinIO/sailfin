@@ -107,12 +107,16 @@ fn _resolve_self_path(binary_dir: string) -> string ![io] {
         // binary as `sailfin.exe` and the suffixless join would miss
         // it (#1482, epic #1485 M2). The Windows variants never match
         // on POSIX (no such file), so the ordering is host-neutral.
-        let names: string[] = ["sailfin", "sailfin.exe", "sfn", "sfn.exe"];
+        // Probe the canonical name before legacy `sailfin`. A POSIX
+        // directory with search permission satisfies access(X_OK), and
+        // self-host work roots contain exactly such a `sailfin` cache
+        // directory beside the published `sfn` binary (SFN-579).
+        let names: string[] = ["sfn", "sfn.exe", "sailfin", "sailfin.exe"];
         let mut i: int = 0;
         loop {
             if i >= names.length { break; }
             let candidate = _path_join(binary_dir, names[i]);
-            if fs.exists(candidate) { return candidate; }
+            if fs.is_executable(candidate) { return candidate; }
             i += 1;
         }
     }

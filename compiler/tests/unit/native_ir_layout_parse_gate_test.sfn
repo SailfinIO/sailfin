@@ -1,0 +1,79 @@
+// compiler/tests/unit/native_ir_layout_parse_gate_test.sfn
+//
+// Regression coverage for SFN-532. A failed layout-entry parse must fail
+// closed where the native-IR parser would otherwise drop that entry.
+import { expect_eq_bool, expect_eq_int } from "sfn/test";
+
+import { parse_native_artifact } from "../../src/native_ir_api";
+
+fn _has_diagnostic(diagnostics: string[], expected: string) -> boolean {
+    let mut index: int = 0;
+    loop {
+        if index >= diagnostics.length { break; }
+        if diagnostics[index] == expected { return true; }
+        index += 1;
+    }
+    return false;
+}
+
+test "native IR layout gate: malformed struct field is fatal" {
+    let malformed_line = ".layout field value type=int offset=oops size=8 align=8";
+    let artifact = ".module demo\n" + ".struct Box\n"
+        + ".layout struct name=Box size=8 align=8\n"
+        + malformed_line
+        + "\n.field value: int\n"
+        + ".endstruct\n";
+    let result = parse_native_artifact(artifact);
+
+    assert expect_eq_int(result.structs.length, 1).ok;
+    assert expect_eq_bool(_has_diagnostic(result.diagnostics, "llvm lowering [fatal] [E1005]: malformed layout field in struct Box: "
+        + malformed_line), true).ok;
+}
+
+test "native IR layout gate: malformed enum variant is fatal" {
+    let malformed_line = ".layout variant Some tag=oops offset=8 size=8 align=8";
+    let artifact = ".module demo\n" + ".enum Option\n"
+        + ".layout enum name=Option size=16 align=8 tag_type=i64 tag_size=8 tag_align=8\n"
+        + malformed_line
+        + "\n.variant Some(value: int)\n"
+        + ".endenum\n";
+    let result = parse_native_artifact(artifact);
+
+    assert expect_eq_int(result.enums.length, 1).ok;
+    assert expect_eq_bool(_has_diagnostic(result.diagnostics, "llvm lowering [fatal] [E1005]: malformed layout variant in enum Option: "
+        + malformed_line), true).ok;
+}
+
+test "native IR layout gate: malformed enum payload is fatal" {
+    let malformed_line = ".layout payload Some.value type=int offset=8 size=oops align=8";
+    let artifact = ".module demo\n" + ".enum Option\n"
+        + ".layout enum name=Option size=16 align=8 tag_type=i64 tag_size=8 tag_align=8\n"
+        + ".layout variant Some tag=1 offset=8 size=8 align=8\n"
+        + malformed_line
+        + "\n.variant Some(value: int)\n"
+        + ".endenum\n";
+    let result = parse_native_artifact(artifact);
+
+    assert expect_eq_int(result.enums.length, 1).ok;
+    assert expect_eq_bool(_has_diagnostic(result.diagnostics, "llvm lowering [fatal] [E1005]: malformed layout payload in enum Option: "
+        + malformed_line), true).ok;
+}
+
+test "native IR layout gate: well-formed spaced types remain diagnostic-free" {
+    let artifact = ".module demo\n" + ".struct Box\n"
+        + ".layout struct name=Box size=8 align=8\n"
+        + ".layout field value type=Result<string, int> offset=0 size=8 align=8\n"
+        + ".field value: Result<string, int>\n"
+        + ".endstruct\n"
+        + ".enum Option\n"
+        + ".layout enum name=Option size=16 align=8 tag_type=i64 tag_size=8 tag_align=8\n"
+        + ".layout variant Some tag=1 offset=8 size=8 align=8\n"
+        + ".layout payload Some.value type=Map<string, Result<int, Error>> offset=8 size=8 align=8\n"
+        + ".variant Some(value: Map<string, Result<int, Error>>)\n"
+        + ".endenum\n";
+    let result = parse_native_artifact(artifact);
+
+    assert expect_eq_int(result.diagnostics.length, 0).ok;
+    assert expect_eq_int(result.structs.length, 1).ok;
+    assert expect_eq_int(result.enums.length, 1).ok;
+}

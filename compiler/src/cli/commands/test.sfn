@@ -2537,7 +2537,7 @@ fn _resolve_test_self_path(binary_dir: string) -> string ![io] {
         loop {
             if i >= names.length { break; }
             let candidate = _path_join_cmd(binary_dir, names[i]);
-            if fs.exists(candidate) { return candidate; }
+            if fs.is_executable(candidate) { return candidate; }
             i += 1;
         }
     }
