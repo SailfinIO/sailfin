@@ -74,14 +74,14 @@ runs:
     # (compiler/src/build_cache.sfn) embeds the real seed/compiler
     # version in the on-disk digest, so a stale-seed entry simply misses.
     - name: Restore seed cache
-      if: ${{ inputs.mode != 'skip-build' && inputs.seed_version != '' && inputs.seed_version != 'latest' }}
+      if: ${{ inputs.mode != 'skip-build' && inputs.target != 'linux-arm64' && inputs.seed_version != '' && inputs.seed_version != 'latest' }}
       uses: actions/cache@v4
       with:
         path: build/toolchains/seed
         key: sailfin-seed-store-${{ inputs.target }}-${{ inputs.seed_version }}
 
     - name: Fetch released seed compiler
-      if: ${{ inputs.mode != 'skip-build' }}
+      if: ${{ inputs.mode != 'skip-build' && inputs.target != 'linux-arm64' }}
       shell: bash {0}
       run: |
         set -euo pipefail
@@ -187,7 +187,7 @@ runs:
         echo "[ci] macOS OpenSSL link path: ${prefix}/lib"
 
     - name: Build native compiler (selfhost from released seed)
-      if: ${{ inputs.mode != 'skip-build' }}
+      if: ${{ inputs.mode != 'skip-build' && inputs.target != 'linux-arm64' }}
       shell: bash {0}
       env:
         GITHUB_TOKEN: ${{ env.GITHUB_TOKEN }}
@@ -237,6 +237,68 @@ runs:
           } >> build/ci-metrics.env
           echo "[ci-metrics] build phase: ${_build_s}s, module-IR cache.hit_rate=${_hit_rate}"
         fi
+
+    # The first aarch64-Linux release cannot use `make fetch-seed`: the
+    # installer correctly selects linux-arm64 on this runner, but that asset is
+    # exactly what this job is producing. Fetch and verify the pinned x86_64
+    # native package explicitly, then run the SFN-472 bootstrap under qemu.
+    - name: Fetch pinned x86_64 seed for aarch64 bootstrap
+      if: ${{ inputs.mode != 'skip-build' && inputs.target == 'linux-arm64' }}
+      id: aarch64_seed
+      shell: bash {0}
+      env:
+        GITHUB_TOKEN: ${{ env.GITHUB_TOKEN }}
+      run: |
+        set -euo pipefail
+        seed_version="${{ inputs.seed_version }}"
+        if [ -z "$seed_version" ] || [ "$seed_version" = "latest" ]; then
+          echo "[aarch64-seed][error] a concrete seed_version is required" >&2
+          exit 1
+        fi
+        asset="sailfin-native-linux-x86_64-${seed_version}.tar.gz"
+        base="https://github.com/${{ inputs.seed_repo }}/releases/download/v${seed_version}"
+        mkdir -p build/aarch64-seed
+        auth=()
+        if [ -n "${GITHUB_TOKEN:-}" ]; then
+          auth=(-H "Authorization: Bearer ${GITHUB_TOKEN}")
+        fi
+        curl --fail --location --retry 3 "${auth[@]}" \
+          "${base}/${asset}" -o "build/aarch64-seed/${asset}"
+        curl --fail --location --retry 3 "${auth[@]}" \
+          "${base}/${asset}.sha256" -o "build/aarch64-seed/${asset}.sha256"
+        expected="$(tr -d '[:space:]' < "build/aarch64-seed/${asset}.sha256")"
+        actual="$(sha256sum "build/aarch64-seed/${asset}" | awk '{print $1}')"
+        if [ "$actual" != "$expected" ]; then
+          echo "[aarch64-seed][error] digest mismatch for ${asset}" >&2
+          exit 1
+        fi
+        tar -xzf "build/aarch64-seed/${asset}" -C build/aarch64-seed
+        seed="$(find build/aarch64-seed -path '*/bin/sfn' -type f -print -quit)"
+        if [ -z "$seed" ]; then
+          echo "[aarch64-seed][error] x86_64 seed binary missing from ${asset}" >&2
+          exit 1
+        fi
+        chmod +x "$seed"
+        qemu-x86_64 "$seed" version
+        echo "path=$seed" >> "$GITHUB_OUTPUT"
+
+    - name: Bootstrap native aarch64 compiler and fixed point
+      if: ${{ inputs.mode != 'skip-build' && inputs.target == 'linux-arm64' }}
+      shell: bash {0}
+      env:
+        SEED_X86_64: ${{ steps.aarch64_seed.outputs.path }}
+        SAILFIN_NATIVE_CC: ${{ inputs.clang }}
+      run: |
+        set -euo pipefail
+        make bootstrap-aarch64-linux
+        rm -rf build/bin build/compiler
+        mkdir -p build/bin build/compiler
+        install -m 755 build/aarch64-bootstrap/pass-2/sfn build/bin/sfn
+        cp -R build/aarch64-bootstrap/pass-2/compiler/import-context \
+          build/compiler/import-context
+        bash scripts/compiler_source_fingerprint.sh compiler/src runtime \
+          > build/.compiler-source-fingerprint
+        build/bin/sfn version
 
     # skip-build mode: the compiler tree was downloaded from the shared
     # per-OS build-compiler artifact instead of being rebuilt here. Verify

@@ -139,6 +139,7 @@ if (allAssets.length === 0) {
   const ghBase = `https://github.com/SailfinIO/sailfin/releases/download/${releaseTag}`;
   allAssets = [
     { file: `sailfin_${releaseVersion}_linux_x86_64.tar.gz`, url: `${ghBase}/sailfin_${releaseVersion}_linux_x86_64.tar.gz`, os: "Linux", arch: "x86_64", friendlyArch: "x86_64", platform: "linux", size: "", sha256: "" },
+    { file: `sailfin_${releaseVersion}_linux_arm64.tar.gz`, url: `${ghBase}/sailfin_${releaseVersion}_linux_arm64.tar.gz`, os: "Linux", arch: "ARM64", friendlyArch: "ARM64", platform: "linux", size: "", sha256: "" },
     { file: `sailfin_${releaseVersion}_macos_arm64.tar.gz`, url: `${ghBase}/sailfin_${releaseVersion}_macos_arm64.tar.gz`, os: "macOS", arch: "ARM64", friendlyArch: "Apple Silicon", platform: "macos", size: "", sha256: "" },
     { file: `sailfin_${releaseVersion}_windows_x86_64.tar.gz`, url: `${ghBase}/sailfin_${releaseVersion}_windows_x86_64.tar.gz`, os: "Windows", arch: "x86_64", friendlyArch: "x86_64", platform: "windows", size: "", sha256: "" },
   ];

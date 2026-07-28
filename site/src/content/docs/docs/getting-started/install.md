@@ -16,14 +16,14 @@ Sailfin runs on the following platforms:
 
 | Platform | Architectures |
 |---|---|
-| Linux | x86_64 |
+| Linux | x86_64, arm64 (aarch64) |
 | macOS | arm64 (Apple Silicon) |
 | Windows | x86_64 |
 
-These are the platform assets published by v0.8.0. The scripts can detect
-additional architectures, but installation stops when the selected release
-does not contain a matching archive. WSL on an x86_64 Windows host uses the
-Linux x86_64 asset; Git Bash installs the Windows x86_64 asset.
+These are the platform assets produced by the release workflow. The scripts can
+detect additional architectures, but installation stops when the selected
+release does not contain a matching archive. WSL on an x86_64 Windows host uses
+the Linux x86_64 asset; Git Bash installs the Windows x86_64 asset.
 
 ### Compiler and linker tools
 
@@ -232,6 +232,7 @@ Examples:
 | Asset name | Platform |
 |---|---|
 | `sailfin_${VERSION}_linux_x86_64.tar.gz` | Linux x86_64 |
+| `sailfin_${VERSION}_linux_arm64.tar.gz` | Linux arm64 (aarch64) |
 | `sailfin_${VERSION}_macos_arm64.tar.gz` | macOS Apple Silicon |
 | `sailfin_${VERSION}_windows_x86_64.tar.gz` | Windows x86_64 |
 
