@@ -54,13 +54,16 @@ import {
     classify_declared_primitive,
     classify_fn_cast,
     clone_bindings,
+    declared_array_marker,
     detect_removed_ai_keyword,
+    element_kind_marks_array,
     find_symbol,
     future_element_kind,
     has_symbol,
     is_builtin_call_name,
     is_function_kind,
     is_identifier_char,
+    make_array_arithmetic_diagnostic,
     make_await_non_future_diagnostic,
     make_channel_send_mismatch_diagnostic,
     make_conditional_branch_mismatch_diagnostic,
@@ -702,6 +705,9 @@ fn check_statement(statement: Statement, ctx: TypeckCtx) -> ScopeResult {
                     elem_kind = make_task_array_element_marker(task_kind);
                 }
             }
+            if elem_kind.length == 0 {
+                elem_kind = declared_array_marker(statement.type_annotation.text);
+            }
         }
         // An unannotated `let mut hs = []` bakes the array's LLVM element type
         // as `double` (empty literal, no inference target); tag it "empty_array"
@@ -711,8 +717,10 @@ fn check_statement(statement: Statement, ctx: TypeckCtx) -> ScopeResult {
         if elem_kind.length == 0 {
             if statement.type_annotation == null {
                 let init = statement.initializer;
-                if init != null && strings_equal(init.variant, "Array") && init.elements.length == 0 {
-                    elem_kind = "empty_array";
+                if init != null && strings_equal(init.variant, "Array") {
+                    if init.elements.length == 0 { elem_kind = "empty_array"; } else {
+                        elem_kind = "array";
+                    }
                 }
             }
         }
@@ -1126,10 +1134,12 @@ fn seed_parameter_scope(signature: FunctionSignature, top_level: SymbolEntry[]) 
 
     for parameter in signature.parameters {
         let mut param_prim: string = "";
+        let mut param_array: string = "";
         if parameter.type_annotation != null {
             param_prim = classify_declared_primitive(parameter.type_annotation.text);
+            param_array = declared_array_marker(parameter.type_annotation.text);
         }
-        let registration = register_local_symbol(bindings, parameter.name, "parameter", parameter.span, param_scope_start, false, false, "", param_prim);
+        let registration = register_local_symbol(bindings, parameter.name, "parameter", parameter.span, param_scope_start, false, false, param_array, param_prim);
         bindings = registration.bindings;
         let mut _ci: int = 0;
         loop {
@@ -1229,10 +1239,12 @@ fn _build_nested_fn_scope(signature: FunctionSignature, ctx: TypeckCtx) -> Scope
     let mut diagnostics: Diagnostic[] = [];
     for parameter in signature.parameters {
         let mut nparam_prim: string = "";
+        let mut nparam_array: string = "";
         if parameter.type_annotation != null {
             nparam_prim = classify_declared_primitive(parameter.type_annotation.text);
+            nparam_array = declared_array_marker(parameter.type_annotation.text);
         }
-        let registration = register_local_symbol(scope, parameter.name, "parameter", parameter.span, param_scope_start, false, false, "", nparam_prim);
+        let registration = register_local_symbol(scope, parameter.name, "parameter", parameter.span, param_scope_start, false, false, nparam_array, nparam_prim);
         scope = registration.bindings;
         let mut _ci: int = 0;
         loop {
@@ -1592,6 +1604,7 @@ fn walk_expression(expression: Expression?, ctx: TypeckCtx) -> Diagnostic[] {
         // rejects exactly the arithmetic the lowerer would fatal on ("ABI
         // primitive mismatch").
         diagnostics = diagnostics.concat(mixed_arithmetic_diagnostics(expression, bindings));
+        diagnostics = diagnostics.concat(array_arithmetic_diagnostics(expression, bindings));
         return diagnostics;
     }
     if expression.variant == "Unary" {
@@ -1665,7 +1678,11 @@ fn walk_expression(expression: Expression?, ctx: TypeckCtx) -> Diagnostic[] {
         loop {
             if _pp >= expression.parameters.length { break; }
             let param = expression.parameters[_pp];
-            let registration = register_local_symbol(body_bindings, param.name, "parameter", param.span, param_scope_start);
+            let mut param_array: string = "";
+            if param.type_annotation != null {
+                param_array = declared_array_marker(param.type_annotation.text);
+            }
+            let registration = register_local_symbol(body_bindings, param.name, "parameter", param.span, param_scope_start, false, false, param_array);
             body_bindings = registration.bindings;
             diagnostics = diagnostics.concat(registration.diagnostics);
             _pp += 1;
@@ -2309,6 +2326,32 @@ fn mixed_arithmetic_diagnostics(expression: Expression, bindings: SymbolEntry[])
     return [make_mixed_arithmetic_diagnostic(lk, rk, op, anchor)];
 }
 
+fn _operand_is_array(expression: Expression?, bindings: SymbolEntry[]) -> boolean {
+    if expression == null { return false; }
+    if strings_equal(expression.variant, "Array") { return true; }
+    if !strings_equal(expression.variant, "Identifier") { return false; }
+    let entry = find_symbol(bindings, expression.name);
+    if entry == null { return false; }
+    return element_kind_marks_array(entry.element_kind);
+}
+
+// Reject only the proven array/array pair. Unknown or mixed shapes remain
+// fail-open so this frontend rule does not invent semantics for pointer
+// arithmetic or partially-inferred expressions.
+fn array_arithmetic_diagnostics(expression: Expression, bindings: SymbolEntry[]) -> Diagnostic[] {
+    let op = expression.operator;
+    let mut is_arith: boolean = false;
+    if strings_equal(op, "+") { is_arith = true; }
+    if strings_equal(op, "-") { is_arith = true; }
+    if strings_equal(op, "*") { is_arith = true; }
+    if strings_equal(op, "/") { is_arith = true; }
+    if strings_equal(op, "%") { is_arith = true; }
+    if !is_arith { return []; }
+    if !_operand_is_array(expression.left, bindings) { return []; }
+    if !_operand_is_array(expression.right, bindings) { return []; }
+    return [make_array_arithmetic_diagnostic(op, expression.span)];
+}
+
 // The monomorphized element kind a `let x = await ch.receive()` initializer
 // yields (#1944): `await` over a channel `receive` is the degenerate
 // pass-through of the channel's element type — the receive already blocks
@@ -2399,6 +2442,9 @@ fn walk_block_expressions(block: Block, ctx: TypeckCtx) -> Diagnostic[] {
                         elem_kind = make_task_array_element_marker(task_kind);
                     }
                 }
+                if elem_kind.length == 0 {
+                    elem_kind = declared_array_marker(statement.type_annotation.text);
+                }
             }
             if elem_kind.length == 0 {
                 let awaited = await_receive_result_kind(statement.initializer, bindings);
@@ -2412,9 +2458,10 @@ fn walk_block_expressions(block: Block, ctx: TypeckCtx) -> Diagnostic[] {
             if elem_kind.length == 0 {
                 if statement.type_annotation == null {
                     let init = statement.initializer;
-                    if init != null && strings_equal(init.variant, "Array")
-                        && init.elements.length == 0 {
-                        elem_kind = "empty_array";
+                    if init != null && strings_equal(init.variant, "Array") {
+                        if init.elements.length == 0 {
+                            elem_kind = "empty_array";
+                        } else { elem_kind = "array"; }
                     }
                 }
             }

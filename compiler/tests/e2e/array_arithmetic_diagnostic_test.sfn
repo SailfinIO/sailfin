@@ -1,0 +1,88 @@
+// SFN-562: array arithmetic must fail in the frontend with a spanned
+// diagnostic, never reach LLVM scalar arithmetic or surface a linker ICE.
+import { find } from "sfn/strings";
+
+fn _sfn_bin() -> string ![io] {
+    let configured = env.get("SAILFIN_BIN");
+    if configured.length > 0 { return configured; }
+    return "build/bin/sfn";
+}
+
+fn _child_env() -> string[] ![io] {
+    let mut values: string[] = [];
+    let path = env.get("PATH");
+    if path.length > 0 { values.push("PATH=" + path); }
+    let home = env.get("HOME");
+    if home.length > 0 { values.push("HOME=" + home); }
+    let tmpdir = env.get("TMPDIR");
+    if tmpdir.length > 0 { values.push("TMPDIR=" + tmpdir); }
+    let scratch = env.get("SAILFIN_TEST_SCRATCH");
+    if scratch.length > 0 {
+        values.push("SAILFIN_TEST_SCRATCH=" + scratch);
+    }
+    return values;
+}
+
+fn _array_add_source(type_name: string, left: string, right: string) -> string {
+    return "fn main() {\n" + "    let xs: " + type_name + "[] = " + left + ";\n"
+        + "    let ys: "
+        + type_name
+        + "[] = "
+        + right
+        + ";\n"
+        + "    let zs: "
+        + type_name
+        + "[] = xs + ys;\n"
+        + "}\n";
+}
+
+fn _struct_add_source() -> string {
+    return "struct Point {\n" + "    x: int;\n" + "}\n\n" + "fn main() {\n"
+        + "    let a: Point = Point { x: 1 };\n"
+        + "    let b: Point = Point { x: 2 };\n"
+        + "    let _ = a + b;\n"
+        + "}\n";
+}
+
+fn _build(source: string, name: string) -> string ![io] {
+    let dir = fs.mkdtemp("sfn-array-arith-");
+    let source_path = dir + "/" + name;
+    let binary_path = dir + "/program";
+    fs.writeFile(source_path, source);
+    let exit = process.run_capture([_sfn_bin(), "build", "-o", binary_path, source_path], _child_env());
+    let out = process.capture_take_stdout();
+    let err = process.capture_take_stderr();
+    let binary_exists = fs.exists(binary_path);
+    let mut result = out + err;
+    if exit == 0 { result = "unexpected zero exit\n" + result; }
+    if binary_exists { result = "unexpected binary\n" + result; }
+    fs.deleteFile(source_path);
+    if binary_exists { fs.deleteFile(binary_path); }
+    fs.removeDirectory(dir);
+    return result;
+}
+
+test "array arithmetic: int[] + int[] reports E0307 at the plus" ![io] {
+    let output = _build(_array_add_source("int", "[1, 2]", "[3, 4]"), "ints.sfn");
+    assert find(output, "unexpected zero exit", 0) < 0;
+    assert find(output, "unexpected binary", 0) < 0;
+    assert find(output, "error[E0307]:", 0) >= 0;
+    assert find(output, "ints:4:24", 0) >= 0;
+    assert find(output, "invalid operand type for instruction", 0) < 0;
+    assert find(output, "internal compiler error", 0) < 0;
+}
+
+test "array arithmetic: string[] + string[] follows the same diagnostic path" ![io] {
+    let output = _build(_array_add_source("string", "[\"a\"]", "[\"b\"]"), "strings.sfn");
+    assert find(output, "error[E0307]:", 0) >= 0;
+    assert find(output, "strings:4:27", 0) >= 0;
+    assert find(output, "invalid operand type for instruction", 0) < 0;
+    assert find(output, "internal compiler error", 0) < 0;
+}
+
+test "aggregate arithmetic: struct + struct is rejected before invalid LLVM emission" ![io] {
+    let output = _build(_struct_add_source(), "structs.sfn");
+    assert find(output, "[E0307]", 0) >= 0;
+    assert find(output, "invalid operand type for instruction", 0) < 0;
+    assert find(output, "internal compiler error", 0) < 0;
+}

@@ -352,7 +352,8 @@ fn parse_expression_bp(state: ExpressionTokens, min_precedence: int) -> Expressi
             left_expression = Expression.Binary {
                 operator: op,
                 left: left_expression,
-                right: rhs_result.expression
+                right: rhs_result.expression,
+                span: source_span_from_tokens([token])
             };
         }
     }

@@ -225,13 +225,15 @@ here.
   Narrows the check≠build gap (#1389) for the wrong-import-depth class
   (e.g. #1952). Scope: only `./`/`../` specs; `sfn/...` and runtime imports
   are unaffected; checked only in `sfn check`, not the build path.
-- **Three more check≠build divergences closed (SFN-385).** A method call on a
+- **Four more check≠build divergences closed (SFN-385, SFN-562).** A method call on a
   primitive receiver that resolves to no primitive method and no in-scope
   free function (`E0012`, e.g. `field.to_uppercase()` on a `string`), an
-  arithmetic op mixing a proven `int` and `float` operand (`E0306`), and a
+  arithmetic op mixing a proven `int` and `float` operand (`E0306`), array
+  arithmetic such as `int[] + int[]` (`E0307`, anchored on the operator;
+  explicit `.concat(...)` remains the concatenation surface), and a
   malformed array-type spelling such as `[int]`/`[]string` (`E0830`,
   canonical form is `T[]`) previously passed `sfn check` and only failed
-  fatally at LLVM lowering; all three now surface as frontend diagnostics
+  fatally at LLVM lowering; all four now surface as frontend diagnostics
   with fix-it hints. Fail-open: each fires only when the frontend can prove
   invalidity, so string methods, imported free functions, canonical `T[]`
   arrays, and same-type/mixed-width integer arithmetic are unaffected.
