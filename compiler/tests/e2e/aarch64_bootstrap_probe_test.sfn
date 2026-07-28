@@ -10,6 +10,21 @@ fn _sfn_bin() -> string ![io] {
     return "build/bin/sfn";
 }
 
+test "aarch64 bootstrap: self path skips sibling sailfin directory (SFN-579)" ![io] {
+    let mut scratch = env.get("SAILFIN_TEST_SCRATCH");
+    if scratch.length == 0 { scratch = "/tmp"; }
+    let root = scratch + "/sfn579-self-path";
+    process.run(["rm", "-rf", root]);
+    fs.createDirectory(root + "/sailfin", true);
+    let copy_exit = process.run(["cp", _sfn_bin(), root + "/sfn"]);
+    assert copy_exit == 0;
+    let exit = process.run_capture([root + "/sfn", "run", "compiler/tests/e2e/fixtures/aarch64_bootstrap_probe.sfn"], process.environ());
+    let stdout = process.capture_take_stdout();
+    let stderr = process.capture_take_stderr();
+    assert exit == 0;
+    assert contains(stdout + stderr, "aarch64 bootstrap probe ok");
+}
+
 test "aarch64 bootstrap: native hazard probe round-trips" ![io] {
     let mut scratch = env.get("SAILFIN_TEST_SCRATCH");
     if scratch.length == 0 { scratch = "/tmp"; }
