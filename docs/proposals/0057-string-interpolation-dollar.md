@@ -1,12 +1,12 @@
 ---
 sfep: 0057
 title: String Interpolation with ${ } (migrating off {{ }})
-status: Accepted
+status: Implemented
 type: language
 created: 2026-07-01
-updated: 2026-07-24
+updated: 2026-07-28
 author: "agent:compiler-architect; human review"
-tracking: SFN-482 (Phases 1–3), SFN-483 (Phase 4)
+tracking: SFN-482 (Phases 1–3), SFN-483 (Phase 4), SFN-576 (literal escape)
 supersedes:
 superseded-by:
 graduates-to: reference/spec/09-strings.md
@@ -441,29 +441,24 @@ release/deprecation-window boundary, not against a seed cut per se.
 
 ## 7. Stage1 readiness mapping
 
-- [ ] Parses — Phase 1 (dual-accept scanner in `core_text.sfn`)
-- [ ] Type-checks / effect-checks — no change required; already agnostic to
+- [x] Parses — Phase 1 (dual-accept scanner in `core_text.sfn`)
+- [x] Type-checks / effect-checks — no change required; already agnostic to
       interpolation delimiter (§4)
-- [ ] Emits valid `.sfn-asm` — no change required; interpolation is resolved
+- [x] Emits valid `.sfn-asm` — no change required; interpolation is resolved
       to ordinary segment-concatenation expressions before IR emission
-- [ ] Lowers to LLVM IR — Phase 1 (`try_lower_interpolated_string_literal`
+- [x] Lowers to LLVM IR — Phase 1 (`try_lower_interpolated_string_literal`
       guard update)
-- [ ] Regression coverage — see §8
-- [ ] Self-hosts — Phase 3 (compiler's own `{{ }}` occurrences migrated;
+- [x] Regression coverage — see §8
+- [x] Self-hosts — Phase 3 (compiler's own `{{ }}` occurrences migrated;
       `make compile` gate)
-- [ ] `sfn fmt --check` clean — run on every file touched in Phase 3
-- [ ] Documented in `docs/status.md` + spec — flip `docs/status.md:496`/
+- [x] `sfn fmt --check` clean — run on every file touched in Phase 3
+- [x] Documented in `docs/status.md` + spec — flip `docs/status.md:496`/
       `:688-690` and rewrite `site/src/content/docs/docs/reference/spec/09-strings.md`
       once Phase 3 lands; Phase 4 removes the "migration planned" language
       entirely
 
-This SFEP stays `Draft` until the design gate is passed; it moves to
-`Accepted` when cleared for implementation, and to `Implemented` only once
-Phase 3 has landed, self-hosted, and the spec/status docs reflect `${ }` as
-the sole documented form (per SFEP-0001 §4, "parsed but not enforced/
-documented" does not qualify as `Implemented` — here the equivalent bar is
-"accepted but the compiler's own source still emits deprecation warnings on
-itself" not qualifying either).
+The delimiter migration, removal gate, and literal escape now meet the Stage1
+bar end to end (SFN-482, SFN-483, SFN-576), so the proposal is Implemented.
 
 ## 8. Test plan
 

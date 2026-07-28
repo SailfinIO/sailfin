@@ -60,7 +60,10 @@ enum Expression {
     // span field stay layout-stable.
     Identifier { name: string, span: SourceSpan? },
     NumberLiteral { value: string },
-    StringLiteral { value: string },
+    // `lexeme` keeps escape intent through AST-to-source emission. The decoded
+    // value alone cannot distinguish `\${` from `\\${` before interpolation
+    // lowering (SFN-576).
+    StringLiteral { value: string, lexeme: string? },
     BooleanLiteral { value: string },
     NullLiteral,
     Unary { operator: string, operand: Expression },

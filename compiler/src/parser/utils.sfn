@@ -105,9 +105,9 @@ fn decode_string_literal_escapes(text: string) -> string {
                 decoded = decoded + "\t";
             } else if escaped == "r" { decoded = decoded + "\r"; } else if escaped == "\"" {
                 decoded = decoded + "\"";
-            } else if escaped == "\\" { decoded = decoded + "\\"; } else {
-                decoded = decoded + escaped;
-            }
+            } else if escaped == "\\" { decoded = decoded + "\\"; } else if escaped == "$" {
+                decoded = decoded + "$";
+            } else { decoded = decoded + escaped; }
             index += 2;
             continue;
         }

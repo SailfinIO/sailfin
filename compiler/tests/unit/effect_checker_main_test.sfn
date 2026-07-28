@@ -57,7 +57,7 @@ fn _build_main_routine(declared_effects: string[]) -> Statement {
         member: "info",
         span: member_span
     };
-    let arg = Expression.StringLiteral { value: "x" };
+    let arg = Expression.StringLiteral { value: "x", lexeme: null };
     let mut args: Expression[] = [];
     args.push(arg);
     let call_expr = Expression.Call {

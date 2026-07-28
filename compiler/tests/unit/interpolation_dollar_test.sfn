@@ -35,6 +35,16 @@ test "interpolation: bare $ not followed by a brace stays literal" {
     assert "Total: $5 for ${name}" == "Total: $5 for world";
 }
 
+test "interpolation: escaped ${ stays literal" {
+    let name = "world";
+    assert "\${name}" == "$" + "{name}";
+    assert "\\${name}" == "\\" + "world";
+}
+
+test "string escapes: unknown escape keeps legacy backslash-drop semantics" {
+    assert "\z" == "z";
+}
+
 test "interpolation: nested braces are matched by depth, not the first }" {
     let boxed = Boxed { a: 7 };
     assert "v=${ (Boxed { a: 7 }).a }" == "v=7";

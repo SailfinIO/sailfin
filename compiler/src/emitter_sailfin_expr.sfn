@@ -44,6 +44,7 @@ fn format_expression(expression: Expression) -> string {
     if expression.variant == "BooleanLiteral" { return expression.value; }
     if expression.variant == "NullLiteral" { return "null"; }
     if expression.variant == "StringLiteral" {
+        if expression.lexeme != null { return expression.lexeme; }
         return quote_string(expression.value);
     }
     if expression.variant == "Unary" {

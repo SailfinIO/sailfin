@@ -250,7 +250,10 @@ fn parse_decorator_argument(tokens: Token[]) -> DecoratorArgument? {
         }
         if _if398 {
             let literal = strip_surrounding_quotes(raw_text);
-            expr = Expression.StringLiteral { value: literal };
+            expr = Expression.StringLiteral {
+                value: literal,
+                lexeme: raw_text
+            };
         } else if raw_text == "true" {
             expr = Expression.BooleanLiteral { value: "true" };
         } else if raw_text == "false" {

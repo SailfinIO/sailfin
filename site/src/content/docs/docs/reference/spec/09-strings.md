@@ -22,10 +22,14 @@ lowers interpolated strings into segment arrays evaluated at runtime.
 `{{ expr }}` has no special meaning and appears verbatim in the output —
 `"{{ name }}"` renders as the literal text `{{ name }}`, not an interpolation.
 
-A literal-`${` escape (`\${`) is **not yet available** — currently `\${`
-drops the backslash and the interpolation still expands — so a string that
-needs a literal `${` should currently be assembled another way (e.g.
-concatenation) rather than relying on an escape.
+A literal-`${` escape (`\${`) produces the two literal characters `${` without
+opening an interpolation. Escaped backslashes compose normally:
+`"\\${name}"` produces a literal backslash followed by the interpolated value.
+
+The recognized string escapes are `\"`, `\\`, `\n`, `\r`, `\t`, and `\$`.
+The `$` escape is only necessary before `{`; a bare `$` is already literal.
+For compatibility, an otherwise unknown escape drops its backslash, so `\z`
+decodes to `z`.
 
 Primitive optional unions such as `int | null` render the active non-null
 payload in direct, flow-narrowed, and match-bound positions.

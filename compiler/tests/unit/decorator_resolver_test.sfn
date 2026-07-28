@@ -53,7 +53,7 @@ fn _decorator(name: string) -> Decorator {
 }
 
 fn _decorator_with_arg(name: string, arg: string) -> Decorator {
-    let literal = Expression.StringLiteral { value: arg };
+    let literal = Expression.StringLiteral { value: arg, lexeme: null };
     let argument = DecoratorArgument { name: null, expression: literal };
     return Decorator { name: name, arguments: [argument] };
 }
