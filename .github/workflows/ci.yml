@@ -828,15 +828,6 @@ jobs:
           set -euo pipefail
           sudo apt-get update
           sudo apt-get install -y --no-install-recommends clang-18 lld llvm-18 libssl-dev
-          mkdir -p build/aarch64-test-bin
-          cat >build/aarch64-test-bin/clang <<'EOF'
-          #!/usr/bin/env bash
-          exec clang-18 --target=aarch64-linux-gnu "$@"
-          EOF
-          chmod +x build/aarch64-test-bin/clang
-          echo "$PWD/build/aarch64-test-bin" >> "$GITHUB_PATH"
-          echo "SAILFIN_LINKER=lld" >> "$GITHUB_ENV"
-          echo "SAILFIN_TARGET_ARCH=aarch64" >> "$GITHUB_ENV"
 
       - name: Download native compiler passes
         uses: actions/download-artifact@v8
@@ -852,6 +843,8 @@ jobs:
           rm -f aarch64-bootstrap-compilers.tar.gz
           cmp build/aarch64-bootstrap/pass-1/sfn build/aarch64-bootstrap/pass-2/sfn
           install -m 755 build/aarch64-bootstrap/pass-2/sfn build/bin/sfn
+          bash scripts/compiler_source_fingerprint.sh compiler/src runtime \
+            > build/.compiler-source-fingerprint
           file build/bin/sfn
           build/bin/sfn version
 
@@ -859,11 +852,13 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
+          # Two test children preserve parallel coverage without letting
+          # nested compiler-build e2e cases overcommit the 16 GiB arm runner.
           make test \
             NATIVE_BIN=build/bin/sfn \
             SAILFIN_CC=/usr/bin/clang-18 \
             TEST_BIN_CACHE_FLAGS=--no-test-cache \
-            TEST_JOBS=4
+            TEST_JOBS=2
 
   # The PR test suite is ~90% of CI wall time and runs serially, so we
   # fan it across per-OS shard legs that run concurrently (Phase 1 of
