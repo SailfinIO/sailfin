@@ -125,19 +125,21 @@ test "struct-sep: struct-string-field read survives function boundary" ![io] {
 
 // Generic-typed field captures the whole type (Result<T, E>) — the inner
 // comma must not be mistaken for a field terminator.
-//
-// `unwrap` returns a literal rather than `box.inner`, and `main` does not
-// construct `Box`, because reading or initializing a `Result<T, E>`-typed
-// field does not lower (SFN-568). `emit native` is gated on LLVM lowerability,
-// while this test pins only `.sfn-asm` rendering of the field separator.
-// Restore those field operations once SFN-568 lands.
 test "struct-sep: generic-typed field captures whole type (Result<T, E>)" ![io] {
-    let source = "struct Box {\n    inner: Result<string, number>,\n    label: string\n}\n\nfn unwrap(box: Box) -> Result<string, number> {\n    return \"hi\";\n}\n\nfn main() {}\n";
+    let source = "struct Box {\n    inner: Result<string, number>,\n    label: string\n}\n\nfn unwrap(box: Box) -> Result<string, number> {\n    return box.inner;\n}\n\nfn main() {}\n";
     let asm = _emit(source, "generic", "native", ".sfn-asm");
     assert asm.length > 0;
     assert contains(asm, ".field inner: Result<string, number>");
     assert contains(asm, ".field label: string");
     assert contains(asm, ".fn unwrap(box: Box) -> Result<string, number>");
+}
+
+// A Result-valued field keeps the constructed pointer-width enum value and
+// member access loads that field rather than fabricating a default.
+test "struct-sep: Result-valued field read round-trips its payload" ![io] {
+    let source = "struct Box {\n    inner: Result<string, number>,\n    label: string\n}\n\nfn unwrap(box: Box) -> Result<string, number> {\n    return box.inner;\n}\n\nfn main() ![io] {\n    let box = Box {\n        inner: Result.Ok { value: \"field-value\" },\n        label: \"box\"\n    };\n    match unwrap(box) {\n        Result.Ok { value } => { print.info(value); },\n        Result.Err { error } => { print.info(error); },\n    }\n}\n";
+    let out = _run(source, "generic_read");
+    assert contains(out, "field-value");
 }
 
 // Nested generic with a lexer-glued `>>` token captures the whole type.

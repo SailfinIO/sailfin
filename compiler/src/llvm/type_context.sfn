@@ -42,11 +42,13 @@ import {
 } from "./types";
 import {
     append_string,
+    ends_with,
     find_last_index_of_char,
     index_of,
     is_simple_identifier,
     number_to_string,
     sanitize_symbol,
+    starts_with,
     string_array_contains,
     trim_text
 } from "./utils";
@@ -228,7 +230,15 @@ fn build_type_context(structs: NativeStruct[], enums: NativeEnum[], interfaces: 
             let layout_field = layout.fields[field_index];
             let mapped = map_struct_field_annotation(layout_field.type_annotation);
             let mut llvm_field_type: string = mapped;
-            if llvm_field_type.length == 0 {
+            let field_annotation = trim_text(layout_field.type_annotation);
+            let result_instantiation = starts_with(field_annotation, "Result<")
+                && ends_with(field_annotation, ">");
+            if result_instantiation {
+                // Generic Result slots are pointer-width in the native layout.
+                // Preserve the actual enum pointer instead of sanitizing the
+                // full annotation into an unsized inline opaque type (SFN-568).
+                llvm_field_type = "%Result*";
+            } else if llvm_field_type.length == 0 {
                 diagnostics.push("llvm lowering: struct `" + definition.name
                     + "` field `"
                     + layout_field.name
