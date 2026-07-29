@@ -48,6 +48,7 @@ import { coerce_operand_to_type, coerce_operand_to_type_with_source } from "./co
 import { parse_member_access } from "./core_parse";
 import { find_local_binding } from "./core_scopes";
 import { find_substring_from, sanitize_symbol } from "./core_text";
+import { lower_mem_footprint_intrinsic } from "./mem_footprint_lowering";
 
 // Slice E.1.5 (#528): if the wrapped diagnostics list contains the ABI
 // primitive mismatch sentinel, return the `llvm lowering [fatal]: ` prefix
@@ -738,6 +739,15 @@ fn coerce_and_emit_call(trimmed_target: string, operands: LLVMOperand[], operand
                 diagnostics: result_diagnostics,
                 string_constants: collected_string_constants
             };
+        }
+    }
+
+    // Darwin process-footprint sentinel (SFN-607, SFEP-0022): the dedicated
+    // lowering helper emits `getpid` + `proc_pid_rusage` only for a Darwin
+    // target and returns an inline zero on Linux or Windows.
+    if helper_descriptor != null {
+        if helper_descriptor.symbol == "sailfin_intrinsic_mem_footprint" {
+            return lower_mem_footprint_intrinsic(result_temp, result_lines, result_diagnostics, collected_string_constants);
         }
     }
 
