@@ -127,6 +127,10 @@ extern fn memcpy(dst: *u8, src: *u8, n: usize) -> *u8;
 
 extern fn strlen(s: *u8) -> usize;
 
+extern fn getenv(name: *u8) -> *u8;
+
+extern fn strcmp(a: *u8, b: *u8) -> i32;
+
 // String-array append (the retired C runtime's `sailfin_runtime.c:
 // sfn_array_push_string` → `sailfin_runtime_append_string_v2`).
 // Stores the `char*` by pointer (no copy) and returns the SfnArray,
@@ -1612,28 +1616,61 @@ fn _framed_find_newline(gb: *GrowBuf) -> i64 {
     return -1;
 }
 
+// Fault-injection seam for the two allocations owned by
+// `_framed_consume`. Production calls still make the same mallocs with
+// the same sizes. A test process can set
+// `SAILFIN_TEST_FRAMED_CONSUME_ALLOC_FAILURE` to `result` or `compact`
+// to fail the matching allocation without starving unrelated runtime
+// allocations.
+fn _framed_consume_alloc(size: usize, phase: i64) -> *u8 {
+    let env_name: string = "SAILFIN_TEST_FRAMED_CONSUME_ALLOC_FAILURE";
+    let requested: *u8 = getenv(env_name as *u8);
+    if requested as i64 != 0 {
+        let result_name: string = "result";
+        let compact_name: string = "compact";
+        if phase == 1 && strcmp(requested, result_name as *u8) == 0 {
+            return null;
+        }
+        if phase == 2 && strcmp(requested, compact_name as *u8) == 0 {
+            return null;
+        }
+    }
+    return malloc(size);
+}
+
 // Hand `ret_len` bytes from the front of the stash to the caller as a
 // fresh NUL-terminated buffer, then drop `consume_len` bytes from the
 // front (`consume_len >= ret_len`: the line case returns `idx` bytes but
 // consumes `idx + 1` to swallow the newline). The unconsumed remainder
 // `[consume_len..len)` is compacted to the front via a temp buffer (two
-// non-overlapping `memcpy`s — there is no `memmove`). `gb.cap` is
+// non-overlapping `memcpy`s — there is no `memmove`). If either allocation
+// fails, the entire stash is dropped: the result-allocation path returns
+// the ordinary empty sentinel (which can itself be null under host OOM),
+// while the compaction path returns the prefix it already copied. In both
+// cases `gb.len == 0`, so callers make forward progress and never observe
+// bytes that were not moved to the front. Mirrors `_pw_framed_consume`
+// (`runtime/sfn/platform/process_windows.sfn`) exactly. `gb.cap` is
 // unchanged, so the +8 slack invariant is preserved (`len` only shrinks).
 fn _framed_consume(gb: *GrowBuf, ret_len: i64, consume_len: i64) -> *u8 {
     let addr: i64 = gb.addr;
     let len: i64 = gb.len;
-    let res: *u8 = malloc((ret_len + 1) as usize);
-    if res as i64 == 0 { return _process_empty_cstr(); }
+    let res: *u8 = _framed_consume_alloc((ret_len + 1) as usize, 1);
+    if res as i64 == 0 {
+        gb.len = 0;
+        return _process_empty_cstr();
+    }
     if ret_len > 0 { memcpy(res, addr as *u8, ret_len as usize); }
     memset((res as i64 + ret_len) as *u8, 0, 1 as usize);
     let rem: i64 = len - consume_len;
     if rem > 0 {
-        let tmp: *u8 = malloc(rem as usize);
-        if tmp as i64 != 0 {
-            memcpy(tmp, (addr + consume_len) as *u8, rem as usize);
-            memcpy(addr as *u8, tmp, rem as usize);
-            free(tmp);
+        let tmp: *u8 = _framed_consume_alloc(rem as usize, 2);
+        if tmp as i64 == 0 {
+            gb.len = 0;
+            return res;
         }
+        memcpy(tmp, (addr + consume_len) as *u8, rem as usize);
+        memcpy(addr as *u8, tmp, rem as usize);
+        free(tmp);
         gb.len = rem;
     } else { gb.len = 0; }
     return res;

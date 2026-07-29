@@ -78,6 +78,10 @@ extern fn memcpy(dst: *u8, src: *u8, n: usize) -> *u8;
 
 extern fn strlen(s: *u8) -> usize;
 
+extern fn getenv(name: *u8) -> *u8;
+
+extern fn strcmp(a: *u8, b: *u8) -> i32;
+
 extern fn exit(code: i32) -> void;
 
 // Materializes a NUL-terminated C string by copying the carried-length bytes
@@ -972,30 +976,61 @@ fn _pw_h_pump(h: *PwProcHandle, want_err: i64, to_eof: i64) -> void ![io] {
     free(buf);
 }
 
+// Fault-injection seam for the two allocations owned by
+// `_pw_framed_consume`. Production calls still make the same mallocs with
+// the same sizes. A test process can set
+// `SAILFIN_TEST_FRAMED_CONSUME_ALLOC_FAILURE` to `result` or `compact`
+// to fail the matching allocation without starving unrelated runtime
+// allocations.
+fn _pw_framed_consume_alloc(size: usize, phase: i64) -> *u8 {
+    let env_name: string = "SAILFIN_TEST_FRAMED_CONSUME_ALLOC_FAILURE";
+    let requested: *u8 = getenv(env_name as *u8);
+    if requested as i64 != 0 {
+        let result_name: string = "result";
+        let compact_name: string = "compact";
+        if phase == 1 && strcmp(requested, result_name as *u8) == 0 {
+            return null;
+        }
+        if phase == 2 && strcmp(requested, compact_name as *u8) == 0 {
+            return null;
+        }
+    }
+    return malloc(size);
+}
+
 // `_pw_framed_consume(gb, ret_len, consume_len)` — hand `ret_len` bytes
 // from the front of the stash to the caller as a fresh NUL-terminated
-// buffer, then drop `consume_len` from the front. The unconsumed
-// remainder is compacted with two NON-OVERLAPPING `memcpy`s through a
-// temp buffer: there is no `memmove` available here, and a single
-// overlapping `memcpy` would be undefined. Mirrors the POSIX
-// `_framed_consume` (`runtime/sfn/process.sfn`) exactly. `gb.cap` is
-// untouched, so the append-side headroom invariant survives (`len` only
-// ever shrinks here).
+// buffer, then drop `consume_len` from the front. The unconsumed remainder
+// is compacted with two NON-OVERLAPPING `memcpy`s through a temp buffer:
+// there is no `memmove` available here, and a single overlapping `memcpy`
+// would be undefined. If either allocation fails, the entire stash is
+// dropped: the result-allocation path returns the ordinary empty sentinel
+// (which can itself be null under host OOM), while the compaction path
+// returns the prefix it already copied. In both cases `gb.len == 0`, so
+// callers make forward progress and never observe bytes that were not moved
+// to the front. Mirrors the POSIX `_framed_consume`
+// (`runtime/sfn/process.sfn`) exactly. `gb.cap` is untouched, so the
+// append-side headroom invariant survives (`len` only ever shrinks here).
 fn _pw_framed_consume(gb: *PwGrowBuf, ret_len: i64, consume_len: i64) -> *u8 {
     let addr: i64 = gb.addr;
     let len: i64 = gb.len;
-    let res: *u8 = malloc((ret_len + 1) as usize);
-    if res as i64 == 0 { return _pw_empty_cstr(); }
+    let res: *u8 = _pw_framed_consume_alloc((ret_len + 1) as usize, 1);
+    if res as i64 == 0 {
+        gb.len = 0;
+        return _pw_empty_cstr();
+    }
     if ret_len > 0 { memcpy(res, addr as *u8, ret_len as usize); }
     memset((res as i64 + ret_len) as *u8, 0, 1 as usize);
     let rem: i64 = len - consume_len;
     if rem > 0 {
-        let tmp: *u8 = malloc(rem as usize);
-        if tmp as i64 != 0 {
-            memcpy(tmp, (addr + consume_len) as *u8, rem as usize);
-            memcpy(addr as *u8, tmp, rem as usize);
-            free(tmp);
+        let tmp: *u8 = _pw_framed_consume_alloc(rem as usize, 2);
+        if tmp as i64 == 0 {
+            gb.len = 0;
+            return res;
         }
+        memcpy(tmp, (addr + consume_len) as *u8, rem as usize);
+        memcpy(addr as *u8, tmp, rem as usize);
+        free(tmp);
         gb.len = rem;
     } else { gb.len = 0; }
     return res;

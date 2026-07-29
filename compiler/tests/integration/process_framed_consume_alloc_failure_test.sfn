@@ -1,0 +1,101 @@
+// Regression for SFN-505: allocation failure in the framed process-read
+// consume path must fail closed instead of leaving a non-empty stash that
+// a drain-to-EOF loop retries forever. The same contract also prevents a
+// failed compaction allocation from relabeling the consumed prefix as the
+// unread remainder.
+//
+// The allocation seam lives in the POSIX runtime function exercised here
+// and is mirrored exactly by the Windows-only runtime module. This test
+// builds a fixture once, then runs it in a fresh process for each failure
+// phase so the seam is scoped to that fixture and never affects the test
+// runner or compiler allocations.
+import { find } from "sfn/strings";
+import { clean_runner_env, nested_runner_scratch, report_child_failure } from "sfn/test";
+
+fn _sfn_bin() -> string ![io] {
+    let configured = env.get("SAILFIN_BIN");
+    if configured.length > 0 { return configured; }
+    return "build/bin/sfn";
+}
+
+fn _fixture_source() -> string {
+    return "fn _drain() -> string ![io] {\n"
+        + "    let id = process.spawn_with_env([\"sh\", \"-c\", \"printf abcdef\"], []);\n"
+        + "    if id == 0 { return \"SPAWN_FAILED\"; }\n"
+        + "    let mut out: string = \"\";\n"
+        + "    let mut spins: int = 0;\n"
+        + "    loop {\n"
+        + "        if process.handle_stdout_at_eof(id) { break; }\n"
+        + "        spins += 1;\n"
+        + "        if spins >= 32 {\n"
+        + "            process.handle_kill(id);\n"
+        + "            let _wait = process.handle_wait(id);\n"
+        + "            return \"SPIN_LIMIT\";\n"
+        + "        }\n"
+        + "        let chunk = process.handle_read_bytes_stdout(id, 3);\n"
+        + "        if chunk.length > 0 { out = out + chunk; }\n"
+        + "    }\n"
+        + "    let exit = process.handle_wait(id);\n"
+        + "    if exit != 0 { return \"CHILD_FAILED\"; }\n"
+        + "    return out;\n"
+        + "}\n\n"
+        + "fn main() -> i32 ![io] {\n"
+        + "    let mode = env.get(\"SAILFIN_TEST_FRAMED_CONSUME_ALLOC_FAILURE\");\n"
+        + "    let out = _drain();\n"
+        + "    if mode == \"result\" {\n"
+        + "        if out != \"\" { print.err(\"result=\" + out); return 11; }\n"
+        + "        print(\"RESULT_OOM_TERMINATED\");\n"
+        + "        return 0;\n"
+        + "    }\n"
+        + "    if mode == \"compact\" {\n"
+        + "        if out != \"abc\" { print.err(\"compact=\" + out); return 12; }\n"
+        + "        print(\"COMPACT_OOM_DROPPED_REMAINDER\");\n"
+        + "        return 0;\n"
+        + "    }\n"
+        + "    return 13;\n"
+        + "}\n";
+}
+
+fn _fixture_env(label: string, mode: string) -> string[] ![io] {
+    let base = clean_runner_env(nested_runner_scratch(label));
+    let mut filtered: string[] = [];
+    let mut i: int = 0;
+    loop {
+        if i >= base.length { break; }
+        if find(base[i], "SAILFIN_TEST_FRAMED_CONSUME_ALLOC_FAILURE=", 0) != 0 {
+            filtered.push(base[i]);
+        }
+        i += 1;
+    }
+    filtered.push("SAILFIN_TEST_FRAMED_CONSUME_ALLOC_FAILURE=" + mode);
+    return filtered;
+}
+
+test "framed consume: allocation failures terminate and never expose uncompacted bytes" ![io] {
+    let scratch = nested_runner_scratch("sfn505-build");
+    fs.createDirectory(scratch, true);
+    let source = scratch + "/framed_consume_alloc_failure_fixture.sfn";
+    let binary = scratch + "/framed_consume_alloc_failure_fixture";
+    fs.writeFile(source, _fixture_source());
+
+    let build_env = clean_runner_env(scratch);
+    let build_exit = process.run_capture([_sfn_bin(), "build", "-o", binary, source], build_env);
+    let build_out = process.capture_take_stdout();
+    let build_err = process.capture_take_stderr();
+    report_child_failure("SFN-505 fixture build", build_exit, build_out, build_err);
+    assert build_exit == 0;
+
+    let result_exit = process.run_capture([binary], _fixture_env("sfn505-result", "result"));
+    let result_out = process.capture_take_stdout();
+    let result_err = process.capture_take_stderr();
+    report_child_failure("SFN-505 result allocation", result_exit, result_out, result_err);
+    assert result_exit == 0;
+    assert find(result_out, "RESULT_OOM_TERMINATED", 0) >= 0;
+
+    let compact_exit = process.run_capture([binary], _fixture_env("sfn505-compact", "compact"));
+    let compact_out = process.capture_take_stdout();
+    let compact_err = process.capture_take_stderr();
+    report_child_failure("SFN-505 compaction allocation", compact_exit, compact_out, compact_err);
+    assert compact_exit == 0;
+    assert find(compact_out, "COMPACT_OOM_DROPPED_REMAINDER", 0) >= 0;
+}
