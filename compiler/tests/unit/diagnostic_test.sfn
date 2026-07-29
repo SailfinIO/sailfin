@@ -7,6 +7,7 @@ import {
     diag_to_legacy_string,
     stamp_spans
 } from "../../src/diagnostic";
+import { append_missing_legacy_lowering_diags, diag_from_legacy_lowering_error } from "../../src/llvm/utils";
 
 fn _diag(severity: string, span: Span?) -> Diag {
     return Diag {
@@ -69,4 +70,50 @@ test "stamp_spans fills only missing spans" {
 test "diag_to_legacy_string preserves lowering spelling" {
     assert diag_to_legacy_string(_diag("error", null)) == "llvm lowering [fatal] [E1003]: unable to lower expression";
     assert diag_to_legacy_string(_diag("note", null)) == "llvm lowering: unable to lower expression";
+}
+
+test "legacy lowering conversion preserves an allocated code" {
+    let diag = diag_from_legacy_lowering_error("llvm lowering [fatal] [E0806]: unsupported atomic operation");
+    assert diag != null;
+    assert diag.code == "E0806";
+    assert diag.message == "unsupported atomic operation";
+    assert diag.stage == "lowering";
+}
+
+test "legacy lowering conversion normalizes interpolation code spelling" {
+    let diag = diag_from_legacy_lowering_error("llvm lowering [fatal]: E0832: interpolation operand is not stringifiable");
+    assert diag != null;
+    assert diag.code == "E0832";
+    assert diag.message == "interpolation operand is not stringifiable";
+}
+
+test "legacy lowering conversion allocates call failures to E1007" {
+    let diag = diag_from_legacy_lowering_error("llvm lowering [fatal]: unable to emit call to unresolved callee");
+    assert diag != null;
+    assert diag.code == "E1007";
+    assert diag.message == "unable to emit call to unresolved callee";
+}
+
+test "legacy lowering conversion uses E1006 for an uncategorized invariant" {
+    let diag = diag_from_legacy_lowering_error("llvm lowering [fatal]: unexpected backend invariant");
+    assert diag != null;
+    assert diag.code == "E1006";
+}
+
+test "legacy lowering conversion ignores non-fatal output" {
+    assert diag_from_legacy_lowering_error("llvm lowering: advisory") == null;
+}
+
+test "legacy lowering reconciliation preserves duplicate fatal multiplicity" {
+    let mut typed: Diag[] = [];
+    typed.push(_diag("error", null));
+    let mut legacy: string[] = [];
+    let rendered = diag_to_legacy_string(_diag("error", null));
+    legacy.push(rendered);
+    legacy.push(rendered);
+
+    let reconciled = append_missing_legacy_lowering_diags(typed, legacy);
+    assert reconciled.length == 2;
+    assert diag_to_legacy_string(reconciled[0]) == rendered;
+    assert diag_to_legacy_string(reconciled[1]) == rendered;
 }

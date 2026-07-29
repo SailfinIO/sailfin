@@ -20,6 +20,7 @@
 // leaking unjoined tasks. Failing closed with a diagnostic is the v0
 // stance (issue #1181); lifting the restriction (emitting the join on
 // every exit edge) is a follow-up.
+import { Diag, diag_to_legacy_string } from "../../diagnostic";
 import { NativeFunction, NativeInstruction } from "../../native_ir";
 import { format_temp_name } from "../expressions_helpers";
 import { make_child_scope_id } from "../lifetime";
@@ -36,7 +37,12 @@ import {
     TryFrameContext,
     TypeContext
 } from "../types";
-import { extend_string_array, number_to_string } from "../utils";
+import {
+    extend_diag_array,
+    extend_string_array,
+    lowering_error_diag,
+    number_to_string
+} from "../utils";
 import { lower_instruction_range } from "./instructions";
 import { emit_scope_drops, extend_lifetime_regions, extend_mutations } from "./instructions_helpers";
 import { get_instruction_tag } from "./lowering_native_helpers";
@@ -102,8 +108,8 @@ fn collect_routine_structure(instructions: NativeInstruction[], start_index: int
 //     itself inside the routine (loop-depth 0).
 // Instructions inside a *nested* routine are skipped — the inner
 // routine's own handler reports them, so each escape is flagged once.
-fn collect_routine_escape_diagnostics(instructions: NativeInstruction[], body_start: int, body_end: int, function_name: string) -> string[] {
-    let mut diagnostics: string[] = [];
+fn collect_routine_escape_diagnostics(instructions: NativeInstruction[], body_start: int, body_end: int, function_name: string) -> Diag[] {
+    let mut diagnostics: Diag[] = [];
     let mut loop_depth: int = 0;
     let mut routine_depth: int = 0;
     let mut index: int = body_start;
@@ -140,34 +146,34 @@ fn collect_routine_escape_diagnostics(instructions: NativeInstruction[], body_st
         }
 
         if _tag == 0 {  // Return
-            diagnostics.push("[fatal] llvm lowering: `return` inside `routine` in `"
-                + function_name
+            let message = "`return` inside `routine` in `" + function_name
                 + "` would exit the nursery before its spawned tasks join; "
                 + "structured concurrency forbids non-local exit from a "
                 + "`routine` (issue #1181) — restructure so the routine "
-                + "completes normally.");
+                + "completes normally.";
+            diagnostics.push(lowering_error_diag("E1011", message, instructions[index].span));
         }
         if _tag == 19 {  // Throw
-            diagnostics.push("[fatal] llvm lowering: `throw` inside `routine` in `"
-                + function_name
+            let message = "`throw` inside `routine` in `" + function_name
                 + "` would exit the nursery before its spawned tasks join; "
                 + "structured concurrency forbids non-local exit from a "
-                + "`routine` (issue #1181).");
+                + "`routine` (issue #1181).";
+            diagnostics.push(lowering_error_diag("E1011", message, instructions[index].span));
         }
         if _tag == 10 {  // Break
             if loop_depth == 0 {
-                diagnostics.push("[fatal] llvm lowering: `break` inside `routine` in `"
-                    + function_name
+                let message = "`break` inside `routine` in `" + function_name
                     + "` targets a loop outside the routine and would exit "
-                    + "the nursery before its spawned tasks join (issue #1181).");
+                    + "the nursery before its spawned tasks join (issue #1181).";
+                diagnostics.push(lowering_error_diag("E1011", message, null));
             }
         }
         if _tag == 11 {  // Continue
             if loop_depth == 0 {
-                diagnostics.push("[fatal] llvm lowering: `continue` inside `routine` in `"
-                    + function_name
+                let message = "`continue` inside `routine` in `" + function_name
                     + "` targets a loop outside the routine and would exit "
-                    + "the nursery before its spawned tasks join (issue #1181).");
+                    + "the nursery before its spawned tasks join (issue #1181).";
+                diagnostics.push(lowering_error_diag("E1011", message, null));
             }
         }
 
@@ -178,6 +184,7 @@ fn collect_routine_escape_diagnostics(instructions: NativeInstruction[], body_st
 
 fn lower_routine_instruction(function: NativeFunction, start_index: int, llvm_return: string, bindings: ParameterBinding[], locals: LocalBinding[], allocas: string[], lines: string[], temp_index: int, block_counter: int, next_local_id: int, next_region_id: int, functions: NativeFunction[], loop_stack: LoopContext[], try_stack: TryFrameContext[], end: int, context: TypeContext, scope_id: string, scope_depth: int, current_label: string) -> BlockLoweringResult ![io] {
     let mut diagnostics: string[] = [];
+    let mut diags: Diag[] = [];
     let mut current_lines: string[] = lines;
     let mut current_allocas: string[] = allocas;
     let mut current_bindings: ParameterBinding[] = bindings;
@@ -202,7 +209,8 @@ fn lower_routine_instruction(function: NativeFunction, start_index: int, llvm_re
     let mut _ed: int = 0;
     loop {
         if _ed >= escape_diagnostics.length { break; }
-        diagnostics.push(escape_diagnostics[_ed]);
+        diags.push(escape_diagnostics[_ed]);
+        diagnostics.push(diag_to_legacy_string(escape_diagnostics[_ed]));
         _ed += 1;
     }
 
@@ -223,6 +231,7 @@ fn lower_routine_instruction(function: NativeFunction, start_index: int, llvm_re
         diagnostics.push(body_result.diagnostics[_bd]);
         _bd += 1;
     }
+    diags = extend_diag_array(diags, body_result.diags);
     lifetime_regions = extend_lifetime_regions(lifetime_regions, body_result.lifetime_regions);
     current_lines = extend_string_array(current_lines, body_result.lines);
     current_allocas = body_result.allocas;
@@ -274,6 +283,7 @@ fn lower_routine_instruction(function: NativeFunction, start_index: int, llvm_re
         temp_index: current_temp,
         block_counter: current_block_counter,
         diagnostics: diagnostics,
+        diags: diags,
         terminated: body_result.terminated,
         next_local_id: current_next_local,
         lifetime_regions: lifetime_regions,

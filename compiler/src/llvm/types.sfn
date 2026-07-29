@@ -3,13 +3,14 @@
 // Struct definitions for the LLVM lowering pass. These types represent
 // intermediate data structures used during the translation from .sfn-asm
 // to LLVM IR.
+import { Diag } from "../diagnostic";
 import {
+    LayoutManifest,
+    NativeEnum,
     NativeFunction,
     NativeInterfaceSignature,
     NativeSourceSpan,
-    NativeEnum,
-    NativeStruct,
-    LayoutManifest
+    NativeStruct
 } from "../native_ir";
 
 // =============================================================================
@@ -133,6 +134,7 @@ struct LoweredLLVMLinesResult {
     lifetime_regions: LifetimeRegionMetadata[];
     capability_manifest: CapabilityManifest;
     string_constants: StringConstant[];
+    diags: Diag[];
 }
 
 struct LayoutManifestApplication {
@@ -152,6 +154,7 @@ struct LoweredLLVMFunction {
     diagnostics: string[];
     lifetime_regions: LifetimeRegionMetadata[];
     string_constants: StringConstant[];
+    diags: Diag[];
 }
 
 struct BodyResult {
@@ -542,6 +545,7 @@ struct ExpressionStatementResult {
     next_region_id: int;
     mutations: LocalMutation[];
     string_constants: StringConstant[];
+    diags: Diag[];
 }
 
 struct LetLoweringResult {
@@ -557,6 +561,7 @@ struct LetLoweringResult {
     next_region_id: int;
     mutations: LocalMutation[];
     string_constants: StringConstant[];
+    diags: Diag[];
 }
 
 struct InlineLetParseResult {
@@ -747,6 +752,7 @@ struct BlockLoweringResult {
     next_index: int;
     mutations: LocalMutation[];
     string_constants: StringConstant[];
+    diags: Diag[];
 }
 
 // =============================================================================
@@ -863,6 +869,7 @@ struct CallSignatureResolution {
 struct FunctionLoweringResult {
     lines: string[];
     diagnostics: string[];
+    diags: Diag[];
 }
 
 // Wraps the output of `build_type_context_with_recovery` for the same
