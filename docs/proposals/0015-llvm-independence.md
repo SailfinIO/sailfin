@@ -6,7 +6,7 @@ type: runtime
 created: 2026-06-05
 updated: 2026-07-29
 author: "agent:compiler-architect"
-tracking: "#1640, #1641"
+tracking: "#1640, #1641, SFN-585"
 supersedes:
 superseded-by:
 graduates-to: reference/runtime-abi.md
@@ -335,6 +335,9 @@ The following identities are unsigned integer handles, not source names:
 | Identity | Scope | Meaning |
 |---|---|---|
 | `SymbolId` | module | One interned Sailfin semantic name. |
+| `DeclarationId` | origin module | One declaration identity assigned during the deterministic declaration-collection pass. |
+| `QualifiedDeclarationId` | consuming module | One interned reference to `(origin module identity, DeclarationId)` for a local or imported declaration. |
+| `TypeConstructorId` | module | One nominal or compiler-intrinsic type constructor; introduced by the post-v0 structured-type extension in §9.2.1. |
 | `TypeId` | module | One structurally interned type. |
 | `EffectSetId` | module | One canonical set of effect atoms. |
 | `CapabilitySetId` | module | One canonical set of capability atoms. |
@@ -383,6 +386,278 @@ definitions in this IR.
 Aggregates, slices, closures, function values, memory operations, exceptions,
 and ownership operations are outside v0. A later version may add them without
 changing the identity, block, metadata, or verifier rules defined here.
+
+### 9.2.1 Structured type expansion (accepted post-v0 contract)
+
+The next type expansion must not extend the scalar mapper with more source-text
+classifiers. It adds structural nodes to the module-owned type graph:
+
+```text
+Type =
+    Unit | Null | Bool | Int | Float | String | Dynamic
+  | Pointer {
+        pointee: TypeId?,
+        permission: ReadOnly | Mutable,
+        address_space: integer
+    }
+  | Reference { referent: TypeId, mutable: boolean }
+  | TypeParameter { owner: QualifiedDeclarationId, index: integer }
+  | Applied { constructor: TypeConstructorId, arguments: TypeId[] }
+  | Union { members: TypeId[] }
+  | Function {
+        parameters: TypeId[],
+        result: TypeId,
+        effects: EffectSetId,
+        call_kind: SailfinValue | CFunction
+    }
+```
+
+`Null` is the absence-value type; it is distinct from `Unit`, which represents
+`void`/no result. `String` is the semantic UTF-8 string type, independent of
+its runtime pointer/length representation. `Dynamic` is the structural carrier
+for the compiler and standard library's transitional `any` surface; it is a
+top/interop type with explicit compatibility rules, not an opaque pointer
+spelling. The ABI adapter owns its erased or boxed representation.
+
+`Pointer` expands the v0 raw machine-address contract with source permission:
+`*T` and accepted `*const T` spellings resolve to `ReadOnly`, while `*mut T`
+resolves to `Mutable`. Its optional pointee remains semantic until the target
+ABI deliberately erases it, and its address space follows §9.2. `Reference` is
+a checked borrow and preserves the semantic distinction between `&T` and
+`&mut T`; neither may be collapsed into `Pointer` merely because all four
+forms are pointer-shaped in a target ABI.
+
+`Applied` is the one representation for nominal and parametric types. A
+non-generic struct, enum, or interface is an application with zero arguments.
+`Array`, `Channel`, `Task`, `Affine`, `Linear`, `PII`, and `Secret` are
+compiler-intrinsic constructors; `Channel<T>` therefore carries `T` as
+`arguments[0]`, never as an `element_kind` string or a `channel:<kind>`
+sentinel. A source alias resolves to its target before interning and does not
+create a distinct `TypeId`. A nominal declaration remains distinct from another
+declaration with the same fields: its `TypeConstructorId`, not its source
+spelling or structural layout, owns that identity. A `TypeConstructorId`
+resolves to either a fixed intrinsic constructor tag or a
+`QualifiedDeclarationId`; a source name is never its identity.
+
+Each constructor descriptor carries an ownership class:
+`Copyable | Affine | Linear`. The intrinsic `Affine<T>` and `Linear<T>`
+wrappers select their corresponding class. To preserve the shipped ownership
+surface, declaration resolution assigns `Affine` to every nominal `OwnedBuf`
+declaration currently recognized by the checker, records its
+`QualifiedDeclarationId` in a bounded compatibility registry, and serializes
+that class with imported declaration metadata. The registry audit covers the
+runtime, capsule, and test declarations that currently rely on name-based
+classification. All other constructors default to `Copyable` unless a later
+language contract adds declaration syntax for ownership. This is the only
+compatibility read of the resolved `OwnedBuf` declaration symbol; ownership
+analysis queries the descriptor after alias resolution and must not recognize
+`OwnedBuf`, `Affine`, or `Linear` from binding annotation text.
+
+`Union` is the structural representation for shipped `A | B` value types.
+Interning flattens nested unions, removes duplicate members, and orders the
+remaining members by canonical structural encoding before hashing. A union
+with one distinct member resolves to that member's `TypeId`; an empty union is
+invalid. Source member order remains available only through provenance.
+Optional syntax `T?` resolves to the same canonical `Union { T, Null }` node as
+the explicit spelling `T | null`; it is not a distinct `Optional<T>`
+constructor.
+Intersection syntax is rejected in value-type resolution as specified by the
+language reference and does not create a structural node.
+
+A generic declaration owns its `TypeParameter` identities by declaration
+identity and zero-based parameter index. A closed specialization is keyed by
+the `QualifiedDeclarationId` plus an ordered `TypeId[]` argument vector.
+Substitution produces structural nodes; it must not rewrite annotation text or
+use a rendered type as a monomorphization key. Bounds constrain which
+applications are admitted but are not part of the identity of a closed
+application.
+
+`Function` owns the semantic callable signature. Parameter and result IDs,
+canonical effect row, and call kind participate in identity. This preserves
+SFEP-0030's rule that two function-value types with unequal effect rows are not
+identical, while effect-row subsumption remains an assignability rule rather
+than identity equality. Capability grants are contextual authority and do not
+participate in function-type identity.
+
+`SailfinValue` denotes the ordinary `fn (A) -> R ![E]` value surface.
+`CFunction` denotes an explicitly C-ABI callable signature. A source
+`* fn (A) -> R` is a `Pointer` whose pointee is a `Function`, but the pointee's
+call kind comes from the resolved declaration/context: ordinary typed Sailfin
+function pointers use `SailfinValue`, while extern/C surfaces use `CFunction`.
+The target adapter selects the platform calling-convention spelling. It must
+not infer the distinction from an LLVM pointer type or merely from the
+presence of a leading `*` in retained source text.
+
+A closure does **not** introduce a distinct semantic type. Named functions and
+capturing or non-capturing closures with the same `SailfinValue` signature have
+the same `TypeId`. A closure value separately records its code `FunctionId` and
+an optional environment-layout identity whose captured fields carry `TypeId`s.
+The hidden environment parameter, uniform `{fn_ptr, env*}` pair, trampoline,
+capture offsets, and environment allocation strategy are ABI/layout data, not
+type identity.
+
+The semantic/ABI ownership line is therefore fixed:
+
+| Semantic type graph | Target ABI/layout adapter |
+|---|---|
+| Nominal constructor and ordered generic arguments | Mangled linker spelling for a specialization |
+| `String`, `Dynamic`, and `Null` semantics | String storage, dynamic boxing/erasure, and null representation |
+| Function parameters, result, effect row, and Sailfin-vs-C call kind | Register classes, hidden environment parameter, trampoline, and LLVM function type |
+| Channel constructor and exact element `TypeId` | Element size/alignment, by-value vs by-reference transfer, and ownership flag |
+| Read-only/mutable raw pointer vs immutable/mutable reference; pointee and address space | Target pointer width and backend spelling |
+| Canonical union member IDs | Tagged-union discriminant and payload layout |
+| Closure's function-value signature | `{fn_ptr, env*}` storage and capture-environment layout |
+
+No target layout fact may create a new semantic `TypeId`, and no backend may
+recover a semantic distinction from a layout fact.
+
+#### Resolution and transport boundary
+
+There is exactly one source-text resolution boundary:
+
+```text
+tokens -> AST TypeAnnotation{text, span}
+       -> resolve_program_types(imported declarations)
+       -> TypeRef{slot, source_span, source_spelling?}
+       -> typecheck/inference -> finalize_type_slots
+       -> .sfn-asm -> typed SSA -> backend
+```
+
+`resolve_program_types` runs after imports and declaration identities are known
+and before any semantic typecheck. It resolves aliases, nominal names, generic
+arguments, unions, raw-pointer permissions, function signatures/effect rows,
+and compiler-intrinsic constructors, interns the result in the source module's
+type table, and attaches `TypeRef`s to every declaration, parameter, binding
+annotation, cast, and type-argument site. Each annotated reference starts with
+`TypeSlot.Resolved(TypeId)`. `source_spelling` is optional diagnostic data. It
+may be rendered in a message, source index, or formatter output; it must never
+decide equality, assignability, dispatch, layout, mangling, or lowering.
+
+Unannotated sites use the same carrier:
+
+```text
+TypeSlot =
+    Resolved(TypeId)
+  | Inference(InferenceVarId)
+  | Error(DiagnosticId)
+```
+
+Typecheck creates an `InferenceVarId` for an unannotated binding, lambda/HOF
+parameter, loop target, empty collection element, or other supported inference
+site, accumulates structural constraints, and resolves the slot by interning
+the inferred structural node in the same module table. This is not a second
+source-text resolution boundary: inference consumes expression/type IDs, never
+annotation spelling. A truly unknown or contradictory slot becomes `Error`;
+it is not a semantic `TypeId`. `finalize_type_slots` runs before `.sfn-asm`
+emission and rejects every live unresolved/error slot that would reach a
+semantic consumer or backend. Existing defaulting (for example an unconstrained
+empty numeric array) is represented as an explicit inference/default rule plus
+provenance, never an `empty_array` string sentinel.
+
+The shipped bare `channel(capacity)` surface likewise starts with an inferred
+element slot. Constraints from a `Channel<T>` target, send, or receive resolve
+it to `T`; if the currently permitted untyped surface remains unconstrained,
+finalization applies the explicit compatibility default `Dynamic`, preserving
+its pointer-width behavior without an empty `element_kind`. A later strict
+channel proposal may remove that default, but this representation migration
+must not silently change the shipped behavior.
+
+The module interner is a service shared by resolution and inference. Each
+distinct structural definition is interned once; the compile-time requirement
+is not that the table is closed before typecheck, but that no later phase
+reparses text or creates duplicate definitions. `LocalBinding`, capture
+records, ownership analysis, and layout all receive the finalized slot/ID.
+
+`.sfn-asm` carries a versioned structural type-table section and refers to its
+entries by ID from functions, parameters, `let` instructions, fields, and
+generic specialization records. Parsing that section reconstructs definitions;
+it does not invoke a source-type parser. The typed-SSA producer may remap
+module-local IDs into the merged module owner by structural interning in
+deterministic module/declaration order. The remap covers qualified
+declarations/type constructors, symbols, effect sets, type parameters, and
+child type IDs before interning the parent. Remapping is not a second
+resolution boundary: it consumes structural definitions and never source text.
+
+Every serialized module records its canonical module/capsule identity and
+declaration table. An import interns a `QualifiedDeclarationId` from the
+origin-module identity and origin `DeclarationId`; same-named declarations from
+different modules therefore remain distinct. Intrinsic constructors use fixed
+tags shared by every module. Merge order can change local numeric handles only
+after a complete owner-aware remap; it cannot change structural equality or
+canonical rendering.
+
+Interning keys use a canonical tagged encoding of the node and the canonical
+identities of its children. Lookup may use a hash table, while the owned table
+and deterministic walk remain the rendering order. A producer visits imported
+modules in the existing deterministic merge order, declarations in source
+order, and child types left-to-right. Equal definitions in one owner receive
+one ID, so equality in typecheck and lowering is an O(1) integer comparison.
+Serialization includes the structural definitions and canonical debug
+renderings, never process addresses or hash-map iteration order.
+
+### 9.2.2 Post-v0 semantic value and operation carriers
+
+The type graph makes structured identities representable; it does not by itself
+give a verifier values or operations to inspect. The post-v0 expansion therefore
+adds these target-neutral carriers before typed SSA claims their verification:
+
+```text
+MakeClosure {
+    signature: TypeId,
+    code: FunctionId,
+    captures: ValueId[]
+} -> Function
+
+IndirectCall {
+    callee: ValueId,
+    signature: TypeId,
+    arguments: ValueId[],
+    effects: EffectSetId,
+    capabilities: CapabilitySetId
+} -> result-or-Unit
+
+ChannelCreate { channel_type: TypeId, capacity: ValueId? } -> Applied(Channel,T)
+ChannelSend { channel: ValueId, value: ValueId } -> Unit
+ChannelReceive { channel: ValueId } -> T
+Spawn {
+    worker: ValueId,
+    signature: TypeId,
+    task_type: TypeId
+} -> Applied(Task,T)
+Await { task_or_receive: ValueId, result_type: TypeId } -> T
+JoinAll { tasks: ValueId, task_array_type: TypeId } -> Applied(Array,T)
+Parallel {
+    workers: ValueId[],
+    signatures: TypeId[],
+    result_type: TypeId
+} -> Dynamic
+```
+
+`MakeClosure.captures` records semantic capture values and their existing
+`ValueId -> TypeId` mapping. It does not record offsets or a target environment
+struct. The ABI adapter derives a separate environment layout and the hidden
+environment parameter from those types. `IndirectCall.signature` must resolve
+to a `Function` whose call kind matches the callee representation. A closure
+pair or ordinary Sailfin function value requires `SailfinValue`; a raw
+`Pointer` may point to either a typed Sailfin signature or `CFunction`, and its
+permission/pointee must agree with the callee's `TypeId`. The target adapter
+then selects the corresponding indirect-call ABI.
+
+`Spawn.task_type` must be `Applied(Task, [T])`, and its worker signature must
+return `T`; the carrier replaces every `spawn:<kind>` encoding. `Await` checks
+`Task<T>` or a channel receive against its explicit result `T`. `JoinAll`
+accepts exactly `Applied(Array, [Applied(Task, [T])])` and returns
+`Applied(Array, [T])`, replacing `taskarr:<kind>`. The currently shipped
+`parallel [...]` surface exposes only an opaque joined-results handle, so its
+carrier result is the explicit transitional `Dynamic` type; each worker
+signature is nevertheless structural, and a later typed result surface must
+replace `Dynamic` with a specified constructor rather than another sentinel.
+
+Until a typed-SSA version admits one of these operations, the versioned
+native-IR type-table verifier owns its structural checks and the typed-SSA
+subset gate rejects that operation. Once admitted, the typed-SSA producer emits
+the carrier and the typed-SSA verifier assumes ownership. There is never a rule
+requiring the v0 verifier to inspect an operation v0 cannot represent.
 
 ### 9.3 Functions, blocks, and values
 
@@ -546,6 +821,29 @@ all of the following hold:
 7. The ordered containers and assigned IDs satisfy the deterministic
    construction rules in §9.7.
 
+The post-v0 structured-type extension adds these fail-closed rules:
+
+8. Every qualified declaration/type constructor and `TypeParameter` owner/index
+   resolves, every `Applied` node satisfies constructor arity, and every
+   `Union` is non-empty and canonically flattened/ordered/deduplicated, and every
+   function signature references valid type and effect-set IDs. A serialized
+   or typed-SSA module contains no inference/error slot; a closed application
+   contains no unresolved type parameter.
+9. Direct calls match the referenced declaration's exact function signature.
+   When the IR version admits `IndirectCall`/`MakeClosure`, those carriers match
+   a `Function` type and preserve its exact canonical effect set. Type identity
+   uses exact effect-set equality; materialization/assignment may apply
+   SFEP-0030 subsumption; a call site is checked against the actual function
+   value row. A closure's code signature matches after the ABI adapter accounts
+   for the hidden environment parameter.
+10. When the IR version admits the channel/concurrency carriers in §9.2.2,
+    construction, send, receive, spawn, await, join-all, and parallel agree on
+    exact channel/task/function/result `TypeId`s. Backend layout compatibility
+    is checked separately and cannot substitute for semantic identity.
+11. A verifier or backend receiving unresolved source type text, an unversioned
+    type-table reference, or a missing type ID rejects the module. There is no
+    text-reparse fallback.
+
 Verification is fail-closed and side-effect free. Diagnostics identify the
 module, function, block, offending ID, and violated invariant. A failed module
 must not reach LLVM rendering, native instruction selection, object emission,
@@ -567,6 +865,12 @@ Intern tables render in canonical structural order. Functions, blocks, and
 instructions render in their owned sequence. Hash-map iteration, filesystem
 enumeration, addresses, thread completion order, and backend-generated names
 must not affect IDs or output.
+
+For the post-v0 nodes in §9.2.1, the renderer spells constructors by qualified
+declaration identity, type parameters by qualified owner and index,
+applications with ordered child IDs, and function types with the canonical
+effect-set ID and call kind. Closure environment layouts render in a separate
+ABI/debug section and never alter the function type's rendering.
 
 Every implementation provides a canonical UTF-8 debug renderer. It is not an
 input language in v0, but identical verified modules must render byte-for-byte
@@ -625,6 +929,17 @@ The next implementation leaf owns four independently testable seams:
    module plus a target profile. Backend-specific operands, types, and
    instructions are created on the consumer side of this boundary.
 
+The structured-type expansion adds four ordered seams:
+
+5. **Front-end resolution boundary:** source annotations resolve once into a
+   module type graph before semantic typecheck.
+6. **Artifact transport:** `.sfn-asm` serializes the graph and references IDs;
+   the native-IR parser reconstructs and validates it without source parsing.
+7. **Semantic consumers:** typecheck symbols, generic specialization, channels,
+   function values, and closures use IDs exclusively.
+8. **ABI consumers:** layout and backend adapters cache target representations
+   by `(TargetProfile, TypeId)` and reject unresolved IDs.
+
 The existing LLVM backend remains the differential oracle. Each construct
 ported to typed SSA uses the same source fixture to produce:
 
@@ -650,6 +965,10 @@ Typed-SSA v0 does not:
 - expose LLVM types, attributes, intrinsics, or instruction strings; or
 - claim the native backend, capability seal, or typed-SSA implementation has
   shipped.
+
+The accepted post-v0 shape in §9.2.1 does not change those v0 claims. It fixes
+the next representation and migration boundary so implementation leaves cannot
+grow another textual type channel while the v0 activation work proceeds.
 
 ---
 
