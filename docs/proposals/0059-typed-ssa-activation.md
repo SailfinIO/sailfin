@@ -4,9 +4,9 @@ title: Typed SSA Activation — Making the Metadata IR Load-Bearing
 status: Accepted
 type: tooling
 created: 2026-07-25
-updated: 2026-07-25
+updated: 2026-07-29
 author: "agent:compiler-architect; project owner (design gate 2026-07-25)"
-tracking: "SFN-508, SFN-509, SFN-511, SFN-512, SFN-514, SFN-517, SFN-519"
+tracking: "SFN-508, SFN-509, SFN-511, SFN-512, SFN-514, SFN-517, SFN-519; structured types: SFN-585, SFN-588–SFN-606"
 supersedes:
 superseded-by:
 graduates-to:
@@ -257,6 +257,151 @@ producer must emit a diagnostic and reject the module. The intersection stands
 only where the manifest *narrows* a grant it does in fact make — scoping a
 granted `io` to a path prefix, say — never where it is absent altogether.
 
+### 3.5 Structured type expansion and string-seam retirement
+
+SFEP-0015 §9.2.1 fixes the post-v0 structural representation and the single
+source-resolution boundary. This section fixes how that boundary coexists with
+the activation strategy here.
+
+The L1 producer's `_map_scalar_type` is a bounded bootstrap seam, not the
+template for aggregate support. It may parse scalar spellings while typed-SSA
+v0 remains declaration-only, but no new function, generic, channel, or closure
+case may be added to it. The structured-type migration retires it by making the
+producer consume the versioned type table serialized in `.sfn-asm`. The
+producer then structurally remaps module-local IDs into its merged module;
+source type parsing remains exclusively in `resolve_program_types` before
+typecheck.
+
+During migration, a record may temporarily carry both `type_id` and retained
+text only within one dependency-ordered leaf. The ID is authoritative, every
+temporary bridge asserts that the ID is the same resolver-produced identity
+carried by the source site's finalized `TypeSlot`, and the leaf names the
+deletion that closes the bridge. It does **not** compare canonical rendering
+byte-for-byte with source spelling: aliases intentionally collapse while the
+original text remains diagnostic provenance. No bridge may choose semantics
+from text when an ID is present. There is no permanent "prefer ID, fall back to
+text" mode and no indefinite dual source of truth.
+
+#### Current semantic sites and named retirement seams
+
+The inventory below is grouped by semantic responsibility rather than by every
+copy helper. A mechanical carrier that only preserves text retires with its
+owning row.
+
+| Order | Current semantic site | Risk carried by text today | Retirement seam |
+|---:|---|---|---|
+| 1 | `ast.sfn::TypeAnnotation.text`; `parser/token_utils.sfn::collect_type_annotation_until` | Parsed spelling is the only annotated-type carrier, including raw-pointer permission and union membership. | Add qualified declaration identities, module `TypeTable`/`TypeSlot`/`TypeRef`, and `resolve_program_types`; resolve `*`/`*const`/`*mut` and canonical unions structurally, keeping text/span only as source provenance. |
+| 2 | Unannotated lets, HOF/lambda parameters, loop targets, and empty arrays in `typecheck_captures.sfn`, `typecheck.sfn`, and `emit_native_format.sfn` | Local inference produces ad-hoc type strings or `empty_array`/empty sentinels after the proposed resolution boundary. | Allocate inference slots, constrain them with structural IDs, intern inferred nodes, default/reject explicitly, and finalize every slot before native emission. |
+| 3 | `typecheck_types.sfn::SymbolEntry.element_kind` / `declared_prim`; `typecheck.sfn` channel, future, task-array, primitive, and generic helpers | Sentinel equality and substring parsing decide assignability, channel sends, await results, and generic construction. | Store finalized IDs on symbols and query `Type`/`Applied` nodes; delete `element_kind`, `taskarr:*`, and primitive-string classifiers. |
+| 4 | `ownership_checker.sfn::{is_owned_type,is_linear_type}` and ownership propagation for annotated/unannotated bindings | `OwnedBuf`, `Affine<T>`, and `Linear<T>` obligations are selected by spelling and separately re-inferred across moves. | Query constructor ownership descriptors plus structural `Reference` nodes; propagate finalized slots/IDs through ownership bindings. |
+| 5 | `typecheck_import_loader.sfn::_native_function_is_tier1_decorator`, `typecheck_imports.sfn::_type_annotation_or_null_from_text`, and imported interface/function signature conversion | Imported parameter/return validity strips spaces, converts annotation text independently, and compares raw native strings. | Import the serialized type/declaration tables; convert and validate every imported signature from structural IDs/constructors, with source text retained only for diagnostics. |
+| 6 | `emit_native_state.sfn`, `emit_native*.sfn`, `native_ir.sfn`, `native_ir_utils_parse.sfn`, and `native_ir_parser*.sfn` | `.sfn-asm` serializes raw annotations on parameters, lets, fields, and layouts, forcing every later consumer to parse again. | Define the versioned `.types` codec, then migrate declarations/instructions/layout carriers to IDs in a separate leaf. Retained debug spelling is non-semantic. |
+| 7 | `llvm/monomorphize.sfn` and type-substitution helpers in `typecheck_types.sfn` | Generic applications are found, substituted, keyed, and mangled with strings. | Key specializations by `(QualifiedDeclarationId, TypeId[])`; substitute `TypeParameter` nodes and render linker names only after specialization identity is fixed. |
+| 8 | `typed_ssa_produce.sfn::_map_scalar_type` and v0 `TssaType` | The producer reparses `.sfn-asm` spelling and cannot represent functions or applications. | Import/remap declarations, constructors, symbols, effect sets, type parameters, and child IDs; extend the model/renderer/verifier before widening the subset gate. |
+| 9 | `llvm/types.sfn::{ParameterBinding, LocalBinding, StructFieldInfo}.type_annotation`; globals and member-resolution carriers | Binding identity, copying, and member resolution repeatedly inspect text. | Thread finalized `TypeId`s through LLVM-side carriers; keep `llvm_type` only as backend output. |
+| 10 | `llvm/type_mapping.sfn::map_type_annotation`, `llvm/type_context*.sfn`, `emit_native_layout.sfn`, and member/literal layout queries | Source parsing and target layout decisions are interleaved and repeated in hot paths. | Add a distinct ABI adapter/cache keyed by `(TargetProfile, TypeId)`; it owns offsets, widths, pointer permissions/backend spellings, tagged-union payloads, and closure/channel layouts. |
+| 11 | `llvm/expression_lowering/native/statement_suspension.sfn::is_mutable_borrow_annotation` | Suspension safety reconstructs `&mut` by stripping annotation text. | Read `Reference.mutable` from the parameter/local `TypeId`; raw pointers remain structurally distinct. |
+| 12 | `emit_native_format.sfn` spawn/channel formatting, `typecheck_types.sfn` task-array markers, `llvm/lowering/{instructions_let,module_globals,emission}.sfn`, and `llvm/expression_lowering/native/{core_scopes,core_concurrency_lowering,core_call_resolution}.sfn` | `channel`, `channel:<kind>`, `spawn:<kind>`, and `taskarr:<kind>` encode identity, element/result width, and dispatch in strings. SFN-434 showed formatter spelling can change behavior. | Migrate channels in one leaf; separately add structural `Spawn`/`Await`/`JoinAll`/`Parallel` carriers over `Task<T>` and function IDs. Ask the ABI adapter for representation and delete every encoded sentinel. |
+| 13 | `typecheck_captures.sfn`, `llvm/expression_lowering/native/{lambda_param_inference,core_call_resolution,core_call_lowering}.sfn`, `llvm/closures.sfn`, and the `__closure__` sentinel | Function and typed-pointer call signatures are inferred/balanced-parsed in several places; closure layout is mistaken for type identity. | First migrate expected-type/effect/call-kind checking to `Function` and `Pointer(Function)` IDs; separately add `MakeClosure`/`IndirectCall` carriers and ABI environment layout. |
+| 14 | Union compatibility in `typecheck*.sfn` and `llvm/type_mapping.sfn::map_union_type` | Top-level `|` splitting separately decides membership and tagged payload layout. | Resolve a canonical flattened/deduplicated/ordered `Union` node; typecheck member IDs structurally and ask the ABI adapter for discriminant/payload layout. |
+
+`symbols_index.sfn`, diagnostics, the formatter, and canonical debug renderers
+may continue to output readable type text. They are projection consumers: they
+must render from the resolved graph or retain source provenance, and their
+output must not flow back into semantic passes.
+
+#### Migration order and activation gates
+
+The implementation leaves follow the table order with four gates:
+
+1. **Resolve text once; infer structurally.** Land qualified identities, the
+   graph/interner, explicit-annotation resolver, and inference slots as separate
+   leaves before migrating a semantic consumer. Formatter variants of the same
+   annotation resolve to the same node/ID; unannotated sites constrain slots
+   with IDs and finalize without synthesizing type text.
+2. **Transport without parsing.** Version `.sfn-asm`, serialize the table, and
+   make the native parser reject missing or malformed IDs. Only then may the
+   typed-SSA producer replace `_map_scalar_type`.
+3. **Move semantic consumers.** Migrate typecheck, captures, ownership/import
+   checks, unions, and generics first; then LLVM carriers, ABI layout,
+   suspension safety, channels, function typing, and closure dispatch. Each
+   slice deletes its local classifier or sentinel and adds a
+   formatter-invariance regression.
+4. **Delete the text lane.** Remove remaining semantic `type_annotation:
+   string` fields, `_map_scalar_type`, channel/task sentinels, duplicate
+   function-type splitters, and type-text substitution. A repository check
+   prevents those names from returning outside parser/provenance/rendering
+   allowlists.
+
+The groomed implementation leaves are dependency-ordered as follows. `Ready`
+means immediately pickable; `Blocked` means fully scoped but held by the named
+predecessor relation, as required by `docs/conventions/linear-templates.md`.
+
+| Issue | Estimate | Initial state | Depends on | Outcome |
+|---|---:|---|---|---|
+| SFN-588 | M | Ready | — | Add the qualified structural type graph, constructor ownership metadata, union node, and deterministic interner. |
+| SFN-597 | M | Blocked | SFN-588 | Resolve explicit annotations, pointer permissions, and unions into `TypeRef`s once. |
+| SFN-598 | M | Blocked | SFN-597 | Constrain and finalize inferred sites to structural IDs. |
+| SFN-589 | M | Blocked | SFN-597, SFN-598 | Carry finalized IDs through typecheck symbols, expression metadata, and union compatibility. |
+| SFN-599 | M | Blocked | SFN-589 | Carry IDs through captures and expected-type state. |
+| SFN-600 | M | Blocked | SFN-589 | Classify ownership, linearity, and references structurally. |
+| SFN-590 | M | Blocked | SFN-588 | Define and validate the versioned structural type-table codec. |
+| SFN-601 | M | Blocked | SFN-590, SFN-597, SFN-598 | Migrate native-IR declarations, instructions, fields, and layouts to IDs. |
+| SFN-605 | M | Blocked | SFN-601 | Convert and validate all imported function/interface signatures by structural identity. |
+| SFN-591 | M | Blocked | SFN-589, SFN-601 | Key generic specialization and substitution by qualified IDs. |
+| SFN-592 | M | Blocked | SFN-601 | Import/remap the graph into typed SSA and extend verifier ownership. |
+| SFN-593 | M | Blocked | SFN-601 | Carry IDs through LLVM bindings and field carriers. |
+| SFN-602 | M | Blocked | SFN-593 | Cache target ABI types, pointer forms, and union layouts by `(TargetProfile, TypeId)`. |
+| SFN-603 | S | Blocked | SFN-593, SFN-600 | Check suspension borrows from structural reference IDs. |
+| SFN-594 | M | Blocked | SFN-589, SFN-599 | Enforce function-value expected types by signature ID. |
+| SFN-604 | M | Blocked | SFN-592, SFN-594, SFN-602 | Lower closure and indirect-call carriers through the ABI adapter. |
+| SFN-595 | M | Blocked | SFN-589, SFN-592, SFN-602 | Remove channel element sentinels and lower admitted channel carriers. |
+| SFN-606 | M | Blocked | SFN-589, SFN-592, SFN-595, SFN-602, SFN-604 | Replace spawn/task/join/parallel sentinels with structural concurrency carriers. |
+| SFN-596 | S | Blocked | SFN-591, SFN-592, SFN-595, SFN-600, SFN-602–SFN-606 | Delete the text lane and enforce the formatter-invariance ratchet. |
+
+The L1/L2/L3 activation layers remain ordered as §3.1 defines. Structured type
+transport widens what the producer can accept, but does not authorize
+per-function fallback, backend text injection, or a mixed typed-SSA/legacy
+module. A widened subset must still produce and verify the whole selected
+module or reject it.
+
+#### Verifier and compile-time contract
+
+`finalize_type_slots` and the versioned native-IR verifier run before any
+structured module reaches a backend. They require:
+
+- every slot is resolved, and every type ID, qualified declaration,
+  constructor, type parameter, and effect row resolves in the correct owner;
+  every closed application satisfies constructor arity;
+- direct calls match the structural function signature; exact canonical effect
+  sets define function-type identity, SFEP-0030 subsumption governs
+  materialization/assignment, and a call site must cover the actual value row;
+- generic specialization keys contain concrete IDs and substitutions leave no
+  unresolved type parameter in a closed body; and
+- imported signature checks, constructor ownership/linearity, raw-pointer
+  permission, union membership, and mutable-reference suspension safety query
+  structural IDs, never retained spelling.
+
+For closures, indirect calls, channels, and structured concurrency, verifier
+ownership follows SFEP-0015 §9.2.2. The native-IR verifier checks the structural
+carriers while typed SSA rejects them as outside its subset. When a later
+typed-SSA version admits `MakeClosure`, `IndirectCall`, `ChannelCreate`,
+`ChannelSend`, `ChannelReceive`, `Spawn`, `Await`, `JoinAll`, or `Parallel`,
+the producer emits that carrier and the typed-SSA verifier takes over exact
+signature, element, task, and result checks. The target adapter separately owns
+ABI/layout validation; layout compatibility never substitutes for semantic
+equality.
+
+Source text is resolved once per annotation. The module interner remains open
+through type inference, but interns each distinct structural definition once.
+After finalization, phases compare IDs in O(1), and target adapters memoize
+layout/type lowering by `(TargetProfile, TypeId)`. Lowering hot paths must not
+call source-type parsers, split generic arguments, normalize formatter
+whitespace, or render a type and parse it back. L2 records resolution count,
+unique intern count, inference-finalization count, and ABI-cache hits so a
+corpus sweep can detect accidental per-use reparsing or reinterning before
+wall-clock noise becomes the only signal.
+
 ## 4. Effect & capability impact
 
 This is the mechanism by which effect and capability metadata first survives
@@ -270,27 +415,37 @@ The producer itself is `![io]`-free at its core (pure `.sfn-asm` text in,
 
 ## 5. Self-hosting impact
 
-No language feature changes, no syntax changes, no parser changes. Every slice
-is an ordinary `compiler/src` change compiled by the currently pinned seed, so
-**no step in this arc requires a seed cut** — the seed must compile the new
-source, not contain the new capability. This is worth stating explicitly because
-the arc has several ordered slices and the ordering could otherwise be
-mistaken for a seed-gated chain (`.claude/rules/seed-dependency.md`).
+Neither the original L1–L3 activation arc nor the structured-type migration
+adds language syntax or requires a seed cut. Every slice is an ordinary
+`compiler/src` change compiled by the currently pinned seed — the seed must
+compile the new source, not contain the new capability. This is worth stating
+explicitly because both arcs are dependency-ordered and could otherwise be
+mistaken for seed-gated chains (`.claude/rules/seed-dependency.md`).
 
-The one real self-hosting risk is concentrated in the first slice: importing
-`typed_ssa*.sfn` from `main.sfn` causes those ~2,360 lines to be lowered to
-LLVM IR for the first time. The subtree's own header comments document two
+The original activation arc's first self-hosting risk comes from importing
+`typed_ssa*.sfn` from `main.sfn`, which causes those ~2,360 lines to be lowered
+to LLVM IR for the first time. The subtree's own header comments document two
 #1389-class hazards it was written to avoid (`.push` on a struct-field array;
 `.push` inside a struct-method body). `sfn check` cannot detect a recurrence —
 only `make compile` can. The first slice must therefore budget for fixing
 lowering failures in already-merged code, and `make compile` is a hard
 acceptance criterion for it.
 
-Pipeline stages touched: **`.sfn-asm` consumption** (new `typed_ssa_produce`),
-**CLI** (`cli/commands/emit.sfn`, a new `cli/commands/dev_typed_ssa.sfn`), and
-**module wiring** (`main.sfn`). The LLVM lowering path is untouched until L3,
-and even then only through the existing `lower_to_llvm_ir_from_text` entry
-point.
+For that original arc, pipeline stages touched are **`.sfn-asm` consumption**
+(new `typed_ssa_produce`), **CLI** (`cli/commands/emit.sfn`, a new
+`cli/commands/dev_typed_ssa.sfn`), and **module wiring** (`main.sfn`). Its LLVM
+lowering path is untouched until L3, and even then only through the existing
+`lower_to_llvm_ir_from_text` entry point.
+
+The structured-type migration in §3.5 has a broader but leaf-bounded
+self-hosting surface: AST type carriers and post-import resolution, inference
+and typecheck state, ownership/import checks, native-IR serialization and
+verification, typed-SSA import, and LLVM binding/ABI consumers. Its principal
+risks are a partially migrated dual source of truth, unresolved inference slots
+crossing native emission, owner-ID remap collisions, and target layouts being
+cached under the wrong type. The dependency gates and per-leaf `make compile`
+checks keep each risk out of downstream phases until its authoritative carrier
+and verifier are present.
 
 ## 6. Alternatives considered
 
@@ -356,14 +511,40 @@ with the explicit entry condition in §3.1.
 - `compiler/tests/e2e/typed_ssa_roundtrip_exec_test.sfn` — L3: a scalar fixture
   built through the round trip and run, compared against the direct build's
   exit status and stdout.
+- `compiler/tests/unit/type_resolution_test.sfn` — compact/canonical formatter
+  variants, nested function/generic/channel applications, nominal identity,
+  effect-row identity, immutable/mutable references, ownership wrappers,
+  read-only/mutable raw pointers, `String`/`Dynamic`/`Null`, canonical unions,
+  `T?` identity with `T | null`, aliases retained as provenance,
+  unannotated/inferred slots, and deterministic interning.
+- `compiler/tests/e2e/typed_ssa_structured_types_test.sfn` — `.sfn-asm`
+  type-table round-trip, malformed-ID rejection, generic substitution, channel
+  element equality, structural spawn/task/await/join-all/parallel carriers,
+  post-v0 carrier gating, and closure-signature ABI verification.
+- `compiler/tests/e2e/type_formatter_invariance_test.sfn` — compile the same
+  function/generic/channel/closure fixture before and after `sfn fmt`; compare
+  canonical type tables and observable behavior.
+- Multi-module fixtures give two same-named declarations distinct qualified
+  identities and round-trip imported decorator signatures structurally.
+- Capture/ownership fixtures cover unannotated lets, HOF parameters, loop
+  targets, empty-array defaulting, `OwnedBuf`/`Affine<T>`/`Linear<T>`, and an
+  `&mut T` parameter live across suspension.
+- Union fixtures cover reordered/duplicated/nested members, aliases,
+  same-named imported members, compatibility, and tagged ABI layout.
+- A repository check rejects new semantic reads of annotation text and encoded
+  `channel:` / `spawn:` / `taskarr:` sentinels outside the temporary migration
+  allowlist.
 
 ## 9. References
 
 - SFEP-0015 §8 (staged roadmap), §9 (Typed SSA v0 normative contract), §9.5
-  (metadata), §9.7 (determinism), §9.9 (implementation and differential seams),
-  §9.10 (v0 non-goals), §12 (ordered workstreams).
+  (metadata), §9.2.1 (structured type expansion), §9.7 (determinism), §9.9
+  (implementation and differential seams), §9.10 (v0 non-goals), §12 (ordered
+  workstreams).
 - SFEP-0016 §3, §4 (why metadata must survive lowering).
+- SFEP-0030 §3.5 / §4 (function-value effect-row identity and closure ABI).
 - SFN-452 (contract), SFN-454 (core + verifier + renderer).
+- SFN-434 / PR #2681 (formatter spelling changed typed-channel lowering).
 - `compiler/src/tensor_ir_link_harness.sfn` — prior art for making a partial IR
   execute through the existing lowering path.
 - `.claude/rules/seed-dependency.md` — why this arc's ordering is not seed-gated.
