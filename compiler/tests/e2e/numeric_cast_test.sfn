@@ -315,10 +315,12 @@ test "string-cast: i8 → string widens via sext then stringifies (#1587)" ![io]
     assert contains(body, "insertvalue {i8*, i64}");
 }
 
-test "string-cast: bool → string widens via zext then stringifies (#1587)" ![io] {
+test "string-cast: bool → string selects true/false text (SFN-554)" ![io] {
     let body = _emit_body("fn label(x: bool) -> string { return x as string; }", "define {i8*, i64} @label", "bool_to_string");
     assert body.length > 0;
-    assert contains(body, "zext i1 %x to i64");
+    assert contains(body, "store [5 x i8] c\"true\\00\"");
+    assert contains(body, "store [6 x i8] c\"false\\00\"");
+    assert contains(body, "select i1 %x");
     assert contains(body, "insertvalue {i8*, i64}");
 }
 

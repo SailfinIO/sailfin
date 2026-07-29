@@ -667,22 +667,11 @@ fn coerce_operand_to_string(operand: LLVMOperand, temp_index: int, lines: string
                 string_constants: empty_constants
             };
         }
-        let select_temp = format_temp_name(false_lit.temp_index);
-        let mut out_lines = append_string(false_lit.lines, "  " + select_temp
-            + " = select i1 "
-            + operand.value
-            + ", i8* "
-            + true_lit.operand.value
-            + ", i8* "
-            + false_lit.operand.value);
-        let out_operand = LLVMOperand { llvm_type: "i8*", value: select_temp };
-        return ExpressionResult {
-            lines: out_lines,
-            temp_index: false_lit.temp_index + 1,
-            operand: out_operand,
-            diagnostics: [],
-            string_constants: empty_constants
-        };
+        // SFN-554: literals lower to `{i8*, i64}` aggregates, so select their
+        // data and length fields together. Selecting the aggregate SSA names
+        // as `i8*` produced invalid LLVM whenever boolean interpolation was
+        // compiled.
+        return select_string_aggregate(operand, true_lit.operand, false_lit.operand, false_lit.temp_index, false_lit.lines);
     }
 
     // SFN-408: a primitive-element array operand (`{ T*, i64, i64 }*`)

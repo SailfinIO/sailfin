@@ -46,16 +46,13 @@ let t = true;
 
 let a = "n=" + n;       // "n=42"
 let b = "f=" + f;       // "f=1.5"
-let c = "t=" + t;       // "t=1"
+let c = "t=" + t;       // "t=true"
 let d = n + " items";   // "42 items" -- works with the string on either side
 ```
 
-This is defined as sugar for `string + (x as string)` — the same
-`number.to_string` lowering the `as string` cast uses — so the two can never
-diverge. **Booleans render `"1"`/`"0"`, not `"true"`/`"false"`**, matching the
-`as string` cast rather than string interpolation's `"true"`/`"false"`
-rendering (see above). This is easy to get wrong when porting code from
-interpolation to concatenation — check for it explicitly.
+This is defined as sugar for `string + (x as string)` — the same display
+lowering the `as string` cast uses — so the two cannot diverge. Booleans render
+`"true"`/`"false"` through concatenation, `as string`, and interpolation.
 
 Indexing a string still yields a single-character string (`s[i]`), not a
 numeric code point, so concatenating an indexed character (`"c=" + s[1]`)

@@ -1373,13 +1373,12 @@ fn coerce_pointer_or_struct(operand: LLVMOperand, operand_type: string, target: 
         // numeric operand (narrow ints, `bool`, `f32`) previously fell
         // through to the "unable to coerce" diagnostic and a null operand,
         // which `lower_cast_expression` defaults to `double 0.0` — so
-        // `x as string` silently lowered to "0". Widen each to the `i64` /
-        // `double` an arm above already stringifies, then recurse so the
-        // widened operand reuses the existing number→string + length
-        // recovery chain. Mirrors the `coerce_operand_to_string` precedent
-        // (core_strings.sfn). Signed widening (`sext`) matches the `i64`
-        // arm's `sitofp`; the source-level signed/unsigned cast matrix is a
-        // separate Slice D follow-up (out of scope per the issue).
+        // `x as string` silently lowered to "0". Narrow numeric values widen
+        // to the `i64` / `double` an arm above already stringifies, while
+        // booleans take the direct text-materialization arm below. Signed
+        // widening (`sext`) matches the `i64` arm's `sitofp`; the source-level
+        // signed/unsigned cast matrix is a separate Slice D follow-up (out of
+        // scope per the issue).
         let mut _is_narrow_int: boolean = false;
         if operand_type == "i32" { _is_narrow_int = true; }
         if operand_type == "i16" { _is_narrow_int = true; }
@@ -1411,34 +1410,75 @@ fn coerce_pointer_or_struct(operand: LLVMOperand, operand_type: string, target: 
             }
         }
         if operand_type == "i1" {
-            // No runtime bool→string helper exists, and a `true`/`false`
-            // string literal would need the `string_constants` table that
-            // only `ExpressionResult` carries (not `CoercionResult`), so
-            // emit decimal `0`/`1` via the i64 chain — the issue sanctions
-            // 0/1 text for this arm.
-            let widened = format_temp_name(temp_index);
-            current_lines.push("  " + widened + " = zext i1 " + operand.value
-                + " to i64");
-            let widened_operand = LLVMOperand {
-                llvm_type: "i64",
-                value: widened
-            };
-            let rec = coerce_pointer_or_struct(widened_operand, "i64", target, temp_index
-                + 1, current_lines);
-            if rec != null {
-                let mut _rd_i: int = 0;
-                loop {
-                    if _rd_i >= rec.diagnostics.length { break; }
-                    diagnostics.push(rec.diagnostics[_rd_i]);
-                    _rd_i += 1;
-                }
-                return CoercionResult {
-                    lines: rec.lines,
-                    temp_index: rec.temp_index,
-                    operand: rec.operand,
-                    diagnostics: diagnostics
-                };
+            // SFN-554: display booleans as `true`/`false`, matching string
+            // interpolation. Materialize both literals through the arena and
+            // select their data/length pair because this coercion layer cannot
+            // return the `string_constants` side table used by other literal
+            // lowering paths.
+            let true_size = LLVMOperand { llvm_type: "i64", value: "5" };
+            let true_alloc = emit_runtime_call("alloc_struct", [true_size], empty_runtime_call_overrides(), temp_index, current_lines);
+            let mut _true_di: int = 0;
+            loop {
+                if _true_di >= true_alloc.diagnostics.length { break; }
+                diagnostics.push(true_alloc.diagnostics[_true_di]);
+                _true_di += 1;
             }
+            current_lines = true_alloc.lines;
+            let true_data = format_temp_name(temp_index);
+            let true_array = format_temp_name(temp_index + 1);
+            current_lines.push("  " + true_array + " = bitcast i8* " + true_data
+                + " to [5 x i8]*");
+            current_lines.push("  store [5 x i8] c\"true\\00\", [5 x i8]* "
+                + true_array);
+
+            let false_size = LLVMOperand { llvm_type: "i64", value: "6" };
+            let false_alloc = emit_runtime_call("alloc_struct", [false_size], empty_runtime_call_overrides(), temp_index
+                + 2, current_lines);
+            let mut _false_di: int = 0;
+            loop {
+                if _false_di >= false_alloc.diagnostics.length { break; }
+                diagnostics.push(false_alloc.diagnostics[_false_di]);
+                _false_di += 1;
+            }
+            current_lines = false_alloc.lines;
+            let false_data = format_temp_name(temp_index + 2);
+            let false_array = format_temp_name(temp_index + 3);
+            current_lines.push("  " + false_array + " = bitcast i8* "
+                + false_data
+                + " to [6 x i8]*");
+            current_lines.push("  store [6 x i8] c\"false\\00\", [6 x i8]* "
+                + false_array);
+
+            let selected_data = format_temp_name(temp_index + 4);
+            current_lines.push("  " + selected_data + " = select i1 " + operand.value
+                + ", i8* "
+                + true_data
+                + ", i8* "
+                + false_data);
+            let selected_length = format_temp_name(temp_index + 5);
+            current_lines.push("  " + selected_length + " = select i1 "
+                + operand.value
+                + ", i64 4, i64 5");
+            let aggregate_data = format_temp_name(temp_index + 6);
+            current_lines.push("  " + aggregate_data
+                + " = insertvalue {i8*, i64} undef, i8* "
+                + selected_data
+                + ", 0");
+            let aggregate = format_temp_name(temp_index + 7);
+            current_lines.push("  " + aggregate + " = insertvalue {i8*, i64} "
+                + aggregate_data
+                + ", i64 "
+                + selected_length
+                + ", 1");
+            return CoercionResult {
+                lines: current_lines,
+                temp_index: temp_index + 8,
+                operand: LLVMOperand {
+                    llvm_type: "{i8*, i64}",
+                    value: aggregate
+                },
+                diagnostics: diagnostics
+            };
         }
         if operand_type == "float" {
             let widened = format_temp_name(temp_index);
