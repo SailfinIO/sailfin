@@ -9,6 +9,7 @@ WORK_DIR="${SAILFIN_AARCH64_BOOTSTRAP_DIR:-$ROOT/build/aarch64-bootstrap}"
 SEED_X86_64="${SEED_X86_64:-${1:-}}"
 QEMU_X86_64="${QEMU_X86_64:-qemu-x86_64}"
 NATIVE_CC="${SAILFIN_NATIVE_CC:-clang}"
+BINFMT_DIR="${SAILFIN_BINFMT_DIR:-/proc/sys/fs/binfmt_misc}"
 
 fail() {
 	printf '[bootstrap-aarch64][error] %s\n' "$*" >&2
@@ -18,6 +19,57 @@ fail() {
 need() {
 	command -v "$1" >/dev/null 2>&1 || fail "required command not found: $1"
 }
+
+# Probe the registration entries by name and never read the two control nodes.
+# `register` is created write-only (S_IWUSR, no read handler), so reading it
+# always fails: EACCES for an unprivileged runner, EINVAL for root. A probe
+# that hands the whole directory to one `grep` therefore inherits grep's exit
+# status 2 no matter what it matched, and under `pipefail` that turns a
+# successful match into "not registered" — which rejected every host where
+# qemu-x86_64 was already enabled in the kernel.
+x86_64_binfmt_registered() {
+	local entry name
+
+	# binfmt_misc can be mounted with dispatch globally disabled, in which
+	# case an enabled entry still never fires.
+	if [ -r "$BINFMT_DIR/status" ] && ! grep -qx enabled "$BINFMT_DIR/status"; then
+		return 1
+	fi
+
+	for entry in "$BINFMT_DIR"/*; do
+		[ -f "$entry" ] && [ -r "$entry" ] || continue
+		name="${entry##*/}"
+		case "$name" in
+			register | status) continue ;;
+		esac
+		grep -qx enabled "$entry" || continue
+		case "$name" in
+			*x86_64* | *x86-64*) return 0 ;;
+		esac
+		if grep -Eq '^interpreter[[:space:]].*(x86_64|x86-64)' "$entry"; then
+			return 0
+		fi
+	done
+	return 1
+}
+
+binfmt_entries() {
+	ls "$BINFMT_DIR" 2>/dev/null | tr '\n' ' '
+}
+
+# Regression seam: run only the probe, against SAILFIN_BINFMT_DIR, and report
+# the verdict as the exit status. The gate itself is reachable on an aarch64
+# host with a live binfmt_misc mount; this keeps its logic coverable from a
+# test on any Linux host.
+if [ "${SAILFIN_BINFMT_PROBE_ONLY:-0}" = "1" ]; then
+	if x86_64_binfmt_registered; then
+		printf '[bootstrap-aarch64] x86_64 binfmt registration detected in %s\n' "$BINFMT_DIR"
+		exit 0
+	fi
+	printf '[bootstrap-aarch64] no usable x86_64 binfmt registration in %s (entries: %s)\n' \
+		"$BINFMT_DIR" "$(binfmt_entries)"
+	exit 1
+fi
 
 [ "$(uname -s)" = "Linux" ] || fail "this bootstrap must run on Linux"
 case "$(uname -m)" in
@@ -39,8 +91,46 @@ SEED_VERSION="$(awk '/^\[[^]]+\]/ { section=$0 } section == "[seed]" && /^versio
 # Compiler builds recursively execute their current compiler. The seed and
 # compiler A are x86_64 executables, so binfmt_misc must cover those child
 # invocations even though the top-level commands below name qemu explicitly.
-[ -d /proc/sys/fs/binfmt_misc ] || fail "binfmt_misc is not mounted"
-if ! find /proc/sys/fs/binfmt_misc -maxdepth 1 -type f -exec grep -l 'x86_64\|x86-64' {} + 2>/dev/null | grep -q .; then
+#
+# Probe the registration entries by name and never read the two control nodes.
+# `register` is created write-only (S_IWUSR, no read handler), so reading it
+# always fails: EACCES for an unprivileged runner, EINVAL for root. A probe
+# that hands the whole directory to one `grep` therefore inherits grep's exit
+# status 2 no matter what it matched, and under `pipefail` that turned a
+# successful match into "not registered" — the gate rejected hosts where
+# qemu-x86_64 was already enabled in the kernel.
+x86_64_binfmt_registered() {
+	local entry name
+
+	# binfmt_misc can be mounted with dispatch globally disabled, in which
+	# case an enabled entry still never fires.
+	if [ -r "$BINFMT_DIR/status" ] && ! grep -qx enabled "$BINFMT_DIR/status"; then
+		return 1
+	fi
+
+	for entry in "$BINFMT_DIR"/*; do
+		[ -f "$entry" ] && [ -r "$entry" ] || continue
+		name="${entry##*/}"
+		case "$name" in
+			register | status) continue ;;
+		esac
+		grep -qx enabled "$entry" || continue
+		case "$name" in
+			*x86_64* | *x86-64*) return 0 ;;
+		esac
+		if grep -Eq '^interpreter[[:space:]].*(x86_64|x86-64)' "$entry"; then
+			return 0
+		fi
+	done
+	return 1
+}
+
+binfmt_entries() {
+	ls "$BINFMT_DIR" 2>/dev/null | tr '\n' ' '
+}
+
+[ -d "$BINFMT_DIR" ] || fail "binfmt_misc is not mounted at $BINFMT_DIR"
+if ! x86_64_binfmt_registered; then
 	printf '[bootstrap-aarch64] enabling qemu-x86_64 binfmt registration\n'
 	if [ "$(id -u)" -eq 0 ] && command -v update-binfmts >/dev/null 2>&1; then
 		update-binfmts --enable qemu-x86_64
@@ -49,9 +139,8 @@ if ! find /proc/sys/fs/binfmt_misc -maxdepth 1 -type f -exec grep -l 'x86_64\|x8
 	else
 		fail "cannot register x86_64 binfmt non-interactively; install qemu-user-binfmt and run: sudo update-binfmts --enable qemu-x86_64"
 	fi
-fi
-if ! find /proc/sys/fs/binfmt_misc -maxdepth 1 -type f -exec grep -l 'x86_64\|x86-64' {} + 2>/dev/null | grep -q .; then
-	fail "x86_64 binfmt registration is still unavailable after update-binfmts"
+	x86_64_binfmt_registered \
+		|| fail "x86_64 binfmt registration is still unavailable after update-binfmts (entries: $(binfmt_entries))"
 fi
 
 rm -rf "$WORK_DIR"
