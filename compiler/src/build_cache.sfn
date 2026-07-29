@@ -850,7 +850,7 @@ fn cache_store_artifact(root: string, key: CacheKey, kind: string, src_path: str
         if strings_equal(kind, "ll") {
             let ledger = _get_env_cmd("SAILFIN_EMIT_LEDGER");
             if ledger.length > 0 {
-                fs.appendFile(ledger, key.digest + "\n");
+                if !fs.appendFile(ledger, key.digest + "\n") { return false; }
             }
         }
     }

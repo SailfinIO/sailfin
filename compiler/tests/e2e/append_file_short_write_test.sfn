@@ -1,0 +1,73 @@
+// Regression guard for SFN-577: append reports a short write while
+// preserving the file and all content that preceded the append.
+import { starts_with } from "sfn/strings";
+import { clean_runner_env, nested_runner_scratch, report_child_failure } from "sfn/test";
+
+fn _sfn_bin() -> string ![io] {
+    let configured = env.get("SAILFIN_BIN");
+    if configured.length > 0 { return configured; }
+    return "build/bin/sfn";
+}
+
+fn _child_env() -> string[] ![io] {
+    return clean_runner_env(nested_runner_scratch("append-short-write"));
+}
+
+test "fs.appendFile reports a short write without deleting existing content" ![io] {
+    let scratch = env.get("SAILFIN_TEST_SCRATCH") + "/append-short-write";
+    let probe = scratch + "/probe.sfn";
+    let bin = scratch + "/probe";
+    let target = scratch + "/existing.txt";
+    fs.createDirectory(scratch, true);
+    fs.writeFile(probe, "fn main() -> int ![io] {\n"
+        + "    let mut payload = \"\";\n"
+        + "    let mut i = 0;\n"
+        + "    loop {\n"
+        + "        if i >= 65536 { break; }\n"
+        + "        payload = payload + \"A\";\n"
+        + "        i = i + 1;\n"
+        + "    }\n"
+        + "    if fs.appendFile(\""
+        + target
+        + "\", payload) { print(\"APPEND_OK\"); }\n"
+        + "    else { print(\"APPEND_FAILED\"); }\n"
+        + "    return 0;\n"
+        + "}\n");
+
+    let build_rc = process.run_capture([_sfn_bin(), "build", probe, "-o", bin], _child_env());
+    let build_out = process.capture_take_stdout();
+    let build_err = process.capture_take_stderr();
+    report_child_failure("append short-write probe build", build_rc, build_out, build_err);
+    assert build_rc == 0;
+
+    // Calibrate the effective limit with printable bytes: file-limit blocks
+    // vary between 512 and 1024 bytes, and a NUL-filled sentinel would read
+    // back as a prematurely terminated string.
+    let sentinel = scratch + "/sentinel";
+    let sentinel_rc = process.run_capture(["bash", "-c", "ulimit -f 8; trap '' XFSZ; yes AAAAAAAA | head -c 65536 > \""
+        + sentinel
+        + "\"; true"], _child_env());
+    let _sentinel_out = process.capture_take_stdout();
+    let _sentinel_err = process.capture_take_stderr();
+    assert sentinel_rc == 0;
+    let cap = fs.readFile(sentinel).length;
+    if cap == 0 || cap >= 65548 {
+        assert true;
+        return;
+    }
+
+    fs.writeFile(target, "PREEXISTING\n");
+    let run_rc = process.run_capture(["bash", "-c", "ulimit -f 8; trap '' XFSZ; \""
+        + bin
+        + "\""], _child_env());
+    let run_out = process.capture_take_stdout();
+    let run_err = process.capture_take_stderr();
+    report_child_failure("append short-write capped run", run_rc, run_out, run_err);
+    assert run_rc == 0;
+
+    let body = fs.readFile(target);
+    assert body.length >= 12;
+    assert starts_with(body, "PREEXISTING\n");
+    assert body.length <= cap;
+    assert run_out == "APPEND_FAILED\n";
+}
