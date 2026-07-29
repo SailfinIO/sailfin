@@ -584,13 +584,15 @@ fn save_result(path: string, data: string) ![io] {
 
 ---
 
-#### `fs.appendFile(path: string, content: string) ![io]`
+#### `fs.appendFile(path: string, content: string) -> boolean ![io]`
 
-Append `content` to the file at `path`. If the file does not exist it is created. Existing content is preserved; the new content is added at the end.
+Append `content` to the file at `path`. If the file does not exist it is created. Existing content is preserved; the new content is added at the end. Returns `true` when the entire payload is written and flushed, or `false` when opening, writing, or closing the file fails. A failed append never deletes the file, though a prefix of the new content may have been appended before the failure.
 
 ```sfn
 fn log_to_file(path: string, message: string) ![io] {
-    fs.appendFile(path, message + "\n");
+    if !fs.appendFile(path, message + "\n") {
+        print.err("failed to append log entry");
+    }
 }
 ```
 

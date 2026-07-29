@@ -502,22 +502,25 @@ fn sfn_fs_write_file(path: *u8, contents: *u8) -> void ![io] {
 // `sfn_fs_append_file(path, contents)` — append the full payload of
 // `contents` to `path` in binary append mode (`"ab"`), creating the
 // file if absent. Same pure-Sailfin `fopen` + `fwrite` + `fclose`
-// shape, immediate-codepoint C fallback, and safety contract as
-// `sfn_fs_write_file` above.
-fn sfn_fs_append_file(path: *u8, contents: *u8) -> void ![io] {
-    if path as i64 == 0 { return; }
-    if contents as i64 == 0 { return; }
+// shape and immediate-codepoint C fallback as `sfn_fs_write_file`
+// above. Returns false on an open, short-write, or flush failure;
+// unlike the fresh-artifact write-lines path, append never unlinks a
+// file because it may contain content that predates this call.
+fn sfn_fs_append_file(path: *u8, contents: *u8) -> bool ![io] {
+    if path as i64 == 0 { return false; }
+    if contents as i64 == 0 { return false; }
 
     let mut real: *u8 = contents;
     if _fs_is_immediate(contents) { real = _fs_decode_immediate(contents); }
 
     let mode_str: string = "ab";
     let f: *File = fopen(path, mode_str as *u8);
-    if f as i64 == 0 { return; }
+    if f as i64 == 0 { return false; }
 
     let len: i64 = strlen(real) as i64;
-    let _ = _fs_fwrite_all(real, len, f);
-    fclose(f);
+    let written = _fs_fwrite_all(real, len, f);
+    let close_rc = fclose(f);
+    return written == len && close_rc == 0;
 }
 
 // `sfn_fs_delete(path)` — remove the file named by `path`. Pure

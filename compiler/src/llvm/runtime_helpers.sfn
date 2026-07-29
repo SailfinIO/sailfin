@@ -1027,10 +1027,10 @@ fn _rh_descriptors_06(descriptors_in: RuntimeHelperDescriptor[]) -> RuntimeHelpe
         target: "fs.writeFile", symbol: "sfn_fs_write_file", return_type: "void", parameter_types: ["i8*", "i8*"], effects: ["io.fs"], native_signature: "sfn_fs_write_file", c_abi_return_type: null
     });
     descriptors = append_runtime_helper(descriptors, RuntimeHelperDescriptor {
-        target: "fs_append_file", symbol: "sfn_fs_append_file", return_type: "void", parameter_types: ["i8*", "i8*"], effects: ["io.fs"], native_signature: "sfn_fs_append_file", c_abi_return_type: null
+        target: "fs_append_file", symbol: "sfn_fs_append_file", return_type: "i1", parameter_types: ["i8*", "i8*"], effects: ["io.fs"], native_signature: "sfn_fs_append_file", c_abi_return_type: null
     });
     descriptors = append_runtime_helper(descriptors, RuntimeHelperDescriptor {
-        target: "fs.appendFile", symbol: "sfn_fs_append_file", return_type: "void", parameter_types: ["i8*", "i8*"], effects: ["io.fs"], native_signature: "sfn_fs_append_file", c_abi_return_type: null
+        target: "fs.appendFile", symbol: "sfn_fs_append_file", return_type: "i1", parameter_types: ["i8*", "i8*"], effects: ["io.fs"], native_signature: "sfn_fs_append_file", c_abi_return_type: null
     });
     descriptors = append_runtime_helper(descriptors, RuntimeHelperDescriptor {
         target: "fs_write_lines", symbol: "sfn_fs_write_lines", return_type: "void", parameter_types: ["i8*", "{ i8**, i64, i64 }*"], effects: ["io.fs"], native_signature: "sfn_fs_write_lines", c_abi_return_type: null
