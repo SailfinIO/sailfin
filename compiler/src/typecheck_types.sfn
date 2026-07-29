@@ -84,6 +84,10 @@ struct SymbolEntry {
     // "float" | "boolean"), or "" for anything compound/unannotated/user-typed.
     // Fail-open sentinel "" — a use-site check must stay silent on "" (SFN-385).
     declared_prim: string;
+    // The exact explicit type annotation when it resolved to a struct in the
+    // binding's declaration scope, or "" otherwise. This is proof metadata,
+    // not inferred type state; use-site checks stay silent on "" (SFN-584).
+    declared_struct: string;
 }
 
 struct SymbolCollectionResult {
@@ -574,6 +578,24 @@ fn make_array_arithmetic_diagnostic(op: string, span: SourceSpan?) -> Diagnostic
         severity: "error",
         message: "operator `" + op
             + "` is not defined for array operands; use `.concat(...)` for array concatenation",
+        file_path: "",
+        primary: token_from_name(op, span),
+        suggestion: null
+    };
+}
+
+// E0308: arithmetic operators have no language-defined meaning for structs.
+// The caller proves both operands are explicitly typed bindings whose
+// annotations resolve to top-level struct declarations (SFN-584).
+fn make_struct_arithmetic_diagnostic(left_type: string, right_type: string, op: string, span: SourceSpan?) -> Diagnostic {
+    return Diagnostic {
+        code: "E0308",
+        severity: "error",
+        message: "operator `" + op + "` is not defined for struct operands `"
+            + left_type
+            + "` and `"
+            + right_type
+            + "`",
         file_path: "",
         primary: token_from_name(op, span),
         suggestion: null
@@ -2676,7 +2698,7 @@ fn check_type_parameters(type_parameters: TypeParameter[], interfaces: Statement
 // compiler's own LLVM lowering uses the pattern e.g.
 // `compiler/src/llvm/lowering/instructions_loops.sfn:492,597`). Other kinds
 // (function/struct/enum/interface/type/test) keep the duplicate diagnostic.
-fn register_local_symbol(bindings: SymbolEntry[], name: string, kind: string, span: SourceSpan?, scope_start: int, is_generic: boolean = false, is_c_abi: boolean = false, element_kind: string = "", declared_prim: string = "") -> ScopeResult {
+fn register_local_symbol(bindings: SymbolEntry[], name: string, kind: string, span: SourceSpan?, scope_start: int, is_generic: boolean = false, is_c_abi: boolean = false, element_kind: string = "", declared_prim: string = "", declared_struct: string = "") -> ScopeResult {
     if !strings_equal(kind, "variable") {
         if has_symbol_in_range(bindings, name, scope_start) {
             return ScopeResult {
@@ -2686,7 +2708,7 @@ fn register_local_symbol(bindings: SymbolEntry[], name: string, kind: string, sp
         }
     }
 
-    let updated = append_symbol(bindings, name, kind, span, is_generic, is_c_abi, element_kind, declared_prim);
+    let updated = append_symbol(bindings, name, kind, span, is_generic, is_c_abi, element_kind, declared_prim, declared_struct);
     return ScopeResult { bindings: updated, diagnostics: [] };
 }
 
@@ -2704,10 +2726,10 @@ fn register_symbol(name: string, kind: string, span: SourceSpan?, existing: Symb
     };
 }
 
-fn append_symbol(symbols: SymbolEntry[], name: string, kind: string, span: SourceSpan?, is_generic: boolean = false, is_c_abi: boolean = false, element_kind: string = "", declared_prim: string = "") -> SymbolEntry[] {
+fn append_symbol(symbols: SymbolEntry[], name: string, kind: string, span: SourceSpan?, is_generic: boolean = false, is_c_abi: boolean = false, element_kind: string = "", declared_prim: string = "", declared_struct: string = "") -> SymbolEntry[] {
     let mut updated: SymbolEntry[] = clone_bindings(symbols);
     updated.push(SymbolEntry {
-        name: name, kind: kind, span: span, is_generic: is_generic, is_c_abi: is_c_abi, element_kind: element_kind, declared_prim: declared_prim
+        name: name, kind: kind, span: span, is_generic: is_generic, is_c_abi: is_c_abi, element_kind: element_kind, declared_prim: declared_prim, declared_struct: declared_struct
     });
     return updated;
 }

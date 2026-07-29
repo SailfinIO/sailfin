@@ -1,4 +1,4 @@
-// Unit tests for the SFN-385 check/build divergence closures: three
+// Unit tests for the SFN-385/SFN-584 check/build divergence closures: four
 // static-analysis diagnostics that make `sfn check` reject programs that
 // previously checked green but only failed at `sfn build` (or lowering).
 //
@@ -7,6 +7,7 @@
 // - E0830 — a malformed array type spelling (`[int]` or `[]string`
 //   instead of the canonical `int[]` / `string[]`).
 // - E0306 — arithmetic mixing a proven `int` and `float` operand.
+// - E0308 — arithmetic on two named, explicitly typed struct operands.
 //
 // These parse a small `.sfn` source through `parse_program` and run
 // `typecheck_diagnostics` end-to-end, asserting on the `Diagnostic.code`
@@ -136,6 +137,171 @@ test "frontend-rejection: accepts typed-var plus numeric-literal arithmetic" ![i
     let program = parse_program(source);
     let diagnostics = typecheck_diagnostics(program);
     assert ! _has_code(diagnostics, "E0306");
+}
+
+// -------------------------------------------------------------------
+// E0308 — arithmetic on proven struct operands.
+// -------------------------------------------------------------------
+test "frontend-rejection: rejects named Point+Point arithmetic at the operator (E0308)" ![io] {
+    let source = "struct Point { x: int; } "
+        + "fn main() -> int { let a: Point = Point { x: 1 }; "
+        + "let b: Point = Point { x: 2 }; let c = a + b; return 0; }";
+    let program = parse_program(source);
+    let diagnostics = typecheck_diagnostics(program);
+    let mut found: Diagnostic? = null;
+    let mut i: int = 0;
+    loop {
+        if i >= diagnostics.length { break; }
+        if strings_equal(diagnostics[i].code, "E0308") {
+            found = diagnostics[i];
+            break;
+        }
+        i += 1;
+    }
+    assert found != null;
+    assert found.primary != null;
+    assert strings_equal(found.primary.lexeme, "+");
+}
+
+test "frontend-rejection: inferred struct bindings stay silent for E0308" ![io] {
+    let source = "struct Point { x: int; } "
+        + "fn main() -> int { let a = Point { x: 1 }; "
+        + "let b = Point { x: 2 }; let c = a + b; return 0; }";
+    let program = parse_program(source);
+    let diagnostics = typecheck_diagnostics(program);
+    assert ! _has_code(diagnostics, "E0308");
+}
+
+test "frontend-rejection: rejects named generic struct arithmetic (E0308)" ![io] {
+    let source = "struct Box<T> { value: T; } "
+        + "fn main() -> int { let a: Box<int> = Box<int> { value: 1 }; "
+        + "let b: Box<int> = Box<int> { value: 2 }; let c = a + b; return 0; }";
+    let program = parse_program(source);
+    let diagnostics = typecheck_diagnostics(program);
+    assert _has_code(diagnostics, "E0308");
+}
+
+test "frontend-rejection: rejects explicitly typed top-level struct arithmetic (E0308)" ![io] {
+    let source = "struct Point { x: int; } "
+        + "let a: Point = Point { x: 1 }; let b: Point = Point { x: 2 }; "
+        + "fn main() -> int { let c = a + b; return 0; }";
+    let program = parse_program(source);
+    let diagnostics = typecheck_diagnostics(program);
+    assert _has_code(diagnostics, "E0308");
+}
+
+test "frontend-rejection: forward struct declaration proves top-level arithmetic" ![io] {
+    let source = "let a: Point = Point { x: 1 }; let b: Point = Point { x: 2 }; "
+        + "let c = a + b; struct Point { x: int; } fn main() -> int { return 0; }";
+    let program = parse_program(source);
+    let diagnostics = typecheck_diagnostics(program);
+    assert _has_code(diagnostics, "E0308");
+}
+
+test "frontend-rejection: top-level value and type duplicate stays E0001 in either order" ![io] {
+    let function_first = parse_program("fn Point() -> int { return 0; } struct Point { x: int; }");
+    let struct_first = parse_program("struct Point { x: int; } fn Point() -> int { return 0; }");
+    assert _has_code(typecheck_diagnostics(function_first), "E0001");
+    assert _has_code(typecheck_diagnostics(struct_first), "E0001");
+}
+
+test "frontend-rejection: rejects explicitly typed struct parameters (E0308)" ![io] {
+    let source = "struct Point { x: int; } "
+        + "fn add(a: Point, b: Point) -> int { let c = a + b; return 0; }";
+    let program = parse_program(source);
+    let diagnostics = typecheck_diagnostics(program);
+    assert _has_code(diagnostics, "E0308");
+}
+
+test "frontend-rejection: rejects explicitly typed struct lambda parameters (E0308)" ![io] {
+    let source = "struct Point { x: int; } "
+        + "fn main() -> int { let f = fn(a: Point, b: Point) -> int { "
+        + "let c = a + b; return 0; }; return 0; }";
+    let program = parse_program(source);
+    let diagnostics = typecheck_diagnostics(program);
+    assert _has_code(diagnostics, "E0308");
+}
+
+test "frontend-rejection: value local named Point does not hide struct proof" ![io] {
+    let source = "struct Point { x: int; } "
+        + "fn main() -> int { let Point: int = 0; "
+        + "let a: Point = Point { x: 1 }; let b: Point = Point { x: 2 }; "
+        + "let c = a + b; return 0; }";
+    let program = parse_program(source);
+    let diagnostics = typecheck_diagnostics(program);
+    assert _has_code(diagnostics, "E0308");
+}
+
+test "frontend-rejection: lambda value parameter named Point does not hide struct proof" ![io] {
+    let source = "struct Point { x: int; } "
+        + "fn main() -> int { let f = fn(Point: int, a: Point, b: Point) -> int { "
+        + "let c = a + b; return 0; }; return 0; }";
+    let program = parse_program(source);
+    let diagnostics = typecheck_diagnostics(program);
+    assert _has_code(diagnostics, "E0308");
+}
+
+test "frontend-rejection: nested function named Point does not hide struct proof" ![io] {
+    let source = "struct Point { x: int; } fn outer() -> int { "
+        + "fn Point() -> int { return 0; } "
+        + "fn add(a: Point, b: Point) -> int { let c = a + b; return 0; } "
+        + "return 0; }";
+    let program = parse_program(source);
+    let diagnostics = typecheck_diagnostics(program);
+    assert _has_code(diagnostics, "E0308");
+}
+
+test "frontend-rejection: generic struct arrays stay on E0307, not E0308" ![io] {
+    let source = "struct Box<T> { value: T; } "
+        + "fn main() -> int { let a: Box<int>[] = []; "
+        + "let b: Box<int>[] = []; let c = a + b; return 0; }";
+    let program = parse_program(source);
+    let diagnostics = typecheck_diagnostics(program);
+    assert _has_code(diagnostics, "E0307");
+    assert ! _has_code(diagnostics, "E0308");
+}
+
+test "frontend-rejection: function type parameter shadowing a struct stays silent for E0308" ![io] {
+    let source = "struct T { value: int; } "
+        + "fn add<T>(a: T, b: T) -> int { let c = a + b; return 0; }";
+    let program = parse_program(source);
+    let diagnostics = typecheck_diagnostics(program);
+    assert ! _has_code(diagnostics, "E0308");
+}
+
+test "frontend-rejection: global structs stay proven under use-site generic shadowing" ![io] {
+    let source = "struct Point { x: int; } "
+        + "let a: Point = Point { x: 1 }; let b: Point = Point { x: 2 }; "
+        + "fn use<Point>() -> int { let c = a + b; return 0; }";
+    let program = parse_program(source);
+    let diagnostics = typecheck_diagnostics(program);
+    assert _has_code(diagnostics, "E0308");
+}
+
+test "frontend-rejection: generic owner type parameter shadowing a struct stays silent" ![io] {
+    let source = "struct T { value: int; } "
+        + "struct Box<T> { fn add(a: T, b: T) -> int { let c = a + b; return 0; } }";
+    let program = parse_program(source);
+    let diagnostics = typecheck_diagnostics(program);
+    assert ! _has_code(diagnostics, "E0308");
+}
+
+test "frontend-rejection: struct type aliases stay silent for E0308" ![io] {
+    let source = "struct Point { x: int; } type P = Point; "
+        + "fn main() -> int { let a: P = Point { x: 1 }; "
+        + "let b: P = Point { x: 2 }; let c = a + b; return 0; }";
+    let program = parse_program(source);
+    let diagnostics = typecheck_diagnostics(program);
+    assert ! _has_code(diagnostics, "E0308");
+}
+
+test "frontend-rejection: enum operands do not masquerade as structs for E0308" ![io] {
+    let source = "enum Choice { A, B } "
+        + "fn main() -> int { let a: Choice = Choice.A; "
+        + "let b: Choice = Choice.B; let c = a + b; return 0; }";
+    let program = parse_program(source);
+    let diagnostics = typecheck_diagnostics(program);
+    assert ! _has_code(diagnostics, "E0308");
 }
 
 // Fail-open across a capture boundary: a primitive local captured into a

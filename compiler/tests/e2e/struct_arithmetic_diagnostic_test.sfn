@@ -1,0 +1,63 @@
+// compiler/tests/e2e/struct_arithmetic_diagnostic_test.sfn
+//
+// SFN-584: proven struct arithmetic must fail in the frontend with a
+// diagnostic anchored on the operator in both `check` and `build`.
+import { find } from "sfn/strings";
+import { clean_runner_env, nested_runner_scratch } from "sfn/test";
+
+fn _sfn_bin() -> string ![io] {
+    let configured = env.get("SAILFIN_BIN");
+    if configured.length > 0 { return configured; }
+    return "build/bin/sfn";
+}
+
+fn _source() -> string {
+    return "struct Point {\n" + "    x: int;\n" + "}\n\n" + "fn main() {\n"
+        + "    let a: Point = Point { x: 1 };\n"
+        + "    let b: Point = Point { x: 2 };\n"
+        + "    let _ = a + b;\n"
+        + "}\n";
+}
+
+fn _run(command: string) -> string ![io] {
+    let dir = fs.mkdtemp("sfn-struct-arith-");
+    let source_path = dir + "/struct-arithmetic.sfn";
+    let binary_path = dir + "/program";
+    fs.writeFile(source_path, _source());
+    let mut args = [_sfn_bin(), command];
+    if command == "build" {
+        args.push("-o");
+        args.push(binary_path);
+    }
+    args.push(source_path);
+    let child_env = clean_runner_env(nested_runner_scratch("sfn584-" + command));
+    let exit = process.run_capture(args, child_env);
+    let out = process.capture_take_stdout();
+    let err = process.capture_take_stderr();
+    let binary_exists = fs.exists(binary_path);
+    let mut result = out + err;
+    if exit == 0 { result = "unexpected zero exit\n" + result; }
+    if binary_exists { result = "unexpected binary\n" + result; }
+    fs.deleteFile(source_path);
+    if binary_exists { fs.deleteFile(binary_path); }
+    fs.removeDirectory(dir);
+    return result;
+}
+
+fn _assert_frontend_rejection(output: string, location: string) {
+    assert find(output, "unexpected zero exit", 0) < 0;
+    assert find(output, "unexpected binary", 0) < 0;
+    assert find(output, "error[E0308]:", 0) >= 0;
+    assert find(output, location, 0) >= 0;
+    assert find(output, "llvm lowering [fatal]", 0) < 0;
+    assert find(output, "invalid operand type for instruction", 0) < 0;
+    assert find(output, "internal compiler error", 0) < 0;
+}
+
+test "struct arithmetic: check rejects Point + Point at the plus" ![io] {
+    _assert_frontend_rejection(_run("check"), "struct-arithmetic.sfn:8:15");
+}
+
+test "struct arithmetic: build agrees with check before lowering" ![io] {
+    _assert_frontend_rejection(_run("build"), "struct-arithmetic:8:15");
+}
