@@ -84,7 +84,7 @@ trap 'rm -f "$err_tmp"' EXIT
 first_line() { grep -m1 . | head -c 160; }
 
 while IFS= read -r f; do
-    known=0; in_list "$f" "${KNOWN_FAILING[@]}" && known=1
+    known=0; in_list "$f" "${KNOWN_FAILING[@]:-}" && known=1
 
     check_out="$(timeout "$TIMEOUT" "$SAILFIN_BIN" check "$f" 2>&1)"
     if [ $? -ne 0 ]; then

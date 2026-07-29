@@ -1034,6 +1034,11 @@ jobs:
           (file build/bin/sfn || true)
           build/bin/sfn version || build/bin/sfn --version || true
 
+      - name: Check examples Bash compatibility
+        if: ${{ matrix.primary }}
+        shell: bash
+        run: scripts/test-check-examples-bash-compat.sh
+
       # Examples regression sweep (epic #549). Every runnable example under
       # examples/ must still `check` + `run` end-to-end. The KNOWN_FAILING
       # allowlist in the script tracks examples blocked on an open compiler
@@ -1443,6 +1448,13 @@ jobs:
           ls -lh build/bin/sfn
           (file build/bin/sfn || true)
           build/bin/sfn version || build/bin/sfn --version || true
+
+      # /bin/bash is the system Bash 3.2 on macOS; keep the examples ratchet
+      # runnable there even when its classification/report arrays are empty.
+      - name: Check examples Bash 3.2 compatibility
+        if: ${{ matrix.primary }}
+        shell: bash
+        run: scripts/test-check-examples-bash-compat.sh
 
       # Regression guard for #615 / #807 — see the build-linux twin for
       # the full background. Runs on macOS arm64 too because the
