@@ -72,6 +72,21 @@ enum ComparePredicate {
     GreaterEqual
 }
 
+enum ConvertKind {
+    IntTruncate,
+    IntSignExtend,
+    IntZeroExtend,
+    IntToFloat,
+    UnsignedIntToFloat,
+    FloatToInt,
+    FloatToUnsignedInt,
+    FloatTruncate,
+    FloatExtend,
+    PointerToInt,
+    IntToPointer,
+    PointerCast
+}
+
 enum InstrKind {
     ConstBool,
     ConstInt,
@@ -79,6 +94,7 @@ enum InstrKind {
     Unary,
     Binary,
     Compare,
+    Convert,
     Call
 }
 
@@ -139,7 +155,8 @@ struct Instr {
     unary_op: UnaryOp;  // Unary
     binary_op: BinaryOp;  // Binary
     compare_pred: ComparePredicate;  // Compare
-    operand_a: int;  // Unary.value / Binary.left / Compare.left; else -1
+    convert_kind: ConvertKind;  // Convert
+    operand_a: int;  // Unary.value / Binary.left / Compare.left / Convert.value; else -1
     operand_b: int;  // Binary.right / Compare.right; else -1
     call_function: int;  // Call: FunctionId; else -1
     call_args: int[];  // Call: ValueId[]
@@ -828,6 +845,7 @@ fn emit_const_bool(builder: FnBuilder, value: boolean, bool_type: int) -> ValueA
         unary_op: UnaryOp.Negate(),
         binary_op: BinaryOp.Add(),
         compare_pred: ComparePredicate.Equal(),
+        convert_kind: ConvertKind.IntTruncate(),
         operand_a: -1,
         operand_b: -1,
         call_function: -1,
@@ -854,6 +872,7 @@ fn emit_const_int(builder: FnBuilder, value: int, int_type: int) -> ValueAddResu
         unary_op: UnaryOp.Negate(),
         binary_op: BinaryOp.Add(),
         compare_pred: ComparePredicate.Equal(),
+        convert_kind: ConvertKind.IntTruncate(),
         operand_a: -1,
         operand_b: -1,
         call_function: -1,
@@ -880,6 +899,7 @@ fn emit_const_float(builder: FnBuilder, bits: int, float_type: int) -> ValueAddR
         unary_op: UnaryOp.Negate(),
         binary_op: BinaryOp.Add(),
         compare_pred: ComparePredicate.Equal(),
+        convert_kind: ConvertKind.IntTruncate(),
         operand_a: -1,
         operand_b: -1,
         call_function: -1,
@@ -906,6 +926,7 @@ fn emit_unary(builder: FnBuilder, op: UnaryOp, operand: int, result_type: int) -
         unary_op: op,
         binary_op: BinaryOp.Add(),
         compare_pred: ComparePredicate.Equal(),
+        convert_kind: ConvertKind.IntTruncate(),
         operand_a: operand,
         operand_b: -1,
         call_function: -1,
@@ -932,6 +953,7 @@ fn emit_binary(builder: FnBuilder, op: BinaryOp, left: int, right: int, result_t
         unary_op: UnaryOp.Negate(),
         binary_op: op,
         compare_pred: ComparePredicate.Equal(),
+        convert_kind: ConvertKind.IntTruncate(),
         operand_a: left,
         operand_b: right,
         call_function: -1,
@@ -958,8 +980,36 @@ fn emit_compare(builder: FnBuilder, pred: ComparePredicate, left: int, right: in
         unary_op: UnaryOp.Negate(),
         binary_op: BinaryOp.Add(),
         compare_pred: pred,
+        convert_kind: ConvertKind.IntTruncate(),
         operand_a: left,
         operand_b: right,
+        call_function: -1,
+        call_args: [],
+        call_effects: -1,
+        call_capabilities: -1
+    };
+    updated = _push_instr(updated, instr);
+    return ValueAddResult { builder: updated, value_id: vid };
+}
+
+fn emit_convert(builder: FnBuilder, kind: ConvertKind, operand: int, result_type: int) -> ValueAddResult {
+    let mut updated: FnBuilder = builder;
+    let vid: int = updated.next_value_id;
+    updated.next_value_id = vid + 1;
+    updated = _push_value_type(updated, result_type);
+    let instr: Instr = Instr {
+        kind: InstrKind.Convert(),
+        result: vid,
+        result_type: result_type,
+        bool_value: false,
+        int_value: 0,
+        float_bits: 0,
+        unary_op: UnaryOp.Negate(),
+        binary_op: BinaryOp.Add(),
+        compare_pred: ComparePredicate.Equal(),
+        convert_kind: kind,
+        operand_a: operand,
+        operand_b: -1,
         call_function: -1,
         call_args: [],
         call_effects: -1,
@@ -991,6 +1041,7 @@ fn emit_call(builder: FnBuilder, function: int, args: int[], effects: int, capab
         unary_op: UnaryOp.Negate(),
         binary_op: BinaryOp.Add(),
         compare_pred: ComparePredicate.Equal(),
+        convert_kind: ConvertKind.IntTruncate(),
         operand_a: -1,
         operand_b: -1,
         call_function: function,

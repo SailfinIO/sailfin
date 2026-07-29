@@ -10,6 +10,7 @@ import {
     CapabilityAtom,
     CapabilitySet,
     ComparePredicate,
+    ConvertKind,
     EffectSet,
     Instr,
     MetadataValue,
@@ -143,6 +144,21 @@ fn _render_compare_pred_name(pred: ComparePredicate) -> string {
     return "greater_equal";
 }
 
+fn _render_convert_kind_name(kind: ConvertKind) -> string {
+    if kind.variant == "IntTruncate" { return "int_truncate"; }
+    if kind.variant == "IntSignExtend" { return "int_sign_extend"; }
+    if kind.variant == "IntZeroExtend" { return "int_zero_extend"; }
+    if kind.variant == "IntToFloat" { return "int_to_float"; }
+    if kind.variant == "UnsignedIntToFloat" { return "unsigned_int_to_float"; }
+    if kind.variant == "FloatToInt" { return "float_to_int"; }
+    if kind.variant == "FloatToUnsignedInt" { return "float_to_unsigned_int"; }
+    if kind.variant == "FloatTruncate" { return "float_truncate"; }
+    if kind.variant == "FloatExtend" { return "float_extend"; }
+    if kind.variant == "PointerToInt" { return "pointer_to_int"; }
+    if kind.variant == "IntToPointer" { return "int_to_pointer"; }
+    return "pointer_cast";
+}
+
 fn _render_instr(module: Module, instr: Instr) -> string {
     let mut prefix: string = "";
     if instr.result != -1 {
@@ -174,6 +190,10 @@ fn _render_instr(module: Module, instr: Instr) -> string {
             + number_to_string(instr.operand_a)
             + ", v"
             + number_to_string(instr.operand_b);
+    }
+    if instr.kind.variant == "Convert" {
+        return prefix + _render_convert_kind_name(instr.convert_kind) + " v"
+            + number_to_string(instr.operand_a);
     }
     // Call
     let mut args: string = "";

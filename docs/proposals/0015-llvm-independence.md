@@ -4,7 +4,7 @@ title: "Toolchain Independence — Sailfin-Native Backend"
 status: Accepted
 type: runtime
 created: 2026-06-05
-updated: 2026-07-26
+updated: 2026-07-29
 author: "agent:compiler-architect"
 tracking: "#1640, #1641"
 supersedes:
@@ -422,6 +422,7 @@ ConstFloat(bits) -> Float
 Unary(op, value) -> scalar
 Binary(op, left, right) -> scalar
 Compare(predicate, left, right) -> Bool
+Convert(kind, value) -> scalar
 Call(function, arguments, effects, capabilities) -> scalar-or-Unit
 ```
 
@@ -436,6 +437,19 @@ relaxed floating-point operations; either requires a distinct enum case in a
 later contract. The verifier rejects an operation whose operand or result types
 are not admitted by that enum case. Overflow and floating-point behavior must
 not be inferred from a backend default.
+
+`ConvertKind` contains `IntTruncate`, `IntSignExtend`, `IntZeroExtend`,
+`IntToFloat`, `UnsignedIntToFloat`, `FloatToInt`, `FloatToUnsignedInt`,
+`FloatTruncate`, `FloatExtend`, `PointerToInt`, `IntToPointer`, and
+`PointerCast`. Integer truncation requires a strictly narrower integer result.
+Sign and zero extension require a strictly wider signed or unsigned pair,
+respectively. The integer/float cases encode signedness in their kind and admit
+only the corresponding signed or unsigned integer type. Float truncation and
+extension require a strictly narrower or wider float result. Pointer/integer
+conversions require the source and result categories named by the kind;
+`PointerCast` requires two pointer types. Consumers must never select a
+conversion kind implicitly. As with arithmetic behavior, a consumer may not
+infer conversion behavior from a backend default.
 
 `Call` is direct in v0: `function` is a `FunctionId`. Its arguments match the
 callee signature exactly. A non-`Unit` call produces one result; a `Unit` call
