@@ -1,0 +1,23 @@
+import { emit_native_text_with_module_name } from "../../src/emit_native";
+import { lower_to_llvm_ir_from_text } from "../../src/llvm/lowering/entrypoints";
+import { parse_program } from "../../src/parser/mod";
+import { index_of } from "../../src/string_utils";
+
+fn _contains(text: string, needle: string) -> boolean {
+    return index_of(text, needle) >= 0;
+}
+
+test "syscall1 through syscall6 pin the Linux x86-64 inline-asm ABI" ![io] {
+    let source = "fn invoke(n: int, a: int, b: int, c: int, d: int, e: int, f: int) -> int {\n"
+        + "let r1 = syscall1(n, a); let r2 = syscall2(n, a, b); let r3 = syscall3(n, a, b, c);\n"
+        + "let r4 = syscall4(n, a, b, c, d); let r5 = syscall5(n, a, b, c, d, e);\n"
+        + "return r1 + r2 + r3 + r4 + r5 + syscall6(n, a, b, c, d, e, f); }";
+    let native = emit_native_text_with_module_name(parse_program(source), "runtime/sfn/platform/syscall_linux.sfn");
+    let ir = lower_to_llvm_ir_from_text(native, "runtime/sfn/platform/syscall_linux.sfn");
+    assert _contains(ir, "={rax},{rax},{rdi},~{rcx},~{r11},~{memory}");
+    assert _contains(ir, "={rax},{rax},{rdi},{rsi},~{rcx},~{r11},~{memory}");
+    assert _contains(ir, "={rax},{rax},{rdi},{rsi},{rdx},~{rcx},~{r11},~{memory}");
+    assert _contains(ir, "={rax},{rax},{rdi},{rsi},{rdx},{r10},~{rcx},~{r11},~{memory}");
+    assert _contains(ir, "={rax},{rax},{rdi},{rsi},{rdx},{r10},{r8},~{rcx},~{r11},~{memory}");
+    assert _contains(ir, "={rax},{rax},{rdi},{rsi},{rdx},{r10},{r8},{r9},~{rcx},~{r11},~{memory}");
+}

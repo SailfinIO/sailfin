@@ -11,6 +11,7 @@ import { find_prelude_mirror_signature } from "../../prelude_mirror_signatures";
 import { find_function_by_name, find_function_by_name_or_import } from "../../rendering_helpers";
 import { find_runtime_helper, make_concat_descriptor, make_push_descriptor } from "../../runtime_helpers";
 import { empty_string_constant_set, merge_string_constants } from "../../strings";
+import { is_syscall_builtin, lower_syscall_builtin } from "../../syscall";
 import {
     find_interface_info_by_name,
     find_struct_info_by_name,
@@ -120,6 +121,11 @@ fn try_dispatch_atomic_builtin(trimmed_target: string, arguments: string[], bind
 fn try_dispatch_byte_load_builtin(trimmed_target: string, arguments: string[], bindings: ParameterBinding[], locals: LocalBinding[], temp_index: int, lines: string[], functions: NativeFunction[], context: TypeContext) -> ExpressionResult? ![io] {
     if !is_byte_load_builtin(trimmed_target) { return null; }
     return lower_byte_load(trimmed_target, arguments, bindings, locals, temp_index, lines, functions, context);
+}
+
+fn try_dispatch_syscall_builtin(trimmed_target: string, arguments: string[], bindings: ParameterBinding[], locals: LocalBinding[], temp_index: int, lines: string[], functions: NativeFunction[], context: TypeContext) -> ExpressionResult? ![io] {
+    if !is_syscall_builtin(trimmed_target) { return null; }
+    return lower_syscall_builtin(trimmed_target, arguments, bindings, locals, temp_index, lines, functions, context);
 }
 
 // ── Closure-callee detection (issue #689) ────────────────────────────
@@ -1865,6 +1871,7 @@ export {
     resolve_call_signature,
     try_dispatch_atomic_builtin,
     try_dispatch_byte_load_builtin,
+    try_dispatch_syscall_builtin,
     _parse_fn_pointer_annotation,
     _ClosureSignatureParse
 };
