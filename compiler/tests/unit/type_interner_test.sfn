@@ -1,0 +1,321 @@
+// compiler/tests/unit/type_interner_test.sfn
+//
+// Acceptance coverage for the owner-qualified structural type graph and
+// deterministic module-local interner defined by SFN-588.
+import {
+    DeclarationId,
+    DiagnosticId,
+    FunctionCallKind,
+    InferenceVarId,
+    IntrinsicConstructorKind,
+    ModuleIdentity,
+    OwnershipClass,
+    PointerPermission,
+    QualifiedDeclarationId,
+    TypeId,
+    error_type_slot,
+    inference_type_slot,
+    qualified_declaration_ids_equal,
+    resolved_type_slot,
+    type_ids_equal
+} from "../../src/type_id";
+import {
+    ConstructorInternResult,
+    EffectSetInternResult,
+    TypeInterner,
+    constructor_descriptor,
+    intern_affine_type,
+    intern_applied_type,
+    intern_array_type,
+    intern_bfloat16_type,
+    intern_bool_type,
+    intern_dynamic_type,
+    intern_float_type,
+    intern_function_type,
+    intern_int_type,
+    intern_linear_type,
+    intern_nominal_constructor,
+    intern_null_type,
+    intern_optional_type,
+    intern_pointer_type,
+    intern_reference_type,
+    intern_string_type,
+    intern_type_effect_set,
+    intern_type_parameter,
+    intern_union_type,
+    intern_unit_type,
+    intrinsic_constructor_id,
+    new_type_interner,
+    render_structural_type,
+    render_type_interner,
+    structural_type,
+    structural_type_hash,
+    type_interner_len
+} from "../../src/type_interner";
+
+fn _module_identity(capsule: string, module: string) -> ModuleIdentity {
+    return ModuleIdentity { capsule: capsule, module: module };
+}
+
+fn _qualified(capsule: string, module: string, declaration: int) -> QualifiedDeclarationId {
+    let origin = _module_identity(capsule, module);
+    let local = DeclarationId { value: declaration };
+    return QualifiedDeclarationId { origin: origin, declaration: local };
+}
+
+test "type interner: identities and unresolved slots stay outside semantic TypeIds" {
+    let resolved = resolved_type_slot(TypeId { value: 7 });
+    let inference = inference_type_slot(InferenceVarId { value: 3 });
+    let failed = error_type_slot(DiagnosticId { value: 11 });
+    assert resolved.kind.variant == "Resolved";
+    assert resolved.type_id.value == 7;
+    assert resolved.inference_var.value == -1;
+    assert inference.kind.variant == "Inference";
+    assert inference.type_id.value == -1;
+    assert inference.inference_var.value == 3;
+    assert failed.kind.variant == "Error";
+    assert failed.type_id.value == -1;
+    assert failed.diagnostic.value == 11;
+    assert type_ids_equal(TypeId { value: 4 }, TypeId { value: 4 });
+    assert ! type_ids_equal(TypeId { value: 4 }, TypeId { value: 5 });
+}
+
+test "type interner: equal scalar definitions share stable IDs and hashes" {
+    let mut interner = new_type_interner("demo", "main");
+    let first = intern_int_type(interner, 32, true);
+    interner = first.interner;
+    let repeated = intern_int_type(interner, 32, true);
+    interner = repeated.interner;
+    assert first.ok;
+    assert repeated.ok;
+    assert first.id.value == repeated.id.value;
+    assert structural_type_hash(interner, first.id) == structural_type_hash(interner, repeated.id);
+    assert type_interner_len(interner) == 1;
+
+    let f16 = intern_float_type(interner, 16);
+    interner = f16.interner;
+    let bf16 = intern_bfloat16_type(interner);
+    interner = bf16.interner;
+    assert f16.id.value != bf16.id.value;
+    assert render_structural_type(interner, f16.id) == "f16";
+    assert render_structural_type(interner, bf16.id) == "bf16";
+
+    let unit = intern_unit_type(interner);
+    interner = unit.interner;
+    let null_type = intern_null_type(interner);
+    interner = null_type.interner;
+    let bool_type = intern_bool_type(interner);
+    interner = bool_type.interner;
+    let string_type = intern_string_type(interner);
+    interner = string_type.interner;
+    let dynamic_type = intern_dynamic_type(interner);
+    interner = dynamic_type.interner;
+    assert unit.id.value != null_type.id.value;
+    assert bool_type.id.value != string_type.id.value;
+    assert string_type.id.value != dynamic_type.id.value;
+}
+
+test "type interner: raw pointers and checked references preserve permission" {
+    let mut interner = new_type_interner("demo", "pointers");
+    let i32_type = intern_int_type(interner, 32, true);
+    interner = i32_type.interner;
+    let read_pointer = intern_pointer_type(interner, true, i32_type.id, PointerPermission.ReadOnly(), 0);
+    interner = read_pointer.interner;
+    let mutable_pointer = intern_pointer_type(interner, true, i32_type.id, PointerPermission.Mutable(), 0);
+    interner = mutable_pointer.interner;
+    let read_reference = intern_reference_type(interner, i32_type.id, false);
+    interner = read_reference.interner;
+    let mutable_reference = intern_reference_type(interner, i32_type.id, true);
+    interner = mutable_reference.interner;
+    let opaque_pointer = intern_pointer_type(interner, false, TypeId {
+        value: 41
+    }, PointerPermission.ReadOnly(), 0);
+    interner = opaque_pointer.interner;
+    let repeated_opaque_pointer = intern_pointer_type(interner, false, TypeId {
+        value: 99
+    }, PointerPermission.ReadOnly(), 0);
+    interner = repeated_opaque_pointer.interner;
+    assert read_pointer.id.value != mutable_pointer.id.value;
+    assert read_pointer.id.value != read_reference.id.value;
+    assert mutable_pointer.id.value != mutable_reference.id.value;
+    assert read_reference.id.value != mutable_reference.id.value;
+    assert opaque_pointer.id.value != read_pointer.id.value;
+    assert opaque_pointer.id.value == repeated_opaque_pointer.id.value;
+    assert structural_type(interner, opaque_pointer.id).pointee.value == -1;
+    assert render_structural_type(interner, read_pointer.id) == "*const i32";
+    assert render_structural_type(interner, mutable_reference.id) == "&mut i32";
+}
+
+test "type interner: unions flatten deduplicate reorder and share optional identity" {
+    let mut interner = new_type_interner("demo", "unions");
+    let i64_type = intern_int_type(interner, 64, true);
+    interner = i64_type.interner;
+    let string_type = intern_string_type(interner);
+    interner = string_type.interner;
+    let first = intern_union_type(interner, [string_type.id, i64_type.id, string_type.id]);
+    interner = first.interner;
+    let reordered = intern_union_type(interner, [i64_type.id, string_type.id]);
+    interner = reordered.interner;
+    let nested = intern_union_type(interner, [first.id, string_type.id, i64_type.id]);
+    interner = nested.interner;
+    assert first.id.value == reordered.id.value;
+    assert first.id.value == nested.id.value;
+
+    let explicit_null = intern_null_type(interner);
+    interner = explicit_null.interner;
+    let explicit_optional = intern_union_type(interner, [explicit_null.id, i64_type.id]);
+    interner = explicit_optional.interner;
+    let optional = intern_optional_type(interner, i64_type.id);
+    interner = optional.interner;
+    assert optional.id.value == explicit_optional.id.value;
+
+    let singleton = intern_union_type(interner, [i64_type.id, i64_type.id]);
+    interner = singleton.interner;
+    assert singleton.id.value == i64_type.id.value;
+    let empty = intern_union_type(interner, []);
+    assert ! empty.ok;
+    assert empty.id.value == -1;
+}
+
+test "type interner: qualified nominal constructors and type parameters keep owners" {
+    let mut interner = new_type_interner("consumer", "main");
+    let first_owner = _qualified("alpha", "model", 0);
+    let second_owner = _qualified("beta", "model", 0);
+    assert ! qualified_declaration_ids_equal(first_owner, second_owner);
+
+    let first_constructor = intern_nominal_constructor(interner, first_owner, "Record", 0, OwnershipClass.Copyable(), false);
+    interner = first_constructor.interner;
+    let repeated_constructor = intern_nominal_constructor(interner, first_owner, "RenamedRecord", 0, OwnershipClass.Copyable(), false);
+    interner = repeated_constructor.interner;
+    let second_constructor = intern_nominal_constructor(interner, second_owner, "Record", 0, OwnershipClass.Copyable(), false);
+    interner = second_constructor.interner;
+    assert first_constructor.id.value == repeated_constructor.id.value;
+    assert first_constructor.id.value != second_constructor.id.value;
+
+    let first_type = intern_applied_type(interner, first_constructor.id, []);
+    interner = first_type.interner;
+    let second_type = intern_applied_type(interner, second_constructor.id, []);
+    interner = second_type.interner;
+    assert first_type.id.value != second_type.id.value;
+
+    let first_parameter = intern_type_parameter(interner, first_owner, 0);
+    interner = first_parameter.interner;
+    let second_parameter = intern_type_parameter(interner, second_owner, 0);
+    interner = second_parameter.interner;
+    assert first_parameter.id.value != second_parameter.id.value;
+}
+
+test "type interner: intrinsic wrappers and OwnedBuf compatibility carry ownership" {
+    let mut interner = new_type_interner("consumer", "main");
+    let element = intern_int_type(interner, 8, false);
+    interner = element.interner;
+    let array = intern_array_type(interner, element.id);
+    interner = array.interner;
+    let applied_array = intern_applied_type(interner, intrinsic_constructor_id(IntrinsicConstructorKind.Array()), [element.id]);
+    interner = applied_array.interner;
+    assert array.id.value == applied_array.id.value;
+
+    let affine = intern_affine_type(interner, element.id);
+    interner = affine.interner;
+    let linear = intern_linear_type(interner, element.id);
+    interner = linear.interner;
+    assert affine.id.value != linear.id.value;
+    let affine_descriptor = constructor_descriptor(interner, intrinsic_constructor_id(IntrinsicConstructorKind.Affine()));
+    let linear_descriptor = constructor_descriptor(interner, intrinsic_constructor_id(IntrinsicConstructorKind.Linear()));
+    assert affine_descriptor.ownership.variant == "Affine";
+    assert linear_descriptor.ownership.variant == "Linear";
+
+    let compatible_owner = _qualified("runtime", "memory/ownedbuf", 2);
+    let unrelated_owner = _qualified("app", "buffers", 2);
+    let compatible_before_audit = intern_nominal_constructor(interner, compatible_owner, "OwnedBuf", 0, OwnershipClass.Copyable(), false);
+    interner = compatible_before_audit.interner;
+    let compatible = intern_nominal_constructor(interner, compatible_owner, "OwnedBuf", 0, OwnershipClass.Copyable(), true);
+    interner = compatible.interner;
+    let unrelated = intern_nominal_constructor(interner, unrelated_owner, "OwnedBuf", 0, OwnershipClass.Copyable(), false);
+    interner = unrelated.interner;
+    assert compatible_before_audit.id.value == compatible.id.value;
+    let compatible_descriptor = constructor_descriptor(interner, compatible.id);
+    let unrelated_descriptor = constructor_descriptor(interner, unrelated.id);
+    assert compatible_descriptor.is_owned_buf_compatibility;
+    assert compatible_descriptor.ownership.variant == "Affine";
+    assert ! unrelated_descriptor.is_owned_buf_compatibility;
+    assert unrelated_descriptor.ownership.variant == "Copyable";
+}
+
+test "type interner: function identity includes order result effects and call kind" {
+    let mut interner = new_type_interner("demo", "functions");
+    let i32_type = intern_int_type(interner, 32, true);
+    interner = i32_type.interner;
+    let bool_type = intern_bool_type(interner);
+    interner = bool_type.interner;
+    let full_effects: EffectSetInternResult = intern_type_effect_set(interner, ["model", "io", "io"]);
+    interner = full_effects.interner;
+    let reordered_effects = intern_type_effect_set(interner, ["io", "model"]);
+    interner = reordered_effects.interner;
+    let io_effect = intern_type_effect_set(interner, ["io"]);
+    interner = io_effect.interner;
+    assert full_effects.id.value == reordered_effects.id.value;
+
+    let base = intern_function_type(interner, [i32_type.id, bool_type.id], i32_type.id, full_effects.id, FunctionCallKind.SailfinValue());
+    interner = base.interner;
+    let repeated = intern_function_type(interner, [i32_type.id, bool_type.id], i32_type.id, reordered_effects.id, FunctionCallKind.SailfinValue());
+    interner = repeated.interner;
+    let reordered_parameters = intern_function_type(interner, [bool_type.id, i32_type.id], i32_type.id, full_effects.id, FunctionCallKind.SailfinValue());
+    interner = reordered_parameters.interner;
+    let changed_result = intern_function_type(interner, [i32_type.id, bool_type.id], bool_type.id, full_effects.id, FunctionCallKind.SailfinValue());
+    interner = changed_result.interner;
+    let changed_effects = intern_function_type(interner, [i32_type.id, bool_type.id], i32_type.id, io_effect.id, FunctionCallKind.SailfinValue());
+    interner = changed_effects.interner;
+    let c_function = intern_function_type(interner, [i32_type.id, bool_type.id], i32_type.id, full_effects.id, FunctionCallKind.CFunction());
+    interner = c_function.interner;
+    assert base.id.value == repeated.id.value;
+    assert base.id.value != reordered_parameters.id.value;
+    assert base.id.value != changed_result.id.value;
+    assert base.id.value != changed_effects.id.value;
+    assert base.id.value != c_function.id.value;
+}
+
+fn _build_deterministic_graph() -> TypeInterner {
+    let mut interner = new_type_interner("demo", "deterministic");
+    let i64_type = intern_int_type(interner, 64, true);
+    interner = i64_type.interner;
+    let string_type = intern_string_type(interner);
+    interner = string_type.interner;
+    let union_type = intern_union_type(interner, [string_type.id, i64_type.id]);
+    interner = union_type.interner;
+    let effects = intern_type_effect_set(interner, ["net", "io"]);
+    interner = effects.interner;
+    let function_type = intern_function_type(interner, [union_type.id], string_type.id, effects.id, FunctionCallKind.SailfinValue());
+    return function_type.interner;
+}
+
+test "type interner: fixed traversal produces deterministic IDs hashes and diagnostics" {
+    let first = _build_deterministic_graph();
+    let second = _build_deterministic_graph();
+    assert type_interner_len(first) == type_interner_len(second);
+    let mut index: int = 0;
+    loop {
+        if index >= type_interner_len(first) { break; }
+        let id = TypeId { value: index };
+        assert structural_type_hash(first, id) == structural_type_hash(second, id);
+        index += 1;
+    }
+    assert render_type_interner(first) == render_type_interner(second);
+}
+
+fn _render_named_nominal(diagnostic_name: string) -> TypeInterner {
+    let mut interner = new_type_interner("consumer", "diagnostics");
+    let owner = _qualified("origin", "types", 9);
+    let constructor: ConstructorInternResult = intern_nominal_constructor(interner, owner, diagnostic_name, 0, OwnershipClass.Copyable(), false);
+    interner = constructor.interner;
+    let applied = intern_applied_type(interner, constructor.id, []);
+    return applied.interner;
+}
+
+test "type interner: diagnostic rendering is excluded from equality and hashing" {
+    let first = _render_named_nominal("Before");
+    let second = _render_named_nominal("After");
+    let id = TypeId { value: 0 };
+    assert structural_type_hash(first, id) == structural_type_hash(second, id);
+    assert render_structural_type(first, id) != render_structural_type(second, id);
+}

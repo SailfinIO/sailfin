@@ -338,12 +338,17 @@ here.
   unsupported signature rejects the whole module. The typed SSA model,
   verifier, and renderer define explicit, non-inferring scalar conversion
   kinds for integer widths/signs, integer/float boundaries, float widths, and
-  pointer/integer boundaries; body production and backend consumption of those
-  conversions are not yet connected. Function bodies, capability
-  derivation/manifests, direct linker ownership, native object/code emission,
-  gated call sites, and native-backend self-hosting are not shipped. #343's
-  mold/lld selection still runs behind clang and is a Stage-1 precursor, not an
-  owned link path.
+  pointer/integer boundaries. The post-v0 structural type foundation is also
+  present as a module-local, owner-qualified graph and deterministic interner:
+  it distinguishes raw pointers from checked references, canonicalizes unions,
+  includes exact effect rows and call kind in function identity, and carries
+  intrinsic/nominal constructor ownership metadata. Source-annotation
+  resolution, inference/finalization, `.sfn-asm` type-table transport, semantic
+  consumer migration, body production, and backend consumption remain
+  unconnected. Function bodies, capability derivation/manifests, direct linker
+  ownership, native object/code emission, gated call sites, and native-backend
+  self-hosting are not shipped. #343's mold/lld selection still runs behind
+  clang and is a Stage-1 precursor, not an owned link path.
 - **Build-host OpenSSL dependency** (SFEP-0036, #1782/#1821). The native
   runtime links `-lssl -lcrypto` (TLS; `runtime/sfn/platform/tls.sfn`), so
   **every** Sailfin binary — including the compiler and each per-test binary
