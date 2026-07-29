@@ -1,6 +1,7 @@
 // compiler/src/llvm/lowering/instructions_try.sfn
 //
 // Control flow handlers: try/catch/finally/throw instruction lowering.
+import { Diag } from "../../diagnostic";
 import { NativeFunction, NativeInstruction, NativeSourceSpan } from "../../native_ir";
 import { char_code, grapheme_at, substring } from "../../string_utils";
 import { lower_expression } from "../expression_lowering/native/core";
@@ -31,6 +32,7 @@ import {
 } from "../types";
 import {
     append_string,
+    extend_diag_array,
     extend_string_array,
     number_to_string,
     trim_text
@@ -229,6 +231,7 @@ fn lower_throw_instruction(function_name: string, instruction: NativeInstruction
 
 fn lower_try_instruction(function: NativeFunction, start_index: int, llvm_return: string, bindings: ParameterBinding[], locals: LocalBinding[], allocas: string[], lines: string[], temp_index: int, block_counter: int, next_local_id: int, next_region_id: int, functions: NativeFunction[], loop_stack: LoopContext[], try_stack: TryFrameContext[], end: int, context: TypeContext, scope_id: string, scope_depth: int, current_label: string) -> BlockLoweringResult ![io] {
     let mut diagnostics: string[] = [];
+    let mut diags: Diag[] = [];
     let structure = collect_try_structure(function.instructions, start_index, end, function.name);
     let mut _ci2: int = 0;
     loop {
@@ -422,6 +425,7 @@ fn lower_try_instruction(function: NativeFunction, start_index: int, llvm_return
         diagnostics.push(try_result.diagnostics[_ci3]);
         _ci3 += 1;
     }
+    diags = extend_diag_array(diags, try_result.diags);
     lifetime_regions = extend_lifetime_regions(lifetime_regions, try_result.lifetime_regions);
     current_allocas = try_result.allocas;
     current_temp = try_result.temp_index;
@@ -519,6 +523,7 @@ fn lower_try_instruction(function: NativeFunction, start_index: int, llvm_return
             diagnostics.push(catch_result.diagnostics[_ci4]);
             _ci4 += 1;
         }
+        diags = extend_diag_array(diags, catch_result.diags);
         lifetime_regions = extend_lifetime_regions(lifetime_regions, catch_result.lifetime_regions);
         current_allocas = catch_result.allocas;
         current_temp = catch_result.temp_index;
@@ -578,6 +583,7 @@ fn lower_try_instruction(function: NativeFunction, start_index: int, llvm_return
             diagnostics.push(finally_result.diagnostics[_ci5]);
             _ci5 += 1;
         }
+        diags = extend_diag_array(diags, finally_result.diags);
         lifetime_regions = extend_lifetime_regions(lifetime_regions, finally_result.lifetime_regions);
         current_allocas = finally_result.allocas;
         current_temp = finally_result.temp_index;
@@ -646,6 +652,7 @@ fn lower_try_instruction(function: NativeFunction, start_index: int, llvm_return
         temp_index: current_temp,
         block_counter: current_block_counter,
         diagnostics: diagnostics,
+        diags: diags,
         terminated: false,
         next_local_id: current_next_local,
         lifetime_regions: lifetime_regions,

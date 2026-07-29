@@ -212,6 +212,11 @@ here.
   `sailfin-check/1` and human output remain byte-compatible while backend
   producers migrate independently (SFEP-0061 S1, SFN-534). Effect diagnostics
   carry structured `FixSuggestion`/`TextEdit` for `sfn fix` / LSP (Track B).
+  LLVM lowering now carries a typed `Diag[]` sidecar through its result graph:
+  every retained `[fatal]` string has a coded lowering-stage diagnostic,
+  direct statement/`let`/routine consumers attach their native-IR span, and
+  the legacy string array remains the fail-closed gate boundary (SFEP-0061 S2,
+  SFN-535).
   `sfn check` surfaces parse errors (`E0500`, #974) and implicit re-export
   bans (`E0600`) via the shared `reexport_check.sfn`. Malformed-but-dispatched
   top-level declarations — a broken parameter list (`fn broken( {`), a missing

@@ -80,7 +80,8 @@ import {
 import { emit_llvm_function } from "./emission";
 import {
     has_fatal_lowering_diagnostic,
-    lower_to_llvm_lines_with_parsed_context_for_tests
+    lower_to_llvm_lines_with_parsed_context_for_tests,
+    print_fatal_lowering_diagnostics
 } from "./lowering_core";
 import {
     empty_trait_metadata,
@@ -152,13 +153,7 @@ fn write_llvm_ir_for_tests_from_text_with_context(native_text: string, module_na
     // silent `return false` left `sfn test` reporting a build failure with
     // no reason (SFN-529).
     if has_fatal_lowering_diagnostic(lowered_lines.diagnostics) {
-        let mut _fpi: int = 0;
-        loop {
-            if _fpi >= lowered_lines.diagnostics.length { break; }
-            let _pdiag = lowered_lines.diagnostics[_fpi];
-            if index_of(_pdiag, "[fatal]") >= 0 { print.err(_pdiag); }
-            _fpi += 1;
-        }
+        print_fatal_lowering_diagnostics(lowered_lines.diagnostics, lowered_lines.diags);
         return false;
     }
     let ir = _join_llvm_lines_linear(lowered_lines.lines);

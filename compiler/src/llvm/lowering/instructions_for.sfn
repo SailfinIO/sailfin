@@ -1,6 +1,7 @@
 // compiler/src/llvm/lowering/instructions_for.sfn
 //
 // Control flow handler: for-loop instruction lowering (range and array iteration).
+import { Diag } from "../../diagnostic";
 import { NativeFunction, NativeInstruction, NativeSourceSpan } from "../../native_ir";
 import { char_code, grapheme_at, substring } from "../../string_utils";
 import { array_pointer_element_type } from "../expression_lowering/arrays";
@@ -32,6 +33,7 @@ import {
     TypeContext
 } from "../types";
 import {
+    extend_diag_array,
     extend_string_array,
     is_simple_identifier,
     number_to_string,
@@ -56,6 +58,7 @@ import { collect_mutation_names, find_mutation_for_name } from "./phi";
 // Returns null if the iterable is not a recognized range pattern.
 fn lower_for_array(function: NativeFunction, structure: LoopStructure, raw_target: string, instruction: NativeInstruction, iterable_operand: LLVMOperand, llvm_return: string, bindings: ParameterBinding[], locals: LocalBinding[], allocas: string[], lines: string[], temp_index: int, block_counter: int, next_local_id: int, next_region_id: int, functions: NativeFunction[], loop_stack: LoopContext[], try_stack: TryFrameContext[], context: TypeContext, scope_id: string, scope_depth: int, next_index: int) -> BlockLoweringResult ![io] {
     let mut diagnostics: string[] = [];
+    let mut diags: Diag[] = [];
     let mut current_lines: string[] = lines;
     let mut current_allocas: string[] = allocas;
     let mut current_locals: LocalBinding[] = locals;
@@ -224,6 +227,7 @@ fn lower_for_array(function: NativeFunction, structure: LoopStructure, raw_targe
         diagnostics.push(body_result.diagnostics[_ci24]);
         _ci24 += 1;
     }
+    diags = extend_diag_array(diags, body_result.diags);
     lifetime_regions = extend_lifetime_regions(lifetime_regions, body_result.lifetime_regions);
     current_allocas = body_result.allocas;
     current_temp = body_result.temp_index;
@@ -322,6 +326,7 @@ fn lower_for_array(function: NativeFunction, structure: LoopStructure, raw_targe
         temp_index: current_temp,
         block_counter: current_block_counter,
         diagnostics: diagnostics,
+        diags: diags,
         terminated: false,
         next_local_id: current_next_local,
         lifetime_regions: lifetime_regions,
@@ -375,6 +380,7 @@ fn lower_for_instruction(function: NativeFunction, start_index: int, llvm_return
             temp_index: current_temp,
             block_counter: current_block_counter,
             diagnostics: diagnostics,
+            diags: [],
             terminated: false,
             next_local_id: current_next_local,
             lifetime_regions: lifetime_regions,
@@ -398,6 +404,7 @@ fn lower_for_instruction(function: NativeFunction, start_index: int, llvm_return
             temp_index: current_temp,
             block_counter: current_block_counter,
             diagnostics: diagnostics,
+            diags: [],
             terminated: false,
             next_local_id: current_next_local,
             lifetime_regions: lifetime_regions,
@@ -421,6 +428,7 @@ fn lower_for_instruction(function: NativeFunction, start_index: int, llvm_return
             temp_index: current_temp,
             block_counter: current_block_counter,
             diagnostics: diagnostics,
+            diags: [],
             terminated: false,
             next_local_id: current_next_local,
             lifetime_regions: lifetime_regions,
@@ -466,6 +474,7 @@ fn lower_for_instruction(function: NativeFunction, start_index: int, llvm_return
             temp_index: current_temp,
             block_counter: current_block_counter,
             diagnostics: diagnostics,
+            diags: [],
             terminated: false,
             next_local_id: current_next_local,
             lifetime_regions: lifetime_regions,
@@ -496,6 +505,7 @@ fn lower_for_instruction(function: NativeFunction, start_index: int, llvm_return
             temp_index: current_temp,
             block_counter: current_block_counter,
             diagnostics: diagnostics,
+            diags: [],
             terminated: false,
             next_local_id: current_next_local,
             lifetime_regions: lifetime_regions,

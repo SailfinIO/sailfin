@@ -1,6 +1,7 @@
 // compiler/src/llvm/lowering/instructions_loops.sfn
 //
 // Control flow handler: loop instruction lowering (infinite loops with break/continue).
+import { Diag } from "../../diagnostic";
 import { NativeFunction, NativeInstruction, NativeSourceSpan } from "../../native_ir";
 import { char_code, grapheme_at, substring } from "../../string_utils";
 import { lower_expression } from "../expression_lowering/native/core";
@@ -22,7 +23,12 @@ import {
     TryFrameContext,
     TypeContext
 } from "../types";
-import { extend_string_array, number_to_string, trim_text } from "../utils";
+import {
+    extend_diag_array,
+    extend_string_array,
+    number_to_string,
+    trim_text
+} from "../utils";
 import { lower_instruction_range } from "./instructions";
 import {
     allocate_block_label,
@@ -125,6 +131,7 @@ fn last_loop_context(values: LoopContext[]) -> LoopContext {
 
 fn lower_loop_instruction(function: NativeFunction, start_index: int, llvm_return: string, bindings: ParameterBinding[], locals: LocalBinding[], allocas: string[], lines: string[], temp_index: int, block_counter: int, next_local_id: int, next_region_id: int, functions: NativeFunction[], loop_stack: LoopContext[], try_stack: TryFrameContext[], end: int, context: TypeContext, scope_id: string, scope_depth: int, current_label: string) -> BlockLoweringResult ![io] {
     let mut diagnostics: string[] = [];
+    let mut diags: Diag[] = [];
     let mut current_lines: string[] = lines;
     let mut current_allocas: string[] = allocas;
     let mut current_locals: LocalBinding[] = locals;
@@ -282,6 +289,7 @@ fn lower_loop_instruction(function: NativeFunction, start_index: int, llvm_retur
         diagnostics.push(body_result.diagnostics[_ci7]);
         _ci7 += 1;
     }
+    diags = extend_diag_array(diags, body_result.diags);
     lifetime_regions = extend_lifetime_regions(lifetime_regions, body_result.lifetime_regions);
     current_allocas = body_result.allocas;
     current_temp = body_result.temp_index;
@@ -614,6 +622,7 @@ fn lower_loop_instruction(function: NativeFunction, start_index: int, llvm_retur
         temp_index: current_temp,
         block_counter: current_block_counter,
         diagnostics: diagnostics,
+        diags: diags,
         terminated: false,
         next_local_id: current_next_local,
         lifetime_regions: lifetime_regions,
