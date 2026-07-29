@@ -1,0 +1,202 @@
+// compiler/src/type_id.sfn
+//
+// Owner-qualified identities and target-neutral structural type records for
+// the post-v0 type graph. Source aliases are resolver provenance and never
+// appear as graph nodes. See SFEP-0015 §9.2.1 and SFEP-0059 §3.5.
+// TypeId is a dense handle owned by one module-local TypeInterner.
+struct TypeId {
+    value: int;
+}
+
+// DeclarationId is assigned in source declaration order by an origin module.
+struct DeclarationId {
+    value: int;
+}
+
+// ModuleIdentity is the canonical capsule/module pair used to qualify
+// declaration identity across imports.
+struct ModuleIdentity {
+    capsule: string;
+    module: string;
+}
+
+// QualifiedDeclarationId keeps same-named declarations from distinct origin
+// modules semantically distinct.
+struct QualifiedDeclarationId {
+    origin: ModuleIdentity;
+    declaration: DeclarationId;
+}
+
+// TypeConstructorId is a dense handle owned by one module-local TypeInterner.
+struct TypeConstructorId {
+    value: int;
+}
+
+// EffectSetId is a dense handle for one canonical exact declared effect row.
+struct EffectSetId {
+    value: int;
+}
+
+// InferenceVarId identifies an unannotated slot without making it a TypeId.
+struct InferenceVarId {
+    value: int;
+}
+
+// DiagnosticId identifies the error that prevents a type slot from resolving.
+struct DiagnosticId {
+    value: int;
+}
+
+enum TypeSlotKind {
+    Resolved,
+    Inference,
+    Error
+}
+
+// TypeSlot carries resolved, inferred, and failed sites without an unknown
+// semantic TypeId. SFN-588 defines the carrier only; later leaves constrain
+// and finalize inference slots.
+struct TypeSlot {
+    kind: TypeSlotKind;
+    type_id: TypeId;
+    inference_var: InferenceVarId;
+    diagnostic: DiagnosticId;
+}
+
+// resolved_type_slot constructs a slot backed by a semantic TypeId.
+fn resolved_type_slot(id: TypeId) -> TypeSlot {
+    return TypeSlot {
+        kind: TypeSlotKind.Resolved(),
+        type_id: id,
+        inference_var: InferenceVarId { value: -1 },
+        diagnostic: DiagnosticId { value: -1 }
+    };
+}
+
+// inference_type_slot constructs an unresolved inference carrier.
+fn inference_type_slot(id: InferenceVarId) -> TypeSlot {
+    return TypeSlot {
+        kind: TypeSlotKind.Inference(),
+        type_id: TypeId { value: -1 },
+        inference_var: id,
+        diagnostic: DiagnosticId { value: -1 }
+    };
+}
+
+// error_type_slot constructs a failed carrier without fabricating a TypeId.
+fn error_type_slot(id: DiagnosticId) -> TypeSlot {
+    return TypeSlot {
+        kind: TypeSlotKind.Error(),
+        type_id: TypeId { value: -1 },
+        inference_var: InferenceVarId { value: -1 },
+        diagnostic: id
+    };
+}
+
+// type_ids_equal is the O(1) semantic equality operation after interning.
+fn type_ids_equal(left: TypeId, right: TypeId) -> boolean {
+    return left.value == right.value;
+}
+
+// qualified_declaration_ids_equal compares declaration ownership, never source
+// spelling.
+fn qualified_declaration_ids_equal(left: QualifiedDeclarationId, right: QualifiedDeclarationId) -> boolean {
+    if left.origin.capsule != right.origin.capsule { return false; }
+    if left.origin.module != right.origin.module { return false; }
+    return left.declaration.value == right.declaration.value;
+}
+
+enum PointerPermission {
+    ReadOnly,
+    Mutable
+}
+
+enum FloatFormat {
+    F16,
+    Bf16,
+    F32,
+    F64
+}
+
+enum OwnershipClass {
+    Copyable,
+    Affine,
+    Linear
+}
+
+enum FunctionCallKind {
+    SailfinValue,
+    CFunction
+}
+
+enum IntrinsicConstructorKind {
+    Array,
+    Channel,
+    Task,
+    Affine,
+    Linear,
+    Pii,
+    Secret
+}
+
+enum TypeConstructorKind {
+    Intrinsic,
+    Nominal
+}
+
+// TypeConstructorDescriptor owns nominal qualification, arity, and ownership
+// classification. is_owned_buf_compatibility is the bounded bridge for the
+// currently shipped name-based OwnedBuf surface; later analysis reads this
+// descriptor rather than annotation text.
+struct TypeConstructorDescriptor {
+    id: TypeConstructorId;
+    kind: TypeConstructorKind;
+    intrinsic: IntrinsicConstructorKind;
+    has_declaration: boolean;
+    declaration: QualifiedDeclarationId;
+    diagnostic_name: string;
+    arity: int;
+    ownership: OwnershipClass;
+    is_owned_buf_compatibility: boolean;
+}
+
+enum StructuralTypeKind {
+    Unit,
+    Null,
+    Bool,
+    Int,
+    Float,
+    String,
+    Dynamic,
+    Pointer,
+    Reference,
+    TypeParameter,
+    Applied,
+    Union,
+    Function
+}
+
+// StructuralType is a wide record whose active fields are selected by kind.
+// Unused fields carry canonical defaults so equality and hashing never depend
+// on uninitialized payload state.
+struct StructuralType {
+    kind: StructuralTypeKind;
+    int_width: int;
+    int_signed: boolean;
+    float_format: FloatFormat;
+    has_pointee: boolean;
+    pointee: TypeId;
+    pointer_permission: PointerPermission;
+    address_space: int;
+    referent: TypeId;
+    reference_mutable: boolean;
+    type_parameter_owner: QualifiedDeclarationId;
+    type_parameter_index: int;
+    constructor: TypeConstructorId;
+    arguments: TypeId[];
+    union_members: TypeId[];
+    parameters: TypeId[];
+    result: TypeId;
+    effects: EffectSetId;
+    call_kind: FunctionCallKind;
+}
