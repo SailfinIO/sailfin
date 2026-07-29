@@ -126,11 +126,57 @@ fi
 rm -rf "$WORK_DIR"
 mkdir -p "$WORK_DIR/bin" "$WORK_DIR/compiler-a" "$WORK_DIR/pass-1" "$WORK_DIR/pass-2"
 
-cat >"$WORK_DIR/bin/clang-x86_64" <<EOF
+# Read an ELF's machine name without a pipeline: `readelf … | grep -q` reports
+# the *pipeline's* status under `pipefail`, so a readelf that fails — or is
+# killed by SIGPIPE when grep exits on first match — makes a correct binary
+# look wrong. That is the same failure shape that made the binfmt probe reject
+# hosts where the registration was already live.
+elf_machine() {
+	readelf -h "$1" 2>/dev/null | sed -n 's/^[[:space:]]*Machine:[[:space:]]*//p'
+}
+
+# The seed resolves its C compiler by looking up the bare name `clang` on PATH
+# (`process.run(["clang", …])`) and emits target-neutral IR carrying no target
+# triple, so whichever `clang` PATH finds decides the output architecture.
+# `SAILFIN_CC` cannot steer it — nothing under compiler/src reads that
+# variable; only the macOS branch of the Makefile does, and it works precisely
+# by shadowing `clang` on PATH (see CLANG_SHIM_DIR). Stage 1 previously set
+# `SAILFIN_CC` to a wrapper named `clang-x86_64`, which nothing ever invoked,
+# so the emulated x86_64 seed built compiler A with the host's native aarch64
+# clang and the readelf gate correctly rejected the result.
+#
+# Shadow `clang` itself, in a directory prepended to PATH for stage 1 only:
+# stages 2 and 3 target aarch64 and want the native compiler.
+CROSS_BIN="$WORK_DIR/bin/x86_64"
+mkdir -p "$CROSS_BIN"
+
+# Bake an absolute path into the wrapper. The wrapper is itself named `clang`
+# and runs with its own directory first on PATH, so a bare name here re-resolves
+# to the wrapper and forks until the machine dies — which is what `NATIVE_CC`
+# defaults to when SAILFIN_NATIVE_CC is unset, as it is for a local run.
+NATIVE_CC_PATH="$(command -v "$NATIVE_CC")" \
+	|| fail "cannot resolve the native C compiler: $NATIVE_CC"
+
+cat >"$CROSS_BIN/clang" <<EOF
 #!/usr/bin/env bash
-exec "$NATIVE_CC" --target=x86_64-linux-gnu "\$@"
+exec "$NATIVE_CC_PATH" --target=x86_64-linux-gnu "\$@"
 EOF
-chmod +x "$WORK_DIR/bin/clang-x86_64"
+chmod +x "$CROSS_BIN/clang"
+
+# Prove the cross toolchain works before spending ~30 minutes of emulated
+# build on it. This catches both ways stage 1 can be misconfigured: the
+# shadowing not taking effect (object comes out aarch64) and a missing x86_64
+# CRT/libgcc sysroot (compiles but cannot link).
+printf '[bootstrap-aarch64] verifying the x86_64 cross toolchain\n'
+printf 'int main(void) { return 0; }\n' >"$WORK_DIR/cross-probe.c"
+PATH="$CROSS_BIN:$PATH" clang -c "$WORK_DIR/cross-probe.c" -o "$WORK_DIR/cross-probe.o" \
+	|| fail "the shadowed x86_64 clang cannot compile an object"
+case "$(elf_machine "$WORK_DIR/cross-probe.o")" in
+	"Advanced Micro Devices X86-64" | "AMD x86-64") ;;
+	*) fail "PATH shadowing is not taking effect: the probe object is $(elf_machine "$WORK_DIR/cross-probe.o"), not x86_64" ;;
+esac
+PATH="$CROSS_BIN:$PATH" clang "$WORK_DIR/cross-probe.c" -o "$WORK_DIR/cross-probe" \
+	|| fail "x86_64 cross link failed; the amd64 CRT/libgcc development packages are missing (need libc6-dev:amd64 and libgcc-*-dev:amd64)"
 
 run_x86() {
 	local binary="$1"
@@ -141,22 +187,26 @@ run_x86() {
 printf '[bootstrap-aarch64] building arch-aware x86_64 compiler A\n'
 (
 	cd "$ROOT"
-	SAILFIN_CC="$WORK_DIR/bin/clang-x86_64" SAILFIN_TARGET_ARCH=x86_64 \
+	PATH="$CROSS_BIN:$PATH" SAILFIN_TARGET_ARCH=x86_64 \
 		run_x86 "$SEED_X86_64" build --no-cache -p compiler \
 		--work-dir "$WORK_DIR/compiler-a" -o "$WORK_DIR/compiler-a/sfn"
 )
-readelf -h "$WORK_DIR/compiler-a/sfn" | grep -Eq 'Machine:[[:space:]]+(Advanced Micro Devices X86-64|AMD x86-64)' \
-	|| fail "compiler A is not an x86_64 ELF executable"
+case "$(elf_machine "$WORK_DIR/compiler-a/sfn")" in
+	"Advanced Micro Devices X86-64" | "AMD x86-64") ;;
+	*) fail "compiler A is not an x86_64 ELF executable (machine: $(elf_machine "$WORK_DIR/compiler-a/sfn"))" ;;
+esac
 
 printf '[bootstrap-aarch64] building native pass-1 with compiler A\n'
 (
 	cd "$ROOT"
-	SAILFIN_CC="$NATIVE_CC" SAILFIN_TARGET_ARCH=aarch64 \
+	SAILFIN_TARGET_ARCH=aarch64 \
 		run_x86 "$WORK_DIR/compiler-a/sfn" build --no-cache -p compiler \
 		--work-dir "$WORK_DIR/pass-1" -o "$WORK_DIR/pass-1/sfn"
 )
-readelf -h "$WORK_DIR/pass-1/sfn" | grep -Eq 'Machine:[[:space:]]+AArch64' \
-	|| fail "pass-1 is not an AArch64 ELF executable"
+case "$(elf_machine "$WORK_DIR/pass-1/sfn")" in
+	AArch64) ;;
+	*) fail "pass-1 is not an AArch64 ELF executable (machine: $(elf_machine "$WORK_DIR/pass-1/sfn"))" ;;
+esac
 
 printf '[bootstrap-aarch64] checking native pass-1\n'
 "$WORK_DIR/pass-1/sfn" --version
@@ -165,7 +215,7 @@ printf '[bootstrap-aarch64] checking native pass-1\n'
 printf '[bootstrap-aarch64] building native pass-2\n'
 (
 	cd "$ROOT"
-	SAILFIN_CC="$NATIVE_CC" SAILFIN_TARGET_ARCH=aarch64 \
+	SAILFIN_TARGET_ARCH=aarch64 \
 		"$WORK_DIR/pass-1/sfn" build --no-cache -p compiler \
 		--work-dir "$WORK_DIR/pass-2" -o "$WORK_DIR/pass-2/sfn"
 )
