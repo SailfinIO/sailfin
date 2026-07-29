@@ -58,7 +58,12 @@ fn _plain_env() -> string[] ![io] {
 }
 
 fn _test_root(tag: string) -> string ![io] {
-    return fs.mkdtemp(_scratch_dir() + "/binfmt-" + tag + "-");
+    let dir = fs.mkdtemp(_scratch_dir() + "/binfmt-" + tag + "-");
+    // `mkdtemp` returns "" on failure. An empty root would be threaded through
+    // as `SAILFIN_BINFMT_DIR=`, silently pointing every case at the host's real
+    // binfmt_misc mount and making these assertions host-dependent.
+    assert dir.length > 0;
+    return dir;
 }
 
 // Every fixture carries a write-only `register` node (mode 000, empty

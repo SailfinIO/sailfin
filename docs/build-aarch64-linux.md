@@ -40,7 +40,8 @@ Two further knobs exist for the binfmt gate. `SAILFIN_BINFMT_DIR` points the
 registration probe somewhere other than `/proc/sys/fs/binfmt_misc`, and
 `SAILFIN_BINFMT_PROBE_ONLY=1` runs that probe alone and exits with its verdict
 — `0` when a usable x86_64 registration is present, `1` otherwise — without
-touching the host or seed checks. Together they let
+touching the host or seed checks. Never leave that one exported: it makes the
+whole bootstrap a no-op that builds nothing and exits `0`. Together they let
 `compiler/tests/e2e/aarch64_binfmt_probe_test.sfn` cover the gate from any
 Linux host instead of only from an aarch64 runner with a live binfmt_misc
 mount.
