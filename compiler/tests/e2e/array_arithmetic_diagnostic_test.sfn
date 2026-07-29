@@ -80,9 +80,11 @@ test "array arithmetic: string[] + string[] follows the same diagnostic path" ![
     assert find(output, "internal compiler error", 0) < 0;
 }
 
-test "aggregate arithmetic: struct + struct is rejected before invalid LLVM emission" ![io] {
+test "aggregate arithmetic: struct + struct reports frontend E0308 at the plus" ![io] {
     let output = _build(_struct_add_source(), "structs.sfn");
-    assert find(output, "[E0307]", 0) >= 0;
+    assert find(output, "error[E0308]:", 0) >= 0;
+    assert find(output, "structs:8:15", 0) >= 0;
+    assert find(output, "llvm lowering [fatal]", 0) < 0;
     assert find(output, "invalid operand type for instruction", 0) < 0;
     assert find(output, "internal compiler error", 0) < 0;
 }

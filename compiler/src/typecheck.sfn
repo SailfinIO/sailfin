@@ -29,6 +29,7 @@ import {
     SymbolCollectionResult,
     SymbolEntry,
     append_symbol,
+    bound_base_name,
     channel_element_kind,
     check_bare_fn_type_annotation,
     check_char_literal_raw,
@@ -78,6 +79,7 @@ import {
     make_spawn_handle_into_empty_array_diagnostic,
     make_spawn_handle_kind_mismatch_diagnostic,
     make_spawn_unresolvable_kind_diagnostic,
+    make_struct_arithmetic_diagnostic,
     make_task_array_element_marker,
     make_thread_local_requires_mut_diagnostic,
     make_try_error_type_mismatch_diagnostic,
@@ -355,7 +357,7 @@ fn _symbols_from_global_names(names: string[]) -> SymbolEntry[] {
     loop {
         if i >= names.length { break; }
         out.push(SymbolEntry {
-            name: names[i], kind: "prelude", span: null, is_generic: false, is_c_abi: false, element_kind: "", declared_prim: ""
+            name: names[i], kind: "prelude", span: null, is_generic: false, is_c_abi: false, element_kind: "", declared_prim: "", declared_struct: ""
         });
         i += 1;
     }
@@ -410,6 +412,34 @@ fn collect_top_level_symbols(program: Program) -> SymbolCollectionResult {
         }
     }
 
+    // Top-level names are collected before type metadata is resolved so a
+    // variable annotation can name a struct declared later in the file. Walk
+    // the source order again and enrich only the first variable declaration
+    // for each name (duplicates were rejected above and retain the first).
+    let mut seen_variables: string[] = [];
+    let no_type_params: string[] = [];
+    for statement in program.statements {
+        if statement.variant == "VariableDeclaration" {
+            if !_string_list_has(seen_variables, statement.name) {
+                seen_variables.push(statement.name);
+                let declared_struct = _declared_struct_annotation(statement.type_annotation, symbols, no_type_params);
+                if declared_struct.length > 0 {
+                    let mut index: int = 0;
+                    loop {
+                        if index >= symbols.length { break; }
+                        if strings_equal(symbols[index].name, statement.name) {
+                            if strings_equal(symbols[index].kind, "variable") {
+                                symbols[index].declared_struct = declared_struct;
+                            }
+                            break;
+                        }
+                        index += 1;
+                    }
+                }
+            }
+        }
+    }
+
     return SymbolCollectionResult {
         symbols: symbols,
         diagnostics: diagnostics
@@ -443,7 +473,7 @@ fn _collect_imported_call_symbols(program: Program) -> SymbolEntry[] {
                     if alias_str.length > 0 { local_name = alias_str; }
                 }
                 symbols.push(SymbolEntry {
-                    name: local_name, kind: "import", span: null, is_generic: false, is_c_abi: false, element_kind: "", declared_prim: ""
+                    name: local_name, kind: "import", span: null, is_generic: false, is_c_abi: false, element_kind: "", declared_prim: "", declared_struct: ""
                 });
                 s += 1;
             }
@@ -474,6 +504,65 @@ fn _names_from_symbols(symbols: SymbolEntry[]) -> string[] {
         i += 1;
     }
     return names;
+}
+
+fn _string_list_has(values: string[], target: string) -> boolean {
+    let mut index: int = 0;
+    loop {
+        if index >= values.length { break; }
+        if strings_equal(values[index], target) { return true; }
+        index += 1;
+    }
+    return false;
+}
+
+// Type annotations resolve in the type namespace. Walk innermost-first but
+// ignore value/callable bindings with the same spelling; aliases, enums, and
+// interfaces remain visible so they can prevent a false struct proof.
+fn _find_type_symbol(symbols: SymbolEntry[], name: string) -> SymbolEntry? {
+    let mut index: int = symbols.length - 1;
+    loop {
+        if index < 0 { break; }
+        let entry = symbols[index];
+        if strings_equal(entry.name, name) {
+            let mut is_type: boolean = false;
+            if strings_equal(entry.kind, "struct") { is_type = true; }
+            if strings_equal(entry.kind, "enum") { is_type = true; }
+            if strings_equal(entry.kind, "interface") { is_type = true; }
+            if strings_equal(entry.kind, "type") { is_type = true; }
+            if is_type { return entry; }
+        }
+        index -= 1;
+    }
+    return null;
+}
+
+fn _find_symbol_with_kind(symbols: SymbolEntry[], name: string, kind: string) -> SymbolEntry? {
+    let mut index: int = symbols.length - 1;
+    loop {
+        if index < 0 { break; }
+        let entry = symbols[index];
+        if strings_equal(entry.name, name) {
+            if strings_equal(entry.kind, kind) { return entry; }
+        }
+        index -= 1;
+    }
+    return null;
+}
+
+// Resolve an explicit annotation in its declaration scope. Only a direct
+// struct name/generic instantiation survives. Arrays, aliases, inferred
+// values, and a base name shadowed by a scoped type parameter stay fail-open.
+fn _declared_struct_annotation(annotation: TypeAnnotation?, bindings: SymbolEntry[], type_params: string[]) -> string {
+    if annotation == null { return ""; }
+    let text = annotation.text;
+    if declared_array_marker(text).length > 0 { return ""; }
+    let base_name = bound_base_name(text);
+    if _string_list_has(type_params, base_name) { return ""; }
+    let type_entry = _find_type_symbol(bindings, base_name);
+    if type_entry == null { return ""; }
+    if !strings_equal(type_entry.kind, "struct") { return ""; }
+    return text;
 }
 
 fn register_top_level_symbol(statement: Statement, existing: SymbolEntry[]) -> SymbolCollectionResult {
@@ -728,7 +817,17 @@ fn check_statement(statement: Statement, ctx: TypeckCtx) -> ScopeResult {
         if statement.type_annotation != null {
             decl_prim = classify_declared_primitive(statement.type_annotation.text);
         }
-        let registration = register_local_symbol(bindings, statement.name, "variable", statement.span, scope_start, false, false, elem_kind, decl_prim);
+        let mut declared_struct = _declared_struct_annotation(statement.type_annotation, bindings, ctx.type_params);
+        // The source-wide top-level collection resolves annotations against
+        // forward declarations. Preserve that proof when the sequential
+        // statement walk re-registers this global for initializer analysis.
+        if is_top_level {
+            let top_variable = _find_symbol_with_kind(top_level, statement.name, "variable");
+            if top_variable != null {
+                declared_struct = top_variable.declared_struct;
+            }
+        }
+        let registration = register_local_symbol(bindings, statement.name, "variable", statement.span, scope_start, false, false, elem_kind, decl_prim, declared_struct);
         let walk_diags = walk_expression(statement.initializer, ctx);
         let annotation_diags = check_bare_fn_type_annotation(statement.type_annotation, statement.name, statement.span);
         let array_diags = check_malformed_array_annotation(statement.type_annotation, statement.name, statement.span);
@@ -850,11 +949,12 @@ fn check_statement(statement: Statement, ctx: TypeckCtx) -> ScopeResult {
             diagnostics.push(_si_diags[_ci4]);
             _ci4 += 1;
         }
+        let method_ctx = ctx_with_type_params(ctx, type_parameter_names(statement.type_parameters));
         let mut index: int = 0;
         loop {
             if index >= statement.methods.length { break; }
             let method = statement.methods[index];
-            let _mb_diags = check_function_body(method.signature, method.body, ctx);
+            let _mb_diags = check_function_body(method.signature, method.body, method_ctx);
             let mut _ci5: int = 0;
             loop {
                 if _ci5 >= _mb_diags.length { break; }
@@ -1108,8 +1208,8 @@ fn check_statement(statement: Statement, ctx: TypeckCtx) -> ScopeResult {
 }
 
 fn check_function_body(signature: FunctionSignature, body: Block, ctx: TypeckCtx) -> Diagnostic[] {
-    let parameter_scope = seed_parameter_scope(signature, ctx.top_level);
     let generic_ctx = ctx_with_type_params(ctx, type_parameter_names(signature.type_parameters));
+    let parameter_scope = seed_parameter_scope(signature, generic_ctx);
     let body_ctx = ctx_enter_body(generic_ctx, parameter_scope.bindings, signature.return_type);
     let body_diagnostics = check_block(body, body_ctx);
     let mut _result = parameter_scope.diagnostics;
@@ -1127,8 +1227,8 @@ fn check_function_body(signature: FunctionSignature, body: Block, ctx: TypeckCtx
 // registered starting at `param_scope_start` (past the seeded entries)
 // so a parameter may legally shadow a top-level name without tripping
 // E0001, while parameter-vs-parameter duplicates are still caught.
-fn seed_parameter_scope(signature: FunctionSignature, top_level: SymbolEntry[]) -> ScopeResult {
-    let mut bindings: SymbolEntry[] = clone_bindings(top_level);
+fn seed_parameter_scope(signature: FunctionSignature, ctx: TypeckCtx) -> ScopeResult {
+    let mut bindings: SymbolEntry[] = clone_bindings(ctx.top_level);
     let param_scope_start = bindings.length;
     let mut diagnostics: Diagnostic[] = [];
 
@@ -1139,7 +1239,8 @@ fn seed_parameter_scope(signature: FunctionSignature, top_level: SymbolEntry[]) 
             param_prim = classify_declared_primitive(parameter.type_annotation.text);
             param_array = declared_array_marker(parameter.type_annotation.text);
         }
-        let registration = register_local_symbol(bindings, parameter.name, "parameter", parameter.span, param_scope_start, false, false, param_array, param_prim);
+        let declared_struct = _declared_struct_annotation(parameter.type_annotation, ctx.top_level, ctx.type_params);
+        let registration = register_local_symbol(bindings, parameter.name, "parameter", parameter.span, param_scope_start, false, false, param_array, param_prim, declared_struct);
         bindings = registration.bindings;
         let mut _ci: int = 0;
         loop {
@@ -1147,7 +1248,7 @@ fn seed_parameter_scope(signature: FunctionSignature, top_level: SymbolEntry[]) 
             diagnostics.push(registration.diagnostics[_ci]);
             _ci += 1;
         }
-        let default_diags = check_object_literal_target(parameter.default_value, parameter.type_annotation, parameter.name, parameter.span, top_level);
+        let default_diags = check_object_literal_target(parameter.default_value, parameter.type_annotation, parameter.name, parameter.span, ctx.top_level);
         let mut _di: int = 0;
         loop {
             if _di >= default_diags.length { break; }
@@ -1208,7 +1309,7 @@ fn _build_nested_fn_scope(signature: FunctionSignature, ctx: TypeckCtx) -> Scope
         if !has_symbol(ctx.top_level, entry.name) {
             if !is_function_kind(entry.kind) {
                 scope.push(SymbolEntry {
-                    name: entry.name, kind: "outer_local", span: entry.span, is_generic: false, is_c_abi: false, element_kind: "", declared_prim: ""
+                    name: entry.name, kind: "outer_local", span: entry.span, is_generic: false, is_c_abi: false, element_kind: "", declared_prim: "", declared_struct: ""
                 });
             }
         }
@@ -1237,6 +1338,7 @@ fn _build_nested_fn_scope(signature: FunctionSignature, ctx: TypeckCtx) -> Scope
     // (4) own parameters — highest priority; may shadow any of the above.
     let param_scope_start = scope.length;
     let mut diagnostics: Diagnostic[] = [];
+    let param_type_params = _decl_type_params(ctx, signature.type_parameters);
     for parameter in signature.parameters {
         let mut nparam_prim: string = "";
         let mut nparam_array: string = "";
@@ -1244,7 +1346,8 @@ fn _build_nested_fn_scope(signature: FunctionSignature, ctx: TypeckCtx) -> Scope
             nparam_prim = classify_declared_primitive(parameter.type_annotation.text);
             nparam_array = declared_array_marker(parameter.type_annotation.text);
         }
-        let registration = register_local_symbol(scope, parameter.name, "parameter", parameter.span, param_scope_start, false, false, nparam_array, nparam_prim);
+        let declared_struct = _declared_struct_annotation(parameter.type_annotation, scope, param_type_params);
+        let registration = register_local_symbol(scope, parameter.name, "parameter", parameter.span, param_scope_start, false, false, nparam_array, nparam_prim, declared_struct);
         scope = registration.bindings;
         let mut _ci: int = 0;
         loop {
@@ -1424,11 +1527,11 @@ fn _trim_main_type_text(text: string) -> string {
 // Extract enum-destructure field-binding NAMES from a match-arm
 // pattern and append them to a fresh copy of `bindings` as
 // "variable"-kind symbols so the arm body can reference them. TYPE
-// resolution is deferred to lowering (#830); the typecheck pass tracks
-// names only (`SymbolEntry` has no type field). A bare-identifier
-// pattern (catch-all) binds that single name unless it is the wildcard
-// `_`. Literal patterns add nothing. `append_symbol` clones, so the
-// parent scope is never mutated and arm bindings stay arm-scoped.
+// resolution is deferred to lowering (#830); these match-pattern entries
+// carry names only and do not populate `SymbolEntry.declared_struct`. A
+// bare-identifier pattern (catch-all) binds that single name unless it is
+// the wildcard `_`. Literal patterns add nothing. `append_symbol` clones,
+// so the parent scope is never mutated and arm bindings stay arm-scoped.
 //
 // Shorthand destructures (`Shape.Circle { radius }`) parse to
 // `Expression.Raw`, not `Expression.Struct`, because `parse_object_literal`
@@ -1605,6 +1708,7 @@ fn walk_expression(expression: Expression?, ctx: TypeckCtx) -> Diagnostic[] {
         // primitive mismatch").
         diagnostics = diagnostics.concat(mixed_arithmetic_diagnostics(expression, bindings));
         diagnostics = diagnostics.concat(array_arithmetic_diagnostics(expression, bindings));
+        diagnostics = diagnostics.concat(_struct_arithmetic_diagnostics(expression, ctx));
         return diagnostics;
     }
     if expression.variant == "Unary" {
@@ -1682,7 +1786,8 @@ fn walk_expression(expression: Expression?, ctx: TypeckCtx) -> Diagnostic[] {
             if param.type_annotation != null {
                 param_array = declared_array_marker(param.type_annotation.text);
             }
-            let registration = register_local_symbol(body_bindings, param.name, "parameter", param.span, param_scope_start, false, false, param_array);
+            let declared_struct = _declared_struct_annotation(param.type_annotation, body_bindings, ctx.type_params);
+            let registration = register_local_symbol(body_bindings, param.name, "parameter", param.span, param_scope_start, false, false, param_array, "", declared_struct);
             body_bindings = registration.bindings;
             diagnostics = diagnostics.concat(registration.diagnostics);
             _pp += 1;
@@ -2352,6 +2457,36 @@ fn array_arithmetic_diagnostics(expression: Expression, bindings: SymbolEntry[])
     return [make_array_arithmetic_diagnostic(op, expression.span)];
 }
 
+// Return the declaration-resolved struct annotation for a bare binding
+// operand. The binding registrar already proved this in the declaration's
+// lexical scope; use-site generic/alias shadowing must not re-resolve it.
+fn _operand_struct_name(expression: Expression?, bindings: SymbolEntry[]) -> string {
+    if expression == null { return ""; }
+    if !strings_equal(expression.variant, "Identifier") { return ""; }
+    let entry = find_symbol(bindings, expression.name);
+    if entry == null { return ""; }
+    return entry.declared_struct;
+}
+
+// Reject only proven struct/struct arithmetic on named, explicitly typed
+// operands. Calls, literals, inferred bindings, aliases, and mixed shapes stay
+// fail-open; extending expression inference is outside SFN-584.
+fn _struct_arithmetic_diagnostics(expression: Expression, ctx: TypeckCtx) -> Diagnostic[] {
+    let op = expression.operator;
+    let mut is_arith: boolean = false;
+    if strings_equal(op, "+") { is_arith = true; }
+    if strings_equal(op, "-") { is_arith = true; }
+    if strings_equal(op, "*") { is_arith = true; }
+    if strings_equal(op, "/") { is_arith = true; }
+    if strings_equal(op, "%") { is_arith = true; }
+    if !is_arith { return []; }
+    let left_type = _operand_struct_name(expression.left, ctx.bindings);
+    if left_type.length == 0 { return []; }
+    let right_type = _operand_struct_name(expression.right, ctx.bindings);
+    if right_type.length == 0 { return []; }
+    return [make_struct_arithmetic_diagnostic(left_type, right_type, op, expression.span)];
+}
+
 // The monomorphized element kind a `let x = await ch.receive()` initializer
 // yields (#1944): `await` over a channel `receive` is the degenerate
 // pass-through of the channel's element type — the receive already blocks
@@ -2431,7 +2566,9 @@ fn walk_block_expressions(block: Block, ctx: TypeckCtx) -> Diagnostic[] {
             // `check_channel_send` can enforce element-type on a later
             // `x.send(v)` (#1942). Every other binding records "".
             let mut elem_kind: string = "";
+            let mut decl_prim: string = "";
             if statement.type_annotation != null {
+                decl_prim = classify_declared_primitive(statement.type_annotation.text);
                 let resolved = channel_element_kind(statement.type_annotation.text);
                 if resolved != null { elem_kind = resolved; }
                 // `Task<T>[]` handle-array marker (SFEP-0055) — see the primary
@@ -2465,7 +2602,8 @@ fn walk_block_expressions(block: Block, ctx: TypeckCtx) -> Diagnostic[] {
                     }
                 }
             }
-            let registration = register_local_symbol(bindings, statement.name, "variable", statement.span, scope_start, false, false, elem_kind);
+            let declared_struct = _declared_struct_annotation(statement.type_annotation, bindings, ctx.type_params);
+            let registration = register_local_symbol(bindings, statement.name, "variable", statement.span, scope_start, false, false, elem_kind, decl_prim, declared_struct);
             bindings = registration.bindings;
         }
         index += 1;
