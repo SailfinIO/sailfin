@@ -335,7 +335,11 @@ here.
   complete. Typed SSA's L1 declaration producer is also reachable through
   `sfn emit typed-ssa`: scalar signatures, linkage, and canonical effect sets
   are parsed from `.sfn-asm`, verified, and rendered deterministically; an
-  unsupported signature rejects the whole module. Function bodies, capability
+  unsupported signature rejects the whole module. The typed SSA model,
+  verifier, and renderer define explicit, non-inferring scalar conversion
+  kinds for integer widths/signs, integer/float boundaries, float widths, and
+  pointer/integer boundaries; body production and backend consumption of those
+  conversions are not yet connected. Function bodies, capability
   derivation/manifests, direct linker ownership, native object/code emission,
   gated call sites, and native-backend self-hosting are not shipped. #343's
   mold/lld selection still runs behind clang and is a Stage-1 precursor, not an

@@ -1,0 +1,113 @@
+// Typed SSA conversion contract coverage for SFEP-0015 §9.4 and §9.6.
+import { index_of } from "../../src/string_utils";
+import {
+    ConvertKind,
+    Linkage,
+    Module,
+    begin_function,
+    emit_convert,
+    end_block,
+    finish_function,
+    intern_bool,
+    intern_capability_set,
+    intern_effect_set,
+    intern_float,
+    intern_int,
+    intern_pointer,
+    intern_symbol,
+    new_module,
+    term_return_value
+} from "../../src/typed_ssa";
+import { render_module } from "../../src/typed_ssa_render";
+import { VerifyResult, verify_module } from "../../src/typed_ssa_verify";
+
+fn _contains(text: string, needle: string) -> boolean {
+    return index_of(text, needle) >= 0;
+}
+
+fn _conversion_module(valid: boolean) -> Module {
+    let mut m = new_module("convert", "convert");
+    let rb = intern_bool(m);
+    m = rb.module;
+    let si8 = intern_int(m, 8, true);
+    m = si8.module;
+    let si32 = intern_int(m, 32, true);
+    m = si32.module;
+    let si64 = intern_int(m, 64, true);
+    m = si64.module;
+    let ui8 = intern_int(m, 8, false);
+    m = ui8.module;
+    let ui32 = intern_int(m, 32, false);
+    m = ui32.module;
+    let ui64 = intern_int(m, 64, false);
+    m = ui64.module;
+    let f32 = intern_float(m, 32);
+    m = f32.module;
+    let f64 = intern_float(m, 64);
+    m = f64.module;
+    let p0 = intern_pointer(m, -1, 0);
+    m = p0.module;
+    let p1 = intern_pointer(m, -1, 1);
+    m = p1.module;
+    let re = intern_effect_set(m, []);
+    m = re.module;
+    let rc = intern_capability_set(m, []);
+    m = rc.module;
+    let sym = intern_symbol(m, "conversions");
+    m = sym.module;
+    let mut sources: int[] = [si64.id, si8.id, ui8.id, si32.id, ui32.id, f32.id, f32.id, f64.id, f32.id, p0.id, si64.id, p0.id];
+    let mut results: int[] = [si8.id, si64.id, ui64.id, f64.id, f64.id, si32.id, ui32.id, f32.id, f64.id, si64.id, p0.id, p1.id];
+    if !valid {
+        sources = [rb.id, rb.id, rb.id, rb.id, rb.id, rb.id, rb.id, rb.id, rb.id, rb.id, rb.id, rb.id];
+        results = [si8.id, si8.id, si8.id, si8.id, si8.id, si8.id, si8.id, si8.id, si8.id, si8.id, si8.id, si8.id];
+    }
+    let kinds: ConvertKind[] = [ConvertKind.IntTruncate(), ConvertKind.IntSignExtend(), ConvertKind.IntZeroExtend(), ConvertKind.IntToFloat(), ConvertKind.UnsignedIntToFloat(), ConvertKind.FloatToInt(), ConvertKind.FloatToUnsignedInt(), ConvertKind.FloatTruncate(), ConvertKind.FloatExtend(), ConvertKind.PointerToInt(), ConvertKind.IntToPointer(), ConvertKind.PointerCast()];
+    let mut b = begin_function(sym.id, sources, results[11], re.id, rc.id, Linkage.Internal());
+    let mut last: int = -1;
+    let mut i: int = 0;
+    loop {
+        if i >= kinds.length { break; }
+        let added = emit_convert(b, kinds[i], i, results[i]);
+        b = added.builder;
+        last = added.value_id;
+        i += 1;
+    }
+    b = end_block(b, term_return_value(last));
+    let fin = finish_function(m, b);
+    return fin.module;
+}
+
+test "typed_ssa: every explicit conversion kind admits its named type pair" {
+    let result: VerifyResult = verify_module(_conversion_module(true));
+    assert result.ok;
+    assert result.diagnostics.length == 0;
+}
+
+test "typed_ssa: every conversion kind rejects and names an offending type pair" {
+    let result: VerifyResult = verify_module(_conversion_module(false));
+    assert ! result.ok;
+    let names: string[] = ["IntTruncate", "IntSignExtend", "IntZeroExtend", "IntToFloat", "UnsignedIntToFloat", "FloatToInt", "FloatToUnsignedInt", "FloatTruncate", "FloatExtend", "PointerToInt", "IntToPointer", "PointerCast"];
+    let mut i: int = 0;
+    loop {
+        if i >= names.length { break; }
+        assert result.diagnostics[i].code == "TSSA054";
+        assert _contains(result.diagnostics[i].message, names[i]);
+        assert _contains(result.diagnostics[i].message, "Bool");
+        assert _contains(result.diagnostics[i].message, "i8");
+        i += 1;
+    }
+}
+
+test "typed_ssa: conversion semantic names render deterministically" {
+    let module: Module = _conversion_module(true);
+    let first: string = render_module(module);
+    let second: string = render_module(_conversion_module(true));
+    assert first == second;
+    let names: string[] = ["int_truncate", "int_sign_extend", "int_zero_extend", "int_to_float", "unsigned_int_to_float", "float_to_int", "float_to_unsigned_int", "float_truncate", "float_extend", "pointer_to_int", "int_to_pointer", "pointer_cast"];
+    let mut i: int = 0;
+    loop {
+        if i >= names.length { break; }
+        assert _contains(first, " = " + names[i] + " v");
+        i += 1;
+    }
+}

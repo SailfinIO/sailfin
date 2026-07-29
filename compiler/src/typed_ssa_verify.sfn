@@ -58,6 +58,78 @@ fn _is_float(module: Module, tid: int) -> boolean {
     return _type_kind(module, tid) == "Float";
 }
 
+fn _is_pointer(module: Module, tid: int) -> boolean {
+    return _type_kind(module, tid) == "Pointer";
+}
+
+fn _type_name(module: Module, tid: int) -> string {
+    if tid < 0 || tid >= module.types.length { return "?"; }
+    let kind: string = _type_kind(module, tid);
+    if kind == "Int" {
+        let mut sign: string = "u";
+        if module.types[tid].int_signed { sign = "i"; }
+        return sign + number_to_string(module.types[tid].int_width);
+    }
+    if kind == "Float" {
+        return "f" + number_to_string(module.types[tid].float_width);
+    }
+    if kind == "Pointer" {
+        return "pointer(as" + number_to_string(module.types[tid].address_space)
+            + ")";
+    }
+    return kind;
+}
+
+fn _convert_pair_is_valid(module: Module, kind: string, operand_type: int, result_type: int) -> boolean {
+    if kind == "IntTruncate" {
+        return _is_int(module, operand_type) && _is_int(module, result_type)
+            && module.types[result_type].int_width < module.types[operand_type].int_width;
+    }
+    if kind == "IntSignExtend" {
+        return _is_int(module, operand_type) && _is_int(module, result_type)
+            && module.types[operand_type].int_signed
+            && module.types[result_type].int_signed
+            && module.types[result_type].int_width > module.types[operand_type].int_width;
+    }
+    if kind == "IntZeroExtend" {
+        return _is_int(module, operand_type) && _is_int(module, result_type)
+            && !module.types[operand_type].int_signed
+            && !module.types[result_type].int_signed
+            && module.types[result_type].int_width > module.types[operand_type].int_width;
+    }
+    if kind == "IntToFloat" {
+        return _is_int(module, operand_type) && module.types[operand_type].int_signed
+            && _is_float(module, result_type);
+    }
+    if kind == "UnsignedIntToFloat" {
+        return _is_int(module, operand_type) && !module.types[operand_type].int_signed
+            && _is_float(module, result_type);
+    }
+    if kind == "FloatToInt" {
+        return _is_float(module, operand_type) && _is_int(module, result_type)
+            && module.types[result_type].int_signed;
+    }
+    if kind == "FloatToUnsignedInt" {
+        return _is_float(module, operand_type) && _is_int(module, result_type)
+            && !module.types[result_type].int_signed;
+    }
+    if kind == "FloatTruncate" {
+        return _is_float(module, operand_type) && _is_float(module, result_type)
+            && module.types[result_type].float_width < module.types[operand_type].float_width;
+    }
+    if kind == "FloatExtend" {
+        return _is_float(module, operand_type) && _is_float(module, result_type)
+            && module.types[result_type].float_width > module.types[operand_type].float_width;
+    }
+    if kind == "PointerToInt" {
+        return _is_pointer(module, operand_type) && _is_int(module, result_type);
+    }
+    if kind == "IntToPointer" {
+        return _is_int(module, operand_type) && _is_pointer(module, result_type);
+    }
+    return _is_pointer(module, operand_type) && _is_pointer(module, result_type);
+}
+
 fn _is_numeric(module: Module, tid: int) -> boolean {
     return _is_int(module, tid) || _is_float(module, tid);
 }
@@ -658,6 +730,21 @@ fn _verify_instr(module: Module, func: SsaFunction, fname: string, block: SsaBlo
                         + " ordered compare requires numeric operands"));
                 }
             }
+        }
+    } else if instr.kind.variant == "Convert" {
+        let od: TssaDiagnostic[] = _use_dominates(module, func, fname, defs, dom, n, bi, ii, instr.operand_a, where
+            + " operand");
+        diags = _concat(diags, od);
+        let ot: int = _value_type(func, instr.operand_a);
+        let kind: string = instr.convert_kind.variant;
+        if !_convert_pair_is_valid(module, kind, ot, rt) {
+            diags.push(_diag("TSSA054", "function " + fname + ": " + where
+                + " convert "
+                + kind
+                + " rejects operand type "
+                + _type_name(module, ot)
+                + " and result type "
+                + _type_name(module, rt)));
         }
     } else if instr.kind.variant == "Call" {
         // Argument dominance.
