@@ -1,6 +1,7 @@
 // #1236 / SFN-91: unit coverage for the explicit jobs parser and the pure
-// RAM+CPU budget behind the native default.
-import { _parse_jobs_value, _test_jobs_budget } from "../../src/cli/commands/test";
+// RAM+CPU budget behind the native default. SFN-547 adds the reconciled
+// 3 GiB/job reserve and the nested-fan-out pin in `_pool_child_env`.
+import { _parse_jobs_value, _pool_child_env, _test_jobs_budget } from "../../src/cli/commands/test";
 
 test "jobs: plain positive integer parses" {
     assert _parse_jobs_value("4") == 4;
@@ -39,8 +40,23 @@ test "jobs: leading whitespace rejected" {
 }
 
 test "jobs: auto budget is bounded by CPU and memory (SFN-91)" {
-    assert _test_jobs_budget(17179869184, 8, false) == 8;
-    assert _test_jobs_budget(1610612736, 8, false) == 4;
+    // 16 GiB * 66% = 11.3 GiB / 3 GiB = 3, below the 8-core ceiling.
+    assert _test_jobs_budget(17179869184, 8, false) == 3;
+    // 1.5 GiB is under a single job's reserve — floors to serial.
+    assert _test_jobs_budget(1610612736, 8, false) == 1;
+    // CPU-bound: 64 GiB affords 14 jobs, 2 cores allows 2.
+    assert _test_jobs_budget(68719476736, 2, false) == 2;
+}
+
+// SFN-547: the reserve is 3 GiB/job out of a 66% slice, matching the emit
+// fan-out (`_cr_ram_budget_jobs`). The 14 GiB host in the report resolved to
+// 16 jobs under the old 384 MiB reserve and killed itself.
+test "jobs: auto budget reserves 3 GiB per job out of 66% of RAM (SFN-547)" {
+    assert _test_jobs_budget(15032385536, 16, false) == 3;
+    // 8 GiB * 66% = 5.3 GiB — one job's reserve fits, a second does not.
+    assert _test_jobs_budget(8589934592, 8, false) == 1;
+    // 32 GiB * 66% = 21.1 GiB / 3 GiB = 7.
+    assert _test_jobs_budget(34359738368, 16, false) == 7;
 }
 
 test "jobs: auto budget floors small and unknown hosts to serial (SFN-91)" {
@@ -49,6 +65,38 @@ test "jobs: auto budget floors small and unknown hosts to serial (SFN-91)" {
 }
 
 test "jobs: auto budget applies global and Darwin caps (SFN-91)" {
-    assert _test_jobs_budget(68719476736, 64, false) == 16;
-    assert _test_jobs_budget(68719476736, 64, true) == 2;
+    // 1 TiB * 66% = 675 GiB / 3 GiB = 225, clamped to the global cap of 16.
+    assert _test_jobs_budget(1099511627776, 64, false) == 16;
+    assert _test_jobs_budget(1099511627776, 64, true) == 2;
+}
+
+// SFN-547: a pooled child must not fan its own per-module emit out beside
+// `jobs - 1` siblings doing the same — the pool is the parallelism layer.
+test "jobs: pooled children are pinned to serial emit (SFN-547)" {
+    let env = _pool_child_env(["PATH=/usr/bin"], "/tmp/s", "/tmp/o", "", false, false);
+    let mut found: boolean = false;
+    let mut i: int = 0;
+    loop {
+        if i >= env.length { break; }
+        if env[i] == "SAILFIN_BUILD_JOBS=1" { found = true; }
+        i += 1;
+    }
+    assert found;
+}
+
+// An explicit override outranks the pin: the inherited entry is kept and no
+// competing default is appended (POSIX `getenv` returns the first match).
+test "jobs: inherited SAILFIN_BUILD_JOBS outranks the serial pin (SFN-547)" {
+    let env = _pool_child_env(["SAILFIN_BUILD_JOBS=4"], "/tmp/s", "/tmp/o", "", false, false);
+    let mut pins: int = 0;
+    let mut kept: boolean = false;
+    let mut i: int = 0;
+    loop {
+        if i >= env.length { break; }
+        if env[i] == "SAILFIN_BUILD_JOBS=1" { pins += 1; }
+        if env[i] == "SAILFIN_BUILD_JOBS=4" { kept = true; }
+        i += 1;
+    }
+    assert kept;
+    assert pins == 0;
 }
