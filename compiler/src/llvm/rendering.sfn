@@ -298,6 +298,13 @@ fn render_runtime_helper_declarations(used_targets: string[], local_functions: N
             if descriptor.target == "sailfin_intrinsic_sc_nprocessors_onln" {
                 _preamble_inlined = true;
             }
+            // SFN-607: the process-footprint sentinel is replaced by a
+            // Darwin-only `getpid` + `proc_pid_rusage` sequence or a
+            // non-Darwin zero. The concrete calls receive declarations from
+            // their dotted registry rows after the post-lowering scan.
+            if descriptor.target == "sailfin_intrinsic_mem_footprint" {
+                _preamble_inlined = true;
+            }
             // #967: the executable-path sentinel never appears as a real
             // `call @sailfin_intrinsic_exe_path(` — the lowering branch
             // (`core_call_emission.sfn`) emits the host's concrete primitive
