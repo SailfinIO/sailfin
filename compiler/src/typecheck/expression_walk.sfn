@@ -41,8 +41,7 @@ import {
     push_spawn_handle_diagnostics
 } from "./concurrency_rules";
 import { TypeckCtx, ctx_enter_body } from "./context";
-import { _build_nested_fn_scope } from "./function_scopes";
-import { _serve_resolves_to_user_fn, register_match_pattern_bindings } from "./patterns";
+import { _serve_resolves_to_user_fn } from "./patterns";
 import { _declared_struct_annotation } from "./symbols";
 import { _is_syscall_name, _syscall_call_diagnostics } from "./syscalls";
 import { _conditional_branch_type, check_conditional_types } from "./try_and_conditional";

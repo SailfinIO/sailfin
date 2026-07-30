@@ -16,9 +16,6 @@ import {
     type_is_future
 } from "../typecheck_types/expr_type_rules";
 import { SymbolEntry, find_symbol } from "../typecheck_types/symbol_table_and_raw_exprs";
-import { walk_block_expressions } from "./block_walk";
-import { walk_expression } from "./expression_walk";
-import { check_try_operator } from "./try_and_conditional";
 
 // Concurrency type rules — issue #1082, epic #965 (M4, decision B). Like the
 // `?`-operator rules above, these are driven against explicit type-annotation

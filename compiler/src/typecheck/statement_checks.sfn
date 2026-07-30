@@ -37,7 +37,6 @@ import { check_struct_implements_interfaces } from "../typecheck_types/interface
 import {
     ScopeResult,
     SymbolEntry,
-    clone_bindings,
     register_local_symbol,
     signature_is_c_abi,
     signature_is_generic
@@ -47,8 +46,6 @@ import {
     check_intersection_value_type_annotation,
     check_object_literal_target
 } from "../typecheck_types/value_and_object_checks";
-import { walk_block_expressions } from "./block_walk";
-import { check_channel_send, push_spawn_handle_diagnostics } from "./concurrency_rules";
 import {
     TypeckCtx,
     ctx_with_bindings,
@@ -60,8 +57,7 @@ import {
     _validate_main_signature,
     check_block,
     check_function_body,
-    check_nested_function_body,
-    seed_parameter_scope
+    check_nested_function_body
 } from "./function_scopes";
 import { register_match_pattern_bindings } from "./patterns";
 import {

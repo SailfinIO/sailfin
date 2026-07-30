@@ -2,12 +2,7 @@
 //
 // Function and block scope construction: parameter seeding, nested-fn
 // hoisting and capture rules, and `main` signature validation.
-import {
-    Block,
-    FunctionSignature,
-    Statement,
-    TypeAnnotation
-} from "../ast";
+import { Block, FunctionSignature, Statement } from "../ast";
 import { Diagnostic } from "../typecheck_types";
 import {
     classify_declared_primitive,
@@ -22,29 +17,21 @@ import {
     ScopeResult,
     SymbolEntry,
     clone_bindings,
-    find_symbol,
     has_symbol,
     is_function_kind,
     register_local_symbol,
-    register_symbol,
     signature_is_c_abi,
     signature_is_generic
 } from "../typecheck_types/symbol_table_and_raw_exprs";
 import { check_object_literal_target } from "../typecheck_types/value_and_object_checks";
-import { walk_block_expressions } from "./block_walk";
 import {
     TypeckCtx,
     ctx_enter_body,
     ctx_with_bindings,
     ctx_with_type_params
 } from "./context";
-import { walk_expression } from "./expression_walk";
 import { check_statement } from "./statement_checks";
-import {
-    _decl_type_params,
-    _declared_struct_annotation,
-    register_top_level_symbol
-} from "./symbols";
+import { _decl_type_params, _declared_struct_annotation } from "./symbols";
 
 fn check_function_body(signature: FunctionSignature, body: Block, ctx: TypeckCtx) -> Diagnostic[] {
     let generic_ctx = ctx_with_type_params(ctx, type_parameter_names(signature.type_parameters));

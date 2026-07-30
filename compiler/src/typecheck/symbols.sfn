@@ -8,23 +8,19 @@ import {
     TypeAnnotation,
     TypeParameter
 } from "../ast";
-import { localize_import_symbols_for_program } from "../effect_imports";
 import { Diagnostic } from "../typecheck_types";
 import { declared_array_marker, type_parameter_names } from "../typecheck_types/annotation_shape_checks";
 import { make_thread_local_requires_mut_diagnostic } from "../typecheck_types/declaration_and_statement_checks";
-import { check_uninferable_generic_constructor } from "../typecheck_types/expr_type_rules";
 import { bound_base_name, check_generic_instantiation } from "../typecheck_types/generic_bounds";
 import { parse_type_arguments, resolve_interface_annotation } from "../typecheck_types/interface_and_generics";
 import {
     SymbolCollectionResult,
     SymbolEntry,
-    has_symbol,
     register_symbol,
     signature_is_c_abi,
     signature_is_generic
 } from "../typecheck_types/symbol_table_and_raw_exprs";
 import { TypeckCtx } from "./context";
-import { typecheck_diagnostics, typecheck_has_errors } from "./mod";
 
 // Every top-level struct declaration, for resolving a concrete type
 // argument to its declaration when checking generic bound satisfaction

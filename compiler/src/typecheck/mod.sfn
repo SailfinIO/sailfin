@@ -11,6 +11,13 @@
 // re-exporting an imported symbol emits no `.fn` signature for it, so
 // consumers lower calls against an `i8*` return
 // (`docs/rca/2026-04-18-reexport-diagnostic-gep.md`).
+//
+// `_`-prefixed helpers in this folder are folder-private, not
+// module-private: several cross module boundaries (for example
+// `_declared_struct_annotation` in `symbols.sfn`, used by four siblings).
+// `symbols_index.sfn` drops `_`-prefixed names before indexing, so they
+// never appear in `sfn symbols` — check the whole folder, not just the
+// defining module, before concluding one is unused.
 import { Program, Statement } from "../ast";
 import {
     ImportSymbolTable,
@@ -19,7 +26,6 @@ import {
     lookup_imported_function
 } from "../effect_imports";
 import { Diagnostic } from "../typecheck_types";
-import { check_struct_implements_interfaces, resolve_interface_annotation } from "../typecheck_types/interface_and_generics";
 import { check_program_scopes } from "./statement_checks";
 import {
     _collect_imported_call_symbols,

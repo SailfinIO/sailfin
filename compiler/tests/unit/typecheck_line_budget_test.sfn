@@ -13,7 +13,7 @@
 // The parent then did the same. A split without a sentinel invites the
 // next one.
 //
-// The split took the heaviest module to 674,936 KB (`statement_checks`),
+// The split took the heaviest module to 671,088 KB (`statement_checks`),
 // down from 2,462,232 KB for the flat file (-72.6%). That drops
 // `typecheck` out of the top slot, but does NOT lower
 // `capsule_emit_parallel.sfn`'s `per_job_reserve`: that reserve is sized
@@ -26,14 +26,14 @@
 // per-module emit. Line count does not predict cross-module RSS: the
 // super-linear relationship in SFEP-0022 §2.4 holds within one module's
 // own decomposition, not between modules. That holds inside this split:
-// `block_walk` costs 384,888 KB at 222 lines while `function_scopes`
-// costs 280,580 KB at 348 — the shorter module is the more expensive
+// `block_walk` costs 380,612 KB at 217 lines while `function_scopes`
+// costs 276,136 KB at 335 — the shorter module is the more expensive
 // one. So this is a maintainability guard, not an RSS bound — a module
 // can sit well inside it and still be the costliest to emit. Pick future
 // decomposition targets by measurement rather than by `wc -l`.
 //
 // Budget rationale: the longest module after the split is
-// `statement_checks.sfn` at 543 lines, holding `check_statement` — a
+// `statement_checks.sfn` at 539 lines, holding `check_statement` — a
 // single 441-line function that dominates it. 750 leaves room for
 // routine maintenance while flagging any module drifting toward the
 // soft budget.
@@ -55,6 +55,8 @@ fn _count_newlines(source: string) -> int {
     return count;
 }
 
+// The module list is hardcoded, so a module added to the folder later is
+// not covered until it is added here too.
 fn _module_lines(name: string) -> int ![io] {
     let source = fs.readFile("compiler/src/typecheck/" + name + ".sfn");
     // A non-empty read is a precondition — guards against a path typo
@@ -63,7 +65,7 @@ fn _module_lines(name: string) -> int ![io] {
     return _count_newlines(source);
 }
 
-test "typecheck: every submodule stays under the line budget" ![io] {
+test "typecheck: each listed submodule stays under the line budget" ![io] {
     let modules: string[] = ["arithmetic_rules", "block_walk", "concurrency_rules", "context", "expression_walk", "function_scopes", "mod", "patterns", "statement_checks", "symbols", "syscalls", "try_and_conditional"];
     let mut i: int = 0;
     loop {

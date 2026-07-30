@@ -13,7 +13,6 @@ import {
     result_type_arguments,
     type_is_result
 } from "../typecheck_types/expr_type_rules";
-import { walk_expression } from "./expression_walk";
 
 // `?` operator (TryOperator) type rules — issue #833, epic #371 (R.3).
 // See `typecheck_types/expr_type_rules.sfn` for `type_is_result` / `result_type_arguments`

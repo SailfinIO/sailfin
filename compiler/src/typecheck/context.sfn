@@ -5,8 +5,6 @@
 // context (type parameters, block bindings, function bodies).
 import { Statement, TypeAnnotation } from "../ast";
 import { ImportSymbolTable } from "../effect_imports";
-import { check_unknown_type_annotation } from "../typecheck_types/annotation_shape_checks";
-import { check_uninferable_generic_constructor } from "../typecheck_types/expr_type_rules";
 import { SymbolEntry } from "../typecheck_types/symbol_table_and_raw_exprs";
 
 // The typing environment + expected-type channel threaded through the

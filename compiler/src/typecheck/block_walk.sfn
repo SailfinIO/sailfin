@@ -20,11 +20,7 @@ import {
 } from "../typecheck_types/expr_type_rules";
 import { SymbolEntry, clone_bindings, register_local_symbol } from "../typecheck_types/symbol_table_and_raw_exprs";
 import { check_intersection_value_type_annotation, check_object_literal_target } from "../typecheck_types/value_and_object_checks";
-import {
-    await_receive_result_kind,
-    check_channel_send,
-    push_spawn_handle_diagnostics
-} from "./concurrency_rules";
+import { await_receive_result_kind } from "./concurrency_rules";
 import {
     TypeckCtx,
     ctx_enter_body,
@@ -32,8 +28,7 @@ import {
     ctx_with_type_params
 } from "./context";
 import { walk_expression, walk_match_pattern } from "./expression_walk";
-import { _build_nested_fn_scope, _hoist_nested_fn_names, check_block } from "./function_scopes";
-import { check_statement } from "./statement_checks";
+import { _build_nested_fn_scope, _hoist_nested_fn_names } from "./function_scopes";
 import { _declared_struct_annotation } from "./symbols";
 
 // Walks expressions inside a block — used by `walk_expression`'s Lambda

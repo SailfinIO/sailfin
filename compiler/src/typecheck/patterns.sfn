@@ -3,7 +3,6 @@
 // Match- and raw-pattern binding registration: the bindings a pattern
 // introduces into the enclosing scope.
 import { Expression } from "../ast";
-import { ImportSymbolTable } from "../effect_imports";
 import { SymbolEntry, append_symbol } from "../typecheck_types/symbol_table_and_raw_exprs";
 import { is_identifier_char } from "../typecheck_types/text_utils";
 
