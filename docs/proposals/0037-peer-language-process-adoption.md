@@ -4,7 +4,7 @@ title: Peer-Language Process Adoption — Merge Queue, ICE Discipline, Perf Hist
 status: Accepted
 type: process
 created: 2026-07-01
-updated: 2026-07-01
+updated: 2026-07-30
 author: "agent:orchestrator (Sailbot); project owner (direction + decisions)"
 tracking: "#1806, #1807, #1808, #1809 (Tier 1, §3.13)"
 supersedes:
@@ -57,12 +57,14 @@ handling stopped scaling:
   span, "file a bug" pointer) and no ICE issue template — so agent-filed
   compiler-bug issues are free-form and hard to dedupe. rustc has treated
   every ICE as a reportable bug with a uniform banner for over a decade.
-- **No performance history.** `benchmark.yml` is `workflow_dispatch`-only and
-  uploads throwaway artifacts; the only baselines are two hand-committed CSVs
-  in `docs/perf/`. Memory regressions have killed CI runners before being
-  noticed (#1245), and the <5 min build target (SFEP-0006) is unenforceable
-  without a time series. Rust (perf.rust-lang.org) and LLVM (the
-  compile-time tracker) catch these per-merge.
+- **Performance-history gap (now closed).** At adoption, `benchmark.yml` was
+  `workflow_dispatch`-only, uploaded throwaway artifacts, and left two
+  hand-committed CSVs in `docs/perf/` as the only baselines. Memory regressions
+  had killed CI runners before being noticed (#1245), and the <5 min build
+  target (SFEP-0006) was unenforceable without a time series. `perf-history.yml`
+  now records that history and enforces the budget on scheduled and non-dry-run
+  executions: it warns at 90% and fails the run when wall time exceeds the
+  budget.
 - **No corpus runs.** Nothing compiles the full in-tree corpus (`examples/`,
   `capsules/`, `benchmarks/runtime/`) against a candidate compiler and diffs
   the result against the pinned seed. Rust's crater and Swift's
@@ -152,11 +154,14 @@ not a one-shot artifact. Regressions open work items automatically.
 compile time + peak RSS — the harness already exists as `sfn bench --compiler`)
 and `make bench-runtime`, appends the CSVs plus commit SHA to an orphan
 `bench-data` branch, and compares against the rolling median of the last N
-runs. A regression beyond threshold (initially: >10% wall-time or >10% peak
-RSS on any module, or the whole-build total crossing the SFEP-0006 budget)
-opens a `type:perf` issue with the offending module and the two data points,
-deduping against an open issue for the same module. No SaaS dependency; the
-data branch is plain CSV and can grow a dashboard later.
+runs. A module regression beyond threshold (initially: >10% wall-time or >10%
+peak RSS) opens a `type:perf` issue with the offending module and the two data
+points, deduping against an open issue for the same module. For scheduled and
+non-dry-run executions, the whole-build budget is also a hard gate: the workflow
+warns at `BUILD_HEADROOM_WARN_PCT` (90%), and a measurement above
+`BUILD_BUDGET_S` opens or updates the budget issue, persists the CSV and artifact
+evidence, then fails the run. No SaaS dependency; the data branch is plain CSV
+and can grow a dashboard later.
 
 *Done-bar:* a synthetic slowdown injected into one module produces exactly
 one auto-filed issue naming that module; reverting it does not re-file.
