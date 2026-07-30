@@ -1,0 +1,85 @@
+// compiler/src/typecheck/syscalls.sfn
+//
+// Direct syscall builtin checks — name recognition, arity, and operand
+// type rules for the `syscall*` intrinsics.
+import { Expression } from "../ast";
+import { index_of } from "../string_utils";
+import { Diagnostic } from "../typecheck_types";
+import { make_syscall_builtin_diagnostic } from "../typecheck_types/declaration_and_statement_checks";
+import { SymbolEntry, find_symbol } from "../typecheck_types/symbol_table_and_raw_exprs";
+import { TypeckCtx } from "./context";
+
+fn _is_syscall_name(name: string) -> boolean {
+    return strings_equal(name, "syscall1") || strings_equal(name, "syscall2")
+        || strings_equal(name, "syscall3")
+        || strings_equal(name, "syscall4")
+        || strings_equal(name, "syscall5")
+        || strings_equal(name, "syscall6");
+}
+
+fn _syscall_arity(name: string) -> int {
+    if strings_equal(name, "syscall1") { return 1; }
+    if strings_equal(name, "syscall2") { return 2; }
+    if strings_equal(name, "syscall3") { return 3; }
+    if strings_equal(name, "syscall4") { return 4; }
+    if strings_equal(name, "syscall5") { return 5; }
+    return 6;
+}
+
+fn _syscall_operand_is_non_int(argument: Expression?, bindings: SymbolEntry[]) -> boolean {
+    if argument == null { return false; }
+    if strings_equal(argument.variant, "StringLiteral") { return true; }
+    if strings_equal(argument.variant, "BooleanLiteral") { return true; }
+    if strings_equal(argument.variant, "NullLiteral") { return true; }
+    if strings_equal(argument.variant, "NumberLiteral") {
+        return index_of(argument.value, ".") >= 0;
+    }
+    if strings_equal(argument.variant, "Unary") {
+        if strings_equal(argument.operator, "!") { return true; }
+        return _syscall_operand_is_non_int(argument.operand, bindings);
+    }
+    if strings_equal(argument.variant, "Binary") {
+        if strings_equal(argument.operator, "==") { return true; }
+        if strings_equal(argument.operator, "!=") { return true; }
+        if strings_equal(argument.operator, "<") { return true; }
+        if strings_equal(argument.operator, "<=") { return true; }
+        if strings_equal(argument.operator, ">") { return true; }
+        if strings_equal(argument.operator, ">=") { return true; }
+        if strings_equal(argument.operator, "&&") { return true; }
+        if strings_equal(argument.operator, "||") { return true; }
+        return _syscall_operand_is_non_int(argument.left, bindings)
+            || _syscall_operand_is_non_int(argument.right, bindings);
+    }
+    if strings_equal(argument.variant, "Conditional") {
+        return _syscall_operand_is_non_int(argument.then_value, bindings)
+            && _syscall_operand_is_non_int(argument.else_value, bindings);
+    }
+    if strings_equal(argument.variant, "Array") { return true; }
+    if strings_equal(argument.variant, "ObjectLiteral") { return true; }
+    if strings_equal(argument.variant, "Lambda") { return true; }
+    if strings_equal(argument.variant, "Identifier") {
+        let entry = find_symbol(bindings, argument.name);
+        if entry == null { return false; }
+        if strings_equal(entry.declared_prim, "float") { return true; }
+        if strings_equal(entry.declared_prim, "string") { return true; }
+        if strings_equal(entry.declared_prim, "boolean") { return true; }
+    }
+    return false;
+}
+
+fn _syscall_call_diagnostics(expression: Expression, ctx: TypeckCtx) -> Diagnostic[] {
+    let name = expression.callee.name;
+    let expected = _syscall_arity(name) + 1;
+    if expression.arguments.length != expected {
+        return [make_syscall_builtin_diagnostic(name, "has the wrong arity; its syscall number and every operand must be `int`", expression.callee.span)];
+    }
+    let mut index: int = 0;
+    loop {
+        if index >= expression.arguments.length { break; }
+        if _syscall_operand_is_non_int(expression.arguments[index], ctx.bindings) {
+            return [make_syscall_builtin_diagnostic(name, "every argument must have type `int`", expression.callee.span)];
+        }
+        index += 1;
+    }
+    return [];
+}

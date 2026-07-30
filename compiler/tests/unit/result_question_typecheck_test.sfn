@@ -10,7 +10,7 @@
 // These drive the callable rule primitives directly, mirroring the #829
 // substitution tests; emitter desugaring (R.4) is #834 and out of scope.
 import { index_of } from "../../src/string_utils";
-import { check_try_operator, try_operator_result_type } from "../../src/typecheck";
+import { check_try_operator, try_operator_result_type } from "../../src/typecheck/try_and_conditional";
 
 // Collapse the not-found case so the assert sites stay free of optional
 // narrowing.

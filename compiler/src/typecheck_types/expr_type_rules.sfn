@@ -33,7 +33,8 @@ import {
 // reuse `parse_type_arguments` to split `Result<T, E>` into `[T, E]`. Like
 // the #829 substitution primitives they are directly callable and driven
 // by `result_question_typecheck_test.sfn`; the rule orchestration lives in
-// `typecheck.sfn` (`check_try_operator` / `try_operator_result_type`).
+// `typecheck/try_and_conditional.sfn` (`check_try_operator` /
+// `try_operator_result_type`).
 // True when `type_text` names a bare `Result<T, E>` instantiation: the
 // head identifier is exactly `Result`, exactly two type arguments are
 // present, and the closing `>` is the final token. The trailing-`>` check
@@ -112,11 +113,12 @@ fn make_try_error_type_mismatch_diagnostic(operand_error: string, fn_error: stri
 // boolean condition and two branches that unify to one type. Types are plain
 // strings throughout the checker (no expression-type inferencer — #829), so
 // these operate on the literal-inferred type strings produced by
-// `_conditional_branch_type` (`typecheck.sfn`); a branch or condition whose type
+// `_conditional_branch_type` (`typecheck/try_and_conditional.sfn`); a branch or
+// condition whose type
 // cannot be inferred is left unconstrained rather than reported, so no valid
 // program is rejected on a type the checker cannot yet see. Unification is
 // exact/null-compatible only — branch coercion beyond that is deferred (#1715
-// Out). The rule orchestration lives in `typecheck.sfn`
+// Out). The rule orchestration lives in `typecheck/try_and_conditional.sfn`
 // (`check_conditional_types`).
 // E0304 — a ternary's two branches have incompatible (non-unifiable) types.
 fn make_conditional_branch_mismatch_diagnostic(then_type: string, else_type: string, span: SourceSpan?) -> Diagnostic {

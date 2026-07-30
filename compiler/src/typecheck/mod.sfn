@@ -1,0 +1,232 @@
+// compiler/src/typecheck/mod.sfn
+//
+// Typechecking and semantic analysis for Sailfin programs. This phase
+// validates symbol usage, scopes, and effect requirements, producing
+// diagnostics for any issues found.
+//
+// This module holds only the entry points nearly every consumer wants:
+// the `typecheck_diagnostics*` family and its error-count wrappers. The
+// checking passes themselves live in sibling modules and are imported
+// from their defining module, never forwarded through here —
+// re-exporting an imported symbol emits no `.fn` signature for it, so
+// consumers lower calls against an `i8*` return
+// (`docs/rca/2026-04-18-reexport-diagnostic-gep.md`).
+import { Program, Statement } from "../ast";
+import {
+    ImportSymbolTable,
+    empty_import_symbols,
+    localize_import_symbols_for_program,
+    lookup_imported_function
+} from "../effect_imports";
+import { Diagnostic } from "../typecheck_types";
+import { check_struct_implements_interfaces, resolve_interface_annotation } from "../typecheck_types/interface_and_generics";
+import { check_program_scopes } from "./statement_checks";
+import {
+    _collect_imported_call_symbols,
+    _filter_interface_declarations,
+    _generic_struct_names,
+    _names_from_symbols,
+    _symbols_from_global_names,
+    check_generic_instantiation_sites,
+    collect_interface_definitions,
+    collect_struct_definitions,
+    collect_top_level_symbols
+} from "./symbols";
+
+fn typecheck_diagnostics(program: Program) -> Diagnostic[] {
+    let empty_imports: Statement[] = [];
+    return typecheck_diagnostics_with_imports(program, empty_imports);
+}
+
+// Prelude-aware gate variant (#812). The 1-arg `typecheck_diagnostics`
+// has no `![io]` to load the implicitly-available prelude symbols, but
+// the single-file compile paths (`compile_to_llvm_file_with_module`,
+// `sfn run`/`sfn build`, the per-module self-host `sfn emit` subprocess)
+// do — they load the names via `prelude_globals.load_prelude_global_names`
+// and pass them here so a bare prelude call (`monotonic_millis`, the
+// parser-synthesized `runtime_assert_fail_fn`, …) resolves instead of
+// tripping E0420.
+fn typecheck_diagnostics_with_prelude(program: Program, prelude_globals: string[]) -> Diagnostic[] {
+    let empty_imports: Statement[] = [];
+    return typecheck_diagnostics_full(program, empty_imports, empty_import_symbols(), prelude_globals);
+}
+
+fn typecheck_error_count_with_prelude(program: Program, prelude_globals: string[]) -> int {
+    return typecheck_diagnostics_with_prelude(program, prelude_globals).length;
+}
+
+fn typecheck_has_errors_with_prelude(program: Program, prelude_globals: string[]) -> boolean {
+    return typecheck_error_count_with_prelude(program, prelude_globals) > 0;
+}
+
+// Cross-module-aware variant. `imported_interfaces` carries interface
+// declarations sourced from the import-context layer (see
+// typecheck_imports.sfn). They are concatenated onto the program's local
+// interface list so cross-module `implements` clauses are conformance-
+// checked against the actual member signatures rather than silently
+// no-oping when the lookup misses.
+//
+// Defensive variant filter: `resolve_interface_annotation` looks up
+// interfaces by `.name` without checking the discriminator, and
+// `check_struct_implements_interfaces` then reads `.members`, so any
+// non-InterfaceDeclaration statement passing through here would either
+// crash or misbehave on the `.members` access. Today the only producer
+// is `interface_statement_from_native` which only emits
+// `Statement.InterfaceDeclaration`, but filtering at the API boundary
+// keeps the contract enforceable for future callers (e.g. `sfn lsp`).
+//
+// Back-compat entry point: existing callers that do not yet have an
+// `ImportSymbolTable` in scope keep working unchanged. Cross-module
+// free-function resolution is a no-op on this path — see
+// `typecheck_diagnostics_with_import_symbols` for the symbol-aware
+// variant introduced in issue #811.
+fn typecheck_diagnostics_with_imports(program: Program, imported_interfaces: Statement[]) -> Diagnostic[] {
+    return typecheck_diagnostics_with_import_symbols(program, imported_interfaces, empty_import_symbols());
+}
+
+// Symbol-aware variant — issue #811 (sub-issue 3 of #616).
+//
+// Threads an `ImportSymbolTable` through the scope walker so the
+// expression-position resolver introduced in issue #809 can lookup
+// imported free functions before issue D enables enforcement. The
+// walker computes the resolution boolean and discards it today; this
+// keeps observable behaviour identical (zero new diagnostics) while
+// pinning the plumbing so issue D only needs to add the emission
+// branch — not the plumbing.
+//
+// Callers that already build an import table during dependency
+// resolution (e.g. `compile_tests_to_llvm_file_with_module_imports`
+// in `main.sfn`) thread it through this entry point. Standalone or
+// pre-resolver call paths can keep using the 2-arg
+// `typecheck_diagnostics_with_imports` (which delegates here with an
+// empty table).
+//
+// The caller passes the GLOBAL symbol table the loader produced from
+// the dependency `.sfn-asm` artifacts; this entry localizes it once
+// against `program`'s `import { ... }` specifiers (alias rewrites +
+// scope filter) so the per-`Call` lookup keys directly off the
+// localized identifier name — mirroring `effect_checker.validate_-
+// effects_with_imports` (effect_checker.sfn:185). Without the
+// localization step issue D would treat any function exported by
+// any loaded dependency as resolved, including names this program
+// never imported.
+fn typecheck_diagnostics_with_import_symbols(program: Program, imported_interfaces: Statement[], imported_function_effects: ImportSymbolTable) -> Diagnostic[] {
+    let empty_prelude: string[] = [];
+    return typecheck_diagnostics_full(program, imported_interfaces, imported_function_effects, empty_prelude);
+}
+
+// Prelude-aware symbol path (#812). The `sfn test` resolver
+// (`compile_tests_to_llvm_file_with_module_imports`) and `sfn check`
+// (`check_source_with_imports`) thread both the cross-module import
+// table AND the implicitly-available prelude names through here so test
+// bodies (`assert` → `runtime_assert_fail_fn`) and bare prelude calls in
+// checked source resolve.
+fn typecheck_diagnostics_with_import_symbols_prelude(program: Program, imported_interfaces: Statement[], imported_function_effects: ImportSymbolTable, prelude_globals: string[]) -> Diagnostic[] {
+    return typecheck_diagnostics_full(program, imported_interfaces, imported_function_effects, prelude_globals);
+}
+
+// Full implementation behind every typecheck entry point.
+// `prelude_globals` carries the implicitly-available prelude/runtime
+// declaration names (#812); callers without `![io]` to load them pass
+// an empty list and fall back to import-specifier + builtin resolution.
+fn typecheck_diagnostics_full(program: Program, imported_interfaces: Statement[], imported_function_effects: ImportSymbolTable, prelude_globals: string[]) -> Diagnostic[] {
+    let local_imports = localize_import_symbols_for_program(program, imported_function_effects);
+    let top_level = collect_top_level_symbols(program);
+    let local_interfaces = collect_interface_definitions(program);
+    let filtered_imports = _filter_interface_declarations(imported_interfaces);
+    let combined_interfaces = local_interfaces.concat(filtered_imports);
+    // E0420 resolution scope (#812): every top-level declaration, the
+    // program's own import-specifier names, and the implicitly-available
+    // prelude/runtime globals. Threaded into function/method/test bodies
+    // so a `Call` to a sibling top-level function — declared anywhere in
+    // the file, including after the caller — an imported free function,
+    // or a bare prelude helper resolves instead of false-positiving. The
+    // duplicate-symbol diagnostics already came from `collect_top_level_-
+    // symbols` above; this scope is resolution-only.
+    let resolution_scope = top_level.symbols.concat(_collect_imported_call_symbols(program)).concat(_symbols_from_global_names(prelude_globals));
+    let local_structs = collect_struct_definitions(program);
+    let generic_struct_names = _generic_struct_names(local_structs);
+    // SFN-555: the same resolution scope answers "is this a known type name?".
+    // Flattened once here so the E0013 check never rebuilds it per annotation.
+    let known_types = _names_from_symbols(resolution_scope);
+    let scoped_diagnostics = check_program_scopes(program, combined_interfaces, local_imports, imported_function_effects, resolution_scope, generic_struct_names, known_types);
+
+    let instantiation_diagnostics = check_generic_instantiation_sites(program, combined_interfaces, local_structs);
+
+    // Merge diagnostics using concat (avoids loop-with-if-break pattern that
+    // the compiler lowers incorrectly — loops emit without exit conditions).
+    let diagnostics_with_scopes = top_level.diagnostics.concat(scoped_diagnostics).concat(instantiation_diagnostics);
+    return diagnostics_with_scopes;
+}
+
+// A built-in decorator name that still lowers via the runtime-helper
+// fallback when it is not imported from `log` (SFEP-0023 §4.5). Matches the
+// canonical spellings the lowering fallback recognizes (`@logExecution`/
+// `@trace`). The fallback additionally accepts other casings via
+// `matches_case_insensitive`, but those are not real decorator names, so the
+// lint deliberately does not warn on them.
+fn _is_builtin_decorator_name(name: string) -> boolean {
+    if name == "logExecution" { return true; }
+    if name == "logexecution" { return true; }
+    if name == "trace" { return true; }
+    return false;
+}
+
+// SFEP-0023 §4.5: the names of built-in decorators (`@logExecution`/
+// `@trace`) applied to a top-level function without importing them from
+// `log`. The `sfn check` path (tools/check.sfn) renders one W0211
+// `deprecated-api` warning per name. Deliberately NOT folded into
+// `typecheck_diagnostics_full`: that function's result is length-counted as
+// the error total by the native-emit gate (`typecheck_error_count_with_-
+// prelude`), which has no import table and would both mis-count a warning
+// as an error and false-positive on a genuinely imported decorator. Here the
+// resolved import table lets the lint fire only on the truly un-imported
+// use, matching the lowering fallback's discriminator.
+fn collect_decorator_deprecation_findings(program: Program, imported_function_effects: ImportSymbolTable) -> string[] {
+    let local_imports = localize_import_symbols_for_program(program, imported_function_effects);
+    let mut findings: string[] = [];
+    let mut index: int = 0;
+    loop {
+        if index >= program.statements.length { break; }
+        let statement = program.statements[index];
+        if statement.variant == "FunctionDeclaration" {
+            let decorators = statement.decorators;
+            let mut di: int = 0;
+            loop {
+                if di >= decorators.length { break; }
+                let name = decorators[di].name;
+                if _is_builtin_decorator_name(name) {
+                    if lookup_imported_function(local_imports, name) == null {
+                        findings.push(name);
+                    }
+                }
+                di += 1;
+            }
+        }
+        index += 1;
+    }
+    return findings;
+}
+
+fn typecheck_error_count(program: Program) -> int {
+    let diagnostics = typecheck_diagnostics(program);
+    return diagnostics.length;
+}
+
+fn typecheck_has_errors(program: Program) -> boolean {
+    let count = typecheck_error_count(program);
+    return count > 0;
+}
+
+// Resolution probe (issue #811). Returns whether `name` resolves to an
+// imported free function in the localized `imports` table. Since #812
+// flipped enforcement on, the walker's Call branch resolves callees
+// inline (binding → builtin → import table) and emits E0420 on a miss;
+// this probe is retained as the public, side-effect-free view of just
+// the import-table arm so unit tests can pin the localized table's
+// behaviour independent of the binding scope — see
+// `typecheck_imports_test.sfn`.
+fn typecheck_walker_resolves_import(name: string, imports: ImportSymbolTable) -> boolean {
+    let entry = lookup_imported_function(imports, name);
+    return entry != null;
+}

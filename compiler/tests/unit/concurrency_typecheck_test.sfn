@@ -18,7 +18,7 @@ import {
     check_await_operand,
     check_channel_send,
     check_spawn_kind
-} from "../../src/typecheck";
+} from "../../src/typecheck/concurrency_rules";
 import {
     future_element_kind,
     make_task_array_element_marker,

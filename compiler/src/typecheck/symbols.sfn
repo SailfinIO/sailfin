@@ -1,0 +1,344 @@
+// compiler/src/typecheck/symbols.sfn
+//
+// Top-level symbol collection: gathering struct, interface, and global
+// declarations into the `SymbolEntry` tables the scope checks run against.
+import {
+    Program,
+    Statement,
+    TypeAnnotation,
+    TypeParameter
+} from "../ast";
+import { localize_import_symbols_for_program } from "../effect_imports";
+import { Diagnostic } from "../typecheck_types";
+import { declared_array_marker, type_parameter_names } from "../typecheck_types/annotation_shape_checks";
+import { make_thread_local_requires_mut_diagnostic } from "../typecheck_types/declaration_and_statement_checks";
+import { check_uninferable_generic_constructor } from "../typecheck_types/expr_type_rules";
+import { bound_base_name, check_generic_instantiation } from "../typecheck_types/generic_bounds";
+import { parse_type_arguments, resolve_interface_annotation } from "../typecheck_types/interface_and_generics";
+import {
+    SymbolCollectionResult,
+    SymbolEntry,
+    has_symbol,
+    register_symbol,
+    signature_is_c_abi,
+    signature_is_generic
+} from "../typecheck_types/symbol_table_and_raw_exprs";
+import { TypeckCtx } from "./context";
+import { typecheck_diagnostics, typecheck_has_errors } from "./mod";
+
+// Every top-level struct declaration, for resolving a concrete type
+// argument to its declaration when checking generic bound satisfaction
+// (SFEP-0038 §3.2b, #1870). Mirrors `collect_interface_definitions`.
+fn collect_struct_definitions(program: Program) -> Statement[] {
+    let mut structs: Statement[] = [];
+    for statement in program.statements {
+        if statement.variant == "StructDeclaration" {
+            structs.push(statement);
+        }
+    }
+    return structs;
+}
+
+// The names of every top-level generic struct (`type_parameters.length > 0`),
+// threaded through the walk so `check_uninferable_generic_constructor` (E0833,
+// SFN-404) can tell a generic-struct static call from an enum/namespace access.
+fn _generic_struct_names(structs: Statement[]) -> string[] {
+    let mut names: string[] = [];
+    for statement in structs {
+        if statement.type_parameters.length > 0 {
+            names.push(statement.name);
+        }
+    }
+    return names;
+}
+
+// E0820 enforcement at generic instantiation sites (SFEP-0038 §3.2b,
+// #1870). The checker has no expression-type inferencer (#829), so
+// generic *function-call* argument→type-parameter binding and `let` /
+// struct-literal generic annotations carry no recoverable concrete
+// arguments to check yet — those live-wire when inference lands, exactly
+// as the `?`-operator (E0810–E0812) and ternary rules defer their live
+// walk. The instantiation site with syntactic concrete arguments today is
+// a struct's `implements I<Args>` clause against a generic interface
+// whose parameters carry bounds; this pass enforces bound satisfaction
+// there. The rule itself (`check_generic_instantiation`) is call-ready
+// for the remaining sites. In-scope parameters for bound propagation are
+// the implementing struct's own type parameters.
+fn check_generic_instantiation_sites(program: Program, interfaces: Statement[], structs: Statement[]) -> Diagnostic[] {
+    let mut diagnostics: Diagnostic[] = [];
+    for statement in program.statements {
+        if statement.variant == "StructDeclaration" {
+            let mut _ai: int = 0;
+            loop {
+                if _ai >= statement.implements_types.length { break; }
+                let annotation = statement.implements_types[_ai];
+                let iface = resolve_interface_annotation(annotation, interfaces);
+                if iface != null {
+                    let found = iface;
+                    if found.type_parameters.length > 0 {
+                        let args = parse_type_arguments(annotation.text);
+                        let inst = check_generic_instantiation(found.name, found.type_parameters, args, interfaces, structs, statement.type_parameters);
+                        let mut _di: int = 0;
+                        loop {
+                            if _di >= inst.length { break; }
+                            diagnostics.push(inst[_di]);
+                            _di += 1;
+                        }
+                    }
+                }
+                _ai += 1;
+            }
+        }
+    }
+    return diagnostics;
+}
+
+// Wrap each implicitly-available prelude/runtime global name in a
+// resolution-only `SymbolEntry` so the E0420 walker's `has_symbol`
+// lookup treats it as in-scope. Kind `"prelude"` is informational; the
+// walker only keys off `.name`.
+fn _symbols_from_global_names(names: string[]) -> SymbolEntry[] {
+    let mut out: SymbolEntry[] = [];
+    let mut i: int = 0;
+    loop {
+        if i >= names.length { break; }
+        out.push(SymbolEntry {
+            name: names[i], kind: "prelude", span: null, is_generic: false, is_c_abi: false, element_kind: "", declared_prim: "", declared_struct: ""
+        });
+        i += 1;
+    }
+    return out;
+}
+
+fn _filter_interface_declarations(statements: Statement[]) -> Statement[] {
+    let mut out: Statement[] = [];
+    let mut i: int = 0;
+    loop {
+        if i >= statements.length { break; }
+        let s = statements[i];
+        if strings_equal(s.variant, "InterfaceDeclaration") { out.push(s); }
+        i += 1;
+    }
+    return out;
+}
+
+fn collect_interface_definitions(program: Program) -> Statement[] {
+    let mut interfaces: Statement[] = [];
+
+    for statement in program.statements {
+        if statement.variant == "InterfaceDeclaration" {
+            interfaces.push(statement);
+        }
+    }
+    return interfaces;
+}
+
+fn collect_top_level_symbols(program: Program) -> SymbolCollectionResult {
+    let mut symbols: SymbolEntry[] = [];
+    let mut diagnostics: Diagnostic[] = [];
+
+    for statement in program.statements {
+        let result = register_top_level_symbol(statement, symbols);
+        symbols = result.symbols;
+        let mut _ci: int = 0;
+        loop {
+            if _ci >= result.diagnostics.length { break; }
+            diagnostics.push(result.diagnostics[_ci]);
+            _ci += 1;
+        }
+    }
+
+    // Top-level names are collected before type metadata is resolved so a
+    // variable annotation can name a struct declared later in the file. Walk
+    // the source order again and enrich only the first variable declaration
+    // for each name (duplicates were rejected above and retain the first).
+    let mut seen_variables: string[] = [];
+    let no_type_params: string[] = [];
+    for statement in program.statements {
+        if statement.variant == "VariableDeclaration" {
+            if !_string_list_has(seen_variables, statement.name) {
+                seen_variables.push(statement.name);
+                let declared_struct = _declared_struct_annotation(statement.type_annotation, symbols, no_type_params);
+                if declared_struct.length > 0 {
+                    let mut index: int = 0;
+                    loop {
+                        if index >= symbols.length { break; }
+                        if strings_equal(symbols[index].name, statement.name) {
+                            if strings_equal(symbols[index].kind, "variable") {
+                                symbols[index].declared_struct = declared_struct;
+                            }
+                            break;
+                        }
+                        index += 1;
+                    }
+                }
+            }
+        }
+    }
+
+    return SymbolCollectionResult {
+        symbols: symbols,
+        diagnostics: diagnostics
+    };
+}
+
+// Resolution-only scope contribution (#812): the local names a program's
+// own `import { ... }` specifiers bring into call position. Registered
+// for E0420 resolution alongside the top-level declarations so an
+// imported free-function call resolves even on the standalone check path
+// (`typecheck_diagnostics` / `typecheck_has_errors`) where the
+// cross-module effect table is empty — the import specifier is itself
+// proof the name is in scope. Aliased specifiers (`import { fetch as get }`)
+// register under the local alias, mirroring
+// `localize_import_symbols_for_program` in effect_imports.sfn.
+fn _collect_imported_call_symbols(program: Program) -> SymbolEntry[] {
+    let mut symbols: SymbolEntry[] = [];
+    let mut i: int = 0;
+    loop {
+        if i >= program.statements.length { break; }
+        let statement = program.statements[i];
+        if statement.variant == "ImportDeclaration" {
+            let mut s: int = 0;
+            loop {
+                if s >= statement.import_specifiers.length { break; }
+                let spec = statement.import_specifiers[s];
+                let mut local_name = spec.name;
+                let alias = spec.alias;
+                if alias != null {
+                    let alias_str: string? = alias;
+                    if alias_str.length > 0 { local_name = alias_str; }
+                }
+                symbols.push(SymbolEntry {
+                    name: local_name, kind: "import", span: null, is_generic: false, is_c_abi: false, element_kind: "", declared_prim: "", declared_struct: ""
+                });
+                s += 1;
+            }
+        }
+        i += 1;
+    }
+    return symbols;
+}
+
+// SFN-555: flatten a resolution scope to bare names for the E0013 known-type
+// lookup. The scope mixes kinds (functions, types, imports, prelude globals);
+// keeping every name is deliberate — see the fail-open note on
+// `_first_unknown_type_name`.
+// SFN-555: a declaration's own type parameters, layered onto whatever the
+// walk already had in scope.
+fn _decl_type_params(ctx: TypeckCtx, parameters: TypeParameter[]) -> string[] {
+    let names = type_parameter_names(parameters);
+    if names.length == 0 { return ctx.type_params; }
+    return ctx.type_params.concat(names);
+}
+
+fn _names_from_symbols(symbols: SymbolEntry[]) -> string[] {
+    let mut names: string[] = [];
+    let mut i: int = 0;
+    loop {
+        if i >= symbols.length { break; }
+        names.push(symbols[i].name);
+        i += 1;
+    }
+    return names;
+}
+
+fn _string_list_has(values: string[], target: string) -> boolean {
+    let mut index: int = 0;
+    loop {
+        if index >= values.length { break; }
+        if strings_equal(values[index], target) { return true; }
+        index += 1;
+    }
+    return false;
+}
+
+// Type annotations resolve in the type namespace. Walk innermost-first but
+// ignore value/callable bindings with the same spelling; aliases, enums, and
+// interfaces remain visible so they can prevent a false struct proof.
+fn _find_type_symbol(symbols: SymbolEntry[], name: string) -> SymbolEntry? {
+    let mut index: int = symbols.length - 1;
+    loop {
+        if index < 0 { break; }
+        let entry = symbols[index];
+        if strings_equal(entry.name, name) {
+            let mut is_type: boolean = false;
+            if strings_equal(entry.kind, "struct") { is_type = true; }
+            if strings_equal(entry.kind, "enum") { is_type = true; }
+            if strings_equal(entry.kind, "interface") { is_type = true; }
+            if strings_equal(entry.kind, "type") { is_type = true; }
+            if is_type { return entry; }
+        }
+        index -= 1;
+    }
+    return null;
+}
+
+fn _find_symbol_with_kind(symbols: SymbolEntry[], name: string, kind: string) -> SymbolEntry? {
+    let mut index: int = symbols.length - 1;
+    loop {
+        if index < 0 { break; }
+        let entry = symbols[index];
+        if strings_equal(entry.name, name) {
+            if strings_equal(entry.kind, kind) { return entry; }
+        }
+        index -= 1;
+    }
+    return null;
+}
+
+// Resolve an explicit annotation in its declaration scope. Only a direct
+// struct name/generic instantiation survives. Arrays, aliases, inferred
+// values, and a base name shadowed by a scoped type parameter stay fail-open.
+fn _declared_struct_annotation(annotation: TypeAnnotation?, bindings: SymbolEntry[], type_params: string[]) -> string {
+    if annotation == null { return ""; }
+    let text = annotation.text;
+    if declared_array_marker(text).length > 0 { return ""; }
+    let base_name = bound_base_name(text);
+    if _string_list_has(type_params, base_name) { return ""; }
+    let type_entry = _find_type_symbol(bindings, base_name);
+    if type_entry == null { return ""; }
+    if !strings_equal(type_entry.kind, "struct") { return ""; }
+    return text;
+}
+
+fn register_top_level_symbol(statement: Statement, existing: SymbolEntry[]) -> SymbolCollectionResult {
+    if statement.variant == "FunctionDeclaration" {
+        return register_symbol(statement.signature.name, "function", statement.signature.name_span, existing, signature_is_generic(statement.signature), signature_is_c_abi(statement.signature));
+    }
+    if statement.variant == "ExternFunctionDeclaration" {
+        return register_symbol(statement.signature.name, "extern function", statement.signature.name_span, existing, signature_is_generic(statement.signature), signature_is_c_abi(statement.signature));
+    }
+    if statement.variant == "ExternVarDeclaration" {
+        return register_symbol(statement.name, "extern variable", statement.name_span, existing);
+    }
+    if statement.variant == "StructDeclaration" {
+        return register_symbol(statement.name, "struct", statement.name_span, existing);
+    }
+    if statement.variant == "EnumDeclaration" {
+        return register_symbol(statement.name, "enum", statement.name_span, existing);
+    }
+    if statement.variant == "InterfaceDeclaration" {
+        return register_symbol(statement.name, "interface", statement.name_span, existing);
+    }
+    if statement.variant == "TestDeclaration" {
+        return register_symbol(statement.name, "test", statement.name_span, existing);
+    }
+    if statement.variant == "TypeAliasDeclaration" {
+        return register_symbol(statement.name, "type", statement.name_span, existing);
+    }
+    if statement.variant == "VariableDeclaration" {
+        let registration = register_symbol(statement.name, "variable", statement.span, existing);
+        if statement.is_thread_local {
+            if !statement.mutable {
+                let mut diagnostics = registration.diagnostics;
+                diagnostics.push(make_thread_local_requires_mut_diagnostic(statement.name));
+                return SymbolCollectionResult {
+                    symbols: registration.symbols,
+                    diagnostics: diagnostics
+                };
+            }
+        }
+        return registration;
+    }
+    return SymbolCollectionResult { symbols: existing, diagnostics: [] };
+}

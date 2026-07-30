@@ -195,7 +195,7 @@ Three tiers, by audience:
 1. **User-source errors → diagnostics, never panics.** Errors in the program
    being compiled are reported as structured `Diagnostic` records with an
    error code, a source span, and (where possible) a fix-it hint — collected
-   and rendered, not thrown. Core passes (`typecheck.sfn`,
+   and rendered, not thrown. Core passes (`typecheck/`,
    `effect_checker.sfn`, lowering) must not `panic()` or bare-`assert` on user
    input: a compiler crash on bad input is a compiler bug.
 2. **Internal fallible operations → `Result<T, E>` + `?`.** For new code,

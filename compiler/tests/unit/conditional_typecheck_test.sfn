@@ -9,11 +9,8 @@
 // the same diagnostics through `typecheck_diagnostics`.
 import { parse_program } from "../../src/parser/mod";
 import { index_of } from "../../src/string_utils";
-import {
-    check_conditional_types,
-    conditional_result_type,
-    typecheck_diagnostics
-} from "../../src/typecheck";
+import { typecheck_diagnostics } from "../../src/typecheck";
+import { check_conditional_types, conditional_result_type } from "../../src/typecheck/try_and_conditional";
 import { Diagnostic } from "../../src/typecheck_types";
 
 fn _count_code(diagnostics: Diagnostic[], code: string) -> int {

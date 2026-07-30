@@ -14,7 +14,7 @@ The compiler follows a multi-stage pipeline:
 Source (.sfn)
   → Lexer (lexer.sfn) → Tokens
   → Parser (parser.sfn) → AST (ast.sfn)
-  → Type Checker (typecheck.sfn) → Validated AST
+  → Type Checker (typecheck/) → Validated AST
   → Effect Checker (effect_checker.sfn) → Effect-safe AST
   → Native Emitter (emit_native.sfn) → .sfn-asm IR (native_ir.sfn)
   → LLVM Lowering (llvm/lowering/) → LLVM IR
@@ -29,7 +29,7 @@ Source (.sfn)
 | `compiler/src/lexer.sfn` | Tokenizer |
 | `compiler/src/parser.sfn` | Parser → AST |
 | `compiler/src/ast.sfn` | AST node definitions |
-| `compiler/src/typecheck.sfn` | Type checking, interface conformance |
+| `compiler/src/typecheck/` | Type checking, interface conformance |
 | `compiler/src/effect_checker.sfn` | Effect validation |
 | `compiler/src/emit_native.sfn` | Emit `.sfn-asm` IR |
 | `compiler/src/native_ir.sfn` | IR representation |
