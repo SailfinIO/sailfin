@@ -25,6 +25,7 @@ import {
     Statement,
     TypeAnnotation
 } from "./ast";
+import { _publish_lines_atomic } from "./build/fs";
 import { Diag, Span } from "./diagnostic";
 import { block_contains_try, desugar_try_in_block } from "./emit_native_desugar_try";
 import {
@@ -202,15 +203,14 @@ fn emit_native_text_with_module_name(program: Program, module_name: string) -> s
 }
 
 // Emit native text directly to a file to avoid returning large strings across ABI boundaries.
-// Streams the emitter's line array straight to disk via `fs.writeLines`
-// (the `write_llvm_lines_chunked` pattern) rather than joining to one
-// string first — byte-identical output, one fewer full-text copy (#1817).
+// Streams the emitter's line array straight to disk rather than joining
+// to one string first — byte-identical output, one fewer full-text copy
+// (#1817) — and publishes atomically via a sibling temp + rename
+// (SFN-578) so no reader observes a partially-written `.sfn-asm`.
 fn emit_native_text_to_file_with_module_name(program: Program, module_name: string, out_path: string) -> boolean ![io] {
     let lines = emit_native_lines_with_module_name(program, module_name);
     if !native_lines_have_text(lines) { return false; }
-    if fs.exists(out_path) { fs.deleteFile(out_path); }
-    fs.writeLines(out_path, lines);
-    return fs.exists(out_path);
+    return _publish_lines_atomic(out_path, lines);
 }
 
 fn emit_native_module_with_module_name(program: Program, module_name: string) -> NativeModule {

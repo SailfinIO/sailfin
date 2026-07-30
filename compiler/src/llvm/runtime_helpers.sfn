@@ -1623,6 +1623,23 @@ fn _rh_descriptors_10(descriptors_in: RuntimeHelperDescriptor[]) -> RuntimeHelpe
 fn _rh_descriptors_11(descriptors_in: RuntimeHelperDescriptor[]) -> RuntimeHelperDescriptor[] {
     let mut descriptors = descriptors_in;
 
+    // Darwin process-footprint sentinel (SFN-607, SFEP-0022). The source-level
+    // helper observes process state and therefore requires `![io]`. Its
+    // lowering branch folds to zero on Linux and Windows; on Darwin it emits
+    // the two concrete calls below. Dotted concrete targets keep both libc
+    // symbols out of source-level global resolution, while their rows let the
+    // post-lowering call scan emit declarations only when the Darwin leg is
+    // present.
+    descriptors = append_runtime_helper(descriptors, RuntimeHelperDescriptor {
+        target: "sailfin_intrinsic_mem_footprint", symbol: "sailfin_intrinsic_mem_footprint", return_type: "i64", parameter_types: [], effects: ["io"], native_signature: null, c_abi_return_type: null
+    });
+    descriptors = append_runtime_helper(descriptors, RuntimeHelperDescriptor {
+        target: "intrinsic.mem_footprint.darwin.getpid", symbol: "getpid", return_type: "i32", parameter_types: [], effects: [], native_signature: null, c_abi_return_type: null
+    });
+    descriptors = append_runtime_helper(descriptors, RuntimeHelperDescriptor {
+        target: "intrinsic.mem_footprint.darwin.proc_pid_rusage", symbol: "proc_pid_rusage", return_type: "i32", parameter_types: ["i32", "i32", "i8*"], effects: [], native_signature: null, c_abi_return_type: null
+    });
+
     // Base64 encode. M3 (#817): base64 encode now lives in pure Sailfin under
     // `capsules/sfn/crypto/src/mod.sfn`; the `base64.encode` intrinsic resolves
     // to that capsule's `base64_encode` rather than the C symbol

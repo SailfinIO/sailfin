@@ -1,0 +1,148 @@
+// compiler/tests/e2e/mem_footprint_intrinsic_test.sfn
+//
+// Regression coverage for the target-aware Darwin process memory-footprint
+// intrinsic. Each target leg is emitted in a fresh compiler process so the
+// target override exercises the same resolver used by cross-compilation.
+import { contains, split } from "sfn/strings";
+
+fn _sfn_bin() -> string ![io] {
+    let configured = env.get("SAILFIN_BIN");
+    if configured.length > 0 { return configured; }
+    return "build/bin/sfn";
+}
+
+fn _scratch_dir() -> string ![io] {
+    let mut dir = env.get("SAILFIN_TEST_SCRATCH");
+    if dir.length == 0 { dir = "/tmp"; }
+    fs.createDirectory(dir, true);
+    return dir;
+}
+
+fn _base_env() -> string[] ![io] {
+    let mut child_env: string[] = [];
+    let path = env.get("PATH");
+    if path.length > 0 { child_env.push("PATH=" + path); }
+    let home = env.get("HOME");
+    if home.length > 0 { child_env.push("HOME=" + home); }
+    let tmpdir = env.get("TMPDIR");
+    if tmpdir.length > 0 { child_env.push("TMPDIR=" + tmpdir); }
+    let scratch = env.get("SAILFIN_TEST_SCRATCH");
+    if scratch.length > 0 {
+        child_env.push("SAILFIN_TEST_SCRATCH=" + scratch);
+    }
+    return child_env;
+}
+
+fn _env_with_target(target_os: string) -> string[] ![io] {
+    let mut child_env = _base_env();
+    child_env.push("SAILFIN_TARGET_OS=" + target_os);
+    return child_env;
+}
+
+fn _any_line_with(text: string, first: string, second: string) -> bool {
+    let lines = split(text, "\n");
+    let mut index = 0;
+    loop {
+        if index >= lines.length { break; }
+        if contains(lines[index], first) && contains(lines[index], second) {
+            return true;
+        }
+        index += 1;
+    }
+    return false;
+}
+
+fn _fixture_source() -> string {
+    return "fn read_footprint() -> i64 ![io] {\n    return sailfin_intrinsic_mem_footprint();\n}\n\nfn main() -> void ![io] {\n    let footprint: i64 = read_footprint();\n}\n";
+}
+
+fn _missing_effect_fixture_source() -> string {
+    return "fn read_footprint() -> i64 {\n    return sailfin_intrinsic_mem_footprint();\n}\n\nfn main() -> void {\n    let footprint: i64 = read_footprint();\n}\n";
+}
+
+fn _fixture_path() -> string ![io] {
+    let source = _scratch_dir() + "/sfn-mem-footprint-probe.sfn";
+    fs.writeFile(source, _fixture_source());
+    return source;
+}
+
+fn _emit(source: string, child_env: string[], tag: string) -> string ![io] {
+    let output = _scratch_dir() + "/sfn-mem-footprint-" + tag + ".ll";
+    if fs.exists(output) { fs.deleteFile(output); }
+    let exit = process.run_capture([_sfn_bin(), "emit", "-o", output, "llvm", source], child_env);
+    let _stdout = process.capture_take_stdout();
+    let _stderr = process.capture_take_stderr();
+    if exit != 0 { return ""; }
+    if !fs.exists(output) { return ""; }
+    let ir = fs.readFile(output);
+    fs.deleteFile(output);
+    return ir;
+}
+
+test "mem-footprint: fixture passes effect and type checking" ![io] {
+    let source = _fixture_path();
+    let exit = process.run_capture([_sfn_bin(), "check", source], _base_env());
+    let _stdout = process.capture_take_stdout();
+    let _stderr = process.capture_take_stderr();
+    fs.deleteFile(source);
+    assert exit == 0;
+}
+
+test "mem-footprint: registry requires the io effect" ![io] {
+    let source = _scratch_dir() + "/sfn-mem-footprint-missing-effect.sfn";
+    fs.writeFile(source, _missing_effect_fixture_source());
+    let exit = process.run_capture([_sfn_bin(), "check", source], _base_env());
+    let _stdout = process.capture_take_stdout();
+    let stderr = process.capture_take_stderr();
+    fs.deleteFile(source);
+    assert exit != 0;
+    assert contains(stderr, "E0400");
+}
+
+test "mem-footprint: Darwin emits the rusage v2 footprint observation" ![io] {
+    let source = _fixture_path();
+    let ir = _emit(source, _env_with_target("Darwin"), "darwin");
+    fs.deleteFile(source);
+    assert ir.length > 0;
+    assert contains(ir, "alloca [160 x i8], align 8");
+    assert contains(ir, "call i32 @getpid()");
+    assert contains(ir, "declare i32 @getpid()");
+    assert _any_line_with(ir, "call i32 @proc_pid_rusage(", ", i32 2, i8* ");
+    assert contains(ir, "declare i32 @proc_pid_rusage(i32, i32, i8*)");
+    assert _any_line_with(ir, "getelementptr i8, i8* ", ", i64 72");
+    assert contains(ir, " = load i64, i64* ");
+    assert _any_line_with(ir, " = phi i64 [ ", " ], [ 0, %mem_footprint_fail_");
+}
+
+test "mem-footprint: Linux and Windows fold to zero without Darwin calls" ![io] {
+    let source = _fixture_path();
+    let targets = ["Linux", "Windows"];
+    let mut index = 0;
+    loop {
+        if index >= targets.length { break; }
+        let ir = _emit(source, _env_with_target(targets[index]), "zero-"
+            + targets[index]);
+        assert ir.length > 0;
+        assert contains(ir, "ret i64 0");
+        assert ! contains(ir, "@getpid(");
+        assert ! contains(ir, "@proc_pid_rusage(");
+        index += 1;
+    }
+    fs.deleteFile(source);
+}
+
+test "mem-footprint: sentinel symbol never reaches generated IR" ![io] {
+    let source = _fixture_path();
+    let targets = ["Darwin", "Linux", "Windows"];
+    let mut index = 0;
+    loop {
+        if index >= targets.length { break; }
+        let ir = _emit(source, _env_with_target(targets[index]), "leak-"
+            + targets[index]);
+        assert ir.length > 0;
+        assert ! _any_line_with(ir, "call ", "@sailfin_intrinsic_mem_footprint");
+        assert ! _any_line_with(ir, "declare ", "@sailfin_intrinsic_mem_footprint");
+        index += 1;
+    }
+    fs.deleteFile(source);
+}

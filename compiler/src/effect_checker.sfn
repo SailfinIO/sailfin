@@ -1413,15 +1413,20 @@ fn collect_effects_from_expression(expression: Expression?, imports: ImportSymbo
             // callers invoke without the matching effect, breaking
             // self-host. #1184 lands that resolution with the in-tree
             // annotation fixups it forces, after which this allowlist can
-            // be removed. (Real `serve(...)` source commits to the `Serve`
-            // AST node in the parser, so this Call-arm path is the
-            // latent/synthesized-callee form — the live `serve(...)`
+            // be removed. The process-footprint sentinel is source-visible,
+            // so it is included here to enforce its registry-declared
+            // `![io]` effect (SFN-607). (Real `serve(...)` source commits to
+            // the `Serve` AST node in the parser, so this Call-arm path is
+            // the latent/synthesized-callee form — the live `serve(...)`
             // enforcement lives in the `Serve` node arm below.)
             let mut _bare_builtin: boolean = false;
             if name == "print" { _bare_builtin = true; }
             if name == "console" { _bare_builtin = true; }
             if name == "sleep" { _bare_builtin = true; }
             if name == "serve" { _bare_builtin = true; }
+            if name == "sailfin_intrinsic_mem_footprint" {
+                _bare_builtin = true;
+            }
             if _bare_builtin {
                 required = _append_builtin_effects(required, name, callee_trigger);
             }

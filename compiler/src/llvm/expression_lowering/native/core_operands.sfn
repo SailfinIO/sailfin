@@ -27,6 +27,7 @@ import {
 } from "../../types";
 import { starts_with } from "../../utils";
 import { array_pointer_element_type } from "../arrays";
+import { emit_bf16_narrow_from_double, emit_bf16_widen_to_double } from "./core_bf16_lowering";
 import {
     append_string,
     char_code_at_text,
@@ -662,16 +663,16 @@ fn coerce_numeric_primitive(operand: LLVMOperand, operand_type: string, target: 
     }
     if target == "bfloat" {
         if operand_type == "double" {
-            let temp_name = format_temp_name(temp_index);
-            current_lines.push("  " + temp_name + " = fptrunc double " + operand.value
-                + " to bfloat");
+            // `fptrunc double ... to bfloat` has no AArch64 selection pattern
+            // (SFN-609); narrow via the correctly-rounded bit sequence instead.
+            let narrowed = emit_bf16_narrow_from_double(operand.value, temp_index, current_lines);
             let coerced = LLVMOperand {
                 llvm_type: "bfloat",
-                value: temp_name
+                value: narrowed.value
             };
             return CoercionResult {
-                lines: current_lines,
-                temp_index: temp_index + 1,
+                lines: narrowed.lines,
+                temp_index: narrowed.temp_index,
                 operand: coerced,
                 diagnostics: diagnostics
             };
@@ -1505,10 +1506,7 @@ fn coerce_pointer_or_struct(operand: LLVMOperand, operand_type: string, target: 
                 };
             }
         }
-        let mut _is_low_precision_float: boolean = false;
-        if operand_type == "half" { _is_low_precision_float = true; }
-        if operand_type == "bfloat" { _is_low_precision_float = true; }
-        if _is_low_precision_float {
+        if operand_type == "half" {
             // SFN-552: low-precision values widen only as the first step of
             // the existing display chain. Recursing with a `double` operand
             // sends the value directly through `number.to_string`; the
@@ -1529,6 +1527,30 @@ fn coerce_pointer_or_struct(operand: LLVMOperand, operand_type: string, target: 
                     if _rd_i >= rec.diagnostics.length { break; }
                     diagnostics.push(rec.diagnostics[_rd_i]);
                     _rd_i += 1;
+                }
+                return CoercionResult {
+                    lines: rec.lines,
+                    temp_index: rec.temp_index,
+                    operand: rec.operand,
+                    diagnostics: diagnostics
+                };
+            }
+        }
+        if operand_type == "bfloat" {
+            // `fpext bfloat` has no AArch64 selection pattern (SFN-609);
+            // widen via the bit-manipulation helper instead.
+            let widened = emit_bf16_widen_to_double(operand.value, temp_index, current_lines);
+            let widened_operand = LLVMOperand {
+                llvm_type: "double",
+                value: widened.value
+            };
+            let rec = coerce_pointer_or_struct(widened_operand, "double", target, widened.temp_index, widened.lines);
+            if rec != null {
+                let mut _rd_i2: int = 0;
+                loop {
+                    if _rd_i2 >= rec.diagnostics.length { break; }
+                    diagnostics.push(rec.diagnostics[_rd_i2]);
+                    _rd_i2 += 1;
                 }
                 return CoercionResult {
                     lines: rec.lines,
