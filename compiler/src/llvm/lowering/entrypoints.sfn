@@ -105,7 +105,8 @@ import {
     compile_native_text_to_llvm_file_with_context,
     has_fatal_lowering_diagnostic,
     lower_to_llvm_lines_with_parsed_context,
-    lower_to_llvm_lines_with_parsed_context_for_tests
+    lower_to_llvm_lines_with_parsed_context_for_tests,
+    print_fatal_lowering_diagnostics
 } from "./lowering_core";
 import {
     DeclareSignature,
@@ -167,6 +168,7 @@ fn lower_to_llvm_lines(native_module: NativeModule) -> LoweredLLVMLinesResult ![
         return LoweredLLVMLinesResult {
             lines: [],
             diagnostics: [],
+            diags: [],
             trait_metadata: empty_trait_metadata(),
             function_effects: [],
             lifetime_regions: [],
@@ -178,6 +180,7 @@ fn lower_to_llvm_lines(native_module: NativeModule) -> LoweredLLVMLinesResult ![
     return LoweredLLVMLinesResult {
         lines: lines,
         diagnostics: [],
+        diags: [],
         trait_metadata: empty_trait_metadata(),
         function_effects: [],
         lifetime_regions: [],
@@ -285,13 +288,7 @@ fn print_llvm_ir_from_text(native_text: string, module_name: string) -> boolean 
         return false;
     }
     if has_fatal_lowering_diagnostic(lowered_lines.diagnostics) {
-        let mut _fpi: int = 0;
-        loop {
-            if _fpi >= lowered_lines.diagnostics.length { break; }
-            let _pdiag = lowered_lines.diagnostics[_fpi];
-            if index_of(_pdiag, "[fatal]") >= 0 { print.err(_pdiag); }
-            _fpi += 1;
-        }
+        print_fatal_lowering_diagnostics(lowered_lines.diagnostics, lowered_lines.diags);
         return false;
     }
     let lines = lowered_lines.lines;
@@ -336,13 +333,7 @@ fn write_llvm_ir(native_module: NativeModule, out_path: string) -> boolean ![io]
     // fatal lowering failure indistinguishable from an ordinary one at the
     // CLI (SFN-529).
     if has_fatal_lowering_diagnostic(lowered_lines.diagnostics) {
-        let mut _fpi: int = 0;
-        loop {
-            if _fpi >= lowered_lines.diagnostics.length { break; }
-            let _pdiag = lowered_lines.diagnostics[_fpi];
-            if index_of(_pdiag, "[fatal]") >= 0 { print.err(_pdiag); }
-            _fpi += 1;
-        }
+        print_fatal_lowering_diagnostics(lowered_lines.diagnostics, lowered_lines.diags);
         return false;
     }
     return write_llvm_lines_chunked(out_path, lines);
@@ -448,6 +439,7 @@ fn lower_to_llvm_lines_with_context(native_module: NativeModule, imported_manife
         return LoweredLLVMLinesResult {
             lines: [],
             diagnostics: diagnostics,
+            diags: [],
             trait_metadata: empty_trait_metadata(),
             function_effects: [],
             lifetime_regions: [],

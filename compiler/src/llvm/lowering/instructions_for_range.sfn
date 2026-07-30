@@ -1,6 +1,7 @@
 // compiler/src/llvm/lowering/instructions_for_range.sfn
 //
 // Control flow handler: range-based for-loop instruction lowering.
+import { Diag } from "../../diagnostic";
 import { NativeFunction, NativeInstruction, NativeSourceSpan } from "../../native_ir";
 import { lower_expression } from "../expression_lowering/native/core";
 import {
@@ -28,7 +29,7 @@ import {
     TryFrameContext,
     TypeContext
 } from "../types";
-import { extend_string_array, trim_text } from "../utils";
+import { extend_diag_array, extend_string_array, trim_text } from "../utils";
 import { lower_instruction_range } from "./instructions";
 import { allocate_block_label } from "./instructions_condition";
 import {
@@ -46,6 +47,7 @@ import { collect_mutation_names, find_mutation_for_name } from "./phi";
 // Returns null if the iterable is not a recognized range pattern.
 fn lower_for_range(function: NativeFunction, structure: LoopStructure, raw_target: string, iterable_text: string, llvm_return: string, bindings: ParameterBinding[], locals: LocalBinding[], allocas: string[], lines: string[], temp_index: int, block_counter: int, next_local_id: int, next_region_id: int, functions: NativeFunction[], loop_stack: LoopContext[], try_stack: TryFrameContext[], context: TypeContext, scope_id: string, scope_depth: int, next_index: int) -> BlockLoweringResult? ![io] {
     let mut diagnostics: string[] = [];
+    let mut diags: Diag[] = [];
     let mut current_lines: string[] = lines;
     let mut current_allocas: string[] = allocas;
     let mut current_locals: LocalBinding[] = locals;
@@ -81,6 +83,7 @@ fn lower_for_range(function: NativeFunction, structure: LoopStructure, raw_targe
             temp_index: current_temp,
             block_counter: current_block_counter,
             diagnostics: diagnostics,
+            diags: diags,
             terminated: false,
             next_local_id: current_next_local,
             lifetime_regions: lifetime_regions,
@@ -120,6 +123,7 @@ fn lower_for_range(function: NativeFunction, structure: LoopStructure, raw_targe
             temp_index: current_temp,
             block_counter: current_block_counter,
             diagnostics: diagnostics,
+            diags: diags,
             terminated: false,
             next_local_id: current_next_local,
             lifetime_regions: lifetime_regions,
@@ -152,6 +156,7 @@ fn lower_for_range(function: NativeFunction, structure: LoopStructure, raw_targe
             temp_index: current_temp,
             block_counter: current_block_counter,
             diagnostics: diagnostics,
+            diags: diags,
             terminated: false,
             next_local_id: current_next_local,
             lifetime_regions: lifetime_regions,
@@ -183,6 +188,7 @@ fn lower_for_range(function: NativeFunction, structure: LoopStructure, raw_targe
             temp_index: current_temp,
             block_counter: current_block_counter,
             diagnostics: diagnostics,
+            diags: diags,
             terminated: false,
             next_local_id: current_next_local,
             lifetime_regions: lifetime_regions,
@@ -215,6 +221,7 @@ fn lower_for_range(function: NativeFunction, structure: LoopStructure, raw_targe
             temp_index: current_temp,
             block_counter: current_block_counter,
             diagnostics: diagnostics,
+            diags: diags,
             terminated: false,
             next_local_id: current_next_local,
             lifetime_regions: lifetime_regions,
@@ -251,6 +258,7 @@ fn lower_for_range(function: NativeFunction, structure: LoopStructure, raw_targe
                 temp_index: current_temp,
                 block_counter: current_block_counter,
                 diagnostics: diagnostics,
+                diags: diags,
                 terminated: false,
                 next_local_id: current_next_local,
                 lifetime_regions: lifetime_regions,
@@ -282,6 +290,7 @@ fn lower_for_range(function: NativeFunction, structure: LoopStructure, raw_targe
                 temp_index: current_temp,
                 block_counter: current_block_counter,
                 diagnostics: diagnostics,
+                diags: diags,
                 terminated: false,
                 next_local_id: current_next_local,
                 lifetime_regions: lifetime_regions,
@@ -307,6 +316,7 @@ fn lower_for_range(function: NativeFunction, structure: LoopStructure, raw_targe
                     temp_index: current_temp,
                     block_counter: current_block_counter,
                     diagnostics: diagnostics,
+                    diags: diags,
                     terminated: false,
                     next_local_id: current_next_local,
                     lifetime_regions: lifetime_regions,
@@ -387,6 +397,7 @@ fn lower_for_range(function: NativeFunction, structure: LoopStructure, raw_targe
             temp_index: current_temp,
             block_counter: current_block_counter,
             diagnostics: diagnostics,
+            diags: diags,
             terminated: false,
             next_local_id: current_next_local,
             lifetime_regions: lifetime_regions,
@@ -438,6 +449,7 @@ fn lower_for_range(function: NativeFunction, structure: LoopStructure, raw_targe
             temp_index: current_temp,
             block_counter: current_block_counter,
             diagnostics: diagnostics,
+            diags: diags,
             terminated: false,
             next_local_id: current_next_local,
             lifetime_regions: lifetime_regions,
@@ -472,6 +484,7 @@ fn lower_for_range(function: NativeFunction, structure: LoopStructure, raw_targe
             temp_index: current_temp,
             block_counter: current_block_counter,
             diagnostics: diagnostics,
+            diags: diags,
             terminated: false,
             next_local_id: current_next_local,
             lifetime_regions: lifetime_regions,
@@ -525,6 +538,7 @@ fn lower_for_range(function: NativeFunction, structure: LoopStructure, raw_targe
         diagnostics.push(body_result.diagnostics[_ci19]);
         _ci19 += 1;
     }
+    diags = extend_diag_array(diags, body_result.diags);
     lifetime_regions = extend_lifetime_regions(lifetime_regions, body_result.lifetime_regions);
     current_allocas = body_result.allocas;
     current_temp = body_result.temp_index;
@@ -641,6 +655,7 @@ fn lower_for_range(function: NativeFunction, structure: LoopStructure, raw_targe
         temp_index: current_temp,
         block_counter: current_block_counter,
         diagnostics: diagnostics,
+        diags: diags,
         terminated: false,
         next_local_id: current_next_local,
         lifetime_regions: lifetime_regions,
@@ -716,6 +731,7 @@ fn build_loop_exit_mutations(collected_mutations: LocalMutation[], locals: Local
         temp_index: current_temp,
         block_counter: 0,
         diagnostics: [],
+        diags: [],
         terminated: false,
         next_local_id: 0,
         lifetime_regions: [],

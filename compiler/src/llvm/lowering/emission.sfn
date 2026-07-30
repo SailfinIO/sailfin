@@ -10,6 +10,7 @@
 // at link time via symbol mangling. This cycle is intentional: async emission
 // needs the main emit_llvm_function for the inner body, while the main
 // emitter delegates async wrapper generation to the async module.
+import { Diag, diag_to_legacy_string } from "../../diagnostic";
 import { NativeFunction } from "../../native_ir";
 import { substring } from "../../string_utils";
 import { test_runner_trace } from "../../test_runner_state";
@@ -38,9 +39,11 @@ import {
 import {
     append_parameter_binding,
     append_string,
+    extend_diag_array,
     extend_string_array,
     index_of,
     join_with_separator,
+    lowering_error_diag,
     matches_case_insensitive,
     number_to_string,
     sanitize_symbol,
@@ -277,6 +280,7 @@ fn prepare_parameters_from_function(function: NativeFunction, context: TypeConte
 
 fn emit_llvm_function(function: NativeFunction, functions: NativeFunction[], effects: string[], context: TypeContext, module_name: string, entry_points: string[], exported_symbols: string[], imported_functions: NativeFunction[], module_globals: LocalBinding[], module_init_symbol: string, needs_module_init_call: boolean, imported_decorator_names: string[]) -> LoweredLLVMFunction ![io] {
     let mut diagnostics: string[] = [];
+    let mut diags: Diag[] = [];
     let debug_lowering = trace_lowering();
 
     let fn_name = function.name;
@@ -345,6 +349,7 @@ fn emit_llvm_function(function: NativeFunction, functions: NativeFunction[], eff
         return LoweredLLVMFunction {
             lines: [],
             diagnostics: diagnostics,
+            diags: diags,
             lifetime_regions: [],
             string_constants: empty_constants
         };
@@ -382,6 +387,7 @@ fn emit_llvm_function(function: NativeFunction, functions: NativeFunction[], eff
         return LoweredLLVMFunction {
             lines: lines,
             diagnostics: diagnostics,
+            diags: diags,
             lifetime_regions: [],
             string_constants: empty_constants
         };
@@ -581,6 +587,7 @@ fn emit_llvm_function(function: NativeFunction, functions: NativeFunction[], eff
     let _eb_allocas = _eb_result.allocas;
     let _eb_terminated = _eb_result.terminated;
     let _eb_body_diagnostics = _eb_result.diagnostics;
+    diags = extend_diag_array(diags, _eb_result.diags);
 
     if debug_lowering {
         print.err("emit-llvm: emit_fn phase=body_done name=" + fn_name
@@ -635,9 +642,11 @@ fn emit_llvm_function(function: NativeFunction, functions: NativeFunction[], eff
                 + fn_name
                 + "`";
             if fallthrough_block_is_reachable(lines) {
-                missing_ret_diag = "llvm lowering [fatal] [E1002]: function `"
-                    + fn_name
+                let message = "function `" + fn_name
                     + "` can reach the end without returning";
+                let diag = lowering_error_diag("E1002", message, null);
+                diags.push(diag);
+                missing_ret_diag = diag_to_legacy_string(diag);
             }
             diagnostics = append_string(diagnostics, missing_ret_diag);
             let ret_line = "  ret " + llvm_return + " " + default_return_literal(llvm_return);
@@ -788,6 +797,7 @@ fn emit_llvm_function(function: NativeFunction, functions: NativeFunction[], eff
     return LoweredLLVMFunction {
         lines: lines,
         diagnostics: diagnostics,
+        diags: diags,
         lifetime_regions: _empty_lifetime_regions,
         string_constants: merged_constants
     };

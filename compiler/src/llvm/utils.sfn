@@ -2,8 +2,157 @@
 //
 // General utility functions for the LLVM lowering pass. These are basic
 // string manipulation, array helpers, and parsing utilities.
+import { Diag, Span, diag_to_legacy_string } from "../diagnostic";
+import { NativeSourceSpan } from "../native_ir";
 import { char_code, substring } from "../string_utils";
 import { ParameterBinding } from "./types";
+
+// =============================================================================
+// Lowering diagnostic compatibility
+// =============================================================================
+fn lowering_error_diag(code: string, message: string, span_in: NativeSourceSpan?) -> Diag {
+    let mut span: Span? = null;
+    if span_in != null {
+        span = Span {
+            start_line: span_in.start_line,
+            start_column: span_in.start_column,
+            end_line: span_in.end_line,
+            end_column: span_in.end_column
+        };
+    }
+    return Diag {
+        code: code,
+        severity: "error",
+        message: message,
+        file_path: "",
+        span: span,
+        stage: "lowering",
+        suggestion: null
+    };
+}
+
+fn extend_diag_array(base: Diag[], extra: Diag[]) -> Diag[] {
+    let mut out = base;
+    let mut index: int = 0;
+    loop {
+        if index >= extra.length { break; }
+        out.push(extra[index]);
+        index += 1;
+    }
+    return out;
+}
+
+fn _legacy_lowering_diag_code(value: string) -> string {
+    let marker = index_of(value, "[E");
+    if marker >= 0 {
+        if marker + 7 <= value.length {
+            if substring(value, marker + 6, marker + 7) == "]" {
+                return substring(value, marker + 1, marker + 6);
+            }
+        }
+    }
+    if index_of(value, "E0832:") >= 0 { return "E0832"; }
+    if index_of(value, "ABI primitive mismatch") >= 0 { return "E1009"; }
+    if index_of(value, "cannot coerce task handle") >= 0 { return "E1009"; }
+    if index_of(value, "unable to coerce value") >= 0 { return "E1009"; }
+    if index_of(value, "arithmetic mixes") >= 0 { return "E1009"; }
+    if index_of(value, "cannot resolve return type") >= 0 { return "E1007"; }
+    if index_of(value, "unable to emit call") >= 0 { return "E1007"; }
+    if index_of(value, "closure dispatch arity") >= 0 { return "E1007"; }
+    if index_of(value, "method call base") >= 0 { return "E1007"; }
+    if index_of(value, "emit_runtime_call") >= 0 { return "E1008"; }
+    if index_of(value, "struct-array concat") >= 0 { return "E1008"; }
+    if index_of(value, "channel `") >= 0 { return "E1010"; }
+    if index_of(value, "`join_all`") >= 0 { return "E1010"; }
+    if index_of(value, "await") >= 0 { return "E1010"; }
+    if index_of(value, "task lambda") >= 0 { return "E1010"; }
+    if index_of(value, "lambda #") >= 0 { return "E1012"; }
+    if index_of(value, "struct/enum literal") >= 0 { return "E1012"; }
+    if index_of(value, "struct literal") >= 0 { return "E1012"; }
+    if index_of(value, "enum payload") >= 0 { return "E1012"; }
+    if index_of(value, "stringif") >= 0 { return "E1013"; }
+    if index_of(value, "elided ") >= 0 { return "E1014"; }
+    return "E1006";
+}
+
+fn _legacy_lowering_diag_message(value: string, code: string) -> string {
+    let separator = index_of(value, ": ");
+    if separator < 0 { return value; }
+    let mut message = substring(value, separator + 2, value.length);
+    let code_prefix = code + ": ";
+    if starts_with(message, code_prefix) {
+        message = substring(message, code_prefix.length, message.length);
+    }
+    return message;
+}
+
+fn diag_from_legacy_lowering_error(value: string) -> Diag? {
+    if index_of(value, "[fatal]") < 0 { return null; }
+    let code = _legacy_lowering_diag_code(value);
+    return lowering_error_diag(code, _legacy_lowering_diag_message(value, code), null);
+}
+
+fn append_missing_legacy_lowering_diags(diags: Diag[], diagnostics: string[]) -> Diag[] {
+    let mut out = diags;
+    let mut matched: boolean[] = [];
+    let mut match_index: int = 0;
+    loop {
+        if match_index >= out.length { break; }
+        matched.push(false);
+        match_index += 1;
+    }
+    let mut index: int = 0;
+    loop {
+        if index >= diagnostics.length { break; }
+        let legacy = diagnostics[index];
+        if index_of(legacy, "[fatal]") >= 0 {
+            let mut found: boolean = false;
+            let mut diag_index: int = 0;
+            loop {
+                if diag_index >= out.length { break; }
+                if !matched[diag_index] && diag_to_legacy_string(out[diag_index]) == legacy {
+                    matched[diag_index] = true;
+                    found = true;
+                    break;
+                }
+                diag_index += 1;
+            }
+            if !found {
+                let converted = diag_from_legacy_lowering_error(legacy);
+                if converted != null {
+                    out.push(converted);
+                    matched.push(true);
+                }
+            }
+        }
+        index += 1;
+    }
+    return out;
+}
+
+fn stamp_lowering_diag_file_paths(diags: Diag[], file_path: string) -> Diag[] {
+    let mut out = diags;
+    let mut index: int = 0;
+    loop {
+        if index >= out.length { break; }
+        if out[index].file_path.length == 0 {
+            out[index].file_path = file_path;
+        }
+        index += 1;
+    }
+    return out;
+}
+
+fn render_lowering_error_diag(diag: Diag) -> string {
+    let mut rendered = diag_to_legacy_string(diag);
+    if diag.span != null {
+        rendered = rendered + "\n  --> " + diag.file_path + ":"
+            + number_to_string(diag.span.start_line)
+            + ":"
+            + number_to_string(diag.span.start_column);
+    }
+    return rendered;
+}
 
 // =============================================================================
 // String manipulation

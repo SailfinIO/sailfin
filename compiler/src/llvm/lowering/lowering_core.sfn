@@ -12,6 +12,7 @@
 //   lowering_text_utils.sfn     — text processing and structured data parsers
 //   lowering_recovery.sfn       — light recovery parsers for functions/structs/imports
 //   lowering_io.sfn             — string array ops, file I/O, intrinsics
+import { Diag } from "../../diagnostic";
 import { NativeModule } from "../../emit_native";
 import { NativeArtifact } from "../../emit_native_layout";
 import { lines_to_native_text, native_lines_have_text } from "../../emit_native_state";
@@ -65,9 +66,13 @@ import {
     TypeContext
 } from "../types";
 import {
+    append_missing_legacy_lowering_diags,
+    extend_diag_array,
     index_of,
     number_to_string,
+    render_lowering_error_diag,
     sanitize_symbol,
+    stamp_lowering_diag_file_paths,
     starts_with,
     string_array_contains,
     trim_text
@@ -751,13 +756,7 @@ fn _lower_parsed_native_to_llvm_file(parse: ParseNativeResult, native_text: stri
     // would be worse than no output at all. Print every fatal so the
     // user sees the underlying cause before the build aborts.
     if has_fatal_lowering_diagnostic(lowered_lines.diagnostics) {
-        let mut _fdi: int = 0;
-        loop {
-            if _fdi >= lowered_lines.diagnostics.length { break; }
-            let _diag = lowered_lines.diagnostics[_fdi];
-            if index_of(_diag, "[fatal]") >= 0 { print.err(_diag); }
-            _fdi += 1;
-        }
+        print_fatal_lowering_diagnostics(lowered_lines.diagnostics, lowered_lines.diags);
         // Drop any stale `.ll` from a previous successful build so
         // downstream tooling that only stats `out_path` cannot mistake
         // it for fresh output (mirrors the empty-native-text branch in
@@ -818,13 +817,7 @@ fn native_text_passes_lowering_gate(native_text: string, module_name: string) ->
     // print every `[fatal]` so the user sees the underlying cause, then
     // refuse the emit.
     if has_fatal_lowering_diagnostic(lowered_lines.diagnostics) {
-        let mut _fdi: int = 0;
-        loop {
-            if _fdi >= lowered_lines.diagnostics.length { break; }
-            let _diag = lowered_lines.diagnostics[_fdi];
-            if index_of(_diag, "[fatal]") >= 0 { print.err(_diag); }
-            _fdi += 1;
-        }
+        print_fatal_lowering_diagnostics(lowered_lines.diagnostics, lowered_lines.diags);
         return false;
     }
     // Mirror the remaining non-fatal rejection conditions in
@@ -886,6 +879,31 @@ fn has_fatal_lowering_diagnostic(diagnostics: string[]) -> boolean {
     return false;
 }
 
+// Render the typed sidecar while the legacy string array remains the
+// fail-closed gate. The canonical first line keeps existing grep-oriented
+// diagnostics stable; Set A adds a source location on the following line.
+fn print_fatal_lowering_diagnostics(diagnostics: string[], diags: Diag[]) -> void ![io.console] {
+    let mut printed: boolean = false;
+    let mut diag_index: int = 0;
+    loop {
+        if diag_index >= diags.length { break; }
+        if diags[diag_index].severity == "error" {
+            print.err(render_lowering_error_diag(diags[diag_index]));
+            printed = true;
+        }
+        diag_index += 1;
+    }
+    if printed { return; }
+    let mut legacy_index: int = 0;
+    loop {
+        if legacy_index >= diagnostics.length { break; }
+        if index_of(diagnostics[legacy_index], "[fatal]") >= 0 {
+            print.err(diagnostics[legacy_index]);
+        }
+        legacy_index += 1;
+    }
+}
+
 fn lower_to_llvm_lines_with_parsed_context(native_module: NativeModule, parse_arg: ParseNativeResult, imported_manifests: LayoutManifest[], imported_native_texts: string[], diagnostics_in: string[], mangle_symbols: boolean, native_text_override_path_in: string) -> LoweredLLVMLinesResult ![io] {
     // Generic-function monomorphization (#1869, SFEP-0038 §3.3). This is the
     // single lowering choke point every entry path funnels through. Specialize
@@ -916,6 +934,7 @@ fn lower_to_llvm_lines_with_parsed_context(native_module: NativeModule, parse_ar
     let safe_imported_manifests = sanitize_imported_manifests(imported_manifests, debug_lowering);
     let safe_imported_native_texts = sanitize_imported_native_texts(imported_native_texts, debug_lowering);
     let mut diagnostics = sanitize_diagnostics(diagnostics_in);
+    let mut diags: Diag[] = [];
     if debug_lowering {
         print.err("emit-llvm: dbg-F after diagnostics sanitize");
     }
@@ -1293,6 +1312,7 @@ fn lower_to_llvm_lines_with_parsed_context(native_module: NativeModule, parse_ar
         if init_lowered.diagnostics.length > 0 {
             diagnostics = extend_string_lines_checked(diagnostics, init_lowered.diagnostics, "module init");
         }
+        diags = extend_diag_array(diags, init_lowered.diags);
         if init_lowered.string_constants.length > 0 {
             module_string_constants = merge_string_constants(module_string_constants, init_lowered.string_constants);
         }
@@ -1307,6 +1327,7 @@ fn lower_to_llvm_lines_with_parsed_context(native_module: NativeModule, parse_ar
     // for `emit_runtime_call` and panic-wrapper inline calls).
     let function_result = lower_all_functions(local_functions, context_functions, aggregated_effects, type_context, native_module.module_name, safe_entry_points, exported_symbols, imported_functions, module_global_locals, module_init_symbol, module_globals_needs_init_call, module_string_constants, trace, debug_lowering, decorator_import_names);
     diagnostics = extend_string_lines_checked(diagnostics, function_result.diagnostics, "function lowering");
+    diags = extend_diag_array(diags, function_result.diags);
 
     // ── M2.10 (#402): type-metadata descriptors. Emitted before
     // the body assembly so the constructor's `call @sfn_type_register`
@@ -1506,9 +1527,12 @@ fn lower_to_llvm_lines_with_parsed_context(native_module: NativeModule, parse_ar
     if debug_lowering {
         print.err("emit-llvm: phase=end lines=" + number_to_string(lines.length));
     }
+    diags = append_missing_legacy_lowering_diags(diags, diagnostics);
+    diags = stamp_lowering_diag_file_paths(diags, module_source_filename(native_module.module_name));
     return LoweredLLVMLinesResult {
         lines: lines,
         diagnostics: diagnostics,
+        diags: diags,
         trait_metadata: trait_metadata,
         function_effects: function_effects,
         lifetime_regions: lifetime_regions,

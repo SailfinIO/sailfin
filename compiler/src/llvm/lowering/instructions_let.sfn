@@ -1,6 +1,7 @@
 // compiler/src/llvm/lowering/instructions_let.sfn
 //
 // Let binding instruction lowering.
+import { Diag, diag_to_legacy_string } from "../../diagnostic";
 import { NativeFunction, NativeInstruction, NativeSourceSpan } from "../../native_ir";
 import { index_of, substring } from "../../string_utils";
 import { array_pointer_element_type } from "../expression_lowering/arrays";
@@ -48,6 +49,7 @@ import {
 import {
     is_identifier_part_char,
     is_identifier_start_char,
+    lowering_error_diag,
     number_to_string,
     starts_with,
     trim_text
@@ -295,6 +297,7 @@ fn _await_receive_channel_base(value: string) -> string {
 
 fn lower_let_instruction(function: NativeFunction, instruction: NativeInstruction, bindings: ParameterBinding[], locals: LocalBinding[], allocas: string[], lines: string[], temp_index: int, next_local_id: int, next_region_id: int, functions: NativeFunction[], context: TypeContext, scope_id: string, scope_depth: int, current_label: string) -> LetLoweringResult ![io] {
     let mut diagnostics: string[] = [];
+    let mut diags: Diag[] = [];
     let mut current_lines: string[] = lines;
     let mut current_allocas: string[] = allocas;
     let mut current_locals: LocalBinding[] = locals;
@@ -708,8 +711,7 @@ fn lower_let_instruction(function: NativeFunction, instruction: NativeInstructio
             // to stderr (like the `coerce_operand_to_type` boundary check)
             // so the gate in `entrypoints_tests_writer` — which refuses
             // silently on a `[fatal]` diagnostic — still surfaces the cause.
-            let bool_diag = "llvm lowering [fatal]: ABI primitive mismatch: binding `"
-                + instruction.name
+            let message = "ABI primitive mismatch: binding `" + instruction.name
                 + "` expects `"
                 + llvm_type
                 + "` ("
@@ -719,8 +721,11 @@ fn lower_let_instruction(function: NativeFunction, instruction: NativeInstructio
                 + "` ("
                 + numeric_type_kind(operand.llvm_type)
                 + ") — add `as int` or `as float` to disambiguate";
-            print.err(bool_diag);
-            diagnostics.push(bool_diag);
+            let diag = lowering_error_diag("E1009", message, initializer_span);
+            diags.push(diag);
+            let legacy_diag = diag_to_legacy_string(diag);
+            print.err(legacy_diag);
+            diagnostics.push(legacy_diag);
             current_lines.push("  store " + llvm_type + " "
                 + default_return_literal(llvm_type)
                 + ", "
@@ -743,13 +748,15 @@ fn lower_let_instruction(function: NativeFunction, instruction: NativeInstructio
                 // `0`/`false`/`null` in the binary with nothing gating it.
                 // Keep the store so the alloca is initialized for the rest of
                 // the pass, but fail the build.
-                diagnostics.push("llvm lowering [fatal] [E1002]: unable to coerce initializer for `"
-                    + instruction.name
+                let message = "unable to coerce initializer for `" + instruction.name
                     + "` to `"
                     + llvm_type
                     + "` in `"
                     + function.name
-                    + "` — refusing to fabricate a default");
+                    + "` — refusing to fabricate a default";
+                let diag = lowering_error_diag("E1002", message, initializer_span);
+                diags.push(diag);
+                diagnostics.push(diag_to_legacy_string(diag));
                 current_lines.push("  store " + llvm_type + " "
                     + default_return_literal(llvm_type)
                     + ", "
@@ -774,13 +781,14 @@ fn lower_let_instruction(function: NativeFunction, instruction: NativeInstructio
         // silence. `_initializer_absent` excludes the legal uninitialized
         // binding, whose identical store is the documented default instead.
         if !_initializer_absent {
-            diagnostics.push("llvm lowering [fatal] [E1002]: initializer for `"
-                + instruction.name
-                + "` in `"
+            let message = "initializer for `" + instruction.name + "` in `"
                 + function.name
                 + "` did not lower — refusing to fabricate a default `"
                 + llvm_type
-                + "`");
+                + "`";
+            let diag = lowering_error_diag("E1002", message, initializer_span);
+            diags.push(diag);
+            diagnostics.push(diag_to_legacy_string(diag));
         }
         current_lines.push("  store " + llvm_type + " " + default_return_literal(llvm_type)
             + ", "
@@ -947,6 +955,7 @@ fn lower_let_instruction(function: NativeFunction, instruction: NativeInstructio
         bindings: current_bindings,
         temp_index: current_temp,
         diagnostics: diagnostics,
+        diags: diags,
         next_local_id: next_local_id + 1,
         lifetime_regions: lifetime_regions,
         lifetime_releases: lifetime_releases,

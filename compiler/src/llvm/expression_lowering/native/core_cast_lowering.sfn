@@ -24,6 +24,13 @@ import {
 } from "../../types";
 import { number_to_string, starts_with, trim_text } from "../../utils";
 import { lower_expression } from "./core";
+import {
+    emit_bf16_narrow_from_double,
+    emit_bf16_narrow_from_float,
+    emit_bf16_widen_to_double,
+    emit_bf16_widen_to_float,
+    emit_i64_round_to_odd
+} from "./core_bf16_lowering";
 import { pick_agg_cast_shim_target } from "./core_literals_lowering";
 import {
     coerce_operand_to_type,
@@ -36,9 +43,11 @@ import { operand_source_type } from "./core_scopes";
 import { coerce_operand_to_string, emit_string_concat, lower_string_literal } from "./core_strings";
 import { encode_string_literal_for_sailfin, resolve_interpolation_template } from "./core_text";
 
+// bfloat has no `.bf16` saturating intrinsic on any target — every `bfloat`
+// operand is widened to `float` before this is consulted (SFN-609), so a
+// `.bf16` name must never be produced here.
 fn float_intrinsic_suffix(llvm_type: string) -> string {
     if llvm_type == "half" { return "f16"; }
-    if llvm_type == "bfloat" { return "bf16"; }
     if llvm_type == "float" { return "f32"; }
     if llvm_type == "double" { return "f64"; }
     return "";
@@ -495,6 +504,43 @@ fn lower_cast_expression(parse: CastParseResult, bindings: ParameterBinding[], l
 
     let mut numeric_op_name: string = "";
 
+    // i64/u64 don't fit f64's 53-bit significand, so a plain `sitofp`/`uitofp`
+    // followed by a narrow to bf16 would round twice, which SFEP-0054 §3.4
+    // forbids; pre-round the integer to odd on the 2^11 grid so the widen
+    // stays a single effective rounding (SFN-609).
+    if operand_is_int {
+        if target_type == "bfloat" {
+            let mut int_source_value: string = operand.value;
+            if operand.llvm_type == "i64" {
+                let rounded = emit_i64_round_to_odd(operand.value, !operand_is_unsigned, current_temp, current_lines);
+                current_lines = rounded.lines;
+                current_temp = rounded.temp_index;
+                int_source_value = rounded.value;
+            }
+            let widen_temp = format_temp_name(current_temp);
+            current_temp += 1;
+            let mut int_widen_op: string = "";
+            if operand_is_unsigned { int_widen_op = "uitofp"; }
+            if !operand_is_unsigned { int_widen_op = "sitofp"; }
+            current_lines.push("  " + widen_temp + " = " + int_widen_op + " "
+                + operand.llvm_type
+                + " "
+                + int_source_value
+                + " to double");
+            let narrowed = emit_bf16_narrow_from_double(widen_temp, current_temp, current_lines);
+            return ExpressionResult {
+                lines: narrowed.lines,
+                temp_index: narrowed.temp_index,
+                operand: LLVMOperand {
+                    llvm_type: "bfloat",
+                    value: narrowed.value
+                },
+                diagnostics: diagnostics,
+                string_constants: lowered.string_constants
+            };
+        }
+    }
+
     if operand_is_int {
         if target_is_float {
             if operand_is_unsigned { numeric_op_name = "uitofp"; }
@@ -503,9 +549,21 @@ fn lower_cast_expression(parse: CastParseResult, bindings: ParameterBinding[], l
     }
     if operand_is_float {
         if target_is_int {
+            // bf16 has no saturating conversion intrinsic on any target;
+            // widen losslessly to f32 first and reuse the f32 intrinsic,
+            // which preserves the saturating semantics exactly (SFN-609).
+            let mut sat_operand_type: string = operand.llvm_type;
+            let mut sat_operand_value: string = operand.value;
+            if operand.llvm_type == "bfloat" {
+                let widened = emit_bf16_widen_to_float(operand.value, current_temp, current_lines);
+                current_lines = widened.lines;
+                current_temp = widened.temp_index;
+                sat_operand_type = "float";
+                sat_operand_value = widened.value;
+            }
             let mut sat_op = "fptosi";
             if target_is_unsigned { sat_op = "fptoui"; }
-            let float_suffix = float_intrinsic_suffix(operand.llvm_type);
+            let float_suffix = float_intrinsic_suffix(sat_operand_type);
             if float_suffix.length > 0 {
                 let intrinsic = "llvm." + sat_op + ".sat." + target_type + "."
                     + float_suffix;
@@ -513,9 +571,9 @@ fn lower_cast_expression(parse: CastParseResult, bindings: ParameterBinding[], l
                     + " @"
                     + intrinsic
                     + "("
-                    + operand.llvm_type
+                    + sat_operand_type
                     + " "
-                    + operand.value
+                    + sat_operand_value
                     + ")");
                 let casted = LLVMOperand {
                     llvm_type: target_type,
@@ -542,23 +600,80 @@ fn lower_cast_expression(parse: CastParseResult, bindings: ParameterBinding[], l
             if dst_width < src_width { numeric_op_name = "trunc"; }
         }
     }
+    // bfloat has no AArch64 conversion instruction in either direction;
+    // substitute the bit-manipulation helpers for every bfloat<->float
+    // pairing (SFN-609). half<->bfloat direct casts are deferred SFEP-0054
+    // work and fall through to the "unsupported cast" diagnostic below.
+    if operand.llvm_type == "bfloat" {
+        if target_type == "float" {
+            let widened = emit_bf16_widen_to_float(operand.value, current_temp, current_lines);
+            return ExpressionResult {
+                lines: widened.lines,
+                temp_index: widened.temp_index,
+                operand: LLVMOperand {
+                    llvm_type: "float",
+                    value: widened.value
+                },
+                diagnostics: diagnostics,
+                string_constants: lowered.string_constants
+            };
+        }
+        if target_type == "double" {
+            let widened = emit_bf16_widen_to_double(operand.value, current_temp, current_lines);
+            return ExpressionResult {
+                lines: widened.lines,
+                temp_index: widened.temp_index,
+                operand: LLVMOperand {
+                    llvm_type: "double",
+                    value: widened.value
+                },
+                diagnostics: diagnostics,
+                string_constants: lowered.string_constants
+            };
+        }
+    }
+    if operand.llvm_type == "float" {
+        if target_type == "bfloat" {
+            let narrowed = emit_bf16_narrow_from_float(operand.value, current_temp, current_lines);
+            return ExpressionResult {
+                lines: narrowed.lines,
+                temp_index: narrowed.temp_index,
+                operand: LLVMOperand {
+                    llvm_type: "bfloat",
+                    value: narrowed.value
+                },
+                diagnostics: diagnostics,
+                string_constants: lowered.string_constants
+            };
+        }
+    }
+    if operand.llvm_type == "double" {
+        if target_type == "bfloat" {
+            let narrowed = emit_bf16_narrow_from_double(operand.value, current_temp, current_lines);
+            return ExpressionResult {
+                lines: narrowed.lines,
+                temp_index: narrowed.temp_index,
+                operand: LLVMOperand {
+                    llvm_type: "bfloat",
+                    value: narrowed.value
+                },
+                diagnostics: diagnostics,
+                string_constants: lowered.string_constants
+            };
+        }
+    }
+
     if operand_is_float {
         if target_is_float {
             if operand.llvm_type == "float" {
                 if target_type == "double" { numeric_op_name = "fpext"; }
                 if target_type == "half" { numeric_op_name = "fptrunc"; }
-                if target_type == "bfloat" { numeric_op_name = "fptrunc"; }
             }
             if operand.llvm_type == "double" {
                 if target_type == "float" { numeric_op_name = "fptrunc"; }
                 if target_type == "half" { numeric_op_name = "fptrunc"; }
-                if target_type == "bfloat" { numeric_op_name = "fptrunc"; }
             }
             if operand.llvm_type == "half" {
-                if target_type == "float" { numeric_op_name = "fpext"; }
-                if target_type == "double" { numeric_op_name = "fpext"; }
-            }
-            if operand.llvm_type == "bfloat" {
                 if target_type == "float" { numeric_op_name = "fpext"; }
                 if target_type == "double" { numeric_op_name = "fpext"; }
             }

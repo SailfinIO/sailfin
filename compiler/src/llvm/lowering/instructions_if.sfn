@@ -1,6 +1,7 @@
 // compiler/src/llvm/lowering/instructions_if.sfn
 //
 // Control flow handlers: if/else instruction lowering.
+import { Diag } from "../../diagnostic";
 import { NativeFunction, NativeInstruction, NativeSourceSpan } from "../../native_ir";
 import { char_code, grapheme_at, substring } from "../../string_utils";
 import { lower_expression } from "../expression_lowering/native/core";
@@ -27,6 +28,7 @@ import {
 import {
     append_string,
     copy_string_array,
+    extend_diag_array,
     extend_string_array,
     index_of,
     is_simple_identifier,
@@ -287,6 +289,7 @@ fn lower_if_instruction(function: NativeFunction, start_index: int, llvm_return:
     let mut current_block_counter: int = block_counter;
     let mut current_next_local: int = next_local_id;
     let mut diagnostics: string[] = [];
+    let mut diags: Diag[] = [];
     let base_bindings: ParameterBinding[] = bindings;
     let mut then_bindings: ParameterBinding[] = base_bindings;
     let mut else_bindings: ParameterBinding[] = base_bindings;
@@ -341,6 +344,7 @@ fn lower_if_instruction(function: NativeFunction, start_index: int, llvm_return:
             temp_index: current_temp,
             block_counter: current_block_counter,
             diagnostics: diagnostics,
+            diags: diags,
             terminated: false,
             next_local_id: current_next_local,
             lifetime_regions: lifetime_regions,
@@ -453,6 +457,7 @@ fn lower_if_instruction(function: NativeFunction, start_index: int, llvm_return:
         diagnostics.push(then_result.diagnostics[_ci14]);
         _ci14 += 1;
     }
+    diags = extend_diag_array(diags, then_result.diags);
     lifetime_regions = extend_lifetime_regions(lifetime_regions, then_result.lifetime_regions);
     current_allocas = then_result.allocas;
     current_locals = then_result.locals;
@@ -507,6 +512,7 @@ fn lower_if_instruction(function: NativeFunction, start_index: int, llvm_return:
             diagnostics.push(else_result.diagnostics[_ci15]);
             _ci15 += 1;
         }
+        diags = extend_diag_array(diags, else_result.diags);
         lifetime_regions = extend_lifetime_regions(lifetime_regions, else_result.lifetime_regions);
         current_allocas = else_result.allocas;
         current_locals = else_result.locals;
@@ -813,6 +819,7 @@ fn lower_if_instruction(function: NativeFunction, start_index: int, llvm_return:
         temp_index: current_temp,
         block_counter: current_block_counter,
         diagnostics: diagnostics,
+        diags: diags,
         terminated: terminated,
         next_local_id: current_next_local,
         lifetime_regions: lifetime_regions,
