@@ -98,10 +98,10 @@ import { LocalBinding, analyze_lambda } from "./typecheck_captures";
 import {
     Diagnostic,
     diagnostic_to_diag,
-    is_identifier_char,
     is_linear_type,
     is_owned_type
 } from "./typecheck_types";
+import { is_identifier_char } from "./typecheck_types/text_utils";
 
 // One tracked binding. `state` is the lattice: "owned" on entry,
 // "moved" once a move site consumes it, "freed" once a disposer consumes

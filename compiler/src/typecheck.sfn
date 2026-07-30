@@ -64,7 +64,6 @@ import {
     has_symbol,
     is_builtin_call_name,
     is_function_kind,
-    is_identifier_char,
     make_array_arithmetic_diagnostic,
     make_await_non_future_diagnostic,
     make_channel_send_mismatch_diagnostic,
@@ -101,11 +100,11 @@ import {
     spawn_future_kind,
     task_array_element_kind,
     task_array_marker_kind,
-    token_from_name,
     type_is_future,
     type_is_result,
     type_parameter_names
 } from "./typecheck_types";
+import { is_identifier_char, token_from_name } from "./typecheck_types/text_utils";
 
 fn typecheck_diagnostics(program: Program) -> Diagnostic[] {
     let empty_imports: Statement[] = [];
