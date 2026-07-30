@@ -33,31 +33,25 @@ import {
     check_extern_var,
     check_function_signature,
     check_generic_instantiation,
-    check_interface_field_members,
     check_interface_members,
-    check_intersection_value_type_annotation,
-    check_object_literal_target,
     check_struct_fields,
     check_struct_methods,
     check_type_parameters,
     check_uninferable_generic_constructor,
     detect_removed_ai_keyword,
     future_element_kind,
-    make_array_arithmetic_diagnostic,
     make_await_non_future_diagnostic,
     make_channel_send_mismatch_diagnostic,
     make_conditional_branch_mismatch_diagnostic,
     make_conditional_non_boolean_condition_diagnostic,
     make_main_signature_param_count_diagnostic,
     make_main_signature_param_type_diagnostic,
-    make_mixed_arithmetic_diagnostic,
     make_nested_fn_capture_diagnostic,
     make_parse_error_diagnostic,
     make_removed_keyword_diagnostic,
     make_spawn_handle_into_empty_array_diagnostic,
     make_spawn_handle_kind_mismatch_diagnostic,
     make_spawn_unresolvable_kind_diagnostic,
-    make_struct_arithmetic_diagnostic,
     make_syscall_builtin_diagnostic,
     make_task_array_element_marker,
     make_thread_local_requires_mut_diagnostic,
@@ -65,9 +59,7 @@ import {
     make_try_non_result_fn_diagnostic,
     make_try_non_result_operand_diagnostic,
     make_undefined_function_diagnostic,
-    make_unknown_primitive_method_diagnostic,
     make_unparseable_statement_diagnostic,
-    primitive_has_method,
     result_type_arguments,
     spawn_future_kind,
     task_array_element_kind,
@@ -111,6 +103,16 @@ import {
     signature_is_generic
 } from "./typecheck_types/symbol_table_and_raw_exprs";
 import { is_identifier_char, token_from_name } from "./typecheck_types/text_utils";
+import {
+    check_interface_field_members,
+    check_intersection_value_type_annotation,
+    check_object_literal_target,
+    make_array_arithmetic_diagnostic,
+    make_mixed_arithmetic_diagnostic,
+    make_struct_arithmetic_diagnostic,
+    make_unknown_primitive_method_diagnostic,
+    primitive_has_method
+} from "./typecheck_types/value_and_object_checks";
 
 fn typecheck_diagnostics(program: Program) -> Diagnostic[] {
     let empty_imports: Statement[] = [];
