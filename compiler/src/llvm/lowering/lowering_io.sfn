@@ -226,8 +226,10 @@ fn ensure_intrinsic_declarations(lines: string[]) -> string[] {
     }
 
     let int_types = ["i8", "i16", "i32", "i64"];
-    let float_types = ["half", "bfloat", "float", "double"];
-    let float_suffixes = ["f16", "bf16", "f32", "f64"];
+    // No `.bf16` saturating intrinsic is ever emitted (SFN-609), so the
+    // declaration for it is dead.
+    let float_types = ["half", "float", "double"];
+    let float_suffixes = ["f16", "f32", "f64"];
     let operations = ["fptosi", "fptoui"];
     let mut operation_index: int = 0;
     loop {
