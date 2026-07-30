@@ -1358,9 +1358,35 @@ fn wait_a_bit() ![clock] {
 }
 ```
 
+#### `unix_millis() -> Result<int, string> ![clock]`
+
+Return signed milliseconds since `1970-01-01T00:00:00Z`, floored to the last
+completed millisecond. The result is `Result.Err` when the host realtime-clock
+provider fails; the API never substitutes zero, a stale value, or the monotonic
+clock.
+
+```sfn
+import { unix_millis } from "time";
+
+fn record_timestamp() ![clock, io] {
+    match unix_millis() {
+        Result.Ok { value } => { print("epoch_ms: ${value}"); },
+        Result.Err { error } => { print.err(error); }
+    }
+}
+```
+
+Realtime clocks can move backward or forward after NTP or manual adjustment.
+Use `monotonic_millis()`, `sfn/time::now_millis()`, or
+`sfn/time::elapsed()` for elapsed-time measurement; their monotonic semantics
+are unchanged. `unix_millis()` ships on Linux x86-64, Linux arm64, macOS arm64,
+and Windows x86-64.
+
 > **Coming in 1.0:** A structured date/time API on top of the existing
-> `clock` effect. `sleep` (from `time`) and the `monotonic_millis` prelude
-> function are available today; richer wall-clock access is planned.
+> `clock` effect. `sleep`, `now_millis`, `elapsed`, and the fallible
+> `unix_millis` realtime read are available from `sfn/time`; the
+> `monotonic_millis` prelude function is also available today. Richer calendar
+> and formatting APIs remain planned.
 > See the [roadmap](/roadmap).
 
 ```sfn

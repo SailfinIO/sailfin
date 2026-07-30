@@ -235,6 +235,10 @@ test "runtime sfn-source consumer fires and produces a cached .o/.ll (#308)" ![i
     assert contains(clock_ir, "@nanosleep(%Timespec*");
     assert contains(clock_ir, "@clock_gettime(i32, %Timespec*");
     assert ! contains(clock_ir, "@nanosleep(i8*, i8*)");
+    // SFN-623: the same runtime object owns the fallible realtime ABI, so a
+    // consumer never observes an intermediate tree with an undefined symbol.
+    assert contains(clock_ir, "define i32 @sfn_clock_unix_millis(");
+    assert contains(clock_ir, "call i32 @clock_gettime(i32 0, %Timespec*");
 }
 
 // ---- Test 2: the disable gate short-circuits the consumer ----

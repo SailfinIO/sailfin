@@ -4,13 +4,12 @@
 // Native replacement for the former `test_clock_gettime_reader.sh`
 // (test-infra Phase 3, epic #842; ratchet #1327).
 //
-// `runtime/sfn/clock.sfn` defines `sfn_clock_monotonic_nanos() -> i64`,
-// the shared field-reader: it stack-allocates a `Timespec`, hands the
-// kernel `& ts`, calls `clock_gettime(CLOCK_MONOTONIC, &ts)`, then reads
-// `tv_sec` (offset 0) and `tv_nsec` (the second `i64`, reached by a `+ 1`
-// pointer step that lowers to a `getelementptr`) back through the
-// `sailfin_intrinsic_pointer_read_i64` registry sentinel (#875), which
-// lowers directly to an LLVM `load i64` — there is no C symbol behind it.
+// `runtime/sfn/clock.sfn` defines the monotonic field-reader plus SFN-623's
+// fallible `sfn_clock_unix_millis(*i64) -> i32` realtime ABI. Both
+// hand the vendor provider 16-byte `Timespec` storage, then read fields after
+// the call. The monotonic path uses two i64 reads. The realtime path uses an
+// i64 `tv_sec` read plus an i32 read at byte offset 8 for `tv_nsec`, matching
+// both POSIX `{ i64, i64 }` and mingw-w64 `{ i64, i32, padding }`.
 //
 // Pins the shape against the *real shipped module*, and runs the adapter
 // to prove monotonic advance:
@@ -27,7 +26,10 @@
 //                    `getelementptr i64, i64* %…` (the `+ 1` step).
 //   6. no sentinel — the pointer-read sentinel never surfaces as a
 //                    `call`/`declare` (it must be a load).
-//   7. monotonic   — the adapter returns a non-decreasing, non-zero value
+//   7. realtime    — exactly one `CLOCK_REALTIME` provider call, post-call
+//                    field loads, fixed integer conversion, no allocating /
+//                    locking / caching path, and four-target emission.
+//   8. monotonic   — the adapter returns a non-decreasing, non-zero value
 //                    across two back-to-back calls.
 //
 // NOTE on matchers: the `sfn/test` `expect_*` matchers are `![pure]` and so
@@ -59,11 +61,20 @@ fn _scratch_dir() -> string ![io] {
 
 let _CLOCK_SFN: string = "runtime/sfn/clock.sfn";
 
-fn _emit_clock() -> string ![io] {
+fn _emit_clock() -> string ![io] { return _emit_clock_for("", "", "host"); }
+
+fn _emit_clock_for(target_os: string, target_arch: string, tag: string) -> string ![io] {
     let dir = _scratch_dir();
-    let ll = dir + "/sfn-clock.ll";
+    let ll = dir + "/sfn-clock-" + tag + ".ll";
     if fs.exists(ll) { fs.deleteFile(ll); }
-    let exit = process.run_capture([_sfn_bin(), "emit", "-o", ll, "llvm", _CLOCK_SFN], _child_env());
+    let mut child_env = _child_env();
+    if target_os.length > 0 {
+        child_env.push("SAILFIN_TARGET_OS=" + target_os);
+    }
+    if target_arch.length > 0 {
+        child_env.push("SAILFIN_TARGET_ARCH=" + target_arch);
+    }
+    let exit = process.run_capture([_sfn_bin(), "emit", "-o", ll, "llvm", _CLOCK_SFN], child_env);
     let _o = process.capture_take_stdout();
     let _e = process.capture_take_stderr();
     if exit != 0 { return ""; }
@@ -77,6 +88,10 @@ fn _emit_clock() -> string ![io] {
 // `define` through the closing `}` — for the ordering-sensitive checks
 // (the faithful stand-in for the bash `awk '/define .../,/^}/'`).
 fn _isolate_body(ir: string) -> string[] {
+    return _isolate_named_body(ir, "define i64 @sfn_clock_monotonic_nanos");
+}
+
+fn _isolate_named_body(ir: string, definition: string) -> string[] {
     let lines = split(ir, "\n");
     let mut body: string[] = [];
     let mut inside = false;
@@ -85,7 +100,7 @@ fn _isolate_body(ir: string) -> string[] {
         if i >= lines.length { break; }
         let line = lines[i];
         if !inside {
-            if contains(line, "define i64 @sfn_clock_monotonic_nanos") {
+            if contains(line, definition) {
                 inside = true;
                 body.push(line);
             }
@@ -193,6 +208,122 @@ test "clock-reader: pointer-read sentinel is a load, not a call/declare" ![io] {
     assert ! _any_line_with(ir, "declare ", "@sailfin_intrinsic_pointer_read_i64");
 }
 
+test "clock-reader: unix ABI is one allocation-free realtime provider read" ![io] {
+    let ir = _emit_clock();
+    assert ir.length > 0;
+    let body = _isolate_named_body(ir, "define i32 @sfn_clock_unix_millis");
+    assert body.length > 0;
+
+    // CLOCK_REALTIME is selector 0 on all shipped vendor legs. The one call
+    // is the whole external read path: no monotonic fallback or retry.
+    assert _count_lines_with(body, "call i32 @clock_gettime(i32 0,") == 1;
+    assert _count_lines_with(body, "call i32 @clock_gettime(") == 1;
+    assert _count_lines_with(body, "@nanosleep") == 0;
+
+    let call_idx = _first_index(body, "call i32 @clock_gettime(i32 0,");
+    assert call_idx >= 0;
+    let mut pre_i64_loads = 0;
+    let mut post_i64_loads = 0;
+    let mut pre_i32_loads = 0;
+    let mut post_i32_loads = 0;
+    let mut i = 0;
+    loop {
+        if i >= body.length { break; }
+        if contains(body[i], "load i64, i64* %") {
+            if i < call_idx { pre_i64_loads += 1; } else { post_i64_loads += 1; }
+        }
+        if contains(body[i], "load i32, i32* %") {
+            if i < call_idx { pre_i32_loads += 1; } else { post_i32_loads += 1; }
+        }
+        i += 1;
+    }
+    assert pre_i64_loads == 0;
+    assert pre_i32_loads == 0;
+    assert post_i64_loads >= 1;
+    assert post_i32_loads >= 1;
+
+    // Stack allocation is expected; heap allocation, synchronization
+    // providers, caches, and string work are not.
+    assert _count_lines_with(body, "alloca {i8*, i8*}") >= 1;
+    assert _count_lines_with(body, "@sfn_alloc_struct") == 0;
+    assert _count_lines_with(body, "@malloc") == 0;
+    assert _count_lines_with(body, "@calloc") == 0;
+    assert _count_lines_with(body, "@realloc") == 0;
+    assert _count_lines_with(body, "@sfn_arena") == 0;
+    assert _count_lines_with(body, "@pthread") == 0;
+    assert _count_lines_with(body, "@sfn_str") == 0;
+    assert _count_lines_with(body, "store atomic") == 0;
+    assert _count_lines_with(body, "atomicrmw") == 0;
+    assert _count_lines_with(body, "cmpxchg") == 0;
+    assert _count_lines_with(body, " phi ") == 0;
+    assert _count_lines_with(body, "call i8* @memcpy(") == 1;
+
+    // A provider error branches before the sole out-parameter copy, leaving
+    // the caller's slot untouched.
+    let mut branch_idx = -1;
+    let mut copy_idx = -1;
+    i = call_idx + 1;
+    loop {
+        if i >= body.length { break; }
+        if branch_idx < 0 && contains(body[i], "br i1 ") { branch_idx = i; }
+        if contains(body[i], "call i8* @memcpy(") {
+            copy_idx = i;
+            break;
+        }
+        i += 1;
+    }
+    assert branch_idx > call_idx;
+    assert copy_idx > branch_idx;
+}
+
+test "clock-reader: unix ABI emits for every shipped release target" ![io] {
+    let targets = ["Linux", "Linux", "Darwin", "Windows"];
+    let arches = ["x86_64", "aarch64", "aarch64", "x86_64"];
+    let tags = ["linux-x86_64", "linux-aarch64", "darwin-aarch64", "windows-x86_64"];
+    let mut i = 0;
+    loop {
+        if i >= targets.length { break; }
+        let ir = _emit_clock_for(targets[i], arches[i], tags[i]);
+        assert ir.length > 0;
+        let body = _isolate_named_body(ir, "define i32 @sfn_clock_unix_millis");
+        assert body.length > 0;
+        assert _count_lines_with(body, "call i32 @clock_gettime(i32 0,") == 1;
+        assert _count_lines_with(body, "load i32, i32* %") >= 1;
+        assert ! _any_line_with(ir, "call ", "@sailfin_intrinsic_clock_realtime");
+        assert ! _any_line_with(ir, "declare ", "@sailfin_intrinsic_clock_realtime");
+        i += 1;
+    }
+}
+
+test "clock-reader: unix public surface is scoped to sfn/time" ![io] {
+    let time_source = fs.readFile("capsules/sfn/time/src/mod.sfn");
+    let time_manifest = fs.readFile("capsules/sfn/time/capsule.toml");
+    let crypto_source = fs.readFile("capsules/sfn/crypto/src/mod.sfn");
+    let crypto_manifest = fs.readFile("capsules/sfn/crypto/capsule.toml");
+
+    assert contains(time_source, "fn unix_millis() -> Result<int, string> ![clock]");
+    assert contains(time_source, "Result.Err");
+    assert contains(time_source, "runtime_unix_millis_fn(out)");
+    assert ! contains(time_source, "extern fn sfn_clock");
+    assert contains(time_manifest, "version = \"0.2.0\"");
+    assert contains(time_manifest, "required = [\"clock\"]");
+    assert ! contains(crypto_source, "unix_millis");
+    assert ! contains(crypto_manifest, "\"clock\"");
+}
+
+test "clock-reader: internal unix adapter cannot bypass clock effect" ![io] {
+    let dir = _scratch_dir();
+    let src = dir + "/sfn-clock-effectless-unix.sfn";
+    fs.writeFile(src, "fn effectless_probe() {\n    let mut value: i64 = 0;\n    let out: *i64 = & value;\n    runtime_unix_millis_fn(out);\n}\n");
+    let exit = process.run_capture([_sfn_bin(), "check", src], _child_env());
+    let _out = process.capture_take_stdout();
+    let err = process.capture_take_stderr();
+    fs.deleteFile(src);
+    assert exit != 0;
+    assert contains(err, "E0400");
+    assert contains(err, "clock");
+}
+
 test "clock-reader: adapter returns a monotonic, non-zero reading" ![io] {
     // Compile + link + run a fixture that calls the runtime primitive via
     // an extern declaration (the same linkage path that makes `sfn_sleep`
@@ -208,4 +339,18 @@ test "clock-reader: adapter returns a monotonic, non-zero reading" ![io] {
     assert exit == 0;
     assert find(out + err, "MONO_OK", 0) >= 0;
     assert find(out + err, "NONZERO_OK", 0) >= 0;
+}
+
+test "clock-reader: timespec conversion floors POSIX and wrapped mingw values" ![io] {
+    let dir = _scratch_dir();
+    let src = dir + "/sfn-clock-convert.sfn";
+    fs.writeFile(src, "extern fn sfn_clock_timespec_to_unix_millis(sec: i64, nsec: i64) -> i64;\n\nfn main() ![io] {\n    if sfn_clock_timespec_to_unix_millis(-1, 999500000) == -1 {\n        print(\"POSIX_NEGATIVE_OK\");\n    }\n    if sfn_clock_timespec_to_unix_millis(1844674407370, 954661600) == -1 {\n        print(\"MINGW_NEGATIVE_OK\");\n    }\n    if sfn_clock_timespec_to_unix_millis(1, 234567800) == 1234 {\n        print(\"POSITIVE_OK\");\n    }\n}\n");
+    let exit = process.run_capture([_sfn_bin(), "run", src], _child_env());
+    let out = process.capture_take_stdout();
+    let err = process.capture_take_stderr();
+    fs.deleteFile(src);
+    assert exit == 0;
+    assert find(out + err, "POSIX_NEGATIVE_OK", 0) >= 0;
+    assert find(out + err, "MINGW_NEGATIVE_OK", 0) >= 0;
+    assert find(out + err, "POSITIVE_OK", 0) >= 0;
 }

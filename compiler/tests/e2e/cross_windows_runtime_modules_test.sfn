@@ -87,6 +87,13 @@ test "cross-windows RUNTIME_MODS / manifest per-module contracts" ![io] {
     // The whole concurrency/* family is excluded from RUNTIME_MODS.
     assert ! contains(makefile, "runtime/sfn/concurrency/");
 
+    // SFN-623: clock.sfn is emitted with SAILFIN_TARGET_OS=Windows and stays
+    // in the real runtime set. Its Unix-millis ABI therefore reaches the
+    // mingw-w64 clock_gettime provider instead of a fail-closed stub.
+    assert contains(manifest, "\"sfn/clock.sfn\"");
+    assert contains(makefile, "clock:runtime/sfn/clock.sfn");
+    assert contains(makefile, "SAILFIN_TARGET_OS=Windows");
+
     // The prelude entry IS linked by the cross-windows bridge.
     assert contains(makefile, "runtime/prelude.sfn");
 }
@@ -127,6 +134,15 @@ test "cross-windows windows_stubs.ll defines the required Windows stubs" ![io] {
     // RUNTIME_MODS, so the compiler's @sfn_rand_fill reference (pulled in by
     // the sfn/crypto `random_bytes` export) resolves to this fail-closed stub.
     assert contains(stubs, "define i32 @sfn_rand_fill");
+
+    // Realtime is not degraded on Windows: clock.sfn supplies the ABI and
+    // mingw-w64 supplies clock_gettime. A stub for either would let the
+    // release link fabricate failure instead of using the real provider.
+    let clock = fs.readFile("runtime/sfn/clock.sfn");
+    assert contains(clock, "fn sfn_clock_unix_millis(");
+    assert contains(clock, "clock_gettime(0, ts_ptr)");
+    assert ! contains(stubs, "@sfn_clock_unix_millis");
+    assert ! contains(stubs, "@clock_gettime");
 
     // windows_stubs.ll is a cross-windows-only object: NOT in the manifest
     // (its `ll-sources` is empty — adding windows_stubs would duplicate the
