@@ -121,33 +121,73 @@ fn target_filter_link_libs(libs: string[], target_os: string) -> string[] {
 }
 
 // Rewrite the runtime capsule's `sfn-sources` list for `target_os`. On
-// Windows the POSIX `process.sfn` (posix_spawnp/waitpid) is swapped for
-// its Win32 sibling `platform/process_windows.sfn`, and the Linux-only
-// `platform/rlimit.sfn` RLIMIT_AS self-cap module is dropped (a no-op on
-// Windows). This mirrors the mingw Makefile `RUNTIME_MODS` swap and is the
-// extensible seam for the broader MSVC exclusion set (the crypto/pthread/
-// concurrency modules backed by `windows_stubs.ll`), which is finalized
-// empirically against a real native link in SFEP-0021 M7. Every other
-// target returns the list unchanged.
+// Windows, three POSIX-only modules are swapped for their Win32 siblings:
+// `process.sfn` (posix_spawnp/waitpid) for `platform/process_windows.sfn`,
+// `rlimit.sfn` (getrlimit/setrlimit) for `platform/rlimit_windows.sfn`
+// (SFN-549 — previously dropped outright, leaving
+// `apply_default_mem_limit` unresolved once `windows_stubs.ll` stopped
+// linking on the native path), and `rand.sfn` (getentropy/`/dev/urandom`)
+// for `platform/rand_windows.sfn` (SFN-549, `BCryptGenRandom`). A fourth
+// module, `platform/realpath_windows.sfn` (SFN-549, `_fullpath`), is
+// APPENDED rather than swapped — see the note below the loop. This mirrors
+// the mingw Makefile `RUNTIME_MODS` swap and is the extensible seam for the
+// broader MSVC exclusion set (the remaining crypto/TLS/concurrency
+// modules), which is finalized empirically against a real native link in
+// SFEP-0021 M7. Every other target returns the list unchanged.
 //
 // `sources` are already runtime-root-resolved absolute paths; match on the
 // basename so the manifest-root prefix is irrelevant, and rebuild the
 // swapped path from the source's own directory so it stays correctly
 // rooted (`<root>/sfn/process.sfn` → `<root>/sfn/platform/process_windows.sfn`).
+// `rlimit.sfn`/`rand.sfn` already live in `platform/`, so their siblings are
+// joined directly onto that same directory rather than appending another
+// `platform/` segment.
 fn target_condition_runtime_sfn_sources(sources: string[], target_os: string) -> string[] {
     if !target_os_is_windows(target_os) { return sources; }
     let mut out: string[] = [];
+    // Anchor for the `realpath_windows.sfn` append below — the `platform/`
+    // directory, discovered from whichever of rlimit.sfn/rand.sfn/exec.sfn
+    // happens to be present in `sources`, since none of the three is
+    // guaranteed by this function's own contract.
+    let mut platform_dir: string = "";
     let mut i: int = 0;
     loop {
         if i >= sources.length { break; }
         let src = sources[i];
         let base = _path_basename(src);
         if base == "rlimit.sfn" {
-            // Excluded on Windows: the RLIMIT_AS self-cap is Linux-only.
+            // Already in platform/ (unlike process.sfn below): the sibling
+            // sits next to it, not one level down.
+            platform_dir = _dirname(src);
+            out.push(_path_join(platform_dir, "rlimit_windows.sfn"));
         } else if base == "process.sfn" {
             out.push(_path_join(_dirname(src), "platform/process_windows.sfn"));
+        } else if base == "rand.sfn" {
+            // Already in platform/ — same as rlimit.sfn above.
+            platform_dir = _dirname(src);
+            out.push(_path_join(platform_dir, "rand_windows.sfn"));
+        } else if base == "exec.sfn" {
+            // exec.sfn itself is unchanged (its `realpath` extern is
+            // satisfied by the appended sibling below, not by swapping
+            // exec.sfn out) — captured here only as a third possible
+            // anchor for platform_dir.
+            platform_dir = _dirname(src);
+            out.push(src);
         } else { out.push(src); }
         i += 1;
+    }
+    // `realpath_windows.sfn` has no POSIX `.sfn` counterpart to swap FROM
+    // (SFN-549): `realpath(3)` is a bare libc symbol on POSIX, not a
+    // Sailfin-authored runtime module, so — unlike the three swaps above —
+    // this is a pure ADDITION with nothing in `sources` to replace. It
+    // satisfies the `extern fn realpath` two independent consumers each
+    // inline (`exec.sfn` and the compiler's own `cli/entry.sfn`) via
+    // ordinary link-time symbol resolution; see the module header of
+    // `platform/realpath_windows.sfn` for the full rationale. Skipped
+    // (rather than guessing a path) if none of the three platform/ modules
+    // above were present to anchor on.
+    if platform_dir.length > 0 {
+        out.push(_path_join(platform_dir, "realpath_windows.sfn"));
     }
     return out;
 }

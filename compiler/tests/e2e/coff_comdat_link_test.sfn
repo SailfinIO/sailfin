@@ -91,7 +91,18 @@ fn _module_source(fn_suffix: string) -> string {
 
 // Trivial `mainCRTStartup` entry so `lld-link` has a resolvable entry
 // point without pulling in the Windows CRT/SDK.
-fn _entry_c_source() -> string { return "void mainCRTStartup(void) {}\n"; }
+// The link runs `/nodefaultlib` with no Sailfin runtime objects, so the
+// entry object must also satisfy the handful of runtime symbols an emitted
+// module references: `sfn_alloc_struct` (struct literals),
+// `sfn_type_register` (the module type-init ctor), and `_fltused` (the MSVC
+// marker emitted for any module using floating point). Without these the
+// link fails on undefined symbols and never exercises comdat folding at all
+// — which is the only thing this test exists to prove (SFN-549).
+fn _entry_c_source() -> string {
+    return "void mainCRTStartup(void) {}\n" + "int _fltused = 0;\n"
+        + "void *sfn_alloc_struct(long long n) { (void)n; return 0; }\n"
+        + "void sfn_type_register(void *d) { (void)d; }\n";
+}
 
 fn _emit_windows_ll(dir: string, tag: string, source: string) -> string ![io] {
     let src = dir + "/" + tag + ".sfn";
@@ -179,7 +190,14 @@ test "coff comdat link: Mach-O target never receives the comdat clause" ![io] {
     // Pins the sharp edge directly: an accidental unconditional comdat
     // clause would abort `llc` here with "MachO doesn't support COMDATs"
     // (verified manually against a hand-authored comdat fixture, SFN-549).
-    assert ! contains(fs.readFile(ll), "comdat");
+    //
+    // Match the literal comdat syntaxes, not a bare "comdat" substring —
+    // this test's own scratch directory (`sfn-coff-comdat-link`) is
+    // interpolated into sanitized symbol names, so a substring test matches
+    // the path and fails on a correct Darwin emit.
+    let darwin_ir = fs.readFile(ll);
+    assert ! contains(darwin_ir, "= comdat any");
+    assert ! contains(darwin_ir, ", comdat");
 
     let obj = dir + "/coff_darwin_guard.obj";
     let obj_exit = process.run_capture([llc, "-mtriple=arm64-apple-darwin", "-filetype=obj", ll, "-o", obj], _base_env());

@@ -1,0 +1,32 @@
+// runtime/sfn/platform/rand_windows.sfn
+//
+// Windows sibling of `runtime/sfn/platform/rand.sfn` (SFN-549), swapped in by
+// `target_condition_runtime_sfn_sources`
+// (`compiler/src/build/target.sfn:137-153`) for a Windows target. Backs
+// `sfn_rand_fill` with `BCryptGenRandom` (bcrypt.dll) instead of
+// `getentropy`/`/dev/urandom`, neither of which exists under MSVC.
+//
+// Contract (mirrors `rand.sfn:85-97` exactly): `sfn_rand_fill(buf, n)`
+// returns 1 on success, 0 on any entropy-source failure. Fail-closed — the
+// caller must not trust `buf` on a 0 return, and there is no fallback source
+// here: `BCryptGenRandom` against the system-preferred RNG IS the canonical
+// Windows CSPRNG, unlike POSIX's getentropy/`/dev/urandom` pair, so there is
+// nothing analogous to the `/dev/urandom` fallback to port.
+//
+// `BCryptGenRandom(NULL, buf, n, BCRYPT_USE_SYSTEM_PREFERRED_RNG)`: a NULL
+// algorithm handle plus the SYSTEM_PREFERRED_RNG flag (0x00000002) selects
+// the system default RNG without a BCryptOpenAlgorithmProvider /
+// BCryptCloseAlgorithmProvider pair. Returns an NTSTATUS; 0 is
+// STATUS_SUCCESS.
+extern fn BCryptGenRandom(algorithm: *u8, buf: *u8, n: i32, flags: i32) -> i32;
+
+// sfn_rand_fill(buf, n) — see `rand.sfn:85-97` for the full contract this
+// mirrors byte-for-byte. `n <= 0` is a no-op success; a null `buf` fails
+// closed.
+fn sfn_rand_fill(buf: *u8, n: i64) -> i32 ![rand] {
+    if n <= 0 { return 1; }
+    if buf as i64 == 0 { return 0; }
+    let rc: i32 = BCryptGenRandom(null, buf, n as i32, 2);
+    if rc == 0 { return 1; }
+    return 0;
+}

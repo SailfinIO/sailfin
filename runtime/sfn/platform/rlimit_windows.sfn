@@ -1,0 +1,19 @@
+// runtime/sfn/platform/rlimit_windows.sfn
+//
+// Windows sibling of `runtime/sfn/platform/rlimit.sfn` (SFN-549), swapped in
+// by `target_condition_runtime_sfn_sources`
+// (`compiler/src/build/target.sfn:145-146`) for a Windows target, which
+// otherwise DROPS `rlimit.sfn` outright — leaving `apply_default_mem_limit`
+// unresolved, since `compiler/src/cli/entry.sfn:156` calls it from `fn main`
+// on every compiler run.
+//
+// `apply_default_mem_limit` is a no-op returning 0, matching the real
+// module's success return for "no cap installed" (`rlimit.sfn:204`, the
+// Windows/unknown-host tail of its own platform dispatch). This is the
+// correct Windows semantic, not a degradation: `RLIMIT_AS` is POSIX, and
+// `rlimit.sfn` already gates its Linux-only enforcement behind a
+// `/proc/self/status` probe (`rlimit.sfn:178-181`) — a Windows host was
+// always going to fall through to the no-cap return. Retired only if
+// Sailfin gains a real Windows memory-budget primitive (job objects), at
+// which point this file grows a body and stops being a pure pass-through.
+fn apply_default_mem_limit() -> i32 ![io] { return 0; }

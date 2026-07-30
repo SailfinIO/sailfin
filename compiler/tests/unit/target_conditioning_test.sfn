@@ -100,12 +100,37 @@ test "target: host runtime module set is unchanged" ![pure] {
     assert expect_eq_str_array(target_condition_runtime_sfn_sources(sources, "Darwin"), sources).ok;
 }
 
-test "target: Windows swaps process.sfn and drops rlimit.sfn" ![pure] {
-    let sources: string[] = ["/rt/sfn/runtime_globals.sfn", "/rt/sfn/process.sfn", "/rt/sfn/platform/rlimit.sfn", "/rt/sfn/io.sfn"];
-    // process.sfn → its Win32 sibling (cross-directory), rlimit.sfn dropped,
-    // every other module preserved in order.
-    let expected: string[] = ["/rt/sfn/runtime_globals.sfn", "/rt/sfn/platform/process_windows.sfn", "/rt/sfn/io.sfn"];
+test "target: Windows swaps process.sfn, rlimit.sfn, and rand.sfn to their Win32 siblings, and appends realpath_windows.sfn" ![pure] {
+    // SFN-549: rlimit.sfn used to be DROPPED here (a no-op stub in
+    // windows_stubs.ll resolved apply_default_mem_limit for the mingw
+    // bridge only); the native MSVC path no longer links that stub, so
+    // rlimit.sfn now swaps to its own Win32 sibling instead of vanishing.
+    // rand.sfn swaps the same way (BCryptGenRandom in place of
+    // getentropy/`/dev/urandom`). process.sfn → its existing Win32
+    // sibling. realpath_windows.sfn has no POSIX .sfn counterpart to swap
+    // FROM (realpath(3) is a bare libc symbol, not a Sailfin module), so
+    // it is APPENDED at the end rather than replacing a matched basename.
+    // Every other module is preserved in order.
+    let sources: string[] = ["/rt/sfn/runtime_globals.sfn", "/rt/sfn/process.sfn", "/rt/sfn/platform/rlimit.sfn", "/rt/sfn/platform/rand.sfn", "/rt/sfn/io.sfn",];
+    let expected: string[] = ["/rt/sfn/runtime_globals.sfn", "/rt/sfn/platform/process_windows.sfn", "/rt/sfn/platform/rlimit_windows.sfn", "/rt/sfn/platform/rand_windows.sfn", "/rt/sfn/io.sfn", "/rt/sfn/platform/realpath_windows.sfn",];
     assert expect_eq_str_array(target_condition_runtime_sfn_sources(sources, "Windows"), expected).ok;
+}
+
+test "target: Windows append anchors on exec.sfn when rlimit.sfn/rand.sfn are absent" ![pure] {
+    // The append doesn't require rlimit.sfn/rand.sfn specifically — any of
+    // the three platform/ modules anchors it, exec.sfn included.
+    let sources: string[] = ["/rt/sfn/runtime_globals.sfn", "/rt/sfn/platform/exec.sfn", "/rt/sfn/io.sfn"];
+    let expected: string[] = ["/rt/sfn/runtime_globals.sfn", "/rt/sfn/platform/exec.sfn", "/rt/sfn/io.sfn", "/rt/sfn/platform/realpath_windows.sfn"];
+    assert expect_eq_str_array(target_condition_runtime_sfn_sources(sources, "Windows"), expected).ok;
+}
+
+test "target: Windows skips the realpath_windows.sfn append with no platform/ anchor present" ![pure] {
+    // No rlimit.sfn / rand.sfn / exec.sfn in this fixture, so there is
+    // nothing to anchor the append on — the function does not guess a
+    // path, it just leaves the list as swapped (unchanged here, since
+    // nothing else matches either).
+    let sources: string[] = ["/rt/sfn/runtime_globals.sfn", "/rt/sfn/io.sfn"];
+    assert expect_eq_str_array(target_condition_runtime_sfn_sources(sources, "Windows"), sources).ok;
 }
 
 // ---- Assemble argv splicing ----

@@ -76,12 +76,19 @@ fn _any_line_with(text: string, a: string, b: string) -> boolean {
     return false;
 }
 
-test "comdat emit: Linux target carries no comdat token at all" ![io] {
+test "comdat emit: Linux target carries no comdat directive" ![io] {
     let src = _fixture_path();
     let ir = _emit(src, "Linux", "linux");
     fs.deleteFile(src);
     assert ir.length > 0;
-    assert ! contains(ir, "comdat");
+    // Assert on the two literal comdat syntaxes rather than a bare
+    // "comdat" substring. The scratch directory name is interpolated into
+    // sanitized symbol names (`@sailfin_user_main__tmp...sfncomdatemit...`),
+    // so a substring test matches the *path* and fails on a correct Linux
+    // emit. Neither `= comdat any` nor `, comdat` can survive symbol
+    // sanitization, which strips spaces, `=` and `,` (SFN-549).
+    assert ! contains(ir, "= comdat any");
+    assert ! contains(ir, ", comdat");
 }
 
 test "comdat emit: Windows target adds a comdat group per descriptor global" ![io] {

@@ -41,9 +41,15 @@ import {
     _resolve_self_path
 } from "./paths";
 // Target conditioning (SFN-52, SFEP-0021 §4.2(A)): rewrite the runtime
-// module set (process→process_windows swap, rlimit drop) and add
-// `windows_stubs.ll` to the link inputs for a Windows target. Identity /
-// skipped off Windows, so Linux/macOS link inputs are byte-identical.
+// module set for a Windows target — `process`/`rlimit`/`rand` swap to
+// their `platform/*_windows` siblings. Identity off Windows, so
+// Linux/macOS link inputs are byte-identical.
+//
+// SFN-549: the native path no longer links `runtime/ir/windows_stubs.ll`.
+// That file is mingw-cross-bridge scaffolding (compiled only by the
+// Makefile's `ci-cross-windows` recipe) and its strong definitions
+// duplicated the real Sailfin modules the native source set already
+// carries, so a native MSVC link failed with `LNK2005`.
 import {
     build_host_os,
     build_target_os,
@@ -1328,37 +1334,6 @@ fn assemble_runtime_capsule_link_inputs(runtime_capsules: RuntimeCapsuleArtifact
             }
             pi += 1;
         }
-    }
-    // SFN-52 (SFEP-0021 §4.2(A), M6): a native Windows (MSVC) link needs the
-    // hand-written stub IR (`realpath`→`_fullpath`, the assert/serve no-ops,
-    // and the crypto/TLS/rand no-op stubs) that the mingw Makefile links
-    // today. It is deliberately absent from the manifest `ll-sources` — its
-    // strong defs would duplicate the runtime's own on Linux/macOS — so the
-    // driver adds it only for a Windows target, compiled with the same
-    // `-target` triple via `llvm_assemble`. `<runtime-root>/ir/windows_stubs.ll`.
-    if target_os_is_windows(target_os) && capsules.length > 0 {
-        let stub_src = _path_join(capsules[0].manifest_dir, "ir/windows_stubs.ll");
-        let stub_obj = _path_join(out_dir, "windows_stubs.ll" + opt_flag + ".o");
-        // This object exists to serve the Windows target, so the no-shell
-        // degrade (SFN-478, empty temp) must assemble in place rather than
-        // abort — otherwise the Windows build fails on its own stub object.
-        let stub_tmp = _mktemp_sibling_cmd(stub_obj);
-        let mut stub_target = stub_obj;
-        if stub_tmp.length > 0 { stub_target = stub_tmp; }
-        let no_includes: string[] = [];
-        let rc = llvm_assemble(stub_src, stub_target, opt_flag, no_includes);
-        if rc != 0 {
-            if stub_tmp.length > 0 { fs.deleteFile(stub_tmp); }
-            print("sfn build: failed to assemble windows_stubs.ll (" + stub_src
-                + ")");
-            return _failed_runtime_link_inputs();
-        }
-        if stub_tmp.length > 0 && !_atomic_rename_into_place(stub_tmp, stub_obj) {
-            print("sfn build: failed to stage windows_stubs.ll object "
-                + stub_obj);
-            return _failed_runtime_link_inputs();
-        }
-        objects.push(stub_obj);
     }
     return RuntimeLinkInputs {
         object_paths: objects,

@@ -1,0 +1,61 @@
+// compiler/tests/e2e/windows_runtime_siblings_test.sfn
+//
+// SFN-549: `runtime/sfn/platform/rlimit_windows.sfn`,
+// `runtime/sfn/platform/rand_windows.sfn`, and
+// `runtime/sfn/platform/realpath_windows.sfn` are the Windows siblings that
+// replace the retired native-MSVC link of `runtime/ir/windows_stubs.ll`
+// (`compiler/src/build/runtime_objs.sfn`, formerly :1332-1362). Pins that
+// each module still emits clean LLVM IR for a Windows target and defines
+// the symbol it provides — via a basename swap for the first two, and via
+// a pure append for `realpath_windows.sfn` (no POSIX `.sfn` counterpart to
+// swap from) — in `target_condition_runtime_sfn_sources`
+// (`compiler/src/build/target.sfn`).
+//
+// No-bash e2e (`.claude/rules/no-bash-e2e.md`): drives `sfn emit llvm`
+// under `SAILFIN_TARGET_OS=Windows` as a subprocess and asserts on the
+// captured `.ll` text with `sfn/strings::contains`.
+import { contains } from "sfn/strings";
+import { clean_runner_env, nested_runner_scratch } from "sfn/test";
+
+fn _sfn_bin() -> string ![io] {
+    let configured = env.get("SAILFIN_BIN");
+    if configured.length > 0 { return configured; }
+    return "build/bin/sfn";
+}
+
+// Emit `src` for a Windows target into a fresh scratch dir, returning the
+// emitted IR text, or "" on any failure (non-zero exit, missing output).
+// `label` distinguishes the nested scratch dir per test.
+fn _emit_windows(src: string, label: string) -> string ![io] {
+    let scratch = nested_runner_scratch(label);
+    fs.createDirectory(scratch, true);
+    let mut child_env = clean_runner_env(scratch);
+    child_env.push("SAILFIN_TARGET_OS=Windows");
+    let ll = scratch + "/out.ll";
+    let exit = process.run_capture([_sfn_bin(), "emit", "-o", ll, "llvm", src], child_env);
+    let _o = process.capture_take_stdout();
+    let _e = process.capture_take_stderr();
+    if exit != 0 { return ""; }
+    if !fs.exists(ll) { return ""; }
+    return fs.readFile(ll);
+}
+
+test "windows siblings: rlimit_windows.sfn emits and defines apply_default_mem_limit" ![io] {
+    let ir = _emit_windows("runtime/sfn/platform/rlimit_windows.sfn", "rlimit-windows-emit");
+    assert ir.length > 0;
+    assert contains(ir, "define i32 @apply_default_mem_limit()");
+}
+
+test "windows siblings: rand_windows.sfn emits and defines sfn_rand_fill" ![io] {
+    let ir = _emit_windows("runtime/sfn/platform/rand_windows.sfn", "rand-windows-emit");
+    assert ir.length > 0;
+    assert contains(ir, "define i32 @sfn_rand_fill(");
+    assert contains(ir, "declare i32 @BCryptGenRandom(");
+}
+
+test "windows siblings: realpath_windows.sfn emits and defines realpath" ![io] {
+    let ir = _emit_windows("runtime/sfn/platform/realpath_windows.sfn", "realpath-windows-emit");
+    assert ir.length > 0;
+    assert contains(ir, "define i8* @realpath(");
+    assert contains(ir, "declare i8* @_fullpath(");
+}

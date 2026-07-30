@@ -1,0 +1,58 @@
+// runtime/sfn/platform/realpath_windows.sfn
+//
+// Windows sibling providing `@realpath` (SFN-549). Unlike `process.sfn` /
+// `rlimit.sfn` / `rand.sfn`, there is no POSIX `.sfn` module to swap FROM
+// here — `realpath(3)` is a bare libc symbol on POSIX, not a
+// Sailfin-authored runtime module — so this file is APPENDED for a
+// Windows target rather than substituted for an existing basename
+// (`target_condition_runtime_sfn_sources`, `compiler/src/build/target.sfn`).
+//
+// Two independent consumers each inline their own
+// `extern fn realpath(path: *u8, resolved: *u8) -> *u8;` per the SFN-635
+// convention (no cross-module extern import): `runtime/sfn/platform/exec.sfn`
+// (`exe_path`/`resolve_runtime_root`) and the compiler's own
+// `compiler/src/cli/entry.sfn` (the argv[0] canonicalization fallback in
+// `fn main`). Neither needs editing — a Sailfin `fn` gets external linkage
+// under its declared name (the same mechanism `rlimit_windows.sfn`'s
+// `apply_default_mem_limit` already relies on to satisfy `entry.sfn`'s own
+// extern of that name), so this one definition satisfies both `@realpath`
+// references at the final Windows link.
+//
+// `_fullpath(resolved, path, maxlen)` is MSVC's `realpath` equivalent, but
+// differs from it in both argument ORDER and ARITY — this is a reorder,
+// not a rename. `260` is Win32's `MAX_PATH`; all three current callers
+// pass `resolved = null` (`exec.sfn:283`, `:358`, `entry.sfn:224`), and the
+// CRT mallocs its own buffer whenever `resolved` is null — `maxlen` is
+// documented as ignored on that path, so the constant is inert for every
+// caller today. Kept (rather than dropped) to match the retired
+// `windows_stubs.ll` stub's exact shape and to serve a future non-null
+// caller correctly, should one appear.
+//
+// Two behavioral differences from POSIX `realpath`, both confirmed benign
+// at all three current call sites:
+//   - `_fullpath` succeeds on a path that does not exist (pure lexical
+//     normalization; POSIX `realpath` fails with ENOENT). `exec.sfn:358`
+//     is only reached after `sfn_fs_exists` already confirmed existence;
+//     `exec.sfn:283`'s input traces to a live loaded module
+//     (`GetModuleFileNameA` via the `sailfin_intrinsic_exe_path`
+//     sentinel); `entry.sfn:224`'s argv[0] fallback already branches on a
+//     null return with its own `else` arm, so a `_fullpath` "success" on
+//     a bad argv[0] just skips that branch rather than breaking it — a
+//     downstream `resolve_runtime_root` existence probe still catches a
+//     genuinely bad path.
+//   - `_fullpath` returns backslash-separated paths where POSIX
+//     `realpath` returns forward-slash paths. Every consumer of these
+//     three call sites' results builds further paths by concatenation
+//     onto that SAME string (`exec.sfn`'s dir-walk, the compiler's runtime
+//     capsule resolver), so the separator convention is self-consistent
+//     end to end, and Windows APIs accept `/` and `\` interchangeably in
+//     a mixed path either way.
+extern fn _fullpath(resolved: *u8, path: *u8, maxlen: i32) -> *u8;
+
+// realpath(path, resolved) — see the module header for the argument
+// reorder and the `260` (MAX_PATH) rationale. `![io]` matches every other
+// OS-state-touching wrapper in this file family (`apply_default_mem_limit`,
+// `exe_path`/`resolve_runtime_root` in `exec.sfn`).
+fn realpath(path: *u8, resolved: *u8) -> *u8 ![io] {
+    return _fullpath(resolved, path, 260);
+}
