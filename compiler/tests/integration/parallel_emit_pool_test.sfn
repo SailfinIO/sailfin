@@ -19,7 +19,13 @@
 // no-bash-e2e.md`).
 import { nested_runner_scratch } from "sfn/test";
 
-import { ParallelEmitTask, _cr_run_parallel_emit } from "../../src/capsule_emit_parallel";
+import { assemble_link_inputs } from "../../src/build/clang_argv";
+import {
+    ParallelEmitTask,
+    ParallelProcessTask,
+    _cr_run_bounded_processes_with_stats,
+    _cr_run_parallel_emit
+} from "../../src/capsule_emit_parallel";
 import { number_to_string } from "../../src/main";
 
 fn _valid_source(n: int) -> string {
@@ -95,6 +101,55 @@ test "parallel emit: jobs above task count still completes" ![io] {
     assert fs.readFile(tasks[0].output_path).length > 0;
     assert fs.exists(tasks[1].output_path);
     assert fs.readFile(tasks[1].output_path).length > 0;
+
+    fs.removeDirectory(dir, true);
+}
+
+test "parallel process pool: exit codes preserve task order" ![io] {
+    let dir = nested_runner_scratch("parallel-process-pool-order");
+    fs.createDirectory(dir, true);
+    let good0 = dir + "/good0.sfn";
+    let broken = dir + "/broken.sfn";
+    let good1 = dir + "/good1.sfn";
+    fs.writeFile(good0, _valid_source(0));
+    fs.writeFile(broken, "fn broken( {\n");
+    fs.writeFile(good1, _valid_source(1));
+    let tasks: ParallelProcessTask[] = [ParallelProcessTask {
+        argv: ["build/bin/sfn", "check", good0]
+    }, ParallelProcessTask { argv: ["build/bin/sfn", "check", broken] }, ParallelProcessTask {
+        argv: ["build/bin/sfn", "check", good1]
+    }, ParallelProcessTask { argv: ["build/bin/sfn", "check", good0] }, ParallelProcessTask {
+        argv: ["build/bin/sfn", "check", good1]
+    }];
+
+    // Five tasks through a two-worker window must exercise top-up after a
+    // reap. The observable high-water mark pins the concurrency bound.
+    let run = _cr_run_bounded_processes_with_stats(tasks, 2);
+    assert run.peak_in_flight == 2;
+    assert run.exit_codes.length == 5;
+    assert run.exit_codes[0] == 0;
+    assert run.exit_codes[1] != 0;
+    assert run.exit_codes[2] == 0;
+    assert run.exit_codes[3] == 0;
+    assert run.exit_codes[4] == 0;
+
+    fs.removeDirectory(dir, true);
+}
+
+test "parallel link assembly: a failing module cleans every staged object" ![io] {
+    let dir = nested_runner_scratch("parallel-link-assembly-cleanup");
+    let obj_dir = dir + "/objects";
+    fs.createDirectory(dir, true);
+    let good0 = dir + "/good0.ll";
+    let broken = dir + "/broken.ll";
+    let good1 = dir + "/good1.ll";
+    fs.writeFile(good0, "define i32 @good0() {\nentry:\n  ret i32 0\n}\n");
+    fs.writeFile(broken, "define i32 @broken( {\n");
+    fs.writeFile(good1, "define i32 @good1() {\nentry:\n  ret i32 1\n}\n");
+
+    let assembled = assemble_link_inputs([good0, broken, good1], obj_dir, "-O0");
+    assert ! assembled.success;
+    assert fs.listDirectory(obj_dir).length == 0;
 
     fs.removeDirectory(dir, true);
 }

@@ -24,6 +24,7 @@
 // Importing `./target` (a struct-free leaf over `build_flags`/`paths`) does
 // not reintroduce the `LlvmTextBackend` vtable hazard the module note above
 // warns about — `target.sfn` declares no interface-implementing struct.
+import { ParallelProcessTask, _cr_resolve_jobs, _cr_run_bounded_processes } from "../capsule_emit_parallel";
 import {
     _atomic_rename_into_place,
     _ensure_dir_cmd,
@@ -75,8 +76,14 @@ fn _llvm_text_assemble_argv(src: string, out: string, opt_flag: string, include_
 // per-test dependency objects — compiles for the same target as the final
 // link, with no change at the call sites. Empty on Linux/macOS.
 fn llvm_assemble(src: string, out: string, opt_flag: string, include_flags: string[]) -> int ![io] {
+    return process.run(llvm_assemble_argv(src, out, opt_flag, include_flags));
+}
+
+// Build the target-conditioned clang argv used by both direct assembly and
+// the bounded subprocess pool.
+fn llvm_assemble_argv(src: string, out: string, opt_flag: string, include_flags: string[]) -> string[] ![io] {
     let target_flags = target_clang_flags(build_target_os());
-    return process.run(_llvm_text_assemble_argv(src, out, opt_flag, include_flags, target_flags));
+    return _llvm_text_assemble_argv(src, out, opt_flag, include_flags, target_flags);
 }
 
 // Result of separating LLVM assembly from the final link. `object_paths`
@@ -86,6 +93,15 @@ fn llvm_assemble(src: string, out: string, opt_flag: string, include_flags: stri
 struct LinkObjectAssembly {
     success: boolean;
     object_paths: string[];
+}
+
+struct PendingLinkObjectAssembly {
+    fallback_path: string;
+    ll_path: string;
+    object_index: int;
+    object_path: string;
+    staged_path: string;
+    task: ParallelProcessTask;
 }
 
 // Assemble a list of textual LLVM modules before the final link (SFN-453).
@@ -111,6 +127,8 @@ fn assemble_link_inputs(ll_paths: string[], object_dir: string, opt_flag: string
     let toolchain_key = clang_line + "\n" + target_key
         + "\nlink-obj-v1-secsplit1";
     let mut objects: string[] = [];
+    let mut pending: PendingLinkObjectAssembly[] = [];
+    let mut can_parallel: boolean = true;
     let mut i: int = 0;
     loop {
         if i >= ll_paths.length { break; }
@@ -122,13 +140,13 @@ fn assemble_link_inputs(ll_paths: string[], object_dir: string, opt_flag: string
                 + toolchain_key);
             let fallback = ll_path + ".link-" + fallback_key + ".o";
             let no_includes: string[] = [];
-            if llvm_assemble(ll_path, fallback, opt_flag, no_includes) != 0 {
-                return LinkObjectAssembly {
-                    success: false,
-                    object_paths: []
-                };
-            }
             objects.push(fallback);
+            can_parallel = false;
+            pending.push(PendingLinkObjectAssembly {
+                fallback_path: fallback, ll_path: ll_path, object_index: objects.length - 1, object_path: "", staged_path: "", task: ParallelProcessTask {
+                    argv: llvm_assemble_argv(ll_path, fallback, opt_flag, no_includes)
+                }
+            });
             i += 1;
             continue;
         }
@@ -143,41 +161,91 @@ fn assemble_link_inputs(ll_paths: string[], object_dir: string, opt_flag: string
 
         let no_includes: string[] = [];
         let tmp = _mktemp_sibling_cmd(obj_path);
-        let mut assembled_to_cache: boolean = false;
-        if tmp.length > 0 {
-            let rc = llvm_assemble(ll_path, tmp, opt_flag, no_includes);
-            if rc == 0 {
-                assembled_to_cache = _atomic_rename_into_place(tmp, obj_path);
-            } else {
-                fs.deleteFile(tmp);
-                return LinkObjectAssembly {
-                    success: false,
-                    object_paths: []
-                };
-            }
-        }
-        if assembled_to_cache {
-            objects.push(obj_path);
-            i += 1;
-            continue;
-        }
-
-        // Cache publication can fail on a read-only shared cache. The source
-        // scratch is the recoverable fallback location and is cleaned with the
-        // owning build/test invocation.
         let fallback = ll_path + ".link-" + key_hash + ".o";
-        if llvm_assemble(ll_path, fallback, opt_flag, no_includes) != 0 {
-            return LinkObjectAssembly { success: false, object_paths: [] };
+        if tmp.length > 0 {
+            objects.push(obj_path);
+            pending.push(PendingLinkObjectAssembly {
+                fallback_path: fallback, ll_path: ll_path, object_index: objects.length - 1, object_path: obj_path, staged_path: tmp, task: ParallelProcessTask {
+                    argv: llvm_assemble_argv(ll_path, tmp, opt_flag, no_includes)
+                }
+            });
+        } else {
+            // Cache publication cannot be staged without a sibling temp. The
+            // source scratch is the recoverable fallback location and is
+            // cleaned with the owning build/test invocation.
+            objects.push(fallback);
+            can_parallel = false;
+            pending.push(PendingLinkObjectAssembly {
+                fallback_path: fallback, ll_path: ll_path, object_index: objects.length - 1, object_path: obj_path, staged_path: "", task: ParallelProcessTask {
+                    argv: llvm_assemble_argv(ll_path, fallback, opt_flag, no_includes)
+                }
+            });
         }
-        objects.push(fallback);
         i += 1;
     }
+
+    let mut jobs = _cr_resolve_jobs();
+    if !can_parallel { jobs = 1; }
+    let results = _cr_run_bounded_processes(_link_object_tasks(pending), jobs);
+    let mut pi: int = 0;
+    loop {
+        if pi >= pending.length { break; }
+        if results[pi] != 0 {
+            _delete_link_object_staging(pending);
+            return LinkObjectAssembly { success: false, object_paths: [] };
+        }
+        pi += 1;
+    }
+    pi = 0;
+    loop {
+        if pi >= pending.length { break; }
+        let item = pending[pi];
+        if item.staged_path.length > 0 {
+            if _atomic_rename_into_place(item.staged_path, item.object_path) {
+                objects[item.object_index] = item.object_path;
+            } else {
+                let no_includes: string[] = [];
+                if llvm_assemble(item.ll_path, item.fallback_path, opt_flag, no_includes) != 0 {
+                    _delete_link_object_staging(pending);
+                    return LinkObjectAssembly {
+                        success: false,
+                        object_paths: []
+                    };
+                }
+                objects[item.object_index] = item.fallback_path;
+            }
+        }
+        pi += 1;
+    }
     return LinkObjectAssembly { success: true, object_paths: objects };
+}
+
+fn _delete_link_object_staging(pending: PendingLinkObjectAssembly[]) ![io] {
+    let mut i: int = 0;
+    loop {
+        if i >= pending.length { break; }
+        if pending[i].staged_path.length > 0 {
+            fs.deleteFile(pending[i].staged_path);
+        }
+        i += 1;
+    }
+}
+
+fn _link_object_tasks(pending: PendingLinkObjectAssembly[]) -> ParallelProcessTask[] {
+    let mut tasks: ParallelProcessTask[] = [];
+    let mut i: int = 0;
+    loop {
+        if i >= pending.length { break; }
+        tasks.push(pending[i].task);
+        i += 1;
+    }
+    return tasks;
 }
 
 export {
     LinkObjectAssembly,
     _llvm_text_assemble_argv,
     assemble_link_inputs,
-    llvm_assemble
+    llvm_assemble,
+    llvm_assemble_argv
 };
