@@ -6,6 +6,7 @@ import { empty_string_constant_set, escape_string_for_llvm } from "../../strings
 import { ExpressionResult, LLVMOperand, StringConstant } from "../../types";
 import { append_string, number_to_string } from "../../utils";
 import { array_pointer_element_type } from "../arrays";
+import { emit_bf16_widen_to_double } from "./core_bf16_lowering";
 import { coerce_operand_to_type, harmonise_operands } from "./core_operands";
 import {
     is_union_llvm_type,
@@ -573,6 +574,45 @@ fn coerce_operand_to_string(operand: LLVMOperand, temp_index: int, lines: string
             diagnostics: nts_result.diagnostics,
             string_constants: empty_constants
         };
+    }
+
+    // SFN-610: narrower floats carry no `number.to_string` descriptor of their
+    // own. Widen to `double` and re-enter, so interpolation formats them
+    // through the same runtime call the concatenation path reaches via
+    // `coerce_pointer_or_struct` (core_operands.sfn).
+    if operand.llvm_type == "float" {
+        let widened = format_temp_name(temp_index);
+        let out_lines = append_string(lines, "  " + widened + " = fpext float "
+            + operand.value
+            + " to double");
+        let widened_operand = LLVMOperand {
+            llvm_type: "double",
+            value: widened
+        };
+        return coerce_operand_to_string(widened_operand, temp_index + 1, out_lines);
+    }
+
+    if operand.llvm_type == "half" {
+        let widened = format_temp_name(temp_index);
+        let out_lines = append_string(lines, "  " + widened + " = fpext half "
+            + operand.value
+            + " to double");
+        let widened_operand = LLVMOperand {
+            llvm_type: "double",
+            value: widened
+        };
+        return coerce_operand_to_string(widened_operand, temp_index + 1, out_lines);
+    }
+
+    // `fpext bfloat` has no AArch64 selection pattern (SFN-609), so bf16 widens
+    // through the bit-manipulation helper rather than a native extension.
+    if operand.llvm_type == "bfloat" {
+        let widened = emit_bf16_widen_to_double(operand.value, temp_index, lines);
+        let widened_operand = LLVMOperand {
+            llvm_type: "double",
+            value: widened.value
+        };
+        return coerce_operand_to_string(widened_operand, widened.temp_index, widened.lines);
     }
 
     if operand.llvm_type == "i64" {

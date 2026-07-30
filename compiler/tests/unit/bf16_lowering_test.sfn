@@ -16,6 +16,7 @@
 // (`docs/proposals/design-notes/sfn-609-bf16-conversion-lowering.md`).
 import { contains } from "sfn/strings";
 
+import { emit_native_text_with_module_name } from "../../src/emit_native";
 import {
     emit_bf16_narrow_from_double,
     emit_bf16_narrow_from_float,
@@ -23,6 +24,10 @@ import {
     emit_bf16_widen_to_float,
     emit_i64_round_to_odd
 } from "../../src/llvm/expression_lowering/native/core_bf16_lowering";
+import { coerce_operand_to_string } from "../../src/llvm/expression_lowering/native/core_strings";
+import { lower_to_llvm_ir_from_text } from "../../src/llvm/lowering/entrypoints";
+import { LLVMOperand } from "../../src/llvm/types";
+import { parse_program } from "../../src/parser/mod";
 
 test "bf16 lowering: widen to float allocates four temps and returns the last" {
     let seed: string[] = [];
@@ -93,6 +98,63 @@ test "bf16 lowering: unsigned i64 round-to-odd allocates seven temps" {
     assert result.value == "%t16";
     assert contains(result.lines[0], "and i64 %n, 2047");
     assert ! contains(result.lines[0], "icmp slt");
+}
+
+// SFN-610: string interpolation reaches a different stringify dispatch than
+// concatenation does, and that one had no arm for `bfloat` at all. The fix
+// routes it through the same bit-manipulation widen; a regression that reached
+// for a native extension instead would emit `fpext bfloat`, which AArch64
+// cannot select. Asserted on the IR text because on x86_64 the unselectable
+// form still runs, so a behavioural test alone would not catch it.
+test "lowering: bf16 interpolation widens without `fpext bfloat` (SFN-610)" ![io] {
+    // Assembled from pieces so the `${...}` marker for the *fixture* is not
+    // itself interpolated by this test's own string literal.
+    let dollar = "$";
+    let source = "fn probe(h: bf16) -> string {\n" + "    return \"h=" + dollar
+        + "{h}\";\n"
+        + "}";
+    let program = parse_program(source);
+    let native = emit_native_text_with_module_name(program, "bf16_interp_test");
+    let ir = lower_to_llvm_ir_from_text(native, "bf16_interp_test");
+
+    assert ! contains(ir, "fpext bfloat");
+    // Narrowings are named individually rather than as a blanket `to bfloat`:
+    // `bitcast i16 ... to bfloat` is the approved carrier tail of the widen
+    // sequence itself, so forbidding the whole shape would outlaw the fix.
+    assert ! contains(ir, "fptrunc float %");
+    assert ! contains(ir, "sitofp i64 %");
+    // The widen still happens — the bit sequence ends on an f32 -> f64 hop.
+    assert contains(ir, "fpext float");
+}
+
+// SFN-610: the three widen arms are new `format_temp_name` sites, so they carry
+// the same temp-accounting pin every emitter in this file does. Neither the
+// behavioural test nor the IR text-shape test above would notice a reused
+// `%tN`, which is the failure this file exists to catch (see the header).
+test "lowering: interpolation widen arms allocate temps without reuse (SFN-610)" ![io] {
+    let f32_seed: string[] = [];
+    let as_f32 = coerce_operand_to_string(LLVMOperand {
+        llvm_type: "float", value: "%x"
+    }, 10, f32_seed);
+    assert contains(as_f32.lines[0], "%t10 = fpext float %x to double");
+    assert ! contains(as_f32.lines[1], "%t10 =");
+
+    let f16_seed: string[] = [];
+    let as_f16 = coerce_operand_to_string(LLVMOperand {
+        llvm_type: "half", value: "%x"
+    }, 10, f16_seed);
+    assert contains(as_f16.lines[0], "%t10 = fpext half %x to double");
+    assert ! contains(as_f16.lines[1], "%t10 =");
+
+    // The bf16 widen consumes five temps (%t10..%t14), so whatever the `double`
+    // arm emits next must start past them.
+    let bf16_seed: string[] = [];
+    let as_bf16 = coerce_operand_to_string(LLVMOperand {
+        llvm_type: "bfloat", value: "%x"
+    }, 10, bf16_seed);
+    assert contains(as_bf16.lines[0], "%t10 = bitcast bfloat %x to i16");
+    assert contains(as_bf16.lines[4], "%t14 = fpext float");
+    assert ! contains(as_bf16.lines[5], "%t14 =");
 }
 
 // Threading check: an emitter must append to the caller's lines rather than
