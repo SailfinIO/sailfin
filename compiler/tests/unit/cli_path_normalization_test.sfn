@@ -8,12 +8,15 @@
 // — to gate this regression. Each invocation costs ~2 min on Linux
 // CI. This unit test gates the same logic in milliseconds, so the
 // e2e test now runs the canonical scenario exactly once.
+import { starts_with } from "sfn/strings";
+
 import {
     _atomic_rename_into_place,
     _copy_file,
     _dirname_cmd,
     _mktemp_from_template_cmd,
     _mktemp_sibling_cmd,
+    _publish_lines_atomic,
     _sha256_of_file_cmd,
     _strip_trailing_slashes_cmd
 } from "../../src/build/fs";
@@ -312,6 +315,117 @@ test "copy-file: overwrites an existing destination" ![io] {
     // stale bytes from the pre-existing longer content behind.
     assert _copy_file(src, dst);
     assert fs.readFile(dst) == "short";
+
+    process.run(["rm", "-rf", scratch]);
+}
+
+// --------------------------------------------------------------
+// `_publish_lines_atomic` (SFN-578) — the IR emit publish path.
+// --------------------------------------------------------------
+// Composes the mint + rename primitives above into the helper both IR
+// emit call sites use, so a partially-written `.ll`/`.sfn-asm` is never
+// observable at the destination. Unobservability itself cannot be
+// asserted without a real race, so these pin the mechanism: the exact
+// published bytes, and that every failure path is both *reported* and
+// leaves no `.sfn_stage.*` sibling behind. The reported-failure case is
+// the one that justifies publishing at this layer rather than inside
+// the `-> void` runtime writer, which cannot report anything.
+// Counts leftover staging siblings in `dir`, so a publish that failed to
+// clean up after itself is distinguishable from one that succeeded.
+fn _stage_residue_count(dir: string) -> int ![io] {
+    if !fs.exists(dir) { return 0; }
+    let entries = fs.listDirectory(dir);
+    let mut found: int = 0;
+    let mut i: int = 0;
+    loop {
+        if i >= entries.length { break; }
+        if starts_with(entries[i], ".sfn_stage.") { found += 1; }
+        i += 1;
+    }
+    return found;
+}
+
+test "publish-lines: writes exact content and leaves no staging residue" ![io] {
+    let scratch = "/tmp/sfn_publish_lines_test";
+    process.run(["rm", "-rf", scratch]);
+    process.run(["mkdir", "-p", scratch]);
+    let dst = scratch + "/artifact.ll";
+
+    assert _publish_lines_atomic(dst, ["; header", "define i32 @main() {", "}"]);
+    assert fs.exists(dst);
+    // `fs.writeLines` terminates every line, including the last, so the
+    // published payload ends with a trailing newline.
+    assert fs.readFile(dst) == "; header\ndefine i32 @main() {\n}\n";
+    assert _stage_residue_count(scratch) == 0;
+
+    process.run(["rm", "-rf", scratch]);
+}
+
+test "publish-lines: replaces an existing destination" ![io] {
+    let scratch = "/tmp/sfn_publish_lines_replace_test";
+    process.run(["rm", "-rf", scratch]);
+    process.run(["mkdir", "-p", scratch]);
+    let dst = scratch + "/artifact.ll";
+
+    fs.writeFile(dst, "; a previous build's output, considerably longer\n");
+    // `rename` replaces the destination wholesale, so no stale tail from
+    // the longer prior content may survive.
+    assert _publish_lines_atomic(dst, ["; fresh"]);
+    assert fs.readFile(dst) == "; fresh\n";
+    assert _stage_residue_count(scratch) == 0;
+
+    process.run(["rm", "-rf", scratch]);
+}
+
+test "publish-lines: empty array publishes a zero-length artifact" ![io] {
+    let scratch = "/tmp/sfn_publish_lines_empty_test";
+    process.run(["rm", "-rf", scratch]);
+    process.run(["mkdir", "-p", scratch]);
+    let dst = scratch + "/artifact.ll";
+
+    // Preserves the pre-SFN-578 `write_llvm_lines_chunked` contract: an
+    // empty line array is a successful zero-length publish, not a failure.
+    assert _publish_lines_atomic(dst, []);
+    assert fs.exists(dst);
+    assert fs.readFile(dst) == "";
+    assert _stage_residue_count(scratch) == 0;
+
+    process.run(["rm", "-rf", scratch]);
+}
+
+test "publish-lines: destination in a missing directory is reported as failure" ![io] {
+    let scratch = "/tmp/sfn_publish_lines_absent_test";
+    process.run(["rm", "-rf", scratch]);
+    let dst = scratch + "/nested/artifact.ll";
+
+    // The mint degrades to "" for a missing parent, the in-place fallback
+    // `fopen` then fails too, and the helper must return false rather
+    // than report a publish that never happened. This is the assertion
+    // the `-> void` runtime writer structurally cannot make.
+    assert ! _publish_lines_atomic(dst, ["; unreachable"]);
+    assert ! fs.exists(dst);
+
+    process.run(["rm", "-rf", scratch]);
+}
+
+test "publish-lines: a failed rename is reported and leaves no residue" ![io] {
+    let scratch = "/tmp/sfn_publish_lines_rename_fail_test";
+    process.run(["rm", "-rf", scratch]);
+    process.run(["mkdir", "-p", scratch]);
+    let dst = scratch + "/artifact.ll";
+
+    // A directory destination fails `rename(2)` with EISDIR while the
+    // sibling mint and the staged write both succeed — the only way to
+    // reach the rename-failure branch without fault injection.
+    process.run(["mkdir", "-p", dst]);
+    assert ! _publish_lines_atomic(dst, ["; staged but never published"]);
+    // `_atomic_rename_into_place` removes the temp on rename failure, so a
+    // caller retrying into the same directory sees no stale sibling.
+    assert _stage_residue_count(scratch) == 0;
+    // The destination survives: the failure path's `fs.deleteFile` is
+    // `unlink(2)`, which refuses a directory. The publish is still
+    // correctly reported as failed, which is what callers act on.
+    assert fs.exists(dst);
 
     process.run(["rm", "-rf", scratch]);
 }

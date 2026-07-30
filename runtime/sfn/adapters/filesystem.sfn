@@ -977,7 +977,9 @@ fn sfn_fs_read_link(path: *u8) -> *u8 ![io] {
 // decoded in pure Sailfin (`_fs_decode_immediate`) before the write. An
 // absurd `len > 10000000` from a corrupted-ABI handle mirrors the C
 // refuse-and-truncate contract natively (open to truncate, then bail).
-// No C call remains.
+// No C call remains. The in-place `"wb"` truncation here is by design —
+// atomic publishing (temp + rename) is the caller's responsibility, not
+// this writer's (SFN-578).
 fn sfn_fs_write_lines(path: *u8, lines: *u8) -> void ![io] {
     if path as i64 == 0 { return; }
     if lines as i64 == 0 { return; }
@@ -995,8 +997,9 @@ fn sfn_fs_write_lines(path: *u8, lines: *u8) -> void ![io] {
         if ft as i64 != 0 { fclose(ft); }
         // The truncation above leaves a zero-length file, which `fs.exists`
         // reports as a successful emit — the same main-less-IR failure a
-        // short write produces. Remove it so the caller's completeness
-        // check fails (SFN-542).
+        // short write produces. Remove it so the caller's `fs.exists`
+        // completeness check must fail (SFN-542); on POSIX this target is
+        // the staging temp, not the destination (SFN-578).
         let _ = unlink(path);
         return;
     }
@@ -1013,8 +1016,10 @@ fn sfn_fs_write_lines(path: *u8, lines: *u8) -> void ![io] {
     if data_addr == 0 {
         if n > 0 {
             fclose(f);
-            // Same reasoning as the absurd-count arm above: an empty file
-            // left behind reads as a complete emit (SFN-542).
+            // Same reasoning as the absurd-count arm above: the caller's
+            // `fs.exists` completeness check must fail (SFN-542); on POSIX
+            // this target is the staging temp, not the destination
+            // (SFN-578).
             let _ = unlink(path);
             return;
         }
@@ -1050,23 +1055,34 @@ fn sfn_fs_write_lines(path: *u8, lines: *u8) -> void ![io] {
     let close_rc: i32 = fclose(f);
     // Discarding these counts is what let a truncated `.ll` reach the
     // linker: the tail of the emitted module is `define @main`, so a
-    // dropped tail links as `undefined reference to 'main'`. Remove the
-    // partial file so `fs.exists` reports the failure to the caller
-    // (SFN-542).
+    // dropped tail links as `undefined reference to 'main'`. Removing the
+    // file is the only channel a `-> void` body has to report the failure
+    // — the descriptor signature is fixed at
+    // `compiler/src/llvm/runtime_helpers.sfn` — and the caller reads it as
+    // `fs.exists(path) == false` (SFN-542).
     //
-    // Removal is confined to this function on purpose. Both `fs.writeLines`
-    // call sites are compiler-internal, write a fresh build artifact into a
-    // path they just deleted, and already consume `fs.exists` as their
-    // completeness check. `sfn_fs_write_file` is deliberately NOT given the
-    // same treatment: its callers include `fmt --write` over user sources
-    // and arbitrary `-o` / `--csv` paths, where `fopen` follows a symlink
-    // but `unlink` would remove the link itself — losing the node on top of
-    // the content `"wb"` already truncated.
+    // When the caller is one of the two IR emit sites, `path` on POSIX is
+    // a `mkstemp`-minted staging temp: they publish through
+    // `_publish_lines_atomic` (`compiler/src/build/fs.sfn`), which mints
+    // beside the destination and renames on success (SFN-578). For those
+    // callers the removal targets a file the process owns in a directory
+    // the mint proved writable, so it cannot itself fail and leave a
+    // truncated artifact unreported. `fs.writeLines` is public API and
+    // this is not true of an arbitrary caller — on a Windows host no temp
+    // is mintable and even those two write in place — so for any other
+    // `path` the pre-SFN-542 caveat stands: a failing `unlink` leaves the
+    // truncated file and a `-> void` body cannot report it.
     //
-    // When `unlink` itself fails (read-only parent, sticky-bit directory)
-    // the truncated file survives and the caller is back to the unguarded
-    // behaviour; a `void` signature cannot report that. The structurally
-    // complete answer is tmp-file + atomic rename, as
-    // `compiler/src/build/fs.sfn:138-166` already does.
+    // Remove this removal entirely once the written byte count is
+    // observable to the caller — either a reportable `write_lines` variant
+    // (a runtime-helper descriptor signature change) or an `fs.size` /
+    // `fs.stat` primitive to compare against the expected length. Until
+    // then deleting the target is the only failure channel available.
+    //
+    // `sfn_fs_write_file` is deliberately NOT given the same treatment:
+    // its callers include `fmt --write` over user sources and arbitrary
+    // `-o` / `--csv` paths, where `fopen` follows a symlink but `unlink`
+    // would remove the link itself — losing the node on top of the
+    // content `"wb"` already truncated.
     if short_write || close_rc != 0 { let _ = unlink(path); }
 }

@@ -18,7 +18,18 @@
 // required: without it the shell is killed by SIGXFSZ instead of seeing a
 // short write. Driving the capped build through `process.run_capture` is
 // the sanctioned pattern for `ulimit` control (`.claude/rules/no-bash-e2e.md`).
-import { contains } from "sfn/strings";
+//
+// SFN-578: `.ll` publishing now goes through a sibling temp + atomic
+// rename (`_publish_lines_atomic`), so under the cap it is the *staged
+// temp* that gets truncated, not `program.ll` directly. The runtime's
+// SFN-542 `unlink` removes that truncated temp, `_publish_lines_atomic`
+// reads the missing temp as failure and returns `false`, and
+// `program.ll` is never created — the same observable outcome this test
+// already asserted, reached through the new mechanism without any change
+// to the body below. The one new addition is a leak check: a temp that
+// survived the unlink would sit under `work + "/sailfin"` with a
+// `.sfn_stage.` prefix.
+import { contains, starts_with } from "sfn/strings";
 import { clean_runner_env, nested_runner_scratch, report_child_failure } from "sfn/test";
 
 fn _sfn_bin() -> string ![io] {
@@ -124,5 +135,19 @@ test "build: a short write never leaves main-less IR on disk" ![io] {
                 + " with no `define i32 @main` (SFN-542)");
         }
         assert contains(body, "define i32 @main");
+    }
+
+    // No leaked staging temp: a truncated `.sfn_stage.*` sibling surviving
+    // the runtime's `unlink` would mean the new publish path failed to
+    // clean up after itself (SFN-578).
+    let sailfin_dir = work + "/sailfin";
+    if fs.exists(sailfin_dir) {
+        let entries = fs.listDirectory(sailfin_dir);
+        let mut i: int = 0;
+        loop {
+            if i >= entries.length { break; }
+            assert ! starts_with(entries[i], ".sfn_stage.");
+            i += 1;
+        }
     }
 }

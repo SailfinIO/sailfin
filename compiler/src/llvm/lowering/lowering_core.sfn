@@ -777,7 +777,6 @@ fn _lower_parsed_native_to_llvm_file(parse: ParseNativeResult, native_text: stri
         print.err("emit-llvm: lowering produced no output lines");
         return false;
     }
-    if fs.exists(out_path) { fs.deleteFile(out_path); }
     return write_llvm_lines_chunked(out_path, lines);
 }
 
