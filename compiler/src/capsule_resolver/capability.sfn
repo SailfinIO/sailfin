@@ -58,9 +58,8 @@ fn _cr_effect_covered(envelope: string[], required: string) -> boolean {
 // The drifting subset of `required` for a member granted `grant`, under the
 // workspace `allow`/`deny`. `effective(M) = (allow ∪ grant) \ deny`, so a
 // required effect drifts iff it is denied (deny wins — some deny entry
-// subsumes it) or it is not covered by allow ∪ grant. Pure so the unit tests
-// can inline-copy it (importing the resolver trips the seed per-module
-// timeout — mirror `workspace_resolver_test.sfn`).
+// subsumes it) or it is not covered by allow ∪ grant. Pure so resolver unit
+// tests can exercise it directly without introducing filesystem effects.
 fn workspace_effective_drift(allow: string[], deny: string[], grant: string[], required: string[]) -> string[] {
     let mut out: string[] = [];
     let mut i: int = 0;
@@ -451,9 +450,8 @@ fn workspace_member_for_spec(members: WorkspaceMember[], spec: string) -> string
 // opts into workspace inheritance with `version = { workspace = true }` (parsed
 // verbatim as the inline-table marker string by `toml_get_version`). When it
 // does, the resolved version is the workspace root's `[workspace.package]
-// version`; otherwise the member's own concrete version wins. Pure so the unit
-// tests can inline-copy it (importing the resolver trips the seed per-module
-// timeout — mirror `workspace_resolver_test.sfn`).
+// version`; otherwise the member's own concrete version wins. Pure so resolver
+// unit tests can exercise it directly without introducing filesystem effects.
 fn resolve_inherited_version(member_version: string, workspace_version: string) -> string {
     if toml_value_is_workspace_inherit(member_version) {
         return workspace_version;

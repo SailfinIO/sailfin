@@ -6,163 +6,33 @@
 //
 // IO-touching helpers (discover_workspace_root, load_workspace_members)
 // are exercised by the e2e capsule build script. These unit tests cover
-// the pure-string parsing and the in-memory lookup.
-//
-// The helpers under test are inline-duplicated (mirroring
-// `stdlib_capsule_allowlist_test.sfn`) because the test runner can't
-// resolve `compile_to_llvm_file_with_module` (and the rest of the
-// compiler) through the `capsule_resolver.sfn → main.sfn` import chain
-// — until the unified resolver actually lands and replaces text-level
-// inlining (Stage B itself), inlining the whole compiler into a unit
-// test trips the seed's per-module timeout.
-//
-// `toml_parser.sfn` does NOT import `main.sfn`, so its helpers are
-// import-safe in a unit test (see `manifest_workspace_test.sfn`); only
-// `capsule_resolver.sfn`'s own helpers need the inline-copy treatment.
-import { toml_value_is_workspace_inherit } from "../../src/toml_parser";
-
-// -- Inline copy of WorkspaceMember (from capsule_resolver.sfn) --
-struct WorkspaceMember {
-    name: string;
-    member_path: string;
-    src_dir: string;
-}
-
-// -- Inline copy of parse_workspace_member_paths (from capsule_resolver.sfn) --
-fn _parse_workspace_member_paths(members_text: string) -> string[] {
-    let mut out: string[] = [];
-    if members_text.length == 0 { return out; }
-    let mut start: int = 0;
-    let len = members_text.length;
-    loop {
-        if start >= len { break; }
-        let mut end: int = start;
-        loop {
-            if end >= len { break; }
-            if substring(members_text, end, end + 1) == "\n" { break; }
-            end += 1;
-        }
-        if end > start {
-            // Entries pass through verbatim, globs included;
-            // `_cr_expand_member_globs` expands trailing-`/*` entries in
-            // `load_workspace_members` (where the filesystem is in scope).
-            out.push(substring(members_text, start, end));
-        }
-        start = end + 1;
-    }
-    return out;
-}
-
-// -- Inline copy of workspace_member_for_spec (from capsule_resolver.sfn) --
-fn _workspace_member_for_spec(members: WorkspaceMember[], spec: string) -> string {
-    let mut i: int = 0;
-    loop {
-        if i >= members.length { break; }
-        if strings_equal(members[i].name, spec) {
-            return members[i].src_dir;
-        }
-        i += 1;
-    }
-    return "";
-}
-
-// -- Inline copy of _cr_is_safe_member_path (from capsule_resolver.sfn) --
-fn _find_char(text: string, ch: string, start: int) -> int {
-    let mut i: int = start;
-    loop {
-        if i >= text.length { break; }
-        if substring(text, i, i + 1) == ch { return i; }
-        i += 1;
-    }
-    return -1;
-}
-
-fn _is_safe_member_path(path: string) -> boolean {
-    if path.length == 0 { return false; }
-    if substring(path, 0, 1) == "/" { return false; }
-    if _find_char(path, "\\", 0) >= 0 { return false; }
-    let mut start: int = 0;
-    loop {
-        if start >= path.length { break; }
-        let mut end: int = start;
-        loop {
-            if end >= path.length { break; }
-            if substring(path, end, end + 1) == "/" { break; }
-            end += 1;
-        }
-        let segment = substring(path, start, end);
-        if strings_equal(segment, "..") { return false; }
-        if strings_equal(segment, ".") { return false; }
-        start = end + 1;
-    }
-    return true;
-}
+// the production pure-string parsing and in-memory lookup implementations
+// now housed in dependency-light resolver submodules.
+import { resolve_inherited_version, workspace_member_for_spec } from "../../src/capsule_resolver/capability";
+import { WorkspaceMember } from "../../src/capsule_resolver/types";
+import {
+    _cr_filter_excluded,
+    _cr_is_safe_member_path,
+    _cr_select_default_member_paths,
+    parse_workspace_member_paths
+} from "../../src/capsule_resolver/workspace";
 
 fn _str_eq(a: string, b: string) -> boolean { return strings_equal(a, b); }
 
-// -- Inline copy of resolve_inherited_version (from capsule_resolver.sfn,
-//    SFEP-0051 Phase 3). Calls the import-safe toml_parser predicate. --
-fn _resolve_inherited_version(member_version: string, workspace_version: string) -> string {
-    if toml_value_is_workspace_inherit(member_version) {
-        return workspace_version;
-    }
-    return member_version;
-}
-
-// -- Inline copies of the SFEP-0051 Phase 5 pure member-selection helpers
-//    (from capsule_resolver.sfn: `_cr_str_in`, `_cr_filter_excluded`,
-//    `_cr_select_default_member_paths`). Inlined for the same reason as the
-//    rest of this file — importing them pulls in the whole compiler. --
-fn _str_in(arr: string[], s: string) -> boolean {
-    let mut i: int = 0;
-    loop {
-        if i >= arr.length { break; }
-        if strings_equal(arr[i], s) { return true; }
-        i += 1;
-    }
-    return false;
-}
-
-fn _filter_excluded(paths: string[], exclude: string[]) -> string[] {
-    if exclude.length == 0 { return paths; }
-    let mut out: string[] = [];
-    let mut i: int = 0;
-    loop {
-        if i >= paths.length { break; }
-        let p = paths[i];
-        i += 1;
-        if !_str_in(exclude, p) { out.push(p); }
-    }
-    return out;
-}
-
-fn _select_default_member_paths(all_paths: string[], defaults: string[]) -> string[] {
-    if defaults.length == 0 { return all_paths; }
-    let mut out: string[] = [];
-    let mut i: int = 0;
-    loop {
-        if i >= all_paths.length { break; }
-        let p = all_paths[i];
-        i += 1;
-        if _str_in(defaults, p) { out.push(p); }
-    }
-    return out;
-}
-
 // ---- parse_workspace_member_paths ----
 test "workspace: empty member list parses to empty array" {
-    let parsed = _parse_workspace_member_paths("");
+    let parsed = parse_workspace_member_paths("");
     assert parsed.length == 0;
 }
 
 test "workspace: single member parses" {
-    let parsed = _parse_workspace_member_paths("compiler");
+    let parsed = parse_workspace_member_paths("compiler");
     assert parsed.length == 1;
     assert _str_eq(parsed[0], "compiler");
 }
 
 test "workspace: multiple members parse newline-separated" {
-    let parsed = _parse_workspace_member_paths("compiler\ncapsules/sfn/http\ncapsules/sfn/test");
+    let parsed = parse_workspace_member_paths("compiler\ncapsules/sfn/http\ncapsules/sfn/test");
     assert parsed.length == 3;
     assert _str_eq(parsed[0], "compiler");
     assert _str_eq(parsed[1], "capsules/sfn/http");
@@ -173,7 +43,7 @@ test "workspace: glob entries pass through the splitter verbatim" {
     // The splitter no longer drops globs — `_cr_expand_member_globs`
     // expands a trailing "capsules/sfn/*" against the workspace tree in
     // `load_workspace_members`. Here it must survive splitting intact.
-    let parsed = _parse_workspace_member_paths("compiler\ncapsules/sfn/*\ncapsules/sfn/http");
+    let parsed = parse_workspace_member_paths("compiler\ncapsules/sfn/*\ncapsules/sfn/http");
     assert parsed.length == 3;
     assert _str_eq(parsed[0], "compiler");
     assert _str_eq(parsed[1], "capsules/sfn/*");
@@ -181,7 +51,7 @@ test "workspace: glob entries pass through the splitter verbatim" {
 }
 
 test "workspace: trailing newline does not add empty entry" {
-    let parsed = _parse_workspace_member_paths("compiler\ncapsules/sfn/http\n");
+    let parsed = parse_workspace_member_paths("compiler\ncapsules/sfn/http\n");
     assert parsed.length == 2;
     assert _str_eq(parsed[1], "capsules/sfn/http");
 }
@@ -195,8 +65,8 @@ test "workspace: spec lookup returns matching member src_dir" {
     members.push(WorkspaceMember {
         name: "sfn/test", member_path: "capsules/sfn/test", src_dir: "/repo/capsules/sfn/test/src"
     });
-    assert _str_eq(_workspace_member_for_spec(members, "sfn/http"), "/repo/capsules/sfn/http/src");
-    assert _str_eq(_workspace_member_for_spec(members, "sfn/test"), "/repo/capsules/sfn/test/src");
+    assert _str_eq(workspace_member_for_spec(members, "sfn/http"), "/repo/capsules/sfn/http/src");
+    assert _str_eq(workspace_member_for_spec(members, "sfn/test"), "/repo/capsules/sfn/test/src");
 }
 
 test "workspace: spec lookup returns empty when missing" {
@@ -204,8 +74,8 @@ test "workspace: spec lookup returns empty when missing" {
     members.push(WorkspaceMember {
         name: "sfn/http", member_path: "capsules/sfn/http", src_dir: "/repo/capsules/sfn/http/src"
     });
-    assert _str_eq(_workspace_member_for_spec(members, "sfn/missing"), "");
-    assert _str_eq(_workspace_member_for_spec(members, ""), "");
+    assert _str_eq(workspace_member_for_spec(members, "sfn/missing"), "");
+    assert _str_eq(workspace_member_for_spec(members, ""), "");
 }
 
 test "workspace: spec lookup is exact match (sfn/http != http)" {
@@ -216,70 +86,72 @@ test "workspace: spec lookup is exact match (sfn/http != http)" {
     // Bare names must NOT match a scoped member — the resolver walks the
     // import surface in scoped form ("sfn/http") and the workspace file is
     // the source of truth for whether that scoped name exists.
-    assert _str_eq(_workspace_member_for_spec(members, "http"), "");
+    assert _str_eq(workspace_member_for_spec(members, "http"), "");
 }
 
 // ---- _cr_is_safe_member_path ----
 test "workspace: ordinary relative paths are safe" {
-    assert _is_safe_member_path("compiler");
-    assert _is_safe_member_path("capsules/sfn/http");
-    assert _is_safe_member_path("nested/many/levels/deep");
+    assert _cr_is_safe_member_path("compiler");
+    assert _cr_is_safe_member_path("capsules/sfn/http");
+    assert _cr_is_safe_member_path("nested/many/levels/deep");
 }
 
-test "workspace: empty path is unsafe" { assert ! _is_safe_member_path(""); }
+test "workspace: empty path is unsafe" {
+    assert ! _cr_is_safe_member_path("");
+}
 
 test "workspace: absolute path is unsafe" {
-    assert ! _is_safe_member_path("/etc/passwd");
-    assert ! _is_safe_member_path("/absolute/dir");
+    assert ! _cr_is_safe_member_path("/etc/passwd");
+    assert ! _cr_is_safe_member_path("/absolute/dir");
 }
 
 test "workspace: parent traversal is unsafe" {
-    assert ! _is_safe_member_path("..");
-    assert ! _is_safe_member_path("../escape");
-    assert ! _is_safe_member_path("a/../b");
-    assert ! _is_safe_member_path("a/b/..");
+    assert ! _cr_is_safe_member_path("..");
+    assert ! _cr_is_safe_member_path("../escape");
+    assert ! _cr_is_safe_member_path("a/../b");
+    assert ! _cr_is_safe_member_path("a/b/..");
 }
 
 test "workspace: current-dir segment is unsafe" {
-    assert ! _is_safe_member_path(".");
-    assert ! _is_safe_member_path("./compiler");
-    assert ! _is_safe_member_path("a/./b");
+    assert ! _cr_is_safe_member_path(".");
+    assert ! _cr_is_safe_member_path("./compiler");
+    assert ! _cr_is_safe_member_path("a/./b");
 }
 
 test "workspace: backslash is unsafe" {
-    assert ! _is_safe_member_path("windows\\path");
-    assert ! _is_safe_member_path("trailing\\");
+    assert ! _cr_is_safe_member_path("windows\\path");
+    assert ! _cr_is_safe_member_path("trailing\\");
 }
 
 // ---- SFEP-0051 Phase 3: resolve_inherited_version ----
 test "workspace: member inheriting version resolves to workspace root version" {
     // `version = { workspace = true }` reaches the resolver as the verbatim
     // marker string; it resolves to the [workspace.package] version.
-    assert _str_eq(_resolve_inherited_version("{ workspace = true }", "0.5.9"), "0.5.9");
+    assert _str_eq(resolve_inherited_version("{ workspace = true }", "0.5.9"), "0.5.9");
 }
 
 test "workspace: member overriding version wins over workspace root" {
     // A concrete member version is never an inherit marker — it passes through
     // unchanged even when the workspace root declares a different version.
-    assert _str_eq(_resolve_inherited_version("0.9.1", "0.5.9"), "0.9.1");
+    assert _str_eq(resolve_inherited_version("0.9.1", "0.5.9"), "0.9.1");
 }
 
 test "workspace: inheriting version with empty workspace root resolves to empty" {
     // No `[workspace.package] version` at the root → the inherited value is the
     // empty getter sentinel; the resolver does not invent a version.
-    assert _str_eq(_resolve_inherited_version("{ workspace = true }", ""), "");
+    assert _str_eq(resolve_inherited_version("{ workspace = true }", ""), "");
 }
 
 test "workspace: non-marker inline table is treated as a literal version" {
     // Only `{ workspace = true }` triggers inheritance; any other value is the
     // member's own version verbatim.
-    assert _str_eq(_resolve_inherited_version("{ workspace = false }", "0.5.9"), "{ workspace = false }");
+    assert _str_eq(resolve_inherited_version("{ workspace = false }", "0.5.9"), "{ workspace = false }");
 }
 
 // ---- SFEP-0051 Phase 5: exclude filtering (glob expansion) ----
 test "workspace: empty exclude leaves the expanded set unchanged" {
     let paths = ["capsules/sfn/http", "capsules/sfn/net", "capsules/sfn/test"];
-    let kept = _filter_excluded(paths, []);
+    let kept = _cr_filter_excluded(paths, []);
     assert kept.length == 3;
     assert _str_eq(kept[0], "capsules/sfn/http");
     assert _str_eq(kept[2], "capsules/sfn/test");
@@ -287,7 +159,7 @@ test "workspace: empty exclude leaves the expanded set unchanged" {
 
 test "workspace: exclude removes a matching subdir from the expansion" {
     let paths = ["capsules/sfn/http", "capsules/sfn/scratch", "capsules/sfn/net"];
-    let kept = _filter_excluded(paths, ["capsules/sfn/scratch"]);
+    let kept = _cr_filter_excluded(paths, ["capsules/sfn/scratch"]);
     assert kept.length == 2;
     assert _str_eq(kept[0], "capsules/sfn/http");
     assert _str_eq(kept[1], "capsules/sfn/net");
@@ -295,7 +167,7 @@ test "workspace: exclude removes a matching subdir from the expansion" {
 
 test "workspace: exclude removes multiple matching subdirs" {
     let paths = ["capsules/sfn/http", "capsules/sfn/scratch", "capsules/sfn/vendored", "capsules/sfn/net"];
-    let kept = _filter_excluded(paths, ["capsules/sfn/scratch", "capsules/sfn/vendored"]);
+    let kept = _cr_filter_excluded(paths, ["capsules/sfn/scratch", "capsules/sfn/vendored"]);
     assert kept.length == 2;
     assert _str_eq(kept[0], "capsules/sfn/http");
     assert _str_eq(kept[1], "capsules/sfn/net");
@@ -303,7 +175,7 @@ test "workspace: exclude removes multiple matching subdirs" {
 
 test "workspace: exclude entry that matches nothing is a no-op" {
     let paths = ["capsules/sfn/http", "capsules/sfn/net"];
-    let kept = _filter_excluded(paths, ["capsules/sfn/absent"]);
+    let kept = _cr_filter_excluded(paths, ["capsules/sfn/absent"]);
     assert kept.length == 2;
     assert _str_eq(kept[0], "capsules/sfn/http");
     assert _str_eq(kept[1], "capsules/sfn/net");
@@ -311,7 +183,7 @@ test "workspace: exclude entry that matches nothing is a no-op" {
 
 test "workspace: exclude preserves order of the surviving members" {
     let paths = ["a/one", "a/two", "a/three", "a/four"];
-    let kept = _filter_excluded(paths, ["a/two"]);
+    let kept = _cr_filter_excluded(paths, ["a/two"]);
     assert kept.length == 3;
     assert _str_eq(kept[0], "a/one");
     assert _str_eq(kept[1], "a/three");
@@ -321,7 +193,7 @@ test "workspace: exclude preserves order of the surviving members" {
 // ---- SFEP-0051 Phase 5: default-members selection ----
 test "workspace: empty default-members selects every member (Cargo fallback)" {
     let all = ["compiler", "runtime", "capsules/sfn/http"];
-    let selected = _select_default_member_paths(all, []);
+    let selected = _cr_select_default_member_paths(all, []);
     assert selected.length == 3;
     assert _str_eq(selected[0], "compiler");
     assert _str_eq(selected[2], "capsules/sfn/http");
@@ -329,7 +201,7 @@ test "workspace: empty default-members selects every member (Cargo fallback)" {
 
 test "workspace: default-members scopes the selection to the listed subset" {
     let all = ["compiler", "runtime", "capsules/sfn/http", "capsules/sfn/net"];
-    let selected = _select_default_member_paths(all, ["compiler", "capsules/sfn/net"]);
+    let selected = _cr_select_default_member_paths(all, ["compiler", "capsules/sfn/net"]);
     assert selected.length == 2;
     assert _str_eq(selected[0], "compiler");
     assert _str_eq(selected[1], "capsules/sfn/net");
@@ -340,7 +212,7 @@ test "workspace: default-members preserves member (not manifest) order" {
     // default-members list happens to use — so a bare root build is
     // deterministic regardless of how the manifest lists defaults.
     let all = ["compiler", "runtime", "capsules/sfn/http"];
-    let selected = _select_default_member_paths(all, ["capsules/sfn/http", "compiler"]);
+    let selected = _cr_select_default_member_paths(all, ["capsules/sfn/http", "compiler"]);
     assert selected.length == 2;
     assert _str_eq(selected[0], "compiler");
     assert _str_eq(selected[1], "capsules/sfn/http");
@@ -351,7 +223,7 @@ test "workspace: default-members entry that is not a member is ignored" {
     // typo or an excluded dir) simply drops out — the intersection with the
     // actual member set is the source of truth.
     let all = ["compiler", "runtime"];
-    let selected = _select_default_member_paths(all, ["compiler", "capsules/sfn/absent"]);
+    let selected = _cr_select_default_member_paths(all, ["compiler", "capsules/sfn/absent"]);
     assert selected.length == 1;
     assert _str_eq(selected[0], "compiler");
 }
