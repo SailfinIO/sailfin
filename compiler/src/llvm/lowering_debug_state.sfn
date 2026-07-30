@@ -63,7 +63,9 @@ export {
     errno_locator_symbol,
     clock_monotonic_id_value,
     sc_nprocessors_onln_value,
-    target_arch_for_lowering
+    target_arch_for_lowering,
+    comdat_leg_for_os,
+    target_uses_comdat
 };
 
 // Per-flag cache cells. `_X_initialized` flips from false to true on
@@ -124,6 +126,15 @@ let mut _stat_st_mode_offset_initialized: boolean = false;
 let mut _stat_st_mode_offset_value: int = 0;
 let mut _stat_buf_size_initialized: boolean = false;
 let mut _stat_buf_size_value: int = 0;
+
+// Cache for the resolved COMDAT leg (SFN-549). COFF is the only object
+// format that both tolerates and requires an explicit comdat group to fold
+// duplicate `linkonce_odr` type-descriptor / ABI-version globals; ELF
+// auto-groups them and Mach-O rejects comdat outright. `_comdat_target_value`
+// holds the resolved decision (true only for a Windows target). See
+// `target_uses_comdat` below.
+let mut _comdat_target_initialized: boolean = false;
+let mut _comdat_target_value: boolean = false;
 
 // Non-shelling host-OS probe (SFN-49, epic #1485; M1 in
 // `docs/proposals/0021-windows-native-selfhost.md` §4.2(E)). Retires the
@@ -352,6 +363,32 @@ fn fs_platform_leg() -> string ![io] {
         _fs_platform_leg_initialized = true;
     }
     return _fs_platform_leg_value;
+}
+
+// Pure decision: COFF is the only object format that both tolerates and
+// requires an explicit comdat group to fold duplicate `linkonce_odr`
+// definitions. ELF auto-groups them; Mach-O rejects comdat outright
+// (`llc` aborts with "MachO doesn't support COMDATs"), so Darwin and every
+// non-Windows target must never see the clause. (SFN-549)
+fn comdat_leg_for_os(os: string) -> boolean { return os == "Windows"; }
+
+// Resolve whether the current target requires the comdat clause on
+// `linkonce_odr` globals (SFN-549). Same resolution order + lazy cache as
+// `fs_platform_leg` above:
+//   1. `SAILFIN_TARGET_OS` env override — the *target* OS, for the Windows
+//      cross-compile from a Linux host.
+//   2. `_host_os` filesystem-marker probe — the native-build path.
+// Delegates the leg decision to `comdat_leg_for_os` so an unknown host
+// falls through the dominant Linux default and never selects the comdat
+// leg.
+fn target_uses_comdat() -> boolean ![io] {
+    if !_comdat_target_initialized {
+        let mut os: string = _get_env_cmd("SAILFIN_TARGET_OS");
+        if os.length == 0 { os = _host_os(); }
+        _comdat_target_value = comdat_leg_for_os(os);
+        _comdat_target_initialized = true;
+    }
+    return _comdat_target_value;
 }
 
 // Byte offset of `st_mode` within `struct stat`, baked per target for the

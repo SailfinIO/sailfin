@@ -1,0 +1,25 @@
+// compiler/tests/unit/type_descriptor_comdat_test.sfn
+//
+// Regression guard for the target-conditioned COMDAT decision (SFN-549):
+// COFF is the only object format that both tolerates and requires an
+// explicit comdat group to fold duplicate `linkonce_odr` type-descriptor /
+// ABI-version globals — ELF auto-groups them, Mach-O rejects `comdat`
+// outright (`llc` aborts with "MachO doesn't support COMDATs"). So the
+// clause must be emitted only for a Windows target.
+//
+// Pure assertions over `comdat_leg_for_os` — the decision function exported
+// alongside the `![io]`-cached `target_uses_comdat` resolver so the leg
+// logic is exercisable without the resolver's latched cache (it can only be
+// probed once per process). Same override-driven pattern as
+// `target_conditioning_test.sfn`.
+import { expect_eq_bool } from "sfn/test";
+
+import { comdat_leg_for_os } from "../../src/llvm/lowering_debug_state";
+
+test "comdat: only Windows selects the comdat leg" ![pure] {
+    assert expect_eq_bool(comdat_leg_for_os("Windows"), true).ok;
+    assert expect_eq_bool(comdat_leg_for_os("Linux"), false).ok;
+    assert expect_eq_bool(comdat_leg_for_os("Darwin"), false).ok;
+    assert expect_eq_bool(comdat_leg_for_os(""), false).ok;
+    assert expect_eq_bool(comdat_leg_for_os("Plan9"), false).ok;
+}

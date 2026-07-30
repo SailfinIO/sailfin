@@ -24,6 +24,11 @@
 // (the common case for imported types) coalesce at link time
 // without errors. The constructor is `internal` so two modules
 // each emit their own ctor with unique `module_name` suffixes.
+// `linkonce_odr` alone is sufficient for ELF (auto-grouped) but not
+// for COFF, which requires an explicit `comdat` group to fold the
+// duplicates; Mach-O forbids `comdat` outright. So a Windows target
+// additionally emits a per-global comdat group (SFN-549); ELF/Mach-O
+// output is unchanged.
 //
 // Skip rules.
 //   - Modules with zero named types emit nothing (no empty ctor,
@@ -37,6 +42,7 @@
 //     ctors find them via `sfn_resolve_type`).
 //
 // Pinned by `compiler/tests/e2e/test_runtime_type_meta.sh`.
+import { target_uses_comdat } from "../lowering_debug_state";
 import {
     EnumTypeInfo,
     InterfaceTypeInfo,
@@ -116,7 +122,7 @@ struct _OneTypeLines {
     ctor_call: string;
 }
 
-fn _emit_one_type(name: string, kind: int) -> _OneTypeLines {
+fn _emit_one_type(name: string, kind: int, use_comdat: boolean) -> _OneTypeLines {
     let stem = _descriptor_global_stem(name);
     let name_sym = "@__sfn_type_desc_name." + stem;
     let desc_sym = "@__sfn_type_desc." + stem;
@@ -129,15 +135,34 @@ fn _emit_one_type(name: string, kind: int) -> _OneTypeLines {
     let escaped = _escape_for_llvm_cstring(name);
 
     let mut lines: string[] = [];
+    // COFF requires an explicit comdat group to fold the `linkonce_odr`
+    // duplicates every referencing module emits; ELF auto-groups them and
+    // Mach-O forbids `comdat` outright, so this clause is Windows-only
+    // (SFN-549). Each global gets its own group keyed to its own name so
+    // `--gc-sections`/`/OPT:REF` granularity is preserved. The `$X = comdat
+    // any` line must precede its use.
+    let mut name_comdat_clause: string = "";
+    let mut desc_comdat_clause: string = "";
+    if use_comdat {
+        // The comdat group name matches the bare global name (no `@`
+        // sigil) so the `, comdat` shorthand on each global below
+        // resolves to its own group rather than a shared one.
+        lines.push("$__sfn_type_desc_name." + stem + " = comdat any");
+        lines.push("$__sfn_type_desc." + stem + " = comdat any");
+        name_comdat_clause = ", comdat";
+        desc_comdat_clause = ", comdat";
+    }
     lines.push(name_sym + " = linkonce_odr unnamed_addr constant ["
         + name_len_text
         + " x i8] c\""
         + escaped
-        + "\\00\"");
+        + "\\00\""
+        + name_comdat_clause);
     // The descriptor's `name_ptr` slot is `ptrtoint` of the name
     // global. `align 8` matches the natural alignment of the
     // i64 lead field; LLVM would infer it but we pin it here so
-    // the runtime can rely on aligned 8-byte loads.
+    // the runtime can rely on aligned 8-byte loads. `, comdat` precedes
+    // `, align 8` to match LLVM's canonical printed form (SFN-549).
     lines.push(desc_sym + " = linkonce_odr constant { i64, i64, i32 } { i64 "
         + id_text
         + ", i64 ptrtoint (["
@@ -146,7 +171,9 @@ fn _emit_one_type(name: string, kind: int) -> _OneTypeLines {
         + name_sym
         + " to i64), i32 "
         + kind_text
-        + " }, align 8");
+        + " }"
+        + desc_comdat_clause
+        + ", align 8");
 
     let ctor_call = "  call void @sfn_type_register(i8* bitcast ({ i64, i64, i32 }* "
         + desc_sym
@@ -227,7 +254,11 @@ fn _already_seen(seen: string[], name: string) -> boolean {
 // linkage handles cross-module duplicates at link time but
 // llvm-as still rejects within-module duplicates. We dedupe by
 // type name before emission so the IR is always self-consistent.
-fn emit_type_descriptors(type_context: TypeContext, module_name: string, skip_names: string[]) -> TypeDescriptorEmission {
+fn emit_type_descriptors(type_context: TypeContext, module_name: string, skip_names: string[]) -> TypeDescriptorEmission ![io] {
+    // Resolved once per module compile — `_emit_one_type` runs once per
+    // named type and must not re-probe the cached resolver on that hot
+    // path (SFN-549).
+    let use_comdat = target_uses_comdat();
     if type_context == null { return _empty_emission(); }
 
     let mut preamble_lines: string[] = [];
@@ -261,7 +292,7 @@ fn emit_type_descriptors(type_context: TypeContext, module_name: string, skip_na
             if _already_seen(safe_skip, nm) { continue; }
             if _already_seen(seen_names, nm) { continue; }
             seen_names.push(nm);
-            let one = _emit_one_type(nm, _kind_struct());
+            let one = _emit_one_type(nm, _kind_struct(), use_comdat);
             let mut pi: int = 0;
             loop {
                 if pi >= one.preamble.length { break; }
@@ -288,7 +319,7 @@ fn emit_type_descriptors(type_context: TypeContext, module_name: string, skip_na
             if _already_seen(safe_skip, enm) { continue; }
             if _already_seen(seen_names, enm) { continue; }
             seen_names.push(enm);
-            let one = _emit_one_type(enm, _kind_enum());
+            let one = _emit_one_type(enm, _kind_enum(), use_comdat);
             let mut pi: int = 0;
             loop {
                 if pi >= one.preamble.length { break; }
@@ -314,7 +345,7 @@ fn emit_type_descriptors(type_context: TypeContext, module_name: string, skip_na
             if _is_synthetic_name(inm) { continue; }
             if _already_seen(seen_names, inm) { continue; }
             seen_names.push(inm);
-            let one = _emit_one_type(inm, _kind_interface());
+            let one = _emit_one_type(inm, _kind_interface(), use_comdat);
             let mut pi: int = 0;
             loop {
                 if pi >= one.preamble.length { break; }

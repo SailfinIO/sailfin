@@ -7,6 +7,7 @@
 //
 // Extracted from lowering_core.sfn to reduce per-file memory footprint.
 import { NativeFunction } from "../../native_ir";
+import { target_uses_comdat } from "../lowering_debug_state";
 import {
     extract_declared_symbol_names,
     render_enum_type_definitions,
@@ -255,7 +256,11 @@ fn render_llvm_preamble(module_name: string, type_context: TypeContext, trait_me
     // ABI version globals (issue #392 / M1.C; issue #462). Every
     // emitted module declares these so the runtime can detect ABI
     // mismatches at load time. `linkonce_odr` linkage coalesces
-    // duplicate definitions when multiple modules link together.
+    // duplicate definitions at link time on ELF, which auto-groups them;
+    // COFF requires an explicit comdat group to fold the same duplicates,
+    // and Mach-O forbids `comdat` outright — so a Windows target adds a
+    // per-global comdat group here and every other target is unchanged
+    // (SFN-549).
     //
     // `@sfn_abi_hash` is an FNV-1a 64-bit hash over a stable
     // rendering of the locked SfnString and SfnArray aggregate
@@ -264,9 +269,18 @@ fn render_llvm_preamble(module_name: string, type_context: TypeContext, trait_me
     // catches real layout drift. Compiler and runtime run in the
     // same address space, so the i64 is read as `uint64_t` directly
     // without endianness handling.
-    lines.push("@sfn_abi_version = linkonce_odr constant i32 1");
-    lines.push("@sfn_abi_hash = linkonce_odr constant i64 "
-        + sfn_abi_hash_decimal());
+    if target_uses_comdat() {
+        lines.push("$sfn_abi_version = comdat any");
+        lines.push("$sfn_abi_hash = comdat any");
+        lines.push("@sfn_abi_version = linkonce_odr constant i32 1, comdat");
+        lines.push("@sfn_abi_hash = linkonce_odr constant i64 "
+            + sfn_abi_hash_decimal()
+            + ", comdat");
+    } else {
+        lines.push("@sfn_abi_version = linkonce_odr constant i32 1");
+        lines.push("@sfn_abi_hash = linkonce_odr constant i64 "
+            + sfn_abi_hash_decimal());
+    }
     lines.push("");
 
     return lines;
