@@ -45,10 +45,10 @@ import {
     with_flag
 } from "sfn/cli";
 
-import { AssertFailure, _empty_assert_failure } from "../../assert_failure";
-import { Program, Statement } from "../../ast";
-import { LinkPlan, LlvmTextBackend } from "../../backend";
-import { assemble_link_inputs } from "../../build/clang_argv";
+import { AssertFailure, _empty_assert_failure } from "../../../assert_failure";
+import { Program, Statement } from "../../../ast";
+import { LinkPlan, LlvmTextBackend } from "../../../backend";
+import { assemble_link_inputs } from "../../../build/clang_argv";
 import {
     _dirname_cmd,
     _ends_with_cmd,
@@ -58,12 +58,12 @@ import {
     _shell_read_cmd,
     _strip_trailing_slashes_cmd,
     _write_text_cmd
-} from "../../build/fs";
+} from "../../../build/fs";
 import {
     assemble_runtime_capsule_link_inputs,
     runtime_stamp_identity,
     write_runtime_identity_stamp
-} from "../../build/runtime_objs";
+} from "../../../build/runtime_objs";
 import {
     CacheKey,
     cache_copy_artifact_to,
@@ -74,28 +74,28 @@ import {
     test_bin_cache_key,
     test_bin_cache_root,
     test_bin_compiler_identity
-} from "../../build_cache";
-import { _env_flag, _get_env_cmd, _legacy_flag_file } from "../../build_flags";
-import { is_safe_scope_name, parse_scope_name } from "../../capsule_artifact";
-import { prepare_project_capsules_for_test } from "../../capsule_resolver";
-import { discover_project_root } from "../../capsule_resolver/paths";
-import { ResolverConsumer, TestCapsuleResolution } from "../../capsule_resolver/types";
-import { discover_workspace_root, load_workspace_default_members } from "../../capsule_resolver/workspace";
-import { ImportSymbolTable, empty_import_symbols } from "../../effect_imports";
-import { format_backend_failure_banner } from "../../ice";
-import { compile_tests_to_llvm_file_with_module_imports, module_name_from_path } from "../../main";
-import { LayoutManifest } from "../../native_ir";
-import { number_to_string } from "../../num_format";
-import { parse_program } from "../../parser/mod";
-import { runtime_capsule_from_root } from "../../runtime_capsule_resolver";
-import { _has_prefix_cmd, _sort_strings_cmd } from "../../string_cmd_utils";
+} from "../../../build_cache";
+import { _env_flag, _get_env_cmd, _legacy_flag_file } from "../../../build_flags";
+import { is_safe_scope_name, parse_scope_name } from "../../../capsule_artifact";
+import { prepare_project_capsules_for_test } from "../../../capsule_resolver";
+import { discover_project_root } from "../../../capsule_resolver/paths";
+import { ResolverConsumer, TestCapsuleResolution } from "../../../capsule_resolver/types";
+import { discover_workspace_root, load_workspace_default_members } from "../../../capsule_resolver/workspace";
+import { ImportSymbolTable, empty_import_symbols } from "../../../effect_imports";
+import { format_backend_failure_banner } from "../../../ice";
+import { compile_tests_to_llvm_file_with_module_imports, module_name_from_path } from "../../../main";
+import { LayoutManifest } from "../../../native_ir";
+import { number_to_string } from "../../../num_format";
+import { parse_program } from "../../../parser/mod";
+import { runtime_capsule_from_root } from "../../../runtime_capsule_resolver";
+import { _has_prefix_cmd, _sort_strings_cmd } from "../../../string_cmd_utils";
 import {
     char_code_at_text,
     find_char_local,
     index_of,
     substring
-} from "../../string_utils";
-import { TestResultRecord, parse_test_record_line } from "../../test_results";
+} from "../../../string_utils";
+import { TestResultRecord, parse_test_record_line } from "../../../test_results";
 import {
     TestEntry,
     collect_test_entries,
@@ -104,7 +104,7 @@ import {
     render_start_event,
     render_summary_event,
     render_test_event
-} from "../../test_runner_json";
+} from "../../../test_runner_json";
 import {
     enter_test_runner_mode,
     exit_test_runner_mode,
@@ -113,13 +113,13 @@ import {
     test_decl_is_matching_test,
     test_decl_matches_filters,
     test_filters_active
-} from "../../test_runner_state";
-import { toml_get_name } from "../../toml_parser";
-import { load_imported_interfaces_from_paths } from "../../typecheck_import_loader";
-import { resolve_test_bin_identity_for_cache } from "../../version";
-import { CliContext } from "../context";
-import { _package_basename } from "./cmd_shared";
-import { toolchain_gate_or_dispatch } from "./toolchain";
+} from "../../../test_runner_state";
+import { toml_get_name } from "../../../toml_parser";
+import { load_imported_interfaces_from_paths } from "../../../typecheck_import_loader";
+import { resolve_test_bin_identity_for_cache } from "../../../version";
+import { CliContext } from "../../context";
+import { _package_basename } from "../cmd_shared";
+import { toolchain_gate_or_dispatch } from "../toolchain";
 
 fn _looks_like_test_file_cmd(name: string) -> boolean {
     return _ends_with_cmd(name, "_test.sfn");
