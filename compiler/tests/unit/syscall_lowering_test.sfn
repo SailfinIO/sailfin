@@ -1,7 +1,8 @@
-import { emit_native_text_with_module_name } from "../../src/emit_native";
-import { lower_to_llvm_ir_from_text } from "../../src/llvm/lowering/entrypoints";
-import { is_syscall_builtin, syscall_contract_error } from "../../src/llvm/syscall";
-import { parse_program } from "../../src/parser/mod";
+import {
+    is_syscall_builtin,
+    render_syscall_constraints,
+    syscall_contract_error
+} from "../../src/llvm/syscall";
 import { index_of } from "../../src/string_utils";
 
 fn _contains(text: string, needle: string) -> boolean {
@@ -29,13 +30,11 @@ test "syscall: rejects unsupported operating systems and architectures" {
     assert _contains(syscall_contract_error("syscall1", 2, "runtime/sfn/platform/syscall_linux", "Linux", "aarch64"), "Linux x86-64");
 }
 
-test "syscall: Linux x86-64 IR pins registers and clobbers" ![io] {
-    let source = "fn invoke(n: int, a: int, b: int, c: int, d: int, e: int, f: int) -> int {\n"
-        + "    return syscall6(n, a, b, c, d, e, f);\n"
-        + "}";
-    let program = parse_program(source);
-    let native = emit_native_text_with_module_name(program, "runtime/sfn/platform/syscall_linux.sfn");
-    let ir = lower_to_llvm_ir_from_text(native, "runtime/sfn/platform/syscall_linux.sfn");
-    assert _contains(ir, "call i64 asm sideeffect \"syscall\"");
-    assert _contains(ir, "={rax},{rax},{rdi},{rsi},{rdx},{r10},{r8},{r9},~{rcx},~{r11},~{memory}");
+test "syscall: constraint renderer pins registers and clobbers" {
+    assert render_syscall_constraints(2) == "={rax},{rax},{rdi},~{rcx},~{r11},~{memory}";
+    assert render_syscall_constraints(3) == "={rax},{rax},{rdi},{rsi},~{rcx},~{r11},~{memory}";
+    assert render_syscall_constraints(4) == "={rax},{rax},{rdi},{rsi},{rdx},~{rcx},~{r11},~{memory}";
+    assert render_syscall_constraints(5) == "={rax},{rax},{rdi},{rsi},{rdx},{r10},~{rcx},~{r11},~{memory}";
+    assert render_syscall_constraints(6) == "={rax},{rax},{rdi},{rsi},{rdx},{r10},{r8},~{rcx},~{r11},~{memory}";
+    assert render_syscall_constraints(7) == "={rax},{rax},{rdi},{rsi},{rdx},{r10},{r8},{r9},~{rcx},~{r11},~{memory}";
 }

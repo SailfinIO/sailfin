@@ -76,6 +76,21 @@ fn _failure(message: string, lines: string[], temp_index: int, strings: StringCo
     };
 }
 
+fn render_syscall_constraints(argument_count: int) -> string {
+    let registers = ["{rax}", "{rdi}", "{rsi}", "{rdx}", "{r10}", "{r8}", "{r9}"];
+    let mut constraints: string[] = ["={rax}"];
+    let mut index: int = 0;
+    loop {
+        if index >= argument_count { break; }
+        constraints.push(registers[index]);
+        index += 1;
+    }
+    constraints.push("~{rcx}");
+    constraints.push("~{r11}");
+    constraints.push("~{memory}");
+    return join_with_separator(constraints, ",");
+}
+
 fn lower_syscall_builtin(name: string, arguments: string[], bindings: ParameterBinding[], locals: LocalBinding[], temp_index: int, lines: string[], functions: NativeFunction[], context: TypeContext) -> ExpressionResult ![io] {
     let builtin = trim_text(name);
     let contract_error = syscall_contract_error(builtin, arguments.length, _syscall_module_name, build_target_os(), target_arch_for_lowering());
@@ -110,23 +125,17 @@ fn lower_syscall_builtin(name: string, arguments: string[], bindings: ParameterB
         index += 1;
     }
 
-    let registers = ["{rax}", "{rdi}", "{rsi}", "{rdx}", "{r10}", "{r8}", "{r9}"];
-    let mut constraints: string[] = ["={rax}"];
     let mut rendered: string[] = [];
     index = 0;
     loop {
         if index >= operands.length { break; }
-        constraints.push(registers[index]);
         rendered.push(format_typed_operand(operands[index]));
         index += 1;
     }
-    constraints.push("~{rcx}");
-    constraints.push("~{r11}");
-    constraints.push("~{memory}");
     let result = format_temp_name(current_temp);
     current_lines.push("  " + result
         + " = call i64 asm sideeffect \"syscall\", \""
-        + join_with_separator(constraints, ",")
+        + render_syscall_constraints(operands.length)
         + "\"("
         + join_with_separator(rendered, ", ")
         + ")");
@@ -142,6 +151,7 @@ fn lower_syscall_builtin(name: string, arguments: string[], bindings: ParameterB
 export {
     is_syscall_builtin,
     lower_syscall_builtin,
+    render_syscall_constraints,
     set_syscall_lowering_module,
     syscall_contract_error
 };
