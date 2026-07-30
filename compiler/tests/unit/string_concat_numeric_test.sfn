@@ -67,6 +67,29 @@ test "string concat: string + bf16 yields concatenated text" {
     assert out == "h=1.5";
 }
 
+// SFN-610: interpolation reaches a different stringify dispatch than concat
+// (`coerce_operand_to_string`, core_strings.sfn), and that dispatch had no arm
+// for any float narrower than `double`. `"h=${h}"` failed the build with E0832
+// while `"h=" + h` on the same value lowered and ran, so these pin the two
+// paths against each other.
+test "string interpolation: f32 interpolates and agrees with concat" {
+    let f: f32 = 1.5;
+    assert "f=${f}" == "f=1.5";
+    assert "f=${f}" == "f=" + f;
+}
+
+test "string interpolation: f16 interpolates and agrees with concat" {
+    let h: f16 = 1.5;
+    assert "h=${h}" == "h=1.5";
+    assert "h=${h}" == "h=" + h;
+}
+
+test "string interpolation: bf16 interpolates and agrees with concat" {
+    let h: bf16 = 1.5;
+    assert "h=${h}" == "h=1.5";
+    assert "h=${h}" == "h=" + h;
+}
+
 test "bool display agrees across concat, cast, and interpolation" {
     let t = true;
     let f = false;
