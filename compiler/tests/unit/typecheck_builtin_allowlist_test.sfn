@@ -2,7 +2,7 @@
 //
 // Issue #810 centralizes the auto-injection envelope (previously
 // scattered as hardcoded names in effect_checker.sfn:623-652) into a
-// single `is_builtin_call_name` helper on `typecheck_types.sfn`. The
+// single `is_builtin_call_name` helper on `typecheck_types/extern_abi.sfn`. The
 // envelope establishes which bare `Identifier(...)` call names the
 // expression walker (#809) must treat as "no resolution required"
 // once Issue D (#616 sub-issue 4) flips on unknown-identifier
