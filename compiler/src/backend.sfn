@@ -49,7 +49,8 @@ import {
     trace_direct_link_fallback
 } from "./build/direct_link";
 // `_shell_read_cmd` runs a command and trims its stdout — used by the
-// macOS SDK probe (`uname -s`, `xcrun --show-sdk-path`).
+// macOS SDK probe (`xcrun --show-sdk-path`, `sw_vers`), both of which sit
+// behind the Darwin gate and so are unreachable off Darwin.
 import { _shell_read_cmd } from "./build/fs";
 // Target conditioning (SFN-52, SFEP-0021 §4.2(A)): the final link resolves
 // the build target once and threads the `-target` triple + POSIX-lib
@@ -145,16 +146,23 @@ fn _macos_sdk_link_flags() -> string[] ![io] {
     return flags;
 }
 
+// Module-private by naming convention; exported so the de-shelling
+// regression guard (`compiler/tests/unit/windows_build_deshell_test.sfn`,
+// SFN-488) can assert the off-Darwin flag set is empty directly rather than
+// inferring it from a link argv. Mirrors the `_llvm_text_link_*_argv`
+// export-of-underscore-helper precedent below; no rename, no behavior
+// change.
+export { _macos_sdk_link_flags };
+
 // Resolve the macOS SDK root, or "" when not on Darwin / none found.
-// Order: `SAILFIN_TARGET_OS` (cross-compile override) then `uname -s` to
-// gate on Darwin; then `SDKROOT` (no subprocess, most stable when set),
-// `xcrun --show-sdk-path`, and the Command Line Tools default. Each SDK
-// candidate must exist on disk before it is trusted, so a stale env var
-// cannot force a bad `-isysroot`.
+// Order: `build_target_os()` gates on Darwin — same `SAILFIN_TARGET_OS`
+// override the rest of the link path resolves through, and shell-free, so
+// the gate costs no subprocess on the every-link path (SFN-488); then
+// `SDKROOT` (no subprocess, most stable when set), `xcrun --show-sdk-path`,
+// and the Command Line Tools default. Each SDK candidate must exist on disk
+// before it is trusted, so a stale env var cannot force a bad `-isysroot`.
 fn _probe_macos_sdk_root() -> string ![io] {
-    let mut os: string = _get_env_cmd("SAILFIN_TARGET_OS");
-    if os.length == 0 { os = _shell_read_cmd("uname -s"); }
-    if os != "Darwin" { return ""; }
+    if build_target_os() != "Darwin" { return ""; }
     let env_sdk = _get_env_cmd("SDKROOT");
     if env_sdk.length > 0 {
         if fs.exists(env_sdk) { return env_sdk; }
@@ -174,9 +182,7 @@ fn _probe_macos_sdk_root() -> string ![io] {
 // deployment target avoids that stale inference while still honoring an
 // explicit caller-provided `MACOSX_DEPLOYMENT_TARGET`.
 fn _probe_macos_deployment_target() -> string ![io] {
-    let mut os: string = _get_env_cmd("SAILFIN_TARGET_OS");
-    if os.length == 0 { os = _shell_read_cmd("uname -s"); }
-    if os != "Darwin" { return ""; }
+    if build_target_os() != "Darwin" { return ""; }
     let explicit = _get_env_cmd("MACOSX_DEPLOYMENT_TARGET");
     if explicit.length > 0 { return explicit; }
     return _shell_read_cmd("v=\"$(SYSTEM_VERSION_COMPAT=0 sw_vers -productVersion 2>/dev/null)\"; IFS=.; set -- $v; if [ -n \"$1\" ] && [ -n \"$2\" ]; then printf '%s.%s' \"$1\" \"$2\"; fi");

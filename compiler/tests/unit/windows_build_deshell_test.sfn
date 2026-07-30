@@ -13,9 +13,10 @@
 // (the AC-2 command: `SAILFIN_HOST_OS=Windows build/bin/sfn test <file>`);
 // the plain suite run takes the POSIX branch and asserts the guards fall
 // through to real behaviour. Both branches keep the normal suite green.
+import { _macos_sdk_link_flags } from "../../src/backend";
 import { _mktemp_sibling_cmd, _sha256_of_file_cmd } from "../../src/build/fs";
 import { _openssl_link_search_flags } from "../../src/build/runtime_objs";
-import { host_is_windows } from "../../src/build/target";
+import { build_target_os, host_is_windows } from "../../src/build/target";
 import { CacheKey, cache_touch_entry } from "../../src/build_cache";
 import { _cr_jobs_from_probe, _cr_resolve_jobs } from "../../src/capsule_emit_parallel";
 
@@ -84,6 +85,25 @@ test "windows-deshell: SAILFIN_BUILD_JOBS=1 forces serial on every host" ![io] {
     let override_value = env.get("SAILFIN_BUILD_JOBS");
     if override_value == "1" { assert _cr_resolve_jobs() == 1; } else {
         assert _cr_resolve_jobs() >= 1;
+    }
+}
+
+// SFN-488 moved the macOS SDK / deployment-target probes' host gate off a
+// raw `SAILFIN_TARGET_OS` read plus a `uname -s` fallback and onto
+// `build_target_os()`, so the gate no longer spawns a shell ahead of itself
+// on every final link. A `.sfn` test cannot observe the absence of a spawn,
+// so what is pinned here is the consequence that matters for the link: off
+// Darwin the driver picks up no `-isysroot` / `-mmacosx-version-min` at all,
+// unchanged by the seam.
+//
+// Gated on the same function the probes consult rather than on
+// `host_is_windows()`: a Darwin host legitimately resolves a real SDK root,
+// so an unconditional emptiness assertion would fail the macOS leg. The
+// Darwin ladder itself (SDKROOT → xcrun → Command Line Tools) is covered
+// behaviorally by `compiler/tests/e2e/macos_sdk_link_flags_test.sfn`.
+test "windows-deshell: macOS SDK link flags stay empty off Darwin" ![io] {
+    if build_target_os() != "Darwin" {
+        assert _macos_sdk_link_flags().length == 0;
     }
 }
 

@@ -27,7 +27,7 @@
 // `compose_build_stamp`, `write_build_stamp`) are gate-agnostic
 // so tests can pin the four-case truth table without spawning a
 // build.
-import { _shell_read_cmd } from "./build/fs";
+import { _toml_trim_cmd } from "./build/fs";
 
 // Pure formatter — the four-case truth table. Tests drive every
 // branch through this function so they don't depend on the
@@ -41,23 +41,55 @@ fn compose_build_stamp_from(capsule_version: string, git_tag: string, git_hash: 
     return capsule_version + "+dev." + git_hash + suffix;
 }
 
-// IO wrapper: shells out to read the tag, short-hash, and dirty
-// state, then funnels through the pure formatter. The git probes
-// all redirect stderr to /dev/null so a missing-`.git` checkout
-// (or an unborn HEAD) collapses cleanly to `<version>+dev`.
+// Run one git probe as a bare argv and return its trimmed stdout, or ""
+// when the probe fails — a missing `.git`, an unborn HEAD, or no `git` on
+// PATH all collapse to "" and let the ladder below degrade.
+//
+// Replaces the former `sh -c "git … 2>/dev/null"` spelling (SFN-488,
+// SFEP-0021 §4.2): `cmd.exe` parses none of that and resolves `/dev/null`
+// as a literal relative path, which is where the native Windows host's
+// "cannot find the path specified" came from. Capturing both streams and
+// dropping them in-process does what the `2>/dev/null` redirect did —
+// keeps a failing probe out of the build log — without needing a shell.
+// The inherited environment is threaded through deliberately: the shell
+// form inherited it too, and git's behaviour depends on it (`GIT_DIR`,
+// `GIT_CEILING_DIRECTORIES`, PATH). `_toml_trim_cmd` is the same trimmer
+// `_shell_read_cmd` applied to its own captured stdout, so the composed
+// stamp is unchanged.
+//
+// One deliberate divergence from the shell form, which ignored the exit
+// code: an unborn HEAD makes `git rev-parse --short HEAD` print the
+// unresolved `HEAD` to stdout and fail 128, which used to compose the
+// nonsense `<version>+dev.HEAD.dirty`. Honoring rc collapses that to
+// `<version>+dev`, the same as any other git-less checkout.
+fn _git_probe_capture(argv: string[], child_env: string[]) -> string ![io] {
+    let rc = process.run_capture(argv, child_env);
+    let out = process.capture_take_stdout();
+    let _err = process.capture_take_stderr();
+    if rc != 0 { return ""; }
+    return _toml_trim_cmd(out);
+}
+
+// IO wrapper: probes the tag, short-hash, and dirty state, then funnels
+// through the pure formatter. Every probe degrades to "" / clean, so a
+// missing-`.git` checkout (or an unborn HEAD) collapses cleanly to
+// `<version>+dev`.
 fn compose_build_stamp(capsule_version: string) -> string ![io] {
     if capsule_version.length == 0 { return ""; }
-    let git_tag = _shell_read_cmd("git describe --exact-match --tags HEAD 2>/dev/null");
+    let child_env = process.environ();
+    let git_tag = _git_probe_capture(["git", "describe", "--exact-match", "--tags", "HEAD"], child_env);
     let mut git_hash: string = "";
     let mut git_dirty: boolean = false;
     if git_tag.length == 0 {
-        git_hash = _shell_read_cmd("git rev-parse --short HEAD 2>/dev/null");
+        git_hash = _git_probe_capture(["git", "rev-parse", "--short", "HEAD"], child_env);
         if git_hash.length > 0 {
-            // `git diff --quiet HEAD --` exits 0 on clean, non-zero
-            // on dirty. We wrap in `sh -c` and redirect both
-            // streams so the dirty probe never leaks output into
-            // the build log.
-            let dirty_rc = process.run(["sh", "-c", "git diff --quiet HEAD -- >/dev/null 2>&1"]);
+            // `git diff --quiet HEAD --` exits 0 on clean, non-zero on
+            // dirty, and `--quiet` already suppresses the diff itself;
+            // the captures are drained so nothing leaks into the build
+            // log either way.
+            let dirty_rc = process.run_capture(["git", "diff", "--quiet", "HEAD", "--"], child_env);
+            let _dirty_out = process.capture_take_stdout();
+            let _dirty_err = process.capture_take_stderr();
             if dirty_rc != 0 { git_dirty = true; }
         }
     }
