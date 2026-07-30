@@ -41,7 +41,7 @@ import {
     bindings_update_local_ownership
 } from "../bindings";
 import { analyze_value_ownership, lower_expression } from "./core";
-import { coerce_operand_to_type } from "./core_operands";
+import { coerce_operand_to_type } from "./core_operands/dispatch";
 import { parse_index_expression, parse_member_access } from "./core_parse";
 import {
     append_lifetime_region,

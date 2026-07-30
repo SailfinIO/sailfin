@@ -1,0 +1,576 @@
+// compiler/src/llvm/expression_lowering/native/core_operands/dispatch.sfn
+//
+// Coercion entry points. `coerce_operand_to_type` is the single chokepoint
+// for numeric ABI shape decisions; it dispatches to the numeric, pointer and
+// general-fallback arms in sibling modules. Also holds operand harmonisation
+// (`harmonise_operands`, `dominant_type`) and the union-variant helpers.
+import { NativeSourceSpan } from "../../../../native_ir";
+import { format_temp_name } from "../../../expressions_helpers";
+import { trace_lowering } from "../../../lowering_debug_state";
+import {
+    ends_with_pointer_suffix,
+    integer_type_is_signed,
+    map_type_annotation,
+    numeric_type_kind
+} from "../../../type_mapping";
+import { BinaryAlignmentResult, CoercionResult, LLVMOperand } from "../../../types";
+import { starts_with } from "../../../utils";
+import {
+    is_union_llvm_type,
+    number_to_string,
+    parse_union_payload_types,
+    trim_text
+} from "../core_text";
+import { recover_temp_from_lines } from "../temp_recovery";
+import { coerce_general_fallback } from "./general_fallback";
+import { coerce_numeric_primitive } from "./numeric_coercion";
+import { coerce_pointer_or_struct } from "./pointer_coercion";
+import { collapse_type_spaces, integer_llvm_width } from "./type_predicates";
+
+// Slice E.2 follow-up (#540): tiny inline formatter so coerce diagnostics
+// can attach a source span without crossing the `core_ownership` →
+// `core_operands` boundary (which would introduce a cyclic import).
+// Mirrors `format_span_location` in shape — `start_line:start_col-end_line:end_col`.
+fn format_coerce_span_location(span: NativeSourceSpan) -> string {
+    let start = number_to_string(span.start_line) + ":" + number_to_string(span.start_column);
+    let end = number_to_string(span.end_line) + ":" + number_to_string(span.end_column);
+    return start + "-" + end;
+}
+
+fn coerce_null_literal_to_union_variant(operand: LLVMOperand, operand_type: string, target: string, variant_index: int, temp_index: int, lines: string[]) -> CoercionResult? {
+    if operand_type != "i8*" { return null; }
+    if operand.value != "null" { return null; }
+    if !is_union_llvm_type(target) { return null; }
+    if variant_index < 0 { return null; }
+
+    let variants = parse_union_payload_types(target);
+    if variant_index >= variants.length { return null; }
+    if variants[variant_index] != "i8*" { return null; }
+
+    let tag_temp = format_temp_name(temp_index);
+    let union_temp = format_temp_name(temp_index + 1);
+    let mut current_lines: string[] = lines;
+    current_lines.push("  " + tag_temp + " = insertvalue " + target
+        + " undef, i32 "
+        + number_to_string(variant_index)
+        + ", 0");
+    current_lines.push("  " + union_temp + " = insertvalue " + target + " "
+        + tag_temp
+        + ", i8* null, "
+        + number_to_string(variant_index
+        + 1));
+    let coerced = LLVMOperand { llvm_type: target, value: union_temp };
+    return CoercionResult {
+        lines: current_lines,
+        temp_index: temp_index + 2,
+        operand: coerced,
+        diagnostics: []
+    };
+}
+
+fn single_i8_union_variant_index(target: string) -> int {
+    if !is_union_llvm_type(target) { return -1; }
+    let variants = parse_union_payload_types(target);
+    let mut found_index: int = -1;
+    let mut index: int = 0;
+    loop {
+        if index >= variants.length { break; }
+        if variants[index] == "i8*" {
+            if found_index >= 0 { return -1; }
+            found_index = index;
+        }
+        index += 1;
+    }
+    return found_index;
+}
+
+// Slice E.3b (#556, re-applies #296): `coerce_operand_to_type` is the
+// single chokepoint for numeric ABI shape decisions. The boundary
+// mode (`allow_widen = false`, used by call args, struct-field
+// assignment, and struct-literal field initialization) refuses
+// `float → int` mismatches with a `[fatal]` diagnostic carrying a
+// fix-it ("add `as float` or `as int` to disambiguate"). The reverse
+// direction (`int → float`) intentionally keeps silent widening
+// pending a paired seed bump — several residual double-ABI helper
+// descriptors (`substring`, `sleep`, `grapheme_at`,
+// `runtime_assert_fail_fn`) still claim `double` for what are
+// semantically integer arguments, and the seed-compiled compiler
+// binary embeds calls of that shape. Arithmetic harmonisation
+// (`harmonise_operands` below) already enforces the symmetric
+// refusal via the `dominant_type` empty-string sentinel — that
+// closes L2/L3 (`let a: int; let b: float; a + b` is the canonical
+// case) regardless of the boundary-mode asymmetry. The permissive
+// mode (`allow_widen = true`, used by pointer-deref stores, lvalue
+// assignments to locals, array-element stores, array-index → i64
+// coercions, and `i1`/`i8*`/`{i8*, i64}` shape coerces) keeps the
+// existing silent widening — those sites don't carry an authoritative
+// target kind.
+//
+// History (kept for context): #528 landed the original fatal refusal;
+// #550 downgraded it to `[warning]` + fall-through while Slice E.2
+// migrated the residual `: number` sites. E.3a (#555 → #567) finished
+// the source migration; E.3a-seedbump-cleanup (#611) flipped the
+// `number_to_string` mirror and C-ABI rows in lockstep with the seed.
+// E.3b (this slice) re-promotes the warning to fatal in the
+// `float → int` direction and lands the symmetric arithmetic refusal
+// via `dominant_type`. The symmetric extension of the boundary-mode
+// refusal rides on a future seed bump that flips the residual
+// double-ABI helper descriptors.
+fn coerce_operand_to_type(operand: LLVMOperand, target_type: string, temp_index: int, lines: string[], allow_widen: boolean, span: NativeSourceSpan?) -> CoercionResult ![io] {
+    let debug_coerce = trace_lowering();
+    if debug_coerce {
+        print.err("emit-llvm: coerce_operand entry operand_type=" + operand.llvm_type
+            + " target="
+            + target_type);
+    }
+    let mut diagnostics: string[] = [];
+    let mut current_lines: string[] = lines;
+    let operand_type = collapse_type_spaces(trim_text(operand.llvm_type));
+    let target = collapse_type_spaces(trim_text(target_type));
+    if target.length == 0 {
+        return CoercionResult {
+            lines: current_lines,
+            temp_index: recover_temp_from_lines(current_lines, temp_index),
+            operand: operand,
+            diagnostics: diagnostics
+        };
+    }
+    if operand_type == target {
+        return CoercionResult {
+            lines: current_lines,
+            temp_index: recover_temp_from_lines(current_lines, temp_index),
+            operand: operand,
+            diagnostics: diagnostics
+        };
+    }
+
+    // ABI primitive kind check (Slice E.3b — #556 reapplies #296):
+    // promote the `float → int` refusal from #528 to `[fatal]` and
+    // emit the canonical fix-it. The reverse direction (`int → float`)
+    // intentionally keeps silent widening here because the residual
+    // double-ABI helper descriptors (`substring`, `sleep`,
+    // `grapheme_at`, `runtime_assert_fail_fn`) still claim `double`
+    // for what are semantically integer arguments. Flipping the
+    // reverse direction to `[fatal]` here would fire on every
+    // `substring(text, i64, i64)` call across the existing tree and
+    // require a paired seed bump (the seed-compiled compiler binary
+    // already embeds calls of this shape). Arithmetic harmonisation
+    // (`dominant_type` + `harmonise_operands` below) keeps the
+    // symmetric refusal — that catches the canonical
+    // `let a: int; let b: float; a + b` case from acceptance.
+    if !allow_widen {
+        let from_kind = numeric_type_kind(operand_type);
+        let to_kind = numeric_type_kind(target);
+        let mut _kind_check: boolean = false;
+        if from_kind == "float" {
+            if to_kind == "int" { _kind_check = true; }
+        }
+        if _kind_check {
+            // #540 threads a `NativeSourceSpan` so the failing site is
+            // locatable in source; pre-#540 callers pass `null` and
+            // continue producing the bare message.
+            let mut abi_diag = "llvm lowering [fatal]: ABI primitive mismatch: callee expects `"
+                + target
+                + "` ("
+                + to_kind
+                + ") but caller produced `"
+                + operand_type
+                + "` ("
+                + from_kind
+                + ")";
+            if span != null {
+                abi_diag = abi_diag + " at " + format_coerce_span_location(span);
+            }
+            abi_diag = abi_diag
+                + " — add `as float` or `as int` to disambiguate";
+            print.err(abi_diag);
+            diagnostics.push(abi_diag);
+            return CoercionResult {
+                lines: current_lines,
+                temp_index: recover_temp_from_lines(current_lines, temp_index),
+                operand: null,
+                diagnostics: diagnostics
+            };
+        }
+        // #537: a boolean (`i1`) flowing into a numeric (`int`/`float`)
+        // boundary is silently `zext`/`uitofp`-widened today. Refuse it
+        // with the canonical `[fatal]` shape so the conversion must be
+        // spelled explicitly (`as int`). This direction is symmetric with
+        // arithmetic harmonisation below and is safe to fire everywhere —
+        // bool-to-string interpolation lowers via `select i1` (core_strings)
+        // and never reaches this numeric coercion path.
+        let mut _bool_check: boolean = false;
+        if from_kind == "bool" {
+            if to_kind == "int" { _bool_check = true; }
+            if to_kind == "float" { _bool_check = true; }
+        }
+        if _bool_check {
+            let mut bool_diag = "llvm lowering [fatal]: ABI primitive mismatch: callee expects `"
+                + target
+                + "` ("
+                + to_kind
+                + ") but caller produced `"
+                + operand_type
+                + "` ("
+                + from_kind
+                + ")";
+            if span != null {
+                bool_diag = bool_diag + " at " + format_coerce_span_location(span);
+            }
+            bool_diag = bool_diag
+                + " — add `as int` or `as float` to disambiguate";
+            print.err(bool_diag);
+            diagnostics.push(bool_diag);
+            return CoercionResult {
+                lines: current_lines,
+                temp_index: recover_temp_from_lines(current_lines, temp_index),
+                operand: null,
+                diagnostics: diagnostics
+            };
+        }
+    }
+
+    let numeric = coerce_numeric_primitive(operand, operand_type, target, temp_index, current_lines);
+    if numeric != null {
+        // Merge so any kind-check warning pushed above survives (#550).
+        let mut _nd_i: int = 0;
+        loop {
+            if _nd_i >= numeric.diagnostics.length { break; }
+            diagnostics.push(numeric.diagnostics[_nd_i]);
+            _nd_i += 1;
+        }
+        return CoercionResult {
+            lines: numeric.lines,
+            temp_index: recover_temp_from_lines(numeric.lines, numeric.temp_index),
+            operand: numeric.operand,
+            diagnostics: diagnostics
+        };
+    }
+    let null_union_variant = single_i8_union_variant_index(target);
+    let null_union = coerce_null_literal_to_union_variant(operand, operand_type, target, null_union_variant, temp_index, current_lines);
+    if null_union != null {
+        return CoercionResult {
+            lines: null_union.lines,
+            temp_index: recover_temp_from_lines(null_union.lines, null_union.temp_index),
+            operand: null_union.operand,
+            diagnostics: diagnostics
+        };
+    }
+    let pointer = coerce_pointer_or_struct(operand, operand_type, target, temp_index, current_lines);
+    if pointer != null {
+        let mut _pd_i: int = 0;
+        loop {
+            if _pd_i >= pointer.diagnostics.length { break; }
+            diagnostics.push(pointer.diagnostics[_pd_i]);
+            _pd_i += 1;
+        }
+        return CoercionResult {
+            lines: pointer.lines,
+            temp_index: recover_temp_from_lines(pointer.lines, pointer.temp_index),
+            operand: pointer.operand,
+            diagnostics: diagnostics
+        };
+    }
+    // A `spawn` future pointer coerced into a non-pointer scalar slot is the
+    // SFN-386 double-slot corruption (an inferred-empty `[]` element type):
+    // reject it here as a `[fatal]` backstop so malformed IR from that shape
+    // can never silently reach clang, even if E0831 somehow missed it.
+    if starts_with(operand_type, "%SailfinFuture") {
+        let mut _future_scalar: boolean = false;
+        if target == "double" { _future_scalar = true; }
+        if target == "i64" { _future_scalar = true; }
+        if target == "i1" { _future_scalar = true; }
+        if target == "i8*" { _future_scalar = true; }
+        if _future_scalar {
+            diagnostics.push("[fatal] llvm lowering: cannot coerce task handle `"
+                + operand.llvm_type
+                + "` to `"
+                + target
+                + "`; a `spawn` future pointer was stored through a non-pointer slot (see E0831)");
+            return CoercionResult {
+                lines: current_lines,
+                temp_index: recover_temp_from_lines(current_lines, temp_index),
+                operand: null,
+                diagnostics: diagnostics
+            };
+        }
+    }
+    let general = coerce_general_fallback(operand, operand_type, target, temp_index, current_lines);
+    if general != null {
+        let mut _gd_i: int = 0;
+        loop {
+            if _gd_i >= general.diagnostics.length { break; }
+            diagnostics.push(general.diagnostics[_gd_i]);
+            _gd_i += 1;
+        }
+        return CoercionResult {
+            lines: general.lines,
+            temp_index: recover_temp_from_lines(general.lines, general.temp_index),
+            operand: general.operand,
+            diagnostics: diagnostics
+        };
+    }
+    diagnostics.push("llvm lowering: unable to coerce operand of type `"
+        + operand.llvm_type
+        + "` to `"
+        + target_type
+        + "`");
+    return CoercionResult {
+        lines: current_lines,
+        temp_index: recover_temp_from_lines(current_lines, temp_index),
+        operand: null,
+        diagnostics: diagnostics
+    };
+}
+
+// Preserve source-level integer signedness at boundaries where LLVM has
+// collapsed `uN` and `iN` onto the same `iN` type (SFN-575). Most coercion
+// sites have no authoritative source annotation and keep using
+// `coerce_operand_to_type`; call arguments and call results use this seam
+// when resolution can prove the operand's source type.
+fn coerce_operand_to_type_with_source(operand: LLVMOperand, source_type: string, target_type: string, temp_index: int, lines: string[], allow_widen: boolean, span: NativeSourceSpan?) -> CoercionResult ![io] {
+    if source_type.length == 0 {
+        return coerce_operand_to_type(operand, target_type, temp_index, lines, allow_widen, span);
+    }
+    let source = trim_text(source_type);
+    if source.length == 0 {
+        return coerce_operand_to_type(operand, target_type, temp_index, lines, allow_widen, span);
+    }
+    let operand_type = collapse_type_spaces(trim_text(operand.llvm_type));
+    if map_type_annotation(source) != operand_type {
+        return coerce_operand_to_type(operand, target_type, temp_index, lines, allow_widen, span);
+    }
+    if integer_type_is_signed(source) {
+        return coerce_operand_to_type(operand, target_type, temp_index, lines, allow_widen, span);
+    }
+
+    let target = collapse_type_spaces(trim_text(target_type));
+    let source_width = integer_llvm_width(operand_type);
+    let target_width = integer_llvm_width(target);
+    if source_width > 0 {
+        if target_width > source_width {
+            let widened = format_temp_name(temp_index);
+            let mut current_lines = lines;
+            current_lines.push("  " + widened + " = zext " + operand_type + " "
+                + operand.value
+                + " to "
+                + target);
+            return CoercionResult {
+                lines: current_lines,
+                temp_index: temp_index + 1,
+                operand: LLVMOperand { llvm_type: target, value: widened },
+                diagnostics: []
+            };
+        }
+        if target == "{i8*, i64}" {
+            if source_width < 64 {
+                let mut current_lines = lines;
+                let widened = format_temp_name(temp_index);
+                current_lines.push("  " + widened + " = zext " + operand_type
+                    + " "
+                    + operand.value
+                    + " to i64");
+                let display_operand = LLVMOperand {
+                    llvm_type: "i64",
+                    value: widened
+                };
+                return coerce_operand_to_type(display_operand, target, temp_index
+                    + 1, current_lines, allow_widen, span);
+            }
+        }
+    }
+    return coerce_operand_to_type(operand, target_type, temp_index, lines, allow_widen, span);
+}
+
+// Slice E.3b (#556 — reapplies #296): when one operand is integer
+// (i64/i32/i16/i8) and the other is float (double/float),
+// `dominant_type` returns the empty-string sentinel to signal the
+// mismatch. `harmonise_operands` checks for the sentinel after the
+// call and emits a fatal diagnostic with the standard fix-it ("add
+// `as float` or `as int` to disambiguate") instead of producing
+// coerced operands. Same-kind pairs (i32 ↔ i64, float ↔ double)
+// continue to widen silently — those are not the int↔float pairs the
+// rejection targets.
+fn dominant_type(first: string, second: string) -> string {
+    if first.length == 0 { return second; }
+    if second.length == 0 { return first; }
+    if first == second { return first; }
+    let first_is_pointer = ends_with_pointer_suffix(first);
+    let second_is_pointer = ends_with_pointer_suffix(second);
+    if first_is_pointer {
+        if !second_is_pointer { return first; }
+    }
+    if second_is_pointer {
+        if !first_is_pointer { return second; }
+    }
+    if first_is_pointer {
+        if second_is_pointer { return first; }
+    }
+    let first_kind = numeric_type_kind(first);
+    let second_kind = numeric_type_kind(second);
+    let mut _mixed_int_float: boolean = false;
+    if first_kind == "int" {
+        if second_kind == "float" { _mixed_int_float = true; }
+    }
+    if first_kind == "float" {
+        if second_kind == "int" { _mixed_int_float = true; }
+    }
+    if _mixed_int_float { return ""; }
+    // #537: a boolean operand mixed with a numeric (`int`/`float`) operand in
+    // arithmetic is an ABI mismatch — `harmonise_operands` turns the empty
+    // sentinel into the `[fatal]` diagnostic. `bool ↔ bool` returns early via
+    // the `first == second` fast path above; `bool ↔ aggregate/pointer` falls
+    // through to the `i1` fallback below (unchanged).
+    let mut _mixed_bool_numeric: boolean = false;
+    if first_kind == "bool" {
+        if second_kind == "int" { _mixed_bool_numeric = true; }
+        if second_kind == "float" { _mixed_bool_numeric = true; }
+    }
+    if second_kind == "bool" {
+        if first_kind == "int" { _mixed_bool_numeric = true; }
+        if first_kind == "float" { _mixed_bool_numeric = true; }
+    }
+    if _mixed_bool_numeric { return ""; }
+    let mut _if79: boolean = false;
+    if first == "double" { _if79 = true; }
+    if second == "double" { _if79 = true; }
+    if _if79 { return "double"; }
+    let mut _if80: boolean = false;
+    if first == "i64" { _if80 = true; }
+    if second == "i64" { _if80 = true; }
+    if _if80 { return "i64"; }
+    // i8 is narrower than i64, so i64 dominates
+    let mut _if81: boolean = false;
+    if first == "i8" {
+        if second == "i64" { _if81 = true; }
+    }
+    if first == "i64" {
+        if second == "i8" { _if81 = true; }
+    }
+    if _if81 { return "i64"; }
+    let mut _if82: boolean = false;
+    if first == "i1" { _if82 = true; }
+    if second == "i1" { _if82 = true; }
+    if _if82 { return "i1"; }
+    return first;
+}
+
+fn harmonise_operands(left: LLVMOperand, right: LLVMOperand, temp_index: int, lines: string[]) -> BinaryAlignmentResult ![io] {
+    let mut diagnostics: string[] = [];
+    let mut current_lines: string[] = lines;
+    let mut current_temp: int = temp_index;
+    let mut left_operand = left;
+    let mut right_operand = right;
+    if left_operand.value == "null" {
+        if ends_with_pointer_suffix(right_operand.llvm_type) {
+            left_operand = LLVMOperand {
+                llvm_type: right_operand.llvm_type,
+                value: "null"
+            };
+        }
+    }
+    if right_operand.value == "null" {
+        if ends_with_pointer_suffix(left_operand.llvm_type) {
+            right_operand = LLVMOperand {
+                llvm_type: left_operand.llvm_type,
+                value: "null"
+            };
+        }
+    }
+    if left_operand.llvm_type == right_operand.llvm_type {
+        return BinaryAlignmentResult {
+            lines: current_lines,
+            temp_index: recover_temp_from_lines(current_lines, current_temp),
+            left: left_operand,
+            right: right_operand,
+            diagnostics: diagnostics,
+            result_type: left_operand.llvm_type
+        };
+    }
+    let target_type = dominant_type(left_operand.llvm_type, right_operand.llvm_type);
+    // Slice E.3b (#556 reapplies #296): `dominant_type` returns ""
+    // when one operand is integer-kind and the other float-kind. The
+    // mismatch is a `[fatal]` lowering diagnostic — refuse to produce
+    // coerced operands and direct the author to spell the conversion
+    // explicitly with `as int` / `as float`.
+    if target_type.length == 0 {
+        let abi_diag = "llvm lowering [fatal]: ABI primitive mismatch: arithmetic mixes `"
+            + left_operand.llvm_type
+            + "` ("
+            + numeric_type_kind(left_operand.llvm_type)
+            + ") and `"
+            + right_operand.llvm_type
+            + "` ("
+            + numeric_type_kind(right_operand.llvm_type)
+            + ") — add `as float` or `as int` to disambiguate";
+        diagnostics.push(abi_diag);
+        return BinaryAlignmentResult {
+            lines: current_lines,
+            temp_index: recover_temp_from_lines(current_lines, current_temp),
+            left: null,
+            right: null,
+            diagnostics: diagnostics,
+            result_type: ""
+        };
+    }
+    let left_coercion = coerce_operand_to_type(left_operand, target_type, current_temp, current_lines, true, null);
+    let mut _ci0: int = 0;
+    loop {
+        if _ci0 >= left_coercion.diagnostics.length { break; }
+        diagnostics.push(left_coercion.diagnostics[_ci0]);
+        _ci0 += 1;
+    }
+    if left_coercion.operand == null {
+        diagnostics.push("llvm lowering: unable to convert left operand from `"
+            + left_operand.llvm_type
+            + "` to `"
+            + target_type
+            + "`");
+        return BinaryAlignmentResult {
+            lines: left_coercion.lines,
+            temp_index: recover_temp_from_lines(left_coercion.lines, left_coercion.temp_index),
+            left: null,
+            right: null,
+            diagnostics: diagnostics,
+            result_type: target_type
+        };
+    }
+    left_operand = left_coercion.operand;
+    current_lines = left_coercion.lines;
+    current_temp = left_coercion.temp_index;
+
+    let right_coercion = coerce_operand_to_type(right_operand, target_type, current_temp, current_lines, true, null);
+    let mut _ci1: int = 0;
+    loop {
+        if _ci1 >= right_coercion.diagnostics.length { break; }
+        diagnostics.push(right_coercion.diagnostics[_ci1]);
+        _ci1 += 1;
+    }
+    if right_coercion.operand == null {
+        diagnostics.push("llvm lowering: unable to convert right operand from `"
+            + right_operand.llvm_type
+            + "` to `"
+            + target_type
+            + "`");
+        return BinaryAlignmentResult {
+            lines: right_coercion.lines,
+            temp_index: recover_temp_from_lines(right_coercion.lines, right_coercion.temp_index),
+            left: null,
+            right: null,
+            diagnostics: diagnostics,
+            result_type: target_type
+        };
+    }
+    right_operand = right_coercion.operand;
+    current_lines = right_coercion.lines;
+    current_temp = right_coercion.temp_index;
+
+    return BinaryAlignmentResult {
+        lines: current_lines,
+        temp_index: recover_temp_from_lines(current_lines, current_temp),
+        left: left_operand,
+        right: right_operand,
+        diagnostics: diagnostics,
+        result_type: target_type
+    };
+}

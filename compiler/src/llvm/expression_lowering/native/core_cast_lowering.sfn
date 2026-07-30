@@ -32,13 +32,9 @@ import {
     emit_i64_round_to_odd
 } from "./core_bf16_lowering";
 import { pick_agg_cast_shim_target } from "./core_literals_lowering";
-import {
-    coerce_operand_to_type,
-    emit_comparison_instruction,
-    integer_llvm_width,
-    is_float_llvm_type,
-    is_integer_llvm_type
-} from "./core_operands";
+import { emit_comparison_instruction } from "./core_operands/comparisons";
+import { coerce_operand_to_type } from "./core_operands/dispatch";
+import { integer_llvm_width, is_float_llvm_type, is_integer_llvm_type } from "./core_operands/type_predicates";
 import { operand_source_type } from "./core_scopes";
 import { coerce_operand_to_string, emit_string_concat, lower_string_literal } from "./core_strings";
 import { encode_string_literal_for_sailfin, resolve_interpolation_template } from "./core_text";

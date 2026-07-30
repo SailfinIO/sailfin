@@ -7,7 +7,7 @@ import { ExpressionResult, LLVMOperand, StringConstant } from "../../types";
 import { append_string, number_to_string } from "../../utils";
 import { array_pointer_element_type } from "../arrays";
 import { emit_bf16_widen_to_double } from "./core_bf16_lowering";
-import { coerce_operand_to_type, harmonise_operands } from "./core_operands";
+import { coerce_operand_to_type, harmonise_operands } from "./core_operands/dispatch";
 import {
     is_union_llvm_type,
     parse_union_payload_types,

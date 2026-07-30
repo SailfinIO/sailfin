@@ -3,12 +3,8 @@
 // Match case condition lowering (split from instructions_match.sfn).
 import { NativeFunction } from "../../native_ir";
 import { lower_expression } from "../expression_lowering/native/core";
-import {
-    emit_boolean_and,
-    emit_comparison_instruction,
-    harmonise_operands,
-    single_i8_union_variant_index
-} from "../expression_lowering/native/core_operands";
+import { emit_boolean_and, emit_comparison_instruction } from "../expression_lowering/native/core_operands/comparisons";
+import { harmonise_operands, single_i8_union_variant_index } from "../expression_lowering/native/core_operands/dispatch";
 import { parse_enum_literal, parse_struct_pattern } from "../expression_lowering/native/core_parse";
 import { is_null_literal, is_union_llvm_type, parse_union_payload_types } from "../expression_lowering/native/core_text";
 import { split_union_annotations } from "../expression_lowering/native/statement_type_mapping";
