@@ -266,28 +266,28 @@ ls build/native/raw/*.ll | wc -l                     # 259
 
 ## Follow-ups (open)
 
-- **Parallelize the serial `.ll` → `.o` assemble phase**
+- **SFN-612 — parallelize the serial `.ll` → `.o` assemble phase**
   (`assemble_link_inputs`, `build/clang_argv.sfn:99-176`) and the runtime
   object compile (`_compile_runtime_sfn_sources`,
   `build/runtime_objs.sfn:1076-1150`) through the existing bounded pool
   (`_cr_run_parallel_emit`). Measured headroom: **37 s** of 49 s on 4 cores.
   This is the one change that buys back budget rather than tracking it.
-- **Predicted regression, not yet observed:** `c8fd88af` (SFN-578) publishes
-  every emitted IR file via `mkstemp` sibling + `rename(2)`, on both emit
-  rounds across ~235 modules. It is *not* in seed `0.8.4` and so ran in no
+- **SFN-615 — predicted regression, not yet observed:** `c8fd88af` (SFN-578)
+  publishes every emitted IR file via `mkstemp` sibling + `rename(2)`, on both
+  emit rounds across ~235 modules. It is *not* in seed `0.8.4` and so ran in no
   measured nightly. Expect it to cost wall time in the first nightly whose seed
   is cut past `838ba31dd`; the new gate will show it.
-- **No per-phase timing exists on the build path.** `BuildReport`
+- **SFN-614 — no per-phase timing exists on the build path.** `BuildReport`
   (`build_report.sfn:83-115`) carries cache stats and dep paths, no durations;
   the only phase timer (`main.sfn:78-85`, `470-558`) is reachable solely via
   the manual single-module `sfn emit --timing llvm` and is never passed by the
   fan-out (`capsule_emit_parallel.sfn:320-329`). Every phase number in this RCA
   had to be reconstructed externally. Wiring durations into `BuildReport` would
   make the next investigation a read instead of a re-derivation.
-- **Per-unit cost regressed at seed `0.8.4`** — `231.8 µs/line` against the
-  `0.8.2` era mean of `192.0` (+20.7%), or `+22.4%` against 07-29's `189.4`
-  point-to-point — on flat IR volume, absorbing a 40-commit seed jump that
-  skipped `0.8.3` as a pin. Unlike the 07-19 window this *is* a throughput
+- **SFN-613 — per-unit cost regressed at seed `0.8.4`** — `231.8 µs/line`
+  against the `0.8.2` era mean of `192.0` (+20.7%), or `+22.4%` against 07-29's
+  `189.4` point-to-point — on flat IR volume, absorbing a 40-commit seed jump
+  that skipped `0.8.3` as a pin. Unlike the 07-19 window this *is* a throughput
   change and it is unattributed; the always-on per-instruction "fail closed"
   additions in that delta are the leading hypothesis.
 
@@ -300,3 +300,4 @@ ls build/native/raw/*.ll | wc -l                     # 259
 - SFN-567 — the "rolling median" mislabel on the budget row (separate)
 - SFN-566 — per-module peak RSS growth (separate)
 - SFN-432 — `test-bin-warmer` timeout (related; coordinate)
+- SFN-616 — SFEP-0037 still calls the SFEP-0006 budget unenforceable
