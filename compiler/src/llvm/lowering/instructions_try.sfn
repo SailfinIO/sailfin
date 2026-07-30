@@ -279,7 +279,11 @@ fn lower_try_instruction(function: NativeFunction, start_index: int, llvm_return
     let jmpbuf_pointer = format_local_pointer_name(current_next_local);
     current_next_local += 1;
     current_allocas.push("  " + frame_pointer + " = alloca [3 x i64]");
-    current_allocas.push("  " + jmpbuf_pointer + " = alloca [32 x i64]");
+    // `align 16` — see the note at `emission.sfn`'s wrapper alloca: MSVC's
+    // `_JUMP_BUFFER` is 16-aligned because `__intrinsic_setjmp` saves
+    // xmm6-xmm15 with `movdqa` (SFN-549).
+    current_allocas.push("  " + jmpbuf_pointer
+        + " = alloca [32 x i64], align 16");
 
     // When the source includes a `finally` block, allocate a "pending
     // exception" slot that the exception landing pad uses to defer

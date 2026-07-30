@@ -494,7 +494,7 @@ fn lower_to_llvm_lines_with_parsed_context_for_tests(native_module: NativeModule
     }
 
     // ---- @main body ----
-    let mut harness: string[] = ["define i32 @main(i32 %argc, i8** %argv) {", "entry:", "  %frame = alloca [3 x i64]", "  %jmpbuf = alloca [32 x i64]", "  %frame.i8 = bitcast [3 x i64]* %frame to i8*", "  %jmpbuf.i8 = bitcast [32 x i64]* %jmpbuf to i8*", "  br label %region0"];
+    let mut harness: string[] = ["define i32 @main(i32 %argc, i8** %argv) {", "entry:", "  %frame = alloca [3 x i64]", "  %jmpbuf = alloca [32 x i64], align 16", "  %frame.i8 = bitcast [3 x i64]* %frame to i8*", "  %jmpbuf.i8 = bitcast [32 x i64]* %jmpbuf to i8*", "  br label %region0"];
 
     // before_all region: on success continue to region 1 (first test); on
     // failure report the hook, cascade a `fail` for every test, and skip
