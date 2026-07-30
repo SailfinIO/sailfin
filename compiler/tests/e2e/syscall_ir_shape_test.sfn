@@ -86,12 +86,12 @@ test "syscall1 through syscall6 pin the Linux x86-64 inline-asm ABI" ![io] {
 
 test "syscall lowering rejects non-Linux targets" ![io] {
     let stderr = _rejection("Darwin", "x86_64", "darwin");
-    assert contains(stderr, "E1015");
+    assert contains(stderr, "E1019");
     assert contains(stderr, "requires the Linux x86-64 target");
 }
 
 test "syscall lowering rejects non-x86-64 targets" ![io] {
     let stderr = _rejection("Linux", "aarch64", "linux-aarch64");
-    assert contains(stderr, "E1015");
+    assert contains(stderr, "E1019");
     assert contains(stderr, "requires the Linux x86-64 target");
 }

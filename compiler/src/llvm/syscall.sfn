@@ -65,7 +65,7 @@ fn syscall_contract_error(name: string, argument_count: int, module_name: string
 }
 
 fn _failure(message: string, lines: string[], temp_index: int, strings: StringConstant[]) -> ExpressionResult ![io] {
-    let diag = "llvm lowering [fatal] [E1015]: " + message;
+    let diag = "llvm lowering [fatal] [E1019]: " + message;
     print.err(diag);
     return ExpressionResult {
         lines: lines,

@@ -3388,7 +3388,7 @@ fn make_undefined_function_diagnostic(name: string, span: SourceSpan?, provider_
 
 fn make_syscall_builtin_diagnostic(name: string, message: string, span: SourceSpan?) -> Diagnostic {
     return Diagnostic {
-        code: "E1015",
+        code: "E1019",
         severity: "error",
         message: "invalid raw syscall builtin `" + name + "`: " + message,
         file_path: "",

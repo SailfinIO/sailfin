@@ -4,9 +4,9 @@ title: Diagnostic Unification — One Coded, Spanned, Severity-Bearing Diagnosti
 status: Accepted
 type: tooling
 created: 2026-07-25
-updated: 2026-07-25
+updated: 2026-07-30
 author: "agent:compiler-architect; agent:Sailbot (orchestrator); project owner (design gate 2026-07-25)"
-tracking: "SFN-534, SFN-535, SFN-536, SFN-537, SFN-538, SFN-539, SFN-540, SFN-541"
+tracking: "SFN-534, SFN-535, SFN-536, SFN-537, SFN-538, SFN-539, SFN-540, SFN-541, SFN-608"
 supersedes:
 superseded-by:
 graduates-to:
@@ -198,10 +198,47 @@ gates stay live until the final stage.
 > ~40 of them in `llvm/types.sfn` alone. Push sites follow their carrier
 > mechanically.
 
+**`diag_to_legacy_string` is a back-compat shim, never a renderer.** Note what
+"reproduces today's spelling exactly" means at the severity every migrated site
+lands on: the `[fatal]` tag *and* the `[Exxxx]` code are emitted only for
+`error`, so a `note` renders as `"<stage>: <message>"` with **no code at all**.
+That is correct for the shim's stated contract and is pinned by
+`compiler/tests/unit/diagnostic_test.sfn`. It is wrong for anything a user
+reads.
+
+The hazard is that every caller is currently safe by accident — all of them feed
+it `Diag`s from `lowering_error_diag`, which hardcodes `severity: "error"`. Under
+§4/D2 the ~150 untagged sites all migrate to `note`, at which point any
+render-through-the-shim silently drops its code with no compiler complaint.
+SFN-538 hit exactly this: its first cut rendered notes without codes and a test
+caught it. **A stage that displays a diagnostic must build the line explicitly**
+— read `Diag.stage` and `Diag.code` rather than hardcoding either, as
+`emit_native_diag_lines` (`compiler/src/emit_native.sfn`) does. S5 is the
+central resolution: once the legacy channel is gone, the shim should be deleted
+outright rather than left as a rendering foot-gun.
+
 ### 5.2 Stages
 
 Each self-hosts (`.claude/rules/selfhost-invariant.md`); none weakens
 fail-closed behaviour.
+
+**Scope each stage by tracing a real build, not by grepping the carrier type.**
+The "72 struct fields" framing above is the right *size* estimate and the wrong
+*discovery* method, because a carrier grep cannot see a sibling function that
+duplicates the producing logic and drops the carrier entirely. S7 was scoped
+that way and missed its own path: `emit_native_lines_with_module_name` is a
+near-verbatim duplicate of `emit_native_with_module_name` that accumulates the
+same diagnostics and returns only the line array, so the four `EmitNativeResult`
+call sites S7 named turned out to be fallback-only and the common path stayed
+silent (SFN-538 shipped the sidecar; SFN-608 carries the remainder).
+
+The same shape sits around `LoweredLLVMLinesResult`, which S3/S5 target:
+`LoweredLLVMResult` has no `diags` field, and the two `lower_to_llvm_with_*`
+entry points hand-copy every field except that one; `lower_to_llvm_ir_from_text`
+— the primary path — consults no fatal gate at all, unlike its two siblings; and
+three unused entry points hardcode `diags: []`. Before implementing a stage,
+enumerate the entry points reaching its carrier and check each for a
+duplicate-body or field-dropping conversion.
 
 - **S1 — sink converges.** `compiler/src/diagnostic.sfn` (`Span`, `Diag`,
   constructors, `diag_to_legacy_string`, `diag_is_error`, `stamp_spans`,
