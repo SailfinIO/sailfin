@@ -26,6 +26,7 @@ import {
     TypeAnnotation
 } from "./ast";
 import { _publish_lines_atomic } from "./build/fs";
+import { Diag, Span } from "./diagnostic";
 import { block_contains_try, desugar_try_in_block } from "./emit_native_desugar_try";
 import {
     append_optional_initializer,
@@ -61,10 +62,11 @@ import {
     join_with_separator,
     lines_to_native_text,
     native_lines_have_text,
-    state_add_diagnostic,
+    number_to_string,
+    state_add_diag,
     state_emit_blank,
     state_emit_line,
-    state_merge_diagnostics,
+    state_merge_layout_diagnostics,
     state_new,
     state_pop_indent,
     state_push_indent
@@ -96,6 +98,7 @@ struct NativeModule {
 struct EmitNativeResult {
     module: NativeModule;
     diagnostics: string[];
+    diags: Diag[];
 }
 
 // ── Entry points ─────────────────────────────────────────────────────
@@ -152,7 +155,8 @@ fn emit_native_with_module_name(program: Program, module_name: string) -> EmitNa
 
     return EmitNativeResult {
         module: module,
-        diagnostics: state.diagnostics
+        diagnostics: state.diagnostics,
+        diags: state.diags
     };
 }
 
@@ -375,7 +379,9 @@ fn emit_statement_control_flow(state: NativeState, statement: Statement) -> Nati
         // does attach decorators to the node (`parser/statements.sfn:537`).
         let mut current = state;
         if statement.decorators.length > 0 {
-            current = state_add_diagnostic(current, "native backend: decorators on `routine` blocks are not yet supported");
+            current = state_add_diag(current, Diag {
+                code: "E1016", severity: "note", message: "native backend: decorators on `routine` blocks are not yet supported", file_path: "", span: null, stage: "emit-native", suggestion: null
+            });
         }
         current = state_emit_line(current, ".routine");
         current = state_push_indent(current);
@@ -385,7 +391,9 @@ fn emit_statement_control_flow(state: NativeState, statement: Statement) -> Nati
     }
     let message = "native backend: unsupported statement `" + statement.variant
         + "`";
-    return state_add_diagnostic(state, message);
+    return state_add_diag(state, Diag {
+        code: "E1015", severity: "note", message: message, file_path: "", span: null, stage: "emit-native", suggestion: null
+    });
 }
 
 // ── Statement emitters ───────────────────────────────────────────────
@@ -489,7 +497,14 @@ fn emit_function(state: NativeState, signature: FunctionSignature, body: Block, 
     if block_contains_try(body) {
         effective_body = desugar_try_in_block(body);
         if block_contains_try(effective_body) {
-            current = state_add_diagnostic(current, "native backend: `?` operator is only supported in let-initializer, return, and expression-statement positions");
+            // The enclosing function's name span, not the residual `?` site.
+            // `Expression.TryOperator` does carry its own span, but
+            // `block_contains_try` reports only a boolean, so the offending
+            // node is not reachable from here — narrowing this needs the walk
+            // to return the node (SFN-608).
+            current = state_add_diag(current, Diag {
+                code: "E1017", severity: "note", message: "native backend: `?` operator is only supported in let-initializer, return, and expression-statement positions", file_path: "", span: _span_from_source(signature.name_span), stage: "emit-native", suggestion: null
+            });
         }
     }
     current = state_push_indent(current);
@@ -556,7 +571,7 @@ fn emit_enum(state: NativeState, statement: Statement) -> NativeState {
     let enum_layout = compute_enum_layout_lines(state.layout_context, statement);
     current = emit_layout_lines(current, enum_layout.lines);
     current = state_push_indent(current);
-    current = state_merge_diagnostics(current, enum_layout.diagnostics);
+    current = state_merge_layout_diagnostics(current, enum_layout.diagnostics, _span_from_source(statement.name_span));
     let mut index: int = 0;
     loop {
         if index >= statement.variants.length { break; }
@@ -581,7 +596,7 @@ fn emit_struct(state: NativeState, statement: Statement) -> NativeState {
     let struct_layout = compute_struct_layout_lines(state.layout_context, statement.name, statement.fields);
     current = emit_layout_lines(current, struct_layout.lines);
     current = state_push_indent(current);
-    current = state_merge_diagnostics(current, struct_layout.diagnostics);
+    current = state_merge_layout_diagnostics(current, struct_layout.diagnostics, _span_from_source(statement.name_span));
 
     let mut index: int = 0;
     loop {
@@ -895,6 +910,55 @@ fn count_exported_symbols(program: Program) -> int {
         index += 1;
     }
     return count;
+}
+
+// ── Diagnostic sidecar ───────────────────────────────────────────────
+// Converts an AST source span (frontend-facing, `ast.sfn`) into the
+// backend-facing `Diag.span` shape (`diagnostic.sfn`). The two structs
+// carry identical fields; this is a pure field-for-field copy.
+fn _span_from_source(source_span: SourceSpan?) -> Span? {
+    if source_span == null { return null; }
+    return Span {
+        start_line: source_span.start_line,
+        start_column: source_span.start_column,
+        end_line: source_span.end_line,
+        end_column: source_span.end_column
+    };
+}
+
+// Render each `NativeState.diags` entry as a human-readable line, modelled
+// on `render_lowering_error_diag` (`llvm/utils.sfn`). Note the primary-path
+// gap: `emit_native_lines_with_module_name` /
+// `emit_native_text_with_module_name` do not thread `diags` out at all
+// (only `emit_native_with_module_name`'s `EmitNativeResult` does), so this
+// renderer only sees diagnostics from callers reaching that entry point —
+// the fallback branches in `main.sfn`. Closing that gap needs a carrier on
+// the struct-free lines path and is tracked as SFN-608.
+fn emit_native_diag_lines(diags: Diag[]) -> string[] {
+    let mut lines: string[] = [];
+    let mut index: int = 0;
+    loop {
+        if index >= diags.length { break; }
+        let diag = diags[index];
+        // Not `diag_to_legacy_string`: that helper only spells the code out
+        // for `error` severity (via the `[fatal] [Exxxx]` tag), and every
+        // diagnostic on this channel is a `note` per SFEP-0061 §4 — so the
+        // code has to be rendered explicitly or it is lost.
+        // `diag.stage`, not a hardcoded "emit-native": the parameter is a bare
+        // `Diag[]`, and SFEP-0061's later stages produce `lowering`/`tssa`/
+        // `tensor` diags of the same type. Reading the field keeps a
+        // cross-stage caller from being silently mislabelled.
+        let mut rendered = diag.stage + " [" + diag.code + "]: " + diag.message;
+        if diag.span != null {
+            rendered = rendered + "\n  --> " + diag.file_path + ":"
+                + number_to_string(diag.span.start_line)
+                + ":"
+                + number_to_string(diag.span.start_column);
+        }
+        lines.push(rendered);
+        index += 1;
+    }
+    return lines;
 }
 
 // ── Re-export validation ─────────────────────────────────────────────

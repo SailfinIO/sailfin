@@ -1,0 +1,101 @@
+// Structured-diagnostic coverage for the `emit_native` channel — SFN-538,
+// design SFEP-0061 §5.2 S7. Before this, `EmitNativeResult.diagnostics` was
+// produced and never read at any of its `main.sfn` call sites; the typed
+// `EmitNativeResult.diags` sidecar added alongside it carries a code, a
+// stage, a severity, and a real span.
+//
+// Scope: emission only, via `emit_native_with_module_name` directly. The
+// primary text/lines path does not thread `diags` out at all (SFN-608), so a
+// CLI-level e2e assertion is not yet possible.
+import { diag_is_error } from "../../src/diagnostic";
+import { emit_native_diag_lines, emit_native_with_module_name } from "../../src/emit_native";
+import { parse_program } from "../../src/parser/mod";
+import { index_of } from "../../src/string_utils";
+
+fn _contains(haystack: string, needle: string) -> boolean {
+    return index_of(haystack, needle) >= 0;
+}
+
+// A struct field whose annotation resolves to neither a primitive, a known
+// struct, nor a known enum takes the pointer-layout fallback in
+// `analyze_type_layout` (`emit_native_layout.sfn`), which is the most common
+// emit-native diagnostic in practice.
+fn _unresolved_field_source() -> string {
+    return "struct Holder { payload: NotAKnownType; }\nfn main() ![io] { let h: int = 1; }";
+}
+
+// The layout diagnostics reach `NativeState` through
+// `state_merge_layout_diagnostics`, which stamps the declaration's
+// `name_span` onto each one — so a message produced deep in the layout walk,
+// where no span survives, still renders with a location.
+test "emit_native: a layout diagnostic carries code, stage, severity and a span" ![io] {
+    let program = parse_program(_unresolved_field_source());
+    let result = emit_native_with_module_name(program, "test_emit_native_diag");
+    let mut found: boolean = false;
+    let mut index: int = 0;
+    loop {
+        if index >= result.diags.length { break; }
+        let diag = result.diags[index];
+        if diag.code == "E1018" {
+            found = true;
+            assert diag.stage == "emit-native";
+            assert diag.severity == "note";
+            assert _contains(diag.message, "native layout:");
+            assert diag.span != null;
+            assert diag.span.start_line == 1;
+        }
+        index += 1;
+    }
+    assert found;
+}
+
+// Invariant guard: the sidecar is purely additive. The legacy `string[]`
+// channel — which `state_add_diagnostic` also writes into the `.sfn-asm`
+// builder as a `"; <message>"` comment — must keep carrying the raw message,
+// never a rendered form, or the emitted IR bytes shift.
+test "emit_native: the legacy string channel stays byte-identical to the raw message" ![io] {
+    let program = parse_program(_unresolved_field_source());
+    let result = emit_native_with_module_name(program, "test_emit_native_diag");
+    assert result.diagnostics.length == result.diags.length;
+    let mut index: int = 0;
+    loop {
+        if index >= result.diags.length { break; }
+        assert result.diagnostics[index] == result.diags[index].message;
+        index += 1;
+    }
+}
+
+// The renderer mirrors `render_lowering_error_diag` (`llvm/utils.sfn`): the
+// legacy spelling on line one, then an indented `-->` location line.
+test "emit_native: the renderer emits the code and a location line" ![io] {
+    let program = parse_program(_unresolved_field_source());
+    let result = emit_native_with_module_name(program, "test_emit_native_diag");
+    let lines = emit_native_diag_lines(result.diags);
+    let mut found: boolean = false;
+    let mut index: int = 0;
+    loop {
+        if index >= lines.length { break; }
+        if _contains(lines[index], "E1018") {
+            if _contains(lines[index], "--> ") {
+                if _contains(lines[index], ":1:") { found = true; }
+            }
+        }
+        index += 1;
+    }
+    assert found;
+}
+
+// SFEP-0061 §4 and D2: every previously-untagged site migrates to `note`,
+// never `warning` or `error`. An `error` here would turn a currently-green
+// build red, which SFN-538's acceptance criteria forbid.
+test "emit_native: no diagnostic is promoted to error severity" ![io] {
+    let program = parse_program(_unresolved_field_source());
+    let result = emit_native_with_module_name(program, "test_emit_native_diag");
+    assert result.diags.length > 0;
+    let mut index: int = 0;
+    loop {
+        if index >= result.diags.length { break; }
+        assert ! diag_is_error(result.diags[index]);
+        index += 1;
+    }
+}
