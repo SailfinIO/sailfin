@@ -91,6 +91,15 @@ view, and not an emission/GEP bug. Evidence:
 
 ## 4. The consumer surface is systemic, not a bounded set
 
+> **Superseded in part by SFN-628.** The per-module counts below were never
+> re-derived, and measurement found two of the four overstated (`parser__
+> expressions` 209 → 146, `parser__token_utils` 157 → 81). More importantly the
+> *method* is wrong: static emission counts do not rank runtime cost. Dynamic
+> attribution puts `identifier_matches`/`symbol_matches` at 0.002% of bytes
+> scanned, while `lexer.sfn` — with 29 static sites — accounts for 97.8%.
+> The systemic-surface conclusion in this section still holds; the sizing does
+> not. See `sfn-628-strnlen-recovery-tax.md`.
+
 The over-read is **not** confined to a small set of NUL-scanning helpers that a
 #1704-style per-helper `_lv` migration would close. The emitted IR shows
 `sfn_str_len` (strnlen) **length-recovery calls in the hundreds** across the
@@ -119,6 +128,18 @@ The consumer surface is the front end's pervasive bare-`i8*`-string +
 end-to-end so a string value is never downgraded to a bare `i8*` and rescanned**
 — a lowering-level change of large blast radius, overlapping SFN-42's own
 (out-of-scope) view lowering.
+
+> **Decided by SFN-628: P1.** Measurement returned *material* — length recovery
+> is 16%–35% of front-end instructions and grows quadratically in source-file
+> size. Scope the epic from `sfn-628-strnlen-recovery-tax.md` §8, not from §4
+> above.
+>
+> Two caveats on that percentage. It is the *total* `strnlen` share, and part of
+> it belongs to a separately-tracked defect (a runtime symbol re-scan) that the
+> epic does not own — see that note's §1 and §5.C for the allocation. And the
+> lexer's whole-buffer rescan, which is nearly all the scanned bytes, was
+> confirmed to need a genuine parameter-type change rather than a local
+> workaround (§5.A.1), so it belongs inside P1 rather than ahead of it.
 
 Two viable paths (recommend the owner pick at grooming):
 
