@@ -1,0 +1,77 @@
+// capsules/sfn/time/tests/unix_millis_test.sfn
+//
+// SFN-623: behavioral coverage for the fallible realtime-clock surface.
+import {
+    _unix_millis_result,
+    now_millis,
+    sleep,
+    unix_millis
+} from "../src/mod";
+
+// Independent host epoch oracle. `time(NULL)` reports completed Unix seconds
+// through the platform C runtime; the production API uses clock_gettime with
+// a Timespec out parameter and millisecond conversion.
+extern fn time(timer: *i64) -> i64;
+
+fn _ok_value(result: Result<int, string>) -> int {
+    match result {
+        Result.Ok { value } => { return value; },
+        Result.Err { error } => { return -1; }
+    }
+}
+
+fn _is_ok(result: Result<int, string>) -> boolean {
+    match result {
+        Result.Ok { value } => { return true; },
+        Result.Err { error } => { return false; }
+    }
+}
+
+fn _abs(value: int) -> int {
+    if value < 0 { return 0 - value; }
+    return value;
+}
+
+test "unix_millis: matches an independent host epoch oracle" ![clock] {
+    let host_seconds = time(null) as int;
+    assert host_seconds > 0;
+
+    let result = unix_millis();
+    assert _is_ok(result);
+    let epoch_ms = _ok_value(result);
+    let host_ms = host_seconds * 1000;
+
+    // `time(NULL)` reports whole seconds and runs before the Sailfin read. Five
+    // seconds covers truncation and loaded scheduling without making timing a
+    // performance gate.
+    assert _abs(epoch_ms - host_ms) <= 5000;
+
+    // A value matching Unix time must be far from this host's boot-relative
+    // monotonic reading; one year is a deliberately conservative separation.
+    assert epoch_ms - now_millis() > 31536000000;
+}
+
+test "unix_millis: remains fallible around elapsed-time observation" ![clock] {
+    let before_result = unix_millis();
+    assert _is_ok(before_result);
+    let monotonic_before = now_millis();
+    sleep(30);
+    let after_result = unix_millis();
+    let monotonic_after = now_millis();
+    assert _is_ok(after_result);
+
+    let monotonic_delta = monotonic_after - monotonic_before;
+    assert monotonic_delta >= 20;
+    // Do not compare or order the realtime values: host adjustment can move
+    // the second reading backward, forward, or onto the same millisecond.
+}
+
+test "unix_millis: provider failure maps to Err without reading a value" {
+    let mut poisoned: i64 = 9223372036854775807;
+    let out: *i64 = & poisoned;
+    let result = _unix_millis_result(0, out);
+    match result {
+        Result.Ok { value } => { assert false; },
+        Result.Err { error } => { assert error.length > 0; }
+    }
+}

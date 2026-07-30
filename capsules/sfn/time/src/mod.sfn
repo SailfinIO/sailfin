@@ -4,16 +4,35 @@
 // All operations require the `clock` effect.
 fn sleep(milliseconds: int) -> void ![clock] {
     // Pause execution for the given number of milliseconds.
-    runtime.sleep(milliseconds);
+    runtime_sleep_fn(milliseconds as f64);
 }
 
 fn now_millis() -> int ![clock] {
     // Returns the current monotonic time in milliseconds.
     // Useful for measuring elapsed time, not wall-clock time.
-    return runtime.monotonic_millis();
+    return runtime_monotonic_millis_fn() as int;
 }
 
 fn elapsed(start_millis: int) -> int ![clock] {
     // Returns the number of milliseconds elapsed since `start_millis`.
-    return runtime.monotonic_millis() - start_millis;
+    return (runtime_monotonic_millis_fn() as int) - start_millis;
+}
+
+fn _unix_millis_result(status: i32, out: *i64) -> Result<int, string> {
+    if status != 1 {
+        return Result.Err {
+            error: "unix_millis: realtime clock provider failed"
+        };
+    }
+    let value: i64 = sailfin_intrinsic_pointer_read_i64(out);
+    return Result.Ok { value: value as int };
+}
+
+// unix_millis returns signed completed milliseconds since the Unix epoch.
+// Realtime can move in either direction after host-clock adjustment;
+// elapsed-time users should keep using now_millis()/elapsed().
+fn unix_millis() -> Result<int, string> ![clock] {
+    let mut epoch_ms: i64 = 0;
+    let out: *i64 = & epoch_ms;
+    return _unix_millis_result(runtime_unix_millis_fn(out), out);
 }

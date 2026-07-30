@@ -1424,6 +1424,9 @@ fn collect_effects_from_expression(expression: Expression?, imports: ImportSymbo
             if name == "console" { _bare_builtin = true; }
             if name == "sleep" { _bare_builtin = true; }
             if name == "serve" { _bare_builtin = true; }
+            if name == "runtime_sleep_fn" { _bare_builtin = true; }
+            if name == "runtime_monotonic_millis_fn" { _bare_builtin = true; }
+            if name == "runtime_unix_millis_fn" { _bare_builtin = true; }
             if name == "sailfin_intrinsic_mem_footprint" {
                 _bare_builtin = true;
             }

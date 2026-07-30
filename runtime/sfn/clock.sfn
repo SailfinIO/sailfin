@@ -22,12 +22,14 @@
 // definition site once the prior C trampoline (`sfn_sleep` in
 // `sailfin_runtime.c`) is deleted in the same PR.
 //
-// Timespec layout: `{ tv_sec: i64, tv_nsec: i64 }` matches the
-// C `struct timespec` on every platform Sailfin currently
-// targets (Linux x86_64 and macOS arm64 both use 8-byte
-// `time_t` and 8-byte `long` for `tv_nsec`). Platform-conditional
-// sizing for 32-bit `time_t` targets is out of scope per the
-// architecture doc §2.9 Q7 and this issue's `Out:` scope.
+// Timespec storage is 16 bytes on every shipped platform. Linux x86_64,
+// Linux arm64, and macOS arm64 spell it `{ i64, i64 }`; mingw-w64 x86_64
+// spells it `{ i64, i32, 4 bytes padding }`. The realtime adapter reads
+// `tv_sec` as i64 and only the low i32 at offset 8 for `tv_nsec`, which is
+// valid for both layouts because every shipped target is little-endian and
+// POSIX normalizes nanoseconds into a non-negative i32-sized value.
+// Platform-conditional sizing for 32-bit `time_t` targets is out of scope
+// per the architecture doc §2.9 Q7 and this issue's `Out:` scope.
 //
 // EINTR handling: nanosleep is called in a bounded retry loop
 // (cap = 32 iterations). On `ret == 0` the sleep completed and the
@@ -66,6 +68,22 @@
 // `test_sleep_unit_semantics.sh` (issue #307).
 import { clock_gettime, nanosleep } from "./platform/posix";
 
+// Why inline `extern fn memcpy` rather than `import { memcpy } from
+// "./platform/libc"`? The single-file emit path that `make
+// ci-cross-windows` drives re-emits this module standalone with no
+// `--import-context`, so it resolves imported extern signatures only from
+// the shared tree that `make rebuild` re-stages with `posix` alone. An
+// imported `memcpy` therefore lowers to `cannot resolve return type for
+// call to memcpy` (E1007) on the cross-Windows leg while every other path
+// stays green. Inlining the one declaration we need keeps this module
+// self-contained for every seed and every emit path, matching the rest of
+// the runtime.
+//
+// Removal condition: SFN-635 teaches the standalone emit path to resolve
+// imported externs. The PR that satisfies it flips this back to an import
+// and deletes this comment, without touching the body.
+extern fn memcpy(dst: *u8, src: *u8, n: usize) -> *u8;
+
 struct Timespec {
     tv_sec: i64;
     tv_nsec: i64;
@@ -83,6 +101,68 @@ let NANOS_PER_SEC: i64 = 1000000000;
 // Nanoseconds per millisecond — the divisor reducing the combined
 // nanosecond reading to whole milliseconds for `sfn_clock_millis`.
 let NANOS_PER_MILLI: i64 = 1000000;
+
+// Read the host realtime clock into `out_millis`.
+//
+// ABI: return 1 on success and 0 on failure; the signed epoch-millisecond
+// value is written only on success. Status is separate because negative Unix
+// time is valid before 1970 and therefore cannot double as an error sentinel.
+//
+// The provider stays on the existing vendor `clock_gettime` boundary so Linux
+// libc can use the vDSO. `CLOCK_REALTIME` is 0 on every shipped provider
+// (glibc Linux x86-64/aarch64, Darwin arm64, and mingw-w64 Windows x86-64).
+// This is deliberately separate from `sailfin_intrinsic_clock_monotonic_id()`:
+// realtime and monotonic clocks have different semantics even where their
+// selectors happen to be small integers.
+//
+// mingw-w64's provider converts FILETIME through an unsigned 100 ns word. A
+// pre-1970 timestamp therefore reaches `timespec` as the quotient/remainder of
+// the wrapped word. Reconstructing 100 ns ticks in wrapping i64 arithmetic
+// recovers its signed two's-complement value. The same conversion is exact for
+// normalized POSIX timespecs, so no target probe or divergent provider path is
+// needed.
+//
+// Success-path shape is fixed: one provider call, two post-call field loads,
+// integer conversion, and one plain out-parameter store. There is no heap
+// allocation, atomic operation, lock, cache, loop, string work, or fallback
+// clock. A noncapturing function value is the seed-supported 16-byte stack
+// aggregate used for provider storage; the closure is never called or allowed
+// to escape. The eight-byte `memcpy` is the existing seed-supported plain
+// pointer write and optimizes to a scalar store.
+fn sfn_clock_timespec_to_unix_millis(sec: i64, nsec: i64) -> i64 {
+    // Wrapping i64 arithmetic reconstructs mingw-w64's signed 100 ns word.
+    // The exact conversion domain is the signed-tick window (roughly
+    // +/-922,337,203,685 seconds), which comfortably contains the shipped
+    // host clocks' practical realtime range.
+    let ticks: i64 = sec * 10000000 + nsec / 100;
+    let millis: i64 = ticks / 10000;
+    if ticks < 0 && ticks % 10000 != 0 { return millis - 1; }
+    return millis;
+}
+
+fn sfn_clock_unix_millis(out_millis: *i64) -> i32 ![clock] {
+    if (out_millis as i64) == 0 { return 0; }
+
+    let mut storage: fn () -> void = fn () { };
+    let storage_ptr: *fn () -> void = & storage;
+    let ts_ptr: *Timespec = storage_ptr as *Timespec;
+    let ret: i32 = clock_gettime(0, ts_ptr);
+    if ret != 0 { return 0; }
+
+    // Read the provider-owned fields only after a successful call. The low
+    // i32 at byte offset 8 is the whole tv_nsec member on mingw-w64 and the
+    // low half of the i64 member on Linux/Darwin. Every shipped target is
+    // little-endian, and normalized tv_nsec fits in a signed i32.
+    let sec_ptr: *i64 = ts_ptr as *i64;
+    let nsec_ptr: *i32 = (sec_ptr + 1) as *i32;
+    let sec: i64 = sailfin_intrinsic_pointer_read_i64(sec_ptr);
+    let nsec: i64 = sailfin_intrinsic_pointer_read_i32(nsec_ptr) as i64;
+    let mut millis: i64 = sfn_clock_timespec_to_unix_millis(sec, nsec);
+    let millis_ptr: *i64 = & millis;
+
+    memcpy(out_millis as *u8, millis_ptr as *u8, 8 as usize);
+    return 1;
+}
 
 // Read the monotonic clock and return the elapsed time as a single
 // nanosecond count. This is the shared `clock_gettime` field-reader
