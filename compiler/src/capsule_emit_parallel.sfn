@@ -310,6 +310,21 @@ struct ParallelEmitTask {
     source_path: string;
 }
 
+// One argv-only subprocess task for the bounded build-worker pool. Callers
+// retain ownership of artifact staging and publication, so the same pool can
+// serve emit and clang phases without weakening their distinct cache rules.
+struct ParallelProcessTask {
+    argv: string[];
+}
+
+// Observable result for bounded-pool regression coverage. `peak_in_flight`
+// counts spawned handles not yet reaped; it must never exceed the requested
+// job limit even when the queue is longer than the worker window.
+struct ParallelProcessRun {
+    exit_codes: int[];
+    peak_in_flight: int;
+}
+
 // The emit child's argv — ONE construction shared by the serial branch and
 // the parallel pool, so the two can never drift. Flag ownership is
 // unchanged and out of scope: `--attempts 1 --no-validate` pins the child
@@ -352,7 +367,7 @@ fn _cr_emit_captured_stream(text: string, to_stderr: boolean) -> void ![io] {
     if to_stderr { print.err(body); } else { print(body); }
 }
 
-// Drain one emit child's pipes to EOF, re-emit what it wrote, then reap.
+// Drain one build child's pipes to EOF, re-emit what it wrote, then reap.
 // Returns the child's exit code. `handle_wait` is the SOLE reaper/free
 // path, so every spawned handle must reach it — a child's failure is an
 // exit code here, never an early return.
@@ -368,7 +383,7 @@ fn _cr_emit_captured_stream(text: string, to_stderr: boolean) -> void ![io] {
 // projection for a HANDLE and no `poll(2)` over pipes, so it drives the
 // framed reads, each of which pumps BOTH pipes so neither stream can wedge
 // the other. Same split `cli/commands/test/pool.sfn::_reap_test_child` carries.
-fn _cr_reap_emit_child(handle: int) -> int ![io] {
+fn _cr_reap_child(handle: int) -> int ![io] {
     // `spawn_with_env` reports failure as handle 0 — nothing to drain or
     // reap. 127 is the same "could not execute" code the serial branch's
     // `process.run` surfaces.
@@ -434,6 +449,63 @@ fn _cr_reap_emit_child(handle: int) -> int ![io] {
     return process.handle_wait(handle);
 }
 
+// Run argv-only subprocesses through the same bounded, in-order-reap window
+// used by the parallel emit fan-out. Results preserve task order. There are
+// no retries at this layer: emit owns its retry rounds, while deterministic
+// compiler phases such as `clang -c` must surface their first failure.
+fn _cr_run_bounded_processes_with_env(tasks: ParallelProcessTask[], jobs: int, child_env: string[]) -> ParallelProcessRun ![io] {
+    let mut results: int[] = [];
+    if tasks.length == 0 {
+        return ParallelProcessRun { exit_codes: results, peak_in_flight: 0 };
+    }
+    let mut effective_jobs = jobs;
+    if effective_jobs <= 0 { effective_jobs = 1; }
+    if effective_jobs == 1 {
+        let mut i: int = 0;
+        loop {
+            if i >= tasks.length { break; }
+            results.push(process.run(tasks[i].argv));
+            i += 1;
+        }
+        return ParallelProcessRun { exit_codes: results, peak_in_flight: 1 };
+    }
+
+    let mut handles: int[] = [];
+    let mut launched: int = 0;
+    let mut peak_in_flight: int = 0;
+    let mut ti: int = 0;
+    loop {
+        if ti >= tasks.length { break; }
+        loop {
+            if launched >= tasks.length { break; }
+            if launched - ti >= effective_jobs { break; }
+            handles.push(process.spawn_with_env(tasks[launched].argv, child_env));
+            launched += 1;
+            let in_flight = launched - ti;
+            if in_flight > peak_in_flight { peak_in_flight = in_flight; }
+        }
+        results.push(_cr_reap_child(handles[ti]));
+        ti += 1;
+    }
+    return ParallelProcessRun {
+        exit_codes: results,
+        peak_in_flight: peak_in_flight
+    };
+}
+
+// Run argv-only subprocesses with inherited environment through the bounded
+// build-worker window and return exit codes in task order.
+fn _cr_run_bounded_processes(tasks: ParallelProcessTask[], jobs: int) -> int[] ![io] {
+    return _cr_run_bounded_processes_with_stats(tasks, jobs).exit_codes;
+}
+
+// Testable form of `_cr_run_bounded_processes`: production callers consume
+// only `exit_codes`, while focused coverage also pins the maximum number of
+// outstanding child handles.
+fn _cr_run_bounded_processes_with_stats(tasks: ParallelProcessTask[], jobs: int) -> ParallelProcessRun ![io] {
+    return _cr_run_bounded_processes_with_env(tasks, jobs, process.environ());
+}
+
 // Run one fan-out round over `tasks`; return the tasks that did NOT
 // publish a good artifact. Keeps at most `jobs` children live and reaps in
 // launch order.
@@ -453,36 +525,37 @@ fn _cr_emit_pool_round(tasks: ParallelEmitTask[], mode: string, sailfin_exe: str
     // worker's `[ "$SAILFIN_PE_MODE" != llvm ]` guard made.
     let validate = mode == "llvm";
     let mut failed: ParallelEmitTask[] = [];
-    let mut handles: int[] = [];
     let mut staged: string[] = [];
     let mut targets: string[] = [];
-    let mut launched: int = 0;
+    let mut process_tasks: ParallelProcessTask[] = [];
     let mut ti: int = 0;
     loop {
         if ti >= tasks.length { break; }
-        // Top the window back up to `jobs` live children.
-        loop {
-            if launched >= tasks.length { break; }
-            if launched - ti >= jobs { break; }
-            let t = tasks[launched];
-            // #1011 staging: emit to a sibling temp and publish with an
-            // atomic same-filesystem rename, so no peer observes the
-            // truncate+rewrite an emit performs on its `-o` target. "" is
-            // the documented degrade (no `mktemp` on a Windows host) — safe
-            // under the fan-out because every task owns a distinct output
-            // path and no peer child reads another's in-flight output.
-            let tmp = _mktemp_sibling_cmd(t.output_path);
-            let mut target: string = t.output_path;
-            if tmp.length > 0 { target = tmp; }
-            staged.push(tmp);
-            targets.push(target);
-            handles.push(process.spawn_with_env(_cr_emit_child_argv(sailfin_exe, t.slug, target, mode, t.source_path, import_context_root), child_env));
-            launched += 1;
-        }
+        let t = tasks[ti];
+        // #1011 staging: emit to a sibling temp and publish with an atomic
+        // same-filesystem rename, so no peer observes the truncate+rewrite an
+        // emit performs on its `-o` target. "" is the documented degrade (no
+        // `mktemp` on a Windows host) — safe under the fan-out because every
+        // task owns a distinct output path and no peer child reads another's
+        // in-flight output.
+        let tmp = _mktemp_sibling_cmd(t.output_path);
+        let mut target: string = t.output_path;
+        if tmp.length > 0 { target = tmp; }
+        staged.push(tmp);
+        targets.push(target);
+        process_tasks.push(ParallelProcessTask {
+            argv: _cr_emit_child_argv(sailfin_exe, t.slug, target, mode, t.source_path, import_context_root)
+        });
+        ti += 1;
+    }
+    let results = _cr_run_bounded_processes_with_env(process_tasks, jobs, child_env).exit_codes;
+    ti = 0;
+    loop {
+        if ti >= tasks.length { break; }
         let t = tasks[ti];
         let target = targets[ti];
         let tmp = staged[ti];
-        let rc = _cr_reap_emit_child(handles[ti]);
+        let rc = results[ti];
         let mut ok: boolean = rc == 0;
         if !ok {
             print.err("capsule-resolver: emit failed for " + t.slug + " (exit "
@@ -599,11 +672,15 @@ fn _cr_run_parallel_emit(tasks: ParallelEmitTask[], mode: string, sailfin_exe: s
 
 export {
     ParallelEmitTask,
+    ParallelProcessRun,
+    ParallelProcessTask,
     _cr_count_cpuinfo_processors,
     _cr_jobs_from_probe,
     _cr_parse_cpu_online,
     _cr_parse_meminfo_bytes,
     _cr_ram_budget_jobs,
     _cr_resolve_jobs,
+    _cr_run_bounded_processes,
+    _cr_run_bounded_processes_with_stats,
     _cr_run_parallel_emit
 };

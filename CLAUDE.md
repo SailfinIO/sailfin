@@ -61,7 +61,7 @@ the same subcommands and do not replace `make compile`.
 
 ## Pipeline and critical files
 
-`lexer.sfn` → `parser/` → `ast.sfn` → `typecheck.sfn` → `effect_checker.sfn`
+`lexer.sfn` → `parser/` → `ast.sfn` → `typecheck/` → `effect_checker.sfn`
 → `emit_native.sfn` (`.sfn-asm`) → `llvm/lowering/entrypoints.sfn` (LLVM IR).
 
 | File | Role |

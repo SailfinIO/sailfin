@@ -57,7 +57,7 @@ The compiler in `compiler/src/` follows this flow:
 
 1. **Lexer** (`lexer.sfn`) → tokens
 2. **Parser** (`parser.sfn`) → AST (`ast.sfn`)
-3. **Type Checker** (`typecheck.sfn`) → duplicate symbols, interface conformance
+3. **Type Checker** (`typecheck/`) → duplicate symbols, interface conformance
 4. **Effect Checker** (`effect_checker.sfn`) → validates `![effect, ...]` annotations
 5. **Native Emitter** (`emit_native.sfn`) → `.sfn-asm` IR (`native_ir.sfn`)
 6. **LLVM Lowering** (`compiler/src/llvm/lowering/entrypoints.sfn`) → LLVM IR

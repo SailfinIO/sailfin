@@ -1217,7 +1217,7 @@ fn parse_postfix_chain(state: ExpressionTokens, expression: Expression) -> Expre
             // `success:false` and the enclosing expression falls through to
             // `expression_parse_failure` → `Raw` (correct: it is junk). (#1627
             // Part A/C — the earlier bare-identifier `lift_pointer_target` gate
-            // is removed; `classify_fn_cast` in `typecheck.sfn` handles
+            // is removed; `classify_fn_cast` in `typecheck/expression_walk.sfn` handles
             // fn-reference classification on the structured `Cast`; E0809 is
             // scoped to typed `* fn (...)` targets so `* u8` is ABI-agnostic.)
             let cast_result = read_cast_target(after_as);

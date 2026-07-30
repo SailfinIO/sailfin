@@ -46,12 +46,9 @@ import {
     try_dispatch_syscall_builtin
 } from "./core_call_resolution";
 import { lower_enum_literal } from "./core_literals_lowering";
-import {
-    coerce_operand_to_type,
-    coerce_operand_to_type_with_source,
-    integer_llvm_width,
-    load_local_operand
-} from "./core_operands";
+import { load_local_operand } from "./core_operands/comparisons";
+import { coerce_operand_to_type, coerce_operand_to_type_with_source } from "./core_operands/dispatch";
+import { integer_llvm_width } from "./core_operands/type_predicates";
 import { parse_member_access } from "./core_parse";
 import {
     find_local_binding,

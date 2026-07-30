@@ -11,7 +11,7 @@
 // the diagnostic severity from `[fatal]` to `[warning]` and routed the
 // kind-check through `coerce_numeric_primitive`, so coercion now succeeds
 // (operand != null) while the diagnostic still carries the span enrichment.
-import { coerce_operand_to_type } from "../../src/llvm/expression_lowering/native/core_operands";
+import { coerce_operand_to_type } from "../../src/llvm/expression_lowering/native/core_operands/dispatch";
 import { LLVMOperand } from "../../src/llvm/types";
 import { NativeSourceSpan } from "../../src/native_ir";
 

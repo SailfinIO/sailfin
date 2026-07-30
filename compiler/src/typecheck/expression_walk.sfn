@@ -1,0 +1,430 @@
+// compiler/src/typecheck/expression_walk.sfn
+//
+// The expression walk: recursive type/scope checking of every expression
+// form, dispatching to the per-rule modules for the specific checks.
+import { Expression, SourceSpan } from "../ast";
+import { lookup_imported_function } from "../effect_imports";
+import { Diagnostic } from "../typecheck_types";
+import {
+    check_bare_fn_type_annotation,
+    check_malformed_array_annotation,
+    check_unknown_type_annotation,
+    declared_array_marker
+} from "../typecheck_types/annotation_shape_checks";
+import { make_nested_fn_capture_diagnostic, make_undefined_function_diagnostic } from "../typecheck_types/declaration_and_statement_checks";
+import { make_parse_error_diagnostic } from "../typecheck_types/expr_type_rules";
+import { is_builtin_call_name } from "../typecheck_types/extern_abi";
+import {
+    SymbolEntry,
+    check_char_literal_raw,
+    check_fn_reference_raw,
+    check_unanalyzable_raw,
+    check_value_if_raw,
+    classify_fn_cast,
+    clone_bindings,
+    find_symbol,
+    is_function_kind,
+    make_fn_value_position_diagnostic,
+    register_local_symbol
+} from "../typecheck_types/symbol_table_and_raw_exprs";
+import { check_intersection_value_type_annotation } from "../typecheck_types/value_and_object_checks";
+import {
+    _struct_arithmetic_diagnostics,
+    array_arithmetic_diagnostics,
+    mixed_arithmetic_diagnostics,
+    primitive_method_diagnostics
+} from "./arithmetic_rules";
+import { walk_block_expressions } from "./block_walk";
+import {
+    channel_send_diagnostics,
+    check_spawn_kind,
+    push_spawn_handle_diagnostics
+} from "./concurrency_rules";
+import { TypeckCtx, ctx_enter_body } from "./context";
+import { _serve_resolves_to_user_fn } from "./patterns";
+import { _declared_struct_annotation } from "./symbols";
+import { _is_syscall_name, _syscall_call_diagnostics } from "./syscalls";
+import { _conditional_branch_type, check_conditional_types } from "./try_and_conditional";
+
+fn walk_expression(expression: Expression?, ctx: TypeckCtx) -> Diagnostic[] {
+    let bindings = ctx.bindings;
+    let imports = ctx.imports;
+    if expression == null { return []; }
+    if expression.variant == "Call" {
+        // A bare-identifier callee is a *call target*, not a value
+        // reference — do not route it through `walk_expression` (that
+        // would trip the E0808 function-as-value check below). It is
+        // validated inline for E0420 (undefined function) instead.
+        // Non-identifier callees (parenthesized exprs, member access)
+        // still recurse.
+        let mut diagnostics: Diagnostic[] = [];
+        if expression.callee != null {
+            if expression.callee.variant != "Identifier" {
+                diagnostics = walk_expression(expression.callee, ctx);
+            }
+        }
+        // #812: a bare-identifier callee that resolves to neither an
+        // in-scope binding (parameter / local / top-level declaration /
+        // import-specifier name) nor a builtin envelope name nor an
+        // imported free function in the localized effect table is an
+        // undefined function — emit E0420 caret-ed at the callee.
+        // Member callees (`obj.method()`) never reach this branch: they
+        // recurse through the Member arm, which only descends into
+        // `.object` and never inspects the member name.
+        if expression.callee != null {
+            if expression.callee.variant == "Identifier" {
+                let callee_name = expression.callee.name;
+                if _is_syscall_name(callee_name) {
+                    diagnostics = diagnostics.concat(_syscall_call_diagnostics(expression, ctx));
+                }
+                let callee_entry = find_symbol(bindings, callee_name);
+                if callee_entry != null {
+                    // Calling a captured enclosing local from a nested fn body
+                    // (tagged `"outer_local"`) is an illegal capture, not a
+                    // resolved call (SFEP-0042, E0421).
+                    if strings_equal(callee_entry.kind, "outer_local") {
+                        diagnostics.push(make_nested_fn_capture_diagnostic(callee_name, expression.callee.span));
+                    }
+                } else {
+                    if !is_builtin_call_name(callee_name) {
+                        if lookup_imported_function(imports, callee_name) == null {
+                            let available = lookup_imported_function(ctx.available_imports, callee_name);
+                            let mut provider: string = "";
+                            if available != null {
+                                provider = available.provider_module;
+                            }
+                            diagnostics.push(make_undefined_function_diagnostic(callee_name, expression.callee.span, provider));
+                        }
+                    }
+                }
+            }
+        }
+        let mut index: int = 0;
+        loop {
+            if index >= expression.arguments.length { break; }
+            diagnostics = diagnostics.concat(walk_expression(expression.arguments[index], ctx));
+            index += 1;
+        }
+        // `ch.send(v)` on a `Channel<T>`-annotated receiver enforces the
+        // element type -> E0815 (#1942). Silent unless the mismatch is
+        // certain (see `channel_send_diagnostics`).
+        diagnostics = diagnostics.concat(channel_send_diagnostics(expression, bindings));
+        // `hs.push(spawn ...)` on an inferred-empty `[]`-tagged receiver ->
+        // E0823 (SFN-386). See `push_spawn_handle_diagnostics`.
+        diagnostics = diagnostics.concat(push_spawn_handle_diagnostics(expression, bindings));
+        // `field.to_uppercase()` on a proven primitive receiver whose method
+        // resolves to neither a primitive method descriptor nor a free callable
+        // -> E0012 (SFN-385). Silent unless the receiver's primitive kind is
+        // known and the method is provably unresolvable (see
+        // `primitive_method_diagnostics`), so it rejects exactly the calls the
+        // lowerer would fatal on ("callee signature is not known").
+        diagnostics = diagnostics.concat(primitive_method_diagnostics(expression, ctx));
+        return diagnostics;
+    }
+    if expression.variant == "Binary" {
+        let mut diagnostics = walk_expression(expression.left, ctx);
+        diagnostics = diagnostics.concat(walk_expression(expression.right, ctx));
+        // `a + b` mixing a proven `int` and `float` operand -> E0306 (SFN-385).
+        // Silent unless both operands' numeric kinds are known and differ, so it
+        // rejects exactly the arithmetic the lowerer would fatal on ("ABI
+        // primitive mismatch").
+        diagnostics = diagnostics.concat(mixed_arithmetic_diagnostics(expression, bindings));
+        diagnostics = diagnostics.concat(array_arithmetic_diagnostics(expression, bindings));
+        diagnostics = diagnostics.concat(_struct_arithmetic_diagnostics(expression, ctx));
+        return diagnostics;
+    }
+    if expression.variant == "Unary" {
+        // Prefix `*`/`&`/`-`/`!` — recurse into the operand so its diagnostics
+        // still fire. In particular, once #1627 Part B structured prefix `&`
+        // into `Unary{"&", Identifier(fn)}` (instead of degrading `& fn` to
+        // `Raw`), the operand `Identifier` reaches the `Identifier` arm below,
+        // which emits E0808 for a function used in value position — preserving
+        // the prior `check_fn_reference_raw` `& fn` behavior.
+        return walk_expression(expression.operand, ctx);
+    }
+    if expression.variant == "Member" {
+        // A bare-identifier member *object* is a receiver / namespace
+        // position (`env.get(...)`, `Color.Red`, `process.run(...)`),
+        // not a value use — do not route it through the E0808
+        // function-as-value check below (a module that both defines
+        // `fn env` and calls `env.get` would otherwise false-positive).
+        // Non-identifier objects (`foo().bar`, `xs[0].field`) still
+        // recurse so nested diagnostics surface.
+        if expression.object != null {
+            if expression.object.variant == "Identifier" { return []; }
+        }
+        return walk_expression(expression.object, ctx);
+    }
+    if expression.variant == "Index" {
+        let mut diagnostics = walk_expression(expression.sequence, ctx);
+        diagnostics = diagnostics.concat(walk_expression(expression.index, ctx));
+        return diagnostics;
+    }
+    if expression.variant == "Array" {
+        let mut diagnostics: Diagnostic[] = [];
+        let mut index: int = 0;
+        loop {
+            if index >= expression.elements.length { break; }
+            diagnostics = diagnostics.concat(walk_expression(expression.elements[index], ctx));
+            index += 1;
+        }
+        return diagnostics;
+    }
+    if expression.variant == "Object" {
+        let mut diagnostics: Diagnostic[] = [];
+        let mut index: int = 0;
+        loop {
+            if index >= expression.fields.length { break; }
+            diagnostics = diagnostics.concat(walk_expression(expression.fields[index].value, ctx));
+            index += 1;
+        }
+        return diagnostics;
+    }
+    if expression.variant == "Struct" {
+        let mut diagnostics: Diagnostic[] = [];
+        let mut index: int = 0;
+        loop {
+            if index >= expression.fields.length { break; }
+            diagnostics = diagnostics.concat(walk_expression(expression.fields[index].value, ctx));
+            index += 1;
+        }
+        return diagnostics;
+    }
+    if expression.variant == "Lambda" {
+        // Register the lambda's own parameters into the scope its body is
+        // walked in, so a parameter used as a call target (or otherwise
+        // resolved by name) is not falsely reported undefined (#1917). The
+        // params start at `param_scope_start` (past the outer bindings) so a
+        // parameter may shadow an enclosing name without tripping E0001, while
+        // parameter-vs-parameter duplicates are still caught.
+        let mut body_bindings: SymbolEntry[] = clone_bindings(bindings);
+        let param_scope_start = body_bindings.length;
+        let mut diagnostics: Diagnostic[] = [];
+        let mut _pp: int = 0;
+        loop {
+            if _pp >= expression.parameters.length { break; }
+            let param = expression.parameters[_pp];
+            let mut param_array: string = "";
+            if param.type_annotation != null {
+                param_array = declared_array_marker(param.type_annotation.text);
+            }
+            let declared_struct = _declared_struct_annotation(param.type_annotation, body_bindings, ctx.type_params);
+            let registration = register_local_symbol(body_bindings, param.name, "parameter", param.span, param_scope_start, false, false, param_array, "", declared_struct);
+            body_bindings = registration.bindings;
+            diagnostics = diagnostics.concat(registration.diagnostics);
+            _pp += 1;
+        }
+        diagnostics = diagnostics.concat(walk_block_expressions(expression.body, ctx_enter_body(ctx, body_bindings, expression.return_type)));
+        let mut lambda_span: SourceSpan? = null;
+        let mut _lp: int = 0;
+        loop {
+            if _lp >= expression.parameters.length { break; }
+            let parameter = expression.parameters[_lp];
+            if lambda_span == null { lambda_span = parameter.span; }
+            diagnostics = diagnostics.concat(check_bare_fn_type_annotation(parameter.type_annotation, parameter.name, parameter.span));
+            diagnostics = diagnostics.concat(check_malformed_array_annotation(parameter.type_annotation, parameter.name, parameter.span));
+            diagnostics = diagnostics.concat(check_unknown_type_annotation(parameter.type_annotation, parameter.name, parameter.span, ctx.known_types, ctx.type_params));
+            diagnostics = diagnostics.concat(check_intersection_value_type_annotation(parameter.type_annotation, parameter.name, parameter.span));
+            _lp += 1;
+        }
+        // A param-less lambda (`fn() -> (int) -> int`) has no parameter span
+        // to anchor a return-type E0826 to; fall back to the body's opening
+        // token so the diagnostic still renders with a source location.
+        if lambda_span == null {
+            if expression.body.tokens.length > 0 {
+                let btok = expression.body.tokens[0];
+                lambda_span = SourceSpan {
+                    start_line: btok.line,
+                    start_column: btok.column,
+                    end_line: btok.line,
+                    end_column: btok.column
+                };
+            }
+        }
+        diagnostics = diagnostics.concat(check_bare_fn_type_annotation(expression.return_type, "lambda", lambda_span));
+        diagnostics = diagnostics.concat(check_malformed_array_annotation(expression.return_type, "lambda", lambda_span));
+        diagnostics = diagnostics.concat(check_unknown_type_annotation(expression.return_type, "lambda", lambda_span, ctx.known_types, ctx.type_params));
+        diagnostics = diagnostics.concat(check_intersection_value_type_annotation(expression.return_type, "lambda", lambda_span));
+        return diagnostics;
+    }
+    if expression.variant == "Range" {
+        let mut diagnostics = walk_expression(expression.start, ctx);
+        diagnostics = diagnostics.concat(walk_expression(expression.end, ctx));
+        return diagnostics;
+    }
+    if expression.variant == "Conditional" {
+        // Ternary `cond ? then : else` (#1690) — recurse into all three
+        // children so nested diagnostics (undefined symbols, parse-error
+        // nodes, removed-keyword statements) inside any branch still fire.
+        let mut diagnostics = walk_expression(expression.condition, ctx);
+        diagnostics = diagnostics.concat(walk_expression(expression.then_value, ctx));
+        diagnostics = diagnostics.concat(walk_expression(expression.else_value, ctx));
+        // #1715: constrain the condition to boolean and unify the two branch
+        // types. Types are literal-inferred (#829 has no live inferencer), so
+        // an un-inferable branch/condition is left unconstrained.
+        let condition_type = _conditional_branch_type(expression.condition);
+        let then_type = _conditional_branch_type(expression.then_value);
+        let else_type = _conditional_branch_type(expression.else_value);
+        diagnostics = diagnostics.concat(check_conditional_types(condition_type, then_type, else_type, expression.span));
+        return diagnostics;
+    }
+    if expression.variant == "Assignment" {
+        // Assignment `target <op> rhs` (#1627 Part D) — recurse into both
+        // sides so diagnostics (undefined symbols, fn-value misuse, nested
+        // parse-error nodes) in the lvalue and the rvalue still fire.
+        let mut diagnostics = walk_expression(expression.target, ctx);
+        diagnostics = diagnostics.concat(walk_expression(expression.rhs, ctx));
+        return diagnostics;
+    }
+    if expression.variant == "Cast" {
+        // A bare function identifier cast to a pointer (`<fn> as * u8` /
+        // `<fn> as * fn (...)`) is a function-address materialization, not a
+        // value-position misuse. Classify it DIRECTLY via `classify_fn_cast`
+        // (E0808/E0809 per target) — do NOT recurse into the operand, because
+        // the `Identifier` arm would wrongly emit E0808 for a perfectly valid
+        // fn-address cast. #1627: Part A now structures every cast (including
+        // bare-identifier operands), so this replaces the old text-based
+        // `check_fn_reference_raw` cast path. Classification is
+        // position-independent — it fires the same whether the cast is
+        // top-level or buried in a call argument.
+        // SFN-555: the cast target is the position where an unknown type used
+        // to reach lowering as a bare `i8*` (lowercase) or an undeclared
+        // `%Name*` that only `clang` rejected (capitalized).
+        let cast_target_diags = check_unknown_type_annotation(expression.target_type, expression.target_type.text, expression.span, ctx.known_types, ctx.type_params);
+        if expression.operand.variant == "Identifier" {
+            let fn_entry = find_symbol(bindings, expression.operand.name);
+            if fn_entry != null {
+                if is_function_kind(fn_entry.kind) {
+                    return cast_target_diags.concat(classify_fn_cast(expression.operand.name, expression.target_type.text, fn_entry, expression.span));
+                }
+            }
+        }
+        return cast_target_diags.concat(walk_expression(expression.operand, ctx));
+    }
+    if expression.variant == "Is" {
+        // Type-guard `x is T` (#1753) — recurse into the operand so inner
+        // diagnostics (undefined symbols, fn-value misuse, nested parse-error
+        // nodes) still fire. The target type is a static type name, not an
+        // expression, so there is nothing to walk there. Flow-sensitive
+        // narrowing is applied at lowering via the `narrowed_variant`
+        // machinery (the typecheck pass tracks names only — no type field).
+        //
+        // The target is deliberately NOT run through the unknown-type check
+        // (E0013, SFN-555): `x is Text` names an enum VARIANT as often as a
+        // type, and variant names are not in the type registry. Judging it
+        // rejects the valid narrowing form.
+        return walk_expression(expression.operand, ctx);
+    }
+    if expression.variant == "TryOperator" {
+        return walk_expression(expression.operand, ctx);
+    }
+    // Concurrency nodes (issue #1082). Recurse into operands so inner
+    // diagnostics still fire. The only statically-sound live rule is E0813:
+    // a `spawn` of a lambda literal with no declared return type cannot be
+    // assigned a future kind. Spawn of a named-fn call / arbitrary
+    // expression, await-on-non-future (E0814), and channel send-mismatch
+    // (E0815) all need expression-type inference (#829, out of scope) and
+    // ship as helpers exercised by `concurrency_typecheck_test.sfn`.
+    if expression.variant == "Spawn" {
+        let mut diagnostics = walk_expression(expression.operand, ctx);
+        if expression.operand.variant == "Lambda" {
+            let return_type = expression.operand.return_type;
+            if return_type == null {
+                diagnostics = diagnostics.concat(check_spawn_kind(null, expression.span));
+            }
+        }
+        return diagnostics;
+    }
+    if expression.variant == "Await" {
+        return walk_expression(expression.operand, ctx);
+    }
+    if expression.variant == "Channel" {
+        if expression.capacity == null { return []; }
+        return walk_expression(expression.capacity, ctx);
+    }
+    if expression.variant == "Serve" {
+        // SFN-29 (#1329): a `serve(...)` token sequence always parses to
+        // `Expression.Serve`, but a `serve` that resolves to a user-defined
+        // or imported function must be validated through the ordinary
+        // call-site argument rules — so a bare function argument trips E0808
+        // exactly as it would for any other call. This mirrors the lowering
+        // gate in `llvm/expression_lowering/native/core.sfn`, which only
+        // lowers builtin serve to `@sfn_serve` when no resolvable `serve` is
+        // in scope. The bare builtin concurrency serve keeps its permissive
+        // treatment (its handler is passed straight through to `@sfn_serve`).
+        if _serve_resolves_to_user_fn(bindings) {
+            let mut diagnostics = walk_expression(expression.handler, ctx);
+            if expression.port != null {
+                diagnostics = diagnostics.concat(walk_expression(expression.port, ctx));
+            }
+            return diagnostics;
+        }
+        return [];
+    }
+    // A parser-originated diagnostic node (issue #1531): the parser emitted
+    // this for syntax that must fail closed (e.g. the internal-only
+    // `spawn:<type>` form). Surface it as a real error so `sfn check` exits
+    // non-zero instead of silently dropping the statement.
+    if expression.variant == "ParseError" {
+        return [make_parse_error_diagnostic(expression.message, expression.span)];
+    }
+    // #1147: a bare identifier that resolves to a function used in value
+    // position (not as a call target — those are handled in the Call arm)
+    // is unsupported. The only way to materialize a function's address is
+    // `<fn> as * u8` (#1146), which the parser degrades to a `Raw` node
+    // (handled below), so a structured `Identifier` here is always an
+    // unsupported value use (e.g. `let f = worker;`, `take(worker)`).
+    if expression.variant == "Identifier" {
+        let entry = find_symbol(bindings, expression.name);
+        if entry != null {
+            // A nested `fn` body resolving a name to an enclosing data local
+            // (tagged `"outer_local"` by `_build_nested_fn_scope`) is an
+            // illegal capture (SFEP-0042, E0421) — reported here instead of
+            // being silently accepted as a value reference.
+            if strings_equal(entry.kind, "outer_local") {
+                return [make_nested_fn_capture_diagnostic(expression.name, expression.span)];
+            }
+            if is_function_kind(entry.kind) {
+                return [make_fn_value_position_diagnostic(expression.name, expression.span)];
+            }
+        }
+        return [];
+    }
+    // Blanket fail-closed backstop for effect-opaque `Raw` nodes
+    // (#1627 Part F / #1743). `check_fn_reference_raw` first classifies the
+    // residual function-reference spellings (`& <fn>` → E0808, a defensive
+    // `<fn> as <type>` → E0808/E0809); after Part A/B those normally structure
+    // into `Cast`/`Unary`, so this is the last-resort path. Any non-empty Raw
+    // that is NOT a recognized fn-reference is genuinely unanalyzable — every
+    // valid construct has been structured (casts, prefix `*`/`&`, assignment,
+    // typed channels) — so it fails closed with E0818 rather than reaching
+    // codegen effect-blind. Empty Raw is clean; match-arm patterns are exempt
+    // upstream (`walk_match_pattern`) and never reach this arm.
+    if expression.variant == "Raw" {
+        let fn_diags = check_fn_reference_raw(expression.text, bindings, expression.span);
+        if fn_diags.length > 0 { return fn_diags; }
+        // SFN-442: classify two familiar-but-unsupported shapes (a value-position
+        // `if`, a character literal) with dedicated E-codes before the generic
+        // E0818 backstop, so they carry an actionable rewrite instead of the
+        // opaque "unstructured expression" message.
+        let if_diags = check_value_if_raw(expression.text, expression.span);
+        if if_diags.length > 0 { return if_diags; }
+        let char_diags = check_char_literal_raw(expression.text, expression.span);
+        if char_diags.length > 0 { return char_diags; }
+        return check_unanalyzable_raw(expression.text, expression.span);
+    }
+    return [];
+}
+
+// Walk a match-arm pattern for diagnostics, exempting the `Raw` shorthand
+// destructure form from the blanket E0818 fail-closed backstop (#1743).
+// Colon-less shorthand patterns (e.g. `Result.Ok { value }`) legitimately
+// degrade to `Expression.Raw` — they are bindings, not unstructured
+// *expressions*, and carry no effects, so they must not trip E0818. Their
+// bindings are registered separately via `register_match_pattern_bindings`.
+// Structured patterns (Struct/Identifier) are still walked normally.
+fn walk_match_pattern(pattern: Expression?, ctx: TypeckCtx) -> Diagnostic[] {
+    if pattern == null { return []; }
+    if pattern.variant == "Raw" { return []; }
+    return walk_expression(pattern, ctx);
+}

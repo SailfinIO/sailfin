@@ -1,0 +1,52 @@
+// compiler/src/llvm/expression_lowering/native/core_operands/type_predicates.sfn
+//
+// LLVM primitive-type predicates shared across coercion and cast lowering.
+import { find_substring_from } from "../core_text";
+
+// Slice D (2026-05-03): integer/float LLVM-type predicates consumed by
+// `lower_cast_expression` (the numeric `as` matrix, in
+// `../core_cast_lowering`). LLVM types here are the ones produced by
+// `map_type_annotation`: `i1`/`i8`/`i16`/`i32`/`i64` for integers and
+// `double`/`float` for floats. Pointer types (e.g. `i8*`, `i64*`) are
+// handled by separate branches in their respective callers.
+// The original of this comment also named `dominant_type` as a consumer;
+// it never called these predicates (it dispatches on `numeric_type_kind`),
+// so that attribution is dropped rather than carried forward.
+fn is_integer_llvm_type(value: string) -> boolean {
+    if value == "i1" { return true; }
+    if value == "i8" { return true; }
+    if value == "i16" { return true; }
+    if value == "i32" { return true; }
+    if value == "i64" { return true; }
+    return false;
+}
+
+fn is_float_llvm_type(value: string) -> boolean {
+    if value == "double" { return true; }
+    if value == "float" { return true; }
+    if value == "half" { return true; }
+    if value == "bfloat" { return true; }
+    return false;
+}
+
+fn integer_llvm_width(value: string) -> int {
+    if value == "i1" { return 1; }
+    if value == "i8" { return 8; }
+    if value == "i16" { return 16; }
+    if value == "i32" { return 32; }
+    if value == "i64" { return 64; }
+    return 0;
+}
+
+// Collapse runs of consecutive spaces to a single space inside LLVM type strings.
+// Uses find_substring_from + substring which rely on the C runtime (grapheme_at)
+// rather than the [] operator that older seeds miscompile.
+fn collapse_type_spaces(value: string) -> string {
+    let mut result = value;
+    loop {
+        let idx = find_substring_from(result, "  ", 0);
+        if idx < 0 { break; }
+        result = substring(result, 0, idx) + " " + substring(result, idx + 2, result.length);
+    }
+    return result;
+}

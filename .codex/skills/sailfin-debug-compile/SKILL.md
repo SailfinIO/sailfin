@@ -18,7 +18,7 @@ Use this skill whenever `sfn check`, `make compile`, a single `.sfn` build, or L
 Map the symptom to the canonical pipeline stage:
 
 1. Lexer/parser: `compiler/src/lexer.sfn`, `compiler/src/parser.sfn`
-2. AST/type/effects: `compiler/src/ast.sfn`, `compiler/src/typecheck.sfn`, `compiler/src/effect_checker.sfn`
+2. AST/type/effects: `compiler/src/ast.sfn`, `compiler/src/typecheck/`, `compiler/src/effect_checker.sfn`
 3. Native IR/emitter: `compiler/src/native_ir.sfn`, `compiler/src/emit_native.sfn`
 4. LLVM lowering: `compiler/src/llvm/lowering/`
 5. Runtime/prelude: `runtime/prelude.sfn`, `runtime/sfn/`

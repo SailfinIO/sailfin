@@ -1,6 +1,6 @@
 // Unit tests for `extern fn` typechecker registration.
 //
-// Covers the contract added in `compiler/src/typecheck.sfn` and
+// Covers the contract added in `compiler/src/typecheck/` and
 // `compiler/src/typecheck_types/` for the runtime-rewrite Phase 1
 // prerequisite (see docs/proposals/0025-native-runtime-architecture.md `#395-extern-function-lowering`).
 //

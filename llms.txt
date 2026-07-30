@@ -411,7 +411,7 @@ The compiler is self-hosted (written in Sailfin, compiles itself):
     Lexer (lexer.sfn)
       -> Parser (parser/*.sfn)
         -> AST (ast.sfn)
-          -> Type Checker (typecheck.sfn)
+          -> Type Checker (typecheck/)
             -> Native Emitter (emit_native.sfn)
               -> .sfn-asm intermediate representation
                 -> LLVM Lowering (llvm/lowering/*.sfn)

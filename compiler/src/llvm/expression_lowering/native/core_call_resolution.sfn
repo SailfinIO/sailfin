@@ -41,7 +41,7 @@ import {
 import { array_pointer_element_type } from "../arrays";
 import { lower_closure_pair_marker, lower_expression } from "./core";
 import { collect_parameter_types } from "./core_helpers";
-import { load_local_operand } from "./core_operands";
+import { load_local_operand } from "./core_operands/comparisons";
 import { strip_enclosing_parentheses } from "./core_operators";
 import {
     find_member_access_separator,

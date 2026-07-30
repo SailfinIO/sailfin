@@ -1,5 +1,6 @@
 // Unit tests for `fn main` signature validation in
-// `compiler/src/typecheck.sfn` (issue #469, M5.3 prerequisite).
+// `compiler/src/typecheck/function_scopes.sfn` (issue #469, M5.3
+// prerequisite).
 //
 // The lowering pass at `compiler/src/llvm/lowering/emission.sfn:319`
 // already detects `fn_name == "main"` and emits a C-compatible

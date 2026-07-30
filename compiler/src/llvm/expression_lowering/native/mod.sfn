@@ -41,13 +41,9 @@ export {
     detect_borrow_conflicts
 } from "./core";
 
-export {
-    coerce_operand_to_type,
-    harmonise_operands,
-    emit_boolean_and,
-    emit_comparison_instruction,
-    load_local_operand
-} from "./core_operands";
+export { emit_boolean_and, emit_comparison_instruction, load_local_operand } from "./core_operands/comparisons";
+
+export { coerce_operand_to_type, harmonise_operands } from "./core_operands/dispatch";
 
 export {
     append_local_binding,

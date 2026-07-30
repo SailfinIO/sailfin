@@ -1,0 +1,180 @@
+// compiler/src/typecheck/arithmetic_rules.sfn
+//
+// Arithmetic and primitive-method type rules: mixed-numeric, array, and
+// struct operand rejection, plus primitive method resolution.
+import { Expression, SourceSpan } from "../ast";
+import { lookup_imported_function } from "../effect_imports";
+import { Diagnostic } from "../typecheck_types";
+import { element_kind_marks_array } from "../typecheck_types/annotation_shape_checks";
+import { is_builtin_call_name } from "../typecheck_types/extern_abi";
+import { SymbolEntry, find_symbol } from "../typecheck_types/symbol_table_and_raw_exprs";
+import { token_from_name } from "../typecheck_types/text_utils";
+import {
+    make_array_arithmetic_diagnostic,
+    make_mixed_arithmetic_diagnostic,
+    make_struct_arithmetic_diagnostic,
+    make_unknown_primitive_method_diagnostic,
+    primitive_has_method
+} from "../typecheck_types/value_and_object_checks";
+import { TypeckCtx } from "./context";
+import { _conditional_number_kind } from "./try_and_conditional";
+
+// SFN-385: reject `recv.method(...)` on a primitive receiver whose method is
+// provably unresolvable. The lowerer resolves such a call by (1) a primitive
+// method descriptor (`substring` family) or (2) fusing the receiver as arg0 to a
+// free callable (`s.substring(a, b)` -> `substring(s, a, b)`); it fatals with
+// "callee signature is not known" only when BOTH miss. This mirror rejects
+// exactly that set: it fires only when the receiver's primitive kind is known
+// (an explicitly-annotated binding/parameter, or a primitive literal) and the
+// method is neither a whitelisted primitive method (`primitive_has_method`) nor
+// an in-scope callable (builtin / imported / bound name). Every other receiver
+// — user type, unannotated binding, complex expression — yields the fail-open
+// "" kind and stays silent, so no valid program is rejected.
+fn primitive_method_diagnostics(expression: Expression, ctx: TypeckCtx) -> Diagnostic[] {
+    let callee = expression.callee;
+    if callee == null { return []; }
+    if !strings_equal(callee.variant, "Member") { return []; }
+    let receiver = callee.object;
+    if receiver == null { return []; }
+    let mut prim: string = "";
+    if strings_equal(receiver.variant, "Identifier") {
+        let entry = find_symbol(ctx.bindings, receiver.name);
+        if entry != null { prim = entry.declared_prim; }
+    } else if strings_equal(receiver.variant, "StringLiteral") {
+        prim = "string";
+    } else if strings_equal(receiver.variant, "NumberLiteral") {
+        prim = _conditional_number_kind(receiver.value);
+    } else if strings_equal(receiver.variant, "BooleanLiteral") {
+        prim = "boolean";
+    }
+    if prim.length == 0 { return []; }
+    let member = callee.member;
+    // (1) a genuine primitive method descriptor -> valid, silent.
+    if primitive_has_method(prim, member) { return []; }
+    // (2) fuses to a free callable named `member` -> valid, silent. Mirrors the
+    // lowerer's receiver-arg0 fusion (`substring` is a prelude global, so a
+    // bound-name hit; an imported helper is an import hit).
+    if is_builtin_call_name(member) { return []; }
+    if lookup_imported_function(ctx.imports, member) != null { return []; }
+    if find_symbol(ctx.bindings, member) != null { return []; }
+    return [make_unknown_primitive_method_diagnostic(prim, member, token_from_name(member, callee.span))];
+}
+
+// SFN-385: the anchor span for a mixed-arithmetic diagnostic. The `Binary` node
+// itself carries no span (ast.sfn), so borrow one from an operand that has one
+// (`Identifier`/`Member`); `null` when neither does (the diagnostic still
+// renders, without a caret).
+fn _arith_operand_span(expression: Expression?) -> SourceSpan? {
+    if expression == null { return null; }
+    if strings_equal(expression.variant, "Identifier") {
+        return expression.span;
+    }
+    if strings_equal(expression.variant, "Member") { return expression.span; }
+    return null;
+}
+
+// SFN-385: the numeric primitive class ("int" | "float" | "") of a *named*
+// arithmetic operand, from its explicit annotation (`declared_prim`). Only a
+// named binding is classified: a bare numeric literal is deliberately left "",
+// because the lowerer coerces a literal against a typed sibling in an
+// order/direction-dependent way (`lower_binary_operation`, "literal-context
+// propagation is bidirectional"), so a literal operand carries no reliable
+// static mismatch. Everything else (member access, call, nested expr,
+// unannotated or non-numeric binding) is also the fail-open "".
+fn operand_numeric_class(expression: Expression?, bindings: SymbolEntry[]) -> string {
+    if expression == null { return ""; }
+    if strings_equal(expression.variant, "Identifier") {
+        let entry = find_symbol(bindings, expression.name);
+        if entry == null { return ""; }
+        if strings_equal(entry.declared_prim, "int") { return "int"; }
+        if strings_equal(entry.declared_prim, "float") { return "float"; }
+        return "";
+    }
+    return "";
+}
+
+// SFN-385: reject arithmetic that mixes a proven `int` and a proven `float`
+// operand -> E0306. Fires only for the arithmetic operators (`+ - * / %`) and
+// only when BOTH operands are named bindings with known, differing numeric
+// kinds. This is the one arithmetic shape the lowerer *always* fatals on
+// ("ABI primitive mismatch"): two typed (non-literal) operands have no
+// literal-coercion escape hatch, so a differing int/float pair is a guaranteed
+// mismatch regardless of operand order. Literal-involving mixes are left "" and
+// fall through to the lowerer's own fatal — replicating their order-dependent
+// coercion rule in the frontend would risk false positives (e.g. the valid
+// `let x: float = 1; x + 2` in numeric_int_default_test.sfn), which is the
+// unsafe direction. Fail-open on anything unclassified.
+fn mixed_arithmetic_diagnostics(expression: Expression, bindings: SymbolEntry[]) -> Diagnostic[] {
+    let op = expression.operator;
+    let mut is_arith: boolean = false;
+    if strings_equal(op, "+") { is_arith = true; }
+    if strings_equal(op, "-") { is_arith = true; }
+    if strings_equal(op, "*") { is_arith = true; }
+    if strings_equal(op, "/") { is_arith = true; }
+    if strings_equal(op, "%") { is_arith = true; }
+    if !is_arith { return []; }
+    let lk = operand_numeric_class(expression.left, bindings);
+    if lk.length == 0 { return []; }
+    let rk = operand_numeric_class(expression.right, bindings);
+    if rk.length == 0 { return []; }
+    if strings_equal(lk, rk) { return []; }
+    let mut anchor = _arith_operand_span(expression.left);
+    if anchor == null { anchor = _arith_operand_span(expression.right); }
+    return [make_mixed_arithmetic_diagnostic(lk, rk, op, anchor)];
+}
+
+fn _operand_is_array(expression: Expression?, bindings: SymbolEntry[]) -> boolean {
+    if expression == null { return false; }
+    if strings_equal(expression.variant, "Array") { return true; }
+    if !strings_equal(expression.variant, "Identifier") { return false; }
+    let entry = find_symbol(bindings, expression.name);
+    if entry == null { return false; }
+    return element_kind_marks_array(entry.element_kind);
+}
+
+// Reject only the proven array/array pair. Unknown or mixed shapes remain
+// fail-open so this frontend rule does not invent semantics for pointer
+// arithmetic or partially-inferred expressions.
+fn array_arithmetic_diagnostics(expression: Expression, bindings: SymbolEntry[]) -> Diagnostic[] {
+    let op = expression.operator;
+    let mut is_arith: boolean = false;
+    if strings_equal(op, "+") { is_arith = true; }
+    if strings_equal(op, "-") { is_arith = true; }
+    if strings_equal(op, "*") { is_arith = true; }
+    if strings_equal(op, "/") { is_arith = true; }
+    if strings_equal(op, "%") { is_arith = true; }
+    if !is_arith { return []; }
+    if !_operand_is_array(expression.left, bindings) { return []; }
+    if !_operand_is_array(expression.right, bindings) { return []; }
+    return [make_array_arithmetic_diagnostic(op, expression.span)];
+}
+
+// Return the declaration-resolved struct annotation for a bare binding
+// operand. The binding registrar already proved this in the declaration's
+// lexical scope; use-site generic/alias shadowing must not re-resolve it.
+fn _operand_struct_name(expression: Expression?, bindings: SymbolEntry[]) -> string {
+    if expression == null { return ""; }
+    if !strings_equal(expression.variant, "Identifier") { return ""; }
+    let entry = find_symbol(bindings, expression.name);
+    if entry == null { return ""; }
+    return entry.declared_struct;
+}
+
+// Reject only proven struct/struct arithmetic on named, explicitly typed
+// operands. Calls, literals, inferred bindings, aliases, and mixed shapes stay
+// fail-open; extending expression inference is outside SFN-584.
+fn _struct_arithmetic_diagnostics(expression: Expression, ctx: TypeckCtx) -> Diagnostic[] {
+    let op = expression.operator;
+    let mut is_arith: boolean = false;
+    if strings_equal(op, "+") { is_arith = true; }
+    if strings_equal(op, "-") { is_arith = true; }
+    if strings_equal(op, "*") { is_arith = true; }
+    if strings_equal(op, "/") { is_arith = true; }
+    if strings_equal(op, "%") { is_arith = true; }
+    if !is_arith { return []; }
+    let left_type = _operand_struct_name(expression.left, ctx.bindings);
+    if left_type.length == 0 { return []; }
+    let right_type = _operand_struct_name(expression.right, ctx.bindings);
+    if right_type.length == 0 { return []; }
+    return [make_struct_arithmetic_diagnostic(left_type, right_type, op, expression.span)];
+}
