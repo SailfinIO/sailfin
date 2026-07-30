@@ -16,6 +16,19 @@ programs are not capped — only the toolchain self-caps. The historical
 - **macOS:** Darwin ignores `RLIMIT_AS`, so the cap is a no-op there. The budget
   is load-bearing on Linux/WSL only.
 
+**The cap bounds a process, not a fleet — it does not make a parallel suite
+safe.** `N` concurrent `sfn` children each self-apply their own 8 GiB cap, so
+the aggregate ceiling is `N x 8 GiB`, and nothing enforces it. Any fan-out must
+budget host RAM itself: `_test_jobs_budget`
+(`compiler/src/cli/commands/test.sfn`) and its bash twin
+`scripts/detect_test_jobs.sh` for the test pool, `_cr_ram_budget_jobs`
+(`compiler/src/capsule_emit_parallel.sfn`) for per-module emit. All three
+reserve **3 GiB/job out of 66% of RAM** — the measured peak of the heaviest
+module emit — and pooled test children are pinned to `SAILFIN_BUILD_JOBS=1` so
+the two fan-outs cannot nest and multiply (SFN-547). Never raise a job count
+past those budgets on the theory that the self-cap will catch it; it will not,
+and the failure mode is a hard host kill, not an `sfn` error.
+
 **Timeouts still apply** — the memory budget does not guard against hangs. Wrap
 single-file invocations with `timeout 60`; `make` targets handle their own.
 

@@ -219,17 +219,41 @@ fn _parse_jobs_value(text: string) -> int {
     return n;
 }
 
-// SFN-91: pure half of the native test-worker budget. Mirrors the retired
-// Makefile helper's `min(cores, RAM/384 MiB)` policy, with a floor of 1,
-// global cap of 16, and Darwin cap of 2 for nested cold-build tests. Unknown
-// RAM is deliberately fail-closed to serial: the test pool has no shared
-// RLIMIT_AS backstop, so CPU-only fan-out can OOM a small host.
+// SFN-91: pure half of the native test-worker budget —
+// `min(cores, usable_RAM / per_job_reserve)` with a floor of 1, a global
+// cap of 16, and a Darwin cap of 2 for nested cold-build tests. Unknown RAM
+// is deliberately fail-closed to serial: the test pool has no shared
+// RLIMIT_AS backstop, so CPU-only fan-out can OOM a small host. That is the
+// one place this policy still diverges from the emit fan-out's fail-open
+// `_cr_ram_budget_jobs`, which would rather over-fan than starve a build on
+// a host it cannot measure.
+//
+// SFN-547: the reserve and the 66% usable slice are now the same figures the
+// emit fan-out reserves (`_cr_ram_budget_jobs`,
+// `compiler/src/capsule_emit_parallel.sfn`), because a pooled test child can
+// spawn exactly that emit — the previous 384 MiB reserve was sized for the
+// light unit-test majority and under-counted the build-and-run class by ~8x,
+// handing a 14 GiB host 16 jobs and OOMing it outright. `RLIMIT_AS` bounds
+// each process, not the fleet: N children multiply the 8 GiB cap, so this
+// arithmetic is the only thing standing between the pool and the host's RAM.
+// `_pool_child_env` pins each child's own emit fan-out to serial, which is
+// what makes `jobs * per_job_reserve` an honest bound rather than a floor.
+//
+// `scripts/detect_test_jobs.sh` reimplements this policy in bash for the
+// Makefile's `TEST_JOBS ?=` default (which passes an explicit `--jobs N`, so
+// it reaches the pool ahead of this function). The two must stay in lockstep.
 fn _test_jobs_budget(memsize_bytes: int, nproc: int, is_darwin: boolean) -> int {
     if memsize_bytes <= 0 { return 1; }
     let mut cores = nproc;
     if cores < 1 { cores = 1; }
-    let per_job_bytes: int = 402653184;
-    let mut by_mem = memsize_bytes / per_job_bytes;
+    // 3 GiB — the measured peak RSS of the heaviest compiler-module emit
+    // (`capsule_resolver.sfn` ~3.23 GiB); see
+    // `docs/proposals/0022-darwin-memory-governor.md` §2.4.
+    let per_job_bytes: int = 3221225472;
+    // 66% slice of physical RAM: headroom for the parent runner, the
+    // `clang`/`llvm-link` grandchildren, and the OS.
+    let usable: int = memsize_bytes * 66 / 100;
+    let mut by_mem = usable / per_job_bytes;
     if by_mem < 1 { by_mem = 1; }
     let mut jobs = cores;
     if by_mem < jobs { jobs = by_mem; }
@@ -2683,6 +2707,18 @@ fn _env_entry_has_key(entry: string, key: string) -> boolean {
     return strings_equal(substring(entry, klen, klen + 1), "=");
 }
 
+// True when the snapshot already carries `key` — used to leave a caller's
+// explicit override in place instead of appending a competing default.
+fn _env_snapshot_has_key(base_env: string[], key: string) -> boolean {
+    let mut i: int = 0;
+    loop {
+        if i >= base_env.length { break; }
+        if _env_entry_has_key(base_env[i], key) { return true; }
+        i += 1;
+    }
+    return false;
+}
+
 // #1236 / #1410: per-child environment = the invocation-stable snapshot
 // (now the parent's full `process.environ()`) plus the per-child
 // test-runner variables (`SAILFIN_TEST_SCRATCH`,
@@ -2721,6 +2757,21 @@ fn _pool_child_env(base_env: string[], child_scratch: string, runtime_objdir: st
     }
     if update_snapshots { env_flat.push("SAILFIN_UPDATE_SNAPSHOTS=1"); }
     if json_output { env_flat.push("SAILFIN_TEST_JSON_SUBFRAME=1"); }
+    // SFN-547: the pool IS the parallelism layer. A pooled child that spawns
+    // a build would otherwise fan its own per-module emit out to
+    // `_cr_resolve_jobs`' RAM budget, which reads the host's total RAM and
+    // cannot see its `jobs - 1` siblings doing the same — so the real peak is
+    // `jobs * emit_jobs * 3 GiB`, not the `jobs * 3 GiB` that
+    // `_test_jobs_budget` sizes against. Pinning each child to serial emit
+    // makes that budget honest. Only the pooled path is affected: the serial
+    // (`--jobs 1`) path inherits the parent env via `process.run` and keeps
+    // its nested fan-out, which is correct because nothing runs beside it.
+    // An inherited `SAILFIN_BUILD_JOBS` always wins: unlike the per-child
+    // keys filtered above it is kept in the snapshot, and the pin is skipped
+    // entirely rather than appended beside it.
+    if !_env_snapshot_has_key(base_env, "SAILFIN_BUILD_JOBS") {
+        env_flat.push("SAILFIN_BUILD_JOBS=1");
+    }
     return env_flat;
 }
 
@@ -3319,6 +3370,7 @@ export {
     _collect_test_files_cmd,
     _suite_name_from_path,
     _parse_jobs_value,
+    _pool_child_env,
     _resolve_test_jobs,
     _test_jobs_budget,
     _parse_shard_index,

@@ -1,31 +1,38 @@
 #!/usr/bin/env bash
 # detect_test_jobs.sh — Pick a sensible TEST_JOBS default for the current host.
 #
-# Heuristic: min(cores, mem_mb / 384), floor 1, cap 16; macOS caps at 2.
+# Heuristic: min(cores, (mem_mb * 66%) / 3072), floor 1, cap 16; macOS
+# caps at 2.
 #
-# The 384 MB-per-job budget is sized for the common test-runner child
-# process, not compiler-module builds. Measured child-process peak at the
-# time of #1998:
-#   * typical unit/integration test child   : ~50–80 MB RSS
-# The 384 MB budget gives ample headroom over that common class.
+# SFN-547: the budget is sized for the HEAVIEST test child, not the common
+# one. The previous 384 MB-per-job divisor was sized for the light majority
+# (a typical unit/integration child is ~50–80 MB RSS), which is true and
+# irrelevant: the pool's peak is set by the build-and-run class, where a
+# child spawning a nested `sfn build`/`sfn run`/`sfn emit` reaches the same
+# weight as a compiler-module emit — `capsule_resolver.sfn` peaks at
+# ~3.23 GB RSS (docs/proposals/0022-darwin-memory-governor.md §2.4).
+# Budgeting the light majority handed a 14 GB host 16 jobs and killed it
+# outright. Sizing for the heavy tail costs parallelism on small hosts and
+# is the only setting that cannot OOM them.
 #
-# This deliberately differs from detect_build_jobs.sh's ~2 GB-per-job budget,
-# which is sized for per-module emit (heaviest module: ~1.76 GB peak RSS).
-# Using BUILD_JOBS' budget for every test child would under-report
-# parallelism by ~5× for the light majority.
+# The compiler's 8 GB RLIMIT_AS self-cap does NOT bound this: it caps each
+# process, so N children multiply it. See .claude/rules/compiler-safety.md.
 #
-# macOS additionally caps at 2 jobs, mirroring detect_build_jobs.sh. The
-# 384 MB budget is right for the light majority but wrong for the
-# build-and-run e2e class: an e2e test that spawns a nested cold
-# `sfn build`/`sfn run`/`sfn emit` peaks ~1.3–1.8 GB RSS while that nested
-# compile runs — the same weight class as a module build, not the ~150 MB
-# once assumed here. On the memory-constrained macOS runner (~7 GB) the
-# memory budget alone lets enough of those heavy children coincide to tip
-# the pool into OOM: the macOS-arm64 nightly self-host check kept aborting
-# with exit 134 / SIGABRT in the e2e phase, the victim test roaming run to
-# run (SFN-87). A flat 2-job cap bounds the concurrent-heavy-compile peak
-# the same way BUILD_JOBS=2 does; Linux is unaffected and an explicit
-# TEST_JOBS=N still wins.
+# 3072 MB/job and the 66% usable slice (headroom for the parent runner, the
+# clang/llvm-link grandchildren, and the OS) are exactly the figures the
+# emit fan-out reserves — `_cr_ram_budget_jobs` in
+# compiler/src/capsule_emit_parallel.sfn — because a test child can spawn
+# exactly that emit. `_test_jobs_budget` in
+# compiler/src/cli/commands/test.sfn is the native twin of this script and
+# carries the identical constants; keep the two in lockstep.
+#
+# macOS additionally caps at 2 jobs, mirroring detect_build_jobs.sh. On the
+# memory-constrained macOS runner (~7 GB) the memory budget alone let enough
+# heavy children coincide to tip the pool into OOM: the macOS-arm64 nightly
+# self-host check kept aborting with exit 134 / SIGABRT in the e2e phase,
+# the victim test roaming run to run (SFN-87). A flat 2-job cap bounds the
+# concurrent-heavy-compile peak the same way BUILD_JOBS=2 does; Linux is
+# unaffected and an explicit TEST_JOBS=N still wins.
 #
 # Cap 16: the runner's --jobs parameter accepts [1, 256] but the
 # sliding-window pool has diminishing returns past core count; 16 matches
@@ -59,13 +66,16 @@ case "$uname_s" in
         ;;
 esac
 
-# Sanitize: a non-numeric or zero result falls back to safe defaults.
+# Sanitize: a non-numeric or zero result falls back to safe defaults. The
+# 1536 MB assumption is below one job's reserve, so an unmeasurable host
+# floors to serial — matching `_test_jobs_budget`'s fail-closed branch.
 [ "$cores" -gt 0 ] 2>/dev/null || cores=1
 [ "$mem_mb" -gt 0 ] 2>/dev/null || mem_mb=1536
 
-# Apply the per-job memory budget. 384 MB per job; see the header comment
-# for the per-child RSS data this divisor is sized against.
-by_mem=$((mem_mb / 384))
+# Apply the per-job memory budget: 3072 MB per job out of a 66% slice of
+# physical RAM. See the header comment for the RSS data these are sized
+# against and for the native twin they must stay in lockstep with.
+by_mem=$(((mem_mb * 66 / 100) / 3072))
 [ "$by_mem" -lt 1 ] && by_mem=1
 
 jobs=$cores
