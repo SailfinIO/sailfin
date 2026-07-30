@@ -102,9 +102,12 @@ fn target_uses_gnu_link_gc(target_os: string) -> boolean {
 }
 
 // Drop POSIX-only link libraries for a Windows (MSVC/UCRT) target:
-// `-lm`/`-lpthread` are POSIX, and `-lssl`/`-lcrypto` resolve to the
-// `windows_stubs.ll` no-op crypto stubs, so none are passed to the MSVC
-// link (`ws2_32`/`kernel32` are auto-linked by clang). Every other target
+// `-lm`/`-lpthread` are POSIX, and `-lssl`/`-lcrypto` have no Windows host
+// package to link against (`platform/openssl_absent_windows.sfn` swaps
+// out `tls.sfn`'s OpenSSL externs entirely for that target — see
+// `target_condition_runtime_sfn_sources` below — rather than relying on
+// a linked-but-stubbed library), so none are passed to the MSVC link
+// (`ws2_32`/`kernel32` are auto-linked by clang). Every other target
 // returns the list unchanged (identity → byte-identical link).
 fn target_filter_link_libs(libs: string[], target_os: string) -> string[] {
     if !target_os_is_windows(target_os) { return libs; }
@@ -120,34 +123,53 @@ fn target_filter_link_libs(libs: string[], target_os: string) -> string[] {
     return kept;
 }
 
+// Extra link libraries a target REQUIRES beyond `libs` — the reverse of
+// `target_filter_link_libs` above, which only ever drops. Windows needs
+// `-lbcrypt` (bcrypt.dll's import lib) for
+// `platform/rand_windows.sfn`'s `BCryptGenRandom` (SFN-549); no other
+// target links it, so every non-Windows target returns `[]` (identity →
+// byte-identical link, #1112).
+fn target_extra_link_libs(target_os: string) -> string[] {
+    if target_os_is_windows(target_os) { return ["-lbcrypt"]; }
+    return [];
+}
+
 // Rewrite the runtime capsule's `sfn-sources` list for `target_os`. On
-// Windows, three POSIX-only modules are swapped for their Win32 siblings:
+// Windows, four POSIX-only modules are swapped for their Win32 siblings:
 // `process.sfn` (posix_spawnp/waitpid) for `platform/process_windows.sfn`,
 // `rlimit.sfn` (getrlimit/setrlimit) for `platform/rlimit_windows.sfn`
 // (SFN-549 — previously dropped outright, leaving
 // `apply_default_mem_limit` unresolved once `windows_stubs.ll` stopped
-// linking on the native path), and `rand.sfn` (getentropy/`/dev/urandom`)
-// for `platform/rand_windows.sfn` (SFN-549, `BCryptGenRandom`). A fourth
-// module, `platform/realpath_windows.sfn` (SFN-549, `_fullpath`), is
-// APPENDED rather than swapped — see the note below the loop. This mirrors
-// the mingw Makefile `RUNTIME_MODS` swap and is the extensible seam for the
-// broader MSVC exclusion set (the remaining crypto/TLS/concurrency
-// modules), which is finalized empirically against a real native link in
+// linking on the native path), `rand.sfn` (getentropy/`/dev/urandom`) for
+// `platform/rand_windows.sfn` (SFN-549, `BCryptGenRandom`), and `tls.sfn`
+// (the OpenSSL `SSL_*`/`TLS_*`/`EVP_*` surface) for
+// `platform/openssl_absent_windows.sfn` (SFN-549 — the Windows target has
+// no OpenSSL to link, so the fail-closed native module replaces it
+// rather than the link merely dropping `-lssl -lcrypto` and leaving the
+// externs unresolved). Five further modules —
+// `platform/realpath_windows.sfn`, `platform/clock_windows.sfn`,
+// `platform/pthread_windows.sfn`, `platform/popen_windows.sfn`, and
+// `platform/mkstemp_windows.sfn` (all SFN-549) — are APPENDED rather than
+// swapped, since none has a POSIX `.sfn` module to swap FROM (each backs
+// a bare libc/pthreads symbol, not a Sailfin-authored runtime module);
+// see the note below the loop. This mirrors the mingw Makefile
+// `RUNTIME_MODS` swap and is the extensible seam for the broader MSVC
+// exclusion set, finalized empirically against a real native link in
 // SFEP-0021 M7. Every other target returns the list unchanged.
 //
 // `sources` are already runtime-root-resolved absolute paths; match on the
 // basename so the manifest-root prefix is irrelevant, and rebuild the
 // swapped path from the source's own directory so it stays correctly
 // rooted (`<root>/sfn/process.sfn` → `<root>/sfn/platform/process_windows.sfn`).
-// `rlimit.sfn`/`rand.sfn` already live in `platform/`, so their siblings are
-// joined directly onto that same directory rather than appending another
-// `platform/` segment.
+// `rlimit.sfn`/`rand.sfn`/`tls.sfn` already live in `platform/`, so their
+// siblings are joined directly onto that same directory rather than
+// appending another `platform/` segment.
 fn target_condition_runtime_sfn_sources(sources: string[], target_os: string) -> string[] {
     if !target_os_is_windows(target_os) { return sources; }
     let mut out: string[] = [];
-    // Anchor for the `realpath_windows.sfn` append below — the `platform/`
-    // directory, discovered from whichever of rlimit.sfn/rand.sfn/exec.sfn
-    // happens to be present in `sources`, since none of the three is
+    // Anchor for the append block below — the `platform/` directory,
+    // discovered from whichever of rlimit.sfn/rand.sfn/tls.sfn/exec.sfn
+    // happens to be present in `sources`, since none of the four is
     // guaranteed by this function's own contract.
     let mut platform_dir: string = "";
     let mut i: int = 0;
@@ -166,28 +188,40 @@ fn target_condition_runtime_sfn_sources(sources: string[], target_os: string) ->
             // Already in platform/ — same as rlimit.sfn above.
             platform_dir = _dirname(src);
             out.push(_path_join(platform_dir, "rand_windows.sfn"));
+        } else if base == "tls.sfn" {
+            // Already in platform/ — same as rlimit.sfn/rand.sfn above.
+            platform_dir = _dirname(src);
+            out.push(_path_join(platform_dir, "openssl_absent_windows.sfn"));
         } else if base == "exec.sfn" {
             // exec.sfn itself is unchanged (its `realpath` extern is
             // satisfied by the appended sibling below, not by swapping
-            // exec.sfn out) — captured here only as a third possible
+            // exec.sfn out) — captured here only as a fourth possible
             // anchor for platform_dir.
             platform_dir = _dirname(src);
             out.push(src);
         } else { out.push(src); }
         i += 1;
     }
-    // `realpath_windows.sfn` has no POSIX `.sfn` counterpart to swap FROM
-    // (SFN-549): `realpath(3)` is a bare libc symbol on POSIX, not a
-    // Sailfin-authored runtime module, so — unlike the three swaps above —
-    // this is a pure ADDITION with nothing in `sources` to replace. It
-    // satisfies the `extern fn realpath` two independent consumers each
-    // inline (`exec.sfn` and the compiler's own `cli/entry.sfn`) via
-    // ordinary link-time symbol resolution; see the module header of
-    // `platform/realpath_windows.sfn` for the full rationale. Skipped
-    // (rather than guessing a path) if none of the three platform/ modules
-    // above were present to anchor on.
+    // `realpath_windows.sfn`, `clock_windows.sfn`, `pthread_windows.sfn`,
+    // `popen_windows.sfn`, `mkstemp_windows.sfn`, and
+    // `strcasestr_windows.sfn` have no POSIX `.sfn` counterpart to swap
+    // FROM (SFN-549): `realpath(3)`, `clock_gettime`/`nanosleep`, the
+    // `pthread_*`/`sysconf` surface, `popen`/`pclose`/`mkstemp`, and
+    // `strcasestr(3)` are bare libc/pthreads symbols on POSIX, not
+    // Sailfin-authored runtime modules, so — unlike the swaps above —
+    // these are pure ADDITIONS with nothing in `sources` to replace. Each
+    // satisfies its `extern fn` declaration(s) elsewhere in the runtime
+    // via ordinary link-time symbol resolution; see each module's own
+    // header for the full rationale. Skipped (rather than guessing a
+    // path) if none of the four platform/ modules above were present to
+    // anchor on.
     if platform_dir.length > 0 {
         out.push(_path_join(platform_dir, "realpath_windows.sfn"));
+        out.push(_path_join(platform_dir, "clock_windows.sfn"));
+        out.push(_path_join(platform_dir, "pthread_windows.sfn"));
+        out.push(_path_join(platform_dir, "popen_windows.sfn"));
+        out.push(_path_join(platform_dir, "mkstemp_windows.sfn"));
+        out.push(_path_join(platform_dir, "strcasestr_windows.sfn"));
     }
     return out;
 }
@@ -202,5 +236,6 @@ export {
     target_forced_linker_flag,
     target_uses_gnu_link_gc,
     target_filter_link_libs,
+    target_extra_link_libs,
     target_condition_runtime_sfn_sources
 };

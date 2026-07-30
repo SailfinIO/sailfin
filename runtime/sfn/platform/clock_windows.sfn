@@ -1,0 +1,142 @@
+// runtime/sfn/platform/clock_windows.sfn
+//
+// Windows sibling providing `clock_gettime` and `nanosleep` (SFN-549),
+// APPENDED by `target_condition_runtime_sfn_sources`
+// (`compiler/src/build/target.sfn`) for a Windows target — there is no
+// POSIX `.sfn` module to swap FROM here (both are bare libc symbols
+// `runtime/sfn/platform/posix.sfn` externs, not Sailfin-authored modules),
+// the same append shape `realpath_windows.sfn`/`rand_windows.sfn` use.
+// `runtime/sfn/clock.sfn` imports both from `./platform/posix` and links
+// against whichever object defines them; this file is that definition on
+// Windows.
+//
+// Out-param ABI: both functions take a raw `*u8` (matching how
+// `sfn_clock_unix_millis` writes its own out-param at
+// `runtime/sfn/clock.sfn:163` via `memcpy`, rather than `posix.sfn`'s
+// opaque `*Timespec` — `posix.sfn` is a type-check-only import source
+// here, not a separately linked object, so nothing requires the pointee
+// type to match at the object-code boundary). A `timespec` is two `i64`s
+// (`tv_sec` at byte offset 0, `tv_nsec` at offset 8) on every shipped
+// target per `clock.sfn`'s own header, and this module writes/reads that
+// exact layout through `memcpy`/`sailfin_intrinsic_pointer_read_i64` —
+// the same intrinsic-backed out-param idiom `clock.sfn:143-165` and
+// `:190-` use, so `clock_gettime_reader_test.sfn`'s pinned field-read
+// ordering sees identical bytes regardless of which platform wrote them.
+//
+// Decimal-only constants: hex integer literals silently fold to 0 on the
+// pinned seed (`runtime/sfn/process.sfn:38`), so every Win32 constant
+// below is written decimal even where the Win32 SDK header spells it hex.
+extern fn memcpy(dst: *u8, src: *u8, n: usize) -> *u8;
+
+// `void GetSystemTimePreciseAsFileTime(LPFILETIME)` — writes an 8-byte
+// FILETIME (100 ns ticks since 1601-01-01) through the out-pointer.
+// Deliberately NOT `GetTickCount64` (~15 ms granularity) and NOT the
+// non-Precise `GetSystemTimeAsFileTime` (also coarse) — this is the
+// highest-resolution wall-clock source UCRT exposes.
+extern fn GetSystemTimePreciseAsFileTime(out_filetime: *u8) -> void;
+
+// `BOOL QueryPerformanceCounter(LARGE_INTEGER *)` /
+// `BOOL QueryPerformanceFrequency(LARGE_INTEGER *)` — the monotonic
+// clock pair. `LARGE_INTEGER` is a plain 8-byte signed tick count at the
+// ABI (the union'd `LowPart`/`HighPart` split is source-level only), so
+// a bare `*i64` out-param is the correct shape.
+extern fn QueryPerformanceCounter(out_count: *i64) -> i32;
+
+extern fn QueryPerformanceFrequency(out_freq: *i64) -> i32;
+
+// `void Sleep(DWORD dwMilliseconds)` — already externed at
+// `platform/process_windows.sfn:123` for the process/run surface.
+// Redeclared here rather than imported: redeclaring a C symbol across
+// runtime modules is safe (each module emits its own `declare` and the
+// linker resolves both to the single Win32 entry point — the same
+// cross-module redeclaration `tls.sfn`'s `getenv`/`strlen` and
+// `posix.sfn`'s `write` already rely on), and this file stays
+// self-contained rather than importing a sibling platform module.
+extern fn Sleep(ms: i32) -> void;
+
+// 100 ns ticks between the FILETIME epoch (1601-01-01) and the Unix
+// epoch (1970-01-01).
+let FILETIME_UNIX_EPOCH_DELTA_TICKS: i64 = 116444736000000000;
+
+// 100 ns ticks per second — the FILETIME tick rate.
+let TICKS_PER_SEC: i64 = 10000000;
+
+// 100 ns per tick, expressed in nanoseconds.
+let NANOS_PER_TICK: i64 = 100;
+
+let NANOS_PER_SEC: i64 = 1000000000;
+
+let MILLIS_PER_SEC: i64 = 1000;
+
+let NANOS_PER_MILLI: i64 = 1000000;
+
+// `clock_gettime(clk_id, ts)` — writes `{tv_sec, tv_nsec}` through `ts`.
+// `clk_id == 0` (`CLOCK_REALTIME` on every shipped POSIX provider, and the
+// convention `posix.sfn` documents) reads the wall clock via
+// `GetSystemTimePreciseAsFileTime` and rebases FILETIME's 1601 epoch to
+// Unix 1970. Any other `clk_id` reads the monotonic clock via
+// `QueryPerformanceCounter`/`QueryPerformanceFrequency` — Windows has no
+// per-id monotonic clock selector the way Linux (`1`) and Darwin (`6`)
+// do (`compiler/src/llvm/lowering_debug_state.sfn:91-98` has no Windows
+// leg), so every non-zero `clk_id` routes here rather than matching a
+// specific numeric id. Returns 0 on success, -1 on failure (null `ts` or
+// a zero QPC frequency).
+fn clock_gettime(clk_id: i32, ts: *u8) -> i32 ![clock] {
+    if ts as i64 == 0 { return 0 - 1; }
+    let mut sec: i64 = 0;
+    let mut nsec: i64 = 0;
+    if clk_id == 0 {
+        let mut filetime: i64 = 0;
+        let filetime_ptr: *i64 = & filetime;
+        GetSystemTimePreciseAsFileTime(filetime_ptr as *u8);
+        let ticks: i64 = sailfin_intrinsic_pointer_read_i64(filetime_ptr);
+        let unix_ticks: i64 = ticks - FILETIME_UNIX_EPOCH_DELTA_TICKS;
+        sec = unix_ticks / TICKS_PER_SEC;
+        nsec = (unix_ticks % TICKS_PER_SEC) * NANOS_PER_TICK;
+    } else {
+        let mut counter: i64 = 0;
+        let mut freq: i64 = 0;
+        let counter_ptr: *i64 = & counter;
+        let freq_ptr: *i64 = & freq;
+        QueryPerformanceCounter(counter_ptr);
+        QueryPerformanceFrequency(freq_ptr);
+        let c: i64 = sailfin_intrinsic_pointer_read_i64(counter_ptr);
+        let f: i64 = sailfin_intrinsic_pointer_read_i64(freq_ptr);
+        if f == 0 { return 0 - 1; }
+        sec = c / f;
+        nsec = ((c % f) * NANOS_PER_SEC) / f;
+    }
+    let sec_ptr: *i64 = & sec;
+    let nsec_ptr: *i64 = & nsec;
+    memcpy(ts, sec_ptr as *u8, 8 as usize);
+    memcpy((ts as i64 + 8) as *u8, nsec_ptr as *u8, 8 as usize);
+    return 0;
+}
+
+// `nanosleep(req, rem)` — reads `{tv_sec, tv_nsec}` from `req` and calls
+// `Sleep` with the millisecond duration. Windows has no EINTR
+// equivalent for `Sleep`, so unlike the POSIX `nanosleep` adapter
+// (`clock.sfn`'s bounded retry loop) this is a single call; `rem` is
+// left unwritten (never partially consumed the way a signal-interrupted
+// POSIX sleep can be). Returns 0 on success, -1 on a null `req`.
+//
+// Sub-millisecond durations round UP to 1 ms rather than truncating to
+// 0. `Sleep(0)` does not sleep — it yields the remainder of the thread's
+// time slice and returns immediately if no equal-priority thread is
+// ready — so truncation would turn a sub-millisecond sleep into a busy
+// spin. POSIX `nanosleep` guarantees sleeping AT LEAST the requested
+// duration, and `Sleep(1)` honors that where `Sleep(0)` violates it.
+// This matters because `sfn_sleep` is user-facing (re-exported through
+// `runtime/prelude.sfn:69` as `runtime_sleep_fn`), so a poll loop built
+// on a fractional-millisecond sleep would burn a core on Windows and
+// nowhere else. Over-sleeping by <1 ms is the correct direction to err;
+// Win32 has no finer-grained sleep primitive without a waitable timer.
+fn nanosleep(req: *u8, rem: *u8) -> i32 ![clock] {
+    if req as i64 == 0 { return 0 - 1; }
+    let sec: i64 = sailfin_intrinsic_pointer_read_i64(req as *i64);
+    let nsec: i64 = sailfin_intrinsic_pointer_read_i64((req as i64 + 8) as *i64);
+    let mut ms: i64 = sec * MILLIS_PER_SEC + nsec / NANOS_PER_MILLI;
+    if ms == 0 && (sec > 0 || nsec > 0) { ms = 1; }
+    Sleep(ms as i32);
+    return 0;
+}

@@ -23,10 +23,15 @@ import { host_is_windows } from "./target";
 //
 // `mkstemp` and `close` are POSIX spellings absent from the MSVC UCRT
 // (which exports `_close`). The `host_is_windows()` guard below stops
-// them being *called* there, but the `call` is still emitted and must
-// resolve at link, so the native MSVC leg (SFEP-0021 M7) needs a
-// `runtime/ir/windows_stubs.ll` entry for each — the same treatment
-// `@realpath` already has there.
+// them being *called* at runtime, but `host_is_windows()` is itself a
+// runtime check, not a compile-time one, so both `call`s are still
+// emitted and must resolve at link regardless of which branch executes.
+// `mkstemp` resolves against `runtime/sfn/platform/mkstemp_windows.sfn`
+// (SFN-549, appended by `target_condition_runtime_sfn_sources`) — the
+// same sibling-module treatment `@realpath` gets from
+// `platform/realpath_windows.sfn`. `close` has no such sibling yet and
+// remains an unresolved symbol on the native MSVC leg; out of scope for
+// SFN-549's link-bridge slice, tracked separately.
 extern fn rename(oldpath: *u8, newpath: *u8) -> i32;
 
 extern fn mkstemp(template: *u8) -> i32;

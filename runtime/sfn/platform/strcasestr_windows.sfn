@@ -1,0 +1,72 @@
+// runtime/sfn/platform/strcasestr_windows.sfn
+//
+// Windows sibling providing `@strcasestr` (SFN-549). Like
+// `realpath_windows.sfn` — and unlike `process.sfn` / `rlimit.sfn` /
+// `rand.sfn` / `tls.sfn` — there is no POSIX `.sfn` module to swap FROM:
+// `strcasestr(3)` is a bare GNU/BSD libc symbol, not a Sailfin-authored
+// runtime module, so this file is APPENDED for a Windows target
+// (`target_condition_runtime_sfn_sources`, `compiler/src/build/target.sfn`).
+//
+// The sole consumer inlines its own extern per the SFN-635 convention (no
+// cross-module extern import): `runtime/sfn/concurrency/serve.sfn:114`,
+// called at `:340` and `:413` to find `Content-Length` / `Connection`
+// header names case-insensitively. A Sailfin `fn` gets external linkage
+// under its declared name, so this one definition satisfies that
+// reference at the final Windows link.
+//
+// Implemented in Sailfin rather than bound to a Win32 equivalent. MSVC's
+// nearest match is `StrStrIA` (shlwapi.dll), which would add `shlwapi.lib`
+// to the MSVC link for one call — a new OS dependency for a function that
+// is ~20 lines of byte comparison. Keeping it pure also keeps it
+// target-independent should the POSIX legs ever want the same body, and
+// adds nothing for the capability seal (SFEP-0016) to account for.
+//
+// ASCII-only case folding, which is what the callers need and what
+// GNU `strcasestr` does in the C locale: HTTP header field names are
+// restricted to US-ASCII by RFC 9110 §5.1, so no locale-aware or UTF-8
+// folding is required. Bytes >= 0x80 compare exactly, never folded.
+//
+// Both scans are bounded by `strnlen`'s 16 MiB cap (the `sfn_str_len`
+// precedent in `runtime/sfn/string.sfn:274`), so neither loop is
+// unbounded on a non-terminated input.
+extern fn strnlen(s: *u8, n: usize) -> usize;
+
+// ASCII `A`-`Z` (65-90) -> `a`-`z`. Every other byte, including the whole
+// high half, is returned unchanged.
+fn _sfn_ascii_fold(b: i64) -> i64 {
+    if b >= 65 && b <= 90 { return b + 32; }
+    return b;
+}
+
+// Case-insensitive `strstr`: the address of the first occurrence of
+// `needle` in `haystack`, or null when absent. Matches the GNU contract
+// on the edge cases the callers can reach — an empty needle matches at
+// position 0, and a needle longer than the haystack never matches.
+fn strcasestr(haystack: *u8, needle: *u8) -> *u8 {
+    if (haystack as i64) == 0 { return 0 as *u8; }
+    if (needle as i64) == 0 { return 0 as *u8; }
+    let hlen: i64 = strnlen(haystack, 16777216 as usize) as i64;
+    let nlen: i64 = strnlen(needle, 16777216 as usize) as i64;
+    if nlen == 0 { return haystack; }
+    if nlen > hlen { return 0 as *u8; }
+    let last: i64 = hlen - nlen;
+    let mut i: i64 = 0;
+    loop {
+        if i > last { break; }
+        let mut j: i64 = 0;
+        let mut matched: bool = true;
+        loop {
+            if j >= nlen { break; }
+            let hb: i64 = _sfn_ascii_fold(load_byte((haystack as i64) + i + j));
+            let nb: i64 = _sfn_ascii_fold(load_byte((needle as i64) + j));
+            if hb != nb {
+                matched = false;
+                break;
+            }
+            j += 1;
+        }
+        if matched { return ((haystack as i64) + i) as *u8; }
+        i += 1;
+    }
+    return 0 as *u8;
+}

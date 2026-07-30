@@ -55,7 +55,12 @@ import { _shell_read_cmd } from "./build/fs";
 // Target conditioning (SFN-52, SFEP-0021 §4.2(A)): the final link resolves
 // the build target once and threads the `-target` triple + POSIX-lib
 // filtering through both link layouts. All identity/empty on Linux/macOS.
-import { build_target_os, target_clang_flags, target_filter_link_libs } from "./build/target";
+import {
+    build_target_os,
+    target_clang_flags,
+    target_extra_link_libs,
+    target_filter_link_libs
+} from "./build/target";
 // `_env_flag` gives `SAILFIN_TRACE_LINK` the same toggle semantics ("",
 // "0", "false" are off) as the other `SAILFIN_TRACE_*` knobs;
 // `_get_env_cmd` reads a single env var (the macOS SDK probe below).
@@ -301,19 +306,30 @@ fn _concat_driver_flags(a: string[], b: string[]) -> string[] {
     return out;
 }
 
-// Return a copy of `plan` with `libs` filtered for `target_os` (SFN-52).
-// On Windows the POSIX/OpenSSL libs are dropped (MSVC/UCRT auto-links its
-// CRT); on every other target `target_filter_link_libs` is the identity,
-// so the returned plan is structurally equal and the link argv stays
-// byte-identical (#1112). A free function so the LinkPlan literal is not
-// constructed inside a struct-method body (file-header self-host note).
+// Return a copy of `plan` with `libs` filtered, then extended, for
+// `target_os` (SFN-52). On Windows the POSIX/OpenSSL libs are dropped
+// (MSVC/UCRT auto-links its CRT) and `-lbcrypt` is added
+// (`platform/rand_windows.sfn`'s `BCryptGenRandom`, SFN-549); on every
+// other target both `target_filter_link_libs` and `target_extra_link_libs`
+// are the identity/empty, so the returned plan is structurally equal and
+// the link argv stays byte-identical (#1112). A free function so the
+// LinkPlan literal is not constructed inside a struct-method body
+// (file-header self-host note).
 fn _target_conditioned_plan(plan: LinkPlan, target_os: string) -> LinkPlan {
+    let mut libs = target_filter_link_libs(plan.libs, target_os);
+    let extra = target_extra_link_libs(target_os);
+    let mut i: int = 0;
+    loop {
+        if i >= extra.length { break; }
+        libs.push(extra[i]);
+        i += 1;
+    }
     return LinkPlan {
         objects: plan.objects,
         out_path: plan.out_path,
         opt_flag: plan.opt_flag,
         link_flags: plan.link_flags,
-        libs: target_filter_link_libs(plan.libs, target_os),
+        libs: libs,
         test_mode: plan.test_mode
     };
 }
