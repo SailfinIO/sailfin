@@ -24,49 +24,7 @@ import {
 } from "./effect_imports";
 import { index_of } from "./string_utils";
 import { Token, TokenKind } from "./token";
-import {
-    Diagnostic,
-    bound_base_name,
-    channel_element_kind,
-    check_enum_variants,
-    check_extern_signature,
-    check_extern_var,
-    check_function_signature,
-    check_generic_instantiation,
-    check_interface_members,
-    check_struct_fields,
-    check_struct_methods,
-    check_type_parameters,
-    check_uninferable_generic_constructor,
-    detect_removed_ai_keyword,
-    future_element_kind,
-    make_await_non_future_diagnostic,
-    make_channel_send_mismatch_diagnostic,
-    make_conditional_branch_mismatch_diagnostic,
-    make_conditional_non_boolean_condition_diagnostic,
-    make_main_signature_param_count_diagnostic,
-    make_main_signature_param_type_diagnostic,
-    make_nested_fn_capture_diagnostic,
-    make_parse_error_diagnostic,
-    make_removed_keyword_diagnostic,
-    make_spawn_handle_into_empty_array_diagnostic,
-    make_spawn_handle_kind_mismatch_diagnostic,
-    make_spawn_unresolvable_kind_diagnostic,
-    make_syscall_builtin_diagnostic,
-    make_task_array_element_marker,
-    make_thread_local_requires_mut_diagnostic,
-    make_try_error_type_mismatch_diagnostic,
-    make_try_non_result_fn_diagnostic,
-    make_try_non_result_operand_diagnostic,
-    make_undefined_function_diagnostic,
-    make_unparseable_statement_diagnostic,
-    result_type_arguments,
-    spawn_future_kind,
-    task_array_element_kind,
-    task_array_marker_kind,
-    type_is_future,
-    type_is_result
-} from "./typecheck_types";
+import { Diagnostic } from "./typecheck_types";
 import {
     check_bare_fn_type_annotation,
     check_malformed_array_annotation,
@@ -76,7 +34,49 @@ import {
     element_kind_marks_array,
     type_parameter_names
 } from "./typecheck_types/annotation_shape_checks";
+import {
+    check_enum_variants,
+    check_extern_signature,
+    check_extern_var,
+    check_function_signature,
+    check_interface_members,
+    check_struct_fields,
+    check_struct_methods,
+    detect_removed_ai_keyword,
+    make_main_signature_param_count_diagnostic,
+    make_main_signature_param_type_diagnostic,
+    make_nested_fn_capture_diagnostic,
+    make_removed_keyword_diagnostic,
+    make_syscall_builtin_diagnostic,
+    make_thread_local_requires_mut_diagnostic,
+    make_undefined_function_diagnostic,
+    make_unparseable_statement_diagnostic
+} from "./typecheck_types/declaration_and_statement_checks";
+import {
+    channel_element_kind,
+    check_uninferable_generic_constructor,
+    future_element_kind,
+    make_await_non_future_diagnostic,
+    make_channel_send_mismatch_diagnostic,
+    make_conditional_branch_mismatch_diagnostic,
+    make_conditional_non_boolean_condition_diagnostic,
+    make_parse_error_diagnostic,
+    make_spawn_handle_into_empty_array_diagnostic,
+    make_spawn_handle_kind_mismatch_diagnostic,
+    make_spawn_unresolvable_kind_diagnostic,
+    make_task_array_element_marker,
+    make_try_error_type_mismatch_diagnostic,
+    make_try_non_result_fn_diagnostic,
+    make_try_non_result_operand_diagnostic,
+    result_type_arguments,
+    spawn_future_kind,
+    task_array_element_kind,
+    task_array_marker_kind,
+    type_is_future,
+    type_is_result
+} from "./typecheck_types/expr_type_rules";
 import { is_builtin_call_name } from "./typecheck_types/extern_abi";
+import { bound_base_name, check_generic_instantiation, check_type_parameters } from "./typecheck_types/generic_bounds";
 import {
     check_struct_implements_interfaces,
     parse_type_arguments,

@@ -1,0 +1,84 @@
+// Line-budget sentinel for the `compiler/src/typecheck_types/` modules.
+//
+// `typecheck_types.sfn` reached 3,795 lines — the longest module in the
+// tree, and more than twice the ~1,500-line soft budget in
+// `.claude/rules/code-style.md`. Splitting it into ten modules took the
+// heaviest one to 369,080 KB peak RSS on an isolated `sfn emit native`,
+// down from 1,768,644 KB for the flat file (-79.1%).
+//
+// This guard exists because the file grew to 3,795 lines once already,
+// and because the same subsystem had been carved up before without one:
+// `typecheck_types.sfn` was itself extracted out of `typecheck.sfn` to
+// "keep file sizes manageable" and then grew right back past its parent.
+// A split without a sentinel invites the next one.
+//
+// What this budget is NOT. It does not bound the compiler's worst-case
+// per-module emit, and this decomposition does not lower
+// `capsule_emit_parallel.sfn`'s `per_job_reserve`. That reserve is sized
+// from the *heaviest* module in the tree, and `typecheck_types.sfn` was
+// never that module despite being the longest — measured on an idle
+// machine, `typecheck.sfn` costs 2,462,232 KB at 2,799 lines and
+// `llvm/expression_lowering/native/core_operands.sfn` 1,989,504 KB at
+// 3,119 lines, both above the 1,768,644 KB this file cost at 3,795.
+// Line count does not predict cross-module RSS; the super-linear
+// relationship in SFEP-0022 §2.4 holds within one module's own
+// decomposition, not between modules. That holds inside this split too:
+// the heaviest module here is `declaration_and_statement_checks` at 500
+// lines / 369,080 KB, outweighing the *longest* module,
+// `expr_type_rules` at 552 lines / 311,160 KB. So this line budget is a
+// maintainability guard, not an RSS bound — a module can sit well inside
+// it and still be the costliest to emit. Pick future decomposition
+// targets by measurement rather than by `wc -l`.
+//
+// Budget rationale: the longest module after the split is
+// `expr_type_rules.sfn` at 552 lines. 750 leaves room for routine
+// maintenance while flagging any module drifting toward the soft budget
+// — a ceiling, not a target, for a subsystem that has already regrown
+// past one.
+import { find_char_local } from "../../src/string_utils";
+
+let TYPECHECK_TYPES_MODULE_LINE_BUDGET: int = 750;
+
+// Count newlines, matching `wc -l` semantics (a trailing newline is not
+// double-counted). Cheap single linear scan via `find_char_local`.
+fn _count_newlines(source: string) -> int {
+    let mut count: int = 0;
+    let mut pos: int = 0;
+    loop {
+        let idx = find_char_local(source, "\n", pos);
+        if idx < 0 { break; }
+        count += 1;
+        pos = idx + 1;
+    }
+    return count;
+}
+
+fn _module_lines(name: string) -> int ![io] {
+    let source = fs.readFile("compiler/src/typecheck_types/" + name + ".sfn");
+    // A non-empty read is a precondition — guards against a path typo
+    // silently passing the budget check on an empty string.
+    assert source.length > 0;
+    return _count_newlines(source);
+}
+
+test "typecheck types: every submodule stays under the line budget" ![io] {
+    let modules: string[] = ["annotation_shape_checks", "declaration_and_statement_checks", "expr_type_rules", "extern_abi", "generic_bounds", "interface_and_generics", "mod", "symbol_table_and_raw_exprs", "text_utils", "value_and_object_checks"];
+    let mut i: int = 0;
+    loop {
+        if i >= modules.length { break; }
+        let lines = _module_lines(modules[i]);
+        assert lines > 0;
+        assert lines < TYPECHECK_TYPES_MODULE_LINE_BUDGET;
+        i += 1;
+    }
+}
+
+// The flat `typecheck_types.sfn` must stay deleted. Module resolution
+// probes `foo.sfn` before falling back to `foo/mod.sfn`, so re-adding the
+// flat file beside the folder would shadow it for every
+// `./typecheck_types` import and silently revert this decomposition while
+// still compiling green — the exact failure this split had to avoid.
+test "typecheck types: the flat module does not shadow the folder" ![io] {
+    assert ! fs.exists("compiler/src/typecheck_types.sfn");
+    assert fs.exists("compiler/src/typecheck_types/mod.sfn");
+}

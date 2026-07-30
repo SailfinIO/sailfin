@@ -26,7 +26,7 @@ import {
     task_array_element_kind,
     task_array_marker_kind,
     type_is_future
-} from "../../src/typecheck_types";
+} from "../../src/typecheck_types/expr_type_rules";
 import { SymbolEntry, register_local_symbol } from "../../src/typecheck_types/symbol_table_and_raw_exprs";
 
 // Initializer of the first top-level `let` in `source` — the same

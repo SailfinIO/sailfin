@@ -18,11 +18,11 @@
 import { Program } from "./ast";
 import { strings_equal, substring } from "./string_utils";
 import { ClosureSymbolSet } from "./typecheck_import_loader";
+import { Diagnostic } from "./typecheck_types";
 import {
-    Diagnostic,
     make_cannot_find_module_diagnostic,
     make_symbol_not_exported_diagnostic
-} from "./typecheck_types";
+} from "./typecheck_types/declaration_and_statement_checks";
 
 // ---- Path helpers ----
 // Local mirrors of `capsule_resolver.sfn`'s `_cr_dirname` / `_cr_path_join`

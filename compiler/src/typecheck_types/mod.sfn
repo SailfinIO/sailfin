@@ -1,0 +1,46 @@
+// compiler/src/typecheck_types/mod.sfn
+//
+// Entry module for the typecheck-types submodules. Holds only the
+// `Diagnostic` model and its `Diag` converter — the surface almost every
+// consumer of this folder actually wants. The validation helpers live in
+// sibling modules and are imported from their defining module, never
+// forwarded through here: re-exporting an imported symbol emits no `.fn`
+// signature for it, so consumers lower calls against an `i8*` return
+// (`docs/rca/2026-04-18-reexport-diagnostic-gep.md`).
+import { Diag, FixSuggestion, diag_from_typecheck } from "../diagnostic";
+import { Token } from "../token";
+
+struct Diagnostic {
+    code: string;
+    severity: string;
+    message: string;
+    file_path: string;
+    primary: Token?;
+    // B3: optional structured fix-it. `null` for diagnostics that
+    // don't carry an automatic fix today (W01xx load warnings,
+    // typecheck factories until B3 stage 2 promotes them). Appended
+    // last so the seed compiler's positional GEP indexing stays
+    // stable for existing field reads — the canonical re-export RCA
+    // (`docs/rca/2026-04-18-reexport-diagnostic-gep.md`) bit this
+    // struct hard once already; the `_reject_reexport_violations`
+    // gate now backstops it but we still respect the discipline.
+    suggestion: FixSuggestion?;
+}
+
+// Frontend-only typed wrapper around the leaf module's primitive converter.
+// Token → Span uses the historical renderer width: end column is the start
+// column plus the token lexeme length.
+fn diagnostic_to_diag(diagnostic: Diagnostic, stage: string) -> Diag {
+    let mut primary_line: int = 0;
+    let mut primary_column: int = 0;
+    let mut primary_lexeme_length: int = 0;
+    let mut has_primary: boolean = false;
+    if diagnostic.primary != null {
+        let primary: Token? = diagnostic.primary;
+        primary_line = primary.line;
+        primary_column = primary.column;
+        primary_lexeme_length = primary.lexeme.length;
+        has_primary = true;
+    }
+    return diag_from_typecheck(diagnostic.code, diagnostic.severity, diagnostic.message, diagnostic.file_path, primary_line, primary_column, primary_lexeme_length, has_primary, stage, diagnostic.suggestion);
+}
