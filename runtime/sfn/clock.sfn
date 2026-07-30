@@ -69,16 +69,19 @@
 import { clock_gettime, nanosleep } from "./platform/posix";
 
 // Why inline `extern fn memcpy` rather than `import { memcpy } from
-// "./platform/libc"`? Same rationale as `runtime/sfn/string.sfn`,
-// `runtime/sfn/array.sfn`, `runtime/sfn/process.sfn`, and
-// `runtime/sfn/memory/arena.sfn`: the single-file emit path that
-// `make ci-cross-windows` drives (`sfn emit llvm runtime/sfn/clock.sfn`)
-// does not reach the cross-module extern resolver for `platform/libc.sfn`,
-// so the call lowers to the `cannot resolve return type for call to
-// memcpy` fatal (#306; #1283 Gap 1). Inlining the one declaration we need
-// keeps this module self-contained for every seed and every emit path.
-// Once that resolution lands, a follow-up PR flips this to an import
-// without touching the body.
+// "./platform/libc"`? The single-file emit path that `make
+// ci-cross-windows` drives re-emits this module standalone with no
+// `--import-context`, so it resolves imported extern signatures only from
+// the shared tree that `make rebuild` re-stages with `posix` alone. An
+// imported `memcpy` therefore lowers to `cannot resolve return type for
+// call to memcpy` (E1007) on the cross-Windows leg while every other path
+// stays green. Inlining the one declaration we need keeps this module
+// self-contained for every seed and every emit path, matching the rest of
+// the runtime.
+//
+// Removal condition: SFN-635 teaches the standalone emit path to resolve
+// imported externs. The PR that satisfies it flips this back to an import
+// and deletes this comment, without touching the body.
 extern fn memcpy(dst: *u8, src: *u8, n: usize) -> *u8;
 
 struct Timespec {
