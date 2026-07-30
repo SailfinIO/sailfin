@@ -1,0 +1,122 @@
+// compiler/tests/e2e/jmp_buf_alignment_test.sfn
+//
+// SFN-549: MSVC's `_JUMP_BUFFER` is `__declspec(align(16))` because
+// `__intrinsic_setjmp` saves xmm6-xmm15 with `movdqa`, which #GPs on an
+// 8-mod-16 address and surfaces as `0xC0000005`. Every jmp_buf alloca in
+// the emitted LLVM IR must therefore carry `align 16` — the native
+// Windows compiler faulted on every invocation before argument dispatch
+// without it. This pins two of the three emission sites from live `sfn
+// emit llvm` output: the `@main` exception-frame wrapper
+// (`compiler/src/llvm/lowering/emission.sfn`) and a user `try` block
+// (`compiler/src/llvm/lowering/instructions_try.sfn`). The third site
+// (`compiler/src/llvm/lowering/lowering_core.sfn`, the `sfn test` harness
+// `@main`) is a harness-generator string template, not reachable from a
+// plain `sfn emit` on a fixture, so it is not covered here.
+//
+// Width-agnostic by design: a pending separate change widens the jmp_buf
+// array from `[32 x i64]` to `[64 x i64]`, so this matches any
+// `alloca [N x i64]` line rather than hardcoding 32 — except the
+// unrelated 3-word exception-frame alloca (`[3 x i64]`, a different,
+// fixed-width struct that carries no alignment requirement), which is
+// excluded by its own distinct width rather than by name (the try-block
+// jmp_buf is a generic `%lN` local pointer, not literally named
+// `%jmpbuf` — only the two `@main`-wrapper sites use that literal name).
+//
+// No-bash e2e (`.claude/rules/no-bash-e2e.md`): drives `sfn emit llvm` on
+// a scratch fixture as a subprocess and asserts on the captured `.ll`
+// text.
+import { contains, split } from "sfn/strings";
+import { clean_runner_env, nested_runner_scratch } from "sfn/test";
+
+fn _sfn_bin() -> string ![io] {
+    let configured = env.get("SAILFIN_BIN");
+    if configured.length > 0 { return configured; }
+    return "build/bin/sfn";
+}
+
+// A `try`/`catch` inside `main` exercises both the `@main` wrapper's own
+// exception frame and the try block's own frame + jmp_buf, so a single
+// fixture reaches both covered emission sites.
+fn _try_fixture_source() -> string {
+    return "fn risky() -> int ![pure] {\n" + "    return 1;\n" + "}\n" + "\n"
+        + "fn main() ![io] {\n"
+        + "    try {\n"
+        + "        let x = risky();\n"
+        + "        print(x);\n"
+        + "    } catch (e) {\n"
+        + "        print(\"caught\");\n"
+        + "    }\n"
+        + "}\n";
+}
+
+// Emit the try/catch fixture for `target_os` (via `SAILFIN_TARGET_OS`,
+// "" for the host default) into a fresh scratch dir, returning the
+// emitted IR text, or "" on any failure. `label` distinguishes the
+// nested scratch dir per test.
+fn _emit_try_fixture(target_os: string, label: string) -> string ![io] {
+    let scratch = nested_runner_scratch(label);
+    fs.createDirectory(scratch, true);
+    let src = scratch + "/fixture.sfn";
+    fs.writeFile(src, _try_fixture_source());
+    let mut child_env = clean_runner_env(scratch);
+    if target_os.length > 0 {
+        child_env.push("SAILFIN_TARGET_OS=" + target_os);
+    }
+    let ll = scratch + "/out.ll";
+    let exit = process.run_capture([_sfn_bin(), "emit", "-o", ll, "llvm", src], child_env);
+    let _o = process.capture_take_stdout();
+    let _e = process.capture_take_stderr();
+    if exit != 0 { return ""; }
+    if !fs.exists(ll) { return ""; }
+    return fs.readFile(ll);
+}
+
+// Every line allocating an `[N x i64]` array that is NOT the 3-word
+// exception frame is presumed to be a jmp_buf alloca (SFN-549's two
+// covered sites: `%jmpbuf` in the `@main` wrapper, `%lN` in a user try
+// block) — width-agnostic so the pending 32->64 widening does not
+// require touching this test.
+fn _jmpbuf_alloca_lines(ir: string) -> string[] ![pure] {
+    let lines = split(ir, "\n");
+    let mut out: string[] = [];
+    let mut i: int = 0;
+    loop {
+        if i >= lines.length { break; }
+        let line = lines[i];
+        if contains(line, "alloca [") && contains(line, "x i64]") && !contains(line, "[3 x i64]") {
+            out.push(line);
+        }
+        i += 1;
+    }
+    return out;
+}
+
+// Assert every jmp_buf alloca in `ir` carries `align 16`, and that at
+// least two were found (the `@main` wrapper and the try block) — a
+// vacuous zero-match pass would silently stop pinning anything.
+fn _assert_all_jmpbuf_allocas_aligned(ir: string) ![pure] {
+    let lines = _jmpbuf_alloca_lines(ir);
+    assert lines.length >= 2;
+    let mut i: int = 0;
+    loop {
+        if i >= lines.length { break; }
+        // Critical assertion (SFN-549): a jmp_buf alloca with no
+        // `align 16` is exactly the pre-fix crash — MSVC's `movdqa`
+        // save of xmm6-xmm15 #GPs on an 8-mod-16 address (0xC0000005)
+        // before argument dispatch.
+        assert contains(lines[i], "align 16");
+        i += 1;
+    }
+}
+
+test "jmp_buf alignment: every jmp_buf alloca carries align 16 for a Linux target" ![io] {
+    let ir = _emit_try_fixture("Linux", "jmpbuf-align-linux");
+    assert ir.length > 0;
+    _assert_all_jmpbuf_allocas_aligned(ir);
+}
+
+test "jmp_buf alignment: every jmp_buf alloca carries align 16 for a Windows target" ![io] {
+    let ir = _emit_try_fixture("Windows", "jmpbuf-align-windows");
+    assert ir.length > 0;
+    _assert_all_jmpbuf_allocas_aligned(ir);
+}

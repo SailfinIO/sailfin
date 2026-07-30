@@ -12,6 +12,7 @@
 // the same override-driven pattern the emit-time locator tests use
 // (`errno_locator_test.sfn`), and the argv-shape pattern of
 // `backend_link_libs_parity_test.sfn`.
+import { contains } from "sfn/strings";
 import { expect_eq_bool, expect_eq_str, expect_eq_str_array } from "sfn/test";
 
 import { LinkPlan, _llvm_text_link_program_argv, _llvm_text_link_test_argv } from "../../src/backend";
@@ -20,6 +21,7 @@ import {
     target_clang_flags,
     target_clang_triple,
     target_condition_runtime_sfn_sources,
+    target_extra_link_libs,
     target_filter_link_libs,
     target_forced_linker_flag,
     target_os_is_windows,
@@ -100,37 +102,71 @@ test "target: host runtime module set is unchanged" ![pure] {
     assert expect_eq_str_array(target_condition_runtime_sfn_sources(sources, "Darwin"), sources).ok;
 }
 
-test "target: Windows swaps process.sfn, rlimit.sfn, and rand.sfn to their Win32 siblings, and appends realpath_windows.sfn" ![pure] {
+test "target: Windows swaps process.sfn, rlimit.sfn, rand.sfn, and tls.sfn to their Win32 siblings, and appends the six anchor-less siblings" ![pure] {
     // SFN-549: rlimit.sfn used to be DROPPED here (a no-op stub in
     // windows_stubs.ll resolved apply_default_mem_limit for the mingw
     // bridge only); the native MSVC path no longer links that stub, so
     // rlimit.sfn now swaps to its own Win32 sibling instead of vanishing.
     // rand.sfn swaps the same way (BCryptGenRandom in place of
-    // getentropy/`/dev/urandom`). process.sfn → its existing Win32
-    // sibling. realpath_windows.sfn has no POSIX .sfn counterpart to swap
-    // FROM (realpath(3) is a bare libc symbol, not a Sailfin module), so
-    // it is APPENDED at the end rather than replacing a matched basename.
-    // Every other module is preserved in order.
-    let sources: string[] = ["/rt/sfn/runtime_globals.sfn", "/rt/sfn/process.sfn", "/rt/sfn/platform/rlimit.sfn", "/rt/sfn/platform/rand.sfn", "/rt/sfn/io.sfn",];
-    let expected: string[] = ["/rt/sfn/runtime_globals.sfn", "/rt/sfn/platform/process_windows.sfn", "/rt/sfn/platform/rlimit_windows.sfn", "/rt/sfn/platform/rand_windows.sfn", "/rt/sfn/io.sfn", "/rt/sfn/platform/realpath_windows.sfn",];
+    // getentropy/`/dev/urandom`). tls.sfn swaps to
+    // openssl_absent_windows.sfn — Windows has no OpenSSL to link, so the
+    // fail-closed native module replaces the OpenSSL surface outright
+    // rather than leaving `-lssl -lcrypto`'s externs unresolved.
+    // process.sfn → its existing Win32 sibling. The six anchor-less
+    // siblings (realpath_windows.sfn, clock_windows.sfn,
+    // pthread_windows.sfn, popen_windows.sfn, mkstemp_windows.sfn,
+    // strcasestr_windows.sfn) have no POSIX .sfn counterpart to swap FROM
+    // (each backs a bare libc/pthreads symbol, not a Sailfin module), so
+    // they are APPENDED at the end rather than replacing a matched
+    // basename. Every other module is preserved in order.
+    let sources: string[] = ["/rt/sfn/runtime_globals.sfn", "/rt/sfn/process.sfn", "/rt/sfn/platform/rlimit.sfn", "/rt/sfn/platform/rand.sfn", "/rt/sfn/platform/tls.sfn", "/rt/sfn/io.sfn",];
+    let expected: string[] = ["/rt/sfn/runtime_globals.sfn", "/rt/sfn/platform/process_windows.sfn", "/rt/sfn/platform/rlimit_windows.sfn", "/rt/sfn/platform/rand_windows.sfn", "/rt/sfn/platform/openssl_absent_windows.sfn", "/rt/sfn/io.sfn", "/rt/sfn/platform/realpath_windows.sfn", "/rt/sfn/platform/clock_windows.sfn", "/rt/sfn/platform/pthread_windows.sfn", "/rt/sfn/platform/popen_windows.sfn", "/rt/sfn/platform/mkstemp_windows.sfn", "/rt/sfn/platform/strcasestr_windows.sfn",];
     assert expect_eq_str_array(target_condition_runtime_sfn_sources(sources, "Windows"), expected).ok;
 }
 
-test "target: Windows append anchors on exec.sfn when rlimit.sfn/rand.sfn are absent" ![pure] {
-    // The append doesn't require rlimit.sfn/rand.sfn specifically — any of
-    // the three platform/ modules anchors it, exec.sfn included.
+test "target: Windows conditioning never double-joins platform/platform" ![pure] {
+    // rlimit.sfn/rand.sfn/tls.sfn already live in platform/, so their
+    // siblings must join directly onto that same directory rather than
+    // appending a second platform/ segment; process.sfn does NOT live in
+    // platform/, so it alone gets the platform/ prefix. This double-join
+    // bug was caught pre-ship once already (SFN-549) — assert no emitted
+    // path, swapped or appended, ever contains platform/platform.
+    let sources: string[] = ["/rt/sfn/process.sfn", "/rt/sfn/platform/rlimit.sfn", "/rt/sfn/platform/rand.sfn", "/rt/sfn/platform/tls.sfn"];
+    let out = target_condition_runtime_sfn_sources(sources, "Windows");
+    let mut i: int = 0;
+    loop {
+        if i >= out.length { break; }
+        assert expect_eq_bool(contains(out[i], "platform/platform"), false).ok;
+        i += 1;
+    }
+}
+
+test "target: Windows append anchors on exec.sfn when rlimit.sfn/rand.sfn/tls.sfn are absent" ![pure] {
+    // The append doesn't require rlimit.sfn/rand.sfn/tls.sfn specifically —
+    // any of the four platform/ modules anchors it, exec.sfn included.
     let sources: string[] = ["/rt/sfn/runtime_globals.sfn", "/rt/sfn/platform/exec.sfn", "/rt/sfn/io.sfn"];
-    let expected: string[] = ["/rt/sfn/runtime_globals.sfn", "/rt/sfn/platform/exec.sfn", "/rt/sfn/io.sfn", "/rt/sfn/platform/realpath_windows.sfn"];
+    let expected: string[] = ["/rt/sfn/runtime_globals.sfn", "/rt/sfn/platform/exec.sfn", "/rt/sfn/io.sfn", "/rt/sfn/platform/realpath_windows.sfn", "/rt/sfn/platform/clock_windows.sfn", "/rt/sfn/platform/pthread_windows.sfn", "/rt/sfn/platform/popen_windows.sfn", "/rt/sfn/platform/mkstemp_windows.sfn", "/rt/sfn/platform/strcasestr_windows.sfn",];
     assert expect_eq_str_array(target_condition_runtime_sfn_sources(sources, "Windows"), expected).ok;
 }
 
-test "target: Windows skips the realpath_windows.sfn append with no platform/ anchor present" ![pure] {
-    // No rlimit.sfn / rand.sfn / exec.sfn in this fixture, so there is
-    // nothing to anchor the append on — the function does not guess a
-    // path, it just leaves the list as swapped (unchanged here, since
-    // nothing else matches either).
+test "target: Windows skips the anchor-less appends with no platform/ anchor present" ![pure] {
+    // No rlimit.sfn / rand.sfn / tls.sfn / exec.sfn in this fixture, so
+    // there is nothing to anchor the appends on — the function does not
+    // guess a path, it just leaves the list as swapped (unchanged here,
+    // since nothing else matches either).
     let sources: string[] = ["/rt/sfn/runtime_globals.sfn", "/rt/sfn/io.sfn"];
     assert expect_eq_str_array(target_condition_runtime_sfn_sources(sources, "Windows"), sources).ok;
+}
+
+test "target: extra link libs — Windows needs bcrypt, host targets need none" ![pure] {
+    // `-lbcrypt` backs BCryptGenRandom in platform/rand_windows.sfn
+    // (SFN-549); every other target keeps the identity/empty result
+    // (#1112).
+    let expected: string[] = ["-lbcrypt"];
+    assert expect_eq_str_array(target_extra_link_libs("Windows"), expected).ok;
+    let none: string[] = [];
+    assert expect_eq_str_array(target_extra_link_libs("Linux"), none).ok;
+    assert expect_eq_str_array(target_extra_link_libs("Darwin"), none).ok;
 }
 
 // ---- Assemble argv splicing ----
