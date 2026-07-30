@@ -38,7 +38,7 @@ import {
     _atomic_rename_into_place,
     _collect_sfn_files_cmd,
     _mktemp_sibling_cmd
-} from "./build/fs";
+} from "../build/fs";
 import {
     BuildCacheConfig,
     CacheKey,
@@ -55,38 +55,82 @@ import {
     empty_cache_stats,
     is_valid_digest,
     sha256_of_file
-} from "./build_cache";
+} from "../build_cache";
 import {
     CapsuleArtifactLayout,
     capsule_artifact_layout_from_specs,
     ir_path_for_slug,
     is_safe_scope_name,
     parse_scope_name
-} from "./capsule_artifact";
-import { ParallelEmitTask, _cr_resolve_jobs, _cr_run_parallel_emit } from "./capsule_emit_parallel";
+} from "../capsule_artifact";
+import { ParallelEmitTask, _cr_resolve_jobs, _cr_run_parallel_emit } from "../capsule_emit_parallel";
 import {
     _cr_find_substring,
     _cr_source_imports_host,
     collect_relative_import_specs,
     collect_scoped_import_specs
-} from "./capsule_import_scan";
-import { _display_capsule_name_cmd } from "./capsule_names";
-import { workspace_member_for_spec } from "./capsule_resolver/capability";
-import { compile_capsule_modules } from "./capsule_resolver/compile";
-import { ResolverDedupeResult, _cr_resolve_and_dedupe } from "./capsule_resolver/dedupe";
+} from "../capsule_import_scan";
+import { _display_capsule_name_cmd } from "../capsule_names";
+import { render_diagnostic } from "../diagnostics_render";
+import { inferred_public_effects } from "../effect_checker";
+import { empty_import_symbols } from "../effect_imports";
+import { effect_subsumes, is_canonical_effect } from "../effect_taxonomy";
+import { emit_subprocess_with_retry } from "../emit_helpers";
+import { set_import_context_root } from "../llvm/mod";
+import { _LockEntry, lock_get_versions } from "../lock";
+import {
+    compile_to_llvm_file_with_module,
+    compile_to_llvm_file_with_module_imports,
+    module_name_from_path,
+    number_to_string,
+    write_native_text_file_with_module
+} from "../main";
+import { parse_program } from "../parser/mod";
+import { RuntimeCapsuleArtifacts, enumerate_runtime_capsule_artifacts } from "../runtime_capsule_resolver";
+import {
+    SemVer,
+    semver_compare,
+    semver_is_valid,
+    semver_parse,
+    semver_satisfies_floor
+} from "../semver";
+import { char_code_at_text, contains_string, substring } from "../string_utils";
+import { test_runner_scratch_root } from "../test_runner_state";
+import {
+    toml_get_capabilities_required,
+    toml_get_dependencies,
+    toml_get_name,
+    toml_get_toolchain_channel,
+    toml_get_toolchain_sfn,
+    toml_get_version,
+    toml_get_workspace_capabilities_allow,
+    toml_get_workspace_capabilities_deny,
+    toml_get_workspace_capabilities_grant,
+    toml_get_workspace_capabilities_mode,
+    toml_get_workspace_default_members,
+    toml_get_workspace_exclude,
+    toml_get_workspace_members,
+    toml_get_workspace_package_version,
+    toml_value_is_workspace_inherit
+} from "../toml_parser";
+import { Diagnostic, diagnostic_to_diag } from "../typecheck_types";
+import { resolve_compiler_version, resolve_compiler_version_for_cache } from "../version";
+import { workspace_member_for_spec } from "./capability";
+import { compile_capsule_modules } from "./compile";
+import { ResolverDedupeResult, _cr_resolve_and_dedupe } from "./dedupe";
 import {
     _cr_collect_capsule_sources,
     _cr_enumerate_host_capsule_sources,
     _cr_locate_cached_capsule_src_latest,
     enumerate_capsule_sources
-} from "./capsule_resolver/discovery";
+} from "./discovery";
 import {
     _cr_any_entry_imports_host,
     _cr_dep_specs_from_text,
     enumerate_binary_capsule_sources,
     enumerate_cache_implicit_sources,
     enumerate_workspace_implicit_sources
-} from "./capsule_resolver/implicit";
+} from "./implicit";
 import {
     _cr_consumer_root_prefix,
     _cr_dirname,
@@ -107,7 +151,7 @@ import {
     _cr_string_lt,
     discover_project_root,
     mangle_slug
-} from "./capsule_resolver/paths";
+} from "./paths";
 import {
     _cr_canonicalise_path,
     _cr_empty_relative_scan_memo,
@@ -115,14 +159,14 @@ import {
     _cr_relative_slug,
     enumerate_relative_sources,
     resolve_relative_import
-} from "./capsule_resolver/relative";
+} from "./relative";
 import {
     _cr_collect_per_source_dep_manifests,
     _cr_manifests_to_asm_paths,
     _cr_stage_import_deps,
     _cr_stage_one,
     stage_capsule_imports
-} from "./capsule_resolver/staging";
+} from "./staging";
 import {
     CapabilityDriftReport,
     CapsuleSource,
@@ -136,52 +180,8 @@ import {
     WorkspaceMember,
     _cr_module_cache_event_failure,
     empty_resolver_consumer
-} from "./capsule_resolver/types";
-import { discover_workspace_root, load_workspace_members } from "./capsule_resolver/workspace";
-import { render_diagnostic } from "./diagnostics_render";
-import { inferred_public_effects } from "./effect_checker";
-import { empty_import_symbols } from "./effect_imports";
-import { effect_subsumes, is_canonical_effect } from "./effect_taxonomy";
-import { emit_subprocess_with_retry } from "./emit_helpers";
-import { set_import_context_root } from "./llvm/mod";
-import { _LockEntry, lock_get_versions } from "./lock";
-import {
-    compile_to_llvm_file_with_module,
-    compile_to_llvm_file_with_module_imports,
-    module_name_from_path,
-    number_to_string,
-    write_native_text_file_with_module
-} from "./main";
-import { parse_program } from "./parser/mod";
-import { RuntimeCapsuleArtifacts, enumerate_runtime_capsule_artifacts } from "./runtime_capsule_resolver";
-import {
-    SemVer,
-    semver_compare,
-    semver_is_valid,
-    semver_parse,
-    semver_satisfies_floor
-} from "./semver";
-import { char_code_at_text, contains_string, substring } from "./string_utils";
-import { test_runner_scratch_root } from "./test_runner_state";
-import {
-    toml_get_capabilities_required,
-    toml_get_dependencies,
-    toml_get_name,
-    toml_get_toolchain_channel,
-    toml_get_toolchain_sfn,
-    toml_get_version,
-    toml_get_workspace_capabilities_allow,
-    toml_get_workspace_capabilities_deny,
-    toml_get_workspace_capabilities_grant,
-    toml_get_workspace_capabilities_mode,
-    toml_get_workspace_default_members,
-    toml_get_workspace_exclude,
-    toml_get_workspace_members,
-    toml_get_workspace_package_version,
-    toml_value_is_workspace_inherit
-} from "./toml_parser";
-import { Diagnostic, diagnostic_to_diag } from "./typecheck_types";
-import { resolve_compiler_version, resolve_compiler_version_for_cache } from "./version";
+} from "./types";
+import { discover_workspace_root, load_workspace_members } from "./workspace";
 
 // Struct definitions and their constructors live in `./capsule_resolver/types`
 // and are NOT re-exported from here. Consumers import them from that module
