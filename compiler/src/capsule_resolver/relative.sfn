@@ -1,0 +1,394 @@
+// compiler/src/capsule_resolver/relative.sfn
+//
+// Relative-import resolution and intra-capsule source enumeration. Turns a
+// `./foo` / `../bar` spec into a path (pure arithmetic — the caller decides
+// whether to fall back to a `<spec>/mod.sfn` layout), maps a file path to its
+// capsule slug and spec, and BFS-walks an entry file's relative-import graph
+// into `CapsuleSource` records, memoised across entry points.
+//
+// `module_name_from_path` has no home outside `../main` (defined at
+// `main.sfn:170`), so this module still reaches the compiler root for that one
+// symbol; `number_to_string` comes from its defining module instead.
+import { _cr_find_substring, collect_relative_import_specs } from "../capsule_import_scan";
+import { module_name_from_path } from "../main";
+import { number_to_string } from "../num_format";
+import { substring } from "../string_utils";
+import { _cr_collect_capsule_sources, enumerate_capsule_sources } from "./discovery";
+import { _cr_dirname, _cr_ends_with, _cr_path_join } from "./paths";
+import { CapsuleSource, WorkspaceMember } from "./types";
+
+// Resolve a relative import spec ("./foo", "../bar/baz") against `base_dir`
+// (the importer's directory) to a filesystem path with `.sfn` appended.
+// Pure path arithmetic — does not check existence; the caller decides
+// whether to fall back to a `<spec>/mod.sfn` directory layout.
+fn resolve_relative_import(base_dir: string, spec: string) -> string {
+    let mut current_base = base_dir;
+    let mut remainder = spec;
+    loop {
+        if remainder.length >= 3 {
+            if substring(remainder, 0, 3) == "../" {
+                current_base = _cr_dirname(current_base);
+                remainder = substring(remainder, 3, remainder.length);
+                continue;
+            }
+        }
+        if remainder.length >= 2 {
+            if substring(remainder, 0, 2) == "./" {
+                remainder = substring(remainder, 2, remainder.length);
+                continue;
+            }
+        }
+        break;
+    }
+    let path = _cr_path_join(current_base, remainder);
+    if _cr_ends_with(path, ".sfn") { return path; }
+    return path + ".sfn";
+}
+
+// Canonicalise a filesystem path into the same shape
+// `resolve_import_module_slug_for_module` produces for the same logical
+// module: strip any leading `./` and collapse `/./` segments. Without
+// this normalisation, invoking `sfn test ./compiler/tests/...` would
+// hand `module_name_from_path` a path with a leading `./` that
+// survives into the slug; `sanitize_module_suffix` then turns it into
+// `___compiler__...` (three underscores from `.` + `/`) while the
+// importing module's slug — derived from a canonical no-`./` path —
+// produces `compiler__...`. The mangled call site and the dep
+// definition would diverge and the link would fail with an undefined
+// reference. Keeping the normalisation here (rather than in
+// `module_name_from_path`) keeps the behavior contained: every
+// existing consumer of `module_name_from_path` operates on already-
+// canonical paths produced by the path-discovery layer.
+fn _cr_canonicalise_path(value: string) -> string {
+    let mut out = value;
+    // Strip leading `./` repeatedly (defensive — a single `./` is the
+    // common case but `././foo` is well-formed POSIX).
+    loop {
+        if out.length < 2 { break; }
+        if substring(out, 0, 2) != "./" { break; }
+        out = substring(out, 2, out.length);
+    }
+    // Collapse interior `/./` segments. Bounded by max iterations so a
+    // pathological input can't loop forever.
+    let mut max_iters: int = 64;
+    loop {
+        if max_iters <= 0 { break; }
+        let pos = _cr_find_substring(out, "/./");
+        if pos < 0 { break; }
+        out = substring(out, 0, pos) + substring(out, pos + 2, out.length);
+        max_iters -= 1;
+    }
+    return out;
+}
+
+// Compute the slug for a relatively-imported file. Delegates to
+// `module_name_from_path` (after canonicalising `./` artifacts) so
+// dependency slugs match the slug the importer's mangling pass derives
+// via `resolve_import_module_slug_for_module`. Stripping `entry_dir`
+// (the pre-Stage-B-PR2 behavior) produced a shorter slug for relative
+// dependencies than the importing module computed for the same import
+// directive — the divergence was harmless for `sfn check` (which only
+// consumes staged `.sfn-asm` text) but broke `sfn test` the moment
+// dependency `.ll` files joined the link line: a test source whose
+// slug is `compiler/tests/e2e/foo_test` resolves `./fixtures/helper`
+// to provider slug `compiler/tests/e2e/fixtures/helper`, but the dep
+// was compiled as `fixtures/helper`, leaving the link with an
+// undefined reference to
+// `<sym>__compiler__tests__e2e__fixtures__helper`. Sharing
+// `module_name_from_path` keeps importer + importee in lockstep
+// across both the build and the test paths.
+//
+// `entry_dir` is retained as a parameter for call-site stability
+// (`enumerate_relative_sources` plumbs it through anyway) but is no
+// longer consulted; the descriptive name documents what the call site
+// passes.
+fn _cr_relative_slug(entry_dir: string, file_path: string) -> string {
+    let _unused_dir = entry_dir;
+    return module_name_from_path(_cr_canonicalise_path(file_path));
+}
+
+// #873: map a relatively-imported file — identified by the PATH SLUG
+// that `_cr_relative_slug` / `module_name_from_path` derives for it — to
+// the canonical spec slug of the workspace member that owns its `src/`
+// tree. For path slug `capsules/sfn/crypto/src/mod` under member
+// `sfn/crypto` this returns `sfn/crypto/mod` — byte-identical to the slug
+// `_cr_collect_capsule_sources(<member>/src, "sfn/crypto")` assigns the
+// SAME file via the workspace-implicit / manifest-dep walks (line ~1035:
+// `spec + "/" + stem`). Returning that shared slug lets the relative and
+// scoped enumerators agree on one symbol per capsule function, so a
+// capsule's own tests (`import { f } from "../src/mod"`) link against the
+// same `f__sfn__crypto__mod` the by-name path already uses.
+//
+// CRITICAL — self-host safety: the input is the `module_name_from_path`
+// PATH SLUG, not the raw file path. `module_name_from_path` ROOTS every
+// `compiler/src/**` file at `compiler/src/` (→ `llvm/lowering/abi_hash`)
+// and every `runtime/**` file at `runtime/` (→ `prelude`), stripping
+// those prefixes. The `compiler` and `runtime/native` workspace members
+// (this repo lists both in `workspace.toml`) therefore NEVER match here —
+// their `<member_path>/src/` needle is absent from the stripped slug — so
+// compiler- and runtime-internal relative imports keep their existing
+// slugs and the self-host build stays byte-identical. Only
+// `capsules/<scope>/<name>` members, whose paths survive
+// `module_name_from_path` intact, are canonicalized. Returns "" when no
+// member owns the slug. The longest matching `member_path` wins so nested
+// members (a member whose path is a prefix of another) resolve
+// deterministically.
+fn _cr_capsule_slug_for_path(path_slug: string, members: WorkspaceMember[]) -> string {
+    if path_slug.length == 0 { return ""; }
+    let mut best_slug: string = "";
+    let mut best_len: int = -1;
+    let mut i: int = 0;
+    loop {
+        if i >= members.length { break; }
+        let m = members[i];
+        i += 1;
+        if m.member_path.length == 0 { continue; }
+        if m.name.length == 0 { continue; }
+        let needle = m.member_path + "/src/";
+        let pos = _cr_find_substring(path_slug, needle);
+        if pos < 0 { continue; }
+        let tail = substring(path_slug, pos + needle.length, path_slug.length);
+        if tail.length == 0 { continue; }
+        if m.member_path.length > best_len {
+            best_len = m.member_path.length;
+            best_slug = m.name + "/" + tail;
+        }
+    }
+    return best_slug;
+}
+
+// #873: recover the workspace-member spec (e.g. `sfn/crypto`) for a
+// canonical capsule slug produced by `_cr_capsule_slug_for_path`
+// (`sfn/crypto/mod`). The slug is `<member.name>/<tail>`, so the spec is
+// the member whose `name + "/"` prefixes the slug; the longest such name
+// wins so a submodule member nested under another resolves
+// deterministically. Returns "" when no member matches — callers then
+// leave `spec` empty (the path-slug / non-capsule case). The spec tags
+// the `CapsuleSource` so the relative-walk entry routes its `.ll` under
+// the per-capsule `build/capsules/<scope>/<name>/ir/` tree identically to
+// the workspace-implicit walk's entry for the same file.
+fn _cr_capsule_spec_for_slug(slug: string, members: WorkspaceMember[]) -> string {
+    let mut best: string = "";
+    let mut best_len: int = -1;
+    let mut i: int = 0;
+    loop {
+        if i >= members.length { break; }
+        let m = members[i];
+        i += 1;
+        if m.name.length == 0 { continue; }
+        let prefix = m.name + "/";
+        if slug.length <= prefix.length { continue; }
+        if substring(slug, 0, prefix.length) == prefix {
+            if m.name.length > best_len {
+                best_len = m.name.length;
+                best = m.name;
+            }
+        }
+    }
+    return best;
+}
+
+// #1247: per-resolution-pass memo shared across the per-entry
+// relative-import walks in `_cr_resolve_and_dedupe`. Without it, a
+// multi-entry resolution (`sfn check compiler/src/` = 158 entries)
+// re-reads and re-scans every source in every entry's import closure
+// once PER ENTRY — O(entries × closure) full-source scans through the
+// allocation-heavy `collect_relative_import_specs` state machine
+// (`_cr_byte_at` allocates a fresh 1-char string per byte). All of
+// that garbage lands in the process-global arena BEFORE `check/engine`'s
+// Phase 5a loop mark, so the per-file rewind can never reclaim it:
+// measured ~25MB of dead arena per entry (~4.0GB across the warm
+// whole-tree check). The memo caches, per unique source path:
+//   - `scan_specs`: the `collect_relative_import_specs` result, so
+//     each source is read + scanned at most once per resolution pass;
+//   - `dep_sources`: the discovered-dependency `CapsuleSource`, which
+//     is entry-independent (`_cr_relative_slug` ignores `entry_dir`),
+//     so slug/member canonicalization also runs once per unique dep.
+// Lookups are linear scans over parallel arrays — the same pattern
+// the visited-set below already uses — because the key set is small
+// (one entry per unique module, ~170 for the compiler tree).
+//
+// The memo deliberately does NOT change which files are emitted for
+// which entry: each entry still runs its own BFS with its own
+// visited set, so the output (and therefore staged artifacts and
+// diagnostics) is byte-identical to the unmemoized walk.
+struct RelativeScanMemo {
+    scan_paths: string[];
+    scan_specs: string[][];
+    dep_paths: string[];
+    dep_sources: CapsuleSource[];
+}
+
+// Outcome of one memoized per-entry walk: the entry's discovered
+// sources plus the (possibly grown) memo to thread into the next
+// entry's walk. Returned explicitly — rather than relying on
+// in-place mutation of the memo argument — to match the
+// return-the-updated-value convention used across the resolver.
+struct RelativeEnumerateOutcome {
+    sources: CapsuleSource[];
+    memo: RelativeScanMemo;
+}
+
+fn _cr_empty_relative_scan_memo() -> RelativeScanMemo {
+    let scan_paths: string[] = [];
+    let scan_specs: string[][] = [];
+    let dep_paths: string[] = [];
+    let dep_sources: CapsuleSource[] = [];
+    return RelativeScanMemo {
+        scan_paths: scan_paths,
+        scan_specs: scan_specs,
+        dep_paths: dep_paths,
+        dep_sources: dep_sources
+    };
+}
+
+// Linear index lookup over a memo key column. Returns -1 when absent.
+fn _cr_memo_index(paths: string[], path: string) -> int {
+    let mut i: int = 0;
+    loop {
+        if i >= paths.length { break; }
+        if strings_equal(paths[i], path) { return i; }
+        i += 1;
+    }
+    return -1;
+}
+
+// Walk relative imports (`./foo`, `../foo`) reachable from `entry_path` and
+// return one CapsuleSource per discovered file. The entry itself is NOT
+// included — the caller compiles it via the standard single-file path.
+//
+// `runtime/*` and scoped (`scope/name`) imports are handled by
+// `enumerate_capsule_sources` (manifest-declared deps) and the workspace
+// member lookup; this enumerator only walks intra-project relative imports.
+//
+// Thin compatibility wrapper over the memoized core: single-entry
+// callers get a fresh memo (identical behavior to the historical
+// implementation); `_cr_resolve_and_dedupe` calls the memoized core
+// directly so the scan cache is shared across all entries in one
+// resolution pass (#1247).
+fn enumerate_relative_sources(entry_path: string, members: WorkspaceMember[]) -> CapsuleSource[] ![io] {
+    let outcome = _cr_enumerate_relative_sources_memo(entry_path, members, _cr_empty_relative_scan_memo());
+    return outcome.sources;
+}
+
+fn _cr_enumerate_relative_sources_memo(entry_path: string, members: WorkspaceMember[], memo: RelativeScanMemo) -> RelativeEnumerateOutcome ![io] {
+    let mut out: CapsuleSource[] = [];
+    if entry_path.length == 0 {
+        return RelativeEnumerateOutcome { sources: out, memo: memo };
+    }
+    let entry_dir = _cr_dirname(entry_path);
+    let mut visited: string[] = [entry_path];
+    let mut queue: string[] = [entry_path];
+    let mut head: int = 0;
+    // Belt-and-suspenders cap on top of the visited-set dedupe, in case
+    // the visited check is ever broken by a slug bug. If we hit it we
+    // surface a diagnostic rather than silently dropping reachable
+    // modules — a silent drop would later show up as missing
+    // import-context artifacts during lowering with no clear cause.
+    let max_iterations: int = 4096;
+    let mut iterations: int = 0;
+    loop {
+        if head >= queue.length { break; }
+        if iterations >= max_iterations {
+            print.err("capsule-resolver: enumerate_relative_sources hit "
+                + "iteration cap ("
+                + number_to_string(max_iterations)
+                + ") — some relative imports may be missing; please file a bug");
+            break;
+        }
+        iterations += 1;
+        let current_path = queue[head];
+        head += 1;
+        // #1247: scan each unique source at most once per resolution
+        // pass. A memo hit skips the `fs.exists` probe too — the file
+        // was on disk when this same pass scanned it moments ago.
+        let mut specs: string[] = [];
+        let scan_idx = _cr_memo_index(memo.scan_paths, current_path);
+        if scan_idx >= 0 { specs = memo.scan_specs[scan_idx]; } else {
+            if !fs.exists(current_path) { continue; }
+            let source = fs.readFile(current_path);
+            specs = collect_relative_import_specs(source);
+            memo.scan_paths.push(current_path);
+            memo.scan_specs.push(specs);
+        }
+        let cur_dir = _cr_dirname(current_path);
+        let mut i: int = 0;
+        loop {
+            if i >= specs.length { break; }
+            let spec = specs[i];
+            let mut dep_path = resolve_relative_import(cur_dir, spec);
+            if !fs.exists(dep_path) {
+                // Directory import fallback: ./dir → dir/mod.sfn
+                if _cr_ends_with(dep_path, ".sfn") {
+                    let mod_fallback = substring(dep_path, 0, dep_path.length - 4)
+                        + "/mod.sfn";
+                    if fs.exists(mod_fallback) { dep_path = mod_fallback; }
+                }
+            }
+            if fs.exists(dep_path) {
+                let mut already_seen: boolean = false;
+                let mut vi: int = 0;
+                loop {
+                    if vi >= visited.length { break; }
+                    if strings_equal(visited[vi], dep_path) {
+                        already_seen = true;
+                        break;
+                    }
+                    vi += 1;
+                }
+                if !already_seen {
+                    visited.push(dep_path);
+                    queue.push(dep_path);
+                    // #1247: the CapsuleSource for a dep is independent
+                    // of which entry discovered it (`_cr_relative_slug`
+                    // ignores `entry_dir`), so the slug / workspace-
+                    // member canonicalization below runs once per
+                    // unique dep per resolution pass; later entries
+                    // that rediscover the same dep reuse the memoized
+                    // value.
+                    let dep_idx = _cr_memo_index(memo.dep_paths, dep_path);
+                    if dep_idx >= 0 {
+                        out.push(memo.dep_sources[dep_idx]);
+                    } else {
+                        // #873: if this relatively-imported file lives inside a
+                        // workspace member's `src/`, stage it under the member's
+                        // canonical spec slug (`sfn/crypto/mod`) — the SAME slug
+                        // the workspace-implicit / manifest-dep walks assign the
+                        // same file — so the relative and scoped enumerators
+                        // agree on one symbol per capsule function and a
+                        // capsule's own `../src/mod` tests link. Tag the spec
+                        // with the member name so the source routes under the
+                        // per-capsule `ir/` layout exactly like the implicit
+                        // walk's sources. Non-member paths (every `compiler/src/**`
+                        // and `runtime/**` file) get "" and fall back to the
+                        // path-shaped slug, leaving self-host slugs untouched.
+                        let path_slug = _cr_relative_slug(entry_dir, dep_path);
+                        let capsule_slug = _cr_capsule_slug_for_path(path_slug, members);
+                        let mut slug = path_slug;
+                        let mut spec: string = "";
+                        if capsule_slug.length > 0 {
+                            slug = capsule_slug;
+                            spec = _cr_capsule_spec_for_slug(capsule_slug, members);
+                        }
+                        // ll_path is filled in by `_cr_resolve_and_dedupe`
+                        // once the consumer is known (Stage C2b2) — for
+                        // a `-p <consumer>` build with safe scope/name,
+                        // this lands under the consumer's per-capsule
+                        // tree; otherwise the legacy flat layout.
+                        let dep_source = CapsuleSource {
+                            spec: spec,
+                            source_path: dep_path,
+                            slug: slug,
+                            ll_path: ""
+                        };
+                        memo.dep_paths.push(dep_path);
+                        memo.dep_sources.push(dep_source);
+                        out.push(dep_source);
+                    }
+                }
+            }
+            i += 1;
+        }
+    }
+    return RelativeEnumerateOutcome { sources: out, memo: memo };
+}
