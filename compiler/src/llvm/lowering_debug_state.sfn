@@ -62,7 +62,8 @@ export {
     skip_module_globals,
     errno_locator_symbol,
     clock_monotonic_id_value,
-    sc_nprocessors_onln_value
+    sc_nprocessors_onln_value,
+    target_arch_for_lowering
 };
 
 // Per-flag cache cells. `_X_initialized` flips from false to true on
@@ -161,6 +162,8 @@ fn _host_arch() -> string ![io] {
     if fs.exists("/lib/ld-linux-aarch64.so.1") { return "aarch64"; }
     return "x86_64";
 }
+
+fn target_arch_for_lowering() -> string ![io] { return _host_arch(); }
 
 // True when the user requested LLVM-lowering stderr trace via
 // `SAILFIN_TRACE_LOWERING=1` (or the legacy `.trace_lowering` file).

@@ -76,6 +76,12 @@ test "builtin allowlist: atomic_fence intrinsic is in envelope" {
     assert is_builtin_call_name("atomic_fence") == true;
 }
 
+test "builtin allowlist: raw syscall family is in envelope" {
+    assert is_builtin_call_name("syscall1") == true;
+    assert is_builtin_call_name("syscall6") == true;
+    assert is_builtin_call_name("syscall0") == false;
+}
+
 test "builtin allowlist: notarealfunction is not in envelope" {
     // Matches the walker test fixture in typecheck_expression_walk_test.sfn.
     // Issue D will surface this as an unknown-identifier diagnostic; the

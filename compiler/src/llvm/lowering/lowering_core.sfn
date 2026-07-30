@@ -56,6 +56,7 @@ import {
     escape_string_for_llvm,
     merge_string_constants
 } from "../strings";
+import { set_syscall_lowering_module } from "../syscall";
 import {
     FunctionEffectEntry,
     LifetimeRegionMetadata,
@@ -904,6 +905,7 @@ fn print_fatal_lowering_diagnostics(diagnostics: string[], diags: Diag[]) -> voi
 }
 
 fn lower_to_llvm_lines_with_parsed_context(native_module: NativeModule, parse_arg: ParseNativeResult, imported_manifests: LayoutManifest[], imported_native_texts: string[], diagnostics_in: string[], mangle_symbols: boolean, native_text_override_path_in: string) -> LoweredLLVMLinesResult ![io] {
+    set_syscall_lowering_module(native_module.module_name);
     // Generic-function monomorphization (#1869, SFEP-0038 §3.3). This is the
     // single lowering choke point every entry path funnels through. Specialize
     // generic `.fn`s and rewrite their call sites, then re-parse the rewritten

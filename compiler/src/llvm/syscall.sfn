@@ -1,0 +1,157 @@
+// Linux x86-64 raw-syscall lowering. These reserved names are deliberately
+// available to one owned runtime chokepoint only; exposing an effect-free raw
+// syscall to general Sailfin code would bypass capability checking.
+import { build_target_os } from "../build/target";
+import { NativeFunction } from "../native_ir";
+import { lower_expression } from "./expression_lowering/native/core";
+import { format_temp_name, format_typed_operand } from "./expressions_helpers";
+import { target_arch_for_lowering } from "./lowering_debug_state";
+import { merge_string_constants } from "./strings";
+import {
+    ExpressionResult,
+    LLVMOperand,
+    LocalBinding,
+    ParameterBinding,
+    StringConstant,
+    TypeContext
+} from "./types";
+import {
+    extend_string_array,
+    join_with_separator,
+    number_to_string,
+    trim_text
+} from "./utils";
+
+let mut _syscall_module_name: string = "";
+
+fn set_syscall_lowering_module(name: string) {
+    _syscall_module_name = trim_text(name);
+}
+
+fn is_syscall_builtin(name: string) -> boolean {
+    let value = trim_text(name);
+    return value == "syscall1" || value == "syscall2" || value == "syscall3"
+        || value == "syscall4"
+        || value == "syscall5"
+        || value == "syscall6";
+}
+
+fn _syscall_arity(name: string) -> int {
+    if name == "syscall1" { return 1; }
+    if name == "syscall2" { return 2; }
+    if name == "syscall3" { return 3; }
+    if name == "syscall4" { return 4; }
+    if name == "syscall5" { return 5; }
+    return 6;
+}
+
+fn syscall_contract_error(name: string, argument_count: int, module_name: string, target_os: string, target_arch: string) -> string {
+    let allowed = "runtime/sfn/platform/syscall_linux.sfn";
+    if module_name != allowed && module_name != "runtime/sfn/platform/syscall_linux" {
+        return name + " is restricted to `" + allowed + "` (caller was `"
+            + module_name
+            + "`)";
+    }
+    if target_os != "Linux" || target_arch != "x86_64" {
+        return name + " requires the Linux x86-64 target";
+    }
+    let expected = _syscall_arity(name) + 1;
+    if argument_count != expected {
+        return name + " expects exactly " + number_to_string(expected)
+            + " `int` arguments, got "
+            + number_to_string(argument_count);
+    }
+    return "";
+}
+
+fn _failure(message: string, lines: string[], temp_index: int, strings: StringConstant[]) -> ExpressionResult ![io] {
+    let diag = "llvm lowering [fatal] [E1019]: " + message;
+    print.err(diag);
+    return ExpressionResult {
+        lines: lines,
+        temp_index: temp_index,
+        operand: null,
+        diagnostics: [diag],
+        string_constants: strings
+    };
+}
+
+fn render_syscall_constraints(argument_count: int) -> string {
+    let registers = ["{rax}", "{rdi}", "{rsi}", "{rdx}", "{r10}", "{r8}", "{r9}"];
+    let mut constraints: string[] = ["={rax}"];
+    let mut index: int = 0;
+    loop {
+        if index >= argument_count { break; }
+        constraints.push(registers[index]);
+        index += 1;
+    }
+    constraints.push("~{rcx}");
+    constraints.push("~{r11}");
+    constraints.push("~{memory}");
+    return join_with_separator(constraints, ",");
+}
+
+fn lower_syscall_builtin(name: string, arguments: string[], bindings: ParameterBinding[], locals: LocalBinding[], temp_index: int, lines: string[], functions: NativeFunction[], context: TypeContext) -> ExpressionResult ![io] {
+    let builtin = trim_text(name);
+    let contract_error = syscall_contract_error(builtin, arguments.length, _syscall_module_name, build_target_os(), target_arch_for_lowering());
+    if contract_error.length > 0 {
+        return _failure(contract_error, lines, temp_index, []);
+    }
+
+    let mut current_lines = lines;
+    let mut current_temp = temp_index;
+    let mut diagnostics: string[] = [];
+    let mut strings: StringConstant[] = [];
+    let mut operands: LLVMOperand[] = [];
+    let mut index: int = 0;
+    loop {
+        if index >= arguments.length { break; }
+        let lowered = lower_expression(trim_text(arguments[index]), bindings, locals, current_temp, current_lines, functions, context, "i64");
+        diagnostics = extend_string_array(diagnostics, lowered.diagnostics);
+        strings = merge_string_constants(strings, lowered.string_constants);
+        current_lines = lowered.lines;
+        current_temp = lowered.temp_index;
+        if lowered.operand == null {
+            return _failure(builtin + " failed to lower argument "
+                + number_to_string(index), current_lines, current_temp, strings);
+        }
+        if trim_text(lowered.operand.llvm_type) != "i64" {
+            return _failure(builtin + " expects argument " + number_to_string(index)
+                + " of type `int` (i64), got `"
+                + lowered.operand.llvm_type
+                + "`", current_lines, current_temp, strings);
+        }
+        operands.push(lowered.operand);
+        index += 1;
+    }
+
+    let mut rendered: string[] = [];
+    index = 0;
+    loop {
+        if index >= operands.length { break; }
+        rendered.push(format_typed_operand(operands[index]));
+        index += 1;
+    }
+    let result = format_temp_name(current_temp);
+    current_lines.push("  " + result
+        + " = call i64 asm sideeffect \"syscall\", \""
+        + render_syscall_constraints(operands.length)
+        + "\"("
+        + join_with_separator(rendered, ", ")
+        + ")");
+    return ExpressionResult {
+        lines: current_lines,
+        temp_index: current_temp + 1,
+        operand: LLVMOperand { llvm_type: "i64", value: result },
+        diagnostics: diagnostics,
+        string_constants: strings
+    };
+}
+
+export {
+    is_syscall_builtin,
+    lower_syscall_builtin,
+    render_syscall_constraints,
+    set_syscall_lowering_module,
+    syscall_contract_error
+};

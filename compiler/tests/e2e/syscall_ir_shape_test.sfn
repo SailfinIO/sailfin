@@ -1,0 +1,97 @@
+import { contains } from "sfn/strings";
+
+fn _sfn_bin() -> string ![io] {
+    let configured = env.get("SAILFIN_BIN");
+    if configured.length > 0 { return configured; }
+    return "build/bin/sfn";
+}
+
+fn _scratch_dir() -> string ![io] {
+    let mut dir = env.get("SAILFIN_TEST_SCRATCH");
+    if dir.length == 0 { dir = "/tmp"; }
+    dir = dir + "/sfn-syscall-ir-shape";
+    fs.createDirectory(dir, true);
+    return dir;
+}
+
+fn _base_env() -> string[] ![io] {
+    let mut values: string[] = [];
+    let path = env.get("PATH");
+    if path.length > 0 { values.push("PATH=" + path); }
+    let home = env.get("HOME");
+    if home.length > 0 { values.push("HOME=" + home); }
+    let tmpdir = env.get("TMPDIR");
+    if tmpdir.length > 0 { values.push("TMPDIR=" + tmpdir); }
+    let scratch = env.get("SAILFIN_TEST_SCRATCH");
+    if scratch.length > 0 {
+        values.push("SAILFIN_TEST_SCRATCH=" + scratch);
+    }
+    return values;
+}
+
+fn _target_env(os: string, arch: string) -> string[] ![io] {
+    let mut values = _base_env();
+    values.push("SAILFIN_TARGET_OS=" + os);
+    values.push("SAILFIN_TARGET_ARCH=" + arch);
+    return values;
+}
+
+fn _fixture_source() -> string {
+    return "fn invoke(n: int, a: int, b: int, c: int, d: int, e: int, f: int) -> int {\n"
+        + "let r1 = syscall1(n, a); let r2 = syscall2(n, a, b); let r3 = syscall3(n, a, b, c);\n"
+        + "let r4 = syscall4(n, a, b, c, d); let r5 = syscall5(n, a, b, c, d, e);\n"
+        + "return r1 + r2 + r3 + r4 + r5 + syscall6(n, a, b, c, d, e, f); }\n";
+}
+
+fn _emit(os: string, arch: string, tag: string) -> string ![io] {
+    let dir = _scratch_dir();
+    let source = dir + "/fixture-" + tag + ".sfn";
+    let output = dir + "/fixture-" + tag + ".ll";
+    fs.writeFile(source, _fixture_source());
+    if fs.exists(output) { fs.deleteFile(output); }
+    let exit = process.run_capture([_sfn_bin(), "emit", "--module-name", "runtime/sfn/platform/syscall_linux.sfn", "-o", output, "llvm", source], _target_env(os, arch));
+    let stdout = process.capture_take_stdout();
+    let stderr = process.capture_take_stderr();
+    if exit != 0 || !fs.exists(output) {
+        print("syscall fixture emission failed:\n" + stdout + stderr);
+        return "";
+    }
+    return fs.readFile(output);
+}
+
+fn _rejection(os: string, arch: string, tag: string) -> string ![io] {
+    let dir = _scratch_dir();
+    let source = dir + "/reject-" + tag + ".sfn";
+    let output = dir + "/reject-" + tag + ".ll";
+    fs.writeFile(source, _fixture_source());
+    if fs.exists(output) { fs.deleteFile(output); }
+    let exit = process.run_capture([_sfn_bin(), "emit", "--module-name", "runtime/sfn/platform/syscall_linux.sfn", "-o", output, "llvm", source], _target_env(os, arch));
+    let _stdout = process.capture_take_stdout();
+    let stderr = process.capture_take_stderr();
+    assert exit != 0;
+    assert ! fs.exists(output);
+    return stderr;
+}
+
+test "syscall1 through syscall6 pin the Linux x86-64 inline-asm ABI" ![io] {
+    let ir = _emit("Linux", "x86_64", "linux-x86-64");
+    assert ir.length > 0;
+    assert contains(ir, "={rax},{rax},{rdi},~{rcx},~{r11},~{memory}");
+    assert contains(ir, "={rax},{rax},{rdi},{rsi},~{rcx},~{r11},~{memory}");
+    assert contains(ir, "={rax},{rax},{rdi},{rsi},{rdx},~{rcx},~{r11},~{memory}");
+    assert contains(ir, "={rax},{rax},{rdi},{rsi},{rdx},{r10},~{rcx},~{r11},~{memory}");
+    assert contains(ir, "={rax},{rax},{rdi},{rsi},{rdx},{r10},{r8},~{rcx},~{r11},~{memory}");
+    assert contains(ir, "={rax},{rax},{rdi},{rsi},{rdx},{r10},{r8},{r9},~{rcx},~{r11},~{memory}");
+}
+
+test "syscall lowering rejects non-Linux targets" ![io] {
+    let stderr = _rejection("Darwin", "x86_64", "darwin");
+    assert contains(stderr, "E1019");
+    assert contains(stderr, "requires the Linux x86-64 target");
+}
+
+test "syscall lowering rejects non-x86-64 targets" ![io] {
+    let stderr = _rejection("Linux", "aarch64", "linux-aarch64");
+    assert contains(stderr, "E1019");
+    assert contains(stderr, "requires the Linux x86-64 target");
+}

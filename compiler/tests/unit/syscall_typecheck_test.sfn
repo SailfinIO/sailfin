@@ -1,0 +1,41 @@
+import { parse_program } from "../../src/parser/mod";
+import { typecheck_diagnostics } from "../../src/typecheck";
+import { Diagnostic } from "../../src/typecheck_types";
+
+fn _e1019(source: string) -> Diagnostic? ![io] {
+    let diagnostics = typecheck_diagnostics(parse_program(source));
+    let mut index: int = 0;
+    loop {
+        if index >= diagnostics.length { break; }
+        if diagnostics[index].code == "E1019" { return diagnostics[index]; }
+        index += 1;
+    }
+    return null;
+}
+
+test "syscall typecheck: wrong arity has a span" ![io] {
+    let diagnostic = _e1019("fn f() -> int { return syscall2(1, 2); }");
+    assert diagnostic != null;
+    assert diagnostic.primary != null;
+}
+
+test "syscall typecheck: definite non-int operand has a span" ![io] {
+    let diagnostic = _e1019("fn f() -> int { return syscall1(1, true); }");
+    assert diagnostic != null;
+    assert diagnostic.primary != null;
+}
+
+test "syscall typecheck: compound non-int operand has a span" ![io] {
+    let diagnostic = _e1019("fn f() -> int { return syscall1(1, 1.5 + 2.5); }");
+    assert diagnostic != null;
+    assert diagnostic.primary != null;
+}
+
+test "syscall typecheck: boolean operator results have a span" ![io] {
+    let comparison = _e1019("fn f() -> int { return syscall1(1, 1 < 2); }");
+    assert comparison != null;
+    assert comparison.primary != null;
+    let negation = _e1019("fn f(x: int) -> int { return syscall1(1, !x); }");
+    assert negation != null;
+    assert negation.primary != null;
+}
