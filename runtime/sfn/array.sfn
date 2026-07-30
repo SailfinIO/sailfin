@@ -43,7 +43,7 @@
 //
 // Still under the `sfn_array_sfn_*` infix (proof-of-life, not yet
 // flipped): `create` / `push` / `slice` (spec-ABI stubs) and
-// `filter` / `reduce` (gated on generics + closures, #766). `map` now
+// `filter` / `reduce` (gated on generics + closures, SFN-101). `map` now
 // carries a real pointer-width body (#1507): the `runtime_array_map_fn`
 // descriptor passes the `{i8*, i8*}` closure by value and the body
 // closure-dispatches it per element. Those rename to bare form when
@@ -522,7 +522,7 @@ fn sfn_array_push_slot(data_ptr: **u8, len_ptr: *i64, cap_ptr: *i64, elem_size: 
 
 // Array higher-order helpers `map`/`filter`/`reduce` — real bodies over
 // the runtime-callable closure-apply seam landed in #1507 (epic #1118,
-// closing the #766 gap). Each typed callback param (`mapper: fn(int) ->
+// closing the SFN-101 gap). Each typed callback param (`mapper: fn(int) ->
 // int`, `predicate: fn(int) -> bool`, `reducer: fn(int, int) -> int`) is
 // invoked as an ordinary closure dispatch: the matching descriptor passes
 // the `{i8*, i8*}` closure pair by value, and the emitter extracts the
@@ -533,7 +533,7 @@ fn sfn_array_push_slot(data_ptr: **u8, len_ptr: *i64, cap_ptr: *i64, elem_size: 
 // closure operand typed `{i8*, i8*}` in lockstep with these signatures.
 // Pointer-width `i64` elements / accumulator only (the callback ABIs are
 // `iN(i8* env, i64 ...)`); generic / typed element widths are post-1.0
-// (gated on generics — #766).
+// (gated on generics — SFN-101).
 // `sfn_array_sfn_map(arr, mapper) -> arr'` — real one-element-at-a-time
 // map (#1507). `mapper` is typed `fn(int) -> int` so the call
 // `mapper(elem)` below is an ordinary closure dispatch: the descriptor
@@ -543,7 +543,7 @@ fn sfn_array_push_slot(data_ptr: **u8, len_ptr: *i64, cap_ptr: *i64, elem_size: 
 // call — the same path `fn apply(cb: fn(int) -> int, x)` exercises
 // (closure_two_int_capture). Pointer-width elements only (the lambda ABI
 // is `i64(i8* env, i64 arg)`); generic / typed element widths are
-// post-1.0 (gated on generics — #766). Allocates a fresh `SfnArray`
+// post-1.0 (gated on generics — SFN-101). Allocates a fresh `SfnArray`
 // (`{ data @0, len @8, cap @16 }`) of `len` 8-byte slots, applies the
 // mapper to each element, and stores the result — the concat_v2 span
 // idiom. The container is freshly, uniquely owned (#1218 / E9).
@@ -586,7 +586,7 @@ fn sfn_array_sfn_map(arr: *u8, mapper: fn (int) -> int) -> *u8 {
 // env and prepends the env to the call — the same path `map` exercises.
 // Pointer-width `i64` elements only (the predicate ABI is
 // `i1(i8* env, i64 arg)`); generic / typed element widths are post-1.0
-// (gated on generics — #766). Over-allocates a fresh `SfnArray`
+// (gated on generics — SFN-101). Over-allocates a fresh `SfnArray`
 // (`{ data @0, len @8, cap @16 }`) of `len` 8-byte slots (the kept count
 // is an upper bound), copies each element for which the predicate is true,
 // then writes the final kept count as `len`. The container is freshly,
@@ -636,7 +636,7 @@ fn sfn_array_sfn_filter(arr: *u8, predicate: fn (int) -> bool) -> *u8 {
 // integer value — so the fold value rides the descriptor as a raw `i64`.
 // Pointer-width `i64` elements and accumulator only (the reducer ABI is
 // `i64(i8* env, i64 acc, i64 elem)`); generic / typed widths are post-1.0
-// (gated on generics — #766).
+// (gated on generics — SFN-101).
 fn sfn_array_sfn_reduce(arr: *u8, initial: i64, reducer: fn (int, int) -> int) -> i64 {
     unsafe {
         let mut len: i64 = 0;

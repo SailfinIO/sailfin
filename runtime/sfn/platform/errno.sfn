@@ -26,12 +26,13 @@
 // `compiler/tests/e2e/test_errno_locator_platform.sh` for the pinned
 // per-target IR shape and `errno_reader_test.sfn` for this module's.
 //
-// Scope (epic #763, #876, #893): because the reader no longer hardcodes
-// a glibc-only symbol, it is host-portable and no longer a misleading
-// Linux-only demonstrator. It is the canonical `errno()` the syscall
-// adapters (#878 `clock_gettime`, `waitpid`/`posix_spawnp` consumers
-// under #763) should reuse once cross-module import of a *defined*
-// runtime function is supported in the link path — see Linkage below.
+// Scope (SFN-635; prior #876 / #893 decisions): because the reader no
+// longer hardcodes a glibc-only symbol, it is host-portable and no
+// longer a misleading Linux-only demonstrator. It is the canonical
+// `errno()` the syscall adapters (#878 `clock_gettime`,
+// `waitpid`/`posix_spawnp` consumers under SFN-635) should reuse once
+// cross-module import of a *defined* runtime function is supported in
+// the link path — see Linkage below.
 //
 // Linkage (#893 decision): this file stays OUT of
 // `runtime/capsule.toml` `sfn-sources`. `sfn-sources`

@@ -10,7 +10,7 @@
 //   `sailfin_runtime_instance_of`
 //
 // Field descriptors with offsets, `get_field`, and structural
-// interface `instance_of` are deferred per issue #402 `Out:`.
+// interface `instance_of` are deferred per the v0 scope decision (#402).
 // `sfn_type_of(value)` returns null at v0 because values do not
 // yet carry a type tag in their first field (`docs/proposals/0025-native-runtime-architecture.md`
 // `#36-type-metadata-and-reflection` dynamic-dispatch path); the static-hint variant lands
@@ -44,7 +44,7 @@
 // against each registered descriptor's `name_ptr`. `sfn_instance_of`
 // is pointer identity. Both move to the architect's open-addressing
 // hash once a real reflection caller demands the scaling — see
-// issue #402 `Out:` and the architect §2.5.2 plan.
+// the v0 scope decision (#402) and the architect §2.5.2 plan.
 //
 // Effects: none. Type metadata lives below the I/O layer (same
 // discipline as `runtime/sfn/memory/arena.sfn`).
@@ -52,7 +52,7 @@
 // Why inline the libc externs? Same rationale as
 // `runtime/sfn/memory/arena.sfn` / `runtime/sfn/string.sfn`: the
 // seed compiler reaches the cross-module extern resolver through
-// a path that issue #306 has not closed yet. Inlining keeps this
+// a path that SFN-635 has not closed yet. Inlining keeps this
 // module self-contained for every seed. Once that path lands, a
 // follow-up PR flips these to imports without touching the bodies.
 //
@@ -222,7 +222,7 @@ fn sfn_type_register(desc: *u8) -> void { _registry_append(desc); }
 // `sfn_resolve_type(name)` returns the descriptor whose name
 // equals `name` (byte-for-byte via libc `strcmp`), or null if
 // no matching descriptor was registered. Linear scan; sized to
-// v0 minimum viable per issue #402. The architect spec's
+// v0 minimum viable per the scope decision (#402). The architect spec's
 // open-addressing hash (§2.5.2) lands once a real reflection
 // caller demands the scaling.
 //
@@ -258,7 +258,7 @@ fn sfn_resolve_type(name: *u8) -> *u8 {
 // pointer identity. Returns true when `value` and `desc` are
 // the same pointer — the case exercised by the descriptor-
 // registry round-trip in `test_runtime_type_meta.sh`. Without
-// value-side type tagging (deferred per issue #402 `Out:`), this
+// value-side type tagging (deferred per the v0 scope decision, #402), this
 // does not yet recover an arbitrary struct value's concrete type
 // at the call site; static-dispatch lowering is the follow-up
 // that closes that gap (architect §2.5.2 dynamic-dispatch path).
@@ -283,7 +283,7 @@ fn sfn_instance_of(value: *u8, desc: *u8) -> bool {
 fn sfn_type_of(value: *u8) -> *u8 { return null; }
 
 // v0 primitive guards. Stubs returning false; value-side type
-// tagging is deferred per issue #402 `Out:`. Until tagging lands
+// tagging is deferred per the v0 scope decision (#402). Until tagging lands
 // these preserve the historical `sailfin_runtime_is_*` semantics
 // — the prelude's `check_type_primitive` (in
 // `runtime/prelude.sfn:461`) expects a `bool` predicate that

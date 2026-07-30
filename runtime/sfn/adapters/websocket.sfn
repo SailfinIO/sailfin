@@ -34,10 +34,10 @@
 // reserved and zeroed. `sfn_websocket_close` frees it.
 //
 // Why inline the externs rather than `import` from
-// `../platform/net.sfn` / `../platform/libc.sfn`? Same #306 rationale
+// `../platform/net.sfn` / `../platform/libc.sfn`? Same SFN-635 rationale
 // as every other `runtime/sfn/*.sfn` module (see `http.sfn` / `filesystem.sfn`
 // headers): the seed compiler reaches the cross-module extern resolver
-// through a path #306 has not closed, so inlining keeps this module
+// through a path SFN-635 has not closed, so inlining keeps this module
 // self-contained for every seed. Declaring the same C symbol in two
 // modules is safe — each emits its own LLVM `declare` and the linker
 // resolves both to the single libc entrypoint.
@@ -103,7 +103,7 @@ extern fn freeaddrinfo(res: *u8) -> void;
 // returns 1 on success, 0 on failure (fail-closed). Replaces OpenSSL
 // `RAND_bytes` for the RFC 6455 masking key and the client handshake
 // `Sec-WebSocket-Key` (SFEP-0048 Phase D, SFN-123). Declared inline per the
-// same cross-module-extern workaround (#306) as the sockets above.
+// same cross-module-extern workaround (SFN-635) as the sockets above.
 extern fn sfn_rand_fill(buf: *u8, n: i64) -> i32;
 
 // ── TLS termination (platform/tls.sfn) ────────────────────────
@@ -123,7 +123,7 @@ extern fn tls_shutdown_free(ssl: *u8) -> void;
 // worker pool. `sfn_websocket_serve` creates one queue + pool, then
 // enqueues a detached `Task` per accepted connection (mirrors
 // `serve.sfn`, #1923). Declared inline per the same cross-module-extern
-// workaround (#306) as the sockets above.
+// workaround (SFN-635) as the sockets above.
 extern fn sfn_taskqueue_create(capacity: i64) -> *u8;
 
 extern fn sfn_taskqueue_destroy(queue: *u8) -> void;
@@ -360,7 +360,7 @@ fn _ws_send_all(fd: i32, ssl: *u8, buf: *u8, total: i64) -> bool {
 // response in one call on a loopback/localhost peer (the v0 scope). A
 // server that splits the `101` status line and headers across TCP
 // segments is not handled here; the drain-until-`\r\n\r\n` receive loop
-// lands with the server bridge and behavioral loopback test (#1877).
+// lands with the server bridge and behavioral loopback test.
 fn _ws_recv_some(fd: i32, buf: *u8, cap: i64) -> i64 {
     return recv(fd, buf, cap, 0);
 }
@@ -527,8 +527,8 @@ fn _ws_find(haystack: *u8, needle: *u8) -> *u8 {
 // `SHA1` / `EVP_EncodeBlock` externs. The algorithms mirror the shipped
 // `sfn/crypto` primitives (`sha1.sfn` / `mod.sfn::base64_encode`); they are
 // re-expressed here in the module's pointer idiom rather than imported,
-// because `runtime/sfn/*.sfn` stays self-contained per the #306 rationale in
-// this file's header.
+// because `runtime/sfn/*.sfn` stays self-contained per the SFN-635 rationale
+// in this file's header.
 // `_ws_rotl32(x, n)` — rotate the low 32 bits of `x` left by `n` (0 < n < 32).
 fn _ws_rotl32(x: i64, n: i64) -> i64 {
     let v: i64 = x & 4294967295;

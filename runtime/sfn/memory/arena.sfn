@@ -76,7 +76,7 @@
 // and `runtime/sfn/array.sfn` inline their externs: cross-module
 // extern resolution through the seed compiler hits the `cannot
 // resolve return type for call to …` fatal (the struct-return gap of
-// #1283 Gap 1; #1288 fixed the runtime-sfn-source emit path, but
+// SFN-635; #1288 fixed the runtime-sfn-source emit path, but
 // de-inlining these C-ABI externs is separate follow-up work),
 // surfacing during emission. Inlining the three
 // declarations we need keeps this module self-contained for every

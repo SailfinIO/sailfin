@@ -139,7 +139,7 @@ extern fn close(fd: i32) -> i32;
 // cast through `* u8` (the `net.sfn` opaque-handle policy — no struct-by-
 // value at the boundary). Identical C ABI to
 // `int setsockopt(int, int, int, const void *, socklen_t)`. Declared inline
-// per the same #306 cross-module-extern workaround as the sockets above.
+// per the same SFN-635 cross-module-extern workaround as the sockets above.
 extern fn setsockopt(sockfd: i32, level: i32, optname: i32, optval: *u8, optlen: i32) -> i32;
 
 // ── Scheduler (M4.1, scheduler.sfn) ───────────────────────────

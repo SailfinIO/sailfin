@@ -3,10 +3,13 @@ always-loaded summary of the parts most often got wrong.
 
 **Comments.** One syntax: `//` — there is no `///` doc-comment form. Comments
 explain *why*; never narrate the line below. Cite only durable references
-(`(#1234)`, `SFEP-NNNN`, an RCA path) — never "this commit"/"this PR", which the
-reader cannot see. No `TODO`/`FIXME` (file an issue and cite it), no
-commented-out code. A workaround comment states its concrete removal condition,
-and the PR that satisfies it deletes both.
+(`SFN-NNN`, `SFEP-NNNN`, an RCA path) — never "this commit"/"this PR", which the
+reader cannot see. Tracked work is Linear-native, so a **removal condition names
+`SFN-NNN`**; a bare `#NNN` is a GitHub PR or external-intake issue and is
+acceptable only as historical provenance, never as the thing a reader is waiting
+on. No `TODO`/`FIXME` (file an issue and cite it), no commented-out code. A
+workaround comment states its concrete removal condition, and the PR that
+satisfies it deletes both.
 
 **Naming.** `snake_case` functions/locals/files; `PascalCase` types and enum
 variants; `_underscore` module-private helpers; `SCREAMING_SNAKE_CASE` constants.

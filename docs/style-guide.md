@@ -122,16 +122,22 @@ that is exactly the *why* comments are for.
 Comments must make sense to a reader with no knowledge of the diff that
 introduced them:
 
-- **Cite issues, SFEPs, and RCAs**: `(#1234)`, `SFEP-0027`,
+- **Cite issues, SFEPs, and RCAs**: `SFN-142`, `SFEP-0027`,
   `docs/rca/...`. These are stable and searchable.
+- **Tracked work is Linear-native** (`SFN-NNN`). A bare `#NNN` names a GitHub
+  PR or an external-contributor intake issue. Those are durable *history* —
+  `(#2711)` as provenance for a decision is fine — but they are not the board,
+  so a reader cannot pick one up. Never state a **removal condition** in terms
+  of a bare `#NNN`; a workaround whose expiry names a tracker nobody works is a
+  workaround that never gets removed.
 - **Never write "this commit", "this PR", "this change"** — the reader cannot
   see your diff. `// Phase E (this commit) adds cross-module resolution` reads
   as a PR description that escaped into the tree. Say what the code does now
   and cite the issue for the history.
 - **No `TODO`/`FIXME`/`HACK` markers.** The repository convention is
-  cite-the-issue: file a GitHub issue and reference it —
-  `// Fallback until #1441 lands proper slice reuse.` An issue is triaged,
-  labeled, and visible on the board; a `TODO` is where work goes to die.
+  cite-the-issue: file a Linear issue and reference it —
+  `// Fallback until SFN-441 lands proper slice reuse.` An issue is triaged,
+  estimated, and visible on the board; a `TODO` is where work goes to die.
 
 ### Workaround comments carry their expiry
 
@@ -141,8 +147,8 @@ that satisfies the condition **must delete both the workaround and the
 comment**:
 
 ```sfn
-// Seed workaround (#998): the pinned seed folds this allocation away.
-// Remove when bootstrap.toml [seed].version contains #998's compiler fix.
+// Seed workaround (SFN-998): the pinned seed folds this allocation away.
+// Remove when bootstrap.toml [seed].version contains SFN-998's compiler fix.
 ```
 
 If you bump the seed or complete a migration, grep for comments citing the

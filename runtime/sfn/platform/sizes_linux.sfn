@@ -55,7 +55,7 @@ extern fn sfn_fs_exists(path: *u8) -> bool;
 
 // `dirent_dname_offset()` — the canonical accessor adapters will import
 // from here once cross-module resolution of imported defined functions
-// lands in the runtime sfn-source emit path (#306 / epic #763). Until
+// lands in the runtime sfn-source emit path (SFN-635). Until
 // then consumers inline the equivalent runtime probe (see
 // `filesystem.sfn::_fs_dirent_dname_offset`); this proves it resolves and
 // type-checks as a real runtime module.

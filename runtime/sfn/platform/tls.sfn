@@ -13,7 +13,7 @@
 // client also loads the canonical system CA bundle
 // (`/etc/ssl/certs/ca-certificates.crt`) as a discovery fallback so a
 // trust-anchored server stays reachable when OpenSSL's default paths are
-// empty (#1784). macOS/Windows CA-store paths remain #1485 M10.
+// empty (#1784). macOS/Windows CA-store paths are not yet implemented.
 //
 // Callback-free by construction (SFEP-0036 §3.2): the verify callback
 // arg to `SSL_CTX_set_verify` is always `null` and the result is polled
@@ -104,7 +104,7 @@ extern fn strlen(s: *u8) -> usize;
 // result is polled after the handshake in `tls_connect_fd`, and the
 // hostname is bound there via SSL_set1_host. Returns null on allocation
 // failure. The canonical system CA bundle is loaded as a discovery
-// fallback below (#1784); macOS/Windows CA-store paths remain #1485 M10.
+// fallback below (#1784); macOS/Windows CA-store paths are not yet built.
 fn tls_client_ctx() -> *u8 {
     let method: *u8 = TLS_client_method();
     if method as i64 == 0 { return null; }
@@ -123,7 +123,7 @@ fn tls_client_ctx() -> *u8 {
     // Additive and de-duped by OpenSSL, so it is harmless where the default
     // paths already cover it, and ignored (return not checked, like the
     // CAFILE load below) when the file is absent. macOS/Windows CA-store
-    // discovery differs and is deferred to #1485 M10.
+    // discovery differs and is not yet implemented.
     let ca_bundle: string = "/etc/ssl/certs/ca-certificates.crt";
     SSL_CTX_load_verify_locations(ctx, ca_bundle as *u8, null);
     // Optional additional CA bundle (custom / test trust).

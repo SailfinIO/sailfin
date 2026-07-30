@@ -74,9 +74,9 @@
 // `../platform/net.sfn` / `../platform/libc.sfn`? Same rationale as
 // every other `runtime/sfn/*.sfn` module (see `filesystem.sfn`
 // header, ~line 108): the seed compiler reaches the cross-module
-// extern resolver through a path #306 has not closed, so inlining
+// extern resolver through a path SFN-635 has not closed, so inlining
 // the declarations keeps this module self-contained for every seed.
-// A follow-up PR flips these to imports once #306 lands, without
+// A follow-up PR flips these to imports once SFN-635 lands, without
 // touching the bodies. Declaring the same C symbol in two modules
 // is safe — each emits its own LLVM `declare` and the linker
 // resolves both to the single libc / libc-socket entrypoint (see
@@ -95,7 +95,7 @@
 // TLS client wrappers (SFEP-0036, gap B1): the `https://` path wraps its
 // connected socket via these helpers, whose bodies live in
 // `../platform/tls.sfn`. Declared here as `extern fn` FORWARD-DECLARATIONS
-// rather than `import`ed for the SAME #306 reason the libc externs below
+// rather than `import`ed for the SAME SFN-635 reason the libc externs below
 // are inlined: a cross-module `import` is resolved from a staged
 // import-context that the standalone per-module runtime emit (the
 // `ci-cross-windows` bridge, which emits `http.sfn` in isolation) does not
@@ -104,7 +104,7 @@
 // linker resolves each `@tls_*` symbol to `tls.sfn`'s definition in the
 // full runtime link (unmangled external linkage, same as the `sfn_http_*`
 // exports). On the Windows cross-build — where `tls.sfn` is excluded (it
-// pulls OpenSSL, deferred to #1485 M10) — they resolve to the no-op stubs
+// pulls OpenSSL, which that target does not link) — they resolve to the stubs
 // in `runtime/ir/windows_stubs.ll`, so `https://` degrades to a clean null
 // there. (The runtime effect is identical to the prior `import`; only the
 // resolution mechanism changes.)
@@ -168,7 +168,7 @@ extern fn close(fd: i32) -> i32;
 // cast through `* u8` (the `net.sfn` opaque-handle policy — no struct-by-
 // value at the boundary). Identical C ABI to
 // `int setsockopt(int, int, int, const void *, socklen_t)`. Declared
-// inline (not imported) per the same #306 cross-module-extern workaround
+// inline (not imported) per the same SFN-635 cross-module-extern workaround
 // as the other socket externs above.
 extern fn setsockopt(sockfd: i32, level: i32, optname: i32, optval: *u8, optlen: i32) -> i32;
 
@@ -179,8 +179,8 @@ extern fn setsockopt(sockfd: i32, level: i32, optname: i32, optval: *u8, optlen:
 // `service` NULL (the caller owns the port). `hints` and the `res` out-list
 // are opaque `struct addrinfo` buffers cast through `* u8` (the `net.sfn`
 // opaque-handle policy); `res` is a `struct addrinfo **` out-param
-// (`* * u8`, on the extern accept-list). Declared inline per the same #306
-// cross-module-extern workaround as the socket externs above.
+// (`* * u8`, on the extern accept-list). Declared inline per the same
+// SFN-635 cross-module-extern workaround as the socket externs above.
 extern fn getaddrinfo(node: *u8, service: *u8, hints: *u8, res: **u8) -> i32;
 
 extern fn freeaddrinfo(res: *u8) -> void;

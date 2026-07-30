@@ -73,7 +73,7 @@ extern fn atoi(s: *u8) -> i32;
 // cast the family-specific sockaddr struct through `* u8` at the call
 // site). `accept` / `getsockname` take a `socklen_t *` (`* i32`) for the
 // address-length in/out parameter. Declared inline (not imported) per the
-// same #306 cross-module-extern workaround as `http.sfn` / `serve.sfn`;
+// same SFN-635 cross-module-extern workaround as `http.sfn` / `serve.sfn`;
 // the linker resolves each module's `declare` to the single libc symbol.
 extern fn socket(domain: i32, ty: i32, protocol: i32) -> i32;
 
@@ -104,7 +104,7 @@ extern fn setsockopt(sockfd: i32, level: i32, optname: i32, optval: *u8, optlen:
 // buffers cast through `* u8` (the `net.sfn` opaque-handle policy); `res`
 // is a `struct addrinfo **` out-param (`* * u8`, the same shape `environ`
 // and `posix_spawnp`'s argv/envp use, on the extern accept-list). Declared
-// inline per the same #306 cross-module-extern workaround as the socket
+// inline per the same SFN-635 cross-module-extern workaround as the socket
 // externs above.
 extern fn getaddrinfo(node: *u8, service: *u8, hints: *u8, res: **u8) -> i32;
 

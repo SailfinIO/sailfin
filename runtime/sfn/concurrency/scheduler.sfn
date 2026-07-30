@@ -147,7 +147,7 @@ struct Scheduler {
 // ── Externs ───────────────────────────────────────────────────
 // Declared inline rather than imported from
 // `runtime/sfn/platform/pthread.sfn` / `.../libc.sfn`, matching the
-// `arena.sfn` / `mem.sfn` / `rc.sfn` precedent (#306): the seed
+// `arena.sfn` / `mem.sfn` / `rc.sfn` precedent (SFN-635): the seed
 // resolves imported *defined* functions unreliably, so runtime
 // modules outside `platform/` re-declare the extern surface they
 // call. The signatures mirror `pthread.sfn` exactly — `attr`

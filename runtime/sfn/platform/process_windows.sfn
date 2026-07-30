@@ -140,7 +140,7 @@ extern fn FreeEnvironmentStringsA(block: *u8) -> i32;
 // `sfn_array_push_string` is the same linked runtime symbol
 // `runtime/sfn/process.sfn` externs for its POSIX `sfn_process_environ`
 // (defined in `runtime/sfn/array.sfn`, target-independent). Declared here
-// too rather than imported, per the #306 / file-header self-containment
+// too rather than imported, per the SFN-635 / file-header self-containment
 // note above `PwGrowBuf` — this extern is a link contract, not a Sailfin
 // import of the POSIX module.
 extern fn sfn_array_push_string(arr: *u8, text: *u8) -> *u8;
@@ -164,8 +164,9 @@ struct PwDword {
 
 // Local growable byte buffer for accumulating captured pipe output. Kept
 // module-private (the `process.sfn` `GrowBuf` lives in the POSIX module,
-// which this file deliberately does NOT import — see the #306 / file-header
-// self-containment note). `{ addr, len, cap }` mirror the POSIX layout.
+// which this file deliberately does NOT import — see the SFN-635 /
+// file-header self-containment note). `{ addr, len, cap }` mirror the
+// POSIX layout.
 struct PwGrowBuf {
     addr: i64;
     len: i64;
@@ -1455,16 +1456,16 @@ fn sfn_process_handle_kill(handle_id: i64) -> i64 ![io] {
 // `sfn_io_poll_readable(fd, timeout_ms)` — Windows stub for the
 // `io.poll_readable` builtin (#1580). The POSIX body
 // (`runtime/sfn/process.sfn`) wraps `poll(2)`, which mingw lacks for
-// stdio/pipe fds (`WSAPoll` covers sockets only). Until a Windows fd
-// multiplexer lands (epic #1540 B5), report "not readable" so a caller
-// falls back to a blocking read rather than spinning. Mirrors the
+// stdio/pipe fds (`WSAPoll` covers sockets only). Until Windows gains an
+// fd multiplexer covering stdio/pipe fds, report "not readable" so a
+// caller falls back to a blocking read rather than spinning. Mirrors the
 // `sfn_process_handle_*` Windows stubs above.
 fn sfn_io_poll_readable(fd: i64, timeout_ms: i64) -> bool ![io] { return false; }
 
 // `sfn_io_poll_any(fds, timeout_ms)` — Windows stub for the `io.poll_any`
 // builtin (SFN-155). The POSIX body (`runtime/sfn/process.sfn`) wraps a
-// multi-slot `poll(2)`, which mingw lacks for stdio/pipe fds. Until a
-// Windows fd multiplexer lands (epic #1540 B5), report "none ready"
+// multi-slot `poll(2)`, which mingw lacks for stdio/pipe fds. Until
+// Windows gains an fd multiplexer covering those fds, report "none ready"
 // (`-1`) so a caller falls back to a blocking read rather than spinning.
 // Mirrors the `sfn_io_poll_readable` Windows stub above.
 fn sfn_io_poll_any(fds: int[], timeout_ms: i64) -> i64 ![io] { return -1; }

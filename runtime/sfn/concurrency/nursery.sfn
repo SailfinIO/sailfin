@@ -50,7 +50,7 @@
 // `runtime/sfn/platform/pthread_layout.sfn`, imported here rather than
 // hand-copied (a stale copy is the #1265 heap-corruption hazard this
 // de-duplication closes). The `pthread_mutex_*` externs below stay
-// re-declared inline per the #306 precedent, referencing the imported
+// re-declared inline per the SFN-635 precedent, referencing the imported
 // struct as an opaque pointee.
 import { PthreadMutex } from "../platform/pthread_layout";
 
