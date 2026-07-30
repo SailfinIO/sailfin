@@ -4,6 +4,7 @@
 // native emitter.  Extracted from emit_native.sfn to reduce per-file
 // memory footprint during self-hosting compilation.
 import { TypeAnnotation } from "./ast";
+import { Diag, Span } from "./diagnostic";
 import { contains_string, ends_with, substring } from "./string_utils";
 
 // ── Data structures ──────────────────────────────────────────────────
@@ -16,6 +17,7 @@ struct NativeState {
     builder: TextBuilder;
     diagnostics: string[];
     layout_context: LayoutContext;
+    diags: Diag[];
 }
 
 struct StatementDispatchResult {
@@ -122,7 +124,8 @@ fn state_new(context: LayoutContext) -> NativeState {
     return NativeState {
         builder: builder_new(),
         diagnostics: [],
-        layout_context: context
+        layout_context: context,
+        diags: []
     };
 }
 
@@ -130,7 +133,8 @@ fn state_emit_line(state: NativeState, line: string) -> NativeState {
     return NativeState {
         builder: builder_emit_line(state.builder, line),
         diagnostics: state.diagnostics,
-        layout_context: state.layout_context
+        layout_context: state.layout_context,
+        diags: state.diags
     };
 }
 
@@ -138,7 +142,8 @@ fn state_emit_blank(state: NativeState) -> NativeState {
     return NativeState {
         builder: builder_emit_blank(state.builder),
         diagnostics: state.diagnostics,
-        layout_context: state.layout_context
+        layout_context: state.layout_context,
+        diags: state.diags
     };
 }
 
@@ -146,7 +151,8 @@ fn state_push_indent(state: NativeState) -> NativeState {
     return NativeState {
         builder: builder_push_indent(state.builder),
         diagnostics: state.diagnostics,
-        layout_context: state.layout_context
+        layout_context: state.layout_context,
+        diags: state.diags
     };
 }
 
@@ -154,7 +160,8 @@ fn state_pop_indent(state: NativeState) -> NativeState {
     return NativeState {
         builder: builder_pop_indent(state.builder),
         diagnostics: state.diagnostics,
-        layout_context: state.layout_context
+        layout_context: state.layout_context,
+        diags: state.diags
     };
 }
 
@@ -163,24 +170,52 @@ fn state_add_diagnostic(state: NativeState, message: string) -> NativeState {
     return NativeState {
         builder: builder_emit_line(state.builder, "; " + message),
         diagnostics: diagnostics,
-        layout_context: state.layout_context
+        layout_context: state.layout_context,
+        diags: state.diags
     };
 }
 
-fn state_merge_diagnostics(state: NativeState, entries: string[]) -> NativeState {
+fn state_add_diag(state: NativeState, diag: Diag) -> NativeState {
+    let next = state_add_diagnostic(state, diag.message);
+    return NativeState {
+        builder: next.builder,
+        diagnostics: next.diagnostics,
+        layout_context: next.layout_context,
+        diags: append_diag(next.diags, diag)
+    };
+}
+
+// Merges a layout pass's legacy `string[]` diagnostics while attaching the
+// typed sidecar. `span` is the enclosing declaration's name span: the layout
+// walk has already discarded every span by the time it produces these
+// messages, so stamping the declaration's own location is the closest true
+// position available (SFEP-0061 §5.2 S7).
+fn state_merge_layout_diagnostics(state: NativeState, entries: string[], span: Span?) -> NativeState {
     if entries.length == 0 { return state; }
     let mut combined: string[] = state.diagnostics;
+    let mut diags: Diag[] = state.diags;
     let mut index: int = 0;
     loop {
         if index >= entries.length { break; }
         combined.push(entries[index]);
+        diags = append_diag(diags, Diag {
+            code: "E1018", severity: "note", message: entries[index], file_path: "", span: span, stage: "emit-native", suggestion: null
+        });
         index += 1;
     }
     return NativeState {
         builder: state.builder,
         diagnostics: combined,
-        layout_context: state.layout_context
+        layout_context: state.layout_context,
+        diags: diags
     };
+}
+
+fn append_diag(values: Diag[], value: Diag) -> Diag[] {
+    let mut out = values;
+    if out == null { out = []; }
+    out.push(value);
+    return out;
 }
 
 // ── String / array utility functions ─────────────────────────────────

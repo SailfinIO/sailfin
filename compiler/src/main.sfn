@@ -4,6 +4,7 @@
 import { free_heap_string, relocate_string_to_heap } from "./arena_relocate";
 import { Program, Statement } from "./ast";
 import { _env_flag, _legacy_flag_file } from "./build_flags";
+import { Diag } from "./diagnostic";
 import { render_diagnostic, split_source_lines } from "./diagnostics_render";
 import {
     validate_and_render_effects,
@@ -13,6 +14,7 @@ import { ImportSymbolTable, empty_import_symbols } from "./effect_imports";
 import {
     NativeModule,
     emit_native,
+    emit_native_diag_lines,
     emit_native_lines_with_module_name,
     emit_native_text_to_file_with_module_name,
     emit_native_text_with_module_name,
@@ -128,6 +130,21 @@ fn _reject_parse_errors(program: Program) -> boolean ![io] {
         i += 1;
     }
     return found;
+}
+
+// Print the `emit_native` diagnostic sidecar. Every entry is `note` severity,
+// which SFEP-0061 §4 prints only under `SAILFIN_DEBUG_LOWERING` — so a default
+// build's behaviour is unchanged. Matches the `[emit-native]` stderr prefix
+// convention of `report_reexport_violations` (`emit_native.sfn`).
+fn _report_emit_native_diags(diags: Diag[]) ![io] {
+    if !_env_flag("SAILFIN_DEBUG_LOWERING") { return; }
+    let lines = emit_native_diag_lines(diags);
+    let mut index: int = 0;
+    loop {
+        if index >= lines.length { break; }
+        print.err("[emit-native] " + lines[index]);
+        index += 1;
+    }
 }
 
 fn compile_to_sailfin(source: string) -> string ![io] {
@@ -349,6 +366,7 @@ fn compile_to_llvm(source: string) -> string ![io] {
         return ir;
     }
     let native_result = emit_native_with_module_name(program, "main");
+    _report_emit_native_diags(native_result.diags);
     let ir = lower_to_llvm_ir(native_result.module);
     if trace_emit {
         print.err("emit-llvm: llvm bytes=" + number_to_string(ir.length));
@@ -431,10 +449,12 @@ fn compile_to_llvm_with_module(source: string, module_name: string) -> string ![
         ir = lower_to_llvm_ir_from_text(native_text, module_name);
         if ir.length == 0 {
             let native_result = emit_native_with_module_name(program, module_name);
+            _report_emit_native_diags(native_result.diags);
             ir = lower_to_llvm_ir(native_result.module);
         }
     } else {
         let native_result = emit_native_with_module_name(program, module_name);
+        _report_emit_native_diags(native_result.diags);
         ir = lower_to_llvm_ir(native_result.module);
     }
     if trace_emit {
@@ -517,6 +537,7 @@ fn compile_to_llvm_with_module_timed(source: string, module_name: string) -> str
         ir = lower_to_llvm_ir_from_text(native_text, module_name);
     } else {
         let native_result = emit_native_with_module_name(program, module_name);
+        _report_emit_native_diags(native_result.diags);
         ir = lower_to_llvm_ir(native_result.module);
     }
     if trace_emit {
