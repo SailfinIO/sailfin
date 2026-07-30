@@ -1,4 +1,4 @@
-// compiler/src/cli/commands/test.sfn
+// compiler/src/cli/commands/test/mod.sfn
 //
 // `test` subcommand (CLI modularization epic #351, Issue 3.8 — proposal
 // §5 Phase 3 item 8, §7). Migrates `sfn test` off the legacy
