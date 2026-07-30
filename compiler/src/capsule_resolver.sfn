@@ -130,26 +130,12 @@ import {
 import { Diagnostic, diagnostic_to_diag } from "./typecheck_types";
 import { resolve_compiler_version, resolve_compiler_version_for_cache } from "./version";
 
-// Struct definitions and their constructors live in `./capsule_resolver/types`.
-// The explicit `from` clause is required: a bare `export { X };` of a symbol
-// imported from a relative path emits no `.fn` signature into this module's
-// `.sfn-asm`, so consumers silently fall back to an `i8*` return type and
-// miscompile boolean `if` guards (`E0600`,
-// docs/rca/2026-04-18-reexport-diagnostic-gep.md).
-export {
-    CapabilityDriftReport,
-    CapsuleSource,
-    CheckCapsuleResolution,
-    CompileCapsuleResult,
-    MemberCapabilityAudit,
-    ModuleCacheEvent,
-    ProjectCapsuleResult,
-    ResolverConsumer,
-    TestCapsuleResolution,
-    WorkspaceMember,
-    empty_resolver_consumer
-} from "./capsule_resolver/types";
-
+// Struct definitions and their constructors live in `./capsule_resolver/types`
+// and are NOT re-exported from here. Consumers import them from that module
+// directly. A re-export — bare or with a `from` clause — leaves this module's
+// `.sfn-asm` without a `.fn` signature for the symbol, so a consumer resolving
+// through it cannot determine the callee's return type and the emit fails
+// (`E0600`, `E1002`, docs/rca/2026-04-18-reexport-diagnostic-gep.md).
 export {
     compile_capsule_modules,
     discover_project_root,
