@@ -334,6 +334,73 @@ longer holds.
 
 It is not part of this epic and should be tracked separately.
 
+#### Resolution (SFN-633)
+
+The parenthetical is what held: all ten call sites (`main.sfn:152,335,388,414,475,618,688,757,857`
+and `tools/check.sfn:164`) pass the same `runtime_helper_call_names()`, which is
+built from hardcoded descriptors with no I/O and no environment dependence
+(`llvm/runtime_helpers.sfn:1747-1758`). The differing-callers diagnosis above is
+therefore wrong, and keying on `helper_names` was not what the fix needed.
+
+The operative hazard is the **phase-scoped arena rewind**, and it makes any
+`string[]` memo in this module a use-after-free regardless of keying.
+
+Ordinary Sailfin arrays and strings are arena-backed: `sfn_alloc_struct`
+(`runtime/sfn/memory/mem.sfn:240-250`) routes through `sfn_arena_alloc` →
+`sfn_arena_sfn_alloc`, the same bump allocator `sfn_arena_sfn_mark` /
+`sfn_arena_sfn_rewind` operate on (`runtime/sfn/memory/arena.sfn:352-354`,
+`:665-748`). The compiler's own execution rewinds at **four** sites, not one:
+
+| site | mark | rewind | cadence |
+|---|---|---|---|
+| `main.sfn` emit pass | `:855` | `:917` | once per file, success path only |
+| `check/engine.sfn` | `:422` | `:454` | **once per checked file** |
+| `cli/commands/test.sfn` | `:1163` | `:1340,1354,1379,…` | per test phase |
+| `cli/commands/fmt.sfn` | `:112` | `:136` | per run |
+
+In `main.sfn` the mark is taken at `:855`, one line *before* the first
+`load_prelude_global_names` call at `:857`, so a `string[]` memo populated on that
+first call sits above the mark and is reclaimed by the rewind at `:917`. Every
+later file in the same process then indexes a dangling container — exactly the
+hazard `arena_relocate.sfn:6-13` records for SFEP-0043: "a `string[]` returned by
+a helper is itself arena-allocated; after the rewind its metadata struct is gone,
+so any post-rewind indexing is a use-after-free."
+
+That explains the original report precisely. The reported crash command was
+`sfn emit --module-name runtime/sfn/platform/posix native` — the `main.sfn`
+rewind path. It also explains the *intermittency*: a UAF read succeeds silently
+until something else allocates over the reclaimed region, so single-file and
+warm-cache runs pass while parallel cold runs fault.
+
+Two consequences worth recording, because both are easy to get wrong:
+
+- **Hoisting the call above the mark does not fix it.** That would rescue
+  `main.sfn` alone; `check/engine.sfn` rewinds once per *file*, so an
+  arena-allocated memo still dangles there.
+- **The differing-callers and aliasing diagnoses were both wrong.** No consumer
+  mutates the returned array (`typecheck.sfn:220` only concats it;
+  `_symbols_from_global_names`, `typecheck.sfn:356-367`, only reads), so a
+  shared-array cache would have been content-correct. Neither theory predicts a
+  SIGSEGV.
+
+The shipped fix therefore carries only a heap-backed scalar across the mark
+boundary, per the sanctioned pattern: the scanned names are joined into one blob,
+relocated out of the arena with `relocate_string_to_heap`
+(`arena_relocate.sfn:31`), stored in a `string` module global, and re-split per
+call. The guard is a `boolean` — const-initialized in the preamble
+(`module_globals.sfn:315-323`), needing no `@sailfin_module_init__` call (which
+#1386 plants only in a module's own `fn main`, `emission.sfn:447-456`, and this
+module has none), hence safe to read before any assignment.
+
+Cost of the round trip: the blob is ~18 KB over 1,119 names, against the ~940 KB
+of runtime source the memo stops re-reading. Measured marginal cost per checked
+file went 8.02M → 213.7K `strnlen` calls (37.5×), flat in N, with `sfn check`
+output byte-identical at N = 1, 2, 4, 8.
+
+Measured after the change: per-file marginal cost drops from ~8.02M `strnlen`
+calls to ~176K, flat in N (8 files: 64,249,837 → 9,336,251 calls, 1.14s → 0.23s),
+with `sfn check` output byte-identical at N = 1, 2, 4, 8.
+
 ### 5.1 IR call-site counts understate the true scan volume
 
 `sfn_str_eq` (`runtime/sfn/string.sfn:284-289`) calls `strnlen` **twice

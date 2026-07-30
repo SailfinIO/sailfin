@@ -1,0 +1,85 @@
+// Regression coverage for the per-process memo in
+// `prelude_globals.load_prelude_global_names` (SFN-633).
+//
+// The runtime source scan is memoized once per process. Two properties
+// keep that safe, and both are easy to lose to a well-meaning refactor:
+//
+//   1. The memo is a heap-relocated `string` blob, never a `string[]`.
+//      Sailfin arrays are arena-backed (`runtime/sfn/memory/mem.sfn:240-250`),
+//      and the compiler rewinds that arena at four sites — including once
+//      per checked file in `check/engine.sfn:422,454` — so an
+//      arena-allocated memo is reclaimed underneath itself and every later
+//      read indexes a dangling container (SFEP-0043;
+//      `compiler/src/arena_relocate.sfn:6-13`). That is what made a naive
+//      cache segfault the freshly built compiler while emitting
+//      `runtime/sfn/platform/posix.sfn`.
+//   2. Only the caller-independent scanned tail is cached. The returned
+//      set is `helper_names ++ scanned`, so caching the combination would
+//      hand one caller another's helper set.
+//
+// These tests pin (2) and the freshness of the returned array. They touch
+// (1) only incidentally — `sfn test` itself marks and rewinds the arena
+// around test execution (`cli/commands/test.sfn:1163` and its rewind
+// sites), so the later tests here do read the memo across a rewind
+// boundary — but a UAF read succeeds silently until something allocates
+// over the reclaimed region, so treat that as a smoke signal rather than
+// a guarantee. The load-bearing guard for (1) is the comment at the
+// declaration plus the cold `make check` self-host.
+//
+// Placed in integration/ rather than unit/: these are `![io]` and read
+// the real runtime source tree, unlike the sibling
+// `unit/prelude_globals_test.sfn`, which deliberately covers only the
+// pure `prelude_scan` half. `prelude_globals`'s import closure is light
+// (`prelude_scan`, `string_utils`, `arena_relocate`) and its runtime-root
+// externs (`exe_path`, `resolve_runtime_root`) resolve against the
+// runtime exec object linked into every test — see
+// docs/conventions/unit-test-import-envelope.md.
+import { expect_eq_bool, expect_eq_int } from "sfn/test";
+
+import { load_prelude_global_names } from "../../src/prelude_globals";
+
+fn _contains_name(names: string[], target: string) -> boolean {
+    let mut i: int = 0;
+    loop {
+        if i >= names.length { break; }
+        if strings_equal(names[i], target) { return true; }
+        i += 1;
+    }
+    return false;
+}
+
+test "prelude globals: distinct callers keep their own helper names" ![io] {
+    let alpha = load_prelude_global_names(["__pg_marker_alpha"]);
+    let beta = load_prelude_global_names(["__pg_marker_beta"]);
+
+    assert expect_eq_bool(_contains_name(alpha, "__pg_marker_alpha"), true).ok;
+    assert expect_eq_bool(_contains_name(beta, "__pg_marker_beta"), true).ok;
+
+    // The load-bearing direction: `beta` is computed after `alpha`, so a
+    // cache holding the combined result would leak alpha's marker here.
+    assert expect_eq_bool(_contains_name(beta, "__pg_marker_alpha"), false).ok;
+    assert expect_eq_bool(_contains_name(alpha, "__pg_marker_beta"), false).ok;
+}
+
+test "prelude globals: the returned set is a fresh array over the memo" ![io] {
+    // The memo's safety argument is that callers only ever read the
+    // cached buffer. Mutating a returned array must not write through
+    // into it, or every later caller inherits the mutation.
+    let first = load_prelude_global_names(["__pg_marker_probe"]);
+    let before = first.length;
+    first.push("__pg_mutation_probe");
+
+    let second = load_prelude_global_names(["__pg_marker_probe"]);
+    assert expect_eq_int(second.length, before).ok;
+    assert expect_eq_bool(_contains_name(second, "__pg_mutation_probe"), false).ok;
+}
+
+test "prelude globals: helper names compose additively with the scan" ![io] {
+    // Guards against the memo accumulating helper names across calls —
+    // the failure mode where each call appends its helpers to the cached
+    // tail and the set grows without bound. Stated as a difference so it
+    // holds whether or not runtime source is present.
+    let none = load_prelude_global_names([]);
+    let one = load_prelude_global_names(["__pg_marker_single"]);
+    assert expect_eq_int(one.length, none.length + 1).ok;
+}

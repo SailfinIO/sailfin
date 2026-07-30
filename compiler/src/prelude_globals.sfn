@@ -18,6 +18,7 @@
 // same exe-relative resolution the linker uses to find `prelude.o`), so
 // the lookup is cwd-independent — integration/e2e tests run the compiler
 // from scratch directories where a cwd-relative `runtime/` would miss.
+import { relocate_string_to_heap } from "./arena_relocate";
 import { prelude_global_names_from_source } from "./prelude_scan";
 import { substring } from "./string_utils";
 
@@ -29,6 +30,86 @@ import { substring } from "./string_utils";
 extern fn exe_path() -> *u8;
 
 extern fn resolve_runtime_root(exe: *u8) -> *u8;
+
+// Per-process memo of the runtime source scan. The corpus is immutable
+// for the life of the process and the compiler never changes cwd, so the
+// BFS walk in `load_prelude_global_names` is pure repeated work whenever
+// a run checks more than one file — it cost ~8.02M `strnlen` calls per
+// checked file with zero amortization (SFN-633;
+// `docs/proposals/design-notes/sfn-628-strnlen-recovery-tax.md` §5.C
+// measures that at 58% of front-end scan volume on a 7-file run).
+//
+// The memo is a heap-relocated `string` blob, NOT a `string[]` — that is
+// the whole difficulty, and a `string[]` here is a use-after-free.
+// `compile_to_llvm_file_with_module_imports` takes an arena mark
+// (`main.sfn:855`) immediately BEFORE the first
+// `load_prelude_global_names` call and rewinds to it at the end of the
+// emit pass (`main.sfn:915-917`, phase-scoped reclamation, default-on).
+// A `string[]` memo is arena-allocated after that mark, so the rewind
+// reclaims its container and every later file in the same process reads a
+// dangling pointer — the exact hazard `arena_relocate.sfn:6-13` records
+// for SFEP-0043 ("after the rewind its metadata struct is gone, so any
+// post-rewind indexing is a use-after-free"). It presents as an
+// intermittent SIGSEGV during `sfn emit`, not as a build failure.
+//
+// So only a heap-backed scalar crosses the mark boundary: the names are
+// joined before relocation and re-split per call. The split re-scans
+// ~18 KB (1,119 names) in place of the ~940 KB of runtime source the memo
+// avoids re-reading, so the win comfortably survives it.
+//
+// `_pg_scanned` is a boolean on purpose — do NOT collapse the guard into
+// `_pg_runtime_blob.length > 0`. A non-scalar module global is emitted
+// with a `null` initializer and its initializer deferred into
+// `@sailfin_module_init__<module>` (`llvm/lowering/module_globals.sfn:293,324`),
+// and #1386 plants the call to that init function only in a module's own
+// `fn main` (`llvm/lowering/emission.sfn:447-456`). This module has no
+// `fn main`, so the blob reads back `null` until its first assignment,
+// while `.length` lowers to an unguarded `load` + `extractvalue`
+// (`llvm/expression_lowering/native/core_member_lowering.sfn:848-864`).
+// A boolean literal is const-initialized in the preamble instead
+// (`module_globals.sfn:315-323`) and needs no init call, so it is safe to
+// read before anything assigns it.
+//
+// The memo also holds ONLY the runtime-derived names, never the combined
+// `helper_names ++ scanned` result. Every call site passes the same
+// `runtime_helper_call_names()` today, so that is defence in depth rather
+// than a live requirement — it keeps the uniformity from silently
+// becoming load-bearing.
+let mut _pg_scanned: boolean = false;
+
+let mut _pg_runtime_blob: string = "";
+
+// Newline-delimited round trip for the memo blob. Declaration names are
+// identifiers, so a newline can never occur inside one.
+fn _pg_join_names(names: string[]) -> string {
+    let mut out: string = "";
+    let mut i: int = 0;
+    loop {
+        if i >= names.length { break; }
+        if i > 0 { out = out + "\n"; }
+        out = out + names[i];
+        i += 1;
+    }
+    return out;
+}
+
+fn _pg_split_names(blob: string) -> string[] {
+    let mut out: string[] = [];
+    let mut start: int = 0;
+    let mut i: int = 0;
+    loop {
+        if i >= blob.length { break; }
+        if substring(blob, i, i + 1) == "\n" {
+            if i > start { out.push(substring(blob, start, i)); }
+            start = i + 1;
+        }
+        i += 1;
+    }
+    if blob.length > start {
+        out.push(substring(blob, start, blob.length));
+    }
+    return out;
+}
 
 fn _pg_join(dir: string, child: string) -> string {
     if dir.length == 0 { return child; }
@@ -114,22 +195,18 @@ fn _pg_find_runtime_dir() -> string ![io] {
 // via `llvm/runtime_helpers.runtime_helper_call_names()`) rather than
 // imported here on purpose: this module is imported by `main`, so a
 // `prelude_globals → llvm/...` edge would invert the layering.
-//
-// NOTE (#812): this intentionally recomputes on every call rather than
-// memoizing in a module-level cache. A `let mut _cache: string[]`
-// module global makes the seed compiler emit a call to
-// `@sailfin_module_init__prelude_globals` without a definition (invalid
-// IR — `llvm-as` rejects it, breaking the cold self-host build). Boolean
-// module globals (see `test_runner_state.sfn`) are fine; array-typed
-// ones are not. The per-call FS scan is the accepted cost until that
-// seed codegen bug is fixed; see the PR thread.
 fn load_prelude_global_names(helper_names: string[]) -> string[] ![io] {
-    let mut names = helper_names;
-    let runtime_dir = _pg_find_runtime_dir();
-    if runtime_dir.length > 0 {
-        let prelude_source = fs.readFile(_pg_join(runtime_dir, "prelude.sfn"));
-        names = names.concat(prelude_global_names_from_source(prelude_source));
-        names = _pg_scan_sfn_tree(runtime_dir, names);
+    if !_pg_scanned {
+        let mut scanned: string[] = [];
+        let runtime_dir = _pg_find_runtime_dir();
+        if runtime_dir.length > 0 {
+            let prelude_source = fs.readFile(_pg_join(runtime_dir, "prelude.sfn"));
+            scanned = scanned.concat(prelude_global_names_from_source(prelude_source));
+            scanned = _pg_scan_sfn_tree(runtime_dir, scanned);
+        }
+        // Relocate out of the arena before the phase rewind reclaims it.
+        _pg_runtime_blob = relocate_string_to_heap(_pg_join_names(scanned));
+        _pg_scanned = true;
     }
-    return names;
+    return helper_names.concat(_pg_split_names(_pg_runtime_blob));
 }
