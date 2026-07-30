@@ -133,6 +133,13 @@ end-to-end so a string value is never downgraded to a bare `i8*` and rescanned**
 > is 16%–35% of front-end instructions and grows quadratically in source-file
 > size. Scope the epic from `sfn-628-strnlen-recovery-tax.md` §8, not from §4
 > above.
+>
+> Two caveats on that percentage. It is the *total* `strnlen` share, and part of
+> it belongs to a separately-tracked defect (a runtime symbol re-scan) that the
+> epic does not own — see that note's §1 and §5.C for the allocation. And the
+> lexer's whole-buffer rescan, which is nearly all the scanned bytes, was
+> confirmed to need a genuine parameter-type change rather than a local
+> workaround (§5.A.1), so it belongs inside P1 rather than ahead of it.
 
 Two viable paths (recommend the owner pick at grooming):
 

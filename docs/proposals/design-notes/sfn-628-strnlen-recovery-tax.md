@@ -15,6 +15,16 @@ is a **quadratic blow-up concentrated in five machine instructions in the
 lexer**, and the parser surface §4 singled out is negligible. An epic scoped
 from §4's conclusions would optimise the wrong code.
 
+**How the measured cost splits across the recommendation.** Of the 39.3 GB
+scanned, ~97.8% is the lexer and ~0.6% is the prelude re-scan path; of the 84.1M
+calls, ~58% is the prelude re-scan and ~48.7% flows through `_dr_split_lines`.
+§8 sends the prelude re-scan *outside* this epic (§5.C — it is redundant
+repetition, not length re-derivation), which is most of the call volume. What
+stays inside the epic is the lexer's bytes (§5.A, and §5.A.1 establishes it is
+genuinely carry-length work) plus the per-character helper returns (§5.B). That
+is the honest allocation: **the epic owns nearly all the bytes and roughly half
+the calls; a separately-tracked defect owns the rest of the calls.**
+
 There are also **two** root-cause mechanisms, not the one §4 described: the
 struct-field demotion (dominates bytes) and bare-`i8*` runtime-helper returns
 that discard a length already known at the call site (dominates call count).
@@ -23,9 +33,10 @@ Three findings drive the verdict:
 
 - Length recovery is **16.1%–34.5% of all executed instructions** in a
   front-end `sfn check`, rising with input size.
-- Bytes scanned grow as **Θ(n²)** in source-file size (measured exponent
-  1.998–2.003). A 1 MB source file would scan ~2.9 TB and spend ~50 s in
-  `strnlen` alone.
+- Bytes scanned grow as **Θ(n²)** in source-file size (floor-subtracted exponent
+  converging to 2.0). A 1 MB source file would scan ~1.7–2.9 TB and spend
+  ~30–50 s in `strnlen` alone, depending on whether real-source or synthetic
+  scaling holds.
 - A further **58% of front-end call volume** is the runtime symbol scan
   re-walking `runtime/**` once per checked file — a separate defect, blocked on
   a seed codegen bug (#812), that should not be folded into this epic.
@@ -53,6 +64,11 @@ Three independent instruments:
 Workload: `sfn check compiler/src/parser/*.sfn` (7 files, 8,436 lines) — the
 front end only (parse + typecheck + effect-check, no IR, no codegen).
 
+**Two artifacts are mixed.** All *dynamic* measurement is against the 0.8.4 seed
+binary; the *static* IR counts in §3 come from a working-tree `make compile`, and
+§3.1 compares the two directly. Tree and seed are close but not identical, so
+treat that one comparison as indicative.
+
 **Uncertainty.** The callgrind figure is exact (instruction counts, not
 samples). The wall-time figure is the soft one: calibration reuses one hot
 buffer, so it models an L2-resident best case and, if anything, *understates*
@@ -70,6 +86,9 @@ Command (from `make compile`, 271 modules):
 for f in build/native/raw/*.ll; do
   printf '%s\t%s\n' "$(grep -c 'call i64 @sfn_str_len' "$f")" "$(basename $f)"
 done | sort -rn | head -20
+
+# the total (head -20 above shows only the leaders)
+cat build/native/raw/*.ll | grep -c 'call i64 @sfn_str_len'
 ```
 
 **Total: 20,972 emitted `call i64 @sfn_str_len` sites across 271 modules.**
@@ -88,27 +107,32 @@ importantly, **none of these are the top emitters**. The actual top modules are:
 
 | count | module |
 |---|---|
-| 828 | `llvm__expression_lowering__native__core_operands` |
-| 660 | `llvm__expression_lowering__native__core_call_emission` |
-| 515 | `typecheck_types` |
-| 435 | `llvm__expression_lowering__native__core_concurrency_lowering` |
-| 364 | `llvm__expression_lowering__native__core_literals_lowering` |
+| 827 | `llvm__expression_lowering__native__core_operands` |
+| 659 | `llvm__expression_lowering__native__core_call_emission` |
+| 514 | `typecheck_types` |
+| 434 | `llvm__expression_lowering__native__core_concurrency_lowering` |
+| 363 | `llvm__expression_lowering__native__core_literals_lowering` |
+
+Count `call i64 @sfn_str_len`, not `@sfn_str_len` — the latter is one higher per
+module, picking up the `declare` line. The §4 figures being superseded do not
+state which they used.
 
 ### 3.1 Why the static count is the wrong instrument
 
-`lexer.ll` emits **29** `sfn_str_len` call sites — near the bottom of the
-table, 1/28th of `core_operands`. At runtime it produces **97.8% of all bytes
+`lexer.ll` emits **29** `sfn_str_len` call sites — below the 271-module mean of
+77, and 1/28th of `core_operands`. At runtime it produces **97.8% of all bytes
 scanned**.
 
 Static emission count does not rank cost even approximately. One call site
-inside a per-character loop dominates 828 cold ones. §4 ranked modules by
+inside a per-character loop dominates 827 cold ones. §4 ranked modules by
 static count and concluded the parser was the hot path; it is not. Any future
 sizing of this work must use dynamic measurement.
 
 ## 4. Where the time actually goes
 
 Dynamic attribution, 7-file front-end check — **84,143,313 calls scanning
-39,316,783,174 bytes (39.3 GB)** to check 8,436 lines:
+39,316,783,174 bytes (39.3 GB)** to check 8,436 lines. Top entries only — these
+rows cover ~76% of calls; the rest is spread across 260-odd symbols:
 
 | enclosing function | calls | % calls | bytes | % bytes |
 |---|---|---|---|---|
@@ -135,7 +159,9 @@ counting mis-ranked this the same way static IR counting did.
 
 ### 4.2 The real hot spot: five instructions in the lexer
 
-Machine-level attribution inside `lex__lexer` (33 distinct sites):
+Machine-level attribution inside `lex__lexer` (33 distinct machine-level sites —
+more than `lexer.ll`'s 29 static IR sites because `sfn_str_len` and its callers
+are inlined, so one IR site can become several machine sites):
 
 | site | calls | bytes | % of all bytes |
 |---|---|---|---|
@@ -145,9 +171,9 @@ Machine-level attribution inside `lex__lexer` (33 distinct sites):
 | `lex__lexer+0x1d1` | 62,968 | 4,361,305,181 | 11.1% |
 | `lex__lexer+0x518` | 54,680 | 4,037,767,103 | 10.3% |
 
-**Five call sites = 83.7% of all string-scanning work in the entire front end**,
-averaging ~71 KB scanned per call — i.e. each one rescans the whole source
-buffer.
+**Five call sites = 81.8% of all string-scanning work in the entire front end**
+(83.7% of the lexer's own bytes), averaging ~71 KB scanned per call — i.e. each
+one rescans the whole source buffer.
 
 ## 5. Root cause
 
@@ -162,7 +188,7 @@ The chain is short and entirely mechanical:
    demotes string-typed **struct fields** to bare `i8*` (deliberately, to keep
    field byte offsets stable), while scalars stay `{i8*, i64}`
    (`map_type_annotation`, `type_mapping.sfn:559-561`).
-3. `compiler/src/lexer.sfn:422-437` — `slice(text: string, …)` and
+3. `compiler/src/lexer.sfn:422-439` — `slice(text: string, …)` and
    `byte_at(text: string, …)` take the source as a **scalar** `string`
    parameter.
 4. **24 call sites** in `lexer.sfn` pass `state.source` — the bare-`i8*` field
@@ -176,21 +202,47 @@ The chain is short and entirely mechanical:
 
 O(n) calls × O(n) scan each = **Θ(n²)**.
 
-Note `_number_run_byte` (`lexer.sfn:406`) already threads `source_len: int`
-explicitly as a separate parameter, and its two internal `byte_at(source, …)`
-calls therefore pass an *already-scalar* `string` and do not rescan. The pattern
-was noticed and worked around by hand for the number path, without the root
-cause being addressed — which is also a partial existence proof that the §8.1
-fix works.
+### 5.A.1 Passing the length as an extra parameter does **not** fix it
 
-**Confidence.** The quadratic *measurement* (§6) is direct. The *attribution* of
-that quadratic to this specific chain is inferred from source reading plus
-machine-level call-site attribution, not from a before/after experiment — no
-A/B was possible here because the issue forbids changing lowering code. The
-inference is well-supported (24 call sites, scan length ≈ full file, exponent
-exactly 2.0, and a hand-workaround already present at `lexer.sfn:406`) but it
-is an inference. The first slice of the epic should confirm it by measuring the
-fix.
+This is the most important negative result in the note, and it rules out the
+obvious cheap fix.
+
+`LexerState` **already carries the length as a field** — `source_len: int`
+(`lexer.sfn:12`). And `_number_run_byte` (`lexer.sfn:406`) already takes it as
+an explicit `source_len: int` parameter. Both facts suggest the scan should be
+avoidable locally. The emitted IR says otherwise (`build/native/raw/lexer.ll:1418-1424`):
+
+```llvm
+  %t905 = extractvalue %LexerState %t904, 0     ; source      — bare i8*
+  %t907 = extractvalue %LexerState %t906, 1     ; source_len  — already in hand, free
+  %t910 = call i64 @sfn_str_len(i8* %t905)      ; …and strnlen'd anyway
+  %t911 = insertvalue {i8*, i64} undef, i8* %t905, 0
+  %t912 = insertvalue {i8*, i64} %t911, i64 %t910, 1
+  %t913 = call i1 @_number_run_byte__lexer({i8*, i64} %t912, i64 %t907, i64 %t909)
+```
+
+The correct length is extracted for free and passed as the *second* argument,
+while the *first* argument still pays a full whole-buffer `strnlen`. Same shape
+at the other two call sites (`lexer.ll:1586-1592`, `:2059-2065`).
+
+The scan is caused by the **parameter's declared type**, not by a missing
+length. `source: string` is scalar, so a bare-`i8*` argument must be widened to
+`{i8*, i64}`, and widening *is* the `strnlen`. No amount of threading a
+`source_len` alongside it removes the scan.
+
+**Consequence.** Removing the quadratic term requires changing the parameter
+*type* off scalar `string` — a `*u8` + `i64` pair — or changing the struct-field
+mapping. That is carry-length work, not a local tidy-up. `_number_run_byte` is
+not a partial fix that merely needs generalising; it is a **worked example of
+the fix not working**.
+
+**Confidence.** The quadratic *measurement* (§6) is direct, and the mechanism is
+now confirmed from emitted IR (above), not merely inferred. Two caveats remain:
+the five hot offsets in §4.2 were resolved to the enclosing function
+(`lex__lexer`) but **not mapped back to individual source call sites**, and **no
+before/after experiment was run** — SFN-628 forbids changing lowering code, so
+there is no A/B. The attribution is well-supported but the size of any fix's win
+is unmeasured.
 
 Other Mechanism-A instances: `SymbolEntry.name` (`typecheck_types.sfn:65-66`,
 scanned per linear symbol-table probe in `find_symbol`) and `Token.lexeme`
@@ -249,16 +301,26 @@ undefined `@sailfin_module_init__prelude_globals`** — invalid IR that `llvm-as
 rejects — because array-typed module globals are miscompiled (#812). The per-call
 FS scan is an accepted workaround for a seed codegen bug.
 
-So the single largest call-count win in the front end is gated on #812, not on
-this epic. It should be tracked separately.
+Note the comment blocks **one specific approach** — a `let mut _cache: string[]`
+module global — and explicitly says boolean module globals are fine. Other
+memoizations (threading the names down from the caller, a non-array cache) are
+not obviously blocked. The win is gated on #812 *as currently framed*, and may
+be reachable without it.
+
+Either way it is not part of this epic and should be tracked separately.
 
 ### 5.1 IR call-site counts understate the true scan volume
 
 `sfn_str_eq` (`runtime/sfn/string.sfn:284-289`) calls `strnlen` **twice
 internally**, on both operands. So counting `@sfn_str_len` in emitted IR —
 acceptance criterion 1 as written — structurally undercounts real scan work by
-however much bare-`i8*` string equality the program does. Both numbers are
-reported above; the dynamic one is the one to trust.
+however much bare-`i8*` string equality the program does.
+
+The interposer counts those inner scans, so the gap is measured, not just
+asserted: `sfn_str_eq` accounts for **1,422,038 calls (1.7%) and 5,861,315 bytes
+(0.015%)** of the totals. Small — freshly emitted IR mostly targets the
+length-aware `sfn_str_eq_lv` (`runtime/sfn/string.sfn:299-302`), which does not
+scan. The undercount is real but bounded and changes no conclusion here.
 
 ## 6. Scaling evidence
 
@@ -274,18 +336,30 @@ measured bytes scanned, floor-subtracted to remove fixed startup cost:
 | 48,290 | 6,766,007,702 | 1.998 |
 | 96,690 | 26,843,634,902 | 1.998 |
 
-Converges on **exactly 2.0**. Fitted model: `bytes_scanned ≈ 2.86 · n²`.
+Exponents are computed after subtracting a fixed **8.0e7-byte floor** (the
+per-invocation startup cost isolated in §5.C); the byte column above is raw.
+Raw exponents for the same rows are 0.831 / 1.453 / 1.816 / 1.947 / 1.985 — the
+floor dominates at small n, which is why it is subtracted.
 
-The seven real parser files fit the same curve (`scanned/n²` converging to
-~1.7–1.85 for the larger files).
+Converging to 2.0 from above. Fitted model on the synthetic series:
+`bytes_scanned ≈ 2.86 · n²`.
+
+The seven real parser files show the **same exponent but a lower constant** —
+`scanned/n²` converges to ~1.72, not 2.86 — so real source is ~40% cheaper per
+byte² than the synthetic series. Both coefficients are carried below rather than
+blended.
 
 Extrapolation:
 
-| source size | bytes scanned | `strnlen` time alone @ ~57 GB/s |
+Extrapolated at ~57 GB/s (§7's calibration; the implied rate from the 7-file run
+is ~60 GB/s, so these are slightly conservative). The range spans the
+real-source coefficient (1.72) and the synthetic one (2.86):
+
+| source size | bytes scanned | `strnlen` time alone |
 |---|---|---|
-| 106 KB (`parser/expressions.sfn`) | 19.5 GB | ~0.34 s |
-| 250 KB | 0.18 TB | ~3 s |
-| 1 MB | 2.86 TB | ~50 s |
+| 106 KB (`parser/expressions.sfn`, measured) | 19.5 GB | ~0.34 s |
+| 250 KB | 0.11–0.18 TB | ~2–3 s |
+| 1 MB | 1.7–2.9 TB | ~30–50 s |
 
 The compiler's own largest modules sit near the top of the measured range, so
 this is not hypothetical: the ~1,500-line soft module budget in
@@ -300,9 +374,15 @@ Callgrind, exact instruction counts:
 | `parser/token_utils.sfn` (30 KB) | 2,891,394,509 | 464,177,035 (16.05%) | 64,386,155 (2.23%) | **18.3%** |
 | `parser/expressions.sfn` (106 KB) | 6,617,481,453 | 2,282,269,124 (34.49%) | 108,399,565 (1.64%) | **36.1%** |
 
-The share **doubles** as the file grows 3.5×, exactly as the quadratic model
-predicts. This is the key number: the tax is not a fixed ~18% overhead, it is a
-scaling cliff.
+The share roughly doubles as the file grows 3.5×. Call this **consistent with a
+super-linear share**, not a confirmation of the byte model: two points from two
+structurally different files cannot carry a fit, and the instruments do not fully
+reconcile — absolute `__strnlen_avx2` instructions grow 4.92× (464M → 2,282M)
+for a 3.53× size increase, an implied exponent near 1.26, well below what §6's
+byte model predicts. The likely reconciliation is that instructions per scanned
+byte fall as scans lengthen (AVX2 amortising a fixed per-call cost), but that
+was not measured. Rely on the directionally solid claim: **the tax is not a
+fixed ~18% overhead, it grows with input size.**
 
 Bandwidth calibration agrees independently: ~0.65 s of `strnlen` against 3.11 s
 user CPU for the 7-file run ≈ **21%**, versus callgrind's 18.3% on comparable
@@ -320,16 +400,17 @@ on that evidence rather than on a calendar.
 
 Scope the epic from §4–§6 of this note, **not** from SFN-460 §4:
 
-1. **The lexer is the whole prize on bytes.** Five call sites, 83.7% of scan
-   bytes, quadratic (§5.A). Passing the already-hoisted `length`
-   (`lexer.sfn:19`) alongside `state.source` — the `_number_run_byte`
-   treatment, applied to `byte_at` and `slice` — **should** collapse the
-   quadratic term. This is untested: no A/B was run, because the issue forbids
-   changing lowering code. It is a **cheap, local, non-architectural candidate
-   that must be measured before the full epic is committed to**, and it should
-   be the epic's first slice regardless. It does not require
-   carry-length-everywhere, and if it lands the measured win, it materially
-   changes how much the rest of the epic is worth.
+1. **The lexer is the whole prize on bytes** — five call sites, 81.8% of scan
+   bytes, quadratic (§5.A) — **and it is carry-length work, not a shortcut
+   around it.** §5.A.1 is the load-bearing result: `LexerState.source_len`
+   already exists and `_number_run_byte` already receives it, and the `strnlen`
+   fires anyway, because the scan is caused by the parameter's scalar `string`
+   *type*, not by a missing length. Threading a length alongside cannot fix it.
+   The fix is to change the parameter type off scalar `string` (a `*u8` + `i64`
+   pair) or to change the struct-field mapping — both squarely inside this
+   epic. Still sequence it first: it is the smallest slice, needs no seed cut,
+   and its measured win sizes the rest. It remains **untested** — no A/B was
+   possible.
 2. **Stop discarding known lengths at runtime-helper returns** (§5.B). Giving
    `substring` / `substring_unchecked` / `grapheme_at` a `{i8*, i64}`
    `return_type` removes a per-character `strnlen` across every char-stepping
@@ -357,8 +438,9 @@ lexer fix identified in §8 was **not** implemented here; it is reported, not
 applied.
 
 This says nothing about SFN-613. The tax is a constant per build at fixed input
-size and cannot explain a 0.8.2 → 0.8.4 throughput regression on flat IR volume.
-The two remain unrelated.
+size, so on this evidence it does not explain a 0.8.2 → 0.8.4 throughput
+regression on flat IR volume. Nothing here measured 0.8.2, so that is a
+non-explanation rather than a proof of independence.
 
 ## 10. Reproducing
 
