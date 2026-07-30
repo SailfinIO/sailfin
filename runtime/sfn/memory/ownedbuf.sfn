@@ -6,8 +6,8 @@
 // free functions; it deliberately ships **no enforcement**. The
 // bodies are raw/unsafe-internal: nothing stops a caller from using
 // a consumed `OwnedBuf` or outliving a `Slice`'s backing buffer
-// today. Move semantics land with the ownership-checker rules
-// (#1214/#1215); view lifetimes in a later phase (Phase U).
+// today. Move semantics land with the ownership-checker rules;
+// view lifetimes in a later phase (Phase U).
 //
 // API surface (eight public functions + one byte-load helper):
 //
@@ -61,7 +61,7 @@
 // reason `arena.sfn` / `rc.sfn` / `string.sfn` inline theirs:
 // cross-module extern resolution through the seed compiler still
 // hits the `cannot resolve return type for call to …` fatal (the
-// struct-return gap of #1283 Gap 1; #1288 fixed the
+// struct-return gap of SFN-635; #1288 fixed the
 // runtime-sfn-source emit path, but de-inlining these C-ABI externs
 // is separate follow-up work). The `sfn_arena_sfn_alloc` / `sfn_arena_sfn_realloc`
 // declarations match the export signatures in

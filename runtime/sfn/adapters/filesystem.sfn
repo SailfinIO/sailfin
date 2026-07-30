@@ -83,8 +83,8 @@
 //
 //   Five of the eight adapters land as real Sailfin bodies; three
 //   stay C trampolines because they touch a platform-divergent symbol
-//   or struct that needs a `cfg(target_os)` story (#468) Sailfin has
-//   not shipped. The single `filesystem.ll` is compiled for Linux,
+//   or struct that needs a `cfg(target_os)` story Sailfin has not
+//   shipped. The single `filesystem.ll` is compiled for Linux,
 //   macOS arm64, *and* the Windows cross target, so an adapter is only
 //   portable-as-pure-Sailfin when its libc symbol links and behaves on
 //   all three.
@@ -131,7 +131,7 @@
 // `runtime/sfn/*.sfn` module (`memory/arena.sfn` line ~63,
 // `string.sfn` line ~39, `process.sfn` line ~74): the seed
 // compiler reaches the cross-module extern resolver through a
-// path that issue #306 has not closed yet, surfacing as
+// path that SFN-635 has not closed yet, surfacing as
 // `cannot resolve return type for call to …` fatals during
 // emission. Inlining the four declarations we need keeps this
 // module self-contained for every seed. Once the cross-module
@@ -165,7 +165,7 @@ extern fn fwrite(buf: *u8, size: usize, nmemb: usize, f: *File) -> usize;
 // Both have a MinGW symbol and identical behaviour across Linux /
 // macOS / Windows, so the single `filesystem.ll` links and behaves
 // on every target. Declared in `runtime/sfn/platform/libc.sfn`
-// (inlined here per the #306 cross-module-extern workaround in the
+// (inlined here per the SFN-635 cross-module-extern workaround in the
 // file header).
 extern fn chmod(path: *u8, mode: i32) -> i32;
 
@@ -195,7 +195,7 @@ extern fn readlink(path: *u8, buf: *u8, bufsize: usize) -> i64;
 // M3.1b additions. `memcpy` / `strlen` / `strchr` back the
 // recursive `sfn_fs_mkdir` component walk; `unlink` / `mkdir` are
 // the POSIX primitives for delete + create (declared in
-// `libc.sfn`, inlined here per the #306 cross-module workaround in
+// `libc.sfn`, inlined here per the SFN-635 cross-module workaround in
 // the file header). `sfn_fs_mkdir` reports "directory exists
 // afterward" via the module-local `sfn_fs_exists` (below) without
 // an `errno` read.
@@ -231,11 +231,11 @@ extern fn getenv(name: *u8) -> *u8;
 // `declare`; never *called* from a Sailfin call site in this module — the
 // sentinel lowers them directly. `opendir` / `readdir` / `closedir` are
 // declared canonically in `runtime/sfn/platform/libc.sfn` (~lines 276-280)
-// and inlined here per the #306 cross-module-extern workaround documented in
-// the file header. `opendir`'s `DIR *` and `readdir`'s `struct dirent *` are
-// spelled `* u8` (opaque-pointee, identical IR lowering) to keep this module
-// self-contained — the same redeclaration pattern the `unlink` / `mkdir` /
-// `rmdir` externs above use.
+// and inlined here per the SFN-635 cross-module-extern workaround documented
+// in the file header. `opendir`'s `DIR *` and `readdir`'s `struct dirent *`
+// are spelled `* u8` (opaque-pointee, identical IR lowering) to keep this
+// module self-contained — the same redeclaration pattern the `unlink` /
+// `mkdir` / `rmdir` externs above use.
 extern fn opendir(path: *u8) -> *u8;
 
 extern fn readdir(dirp: *u8) -> *u8;
@@ -269,7 +269,7 @@ extern fn strcmp(a: *u8, b: *u8) -> i32;
 // it performs the slot store for us (Sailfin exposes no pointer-write
 // intrinsic, only the special-cased `pointer_read_i64` load). Both are
 // declared canonically in `runtime/sfn/array.sfn` and inlined here per
-// the same #306 workaround; both lower over `{ i8**, i64, i64 }*`
+// the same SFN-635 workaround; both lower over `{ i8**, i64, i64 }*`
 // (spelled `* u8`).
 extern fn sailfin_runtime_concat_v2(a: *u8, b: *u8) -> *u8;
 
@@ -296,7 +296,7 @@ fn _fs_append_str(arr: *u8, s: *u8) -> *u8 {
 // C string that begins at that address + this offset — `d_name` is an
 // inline char array, not a pointer, so its bytes are read directly with no
 // `pointer_read` step. Canonical home + long-form layout rationale:
-// `runtime/sfn/platform/sizes_linux.sfn`. Inlined here per the #306
+// `runtime/sfn/platform/sizes_linux.sfn`. Inlined here per the SFN-635
 // cross-module workaround in the file header (importing a *defined* symbol
 // into an `sfn-source` fails lowering; see `errno.sfn`'s Linkage note).
 //
@@ -325,18 +325,18 @@ let DIRENT_DNAME_OFFSET_DARWIN: i64 = 21;
 // write to the legacy C adapter (its per-entry immediate decode is a
 // follow-up). Path arguments are never guarded (paths are always real
 // buffers; even the C adapter never decoded the path). The remaining
-// delegation falls away with the encoding itself (#822 / M1.A.2).
+// delegation falls away with the encoding itself (M1.A.2).
 // `sfn_str_from_codepoint(cp)` — the native Sailfin UTF-8 encoder
 // (`runtime/sfn/string.sfn`, #1308) used to decode an immediate-codepoint
 // `contents` into a real buffer before `fwrite`. Inlined extern per the
-// #306 cross-module-extern workaround documented in the file header.
+// SFN-635 cross-module-extern workaround documented in the file header.
 extern fn sfn_str_from_codepoint(cp: i64) -> *u8;
 
 // `_fs_is_immediate(data)` — is `data` a legacy immediate-codepoint
 // tagged pointer rather than a real string buffer? Inlined copy of
 // `runtime/sfn/io.sfn::_sfn_is_immediate` (the runtime `sfn-source`
 // emit path does not resolve imported *defined* functions — see the
-// note in `clock.sfn`, epic #763). Pointer math only — no syscall.
+// note in `clock.sfn`, SFN-635). Pointer math only — no syscall.
 // A near-null ASCII byte (`1..=0x7f`, plus NULL `0`) or a codepoint
 // shifted into the upper 32 bits (`cp << 32`, low 32 bits zero,
 // value non-zero) classifies as immediate; a real pointer is `> 0x7f`

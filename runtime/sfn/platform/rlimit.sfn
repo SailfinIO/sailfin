@@ -37,7 +37,7 @@
 // subprocesses, `clang`, and `llvm-link` children all run under the
 // same budget — matching the old shell-level `ulimit -v` behavior.
 //
-// Extern discipline: declarations are inlined per the #306
+// Extern discipline: declarations are inlined per the SFN-635
 // cross-module-extern workaround used throughout this directory
 // (see `runtime/sfn/platform/exec.sfn`'s module header for the
 // long-form rationale, the `as * u8` cast-quirk note, and the
@@ -63,7 +63,7 @@ struct RLimit {
     max: i64;
 }
 
-// ── libc / runtime externs (#306 inline re-declarations) ────────
+// ── libc / runtime externs (SFN-635 inline re-declarations) ─────
 // `getrlimit` / `setrlimit` take `struct rlimit *`; declared here
 // with a `* u8` surface and cast at the call site, mirroring how
 // `process.sfn` passes its `PollSlot` buffer to `pipe(2)`.

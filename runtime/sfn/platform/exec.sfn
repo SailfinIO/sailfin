@@ -71,10 +71,10 @@
 //   `runtime/sfn/memory/rc.sfn` / `runtime/sfn/string.sfn` /
 //   `runtime/sfn/process.sfn` / `runtime/sfn/exception.sfn`:
 //   the seed compiler reaches the cross-module extern resolver
-//   through a path that issue #306 has not closed yet,
+//   through a path that SFN-635 has not closed yet,
 //   surfacing as `cannot resolve return type for call to …`
 //   fatals during emission. Inlining the declarations keeps
-//   this module self-contained for every seed. Once #306
+//   this module self-contained for every seed. Once SFN-635
 //   closes, a follow-up PR flips these to imports without
 //   touching the bodies. The same declarations also live in
 //   `runtime/sfn/platform/libc.sfn` for discoverability and
@@ -120,7 +120,7 @@ extern fn strrchr(s: *u8, c: i32) -> *u8;
 // `_NSGetExecutablePath` writes (the Linux leg's `readlink`
 // returns the count directly, so it never references `strlen`).
 // `exec.sfn` inlines its externs rather than importing `libc.sfn`
-// (the #306 cross-module workaround documented in the module
+// (the SFN-635 cross-module workaround documented in the module
 // header), so the `strlen` declaration must live here too —
 // otherwise the Darwin module emits `call @strlen` with no
 // matching `declare`, and clang rejects the IR with
@@ -138,7 +138,7 @@ extern fn realpath(path: *u8, resolved: *u8) -> *u8;
 // `sfn_fs_exists` is the pure-Sailfin stat-based existence probe in
 // `runtime/sfn/adapters/filesystem.sfn` (M3.1c #926, replacing the
 // legacy C `sailfin_intrinsic_fs_exists`). True for files and
-// directories alike. Declared extern here per the #306 cross-module
+// directories alike. Declared extern here per the SFN-635 cross-module
 // workaround used throughout this module; the definition links from
 // the filesystem adapter.
 extern fn sfn_fs_exists(path: *u8) -> bool;
@@ -151,7 +151,7 @@ extern fn sfn_fs_exists(path: *u8) -> bool;
 // canonical equivalent is `memcmp(override, "", 1) != 0`,
 // which compares one byte against a NUL-only literal. The
 // libc prototype lives in `runtime/sfn/platform/libc.sfn`;
-// inlining is the same #306 workaround as the rest of this
+// inlining is the same SFN-635 workaround as the rest of this
 // file's externs.
 extern fn memcmp(a: *u8, b: *u8, n: usize) -> i32;
 

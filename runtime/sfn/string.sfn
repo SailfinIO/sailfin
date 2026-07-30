@@ -89,14 +89,14 @@ extern fn strtod(nptr: *u8, endptr: **u8) -> f64;
 // `sfn_str_append` have been real Sailfin bodies since #1318, and the last
 // Sailfin demand on the legacy concat — `resolve_runtime_root` in exec.sfn —
 // was retargeted to the native `+` path). The C definitions are now purely
-// C-internal and retire with the C runtime at #822.
+// C-internal and retire with the C runtime itself.
 // #1315 (C4 of epic #1308): the accessor family — `byte_at`/`find_byte`/
 // `codepoint`/`grapheme_at`/`grapheme_count` — are now real Sailfin
 // bodies below (bare-named emission targets; the C defs are `static`).
 // They cannot, under today's seed, single-byte-load a `* u8` or reproduce
 // the platform-gated grapheme production, so they call two narrow C bridge
 // primitives (`sailfin_runtime.c`). These retire with the SfnString
-// aggregate flip (#1283). The immediate-codepoint decode is already gone:
+// aggregate flip (SFN-43). The immediate-codepoint decode is already gone:
 // the `(byte << 32)` encoding is retired (#1420/#822).
 //
 // `codepoint`/`grapheme_count` return `f64` (not `i64`): the registry
@@ -370,8 +370,8 @@ fn sfn_str_cmp_lv(a_data: *u8, a_len: i64, b_data: *u8, b_len: i64) -> i32 {
 // tracking: the arena reclaims on rewind, the discipline the rest of the ported
 // string surface already follows. The `roundup8(length + 1)` 8-aligned alloc +
 // `_num_put_byte` trailing NUL keeps the word read-modify-write in-bounds (the
-// seed cannot lower a single-byte `* u8` store). A non-owning `Slice` view stays
-// blocked on #1283 (the SfnString aggregate flip).
+// seed cannot lower a single-byte `* u8` store). A non-owning `Slice` view
+// stays blocked on SFN-43 (the SfnString aggregate flip).
 fn _sfn_substring_unchecked(text: *u8, start: i64, end: i64) -> *u8 {
     if (text as i64) == 0 {
         let empty: string = "";
@@ -662,7 +662,7 @@ fn sfn_str_append(dst: *u8, suffix_data: *u8, suffix_len: i64, arena_slot: *u8) 
 // byte-identical to the prior C trampolines — including the bootstrap "treat
 // each UTF-8 byte as a grapheme" simplification and the first-byte
 // `codepoint` for multi-byte sequences. These bridges retire with the
-// SfnString aggregate flip (#1283). The immediate-codepoint decode bridge is
+// SfnString aggregate flip (SFN-43). The immediate-codepoint decode bridge is
 // already gone: the `(byte << 32)` encoding is retired (#1420/#822).
 //
 // `codepoint` / `grapheme_count` return `f64`, not `i64`: their registry

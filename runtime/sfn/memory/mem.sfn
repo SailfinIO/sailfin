@@ -27,7 +27,7 @@
 // body, which is also un-annotated).
 //
 // Why inline `extern fn`? The same cross-module extern-resolution
-// limitation documented in `arena.sfn` / `rc.sfn` (#306): importing
+// limitation documented in `arena.sfn` / `rc.sfn` (SFN-635): importing
 // from `runtime/sfn/platform/libc.sfn` trips the seed's extern
 // accept-list, so the libc symbols we need are declared inline.
 extern fn malloc(size: usize) -> *u8;
@@ -201,7 +201,7 @@ fn sfn_mem_free(ptr: *u8) -> void {
 // deallocation, so persistent tracking is unnecessary: a no-op, exactly what
 // the C body did when `sfn_arena_enabled()`. The legacy non-arena
 // `_sailfin_persistent_table` insert + the dead `sailfin_runtime_string_drop`
-// reader retire with the C runtime (#822). No registry change — emission still
+// reader retire with the C runtime itself. No registry change — emission still
 // targets the bare `sailfin_runtime_mark_persistent`.
 fn sailfin_runtime_mark_persistent(ptr: *u8) -> void { }
 

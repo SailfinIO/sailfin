@@ -34,7 +34,7 @@
 // `runtime/sfn/platform/pthread_layout.sfn`, imported here rather than
 // hand-copied — a stale copy is exactly the #1265 heap-corruption hazard
 // this de-duplication closes. The C-ABI `pthread_*` extern declarations
-// below stay re-declared inline per the #306 precedent (they reference the
+// below stay re-declared inline per the SFN-635 precedent (they reference the
 // imported struct as an opaque pointee).
 import { PthreadMutex, PthreadCond } from "../platform/pthread_layout";
 

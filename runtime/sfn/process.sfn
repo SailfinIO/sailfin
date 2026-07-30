@@ -67,7 +67,7 @@
 // regression repro during M2.9 development). Full environment
 // *marshalling* (user-supplied envp with explicit key=value
 // strings) remains out of scope for M2.9 per the issue's `Out:`
-// list and lands with `process.spawn_with_env` (issue #365 —
+// list and lands with `process.spawn_with_env` (#365 —
 // already shipped on the C side, separate Sailfin migration).
 //
 // Why inline the externs rather than `import { malloc, free }
@@ -75,7 +75,7 @@
 // `runtime/sfn/memory/arena.sfn` / `runtime/sfn/memory/rc.sfn`
 // / `runtime/sfn/string.sfn` / `runtime/sfn/array.sfn`: the
 // seed compiler reaches the cross-module extern resolver
-// through a path that issue #306 has not closed yet,
+// through a path that SFN-635 has not closed yet,
 // surfacing as `cannot resolve return type for call to …`
 // fatals during emission. Inlining the four declarations we
 // need keeps this module self-contained for every seed. Once
@@ -114,7 +114,7 @@ fn get_environ() -> **u8 { return environ; }
 // ── Additional POSIX surface for the capture / handle variants ──
 // (#928, M3). These back `sfn_process_run_capture`,
 // `sfn_process_capture_take_*`, and the `sfn_process_handle_*`
-// family below. Inlined here for the same #306 reason the spawn
+// family below. Inlined here for the same SFN-635 reason the spawn
 // externs are inlined (see the file header) — the cross-module
 // extern resolver is not yet wired for runtime sfn-sources, so the
 // surface in `runtime/sfn/platform/posix.sfn` is typecheck-only and
@@ -168,7 +168,7 @@ extern fn posix_spawn_file_actions_adddup2(fa: *u8, fd: i32, newfd: i32) -> i32;
 
 // Per-child cwd (#1167): child `chdir`s to `path` before `exec`, no
 // process-global `chdir`. Re-declared inline (typed `* u8`, not the
-// `* PosixSpawnFileActions` of `platform/posix.sfn`) per the #306
+// `* PosixSpawnFileActions` of `platform/posix.sfn`) per the SFN-635
 // cross-module-extern limitation. Portability floor: glibc ≥2.29 /
 // macOS ≥10.15 / musl ≥1.1.24; called only on the posix spawn path.
 extern fn posix_spawn_file_actions_addchdir_np(fa: *u8, path: *u8) -> i32;
@@ -224,7 +224,7 @@ extern fn wait4(pid: i32, status: *i32, options: i32, rusage: *u8) -> i32;
 // `clock_gettime` for the metered wall-clock bracket. Declared with the
 // same `* Timespec` shape `runtime/sfn/clock.sfn` uses so the emitted
 // `declare` matches across the two runtime objects; redeclared locally
-// (rather than imported) for the #306 reason the file header documents
+// (rather than imported) for the SFN-635 reason the file header documents
 // — the runtime sfn-source emit path resolves imported externs but not
 // imported *defined* fns, and inlining keeps this module self-contained.
 struct Timespec {
@@ -247,7 +247,7 @@ let SFN_RUSAGE_MAXRSS_OFFSET: i64 = 32;
 
 // Local monotonic-clock reader for the wall-clock bracket. A near-
 // verbatim copy of `clock.sfn::sfn_clock_monotonic_nanos` (kept local
-// for the #306 cross-module-defined-fn limitation above): stack-alloc a
+// for the SFN-635 cross-module-defined-fn limitation above): stack-alloc a
 // `Timespec`, hand the kernel its address, then read `tv_sec` (offset 0)
 // and `tv_nsec` (the next `i64`) back through the pointer-read intrinsic
 // *after* the call. `sailfin_intrinsic_clock_monotonic_id()` folds to
@@ -299,7 +299,7 @@ extern fn sfn_fs_exists(path: *u8) -> bool;
 // Overlay matching the Linux x86_64 `struct rlimit`: two 8-byte slots
 // (`rlim_cur`, `rlim_max`). `RLIM_INFINITY` reads back as -1 through the
 // i64 view. Mirrors `RLimit` in `runtime/sfn/platform/rlimit.sfn`, kept
-// local for the #306 cross-module limitation the file header documents.
+// local for the SFN-635 cross-module limitation the file header documents.
 struct CapRLimit {
     cur: i64;
     max: i64;

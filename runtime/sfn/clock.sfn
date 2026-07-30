@@ -50,7 +50,7 @@
 // imported `extern` signatures (e.g. `posix.sfn`'s `nanosleep`) but
 // not imported *defined* functions, so importing `errno()` here fails
 // lowering with "callee signature is not known". The DRY re-point is
-// deferred until that cross-module resolution lands (epic #763).
+// deferred until that cross-module resolution lands (SFN-635).
 //
 // `EINTR == 4` on both Linux and macOS; a platform-constant
 // home for that value is a follow-up. The loop re-passes the same
@@ -58,7 +58,7 @@
 // (we lose the consumed portion) but preserves the wall-clock-≥-
 // requested correctness contract. Precise remainder tracking (read
 // `rem` back, subtract the consumed portion) remains deferred under
-// epic #763 alongside the `clock_gettime` migration.
+// SFN-635 alongside the `clock_gettime` migration.
 //
 // Pinned by `compiler/tests/e2e/test_runtime_clock_skeleton.sh`
 // (typecheck + fmt + LLVM `define`/`call` shape over `@nanosleep`)
