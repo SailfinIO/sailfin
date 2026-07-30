@@ -1,0 +1,109 @@
+// Unit tests pinning the bf16 conversion emitters (SFN-609).
+//
+// LLVM 18's AArch64 backend can select no `bfloat` conversion, so every one
+// is emitted as an explicit bit sequence instead
+// (`compiler/src/llvm/expression_lowering/native/core_bf16_lowering.sfn`).
+//
+// The assertions below are deliberately about **temp-index accounting**, not
+// about the arithmetic. Each emitter allocates a fixed number of SSA temps and
+// must return an index past all of them; a `format_temp_name` added without
+// its matching `next += 1` would silently reuse a `%tN` and produce invalid
+// IR that a text-shape test would not notice. Every emitter is therefore
+// called from a non-zero base index so an off-by-one cannot pass.
+//
+// The rounding itself is validated differentially against LLVM and an exact
+// integer oracle — see the design note
+// (`docs/proposals/design-notes/sfn-609-bf16-conversion-lowering.md`).
+import { contains } from "sfn/strings";
+
+import {
+    emit_bf16_narrow_from_double,
+    emit_bf16_narrow_from_float,
+    emit_bf16_widen_to_double,
+    emit_bf16_widen_to_float,
+    emit_i64_round_to_odd
+} from "../../src/llvm/expression_lowering/native/core_bf16_lowering";
+
+test "bf16 lowering: widen to float allocates four temps and returns the last" {
+    let seed: string[] = [];
+    let result = emit_bf16_widen_to_float("%x", 10, seed);
+    assert result.temp_index == 14;
+    assert result.lines.length == 4;
+    assert result.value == "%t13";
+    assert contains(result.lines[0], "bitcast bfloat %x to i16");
+    assert contains(result.lines[3], "to float");
+}
+
+test "bf16 lowering: widen to double adds exactly one temp over the float widen" {
+    let seed: string[] = [];
+    let result = emit_bf16_widen_to_double("%x", 10, seed);
+    assert result.temp_index == 15;
+    assert result.lines.length == 5;
+    assert result.value == "%t14";
+    // The final step must be an ordinary f32->f64 fpext, never `fpext bfloat`.
+    assert contains(result.lines[4], "fpext float");
+    assert ! contains(result.lines[4], "fpext bfloat");
+}
+
+test "bf16 lowering: narrow from float allocates twelve temps" {
+    let seed: string[] = [];
+    let result = emit_bf16_narrow_from_float("%x", 10, seed);
+    assert result.temp_index == 22;
+    assert result.lines.length == 12;
+    assert result.value == "%t21";
+    // Round-to-nearest-even bias, and the NaN guard that keeps the bias add
+    // from carrying a NaN's exponent into infinity.
+    assert contains(result.lines[3], "32767");
+    assert contains(result.lines[8], "fcmp uno float");
+}
+
+test "bf16 lowering: narrow from double allocates twenty-seven temps" {
+    let seed: string[] = [];
+    let result = emit_bf16_narrow_from_double("%x", 10, seed);
+    assert result.temp_index == 37;
+    assert result.lines.length == 27;
+    assert result.value == "%t36";
+    // The intermediate must be `fptrunc double ... to float`, never straight
+    // to bfloat, and the round-to-odd correction must be a +/- 1 step rather
+    // than an `or 1` (which would be wrong when RNE rounded away from zero).
+    assert contains(result.lines[0], "fptrunc double %x to float");
+    assert ! contains(result.lines[0], "to bfloat");
+    assert contains(result.lines[5], "fcmp une double");
+    assert contains(result.lines[9], "i32 -1, i32 1");
+}
+
+test "bf16 lowering: signed i64 round-to-odd allocates twelve temps" {
+    let seed: string[] = [];
+    let result = emit_i64_round_to_odd("%n", true, 10, seed);
+    assert result.temp_index == 22;
+    assert result.lines.length == 12;
+    assert result.value == "%t21";
+    assert contains(result.lines[0], "icmp slt i64 %n, 0");
+    assert contains(result.lines[8], "9007199254740992");
+    assert contains(result.lines[11], "select i1 %t10");
+}
+
+// The unsigned arm skips the three sign temps, so it is a distinct allocation
+// path from the signed one and needs its own pin.
+test "bf16 lowering: unsigned i64 round-to-odd allocates seven temps" {
+    let seed: string[] = [];
+    let result = emit_i64_round_to_odd("%n", false, 10, seed);
+    assert result.temp_index == 17;
+    assert result.lines.length == 7;
+    assert result.value == "%t16";
+    assert contains(result.lines[0], "and i64 %n, 2047");
+    assert ! contains(result.lines[0], "icmp slt");
+}
+
+// Threading check: an emitter must append to the caller's lines rather than
+// replace them, and must start numbering at the index it was handed.
+test "bf16 lowering: emitters append to existing lines and honour the base index" {
+    let mut seed: string[] = [];
+    seed.push("  ; existing");
+    let result = emit_bf16_widen_to_float("%x", 42, seed);
+    assert result.lines.length == 5;
+    assert contains(result.lines[0], "; existing");
+    assert contains(result.lines[1], "%t42");
+    assert result.temp_index == 46;
+    assert result.value == "%t45";
+}

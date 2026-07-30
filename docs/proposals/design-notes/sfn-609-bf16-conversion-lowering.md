@@ -117,6 +117,13 @@ portable contract, so forwarding the quieted `f32` payload is legal.
 | f32 → bf16 narrow | 116,080,198 sampled f32 | 0 differences vs `fptrunc float to bfloat` |
 | f64 → bf16 narrow | 6,917,525, incl. a stratified sweep of every bf16 midpoint and its f64 neighbours | 0 differences vs `fptrunc double to bfloat` |
 | i64 → bf16 | 4,000,016 vs an **exact integer oracle** | this sequence 0 wrong; LLVM's own `sitofp i64 to bfloat` **31 wrong** |
+| i64 → bf16, pre-step justification | 8,221,211 incl. a targeted sweep of the `2¹¹`-grid tie window | pre-step changed the result **3,066** times, and was right every time: this sequence 0 wrong, plain `i64 → f64 → bf16` **3,066 wrong** |
+
+The last row is the one that justifies the integer pre-step specifically. Most
+`i64` values round identically with or without it — uniformly random draws
+almost never land in the double-rounding window — so a witness has to be taken
+from near a `2¹¹`-grid tie to exercise it. `18084767253659649` is one:
+correctly `0x5A81`, but `0x5A80` if rounded through `f64` first.
 
 All replacement sequences select on `aarch64-unknown-linux-gnu` and
 `x86_64-pc-linux-gnu`, at `-O0` and `-O2`.

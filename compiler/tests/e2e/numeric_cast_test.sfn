@@ -473,6 +473,40 @@ test "numeric-cast: int → bf16 pre-rounds to odd so the narrow rounds once" ![
     assert ! contains(body, "sitofp i64 %x to bfloat");
 }
 
+// The unsigned arm of the pre-round skips the sign temps entirely, so it is a
+// distinct allocation and arithmetic path from the signed one above.
+test "numeric-cast: u64 → bf16 pre-rounds to odd and widens with uitofp" ![io] {
+    let body = _emit_body("fn f(x: u64) -> bf16 { return x as bf16; }", "define bfloat @f", "sfn609_from_u64");
+    assert body.length > 0;
+    assert contains(body, "uitofp i64");
+    assert contains(body, "9007199254740992");
+    assert contains(body, "fcmp une double");
+    assert ! contains(body, "uitofp i64 %x to bfloat");
+}
+
+// Runtime guard for the correctness half, and the reason the `i64` pre-round
+// exists at all. For this `n` the correctly-rounded result is 0x5A81, while
+// rounding through `f64` first double-rounds to 0x5A80. `int as bf16` must
+// take the single-rounding path and therefore disagree with the
+// double-rounded chain (SFEP-0054 §3.4, SFN-609).
+//
+// The witness matters: most `i64` values round identically either way, so a
+// value not drawn from the double-rounding window would pass even with the
+// pre-round removed.
+test "numeric-cast: int → bf16 rounds once, not through f64" ![io] {
+    let exit = _build_and_run_source("fn main() -> int {\n"
+        + "    let n: int = 18084767253659649;\n"
+        + "    let direct: bf16 = n as bf16;\n"
+        + "    let widened: f64 = n as f64;\n"
+        + "    let doubled: bf16 = widened as bf16;\n"
+        + "    let a: f64 = direct as f64;\n"
+        + "    let b: f64 = doubled as f64;\n"
+        + "    if a == b { return 1; }\n"
+        + "    return 0;\n"
+        + "}\n", "sfn609_single_rounding");
+    assert exit == 0;
+}
+
 // ---- SFN-573: `>>` selects lshr for unsigned, ashr for signed ----
 test "operator-sign: u32 >> lowers as lshr (not ashr)" ![io] {
     let body = _emit_body("fn f(x: u32, y: u32) -> u32 { return x >> y; }", "define i32 @f", "u32_shr");
