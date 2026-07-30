@@ -192,7 +192,8 @@ import { discover_workspace_root, load_workspace_members } from "./workspace";
 export {
     prepare_project_capsules,
     prepare_project_capsules_for_check,
-    prepare_project_capsules_for_test
+    prepare_project_capsules_for_test,
+    stage_capsule_imports_for_emit
 };
 
 // ---- Dependency enumeration ----
