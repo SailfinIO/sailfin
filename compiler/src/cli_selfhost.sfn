@@ -30,17 +30,32 @@
 // root is resolved from `SAILFIN_TEST_SCRATCH` (not `--work-dir`) by
 // `capsule_resolver.sfn::_cr_scratch_root`. Without a distinct value
 // per stage, stage3 would clobber stage2's `.ll` and the diff would be
-// vacuous. We set it on each spawned child via the established
-// `sh -c "VAR=<quoted> <cmd>"` env-injection vehicle (the same pattern
-// `_emit_runtime_sfn_source` uses, `cli_main.sfn:1197`), keeping this a
-// pure-orchestration driver that post-processes no artifact.
+// vacuous. It is set on each spawned child through `run_capture`'s
+// explicit env array (`_selfhost_stage_env`), the same shell-free
+// vehicle `build/runtime_objs.sfn::_runtime_emit_child_env` uses,
+// keeping this a pure-orchestration driver that post-processes no
+// artifact.
+//
+// Nothing this command *spawns* may reach a POSIX shell: `sfn selfhost`
+// is what proves the native Windows self-host fixed point, and there is
+// no `sh` there to reach (SFEP-0021 §4.2). Stage builds, scratch
+// cleanup, binary promotion and the smoke gate are all shell-free.
+//
+// One reach survives, and only on POSIX: `_selfhost_snapshot` hashes via
+// `_sha256_of_file_cmd` / `_sha256_of_text_file`, which `popen` a
+// `sha256sum`/`shasum` pipeline for the binary shas and for any `.ll`
+// over 64 KiB (i.e. every compiler module). Both self-guard
+// `host_is_windows()` and degrade to the in-process hasher, so the
+// Windows goal holds — at the cost of an empty binary sha there, which
+// makes `binary_match` vacuous on Windows. SFN-620 retires the ladder.
 import {
+    _atomic_rename_into_place,
+    _copy_file,
     _dirname_cmd,
     _ensure_dir_recursive_cmd,
+    _mktemp_sibling_cmd,
     _sha256_of_file_cmd,
-    _sha256_of_text_file,
-    _shell_read_cmd,
-    _shell_single_quote_arg
+    _sha256_of_text_file
 } from "./build/fs";
 import {
     DeterminismModule,
@@ -61,6 +76,12 @@ struct SelfhostConfig {
     seedcheck_out: string;
     stage3_out: string;
     promote_to: string;
+    // Accepted and recorded, but not enforced (SFN-619 restores it). Its
+    // only ever vehicle was interpolation into a shell `timeout N …`
+    // prefix, and the runtime offers no shell-free equivalent — a deadline
+    // today means the spawn/poll/kill handle API
+    // (`cli/commands/test.sfn::_reap_test_child`). Kept in the flag surface
+    // so no existing caller breaks.
     smoke_timeout: string;
     json: boolean;
     no_promote: boolean;
@@ -84,7 +105,8 @@ fn _selfhost_default_config() -> SelfhostConfig {
 fn _selfhost_usage() -> string {
     return "usage: sfn selfhost [--work-dir DIR] [--first-pass BIN]\n"
         + "                    [--seedcheck-out BIN] [--stage3-out BIN]\n"
-        + "                    [--promote-to BIN] [--smoke-timeout SECS]\n"
+        + "                    [--promote-to BIN]\n"
+        + "                    [--smoke-timeout SECS] (accepted, not enforced)\n"
         + "                    [--no-promote] [--strict] [--json]\n"
         + "\n"
         + "Internal: validate the compiler self-hosts to a fixed point\n"
@@ -121,19 +143,167 @@ fn _selfhost_basename(path: string) -> string {
     return substring(path, last_slash + 1, path.length);
 }
 
-// Whether `value` is one or more ASCII digits. Guards `--smoke-timeout`
-// before it is interpolated into the shell `timeout` prefix.
-fn _selfhost_is_digits(value: string) -> boolean {
-    if value.length == 0 { return false; }
-    let digits = "0123456789";
+// Whether a flat `"KEY=VALUE"` environment entry binds `key`. A bare
+// `"KEY"` with no `=` counts, since that is how a valueless binding is
+// reported.
+fn _selfhost_env_entry_has_key(entry: string, key: string) -> boolean {
+    if entry == key { return true; }
+    if entry.length <= key.length { return false; }
+    if substring(entry, 0, key.length) != key { return false; }
+    return substring(entry, key.length, key.length + 1) == "=";
+}
+
+// The environment for one stage child: the parent's, with the two
+// selfhost overrides forced on. `run_capture` never inherits — an empty
+// array is the empty environment, not "the parent's" — so the parent env
+// is copied through explicitly.
+//
+// Existing bindings for the two keys are *dropped*, not shadowed by a
+// later duplicate: POSIX leaves it unspecified which entry `getenv`
+// resolves when `envp` binds a key twice, so appending alone would let
+// an inherited `SAILFIN_BOOTSTRAP=on` win.
+//
+// `SAILFIN_BOOTSTRAP=off`: the selfhost stages MUST build with the given
+// `driver_bin` (the fixed point is that the first-pass binary rebuilds
+// itself), never dispatch to the pinned seed. `driver_bin` carries the
+// *source* version, which is ahead of `bootstrap.toml [seed].version` for
+// the whole span between a release and its seed cut — so the exact-match
+// bootstrap gate (SFEP-0047) would otherwise fetch + re-exec the seed here
+// and subvert the self-host check while still reporting green. Mirrors the
+// `SAILFIN_TOOLCHAIN=off` seed-transition note in `compiler/capsule.toml`.
+fn _selfhost_stage_env(parent_env: string[], scratch_dir: string) -> string[] {
+    let mut child_env: string[] = [];
     let mut i: int = 0;
     loop {
-        if i >= value.length { break; }
-        let ch = substring(value, i, i + 1);
-        if !_selfhost_contains(digits, ch) { return false; }
+        if i >= parent_env.length { break; }
+        let entry = parent_env[i];
+        if !_selfhost_env_entry_has_key(entry, "SAILFIN_BOOTSTRAP") && !_selfhost_env_entry_has_key(entry, "SAILFIN_TEST_SCRATCH") {
+            child_env.push(entry);
+        }
         i += 1;
     }
-    return true;
+    child_env.push("SAILFIN_BOOTSTRAP=off");
+    child_env.push("SAILFIN_TEST_SCRATCH=" + scratch_dir);
+    return child_env;
+}
+
+// The argv for one stage build. `run_capture` hands this straight to
+// `execve`, so the arguments are literal — none of the shell quoting the
+// former `sh -c` command string needed.
+fn _selfhost_stage_argv(driver_bin: string, work_subdir: string, out_bin: string) -> string[] {
+    return [driver_bin, "build", "--no-cache", "-p", "compiler", "--work-dir", work_subdir, "-o", out_bin];
+}
+
+// Re-emit a captured child stream so stage output still reaches the
+// console. `print`/`print.err` append a newline, so one trailing newline
+// is stripped for a byte-faithful round-trip; an empty capture prints
+// nothing. Mirrors `build/runtime_objs.sfn::_runtime_emit_captured_stream`.
+fn _selfhost_emit_captured_stream(text: string, to_stderr: boolean) -> void ![io] {
+    if text.length == 0 { return; }
+    let mut out = text;
+    if substring(out, out.length - 1, out.length) == "\n" {
+        out = substring(out, 0, out.length - 1);
+    }
+    if to_stderr { print.err(out); } else { print(out); }
+}
+
+// Delete `root` and everything beneath it — the shell-free replacement
+// for `rm -rf`, over a file or a directory. A missing `root` is not an
+// error, matching `rm -rf`. Returns whether `root` is gone afterward.
+//
+// There is no `fs.isDirectory` builtin, so entry kind is inferred from
+// the unlink: `fs.deleteFile` is `unlink(2)`, which fails on a directory.
+// Whatever refuses to unlink is queued as a directory and removed after
+// its contents, since `fs.removeDirectory` is `rmdir(2)` and only takes
+// an empty directory. `dirs` is an append-only queue walked by a monotone
+// cursor, so a directory is only ever pushed while its parent is being
+// processed — every ancestor therefore sits at a strictly smaller index,
+// and removing the queue in reverse always empties children first.
+//
+// Symlinks are unlinked rather than followed (`unlink(2)` again), so the
+// walk cannot escape `root`; `fs.listDirectory` filters `.`/`..`. Mirrors
+// the shipped `sfn/fs::remove_all`, which is not importable from
+// `compiler/src`.
+//
+// The return value matters more than it looks: a stale `.ll` surviving in
+// one stage is a false *mismatch*, while one surviving symmetrically in
+// both stages is a false *fixed point* — the displaced `rm -rf` swallowed
+// its errors, so this is the one silent false-green path worth reporting.
+fn _selfhost_remove_tree(root: string) -> boolean ![io] {
+    if !fs.exists(root) { return true; }
+    // A file root has no entries to walk; `rmdir` would refuse it.
+    if fs.deleteFile(root) { return true; }
+    let mut dirs: string[] = [root];
+    let mut di: int = 0;
+    let mut guard: int = 0;
+    loop {
+        if di >= dirs.length { break; }
+        if guard > 65536 { break; }
+        guard += 1;
+        let dir = dirs[di];
+        let entries = fs.listDirectory(dir);
+        let mut ei: int = 0;
+        loop {
+            if ei >= entries.length { break; }
+            let full_path = dir + "/" + entries[ei];
+            if !fs.deleteFile(full_path) { dirs.push(full_path); }
+            ei += 1;
+        }
+        di += 1;
+    }
+    let mut ri: int = dirs.length - 1;
+    loop {
+        if ri < 0 { break; }
+        fs.removeDirectory(dirs[ri]);
+        ri -= 1;
+    }
+    return !fs.exists(root);
+}
+
+// Copy a stage binary into place: stage it beside the destination, carry
+// the source's mode bits over, then rename it into position.
+//
+// Writing `dst` directly does not work for `--promote-to`, whose default
+// destination is the *running* `build/bin/sfn`. `_copy_file` opens its
+// destination with `fopen(…, "wb")`, and the kernel denies write access to
+// a file currently being executed (`ETXTBSY`), so the open fails outright.
+// The displaced `cp -f` survived that only because `-f` means "if the
+// destination cannot be opened, remove it and try again" — the flag was
+// load-bearing, not cosmetic. `rename(2)` reaches the same fresh inode
+// without ever opening the live one, and atomically: `dst` is never
+// observed truncated or missing, which matters because the next `make
+// check` step immediately executes the binary just promoted.
+//
+// The mode step is equally load-bearing: `_copy_file` creates a missing
+// destination with `fopen`'s 0666-and-umask default, which is *not*
+// executable, whereas `cp -f` carried the source's permissions across.
+// It is applied to the staged copy rather than after the rename so `dst`
+// is never briefly present-but-unrunnable.
+//
+// `fs.get_perms` reports -1 on any error and `fs.set_perms` masks to 12
+// bits, so chmod-ing an unchecked -1 would quietly set 0o7777 — setuid,
+// setgid, sticky and world-writable — on the compiler binary. The `> 0`
+// guard is not defensive padding: the Windows `get_perms` lowering is a
+// fixed -1 stub, so that is the path taken on the very platform this
+// command exists to validate. A non-positive mode means the host does not
+// report one, and the copy's default stands.
+fn _selfhost_promote_binary(src: string, dst: string) -> boolean ![io] {
+    let mut staged = _mktemp_sibling_cmd(dst);
+    // `_mktemp_sibling_cmd` yields "" if it cannot allocate a temp name;
+    // a fixed sibling still shares the destination's filesystem, which is
+    // what keeps the rename atomic.
+    if staged.length == 0 { staged = dst + ".sfn-promote-tmp"; }
+    if !_copy_file(src, staged) {
+        fs.deleteFile(staged);
+        return false;
+    }
+    let mode = fs.get_perms(src);
+    if mode > 0 && !fs.set_perms(staged, mode) {
+        print.err("[selfhost] could not carry the source mode onto " + staged);
+        fs.deleteFile(staged);
+        return false;
+    }
+    return _atomic_rename_into_place(staged, dst);
 }
 
 // Recursively collect `*.ll` files under `root`. For the compiler
@@ -235,48 +405,48 @@ fn _selfhost_snapshot(capsules_dir: string, runtime_dir: string, binary_path: st
 fn _selfhost_build_stage(driver_bin: string, scratch_dir: string, work_subdir: string, out_bin: string) -> int ![io] {
     _ensure_dir_recursive_cmd(work_subdir);
     // Fresh scratch: drop any prior `.ll` so a stale module can't poison
-    // the fixed-point comparison.
-    process.run(["rm", "-rf", scratch_dir + "/capsules"]);
-    // `SAILFIN_BOOTSTRAP=off`: the selfhost stages MUST build with the given
-    // `driver_bin` (the fixed point is that the first-pass binary rebuilds
-    // itself), never dispatch to the pinned seed. `driver_bin` carries the
-    // *source* version, which is ahead of `bootstrap.toml [seed].version` for
-    // the whole span between a release and its seed cut — so the exact-match
-    // bootstrap gate (SFEP-0047) would otherwise fetch + re-exec the seed here
-    // and subvert the self-host check. Mirrors the `SAILFIN_TOOLCHAIN=off`
-    // seed-transition note in `compiler/capsule.toml`.
-    let cmd = "SAILFIN_BOOTSTRAP=off SAILFIN_TEST_SCRATCH="
-        + _shell_single_quote_arg(scratch_dir)
-        + " "
-        + _shell_single_quote_arg(driver_bin)
-        + " build --no-cache -p compiler --work-dir "
-        + _shell_single_quote_arg(work_subdir)
-        + " -o "
-        + _shell_single_quote_arg(out_bin);
-    return process.run(["sh", "-c", cmd]);
+    // the fixed-point comparison. Surfaced rather than ignored because a
+    // survivor skews the diff in either direction (see `_selfhost_remove_tree`).
+    let scratch_capsules = scratch_dir + "/capsules";
+    if !_selfhost_remove_tree(scratch_capsules) {
+        print.err("[selfhost] WARNING: could not fully clear "
+            + scratch_capsules
+            + " — a stale module may skew the fixed-point diff");
+    }
+    let rc = process.run_capture(_selfhost_stage_argv(driver_bin, work_subdir, out_bin), _selfhost_stage_env(process.environ(), scratch_dir));
+    // `run_capture` buffers rather than passing the child's stdio through,
+    // so both streams are handed back to the console here.
+    _selfhost_emit_captured_stream(process.capture_take_stdout(), false);
+    _selfhost_emit_captured_stream(process.capture_take_stderr(), true);
+    // `run_capture` reports a spawn or reap failure as -1, which would
+    // surface as the nonsensical "exit=-1" and a 255 process status. It
+    // also leaves both captures empty, so unlike the displaced `sh -c`
+    // there is no `not found` message to go on — hence the explicit one.
+    if rc < 0 {
+        print.err("[selfhost] could not spawn " + driver_bin);
+        return 1;
+    }
+    return rc;
 }
 
 // Smoke gate: run hello-world with the seedcheck binary and confirm the
-// expected greeting appears (port of `Makefile:566-580`). Output is
-// captured combined (stdout+stderr); the exit code is intentionally
-// ignored, exactly as the Makefile's `|| true` did — the greeting
-// substring is the contract. Wrapped in `timeout` when one is present.
-fn _selfhost_smoke(seedcheck_bin: string, smoke_timeout: string) -> boolean ![io] {
-    let base = _shell_single_quote_arg(seedcheck_bin) + " run "
-        + _shell_single_quote_arg("examples/basics/hello-world.sfn")
-        + " 2>&1";
-    let mut smoke_cmd = base;
-    if _selfhost_is_digits(smoke_timeout) && smoke_timeout != "0" {
-        smoke_cmd = "if command -v timeout >/dev/null 2>&1; then timeout "
-            + smoke_timeout
-            + " "
-            + base
-            + "; else "
-            + base
-            + "; fi";
-    }
-    let out = _shell_read_cmd(smoke_cmd);
-    return _selfhost_contains(out, "Hello, Sailfin!");
+// expected greeting appears (port of `Makefile:566-580`). The exit code
+// is intentionally ignored, exactly as the Makefile's `|| true` did — the
+// greeting substring is the contract.
+//
+// stdout and stderr are captured separately and joined in-process; the
+// former combined capture came from a `2>&1` redirection, which needed a
+// shell. The greeting may arrive on either stream, so both are searched.
+//
+// There is no deadline here: `--smoke-timeout` came from the shell
+// `timeout` prefix, and `run_capture` drains to EOF with an infinite poll,
+// so a wedged seedcheck binary hangs this gate. SFN-619 restores a bound
+// via the spawn/poll/kill handle API.
+fn _selfhost_smoke(seedcheck_bin: string) -> boolean ![io] {
+    let argv: string[] = [seedcheck_bin, "run", "examples/basics/hello-world.sfn"];
+    let _ = process.run_capture(argv, process.environ());
+    let combined = process.capture_take_stdout() + process.capture_take_stderr();
+    return _selfhost_contains(combined, "Hello, Sailfin!");
 }
 
 fn handle_selfhost_command(args: string[], binary_dir: string) -> int ![io] {
@@ -400,10 +570,9 @@ fn handle_selfhost_command(args: string[], binary_dir: string) -> int ![io] {
     // that the spawned build never creates, unlike its own `-o` parent
     // (`build.sfn:303`'s `_ensure_dir`).
     _ensure_dir_recursive_cmd(_dirname_cmd(cfg.seedcheck_out));
-    let s2_promote_rc = process.run(["cp", "-f", s2_linked_bin, cfg.seedcheck_out]);
-    if s2_promote_rc != 0 {
+    if !_selfhost_promote_binary(s2_linked_bin, cfg.seedcheck_out) {
         print.err("[selfhost] failed to copy stage2 binary → " + cfg.seedcheck_out);
-        return s2_promote_rc;
+        return 1;
     }
     // A stage that contributes zero `.ll` files from its sailfin cache dir
     // silently drops that coverage from the fixed-point diff below without
@@ -422,7 +591,7 @@ fn handle_selfhost_command(args: string[], binary_dir: string) -> int ![io] {
     if !cfg.json {
         print("[selfhost] validating seedcheck binary runs hello-world...");
     }
-    if !_selfhost_smoke(cfg.seedcheck_out, cfg.smoke_timeout) {
+    if !_selfhost_smoke(cfg.seedcheck_out) {
         print.err("[selfhost] seedcheck binary cannot run hello-world.sfn"
             + " (expected 'Hello, Sailfin!')");
         print.err("[selfhost] the seedcheck compiler is NOT viable — fix the compiler");
@@ -441,10 +610,9 @@ fn handle_selfhost_command(args: string[], binary_dir: string) -> int ![io] {
         return s3_rc;
     }
     _ensure_dir_recursive_cmd(_dirname_cmd(cfg.stage3_out));
-    let s3_promote_rc = process.run(["cp", "-f", s3_linked_bin, cfg.stage3_out]);
-    if s3_promote_rc != 0 {
+    if !_selfhost_promote_binary(s3_linked_bin, cfg.stage3_out) {
         print.err("[selfhost] failed to copy stage3 binary → " + cfg.stage3_out);
-        return s3_promote_rc;
+        return 1;
     }
     if _selfhost_collect_ll_files(s3_runtime).length == 0 {
         print.err("[selfhost] WARNING: stage3 contributed zero .ll modules from its "
@@ -504,10 +672,9 @@ fn handle_selfhost_command(args: string[], binary_dir: string) -> int ![io] {
 
     if !cfg.no_promote {
         _ensure_dir_recursive_cmd(_dirname_cmd(cfg.promote_to));
-        let promote_rc = process.run(["cp", "-f", cfg.seedcheck_out, cfg.promote_to]);
-        if promote_rc != 0 {
+        if !_selfhost_promote_binary(cfg.seedcheck_out, cfg.promote_to) {
             print.err("[selfhost] failed to promote seedcheck → " + cfg.promote_to);
-            return promote_rc;
+            return 1;
         }
         if !cfg.json {
             print("[selfhost] promoted seedcheck → " + cfg.promote_to);
@@ -523,6 +690,10 @@ export {
     _selfhost_basename,
     _selfhost_collect_ll_files,
     _selfhost_contains,
-    _selfhost_is_digits,
-    _selfhost_snapshot
+    _selfhost_env_entry_has_key,
+    _selfhost_promote_binary,
+    _selfhost_remove_tree,
+    _selfhost_snapshot,
+    _selfhost_stage_argv,
+    _selfhost_stage_env
 };
