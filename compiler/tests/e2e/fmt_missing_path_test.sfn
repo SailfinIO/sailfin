@@ -1,0 +1,196 @@
+// compiler/tests/e2e/fmt_missing_path_test.sfn
+//
+// End-to-end guard for `sfn fmt`'s missing-path check (SFN-643,
+// `compiler/src/cli/commands/fmt.sfn` `run()` /
+// `compiler/src/build/fs.sfn` `_collect_sfn_files_cmd`). Before the fix,
+// `_collect_sfn_files_cmd`'s single-file fast path returned any
+// `.sfn`-suffixed argument as a collected file without checking that it
+// existed, so `fmt` read it as empty source: `--write` minted it as a
+// 0-byte stub and exited 0, and `--check` listed it among the files that
+// "would change". The stub is the damaging half — module resolution
+// probes `foo.sfn` before falling back to a `foo/` directory, so a
+// resurrected 0-byte `foo.sfn` silently shadows the folder that replaced
+// a split-up flat module while the tree still compiles green. The fix
+// makes `run()` validate every positional path up front and fail the
+// whole invocation — before formatting anything — printing `error: path
+// not found: <path>` to stdout for each. These tests drive the real CLI
+// as a subprocess and pin: the diagnostic text, the non-zero exit, that
+// nothing is written even when a real path is present in the same
+// invocation (all-or-nothing), and that the unrelated "no .sfn files
+// found" / empty-file legs are unchanged. See `.claude/rules/no-bash-e2e.md`.
+import { contains } from "sfn/strings";
+import { clean_runner_env, nested_runner_scratch, report_child_failure } from "sfn/test";
+
+fn _sfn_bin() -> string ![io] {
+    let configured = env.get("SAILFIN_BIN");
+    if configured.length > 0 { return configured; }
+    return "build/bin/sfn";
+}
+
+fn _scratch_dir() -> string ![io] {
+    let mut dir = env.get("SAILFIN_TEST_SCRATCH");
+    if dir.length == 0 { dir = "/tmp"; }
+    dir = dir + "/sfn-fmt-missing-e2e";
+    fs.createDirectory(dir, true);
+    return dir;
+}
+
+fn _child_env() -> string[] ![io] {
+    return clean_runner_env(nested_runner_scratch("fmt-missing-path"));
+}
+
+test "fmt-missing-path: --write on an absent path fails without writing it" ![io] {
+    let dir = _scratch_dir();
+    let absent = dir + "/absent-write.sfn";
+    if fs.exists(absent) { fs.deleteFile(absent); }
+
+    let rc = process.run_capture([_sfn_bin(), "fmt", "--write", absent], _child_env());
+    let out = process.capture_take_stdout();
+    let _err = process.capture_take_stderr();
+
+    assert rc == 1;
+    assert contains(out, "path not found");
+    assert contains(out, absent);
+    assert ! fs.exists(absent);
+}
+
+test "fmt-missing-path: --check on an absent path reports a diagnostic, not a bare listing" ![io] {
+    let dir = _scratch_dir();
+    let absent = dir + "/absent-check.sfn";
+    if fs.exists(absent) { fs.deleteFile(absent); }
+
+    let rc = process.run_capture([_sfn_bin(), "fmt", "--check", absent], _child_env());
+    let out = process.capture_take_stdout();
+    let _err = process.capture_take_stderr();
+
+    assert rc == 1;
+    assert contains(out, "path not found");
+    assert contains(out, absent);
+    assert ! fs.exists(absent);
+}
+
+test "fmt-missing-path: plain stdout-mode fmt on an absent path fails" ![io] {
+    let dir = _scratch_dir();
+    let absent = dir + "/absent-stdout.sfn";
+    if fs.exists(absent) { fs.deleteFile(absent); }
+
+    let rc = process.run_capture([_sfn_bin(), "fmt", absent], _child_env());
+    let out = process.capture_take_stdout();
+    let _err = process.capture_take_stderr();
+
+    assert rc == 1;
+    assert contains(out, "path not found");
+    assert contains(out, absent);
+    assert ! fs.exists(absent);
+}
+
+test "fmt-missing-path: mixed real + absent --write is all-or-nothing" ![io] {
+    let dir = _scratch_dir();
+    let real = dir + "/real-mixed.sfn";
+    let absent = dir + "/absent-mixed.sfn";
+    if fs.exists(absent) { fs.deleteFile(absent); }
+    // Deliberately badly-formatted valid Sailfin source that `sfn fmt`
+    // would definitely rewrite (no indentation inside the block).
+    let original = "fn main() ![io] {\nprint(\"hi\");\n}\n";
+    fs.writeFile(real, original);
+
+    let rc = process.run_capture([_sfn_bin(), "fmt", "--write", real, absent], _child_env());
+    let out = process.capture_take_stdout();
+    let _err = process.capture_take_stderr();
+
+    assert rc == 1;
+    assert contains(out, "path not found");
+    assert contains(out, absent);
+    assert ! fs.exists(absent);
+    // Nothing was partially formatted: the real file's bytes are untouched.
+    assert strings_equal(fs.readFile(real), original);
+
+    // Prove the previous assertion is not vacuous — `fmt` really would
+    // have rewritten this fixture, so "untouched" means the missing-path
+    // guard fired before the write loop, not that the fixture was
+    // already canonical.
+    let solo_rc = process.run_capture([_sfn_bin(), "fmt", "--write", real], _child_env());
+    let solo_out = process.capture_take_stdout();
+    let solo_err = process.capture_take_stderr();
+    report_child_failure("fmt-missing-path solo --write", solo_rc, solo_out, solo_err);
+    assert solo_rc == 0;
+    assert ! strings_equal(fs.readFile(real), original);
+}
+
+test "fmt-missing-path: existing empty .sfn file still formats as a no-op" ![io] {
+    let dir = _scratch_dir();
+    let path = dir + "/empty.sfn";
+    fs.writeFile(path, "");
+
+    let check_rc = process.run_capture([_sfn_bin(), "fmt", "--check", path], _child_env());
+    let check_out = process.capture_take_stdout();
+    let check_err = process.capture_take_stderr();
+    report_child_failure("fmt-missing-path empty --check", check_rc, check_out, check_err);
+    assert check_rc == 0;
+
+    let write_rc = process.run_capture([_sfn_bin(), "fmt", "--write", path], _child_env());
+    let write_out = process.capture_take_stdout();
+    let write_err = process.capture_take_stderr();
+    report_child_failure("fmt-missing-path empty --write", write_rc, write_out, write_err);
+    assert write_rc == 0;
+    assert fs.readFile(path).length == 0;
+}
+
+test "fmt-missing-path: existing directory with no .sfn files is unchanged" ![io] {
+    let dir = _scratch_dir() + "/empty-dir";
+    fs.createDirectory(dir, true);
+
+    let rc = process.run_capture([_sfn_bin(), "fmt", "--check", dir], _child_env());
+    let out = process.capture_take_stdout();
+    let _err = process.capture_take_stderr();
+
+    assert rc == 1;
+    assert contains(out, "no .sfn files found");
+}
+
+// The pair above and below split one message into two: a directory that
+// exists but holds no sources keeps `no .sfn files found`, while a
+// directory that is not there at all now says so. Reporting the former
+// for the latter read as "your directory has no sources" when the truth
+// was "your directory does not exist" (SFN-643).
+test "fmt-missing-path: absent directory is named, not reported as empty" ![io] {
+    let dir = _scratch_dir() + "/absent-dir";
+    let rc = process.run_capture([_sfn_bin(), "fmt", "--check", dir], _child_env());
+    let out = process.capture_take_stdout();
+    let _err = process.capture_take_stderr();
+
+    assert rc == 1;
+    assert contains(out, "path not found");
+    assert contains(out, dir);
+    assert ! contains(out, "no .sfn files found");
+    assert ! fs.exists(dir);
+}
+
+// Every missing path is reported, not just the first — `run()` counts
+// them in a loop rather than returning on the first miss, so that
+// `sfn fmt --write $(git diff --name-only HEAD | grep '\.sfn$')` over a
+// diff with several deleted files is diagnosable in one run. The absent
+// path is listed first here so a first-miss early return could not pass
+// this by accident (SFN-643).
+test "fmt-missing-path: every missing path is reported, not just the first" ![io] {
+    let dir = _scratch_dir();
+    let absent_a = dir + "/absent-multi-a.sfn";
+    let absent_b = dir + "/absent-multi-b.sfn";
+    let real = dir + "/real-multi.sfn";
+    if fs.exists(absent_a) { fs.deleteFile(absent_a); }
+    if fs.exists(absent_b) { fs.deleteFile(absent_b); }
+    let original = "fn main() ![io] {\nprint(\"hi\");\n}\n";
+    fs.writeFile(real, original);
+
+    let rc = process.run_capture([_sfn_bin(), "fmt", "--write", absent_a, real, absent_b], _child_env());
+    let out = process.capture_take_stdout();
+    let _err = process.capture_take_stderr();
+
+    assert rc == 1;
+    assert contains(out, absent_a);
+    assert contains(out, absent_b);
+    assert ! fs.exists(absent_a);
+    assert ! fs.exists(absent_b);
+    // Still all-or-nothing with the absent path listed ahead of the real one.
+    assert strings_equal(fs.readFile(real), original);
+}

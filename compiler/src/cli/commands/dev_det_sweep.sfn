@@ -322,6 +322,24 @@ fn _det_orchestrate(seed: string, jobs: int, iters: int, out_in: string, roots: 
     let mut self_exe = self_exe_probe;
     if self_exe.length == 0 { self_exe = seed; }
 
+    // Reject a root that does not exist before enumerating. Since SFN-643
+    // gated `_collect_sfn_files_cmd`'s single-file fast path on existence,
+    // a typo'd `.sfn` root collects nothing rather than one phantom module
+    // — so `sfn dev determinism-sweep compiler/src/typcheck.sfn` would
+    // sweep zero modules and exit 0, reporting a clean run for a command
+    // that swept nothing. That is exactly the vacuous pass the exit-code
+    // contract at the end of this function refuses. Usage error (2), like
+    // the seed and import-context guards above.
+    let mut root_i = 0;
+    loop {
+        if root_i >= roots.length { break; }
+        if !fs.exists(roots[root_i]) {
+            print.err("sfn dev determinism-sweep: path not found: " + roots[root_i]);
+            return 2;
+        }
+        root_i += 1;
+    }
+
     let modules = _det_enumerate_modules(roots);
 
     let repo_root = _shell_read_cmd("pwd");
