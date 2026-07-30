@@ -27,9 +27,6 @@
 // `compose_build_stamp`, `write_build_stamp`) are gate-agnostic
 // so tests can pin the four-case truth table without spawning a
 // build.
-// `_toml_trim_cmd` is the same trimmer the former `_shell_read_cmd` probes
-// applied to their captured stdout, so the composed stamp stays
-// byte-identical now that the probes capture directly.
 import { _toml_trim_cmd } from "./build/fs";
 
 // Pure formatter — the four-case truth table. Tests drive every
@@ -56,7 +53,15 @@ fn compose_build_stamp_from(capsule_version: string, git_tag: string, git_hash: 
 // keeps a failing probe out of the build log — without needing a shell.
 // The inherited environment is threaded through deliberately: the shell
 // form inherited it too, and git's behaviour depends on it (`GIT_DIR`,
-// `GIT_CEILING_DIRECTORIES`, PATH).
+// `GIT_CEILING_DIRECTORIES`, PATH). `_toml_trim_cmd` is the same trimmer
+// `_shell_read_cmd` applied to its own captured stdout, so the composed
+// stamp is unchanged.
+//
+// One deliberate divergence from the shell form, which ignored the exit
+// code: an unborn HEAD makes `git rev-parse --short HEAD` print the
+// unresolved `HEAD` to stdout and fail 128, which used to compose the
+// nonsense `<version>+dev.HEAD.dirty`. Honoring rc collapses that to
+// `<version>+dev`, the same as any other git-less checkout.
 fn _git_probe_capture(argv: string[], child_env: string[]) -> string ![io] {
     let rc = process.run_capture(argv, child_env);
     let out = process.capture_take_stdout();

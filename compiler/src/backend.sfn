@@ -146,6 +146,14 @@ fn _macos_sdk_link_flags() -> string[] ![io] {
     return flags;
 }
 
+// Module-private by naming convention; exported so the de-shelling
+// regression guard (`compiler/tests/unit/windows_build_deshell_test.sfn`,
+// SFN-488) can assert the off-Darwin flag set is empty directly rather than
+// inferring it from a link argv. Mirrors the `_llvm_text_link_*_argv`
+// export-of-underscore-helper precedent below; no rename, no behavior
+// change.
+export { _macos_sdk_link_flags };
+
 // Resolve the macOS SDK root, or "" when not on Darwin / none found.
 // Order: `build_target_os()` gates on Darwin — same `SAILFIN_TARGET_OS`
 // override the rest of the link path resolves through, and shell-free, so
