@@ -2,8 +2,17 @@
 // (issue #1502 — `sfn selfhost`). The fixed-point comparator itself is
 // covered by `build_report_determinism_test.sfn`; these target the
 // selfhost-specific string helpers that feed the smoke gate and the
-// `.ll`-dir snapshot loader.
-import { _selfhost_basename, _selfhost_contains, _selfhost_is_digits } from "../../src/cli_selfhost";
+// `.ll`-dir snapshot loader, plus the argv/env builders that spawn each
+// stage child without a shell (SFN-489).
+import { expect_eq_bool, expect_eq_str_array } from "sfn/test";
+
+import {
+    _selfhost_basename,
+    _selfhost_contains,
+    _selfhost_env_entry_has_key,
+    _selfhost_stage_argv,
+    _selfhost_stage_env
+} from "../../src/cli_selfhost";
 
 // --------------------------------------------------------------
 // _selfhost_contains — substring scan (smoke-gate grep)
@@ -48,20 +57,78 @@ test "selfhost_basename: trailing slash yields empty basename" {
 }
 
 // --------------------------------------------------------------
-// _selfhost_is_digits — `--smoke-timeout` guard
+// _selfhost_env_entry_has_key — `"KEY=VALUE"` key match
 // --------------------------------------------------------------
-test "selfhost_is_digits: accepts a positive integer" {
-    assert _selfhost_is_digits("10");
+test "selfhost_env_entry_has_key: matches a bound key" {
+    assert expect_eq_bool(_selfhost_env_entry_has_key("SAILFIN_BOOTSTRAP=off", "SAILFIN_BOOTSTRAP"), true).ok;
 }
 
-test "selfhost_is_digits: accepts zero" { assert _selfhost_is_digits("0"); }
-
-test "selfhost_is_digits: rejects empty" { assert ! _selfhost_is_digits(""); }
-
-test "selfhost_is_digits: rejects non-digit characters (injection guard)" {
-    assert ! _selfhost_is_digits("10; rm -rf /");
+test "selfhost_env_entry_has_key: matches an empty value" {
+    assert expect_eq_bool(_selfhost_env_entry_has_key("SAILFIN_BOOTSTRAP=", "SAILFIN_BOOTSTRAP"), true).ok;
 }
 
-test "selfhost_is_digits: rejects negative sign" {
-    assert ! _selfhost_is_digits("-5");
+test "selfhost_env_entry_has_key: matches a valueless binding" {
+    assert expect_eq_bool(_selfhost_env_entry_has_key("SAILFIN_BOOTSTRAP", "SAILFIN_BOOTSTRAP"), true).ok;
+}
+
+// The prefix guard that keeps the override filter from dropping unrelated
+// variables which merely start with the same characters.
+test "selfhost_env_entry_has_key: rejects a longer key sharing a prefix" {
+    assert expect_eq_bool(_selfhost_env_entry_has_key("SAILFIN_BOOTSTRAP_MODE=x", "SAILFIN_BOOTSTRAP"), false).ok;
+}
+
+test "selfhost_env_entry_has_key: rejects an unrelated key" {
+    assert expect_eq_bool(_selfhost_env_entry_has_key("PATH=/usr/bin", "SAILFIN_BOOTSTRAP"), false).ok;
+}
+
+// --------------------------------------------------------------
+// _selfhost_stage_env — per-stage child environment
+//
+// The load-bearing helper. Silently losing `SAILFIN_BOOTSTRAP=off` makes
+// each stage dispatch to the pinned seed instead of the binary under
+// test, subverting the entire fixed-point check while still reporting
+// green (SFEP-0047's exact-match bootstrap gate). Losing a distinct
+// `SAILFIN_TEST_SCRATCH` collapses both stages onto one `.ll` dir and
+// makes the diff vacuous.
+//
+// These assert the whole array rather than probing for membership: the
+// exact contents also pin the ordering and prove no *second* binding for
+// either key survives, which membership checks would miss.
+// --------------------------------------------------------------
+test "selfhost_stage_env: appends both overrides to the inherited env" {
+    assert expect_eq_str_array(_selfhost_stage_env(["PATH=/usr/bin", "HOME=/root"], "build/selfhost/s2/scratch"), ["PATH=/usr/bin", "HOME=/root", "SAILFIN_BOOTSTRAP=off", "SAILFIN_TEST_SCRATCH=build/selfhost/s2/scratch"]).ok;
+}
+
+// A duplicate key in `envp` resolves unspecified, so an inherited `=on`
+// must be dropped, not merely followed by `=off`.
+test "selfhost_stage_env: replaces an inherited SAILFIN_BOOTSTRAP" {
+    assert expect_eq_str_array(_selfhost_stage_env(["SAILFIN_BOOTSTRAP=on", "PATH=/usr/bin"], "s"), ["PATH=/usr/bin", "SAILFIN_BOOTSTRAP=off", "SAILFIN_TEST_SCRATCH=s"]).ok;
+}
+
+test "selfhost_stage_env: replaces an inherited SAILFIN_TEST_SCRATCH" {
+    assert expect_eq_str_array(_selfhost_stage_env(["SAILFIN_TEST_SCRATCH=/stale", "PATH=/usr/bin"], "fresh"), ["PATH=/usr/bin", "SAILFIN_BOOTSTRAP=off", "SAILFIN_TEST_SCRATCH=fresh"]).ok;
+}
+
+test "selfhost_stage_env: an empty parent env still carries both overrides" {
+    assert expect_eq_str_array(_selfhost_stage_env([], "s"), ["SAILFIN_BOOTSTRAP=off", "SAILFIN_TEST_SCRATCH=s"]).ok;
+}
+
+test "selfhost_stage_env: keeps a variable that merely shares a prefix" {
+    assert expect_eq_str_array(_selfhost_stage_env(["SAILFIN_BOOTSTRAP_MODE=x"], "s"), ["SAILFIN_BOOTSTRAP_MODE=x", "SAILFIN_BOOTSTRAP=off", "SAILFIN_TEST_SCRATCH=s"]).ok;
+}
+
+// --------------------------------------------------------------
+// _selfhost_stage_argv — the stage build command line
+// --------------------------------------------------------------
+// Whole-array equality is the point: it pins `argv[0]` to the driver and
+// proves no `sh`/`-c` wrapper crept back in.
+test "selfhost_stage_argv: invokes the driver directly, with no shell" {
+    assert expect_eq_str_array(_selfhost_stage_argv("build/bin/sfn", "build/selfhost/s2", "build/selfhost/s2/bin/sfn"), ["build/bin/sfn", "build", "--no-cache", "-p", "compiler", "--work-dir", "build/selfhost/s2", "-o", "build/selfhost/s2/bin/sfn"]).ok;
+}
+
+// Arguments reach `execve` verbatim, so a space stays inside one argument
+// instead of being shell-quoted — the former `sh -c` command string
+// needed `_shell_single_quote_arg` for exactly this.
+test "selfhost_stage_argv: passes a spaced path through unquoted" {
+    assert expect_eq_str_array(_selfhost_stage_argv("drv", "work dir", "out bin"), ["drv", "build", "--no-cache", "-p", "compiler", "--work-dir", "work dir", "-o", "out bin"]).ok;
 }
