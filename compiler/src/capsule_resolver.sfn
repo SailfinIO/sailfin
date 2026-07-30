@@ -71,6 +71,20 @@ import {
     collect_scoped_import_specs
 } from "./capsule_import_scan";
 import { _display_capsule_name_cmd } from "./capsule_names";
+import {
+    CapabilityDriftReport,
+    CapsuleSource,
+    CheckCapsuleResolution,
+    CompileCapsuleResult,
+    MemberCapabilityAudit,
+    ModuleCacheEvent,
+    ProjectCapsuleResult,
+    ResolverConsumer,
+    TestCapsuleResolution,
+    WorkspaceMember,
+    _cr_module_cache_event_failure,
+    empty_resolver_consumer
+} from "./capsule_resolver/types";
 import { render_diagnostic } from "./diagnostics_render";
 import { inferred_public_effects } from "./effect_checker";
 import { empty_import_symbols } from "./effect_imports";
@@ -116,6 +130,12 @@ import {
 import { Diagnostic, diagnostic_to_diag } from "./typecheck_types";
 import { resolve_compiler_version, resolve_compiler_version_for_cache } from "./version";
 
+// Struct definitions and their constructors live in `./capsule_resolver/types`.
+// The explicit `from` clause is required: a bare `export { X };` of a symbol
+// imported from a relative path emits no `.fn` signature into this module's
+// `.sfn-asm`, so consumers silently fall back to an `i8*` return type and
+// miscompile boolean `if` guards (`E0600`,
+// docs/rca/2026-04-18-reexport-diagnostic-gep.md).
 export {
     CapabilityDriftReport,
     CapsuleSource,
@@ -127,10 +147,13 @@ export {
     ResolverConsumer,
     TestCapsuleResolution,
     WorkspaceMember,
+    empty_resolver_consumer
+} from "./capsule_resolver/types";
+
+export {
     compile_capsule_modules,
     discover_project_root,
     discover_workspace_root,
-    empty_resolver_consumer,
     enumerate_binary_capsule_sources,
     enumerate_capsule_sources,
     enumerate_relative_sources,
@@ -154,208 +177,6 @@ export {
     workspace_effective_envelope,
     workspace_member_for_spec
 };
-
-struct CapsuleSource {
-    spec: string;  // e.g. "sfn/cli" — the dep key from capsule.toml
-    source_path: string;  // absolute path to the .sfn file
-    slug: string;  // e.g. "sfn/cli/mod" — used for staging + symbol mangling
-    // Where the per-module `.ll` lands on disk. Stage C2b2 routes
-    // it via `ir_path_for_slug` into the per-capsule tree:
-    //   `build/capsules/<scope>/<name>/ir/<rel>.ll` for manifest-
-    //   declared deps and intra-capsule sources of a `-p` build
-    //   whose `[capsule].name` is in safe scope/name form;
-    //   otherwise falls back to legacy
-    //   `build/sailfin/capsules/<mangled>.ll`.
-    // Construction sites emit `ll_path = ""` and the post-dedupe
-    // pass in `_cr_resolve_and_dedupe` fills it in once the
-    // consumer + dep layout is known. Never observed empty by
-    // downstream callers.
-    ll_path: string;
-}
-
-// Identifies the "consumer" capsule of a resolver pass — the
-// capsule whose entry source we're building. Threaded into
-// `prepare_project_capsules{,_for_check,_for_test}` so the resolver
-// can route intra-capsule (relative-import) `.ll` outputs into the
-// consumer's own `build/capsules/<scope>/<name>/ir/` tree (Stage
-// C2b2). Both fields empty (`empty_resolver_consumer()`) means
-// "positional / no `-p`" — the legacy flat layout is used for any
-// source that doesn't fall under a manifest-declared dep prefix.
-//
-// `cli_main.sfn::is_build` populates this from the resolved
-// `[capsule].name`; `sfn run`, `sfn check`, and `sfn test` pass the
-// empty consumer until they grow `-p` plumbing of their own.
-//
-// Stage D PR3: `walk_project_src` opts the resolver into a
-// recursive walk of `<project_root>/src/**/*.sfn` for `kind =
-// "binary"` `-p` builds where the entry module doesn't transitively
-// import every source in the capsule (the compiler's `main.sfn` is
-// the canonical example — it imports `cli_main`, which is the real
-// entry, but the relative-import walker can't reach the `~138 .sfn`
-// files the link needs). Empty consumer / `walk_project_src=false`
-// preserves the legacy entry-driven enumeration, so end-user
-// builds and the existing self-host paths are unaffected.
-//
-// P1 (#363): `include_host_as_dep` opts the resolver into walking
-// the host capsule's `<project_root>/src/` as if it were a
-// manifest-declared dep. Set by `sfn test` so a test file in
-// `<project>/tests/` can `import { fn } from "<capsule_name>"` and
-// have the resolver stage + compile the host capsule under slug
-// `<capsule_name>/<stem>`. The build path (`sfn build`) keeps this
-// off — the host capsule's entry source is already compiled
-// directly, so re-enumerating it as a dep would double-emit.
-struct ResolverConsumer {
-    scope: string;
-    name: string;
-    walk_project_src: boolean;
-    include_host_as_dep: boolean;
-}
-
-fn empty_resolver_consumer() -> ResolverConsumer {
-    return ResolverConsumer {
-        scope: "",
-        name: "",
-        walk_project_src: false,
-        include_host_as_dep: false
-    };
-}
-
-// Result of `compile_capsule_modules`: per-build .ll paths plus the
-// cache stats accumulated across all per-module compiles. `success`
-// distinguishes "no deps" (empty `ll_paths`, success=true) from a
-// compile failure (empty `ll_paths`, success=false).
-//
-// Stage C2c: when `success=true`, `module_events` is a parallel
-// array to `ll_paths` (same length, matching indices) holding
-// the per-module `ModuleCacheEvent` returned by
-// `_cr_compile_one`. When `success=false`, the bail path
-// preserves whichever events were already accumulated AND
-// pushes the failing event, so `module_events.length` may be
-// `ll_paths.length + 1` while `ll_paths` reflects only the
-// modules that finished cleanly. Sidecar emission is gated on
-// `success=true` upstream, so the sidecar never sees the
-// extra entry; the divergence is purely diagnostic. The
-// sidecar emitter consumes `slug` + `cache_key_digest` from
-// each event to enumerate per-source artifacts in
-// `manifest.json`. `stats` remains the totals summary;
-// `module_events` is the per-source detail.
-struct CompileCapsuleResult {
-    ll_paths: string[];
-    stats: CacheStats;
-    success: boolean;
-    module_events: ModuleCacheEvent[];
-}
-
-// Result of `prepare_project_capsules` (the build / run path).
-// `ll_paths` is the dep `.ll` list for the linker; `stats` is the
-// per-build cache summary the CLI prints at the end (and that
-// `--json` will eventually emit as a structured field).
-//
-// Stage C2c: `module_events` is forwarded from
-// `CompileCapsuleResult` so the CLI's sidecar emitter has the
-// per-module slug + cache_key_digest without re-running the
-// compile loop.
-struct ProjectCapsuleResult {
-    ll_paths: string[];
-    // Issue #991: distinguishes a legitimate empty `ll_paths` (the
-    // project declares no capsule dependencies — `success = true`)
-    // from a resolver/compile failure that left `ll_paths` empty
-    // (slug collision, stage-write failure, or a per-module emit
-    // failure such as an effect-gate `E0402` — `success = false`).
-    // The build driver consults this before linking so a dropped
-    // module exits non-zero instead of silently linking the
-    // survivors and reporting success.
-    success: boolean;
-    stats: CacheStats;
-    module_events: ModuleCacheEvent[];
-    // Stage D PR2: every `kind = "runtime"` capsule the project's
-    // `[dependencies]` declares (transitively, via the workspace
-    // member graph). Empty when the project doesn't declare any
-    // runtime dep — `cli_main.sfn::_clang_link_multi_with_opt`
-    // falls back to the legacy hardcoded `runtime_root/native/...`
-    // path that user-program builds rely on. Populated for the
-    // compiler when its `compiler/capsule.toml` declares
-    // `[dependencies] "sfn/runtime-native" = "*"`, which is what
-    // unblocks `sfn build -p compiler` as a real bootstrap path.
-    runtime_capsules: RuntimeCapsuleArtifacts[];
-}
-
-// One entry from the workspace's [workspace].members list, with the
-// member's canonical name (read from the member's own capsule.toml) and
-// its src/ directory pre-resolved against the workspace root.
-struct WorkspaceMember {
-    name: string;  // canonical name, e.g. "sfn/http"
-    member_path: string;  // path relative to workspace root, e.g. "capsules/sfn/http"
-    src_dir: string;  // path to the member's src/ dir (workspace-rooted)
-}
-
-// SFEP-0051 Phase 4a/4b: one member's effect surface audited against the
-// workspace capability envelope. `required` is the member's declared
-// `[capabilities] required` (Phase 4a) unioned with the effects inferred across
-// its public functions (Phase 4b, SFN-418); `drift` is the subset of `required`
-// that falls outside `effective(member) = (allow ∪ grants[member]) \ deny`.
-struct MemberCapabilityAudit {
-    member_name: string;
-    member_path: string;
-    required: string[];  // declared [capabilities] required ∪ inferred public effect surface
-    drift: string[];  // required effects outside the effective envelope
-}
-
-// SFEP-0051 Phase 4a: the workspace-tier declared-surface capability audit
-// result. `diagnostics` carries a coded `Diagnostic` per drifting effect
-// (E0405) and per malformed envelope entry (E0406); `has_drift` is true iff
-// any member drifts. Phase 4a produces the report only — wiring it into a
-// build/check failure gate is Phase 4c (SFN-419), so nothing here fails a
-// build yet.
-struct CapabilityDriftReport {
-    members: MemberCapabilityAudit[];
-    diagnostics: Diagnostic[];
-    has_drift: boolean;
-}
-
-// Result of a check-mode resolver pass: same workspace + manifest +
-// relative-import enumeration as `prepare_project_capsules`, but the
-// pipeline stops after `stage_capsule_imports` so no `.ll` is emitted.
-// `asm_paths` is the list of staged `.sfn-asm` files the typechecker
-// should consume for cross-module interface conformance.
-struct CheckCapsuleResolution {
-    asm_paths: string[];  // build/compiler/import-context/<slug>.sfn-asm
-    capsule_count: int;  // post-dedupe count, for diagnostic output
-    staging_failed: boolean;  // true on slug collision or stage-write failure
-    // Phase F (`docs/proposals/0008-effect-validation.md` §5): the
-    // project manifest's `[capabilities] required = [...]`. Empty
-    // when no manifest is present (standalone .sfn files outside
-    // any capsule). The effect-checker treats empty as "skip
-    // capability cross-check"; non-empty as "fail E0403 on any
-    // function declaring an effect outside this surface."
-    capabilities_required: string[];
-}
-
-// Result of a test-mode resolver pass: same workspace + manifest +
-// relative-import enumeration as `prepare_project_capsules`, but
-// returns BOTH the staged `.sfn-asm` paths (for the typechecker
-// import-loader) AND the compiled `.ll` paths (for the linker). The
-// test runner needs both — the loader feeds cross-module conformance
-// into typecheck, and clang link consumes the helper `.ll` files so
-// imported helper definitions resolve at link time. (The earlier
-// `llvm-objcopy --weaken` backstop in the test linker was retired
-// once `_collect_test_files_cmd`'s trailing-slash bug — which had
-// been masking the resolver's correctness — was fixed.)
-struct TestCapsuleResolution {
-    asm_paths: string[];  // build/compiler/import-context/<slug>.sfn-asm
-    // build/capsules/<scope>/<name>/ir/<rel>.ll (or legacy
-    // build/sailfin/capsules/<mangled>.ll fallback). See
-    // `CapsuleSource.ll_path` for the routing rules.
-    ll_paths: string[];
-    capsule_count: int;  // post-dedupe count, for diagnostic output
-    staging_failed: boolean;  // true on slug collision, stage-write, or compile failure
-    // Phase F: same `[capabilities] required` surfacing as
-    // `CheckCapsuleResolution`. The test runner threads this into
-    // `compile_tests_to_llvm_file_with_module_imports` so a test
-    // body declaring an effect the capsule manifest doesn't grant
-    // produces an `E0403` diagnostic.
-    capabilities_required: string[];
-}
 
 // ---- Path helpers ----
 fn _cr_dirname(path: string) -> string {
@@ -1849,47 +1670,6 @@ fn _cr_stage_import_deps(sources: CapsuleSource[], universe: CapsuleSource[], wo
         }
         i += 1;
     }
-}
-
-// One module's cache outcome. Returned from `_cr_compile_one` so
-// the caller (`compile_capsule_modules`) can fold per-module
-// outcomes into the per-build `CacheStats` struct without needing
-// mutable in/out parameters.
-//
-// `lookup_attempted` distinguishes "we tried the cache and missed"
-// from "we never asked the cache" — without it, every module
-// in a `--no-cache` build would count as a miss and trigger the
-// stats summary line, which is misleading for the user-facing
-// surface.
-struct ModuleCacheEvent {
-    success: boolean;  // false → caller bails this build
-    lookup_attempted: boolean;  // true iff we consulted the cache
-    hit: boolean;  // cache served the .ll; producer skipped
-    stored: boolean;  // miss path stored a fresh artifact
-    invalid_key: boolean;  // is_valid_digest rejected the digest
-    copy_failed: boolean;  // cache had it; cp to dst failed
-    // Stage C2c: per-module identity threaded back to the
-    // sidecar emitter so `manifest.json` can list every module
-    // the build produced. `slug` matches `CapsuleSource.slug`
-    // (stable, used for symbol mangling). `cache_key_digest` is
-    // the sha256 hex string from `CacheKey.digest`, or `""`
-    // when caching was disabled (`config.enabled = false`) or
-    // the digest was rejected by `is_valid_digest`.
-    slug: string;
-    cache_key_digest: string;
-}
-
-fn _cr_module_cache_event_failure(slug: string) -> ModuleCacheEvent {
-    return ModuleCacheEvent {
-        success: false,
-        lookup_attempted: false,
-        hit: false,
-        stored: false,
-        invalid_key: false,
-        copy_failed: false,
-        slug: slug,
-        cache_key_digest: ""
-    };
 }
 
 // ---- Capsule module compilation ----
