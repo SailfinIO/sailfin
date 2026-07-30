@@ -39,7 +39,7 @@ struct Diag {
 }
 
 // Primitive frontend adapter kept here rather than importing `Diagnostic`.
-// The typed wrapper in `typecheck_types.sfn` decomposes its optional Token,
+// The typed wrapper in `typecheck_types/mod.sfn` decomposes its optional Token,
 // preserving this module's backend-safe dependency direction.
 fn diag_from_typecheck(code: string, severity: string, message: string, file_path: string, primary_line: int, primary_column: int, primary_lexeme_length: int, has_primary: boolean, stage: string, suggestion: FixSuggestion?) -> Diag {
     let mut span: Span? = null;

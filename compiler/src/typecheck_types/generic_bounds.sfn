@@ -22,10 +22,6 @@ import { token_from_name, trim_text } from "./text_utils";
 // `+`, respecting `(`/`)` and `<`/`>` nesting the same way
 // `split_top_level_commas` does (#1868, SFEP-0038 §3.1). Empty segments are
 // dropped and each segment is trimmed.
-// Split a type-parameter bound list ("Eq + Comparable<int>") on top-level
-// `+`, respecting `(`/`)` and `<`/`>` nesting the same way
-// `split_top_level_commas` does (#1868, SFEP-0038 §3.1). Empty segments are
-// dropped and each segment is trimmed.
 fn split_top_level_plus(text: string) -> string[] {
     let mut out: string[] = [];
     let mut current: string = "";

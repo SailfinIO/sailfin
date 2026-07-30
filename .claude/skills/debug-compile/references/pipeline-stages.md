@@ -7,7 +7,7 @@ Use this table to map a compiler diagnostic to the file(s) most likely to contai
 | Unexpected token / unterminated literal | Lex | `compiler/src/lexer.sfn` |
 | Expected `<construct>` / unexpected syntax | Parse | `compiler/src/parser/` |
 | Unknown AST node shape in downstream pass | AST | `compiler/src/ast.sfn` |
-| Type mismatch / undefined symbol / duplicate symbol | Typecheck | `compiler/src/typecheck.sfn`, `compiler/src/typecheck_types.sfn` |
+| Type mismatch / undefined symbol / duplicate symbol | Typecheck | `compiler/src/typecheck.sfn`, `compiler/src/typecheck_types/` |
 | Missing effect annotation / effect not declared | Effects | `compiler/src/effect_checker.sfn` |
 | `.sfn-asm` emission error / malformed IR instruction | Emit | `compiler/src/emit_native.sfn`, `compiler/src/emit_native_state.sfn`, `compiler/src/native_ir.sfn` |
 | LLVM `clang` rejects generated `.ll` | Lowering | `compiler/src/llvm/lowering/` (start at `entrypoints.sfn`) |

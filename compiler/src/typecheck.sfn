@@ -2095,7 +2095,7 @@ fn walk_match_pattern(pattern: Expression?, ctx: TypeckCtx) -> Diagnostic[] {
 }
 
 // `?` operator (TryOperator) type rules — issue #833, epic #371 (R.3).
-// See `typecheck_types.sfn` for `type_is_result` / `result_type_arguments`
+// See `typecheck_types/expr_type_rules.sfn` for `type_is_result` / `result_type_arguments`
 // and the E0810–E0812 factories. `operand_type` is the type of the `?`
 // operand; `enclosing_return_type` is the declared return type of the
 // function the `?` appears in (null when the function declares no return
