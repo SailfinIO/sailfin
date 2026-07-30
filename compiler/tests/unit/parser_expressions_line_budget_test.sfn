@@ -1,0 +1,58 @@
+// Line-budget sentinel for `compiler/src/parser/expressions/`.
+//
+// The former flat `expressions.sfn` reached 2,603 lines. Besides making the
+// parser difficult to navigate, a module that large raises the per-worker
+// compiler working set and constrains safe build parallelism. The split keeps
+// each expression-parsing concern below 750 lines; this guard prevents the
+// flat module or any listed leaf from quietly regrowing.
+//
+// Isolated macOS arm64 emission with the same self-hosted compiler and import
+// context measured the flat module at 1,075,937,280 bytes peak RSS
+// (1,026.1 MiB). The heaviest split module, `mod.sfn`, measured 291,930,112
+// bytes (278.4 MiB), a 72.9% reduction. This remains a maintainability guard,
+// not a general RSS formula: compare future decomposition targets by direct
+// measurement rather than assuming line counts predict costs across modules.
+import { expect_eq_bool } from "sfn/test";
+
+import { find_char_local } from "../../src/string_utils";
+
+let PARSER_EXPRESSION_MODULE_LINE_BUDGET: int = 750;
+let PARSER_EXPRESSION_ROOT: string = "compiler/src/parser/expressions";
+
+fn _count_newlines(source: string) -> int {
+    let mut count: int = 0;
+    let mut pos: int = 0;
+    loop {
+        let idx = find_char_local(source, "\n", pos);
+        if idx < 0 { break; }
+        count += 1;
+        pos = idx + 1;
+    }
+    return count;
+}
+
+fn _module_lines(name: string) -> int ![io] {
+    let source = fs.readFile(PARSER_EXPRESSION_ROOT + "/" + name + ".sfn");
+    assert source.length > 0;
+    return _count_newlines(source);
+}
+
+test "parser expressions: each submodule stays under 750 lines" ![io] {
+    let modules: string[] = ["concurrency", "lambdas", "literals", "mod", "normalize", "postfix", "prefix", "type_targets"];
+    let mut i: int = 0;
+    loop {
+        if i >= modules.length { break; }
+        let lines = _module_lines(modules[i]);
+        assert expect_eq_bool(lines > 0, true).ok;
+        assert expect_eq_bool(lines < PARSER_EXPRESSION_MODULE_LINE_BUDGET, true).ok;
+        i += 1;
+    }
+}
+
+// Module resolution probes `expressions.sfn` before
+// `expressions/mod.sfn`. Reintroducing the flat file would shadow the folder
+// and silently undo the decomposition while still allowing builds to pass.
+test "parser expressions: the flat module does not shadow the folder" ![io] {
+    assert expect_eq_bool(fs.exists("compiler/src/parser/expressions.sfn"), false).ok;
+    assert expect_eq_bool(fs.exists(PARSER_EXPRESSION_ROOT + "/mod.sfn"), true).ok;
+}

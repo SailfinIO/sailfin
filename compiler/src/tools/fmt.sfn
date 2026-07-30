@@ -535,7 +535,8 @@ fn _reclassify_unary_ops(fmt_tokens: FmtToken[]) -> FmtToken[] {
             // Prefix `*` (pointer type `*u8`, dereference `*ptr`) is the same
             // token as binary multiply, disambiguated here by the previous
             // token's role: in a prefix context it carries no trailing space,
-            // matching the parser's verbatim intent (parser/expressions.sfn).
+            // matching the parser's verbatim intent
+            // (parser/expressions/prefix.sfn).
             // Binary multiply (prev_role "value"/"paren_close"/…) falls through
             // unchanged, so `a * b` keeps its spaces.
             if strings_equal(lex, "*") {

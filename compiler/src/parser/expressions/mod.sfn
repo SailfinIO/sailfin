@@ -1,0 +1,571 @@
+// compiler/src/parser/expressions/mod.sfn
+//
+// Expression parsing - Pratt parser implementation for expressions including
+// literals, binary/unary operators, member access, calls, lambdas, and more.
+import { Expression } from "../../ast";
+import { char_at, normalize_number_literal_value, strings_equal } from "../../string_utils";
+import { Token } from "../../token";
+import {
+    append_token,
+    filter_trivia,
+    identifier_text,
+    source_span_from_tokens,
+    string_literal_value,
+    symbol_matches,
+    tokens_to_text
+} from "../token_utils";
+import {
+    ExpressionBlockParseResult,
+    ExpressionCollectResult,
+    ExpressionParseResult,
+    ExpressionTokens,
+    ExpressionTypeSeparatorParseResult
+} from "../types";
+import { string_array_contains, trim_text } from "../utils";
+import {
+    binary_precedence,
+    looks_like_number_expr,
+    strip_surrounding_quotes_expr
+} from "./normalize";
+import { parse_prefix_expression } from "./prefix";
+
+// ============================================================================
+// Expression State Operations
+// ============================================================================
+fn expression_tokens_is_at_end(state: ExpressionTokens) -> boolean {
+    return state.index >= state.tokens.length;
+}
+
+fn expression_tokens_peek(state: ExpressionTokens) -> Token {
+    return state.tokens[state.index];
+}
+
+fn expression_tokens_advance(state: ExpressionTokens) -> ExpressionTokens {
+    if state.index >= state.tokens.length { return state; }
+    return ExpressionTokens {
+        tokens: state.tokens,
+        index: state.index + 1
+    };
+}
+
+fn expression_parse_failure(state: ExpressionTokens) -> ExpressionParseResult {
+    return ExpressionParseResult {
+        state: state,
+        expression: Expression.Raw { text: "", span: null },
+        success: false
+    };
+}
+
+// ============================================================================
+// Type Separator Parsing
+// ============================================================================
+fn expression_tokens_consume_type_separator(state: ExpressionTokens, accept_colon: boolean, accept_arrow: boolean) -> ExpressionTypeSeparatorParseResult {
+    if expression_tokens_is_at_end(state) {
+        return ExpressionTypeSeparatorParseResult {
+            state: state,
+            used_separator: "",
+            found: false
+        };
+    }
+    let token = expression_tokens_peek(state);
+    if token.kind.variant != "Symbol" {
+        return ExpressionTypeSeparatorParseResult {
+            state: state,
+            used_separator: "",
+            found: false
+        };
+    }
+
+    if accept_colon {
+        if symbol_matches(token, ":") {
+            return ExpressionTypeSeparatorParseResult {
+                state: expression_tokens_advance(state),
+                used_separator: ":",
+                found: true
+            };
+        }
+    }
+
+    if accept_arrow {
+        if symbol_matches(token, "->") {
+            return ExpressionTypeSeparatorParseResult {
+                state: expression_tokens_advance(state),
+                used_separator: "->",
+                found: true
+            };
+        }
+        if symbol_matches(token, "-") {
+            let mut next_state = expression_tokens_advance(state);
+            if !expression_tokens_is_at_end(next_state) {
+                let maybe_gt = expression_tokens_peek(next_state);
+                if maybe_gt.kind.variant == "Symbol" {
+                    if symbol_matches(maybe_gt, ">") {
+                        next_state = expression_tokens_advance(next_state);
+                    }
+                }
+            }
+            return ExpressionTypeSeparatorParseResult {
+                state: next_state,
+                used_separator: "->",
+                found: true
+            };
+        }
+    }
+
+    return ExpressionTypeSeparatorParseResult {
+        state: state,
+        used_separator: "",
+        found: false
+    };
+}
+
+// ============================================================================
+// Expression Token Collection
+// ============================================================================
+fn expression_tokens_collect_until(state: ExpressionTokens, terminators: string[]) -> ExpressionCollectResult {
+    let mut current = state;
+    let mut collected: Token[] = [];
+    let mut angle: int = 0;
+    let mut paren: int = 0;
+    let mut brace: int = 0;
+    let mut bracket: int = 0;
+
+    loop {
+        if expression_tokens_is_at_end(current) {
+            return ExpressionCollectResult {
+                state: current,
+                tokens: collected,
+                success: false
+            };
+        }
+        let token = expression_tokens_peek(current);
+        let mut _let402: boolean = false;
+        if angle == 0 {
+            if paren == 0 {
+                if brace == 0 {
+                    if bracket == 0 { _let402 = true; }
+                }
+            }
+        }
+        let at_top = _let402;
+        if at_top {
+            if token.kind.variant == "Symbol" {
+                if string_array_contains(terminators, token.lexeme) { break; }
+            }
+        }
+        if token.kind.variant == "Symbol" {
+            let sym = token.lexeme;
+            if strings_equal(sym, "<") { angle += 1; } else if strings_equal(sym, ">") {
+                if angle > 0 { angle -= 1; }
+            } else if strings_equal(sym, "(") { paren += 1; } else if strings_equal(sym, ")") {
+                if paren > 0 { paren -= 1; }
+            } else if strings_equal(sym, "{") { brace += 1; } else if strings_equal(sym, "}") {
+                if brace > 0 { brace -= 1; }
+            } else if strings_equal(sym, "[") { bracket += 1; } else if strings_equal(sym, "]") {
+                if bracket > 0 { bracket -= 1; }
+            }
+        }
+        collected = append_token(collected, token);
+        current = expression_tokens_advance(current);
+    }
+
+    return ExpressionCollectResult {
+        state: current,
+        tokens: collected,
+        success: true
+    };
+}
+
+fn collect_expression_block(state: ExpressionTokens) -> ExpressionBlockParseResult {
+    let mut current = state;
+    if expression_tokens_is_at_end(current) {
+        return ExpressionBlockParseResult {
+            state: current,
+            tokens: [],
+            success: false
+        };
+    }
+    let first = expression_tokens_peek(current);
+    if !symbol_matches(first, "{") {
+        return ExpressionBlockParseResult {
+            state: current,
+            tokens: [],
+            success: false
+        };
+    }
+
+    let mut tokens: Token[] = [];
+    let mut depth: int = 0;
+
+    loop {
+        if expression_tokens_is_at_end(current) {
+            return ExpressionBlockParseResult {
+                state: current,
+                tokens: tokens,
+                success: false
+            };
+        }
+        let token = expression_tokens_peek(current);
+        tokens = append_token(tokens, token);
+        if token.kind.variant == "Symbol" {
+            let sym = token.lexeme;
+            if strings_equal(sym, "{") { depth += 1; } else if strings_equal(sym, "}") {
+                depth -= 1;
+                if depth == 0 {
+                    current = expression_tokens_advance(current);
+                    break;
+                }
+            }
+        }
+        current = expression_tokens_advance(current);
+    }
+
+    return ExpressionBlockParseResult {
+        state: current,
+        tokens: tokens,
+        success: true
+    };
+}
+
+// ============================================================================
+// Main Expression Entry Point
+// ============================================================================
+fn expression_from_tokens(tokens: Token[]) -> Expression {
+    let filtered = filter_trivia(tokens);
+    if filtered.length == 0 {
+        return Expression.Raw {
+            text: "",
+            span: source_span_from_tokens(tokens)
+        };
+    }
+
+    if filtered.length == 1 {
+        let single = expression_from_single_token(filtered[0]);
+        if single != null { return single; }
+    }
+
+    let state = ExpressionTokens { tokens: filtered, index: 0 };
+    let result = parse_expression_bp(state, 0);
+    if !result.success {
+        return Expression.Raw {
+            text: trim_text(tokens_to_text(tokens)),
+            span: source_span_from_tokens(tokens)
+        };
+    }
+
+    if result.state.index != result.state.tokens.length {
+        return Expression.Raw {
+            text: trim_text(tokens_to_text(tokens)),
+            span: source_span_from_tokens(tokens)
+        };
+    }
+
+    return result.expression;
+}
+
+fn expression_from_single_token(token: Token) -> Expression? {
+    if token.kind.variant == "NumberLiteral" {
+        return Expression.NumberLiteral {
+            value: normalize_number_literal_value(token.lexeme)
+        };
+    }
+    if token.kind.variant == "BooleanLiteral" {
+        return Expression.BooleanLiteral { value: token.lexeme };
+    }
+    if token.kind.variant == "StringLiteral" {
+        return Expression.StringLiteral {
+            value: string_literal_value(token),
+            lexeme: token.lexeme
+        };
+    }
+    if token.kind.variant == "Identifier" {
+        let value = identifier_text(token);
+        if strings_equal(value, "true") {
+            return Expression.BooleanLiteral { value: "true" };
+        }
+        if strings_equal(value, "false") {
+            return Expression.BooleanLiteral { value: "false" };
+        }
+        if strings_equal(value, "null") { return Expression.NullLiteral(); }
+        return Expression.Identifier {
+            name: value,
+            span: source_span_from_tokens([token])
+        };
+    }
+    return null;
+}
+
+// ============================================================================
+// Pratt Parser - Binary Precedence Climbing
+// ============================================================================
+fn parse_expression_bp(state: ExpressionTokens, min_precedence: int) -> ExpressionParseResult {
+    let prefix_result = parse_prefix_expression(state);
+    if !prefix_result.success { return prefix_result; }
+
+    let mut current_state = prefix_result.state;
+    let mut left_expression = prefix_result.expression;
+
+    loop {
+        if expression_tokens_is_at_end(current_state) { break; }
+        let token = expression_tokens_peek(current_state);
+        if token.kind.variant != "Symbol" { break; }
+
+        let op = token.lexeme;
+        let precedence = binary_precedence(op);
+        if precedence == -1 { break; }
+        if precedence < min_precedence { break; }
+
+        current_state = expression_tokens_advance(current_state);
+        let rhs_result = parse_expression_bp(current_state, precedence + 1);
+        if !rhs_result.success { return expression_parse_failure(state); }
+        current_state = rhs_result.state;
+        if op == ".." {
+            left_expression = Expression.Range {
+                start: left_expression,
+                end: rhs_result.expression
+            };
+        } else {
+            left_expression = Expression.Binary {
+                operator: op,
+                left: left_expression,
+                right: rhs_result.expression,
+                span: source_span_from_tokens([token])
+            };
+        }
+    }
+
+    // Ternary conditional `cond ? then : else` (#1690). Lowest precedence,
+    // right-associative. Recognized ONLY at the base precedence
+    // (`min_precedence == 0`) so it binds looser than every binary operator:
+    // `a + b ? c : d` groups as `(a + b) ? c : d` because the climbed
+    // `a + b` is `left_expression` here, and a binary right-hand side
+    // (parsed at `precedence + 1` ≥ 1) never enters this arm. The then- and
+    // else-branches recurse at base precedence, so `a ? b : c ? d : e`
+    // right-associates as `a ? b : (c ? d : e)` and the then-branch may
+    // itself be a ternary (`a ? x ? y : z : w`). The `?` was already
+    // confirmed a ternary (left unconsumed) by `parse_postfix_chain`, but
+    // re-checking `is_ternary_marker` keeps this layer self-contained.
+    if min_precedence == 0 {
+        if !expression_tokens_is_at_end(current_state) {
+            let q_token = expression_tokens_peek(current_state);
+            let mut q_is_question: boolean = false;
+            if q_token.kind.variant == "Symbol" {
+                if strings_equal(q_token.lexeme, "?") { q_is_question = true; }
+            }
+            if q_is_question {
+                let after_q = expression_tokens_advance(current_state);
+                if is_ternary_marker(after_q) {
+                    let then_result = parse_expression_bp(after_q, 0);
+                    if !then_result.success {
+                        return expression_parse_failure(state);
+                    }
+                    let after_then = then_result.state;
+                    if expression_tokens_is_at_end(after_then) {
+                        return expression_parse_failure(state);
+                    }
+                    let colon = expression_tokens_peek(after_then);
+                    if !symbol_matches(colon, ":") {
+                        return expression_parse_failure(state);
+                    }
+                    let after_colon = expression_tokens_advance(after_then);
+                    let else_result = parse_expression_bp(after_colon, 0);
+                    if !else_result.success {
+                        return expression_parse_failure(state);
+                    }
+                    return ExpressionParseResult {
+                        state: else_result.state,
+                        expression: Expression.Conditional {
+                            condition: left_expression,
+                            then_value: then_result.expression,
+                            else_value: else_result.expression,
+                            span: source_span_from_tokens([q_token])
+                        },
+                        success: true
+                    };
+                }
+            }
+        }
+    }
+
+    // Assignment-as-expression `target <op> value` (#1627 Part D). Binds
+    // looser than ternary, right-associative; recognized only at base
+    // precedence (`min_precedence == 0`) so it wraps the fully-climbed (and
+    // possibly ternary-wrapped) `left_expression` as the target. `=` and the
+    // compound operators carry precedence -1 (never climbed), so this is
+    // purely additive — every `a = b` / `x += 1` that previously degraded to
+    // an effect-blind `Raw` now structures into `Assignment`, and the value
+    // recurses at base precedence for right-associativity (`a = b = c`).
+    // `==`/`!=`/`<=`/`>=` lex as distinct two-char tokens, so
+    // `is_assignment_operator` cannot misfire on a comparison.
+    if min_precedence == 0 {
+        if !expression_tokens_is_at_end(current_state) {
+            let assign_token = expression_tokens_peek(current_state);
+            if assign_token.kind.variant == "Symbol" {
+                if is_assignment_operator(assign_token.lexeme) {
+                    let after_op = expression_tokens_advance(current_state);
+                    let value_result = parse_expression_bp(after_op, 0);
+                    if !value_result.success {
+                        return expression_parse_failure(state);
+                    }
+                    return ExpressionParseResult {
+                        state: value_result.state,
+                        expression: Expression.Assignment {
+                            target: left_expression,
+                            operator: assign_token.lexeme,
+                            rhs: value_result.expression,
+                            span: source_span_from_tokens([assign_token])
+                        },
+                        success: true
+                    };
+                }
+            }
+        }
+    }
+
+    return ExpressionParseResult {
+        state: current_state,
+        expression: left_expression,
+        success: true
+    };
+}
+
+// Recognize an assignment operator (#1627 Part D). Restricted to the set the
+// lowering `parse_assignment_expression` string-scan supports (`= += -= *= /=`);
+// `%=` is intentionally excluded so it stays `Raw` (the lowering compound
+// parser cannot handle it anyway).
+fn is_assignment_operator(op: string) -> boolean {
+    if strings_equal(op, "=") { return true; }
+    if strings_equal(op, "+=") { return true; }
+    if strings_equal(op, "-=") { return true; }
+    if strings_equal(op, "*=") { return true; }
+    if strings_equal(op, "/=") { return true; }
+    return false;
+}
+
+// ============================================================================
+// Ternary Disambiguation (#1690)
+// ============================================================================
+// Decide whether a `?` at the current position opens a ternary conditional
+// rather than the postfix try operator. `state` must be positioned at the
+// token immediately AFTER the `?`. A ternary requires BOTH:
+//   (a) the next token can start an expression (the then-branch), and
+//   (b) a top-level `:` appears ahead before a terminator.
+// (a) is essential: a try operator directly before an enclosing ternary's
+// colon (`outer ? inner()? : z`) has `:` immediately after the inner `?`,
+// which cannot start an expression — so the inner `?` stays a try operator.
+// (b) preserves the exact legacy behavior for every non-ternary `?`: with no
+// top-level `:` ahead, the `?` is consumed as a TryOperator as before.
+fn is_ternary_marker(state: ExpressionTokens) -> boolean {
+    if expression_tokens_is_at_end(state) { return false; }
+    if !token_can_start_expression(expression_tokens_peek(state)) {
+        return false;
+    }
+    return ternary_colon_ahead(state);
+}
+
+fn token_can_start_expression(token: Token) -> boolean {
+    if token.kind.variant == "Identifier" { return true; }
+    if token.kind.variant == "NumberLiteral" { return true; }
+    if token.kind.variant == "StringLiteral" { return true; }
+    if token.kind.variant == "BooleanLiteral" { return true; }
+    if token.kind.variant == "Symbol" {
+        let sym = token.lexeme;
+        if strings_equal(sym, "(") { return true; }
+        if strings_equal(sym, "[") { return true; }
+        if strings_equal(sym, "{") { return true; }
+        if strings_equal(sym, "-") { return true; }
+        if strings_equal(sym, "!") { return true; }
+    }
+    return false;
+}
+
+// Scan forward (from the token after `?`) for a `:` at the same nesting
+// level, tracking only `()`/`{}`/`[]` depth. Angle brackets are deliberately
+// NOT tracked: `<`/`>` are comparison operators in expression position
+// (`cond ? a < b : c`), and treating them as nesting would hide the ternary
+// colon. A top-level `,`/`;`, or a closing delimiter that drops below the
+// starting depth, ends the candidate region (no ternary). Object-literal and
+// nested-call colons sit at depth > 0 and are correctly skipped
+// (`cond ? {k: 1} : z`).
+fn ternary_colon_ahead(state: ExpressionTokens) -> boolean {
+    let mut current = state;
+    let mut paren: int = 0;
+    let mut brace: int = 0;
+    let mut bracket: int = 0;
+    loop {
+        if expression_tokens_is_at_end(current) { return false; }
+        let token = expression_tokens_peek(current);
+        if token.kind.variant == "Symbol" {
+            let sym = token.lexeme;
+            let mut at_top: boolean = false;
+            if paren == 0 {
+                if brace == 0 {
+                    if bracket == 0 { at_top = true; }
+                }
+            }
+            if at_top {
+                if strings_equal(sym, ":") { return true; }
+                if strings_equal(sym, ",") { return false; }
+                if strings_equal(sym, ";") { return false; }
+            }
+            if strings_equal(sym, "(") { paren += 1; } else if strings_equal(sym, ")") {
+                if paren == 0 { return false; }
+                paren -= 1;
+            } else if strings_equal(sym, "{") { brace += 1; } else if strings_equal(sym, "}") {
+                if brace == 0 { return false; }
+                brace -= 1;
+            } else if strings_equal(sym, "[") { bracket += 1; } else if strings_equal(sym, "]") {
+                if bracket == 0 { return false; }
+                bracket -= 1;
+            }
+        }
+        current = expression_tokens_advance(current);
+    }
+}
+
+fn normalize_expression(tokens: Token[], expr: Expression) -> Expression {
+    if expr.variant == "Raw" {
+        let filtered = filter_trivia(tokens);
+        if filtered.length == 1 {
+            let token = filtered[0];
+            if token.kind.variant == "StringLiteral" {
+                return Expression.StringLiteral {
+                    value: string_literal_value(token),
+                    lexeme: token.lexeme
+                };
+            }
+            if token.kind.variant == "BooleanLiteral" {
+                return Expression.BooleanLiteral { value: token.lexeme };
+            }
+            if token.kind.variant == "NumberLiteral" {
+                return Expression.NumberLiteral {
+                    value: normalize_number_literal_value(token.lexeme)
+                };
+            }
+        }
+        let raw_text = trim_text(expr.text);
+        if raw_text.length >= 2 {
+            if char_at(raw_text, 0) == "\"" {
+                if char_at(raw_text, raw_text.length - 1) == "\"" {
+                    let literal = strip_surrounding_quotes_expr(raw_text);
+                    return Expression.StringLiteral {
+                        value: literal,
+                        lexeme: raw_text
+                    };
+                }
+            }
+        }
+        if raw_text == "true" {
+            return Expression.BooleanLiteral { value: "true" };
+        }
+        if raw_text == "false" {
+            return Expression.BooleanLiteral { value: "false" };
+        }
+        if looks_like_number_expr(raw_text) {
+            return Expression.NumberLiteral {
+                value: normalize_number_literal_value(raw_text)
+            };
+        }
+    }
+    return expr;
+}
