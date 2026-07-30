@@ -32,7 +32,7 @@ import { ed25519_verify_utf8 } from "sfn/crypto";
 
 import { _sha256_of_file_cmd, _shell_read_cmd, _toml_trim_cmd } from "../../build/fs";
 import { _env_flag, _get_home_cmd } from "../../build_flags";
-import { ToolchainDecision, toolchain_decide, toolchain_print_mismatch } from "../../capsule_resolver";
+import { ToolchainDecision, toolchain_decide, toolchain_print_mismatch } from "../../capsule_resolver/toolchain";
 import { number_to_string } from "../../num_format";
 import { release_signing_public_key_hex } from "../../release_trust";
 import {
