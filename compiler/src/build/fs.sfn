@@ -143,6 +143,83 @@ fn _atomic_rename_into_place(tmp_path: string, dst_path: string) -> boolean ![io
     return true;
 }
 
+// A null or empty line array publishes a zero-length artifact, matching
+// the pre-SFN-578 `write_llvm_lines_chunked` contract. `fs.writeLines`
+// returns early on a null handle without touching the file, so the empty
+// case routes through `fs.writeFile` instead.
+fn _write_lines_or_empty(target: string, lines: string[]) -> void ![io] {
+    if lines == null {
+        fs.writeFile(target, "");
+        return;
+    }
+    if lines.length == 0 {
+        fs.writeFile(target, "");
+        return;
+    }
+    fs.writeLines(target, lines);
+}
+
+// Publish `lines` as `path` through a sibling temp + atomic rename, so no
+// reader observes the destination mid-write. `fs.writeLines` opens its
+// target `"wb"` and that truncation IS the tear, so writing the
+// destination directly makes a partially-emitted `.ll`/`.sfn-asm`
+// observable even when the write later fails (SFN-542, SFN-578).
+//
+// Returns the real publish status, which both IR emit callers thread to
+// their own `boolean` return in place of the `fs.exists` check they used
+// to consume. `fs.writeLines` is `-> void` (a frozen runtime-helper
+// descriptor signature at `compiler/src/llvm/runtime_helpers.sfn`), so the
+// staged write's outcome is read as `fs.exists(tmp)` — which is only a
+// sound signal because the mint's pre-created temp is dropped first. See
+// the `fs.deleteFile(tmp)` below.
+//
+// On failure the destination is removed rather than left holding a prior
+// build's output — `fs.exists(path)` is the completeness check downstream
+// tooling that only stats the path applies, and a stale-but-complete
+// artifact would pass it. That is build-artifact policy: do not reuse this
+// helper for a destination whose prior content must survive a failed
+// write, which is why the cache publishes via `_atomic_rename_into_place`
+// directly.
+//
+// With no temp mintable (`host_is_windows()`) the write degrades to the
+// direct in-place form — crash atomicity is lost, the artifact is still
+// produced, and the failure is still reported.
+fn _publish_lines_atomic(path: string, lines: string[]) -> boolean ![io] {
+    let tmp = _mktemp_sibling_cmd(path);
+    if tmp.length == 0 {
+        // The degrade leg writes the destination in place, so `fs.exists`
+        // only means "this write produced a file" once any prior artifact
+        // is gone — otherwise a failed write reports the previous build's
+        // output as success. This is the whole native-Windows leg, where
+        // the mint always returns "" (SFN-578).
+        if fs.exists(path) { fs.deleteFile(path); }
+        _write_lines_or_empty(path, lines);
+        return fs.exists(path);
+    }
+    // `_mktemp_sibling_cmd` pre-creates the temp `O_EXCL`, so its mere
+    // presence proves nothing about the staged write — `sfn_fs_write_lines`
+    // has one failure return (`fopen` itself failing) that does not unlink,
+    // and a surviving zero-byte temp would then be renamed into place and
+    // reported as a successful publish. Dropping the temp first restores
+    // the intended equivalence: `fs.exists(tmp)` afterwards means the write
+    // opened the file AND did not remove it for a short write or failing
+    // `fclose` (SFN-542). The mint's randomised name stays effectively
+    // reserved; the codebase already treats `fs.exists` on a minted temp as
+    // no evidence of content (`emit_helpers.sfn` pairs it with a non-empty
+    // probe for the same reason).
+    fs.deleteFile(tmp);
+    _write_lines_or_empty(tmp, lines);
+    if !fs.exists(tmp) {
+        if fs.exists(path) { fs.deleteFile(path); }
+        return false;
+    }
+    if !_atomic_rename_into_place(tmp, path) {
+        if fs.exists(path) { fs.deleteFile(path); }
+        return false;
+    }
+    return true;
+}
+
 // Copy `src` to `dst` byte-for-byte through libc stdio, replacing any
 // existing `dst`. Returns false on any open, short-write, or close
 // failure, leaving `dst` in whatever state the partial write reached
@@ -479,6 +556,7 @@ export {
     _mktemp_sibling_cmd,
     _mktemp_from_template_cmd,
     _atomic_rename_into_place,
+    _publish_lines_atomic,
     _copy_file,
     _ensure_dir_cmd,
     _ensure_dir_recursive_cmd,

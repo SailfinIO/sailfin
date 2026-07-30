@@ -19,6 +19,13 @@
 | `compiler/src/emit_native.sfn:204-210` `emit_native_text_to_file_with_module_name` | `.sfn-asm` |
 | `compiler/src/llvm/lowering/lowering_io.sfn:136-149` `write_llvm_lines_chunked` | `.ll` |
 
+`write_llvm_lines_chunked` reaches the helper from two callers:
+`lowering_core.sfn:781` (live) and `entrypoints.sfn:339` `write_llvm_ir`, which is
+imported at `main.sfn:29` but never called. Only `lowering_core.sfn:780` and
+`emit_native.sfn:207` had a destination pre-delete, so the dead `write_llvm_ir`
+path inherits one it never had; harmless while it stays dead, noted so a future
+revival does not acquire the policy silently.
+
 `runtime/sfn/adapters/filesystem.sfn::sfn_fs_write_lines` keeps its in-place
 `fopen("wb")` and keeps all three SFN-542 `unlink` sites. Its edits are
 **comments only**.
@@ -164,24 +171,61 @@ All three `unlink` sites in `sfn_fs_write_lines` stay
 (`filesystem.sfn:~1000`, `~1018`, `~1071`), including both corrupted-handle early
 returns. Their comments are rewritten to state the new role.
 
-The reason is structural, not conservative. `_mktemp_sibling_cmd` **pre-creates**
-the temp, so `fs.exists(tmp)` is true from the mint onward and is *purely* the
-runtime's failure signal — never a "was it written" check. Because
-`sfn_fs_write_lines` is `-> void` and the descriptor signature is frozen,
-removing its target is the **only** channel this body has to report a failed
-write. Retire the `unlink` and `_publish_lines_atomic` loses its ability to
-distinguish a complete staged temp from a truncated one, and would publish
-truncated IR — strictly worse than today.
+The reason is structural, not conservative. Because `sfn_fs_write_lines` is
+`-> void` and the descriptor signature is frozen, removing its target is the
+**only** channel this body has to report a failed write. Retire the `unlink` and
+`_publish_lines_atomic` loses its ability to distinguish a complete staged temp
+from a truncated one, and would publish truncated IR — strictly worse than today.
 
 What the narrowing does buy is the elimination of the failure mode the current
 comment flags as unfixable ("when `unlink` itself fails … a `void` signature
-cannot report that"). On POSIX the `unlink` target is now a `mkstemp`-minted file
-we own, in a directory the mint just proved writable, so the removal cannot
-plausibly fail — ownership satisfies the sticky-bit case and the writable-parent
-case is a precondition of the mint. The stated removal condition in that comment
-("the structurally complete answer is tmp-file + atomic rename, as
-`compiler/src/build/fs.sfn:138-166` already does") is satisfied by this change
-and that sentence is deleted.
+cannot report that"). For the two IR emit callers the `unlink` target is a
+`mkstemp`-minted file we own, in a directory the mint just proved writable, so
+the removal cannot plausibly fail — ownership satisfies the sticky-bit case and
+the writable-parent case is a precondition of the mint. That reasoning is
+**caller-scoped, not a property of the parameter**: `fs.writeLines` is public
+API, and for any other caller — or for either emit caller on the in-place
+degrade leg — the pre-SFN-542 caveat still stands. The rewritten comment says so
+rather than generalising.
+
+The old comment's removal condition ("the structurally complete answer is
+tmp-file + atomic rename, as `compiler/src/build/fs.sfn:138-166` already does")
+is satisfied and deleted. Since the workaround itself is *retained*, it is
+replaced with a new condition rather than left with none
+(`.claude/rules/code-style.md`): remove the `unlink` once the written byte count
+is observable to the caller — a reportable `write_lines` variant, or an
+`fs.size`/`fs.stat` primitive to compare against the expected length.
+
+### 6a. `fs.exists(tmp)` is only sound because the temp is dropped first
+
+`_mktemp_sibling_cmd` **pre-creates** the temp `O_EXCL`, so its presence proves
+nothing about the staged write. `sfn_fs_write_lines` has exactly one failure
+return that does **not** unlink — `fopen` itself failing
+(`filesystem.sfn:1011-1012`) — so a surviving zero-byte temp would be renamed
+into place and reported as a *successful* publish. On the in-process `.ll` path
+there is no downstream non-empty probe to catch it, so the compiler would hand
+`clang` a zero-byte `program.ll` and exit 0: a fresh instance of exactly the
+SFN-542 failure class, with the exit code lying.
+
+`_publish_lines_atomic` therefore `fs.deleteFile(tmp)` immediately after the
+mint. `fs.exists(tmp)` afterwards means the write opened the file **and** did not
+remove it for a short write or failing `fclose` — the equivalence the design
+depends on. The mint's randomised name stays effectively reserved, and the
+codebase already treats `fs.exists` on a minted temp as no evidence of content
+(`emit_helpers.sfn` pairs it with a non-empty probe for the same reason).
+
+Fixing this in the runtime instead — unlinking on the `fopen`-failure return —
+was rejected: `fopen("wb")` can fail on a file that *exists* (a read-only file in
+a writable directory), and unlinking then destroys data the caller could not even
+open. That is the same public-API hazard that keeps `sfn_fs_write_file` out of
+the `unlink` treatment.
+
+Two residual holes are accepted and unreachable in practice, both requiring a
+corrupted-ABI handle: `arr.len < 0` clamps to 0 and `data_addr == 0 && n == 0`
+both produce a legitimately-empty file with no `unlink`, so they publish a
+zero-length artifact and report success. The `n < 0` clamp is also inconsistent
+with its `n > 10000000` sibling, which *does* unlink; folding them into one
+refuse-and-unlink arm is a separate runtime cleanup.
 
 On a Windows host the mint returns `""`, the helper writes in place, and the
 `unlink` target is the destination again — which is why the mitigation is

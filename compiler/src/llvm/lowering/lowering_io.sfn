@@ -3,6 +3,7 @@
 // String array operations, file I/O helpers, and miscellaneous lowering
 // utilities.  Extracted from lowering_core.sfn to reduce per-file
 // memory footprint during self-hosting compilation.
+import { _publish_lines_atomic } from "../../build/fs";
 import { substring } from "../../string_utils";
 import { LifetimeRegionMetadata, StringConstant } from "../types";
 import {
@@ -133,19 +134,10 @@ fn insert_string_at(values: string[], insert_index: int, value: string) -> strin
 }
 
 // ── File I/O helpers ─────────────────────────────────────────────────
+// Publishes `lines` as `path` atomically via a sibling temp + rename
+// (SFN-578), so no reader observes a partially-written `.ll`.
 fn write_llvm_lines_chunked(path: string, lines: string[]) -> boolean ![io] {
-    let mut _if257: boolean = false;
-    if lines == null { _if257 = true; }
-    if lines.length == 0 { _if257 = true; }
-    if _if257 {
-        fs.writeFile(path, "");
-        return fs.exists(path);
-    }
-
-    // Write lines directly to file via the C runtime, avoiding O(N²)
-    // string concatenation from the previous chunk-and-join approach.
-    fs.writeLines(path, lines);
-    return fs.exists(path);
+    return _publish_lines_atomic(path, lines);
 }
 
 fn _write_llvm_lines_chunked_unused(path: string, lines: string[]) -> boolean ![io] {
