@@ -54,6 +54,10 @@ env:
   PERF_MIN_RUNS: "7"
   PERF_THRESHOLD_PCT: "10"
   BUILD_BUDGET_S: "300"
+  # Warn (never fail) once a run uses this share of the budget. Wall time grows
+  # with the tree at roughly constant cost per IR line, so headroom shrinks
+  # nightly and a breach arrives without a per-run regression to blame it on.
+  BUILD_HEADROOM_WARN_PCT: "90"
   DATA_BRANCH: "bench-data"
   # Systemic-flood cap: if more than this many distinct modules regress in a
   # single run — the signature of an environmental shift (seed bump, runner /
@@ -396,3 +400,53 @@ jobs:
             bench-out/*.csv
             regressions.tsv
           if-no-files-found: warn
+
+      # Last step, and gated exactly like `File regression issues` above, so a
+      # breach leaves its issue and its CSVs behind before the job goes red and
+      # a `dry_run` trial stays green. Rationale and the incident this closes:
+      # docs/rca/2026-07-30-whole-build-wall-time-budget-breach.md.
+      - name: Enforce the whole-build wall-time budget
+        if: ${{ github.event_name == 'schedule' || inputs.dry_run != true }}
+        shell: bash
+        env:
+          MEASURED_S: ${{ steps.build.outputs.wall_s }}
+          SHA: ${{ github.sha }}
+        run: |
+          set -euo pipefail
+          # Enforce the number the compare step judged, not this run's stopwatch.
+          # `append` is idempotent per commit (scripts/perf_history.sh), so a
+          # re-run against an already-recorded SHA re-measures but does not
+          # re-record; reading build.csv keeps the gate and the filed issue from
+          # ever contradicting each other in the same job summary.
+          wall_s="$(awk -F, -v s="$SHA" 'NR > 1 && $1 == s { print $3; exit }' \
+            bench-data/build.csv 2>/dev/null || true)"
+          if [ -n "$wall_s" ] && [ "$wall_s" != "${MEASURED_S:-}" ]; then
+            echo "[perf-history] this run measured ${MEASURED_S}s; enforcing the recorded ${wall_s}s for ${SHA:0:12}"
+          fi
+          [ -n "$wall_s" ] || wall_s="${MEASURED_S:-}"
+          if [ -z "$wall_s" ]; then
+            echo "::error::whole-build wall time was not recorded; cannot check the budget"
+            exit 1
+          fi
+          # A non-positive budget disables the check, matching the `BUD > 0`
+          # guard in scripts/perf_history.sh.
+          if [ "${BUILD_BUDGET_S:-0}" -le 0 ]; then
+            echo "[perf-history] budget disabled (BUILD_BUDGET_S=${BUILD_BUDGET_S:-unset}); skipping"
+            exit 0
+          fi
+          warn_at=$(( BUILD_BUDGET_S * BUILD_HEADROOM_WARN_PCT / 100 ))
+          pct=$(( wall_s * 100 / BUILD_BUDGET_S ))
+          echo "[perf-history] wall ${wall_s}s / budget ${BUILD_BUDGET_S}s (${pct}% of budget; warn at ${warn_at}s)"
+          if [ "$wall_s" -gt "$BUILD_BUDGET_S" ]; then
+            over=$(( wall_s - BUILD_BUDGET_S ))
+            echo "::error::whole-build wall time ${wall_s}s exceeds the SFEP-0006 budget ${BUILD_BUDGET_S}s by ${over}s (${pct}% of budget)"
+            echo "**Budget breach:** wall \`${wall_s} s\` vs budget \`${BUILD_BUDGET_S} s\` (+${over} s)." >> "$GITHUB_STEP_SUMMARY"
+            exit 1
+          fi
+          if [ "$wall_s" -ge "$warn_at" ]; then
+            # Headroom, not throughput, is what a fixed budget runs out of: the
+            # tree grows every night at roughly constant cost per IR line, so
+            # the last warning before a breach is the useful one.
+            echo "::warning::whole-build wall time ${wall_s}s is within ${BUILD_HEADROOM_WARN_PCT}% of the ${BUILD_BUDGET_S}s budget (${pct}% of budget)"
+            echo "**Budget headroom low:** wall \`${wall_s} s\` is ${pct}% of the \`${BUILD_BUDGET_S} s\` budget." >> "$GITHUB_STEP_SUMMARY"
+          fi

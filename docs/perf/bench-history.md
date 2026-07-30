@@ -64,6 +64,44 @@ sum is **not** the parallel clean-build wall-time the SFEP-0006 `<5 min`
 that wall-time in `build.csv`; the compare step checks *that* number against the
 budget (`BUILD_BUDGET_S`), never the per-module sum.
 
+They also do not measure the same **binary**. `sfn bench --compiler` times the
+compiler that was just self-hosted (`build/bin/sfn`) running emit only, with no
+`clang -c` and no link. `build_wall_s` times the **pinned seed** compiling the
+whole tree, link included. So an improvement to *generated-code quality* reaches
+the bench series a full seed generation before it reaches the wall series: the
+compiler the seed produces gets faster immediately, while the seed's own body
+stays as the previous generation emitted it. Read a bench/wall divergence across
+a seed bump as that lag before reading it as a regression — 2026-07-26 showed
+bench dropping 57% on the same night wall time hit its series maximum
+(`docs/rca/2026-07-30-whole-build-wall-time-budget-breach.md`).
+
+Two consequences worth keeping in mind when reading `build.csv`:
+
+- **The number is only valid cold.** The same tree rebuilt warm measures ~27%
+  lower. CI is cold by construction (fresh checkout, fresh `build/`); a local
+  comparison is not, unless you clear `build/` first.
+- **Wall time grows with the tree at roughly constant cost per IR line.** Divide
+  `build_wall_s` by that night's `Σ ir_lines` from `compile.csv` before calling
+  anything a regression — a rising raw wall time at flat cost-per-line is the
+  tree growing into a fixed budget, which needs headroom, not a bisect.
+
+## Enforcement
+
+A breach **fails the nightly**. The final `Enforce the whole-build wall-time
+budget` step exits non-zero when `build_wall_s > BUILD_BUDGET_S`, and emits a
+`::warning` once a run reaches `BUILD_HEADROOM_WARN_PCT` (`90`) of the budget. It
+runs after issue-filing and artifact upload, so a breach still leaves its full
+record behind, and it is skipped on a `dry_run` dispatch so that trial stays
+green. Before this existed a breach only filed an issue and the job stayed green,
+which is how a two-week run of over-budget nightlies went unremarked in 2026-07
+(SFN-421).
+
+It enforces the `build_wall_s` **recorded in `build.csv` for the commit**, not
+the stopwatch of the run it is in. Because append is idempotent per commit, a
+re-run against an already-recorded SHA re-measures without re-recording; reading
+the row is what keeps the gate and the auto-filed issue from disagreeing inside
+one job summary. When the two differ the step logs both.
+
 ## What happens on a regression
 
 The job auto-files **one `type:perf` issue per offending module**, titled

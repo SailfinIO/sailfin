@@ -53,6 +53,26 @@ fn _run_compare(dir: string) -> int ![io] {
         + "/out.tsv"], _child_env());
 }
 
+fn _run_compare_budget(dir: string, budget: string) -> int ![io] {
+    return process.run_capture(["bash", "scripts/perf_history.sh", "compare", "--data-dir", dir, "--sha", "cur", "--min-runs", "7", "--threshold-pct", "10", "--budget", budget, "--out", dir
+        + "/out.tsv"], _child_env());
+}
+
+// A `build.csv` whose only row is the current run, so the whole-build budget
+// row is the sole thing the compare step can emit.
+fn _write_budget_fixture(dir: string, wall: string, budget: string) -> void ![io] {
+    fs.createDirectory(dir, true);
+    fs.writeFile(dir + "/compile.csv", _header() + _prior_rows("0.8.0")
+        + "cur,2026-07-12,foo,1.0,10000,500,OK,0.8.0\n"
+        + "cur,2026-07-12,bar,1.0,10000,500,OK,0.8.0\n");
+    fs.writeFile(dir + "/build.csv", "run_sha,run_date,build_wall_s,budget_s\n"
+        + "cur,2026-07-12,"
+        + wall
+        + ","
+        + budget
+        + "\n");
+}
+
 test "perf-history: a seed bump resets baselines and files no regressions" ![io] {
     let dir = "build/perf-history-compare-test/seedbump";
     fs.createDirectory(dir, true);
@@ -90,4 +110,32 @@ test "perf-history: a same-seed regression is still caught" ![io] {
     let _err = process.capture_take_stderr();
     assert exit == 0;
     assert contains(out, "1 regression line(s) written");
+}
+
+// The budget comparison is strict `>`, and `perf-history.yml`'s enforcement gate
+// applies the same boundary to the same recorded number (SFN-421). Pinning it
+// here keeps the two from drifting apart: a gate that failed where compare filed
+// nothing (or the reverse) would contradict itself inside one job summary.
+test "perf-history: wall time one second over the budget files a budget row" ![io] {
+    let dir = "build/perf-history-compare-test/budget-over";
+    _write_budget_fixture(dir, "301", "300");
+    let exit = _run_compare_budget(dir, "300");
+    let out = process.capture_take_stdout();
+    let _err = process.capture_take_stderr();
+    assert exit == 0;
+    assert contains(out, "1 regression line(s) written");
+    // Row kind must be `budget`, not `rolling-median`: the budget row has no
+    // median smoothing and no seed scoping, and reporting keys off column 1.
+    let rows = fs.readFile(dir + "/out.tsv");
+    assert contains(rows, "budget\t<whole-build>\tbuild_wall_s\t301.0\t300.0");
+}
+
+test "perf-history: wall time exactly at the budget files nothing" ![io] {
+    let dir = "build/perf-history-compare-test/budget-at";
+    _write_budget_fixture(dir, "300", "300");
+    let exit = _run_compare_budget(dir, "300");
+    let out = process.capture_take_stdout();
+    let _err = process.capture_take_stderr();
+    assert exit == 0;
+    assert contains(out, "no regressions detected");
 }
