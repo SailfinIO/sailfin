@@ -1,0 +1,309 @@
+import { _ends_with_cmd, _shell_read_cmd, _strip_trailing_slashes_cmd } from "../../../build/fs";
+import { runtime_stamp_identity } from "../../../build/runtime_objs";
+import { runtime_link_inputs_identity } from "../../../build_cache";
+import { _get_env_cmd } from "../../../build_flags";
+import { runtime_capsule_from_root } from "../../../runtime_capsule_resolver";
+import { _has_prefix_cmd } from "../../../string_cmd_utils";
+
+// Resolve the per-test scratch root used for the test runner's
+// ephemeral artifacts (`test.ll`, the linked test executable,
+// `test-o0/`, dump-sources output, and the resolver's per-module
+// `.ll` cache via `_cr_scratch_root`). Defaults to
+// `"build/sailfin"`; honours `SAILFIN_TEST_SCRATCH` when set so
+// that callers wanting per-invocation isolation can keep concurrent
+// `sfn test` runs from racing on the same `test.ll` /
+// `capsules/<slug>.ll` paths. The multi-file runner path mints such
+// a root itself via `mktemp -d` (issue #850, replacing the retired
+// `scripts/run_native_test.sh`); seedcheck/stage3 pin it explicitly
+// from the Makefile. The capsule
+// resolver reads the same env var (`_cr_scratch_root`), so both
+// halves of a `sfn test` run agree on the scratch root without
+// any in-process plumbing.
+//
+// Persistent control flags (`.trace_test_runner`,
+// `.dump_test_sources`) stay rooted at `build/sailfin/` so an
+// `unset SAILFIN_TEST_SCRATCH` run still observes user-toggled
+// debug switches. The run-marker that used to live at
+// `build/sailfin/.test_runner_active` is now process-local state
+// in `compiler/src/test_runner_state.sfn`; it never had a
+// cross-process consumer, so the filesystem round-trip was pure
+// overhead. See issue #311 for the migration rationale.
+fn _test_scratch_root() -> string ![io] {
+    let env = _get_env_cmd("SAILFIN_TEST_SCRATCH");
+    if env.length > 0 { return env; }
+    return "build/sailfin";
+}
+
+struct TestScratchRoot {
+    root: string;
+    owned: boolean;
+}
+
+fn _resolve_test_scratch_root(scratch_env: string) -> TestScratchRoot ![io] {
+    if scratch_env.length > 0 {
+        return TestScratchRoot { root: scratch_env, owned: false };
+    }
+
+    // Honor TMPDIR (macOS CI points it at /var/folders/..., and
+    // contributors may aim it at tmpfs/quota dirs), falling back to /tmp.
+    // Resolved Sailfin-side via _get_env_cmd rather than shell
+    // `${VAR:-default}` expansion because `${` is the reserved
+    // parser-pending interpolation sigil and is not safe in a string literal.
+    let mut tmp_base = _get_env_cmd("TMPDIR");
+    if tmp_base.length == 0 { tmp_base = "/tmp"; }
+    tmp_base = _strip_trailing_slashes_cmd(tmp_base);
+    let tmp = _shell_read_cmd("mktemp -d \"" + tmp_base + "/sfn-test-XXXXXX\"");
+    if tmp.length > 0 {
+        return TestScratchRoot { root: tmp, owned: true };
+    }
+
+    return TestScratchRoot { root: _test_scratch_root(), owned: false };
+}
+
+// ---- Exported command handlers ----
+// Remove stale LLVM lowering scratchpad files from build/sailfin/ so that
+// inter-phase data from a previous compilation doesn't corrupt the next one.
+// Only deletes known scratch prefixes; leaves control/debug flags untouched.
+fn _clean_lowering_state(dir: string) -> int ![io] {
+    let entries = fs.listDirectory(dir);
+    let mut ci: int = 0;
+    loop {
+        if ci >= entries.length { break; }
+        let entry = entries[ci];
+        ci += 1;
+        if entry.length == 0 { continue; }
+        if entry[0] != "." { continue; }
+        // Only delete known lowering scratch prefixes.
+        let mut is_scratch: boolean = false;
+        // Legacy: .async_inner_return_type IPC channel was removed but stale files
+        // from older build dirs / older seed binaries should still be swept.
+        if _has_prefix_cmd(entry, ".async_inner_") { is_scratch = true; }
+        // Legacy: .block_result_* IPC channel was removed but stale files from
+        // older build dirs / older seed binaries should still be swept.
+        if _has_prefix_cmd(entry, ".block_result_") { is_scratch = true; }
+        // Legacy: .call_result_* IPC channel was removed but stale files from
+        // older build dirs / older seed binaries should still be swept.
+        if _has_prefix_cmd(entry, ".call_result_") { is_scratch = true; }
+        // Legacy: .coerce_result_* file IPC fallback was removed (no writer
+        // was ever shipped); sweep stale files from older build dirs.
+        if _has_prefix_cmd(entry, ".coerce_result_") { is_scratch = true; }
+        // Legacy: .ctx_func_* IPC channel was removed but stale files from
+        // older build dirs / older seed binaries should still be swept.
+        if _has_prefix_cmd(entry, ".ctx_func_") { is_scratch = true; }
+        // Legacy: .dispatch_* IPC channel was removed but stale files from
+        // older build dirs / older seed binaries should still be swept.
+        if _has_prefix_cmd(entry, ".dispatch_") { is_scratch = true; }
+        // Legacy: .expr_stmt_* IPC channel was removed but stale files from
+        // older build dirs / older seed binaries should still be swept.
+        if _has_prefix_cmd(entry, ".expr_stmt_") { is_scratch = true; }
+        // Legacy: .fn_* IPC channel was removed but stale files from
+        // older build dirs / older seed binaries should still be swept.
+        if _has_prefix_cmd(entry, ".fn_") { is_scratch = true; }
+        // Legacy: .instr_* IPC channel was removed but stale files from
+        // older build dirs / older seed binaries should still be swept.
+        if _has_prefix_cmd(entry, ".instr_") { is_scratch = true; }
+        // Legacy: .let_ipc_* IPC channel was removed but stale files from
+        // older build dirs / older seed binaries should still be swept.
+        if _has_prefix_cmd(entry, ".let_ipc_") { is_scratch = true; }
+        // Legacy: .let_result_* IPC channel was removed but stale files from
+        // older build dirs / older seed binaries should still be swept.
+        if _has_prefix_cmd(entry, ".let_result_") { is_scratch = true; }
+        // Legacy: .module_globals_* IPC channel was removed but stale files from
+        // older build dirs / older seed binaries should still be swept.
+        if _has_prefix_cmd(entry, ".module_globals_") { is_scratch = true; }
+        // Legacy: .phase_types_diagnostics / .phase_functions_diagnostics
+        // were cross-phase file IPC channels used to ship accumulated
+        // diagnostics from `build_type_context_with_recovery` /
+        // `lower_all_functions` to the orchestrator in `lowering_core.sfn`.
+        // Both are now in-memory struct returns (TypeContextBuildResult,
+        // FunctionLoweringResult). Prefix kept so stale files from older
+        // seeds / build dirs don't contaminate new compiles.
+        if _has_prefix_cmd(entry, ".phase_") { is_scratch = true; }
+        // Legacy: .self_field_* IPC channel was removed but stale files from
+        // older build dirs / older seed binaries should still be swept.
+        if _has_prefix_cmd(entry, ".self_field_") { is_scratch = true; }
+        if strings_equal(entry, ".condition_locals") { is_scratch = true; }
+        // Legacy: .enum_info IPC channel was removed but stale files from
+        // older build dirs / older seed binaries should still be swept.
+        if strings_equal(entry, ".enum_info") { is_scratch = true; }
+        // Legacy: .struct_info IPC channel was removed but stale files from
+        // older build dirs / older seed binaries should still be swept.
+        if strings_equal(entry, ".struct_info") { is_scratch = true; }
+        if !is_scratch { continue; }
+        let full = dir + "/" + entry;
+        fs.deleteFile(full);
+    }
+    return 0;
+}
+
+// Tear down a runner-owned ephemeral scratch tree, mirroring the
+// script's EXIT trap: preserve on explicit request
+// (`SAILFIN_TEST_KEEP_SCRATCH=1`) or on failure (so post-mortem
+// tooling can inspect the partial `.ll` / `test.ll` / resolver
+// dot-files), else remove it. No-op when the scratch root was
+// caller-pinned via `SAILFIN_TEST_SCRATCH` (seedcheck owns its tree).
+fn _cleanup_test_scratch(owned: boolean, scratch_root: string, success: boolean) -> void ![io] {
+    if !owned { return; }
+    if _get_env_cmd("SAILFIN_TEST_KEEP_SCRATCH") == "1" {
+        print.err("[test] preserving scratch: " + scratch_root
+            + " (SAILFIN_TEST_KEEP_SCRATCH=1)");
+        return;
+    }
+    if !success {
+        print.err("[test] preserving scratch on failure: " + scratch_root);
+        return;
+    }
+    process.run(["rm", "-rf", scratch_root]);
+}
+
+// Recursively collect `.h` header files under `root` (bounded depth),
+// mirroring `_collect_sfn_files_cmd`'s walker. Used by
+// `_test_bin_runtime_identity` to fold the runtime's include-dir headers
+// into the per-test cache key by content — a header edit changes the
+// compiled runtime objects the test binary links against, so it must
+// bust the key even though the `.c`/`.ll` source list is unchanged.
+fn _collect_header_files_cmd(root: string, max_depth: int) -> string[] ![io] {
+    let mut results: string[] = [];
+    if _ends_with_cmd(root, ".h") { return [root]; }
+    let root_norm: string = _strip_trailing_slashes_cmd(root);
+    let mut queue: string[] = [root_norm];
+    let mut depth: int = 0;
+    loop {
+        if depth >= max_depth { break; }
+        if queue.length == 0 { break; }
+        let mut next_queue: string[] = [];
+        let mut qi: int = 0;
+        loop {
+            if qi >= queue.length { break; }
+            let dir = queue[qi];
+            if !fs.exists(dir) {
+                qi += 1;
+                continue;
+            }
+            let entries = fs.listDirectory(dir);
+            let mut ei: int = 0;
+            loop {
+                if ei >= entries.length { break; }
+                let entry = entries[ei];
+                // Defense-in-depth (#1409): never recurse on an empty entry
+                // name. `dir + "/" + ""` is `dir + "/"` — listing it re-lists
+                // the SAME directory, so a `listDirectory` that returns
+                // empty names (e.g. a wrong `struct dirent` offset on a
+                // platform) would re-enqueue this directory every level and
+                // blow the BFS up 4^depth to `max_depth`. A real directory
+                // entry always has a non-empty name.
+                if entry.length == 0 {
+                    ei += 1;
+                    continue;
+                }
+                let full_path = dir + "/" + entry;
+                if _ends_with_cmd(entry, ".h") { results.push(full_path); } else {
+                    let child_entries = fs.listDirectory(full_path);
+                    if child_entries.length > 0 {
+                        next_queue.push(full_path);
+                    }
+                }
+                ei += 1;
+            }
+            qi += 1;
+        }
+        queue = next_queue;
+        depth += 1;
+    }
+    return results;
+}
+
+// #1233: content identity of the runtime link inputs every test binary
+// links against. The runtime capsule set is invocation-stable, so this
+// is resolved once and folded into every per-test cache key via
+// `runtime_link_inputs_identity`. Replacing the former per-commit
+// `compiler_identity` reliance with this content hash is what keeps the
+// per-test binary cache correct across a runtime edit while letting
+// genuinely-unchanged tests hit across commits.
+//
+// Folds, per runtime capsule: the `.c`/`.ll`/`.sfn` sources + prelude
+// entry (by content), the `.h` headers found under each include root (by
+// content — a header edit changes the compiled runtime objects), the
+// include-dir paths (`-I<dir>`, by value — an include-root change), and
+// the declared link libs (by value). `unique_suffix` makes the hash temp
+// path collision-safe across concurrent `sfn test` invocations (pass the
+// per-invocation scratch root).
+fn _test_bin_runtime_identity(runtime_root: string, unique_suffix: string) -> string ![io] {
+    // #1996 / SFEP-0044 §3-A: when this process is a child of a
+    // multi-file runner that stamped the warm objdir, the identity was
+    // already computed once by the parent over the same immutable
+    // runtime tree — return the stamped value instead of re-hashing
+    // every runtime source + header. Nonce validation happens inside
+    // `runtime_stamp_identity`; any failure returns "" and the full
+    // computation below runs (the parent itself, and the single-file
+    // leaf path, always take that branch).
+    let stamp_objdir = _get_env_cmd("SAILFIN_TEST_RUNTIME_OBJDIR");
+    if stamp_objdir.length > 0 {
+        let stamped_identity = runtime_stamp_identity(stamp_objdir);
+        if stamped_identity.length > 0 { return stamped_identity; }
+    }
+    let caps = runtime_capsule_from_root(runtime_root);
+    let mut sources: string[] = [];
+    let mut values: string[] = [];
+    let mut ci: int = 0;
+    loop {
+        if ci >= caps.length { break; }
+        let cap = caps[ci];
+        let mut si: int = 0;
+        loop {
+            if si >= cap.c_sources.length { break; }
+            sources.push(cap.c_sources[si]);
+            si += 1;
+        }
+        let mut li: int = 0;
+        loop {
+            if li >= cap.ll_sources.length { break; }
+            sources.push(cap.ll_sources[li]);
+            li += 1;
+        }
+        let mut fi: int = 0;
+        loop {
+            if fi >= cap.sfn_sources.length { break; }
+            sources.push(cap.sfn_sources[fi]);
+            fi += 1;
+        }
+        if cap.prelude_entry.length > 0 {
+            sources.push(cap.prelude_entry);
+        }
+        // Include roots: fold the path by value (`-I<dir>`) so an
+        // include-root change busts, and hash every `.h` under it by
+        // content so a header edit busts.
+        let mut di: int = 0;
+        loop {
+            if di >= cap.include_dirs.length { break; }
+            let inc = cap.include_dirs[di];
+            values.push("-I" + inc);
+            let headers = _collect_header_files_cmd(inc, 32);
+            let mut hi: int = 0;
+            loop {
+                if hi >= headers.length { break; }
+                sources.push(headers[hi]);
+                hi += 1;
+            }
+            di += 1;
+        }
+        let mut bi: int = 0;
+        loop {
+            if bi >= cap.link_libs.length { break; }
+            values.push(cap.link_libs[bi]);
+            bi += 1;
+        }
+        ci += 1;
+    }
+    return runtime_link_inputs_identity(sources, values, unique_suffix + "_rtid");
+}
+
+export {
+    _test_scratch_root,
+    TestScratchRoot,
+    _resolve_test_scratch_root,
+    _clean_lowering_state,
+    _cleanup_test_scratch,
+    _collect_header_files_cmd,
+    _test_bin_runtime_identity
+};

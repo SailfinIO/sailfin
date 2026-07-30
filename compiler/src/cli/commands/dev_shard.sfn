@@ -38,13 +38,9 @@ import { number_to_string } from "../../num_format";
 import { _sort_strings_cmd } from "../../string_cmd_utils";
 import { strings_equal } from "../../string_utils";
 import { CliContext } from "../context";
-import {
-    _collect_test_files_cmd,
-    _resolve_test_jobs,
-    _shard_keeps_index,
-    command_def as test_command_def,
-    run as test_run
-} from "./test/mod";
+import { _resolve_test_jobs, _shard_keeps_index } from "./test/arg_and_jobs";
+import { _collect_test_files_cmd } from "./test/discovery";
+import { command_def as test_command_def, run as test_run } from "./test/mod";
 
 // A named CI shard: the test roots it discovers and the file-count-balanced
 // stride it keeps. `total == 0` means "no stride — run every file under

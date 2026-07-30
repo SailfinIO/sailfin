@@ -1,0 +1,172 @@
+import { LinkPlan, LlvmTextBackend } from "../../../backend";
+import { assemble_link_inputs } from "../../../build/clang_argv";
+import { _ensure_dir_cmd } from "../../../build/fs";
+import { assemble_runtime_capsule_link_inputs } from "../../../build/runtime_objs";
+import { _get_env_cmd } from "../../../build_flags";
+import { runtime_capsule_from_root } from "../../../runtime_capsule_resolver";
+
+// Resolver-driven test linker. Takes a list of dependency `.ll` paths
+// produced by `prepare_project_capsules_for_test` and adds them to
+// the link line alongside the runtime sources + globals + prelude.
+// With strong helper definitions in scope from the resolver pass,
+// clang resolves the test source's mangled imported call sites
+// directly — no backstop needed.
+//
+// Link order (head → tail):
+//   1. Test source `.ll` (strong)
+//   2. Resolver-produced dependency `.ll` files (strong)
+//   3. Runtime sources + globals + prelude (strong)
+//
+// Historical context: this function used to also link a weakened
+// copy of `build/selfhost/native/obj/native.linked.o` via
+// `llvm-objcopy --weaken` as a catch-all backstop. Empirical
+// investigation (2026-04-28) showed the weak object was masking a
+// trailing-slash bug in `_collect_test_files_cmd`: directory-mode
+// invocations like `sfn test compiler/tests/unit/` produced
+// `compiler/tests/unit//foo_test.sfn` paths, which
+// `_cr_resolve_and_dedupe`'s relative-import walker could not
+// navigate, so the resolver returned `deps=0` and the weakened
+// binary backstopped every "missing" symbol. With path
+// normalization in place (`_collect_test_files_cmd` now calls
+// `_strip_trailing_slashes_cmd`), the resolver produces every
+// symbol tests need, and the backstop became dead code. See
+// `docs/proposals/0006-build-architecture.md` Stage B for the full
+// trail.
+// Outcome of a test-binary link: the clang exit code plus whether the
+// backend actually ran (SFN-212). The two pre-backend preflight bailouts
+// (missing runtime bundle, runtime object-assembly failure) each print
+// their own diagnostic and return `ran_backend: false`, so the caller can
+// gate the SFN-34 backend-failure ICE banner on a genuine backend failure
+// rather than on any nonzero rc — mirroring `LinkResult` on the build/run
+// path (`build/link.sfn`).
+struct TestLinkResult {
+    rc: int;
+    ran_backend: boolean;
+}
+
+fn _clang_link_test_cmd_with_deps(ll_path: string, out_path: string, runtime_root: string, dep_ll_paths: string[], cache_dir: string, binary_dir: string) -> TestLinkResult ![io] {
+    // `-Wno-override-module`: every emitted `.ll` carries its own `target
+    // triple`, which clang's link overrides — matching the suppression on
+    // every other clang invocation in cli_main.sfn so the test path is not
+    // the lone source of `[-Woverride-module]` noise.
+    //
+    // Link order (head → tail):
+    //   1. Test source object (strong)
+    //   2. Resolver-produced dep module objects (strong)
+    //   3. Runtime sources + globals + prelude (strong, objects)
+    //
+    // Issue #940: resolve the implicit runtime capsule
+    // (`<runtime_root>/capsule.toml`) and assemble its objects
+    // on the SAME path as `sfn build` / `sfn run` — c-sources +
+    // ll-sources + sfn-sources + prelude-entry. This replaces the
+    // retired probe ladder over `build/.../obj/runtime/*.o` plus the
+    // inline `native/src/*.c` glob.
+    //
+    // PERF (#940): the multi-file runner forks a child `sfn test`
+    // process per file, each with its own per-file scratch. Compiling
+    // the runtime into that private scratch would rebuild the entire
+    // runtime (14 sfn-module emits + C compiles) once PER TEST FILE.
+    // Instead the parent runner warms the runtime once into a shared,
+    // invocation-stable dir and hands it to every child via
+    // `SAILFIN_TEST_RUNTIME_OBJDIR`; with that set we assemble against
+    // the shared dir, so every child cache-hits and the runtime is
+    // built once per invocation. Falls back to `cache_dir` (the
+    // single-file leaf path, where no shared dir is plumbed).
+    let mut rt_cache_dir = cache_dir;
+    let shared_objdir = _get_env_cmd("SAILFIN_TEST_RUNTIME_OBJDIR");
+    if shared_objdir.length > 0 { rt_cache_dir = shared_objdir; }
+    let link_obj_dir = rt_cache_dir + "/link-obj";
+    let test_inputs: string[] = [ll_path];
+    let test_objects = assemble_link_inputs(test_inputs, link_obj_dir, "-O0");
+    if !test_objects.success {
+        return TestLinkResult { rc: 1, ran_backend: true };
+    }
+    let dep_objects = assemble_link_inputs(dep_ll_paths, link_obj_dir, "-O0");
+    if !dep_objects.success {
+        return TestLinkResult { rc: 1, ran_backend: true };
+    }
+    let runtime_caps = runtime_capsule_from_root(runtime_root);
+    if runtime_caps.length == 0 {
+        print.err("sfn test: runtime bundle/manifest missing — expected "
+            + runtime_root
+            + "/capsule.toml (kind = \"runtime\")");
+        // Pre-backend bailout: this preflight diagnostic stands alone; the
+        // backend never ran, so the caller must not stack the ICE banner
+        // (SFN-212).
+        return TestLinkResult { rc: 1, ran_backend: false };
+    }
+    _ensure_dir_cmd(rt_cache_dir);
+    // Test link path keeps runtime objects work-dir-local (shared root
+    // empty); the shared content-addressed runtime cache (#1096) is
+    // scoped to the build/run path that feeds the build-quality gate.
+    let rt = assemble_runtime_capsule_link_inputs(runtime_caps, rt_cache_dir, "-O0", binary_dir, "");
+    // Pre-backend bailout: runtime object assembly failed; the backend never
+    // ran (SFN-212).
+    if !rt.success {
+        return TestLinkResult { rc: 1, ran_backend: false };
+    }
+    // The runtime capsule's `link-libs` (runtime/capsule.toml) already
+    // carries `-lm` / `-lpthread`. Track which math/thread libs flow
+    // through so the defensive push below does not re-add a lib the
+    // capsule supplied — a duplicate `-lm` makes the macOS linker emit
+    // `ld: warning: ignoring duplicate libraries: '-lm'`.
+    let mut libs: string[] = [];
+    let mut has_lm: boolean = false;
+    let mut has_pthread: boolean = false;
+    let mut lli: int = 0;
+    loop {
+        if lli >= rt.link_libs.length { break; }
+        let lib = rt.link_libs[lli];
+        if strings_equal(lib, "-lm") { has_lm = true; }
+        if strings_equal(lib, "-lpthread") { has_pthread = true; }
+        if strings_equal(lib, "-pthread") { has_pthread = true; }
+        libs.push(lib);
+        lli += 1;
+    }
+    // Fallback for configurations where the runtime capsule did not supply
+    // them (keeps the link complete without double-adding).
+    if !has_lm { libs.push("-lm"); }
+    if !has_pthread { libs.push("-pthread"); }
+    // Dispatch the test-binary link directly through the `Backend` seam.
+    // This is a cross-directory `../../backend` import of the method-bearing
+    // `LlvmTextBackend`; the #1687 workaround that routed it through
+    // `cli_main::link_test_objects` was removed once #1701 (cross-dir
+    // method-bearing struct lowering under `--import-context`) was fixed. The
+    // `backend.link` *called*-method path here was the one repaired by #1701's
+    // `find_declare_signature_t` correction (#1739/#1740 had already fixed the
+    // uncalled/vtable-only method path). Reproduces the prior test-link argv
+    // exactly (test_mode).
+    let backend = LlvmTextBackend { };
+    let no_link_flags: string[] = [];
+    let mut link_objects: string[] = [];
+    let mut toi: int = 0;
+    loop {
+        if toi >= test_objects.object_paths.length { break; }
+        link_objects.push(test_objects.object_paths[toi]);
+        toi += 1;
+    }
+    let mut oi: int = 0;
+    loop {
+        if oi >= rt.object_paths.length { break; }
+        link_objects.push(rt.object_paths[oi]);
+        oi += 1;
+    }
+    let mut doi: int = 0;
+    loop {
+        if doi >= dep_objects.object_paths.length { break; }
+        link_objects.push(dep_objects.object_paths[doi]);
+        doi += 1;
+    }
+    let plan = LinkPlan {
+        objects: link_objects,
+        out_path: out_path,
+        opt_flag: "-O0",
+        link_flags: no_link_flags,
+        libs: libs,
+        test_mode: true
+    };
+    let link_rc = backend.link(plan);
+    return TestLinkResult { rc: link_rc, ran_backend: true };
+}
+
+export { TestLinkResult, _clang_link_test_cmd_with_deps };
