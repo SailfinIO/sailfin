@@ -73,12 +73,15 @@ test "jobs: auto budget applies global and Darwin caps (SFN-91)" {
 // SFN-547: a pooled child must not fan its own per-module emit out beside
 // `jobs - 1` siblings doing the same — the pool is the parallelism layer.
 test "jobs: pooled children are pinned to serial emit (SFN-547)" {
-    let env = _pool_child_env(["PATH=/usr/bin"], "/tmp/s", "/tmp/o", "", false, false);
+    // Not named `env`: that shadows the `env` builtin module, and member
+    // access then resolves against the builtin (an `![io]` effect) instead
+    // of the local array.
+    let child_env = _pool_child_env(["PATH=/usr/bin"], "/tmp/s", "/tmp/o", "", false, false);
     let mut found: boolean = false;
     let mut i: int = 0;
     loop {
-        if i >= env.length { break; }
-        if env[i] == "SAILFIN_BUILD_JOBS=1" { found = true; }
+        if i >= child_env.length { break; }
+        if child_env[i] == "SAILFIN_BUILD_JOBS=1" { found = true; }
         i += 1;
     }
     assert found;
@@ -87,14 +90,14 @@ test "jobs: pooled children are pinned to serial emit (SFN-547)" {
 // An explicit override outranks the pin: the inherited entry is kept and no
 // competing default is appended (POSIX `getenv` returns the first match).
 test "jobs: inherited SAILFIN_BUILD_JOBS outranks the serial pin (SFN-547)" {
-    let env = _pool_child_env(["SAILFIN_BUILD_JOBS=4"], "/tmp/s", "/tmp/o", "", false, false);
+    let child_env = _pool_child_env(["SAILFIN_BUILD_JOBS=4"], "/tmp/s", "/tmp/o", "", false, false);
     let mut pins: int = 0;
     let mut kept: boolean = false;
     let mut i: int = 0;
     loop {
-        if i >= env.length { break; }
-        if env[i] == "SAILFIN_BUILD_JOBS=1" { pins += 1; }
-        if env[i] == "SAILFIN_BUILD_JOBS=4" { kept = true; }
+        if i >= child_env.length { break; }
+        if child_env[i] == "SAILFIN_BUILD_JOBS=1" { pins += 1; }
+        if child_env[i] == "SAILFIN_BUILD_JOBS=4" { kept = true; }
         i += 1;
     }
     assert kept;
