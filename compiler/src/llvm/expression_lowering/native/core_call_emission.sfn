@@ -44,7 +44,7 @@ import {
     lower_array_push_in_place,
     lower_struct_array_concat
 } from "../arrays";
-import { coerce_operand_to_type, coerce_operand_to_type_with_source } from "./core_operands";
+import { coerce_operand_to_type, coerce_operand_to_type_with_source } from "./core_operands/dispatch";
 import { parse_member_access } from "./core_parse";
 import { find_local_binding } from "./core_scopes";
 import { find_substring_from, sanitize_symbol } from "./core_text";

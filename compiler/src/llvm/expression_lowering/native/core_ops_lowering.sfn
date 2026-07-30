@@ -32,11 +32,8 @@ import {
 } from "../../utils";
 import { lower_expression } from "./core";
 import { operation_name_for_symbol } from "./core_helpers";
-import {
-    coerce_operand_to_type,
-    emit_comparison_instruction,
-    harmonise_operands
-} from "./core_operands";
+import { emit_comparison_instruction } from "./core_operands/comparisons";
+import { coerce_operand_to_type, harmonise_operands } from "./core_operands/dispatch";
 import { lines_end_with_terminator, strip_enclosing_parentheses } from "./core_operators";
 import { binary_operands_are_unsigned } from "./core_scopes";
 import { is_number_literal } from "./core_text";

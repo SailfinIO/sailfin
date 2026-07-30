@@ -1,0 +1,139 @@
+// Line-budget sentinel for the whole
+// `compiler/src/llvm/expression_lowering/native/` family.
+//
+// `core_operands.sfn` reached 3,119 lines — twice the ~1,500-line soft
+// budget in `.claude/rules/code-style.md` — and was split into the ten
+// modules under `core_operands/`, the largest 576 lines.
+//
+// Why this guard covers the FOLDER and not just the split. The Per-Module
+// Peak RSS project records `llvm/expression_lowering/native/core` going
+// 4.35 GiB -> 1.64 GiB via PR #1645; `core_operands` had since climbed
+// back to 1,989,504 KB, ~16% above that post-fix figure and only just
+// inside the 2 GB CI per-job gate the series was run to clear. It could
+// regrow unnoticed because, unlike `capsule_resolver/` and
+// `typecheck_types/`, this family carried no sentinel at all. A split that
+// ships without a guard is a split that gets undone (SFN-566 records the
+// same drift pattern elsewhere).
+//
+// Why per-file ceilings rather than one family-wide maximum. Fifteen
+// siblings are still over budget, the largest at 1,877 lines. A single
+// budget set to that maximum would nominally "cover" the family while
+// licensing `core_text.sfn` (759) to grow to 1,877 in silence — the exact
+// failure this file exists to prevent. Instead every oversized sibling is
+// pinned at its current length and may only ever SHRINK, while everything
+// else — the new `core_operands/` modules, and any file added to this
+// folder later — must come in under 750.
+//
+// Updating this table. Lowering a ceiling as a module shrinks is expected
+// and needs no ceremony. RAISING one is the thing this guard exists to
+// make visible: it must be a deliberate, reviewed line in the diff, never
+// a reflex to make a red test green. SFN-639 tracks ratcheting the whole
+// repo to 750, at which point this table should be empty and the
+// grandfather clause deleted outright.
+//
+// What this budget is NOT. It does not bound worst-case per-module emit.
+// Line count does not predict cross-module RSS — measured on an idle
+// machine, `typecheck.sfn` cost 2,462,232 KB at 2,799 lines while
+// `typecheck_types.sfn` cost 1,768,644 KB at 3,795. This is a
+// maintainability guard; pick future decomposition targets by measurement,
+// not by `wc -l`.
+import { ends_with, find_char_local } from "../../src/string_utils";
+
+let NATIVE_LOWERING_MODULE_LINE_BUDGET: int = 750;
+
+let NATIVE_LOWERING_ROOT: string = "compiler/src/llvm/expression_lowering/native";
+
+// Count newlines, matching `wc -l` semantics (a trailing newline is not
+// double-counted). Cheap single linear scan via `find_char_local`.
+fn _count_newlines(source: string) -> int {
+    let mut count: int = 0;
+    let mut pos: int = 0;
+    loop {
+        let idx = find_char_local(source, "\n", pos);
+        if idx < 0 { break; }
+        count += 1;
+        pos = idx + 1;
+    }
+    return count;
+}
+
+// Files that predate this sentinel and exceed the budget. Each entry is a
+// ceiling that may only ever be lowered. Returns 0 for a file that is not
+// grandfathered, which then has to satisfy the full budget.
+fn _grandfathered_ceiling(name: string) -> int {
+    if name == "core_call_resolution.sfn" { return 1877; }
+    if name == "core_call_emission.sfn" { return 1856; }
+    if name == "core.sfn" { return 1626; }
+    if name == "core_concurrency_lowering.sfn" { return 1608; }
+    if name == "core_ops_lowering.sfn" { return 1581; }
+    if name == "core_literals_lowering.sfn" { return 1447; }
+    if name == "lambda_lowering.sfn" { return 1401; }
+    if name == "core_member_lowering.sfn" { return 1212; }
+    if name == "core_parse.sfn" { return 1137; }
+    if name == "core_parsing.sfn" { return 1053; }
+    if name == "statement.sfn" { return 935; }
+    if name == "core_cast_lowering.sfn" { return 858; }
+    if name == "core_operators.sfn" { return 830; }
+    if name == "core_strings.sfn" { return 789; }
+    if name == "core_text.sfn" { return 759; }
+    return 0;
+}
+
+test "native lowering: every module stays within its line budget" ![io] {
+    // Breadth-first walk so files added under `core_operands/` — or any
+    // future subfolder — are covered automatically. A hardcoded module
+    // list is how a new oversized file slips in unnoticed, which is the
+    // regrowth mechanism this guard exists to close.
+    let mut dir_queue: string[] = [NATIVE_LOWERING_ROOT];
+    let mut head: int = 0;
+    let mut checked: int = 0;
+
+    loop {
+        if head >= dir_queue.length { break; }
+        let dir = dir_queue[head];
+        head += 1;
+        let entries = fs.listDirectory(dir);
+        let mut i: int = 0;
+        loop {
+            if i >= entries.length { break; }
+            let entry = entries[i];
+            let full = dir + "/" + entry;
+            if ends_with(entry, ".sfn") {
+                let source = fs.readFile(full);
+                // A non-empty read is a precondition — guards against a
+                // path typo silently passing the check on an empty string.
+                assert source.length > 0;
+                let lines = _count_newlines(source);
+                assert lines > 0;
+                let ceiling = _grandfathered_ceiling(entry);
+                if ceiling > 0 {
+                    // Grandfathered: may only shrink.
+                    assert lines <= ceiling;
+                } else {
+                    assert lines < NATIVE_LOWERING_MODULE_LINE_BUDGET;
+                }
+                checked += 1;
+            } else {
+                // Anything without a `.sfn` suffix is a potential
+                // subdirectory; `listDirectory` on a non-directory returns
+                // an empty list, so this is safe to enqueue unguarded.
+                dir_queue.push(full);
+            }
+            i += 1;
+        }
+    }
+
+    // The walk must actually have found the family — an empty or
+    // mis-rooted traversal would otherwise pass vacuously.
+    assert checked > 30;
+}
+
+// The flat `core_operands.sfn` must stay deleted. Module resolution probes
+// `foo.sfn` before falling back to a folder, so re-adding the flat file
+// beside `core_operands/` would shadow it for every `./core_operands`
+// import and silently revert this decomposition while still compiling
+// green — the exact failure this split had to avoid.
+test "native lowering: the flat core_operands module does not shadow the folder" ![io] {
+    assert ! fs.exists(NATIVE_LOWERING_ROOT + "/core_operands.sfn");
+    assert fs.exists(NATIVE_LOWERING_ROOT + "/core_operands/dispatch.sfn");
+}

@@ -177,25 +177,16 @@ export {
     parse_range_iterable
 } from "./core_parse";
 
-import {
-    emit_comparison_instruction,
-    emit_boolean_and,
-    load_local_operand,
-    coerce_operand_to_type,
-    dominant_type,
-    is_string_pointer_type,
-    harmonise_operands
-} from "./core_operands";
+import { load_local_operand } from "./core_operands/comparisons";
 
 export {
-    emit_comparison_instruction,
     emit_boolean_and,
-    load_local_operand,
-    coerce_operand_to_type,
-    dominant_type,
+    emit_comparison_instruction,
     is_string_pointer_type,
-    harmonise_operands
-} from "./core_operands";
+    load_local_operand
+} from "./core_operands/comparisons";
+
+export { coerce_operand_to_type, dominant_type, harmonise_operands } from "./core_operands/dispatch";
 
 import { emit_runtime_call, empty_runtime_call_overrides } from "./runtime_call";
 

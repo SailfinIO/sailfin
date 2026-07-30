@@ -42,7 +42,7 @@ import {
     StringConstant
 } from "../../types";
 import { extend_string_array, join_with_separator, number_to_string } from "../../utils";
-import { coerce_operand_to_type } from "./core_operands";
+import { coerce_operand_to_type } from "./core_operands/dispatch";
 
 // Per-call-site overrides for `emit_runtime_call`. Empty fields fall
 // back to the descriptor returned by `find_runtime_helper(target)`.

@@ -22,7 +22,7 @@ import { extend_string_array, starts_with } from "../../utils";
 import { lower_expression } from "./core";
 import { find_parameter_binding } from "./core_bindings";
 import { split_call_arguments } from "./core_calls";
-import { coerce_operand_to_type } from "./core_operands";
+import { coerce_operand_to_type } from "./core_operands/dispatch";
 import { find_local_binding } from "./core_scopes";
 import { coerce_operand_to_string } from "./core_strings";
 import {

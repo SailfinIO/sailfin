@@ -43,7 +43,7 @@ import {
 import { array_pointer_element_type } from "../arrays";
 import { split_array_elements } from "../splitting";
 import { lower_expression } from "./core";
-import { coerce_operand_to_type, dominant_type } from "./core_operands";
+import { coerce_operand_to_type, dominant_type } from "./core_operands/dispatch";
 import { parse_array_literal_metadata } from "./core_parsing";
 import { coerce_operand_to_string, emit_string_concat, lower_string_literal } from "./core_strings";
 import { find_substring_from } from "./core_text";
