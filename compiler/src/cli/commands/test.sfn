@@ -77,13 +77,10 @@ import {
 } from "../../build_cache";
 import { _env_flag, _get_env_cmd, _legacy_flag_file } from "../../build_flags";
 import { is_safe_scope_name, parse_scope_name } from "../../capsule_artifact";
-import {
-    discover_workspace_root,
-    load_workspace_default_members,
-    prepare_project_capsules_for_test
-} from "../../capsule_resolver";
+import { prepare_project_capsules_for_test } from "../../capsule_resolver";
 import { discover_project_root } from "../../capsule_resolver/paths";
 import { ResolverConsumer, TestCapsuleResolution } from "../../capsule_resolver/types";
+import { discover_workspace_root, load_workspace_default_members } from "../../capsule_resolver/workspace";
 import { ImportSymbolTable, empty_import_symbols } from "../../effect_imports";
 import { format_backend_failure_banner } from "../../ice";
 import { compile_tests_to_llvm_file_with_module_imports, module_name_from_path } from "../../main";

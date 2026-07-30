@@ -17,13 +17,10 @@
 // on whichever path came first.
 import { Statement } from "../ast";
 import { _collect_sfn_files_cmd, _dirname_cmd, _path_join_cmd } from "../build/fs";
-import {
-    discover_workspace_root,
-    prepare_project_capsules_for_check,
-    workspace_capability_gate
-} from "../capsule_resolver";
+import { prepare_project_capsules_for_check, workspace_capability_gate } from "../capsule_resolver";
 import { discover_project_root } from "../capsule_resolver/paths";
 import { CheckCapsuleResolution, empty_resolver_consumer } from "../capsule_resolver/types";
+import { discover_workspace_root } from "../capsule_resolver/workspace";
 import {
     CheckJsonEvent,
     CheckJsonSummary,

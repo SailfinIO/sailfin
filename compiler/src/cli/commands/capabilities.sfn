@@ -18,12 +18,12 @@ import {
 
 import { _path_join_cmd } from "../../build/fs";
 import {
-    discover_workspace_root,
     workspace_capability_audit,
     workspace_capability_envelope_active,
     workspace_capability_mode,
     workspace_effective_envelope
 } from "../../capsule_resolver";
+import { discover_workspace_root } from "../../capsule_resolver/workspace";
 import { render_diagnostic } from "../../diagnostics_render";
 import {
     toml_get_workspace_capabilities_allow,
