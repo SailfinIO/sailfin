@@ -107,7 +107,18 @@ fn coerce_general_fallback(operand: LLVMOperand, operand_type: string, target: s
     }
 
     let union_result = _coerce_union_target_fallback(operand, operand_type, target, temp_index, current_lines);
-    if union_result != null { return union_result; }
+    if union_result != null {
+        if union_result.operand != null { return union_result; }
+        // No variant matched, but the arm accumulated diagnostics. Adopt
+        // them so a later guard's result still carries them, matching the
+        // shared-array behaviour this arm had before it was split out.
+        let mut _union_di: int = 0;
+        loop {
+            if _union_di >= union_result.diagnostics.length { break; }
+            diagnostics.push(union_result.diagnostics[_union_di]);
+            _union_di += 1;
+        }
+    }
 
     if !ends_with_pointer_suffix(target) {
         if ends_with_pointer_suffix(operand.llvm_type) {

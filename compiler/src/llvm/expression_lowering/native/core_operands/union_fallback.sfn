@@ -250,5 +250,20 @@ fn _coerce_union_target_fallback(operand: LLVMOperand, operand_type: string, tar
         }
     }
 
+    // No variant matched. Before this arm was split out of
+    // `coerce_general_fallback` it shared that function's single
+    // `diagnostics` array, so messages accumulated while probing variants
+    // survived the fall-through and rode out on whichever later guard
+    // returned a result. Returning a bare null here would drop them, so
+    // hand them back with a null `operand` — the caller's signal for
+    // "no match, but carry these forward".
+    if diagnostics.length > 0 {
+        return CoercionResult {
+            lines: current_lines,
+            temp_index: temp_index,
+            operand: null,
+            diagnostics: diagnostics
+        };
+    }
     return null;
 }
