@@ -25,7 +25,7 @@ Implement the feature **one pipeline stage at a time**, following the architect'
 
 1. **Parser** (`compiler/src/parser/`) — new syntax recognition
 2. **AST** (`compiler/src/ast.sfn`) — new node types
-3. **Type Checker** (`compiler/src/typecheck.sfn`) — type rules and constraints
+3. **Type Checker** (`compiler/src/typecheck/`) — type rules and constraints
 4. **Effect Checker** (`compiler/src/effect_checker.sfn`) — if this involves effects
 5. **Native Emitter** (`compiler/src/emit_native.sfn`) — `.sfn-asm` emission
 6. **LLVM Lowering** (`compiler/src/llvm/`) — LLVM IR generation

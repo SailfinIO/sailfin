@@ -17,9 +17,11 @@
 // `capsule_emit_parallel.sfn`'s `per_job_reserve`. That reserve is sized
 // from the *heaviest* module in the tree, and `typecheck_types.sfn` was
 // never that module despite being the longest — measured on an idle
-// machine, `typecheck.sfn` costs 2,462,232 KB at 2,799 lines and
+// machine, the then-flat `typecheck.sfn` cost 2,462,232 KB and
 // `llvm/expression_lowering/native/core_operands.sfn` 1,989,504 KB at
 // 3,119 lines, both above the 1,768,644 KB this file cost at 3,795.
+// `typecheck.sfn` has since been split into `compiler/src/typecheck/`
+// (SFN-634), taking its heaviest module to 671,088 KB.
 // Line count does not predict cross-module RSS; the super-linear
 // relationship in SFEP-0022 §2.4 holds within one module's own
 // decomposition, not between modules. That holds inside this split too:

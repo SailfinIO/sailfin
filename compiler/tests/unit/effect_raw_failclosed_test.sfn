@@ -18,13 +18,9 @@
 import { Expression, Statement } from "../../src/ast";
 import { empty_import_symbols } from "../../src/effect_imports";
 import { parse_program } from "../../src/parser/mod";
-import {
-    TypeckCtx,
-    make_typeck_ctx,
-    typecheck_diagnostics,
-    walk_expression,
-    walk_match_pattern
-} from "../../src/typecheck";
+import { typecheck_diagnostics } from "../../src/typecheck";
+import { TypeckCtx, make_typeck_ctx } from "../../src/typecheck/context";
+import { walk_expression, walk_match_pattern } from "../../src/typecheck/expression_walk";
 import { Diagnostic } from "../../src/typecheck_types";
 import { SymbolEntry } from "../../src/typecheck_types/symbol_table_and_raw_exprs";
 

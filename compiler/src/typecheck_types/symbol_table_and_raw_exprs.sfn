@@ -313,7 +313,8 @@ fn check_fn_reference_raw(text: string, symbols: SymbolEntry[], span: SourceSpan
 
     // Cast form: `<fn> as <type>` — kept for defensive back-compat with any
     // residual Raw still containing ` as `. After Part A all structured casts
-    // reach `typecheck.sfn`'s Cast arm instead, so this half is effectively
+    // reach `typecheck/expression_walk.sfn`'s Cast arm instead, so this half is
+    // effectively
     // dead for normal source. Delegates to `classify_fn_cast` for identical
     // behavior with the structured path.
     let as_pos = index_of(trimmed, " as ");

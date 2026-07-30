@@ -12,7 +12,8 @@
 // full compile.
 import { Expression, SourceSpan, Statement } from "../../src/ast";
 import { empty_import_symbols } from "../../src/effect_imports";
-import { TypeckCtx, make_typeck_ctx, walk_expression } from "../../src/typecheck";
+import { TypeckCtx, make_typeck_ctx } from "../../src/typecheck/context";
+import { walk_expression } from "../../src/typecheck/expression_walk";
 import { Diagnostic } from "../../src/typecheck_types";
 import { SymbolEntry } from "../../src/typecheck_types/symbol_table_and_raw_exprs";
 

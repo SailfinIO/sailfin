@@ -1,0 +1,206 @@
+// compiler/src/typecheck/concurrency_rules.sfn
+//
+// Type rules for the concurrency surface: `spawn` handles, `await`
+// operands, and channel send/receive element kinds.
+import { Expression, SourceSpan } from "../ast";
+import { Diagnostic } from "../typecheck_types";
+import {
+    future_element_kind,
+    make_await_non_future_diagnostic,
+    make_channel_send_mismatch_diagnostic,
+    make_spawn_handle_into_empty_array_diagnostic,
+    make_spawn_handle_kind_mismatch_diagnostic,
+    make_spawn_unresolvable_kind_diagnostic,
+    spawn_future_kind,
+    task_array_marker_kind,
+    type_is_future
+} from "../typecheck_types/expr_type_rules";
+import { SymbolEntry, find_symbol } from "../typecheck_types/symbol_table_and_raw_exprs";
+
+// Concurrency type rules — issue #1082, epic #965 (M4, decision B). Like the
+// `?`-operator rules above, these are driven against explicit type-annotation
+// strings: the checker has no expression-type inferencer (#829), so the only
+// statically-sound LIVE rule is `check_spawn_kind` for a lambda-literal operand
+// (wired in `walk_expression`). `check_await_operand`/`check_channel_send`
+// ship as helpers — live wiring waits on operand-type inference, exactly as
+// `check_try_operator`'s rule 3 does. Kind resolution mirrors
+// `llvm/type_mapping.sfn:831-905` so emit-native (#1084) agrees.
+// `spawn` rule: a spawned callee must have a determinable future kind.
+// `return_type_text` is the callee's declared return-type annotation, or null
+// when the spawn target declares no return type (E0813). A non-null
+// annotation always resolves to one of the six kinds (ptr is the catch-all),
+// so a declared return type never errors here.
+fn check_spawn_kind(return_type_text: string?, span: SourceSpan?) -> Diagnostic[] {
+    let mut diagnostics: Diagnostic[] = [];
+    if return_type_text == null {
+        diagnostics.push(make_spawn_unresolvable_kind_diagnostic(span));
+        return diagnostics;
+    }
+    let kind = spawn_future_kind(return_type_text);
+    if kind.length == 0 {
+        diagnostics.push(make_spawn_unresolvable_kind_diagnostic(span));
+    }
+    return diagnostics;
+}
+
+// `await` rule (1): the operand must be a future type -> E0814. The
+// expression's type is the future's element kind (`await_result_type`).
+fn check_await_operand(operand_type: string, span: SourceSpan?) -> Diagnostic[] {
+    let mut diagnostics: Diagnostic[] = [];
+    if !type_is_future(operand_type) {
+        diagnostics.push(make_await_non_future_diagnostic(operand_type, span));
+    }
+    return diagnostics;
+}
+
+// The element kind an `await` yields (the await->T rule), or null when the
+// operand is not a future (E0814 reports that separately).
+fn await_result_type(operand_type: string) -> string? {
+    return future_element_kind(operand_type);
+}
+
+// channel send rule: a value sent on a channel must match the channel's
+// element kind -> E0815. Both kinds are monomorphized strings.
+fn check_channel_send(channel_kind: string, sent_kind: string, span: SourceSpan?) -> Diagnostic[] {
+    let mut diagnostics: Diagnostic[] = [];
+    if !strings_equal(channel_kind, sent_kind) {
+        diagnostics.push(make_channel_send_mismatch_diagnostic(channel_kind, sent_kind, span));
+    }
+    return diagnostics;
+}
+
+// The monomorphized kind of a value sent on a channel, when it is resolvable
+// with certainty from the expression alone (#1942). Only literal forms whose
+// kind is unambiguous are classified — the checker has no expression-type
+// inferencer (#829), so an identifier / call / lambda argument stays null and
+// is conservatively NOT flagged, keeping the send check free of false
+// positives (e.g. `tasks.send(fn() { ... })` on a `Channel<fn() -> void>`). A
+// bare numeric literal is intentionally unresolved: `int`/`number`/`float`
+// share the literal spelling, so its kind is not decidable here.
+fn channel_send_value_kind(value: Expression?) -> string? {
+    if value == null { return null; }
+    if strings_equal(value.variant, "StringLiteral") { return "string"; }
+    if strings_equal(value.variant, "BooleanLiteral") { return "bool"; }
+    return null;
+}
+
+// Element-type check for a `ch.send(v)` call (#1942 / E0815). Fires only when
+// the receiver resolves to a `Channel<T>`-annotated binding (non-empty
+// `element_kind`), the call has exactly one argument, and that argument's kind
+// is resolvable with certainty — so a genuine mismatch (`let ch: Channel<int>;
+// ch.send("x")`) is reported while inference-dependent sends stay silent.
+fn channel_send_diagnostics(expression: Expression, bindings: SymbolEntry[]) -> Diagnostic[] {
+    let callee = expression.callee;
+    if callee == null { return []; }
+    if !strings_equal(callee.variant, "Member") { return []; }
+    if !strings_equal(callee.member, "send") { return []; }
+    let receiver = callee.object;
+    if receiver == null { return []; }
+    if !strings_equal(receiver.variant, "Identifier") { return []; }
+    let entry = find_symbol(bindings, receiver.name);
+    if entry == null { return []; }
+    if entry.element_kind.length == 0 { return []; }
+    // "empty_array" is the push_spawn_handle_diagnostics sentinel, not a real
+    // Channel<T> element kind — it never carries a channel here.
+    if strings_equal(entry.element_kind, "empty_array") { return []; }
+    // A `taskarr:` marker is a `Task<T>[]` handle array (SFEP-0055), not a
+    // channel; a `.send` on it is not a channel-send mismatch (arrays have no
+    // `send`). Skip so it doesn't false-fire E0815.
+    if task_array_marker_kind(entry.element_kind) != null { return []; }
+    // `ptr` is the indeterminate catch-all `spawn_future_kind` assigns to every
+    // non-primitive element (user type, alias, generic parameter, fn-type), so
+    // a `Channel<T>` whose `T` is not one of the five determinate primitive
+    // kinds carries no statically-comparable kind. Comparing it against a
+    // determinate sent kind would false-positive (`Channel<fn() -> void>` +
+    // `send("x")`), so the check stays silent there — only a determinate
+    // channel kind is enforced.
+    if strings_equal(entry.element_kind, "ptr") { return []; }
+    if expression.arguments.length != 1 { return []; }
+    let sent_kind = channel_send_value_kind(expression.arguments[0]);
+    if sent_kind == null { return []; }
+    return check_channel_send(entry.element_kind, sent_kind, expression.span);
+}
+
+// Element-type check for a `.push(spawn ...)` call (SFN-386 / E0823). Fires
+// only when the receiver resolves to an unannotated, inferred-empty `[]`
+// binding (the "empty_array" sentinel from `walk_block_expressions`) and the
+// pushed argument is exactly one `spawn` expression — the pattern whose
+// double-slot element type corrupts the pushed future pointer.
+fn push_spawn_handle_diagnostics(expression: Expression, bindings: SymbolEntry[]) -> Diagnostic[] {
+    let callee = expression.callee;
+    if callee == null { return []; }
+    if !strings_equal(callee.variant, "Member") { return []; }
+    if !strings_equal(callee.member, "push") { return []; }
+    let receiver = callee.object;
+    if receiver == null { return []; }
+    if !strings_equal(receiver.variant, "Identifier") { return []; }
+    let entry = find_symbol(bindings, receiver.name);
+    if entry == null { return []; }
+    if expression.arguments.length != 1 { return []; }
+    let pushed = expression.arguments[0];
+    if !strings_equal(pushed.variant, "Spawn") { return []; }
+    // E0831: un-annotated inferred-empty `[]` handle array — no element type,
+    // fails closed (SFN-386). `Task<T>` opens the annotated path; this guard
+    // is unchanged for the still-ambiguous un-annotated case.
+    if strings_equal(entry.element_kind, "empty_array") {
+        return [make_spawn_handle_into_empty_array_diagnostic(receiver.name, expression.span)];
+    }
+    // E0836: an annotated `Task<K1>[]` receiving a `spawn fn() -> K2` whose
+    // result kind differs — a heterogeneous handle array (SFEP-0055 §3.4).
+    let array_kind = task_array_marker_kind(entry.element_kind);
+    if array_kind != null {
+        let pushed_kind = _pushed_spawn_result_kind(pushed);
+        if pushed_kind.length > 0 {
+            if !strings_equal(pushed_kind, array_kind) {
+                return [make_spawn_handle_kind_mismatch_diagnostic(receiver.name, array_kind, pushed_kind, expression.span)];
+            }
+        }
+    }
+    return [];
+}
+
+// The future result kind of a `spawn fn() -> T { ... }` expression, resolved
+// from the spawned lambda's declared return type via the six-kind resolver, or
+// "" when it cannot be determined (no lambda / no return type). Drives the
+// E0836 handle-array homogeneity check.
+fn _pushed_spawn_result_kind(spawn_expr: Expression) -> string {
+    let operand = spawn_expr.operand;
+    if operand == null { return ""; }
+    if !strings_equal(operand.variant, "Lambda") { return ""; }
+    let return_type = operand.return_type;
+    if return_type == null { return ""; }
+    return spawn_future_kind(return_type.text);
+}
+
+// The monomorphized element kind a `let x = await ch.receive()` initializer
+// yields (#1944): `await` over a channel `receive` is the degenerate
+// pass-through of the channel's element type — the receive already blocks
+// synchronously, so there is no `Future<T>` to unwrap (Go's model: `receive`
+// yields the element type directly). Returns null unless the initializer is
+// exactly `await <ident>.receive()` and `<ident>` resolves to a `Channel<T>`
+// binding (non-empty `element_kind`). Like `await_result_type` /
+// `check_await_operand`, this is a pure resolution primitive exercised by
+// `concurrency_typecheck_test.sfn`, NOT wired into the live walk: `SymbolEntry.
+// element_kind` marks "this symbol IS a `Channel<K>`", so recording it on a
+// received *value* would mislead `channel_send_diagnostics`. The live-walk
+// wiring waits on the expression-type inferencer (#829); the runtime dispatch
+// of a fn-typed received local is delivered independently in lowering
+// (`instructions_let.sfn` / `core_concurrency_lowering.sfn`).
+fn await_receive_result_kind(initializer: Expression?, bindings: SymbolEntry[]) -> string? {
+    if initializer == null { return null; }
+    if !strings_equal(initializer.variant, "Await") { return null; }
+    let operand = initializer.operand;
+    if operand == null { return null; }
+    if !strings_equal(operand.variant, "Call") { return null; }
+    let callee = operand.callee;
+    if callee == null { return null; }
+    if !strings_equal(callee.variant, "Member") { return null; }
+    if !strings_equal(callee.member, "receive") { return null; }
+    let receiver = callee.object;
+    if receiver == null { return null; }
+    if !strings_equal(receiver.variant, "Identifier") { return null; }
+    let entry = find_symbol(bindings, receiver.name);
+    if entry == null { return null; }
+    if entry.element_kind.length == 0 { return null; }
+    return entry.element_kind;
+}
