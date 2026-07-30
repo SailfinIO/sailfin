@@ -1,0 +1,516 @@
+// compiler/src/capsule_resolver/discovery.sfn
+//
+// Manifest-declared dependency discovery. Parses the `[dependencies]` table,
+// resolves each declared capsule to a source tree — in-tree under
+// `capsules/<scope>/<name>/src/` for the self-build, or
+// `~/.sfn/cache/capsules/<scope>/<name>/<ver>/src/` after `sfn add` — and walks
+// each tree into `CapsuleSource` records with stable slugs.
+//
+// `number_to_string` comes from `../num_format`, its defining module, rather
+// than via `../main`: routing it through `main` would pull the whole compiler
+// into every consumer of this module's import closure.
+import { _collect_sfn_files_cmd } from "../build/fs";
+import { is_safe_scope_name, parse_scope_name } from "../capsule_artifact";
+import { _display_capsule_name_cmd } from "../capsule_names";
+import { lock_get_versions } from "../lock";
+import { number_to_string } from "../num_format";
+import { enumerate_runtime_capsule_artifacts } from "../runtime_capsule_resolver";
+import {
+    SemVer,
+    semver_compare,
+    semver_is_valid,
+    semver_parse
+} from "../semver";
+import { contains_string, substring } from "../string_utils";
+import { toml_get_dependencies, toml_get_name } from "../toml_parser";
+import { workspace_member_for_spec } from "./capability";
+import {
+    _cr_dirname,
+    _cr_ends_with,
+    _cr_find_char,
+    _cr_get_home,
+    _cr_is_safe_segment,
+    _cr_is_safe_version,
+    _cr_path_join
+} from "./paths";
+import { CapsuleSource, WorkspaceMember } from "./types";
+import { discover_workspace_root, load_workspace_members } from "./workspace";
+
+// Parse "name=version\n" lines from toml_get_dependencies output, skipping
+// blanks and returning one dep spec per line. Each returned spec is the
+// scope/name key (e.g. "sfn/cli") — versions live in dep_versions[i].
+struct _CrDepEntry {
+    spec: string;
+    version: string;
+}
+
+fn _cr_parse_deps(deps: string) -> _CrDepEntry[] {
+    let mut out: _CrDepEntry[] = [];
+    if deps.length == 0 { return out; }
+    let mut start: int = 0;
+    let len = deps.length;
+    loop {
+        if start >= len { break; }
+        let mut end: int = start;
+        loop {
+            if end >= len { break; }
+            if substring(deps, end, end + 1) == "\n" { break; }
+            end += 1;
+        }
+        if end > start {
+            let mut eq_pos: int = -1;
+            let mut ei: int = start;
+            loop {
+                if ei >= end { break; }
+                if substring(deps, ei, ei + 1) == "=" {
+                    eq_pos = ei;
+                    break;
+                }
+                ei += 1;
+            }
+            if eq_pos > start {
+                let name = substring(deps, start, eq_pos);
+                let version = substring(deps, eq_pos + 1, end);
+                if name.length > 0 {
+                    out.push(_CrDepEntry { spec: name, version: version });
+                }
+            }
+        }
+        start = end + 1;
+    }
+    return out;
+}
+
+// Look up a capsule's locked version from the pre-parsed lockfile
+// entries (#1048). `entry.spec` is always the scoped `scope/name` form
+// (the cache path below requires it), so we match that first and then
+// fall back to the bare display name — mirroring the backward-compat
+// fallback `sfn add` performs (`cli_commands.sfn`) for older lockfiles
+// that stored `"http"` instead of `"sfn/http"`. Returns "" if absent
+// under either key. The caller pre-parses once, so this stays O(deps)
+// per call without re-scanning the lockfile text.
+fn _cr_lookup_locked_version(lock_entries: _CrDepEntry[], spec: string) -> string {
+    let mut i: int = 0;
+    loop {
+        if i >= lock_entries.length { break; }
+        if strings_equal(lock_entries[i].spec, spec) {
+            return lock_entries[i].version;
+        }
+        i += 1;
+    }
+    let display = _display_capsule_name_cmd(spec);
+    if !strings_equal(display, spec) {
+        let mut j: int = 0;
+        loop {
+            if j >= lock_entries.length { break; }
+            if strings_equal(lock_entries[j].spec, display) {
+                return lock_entries[j].version;
+            }
+            j += 1;
+        }
+    }
+    return "";
+}
+
+// Locate the src/ directory for a capsule dep. Checks the in-tree
+// capsules/<scope>/<name>/src/ first (compiler self-build and ecosystem
+// development) and falls back to ~/.sfn/cache/capsules/<scope>/<name>/<version>/src/
+// (end-user builds after `sfn add`). Returns "" if neither exists.
+fn _cr_locate_capsule_src(project_root: string, spec: string, version: string) -> string ![io] {
+    let slash = _cr_find_char(spec, "/", 0);
+    if slash <= 0 { return ""; }
+    let slash2 = _cr_find_char(substring(spec, slash + 1, spec.length), "/", 0);
+    if slash2 >= 0 { return ""; }
+    let scope = substring(spec, 0, slash);
+    let name = substring(spec, slash + 1, spec.length);
+    if !_cr_is_safe_segment(scope) { return ""; }
+    if !_cr_is_safe_segment(name) { return ""; }
+
+    // Prefer in-tree source if we're inside a sailfin repo checkout.
+    let in_tree = _cr_path_join(project_root, "capsules/" + scope + "/" + name
+        + "/src");
+    if fs.exists(in_tree) { return in_tree; }
+
+    // Fall back to the user cache populated by `sfn add`.
+    if version.length == 0 { return ""; }
+    if !_cr_is_safe_version(version) { return ""; }
+    let home = _cr_get_home();
+    if home.length == 0 { return ""; }
+    let cached = home + "/.sfn/cache/capsules/" + scope + "/" + name + "/"
+        + version
+        + "/src";
+    if fs.exists(cached) { return cached; }
+    return "";
+}
+
+// Locate the src/ dir for a scoped capsule in the user cache
+// (~/.sfn/cache/capsules/<scope>/<name>/<version>/src), choosing the
+// highest semver version present. Used by the manifest-less, workspace-
+// less bare-build path (SFN-216): a bare `sfn build main.sfn` has no
+// capsule.toml or capsule.lock to pin a version, so the newest cached
+// version is selected. Returns "" if the capsule is not cached or no
+// cached version has a src/ dir.
+fn _cr_locate_cached_capsule_src_latest(spec: string) -> string ![io] {
+    let slash = _cr_find_char(spec, "/", 0);
+    if slash <= 0 { return ""; }
+    let slash2 = _cr_find_char(substring(spec, slash + 1, spec.length), "/", 0);
+    if slash2 >= 0 { return ""; }
+    let scope = substring(spec, 0, slash);
+    let name = substring(spec, slash + 1, spec.length);
+    if !_cr_is_safe_segment(scope) { return ""; }
+    if !_cr_is_safe_segment(name) { return ""; }
+    let home = _cr_get_home();
+    if home.length == 0 { return ""; }
+    let base = home + "/.sfn/cache/capsules/" + scope + "/" + name;
+    if !fs.exists(base) { return ""; }
+    let entries = fs.listDirectory(base);
+    let mut best_version: string = "";
+    let mut has_best: boolean = false;
+    // `best_parsed` is only read when `has_best` is true; the placeholder
+    // seed keeps the type inferred as SemVer without importing the name.
+    let mut best_parsed = semver_parse("0.0.0");
+    let guard: int = 4096;
+    let mut i: int = 0;
+    loop {
+        if i >= entries.length { break; }
+        if i >= guard { break; }
+        let ver = entries[i];
+        i += 1;
+        if ver.length == 0 { continue; }
+        if ver[0] == "." { continue; }
+        if !_cr_is_safe_version(ver) { continue; }
+        let parsed = semver_parse(ver);
+        if !semver_is_valid(parsed) { continue; }
+        let src = base + "/" + ver + "/src";
+        if !fs.exists(src) { continue; }
+        if !has_best {
+            has_best = true;
+            best_parsed = parsed;
+            best_version = ver;
+        } else if semver_compare(parsed, best_parsed) > 0 {
+            best_parsed = parsed;
+            best_version = ver;
+        }
+    }
+    if !has_best { return ""; }
+    return base + "/" + best_version + "/src";
+}
+
+// Walk a capsule src/ dir iteratively (BFS) and collect every .sfn file,
+// each with a slug relative to the capsule (e.g. "sfn/cli/mod", or for
+// nested files, "sfn/cli/util/foo"). Iterative to match the existing
+// _collect_sfn_files_cmd pattern — the seed compiler has historically
+// been brittle around recursive accumulators.
+fn _cr_collect_capsule_sources(src_dir: string, spec: string) -> CapsuleSource[] ![io] {
+    let mut out: CapsuleSource[] = [];
+    if !fs.exists(src_dir) { return out; }
+
+    // Queues run in lockstep: at position i, dir_queue[i] is a filesystem
+    // path and slug_queue[i] is the slug prefix that every .sfn file in
+    // that directory should inherit (e.g. src root = `spec`; nested
+    // src/util/ = `spec/util`).
+    let mut dir_queue: string[] = [src_dir];
+    let mut slug_queue: string[] = [spec];
+    let mut head: int = 0;
+    // Belt-and-suspenders cap on the BFS — guards against a pathological
+    // symlink loop or a runaway listDirectory binding. The previous
+    // implementation used `head >= max_depth` with `max_depth = 32`, which
+    // capped on QUEUE INDEX (directories visited), not tree depth, and would
+    // silently truncate any capsule with more than 32 directories under
+    // `src/` — dropping reachable `.sfn` files into undefined symbols at link
+    // with no diagnostic (#2146). Mirrors the diagnostic shape of
+    // `enumerate_relative_sources` / `enumerate_binary_capsule_sources` so a
+    // hit surfaces a clear bug-report hook instead of dropping modules.
+    let max_iterations: int = 4096;
+    let mut iterations: int = 0;
+    loop {
+        if head >= dir_queue.length { break; }
+        if iterations >= max_iterations {
+            print.err("capsule-resolver: _cr_collect_capsule_sources hit "
+                + "iteration cap ("
+                + number_to_string(max_iterations)
+                + ") under "
+                + src_dir
+                + " — some sources may be missing; please file a bug");
+            break;
+        }
+        iterations += 1;
+        let dir = dir_queue[head];
+        let slug_prefix = slug_queue[head];
+        head += 1;
+        if !fs.exists(dir) { continue; }
+        let entries = fs.listDirectory(dir);
+        let mut i: int = 0;
+        loop {
+            if i >= entries.length { break; }
+            let entry = entries[i];
+            let full = _cr_path_join(dir, entry);
+            if _cr_ends_with(entry, ".sfn") {
+                let stem = substring(entry, 0, entry.length - 4);
+                let slug = slug_prefix + "/" + stem;
+                // ll_path is filled in by `_cr_resolve_and_dedupe`
+                // once the consumer + dep layout is known (Stage
+                // C2b2). Constructing it here would require
+                // threading the layout into every collector site;
+                // doing it post-dedupe keeps the layout decision
+                // in one place.
+                out.push(CapsuleSource {
+                    spec: spec, source_path: full, slug: slug, ll_path: ""
+                });
+            } else {
+                // Treat anything without a .sfn suffix as a potential
+                // subdirectory. listDirectory on a non-directory returns
+                // an empty list which we skip naturally.
+                let child_entries = fs.listDirectory(full);
+                if child_entries.length > 0 {
+                    dir_queue.push(full);
+                    slug_queue.push(slug_prefix + "/" + entry);
+                }
+            }
+            i += 1;
+        }
+    }
+    return out;
+}
+
+// P1 (#363): enumerate every .sfn source under
+// `<project_root>/src/` and tag it with the host capsule's
+// `[capsule].name` as the spec, so a test file in `<project>/tests/`
+// can `import { fn } from "<capsule_name>"` and have the resolver
+// stage + compile the source under slug `<capsule_name>/<stem>`.
+// Returns empty when the manifest is missing, has no `[capsule].name`,
+// or the name is unsafe (path traversal) — callers fall through to
+// relative-import / workspace-implicit walks. Skipped when
+// `<project_root>/src/` doesn't exist.
+//
+// Slug shape mirrors `_cr_collect_capsule_sources(src_dir, spec)`:
+// for `[capsule].name = "my-app"` and `<project_root>/src/mod.sfn`
+// the resolver produces `slug = "my-app/mod"`. The test source's
+// `import { fn } from "my-app";` resolves to provider slug
+// `my-app/mod` via `resolve_import_artifact_slug`'s `<base>/mod`
+// fallback, which is what makes the link line resolve.
+fn _cr_enumerate_host_capsule_sources(project_root: string) -> CapsuleSource[] ![io] {
+    let mut out: CapsuleSource[] = [];
+    if project_root.length == 0 { return out; }
+    let manifest_path = _cr_path_join(project_root, "capsule.toml");
+    if !fs.exists(manifest_path) { return out; }
+    let manifest_text = fs.readFile(manifest_path);
+    let capsule_name = toml_get_name(manifest_text);
+    if capsule_name.length == 0 { return out; }
+    // Reject path-traversal / separator characters in the name.
+    // For scope-form names (`acme/router`, `acme/router/middleware/auth`),
+    // delegate to `is_safe_scope_name` so submodule capsule names with
+    // multi-segment `name` parts (the second `/` onward survives in
+    // `parts.name`) round-trip — `_cr_is_safe_segment` would reject
+    // any `/`. Single-segment names like `"my-app"` don't go through
+    // `parse_scope_name` (it returns empty for no-slash inputs) so
+    // those still need a direct safe-segment check.
+    let parts = parse_scope_name(capsule_name);
+    if parts.scope.length > 0 {
+        if !is_safe_scope_name(parts.scope, parts.name) { return out; }
+    } else {
+        if !_cr_is_safe_segment(capsule_name) { return out; }
+    }
+    let src_dir = _cr_path_join(project_root, "src");
+    if !fs.exists(src_dir) { return out; }
+    return _cr_collect_capsule_sources(src_dir, capsule_name);
+}
+
+// Enumerate every .sfn source file for every dep declared in the project's
+// capsule.toml. Returns an empty list if no manifest or no deps.
+//
+// Stage D PR2: `kind = "runtime"` capsule deps (e.g.
+// `sfn/runtime-native` for the compiler) ship C / LL source — not
+// `.sfn` modules — so they contribute zero entries here. The
+// runtime capsule resolver picks them up separately via
+// `enumerate_runtime_capsule_artifacts`. We discover them
+// up-front via workspace.toml so the legacy
+// `_cr_locate_capsule_src` lookup below doesn't false-positive
+// on a runtime capsule name and emit a "could not locate source"
+// diagnostic.
+fn enumerate_capsule_sources(project_root: string) -> CapsuleSource[] ![io] {
+    let mut sources: CapsuleSource[] = [];
+    if project_root.length == 0 { return sources; }
+    let manifest = _cr_path_join(project_root, "capsule.toml");
+    if !fs.exists(manifest) { return sources; }
+    let text = fs.readFile(manifest);
+    let deps = toml_get_dependencies(text);
+    let entries = _cr_parse_deps(deps);
+
+    // Lockfile precedence (#1048): the designed resolution order is
+    // workspace → lockfile → cache → registry. When a capsule.lock is
+    // present we prefer its pinned version over the capsule.toml range
+    // when building the ~/.sfn/cache path below. Parse it once up-front
+    // into `<spec>=<version>` entries (the shape `_cr_parse_deps`
+    // consumes) so the per-dep lookups in the loop are plain list scans
+    // rather than a full re-parse of the lockfile text each time. An
+    // absent lockfile leaves `has_lock` false and `lock_entries` empty,
+    // preserving the pre-#1048 capsule.toml-range behaviour byte-for-byte.
+    let lock_path = _cr_path_join(project_root, "capsule.lock");
+    let mut has_lock: boolean = false;
+    let mut lock_entries: _CrDepEntry[] = [];
+    if fs.exists(lock_path) {
+        let lock_text = fs.readFile(lock_path);
+        lock_entries = _cr_parse_deps(lock_get_versions(lock_text));
+        has_lock = true;
+    }
+
+    // Discover every `kind = "runtime"` capsule the workspace
+    // exposes, so we can skip those names below. Empty when
+    // the project sits outside any workspace, which is the
+    // common case for end-user `sfn build` invocations and
+    // matches the pre-Stage-D behaviour exactly.
+    let workspace_root = discover_workspace_root(project_root);
+    let empty_specs: string[] = [];
+    let mut runtime_cap_names: string[] = [];
+    // Workspace member map (e.g. "sfn/strings" -> capsules/sfn/strings/src).
+    // Empty outside a workspace, which keeps end-user `sfn build`/`sfn add`
+    // flows byte-identical. Inside a workspace it is the authoritative
+    // resolver for a *declared* sibling-capsule dep: `_cr_locate_capsule_src`
+    // below only checks `<project_root>/capsules/...` and `~/.sfn/cache`,
+    // neither of which finds a workspace sibling, so a declared
+    // capsule→capsule dep (the first real case being `sfn/test` →
+    // `sfn/strings`, #847/#846) would otherwise be reported "could not
+    // locate" and its `.sfn-asm` never staged for import-signature lowering.
+    let mut members: WorkspaceMember[] = [];
+    // Workspace.lock precedence (#1071): prefer workspace-level pins over
+    // capsule.lock for external deps. Parsed once here into the same
+    // `_CrDepEntry[]` shape `_cr_lookup_locked_version` consumes. An absent
+    // workspace.lock leaves `ws_has_lock` false and `ws_lock_entries` empty,
+    // making resolution byte-identical to the post-#1048 path. Sibling deps
+    // are resolved via `members` below and never consult this lockfile.
+    let mut ws_has_lock: boolean = false;
+    let mut ws_lock_entries: _CrDepEntry[] = [];
+    if workspace_root.length > 0 {
+        let runtime_caps = enumerate_runtime_capsule_artifacts(workspace_root, empty_specs);
+        let mut rci: int = 0;
+        loop {
+            if rci >= runtime_caps.length { break; }
+            runtime_cap_names.push(runtime_caps[rci].capsule_name);
+            rci += 1;
+        }
+        members = load_workspace_members(workspace_root);
+        let ws_lock_path = _cr_path_join(workspace_root, "workspace.lock");
+        if fs.exists(ws_lock_path) {
+            let ws_lock_text = fs.readFile(ws_lock_path);
+            ws_lock_entries = _cr_parse_deps(lock_get_versions(ws_lock_text));
+            ws_has_lock = true;
+        }
+    }
+
+    // Worklist for transitive dependency resolution (SFN-35). A capsule's
+    // public API may call into its own declared deps — e.g. `sfn/http`'s
+    // `serialize_response` uses `sfn/strings::int_to_string` — so a consumer
+    // that declares only `sfn/http` must still get `sfn/strings` staged and
+    // linked, or the call site's `int_to_string__sfn__strings__mod` symbol is
+    // undefined at link. Each staged dep's own `capsule.toml [dependencies]`
+    // is walked and its deps enqueued, deduped by spec (`visited`) and cycle-
+    // guarded. `queue_direct` marks the project's own declared deps so the
+    // "absent from capsule.lock" hint only fires for those — a transitive dep
+    // the user never named directly should not demand a `sfn add`.
+    let mut queue_specs: string[] = [];
+    let mut queue_versions: string[] = [];
+    let mut queue_direct: boolean[] = [];
+    let mut qseed: int = 0;
+    loop {
+        if qseed >= entries.length { break; }
+        queue_specs.push(entries[qseed].spec);
+        queue_versions.push(entries[qseed].version);
+        queue_direct.push(true);
+        qseed += 1;
+    }
+    let mut visited: string[] = [];
+    let mut qi: int = 0;
+    let queue_guard: int = 4096;
+    loop {
+        if qi >= queue_specs.length { break; }
+        // Guard the transitive walk against a pathological / cyclic manifest
+        // graph (input-driven loop): the `visited` dedup already bounds it to
+        // one visit per distinct spec, so this only ever trips on a manifest
+        // set larger than any real workspace.
+        if qi >= queue_guard { break; }
+        let spec = queue_specs[qi];
+        let version = queue_versions[qi];
+        let is_direct = queue_direct[qi];
+        qi += 1;
+        // Stage D PR2: skip runtime capsule deps — handled
+        // separately by `enumerate_runtime_capsule_artifacts`.
+        if contains_string(runtime_cap_names, spec) { continue; }
+        if contains_string(visited, spec) { continue; }
+        visited.push(spec);
+        // Prefer the workspace member map for a declared sibling dep;
+        // fall back to the project-relative + `~/.sfn/cache` locator for
+        // end-user (non-workspace) builds. `_cr_collect_capsule_sources`
+        // produces the same canonical `<scope>/<name>/mod` slug for either
+        // src_dir, so the staged artifact path matches `imports.sfn`'s
+        // expectation regardless of which lookup supplied it.
+        let mut src_dir: string = "";
+        if members.length > 0 {
+            src_dir = workspace_member_for_spec(members, spec);
+        }
+        if src_dir.length == 0 {
+            // Lockfile-pinned version wins over the capsule.toml range.
+            // Precedence: workspace.lock (#1071) > capsule.lock (#1048) >
+            // capsule.toml range. Workspace siblings are resolved above and
+            // never reach this branch, so sibling-first resolution holds.
+            let mut effective_version: string = version;
+            let mut resolved_from_lock: boolean = false;
+            if ws_has_lock {
+                let ws_locked = _cr_lookup_locked_version(ws_lock_entries, spec);
+                if ws_locked.length > 0 {
+                    effective_version = ws_locked;
+                    resolved_from_lock = true;
+                }
+            }
+            // Fall back to capsule.lock only when workspace.lock did not
+            // pin this dep. The missing-from-capsule.lock diagnostic is
+            // suppressed when workspace.lock already supplied the version,
+            // and only fires for a project-declared (direct) dep.
+            if !resolved_from_lock && has_lock {
+                let locked = _cr_lookup_locked_version(lock_entries, spec);
+                if locked.length > 0 { effective_version = locked; } else if is_direct {
+                    print.err("capsule-resolver: dependency \"" + spec
+                        + "\" is declared in capsule.toml but absent from"
+                        + " capsule.lock — run `sfn add "
+                        + spec
+                        + "` to lock it");
+                }
+            }
+            src_dir = _cr_locate_capsule_src(project_root, spec, effective_version);
+        }
+        if src_dir.length > 0 {
+            let found = _cr_collect_capsule_sources(src_dir, spec);
+            let mut fi: int = 0;
+            loop {
+                if fi >= found.length { break; }
+                sources.push(found[fi]);
+                fi += 1;
+            }
+            // Enqueue this dep's OWN declared deps (transitive closure). The
+            // dep's manifest sits beside its `src/` dir. Runtime-capsule and
+            // already-visited specs are filtered here as well as at dequeue.
+            let dep_manifest = _cr_path_join(_cr_dirname(src_dir), "capsule.toml");
+            if fs.exists(dep_manifest) {
+                let dep_text = fs.readFile(dep_manifest);
+                let dep_entries = _cr_parse_deps(toml_get_dependencies(dep_text));
+                let mut di: int = 0;
+                loop {
+                    if di >= dep_entries.length { break; }
+                    let de = dep_entries[di];
+                    di += 1;
+                    if contains_string(visited, de.spec) { continue; }
+                    if contains_string(runtime_cap_names, de.spec) { continue; }
+                    queue_specs.push(de.spec);
+                    queue_versions.push(de.version);
+                    queue_direct.push(false);
+                }
+            }
+        } else {
+            print.err("capsule-resolver: could not locate source for \"" + spec
+                + "\" — run `sfn add "
+                + spec
+                + "` to populate the cache");
+        }
+    }
+    return sources;
+}

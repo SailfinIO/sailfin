@@ -1,0 +1,608 @@
+// compiler/src/capsule_resolver.sfn
+//
+// End-user capsule dependency resolver.
+//
+// Replaces the text-level `inline_imports_for_source` hack in cli_commands.sfn
+// with real separate-compilation of capsule modules, using the same
+// import-context machinery the compiler uses on itself (the staged
+// .sfn-asm + .layout-manifest files under build/compiler/import-context).
+//
+// Flow invoked by `sfn build` and `sfn run`:
+//
+//   1. discover_project_root(base_dir)
+//        Walks up from the main source file looking for capsule.toml.
+//        Returns the project root (or "" if no manifest was found).
+//
+//   2. enumerate_capsule_sources(project_root)
+//        Reads the [dependencies] table and for each declared capsule
+//        locates its source tree — either in-tree under capsules/<scope>/<name>/src/
+//        (for the compiler's self-build) or ~/.sfn/cache/capsules/<scope>/<name>/<ver>/src/
+//        (for end-user builds after `sfn add`). Walks each src/ tree to
+//        collect every .sfn file, assigning each a stable slug like
+//        "sfn/cli/mod" so the compiler's existing import resolver finds them.
+//
+//   3. stage_capsule_imports(sources, project_root)
+//        Emits .sfn-asm + .layout-manifest for each capsule source into
+//        build/compiler/import-context/<slug>.* so `compile_to_llvm_file_with_module`
+//        on the main source sees the capsule's layout and symbols.
+//
+//   4. compile_capsule_modules(sources, project_root)
+//        Lowers each capsule source to its own .ll file under
+//        build/sailfin/capsules/<mangled-slug>.ll so the final clang link
+//        can bind the main module's external declarations.
+//
+// Consumers then call `_clang_link_multi` with the main .ll and the
+// capsule .ll paths, and clang produces a linked binary with all
+// capsule symbols resolved.
+import {
+    _atomic_rename_into_place,
+    _collect_sfn_files_cmd,
+    _mktemp_sibling_cmd
+} from "../build/fs";
+import {
+    BuildCacheConfig,
+    CacheKey,
+    CacheStats,
+    cache_clean,
+    cache_compiler_identity,
+    cache_copy_artifact_to,
+    cache_key_for,
+    cache_lookup_artifact,
+    cache_root,
+    cache_store_artifact,
+    canonicalize_flags,
+    empty_build_cache_config,
+    empty_cache_stats,
+    is_valid_digest,
+    sha256_of_file
+} from "../build_cache";
+import {
+    CapsuleArtifactLayout,
+    capsule_artifact_layout_from_specs,
+    ir_path_for_slug,
+    is_safe_scope_name,
+    parse_scope_name
+} from "../capsule_artifact";
+import { ParallelEmitTask, _cr_resolve_jobs, _cr_run_parallel_emit } from "../capsule_emit_parallel";
+import {
+    _cr_find_substring,
+    _cr_source_imports_host,
+    collect_relative_import_specs,
+    collect_scoped_import_specs
+} from "../capsule_import_scan";
+import { _display_capsule_name_cmd } from "../capsule_names";
+import { render_diagnostic } from "../diagnostics_render";
+import { inferred_public_effects } from "../effect_checker";
+import { empty_import_symbols } from "../effect_imports";
+import { effect_subsumes, is_canonical_effect } from "../effect_taxonomy";
+import { emit_subprocess_with_retry } from "../emit_helpers";
+import { set_import_context_root } from "../llvm/mod";
+import { _LockEntry, lock_get_versions } from "../lock";
+import {
+    compile_to_llvm_file_with_module,
+    compile_to_llvm_file_with_module_imports,
+    module_name_from_path,
+    number_to_string,
+    write_native_text_file_with_module
+} from "../main";
+import { parse_program } from "../parser/mod";
+import { RuntimeCapsuleArtifacts, enumerate_runtime_capsule_artifacts } from "../runtime_capsule_resolver";
+import {
+    SemVer,
+    semver_compare,
+    semver_is_valid,
+    semver_parse,
+    semver_satisfies_floor
+} from "../semver";
+import { char_code_at_text, contains_string, substring } from "../string_utils";
+import { test_runner_scratch_root } from "../test_runner_state";
+import {
+    toml_get_capabilities_required,
+    toml_get_dependencies,
+    toml_get_name,
+    toml_get_toolchain_channel,
+    toml_get_toolchain_sfn,
+    toml_get_version,
+    toml_get_workspace_capabilities_allow,
+    toml_get_workspace_capabilities_deny,
+    toml_get_workspace_capabilities_grant,
+    toml_get_workspace_capabilities_mode,
+    toml_get_workspace_default_members,
+    toml_get_workspace_exclude,
+    toml_get_workspace_members,
+    toml_get_workspace_package_version,
+    toml_value_is_workspace_inherit
+} from "../toml_parser";
+import { Diagnostic, diagnostic_to_diag } from "../typecheck_types";
+import { resolve_compiler_version, resolve_compiler_version_for_cache } from "../version";
+import { workspace_member_for_spec } from "./capability";
+import { compile_capsule_modules } from "./compile";
+import { ResolverDedupeResult, _cr_resolve_and_dedupe } from "./dedupe";
+import {
+    _cr_collect_capsule_sources,
+    _cr_enumerate_host_capsule_sources,
+    _cr_locate_cached_capsule_src_latest,
+    enumerate_capsule_sources
+} from "./discovery";
+import {
+    _cr_any_entry_imports_host,
+    _cr_dep_specs_from_text,
+    enumerate_binary_capsule_sources,
+    enumerate_cache_implicit_sources,
+    enumerate_workspace_implicit_sources
+} from "./implicit";
+import {
+    _cr_consumer_root_prefix,
+    _cr_dirname,
+    _cr_ends_with,
+    _cr_ensure_dir,
+    _cr_find_char,
+    _cr_get_home,
+    _cr_import_context_root,
+    _cr_is_safe_segment,
+    _cr_is_safe_version,
+    _cr_path_join,
+    _cr_resolve_ll_path,
+    _cr_routing_slug,
+    _cr_scratch_root,
+    _cr_sort_strings,
+    _cr_string_array_contains,
+    _cr_string_in_array,
+    _cr_string_lt,
+    discover_project_root,
+    mangle_slug
+} from "./paths";
+import {
+    _cr_canonicalise_path,
+    _cr_empty_relative_scan_memo,
+    _cr_enumerate_relative_sources_memo,
+    _cr_relative_slug,
+    enumerate_relative_sources,
+    resolve_relative_import
+} from "./relative";
+import {
+    _cr_collect_per_source_dep_manifests,
+    _cr_manifests_to_asm_paths,
+    _cr_stage_import_deps,
+    _cr_stage_one,
+    stage_capsule_imports
+} from "./staging";
+import {
+    CapabilityDriftReport,
+    CapsuleSource,
+    CheckCapsuleResolution,
+    CompileCapsuleResult,
+    MemberCapabilityAudit,
+    ModuleCacheEvent,
+    ProjectCapsuleResult,
+    ResolverConsumer,
+    TestCapsuleResolution,
+    WorkspaceMember,
+    _cr_module_cache_event_failure,
+    empty_resolver_consumer
+} from "./types";
+import { discover_workspace_root, load_workspace_members } from "./workspace";
+
+// Struct definitions and their constructors live in `./capsule_resolver/types`
+// and are NOT re-exported from here. Consumers import them from that module
+// directly. A re-export — bare or with a `from` clause — leaves this module's
+// `.sfn-asm` without a `.fn` signature for the symbol, so a consumer resolving
+// through it cannot determine the callee's return type and the emit fails
+// (`E0600`, `E1002`, docs/rca/2026-04-18-reexport-diagnostic-gep.md).
+export {
+    prepare_project_capsules,
+    prepare_project_capsules_for_check,
+    prepare_project_capsules_for_test,
+    stage_capsule_imports_for_emit
+};
+
+// ---- Dependency enumeration ----
+// ---- Import-context staging ----
+// ---- Cache wiring helpers (Stage C PR1b) ----
+// ---- Capsule module compilation ----
+// ---- Top-level orchestrator ----
+// Resolve, stage, and compile every dependency reachable from
+// `input_path`. Returns a `ProjectCapsuleResult` carrying the dep
+// `.ll` paths and the per-build cache stats. `ll_paths` is empty
+// when no dependencies are needed AND on slug collision or stage
+// failure. Issue #991: the `success` flag disambiguates the two —
+// `success = true` with empty `ll_paths` means "no deps" (a consumer
+// can safely link the entry alone), while `success = false` means a
+// collision/stage/compile failure left `ll_paths` empty. The `-p`
+// build driver (`cli_main.sfn`) consults this flag and exits non-zero
+// instead of linking the survivors. Other consumers that read only
+// `ll_paths` (e.g. the `sfn run` path) do not yet check it and would
+// need the same guard to propagate emit failures.
+// #1405 Bug 2: minimum resolved-closure size at which a positional
+// (non-`-p`) build or test opts into subprocess-per-module isolation.
+// Below it, the closure compiles in-process (cheaper, and avoids
+// perturbing the entry's in-process arena with `process.run` argv
+// allocations — see the `walk_src` note in cli_main.sfn). At or above
+// it, each module compiles in a child with a fresh arena that dies on
+// exit, bounding peak RSS under the 8 GiB self-cap. A whole-compiler-
+// importing source (e.g. a unit test importing `lower_to_llvm_ir_from_text`)
+// resolves ~120 modules, far above this; a typical end-user build with a
+// handful of capsule deps stays in-process.
+fn _cr_positional_isolation_threshold() -> int { return 16; }
+
+// #1405 Bug 2: choose the emit binary for a build/test. A `-p` build
+// always threads a non-empty `sailfin_exe`, which is returned unchanged
+// so the self-host path is byte-for-byte unaffected. A positional
+// build/test arrives with an empty `sailfin_exe`; when a same-generation
+// binary is available (`binary_dir`) and the resolved import closure is
+// large, return `<binary_dir>/sailfin` so `stage_capsule_imports` /
+// `compile_capsule_modules` take their subprocess-per-module path
+// instead of accumulating the entire closure in one never-freed bump
+// arena (the ~15.5 GB cold-compile OOM this issue fixes).
+fn _cr_effective_isolation_exe(sailfin_exe: string, binary_dir: string, source_count: int) -> string {
+    if sailfin_exe.length > 0 { return sailfin_exe; }
+    if binary_dir.length == 0 { return sailfin_exe; }
+    if source_count < _cr_positional_isolation_threshold() {
+        return sailfin_exe;
+    }
+    return binary_dir + "/sfn";
+}
+
+fn prepare_project_capsules(input_path: string, config: BuildCacheConfig, consumer: ResolverConsumer, sailfin_exe: string, work_dir: string, binary_dir: string) -> ProjectCapsuleResult ![io] {
+    let empty_paths: string[] = [];
+    let empty_events: ModuleCacheEvent[] = [];
+    let empty_runtime_capsules: RuntimeCapsuleArtifacts[] = [];
+    let entry_paths: string[] = [input_path];
+    let resolved = _cr_resolve_and_dedupe(entry_paths, consumer, binary_dir);
+    if resolved.has_collision {
+        // Slug collision is a setup error (already reported by
+        // `_cr_resolve_and_dedupe`), not a "no deps" build.
+        return ProjectCapsuleResult {
+            ll_paths: empty_paths,
+            success: false,
+            stats: empty_cache_stats(),
+            module_events: empty_events,
+            runtime_capsules: empty_runtime_capsules
+        };
+    }
+    // Stage D PR2: surface every `kind = "runtime"` workspace
+    // member the project's `[dependencies]` declares. Filtered by
+    // `manifest_dep_specs` so end-user builds (no runtime dep
+    // declared) get an empty list and the link path falls through
+    // to the legacy `_clang_compile_runtime_objects` helper.
+    // Resolver-side discovery is the source of truth: the workspace
+    // root + the manifest's declared deps both come from
+    // `_cr_resolve_and_dedupe` already.
+    let mut runtime_capsules: RuntimeCapsuleArtifacts[] = [];
+    if resolved.workspace_root.length > 0 {
+        if resolved.manifest_dep_specs.length > 0 {
+            runtime_capsules = enumerate_runtime_capsule_artifacts(resolved.workspace_root, resolved.manifest_dep_specs);
+        }
+    }
+    if resolved.sources.length == 0 {
+        // Legitimate "no capsule dependencies" — empty `ll_paths`
+        // here is success, not a compile failure.
+        return ProjectCapsuleResult {
+            ll_paths: empty_paths,
+            success: true,
+            stats: empty_cache_stats(),
+            module_events: empty_events,
+            runtime_capsules: runtime_capsules
+        };
+    }
+
+    // #1405 Bug 2: route a large-closure positional build onto the
+    // subprocess-per-module path (fresh arena per child) when a
+    // same-generation binary is available; `-p` builds (non-empty
+    // `sailfin_exe`) are unchanged.
+    let effective_exe = _cr_effective_isolation_exe(sailfin_exe, binary_dir, resolved.sources.length);
+
+    let staged = stage_capsule_imports(resolved.sources, effective_exe, work_dir);
+    if !staged {
+        print.err("capsule-resolver: failed to stage import-context for project capsules");
+        return ProjectCapsuleResult {
+            ll_paths: empty_paths,
+            success: false,
+            stats: empty_cache_stats(),
+            module_events: empty_events,
+            runtime_capsules: runtime_capsules
+        };
+    }
+
+    // Stage D PR4: when `walk_project_src` is on, the binary-
+    // capsule walker excludes the entry from enumeration (the
+    // entry's `.ll` is produced separately by the caller's
+    // `compile_to_llvm_file_with_module`, so it doesn't need a
+    // capsule-side compile). But the entry's `.sfn-asm` IS
+    // needed by every sibling module that imports from it —
+    // without it staged, `<seed> emit --module-name <sibling>
+    // llvm <sibling-src>` can't see the entry's exported symbol
+    // signatures and emits dangling references. The compiler's
+    // self-build is the canonical case: every module imports
+    // `compile_to_llvm_file_with_module` / `compile_to_sailfin`
+    // / etc. from `main.sfn`. Staging the entry separately keeps
+    // the entry out of `compile_capsule_modules` (no double-
+    // emit) while making its import-context available.
+    // #984: the staged entry doubles as the extra slug universe for
+    // `.import-deps` resolution, so siblings that import the entry get
+    // its `.sfn-asm` listed in their sidecar and `sibling→entry`
+    // effects are enforced on the build path. `[]` when the entry isn't
+    // walk-excluded (non-`-p` builds resolve the entry as a normal
+    // source already).
+    let mut slug_universe_extra: CapsuleSource[] = [];
+    if consumer.walk_project_src {
+        let entry_path = entry_paths[0];
+        if fs.exists(entry_path) {
+            let entry_slug = module_name_from_path(entry_path);
+            let mut entry_src: CapsuleSource[] = [];
+            entry_src.push(CapsuleSource {
+                spec: "", source_path: entry_path, slug: entry_slug, ll_path: ""
+            });
+            let entry_staged = stage_capsule_imports(entry_src, effective_exe, work_dir);
+            if !entry_staged {
+                print.err("capsule-resolver: failed to stage entry import-context for "
+                    + entry_path);
+                return ProjectCapsuleResult {
+                    ll_paths: empty_paths,
+                    success: false,
+                    stats: empty_cache_stats(),
+                    module_events: empty_events,
+                    runtime_capsules: runtime_capsules
+                };
+            }
+            slug_universe_extra = entry_src;
+        }
+    }
+
+    let result = compile_capsule_modules(resolved.sources, slug_universe_extra, config, effective_exe, work_dir);
+    if !result.success {
+        // A per-module emit failed (e.g. an effect-gate `E0402`).
+        // The helper has already printed the diagnostic; surface the
+        // failure so the driver exits non-zero instead of linking the
+        // surviving modules.
+        return ProjectCapsuleResult {
+            ll_paths: empty_paths,
+            success: false,
+            stats: result.stats,
+            module_events: result.module_events,
+            runtime_capsules: runtime_capsules
+        };
+    }
+    return ProjectCapsuleResult {
+        ll_paths: result.ll_paths,
+        success: true,
+        stats: result.stats,
+        module_events: result.module_events,
+        runtime_capsules: runtime_capsules
+    };
+}
+
+// Resolver pass tuned for `sfn check`: enumerate, dedupe, and stage
+// the same `.sfn-asm` + `.layout-manifest` artifacts that the full
+// builder would, but skip `compile_capsule_modules` so no LLVM IR is
+// produced. Returns the staged `.sfn-asm` paths so the typechecker
+// import-loader can read interface declarations off disk and feed
+// them into `typecheck_diagnostics_with_imports`.
+//
+// `entry_paths` is a list of source files that share the same
+// project + workspace roots. Callers (e.g. `check/engine.sfn`) group
+// `sfn check` arguments by `(discover_project_root,
+// discover_workspace_root)` and pass each group's file list as a
+// separate invocation, so a multi-path `sfn check pathA pathB` that
+// spans capsules gets a per-capsule resolution pass and isn't
+// silently anchored on whichever path happened to come first.
+//
+// Contract differences from `prepare_project_capsules`:
+//   - On slug collision, returns `staging_failed = true` instead of
+//     `[]`, so the CLI can distinguish "no deps" (clean exit 0/1) from
+//     "setup error" (exit 2).
+//   - On `stage_capsule_imports` failure, same: `staging_failed = true`.
+//   - Standalone files outside any capsule.toml are valid input and
+//     return an empty resolution (no error) — relative-import walking
+//     still happens via `enumerate_relative_sources`.
+fn prepare_project_capsules_for_check(entry_paths: string[], consumer: ResolverConsumer, sailfin_exe: string, work_dir: string, binary_dir: string) -> CheckCapsuleResolution ![io] {
+    let empty_paths: string[] = [];
+    let resolved = _cr_resolve_and_dedupe(entry_paths, consumer, binary_dir);
+    // Phase F: surface the manifest's capability surface even on
+    // the early-exit paths. A collision/stage failure shouldn't
+    // silently disable E0403 for a clean re-run; the failure modes
+    // here are about staging artifacts, not about manifest
+    // semantics. We pass through whatever `_cr_resolve_and_dedupe`
+    // already extracted from the manifest read.
+    if resolved.has_collision {
+        return CheckCapsuleResolution {
+            asm_paths: empty_paths,
+            capsule_count: 0,
+            staging_failed: true,
+            capabilities_required: resolved.capabilities_required
+        };
+    }
+    if resolved.sources.length == 0 {
+        return CheckCapsuleResolution {
+            asm_paths: empty_paths,
+            capsule_count: 0,
+            staging_failed: false,
+            capabilities_required: resolved.capabilities_required
+        };
+    }
+
+    // #1246: thread `sailfin_exe` so staging mirrors `sfn build` —
+    // each cache-miss module is emitted in a subprocess
+    // (`_cr_stage_one` exe branch via `emit_subprocess_with_retry`)
+    // and the parent arena stays bounded. The prior in-process
+    // fallback (empty exe) peaked 8.3GB on a cold
+    // `check compiler/src/cli_main.sfn` because the full import
+    // closure's AST + native text accumulated in one arena
+    // (#1245). Warm runs are unaffected: `_cr_stage_one`'s cache
+    // hit short-circuits before the exe branch, so no subprocess
+    // is spawned. Callers without `binary_dir` plumbing pass ""
+    // and keep the in-process path.
+    let staged = stage_capsule_imports(resolved.sources, sailfin_exe, work_dir);
+    if !staged {
+        print.err("capsule-resolver: failed to stage import-context for project capsules");
+        return CheckCapsuleResolution {
+            asm_paths: empty_paths,
+            capsule_count: 0,
+            staging_failed: true,
+            capabilities_required: resolved.capabilities_required
+        };
+    }
+
+    let check_context_root = _cr_import_context_root(work_dir);
+    let mut asm_paths: string[] = [];
+    let mut ai: int = 0;
+    loop {
+        if ai >= resolved.sources.length { break; }
+        asm_paths.push(check_context_root + "/" + resolved.sources[ai].slug
+            + ".sfn-asm");
+        ai += 1;
+    }
+
+    return CheckCapsuleResolution {
+        asm_paths: asm_paths,
+        capsule_count: resolved.sources.length as int,
+        staging_failed: false,
+        capabilities_required: resolved.capabilities_required
+    };
+}
+
+// #1370: import-context staging tailored for a user-facing `emit llvm`
+// of a capsule consumer. Stages the consumer's declared capsule
+// dependencies (e.g. `sfn/http`) into the import-context tree so the
+// imported functions (e.g. `serve`) enter the lowering `functions` list
+// — exactly as `check` / `build` / `run` already do — and the #1323
+// builtin-serve gate selects the capsule fn instead of `@sfn_serve`.
+//
+// Gated on `manifest_dep_specs` being non-empty — i.e. the entry's
+// `capsule.toml` declares `[dependencies]`. This deliberately EXCLUDES
+// build-internal bare `emit llvm` calls on runtime modules
+// (`runtime/prelude.sfn`, `runtime/sfn/*` — `make ci-cross-windows`),
+// which have NO consumer manifest. Staging such a module's relative
+// sibling closure into the shared import-context makes the subsequent
+// in-process emit pick up the siblings' runtime-helper signatures and
+// render imported-signature `declare`s that conflict with the
+// descriptor declares (the documented pollution hazard — see
+// `_runtime_sfn_ctx_root` in `cli_main.sfn`), producing invalid IR.
+// Returns true when staging was a no-op (no declared deps) or
+// succeeded; false on a slug collision or staging error.
+fn stage_capsule_imports_for_emit(entry_path: string, sailfin_exe: string, work_dir: string) -> boolean ![io] {
+    let entry_paths: string[] = [entry_path];
+    let resolved = _cr_resolve_and_dedupe(entry_paths, empty_resolver_consumer(), "");
+    if resolved.has_collision { return false; }
+    // No declared capsule dependencies → nothing to stage. A bare
+    // runtime/prelude emit (no consumer manifest) lands here untouched.
+    if resolved.manifest_dep_specs.length == 0 { return true; }
+    if resolved.sources.length == 0 { return true; }
+    return stage_capsule_imports(resolved.sources, sailfin_exe, work_dir);
+}
+
+// Resolver pass tuned for `sfn test`: stages `.sfn-asm` import-context
+// (so the typechecker import-loader can read interface declarations
+// for cross-module conformance) AND compiles each capsule source to
+// its own `.ll` (so clang link can resolve imported helper definitions
+// directly).
+//
+// `entry_paths` is a list of test source files that share the same
+// project + workspace roots. The CLI groups discovered tests by
+// `(discover_project_root, discover_workspace_root)` and calls this
+// once per group, mirroring the per-group resolution `check/engine.sfn`
+// already performs. Resolution work is amortized across every test
+// in the group; per-(group, capsule) staging + compilation runs at
+// most once.
+//
+// Contract differences from `prepare_project_capsules`:
+//   - On slug collision, returns `staging_failed = true` (caller
+//     exits 2 to distinguish setup error from test failure).
+//   - On `stage_capsule_imports` failure, same: `staging_failed = true`.
+//   - On `compile_capsule_modules` failure, same: `staging_failed =
+//     true`, `ll_paths = []`.
+//   - Standalone test files outside any capsule.toml are valid input
+//     and return an empty resolution (no error) — the test source's
+//     own compile path still runs, and any relative-import walking
+//     happens inside the per-entry `enumerate_relative_sources`
+//     branch of `_cr_resolve_and_dedupe`.
+fn prepare_project_capsules_for_test(entry_paths: string[], consumer: ResolverConsumer, sailfin_exe: string, work_dir: string, binary_dir: string) -> TestCapsuleResolution ![io] {
+    let empty_paths: string[] = [];
+    let resolved = _cr_resolve_and_dedupe(entry_paths, consumer, binary_dir);
+    // Phase F: thread `capabilities_required` through every exit
+    // path. Same rationale as `prepare_project_capsules_for_check`:
+    // staging failures are setup-time concerns, not manifest
+    // semantics — the gate still needs to know the capability
+    // surface to render `E0403` correctly on a clean retry.
+    if resolved.has_collision {
+        return TestCapsuleResolution {
+            asm_paths: empty_paths,
+            ll_paths: empty_paths,
+            capsule_count: 0,
+            staging_failed: true,
+            capabilities_required: resolved.capabilities_required
+        };
+    }
+    if resolved.sources.length == 0 {
+        return TestCapsuleResolution {
+            asm_paths: empty_paths,
+            ll_paths: empty_paths,
+            capsule_count: 0,
+            staging_failed: false,
+            capabilities_required: resolved.capabilities_required
+        };
+    }
+
+    // Stage E PR1: thread `sailfin_exe` to subprocess-stage imports too.
+    // #1405 Bug 2: the `sfn test` runner now threads a same-generation
+    // `binary_dir`, so a large-closure test (e.g. one importing the whole
+    // compiler via `lower_to_llvm_ir_from_text`) isolates per-module emit
+    // in subprocesses (fresh arena per child) instead of accumulating the
+    // entire closure in one never-freed bump arena and OOMing past the
+    // 8 GiB self-cap on a cold test-bin cache. Small fixtures (below the
+    // closure-size threshold) keep the in-process fast path; a non-empty
+    // `sailfin_exe` is returned unchanged.
+    let effective_exe = _cr_effective_isolation_exe(sailfin_exe, binary_dir, resolved.sources.length);
+    let staged = stage_capsule_imports(resolved.sources, effective_exe, work_dir);
+    if !staged {
+        print.err("capsule-resolver: failed to stage import-context for project capsules");
+        return TestCapsuleResolution {
+            asm_paths: empty_paths,
+            ll_paths: empty_paths,
+            capsule_count: 0,
+            staging_failed: true,
+            capabilities_required: resolved.capabilities_required
+        };
+    }
+
+    let test_context_root = _cr_import_context_root(work_dir);
+    let mut asm_paths: string[] = [];
+    let mut ai: int = 0;
+    loop {
+        if ai >= resolved.sources.length { break; }
+        asm_paths.push(test_context_root + "/" + resolved.sources[ai].slug
+            + ".sfn-asm");
+        ai += 1;
+    }
+
+    // `sfn test` doesn't yet take a CLI cache config; pass the
+    // env-driven default. When the test runner grows `--no-cache`
+    // / `--clean`, thread the resolved config in here.
+    let test_config = empty_build_cache_config();
+    // #984: `sfn test` resolves the entry as a normal source (no
+    // walk-exclusion), so there is no extra slug universe to thread.
+    let test_slug_universe_extra: CapsuleSource[] = [];
+    let result = compile_capsule_modules(resolved.sources, test_slug_universe_extra, test_config, effective_exe, work_dir);
+    // Surface a compile failure as `staging_failed = true` so the
+    // test runner exits 2 instead of trying to link against
+    // missing helper objects. (The PR1c stats are dropped on this
+    // path — once the test runner needs them, the
+    // `TestCapsuleResolution` struct gets a `cache_stats` field.)
+    if !result.success {
+        return TestCapsuleResolution {
+            asm_paths: asm_paths,
+            ll_paths: empty_paths,
+            capsule_count: resolved.sources.length as int,
+            staging_failed: true,
+            capabilities_required: resolved.capabilities_required
+        };
+    }
+
+    return TestCapsuleResolution {
+        asm_paths: asm_paths,
+        ll_paths: result.ll_paths,
+        capsule_count: resolved.sources.length as int,
+        staging_failed: false,
+        capabilities_required: resolved.capabilities_required
+    };
+}

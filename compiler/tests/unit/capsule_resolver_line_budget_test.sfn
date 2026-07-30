@@ -1,0 +1,72 @@
+// Line-budget sentinel for the `compiler/src/capsule_resolver/` modules —
+// the cheap regression guard for this decomposition's per-worker RSS lever.
+//
+// `capsule_resolver.sfn` was 4,691 lines, the largest module in the tree and
+// the single heaviest per-module emit: 2,632,332 KB peak RSS measured on an
+// isolated `sfn emit native`. Splitting it into twelve modules took the
+// heaviest one to 587,280 KB (-77.7%).
+//
+// This guard exists because the file has regrown before. `capsule_emit_parallel.sfn`
+// records that `capsule_resolver.sfn` already survived two prior extractions
+// (`capsule_import_scan.sfn` and `capsule_emit_parallel.sfn` were both carved
+// out of it, explicitly to bring it under the CI per-job gate) and it still
+// reached 4,691 lines. A third split without a sentinel invites a fourth.
+//
+// Why the budget bounds RSS: per-module working set is what caps parallel
+// `--jobs` (SFEP-0027 §2.1), and `capsule_emit_parallel.sfn`'s
+// `_cr_ram_budget_jobs` reserve is sized from the heaviest compiler-module
+// emit. A module creeping back toward four figures re-inflates that reserve
+// and costs fan-out on every CI build.
+//
+// Budget rationale: the largest module at the end of the split is
+// `mod.sfn` at 607 lines. 900 leaves comfortable headroom for routine
+// maintenance while flagging any module drifting toward the 1,500-line soft
+// budget in `.claude/rules/code-style.md` — which is a ceiling, not a target,
+// for a subsystem that has already proven it regrows.
+import { find_char_local } from "../../src/string_utils";
+
+let CAPSULE_RESOLVER_MODULE_LINE_BUDGET: int = 900;
+
+// Count newlines, matching `wc -l` semantics (a trailing newline is not
+// double-counted). Cheap single linear scan via `find_char_local`.
+fn _count_newlines(source: string) -> int {
+    let mut count: int = 0;
+    let mut pos: int = 0;
+    loop {
+        let idx = find_char_local(source, "\n", pos);
+        if idx < 0 { break; }
+        count += 1;
+        pos = idx + 1;
+    }
+    return count;
+}
+
+fn _module_lines(name: string) -> int ![io] {
+    let source = fs.readFile("compiler/src/capsule_resolver/" + name + ".sfn");
+    // A non-empty read is a precondition — guards against a path typo
+    // silently passing the budget check on an empty string.
+    assert source.length > 0;
+    return _count_newlines(source);
+}
+
+test "capsule resolver: every submodule stays under the line budget" ![io] {
+    let modules: string[] = ["capability", "compile", "dedupe", "discovery", "implicit", "mod", "paths", "relative", "staging", "toolchain", "types", "workspace"];
+    let mut i: int = 0;
+    loop {
+        if i >= modules.length { break; }
+        let lines = _module_lines(modules[i]);
+        assert lines > 0;
+        assert lines < CAPSULE_RESOLVER_MODULE_LINE_BUDGET;
+        i += 1;
+    }
+}
+
+// The flat `capsule_resolver.sfn` must stay deleted. Module resolution probes
+// `foo.sfn` before falling back to `foo/mod.sfn`, so re-adding the flat file
+// beside the folder would shadow it for every `./capsule_resolver` import and
+// silently revert this decomposition while still compiling green — the exact
+// failure this split had to avoid.
+test "capsule resolver: the flat module does not shadow the folder" ![io] {
+    assert ! fs.exists("compiler/src/capsule_resolver.sfn");
+    assert fs.exists("compiler/src/capsule_resolver/mod.sfn");
+}
