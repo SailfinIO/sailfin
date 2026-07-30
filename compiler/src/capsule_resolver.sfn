@@ -72,6 +72,27 @@ import {
 } from "./capsule_import_scan";
 import { _display_capsule_name_cmd } from "./capsule_names";
 import {
+    _cr_consumer_root_prefix,
+    _cr_dirname,
+    _cr_ends_with,
+    _cr_ensure_dir,
+    _cr_find_char,
+    _cr_get_home,
+    _cr_import_context_root,
+    _cr_is_safe_segment,
+    _cr_is_safe_version,
+    _cr_path_join,
+    _cr_resolve_ll_path,
+    _cr_routing_slug,
+    _cr_scratch_root,
+    _cr_sort_strings,
+    _cr_string_array_contains,
+    _cr_string_in_array,
+    _cr_string_lt,
+    discover_project_root,
+    mangle_slug
+} from "./capsule_resolver/paths";
+import {
     CapabilityDriftReport,
     CapsuleSource,
     CheckCapsuleResolution,
@@ -138,14 +159,12 @@ import { resolve_compiler_version, resolve_compiler_version_for_cache } from "./
 // (`E0600`, `E1002`, docs/rca/2026-04-18-reexport-diagnostic-gep.md).
 export {
     compile_capsule_modules,
-    discover_project_root,
     discover_workspace_root,
     enumerate_binary_capsule_sources,
     enumerate_capsule_sources,
     enumerate_relative_sources,
     enumerate_workspace_implicit_sources,
     load_workspace_members,
-    mangle_slug,
     parse_workspace_member_paths,
     prepare_project_capsules,
     prepare_project_capsules_for_check,
@@ -165,255 +184,9 @@ export {
 };
 
 // ---- Path helpers ----
-fn _cr_dirname(path: string) -> string {
-    let mut last_slash: int = -1;
-    let mut i: int = 0;
-    loop {
-        if i >= path.length { break; }
-        if path[i] == "/" { last_slash = i; }
-        i += 1;
-    }
-    if last_slash < 0 { return "."; }
-    if last_slash == 0 { return "/"; }
-    return substring(path, 0, last_slash);
-}
-
-fn _cr_path_join(base: string, name: string) -> string {
-    if base.length == 0 { return name; }
-    if base[base.length - 1] == "/" { return base + name; }
-    return base + "/" + name;
-}
-
-fn _cr_find_char(text: string, ch: string, start: int) -> int {
-    let mut i: int = start;
-    loop {
-        if i >= text.length { break; }
-        if substring(text, i, i + 1) == ch { return i; }
-        i += 1;
-    }
-    return -1;
-}
-
-fn _cr_starts_with(text: string, prefix: string) -> boolean {
-    if prefix.length > text.length { return false; }
-    return strings_equal(substring(text, 0, prefix.length), prefix);
-}
-
-fn _cr_ends_with(text: string, suffix: string) -> boolean {
-    if suffix.length > text.length { return false; }
-    let start = text.length - suffix.length;
-    return strings_equal(substring(text, start, text.length), suffix);
-}
-
-// Forward-declare the arena-aware popen-based capture helper so the
-// resolver's env reads (`_cr_scratch_root`, `_cr_get_home`,
-// `SAILFIN_BUILD_JOBS` lookup, `mktemp` calls) don't go through the
-// fixed `/tmp/.sfn_capsule_resolver_tmp` path that previously raced
-// across xargs-spawned emit workers and parallel `sfn test`
-// invocations. The helper is the same one
-// `build/fs.sfn:_shell_read_cmd` calls; declaring it here
-// keeps the resolver self-contained (no new cross-module import).
-extern fn sailfin_runtime_shell_capture(cmd: *u8) -> *u8;
-
-fn _cr_shell_read(cmd: string) -> string ![io] {
-    let captured = sailfin_runtime_shell_capture(cmd);
-    // Match the trimming semantics of `build/fs.sfn:_shell_read_cmd`
-    // (which routes through `_toml_trim_cmd` for symmetric whitespace
-    // stripping). Without this, an env value with trailing whitespace
-    // could make `_cr_scratch_root` and `_test_scratch_root` disagree
-    // on the path and route artifacts to different directories.
-    if captured.length == 0 { return ""; }
-    let mut start: int = 0;
-    let mut end: int = captured.length;
-    loop {
-        if start >= end { break; }
-        let c = substring(captured, start, start + 1);
-        let mut ws: boolean = false;
-        if c == " " { ws = true; }
-        if c == "\n" { ws = true; }
-        if c == "\r" { ws = true; }
-        if c == "\t" { ws = true; }
-        if !ws { break; }
-        start += 1;
-    }
-    loop {
-        if end <= start { break; }
-        let c = substring(captured, end - 1, end);
-        let mut ws: boolean = false;
-        if c == " " { ws = true; }
-        if c == "\n" { ws = true; }
-        if c == "\r" { ws = true; }
-        if c == "\t" { ws = true; }
-        if !ws { break; }
-        end -= 1;
-    }
-    return substring(captured, start, end);
-}
-
-fn _cr_get_home() -> string ![io] { return env.get("HOME"); }
-
-fn _cr_ensure_dir(path: string) -> void ![io] {
-    if !fs.exists(path) { fs.createDirectory(path, true); }
-}
-
-// Resolve the import-context root (`.sfn-asm` + `.layout-manifest`
-// staging area). When `work_dir` is empty (the default `sfn build`
-// path with no `--work-dir`), this is the canonical `build/compiler/import-context`
-// directory that `llvm/imports.sfn:_resolve_layout_manifest_path_for_slug`
-// scans. When `work_dir` is non-empty (`sfn build --work-dir <root>`),
-// the staging area moves under `<root>/compiler/import-context` so the
-// build can be redirected away from CWD-relative `build/`.
-//
-// SFN-175 moved this from the legacy Python-bootstrap-era
-// `build/native/import-context`; SFN-194 retired the one-release old-path
-// read fallback + Makefile copy shim once a seed staging the new path was
-// pinned, so this is now the single canonical location.
-fn _cr_import_context_root(work_dir: string) -> string {
-    if work_dir.length == 0 { return "build/compiler/import-context"; }
-    return work_dir + "/compiler/import-context";
-}
-
-// Validate a capsule.toml path segment is safe (no traversal).
-fn _cr_is_safe_segment(value: string) -> boolean {
-    if value.length == 0 { return false; }
-    if strings_equal(value, ".") { return false; }
-    if strings_equal(value, "..") { return false; }
-    if _cr_find_char(value, "/", 0) >= 0 { return false; }
-    if _cr_find_char(value, "\\", 0) >= 0 { return false; }
-    return true;
-}
-
-fn _cr_is_safe_version(value: string) -> boolean {
-    if value.length == 0 { return false; }
-    if _cr_find_char(value, "/", 0) >= 0 { return false; }
-    if _cr_find_char(value, "\\", 0) >= 0 { return false; }
-    // Guard against ".." anywhere
-    let mut i: int = 0;
-    loop {
-        if i + 1 >= value.length { break; }
-        if substring(value, i, i + 2) == ".." { return false; }
-        i += 1;
-    }
-    return true;
-}
-
 // ---- Slug mangling ----
-// Convert a slug like "sfn/cli/mod" to "sfn__cli__mod" for use as a
-// filesystem-safe identifier (e.g. in .ll filenames).
-fn mangle_slug(slug: string) -> string {
-    let mut out: string = "";
-    let mut i: int = 0;
-    loop {
-        if i >= slug.length { break; }
-        let ch = substring(slug, i, i + 1);
-        if ch == "/" { out = out + "__"; } else { out = out + ch; }
-        i += 1;
-    }
-    return out;
-}
-
 // ---- LL path resolution (Stage C2b2) ----
-// Resolve the scratch root used for `_cr_legacy_ll_path` and the
-// `compile_capsule_modules` ensure-dir calls. Defaults to
-// `"build/sailfin"`; honours `SAILFIN_TEST_SCRATCH` when set so that
-// callers wanting per-invocation isolation can keep concurrent
-// `sfn test` runs from racing on `build/sailfin/capsules/<slug>.ll`.
-// The multi-file `sfn test` runner mints such a root via `mktemp -d`
-// (issue #850, replacing the retired `scripts/run_native_test.sh`)
-// and hands it to each child via `env`. Single-file `sfn test` runs set
-// the same root in process-local `test_runner_state`, because their
-// resolver work runs in the current process and cannot mutate its own
-// environment. The env var is read once via `env.get` (the same
-// non-shelling read `_cr_resolve_jobs` uses for `SAILFIN_BUILD_JOBS`);
-// an empty value falls through to the default so that
-// `unset SAILFIN_TEST_SCRATCH` and `SAILFIN_TEST_SCRATCH=` behave
-// identically (no surprise paths on a stripped env).
-fn _cr_scratch_root() -> string ![io] {
-    let active_test_root = test_runner_scratch_root();
-    if active_test_root.length > 0 { return active_test_root; }
-    let scratch = env.get("SAILFIN_TEST_SCRATCH");
-    if scratch.length > 0 { return scratch; }
-    return "build/sailfin";
-}
-
-// Legacy flat layout for the `.ll` of a slug. Used by the C2b2
-// fallback path: positional builds, single-segment `[capsule].name`
-// (the compiler self-host falls in this bucket — its name is
-// `"sailfin"`), and any source whose slug doesn't match a known
-// dep prefix. One source of truth so the fallback never drifts
-// across the two CapsuleSource construction sites.
-fn _cr_legacy_ll_path(slug: string) -> string ![io] {
-    return _cr_scratch_root() + "/capsules/" + mangle_slug(slug) + ".ll";
-}
-
-// Resolve the per-module `.ll` path under the given layout, falling
-// back to the legacy flat layout when the layout doesn't classify
-// the slug. Pure delegate to `ir_path_for_slug` from
-// `capsule_artifact.sfn`; kept here so the resolver has a single
-// site that owns the fallback policy.
-fn _cr_resolve_ll_path(slug: string, layout: CapsuleArtifactLayout) -> string ![io] {
-    let candidate = ir_path_for_slug(layout, slug);
-    if candidate.length > 0 { return candidate; }
-    return _cr_legacy_ll_path(slug);
-}
-
-// Compute the prefix that should be stripped from a relative-
-// import slug before routing it under the consumer's per-capsule
-// `ir/` tree. Returns `""` when the consumer isn't in safe
-// scope-form (in which case the consumer-tree branch is dead and
-// the prefix never matters) or when the `project_root` is empty
-// (positional builds without a discoverable manifest).
-//
-// The trailing `/` on the prefix is intentional: stripping
-// `project_root + "/"` (rather than `project_root`) keeps a
-// sibling path like `<project_root>extra/util.sfn` from being
-// mistakenly treated as intra-capsule.
-fn _cr_consumer_root_prefix(project_root: string, consumer: ResolverConsumer) -> string {
-    if consumer.scope.length == 0 { return ""; }
-    if consumer.name.length == 0 { return ""; }
-    if project_root.length == 0 { return ""; }
-    return project_root + "/";
-}
-
-// Compute the slug used purely for `ll_path` routing. For
-// intra-capsule (relative-import) sources whose path-shaped slug
-// starts with the consumer-root prefix, strip the prefix so the
-// routed path mirrors the source layout under the consumer's
-// `ir/` tree. For everything else (manifest deps with `<scope>/
-// <name>/<rest>` slugs, or any source where the prefix doesn't
-// match), return the slug unchanged. The original slug is
-// preserved on `CapsuleSource.slug` for cache keying, symbol
-// mangling, and `.sfn-asm` staging.
-fn _cr_routing_slug(cur: CapsuleSource, consumer_root_prefix: string) -> string {
-    if cur.spec.length > 0 { return cur.slug; }
-    if consumer_root_prefix.length == 0 { return cur.slug; }
-    if cur.slug.length <= consumer_root_prefix.length { return cur.slug; }
-    if substring(cur.slug, 0, consumer_root_prefix.length) != consumer_root_prefix {
-        return cur.slug;
-    }
-    return substring(cur.slug, consumer_root_prefix.length, cur.slug.length);
-}
-
 // ---- Project discovery ----
-// Walk up from start_dir looking for capsule.toml. Returns the directory
-// containing it, or "" if no manifest is found within 16 levels.
-fn discover_project_root(start_dir: string) -> string ![io] {
-    let mut dir: string = start_dir;
-    if dir.length == 0 { dir = "."; }
-    let mut depth: int = 0;
-    loop {
-        if depth >= 16 { break; }
-        let manifest = _cr_path_join(dir, "capsule.toml");
-        if fs.exists(manifest) { return dir; }
-        let parent = _cr_dirname(dir);
-        if strings_equal(parent, dir) { break; }
-        if parent.length == 0 { break; }
-        dir = parent;
-        depth += 1;
-    }
-    return "";
-}
-
 // ---- Toolchain pin gate (SFEP-0046 Phase 1) ----
 // Verify the running toolchain satisfies a manifest `[toolchain]` pin
 // (floor semantics: running >= pin). A `workspace.toml` pin is the default;
@@ -1457,20 +1230,6 @@ fn stage_capsule_imports(sources: CapsuleSource[], sailfin_exe: string, work_dir
 //     of the imported capsule. This is intentionally coarse for
 //     PR1e — refining to per-submodule precision lands separately
 //     once the resolver retains submodule-resolution edges.
-// Linear-search membership predicate. Sailfin's runtime has no
-// `Set<string>`, so dedupe loops use parallel-array containment;
-// at the typical N (~5-30 deps per source) the constant cost is
-// dominated by the per-source filesystem read elsewhere.
-fn _cr_string_in_array(arr: string[], needle: string) -> boolean {
-    let mut i: int = 0;
-    loop {
-        if i >= arr.length { break; }
-        if strings_equal(arr[i], needle) { return true; }
-        i += 1;
-    }
-    return false;
-}
-
 // Extract `scope/name` prefix from a scoped import spec. Returns:
 //   "sfn/math"        →  "sfn/math"
 //   "sfn/http/client" →  "sfn/http"
@@ -2208,48 +1967,6 @@ fn _cr_is_safe_member_path(path: string) -> boolean {
         start = end + 1;
     }
     return true;
-}
-
-// Lexicographic string comparison over character codes (mirrors
-// `build_cache::_string_lt`), so member expansion is deterministic regardless
-// of `fs.listDirectory` return order.
-fn _cr_string_lt(a: string, b: string) -> boolean {
-    let mut i: int = 0;
-    loop {
-        if i >= a.length || i >= b.length { break; }
-        let ca = char_code_at_text(a, i);
-        let cb = char_code_at_text(b, i);
-        if ca < cb { return true; }
-        if ca > cb { return false; }
-        i += 1;
-    }
-    return a.length < b.length;
-}
-
-// Insertion sort — member counts per glob are small (tens of capsules).
-fn _cr_sort_strings(input: string[]) -> string[] {
-    let mut out: string[] = [];
-    let mut ci: int = 0;
-    loop {
-        if ci >= input.length { break; }
-        out.push(input[ci]);
-        ci += 1;
-    }
-    let mut k: int = 1;
-    loop {
-        if k >= out.length { break; }
-        let cur = out[k];
-        let mut j: int = k - 1;
-        loop {
-            if j < 0 { break; }
-            if !_cr_string_lt(cur, out[j]) { break; }
-            out[j + 1] = out[j];
-            j -= 1;
-        }
-        out[j + 1] = cur;
-        k += 1;
-    }
-    return out;
 }
 
 // Array membership test — used to keep member expansion duplicate-free.
@@ -3449,16 +3166,6 @@ fn _cr_member_src_for_spec(members: WorkspaceMember[], spec: string) -> string {
     let mut canonical = spec;
     if second > 0 { canonical = substring(spec, 0, second); }
     return workspace_member_for_spec(members, canonical);
-}
-
-fn _cr_string_array_contains(items: string[], needle: string) -> boolean {
-    let mut i: int = 0;
-    loop {
-        if i >= items.length { break; }
-        if strings_equal(items[i], needle) { return true; }
-        i += 1;
-    }
-    return false;
 }
 
 // Walk every scoped import reachable from `entry_path` and, for any spec
