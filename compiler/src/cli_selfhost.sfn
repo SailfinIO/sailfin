@@ -36,13 +36,24 @@
 // keeping this a pure-orchestration driver that post-processes no
 // artifact.
 //
-// No stage of this command may reach a POSIX shell: `sfn selfhost` is
-// what proves the native Windows self-host fixed point, and there is no
-// `sh` there to reach (SFEP-0021 §4.2).
+// Nothing this command *spawns* may reach a POSIX shell: `sfn selfhost`
+// is what proves the native Windows self-host fixed point, and there is
+// no `sh` there to reach (SFEP-0021 §4.2). Stage builds, scratch
+// cleanup, binary promotion and the smoke gate are all shell-free.
+//
+// One reach survives, and only on POSIX: `_selfhost_snapshot` hashes via
+// `_sha256_of_file_cmd` / `_sha256_of_text_file`, which `popen` a
+// `sha256sum`/`shasum` pipeline for the binary shas and for any `.ll`
+// over 64 KiB (i.e. every compiler module). Both self-guard
+// `host_is_windows()` and degrade to the in-process hasher, so the
+// Windows goal holds — at the cost of an empty binary sha there, which
+// makes `binary_match` vacuous on Windows. SFN-620 retires the ladder.
 import {
+    _atomic_rename_into_place,
     _copy_file,
     _dirname_cmd,
     _ensure_dir_recursive_cmd,
+    _mktemp_sibling_cmd,
     _sha256_of_file_cmd,
     _sha256_of_text_file
 } from "./build/fs";
@@ -65,14 +76,12 @@ struct SelfhostConfig {
     seedcheck_out: string;
     stage3_out: string;
     promote_to: string;
-    // Accepted and recorded, but not enforced. Its only ever vehicle was
-    // interpolation into a shell `timeout N …` prefix, and the runtime
-    // offers no shell-free equivalent — a deadline today means the
-    // spawn/poll/kill handle API (`cli/commands/test.sfn::_reap_test_child`),
-    // which is far more machinery than this gate warrants. Kept in the
-    // flag surface so no existing caller breaks; enforcing it again
-    // requires either that handle loop or a `run_capture` timeout
-    // argument.
+    // Accepted and recorded, but not enforced (SFN-619 restores it). Its
+    // only ever vehicle was interpolation into a shell `timeout N …`
+    // prefix, and the runtime offers no shell-free equivalent — a deadline
+    // today means the spawn/poll/kill handle API
+    // (`cli/commands/test.sfn::_reap_test_child`). Kept in the flag surface
+    // so no existing caller breaks.
     smoke_timeout: string;
     json: boolean;
     no_promote: boolean;
@@ -96,7 +105,8 @@ fn _selfhost_default_config() -> SelfhostConfig {
 fn _selfhost_usage() -> string {
     return "usage: sfn selfhost [--work-dir DIR] [--first-pass BIN]\n"
         + "                    [--seedcheck-out BIN] [--stage3-out BIN]\n"
-        + "                    [--promote-to BIN] [--smoke-timeout SECS]\n"
+        + "                    [--promote-to BIN]\n"
+        + "                    [--smoke-timeout SECS] (accepted, not enforced)\n"
         + "                    [--no-promote] [--strict] [--json]\n"
         + "\n"
         + "Internal: validate the compiler self-hosts to a fixed point\n"
@@ -198,16 +208,31 @@ fn _selfhost_emit_captured_stream(text: string, to_stderr: boolean) -> void ![io
 }
 
 // Delete `root` and everything beneath it — the shell-free replacement
-// for `rm -rf`. A missing `root` is not an error, matching `rm -rf`.
+// for `rm -rf`, over a file or a directory. A missing `root` is not an
+// error, matching `rm -rf`. Returns whether `root` is gone afterward.
 //
 // There is no `fs.isDirectory` builtin, so entry kind is inferred from
 // the unlink: `fs.deleteFile` is `unlink(2)`, which fails on a directory.
 // Whatever refuses to unlink is queued as a directory and removed after
 // its contents, since `fs.removeDirectory` is `rmdir(2)` and only takes
-// an empty directory. Discovery order is top-down, so removing the queue
-// in reverse empties children before their parents.
-fn _selfhost_remove_tree(root: string) -> void ![io] {
-    if !fs.exists(root) { return; }
+// an empty directory. `dirs` is an append-only queue walked by a monotone
+// cursor, so a directory is only ever pushed while its parent is being
+// processed — every ancestor therefore sits at a strictly smaller index,
+// and removing the queue in reverse always empties children first.
+//
+// Symlinks are unlinked rather than followed (`unlink(2)` again), so the
+// walk cannot escape `root`; `fs.listDirectory` filters `.`/`..`. Mirrors
+// the shipped `sfn/fs::remove_all`, which is not importable from
+// `compiler/src`.
+//
+// The return value matters more than it looks: a stale `.ll` surviving in
+// one stage is a false *mismatch*, while one surviving symmetrically in
+// both stages is a false *fixed point* — the displaced `rm -rf` swallowed
+// its errors, so this is the one silent false-green path worth reporting.
+fn _selfhost_remove_tree(root: string) -> boolean ![io] {
+    if !fs.exists(root) { return true; }
+    // A file root has no entries to walk; `rmdir` would refuse it.
+    if fs.deleteFile(root) { return true; }
     let mut dirs: string[] = [root];
     let mut di: int = 0;
     let mut guard: int = 0;
@@ -232,16 +257,53 @@ fn _selfhost_remove_tree(root: string) -> void ![io] {
         fs.removeDirectory(dirs[ri]);
         ri -= 1;
     }
+    return !fs.exists(root);
 }
 
-// Copy a stage binary into place, carrying the source's mode bits over.
-// The `set_perms` is not incidental: `_copy_file` creates a missing
-// destination via `fopen(…, "wb")`, whose 0666-and-umask default yields a
-// non-executable file, whereas the displaced `cp -f` copied the source's
-// permissions. Without it a freshly promoted `sfn` cannot be run.
+// Copy a stage binary into place: stage it beside the destination, carry
+// the source's mode bits over, then rename it into position.
+//
+// Writing `dst` directly does not work for `--promote-to`, whose default
+// destination is the *running* `build/bin/sfn`. `_copy_file` opens its
+// destination with `fopen(…, "wb")`, and the kernel denies write access to
+// a file currently being executed (`ETXTBSY`), so the open fails outright.
+// The displaced `cp -f` survived that only because `-f` means "if the
+// destination cannot be opened, remove it and try again" — the flag was
+// load-bearing, not cosmetic. `rename(2)` reaches the same fresh inode
+// without ever opening the live one, and atomically: `dst` is never
+// observed truncated or missing, which matters because the next `make
+// check` step immediately executes the binary just promoted.
+//
+// The mode step is equally load-bearing: `_copy_file` creates a missing
+// destination with `fopen`'s 0666-and-umask default, which is *not*
+// executable, whereas `cp -f` carried the source's permissions across.
+// It is applied to the staged copy rather than after the rename so `dst`
+// is never briefly present-but-unrunnable.
+//
+// `fs.get_perms` reports -1 on any error and `fs.set_perms` masks to 12
+// bits, so chmod-ing an unchecked -1 would quietly set 0o7777 — setuid,
+// setgid, sticky and world-writable — on the compiler binary. The `> 0`
+// guard is not defensive padding: the Windows `get_perms` lowering is a
+// fixed -1 stub, so that is the path taken on the very platform this
+// command exists to validate. A non-positive mode means the host does not
+// report one, and the copy's default stands.
 fn _selfhost_promote_binary(src: string, dst: string) -> boolean ![io] {
-    if !_copy_file(src, dst) { return false; }
-    return fs.set_perms(dst, fs.get_perms(src));
+    let mut staged = _mktemp_sibling_cmd(dst);
+    // `_mktemp_sibling_cmd` yields "" if it cannot allocate a temp name;
+    // a fixed sibling still shares the destination's filesystem, which is
+    // what keeps the rename atomic.
+    if staged.length == 0 { staged = dst + ".sfn-promote-tmp"; }
+    if !_copy_file(src, staged) {
+        fs.deleteFile(staged);
+        return false;
+    }
+    let mode = fs.get_perms(src);
+    if mode > 0 && !fs.set_perms(staged, mode) {
+        print.err("[selfhost] could not carry the source mode onto " + staged);
+        fs.deleteFile(staged);
+        return false;
+    }
+    return _atomic_rename_into_place(staged, dst);
 }
 
 // Recursively collect `*.ll` files under `root`. For the compiler
@@ -343,14 +405,27 @@ fn _selfhost_snapshot(capsules_dir: string, runtime_dir: string, binary_path: st
 fn _selfhost_build_stage(driver_bin: string, scratch_dir: string, work_subdir: string, out_bin: string) -> int ![io] {
     _ensure_dir_recursive_cmd(work_subdir);
     // Fresh scratch: drop any prior `.ll` so a stale module can't poison
-    // the fixed-point comparison.
-    _selfhost_remove_tree(scratch_dir + "/capsules");
+    // the fixed-point comparison. Surfaced rather than ignored because a
+    // survivor skews the diff in either direction (see `_selfhost_remove_tree`).
+    let scratch_capsules = scratch_dir + "/capsules";
+    if !_selfhost_remove_tree(scratch_capsules) {
+        print.err("[selfhost] WARNING: could not fully clear "
+            + scratch_capsules
+            + " — a stale module may skew the fixed-point diff");
+    }
     let rc = process.run_capture(_selfhost_stage_argv(driver_bin, work_subdir, out_bin), _selfhost_stage_env(process.environ(), scratch_dir));
     // `run_capture` buffers rather than passing the child's stdio through,
-    // so the streams are handed back to the console here; both must be
-    // taken so a partial read cannot leak into the next capture.
+    // so both streams are handed back to the console here.
     _selfhost_emit_captured_stream(process.capture_take_stdout(), false);
     _selfhost_emit_captured_stream(process.capture_take_stderr(), true);
+    // `run_capture` reports a spawn or reap failure as -1, which would
+    // surface as the nonsensical "exit=-1" and a 255 process status. It
+    // also leaves both captures empty, so unlike the displaced `sh -c`
+    // there is no `not found` message to go on — hence the explicit one.
+    if rc < 0 {
+        print.err("[selfhost] could not spawn " + driver_bin);
+        return 1;
+    }
     return rc;
 }
 
@@ -362,7 +437,11 @@ fn _selfhost_build_stage(driver_bin: string, scratch_dir: string, work_subdir: s
 // stdout and stderr are captured separately and joined in-process; the
 // former combined capture came from a `2>&1` redirection, which needed a
 // shell. The greeting may arrive on either stream, so both are searched.
-// `--smoke-timeout` is no longer applied here — see `SelfhostConfig`.
+//
+// There is no deadline here: `--smoke-timeout` came from the shell
+// `timeout` prefix, and `run_capture` drains to EOF with an infinite poll,
+// so a wedged seedcheck binary hangs this gate. SFN-619 restores a bound
+// via the spawn/poll/kill handle API.
 fn _selfhost_smoke(seedcheck_bin: string) -> boolean ![io] {
     let argv: string[] = [seedcheck_bin, "run", "examples/basics/hello-world.sfn"];
     let _ = process.run_capture(argv, process.environ());
@@ -612,6 +691,8 @@ export {
     _selfhost_collect_ll_files,
     _selfhost_contains,
     _selfhost_env_entry_has_key,
+    _selfhost_promote_binary,
+    _selfhost_remove_tree,
     _selfhost_snapshot,
     _selfhost_stage_argv,
     _selfhost_stage_env

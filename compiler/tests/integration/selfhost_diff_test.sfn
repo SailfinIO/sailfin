@@ -11,6 +11,8 @@
 import { compare_for_determinism } from "../../src/build_report";
 import {
     _selfhost_collect_ll_files,
+    _selfhost_promote_binary,
+    _selfhost_remove_tree,
     _selfhost_snapshot,
     handle_selfhost_command
 } from "../../src/cli_selfhost";
@@ -207,4 +209,92 @@ test "selfhost cmd: flag missing its value returns exit 2" ![io] {
 
 test "selfhost cmd: missing first-pass binary returns exit 1" ![io] {
     assert handle_selfhost_command(["selfhost", "--first-pass", "/no/such/sailfin/binary"], "") == 1;
+}
+
+// --------------------------------------------------------------
+// _selfhost_remove_tree — the shell-free `rm -rf` (SFN-489)
+// --------------------------------------------------------------
+test "selfhost_remove_tree: removes a nested tree including empty dirs" ![io] {
+    let root = fs.mkdtemp("sfn-selfhost-rmtree-");
+    let caps = root + "/capsules";
+    _write_ll(caps, "mod_a.ll", "; a\n");
+    _write_ll(caps + "/nested/deeper", "mod_b.ll", "; b\n");
+    // An empty directory is the case the unlink-probe must classify
+    // correctly: `fs.listDirectory` reports it as having no entries, so a
+    // heuristic keyed on emptiness would mistake it for a file.
+    fs.createDirectory(caps + "/empty", true);
+    assert fs.exists(caps + "/nested/deeper/mod_b.ll");
+
+    assert _selfhost_remove_tree(caps);
+    assert ! fs.exists(caps);
+    // The parent must survive — the walk removes `root` and below, nothing above.
+    assert fs.exists(root);
+}
+
+test "selfhost_remove_tree: a missing root is a no-op, not a failure" ![io] {
+    assert _selfhost_remove_tree("/definitely/not/a/real/scratch/capsules");
+}
+
+// `rm -rf <file>` removes a plain file; the reverse pass alone would
+// `rmdir` it and fail, so the unlink probe runs on the root too.
+test "selfhost_remove_tree: removes a file root" ![io] {
+    let root = fs.mkdtemp("sfn-selfhost-rmfile-");
+    let target = root + "/lonely.ll";
+    fs.writeFile(target, "; content\n");
+    assert _selfhost_remove_tree(target);
+    assert ! fs.exists(target);
+}
+
+// --------------------------------------------------------------
+// _selfhost_promote_binary — staged copy + mode carry + rename (SFN-489)
+// --------------------------------------------------------------
+// The regression the mode step exists for: `_copy_file` creates a missing
+// destination via `fopen(…, "wb")`, whose 0666-and-umask default is not
+// executable, where the displaced `cp -f` carried the source mode across.
+// A non-executable promoted `sfn` fails everything downstream of it.
+test "selfhost_promote_binary: a fresh destination is left executable" ![io] {
+    let root = fs.mkdtemp("sfn-selfhost-promote-");
+    let src = root + "/stage-bin";
+    fs.writeFile(src, "#!/bin/sh\necho hi\n");
+    assert fs.set_perms(src, 493);
+    assert fs.is_executable(src);
+
+    let dst = root + "/bin/sfn";
+    fs.createDirectory(root + "/bin", true);
+    assert _selfhost_promote_binary(src, dst);
+    assert fs.exists(dst);
+    assert fs.is_executable(dst);
+}
+
+test "selfhost_promote_binary: overwrites an existing destination" ![io] {
+    let root = fs.mkdtemp("sfn-selfhost-promote-over-");
+    let src = root + "/new-bin";
+    let dst = root + "/old-bin";
+    fs.writeFile(src, "new contents\n");
+    assert fs.set_perms(src, 493);
+    fs.writeFile(dst, "stale contents\n");
+
+    assert _selfhost_promote_binary(src, dst);
+    assert fs.readFile(dst) == "new contents\n";
+    assert fs.is_executable(dst);
+}
+
+// The staged sibling must not survive a successful promotion — a leftover
+// `.sfn_stage.*` beside `build/bin/sfn` would be collected by nothing.
+test "selfhost_promote_binary: leaves no staging file behind" ![io] {
+    let root = fs.mkdtemp("sfn-selfhost-promote-clean-");
+    let src = root + "/src-bin";
+    fs.writeFile(src, "payload\n");
+    assert _selfhost_promote_binary(src, root + "/dst-bin");
+    // `src` and `dst` only — any third entry is staging residue.
+    assert fs.listDirectory(root).length == 2;
+}
+
+test "selfhost_promote_binary: a missing source fails rather than truncating" ![io] {
+    let root = fs.mkdtemp("sfn-selfhost-promote-missing-");
+    let dst = root + "/dst-bin";
+    fs.writeFile(dst, "must survive\n");
+    assert ! _selfhost_promote_binary(root + "/no-such-source", dst);
+    // The rename never ran, so the prior destination is intact.
+    assert fs.readFile(dst) == "must survive\n";
 }
