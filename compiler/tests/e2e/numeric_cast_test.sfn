@@ -380,10 +380,14 @@ test "numeric-cast: f16 → f32 widening lowers as fpext" ![io] {
     assert contains(body, "fpext half %x to float");
 }
 
-test "numeric-cast: bf16 → f32 widening lowers as fpext" ![io] {
+test "numeric-cast: bf16 → f32 widening lowers as a bit-level widen" ![io] {
     let body = _emit_body("fn widen(x: bf16) -> f32 { return x as f32; }", "define float @widen", "bf16_to_f32");
     assert body.length > 0;
-    assert contains(body, "fpext bfloat %x to float");
+    assert contains(body, "bitcast bfloat %x to i16");
+    assert contains(body, "zext i16");
+    assert contains(body, "shl i32");
+    assert contains(body, "to float");
+    assert ! contains(body, "fpext bfloat");
 }
 
 test "numeric-cast: f32 → f16 narrowing lowers as fptrunc" ![io] {
@@ -392,10 +396,14 @@ test "numeric-cast: f32 → f16 narrowing lowers as fptrunc" ![io] {
     assert contains(body, "fptrunc float %x to half");
 }
 
-test "numeric-cast: f32 → bf16 narrowing lowers as fptrunc" ![io] {
+test "numeric-cast: f32 → bf16 narrowing lowers as a round-to-nearest-even bit sequence" ![io] {
     let body = _emit_body("fn narrow(x: f32) -> bf16 { return x as bf16; }", "define bfloat @narrow", "f32_to_bf16");
     assert body.length > 0;
-    assert contains(body, "fptrunc float %x to bfloat");
+    assert contains(body, "bitcast float %x to i32");
+    assert contains(body, "32767");
+    assert contains(body, "fcmp uno float");
+    assert contains(body, "to bfloat");
+    assert ! contains(body, "fptrunc float %x to bfloat");
 }
 
 test "numeric-cast: f16 round-trips through f32 (fptrunc back to half)" ![io] {
@@ -412,10 +420,57 @@ test "numeric-cast: f16 local from double literal narrows via fptrunc" ![io] {
     assert ! contains(body, "store half zeroinitializer");
 }
 
-test "numeric-cast: bf16 local from double literal narrows via fptrunc" ![io] {
+test "numeric-cast: bf16 local from double literal narrows via a correctly-rounded bit sequence" ![io] {
     let body = _emit_body("fn mk() -> bf16 { let x: bf16 = 0.5; return x; }", "define bfloat @mk", "bf16_local_fptrunc");
     assert body.length > 0;
     assert contains(body, "fptrunc double");
+    assert contains(body, "fcmp une double");
+    assert contains(body, "to bfloat");
+    assert contains(body, "select i1");
+    assert ! contains(body, "fptrunc double 5.000000e-01 to bfloat");
+}
+
+// ---- SFN-609: no unselectable `bfloat` conversion survives lowering ----
+// LLVM 18's AArch64 backend has no selection pattern for any `bfloat`
+// conversion, so the four crashing forms below must never reach the backend.
+// Each negative pins the exact instruction the previous lowering emitted,
+// anchored on the `%x` parameter name so the assertion cannot drift into a
+// false pass as temp numbering changes.
+test "numeric-cast: bf16 → f64 emits no fpext from bfloat" ![io] {
+    let body = _emit_body("fn f(x: bf16) -> f64 { return x as f64; }", "define double @f", "sfn609_widen_f64");
+    assert body.length > 0;
+    assert contains(body, "bitcast bfloat %x to i16");
+    assert contains(body, "fpext float");
+    assert ! contains(body, "fpext bfloat %x to double");
+    assert ! contains(body, "fpext bfloat");
+}
+
+test "numeric-cast: f64 → bf16 narrows through float, never straight to bfloat" ![io] {
+    let body = _emit_body("fn f(x: f64) -> bf16 { return x as bf16; }", "define bfloat @f", "sfn609_narrow_f64");
+    assert body.length > 0;
+    assert contains(body, "fptrunc double %x to float");
+    assert contains(body, "fcmp une double");
+    assert ! contains(body, "fptrunc double %x to bfloat");
+}
+
+test "numeric-cast: bf16 → i32 uses the f32 saturating intrinsic" ![io] {
+    let body = _emit_body("fn f(x: bf16) -> i32 { return x as i32; }", "define i32 @f", "sfn609_to_i32");
+    assert body.length > 0;
+    assert contains(body, "llvm.fptosi.sat.i32.f32");
+    assert ! contains(body, ".bf16(");
+}
+
+// `int` is i64, which does not fit f64's 53-bit significand, so the magnitude
+// is pre-rounded to odd at the 2^11 grid (guarded above 2^53) before the
+// widen — otherwise the widen and the narrow would round twice, which
+// SFEP-0054 §3.4 forbids.
+test "numeric-cast: int → bf16 pre-rounds to odd so the narrow rounds once" ![io] {
+    let body = _emit_body("fn f(x: int) -> bf16 { return x as bf16; }", "define bfloat @f", "sfn609_from_int");
+    assert body.length > 0;
+    assert contains(body, "9007199254740992");
+    assert contains(body, "to double");
+    assert contains(body, "fcmp une double");
+    assert ! contains(body, "sitofp i64 %x to bfloat");
 }
 
 // ---- SFN-573: `>>` selects lshr for unsigned, ashr for signed ----
