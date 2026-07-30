@@ -38,8 +38,9 @@ Three findings drive the verdict:
   ~30–50 s in `strnlen` alone, depending on whether real-source or synthetic
   scaling holds.
 - A further **58% of front-end call volume** is the runtime symbol scan
-  re-walking `runtime/**` once per checked file — a separate defect, blocked on
-  a seed codegen bug (#812), that should not be folded into this epic.
+  re-walking `runtime/**` once per checked file — a separate, **unblocked**
+  defect that should not be folded into this epic. Its source comment cites a
+  codegen blocker that measurement showed is stale (§5.C).
 
 ## 2. Method
 
@@ -295,19 +296,43 @@ For the 7-file parser run, ~6 × 8.1M ≈ **48.6M of the 84.1M calls (58%) are
 redundant re-scans of runtime source**.
 
 This is *not* a lowering problem and is not fixed by carrying length. It is
-already documented as deliberate: `prelude_globals.sfn:118-125` records that
-memoizing it in a module global makes **the seed compiler emit a call to an
-undefined `@sailfin_module_init__prelude_globals`** — invalid IR that `llvm-as`
-rejects — because array-typed module globals are miscompiled (#812). The per-call
-FS scan is an accepted workaround for a seed codegen bug.
+documented as deliberate at `prelude_globals.sfn:118-125`, which records that
+memoizing it in a module global makes the seed emit a call to an undefined
+`@sailfin_module_init__prelude_globals` — invalid IR that `llvm-as` rejects —
+because array-typed module globals are miscompiled (#812).
 
-Note the comment blocks **one specific approach** — a `let mut _cache: string[]`
-module global — and explicitly says boolean module globals are fine. Other
-memoizations (threading the names down from the caller, a non-array cache) are
-not obviously blocked. The win is gated on #812 *as currently framed*, and may
-be reachable without it.
+**That comment is stale.** Tested directly: adding
+`let mut _pg_cache: string[] = [];` to `prelude_globals.sfn` and running
+`make clean-build && make compile` **compiles all 299 modules and links**
+(`built: build/sailfin/program`). No invalid IR, no undefined
+`@sailfin_module_init__`. The defect class was closed by #1386, which defined
+`@sailfin_module_init__` end-to-end and is guarded by
+`compiler/tests/e2e/check_build_agree_module_global_test.sfn` — whose header
+names the original symptom as exactly `let mut xs: int[] = [];`. `#812` is a
+closed GitHub issue predating the Linear migration; the comment outlived its
+cause and should be deleted by whoever does the memoization.
 
-Either way it is not part of this epic and should be tracked separately.
+### 5.C.1 The real constraint is correctness, not codegen
+
+The same experiment found the trap that actually matters. A **naive**
+unconditional cache — return `_pg_cache` whenever non-empty, ignoring the
+`helper_names` argument — builds the compiler successfully and then **segfaults
+the freshly built binary** emitting `runtime/sfn/platform/posix.sfn`
+(`sfn emit --module-name runtime/sfn/platform/posix native`, SIGSEGV). A control
+`make clean-build && make compile` on the unmodified tree passes that same step,
+so the crash is attributable to the memoization, not to a pre-existing cold-build
+failure.
+
+Cause: `load_prelude_global_names(helper_names)` is parameterised, and callers do
+not all pass the same set. An unkeyed cache hands one caller another's
+global-name set.
+
+So the memoization is **viable but must be keyed on `helper_names`** (or the
+callers proven to pass an identical set). The recompute-every-time behaviour was
+defensible on correctness grounds even though its stated codegen justification no
+longer holds.
+
+It is not part of this epic and should be tracked separately.
 
 ### 5.1 IR call-site counts understate the true scan volume
 
@@ -417,10 +442,14 @@ Scope the epic from §4–§6 of this note, **not** from SFN-460 §4:
    scanner in the compiler. `grapheme_at` already calls the `_lv` native and
    already takes aggregate parameters — it is discarding a length it holds.
    This is the natural spine of the carry-length epic and where SFN-43 attaches.
-3. **File the prelude re-scan separately** (§5.C). It is 58% of front-end call
-   volume, it is not a lowering bug, and it is blocked on the #812 seed codegen
-   bug for array-typed module globals. Folding it into this epic would couple a
-   large independent win to an unrelated blocker.
+3. **File the prelude re-scan separately** (§5.C) — and note it is **not
+   blocked**. It is 58% of front-end call volume and is not a lowering bug. The
+   `#812` codegen blocker its source comment cites was verified stale (§5.C):
+   the array-typed module global compiles and self-hosts today. The real
+   requirement is that the cache be **keyed on `helper_names`** (§5.C.1) — an
+   unkeyed one self-hosts and then segfaults. Likely the cheapest large win
+   available in the front end; it is kept out of this epic because it is a
+   different defect, not because it is gated.
 4. **The parser token-comparison surface is not worth touching** on performance
    grounds. If it changes, it changes for the memory-safety argument
    (SFN-42/SFN-460), not this one.
